@@ -42,6 +42,12 @@ public:
     size_t size_bytes,
     size_t dst_offset_bytes = 0) = 0;
 
+  virtual Status CopyDeviceToHost(
+    const DeviceBuffer& src,
+    void* dst,
+    size_t size_bytes,
+    size_t src_offset_bytes = 0) = 0;
+
   // These enqueue work. They do not need to block the CPU.
   virtual Status ForwardDct8(
     const Dct8Batch& batch) = 0;
@@ -56,4 +62,4 @@ protected:
   GpuBackend() = default;
 };
 
-}
+}  // namespace gjxl
