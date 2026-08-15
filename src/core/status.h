@@ -61,4 +61,4 @@ private:
   std::string message_;
 };
 
-}
+} // gjxl

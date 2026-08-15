@@ -10,7 +10,7 @@
 
 namespace gjxl {
 
-inline constexpr uint32_t kBlockDim = 0;
+inline constexpr uint32_t kBlockDim = 8;
 
 struct FrameGeometry {
   uint32_t width = 0;
@@ -22,6 +22,9 @@ struct FrameGeometry {
 
   uint32_t xblocks = 0;
   uint32_t yblocks = 0;
+
+  // uint32_t xgroups;
+  // uint32_t ygroups;
 
   [[nodiscard]] static Status Create(
     uint32_t width,
@@ -63,4 +66,4 @@ struct FrameGeometry {
   }
 };
 
-}
+}  // namespace gjxl
