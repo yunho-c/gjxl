@@ -44,6 +44,17 @@ target_include_directories(
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+# metal-cpp
+add_library(
+  metal_cpp
+  INTERFACE
+)
+
+target_include_directories(
+  metal_cpp
+  INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/metal-cpp"
+)
 # Apple frameworks
 find_library(
   METAL_FRAMEWORK
@@ -98,14 +109,12 @@ add_custom_command(
 
   COMMAND
     "${CMAKE_COMMAND}"
-    -E
-    make_directory
+    -E make_directory
     "${GJXL_METAL_DIR}"
 
   COMMAND
     "${XCRUN_EXECUTABLE}"
-    -sdk
-    macosx
+    -sdk macosx
     metal
     -c
     "${GJXL_DCT_METAL_SOURCE}"
@@ -129,8 +138,7 @@ add_custom_command(
 
   COMMAND
     "${XCRUN_EXECUTABLE}"
-    -sdk
-    macosx
+    -sdk macosx
     metal
     -o
     "${GJXL_METALLIB}"
@@ -151,3 +159,37 @@ add_custom_target(
   DEPENDS
     "${GJXL_METALLIB}"
 )
+
+# Metal backend
+
+add_library(
+  gjxl_metal
+  STATIC
+
+  src/gpu/metal/metal_backend.cpp
+)
+
+add_dependencies(
+  gjxl_metal
+  gjxl_metal_shaders
+)
+
+target_link_libraries(
+  gjxl_metal
+
+  PUBLIC
+    gjxl_core
+
+  PRIVATE
+    metal_cpp
+    "${METAL_FRAMEWORK}"
+    "${FOUNDATION_FRAMEWORK}"
+    "${COREGRAPHICS_FRAMEWORK}"
+)
+
+target_compile_features(
+  gjxl_metal
+  PRIVATE
+    cxx_std_20
+)
+

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#import <Foundation/Foundation.h>
+#include <Foundation/Foundation.hpp>
 
 #include <string>
 #include <string_view>
@@ -13,27 +13,32 @@
 namespace gjxl::metal {
 
 inline Status ErrorToStatus(
-  NSError* error,
+  const NS::Error* error,
   std::string_view operation) {
 
     std::string message(operation);
-
     message += ": ";
 
-    if (error != nil) {
-      const char* description =
-        [[error localizedDescription] UTF8String];
+  if (error != nullptr) {
+    const NS::String* description =
+      error->localizedDescription();
 
-      if (description != nullptr) {
-        message += description;
-      } else {
-        message += "unknown Metal error";
+    if (description != nullptr) {
+      const char* utf8 =
+        description->utf8String();
+
+      if (utf8 != nullptr) {
+        message += utf8;
+        return Status::Internal(
+          std::move(message));
       }
-    } else {
-      message += "unknown Metal error";
     }
+  }
 
-    return Status::Internal(std::move(message));
+  message += "unknown Metal error";
+
+  return Status::Internal(
+    std::move(message));
 }
 
-}
+}  // namespace gjxl::metal

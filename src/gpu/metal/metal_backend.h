@@ -15,9 +15,8 @@ namespace gjxl {
 //
 // metallib_path must point ot the precompiled shader library generated
 // from src/gpu/metal/kernels/*.metal.
-//
 Status CreateMetalBackend(
   std::string_view metallib_path,
   std::unique_ptr<GpuBackend>* out);
 
-}
+}  // namespace gjxl
