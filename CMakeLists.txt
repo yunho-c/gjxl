@@ -166,6 +166,7 @@ add_library(
   gjxl_metal
   STATIC
 
+  src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_backend.cpp
 )
 
