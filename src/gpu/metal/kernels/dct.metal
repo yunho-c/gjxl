@@ -5,7 +5,7 @@
 
 using namespace metal;
 
-constant float kDCT8_2D[64] = {
+constant float kOrthonormalDct8[64] = {
   0.35355339f,  0.35355339f,  0.35355339f,  0.35355339f,  0.35355339f,  0.35355339f,  0.35355339f,  0.35355339f,
   0.49039264f,  0.41573481f,  0.27778512f,  0.09754516f, -0.09754516f, -0.27778512f, -0.41573481f, -0.49039264f,
   0.46193977f,  0.19134172f, -0.19134172f, -0.46193977f, -0.46193977f, -0.19134172f,  0.19134172f,  0.46193977f,
@@ -16,10 +16,15 @@ constant float kDCT8_2D[64] = {
   0.09754516f, -0.27778512f,  0.41573481f, -0.49039264f,  0.49039264f, -0.41573481f,  0.27778512f, -0.09754516f
 };
 
+constant float kForwardDct8Scale = 1.0f / 8.0f;
+constant float kInverseDct8Scale = 8.0f;
+
 // Computes forward DCT using hardcoded 8x8 DCT-II transform matrix with two matmuls:
 //   B = C A C^T, where C is the 2D 8x8 DCT transform matrix.
+// The orthonormal result is divided by 8 and transposed to match libjxl's
+// scaled coefficient layout: B[u][v], with horizontal frequency first.
 // This exists to perform as a simple reference (and performance baseline) against optimized variants.
-kernel void gjxl_forward_dct8__scalar_2d_matmul(
+kernel void gjxl_dct8_forward_scalar_2d_matmul(
   device const float* A [[buffer(0)]], // input (pixels)
   device       float* B [[buffer(1)]], // output (coefficients)
   uint  tid             [[thread_index_in_threadgroup]],
@@ -37,7 +42,7 @@ kernel void gjxl_forward_dct8__scalar_2d_matmul(
   float t = 0;
 
   for (int i=0; i < 8; ++i) { // "inner loop" over N (i.e., width of A and/or height of T)
-    t += kDCT8_2D[8*row + i] * A[base + 8*i + col];
+    t += kOrthonormalDct8[8*row + i] * A[base + 8*i + col];
   }
 
   T[row][col] = t;
@@ -49,18 +54,20 @@ kernel void gjxl_forward_dct8__scalar_2d_matmul(
   float b = 0;
 
   for (int i=0; i < 8; ++i) {
-    b += T[row][i] * kDCT8_2D[8*col + i];
+    b += T[row][i] * kOrthonormalDct8[8*col + i];
   }
 
-  // commit results
-  B[base + 8*row + col] = b;
+  // commit results (scaled and transposed to match libjxl)
+  B[base + 8*col + row] = b * kForwardDct8Scale;
 }
 
 
 // Computes inverse DCT using hardcoded 8x8 DCT-II transform matrix with two matmuls:
 //   B = C^T A C.
+// Input coefficients use libjxl's transposed [u][v] layout. The orthonormal
+// inverse result is multiplied by 8 to invert the forward scaling.
 // This exists to perform as a simple reference (and performance baseline) against optimized variants.
-kernel void gjxl_inverse_dct8__scalar_2d_matmul(
+kernel void gjxl_dct8_inverse_scalar_2d_matmul(
   device const float* A [[buffer(0)]], // input (coefficients)
   device       float* B [[buffer(1)]], // output (pixels)
   uint  tid             [[thread_index_in_threadgroup]],
@@ -76,7 +83,7 @@ kernel void gjxl_inverse_dct8__scalar_2d_matmul(
   float t = 0;
 
   for (int i=0; i < 8; ++i) {
-    t += kDCT8_2D[8*i + row] * A[base + 8*i + col];
+    t += kOrthonormalDct8[8*i + row] * A[base + 8*col + i];
   }
 
   T[row][col] = t;
@@ -86,8 +93,8 @@ kernel void gjxl_inverse_dct8__scalar_2d_matmul(
   float b = 0;
 
   for (int i=0; i < 8; ++i) {
-    b += T[row][i] * kDCT8_2D[8*i + col];
+    b += T[row][i] * kOrthonormalDct8[8*i + col];
   }
 
-  B[base + 8*row + col] = b;
+  B[base + 8*row + col] = b * kInverseDct8Scale;
 }
