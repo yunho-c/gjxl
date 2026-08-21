@@ -106,7 +106,8 @@ kernel void gjxl_dct8_inverse_scalar_2d_matmul(
 kernel void gjxl_dct8_forward_simdgroup_2d_matmul(
   device const float* A [[buffer(0)]], // input (pixels)
   device       float* B [[buffer(1)]], // output (coefficients)
-  uint  tid             [[thread_index_in_threadgroup]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
   uint3 group_position  [[threadgroup_position_in_grid]])
 {
   const ulong base = static_cast<ulong>(group_position.x) * 64ul;
@@ -114,7 +115,7 @@ kernel void gjxl_dct8_forward_simdgroup_2d_matmul(
   // lift hard-coded DCT matrix onto threadgroup memory for simdgroup_load()
   threadgroup float c_shared[64];
 
-  for (int i = tid; i < 64; i += 32) {
+  for (uint i = lane; i < 64; i += simd_width) {
     c_shared[i] = kOrthonormalDct8[i];
   }
 
@@ -142,9 +143,10 @@ kernel void gjxl_dct8_forward_simdgroup_2d_matmul(
 // Computes inverse DCT using hardcoded 8x8 DCT-II transform matrix with two matmuls.
 //
 kernel void gjxl_dct8_inverse_simdgroup_2d_matmul(
-  device const float* A [[buffer(0)]], // input (pixels)
-  device       float* B [[buffer(1)]], // output (coefficients)
-  uint  tid             [[thread_index_in_threadgroup]],
+  device const float* A [[buffer(0)]], // input (coefficients)
+  device       float* B [[buffer(1)]], // output (pixels)
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
   uint3 group_position  [[threadgroup_position_in_grid]])
 {
   const ulong base = static_cast<ulong>(group_position.x) * 64ul;
@@ -152,7 +154,7 @@ kernel void gjxl_dct8_inverse_simdgroup_2d_matmul(
   // lift hard-coded DCT matrix onto threadgroup memory for simdgroup_load()
   threadgroup float c_shared[64];
 
-  for (int i = tid; i < 64; i += 32) {
+  for (uint i = lane; i < 64; i += simd_width) {
     c_shared[i] = kOrthonormalDct8[i];
   }
 
