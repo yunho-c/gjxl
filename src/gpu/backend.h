@@ -16,7 +16,11 @@ struct Dct8Batch {
   const DeviceBuffer* input = nullptr;
   DeviceBuffer* output = nullptr;
 
-  // Each block consists of exactly 64 contiguous floats.
+  // Blocks consist of 64 floats and uses libjxl scaled DCT8 convention.
+  // Pixel blocks are row-major: pixels[y * 8 + x].
+  // Coefficients use libjxl's square-transform layout:
+  // coefficients[u * 8 + v], with horizontal frequency first.
+  // A constant pixel block therefore has that same value at coefficients[0].
   size_t block_count = 0;
 };
 
