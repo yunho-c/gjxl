@@ -6,6 +6,8 @@
 #include <iostream>
 #include <memory>
 #include <random>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "gpu/backend.h"
@@ -14,10 +16,11 @@
 namespace {
 
 constexpr size_t kDctSize = 64;
+constexpr size_t kWarmupIterations = 20;
 
 void Require(
   const gjxl::Status& status,
-  const char* operation) {
+  std::string_view operation) {
 
   if (status.ok()) {
     return;
@@ -32,11 +35,68 @@ void Require(
   std::exit(EXIT_FAILURE);
 }
 
+template <typename Submit>
+void BenchmarkDct8(
+  gjxl::GpuBackend& gpu,
+  std::string_view operation,
+  const Submit& submit,
+  const gjxl::Dct8Batch& batch,
+  size_t iterations) {
+
+  const std::string warmup_operation =
+    std::string("Warmup ") + std::string(operation);
+  const std::string timed_operation =
+    std::string("Timed ") + std::string(operation);
+
+  for (size_t i = 0; i < kWarmupIterations; ++i) {
+    Require(
+      submit(batch),
+      warmup_operation);
+  }
+
+  Require(
+    gpu.Synchronize(),
+    "Warmup synchronization");
+
+  const auto begin = std::chrono::steady_clock::now();
+
+  for (size_t i = 0; i < iterations; ++i) {
+    Require(
+      submit(batch),
+      timed_operation);
+  }
+
+  Require(
+    gpu.Synchronize(),
+    "Timed synchronization");
+
+  const auto end = std::chrono::steady_clock::now();
+
+  const double seconds =
+    std::chrono::duration<double>(
+      end - begin)
+      .count();
+
+  const double transforms =
+    static_cast<double>(batch.block_count) *
+    static_cast<double>(iterations);
+
+  const double pixels = transforms * 64.0;
+
+  std::cout
+    << "\nOperation:        " << operation << '\n'
+    << "Blocks/launch:    " << batch.block_count << '\n'
+    << "Iterations:       " << iterations << '\n'
+    << "Elapsed:          " << seconds << '\n'
+    << "Transforms/s:     " << transforms / seconds << '\n'
+    << "MPixels/s:        " << pixels / seconds / 1.0e6 << '\n';
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   size_t block_count = 65536;
-  size_t iterations  = 200;
+  size_t iterations = 200;
 
   if (argc >= 2) {
     block_count =
@@ -53,11 +113,12 @@ int main(int argc, char** argv) {
   std::unique_ptr<gjxl::GpuBackend> gpu;
 
   Require(
-    gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-    "CreaeMetalBackend");
+    gjxl::CreateMetalBackend(
+      GJXL_METALLIB_PATH,
+      &gpu),
+    "CreateMetalBackend");
 
   const size_t element_count = block_count * kDctSize;
-
   const size_t bytes = element_count * sizeof(float);
 
   std::vector<float> input(element_count);
@@ -85,57 +146,36 @@ int main(int argc, char** argv) {
       *device_input,
       input.data(),
       bytes),
-    "Upload");
+    "Upload input");
 
   const gjxl::Dct8Batch batch{
     .input = device_input.get(),
     .output = device_output.get(),
-    .block_count = block_count
+    .block_count = block_count,
   };
 
-  // Warm-up
-  for (int i = 0; i < 20; ++i) {
-    Require(
-      gpu->ForwardDct8(batch),
-      "Warmup ForwardDct8");
-  }
-
-  Require(
-    gpu->Synchronize(),
-    "Warmup Synchronize");
-
-  const auto begin = std::chrono::steady_clock::now();
-
-  for (size_t i = 0; i < iterations; ++i) {
-    Require(
-      gpu->ForwardDct8(batch),
-      "ForwardDct8");
-  }
-
-  Require(
-    gpu->Synchronize(),
-    "Synchronize");
-
-  const auto end = std::chrono::steady_clock::now();
-
-  const double seconds =
-    std::chrono::duration<double>(
-      end - begin)
-      .count();
-
-  const double transforms =
-    static_cast<double>(block_count) *
-    static_cast<double>(iterations);
-
-  const double pixels = transforms * 64.0;
-
   std::cout
-    << "Backend:          " << gpu->name() << '\n'
-    << "Blocks/launch:    " << block_count << '\n'
-    << "Iterations:       " << iterations << '\n'
-    << "Elapsed:          " << seconds << '\n'
-    << "Transforms/s:     " << transforms / seconds << '\n'
-    << "MPixels/s:        " << pixels / seconds / 1.0e6 << '\n';
+    << "Backend: "
+    << gpu->name()
+    << '\n';
+
+  BenchmarkDct8(
+    *gpu,
+    "ForwardDct8",
+    [&gpu](const gjxl::Dct8Batch& dct_batch) {
+      return gpu->ForwardDct8(dct_batch);
+    },
+    batch,
+    iterations);
+
+  BenchmarkDct8(
+    *gpu,
+    "InverseDct8",
+    [&gpu](const gjxl::Dct8Batch& dct_batch) {
+      return gpu->InverseDct8(dct_batch);
+    },
+    batch,
+    iterations);
 
   return EXIT_SUCCESS;
 }

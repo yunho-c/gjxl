@@ -23,11 +23,11 @@ option(
   ON
 )
 
-# option(
-#   GJXL_BUILD_BENCHMARKS
-#   "Build benchmarks"
-#   ON
-# )
+option(
+  GJXL_BUILD_BENCHMARKS
+  "Build benchmarks"
+  OFF
+)
 
 # C++ common interface
 add_library(
@@ -244,6 +244,32 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_dct
     COMMAND gjxl_dct_test
+  )
+
+endif()
+
+if(GJXL_BUILD_BENCHMARKS)
+
+  add_executable(
+    gjxl_dct_benchmark
+    benchmarks/dct_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_dct_benchmark
+    PRIVATE
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_dct_benchmark
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_dct_benchmark
+    gjxl_metal_shaders
   )
 
 endif()
