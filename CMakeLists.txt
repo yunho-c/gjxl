@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Yunho Cho
+
 cmake_minimum_required(VERSION 3.25)
 
 project(
@@ -20,11 +23,11 @@ option(
   ON
 )
 
-option(
-  GJXL_BUILD_BENCHMARKS
-  "Build benchmarks"
-  ON
-)
+# option(
+#   GJXL_BUILD_BENCHMARKS
+#   "Build benchmarks"
+#   ON
+# )
 
 # C++ common interface
 add_library(
@@ -194,3 +197,35 @@ target_compile_features(
     cxx_std_20
 )
 
+if(GJXL_BUILD_TESTS)
+
+  enable_testing()
+
+  add_executable(
+    gjxl_dct_test
+    tests/dct_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_dct_test
+    PRIVATE
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_dct_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_dct_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_dct
+    COMMAND gjxl_dct_test
+  )
+
+endif()
