@@ -23,6 +23,12 @@ constexpr size_t kDct8Elements = 64;
 
 constexpr size_t kDct8Bytes = kDct8Elements * sizeof(float);
 
+constexpr std::string_view kForwardDct8FunctionName =
+  "gjxl_dct8_forward_scalar_2d_matmul";
+
+constexpr std::string_view kInverseDct8FunctionName =
+  "gjxl_dct8_inverse_scalar_2d_matmul";
+
 // MetalBuffer
 class MetalBuffer final : public DeviceBuffer {
 public:
@@ -64,21 +70,23 @@ private:
 Status CreatePipeline(
   MTL::Device* device,
   MTL::Library* library,
-  const char* function_name,
+  std::string_view function_name,
   NS::SharedPtr<MTL::ComputePipelineState>* out) {
 
   if (device == nullptr ||
       library == nullptr ||
-      function_name == nullptr ||
+      function_name.empty() ||
       out == nullptr) {
 
     return Status::InvalidArgument(
-      "CreatePipeline received null argument");
+      "CreatePipeline received invalid argument");
   }
+
+  const std::string function_name_string(function_name);
 
   NS::String* name =
     NS::String::string(
-      function_name,
+      function_name_string.c_str(),
       NS::UTF8StringEncoding);
 
   auto function =
@@ -88,7 +96,13 @@ Status CreatePipeline(
   if (!function) {
     return Status::Internal(
       std::string("Metal function not found: ") +
-      function_name);
+      function_name_string);
+  }
+
+  if (function->functionType() != MTL::FunctionTypeKernel) {
+    return Status::InvalidArgument(
+      std::string("Metal function is not a kernel: ") +
+      function_name_string);
   }
 
   NS::Error* error = nullptr;
@@ -611,7 +625,7 @@ Status CreateMetalBackend(
     CreatePipeline(
       device.get(),
       library.get(),
-      "gjxl_forward_dct8",
+      kForwardDct8FunctionName,
       &forward_dct8);
 
   if (!status.ok()) {
@@ -624,7 +638,7 @@ Status CreateMetalBackend(
     CreatePipeline(
       device.get(),
       library.get(),
-      "gjxl_inverse_dct8",
+      kInverseDct8FunctionName,
       &inverse_dct8);
 
   if (!status.ok()) {
