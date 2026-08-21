@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -25,6 +26,25 @@ constexpr gjxl::test::DctShape kDctShape{
   .rows = kDctRows,
   .cols = kDctCols,
 };
+
+struct Dct8ImplementationCase {
+  gjxl::MetalDct8Implementation implementation;
+  std::string_view name;
+};
+
+constexpr std::array<Dct8ImplementationCase, 2>
+kDct8Implementations{{
+  {
+    .implementation =
+      gjxl::MetalDct8Implementation::kScalarMatmul,
+    .name = "scalar matmul",
+  },
+  {
+    .implementation =
+      gjxl::MetalDct8Implementation::kSimdgroupMatmul,
+    .name = "simdgroup matmul",
+  },
+}};
 
 bool CheckStatus(
   const gjxl::Status& status,
@@ -203,8 +223,9 @@ bool CheckDct8Operation(
     relative_tolerance);
 }
 
-bool TestDefaultDct8Kernels(
-  gjxl::GpuBackend& gpu) {
+bool TestDct8Kernels(
+  gjxl::GpuBackend& gpu,
+  std::string_view implementation_name) {
 
   const std::vector<float> input = MakeReferenceInput();
   std::vector<float> output(input.size());
@@ -244,6 +265,12 @@ bool TestDefaultDct8Kernels(
   std::vector<double> expected(input.size());
   constexpr double kRelativeTolerance = 2e-5;
 
+  const std::string forward_operation =
+    std::string(implementation_name) + " ForwardDct8";
+
+  const std::string inverse_operation =
+    std::string(implementation_name) + " InverseDct8";
+
   gjxl::test::ReferenceForwardDct(
     kDctShape,
     input.data(),
@@ -252,7 +279,7 @@ bool TestDefaultDct8Kernels(
 
   if (!CheckDct8Operation(
       gpu,
-      "Default ForwardDct8",
+      forward_operation,
       &gjxl::GpuBackend::ForwardDct8,
       batch,
       &output,
@@ -270,7 +297,7 @@ bool TestDefaultDct8Kernels(
 
   return CheckDct8Operation(
     gpu,
-    "Default InverseDct8",
+    inverse_operation,
     &gjxl::GpuBackend::InverseDct8,
     batch,
     &output,
@@ -279,8 +306,9 @@ bool TestDefaultDct8Kernels(
     kRelativeTolerance);
 }
 
-bool TestDefaultRoundTrip(
-  gjxl::GpuBackend& gpu) {
+bool TestRoundTrip(
+  gjxl::GpuBackend& gpu,
+  std::string_view implementation_name) {
 
   constexpr size_t kBlocks = 257;
 
@@ -334,7 +362,7 @@ bool TestDefaultRoundTrip(
         .output = coefficients.get(),
         .block_count = kBlocks,
       }),
-      "Default ForwardDct8")) {
+      std::string(implementation_name) + " ForwardDct8")) {
     return false;
   }
 
@@ -344,13 +372,14 @@ bool TestDefaultRoundTrip(
         .output = output.get(),
         .block_count = kBlocks,
       }),
-      "Default InverseDct8")) {
+      std::string(implementation_name) + " InverseDct8")) {
     return false;
   }
 
   if (!CheckStatus(
       gpu.Synchronize(),
-      "Default round-trip synchronization")) {
+      std::string(implementation_name) +
+        " round-trip synchronization")) {
     return false;
   }
 
@@ -372,7 +401,8 @@ bool TestDefaultRoundTrip(
   }
 
   std::cout
-    << "Default round-trip max error: "
+    << implementation_name
+    << " round-trip max error: "
     << max_error
     << '\n';
 
@@ -380,7 +410,8 @@ bool TestDefaultRoundTrip(
 
   if (max_error > kTolerance) {
     std::cerr
-      << "Default round-trip error exceeds tolerance\n";
+      << implementation_name
+      << " round-trip error exceeds tolerance\n";
 
     return false;
   }
@@ -391,28 +422,43 @@ bool TestDefaultRoundTrip(
 }  // namespace
 
 int main() {
-  std::unique_ptr<gjxl::GpuBackend> gpu;
+  for (const Dct8ImplementationCase& implementation :
+       kDct8Implementations) {
 
-  const gjxl::Status status =
-    gjxl::CreateMetalBackend(
-      GJXL_METALLIB_PATH,
-      &gpu);
+    const gjxl::MetalBackendOptions options{
+      .forward_dct8 = implementation.implementation,
+      .inverse_dct8 = implementation.implementation,
+    };
 
-  if (!CheckStatus(status, "CreateMetalBackend")) {
-    return EXIT_FAILURE;
-  }
+    std::unique_ptr<gjxl::GpuBackend> gpu;
 
-  std::cout
-    << "Testing backend: "
-    << gpu->name()
-    << '\n';
+    const gjxl::Status status =
+      gjxl::CreateMetalBackend(
+        GJXL_METALLIB_PATH,
+        options,
+        &gpu);
 
-  if (!TestDefaultDct8Kernels(*gpu)) {
-    return EXIT_FAILURE;
-  }
+    if (!CheckStatus(
+        status,
+        std::string("CreateMetalBackend for ") +
+          std::string(implementation.name))) {
+      return EXIT_FAILURE;
+    }
 
-  if (!TestDefaultRoundTrip(*gpu)) {
-    return EXIT_FAILURE;
+    std::cout
+      << "Testing backend: "
+      << gpu->name()
+      << " ["
+      << implementation.name
+      << "]\n";
+
+    if (!TestDct8Kernels(*gpu, implementation.name)) {
+      return EXIT_FAILURE;
+    }
+
+    if (!TestRoundTrip(*gpu, implementation.name)) {
+      return EXIT_FAILURE;
+    }
   }
 
   std::cout << "All DCT tests passed.\n";

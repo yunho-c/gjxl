@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
@@ -17,6 +18,25 @@ namespace {
 
 constexpr size_t kDctSize = 64;
 constexpr size_t kWarmupIterations = 20;
+
+struct Dct8ImplementationCase {
+  gjxl::MetalDct8Implementation implementation;
+  std::string_view name;
+};
+
+constexpr std::array<Dct8ImplementationCase, 2>
+kDct8Implementations{{
+  {
+    .implementation =
+      gjxl::MetalDct8Implementation::kScalarMatmul,
+    .name = "scalar matmul",
+  },
+  {
+    .implementation =
+      gjxl::MetalDct8Implementation::kSimdgroupMatmul,
+    .name = "simdgroup matmul",
+  },
+}};
 
 void Require(
   const gjxl::Status& status,
@@ -110,14 +130,6 @@ int main(int argc, char** argv) {
         std::strtoull(argv[2], nullptr, 10));
   }
 
-  std::unique_ptr<gjxl::GpuBackend> gpu;
-
-  Require(
-    gjxl::CreateMetalBackend(
-      GJXL_METALLIB_PATH,
-      &gpu),
-    "CreateMetalBackend");
-
   const size_t element_count = block_count * kDctSize;
   const size_t bytes = element_count * sizeof(float);
 
@@ -130,52 +142,73 @@ int main(int argc, char** argv) {
     value = distribution(rng);
   }
 
-  std::unique_ptr<gjxl::DeviceBuffer> device_input;
-  std::unique_ptr<gjxl::DeviceBuffer> device_output;
+  for (const Dct8ImplementationCase& implementation :
+       kDct8Implementations) {
 
-  Require(
-    gpu->Allocate(bytes, &device_input),
-    "Allocate input");
+    const gjxl::MetalBackendOptions options{
+      .forward_dct8 = implementation.implementation,
+      .inverse_dct8 = implementation.implementation,
+    };
 
-  Require(
-    gpu->Allocate(bytes, &device_output),
-    "Allocate output");
+    std::unique_ptr<gjxl::GpuBackend> gpu;
 
-  Require(
-    gpu->CopyHostToDevice(
-      *device_input,
-      input.data(),
-      bytes),
-    "Upload input");
+    Require(
+      gjxl::CreateMetalBackend(
+        GJXL_METALLIB_PATH,
+        options,
+        &gpu),
+      std::string("CreateMetalBackend for ") +
+        std::string(implementation.name));
 
-  const gjxl::Dct8Batch batch{
-    .input = device_input.get(),
-    .output = device_output.get(),
-    .block_count = block_count,
-  };
+    std::unique_ptr<gjxl::DeviceBuffer> device_input;
+    std::unique_ptr<gjxl::DeviceBuffer> device_output;
 
-  std::cout
-    << "Backend: "
-    << gpu->name()
-    << '\n';
+    Require(
+      gpu->Allocate(bytes, &device_input),
+      "Allocate input");
 
-  BenchmarkDct8(
-    *gpu,
-    "ForwardDct8",
-    [&gpu](const gjxl::Dct8Batch& dct_batch) {
-      return gpu->ForwardDct8(dct_batch);
-    },
-    batch,
-    iterations);
+    Require(
+      gpu->Allocate(bytes, &device_output),
+      "Allocate output");
 
-  BenchmarkDct8(
-    *gpu,
-    "InverseDct8",
-    [&gpu](const gjxl::Dct8Batch& dct_batch) {
-      return gpu->InverseDct8(dct_batch);
-    },
-    batch,
-    iterations);
+    Require(
+      gpu->CopyHostToDevice(
+        *device_input,
+        input.data(),
+        bytes),
+      "Upload input");
+
+    const gjxl::Dct8Batch batch{
+      .input = device_input.get(),
+      .output = device_output.get(),
+      .block_count = block_count,
+    };
+
+    std::cout
+      << "\nBackend: "
+      << gpu->name()
+      << " ["
+      << implementation.name
+      << "]\n";
+
+    BenchmarkDct8(
+      *gpu,
+      std::string(implementation.name) + " ForwardDct8",
+      [&gpu](const gjxl::Dct8Batch& dct_batch) {
+        return gpu->ForwardDct8(dct_batch);
+      },
+      batch,
+      iterations);
+
+    BenchmarkDct8(
+      *gpu,
+      std::string(implementation.name) + " InverseDct8",
+      [&gpu](const gjxl::Dct8Batch& dct_batch) {
+        return gpu->InverseDct8(dct_batch);
+      },
+      batch,
+      iterations);
+  }
 
   return EXIT_SUCCESS;
 }

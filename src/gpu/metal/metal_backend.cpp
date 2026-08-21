@@ -3,6 +3,7 @@
 #include <Foundation/Foundation.hpp>
 #include <Metal/Metal.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -23,11 +24,60 @@ constexpr size_t kDct8Elements = 64;
 
 constexpr size_t kDct8Bytes = kDct8Elements * sizeof(float);
 
-constexpr std::string_view kForwardDct8FunctionName =
-  "gjxl_dct8_forward_scalar_2d_matmul";
+enum class Dct8DispatchMode {
+  kOneThreadPerElement,
+  kSingleSimdgroup,
+};
 
-constexpr std::string_view kInverseDct8FunctionName =
-  "gjxl_dct8_inverse_scalar_2d_matmul";
+struct Dct8ImplementationSpec {
+  MetalDct8Implementation implementation;
+  std::string_view display_name;
+  std::string_view forward_function_name;
+  std::string_view inverse_function_name;
+  Dct8DispatchMode dispatch_mode;
+};
+
+constexpr std::array<Dct8ImplementationSpec, 2>
+kDct8ImplementationSpecs{{
+  {
+    .implementation = MetalDct8Implementation::kScalarMatmul,
+    .display_name = "scalar matmul",
+    .forward_function_name =
+      "gjxl_dct8_forward_scalar_2d_matmul",
+    .inverse_function_name =
+      "gjxl_dct8_inverse_scalar_2d_matmul",
+    .dispatch_mode = Dct8DispatchMode::kOneThreadPerElement,
+  },
+  {
+    .implementation = MetalDct8Implementation::kSimdgroupMatmul,
+    .display_name = "simdgroup matmul",
+    .forward_function_name =
+      "gjxl_dct8_forward_simdgroup_2d_matmul",
+    .inverse_function_name =
+      "gjxl_dct8_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = Dct8DispatchMode::kSingleSimdgroup,
+  },
+}};
+
+const Dct8ImplementationSpec* FindDct8ImplementationSpec(
+  MetalDct8Implementation implementation) {
+
+  for (const Dct8ImplementationSpec& spec :
+       kDct8ImplementationSpecs) {
+
+    if (spec.implementation == implementation) {
+      return &spec;
+    }
+  }
+
+  return nullptr;
+}
+
+struct Dct8Pipeline {
+  NS::SharedPtr<MTL::ComputePipelineState> state;
+  NS::UInteger threads_per_threadgroup = 0;
+  std::string label;
+};
 
 // MetalBuffer
 class MetalBuffer final : public DeviceBuffer {
@@ -124,6 +174,78 @@ Status CreatePipeline(
   return Status::Ok();
 }
 
+Status CreateDct8Pipeline(
+  MTL::Device* device,
+  MTL::Library* library,
+  const Dct8ImplementationSpec& spec,
+  std::string_view function_name,
+  std::string_view operation,
+  Dct8Pipeline* out) {
+
+  if (out == nullptr) {
+    return Status::InvalidArgument(
+      "CreateDct8Pipeline output pointer is null");
+  }
+
+  NS::SharedPtr<MTL::ComputePipelineState> state;
+
+  Status status =
+    CreatePipeline(
+      device,
+      library,
+      function_name,
+      &state);
+
+  if (!status.ok()) {
+    return {
+      status.code(),
+      std::string("Failed to create ") +
+        std::string(operation) +
+        " DCT8 pipeline for " +
+        std::string(spec.display_name) +
+        ": " +
+        std::string(status.message()),
+    };
+  }
+
+  NS::UInteger threads_per_threadgroup = 0;
+
+  switch (spec.dispatch_mode) {
+    case Dct8DispatchMode::kOneThreadPerElement:
+      threads_per_threadgroup = kDct8Elements;
+      break;
+
+    case Dct8DispatchMode::kSingleSimdgroup:
+      threads_per_threadgroup = state->threadExecutionWidth();
+      break;
+  }
+
+  if (threads_per_threadgroup == 0) {
+    return Status::Unavailable(
+      std::string("Metal reported an invalid threadgroup size for ") +
+      std::string(spec.display_name));
+  }
+
+  if (state->maxTotalThreadsPerThreadgroup() <
+      threads_per_threadgroup) {
+
+    return Status::Unavailable(
+      std::string("Metal GPU cannot launch the required threadgroup for ") +
+      std::string(spec.display_name));
+  }
+
+  out->state = std::move(state);
+  out->threads_per_threadgroup = threads_per_threadgroup;
+  out->label =
+    std::string("gjxl ") +
+    std::string(operation) +
+    " DCT8 (" +
+    std::string(spec.display_name) +
+    ")";
+
+  return Status::Ok();
+}
+
 // MetalBackend
 class MetalBackend final : public GpuBackend {
 public:
@@ -131,8 +253,8 @@ public:
     NS::SharedPtr<MTL::Device> device,
     NS::SharedPtr<MTL::CommandQueue> command_queue,
     NS::SharedPtr<MTL::Library> library,
-    NS::SharedPtr<MTL::ComputePipelineState> forward_dct8,
-    NS::SharedPtr<MTL::ComputePipelineState> inverse_dct8)
+    Dct8Pipeline forward_dct8,
+    Dct8Pipeline inverse_dct8)
     : device_(std::move(device)),
       command_queue_(std::move(command_queue)),
       library_(std::move(library)),
@@ -305,18 +427,16 @@ public:
     const Dct8Batch& batch) override {
 
     return SubmitDct8(
-      forward_dct8_.get(),
-      batch,
-      "gjxl forward DCT8");
+      forward_dct8_,
+      batch);
   }
 
   Status InverseDct8(
     const Dct8Batch& batch) override {
 
     return SubmitDct8(
-      inverse_dct8_.get(),
-      batch,
-      "gjxl inverse DCT8");
+      inverse_dct8_,
+      batch);
   }
 
   // Synchronization
@@ -429,9 +549,8 @@ private:
 
 
   Status SubmitDct8(
-    MTL::ComputePipelineState* pipeline,
-    const Dct8Batch& batch,
-    const char* label) {
+    const Dct8Pipeline& pipeline,
+    const Dct8Batch& batch) {
 
     const MetalBuffer* input = nullptr;
     MetalBuffer* output = nullptr;
@@ -448,16 +567,6 @@ private:
 
     if (batch.block_count == 0) {
       return Status::Ok();
-    }
-
-    // Initial naïve design:
-    //   one threadgroup = one 8x8 transform
-    //   64 threads      = one thread per pixel
-    constexpr NS::UInteger kThreadsPerDct = 64;
-
-    if (pipeline->maxTotalThreadsPerThreadgroup() < kThreadsPerDct) {
-      return Status::Unavailable(
-        "Metal GPU cannot launch 64-thread DCT8 threadgroup");
     }
 
     if (batch.block_count > std::numeric_limits<NS::UInteger>::max()) {
@@ -483,12 +592,10 @@ private:
       NS::RetainPtr(
         raw_command_buffer);
 
-    if (label != nullptr) {
-      raw_command_buffer->setLabel(
-        NS::String::string(
-          label,
-          NS::UTF8StringEncoding));
-    }
+    raw_command_buffer->setLabel(
+      NS::String::string(
+        pipeline.label.c_str(),
+        NS::UTF8StringEncoding));
 
     MTL::ComputeCommandEncoder* encoder =
       raw_command_buffer->computeCommandEncoder();
@@ -498,7 +605,7 @@ private:
         "Failed to create Metal compute encoder");
     }
 
-    encoder->setComputePipelineState(pipeline);
+    encoder->setComputePipelineState(pipeline.state.get());
 
     encoder->setBuffer(
       input->handle(),
@@ -510,12 +617,8 @@ private:
       0,
       1);
 
-    // TEMP
-      // Exactly one threadgroup per 8x8 DCT.
-      //
-      // kernel:
-      //   thread_index_in_threadgroup -> 0...63
-      //   threadgroup_position_in_grid.x -> block index
+    // Exactly one threadgroup per 8x8 DCT. The selected implementation
+    // determines how many threads cooperate within that threadgroup.
     const MTL::Size threadgroups(
       static_cast<NS::UInteger>(
         batch.block_count),
@@ -523,7 +626,7 @@ private:
         1);
 
     const MTL::Size threads_per_threadgroup(
-      kThreadsPerDct,
+      pipeline.threads_per_threadgroup,
       1,
       1);
 
@@ -535,26 +638,26 @@ private:
 
     raw_command_buffer->commit();
 
-    // Synchronizing also waits for perviously submitted work
+    // Synchronizing also waits for previously submitted work.
     last_command_buffer_ = std::move(command_buffer);
 
     return Status::Ok();
   }
 
 
-    NS::SharedPtr<MTL::Device> device_;
+  NS::SharedPtr<MTL::Device> device_;
 
-    NS::SharedPtr<MTL::CommandQueue> command_queue_;
+  NS::SharedPtr<MTL::CommandQueue> command_queue_;
 
-    NS::SharedPtr<MTL::Library> library_;
+  NS::SharedPtr<MTL::Library> library_;
 
-    NS::SharedPtr<MTL::ComputePipelineState> forward_dct8_;
+  Dct8Pipeline forward_dct8_;
 
-    NS::SharedPtr<MTL::ComputePipelineState> inverse_dct8_;
+  Dct8Pipeline inverse_dct8_;
 
-    NS::SharedPtr<MTL::CommandBuffer> last_command_buffer_;
+  NS::SharedPtr<MTL::CommandBuffer> last_command_buffer_;
 
-    std::string name_;
+  std::string name_;
 };
 
 
@@ -566,6 +669,17 @@ Status CreateMetalBackend(
   std::string_view metallib_path,
   std::unique_ptr<GpuBackend>* out) {
 
+  return CreateMetalBackend(
+    metallib_path,
+    MetalBackendOptions{},
+    out);
+}
+
+Status CreateMetalBackend(
+  std::string_view metallib_path,
+  const MetalBackendOptions& options,
+  std::unique_ptr<GpuBackend>* out) {
+
   if (out == nullptr) {
     return Status::InvalidArgument(
       "CreateMetalBackend output pointer is null");
@@ -574,6 +688,22 @@ Status CreateMetalBackend(
   if (metallib_path.empty()) {
     return Status::InvalidArgument(
       "Metal library path is empty");
+  }
+
+  const Dct8ImplementationSpec* forward_dct8_spec =
+    FindDct8ImplementationSpec(options.forward_dct8);
+
+  if (forward_dct8_spec == nullptr) {
+    return Status::InvalidArgument(
+      "Unknown forward Metal DCT8 implementation");
+  }
+
+  const Dct8ImplementationSpec* inverse_dct8_spec =
+    FindDct8ImplementationSpec(options.inverse_dct8);
+
+  if (inverse_dct8_spec == nullptr) {
+    return Status::InvalidArgument(
+      "Unknown inverse Metal DCT8 implementation");
   }
 
   auto pool =
@@ -619,26 +749,30 @@ Status CreateMetalBackend(
       "Loading gjxl.metallib");
   }
 
-  NS::SharedPtr<MTL::ComputePipelineState> forward_dct8;
+  Dct8Pipeline forward_dct8;
 
   Status status =
-    CreatePipeline(
+    CreateDct8Pipeline(
       device.get(),
       library.get(),
-      kForwardDct8FunctionName,
+      *forward_dct8_spec,
+      forward_dct8_spec->forward_function_name,
+      "forward",
       &forward_dct8);
 
   if (!status.ok()) {
     return status;
   }
 
-  NS::SharedPtr<MTL::ComputePipelineState> inverse_dct8;
+  Dct8Pipeline inverse_dct8;
 
   status =
-    CreatePipeline(
+    CreateDct8Pipeline(
       device.get(),
       library.get(),
-      kInverseDct8FunctionName,
+      *inverse_dct8_spec,
+      inverse_dct8_spec->inverse_function_name,
+      "inverse",
       &inverse_dct8);
 
   if (!status.ok()) {
