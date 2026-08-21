@@ -202,6 +202,23 @@ if(GJXL_BUILD_TESTS)
   enable_testing()
 
   add_executable(
+    gjxl_dct_reference_test
+    tests/dct_reference.cpp
+    tests/dct_reference_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_dct_reference_test
+    PRIVATE
+      gjxl_core
+  )
+
+  add_test(
+    NAME dct_reference
+    COMMAND gjxl_dct_reference_test
+  )
+
+  add_executable(
     gjxl_dct_test
     tests/dct_reference.cpp
     tests/dct_test.cpp
