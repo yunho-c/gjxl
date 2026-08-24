@@ -11,6 +11,14 @@ using namespace metal;
 constant float kForwardDct8Scale = 1.0f / 8.0f;
 constant float kInverseDct8Scale = 8.0f;
 
+constant float kForwardDct16Scale = 1.0f / 16.0f;
+constant float kInverseDct16Scale = 16.0f;
+
+constant float kForwardDct32Scale = 1.0f / 32.0f;
+constant float kInverseDct32Scale = 32.0f;
+
+// 8x8
+
 // Computes forward DCT using hardcoded 8x8 DCT-II transform matrix with two matmuls:
 //   B = C A C^T, where C is the 2D 8x8 DCT transform matrix.
 // The orthonormal result is divided by 8 and transposed to match libjxl's
@@ -55,7 +63,8 @@ kernel void gjxl_dct8_forward_scalar_2d_matmul(
 
 
 // Computes inverse DCT using hardcoded 8x8 DCT-II transform matrix with two matmuls:
-//   B = C^T A C.
+//   B = C^T A^T C
+//     where A uses libjxl's transposed coefficient layout.
 // Input coefficients use libjxl's transposed [u][v] layout. The orthonormal
 // inverse result is multiplied by 8 to invert the forward scaling.
 // This exists to perform as a simple reference (and performance baseline) against optimized variants.
@@ -70,7 +79,7 @@ kernel void gjxl_dct8_inverse_scalar_2d_matmul(
 
   const ulong base = static_cast<ulong>(group_position.x) * 64ul;
 
-  threadgroup float T[8][8]; // intermediate product (C^T * A)
+  threadgroup float T[8][8]; // intermediate product (C^T * A^T)
 
   float t = 0;
 
@@ -167,4 +176,153 @@ kernel void gjxl_dct8_inverse_simdgroup_2d_matmul(
   b.thread_elements() *= kInverseDct8Scale;
 
   simdgroup_store(b, B + base);
+}
+
+
+// 16x16
+
+// Computes forward DCT using the precomputed 16x16 DCT-II transform matrix with two matmuls:
+//   B = C A C^T.
+// See `gjxl_dct8_forward_scalar_2d_matmul()` for details.
+kernel void gjxl_dct16_forward_scalar_2d_matmul(
+  device const float* A [[buffer(0)]], // input (pixels)
+  device       float* B [[buffer(1)]], // output (coefficients)
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  int row = tid / 16;
+  int col = tid % 16;
+
+  const ulong base = static_cast<ulong>(group_position.x) * 256ul;
+
+  threadgroup float T[16][16]; // intermediate product (C * A)
+
+  float t = 0;
+
+  for (int i=0; i<16; ++i) {
+    t += kOrthonormalDct16[16*row + i] * A[base + 16*i + col];
+  }
+
+  T[row][col] = t;
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float b = 0;
+
+  for (int i=0; i<16; ++i) {
+    b += T[row][i] * kOrthonormalDct16[16*col + i];
+  }
+
+  B[base + 16*col + row] = b * kForwardDct16Scale;
+}
+
+
+// Computes inverse DCT using the precomputed 16x16 DCT-II transform matrix with two matmuls:
+//   B = C^T A^T C
+// See `gjxl_dct8_inverse_scalar_2d_matmul()` for details.
+kernel void gjxl_dct16_inverse_scalar_2d_matmul(
+  device const float* A [[buffer(0)]], // input (coefficients)
+  device       float* B [[buffer(1)]], // output (pixels)
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  int row = tid / 16;
+  int col = tid % 16;
+
+  const ulong base = static_cast<ulong>(group_position.x) * 256ul;
+
+  threadgroup float T[16][16]; // intermediate product (C^T * A^T)
+
+  float t = 0;
+
+  for (int i=0; i<16; ++i) {
+    t += kOrthonormalDct16[16*i + row] * A[base + 16*col + i];
+  }
+
+  T[row][col] = t;
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float b = 0;
+
+  for (int i=0; i<16; ++i) {
+    b += T[row][i] * kOrthonormalDct16[16*i + col];
+  }
+
+  B[base + 16*row + col] = b * kInverseDct16Scale;
+}
+
+
+
+// 32x32
+
+// Computes forward DCT using the precomputed 32x32 DCT-II transform matrix with two matmuls:
+//   B = C A C^T.
+// See `gjxl_dct8_forward_scalar_2d_matmul()` for details.
+kernel void gjxl_dct32_forward_scalar_2d_matmul(
+  device const float* A [[buffer(0)]], // input (pixels)
+  device       float* B [[buffer(1)]], // output (coefficients)
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  int row = tid / 32;
+  int col = tid % 32;
+
+  const ulong base = static_cast<ulong>(group_position.x) * 1024ul;
+
+  threadgroup float T[32][32]; // intermediate product (C * A)
+
+  float t = 0;
+
+  for (int i=0; i<32; ++i) {
+    t += kOrthonormalDct32[32*row + i] * A[base + 32*i + col];
+  }
+
+  T[row][col] = t;
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float b = 0;
+
+  for (int i=0; i<32; ++i) {
+    b += T[row][i] * kOrthonormalDct32[32*col + i];
+  }
+
+  B[base + 32*col + row] = b * kForwardDct32Scale;
+}
+
+
+// Computes inverse DCT using the precomputed 32x32 DCT-II transform matrix with two matmuls:
+//   B = C^T A^T C
+// See `gjxl_dct8_inverse_scalar_2d_matmul()` for details.
+kernel void gjxl_dct32_inverse_scalar_2d_matmul(
+  device const float* A [[buffer(0)]], // input (coefficients)
+  device       float* B [[buffer(1)]], // output (pixels)
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  int row = tid / 32;
+  int col = tid % 32;
+
+  const ulong base = static_cast<ulong>(group_position.x) * 1024ul;
+
+  threadgroup float T[32][32]; // intermediate product (C^T * A^T)
+
+  float t = 0;
+
+  for (int i=0; i<32; ++i) {
+    t += kOrthonormalDct32[32*i + row] * A[base + 32*col + i];
+  }
+
+  T[row][col] = t;
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float b = 0;
+
+  for (int i=0; i<32; ++i) {
+    b += T[row][i] * kOrthonormalDct32[32*i + col];
+  }
+
+  B[base + 32*row + col] = b * kInverseDct32Scale;
 }
