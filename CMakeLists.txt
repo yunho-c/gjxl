@@ -95,6 +95,11 @@ set(
 )
 
 set(
+  GJXL_DCT_BASIS_HEADER
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
+)
+
+set(
   GJXL_DCT_METAL_IR
   "${GJXL_METAL_DIR}/dct.ir"
 )
@@ -126,6 +131,7 @@ add_custom_command(
 
   DEPENDS
     "${GJXL_DCT_METAL_SOURCE}"
+    "${GJXL_DCT_BASIS_HEADER}"
 
   COMMENT
     "Compiling Metal DCT shaders"
