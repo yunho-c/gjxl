@@ -83,7 +83,7 @@ struct FixedTransformSpec {
   TransformDispatchMode dispatch_mode;
 };
 
-constexpr std::array<FixedTransformSpec, 2>
+constexpr std::array<FixedTransformSpec, 4>
 kFixedTransformSpecs{{
   {
     .strategy = AcStrategyType::kDct16x16,
@@ -97,6 +97,20 @@ kFixedTransformSpecs{{
     .implementation_name = "scalar matmul",
     .forward_function_name = "gjxl_dct32_forward_scalar_2d_matmul",
     .inverse_function_name = "gjxl_dct32_inverse_scalar_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
+  },
+  {
+    .strategy = AcStrategyType::kDct16x8,
+    .implementation_name = "scalar matmul",
+    .forward_function_name = "gjxl_dct16x8_forward_scalar_2d_matmul",
+    .inverse_function_name = "gjxl_dct16x8_inverse_scalar_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
+  },
+  {
+    .strategy = AcStrategyType::kDct8x16,
+    .implementation_name = "scalar matmul",
+    .forward_function_name = "gjxl_dct8x16_forward_scalar_2d_matmul",
+    .inverse_function_name = "gjxl_dct8x16_inverse_scalar_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
   },
 }};

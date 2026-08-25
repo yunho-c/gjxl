@@ -167,6 +167,12 @@ std::vector<float> MakeReferenceInput(size_t elements_per_transform) {
 using TransformOperation =
   gjxl::Status (gjxl::GpuBackend::*)(const gjxl::TransformBatch&);
 
+using ReferenceTransform = void (*)(
+  gjxl::Extent2D,
+  const float*,
+  double*,
+  size_t);
+
 bool CheckDctOperation(
   gjxl::GpuBackend& gpu,
   std::string_view operation,
@@ -235,18 +241,20 @@ bool CheckDctOperation(
     relative_tolerance);
 }
 
-bool TestDctKernels(
+bool TestDctKernel(
   gjxl::GpuBackend& gpu,
   std::string_view implementation_name,
   gjxl::AcStrategyType strategy,
-  double forward_absolute_tolerance,
-  double inverse_absolute_tolerance) {
+  std::string_view direction_name,
+  TransformOperation transform,
+  ReferenceTransform reference_transform,
+  double absolute_tolerance) {
 
   const gjxl::AcStrategyInfo* strategy_info =
     gjxl::GetAcStrategyInfo(strategy);
 
   if (strategy_info == nullptr) {
-    std::cerr << "TestDctKernels received invalid strategy\n";
+    std::cerr << "TestDctKernel received invalid strategy\n";
     return false;
   }
 
@@ -294,32 +302,12 @@ bool TestDctKernels(
   const gjxl::Extent2D extent = strategy_info->pixel_extent();
   const size_t transform_count =
     input.size() / elements_per_transform;
-  const std::string forward_operation =
-    std::string(implementation_name) + " Forward" +
-      std::string(strategy_info->name);
-  const std::string inverse_operation =
-    std::string(implementation_name) + " Inverse" +
+  const std::string operation =
+    std::string(implementation_name) + ' ' +
+      std::string(direction_name) +
       std::string(strategy_info->name);
 
-  gjxl::test::ReferenceForwardDct(
-    extent,
-    input.data(),
-    expected.data(),
-    transform_count);
-
-  if (!CheckDctOperation(
-      gpu,
-      forward_operation,
-      &gjxl::GpuBackend::ForwardTransform,
-      batch,
-      &output,
-      expected,
-      forward_absolute_tolerance,
-      5e-5)) {
-    return false;
-  }
-
-  gjxl::test::ReferenceInverseDct(
+  reference_transform(
     extent,
     input.data(),
     expected.data(),
@@ -327,13 +315,39 @@ bool TestDctKernels(
 
   return CheckDctOperation(
     gpu,
-    inverse_operation,
-    &gjxl::GpuBackend::InverseTransform,
+    operation,
+    transform,
     batch,
     &output,
     expected,
-    inverse_absolute_tolerance,
+    absolute_tolerance,
     5e-5);
+}
+
+bool TestDctKernels(
+  gjxl::GpuBackend& gpu,
+  std::string_view implementation_name,
+  gjxl::AcStrategyType strategy,
+  double forward_absolute_tolerance,
+  double inverse_absolute_tolerance) {
+
+  return
+    TestDctKernel(
+      gpu,
+      implementation_name,
+      strategy,
+      "Forward",
+      &gjxl::GpuBackend::ForwardTransform,
+      &gjxl::test::ReferenceForwardDct,
+      forward_absolute_tolerance) &&
+    TestDctKernel(
+      gpu,
+      implementation_name,
+      strategy,
+      "Inverse",
+      &gjxl::GpuBackend::InverseTransform,
+      &gjxl::test::ReferenceInverseDct,
+      inverse_absolute_tolerance);
 }
 
 bool TestRoundTrip(
@@ -609,6 +623,38 @@ int main() {
           *gpu,
           "scalar matmul",
           gjxl::AcStrategyType::kDct16x16)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestDctKernels(
+          *gpu,
+          "scalar matmul",
+          gjxl::AcStrategyType::kDct16x8,
+          2e-5,
+          2e-4)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestRoundTrip(
+          *gpu,
+          "scalar matmul",
+          gjxl::AcStrategyType::kDct16x8)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestDctKernels(
+          *gpu,
+          "scalar matmul",
+          gjxl::AcStrategyType::kDct8x16,
+          2e-5,
+          2e-4)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestRoundTrip(
+          *gpu,
+          "scalar matmul",
+          gjxl::AcStrategyType::kDct8x16)) {
         return EXIT_FAILURE;
       }
 

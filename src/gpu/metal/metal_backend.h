@@ -12,7 +12,7 @@
 namespace gjxl {
 
 // Built-in DCT8 kernel pairs selectable when the Metal backend is created.
-// DCT16 and DCT32 currently use their fixed scalar implementations.
+// DCT16x16, DCT32x32, DCT16x8, and DCT8x16 currently use fixed scalar pairs.
 enum class MetalDct8Implementation {
   kScalarMatmul,
   kSimdgroupMatmul,

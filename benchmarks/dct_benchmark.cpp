@@ -300,6 +300,14 @@ int main(int argc, char** argv) {
         ComparableTransformCount(
           gjxl::AcStrategyType::kDct16x16,
           dct8_transform_count);
+      const size_t dct16x8_transform_count =
+        ComparableTransformCount(
+          gjxl::AcStrategyType::kDct16x8,
+          dct8_transform_count);
+      const size_t dct8x16_transform_count =
+        ComparableTransformCount(
+          gjxl::AcStrategyType::kDct8x16,
+          dct8_transform_count);
       const size_t dct32_transform_count =
         ComparableTransformCount(
           gjxl::AcStrategyType::kDct32x32,
@@ -310,6 +318,20 @@ int main(int argc, char** argv) {
         "scalar matmul",
         gjxl::AcStrategyType::kDct16x16,
         dct16_transform_count,
+        iterations);
+
+      BenchmarkDctPair(
+        *gpu,
+        "scalar matmul",
+        gjxl::AcStrategyType::kDct16x8,
+        dct16x8_transform_count,
+        iterations);
+
+      BenchmarkDctPair(
+        *gpu,
+        "scalar matmul",
+        gjxl::AcStrategyType::kDct8x16,
+        dct8x16_transform_count,
         iterations);
 
       BenchmarkDctPair(
