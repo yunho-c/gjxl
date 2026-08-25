@@ -610,6 +610,254 @@ __attribute__((always_inline)) inline void InverseRectangularDct(
 }
 
 
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void ForwardRectangularDctSimdgroup(
+  device const float* A,
+  device       float* B,
+  constant const float* vertical_basis,
+  constant const float* horizontal_basis,
+  threadgroup float* shared_vertical_basis,
+  threadgroup float* shared_horizontal_basis,
+  float scale,
+  uint lane,
+  uint simd_width,
+  uint simdgroup_index,
+  uint3 group_position)
+{
+  constexpr uint kTileSize = 8;
+  constexpr uint kRowTiles = Rows / kTileSize;
+  constexpr uint kColumnTiles = Columns / kTileSize;
+
+  const uint threadgroup_stride = kRowTiles * simd_width;
+
+  for (uint i = simdgroup_index * simd_width + lane;
+       i < Rows * Rows;
+       i += threadgroup_stride) {
+    shared_vertical_basis[i] = vertical_basis[i];
+  }
+
+  for (uint i = simdgroup_index * simd_width + lane;
+       i < Columns * Columns;
+       i += threadgroup_stride) {
+    shared_horizontal_basis[i] = horizontal_basis[i];
+  }
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const ulong base =
+    static_cast<ulong>(group_position.x) * Rows * Columns;
+
+  // One SIMD group owns an eight-row stripe and keeps its complete vertical
+  // transform in registers for the horizontal pass.
+  simdgroup_float8x8 intermediate[kColumnTiles];
+
+  for (uint column_tile = 0;
+       column_tile < kColumnTiles;
+       ++column_tile) {
+    simdgroup_float8x8 accumulator =
+      make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    for (uint inner_tile = 0;
+         inner_tile < kRowTiles;
+         ++inner_tile) {
+      simdgroup_float8x8 c;
+      simdgroup_float8x8 a;
+
+      simdgroup_load(
+        c,
+        shared_vertical_basis,
+        Rows,
+        ulong2(inner_tile * kTileSize,
+               simdgroup_index * kTileSize));
+
+      simdgroup_load(
+        a,
+        A + base,
+        Columns,
+        ulong2(column_tile * kTileSize,
+               inner_tile * kTileSize));
+
+      simdgroup_multiply_accumulate(
+        accumulator,
+        c,
+        a,
+        accumulator);
+    }
+
+    intermediate[column_tile] = accumulator;
+  }
+
+  for (uint column_tile = 0;
+       column_tile < kColumnTiles;
+       ++column_tile) {
+    simdgroup_float8x8 accumulator =
+      make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    for (uint inner_tile = 0;
+         inner_tile < kColumnTiles;
+         ++inner_tile) {
+      simdgroup_float8x8 ct;
+
+      simdgroup_load(
+        ct,
+        shared_horizontal_basis,
+        Columns,
+        ulong2(inner_tile * kTileSize,
+               column_tile * kTileSize),
+        true);
+
+      simdgroup_multiply_accumulate(
+        accumulator,
+        intermediate[inner_tile],
+        ct,
+        accumulator);
+    }
+
+    accumulator.thread_elements() *= scale;
+
+    if (Rows < Columns) {
+      simdgroup_store(
+        accumulator,
+        B + base,
+        Columns,
+        ulong2(column_tile * kTileSize,
+               simdgroup_index * kTileSize));
+    } else {
+      simdgroup_store(
+        accumulator,
+        B + base,
+        Rows,
+        ulong2(simdgroup_index * kTileSize,
+               column_tile * kTileSize),
+        true);
+    }
+  }
+}
+
+
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void InverseRectangularDctSimdgroup(
+  device const float* A,
+  device       float* B,
+  constant const float* vertical_basis,
+  constant const float* horizontal_basis,
+  threadgroup float* shared_vertical_basis,
+  threadgroup float* shared_horizontal_basis,
+  float scale,
+  uint lane,
+  uint simd_width,
+  uint simdgroup_index,
+  uint3 group_position)
+{
+  constexpr uint kTileSize = 8;
+  constexpr uint kRowTiles = Rows / kTileSize;
+  constexpr uint kColumnTiles = Columns / kTileSize;
+
+  const uint threadgroup_stride = kRowTiles * simd_width;
+
+  for (uint i = simdgroup_index * simd_width + lane;
+       i < Rows * Rows;
+       i += threadgroup_stride) {
+    shared_vertical_basis[i] = vertical_basis[i];
+  }
+
+  for (uint i = simdgroup_index * simd_width + lane;
+       i < Columns * Columns;
+       i += threadgroup_stride) {
+    shared_horizontal_basis[i] = horizontal_basis[i];
+  }
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const ulong base =
+    static_cast<ulong>(group_position.x) * Rows * Columns;
+
+  simdgroup_float8x8 intermediate[kColumnTiles];
+
+  for (uint column_tile = 0;
+       column_tile < kColumnTiles;
+       ++column_tile) {
+    simdgroup_float8x8 accumulator =
+      make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    for (uint inner_tile = 0;
+         inner_tile < kRowTiles;
+         ++inner_tile) {
+      simdgroup_float8x8 ct;
+      simdgroup_float8x8 coefficients;
+
+      simdgroup_load(
+        ct,
+        shared_vertical_basis,
+        Rows,
+        ulong2(simdgroup_index * kTileSize,
+               inner_tile * kTileSize),
+        true);
+
+      if (Rows < Columns) {
+        simdgroup_load(
+          coefficients,
+          A + base,
+          Columns,
+          ulong2(column_tile * kTileSize,
+                 inner_tile * kTileSize));
+      } else {
+        simdgroup_load(
+          coefficients,
+          A + base,
+          Rows,
+          ulong2(inner_tile * kTileSize,
+                 column_tile * kTileSize),
+          true);
+      }
+
+      simdgroup_multiply_accumulate(
+        accumulator,
+        ct,
+        coefficients,
+        accumulator);
+    }
+
+    intermediate[column_tile] = accumulator;
+  }
+
+  for (uint column_tile = 0;
+       column_tile < kColumnTiles;
+       ++column_tile) {
+    simdgroup_float8x8 accumulator =
+      make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    for (uint inner_tile = 0;
+         inner_tile < kColumnTiles;
+         ++inner_tile) {
+      simdgroup_float8x8 c;
+
+      simdgroup_load(
+        c,
+        shared_horizontal_basis,
+        Columns,
+        ulong2(column_tile * kTileSize,
+               inner_tile * kTileSize));
+
+      simdgroup_multiply_accumulate(
+        accumulator,
+        intermediate[inner_tile],
+        c,
+        accumulator);
+    }
+
+    accumulator.thread_elements() *= scale;
+
+    simdgroup_store(
+      accumulator,
+      B + base,
+      Columns,
+      ulong2(column_tile * kTileSize,
+             simdgroup_index * kTileSize));
+  }
+}
+
+
 // Computes a forward DCT over 16 rows and 8 columns. The natural [v][u]
 // result is transposed to libjxl's [u][v] coefficient layout.
 kernel void gjxl_dct16x8_forward_scalar_2d_matmul(
@@ -654,6 +902,58 @@ kernel void gjxl_dct16x8_inverse_scalar_2d_matmul(
 }
 
 
+kernel void gjxl_dct16x8_forward_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_vertical_basis[16 * 16];
+  threadgroup float shared_horizontal_basis[8 * 8];
+
+  ForwardRectangularDctSimdgroup<16, 8>(
+    A,
+    B,
+    kOrthonormalDct16,
+    kOrthonormalDct8,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    kForwardDct16x8Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
+}
+
+
+kernel void gjxl_dct16x8_inverse_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_vertical_basis[16 * 16];
+  threadgroup float shared_horizontal_basis[8 * 8];
+
+  InverseRectangularDctSimdgroup<16, 8>(
+    A,
+    B,
+    kOrthonormalDct16,
+    kOrthonormalDct8,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    kInverseDct16x8Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
+}
+
+
 // Computes a forward DCT over 8 rows and 16 columns. For this orientation,
 // libjxl stores coefficients in the natural row-major [v][u] layout.
 kernel void gjxl_dct8x16_forward_scalar_2d_matmul(
@@ -694,6 +994,58 @@ kernel void gjxl_dct8x16_inverse_scalar_2d_matmul(
     T,
     kInverseDct16x8Scale,
     tid,
+    group_position);
+}
+
+
+kernel void gjxl_dct8x16_forward_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_vertical_basis[8 * 8];
+  threadgroup float shared_horizontal_basis[16 * 16];
+
+  ForwardRectangularDctSimdgroup<8, 16>(
+    A,
+    B,
+    kOrthonormalDct8,
+    kOrthonormalDct16,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    kForwardDct16x8Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
+}
+
+
+kernel void gjxl_dct8x16_inverse_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_vertical_basis[8 * 8];
+  threadgroup float shared_horizontal_basis[16 * 16];
+
+  InverseRectangularDctSimdgroup<8, 16>(
+    A,
+    B,
+    kOrthonormalDct8,
+    kOrthonormalDct16,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    kInverseDct16x8Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
     group_position);
 }
 

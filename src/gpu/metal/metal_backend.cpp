@@ -47,7 +47,7 @@ struct DctSelection {
   MetalDctImplementation inverse;
 };
 
-constexpr std::array<DctImplementationSpec, 8>
+constexpr std::array<DctImplementationSpec, 10>
 kDctImplementationSpecs{{
   {
     .strategy = AcStrategyType::kDct8,
@@ -121,12 +121,30 @@ kDctImplementationSpecs{{
     .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
   },
   {
+    .strategy = AcStrategyType::kDct16x8,
+    .implementation = MetalDctImplementation::kSimdgroupMatmul,
+    .display_name = "simdgroup matmul",
+    .forward_function_name = "gjxl_dct16x8_forward_simdgroup_2d_matmul",
+    .inverse_function_name = "gjxl_dct16x8_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 2,
+  },
+  {
     .strategy = AcStrategyType::kDct8x16,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
     .forward_function_name = "gjxl_dct8x16_forward_scalar_2d_matmul",
     .inverse_function_name = "gjxl_dct8x16_inverse_scalar_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
+  },
+  {
+    .strategy = AcStrategyType::kDct8x16,
+    .implementation = MetalDctImplementation::kSimdgroupMatmul,
+    .display_name = "simdgroup matmul",
+    .forward_function_name = "gjxl_dct8x16_forward_simdgroup_2d_matmul",
+    .inverse_function_name = "gjxl_dct8x16_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
   },
 }};
 
@@ -862,13 +880,13 @@ Status CreateMetalBackend(
     },
     {
       .strategy = AcStrategyType::kDct16x8,
-      .forward = MetalDctImplementation::kScalarMatmul,
-      .inverse = MetalDctImplementation::kScalarMatmul,
+      .forward = options.forward_dct16x8,
+      .inverse = options.inverse_dct16x8,
     },
     {
       .strategy = AcStrategyType::kDct8x16,
-      .forward = MetalDctImplementation::kScalarMatmul,
-      .inverse = MetalDctImplementation::kScalarMatmul,
+      .forward = options.forward_dct8x16,
+      .inverse = options.inverse_dct8x16,
     },
   }};
 

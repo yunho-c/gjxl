@@ -288,6 +288,10 @@ int main(int argc, char** argv) {
       .inverse_dct16x16 = implementation.implementation,
       .forward_dct32x32 = implementation.implementation,
       .inverse_dct32x32 = implementation.implementation,
+      .forward_dct16x8 = implementation.implementation,
+      .inverse_dct16x8 = implementation.implementation,
+      .forward_dct8x16 = implementation.implementation,
+      .inverse_dct8x16 = implementation.implementation,
     };
 
     std::unique_ptr<gjxl::GpuBackend> gpu;
@@ -328,23 +332,19 @@ int main(int argc, char** argv) {
       dct32_transform_count,
       iterations);
 
-    if (implementation.implementation ==
-        gjxl::MetalDctImplementation::kScalarMatmul) {
+    BenchmarkDctPair(
+      *gpu,
+      implementation.name,
+      gjxl::AcStrategyType::kDct16x8,
+      dct16x8_transform_count,
+      iterations);
 
-      BenchmarkDctPair(
-        *gpu,
-        "scalar matmul",
-        gjxl::AcStrategyType::kDct16x8,
-        dct16x8_transform_count,
-        iterations);
-
-      BenchmarkDctPair(
-        *gpu,
-        "scalar matmul",
-        gjxl::AcStrategyType::kDct8x16,
-        dct8x16_transform_count,
-        iterations);
-    }
+    BenchmarkDctPair(
+      *gpu,
+      implementation.name,
+      gjxl::AcStrategyType::kDct8x16,
+      dct8x16_transform_count,
+      iterations);
   }
 
   return EXIT_SUCCESS;
