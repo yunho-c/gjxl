@@ -47,6 +47,20 @@ target_include_directories(
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+# Codec algorithms
+add_library(
+  gjxl_codec
+  STATIC
+
+  src/codec/quantization.cpp
+)
+
+target_link_libraries(
+  gjxl_codec
+  PUBLIC
+    gjxl_core
+)
+
 # metal-cpp
 add_library(
   metal_cpp
@@ -238,6 +252,36 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME dct_reference
     COMMAND gjxl_dct_reference_test
+  )
+
+  add_executable(
+    gjxl_quantization_test
+    tests/quantization_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_quantization_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME quantization
+    COMMAND gjxl_quantization_test
+  )
+
+  find_package(
+    Python3
+    COMPONENTS Interpreter
+    REQUIRED
+  )
+
+  add_test(
+    NAME quantization_tables_generated
+    COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_quantization_tables.py"
+      --check
   )
 
   add_executable(

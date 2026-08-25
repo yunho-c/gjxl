@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 #include "core/geometry.h"
 
@@ -31,6 +32,8 @@ struct PlaneView {
 
 using PlaneF32View = PlaneView<float>;
 using ConstPlaneF32View = PlaneView<const float>;
+using PlaneI32View = PlaneView<int32_t>;
+using ConstPlaneI32View = PlaneView<const int32_t>;
 
 template <typename T>
 struct Image3View {
