@@ -9,31 +9,9 @@
 
 #include "core/status.h"
 #include "gpu/buffer.h"
+#include "gpu/ops/transform.h"
 
 namespace gjxl {
-
-template <size_t Dimension>
-struct SquareDctBatch {
-  static_assert(Dimension > 0);
-
-  static constexpr size_t kDimension = Dimension;
-  static constexpr size_t kElementsPerBlock = Dimension * Dimension;
-
-  const DeviceBuffer* input = nullptr;
-  DeviceBuffer* output = nullptr;
-
-  // Blocks consist of Dimension * Dimension floats and use libjxl's scaled
-  // square-DCT convention. Pixel blocks are row-major:
-  // pixels[y * Dimension + x].
-  // Coefficients use libjxl's square-transform layout:
-  // coefficients[u * Dimension + v], with horizontal frequency first.
-  // A constant pixel block therefore has that same value at coefficients[0].
-  size_t block_count = 0;
-};
-
-using Dct8Batch = SquareDctBatch<8>;
-using Dct16Batch = SquareDctBatch<16>;
-using Dct32Batch = SquareDctBatch<32>;
 
 class GpuBackend {
 public:
@@ -64,23 +42,11 @@ public:
     size_t src_offset_bytes = 0) = 0;
 
   // These enqueue work. They do not need to block the CPU.
-  virtual Status ForwardDct8(
-    const Dct8Batch& batch) = 0;
+  virtual Status ForwardTransform(
+    const TransformBatch& batch) = 0;
 
-  virtual Status InverseDct8(
-    const Dct8Batch& batch) = 0;
-
-  virtual Status ForwardDct16(
-    const Dct16Batch& batch) = 0;
-
-  virtual Status InverseDct16(
-    const Dct16Batch& batch) = 0;
-
-  virtual Status ForwardDct32(
-    const Dct32Batch& batch) = 0;
-
-  virtual Status InverseDct32(
-    const Dct32Batch& batch) = 0;
+  virtual Status InverseTransform(
+    const TransformBatch& batch) = 0;
 
   // Explicit synchronization is useful for tests and benchmarks.
   virtual Status Synchronize() = 0;
