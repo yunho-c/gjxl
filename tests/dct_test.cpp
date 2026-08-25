@@ -19,14 +19,6 @@
 
 namespace {
 
-constexpr size_t kDctRows = 8;
-constexpr size_t kDctCols = 8;
-constexpr size_t kDctSize = kDctRows * kDctCols;
-constexpr gjxl::test::DctShape kDctShape{
-  .rows = kDctRows,
-  .cols = kDctCols,
-};
-
 struct Dct8ImplementationCase {
   gjxl::MetalDct8Implementation implementation;
   std::string_view name;
@@ -67,6 +59,7 @@ bool CheckReferenceResults(
   std::string_view operation,
   const std::vector<float>& actual,
   const std::vector<double>& expected,
+  size_t elements_per_block,
   double absolute_tolerance,
   double relative_tolerance) {
 
@@ -112,8 +105,8 @@ bool CheckReferenceResults(
     return true;
   }
 
-  const size_t block = worst_index / kDctSize;
-  const size_t element = worst_index % kDctSize;
+  const size_t block = worst_index / elements_per_block;
+  const size_t element = worst_index % elements_per_block;
   const double expected_value = expected[worst_index];
   const double actual_value = static_cast<double>(actual[worst_index]);
   const double allowed_error =
@@ -139,36 +132,40 @@ bool CheckReferenceResults(
   return false;
 }
 
+template <typename Batch>
 std::vector<float> MakeReferenceInput() {
-  constexpr size_t kImpulseBlocks = kDctSize;
+  constexpr size_t kElementsPerBlock = Batch::kElementsPerBlock;
+  constexpr size_t kImpulseBlocks = kElementsPerBlock;
   constexpr size_t kRandomBlocks = 16;
   constexpr size_t kBlockCount = kImpulseBlocks + kRandomBlocks;
 
-  std::vector<float> input(kBlockCount * kDctSize, 0.0f);
+  std::vector<float> input(kBlockCount * kElementsPerBlock, 0.0f);
 
   for (size_t block = 0; block < kImpulseBlocks; ++block) {
-    input[block * kDctSize + block] = 1.0f;
+    input[block * kElementsPerBlock + block] = 1.0f;
   }
 
   std::mt19937 rng(12345);
   std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
 
   for (size_t block = kImpulseBlocks; block < kBlockCount; ++block) {
-    for (size_t i = 0; i < kDctSize; ++i) {
-      input[block * kDctSize + i] = distribution(rng);
+    for (size_t i = 0; i < kElementsPerBlock; ++i) {
+      input[block * kElementsPerBlock + i] = distribution(rng);
     }
   }
 
   return input;
 }
 
-using Dct8Operation = gjxl::Status (gjxl::GpuBackend::*)(const gjxl::Dct8Batch&);
+template <typename Batch>
+using DctOperation = gjxl::Status (gjxl::GpuBackend::*)(const Batch&);
 
-bool CheckDct8Operation(
+template <typename Batch>
+bool CheckDctOperation(
   gjxl::GpuBackend& gpu,
   std::string_view operation,
-  Dct8Operation transform,
-  const gjxl::Dct8Batch& batch,
+  DctOperation<Batch> transform,
+  const Batch& batch,
   std::vector<float>* actual,
   const std::vector<double>& expected,
   double absolute_tolerance,
@@ -219,31 +216,41 @@ bool CheckDct8Operation(
     operation,
     *actual,
     expected,
+    Batch::kElementsPerBlock,
     absolute_tolerance,
     relative_tolerance);
 }
 
-bool TestDct8Kernels(
+template <typename Batch>
+bool TestDctKernels(
   gjxl::GpuBackend& gpu,
-  std::string_view implementation_name) {
+  std::string_view implementation_name,
+  std::string_view transform_name,
+  DctOperation<Batch> forward,
+  DctOperation<Batch> inverse,
+  double forward_absolute_tolerance,
+  double inverse_absolute_tolerance) {
 
-  const std::vector<float> input = MakeReferenceInput();
+  const std::vector<float> input =
+    MakeReferenceInput<Batch>();
   std::vector<float> output(input.size());
+  std::vector<double> expected(input.size());
 
   std::unique_ptr<gjxl::DeviceBuffer> device_input;
   std::unique_ptr<gjxl::DeviceBuffer> device_output;
-
   const size_t bytes = input.size() * sizeof(float);
 
   if (!CheckStatus(
       gpu.Allocate(bytes, &device_input),
-      "Allocate reference input")) {
+      std::string("Allocate ") + std::string(transform_name) +
+        " reference input")) {
     return false;
   }
 
   if (!CheckStatus(
       gpu.Allocate(bytes, &device_output),
-      "Allocate reference output")) {
+      std::string("Allocate ") + std::string(transform_name) +
+        " reference output")) {
     return false;
   }
 
@@ -252,70 +259,80 @@ bool TestDct8Kernels(
         *device_input,
         input.data(),
         bytes),
-      "Upload reference input")) {
+      std::string("Upload ") + std::string(transform_name) +
+        " reference input")) {
     return false;
   }
 
-  const gjxl::Dct8Batch batch{
+  const Batch batch{
     .input = device_input.get(),
     .output = device_output.get(),
-    .block_count = input.size() / kDctSize,
+    .block_count = input.size() / Batch::kElementsPerBlock,
   };
-
-  std::vector<double> expected(input.size());
-  constexpr double kRelativeTolerance = 2e-5;
-
+  const gjxl::test::DctShape shape{
+    .rows = Batch::kDimension,
+    .cols = Batch::kDimension,
+  };
+  const size_t block_count = input.size() / Batch::kElementsPerBlock;
   const std::string forward_operation =
-    std::string(implementation_name) + " ForwardDct8";
-
+    std::string(implementation_name) + " Forward" +
+      std::string(transform_name);
   const std::string inverse_operation =
-    std::string(implementation_name) + " InverseDct8";
+    std::string(implementation_name) + " Inverse" +
+      std::string(transform_name);
 
   gjxl::test::ReferenceForwardDct(
-    kDctShape,
+    shape,
     input.data(),
     expected.data(),
-    input.size() / kDctSize);
+    block_count);
 
-  if (!CheckDct8Operation(
+  if (!CheckDctOperation(
       gpu,
       forward_operation,
-      &gjxl::GpuBackend::ForwardDct8,
+      forward,
       batch,
       &output,
       expected,
-      1e-5,
-      kRelativeTolerance)) {
+      forward_absolute_tolerance,
+      5e-5)) {
     return false;
   }
 
   gjxl::test::ReferenceInverseDct(
-    kDctShape,
+    shape,
     input.data(),
     expected.data(),
-    input.size() / kDctSize);
+    block_count);
 
-  return CheckDct8Operation(
+  return CheckDctOperation(
     gpu,
     inverse_operation,
-    &gjxl::GpuBackend::InverseDct8,
+    inverse,
     batch,
     &output,
     expected,
-    5e-5,
-    kRelativeTolerance);
+    inverse_absolute_tolerance,
+    5e-5);
 }
 
+template <typename Batch>
 bool TestRoundTrip(
   gjxl::GpuBackend& gpu,
-  std::string_view implementation_name) {
+  std::string_view implementation_name,
+  std::string_view transform_name,
+  DctOperation<Batch> forward,
+  DctOperation<Batch> inverse) {
 
   constexpr size_t kBlocks = 257;
 
-  std::mt19937 rng(67890);
+  std::mt19937 rng(
+    67890u ^
+    static_cast<unsigned int>(Batch::kDimension << 8));
   std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
 
-  std::vector<float> input(kBlocks * kDctSize);
+  std::vector<float> input(
+    kBlocks * Batch::kElementsPerBlock);
 
   for (float& value : input) {
     value = distribution(rng);
@@ -356,23 +373,28 @@ bool TestRoundTrip(
     return false;
   }
 
+  const Batch forward_batch{
+    .input = pixels.get(),
+    .output = coefficients.get(),
+    .block_count = kBlocks,
+  };
+  const Batch inverse_batch{
+    .input = coefficients.get(),
+    .output = output.get(),
+    .block_count = kBlocks,
+  };
+
   if (!CheckStatus(
-      gpu.ForwardDct8({
-        .input = pixels.get(),
-        .output = coefficients.get(),
-        .block_count = kBlocks,
-      }),
-      std::string(implementation_name) + " ForwardDct8")) {
+      (gpu.*forward)(forward_batch),
+      std::string(implementation_name) + " Forward" +
+        std::string(transform_name))) {
     return false;
   }
 
   if (!CheckStatus(
-      gpu.InverseDct8({
-        .input = coefficients.get(),
-        .output = output.get(),
-        .block_count = kBlocks,
-      }),
-      std::string(implementation_name) + " InverseDct8")) {
+      (gpu.*inverse)(inverse_batch),
+      std::string(implementation_name) + " Inverse" +
+        std::string(transform_name))) {
     return false;
   }
 
@@ -402,6 +424,8 @@ bool TestRoundTrip(
 
   std::cout
     << implementation_name
+    << ' '
+    << transform_name
     << " round-trip max error: "
     << max_error
     << '\n';
@@ -411,6 +435,8 @@ bool TestRoundTrip(
   if (max_error > kTolerance) {
     std::cerr
       << implementation_name
+      << ' '
+      << transform_name
       << " round-trip error exceeds tolerance\n";
 
     return false;
@@ -452,11 +478,67 @@ int main() {
       << implementation.name
       << "]\n";
 
-    if (!TestDct8Kernels(*gpu, implementation.name)) {
+    if (!TestDctKernels<gjxl::Dct8Batch>(
+        *gpu,
+        implementation.name,
+        "Dct8",
+        &gjxl::GpuBackend::ForwardDct8,
+        &gjxl::GpuBackend::InverseDct8,
+        1e-5,
+        5e-5)) {
       return EXIT_FAILURE;
     }
 
-    if (!TestRoundTrip(*gpu, implementation.name)) {
+    if (implementation.implementation ==
+        gjxl::MetalDct8Implementation::kScalarMatmul) {
+
+      if (!TestDctKernels<gjxl::Dct16Batch>(
+          *gpu,
+          "scalar matmul",
+          "Dct16",
+          &gjxl::GpuBackend::ForwardDct16,
+          &gjxl::GpuBackend::InverseDct16,
+          2e-5,
+          2e-4)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestRoundTrip<gjxl::Dct16Batch>(
+          *gpu,
+          "scalar matmul",
+          "Dct16",
+          &gjxl::GpuBackend::ForwardDct16,
+          &gjxl::GpuBackend::InverseDct16)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestDctKernels<gjxl::Dct32Batch>(
+          *gpu,
+          "scalar matmul",
+          "Dct32",
+          &gjxl::GpuBackend::ForwardDct32,
+          &gjxl::GpuBackend::InverseDct32,
+          2e-5,
+          2e-4)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestRoundTrip<gjxl::Dct32Batch>(
+          *gpu,
+          "scalar matmul",
+          "Dct32",
+          &gjxl::GpuBackend::ForwardDct32,
+          &gjxl::GpuBackend::InverseDct32)) {
+        return EXIT_FAILURE;
+      }
+    }
+
+    if (!TestRoundTrip<gjxl::Dct8Batch>(
+        *gpu,
+        implementation.name,
+        "Dct8",
+        &gjxl::GpuBackend::ForwardDct8,
+        &gjxl::GpuBackend::InverseDct8)) {
       return EXIT_FAILURE;
     }
   }

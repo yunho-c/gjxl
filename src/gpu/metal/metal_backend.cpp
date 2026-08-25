@@ -20,11 +20,7 @@
 namespace gjxl {
 namespace {
 
-constexpr size_t kDct8Elements = 64;
-
-constexpr size_t kDct8Bytes = kDct8Elements * sizeof(float);
-
-enum class Dct8DispatchMode {
+enum class DctDispatchMode {
   kOneThreadPerElement,
   kSingleSimdgroup,
 };
@@ -34,7 +30,7 @@ struct Dct8ImplementationSpec {
   std::string_view display_name;
   std::string_view forward_function_name;
   std::string_view inverse_function_name;
-  Dct8DispatchMode dispatch_mode;
+  DctDispatchMode dispatch_mode;
 };
 
 constexpr std::array<Dct8ImplementationSpec, 2>
@@ -46,7 +42,7 @@ kDct8ImplementationSpecs{{
       "gjxl_dct8_forward_scalar_2d_matmul",
     .inverse_function_name =
       "gjxl_dct8_inverse_scalar_2d_matmul",
-    .dispatch_mode = Dct8DispatchMode::kOneThreadPerElement,
+    .dispatch_mode = DctDispatchMode::kOneThreadPerElement,
   },
   {
     .implementation = MetalDct8Implementation::kSimdgroupMatmul,
@@ -55,7 +51,7 @@ kDct8ImplementationSpecs{{
       "gjxl_dct8_forward_simdgroup_2d_matmul",
     .inverse_function_name =
       "gjxl_dct8_inverse_simdgroup_2d_matmul",
-    .dispatch_mode = Dct8DispatchMode::kSingleSimdgroup,
+    .dispatch_mode = DctDispatchMode::kSingleSimdgroup,
   },
 }};
 
@@ -73,9 +69,10 @@ const Dct8ImplementationSpec* FindDct8ImplementationSpec(
   return nullptr;
 }
 
-struct Dct8Pipeline {
+struct DctPipeline {
   NS::SharedPtr<MTL::ComputePipelineState> state;
   NS::UInteger threads_per_threadgroup = 0;
+  size_t elements_per_block = 0;
   std::string label;
 };
 
@@ -174,18 +171,22 @@ Status CreatePipeline(
   return Status::Ok();
 }
 
-Status CreateDct8Pipeline(
+Status CreateDctPipeline(
   MTL::Device* device,
   MTL::Library* library,
-  const Dct8ImplementationSpec& spec,
+  size_t dimension,
+  std::string_view implementation_name,
+  DctDispatchMode dispatch_mode,
   std::string_view function_name,
   std::string_view operation,
-  Dct8Pipeline* out) {
+  DctPipeline* out) {
 
-  if (out == nullptr) {
+  if (dimension == 0 || out == nullptr) {
     return Status::InvalidArgument(
-      "CreateDct8Pipeline output pointer is null");
+      "CreateDctPipeline received invalid argument");
   }
+
+  const size_t elements_per_block = dimension * dimension;
 
   NS::SharedPtr<MTL::ComputePipelineState> state;
 
@@ -201,8 +202,10 @@ Status CreateDct8Pipeline(
       status.code(),
       std::string("Failed to create ") +
         std::string(operation) +
-        " DCT8 pipeline for " +
-        std::string(spec.display_name) +
+        " DCT" +
+        std::to_string(dimension) +
+        " pipeline for " +
+        std::string(implementation_name) +
         ": " +
         std::string(status.message()),
     };
@@ -210,12 +213,13 @@ Status CreateDct8Pipeline(
 
   NS::UInteger threads_per_threadgroup = 0;
 
-  switch (spec.dispatch_mode) {
-    case Dct8DispatchMode::kOneThreadPerElement:
-      threads_per_threadgroup = kDct8Elements;
+  switch (dispatch_mode) {
+    case DctDispatchMode::kOneThreadPerElement:
+      threads_per_threadgroup =
+        static_cast<NS::UInteger>(elements_per_block);
       break;
 
-    case Dct8DispatchMode::kSingleSimdgroup:
+    case DctDispatchMode::kSingleSimdgroup:
       threads_per_threadgroup = state->threadExecutionWidth();
       break;
   }
@@ -223,7 +227,7 @@ Status CreateDct8Pipeline(
   if (threads_per_threadgroup == 0) {
     return Status::Unavailable(
       std::string("Metal reported an invalid threadgroup size for ") +
-      std::string(spec.display_name));
+      std::string(implementation_name));
   }
 
   if (state->maxTotalThreadsPerThreadgroup() <
@@ -231,16 +235,19 @@ Status CreateDct8Pipeline(
 
     return Status::Unavailable(
       std::string("Metal GPU cannot launch the required threadgroup for ") +
-      std::string(spec.display_name));
+      std::string(implementation_name));
   }
 
   out->state = std::move(state);
   out->threads_per_threadgroup = threads_per_threadgroup;
+  out->elements_per_block = elements_per_block;
   out->label =
     std::string("gjxl ") +
     std::string(operation) +
-    " DCT8 (" +
-    std::string(spec.display_name) +
+    " DCT" +
+    std::to_string(dimension) +
+    " (" +
+    std::string(implementation_name) +
     ")";
 
   return Status::Ok();
@@ -253,13 +260,21 @@ public:
     NS::SharedPtr<MTL::Device> device,
     NS::SharedPtr<MTL::CommandQueue> command_queue,
     NS::SharedPtr<MTL::Library> library,
-    Dct8Pipeline forward_dct8,
-    Dct8Pipeline inverse_dct8)
+    DctPipeline forward_dct8,
+    DctPipeline inverse_dct8,
+    DctPipeline forward_dct16,
+    DctPipeline inverse_dct16,
+    DctPipeline forward_dct32,
+    DctPipeline inverse_dct32)
     : device_(std::move(device)),
       command_queue_(std::move(command_queue)),
       library_(std::move(library)),
       forward_dct8_(std::move(forward_dct8)),
-      inverse_dct8_(std::move(inverse_dct8)) {
+      inverse_dct8_(std::move(inverse_dct8)),
+      forward_dct16_(std::move(forward_dct16)),
+      inverse_dct16_(std::move(inverse_dct16)),
+      forward_dct32_(std::move(forward_dct32)),
+      inverse_dct32_(std::move(inverse_dct32)) {
 
     NS::String* device_name = device_->name();
 
@@ -426,7 +441,7 @@ public:
   Status ForwardDct8(
     const Dct8Batch& batch) override {
 
-    return SubmitDct8(
+    return SubmitDct(
       forward_dct8_,
       batch);
   }
@@ -434,8 +449,40 @@ public:
   Status InverseDct8(
     const Dct8Batch& batch) override {
 
-    return SubmitDct8(
+    return SubmitDct(
       inverse_dct8_,
+      batch);
+  }
+
+  Status ForwardDct16(
+    const Dct16Batch& batch) override {
+
+    return SubmitDct(
+      forward_dct16_,
+      batch);
+  }
+
+  Status InverseDct16(
+    const Dct16Batch& batch) override {
+
+    return SubmitDct(
+      inverse_dct16_,
+      batch);
+  }
+
+  Status ForwardDct32(
+    const Dct32Batch& batch) override {
+
+    return SubmitDct(
+      forward_dct32_,
+      batch);
+  }
+
+  Status InverseDct32(
+    const Dct32Batch& batch) override {
+
+    return SubmitDct(
+      inverse_dct32_,
       batch);
   }
 
@@ -486,8 +533,9 @@ private:
     return dynamic_cast<const MetalBuffer*>(&buffer);
   }
 
+  template <size_t Dimension>
   Status ValidateDctBatch(
-    const Dct8Batch& batch,
+    const SquareDctBatch<Dimension>& batch,
     const MetalBuffer** input,
     MetalBuffer** output) const {
 
@@ -513,14 +561,17 @@ private:
         "In-place DCT is not supported yet");
     }
 
-    if (batch.block_count >
-        std::numeric_limits<size_t>::max() / kDct8Bytes) {
+    constexpr size_t kBytesPerBlock =
+      SquareDctBatch<Dimension>::kElementsPerBlock * sizeof(float);
 
-          return Status::InvalidArgument(
+    if (batch.block_count >
+        std::numeric_limits<size_t>::max() / kBytesPerBlock) {
+
+      return Status::InvalidArgument(
         "DCT batch is too large");
     }
 
-    const size_t required_bytes = batch.block_count * kDct8Bytes;
+    const size_t required_bytes = batch.block_count * kBytesPerBlock;
 
     if (batch.input->size_bytes() < required_bytes ||
         batch.output->size_bytes() < required_bytes) {
@@ -548,9 +599,17 @@ private:
   }
 
 
-  Status SubmitDct8(
-    const Dct8Pipeline& pipeline,
-    const Dct8Batch& batch) {
+  template <size_t Dimension>
+  Status SubmitDct(
+    const DctPipeline& pipeline,
+    const SquareDctBatch<Dimension>& batch) {
+
+    if (pipeline.elements_per_block !=
+        SquareDctBatch<Dimension>::kElementsPerBlock) {
+
+      return Status::Internal(
+        "DCT pipeline dimension does not match batch type");
+    }
 
     const MetalBuffer* input = nullptr;
     MetalBuffer* output = nullptr;
@@ -617,7 +676,7 @@ private:
       0,
       1);
 
-    // Exactly one threadgroup per 8x8 DCT. The selected implementation
+    // Exactly one threadgroup per square DCT. The selected implementation
     // determines how many threads cooperate within that threadgroup.
     const MTL::Size threadgroups(
       static_cast<NS::UInteger>(
@@ -651,9 +710,17 @@ private:
 
   NS::SharedPtr<MTL::Library> library_;
 
-  Dct8Pipeline forward_dct8_;
+  DctPipeline forward_dct8_;
 
-  Dct8Pipeline inverse_dct8_;
+  DctPipeline inverse_dct8_;
+
+  DctPipeline forward_dct16_;
+
+  DctPipeline inverse_dct16_;
+
+  DctPipeline forward_dct32_;
+
+  DctPipeline inverse_dct32_;
 
   NS::SharedPtr<MTL::CommandBuffer> last_command_buffer_;
 
@@ -749,13 +816,15 @@ Status CreateMetalBackend(
       "Loading gjxl.metallib");
   }
 
-  Dct8Pipeline forward_dct8;
+  DctPipeline forward_dct8;
 
   Status status =
-    CreateDct8Pipeline(
+    CreateDctPipeline(
       device.get(),
       library.get(),
-      *forward_dct8_spec,
+      8,
+      forward_dct8_spec->display_name,
+      forward_dct8_spec->dispatch_mode,
       forward_dct8_spec->forward_function_name,
       "forward",
       &forward_dct8);
@@ -764,16 +833,86 @@ Status CreateMetalBackend(
     return status;
   }
 
-  Dct8Pipeline inverse_dct8;
+  DctPipeline inverse_dct8;
 
   status =
-    CreateDct8Pipeline(
+    CreateDctPipeline(
       device.get(),
       library.get(),
-      *inverse_dct8_spec,
+      8,
+      inverse_dct8_spec->display_name,
+      inverse_dct8_spec->dispatch_mode,
       inverse_dct8_spec->inverse_function_name,
       "inverse",
       &inverse_dct8);
+
+  if (!status.ok()) {
+    return status;
+  }
+
+  DctPipeline forward_dct16;
+
+  status =
+    CreateDctPipeline(
+      device.get(),
+      library.get(),
+      16,
+      "scalar matmul",
+      DctDispatchMode::kOneThreadPerElement,
+      "gjxl_dct16_forward_scalar_2d_matmul",
+      "forward",
+      &forward_dct16);
+
+  if (!status.ok()) {
+    return status;
+  }
+
+  DctPipeline inverse_dct16;
+
+  status =
+    CreateDctPipeline(
+      device.get(),
+      library.get(),
+      16,
+      "scalar matmul",
+      DctDispatchMode::kOneThreadPerElement,
+      "gjxl_dct16_inverse_scalar_2d_matmul",
+      "inverse",
+      &inverse_dct16);
+
+  if (!status.ok()) {
+    return status;
+  }
+
+  DctPipeline forward_dct32;
+
+  status =
+    CreateDctPipeline(
+      device.get(),
+      library.get(),
+      32,
+      "scalar matmul",
+      DctDispatchMode::kOneThreadPerElement,
+      "gjxl_dct32_forward_scalar_2d_matmul",
+      "forward",
+      &forward_dct32);
+
+  if (!status.ok()) {
+    return status;
+  }
+
+  DctPipeline inverse_dct32;
+
+  status =
+    CreateDctPipeline(
+      device.get(),
+      library.get(),
+      32,
+      "scalar matmul",
+      DctDispatchMode::kOneThreadPerElement,
+      "gjxl_dct32_inverse_scalar_2d_matmul",
+      "inverse",
+      &inverse_dct32);
 
   if (!status.ok()) {
     return status;
@@ -785,7 +924,11 @@ Status CreateMetalBackend(
       std::move(command_queue),
       std::move(library),
       std::move(forward_dct8),
-      std::move(inverse_dct8)));
+      std::move(inverse_dct8),
+      std::move(forward_dct16),
+      std::move(inverse_dct16),
+      std::move(forward_dct32),
+      std::move(inverse_dct32)));
 
   return Status::Ok();
 }

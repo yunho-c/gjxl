@@ -104,6 +104,47 @@ constexpr std::array<double, kDctSize> kLibjxlDct8ImpulseGolden = {
   -0.021604428630704529,
 };
 
+struct DctGoldenSample {
+  size_t horizontal_frequency;
+  size_t vertical_frequency;
+  double coefficient;
+};
+
+// Selected coefficients generated from the same pinned libjxl revision and
+// impulse as kLibjxlDct8ImpulseGolden. Sampling asymmetric frequency pairs
+// keeps the larger golden data compact while still pinning scale and layout.
+constexpr std::array kLibjxlDct16ImpulseGolden = {
+  DctGoldenSample{0, 0, 0.00390625},
+  DctGoldenSample{1, 0, 0.0026041236659286983},
+  DctGoldenSample{0, 1, 0.0048719727069791849},
+  DctGoldenSample{1, 2, 0.002046046835336717},
+  DctGoldenSample{2, 1, -0.0038278843932731069},
+  DctGoldenSample{3, 5, 0.0060100640370667697},
+  DctGoldenSample{5, 3, 0.00048579230904686701},
+  DctGoldenSample{7, 11, 0.0014387082011393941},
+  DctGoldenSample{11, 7, -0.0057791006466050366},
+  DctGoldenSample{15, 14, -0.0057288338417898314},
+  DctGoldenSample{14, 15, -0.0030621254844484173},
+  DctGoldenSample{8, 8, 0.0039062499999999965},
+};
+
+constexpr std::array kLibjxlDct32ImpulseGolden = {
+  DctGoldenSample{0, 0, 0.0009765625},
+  DctGoldenSample{1, 0, 0.0011845814776345782},
+  DctGoldenSample{0, 1, 0.0013396790568295839},
+  DctGoldenSample{1, 2, 0.0014774396488265572},
+  DctGoldenSample{2, 1, 0.00089310462377957295},
+  DctGoldenSample{3, 5, -3.2285940645431752e-05},
+  DctGoldenSample{5, 3, -0.0013082263360325187},
+  DctGoldenSample{7, 11, 0.0014181465012004183},
+  DctGoldenSample{11, 7, -0.00026983048321276292},
+  DctGoldenSample{13, 23, 0.0011623779772346932},
+  DctGoldenSample{23, 13, -0.0019296582100345972},
+  DctGoldenSample{31, 30, -0.00047333272657417282},
+  DctGoldenSample{30, 31, -0.00041853395990601141},
+  DctGoldenSample{16, 16, 0.00097656249999999913},
+};
+
 /// Checks DC/AC scaling and a float-quantized round trip for one shape.
 bool TestReferenceShape(
   gjxl::test::DctShape shape,
@@ -290,7 +331,7 @@ bool TestReferenceTransposePair(
   return true;
 }
 
-bool TestLibjxlGoldenVector() {
+bool TestLibjxlDct8GoldenVector() {
   std::array<float, kDctSize> pixels{};
   pixels[2 * kDct8Shape.cols + 5] = 1.0f;
 
@@ -324,9 +365,71 @@ bool TestLibjxlGoldenVector() {
   return true;
 }
 
+template <size_t Dimension, size_t SampleCount>
+bool TestLibjxlGoldenSamples(
+  std::string_view transform_name,
+  const std::array<DctGoldenSample, SampleCount>& golden) {
+
+  constexpr gjxl::test::DctShape kShape{
+    .rows = Dimension,
+    .cols = Dimension,
+  };
+  constexpr size_t kBlockSize = Dimension * Dimension;
+  std::array<float, kBlockSize> pixels{};
+  pixels[2 * Dimension + 5] = 1.0f;
+  std::array<double, kBlockSize> coefficients{};
+
+  gjxl::test::ReferenceForwardDct(
+    kShape,
+    pixels.data(),
+    coefficients.data(),
+    1);
+
+  double max_error = 0.0;
+
+  for (const DctGoldenSample& sample : golden) {
+    const size_t index =
+      gjxl::test::LibjxlCoefficientIndex(
+        kShape,
+        sample.vertical_frequency,
+        sample.horizontal_frequency);
+
+    max_error = std::max(
+      max_error,
+      std::abs(
+        coefficients[index] -
+        sample.coefficient));
+  }
+
+  if (max_error > 1e-14) {
+    std::cerr
+      << "Pinned libjxl "
+      << transform_name
+      << " comparison failed: max error "
+      << max_error
+      << '\n';
+
+    return false;
+  }
+
+  return true;
+}
+
 /// Runs the pinned libjxl parity check and generalized shape invariants.
 bool TestReferenceContracts() {
-  if (!TestLibjxlGoldenVector()) {
+  if (!TestLibjxlDct8GoldenVector()) {
+    return false;
+  }
+
+  if (!TestLibjxlGoldenSamples<16>(
+      "DCT16",
+      kLibjxlDct16ImpulseGolden)) {
+    return false;
+  }
+
+  if (!TestLibjxlGoldenSamples<32>(
+      "DCT32",
+      kLibjxlDct32ImpulseGolden)) {
     return false;
   }
 
@@ -337,6 +440,8 @@ bool TestReferenceContracts() {
 
   constexpr std::array kShapeCases{
     ShapeCase{{8, 8}, "8x8"},
+    ShapeCase{{16, 16}, "16x16"},
+    ShapeCase{{32, 32}, "32x32"},
     ShapeCase{{8, 16}, "8x16"},
     ShapeCase{{16, 8}, "16x8"},
     ShapeCase{{8, 64}, "8x64"},
