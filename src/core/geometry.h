@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 
 namespace gjxl {
 
@@ -15,6 +16,18 @@ struct Extent2D {
 
   [[nodiscard]] constexpr bool empty() const noexcept {
     return width == 0 || height == 0;
+  }
+
+  /// Computes width * height without overflowing size_t.
+  [[nodiscard]] constexpr bool try_area(size_t* area) const noexcept {
+    if (area == nullptr ||
+        (height != 0 &&
+         width > std::numeric_limits<size_t>::max() / height)) {
+      return false;
+    }
+
+    *area = width * height;
+    return true;
   }
 
   friend constexpr bool operator==(

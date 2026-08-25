@@ -396,6 +396,29 @@ bool CheckQuantizerAndFields() {
     return false;
   }
 
+  float oversized_field_sample = 1.0f;
+  int32_t oversized_raw_sample = 0;
+  constexpr gjxl::Extent2D kOversizedExtent{
+    std::numeric_limits<size_t>::max(),
+    2,
+  };
+  if (gjxl::CreateQuantizerFromField(
+        1.7f,
+        {
+          .data = &oversized_field_sample,
+          .extent = kOversizedExtent,
+          .stride = kOversizedExtent.width,
+        },
+        {
+          .data = &oversized_raw_sample,
+          .extent = kOversizedExtent,
+          .stride = kOversizedExtent.width,
+        },
+        &unused).ok()) {
+    std::cerr << "Overflowing quant field geometry was accepted\n";
+    return false;
+  }
+
   return true;
 }
 

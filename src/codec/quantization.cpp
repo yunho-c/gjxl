@@ -295,8 +295,12 @@ Status CreateQuantizerFromField(
     return status;
   }
 
-  const size_t value_count =
-    quant_field.extent.width * quant_field.extent.height;
+  size_t value_count = 0;
+  if (!quant_field.extent.try_area(&value_count)) {
+    return Status::InvalidArgument(
+      "Quantization field dimensions are too large");
+  }
+
   std::vector<float> values;
   values.reserve(value_count);
 

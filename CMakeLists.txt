@@ -52,6 +52,7 @@ add_library(
   gjxl_codec
   STATIC
 
+  src/codec/adaptive_quantization.cpp
   src/codec/dc_conversion.cpp
   src/codec/quantization.cpp
 )
@@ -239,6 +240,22 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_fast_math_test
+    tests/fast_math_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_fast_math_test
+    PRIVATE
+      gjxl_core
+  )
+
+  add_test(
+    NAME fast_math
+    COMMAND gjxl_fast_math_test
+  )
+
+  add_executable(
     gjxl_dct_reference_test
     tests/dct_reference.cpp
     tests/dct_reference_test.cpp
@@ -286,6 +303,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME dc_conversion
     COMMAND gjxl_dc_conversion_test
+  )
+
+  add_executable(
+    gjxl_adaptive_quantization_test
+    tests/adaptive_quantization_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_adaptive_quantization_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME adaptive_quantization
+    COMMAND gjxl_adaptive_quantization_test
   )
 
   find_package(

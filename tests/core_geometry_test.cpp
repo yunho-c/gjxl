@@ -13,6 +13,34 @@
 
 namespace {
 
+bool CheckExtentArea() {
+  size_t area = 777;
+  if (!gjxl::Extent2D{3, 2}.try_area(&area) || area != 6) {
+    std::cerr << "Extent2D produced an incorrect area\n";
+    return false;
+  }
+
+  area = 777;
+  if (!gjxl::Extent2D{
+        std::numeric_limits<size_t>::max(),
+        0}.try_area(&area) || area != 0) {
+    std::cerr << "Extent2D did not handle an empty extent\n";
+    return false;
+  }
+
+  area = 777;
+  if (gjxl::Extent2D{
+        std::numeric_limits<size_t>::max(),
+        2}.try_area(&area) ||
+      area != 777 ||
+      gjxl::Extent2D{3, 2}.try_area(nullptr)) {
+    std::cerr << "Extent2D accepted an invalid area calculation\n";
+    return false;
+  }
+
+  return true;
+}
+
 bool CheckFrameGeometry() {
   gjxl::FrameGeometry geometry;
   const gjxl::Status status =
@@ -150,7 +178,8 @@ bool CheckAcStrategies() {
 }  // namespace
 
 int main() {
-  if (!CheckFrameGeometry() ||
+  if (!CheckExtentArea() ||
+      !CheckFrameGeometry() ||
       !CheckImageView() ||
       !CheckAcStrategies()) {
 
