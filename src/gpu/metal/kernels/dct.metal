@@ -1098,6 +1098,58 @@ kernel void gjxl_dct32x16_inverse_scalar_2d_matmul(
 }
 
 
+kernel void gjxl_dct32x16_forward_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_vertical_basis[32 * 32];
+  threadgroup float shared_horizontal_basis[16 * 16];
+
+  ForwardRectangularDctSimdgroup<32, 16>(
+    A,
+    B,
+    kOrthonormalDct32,
+    kOrthonormalDct16,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    kForwardDct32x16Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
+}
+
+
+kernel void gjxl_dct32x16_inverse_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_vertical_basis[32 * 32];
+  threadgroup float shared_horizontal_basis[16 * 16];
+
+  InverseRectangularDctSimdgroup<32, 16>(
+    A,
+    B,
+    kOrthonormalDct32,
+    kOrthonormalDct16,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    kInverseDct32x16Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
+}
+
+
 // Computes a forward DCT over 16 rows and 32 columns. For this orientation,
 // libjxl stores coefficients in the natural row-major [v][u] layout.
 kernel void gjxl_dct16x32_forward_scalar_2d_matmul(
@@ -1138,6 +1190,58 @@ kernel void gjxl_dct16x32_inverse_scalar_2d_matmul(
     T,
     kInverseDct32x16Scale,
     tid,
+    group_position);
+}
+
+
+kernel void gjxl_dct16x32_forward_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_vertical_basis[16 * 16];
+  threadgroup float shared_horizontal_basis[32 * 32];
+
+  ForwardRectangularDctSimdgroup<16, 32>(
+    A,
+    B,
+    kOrthonormalDct16,
+    kOrthonormalDct32,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    kForwardDct32x16Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
+}
+
+
+kernel void gjxl_dct16x32_inverse_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_vertical_basis[16 * 16];
+  threadgroup float shared_horizontal_basis[32 * 32];
+
+  InverseRectangularDctSimdgroup<16, 32>(
+    A,
+    B,
+    kOrthonormalDct16,
+    kOrthonormalDct32,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    kInverseDct32x16Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
     group_position);
 }
 

@@ -578,6 +578,10 @@ int main() {
       .inverse_dct16x8 = implementation.implementation,
       .forward_dct8x16 = implementation.implementation,
       .inverse_dct8x16 = implementation.implementation,
+      .forward_dct32x16 = implementation.implementation,
+      .inverse_dct32x16 = implementation.implementation,
+      .forward_dct16x32 = implementation.implementation,
+      .inverse_dct16x32 = implementation.implementation,
     };
 
     std::unique_ptr<gjxl::GpuBackend> gpu;
@@ -656,38 +660,38 @@ int main() {
       if (!TestTransformValidation(*gpu)) {
         return EXIT_FAILURE;
       }
+    }
 
-      if (!TestDctKernels(
-          *gpu,
-          "scalar matmul",
-          gjxl::AcStrategyType::kDct32x16,
-          2e-5,
-          2e-4)) {
-        return EXIT_FAILURE;
-      }
+    if (!TestDctKernels(
+        *gpu,
+        implementation.name,
+        gjxl::AcStrategyType::kDct32x16,
+        2e-5,
+        2e-4)) {
+      return EXIT_FAILURE;
+    }
 
-      if (!TestRoundTrip(
-          *gpu,
-          "scalar matmul",
-          gjxl::AcStrategyType::kDct32x16)) {
-        return EXIT_FAILURE;
-      }
+    if (!TestRoundTrip(
+        *gpu,
+        implementation.name,
+        gjxl::AcStrategyType::kDct32x16)) {
+      return EXIT_FAILURE;
+    }
 
-      if (!TestDctKernels(
-          *gpu,
-          "scalar matmul",
-          gjxl::AcStrategyType::kDct16x32,
-          2e-5,
-          2e-4)) {
-        return EXIT_FAILURE;
-      }
+    if (!TestDctKernels(
+        *gpu,
+        implementation.name,
+        gjxl::AcStrategyType::kDct16x32,
+        2e-5,
+        2e-4)) {
+      return EXIT_FAILURE;
+    }
 
-      if (!TestRoundTrip(
-          *gpu,
-          "scalar matmul",
-          gjxl::AcStrategyType::kDct16x32)) {
-        return EXIT_FAILURE;
-      }
+    if (!TestRoundTrip(
+        *gpu,
+        implementation.name,
+        gjxl::AcStrategyType::kDct16x32)) {
+      return EXIT_FAILURE;
     }
 
     if (!TestDctKernels(

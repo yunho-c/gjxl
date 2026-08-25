@@ -47,7 +47,7 @@ struct DctSelection {
   MetalDctImplementation inverse;
 };
 
-constexpr std::array<DctImplementationSpec, 12>
+constexpr std::array<DctImplementationSpec, 14>
 kDctImplementationSpecs{{
   {
     .strategy = AcStrategyType::kDct8,
@@ -155,12 +155,30 @@ kDctImplementationSpecs{{
     .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
   },
   {
+    .strategy = AcStrategyType::kDct32x16,
+    .implementation = MetalDctImplementation::kSimdgroupMatmul,
+    .display_name = "simdgroup matmul",
+    .forward_function_name = "gjxl_dct32x16_forward_simdgroup_2d_matmul",
+    .inverse_function_name = "gjxl_dct32x16_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 4,
+  },
+  {
     .strategy = AcStrategyType::kDct16x32,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
     .forward_function_name = "gjxl_dct16x32_forward_scalar_2d_matmul",
     .inverse_function_name = "gjxl_dct16x32_inverse_scalar_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
+  },
+  {
+    .strategy = AcStrategyType::kDct16x32,
+    .implementation = MetalDctImplementation::kSimdgroupMatmul,
+    .display_name = "simdgroup matmul",
+    .forward_function_name = "gjxl_dct16x32_forward_simdgroup_2d_matmul",
+    .inverse_function_name = "gjxl_dct16x32_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 2,
   },
 }};
 
