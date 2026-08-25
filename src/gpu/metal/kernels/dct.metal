@@ -259,6 +259,100 @@ kernel void gjxl_dct16_inverse_scalar_2d_matmul(
 
 // 16x8 and 8x16
 
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline ulong RectangularCoefficientIndex(
+  uint vertical_frequency,
+  uint horizontal_frequency)
+{
+  return Rows < Columns
+    ? static_cast<ulong>(vertical_frequency) * Columns +
+        horizontal_frequency
+    : static_cast<ulong>(horizontal_frequency) * Rows +
+        vertical_frequency;
+}
+
+
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void ForwardRectangularDct(
+  device const float* A,
+  device       float* B,
+  constant const float* vertical_basis,
+  constant const float* horizontal_basis,
+  threadgroup float* T,
+  float scale,
+  uint tid,
+  uint3 group_position)
+{
+  const uint row = tid / Columns;
+  const uint col = tid % Columns;
+
+  const ulong base =
+    static_cast<ulong>(group_position.x) * Rows * Columns;
+
+  float t = 0;
+
+  for (uint i=0; i<Rows; ++i) {
+    t += vertical_basis[Rows*row + i] *
+      A[base + Columns*i + col];
+  }
+
+  T[Columns*row + col] = t;
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float b = 0;
+
+  for (uint i=0; i<Columns; ++i) {
+    b += T[Columns*row + i] * horizontal_basis[Columns*col + i];
+  }
+
+  const ulong coefficient =
+    RectangularCoefficientIndex<Rows, Columns>(row, col);
+
+  B[base + coefficient] = b * scale;
+}
+
+
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void InverseRectangularDct(
+  device const float* A,
+  device       float* B,
+  constant const float* vertical_basis,
+  constant const float* horizontal_basis,
+  threadgroup float* T,
+  float scale,
+  uint tid,
+  uint3 group_position)
+{
+  const uint row = tid / Columns;
+  const uint col = tid % Columns;
+
+  const ulong base =
+    static_cast<ulong>(group_position.x) * Rows * Columns;
+
+  float t = 0;
+
+  for (uint i=0; i<Rows; ++i) {
+    const ulong coefficient =
+      RectangularCoefficientIndex<Rows, Columns>(i, col);
+
+    t += vertical_basis[Rows*i + row] * A[base + coefficient];
+  }
+
+  T[Columns*row + col] = t;
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float b = 0;
+
+  for (uint i=0; i<Columns; ++i) {
+    b += T[Columns*row + i] * horizontal_basis[Columns*i + col];
+  }
+
+  B[base + Columns*row + col] = b * scale;
+}
+
+
 // Computes a forward DCT over 16 rows and 8 columns. The natural [v][u]
 // result is transposed to libjxl's [u][v] coefficient layout.
 kernel void gjxl_dct16x8_forward_scalar_2d_matmul(
@@ -267,30 +361,17 @@ kernel void gjxl_dct16x8_forward_scalar_2d_matmul(
   uint              tid [[thread_index_in_threadgroup]],
   uint3  group_position [[threadgroup_position_in_grid]])
 {
-  int row = tid / 8;
-  int col = tid % 8;
+  threadgroup float T[16 * 8];
 
-  const ulong base = static_cast<ulong>(group_position.x) * 128ul;
-
-  threadgroup float T[16][8]; // vertical DCT in natural [v][x] order
-
-  float t = 0;
-
-  for (int i=0; i<16; ++i) {
-    t += kOrthonormalDct16[16*row + i] * A[base + 8*i + col];
-  }
-
-  T[row][col] = t;
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  float b = 0;
-
-  for (int i=0; i<8; ++i) {
-    b += T[row][i] * kOrthonormalDct8[8*col + i];
-  }
-
-  B[base + 16*col + row] = b * kForwardDct16x8Scale;
+  ForwardRectangularDct<16, 8>(
+    A,
+    B,
+    kOrthonormalDct16,
+    kOrthonormalDct8,
+    T,
+    kForwardDct16x8Scale,
+    tid,
+    group_position);
 }
 
 
@@ -302,30 +383,17 @@ kernel void gjxl_dct16x8_inverse_scalar_2d_matmul(
   uint              tid [[thread_index_in_threadgroup]],
   uint3  group_position [[threadgroup_position_in_grid]])
 {
-  int row = tid / 8;
-  int col = tid % 8;
+  threadgroup float T[16 * 8];
 
-  const ulong base = static_cast<ulong>(group_position.x) * 128ul;
-
-  threadgroup float T[16][8]; // vertical inverse in natural [y][u] order
-
-  float t = 0;
-
-  for (int i=0; i<16; ++i) {
-    t += kOrthonormalDct16[16*i + row] * A[base + 16*col + i];
-  }
-
-  T[row][col] = t;
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  float b = 0;
-
-  for (int i=0; i<8; ++i) {
-    b += T[row][i] * kOrthonormalDct8[8*i + col];
-  }
-
-  B[base + 8*row + col] = b * kInverseDct16x8Scale;
+  InverseRectangularDct<16, 8>(
+    A,
+    B,
+    kOrthonormalDct16,
+    kOrthonormalDct8,
+    T,
+    kInverseDct16x8Scale,
+    tid,
+    group_position);
 }
 
 
@@ -337,30 +405,17 @@ kernel void gjxl_dct8x16_forward_scalar_2d_matmul(
   uint              tid [[thread_index_in_threadgroup]],
   uint3  group_position [[threadgroup_position_in_grid]])
 {
-  int row = tid / 16;
-  int col = tid % 16;
+  threadgroup float T[8 * 16];
 
-  const ulong base = static_cast<ulong>(group_position.x) * 128ul;
-
-  threadgroup float T[8][16]; // vertical DCT in natural [v][x] order
-
-  float t = 0;
-
-  for (int i=0; i<8; ++i) {
-    t += kOrthonormalDct8[8*row + i] * A[base + 16*i + col];
-  }
-
-  T[row][col] = t;
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  float b = 0;
-
-  for (int i=0; i<16; ++i) {
-    b += T[row][i] * kOrthonormalDct16[16*col + i];
-  }
-
-  B[base + 16*row + col] = b * kForwardDct16x8Scale;
+  ForwardRectangularDct<8, 16>(
+    A,
+    B,
+    kOrthonormalDct8,
+    kOrthonormalDct16,
+    T,
+    kForwardDct16x8Scale,
+    tid,
+    group_position);
 }
 
 
@@ -372,30 +427,17 @@ kernel void gjxl_dct8x16_inverse_scalar_2d_matmul(
   uint              tid [[thread_index_in_threadgroup]],
   uint3  group_position [[threadgroup_position_in_grid]])
 {
-  int row = tid / 16;
-  int col = tid % 16;
+  threadgroup float T[8 * 16];
 
-  const ulong base = static_cast<ulong>(group_position.x) * 128ul;
-
-  threadgroup float T[8][16]; // vertical inverse in natural [y][u] order
-
-  float t = 0;
-
-  for (int i=0; i<8; ++i) {
-    t += kOrthonormalDct8[8*i + row] * A[base + 16*i + col];
-  }
-
-  T[row][col] = t;
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  float b = 0;
-
-  for (int i=0; i<16; ++i) {
-    b += T[row][i] * kOrthonormalDct16[16*i + col];
-  }
-
-  B[base + 16*row + col] = b * kInverseDct16x8Scale;
+  InverseRectangularDct<8, 16>(
+    A,
+    B,
+    kOrthonormalDct8,
+    kOrthonormalDct16,
+    T,
+    kInverseDct16x8Scale,
+    tid,
+    group_position);
 }
 
 
