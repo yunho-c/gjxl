@@ -105,13 +105,23 @@ void BenchmarkDct(
     transforms *
     static_cast<double>(Batch::kElementsPerBlock);
 
+  // Each output element evaluates two length-N dot products: one for each
+  // matrix multiplication in the separable 2D transform.
+  const double multiply_accumulates =
+    pixels *
+    2.0 *
+    static_cast<double>(Batch::kDimension);
+
   std::cout
     << "\nOperation:        " << operation << '\n'
     << "Blocks/launch:    " << batch.block_count << '\n'
     << "Iterations:       " << iterations << '\n'
     << "Elapsed:          " << seconds << '\n'
     << "Transforms/s:     " << transforms / seconds << '\n'
-    << "MPixels/s:        " << pixels / seconds / 1.0e6 << '\n';
+    << "MPixels/s:        " << pixels / seconds / 1.0e6 << '\n'
+    << "Dense GMAC/s:     "
+    << multiply_accumulates / seconds / 1.0e9
+    << '\n';
 }
 
 template <typename Batch>
