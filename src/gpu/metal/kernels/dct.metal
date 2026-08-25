@@ -183,6 +183,217 @@ kernel void gjxl_dct8_inverse_simdgroup_2d_matmul(
 }
 
 
+template <uint N>
+__attribute__((always_inline)) inline void ForwardSquareDctSimdgroup(
+  device const float* A,
+  device       float* B,
+  constant const float* basis,
+  threadgroup float* shared_basis,
+  float scale,
+  uint lane,
+  uint simd_width,
+  uint simdgroup_index,
+  uint3 group_position)
+{
+  constexpr uint kTileSize = 8;
+  constexpr uint kTilesPerDimension = N / kTileSize;
+
+  const ulong base =
+    static_cast<ulong>(group_position.x) * N * N;
+
+  for (uint i = simdgroup_index * simd_width + lane;
+       i < N * N;
+       i += kTilesPerDimension * simd_width) {
+    shared_basis[i] = basis[i];
+  }
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // One SIMD group owns an eight-row stripe. Keeping its complete C*A
+  // stripe in registers avoids an intermediate threadgroup-memory pass.
+  simdgroup_float8x8 intermediate[kTilesPerDimension];
+
+  for (uint column_tile = 0;
+       column_tile < kTilesPerDimension;
+       ++column_tile) {
+    simdgroup_float8x8 accumulator =
+      make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    for (uint inner_tile = 0;
+         inner_tile < kTilesPerDimension;
+         ++inner_tile) {
+      simdgroup_float8x8 c;
+      simdgroup_float8x8 a;
+
+      simdgroup_load(
+        c,
+        shared_basis,
+        N,
+        ulong2(inner_tile * kTileSize,
+               simdgroup_index * kTileSize));
+
+      simdgroup_load(
+        a,
+        A + base,
+        N,
+        ulong2(column_tile * kTileSize,
+               inner_tile * kTileSize));
+
+      simdgroup_multiply_accumulate(
+        accumulator,
+        c,
+        a,
+        accumulator);
+    }
+
+    intermediate[column_tile] = accumulator;
+  }
+
+  for (uint column_tile = 0;
+       column_tile < kTilesPerDimension;
+       ++column_tile) {
+    simdgroup_float8x8 accumulator =
+      make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    for (uint inner_tile = 0;
+         inner_tile < kTilesPerDimension;
+         ++inner_tile) {
+      simdgroup_float8x8 ct;
+
+      simdgroup_load(
+        ct,
+        shared_basis,
+        N,
+        ulong2(inner_tile * kTileSize,
+               column_tile * kTileSize),
+        true);
+
+      simdgroup_multiply_accumulate(
+        accumulator,
+        intermediate[inner_tile],
+        ct,
+        accumulator);
+    }
+
+    accumulator.thread_elements() *= scale;
+
+    // Square-transform coefficients use libjxl's transposed [u][v] layout.
+    simdgroup_store(
+      accumulator,
+      B + base,
+      N,
+      ulong2(simdgroup_index * kTileSize,
+             column_tile * kTileSize),
+      true);
+  }
+}
+
+
+template <uint N>
+__attribute__((always_inline)) inline void InverseSquareDctSimdgroup(
+  device const float* A,
+  device       float* B,
+  constant const float* basis,
+  threadgroup float* shared_basis,
+  float scale,
+  uint lane,
+  uint simd_width,
+  uint simdgroup_index,
+  uint3 group_position)
+{
+  constexpr uint kTileSize = 8;
+  constexpr uint kTilesPerDimension = N / kTileSize;
+
+  const ulong base =
+    static_cast<ulong>(group_position.x) * N * N;
+
+  for (uint i = simdgroup_index * simd_width + lane;
+       i < N * N;
+       i += kTilesPerDimension * simd_width) {
+    shared_basis[i] = basis[i];
+  }
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Reconstruct one eight-row stripe of C^T*A^T*C per SIMD group. A is
+  // loaded transposed because coefficients use libjxl's [u][v] layout.
+  simdgroup_float8x8 intermediate[kTilesPerDimension];
+
+  for (uint column_tile = 0;
+       column_tile < kTilesPerDimension;
+       ++column_tile) {
+    simdgroup_float8x8 accumulator =
+      make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    for (uint inner_tile = 0;
+         inner_tile < kTilesPerDimension;
+         ++inner_tile) {
+      simdgroup_float8x8 ct;
+      simdgroup_float8x8 at;
+
+      simdgroup_load(
+        ct,
+        shared_basis,
+        N,
+        ulong2(simdgroup_index * kTileSize,
+               inner_tile * kTileSize),
+        true);
+
+      simdgroup_load(
+        at,
+        A + base,
+        N,
+        ulong2(inner_tile * kTileSize,
+               column_tile * kTileSize),
+        true);
+
+      simdgroup_multiply_accumulate(
+        accumulator,
+        ct,
+        at,
+        accumulator);
+    }
+
+    intermediate[column_tile] = accumulator;
+  }
+
+  for (uint column_tile = 0;
+       column_tile < kTilesPerDimension;
+       ++column_tile) {
+    simdgroup_float8x8 accumulator =
+      make_filled_simdgroup_matrix<float, 8>(0.0f);
+
+    for (uint inner_tile = 0;
+         inner_tile < kTilesPerDimension;
+         ++inner_tile) {
+      simdgroup_float8x8 c;
+
+      simdgroup_load(
+        c,
+        shared_basis,
+        N,
+        ulong2(column_tile * kTileSize,
+               inner_tile * kTileSize));
+
+      simdgroup_multiply_accumulate(
+        accumulator,
+        intermediate[inner_tile],
+        c,
+        accumulator);
+    }
+
+    accumulator.thread_elements() *= scale;
+
+    simdgroup_store(
+      accumulator,
+      B + base,
+      N,
+      ulong2(column_tile * kTileSize,
+             simdgroup_index * kTileSize));
+  }
+}
+
+
 // 16x16
 
 // Computes forward DCT using the precomputed 16x16 DCT-II transform matrix with two matmuls:
@@ -254,6 +465,52 @@ kernel void gjxl_dct16_inverse_scalar_2d_matmul(
   }
 
   B[base + 16*row + col] = b * kInverseDct16Scale;
+}
+
+
+kernel void gjxl_dct16_forward_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_basis[16 * 16];
+
+  ForwardSquareDctSimdgroup<16>(
+    A,
+    B,
+    kOrthonormalDct16,
+    shared_basis,
+    kForwardDct16Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
+}
+
+
+kernel void gjxl_dct16_inverse_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_basis[16 * 16];
+
+  InverseSquareDctSimdgroup<16>(
+    A,
+    B,
+    kOrthonormalDct16,
+    shared_basis,
+    kInverseDct16Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
 }
 
 
@@ -513,4 +770,50 @@ kernel void gjxl_dct32_inverse_scalar_2d_matmul(
   }
 
   B[base + 32*row + col] = b * kInverseDct32Scale;
+}
+
+
+kernel void gjxl_dct32_forward_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_basis[32 * 32];
+
+  ForwardSquareDctSimdgroup<32>(
+    A,
+    B,
+    kOrthonormalDct32,
+    shared_basis,
+    kForwardDct32Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
+}
+
+
+kernel void gjxl_dct32_inverse_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint  lane            [[thread_index_in_simdgroup]],
+  uint  simd_width      [[threads_per_simdgroup]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  threadgroup float shared_basis[32 * 32];
+
+  InverseSquareDctSimdgroup<32>(
+    A,
+    B,
+    kOrthonormalDct32,
+    shared_basis,
+    kInverseDct32Scale,
+    lane,
+    simd_width,
+    simdgroup_index,
+    group_position);
 }

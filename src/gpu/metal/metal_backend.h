@@ -11,19 +11,31 @@
 
 namespace gjxl {
 
-// Built-in DCT8 kernel pairs selectable when the Metal backend is created.
-// DCT16x16, DCT32x32, DCT16x8, and DCT8x16 currently use fixed scalar pairs.
-enum class MetalDct8Implementation {
+// Built-in square-DCT kernel pairs selectable when the Metal backend is created.
+// Rectangular transforms currently use fixed scalar pairs.
+enum class MetalDctImplementation {
   kScalarMatmul,
   kSimdgroupMatmul,
 };
 
 struct MetalBackendOptions {
-  MetalDct8Implementation forward_dct8 =
-    MetalDct8Implementation::kScalarMatmul;
+  MetalDctImplementation forward_dct8 =
+    MetalDctImplementation::kScalarMatmul;
 
-  MetalDct8Implementation inverse_dct8 =
-    MetalDct8Implementation::kScalarMatmul;
+  MetalDctImplementation inverse_dct8 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation forward_dct16x16 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation inverse_dct16x16 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation forward_dct32x32 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation inverse_dct32x32 =
+    MetalDctImplementation::kScalarMatmul;
 };
 
 // Creates a Metal backend using the system-default GPU.

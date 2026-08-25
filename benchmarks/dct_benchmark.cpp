@@ -20,21 +20,21 @@ namespace {
 
 constexpr size_t kWarmupIterations = 20;
 
-struct Dct8ImplementationCase {
-  gjxl::MetalDct8Implementation implementation;
+struct ImplementationCase {
+  gjxl::MetalDctImplementation implementation;
   std::string_view name;
 };
 
-constexpr std::array<Dct8ImplementationCase, 2>
-kDct8Implementations{{
+constexpr std::array<ImplementationCase, 2>
+kImplementations{{
   {
     .implementation =
-      gjxl::MetalDct8Implementation::kScalarMatmul,
+      gjxl::MetalDctImplementation::kScalarMatmul,
     .name = "scalar matmul",
   },
   {
     .implementation =
-      gjxl::MetalDct8Implementation::kSimdgroupMatmul,
+      gjxl::MetalDctImplementation::kSimdgroupMatmul,
     .name = "simdgroup matmul",
   },
 }};
@@ -260,12 +260,34 @@ int main(int argc, char** argv) {
         std::strtoull(argv[2], nullptr, 10));
   }
 
-  for (const Dct8ImplementationCase& implementation :
-       kDct8Implementations) {
+  // Keep the number of transformed pixels per launch comparable to DCT8.
+  const size_t dct16_transform_count =
+    ComparableTransformCount(
+      gjxl::AcStrategyType::kDct16x16,
+      dct8_transform_count);
+  const size_t dct16x8_transform_count =
+    ComparableTransformCount(
+      gjxl::AcStrategyType::kDct16x8,
+      dct8_transform_count);
+  const size_t dct8x16_transform_count =
+    ComparableTransformCount(
+      gjxl::AcStrategyType::kDct8x16,
+      dct8_transform_count);
+  const size_t dct32_transform_count =
+    ComparableTransformCount(
+      gjxl::AcStrategyType::kDct32x32,
+      dct8_transform_count);
+
+  for (const ImplementationCase& implementation :
+       kImplementations) {
 
     const gjxl::MetalBackendOptions options{
       .forward_dct8 = implementation.implementation,
       .inverse_dct8 = implementation.implementation,
+      .forward_dct16x16 = implementation.implementation,
+      .inverse_dct16x16 = implementation.implementation,
+      .forward_dct32x32 = implementation.implementation,
+      .inverse_dct32x32 = implementation.implementation,
     };
 
     std::unique_ptr<gjxl::GpuBackend> gpu;
@@ -292,33 +314,22 @@ int main(int argc, char** argv) {
       dct8_transform_count,
       iterations);
 
+    BenchmarkDctPair(
+      *gpu,
+      implementation.name,
+      gjxl::AcStrategyType::kDct16x16,
+      dct16_transform_count,
+      iterations);
+
+    BenchmarkDctPair(
+      *gpu,
+      implementation.name,
+      gjxl::AcStrategyType::kDct32x32,
+      dct32_transform_count,
+      iterations);
+
     if (implementation.implementation ==
-        gjxl::MetalDct8Implementation::kScalarMatmul) {
-
-      // Keep the number of transformed pixels per launch comparable to DCT8.
-      const size_t dct16_transform_count =
-        ComparableTransformCount(
-          gjxl::AcStrategyType::kDct16x16,
-          dct8_transform_count);
-      const size_t dct16x8_transform_count =
-        ComparableTransformCount(
-          gjxl::AcStrategyType::kDct16x8,
-          dct8_transform_count);
-      const size_t dct8x16_transform_count =
-        ComparableTransformCount(
-          gjxl::AcStrategyType::kDct8x16,
-          dct8_transform_count);
-      const size_t dct32_transform_count =
-        ComparableTransformCount(
-          gjxl::AcStrategyType::kDct32x32,
-          dct8_transform_count);
-
-      BenchmarkDctPair(
-        *gpu,
-        "scalar matmul",
-        gjxl::AcStrategyType::kDct16x16,
-        dct16_transform_count,
-        iterations);
+        gjxl::MetalDctImplementation::kScalarMatmul) {
 
       BenchmarkDctPair(
         *gpu,
@@ -332,13 +343,6 @@ int main(int argc, char** argv) {
         "scalar matmul",
         gjxl::AcStrategyType::kDct8x16,
         dct8x16_transform_count,
-        iterations);
-
-      BenchmarkDctPair(
-        *gpu,
-        "scalar matmul",
-        gjxl::AcStrategyType::kDct32x32,
-        dct32_transform_count,
         iterations);
     }
   }
