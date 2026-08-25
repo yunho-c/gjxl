@@ -16,37 +16,49 @@ namespace gjxl {
 // JPEG XL VarDCT AC strategies. Index matches JPEG XL format and reference implementation (libjxl).
 enum class AcStrategyType : uint8_t {
   kDct8 = 0,
-  kIdentity,
-  kDct2x2,
-  kDct4x4,
-  kDct16x16,
-  kDct32x32,
-  kDct16x8,
-  kDct8x16,
-  kDct32x8,
-  kDct8x32,
-  kDct32x16,
-  kDct16x32,
-  kDct4x8,
-  kDct8x4,
-  kAfv0,
-  kAfv1,
-  kAfv2,
-  kAfv3,
-  kDct64x64,
-  kDct64x32,
-  kDct32x64,
-  kDct128x128,
-  kDct128x64,
-  kDct64x128,
-  kDct256x256,
-  kDct256x128,
-  kDct128x256,
-  kCount,
+  kIdentity = 1,
+  kDct2x2 = 2,
+  kDct4x4 = 3,
+  kDct16x16 = 4,
+  kDct32x32 = 5,
+  kDct16x8 = 6,
+  kDct8x16 = 7,
+  kDct32x8 = 8,
+  kDct8x32 = 9,
+  kDct32x16 = 10,
+  kDct16x32 = 11,
+  kDct4x8 = 12,
+  kDct8x4 = 13,
+  kAfv0 = 14,
+  kAfv1 = 15,
+  kAfv2 = 16,
+  kAfv3 = 17,
+  kDct64x64 = 18,
+  kDct64x32 = 19,
+  kDct32x64 = 20,
+  kDct128x128 = 21,
+  kDct128x64 = 22,
+  kDct64x128 = 23,
+  kDct256x256 = 24,
+  kDct256x128 = 25,
+  kDct128x256 = 26,
+  kCount = 27,
 };
 
 inline constexpr size_t kAcStrategyCount =
   static_cast<size_t>(AcStrategyType::kCount);
+
+// Pin the starts of the format's strategy families as an independent shield
+// against accidental renumbering during future table edits.
+static_assert(static_cast<uint8_t>(AcStrategyType::kDct8) == 0);
+static_assert(static_cast<uint8_t>(AcStrategyType::kDct16x8) == 6);
+static_assert(static_cast<uint8_t>(AcStrategyType::kDct4x8) == 12);
+static_assert(static_cast<uint8_t>(AcStrategyType::kAfv0) == 14);
+static_assert(static_cast<uint8_t>(AcStrategyType::kDct64x64) == 18);
+static_assert(static_cast<uint8_t>(AcStrategyType::kDct128x128) == 21);
+static_assert(static_cast<uint8_t>(AcStrategyType::kDct256x256) == 24);
+static_assert(static_cast<uint8_t>(AcStrategyType::kDct128x256) == 26);
+static_assert(kAcStrategyCount == 27);
 
 struct AcStrategyInfo {
   AcStrategyType type;
