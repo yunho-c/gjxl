@@ -55,19 +55,18 @@ std::vector<double> MakeBasis(
 }  // namespace
 
 void ReferenceForwardDct(
-  DctShape shape,
+  Extent2D extent,
   const float* pixels,
   double* coefficients,
   size_t block_count) {
 
-  assert(shape.rows > 0);
-  assert(shape.cols > 0);
+  assert(!extent.empty());
 
-  const size_t block_size = shape.rows * shape.cols;
+  const size_t block_size = extent.width * extent.height;
   const std::vector<double> vertical_basis =
-    MakeBasis(shape.rows, BasisDirection::kForward);
+    MakeBasis(extent.height, BasisDirection::kForward);
   const std::vector<double> horizontal_basis =
-    MakeBasis(shape.cols, BasisDirection::kForward);
+    MakeBasis(extent.width, BasisDirection::kForward);
   std::vector<double> horizontal_dct(block_size);
 
   for (size_t block = 0; block < block_count; ++block) {
@@ -76,33 +75,33 @@ void ReferenceForwardDct(
 
     // Apply the horizontal 1-D transform to every row. The intermediate
     // remains in natural [y][u] order.
-    for (size_t y = 0; y < shape.rows; ++y) {
-      for (size_t u = 0; u < shape.cols; ++u) {
+    for (size_t y = 0; y < extent.height; ++y) {
+      for (size_t u = 0; u < extent.width; ++u) {
         double result = 0.0;
 
-        for (size_t x = 0; x < shape.cols; ++x) {
+        for (size_t x = 0; x < extent.width; ++x) {
           result +=
-            static_cast<double>(source[y * shape.cols + x]) *
-            horizontal_basis[u * shape.cols + x];
+            static_cast<double>(source[y * extent.width + x]) *
+            horizontal_basis[u * extent.width + x];
         }
 
-        horizontal_dct[y * shape.cols + u] = result;
+        horizontal_dct[y * extent.width + u] = result;
       }
     }
 
     // Apply the vertical transform, then store the result in libjxl's
     // shape-dependent coefficient layout rather than natural [v][u] order.
-    for (size_t v = 0; v < shape.rows; ++v) {
-      for (size_t u = 0; u < shape.cols; ++u) {
+    for (size_t v = 0; v < extent.height; ++v) {
+      for (size_t u = 0; u < extent.width; ++u) {
         double result = 0.0;
 
-        for (size_t y = 0; y < shape.rows; ++y) {
+        for (size_t y = 0; y < extent.height; ++y) {
           result +=
-            vertical_basis[v * shape.rows + y] *
-            horizontal_dct[y * shape.cols + u];
+            vertical_basis[v * extent.height + y] *
+            horizontal_dct[y * extent.width + u];
         }
 
-        destination[LibjxlCoefficientIndex(shape, v, u)] =
+        destination[LibjxlCoefficientIndex(extent, v, u)] =
           result;
       }
     }
@@ -110,19 +109,18 @@ void ReferenceForwardDct(
 }
 
 void ReferenceInverseDct(
-  DctShape shape,
+  Extent2D extent,
   const float* coefficients,
   double* pixels,
   size_t block_count) {
 
-  assert(shape.rows > 0);
-  assert(shape.cols > 0);
+  assert(!extent.empty());
 
-  const size_t block_size = shape.rows * shape.cols;
+  const size_t block_size = extent.width * extent.height;
   const std::vector<double> vertical_basis =
-    MakeBasis(shape.rows, BasisDirection::kInverse);
+    MakeBasis(extent.height, BasisDirection::kInverse);
   const std::vector<double> horizontal_basis =
-    MakeBasis(shape.cols, BasisDirection::kInverse);
+    MakeBasis(extent.width, BasisDirection::kInverse);
   std::vector<double> horizontal_idct(block_size);
 
   for (size_t block = 0; block < block_count; ++block) {
@@ -131,33 +129,33 @@ void ReferenceInverseDct(
 
     // Undo the horizontal-frequency axis while reading coefficients through
     // the shape-dependent layout. The intermediate is natural [v][x].
-    for (size_t v = 0; v < shape.rows; ++v) {
-      for (size_t x = 0; x < shape.cols; ++x) {
+    for (size_t v = 0; v < extent.height; ++v) {
+      for (size_t x = 0; x < extent.width; ++x) {
         double result = 0.0;
 
-        for (size_t u = 0; u < shape.cols; ++u) {
+        for (size_t u = 0; u < extent.width; ++u) {
           result +=
             static_cast<double>(
-              source[LibjxlCoefficientIndex(shape, v, u)]) *
-            horizontal_basis[u * shape.cols + x];
+              source[LibjxlCoefficientIndex(extent, v, u)]) *
+            horizontal_basis[u * extent.width + x];
         }
 
-        horizontal_idct[v * shape.cols + x] = result;
+        horizontal_idct[v * extent.width + x] = result;
       }
     }
 
     // Undo the vertical-frequency axis and return row-major [y][x] pixels.
-    for (size_t y = 0; y < shape.rows; ++y) {
-      for (size_t x = 0; x < shape.cols; ++x) {
+    for (size_t y = 0; y < extent.height; ++y) {
+      for (size_t x = 0; x < extent.width; ++x) {
         double result = 0.0;
 
-        for (size_t v = 0; v < shape.rows; ++v) {
+        for (size_t v = 0; v < extent.height; ++v) {
           result +=
-            vertical_basis[v * shape.rows + y] *
-            horizontal_idct[v * shape.cols + x];
+            vertical_basis[v * extent.height + y] *
+            horizontal_idct[v * extent.width + x];
         }
 
-        destination[y * shape.cols + x] = result;
+        destination[y * extent.width + x] = result;
       }
     }
   }

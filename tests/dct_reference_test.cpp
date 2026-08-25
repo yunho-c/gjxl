@@ -21,18 +21,18 @@
 
 namespace {
 
-constexpr gjxl::test::DctShape kDct8Shape{
-  .rows = 8,
-  .cols = 8,
+constexpr gjxl::Extent2D kDct8Shape{
+  .width = 8,
+  .height = 8,
 };
 
-constexpr size_t kDctSize = kDct8Shape.rows * kDct8Shape.cols;
+constexpr size_t kDctSize = kDct8Shape.width * kDct8Shape.height;
 
 static_assert(
-  gjxl::test::LibjxlCoefficientIndex({8, 16}, 3, 5) == 53);
+  gjxl::test::LibjxlCoefficientIndex({8, 16}, 3, 5) == 83);
 
 static_assert(
-  gjxl::test::LibjxlCoefficientIndex({16, 8}, 3, 5) == 83);
+  gjxl::test::LibjxlCoefficientIndex({16, 8}, 3, 5) == 53);
 
 // Generated from libjxl e8ff09762481785938d8e4e01333ed3917571161 by
 // applying DCTSlow<8> to an impulse at pixels[2][5], then transposing its
@@ -147,10 +147,10 @@ constexpr std::array kLibjxlDct32ImpulseGolden = {
 
 /// Checks DC/AC scaling and a float-quantized round trip for one shape.
 bool TestReferenceShape(
-  gjxl::test::DctShape shape,
+  gjxl::Extent2D shape,
   std::string_view shape_name) {
 
-  const size_t block_size = shape.rows * shape.cols;
+  const size_t block_size = shape.width * shape.height;
   constexpr float kConstantValue = 0.25f;
   constexpr double kExactTolerance = 1e-12;
 
@@ -196,8 +196,8 @@ bool TestReferenceShape(
   // Round-trip check
   std::mt19937 rng(
     0xDC700000u ^
-    static_cast<unsigned int>(shape.rows << 8) ^
-    static_cast<unsigned int>(shape.cols));
+    static_cast<unsigned int>(shape.height << 8) ^
+    static_cast<unsigned int>(shape.width));
   std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
 
   std::vector<float> pixels(block_size);
@@ -266,28 +266,28 @@ bool TestReferenceShape(
 /// Checks that transposing the spatial block and shape preserves libjxl's
 /// linear coefficient order.
 bool TestReferenceTransposePair(
-  gjxl::test::DctShape shape,
+  gjxl::Extent2D shape,
   std::string_view shape_name) {
 
-  const size_t block_size = shape.rows * shape.cols;
-  const gjxl::test::DctShape transposed_shape{
-    .rows = shape.cols,
-    .cols = shape.rows,
+  const size_t block_size = shape.width * shape.height;
+  const gjxl::Extent2D transposed_shape{
+    .width = shape.height,
+    .height = shape.width,
   };
   std::mt19937 rng(
     0xDC710000u ^
-    static_cast<unsigned int>(shape.rows << 8) ^
-    static_cast<unsigned int>(shape.cols));
+    static_cast<unsigned int>(shape.height << 8) ^
+    static_cast<unsigned int>(shape.width));
   std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
 
   std::vector<float> pixels(block_size);
   std::vector<float> transposed_pixels(block_size);
 
-  for (size_t y = 0; y < shape.rows; ++y) {
-    for (size_t x = 0; x < shape.cols; ++x) {
+  for (size_t y = 0; y < shape.height; ++y) {
+    for (size_t x = 0; x < shape.width; ++x) {
       const float value = distribution(rng);
-      pixels[y * shape.cols + x] = value;
-      transposed_pixels[x * shape.rows + y] = value;
+      pixels[y * shape.width + x] = value;
+      transposed_pixels[x * shape.height + y] = value;
     }
   }
 
@@ -333,7 +333,7 @@ bool TestReferenceTransposePair(
 
 bool TestLibjxlDct8GoldenVector() {
   std::array<float, kDctSize> pixels{};
-  pixels[2 * kDct8Shape.cols + 5] = 1.0f;
+  pixels[2 * kDct8Shape.width + 5] = 1.0f;
 
   std::array<double, kDctSize> coefficients{};
 
@@ -370,9 +370,9 @@ bool TestLibjxlGoldenSamples(
   std::string_view transform_name,
   const std::array<DctGoldenSample, SampleCount>& golden) {
 
-  constexpr gjxl::test::DctShape kShape{
-    .rows = Dimension,
-    .cols = Dimension,
+  constexpr gjxl::Extent2D kShape{
+    .width = Dimension,
+    .height = Dimension,
   };
   constexpr size_t kBlockSize = Dimension * Dimension;
   std::array<float, kBlockSize> pixels{};
@@ -434,7 +434,7 @@ bool TestReferenceContracts() {
   }
 
   struct ShapeCase {
-    gjxl::test::DctShape shape;
+    gjxl::Extent2D shape;
     std::string_view name;
   };
 
