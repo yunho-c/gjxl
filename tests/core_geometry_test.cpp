@@ -96,6 +96,10 @@ bool CheckAcStrategies() {
         info.name.empty() ||
         info.covered_blocks.empty() ||
         info.pixel_extent().empty() ||
+        info.coefficient_extent().width <
+          info.coefficient_extent().height ||
+        info.low_frequency_extent().width <
+          info.low_frequency_extent().height ||
         info.coefficient_count() !=
           info.pixel_extent().width * info.pixel_extent().height) {
 
@@ -106,6 +110,8 @@ bool CheckAcStrategies() {
 
   const gjxl::AcStrategyInfo* dct16x8 =
     gjxl::GetAcStrategyInfo(gjxl::AcStrategyType::kDct16x8);
+  const gjxl::AcStrategyInfo* dct8x16 =
+    gjxl::GetAcStrategyInfo(gjxl::AcStrategyType::kDct8x16);
   const gjxl::AcStrategyInfo* dct8 =
     gjxl::GetAcStrategyInfo(gjxl::AcStrategyType::kDct8);
   const gjxl::AcStrategyInfo* identity =
@@ -114,7 +120,14 @@ bool CheckAcStrategies() {
   if (dct16x8 == nullptr ||
       dct16x8->covered_blocks != gjxl::Extent2D{1, 2} ||
       dct16x8->pixel_extent() != gjxl::Extent2D{8, 16} ||
+      dct16x8->coefficient_extent() != gjxl::Extent2D{16, 8} ||
+      dct16x8->low_frequency_extent() != gjxl::Extent2D{2, 1} ||
+      dct16x8->coefficient_index(3, 5) != 83 ||
       dct16x8->coefficient_count() != 128 ||
+      dct8x16 == nullptr ||
+      dct8x16->covered_blocks != gjxl::Extent2D{2, 1} ||
+      dct8x16->pixel_extent() != gjxl::Extent2D{16, 8} ||
+      dct8x16->coefficient_index(3, 5) != 53 ||
       dct8 == nullptr ||
       identity == nullptr ||
       dct8->pixel_extent() != identity->pixel_extent() ||

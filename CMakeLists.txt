@@ -52,6 +52,7 @@ add_library(
   gjxl_codec
   STATIC
 
+  src/codec/dc_conversion.cpp
   src/codec/quantization.cpp
 )
 
@@ -268,6 +269,23 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME quantization
     COMMAND gjxl_quantization_test
+  )
+
+  add_executable(
+    gjxl_dc_conversion_test
+    tests/dct_reference.cpp
+    tests/dc_conversion_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_dc_conversion_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME dc_conversion
+    COMMAND gjxl_dc_conversion_test
   )
 
   find_package(

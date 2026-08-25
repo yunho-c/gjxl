@@ -76,6 +76,34 @@ struct AcStrategyInfo {
     };
   }
 
+  /// Physical coefficient storage, with the longer frequency axis contiguous.
+  [[nodiscard]] constexpr Extent2D coefficient_extent() const noexcept {
+    const Extent2D pixels = pixel_extent();
+    return pixels.width > pixels.height
+      ? pixels
+      : Extent2D{pixels.height, pixels.width};
+  }
+
+  /// LLF storage occupied by one DC value per covered 8x8 base block.
+  [[nodiscard]] constexpr Extent2D low_frequency_extent() const noexcept {
+    return covered_blocks.width > covered_blocks.height
+      ? covered_blocks
+      : Extent2D{covered_blocks.height, covered_blocks.width};
+  }
+
+  /// Maps natural [vertical][horizontal] frequencies to libjxl storage.
+  [[nodiscard]] constexpr size_t coefficient_index(
+    size_t vertical_frequency,
+    size_t horizontal_frequency) const noexcept {
+
+    const Extent2D pixels = pixel_extent();
+    if (pixels.height < pixels.width) {
+      return vertical_frequency * pixels.width + horizontal_frequency;
+    }
+
+    return horizontal_frequency * pixels.height + vertical_frequency;
+  }
+
   [[nodiscard]] constexpr size_t coefficient_count() const noexcept {
     const Extent2D extent = pixel_extent();
     return extent.width * extent.height;
