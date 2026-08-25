@@ -3,32 +3,21 @@
 
 #pragma once
 
-#include <cstdint>
-#include <limits>
+#include <cstddef>
 
+#include "core/block_grid.h"
+#include "core/geometry.h"
 #include "core/status.h"
 
 namespace gjxl {
 
-inline constexpr uint32_t kBlockDim = 8;
-
 struct FrameGeometry {
-  uint32_t width = 0;
-  uint32_t height = 0;
-
-  // Pixel dimensions rounded up to the JPEG XL 8x8 block grid.
-  uint32_t padded_width = 0;
-  uint32_t padded_height = 0;
-
-  uint32_t xblocks = 0;
-  uint32_t yblocks = 0;
-
-  // uint32_t xgroups;
-  // uint32_t ygroups;
+  Extent2D frame;
+  Extent2D padded_frame;
+  BlockGrid block_grid;
 
   [[nodiscard]] static Status Create(
-    uint32_t width,
-    uint32_t height,
+    Extent2D frame,
     FrameGeometry* out) {
 
     if (out == nullptr) {
@@ -36,33 +25,29 @@ struct FrameGeometry {
         "FrameGeometry output pointer is null");
     }
 
-    if (width == 0 || height == 0) {
-      return Status::InvalidArgument(
-        "Image dimensions must be non-zero");
+    BlockGrid block_grid;
+    Status status = BlockGrid::Create(frame, &block_grid);
+
+    if (!status.ok()) {
+      return status;
     }
 
-    constexpr uint32_t kPadding = kBlockDim - 1;
+    const FrameGeometry geometry{
+      .frame = frame,
+      .padded_frame = block_grid.padded_pixel_extent(),
+      .block_grid = block_grid,
+    };
 
-    if (width > std::numeric_limits<uint32_t>::max() - kPadding ||
-        height > std::numeric_limits<uint32_t>::max() - kPadding) {
-          return Status::InvalidArgument(
-            "Image dimensions are too large");
-    }
-
-    FrameGeometry g;
-
-    g.width = width;
-    g.height = height;
-
-    g.padded_width = ((width + kPadding) / kBlockDim) * kBlockDim;
-
-    g.padded_height = ((height + kPadding) / kBlockDim) * kBlockDim;
-
-    g.xblocks = g.padded_width / kBlockDim;
-    g.yblocks = g.padded_height / kBlockDim;
-
-    *out = g;
+    *out = geometry;
     return Status::Ok();
+  }
+
+  [[nodiscard]] static Status Create(
+    size_t width,
+    size_t height,
+    FrameGeometry* out) {
+
+    return Create({width, height}, out);
   }
 };
 

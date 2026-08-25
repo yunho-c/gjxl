@@ -6,23 +6,22 @@
 #include <array>
 #include <cstddef>
 
+#include "core/geometry.h"
+
 namespace gjxl {
 
 template <typename T>
 struct PlaneView {
   T* data = nullptr;
-
-  size_t width = 0;
-  size_t height = 0;
+  Extent2D extent;
 
   // Number of T elements between rows, not bytes.
   size_t stride = 0;
 
   [[nodiscard]] bool valid() const noexcept {
     return data != nullptr &&
-           width != 0 &&
-           height != 0 &&
-           stride >= width;
+           !extent.empty() &&
+           stride >= extent.width;
   }
 
   [[nodiscard]] T* Row(size_t y) const noexcept {
@@ -41,22 +40,24 @@ struct Image3View {
     return plane[0].valid() &&
            plane[1].valid() &&
            plane[2].valid() &&
-           plane[0].width == plane[1].width &&
-           plane[0].width == plane[2].width &&
-           plane[0].height == plane[1].height &&
-           plane[0].height == plane[2].height;
+           plane[0].extent == plane[1].extent &&
+           plane[0].extent == plane[2].extent;
+  }
+
+  [[nodiscard]] Extent2D extent() const noexcept {
+    return plane[0].extent;
   }
 
   [[nodiscard]] size_t width() const noexcept {
-    return plane[0].width;
+    return extent().width;
   }
 
   [[nodiscard]] size_t height() const noexcept {
-    return plane[0].height;
+    return extent().height;
   }
 };
 
 using Image3FView = Image3View<float>;
 using ConstImage3FView = Image3View<const float>;
 
-} // namespace gjxl
+}  // namespace gjxl

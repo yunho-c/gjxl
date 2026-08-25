@@ -208,6 +208,22 @@ if(GJXL_BUILD_TESTS)
   enable_testing()
 
   add_executable(
+    gjxl_core_geometry_test
+    tests/core_geometry_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_core_geometry_test
+    PRIVATE
+      gjxl_core
+  )
+
+  add_test(
+    NAME core_geometry
+    COMMAND gjxl_core_geometry_test
+  )
+
+  add_executable(
     gjxl_dct_reference_test
     tests/dct_reference.cpp
     tests/dct_reference_test.cpp
