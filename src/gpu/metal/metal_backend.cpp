@@ -31,7 +31,7 @@ enum class TransformDispatchMode {
   kFixedSimdgroupCount,
 };
 
-struct SquareDctImplementationSpec {
+struct DctImplementationSpec {
   AcStrategyType strategy;
   MetalDctImplementation implementation;
   std::string_view display_name;
@@ -41,14 +41,14 @@ struct SquareDctImplementationSpec {
   size_t simdgroups_per_threadgroup = 0;
 };
 
-struct SquareDctSelection {
+struct DctSelection {
   AcStrategyType strategy;
   MetalDctImplementation forward;
   MetalDctImplementation inverse;
 };
 
-constexpr std::array<SquareDctImplementationSpec, 6>
-kSquareDctImplementationSpecs{{
+constexpr std::array<DctImplementationSpec, 8>
+kDctImplementationSpecs{{
   {
     .strategy = AcStrategyType::kDct8,
     .implementation = MetalDctImplementation::kScalarMatmul,
@@ -112,15 +112,29 @@ kSquareDctImplementationSpecs{{
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 4,
   },
+  {
+    .strategy = AcStrategyType::kDct16x8,
+    .implementation = MetalDctImplementation::kScalarMatmul,
+    .display_name = "scalar matmul",
+    .forward_function_name = "gjxl_dct16x8_forward_scalar_2d_matmul",
+    .inverse_function_name = "gjxl_dct16x8_inverse_scalar_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
+  },
+  {
+    .strategy = AcStrategyType::kDct8x16,
+    .implementation = MetalDctImplementation::kScalarMatmul,
+    .display_name = "scalar matmul",
+    .forward_function_name = "gjxl_dct8x16_forward_scalar_2d_matmul",
+    .inverse_function_name = "gjxl_dct8x16_inverse_scalar_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
+  },
 }};
 
-const SquareDctImplementationSpec* FindSquareDctImplementationSpec(
+const DctImplementationSpec* FindDctImplementationSpec(
   AcStrategyType strategy,
   MetalDctImplementation implementation) {
 
-  for (const SquareDctImplementationSpec& spec :
-       kSquareDctImplementationSpecs) {
-
+  for (const DctImplementationSpec& spec : kDctImplementationSpecs) {
     if (spec.strategy == strategy &&
         spec.implementation == implementation) {
       return &spec;
@@ -129,32 +143,6 @@ const SquareDctImplementationSpec* FindSquareDctImplementationSpec(
 
   return nullptr;
 }
-
-struct FixedTransformSpec {
-  AcStrategyType strategy;
-  std::string_view implementation_name;
-  std::string_view forward_function_name;
-  std::string_view inverse_function_name;
-  TransformDispatchMode dispatch_mode;
-};
-
-constexpr std::array<FixedTransformSpec, 2>
-kFixedTransformSpecs{{
-  {
-    .strategy = AcStrategyType::kDct16x8,
-    .implementation_name = "scalar matmul",
-    .forward_function_name = "gjxl_dct16x8_forward_scalar_2d_matmul",
-    .inverse_function_name = "gjxl_dct16x8_inverse_scalar_2d_matmul",
-    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
-  },
-  {
-    .strategy = AcStrategyType::kDct8x16,
-    .implementation_name = "scalar matmul",
-    .forward_function_name = "gjxl_dct8x16_forward_scalar_2d_matmul",
-    .inverse_function_name = "gjxl_dct8x16_inverse_scalar_2d_matmul",
-    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
-  },
-}};
 
 struct TransformPipeline {
   NS::SharedPtr<MTL::ComputePipelineState> state;
@@ -856,7 +844,7 @@ Status CreateMetalBackend(
       "Metal library path is empty");
   }
 
-  const std::array<SquareDctSelection, 3> square_dct_selections{{
+  const std::array<DctSelection, 5> dct_selections{{
     {
       .strategy = AcStrategyType::kDct8,
       .forward = options.forward_dct8,
@@ -872,18 +860,28 @@ Status CreateMetalBackend(
       .forward = options.forward_dct32x32,
       .inverse = options.inverse_dct32x32,
     },
+    {
+      .strategy = AcStrategyType::kDct16x8,
+      .forward = MetalDctImplementation::kScalarMatmul,
+      .inverse = MetalDctImplementation::kScalarMatmul,
+    },
+    {
+      .strategy = AcStrategyType::kDct8x16,
+      .forward = MetalDctImplementation::kScalarMatmul,
+      .inverse = MetalDctImplementation::kScalarMatmul,
+    },
   }};
 
-  for (const SquareDctSelection& selection : square_dct_selections) {
+  for (const DctSelection& selection : dct_selections) {
     const AcStrategyInfo* strategy_info =
       GetAcStrategyInfo(selection.strategy);
 
     if (strategy_info == nullptr) {
       return Status::Internal(
-        "Metal square-DCT selection has an invalid strategy");
+        "Metal DCT selection has an invalid strategy");
     }
 
-    if (FindSquareDctImplementationSpec(
+    if (FindDctImplementationSpec(
           selection.strategy,
           selection.forward) == nullptr) {
       return Status::InvalidArgument(
@@ -892,7 +890,7 @@ Status CreateMetalBackend(
         " implementation");
     }
 
-    if (FindSquareDctImplementationSpec(
+    if (FindDctImplementationSpec(
           selection.strategy,
           selection.inverse) == nullptr) {
       return Status::InvalidArgument(
@@ -948,19 +946,19 @@ Status CreateMetalBackend(
   TransformPipelineRegistry transform_pipelines;
   Status status = Status::Ok();
 
-  for (const SquareDctSelection& selection : square_dct_selections) {
-    const SquareDctImplementationSpec* forward_spec =
-      FindSquareDctImplementationSpec(
+  for (const DctSelection& selection : dct_selections) {
+    const DctImplementationSpec* forward_spec =
+      FindDctImplementationSpec(
         selection.strategy,
         selection.forward);
-    const SquareDctImplementationSpec* inverse_spec =
-      FindSquareDctImplementationSpec(
+    const DctImplementationSpec* inverse_spec =
+      FindDctImplementationSpec(
         selection.strategy,
         selection.inverse);
 
     if (forward_spec == nullptr || inverse_spec == nullptr) {
       return Status::Internal(
-        "Validated Metal square-DCT implementation disappeared");
+        "Validated Metal DCT implementation disappeared");
     }
 
     TransformPipelinePair& pipelines =
@@ -991,43 +989,6 @@ Status CreateMetalBackend(
         inverse_spec->dispatch_mode,
         inverse_spec->simdgroups_per_threadgroup,
         inverse_spec->inverse_function_name,
-        "inverse",
-        &pipelines.inverse);
-
-    if (!status.ok()) {
-      return status;
-    }
-  }
-
-  for (const FixedTransformSpec& spec : kFixedTransformSpecs) {
-    TransformPipelinePair& pipelines =
-      transform_pipelines[StrategyIndex(spec.strategy)];
-
-    status =
-      CreateTransformPipeline(
-        device.get(),
-        library.get(),
-        spec.strategy,
-        spec.implementation_name,
-        spec.dispatch_mode,
-        0,
-        spec.forward_function_name,
-        "forward",
-        &pipelines.forward);
-
-    if (!status.ok()) {
-      return status;
-    }
-
-    status =
-      CreateTransformPipeline(
-        device.get(),
-        library.get(),
-        spec.strategy,
-        spec.implementation_name,
-        spec.dispatch_mode,
-        0,
-        spec.inverse_function_name,
         "inverse",
         &pipelines.inverse);
 

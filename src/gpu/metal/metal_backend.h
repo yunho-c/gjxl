@@ -11,8 +11,7 @@
 
 namespace gjxl {
 
-// Built-in square-DCT kernel pairs selectable when the Metal backend is created.
-// Rectangular transforms currently use fixed scalar pairs.
+// Built-in DCT kernel implementations. Availability is strategy-dependent.
 enum class MetalDctImplementation {
   kScalarMatmul,
   kSimdgroupMatmul,
