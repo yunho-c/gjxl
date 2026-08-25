@@ -273,6 +273,14 @@ int main(int argc, char** argv) {
     ComparableTransformCount(
       gjxl::AcStrategyType::kDct8x16,
       dct8_transform_count);
+  const size_t dct32x16_transform_count =
+    ComparableTransformCount(
+      gjxl::AcStrategyType::kDct32x16,
+      dct8_transform_count);
+  const size_t dct16x32_transform_count =
+    ComparableTransformCount(
+      gjxl::AcStrategyType::kDct16x32,
+      dct8_transform_count);
   const size_t dct32_transform_count =
     ComparableTransformCount(
       gjxl::AcStrategyType::kDct32x32,
@@ -345,6 +353,24 @@ int main(int argc, char** argv) {
       gjxl::AcStrategyType::kDct8x16,
       dct8x16_transform_count,
       iterations);
+
+    if (implementation.implementation ==
+        gjxl::MetalDctImplementation::kScalarMatmul) {
+
+      BenchmarkDctPair(
+        *gpu,
+        "scalar matmul",
+        gjxl::AcStrategyType::kDct32x16,
+        dct32x16_transform_count,
+        iterations);
+
+      BenchmarkDctPair(
+        *gpu,
+        "scalar matmul",
+        gjxl::AcStrategyType::kDct16x32,
+        dct16x32_transform_count,
+        iterations);
+    }
   }
 
   return EXIT_SUCCESS;

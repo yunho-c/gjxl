@@ -444,6 +444,8 @@ bool TestReferenceContracts() {
     ShapeCase{{32, 32}, "32x32"},
     ShapeCase{{8, 16}, "8x16"},
     ShapeCase{{16, 8}, "16x8"},
+    ShapeCase{{16, 32}, "16x32"},
+    ShapeCase{{32, 16}, "32x16"},
     ShapeCase{{8, 64}, "8x64"},
     ShapeCase{{64, 8}, "64x8"},
   };
@@ -456,6 +458,7 @@ bool TestReferenceContracts() {
 
   constexpr std::array kTransposeCases{
     ShapeCase{{8, 16}, "8x16/16x8"},
+    ShapeCase{{16, 32}, "16x32/32x16"},
     ShapeCase{{8, 64}, "8x64/64x8"},
   };
 

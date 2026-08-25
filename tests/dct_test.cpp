@@ -656,6 +656,38 @@ int main() {
       if (!TestTransformValidation(*gpu)) {
         return EXIT_FAILURE;
       }
+
+      if (!TestDctKernels(
+          *gpu,
+          "scalar matmul",
+          gjxl::AcStrategyType::kDct32x16,
+          2e-5,
+          2e-4)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestRoundTrip(
+          *gpu,
+          "scalar matmul",
+          gjxl::AcStrategyType::kDct32x16)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestDctKernels(
+          *gpu,
+          "scalar matmul",
+          gjxl::AcStrategyType::kDct16x32,
+          2e-5,
+          2e-4)) {
+        return EXIT_FAILURE;
+      }
+
+      if (!TestRoundTrip(
+          *gpu,
+          "scalar matmul",
+          gjxl::AcStrategyType::kDct16x32)) {
+        return EXIT_FAILURE;
+      }
     }
 
     if (!TestDctKernels(

@@ -47,6 +47,18 @@ struct MetalBackendOptions {
 
   MetalDctImplementation inverse_dct8x16 =
     MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation forward_dct32x16 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation inverse_dct32x16 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation forward_dct16x32 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation inverse_dct16x32 =
+    MetalDctImplementation::kScalarMatmul;
 };
 
 // Creates a Metal backend using the system-default GPU.

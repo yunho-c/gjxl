@@ -47,7 +47,7 @@ struct DctSelection {
   MetalDctImplementation inverse;
 };
 
-constexpr std::array<DctImplementationSpec, 10>
+constexpr std::array<DctImplementationSpec, 12>
 kDctImplementationSpecs{{
   {
     .strategy = AcStrategyType::kDct8,
@@ -145,6 +145,22 @@ kDctImplementationSpecs{{
     .inverse_function_name = "gjxl_dct8x16_inverse_simdgroup_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 1,
+  },
+  {
+    .strategy = AcStrategyType::kDct32x16,
+    .implementation = MetalDctImplementation::kScalarMatmul,
+    .display_name = "scalar matmul",
+    .forward_function_name = "gjxl_dct32x16_forward_scalar_2d_matmul",
+    .inverse_function_name = "gjxl_dct32x16_inverse_scalar_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
+  },
+  {
+    .strategy = AcStrategyType::kDct16x32,
+    .implementation = MetalDctImplementation::kScalarMatmul,
+    .display_name = "scalar matmul",
+    .forward_function_name = "gjxl_dct16x32_forward_scalar_2d_matmul",
+    .inverse_function_name = "gjxl_dct16x32_inverse_scalar_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
   },
 }};
 
@@ -862,7 +878,7 @@ Status CreateMetalBackend(
       "Metal library path is empty");
   }
 
-  const std::array<DctSelection, 5> dct_selections{{
+  const std::array<DctSelection, 7> dct_selections{{
     {
       .strategy = AcStrategyType::kDct8,
       .forward = options.forward_dct8,
@@ -887,6 +903,16 @@ Status CreateMetalBackend(
       .strategy = AcStrategyType::kDct8x16,
       .forward = options.forward_dct8x16,
       .inverse = options.inverse_dct8x16,
+    },
+    {
+      .strategy = AcStrategyType::kDct32x16,
+      .forward = options.forward_dct32x16,
+      .inverse = options.inverse_dct32x16,
+    },
+    {
+      .strategy = AcStrategyType::kDct16x32,
+      .forward = options.forward_dct16x32,
+      .inverse = options.inverse_dct16x32,
     },
   }};
 

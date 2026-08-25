@@ -18,6 +18,10 @@ constant float kInverseDct16Scale = 16.0f;
 constant float kForwardDct16x8Scale = 0.0883883461f;
 constant float kInverseDct16x8Scale = 11.3137083f;
 
+// 1 / sqrt(32 * 16). The transpose pair has the same normalization.
+constant float kForwardDct32x16Scale = 0.0441941738f;
+constant float kInverseDct32x16Scale = 22.6274170f;
+
 constant float kForwardDct32Scale = 1.0f / 32.0f;
 constant float kInverseDct32Scale = 32.0f;
 
@@ -514,7 +518,7 @@ kernel void gjxl_dct16_inverse_simdgroup_2d_matmul(
 }
 
 
-// 16x8 and 8x16
+// Rectangular transforms
 
 template <uint Rows, uint Columns>
 __attribute__((always_inline)) inline ulong RectangularCoefficientIndex(
@@ -1049,6 +1053,93 @@ kernel void gjxl_dct8x16_inverse_simdgroup_2d_matmul(
     group_position);
 }
 
+
+// Computes a forward DCT over 32 rows and 16 columns. The natural [v][u]
+// result is transposed to libjxl's [u][v] coefficient layout.
+kernel void gjxl_dct32x16_forward_scalar_2d_matmul(
+  device const float* A [[buffer(0)]], // input (pixels)
+  device       float* B [[buffer(1)]], // output (coefficients)
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float T[32 * 16];
+
+  ForwardRectangularDct<32, 16>(
+    A,
+    B,
+    kOrthonormalDct32,
+    kOrthonormalDct16,
+    T,
+    kForwardDct32x16Scale,
+    tid,
+    group_position);
+}
+
+
+// Reads libjxl's transposed [u][v] coefficient layout and reconstructs
+// row-major pixels over 32 rows and 16 columns.
+kernel void gjxl_dct32x16_inverse_scalar_2d_matmul(
+  device const float* A [[buffer(0)]], // input (coefficients)
+  device       float* B [[buffer(1)]], // output (pixels)
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float T[32 * 16];
+
+  InverseRectangularDct<32, 16>(
+    A,
+    B,
+    kOrthonormalDct32,
+    kOrthonormalDct16,
+    T,
+    kInverseDct32x16Scale,
+    tid,
+    group_position);
+}
+
+
+// Computes a forward DCT over 16 rows and 32 columns. For this orientation,
+// libjxl stores coefficients in the natural row-major [v][u] layout.
+kernel void gjxl_dct16x32_forward_scalar_2d_matmul(
+  device const float* A [[buffer(0)]], // input (pixels)
+  device       float* B [[buffer(1)]], // output (coefficients)
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float T[16 * 32];
+
+  ForwardRectangularDct<16, 32>(
+    A,
+    B,
+    kOrthonormalDct16,
+    kOrthonormalDct32,
+    T,
+    kForwardDct32x16Scale,
+    tid,
+    group_position);
+}
+
+
+// Reads libjxl's natural [v][u] coefficient layout and reconstructs
+// row-major pixels over 16 rows and 32 columns.
+kernel void gjxl_dct16x32_inverse_scalar_2d_matmul(
+  device const float* A [[buffer(0)]], // input (coefficients)
+  device       float* B [[buffer(1)]], // output (pixels)
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float T[16 * 32];
+
+  InverseRectangularDct<16, 32>(
+    A,
+    B,
+    kOrthonormalDct16,
+    kOrthonormalDct32,
+    T,
+    kInverseDct32x16Scale,
+    tid,
+    group_position);
+}
 
 
 // 32x32
