@@ -26,9 +26,9 @@ bool CheckFrameGeometry() {
     return false;
   }
 
-  if (geometry.frame != gjxl::Extent2D{17, 9} ||
-      geometry.padded_frame != gjxl::Extent2D{24, 16} ||
-      geometry.block_grid.blocks != gjxl::Extent2D{3, 2}) {
+  if (geometry.frame() != gjxl::Extent2D{17, 9} ||
+      geometry.padded_frame() != gjxl::Extent2D{24, 16} ||
+      geometry.block_grid().blocks != gjxl::Extent2D{3, 2}) {
 
     std::cerr << "FrameGeometry produced incorrect extents\n";
     return false;

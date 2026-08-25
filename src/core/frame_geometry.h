@@ -11,10 +11,11 @@
 
 namespace gjxl {
 
-struct FrameGeometry {
-  Extent2D frame;
-  Extent2D padded_frame;
-  BlockGrid block_grid;
+class FrameGeometry {
+public:
+  // Default construction provides storage for Create(). Accessors describe a
+  // valid geometry only after Create() succeeds.
+  FrameGeometry() = default;
 
   [[nodiscard]] static Status Create(
     Extent2D frame,
@@ -32,13 +33,8 @@ struct FrameGeometry {
       return status;
     }
 
-    const FrameGeometry geometry{
-      .frame = frame,
-      .padded_frame = block_grid.padded_pixel_extent(),
-      .block_grid = block_grid,
-    };
-
-    *out = geometry;
+    out->frame_ = frame;
+    out->block_grid_ = block_grid;
     return Status::Ok();
   }
 
@@ -49,6 +45,22 @@ struct FrameGeometry {
 
     return Create({width, height}, out);
   }
+
+  [[nodiscard]] constexpr Extent2D frame() const noexcept {
+    return frame_;
+  }
+
+  [[nodiscard]] constexpr BlockGrid block_grid() const noexcept {
+    return block_grid_;
+  }
+
+  [[nodiscard]] constexpr Extent2D padded_frame() const noexcept {
+    return block_grid_.padded_pixel_extent();
+  }
+
+private:
+  Extent2D frame_;
+  BlockGrid block_grid_;
 };
 
 }  // namespace gjxl
