@@ -17,6 +17,8 @@
 #include "codec/dct.h"
 #include "codec/quantization.h"
 #include "core/geometry.h"
+#include "core/image_buffer.h"
+#include "core/image_ops.h"
 
 namespace gjxl {
 namespace {
@@ -371,20 +373,8 @@ Status ReconstructQuantizedCoefficients(
   }
 
   try {
-    size_t pixel_count = 0;
-    if (!output.extent().try_area(&pixel_count)) {
-      return Status::InvalidArgument(
-        "Coefficient reconstruction dimensions are too large");
-    }
-    std::array<std::vector<float>, 3> result;
-    for (std::vector<float>& plane : result) {
-      plane.resize(pixel_count);
-    }
-    const Image3FView result_view{{
-      PlaneF32View{result[0].data(), output.extent(), output.width()},
-      PlaneF32View{result[1].data(), output.extent(), output.width()},
-      PlaneF32View{result[2].data(), output.extent(), output.width()},
-    }};
+    Image3FBuffer result(output.extent());
+    const Image3FView result_view = result.view();
 
     for (const QuantizedTransform& transform : frame.transforms()) {
       const AcStrategyInfo* info = GetAcStrategyInfo(transform.strategy);
@@ -461,14 +451,7 @@ Status ReconstructQuantizedCoefficients(
       }
     }
 
-    for (size_t channel = 0; channel < result.size(); ++channel) {
-      for (size_t y = 0; y < output.height(); ++y) {
-        std::copy_n(
-          result_view.plane[channel].Row(y),
-          output.width(),
-          output.plane[channel].Row(y));
-      }
-    }
+    CopyImage(result.const_view(), output);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate coefficient reconstruction scratch storage");

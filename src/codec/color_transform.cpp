@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <new>
 #include <stdexcept>
-#include <vector>
+
+#include "core/image_buffer.h"
+#include "core/image_ops.h"
 
 namespace gjxl {
 namespace {
@@ -47,15 +49,8 @@ Status ConvertImage(
   }
 
   try {
-    size_t pixel_count = 0;
-    if (!input.extent().try_area(&pixel_count)) {
-      return Status::InvalidArgument(
-        "Color-transform image dimensions are too large");
-    }
-    std::array<std::vector<float>, 3> result;
-    for (std::vector<float>& plane : result) {
-      plane.resize(pixel_count);
-    }
+    Image3FBuffer result(input.extent());
+    const Image3FView result_view = result.view();
     for (size_t y = 0; y < input.height(); ++y) {
       for (size_t x = 0; x < input.width(); ++x) {
         const std::array<float, 3> value = {
@@ -79,18 +74,11 @@ Status ConvertImage(
             "Color transform produced non-finite pixels");
         }
         for (size_t channel = 0; channel < 3; ++channel) {
-          result[channel][y * input.width() + x] = converted[channel];
+          result_view.plane[channel].Row(y)[x] = converted[channel];
         }
       }
     }
-    for (size_t channel = 0; channel < 3; ++channel) {
-      for (size_t y = 0; y < input.height(); ++y) {
-        std::copy_n(
-          result[channel].data() + y * input.width(),
-          input.width(),
-          output.plane[channel].Row(y));
-      }
-    }
+    CopyImage(result.const_view(), output);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate color-transform scratch storage");

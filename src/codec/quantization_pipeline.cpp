@@ -3,8 +3,6 @@
 
 #include "codec/quantization_pipeline.h"
 
-#include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -17,67 +15,11 @@
 #include "codec/chroma_from_luma.h"
 #include "codec/gaborish.h"
 #include "core/geometry.h"
+#include "core/image_buffer.h"
+#include "core/image_ops.h"
 
 namespace gjxl {
 namespace {
-
-struct OwnedImage3F {
-  Extent2D extent;
-  std::array<std::vector<float>, 3> plane;
-
-  [[nodiscard]] Image3FView View() {
-    return {{
-      PlaneF32View{plane[0].data(), extent, extent.width},
-      PlaneF32View{plane[1].data(), extent, extent.width},
-      PlaneF32View{plane[2].data(), extent, extent.width},
-    }};
-  }
-
-  [[nodiscard]] ConstImage3FView ConstView() const {
-    return {{
-      ConstPlaneF32View{plane[0].data(), extent, extent.width},
-      ConstPlaneF32View{plane[1].data(), extent, extent.width},
-      ConstPlaneF32View{plane[2].data(), extent, extent.width},
-    }};
-  }
-};
-
-Status AllocateImage(Extent2D extent, OwnedImage3F* image) {
-  size_t count = 0;
-  if (image == nullptr || extent.empty() || !extent.try_area(&count)) {
-    return Status::InvalidArgument(
-      "CPU quantization pipeline image extent is invalid");
-  }
-  image->extent = extent;
-  for (std::vector<float>& plane : image->plane) {
-    plane.resize(count);
-  }
-  return Status::Ok();
-}
-
-template <typename T>
-void CopyPlane(
-  const std::vector<T>& source,
-  PlaneView<T> destination) {
-
-  for (size_t y = 0; y < destination.extent.height; ++y) {
-    std::copy_n(
-      source.data() + y * destination.extent.width,
-      destination.extent.width,
-      destination.Row(y));
-  }
-}
-
-void CopyImage(const OwnedImage3F& source, Image3FView destination) {
-  for (size_t channel = 0; channel < 3; ++channel) {
-    for (size_t y = 0; y < destination.height(); ++y) {
-      std::copy_n(
-        source.plane[channel].data() + y * source.extent.width,
-        destination.width(),
-        destination.plane[channel].Row(y));
-    }
-  }
-}
 
 Status ValidatePipelineInputs(
   ConstImage3FView original_linear_rgb,
@@ -188,33 +130,22 @@ Status RunCpuQuantizationPipeline(
       return status;
     }
 
-    OwnedImage3F preprocessed_opsin;
-    status = AllocateImage(opsin.extent(), &preprocessed_opsin);
-    if (!status.ok()) {
-      return status;
-    }
+    Image3FBuffer preprocessed_opsin(opsin.extent());
     if (options.adaptive_quantization.loop_filter.gaborish) {
       status = ApplyGaborishInverse(
         opsin,
         options.gaborish_inverse_multipliers,
-        preprocessed_opsin.View());
+        preprocessed_opsin.view());
       if (!status.ok()) {
         return status;
       }
     } else {
-      for (size_t channel = 0; channel < 3; ++channel) {
-        for (size_t y = 0; y < opsin.height(); ++y) {
-          std::copy_n(
-            opsin.plane[channel].Row(y),
-            opsin.width(),
-            preprocessed_opsin.View().plane[channel].Row(y));
-        }
-      }
+      CopyImage(opsin, preprocessed_opsin.view());
     }
 
     ColorCorrelationMap initial_color_correlation;
     status = ComputeInitialColorCorrelationMap(
-      preprocessed_opsin.ConstView(),
+      preprocessed_opsin.const_view(),
       &initial_color_correlation);
     if (!status.ok()) {
       return status;
@@ -222,7 +153,7 @@ Status RunCpuQuantizationPipeline(
 
     AcStrategyGrid strategies;
     status = FindAcStrategyGrid(
-      preprocessed_opsin.ConstView(),
+      preprocessed_opsin.const_view(),
       {initial_quant.data(), block_extent, block_extent.width},
       {pixel_mask.data(), opsin.extent(), opsin.width()},
       initial_color_correlation,
@@ -242,13 +173,7 @@ Status RunCpuQuantizationPipeline(
     std::vector<float> final_quant(block_count);
     std::vector<int32_t> raw_quant(block_count);
     std::vector<float> block_distance(block_count);
-    OwnedImage3F reconstructed_linear;
-    status = AllocateImage(
-      original_linear_rgb.extent(),
-      &reconstructed_linear);
-    if (!status.ok()) {
-      return status;
-    }
+    Image3FBuffer reconstructed_linear(original_linear_rgb.extent());
     Quantizer quantizer;
     ColorCorrelationMap final_color_correlation;
     std::vector<double> score_history;
@@ -257,7 +182,7 @@ Status RunCpuQuantizationPipeline(
     adaptive_options.butteraugli_target = options.butteraugli_target;
     status = FindBestQuantization(
       original_linear_rgb,
-      preprocessed_opsin.ConstView(),
+      preprocessed_opsin.const_view(),
       strategies,
       {initial_quant.data(), block_extent, block_extent.width},
       {sharpness.data(), block_extent, block_extent.width},
@@ -269,7 +194,7 @@ Status RunCpuQuantizationPipeline(
           raw_quant.data(), block_extent, block_extent.width},
         .block_distance_map = {
           block_distance.data(), block_extent, block_extent.width},
-        .reconstructed_linear_rgb = reconstructed_linear.View(),
+        .reconstructed_linear_rgb = reconstructed_linear.view(),
         .quantizer = &quantizer,
         .color_correlation = &final_color_correlation,
         .score_history = &score_history,
@@ -278,16 +203,21 @@ Status RunCpuQuantizationPipeline(
       return status;
     }
 
-    CopyPlane(initial_quant, output.initial_quantization.quant_field);
-    CopyPlane(strategy_mask, output.initial_quantization.strategy_mask);
-    CopyPlane(pixel_mask, output.initial_quantization.pixel_mask);
-    CopyPlane(final_quant, output.adaptive_quantization.quant_field);
-    CopyPlane(raw_quant, output.adaptive_quantization.raw_quant_field);
-    CopyPlane(
+    CopyContiguousPlane(
+      initial_quant, output.initial_quantization.quant_field);
+    CopyContiguousPlane(
+      strategy_mask, output.initial_quantization.strategy_mask);
+    CopyContiguousPlane(
+      pixel_mask, output.initial_quantization.pixel_mask);
+    CopyContiguousPlane(
+      final_quant, output.adaptive_quantization.quant_field);
+    CopyContiguousPlane(
+      raw_quant, output.adaptive_quantization.raw_quant_field);
+    CopyContiguousPlane(
       block_distance,
       output.adaptive_quantization.block_distance_map);
     CopyImage(
-      reconstructed_linear,
+      reconstructed_linear.const_view(),
       output.adaptive_quantization.reconstructed_linear_rgb);
     *output.adaptive_quantization.quantizer = quantizer;
     *output.adaptive_quantization.color_correlation =

@@ -17,6 +17,8 @@
 #include "codec/quantization.h"
 #include "core/block_grid.h"
 #include "core/geometry.h"
+#include "core/image_buffer.h"
+#include "core/image_ops.h"
 #include "util/fast_math.h"
 
 namespace gjxl {
@@ -466,19 +468,6 @@ Status ValidateInputs(
   return Status::Ok();
 }
 
-void CopyPlane(
-  Extent2D extent,
-  const std::vector<float>& source,
-  PlaneF32View destination) {
-
-  for (size_t y = 0; y < extent.height; ++y) {
-    std::copy_n(
-      source.data() + y * extent.width,
-      extent.width,
-      destination.Row(y));
-  }
-}
-
 }  // namespace
 
 Status ComputeInitialQuantDc(
@@ -630,9 +619,9 @@ Status ComputeInitialQuantField(
         "Initial quantization produced a non-finite result");
     }
 
-    CopyPlane(block_extent, quant_field, output.quant_field);
-    CopyPlane(block_extent, strategy_mask, output.strategy_mask);
-    CopyPlane(opsin.extent(), blurred_pixel_mask, output.pixel_mask);
+    CopyContiguousPlane(quant_field, output.quant_field);
+    CopyContiguousPlane(strategy_mask, output.strategy_mask);
+    CopyContiguousPlane(blurred_pixel_mask, output.pixel_mask);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate initial quantization scratch storage");
@@ -721,12 +710,7 @@ Status AdjustQuantField(
       return status;
     }
 
-    for (size_t y = 0; y < output.extent.height; ++y) {
-      std::copy_n(
-        adjusted.data() + y * output.extent.width,
-        output.extent.width,
-        output.Row(y));
-    }
+    CopyContiguousPlane(adjusted, output);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate adjusted quant field storage");
@@ -739,93 +723,10 @@ Status AdjustQuantField(
 
 namespace {
 
-struct OwnedImage3F {
-  Extent2D extent;
-  std::array<std::vector<float>, 3> plane;
-
-  [[nodiscard]] Image3FView View() {
-    return {{
-      PlaneF32View{plane[0].data(), extent, extent.width},
-      PlaneF32View{plane[1].data(), extent, extent.width},
-      PlaneF32View{plane[2].data(), extent, extent.width},
-    }};
-  }
-
-  [[nodiscard]] ConstImage3FView ConstView() const {
-    return {{
-      ConstPlaneF32View{plane[0].data(), extent, extent.width},
-      ConstPlaneF32View{plane[1].data(), extent, extent.width},
-      ConstPlaneF32View{plane[2].data(), extent, extent.width},
-    }};
-  }
-};
-
-Status AllocateImage(Extent2D extent, OwnedImage3F* image) {
-  size_t pixel_count = 0;
-  if (image == nullptr || !extent.try_area(&pixel_count) || extent.empty()) {
-    return Status::InvalidArgument(
-      "Adaptive-quantization image extent is invalid");
-  }
-  image->extent = extent;
-  for (std::vector<float>& plane : image->plane) {
-    plane.resize(pixel_count);
-  }
-  return Status::Ok();
-}
-
-ConstImage3FView CroppedView(
-  const OwnedImage3F& image,
-  Extent2D extent) {
-
-  return {{
-    ConstPlaneF32View{image.plane[0].data(), extent, image.extent.width},
-    ConstPlaneF32View{image.plane[1].data(), extent, image.extent.width},
-    ConstPlaneF32View{image.plane[2].data(), extent, image.extent.width},
-  }};
-}
-
-void CopyContiguousPlane(
-  const std::vector<float>& source,
-  PlaneF32View destination) {
-
-  for (size_t y = 0; y < destination.extent.height; ++y) {
-    std::copy_n(
-      source.data() + y * destination.extent.width,
-      destination.extent.width,
-      destination.Row(y));
-  }
-}
-
-void CopyContiguousPlane(
-  const std::vector<int32_t>& source,
-  PlaneI32View destination) {
-
-  for (size_t y = 0; y < destination.extent.height; ++y) {
-    std::copy_n(
-      source.data() + y * destination.extent.width,
-      destination.extent.width,
-      destination.Row(y));
-  }
-}
-
-void CopyContiguousImage(
-  const OwnedImage3F& source,
-  Image3FView destination) {
-
-  for (size_t channel = 0; channel < 3; ++channel) {
-    for (size_t y = 0; y < destination.height(); ++y) {
-      std::copy_n(
-        source.plane[channel].data() + y * source.extent.width,
-        destination.width(),
-        destination.plane[channel].Row(y));
-    }
-  }
-}
-
 struct QuantizationEvaluation {
   std::vector<int32_t> raw_quant;
   std::vector<float> block_distance;
-  OwnedImage3F reconstructed_linear;
+  Image3FBuffer reconstructed_linear;
   Quantizer quantizer;
   ColorCorrelationMap color_correlation;
   double score = 0.0;
@@ -895,45 +796,32 @@ Status EvaluateQuantization(
     return status;
   }
 
-  OwnedImage3F reconstructed_opsin;
-  status = AllocateImage(opsin.extent(), &reconstructed_opsin);
-  if (!status.ok()) {
-    return status;
-  }
+  Image3FBuffer reconstructed_opsin(opsin.extent());
   status = ReconstructQuantizedCoefficients(
     coefficients,
     result.quantizer,
     result.color_correlation,
     options.coefficient_coding,
-    reconstructed_opsin.View());
+    reconstructed_opsin.view());
   if (!status.ok()) {
     return status;
   }
 
-  OwnedImage3F filtered_opsin;
-  status = AllocateImage(opsin.extent(), &filtered_opsin);
-  if (!status.ok()) {
-    return status;
-  }
+  Image3FBuffer filtered_opsin(opsin.extent());
   status = ApplyLoopFilters(
-    reconstructed_opsin.ConstView(),
+    reconstructed_opsin.const_view(),
     {inverse_sigma.data(), block_extent, block_extent.width},
     options.loop_filter,
-    filtered_opsin.View());
+    filtered_opsin.view());
   if (!status.ok()) {
     return status;
   }
 
-  status = AllocateImage(
-    original_linear_rgb.extent(),
-    &result.reconstructed_linear);
-  if (!status.ok()) {
-    return status;
-  }
+  result.reconstructed_linear.resize(original_linear_rgb.extent());
   status = OpsinToLinearRgb(
-    CroppedView(filtered_opsin, original_linear_rgb.extent()),
+    filtered_opsin.cropped_view(original_linear_rgb.extent()),
     options.opsin_intensity_target,
-    result.reconstructed_linear.View());
+    result.reconstructed_linear.view());
   if (!status.ok()) {
     return status;
   }
@@ -946,7 +834,7 @@ Status EvaluateQuantization(
   std::vector<float> distance_map(pixel_count);
   status = ComputeButteraugliDistance(
     original_linear_rgb,
-    result.reconstructed_linear.ConstView(),
+    result.reconstructed_linear.const_view(),
     options.butteraugli,
     {
       distance_map.data(),
@@ -1198,8 +1086,8 @@ Status FindBestQuantization(
     CopyContiguousPlane(
       evaluation.block_distance,
       output.block_distance_map);
-    CopyContiguousImage(
-      evaluation.reconstructed_linear,
+    CopyImage(
+      evaluation.reconstructed_linear.const_view(),
       output.reconstructed_linear_rgb);
     *output.quantizer = evaluation.quantizer;
     *output.color_correlation = std::move(evaluation.color_correlation);
