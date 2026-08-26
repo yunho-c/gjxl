@@ -56,6 +56,31 @@ void Require(
   std::exit(EXIT_FAILURE);
 }
 
+void RequireSubmission(
+  const gjxl::Status& status,
+  const std::unique_ptr<gjxl::GpuSubmission>& submission,
+  std::string_view operation) {
+
+  Require(status, operation);
+  if (submission == nullptr) {
+    std::cerr << operation << " returned no submission handle\n";
+    std::exit(EXIT_FAILURE);
+  }
+}
+
+gjxl::Status WaitAll(
+  const std::vector<std::unique_ptr<gjxl::GpuSubmission>>& submissions) {
+
+  gjxl::Status first_error;
+  for (const auto& submission : submissions) {
+    const gjxl::Status status = submission->Wait();
+    if (first_error.ok() && !status.ok()) {
+      first_error = status;
+    }
+  }
+  return first_error;
+}
+
 size_t ComparableTransformCount(
   gjxl::AcStrategyType strategy,
   size_t dct8_transform_count) {
@@ -90,7 +115,6 @@ size_t ComparableTransformCount(
 
 template <typename Submit>
 void BenchmarkDct(
-  gjxl::GpuBackend& gpu,
   std::string_view operation,
   const Submit& submit,
   const gjxl::TransformBatch& batch,
@@ -109,27 +133,34 @@ void BenchmarkDct(
   const std::string timed_operation =
     std::string("Timed ") + std::string(operation);
 
+  std::vector<std::unique_ptr<gjxl::GpuSubmission>> warmup_submissions;
+  warmup_submissions.reserve(kWarmupIterations);
   for (size_t i = 0; i < kWarmupIterations; ++i) {
-    Require(
-      submit(batch),
-      warmup_operation);
+    std::unique_ptr<gjxl::GpuSubmission> submission;
+    const gjxl::Status status = submit(batch, &submission);
+    RequireSubmission(status, submission, warmup_operation);
+    warmup_submissions.push_back(std::move(submission));
   }
 
   Require(
-    gpu.Synchronize(),
-    "Warmup synchronization");
+    WaitAll(warmup_submissions),
+    "Warmup completion");
+
+  std::vector<std::unique_ptr<gjxl::GpuSubmission>> timed_submissions;
+  timed_submissions.reserve(iterations);
 
   const auto begin = std::chrono::steady_clock::now();
 
   for (size_t i = 0; i < iterations; ++i) {
-    Require(
-      submit(batch),
-      timed_operation);
+    std::unique_ptr<gjxl::GpuSubmission> submission;
+    const gjxl::Status status = submit(batch, &submission);
+    RequireSubmission(status, submission, timed_operation);
+    timed_submissions.push_back(std::move(submission));
   }
 
   Require(
-    gpu.Synchronize(),
-    "Timed synchronization");
+    WaitAll(timed_submissions),
+    "Timed completion");
 
   const auto end = std::chrono::steady_clock::now();
 
@@ -222,21 +253,23 @@ void BenchmarkDctPair(
   };
 
   BenchmarkDct(
-    gpu,
     std::string(implementation_name) + " Forward" +
       std::string(strategy_info->name),
-    [&gpu](const gjxl::TransformBatch& transform_batch) {
-      return gpu.ForwardTransform(transform_batch);
+    [&gpu](
+      const gjxl::TransformBatch& transform_batch,
+      std::unique_ptr<gjxl::GpuSubmission>* submission) {
+      return gpu.ForwardTransform(transform_batch, submission);
     },
     batch,
     iterations);
 
   BenchmarkDct(
-    gpu,
     std::string(implementation_name) + " Inverse" +
       std::string(strategy_info->name),
-    [&gpu](const gjxl::TransformBatch& transform_batch) {
-      return gpu.InverseTransform(transform_batch);
+    [&gpu](
+      const gjxl::TransformBatch& transform_batch,
+      std::unique_ptr<gjxl::GpuSubmission>* submission) {
+      return gpu.InverseTransform(transform_batch, submission);
     },
     batch,
     iterations);

@@ -251,9 +251,9 @@ span all 15 samples from three consecutive invocations.
 
 This measurement predates the native Butteraugli facade and the later shared
 image/scratch refactors. It remains a historical comparison point, not the
-current Metal-AQ baseline. Milestone 0 of
-[`metal-aq.md`](metal-aq.md) requires a refreshed full-pipeline and per-evaluation
-breakdown before GPU implementation choices are treated as performance claims.
+current Metal-AQ baseline. The refreshed full-pipeline, per-evaluation, and
+peak-RSS results are recorded under completed Milestone 0 of
+[`metal-aq.md`](metal-aq.md).
 
 | Stage | Median | Observed range |
 | --- | ---: | ---: |

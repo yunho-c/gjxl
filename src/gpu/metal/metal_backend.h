@@ -59,6 +59,10 @@ struct MetalBackendOptions {
 
   MetalDctImplementation inverse_dct16x32 =
     MetalDctImplementation::kScalarMatmul;
+
+  // Deterministic failure injection used by real-device backend tests.
+  bool test_fail_submission = false;
+  bool test_fail_completion = false;
 };
 
 // Creates a Metal backend using the system-default GPU.

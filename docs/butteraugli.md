@@ -469,10 +469,10 @@ only for deliberate compatibility validation.
 ## Recommended implementation order
 
 Milestones 1 through 6 establish the standalone CPU correctness baseline and
-production dependency boundary and are complete. Shared
-device-image and submission infrastructure begins in
-[`metal-aq.md`](metal-aq.md); after that substrate is validated, complete the
-operation contract in Milestone 7 before porting leaf kernels in Milestone 8.
-Prepared-reference optimization and standalone qualification follow in
-Milestone 9. Full iterative-AQ integration proceeds only through the gates in
-`metal-aq.md`, while the native CPU map remains the primary readable oracle.
+production dependency boundary and are complete. Shared device-image and
+submission infrastructure is now validated by Milestone 1 of
+[`metal-aq.md`](metal-aq.md); complete the operation contract in Milestone 7
+before porting leaf kernels in Milestone 8. Prepared-reference optimization and
+standalone qualification follow in Milestone 9. Full iterative-AQ integration
+proceeds only through the gates in `metal-aq.md`, while the native CPU map
+remains the primary readable oracle.

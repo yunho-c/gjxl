@@ -16,15 +16,19 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/buffer.h"
+#include "gpu/metal/metal_backend_internal.h"
 #include "gpu/metal/metal_status.h"
 
 namespace gjxl {
 namespace {
 
-enum class TransformDirection {
-  kForward,
-  kInverse,
-};
+using metal_internal::MetalBackend;
+using metal_internal::MetalBuffer;
+using metal_internal::PrimitivePipelines;
+using metal_internal::TransformDirection;
+using metal_internal::TransformPipeline;
+using metal_internal::TransformPipelinePair;
+using metal_internal::TransformPipelineRegistry;
 
 enum class TransformDispatchMode {
   kOneThreadPerElement,
@@ -196,63 +200,11 @@ const DctImplementationSpec* FindDctImplementationSpec(
   return nullptr;
 }
 
-struct TransformPipeline {
-  NS::SharedPtr<MTL::ComputePipelineState> state;
-  NS::UInteger threads_per_threadgroup = 0;
-  AcStrategyType strategy = AcStrategyType::kCount;
-  std::string label;
-};
-
-struct TransformPipelinePair {
-  TransformPipeline forward;
-  TransformPipeline inverse;
-};
-
-using TransformPipelineRegistry =
-  std::array<TransformPipelinePair, kAcStrategyCount>;
-
 [[nodiscard]] constexpr size_t StrategyIndex(
   AcStrategyType strategy) noexcept {
 
   return static_cast<size_t>(strategy);
 }
-
-// MetalBuffer
-class MetalBuffer final : public DeviceBuffer {
-public:
-  MetalBuffer(
-    NS::SharedPtr<MTL::Buffer> buffer,
-    size_t size_bytes)
-    : DeviceBuffer(
-      BackendKind::kMetal,
-      size_bytes),
-    buffer_(std::move(buffer)) {}
-
-  ~MetalBuffer() override = default;
-
-  [[nodiscard]]
-  MTL::Buffer* handle() const noexcept {
-    return buffer_.get();
-  }
-
-  [[nodiscard]]
-  MTL::Device* device() const noexcept {
-    return buffer_->device();
-  }
-
-  [[nodiscard]]
-  void* contents() noexcept {
-    return buffer_->contents();
-  }
-
-  [[nodiscard]]
-  const void* contents() const noexcept {
-    return buffer_->contents();
-  }
-
-private:
-  NS::SharedPtr<MTL::Buffer> buffer_;
-};
 
 // Pipeline creation
 Status CreatePipeline(
@@ -412,462 +364,318 @@ Status CreateTransformPipeline(
   return Status::Ok();
 }
 
-// MetalBackend
-class MetalBackend final : public GpuBackend {
-public:
-  MetalBackend(
-    NS::SharedPtr<MTL::Device> device,
-    NS::SharedPtr<MTL::CommandQueue> command_queue,
-    NS::SharedPtr<MTL::Library> library,
-    TransformPipelineRegistry transform_pipelines)
-    : device_(std::move(device)),
-      command_queue_(std::move(command_queue)),
-      library_(std::move(library)),
-      transform_pipelines_(std::move(transform_pipelines)) {
-
-    NS::String* device_name = device_->name();
-
-    if (device_name != nullptr) {
-      const char* utf8 =
-        device_name->utf8String();
-
-      if (utf8 != nullptr) {
-        name_ = std::string("Metal: ") + utf8;
-      }
-    }
-
-    if (name_.empty()) {
-      name_ = "Metal";
-    }
-  }
-
-  ~MetalBackend() override {
-    // Avoid destroying resources while GPU work is still running.
-    (void)Synchronize();
-  }
-
-  // Identity
-  [[nodiscard]]
-  BackendKind kind() const noexcept override {
-    return BackendKind::kMetal;
-  }
-
-  [[nodiscard]]
-  std::string_view name() const noexcept override {
-    return name_;
-  }
-
-  // Memory
-  Status Allocate(
-    size_t size_bytes,
-    std::unique_ptr<DeviceBuffer>* out) override {
-
-    if (out == nullptr) {
-      return Status::InvalidArgument(
-        "Allocate output pointer is null");
-    }
-
-    if (size_bytes == 0) {
-      return Status::InvalidArgument(
-        "Cannot allocate zero-sized Metal buffer");
-    }
-
-    if (size_bytes >
-      std::numeric_limits<NS::UInteger>::max()) {
-
-      return Status::InvalidArgument(
-        "Requested Metal buffer is too large");
-    }
-
-    auto buffer =
-      NS::TransferPtr(
-        device_->newBuffer(
-          static_cast<NS::UInteger>(size_bytes),
-          MTL::ResourceStorageModeShared));
-
-    if (!buffer) {
-      return Status::OutOfMemory(
-        "Metal failed to allocate MTL::Buffer");
-    }
-
-    out->reset(
-      new MetalBuffer(
-        std::move(buffer),
-        size_bytes));
-
-    return Status::Ok();
-  }
-
-  // Host → GPU
-  // On Apple Silicon, these are shared buffers, so this is simply a memcpy
-  Status CopyHostToDevice(
-    DeviceBuffer& dst,
-    const void* src,
-    size_t size_bytes,
-    size_t dst_offset_bytes) override {
-
-    if (src == nullptr && size_bytes != 0) {
-      return Status::InvalidArgument(
-        "Host source pointer is null");
-    }
-
-    MetalBuffer* metal_dst = AsMetalBuffer(dst);
-
-    if (metal_dst == nullptr) {
-      return Status::InvalidArgument(
-        "Destination is not a Metal buffer");
-    }
-
-    if (metal_dst->device() != device_.get()) {
-      return Status::InvalidArgument(
-        "Destination belongs to another Metal device");
-    }
-
-    if (dst_offset_bytes > dst.size_bytes() ||
-        size_bytes > dst.size_bytes() - dst_offset_bytes) {
-
-      return Status::InvalidArgument(
-        "Host to device copy exceeds destination buffer");
-    }
-
-    auto* destination =
-      static_cast<std::byte*>(
-        metal_dst->contents()) +
-      dst_offset_bytes;
-
-    std::memcpy(
-      destination,
-      src,
-      size_bytes);
-
-    return Status::Ok();
-  }
-
-  // GPU → Host
-  Status CopyDeviceToHost(
-    const DeviceBuffer& src,
-    void* dst,
-    size_t size_bytes,
-    size_t src_offset_bytes) override {
-
-    if (dst == nullptr && size_bytes != 0) {
-      return Status::InvalidArgument(
-        "Host destination pointer is null");
-    }
-
-    const MetalBuffer* metal_src = AsMetalBuffer(src);
-
-    if (metal_src == nullptr) {
-      return Status::InvalidArgument(
-        "Source is not a Metal buffer");
-    }
-
-    if (metal_src->device() != device_.get()) {
-      return Status::InvalidArgument(
-        "Source belongs to another Metal device");
-    }
-
-    if (src_offset_bytes > src.size_bytes() ||
-        size_bytes > src.size_bytes() - src_offset_bytes) {
-
-      return Status::InvalidArgument(
-        "Device-to-host copy exceeds source buffer");
-    }
-
-    const auto* source =
-      static_cast<const std::byte*>(
-        metal_src->contents()) + src_offset_bytes;
-
-    std::memcpy(
-      dst,
-      source,
-      size_bytes);
-
-    return Status::Ok();
-  }
-
-  // Transforms
-  Status ForwardTransform(
-    const TransformBatch& batch) override {
-
-    return SubmitTransform(
-      TransformDirection::kForward,
-      batch);
-  }
-
-  Status InverseTransform(
-    const TransformBatch& batch) override {
-
-    return SubmitTransform(
-      TransformDirection::kInverse,
-      batch);
-  }
-
-  // Synchronization
-  Status Synchronize() override {
-    if (!last_command_buffer_) {
-      return Status::Ok();
-    }
-
-    last_command_buffer_->waitUntilCompleted();
-
-    Status result = Status::Ok();
-
-    if (last_command_buffer_->status() ==
-      MTL::CommandBufferStatusError) {
-
-      result =
-        metal::ErrorToStatus(
-          last_command_buffer_->error(),
-          "Metal command buffer");
-    }
-
-    last_command_buffer_.reset();
-
-    return result;
-  }
-
-
-private:
-  static MetalBuffer* AsMetalBuffer(
-    DeviceBuffer& buffer) {
-
-    if (buffer.backend() != BackendKind::kMetal) {
-      return nullptr;
-    }
-
-    return dynamic_cast<MetalBuffer*>(&buffer);
-  }
-
-  static const MetalBuffer* AsMetalBuffer(
-    const DeviceBuffer& buffer) {
-
-    if (buffer.backend() !=
-      BackendKind::kMetal) {
-      return nullptr;
-    }
-
-    return dynamic_cast<const MetalBuffer*>(&buffer);
-  }
-
-  Status ValidateTransformBatch(
-    const AcStrategyInfo& strategy_info,
-    const TransformBatch& batch,
-    const MetalBuffer** input,
-    MetalBuffer** output) const {
-
-    if (input == nullptr || output == nullptr) {
-
-      return Status::Internal(
-        "ValidateTransformBatch output is null");
-    }
-
-    if (batch.transform_count == 0) {
-      *input = nullptr;
-      *output = nullptr;
-      return Status::Ok();
-    }
-
-    if (batch.input == nullptr || batch.output == nullptr) {
-      return Status::InvalidArgument(
-        "Transform input/output buffer is null");
-    }
-
-    if (batch.input == batch.output) {
-      return Status::InvalidArgument(
-        "In-place transforms are not supported yet");
-    }
-
-    const size_t coefficient_count =
-      strategy_info.coefficient_count();
-
-    if (coefficient_count >
-        std::numeric_limits<size_t>::max() / sizeof(float)) {
-
-      return Status::Internal(
-        "Transform coefficient count is too large");
-    }
-
-    const size_t bytes_per_transform =
-      coefficient_count * sizeof(float);
-
-    if (batch.transform_count >
-        std::numeric_limits<size_t>::max() / bytes_per_transform) {
-
-      return Status::InvalidArgument(
-        "Transform batch is too large");
-    }
-
-    const size_t required_bytes =
-      batch.transform_count * bytes_per_transform;
-
-    if (batch.input->size_bytes() < required_bytes ||
-        batch.output->size_bytes() < required_bytes) {
-
-      return Status::InvalidArgument(
-        "Transform buffer is too small");
-    }
-
-    *input = AsMetalBuffer(*batch.input);
-    *output = AsMetalBuffer(*batch.output);
-
-    if (*input == nullptr || *output == nullptr) {
-      return Status::InvalidArgument(
-        "Transform buffers are not Metal buffers");
-    }
-
-    if ((*input)->device() != device_.get() ||
-        (*output)->device() != device_.get()) {
-
-      return Status::InvalidArgument(
-        "Transform buffer belongs to another Metal device");
-    }
-
-    return Status::Ok();
-  }
-
-
-  Status SubmitTransform(
-    TransformDirection direction,
-    const TransformBatch& batch) {
-
-    const AcStrategyInfo* strategy_info =
-      GetAcStrategyInfo(batch.strategy);
-
-    if (strategy_info == nullptr) {
-      return Status::InvalidArgument(
-        "Unknown JPEG XL AC strategy");
-    }
-
-    const TransformPipelinePair& pair =
-      transform_pipelines_[StrategyIndex(batch.strategy)];
-
-    const TransformPipeline& pipeline =
-      direction == TransformDirection::kForward
-        ? pair.forward
-        : pair.inverse;
-
-    if (!pipeline.state) {
-      return Status::Unavailable(
-        std::string("Metal backend does not support ") +
-        std::string(strategy_info->name));
-    }
-
-    if (pipeline.strategy != batch.strategy) {
-      return Status::Internal(
-        "Transform pipeline strategy does not match batch strategy");
-    }
-
-    const MetalBuffer* input = nullptr;
-    MetalBuffer* output = nullptr;
-
-    Status status =
-      ValidateTransformBatch(
-        *strategy_info,
-        batch,
-        &input,
-        &output);
-
-    if (!status.ok()) {
-      return status;
-    }
-
-    if (batch.transform_count == 0) {
-      return Status::Ok();
-    }
-
-    if (batch.transform_count >
-        std::numeric_limits<NS::UInteger>::max()) {
-
-      return Status::InvalidArgument(
-        "Transform batch exceeds Metal grid range");
-    }
-
-    // metal-cpp uses autorelease for commandBuffer() & computeCommandEncoder()
-    auto pool =
-      NS::TransferPtr(
-        NS::AutoreleasePool::alloc()->init());
-
-    MTL::CommandBuffer* raw_command_buffer = command_queue_->commandBuffer();
-
-    if (raw_command_buffer == nullptr) {
-      return Status::Internal(
-        "Failed to create Metal command buffer");
-    }
-
-    // commandBuffer() is borrowed/autoreleased. Keep our own reference
-    // so Synchronize() can use it safely after this function returns.
-    auto command_buffer =
-      NS::RetainPtr(
-        raw_command_buffer);
-
-    raw_command_buffer->setLabel(
-      NS::String::string(
-        pipeline.label.c_str(),
-        NS::UTF8StringEncoding));
-
-    MTL::ComputeCommandEncoder* encoder =
-      raw_command_buffer->computeCommandEncoder();
-
-    if (encoder == nullptr) {
-      return Status::Internal(
-        "Failed to create Metal compute encoder");
-    }
-
-    encoder->setComputePipelineState(pipeline.state.get());
-
-    encoder->setBuffer(
-      input->handle(),
-      0,
-      0);
-
-    encoder->setBuffer(
-      output->handle(),
-      0,
-      1);
-
-    // Exactly one threadgroup per complete transform. The selected
-    // implementation determines how many threads cooperate within it.
-    const MTL::Size threadgroups(
-      static_cast<NS::UInteger>(
-        batch.transform_count),
-        1,
-        1);
-
-    const MTL::Size threads_per_threadgroup(
-      pipeline.threads_per_threadgroup,
-      1,
-      1);
-
-    encoder->dispatchThreadgroups(
-      threadgroups,
-      threads_per_threadgroup);
-
-    encoder->endEncoding();
-
-    raw_command_buffer->commit();
-
-    // Synchronizing also waits for previously submitted work.
-    last_command_buffer_ = std::move(command_buffer);
-
-    return Status::Ok();
-  }
-
-  NS::SharedPtr<MTL::Device> device_;
-
-  NS::SharedPtr<MTL::CommandQueue> command_queue_;
-
-  NS::SharedPtr<MTL::Library> library_;
-
-  TransformPipelineRegistry transform_pipelines_;
-
-  NS::SharedPtr<MTL::CommandBuffer> last_command_buffer_;
-
-  std::string name_;
-};
-
 
 }  // namespace
+
+namespace metal_internal {
+namespace {
+
+struct TransformSubmissionContext {
+  const TransformPipeline* pipeline = nullptr;
+  const MetalBuffer* input = nullptr;
+  MetalBuffer* output = nullptr;
+  size_t transform_count = 0;
+};
+
+}  // namespace
+
+MetalBackend::MetalBackend(
+  NS::SharedPtr<MTL::Device> device,
+  NS::SharedPtr<MTL::CommandQueue> command_queue,
+  NS::SharedPtr<MTL::Library> library,
+  TransformPipelineRegistry transform_pipelines,
+  PrimitivePipelines primitive_pipelines,
+  bool test_fail_submission,
+  bool test_fail_completion)
+  : device_(std::move(device)),
+    command_queue_(std::move(command_queue)),
+    library_(std::move(library)),
+    transform_pipelines_(std::move(transform_pipelines)),
+    primitive_pipelines_(std::move(primitive_pipelines)),
+    test_fail_submission_(test_fail_submission),
+    test_fail_completion_(test_fail_completion) {
+
+  NS::String* device_name = device_->name();
+  if (device_name != nullptr) {
+    const char* utf8 = device_name->utf8String();
+    if (utf8 != nullptr) {
+      name_ = std::string("Metal: ") + utf8;
+    }
+  }
+  if (name_.empty()) {
+    name_ = "Metal";
+  }
+}
+
+BackendKind MetalBackend::kind() const noexcept {
+  return BackendKind::kMetal;
+}
+
+std::string_view MetalBackend::name() const noexcept {
+  return name_;
+}
+
+Status MetalBackend::Allocate(
+  size_t size_bytes,
+  std::unique_ptr<DeviceBuffer>* out) {
+
+  if (out == nullptr) {
+    return Status::InvalidArgument(
+      "Allocate output pointer is null");
+  }
+  if (size_bytes == 0) {
+    return Status::InvalidArgument(
+      "Cannot allocate zero-sized Metal buffer");
+  }
+  if (size_bytes > std::numeric_limits<NS::UInteger>::max()) {
+    return Status::InvalidArgument(
+      "Requested Metal buffer is too large");
+  }
+
+  auto buffer = NS::TransferPtr(
+    device_->newBuffer(
+      static_cast<NS::UInteger>(size_bytes),
+      MTL::ResourceStorageModeShared));
+  if (!buffer) {
+    return Status::OutOfMemory(
+      "Metal failed to allocate MTL::Buffer");
+  }
+
+  out->reset(new MetalBuffer(std::move(buffer), id(), size_bytes));
+  RecordSuccessfulAllocation();
+  return Status::Ok();
+}
+
+Status MetalBackend::CopyHostToDevice(
+  DeviceBuffer& dst,
+  const void* src,
+  size_t size_bytes,
+  size_t dst_offset_bytes) {
+
+  if (src == nullptr && size_bytes != 0) {
+    return Status::InvalidArgument(
+      "Host source pointer is null");
+  }
+  MetalBuffer* metal_dst = AsMetalBuffer(dst);
+  if (metal_dst == nullptr) {
+    return Status::InvalidArgument(
+      "Destination is not a Metal buffer");
+  }
+  if (!owns(dst) || metal_dst->device() != device_.get()) {
+    return Status::InvalidArgument(
+      "Destination belongs to another Metal backend");
+  }
+  if (dst_offset_bytes > dst.size_bytes() ||
+      size_bytes > dst.size_bytes() - dst_offset_bytes) {
+    return Status::InvalidArgument(
+      "Host to device copy exceeds destination buffer");
+  }
+
+  auto* destination =
+    static_cast<std::byte*>(metal_dst->contents()) + dst_offset_bytes;
+  std::memcpy(destination, src, size_bytes);
+  return Status::Ok();
+}
+
+Status MetalBackend::CopyDeviceToHost(
+  const DeviceBuffer& src,
+  void* dst,
+  size_t size_bytes,
+  size_t src_offset_bytes) {
+
+  if (dst == nullptr && size_bytes != 0) {
+    return Status::InvalidArgument(
+      "Host destination pointer is null");
+  }
+  const MetalBuffer* metal_src = AsMetalBuffer(src);
+  if (metal_src == nullptr) {
+    return Status::InvalidArgument(
+      "Source is not a Metal buffer");
+  }
+  if (!owns(src) || metal_src->device() != device_.get()) {
+    return Status::InvalidArgument(
+      "Source belongs to another Metal backend");
+  }
+  if (src_offset_bytes > src.size_bytes() ||
+      size_bytes > src.size_bytes() - src_offset_bytes) {
+    return Status::InvalidArgument(
+      "Device-to-host copy exceeds source buffer");
+  }
+
+  const auto* source =
+    static_cast<const std::byte*>(metal_src->contents()) + src_offset_bytes;
+  std::memcpy(dst, source, size_bytes);
+  return Status::Ok();
+}
+
+Status MetalBackend::ForwardTransform(
+  const TransformBatch& batch,
+  std::unique_ptr<GpuSubmission>* submission) {
+
+  return SubmitTransform(
+    TransformDirection::kForward, batch, submission);
+}
+
+Status MetalBackend::InverseTransform(
+  const TransformBatch& batch,
+  std::unique_ptr<GpuSubmission>* submission) {
+
+  return SubmitTransform(
+    TransformDirection::kInverse, batch, submission);
+}
+
+MetalBuffer* MetalBackend::AsMetalBuffer(DeviceBuffer& buffer) {
+  if (buffer.backend() != BackendKind::kMetal) {
+    return nullptr;
+  }
+  return dynamic_cast<MetalBuffer*>(&buffer);
+}
+
+const MetalBuffer* MetalBackend::AsMetalBuffer(
+  const DeviceBuffer& buffer) {
+
+  if (buffer.backend() != BackendKind::kMetal) {
+    return nullptr;
+  }
+  return dynamic_cast<const MetalBuffer*>(&buffer);
+}
+
+Status MetalBackend::ValidateTransformBatch(
+  const AcStrategyInfo& strategy_info,
+  const TransformBatch& batch,
+  const MetalBuffer** input,
+  MetalBuffer** output) const {
+
+  if (input == nullptr || output == nullptr) {
+    return Status::Internal(
+      "ValidateTransformBatch output is null");
+  }
+  if (batch.transform_count == 0) {
+    *input = nullptr;
+    *output = nullptr;
+    return Status::Ok();
+  }
+  if (batch.input == nullptr || batch.output == nullptr) {
+    return Status::InvalidArgument(
+      "Transform input/output buffer is null");
+  }
+  if (batch.input == batch.output) {
+    return Status::InvalidArgument(
+      "In-place transforms are not supported yet");
+  }
+
+  const size_t coefficient_count = strategy_info.coefficient_count();
+  if (coefficient_count >
+      std::numeric_limits<size_t>::max() / sizeof(float)) {
+    return Status::Internal(
+      "Transform coefficient count is too large");
+  }
+  const size_t bytes_per_transform =
+    coefficient_count * sizeof(float);
+  if (batch.transform_count >
+      std::numeric_limits<size_t>::max() / bytes_per_transform) {
+    return Status::InvalidArgument(
+      "Transform batch is too large");
+  }
+  const size_t required_bytes =
+    batch.transform_count * bytes_per_transform;
+  if (batch.input->size_bytes() < required_bytes ||
+      batch.output->size_bytes() < required_bytes) {
+    return Status::InvalidArgument(
+      "Transform buffer is too small");
+  }
+
+  *input = AsMetalBuffer(*batch.input);
+  *output = AsMetalBuffer(*batch.output);
+  if (*input == nullptr || *output == nullptr) {
+    return Status::InvalidArgument(
+      "Transform buffers are not Metal buffers");
+  }
+  if (!owns(*batch.input) || !owns(*batch.output) ||
+      (*input)->device() != device_.get() ||
+      (*output)->device() != device_.get()) {
+    return Status::InvalidArgument(
+      "Transform buffer belongs to another Metal backend");
+  }
+  return Status::Ok();
+}
+
+void MetalBackend::EncodeTransformSubmission(
+  MetalBackend&,
+  MTL::ComputeCommandEncoder* encoder,
+  const void* context) {
+
+  const auto& transform =
+    *static_cast<const TransformSubmissionContext*>(context);
+  encoder->setComputePipelineState(transform.pipeline->state.get());
+  encoder->setBuffer(transform.input->handle(), 0, 0);
+  encoder->setBuffer(transform.output->handle(), 0, 1);
+  encoder->dispatchThreadgroups(
+    MTL::Size(
+      static_cast<NS::UInteger>(transform.transform_count), 1, 1),
+    MTL::Size(transform.pipeline->threads_per_threadgroup, 1, 1));
+}
+
+Status MetalBackend::SubmitTransform(
+  TransformDirection direction,
+  const TransformBatch& batch,
+  std::unique_ptr<GpuSubmission>* submission) {
+
+  if (submission == nullptr) {
+    return Status::InvalidArgument(
+      "Transform submission output pointer is null");
+  }
+  submission->reset();
+
+  const AcStrategyInfo* strategy_info =
+    GetAcStrategyInfo(batch.strategy);
+  if (strategy_info == nullptr) {
+    return Status::InvalidArgument(
+      "Unknown JPEG XL AC strategy");
+  }
+
+  const TransformPipelinePair& pair =
+    transform_pipelines_[StrategyIndex(batch.strategy)];
+  const TransformPipeline& pipeline =
+    direction == TransformDirection::kForward
+      ? pair.forward
+      : pair.inverse;
+  if (!pipeline.state) {
+    return Status::Unavailable(
+      std::string("Metal backend does not support ") +
+      std::string(strategy_info->name));
+  }
+  if (pipeline.strategy != batch.strategy) {
+    return Status::Internal(
+      "Transform pipeline strategy does not match batch strategy");
+  }
+
+  const MetalBuffer* input = nullptr;
+  MetalBuffer* output = nullptr;
+  Status status = ValidateTransformBatch(
+    *strategy_info, batch, &input, &output);
+  if (!status.ok()) {
+    return status;
+  }
+  if (batch.transform_count == 0) {
+    return Status::Ok();
+  }
+  if (batch.transform_count >
+      std::numeric_limits<NS::UInteger>::max()) {
+    return Status::InvalidArgument(
+      "Transform batch exceeds Metal grid range");
+  }
+
+  const TransformSubmissionContext context{
+    &pipeline, input, output, batch.transform_count};
+  return SubmitCompute(
+    pipeline.label.c_str(),
+    &MetalBackend::EncodeTransformSubmission,
+    &context,
+    submission);
+}
+
+}  // namespace metal_internal
 
 // Factory
 
@@ -1059,12 +867,22 @@ Status CreateMetalBackend(
     }
   }
 
+  PrimitivePipelines primitive_pipelines;
+  status = CreatePrimitivePipelines(
+    device.get(), library.get(), &primitive_pipelines);
+  if (!status.ok()) {
+    return status;
+  }
+
   out->reset(
     new MetalBackend(
       std::move(device),
       std::move(command_queue),
       std::move(library),
-      std::move(transform_pipelines)));
+      std::move(transform_pipelines),
+      std::move(primitive_pipelines),
+      options.test_fail_submission,
+      options.test_fail_completion));
 
   return Status::Ok();
 }
