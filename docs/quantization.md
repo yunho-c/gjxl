@@ -269,8 +269,9 @@ cmake --build build-release -j --target gjxl_quantization_benchmark
 
 ## Batched Metal AC candidate evaluation
 
-The Metal backend can evaluate a same-strategy candidate batch in one command
-buffer. It gathers candidate image regions, runs the selected forward DCT,
+The Metal backend can evaluate one or more same-strategy candidate batches in
+one command buffer and one compute encoder. It gathers candidate image regions,
+runs the selected forward DCT,
 computes quantization residuals and rate terms, runs the inverse DCT, and
 reduces the masked information loss to one cost per candidate. Full planar
 opsin, mask, and quantization-matrix buffers remain resident; only 24-byte
@@ -316,10 +317,43 @@ Reproduce the benchmark with:
 just ac-strategy-benchmark
 ```
 
-These results measure the candidate-evaluation leaf operation. They do not yet
-measure a complete `FindAcStrategyGrid` run: integration must collect enough
-candidates at each dependency-safe search stage to reach the batch crossovers,
-then compare the selected grid and whole-search wall time against the CPU path.
+### Complete staged search
+
+`FindAcStrategyGridGpu` precomputes every candidate anchor that the existing
+search can request, grouped by strategy. It submits all seven groups through a
+single command buffer and encoder, sharing scratch storage between groups, then
+downloads the scalar costs. The original CPU traversal consumes the resulting
+table without changing merge order, priorities, boundary checks, or tie policy.
+For a complete 8x8-block color tile this stages 258 candidates; enumerating
+every geometrically valid 32-point anchor would stage 320.
+
+Release measurements on an Apple M4 Pro on 2026-08-26 used three independent
+invocations of 12 samples with alternating CPU/GPU order. GPU E2E includes
+strided host packing, candidate and quant-norm construction, all buffer
+allocations and uploads, one command submission and synchronization, cost
+readback, and CPU decision traversal. Values below are ranges across the three
+invocation medians.
+
+| Image | Candidates | CPU median range | GPU E2E median range | Speedup range |
+| --- | ---: | ---: | ---: | ---: |
+| 64x64 | 258 | 2.764–2.792 ms | 1.038–1.170 ms | 2.39–2.69x |
+| 128x96 | 752 | 8.332–8.388 ms | 1.504–1.621 ms | 5.17–5.50x |
+| 256x192 | 3,096 | 33.478–33.640 ms | 3.395–3.490 ms | 9.61–9.87x |
+| 512x384 | 12,384 | 133.403–133.768 ms | 6.843–10.306 ms | 13.03–19.56x |
+
+The 512x384 GPU samples were bimodal (roughly 5–11 ms), and this affected the
+three run medians. The table therefore supports a substantial end-to-end
+throughput win, but not a claim that resource-management variance has been
+eliminated. Full-grid parity tests cover full and partial color tiles,
+three Butteraugli targets, strided inputs, invalid-input atomicity, and several
+deterministic source phases. Quantization-boundary sensitivity remains governed
+by the leaf-cost accuracy contract above.
+
+Reproduce this benchmark with:
+
+```sh
+just ac-strategy-search-benchmark
+```
 
 ## Accuracy scope and known deviations
 

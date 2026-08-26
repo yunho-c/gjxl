@@ -861,4 +861,27 @@ if(GJXL_BUILD_BENCHMARKS)
     gjxl_metal_shaders
   )
 
+  add_executable(
+    gjxl_ac_strategy_search_benchmark
+    benchmarks/ac_strategy_search_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_search_benchmark
+    PRIVATE
+      gjxl_gpu_ops
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_ac_strategy_search_benchmark
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_ac_strategy_search_benchmark
+    gjxl_metal_shaders
+  )
+
 endif()
