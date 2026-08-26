@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <span>
 #include <string_view>
 
 #include "core/status.h"
@@ -53,6 +54,12 @@ public:
   /// Candidate selection and search traversal remain on the CPU.
   virtual Status EvaluateAcStrategyCandidates(
     const AcStrategyCandidateBatch& batch) = 0;
+
+  /// Enqueues several candidate batches in one backend submission. Each batch
+  /// is internally same-strategy; batches may select different strategies,
+  /// execute in span order, and reuse scratch buffers.
+  virtual Status EvaluateAcStrategyCandidateBatches(
+    std::span<const AcStrategyCandidateBatch> batches) = 0;
 
   // Explicit synchronization is useful for tests and benchmarks.
   virtual Status Synchronize() = 0;

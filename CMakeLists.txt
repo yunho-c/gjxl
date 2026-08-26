@@ -159,6 +159,20 @@ else()
   )
 endif()
 
+# Backend-independent GPU codec operations
+add_library(
+  gjxl_gpu_ops
+  STATIC
+
+  src/gpu/ops/ac_strategy_search.cpp
+)
+
+target_link_libraries(
+  gjxl_gpu_ops
+  PUBLIC
+    gjxl_codec
+)
+
 # metal-cpp
 add_library(
   metal_cpp
@@ -755,6 +769,34 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_ac_strategy
     COMMAND gjxl_ac_strategy_metal_test
+  )
+
+  add_executable(
+    gjxl_ac_strategy_gpu_search_test
+    tests/ac_strategy_gpu_search_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_gpu_search_test
+    PRIVATE
+      gjxl_gpu_ops
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_ac_strategy_gpu_search_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_ac_strategy_gpu_search_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_ac_strategy_search
+    COMMAND gjxl_ac_strategy_gpu_search_test
   )
 
 endif()

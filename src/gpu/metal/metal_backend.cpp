@@ -11,10 +11,13 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <new>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "core/ac_strategy.h"
 #include "core/status.h"
@@ -698,7 +701,14 @@ public:
   Status EvaluateAcStrategyCandidates(
     const AcStrategyCandidateBatch& batch) override {
 
-    return SubmitAcStrategyCandidates(batch);
+    return SubmitAcStrategyCandidates(
+      std::span<const AcStrategyCandidateBatch>(&batch, 1));
+  }
+
+  Status EvaluateAcStrategyCandidateBatches(
+    std::span<const AcStrategyCandidateBatch> batches) override {
+
+    return SubmitAcStrategyCandidates(batches);
   }
 
   // Synchronization
@@ -1285,33 +1295,9 @@ private:
       MTL::Size(pipeline.threads_per_threadgroup, 1, 1));
   }
 
-  Status SubmitAcStrategyCandidates(
-    const AcStrategyCandidateBatch& batch) {
-
-    ValidatedAcStrategyBatch validated;
-    Status status = ValidateAcStrategyCandidateBatch(batch, &validated);
-    if (!status.ok() || batch.candidate_count == 0) {
-      return status;
-    }
-
-    auto pool = NS::TransferPtr(
-      NS::AutoreleasePool::alloc()->init());
-    MTL::CommandBuffer* raw_command_buffer = command_queue_->commandBuffer();
-    if (raw_command_buffer == nullptr) {
-      return Status::Internal(
-        "Failed to create Metal command buffer");
-    }
-    auto command_buffer = NS::RetainPtr(raw_command_buffer);
-    raw_command_buffer->setLabel(NS::String::string(
-      "gjxl batched AC candidate evaluation",
-      NS::UTF8StringEncoding));
-
-    MTL::ComputeCommandEncoder* encoder =
-      raw_command_buffer->computeCommandEncoder();
-    if (encoder == nullptr) {
-      return Status::Internal(
-        "Failed to create Metal compute encoder");
-    }
+  void EncodeAcStrategyCandidateBatch(
+    MTL::ComputeCommandEncoder* encoder,
+    const ValidatedAcStrategyBatch& validated) {
 
     encoder->setComputePipelineState(ac_strategy_pipelines_.gather.get());
     encoder->setBuffer(validated.opsin->handle(), 0, 0);
@@ -1374,10 +1360,62 @@ private:
       5);
     encoder->dispatchThreadgroups(
       MTL::Size(
-        static_cast<NS::UInteger>(batch.candidate_count),
+        static_cast<NS::UInteger>(validated.params.candidate_count),
         1,
         1),
       MTL::Size(validated.params.coefficient_count, 1, 1));
+  }
+
+  Status SubmitAcStrategyCandidates(
+    std::span<const AcStrategyCandidateBatch> batches) {
+
+    std::vector<ValidatedAcStrategyBatch> validated_batches;
+    try {
+      validated_batches.reserve(batches.size());
+      for (const AcStrategyCandidateBatch& batch : batches) {
+        ValidatedAcStrategyBatch validated;
+        Status status = ValidateAcStrategyCandidateBatch(batch, &validated);
+        if (!status.ok()) {
+          return status;
+        }
+        if (batch.candidate_count != 0) {
+          validated_batches.push_back(validated);
+        }
+      }
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to validate AC-strategy candidate batches");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+        "Too many AC-strategy candidate batches");
+    }
+
+    if (validated_batches.empty()) {
+      return Status::Ok();
+    }
+
+    auto pool = NS::TransferPtr(
+      NS::AutoreleasePool::alloc()->init());
+    MTL::CommandBuffer* raw_command_buffer = command_queue_->commandBuffer();
+    if (raw_command_buffer == nullptr) {
+      return Status::Internal(
+        "Failed to create Metal command buffer");
+    }
+    auto command_buffer = NS::RetainPtr(raw_command_buffer);
+    raw_command_buffer->setLabel(NS::String::string(
+      "gjxl staged AC candidate evaluation",
+      NS::UTF8StringEncoding));
+
+    MTL::ComputeCommandEncoder* encoder =
+      raw_command_buffer->computeCommandEncoder();
+    if (encoder == nullptr) {
+      return Status::Internal(
+        "Failed to create Metal compute encoder");
+    }
+
+    for (const ValidatedAcStrategyBatch& validated : validated_batches) {
+      EncodeAcStrategyCandidateBatch(encoder, validated);
+    }
 
     encoder->endEncoding();
     raw_command_buffer->commit();
