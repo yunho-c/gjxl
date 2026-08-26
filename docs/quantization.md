@@ -412,8 +412,9 @@ implementations therefore share packing, partial-threadgroup guards, and buffer
 bindings. Candidate and full-search tests cover all three implementations.
 
 An end-to-end fixture compares the CPU and GPU-search paths exactly through the
-final frame, including strategy cells, raw quantization, CfL, EPF, floating DC,
-fixed AC rows, reconstructed pixels, distance map, and score history. Its
+final frame, including strategy cells, raw quantization, CfL, EPF, quantized
+and decoder-equivalent DC, fixed AC rows, reconstructed pixels, distance map,
+and score history. Its
 257x17 source pads to 33x3 blocks, crossing the 256-pixel AC-group boundary and
 verifying the 1x3-block edge group. Broader quantization-boundary sensitivity
 still follows the documented candidate-cost accuracy contract.

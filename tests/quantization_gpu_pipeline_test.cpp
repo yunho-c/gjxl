@@ -185,8 +185,13 @@ bool FramesEqual(const gjxl::VarDctEncoderFrame &left,
   }
   const gjxl::ConstImage3FView left_dc = left.dc();
   const gjxl::ConstImage3FView right_dc = right.dc();
+  const gjxl::ConstImage3I32View left_quantized_dc = left.quantized_dc();
+  const gjxl::ConstImage3I32View right_quantized_dc = right.quantized_dc();
   for (size_t channel = 0; channel < 3; ++channel) {
-    if (!PlanesEqual(left_dc.plane[channel], right_dc.plane[channel])) {
+    if (!PlanesEqual(
+          left_quantized_dc.plane[channel],
+          right_quantized_dc.plane[channel]) ||
+        !PlanesEqual(left_dc.plane[channel], right_dc.plane[channel])) {
       return false;
     }
   }
