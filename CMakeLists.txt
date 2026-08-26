@@ -141,6 +141,7 @@ add_library(
   STATIC
 
   src/codestream/bit_writer.cpp
+  src/codestream/dc_group.cpp
   src/codestream/entropy.cpp
   src/codestream/huffman.cpp
   src/codestream/sections.cpp
@@ -149,7 +150,7 @@ add_library(
 target_link_libraries(
   gjxl_codestream
   PUBLIC
-    gjxl_core
+    gjxl_codec
 )
 
 if(GJXL_ENABLE_LIBJXL_REFERENCE)
@@ -439,6 +440,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME sections
     COMMAND gjxl_sections_test
+  )
+
+  add_executable(
+    gjxl_dc_group_test
+    tests/dc_group_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_dc_group_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME dc_group
+    COMMAND gjxl_dc_group_test
   )
 
   add_executable(
