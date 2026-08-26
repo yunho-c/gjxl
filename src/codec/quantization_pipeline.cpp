@@ -113,6 +113,13 @@ Status ValidatePipelineInputs(
   if (!output.initial_quantization.quant_field.valid() ||
       !output.initial_quantization.strategy_mask.valid() ||
       !output.initial_quantization.pixel_mask.valid() ||
+      !output.adaptive_quantization.quant_field.valid() ||
+      !output.adaptive_quantization.raw_quant_field.valid() ||
+      !output.adaptive_quantization.block_distance_map.valid() ||
+      !output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
+      output.adaptive_quantization.quantizer == nullptr ||
+      output.adaptive_quantization.color_correlation == nullptr ||
+      output.adaptive_quantization.score_history == nullptr ||
       output.initial_quantization.quant_field.extent != *block_extent ||
       output.initial_quantization.strategy_mask.extent != *block_extent ||
       output.initial_quantization.pixel_mask.extent != opsin.extent() ||
@@ -123,8 +130,8 @@ Status ValidatePipelineInputs(
       "CPU quantization pipeline outputs have invalid geometry");
   }
 
-  // Reuse the full AQ validator for the original/padded extent relationship
-  // and the remaining nested output contract after strategies are available.
+  // FindBestQuantization validates the original/padded extent relationship
+  // once the selected strategy grid is available.
   return Status::Ok();
 }
 

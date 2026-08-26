@@ -29,54 +29,63 @@ option(
   OFF
 )
 
-if(NOT EXISTS
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/third_party/highway/CMakeLists.txt")
-  message(FATAL_ERROR
-    "Pinned libjxl dependencies are missing. Run: git submodule update --init --recursive")
+option(
+  GJXL_ENABLE_LIBJXL_REFERENCE
+  "Build the libjxl-backed Butteraugli and iterative-AQ reference path"
+  ON
+)
+
+if(GJXL_ENABLE_LIBJXL_REFERENCE)
+  if(NOT EXISTS
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/third_party/highway/CMakeLists.txt")
+    message(FATAL_ERROR
+      "Pinned libjxl dependencies are missing. Run: git submodule update --init --recursive")
+  endif()
+
+  # Butteraugli is the perceptual oracle used by iterative AQ. Build only its
+  # required libjxl translation units plus Highway, rather than the full
+  # encoder/decoder libraries. Normal variables keep these subproject settings
+  # local instead of overwriting a parent project's cache.
+  set(HWY_ENABLE_TESTS OFF)
+  set(HWY_ENABLE_EXAMPLES OFF)
+  set(HWY_ENABLE_CONTRIB OFF)
+  add_subdirectory(
+    third_party/libjxl/third_party/highway
+    third_party/highway
+    EXCLUDE_FROM_ALL
+  )
+
+  add_library(
+    gjxl_butteraugli_reference
+    STATIC
+
+    third_party/libjxl/lib/jxl/butteraugli/butteraugli.cc
+    third_party/libjxl/lib/jxl/convolve_slow.cc
+    third_party/libjxl/lib/jxl/enc_convolve_separable5.cc
+    third_party/libjxl/lib/jxl/image.cc
+    third_party/libjxl/lib/jxl/memory_manager_internal.cc
+    third_party/libjxl/lib/jxl/simd_util.cc
+  )
+
+  target_include_directories(
+    gjxl_butteraugli_reference
+    PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
+  )
+
+  target_compile_features(
+    gjxl_butteraugli_reference
+    PRIVATE
+      cxx_std_20
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_reference
+    PRIVATE
+      hwy
+  )
 endif()
-
-# Butteraugli is the perceptual oracle used by iterative AQ. Build only its
-# required libjxl translation units plus Highway, rather than the full
-# encoder/decoder libraries.
-set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
-add_subdirectory(
-  third_party/libjxl/third_party/highway
-  third_party/highway
-  EXCLUDE_FROM_ALL
-)
-
-add_library(
-  gjxl_butteraugli_reference
-  STATIC
-
-  third_party/libjxl/lib/jxl/butteraugli/butteraugli.cc
-  third_party/libjxl/lib/jxl/convolve_slow.cc
-  third_party/libjxl/lib/jxl/enc_convolve_separable5.cc
-  third_party/libjxl/lib/jxl/image.cc
-  third_party/libjxl/lib/jxl/memory_manager_internal.cc
-  third_party/libjxl/lib/jxl/simd_util.cc
-)
-
-target_include_directories(
-  gjxl_butteraugli_reference
-  PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
-)
-
-target_compile_features(
-  gjxl_butteraugli_reference
-  PUBLIC
-    cxx_std_20
-)
-
-target_link_libraries(
-  gjxl_butteraugli_reference
-  PUBLIC
-    hwy
-)
 
 # C++ common interface
 add_library(
@@ -121,9 +130,34 @@ target_link_libraries(
   gjxl_codec
   PUBLIC
     gjxl_core
-  PRIVATE
-    gjxl_butteraugli_reference
 )
+
+if(GJXL_ENABLE_LIBJXL_REFERENCE)
+  target_compile_definitions(
+    gjxl_codec
+    PRIVATE
+      GJXL_ENABLE_LIBJXL_REFERENCE=1
+  )
+
+  target_include_directories(
+    gjxl_codec
+    PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
+  )
+
+  target_link_libraries(
+    gjxl_codec
+    PRIVATE
+      gjxl_butteraugli_reference
+  )
+else()
+  target_compile_definitions(
+    gjxl_codec
+    PRIVATE
+      GJXL_ENABLE_LIBJXL_REFERENCE=0
+  )
+endif()
 
 # metal-cpp
 add_library(
@@ -448,21 +482,23 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_adaptive_quantization_test
   )
 
-  add_executable(
-    gjxl_adaptive_quantization_loop_test
-    tests/adaptive_quantization_loop_test.cpp
-  )
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    add_executable(
+      gjxl_adaptive_quantization_loop_test
+      tests/adaptive_quantization_loop_test.cpp
+    )
 
-  target_link_libraries(
-    gjxl_adaptive_quantization_loop_test
-    PRIVATE
-      gjxl_codec
-  )
+    target_link_libraries(
+      gjxl_adaptive_quantization_loop_test
+      PRIVATE
+        gjxl_codec
+    )
 
-  add_test(
-    NAME adaptive_quantization_loop
-    COMMAND gjxl_adaptive_quantization_loop_test
-  )
+    add_test(
+      NAME adaptive_quantization_loop
+      COMMAND gjxl_adaptive_quantization_loop_test
+    )
+  endif()
 
   add_executable(
     gjxl_color_transform_test
@@ -480,21 +516,23 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_color_transform_test
   )
 
-  add_executable(
-    gjxl_quantization_pipeline_test
-    tests/quantization_pipeline_test.cpp
-  )
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    add_executable(
+      gjxl_quantization_pipeline_test
+      tests/quantization_pipeline_test.cpp
+    )
 
-  target_link_libraries(
-    gjxl_quantization_pipeline_test
-    PRIVATE
-      gjxl_codec
-  )
+    target_link_libraries(
+      gjxl_quantization_pipeline_test
+      PRIVATE
+        gjxl_codec
+    )
 
-  add_test(
-    NAME quantization_pipeline
-    COMMAND gjxl_quantization_pipeline_test
-  )
+    add_test(
+      NAME quantization_pipeline
+      COMMAND gjxl_quantization_pipeline_test
+    )
+  endif()
 
   add_executable(
     gjxl_gaborish_test
@@ -576,21 +614,39 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_loop_filter_test
   )
 
-  add_executable(
-    gjxl_butteraugli_test
-    tests/butteraugli_test.cpp
-  )
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    add_executable(
+      gjxl_butteraugli_test
+      tests/butteraugli_test.cpp
+    )
 
-  target_link_libraries(
-    gjxl_butteraugli_test
-    PRIVATE
-      gjxl_codec
-  )
+    target_link_libraries(
+      gjxl_butteraugli_test
+      PRIVATE
+        gjxl_codec
+    )
 
-  add_test(
-    NAME butteraugli
-    COMMAND gjxl_butteraugli_test
-  )
+    add_test(
+      NAME butteraugli
+      COMMAND gjxl_butteraugli_test
+    )
+  else()
+    add_executable(
+      gjxl_butteraugli_unavailable_test
+      tests/butteraugli_unavailable_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_butteraugli_unavailable_test
+      PRIVATE
+        gjxl_codec
+    )
+
+    add_test(
+      NAME butteraugli_unavailable
+      COMMAND gjxl_butteraugli_unavailable_test
+    )
+  endif()
 
   find_package(
     Python3
@@ -638,16 +694,18 @@ endif()
 
 if(GJXL_BUILD_BENCHMARKS)
 
-  add_executable(
-    gjxl_quantization_benchmark
-    benchmarks/quantization_benchmark.cpp
-  )
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    add_executable(
+      gjxl_quantization_benchmark
+      benchmarks/quantization_benchmark.cpp
+    )
 
-  target_link_libraries(
-    gjxl_quantization_benchmark
-    PRIVATE
-      gjxl_codec
-  )
+    target_link_libraries(
+      gjxl_quantization_benchmark
+      PRIVATE
+        gjxl_codec
+    )
+  endif()
 
   add_executable(
     gjxl_dct_benchmark

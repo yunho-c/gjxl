@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <string_view>
 #include <vector>
@@ -74,7 +75,8 @@ void FillFixture(
               0.11f * std::sin(
                 0.41f * static_cast<float>((channel + 1) * x + 2 * y)) +
               0.07f * std::cos(
-                0.27f * static_cast<float>(3 * x - y));
+                0.27f *
+                (3.0f * static_cast<float>(x) - static_cast<float>(y)));
             error = 0.018f * std::sin(
               0.73f * static_cast<float>(5 * x + 3 * y + channel));
             break;
@@ -154,7 +156,13 @@ bool CheckFixture(
           return std::abs(actual - expected) <= 3.0e-6f;
         })) {
     std::cerr << "Butteraugli fixture differs from libjxl "
-              << kPinnedLibjxlRevision << ": " << name << '\n';
+              << kPinnedLibjxlRevision << ": " << name
+              << "\n  actual score: " << std::setprecision(10) << score
+              << "\n  actual samples:";
+    for (float sample : samples) {
+      std::cerr << ' ' << sample;
+    }
+    std::cerr << '\n';
     return false;
   }
   return true;
@@ -240,8 +248,8 @@ int main() {
     {1.542445898f, 3.690321922f, 7.4165411f, 1.542400122f},
   };
   constexpr FixtureGolden kTextureGolden{
-    0.7470397949,
-    {0.1901933849f, 0.2465418875f, 0.3287552297f, 0.2964144051f},
+    0.7470344305,
+    {0.2163355798f, 0.2420784384f, 0.3289652765f, 0.2964046299f},
   };
   constexpr FixtureGolden kContrastGolden{
     2.239220142,

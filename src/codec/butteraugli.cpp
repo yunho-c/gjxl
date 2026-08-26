@@ -13,13 +13,16 @@
 #include <utility>
 #include <vector>
 
+#if GJXL_ENABLE_LIBJXL_REFERENCE
 #include <jxl/memory_manager.h>
 
 #include "lib/jxl/butteraugli/butteraugli.h"
 #include "lib/jxl/image.h"
 #include "lib/jxl/memory_manager_internal.h"
+#endif
 
 namespace gjxl {
+#if GJXL_ENABLE_LIBJXL_REFERENCE
 namespace {
 
 Status CopyToLibjxl(
@@ -54,6 +57,7 @@ Status CopyToLibjxl(
 }
 
 }  // namespace
+#endif
 
 Status ComputeButteraugliDistance(
   ConstImage3FView reference_linear_rgb,
@@ -62,6 +66,7 @@ Status ComputeButteraugliDistance(
   PlaneF32View distance_map,
   double* score) {
 
+#if GJXL_ENABLE_LIBJXL_REFERENCE
   if (!reference_linear_rgb.valid() ||
       !distorted_linear_rgb.valid() ||
       reference_linear_rgb.extent() != distorted_linear_rgb.extent() ||
@@ -144,6 +149,15 @@ Status ComputeButteraugliDistance(
   }
   *score = result_score;
   return Status::Ok();
+#else
+  static_cast<void>(reference_linear_rgb);
+  static_cast<void>(distorted_linear_rgb);
+  static_cast<void>(options);
+  static_cast<void>(distance_map);
+  static_cast<void>(score);
+  return Status::Unavailable(
+    "Butteraugli requires GJXL_ENABLE_LIBJXL_REFERENCE");
+#endif
 }
 
 Status ReduceButteraugliDistanceMap(

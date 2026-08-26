@@ -126,7 +126,9 @@ void FillLinear(ImageStorage* image) {
       image->plane[1][y * kPixelExtent.width + x] =
         std::clamp(
           0.1f + 0.68f * fy +
-            0.16f * std::cos(0.39f * static_cast<float>(2 * x - y)),
+            0.16f * std::cos(
+              0.39f *
+              (2.0f * static_cast<float>(x) - static_cast<float>(y))),
           0.0f,
           1.0f);
       image->plane[2][y * kPixelExtent.width + x] =

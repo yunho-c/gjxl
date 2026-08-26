@@ -170,6 +170,12 @@ pinned libjxl submodule. The gjxl-facing API remains backend-neutral and
 view-based, so a later GPU implementation can replace the private reference
 target without changing AQ orchestration.
 
+The libjxl-backed metric is controlled by `GJXL_ENABLE_LIBJXL_REFERENCE`, which
+defaults to `ON`. Set it to `OFF` to configure and build core, Metal, and the
+non-perceptual CPU codec paths without initializing the libjxl submodule.
+`ComputeButteraugliDistance` and the iterative reference pipeline then return
+`Unavailable`; their tests and quantization benchmark are omitted.
+
 Relevant implementation:
 
 - [`butteraugli.cpp`](../src/codec/butteraugli.cpp)

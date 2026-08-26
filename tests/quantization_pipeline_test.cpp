@@ -82,7 +82,9 @@ std::array<float, 3> Pixel(
     case Fixture::kTexture:
       return {
         0.45f + 0.28f * std::sin(0.73f * static_cast<float>(x + 2 * y)),
-        0.48f + 0.24f * std::cos(0.51f * static_cast<float>(3 * x - y)),
+        0.48f + 0.24f * std::cos(
+          0.51f *
+          (3.0f * static_cast<float>(x) - static_cast<float>(y))),
         0.42f + 0.31f * std::sin(0.37f * static_cast<float>(x + 5 * y)),
       };
     case Fixture::kEdge: {
@@ -328,6 +330,66 @@ bool CheckInvalidRequestIsAtomic() {
   return true;
 }
 
+bool CheckInvalidOutputsAreRejected() {
+  constexpr gjxl::Extent2D kExtent{16, 16};
+  ImageStorage original(kExtent, 0.25f);
+  ImageStorage opsin(kExtent, 0.1f);
+  PipelineStorage storage(kExtent, kExtent, 29.0f);
+  const auto initial = storage.initial_quant;
+  const auto final = storage.final_quant;
+  const auto raw = storage.raw_quant;
+  const auto reconstructed = storage.reconstructed.plane;
+
+  const auto rejected_atomically = [&](
+    gjxl::CpuQuantizationPipelineOutput output) {
+    const gjxl::Status status = gjxl::RunCpuQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), {}, output);
+    return !status.ok() &&
+      storage.initial_quant == initial &&
+      storage.final_quant == final &&
+      storage.raw_quant == raw &&
+      storage.reconstructed.plane == reconstructed &&
+      !storage.strategies.valid() &&
+      !storage.quantizer.valid() &&
+      !storage.color_correlation.valid() &&
+      storage.score_history.empty();
+  };
+
+  auto output = storage.Output();
+  output.adaptive_quantization.quant_field.data = nullptr;
+  if (!rejected_atomically(output)) return false;
+
+  output = storage.Output();
+  output.adaptive_quantization.raw_quant_field.data = nullptr;
+  if (!rejected_atomically(output)) return false;
+
+  output = storage.Output();
+  output.adaptive_quantization.block_distance_map.data = nullptr;
+  if (!rejected_atomically(output)) return false;
+
+  output = storage.Output();
+  output.adaptive_quantization.reconstructed_linear_rgb.plane[1].data = nullptr;
+  if (!rejected_atomically(output)) return false;
+
+  output = storage.Output();
+  output.adaptive_quantization.quantizer = nullptr;
+  if (!rejected_atomically(output)) return false;
+
+  output = storage.Output();
+  output.adaptive_quantization.color_correlation = nullptr;
+  if (!rejected_atomically(output)) return false;
+
+  output = storage.Output();
+  output.adaptive_quantization.score_history = nullptr;
+  if (!rejected_atomically(output)) return false;
+
+  output = storage.Output();
+  output.strategies = nullptr;
+  if (!rejected_atomically(output)) return false;
+
+  return true;
+}
+
 bool CheckGaborishDisabledPath() {
   constexpr gjxl::Extent2D kExtent{16, 16};
   ImageStorage original(kExtent);
@@ -365,7 +427,8 @@ int main() {
         "64-pixel color-tile boundary",
         {69, 17}) ||
       !CheckGaborishDisabledPath() ||
-      !CheckInvalidRequestIsAtomic()) {
+      !CheckInvalidRequestIsAtomic() ||
+      !CheckInvalidOutputsAreRejected()) {
     return EXIT_FAILURE;
   }
   std::cout << "All CPU quantization pipeline tests passed.\n";
