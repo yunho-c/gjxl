@@ -25,7 +25,10 @@ reference linkage from the production library target remains Milestone 6.
 
 The current Metal abstraction supports allocation, transfers, synchronization,
 and batched transforms. It does not yet model image operations, multi-pass
-compute graphs, or reusable scratch storage.
+compute graphs, or reusable scratch storage. Those shared contracts and the
+complete resident AQ integration are owned by
+[`metal-aq.md`](metal-aq.md); this document owns only the standalone device
+Butteraugli operation and its perceptual validation.
 
 ## Goals
 
@@ -52,9 +55,10 @@ compute graphs, or reusable scratch storage.
 
 ## Backend boundary
 
-Keep `ComputeButteraugliDistance` as the stable host-facing facade. During the
-transition, split its implementations behind internal entry points so native
-CPU and libjxl can be evaluated on the same inputs in one test process.
+Keep `ComputeButteraugliDistance` as the stable host-facing CPU facade. The
+native implementation is the production path; test-only internal adapters let
+the same fixtures evaluate native CPU, pinned scalar libjxl, and dispatched
+libjxl in one reference-enabled build.
 
 Metal should receive an explicit device-buffer operation, for example a
 `ButteraugliBatch` under `src/gpu/ops/`, rather than silently uploading and
@@ -69,11 +73,11 @@ optimization milestone, not part of the initial correctness contract.
 
 ## Validation strategy
 
-The libjxl reference must remain enabled while native parity is established.
-Tests should compare complete distance maps, not only the aggregate score or
-selected samples. Test-only fixtures generated from the pinned source should
-also cover intermediate stages without exposing those stages as production
-APIs.
+The reference-enabled configuration must remain available while native CPU and
+Metal parity are maintained. Tests should compare complete distance maps, not
+only the aggregate score or selected samples. Test-only fixtures generated from
+the pinned source should also cover intermediate stages without exposing those
+stages as production APIs.
 
 The differential corpus must cover:
 
@@ -353,59 +357,93 @@ Exit criterion: the default library and its consumers build and run without
 initializing libjxl, while a reference-enabled CI configuration continues to
 guard parity.
 
-### 7. Add reusable Metal image-operation infrastructure
+This build/dependency cleanup may proceed in parallel with Metal work. It is not
+a prerequisite for profiling AQ, adding shared GPU infrastructure, or beginning
+the device Butteraugli operation. Before removing the production reference
+linkage, document whether the slower native scalar CPU path is an accepted
+fallback or requires a separate CPU optimization effort.
 
-- Define device image views with extent, channel layout, and stride contracts.
-- Add image-operation dispatch without expanding transform-specific types.
-- Add reusable scratch allocation and explicit lifetime rules.
-- Support sequencing multiple kernels in one command buffer and reducing a
-  plane to a scalar maximum.
-- Add test utilities for intermediate device-plane readback and comparison.
+### 7. Define the standalone device Butteraugli operation
 
-Exit criterion: pointwise operations, separable blur, and maximum reduction
-have direct CPU-oracle tests over odd and strided dimensions.
+- Depend on the backend-neutral device-image, submission, scratch, and
+  reduction contracts established by Milestone 1 of
+  [`metal-aq.md`](metal-aq.md).
+- Add an explicit operation under `src/gpu/ops/`; do not route device buffers
+  through the synchronous CPU-view facade.
+- Accept device-resident reference and distorted linear RGB images and write a
+  device-resident pixel distance map plus an aggregate score.
+- Specify options, extent, stride, offset, buffer-capacity, device-ownership,
+  and aliasing requirements.
+- Separate one-time preparation, repeated comparison, optional diagnostic
+  readback, and score readback in the operation contract.
+- Validate all host-visible descriptors before submitting GPU work.
+
+Exit criterion: operation and prepared-state contracts are documented and
+covered by validation/lifetime tests before Butteraugli kernels replace any
+test stub or staged path.
 
 ### 8. Port Butteraugli leaf stages to Metal
 
 - Port opsin conversion and pointwise nonlinear operations.
 - Port separable blurs and frequency decomposition.
-- Port Malta neighborhood kernels, masking, erosion, and final composition.
-- Reuse scratch planes according to a documented lifetime schedule.
-- Compare each intermediate output with both native CPU and libjxl.
+- Port symmetric/asymmetric difference, Malta neighborhoods, masking, fuzzy
+  erosion, final composition, and maximum-score reduction.
+- Reuse scratch planes according to a documented lifetime schedule with no
+  steady-state allocation.
+- Compare every eligible intermediate output with the native scalar CPU oracle
+  and pinned libjxl fixtures.
+- Cover partial threadgroups, images smaller than a kernel, odd and strided
+  dimensions, poisoned output, and unsupported aliasing.
 
-Exit criterion: the Metal distance map and score meet their numerical
-tolerances on the complete corpus without uninitialized or out-of-bounds
-output.
+Exit criterion: the Metal distance map and score meet fixed numerical
+tolerances on the complete corpus without uninitialized, stale, or
+out-of-bounds output.
 
-### 9. Integrate Metal with iterative AQ
+### 9. Add prepared-reference reuse and qualify standalone performance
 
-- Add explicit backend selection to the internal quantization orchestration.
-- Keep reconstructed images and perceptual intermediates device-resident where
-  that reduces transfers without coupling policy to Metal.
-- Evaluate prepared-reference caching across repeated AQ comparisons.
-- Measure complete encode/reconstruct/measure iterations, not isolated kernels
-  alone.
+- Cache the original image's opsin and frequency decomposition for repeated AQ
+  comparisons.
+- Prove one-shot and prepared paths are numerically equivalent within the same
+  decision-level contract.
+- Reuse device buffers and scratch across comparisons without retaining mutable
+  state between independent prepared objects.
+- Benchmark preparation, resident comparison, and full-E2E comparison
+  separately with balanced execution order.
+- Report upload/readback costs, persistent bytes, peak scratch bytes, and the
+  CPU/Metal crossover on the workload set defined in
+  [`metal-aq.md`](metal-aq.md).
 
-Exit criterion: Metal preserves accepted AQ decisions and provides a stable,
-repeatable end-to-end speedup over native CPU for representative image sizes.
+Exit criterion: repeated prepared comparisons require no reference
+recomputation or steady-state allocation and provide a stable standalone
+full-E2E speedup at the target image sizes.
 
-### 10. Consolidate and maintain
+The strategy-aware 16-norm block reduction, CPU quant-field update, resident
+reconstruction chain, and complete AQ speedup gate are not Butteraugli
+milestones. They are tracked in [`metal-aq.md`](metal-aq.md), which consumes the
+device-resident distance map produced here.
 
-- Remove transitional implementation selectors and duplicate scratch paths.
-- Document numerical tolerances, known CPU/Metal deviations, memory use, and
-  backend-selection behavior.
-- Keep pinned full-map fixtures so ordinary tests do not require libjxl.
+### 10. Consolidate and maintain Butteraugli
+
+- Remove Butteraugli-specific transitional selectors and duplicate scratch
+  paths after CPU and Metal contracts stabilize.
+- Document numerical tolerances, known CPU/Metal deviations, standalone memory
+  use, and prepared-reference behavior.
+- Keep pinned full-map and intermediate fixtures so ordinary native tests do
+  not require libjxl.
 - Retain periodic reference-enabled CI or an explicit compatibility job for
   intentional libjxl revision updates.
 
-Exit criterion: native CPU is the standalone correctness baseline, Metal is an
-optional accelerated backend, and libjxl is required only for deliberate
-compatibility validation.
+Exit criterion: native CPU is the standalone correctness baseline, the device
+operation is an optional accelerated implementation, and libjxl is required
+only for deliberate compatibility validation.
 
 ## Recommended implementation order
 
-Complete milestones 1 through 6 before treating the Metal backend as a product
-path. Metal infrastructure may begin after the CPU blur contract is stable, but
-the native CPU map should remain the primary readable oracle. Within the Metal
-work, prioritize reusable convolution and scratch-management primitives before
-Butteraugli-specific fusion or tuning.
+Milestones 1 through 5 establish the correctness baseline and are complete.
+Milestone 6 is independent build cleanup and may proceed in parallel. Shared
+device-image and submission infrastructure begins in
+[`metal-aq.md`](metal-aq.md); after that substrate is validated, complete the
+operation contract in Milestone 7 before porting leaf kernels in Milestone 8.
+Prepared-reference optimization and standalone qualification follow in
+Milestone 9. Full iterative-AQ integration proceeds only through the gates in
+`metal-aq.md`, while the native CPU map remains the primary readable oracle.

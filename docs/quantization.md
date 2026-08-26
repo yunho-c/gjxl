@@ -1,9 +1,10 @@
 # Quantization and adaptive quantization roadmap
 
-This document tracks the CPU reference pipeline that must be established before
-moving additional quantization and adaptive-quantization work to Metal. The CPU
-implementations provide executable specifications, pinned libjxl parity data,
-and independent correctness oracles for later GPU kernels.
+This document tracks the CPU quantization and adaptive-quantization reference
+pipeline. The implementations provide executable specifications, pinned
+libjxl parity data, and independent correctness oracles for later GPU kernels.
+The cross-operation Metal implementation plan, residency contract, validation
+matrix, and rollout gate live in [`metal-aq.md`](metal-aq.md).
 
 The current reference revision is libjxl
 `e8ff09762481785938d8e4e01333ed3917571161`.
@@ -165,16 +166,16 @@ Relevant implementations:
 - Validate both the full distance map and scalar score against pinned fixtures.
 - Include flat, textured, high-contrast, and chromatic test images.
 
-The CPU metric builds only Butteraugli's required translation units from the
-pinned libjxl submodule. The gjxl-facing API remains backend-neutral and
-view-based, so a later GPU implementation can replace the private reference
-target without changing AQ orchestration.
+The CPU metric uses gjxl's native scalar Butteraugli implementation through the
+backend-neutral, view-based `ComputeButteraugliDistance` facade. The pinned
+libjxl implementation remains available only as a differential oracle when
+`GJXL_ENABLE_LIBJXL_REFERENCE=ON`. With the reference disabled, the native
+facade, iterative AQ, and complete quantization pipeline continue to build and
+run without libjxl or Highway.
 
-The libjxl-backed metric is controlled by `GJXL_ENABLE_LIBJXL_REFERENCE`, which
-defaults to `ON`. Set it to `OFF` to configure and build core, Metal, and the
-non-perceptual CPU codec paths without initializing the libjxl submodule.
-`ComputeButteraugliDistance` and the iterative reference pipeline then return
-`Unavailable`; their tests and quantization benchmark are omitted.
+The native implementation, its intermediate-stage oracles, and the standalone
+device Butteraugli operation are tracked in [`butteraugli.md`](butteraugli.md).
+The complete resident reconstruction and AQ integration path is tracked in [`metal-aq.md`](metal-aq.md).
 
 Relevant implementation:
 
@@ -240,12 +241,18 @@ Relevant implementations:
 - [`quantization_pipeline_test.cpp`](../tests/quantization_pipeline_test.cpp)
 - [`quantization_benchmark.cpp`](../benchmarks/quantization_benchmark.cpp)
 
-## CPU performance baseline
+## Historical CPU performance baseline
 
 Release build on an Apple M4 Pro with 48 GB RAM, measured on 2026-08-25. The
 synthetic workload is 128x96 linear RGB, includes a 64-pixel CfL boundary, and
 uses two AQ updates. Values are the median of the three run medians; ranges
 span all 15 samples from three consecutive invocations.
+
+This measurement predates the native Butteraugli facade and the later shared
+image/scratch refactors. It remains a historical comparison point, not the
+current Metal-AQ baseline. Milestone 0 of
+[`metal-aq.md`](metal-aq.md) requires a refreshed full-pipeline and per-evaluation
+breakdown before GPU implementation choices are treated as performance claims.
 
 | Stage | Median | Observed range |
 | --- | ---: | ---: |
@@ -289,19 +296,18 @@ They do block claiming complete encoder or bitstream parity.
 
 ## GPU-porting boundary
 
-After the CPU integration gate, port compute-heavy leaf operations while
-retaining the CPU pipeline as the reference implementation. A likely order is:
+The actionable GPU roadmap is [`metal-aq.md`](metal-aq.md). This document
+remains authoritative for CPU algorithm order, supported strategies, known
+codec deviations, and reference outputs.
 
-1. Gaborish and masking convolutions.
-2. CfL statistics and map generation.
-3. AC candidate transform and cost evaluation.
-4. Quantization, dequantization, and reconstruction.
-5. EPF and Butteraugli distance-map computation.
+Initial quantization and AC-strategy search are siblings of iterative AQ and
+remain separate GPU efforts. Within iterative AQ, quant-field convergence,
+clamping, and rounding-progress decisions initially stay on the CPU. The Metal
+path accelerates the complete encode/reconstruct/measure evaluation and reads
+back only the block-distance map and score required by that unchanged policy.
 
-Search traversal, candidate selection, convergence decisions, and AQ
-orchestration should initially remain on the CPU. They should move to the GPU
-only when profiling demonstrates that doing so is worthwhile and the CPU/GPU
-parity tests can preserve deterministic behavior.
-
-Each GPU milestone must be checked against both the CPU reference and pinned
-libjxl outputs; a GPU round trip alone is not sufficient evidence of parity.
+Every GPU stage must be compared with the CPU reference and, where applicable,
+the pinned libjxl oracle. Direct intermediate comparisons, final AQ decisions,
+resident timings, and full end-to-end timings are all required; a GPU round
+trip or isolated kernel speedup is not sufficient evidence of parity or useful
+acceleration.
