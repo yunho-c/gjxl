@@ -614,39 +614,24 @@ __attribute__((always_inline)) inline void InverseRectangularDct(
 }
 
 
-template <uint Rows, uint Columns>
-__attribute__((always_inline)) inline void ForwardRectangularDctSimdgroup(
+template <
+  uint Rows,
+  uint Columns,
+  typename VerticalBasisPointer,
+  typename HorizontalBasisPointer>
+__attribute__((always_inline)) inline void
+ForwardRectangularDctSimdgroupWithBasis(
   device const float* A,
   device       float* B,
-  constant const float* vertical_basis,
-  constant const float* horizontal_basis,
-  threadgroup float* shared_vertical_basis,
-  threadgroup float* shared_horizontal_basis,
+  VerticalBasisPointer vertical_basis,
+  HorizontalBasisPointer horizontal_basis,
   float scale,
-  uint lane,
-  uint simd_width,
   uint simdgroup_index,
   uint3 group_position)
 {
   constexpr uint kTileSize = 8;
   constexpr uint kRowTiles = Rows / kTileSize;
   constexpr uint kColumnTiles = Columns / kTileSize;
-
-  const uint threadgroup_stride = kRowTiles * simd_width;
-
-  for (uint i = simdgroup_index * simd_width + lane;
-       i < Rows * Rows;
-       i += threadgroup_stride) {
-    shared_vertical_basis[i] = vertical_basis[i];
-  }
-
-  for (uint i = simdgroup_index * simd_width + lane;
-       i < Columns * Columns;
-       i += threadgroup_stride) {
-    shared_horizontal_basis[i] = horizontal_basis[i];
-  }
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
 
   const ulong base =
     static_cast<ulong>(group_position.x) * Rows * Columns;
@@ -669,7 +654,7 @@ __attribute__((always_inline)) inline void ForwardRectangularDctSimdgroup(
 
       simdgroup_load(
         c,
-        shared_vertical_basis,
+        vertical_basis,
         Rows,
         ulong2(inner_tile * kTileSize,
                simdgroup_index * kTileSize));
@@ -704,7 +689,7 @@ __attribute__((always_inline)) inline void ForwardRectangularDctSimdgroup(
 
       simdgroup_load(
         ct,
-        shared_horizontal_basis,
+        horizontal_basis,
         Columns,
         ulong2(inner_tile * kTileSize,
                column_tile * kTileSize),
@@ -739,39 +724,24 @@ __attribute__((always_inline)) inline void ForwardRectangularDctSimdgroup(
 }
 
 
-template <uint Rows, uint Columns>
-__attribute__((always_inline)) inline void InverseRectangularDctSimdgroup(
+template <
+  uint Rows,
+  uint Columns,
+  typename VerticalBasisPointer,
+  typename HorizontalBasisPointer>
+__attribute__((always_inline)) inline void
+InverseRectangularDctSimdgroupWithBasis(
   device const float* A,
   device       float* B,
-  constant const float* vertical_basis,
-  constant const float* horizontal_basis,
-  threadgroup float* shared_vertical_basis,
-  threadgroup float* shared_horizontal_basis,
+  VerticalBasisPointer vertical_basis,
+  HorizontalBasisPointer horizontal_basis,
   float scale,
-  uint lane,
-  uint simd_width,
   uint simdgroup_index,
   uint3 group_position)
 {
   constexpr uint kTileSize = 8;
   constexpr uint kRowTiles = Rows / kTileSize;
   constexpr uint kColumnTiles = Columns / kTileSize;
-
-  const uint threadgroup_stride = kRowTiles * simd_width;
-
-  for (uint i = simdgroup_index * simd_width + lane;
-       i < Rows * Rows;
-       i += threadgroup_stride) {
-    shared_vertical_basis[i] = vertical_basis[i];
-  }
-
-  for (uint i = simdgroup_index * simd_width + lane;
-       i < Columns * Columns;
-       i += threadgroup_stride) {
-    shared_horizontal_basis[i] = horizontal_basis[i];
-  }
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
 
   const ulong base =
     static_cast<ulong>(group_position.x) * Rows * Columns;
@@ -792,7 +762,7 @@ __attribute__((always_inline)) inline void InverseRectangularDctSimdgroup(
 
       simdgroup_load(
         ct,
-        shared_vertical_basis,
+        vertical_basis,
         Rows,
         ulong2(simdgroup_index * kTileSize,
                inner_tile * kTileSize),
@@ -838,7 +808,7 @@ __attribute__((always_inline)) inline void InverseRectangularDctSimdgroup(
 
       simdgroup_load(
         c,
-        shared_horizontal_basis,
+        horizontal_basis,
         Columns,
         ulong2(column_tile * kTileSize,
                inner_tile * kTileSize));
@@ -859,6 +829,104 @@ __attribute__((always_inline)) inline void InverseRectangularDctSimdgroup(
       ulong2(column_tile * kTileSize,
              simdgroup_index * kTileSize));
   }
+}
+
+
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void StageRectangularDctBasis(
+  constant const float* vertical_basis,
+  constant const float* horizontal_basis,
+  threadgroup float* shared_vertical_basis,
+  threadgroup float* shared_horizontal_basis,
+  uint lane,
+  uint simd_width,
+  uint simdgroup_index)
+{
+  constexpr uint kSimdgroupsPerThreadgroup = Rows / 8;
+  const uint threadgroup_stride =
+    kSimdgroupsPerThreadgroup * simd_width;
+
+  for (uint i = simdgroup_index * simd_width + lane;
+       i < Rows * Rows;
+       i += threadgroup_stride) {
+    shared_vertical_basis[i] = vertical_basis[i];
+  }
+
+  for (uint i = simdgroup_index * simd_width + lane;
+       i < Columns * Columns;
+       i += threadgroup_stride) {
+    shared_horizontal_basis[i] = horizontal_basis[i];
+  }
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+}
+
+
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void ForwardRectangularDctSimdgroup(
+  device const float* A,
+  device       float* B,
+  constant const float* vertical_basis,
+  constant const float* horizontal_basis,
+  threadgroup float* shared_vertical_basis,
+  threadgroup float* shared_horizontal_basis,
+  float scale,
+  uint lane,
+  uint simd_width,
+  uint simdgroup_index,
+  uint3 group_position)
+{
+  StageRectangularDctBasis<Rows, Columns>(
+    vertical_basis,
+    horizontal_basis,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    lane,
+    simd_width,
+    simdgroup_index);
+
+  ForwardRectangularDctSimdgroupWithBasis<Rows, Columns>(
+    A,
+    B,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    scale,
+    simdgroup_index,
+    group_position);
+}
+
+
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void InverseRectangularDctSimdgroup(
+  device const float* A,
+  device       float* B,
+  constant const float* vertical_basis,
+  constant const float* horizontal_basis,
+  threadgroup float* shared_vertical_basis,
+  threadgroup float* shared_horizontal_basis,
+  float scale,
+  uint lane,
+  uint simd_width,
+  uint simdgroup_index,
+  uint3 group_position)
+{
+  StageRectangularDctBasis<Rows, Columns>(
+    vertical_basis,
+    horizontal_basis,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    lane,
+    simd_width,
+    simdgroup_index);
+
+  InverseRectangularDctSimdgroupWithBasis<Rows, Columns>(
+    A,
+    B,
+    shared_vertical_basis,
+    shared_horizontal_basis,
+    scale,
+    simdgroup_index,
+    group_position);
 }
 
 
@@ -1031,24 +1099,17 @@ kernel void gjxl_dct8x16_forward_simdgroup_2d_matmul(
 kernel void gjxl_dct8x16_inverse_simdgroup_2d_matmul(
   device const float* A [[buffer(0)]],
   device       float* B [[buffer(1)]],
-  uint  lane            [[thread_index_in_simdgroup]],
-  uint  simd_width      [[threads_per_simdgroup]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
   uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
   uint3 group_position  [[threadgroup_position_in_grid]])
 {
-  threadgroup float shared_vertical_basis[8 * 8];
-  threadgroup float shared_horizontal_basis[16 * 16];
-
-  InverseRectangularDctSimdgroup<8, 16>(
+  InverseRectangularDctSimdgroupWithBasis<8, 16>(
     A,
     B,
-    kOrthonormalDct8,
-    kOrthonormalDct16,
-    shared_vertical_basis,
-    shared_horizontal_basis,
+    vertical_basis,
+    horizontal_basis,
     kInverseDct16x8Scale,
-    lane,
-    simd_width,
     simdgroup_index,
     group_position);
 }
@@ -1223,24 +1284,17 @@ kernel void gjxl_dct16x32_forward_simdgroup_2d_matmul(
 kernel void gjxl_dct16x32_inverse_simdgroup_2d_matmul(
   device const float* A [[buffer(0)]],
   device       float* B [[buffer(1)]],
-  uint  lane            [[thread_index_in_simdgroup]],
-  uint  simd_width      [[threads_per_simdgroup]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
   uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
   uint3 group_position  [[threadgroup_position_in_grid]])
 {
-  threadgroup float shared_vertical_basis[16 * 16];
-  threadgroup float shared_horizontal_basis[32 * 32];
-
-  InverseRectangularDctSimdgroup<16, 32>(
+  InverseRectangularDctSimdgroupWithBasis<16, 32>(
     A,
     B,
-    kOrthonormalDct16,
-    kOrthonormalDct32,
-    shared_vertical_basis,
-    shared_horizontal_basis,
+    vertical_basis,
+    horizontal_basis,
     kInverseDct32x16Scale,
-    lane,
-    simd_width,
     simdgroup_index,
     group_position);
 }

@@ -4,11 +4,13 @@
 #include <Metal/Metal.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <numbers>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -41,6 +43,8 @@ struct DctImplementationSpec {
   TransformDispatchMode dispatch_mode;
   size_t simdgroups_per_threadgroup = 0;
   size_t transforms_per_threadgroup = 1;
+  bool forward_uses_device_basis = false;
+  bool inverse_uses_device_basis = false;
 };
 
 struct DctSelection {
@@ -192,6 +196,7 @@ kDctImplementationSpecs{{
     .inverse_function_name = "gjxl_dct8x16_inverse_simdgroup_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 1,
+    .inverse_uses_device_basis = true,
   },
   {
     .strategy = AcStrategyType::kDct8x16,
@@ -248,6 +253,7 @@ kDctImplementationSpecs{{
     .inverse_function_name = "gjxl_dct16x32_inverse_simdgroup_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 2,
+    .inverse_uses_device_basis = true,
   },
   {
     .strategy = AcStrategyType::kDct16x32,
@@ -280,6 +286,7 @@ struct TransformPipeline {
   NS::SharedPtr<MTL::ComputePipelineState> state;
   NS::UInteger threads_per_threadgroup = 0;
   size_t transforms_per_threadgroup = 1;
+  bool uses_device_basis = false;
   AcStrategyType strategy = AcStrategyType::kCount;
   std::string label;
 };
@@ -291,6 +298,93 @@ struct TransformPipelinePair {
 
 using TransformPipelineRegistry =
   std::array<TransformPipelinePair, kAcStrategyCount>;
+
+constexpr size_t kDct8BasisOffsetFloats = 0;
+constexpr size_t kDct16BasisOffsetFloats = 8 * 8;
+constexpr size_t kDct32BasisOffsetFloats =
+  kDct16BasisOffsetFloats + 16 * 16;
+constexpr size_t kDctBasisFloatCount =
+  kDct32BasisOffsetFloats + 32 * 32;
+
+[[nodiscard]] constexpr size_t DctBasisOffsetBytes(size_t length) {
+  switch (length) {
+    case 8:
+      return kDct8BasisOffsetFloats * sizeof(float);
+    case 16:
+      return kDct16BasisOffsetFloats * sizeof(float);
+    case 32:
+      return kDct32BasisOffsetFloats * sizeof(float);
+    default:
+      return std::numeric_limits<size_t>::max();
+  }
+}
+
+static_assert(DctBasisOffsetBytes(8) % 256 == 0);
+static_assert(DctBasisOffsetBytes(16) % 256 == 0);
+static_assert(DctBasisOffsetBytes(32) % 256 == 0);
+
+// Mirrors the formula used to generate the Metal constant bases. Keeping the
+// buffer values identical avoids changing the transform's numerical behavior.
+void FillOrthonormalDctBasis(
+  size_t length,
+  float* basis) {
+
+  const double scale =
+    std::sqrt(2.0 / static_cast<double>(length));
+
+  for (size_t frequency = 0; frequency < length; ++frequency) {
+    const double alpha =
+      frequency == 0 ? 1.0 / std::sqrt(2.0) : 1.0;
+
+    for (size_t sample = 0; sample < length; ++sample) {
+      const double angle =
+        (static_cast<double>(sample) + 0.5) *
+        static_cast<double>(frequency) *
+        std::numbers::pi_v<double> /
+        static_cast<double>(length);
+
+      basis[frequency * length + sample] =
+        static_cast<float>(alpha * scale * std::cos(angle));
+    }
+  }
+}
+
+Status CreateDctBasisBuffer(
+  MTL::Device* device,
+  NS::SharedPtr<MTL::Buffer>* out) {
+
+  if (device == nullptr || out == nullptr) {
+    return Status::InvalidArgument(
+      "CreateDctBasisBuffer received invalid argument");
+  }
+
+  std::array<float, kDctBasisFloatCount> basis{};
+
+  FillOrthonormalDctBasis(
+    8,
+    basis.data() + kDct8BasisOffsetFloats);
+  FillOrthonormalDctBasis(
+    16,
+    basis.data() + kDct16BasisOffsetFloats);
+  FillOrthonormalDctBasis(
+    32,
+    basis.data() + kDct32BasisOffsetFloats);
+
+  auto buffer =
+    NS::TransferPtr(
+      device->newBuffer(
+        basis.data(),
+        static_cast<NS::UInteger>(basis.size() * sizeof(float)),
+        MTL::ResourceStorageModeShared));
+
+  if (!buffer) {
+    return Status::OutOfMemory(
+      "Metal failed to allocate the DCT basis buffer");
+  }
+
+  *out = std::move(buffer);
+  return Status::Ok();
+}
 
 [[nodiscard]] constexpr size_t StrategyIndex(
   AcStrategyType strategy) noexcept {
@@ -401,6 +495,7 @@ Status CreateTransformPipeline(
   TransformDispatchMode dispatch_mode,
   size_t simdgroups_per_threadgroup,
   size_t transforms_per_threadgroup,
+  bool uses_device_basis,
   std::string_view function_name,
   std::string_view operation,
   TransformPipeline* out) {
@@ -483,6 +578,7 @@ Status CreateTransformPipeline(
   out->state = std::move(state);
   out->threads_per_threadgroup = threads_per_threadgroup;
   out->transforms_per_threadgroup = transforms_per_threadgroup;
+  out->uses_device_basis = uses_device_basis;
   out->strategy = strategy;
   out->label =
     std::string("gjxl ") +
@@ -503,10 +599,12 @@ public:
     NS::SharedPtr<MTL::Device> device,
     NS::SharedPtr<MTL::CommandQueue> command_queue,
     NS::SharedPtr<MTL::Library> library,
+    NS::SharedPtr<MTL::Buffer> dct_basis_buffer,
     TransformPipelineRegistry transform_pipelines)
     : device_(std::move(device)),
       command_queue_(std::move(command_queue)),
       library_(std::move(library)),
+      dct_basis_buffer_(std::move(dct_basis_buffer)),
       transform_pipelines_(std::move(transform_pipelines)) {
 
     NS::String* device_name = device_->name();
@@ -928,7 +1026,39 @@ private:
       0,
       1);
 
-    if (pipeline.transforms_per_threadgroup > 1) {
+    if (pipeline.uses_device_basis) {
+      if (!dct_basis_buffer_) {
+        return Status::Internal(
+          "Transform pipeline is missing its DCT basis buffer");
+      }
+
+      const Extent2D extent = strategy_info->pixel_extent();
+      const size_t vertical_basis_offset =
+        DctBasisOffsetBytes(extent.height);
+      const size_t horizontal_basis_offset =
+        DctBasisOffsetBytes(extent.width);
+
+      if (vertical_basis_offset ==
+            std::numeric_limits<size_t>::max() ||
+          horizontal_basis_offset ==
+            std::numeric_limits<size_t>::max()) {
+
+        return Status::Internal(
+          "Transform pipeline has an unsupported DCT basis length");
+      }
+
+      encoder->setBuffer(
+        dct_basis_buffer_.get(),
+        static_cast<NS::UInteger>(vertical_basis_offset),
+        2);
+
+      if (extent.width != extent.height) {
+        encoder->setBuffer(
+          dct_basis_buffer_.get(),
+          static_cast<NS::UInteger>(horizontal_basis_offset),
+          3);
+      }
+    } else if (pipeline.transforms_per_threadgroup > 1) {
       const std::uint32_t transform_count =
         static_cast<std::uint32_t>(batch.transform_count);
 
@@ -971,6 +1101,8 @@ private:
   NS::SharedPtr<MTL::CommandQueue> command_queue_;
 
   NS::SharedPtr<MTL::Library> library_;
+
+  NS::SharedPtr<MTL::Buffer> dct_basis_buffer_;
 
   TransformPipelineRegistry transform_pipelines_;
 
@@ -1119,6 +1251,7 @@ Status CreateMetalBackend(
   }
 
   TransformPipelineRegistry transform_pipelines;
+  NS::SharedPtr<MTL::Buffer> dct_basis_buffer;
   Status status = Status::Ok();
 
   for (const DctSelection& selection : dct_selections) {
@@ -1136,6 +1269,20 @@ Status CreateMetalBackend(
         "Validated Metal DCT implementation disappeared");
     }
 
+    if ((forward_spec->forward_uses_device_basis ||
+         inverse_spec->inverse_uses_device_basis) &&
+        !dct_basis_buffer) {
+
+      status =
+        CreateDctBasisBuffer(
+          device.get(),
+          &dct_basis_buffer);
+
+      if (!status.ok()) {
+        return status;
+      }
+    }
+
     TransformPipelinePair& pipelines =
       transform_pipelines[StrategyIndex(selection.strategy)];
 
@@ -1148,6 +1295,7 @@ Status CreateMetalBackend(
         forward_spec->dispatch_mode,
         forward_spec->simdgroups_per_threadgroup,
         forward_spec->transforms_per_threadgroup,
+        forward_spec->forward_uses_device_basis,
         forward_spec->forward_function_name,
         "forward",
         &pipelines.forward);
@@ -1165,6 +1313,7 @@ Status CreateMetalBackend(
         inverse_spec->dispatch_mode,
         inverse_spec->simdgroups_per_threadgroup,
         inverse_spec->transforms_per_threadgroup,
+        inverse_spec->inverse_uses_device_basis,
         inverse_spec->inverse_function_name,
         "inverse",
         &pipelines.inverse);
@@ -1179,6 +1328,7 @@ Status CreateMetalBackend(
       std::move(device),
       std::move(command_queue),
       std::move(library),
+      std::move(dct_basis_buffer),
       std::move(transform_pipelines)));
 
   return Status::Ok();
