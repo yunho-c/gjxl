@@ -221,10 +221,12 @@ GPU porting begins only after the CPU pipeline satisfies all of the following:
 - Stage-level CPU timings establish performance baselines.
 - Accuracy tolerances and known deviations are documented explicitly.
 
-`RunCpuQuantizationPipeline` is the integration boundary. It runs initial AQ
-on the pre-Gaborish XYB image, applies inverse Gaborish when enabled, computes
-first-pass CfL, selects strategies, initializes EPF sharpness, and invokes the
-iterative AQ loop. Its outputs expose the initial maps, a completed
+`RunQuantizationPipeline` is the backend-neutral integration boundary. It runs
+initial AQ on the pre-Gaborish XYB image, applies inverse Gaborish when enabled,
+computes first-pass CfL, delegates strategy selection to an injected provider,
+initializes EPF sharpness, and invokes the iterative AQ loop. The CPU wrapper
+uses `FindAcStrategyGrid`; the GPU wrapper uses `FindAcStrategyGridGpu`. Their
+outputs expose the initial maps, a completed
 `VarDctEncoderFrame`, the final float quant field, score history, block distance
 map, and reconstructed linear RGB image.
 
@@ -389,6 +391,32 @@ Reproduce this benchmark with:
 just ac-strategy-search-benchmark
 ```
 
+### Full pipeline integration
+
+`RunGpuQuantizationPipeline` injects staged GPU candidate evaluation into the
+common quantization pipeline without adding a GPU dependency to `gjxl_codec`.
+Initial AQ, Gaborish, first-pass CfL, search decisions, iterative AQ, coefficient
+coding, reconstruction, and final `VarDctEncoderFrame` assembly remain on the
+CPU. Only the candidate-cost portion of AC-strategy search executes on Metal.
+
+The Metal backend uses the same transform-dispatch helper for public DCT
+batches and candidate evaluation. Scalar, SIMD-group, and factored radix-2
+implementations therefore share packing, partial-threadgroup guards, and buffer
+bindings. Candidate and full-search tests cover all three implementations.
+
+An end-to-end fixture compares the CPU and GPU-search paths exactly through the
+final frame, including strategy cells, raw quantization, CfL, EPF, floating DC,
+fixed AC rows, reconstructed pixels, distance map, and score history. Its
+257x17 source pads to 33x3 blocks, crossing the 256-pixel AC-group boundary and
+verifying the 1x3-block edge group. Broader quantization-boundary sensitivity
+still follows the documented candidate-cost accuracy contract.
+
+Relevant implementations:
+
+- [`quantization_pipeline.h`](../src/codec/quantization_pipeline.h)
+- [`quantization_pipeline.cpp`](../src/gpu/ops/quantization_pipeline.cpp)
+- [`quantization_gpu_pipeline_test.cpp`](../tests/quantization_gpu_pipeline_test.cpp)
+
 ## Accuracy scope and known deviations
 
 The CPU pipeline is an executable reference for the currently supported seven
@@ -416,7 +444,7 @@ retaining the CPU pipeline as the reference implementation. A likely order is:
 
 1. Gaborish and masking convolutions.
 2. CfL statistics and map generation.
-3. AC candidate transform and cost evaluation.
+3. AC candidate transform and cost evaluation — integrated for strategy search.
 4. Quantization, dequantization, and reconstruction.
 5. EPF and Butteraugli distance-map computation.
 

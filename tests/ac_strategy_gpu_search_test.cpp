@@ -89,9 +89,9 @@ struct SearchFixture {
   std::vector<float> pixel_mask;
 };
 
-gjxl::MetalBackendOptions SimdgroupOptions() {
-  constexpr auto implementation =
-    gjxl::MetalDctImplementation::kSimdgroupMatmul;
+gjxl::MetalBackendOptions OptionsFor(
+  gjxl::MetalDctImplementation implementation) {
+
   return {
     .forward_dct8 = implementation,
     .inverse_dct8 = implementation,
@@ -252,7 +252,10 @@ bool CheckValidationAndAtomicCommit(gjxl::GpuBackend& gpu) {
 int main() {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   const gjxl::Status create_status =
-    gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, SimdgroupOptions(), &gpu);
+    gjxl::CreateMetalBackend(
+      GJXL_METALLIB_PATH,
+      OptionsFor(gjxl::MetalDctImplementation::kSimdgroupMatmul),
+      &gpu);
   if (!create_status.ok()) {
     std::cerr << "Unable to create Metal backend: " << create_status.message()
               << '\n';
@@ -276,6 +279,19 @@ int main() {
       !CheckSearchParity(*scalar_gpu, {64, 64}, 1.2f, 0.6f, true)) {
     std::cerr << "Scalar staged search failed: " << scalar_status.message()
               << '\n';
+    return EXIT_FAILURE;
+  }
+
+  std::unique_ptr<gjxl::GpuBackend> factored_gpu;
+  const gjxl::Status factored_status =
+    gjxl::CreateMetalBackend(
+      GJXL_METALLIB_PATH,
+      OptionsFor(gjxl::MetalDctImplementation::kFactoredRadix2),
+      &factored_gpu);
+  if (!factored_status.ok() ||
+      !CheckSearchParity(*factored_gpu, {64, 64}, 1.2f, 0.9f, true)) {
+    std::cerr << "Factored staged search failed: "
+              << factored_status.message() << '\n';
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

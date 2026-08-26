@@ -166,6 +166,7 @@ add_library(
   STATIC
 
   src/gpu/ops/ac_strategy_search.cpp
+  src/gpu/ops/quantization_pipeline.cpp
 )
 
 target_link_libraries(
@@ -815,6 +816,36 @@ if(GJXL_BUILD_TESTS)
     NAME metal_ac_strategy_search
     COMMAND gjxl_ac_strategy_gpu_search_test
   )
+
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    add_executable(
+      gjxl_quantization_gpu_pipeline_test
+      tests/quantization_gpu_pipeline_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_quantization_gpu_pipeline_test
+      PRIVATE
+        gjxl_gpu_ops
+        gjxl_metal
+    )
+
+    target_compile_definitions(
+      gjxl_quantization_gpu_pipeline_test
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+    )
+
+    add_dependencies(
+      gjxl_quantization_gpu_pipeline_test
+      gjxl_metal_shaders
+    )
+
+    add_test(
+      NAME metal_quantization_pipeline
+      COMMAND gjxl_quantization_gpu_pipeline_test
+    )
+  endif()
 
 endif()
 

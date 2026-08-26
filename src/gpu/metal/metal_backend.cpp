@@ -855,6 +855,8 @@ private:
     MetalAcStrategyBatchParams params{};
     size_t transform_count = 0;
     size_t packed_element_count = 0;
+    size_t forward_threadgroup_count = 0;
+    size_t inverse_threadgroup_count = 0;
   };
 
   [[nodiscard]] static bool TryMultiply(
@@ -869,6 +871,38 @@ private:
     }
     *result = left * right;
     return true;
+  }
+
+  static Status TransformThreadgroupCount(
+    const TransformPipeline& pipeline,
+    size_t transform_count,
+    size_t* out) {
+
+    if (out == nullptr || pipeline.transforms_per_threadgroup == 0) {
+      return Status::Internal(
+        "Transform pipeline has an invalid packing factor");
+    }
+    if (transform_count == 0) {
+      *out = 0;
+      return Status::Ok();
+    }
+    if (pipeline.transforms_per_threadgroup > 1 &&
+        transform_count > std::numeric_limits<std::uint32_t>::max()) {
+      return Status::InvalidArgument(
+        "Packed transform batch exceeds Metal kernel range");
+    }
+
+    const size_t threadgroup_count =
+      1 +
+      (transform_count - 1) /
+        pipeline.transforms_per_threadgroup;
+    if (threadgroup_count >
+        std::numeric_limits<NS::UInteger>::max()) {
+      return Status::InvalidArgument(
+        "Transform batch exceeds Metal grid range");
+    }
+    *out = threadgroup_count;
+    return Status::Ok();
   }
 
   Status RequireMetalBuffer(
@@ -1153,6 +1187,20 @@ private:
     validated.inverse = &transform_pair.inverse;
     validated.transform_count = transform_count;
     validated.packed_element_count = packed_element_count;
+    status = TransformThreadgroupCount(
+      *validated.forward,
+      transform_count,
+      &validated.forward_threadgroup_count);
+    if (!status.ok()) {
+      return status;
+    }
+    status = TransformThreadgroupCount(
+      *validated.inverse,
+      transform_count,
+      &validated.inverse_threadgroup_count);
+    if (!status.ok()) {
+      return status;
+    }
     *out = validated;
     return Status::Ok();
   }
@@ -1283,29 +1331,13 @@ private:
       return Status::Ok();
     }
 
-    if (pipeline.transforms_per_threadgroup == 0) {
-      return Status::Internal(
-        "Transform pipeline has an invalid packing factor");
-    }
-
-    const size_t threadgroup_count =
-      1 +
-      (batch.transform_count - 1) /
-        pipeline.transforms_per_threadgroup;
-
-    if (threadgroup_count >
-        std::numeric_limits<NS::UInteger>::max()) {
-
-      return Status::InvalidArgument(
-        "Transform batch exceeds Metal grid range");
-    }
-
-    if (pipeline.transforms_per_threadgroup > 1 &&
-        batch.transform_count >
-          std::numeric_limits<std::uint32_t>::max()) {
-
-      return Status::InvalidArgument(
-        "Packed transform batch exceeds Metal kernel range");
+    size_t threadgroup_count = 0;
+    status = TransformThreadgroupCount(
+      pipeline,
+      batch.transform_count,
+      &threadgroup_count);
+    if (!status.ok()) {
+      return status;
     }
 
     // metal-cpp uses autorelease for commandBuffer() & computeCommandEncoder()
@@ -1339,45 +1371,13 @@ private:
         "Failed to create Metal compute encoder");
     }
 
-    encoder->setComputePipelineState(pipeline.state.get());
-
-    encoder->setBuffer(
-      input->handle(),
-      0,
-      0);
-
-    encoder->setBuffer(
-      output->handle(),
-      0,
-      1);
-
-    if (pipeline.transforms_per_threadgroup > 1) {
-      const std::uint32_t transform_count =
-        static_cast<std::uint32_t>(batch.transform_count);
-
-      encoder->setBytes(
-        &transform_count,
-        sizeof(transform_count),
-        2);
-    }
-
-    // Most kernels dispatch one threadgroup per transform. Packed kernels
-    // handle a guarded partial group when the count is not divisible by their
-    // packing factor.
-    const MTL::Size threadgroups(
-      static_cast<NS::UInteger>(
-        threadgroup_count),
-        1,
-        1);
-
-    const MTL::Size threads_per_threadgroup(
-      pipeline.threads_per_threadgroup,
-      1,
-      1);
-
-    encoder->dispatchThreadgroups(
-      threadgroups,
-      threads_per_threadgroup);
+    EncodeTransformDispatch(
+      encoder,
+      pipeline,
+      *input,
+      *output,
+      batch.transform_count,
+      threadgroup_count);
 
     encoder->endEncoding();
 
@@ -1394,14 +1394,23 @@ private:
     const TransformPipeline& pipeline,
     const MetalBuffer& input,
     MetalBuffer& output,
-    size_t transform_count) {
+    size_t transform_count,
+    size_t threadgroup_count) {
 
     encoder->setComputePipelineState(pipeline.state.get());
     encoder->setBuffer(input.handle(), 0, 0);
     encoder->setBuffer(output.handle(), 0, 1);
+    if (pipeline.transforms_per_threadgroup > 1) {
+      const std::uint32_t packed_transform_count =
+        static_cast<std::uint32_t>(transform_count);
+      encoder->setBytes(
+        &packed_transform_count,
+        sizeof(packed_transform_count),
+        2);
+    }
     encoder->dispatchThreadgroups(
       MTL::Size(
-        static_cast<NS::UInteger>(transform_count),
+        static_cast<NS::UInteger>(threadgroup_count),
         1,
         1),
       MTL::Size(pipeline.threads_per_threadgroup, 1, 1));
@@ -1434,7 +1443,8 @@ private:
       *validated.forward,
       *validated.scratch_a,
       *validated.scratch_b,
-      validated.transform_count);
+      validated.transform_count,
+      validated.forward_threadgroup_count);
 
     encoder->setComputePipelineState(ac_strategy_pipelines_.residual.get());
     encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
@@ -1458,7 +1468,8 @@ private:
       *validated.inverse,
       *validated.scratch_a,
       *validated.scratch_b,
-      validated.transform_count);
+      validated.transform_count,
+      validated.inverse_threadgroup_count);
 
     encoder->setComputePipelineState(ac_strategy_pipelines_.cost.get());
     encoder->setBuffer(validated.scratch_b->handle(), 0, 0);

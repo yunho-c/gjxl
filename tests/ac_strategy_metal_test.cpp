@@ -436,6 +436,10 @@ int main() {
       !CheckImplementation(
         gjxl::MetalDctImplementation::kSimdgroupMatmul,
         "simdgroup matmul",
+        fixture) ||
+      !CheckImplementation(
+        gjxl::MetalDctImplementation::kFactoredRadix2,
+        "factored radix-2",
         fixture)) {
     return EXIT_FAILURE;
   }
