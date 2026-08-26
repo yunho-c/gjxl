@@ -2,271 +2,678 @@
 // Copyright (c) 2026 Yunho Cho
 
 /// @file
-/// Validates the pinned Butteraugli adapter and AQ block-map reduction.
+/// Validates the pinned scalar goldens, live oracle, and AQ block reduction.
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include <jxl/memory_manager.h>
+
+#include "butteraugli_fixtures.h"
+#include "butteraugli_goldens_generated.h"
+#include "butteraugli_oracle.h"
 #include "codec/butteraugli.h"
 
 namespace {
 
-constexpr gjxl::Extent2D kExtent{32, 24};
-constexpr size_t kStride = 35;
-constexpr std::string_view kPinnedLibjxlRevision =
-  "e8ff09762481785938d8e4e01333ed3917571161";
+namespace bt = gjxl::butteraugli_test;
+namespace golden = gjxl::butteraugli_test::golden;
 
-enum class Fixture {
-  kFlat,
-  kTexture,
-  kContrast,
-  kChromatic,
-};
+constexpr float kOutputPoison = -991.0f;
+constexpr double kScorePoison = -313.0;
+constexpr float kAbsoluteTolerance = 1.0e-5f;
+constexpr float kRelativeTolerance = 5.0e-6f;
+constexpr double kScoreTolerance = 1.0e-5;
+constexpr float kIdentityTolerance = 1.0e-7f;
 
-struct FixtureGolden {
-  double score;
-  std::array<float, 4> samples;
-};
+struct ErrorStats {
+  float maximum_absolute = 0.0f;
+  float maximum_relative = 0.0f;
+  float maximum_tolerance_ratio = 0.0f;
 
-struct ImageStorage {
-  std::array<std::vector<float>, 3> plane;
-
-  explicit ImageStorage(float fill = -777.0f) {
-    for (std::vector<float>& values : plane) {
-      values.assign(kStride * kExtent.height, fill);
+  void Add(float actual, float expected) {
+    const float absolute = std::abs(actual - expected);
+    maximum_absolute = std::max(maximum_absolute, absolute);
+    maximum_tolerance_ratio =
+        std::max(maximum_tolerance_ratio,
+                 absolute / (kAbsoluteTolerance +
+                             kRelativeTolerance * std::abs(expected)));
+    if (expected != 0.0f) {
+      maximum_relative =
+          std::max(maximum_relative, absolute / std::abs(expected));
     }
   }
-
-  [[nodiscard]] gjxl::ConstImage3FView View() const {
-    return {{
-      gjxl::ConstPlaneF32View{plane[0].data(), kExtent, kStride},
-      gjxl::ConstPlaneF32View{plane[1].data(), kExtent, kStride},
-      gjxl::ConstPlaneF32View{plane[2].data(), kExtent, kStride},
-    }};
-  }
 };
 
-void FillFixture(
-  Fixture fixture,
-  ImageStorage* reference,
-  ImageStorage* distorted) {
-
-  for (size_t y = 0; y < kExtent.height; ++y) {
-    for (size_t x = 0; x < kExtent.width; ++x) {
-      for (size_t channel = 0; channel < 3; ++channel) {
-        float value = 0.0f;
-        float error = 0.0f;
-        switch (fixture) {
-          case Fixture::kFlat:
-            value = 0.18f + 0.04f * static_cast<float>(channel);
-            if (x >= 10 && x < 22 && y >= 7 && y < 17) {
-              error = 0.012f * static_cast<float>(channel + 1);
-            }
-            break;
-          case Fixture::kTexture:
-            value = 0.25f +
-              0.11f * std::sin(
-                0.41f * static_cast<float>((channel + 1) * x + 2 * y)) +
-              0.07f * std::cos(
-                0.27f *
-                (3.0f * static_cast<float>(x) - static_cast<float>(y)));
-            error = 0.018f * std::sin(
-              0.73f * static_cast<float>(5 * x + 3 * y + channel));
-            break;
-          case Fixture::kContrast:
-            value = ((x / 4 + y / 4) & 1u) == 0 ? 0.02f : 0.92f;
-            error = (x % 4 == 0 || y % 4 == 0)
-              ? (value < 0.5f ? 0.035f : -0.035f)
-              : 0.0f;
-            break;
-          case Fixture::kChromatic:
-            value = channel == 0
-              ? 0.05f + 0.75f * static_cast<float>(x) / 31.0f
-              : channel == 1
-                ? 0.08f + 0.65f * static_cast<float>(y) / 23.0f
-                : 0.72f - 0.55f * static_cast<float>(x + y) / 54.0f;
-            error = channel == 0
-              ? 0.02f * std::sin(0.31f * static_cast<float>(y))
-              : channel == 2
-                ? -0.018f * std::cos(0.29f * static_cast<float>(x))
-                : 0.0f;
-            break;
-        }
-        reference->plane[channel][y * kStride + x] = value;
-        distorted->plane[channel][y * kStride + x] = value + error;
-      }
-    }
-  }
+[[nodiscard]] gjxl::Extent2D ToGjxlExtent(bt::OracleExtent extent) {
+  return {extent.width, extent.height};
 }
 
-bool CheckFixture(
-  Fixture fixture,
-  std::string_view name,
-  const FixtureGolden& golden) {
-  ImageStorage reference;
-  ImageStorage distorted;
-  FillFixture(fixture, &reference, &distorted);
-  constexpr size_t kMapStride = kExtent.width + 5;
-  std::vector<float> map(kMapStride * kExtent.height, -777.0f);
-  double score = -1.0;
-  const gjxl::Status status = gjxl::ComputeButteraugliDistance(
-    reference.View(),
-    distorted.View(),
-    {},
-    {map.data(), kExtent, kMapStride},
-    &score);
-  if (!status.ok() || !std::isfinite(score) || score <= 0.0) {
-    std::cerr << "Butteraugli fixture failed: " << name << '\n';
-    return false;
-  }
-  for (size_t y = 0; y < kExtent.height; ++y) {
-    for (size_t x = 0; x < kExtent.width; ++x) {
-      if (!std::isfinite(map[y * kMapStride + x]) ||
-          map[y * kMapStride + x] < 0.0f) {
-        return false;
-      }
-    }
-    for (size_t x = kExtent.width; x < kMapStride; ++x) {
-      if (map[y * kMapStride + x] != -777.0f) {
-        std::cerr << "Butteraugli overwrote map padding\n";
-        return false;
-      }
-    }
-  }
+[[nodiscard]] gjxl::ConstImage3FView ToGjxlImage(bt::ConstOracleImage3 image) {
+  return gjxl::ConstImage3FView{{{
+      {image.plane[0].data, ToGjxlExtent(image.plane[0].extent),
+       image.plane[0].stride},
+      {image.plane[1].data, ToGjxlExtent(image.plane[1].extent),
+       image.plane[1].stride},
+      {image.plane[2].data, ToGjxlExtent(image.plane[2].extent),
+       image.plane[2].stride},
+  }}};
+}
 
-  const std::array<float, 4> samples = {
-    map[0],
-    map[8 * kMapStride + 8],
-    map[12 * kMapStride + 16],
-    map[23 * kMapStride + 31],
+[[nodiscard]] gjxl::ButteraugliOptions
+ToGjxlOptions(bt::OracleOptions options) {
+  return {
+      .hf_asymmetry = options.hf_asymmetry,
+      .x_multiplier = options.x_multiplier,
+      .intensity_target = options.intensity_target,
   };
-  if (std::abs(score - golden.score) > 3.0e-6 ||
-      !std::equal(
-        samples.begin(),
-        samples.end(),
-        golden.samples.begin(),
-        [](float actual, float expected) {
-          return std::abs(actual - expected) <= 3.0e-6f;
-        })) {
-    std::cerr << "Butteraugli fixture differs from libjxl "
-              << kPinnedLibjxlRevision << ": " << name
-              << "\n  actual score: " << std::setprecision(10) << score
-              << "\n  actual samples:";
-    for (float sample : samples) {
-      std::cerr << ' ' << sample;
+}
+
+struct MapStorage {
+  explicit MapStorage(bt::OracleExtent image_extent)
+      : extent(image_extent), stride(image_extent.width + 5),
+        values(stride * extent.height, kOutputPoison) {}
+
+  [[nodiscard]] bt::OraclePlane OracleView() {
+    return {values.data(), extent, stride};
+  }
+  [[nodiscard]] gjxl::PlaneF32View GjxlView() {
+    return {values.data(), ToGjxlExtent(extent), stride};
+  }
+  [[nodiscard]] bool PaddingIsUntouched() const {
+    for (size_t y = 0; y < extent.height; ++y) {
+      for (size_t x = extent.width; x < stride; ++x) {
+        if (values[y * stride + x] != kOutputPoison)
+          return false;
+      }
     }
-    std::cerr << '\n';
+    return true;
+  }
+  [[nodiscard]] std::vector<float> LogicalValues() const {
+    std::vector<float> logical(extent.width * extent.height);
+    for (size_t y = 0; y < extent.height; ++y) {
+      std::copy_n(values.data() + y * stride, extent.width,
+                  logical.data() + y * extent.width);
+    }
+    return logical;
+  }
+
+  bt::OracleExtent extent;
+  size_t stride;
+  std::vector<float> values;
+};
+
+[[nodiscard]] bool ValuesMatch(const std::vector<float> &actual,
+                               const std::vector<float> &expected,
+                               ErrorStats *errors = nullptr) {
+  if (actual.size() != expected.size())
+    return false;
+  for (size_t index = 0; index < actual.size(); ++index) {
+    if (errors != nullptr)
+      errors->Add(actual[index], expected[index]);
+    const float tolerance =
+        kAbsoluteTolerance + kRelativeTolerance * std::abs(expected[index]);
+    if (!std::isfinite(actual[index]) ||
+        std::abs(actual[index] - expected[index]) > tolerance) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool MeasureValues(const std::vector<float> &actual,
+                                 const std::vector<float> &expected,
+                                 ErrorStats *errors) {
+  if (actual.size() != expected.size())
+    return false;
+  for (size_t index = 0; index < actual.size(); ++index) {
+    if (!std::isfinite(actual[index]) || !std::isfinite(expected[index])) {
+      return false;
+    }
+    errors->Add(actual[index], expected[index]);
+  }
+  return true;
+}
+
+template <size_t Size>
+[[nodiscard]] std::vector<float>
+DecodeBits(const std::array<uint32_t, Size> &bits) {
+  std::vector<float> values(Size);
+  for (size_t index = 0; index < Size; ++index) {
+    values[index] = std::bit_cast<float>(bits[index]);
+  }
+  return values;
+}
+
+[[nodiscard]] bool ComputeFacade(const bt::FixturePair &fixture,
+                                 MapStorage *map, double *score) {
+  return gjxl::ComputeButteraugliDistance(
+             ToGjxlImage(fixture.reference.ConstView()),
+             ToGjxlImage(fixture.distorted.ConstView()),
+             ToGjxlOptions(fixture.options), map->GjxlView(), score)
+      .ok();
+}
+
+[[nodiscard]] bool CheckScalarGoldens(ErrorStats *full_map_errors,
+                                      double *maximum_score_error) {
+  constexpr std::array<bt::FixtureKind, golden::kFullMapCount> kKinds = {
+      bt::FixtureKind::kFlat,
+      bt::FixtureKind::kTexture,
+      bt::FixtureKind::kContrast,
+      bt::FixtureKind::kChromatic,
+  };
+  constexpr std::array<std::string_view, golden::kFullMapCount> kNames = {
+      "flat",
+      "texture",
+      "contrast",
+      "chromatic",
+  };
+  for (size_t index = 0; index < kKinds.size(); ++index) {
+    const bt::FixturePair fixture = bt::MakeFixture({
+        std::string(kNames[index]),
+        {golden::kFullMapWidth, golden::kFullMapHeight},
+        kKinds[index],
+    });
+    MapStorage actual(fixture.reference.extent());
+    double score = kScorePoison;
+    const std::vector<float> expected = DecodeBits(golden::kFullMapBits[index]);
+    const double expected_score =
+        std::bit_cast<double>(golden::kFullMapScoreBits[index]);
+    if (!ComputeFacade(fixture, &actual, &score) ||
+        !actual.PaddingIsUntouched() ||
+        !bt::PaddingIsPoisoned(fixture.reference) ||
+        !bt::PaddingIsPoisoned(fixture.distorted) ||
+        !MeasureValues(actual.LogicalValues(), expected, full_map_errors) ||
+        !std::isfinite(score)) {
+      std::cerr << "Scalar full-map golden differs: " << kNames[index]
+                << "\n  actual score: " << std::setprecision(12) << score
+                << "\n  scalar score: " << expected_score << '\n';
+      return false;
+    }
+    *maximum_score_error =
+        std::max(*maximum_score_error, std::abs(score - expected_score));
+  }
+  std::vector<float> perturbed = DecodeBits(golden::kFullMapBits[0]);
+  const std::vector<float> unperturbed = perturbed;
+  perturbed[perturbed.size() / 2] += 0.01f;
+  if (!ValuesMatch(unperturbed, unperturbed) ||
+      ValuesMatch(unperturbed, perturbed)) {
+    std::cerr << "Full-map comparator did not detect a perturbation\n";
     return false;
   }
   return true;
 }
 
-bool CheckIdentityAndValidation() {
-  ImageStorage image;
-  ImageStorage unused;
-  FillFixture(Fixture::kTexture, &image, &unused);
-  std::vector<float> map(kExtent.width * kExtent.height, -1.0f);
-  double score = -1.0;
-  if (!gjxl::ComputeButteraugliDistance(
-        image.View(),
-        image.View(),
-        {},
-        {map.data(), kExtent, kExtent.width},
-        &score).ok() ||
-      score != 0.0 ||
-      !std::ranges::all_of(map, [](float value) { return value == 0.0f; })) {
-    std::cerr << "Identical images have nonzero Butteraugli distance\n";
+[[nodiscard]] bool CheckIntermediateGoldens(ErrorStats *stage_errors) {
+  static_assert(golden::kIntermediateStageCount == bt::kIntermediateStageCount);
+  const bt::FixturePair fixture = bt::MakeFixture({
+      "intermediate",
+      {golden::kIntermediateWidth, golden::kIntermediateHeight},
+      bt::FixtureKind::kIntermediate,
+  });
+  bt::IntermediateStageOutput output;
+  if (!bt::ComputePinnedIntermediateStages(fixture.reference.ConstView(),
+                                           fixture.distorted.ConstView(),
+                                           fixture.options, &output)) {
+    std::cerr << "Live intermediate-stage oracle failed\n";
     return false;
   }
-
-  const std::vector<float> original_map = map;
-  const double original_score = score;
-  auto bad_options = gjxl::ButteraugliOptions{};
-  bad_options.intensity_target = 0.0f;
-  if (gjxl::ComputeButteraugliDistance(
-        image.View(),
-        image.View(),
-        bad_options,
-        {map.data(), kExtent, kExtent.width},
-        &score).ok() ||
-      map != original_map ||
-      score != original_score) {
-    std::cerr << "Invalid Butteraugli request was not atomic\n";
+  for (size_t index = 0; index < bt::kIntermediateStageCount; ++index) {
+    const std::vector<float> expected =
+        DecodeBits(golden::kIntermediateStageBits[index]);
+    if (!MeasureValues(output.plane[index], expected, stage_errors)) {
+      std::cerr << "Scalar intermediate golden differs: "
+                << bt::IntermediateStageName(
+                       static_cast<bt::IntermediateStage>(index))
+                << '\n';
+      return false;
+    }
+  }
+  MapStorage full_map(fixture.reference.extent());
+  double full_score = kScorePoison;
+  if (!ComputeFacade(fixture, &full_map, &full_score) ||
+      !ValuesMatch(output.plane[static_cast<size_t>(
+                       bt::IntermediateStage::kFinalComposition)],
+                   full_map.LogicalValues())) {
+    std::cerr << "Intermediate final composition differs from the public map\n";
+    return false;
+  }
+  std::vector<float> perturbed =
+      DecodeBits(golden::kIntermediateStageBits[static_cast<size_t>(
+          bt::IntermediateStage::kMask)]);
+  const std::vector<float> unperturbed = perturbed;
+  perturbed[3] += 0.01f;
+  if (ValuesMatch(unperturbed, perturbed)) {
+    std::cerr << "Stage comparator did not detect a perturbation\n";
     return false;
   }
   return true;
 }
 
-bool CheckBlockReduction() {
+[[nodiscard]] bool CheckDifferentialCorpus() {
+  const std::vector<bt::FixturePair> corpus =
+      bt::BuildDifferentialCorpus(GJXL_FLOWER_PPM_PATH);
+  for (const bt::FixturePair &fixture : corpus) {
+    MapStorage facade_map(fixture.reference.extent());
+    MapStorage oracle_map(fixture.reference.extent());
+    double facade_score = kScorePoison;
+    double oracle_score = kScorePoison;
+    if (!ComputeFacade(fixture, &facade_map, &facade_score) ||
+        !bt::ComputeLiveButteraugli(
+            fixture.reference.ConstView(), fixture.distorted.ConstView(),
+            fixture.options, oracle_map.OracleView(), &oracle_score) ||
+        !facade_map.PaddingIsUntouched() || !oracle_map.PaddingIsUntouched() ||
+        !bt::PaddingIsPoisoned(fixture.reference) ||
+        !bt::PaddingIsPoisoned(fixture.distorted) ||
+        !ValuesMatch(facade_map.LogicalValues(), oracle_map.LogicalValues()) ||
+        std::abs(facade_score - oracle_score) > kScoreTolerance) {
+      std::cerr << "Live differential fixture failed: " << fixture.name << '\n';
+      return false;
+    }
+    if (fixture.name == "identity_texture_32x24" &&
+        (std::abs(facade_score) > kIdentityTolerance ||
+         !std::ranges::all_of(facade_map.LogicalValues(), [](float value) {
+           return std::abs(value) <= kIdentityTolerance;
+         }))) {
+      std::cerr << "Identity map exceeds the 1e-7 tolerance\n";
+      return false;
+    }
+  }
+  return true;
+}
+
+struct TrackingAllocator {
+  struct Header {
+    size_t size;
+  };
+
+  static void *Allocate(void *opaque, size_t size) {
+    auto *self = static_cast<TrackingAllocator *>(opaque);
+    const size_t call = self->allocation_calls++;
+    if (call == self->fail_at ||
+        size > std::numeric_limits<size_t>::max() - sizeof(Header)) {
+      return nullptr;
+    }
+    auto *header = static_cast<Header *>(std::malloc(sizeof(Header) + size));
+    if (header == nullptr)
+      return nullptr;
+    header->size = size;
+    self->live_bytes += size;
+    self->peak_bytes = std::max(self->peak_bytes, self->live_bytes);
+    return header + 1;
+  }
+  static void Free(void *opaque, void *address) {
+    if (address == nullptr)
+      return;
+    auto *self = static_cast<TrackingAllocator *>(opaque);
+    auto *header = static_cast<Header *>(address) - 1;
+    self->live_bytes -= header->size;
+    std::free(header);
+  }
+  [[nodiscard]] JxlMemoryManager Manager() { return {this, Allocate, Free}; }
+  void Reset(size_t failure_index = std::numeric_limits<size_t>::max()) {
+    allocation_calls = 0;
+    peak_bytes = live_bytes;
+    fail_at = failure_index;
+  }
+
+  size_t allocation_calls = 0;
+  size_t live_bytes = 0;
+  size_t peak_bytes = 0;
+  size_t fail_at = std::numeric_limits<size_t>::max();
+};
+
+[[nodiscard]] bool MapAndScoreAreUntouched(const MapStorage &map,
+                                           const std::vector<float> &original,
+                                           double score) {
+  return map.values == original && score == kScorePoison;
+}
+
+[[nodiscard]] bool
+CheckOneShotAllocationFailures(const bt::FixturePair &fixture) {
+  size_t successful_calls = 0;
+  {
+    TrackingAllocator tracker;
+    JxlMemoryManager manager = tracker.Manager();
+    MapStorage map(fixture.reference.extent());
+    double score = kScorePoison;
+    if (!bt::ComputeLiveButteraugli(
+            fixture.reference.ConstView(), fixture.distorted.ConstView(),
+            fixture.options, map.OracleView(), &score, &manager) ||
+        tracker.live_bytes != 0)
+      return false;
+    successful_calls = tracker.allocation_calls;
+  }
+  for (size_t fail_at = 0; fail_at < successful_calls; ++fail_at) {
+    TrackingAllocator tracker;
+    tracker.fail_at = fail_at;
+    JxlMemoryManager manager = tracker.Manager();
+    MapStorage map(fixture.reference.extent());
+    const std::vector<float> original = map.values;
+    double score = kScorePoison;
+    if (bt::ComputeLiveButteraugli(
+            fixture.reference.ConstView(), fixture.distorted.ConstView(),
+            fixture.options, map.OracleView(), &score, &manager) ||
+        !MapAndScoreAreUntouched(map, original, score) ||
+        tracker.live_bytes != 0) {
+      std::cerr << "One-shot allocation failure was not atomic at " << fail_at
+                << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+CheckPrepareAllocationFailures(const bt::FixturePair &fixture) {
+  size_t successful_calls = 0;
+  {
+    TrackingAllocator tracker;
+    JxlMemoryManager manager = tracker.Manager();
+    {
+      bt::PreparedReference prepared;
+      if (!bt::PrepareLiveButteraugliReference(fixture.reference.ConstView(),
+                                               fixture.options, &prepared,
+                                               &manager))
+        return false;
+      successful_calls = tracker.allocation_calls;
+    }
+    if (tracker.live_bytes != 0)
+      return false;
+  }
+  for (size_t fail_at = 0; fail_at < successful_calls; ++fail_at) {
+    TrackingAllocator tracker;
+    tracker.fail_at = fail_at;
+    JxlMemoryManager manager = tracker.Manager();
+    bt::PreparedReference prepared;
+    if (bt::PrepareLiveButteraugliReference(fixture.reference.ConstView(),
+                                            fixture.options, &prepared,
+                                            &manager) ||
+        prepared.valid() || tracker.live_bytes != 0) {
+      std::cerr << "Prepare allocation failure leaked at " << fail_at << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+CheckPreparedCompareAllocationFailures(const bt::FixturePair &fixture) {
+  size_t successful_compare_calls = 0;
+  {
+    TrackingAllocator tracker;
+    JxlMemoryManager manager = tracker.Manager();
+    bt::PreparedReference prepared;
+    if (!bt::PrepareLiveButteraugliReference(fixture.reference.ConstView(),
+                                             fixture.options, &prepared,
+                                             &manager))
+      return false;
+    tracker.Reset();
+    MapStorage map(fixture.reference.extent());
+    double score = kScorePoison;
+    if (!bt::CompareLiveButteraugliPrepared(
+            prepared, fixture.distorted.ConstView(), map.OracleView(), &score))
+      return false;
+    successful_compare_calls = tracker.allocation_calls;
+  }
+  for (size_t fail_at = 0; fail_at < successful_compare_calls; ++fail_at) {
+    TrackingAllocator tracker;
+    JxlMemoryManager manager = tracker.Manager();
+    {
+      bt::PreparedReference prepared;
+      if (!bt::PrepareLiveButteraugliReference(fixture.reference.ConstView(),
+                                               fixture.options, &prepared,
+                                               &manager))
+        return false;
+      const size_t retained_bytes = tracker.live_bytes;
+      tracker.Reset(fail_at);
+      MapStorage map(fixture.reference.extent());
+      const std::vector<float> original = map.values;
+      double score = kScorePoison;
+      if (bt::CompareLiveButteraugliPrepared(prepared,
+                                             fixture.distorted.ConstView(),
+                                             map.OracleView(), &score) ||
+          !MapAndScoreAreUntouched(map, original, score) ||
+          tracker.live_bytes != retained_bytes) {
+        std::cerr << "Prepared comparison failure was not atomic at " << fail_at
+                  << '\n';
+        return false;
+      }
+    }
+    if (tracker.live_bytes != 0)
+      return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+CheckStageAllocationFailures(const bt::FixturePair &fixture) {
+  size_t successful_calls = 0;
+  {
+    TrackingAllocator tracker;
+    JxlMemoryManager manager = tracker.Manager();
+    bt::IntermediateStageOutput output;
+    if (!bt::ComputePinnedIntermediateStages(
+            fixture.reference.ConstView(), fixture.distorted.ConstView(),
+            fixture.options, &output, &manager) ||
+        tracker.live_bytes != 0) {
+      return false;
+    }
+    successful_calls = tracker.allocation_calls;
+  }
+  for (size_t fail_at = 0; fail_at < successful_calls; ++fail_at) {
+    TrackingAllocator tracker;
+    tracker.fail_at = fail_at;
+    JxlMemoryManager manager = tracker.Manager();
+    bt::IntermediateStageOutput output;
+    output.extent = {1, 1};
+    output.plane[0] = {42.0f};
+    if (bt::ComputePinnedIntermediateStages(
+            fixture.reference.ConstView(), fixture.distorted.ConstView(),
+            fixture.options, &output, &manager) ||
+        output.extent != bt::OracleExtent{1, 1} ||
+        output.plane[0] != std::vector<float>{42.0f} ||
+        tracker.live_bytes != 0) {
+      std::cerr << "Stage allocation failure was not atomic at " << fail_at
+                << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool CheckAllocationFailures() {
+  const bt::FixturePair fixture = bt::MakeFixture({
+      "allocation",
+      {32, 24},
+      bt::FixtureKind::kTexture,
+  });
+  const bt::FixturePair stage_fixture = bt::MakeFixture({
+      "stage_allocation",
+      {16, 12},
+      bt::FixtureKind::kIntermediate,
+  });
+  return CheckOneShotAllocationFailures(fixture) &&
+         CheckPrepareAllocationFailures(fixture) &&
+         CheckPreparedCompareAllocationFailures(fixture) &&
+         CheckStageAllocationFailures(stage_fixture);
+}
+
+[[nodiscard]] bool ExpectFacadeFailureAtomic(
+    bt::ConstOracleImage3 reference, bt::ConstOracleImage3 distorted,
+    bt::OracleOptions options, gjxl::PlaneF32View output, double *score,
+    const std::vector<float> &expected_map, double expected_score) {
+  const gjxl::Status status = gjxl::ComputeButteraugliDistance(
+      ToGjxlImage(reference), ToGjxlImage(distorted), ToGjxlOptions(options),
+      output, score);
+  return !status.ok() &&
+         (output.data == nullptr ||
+          std::equal(expected_map.begin(), expected_map.end(), output.data)) &&
+         (score == nullptr || *score == expected_score);
+}
+
+[[nodiscard]] bool CheckInvalidFacadeRequests() {
+  bt::FixturePair fixture = bt::MakeFixture({
+      "invalid",
+      {32, 24},
+      bt::FixtureKind::kTexture,
+  });
+  const bt::ConstOracleImage3 good_reference = fixture.reference.ConstView();
+  const bt::ConstOracleImage3 good_distorted = fixture.distorted.ConstView();
+  MapStorage map(fixture.reference.extent());
+  const std::vector<float> original = map.values;
+  double score = kScorePoison;
+  auto check = [&](bt::ConstOracleImage3 reference,
+                   bt::ConstOracleImage3 distorted, bt::OracleOptions options,
+                   gjxl::PlaneF32View output) {
+    if (!ExpectFacadeFailureAtomic(reference, distorted, options, output,
+                                   &score, original, kScorePoison)) {
+      std::cerr << "Invalid facade request was not rejected atomically\n";
+      return false;
+    }
+    return true;
+  };
+
+  bt::ConstOracleImage3 bad = good_distorted;
+  bad.plane[2].extent.width -= 1;
+  if (!check(good_reference, bad, {}, map.GjxlView()))
+    return false;
+  const bt::FixturePair mismatched = bt::MakeFixture({
+      "mismatched",
+      {31, 24},
+      bt::FixtureKind::kTexture,
+  });
+  if (!check(good_reference, mismatched.distorted.ConstView(), {},
+             map.GjxlView())) {
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    bad = good_distorted;
+    bad.plane[channel].data = nullptr;
+    if (!check(good_reference, bad, {}, map.GjxlView()))
+      return false;
+    bad = good_reference;
+    bad.plane[channel].data = nullptr;
+    if (!check(bad, good_distorted, {}, map.GjxlView()))
+      return false;
+  }
+  bad = good_distorted;
+  bad.plane[1].stride = bad.plane[1].extent.width - 1;
+  if (!check(good_reference, bad, {}, map.GjxlView()))
+    return false;
+  if (!check(good_reference, good_distorted, {},
+             {nullptr, ToGjxlExtent(fixture.reference.extent()), 32}) ||
+      !check(
+          good_reference, good_distorted, {},
+          {map.values.data(), ToGjxlExtent(fixture.reference.extent()), 31})) {
+    return false;
+  }
+  if (gjxl::ComputeButteraugliDistance(ToGjxlImage(good_reference),
+                                       ToGjxlImage(good_distorted), {},
+                                       map.GjxlView(), nullptr)
+          .ok() ||
+      map.values != original) {
+    return false;
+  }
+
+  constexpr std::array<float, 3> kBadValues = {
+      0.0f,
+      std::numeric_limits<float>::infinity(),
+      std::numeric_limits<float>::quiet_NaN(),
+  };
+  for (size_t option = 0; option < 3; ++option) {
+    for (float bad_value : kBadValues) {
+      bt::OracleOptions bad_options;
+      if (option == 0)
+        bad_options.hf_asymmetry = bad_value;
+      if (option == 1)
+        bad_options.x_multiplier = bad_value;
+      if (option == 2)
+        bad_options.intensity_target = bad_value;
+      if (!check(good_reference, good_distorted, bad_options, map.GjxlView())) {
+        return false;
+      }
+    }
+  }
+  fixture.reference.planes()[0][0] = std::numeric_limits<float>::quiet_NaN();
+  if (!check(fixture.reference.ConstView(), good_distorted, {},
+             map.GjxlView())) {
+    return false;
+  }
+  fixture.reference.planes()[0][0] = 0.25f;
+  fixture.distorted.planes()[2][3] = std::numeric_limits<float>::infinity();
+  if (!check(fixture.reference.ConstView(), fixture.distorted.ConstView(), {},
+             map.GjxlView())) {
+    return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool CheckBlockReduction() {
   constexpr gjxl::Extent2D kBlockExtent{4, 4};
   constexpr gjxl::Extent2D kPixelExtent{32, 32};
   gjxl::AcStrategyGrid strategies;
   if (!gjxl::AcStrategyGrid::Create(kBlockExtent, &strategies).ok() ||
-      !strategies.Set(0, 0, gjxl::AcStrategyType::kDct32x32).ok()) {
+      !strategies.Set(0, 0, gjxl::AcStrategyType::kDct32x32).ok())
     return false;
-  }
   std::vector<float> distance(kPixelExtent.width * kPixelExtent.height, 2.0f);
   std::vector<float> blocks(kBlockExtent.width * kBlockExtent.height, -1.0f);
   if (!gjxl::ReduceButteraugliDistanceMap(
-        {distance.data(), kPixelExtent, kPixelExtent.width},
-        strategies,
-        {blocks.data(), kBlockExtent, kBlockExtent.width}).ok()) {
+           {distance.data(), kPixelExtent, kPixelExtent.width}, strategies,
+           {blocks.data(), kBlockExtent, kBlockExtent.width})
+           .ok())
     return false;
-  }
   for (float value : blocks) {
-    if (std::abs(value - 2.4f) > 2.0e-6f) {
-      std::cerr << "Butteraugli 16-norm block reduction is incorrect\n";
+    if (std::abs(value - 2.4f) > 2.0e-6f)
       return false;
-    }
   }
-
   distance.back() = -1.0f;
   const std::vector<float> original = blocks;
   if (gjxl::ReduceButteraugliDistanceMap(
-        {distance.data(), kPixelExtent, kPixelExtent.width},
-        strategies,
-        {blocks.data(), kBlockExtent, kBlockExtent.width}).ok() ||
+          {distance.data(), kPixelExtent, kPixelExtent.width}, strategies,
+          {blocks.data(), kBlockExtent, kBlockExtent.width})
+          .ok() ||
       blocks != original) {
-    std::cerr << "Invalid Butteraugli block reduction was not atomic\n";
+    std::cerr << "Invalid Butteraugli reduction was not atomic\n";
     return false;
   }
   return true;
 }
 
-}  // namespace
+} // namespace
 
 int main() {
-  constexpr FixtureGolden kFlatGolden{
-    7.416567802,
-    {1.542445898f, 3.690321922f, 7.4165411f, 1.542400122f},
-  };
-  constexpr FixtureGolden kTextureGolden{
-    0.7470344305,
-    {0.2163355798f, 0.2420784384f, 0.3289652765f, 0.2964046299f},
-  };
-  constexpr FixtureGolden kContrastGolden{
-    2.239220142,
-    {2.239220142f, 1.164466739f, 0.9660935998f, 0.9154187441f},
-  };
-  constexpr FixtureGolden kChromaticGolden{
-    1.367423773,
-    {1.202098608f, 0.6952123642f, 0.5296805501f, 0.5132343769f},
-  };
-  if (!CheckFixture(Fixture::kFlat, "flat", kFlatGolden) ||
-      !CheckFixture(Fixture::kTexture, "texture", kTextureGolden) ||
-      !CheckFixture(Fixture::kContrast, "contrast", kContrastGolden) ||
-      !CheckFixture(Fixture::kChromatic, "chromatic", kChromaticGolden) ||
-      !CheckIdentityAndValidation() ||
+  ErrorStats full_map_errors;
+  ErrorStats stage_errors;
+  double maximum_score_error = 0.0;
+  if (!CheckScalarGoldens(&full_map_errors, &maximum_score_error) ||
+      !CheckIntermediateGoldens(&stage_errors) || !CheckDifferentialCorpus() ||
+      !CheckInvalidFacadeRequests() || !CheckAllocationFailures() ||
       !CheckBlockReduction()) {
     return EXIT_FAILURE;
   }
-  std::cout << "All Butteraugli tests passed.\n";
+  std::cout << std::setprecision(9)
+            << "Maximum scalar-vs-dispatched full-map error: abs="
+            << full_map_errors.maximum_absolute
+            << " rel=" << full_map_errors.maximum_relative
+            << " tolerance_ratio=" << full_map_errors.maximum_tolerance_ratio
+            << " score_abs=" << maximum_score_error << '\n'
+            << "Maximum scalar-vs-dispatched stage error: abs="
+            << stage_errors.maximum_absolute
+            << " rel=" << stage_errors.maximum_relative
+            << " tolerance_ratio=" << stage_errors.maximum_tolerance_ratio
+            << '\n'
+            << "All Butteraugli tests passed.\n";
   return EXIT_SUCCESS;
 }

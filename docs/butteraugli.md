@@ -99,7 +99,7 @@ from per-comparison work.
 
 ## Milestones
 
-### 1. Expand the libjxl oracle harness
+### 1. Expand the libjxl oracle harness — infrastructure complete; acceptance pending
 
 - Factor fixture generation so the same inputs can drive two backends.
 - Compare every distance-map pixel rather than four selected samples.
@@ -112,6 +112,57 @@ from per-comparison work.
 
 Exit criterion: the harness detects deliberate perturbations to blur borders,
 opsin constants, masking, Malta stencils, and score reduction.
+
+The infrastructure work added exact scalar-generated full maps and 27
+intermediate planes, an exact regeneration check, live full-map differential
+coverage, injected allocation failures, a real-image crop, a two-update
+iterative-AQ pin, and a dedicated interleaved benchmark. The test comparison
+limits are
+`1e-5 + 5e-6 * abs(expected)` per map pixel, `1e-5` for aggregate scores,
+`1e-7` for identity maps, and `2e-5` for pinned iterative-AQ floating outputs.
+Raw quant values and poisoned padding remain exact checks.
+
+The scalar header is a reproducible source fixture, while facade parity is
+checked against the live dynamically dispatched oracle. On an M4 Pro with
+AppleClang 17, pinned libjxl's own scalar and dispatched Highway targets differ
+by more than the map/score comparison limits. Those differences are recorded
+instead of hiding them by widening the limits:
+
+| Fixture group | Maximum absolute error | Maximum relative error | Maximum score error | Maximum limit ratio |
+|---|---:|---:|---:|---:|
+| Four 32x24 full maps | 0.000135899 | 0.000137113 | 0.0000467300 | 6.10x |
+| 16x12 intermediate planes | 0.000701904 | 0.0252102 | n/a | 4.71x |
+
+The relative stage maximum occurs near zero. Exact scalar regeneration and the
+fixed facade-vs-live limits are separate gates; the scalar-vs-dispatched values
+above are a diagnostic baseline, not an assertion-based acceptance gate.
+Milestone 1 remains pending until a cross-target tolerance policy is adopted.
+
+Release timings below combine three independent runs. Each run used three
+warmup rotations followed by 15 samples, rotating the order of one-shot,
+reference-preparation, and prepared-comparison phases. The median column is the
+range of the three run medians; the observed column spans all 45 samples.
+These are baselines, not improvement claims.
+
+| Workload | Phase | Run-median range (ms) | All observed samples (ms) |
+|---|---|---:|---:|
+| Synthetic 128x96 | One shot | 3.215–3.232 | 2.999–3.443 |
+| Synthetic 128x96 | Reference preparation | 0.846–0.849 | 0.844–0.897 |
+| Synthetic 128x96 | Prepared comparison | 2.073–2.079 | 2.049–2.530 |
+| Flower 510x532 | One shot | 69.266–70.225 | 68.099–71.791 |
+| Flower 510x532 | Reference preparation | 19.761–19.898 | 18.701–20.684 |
+| Flower 510x532 | Prepared comparison | 50.350–50.438 | 48.970–55.051 |
+
+Memory numbers are peak live bytes observed through the supplied
+`JxlMemoryManager`. They intentionally exclude comparator objects,
+standard-library containers, allocator metadata, and other process memory.
+The prepared-comparison total includes retained reference state; the
+incremental column subtracts that retained baseline.
+
+| Workload | One-shot peak | Preparation peak | Prepared retained | Comparison total peak | Comparison incremental peak |
+|---|---:|---:|---:|---:|---:|
+| Synthetic 128x96 | 3,507,968 B (3.345 MiB) | 1,932,288 B (1.843 MiB) | 1,349,376 B (1.287 MiB) | 3,317,504 B (3.164 MiB) | 1,968,128 B (1.877 MiB) |
+| Flower 510x532 | 61,789,440 B (58.927 MiB) | 31,976,064 B (30.495 MiB) | 22,360,320 B (21.324 MiB) | 58,310,400 B (55.609 MiB) | 35,950,080 B (34.285 MiB) |
 
 ### 2. Establish native CPU image and blur primitives
 

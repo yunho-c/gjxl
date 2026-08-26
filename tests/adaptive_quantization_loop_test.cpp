@@ -244,6 +244,64 @@ bool CheckLoopAndUpdateRule() {
       return false;
     }
   }
+  AqStorage two_updates;
+  updated_options.iterations = 2;
+  const gjxl::Status two_update_status = gjxl::FindBestQuantization(
+    original.ConstView(),
+    opsin.ConstView(),
+    strategies,
+    initial,
+    sharpness_view,
+    updated_options,
+    two_updates.Output());
+  if (!two_update_status.ok() || two_updates.score_history.size() != 3 ||
+      !PaddingIsUntouched(two_updates)) {
+    std::cerr << "Two-update AQ evaluation failed\n";
+    return false;
+  }
+  constexpr float kPinnedTolerance = 2.0e-5f;
+  constexpr std::array<double, 3> kPinnedScoreHistory = {
+    1.5871505737304688,
+    1.4434140920639038,
+    1.3173232078552246,
+  };
+  constexpr std::array<float, 6> kPinnedQuantField = {
+    0.890399575f, 0.865948975f, 0.797086954f,
+    1.00165439f, 0.905635715f, 0.859129727f,
+  };
+  constexpr std::array<int32_t, 6> kPinnedRawQuantField = {
+    7, 7, 6,
+    8, 7, 7,
+  };
+  constexpr std::array<float, 6> kPinnedBlockDistance = {
+    1.45603883f, 1.42887533f, 1.43554032f,
+    1.41945028f, 1.39149904f, 1.37905943f,
+  };
+  for (size_t index = 0; index < kPinnedScoreHistory.size(); ++index) {
+    if (std::abs(
+          two_updates.score_history[index] -
+          kPinnedScoreHistory[index]) > kPinnedTolerance) {
+      std::cerr << "Two-update AQ score history differs from the pin\n";
+      return false;
+    }
+  }
+  for (size_t index = 0; index < kPinnedQuantField.size(); ++index) {
+    const size_t x = index % kBlockExtent.width;
+    const size_t y = index / kBlockExtent.width;
+    const size_t strided_index = y * AqStorage::kBlockStride + x;
+    if (std::abs(
+          two_updates.quant_field[strided_index] -
+          kPinnedQuantField[index]) > kPinnedTolerance ||
+        two_updates.raw_quant[strided_index] !=
+          kPinnedRawQuantField[index] ||
+        std::abs(
+          two_updates.block_distance[strided_index] -
+          kPinnedBlockDistance[index]) > kPinnedTolerance) {
+      std::cerr << "Two-update AQ fields differ from the pin\n";
+      return false;
+    }
+  }
+
   return true;
 }
 
