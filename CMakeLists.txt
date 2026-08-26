@@ -135,6 +135,23 @@ target_link_libraries(
     gjxl_core
 )
 
+# Backend-independent codestream serialization primitives
+add_library(
+  gjxl_codestream
+  STATIC
+
+  src/codestream/bit_writer.cpp
+  src/codestream/entropy.cpp
+  src/codestream/huffman.cpp
+  src/codestream/sections.cpp
+)
+
+target_link_libraries(
+  gjxl_codestream
+  PUBLIC
+    gjxl_core
+)
+
 if(GJXL_ENABLE_LIBJXL_REFERENCE)
   target_compile_definitions(
     gjxl_codec
@@ -375,6 +392,54 @@ target_compile_features(
 if(GJXL_BUILD_TESTS)
 
   enable_testing()
+
+  add_executable(
+    gjxl_bit_writer_test
+    tests/bit_writer_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_bit_writer_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME bit_writer
+    COMMAND gjxl_bit_writer_test
+  )
+
+  add_executable(
+    gjxl_entropy_test
+    tests/entropy_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_entropy_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME entropy
+    COMMAND gjxl_entropy_test
+  )
+
+  add_executable(
+    gjxl_sections_test
+    tests/sections_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_sections_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME sections
+    COMMAND gjxl_sections_test
+  )
 
   add_executable(
     gjxl_core_geometry_test
