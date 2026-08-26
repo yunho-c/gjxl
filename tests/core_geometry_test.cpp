@@ -6,10 +6,14 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
+#include <vector>
 
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
 #include "core/image.h"
+#include "core/image_buffer.h"
+#include "core/image_ops.h"
 
 namespace {
 
@@ -116,6 +120,89 @@ bool CheckImageView() {
   return true;
 }
 
+bool CheckMirrorCoordinate() {
+  constexpr std::array<size_t, 14> kExpected = {
+    1, 2, 2, 1, 0, 0, 1, 2, 2, 1, 0, 0, 1, 2,
+  };
+  for (ptrdiff_t coordinate = -5; coordinate <= 8; ++coordinate) {
+    if (gjxl::MirrorCoordinate(coordinate, 3) !=
+        kExpected[static_cast<size_t>(coordinate + 5)]) {
+      std::cerr << "Mirrored coordinate is incorrect\n";
+      return false;
+    }
+  }
+
+  if (gjxl::MirrorCoordinate(
+        std::numeric_limits<ptrdiff_t>::min(), 1) != 0 ||
+      gjxl::MirrorCoordinate(
+        std::numeric_limits<ptrdiff_t>::max(), 1) != 0) {
+    std::cerr << "Mirroring failed at the coordinate limits\n";
+    return false;
+  }
+
+  return true;
+}
+
+bool CheckImageBufferAndCopy() {
+  gjxl::Image3FBuffer buffer({3, 2});
+  const gjxl::Image3FView buffer_view = buffer.view();
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < 2; ++y) {
+      for (size_t x = 0; x < 3; ++x) {
+        buffer_view.plane[channel].Row(y)[x] =
+          static_cast<float>(100 * channel + 10 * y + x);
+      }
+    }
+  }
+
+  constexpr size_t kStride = 5;
+  std::array<std::array<float, kStride * 2>, 3> destination;
+  for (auto& plane : destination) {
+    plane.fill(-1.0f);
+  }
+  const gjxl::Image3FView destination_view{{
+    gjxl::PlaneF32View{destination[0].data(), {3, 2}, kStride},
+    gjxl::PlaneF32View{destination[1].data(), {3, 2}, kStride},
+    gjxl::PlaneF32View{destination[2].data(), {3, 2}, kStride},
+  }};
+  gjxl::CopyImage(buffer.const_view(), destination_view);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < 2; ++y) {
+      for (size_t x = 0; x < 3; ++x) {
+        if (destination_view.plane[channel].Row(y)[x] !=
+            buffer_view.plane[channel].Row(y)[x]) {
+          std::cerr << "Image copy changed active pixels\n";
+          return false;
+        }
+      }
+      if (destination[channel][y * kStride + 3] != -1.0f ||
+          destination[channel][y * kStride + 4] != -1.0f) {
+        std::cerr << "Image copy overwrote row padding\n";
+        return false;
+      }
+    }
+  }
+
+  if (buffer.cropped_view({2, 1}).extent() != gjxl::Extent2D{2, 1}) {
+    std::cerr << "Cropped image-buffer view is incorrect\n";
+    return false;
+  }
+
+  try {
+    buffer.resize({std::numeric_limits<size_t>::max(), 2});
+    std::cerr << "Image buffer accepted an overflowing extent\n";
+    return false;
+  } catch (const std::length_error&) {
+    // Expected: the failed resize must leave the prior buffer intact.
+  }
+  if (buffer.extent() != gjxl::Extent2D{3, 2}) {
+    std::cerr << "Failed image-buffer resize changed the image\n";
+    return false;
+  }
+
+  return true;
+}
+
 bool CheckAcStrategies() {
   for (size_t i = 0; i < gjxl::kAcStrategyInfos.size(); ++i) {
     const gjxl::AcStrategyInfo& info = gjxl::kAcStrategyInfos[i];
@@ -181,6 +268,8 @@ int main() {
   if (!CheckExtentArea() ||
       !CheckFrameGeometry() ||
       !CheckImageView() ||
+      !CheckMirrorCoordinate() ||
+      !CheckImageBufferAndCopy() ||
       !CheckAcStrategies()) {
 
     return EXIT_FAILURE;

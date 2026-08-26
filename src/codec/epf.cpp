@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/image_ops.h"
+
 namespace gjxl {
 namespace {
 
@@ -24,22 +26,9 @@ enum class EpfPass {
   kPass2,
 };
 
-size_t Mirror(ptrdiff_t coordinate, size_t size) {
-  ptrdiff_t mirrored = coordinate;
-  const ptrdiff_t signed_size = static_cast<ptrdiff_t>(size);
-  while (mirrored < 0 || mirrored >= signed_size) {
-    if (mirrored < 0) {
-      mirrored = -mirrored - 1;
-    } else {
-      mirrored = 2 * signed_size - mirrored - 1;
-    }
-  }
-  return static_cast<size_t>(mirrored);
-}
-
 float Sample(ConstPlaneF32View plane, ptrdiff_t x, ptrdiff_t y) {
-  return plane.Row(Mirror(y, plane.extent.height))[
-    Mirror(x, plane.extent.width)];
+  return plane.Row(MirrorCoordinate(y, plane.extent.height))[
+    MirrorCoordinate(x, plane.extent.width)];
 }
 
 float EpfWeight(float sad, float scaled_inverse_sigma) {
@@ -323,6 +312,15 @@ Status ApplyEpf(
       options.border_sad_multiplier <= 0.0f) {
     return Status::InvalidArgument(
       "EPF image, sigma field, or filter options are invalid");
+  }
+  constexpr size_t kMaximumSampleOffset = 3;
+  constexpr size_t kMaximumDimension =
+    static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) -
+      kMaximumSampleOffset;
+  if (input.width() > kMaximumDimension ||
+      input.height() > kMaximumDimension) {
+    return Status::InvalidArgument(
+      "EPF image dimensions are too large");
   }
   for (float channel_scale : options.channel_scale) {
     if (!std::isfinite(channel_scale) || channel_scale < 0.0f) {

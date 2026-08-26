@@ -13,22 +13,10 @@
 #include <vector>
 
 #include "codec/convolution.h"
+#include "core/image_ops.h"
 
 namespace gjxl {
 namespace {
-
-size_t Mirror(ptrdiff_t coordinate, size_t size) {
-  ptrdiff_t mirrored = coordinate;
-  const ptrdiff_t signed_size = static_cast<ptrdiff_t>(size);
-  while (mirrored < 0 || mirrored >= signed_size) {
-    if (mirrored < 0) {
-      mirrored = -mirrored - 1;
-    } else {
-      mirrored = 2 * signed_size - mirrored - 1;
-    }
-  }
-  return static_cast<size_t>(mirrored);
-}
 
 Symmetric5Weights GaborishWeights(float multiplier) {
   constexpr std::array<float, 5> kGaborish = {
@@ -132,10 +120,11 @@ Status ApplyGaborish(
     return Status::InvalidArgument(
       "Gaborish input and output images are invalid or differently sized");
   }
-  if (input.width() >
-        static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) ||
-      input.height() >
-        static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
+  constexpr size_t kRadius = 1;
+  constexpr size_t kMaximumDimension =
+    static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) - kRadius;
+  if (input.width() > kMaximumDimension ||
+      input.height() > kMaximumDimension) {
     return Status::InvalidArgument(
       "Gaborish image dimensions are too large");
   }
@@ -180,8 +169,8 @@ Status ApplyGaborish(
           const ptrdiff_t sy = static_cast<ptrdiff_t>(y);
           const auto sample = [&](ptrdiff_t dx, ptrdiff_t dy) {
             return input.plane[channel].Row(
-              Mirror(sy + dy, input.height()))[
-                Mirror(sx + dx, input.width())];
+              MirrorCoordinate(sy + dy, input.height()))[
+                MirrorCoordinate(sx + dx, input.width())];
           };
           const float axes =
             (sample(-1, 0) + sample(1, 0)) +

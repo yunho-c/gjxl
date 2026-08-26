@@ -8,23 +8,10 @@
 #include <cstddef>
 #include <limits>
 
+#include "core/image_ops.h"
+
 namespace gjxl {
 namespace {
-
-size_t Mirror(ptrdiff_t coordinate, size_t size) {
-  ptrdiff_t mirrored = coordinate;
-  const ptrdiff_t signed_size = static_cast<ptrdiff_t>(size);
-
-  while (mirrored < 0 || mirrored >= signed_size) {
-    if (mirrored < 0) {
-      mirrored = -mirrored - 1;
-    } else {
-      mirrored = 2 * signed_size - 1 - mirrored;
-    }
-  }
-
-  return static_cast<size_t>(mirrored);
-}
 
 float WeightedRow(
   ConstPlaneF32View input,
@@ -34,9 +21,10 @@ float WeightedRow(
   float near_weight,
   float far_weight) {
 
-  const float* row = input.Row(Mirror(y, input.extent.height));
+  const float* row = input.Row(
+    MirrorCoordinate(y, input.extent.height));
   const auto sample = [&](ptrdiff_t sample_x) {
-    return row[Mirror(sample_x, input.extent.width)];
+    return row[MirrorCoordinate(sample_x, input.extent.width)];
   };
 
   const float far = far_weight * (sample(x - 2) + sample(x + 2));
@@ -60,10 +48,11 @@ Status ConvolveSymmetric5(
       "Symmetric5 planes are invalid, aliased, or differently sized");
   }
 
-  if (input.extent.width >
-        static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) ||
-      input.extent.height >
-        static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
+  constexpr size_t kRadius = 2;
+  constexpr size_t kMaximumDimension =
+    static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) - kRadius;
+  if (input.extent.width > kMaximumDimension ||
+      input.extent.height > kMaximumDimension) {
     return Status::InvalidArgument(
       "Symmetric5 plane dimensions are too large");
   }
