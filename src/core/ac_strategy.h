@@ -4,12 +4,18 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <new>
+#include <stdexcept>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "core/block_grid.h"
 #include "core/geometry.h"
+#include "core/status.h"
 
 namespace gjxl {
 
@@ -162,5 +168,208 @@ static_assert([] {
 
   return &kAcStrategyInfos[index];
 }
+
+struct AcStrategyCell {
+  AcStrategyType strategy = AcStrategyType::kDct8;
+  bool is_anchor = false;
+};
+
+/// Owns one encoded AC-strategy cell per JPEG XL 8x8 base block.
+///
+/// Every covered cell stores the selected strategy. Exactly the top-left cell
+/// of each complete transform is marked as its anchor.
+class AcStrategyGrid {
+public:
+  AcStrategyGrid() = default;
+
+  [[nodiscard]] static Status Create(
+    Extent2D extent,
+    AcStrategyGrid* out) {
+
+    if (out == nullptr) {
+      return Status::InvalidArgument(
+        "AC-strategy grid output is null");
+    }
+
+    if (extent.empty()) {
+      return Status::InvalidArgument(
+        "AC-strategy grid extent must be non-empty");
+    }
+
+    size_t cell_count = 0;
+    if (!extent.try_area(&cell_count)) {
+      return Status::InvalidArgument(
+        "AC-strategy grid extent is too large");
+    }
+
+    try {
+      AcStrategyGrid result;
+      result.extent_ = extent;
+      result.cells_.assign(cell_count, kInvalidCell);
+      *out = std::move(result);
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate AC-strategy grid");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+        "AC-strategy grid extent is too large");
+    }
+
+    return Status::Ok();
+  }
+
+  [[nodiscard]] bool valid() const noexcept {
+    size_t cell_count = 0;
+    return !extent_.empty() &&
+      extent_.try_area(&cell_count) &&
+      cells_.size() == cell_count;
+  }
+
+  [[nodiscard]] Extent2D extent() const noexcept {
+    return extent_;
+  }
+
+  [[nodiscard]] bool complete() const noexcept {
+    return valid() && std::ranges::none_of(
+      cells_,
+      [](uint8_t cell) { return cell == kInvalidCell; });
+  }
+
+  [[nodiscard]] bool occupied(size_t x, size_t y) const noexcept {
+    return valid() && x < extent_.width && y < extent_.height &&
+      cells_[y * extent_.width + x] != kInvalidCell;
+  }
+
+  void clear() noexcept {
+    std::ranges::fill(cells_, kInvalidCell);
+  }
+
+  void fill_dct8() noexcept {
+    std::ranges::fill(
+      cells_,
+      EncodeCell(AcStrategyType::kDct8, true));
+  }
+
+  void fill_empty_dct8() noexcept {
+    std::ranges::replace(
+      cells_,
+      kInvalidCell,
+      EncodeCell(AcStrategyType::kDct8, true));
+  }
+
+  [[nodiscard]] Status Set(
+    size_t x,
+    size_t y,
+    AcStrategyType strategy) {
+
+    if (!valid()) {
+      return Status::InvalidArgument(
+        "AC-strategy grid is invalid");
+    }
+
+    const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
+    if (info == nullptr) {
+      return Status::InvalidArgument(
+        "Unknown AC strategy");
+    }
+
+    const Extent2D covered = info->covered_blocks;
+    if (x >= extent_.width ||
+        y >= extent_.height ||
+        covered.width > extent_.width - x ||
+        covered.height > extent_.height - y) {
+      return Status::InvalidArgument(
+        "AC strategy does not fit in the grid");
+    }
+
+    for (size_t dy = 0; dy < covered.height; ++dy) {
+      for (size_t dx = 0; dx < covered.width; ++dx) {
+        if (cells_[(y + dy) * extent_.width + x + dx] != kInvalidCell) {
+          return Status::InvalidArgument(
+            "AC strategy overlaps an occupied block");
+        }
+      }
+    }
+
+    for (size_t dy = 0; dy < covered.height; ++dy) {
+      for (size_t dx = 0; dx < covered.width; ++dx) {
+        cells_[(y + dy) * extent_.width + x + dx] =
+          EncodeCell(strategy, dx == 0 && dy == 0);
+      }
+    }
+
+    return Status::Ok();
+  }
+
+  [[nodiscard]] Status Get(
+    size_t x,
+    size_t y,
+    AcStrategyCell* out) const {
+
+    if (out == nullptr) {
+      return Status::InvalidArgument(
+        "AC-strategy cell output is null");
+    }
+
+    if (!valid() || x >= extent_.width || y >= extent_.height) {
+      return Status::InvalidArgument(
+        "AC-strategy cell coordinates are invalid");
+    }
+
+    const uint8_t encoded = cells_[y * extent_.width + x];
+    if (encoded == kInvalidCell) {
+      return Status::InvalidArgument(
+        "AC-strategy cell is unoccupied");
+    }
+
+    *out = {
+      .strategy = static_cast<AcStrategyType>(encoded >> 1),
+      .is_anchor = (encoded & 1u) != 0,
+    };
+    return Status::Ok();
+  }
+
+  template <typename Function>
+  [[nodiscard]] Status ForEachAnchor(Function&& function) const {
+    if (!complete()) {
+      return Status::InvalidArgument(
+        "AC-strategy grid is incomplete");
+    }
+
+    for (size_t y = 0; y < extent_.height; ++y) {
+      for (size_t x = 0; x < extent_.width; ++x) {
+        const uint8_t encoded = cells_[y * extent_.width + x];
+        if ((encoded & 1u) == 0) {
+          continue;
+        }
+
+        Status status = function(
+          x,
+          y,
+          static_cast<AcStrategyType>(encoded >> 1));
+        if (!status.ok()) {
+          return status;
+        }
+      }
+    }
+
+    return Status::Ok();
+  }
+
+private:
+  static constexpr uint8_t kInvalidCell = 0xff;
+
+  [[nodiscard]] static constexpr uint8_t EncodeCell(
+    AcStrategyType strategy,
+    bool is_anchor) noexcept {
+
+    return static_cast<uint8_t>(
+      (static_cast<uint8_t>(strategy) << 1) |
+      static_cast<uint8_t>(is_anchor));
+  }
+
+  Extent2D extent_;
+  std::vector<uint8_t> cells_;
+};
 
 }  // namespace gjxl

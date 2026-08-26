@@ -54,6 +54,7 @@ add_library(
 
   src/codec/adaptive_quantization.cpp
   src/codec/dc_conversion.cpp
+  src/codec/dct.cpp
   src/codec/quantization.cpp
 )
 
@@ -240,6 +241,22 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_ac_strategy_grid_test
+    tests/ac_strategy_grid_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_grid_test
+    PRIVATE
+      gjxl_core
+  )
+
+  add_test(
+    NAME ac_strategy_grid
+    COMMAND gjxl_ac_strategy_grid_test
+  )
+
+  add_executable(
     gjxl_fast_math_test
     tests/fast_math_test.cpp
   )
@@ -270,6 +287,23 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME dct_reference
     COMMAND gjxl_dct_reference_test
+  )
+
+  add_executable(
+    gjxl_cpu_dct_test
+    tests/cpu_dct_test.cpp
+    tests/dct_reference.cpp
+  )
+
+  target_link_libraries(
+    gjxl_cpu_dct_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME cpu_dct
+    COMMAND gjxl_cpu_dct_test
   )
 
   add_executable(
