@@ -58,6 +58,7 @@ add_library(
   src/codec/convolution.cpp
   src/codec/dc_conversion.cpp
   src/codec/dct.cpp
+  src/codec/epf.cpp
   src/codec/gaborish.cpp
   src/codec/quantization.cpp
 )
@@ -421,6 +422,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME chroma_from_luma
     COMMAND gjxl_chroma_from_luma_test
+  )
+
+  add_executable(
+    gjxl_epf_test
+    tests/epf_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_epf_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME epf
+    COMMAND gjxl_epf_test
   )
 
   find_package(
