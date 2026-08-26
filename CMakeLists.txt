@@ -53,8 +53,11 @@ add_library(
   STATIC
 
   src/codec/adaptive_quantization.cpp
+  src/codec/chroma_from_luma.cpp
+  src/codec/convolution.cpp
   src/codec/dc_conversion.cpp
   src/codec/dct.cpp
+  src/codec/gaborish.cpp
   src/codec/quantization.cpp
 )
 
@@ -353,6 +356,38 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME adaptive_quantization
     COMMAND gjxl_adaptive_quantization_test
+  )
+
+  add_executable(
+    gjxl_gaborish_test
+    tests/gaborish_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_gaborish_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME gaborish
+    COMMAND gjxl_gaborish_test
+  )
+
+  add_executable(
+    gjxl_chroma_from_luma_test
+    tests/chroma_from_luma_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_chroma_from_luma_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME chroma_from_luma
+    COMMAND gjxl_chroma_from_luma_test
   )
 
   find_package(

@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+#include "core/ac_strategy.h"
+#include "core/geometry.h"
+#include "core/image.h"
+#include "core/quantizer.h"
+#include "core/status.h"
+
+namespace gjxl {
+
+inline constexpr size_t kColorTileDimension = 64;
+inline constexpr int32_t kDefaultColorFactor = 84;
+
+/// Owns the per-color-tile AC chroma-from-luma correction factors.
+///
+/// The stored signed bytes match the JPEG XL representation. Actual factors
+/// are X = x_factor / 84 and B = 1 + b_factor / 84; the Y factor is zero.
+class ColorCorrelationMap {
+public:
+  [[nodiscard]] bool valid() const noexcept;
+  [[nodiscard]] Extent2D tile_extent() const noexcept;
+  [[nodiscard]] ConstPlaneI8View y_to_x_map() const noexcept;
+  [[nodiscard]] ConstPlaneI8View y_to_b_map() const noexcept;
+
+  [[nodiscard]] std::array<float, 3> AcFactors(
+    size_t tile_x,
+    size_t tile_y) const noexcept;
+
+private:
+  friend Status ComputeInitialColorCorrelationMap(
+    ConstImage3FView,
+    ColorCorrelationMap*);
+  friend Status ComputeFinalColorCorrelationMap(
+    ConstImage3FView,
+    const AcStrategyGrid&,
+    ConstPlaneI32View,
+    const Quantizer&,
+    bool,
+    ColorCorrelationMap*);
+
+  Extent2D tile_extent_;
+  std::vector<int8_t> y_to_x_;
+  std::vector<int8_t> y_to_b_;
+};
+
+/// Computes libjxl's first-pass DCT8-only chroma-from-luma AC map.
+///
+/// Input dimensions are padded pixel dimensions and must be non-zero
+/// multiples of the JPEG XL 8x8 block size. The output is committed only
+/// after the entire map has been computed successfully.
+[[nodiscard]] Status ComputeInitialColorCorrelationMap(
+  ConstImage3FView opsin,
+  ColorCorrelationMap* out);
+
+/// Recomputes CfL after strategy selection and raw-quant finalization.
+[[nodiscard]] Status ComputeFinalColorCorrelationMap(
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneI32View raw_quant_field,
+  const Quantizer& quantizer,
+  bool fast,
+  ColorCorrelationMap* out);
+
+}  // namespace gjxl

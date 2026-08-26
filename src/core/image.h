@@ -32,6 +32,10 @@ struct PlaneView {
 
 using PlaneF32View = PlaneView<float>;
 using ConstPlaneF32View = PlaneView<const float>;
+using PlaneI8View = PlaneView<int8_t>;
+using ConstPlaneI8View = PlaneView<const int8_t>;
+using PlaneU8View = PlaneView<uint8_t>;
+using ConstPlaneU8View = PlaneView<const uint8_t>;
 using PlaneI32View = PlaneView<int32_t>;
 using ConstPlaneI32View = PlaneView<const int32_t>;
 
