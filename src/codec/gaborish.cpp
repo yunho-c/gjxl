@@ -10,9 +10,9 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
-#include <vector>
 
 #include "codec/convolution.h"
+#include "core/image_buffer.h"
 #include "core/image_ops.h"
 
 namespace gjxl {
@@ -63,47 +63,33 @@ Status ApplyGaborishInverse(
     }
   }
 
-  size_t pixel_count = 0;
-  if (!input.extent().try_area(&pixel_count)) {
-    return Status::InvalidArgument(
-      "Gaborish image dimensions are too large");
-  }
-
   try {
-    std::array<std::vector<float>, 3> filtered;
-    for (size_t channel = 0; channel < filtered.size(); ++channel) {
-      filtered[channel].resize(pixel_count);
+    Image3FBuffer filtered(input.extent());
+    const Image3FView filtered_view = filtered.view();
+    for (size_t channel = 0; channel < 3; ++channel) {
       Status status = ConvolveSymmetric5(
         input.plane[channel],
         GaborishWeights(multipliers[channel]),
-        {
-          .data = filtered[channel].data(),
-          .extent = input.extent(),
-          .stride = input.width(),
-        });
+        filtered_view.plane[channel]);
       if (!status.ok()) {
         return status;
       }
 
       if (!std::ranges::all_of(
-            filtered[channel],
+            filtered.plane(channel),
             [](float value) { return std::isfinite(value); })) {
         return Status::InvalidArgument(
           "Gaborish filtering produced a non-finite result");
       }
     }
 
-    for (size_t channel = 0; channel < filtered.size(); ++channel) {
-      for (size_t y = 0; y < input.height(); ++y) {
-        std::copy_n(
-          filtered[channel].data() + y * input.width(),
-          input.width(),
-          output.plane[channel].Row(y));
-      }
-    }
+    CopyImage(filtered.const_view(), output);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Gaborish scratch storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Gaborish image dimensions are too large");
   }
 
   return Status::Ok();
@@ -149,15 +135,8 @@ Status ApplyGaborish(
   }
 
   try {
-    size_t pixel_count = 0;
-    if (!input.extent().try_area(&pixel_count)) {
-      return Status::InvalidArgument(
-        "Gaborish image dimensions are too large");
-    }
-    std::array<std::vector<float>, 3> result;
-    for (std::vector<float>& plane : result) {
-      plane.resize(pixel_count);
-    }
+    Image3FBuffer result(input.extent());
+    const Image3FView result_view = result.view();
 
     for (size_t channel = 0; channel < 3; ++channel) {
       const float center_weight = weights[channel][0];
@@ -186,19 +165,12 @@ Status ApplyGaborish(
             return Status::InvalidArgument(
               "Gaborish filtering produced a non-finite result");
           }
-          result[channel][y * input.width() + x] = value;
+          result_view.plane[channel].Row(y)[x] = value;
         }
       }
     }
 
-    for (size_t channel = 0; channel < 3; ++channel) {
-      for (size_t y = 0; y < input.height(); ++y) {
-        std::copy_n(
-          result[channel].data() + y * input.width(),
-          input.width(),
-          output.plane[channel].Row(y));
-      }
-    }
+    CopyImage(result.const_view(), output);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Gaborish scratch storage");

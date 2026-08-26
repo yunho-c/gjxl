@@ -249,6 +249,33 @@ bool CheckEpfFiltering() {
     }
   }
 
+  in_place = input;
+  options.iterations = 2;
+  if (!gjxl::ApplyEpf(
+        const_view(input),
+        {inverse_sigma.data(), kBlockExtent, kBlockExtent.width},
+        options,
+        view(output)).ok() ||
+      !gjxl::ApplyEpf(
+        const_view(in_place),
+        {inverse_sigma.data(), kBlockExtent, kBlockExtent.width},
+        options,
+        view(in_place)).ok()) {
+    std::cerr << "EPF pass sequence 1,2 failed\n";
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kImageExtent.height; ++y) {
+      for (size_t x = 0; x < kImageExtent.width; ++x) {
+        if (in_place[channel][y * kStride + x] !=
+            output[channel][y * kStride + x]) {
+          std::cerr << "In-place two-pass EPF differs\n";
+          return false;
+        }
+      }
+    }
+  }
+
   inverse_sigma.fill(-10000.0f);
   options.iterations = 3;
   if (!gjxl::ApplyEpf(

@@ -48,6 +48,23 @@ struct ImageStorage {
   }
 };
 
+bool SameActivePixels(
+  const ImageStorage& left,
+  const ImageStorage& right) {
+
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kExtent.height; ++y) {
+      for (size_t x = 0; x < kExtent.width; ++x) {
+        if (left.plane[channel][y * kStride + x] !=
+            right.plane[channel][y * kStride + x]) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckComposition() {
   ImageStorage input(-111.0f);
   ImageStorage gaborished(-222.0f);
@@ -117,6 +134,34 @@ bool CheckComposition() {
     }
   }
 
+  ImageStorage single_stage(-555.0f);
+  options.epf_options.iterations = 0;
+  if (!gjxl::ApplyLoopFilters(
+        input.ConstView(), {}, options, single_stage.View()).ok() ||
+      !SameActivePixels(single_stage, gaborished)) {
+    std::cerr << "Gaborish-only loop filtering differs\n";
+    return false;
+  }
+
+  ImageStorage epf_only(-666.0f);
+  ImageStorage epf_expected(-777.0f);
+  options.gaborish = false;
+  options.epf_options.iterations = 2;
+  if (!gjxl::ApplyEpf(
+        input.ConstView(),
+        sigma_view,
+        options.epf_options,
+        epf_expected.View()).ok() ||
+      !gjxl::ApplyLoopFilters(
+        input.ConstView(),
+        sigma_view,
+        options,
+        epf_only.View()).ok() ||
+      !SameActivePixels(epf_only, epf_expected)) {
+    std::cerr << "EPF-only loop filtering differs\n";
+    return false;
+  }
+
   options.gaborish = false;
   options.epf_options.iterations = 0;
   if (!gjxl::ApplyLoopFilters(
@@ -133,6 +178,14 @@ bool CheckComposition() {
         }
       }
     }
+  }
+
+  in_place = input;
+  if (!gjxl::ApplyLoopFilters(
+        in_place.ConstView(), {}, options, in_place.View()).ok() ||
+      !SameActivePixels(in_place, input)) {
+    std::cerr << "Disabled in-place loop filtering changed input\n";
+    return false;
   }
 
   const auto original = combined.plane;

@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/image_buffer.h"
 #include "core/image_ops.h"
 
 namespace gjxl {
@@ -349,99 +350,53 @@ Status ApplyEpf(
   }
 
   try {
-    size_t pixel_count = 0;
-    if (!input.extent().try_area(&pixel_count)) {
-      return Status::InvalidArgument(
-        "EPF image dimensions are too large");
-    }
-    std::array<std::vector<float>, 3> scratch_a;
-    std::array<std::vector<float>, 3> scratch_b;
-    for (size_t channel = 0; channel < 3; ++channel) {
-      scratch_a[channel].resize(pixel_count);
-      if (options.iterations >= 2) {
-        scratch_b[channel].resize(pixel_count);
-      }
-      for (size_t y = 0; y < input.height(); ++y) {
-        std::copy_n(
-          input.plane[channel].Row(y),
-          input.width(),
-          scratch_a[channel].data() + y * input.width());
-      }
+    if (options.iterations == 0) {
+      CopyImage(input, output);
+      return Status::Ok();
     }
 
-    const auto view = [&](std::array<std::vector<float>, 3>& storage) {
-      return Image3FView{{
-        PlaneF32View{storage[0].data(), input.extent(), input.width()},
-        PlaneF32View{storage[1].data(), input.extent(), input.width()},
-        PlaneF32View{storage[2].data(), input.extent(), input.width()},
-      }};
-    };
-    const auto const_view = [&](
-      const std::array<std::vector<float>, 3>& storage) {
-      return ConstImage3FView{{
-        ConstPlaneF32View{
-          storage[0].data(), input.extent(), input.width()},
-        ConstPlaneF32View{
-          storage[1].data(), input.extent(), input.width()},
-        ConstPlaneF32View{
-          storage[2].data(), input.extent(), input.width()},
-      }};
-    };
-
+    Image3FBuffer scratch_a(input.extent());
     if (options.iterations == 1) {
-      // Preserve the original input in scratch B only when it is needed as
-      // the source of a single pass.
-      for (size_t channel = 0; channel < 3; ++channel) {
-        scratch_b[channel] = scratch_a[channel];
-      }
       ApplyEpfPass(
-        const_view(scratch_b),
+        input,
         inverse_sigma,
         options,
         EpfPass::kPass1,
-        view(scratch_a));
+        scratch_a.view());
+      CopyImage(scratch_a.const_view(), output);
     } else if (options.iterations == 2) {
       ApplyEpfPass(
-        const_view(scratch_a),
+        input,
         inverse_sigma,
         options,
         EpfPass::kPass1,
-        view(scratch_b));
+        scratch_a.view());
       ApplyEpfPass(
-        const_view(scratch_b),
+        scratch_a.const_view(),
         inverse_sigma,
         options,
         EpfPass::kPass2,
-        view(scratch_a));
-    } else if (options.iterations == 3) {
+        output);
+    } else {
+      Image3FBuffer scratch_b(input.extent());
       ApplyEpfPass(
-        const_view(scratch_a),
+        input,
         inverse_sigma,
         options,
         EpfPass::kPass0,
-        view(scratch_b));
+        scratch_a.view());
       ApplyEpfPass(
-        const_view(scratch_b),
+        scratch_a.const_view(),
         inverse_sigma,
         options,
         EpfPass::kPass1,
-        view(scratch_a));
+        scratch_b.view());
       ApplyEpfPass(
-        const_view(scratch_a),
+        scratch_b.const_view(),
         inverse_sigma,
         options,
         EpfPass::kPass2,
-        view(scratch_b));
-      scratch_a.swap(scratch_b);
-    }
-
-    for (size_t channel = 0; channel < 3; ++channel) {
-      for (size_t y = 0; y < input.height(); ++y) {
-        std::copy_n(
-          scratch_a[channel].data() + y * input.width(),
-          input.width(),
-          output.plane[channel].Row(y));
-      }
+        output);
     }
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
