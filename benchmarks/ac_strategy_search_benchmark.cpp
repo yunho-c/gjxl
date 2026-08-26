@@ -300,6 +300,10 @@ int main(int argc, char** argv) {
     RunCase(*gpu, {128, 96}, sample_count);
     RunCase(*gpu, {256, 192}, sample_count);
     RunCase(*gpu, {512, 384}, sample_count);
+    // 854x480 display pixels padded to the next complete 8x8 block.
+    RunCase(*gpu, {856, 480}, sample_count);
+    RunCase(*gpu, {1280, 720}, sample_count);
+    RunCase(*gpu, {1920, 1080}, sample_count);
     std::cout << "checksum: " << g_checksum << '\n';
     return EXIT_SUCCESS;
   } catch (const std::exception& error) {

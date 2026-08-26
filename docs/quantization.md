@@ -336,15 +336,20 @@ invocation medians.
 
 | Image | Candidates | CPU median range | GPU E2E median range | Speedup range |
 | --- | ---: | ---: | ---: | ---: |
-| 64x64 | 258 | 2.764–2.792 ms | 1.038–1.170 ms | 2.39–2.69x |
-| 128x96 | 752 | 8.332–8.388 ms | 1.504–1.621 ms | 5.17–5.50x |
-| 256x192 | 3,096 | 33.478–33.640 ms | 3.395–3.490 ms | 9.61–9.87x |
-| 512x384 | 12,384 | 133.403–133.768 ms | 6.843–10.306 ms | 13.03–19.56x |
+| 64x64 | 258 | 2.784–2.813 ms | 0.630–1.132 ms | 2.48–4.63x |
+| 128x96 | 752 | 8.328–8.417 ms | 0.603–1.631 ms | 5.11–13.90x |
+| 256x192 | 3,096 | 33.311–33.821 ms | 1.984–3.505 ms | 9.52–17.38x |
+| 512x384 | 12,384 | 132.686–134.425 ms | 6.310–10.166 ms | 13.11–22.15x |
+| 480p (856x480 padded) | 25,594 | 273.142–276.185 ms | 9.771–14.291 ms | 19.51–28.49x |
+| 720p (1280x720) | 57,720 | 619.433–625.679 ms | 20.474–22.030 ms | 29.14–31.02x |
+| 1080p (1920x1080) | 130,380 | 1,391.920–1,417.010 ms | 42.388–45.615 ms | 30.58–33.10x |
 
-The 512x384 GPU samples were bimodal (roughly 5–11 ms), and this affected the
-three run medians. The table therefore supports a substantial end-to-end
-throughput win, but not a claim that resource-management variance has been
-eliminated. Full-grid parity tests cover full and partial color tiles,
+The 480p case models a 16:9 854x480 source padded by two columns to complete
+the final 8x8 block. GPU samples remain variable, especially for the smaller
+allocations, so the table supports a substantial end-to-end throughput win but
+not a claim that resource-management variance has been eliminated. At 1080p,
+however, all three GPU run medians remained within 3.3 ms. Full-grid parity
+tests cover full and partial color tiles,
 three Butteraugli targets, strided inputs, invalid-input atomicity, and several
 deterministic source phases. Quantization-boundary sensitivity remains governed
 by the leaf-cost accuracy contract above.
