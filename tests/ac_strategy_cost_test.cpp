@@ -172,6 +172,51 @@ bool CheckInputsAffectCost() {
   return true;
 }
 
+bool CheckQuantNorm() {
+  Fixture fixture;
+  float quant_norm = -777.0f;
+  if (!gjxl::ComputeAcStrategyQuantNorm(
+        gjxl::AcStrategyType::kDct16x8,
+        2,
+        1,
+        fixture.QuantField(),
+        &quant_norm).ok() ||
+      quant_norm != std::max(
+        fixture.quant_field[1 * 4 + 2],
+        fixture.quant_field[2 * 4 + 2])) {
+    std::cerr << "AC-strategy quant norm aggregation is incorrect\n";
+    return false;
+  }
+
+  quant_norm = -777.0f;
+  fixture.quant_field[2 * 4 + 2] =
+    std::numeric_limits<float>::quiet_NaN();
+  if (gjxl::ComputeAcStrategyQuantNorm(
+        gjxl::AcStrategyType::kDct16x8,
+        2,
+        1,
+        fixture.QuantField(),
+        &quant_norm).ok() ||
+      gjxl::ComputeAcStrategyQuantNorm(
+        gjxl::AcStrategyType::kDct32x32,
+        1,
+        1,
+        fixture.QuantField(),
+        &quant_norm).ok() ||
+      gjxl::ComputeAcStrategyQuantNorm(
+        gjxl::AcStrategyType::kDct8,
+        0,
+        0,
+        fixture.QuantField(),
+        nullptr).ok() ||
+      quant_norm != -777.0f) {
+    std::cerr << "Invalid AC-strategy quant norm request was accepted\n";
+    return false;
+  }
+
+  return true;
+}
+
 bool CheckInvalidInputs() {
   Fixture fixture;
   float cost = -777.0f;
@@ -238,6 +283,7 @@ bool CheckInvalidInputs() {
 int main() {
   if (!CheckDeterministicCosts() ||
       !CheckInputsAffectCost() ||
+      !CheckQuantNorm() ||
       !CheckInvalidInputs()) {
     return EXIT_FAILURE;
   }

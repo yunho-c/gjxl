@@ -21,6 +21,15 @@ struct AcStrategyCostOptions {
   std::array<float, 3> cfl_factors{};
 };
 
+/// Aggregates an initial quant field over one strategy footprint.
+/// Coordinates are expressed in JPEG XL 8x8 base blocks.
+[[nodiscard]] Status ComputeAcStrategyQuantNorm(
+  AcStrategyType strategy,
+  size_t block_x,
+  size_t block_y,
+  ConstPlaneF32View quant_field,
+  float* quant_norm);
+
 /// Estimates libjxl's quantization-aware cost for one complete transform.
 /// Coordinates are expressed in JPEG XL 8x8 base blocks.
 [[nodiscard]] Status EstimateAcStrategyCost(

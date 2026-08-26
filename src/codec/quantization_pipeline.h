@@ -5,6 +5,7 @@
 
 #include <array>
 
+#include "codec/ac_strategy.h"
 #include "codec/adaptive_quantization.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
@@ -23,10 +24,38 @@ struct CpuQuantizationPipelineOptions {
 struct CpuQuantizationPipelineOutput {
   InitialQuantFieldOutput initial_quantization;
   AdaptiveQuantizationOutput adaptive_quantization;
-  AcStrategyGrid* strategies = nullptr;
 };
 
-/// Runs the complete CPU quantization reference pipeline before GPU porting.
+/// Supplies AC-strategy selection without coupling codec orchestration to a
+/// particular CPU or GPU implementation.
+class AcStrategySearchProvider {
+public:
+  virtual ~AcStrategySearchProvider() = default;
+
+  [[nodiscard]] virtual Status Find(
+    ConstImage3FView opsin,
+    ConstPlaneF32View quant_field,
+    ConstPlaneF32View pixel_mask,
+    const ColorCorrelationMap& color_correlation,
+    AcStrategySearchOptions options,
+    AcStrategyGrid* out) = 0;
+
+protected:
+  AcStrategySearchProvider() = default;
+};
+
+/// Runs the complete pipeline using an injected AC-strategy implementation.
+///
+/// The provider is invoked exactly once after initial AQ, Gaborish, and
+/// first-pass CfL. All caller-visible outputs remain atomic across later AQ.
+[[nodiscard]] Status RunQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  AcStrategySearchProvider& strategy_search,
+  CpuQuantizationPipelineOptions options,
+  CpuQuantizationPipelineOutput output);
+
+/// Runs the complete pipeline with the built-in CPU AC-strategy search.
 ///
 /// `opsin` contains the padded, pre-Gaborish XYB input. Initial AQ samples it
 /// directly; subsequent stages consume an internally inverse-filtered copy.

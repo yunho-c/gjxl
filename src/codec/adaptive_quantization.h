@@ -65,11 +65,9 @@ struct AdaptiveQuantizationOptions {
 
 struct AdaptiveQuantizationOutput {
   PlaneF32View quant_field;
-  PlaneI32View raw_quant_field;
   PlaneF32View block_distance_map;
   Image3FView reconstructed_linear_rgb;
-  Quantizer* quantizer = nullptr;
-  ColorCorrelationMap* color_correlation = nullptr;
+  VarDctEncoderFrame* frame = nullptr;
   std::vector<double>* score_history = nullptr;
 };
 

@@ -124,6 +124,7 @@ add_library(
   src/codec/quantization.cpp
   src/codec/quantization_pipeline.cpp
   src/codec/reconstruction.cpp
+  src/codec/vardct_frame.cpp
 )
 
 target_link_libraries(
@@ -158,6 +159,21 @@ else()
       GJXL_ENABLE_LIBJXL_REFERENCE=0
   )
 endif()
+
+# Backend-independent GPU codec operations
+add_library(
+  gjxl_gpu_ops
+  STATIC
+
+  src/gpu/ops/ac_strategy_search.cpp
+  src/gpu/ops/quantization_pipeline.cpp
+)
+
+target_link_libraries(
+  gjxl_gpu_ops
+  PUBLIC
+    gjxl_codec
+)
 
 # metal-cpp
 add_library(
@@ -207,6 +223,11 @@ set(
 )
 
 set(
+  GJXL_AC_STRATEGY_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/ac_strategy.metal"
+)
+
+set(
   GJXL_DCT_BASIS_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
 )
@@ -214,6 +235,11 @@ set(
 set(
   GJXL_DCT_METAL_IR
   "${GJXL_METAL_DIR}/dct.ir"
+)
+
+set(
+  GJXL_AC_STRATEGY_METAL_IR
+  "${GJXL_METAL_DIR}/ac_strategy.ir"
 )
 
 set(
@@ -251,6 +277,33 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_AC_STRATEGY_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    "${GJXL_AC_STRATEGY_METAL_SOURCE}"
+    -o
+    "${GJXL_AC_STRATEGY_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_AC_STRATEGY_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling Metal AC-strategy shaders"
+
+  VERBATIM
+)
+
 # .ir -> .metallib
 
 add_custom_command(
@@ -264,9 +317,11 @@ add_custom_command(
     -o
     "${GJXL_METALLIB}"
     "${GJXL_DCT_METAL_IR}"
+    "${GJXL_AC_STRATEGY_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
+    "${GJXL_AC_STRATEGY_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -599,6 +654,22 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_vardct_frame_test
+    tests/vardct_frame_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_vardct_frame_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME vardct_frame
+    COMMAND gjxl_vardct_frame_test
+  )
+
+  add_executable(
     gjxl_loop_filter_test
     tests/loop_filter_test.cpp
   )
@@ -690,6 +761,92 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_dct_test
   )
 
+  add_executable(
+    gjxl_ac_strategy_metal_test
+    tests/ac_strategy_metal_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_metal_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_ac_strategy_metal_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_ac_strategy_metal_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_ac_strategy
+    COMMAND gjxl_ac_strategy_metal_test
+  )
+
+  add_executable(
+    gjxl_ac_strategy_gpu_search_test
+    tests/ac_strategy_gpu_search_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_gpu_search_test
+    PRIVATE
+      gjxl_gpu_ops
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_ac_strategy_gpu_search_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_ac_strategy_gpu_search_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_ac_strategy_search
+    COMMAND gjxl_ac_strategy_gpu_search_test
+  )
+
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    add_executable(
+      gjxl_quantization_gpu_pipeline_test
+      tests/quantization_gpu_pipeline_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_quantization_gpu_pipeline_test
+      PRIVATE
+        gjxl_gpu_ops
+        gjxl_metal
+    )
+
+    target_compile_definitions(
+      gjxl_quantization_gpu_pipeline_test
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+    )
+
+    add_dependencies(
+      gjxl_quantization_gpu_pipeline_test
+      gjxl_metal_shaders
+    )
+
+    add_test(
+      NAME metal_quantization_pipeline
+      COMMAND gjxl_quantization_gpu_pipeline_test
+    )
+  endif()
+
 endif()
 
 if(GJXL_BUILD_BENCHMARKS)
@@ -726,6 +883,52 @@ if(GJXL_BUILD_BENCHMARKS)
 
   add_dependencies(
     gjxl_dct_benchmark
+    gjxl_metal_shaders
+  )
+
+  add_executable(
+    gjxl_ac_strategy_benchmark
+    benchmarks/ac_strategy_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_benchmark
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_ac_strategy_benchmark
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_ac_strategy_benchmark
+    gjxl_metal_shaders
+  )
+
+  add_executable(
+    gjxl_ac_strategy_search_benchmark
+    benchmarks/ac_strategy_search_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_search_benchmark
+    PRIVATE
+      gjxl_gpu_ops
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_ac_strategy_search_benchmark
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_ac_strategy_search_benchmark
     gjxl_metal_shaders
   )
 

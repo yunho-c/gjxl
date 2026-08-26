@@ -11,9 +11,10 @@
 #include <new>
 #include <vector>
 
+#include "codec/ac_strategy_search_internal.h"
+#include "codec/ac_strategy_search_policy.h"
 #include "codec/dct.h"
 #include "codec/quantization.h"
-#include "codec/ac_strategy_search_policy.h"
 #include "core/block_grid.h"
 #include "util/fast_math.h"
 
@@ -96,7 +97,7 @@ Status ValidateCostInputs(
   return Status::Ok();
 }
 
-float QuantNorm(
+float ComputeQuantNormUnchecked(
   ConstPlaneF32View quant_field,
   size_t block_x,
   size_t block_y,
@@ -272,6 +273,7 @@ struct SearchContext {
   size_t tile_block_y;
   Extent2D tile_block_extent;
   SearchGrid* grid;
+  const ac_strategy_internal::CandidateCostTableView* candidate_costs;
   std::array<float, 64> costs{};
   std::array<uint8_t, 64> priorities{};
 };
@@ -283,6 +285,22 @@ Status CandidateCost(
   size_t local_y,
   float entropy_multiplier,
   float* cost) {
+
+  if (context.candidate_costs != nullptr) {
+    const size_t strategy_index = static_cast<size_t>(strategy);
+    const size_t block_x = context.tile_block_x + local_x;
+    const size_t block_y = context.tile_block_y + local_y;
+    const std::span<const float> costs =
+      context.candidate_costs->strategy_costs[strategy_index];
+    const float result = costs[
+      block_y * context.candidate_costs->block_extent.width + block_x];
+    if (!std::isfinite(result) || result < 0.0f) {
+      return Status::Internal(
+        "AC-strategy candidate cost table is incomplete");
+    }
+    *cost = result;
+    return Status::Ok();
+  }
 
   return EstimateAcStrategyCost(
     strategy,
@@ -567,6 +585,21 @@ Status FindBestFirstLevelDivision(
 }
 
 Status SearchTile(SearchContext* context) {
+  constexpr float kDct8EntropyMultiplier =
+    ac_strategy_internal::CandidateEntropyMultiplier(
+      AcStrategyType::kDct8);
+  constexpr float kDct16RectangleEntropyMultiplier =
+    ac_strategy_internal::CandidateEntropyMultiplier(
+      AcStrategyType::kDct16x8);
+  constexpr float kDct16SquareEntropyMultiplier =
+    ac_strategy_internal::CandidateEntropyMultiplier(
+      AcStrategyType::kDct16x16);
+  constexpr float kDct32RectangleEntropyMultiplier =
+    ac_strategy_internal::CandidateEntropyMultiplier(
+      AcStrategyType::kDct32x16);
+  constexpr float kDct32SquareEntropyMultiplier =
+    ac_strategy_internal::CandidateEntropyMultiplier(
+      AcStrategyType::kDct32x32);
   constexpr float kDct8MultiplierSlope = -0.4f;
   constexpr float kDct8MultiplierOffset = 1.0f;
   constexpr float kDct8MultiplierBase = 1.4f;
@@ -582,7 +615,7 @@ Status SearchTile(SearchContext* context) {
         AcStrategyType::kDct8,
         x,
         y,
-        1.0f,
+        kDct8EntropyMultiplier,
         &cost);
       if (!status.ok()) {
         return status;
@@ -597,10 +630,22 @@ Status SearchTile(SearchContext* context) {
     float entropy_multiplier;
   };
   constexpr std::array kMergeTries = {
-    MergeTry{AcStrategyType::kDct16x8, 2, 1.21f},
-    MergeTry{AcStrategyType::kDct8x16, 2, 1.21f},
-    MergeTry{AcStrategyType::kDct16x32, 4, 1.49f},
-    MergeTry{AcStrategyType::kDct32x16, 4, 1.49f},
+    MergeTry{
+      AcStrategyType::kDct16x8,
+      2,
+      kDct16RectangleEntropyMultiplier},
+    MergeTry{
+      AcStrategyType::kDct8x16,
+      2,
+      kDct16RectangleEntropyMultiplier},
+    MergeTry{
+      AcStrategyType::kDct16x32,
+      4,
+      kDct32RectangleEntropyMultiplier},
+    MergeTry{
+      AcStrategyType::kDct32x16,
+      4,
+      kDct32RectangleEntropyMultiplier},
   };
 
   for (const MergeTry merge : kMergeTries) {
@@ -616,7 +661,12 @@ Status SearchTile(SearchContext* context) {
           if (merge.strategy == AcStrategyType::kDct16x32) {
             if ((y | x) % 4 == 0) {
               Status status = FindBestFirstLevelDivision(
-                context, 4, x, y, 1.49f, 1.48f);
+                context,
+                4,
+                x,
+                y,
+                kDct32RectangleEntropyMultiplier,
+                kDct32SquareEntropyMultiplier);
               if (!status.ok()) {
                 return status;
               }
@@ -637,7 +687,12 @@ Status SearchTile(SearchContext* context) {
           if (merge.strategy == AcStrategyType::kDct8x16) {
             if ((y | x) % 2 == 0) {
               Status status = FindBestFirstLevelDivision(
-                context, 2, x, y, 1.21f, 1.34f);
+                context,
+                2,
+                x,
+                y,
+                kDct16RectangleEntropyMultiplier,
+                kDct16SquareEntropyMultiplier);
               if (!status.ok()) {
                 return status;
               }
@@ -671,7 +726,12 @@ Status SearchTile(SearchContext* context) {
     for (size_t x = 0; x + 1 < context->tile_block_extent.width; ++x) {
       if ((y | x) % 2 != 0) {
         Status status = FindBestFirstLevelDivision(
-          context, 2, x, y, 1.21f, 1.34f);
+          context,
+          2,
+          x,
+          y,
+          kDct16RectangleEntropyMultiplier,
+          kDct16SquareEntropyMultiplier);
         if (!status.ok()) {
           return status;
         }
@@ -679,7 +739,9 @@ Status SearchTile(SearchContext* context) {
     }
   }
 
-  constexpr size_t kDct32SearchStep = 2;
+  constexpr size_t kDct32SearchStep =
+    ac_strategy_internal::CandidateAnchorStep(
+      AcStrategyType::kDct32x32);
   for (size_t y = 0;
        y + 3 < context->tile_block_extent.height;
        y += kDct32SearchStep) {
@@ -690,7 +752,12 @@ Status SearchTile(SearchContext* context) {
         continue;
       }
       Status status = FindBestFirstLevelDivision(
-        context, 4, x, y, 1.49f, 1.48f);
+        context,
+        4,
+        x,
+        y,
+        kDct32RectangleEntropyMultiplier,
+        kDct32SquareEntropyMultiplier);
       if (!status.ok()) {
         return status;
       }
@@ -700,6 +767,54 @@ Status SearchTile(SearchContext* context) {
 }
 
 }  // namespace
+
+Status ComputeAcStrategyQuantNorm(
+  AcStrategyType strategy,
+  size_t block_x,
+  size_t block_y,
+  ConstPlaneF32View quant_field,
+  float* quant_norm) {
+
+  if (quant_norm == nullptr || !quant_field.valid()) {
+    return Status::InvalidArgument(
+      "AC-strategy quant norm input or output is invalid");
+  }
+  const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
+  if (info == nullptr) {
+    return Status::InvalidArgument(
+      "Unknown AC strategy");
+  }
+  const Extent2D covered = info->covered_blocks;
+  if (block_x >= quant_field.extent.width ||
+      block_y >= quant_field.extent.height ||
+      covered.width > quant_field.extent.width - block_x ||
+      covered.height > quant_field.extent.height - block_y) {
+    return Status::InvalidArgument(
+      "AC-strategy quant norm footprint is out of bounds");
+  }
+
+  for (size_t dy = 0; dy < covered.height; ++dy) {
+    for (size_t dx = 0; dx < covered.width; ++dx) {
+      const float value = quant_field.Row(block_y + dy)[block_x + dx];
+      if (!std::isfinite(value) || value <= 0.0f) {
+        return Status::InvalidArgument(
+          "AC-strategy quant field must be finite and positive");
+      }
+    }
+  }
+
+  const float result = ComputeQuantNormUnchecked(
+    quant_field,
+    block_x,
+    block_y,
+    covered);
+  if (!std::isfinite(result) || result <= 0.0f) {
+    return Status::InvalidArgument(
+      "AC-strategy quant field must be finite and positive");
+  }
+  *quant_norm = result;
+  return Status::Ok();
+}
 
 Status EstimateAcStrategyCost(
   AcStrategyType strategy,
@@ -755,14 +870,15 @@ Status EstimateAcStrategyCost(
     }
   }
 
-  const float quant_norm = QuantNorm(
-    quant_field,
+  float quant_norm = 0.0f;
+  status = ComputeAcStrategyQuantNorm(
+    strategy,
     block_x,
     block_y,
-    covered);
-  if (!std::isfinite(quant_norm) || quant_norm <= 0.0f) {
-    return Status::InvalidArgument(
-      "AC-strategy quant field must be finite and positive");
+    quant_field,
+    &quant_norm);
+  if (!status.ok()) {
+    return status;
   }
 
   constexpr float kBias = 0.13731742964354549f;
@@ -871,12 +987,15 @@ Status EstimateAcStrategyCost(
   return Status::Ok();
 }
 
-Status FindAcStrategyGrid(
+namespace {
+
+Status FindAcStrategyGridImpl(
   ConstImage3FView opsin,
   ConstPlaneF32View quant_field,
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,
   AcStrategySearchOptions options,
+  const ac_strategy_internal::CandidateCostTableView* candidate_costs,
   AcStrategyGrid* out) {
 
   if (out == nullptr) {
@@ -909,6 +1028,21 @@ Status FindAcStrategyGrid(
       "AC-strategy search options or color map are invalid");
   }
 
+  if (candidate_costs != nullptr) {
+    if (candidate_costs->block_extent != block_extent) {
+      return Status::InvalidArgument(
+        "AC-strategy candidate cost table has invalid geometry");
+    }
+    for (const ac_strategy_internal::CandidateStage& stage :
+         ac_strategy_internal::kCandidateStages) {
+      if (candidate_costs->strategy_costs[
+            static_cast<size_t>(stage.strategy)].size() != block_count) {
+        return Status::InvalidArgument(
+          "AC-strategy candidate cost table is incomplete");
+      }
+    }
+  }
+
   try {
     SearchGrid search_grid(block_extent);
     for (size_t tile_y = 0; tile_y < expected_tile_extent.height; ++tile_y) {
@@ -931,6 +1065,7 @@ Status FindAcStrategyGrid(
           .tile_block_y = block_y,
           .tile_block_extent = {tile_width, tile_height},
           .grid = &search_grid,
+          .candidate_costs = candidate_costs,
         };
         Status status = SearchTile(&context);
         if (!status.ok()) {
@@ -947,5 +1082,48 @@ Status FindAcStrategyGrid(
       "AC-strategy search dimensions are too large");
   }
 }
+
+}  // namespace
+
+Status FindAcStrategyGrid(
+  ConstImage3FView opsin,
+  ConstPlaneF32View quant_field,
+  ConstPlaneF32View pixel_mask,
+  const ColorCorrelationMap& color_correlation,
+  AcStrategySearchOptions options,
+  AcStrategyGrid* out) {
+
+  return FindAcStrategyGridImpl(
+    opsin,
+    quant_field,
+    pixel_mask,
+    color_correlation,
+    options,
+    nullptr,
+    out);
+}
+
+namespace ac_strategy_internal {
+
+Status FindAcStrategyGridFromCandidateCosts(
+  ConstImage3FView opsin,
+  ConstPlaneF32View quant_field,
+  ConstPlaneF32View pixel_mask,
+  const ColorCorrelationMap& color_correlation,
+  AcStrategySearchOptions options,
+  const CandidateCostTableView& candidate_costs,
+  AcStrategyGrid* out) {
+
+  return FindAcStrategyGridImpl(
+    opsin,
+    quant_field,
+    pixel_mask,
+    color_correlation,
+    options,
+    &candidate_costs,
+    out);
+}
+
+}  // namespace ac_strategy_internal
 
 }  // namespace gjxl

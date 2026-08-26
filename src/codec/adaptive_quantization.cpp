@@ -721,11 +721,9 @@ Status AdjustQuantField(
 namespace {
 
 struct QuantizationEvaluation {
-  std::vector<int32_t> raw_quant;
   std::vector<float> block_distance;
   Image3FBuffer reconstructed_linear;
-  Quantizer quantizer;
-  ColorCorrelationMap color_correlation;
+  VarDctEncoderFrame frame;
   double score = 0.0;
 };
 
@@ -747,23 +745,25 @@ Status EvaluateQuantization(
   }
 
   QuantizationEvaluation result;
-  result.raw_quant.resize(block_count);
+  std::vector<int32_t> raw_quant(block_count);
+  Quantizer quantizer;
   Status status = CreateQuantizerFromField(
     quant_dc,
     quant_field,
-    {result.raw_quant.data(), block_extent, block_extent.width},
-    &result.quantizer);
+    {raw_quant.data(), block_extent, block_extent.width},
+    &quantizer);
   if (!status.ok()) {
     return status;
   }
 
+  ColorCorrelationMap color_correlation;
   status = ComputeFinalColorCorrelationMap(
     opsin,
     strategies,
-    {result.raw_quant.data(), block_extent, block_extent.width},
-    result.quantizer,
+    {raw_quant.data(), block_extent, block_extent.width},
+    quantizer,
     options.fast_color_correlation,
-    &result.color_correlation);
+    &color_correlation);
   if (!status.ok()) {
     return status;
   }
@@ -771,8 +771,8 @@ Status EvaluateQuantization(
   std::vector<float> inverse_sigma(block_count);
   status = ComputeEpfInverseSigma(
     strategies,
-    {result.raw_quant.data(), block_extent, block_extent.width},
-    result.quantizer,
+    {raw_quant.data(), block_extent, block_extent.width},
+    quantizer,
     epf_sharpness,
     options.epf_sigma,
     {inverse_sigma.data(), block_extent, block_extent.width});
@@ -780,25 +780,31 @@ Status EvaluateQuantization(
     return status;
   }
 
-  QuantizedCoefficientFrame coefficients;
+  FrameGeometry geometry;
+  status = FrameGeometry::Create(original_linear_rgb.extent(), &geometry);
+  if (!status.ok()) {
+    return status;
+  }
   status = ComputeQuantizedCoefficients(
     opsin,
-    strategies,
-    {result.raw_quant.data(), block_extent, block_extent.width},
-    result.quantizer,
-    result.color_correlation,
+    {
+      .geometry = geometry,
+      .strategies = &strategies,
+      .raw_quant_field = {
+        raw_quant.data(), block_extent, block_extent.width},
+      .quantizer = &quantizer,
+      .color_correlation = &color_correlation,
+      .epf_sharpness = epf_sharpness,
+    },
     options.coefficient_coding,
-    &coefficients);
+    &result.frame);
   if (!status.ok()) {
     return status;
   }
 
   Image3FBuffer reconstructed_opsin(opsin.extent());
   status = ReconstructQuantizedCoefficients(
-    coefficients,
-    result.quantizer,
-    result.color_correlation,
-    options.coefficient_coding,
+    result.frame,
     reconstructed_opsin.view());
   if (!status.ok()) {
     return status;
@@ -875,11 +881,9 @@ Status ValidateAdaptiveQuantizationInputs(
       !initial_quant_field.valid() ||
       !epf_sharpness.valid() ||
       !output.quant_field.valid() ||
-      !output.raw_quant_field.valid() ||
       !output.block_distance_map.valid() ||
       !output.reconstructed_linear_rgb.valid() ||
-      output.quantizer == nullptr ||
-      output.color_correlation == nullptr ||
+      output.frame == nullptr ||
       output.score_history == nullptr) {
     return Status::InvalidArgument(
       "Adaptive-quantization inputs or outputs are invalid");
@@ -893,7 +897,6 @@ Status ValidateAdaptiveQuantizationInputs(
       initial_quant_field.extent != block_extent ||
       epf_sharpness.extent != block_extent ||
       output.quant_field.extent != block_extent ||
-      output.raw_quant_field.extent != block_extent ||
       output.block_distance_map.extent != block_extent ||
       output.reconstructed_linear_rgb.extent() !=
         original_linear_rgb.extent()) {
@@ -1058,12 +1061,12 @@ Status FindBestQuantization(
           const float old = quant_field[index];
           quant_field[index] *= difference;
           const long old_raw = std::lround(
-            old * evaluation.quantizer.inverse_global_scale());
+            old * evaluation.frame.quantizer().inverse_global_scale());
           const long new_raw = std::lround(
             quant_field[index] *
-            evaluation.quantizer.inverse_global_scale());
+            evaluation.frame.quantizer().inverse_global_scale());
           if (old_raw == new_raw) {
-            quant_field[index] = old + evaluation.quantizer.scale();
+            quant_field[index] = old + evaluation.frame.quantizer().scale();
           }
         }
         quant_field[index] = std::clamp(
@@ -1075,16 +1078,12 @@ Status FindBestQuantization(
 
     CopyContiguousPlane(quant_field, output.quant_field);
     CopyContiguousPlane(
-      evaluation.raw_quant,
-      output.raw_quant_field);
-    CopyContiguousPlane(
       evaluation.block_distance,
       output.block_distance_map);
     CopyImage(
       evaluation.reconstructed_linear.const_view(),
       output.reconstructed_linear_rgb);
-    *output.quantizer = evaluation.quantizer;
-    *output.color_correlation = std::move(evaluation.color_correlation);
+    *output.frame = std::move(evaluation.frame);
     *output.score_history = std::move(score_history);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(

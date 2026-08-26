@@ -22,6 +22,25 @@
 namespace gjxl {
 namespace {
 
+class CpuAcStrategySearchProvider final : public AcStrategySearchProvider {
+public:
+  Status Find(
+    ConstImage3FView opsin,
+    ConstPlaneF32View quant_field,
+    ConstPlaneF32View pixel_mask,
+    const ColorCorrelationMap& color_correlation,
+    AcStrategySearchOptions options,
+    AcStrategyGrid* out) override {
+
+    return FindAcStrategyGrid(
+      opsin,
+      quant_field,
+      pixel_mask,
+      color_correlation,
+      options,
+      out);
+  }
+};
 Status ValidatePipelineInputs(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
@@ -36,15 +55,14 @@ Status ValidatePipelineInputs(
       options.butteraugli_target <= 0.0f ||
       !std::isfinite(options.initial_quant_rescale) ||
       options.initial_quant_rescale <= 0.0f ||
-      block_extent == nullptr ||
-      output.strategies == nullptr) {
+      block_extent == nullptr) {
     return Status::InvalidArgument(
-      "CPU quantization pipeline inputs or options are invalid");
+      "Quantization pipeline inputs or options are invalid");
   }
   for (float multiplier : options.gaborish_inverse_multipliers) {
     if (!std::isfinite(multiplier)) {
       return Status::InvalidArgument(
-        "CPU quantization pipeline Gaborish multiplier is invalid");
+        "Quantization pipeline Gaborish multiplier is invalid");
     }
   }
 
@@ -54,20 +72,17 @@ Status ValidatePipelineInputs(
       !output.initial_quantization.strategy_mask.valid() ||
       !output.initial_quantization.pixel_mask.valid() ||
       !output.adaptive_quantization.quant_field.valid() ||
-      !output.adaptive_quantization.raw_quant_field.valid() ||
       !output.adaptive_quantization.block_distance_map.valid() ||
       !output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
-      output.adaptive_quantization.quantizer == nullptr ||
-      output.adaptive_quantization.color_correlation == nullptr ||
+      output.adaptive_quantization.frame == nullptr ||
       output.adaptive_quantization.score_history == nullptr ||
       output.initial_quantization.quant_field.extent != *block_extent ||
       output.initial_quantization.strategy_mask.extent != *block_extent ||
       output.initial_quantization.pixel_mask.extent != opsin.extent() ||
       output.adaptive_quantization.quant_field.extent != *block_extent ||
-      output.adaptive_quantization.raw_quant_field.extent != *block_extent ||
       output.adaptive_quantization.block_distance_map.extent != *block_extent) {
     return Status::InvalidArgument(
-      "CPU quantization pipeline outputs have invalid geometry");
+      "Quantization pipeline outputs have invalid geometry");
   }
 
   // FindBestQuantization validates the original/padded extent relationship
@@ -77,9 +92,10 @@ Status ValidatePipelineInputs(
 
 }  // namespace
 
-Status RunCpuQuantizationPipeline(
+Status RunQuantizationPipeline(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
+  AcStrategySearchProvider& strategy_search,
   CpuQuantizationPipelineOptions options,
   CpuQuantizationPipelineOutput output) {
 
@@ -99,7 +115,7 @@ Status RunCpuQuantizationPipeline(
   if (!block_extent.try_area(&block_count) ||
       !opsin.extent().try_area(&pixel_count)) {
     return Status::InvalidArgument(
-      "CPU quantization pipeline dimensions are too large");
+      "Quantization pipeline dimensions are too large");
   }
 
   try {
@@ -150,7 +166,7 @@ Status RunCpuQuantizationPipeline(
     }
 
     AcStrategyGrid strategies;
-    status = FindAcStrategyGrid(
+    status = strategy_search.Find(
       preprocessed_opsin.const_view(),
       {initial_quant.data(), block_extent, block_extent.width},
       {pixel_mask.data(), opsin.extent(), opsin.width()},
@@ -169,11 +185,9 @@ Status RunCpuQuantizationPipeline(
     }
 
     std::vector<float> final_quant(block_count);
-    std::vector<int32_t> raw_quant(block_count);
     std::vector<float> block_distance(block_count);
     Image3FBuffer reconstructed_linear(original_linear_rgb.extent());
-    Quantizer quantizer;
-    ColorCorrelationMap final_color_correlation;
+    VarDctEncoderFrame frame;
     std::vector<double> score_history;
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
@@ -188,13 +202,10 @@ Status RunCpuQuantizationPipeline(
       {
         .quant_field = {
           final_quant.data(), block_extent, block_extent.width},
-        .raw_quant_field = {
-          raw_quant.data(), block_extent, block_extent.width},
         .block_distance_map = {
           block_distance.data(), block_extent, block_extent.width},
         .reconstructed_linear_rgb = reconstructed_linear.view(),
-        .quantizer = &quantizer,
-        .color_correlation = &final_color_correlation,
+        .frame = &frame,
         .score_history = &score_history,
       });
     if (!status.ok()) {
@@ -210,27 +221,37 @@ Status RunCpuQuantizationPipeline(
     CopyContiguousPlane(
       final_quant, output.adaptive_quantization.quant_field);
     CopyContiguousPlane(
-      raw_quant, output.adaptive_quantization.raw_quant_field);
-    CopyContiguousPlane(
       block_distance,
       output.adaptive_quantization.block_distance_map);
     CopyImage(
       reconstructed_linear.const_view(),
       output.adaptive_quantization.reconstructed_linear_rgb);
-    *output.adaptive_quantization.quantizer = quantizer;
-    *output.adaptive_quantization.color_correlation =
-      std::move(final_color_correlation);
+    *output.adaptive_quantization.frame = std::move(frame);
     *output.adaptive_quantization.score_history = std::move(score_history);
-    *output.strategies = std::move(strategies);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
-      "Unable to allocate CPU quantization pipeline storage");
+      "Unable to allocate quantization pipeline storage");
   } catch (const std::length_error&) {
     return Status::InvalidArgument(
-      "CPU quantization pipeline dimensions are too large");
+      "Quantization pipeline dimensions are too large");
   }
 
   return Status::Ok();
+}
+
+Status RunCpuQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  CpuQuantizationPipelineOutput output) {
+
+  CpuAcStrategySearchProvider strategy_search;
+  return RunQuantizationPipeline(
+    original_linear_rgb,
+    opsin,
+    strategy_search,
+    options,
+    output);
 }
 
 }  // namespace gjxl

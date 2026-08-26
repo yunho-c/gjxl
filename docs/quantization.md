@@ -152,7 +152,7 @@ decoder reconstruction are parity-tested independently of that heuristic.
 
 Relevant implementations:
 
-- [`coeff_store.h`](../src/core/coeff_store.h)
+- [`vardct_frame.h`](../src/codec/vardct_frame.h)
 - [`reconstruction.cpp`](../src/codec/reconstruction.cpp)
 - [`loop_filter.cpp`](../src/codec/loop_filter.cpp)
 - [`gaborish.cpp`](../src/codec/gaborish.cpp)
@@ -221,12 +221,14 @@ GPU porting begins only after the CPU pipeline satisfies all of the following:
 - Stage-level CPU timings establish performance baselines.
 - Accuracy tolerances and known deviations are documented explicitly.
 
-`RunCpuQuantizationPipeline` is the integration boundary. It runs initial AQ
-on the pre-Gaborish XYB image, applies inverse Gaborish when enabled, computes
-first-pass CfL, selects strategies, initializes EPF sharpness, and invokes the
-iterative AQ loop. Its outputs expose the initial maps, selected strategy grid,
-final float and raw quant fields, final CfL, score history, block distance map,
-and reconstructed linear RGB image.
+`RunQuantizationPipeline` is the backend-neutral integration boundary. It runs
+initial AQ on the pre-Gaborish XYB image, applies inverse Gaborish when enabled,
+computes first-pass CfL, delegates strategy selection to an injected provider,
+initializes EPF sharpness, and invokes the iterative AQ loop. The CPU wrapper
+uses `FindAcStrategyGrid`; the GPU wrapper uses `FindAcStrategyGridGpu`. Their
+outputs expose the initial maps, a completed
+`VarDctEncoderFrame`, the final float quant field, score history, block distance
+map, and reconstructed linear RGB image.
 
 The integration corpus covers odd dimensions and edge padding, gradients,
 texture, hard edges, saturated primaries, and a 64-pixel CfL tile boundary.
@@ -240,12 +242,41 @@ Relevant implementations:
 - [`quantization_pipeline_test.cpp`](../tests/quantization_pipeline_test.cpp)
 - [`quantization_benchmark.cpp`](../benchmarks/quantization_benchmark.cpp)
 
+### 12. Encoder-facing VarDCT frame — complete
+
+`VarDctEncoderFrame` is the owned handoff between encoder analysis and future
+entropy/bitstream coding. A successful final AQ evaluation commits one frame
+containing source and padded geometry, the selected strategy grid, raw quant
+field, quantizer, final CfL map, EPF sharpness, coefficient-coding multipliers,
+three floating-point DC planes, and grouped quantized AC coefficients. Callers
+may release or reuse all borrowed inputs after frame construction.
+
+AC storage follows the JPEG XL 256x256-pixel group grid. Each group owns three
+fixed 65,536-element `int32_t` channel rows. Groups are indexed in row-major
+order; within a group, complete transforms are appended in row-major anchor
+order, and each transform contributes its native coefficient layout
+contiguously. Edge groups expose their used coefficient count and guarantee a
+zero-filled unused tail. A transform that would cross a group boundary is
+rejected atomically.
+
+DC deliberately remains as one floating-point sample per 8x8 base block and
+channel. Modular DC tokenization is a later bitstream milestone, not hidden in
+this representation.
+
+Relevant implementations:
+
+- [`vardct_frame.h`](../src/codec/vardct_frame.h)
+- [`vardct_frame.cpp`](../src/codec/vardct_frame.cpp)
+- [`vardct_frame_test.cpp`](../tests/vardct_frame_test.cpp)
+
 ## CPU performance baseline
 
 Release build on an Apple M4 Pro with 48 GB RAM, measured on 2026-08-25. The
 synthetic workload is 128x96 linear RGB, includes a 64-pixel CfL boundary, and
 uses two AQ updates. Values are the median of the three run medians; ranges
-span all 15 samples from three consecutive invocations.
+span all 15 samples from three consecutive invocations. This historical
+baseline predates the fixed-row frame storage in milestone 12 and must be
+refreshed before using it to judge that representation's cost.
 
 | Stage | Median | Observed range |
 | --- | ---: | ---: |
@@ -266,6 +297,125 @@ cmake -S . -B build-release \
 cmake --build build-release -j --target gjxl_quantization_benchmark
 ./build-release/gjxl_quantization_benchmark
 ```
+
+## Batched Metal AC candidate evaluation
+
+The Metal backend can evaluate one or more same-strategy candidate batches in
+one command buffer and one compute encoder. It gathers candidate image regions,
+runs the selected forward DCT,
+computes quantization residuals and rate terms, runs the inverse DCT, and
+reduces the masked information loss to one cost per candidate. Full planar
+opsin, mask, and quantization-matrix buffers remain resident; only 24-byte
+candidate descriptors and scalar costs need to cross the CPU/GPU boundary.
+Search traversal and selection remain on the CPU.
+
+Release measurements on an Apple M4 Pro on 2026-08-25 used simdgroup DCTs and
+three independent invocations of 12 samples. Each invocation balances all six
+CPU/resident/E2E measurement orders, immediately warms each GPU path before a
+timed sample, and times at least 16 GPU submissions per sample. `E2E` includes
+candidate upload, command submission and synchronization, and cost download;
+image, mask, matrix residency, candidate construction, and quant-norm
+aggregation are outside timing. Maximum batch sizes hold coefficient-pixel
+work constant at 4096 DCT8-equivalent candidates.
+
+| Strategy | Candidates | CPU median range | Metal E2E median range | E2E speedup range |
+| --- | ---: | ---: | ---: | ---: |
+| DCT8 | 4096 | 16.758–16.855 ms | 0.430–0.512 ms | 32.9–39.0x |
+| DCT16x8 | 2048 | 18.970–19.554 ms | 0.438–0.501 ms | 38.7–44.7x |
+| DCT8x16 | 2048 | 17.471–18.313 ms | 0.388–0.435 ms | 42.1–47.2x |
+| DCT16x16 | 1024 | 22.588–22.757 ms | 0.402–0.428 ms | 53.1–56.6x |
+| DCT32x16 | 512 | 31.185–31.480 ms | 0.393–0.591 ms | 53.3–79.3x |
+| DCT16x32 | 512 | 29.299–29.544 ms | 0.462–0.578 ms | 51.0–63.4x |
+| DCT32x32 | 256 | 38.236–38.270 ms | 0.470–0.613 ms | 62.5–81.4x |
+
+Batching is necessary to amortize roughly 0.12 ms of command-buffer latency.
+The smallest tested E2E batch that was faster in all three invocations was 32
+candidates for DCT16x8 and DCT8x16, and 8 candidates for DCT16x16, DCT32x16,
+DCT16x32, and DCT32x32. DCT8 at 32 candidates remained around break-even, so
+its crossover lies above that tested point. A single large transform is also
+around break-even; this is a throughput optimization, not a latency win.
+
+Each invocation validates 10,783 CPU/GPU costs before timing. Two candidates
+landed on a quantization discontinuity where float Metal DCT output rounded a
+coefficient differently from the double-precision CPU DCT. The worst cost
+difference was 0.566%; all other candidates met the tight unit-test tolerance.
+The benchmark retains a 1% hard gate, while dedicated non-boundary fixtures
+retain the tighter parity check for both scalar and simdgroup implementations.
+
+Reproduce the benchmark with:
+
+```sh
+just ac-strategy-benchmark
+```
+
+### Complete staged search
+
+`FindAcStrategyGridGpu` precomputes every candidate anchor that the existing
+search can request, grouped by strategy. It submits all seven groups through a
+single command buffer and encoder, sharing scratch storage between groups, then
+downloads the scalar costs. The original CPU traversal consumes the resulting
+table without changing merge order, priorities, boundary checks, or tie policy.
+For a complete 8x8-block color tile this stages 258 candidates; enumerating
+every geometrically valid 32-point anchor would stage 320.
+
+Release measurements on an Apple M4 Pro on 2026-08-26 used three independent
+invocations of 12 samples with alternating CPU/GPU order. GPU E2E includes
+strided host packing, candidate and quant-norm construction, all buffer
+allocations and uploads, one command submission and synchronization, cost
+readback, and CPU decision traversal. Values below are ranges across the three
+invocation medians.
+
+| Image | Candidates | CPU median range | GPU E2E median range | Speedup range |
+| --- | ---: | ---: | ---: | ---: |
+| 64x64 | 258 | 2.784–2.813 ms | 0.630–1.132 ms | 2.48–4.63x |
+| 128x96 | 752 | 8.328–8.417 ms | 0.603–1.631 ms | 5.11–13.90x |
+| 256x192 | 3,096 | 33.311–33.821 ms | 1.984–3.505 ms | 9.52–17.38x |
+| 512x384 | 12,384 | 132.686–134.425 ms | 6.310–10.166 ms | 13.11–22.15x |
+| 480p (856x480 padded) | 25,594 | 273.142–276.185 ms | 9.771–14.291 ms | 19.51–28.49x |
+| 720p (1280x720) | 57,720 | 619.433–625.679 ms | 20.474–22.030 ms | 29.14–31.02x |
+| 1080p (1920x1080) | 130,380 | 1,391.920–1,417.010 ms | 42.388–45.615 ms | 30.58–33.10x |
+
+The 480p case models a 16:9 854x480 source padded by two columns to complete
+the final 8x8 block. GPU samples remain variable, especially for the smaller
+allocations, so the table supports a substantial end-to-end throughput win but
+not a claim that resource-management variance has been eliminated. At 1080p,
+however, all three GPU run medians remained within 3.3 ms. Full-grid parity
+tests cover full and partial color tiles,
+three Butteraugli targets, strided inputs, invalid-input atomicity, and several
+deterministic source phases. Quantization-boundary sensitivity remains governed
+by the leaf-cost accuracy contract above.
+
+Reproduce this benchmark with:
+
+```sh
+just ac-strategy-search-benchmark
+```
+
+### Full pipeline integration
+
+`RunGpuQuantizationPipeline` injects staged GPU candidate evaluation into the
+common quantization pipeline without adding a GPU dependency to `gjxl_codec`.
+Initial AQ, Gaborish, first-pass CfL, search decisions, iterative AQ, coefficient
+coding, reconstruction, and final `VarDctEncoderFrame` assembly remain on the
+CPU. Only the candidate-cost portion of AC-strategy search executes on Metal.
+
+The Metal backend uses the same transform-dispatch helper for public DCT
+batches and candidate evaluation. Scalar, SIMD-group, and factored radix-2
+implementations therefore share packing, partial-threadgroup guards, and buffer
+bindings. Candidate and full-search tests cover all three implementations.
+
+An end-to-end fixture compares the CPU and GPU-search paths exactly through the
+final frame, including strategy cells, raw quantization, CfL, EPF, floating DC,
+fixed AC rows, reconstructed pixels, distance map, and score history. Its
+257x17 source pads to 33x3 blocks, crossing the 256-pixel AC-group boundary and
+verifying the 1x3-block edge group. Broader quantization-boundary sensitivity
+still follows the documented candidate-cost accuracy contract.
+
+Relevant implementations:
+
+- [`quantization_pipeline.h`](../src/codec/quantization_pipeline.h)
+- [`quantization_pipeline.cpp`](../src/gpu/ops/quantization_pipeline.cpp)
+- [`quantization_gpu_pipeline_test.cpp`](../tests/quantization_gpu_pipeline_test.cpp)
 
 ## Accuracy scope and known deviations
 
@@ -294,7 +444,7 @@ retaining the CPU pipeline as the reference implementation. A likely order is:
 
 1. Gaborish and masking convolutions.
 2. CfL statistics and map generation.
-3. AC candidate transform and cost evaluation.
+3. AC candidate transform and cost evaluation — integrated for strategy search.
 4. Quantization, dequantization, and reconstruction.
 5. EPF and Butteraugli distance-map computation.
 
