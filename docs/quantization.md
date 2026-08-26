@@ -169,9 +169,10 @@ Relevant implementations:
 The CPU metric uses gjxl's native scalar Butteraugli implementation through the
 backend-neutral, view-based `ComputeButteraugliDistance` facade. The pinned
 libjxl implementation remains available only as a differential oracle when
-`GJXL_ENABLE_LIBJXL_REFERENCE=ON`. With the reference disabled, the native
-facade, iterative AQ, and complete quantization pipeline continue to build and
-run without libjxl or Highway.
+`GJXL_ENABLE_LIBJXL_REFERENCE=ON`; the option defaults to `OFF`. The production
+codec target has no libjxl or Highway dependency, and the native facade,
+iterative AQ, and complete quantization pipeline build and run without either
+reference dependency.
 
 The native implementation, its intermediate-stage oracles, and the standalone
 device Butteraugli operation are tracked in [`butteraugli.md`](butteraugli.md).

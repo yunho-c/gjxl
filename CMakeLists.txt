@@ -9,6 +9,9 @@ project(
   LANGUAGES CXX
 )
 
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
 # TEMP
 if(NOT APPLE)
   message(FATAL_ERROR
@@ -32,10 +35,11 @@ option(
 option(
   GJXL_ENABLE_LIBJXL_REFERENCE
   "Build the pinned libjxl Butteraugli reference tests and benchmarks"
-  ON
+  OFF
 )
 
-if(GJXL_ENABLE_LIBJXL_REFERENCE)
+if(GJXL_ENABLE_LIBJXL_REFERENCE AND
+   (GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS))
   if(NOT EXISTS
       "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/third_party/highway/CMakeLists.txt")
     message(FATAL_ERROR
@@ -186,6 +190,14 @@ add_library(
   INTERFACE
 )
 
+add_library(gjxl::core ALIAS gjxl_core)
+
+set_target_properties(
+  gjxl_core
+  PROPERTIES
+    EXPORT_NAME core
+)
+
 target_compile_features(
   gjxl_core
   INTERFACE
@@ -195,7 +207,8 @@ target_compile_features(
 target_include_directories(
   gjxl_core
   INTERFACE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Codec algorithms
@@ -221,38 +234,69 @@ add_library(
   src/codec/reconstruction.cpp
 )
 
+add_library(gjxl::codec ALIAS gjxl_codec)
+
+set_target_properties(
+  gjxl_codec
+  PROPERTIES
+    EXPORT_NAME codec
+)
+
 target_link_libraries(
   gjxl_codec
   PUBLIC
     gjxl_core
 )
 
-if(GJXL_ENABLE_LIBJXL_REFERENCE)
-  target_compile_definitions(
+install(
+  TARGETS
+    gjxl_core
     gjxl_codec
-    PRIVATE
-      GJXL_ENABLE_LIBJXL_REFERENCE=1
-  )
+  EXPORT gjxlTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
 
-  target_include_directories(
-    gjxl_codec
-    PRIVATE
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
-  )
+install(
+  DIRECTORY src/core
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+)
 
-  target_link_libraries(
-    gjxl_codec
-    PRIVATE
-      gjxl_butteraugli_reference
-  )
-else()
-  target_compile_definitions(
-    gjxl_codec
-    PRIVATE
-      GJXL_ENABLE_LIBJXL_REFERENCE=0
-  )
-endif()
+install(
+  DIRECTORY src/codec
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*_internal.h" EXCLUDE
+    PATTERN "quantization_tables_generated.h" EXCLUDE
+)
+
+configure_package_config_file(
+  cmake/gjxlConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+
+install(
+  EXPORT gjxlTargets
+  FILE gjxlTargets.cmake
+  NAMESPACE gjxl::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
+
+install(
+  FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
 
 # metal-cpp
 add_library(
@@ -963,6 +1007,16 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_dct_test
   )
 
+  add_test(
+    NAME codec_install_consumer
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DGJXL_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+      "-DGJXL_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      "-DGJXL_TEST_CONFIG=$<CONFIG>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_consumer.cmake"
+  )
+
 endif()
 
 if(GJXL_BUILD_BENCHMARKS)
@@ -986,18 +1040,18 @@ if(GJXL_BUILD_BENCHMARKS)
       PRIVATE
         GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
     )
-
-    add_executable(
-      gjxl_quantization_benchmark
-      benchmarks/quantization_benchmark.cpp
-    )
-
-    target_link_libraries(
-      gjxl_quantization_benchmark
-      PRIVATE
-        gjxl_codec
-    )
   endif()
+
+  add_executable(
+    gjxl_quantization_benchmark
+    benchmarks/quantization_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_quantization_benchmark
+    PRIVATE
+      gjxl_codec
+  )
 
   add_executable(
     gjxl_dct_benchmark

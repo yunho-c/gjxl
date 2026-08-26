@@ -17,11 +17,12 @@ call-local scratch, producing a pixel-resolution distance map and its maximum
 score. gjxl also owns the transform-aware 16-norm reduction of that map and the
 iterative quant-field update.
 
-`GJXL_ENABLE_LIBJXL_REFERENCE=OFF` builds the facade and complete iterative
-quantization pipeline without libjxl or Highway. Reference-enabled builds keep
-the pinned libjxl translation units and Highway for differential tests,
-golden regeneration, and comparative benchmarks. Removing the now-unused
-reference linkage from the production library target remains Milestone 6.
+The default build uses `GJXL_ENABLE_LIBJXL_REFERENCE=OFF` and builds the facade
+and complete iterative quantization pipeline without libjxl or Highway.
+`gjxl_codec` has no reference-backend sources, includes, compile definitions,
+or link dependencies. Reference-enabled test and benchmark builds keep the
+pinned libjxl translation units and Highway solely for differential tests,
+golden regeneration, and comparative benchmarks.
 
 The current Metal abstraction supports allocation, transfers, synchronization,
 and batched transforms. It does not yet model image operations, multi-pass
@@ -344,7 +345,7 @@ supplied `JxlMemoryManager`, explicitly labeled as libjxl-managed memory. Those
 numbers do not measure native allocations, standard-library allocations,
 allocator metadata, or total process memory.
 
-### 6. Remove libjxl from the production dependency graph
+### 6. Remove libjxl from the production dependency graph — complete (2026-08-26)
 
 - Remove dormant libjxl and Highway linkage from `gjxl_codec`.
 - Restrict libjxl includes, sources, and Highway linkage to reference tests and
@@ -357,11 +358,39 @@ Exit criterion: the default library and its consumers build and run without
 initializing libjxl, while a reference-enabled CI configuration continues to
 guard parity.
 
-This build/dependency cleanup may proceed in parallel with Metal work. It is not
-a prerequisite for profiling AQ, adding shared GPU infrastructure, or beginning
-the device Butteraugli operation. Before removing the production reference
-linkage, document whether the slower native scalar CPU path is an accepted
-fallback or requires a separate CPU optimization effort.
+`GJXL_ENABLE_LIBJXL_REFERENCE` now defaults to `OFF`. The production
+`gjxl_codec` target has the same gjxl-owned source and link graph in both modes;
+the pinned libjxl sources, include paths, and Highway linkage are created only
+when the option is enabled for tests or benchmarks. The native quantization
+benchmark is available in ordinary benchmark builds, while the Butteraugli
+oracle, golden generator, and comparative benchmark remain reference-only.
+
+The project now installs its public core and codec headers, the static codec
+archive, and a relocatable CMake package exposing `gjxl::core` and
+`gjxl::codec`. The `codec_install_consumer` regression test installs that
+package to a staging prefix, discovers it with `find_package(gjxl CONFIG)`,
+statically links a separate project, and runs a native Butteraugli call.
+
+Fresh AppleClang 17 Release builds validated both configurations. The default
+reference-disabled build, with benchmarks enabled, passed all 25 tests; its
+target list omitted every libjxl oracle, golden-generator, and Butteraugli
+benchmark target while retaining `gjxl_quantization_benchmark`. The
+reference-enabled build passed all 31 tests, including scalar and dispatched
+differential coverage and golden regeneration, and its four-phase comparative
+benchmark completed successfully.
+
+For the standalone acceptance check, the working source tree was copied with
+the entire `third_party` directory omitted. With no submodules present, the
+default configuration built and installed `gjxl_codec`; a separate downstream
+project then found the installed package, linked the static archive, and ran
+successfully. The exported target graph contains only `gjxl::core` and
+`gjxl::codec`, and the archive has no unresolved libjxl or Highway symbols.
+
+The slower native scalar CPU implementation measured in Milestone 5 is
+accepted as the readable production correctness baseline. It is not treated as
+a speedup or hidden behind a production libjxl fallback; subsequent CPU or
+Metal optimization remains evidence-driven and must preserve the existing
+numerical and decision gates.
 
 ### 7. Define the standalone device Butteraugli operation
 
@@ -439,8 +468,8 @@ only for deliberate compatibility validation.
 
 ## Recommended implementation order
 
-Milestones 1 through 5 establish the correctness baseline and are complete.
-Milestone 6 is independent build cleanup and may proceed in parallel. Shared
+Milestones 1 through 6 establish the standalone CPU correctness baseline and
+production dependency boundary and are complete. Shared
 device-image and submission infrastructure begins in
 [`metal-aq.md`](metal-aq.md); after that substrate is validated, complete the
 operation contract in Milestone 7 before porting leaf kernels in Milestone 8.
