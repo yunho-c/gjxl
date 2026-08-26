@@ -441,9 +441,9 @@ only for deliberate compatibility validation.
 
 Milestones 1 through 5 establish the correctness baseline and are complete.
 Milestone 6 is independent build cleanup and may proceed in parallel. Shared
-device-image and submission infrastructure begins in
-[`metal-aq.md`](metal-aq.md); after that substrate is validated, complete the
-operation contract in Milestone 7 before porting leaf kernels in Milestone 8.
-Prepared-reference optimization and standalone qualification follow in
-Milestone 9. Full iterative-AQ integration proceeds only through the gates in
-`metal-aq.md`, while the native CPU map remains the primary readable oracle.
+device-image and submission infrastructure is now validated by Milestone 1 of
+[`metal-aq.md`](metal-aq.md); complete the operation contract in Milestone 7
+before porting leaf kernels in Milestone 8. Prepared-reference optimization and
+standalone qualification follow in Milestone 9. Full iterative-AQ integration
+proceeds only through the gates in `metal-aq.md`, while the native CPU map
+remains the primary readable oracle.

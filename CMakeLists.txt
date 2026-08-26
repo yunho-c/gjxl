@@ -254,6 +254,21 @@ else()
   )
 endif()
 
+# Backend-neutral GPU infrastructure
+add_library(
+  gjxl_gpu
+  STATIC
+
+  src/gpu/image.cpp
+  src/gpu/scratch.cpp
+)
+
+target_link_libraries(
+  gjxl_gpu
+  PUBLIC
+    gjxl_core
+)
+
 # metal-cpp
 add_library(
   metal_cpp
@@ -302,6 +317,11 @@ set(
 )
 
 set(
+  GJXL_PRIMITIVES_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/primitives.metal"
+)
+
+set(
   GJXL_DCT_BASIS_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
 )
@@ -309,6 +329,11 @@ set(
 set(
   GJXL_DCT_METAL_IR
   "${GJXL_METAL_DIR}/dct.ir"
+)
+
+set(
+  GJXL_PRIMITIVES_METAL_IR
+  "${GJXL_METAL_DIR}/primitives.ir"
 )
 
 set(
@@ -346,6 +371,33 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_PRIMITIVES_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    "${GJXL_PRIMITIVES_METAL_SOURCE}"
+    -o
+    "${GJXL_PRIMITIVES_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_PRIMITIVES_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling Metal primitive shaders"
+
+  VERBATIM
+)
+
 # .ir -> .metallib
 
 add_custom_command(
@@ -359,9 +411,11 @@ add_custom_command(
     -o
     "${GJXL_METALLIB}"
     "${GJXL_DCT_METAL_IR}"
+    "${GJXL_PRIMITIVES_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
+    "${GJXL_PRIMITIVES_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -395,7 +449,7 @@ target_link_libraries(
   gjxl_metal
 
   PUBLIC
-    gjxl_core
+    gjxl_gpu
 
   PRIVATE
     metal_cpp
@@ -933,6 +987,49 @@ if(GJXL_BUILD_TESTS)
       "${Python3_EXECUTABLE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_quantization_tables.py"
       --check
+  )
+
+  add_executable(
+    gjxl_gpu_image_test
+    tests/gpu_image_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_gpu_image_test
+    PRIVATE
+      gjxl_gpu
+  )
+
+  add_test(
+    NAME gpu_image
+    COMMAND gjxl_gpu_image_test
+  )
+
+  add_executable(
+    gjxl_gpu_primitives_metal_test
+    tests/gpu_primitives_metal_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_gpu_primitives_metal_test
+    PRIVATE
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_gpu_primitives_metal_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_gpu_primitives_metal_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_gpu_primitives
+    COMMAND gjxl_gpu_primitives_metal_test
   )
 
   add_executable(

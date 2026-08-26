@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace gjxl {
 
@@ -11,6 +12,8 @@ enum class BackendKind {
   kCuda,
   kMetal,
 };
+
+using BackendId = uint64_t;
 
 class DeviceBuffer {
 public:
@@ -27,14 +30,23 @@ public:
     return size_bytes_;
   }
 
+  [[nodiscard]] BackendId backend_id() const noexcept {
+    return backend_id_;
+  }
+
 protected:
-  DeviceBuffer(BackendKind backend, size_t size_bytes)
+  DeviceBuffer(
+    BackendKind backend,
+    BackendId backend_id,
+    size_t size_bytes)
     : backend_(backend),
+      backend_id_(backend_id),
       size_bytes_(size_bytes) {}
 
 private:
   BackendKind backend_;
+  BackendId backend_id_;
   size_t size_bytes_;
 };
 
-}
+}  // namespace gjxl

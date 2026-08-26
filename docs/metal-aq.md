@@ -251,8 +251,8 @@ oracle coverage.
 
 ## Milestones
 
-Milestone 0 is complete. Milestones 1 through 8 remain pending and must not be
-treated as complete until their stated exit criteria pass.
+Milestones 0 and 1 are complete. Milestones 2 through 8 remain pending and
+must not be treated as complete until their stated exit criteria pass.
 
 ### 0. Refresh the AQ baseline and freeze the evaluation contract — complete (2026-08-26)
 
@@ -271,12 +271,12 @@ Exit criterion: Release measurements identify the cost of every evaluation
 stage and the documentation fixes the first CPU/GPU boundary without relying on
 an assumed bottleneck.
 
-The implementation adds a diagnostic-only internal profiling entry point that runs
-the production `FindBestQuantization` implementation. It atomically reports
-loop setup, every evaluation, quant-field updates, and output commit. Each
-evaluation records field construction, coefficient coding, reconstruction,
-loop filters, color conversion, Butteraugli, and block reduction. The ordinary
-API remains unchanged and does not read the clock.
+The implementation adds a diagnostic-only internal profiling entry point that
+runs the production `FindBestQuantization` implementation. It atomically
+reports loop setup, every evaluation, quant-field updates, and output commit.
+Each evaluation records field construction, coefficient coding,
+reconstruction, loop filters, color conversion, Butteraugli, and block
+reduction. The ordinary API remains unchanged and does not read the clock.
 
 The benchmark now rotates seven phases and supports the required padded
 workloads. Measurements below used an Apple M4 Pro with 14 CPU cores and 48 GB
@@ -350,9 +350,10 @@ just quantization-benchmark padded_1080p 5 3
 The measured stage split and memory scaling validate the documented boundary:
 the GPU effort starts with shared residency/submission/scratch infrastructure,
 then connects reconstruction, filtering, and prepared Butteraugli without
-full-resolution host round trips. No Milestone 1 work is included here.
+full-resolution host round trips. These Milestone 0 measurements include no
+Milestone 1 GPU work.
 
-### 1. Add reusable device-image and submission infrastructure
+### 1. Add reusable device-image and submission infrastructure — complete (2026-08-26)
 
 - Define backend-neutral device plane and three-plane image views.
 - Add checked conversion from view geometry to buffer byte ranges.
@@ -369,6 +370,46 @@ full-resolution host round trips. No Milestone 1 work is included here.
 Exit criterion: shared infrastructure passes CPU-oracle tests on a real Metal
 device and a complete multi-kernel test incurs one submission and no
 steady-state allocation.
+
+The backend-neutral substrate now provides typed mutable and const device
+planes, explicit three-plane images, checked byte-range conversion, backend
+instance ownership, overlap checks, and a reusable aligned scratch arena.
+Buffers from a different backend instance are rejected even when both backends
+select the same physical device. Scratch growth is preparation-only; planned
+slices remain non-owning and require the arena to outlive submitted work.
+
+`SubmitPrimitiveSequence` validates a complete span before creating a command
+buffer, then encodes it in order through one compute encoder and one commit.
+Successful allocation and submission counters make the steady-state contract
+directly testable. Invalid descriptors return `InvalidArgument` without a
+submission; command creation and completion failures have distinct
+`SubmissionFailed` and `DeviceError` statuses.
+
+The shader build compiles `dct.metal` and `primitives.metal` separately and
+links both into `gjxl.metallib`. Backend creation binds the exact affine,
+horizontal-convolution, vertical-convolution, and maximum-reduction entry
+points. The initial convolution primitive supports odd 1–33 tap float kernels,
+truncated and renormalized edges, strided planes, and exact in-place
+input/output through distinct scratch. Maximum reduction is multi-pass and
+returns the exact maximum of finite float inputs.
+
+Release validation ran on the M4 Pro described above. The guarded `17x11`
+affine -> five-tap convolution -> maximum chain used nonzero offsets and
+different row strides. After one warmup, each of three repeated executions
+incremented the committed-submission counter by exactly one and the allocation
+counter by zero. Its 4096-byte arena used 1284 bytes at peak. Affine matched its
+CPU oracle exactly; the chained convolution's maximum absolute error was
+`1.19209e-7`, below the fixed `2e-5 + 2e-5 * abs(expected)` gate. Direct one-
+and 33-tap cases, an in-place constant case, partial threadgroups, all-negative
+reduction input, and a tail maximum also passed; reduction results were
+bit-exact with the maximum of the downloaded logical plane.
+
+The complete reference-enabled suite passed 32/32 tests and the
+reference-disabled suite passed 26/26. Both include real Metal DCT and primitive
+execution. Guarded prefixes, suffixes, and row padding remained poisoned, and
+foreign ownership, overflow, misalignment, partial overlap, insufficient
+scratch, injected submission failure, and injected completion failure were
+covered directly.
 
 ### 2. Define and validate the prepared AQ evaluation operation
 
@@ -547,9 +588,9 @@ encoder decisions.
 
 ## Implementation order
 
-Milestone 0 is complete. Milestone 1 is the next implementation task and
-establishes the shared substrate required by both reconstruction and
-Butteraugli. After Milestone 2 fixes residency and lifetime contracts,
+Milestones 0 and 1 are complete. Milestone 2 is the next implementation task
+and fixes residency and lifetime contracts for the prepared AQ operation.
+After that contract is validated,
 reconstruction/filter work (Milestones 3 and 4) and the standalone Butteraugli
 operation (Milestone 5) may proceed independently. Milestone 6 joins them into
 the iterative loop; Milestones 7 and 8 harden and qualify the result for
