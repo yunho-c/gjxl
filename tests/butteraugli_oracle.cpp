@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -70,7 +71,8 @@ constexpr std::array<float, 9> kL2Weights = {
 };
 
 [[nodiscard]] bool ValidExtent(OracleExtent extent) {
-  return extent.width != 0 && extent.height != 0;
+  return extent.width != 0 && extent.height != 0 &&
+         extent.width <= std::numeric_limits<size_t>::max() / extent.height;
 }
 
 template <typename Plane> [[nodiscard]] bool ValidPlane(const Plane &plane) {
@@ -260,6 +262,17 @@ void CopyStagePlane(const jxl::ImageF &source, IntermediateStage stage,
   }
 }
 
+void CopyOpsinFrequencyPlane(const jxl::ImageF &source,
+                             OpsinFrequencyStage stage,
+                             OpsinFrequencyStageOutput *output) {
+  std::vector<float> &values = output->plane[static_cast<size_t>(stage)];
+  values.resize(output->extent.width * output->extent.height);
+  for (size_t y = 0; y < output->extent.height; ++y) {
+    std::copy_n(source.ConstRow(y), output->extent.width,
+                values.data() + y * output->extent.width);
+  }
+}
+
 void AddL2Diff(const jxl::ImageF &image0, const jxl::ImageF &image1,
                float weight, jxl::ImageF *diffmap) {
   if (weight == 0.0f) {
@@ -390,6 +403,105 @@ bool ComputeLiveGaussianBlur(ConstOraclePlane input, float sigma,
       return false;
     }
     return CopyPlaneAtomically(result, output);
+  } catch (const std::length_error &) {
+    return false;
+  } catch (const std::bad_alloc &) {
+    return false;
+  }
+}
+
+const char *OpsinFrequencyStageName(OpsinFrequencyStage stage) {
+  constexpr std::array<const char *, kOpsinFrequencyStageCount> kNames = {
+      "opsin_x", "opsin_y", "opsin_b", "lf_x", "lf_y",  "lf_b",  "mf_x",
+      "mf_y",    "mf_b",    "hf_x",    "hf_y", "uhf_x", "uhf_y",
+  };
+  const size_t index = static_cast<size_t>(stage);
+  return index < kNames.size() ? kNames[index] : "unknown";
+}
+
+bool ComputeLiveOpsinAndFrequencies(
+    ConstOracleImage3 input, float intensity_target,
+    OpsinFrequencyStageOutput *output,
+    const JxlMemoryManager *requested_memory_manager) {
+  if (output == nullptr || !ValidImage(input) || !PixelsAreFinite(input) ||
+      !std::isfinite(intensity_target) || intensity_target <= 0.0f) {
+    return false;
+  }
+
+  try {
+    OpsinFrequencyStageOutput local;
+    local.extent = input.plane[0].extent;
+    JxlMemoryManager memory_manager{};
+    if (!InitMemoryManager(requested_memory_manager, &memory_manager)) {
+      return false;
+    }
+    jxl::Image3F image;
+    jxl::Image3F xyb;
+    jxl::Image3F opsin_temp;
+    if (!CopyToLibjxl(input, &memory_manager, &image) ||
+        !AllocateImage3(&memory_manager, local.extent, &xyb) ||
+        !AllocateImage3(&memory_manager, local.extent, &opsin_temp)) {
+      return false;
+    }
+    jxl::ButteraugliParams params;
+    params.intensity_target = intensity_target;
+    jxl::BlurTemp blur_temp;
+    if (!jxl::HWY_NAMESPACE::OpsinDynamicsImage(image, params, &opsin_temp,
+                                                &blur_temp, &xyb)) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      CopyOpsinFrequencyPlane(
+          xyb.Plane(channel),
+          static_cast<OpsinFrequencyStage>(
+              static_cast<size_t>(OpsinFrequencyStage::kOpsinX) + channel),
+          &local);
+    }
+
+    jxl::PsychoImage psycho;
+    if (!jxl::HWY_NAMESPACE::SeparateFrequencies(local.extent.width,
+                                                 local.extent.height, params,
+                                                 &blur_temp, xyb, psycho)) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      CopyOpsinFrequencyPlane(
+          psycho.lf.Plane(channel),
+          static_cast<OpsinFrequencyStage>(
+              static_cast<size_t>(OpsinFrequencyStage::kLowFrequencyX) +
+              channel),
+          &local);
+      CopyOpsinFrequencyPlane(
+          psycho.mf.Plane(channel),
+          static_cast<OpsinFrequencyStage>(
+              static_cast<size_t>(OpsinFrequencyStage::kMediumFrequencyX) +
+              channel),
+          &local);
+    }
+    for (size_t channel = 0; channel < 2; ++channel) {
+      CopyOpsinFrequencyPlane(
+          psycho.hf[channel],
+          static_cast<OpsinFrequencyStage>(
+              static_cast<size_t>(OpsinFrequencyStage::kHighFrequencyX) +
+              channel),
+          &local);
+      CopyOpsinFrequencyPlane(
+          psycho.uhf[channel],
+          static_cast<OpsinFrequencyStage>(
+              static_cast<size_t>(OpsinFrequencyStage::kUltraHighFrequencyX) +
+              channel),
+          &local);
+    }
+    for (const std::vector<float> &plane : local.plane) {
+      if (!std::ranges::all_of(
+              plane, [](float value) { return std::isfinite(value); })) {
+        return false;
+      }
+    }
+    *output = std::move(local);
+    return true;
+  } catch (const std::length_error &) {
+    return false;
   } catch (const std::bad_alloc &) {
     return false;
   }

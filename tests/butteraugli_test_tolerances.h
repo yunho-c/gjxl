@@ -37,5 +37,7 @@ struct ScalarDispatchTolerance {
 inline constexpr ScalarDispatchTolerance kScalarDispatchTolerance;
 inline constexpr float kNativeBlurDispatchTolerance =
     kScalarDispatchTolerance.stage_absolute;
+inline constexpr float kNativeOpsinFrequencyDispatchTolerance =
+    kScalarDispatchTolerance.stage_absolute;
 
 } // namespace gjxl::butteraugli_test

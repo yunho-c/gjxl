@@ -48,6 +48,41 @@ struct OracleOptions {
 ComputeLiveGaussianBlur(ConstOraclePlane input, float sigma, OraclePlane output,
                         const JxlMemoryManager *memory_manager = nullptr);
 
+enum class OpsinFrequencyStage : size_t {
+  kOpsinX,
+  kOpsinY,
+  kOpsinB,
+  kLowFrequencyX,
+  kLowFrequencyY,
+  kLowFrequencyB,
+  kMediumFrequencyX,
+  kMediumFrequencyY,
+  kMediumFrequencyB,
+  kHighFrequencyX,
+  kHighFrequencyY,
+  kUltraHighFrequencyX,
+  kUltraHighFrequencyY,
+  kCount,
+};
+
+inline constexpr size_t kOpsinFrequencyStageCount =
+    static_cast<size_t>(OpsinFrequencyStage::kCount);
+
+struct OpsinFrequencyStageOutput {
+  OracleExtent extent;
+  std::array<std::vector<float>, kOpsinFrequencyStageCount> plane;
+};
+
+[[nodiscard]] const char *OpsinFrequencyStageName(OpsinFrequencyStage stage);
+
+/// Calls pinned libjxl's opsin and frequency stages for one image. Defining
+/// HWY_COMPILE_ONLY_SCALAR on this adapter selects scalar symbols. The output
+/// is committed only after all validation and allocation succeeds.
+[[nodiscard]] bool ComputeLiveOpsinAndFrequencies(
+    ConstOracleImage3 input, float intensity_target,
+    OpsinFrequencyStageOutput *output,
+    const JxlMemoryManager *memory_manager = nullptr);
+
 /// Calls pinned libjxl's public, dynamically dispatched full-map path.
 /// The output map and score are committed only after the entire call succeeds.
 [[nodiscard]] bool

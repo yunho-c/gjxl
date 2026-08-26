@@ -190,7 +190,7 @@ output padding; validation and scratch allocation finish before output writes.
 
 The five 16x12 scalar blur goldens pass the fixed
 `1e-5 + 5e-6 * abs(expected)` limit. On an M4 Pro with AppleClang 17, the
-maximum native-versus-scalar absolute error was `5.96046448e-08`; the maximum
+maximum native-versus-scalar absolute error was `0`; the maximum
 native-versus-dispatched absolute error over every reference and distorted
 plane, all channels, all sigmas, and the complete differential corpus was
 `1.78813934e-07`, below the fixed `1.5e-3` stage cap. Direct-oracle allocation
@@ -198,7 +198,7 @@ failure injection covers every managed allocation without leaks or partial
 output. This milestone adds primitives only; the public facade remains on the
 pinned libjxl path until native pipeline integration in later milestones.
 
-### 3. Implement native opsin and frequency decomposition
+### 3. Implement native opsin and frequency decomposition — complete (2026-08-26)
 
 - Port absorbance mixing, gamma response, and linear RGB to XYB conversion.
 - Implement LF/MF, MF/HF, and HF/UHF separation.
@@ -208,6 +208,31 @@ pinned libjxl path until native pipeline integration in later milestones.
 
 Exit criterion: all intermediate planes match the pinned oracle within the
 stage tolerances for every corpus category.
+
+The native module now converts linear RGB to opsin-dynamics XYB and separates
+it into three LF planes, three MF planes, two HF planes, and two UHF planes.
+The implementation preserves the pinned absorbance coefficients, gamma
+approximation, intensity scaling, low-frequency conversion, range transforms,
+maximum clamps, X-by-Y suppression, and scalar evaluation order. In
+particular, scalar multiply-adds explicitly preserve Highway scalar's
+intermediate rounding instead of depending on the compiler's contraction
+mode.
+
+Opsin conversion stages the complete result before committing it, supports
+exact input/output aliasing, and preserves strided output padding on failure.
+Frequency decomposition builds a complete candidate image and move-commits it
+only after all stages are finite. Reusable opsin and frequency scratch storage
+owns the temporary blurred images and Gaussian state. The public Butteraugli
+facade remains on libjxl.
+
+All 13 native opsin/frequency planes match the existing 16x12 scalar goldens
+exactly. On an M4 Pro with AppleClang 17, the maximum native-versus-dispatched
+absolute error over both images in every differential-corpus fixture was
+`0.000915527344`, below the fixed `1.5e-3` stage cap. The direct single-image
+oracle covers every managed-allocation failure without leaks or partial output,
+and the native tests cover invalid/non-finite inputs, exact in-place opsin
+conversion, constant fields, threshold behavior, small images, strides,
+padding, and scratch reuse.
 
 ### 4. Implement native difference and masking stages
 
