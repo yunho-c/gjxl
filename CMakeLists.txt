@@ -52,6 +52,7 @@ add_library(
   gjxl_codec
   STATIC
 
+  src/codec/ac_strategy.cpp
   src/codec/adaptive_quantization.cpp
   src/codec/chroma_from_luma.cpp
   src/codec/convolution.cpp
@@ -307,6 +308,38 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME cpu_dct
     COMMAND gjxl_cpu_dct_test
+  )
+
+  add_executable(
+    gjxl_ac_strategy_cost_test
+    tests/ac_strategy_cost_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_cost_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME ac_strategy_cost
+    COMMAND gjxl_ac_strategy_cost_test
+  )
+
+  add_executable(
+    gjxl_ac_strategy_search_test
+    tests/ac_strategy_search_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_search_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME ac_strategy_search
+    COMMAND gjxl_ac_strategy_search_test
   )
 
   add_executable(

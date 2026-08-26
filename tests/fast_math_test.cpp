@@ -73,10 +73,49 @@ bool CheckFastPow2() {
   return true;
 }
 
+bool CheckFastPow() {
+  constexpr std::array<float, 5> kBases = {
+    0.125f,
+    0.5f,
+    1.0f,
+    2.0f,
+    7.5f,
+  };
+  constexpr std::array<float, 5> kExponents = {
+    -1.5f,
+    -0.25f,
+    0.0f,
+    0.375f,
+    2.0f,
+  };
+
+  for (float base : kBases) {
+    for (float exponent : kExponents) {
+      const float expected = std::pow(base, exponent);
+      const float actual = gjxl::fast_math::FastPow(base, exponent);
+      const float relative_error = std::abs(actual - expected) / expected;
+      if (!std::isfinite(actual) || relative_error > 5.0e-6f) {
+        std::cerr << "FastPow exceeded its error bound\n";
+        return false;
+      }
+    }
+  }
+
+  if (!std::isnan(gjxl::fast_math::FastPow(-1.0f, 0.5f)) ||
+      !std::isnan(gjxl::fast_math::FastPow(
+        2.0f,
+        std::numeric_limits<float>::infinity()))) {
+    std::cerr << "FastPow accepted an invalid input\n";
+    return false;
+  }
+
+  return true;
+}
+
 }  // namespace
 
 int main() {
-  if (!CheckFastLog2() || !CheckFastPow2()) {
+  if (!CheckFastLog2() || !CheckFastPow2() || !CheckFastPow()) {
     return EXIT_FAILURE;
   }
 

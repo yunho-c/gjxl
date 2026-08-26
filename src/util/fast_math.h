@@ -71,4 +71,12 @@ namespace gjxl::fast_math {
   return numerator / denominator;
 }
 
+/// Approximates base^exponent through the shared log2 and exp2 polynomials.
+[[nodiscard]] inline float FastPow(float base, float exponent) {
+  if (!std::isfinite(exponent)) {
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+  return FastPow2(FastLog2(base) * exponent);
+}
+
 }  // namespace gjxl::fast_math
