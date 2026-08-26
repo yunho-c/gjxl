@@ -267,6 +267,60 @@ cmake --build build-release -j --target gjxl_quantization_benchmark
 ./build-release/gjxl_quantization_benchmark
 ```
 
+## Batched Metal AC candidate evaluation
+
+The Metal backend can evaluate a same-strategy candidate batch in one command
+buffer. It gathers candidate image regions, runs the selected forward DCT,
+computes quantization residuals and rate terms, runs the inverse DCT, and
+reduces the masked information loss to one cost per candidate. Full planar
+opsin, mask, and quantization-matrix buffers remain resident; only 24-byte
+candidate descriptors and scalar costs need to cross the CPU/GPU boundary.
+Search traversal and selection remain on the CPU.
+
+Release measurements on an Apple M4 Pro on 2026-08-25 used simdgroup DCTs and
+three independent invocations of 12 samples. Each invocation balances all six
+CPU/resident/E2E measurement orders, immediately warms each GPU path before a
+timed sample, and times at least 16 GPU submissions per sample. `E2E` includes
+candidate upload, command submission and synchronization, and cost download;
+image, mask, matrix residency, candidate construction, and quant-norm
+aggregation are outside timing. Maximum batch sizes hold coefficient-pixel
+work constant at 4096 DCT8-equivalent candidates.
+
+| Strategy | Candidates | CPU median range | Metal E2E median range | E2E speedup range |
+| --- | ---: | ---: | ---: | ---: |
+| DCT8 | 4096 | 16.758–16.855 ms | 0.430–0.512 ms | 32.9–39.0x |
+| DCT16x8 | 2048 | 18.970–19.554 ms | 0.438–0.501 ms | 38.7–44.7x |
+| DCT8x16 | 2048 | 17.471–18.313 ms | 0.388–0.435 ms | 42.1–47.2x |
+| DCT16x16 | 1024 | 22.588–22.757 ms | 0.402–0.428 ms | 53.1–56.6x |
+| DCT32x16 | 512 | 31.185–31.480 ms | 0.393–0.591 ms | 53.3–79.3x |
+| DCT16x32 | 512 | 29.299–29.544 ms | 0.462–0.578 ms | 51.0–63.4x |
+| DCT32x32 | 256 | 38.236–38.270 ms | 0.470–0.613 ms | 62.5–81.4x |
+
+Batching is necessary to amortize roughly 0.12 ms of command-buffer latency.
+The smallest tested E2E batch that was faster in all three invocations was 32
+candidates for DCT16x8 and DCT8x16, and 8 candidates for DCT16x16, DCT32x16,
+DCT16x32, and DCT32x32. DCT8 at 32 candidates remained around break-even, so
+its crossover lies above that tested point. A single large transform is also
+around break-even; this is a throughput optimization, not a latency win.
+
+Each invocation validates 10,783 CPU/GPU costs before timing. Two candidates
+landed on a quantization discontinuity where float Metal DCT output rounded a
+coefficient differently from the double-precision CPU DCT. The worst cost
+difference was 0.566%; all other candidates met the tight unit-test tolerance.
+The benchmark retains a 1% hard gate, while dedicated non-boundary fixtures
+retain the tighter parity check for both scalar and simdgroup implementations.
+
+Reproduce the benchmark with:
+
+```sh
+just ac-strategy-benchmark
+```
+
+These results measure the candidate-evaluation leaf operation. They do not yet
+measure a complete `FindAcStrategyGrid` run: integration must collect enough
+candidates at each dependency-safe search stage to reach the batch crossovers,
+then compare the selected grid and whole-search wall time against the CPU path.
+
 ## Accuracy scope and known deviations
 
 The CPU pipeline is an executable reference for the currently supported seven

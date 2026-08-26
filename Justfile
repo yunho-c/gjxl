@@ -10,3 +10,9 @@ build:
 # Compare all Metal DCT implementations.
 benchmark blocks="65536" iterations="200": build
     "{{ build_dir }}/gjxl_dct_benchmark" "{{ blocks }}" "{{ iterations }}"
+
+# Compare CPU and Metal batched AC candidate evaluation in a Release build.
+ac-strategy-benchmark dct8_equivalents="4096" samples="12":
+    cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
+    cmake --build build/release --target gjxl_ac_strategy_benchmark
+    build/release/gjxl_ac_strategy_benchmark "{{ dct8_equivalents }}" "{{ samples }}"
