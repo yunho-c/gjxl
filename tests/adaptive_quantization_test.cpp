@@ -498,6 +498,74 @@ bool CheckInvalidInputs() {
   return true;
 }
 
+bool CheckAdjustedQuantField() {
+  constexpr gjxl::Extent2D kExtent{4, 4};
+  constexpr size_t kInputStride = 6;
+  constexpr size_t kOutputStride = 7;
+  gjxl::AcStrategyGrid strategies;
+  if (!gjxl::AcStrategyGrid::Create(kExtent, &strategies).ok() ||
+      !strategies.Set(0, 0, gjxl::AcStrategyType::kDct32x32).ok()) {
+    return false;
+  }
+
+  std::array<float, kInputStride * kExtent.height> input;
+  std::array<float, kOutputStride * kExtent.height> output;
+  input.fill(-111.0f);
+  output.fill(-777.0f);
+  for (size_t y = 0; y < kExtent.height; ++y) {
+    for (size_t x = 0; x < kExtent.width; ++x) {
+      input[y * kInputStride + x] =
+        0.48f + 0.01f * static_cast<float>(x + y);
+    }
+  }
+  const gjxl::ConstPlaneF32View input_view{
+    input.data(), kExtent, kInputStride};
+  const gjxl::PlaneF32View output_view{
+    output.data(), kExtent, kOutputStride};
+  if (!gjxl::AdjustQuantField(
+        strategies, 3.0f, input_view, output_view).ok()) {
+    return false;
+  }
+  for (size_t y = 0; y < kExtent.height; ++y) {
+    for (size_t x = 0; x < kExtent.width; ++x) {
+      if (std::abs(output_view.Row(y)[x] - 0.515324116f) > 2.0e-7f) {
+        std::cerr << "Adjusted quant field differs from pinned libjxl\n";
+        return false;
+      }
+    }
+    for (size_t x = kExtent.width; x < kOutputStride; ++x) {
+      if (output[y * kOutputStride + x] != -777.0f) {
+        std::cerr << "Adjusted quant field overwrote row padding\n";
+        return false;
+      }
+    }
+  }
+
+  // At low perceptual distances, every multiblock transform uses its maximum.
+  if (!gjxl::AdjustQuantField(
+        strategies, 1.2f, input_view, output_view).ok()) {
+    return false;
+  }
+  for (size_t y = 0; y < kExtent.height; ++y) {
+    for (size_t x = 0; x < kExtent.width; ++x) {
+      if (std::abs(output_view.Row(y)[x] - 0.54f) > 2.0e-7f) {
+        std::cerr << "Low-distance adjusted quant field is incorrect\n";
+        return false;
+      }
+    }
+  }
+
+  const auto original_output = output;
+  input[0] = std::numeric_limits<float>::quiet_NaN();
+  if (gjxl::AdjustQuantField(
+        strategies, 1.2f, input_view, output_view).ok() ||
+      output != original_output) {
+    std::cerr << "Invalid quant adjustment changed output\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -505,6 +573,7 @@ int main() {
       !CheckPinnedInitialQuantField() ||
       !CheckRescaleContract() ||
       !CheckTileBoundaryGoldens() ||
+      !CheckAdjustedQuantField() ||
       !CheckInvalidInputs()) {
     return EXIT_FAILURE;
   }

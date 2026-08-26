@@ -9,8 +9,12 @@
 #include <cstddef>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <vector>
 
+#include "codec/color_transform.h"
+#include "codec/convolution.h"
+#include "codec/quantization.h"
 #include "core/block_grid.h"
 #include "core/geometry.h"
 #include "util/fast_math.h"
@@ -208,43 +212,7 @@ void FuzzyErosion(
   }
 }
 
-size_t Mirror(ptrdiff_t coordinate, size_t size) {
-  ptrdiff_t mirrored = coordinate;
-  const ptrdiff_t signed_size = static_cast<ptrdiff_t>(size);
-
-  while (mirrored < 0 || mirrored >= signed_size) {
-    if (mirrored < 0) {
-      mirrored = -mirrored - 1;
-    } else {
-      mirrored = 2 * signed_size - 1 - mirrored;
-    }
-  }
-
-  return static_cast<size_t>(mirrored);
-}
-
-float WeightedSum5(
-  const std::vector<float>& input,
-  Extent2D extent,
-  ptrdiff_t x,
-  ptrdiff_t y,
-  float center_weight,
-  float near_weight,
-  float far_weight) {
-
-  const size_t sample_y = Mirror(y, extent.height);
-  const auto sample = [&](ptrdiff_t sample_x) {
-    return input[
-      sample_y * extent.width + Mirror(sample_x, extent.width)];
-  };
-
-  const float far = far_weight * (sample(x - 2) + sample(x + 2));
-  const float near = near_weight * (sample(x - 1) + sample(x + 1));
-  const float center = center_weight * sample(x);
-  return far + (near + center);
-}
-
-void BlurPixelMask(
+Status BlurPixelMask(
   Extent2D extent,
   const std::vector<float>& input,
   std::vector<float>* output) {
@@ -262,26 +230,26 @@ void BlurPixelMask(
   weight_sum = std::max(weight_sum, 1.0e-5);
   const float normalize = static_cast<float>(1.0 / weight_sum);
 
-  const float w0 = normalize;
-  const float w1 = normalize * kFilter[0];
-  const float w2 = normalize * kFilter[2];
-  const float w4 = normalize * kFilter[1];
-  const float w5 = normalize * kFilter[3];
-  const float w8 = normalize * kFilter[4];
-
   output->resize(extent.width * extent.height);
-  for (size_t y = 0; y < extent.height; ++y) {
-    for (size_t x = 0; x < extent.width; ++x) {
-      const ptrdiff_t sx = static_cast<ptrdiff_t>(x);
-      const ptrdiff_t sy = static_cast<ptrdiff_t>(y);
-      float sum0 = WeightedSum5(input, extent, sx, sy, w0, w1, w2);
-      sum0 += WeightedSum5(input, extent, sx, sy - 2, w2, w5, w8);
-      float sum1 = WeightedSum5(input, extent, sx, sy + 2, w2, w5, w8);
-      sum0 += WeightedSum5(input, extent, sx, sy - 1, w1, w4, w5);
-      sum1 += WeightedSum5(input, extent, sx, sy + 1, w1, w4, w5);
-      (*output)[y * extent.width + x] = sum0 + sum1;
-    }
-  }
+  return ConvolveSymmetric5(
+    {
+      .data = input.data(),
+      .extent = extent,
+      .stride = extent.width,
+    },
+    {
+      .distance0 = normalize,
+      .distance1 = normalize * kFilter[0],
+      .distance2 = normalize * kFilter[2],
+      .distance4 = normalize * kFilter[1],
+      .distance8 = normalize * kFilter[4],
+      .distance5 = normalize * kFilter[3],
+    },
+    {
+      .data = output->data(),
+      .extent = extent,
+      .stride = extent.width,
+    });
 }
 
 float GammaModulation(
@@ -640,7 +608,13 @@ Status ComputeInitialQuantField(
       &quant_field);
 
     std::vector<float> blurred_pixel_mask;
-    BlurPixelMask(opsin.extent(), pixel_mask, &blurred_pixel_mask);
+    status = BlurPixelMask(
+      opsin.extent(),
+      pixel_mask,
+      &blurred_pixel_mask);
+    if (!status.ok()) {
+      return status;
+    }
 
     const auto valid_values = [](const std::vector<float>& values) {
       return std::ranges::all_of(
@@ -662,6 +636,580 @@ Status ComputeInitialQuantField(
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate initial quantization scratch storage");
+  }
+
+  return Status::Ok();
+}
+
+Status AdjustQuantField(
+  const AcStrategyGrid& strategies,
+  float butteraugli_target,
+  ConstPlaneF32View input,
+  PlaneF32View output) {
+
+  if (!strategies.complete() ||
+      !input.valid() ||
+      !output.valid() ||
+      input.extent != strategies.extent() ||
+      output.extent != input.extent ||
+      !std::isfinite(butteraugli_target) ||
+      butteraugli_target <= 0.0f) {
+    return Status::InvalidArgument(
+      "Adjusted quant field inputs are invalid");
+  }
+
+  size_t value_count = 0;
+  if (!input.extent.try_area(&value_count)) {
+    return Status::InvalidArgument(
+      "Adjusted quant field dimensions are too large");
+  }
+
+  try {
+    std::vector<float> adjusted(value_count);
+    for (size_t y = 0; y < input.extent.height; ++y) {
+      for (size_t x = 0; x < input.extent.width; ++x) {
+        const float value = input.Row(y)[x];
+        if (!std::isfinite(value) || value <= 0.0f) {
+          return Status::InvalidArgument(
+            "Quant field must contain finite positive values");
+        }
+        adjusted[y * input.extent.width + x] = value;
+      }
+    }
+
+    float mean_max_mixer = 1.0f;
+    constexpr float kMixerLimit = 1.54138f;
+    constexpr float kMixerSlope = 0.56391f;
+    if (butteraugli_target > kMixerLimit) {
+      mean_max_mixer = std::max(
+        0.0f,
+        mean_max_mixer -
+          (butteraugli_target - kMixerLimit) * kMixerSlope);
+    }
+
+    const Status status = strategies.ForEachAnchor(
+      [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
+        const Extent2D covered =
+          GetAcStrategyInfo(strategy)->covered_blocks;
+        float maximum = adjusted[
+          block_y * input.extent.width + block_x];
+        float mean = 0.0f;
+        for (size_t dy = 0; dy < covered.height; ++dy) {
+          for (size_t dx = 0; dx < covered.width; ++dx) {
+            const float value = adjusted[
+              (block_y + dy) * input.extent.width + block_x + dx];
+            maximum = std::max(maximum, value);
+            mean += value;
+          }
+        }
+        const size_t block_count = covered.width * covered.height;
+        mean /= static_cast<float>(block_count);
+        float result = maximum;
+        if (block_count >= 4) {
+          result = maximum * mean_max_mixer +
+            mean * (1.0f - mean_max_mixer);
+        }
+        for (size_t dy = 0; dy < covered.height; ++dy) {
+          for (size_t dx = 0; dx < covered.width; ++dx) {
+            adjusted[
+              (block_y + dy) * input.extent.width + block_x + dx] = result;
+          }
+        }
+        return Status::Ok();
+      });
+    if (!status.ok()) {
+      return status;
+    }
+
+    for (size_t y = 0; y < output.extent.height; ++y) {
+      std::copy_n(
+        adjusted.data() + y * output.extent.width,
+        output.extent.width,
+        output.Row(y));
+    }
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate adjusted quant field storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Adjusted quant field dimensions are too large");
+  }
+  return Status::Ok();
+}
+
+namespace {
+
+struct OwnedImage3F {
+  Extent2D extent;
+  std::array<std::vector<float>, 3> plane;
+
+  [[nodiscard]] Image3FView View() {
+    return {{
+      PlaneF32View{plane[0].data(), extent, extent.width},
+      PlaneF32View{plane[1].data(), extent, extent.width},
+      PlaneF32View{plane[2].data(), extent, extent.width},
+    }};
+  }
+
+  [[nodiscard]] ConstImage3FView ConstView() const {
+    return {{
+      ConstPlaneF32View{plane[0].data(), extent, extent.width},
+      ConstPlaneF32View{plane[1].data(), extent, extent.width},
+      ConstPlaneF32View{plane[2].data(), extent, extent.width},
+    }};
+  }
+};
+
+Status AllocateImage(Extent2D extent, OwnedImage3F* image) {
+  size_t pixel_count = 0;
+  if (image == nullptr || !extent.try_area(&pixel_count) || extent.empty()) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization image extent is invalid");
+  }
+  image->extent = extent;
+  for (std::vector<float>& plane : image->plane) {
+    plane.resize(pixel_count);
+  }
+  return Status::Ok();
+}
+
+ConstImage3FView CroppedView(
+  const OwnedImage3F& image,
+  Extent2D extent) {
+
+  return {{
+    ConstPlaneF32View{image.plane[0].data(), extent, image.extent.width},
+    ConstPlaneF32View{image.plane[1].data(), extent, image.extent.width},
+    ConstPlaneF32View{image.plane[2].data(), extent, image.extent.width},
+  }};
+}
+
+void CopyContiguousPlane(
+  const std::vector<float>& source,
+  PlaneF32View destination) {
+
+  for (size_t y = 0; y < destination.extent.height; ++y) {
+    std::copy_n(
+      source.data() + y * destination.extent.width,
+      destination.extent.width,
+      destination.Row(y));
+  }
+}
+
+void CopyContiguousPlane(
+  const std::vector<int32_t>& source,
+  PlaneI32View destination) {
+
+  for (size_t y = 0; y < destination.extent.height; ++y) {
+    std::copy_n(
+      source.data() + y * destination.extent.width,
+      destination.extent.width,
+      destination.Row(y));
+  }
+}
+
+void CopyContiguousImage(
+  const OwnedImage3F& source,
+  Image3FView destination) {
+
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < destination.height(); ++y) {
+      std::copy_n(
+        source.plane[channel].data() + y * source.extent.width,
+        destination.width(),
+        destination.plane[channel].Row(y));
+    }
+  }
+}
+
+struct QuantizationEvaluation {
+  std::vector<int32_t> raw_quant;
+  std::vector<float> block_distance;
+  OwnedImage3F reconstructed_linear;
+  Quantizer quantizer;
+  ColorCorrelationMap color_correlation;
+  double score = 0.0;
+};
+
+Status EvaluateQuantization(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View quant_field,
+  ConstPlaneU8View epf_sharpness,
+  float quant_dc,
+  AdaptiveQuantizationOptions options,
+  QuantizationEvaluation* evaluation) {
+
+  const Extent2D block_extent = strategies.extent();
+  size_t block_count = 0;
+  if (evaluation == nullptr || !block_extent.try_area(&block_count)) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization evaluation output is invalid");
+  }
+
+  QuantizationEvaluation result;
+  result.raw_quant.resize(block_count);
+  Status status = CreateQuantizerFromField(
+    quant_dc,
+    quant_field,
+    {result.raw_quant.data(), block_extent, block_extent.width},
+    &result.quantizer);
+  if (!status.ok()) {
+    return status;
+  }
+
+  status = ComputeFinalColorCorrelationMap(
+    opsin,
+    strategies,
+    {result.raw_quant.data(), block_extent, block_extent.width},
+    result.quantizer,
+    options.fast_color_correlation,
+    &result.color_correlation);
+  if (!status.ok()) {
+    return status;
+  }
+
+  std::vector<float> inverse_sigma(block_count);
+  status = ComputeEpfInverseSigma(
+    strategies,
+    {result.raw_quant.data(), block_extent, block_extent.width},
+    result.quantizer,
+    epf_sharpness,
+    options.epf_sigma,
+    {inverse_sigma.data(), block_extent, block_extent.width});
+  if (!status.ok()) {
+    return status;
+  }
+
+  QuantizedCoefficientFrame coefficients;
+  status = ComputeQuantizedCoefficients(
+    opsin,
+    strategies,
+    {result.raw_quant.data(), block_extent, block_extent.width},
+    result.quantizer,
+    result.color_correlation,
+    options.coefficient_coding,
+    &coefficients);
+  if (!status.ok()) {
+    return status;
+  }
+
+  OwnedImage3F reconstructed_opsin;
+  status = AllocateImage(opsin.extent(), &reconstructed_opsin);
+  if (!status.ok()) {
+    return status;
+  }
+  status = ReconstructQuantizedCoefficients(
+    coefficients,
+    result.quantizer,
+    result.color_correlation,
+    options.coefficient_coding,
+    reconstructed_opsin.View());
+  if (!status.ok()) {
+    return status;
+  }
+
+  OwnedImage3F filtered_opsin;
+  status = AllocateImage(opsin.extent(), &filtered_opsin);
+  if (!status.ok()) {
+    return status;
+  }
+  status = ApplyLoopFilters(
+    reconstructed_opsin.ConstView(),
+    {inverse_sigma.data(), block_extent, block_extent.width},
+    options.loop_filter,
+    filtered_opsin.View());
+  if (!status.ok()) {
+    return status;
+  }
+
+  status = AllocateImage(
+    original_linear_rgb.extent(),
+    &result.reconstructed_linear);
+  if (!status.ok()) {
+    return status;
+  }
+  status = OpsinToLinearRgb(
+    CroppedView(filtered_opsin, original_linear_rgb.extent()),
+    options.opsin_intensity_target,
+    result.reconstructed_linear.View());
+  if (!status.ok()) {
+    return status;
+  }
+
+  size_t pixel_count = 0;
+  if (!original_linear_rgb.extent().try_area(&pixel_count)) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization reference extent is too large");
+  }
+  std::vector<float> distance_map(pixel_count);
+  status = ComputeButteraugliDistance(
+    original_linear_rgb,
+    result.reconstructed_linear.ConstView(),
+    options.butteraugli,
+    {
+      distance_map.data(),
+      original_linear_rgb.extent(),
+      original_linear_rgb.width(),
+    },
+    &result.score);
+  if (!status.ok()) {
+    return status;
+  }
+
+  result.block_distance.resize(block_count);
+  status = ReduceButteraugliDistanceMap(
+    {
+      distance_map.data(),
+      original_linear_rgb.extent(),
+      original_linear_rgb.width(),
+    },
+    strategies,
+    {result.block_distance.data(), block_extent, block_extent.width});
+  if (!status.ok()) {
+    return status;
+  }
+
+  *evaluation = std::move(result);
+  return Status::Ok();
+}
+
+Status ValidateAdaptiveQuantizationInputs(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  const AdaptiveQuantizationOutput& output) {
+
+  if (!original_linear_rgb.valid() ||
+      !opsin.valid() ||
+      !strategies.complete() ||
+      !initial_quant_field.valid() ||
+      !epf_sharpness.valid() ||
+      !output.quant_field.valid() ||
+      !output.raw_quant_field.valid() ||
+      !output.block_distance_map.valid() ||
+      !output.reconstructed_linear_rgb.valid() ||
+      output.quantizer == nullptr ||
+      output.color_correlation == nullptr ||
+      output.score_history == nullptr) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization inputs or outputs are invalid");
+  }
+
+  const Extent2D block_extent = strategies.extent();
+  if (block_extent.width >
+        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
+      block_extent.height >
+        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
+      opsin.extent() != Extent2D{
+        block_extent.width * kJxlBlockDimension,
+        block_extent.height * kJxlBlockDimension} ||
+      initial_quant_field.extent != block_extent ||
+      epf_sharpness.extent != block_extent ||
+      output.quant_field.extent != block_extent ||
+      output.raw_quant_field.extent != block_extent ||
+      output.block_distance_map.extent != block_extent ||
+      output.reconstructed_linear_rgb.extent() !=
+        original_linear_rgb.extent()) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization image and block geometry do not match");
+  }
+
+  if (original_linear_rgb.width() > opsin.width() ||
+      original_linear_rgb.height() > opsin.height() ||
+      original_linear_rgb.width() <=
+        opsin.width() - kJxlBlockDimension ||
+      original_linear_rgb.height() <=
+        opsin.height() - kJxlBlockDimension) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization padding exceeds one partial block");
+  }
+
+  if (!std::isfinite(options.butteraugli_target) ||
+      options.butteraugli_target <= 0.0f ||
+      !std::isfinite(options.opsin_intensity_target) ||
+      options.opsin_intensity_target <= 0.0f ||
+      options.iterations > 4) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization options are invalid");
+  }
+
+  return Status::Ok();
+}
+
+}  // namespace
+
+Status FindBestQuantization(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationOutput output) {
+
+  Status status = ValidateAdaptiveQuantizationInputs(
+    original_linear_rgb,
+    opsin,
+    strategies,
+    initial_quant_field,
+    epf_sharpness,
+    options,
+    output);
+  if (!status.ok()) {
+    return status;
+  }
+
+  const Extent2D block_extent = strategies.extent();
+  size_t block_count = 0;
+  if (!block_extent.try_area(&block_count)) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization block grid is too large");
+  }
+
+  try {
+    std::vector<float> quant_field(block_count);
+    status = AdjustQuantField(
+      strategies,
+      options.butteraugli_target,
+      initial_quant_field,
+      {quant_field.data(), block_extent, block_extent.width});
+    if (!status.ok()) {
+      return status;
+    }
+    const std::vector<float> adjusted_initial = quant_field;
+
+    const auto [minimum_it, maximum_it] = std::minmax_element(
+      adjusted_initial.begin(),
+      adjusted_initial.end());
+    const float initial_minimum = *minimum_it;
+    const float initial_maximum = *maximum_it;
+    const float initial_ratio = initial_maximum / initial_minimum;
+    const float maximum_deviation = std::sqrt(250.0f / initial_ratio);
+    const float asymmetry = std::min(2.0f, maximum_deviation);
+    const float lower_bound =
+      initial_minimum / (asymmetry * maximum_deviation);
+    const float upper_bound =
+      initial_maximum * (maximum_deviation / asymmetry);
+    if (!std::isfinite(lower_bound) ||
+        !std::isfinite(upper_bound) ||
+        lower_bound <= 0.0f ||
+        upper_bound < lower_bound ||
+        upper_bound / lower_bound >= 253.0f ||
+        upper_bound >
+          static_cast<float>(std::numeric_limits<long>::max()) /
+            static_cast<float>(kQuantGlobalScaleDenominator)) {
+      return Status::InvalidArgument(
+        "Initial quant field cannot form libjxl AQ bounds");
+    }
+
+    float quant_dc = 0.0f;
+    status = ComputeInitialQuantDc(
+      options.butteraugli_target,
+      &quant_dc);
+    if (!status.ok()) {
+      return status;
+    }
+
+    std::vector<double> score_history;
+    score_history.reserve(options.iterations + 1);
+    QuantizationEvaluation evaluation;
+    for (size_t iteration = 0;
+         iteration <= options.iterations;
+         ++iteration) {
+      status = EvaluateQuantization(
+        original_linear_rgb,
+        opsin,
+        strategies,
+        {
+          quant_field.data(),
+          block_extent,
+          block_extent.width,
+        },
+        epf_sharpness,
+        quant_dc,
+        options,
+        &evaluation);
+      if (!status.ok()) {
+        return status;
+      }
+      score_history.push_back(evaluation.score);
+      if (iteration == options.iterations) {
+        break;
+      }
+
+      // The second update is constrained toward the initial field to reduce
+      // oscillation caused by DC reconstruction, matching libjxl.
+      if (iteration == 1) {
+        for (size_t index = 0; index < block_count; ++index) {
+          const float clamp =
+            0.4f * quant_field[index] +
+            0.6f * adjusted_initial[index];
+          if (quant_field[index] < clamp) {
+            quant_field[index] = std::clamp(
+              clamp,
+              lower_bound,
+              upper_bound);
+          }
+        }
+      }
+
+      const double power = iteration < 2 ? 0.2 : 0.0;
+      for (size_t index = 0; index < block_count; ++index) {
+        const float difference = evaluation.block_distance[index] /
+          options.butteraugli_target;
+        if (!std::isfinite(difference) || difference < 0.0f) {
+          return Status::Internal(
+            "Adaptive quantization produced an invalid block distance");
+        }
+
+        if (difference <= 1.0f) {
+          if (power != 0.0) {
+            quant_field[index] *= static_cast<float>(
+              std::pow(difference, power));
+          }
+        } else {
+          const float old = quant_field[index];
+          quant_field[index] *= difference;
+          const long old_raw = std::lround(
+            old * evaluation.quantizer.inverse_global_scale());
+          const long new_raw = std::lround(
+            quant_field[index] *
+            evaluation.quantizer.inverse_global_scale());
+          if (old_raw == new_raw) {
+            quant_field[index] = old + evaluation.quantizer.scale();
+          }
+        }
+        quant_field[index] = std::clamp(
+          quant_field[index],
+          lower_bound,
+          upper_bound);
+      }
+    }
+
+    CopyContiguousPlane(quant_field, output.quant_field);
+    CopyContiguousPlane(
+      evaluation.raw_quant,
+      output.raw_quant_field);
+    CopyContiguousPlane(
+      evaluation.block_distance,
+      output.block_distance_map);
+    CopyContiguousImage(
+      evaluation.reconstructed_linear,
+      output.reconstructed_linear_rgb);
+    *output.quantizer = evaluation.quantizer;
+    *output.color_correlation = std::move(evaluation.color_correlation);
+    *output.score_history = std::move(score_history);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate adaptive-quantization scratch storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization dimensions are too large");
   }
 
   return Status::Ok();

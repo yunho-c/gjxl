@@ -29,6 +29,55 @@ option(
   OFF
 )
 
+if(NOT EXISTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/third_party/highway/CMakeLists.txt")
+  message(FATAL_ERROR
+    "Pinned libjxl dependencies are missing. Run: git submodule update --init --recursive")
+endif()
+
+# Butteraugli is the perceptual oracle used by iterative AQ. Build only its
+# required libjxl translation units plus Highway, rather than the full
+# encoder/decoder libraries.
+set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
+add_subdirectory(
+  third_party/libjxl/third_party/highway
+  third_party/highway
+  EXCLUDE_FROM_ALL
+)
+
+add_library(
+  gjxl_butteraugli_reference
+  STATIC
+
+  third_party/libjxl/lib/jxl/butteraugli/butteraugli.cc
+  third_party/libjxl/lib/jxl/convolve_slow.cc
+  third_party/libjxl/lib/jxl/enc_convolve_separable5.cc
+  third_party/libjxl/lib/jxl/image.cc
+  third_party/libjxl/lib/jxl/memory_manager_internal.cc
+  third_party/libjxl/lib/jxl/simd_util.cc
+)
+
+target_include_directories(
+  gjxl_butteraugli_reference
+  PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
+)
+
+target_compile_features(
+  gjxl_butteraugli_reference
+  PUBLIC
+    cxx_std_20
+)
+
+target_link_libraries(
+  gjxl_butteraugli_reference
+  PUBLIC
+    hwy
+)
+
 # C++ common interface
 add_library(
   gjxl_core
@@ -54,7 +103,9 @@ add_library(
 
   src/codec/ac_strategy.cpp
   src/codec/adaptive_quantization.cpp
+  src/codec/butteraugli.cpp
   src/codec/chroma_from_luma.cpp
+  src/codec/color_transform.cpp
   src/codec/convolution.cpp
   src/codec/dc_conversion.cpp
   src/codec/dct.cpp
@@ -69,6 +120,8 @@ target_link_libraries(
   gjxl_codec
   PUBLIC
     gjxl_core
+  PRIVATE
+    gjxl_butteraugli_reference
 )
 
 # metal-cpp
@@ -395,6 +448,38 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_adaptive_quantization_loop_test
+    tests/adaptive_quantization_loop_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_adaptive_quantization_loop_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME adaptive_quantization_loop
+    COMMAND gjxl_adaptive_quantization_loop_test
+  )
+
+  add_executable(
+    gjxl_color_transform_test
+    tests/color_transform_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_color_transform_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME color_transform
+    COMMAND gjxl_color_transform_test
+  )
+
+  add_executable(
     gjxl_gaborish_test
     tests/gaborish_test.cpp
   )
@@ -472,6 +557,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME loop_filter
     COMMAND gjxl_loop_filter_test
+  )
+
+  add_executable(
+    gjxl_butteraugli_test
+    tests/butteraugli_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME butteraugli
+    COMMAND gjxl_butteraugli_test
   )
 
   find_package(
