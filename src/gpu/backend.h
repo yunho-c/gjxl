@@ -9,6 +9,7 @@
 
 #include "core/status.h"
 #include "gpu/buffer.h"
+#include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/transform.h"
 
 namespace gjxl {
@@ -47,6 +48,11 @@ public:
 
   virtual Status InverseTransform(
     const TransformBatch& batch) = 0;
+
+  /// Enqueues one same-strategy batch of complete AC candidate costs.
+  /// Candidate selection and search traversal remain on the CPU.
+  virtual Status EvaluateAcStrategyCandidates(
+    const AcStrategyCandidateBatch& batch) = 0;
 
   // Explicit synchronization is useful for tests and benchmarks.
   virtual Status Synchronize() = 0;

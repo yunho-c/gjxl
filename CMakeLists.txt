@@ -207,6 +207,11 @@ set(
 )
 
 set(
+  GJXL_AC_STRATEGY_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/ac_strategy.metal"
+)
+
+set(
   GJXL_DCT_BASIS_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
 )
@@ -214,6 +219,11 @@ set(
 set(
   GJXL_DCT_METAL_IR
   "${GJXL_METAL_DIR}/dct.ir"
+)
+
+set(
+  GJXL_AC_STRATEGY_METAL_IR
+  "${GJXL_METAL_DIR}/ac_strategy.ir"
 )
 
 set(
@@ -251,6 +261,33 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_AC_STRATEGY_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    "${GJXL_AC_STRATEGY_METAL_SOURCE}"
+    -o
+    "${GJXL_AC_STRATEGY_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_AC_STRATEGY_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling Metal AC-strategy shaders"
+
+  VERBATIM
+)
+
 # .ir -> .metallib
 
 add_custom_command(
@@ -264,9 +301,11 @@ add_custom_command(
     -o
     "${GJXL_METALLIB}"
     "${GJXL_DCT_METAL_IR}"
+    "${GJXL_AC_STRATEGY_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
+    "${GJXL_AC_STRATEGY_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -688,6 +727,34 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_dct
     COMMAND gjxl_dct_test
+  )
+
+  add_executable(
+    gjxl_ac_strategy_metal_test
+    tests/ac_strategy_metal_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_strategy_metal_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_ac_strategy_metal_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_ac_strategy_metal_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_ac_strategy
+    COMMAND gjxl_ac_strategy_metal_test
   )
 
 endif()

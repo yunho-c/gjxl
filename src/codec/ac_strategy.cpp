@@ -99,7 +99,7 @@ Status ValidateCostInputs(
   return Status::Ok();
 }
 
-float QuantNorm(
+float ComputeQuantNormUnchecked(
   ConstPlaneF32View quant_field,
   size_t block_x,
   size_t block_y,
@@ -704,6 +704,54 @@ Status SearchTile(SearchContext* context) {
 
 }  // namespace
 
+Status ComputeAcStrategyQuantNorm(
+  AcStrategyType strategy,
+  size_t block_x,
+  size_t block_y,
+  ConstPlaneF32View quant_field,
+  float* quant_norm) {
+
+  if (quant_norm == nullptr || !quant_field.valid()) {
+    return Status::InvalidArgument(
+      "AC-strategy quant norm input or output is invalid");
+  }
+  const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
+  if (info == nullptr) {
+    return Status::InvalidArgument(
+      "Unknown AC strategy");
+  }
+  const Extent2D covered = info->covered_blocks;
+  if (block_x >= quant_field.extent.width ||
+      block_y >= quant_field.extent.height ||
+      covered.width > quant_field.extent.width - block_x ||
+      covered.height > quant_field.extent.height - block_y) {
+    return Status::InvalidArgument(
+      "AC-strategy quant norm footprint is out of bounds");
+  }
+
+  for (size_t dy = 0; dy < covered.height; ++dy) {
+    for (size_t dx = 0; dx < covered.width; ++dx) {
+      const float value = quant_field.Row(block_y + dy)[block_x + dx];
+      if (!std::isfinite(value) || value <= 0.0f) {
+        return Status::InvalidArgument(
+          "AC-strategy quant field must be finite and positive");
+      }
+    }
+  }
+
+  const float result = ComputeQuantNormUnchecked(
+    quant_field,
+    block_x,
+    block_y,
+    covered);
+  if (!std::isfinite(result) || result <= 0.0f) {
+    return Status::InvalidArgument(
+      "AC-strategy quant field must be finite and positive");
+  }
+  *quant_norm = result;
+  return Status::Ok();
+}
+
 Status EstimateAcStrategyCost(
   AcStrategyType strategy,
   size_t block_x,
@@ -758,14 +806,15 @@ Status EstimateAcStrategyCost(
     }
   }
 
-  const float quant_norm = QuantNorm(
-    quant_field,
+  float quant_norm = 0.0f;
+  status = ComputeAcStrategyQuantNorm(
+    strategy,
     block_x,
     block_y,
-    covered);
-  if (!std::isfinite(quant_norm) || quant_norm <= 0.0f) {
-    return Status::InvalidArgument(
-      "AC-strategy quant field must be finite and positive");
+    quant_field,
+    &quant_norm);
+  if (!status.ok()) {
+    return status;
   }
 
   constexpr float kBias = 0.13731742964354549f;
