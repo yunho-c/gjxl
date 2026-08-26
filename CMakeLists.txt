@@ -206,6 +206,7 @@ add_library(
   src/codec/ac_strategy.cpp
   src/codec/adaptive_quantization.cpp
   src/codec/butteraugli.cpp
+  src/codec/butteraugli_distance_internal.cpp
   src/codec/butteraugli_internal.cpp
   src/codec/chroma_from_luma.cpp
   src/codec/color_transform.cpp
@@ -443,6 +444,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME butteraugli_stages
     COMMAND gjxl_butteraugli_stages_test
+  )
+
+  add_executable(
+    gjxl_butteraugli_distance_test
+    tests/butteraugli_distance_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_distance_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME butteraugli_distance
+    COMMAND gjxl_butteraugli_distance_test
   )
 
   add_executable(
@@ -811,6 +828,61 @@ if(GJXL_BUILD_TESTS)
     add_test(
       NAME butteraugli_frequency_differential
       COMMAND gjxl_butteraugli_frequency_differential_test
+    )
+
+    add_executable(
+      gjxl_butteraugli_distance_differential_test
+      tests/butteraugli_distance_differential_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_butteraugli_distance_differential_test
+      PRIVATE
+        gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_distance_differential_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+        GJXL_NATIVE_DISTANCE_ORACLE_SCALAR=0
+    )
+
+    add_test(
+      NAME butteraugli_distance_differential
+      COMMAND gjxl_butteraugli_distance_differential_test
+    )
+
+    # Compile the internal scalar implementation directly so this executable
+    # links only the pinned scalar libjxl oracle, without the production
+    # facade's dispatched reference dependency.
+    add_executable(
+      gjxl_butteraugli_distance_scalar_differential_test
+      tests/butteraugli_distance_differential_test.cpp
+      src/codec/butteraugli_distance_internal.cpp
+      src/codec/butteraugli_internal.cpp
+    )
+
+    target_link_libraries(
+      gjxl_butteraugli_distance_scalar_differential_test
+      PRIVATE
+        gjxl_core
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle_scalar
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_distance_scalar_differential_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+        GJXL_NATIVE_DISTANCE_ORACLE_SCALAR=1
+    )
+
+    add_test(
+      NAME butteraugli_distance_scalar_differential
+      COMMAND gjxl_butteraugli_distance_scalar_differential_test
     )
   else()
     add_executable(

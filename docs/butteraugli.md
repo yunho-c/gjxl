@@ -234,7 +234,7 @@ and the native tests cover invalid/non-finite inputs, exact in-place opsin
 conversion, constant fields, threshold behavior, small images, strides,
 padding, and scratch reuse.
 
-### 4. Implement native difference and masking stages
+### 4. Implement native difference and masking stages — complete (2026-08-26)
 
 - Implement symmetric and asymmetric L2 terms.
 - Implement LF and full Malta neighborhood responses with exact edge rules.
@@ -243,6 +243,31 @@ padding, and scratch reuse.
 
 Exit criterion: the complete native CPU map and score pass full-map
 differential tests, including small-image expansion and cropping behavior.
+
+The native implementation now contains symmetric and asymmetric L2 terms,
+the 16-direction LF and full Malta responses, masking precomputation and
+step-three fuzzy erosion, AC/DC channel composition, and maximum-score
+reduction. Malta reads zero outside its 9x9 support at image borders. The
+complete-map path separately edge-replicates dimensions smaller than eight,
+crops the expanded result, and adds exactly one half-resolution scale for
+images at least 15x15. All results are staged before output writes, reusable
+scratch owns the intermediate images, and the public facade remains on
+libjxl pending Milestone 5.
+
+The strict 16x12 scalar stage goldens and four 32x24 scalar map/score goldens
+pass. A dedicated pinned-scalar executable also covers every eligible stage,
+complete map, and score over the full corpus. On an M4 Pro Release build, the
+maximum complete-corpus scalar errors were `3.05175781e-05` for a stage and
+`4.76837158e-07` for both the map and score; every value passes the strict
+scalar map formula and `1e-5` score limit.
+
+Pinned libjxl's dispatched path differs from its scalar path most visibly on
+expanded 1x1 impulses. Native-versus-dispatched comparison therefore remains
+a separate cross-target gate using the existing architecture-independent
+`0.0015` stage cap for stages, maps, and scores, without changing the original
+facade/golden limits. The measured maxima were `0.000679016113` for stages and
+`0.00114440918` for both maps and scores. No architecture-specific tolerance
+branches are used.
 
 ### 5. Integrate and harden the native CPU backend
 

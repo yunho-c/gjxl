@@ -39,5 +39,15 @@ inline constexpr float kNativeBlurDispatchTolerance =
     kScalarDispatchTolerance.stage_absolute;
 inline constexpr float kNativeOpsinFrequencyDispatchTolerance =
     kScalarDispatchTolerance.stage_absolute;
+inline constexpr float kNativeDifferenceDispatchTolerance =
+    kScalarDispatchTolerance.stage_absolute;
+// The complete native pipeline is scalar by design. Highway target selection
+// changes upstream opsin values enough that expanded 1x1 impulses require the
+// same fixed cross-target cap as intermediate stages. Strict scalar parity is
+// enforced independently over the complete corpus.
+inline constexpr float kNativeMapDispatchTolerance =
+    kScalarDispatchTolerance.stage_absolute;
+inline constexpr double kNativeScoreDispatchTolerance =
+    kScalarDispatchTolerance.stage_absolute;
 
 } // namespace gjxl::butteraugli_test
