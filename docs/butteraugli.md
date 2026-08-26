@@ -24,12 +24,13 @@ or link dependencies. Reference-enabled test and benchmark builds keep the
 pinned libjxl translation units and Highway solely for differential tests,
 golden regeneration, and comparative benchmarks.
 
-The current Metal abstraction supports allocation, transfers, synchronization,
-and batched transforms. It does not yet model image operations, multi-pass
-compute graphs, or reusable scratch storage. Those shared contracts and the
-complete resident AQ integration are owned by
-[`metal-aq.md`](metal-aq.md); this document owns only the standalone device
-Butteraugli operation and its perceptual validation.
+The shared Metal substrate now supports typed device images, checked buffer
+ranges, reusable scratch, multi-kernel submissions, and maximum reduction. A
+backend-neutral prepared Butteraugli operation contract defines its validation,
+lifetime, output, and readback behavior. Metal Butteraugli kernels and
+perceptual parity remain pending. The shared contracts and complete resident AQ
+integration are owned by [`metal-aq.md`](metal-aq.md); this document owns the
+standalone device Butteraugli operation and its perceptual validation.
 
 ## Goals
 
@@ -392,7 +393,7 @@ a speedup or hidden behind a production libjxl fallback; subsequent CPU or
 Metal optimization remains evidence-driven and must preserve the existing
 numerical and decision gates.
 
-### 7. Define the standalone device Butteraugli operation
+### 7. Define the standalone device Butteraugli operation — complete (2026-08-26)
 
 - Depend on the backend-neutral device-image, submission, scratch, and
   reduction contracts established by Milestone 1 of
@@ -410,6 +411,51 @@ numerical and decision gates.
 Exit criterion: operation and prepared-state contracts are documented and
 covered by validation/lifetime tests before Butteraugli kernels replace any
 test stub or staged path.
+
+The codec-specific GPU layer now exposes a backend-neutral
+`DeviceButteraugliOperation` factory boundary and a non-copyable
+`PreparedDeviceButteraugli` state without adding Butteraugli methods to
+`GpuBackend` or Metal dependencies to `gjxl_codec`. Preparation binds one
+backend instance, a device-resident reference image, immutable
+`ButteraugliOptions`, and the image extent. The backend and reference buffers
+must outlive the prepared state.
+
+Each repeated comparison accepts a device-resident distorted image plus
+caller-owned float32 outputs: one pixel-resolution distance map and one `1x1`
+score plane. Comparison is host-synchronous at this boundary: the
+implementation owns and waits for exactly one submission, then returns with
+both outputs device-resident and performs no implicit readback. Score readback
+copies only the scalar and promotes it to `double`; full-map readback is an
+explicit diagnostic operation supporting strided host output and atomic
+commit. Output buffers remain caller-owned and must remain alive through any
+requested readback.
+
+Preparation requires finite positive options and three same-sized float32
+reference planes. Comparison additionally validates the prepared extent,
+distorted image, output geometry, offset alignment, row stride, buffer
+capacity, and backend-instance ownership before submission. Read-only
+reference/distorted aliasing is supported. The map and score must not overlap
+one another or any input range. Invalid descriptors submit no work and leave
+the prepared state usable; execution or readback failures invalidate it.
+Repeated calls on one state are non-reentrant, while independent states may
+execute concurrently.
+
+The contract test uses only the existing affine and maximum-reduction Metal
+primitives as an explicitly test-only staged implementation. It does not call
+the CPU facade and makes no Butteraugli numerical claim. Odd `17x11` and small
+`1x1` strided cases cover nonzero offsets, guarded padding, exact input alias,
+three device-allocation-free repeated comparisons, and atomic scalar/map
+readback.
+Validation covers malformed geometry and types, overlap, foreign ownership,
+non-finite options, unavailable capability, allocation failure, same-state
+concurrency, and independent-state concurrency. Injected submission,
+completion, readback, and invalid-computed-result failures exercise status and
+invalidation behavior.
+
+Fresh AppleClang 17 Release builds passed all 28 reference-disabled and all 34
+reference-enabled tests. Both configurations include real Metal execution for
+the shared primitives, the staged operation contract, and DCT kernels. Actual
+Butteraugli stage/map/score comparisons remain the fixed Milestone 8 gate.
 
 ### 8. Port Butteraugli leaf stages to Metal
 
@@ -468,11 +514,9 @@ only for deliberate compatibility validation.
 
 ## Recommended implementation order
 
-Milestones 1 through 6 establish the standalone CPU correctness baseline and
-production dependency boundary and are complete. Shared device-image and
-submission infrastructure is now validated by Milestone 1 of
-[`metal-aq.md`](metal-aq.md); complete the operation contract in Milestone 7
-before porting leaf kernels in Milestone 8. Prepared-reference optimization and
-standalone qualification follow in Milestone 9. Full iterative-AQ integration
-proceeds only through the gates in `metal-aq.md`, while the native CPU map
-remains the primary readable oracle.
+Milestones 1 through 7 establish the standalone CPU correctness baseline,
+production dependency boundary, shared GPU substrate, and device-operation
+contract and are complete. Port and validate the leaf kernels in Milestone 8,
+then add prepared-reference optimization and standalone qualification in
+Milestone 9. Full iterative-AQ integration proceeds only through the gates in
+`metal-aq.md`, while the native CPU map remains the primary readable oracle.

@@ -313,6 +313,20 @@ target_link_libraries(
     gjxl_core
 )
 
+# Codec-specific GPU operation contracts
+add_library(
+  gjxl_gpu_butteraugli
+  STATIC
+
+  src/gpu/ops/butteraugli.cpp
+)
+
+target_link_libraries(
+  gjxl_gpu_butteraugli
+  PUBLIC
+    gjxl_gpu
+)
+
 # metal-cpp
 add_library(
   metal_cpp
@@ -1076,6 +1090,34 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_gpu_primitives
     COMMAND gjxl_gpu_primitives_metal_test
+  )
+
+  add_executable(
+    gjxl_butteraugli_device_operation_test
+    tests/butteraugli_device_operation_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_device_operation_test
+    PRIVATE
+      gjxl_gpu_butteraugli
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_butteraugli_device_operation_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_butteraugli_device_operation_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_butteraugli_operation_contract
+    COMMAND gjxl_butteraugli_device_operation_test
   )
 
   add_executable(

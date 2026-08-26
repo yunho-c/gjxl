@@ -64,6 +64,11 @@ differential tests, intermediate-stage fixtures, the explicit device
 Butteraugli operation, prepared-reference behavior, and Butteraugli-specific
 numerical tolerances.
 
+Butteraugli Milestone 7 now fixes the backend-neutral preparation, synchronous
+comparison, device-output, readback, validation, and lifetime contracts. Its
+test-only staged path exercises this substrate but contains no Butteraugli
+kernels. This does not complete the Metal AQ Milestone 5 integration gate.
+
 ### Shared GPU infrastructure
 
 This roadmap owns the requirements and integration of device image views,
