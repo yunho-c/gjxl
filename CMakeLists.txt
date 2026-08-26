@@ -986,18 +986,24 @@ if(GJXL_BUILD_BENCHMARKS)
       PRIVATE
         GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
     )
-
-    add_executable(
-      gjxl_quantization_benchmark
-      benchmarks/quantization_benchmark.cpp
-    )
-
-    target_link_libraries(
-      gjxl_quantization_benchmark
-      PRIVATE
-        gjxl_codec
-    )
   endif()
+
+  add_executable(
+    gjxl_quantization_benchmark
+    benchmarks/quantization_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_quantization_benchmark
+    PRIVATE
+      gjxl_codec
+  )
+
+  target_compile_definitions(
+    gjxl_quantization_benchmark
+    PRIVATE
+      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+  )
 
   add_executable(
     gjxl_dct_benchmark

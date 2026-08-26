@@ -147,7 +147,9 @@ retains device-resident copies of:
 - Reusable coefficient, image, filter, perceptual, and reduction scratch.
 
 Preparation must finish validation and allocation before any evaluation is
-submitted. A failed preparation leaves no partially usable state.
+submitted. The prepared object is non-copyable, is bound to the backend that
+created it, and exposes no partially initialized state. Preparation failure
+returns no object.
 
 ### Per-evaluation inputs
 
@@ -171,6 +173,25 @@ The pixel-resolution distance map must remain device-resident. Reading it back
 to perform the 16-norm reduction on the CPU is not an acceptable steady-state
 path. The final evaluation may additionally commit the reconstructed linear RGB
 image and existing CPU-visible state.
+
+### Synchronization, concurrency, and failure
+
+The initial operation is host-synchronous at the CPU policy boundary. One call
+encodes one Metal submission, waits for its bounded block-map and score
+readback, and returns only after those values are available. The implementation
+must not hide additional submissions or full-resolution diagnostic readbacks.
+
+A prepared object is not concurrently reentrant because its evaluations reuse
+mutable scratch. Independent prepared objects may execute concurrently and
+must not share mutable storage. Geometry, strategy, option, or backend mismatch
+is rejected before submission and leaves the prepared object usable.
+
+Invalid input submits no work. Allocation or validation failure during
+preparation returns no object. Submission, command-buffer, synchronization, or
+readback failure commits no caller-visible CPU output and invalidates the
+prepared object; the caller must prepare a new object before retrying. Backend
+unavailability remains an explicit status handled by CPU fallback above the
+operation rather than by silently switching implementations inside it.
 
 ## Shared GPU contracts
 
@@ -230,11 +251,10 @@ oracle coverage.
 
 ## Milestones
 
-All milestones below are pending. Milestone 0 is the implementation entry
-point; later milestones must not be treated as complete until their stated
-exit criteria pass.
+Milestone 0 is complete. Milestones 1 through 8 remain pending and must not be
+treated as complete until their stated exit criteria pass.
 
-### 0. Refresh the AQ baseline and freeze the evaluation contract
+### 0. Refresh the AQ baseline and freeze the evaluation contract — complete (2026-08-26)
 
 - Add timing boundaries inside one CPU AQ evaluation for field construction,
   coefficient coding, reconstruction, loop filters, color conversion,
@@ -250,6 +270,87 @@ exit criteria pass.
 Exit criterion: Release measurements identify the cost of every evaluation
 stage and the documentation fixes the first CPU/GPU boundary without relying on
 an assumed bottleneck.
+
+The implementation adds a diagnostic-only internal profiling entry point that runs
+the production `FindBestQuantization` implementation. It atomically reports
+loop setup, every evaluation, quant-field updates, and output commit. Each
+evaluation records field construction, coefficient coding, reconstruction,
+loop filters, color conversion, Butteraugli, and block reduction. The ordinary
+API remains unchanged and does not read the clock.
+
+The benchmark now rotates seven phases and supports the required padded
+workloads. Measurements below used an Apple M4 Pro with 14 CPU cores and 48 GB
+RAM, macOS 15.6, AppleClang 17, and a Release build of this Milestone 0 tree
+based on `bff6146`. Each of three independent processes performed three warmup
+rotations and five measured rotations. Reported medians are the median of the
+three run medians; parenthesized ranges span all 15 measured samples.
+
+| Workload (source -> coding) | One evaluation (ms) | Two-update AQ (ms) | Complete pipeline (ms) |
+| --- | ---: | ---: | ---: |
+| Synthetic 128x96 -> 128x96 | 13.826 (13.347–14.260) | 40.882 (40.057–42.504) | 53.195 (51.746–54.278) |
+| Odd 121x89 -> 128x96 | 12.289 (11.965–12.627) | 36.525 (35.877–37.218) | 49.332 (48.855–51.093) |
+| Flower 510x532 -> 512x536 | 298.712 (293.901–309.105) | 898.888 (886.225–917.357) | 1177.842 (1163.011–1235.693) |
+| Padded 480p 854x479 -> 856x480 | 454.288 (448.320–462.507) | 1366.242 (1343.159–1404.186) | 1734.224 (1711.211–1782.266) |
+| Padded 720p 1279x719 -> 1280x720 | 1011.521 (992.109–1026.342) | 3031.718 (2996.328–3073.570) | 3844.369 (3800.606–3899.127) |
+| Padded 1080p 1919x1079 -> 1920x1080 | 2285.346 (2255.584–2315.131) | 6863.434 (6773.744–6885.900) | 8713.679 (8577.378–8746.698) |
+
+The complete-pipeline totals include the following independently measured CPU
+preprocessing and search medians:
+
+| Workload | Initial quant | Gaborish | Initial CfL | AC search |
+| --- | ---: | ---: | ---: | ---: |
+| Synthetic 128x96 | 0.386 | 0.647 | 1.237 | 9.377 |
+| Odd 121x89 | 0.377 | 0.660 | 1.517 | 10.231 |
+| Flower 510x532 | 8.102 | 14.030 | 29.192 | 222.521 |
+| Padded 480p | 12.279 | 22.012 | 39.640 | 290.632 |
+| Padded 720p | 26.991 | 47.929 | 91.918 | 646.087 |
+| Padded 1080p | 60.883 | 107.115 | 203.984 | 1455.114 |
+
+Internal one-evaluation medians in milliseconds identify the throughput-heavy
+boundary directly:
+
+| Workload | Field construction | Coefficient coding | Reconstruction | Loop filters | Color conversion | Butteraugli | Block reduction | Evaluation total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Synthetic 128x96 | 0.685 | 0.752 | 0.844 | 2.747 | 0.109 | 8.629 | 0.023 | 13.812 |
+| Odd 121x89 | 0.582 | 0.645 | 0.740 | 2.723 | 0.094 | 7.446 | 0.021 | 12.272 |
+| Flower 510x532 | 14.989 | 16.292 | 19.555 | 58.700 | 2.227 | 185.830 | 0.478 | 297.453 |
+| Padded 480p | 23.965 | 25.547 | 30.634 | 89.698 | 3.974 | 282.372 | 0.717 | 452.004 |
+| Padded 720p | 53.657 | 57.290 | 69.257 | 190.811 | 7.960 | 626.878 | 1.741 | 1004.808 |
+| Padded 1080p | 122.608 | 130.287 | 153.798 | 425.433 | 17.539 | 1413.317 | 4.124 | 2279.490 |
+
+Butteraugli is approximately 62% of evaluation time throughout the measured
+range, with loop filtering the next largest stage. Field construction remains
+on the CPU initially because it is a smaller stage and produces only
+block/tile-resolution iteration inputs; its transfer cost remains part of the
+future full-E2E gate.
+
+Peak memory was measured by running one workload per process under
+`/usr/bin/time -l`. These are process-wide maximum resident-set values, not
+allocator-tracked native scratch bytes, and include benchmark inputs, outputs,
+libraries, and allocator retention.
+
+| Workload | Median peak RSS | Three-process range |
+| --- | ---: | ---: |
+| Synthetic 128x96 | 27.5 MiB | 22.0–43.1 MiB |
+| Odd 121x89 | 27.2 MiB | 23.4–31.0 MiB |
+| Flower 510x532 | 468.5 MiB | 423.7–478.4 MiB |
+| Padded 480p | 654.9 MiB | 652.9–696.3 MiB |
+| Padded 720p | 973.6 MiB | 971.1–1046.7 MiB |
+| Padded 1080p | 1992.6 MiB | 1952.5–2074.8 MiB |
+
+Reproduce one process with `just quantization-benchmark`, or select one
+workload explicitly, for example:
+
+```sh
+just quantization-benchmark padded_1080p 5 3
+/usr/bin/time -l build/release/gjxl_quantization_benchmark \
+  --workload padded_1080p --samples 5 --warmups 3
+```
+
+The measured stage split and memory scaling validate the documented boundary:
+the GPU effort starts with shared residency/submission/scratch infrastructure,
+then connects reconstruction, filtering, and prepared Butteraugli without
+full-resolution host round trips. No Milestone 1 work is included here.
 
 ### 1. Add reusable device-image and submission infrastructure
 
@@ -446,12 +547,13 @@ encoder decisions.
 
 ## Implementation order
 
-Milestone 0 is the first implementation task. Milestone 1 then establishes the
-shared substrate required by both reconstruction and Butteraugli. After
-Milestone 2 fixes residency and lifetime contracts, reconstruction/filter work
-(Milestones 3 and 4) and the standalone Butteraugli operation (Milestone 5) may
-proceed independently. Milestone 6 joins them into the iterative loop;
-Milestones 7 and 8 harden and qualify the result for rollout.
+Milestone 0 is complete. Milestone 1 is the next implementation task and
+establishes the shared substrate required by both reconstruction and
+Butteraugli. After Milestone 2 fixes residency and lifetime contracts,
+reconstruction/filter work (Milestones 3 and 4) and the standalone Butteraugli
+operation (Milestone 5) may proceed independently. Milestone 6 joins them into
+the iterative loop; Milestones 7 and 8 harden and qualify the result for
+rollout.
 
 Removing libjxl from the production dependency graph is tracked independently
 in [`butteraugli.md`](butteraugli.md). It may proceed in parallel and does not

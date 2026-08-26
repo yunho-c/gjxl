@@ -5,13 +5,16 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
+#include "codec/adaptive_quantization_internal.h"
 #include "codec/color_transform.h"
 #include "codec/convolution.h"
 #include "codec/quantization.h"
@@ -21,6 +24,31 @@
 
 namespace gjxl {
 namespace {
+
+namespace aqi = adaptive_quantization_internal;
+using ProfileClock = std::chrono::steady_clock;
+
+uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
+  return static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      ProfileClock::now() - begin).count());
+}
+
+template <typename Function>
+Status MeasureEvaluationStage(
+  aqi::EvaluationProfile* profile,
+  aqi::EvaluationStage stage,
+  Function&& function) {
+
+  if (profile == nullptr) {
+    return std::forward<Function>(function)();
+  }
+  const auto begin = ProfileClock::now();
+  Status status = std::forward<Function>(function)();
+  profile->stage_nanoseconds[static_cast<size_t>(stage)] =
+    ElapsedNanoseconds(begin);
+  return status;
+}
 
 constexpr float kAcQuant = 0.765f;
 constexpr float kDcQuant = 1.095924047623553f;
@@ -839,7 +867,8 @@ Status EvaluateQuantization(
   ConstPlaneU8View epf_sharpness,
   float quant_dc,
   AdaptiveQuantizationOptions options,
-  QuantizationEvaluation* evaluation) {
+  QuantizationEvaluation* evaluation,
+  aqi::EvaluationProfile* profile) {
 
   const Extent2D block_extent = strategies.extent();
   size_t block_count = 0;
@@ -848,92 +877,124 @@ Status EvaluateQuantization(
       "Adaptive-quantization evaluation output is invalid");
   }
 
+  const auto evaluation_begin = profile == nullptr
+    ? ProfileClock::time_point{}
+    : ProfileClock::now();
+  aqi::EvaluationProfile local_profile;
+  aqi::EvaluationProfile* measured = profile == nullptr
+    ? nullptr
+    : &local_profile;
   QuantizationEvaluation result;
-  result.raw_quant.resize(block_count);
-  Status status = CreateQuantizerFromField(
-    quant_dc,
-    quant_field,
-    {result.raw_quant.data(), block_extent, block_extent.width},
-    &result.quantizer);
-  if (!status.ok()) {
-    return status;
-  }
-
-  status = ComputeFinalColorCorrelationMap(
-    opsin,
-    strategies,
-    {result.raw_quant.data(), block_extent, block_extent.width},
-    result.quantizer,
-    options.fast_color_correlation,
-    &result.color_correlation);
-  if (!status.ok()) {
-    return status;
-  }
-
-  std::vector<float> inverse_sigma(block_count);
-  status = ComputeEpfInverseSigma(
-    strategies,
-    {result.raw_quant.data(), block_extent, block_extent.width},
-    result.quantizer,
-    epf_sharpness,
-    options.epf_sigma,
-    {inverse_sigma.data(), block_extent, block_extent.width});
+  std::vector<float> inverse_sigma;
+  Status status = MeasureEvaluationStage(
+    measured,
+    aqi::EvaluationStage::kFieldConstruction,
+    [&] {
+      result.raw_quant.resize(block_count);
+      inverse_sigma.resize(block_count);
+      Status field_status = CreateQuantizerFromField(
+        quant_dc,
+        quant_field,
+        {result.raw_quant.data(), block_extent, block_extent.width},
+        &result.quantizer);
+      if (!field_status.ok()) {
+        return field_status;
+      }
+      field_status = ComputeFinalColorCorrelationMap(
+        opsin,
+        strategies,
+        {result.raw_quant.data(), block_extent, block_extent.width},
+        result.quantizer,
+        options.fast_color_correlation,
+        &result.color_correlation);
+      if (!field_status.ok()) {
+        return field_status;
+      }
+      return ComputeEpfInverseSigma(
+        strategies,
+        {result.raw_quant.data(), block_extent, block_extent.width},
+        result.quantizer,
+        epf_sharpness,
+        options.epf_sigma,
+        {inverse_sigma.data(), block_extent, block_extent.width});
+    });
   if (!status.ok()) {
     return status;
   }
 
   QuantizedCoefficientFrame coefficients;
-  status = ComputeQuantizedCoefficients(
-    opsin,
-    strategies,
-    {result.raw_quant.data(), block_extent, block_extent.width},
-    result.quantizer,
-    result.color_correlation,
-    options.coefficient_coding,
-    &coefficients);
+  status = MeasureEvaluationStage(
+    measured,
+    aqi::EvaluationStage::kCoefficientCoding,
+    [&] {
+      return ComputeQuantizedCoefficients(
+        opsin,
+        strategies,
+        {result.raw_quant.data(), block_extent, block_extent.width},
+        result.quantizer,
+        result.color_correlation,
+        options.coefficient_coding,
+        &coefficients);
+    });
   if (!status.ok()) {
     return status;
   }
 
   OwnedImage3F reconstructed_opsin;
-  status = AllocateImage(opsin.extent(), &reconstructed_opsin);
-  if (!status.ok()) {
-    return status;
-  }
-  status = ReconstructQuantizedCoefficients(
-    coefficients,
-    result.quantizer,
-    result.color_correlation,
-    options.coefficient_coding,
-    reconstructed_opsin.View());
+  status = MeasureEvaluationStage(
+    measured,
+    aqi::EvaluationStage::kReconstruction,
+    [&] {
+      Status reconstruction_status =
+        AllocateImage(opsin.extent(), &reconstructed_opsin);
+      if (!reconstruction_status.ok()) {
+        return reconstruction_status;
+      }
+      return ReconstructQuantizedCoefficients(
+        coefficients,
+        result.quantizer,
+        result.color_correlation,
+        options.coefficient_coding,
+        reconstructed_opsin.View());
+    });
   if (!status.ok()) {
     return status;
   }
 
   OwnedImage3F filtered_opsin;
-  status = AllocateImage(opsin.extent(), &filtered_opsin);
-  if (!status.ok()) {
-    return status;
-  }
-  status = ApplyLoopFilters(
-    reconstructed_opsin.ConstView(),
-    {inverse_sigma.data(), block_extent, block_extent.width},
-    options.loop_filter,
-    filtered_opsin.View());
+  status = MeasureEvaluationStage(
+    measured,
+    aqi::EvaluationStage::kLoopFilters,
+    [&] {
+      Status filter_status = AllocateImage(opsin.extent(), &filtered_opsin);
+      if (!filter_status.ok()) {
+        return filter_status;
+      }
+      return ApplyLoopFilters(
+        reconstructed_opsin.ConstView(),
+        {inverse_sigma.data(), block_extent, block_extent.width},
+        options.loop_filter,
+        filtered_opsin.View());
+    });
   if (!status.ok()) {
     return status;
   }
 
-  status = AllocateImage(
-    original_linear_rgb.extent(),
-    &result.reconstructed_linear);
-  if (!status.ok()) {
-    return status;
-  }
-  status = OpsinToLinearRgb(
-    CroppedView(filtered_opsin, original_linear_rgb.extent()),
-    options.opsin_intensity_target,
-    result.reconstructed_linear.View());
+  status = MeasureEvaluationStage(
+    measured,
+    aqi::EvaluationStage::kColorConversion,
+    [&] {
+      Status color_status = AllocateImage(
+        original_linear_rgb.extent(),
+        &result.reconstructed_linear);
+      if (!color_status.ok()) {
+        return color_status;
+      }
+      return OpsinToLinearRgb(
+        CroppedView(filtered_opsin, original_linear_rgb.extent()),
+        options.opsin_intensity_target,
+        result.reconstructed_linear.View());
+    });
   if (!status.ok()) {
     return status;
   }
@@ -943,35 +1004,51 @@ Status EvaluateQuantization(
     return Status::InvalidArgument(
       "Adaptive-quantization reference extent is too large");
   }
-  std::vector<float> distance_map(pixel_count);
-  status = ComputeButteraugliDistance(
-    original_linear_rgb,
-    result.reconstructed_linear.ConstView(),
-    options.butteraugli,
-    {
-      distance_map.data(),
-      original_linear_rgb.extent(),
-      original_linear_rgb.width(),
-    },
-    &result.score);
+  std::vector<float> distance_map;
+  status = MeasureEvaluationStage(
+    measured,
+    aqi::EvaluationStage::kButteraugli,
+    [&] {
+      distance_map.resize(pixel_count);
+      return ComputeButteraugliDistance(
+        original_linear_rgb,
+        result.reconstructed_linear.ConstView(),
+        options.butteraugli,
+        {
+          distance_map.data(),
+          original_linear_rgb.extent(),
+          original_linear_rgb.width(),
+        },
+        &result.score);
+    });
   if (!status.ok()) {
     return status;
   }
 
-  result.block_distance.resize(block_count);
-  status = ReduceButteraugliDistanceMap(
-    {
-      distance_map.data(),
-      original_linear_rgb.extent(),
-      original_linear_rgb.width(),
-    },
-    strategies,
-    {result.block_distance.data(), block_extent, block_extent.width});
+  status = MeasureEvaluationStage(
+    measured,
+    aqi::EvaluationStage::kBlockReduction,
+    [&] {
+      result.block_distance.resize(block_count);
+      return ReduceButteraugliDistanceMap(
+        {
+          distance_map.data(),
+          original_linear_rgb.extent(),
+          original_linear_rgb.width(),
+        },
+        strategies,
+        {result.block_distance.data(), block_extent, block_extent.width});
+    });
   if (!status.ok()) {
     return status;
   }
 
   *evaluation = std::move(result);
+  if (profile != nullptr) {
+    local_profile.total_nanoseconds =
+      ElapsedNanoseconds(evaluation_begin);
+    *profile = local_profile;
+  }
   return Status::Ok();
 }
 
@@ -1043,14 +1120,17 @@ Status ValidateAdaptiveQuantizationInputs(
 
 }  // namespace
 
-Status FindBestQuantization(
+namespace {
+
+Status FindBestQuantizationImpl(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
   const AcStrategyGrid& strategies,
   ConstPlaneF32View initial_quant_field,
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options,
-  AdaptiveQuantizationOutput output) {
+  AdaptiveQuantizationOutput output,
+  aqi::AdaptiveQuantizationProfile* profile) {
 
   Status status = ValidateAdaptiveQuantizationInputs(
     original_linear_rgb,
@@ -1072,6 +1152,13 @@ Status FindBestQuantization(
   }
 
   try {
+    aqi::AdaptiveQuantizationProfile local_profile;
+    if (profile != nullptr) {
+      local_profile.evaluations.reserve(options.iterations + 1);
+    }
+    const auto setup_begin = profile == nullptr
+      ? ProfileClock::time_point{}
+      : ProfileClock::now();
     std::vector<float> quant_field(block_count);
     status = AdjustQuantField(
       strategies,
@@ -1114,6 +1201,10 @@ Status FindBestQuantization(
     if (!status.ok()) {
       return status;
     }
+    if (profile != nullptr) {
+      local_profile.loop_setup_nanoseconds =
+        ElapsedNanoseconds(setup_begin);
+    }
 
     std::vector<double> score_history;
     score_history.reserve(options.iterations + 1);
@@ -1121,6 +1212,7 @@ Status FindBestQuantization(
     for (size_t iteration = 0;
          iteration <= options.iterations;
          ++iteration) {
+      aqi::EvaluationProfile evaluation_profile;
       status = EvaluateQuantization(
         original_linear_rgb,
         opsin,
@@ -1133,15 +1225,22 @@ Status FindBestQuantization(
         epf_sharpness,
         quant_dc,
         options,
-        &evaluation);
+        &evaluation,
+        profile == nullptr ? nullptr : &evaluation_profile);
       if (!status.ok()) {
         return status;
+      }
+      if (profile != nullptr) {
+        local_profile.evaluations.push_back(evaluation_profile);
       }
       score_history.push_back(evaluation.score);
       if (iteration == options.iterations) {
         break;
       }
 
+      const auto update_begin = profile == nullptr
+        ? ProfileClock::time_point{}
+        : ProfileClock::now();
       // The second update is constrained toward the initial field to reduce
       // oscillation caused by DC reconstruction, matching libjxl.
       if (iteration == 1) {
@@ -1189,8 +1288,15 @@ Status FindBestQuantization(
           lower_bound,
           upper_bound);
       }
+      if (profile != nullptr) {
+        local_profile.quant_field_update_nanoseconds +=
+          ElapsedNanoseconds(update_begin);
+      }
     }
 
+    const auto commit_begin = profile == nullptr
+      ? ProfileClock::time_point{}
+      : ProfileClock::now();
     CopyContiguousPlane(quant_field, output.quant_field);
     CopyContiguousPlane(
       evaluation.raw_quant,
@@ -1204,6 +1310,11 @@ Status FindBestQuantization(
     *output.quantizer = evaluation.quantizer;
     *output.color_correlation = std::move(evaluation.color_correlation);
     *output.score_history = std::move(score_history);
+    if (profile != nullptr) {
+      local_profile.output_commit_nanoseconds =
+        ElapsedNanoseconds(commit_begin);
+      *profile = std::move(local_profile);
+    }
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate adaptive-quantization scratch storage");
@@ -1214,5 +1325,56 @@ Status FindBestQuantization(
 
   return Status::Ok();
 }
+
+}  // namespace
+
+Status FindBestQuantization(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationOutput output) {
+
+  return FindBestQuantizationImpl(
+    original_linear_rgb,
+    opsin,
+    strategies,
+    initial_quant_field,
+    epf_sharpness,
+    options,
+    output,
+    nullptr);
+}
+
+namespace adaptive_quantization_internal {
+
+Status FindBestQuantizationProfiled(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationOutput output,
+  AdaptiveQuantizationProfile* profile) {
+
+  if (profile == nullptr) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization profile output is null");
+  }
+  return FindBestQuantizationImpl(
+    original_linear_rgb,
+    opsin,
+    strategies,
+    initial_quant_field,
+    epf_sharpness,
+    options,
+    output,
+    profile);
+}
+
+}  // namespace adaptive_quantization_internal
 
 }  // namespace gjxl
