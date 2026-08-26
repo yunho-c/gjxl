@@ -1,3 +1,6 @@
 [submodule "third_party/metal-cpp"]
 	path = third_party/metal-cpp
 	url = https://github.com/apple/metal-cpp.git
+[submodule "libjxl"]
+	path = third_party/libjxl
+	url = https://github.com/libjxl/libjxl.git
