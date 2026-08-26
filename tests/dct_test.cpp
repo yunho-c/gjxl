@@ -139,7 +139,9 @@ bool CheckReferenceResults(
 
 std::vector<float> MakeReferenceInput(size_t elements_per_transform) {
   const size_t impulse_transforms = elements_per_transform;
-  constexpr size_t kRandomTransforms = 16;
+  // Keep the total DCT8 count non-divisible by its packing factor so direct
+  // oracle checks exercise the guarded final threadgroup.
+  constexpr size_t kRandomTransforms = 17;
   const size_t transform_count =
     impulse_transforms + kRandomTransforms;
 

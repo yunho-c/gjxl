@@ -1433,49 +1433,54 @@ __attribute__((always_inline)) inline void ForwardFactoredDct2D(
   threadgroup float* intermediate,
   uint tid,
   uint threads_per_threadgroup,
-  uint3 group_position)
+  ulong transform_index,
+  bool transform_is_active)
 {
   constexpr uint kMaxLength = Rows > Columns ? Rows : Columns;
   constexpr float kScale = 1.0f / (Rows * Columns);
 
   const ulong base =
-    static_cast<ulong>(group_position.x) * Rows * Columns;
+    transform_index * Rows * Columns;
 
   thread float values[kMaxLength];
   thread float scratch[2 * kMaxLength];
 
   // Transform each pixel row, retaining natural [y][u] order.
-  for (uint row = tid;
-       row < Rows;
-       row += threads_per_threadgroup) {
-    for (uint x = 0; x < Columns; ++x) {
-      values[x] = A[base + row * Columns + x];
-    }
+  if (transform_is_active) {
+    for (uint row = tid;
+         row < Rows;
+         row += threads_per_threadgroup) {
+      for (uint x = 0; x < Columns; ++x) {
+        values[x] = A[base + row * Columns + x];
+      }
 
-    FactoredDct1D<Columns>::Forward(values, scratch);
+      FactoredDct1D<Columns>::Forward(values, scratch);
 
-    for (uint u = 0; u < Columns; ++u) {
-      intermediate[row * Columns + u] = values[u];
+      for (uint u = 0; u < Columns; ++u) {
+        intermediate[row * Columns + u] = values[u];
+      }
     }
   }
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   // Transform each column and store libjxl's shape-dependent layout.
-  for (uint u = tid;
-       u < Columns;
-       u += threads_per_threadgroup) {
-    for (uint y = 0; y < Rows; ++y) {
-      values[y] = intermediate[y * Columns + u];
-    }
+  if (transform_is_active) {
+    for (uint u = tid;
+         u < Columns;
+         u += threads_per_threadgroup) {
+      for (uint y = 0; y < Rows; ++y) {
+        values[y] = intermediate[y * Columns + u];
+      }
 
-    FactoredDct1D<Rows>::Forward(values, scratch);
+      FactoredDct1D<Rows>::Forward(values, scratch);
 
-    for (uint v = 0; v < Rows; ++v) {
-      const ulong coefficient =
-        RectangularCoefficientIndex<Rows, Columns>(v, u);
+      for (uint v = 0; v < Rows; ++v) {
+        const ulong coefficient =
+          RectangularCoefficientIndex<Rows, Columns>(v, u);
 
-      B[base + coefficient] = values[v] * kScale;
+        B[base + coefficient] = values[v] * kScale;
+      }
     }
   }
 }
@@ -1488,48 +1493,53 @@ __attribute__((always_inline)) inline void InverseFactoredDct2D(
   threadgroup float* intermediate,
   uint tid,
   uint threads_per_threadgroup,
-  uint3 group_position)
+  ulong transform_index,
+  bool transform_is_active)
 {
   constexpr uint kMaxLength = Rows > Columns ? Rows : Columns;
 
   const ulong base =
-    static_cast<ulong>(group_position.x) * Rows * Columns;
+    transform_index * Rows * Columns;
 
   thread float values[kMaxLength];
   thread float scratch[2 * kMaxLength];
 
   // Undo the vertical-frequency axis while reading libjxl's layout.
-  for (uint u = tid;
-       u < Columns;
-       u += threads_per_threadgroup) {
-    for (uint v = 0; v < Rows; ++v) {
-      const ulong coefficient =
-        RectangularCoefficientIndex<Rows, Columns>(v, u);
+  if (transform_is_active) {
+    for (uint u = tid;
+         u < Columns;
+         u += threads_per_threadgroup) {
+      for (uint v = 0; v < Rows; ++v) {
+        const ulong coefficient =
+          RectangularCoefficientIndex<Rows, Columns>(v, u);
 
-      values[v] = A[base + coefficient];
-    }
+        values[v] = A[base + coefficient];
+      }
 
-    FactoredDct1D<Rows>::Inverse(values, scratch);
+      FactoredDct1D<Rows>::Inverse(values, scratch);
 
-    for (uint y = 0; y < Rows; ++y) {
-      intermediate[y * Columns + u] = values[y];
+      for (uint y = 0; y < Rows; ++y) {
+        intermediate[y * Columns + u] = values[y];
+      }
     }
   }
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   // Undo the horizontal-frequency axis and return row-major pixels.
-  for (uint y = tid;
-       y < Rows;
-       y += threads_per_threadgroup) {
-    for (uint u = 0; u < Columns; ++u) {
-      values[u] = intermediate[y * Columns + u];
-    }
+  if (transform_is_active) {
+    for (uint y = tid;
+         y < Rows;
+         y += threads_per_threadgroup) {
+      for (uint u = 0; u < Columns; ++u) {
+        values[u] = intermediate[y * Columns + u];
+      }
 
-    FactoredDct1D<Columns>::Inverse(values, scratch);
+      FactoredDct1D<Columns>::Inverse(values, scratch);
 
-    for (uint x = 0; x < Columns; ++x) {
-      B[base + y * Columns + x] = values[x];
+      for (uint x = 0; x < Columns; ++x) {
+        B[base + y * Columns + x] = values[x];
+      }
     }
   }
 }
@@ -1538,28 +1548,66 @@ __attribute__((always_inline)) inline void InverseFactoredDct2D(
 kernel void gjxl_dct8_forward_factored_radix2(
   device const float* A [[buffer(0)]],
   device       float* B [[buffer(1)]],
+  constant uint& transform_count [[buffer(2)]],
   uint              tid [[thread_index_in_threadgroup]],
-  uint3        tg_size  [[threads_per_threadgroup]],
   uint3  group_position [[threadgroup_position_in_grid]])
 {
-  threadgroup float intermediate[8 * 8];
+  constexpr uint kTransformsPerThreadgroup = 4;
+  constexpr uint kThreadsPerTransform = 8;
+  constexpr uint kElementsPerTransform = 8 * 8;
+
+  const uint transform_in_threadgroup = tid / kThreadsPerTransform;
+  const uint transform_tid = tid % kThreadsPerTransform;
+  const ulong transform_index =
+    static_cast<ulong>(group_position.x) *
+      kTransformsPerThreadgroup +
+    transform_in_threadgroup;
+
+  threadgroup float intermediate[
+    kTransformsPerThreadgroup * kElementsPerTransform];
 
   ForwardFactoredDct2D<8, 8>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A,
+    B,
+    intermediate +
+      transform_in_threadgroup * kElementsPerTransform,
+    transform_tid,
+    kThreadsPerTransform,
+    transform_index,
+    transform_index < transform_count);
 }
 
 
 kernel void gjxl_dct8_inverse_factored_radix2(
   device const float* A [[buffer(0)]],
   device       float* B [[buffer(1)]],
+  constant uint& transform_count [[buffer(2)]],
   uint              tid [[thread_index_in_threadgroup]],
-  uint3        tg_size  [[threads_per_threadgroup]],
   uint3  group_position [[threadgroup_position_in_grid]])
 {
-  threadgroup float intermediate[8 * 8];
+  constexpr uint kTransformsPerThreadgroup = 4;
+  constexpr uint kThreadsPerTransform = 8;
+  constexpr uint kElementsPerTransform = 8 * 8;
+
+  const uint transform_in_threadgroup = tid / kThreadsPerTransform;
+  const uint transform_tid = tid % kThreadsPerTransform;
+  const ulong transform_index =
+    static_cast<ulong>(group_position.x) *
+      kTransformsPerThreadgroup +
+    transform_in_threadgroup;
+
+  threadgroup float intermediate[
+    kTransformsPerThreadgroup * kElementsPerTransform];
 
   InverseFactoredDct2D<8, 8>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A,
+    B,
+    intermediate +
+      transform_in_threadgroup * kElementsPerTransform,
+    transform_tid,
+    kThreadsPerTransform,
+    transform_index,
+    transform_index < transform_count);
 }
 
 
@@ -1573,7 +1621,8 @@ kernel void gjxl_dct16_forward_factored_radix2(
   threadgroup float intermediate[16 * 16];
 
   ForwardFactoredDct2D<16, 16>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1587,7 +1636,8 @@ kernel void gjxl_dct16_inverse_factored_radix2(
   threadgroup float intermediate[16 * 16];
 
   InverseFactoredDct2D<16, 16>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1601,7 +1651,8 @@ kernel void gjxl_dct16x8_forward_factored_radix2(
   threadgroup float intermediate[16 * 8];
 
   ForwardFactoredDct2D<16, 8>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1615,7 +1666,8 @@ kernel void gjxl_dct16x8_inverse_factored_radix2(
   threadgroup float intermediate[16 * 8];
 
   InverseFactoredDct2D<16, 8>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1629,7 +1681,8 @@ kernel void gjxl_dct8x16_forward_factored_radix2(
   threadgroup float intermediate[8 * 16];
 
   ForwardFactoredDct2D<8, 16>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1643,7 +1696,8 @@ kernel void gjxl_dct8x16_inverse_factored_radix2(
   threadgroup float intermediate[8 * 16];
 
   InverseFactoredDct2D<8, 16>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1657,7 +1711,8 @@ kernel void gjxl_dct32x16_forward_factored_radix2(
   threadgroup float intermediate[32 * 16];
 
   ForwardFactoredDct2D<32, 16>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1671,7 +1726,8 @@ kernel void gjxl_dct32x16_inverse_factored_radix2(
   threadgroup float intermediate[32 * 16];
 
   InverseFactoredDct2D<32, 16>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1685,7 +1741,8 @@ kernel void gjxl_dct16x32_forward_factored_radix2(
   threadgroup float intermediate[16 * 32];
 
   ForwardFactoredDct2D<16, 32>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1699,7 +1756,8 @@ kernel void gjxl_dct16x32_inverse_factored_radix2(
   threadgroup float intermediate[16 * 32];
 
   InverseFactoredDct2D<16, 32>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1713,7 +1771,8 @@ kernel void gjxl_dct32_forward_factored_radix2(
   threadgroup float intermediate[32 * 32];
 
   ForwardFactoredDct2D<32, 32>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
@@ -1727,7 +1786,8 @@ kernel void gjxl_dct32_inverse_factored_radix2(
   threadgroup float intermediate[32 * 32];
 
   InverseFactoredDct2D<32, 32>(
-    A, B, intermediate, tid, tg_size.x, group_position);
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
 }
 
 
