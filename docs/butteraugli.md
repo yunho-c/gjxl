@@ -99,7 +99,7 @@ from per-comparison work.
 
 ## Milestones
 
-### 1. Expand the libjxl oracle harness — infrastructure complete; acceptance pending
+### 1. Expand the libjxl oracle harness — complete (2026-08-26)
 
 - Factor fixture generation so the same inputs can drive two backends.
 - Compare every distance-map pixel rather than four selected samples.
@@ -134,9 +134,12 @@ instead of hiding them by widening the limits:
 | 16x12 intermediate planes | 0.000701904 | 0.0252102 | n/a | 4.71x |
 
 The relative stage maximum occurs near zero. Exact scalar regeneration and the
-fixed facade-vs-live limits are separate gates; the scalar-vs-dispatched values
-above are a diagnostic baseline, not an assertion-based acceptance gate.
-Milestone 1 remains pending until a cross-target tolerance policy is adopted.
+fixed facade-vs-live limits are separate gates. Scalar-vs-dispatched
+compatibility has its own assertion-based absolute limits: `3e-4` per full-map
+pixel, `1.5e-3` per intermediate-stage value, and `1e-4` for aggregate scores.
+These rounded limits are slightly more than twice the observed M4 Pro maxima;
+they do not weaken native facade-vs-live comparisons. Other CPU architectures
+use the same policy and must provide new evidence before changing it.
 
 Release timings below combine three independent runs. Each run used three
 warmup rotations followed by 15 samples, rotating the order of one-shot,

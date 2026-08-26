@@ -37,6 +37,16 @@ constexpr float kRelativeTolerance = 5.0e-6f;
 constexpr double kScoreTolerance = 1.0e-5;
 constexpr float kIdentityTolerance = 1.0e-7f;
 
+// Cross-target Highway drift is independent of the strict facade/live limit.
+// These rounded caps are slightly above twice the observed M4 Pro maxima.
+struct ScalarDispatchTolerance {
+  float full_map_absolute = 3.0e-4f;
+  float stage_absolute = 1.5e-3f;
+  double score_absolute = 1.0e-4;
+};
+
+inline constexpr ScalarDispatchTolerance kScalarDispatchTolerance;
+
 struct ErrorStats {
   float maximum_absolute = 0.0f;
   float maximum_relative = 0.0f;
@@ -132,18 +142,22 @@ struct MapStorage {
   return true;
 }
 
-[[nodiscard]] bool MeasureValues(const std::vector<float> &actual,
-                                 const std::vector<float> &expected,
-                                 ErrorStats *errors) {
+[[nodiscard]] bool ScalarDispatchValuesMatch(
+    const std::vector<float> &actual, const std::vector<float> &expected,
+    float absolute_tolerance, ErrorStats *errors = nullptr) {
   if (actual.size() != expected.size())
     return false;
+  bool matches = true;
   for (size_t index = 0; index < actual.size(); ++index) {
     if (!std::isfinite(actual[index]) || !std::isfinite(expected[index])) {
       return false;
     }
-    errors->Add(actual[index], expected[index]);
+    if (errors != nullptr)
+      errors->Add(actual[index], expected[index]);
+    if (std::abs(actual[index] - expected[index]) > absolute_tolerance)
+      matches = false;
   }
-  return true;
+  return matches;
 }
 
 template <size_t Size>
@@ -194,11 +208,17 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
         !actual.PaddingIsUntouched() ||
         !bt::PaddingIsPoisoned(fixture.reference) ||
         !bt::PaddingIsPoisoned(fixture.distorted) ||
-        !MeasureValues(actual.LogicalValues(), expected, full_map_errors) ||
-        !std::isfinite(score)) {
+        !ScalarDispatchValuesMatch(
+            actual.LogicalValues(), expected,
+            kScalarDispatchTolerance.full_map_absolute, full_map_errors) ||
+        !std::isfinite(score) ||
+        std::abs(score - expected_score) >
+            kScalarDispatchTolerance.score_absolute) {
       std::cerr << "Scalar full-map golden differs: " << kNames[index]
                 << "\n  actual score: " << std::setprecision(12) << score
-                << "\n  scalar score: " << expected_score << '\n';
+                << "\n  scalar score: " << expected_score
+                << "\n  maximum map error: "
+                << full_map_errors->maximum_absolute << '\n';
       return false;
     }
     *maximum_score_error =
@@ -208,7 +228,10 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
   const std::vector<float> unperturbed = perturbed;
   perturbed[perturbed.size() / 2] += 0.01f;
   if (!ValuesMatch(unperturbed, unperturbed) ||
-      ValuesMatch(unperturbed, perturbed)) {
+      ValuesMatch(unperturbed, perturbed) ||
+      ScalarDispatchValuesMatch(
+          unperturbed, perturbed,
+          kScalarDispatchTolerance.full_map_absolute)) {
     std::cerr << "Full-map comparator did not detect a perturbation\n";
     return false;
   }
@@ -232,11 +255,14 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
   for (size_t index = 0; index < bt::kIntermediateStageCount; ++index) {
     const std::vector<float> expected =
         DecodeBits(golden::kIntermediateStageBits[index]);
-    if (!MeasureValues(output.plane[index], expected, stage_errors)) {
+    if (!ScalarDispatchValuesMatch(
+            output.plane[index], expected,
+            kScalarDispatchTolerance.stage_absolute, stage_errors)) {
       std::cerr << "Scalar intermediate golden differs: "
                 << bt::IntermediateStageName(
                        static_cast<bt::IntermediateStage>(index))
-                << '\n';
+                << "\n  maximum stage error: "
+                << stage_errors->maximum_absolute << '\n';
       return false;
     }
   }
@@ -254,7 +280,9 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
           bt::IntermediateStage::kMask)]);
   const std::vector<float> unperturbed = perturbed;
   perturbed[3] += 0.01f;
-  if (ValuesMatch(unperturbed, perturbed)) {
+  if (ValuesMatch(unperturbed, perturbed) ||
+      ScalarDispatchValuesMatch(unperturbed, perturbed,
+                                kScalarDispatchTolerance.stage_absolute)) {
     std::cerr << "Stage comparator did not detect a perturbation\n";
     return false;
   }
