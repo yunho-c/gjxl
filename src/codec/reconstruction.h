@@ -10,15 +10,16 @@
 namespace gjxl {
 
 /// Transforms and quantizes a padded XYB image using the selected strategies.
-/// The completed frame owns all encoder control fields and grouped coefficients.
+/// The completed frame owns encoder control fields, quantized DC, and grouped
+/// quantized AC coefficients.
 [[nodiscard]] Status ComputeQuantizedCoefficients(
   ConstImage3FView opsin,
   VarDctFrameInput input,
   CoefficientCodingOptions options,
   VarDctEncoderFrame* out);
 
-/// Dequantizes one coefficient frame, restores CfL and LLF, and applies the
-/// inverse transforms. Output is committed only after every block succeeds.
+/// Dequantizes one coefficient frame, restores CfL and decoder-equivalent DC,
+/// and applies the inverse transforms. Output is committed atomically.
 [[nodiscard]] Status ReconstructQuantizedCoefficients(
   const VarDctEncoderFrame& frame,
   Image3FView output);

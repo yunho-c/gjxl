@@ -117,6 +117,7 @@ add_library(
   src/codec/color_transform.cpp
   src/codec/convolution.cpp
   src/codec/dc_conversion.cpp
+  src/codec/dc_quantization.cpp
   src/codec/dct.cpp
   src/codec/epf.cpp
   src/codec/gaborish.cpp
@@ -465,6 +466,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME dc_conversion
     COMMAND gjxl_dc_conversion_test
+  )
+
+  add_executable(
+    gjxl_dc_quantization_test
+    tests/dc_quantization_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_dc_quantization_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME dc_quantization
+    COMMAND gjxl_dc_quantization_test
   )
 
   add_executable(

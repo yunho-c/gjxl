@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "codec/dc_conversion.h"
+#include "codec/dc_quantization.h"
 #include "codec/dct.h"
 #include "codec/quantization.h"
 #include "core/geometry.h"
@@ -186,8 +187,9 @@ Status ComputeQuantizedCoefficients(
     result.quantizer_ = *input.quantizer;
     result.color_correlation_ = *input.color_correlation;
     result.coding_options_ = options;
-    for (std::vector<float>& dc : result.dc_) {
-      dc.assign(block_count, 0.0f);
+    for (size_t channel = 0; channel < 3; ++channel) {
+      result.quantized_dc_[channel].resize(block_count);
+      result.dc_[channel].assign(block_count, 0.0f);
     }
 
     result.ac_group_extent_ = {
@@ -362,6 +364,27 @@ Status ComputeQuantizedCoefficients(
           coefficient_count;
         return Status::Ok();
       });
+    if (!status.ok()) {
+      return status;
+    }
+
+    const Image3I32View quantized_dc{{
+      PlaneI32View{
+        result.quantized_dc_[0].data(), block_extent, block_extent.width},
+      PlaneI32View{
+        result.quantized_dc_[1].data(), block_extent, block_extent.width},
+      PlaneI32View{
+        result.quantized_dc_[2].data(), block_extent, block_extent.width},
+    }};
+    const Image3FView reconstructed_dc{{
+      PlaneF32View{result.dc_[0].data(), block_extent, block_extent.width},
+      PlaneF32View{result.dc_[1].data(), block_extent, block_extent.width},
+      PlaneF32View{result.dc_[2].data(), block_extent, block_extent.width},
+    }};
+    status = QuantizeDcCoefficients(
+      result.dc(),
+      result.quantizer_,
+      {.quantized = quantized_dc, .reconstructed = reconstructed_dc});
     if (!status.ok()) {
       return status;
     }

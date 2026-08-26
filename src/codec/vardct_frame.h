@@ -52,7 +52,8 @@ struct VarDctAcGroupView {
 ///
 /// AC coefficients use one fixed 65536-element row per group and channel.
 /// Complete transforms are appended in row-major anchor order; unused edge-
-/// group tails are zero. DC remains floating point until modular DC coding.
+/// group tails are zero. Quantized DC is authoritative; `dc()` is the
+/// decoder-equivalent dequantized cache used by reconstruction and AQ.
 class VarDctEncoderFrame {
 public:
   VarDctEncoderFrame() = default;
@@ -83,6 +84,10 @@ public:
     return coding_options_;
   }
 
+  /// Modular-stream DC coefficients in X/Y/B plane order.
+  [[nodiscard]] ConstImage3I32View quantized_dc() const noexcept;
+
+  /// Decoder-equivalent dequantized DC used by reconstruction and AQ.
   [[nodiscard]] ConstImage3FView dc() const noexcept;
 
   [[nodiscard]] Extent2D ac_group_extent() const noexcept {
@@ -119,6 +124,7 @@ private:
   ColorCorrelationMap color_correlation_;
   std::vector<uint8_t> epf_sharpness_;
   CoefficientCodingOptions coding_options_;
+  std::array<std::vector<int32_t>, 3> quantized_dc_;
   std::array<std::vector<float>, 3> dc_;
   Extent2D ac_group_extent_;
   std::vector<size_t> group_used_coefficient_count_;
