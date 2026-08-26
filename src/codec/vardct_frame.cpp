@@ -65,6 +65,15 @@ ConstPlaneU8View VarDctEncoderFrame::epf_sharpness() const noexcept {
   return {epf_sharpness_.data(), extent, extent.width};
 }
 
+ConstImage3I32View VarDctEncoderFrame::quantized_dc() const noexcept {
+  const Extent2D extent = geometry_.block_grid().blocks;
+  return ConstImage3I32View{{
+    ConstPlaneI32View{quantized_dc_[0].data(), extent, extent.width},
+    ConstPlaneI32View{quantized_dc_[1].data(), extent, extent.width},
+    ConstPlaneI32View{quantized_dc_[2].data(), extent, extent.width},
+  }};
+}
+
 ConstImage3FView VarDctEncoderFrame::dc() const noexcept {
   const Extent2D extent = geometry_.block_grid().blocks;
   return ConstImage3FView{{
@@ -150,11 +159,25 @@ bool VarDctEncoderFrame::valid() const {
       group_used_coefficient_count_.size() != group_count) {
     return false;
   }
-  for (const std::vector<float>& channel : dc_) {
-    if (channel.size() != block_count ||
-        !std::ranges::all_of(channel, [](float value) {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (quantized_dc_[channel].size() != block_count ||
+        dc_[channel].size() != block_count ||
+        !std::ranges::all_of(dc_[channel], [](float value) {
           return std::isfinite(value);
         })) {
+      return false;
+    }
+  }
+  const std::array<float, 3>& dc_steps = quantizer_.dc_steps();
+  for (size_t index = 0; index < block_count; ++index) {
+    const float reconstructed_y =
+      static_cast<float>(quantized_dc_[1][index]) * dc_steps[1];
+    if (dc_[0][index] !=
+          static_cast<float>(quantized_dc_[0][index]) * dc_steps[0] ||
+        dc_[1][index] != reconstructed_y ||
+        dc_[2][index] !=
+          static_cast<float>(quantized_dc_[2][index]) * dc_steps[2] +
+            reconstructed_y) {
       return false;
     }
   }

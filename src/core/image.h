@@ -66,5 +66,7 @@ struct Image3View {
 
 using Image3FView = Image3View<float>;
 using ConstImage3FView = Image3View<const float>;
+using Image3I32View = Image3View<int32_t>;
+using ConstImage3I32View = Image3View<const int32_t>;
 
 }  // namespace gjxl

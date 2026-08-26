@@ -248,8 +248,9 @@ Relevant implementations:
 entropy/bitstream coding. A successful final AQ evaluation commits one frame
 containing source and padded geometry, the selected strategy grid, raw quant
 field, quantizer, final CfL map, EPF sharpness, coefficient-coding multipliers,
-three floating-point DC planes, and grouped quantized AC coefficients. Callers
-may release or reuse all borrowed inputs after frame construction.
+three modular-stream `int32_t` DC planes, decoder-equivalent reconstructed DC,
+and grouped quantized AC coefficients. Callers may release or reuse all
+borrowed inputs after frame construction.
 
 AC storage follows the JPEG XL 256x256-pixel group grid. Each group owns three
 fixed 65,536-element `int32_t` channel rows. Groups are indexed in row-major
@@ -259,15 +260,21 @@ contiguously. Edge groups expose their used coefficient count and guarantee a
 zero-filled unused tail. A transform that would cross a group boundary is
 rejected atomically.
 
-DC deliberately remains as one floating-point sample per 8x8 base block and
-channel. Modular DC tokenization is a later bitstream milestone, not hidden in
-this representation.
+DC uses one sample per 8x8 base block and channel. Quantization follows
+libjxl's default 4:4:4 path with `extra_dc_precision = 0`: Y is quantized first,
+X has no DC CfL prediction, and B is predicted from decoder-reconstructed Y
+with a factor of one. The quantized `int32_t` planes are authoritative; the
+frame also caches their decoder-equivalent floating-point reconstruction so AQ
+measures actual DC loss. Modular gradient prediction and entropy tokenization
+remain a later bitstream milestone.
 
 Relevant implementations:
 
 - [`vardct_frame.h`](../src/codec/vardct_frame.h)
 - [`vardct_frame.cpp`](../src/codec/vardct_frame.cpp)
+- [`dc_quantization.cpp`](../src/codec/dc_quantization.cpp)
 - [`vardct_frame_test.cpp`](../tests/vardct_frame_test.cpp)
+- [`dc_quantization_test.cpp`](../tests/dc_quantization_test.cpp)
 
 ## CPU performance baseline
 
@@ -423,16 +430,16 @@ The CPU pipeline is an executable reference for the currently supported seven
 DCT strategies and fixed-raw-quant coefficient path. It is not yet a complete
 libjxl encoder replacement:
 
-- DC is preserved as floating-point LLF data. Modular DC quantization,
-  DC chroma-from-luma, and adaptive DC smoothing are not modeled yet.
+- Default 4:4:4 DC quantization and DC chroma-from-luma are modeled. Modular DC
+  entropy tokenization and adaptive DC smoothing are not modeled yet.
 - The optional encoder-side `AdjustQuantBlockAC` heuristic is not applied.
 - Maximum-error AQ, resampling-specific AQ bypasses, HDR transfer functions,
   and non-default opsin matrices are outside the current contract.
 - Exact pinned parity applies to the individual numerical stages and fixed
-  coefficient fixtures. Because of the DC and coefficient-heuristic omissions,
-  the complete score trajectory is tested for deterministic composition and
-  the libjxl update rule, not claimed to be bit-identical to a full libjxl
-  encode round trip.
+  coefficient fixtures. Because of the coefficient-heuristic omission, the
+  complete score trajectory is tested for deterministic composition and the
+  libjxl update rule, not claimed to be bit-identical to a full libjxl encode
+  round trip.
 
 These deviations do not block GPU ports of the established leaf operations.
 They do block claiming complete encoder or bitstream parity.

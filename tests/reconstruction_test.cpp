@@ -208,10 +208,12 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
   }
   if (strategy == gjxl::AcStrategyType::kDct32x32) {
     constexpr uint64_t kPinnedQuantizedHash = 0x4fa3ae70ffbbecfdull;
-    constexpr std::array<std::array<float, 4>, 3> kPinnedDc = {{
-      {{0.143136919f, -0.0461696424f, -0.0687146857f, 0.13248992f}},
-      {{0.225893721f, -0.0998571068f, -0.0880814046f, 0.251050711f}},
-      {{0.277661204f, -0.1208947f, -0.109017931f, 0.321551472f}},
+    // Default 4:4:4 DC quantization of the pinned libjxl LLF outputs for this
+    // fixture, in X/Y/B plane order.
+    constexpr std::array<std::array<int32_t, 4>, 3> kPinnedQuantizedDc = {{
+      {{317, -102, -152, 293}},
+      {{62, -28, -24, 69}},
+      {{7, -3, -3, 10}},
     }};
     constexpr std::array<size_t, 4> kDcIndices = {0, 3, 10, 15};
     if (color_correlation.y_to_x_map().Row(0)[0] != 46 ||
@@ -223,13 +225,27 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
                 << kPinnedLibjxlRevision << '\n';
       return false;
     }
+    const gjxl::ConstImage3I32View quantized_dc = frame.quantized_dc();
+    const gjxl::ConstImage3FView reconstructed_dc = frame.dc();
+    const auto& dc_steps = quantizer.dc_steps();
     for (size_t channel = 0; channel < 3; ++channel) {
       for (size_t i = 0; i < kDcIndices.size(); ++i) {
         const size_t index = kDcIndices[i];
-        if (std::abs(
-              frame.dc().plane[channel].Row(index / 4)[index % 4] -
-              kPinnedDc[channel][i]) > 2.0e-6f) {
-          std::cerr << "DCT32 DC differs from pinned libjxl\n";
+        if (quantized_dc.plane[channel].Row(index / 4)[index % 4] !=
+            kPinnedQuantizedDc[channel][i]) {
+          std::cerr << "DCT32 quantized DC differs from pinned libjxl\n";
+          return false;
+        }
+        float expected =
+          static_cast<float>(kPinnedQuantizedDc[channel][i]) *
+          dc_steps[channel];
+        if (channel == 2) {
+          expected +=
+            static_cast<float>(kPinnedQuantizedDc[1][i]) * dc_steps[1];
+        }
+        if (reconstructed_dc.plane[channel].Row(index / 4)[index % 4] !=
+            expected) {
+          std::cerr << "DCT32 reconstructed DC is not decoder-equivalent\n";
           return false;
         }
       }
@@ -257,39 +273,6 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
     std::cerr << "Coefficient reconstruction failed\n";
     return false;
   }
-  if (strategy == gjxl::AcStrategyType::kDct32x32) {
-    constexpr std::array<size_t, 5> kPixelIndices = {
-      0, 31, 16 * 32 + 16, 31 * 32, 32 * 32 - 1,
-    };
-    constexpr std::array<std::array<float, 5>, 3> kPinnedPixels = {{
-      {{
-        0.0697816387f, -0.142363906f, 0.0743393302f,
-        -0.156939551f, 0.0409591421f,
-      }},
-      {{
-        0.127346218f, -0.28666836f, 0.129362777f,
-        -0.310681701f, 0.123427503f,
-      }},
-      {{
-        0.190266758f, -0.360523403f, 0.163636193f,
-        -0.371389836f, 0.13495478f,
-      }},
-    }};
-    for (size_t channel = 0; channel < 3; ++channel) {
-      for (size_t i = 0; i < kPixelIndices.size(); ++i) {
-        const size_t index = kPixelIndices[i];
-        const size_t x = index % 32;
-        const size_t y = index / 32;
-        if (std::abs(
-              reconstructed.plane[channel][y * reconstructed.stride + x] -
-              kPinnedPixels[channel][i]) > 4.0e-6f) {
-          std::cerr << "DCT32 reconstruction differs from pinned libjxl\n";
-          return false;
-        }
-      }
-    }
-  }
-
   double squared_error = 0.0;
   float max_error = 0.0f;
   for (size_t channel = 0; channel < 3; ++channel) {
@@ -315,7 +298,7 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
   return true;
 }
 
-bool CheckFlatDcPreservation() {
+bool CheckFlatDcQuantization() {
   constexpr gjxl::Extent2D kBlockExtent{4, 4};
   constexpr gjxl::Extent2D kPixelExtent{32, 32};
   constexpr std::array<float, 3> kValues = {0.125f, -0.25f, 0.375f};
@@ -356,13 +339,34 @@ bool CheckFlatDcPreservation() {
         &frame).ok()) {
     return false;
   }
+  const auto& inverse_dc_steps = quantizer.inverse_dc_steps();
+  const auto& dc_steps = quantizer.dc_steps();
+  const int32_t quantized_y = static_cast<int32_t>(
+    std::round(kValues[1] * inverse_dc_steps[1]));
+  const float reconstructed_y =
+    static_cast<float>(quantized_y) * dc_steps[1];
+  const std::array<int32_t, 3> expected_quantized = {
+    static_cast<int32_t>(std::round(kValues[0] * inverse_dc_steps[0])),
+    quantized_y,
+    static_cast<int32_t>(std::round(
+      (kValues[2] - reconstructed_y) * inverse_dc_steps[2])),
+  };
+  const std::array<float, 3> expected_reconstructed = {
+    static_cast<float>(expected_quantized[0]) * dc_steps[0],
+    reconstructed_y,
+    static_cast<float>(expected_quantized[2]) * dc_steps[2] +
+      reconstructed_y,
+  };
+  const gjxl::ConstImage3I32View quantized_dc = frame.quantized_dc();
+  const gjxl::ConstImage3FView reconstructed_dc = frame.dc();
   for (size_t channel = 0; channel < 3; ++channel) {
     for (size_t y = 0; y < kBlockExtent.height; ++y) {
       for (size_t x = 0; x < kBlockExtent.width; ++x) {
-        if (std::abs(
-              frame.dc().plane[channel].Row(y)[x] - kValues[channel]) >
-            2.0e-6f) {
-          std::cerr << "Floating-point DC was not preserved\n";
+        if (quantized_dc.plane[channel].Row(y)[x] !=
+              expected_quantized[channel] ||
+            reconstructed_dc.plane[channel].Row(y)[x] !=
+              expected_reconstructed[channel]) {
+          std::cerr << "Flat DC was not quantized or reconstructed correctly\n";
           return false;
         }
       }
@@ -380,8 +384,8 @@ bool CheckFlatDcPreservation() {
       for (size_t x = 0; x < kPixelExtent.width; ++x) {
         if (std::abs(
               reconstructed.plane[channel][y * reconstructed.stride + x] -
-              kValues[channel]) > 3.0e-6f) {
-          std::cerr << "Flat DC-only image did not round trip\n";
+              expected_reconstructed[channel]) > 3.0e-6f) {
+          std::cerr << "Flat DC-only image did not match decoded DC\n";
           return false;
         }
       }
@@ -483,7 +487,7 @@ int main() {
       return EXIT_FAILURE;
     }
   }
-  if (!CheckFlatDcPreservation() || !CheckMixedGridAndInvalidInputs()) {
+  if (!CheckFlatDcQuantization() || !CheckMixedGridAndInvalidInputs()) {
     return EXIT_FAILURE;
   }
 

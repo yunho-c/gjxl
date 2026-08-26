@@ -157,6 +157,7 @@ bool CheckOneBlockAndOwnership() {
       frame.epf_sharpness().Row(0)[0] != 4 ||
       frame.coding_options().x_matrix_multiplier != 1.25f ||
       frame.coding_options().b_matrix_multiplier != 0.75f ||
+      !frame.quantized_dc().valid() ||
       frame.ac_group_extent() != gjxl::Extent2D{1, 1} ||
       !CheckGroup(frame, 0, 0, 0, {1, 1}, 64)) {
     std::cerr << "One-block frame or deep ownership is invalid: "
