@@ -24,7 +24,7 @@ struct ImplementationCase {
   std::string_view name;
 };
 
-constexpr std::array<ImplementationCase, 2>
+constexpr std::array<ImplementationCase, 3>
 kImplementations{{
   {
     .implementation =
@@ -35,6 +35,11 @@ kImplementations{{
     .implementation =
       gjxl::MetalDctImplementation::kSimdgroupMatmul,
     .name = "simdgroup matmul",
+  },
+  {
+    .implementation =
+      gjxl::MetalDctImplementation::kFactoredRadix2,
+    .name = "factored radix-2",
   },
 }};
 

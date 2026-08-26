@@ -47,7 +47,7 @@ struct DctSelection {
   MetalDctImplementation inverse;
 };
 
-constexpr std::array<DctImplementationSpec, 14>
+constexpr std::array<DctImplementationSpec, 21>
 kDctImplementationSpecs{{
   {
     .strategy = AcStrategyType::kDct8,
@@ -67,6 +67,17 @@ kDctImplementationSpecs{{
       "gjxl_dct8_forward_simdgroup_2d_matmul",
     .inverse_function_name =
       "gjxl_dct8_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
+    .strategy = AcStrategyType::kDct8,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct8_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct8_inverse_factored_radix2",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 1,
   },
@@ -92,6 +103,17 @@ kDctImplementationSpecs{{
     .simdgroups_per_threadgroup = 2,
   },
   {
+    .strategy = AcStrategyType::kDct16x16,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct16_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct16_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
     .strategy = AcStrategyType::kDct32x32,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
@@ -113,6 +135,17 @@ kDctImplementationSpecs{{
     .simdgroups_per_threadgroup = 4,
   },
   {
+    .strategy = AcStrategyType::kDct32x32,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct32_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct32_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
     .strategy = AcStrategyType::kDct16x8,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
@@ -130,6 +163,17 @@ kDctImplementationSpecs{{
     .simdgroups_per_threadgroup = 2,
   },
   {
+    .strategy = AcStrategyType::kDct16x8,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct16x8_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct16x8_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
     .strategy = AcStrategyType::kDct8x16,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
@@ -143,6 +187,17 @@ kDctImplementationSpecs{{
     .display_name = "simdgroup matmul",
     .forward_function_name = "gjxl_dct8x16_forward_simdgroup_2d_matmul",
     .inverse_function_name = "gjxl_dct8x16_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
+    .strategy = AcStrategyType::kDct8x16,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct8x16_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct8x16_inverse_factored_radix2",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 1,
   },
@@ -164,6 +219,17 @@ kDctImplementationSpecs{{
     .simdgroups_per_threadgroup = 4,
   },
   {
+    .strategy = AcStrategyType::kDct32x16,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct32x16_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct32x16_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
     .strategy = AcStrategyType::kDct16x32,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
@@ -179,6 +245,17 @@ kDctImplementationSpecs{{
     .inverse_function_name = "gjxl_dct16x32_inverse_simdgroup_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 2,
+  },
+  {
+    .strategy = AcStrategyType::kDct16x32,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct16x32_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct16x32_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
   },
 }};
 
