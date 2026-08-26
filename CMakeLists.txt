@@ -113,6 +113,7 @@ add_library(
   src/codec/gaborish.cpp
   src/codec/loop_filter.cpp
   src/codec/quantization.cpp
+  src/codec/quantization_pipeline.cpp
   src/codec/reconstruction.cpp
 )
 
@@ -480,6 +481,22 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_quantization_pipeline_test
+    tests/quantization_pipeline_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_quantization_pipeline_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME quantization_pipeline
+    COMMAND gjxl_quantization_pipeline_test
+  )
+
+  add_executable(
     gjxl_gaborish_test
     tests/gaborish_test.cpp
   )
@@ -620,6 +637,17 @@ if(GJXL_BUILD_TESTS)
 endif()
 
 if(GJXL_BUILD_BENCHMARKS)
+
+  add_executable(
+    gjxl_quantization_benchmark
+    benchmarks/quantization_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_quantization_benchmark
+    PRIVATE
+      gjxl_codec
+  )
 
   add_executable(
     gjxl_dct_benchmark
