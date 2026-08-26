@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <array>
-
 #include "codec/ac_strategy.h"
 #include "codec/adaptive_quantization.h"
 #include "core/ac_strategy.h"
@@ -16,8 +14,6 @@ namespace gjxl {
 struct CpuQuantizationPipelineOptions {
   float butteraugli_target = 1.0f;
   float initial_quant_rescale = 1.0f;
-  std::array<float, 3> gaborish_inverse_multipliers = {
-    1.0f, 1.0f, 1.0f};
   AdaptiveQuantizationOptions adaptive_quantization;
 };
 

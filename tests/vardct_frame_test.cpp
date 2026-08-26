@@ -56,6 +56,7 @@ gjxl::Status Encode(
   gjxl::Extent2D original_extent,
   gjxl::AcStrategyGrid* strategies,
   gjxl::VarDctEncoderFrame* frame,
+  gjxl::SimpleVarDctCodestreamProfile profile = {},
   bool mutate_inputs_afterward = false) {
 
   gjxl::FrameGeometry geometry;
@@ -104,7 +105,7 @@ gjxl::Status Encode(
       .color_correlation = &color_correlation,
       .epf_sharpness = {epf_sharpness.data(), blocks, blocks.width},
     },
-    {.x_matrix_multiplier = 1.25f, .b_matrix_multiplier = 0.75f},
+    profile,
     frame);
   if (!status.ok() || !mutate_inputs_afterward) {
     return status;
@@ -148,15 +149,14 @@ bool CheckGroup(
 bool CheckOneBlockAndOwnership() {
   gjxl::AcStrategyGrid strategies;
   gjxl::VarDctEncoderFrame frame;
-  const gjxl::Status status = Encode({8, 8}, &strategies, &frame, true);
+  const gjxl::Status status = Encode({8, 8}, &strategies, &frame, {}, true);
   if (!status.ok() ||
       !frame.valid() ||
       frame.geometry().frame() != gjxl::Extent2D{8, 8} ||
       frame.strategies().complete() == false ||
       frame.raw_quant_field().Row(0)[0] != 29 ||
       frame.epf_sharpness().Row(0)[0] != 4 ||
-      frame.coding_options().x_matrix_multiplier != 1.25f ||
-      frame.coding_options().b_matrix_multiplier != 0.75f ||
+      frame.profile() != gjxl::SimpleVarDctCodestreamProfile{} ||
       !frame.quantized_dc().valid() ||
       frame.ac_group_extent() != gjxl::Extent2D{1, 1} ||
       !CheckGroup(frame, 0, 0, 0, {1, 1}, 64)) {
@@ -228,13 +228,38 @@ bool CheckCrossingStrategyIsRejectedAtomically() {
   return true;
 }
 
+bool CheckMatrixScaleBoundsAndAtomicRejection() {
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::AcStrategyGrid strategies;
+  gjxl::SimpleVarDctCodestreamProfile profile;
+  profile.x_qm_scale = 0;
+  profile.b_qm_scale = 7;
+  if (!Encode({8, 8}, &strategies, &frame, profile).ok() ||
+      !frame.valid() || frame.profile() != profile ||
+      gjxl::ValidateSimpleCodestreamFrame(frame).ok()) {
+    std::cerr << "Representable matrix-scale bounds were not retained\n";
+    return false;
+  }
+
+  const gjxl::VarDctEncoderFrame sentinel = frame;
+  profile.x_qm_scale = 8;
+  if (Encode({8, 8}, &strategies, &frame, profile).ok() ||
+      !frame.valid() || frame.profile() != sentinel.profile() ||
+      frame.profile().x_qm_scale != 0) {
+    std::cerr << "Out-of-range matrix scale changed the prior frame\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
   if (!CheckOneBlockAndOwnership() ||
       !CheckExactGroup() ||
       !CheckEdgeGroups() ||
-      !CheckCrossingStrategyIsRejectedAtomically()) {
+      !CheckCrossingStrategyIsRejectedAtomically() ||
+      !CheckMatrixScaleBoundsAndAtomicRejection()) {
     return EXIT_FAILURE;
   }
   std::cout << "All VarDCT encoder-frame tests passed.\n";

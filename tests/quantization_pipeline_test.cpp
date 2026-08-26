@@ -184,10 +184,13 @@ struct PipelineStorage {
 
 bool CheckResult(
   const PipelineStorage& result,
-  size_t expected_score_count = 3) {
+  size_t expected_score_count = 3,
+  bool expect_simple_profile = true) {
 
   if (!result.frame.valid() ||
-      result.score_history.size() != expected_score_count) {
+      result.score_history.size() != expected_score_count ||
+      gjxl::ValidateSimpleCodestreamFrame(result.frame).ok() !=
+        expect_simple_profile) {
     return false;
   }
   for (double score : result.score_history) {
@@ -300,17 +303,21 @@ bool CheckInvalidRequestIsAtomic() {
   const auto reconstructed = output.reconstructed.plane;
   gjxl::CpuQuantizationPipelineOptions options;
   options.butteraugli_target = 0.0f;
-  if (gjxl::RunCpuQuantizationPipeline(
-        original.ConstView(),
-        opsin.ConstView(),
-        options,
-        output.Output()).ok() ||
-      output.initial_quant != initial ||
-      output.final_quant != final ||
-      output.reconstructed.plane != reconstructed ||
-      output.frame.valid() ||
-      !output.score_history.empty()) {
+  const auto rejected_atomically = [&] {
+    return !gjxl::RunCpuQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), options, output.Output()).ok() &&
+      output.initial_quant == initial && output.final_quant == final &&
+      output.reconstructed.plane == reconstructed &&
+      !output.frame.valid() && output.score_history.empty();
+  };
+  if (!rejected_atomically()) {
     std::cerr << "Invalid CPU pipeline request changed output\n";
+    return false;
+  }
+  options.butteraugli_target = 1.0f;
+  options.adaptive_quantization.profile.x_qm_scale = 8;
+  if (!rejected_atomically()) {
+    std::cerr << "Invalid profile changed CPU pipeline output\n";
     return false;
   }
   return true;
@@ -374,10 +381,10 @@ bool CheckGaborishDisabledPath() {
   gjxl::CpuQuantizationPipelineOptions options;
   options.butteraugli_target = 1.2f;
   options.adaptive_quantization.iterations = 0;
-  options.adaptive_quantization.loop_filter.gaborish = false;
+  options.adaptive_quantization.profile.loop_filter.gaborish = false;
   const gjxl::Status status = gjxl::RunCpuQuantizationPipeline(
     original.ConstView(), opsin.ConstView(), options, output.Output());
-  if (!status.ok() || !CheckResult(output, 1)) {
+  if (!status.ok() || !CheckResult(output, 1, false)) {
     std::cerr << "No-Gaborish CPU pipeline failed: "
               << status.message() << '\n';
     return false;

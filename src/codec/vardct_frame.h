@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "codec/chroma_from_luma.h"
+#include "codec/codestream.h"
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
 #include "core/image.h"
@@ -23,11 +24,6 @@ inline constexpr size_t kVarDctAcGroupBlockDimension =
   kVarDctAcGroupDimension / kJxlBlockDimension;
 inline constexpr size_t kVarDctAcGroupCoefficientCapacity =
   kVarDctAcGroupDimension * kVarDctAcGroupDimension;
-
-struct CoefficientCodingOptions {
-  float x_matrix_multiplier = 1.0f;
-  float b_matrix_multiplier = 1.0f;
-};
 
 /// Borrowed inputs copied into a completed encoder frame.
 struct VarDctFrameInput {
@@ -80,8 +76,8 @@ public:
 
   [[nodiscard]] ConstPlaneU8View epf_sharpness() const noexcept;
 
-  [[nodiscard]] CoefficientCodingOptions coding_options() const noexcept {
-    return coding_options_;
+  [[nodiscard]] const SimpleVarDctCodestreamProfile& profile() const noexcept {
+    return profile_;
   }
 
   /// Modular-stream DC coefficients in X/Y/B plane order.
@@ -106,7 +102,7 @@ private:
   friend Status ComputeQuantizedCoefficients(
     ConstImage3FView,
     VarDctFrameInput,
-    CoefficientCodingOptions,
+    SimpleVarDctCodestreamProfile,
     VarDctEncoderFrame*);
 
   friend Status ReconstructQuantizedCoefficients(
@@ -123,7 +119,7 @@ private:
   Quantizer quantizer_;
   ColorCorrelationMap color_correlation_;
   std::vector<uint8_t> epf_sharpness_;
-  CoefficientCodingOptions coding_options_;
+  SimpleVarDctCodestreamProfile profile_;
   std::array<std::vector<int32_t>, 3> quantized_dc_;
   std::array<std::vector<float>, 3> dc_;
   Extent2D ac_group_extent_;

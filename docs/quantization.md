@@ -247,10 +247,10 @@ Relevant implementations:
 `VarDctEncoderFrame` is the owned handoff between encoder analysis and future
 entropy/bitstream coding. A successful final AQ evaluation commits one frame
 containing source and padded geometry, the selected strategy grid, raw quant
-field, quantizer, final CfL map, EPF sharpness, coefficient-coding multipliers,
-three modular-stream `int32_t` DC planes, decoder-equivalent reconstructed DC,
-and grouped quantized AC coefficients. Callers may release or reuse all
-borrowed inputs after frame construction.
+field, quantizer, final CfL map, EPF sharpness, the retained codestream profile
+and its three-bit X/B matrix scales, three modular-stream `int32_t` DC planes,
+decoder-equivalent reconstructed DC, and grouped quantized AC coefficients.
+Callers may release or reuse all borrowed inputs after frame construction.
 
 AC storage follows the JPEG XL 256x256-pixel group grid. Each group owns three
 fixed 65,536-element `int32_t` channel rows. Groups are indexed in row-major

@@ -14,6 +14,10 @@ struct LoopFilterOptions {
   bool gaborish = true;
   GaborishOptions gaborish_options;
   EpfFilterOptions epf_options;
+
+  friend bool operator==(
+    const LoopFilterOptions&,
+    const LoopFilterOptions&) = default;
 };
 
 /// Applies decoder loop filters in bitstream order: Gaborish, then EPF.

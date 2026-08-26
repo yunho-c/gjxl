@@ -30,22 +30,15 @@ constexpr std::array<XybChannel, 3> kChannels = {
   XybChannel::kB,
 };
 
-bool ValidOptions(CoefficientCodingOptions options) {
-  return std::isfinite(options.x_matrix_multiplier) &&
-    options.x_matrix_multiplier > 0.0f &&
-    std::isfinite(options.b_matrix_multiplier) &&
-    options.b_matrix_multiplier > 0.0f;
-}
-
 float MatrixMultiplier(
   size_t channel,
-  CoefficientCodingOptions options) {
+  const SimpleVarDctCodestreamProfile& profile) {
 
   if (channel == 0) {
-    return options.x_matrix_multiplier;
+    return QuantizationMatrixMultiplier(profile.x_qm_scale);
   }
   if (channel == 2) {
-    return options.b_matrix_multiplier;
+    return QuantizationMatrixMultiplier(profile.b_qm_scale);
   }
   return 1.0f;
 }
@@ -53,7 +46,7 @@ float MatrixMultiplier(
 Status ValidateImageContract(
   ConstImage3FView opsin,
   VarDctFrameInput input,
-  CoefficientCodingOptions options) {
+  const SimpleVarDctCodestreamProfile& profile) {
 
   if (!opsin.valid() ||
       input.geometry.frame().empty() ||
@@ -65,7 +58,7 @@ Status ValidateImageContract(
       input.color_correlation == nullptr ||
       !input.color_correlation->valid() ||
       !input.epf_sharpness.valid() ||
-      !ValidOptions(options) ||
+      !profile.valid() ||
       input.raw_quant_field.extent != input.strategies->extent() ||
       input.epf_sharpness.extent != input.strategies->extent() ||
       input.geometry.block_grid().blocks != input.strategies->extent()) {
@@ -140,7 +133,7 @@ void CopyPixelsToImage(
 Status ComputeQuantizedCoefficients(
   ConstImage3FView opsin,
   VarDctFrameInput input,
-  CoefficientCodingOptions options,
+  SimpleVarDctCodestreamProfile profile,
   VarDctEncoderFrame* out) {
 
   if (out == nullptr) {
@@ -151,7 +144,7 @@ Status ComputeQuantizedCoefficients(
   Status status = ValidateImageContract(
     opsin,
     input,
-    options);
+    profile);
   if (!status.ok()) {
     return status;
   }
@@ -181,7 +174,7 @@ Status ComputeQuantizedCoefficients(
     }
     result.quantizer_ = *input.quantizer;
     result.color_correlation_ = *input.color_correlation;
-    result.coding_options_ = options;
+    result.profile_ = profile;
     for (size_t channel = 0; channel < 3; ++channel) {
       result.quantized_dc_[channel].resize(block_count);
       result.dc_[channel].assign(block_count, 0.0f);
@@ -331,7 +324,7 @@ Status ComputeQuantizedCoefficients(
             raw_quant,
             {
               .channel = kChannels[channel],
-              .matrix_multiplier = MatrixMultiplier(channel, options),
+              .matrix_multiplier = MatrixMultiplier(channel, profile),
             },
             coefficients[channel],
             quantized[channel]);
@@ -458,7 +451,7 @@ Status ReconstructQuantizedCoefficients(
               .channel = kChannels[channel],
               .matrix_multiplier = MatrixMultiplier(
                 channel,
-                frame.coding_options_),
+                frame.profile_),
             },
             std::span<const int32_t>(
               frame.ac_coefficients_.data() + source,

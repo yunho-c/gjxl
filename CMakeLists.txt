@@ -125,6 +125,7 @@ add_library(
   src/codec/quantization.cpp
   src/codec/quantization_pipeline.cpp
   src/codec/reconstruction.cpp
+  src/codec/codestream.cpp
   src/codec/vardct_frame.cpp
 )
 
@@ -684,6 +685,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME vardct_frame
     COMMAND gjxl_vardct_frame_test
+  )
+
+  add_executable(
+    gjxl_simple_codestream_profile_test
+    tests/simple_codestream_profile_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_simple_codestream_profile_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME simple_codestream_profile
+    COMMAND gjxl_simple_codestream_profile_test
   )
 
   add_executable(

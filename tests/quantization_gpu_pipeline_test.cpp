@@ -167,10 +167,7 @@ bool FramesEqual(const gjxl::VarDctEncoderFrame &left,
           right.quantizer().params().global_scale ||
       left.quantizer().params().quant_dc !=
           right.quantizer().params().quant_dc ||
-      left.coding_options().x_matrix_multiplier !=
-          right.coding_options().x_matrix_multiplier ||
-      left.coding_options().b_matrix_multiplier !=
-          right.coding_options().b_matrix_multiplier ||
+      left.profile() != right.profile() ||
       left.ac_group_extent() != right.ac_group_extent() ||
       left.ac_group_count() != right.ac_group_count()) {
     return false;

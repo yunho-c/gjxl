@@ -774,7 +774,7 @@ Status EvaluateQuantization(
     {raw_quant.data(), block_extent, block_extent.width},
     quantizer,
     epf_sharpness,
-    options.epf_sigma,
+    options.profile.epf_sigma,
     {inverse_sigma.data(), block_extent, block_extent.width});
   if (!status.ok()) {
     return status;
@@ -796,7 +796,7 @@ Status EvaluateQuantization(
       .color_correlation = &color_correlation,
       .epf_sharpness = epf_sharpness,
     },
-    options.coefficient_coding,
+    options.profile,
     &result.frame);
   if (!status.ok()) {
     return status;
@@ -814,7 +814,7 @@ Status EvaluateQuantization(
   status = ApplyLoopFilters(
     reconstructed_opsin.const_view(),
     {inverse_sigma.data(), block_extent, block_extent.width},
-    options.loop_filter,
+    options.profile.loop_filter,
     filtered_opsin.view());
   if (!status.ok()) {
     return status;
@@ -823,7 +823,7 @@ Status EvaluateQuantization(
   result.reconstructed_linear.resize(original_linear_rgb.extent());
   status = OpsinToLinearRgb(
     filtered_opsin.cropped_view(original_linear_rgb.extent()),
-    options.opsin_intensity_target,
+    options.profile.intensity_target,
     result.reconstructed_linear.view());
   if (!status.ok()) {
     return status;
@@ -916,8 +916,7 @@ Status ValidateAdaptiveQuantizationInputs(
 
   if (!std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f ||
-      !std::isfinite(options.opsin_intensity_target) ||
-      options.opsin_intensity_target <= 0.0f ||
+      !options.profile.valid() ||
       options.iterations > 4) {
     return Status::InvalidArgument(
       "Adaptive-quantization options are invalid");

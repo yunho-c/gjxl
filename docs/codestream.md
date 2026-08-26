@@ -16,6 +16,8 @@ quantization from pixels.
 The frontend handoff is complete for the initial profile. A valid
 `VarDctEncoderFrame` owns:
 
+- the exact serialization-critical source, quantization, DC, coefficient-order,
+  loop-filter, and modular profile used by the frontend;
 - original and padded frame geometry;
 - the complete AC-strategy grid;
 - the raw quant field and quantizer parameters;
@@ -31,6 +33,7 @@ group in row-major anchor order, and unused edge-group tails are zero.
 
 Relevant implementations:
 
+- [`codestream.h`](../src/codec/codestream.h)
 - [`vardct_frame.h`](../src/codec/vardct_frame.h)
 - [`vardct_frame.cpp`](../src/codec/vardct_frame.cpp)
 - [`dc_quantization.cpp`](../src/codec/dc_quantization.cpp)

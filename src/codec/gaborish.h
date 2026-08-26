@@ -21,6 +21,10 @@ struct GaborishOptions {
     1.1f * 0.055680538f,
     1.1f * 0.055680538f,
   };
+
+  friend bool operator==(
+    const GaborishOptions&,
+    const GaborishOptions&) = default;
 };
 
 /// Applies libjxl's encoder-side approximate inverse Gaborish filter.

@@ -4,7 +4,6 @@
 #include "codec/vardct_frame.h"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 
 namespace gjxl {
@@ -135,10 +134,7 @@ bool VarDctEncoderFrame::valid() const {
       !quantizer_.valid() ||
       !color_correlation_.valid() ||
       color_correlation_.tile_extent() != ExpectedColorTileExtent(geometry_) ||
-      !std::isfinite(coding_options_.x_matrix_multiplier) ||
-      coding_options_.x_matrix_multiplier <= 0.0f ||
-      !std::isfinite(coding_options_.b_matrix_multiplier) ||
-      coding_options_.b_matrix_multiplier <= 0.0f) {
+      !profile_.valid()) {
     return false;
   }
 

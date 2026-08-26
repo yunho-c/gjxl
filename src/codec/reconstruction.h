@@ -15,7 +15,7 @@ namespace gjxl {
 [[nodiscard]] Status ComputeQuantizedCoefficients(
   ConstImage3FView opsin,
   VarDctFrameInput input,
-  CoefficientCodingOptions options,
+  SimpleVarDctCodestreamProfile profile,
   VarDctEncoderFrame* out);
 
 /// Dequantizes one coefficient frame, restores CfL and decoder-equivalent DC,

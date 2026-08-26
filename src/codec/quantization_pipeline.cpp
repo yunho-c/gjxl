@@ -59,11 +59,9 @@ Status ValidatePipelineInputs(
     return Status::InvalidArgument(
       "Quantization pipeline inputs or options are invalid");
   }
-  for (float multiplier : options.gaborish_inverse_multipliers) {
-    if (!std::isfinite(multiplier)) {
-      return Status::InvalidArgument(
-        "Quantization pipeline Gaborish multiplier is invalid");
-    }
+  if (!options.adaptive_quantization.profile.valid()) {
+    return Status::InvalidArgument(
+      "Quantization pipeline profile is invalid");
   }
 
   *block_extent =
@@ -123,7 +121,7 @@ Status RunQuantizationPipeline(
     std::vector<float> strategy_mask(block_count);
     std::vector<float> pixel_mask(pixel_count);
     const float initial_quant_target =
-      options.adaptive_quantization.loop_filter.gaborish
+      options.adaptive_quantization.profile.loop_filter.gaborish
         ? options.butteraugli_target
         : 0.62f * options.butteraugli_target;
     status = ComputeInitialQuantField(
@@ -145,10 +143,11 @@ Status RunQuantizationPipeline(
     }
 
     Image3FBuffer preprocessed_opsin(opsin.extent());
-    if (options.adaptive_quantization.loop_filter.gaborish) {
+    if (options.adaptive_quantization.profile.loop_filter.gaborish) {
       status = ApplyGaborishInverse(
         opsin,
-        options.gaborish_inverse_multipliers,
+        options.adaptive_quantization.profile.
+          gaborish_inverse_multipliers,
         preprocessed_opsin.view());
       if (!status.ok()) {
         return status;

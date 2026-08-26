@@ -115,7 +115,7 @@ gjxl::Status ComputeFrame(
   gjxl::ConstPlaneI32View raw_quant,
   const gjxl::Quantizer& quantizer,
   const gjxl::ColorCorrelationMap& color_correlation,
-  gjxl::CoefficientCodingOptions options,
+  gjxl::SimpleVarDctCodestreamProfile profile,
   gjxl::VarDctEncoderFrame* frame) {
 
   gjxl::FrameGeometry geometry;
@@ -140,7 +140,7 @@ gjxl::Status ComputeFrame(
       .epf_sharpness = {
         epf_sharpness.data(), strategies.extent(), strategies.extent().width},
     },
-    options,
+    profile,
     frame);
 }
 
@@ -423,19 +423,22 @@ bool CheckMixedGridAndInvalidInputs() {
   }
 
   gjxl::VarDctEncoderFrame frame;
-  const gjxl::CoefficientCodingOptions options{
-    .x_matrix_multiplier = 1.25f,
-    .b_matrix_multiplier = 0.8f,
-  };
+  gjxl::SimpleVarDctCodestreamProfile profile;
+  profile.x_qm_scale = 3;
+  profile.b_qm_scale = 1;
   if (!ComputeFrame(
         input.ConstView(),
         grid,
         {raw_quant.data(), kBlockExtent, kBlockExtent.width},
         quantizer,
         color_correlation,
-        options,
+        profile,
         &frame).ok() ||
-      !frame.valid()) {
+      !frame.valid() || frame.profile() != profile ||
+      gjxl::QuantizationMatrixMultiplier(frame.profile().x_qm_scale) !=
+        1.25f ||
+      gjxl::QuantizationMatrixMultiplier(frame.profile().b_qm_scale) !=
+        0.8f) {
     std::cerr << "Mixed-grid coefficient coding failed\n";
     return false;
   }

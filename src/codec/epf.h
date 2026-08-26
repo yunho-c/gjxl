@@ -25,6 +25,10 @@ struct EpfSigmaOptions {
     6.0f / 7.0f,
     7.0f / 7.0f,
   };
+
+  friend bool operator==(
+    const EpfSigmaOptions&,
+    const EpfSigmaOptions&) = default;
 };
 
 struct EpfFilterOptions {
@@ -33,6 +37,10 @@ struct EpfFilterOptions {
   float pass0_sigma_scale = 0.9f;
   float pass2_sigma_scale = 6.5f;
   float border_sad_multiplier = 2.0f / 3.0f;
+
+  friend bool operator==(
+    const EpfFilterOptions&,
+    const EpfFilterOptions&) = default;
 };
 
 /// Initializes the pre-AQ EPF sharpness field to libjxl's neutral value 4.

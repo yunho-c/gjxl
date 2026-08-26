@@ -8,9 +8,8 @@
 
 #include "codec/butteraugli.h"
 #include "codec/chroma_from_luma.h"
-#include "codec/epf.h"
-#include "codec/loop_filter.h"
 #include "codec/reconstruction.h"
+#include "codec/codestream.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
 #include "core/quantizer.h"
@@ -55,11 +54,8 @@ struct InitialQuantFieldOutput {
 struct AdaptiveQuantizationOptions {
   float butteraugli_target = 1.0f;
   size_t iterations = 2;
-  float opsin_intensity_target = 255.0f;
   bool fast_color_correlation = true;
-  CoefficientCodingOptions coefficient_coding;
-  EpfSigmaOptions epf_sigma;
-  LoopFilterOptions loop_filter;
+  SimpleVarDctCodestreamProfile profile;
   ButteraugliOptions butteraugli;
 };
 
