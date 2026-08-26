@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <vector>
 
@@ -278,33 +279,46 @@ bool CheckLoopAndUpdateRule() {
     1.45603883f, 1.42887533f, 1.43554032f,
     1.41945028f, 1.39149904f, 1.37905943f,
   };
+  double maximum_score_error = 0.0;
   for (size_t index = 0; index < kPinnedScoreHistory.size(); ++index) {
-    if (std::abs(
-          two_updates.score_history[index] -
-          kPinnedScoreHistory[index]) >
+    const double error = std::abs(two_updates.score_history[index] -
+                                  kPinnedScoreHistory[index]);
+    maximum_score_error = std::max(maximum_score_error, error);
+    if (error >
           gjxl::butteraugli_test::kPinnedAqTolerance) {
       std::cerr << "Two-update AQ score history differs from the pin\n";
       return false;
     }
   }
+  float maximum_quant_error = 0.0f;
+  float maximum_block_distance_error = 0.0f;
   for (size_t index = 0; index < kPinnedQuantField.size(); ++index) {
     const size_t x = index % kBlockExtent.width;
     const size_t y = index / kBlockExtent.width;
     const size_t strided_index = y * AqStorage::kBlockStride + x;
-    if (std::abs(
-          two_updates.quant_field[strided_index] -
-          kPinnedQuantField[index]) >
+    const float quant_error = std::abs(
+      two_updates.quant_field[strided_index] - kPinnedQuantField[index]);
+    const float block_distance_error = std::abs(
+      two_updates.block_distance[strided_index] - kPinnedBlockDistance[index]);
+    maximum_quant_error = std::max(maximum_quant_error, quant_error);
+    maximum_block_distance_error =
+      std::max(maximum_block_distance_error, block_distance_error);
+    if (quant_error >
           gjxl::butteraugli_test::kPinnedAqTolerance ||
         two_updates.raw_quant[strided_index] !=
           kPinnedRawQuantField[index] ||
-        std::abs(
-          two_updates.block_distance[strided_index] -
-          kPinnedBlockDistance[index]) >
+        block_distance_error >
           gjxl::butteraugli_test::kPinnedAqTolerance) {
       std::cerr << "Two-update AQ fields differ from the pin\n";
       return false;
     }
   }
+
+  std::cout << std::setprecision(9)
+            << "Two-update pin maximum errors: score="
+            << maximum_score_error << " quant=" << maximum_quant_error
+            << " block_distance=" << maximum_block_distance_error
+            << " raw_quant=exact\n";
 
   return true;
 }

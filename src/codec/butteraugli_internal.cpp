@@ -677,7 +677,7 @@ Status OpsinDynamicsImage(ConstImage3FView linear_rgb, float intensity_target,
       if (!std::isfinite(result.plane[0].Row(y)[x]) ||
           !std::isfinite(result.plane[1].Row(y)[x]) ||
           !std::isfinite(result.plane[2].Row(y)[x])) {
-        return Status::InvalidArgument(
+        return Status::Internal(
             "Butteraugli opsin computation produced non-finite values");
       }
     }
@@ -839,7 +839,7 @@ Status SeparateFrequencies(ConstImage3FView xyb, FrequencyScratch *scratch,
   }
 
   if (!PsychoImageIsFinite(candidate)) {
-    return Status::InvalidArgument(
+    return Status::Internal(
         "Butteraugli frequency computation produced non-finite values");
   }
   *output = std::move(candidate);

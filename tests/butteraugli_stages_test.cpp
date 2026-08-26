@@ -65,6 +65,10 @@ struct ImageStorage {
   return status.code() == gjxl::StatusCode::kInvalidArgument;
 }
 
+[[nodiscard]] bool IsInternal(const gjxl::Status &status) {
+  return status.code() == gjxl::StatusCode::kInternal;
+}
+
 void FillImage(ImageStorage *image) {
   for (size_t channel = 0; channel < 3; ++channel) {
     for (size_t y = 0; y < image->extent.height; ++y) {
@@ -210,8 +214,10 @@ void FillImage(ImageStorage *image) {
   }
   input.plane[1][2 * input.stride + 3] = 0.2f;
   input.plane[0][0] = std::numeric_limits<float>::max();
-  return check(input.ConstView(), std::numeric_limits<float>::max(), &scratch,
-               output.View());
+  return IsInternal(bi::OpsinDynamicsImage(
+             input.ConstView(), std::numeric_limits<float>::max(), &scratch,
+             output.View())) &&
+         output.plane == original_output;
 }
 
 [[nodiscard]] bool CheckOpsinBehavior() {

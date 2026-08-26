@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 /// @file
-/// Interleaved timing and libjxl-managed-memory baselines for Butteraugli.
+/// Interleaved native/libjxl timings and libjxl-managed-memory baselines.
 
 #include <algorithm>
 #include <array>
@@ -90,16 +90,19 @@ struct TrackingAllocator {
 };
 
 enum class Phase : size_t {
-  kOneShot,
+  kNativeOneShot,
+  kLibjxlOneShot,
   kReferencePreparation,
   kPreparedComparison,
   kCount,
 };
 
-constexpr std::array<std::string_view, 3> kPhaseNames = {
-    "one_shot",
-    "reference_preparation",
-    "prepared_comparison",
+constexpr size_t kPhaseCount = static_cast<size_t>(Phase::kCount);
+constexpr std::array<std::string_view, kPhaseCount> kPhaseNames = {
+    "native_one_shot",
+    "libjxl_one_shot",
+    "libjxl_reference_preparation",
+    "libjxl_prepared_comparison",
 };
 
 struct TimingStats {
@@ -118,7 +121,7 @@ struct TimingStats {
 }
 
 struct MemoryStats {
-  size_t one_shot_peak = 0;
+  size_t libjxl_one_shot_peak = 0;
   size_t preparation_peak = 0;
   size_t prepared_retained = 0;
   size_t comparison_peak_total = 0;
@@ -141,7 +144,7 @@ public:
     const bt::OraclePlane output{map_.data(), fixture_.reference.extent(),
                                  fixture_.reference.extent().width};
     bool ok = false;
-    if (phase == Phase::kOneShot) {
+    if (phase == Phase::kNativeOneShot) {
       ok = gjxl::ComputeButteraugliDistance(
                ToGjxlImage(fixture_.reference.ConstView()),
                ToGjxlImage(fixture_.distorted.ConstView()),
@@ -150,6 +153,10 @@ public:
                 fixture_.reference.extent().width},
                &score)
                .ok();
+    } else if (phase == Phase::kLibjxlOneShot) {
+      ok = bt::ComputeLiveButteraugli(
+          fixture_.reference.ConstView(), fixture_.distorted.ConstView(),
+          fixture_.options, output, &score);
     } else if (phase == Phase::kReferencePreparation) {
       bt::PreparedReference temporary;
       ok = bt::PrepareLiveButteraugliReference(fixture_.reference.ConstView(),
@@ -174,22 +181,23 @@ private:
   double sink_ = 0.0;
 };
 
-[[nodiscard]] std::array<TimingStats, 3>
+[[nodiscard]] std::array<TimingStats, kPhaseCount>
 BenchmarkTimings(const bt::FixturePair &fixture, double *sink) {
   WorkloadRunner runner(fixture);
   for (size_t round = 0; round < kWarmupRounds; ++round) {
-    for (size_t offset = 0; offset < 3; ++offset) {
-      runner.Run(static_cast<Phase>((round + offset) % 3));
+    for (size_t offset = 0; offset < kPhaseCount; ++offset) {
+      runner.Run(static_cast<Phase>((round + offset) % kPhaseCount));
     }
   }
 
-  std::array<std::vector<double>, 3> samples;
+  std::array<std::vector<double>, kPhaseCount> samples;
   for (std::vector<double> &phase_samples : samples) {
     phase_samples.reserve(kSamples);
   }
   for (size_t sample = 0; sample < kSamples; ++sample) {
-    for (size_t offset = 0; offset < 3; ++offset) {
-      const Phase phase = static_cast<Phase>((sample + offset) % 3);
+    for (size_t offset = 0; offset < kPhaseCount; ++offset) {
+      const Phase phase =
+          static_cast<Phase>((sample + offset) % kPhaseCount);
       const auto begin = Clock::now();
       runner.Run(phase);
       const auto end = Clock::now();
@@ -202,6 +210,7 @@ BenchmarkTimings(const bt::FixturePair &fixture, double *sink) {
       Summarize(std::move(samples[0])),
       Summarize(std::move(samples[1])),
       Summarize(std::move(samples[2])),
+      Summarize(std::move(samples[3])),
   };
 }
 
@@ -222,7 +231,7 @@ BenchmarkTimings(const bt::FixturePair &fixture, double *sink) {
         tracker.live_bytes != 0) {
       throw std::runtime_error("One-shot memory measurement failed");
     }
-    result.one_shot_peak = tracker.peak_bytes;
+    result.libjxl_one_shot_peak = tracker.peak_bytes;
   }
   {
     TrackingAllocator tracker;
@@ -267,7 +276,8 @@ void PrintWorkload(const bt::FixturePair &fixture, double *sink) {
               << timings[phase].minimum_ms << ',' << timings[phase].maximum_ms
               << "]\n";
   }
-  std::cout << "  managed_bytes one_shot_peak=" << memory.one_shot_peak
+  std::cout << "  libjxl_managed_bytes libjxl_one_shot_peak="
+            << memory.libjxl_one_shot_peak
             << " preparation_peak=" << memory.preparation_peak
             << " prepared_retained=" << memory.prepared_retained
             << " comparison_peak_total=" << memory.comparison_peak_total
@@ -287,9 +297,10 @@ int main() {
     const bt::FixturePair flower = bt::LoadFlowerFixture(GJXL_FLOWER_PPM_PATH);
     double sink = 0.0;
     std::cout << std::fixed << std::setprecision(3)
-              << "Butteraugli benchmark: 3 warmup rounds, 15 rotated samples\n"
-              << "Managed-byte peaks exclude standard-library and process "
-                 "allocations.\n";
+              << "Butteraugli benchmark: 3 warmup rounds, 15 rotated samples "
+                 "across 4 equal-fixture phases\n"
+              << "libjxl-managed-byte peaks apply only to libjxl phases and "
+                 "exclude standard-library and process allocations.\n";
     PrintWorkload(synthetic, &sink);
     PrintWorkload(flower, &sink);
     std::cout << "sink=" << sink << '\n';

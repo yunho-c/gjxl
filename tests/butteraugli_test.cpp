@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 /// @file
-/// Validates the pinned scalar goldens, live oracle, and AQ block reduction.
+/// Validates the native facade against pinned scalar goldens and live libjxl.
 
 #include <algorithm>
 #include <array>
@@ -193,13 +193,11 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
         !actual.PaddingIsUntouched() ||
         !bt::PaddingIsPoisoned(fixture.reference) ||
         !bt::PaddingIsPoisoned(fixture.distorted) ||
-        !ScalarDispatchValuesMatch(
-            actual.LogicalValues(), expected,
-            bt::kScalarDispatchTolerance.full_map_absolute, full_map_errors) ||
+        !ValuesMatch(actual.LogicalValues(), expected, full_map_errors) ||
         !std::isfinite(score) ||
-        std::abs(score - expected_score) >
-            bt::kScalarDispatchTolerance.score_absolute) {
-      std::cerr << "Scalar full-map golden differs: " << kNames[index]
+        std::abs(score - expected_score) > bt::kScoreTolerance) {
+      std::cerr << "Native facade/scalar full-map golden differs: "
+                << kNames[index]
                 << "\n  actual score: " << std::setprecision(12) << score
                 << "\n  scalar score: " << expected_score
                 << "\n  maximum map error: "
@@ -254,10 +252,11 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
   MapStorage full_map(fixture.reference.extent());
   double full_score = kScorePoison;
   if (!ComputeFacade(fixture, &full_map, &full_score) ||
-      !ValuesMatch(output.plane[static_cast<size_t>(
-                       bt::IntermediateStage::kFinalComposition)],
-                   full_map.LogicalValues())) {
-    std::cerr << "Intermediate final composition differs from the public map\n";
+      !ScalarDispatchValuesMatch(
+          output.plane[static_cast<size_t>(
+              bt::IntermediateStage::kFinalComposition)],
+          full_map.LogicalValues(), bt::kNativeMapDispatchTolerance)) {
+    std::cerr << "Dispatched final composition differs from the native map\n";
     return false;
   }
   std::vector<float> perturbed =
@@ -289,8 +288,11 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
         !facade_map.PaddingIsUntouched() || !oracle_map.PaddingIsUntouched() ||
         !bt::PaddingIsPoisoned(fixture.reference) ||
         !bt::PaddingIsPoisoned(fixture.distorted) ||
-        !ValuesMatch(facade_map.LogicalValues(), oracle_map.LogicalValues()) ||
-        std::abs(facade_score - oracle_score) > bt::kScoreTolerance) {
+        !ScalarDispatchValuesMatch(
+            facade_map.LogicalValues(), oracle_map.LogicalValues(),
+            bt::kNativeMapDispatchTolerance) ||
+        std::abs(facade_score - oracle_score) >
+            bt::kNativeScoreDispatchTolerance) {
       std::cerr << "Live differential fixture failed: " << fixture.name << '\n';
       return false;
     }
@@ -677,12 +679,12 @@ int main() {
     return EXIT_FAILURE;
   }
   std::cout << std::setprecision(9)
-            << "Maximum scalar-vs-dispatched full-map error: abs="
+            << "Maximum native-facade-vs-scalar full-map error: abs="
             << full_map_errors.maximum_absolute
             << " rel=" << full_map_errors.maximum_relative
             << " tolerance_ratio=" << full_map_errors.maximum_tolerance_ratio
             << " score_abs=" << maximum_score_error << '\n'
-            << "Maximum scalar-vs-dispatched stage error: abs="
+            << "Maximum dispatched-vs-scalar stage error: abs="
             << stage_errors.maximum_absolute
             << " rel=" << stage_errors.maximum_relative
             << " tolerance_ratio=" << stage_errors.maximum_tolerance_ratio

@@ -12,15 +12,16 @@ or reductions can change adaptive-quantization decisions.
 ## Current state
 
 `ComputeButteraugliDistance` exposes a backend-neutral, view-based CPU API. Its
-current implementation adapts gjxl images to the pinned libjxl implementation,
-which produces a pixel-resolution distance map and its maximum score. gjxl
-already owns the transform-aware 16-norm reduction of that map and the
+current implementation runs the gjxl-owned native scalar backend with
+call-local scratch, producing a pixel-resolution distance map and its maximum
+score. gjxl also owns the transform-aware 16-norm reduction of that map and the
 iterative quant-field update.
 
-The build compiles only the libjxl translation units required by Butteraugli,
-plus Highway. `GJXL_ENABLE_LIBJXL_REFERENCE=OFF` removes that dependency, but
-the distance computation and complete iterative quantization pipeline then
-return `Unavailable`.
+`GJXL_ENABLE_LIBJXL_REFERENCE=OFF` builds the facade and complete iterative
+quantization pipeline without libjxl or Highway. Reference-enabled builds keep
+the pinned libjxl translation units and Highway for differential tests,
+golden regeneration, and comparative benchmarks. Removing the now-unused
+reference linkage from the production library target remains Milestone 6.
 
 The current Metal abstraction supports allocation, transfers, synchronization,
 and batched transforms. It does not yet model image operations, multi-pass
@@ -269,7 +270,7 @@ facade/golden limits. The measured maxima were `0.000679016113` for stages and
 `0.00114440918` for both maps and scores. No architecture-specific tolerance
 branches are used.
 
-### 5. Integrate and harden the native CPU backend
+### 5. Integrate and harden the native CPU backend — complete (2026-08-26)
 
 - Make the native implementation available through
   `ComputeButteraugliDistance` while retaining a test-only way to select the
@@ -285,9 +286,63 @@ Exit criterion: native CPU can run the complete pipeline with
 `GJXL_ENABLE_LIBJXL_REFERENCE=OFF`, and the enabled build passes differential
 and end-to-end parity tests.
 
+The public facade now maps `ButteraugliOptions` directly to the native scalar
+implementation and creates scratch storage per call. This keeps concurrent
+calls independent while preserving strided views, exact output aliasing,
+poisoned padding, and atomic map/score commits. Invalid caller inputs are
+reported as `InvalidArgument`, allocation failures as `OutOfMemory`, and
+non-finite computed results as internal failures. The facade, iterative AQ,
+and full CPU quantization-pipeline tests are built in both reference modes;
+the unavailable-backend target has been removed.
+
+The four strict scalar full-map goldens produced a maximum native-facade map
+error of `4.76837158e-07`, a maximum score error of `4.76837158e-07`, and a
+maximum strict-limit ratio of `0.0193271134`. Across the complete scalar
+corpus, the maximum native difference-stage error was `3.05175781e-05`; map
+and score errors remained `4.76837158e-07`. The dispatched libjxl comparison
+remains a separate architecture-independent gate: observed stage error was
+`0.000679016113`, and map and score errors were `0.00114440918`, all below the
+fixed `0.0015` cap. Scalar goldens retain the
+`1e-5 + 5e-6 * abs(expected)` map limit and `1e-5` score limit.
+
+The existing two-update AQ pin passes without revision. Maximum observed
+errors were `5.7220459e-06` for score history, `9.83476639e-06` for the final
+quant field, and `1.52587891e-05` for block distances; raw quant values matched
+exactly. All remain under the fixed `2e-5` pin limit. Five complete pipeline
+fixtures now pin all 15 score-history values, 72 final quant-field values, and
+72 raw quant decisions from the pre-integration pinned scalar libjxl path. The
+native run's maximum errors were `1.1920929e-07` for score history and
+`5.96046448e-08` for final quant fields, while every raw quant decision matched
+exactly. Comparisons use the same `2e-5` floating-point limit and exact raw
+quant equality.
+
+Release timings below combine three independent benchmark processes. Each
+process used three warmup rotations followed by 15 samples of four
+equal-fixture phases. The median column is the range of the three process
+medians; the observed column spans all 45 samples. The scalar implementation
+is currently slower than dispatched libjxl on both fixtures, so optimization
+work should follow this end-to-end evidence rather than infer a speedup from
+the integration alone.
+
+| Workload | Phase | Run-median range (ms) | All observed samples (ms) |
+|---|---|---:|---:|
+| Synthetic 128x96 | Native one shot | 8.237–8.929 | 8.032–15.158 |
+| Synthetic 128x96 | Dispatched libjxl one shot | 3.300–3.619 | 3.027–7.193 |
+| Synthetic 128x96 | Libjxl reference preparation | 0.881–0.940 | 0.859–2.420 |
+| Synthetic 128x96 | Prepared libjxl comparison | 2.265–2.688 | 2.125–5.027 |
+| Flower 510x532 | Native one shot | 184.862–188.086 | 183.099–190.338 |
+| Flower 510x532 | Dispatched libjxl one shot | 72.001–73.212 | 70.868–83.998 |
+| Flower 510x532 | Libjxl reference preparation | 20.283–20.757 | 19.413–21.430 |
+| Flower 510x532 | Prepared libjxl comparison | 52.096–52.490 | 50.162–68.145 |
+
+The benchmark continues to report only bytes observed through libjxl's
+supplied `JxlMemoryManager`, explicitly labeled as libjxl-managed memory. Those
+numbers do not measure native allocations, standard-library allocations,
+allocator metadata, or total process memory.
+
 ### 6. Remove libjxl from the production dependency graph
 
-- Make native CPU the default implementation.
+- Remove dormant libjxl and Highway linkage from `gjxl_codec`.
 - Restrict libjxl includes, sources, and Highway linkage to reference tests and
   reference benchmarks.
 - Keep an explicit build option for maintainers who need live differential

@@ -4,60 +4,16 @@
 #include "codec/butteraugli.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
 #include <new>
 #include <stdexcept>
-#include <utility>
 #include <vector>
 
-#if GJXL_ENABLE_LIBJXL_REFERENCE
-#include <jxl/memory_manager.h>
-
-#include "lib/jxl/butteraugli/butteraugli.h"
-#include "lib/jxl/image.h"
-#include "lib/jxl/memory_manager_internal.h"
-#endif
+#include "codec/butteraugli_distance_internal.h"
 
 namespace gjxl {
-#if GJXL_ENABLE_LIBJXL_REFERENCE
-namespace {
-
-Status CopyToLibjxl(
-  ConstImage3FView source,
-  JxlMemoryManager* memory_manager,
-  jxl::Image3F* out) {
-
-  auto image_or = jxl::Image3F::Create(
-    memory_manager,
-    source.width(),
-    source.height());
-  if (!image_or.ok()) {
-    return Status::OutOfMemory(
-      "Unable to allocate Butteraugli input image");
-  }
-  jxl::Image3F image = std::move(image_or).value_();
-  for (size_t channel = 0; channel < 3; ++channel) {
-    for (size_t y = 0; y < source.height(); ++y) {
-      const float* source_row = source.plane[channel].Row(y);
-      float* destination_row = image.PlaneRow(channel, y);
-      for (size_t x = 0; x < source.width(); ++x) {
-        if (!std::isfinite(source_row[x])) {
-          return Status::InvalidArgument(
-            "Butteraugli input pixels must be finite");
-        }
-        destination_row[x] = source_row[x];
-      }
-    }
-  }
-  *out = std::move(image);
-  return Status::Ok();
-}
-
-}  // namespace
-#endif
 
 Status ComputeButteraugliDistance(
   ConstImage3FView reference_linear_rgb,
@@ -66,98 +22,19 @@ Status ComputeButteraugliDistance(
   PlaneF32View distance_map,
   double* score) {
 
-#if GJXL_ENABLE_LIBJXL_REFERENCE
-  if (!reference_linear_rgb.valid() ||
-      !distorted_linear_rgb.valid() ||
-      reference_linear_rgb.extent() != distorted_linear_rgb.extent() ||
-      !distance_map.valid() ||
-      distance_map.extent != reference_linear_rgb.extent() ||
-      score == nullptr ||
-      !std::isfinite(options.hf_asymmetry) ||
-      options.hf_asymmetry <= 0.0f ||
-      !std::isfinite(options.x_multiplier) ||
-      options.x_multiplier <= 0.0f ||
-      !std::isfinite(options.intensity_target) ||
-      options.intensity_target <= 0.0f) {
-    return Status::InvalidArgument(
-      "Butteraugli images, output, or options are invalid");
-  }
-
-  JxlMemoryManager memory_manager{};
-  if (!jxl::MemoryManagerInit(&memory_manager, nullptr)) {
-    return Status::Internal(
-      "Unable to initialize Butteraugli memory manager");
-  }
-
-  jxl::Image3F reference;
-  Status status = CopyToLibjxl(
-    reference_linear_rgb,
-    &memory_manager,
-    &reference);
-  if (!status.ok()) {
-    return status;
-  }
-  jxl::Image3F distorted;
-  status = CopyToLibjxl(
-    distorted_linear_rgb,
-    &memory_manager,
-    &distorted);
-  if (!status.ok()) {
-    return status;
-  }
-
-  auto result_or = jxl::ImageF::Create(
-    &memory_manager,
-    reference_linear_rgb.width(),
-    reference_linear_rgb.height());
-  if (!result_or.ok()) {
-    return Status::OutOfMemory(
-      "Unable to allocate Butteraugli distance map");
-  }
-  jxl::ImageF result = std::move(result_or).value_();
-  const jxl::ButteraugliParams params{
+  butteraugli_internal::NativeButteraugliScratch scratch;
+  const butteraugli_internal::NativeButteraugliParams params{
     .hf_asymmetry = options.hf_asymmetry,
-    .xmul = options.x_multiplier,
+    .x_multiplier = options.x_multiplier,
     .intensity_target = options.intensity_target,
   };
-  if (!jxl::ButteraugliDiffmap(reference, distorted, params, result)) {
-    return Status::Internal(
-      "Pinned libjxl Butteraugli computation failed");
-  }
-
-  const double result_score =
-    jxl::ButteraugliScoreFromDiffmap(result, &params);
-  if (!std::isfinite(result_score)) {
-    return Status::Internal(
-      "Butteraugli produced a non-finite score");
-  }
-  for (size_t y = 0; y < distance_map.extent.height; ++y) {
-    const float* source = result.ConstRow(y);
-    for (size_t x = 0; x < distance_map.extent.width; ++x) {
-      if (!std::isfinite(source[x]) || source[x] < 0.0f) {
-        return Status::Internal(
-          "Butteraugli produced an invalid distance map");
-      }
-    }
-  }
-
-  for (size_t y = 0; y < distance_map.extent.height; ++y) {
-    std::copy_n(
-      result.ConstRow(y),
-      distance_map.extent.width,
-      distance_map.Row(y));
-  }
-  *score = result_score;
-  return Status::Ok();
-#else
-  static_cast<void>(reference_linear_rgb);
-  static_cast<void>(distorted_linear_rgb);
-  static_cast<void>(options);
-  static_cast<void>(distance_map);
-  static_cast<void>(score);
-  return Status::Unavailable(
-    "Butteraugli requires GJXL_ENABLE_LIBJXL_REFERENCE");
-#endif
+  return butteraugli_internal::ComputeButteraugliDistanceNative(
+    reference_linear_rgb,
+    distorted_linear_rgb,
+    params,
+    &scratch,
+    distance_map,
+    score);
 }
 
 Status ReduceButteraugliDistanceMap(

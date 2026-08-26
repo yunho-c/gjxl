@@ -31,7 +31,7 @@ option(
 
 option(
   GJXL_ENABLE_LIBJXL_REFERENCE
-  "Build the libjxl-backed Butteraugli and iterative-AQ reference path"
+  "Build the pinned libjxl Butteraugli reference tests and benchmarks"
   ON
 )
 
@@ -625,23 +625,21 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_adaptive_quantization_test
   )
 
-  if(GJXL_ENABLE_LIBJXL_REFERENCE)
-    add_executable(
-      gjxl_adaptive_quantization_loop_test
-      tests/adaptive_quantization_loop_test.cpp
-    )
+  add_executable(
+    gjxl_adaptive_quantization_loop_test
+    tests/adaptive_quantization_loop_test.cpp
+  )
 
-    target_link_libraries(
-      gjxl_adaptive_quantization_loop_test
-      PRIVATE
-        gjxl_codec
-    )
+  target_link_libraries(
+    gjxl_adaptive_quantization_loop_test
+    PRIVATE
+      gjxl_codec
+  )
 
-    add_test(
-      NAME adaptive_quantization_loop
-      COMMAND gjxl_adaptive_quantization_loop_test
-    )
-  endif()
+  add_test(
+    NAME adaptive_quantization_loop
+    COMMAND gjxl_adaptive_quantization_loop_test
+  )
 
   add_executable(
     gjxl_color_transform_test
@@ -659,23 +657,21 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_color_transform_test
   )
 
-  if(GJXL_ENABLE_LIBJXL_REFERENCE)
-    add_executable(
-      gjxl_quantization_pipeline_test
-      tests/quantization_pipeline_test.cpp
-    )
+  add_executable(
+    gjxl_quantization_pipeline_test
+    tests/quantization_pipeline_test.cpp
+  )
 
-    target_link_libraries(
-      gjxl_quantization_pipeline_test
-      PRIVATE
-        gjxl_codec
-    )
+  target_link_libraries(
+    gjxl_quantization_pipeline_test
+    PRIVATE
+      gjxl_codec
+  )
 
-    add_test(
-      NAME quantization_pipeline
-      COMMAND gjxl_quantization_pipeline_test
-    )
-  endif()
+  add_test(
+    NAME quantization_pipeline
+    COMMAND gjxl_quantization_pipeline_test
+  )
 
   add_executable(
     gjxl_gaborish_test
@@ -757,14 +753,30 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_loop_filter_test
   )
 
+  add_executable(
+    gjxl_butteraugli_test
+    tests/butteraugli_facade_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME butteraugli
+    COMMAND gjxl_butteraugli_test
+  )
+
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(
-      gjxl_butteraugli_test
+      gjxl_butteraugli_reference_test
       tests/butteraugli_test.cpp
     )
 
     target_link_libraries(
-      gjxl_butteraugli_test
+      gjxl_butteraugli_reference_test
       PRIVATE
         gjxl_codec
         gjxl_butteraugli_fixtures
@@ -772,14 +784,14 @@ if(GJXL_BUILD_TESTS)
     )
 
     target_compile_definitions(
-      gjxl_butteraugli_test
+      gjxl_butteraugli_reference_test
       PRIVATE
         GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
     )
 
     add_test(
-      NAME butteraugli
-      COMMAND gjxl_butteraugli_test
+      NAME butteraugli_reference
+      COMMAND gjxl_butteraugli_reference_test
     )
 
     add_executable(
@@ -883,22 +895,6 @@ if(GJXL_BUILD_TESTS)
     add_test(
       NAME butteraugli_distance_scalar_differential
       COMMAND gjxl_butteraugli_distance_scalar_differential_test
-    )
-  else()
-    add_executable(
-      gjxl_butteraugli_unavailable_test
-      tests/butteraugli_unavailable_test.cpp
-    )
-
-    target_link_libraries(
-      gjxl_butteraugli_unavailable_test
-      PRIVATE
-        gjxl_codec
-    )
-
-    add_test(
-      NAME butteraugli_unavailable
-      COMMAND gjxl_butteraugli_unavailable_test
     )
   endif()
 

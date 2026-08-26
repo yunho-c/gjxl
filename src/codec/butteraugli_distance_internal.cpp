@@ -815,7 +815,7 @@ Status ComputeDifferenceStages(const OwnedPsychoImage &reference,
   for (size_t stage = 0; stage < kDifferenceStageCount; ++stage) {
     if (!PlaneIsFinite(std::as_const(candidate).StageView(
             static_cast<DifferenceStage>(stage)))) {
-      return Status::InvalidArgument(
+      return Status::Internal(
           "Butteraugli difference computation produced non-finite values");
     }
   }
@@ -957,7 +957,7 @@ Status ComputeButteraugliDistanceNative(ConstImage3FView reference,
     for (size_t x = 0; x < requested_extent.width; ++x) {
       const float value = staged_map.Row(y)[x];
       if (!std::isfinite(value) || value < 0.0f) {
-        return Status::InvalidArgument(
+        return Status::Internal(
             "Native Butteraugli produced an invalid distance map");
       }
       maximum = std::max(maximum, value);
