@@ -60,7 +60,9 @@ add_library(
   src/codec/dct.cpp
   src/codec/epf.cpp
   src/codec/gaborish.cpp
+  src/codec/loop_filter.cpp
   src/codec/quantization.cpp
+  src/codec/reconstruction.cpp
 )
 
 target_link_libraries(
@@ -438,6 +440,38 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME epf
     COMMAND gjxl_epf_test
+  )
+
+  add_executable(
+    gjxl_reconstruction_test
+    tests/reconstruction_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_reconstruction_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME reconstruction
+    COMMAND gjxl_reconstruction_test
+  )
+
+  add_executable(
+    gjxl_loop_filter_test
+    tests/loop_filter_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_loop_filter_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME loop_filter
+    COMMAND gjxl_loop_filter_test
   )
 
   find_package(
