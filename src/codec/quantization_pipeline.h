@@ -23,7 +23,6 @@ struct CpuQuantizationPipelineOptions {
 struct CpuQuantizationPipelineOutput {
   InitialQuantFieldOutput initial_quantization;
   AdaptiveQuantizationOutput adaptive_quantization;
-  AcStrategyGrid* strategies = nullptr;
 };
 
 /// Runs the complete CPU quantization reference pipeline before GPU porting.

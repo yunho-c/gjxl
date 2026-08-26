@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -33,11 +34,12 @@ constexpr std::string_view kPinnedLibjxlRevision =
   "e8ff09762481785938d8e4e01333ed3917571161";
 
 uint64_t HashQuantized(
-  const std::array<std::vector<int32_t>, 3>& coefficients) {
+  const std::array<std::span<const int32_t>, 3>& coefficients,
+  size_t count) {
 
   uint64_t hash = 1469598103934665603ull;
-  for (const std::vector<int32_t>& channel : coefficients) {
-    for (int32_t value : channel) {
+  for (std::span<const int32_t> channel : coefficients) {
+    for (int32_t value : channel.first(count)) {
       hash ^= static_cast<uint32_t>(value);
       hash *= 1099511628211ull;
     }
@@ -107,6 +109,41 @@ bool PaddingIs(const ImageStorage& image, float value) {
   return true;
 }
 
+gjxl::Status ComputeFrame(
+  gjxl::ConstImage3FView input,
+  const gjxl::AcStrategyGrid& strategies,
+  gjxl::ConstPlaneI32View raw_quant,
+  const gjxl::Quantizer& quantizer,
+  const gjxl::ColorCorrelationMap& color_correlation,
+  gjxl::CoefficientCodingOptions options,
+  gjxl::VarDctEncoderFrame* frame) {
+
+  gjxl::FrameGeometry geometry;
+  gjxl::Status status = gjxl::FrameGeometry::Create(
+    input.extent(), &geometry);
+  if (!status.ok()) {
+    return status;
+  }
+  size_t block_count = 0;
+  if (!strategies.extent().try_area(&block_count)) {
+    return gjxl::Status::InvalidArgument("Test block grid is too large");
+  }
+  std::vector<uint8_t> epf_sharpness(block_count, 4);
+  return gjxl::ComputeQuantizedCoefficients(
+    input,
+    {
+      .geometry = geometry,
+      .strategies = &strategies,
+      .raw_quant_field = raw_quant,
+      .quantizer = &quantizer,
+      .color_correlation = &color_correlation,
+      .epf_sharpness = {
+        epf_sharpness.data(), strategies.extent(), strategies.extent().width},
+    },
+    options,
+    frame);
+}
+
 bool CheckStrategy(gjxl::AcStrategyType strategy) {
   const gjxl::AcStrategyInfo* info = gjxl::GetAcStrategyInfo(strategy);
   if (info == nullptr) {
@@ -142,8 +179,8 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
     return false;
   }
 
-  gjxl::QuantizedCoefficientFrame frame;
-  if (!gjxl::ComputeQuantizedCoefficients(
+  gjxl::VarDctEncoderFrame frame;
+  if (!ComputeFrame(
         input.ConstView(),
         grid,
         raw_view,
@@ -151,17 +188,21 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
         color_correlation,
         {},
         &frame).ok() ||
-      !frame.complete() ||
-      frame.transforms().size() != 1) {
+      !frame.valid() ||
+      frame.ac_group_count() != 1) {
     std::cerr << "Coefficient coding failed for a supported strategy\n";
     return false;
   }
 
-  const gjxl::QuantizedTransform& transform = frame.transforms().front();
-  if (transform.strategy != strategy ||
-      transform.raw_quant != 37 ||
-      transform.block_x != 0 ||
-      transform.block_y != 0) {
+  gjxl::VarDctAcGroupView group;
+  gjxl::AcStrategyCell cell;
+  if (!frame.GetAcGroup(0, &group).ok() ||
+      !frame.strategies().Get(0, 0, &cell).ok() ||
+      cell.strategy != strategy ||
+      !cell.is_anchor ||
+      frame.raw_quant_field().Row(0)[0] != 37 ||
+      group.block_x != 0 || group.block_y != 0 ||
+      group.used_coefficient_count != info->coefficient_count()) {
     std::cerr << "Stored coefficient metadata is incorrect\n";
     return false;
   }
@@ -175,7 +216,9 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
     constexpr std::array<size_t, 4> kDcIndices = {0, 3, 10, 15};
     if (color_correlation.y_to_x_map().Row(0)[0] != 46 ||
         color_correlation.y_to_b_map().Row(0)[0] != 19 ||
-        HashQuantized(transform.ac) != kPinnedQuantizedHash) {
+        HashQuantized(
+          group.coefficients,
+          group.used_coefficient_count) != kPinnedQuantizedHash) {
       std::cerr << "DCT32 coefficient path differs from libjxl "
                 << kPinnedLibjxlRevision << '\n';
       return false;
@@ -184,7 +227,7 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
       for (size_t i = 0; i < kDcIndices.size(); ++i) {
         const size_t index = kDcIndices[i];
         if (std::abs(
-              frame.dc(channel, index % 4, index / 4) -
+              frame.dc().plane[channel].Row(index / 4)[index % 4] -
               kPinnedDc[channel][i]) > 2.0e-6f) {
           std::cerr << "DCT32 DC differs from pinned libjxl\n";
           return false;
@@ -195,7 +238,7 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
 
   const gjxl::Extent2D coefficient_extent = info->coefficient_extent();
   const gjxl::Extent2D llf_extent = info->low_frequency_extent();
-  for (const std::vector<int32_t>& coefficients : transform.ac) {
+  for (std::span<const int32_t> coefficients : group.coefficients) {
     for (size_t y = 0; y < llf_extent.height; ++y) {
       for (size_t x = 0; x < llf_extent.width; ++x) {
         if (coefficients[y * coefficient_extent.width + x] != 0) {
@@ -209,9 +252,6 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
   ImageStorage reconstructed(info->pixel_extent());
   if (!gjxl::ReconstructQuantizedCoefficients(
         frame,
-        quantizer,
-        color_correlation,
-        {},
         reconstructed.View()).ok() ||
       !PaddingIs(reconstructed, -777.0f)) {
     std::cerr << "Coefficient reconstruction failed\n";
@@ -305,8 +345,8 @@ bool CheckFlatDcPreservation() {
     return false;
   }
 
-  gjxl::QuantizedCoefficientFrame frame;
-  if (!gjxl::ComputeQuantizedCoefficients(
+  gjxl::VarDctEncoderFrame frame;
+  if (!ComputeFrame(
         input.ConstView(),
         grid,
         {raw_quant.data(), kBlockExtent, kBlockExtent.width},
@@ -319,7 +359,9 @@ bool CheckFlatDcPreservation() {
   for (size_t channel = 0; channel < 3; ++channel) {
     for (size_t y = 0; y < kBlockExtent.height; ++y) {
       for (size_t x = 0; x < kBlockExtent.width; ++x) {
-        if (std::abs(frame.dc(channel, x, y) - kValues[channel]) > 2.0e-6f) {
+        if (std::abs(
+              frame.dc().plane[channel].Row(y)[x] - kValues[channel]) >
+            2.0e-6f) {
           std::cerr << "Floating-point DC was not preserved\n";
           return false;
         }
@@ -330,9 +372,6 @@ bool CheckFlatDcPreservation() {
   ImageStorage reconstructed(kPixelExtent);
   if (!gjxl::ReconstructQuantizedCoefficients(
         frame,
-        quantizer,
-        color_correlation,
-        {},
         reconstructed.View()).ok()) {
     return false;
   }
@@ -379,12 +418,12 @@ bool CheckMixedGridAndInvalidInputs() {
     return false;
   }
 
-  gjxl::QuantizedCoefficientFrame frame;
+  gjxl::VarDctEncoderFrame frame;
   const gjxl::CoefficientCodingOptions options{
     .x_matrix_multiplier = 1.25f,
     .b_matrix_multiplier = 0.8f,
   };
-  if (!gjxl::ComputeQuantizedCoefficients(
+  if (!ComputeFrame(
         input.ConstView(),
         grid,
         {raw_quant.data(), kBlockExtent, kBlockExtent.width},
@@ -392,7 +431,7 @@ bool CheckMixedGridAndInvalidInputs() {
         color_correlation,
         options,
         &frame).ok() ||
-      !frame.complete()) {
+      !frame.valid()) {
     std::cerr << "Mixed-grid coefficient coding failed\n";
     return false;
   }
@@ -400,17 +439,14 @@ bool CheckMixedGridAndInvalidInputs() {
   ImageStorage reconstructed(kPixelExtent);
   if (!gjxl::ReconstructQuantizedCoefficients(
         frame,
-        quantizer,
-        color_correlation,
-        options,
         reconstructed.View()).ok()) {
     std::cerr << "Mixed-grid reconstruction failed\n";
     return false;
   }
 
-  gjxl::QuantizedCoefficientFrame sentinel = frame;
+  gjxl::VarDctEncoderFrame sentinel = frame;
   raw_quant.back() = 0;
-  if (gjxl::ComputeQuantizedCoefficients(
+  if (ComputeFrame(
         input.ConstView(),
         grid,
         {raw_quant.data(), kBlockExtent, kBlockExtent.width},
@@ -418,18 +454,16 @@ bool CheckMixedGridAndInvalidInputs() {
         color_correlation,
         {},
         &sentinel).ok() ||
-      sentinel.transforms().size() != frame.transforms().size()) {
+      !sentinel.valid() ||
+      sentinel.raw_quant_field().Row(kBlockExtent.height - 1)[
+        kBlockExtent.width - 1] != 23) {
     std::cerr << "Invalid coefficient coding was accepted or not atomic\n";
     return false;
   }
 
-  ImageStorage invalid_output(kPixelExtent, -123.0f);
-  gjxl::Quantizer invalid_quantizer;
+  ImageStorage invalid_output({8, 8}, -123.0f);
   if (gjxl::ReconstructQuantizedCoefficients(
         frame,
-        invalid_quantizer,
-        color_correlation,
-        {},
         invalid_output.View()).ok() ||
       !std::ranges::all_of(
         invalid_output.plane[0],

@@ -85,30 +85,24 @@ struct AqStorage {
   explicit AqStorage(float fill = -777.0f)
       : reconstructed(kOriginalExtent, fill),
         quant_field(kBlockStride * kBlockExtent.height, fill),
-        raw_quant(kBlockStride * kBlockExtent.height, -777),
         block_distance(kBlockStride * kBlockExtent.height, fill) {}
 
   [[nodiscard]] gjxl::AdaptiveQuantizationOutput Output() {
     return {
       .quant_field = {
         quant_field.data(), kBlockExtent, kBlockStride},
-      .raw_quant_field = {
-        raw_quant.data(), kBlockExtent, kBlockStride},
       .block_distance_map = {
         block_distance.data(), kBlockExtent, kBlockStride},
       .reconstructed_linear_rgb = reconstructed.View(),
-      .quantizer = &quantizer,
-      .color_correlation = &color_correlation,
+      .frame = &frame,
       .score_history = &score_history,
     };
   }
 
   ImageStorage reconstructed;
   std::vector<float> quant_field;
-  std::vector<int32_t> raw_quant;
   std::vector<float> block_distance;
-  gjxl::Quantizer quantizer;
-  gjxl::ColorCorrelationMap color_correlation;
+  gjxl::VarDctEncoderFrame frame;
   std::vector<double> score_history;
 };
 
@@ -116,7 +110,6 @@ bool PaddingIsUntouched(const AqStorage& storage) {
   for (size_t y = 0; y < kBlockExtent.height; ++y) {
     for (size_t x = kBlockExtent.width; x < AqStorage::kBlockStride; ++x) {
       if (storage.quant_field[y * AqStorage::kBlockStride + x] != -777.0f ||
-          storage.raw_quant[y * AqStorage::kBlockStride + x] != -777 ||
           storage.block_distance[y * AqStorage::kBlockStride + x] !=
             -777.0f) {
         return false;
@@ -174,11 +167,10 @@ bool CheckLoopAndUpdateRule() {
         strategies,
         initial,
         sharpness_view,
-        baseline_options,
-        baseline.Output()).ok() ||
+      baseline_options,
+      baseline.Output()).ok() ||
       baseline.score_history.size() != 1 ||
-      !baseline.quantizer.valid() ||
-      !baseline.color_correlation.valid() ||
+      !baseline.frame.valid() ||
       !PaddingIsUntouched(baseline)) {
     std::cerr << "Zero-update AQ evaluation failed\n";
     return false;
@@ -203,11 +195,11 @@ bool CheckLoopAndUpdateRule() {
     } else {
       expected[index] = kInitial[index] * difference;
       const long old_raw = std::lround(
-        kInitial[index] * baseline.quantizer.inverse_global_scale());
+        kInitial[index] * baseline.frame.quantizer().inverse_global_scale());
       const long new_raw = std::lround(
-        expected[index] * baseline.quantizer.inverse_global_scale());
+        expected[index] * baseline.frame.quantizer().inverse_global_scale());
       if (old_raw == new_raw) {
-        expected[index] = kInitial[index] + baseline.quantizer.scale();
+        expected[index] = kInitial[index] + baseline.frame.quantizer().scale();
       }
     }
     expected[index] = std::clamp(expected[index], lower, upper);
@@ -237,7 +229,7 @@ bool CheckLoopAndUpdateRule() {
     if (std::abs(
           updated.quant_field[y * AqStorage::kBlockStride + x] -
           expected[index]) > 2.0e-6f ||
-        updated.raw_quant[y * AqStorage::kBlockStride + x] < 1 ||
+        updated.frame.raw_quant_field().Row(y)[x] < 1 ||
         !std::isfinite(
           updated.block_distance[y * AqStorage::kBlockStride + x])) {
       std::cerr << "AQ field update differs from libjxl's rule\n";
@@ -261,7 +253,6 @@ bool CheckInvalidRequestIsAtomic() {
   sharpness.fill(4);
   AqStorage output(31.0f);
   const auto original_quant = output.quant_field;
-  const auto original_raw = output.raw_quant;
   const auto original_distance = output.block_distance;
   const auto original_image = output.reconstructed.plane;
   gjxl::AdaptiveQuantizationOptions options;
@@ -272,14 +263,12 @@ bool CheckInvalidRequestIsAtomic() {
         strategies,
         {initial.data(), kBlockExtent, kBlockExtent.width},
         {sharpness.data(), kBlockExtent, kBlockExtent.width},
-        options,
-        output.Output()).ok() ||
+      options,
+      output.Output()).ok() ||
       output.quant_field != original_quant ||
-      output.raw_quant != original_raw ||
       output.block_distance != original_distance ||
       output.reconstructed.plane != original_image ||
-      output.quantizer.valid() ||
-      output.color_correlation.valid() ||
+      output.frame.valid() ||
       !output.score_history.empty()) {
     std::cerr << "Invalid AQ request changed output\n";
     return false;
