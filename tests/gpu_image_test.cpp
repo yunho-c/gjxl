@@ -8,10 +8,10 @@
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <span>
 
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/primitives.h"
 #include "gpu/scratch.h"
 
 namespace {
@@ -32,10 +32,6 @@ public:
     return "range-test backend";
   }
 
-  [[nodiscard]] gjxl::GpuBackendStats stats() const noexcept override {
-    return stats_;
-  }
-
   gjxl::Status Allocate(
     size_t size_bytes,
     std::unique_ptr<gjxl::DeviceBuffer>* out) override {
@@ -44,7 +40,7 @@ public:
       return gjxl::Status::InvalidArgument("Invalid fake allocation");
     }
     out->reset(new FakeBuffer(id(), size_bytes));
-    ++stats_.successful_allocations;
+    RecordSuccessfulAllocation();
     return gjxl::Status::Ok();
   }
 
@@ -64,25 +60,19 @@ public:
     return gjxl::Status::Ok();
   }
 
-  gjxl::Status ForwardTransform(const gjxl::TransformBatch&) override {
+  gjxl::Status ForwardTransform(
+    const gjxl::TransformBatch&,
+    std::unique_ptr<gjxl::GpuSubmission>* submission) override {
+    if (submission != nullptr) submission->reset();
     return gjxl::Status::Unavailable("Not implemented by range-test backend");
   }
 
-  gjxl::Status InverseTransform(const gjxl::TransformBatch&) override {
+  gjxl::Status InverseTransform(
+    const gjxl::TransformBatch&,
+    std::unique_ptr<gjxl::GpuSubmission>* submission) override {
+    if (submission != nullptr) submission->reset();
     return gjxl::Status::Unavailable("Not implemented by range-test backend");
   }
-
-  gjxl::Status SubmitPrimitiveSequence(
-    std::span<const gjxl::PrimitiveCommand>) override {
-    return gjxl::Status::Unavailable("Not implemented by range-test backend");
-  }
-
-  gjxl::Status Synchronize() override {
-    return gjxl::Status::Ok();
-  }
-
-private:
-  gjxl::GpuBackendStats stats_;
 };
 
 bool IsInvalid(const gjxl::Status& status) {
@@ -184,7 +174,8 @@ bool CheckScratchArena() {
   FakeBackend other;
   gjxl::DeviceScratchArena arena;
   if (!arena.Prepare(backend, 1024).ok() ||
-      backend.stats().successful_allocations != 1) {
+      backend.stats().successful_allocations != 1 ||
+      gjxl::QueryGpuImagePrimitives(backend) != nullptr) {
     return false;
   }
   gjxl::DevicePlaneView first;

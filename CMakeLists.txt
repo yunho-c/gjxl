@@ -438,6 +438,8 @@ add_library(
 
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_backend.cpp
+  src/gpu/metal/metal_primitives.cpp
+  src/gpu/metal/metal_submission.cpp
 )
 
 add_dependencies(

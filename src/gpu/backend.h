@@ -7,13 +7,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <span>
 #include <string_view>
 
 #include "core/status.h"
 #include "gpu/buffer.h"
-#include "gpu/ops/primitives.h"
 #include "gpu/ops/transform.h"
+#include "gpu/submission.h"
 
 namespace gjxl {
 
@@ -40,7 +39,12 @@ public:
     return buffer.backend_id() == id_;
   }
 
-  [[nodiscard]] virtual GpuBackendStats stats() const noexcept = 0;
+  [[nodiscard]] GpuBackendStats stats() const noexcept {
+    return {
+      successful_allocations_.load(std::memory_order_relaxed),
+      committed_submissions_.load(std::memory_order_relaxed),
+    };
+  }
 
   virtual Status Allocate(
     size_t size_bytes,
@@ -60,23 +64,27 @@ public:
     size_t size_bytes,
     size_t src_offset_bytes = 0) = 0;
 
-  // These enqueue work. They do not need to block the CPU.
+  /// Enqueues transform work. A successful non-empty batch returns a non-null
+  /// submission. A failed or empty batch leaves submission null.
   virtual Status ForwardTransform(
-    const TransformBatch& batch) = 0;
+    const TransformBatch& batch,
+    std::unique_ptr<GpuSubmission>* submission) = 0;
 
   virtual Status InverseTransform(
-    const TransformBatch& batch) = 0;
-
-  /// Validates and enqueues dependent primitive commands in one submission.
-  virtual Status SubmitPrimitiveSequence(
-    std::span<const PrimitiveCommand> commands) = 0;
-
-  // Explicit synchronization is useful for tests and benchmarks.
-  virtual Status Synchronize() = 0;
+    const TransformBatch& batch,
+    std::unique_ptr<GpuSubmission>* submission) = 0;
 
 protected:
   GpuBackend()
     : id_(NextId()) {}
+
+  void RecordSuccessfulAllocation() noexcept {
+    successful_allocations_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void RecordCommittedSubmission() noexcept {
+    committed_submissions_.fetch_add(1, std::memory_order_relaxed);
+  }
 
 private:
   [[nodiscard]] static BackendId NextId() noexcept {
@@ -85,6 +93,8 @@ private:
   }
 
   BackendId id_;
+  std::atomic<uint64_t> successful_allocations_{0};
+  std::atomic<uint64_t> committed_submissions_{0};
 };
 
 }  // namespace gjxl

@@ -222,12 +222,30 @@ transition requires it, but must not commit and synchronize after each leaf
 operation. Submission failure and command-buffer failure must be distinguishable
 from invalid caller input.
 
+Every successful non-empty transform or image-primitive submission returns an
+owning `GpuSubmission`. `Wait()` is thread-safe, idempotent, and returns its
+cached completion status. The handle retains the native objects required to
+wait and may outlive the backend; destroying the handle does not implicitly
+wait. Failed validation or command-buffer creation resets the output handle and
+submits no work. Empty image-primitive sequences are invalid. Zero-transform
+batches retain their established no-op contract and return success with a null
+handle.
+
+Prepared operations must retain all outstanding submissions and wait before
+destroying, resizing, or reusing referenced scratch. Backend allocation and
+submission counters are safe to read while independent submissions are being
+created concurrently.
+
 The shader build must compile and link multiple controlled in-tree `.metal`
 sources into the existing gjxl metallib. Backend creation binds exact exported
 function names and validates required pipeline state up front; runtime
 reflection or prefix-based discovery is not part of the contract. Coherent
 codec operations belong above the backend and must not expand `GpuBackend` into
-one virtual method per private leaf kernel.
+one virtual method per private leaf kernel. The fixed affine,
+separable-convolution, and maximum-reduction command set is exposed through the
+optional `GpuImagePrimitives` capability instead of the core backend interface.
+Prepared Butteraugli and AQ operations will own their private kernel sequences
+rather than extending that command variant.
 
 Caller-visible output is committed only after validation and successful GPU
 completion. Invalid requests must submit no work. Tests may read intermediate
@@ -378,12 +396,30 @@ Buffers from a different backend instance are rejected even when both backends
 select the same physical device. Scratch growth is preparation-only; planned
 slices remain non-owning and require the arena to outlive submitted work.
 
-`SubmitPrimitiveSequence` validates a complete span before creating a command
-buffer, then encodes it in order through one compute encoder and one commit.
-Successful allocation and submission counters make the steady-state contract
-directly testable. Invalid descriptors return `InvalidArgument` without a
-submission; command creation and completion failures have distinct
-`SubmissionFailed` and `DeviceError` statuses.
+`GpuBackend` now contains only the shared buffer, copy, and transform surface.
+Backends opt into the fixed `ImagePrimitiveCommand` set through
+`GpuImagePrimitives`; a lightweight range-test backend therefore has no image
+primitive dependency or stub method. `SubmitImagePrimitiveSequence` validates
+a complete non-empty span before creating a command buffer, then encodes it in
+order through one compute encoder and one commit.
+
+Transforms and primitive sequences both return per-command `GpuSubmission`
+handles, replacing backend-wide latest-command synchronization. Repeated and
+concurrent `Wait()` calls return one cached status, and a handle retains the
+native command buffer, queue, and device so that it may outlive its backend.
+Invalid descriptors and injected command creation failures clear the output
+handle and commit nothing; completion failures remain attached to the exact
+submitted command. Successful allocation and submission counters are owned by
+`GpuBackend`, use atomic storage, and make concurrent and steady-state
+contracts directly testable. Command creation and completion failures have
+distinct `SubmissionFailed` and `DeviceError` statuses.
+
+The Metal host implementation is split by responsibility:
+`metal_backend.cpp` owns factory, buffer, copy, transform, and capability setup;
+`metal_submission.cpp` owns command-buffer lifecycle and completion errors; and
+`metal_primitives.cpp` owns primitive pipelines, validation, and encoding. One
+narrow internal header shares the concrete backend state and buffer resolution
+surface.
 
 The shader build compiles `dct.metal` and `primitives.metal` separately and
 links both into `gjxl.metallib`. Backend creation binds the exact affine,
@@ -408,8 +444,10 @@ The complete reference-enabled suite passed 32/32 tests and the
 reference-disabled suite passed 26/26. Both include real Metal DCT and primitive
 execution. Guarded prefixes, suffixes, and row padding remained poisoned, and
 foreign ownership, overflow, misalignment, partial overlap, insufficient
-scratch, injected submission failure, and injected completion failure were
-covered directly.
+scratch, empty sequences, injected submission failure, and multiple independent
+injected completion failures were covered directly. Submission handles were
+also exercised after backend destruction, through repeated and concurrent
+waits, and from concurrent submission threads.
 
 ### 2. Define and validate the prepared AQ evaluation operation
 

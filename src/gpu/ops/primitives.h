@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <memory>
+#include <span>
 #include <variant>
 
+#include "gpu/backend.h"
 #include "gpu/image.h"
 
 namespace gjxl {
@@ -38,9 +41,27 @@ struct MaximumReductionCommand {
   DevicePlaneView output;
 };
 
-using PrimitiveCommand = std::variant<
+using ImagePrimitiveCommand = std::variant<
   PointwiseAffineCommand,
   SeparableConvolutionCommand,
   MaximumReductionCommand>;
+
+/// Optional capability for a fixed set of reusable image primitives.
+class GpuImagePrimitives {
+public:
+  virtual ~GpuImagePrimitives() = default;
+
+  /// Validates and enqueues one non-empty dependent sequence. Success returns
+  /// a non-null submission; failure resets the output and submits no work.
+  virtual Status SubmitImagePrimitiveSequence(
+    std::span<const ImagePrimitiveCommand> commands,
+    std::unique_ptr<GpuSubmission>* submission) = 0;
+};
+
+[[nodiscard]] inline GpuImagePrimitives* QueryGpuImagePrimitives(
+  GpuBackend& backend) noexcept {
+
+  return dynamic_cast<GpuImagePrimitives*>(&backend);
+}
 
 }  // namespace gjxl

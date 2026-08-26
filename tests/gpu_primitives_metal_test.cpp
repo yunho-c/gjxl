@@ -13,7 +13,9 @@
 #include <memory>
 #include <random>
 #include <span>
+#include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "gpu/backend.h"
@@ -133,8 +135,26 @@ bool PreparePlane(
     plane->Prepare(gpu, extent, stride), "guarded plane allocation");
 }
 
+bool SubmitAndWait(
+  gjxl::GpuImagePrimitives& primitives,
+  std::span<const gjxl::ImagePrimitiveCommand> commands,
+  std::string_view operation) {
+
+  std::unique_ptr<gjxl::GpuSubmission> submission;
+  if (!CheckStatus(
+        primitives.SubmitImagePrimitiveSequence(commands, &submission),
+        std::string(operation) + " submission") ||
+      submission == nullptr) {
+    std::cerr << operation << " did not return a submission handle\n";
+    return false;
+  }
+  return CheckStatus(
+    submission->Wait(), std::string(operation) + " completion");
+}
+
 bool RunConvolutionCase(
   gjxl::GpuBackend& gpu,
+  gjxl::GpuImagePrimitives& primitives,
   size_t kernel_size) {
 
   constexpr gjxl::Extent2D kExtent{17, 11};
@@ -166,14 +186,14 @@ bool RunConvolutionCase(
       !CheckStatus(output.Upload(), "convolution output poison")) {
     return false;
   }
-  const gjxl::PrimitiveCommand command =
+  const gjxl::ImagePrimitiveCommand command =
     gjxl::SeparableConvolutionCommand{
       input.ConstView(), weights.ConstView(), intermediate.View(),
       output.View()};
-  if (!CheckStatus(gpu.SubmitPrimitiveSequence(
-        std::span<const gjxl::PrimitiveCommand>(&command, 1)),
-        "convolution submission") ||
-      !CheckStatus(gpu.Synchronize(), "convolution synchronization") ||
+  if (!SubmitAndWait(
+        primitives,
+        std::span<const gjxl::ImagePrimitiveCommand>(&command, 1),
+        "convolution") ||
       !CheckStatus(output.Download(), "convolution output download") ||
       !CheckStatus(intermediate.Download(), "convolution scratch download")) {
     return false;
@@ -185,7 +205,9 @@ bool RunConvolutionCase(
          output.GuardsIntact() && intermediate.GuardsIntact();
 }
 
-bool CheckPrimitiveChain(gjxl::GpuBackend& gpu) {
+bool CheckPrimitiveChain(
+  gjxl::GpuBackend& gpu,
+  gjxl::GpuImagePrimitives& primitives) {
   constexpr gjxl::Extent2D kExtent{17, 11};
   constexpr float kScale = -0.75f;
   constexpr float kBias = 0.2f;
@@ -236,7 +258,7 @@ bool CheckPrimitiveChain(gjxl::GpuBackend& gpu) {
     return false;
   }
 
-  const std::array<gjxl::PrimitiveCommand, 3> commands{{
+  const std::array<gjxl::ImagePrimitiveCommand, 3> commands{{
     gjxl::PointwiseAffineCommand{
       input.ConstView(), affine.View(), kScale, kBias},
     gjxl::SeparableConvolutionCommand{
@@ -246,9 +268,7 @@ bool CheckPrimitiveChain(gjxl::GpuBackend& gpu) {
       convolved.ConstView(), reduction_a, reduction_b, maximum.View()},
   }};
 
-  if (!CheckStatus(
-        gpu.SubmitPrimitiveSequence(commands), "chain warmup submission") ||
-      !CheckStatus(gpu.Synchronize(), "chain warmup synchronization")) {
+  if (!SubmitAndWait(primitives, commands, "chain warmup")) {
     return false;
   }
   const gjxl::GpuBackendStats before = gpu.stats();
@@ -259,9 +279,7 @@ bool CheckPrimitiveChain(gjxl::GpuBackend& gpu) {
     if (!CheckStatus(affine.Upload(), "measured affine poison") ||
         !CheckStatus(convolved.Upload(), "measured convolution poison") ||
         !CheckStatus(maximum.Upload(), "measured maximum poison") ||
-        !CheckStatus(gpu.SubmitPrimitiveSequence(commands),
-                     "measured chain submission") ||
-        !CheckStatus(gpu.Synchronize(), "measured chain synchronization")) {
+        !SubmitAndWait(primitives, commands, "measured chain")) {
       return false;
     }
     const gjxl::GpuBackendStats after = gpu.stats();
@@ -302,7 +320,9 @@ bool CheckPrimitiveChain(gjxl::GpuBackend& gpu) {
   return true;
 }
 
-bool CheckLargeMaximum(gjxl::GpuBackend& gpu) {
+bool CheckLargeMaximum(
+  gjxl::GpuBackend& gpu,
+  gjxl::GpuImagePrimitives& primitives) {
   constexpr gjxl::Extent2D kExtent{37, 29};
   std::vector<float> input_values = MakeInput(kExtent, 991);
   for (float& value : input_values) {
@@ -335,12 +355,12 @@ bool CheckLargeMaximum(gjxl::GpuBackend& gpu) {
       !CheckStatus(output.Upload(), "large maximum output poison")) {
     return false;
   }
-  const gjxl::PrimitiveCommand command = gjxl::MaximumReductionCommand{
+  const gjxl::ImagePrimitiveCommand command = gjxl::MaximumReductionCommand{
     input.ConstView(), scratch_a.View(), scratch_b.View(), output.View()};
-  if (!CheckStatus(gpu.SubmitPrimitiveSequence(
-        std::span<const gjxl::PrimitiveCommand>(&command, 1)),
-        "large maximum submission") ||
-      !CheckStatus(gpu.Synchronize(), "large maximum synchronization") ||
+  if (!SubmitAndWait(
+        primitives,
+        std::span<const gjxl::ImagePrimitiveCommand>(&command, 1),
+        "large maximum") ||
       !CheckStatus(output.Download(), "large maximum output download") ||
       !CheckStatus(scratch_a.Download(), "large maximum scratch A download") ||
       !CheckStatus(scratch_b.Download(), "large maximum scratch B download")) {
@@ -353,7 +373,9 @@ bool CheckLargeMaximum(gjxl::GpuBackend& gpu) {
          scratch_b.GuardsIntact();
 }
 
-bool CheckInPlaceAndConstant(gjxl::GpuBackend& gpu) {
+bool CheckInPlaceAndConstant(
+  gjxl::GpuBackend& gpu,
+  gjxl::GpuImagePrimitives& primitives) {
   constexpr gjxl::Extent2D kExtent{17, 11};
   constexpr float kScale = 0.5f;
   constexpr float kBias = 0.25f;
@@ -379,16 +401,14 @@ bool CheckInPlaceAndConstant(gjxl::GpuBackend& gpu) {
       !CheckStatus(intermediate.Upload(), "in-place scratch poison")) {
     return false;
   }
-  const std::array<gjxl::PrimitiveCommand, 2> commands{{
+  const std::array<gjxl::ImagePrimitiveCommand, 2> commands{{
     gjxl::PointwiseAffineCommand{
       in_place.ConstView(), in_place.View(), kScale, kBias},
     gjxl::SeparableConvolutionCommand{
       in_place.ConstView(), weights.ConstView(), intermediate.View(),
       in_place.View()},
   }};
-  if (!CheckStatus(gpu.SubmitPrimitiveSequence(commands),
-                   "in-place primitive submission") ||
-      !CheckStatus(gpu.Synchronize(), "in-place primitive synchronization") ||
+  if (!SubmitAndWait(primitives, commands, "in-place primitive") ||
       !CheckStatus(in_place.Download(), "in-place output download") ||
       !CheckStatus(intermediate.Download(), "in-place scratch download")) {
     return false;
@@ -403,7 +423,9 @@ bool CheckInPlaceAndConstant(gjxl::GpuBackend& gpu) {
          in_place.GuardsIntact() && intermediate.GuardsIntact();
 }
 
-bool CheckValidation(gjxl::GpuBackend& gpu) {
+bool CheckValidation(
+  gjxl::GpuBackend& gpu,
+  gjxl::GpuImagePrimitives& primitives) {
   constexpr gjxl::Extent2D kExtent{17, 11};
   gjxl::test::GuardedDevicePlane input;
   gjxl::test::GuardedDevicePlane output;
@@ -411,25 +433,46 @@ bool CheckValidation(gjxl::GpuBackend& gpu) {
       !PreparePlane(gpu, kExtent, 23, &output)) {
     return false;
   }
+
+  const gjxl::ImagePrimitiveCommand valid = gjxl::PointwiseAffineCommand{
+    input.ConstView(), output.View(), 1.0f, 0.0f};
+  std::unique_ptr<gjxl::GpuSubmission> submission;
+  if (!primitives.SubmitImagePrimitiveSequence(
+        std::span<const gjxl::ImagePrimitiveCommand>(&valid, 1),
+        &submission).ok() ||
+      submission == nullptr || !submission->Wait().ok()) {
+    std::cerr << "Valid primitive did not return a usable submission\n";
+    return false;
+  }
   const uint64_t submissions = gpu.stats().committed_submissions;
   gjxl::PointwiseAffineCommand invalid_stride{
     input.ConstView(), output.View(), 1.0f, 0.0f};
   invalid_stride.output.row_stride = 16;
-  const gjxl::PrimitiveCommand first = invalid_stride;
-  if (gpu.SubmitPrimitiveSequence(
-        std::span<const gjxl::PrimitiveCommand>(&first, 1)).code() !=
-        gjxl::StatusCode::kInvalidArgument) {
+  const gjxl::ImagePrimitiveCommand first = invalid_stride;
+  if (primitives.SubmitImagePrimitiveSequence(
+        std::span<const gjxl::ImagePrimitiveCommand>(&first, 1),
+        &submission).code() != gjxl::StatusCode::kInvalidArgument ||
+      submission != nullptr) {
     std::cerr << "Invalid primitive stride was accepted\n";
+    return false;
+  }
+
+  if (primitives.SubmitImagePrimitiveSequence(
+        std::span<const gjxl::ImagePrimitiveCommand>(&valid, 1),
+        nullptr).code() != gjxl::StatusCode::kInvalidArgument ||
+      gpu.stats().committed_submissions != submissions) {
+    std::cerr << "Null primitive submission output committed work\n";
     return false;
   }
 
   gjxl::DevicePlaneView partial = input.View();
   partial.offset_bytes += sizeof(float);
-  const gjxl::PrimitiveCommand second = gjxl::PointwiseAffineCommand{
+  const gjxl::ImagePrimitiveCommand second = gjxl::PointwiseAffineCommand{
     input.ConstView(), partial, 1.0f, 0.0f};
-  if (gpu.SubmitPrimitiveSequence(
-        std::span<const gjxl::PrimitiveCommand>(&second, 1)).code() !=
-        gjxl::StatusCode::kInvalidArgument) {
+  if (primitives.SubmitImagePrimitiveSequence(
+        std::span<const gjxl::ImagePrimitiveCommand>(&second, 1),
+        &submission).code() != gjxl::StatusCode::kInvalidArgument ||
+      submission != nullptr) {
     std::cerr << "Partially overlapping primitive planes were accepted\n";
     return false;
   }
@@ -444,14 +487,17 @@ bool CheckValidation(gjxl::GpuBackend& gpu) {
       !PreparePlane(gpu, {1, 1}, 1, &scalar_output)) {
     return false;
   }
-  const gjxl::PrimitiveCommand short_scratch =
+  const gjxl::ImagePrimitiveCommand short_scratch =
     gjxl::MaximumReductionCommand{
       large_input.ConstView(), short_scratch_a.View(), short_scratch_b.View(),
       scalar_output.View()};
-  if (gpu.SubmitPrimitiveSequence(
-        std::span<const gjxl::PrimitiveCommand>(&short_scratch, 1)).code() !=
+  if (primitives.SubmitImagePrimitiveSequence(
+        std::span<const gjxl::ImagePrimitiveCommand>(&short_scratch, 1),
+        &submission).code() != gjxl::StatusCode::kInvalidArgument ||
+      submission != nullptr ||
+      primitives.SubmitImagePrimitiveSequence({}, &submission).code() !=
         gjxl::StatusCode::kInvalidArgument ||
-      !gpu.SubmitPrimitiveSequence({}).ok()) {
+      submission != nullptr) {
     std::cerr << "Insufficient reduction scratch or empty sequence failed\n";
     return false;
   }
@@ -463,11 +509,12 @@ bool CheckValidation(gjxl::GpuBackend& gpu) {
   }
   gjxl::test::GuardedDevicePlane foreign;
   if (!PreparePlane(*other, kExtent, 23, &foreign)) return false;
-  const gjxl::PrimitiveCommand third = gjxl::PointwiseAffineCommand{
+  const gjxl::ImagePrimitiveCommand third = gjxl::PointwiseAffineCommand{
     foreign.ConstView(), output.View(), 1.0f, 0.0f};
-  if (gpu.SubmitPrimitiveSequence(
-        std::span<const gjxl::PrimitiveCommand>(&third, 1)).code() !=
-        gjxl::StatusCode::kInvalidArgument ||
+  if (primitives.SubmitImagePrimitiveSequence(
+        std::span<const gjxl::ImagePrimitiveCommand>(&third, 1),
+        &submission).code() != gjxl::StatusCode::kInvalidArgument ||
+      submission != nullptr ||
       gpu.stats().committed_submissions != submissions) {
     std::cerr << "Foreign primitive buffer submitted work\n";
     return false;
@@ -478,27 +525,63 @@ bool CheckValidation(gjxl::GpuBackend& gpu) {
 bool CheckFailureStatuses() {
   const auto check = [](gjxl::MetalBackendOptions options,
                         gjxl::StatusCode expected_submit,
-                        gjxl::StatusCode expected_sync) {
+                        gjxl::StatusCode expected_wait) {
     std::unique_ptr<gjxl::GpuBackend> gpu;
     if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, options, &gpu).ok()) {
       return false;
     }
+    gjxl::GpuImagePrimitives* primitives =
+      gjxl::QueryGpuImagePrimitives(*gpu);
+    if (primitives == nullptr) return false;
     gjxl::test::GuardedDevicePlane input;
     gjxl::test::GuardedDevicePlane output;
     if (!input.Prepare(*gpu, {3, 2}, 5).ok() ||
         !output.Prepare(*gpu, {3, 2}, 5).ok()) {
       return false;
     }
-    const gjxl::PrimitiveCommand command = gjxl::PointwiseAffineCommand{
+    const gjxl::ImagePrimitiveCommand command = gjxl::PointwiseAffineCommand{
       input.ConstView(), output.View(), 1.0f, 0.0f};
-    const gjxl::Status submitted = gpu->SubmitPrimitiveSequence(
-      std::span<const gjxl::PrimitiveCommand>(&command, 1));
+    std::unique_ptr<gjxl::GpuSubmission> submission;
+    const gjxl::Status submitted = primitives->SubmitImagePrimitiveSequence(
+      std::span<const gjxl::ImagePrimitiveCommand>(&command, 1),
+      &submission);
     if (submitted.code() != expected_submit) return false;
     if (!submitted.ok()) {
-      return gpu->stats().committed_submissions == 0;
+      return submission == nullptr &&
+             gpu->stats().committed_submissions == 0;
     }
-    return gpu->Synchronize().code() == expected_sync &&
-           gpu->stats().committed_submissions == 1;
+    if (submission == nullptr) return false;
+    std::unique_ptr<gjxl::GpuSubmission> second_submission;
+    if (!primitives->SubmitImagePrimitiveSequence(
+          std::span<const gjxl::ImagePrimitiveCommand>(&command, 1),
+          &second_submission).ok() ||
+        second_submission == nullptr) {
+      return false;
+    }
+
+    constexpr size_t kWaiterCount = 4;
+    std::array<gjxl::Status, kWaiterCount> concurrent_results;
+    std::array<std::thread, kWaiterCount> waiters;
+    for (size_t index = 0; index < kWaiterCount; ++index) {
+      waiters[index] = std::thread(
+        [&submission, &concurrent_results, index] {
+          concurrent_results[index] = submission->Wait();
+        });
+    }
+    for (std::thread& waiter : waiters) waiter.join();
+
+    const gjxl::Status second_first = second_submission->Wait();
+    const gjxl::Status second_again = second_submission->Wait();
+    for (const gjxl::Status& result : concurrent_results) {
+      if (result.code() != expected_wait ||
+          result.message() != concurrent_results.front().message()) {
+        return false;
+      }
+    }
+    return second_first.code() == expected_wait &&
+           second_again.code() == second_first.code() &&
+           second_again.message() == second_first.message() &&
+           gpu->stats().committed_submissions == 2;
   };
 
   gjxl::MetalBackendOptions submit_failure;
@@ -515,6 +598,90 @@ bool CheckFailureStatuses() {
            gjxl::StatusCode::kDeviceError);
 }
 
+bool CheckSubmissionOutlivesBackend() {
+  std::unique_ptr<gjxl::GpuSubmission> submission;
+  {
+    std::unique_ptr<gjxl::GpuBackend> gpu;
+    if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+      return false;
+    }
+    gjxl::GpuImagePrimitives* primitives =
+      gjxl::QueryGpuImagePrimitives(*gpu);
+    if (primitives == nullptr) return false;
+    gjxl::test::GuardedDevicePlane input;
+    gjxl::test::GuardedDevicePlane output;
+    if (!input.Prepare(*gpu, {3, 2}, 5).ok() ||
+        !output.Prepare(*gpu, {3, 2}, 5).ok()) {
+      return false;
+    }
+    const gjxl::ImagePrimitiveCommand command =
+      gjxl::PointwiseAffineCommand{
+        input.ConstView(), output.View(), 1.0f, 0.0f};
+    if (!primitives->SubmitImagePrimitiveSequence(
+          std::span<const gjxl::ImagePrimitiveCommand>(&command, 1),
+          &submission).ok() ||
+        submission == nullptr) {
+      return false;
+    }
+    gpu.reset();
+  }
+  return submission->Wait().ok() && submission->Wait().ok();
+}
+
+bool CheckConcurrentSubmissions(
+  gjxl::GpuBackend& gpu,
+  gjxl::GpuImagePrimitives& primitives) {
+
+  constexpr size_t kSubmissionCount = 4;
+  constexpr gjxl::Extent2D kExtent{17, 11};
+  std::array<gjxl::test::GuardedDevicePlane, kSubmissionCount> inputs;
+  std::array<gjxl::test::GuardedDevicePlane, kSubmissionCount> outputs;
+  std::array<gjxl::ImagePrimitiveCommand, kSubmissionCount> commands;
+  for (size_t index = 0; index < kSubmissionCount; ++index) {
+    if (!inputs[index].Prepare(gpu, kExtent, 23).ok() ||
+        !outputs[index].Prepare(gpu, kExtent, 25).ok()) {
+      return false;
+    }
+    inputs[index].SetLogical(MakeInput(kExtent, 900 +
+      static_cast<uint32_t>(index)));
+    outputs[index].PoisonLogical();
+    if (!inputs[index].Upload().ok() || !outputs[index].Upload().ok()) {
+      return false;
+    }
+    commands[index] = gjxl::PointwiseAffineCommand{
+      inputs[index].ConstView(), outputs[index].View(), 0.5f, 0.25f};
+  }
+
+  const uint64_t before = gpu.stats().committed_submissions;
+  std::array<std::unique_ptr<gjxl::GpuSubmission>, kSubmissionCount>
+    submissions;
+  std::array<gjxl::Status, kSubmissionCount> statuses;
+  std::array<std::thread, kSubmissionCount> threads;
+  for (size_t index = 0; index < kSubmissionCount; ++index) {
+    threads[index] = std::thread([&, index] {
+      statuses[index] = primitives.SubmitImagePrimitiveSequence(
+        std::span<const gjxl::ImagePrimitiveCommand>(&commands[index], 1),
+        &submissions[index]);
+    });
+  }
+  for (std::thread& thread : threads) thread.join();
+  for (size_t index = 0; index < kSubmissionCount; ++index) {
+    if (!statuses[index].ok() || submissions[index] == nullptr ||
+        !submissions[index]->Wait().ok() ||
+        !outputs[index].Download().ok() || !outputs[index].GuardsIntact()) {
+      return false;
+    }
+    const std::vector<float> expected = ReferenceAffine(
+      inputs[index].Logical(), 0.5f, 0.25f);
+    if (!Compare(
+          "concurrent affine", outputs[index].Logical(), expected,
+          2e-6f, 2e-6f)) {
+      return false;
+    }
+  }
+  return gpu.stats().committed_submissions == before + kSubmissionCount;
+}
+
 }  // namespace
 
 int main() {
@@ -524,13 +691,18 @@ int main() {
         "Metal backend creation")) {
     return EXIT_FAILURE;
   }
-  if (!CheckPrimitiveChain(*gpu) ||
-      !RunConvolutionCase(*gpu, 1) ||
-      !RunConvolutionCase(*gpu, 33) ||
-      !CheckLargeMaximum(*gpu) ||
-      !CheckInPlaceAndConstant(*gpu) ||
-      !CheckValidation(*gpu) ||
-      !CheckFailureStatuses()) {
+  gjxl::GpuImagePrimitives* primitives =
+    gjxl::QueryGpuImagePrimitives(*gpu);
+  if (primitives == nullptr ||
+      !CheckPrimitiveChain(*gpu, *primitives) ||
+      !RunConvolutionCase(*gpu, *primitives, 1) ||
+      !RunConvolutionCase(*gpu, *primitives, 33) ||
+      !CheckLargeMaximum(*gpu, *primitives) ||
+      !CheckInPlaceAndConstant(*gpu, *primitives) ||
+      !CheckValidation(*gpu, *primitives) ||
+      !CheckConcurrentSubmissions(*gpu, *primitives) ||
+      !CheckFailureStatuses() ||
+      !CheckSubmissionOutlivesBackend()) {
     return EXIT_FAILURE;
   }
   std::cout << "All Metal primitive infrastructure tests passed.\n";

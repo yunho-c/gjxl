@@ -23,8 +23,9 @@ public:
   DeviceScratchArena(DeviceScratchArena&&) noexcept = default;
   DeviceScratchArena& operator=(DeviceScratchArena&&) noexcept = default;
 
-  /// Allocates or grows storage. Caller must first synchronize outstanding
-  /// work that references existing slices. A sufficient allocation is reused.
+  /// Allocates or grows storage. Caller must first wait on every outstanding
+  /// submission that references existing slices. A sufficient allocation is
+  /// reused.
   [[nodiscard]] Status Prepare(GpuBackend& backend, size_t capacity_bytes);
   void ResetLayout() noexcept;
 
