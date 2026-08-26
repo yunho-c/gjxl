@@ -22,6 +22,23 @@ namespace {
 constexpr gjxl::Extent2D kExtent{80, 72};
 constexpr size_t kStride = kExtent.width + 3;
 
+bool CheckColorTileExtent() {
+  const gjxl::Extent2D maximum{
+    std::numeric_limits<size_t>::max(),
+    std::numeric_limits<size_t>::max(),
+  };
+  const gjxl::Extent2D expected{
+    std::numeric_limits<size_t>::max() / gjxl::kColorTileDimension + 1,
+    std::numeric_limits<size_t>::max() / gjxl::kColorTileDimension + 1,
+  };
+  if (gjxl::ColorTileExtent({64, 65}) != gjxl::Extent2D{1, 2} ||
+      gjxl::ColorTileExtent(maximum) != expected) {
+    std::cerr << "Color-tile extent calculation is incorrect\n";
+    return false;
+  }
+  return true;
+}
+
 struct OpsinStorage {
   std::array<std::vector<float>, 3> plane;
 
@@ -262,7 +279,8 @@ bool CheckValidationAndAtomicCommit() {
 }  // namespace
 
 int main() {
-  if (!CheckPinnedMap() ||
+  if (!CheckColorTileExtent() ||
+      !CheckPinnedMap() ||
       !CheckPinnedFinalMap() ||
       !CheckValidationAndAtomicCommit()) {
     return EXIT_FAILURE;

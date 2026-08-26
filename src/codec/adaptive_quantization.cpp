@@ -413,8 +413,7 @@ Status ValidateInputs(
       "Opsin image is invalid");
   }
 
-  if (opsin.width() % kJxlBlockDimension != 0 ||
-      opsin.height() % kJxlBlockDimension != 0) {
+  if (!BlockGrid::IsPaddedPixelExtent(opsin.extent())) {
     return Status::InvalidArgument(
       "Opsin image must be padded to complete 8x8 blocks");
   }
@@ -435,10 +434,8 @@ Status ValidateInputs(
       "Initial quantization options must be finite and positive");
   }
 
-  *block_extent = {
-    .width = opsin.width() / kJxlBlockDimension,
-    .height = opsin.height() / kJxlBlockDimension,
-  };
+  *block_extent =
+    BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
   if (!output.quant_field.valid() ||
       !output.strategy_mask.valid() ||
       !output.pixel_mask.valid() ||
@@ -889,13 +886,10 @@ Status ValidateAdaptiveQuantizationInputs(
   }
 
   const Extent2D block_extent = strategies.extent();
-  if (block_extent.width >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      block_extent.height >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      opsin.extent() != Extent2D{
-        block_extent.width * kJxlBlockDimension,
-        block_extent.height * kJxlBlockDimension} ||
+  Extent2D padded_pixel_extent;
+  if (!BlockGrid{block_extent}.try_padded_pixel_extent(
+        &padded_pixel_extent) ||
+      opsin.extent() != padded_pixel_extent ||
       initial_quant_field.extent != block_extent ||
       epf_sharpness.extent != block_extent ||
       output.quant_field.extent != block_extent ||

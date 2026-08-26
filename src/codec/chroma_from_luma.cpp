@@ -293,18 +293,12 @@ Status ComputeInitialColorCorrelationMap(
       "Chroma-from-luma map output is null");
   }
   if (!opsin.valid() ||
-      opsin.width() % kJxlBlockDimension != 0 ||
-      opsin.height() % kJxlBlockDimension != 0) {
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent())) {
     return Status::InvalidArgument(
       "Chroma-from-luma input must have valid 8x8-aligned geometry");
   }
 
-  const Extent2D tile_extent{
-    opsin.width() / kColorTileDimension +
-      static_cast<size_t>(opsin.width() % kColorTileDimension != 0),
-    opsin.height() / kColorTileDimension +
-      static_cast<size_t>(opsin.height() % kColorTileDimension != 0),
-  };
+  const Extent2D tile_extent = ColorTileExtent(opsin.extent());
   size_t tile_count = 0;
   if (!tile_extent.try_area(&tile_count)) {
     return Status::InvalidArgument(
@@ -398,15 +392,12 @@ Status ComputeFinalColorCorrelationMap(
       "Final chroma-from-luma map output is null");
   }
   if (!opsin.valid() ||
-      opsin.width() % kJxlBlockDimension != 0 ||
-      opsin.height() % kJxlBlockDimension != 0) {
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent())) {
     return Status::InvalidArgument(
       "Final chroma-from-luma input must have valid block geometry");
   }
-  const Extent2D block_extent{
-    opsin.width() / kJxlBlockDimension,
-    opsin.height() / kJxlBlockDimension,
-  };
+  const Extent2D block_extent =
+    BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
   if (!strategies.complete() || strategies.extent() != block_extent ||
       !raw_quant_field.valid() || raw_quant_field.extent != block_extent ||
       !quantizer.valid()) {
@@ -414,12 +405,7 @@ Status ComputeFinalColorCorrelationMap(
       "Final chroma-from-luma strategy or quantization state is invalid");
   }
 
-  const Extent2D tile_extent{
-    opsin.width() / kColorTileDimension +
-      static_cast<size_t>(opsin.width() % kColorTileDimension != 0),
-    opsin.height() / kColorTileDimension +
-      static_cast<size_t>(opsin.height() % kColorTileDimension != 0),
-  };
+  const Extent2D tile_extent = ColorTileExtent(opsin.extent());
   size_t tile_count = 0;
   if (!tile_extent.try_area(&tile_count)) {
     return Status::InvalidArgument(

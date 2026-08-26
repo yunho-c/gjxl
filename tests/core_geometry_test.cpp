@@ -42,6 +42,14 @@ bool CheckExtentArea() {
     return false;
   }
 
+  const gjxl::Extent2D divided = gjxl::Extent2D{
+    std::numeric_limits<size_t>::max(), 65}.ceil_div(64);
+  if (divided != gjxl::Extent2D{
+        std::numeric_limits<size_t>::max() / 64 + 1, 2}) {
+    std::cerr << "Extent2D ceiling division is incorrect\n";
+    return false;
+  }
+
   return true;
 }
 
@@ -79,6 +87,24 @@ bool CheckFrameGeometry() {
         &unused).ok()) {
 
     std::cerr << "FrameGeometry accepted an overflowing frame\n";
+    return false;
+  }
+
+  constexpr gjxl::Extent2D kPaddedExtent{24, 16};
+  if (!gjxl::BlockGrid::IsPaddedPixelExtent(kPaddedExtent) ||
+      gjxl::BlockGrid::IsPaddedPixelExtent({17, 9}) ||
+      gjxl::BlockGrid::FromPaddedPixelExtent(kPaddedExtent).blocks !=
+        gjxl::Extent2D{3, 2}) {
+    std::cerr << "Padded block-grid geometry is incorrect\n";
+    return false;
+  }
+
+  gjxl::Extent2D padded_extent;
+  if (!gjxl::BlockGrid{{3, 2}}.try_padded_pixel_extent(&padded_extent) ||
+      padded_extent != kPaddedExtent ||
+      gjxl::BlockGrid{{std::numeric_limits<size_t>::max(), 1}}
+        .try_padded_pixel_extent(&padded_extent)) {
+    std::cerr << "Checked padded extent calculation is incorrect\n";
     return false;
   }
 

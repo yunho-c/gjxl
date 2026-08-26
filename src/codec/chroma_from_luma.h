@@ -19,6 +19,12 @@ namespace gjxl {
 inline constexpr size_t kColorTileDimension = 64;
 inline constexpr int32_t kDefaultColorFactor = 84;
 
+[[nodiscard]] constexpr Extent2D ColorTileExtent(
+  Extent2D pixel_extent) noexcept {
+
+  return pixel_extent.ceil_div(kColorTileDimension);
+}
+
 /// Owns the per-color-tile AC chroma-from-luma correction factors.
 ///
 /// The stored signed bytes match the JPEG XL representation. Actual factors

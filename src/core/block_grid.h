@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <limits>
 
@@ -17,6 +18,25 @@ inline constexpr size_t kJxlBlockArea = kJxlBlockDimension * kJxlBlockDimension;
 // Dimensions of a regular JPEG XL 8x8 base-block grid.
 struct BlockGrid {
   Extent2D blocks;
+
+  [[nodiscard]] static constexpr bool IsPaddedPixelExtent(
+    Extent2D pixel_extent) noexcept {
+
+    return !pixel_extent.empty() &&
+      pixel_extent.width % kJxlBlockDimension == 0 &&
+      pixel_extent.height % kJxlBlockDimension == 0;
+  }
+
+  /// Constructs a grid from an already padded, block-aligned pixel extent.
+  [[nodiscard]] static constexpr BlockGrid FromPaddedPixelExtent(
+    Extent2D pixel_extent) noexcept {
+
+    assert(IsPaddedPixelExtent(pixel_extent));
+    return {{
+      pixel_extent.width / kJxlBlockDimension,
+      pixel_extent.height / kJxlBlockDimension,
+    }};
+  }
 
   [[nodiscard]] static Status Create(
     Extent2D pixel_extent,
@@ -58,6 +78,21 @@ struct BlockGrid {
       .width = blocks.width * kJxlBlockDimension,
       .height = blocks.height * kJxlBlockDimension,
     };
+  }
+
+  /// Computes the padded pixel extent without overflowing size_t.
+  [[nodiscard]] constexpr bool try_padded_pixel_extent(
+    Extent2D* pixel_extent) const noexcept {
+
+    if (pixel_extent == nullptr || blocks.empty() ||
+        blocks.width >
+          std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
+        blocks.height >
+          std::numeric_limits<size_t>::max() / kJxlBlockDimension) {
+      return false;
+    }
+    *pixel_extent = padded_pixel_extent();
+    return true;
   }
 };
 

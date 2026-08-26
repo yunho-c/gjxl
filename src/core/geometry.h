@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <limits>
 
@@ -28,6 +29,15 @@ struct Extent2D {
 
     *area = width * height;
     return true;
+  }
+
+  /// Divides both dimensions by a non-zero divisor, rounding up safely.
+  [[nodiscard]] constexpr Extent2D ceil_div(size_t divisor) const noexcept {
+    assert(divisor != 0);
+    return {
+      width / divisor + static_cast<size_t>(width % divisor != 0),
+      height / divisor + static_cast<size_t>(height % divisor != 0),
+    };
   }
 
   friend constexpr bool operator==(

@@ -7,11 +7,12 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <limits>
 #include <new>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+#include "core/block_grid.h"
 
 #if GJXL_ENABLE_LIBJXL_REFERENCE
 #include <jxl/memory_manager.h>
@@ -165,22 +166,19 @@ Status ReduceButteraugliDistanceMap(
   const AcStrategyGrid& strategies,
   PlaneF32View block_distance_map) {
 
+  Extent2D padded_pixel_extent;
   if (!distance_map.valid() ||
       !strategies.complete() ||
       !block_distance_map.valid() ||
       block_distance_map.extent != strategies.extent() ||
-      strategies.extent().width >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      strategies.extent().height >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
+      !BlockGrid{strategies.extent()}.try_padded_pixel_extent(
+        &padded_pixel_extent) ||
       distance_map.extent.width <=
-        (strategies.extent().width - 1) * kJxlBlockDimension ||
+        padded_pixel_extent.width - kJxlBlockDimension ||
       distance_map.extent.height <=
-        (strategies.extent().height - 1) * kJxlBlockDimension ||
-      distance_map.extent.width >
-        strategies.extent().width * kJxlBlockDimension ||
-      distance_map.extent.height >
-        strategies.extent().height * kJxlBlockDimension) {
+        padded_pixel_extent.height - kJxlBlockDimension ||
+      distance_map.extent.width > padded_pixel_extent.width ||
+      distance_map.extent.height > padded_pixel_extent.height) {
     return Status::InvalidArgument(
       "Butteraugli reduction inputs are invalid or differently sized");
   }

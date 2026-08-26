@@ -299,11 +299,9 @@ Status ApplyEpf(
       !output.valid() ||
       !inverse_sigma.valid() ||
       input.extent() != output.extent() ||
-      input.width() % kJxlBlockDimension != 0 ||
-      input.height() % kJxlBlockDimension != 0 ||
-      inverse_sigma.extent != Extent2D{
-        input.width() / kJxlBlockDimension,
-        input.height() / kJxlBlockDimension} ||
+      !BlockGrid::IsPaddedPixelExtent(input.extent()) ||
+      inverse_sigma.extent !=
+        BlockGrid::FromPaddedPixelExtent(input.extent()).blocks ||
       options.iterations > 3 ||
       !std::isfinite(options.pass0_sigma_scale) ||
       options.pass0_sigma_scale <= 0.0f ||

@@ -43,16 +43,13 @@ Status ValidateCostInputs(
   }
 
   if (!opsin.valid() ||
-      opsin.width() % kJxlBlockDimension != 0 ||
-      opsin.height() % kJxlBlockDimension != 0) {
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent())) {
     return Status::InvalidArgument(
       "AC-strategy cost requires a padded opsin image");
   }
 
-  const Extent2D block_extent{
-    .width = opsin.width() / kJxlBlockDimension,
-    .height = opsin.height() / kJxlBlockDimension,
-  };
+  const Extent2D block_extent =
+    BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
   if (!quant_field.valid() ||
       quant_field.extent != block_extent ||
       !pixel_mask.valid() ||
@@ -887,15 +884,12 @@ Status FindAcStrategyGrid(
       "AC-strategy grid output is null");
   }
   if (!opsin.valid() ||
-      opsin.width() % kJxlBlockDimension != 0 ||
-      opsin.height() % kJxlBlockDimension != 0) {
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent())) {
     return Status::InvalidArgument(
       "AC-strategy search requires a padded opsin image");
   }
-  const Extent2D block_extent{
-    opsin.width() / kJxlBlockDimension,
-    opsin.height() / kJxlBlockDimension,
-  };
+  const Extent2D block_extent =
+    BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
   size_t block_count = 0;
   if (!block_extent.try_area(&block_count)) {
     return Status::InvalidArgument(
@@ -907,12 +901,7 @@ Status FindAcStrategyGrid(
     return Status::InvalidArgument(
       "AC-strategy search fields have invalid geometry");
   }
-  const Extent2D expected_tile_extent{
-    opsin.width() / kColorTileDimension +
-      static_cast<size_t>(opsin.width() % kColorTileDimension != 0),
-    opsin.height() / kColorTileDimension +
-      static_cast<size_t>(opsin.height() % kColorTileDimension != 0),
-  };
+  const Extent2D expected_tile_extent = ColorTileExtent(opsin.extent());
   if (color_correlation.tile_extent() != expected_tile_extent ||
       !std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f) {

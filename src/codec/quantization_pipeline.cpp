@@ -14,6 +14,7 @@
 #include "codec/ac_strategy.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/gaborish.h"
+#include "core/block_grid.h"
 #include "core/geometry.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
@@ -30,8 +31,7 @@ Status ValidatePipelineInputs(
 
   if (!original_linear_rgb.valid() ||
       !opsin.valid() ||
-      opsin.width() % kJxlBlockDimension != 0 ||
-      opsin.height() % kJxlBlockDimension != 0 ||
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
       !std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f ||
       !std::isfinite(options.initial_quant_rescale) ||
@@ -48,10 +48,8 @@ Status ValidatePipelineInputs(
     }
   }
 
-  *block_extent = {
-    opsin.width() / kJxlBlockDimension,
-    opsin.height() / kJxlBlockDimension,
-  };
+  *block_extent =
+    BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
   if (!output.initial_quantization.quant_field.valid() ||
       !output.initial_quantization.strategy_mask.valid() ||
       !output.initial_quantization.pixel_mask.valid() ||

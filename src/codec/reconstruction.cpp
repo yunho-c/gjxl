@@ -7,7 +7,6 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <limits>
 #include <new>
 #include <stdexcept>
 #include <utility>
@@ -16,6 +15,7 @@
 #include "codec/dc_conversion.h"
 #include "codec/dct.h"
 #include "codec/quantization.h"
+#include "core/block_grid.h"
 #include "core/geometry.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
@@ -69,21 +69,15 @@ Status ValidateImageContract(
   }
 
   const Extent2D block_extent = strategies.extent();
-  if (block_extent.width >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      block_extent.height >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      opsin.extent() != Extent2D{
-        block_extent.width * kJxlBlockDimension,
-        block_extent.height * kJxlBlockDimension}) {
+  Extent2D padded_pixel_extent;
+  if (!BlockGrid{block_extent}.try_padded_pixel_extent(
+        &padded_pixel_extent) ||
+      opsin.extent() != padded_pixel_extent) {
     return Status::InvalidArgument(
       "Coefficient image does not match its block grid");
   }
 
-  const Extent2D expected_color_tiles{
-    (opsin.width() + kColorTileDimension - 1) / kColorTileDimension,
-    (opsin.height() + kColorTileDimension - 1) / kColorTileDimension,
-  };
+  const Extent2D expected_color_tiles = ColorTileExtent(opsin.extent());
   if (color_correlation.tile_extent() != expected_color_tiles) {
     return Status::InvalidArgument(
       "Color-correlation map does not match the coefficient image");
@@ -352,21 +346,15 @@ Status ReconstructQuantizedCoefficients(
   }
 
   const Extent2D block_extent = frame.block_extent();
-  if (block_extent.width >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      block_extent.height >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      output.extent() != Extent2D{
-        block_extent.width * kJxlBlockDimension,
-        block_extent.height * kJxlBlockDimension}) {
+  Extent2D padded_pixel_extent;
+  if (!BlockGrid{block_extent}.try_padded_pixel_extent(
+        &padded_pixel_extent) ||
+      output.extent() != padded_pixel_extent) {
     return Status::InvalidArgument(
       "Coefficient reconstruction output has the wrong extent");
   }
 
-  const Extent2D expected_color_tiles{
-    (output.width() + kColorTileDimension - 1) / kColorTileDimension,
-    (output.height() + kColorTileDimension - 1) / kColorTileDimension,
-  };
+  const Extent2D expected_color_tiles = ColorTileExtent(output.extent());
   if (color_correlation.tile_extent() != expected_color_tiles) {
     return Status::InvalidArgument(
       "Color-correlation map does not match the reconstruction image");
