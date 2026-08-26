@@ -41,6 +41,13 @@ struct OracleOptions {
   float intensity_target = 80.0f;
 };
 
+/// Calls pinned libjxl's dynamically dispatched internal blur directly.
+/// The output plane is committed only after all validation and allocation
+/// succeeds.
+[[nodiscard]] bool
+ComputeLiveGaussianBlur(ConstOraclePlane input, float sigma, OraclePlane output,
+                        const JxlMemoryManager *memory_manager = nullptr);
+
 /// Calls pinned libjxl's public, dynamically dispatched full-map path.
 /// The output map and score are committed only after the entire call succeeds.
 [[nodiscard]] bool

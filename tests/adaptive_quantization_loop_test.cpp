@@ -13,6 +13,7 @@
 #include <iostream>
 #include <vector>
 
+#include "butteraugli_test_tolerances.h"
 #include "codec/adaptive_quantization.h"
 #include "codec/color_transform.h"
 
@@ -236,7 +237,8 @@ bool CheckLoopAndUpdateRule() {
     const size_t y = index / kBlockExtent.width;
     if (std::abs(
           updated.quant_field[y * AqStorage::kBlockStride + x] -
-          expected[index]) > 2.0e-6f ||
+          expected[index]) >
+          gjxl::butteraugli_test::kAqUpdateTolerance ||
         updated.raw_quant[y * AqStorage::kBlockStride + x] < 1 ||
         !std::isfinite(
           updated.block_distance[y * AqStorage::kBlockStride + x])) {
@@ -259,7 +261,6 @@ bool CheckLoopAndUpdateRule() {
     std::cerr << "Two-update AQ evaluation failed\n";
     return false;
   }
-  constexpr float kPinnedTolerance = 2.0e-5f;
   constexpr std::array<double, 3> kPinnedScoreHistory = {
     1.5871505737304688,
     1.4434140920639038,
@@ -280,7 +281,8 @@ bool CheckLoopAndUpdateRule() {
   for (size_t index = 0; index < kPinnedScoreHistory.size(); ++index) {
     if (std::abs(
           two_updates.score_history[index] -
-          kPinnedScoreHistory[index]) > kPinnedTolerance) {
+          kPinnedScoreHistory[index]) >
+          gjxl::butteraugli_test::kPinnedAqTolerance) {
       std::cerr << "Two-update AQ score history differs from the pin\n";
       return false;
     }
@@ -291,12 +293,14 @@ bool CheckLoopAndUpdateRule() {
     const size_t strided_index = y * AqStorage::kBlockStride + x;
     if (std::abs(
           two_updates.quant_field[strided_index] -
-          kPinnedQuantField[index]) > kPinnedTolerance ||
+          kPinnedQuantField[index]) >
+          gjxl::butteraugli_test::kPinnedAqTolerance ||
         two_updates.raw_quant[strided_index] !=
           kPinnedRawQuantField[index] ||
         std::abs(
           two_updates.block_distance[strided_index] -
-          kPinnedBlockDistance[index]) > kPinnedTolerance) {
+          kPinnedBlockDistance[index]) >
+          gjxl::butteraugli_test::kPinnedAqTolerance) {
       std::cerr << "Two-update AQ fields differ from the pin\n";
       return false;
     }

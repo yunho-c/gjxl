@@ -119,6 +119,17 @@ template <typename Plane> [[nodiscard]] bool ValidPlane(const Plane &plane) {
   return true;
 }
 
+[[nodiscard]] bool PixelsAreFinite(ConstOraclePlane plane) {
+  for (size_t y = 0; y < plane.extent.height; ++y) {
+    for (size_t x = 0; x < plane.extent.width; ++x) {
+      if (!std::isfinite(plane.data[y * plane.stride + x])) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] jxl::ButteraugliParams ToLibjxl(OracleOptions options) {
   return {
       .hf_asymmetry = options.hf_asymmetry,
@@ -170,6 +181,19 @@ template <typename Plane> [[nodiscard]] bool ValidPlane(const Plane &plane) {
   return true;
 }
 
+[[nodiscard]] bool CopyToLibjxl(ConstOraclePlane source,
+                                JxlMemoryManager *memory_manager,
+                                jxl::ImageF *image) {
+  if (!AllocatePlane(memory_manager, source.extent, image)) {
+    return false;
+  }
+  for (size_t y = 0; y < source.extent.height; ++y) {
+    std::copy_n(source.data + y * source.stride, source.extent.width,
+                image->Row(y));
+  }
+  return true;
+}
+
 [[nodiscard]] bool ValidRequest(ConstOracleImage3 reference,
                                 ConstOracleImage3 distorted,
                                 OracleOptions options) {
@@ -206,6 +230,23 @@ template <typename Plane> [[nodiscard]] bool ValidPlane(const Plane &plane) {
                 destination.data + y * destination.stride);
   }
   *destination_score = source_score;
+  return true;
+}
+
+[[nodiscard]] bool CopyPlaneAtomically(const jxl::ImageF &source,
+                                       OraclePlane destination) {
+  for (size_t y = 0; y < destination.extent.height; ++y) {
+    const float *row = source.ConstRow(y);
+    for (size_t x = 0; x < destination.extent.width; ++x) {
+      if (!std::isfinite(row[x])) {
+        return false;
+      }
+    }
+  }
+  for (size_t y = 0; y < destination.extent.height; ++y) {
+    std::copy_n(source.ConstRow(y), destination.extent.width,
+                destination.data + y * destination.stride);
+  }
   return true;
 }
 
@@ -315,6 +356,43 @@ PreparedReference::operator=(PreparedReference &&) noexcept = default;
 
 bool PreparedReference::valid() const {
   return impl_ != nullptr && impl_->comparator != nullptr;
+}
+
+bool ComputeLiveGaussianBlur(ConstOraclePlane input, float sigma,
+                             OraclePlane output,
+                             const JxlMemoryManager *requested_memory_manager) {
+  const float scaled_radius = 2.25f * std::abs(sigma);
+  const int radius = std::isfinite(scaled_radius) && scaled_radius < 17.0f
+                         ? std::max(1, static_cast<int>(scaled_radius))
+                         : 0;
+  const size_t kernel_size = 2 * static_cast<size_t>(radius) + 1;
+  if (!ValidPlane(input) || !PixelsAreFinite(input) || !ValidPlane(output) ||
+      input.extent != output.extent || !std::isfinite(sigma) || sigma <= 0.0f ||
+      (kernel_size != 5 && kernel_size != 7 && kernel_size != 13 &&
+       kernel_size != 15 && kernel_size != 33)) {
+    return false;
+  }
+
+  try {
+    JxlMemoryManager memory_manager{};
+    if (!InitMemoryManager(requested_memory_manager, &memory_manager)) {
+      return false;
+    }
+    jxl::ImageF input_image;
+    jxl::ImageF result;
+    if (!CopyToLibjxl(input, &memory_manager, &input_image) ||
+        !AllocatePlane(&memory_manager, input.extent, &result)) {
+      return false;
+    }
+    jxl::BlurTemp blur_temp;
+    const jxl::ButteraugliParams params;
+    if (!jxl::Blur(input_image, sigma, params, &blur_temp, &result)) {
+      return false;
+    }
+    return CopyPlaneAtomically(result, output);
+  } catch (const std::bad_alloc &) {
+    return false;
+  }
 }
 
 bool ComputeLiveButteraugli(ConstOracleImage3 reference,

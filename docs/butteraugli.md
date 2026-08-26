@@ -167,7 +167,7 @@ incremental column subtracts that retained baseline.
 | Synthetic 128x96 | 3,507,968 B (3.345 MiB) | 1,932,288 B (1.843 MiB) | 1,349,376 B (1.287 MiB) | 3,317,504 B (3.164 MiB) | 1,968,128 B (1.877 MiB) |
 | Flower 510x532 | 61,789,440 B (58.927 MiB) | 31,976,064 B (30.495 MiB) | 22,360,320 B (21.324 MiB) | 58,310,400 B (55.609 MiB) | 35,950,080 B (34.285 MiB) |
 
-### 2. Establish native CPU image and blur primitives
+### 2. Establish native CPU image and blur primitives — complete (2026-08-26)
 
 - Introduce internal owned-image and reusable scratch types with checked extent
   arithmetic.
@@ -179,6 +179,24 @@ incremental column subtracts that retained baseline.
 
 Exit criterion: every blur output matches libjxl over the differential corpus,
 including borders and images smaller than a kernel.
+
+gjxl now owns contiguous single-plane and planar three-channel float storage,
+checked atomic resizing, reusable transposed/kernel scratch, and a scalar blur
+for all five pinned sigmas. The non-aliasing 5-tap path mirrors coordinates
+outside the image, repeating each edge pixel once. The 7-, 13-, 15-, and
+33-tap paths instead clip support at each edge, renormalize each coordinate,
+and apply two transposed scalar passes. Both modes preserve strided input and
+output padding; validation and scratch allocation finish before output writes.
+
+The five 16x12 scalar blur goldens pass the fixed
+`1e-5 + 5e-6 * abs(expected)` limit. On an M4 Pro with AppleClang 17, the
+maximum native-versus-scalar absolute error was `5.96046448e-08`; the maximum
+native-versus-dispatched absolute error over every reference and distorted
+plane, all channels, all sigmas, and the complete differential corpus was
+`1.78813934e-07`, below the fixed `1.5e-3` stage cap. Direct-oracle allocation
+failure injection covers every managed allocation without leaks or partial
+output. This milestone adds primitives only; the public facade remains on the
+pinned libjxl path until native pipeline integration in later milestones.
 
 ### 3. Implement native opsin and frequency decomposition
 

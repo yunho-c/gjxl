@@ -206,6 +206,7 @@ add_library(
   src/codec/ac_strategy.cpp
   src/codec/adaptive_quantization.cpp
   src/codec/butteraugli.cpp
+  src/codec/butteraugli_internal.cpp
   src/codec/chroma_from_luma.cpp
   src/codec/color_transform.cpp
   src/codec/convolution.cpp
@@ -411,6 +412,22 @@ target_compile_features(
 if(GJXL_BUILD_TESTS)
 
   enable_testing()
+
+  add_executable(
+    gjxl_butteraugli_primitives_test
+    tests/butteraugli_primitives_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_primitives_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME butteraugli_primitives
+    COMMAND gjxl_butteraugli_primitives_test
+  )
 
   add_executable(
     gjxl_core_geometry_test
@@ -730,6 +747,30 @@ if(GJXL_BUILD_TESTS)
     add_test(
       NAME butteraugli
       COMMAND gjxl_butteraugli_test
+    )
+
+    add_executable(
+      gjxl_butteraugli_blur_differential_test
+      tests/butteraugli_blur_differential_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_butteraugli_blur_differential_test
+      PRIVATE
+        gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_blur_differential_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
+
+    add_test(
+      NAME butteraugli_blur_differential
+      COMMAND gjxl_butteraugli_blur_differential_test
     )
   else()
     add_executable(

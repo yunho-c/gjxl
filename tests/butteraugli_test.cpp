@@ -23,6 +23,7 @@
 #include "butteraugli_fixtures.h"
 #include "butteraugli_goldens_generated.h"
 #include "butteraugli_oracle.h"
+#include "butteraugli_test_tolerances.h"
 #include "codec/butteraugli.h"
 
 namespace {
@@ -32,20 +33,6 @@ namespace golden = gjxl::butteraugli_test::golden;
 
 constexpr float kOutputPoison = -991.0f;
 constexpr double kScorePoison = -313.0;
-constexpr float kAbsoluteTolerance = 1.0e-5f;
-constexpr float kRelativeTolerance = 5.0e-6f;
-constexpr double kScoreTolerance = 1.0e-5;
-constexpr float kIdentityTolerance = 1.0e-7f;
-
-// Cross-target Highway drift is independent of the strict facade/live limit.
-// These rounded caps are slightly above twice the observed M4 Pro maxima.
-struct ScalarDispatchTolerance {
-  float full_map_absolute = 3.0e-4f;
-  float stage_absolute = 1.5e-3f;
-  double score_absolute = 1.0e-4;
-};
-
-inline constexpr ScalarDispatchTolerance kScalarDispatchTolerance;
 
 struct ErrorStats {
   float maximum_absolute = 0.0f;
@@ -57,8 +44,7 @@ struct ErrorStats {
     maximum_absolute = std::max(maximum_absolute, absolute);
     maximum_tolerance_ratio =
         std::max(maximum_tolerance_ratio,
-                 absolute / (kAbsoluteTolerance +
-                             kRelativeTolerance * std::abs(expected)));
+                 absolute / bt::MapTolerance(expected));
     if (expected != 0.0f) {
       maximum_relative =
           std::max(maximum_relative, absolute / std::abs(expected));
@@ -132,8 +118,7 @@ struct MapStorage {
   for (size_t index = 0; index < actual.size(); ++index) {
     if (errors != nullptr)
       errors->Add(actual[index], expected[index]);
-    const float tolerance =
-        kAbsoluteTolerance + kRelativeTolerance * std::abs(expected[index]);
+    const float tolerance = bt::MapTolerance(expected[index]);
     if (!std::isfinite(actual[index]) ||
         std::abs(actual[index] - expected[index]) > tolerance) {
       return false;
@@ -210,10 +195,10 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
         !bt::PaddingIsPoisoned(fixture.distorted) ||
         !ScalarDispatchValuesMatch(
             actual.LogicalValues(), expected,
-            kScalarDispatchTolerance.full_map_absolute, full_map_errors) ||
+            bt::kScalarDispatchTolerance.full_map_absolute, full_map_errors) ||
         !std::isfinite(score) ||
         std::abs(score - expected_score) >
-            kScalarDispatchTolerance.score_absolute) {
+            bt::kScalarDispatchTolerance.score_absolute) {
       std::cerr << "Scalar full-map golden differs: " << kNames[index]
                 << "\n  actual score: " << std::setprecision(12) << score
                 << "\n  scalar score: " << expected_score
@@ -231,7 +216,7 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
       ValuesMatch(unperturbed, perturbed) ||
       ScalarDispatchValuesMatch(
           unperturbed, perturbed,
-          kScalarDispatchTolerance.full_map_absolute)) {
+          bt::kScalarDispatchTolerance.full_map_absolute)) {
     std::cerr << "Full-map comparator did not detect a perturbation\n";
     return false;
   }
@@ -257,7 +242,7 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
         DecodeBits(golden::kIntermediateStageBits[index]);
     if (!ScalarDispatchValuesMatch(
             output.plane[index], expected,
-            kScalarDispatchTolerance.stage_absolute, stage_errors)) {
+            bt::kScalarDispatchTolerance.stage_absolute, stage_errors)) {
       std::cerr << "Scalar intermediate golden differs: "
                 << bt::IntermediateStageName(
                        static_cast<bt::IntermediateStage>(index))
@@ -282,7 +267,7 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
   perturbed[3] += 0.01f;
   if (ValuesMatch(unperturbed, perturbed) ||
       ScalarDispatchValuesMatch(unperturbed, perturbed,
-                                kScalarDispatchTolerance.stage_absolute)) {
+                                bt::kScalarDispatchTolerance.stage_absolute)) {
     std::cerr << "Stage comparator did not detect a perturbation\n";
     return false;
   }
@@ -305,14 +290,14 @@ DecodeBits(const std::array<uint32_t, Size> &bits) {
         !bt::PaddingIsPoisoned(fixture.reference) ||
         !bt::PaddingIsPoisoned(fixture.distorted) ||
         !ValuesMatch(facade_map.LogicalValues(), oracle_map.LogicalValues()) ||
-        std::abs(facade_score - oracle_score) > kScoreTolerance) {
+        std::abs(facade_score - oracle_score) > bt::kScoreTolerance) {
       std::cerr << "Live differential fixture failed: " << fixture.name << '\n';
       return false;
     }
     if (fixture.name == "identity_texture_32x24" &&
-        (std::abs(facade_score) > kIdentityTolerance ||
+        (std::abs(facade_score) > bt::kIdentityTolerance ||
          !std::ranges::all_of(facade_map.LogicalValues(), [](float value) {
-           return std::abs(value) <= kIdentityTolerance;
+           return std::abs(value) <= bt::kIdentityTolerance;
          }))) {
       std::cerr << "Identity map exceeds the 1e-7 tolerance\n";
       return false;
@@ -663,7 +648,7 @@ CheckStageAllocationFailures(const bt::FixturePair &fixture) {
            .ok())
     return false;
   for (float value : blocks) {
-    if (std::abs(value - 2.4f) > 2.0e-6f)
+    if (std::abs(value - 2.4f) > bt::kBlockReductionTolerance)
       return false;
   }
   distance.back() = -1.0f;
