@@ -142,7 +142,6 @@ struct PipelineStorage {
         strategy_mask(block_stride * block_extent.height, fill),
         pixel_mask(pixel_stride * padded_extent.height, fill),
         final_quant(block_stride * block_extent.height, fill),
-        raw_quant(block_stride * block_extent.height, -777),
         block_distance(block_stride * block_extent.height, fill),
         reconstructed(original_extent, fill),
         padded_extent(padded_extent) {}
@@ -160,16 +159,12 @@ struct PipelineStorage {
       .adaptive_quantization = {
         .quant_field = {
           final_quant.data(), block_extent, block_stride},
-        .raw_quant_field = {
-          raw_quant.data(), block_extent, block_stride},
         .block_distance_map = {
           block_distance.data(), block_extent, block_stride},
         .reconstructed_linear_rgb = reconstructed.View(),
-        .quantizer = &quantizer,
-        .color_correlation = &color_correlation,
+        .frame = &frame,
         .score_history = &score_history,
       },
-      .strategies = &strategies,
     };
   }
 
@@ -180,23 +175,18 @@ struct PipelineStorage {
   std::vector<float> strategy_mask;
   std::vector<float> pixel_mask;
   std::vector<float> final_quant;
-  std::vector<int32_t> raw_quant;
   std::vector<float> block_distance;
   ImageStorage reconstructed;
   gjxl::Extent2D padded_extent;
-  gjxl::Quantizer quantizer;
-  gjxl::ColorCorrelationMap color_correlation;
+  gjxl::VarDctEncoderFrame frame;
   std::vector<double> score_history;
-  gjxl::AcStrategyGrid strategies;
 };
 
 bool CheckResult(
   const PipelineStorage& result,
   size_t expected_score_count = 3) {
 
-  if (!result.strategies.complete() ||
-      !result.quantizer.valid() ||
-      !result.color_correlation.valid() ||
+  if (!result.frame.valid() ||
       result.score_history.size() != expected_score_count) {
     return false;
   }
@@ -214,7 +204,8 @@ bool CheckResult(
           result.strategy_mask[index] <= 0.0f ||
           !std::isfinite(result.final_quant[index]) ||
           result.final_quant[index] <= 0.0f ||
-          result.raw_quant[index] < 1 || result.raw_quant[index] > 256 ||
+          result.frame.raw_quant_field().Row(y)[x] < 1 ||
+          result.frame.raw_quant_field().Row(y)[x] > 256 ||
           !std::isfinite(result.block_distance[index]) ||
           result.block_distance[index] < 0.0f) {
         return false;
@@ -227,7 +218,6 @@ bool CheckResult(
       if (result.initial_quant[index] != -777.0f ||
           result.strategy_mask[index] != -777.0f ||
           result.final_quant[index] != -777.0f ||
-          result.raw_quant[index] != -777 ||
           result.block_distance[index] != -777.0f) {
         return false;
       }
@@ -307,7 +297,6 @@ bool CheckInvalidRequestIsAtomic() {
   PipelineStorage output(kExtent, kExtent, 29.0f);
   const auto initial = output.initial_quant;
   const auto final = output.final_quant;
-  const auto raw = output.raw_quant;
   const auto reconstructed = output.reconstructed.plane;
   gjxl::CpuQuantizationPipelineOptions options;
   options.butteraugli_target = 0.0f;
@@ -318,11 +307,8 @@ bool CheckInvalidRequestIsAtomic() {
         output.Output()).ok() ||
       output.initial_quant != initial ||
       output.final_quant != final ||
-      output.raw_quant != raw ||
       output.reconstructed.plane != reconstructed ||
-      output.strategies.valid() ||
-      output.quantizer.valid() ||
-      output.color_correlation.valid() ||
+      output.frame.valid() ||
       !output.score_history.empty()) {
     std::cerr << "Invalid CPU pipeline request changed output\n";
     return false;
@@ -337,7 +323,6 @@ bool CheckInvalidOutputsAreRejected() {
   PipelineStorage storage(kExtent, kExtent, 29.0f);
   const auto initial = storage.initial_quant;
   const auto final = storage.final_quant;
-  const auto raw = storage.raw_quant;
   const auto reconstructed = storage.reconstructed.plane;
 
   const auto rejected_atomically = [&](
@@ -347,20 +332,13 @@ bool CheckInvalidOutputsAreRejected() {
     return !status.ok() &&
       storage.initial_quant == initial &&
       storage.final_quant == final &&
-      storage.raw_quant == raw &&
       storage.reconstructed.plane == reconstructed &&
-      !storage.strategies.valid() &&
-      !storage.quantizer.valid() &&
-      !storage.color_correlation.valid() &&
+      !storage.frame.valid() &&
       storage.score_history.empty();
   };
 
   auto output = storage.Output();
   output.adaptive_quantization.quant_field.data = nullptr;
-  if (!rejected_atomically(output)) return false;
-
-  output = storage.Output();
-  output.adaptive_quantization.raw_quant_field.data = nullptr;
   if (!rejected_atomically(output)) return false;
 
   output = storage.Output();
@@ -372,19 +350,11 @@ bool CheckInvalidOutputsAreRejected() {
   if (!rejected_atomically(output)) return false;
 
   output = storage.Output();
-  output.adaptive_quantization.quantizer = nullptr;
-  if (!rejected_atomically(output)) return false;
-
-  output = storage.Output();
-  output.adaptive_quantization.color_correlation = nullptr;
+  output.adaptive_quantization.frame = nullptr;
   if (!rejected_atomically(output)) return false;
 
   output = storage.Output();
   output.adaptive_quantization.score_history = nullptr;
-  if (!rejected_atomically(output)) return false;
-
-  output = storage.Output();
-  output.strategies = nullptr;
   if (!rejected_atomically(output)) return false;
 
   return true;

@@ -1246,6 +1246,551 @@ kernel void gjxl_dct16x32_inverse_simdgroup_2d_matmul(
 }
 
 
+// Factored radix-2 transforms
+
+constant float kFactoredDctSqrt2 = 1.41421356237f;
+
+constant float kFactoredDctMultipliers4[2] = {
+  0.541196100146197f,
+  1.3065629648763764f,
+};
+
+constant float kFactoredDctMultipliers8[4] = {
+  0.5097955791041592f,
+  0.6013448869350453f,
+  0.8999762231364156f,
+  2.5629154477415055f,
+};
+
+constant float kFactoredDctMultipliers16[8] = {
+  0.5024192861881557f,
+  0.5224986149396889f,
+  0.5669440348163577f,
+  0.6468217833599901f,
+  0.7881546234512502f,
+  1.060677685990347f,
+  1.7224470982383342f,
+  5.101148618689155f,
+};
+
+constant float kFactoredDctMultipliers32[16] = {
+  0.5006029982351963f,
+  0.5054709598975436f,
+  0.5154473099226246f,
+  0.5310425910897841f,
+  0.5531038960344445f,
+  0.5829349682061339f,
+  0.6225041230356648f,
+  0.6748083414550057f,
+  0.7445362710022986f,
+  0.8393496454155268f,
+  0.9725682378619608f,
+  1.1694399334328847f,
+  1.4841646163141662f,
+  2.057781009953411f,
+  3.407608418468719f,
+  10.190008123548033f,
+};
+
+
+template <uint N>
+struct FactoredDctMultipliers;
+
+template <>
+struct FactoredDctMultipliers<4> {
+  __attribute__((always_inline)) static float Get(uint index) {
+    return kFactoredDctMultipliers4[index];
+  }
+};
+
+template <>
+struct FactoredDctMultipliers<8> {
+  __attribute__((always_inline)) static float Get(uint index) {
+    return kFactoredDctMultipliers8[index];
+  }
+};
+
+template <>
+struct FactoredDctMultipliers<16> {
+  __attribute__((always_inline)) static float Get(uint index) {
+    return kFactoredDctMultipliers16[index];
+  }
+};
+
+template <>
+struct FactoredDctMultipliers<32> {
+  __attribute__((always_inline)) static float Get(uint index) {
+    return kFactoredDctMultipliers32[index];
+  }
+};
+
+
+// Lowest-complexity self-recursive radix-2 DCT-II/III, following the
+// factorization used by the pinned libjxl implementation. Forward() produces
+// an unscaled DCT-II; Inverse() consumes coefficients scaled by 1/N.
+template <uint N>
+struct FactoredDct1D {
+  __attribute__((always_inline)) static void Forward(
+    thread float* values,
+    thread float* scratch)
+  {
+    constexpr uint kHalf = N / 2;
+
+    for (uint i = 0; i < kHalf; ++i) {
+      scratch[i] = values[i] + values[N - i - 1];
+    }
+
+    FactoredDct1D<kHalf>::Forward(scratch, scratch + N);
+
+    for (uint i = 0; i < kHalf; ++i) {
+      scratch[kHalf + i] =
+        (values[i] - values[N - i - 1]) *
+        FactoredDctMultipliers<N>::Get(i);
+    }
+
+    FactoredDct1D<kHalf>::Forward(
+      scratch + kHalf,
+      scratch + N);
+
+    scratch[kHalf] =
+      scratch[kHalf] * kFactoredDctSqrt2 +
+      scratch[kHalf + 1];
+
+    for (uint i = 1; i + 1 < kHalf; ++i) {
+      scratch[kHalf + i] += scratch[kHalf + i + 1];
+    }
+
+    for (uint i = 0; i < kHalf; ++i) {
+      values[2 * i] = scratch[i];
+      values[2 * i + 1] = scratch[kHalf + i];
+    }
+  }
+
+  __attribute__((always_inline)) static void Inverse(
+    thread float* values,
+    thread float* scratch)
+  {
+    constexpr uint kHalf = N / 2;
+
+    for (uint i = 0; i < kHalf; ++i) {
+      scratch[i] = values[2 * i];
+      scratch[kHalf + i] = values[2 * i + 1];
+    }
+
+    FactoredDct1D<kHalf>::Inverse(scratch, scratch + N);
+
+    for (uint i = kHalf - 1; i > 0; --i) {
+      scratch[kHalf + i] += scratch[kHalf + i - 1];
+    }
+
+    scratch[kHalf] *= kFactoredDctSqrt2;
+
+    FactoredDct1D<kHalf>::Inverse(
+      scratch + kHalf,
+      scratch + N);
+
+    for (uint i = 0; i < kHalf; ++i) {
+      const float even = scratch[i];
+      const float odd =
+        scratch[kHalf + i] *
+        FactoredDctMultipliers<N>::Get(i);
+
+      values[i] = even + odd;
+      values[N - i - 1] = even - odd;
+    }
+  }
+};
+
+
+template <>
+struct FactoredDct1D<2> {
+  __attribute__((always_inline)) static void Forward(
+    thread float* values,
+    thread float*)
+  {
+    const float first = values[0];
+    const float second = values[1];
+    values[0] = first + second;
+    values[1] = first - second;
+  }
+
+  __attribute__((always_inline)) static void Inverse(
+    thread float* values,
+    thread float*)
+  {
+    const float dc = values[0];
+    const float ac = values[1];
+    values[0] = dc + ac;
+    values[1] = dc - ac;
+  }
+};
+
+
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void ForwardFactoredDct2D(
+  device const float* A,
+  device       float* B,
+  threadgroup float* intermediate,
+  uint tid,
+  uint threads_per_threadgroup,
+  ulong transform_index,
+  bool transform_is_active)
+{
+  constexpr uint kMaxLength = Rows > Columns ? Rows : Columns;
+  constexpr float kScale = 1.0f / (Rows * Columns);
+
+  const ulong base =
+    transform_index * Rows * Columns;
+
+  thread float values[kMaxLength];
+  thread float scratch[2 * kMaxLength];
+
+  // Transform each pixel row, retaining natural [y][u] order.
+  if (transform_is_active) {
+    for (uint row = tid;
+         row < Rows;
+         row += threads_per_threadgroup) {
+      for (uint x = 0; x < Columns; ++x) {
+        values[x] = A[base + row * Columns + x];
+      }
+
+      FactoredDct1D<Columns>::Forward(values, scratch);
+
+      for (uint u = 0; u < Columns; ++u) {
+        intermediate[row * Columns + u] = values[u];
+      }
+    }
+  }
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Transform each column and store libjxl's shape-dependent layout.
+  if (transform_is_active) {
+    for (uint u = tid;
+         u < Columns;
+         u += threads_per_threadgroup) {
+      for (uint y = 0; y < Rows; ++y) {
+        values[y] = intermediate[y * Columns + u];
+      }
+
+      FactoredDct1D<Rows>::Forward(values, scratch);
+
+      for (uint v = 0; v < Rows; ++v) {
+        const ulong coefficient =
+          RectangularCoefficientIndex<Rows, Columns>(v, u);
+
+        B[base + coefficient] = values[v] * kScale;
+      }
+    }
+  }
+}
+
+
+template <uint Rows, uint Columns>
+__attribute__((always_inline)) inline void InverseFactoredDct2D(
+  device const float* A,
+  device       float* B,
+  threadgroup float* intermediate,
+  uint tid,
+  uint threads_per_threadgroup,
+  ulong transform_index,
+  bool transform_is_active)
+{
+  constexpr uint kMaxLength = Rows > Columns ? Rows : Columns;
+
+  const ulong base =
+    transform_index * Rows * Columns;
+
+  thread float values[kMaxLength];
+  thread float scratch[2 * kMaxLength];
+
+  // Undo the vertical-frequency axis while reading libjxl's layout.
+  if (transform_is_active) {
+    for (uint u = tid;
+         u < Columns;
+         u += threads_per_threadgroup) {
+      for (uint v = 0; v < Rows; ++v) {
+        const ulong coefficient =
+          RectangularCoefficientIndex<Rows, Columns>(v, u);
+
+        values[v] = A[base + coefficient];
+      }
+
+      FactoredDct1D<Rows>::Inverse(values, scratch);
+
+      for (uint y = 0; y < Rows; ++y) {
+        intermediate[y * Columns + u] = values[y];
+      }
+    }
+  }
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Undo the horizontal-frequency axis and return row-major pixels.
+  if (transform_is_active) {
+    for (uint y = tid;
+         y < Rows;
+         y += threads_per_threadgroup) {
+      for (uint u = 0; u < Columns; ++u) {
+        values[u] = intermediate[y * Columns + u];
+      }
+
+      FactoredDct1D<Columns>::Inverse(values, scratch);
+
+      for (uint x = 0; x < Columns; ++x) {
+        B[base + y * Columns + x] = values[x];
+      }
+    }
+  }
+}
+
+
+kernel void gjxl_dct8_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  constant uint& transform_count [[buffer(2)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  constexpr uint kTransformsPerThreadgroup = 4;
+  constexpr uint kThreadsPerTransform = 8;
+  constexpr uint kElementsPerTransform = 8 * 8;
+
+  const uint transform_in_threadgroup = tid / kThreadsPerTransform;
+  const uint transform_tid = tid % kThreadsPerTransform;
+  const ulong transform_index =
+    static_cast<ulong>(group_position.x) *
+      kTransformsPerThreadgroup +
+    transform_in_threadgroup;
+
+  threadgroup float intermediate[
+    kTransformsPerThreadgroup * kElementsPerTransform];
+
+  ForwardFactoredDct2D<8, 8>(
+    A,
+    B,
+    intermediate +
+      transform_in_threadgroup * kElementsPerTransform,
+    transform_tid,
+    kThreadsPerTransform,
+    transform_index,
+    transform_index < transform_count);
+}
+
+
+kernel void gjxl_dct8_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  constant uint& transform_count [[buffer(2)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  constexpr uint kTransformsPerThreadgroup = 4;
+  constexpr uint kThreadsPerTransform = 8;
+  constexpr uint kElementsPerTransform = 8 * 8;
+
+  const uint transform_in_threadgroup = tid / kThreadsPerTransform;
+  const uint transform_tid = tid % kThreadsPerTransform;
+  const ulong transform_index =
+    static_cast<ulong>(group_position.x) *
+      kTransformsPerThreadgroup +
+    transform_in_threadgroup;
+
+  threadgroup float intermediate[
+    kTransformsPerThreadgroup * kElementsPerTransform];
+
+  InverseFactoredDct2D<8, 8>(
+    A,
+    B,
+    intermediate +
+      transform_in_threadgroup * kElementsPerTransform,
+    transform_tid,
+    kThreadsPerTransform,
+    transform_index,
+    transform_index < transform_count);
+}
+
+
+kernel void gjxl_dct16_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[16 * 16];
+
+  ForwardFactoredDct2D<16, 16>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct16_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[16 * 16];
+
+  InverseFactoredDct2D<16, 16>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct16x8_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[16 * 8];
+
+  ForwardFactoredDct2D<16, 8>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct16x8_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[16 * 8];
+
+  InverseFactoredDct2D<16, 8>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct8x16_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[8 * 16];
+
+  ForwardFactoredDct2D<8, 16>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct8x16_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[8 * 16];
+
+  InverseFactoredDct2D<8, 16>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct32x16_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[32 * 16];
+
+  ForwardFactoredDct2D<32, 16>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct32x16_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[32 * 16];
+
+  InverseFactoredDct2D<32, 16>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct16x32_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[16 * 32];
+
+  ForwardFactoredDct2D<16, 32>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct16x32_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[16 * 32];
+
+  InverseFactoredDct2D<16, 32>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct32_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[32 * 32];
+
+  ForwardFactoredDct2D<32, 32>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct32_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[32 * 32];
+
+  InverseFactoredDct2D<32, 32>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
 // 32x32
 
 // Computes forward DCT using the precomputed 32x32 DCT-II transform matrix with two matmuls:

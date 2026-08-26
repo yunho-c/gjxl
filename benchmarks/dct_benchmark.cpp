@@ -25,7 +25,7 @@ struct ImplementationCase {
   std::string_view name;
 };
 
-constexpr std::array<ImplementationCase, 2>
+constexpr std::array<ImplementationCase, 3>
 kImplementations{{
   {
     .implementation =
@@ -36,6 +36,11 @@ kImplementations{{
     .implementation =
       gjxl::MetalDctImplementation::kSimdgroupMatmul,
     .name = "simdgroup matmul",
+  },
+  {
+    .implementation =
+      gjxl::MetalDctImplementation::kFactoredRadix2,
+    .name = "factored radix-2",
   },
 }};
 
@@ -150,7 +155,7 @@ void BenchmarkDct(
 
   // A dense separable transform evaluates one horizontal and one vertical
   // dot product per output element.
-  const double multiply_accumulates =
+  const double dense_equivalent_multiply_accumulates =
     pixels *
     static_cast<double>(extent.width + extent.height);
 
@@ -161,8 +166,8 @@ void BenchmarkDct(
     << "Elapsed:          " << seconds << '\n'
     << "Transforms/s:     " << transforms / seconds << '\n'
     << "MPixels/s:        " << pixels / seconds / 1.0e6 << '\n'
-    << "Dense GMAC/s:     "
-    << multiply_accumulates / seconds / 1.0e9
+    << "Dense-equivalent GMAC/s: "
+    << dense_equivalent_multiply_accumulates / seconds / 1.0e9
     << '\n';
 }
 

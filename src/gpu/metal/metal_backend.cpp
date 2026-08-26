@@ -47,6 +47,7 @@ struct DctImplementationSpec {
   std::string_view inverse_function_name;
   TransformDispatchMode dispatch_mode;
   size_t simdgroups_per_threadgroup = 0;
+  size_t transforms_per_threadgroup = 1;
 };
 
 struct DctSelection {
@@ -55,7 +56,7 @@ struct DctSelection {
   MetalDctImplementation inverse;
 };
 
-constexpr std::array<DctImplementationSpec, 14>
+constexpr std::array<DctImplementationSpec, 21>
 kDctImplementationSpecs{{
   {
     .strategy = AcStrategyType::kDct8,
@@ -79,6 +80,18 @@ kDctImplementationSpecs{{
     .simdgroups_per_threadgroup = 1,
   },
   {
+    .strategy = AcStrategyType::kDct8,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct8_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct8_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+    .transforms_per_threadgroup = 4,
+  },
+  {
     .strategy = AcStrategyType::kDct16x16,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
@@ -98,6 +111,17 @@ kDctImplementationSpecs{{
       "gjxl_dct16_inverse_simdgroup_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 2,
+  },
+  {
+    .strategy = AcStrategyType::kDct16x16,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct16_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct16_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
   },
   {
     .strategy = AcStrategyType::kDct32x32,
@@ -121,6 +145,17 @@ kDctImplementationSpecs{{
     .simdgroups_per_threadgroup = 4,
   },
   {
+    .strategy = AcStrategyType::kDct32x32,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct32_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct32_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
     .strategy = AcStrategyType::kDct16x8,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
@@ -138,6 +173,17 @@ kDctImplementationSpecs{{
     .simdgroups_per_threadgroup = 2,
   },
   {
+    .strategy = AcStrategyType::kDct16x8,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct16x8_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct16x8_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
     .strategy = AcStrategyType::kDct8x16,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
@@ -151,6 +197,17 @@ kDctImplementationSpecs{{
     .display_name = "simdgroup matmul",
     .forward_function_name = "gjxl_dct8x16_forward_simdgroup_2d_matmul",
     .inverse_function_name = "gjxl_dct8x16_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
+    .strategy = AcStrategyType::kDct8x16,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct8x16_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct8x16_inverse_factored_radix2",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 1,
   },
@@ -172,6 +229,17 @@ kDctImplementationSpecs{{
     .simdgroups_per_threadgroup = 4,
   },
   {
+    .strategy = AcStrategyType::kDct32x16,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct32x16_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct32x16_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
     .strategy = AcStrategyType::kDct16x32,
     .implementation = MetalDctImplementation::kScalarMatmul,
     .display_name = "scalar matmul",
@@ -187,6 +255,17 @@ kDctImplementationSpecs{{
     .inverse_function_name = "gjxl_dct16x32_inverse_simdgroup_2d_matmul",
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 2,
+  },
+  {
+    .strategy = AcStrategyType::kDct16x32,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name =
+      "gjxl_dct16x32_forward_factored_radix2",
+    .inverse_function_name =
+      "gjxl_dct16x32_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
   },
 }};
 
@@ -207,6 +286,7 @@ const DctImplementationSpec* FindDctImplementationSpec(
 struct TransformPipeline {
   NS::SharedPtr<MTL::ComputePipelineState> state;
   NS::UInteger threads_per_threadgroup = 0;
+  size_t transforms_per_threadgroup = 1;
   AcStrategyType strategy = AcStrategyType::kCount;
   std::string label;
 };
@@ -353,6 +433,7 @@ Status CreateTransformPipeline(
   std::string_view implementation_name,
   TransformDispatchMode dispatch_mode,
   size_t simdgroups_per_threadgroup,
+  size_t transforms_per_threadgroup,
   std::string_view function_name,
   std::string_view operation,
   TransformPipeline* out) {
@@ -360,7 +441,8 @@ Status CreateTransformPipeline(
   const AcStrategyInfo* strategy_info =
     GetAcStrategyInfo(strategy);
 
-  if (strategy_info == nullptr || out == nullptr) {
+  if (strategy_info == nullptr || transforms_per_threadgroup == 0 ||
+      out == nullptr) {
     return Status::InvalidArgument(
       "CreateTransformPipeline received invalid argument");
   }
@@ -433,6 +515,7 @@ Status CreateTransformPipeline(
 
   out->state = std::move(state);
   out->threads_per_threadgroup = threads_per_threadgroup;
+  out->transforms_per_threadgroup = transforms_per_threadgroup;
   out->strategy = strategy;
   out->label =
     std::string("gjxl ") +
@@ -1200,11 +1283,29 @@ private:
       return Status::Ok();
     }
 
-    if (batch.transform_count >
+    if (pipeline.transforms_per_threadgroup == 0) {
+      return Status::Internal(
+        "Transform pipeline has an invalid packing factor");
+    }
+
+    const size_t threadgroup_count =
+      1 +
+      (batch.transform_count - 1) /
+        pipeline.transforms_per_threadgroup;
+
+    if (threadgroup_count >
         std::numeric_limits<NS::UInteger>::max()) {
 
       return Status::InvalidArgument(
         "Transform batch exceeds Metal grid range");
+    }
+
+    if (pipeline.transforms_per_threadgroup > 1 &&
+        batch.transform_count >
+          std::numeric_limits<std::uint32_t>::max()) {
+
+      return Status::InvalidArgument(
+        "Packed transform batch exceeds Metal kernel range");
     }
 
     // metal-cpp uses autorelease for commandBuffer() & computeCommandEncoder()
@@ -1250,11 +1351,22 @@ private:
       0,
       1);
 
-    // Exactly one threadgroup per complete transform. The selected
-    // implementation determines how many threads cooperate within it.
+    if (pipeline.transforms_per_threadgroup > 1) {
+      const std::uint32_t transform_count =
+        static_cast<std::uint32_t>(batch.transform_count);
+
+      encoder->setBytes(
+        &transform_count,
+        sizeof(transform_count),
+        2);
+    }
+
+    // Most kernels dispatch one threadgroup per transform. Packed kernels
+    // handle a guarded partial group when the count is not divisible by their
+    // packing factor.
     const MTL::Size threadgroups(
       static_cast<NS::UInteger>(
-        batch.transform_count),
+        threadgroup_count),
         1,
         1);
 
@@ -1606,6 +1718,7 @@ Status CreateMetalBackend(
         forward_spec->display_name,
         forward_spec->dispatch_mode,
         forward_spec->simdgroups_per_threadgroup,
+        forward_spec->transforms_per_threadgroup,
         forward_spec->forward_function_name,
         "forward",
         &pipelines.forward);
@@ -1622,6 +1735,7 @@ Status CreateMetalBackend(
         inverse_spec->display_name,
         inverse_spec->dispatch_mode,
         inverse_spec->simdgroups_per_threadgroup,
+        inverse_spec->transforms_per_threadgroup,
         inverse_spec->inverse_function_name,
         "inverse",
         &pipelines.inverse);

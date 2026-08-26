@@ -152,7 +152,7 @@ decoder reconstruction are parity-tested independently of that heuristic.
 
 Relevant implementations:
 
-- [`coeff_store.h`](../src/core/coeff_store.h)
+- [`vardct_frame.h`](../src/codec/vardct_frame.h)
 - [`reconstruction.cpp`](../src/codec/reconstruction.cpp)
 - [`loop_filter.cpp`](../src/codec/loop_filter.cpp)
 - [`gaborish.cpp`](../src/codec/gaborish.cpp)
@@ -224,9 +224,9 @@ GPU porting begins only after the CPU pipeline satisfies all of the following:
 `RunCpuQuantizationPipeline` is the integration boundary. It runs initial AQ
 on the pre-Gaborish XYB image, applies inverse Gaborish when enabled, computes
 first-pass CfL, selects strategies, initializes EPF sharpness, and invokes the
-iterative AQ loop. Its outputs expose the initial maps, selected strategy grid,
-final float and raw quant fields, final CfL, score history, block distance map,
-and reconstructed linear RGB image.
+iterative AQ loop. Its outputs expose the initial maps, a completed
+`VarDctEncoderFrame`, the final float quant field, score history, block distance
+map, and reconstructed linear RGB image.
 
 The integration corpus covers odd dimensions and edge padding, gradients,
 texture, hard edges, saturated primaries, and a 64-pixel CfL tile boundary.
@@ -240,12 +240,41 @@ Relevant implementations:
 - [`quantization_pipeline_test.cpp`](../tests/quantization_pipeline_test.cpp)
 - [`quantization_benchmark.cpp`](../benchmarks/quantization_benchmark.cpp)
 
+### 12. Encoder-facing VarDCT frame — complete
+
+`VarDctEncoderFrame` is the owned handoff between encoder analysis and future
+entropy/bitstream coding. A successful final AQ evaluation commits one frame
+containing source and padded geometry, the selected strategy grid, raw quant
+field, quantizer, final CfL map, EPF sharpness, coefficient-coding multipliers,
+three floating-point DC planes, and grouped quantized AC coefficients. Callers
+may release or reuse all borrowed inputs after frame construction.
+
+AC storage follows the JPEG XL 256x256-pixel group grid. Each group owns three
+fixed 65,536-element `int32_t` channel rows. Groups are indexed in row-major
+order; within a group, complete transforms are appended in row-major anchor
+order, and each transform contributes its native coefficient layout
+contiguously. Edge groups expose their used coefficient count and guarantee a
+zero-filled unused tail. A transform that would cross a group boundary is
+rejected atomically.
+
+DC deliberately remains as one floating-point sample per 8x8 base block and
+channel. Modular DC tokenization is a later bitstream milestone, not hidden in
+this representation.
+
+Relevant implementations:
+
+- [`vardct_frame.h`](../src/codec/vardct_frame.h)
+- [`vardct_frame.cpp`](../src/codec/vardct_frame.cpp)
+- [`vardct_frame_test.cpp`](../tests/vardct_frame_test.cpp)
+
 ## CPU performance baseline
 
 Release build on an Apple M4 Pro with 48 GB RAM, measured on 2026-08-25. The
 synthetic workload is 128x96 linear RGB, includes a 64-pixel CfL boundary, and
 uses two AQ updates. Values are the median of the three run medians; ranges
-span all 15 samples from three consecutive invocations.
+span all 15 samples from three consecutive invocations. This historical
+baseline predates the fixed-row frame storage in milestone 12 and must be
+refreshed before using it to judge that representation's cost.
 
 | Stage | Median | Observed range |
 | --- | ---: | ---: |

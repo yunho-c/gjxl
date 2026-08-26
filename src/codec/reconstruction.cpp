@@ -49,31 +49,33 @@ float MatrixMultiplier(
 
 Status ValidateImageContract(
   ConstImage3FView opsin,
-  const AcStrategyGrid& strategies,
-  ConstPlaneI32View raw_quant_field,
-  const Quantizer& quantizer,
-  const ColorCorrelationMap& color_correlation,
+  VarDctFrameInput input,
   CoefficientCodingOptions options) {
 
   if (!opsin.valid() ||
-      !strategies.complete() ||
-      !raw_quant_field.valid() ||
-      !quantizer.valid() ||
-      !color_correlation.valid() ||
+      input.geometry.frame().empty() ||
+      input.strategies == nullptr ||
+      !input.strategies->complete() ||
+      !input.raw_quant_field.valid() ||
+      input.quantizer == nullptr ||
+      !input.quantizer->valid() ||
+      input.color_correlation == nullptr ||
+      !input.color_correlation->valid() ||
+      !input.epf_sharpness.valid() ||
       !ValidOptions(options) ||
-      raw_quant_field.extent != strategies.extent()) {
+      input.raw_quant_field.extent != input.strategies->extent() ||
+      input.epf_sharpness.extent != input.strategies->extent() ||
+      input.geometry.block_grid().blocks != input.strategies->extent()) {
     return Status::InvalidArgument(
       "Coefficient coding inputs are invalid or differently sized");
   }
 
-  const Extent2D block_extent = strategies.extent();
+  const Extent2D block_extent = input.strategies->extent();
   if (block_extent.width >
         std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
       block_extent.height >
         std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      opsin.extent() != Extent2D{
-        block_extent.width * kJxlBlockDimension,
-        block_extent.height * kJxlBlockDimension}) {
+      opsin.extent() != input.geometry.padded_frame()) {
     return Status::InvalidArgument(
       "Coefficient image does not match its block grid");
   }
@@ -82,17 +84,18 @@ Status ValidateImageContract(
     (opsin.width() + kColorTileDimension - 1) / kColorTileDimension,
     (opsin.height() + kColorTileDimension - 1) / kColorTileDimension,
   };
-  if (color_correlation.tile_extent() != expected_color_tiles) {
+  if (input.color_correlation->tile_extent() != expected_color_tiles) {
     return Status::InvalidArgument(
       "Color-correlation map does not match the coefficient image");
   }
 
   for (size_t y = 0; y < block_extent.height; ++y) {
     for (size_t x = 0; x < block_extent.width; ++x) {
-      const int32_t raw_quant = raw_quant_field.Row(y)[x];
-      if (raw_quant < 1 || raw_quant > kMaxRawQuant) {
+      const int32_t raw_quant = input.raw_quant_field.Row(y)[x];
+      if (raw_quant < 1 || raw_quant > kMaxRawQuant ||
+          input.epf_sharpness.Row(y)[x] >= 8) {
         return Status::InvalidArgument(
-          "Raw quantization field value is out of range");
+          "Raw quantization or EPF sharpness is out of range");
       }
     }
   }
@@ -140,12 +143,9 @@ void CopyPixelsToImage(
 
 Status ComputeQuantizedCoefficients(
   ConstImage3FView opsin,
-  const AcStrategyGrid& strategies,
-  ConstPlaneI32View raw_quant_field,
-  const Quantizer& quantizer,
-  const ColorCorrelationMap& color_correlation,
+  VarDctFrameInput input,
   CoefficientCodingOptions options,
-  QuantizedCoefficientFrame* out) {
+  VarDctEncoderFrame* out) {
 
   if (out == nullptr) {
     return Status::InvalidArgument(
@@ -154,25 +154,62 @@ Status ComputeQuantizedCoefficients(
 
   Status status = ValidateImageContract(
     opsin,
-    strategies,
-    raw_quant_field,
-    quantizer,
-    color_correlation,
+    input,
     options);
   if (!status.ok()) {
     return status;
   }
 
   try {
-    QuantizedCoefficientFrame result;
-    status = QuantizedCoefficientFrame::Create(
-      strategies.extent(),
-      &result);
-    if (!status.ok()) {
-      return status;
+    const Extent2D block_extent = input.strategies->extent();
+    size_t block_count = 0;
+    if (!block_extent.try_area(&block_count)) {
+      return Status::InvalidArgument(
+        "Coefficient coding block grid is too large");
     }
 
-    status = strategies.ForEachAnchor(
+    VarDctEncoderFrame result;
+    result.geometry_ = input.geometry;
+    result.strategies_ = *input.strategies;
+    result.raw_quant_field_.resize(block_count);
+    result.epf_sharpness_.resize(block_count);
+    for (size_t y = 0; y < block_extent.height; ++y) {
+      std::copy_n(
+        input.raw_quant_field.Row(y),
+        block_extent.width,
+        result.raw_quant_field_.data() + y * block_extent.width);
+      std::copy_n(
+        input.epf_sharpness.Row(y),
+        block_extent.width,
+        result.epf_sharpness_.data() + y * block_extent.width);
+    }
+    result.quantizer_ = *input.quantizer;
+    result.color_correlation_ = *input.color_correlation;
+    result.coding_options_ = options;
+    for (std::vector<float>& dc : result.dc_) {
+      dc.assign(block_count, 0.0f);
+    }
+
+    result.ac_group_extent_ = {
+      (block_extent.width + kVarDctAcGroupBlockDimension - 1) /
+        kVarDctAcGroupBlockDimension,
+      (block_extent.height + kVarDctAcGroupBlockDimension - 1) /
+        kVarDctAcGroupBlockDimension,
+    };
+    size_t group_count = 0;
+    if (!result.ac_group_extent_.try_area(&group_count) ||
+        group_count > std::numeric_limits<size_t>::max() / 3 ||
+        group_count * 3 > std::numeric_limits<size_t>::max() /
+          kVarDctAcGroupCoefficientCapacity) {
+      return Status::InvalidArgument(
+        "Coefficient coding group grid is too large");
+    }
+    result.group_used_coefficient_count_.assign(group_count, 0);
+    result.ac_coefficients_.assign(
+      group_count * 3 * kVarDctAcGroupCoefficientCapacity,
+      0);
+
+    status = input.strategies->ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
         const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
         if (info == nullptr || !SupportsCpuDct(strategy)) {
@@ -180,11 +217,24 @@ Status ComputeQuantizedCoefficients(
             "Coefficient coding does not support an AC strategy");
         }
 
+        const size_t group_x = block_x / kVarDctAcGroupBlockDimension;
+        const size_t group_y = block_y / kVarDctAcGroupBlockDimension;
+        if ((block_x + info->covered_blocks.width - 1) /
+              kVarDctAcGroupBlockDimension != group_x ||
+            (block_y + info->covered_blocks.height - 1) /
+              kVarDctAcGroupBlockDimension != group_y) {
+          return Status::InvalidArgument(
+            "AC strategy crosses a VarDCT group boundary");
+        }
+        const size_t group_index =
+          group_y * result.ac_group_extent_.width + group_x;
         const size_t coefficient_count = info->coefficient_count();
         std::array<std::vector<float>, 3> coefficients;
+        std::array<std::vector<int32_t>, 3> quantized;
         std::vector<float> pixels(coefficient_count);
         for (size_t channel = 0; channel < coefficients.size(); ++channel) {
           coefficients[channel].resize(coefficient_count);
+          quantized[channel].resize(coefficient_count);
           CopyPixelsFromImage(
             opsin.plane[channel],
             block_x,
@@ -200,16 +250,8 @@ Status ComputeQuantizedCoefficients(
           }
         }
 
-        const int32_t raw_quant = raw_quant_field.Row(block_y)[block_x];
-        QuantizedTransform transform{
-          .block_x = block_x,
-          .block_y = block_y,
-          .strategy = strategy,
-          .raw_quant = raw_quant,
-        };
-        for (std::vector<int32_t>& ac : transform.ac) {
-          ac.resize(coefficient_count);
-        }
+        const int32_t raw_quant =
+          result.raw_quant_field_[block_y * block_extent.width + block_x];
 
         // Y is round-trip dequantized before removing its prediction from
         // X/B, exactly as in libjxl's VarDCT coefficient path.
@@ -229,40 +271,35 @@ Status ComputeQuantizedCoefficients(
         }
         for (size_t dy = 0; dy < info->covered_blocks.height; ++dy) {
           for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
-            block_status = result.SetDc(
-              1,
-              block_x + dx,
-              block_y + dy,
-              y_dc[dy * info->covered_blocks.width + dx]);
-            if (!block_status.ok()) {
-              return block_status;
-            }
+            result.dc_[1][
+              (block_y + dy) * block_extent.width + block_x + dx] =
+                y_dc[dy * info->covered_blocks.width + dx];
           }
         }
 
         block_status = QuantizeAcBlock(
           strategy,
-          quantizer,
+          result.quantizer_,
           raw_quant,
           {.channel = XybChannel::kY},
           coefficients[1],
-          transform.ac[1]);
+          quantized[1]);
         if (!block_status.ok()) {
           return block_status;
         }
         block_status = DequantizeAcBlock(
           strategy,
-          quantizer,
+          result.quantizer_,
           raw_quant,
           {.channel = XybChannel::kY},
-          transform.ac[1],
+          quantized[1],
           coefficients[1]);
         if (!block_status.ok()) {
           return block_status;
         }
 
         const std::array<float, 3> factors =
-          color_correlation.AcFactors(block_x / 8, block_y / 8);
+          result.color_correlation_.AcFactors(block_x / 8, block_y / 8);
         for (size_t index = 0; index < coefficient_count; ++index) {
           coefficients[0][index] -= factors[0] * coefficients[1][index];
           coefficients[2][index] -= factors[2] * coefficients[1][index];
@@ -285,40 +322,52 @@ Status ComputeQuantizedCoefficients(
           }
           for (size_t dy = 0; dy < info->covered_blocks.height; ++dy) {
             for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
-              block_status = result.SetDc(
-                channel,
-                block_x + dx,
-                block_y + dy,
-                dc[dy * info->covered_blocks.width + dx]);
-              if (!block_status.ok()) {
-                return block_status;
-              }
+              result.dc_[channel][
+                (block_y + dy) * block_extent.width + block_x + dx] =
+                  dc[dy * info->covered_blocks.width + dx];
             }
           }
 
           block_status = QuantizeAcBlock(
             strategy,
-            quantizer,
+            result.quantizer_,
             raw_quant,
             {
               .channel = kChannels[channel],
               .matrix_multiplier = MatrixMultiplier(channel, options),
             },
             coefficients[channel],
-            transform.ac[channel]);
+            quantized[channel]);
           if (!block_status.ok()) {
             return block_status;
           }
         }
 
-        return result.AddTransform(std::move(transform));
+        const size_t group_offset =
+          result.group_used_coefficient_count_[group_index];
+        if (coefficient_count >
+            kVarDctAcGroupCoefficientCapacity - group_offset) {
+          return Status::Internal(
+            "VarDCT AC group coefficient storage overflowed");
+        }
+        for (size_t channel = 0; channel < 3; ++channel) {
+          std::copy(
+            quantized[channel].begin(),
+            quantized[channel].end(),
+            result.ac_coefficients_.begin() +
+              result.AcGroupChannelOffset(group_index, channel) +
+              group_offset);
+        }
+        result.group_used_coefficient_count_[group_index] +=
+          coefficient_count;
+        return Status::Ok();
       });
     if (!status.ok()) {
       return status;
     }
-    if (!result.complete()) {
+    if (!result.valid()) {
       return Status::Internal(
-        "Coefficient coding did not cover the complete image");
+        "Coefficient coding did not produce a valid encoder frame");
     }
 
     *out = std::move(result);
@@ -334,40 +383,18 @@ Status ComputeQuantizedCoefficients(
 }
 
 Status ReconstructQuantizedCoefficients(
-  const QuantizedCoefficientFrame& frame,
-  const Quantizer& quantizer,
-  const ColorCorrelationMap& color_correlation,
-  CoefficientCodingOptions options,
+  const VarDctEncoderFrame& frame,
   Image3FView output) {
 
-  if (!frame.complete() ||
-      !quantizer.valid() ||
-      !color_correlation.valid() ||
-      !ValidOptions(options) ||
-      !output.valid()) {
+  if (!frame.valid() || !output.valid()) {
     return Status::InvalidArgument(
       "Coefficient reconstruction inputs are invalid");
   }
 
-  const Extent2D block_extent = frame.block_extent();
-  if (block_extent.width >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      block_extent.height >
-        std::numeric_limits<size_t>::max() / kJxlBlockDimension ||
-      output.extent() != Extent2D{
-        block_extent.width * kJxlBlockDimension,
-        block_extent.height * kJxlBlockDimension}) {
+  const Extent2D block_extent = frame.geometry_.block_grid().blocks;
+  if (output.extent() != frame.geometry_.padded_frame()) {
     return Status::InvalidArgument(
       "Coefficient reconstruction output has the wrong extent");
-  }
-
-  const Extent2D expected_color_tiles{
-    (output.width() + kColorTileDimension - 1) / kColorTileDimension,
-    (output.height() + kColorTileDimension - 1) / kColorTileDimension,
-  };
-  if (color_correlation.tile_extent() != expected_color_tiles) {
-    return Status::InvalidArgument(
-      "Color-correlation map does not match the reconstruction image");
   }
 
   try {
@@ -386,79 +413,107 @@ Status ReconstructQuantizedCoefficients(
       PlaneF32View{result[2].data(), output.extent(), output.width()},
     }};
 
-    for (const QuantizedTransform& transform : frame.transforms()) {
-      const AcStrategyInfo* info = GetAcStrategyInfo(transform.strategy);
-      if (info == nullptr || !SupportsCpuDct(transform.strategy)) {
-        return Status::InvalidArgument(
-          "Stored coefficient strategy is unsupported");
-      }
-
-      const size_t coefficient_count = info->coefficient_count();
-      std::array<std::vector<float>, 3> coefficients;
-      for (size_t channel = 0; channel < coefficients.size(); ++channel) {
-        coefficients[channel].resize(coefficient_count);
-        Status status = DequantizeAcBlock(
-          transform.strategy,
-          quantizer,
-          transform.raw_quant,
-          {
-            .channel = kChannels[channel],
-            .matrix_multiplier = MatrixMultiplier(channel, options),
-          },
-          transform.ac[channel],
-          coefficients[channel]);
-        if (!status.ok()) {
-          return status;
+    std::vector<size_t> group_offsets(frame.ac_group_count(), 0);
+    const ConstImage3FView frame_dc = frame.dc();
+    const Status reconstruct_status = frame.strategies_.ForEachAnchor(
+      [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
+        const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
+        if (info == nullptr || !SupportsCpuDct(strategy)) {
+          return Status::InvalidArgument(
+            "Stored coefficient strategy is unsupported");
         }
-      }
 
-      const std::array<float, 3> factors = color_correlation.AcFactors(
-        transform.block_x / 8,
-        transform.block_y / 8);
-      for (size_t index = 0; index < coefficient_count; ++index) {
-        coefficients[0][index] += factors[0] * coefficients[1][index];
-        coefficients[2][index] += factors[2] * coefficients[1][index];
-      }
+        const size_t group_x = block_x / kVarDctAcGroupBlockDimension;
+        const size_t group_y = block_y / kVarDctAcGroupBlockDimension;
+        const size_t group_index =
+          group_y * frame.ac_group_extent_.width + group_x;
+        const size_t group_offset = group_offsets[group_index];
+        const size_t coefficient_count = info->coefficient_count();
+        if (group_offset >
+              frame.group_used_coefficient_count_[group_index] ||
+            coefficient_count >
+            frame.group_used_coefficient_count_[group_index] - group_offset) {
+          return Status::Internal(
+            "Stored VarDCT AC group ended inside a transform");
+        }
 
-      for (size_t channel = 0; channel < coefficients.size(); ++channel) {
-        std::vector<float> dc(
-          info->covered_blocks.width * info->covered_blocks.height);
-        for (size_t dy = 0; dy < info->covered_blocks.height; ++dy) {
-          for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
-            dc[dy * info->covered_blocks.width + dx] = frame.dc(
-              channel,
-              transform.block_x + dx,
-              transform.block_y + dy);
+        const int32_t raw_quant = frame.raw_quant_field_[
+          block_y * block_extent.width + block_x];
+        std::array<std::vector<float>, 3> coefficients;
+        for (size_t channel = 0; channel < coefficients.size(); ++channel) {
+          coefficients[channel].resize(coefficient_count);
+          const size_t source =
+            frame.AcGroupChannelOffset(group_index, channel) + group_offset;
+          Status status = DequantizeAcBlock(
+            strategy,
+            frame.quantizer_,
+            raw_quant,
+            {
+              .channel = kChannels[channel],
+              .matrix_multiplier = MatrixMultiplier(
+                channel,
+                frame.coding_options_),
+            },
+            std::span<const int32_t>(
+              frame.ac_coefficients_.data() + source,
+              coefficient_count),
+            coefficients[channel]);
+          if (!status.ok()) {
+            return status;
           }
         }
-        const ConstPlaneF32View dc_view{
-          .data = dc.data(),
-          .extent = info->covered_blocks,
-          .stride = info->covered_blocks.width,
-        };
-        Status status = ConvertDcToLowFrequencies(
-          transform.strategy,
-          dc_view,
-          coefficients[channel]);
-        if (!status.ok()) {
-          return status;
+
+        const std::array<float, 3> factors =
+          frame.color_correlation_.AcFactors(block_x / 8, block_y / 8);
+        for (size_t index = 0; index < coefficient_count; ++index) {
+          coefficients[0][index] += factors[0] * coefficients[1][index];
+          coefficients[2][index] += factors[2] * coefficients[1][index];
         }
 
-        std::vector<float> pixels(coefficient_count);
-        status = InverseDctCpu(
-          transform.strategy,
-          coefficients[channel],
-          pixels);
-        if (!status.ok()) {
-          return status;
+        for (size_t channel = 0; channel < coefficients.size(); ++channel) {
+          std::vector<float> dc(
+            info->covered_blocks.width * info->covered_blocks.height);
+          for (size_t dy = 0; dy < info->covered_blocks.height; ++dy) {
+            for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
+              dc[dy * info->covered_blocks.width + dx] =
+                frame_dc.plane[channel].Row(block_y + dy)[block_x + dx];
+            }
+          }
+          const ConstPlaneF32View dc_view{
+            .data = dc.data(),
+            .extent = info->covered_blocks,
+            .stride = info->covered_blocks.width,
+          };
+          Status status = ConvertDcToLowFrequencies(
+            strategy,
+            dc_view,
+            coefficients[channel]);
+          if (!status.ok()) {
+            return status;
+          }
+
+          std::vector<float> pixels(coefficient_count);
+          status = InverseDctCpu(strategy, coefficients[channel], pixels);
+          if (!status.ok()) {
+            return status;
+          }
+          CopyPixelsToImage(
+            pixels,
+            block_x,
+            block_y,
+            info->pixel_extent(),
+            result_view.plane[channel]);
         }
-        CopyPixelsToImage(
-          pixels,
-          transform.block_x,
-          transform.block_y,
-          info->pixel_extent(),
-          result_view.plane[channel]);
-      }
+
+        group_offsets[group_index] += coefficient_count;
+        return Status::Ok();
+      });
+    if (!reconstruct_status.ok()) {
+      return reconstruct_status;
+    }
+    if (group_offsets != frame.group_used_coefficient_count_) {
+      return Status::Internal(
+        "Stored VarDCT AC groups contain unconsumed coefficients");
     }
 
     for (size_t channel = 0; channel < result.size(); ++channel) {

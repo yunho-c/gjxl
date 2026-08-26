@@ -94,8 +94,7 @@ Status ValidatePipelineInputs(
       options.butteraugli_target <= 0.0f ||
       !std::isfinite(options.initial_quant_rescale) ||
       options.initial_quant_rescale <= 0.0f ||
-      block_extent == nullptr ||
-      output.strategies == nullptr) {
+      block_extent == nullptr) {
     return Status::InvalidArgument(
       "CPU quantization pipeline inputs or options are invalid");
   }
@@ -114,17 +113,14 @@ Status ValidatePipelineInputs(
       !output.initial_quantization.strategy_mask.valid() ||
       !output.initial_quantization.pixel_mask.valid() ||
       !output.adaptive_quantization.quant_field.valid() ||
-      !output.adaptive_quantization.raw_quant_field.valid() ||
       !output.adaptive_quantization.block_distance_map.valid() ||
       !output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
-      output.adaptive_quantization.quantizer == nullptr ||
-      output.adaptive_quantization.color_correlation == nullptr ||
+      output.adaptive_quantization.frame == nullptr ||
       output.adaptive_quantization.score_history == nullptr ||
       output.initial_quantization.quant_field.extent != *block_extent ||
       output.initial_quantization.strategy_mask.extent != *block_extent ||
       output.initial_quantization.pixel_mask.extent != opsin.extent() ||
       output.adaptive_quantization.quant_field.extent != *block_extent ||
-      output.adaptive_quantization.raw_quant_field.extent != *block_extent ||
       output.adaptive_quantization.block_distance_map.extent != *block_extent) {
     return Status::InvalidArgument(
       "CPU quantization pipeline outputs have invalid geometry");
@@ -240,7 +236,6 @@ Status RunCpuQuantizationPipeline(
     }
 
     std::vector<float> final_quant(block_count);
-    std::vector<int32_t> raw_quant(block_count);
     std::vector<float> block_distance(block_count);
     OwnedImage3F reconstructed_linear;
     status = AllocateImage(
@@ -249,8 +244,7 @@ Status RunCpuQuantizationPipeline(
     if (!status.ok()) {
       return status;
     }
-    Quantizer quantizer;
-    ColorCorrelationMap final_color_correlation;
+    VarDctEncoderFrame frame;
     std::vector<double> score_history;
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
@@ -265,13 +259,10 @@ Status RunCpuQuantizationPipeline(
       {
         .quant_field = {
           final_quant.data(), block_extent, block_extent.width},
-        .raw_quant_field = {
-          raw_quant.data(), block_extent, block_extent.width},
         .block_distance_map = {
           block_distance.data(), block_extent, block_extent.width},
         .reconstructed_linear_rgb = reconstructed_linear.View(),
-        .quantizer = &quantizer,
-        .color_correlation = &final_color_correlation,
+        .frame = &frame,
         .score_history = &score_history,
       });
     if (!status.ok()) {
@@ -282,18 +273,14 @@ Status RunCpuQuantizationPipeline(
     CopyPlane(strategy_mask, output.initial_quantization.strategy_mask);
     CopyPlane(pixel_mask, output.initial_quantization.pixel_mask);
     CopyPlane(final_quant, output.adaptive_quantization.quant_field);
-    CopyPlane(raw_quant, output.adaptive_quantization.raw_quant_field);
     CopyPlane(
       block_distance,
       output.adaptive_quantization.block_distance_map);
     CopyImage(
       reconstructed_linear,
       output.adaptive_quantization.reconstructed_linear_rgb);
-    *output.adaptive_quantization.quantizer = quantizer;
-    *output.adaptive_quantization.color_correlation =
-      std::move(final_color_correlation);
+    *output.adaptive_quantization.frame = std::move(frame);
     *output.adaptive_quantization.score_history = std::move(score_history);
-    *output.strategies = std::move(strategies);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate CPU quantization pipeline storage");

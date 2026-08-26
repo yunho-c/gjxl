@@ -71,13 +71,10 @@ struct StageOutput {
     kPixelExtent.width * kPixelExtent.height);
   std::vector<float> final_quant = std::vector<float>(
     kBlockExtent.width * kBlockExtent.height);
-  std::vector<int32_t> raw_quant = std::vector<int32_t>(
-    kBlockExtent.width * kBlockExtent.height);
   std::vector<float> block_distance = std::vector<float>(
     kBlockExtent.width * kBlockExtent.height);
   ImageStorage reconstructed;
-  gjxl::Quantizer quantizer;
-  gjxl::ColorCorrelationMap color_correlation;
+  gjxl::VarDctEncoderFrame frame;
   std::vector<double> scores;
 };
 
@@ -191,13 +188,10 @@ int main() {
   const gjxl::AdaptiveQuantizationOutput adaptive_output{
     .quant_field = {
       stage.final_quant.data(), kBlockExtent, kBlockExtent.width},
-    .raw_quant_field = {
-      stage.raw_quant.data(), kBlockExtent, kBlockExtent.width},
     .block_distance_map = {
       stage.block_distance.data(), kBlockExtent, kBlockExtent.width},
     .reconstructed_linear_rgb = stage.reconstructed.View(),
-    .quantizer = &stage.quantizer,
-    .color_correlation = &stage.color_correlation,
+    .frame = &stage.frame,
     .score_history = &stage.scores,
   };
   gjxl::AdaptiveQuantizationOptions adaptive_options;
@@ -205,7 +199,6 @@ int main() {
   adaptive_options.iterations = 2;
 
   StageOutput pipeline_stage;
-  gjxl::AcStrategyGrid pipeline_strategies;
   const gjxl::CpuQuantizationPipelineOutput pipeline_output{
     .initial_quantization = {
       .quant_field = {
@@ -226,20 +219,14 @@ int main() {
         pipeline_stage.final_quant.data(),
         kBlockExtent,
         kBlockExtent.width},
-      .raw_quant_field = {
-        pipeline_stage.raw_quant.data(),
-        kBlockExtent,
-        kBlockExtent.width},
       .block_distance_map = {
         pipeline_stage.block_distance.data(),
         kBlockExtent,
         kBlockExtent.width},
       .reconstructed_linear_rgb = pipeline_stage.reconstructed.View(),
-      .quantizer = &pipeline_stage.quantizer,
-      .color_correlation = &pipeline_stage.color_correlation,
+      .frame = &pipeline_stage.frame,
       .score_history = &pipeline_stage.scores,
     },
-    .strategies = &pipeline_strategies,
   };
   gjxl::CpuQuantizationPipelineOptions pipeline_options;
   pipeline_options.butteraugli_target = 1.2f;

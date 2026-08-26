@@ -15,6 +15,7 @@ namespace gjxl {
 enum class MetalDctImplementation {
   kScalarMatmul,
   kSimdgroupMatmul,
+  kFactoredRadix2,
 };
 
 struct MetalBackendOptions {
