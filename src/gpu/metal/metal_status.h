@@ -41,4 +41,12 @@ inline Status ErrorToStatus(
     std::move(message));
 }
 
+inline Status ErrorToDeviceStatus(
+  const NS::Error* error,
+  std::string_view operation) {
+
+  const Status status = ErrorToStatus(error, operation);
+  return Status::DeviceError(std::string(status.message()));
+}
+
 }  // namespace gjxl::metal

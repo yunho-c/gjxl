@@ -16,6 +16,7 @@
 
 #include "butteraugli_test_tolerances.h"
 #include "codec/adaptive_quantization.h"
+#include "codec/adaptive_quantization_internal.h"
 #include "codec/color_transform.h"
 
 namespace {
@@ -363,10 +364,210 @@ bool CheckInvalidRequestIsAtomic() {
   return true;
 }
 
+bool ColorCorrelationMapsEqual(
+  const gjxl::ColorCorrelationMap& left,
+  const gjxl::ColorCorrelationMap& right) {
+
+  if (left.valid() != right.valid() ||
+      left.tile_extent() != right.tile_extent()) {
+    return false;
+  }
+  const auto left_x = left.y_to_x_map();
+  const auto right_x = right.y_to_x_map();
+  const auto left_b = left.y_to_b_map();
+  const auto right_b = right.y_to_b_map();
+  for (size_t y = 0; y < left.tile_extent().height; ++y) {
+    if (!std::equal(
+          left_x.Row(y),
+          left_x.Row(y) + left.tile_extent().width,
+          right_x.Row(y)) ||
+        !std::equal(
+          left_b.Row(y),
+          left_b.Row(y) + left.tile_extent().width,
+          right_b.Row(y))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <typename T>
+bool PlanesEqual(gjxl::PlaneView<const T> left,
+                 gjxl::PlaneView<const T> right) {
+  if (left.extent != right.extent)
+    return false;
+  for (size_t y = 0; y < left.extent.height; ++y) {
+    if (!std::equal(left.Row(y), left.Row(y) + left.extent.width,
+                    right.Row(y))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool FramesEqual(const gjxl::VarDctEncoderFrame& left,
+                 const gjxl::VarDctEncoderFrame& right) {
+  if (!left.valid() || !right.valid() ||
+      left.geometry().frame() != right.geometry().frame() ||
+      !PlanesEqual(left.raw_quant_field(), right.raw_quant_field()) ||
+      !PlanesEqual(left.epf_sharpness(), right.epf_sharpness()) ||
+      left.quantizer().params().global_scale !=
+        right.quantizer().params().global_scale ||
+      left.quantizer().params().quant_dc !=
+        right.quantizer().params().quant_dc ||
+      !ColorCorrelationMapsEqual(
+        left.color_correlation(), right.color_correlation()) ||
+      left.profile() != right.profile() ||
+      left.ac_group_extent() != right.ac_group_extent() ||
+      left.ac_group_count() != right.ac_group_count()) {
+    return false;
+  }
+  const gjxl::ConstImage3FView left_dc = left.dc();
+  const gjxl::ConstImage3FView right_dc = right.dc();
+  const gjxl::ConstImage3I32View left_quantized_dc = left.quantized_dc();
+  const gjxl::ConstImage3I32View right_quantized_dc = right.quantized_dc();
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (!PlanesEqual(left_dc.plane[channel], right_dc.plane[channel]) ||
+        !PlanesEqual(left_quantized_dc.plane[channel],
+                     right_quantized_dc.plane[channel])) {
+      return false;
+    }
+  }
+  for (size_t group_index = 0; group_index < left.ac_group_count();
+       ++group_index) {
+    gjxl::VarDctAcGroupView left_group;
+    gjxl::VarDctAcGroupView right_group;
+    if (!left.GetAcGroup(group_index, &left_group).ok() ||
+        !right.GetAcGroup(group_index, &right_group).ok() ||
+        left_group.block_x != right_group.block_x ||
+        left_group.block_y != right_group.block_y ||
+        left_group.block_extent != right_group.block_extent ||
+        left_group.used_coefficient_count !=
+          right_group.used_coefficient_count) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      if (!std::equal(left_group.coefficients[channel].begin(),
+                      left_group.coefficients[channel].end(),
+                      right_group.coefficients[channel].begin())) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool CheckProfiledPath() {
+  namespace aqi = gjxl::adaptive_quantization_internal;
+
+  ImageStorage original(kOriginalExtent);
+  ImageStorage padded_linear(kPaddedExtent);
+  ImageStorage opsin(kPaddedExtent);
+  FillPaddedLinear(&padded_linear, &original);
+  if (!gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, opsin.View()).ok()) {
+    return false;
+  }
+
+  gjxl::AcStrategyGrid strategies;
+  if (!gjxl::AcStrategyGrid::Create(kBlockExtent, &strategies).ok()) {
+    return false;
+  }
+  strategies.fill_dct8();
+  constexpr std::array<float, 6> kInitial = {
+    0.41f, 0.44f, 0.47f,
+    0.43f, 0.46f, 0.49f,
+  };
+  std::array<uint8_t, 6> sharpness{};
+  sharpness.fill(4);
+  const gjxl::ConstPlaneF32View initial{
+    kInitial.data(), kBlockExtent, kBlockExtent.width};
+  const gjxl::ConstPlaneU8View sharpness_view{
+    sharpness.data(), kBlockExtent, kBlockExtent.width};
+  gjxl::AdaptiveQuantizationOptions options;
+  options.butteraugli_target = 1.1f;
+  options.iterations = 2;
+
+  AqStorage ordinary;
+  AqStorage profiled;
+  aqi::AdaptiveQuantizationProfile profile;
+  const gjxl::Status ordinary_status = gjxl::FindBestQuantization(
+    original.ConstView(), opsin.ConstView(), strategies, initial,
+    sharpness_view, options, ordinary.Output());
+  const gjxl::Status profiled_status = aqi::FindBestQuantizationProfiled(
+    original.ConstView(), opsin.ConstView(), strategies, initial,
+    sharpness_view, options, profiled.Output(), &profile);
+  if (!ordinary_status.ok() || !profiled_status.ok() ||
+      ordinary.quant_field != profiled.quant_field ||
+      ordinary.block_distance != profiled.block_distance ||
+      ordinary.reconstructed.plane != profiled.reconstructed.plane ||
+      !FramesEqual(ordinary.frame, profiled.frame) ||
+      ordinary.score_history != profiled.score_history ||
+      profile.evaluations.size() != options.iterations + 1) {
+    std::cerr << "Profiled AQ differs from the production path\n";
+    return false;
+  }
+
+  AqStorage zero_profiled;
+  aqi::AdaptiveQuantizationProfile zero_profile;
+  options.iterations = 0;
+  if (!aqi::FindBestQuantizationProfiled(
+        original.ConstView(), opsin.ConstView(), strategies, initial,
+        sharpness_view, options, zero_profiled.Output(), &zero_profile).ok() ||
+      zero_profile.evaluations.size() != 1) {
+    std::cerr << "Zero-update profiled AQ has the wrong evaluation count\n";
+    return false;
+  }
+
+  for (const aqi::EvaluationProfile& evaluation : profile.evaluations) {
+    uint64_t measured_stages = 0;
+    for (uint64_t stage : evaluation.stage_nanoseconds) {
+      if (stage == 0) {
+        std::cerr << "Profiled AQ omitted an evaluation stage\n";
+        return false;
+      }
+      measured_stages += stage;
+    }
+    if (evaluation.total_nanoseconds < measured_stages) {
+      std::cerr << "Profiled AQ stage time exceeds its evaluation total\n";
+      return false;
+    }
+  }
+
+  aqi::AdaptiveQuantizationProfile invalid_profile;
+  invalid_profile.loop_setup_nanoseconds = 11;
+  invalid_profile.quant_field_update_nanoseconds = 12;
+  invalid_profile.output_commit_nanoseconds = 13;
+  invalid_profile.evaluations.push_back({
+    .total_nanoseconds = 14,
+  });
+  const aqi::AdaptiveQuantizationProfile original_profile = invalid_profile;
+  AqStorage invalid_output(31.0f);
+  const auto original_quant = invalid_output.quant_field;
+  const auto original_distance = invalid_output.block_distance;
+  const auto original_image = invalid_output.reconstructed.plane;
+  options.iterations = 5;
+  if (aqi::FindBestQuantizationProfiled(
+        original.ConstView(), opsin.ConstView(), strategies, initial,
+        sharpness_view, options, invalid_output.Output(),
+        &invalid_profile).ok() ||
+      invalid_profile != original_profile ||
+      invalid_output.quant_field != original_quant ||
+      invalid_output.block_distance != original_distance ||
+      invalid_output.reconstructed.plane != original_image ||
+      invalid_output.frame.valid() ||
+      !invalid_output.score_history.empty()) {
+    std::cerr << "Invalid profiled AQ request changed caller state\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
-  if (!CheckLoopAndUpdateRule() || !CheckInvalidRequestIsAtomic()) {
+  if (!CheckLoopAndUpdateRule() || !CheckInvalidRequestIsAtomic() ||
+      !CheckProfiledPath()) {
     return EXIT_FAILURE;
   }
   std::cout << "All iterative adaptive-quantization tests passed.\n";

@@ -60,6 +60,10 @@ struct MetalBackendOptions {
 
   MetalDctImplementation inverse_dct16x32 =
     MetalDctImplementation::kScalarMatmul;
+
+  // Deterministic failure injection used by real-device backend tests.
+  bool test_fail_submission = false;
+  bool test_fail_completion = false;
 };
 
 // Creates a Metal backend using the system-default GPU.
@@ -76,5 +80,11 @@ Status CreateMetalBackend(
   std::string_view metallib_path,
   const MetalBackendOptions& options,
   std::unique_ptr<GpuBackend>* out);
+
+/// Injects a failure into the next Metal compute submission only.
+[[nodiscard]] Status ArmNextMetalSubmissionFailureForTest(
+  GpuBackend& backend,
+  bool fail_submission,
+  bool fail_completion);
 
 }  // namespace gjxl

@@ -1,0 +1,448 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+
+#pragma once
+
+#include <Foundation/Foundation.hpp>
+#include <Metal/Metal.hpp>
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+
+#include "core/ac_strategy.h"
+#include "core/status.h"
+#include "gpu/backend.h"
+#include "gpu/image.h"
+#include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/butteraugli.h"
+#include "gpu/ops/primitives.h"
+
+namespace gjxl::metal_internal {
+
+enum class TransformDirection {
+  kForward,
+  kInverse,
+};
+
+struct TransformPipeline {
+  NS::SharedPtr<MTL::ComputePipelineState> state;
+  NS::UInteger threads_per_threadgroup = 0;
+  size_t transforms_per_threadgroup = 1;
+  bool uses_device_basis = false;
+  AcStrategyType strategy = AcStrategyType::kCount;
+  std::string label;
+};
+
+struct TransformPipelinePair {
+  TransformPipeline forward;
+  TransformPipeline inverse;
+};
+
+using TransformPipelineRegistry =
+  std::array<TransformPipelinePair, kAcStrategyCount>;
+
+struct PrimitivePipelines {
+  NS::SharedPtr<MTL::ComputePipelineState> affine;
+  NS::SharedPtr<MTL::ComputePipelineState> convolution_horizontal;
+  NS::SharedPtr<MTL::ComputePipelineState> convolution_vertical;
+  NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
+};
+
+struct AqPipelines {
+  NS::SharedPtr<MTL::ComputePipelineState> contract_probe;
+  NS::SharedPtr<MTL::ComputePipelineState> reset_reconstruction;
+  NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
+  NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;
+  NS::SharedPtr<MTL::ComputePipelineState> quantization_probe;
+  NS::SharedPtr<MTL::ComputePipelineState> gaborish;
+  NS::SharedPtr<MTL::ComputePipelineState> epf;
+  NS::SharedPtr<MTL::ComputePipelineState> opsin_to_linear;
+};
+
+struct AcStrategyPipelines {
+  NS::SharedPtr<MTL::ComputePipelineState> gather;
+  NS::SharedPtr<MTL::ComputePipelineState> residual;
+  NS::SharedPtr<MTL::ComputePipelineState> cost;
+  NS::UInteger gather_threads_per_threadgroup = 0;
+};
+
+struct MetalAcStrategyBatchParams {
+  uint32_t pixel_width;
+  uint32_t pixel_height;
+  uint32_t opsin_row_stride;
+  uint32_t opsin_plane_stride;
+  uint32_t pixel_mask_row_stride;
+  uint32_t candidate_count;
+  uint32_t coefficient_count;
+  uint32_t transform_width;
+  uint32_t transform_height;
+  uint32_t covered_block_count;
+  float info_loss_multiplier;
+  float zeros_multiplier;
+  float cost_delta;
+};
+
+static_assert(std::is_standard_layout_v<MetalAcStrategyBatchParams>);
+static_assert(sizeof(MetalAcStrategyBatchParams) == 13 * sizeof(uint32_t));
+
+class MetalPreparedAqEvaluation;
+
+struct ButteraugliPipelines {
+  NS::SharedPtr<MTL::ComputePipelineState> copy;
+  NS::SharedPtr<MTL::ComputePipelineState> clear;
+  NS::SharedPtr<MTL::ComputePipelineState> add;
+  NS::SharedPtr<MTL::ComputePipelineState> expand;
+  NS::SharedPtr<MTL::ComputePipelineState> subsample;
+  NS::SharedPtr<MTL::ComputePipelineState> blur5_horizontal;
+  NS::SharedPtr<MTL::ComputePipelineState> blur5_vertical;
+  NS::SharedPtr<MTL::ComputePipelineState> convolution_transpose;
+  NS::SharedPtr<MTL::ComputePipelineState> opsin;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_high;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_suppress_x;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_ultra;
+  NS::SharedPtr<MTL::ComputePipelineState> malta_scale;
+  NS::SharedPtr<MTL::ComputePipelineState> malta_response;
+  NS::SharedPtr<MTL::ComputePipelineState> l2;
+  NS::SharedPtr<MTL::ComputePipelineState> mask_precompute;
+  NS::SharedPtr<MTL::ComputePipelineState> fuzzy_erosion;
+  NS::SharedPtr<MTL::ComputePipelineState> masked_ac;
+  NS::SharedPtr<MTL::ComputePipelineState> final;
+  NS::SharedPtr<MTL::ComputePipelineState> crop;
+  NS::SharedPtr<MTL::ComputePipelineState> compose;
+  NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
+};
+
+class MetalPreparedDeviceButteraugli;
+
+class MetalBuffer final : public DeviceBuffer {
+public:
+  MetalBuffer(
+    NS::SharedPtr<MTL::Buffer> buffer,
+    BackendId backend_id,
+    size_t size_bytes)
+    : DeviceBuffer(BackendKind::kMetal, backend_id, size_bytes),
+      buffer_(std::move(buffer)) {}
+
+  ~MetalBuffer() override = default;
+
+  [[nodiscard]] MTL::Buffer* handle() const noexcept {
+    return buffer_.get();
+  }
+
+  [[nodiscard]] MTL::Device* device() const noexcept {
+    return buffer_->device();
+  }
+
+  [[nodiscard]] void* contents() noexcept {
+    return buffer_->contents();
+  }
+
+  [[nodiscard]] const void* contents() const noexcept {
+    return buffer_->contents();
+  }
+
+private:
+  NS::SharedPtr<MTL::Buffer> buffer_;
+};
+
+class MetalBackend final
+  : public GpuBackend,
+    public GpuImagePrimitives,
+    public GpuAqEvaluation,
+    public DeviceButteraugliOperation {
+public:
+  MetalBackend(
+    NS::SharedPtr<MTL::Device> device,
+    NS::SharedPtr<MTL::CommandQueue> command_queue,
+    NS::SharedPtr<MTL::Library> library,
+    NS::SharedPtr<MTL::Buffer> dct_basis_buffer,
+    TransformPipelineRegistry transform_pipelines,
+    AcStrategyPipelines ac_strategy_pipelines,
+    PrimitivePipelines primitive_pipelines,
+    AqPipelines aq_pipelines,
+    ButteraugliPipelines butteraugli_pipelines,
+    bool test_fail_submission,
+    bool test_fail_completion);
+
+  ~MetalBackend() override;
+
+  [[nodiscard]] BackendKind kind() const noexcept override;
+  [[nodiscard]] std::string_view name() const noexcept override;
+
+  Status Allocate(
+    size_t size_bytes,
+    std::unique_ptr<DeviceBuffer>* out) override;
+
+  Status CopyHostToDevice(
+    DeviceBuffer& dst,
+    const void* src,
+    size_t size_bytes,
+    size_t dst_offset_bytes) override;
+
+  Status CopyDeviceToHost(
+    const DeviceBuffer& src,
+    void* dst,
+    size_t size_bytes,
+    size_t src_offset_bytes) override;
+
+  Status ForwardTransform(
+    const TransformBatch& batch,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
+  Status InverseTransform(
+    const TransformBatch& batch,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
+  Status EvaluateAcStrategyCandidates(
+    const AcStrategyCandidateBatch& batch) override;
+
+  Status EvaluateAcStrategyCandidateBatches(
+    std::span<const AcStrategyCandidateBatch> batches) override;
+
+  Status Synchronize() override;
+
+  Status SubmitImagePrimitiveSequence(
+    std::span<const ImagePrimitiveCommand> commands,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
+  Status PrepareAqEvaluation(
+    const AqEvaluationPreparation& preparation,
+    std::unique_ptr<PreparedAqEvaluation>* prepared) override;
+
+  Status Prepare(
+    GpuBackend& backend,
+    const DeviceButteraugliPrepareDescriptor& descriptor,
+    std::unique_ptr<PreparedDeviceButteraugli>* prepared) override;
+
+  void ArmNextSubmissionFailureForTest(
+    bool fail_submission,
+    bool fail_completion) noexcept;
+
+private:
+  friend class MetalPreparedAqEvaluation;
+  friend class MetalPreparedDeviceButteraugli;
+  struct TransformEncodeContext {
+    const TransformPipeline* pipeline = nullptr;
+    TransformDirection direction = TransformDirection::kForward;
+    const MetalBuffer* input = nullptr;
+    MetalBuffer* output = nullptr;
+    size_t input_offset_bytes = 0;
+    size_t output_offset_bytes = 0;
+    size_t transform_count = 0;
+  };
+
+  struct ResolvedConstPlane {
+    ConstDevicePlaneView view;
+    DeviceMemoryRange range;
+    const MetalBuffer* buffer = nullptr;
+  };
+
+  struct ResolvedPlane {
+    DevicePlaneView view;
+    DeviceMemoryRange range;
+    MetalBuffer* buffer = nullptr;
+  };
+
+  struct ValidatedAcStrategyBatch {
+    AcStrategyType strategy = AcStrategyType::kCount;
+    const MetalBuffer* opsin = nullptr;
+    const MetalBuffer* pixel_mask = nullptr;
+    const MetalBuffer* matrices = nullptr;
+    const MetalBuffer* candidates = nullptr;
+    MetalBuffer* scratch_a = nullptr;
+    MetalBuffer* scratch_b = nullptr;
+    MetalBuffer* rate_scratch = nullptr;
+    MetalBuffer* costs = nullptr;
+    const TransformPipeline* forward = nullptr;
+    const TransformPipeline* inverse = nullptr;
+    MetalAcStrategyBatchParams params{};
+    size_t transform_count = 0;
+    size_t packed_element_count = 0;
+  };
+
+  struct AcStrategyEncodeContext {
+    std::span<const ValidatedAcStrategyBatch> batches;
+  };
+
+  using ComputeEncodeCallback = void (*)(
+    MetalBackend&,
+    MTL::ComputeCommandEncoder*,
+    const void*);
+
+  static MetalBuffer* AsMetalBuffer(DeviceBuffer& buffer);
+  static const MetalBuffer* AsMetalBuffer(const DeviceBuffer& buffer);
+
+  [[nodiscard]] static bool TryMultiply(
+    size_t left,
+    size_t right,
+    size_t* result) noexcept;
+
+  Status RequireMetalBuffer(
+    const DeviceBuffer* buffer,
+    size_t required_bytes,
+    std::string_view role,
+    const MetalBuffer** out) const;
+
+  Status RequireMetalBuffer(
+    DeviceBuffer* buffer,
+    size_t required_bytes,
+    std::string_view role,
+    MetalBuffer** out) const;
+
+  Status ValidateAcStrategyCandidateBatch(
+    const AcStrategyCandidateBatch& batch,
+    ValidatedAcStrategyBatch* out) const;
+
+  static void EncodeAcStrategySubmission(
+    MetalBackend& backend,
+    MTL::ComputeCommandEncoder* encoder,
+    const void* context);
+
+  void EncodeAcStrategyCandidateBatch(
+    MTL::ComputeCommandEncoder* encoder,
+    const ValidatedAcStrategyBatch& validated);
+
+  Status SubmitAcStrategyCandidates(
+    std::span<const AcStrategyCandidateBatch> batches);
+
+  Status SubmitCompute(
+    const char* label,
+    ComputeEncodeCallback encode,
+    const void* context,
+    std::unique_ptr<GpuSubmission>* submission);
+
+  Status ValidateTransformBatch(
+    const AcStrategyInfo& strategy_info,
+    const TransformBatch& batch,
+    const MetalBuffer** input,
+    MetalBuffer** output) const;
+
+  Status SubmitTransform(
+    TransformDirection direction,
+    const TransformBatch& batch,
+    std::unique_ptr<GpuSubmission>* submission);
+
+  static void EncodeTransformSubmission(
+    MetalBackend& backend,
+    MTL::ComputeCommandEncoder* encoder,
+    const void* context);
+
+  void EncodeTransformBatch(
+    MTL::ComputeCommandEncoder* encoder,
+    TransformDirection direction,
+    AcStrategyType strategy,
+    const MetalBuffer& input,
+    size_t input_offset_bytes,
+    MetalBuffer& output,
+    size_t output_offset_bytes,
+    size_t transform_count) const;
+
+  Status ResolvePlane(
+    ConstDevicePlaneView view,
+    ResolvedConstPlane* out) const;
+
+  Status ResolvePlane(
+    DevicePlaneView view,
+    ResolvedPlane* out) const;
+
+  [[nodiscard]] static bool SamePlaneLayout(
+    ConstDevicePlaneView left,
+    ConstDevicePlaneView right) noexcept;
+
+  [[nodiscard]] static Status RejectOverlap(
+    DeviceMemoryRange left,
+    DeviceMemoryRange right,
+    std::string_view message);
+
+  Status ValidatePrimitive(const PointwiseAffineCommand& command) const;
+  Status ValidatePrimitive(const SeparableConvolutionCommand& command) const;
+  Status ValidatePrimitive(const MaximumReductionCommand& command) const;
+  Status ValidatePrimitiveCommand(
+    const ImagePrimitiveCommand& command) const;
+
+  static void DispatchPlane(
+    MTL::ComputeCommandEncoder* encoder,
+    Extent2D extent);
+
+  void EncodePrimitive(
+    MTL::ComputeCommandEncoder* encoder,
+    const PointwiseAffineCommand& command);
+
+  void EncodeConvolutionPass(
+    MTL::ComputeCommandEncoder* encoder,
+    MTL::ComputePipelineState* pipeline,
+    ConstDevicePlaneView input_view,
+    ConstDevicePlaneView kernel_view,
+    DevicePlaneView output_view);
+
+  void EncodePrimitive(
+    MTL::ComputeCommandEncoder* encoder,
+    const SeparableConvolutionCommand& command);
+
+  void EncodeReductionPass(
+    MTL::ComputeCommandEncoder* encoder,
+    ConstDevicePlaneView input_view,
+    size_t input_count,
+    DevicePlaneView output_view);
+
+  void EncodePrimitive(
+    MTL::ComputeCommandEncoder* encoder,
+    const MaximumReductionCommand& command);
+
+  void EncodePrimitiveCommand(
+    MTL::ComputeCommandEncoder* encoder,
+    const ImagePrimitiveCommand& command);
+
+  static void EncodePrimitiveSubmission(
+    MetalBackend& backend,
+    MTL::ComputeCommandEncoder* encoder,
+    const void* context);
+
+  NS::SharedPtr<MTL::Device> device_;
+  NS::SharedPtr<MTL::CommandQueue> command_queue_;
+  NS::SharedPtr<MTL::Library> library_;
+  NS::SharedPtr<MTL::Buffer> dct_basis_buffer_;
+  TransformPipelineRegistry transform_pipelines_;
+  AcStrategyPipelines ac_strategy_pipelines_;
+  PrimitivePipelines primitive_pipelines_;
+  AqPipelines aq_pipelines_;
+  ButteraugliPipelines butteraugli_pipelines_;
+  bool test_fail_submission_ = false;
+  bool test_fail_completion_ = false;
+  std::atomic<bool> test_fail_next_submission_{false};
+  std::atomic<bool> test_fail_next_completion_{false};
+  std::unique_ptr<GpuSubmission> pending_ac_submission_;
+  std::string name_;
+};
+
+Status CreateAcStrategyPipelines(
+  MTL::Device* device,
+  MTL::Library* library,
+  AcStrategyPipelines* out);
+
+Status CreatePrimitivePipelines(
+  MTL::Device* device,
+  MTL::Library* library,
+  PrimitivePipelines* out);
+
+Status CreateAqPipelines(
+  MTL::Device* device,
+  MTL::Library* library,
+  AqPipelines* out);
+
+Status CreateButteraugliPipelines(
+  MTL::Device* device,
+  MTL::Library* library,
+  ButteraugliPipelines* out);
+
+}  // namespace gjxl::metal_internal

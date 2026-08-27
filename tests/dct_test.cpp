@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -172,7 +173,9 @@ std::vector<float> MakeReferenceInput(size_t elements_per_transform) {
 }
 
 using TransformOperation =
-  gjxl::Status (gjxl::GpuBackend::*)(const gjxl::TransformBatch&);
+  gjxl::Status (gjxl::GpuBackend::*)(
+    const gjxl::TransformBatch&,
+    std::unique_ptr<gjxl::GpuSubmission>*);
 
 using ReferenceTransform = void (*)(
   gjxl::Extent2D,
@@ -210,15 +213,18 @@ bool CheckDctOperation(
     return false;
   }
 
+  std::unique_ptr<gjxl::GpuSubmission> submission;
   if (!CheckStatus(
-      (gpu.*transform)(batch),
-      std::string(operation) + " submission")) {
+      (gpu.*transform)(batch, &submission),
+      std::string(operation) + " submission") ||
+      submission == nullptr) {
+    std::cerr << operation << " did not return a submission handle\n";
     return false;
   }
 
   if (!CheckStatus(
-      gpu.Synchronize(),
-      std::string(operation) + " synchronization")) {
+      submission->Wait(),
+      std::string(operation) + " completion")) {
     return false;
   }
 
@@ -436,24 +442,32 @@ bool TestRoundTrip(
     .transform_count = kTransformCount,
   };
 
+  std::unique_ptr<gjxl::GpuSubmission> forward_submission;
+  std::unique_ptr<gjxl::GpuSubmission> inverse_submission;
   if (!CheckStatus(
-      gpu.ForwardTransform(forward_batch),
+      gpu.ForwardTransform(forward_batch, &forward_submission),
       std::string(implementation_name) + " Forward" +
-        std::string(strategy_info->name))) {
+        std::string(strategy_info->name)) ||
+      forward_submission == nullptr) {
     return false;
   }
 
   if (!CheckStatus(
-      gpu.InverseTransform(inverse_batch),
+      gpu.InverseTransform(inverse_batch, &inverse_submission),
       std::string(implementation_name) + " Inverse" +
-        std::string(strategy_info->name))) {
+        std::string(strategy_info->name)) ||
+      inverse_submission == nullptr) {
     return false;
   }
 
+  const gjxl::Status forward_completion = forward_submission->Wait();
+  const gjxl::Status inverse_completion = inverse_submission->Wait();
   if (!CheckStatus(
-      gpu.Synchronize(),
-      std::string(implementation_name) +
-        " round-trip synchronization")) {
+        forward_completion,
+        std::string(implementation_name) + " forward completion") ||
+      !CheckStatus(
+        inverse_completion,
+        std::string(implementation_name) + " inverse completion")) {
     return false;
   }
 
@@ -512,15 +526,36 @@ bool TestTransformValidation(gjxl::GpuBackend& gpu) {
     return false;
   }
 
+  const gjxl::TransformBatch valid_batch{
+    .strategy = gjxl::AcStrategyType::kDct8,
+    .input = input.get(),
+    .output = output.get(),
+    .transform_count = 1,
+  };
+  const uint64_t before = gpu.stats().committed_submissions;
+  if (gpu.ForwardTransform(valid_batch, nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      gpu.stats().committed_submissions != before) {
+    std::cerr << "Null transform submission output committed work\n";
+    return false;
+  }
+
+  std::unique_ptr<gjxl::GpuSubmission> submission;
+  if (!gpu.ForwardTransform(valid_batch, &submission).ok() ||
+      submission == nullptr || !submission->Wait().ok()) {
+    std::cerr << "Valid transform did not return a usable submission\n";
+    return false;
+  }
   const gjxl::Status unsupported =
     gpu.ForwardTransform({
       .strategy = gjxl::AcStrategyType::kIdentity,
       .input = input.get(),
       .output = output.get(),
       .transform_count = 1,
-    });
+    }, &submission);
 
-  if (unsupported.code() != gjxl::StatusCode::kUnavailable) {
+  if (unsupported.code() != gjxl::StatusCode::kUnavailable ||
+      submission != nullptr) {
     std::cerr
       << "Unsupported strategy did not return unavailable: "
       << unsupported.message()
@@ -534,9 +569,10 @@ bool TestTransformValidation(gjxl::GpuBackend& gpu) {
       .input = input.get(),
       .output = output.get(),
       .transform_count = 1,
-    });
+    }, &submission);
 
-  if (undersized.code() != gjxl::StatusCode::kInvalidArgument) {
+  if (undersized.code() != gjxl::StatusCode::kInvalidArgument ||
+      submission != nullptr) {
     std::cerr
       << "Undersized transform did not return invalid argument: "
       << undersized.message()
@@ -550,9 +586,10 @@ bool TestTransformValidation(gjxl::GpuBackend& gpu) {
       .input = input.get(),
       .output = output.get(),
       .transform_count = 1,
-    });
+    }, &submission);
 
-  if (invalid.code() != gjxl::StatusCode::kInvalidArgument) {
+  if (invalid.code() != gjxl::StatusCode::kInvalidArgument ||
+      submission != nullptr) {
     std::cerr
       << "Invalid strategy did not return invalid argument: "
       << invalid.message()
@@ -560,12 +597,84 @@ bool TestTransformValidation(gjxl::GpuBackend& gpu) {
     return false;
   }
 
-  return CheckStatus(
-    gpu.ForwardTransform({
+  const gjxl::Status empty = gpu.ForwardTransform({
       .strategy = gjxl::AcStrategyType::kDct8,
       .transform_count = 0,
-    }),
-    "Empty transform batch");
+    }, &submission);
+  return CheckStatus(empty, "Empty transform batch") &&
+         submission == nullptr;
+}
+
+bool TestTransformFailureStatuses() {
+  constexpr size_t kDct8Bytes = 64 * sizeof(float);
+
+  gjxl::MetalBackendOptions submit_options;
+  submit_options.test_fail_submission = true;
+  std::unique_ptr<gjxl::GpuBackend> submit_gpu;
+  if (!gjxl::CreateMetalBackend(
+        GJXL_METALLIB_PATH, submit_options, &submit_gpu).ok()) {
+    return false;
+  }
+  std::unique_ptr<gjxl::DeviceBuffer> submit_input;
+  std::unique_ptr<gjxl::DeviceBuffer> submit_output;
+  if (!submit_gpu->Allocate(kDct8Bytes, &submit_input).ok() ||
+      !submit_gpu->Allocate(kDct8Bytes, &submit_output).ok()) {
+    return false;
+  }
+  const gjxl::TransformBatch submit_batch{
+    .strategy = gjxl::AcStrategyType::kDct8,
+    .input = submit_input.get(),
+    .output = submit_output.get(),
+    .transform_count = 1,
+  };
+  std::unique_ptr<gjxl::GpuSubmission> submission;
+  if (submit_gpu->ForwardTransform(submit_batch, &submission).code() !=
+        gjxl::StatusCode::kSubmissionFailed ||
+      submission != nullptr ||
+      submit_gpu->stats().committed_submissions != 0) {
+    std::cerr << "Injected transform submission failure was not isolated\n";
+    return false;
+  }
+
+  gjxl::MetalBackendOptions completion_options;
+  completion_options.test_fail_completion = true;
+  std::unique_ptr<gjxl::GpuBackend> completion_gpu;
+  if (!gjxl::CreateMetalBackend(
+        GJXL_METALLIB_PATH, completion_options, &completion_gpu).ok()) {
+    return false;
+  }
+  std::unique_ptr<gjxl::DeviceBuffer> completion_input;
+  std::unique_ptr<gjxl::DeviceBuffer> completion_output_a;
+  std::unique_ptr<gjxl::DeviceBuffer> completion_output_b;
+  if (!completion_gpu->Allocate(kDct8Bytes, &completion_input).ok() ||
+      !completion_gpu->Allocate(kDct8Bytes, &completion_output_a).ok() ||
+      !completion_gpu->Allocate(kDct8Bytes, &completion_output_b).ok()) {
+    return false;
+  }
+  std::unique_ptr<gjxl::GpuSubmission> first;
+  std::unique_ptr<gjxl::GpuSubmission> second;
+  const gjxl::TransformBatch first_batch{
+    .strategy = gjxl::AcStrategyType::kDct8,
+    .input = completion_input.get(),
+    .output = completion_output_a.get(),
+    .transform_count = 1,
+  };
+  gjxl::TransformBatch second_batch = first_batch;
+  second_batch.output = completion_output_b.get();
+  if (!completion_gpu->ForwardTransform(first_batch, &first).ok() ||
+      !completion_gpu->ForwardTransform(second_batch, &second).ok() ||
+      first == nullptr || second == nullptr) {
+    std::cerr << "Outstanding transform submissions were not returned\n";
+    return false;
+  }
+  const gjxl::Status first_status = first->Wait();
+  const gjxl::Status second_status = second->Wait();
+  const gjxl::Status first_again = first->Wait();
+  return first_status.code() == gjxl::StatusCode::kDeviceError &&
+         second_status.code() == gjxl::StatusCode::kDeviceError &&
+         first_again.code() == first_status.code() &&
+         first_again.message() == first_status.message() &&
+         completion_gpu->stats().committed_submissions == 2;
 }
 
 }  // namespace
@@ -732,6 +841,10 @@ int main() {
         gjxl::AcStrategyType::kDct8x16)) {
       return EXIT_FAILURE;
     }
+  }
+
+  if (!TestTransformFailureStatuses()) {
+    return EXIT_FAILURE;
   }
 
   std::cout << "All DCT tests passed.\n";

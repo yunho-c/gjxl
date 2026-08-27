@@ -38,3 +38,15 @@ ac-strategy-search-benchmark samples="12":
     cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
     cmake --build build/release --target gjxl_ac_strategy_search_benchmark
     build/release/gjxl_ac_strategy_search_benchmark "{{ samples }}"
+
+# Measure the CPU quantization and adaptive-quantization baseline.
+quantization-benchmark workload="all" samples="5" warmups="3":
+    cmake -S . -B "{{ build_dir }}/release" -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
+    cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
+    "{{ build_dir }}/release/gjxl_quantization_benchmark" --workload "{{ workload }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+
+# Measure native CPU and prepared Metal Butteraugli paths.
+butteraugli-metal-benchmark workload="all" samples="15" warmups="3":
+    cmake -S . -B "{{ build_dir }}/release" -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
+    cmake --build "{{ build_dir }}/release" --target gjxl_metal_butteraugli_benchmark -j
+    "{{ build_dir }}/release/gjxl_metal_butteraugli_benchmark" --workload "{{ workload }}" --samples "{{ samples }}" --warmups "{{ warmups }}"

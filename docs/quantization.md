@@ -146,8 +146,9 @@ Relevant implementations:
   perceptual round trip.
 - Compare intermediate coefficients and reconstructed images with libjxl.
 
-The CPU reference preserves floating-point DC separately, matching VarDCT's
-AC/DC split. It intentionally does not yet run libjxl's optional
+The CPU reference stores modular-stream quantized DC separately from AC and
+retains its decoder-equivalent floating-point reconstruction for the perceptual
+round trip. It intentionally does not yet run libjxl's optional
 `AdjustQuantBlockAC` encoder heuristic; fixed-raw-quant coefficient coding and
 decoder reconstruction are parity-tested independently of that heuristic.
 
@@ -289,9 +290,9 @@ refreshed before using it to judge that representation's cost.
 
 This measurement predates the native Butteraugli facade and the later shared
 image/scratch refactors. It remains a historical comparison point, not the
-current Metal-AQ baseline. Milestone 0 of
-[`metal-aq.md`](metal-aq.md) requires a refreshed full-pipeline and per-evaluation
-breakdown before GPU implementation choices are treated as performance claims.
+current Metal-AQ baseline. The refreshed full-pipeline, per-evaluation, and
+peak-RSS results are recorded under completed Milestone 0 of
+[`metal-aq.md`](metal-aq.md).
 
 | Stage | Median | Observed range |
 | --- | ---: | ---: |

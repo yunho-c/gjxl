@@ -307,7 +307,7 @@ FixturePair LoadFlowerFixture(const std::string &ppm_path, size_t crop_x,
 }
 
 std::vector<FixturePair>
-BuildDifferentialCorpus(const std::string &flower_ppm_path) {
+BuildSyntheticDifferentialCorpus() {
   std::vector<FixturePair> corpus;
   auto add = [&](FixtureSpec spec) { corpus.push_back(MakeFixture(spec)); };
   add({"identity_texture_32x24", {32, 24}, FixtureKind::kIdentityTexture});
@@ -370,6 +370,12 @@ BuildDifferentialCorpus(const std::string &flower_ppm_path) {
       FixtureKind::kTexture,
       {.intensity_target = 255.0f},
   });
+  return corpus;
+}
+
+std::vector<FixturePair>
+BuildDifferentialCorpus(const std::string &flower_ppm_path) {
+  std::vector<FixturePair> corpus = BuildSyntheticDifferentialCorpus();
   corpus.push_back(LoadFlowerFixture(flower_ppm_path, 207, 218, {96, 96}));
   return corpus;
 }

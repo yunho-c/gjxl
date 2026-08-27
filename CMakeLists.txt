@@ -109,23 +109,6 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE AND
 
   if(GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS)
     add_library(
-      gjxl_butteraugli_fixtures
-      STATIC
-      tests/butteraugli_fixtures.cpp
-    )
-    target_include_directories(
-      gjxl_butteraugli_fixtures
-      PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
-    )
-    target_compile_features(
-      gjxl_butteraugli_fixtures
-      PUBLIC
-        cxx_std_20
-    )
-
-    add_library(
       gjxl_butteraugli_oracle
       STATIC
       tests/butteraugli_oracle.cpp
@@ -182,6 +165,24 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE AND
         hwy
     )
   endif()
+endif()
+
+if(GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS)
+  add_library(
+    gjxl_butteraugli_fixtures
+    STATIC
+    tests/butteraugli_fixtures.cpp
+  )
+  target_include_directories(
+    gjxl_butteraugli_fixtures
+    PUBLIC
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+  )
+  target_compile_features(
+    gjxl_butteraugli_fixtures
+    PUBLIC
+      cxx_std_20
+  )
 endif()
 
 # C++ common interface
@@ -369,6 +370,35 @@ install(
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
 )
 
+# Backend-neutral GPU infrastructure
+add_library(
+  gjxl_gpu
+  STATIC
+
+  src/gpu/image.cpp
+  src/gpu/scratch.cpp
+)
+
+target_link_libraries(
+  gjxl_gpu
+  PUBLIC
+    gjxl_core
+)
+
+# Codec-specific GPU operation contracts
+add_library(
+  gjxl_gpu_butteraugli
+  STATIC
+
+  src/gpu/ops/butteraugli.cpp
+)
+
+target_link_libraries(
+  gjxl_gpu_butteraugli
+  PUBLIC
+    gjxl_gpu
+)
+
 # Backend-independent GPU codec operations
 add_library(
   gjxl_gpu_ops
@@ -382,6 +412,7 @@ target_link_libraries(
   gjxl_gpu_ops
   PUBLIC
     gjxl_codec
+    gjxl_gpu
 )
 
 # metal-cpp
@@ -437,6 +468,36 @@ set(
 )
 
 set(
+  GJXL_PRIMITIVES_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/primitives.metal"
+)
+
+set(
+  GJXL_AQ_CONTRACT_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_contract.metal"
+)
+
+set(
+  GJXL_AQ_RECONSTRUCTION_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_reconstruction.metal"
+)
+
+set(
+  GJXL_AQ_POSTPROCESS_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_postprocess.metal"
+)
+
+set(
+  GJXL_AQ_QUANTIZATION_HEADER
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_quantization.h"
+)
+
+set(
+  GJXL_BUTTERAUGLI_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/butteraugli.metal"
+)
+
+set(
   GJXL_DCT_BASIS_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
 )
@@ -449,6 +510,31 @@ set(
 set(
   GJXL_AC_STRATEGY_METAL_IR
   "${GJXL_METAL_DIR}/ac_strategy.ir"
+)
+
+set(
+  GJXL_PRIMITIVES_METAL_IR
+  "${GJXL_METAL_DIR}/primitives.ir"
+)
+
+set(
+  GJXL_AQ_CONTRACT_METAL_IR
+  "${GJXL_METAL_DIR}/aq_contract.ir"
+)
+
+set(
+  GJXL_AQ_RECONSTRUCTION_METAL_IR
+  "${GJXL_METAL_DIR}/aq_reconstruction.ir"
+)
+
+set(
+  GJXL_AQ_POSTPROCESS_METAL_IR
+  "${GJXL_METAL_DIR}/aq_postprocess.ir"
+)
+
+set(
+  GJXL_BUTTERAUGLI_METAL_IR
+  "${GJXL_METAL_DIR}/butteraugli.ir"
 )
 
 set(
@@ -513,6 +599,151 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_PRIMITIVES_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    "${GJXL_PRIMITIVES_METAL_SOURCE}"
+    -o
+    "${GJXL_PRIMITIVES_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_PRIMITIVES_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling Metal primitive shaders"
+
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT
+    "${GJXL_AQ_CONTRACT_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    "${GJXL_AQ_CONTRACT_METAL_SOURCE}"
+    -o
+    "${GJXL_AQ_CONTRACT_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_AQ_CONTRACT_METAL_SOURCE}"
+    "${GJXL_AQ_QUANTIZATION_HEADER}"
+
+  COMMENT
+    "Compiling Metal AQ contract probe"
+
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT
+    "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    -fmetal-math-mode=safe
+    -ffp-contract=off
+    "${GJXL_AQ_RECONSTRUCTION_METAL_SOURCE}"
+    -o
+    "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_AQ_RECONSTRUCTION_METAL_SOURCE}"
+    "${GJXL_AQ_QUANTIZATION_HEADER}"
+
+  COMMENT
+    "Compiling Metal AQ reconstruction shaders"
+
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT
+    "${GJXL_AQ_POSTPROCESS_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    -fmetal-math-mode=safe
+    -fmetal-math-fp32-functions=precise
+    -ffp-contract=off
+    "${GJXL_AQ_POSTPROCESS_METAL_SOURCE}"
+    -o
+    "${GJXL_AQ_POSTPROCESS_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_AQ_POSTPROCESS_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling Metal AQ postprocess shaders"
+
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    -fmetal-math-mode=safe
+    -fmetal-math-fp32-functions=precise
+    -ffp-contract=off
+    "${GJXL_BUTTERAUGLI_METAL_SOURCE}"
+    -o
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_BUTTERAUGLI_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling strict-math Metal Butteraugli shaders"
+
+  VERBATIM
+)
+
 # .ir -> .metallib
 
 add_custom_command(
@@ -527,10 +758,20 @@ add_custom_command(
     "${GJXL_METALLIB}"
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
+    "${GJXL_PRIMITIVES_METAL_IR}"
+    "${GJXL_AQ_CONTRACT_METAL_IR}"
+    "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
+    "${GJXL_AQ_POSTPROCESS_METAL_IR}"
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
+    "${GJXL_PRIMITIVES_METAL_IR}"
+    "${GJXL_AQ_CONTRACT_METAL_IR}"
+    "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
+    "${GJXL_AQ_POSTPROCESS_METAL_IR}"
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -552,7 +793,15 @@ add_library(
   STATIC
 
   src/gpu/metal/metal_cpp_impl.cpp
+  src/gpu/metal/metal_ac_strategy.cpp
   src/gpu/metal/metal_backend.cpp
+  src/gpu/metal/metal_aq_butteraugli.cpp
+  src/gpu/metal/metal_aq_evaluation.cpp
+  src/gpu/metal/metal_aq_postprocess.cpp
+  src/gpu/metal/metal_aq_reconstruction.cpp
+  src/gpu/metal/metal_butteraugli.cpp
+  src/gpu/metal/metal_primitives.cpp
+  src/gpu/metal/metal_submission.cpp
 )
 
 add_dependencies(
@@ -564,7 +813,9 @@ target_link_libraries(
   gjxl_metal
 
   PUBLIC
-    gjxl_core
+    gjxl_gpu
+    gjxl_gpu_butteraugli
+    gjxl_gpu_ops
 
   PRIVATE
     metal_cpp
@@ -1378,6 +1629,200 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_gpu_image_test
+    tests/gpu_image_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_gpu_image_test
+    PRIVATE
+      gjxl_gpu
+  )
+
+  add_test(
+    NAME gpu_image
+    COMMAND gjxl_gpu_image_test
+  )
+
+  add_executable(
+    gjxl_gpu_primitives_metal_test
+    tests/gpu_primitives_metal_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_gpu_primitives_metal_test
+    PRIVATE
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_gpu_primitives_metal_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_gpu_primitives_metal_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_gpu_primitives
+    COMMAND gjxl_gpu_primitives_metal_test
+  )
+
+  add_executable(
+    gjxl_butteraugli_device_operation_test
+    tests/butteraugli_device_operation_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_device_operation_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_butteraugli_device_operation_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_butteraugli_device_operation_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_butteraugli_operation_contract
+    COMMAND gjxl_butteraugli_device_operation_test
+  )
+
+  add_executable(
+    gjxl_metal_butteraugli_test
+    tests/metal_butteraugli_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_butteraugli_test
+    PRIVATE
+      gjxl_codec
+      gjxl_butteraugli_fixtures
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_butteraugli_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+      GJXL_METAL_BUTTERAUGLI_REFERENCE_FIXTURES=$<BOOL:${GJXL_ENABLE_LIBJXL_REFERENCE}>
+  )
+
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    target_compile_definitions(
+      gjxl_metal_butteraugli_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
+  endif()
+
+  add_dependencies(
+    gjxl_metal_butteraugli_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_butteraugli
+    COMMAND gjxl_metal_butteraugli_test
+  )
+
+  add_executable(
+    gjxl_metal_aq_evaluation_test
+    tests/metal_aq_evaluation_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_aq_evaluation_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_aq_evaluation_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_metal_aq_evaluation_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_aq_evaluation
+    COMMAND gjxl_metal_aq_evaluation_test
+  )
+
+  add_executable(
+    gjxl_metal_aq_reconstruction_test
+    tests/dct_reference.cpp
+    tests/metal_aq_reconstruction_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_aq_reconstruction_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_aq_reconstruction_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_metal_aq_reconstruction_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_aq_reconstruction
+    COMMAND gjxl_metal_aq_reconstruction_test
+  )
+
+  add_executable(
+    gjxl_metal_aq_postprocess_test
+    tests/metal_aq_postprocess_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_aq_postprocess_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_aq_postprocess_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_metal_aq_postprocess_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_aq_postprocess
+    COMMAND gjxl_metal_aq_postprocess_test
+  )
+
+  add_executable(
     gjxl_dct_test
     tests/dct_reference.cpp
     tests/dct_test.cpp
@@ -1504,6 +1949,31 @@ endif()
 
 if(GJXL_BUILD_BENCHMARKS)
 
+  add_executable(
+    gjxl_metal_butteraugli_benchmark
+    benchmarks/metal_butteraugli_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_butteraugli_benchmark
+    PRIVATE
+      gjxl_codec
+      gjxl_butteraugli_fixtures
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_butteraugli_benchmark
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+  )
+
+  add_dependencies(
+    gjxl_metal_butteraugli_benchmark
+    gjxl_metal_shaders
+  )
+
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(
       gjxl_butteraugli_benchmark
@@ -1534,6 +2004,12 @@ if(GJXL_BUILD_BENCHMARKS)
     gjxl_quantization_benchmark
     PRIVATE
       gjxl_codec
+  )
+
+  target_compile_definitions(
+    gjxl_quantization_benchmark
+    PRIVATE
+      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
   )
 
   add_executable(
