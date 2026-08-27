@@ -11,21 +11,20 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <span>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
+#include "codec/butteraugli.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/butteraugli.h"
-#include "gpu/ops/primitives.h"
-#include "gpu/scratch.h"
 #include "gpu_test_utils.h"
 
 namespace {
 
-constexpr size_t kReductionWidth = 256;
 constexpr float kHostPoison = -12345.0f;
+constexpr float kMetalTolerance = 1.5e-3f;
 
 [[nodiscard]] bool CheckStatus(
   const gjxl::Status& status,
@@ -110,113 +109,6 @@ private:
   std::array<gjxl::test::GuardedDevicePlane, 3> plane_;
 };
 
-class StagedPrepared final : public gjxl::PreparedDeviceButteraugli {
-public:
-  StagedPrepared(
-    gjxl::GpuBackend& backend,
-    gjxl::GpuImagePrimitives& primitives,
-    gjxl::DeviceButteraugliPrepareDescriptor descriptor)
-    : PreparedDeviceButteraugli(backend, descriptor),
-      primitives_(primitives) {}
-
-  [[nodiscard]] gjxl::Status PrepareScratch() {
-    size_t pixel_count = 0;
-    if (!extent().try_area(&pixel_count)) {
-      return gjxl::Status::InvalidArgument(
-        "Staged Butteraugli extent overflows");
-    }
-    const size_t partial_count = pixel_count / kReductionWidth +
-      static_cast<size_t>(pixel_count % kReductionWidth != 0);
-    if (partial_count >
-        (std::numeric_limits<size_t>::max() - 128) /
-          (2 * sizeof(float))) {
-      return gjxl::Status::InvalidArgument(
-        "Staged Butteraugli scratch size overflows");
-    }
-    const size_t capacity =
-      2 * partial_count * sizeof(float) + 128;
-    gjxl::Status status = scratch_.Prepare(backend(), capacity);
-    if (!status.ok()) return status;
-    status = scratch_.AllocatePlane(
-      gjxl::DeviceElementType::kF32,
-      {partial_count, 1}, partial_count, 64, &scratch_a_);
-    if (!status.ok()) return status;
-    return scratch_.AllocatePlane(
-      gjxl::DeviceElementType::kF32,
-      {partial_count, 1}, partial_count, 64, &scratch_b_);
-  }
-
-private:
-  [[nodiscard]] gjxl::Status CompareValidated(
-    const gjxl::DeviceButteraugliComparisonDescriptor& descriptor) override {
-
-    const std::array<gjxl::ImagePrimitiveCommand, 2> commands{{
-      gjxl::PointwiseAffineCommand{
-        descriptor.distorted_linear_rgb.plane[0],
-        descriptor.distance_map,
-        1.0f,
-        0.0f,
-      },
-      gjxl::MaximumReductionCommand{
-        descriptor.distance_map,
-        scratch_a_,
-        scratch_b_,
-        descriptor.score,
-      },
-    }};
-    std::unique_ptr<gjxl::GpuSubmission> submission;
-    gjxl::Status status = primitives_.SubmitImagePrimitiveSequence(
-      commands, &submission);
-    if (!status.ok()) return status;
-    if (submission == nullptr) {
-      return gjxl::Status::Internal(
-        "Staged Butteraugli submission is null");
-    }
-    return submission->Wait();
-  }
-
-  gjxl::GpuImagePrimitives& primitives_;
-  gjxl::DeviceScratchArena scratch_;
-  gjxl::DevicePlaneView scratch_a_;
-  gjxl::DevicePlaneView scratch_b_;
-};
-
-class StagedDeviceButteraugliOperation final
-    : public gjxl::DeviceButteraugliOperation {
-public:
-  [[nodiscard]] gjxl::Status Prepare(
-    gjxl::GpuBackend& backend,
-    const gjxl::DeviceButteraugliPrepareDescriptor& descriptor,
-    std::unique_ptr<gjxl::PreparedDeviceButteraugli>* prepared) override {
-
-    if (prepared == nullptr) {
-      return gjxl::Status::InvalidArgument(
-        "Staged Butteraugli prepared output is null");
-    }
-    prepared->reset();
-    gjxl::Status status =
-      gjxl::ValidateDeviceButteraugliPrepareDescriptor(backend, descriptor);
-    if (!status.ok()) return status;
-    gjxl::GpuImagePrimitives* primitives =
-      gjxl::QueryGpuImagePrimitives(backend);
-    if (primitives == nullptr) {
-      return gjxl::Status::Unavailable(
-        "Backend has no staged Butteraugli primitives");
-    }
-    try {
-      auto candidate = std::make_unique<StagedPrepared>(
-        backend, *primitives, descriptor);
-      status = candidate->PrepareScratch();
-      if (!status.ok()) return status;
-      *prepared = std::move(candidate);
-    } catch (const std::bad_alloc&) {
-      return gjxl::Status::OutOfMemory(
-        "Unable to allocate staged Butteraugli state");
-    }
-    return gjxl::Status::Ok();
-  }
-};
-
 class FakeBuffer final : public gjxl::DeviceBuffer {
 public:
   FakeBuffer(gjxl::BackendId backend_id, size_t size_bytes)
@@ -233,10 +125,6 @@ public:
     return "Butteraugli contract fake backend";
   }
 
-  void set_fail_allocation(bool fail) noexcept {
-    fail_allocation_ = fail;
-  }
-
   void set_fail_readback(bool fail) noexcept {
     fail_readback_ = fail;
   }
@@ -249,9 +137,6 @@ public:
       return gjxl::Status::InvalidArgument("Invalid fake allocation");
     }
     out->reset();
-    if (fail_allocation_) {
-      return gjxl::Status::OutOfMemory("Injected fake allocation failure");
-    }
     out->reset(new FakeBuffer(id(), size_bytes));
     RecordSuccessfulAllocation();
     return gjxl::Status::Ok();
@@ -285,21 +170,22 @@ public:
   }
 
 private:
-  bool fail_allocation_ = false;
   bool fail_readback_ = false;
 };
 
 class PlainFakeBackend final : public FakeBackendBase {};
 
-class PrimitiveFakeBackend final
+class OutOfMemoryFakeBackend final
     : public FakeBackendBase,
-      public gjxl::GpuImagePrimitives {
+      public gjxl::DeviceButteraugliOperation {
 public:
-  gjxl::Status SubmitImagePrimitiveSequence(
-    std::span<const gjxl::ImagePrimitiveCommand>,
-    std::unique_ptr<gjxl::GpuSubmission>* submission) override {
-    if (submission != nullptr) submission->reset();
-    return gjxl::Status::Unavailable("Fake primitives unavailable");
+  gjxl::Status Prepare(
+    gjxl::GpuBackend&,
+    const gjxl::DeviceButteraugliPrepareDescriptor&,
+    std::unique_ptr<gjxl::PreparedDeviceButteraugli>* prepared) override {
+
+    if (prepared != nullptr) prepared->reset();
+    return gjxl::Status::OutOfMemory("Injected preparation failure");
   }
 };
 
@@ -419,6 +305,36 @@ private:
   return {distorted.ConstView(), distance_map.View(), score.View()};
 }
 
+[[nodiscard]] bool ComputeExpected(
+  const GuardedImage3& reference,
+  const GuardedImage3& distorted,
+  gjxl::Extent2D extent,
+  gjxl::ButteraugliOptions options,
+  std::vector<float>* distance_map,
+  double* score) {
+
+  std::array<std::vector<float>, 3> reference_values;
+  std::array<std::vector<float>, 3> distorted_values;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    reference_values[channel] = reference.Logical(channel);
+    distorted_values[channel] = distorted.Logical(channel);
+  }
+  const gjxl::ConstImage3FView reference_view{{{
+    {reference_values[0].data(), extent, extent.width},
+    {reference_values[1].data(), extent, extent.width},
+    {reference_values[2].data(), extent, extent.width},
+  }}};
+  const gjxl::ConstImage3FView distorted_view{{{
+    {distorted_values[0].data(), extent, extent.width},
+    {distorted_values[1].data(), extent, extent.width},
+    {distorted_values[2].data(), extent, extent.width},
+  }}};
+  distance_map->assign(extent.width * extent.height, kHostPoison);
+  return gjxl::ComputeButteraugliDistance(
+    reference_view, distorted_view, options,
+    {distance_map->data(), extent, extent.width}, score).ok();
+}
+
 [[nodiscard]] bool CheckValidRepeatedAndReadback() {
   std::unique_ptr<gjxl::GpuBackend> backend;
   GuardedImage3 reference;
@@ -438,12 +354,10 @@ private:
   const gjxl::DeviceButteraugliPrepareDescriptor prepare{
     reference.ConstView(), options};
   std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
-  {
-    StagedDeviceButteraugliOperation operation;
-    if (!CheckStatus(operation.Prepare(*backend, prepare, &prepared),
-                     "staged preparation")) {
-      return false;
-    }
+  if (!CheckStatus(
+        gjxl::PrepareDeviceButteraugli(*backend, prepare, &prepared),
+        "Metal preparation")) {
+    return false;
   }
   if (prepared == nullptr || !prepared->valid() ||
       prepared->backend_id() != backend->id() ||
@@ -463,23 +377,27 @@ private:
   const auto comparison = MakeComparison(distorted, distance_map, score);
   for (size_t iteration = 0; iteration < 3; ++iteration) {
     if (!CheckStatus(prepared->Compare(comparison),
-                     "repeated staged comparison")) {
+                     "repeated Metal comparison")) {
       return false;
     }
   }
   const gjxl::GpuBackendStats after = backend->stats();
   if (after.successful_allocations != before.successful_allocations ||
       after.committed_submissions != before.committed_submissions + 3) {
-    std::cerr << "Staged comparison allocated or submitted incorrectly\n";
+    std::cerr << "Metal comparison allocated or submitted incorrectly\n";
     return false;
   }
 
-  const std::vector<float> expected = distorted.Logical(0);
-  const float expected_score =
-    *std::max_element(expected.begin(), expected.end());
+  std::vector<float> expected;
+  double expected_score = -1.0;
+  if (!ComputeExpected(
+        reference, distorted, {17, 11}, options, &expected,
+        &expected_score)) {
+    return false;
+  }
   double actual_score = -1.0;
   if (!CheckStatus(prepared->ReadScore(&actual_score), "score readback") ||
-      static_cast<float>(actual_score) != expected_score ||
+      std::abs(actual_score - expected_score) > kMetalTolerance ||
       !IsCode(prepared->ReadScore(nullptr),
               gjxl::StatusCode::kInvalidArgument) ||
       !prepared->valid()) {
@@ -504,7 +422,10 @@ private:
   size_t index = 0;
   for (size_t y = 0; y < 11; ++y) {
     for (size_t x = 0; x < 17; ++x) {
-      if (host_map[y * kHostStride + x] != expected[index++]) return false;
+      if (std::abs(host_map[y * kHostStride + x] - expected[index++]) >
+          kMetalTolerance) {
+        return false;
+      }
     }
     for (size_t x = 17; x < kHostStride; ++x) {
       if (host_map[y * kHostStride + x] != kHostPoison) return false;
@@ -538,11 +459,11 @@ private:
                         &distance_map, &score)) {
     return false;
   }
-  StagedDeviceButteraugliOperation operation;
   const gjxl::DeviceButteraugliPrepareDescriptor prepare{
     reference.ConstView(), {}};
   std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
-  if (!operation.Prepare(*backend, prepare, &prepared).ok()) return false;
+  if (!gjxl::PrepareDeviceButteraugli(
+        *backend, prepare, &prepared).ok()) return false;
   const auto valid = MakeComparison(distorted, distance_map, score);
   const uint64_t submissions = backend->stats().committed_submissions;
 
@@ -607,7 +528,7 @@ private:
   }
 
   std::unique_ptr<gjxl::PreparedDeviceButteraugli> output;
-  if (!IsCode(operation.Prepare(*backend, prepare, nullptr),
+  if (!IsCode(gjxl::PrepareDeviceButteraugli(*backend, prepare, nullptr),
               gjxl::StatusCode::kInvalidArgument)) {
     return false;
   }
@@ -620,11 +541,12 @@ private:
     output = std::move(prepared);
     const gjxl::DeviceButteraugliPrepareDescriptor bad{
       reference.ConstView(), bad_options};
-    if (!IsCode(operation.Prepare(*backend, bad, &output),
+    if (!IsCode(gjxl::PrepareDeviceButteraugli(*backend, bad, &output),
                 gjxl::StatusCode::kInvalidArgument) || output != nullptr) {
       return false;
     }
-    if (!operation.Prepare(*backend, prepare, &prepared).ok()) return false;
+    if (!gjxl::PrepareDeviceButteraugli(
+          *backend, prepare, &prepared).ok()) return false;
   }
 
   for (size_t variant = 0; variant < 2; ++variant) {
@@ -636,12 +558,13 @@ private:
       bad_reference.reference_linear_rgb.plane[2].extent.width = 16;
     }
     output = std::move(prepared);
-    if (!IsCode(operation.Prepare(
+    if (!IsCode(gjxl::PrepareDeviceButteraugli(
                   *backend, bad_reference, &output),
                 gjxl::StatusCode::kInvalidArgument) || output != nullptr) {
       return false;
     }
-    if (!operation.Prepare(*backend, prepare, &prepared).ok()) return false;
+    if (!gjxl::PrepareDeviceButteraugli(
+          *backend, prepare, &prepared).ok()) return false;
   }
   return true;
 }
@@ -669,45 +592,54 @@ private:
       !distance_map.Upload().ok() || !score.Upload().ok()) {
     return false;
   }
-  StagedDeviceButteraugliOperation operation;
   std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
   const gjxl::DeviceButteraugliPrepareDescriptor prepare{
     reference.ConstView(), {}};
-  if (!operation.Prepare(*backend, prepare, &prepared).ok() ||
+  if (!gjxl::PrepareDeviceButteraugli(
+        *backend, prepare, &prepared).ok() ||
       !prepared->Compare(
         MakeComparison(distorted, distance_map, score)).ok()) {
+    return false;
+  }
+  std::vector<float> expected_map;
+  double expected_score = -1.0;
+  if (!ComputeExpected(
+        reference, distorted, {1, 1}, {}, &expected_map,
+        &expected_score)) {
     return false;
   }
   double actual_score = -1.0;
   std::array<float, 3> host_map{
     kHostPoison, kHostPoison, kHostPoison};
-  return prepared->ReadScore(&actual_score).ok() && actual_score == 0.75 &&
+  return prepared->ReadScore(&actual_score).ok() &&
+         std::abs(actual_score - expected_score) <= kMetalTolerance &&
          prepared->ReadDistanceMap(
            {host_map.data(), {1, 1}, host_map.size()}).ok() &&
-         host_map[0] == 0.75f && host_map[1] == kHostPoison &&
+         std::abs(host_map[0] - expected_map[0]) <= kMetalTolerance &&
+         host_map[1] == kHostPoison &&
          host_map[2] == kHostPoison;
 }
 
 [[nodiscard]] bool CheckUnavailableAndAllocationFailure() {
-  StagedDeviceButteraugliOperation operation;
   PlainFakeBackend plain;
   FakeImage plain_image;
   if (!plain_image.Prepare(plain, {5, 3}, 7)) return false;
   const gjxl::DeviceButteraugliPrepareDescriptor plain_prepare{
     plain_image.View(), {}};
   std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
-  if (!IsCode(operation.Prepare(plain, plain_prepare, &prepared),
+  if (!IsCode(gjxl::PrepareDeviceButteraugli(
+                plain, plain_prepare, &prepared),
               gjxl::StatusCode::kUnavailable) || prepared != nullptr) {
     return false;
   }
 
-  PrimitiveFakeBackend failing;
+  OutOfMemoryFakeBackend failing;
   FakeImage failing_image;
   if (!failing_image.Prepare(failing, {5, 3}, 7)) return false;
-  failing.set_fail_allocation(true);
   const gjxl::DeviceButteraugliPrepareDescriptor failing_prepare{
     failing_image.View(), {}};
-  return IsCode(operation.Prepare(failing, failing_prepare, &prepared),
+  return IsCode(gjxl::PrepareDeviceButteraugli(
+                  failing, failing_prepare, &prepared),
                 gjxl::StatusCode::kOutOfMemory) &&
          prepared == nullptr;
 }
@@ -725,11 +657,11 @@ private:
                           &distance_map, &score)) {
       return false;
     }
-    StagedDeviceButteraugliOperation operation;
     std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
     const gjxl::DeviceButteraugliPrepareDescriptor prepare{
       reference.ConstView(), {}};
-    if (!operation.Prepare(*backend, prepare, &prepared).ok()) return false;
+    if (!gjxl::PrepareDeviceButteraugli(
+          *backend, prepare, &prepared).ok()) return false;
     const uint64_t before = backend->stats().committed_submissions;
     const gjxl::Status status = prepared->Compare(
       MakeComparison(distorted, distance_map, score));
@@ -768,32 +700,45 @@ private:
                           &distance_map, &score)) {
       return false;
     }
-    distorted.FillAll(-1.0f);
+    distorted.FillAll(std::numeric_limits<float>::quiet_NaN());
     if (!distorted.Upload()) return false;
-    StagedDeviceButteraugliOperation operation;
     std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
     const gjxl::DeviceButteraugliPrepareDescriptor prepare{
       reference.ConstView(), {}};
-    if (!operation.Prepare(*backend, prepare, &prepared).ok() ||
-        !prepared->Compare(
-          MakeComparison(distorted, distance_map, score)).ok()) {
+    const gjxl::Status prepare_status = gjxl::PrepareDeviceButteraugli(
+      *backend, prepare, &prepared);
+    if (!CheckStatus(prepare_status, "non-finite preparation")) {
+      return false;
+    }
+    const gjxl::Status compare_status = prepared->Compare(
+      MakeComparison(distorted, distance_map, score));
+    if (!CheckStatus(compare_status, "non-finite comparison")) {
       return false;
     }
     if (score_readback) {
       double host_score = -3.0;
-      return IsCode(prepared->ReadScore(&host_score),
-                    gjxl::StatusCode::kInternal) &&
-             host_score == -3.0 && !prepared->valid();
+      const gjxl::Status read_status = prepared->ReadScore(&host_score);
+      if (!IsCode(read_status, gjxl::StatusCode::kInternal)) {
+        std::cerr << "Unexpected non-finite score status: "
+                  << static_cast<int>(read_status.code()) << ' '
+                  << read_status.message() << '\n';
+        return false;
+      }
+      return host_score == -3.0 && !prepared->valid();
     }
     std::vector<float> host_map(20 * 11, kHostPoison);
     const gjxl::PlaneF32View view{
       host_map.data(), {17, 11}, 20};
-    return IsCode(prepared->ReadDistanceMap(view),
-                  gjxl::StatusCode::kInternal) &&
-           std::ranges::all_of(host_map, [](float value) {
+    const gjxl::Status read_status = prepared->ReadDistanceMap(view);
+    if (!IsCode(read_status, gjxl::StatusCode::kInternal)) {
+      std::cerr << "Unexpected non-finite map status: "
+                << static_cast<int>(read_status.code()) << ' '
+                << read_status.message() << '\n';
+      return false;
+    }
+    return std::ranges::all_of(host_map, [](float value) {
              return value == kHostPoison;
-           }) &&
-           !prepared->valid();
+           }) && !prepared->valid();
   };
   return check(true) && check(false);
 }
@@ -903,15 +848,23 @@ private:
 }  // namespace
 
 int main() {
-  if (!CheckValidRepeatedAndReadback() ||
-      !CheckDescriptorValidation() ||
-      !CheckSmallStridedCase() ||
-      !CheckUnavailableAndAllocationFailure() ||
-      !CheckSubmissionAndCompletionFailures() ||
-      !CheckInvalidComputedReadback() ||
-      !CheckInjectedReadbackFailure() ||
-      !CheckPreparedConcurrency()) {
-    return EXIT_FAILURE;
+  const std::array checks{
+    std::pair{"valid repeated comparison", &CheckValidRepeatedAndReadback},
+    std::pair{"descriptor validation", &CheckDescriptorValidation},
+    std::pair{"small strided comparison", &CheckSmallStridedCase},
+    std::pair{"availability and allocation failure",
+              &CheckUnavailableAndAllocationFailure},
+    std::pair{"submission and completion failures",
+              &CheckSubmissionAndCompletionFailures},
+    std::pair{"invalid computed readback", &CheckInvalidComputedReadback},
+    std::pair{"injected readback failure", &CheckInjectedReadbackFailure},
+    std::pair{"prepared concurrency", &CheckPreparedConcurrency},
+  };
+  for (const auto& [name, check] : checks) {
+    if (!check()) {
+      std::cerr << "Device Butteraugli contract failure: " << name << '\n';
+      return EXIT_FAILURE;
+    }
   }
   std::cout << "All device Butteraugli operation contract tests passed.\n";
   return EXIT_SUCCESS;

@@ -27,10 +27,13 @@ golden regeneration, and comparative benchmarks.
 The shared Metal substrate now supports typed device images, checked buffer
 ranges, reusable scratch, multi-kernel submissions, and maximum reduction. A
 backend-neutral prepared Butteraugli operation contract defines its validation,
-lifetime, output, and readback behavior. Metal Butteraugli kernels and
-perceptual parity remain pending. The shared contracts and complete resident AQ
-integration are owned by [`metal-aq.md`](metal-aq.md); this document owns the
-standalone device Butteraugli operation and its perceptual validation.
+lifetime, output, and readback behavior. The Metal backend now implements the
+complete standalone Butteraugli map and score pipeline with fixed scalar and
+pinned-fixture parity gates. Prepared-reference caching and standalone
+performance qualification remain pending. The shared contracts and complete
+resident AQ integration are owned by [`metal-aq.md`](metal-aq.md); this
+document owns the standalone device Butteraugli operation and its perceptual
+validation.
 
 ## Goals
 
@@ -440,24 +443,26 @@ the prepared state usable; execution or readback failures invalidate it.
 Repeated calls on one state are non-reentrant, while independent states may
 execute concurrently.
 
-The contract test uses only the existing affine and maximum-reduction Metal
-primitives as an explicitly test-only staged implementation. It does not call
-the CPU facade and makes no Butteraugli numerical claim. Odd `17x11` and small
-`1x1` strided cases cover nonzero offsets, guarded padding, exact input alias,
-three device-allocation-free repeated comparisons, and atomic scalar/map
-readback.
+At the Milestone 7 exit, the contract test used only the existing affine and
+maximum-reduction Metal primitives as an explicitly test-only staged
+implementation and made no Butteraugli numerical claim. Milestone 8 replaces
+that successful stand-in with the real Metal Butteraugli operation. Odd
+`17x11` and small `1x1` strided cases continue to cover nonzero offsets,
+guarded padding, exact input alias, three device-allocation-free repeated
+comparisons, and atomic scalar/map readback.
 Validation covers malformed geometry and types, overlap, foreign ownership,
 non-finite options, unavailable capability, allocation failure, same-state
 concurrency, and independent-state concurrency. Injected submission,
 completion, readback, and invalid-computed-result failures exercise status and
 invalidation behavior.
 
-Fresh AppleClang 17 Release builds passed all 28 reference-disabled and all 34
-reference-enabled tests. Both configurations include real Metal execution for
-the shared primitives, the staged operation contract, and DCT kernels. Actual
-Butteraugli stage/map/score comparisons remain the fixed Milestone 8 gate.
+At the Milestone 7 exit, fresh AppleClang 17 Release builds passed all 28
+reference-disabled and all 34 reference-enabled tests. Both configurations
+included real Metal execution for the shared primitives, staged operation
+contract, and DCT kernels. The actual Butteraugli stage/map/score comparisons
+were deliberately deferred to the fixed Milestone 8 gate below.
 
-### 8. Port Butteraugli leaf stages to Metal
+### 8. Port Butteraugli leaf stages to Metal — complete (2026-08-26)
 
 - Port opsin conversion and pointwise nonlinear operations.
 - Port separable blurs and frequency decomposition.
@@ -473,6 +478,56 @@ Butteraugli stage/map/score comparisons remain the fixed Milestone 8 gate.
 Exit criterion: the Metal distance map and score meet fixed numerical
 tolerances on the complete corpus without uninitialized, stale, or
 out-of-bounds output.
+
+The Metal backend now binds 23 exact Butteraugli compute entry points when the
+backend is created. The shader library implements small-image edge expansion,
+both Gaussian boundary modes, opsin dynamics, frequency separation,
+symmetric/asymmetric L2 terms, all LF and full Malta stencils, masking and
+step-three fuzzy erosion, final composition, the optional half-resolution
+scale, cropping, and a NaN-propagating maximum reduction. Butteraugli shaders
+compile with `-fmetal-math-mode=safe`,
+`-fmetal-math-fp32-functions=precise`, and `-ffp-contract=off`; the existing
+DCT and shared primitive shaders retain their own compilation policy.
+
+Preparation allocates one arena containing 38 reusable full-resolution planes,
+two reduction planes, and all five Gaussian kernels. Planes 0–19 hold the two
+ten-plane psycho-image decompositions; 20–25 alternate between expanded or
+subsampled RGB, blurred RGB, and XYB; 26–31 accumulate three AC and three DC
+planes; 32–36 are lifetime-disjoint blur, Malta, and mask workspaces; and plane
+37 stages crop, subscale, or test-only diagnostic output. Larger Gaussian
+passes transpose through one workspace so portrait and landscape inputs use
+the same allocation. A comparison recomputes both decompositions, encodes the
+complete main scale, optional half scale, map composition, and score reduction
+into exactly one synchronous submission, and performs no device allocation.
+Caching the reference decomposition is intentionally left to Milestone 9.
+
+The always-built Metal numerical test compares every pixel of all 27 pinned
+intermediate planes and every map and score in the deterministic differential
+corpus against the scalar baseline. The reference-enabled variant also covers
+the `96x96` Flower crop and complete `510x532` Flower image. Coverage includes
+`1x1`, narrow `3x7` and `7x3`, exactly `8x8`, odd and partial-threadgroup
+extents, non-default options, nonzero device offsets, different row strides,
+poisoned guards and host padding, identity input, rejected output/input alias,
+and non-finite device pixels. The fixed architecture-independent limit remains
+`1.5e-3` for stages, maps, and scores, with `1e-7` for identity; no target or
+GPU-specific tolerance branch was added.
+
+On the M4 Pro with AppleClang 17, the maximum absolute intermediate-stage
+error was `0.000396729`; the maximum complete-corpus map and score errors were
+both `0.000549316`. The identity gate passed at `1e-7`. The real-backend
+contract test also preserves allocation/submission counters, atomic strided
+readback, invalid-descriptor usability, unavailable and allocation-failure
+status, non-reentrancy, independent prepared-state concurrency, and injected
+submission, completion, readback, and invalid-computed-result invalidation.
+
+Fresh Release builds passed all 29 reference-disabled and all 35
+reference-enabled tests. The enabled matrix includes scalar and dispatched
+libjxl differentials, pinned-golden regeneration, both Flower comparisons,
+Metal primitives, the real Metal Butteraugli contract and numerical tests,
+Metal DCT, and the installed static consumer. The disabled target graph has no
+libjxl oracle, golden-generator, or Butteraugli benchmark. This milestone makes
+no speedup, crossover, or Metal memory-usage claim; those measurements require
+the prepared-reference work and balanced benchmark protocol in Milestone 9.
 
 ### 9. Add prepared-reference reuse and qualify standalone performance
 
@@ -514,9 +569,9 @@ only for deliberate compatibility validation.
 
 ## Recommended implementation order
 
-Milestones 1 through 7 establish the standalone CPU correctness baseline,
-production dependency boundary, shared GPU substrate, and device-operation
-contract and are complete. Port and validate the leaf kernels in Milestone 8,
-then add prepared-reference optimization and standalone qualification in
-Milestone 9. Full iterative-AQ integration proceeds only through the gates in
+Milestones 1 through 8 establish the standalone CPU correctness baseline,
+production dependency boundary, shared GPU substrate, device-operation
+contract, and complete scalar-parity Metal pipeline and are complete. Add
+prepared-reference optimization and standalone qualification in Milestone 9.
+Full iterative-AQ integration proceeds only through the gates in
 `metal-aq.md`, while the native CPU map remains the primary readable oracle.

@@ -22,6 +22,7 @@
 namespace gjxl {
 namespace {
 
+using metal_internal::ButteraugliPipelines;
 using metal_internal::MetalBackend;
 using metal_internal::MetalBuffer;
 using metal_internal::PrimitivePipelines;
@@ -385,6 +386,7 @@ MetalBackend::MetalBackend(
   NS::SharedPtr<MTL::Library> library,
   TransformPipelineRegistry transform_pipelines,
   PrimitivePipelines primitive_pipelines,
+  ButteraugliPipelines butteraugli_pipelines,
   bool test_fail_submission,
   bool test_fail_completion)
   : device_(std::move(device)),
@@ -392,6 +394,7 @@ MetalBackend::MetalBackend(
     library_(std::move(library)),
     transform_pipelines_(std::move(transform_pipelines)),
     primitive_pipelines_(std::move(primitive_pipelines)),
+    butteraugli_pipelines_(std::move(butteraugli_pipelines)),
     test_fail_submission_(test_fail_submission),
     test_fail_completion_(test_fail_completion) {
 
@@ -874,6 +877,13 @@ Status CreateMetalBackend(
     return status;
   }
 
+  ButteraugliPipelines butteraugli_pipelines;
+  status = CreateButteraugliPipelines(
+    device.get(), library.get(), &butteraugli_pipelines);
+  if (!status.ok()) {
+    return status;
+  }
+
   out->reset(
     new MetalBackend(
       std::move(device),
@@ -881,6 +891,7 @@ Status CreateMetalBackend(
       std::move(library),
       std::move(transform_pipelines),
       std::move(primitive_pipelines),
+      std::move(butteraugli_pipelines),
       options.test_fail_submission,
       options.test_fail_completion));
 

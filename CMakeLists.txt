@@ -109,23 +109,6 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE AND
 
   if(GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS)
     add_library(
-      gjxl_butteraugli_fixtures
-      STATIC
-      tests/butteraugli_fixtures.cpp
-    )
-    target_include_directories(
-      gjxl_butteraugli_fixtures
-      PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
-    )
-    target_compile_features(
-      gjxl_butteraugli_fixtures
-      PUBLIC
-        cxx_std_20
-    )
-
-    add_library(
       gjxl_butteraugli_oracle
       STATIC
       tests/butteraugli_oracle.cpp
@@ -182,6 +165,24 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE AND
         hwy
     )
   endif()
+endif()
+
+if(GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS)
+  add_library(
+    gjxl_butteraugli_fixtures
+    STATIC
+    tests/butteraugli_fixtures.cpp
+  )
+  target_include_directories(
+    gjxl_butteraugli_fixtures
+    PUBLIC
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+  )
+  target_compile_features(
+    gjxl_butteraugli_fixtures
+    PUBLIC
+      cxx_std_20
+  )
 endif()
 
 # C++ common interface
@@ -380,6 +381,11 @@ set(
 )
 
 set(
+  GJXL_BUTTERAUGLI_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/butteraugli.metal"
+)
+
+set(
   GJXL_DCT_BASIS_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
 )
@@ -392,6 +398,11 @@ set(
 set(
   GJXL_PRIMITIVES_METAL_IR
   "${GJXL_METAL_DIR}/primitives.ir"
+)
+
+set(
+  GJXL_BUTTERAUGLI_METAL_IR
+  "${GJXL_METAL_DIR}/butteraugli.ir"
 )
 
 set(
@@ -456,6 +467,36 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    -fmetal-math-mode=safe
+    -fmetal-math-fp32-functions=precise
+    -ffp-contract=off
+    "${GJXL_BUTTERAUGLI_METAL_SOURCE}"
+    -o
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_BUTTERAUGLI_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling strict-math Metal Butteraugli shaders"
+
+  VERBATIM
+)
+
 # .ir -> .metallib
 
 add_custom_command(
@@ -470,10 +511,12 @@ add_custom_command(
     "${GJXL_METALLIB}"
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -496,6 +539,7 @@ add_library(
 
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_backend.cpp
+  src/gpu/metal/metal_butteraugli.cpp
   src/gpu/metal/metal_primitives.cpp
   src/gpu/metal/metal_submission.cpp
 )
@@ -510,6 +554,7 @@ target_link_libraries(
 
   PUBLIC
     gjxl_gpu
+    gjxl_gpu_butteraugli
 
   PRIVATE
     metal_cpp
@@ -1100,7 +1145,7 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(
     gjxl_butteraugli_device_operation_test
     PRIVATE
-      gjxl_gpu_butteraugli
+      gjxl_codec
       gjxl_metal
   )
 
@@ -1118,6 +1163,44 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_butteraugli_operation_contract
     COMMAND gjxl_butteraugli_device_operation_test
+  )
+
+  add_executable(
+    gjxl_metal_butteraugli_test
+    tests/metal_butteraugli_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_butteraugli_test
+    PRIVATE
+      gjxl_codec
+      gjxl_butteraugli_fixtures
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_butteraugli_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+      GJXL_METAL_BUTTERAUGLI_REFERENCE_FIXTURES=$<BOOL:${GJXL_ENABLE_LIBJXL_REFERENCE}>
+  )
+
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    target_compile_definitions(
+      gjxl_metal_butteraugli_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
+  endif()
+
+  add_dependencies(
+    gjxl_metal_butteraugli_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_butteraugli
+    COMMAND gjxl_metal_butteraugli_test
   )
 
   add_executable(

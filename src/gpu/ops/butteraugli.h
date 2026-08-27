@@ -115,4 +115,30 @@ protected:
   DeviceButteraugliOperation() = default;
 };
 
+/// Returns the optional prepared Butteraugli capability exposed by a backend.
+[[nodiscard]] inline DeviceButteraugliOperation*
+QueryDeviceButteraugliOperation(GpuBackend& backend) noexcept {
+  return dynamic_cast<DeviceButteraugliOperation*>(&backend);
+}
+
+/// Prepares the backend's device Butteraugli operation. Failure clears output.
+[[nodiscard]] inline Status PrepareDeviceButteraugli(
+  GpuBackend& backend,
+  const DeviceButteraugliPrepareDescriptor& descriptor,
+  std::unique_ptr<PreparedDeviceButteraugli>* prepared) {
+
+  if (prepared == nullptr) {
+    return Status::InvalidArgument(
+      "Prepared Device Butteraugli output is null");
+  }
+  prepared->reset();
+  DeviceButteraugliOperation* operation =
+    QueryDeviceButteraugliOperation(backend);
+  if (operation == nullptr) {
+    return Status::Unavailable(
+      "GPU backend does not provide prepared Device Butteraugli");
+  }
+  return operation->Prepare(backend, descriptor, prepared);
+}
+
 }  // namespace gjxl
