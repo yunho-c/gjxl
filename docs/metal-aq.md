@@ -133,11 +133,14 @@ after the complete resident path is measured and a separate GPU port can
 preserve its decisions. The first implementation must not obscure their upload
 cost in end-to-end measurements.
 
-The final evaluation may additionally read back the reconstructed image and
-other caller-visible output required by the existing CPU API. A future encoder
-handoff may retain final coefficients on the device, but that representation is
-outside the first AQ milestone and must not be invented implicitly by scratch
-buffers.
+Milestone 6 deliberately stops at the bounded policy result: the final quant
+field, block-distance map, score history, and exact raw-quant decisions used as
+its acceptance oracle. Milestone 7 separately defines reconstructed-image and
+`VarDctEncoderFrame` materialization before the Metal AQ path replaces CPU AQ in
+the complete quantization pipeline. Milestone 6 must not add a redundant CPU
+final evaluation merely to fabricate those outputs. A future encoder handoff
+may retain final coefficients on the device, but that representation must not
+be invented implicitly by scratch buffers.
 
 ## Residency and transfer contract
 
@@ -182,8 +185,12 @@ Intermediate AQ evaluations read back only:
 
 The pixel-resolution distance map must remain device-resident. Reading it back
 to perform the 16-norm reduction on the CPU is not an acceptable steady-state
-path. The final evaluation may additionally commit the reconstructed linear RGB
-image and existing CPU-visible state.
+path. During Milestone 6, including the last policy evaluation, the prepared
+operation returns only this bounded result. CPU orchestration atomically commits
+the final quant field, block-distance map, and score history after the complete
+loop succeeds; exact raw quant values are a decision-level acceptance oracle,
+not an additional public output. Milestone 7 owns reconstructed linear RGB and
+encoder-frame materialization.
 
 ### Synchronization, concurrency, and failure
 
@@ -803,15 +810,24 @@ tests.
   GPU.
 - Cover multiblock strategies, partial source edges, and every supported
   strategy footprint.
-- Read back only block distances and the score for intermediate evaluations.
+- Make production `PreparedAqEvaluation::Evaluate` return only block distances
+  and the score for every policy evaluation, including the last one.
+- Factor the deterministic CPU policy driver so the CPU reference evaluator and
+  prepared GPU evaluator share the same clamp, power, rounding-progress, bounds,
+  and iteration logic.
 - Run the unchanged CPU clamp, power, rounding-progress, and bounds policy.
 - Execute the default two-update loop using one GPU submission and one bounded
   readback per evaluation.
-- Commit final outputs only after the last evaluation succeeds.
+- Atomically commit the bounded policy outputs only after the last evaluation
+  succeeds.
+- Keep the public complete quantization pipeline on CPU AQ until Milestone 7;
+  do not run an extra CPU evaluation solely to materialize reconstructed RGB or
+  a `VarDctEncoderFrame`.
 
 Exit criterion: score history and floating-point AQ fields remain within their
-fixed tolerances, every raw quant value matches exactly, and no intermediate
-pixel-resolution plane crosses the CPU/GPU boundary.
+fixed tolerances, every raw quant decision matches exactly, each evaluation uses
+one submission and one bounded readback, no pixel-resolution plane crosses the
+CPU/GPU boundary, and the CPU reference path remains bit-for-bit unchanged.
 
 ### 7. Harden residency, failure behavior, and final output
 
@@ -820,13 +836,17 @@ pixel-resolution plane crosses the CPU/GPU boundary.
 - Verify concurrent prepared states do not share mutable scratch.
 - Exercise device loss, command-buffer errors where injectable, allocation
   failure, malformed descriptors, and destruction with outstanding work.
-- Define final reconstructed-image readback and any later encoder handoff
-  separately from scratch layout.
+- Define and atomically materialize final reconstructed linear RGB and the
+  existing `VarDctEncoderFrame` separately from scratch layout.
+- Connect Metal AQ to the public complete quantization pipeline without a
+  redundant CPU final evaluation; keep any later device-resident encoder
+  handoff as a separate extension.
 - Report persistent and peak scratch memory by image size.
 
 Exit criterion: failures never expose partially committed CPU output, resource
-lifetimes are explicit, and the steady-state path has no per-evaluation device
-allocation.
+lifetimes are explicit, the steady-state path has no per-evaluation device
+allocation, and the complete GPU pipeline produces the existing reconstructed
+image and encoder-frame outputs atomically.
 
 ### 8. Establish the end-to-end performance and rollout gate
 
@@ -852,11 +872,14 @@ intermediate:
 1. Leaf kernels compare every output element with an independent CPU oracle.
 2. Stage tests compare coefficient coding, reconstruction, filtering, color
    conversion, Butteraugli, and block reduction independently.
-3. Evaluation tests compare reconstructed images, distance maps, block maps,
-   scores, and failure behavior.
-4. Iterative tests compare the entire score history, final float quant field,
-   exact raw quant field, and final reconstruction.
-5. Pipeline tests compare the CPU and Metal paths through the supported
+3. Evaluation tests compare distance maps, block maps, scores, submission and
+   readback counts, and failure behavior.
+4. Milestone 6 iterative tests compare the entire score history, final float
+   quant field, and exact raw-quant decisions without requiring final image or
+   frame materialization.
+5. Milestone 7 final-output tests compare reconstructed images, encoder-frame
+   state, and deterministic codestream bytes.
+6. Pipeline tests compare the CPU and Metal paths through the supported
    integration boundary.
 
 The corpus must include:
@@ -915,8 +938,11 @@ Milestones 0 through 5 are complete. The validated prepared-operation contract
 now carries resident reconstructed opsin through loop filtering, cropped linear
 RGB, and the prepared Butteraugli comparison into a resident pixel distance
 map and scalar score. Milestone 6 adds device block reduction, joins the
-evaluation into one submission, and runs the iterative CPU policy. Milestones
-7 and 8 harden and qualify the result for rollout.
+evaluation into one submission, and runs the iterative CPU policy while
+deliberately stopping at bounded policy output. Milestone 7 materializes the
+existing reconstructed-image and encoder-frame outputs and connects the full
+pipeline without a redundant CPU evaluation. Milestone 8 qualifies that
+complete path for rollout.
 
 The 2026-08-27 codestream integration made the encoder frame profile the single
 CPU/GPU option contract and added modular DC quantization parity to the resident
