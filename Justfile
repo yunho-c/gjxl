@@ -7,6 +7,16 @@ build:
     cmake -S . -B "{{ build_dir }}" -G Ninja -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
     cmake --build "{{ build_dir }}"
 
+# Quickly decode a representative corpus with the installed libjxl tools.
+codestream-smoke:
+    cmake -S . -B "{{ build_dir }}" -G Ninja -DGJXL_BUILD_TESTS=ON -DHWY_ENABLE_TESTS=OFF
+    cmake --build "{{ build_dir }}" --target codestream-smoke
+
+# Build the pinned libjxl decoder and run the complete conformance corpus.
+codestream-conformance:
+    cmake -S . -B "{{ build_dir }}" -G Ninja -DGJXL_BUILD_TESTS=ON -DHWY_ENABLE_TESTS=OFF
+    cmake --build "{{ build_dir }}" --target codestream-conformance
+
 # Compare all Metal DCT implementations.
 benchmark blocks="65536" iterations="200": build
     "{{ build_dir }}/gjxl_dct_benchmark" "{{ blocks }}" "{{ iterations }}"

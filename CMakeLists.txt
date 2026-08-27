@@ -398,6 +398,91 @@ if(GJXL_BUILD_TESTS)
   enable_testing()
 
   add_executable(
+    gjxl_codestream_conformance_test
+    tests/codestream_conformance_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_codestream_conformance_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  set(
+    GJXL_PINNED_LIBJXL_REVISION
+    e8ff09762481785938d8e4e01333ed3917571161
+  )
+  set(
+    GJXL_PINNED_LIBJXL_BUILD
+    "${CMAKE_CURRENT_BINARY_DIR}/pinned-libjxl"
+  )
+
+  add_custom_target(
+    gjxl_pinned_decoder
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DGJXL_LIBJXL_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+      "-DGJXL_LIBJXL_BUILD=${GJXL_PINNED_LIBJXL_BUILD}"
+      "-DGJXL_LIBJXL_REVISION=${GJXL_PINNED_LIBJXL_REVISION}"
+      "-DGJXL_GENERATOR=${CMAKE_GENERATOR}"
+      -P
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildPinnedDjxl.cmake"
+    COMMENT
+      "Building pinned libjxl decoder at ${GJXL_PINNED_LIBJXL_REVISION}"
+    VERBATIM
+  )
+
+  add_custom_target(
+    codestream-conformance
+    COMMAND
+      gjxl_codestream_conformance_test
+      --decoder "${GJXL_PINNED_LIBJXL_BUILD}/tools/djxl"
+      --info "${GJXL_PINNED_LIBJXL_BUILD}/tools/jxlinfo"
+      --artifacts
+        "${CMAKE_CURRENT_BINARY_DIR}/codestream-conformance-artifacts"
+    DEPENDS
+      gjxl_codestream_conformance_test
+      gjxl_pinned_decoder
+    USES_TERMINAL
+    VERBATIM
+  )
+
+  find_program(GJXL_SYSTEM_DJXL djxl)
+  find_program(GJXL_SYSTEM_JXLINFO jxlinfo)
+  if(GJXL_SYSTEM_DJXL AND GJXL_SYSTEM_JXLINFO)
+    add_custom_target(
+      codestream-smoke
+      COMMAND
+        gjxl_codestream_conformance_test
+        --decoder "${GJXL_SYSTEM_DJXL}"
+        --info "${GJXL_SYSTEM_JXLINFO}"
+        --artifacts "${CMAKE_CURRENT_BINARY_DIR}/codestream-smoke-artifacts"
+        --smoke
+      DEPENDS
+        gjxl_codestream_conformance_test
+      USES_TERMINAL
+      VERBATIM
+    )
+
+    add_test(
+      NAME codestream_conformance_smoke
+      COMMAND
+        gjxl_codestream_conformance_test
+        --decoder "${GJXL_SYSTEM_DJXL}"
+        --info "${GJXL_SYSTEM_JXLINFO}"
+        --artifacts "${CMAKE_CURRENT_BINARY_DIR}/codestream-smoke-artifacts"
+        --smoke
+    )
+    set_tests_properties(
+      codestream_conformance_smoke
+      PROPERTIES LABELS conformance
+    )
+  else()
+    message(STATUS
+      "System djxl/jxlinfo not found; codestream-smoke target is unavailable")
+  endif()
+
+  add_executable(
     gjxl_bit_writer_test
     tests/bit_writer_test.cpp
   )

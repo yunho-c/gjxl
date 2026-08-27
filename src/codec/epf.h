@@ -58,7 +58,9 @@ struct EpfFilterOptions {
   EpfSigmaOptions options,
   PlaneF32View inverse_sigma);
 
-/// Applies libjxl's decoder-side EPF passes to a padded XYB image.
+/// Applies libjxl's decoder-side EPF passes to an XYB image. The sigma field
+/// covers the image's ceil-divided 8x8 block grid; pixels beyond the declared
+/// image boundary are mirrored exactly as they are by the decoder.
 /// Iteration counts 1, 2 and 3 select pass sequences {1}, {1,2}, and
 /// {0,1,2}. Zero copies the input. Input and output may alias.
 [[nodiscard]] Status ApplyEpf(

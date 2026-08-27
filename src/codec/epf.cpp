@@ -299,9 +299,6 @@ Status ApplyEpf(
       !output.valid() ||
       !inverse_sigma.valid() ||
       input.extent() != output.extent() ||
-      !BlockGrid::IsPaddedPixelExtent(input.extent()) ||
-      inverse_sigma.extent !=
-        BlockGrid::FromPaddedPixelExtent(input.extent()).blocks ||
       options.iterations > 3 ||
       !std::isfinite(options.pass0_sigma_scale) ||
       options.pass0_sigma_scale <= 0.0f ||
@@ -311,6 +308,12 @@ Status ApplyEpf(
       options.border_sad_multiplier <= 0.0f) {
     return Status::InvalidArgument(
       "EPF image, sigma field, or filter options are invalid");
+  }
+  BlockGrid block_grid;
+  if (!BlockGrid::Create(input.extent(), &block_grid).ok() ||
+      inverse_sigma.extent != block_grid.blocks) {
+    return Status::InvalidArgument(
+      "EPF image and sigma field dimensions are inconsistent");
   }
   constexpr size_t kMaximumSampleOffset = 3;
   constexpr size_t kMaximumDimension =

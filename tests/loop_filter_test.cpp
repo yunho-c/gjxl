@@ -15,6 +15,8 @@
 #include "codec/epf.h"
 #include "codec/gaborish.h"
 #include "codec/loop_filter.h"
+#include "core/image_buffer.h"
+#include "core/image_ops.h"
 
 namespace {
 
@@ -199,8 +201,62 @@ bool CheckComposition() {
   return true;
 }
 
+bool CheckDeclaredImageBoundary() {
+  constexpr gjxl::Extent2D kOddExtent{13, 9};
+  constexpr gjxl::Extent2D kOddBlocks{2, 2};
+  gjxl::Image3FBuffer input(kOddExtent);
+  gjxl::Image3FBuffer output(kOddExtent);
+  gjxl::Image3FBuffer in_place(kOddExtent);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kOddExtent.height; ++y) {
+      for (size_t x = 0; x < kOddExtent.width; ++x) {
+        input.plane(channel)[y * kOddExtent.width + x] =
+          0.07f * static_cast<float>(channel + 1) +
+          0.013f * static_cast<float>(x * x + 3 * y);
+      }
+    }
+  }
+  gjxl::CopyImage(input.const_view(), in_place.view());
+  const std::array<float, 4> inverse_sigma = {
+    -1.2f, -2.1f, -1.7f, -2.8f};
+  const gjxl::ConstPlaneF32View sigma{
+    inverse_sigma.data(), kOddBlocks, kOddBlocks.width};
+  if (!gjxl::ApplyLoopFilters(
+        input.const_view(), sigma, {}, output.view()).ok() ||
+      !gjxl::ApplyLoopFilters(
+        in_place.const_view(), sigma, {}, in_place.view()).ok()) {
+    std::cerr << "Odd-sized loop filtering failed\n";
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t index = 0;
+         index < kOddExtent.width * kOddExtent.height; ++index) {
+      if (output.plane(channel)[index] != in_place.plane(channel)[index]) {
+        std::cerr << "Odd-sized in-place loop filtering differs\n";
+        return false;
+      }
+    }
+  }
+
+  const std::vector<float> original(
+    output.plane(0).begin(), output.plane(0).end());
+  const std::array<float, 1> wrong_sigma = {-1.0f};
+  if (gjxl::ApplyLoopFilters(
+        input.const_view(),
+        {wrong_sigma.data(), {1, 1}, 1},
+        {}, output.view()).ok() ||
+      !std::equal(
+        output.plane(0).begin(), output.plane(0).end(), original.begin())) {
+    std::cerr << "Invalid odd-sized loop filtering was not atomic\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
-  return CheckComposition() ? EXIT_SUCCESS : EXIT_FAILURE;
+  return CheckComposition() && CheckDeclaredImageBoundary()
+    ? EXIT_SUCCESS
+    : EXIT_FAILURE;
 }

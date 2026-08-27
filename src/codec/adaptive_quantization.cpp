@@ -810,9 +810,13 @@ Status EvaluateQuantization(
     return status;
   }
 
-  Image3FBuffer filtered_opsin(opsin.extent());
+  Image3FBuffer cropped_reconstruction(original_linear_rgb.extent());
+  CopyImage(
+    reconstructed_opsin.cropped_view(original_linear_rgb.extent()),
+    cropped_reconstruction.view());
+  Image3FBuffer filtered_opsin(original_linear_rgb.extent());
   status = ApplyLoopFilters(
-    reconstructed_opsin.const_view(),
+    cropped_reconstruction.const_view(),
     {inverse_sigma.data(), block_extent, block_extent.width},
     options.profile.loop_filter,
     filtered_opsin.view());
@@ -822,7 +826,7 @@ Status EvaluateQuantization(
 
   result.reconstructed_linear.resize(original_linear_rgb.extent());
   status = OpsinToLinearRgb(
-    filtered_opsin.cropped_view(original_linear_rgb.extent()),
+    filtered_opsin.const_view(),
     options.profile.intensity_target,
     result.reconstructed_linear.view());
   if (!status.ok()) {
