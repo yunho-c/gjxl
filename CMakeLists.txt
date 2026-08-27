@@ -140,6 +140,7 @@ add_library(
   gjxl_codestream
   STATIC
 
+  src/codestream/ac_group.cpp
   src/codestream/bit_writer.cpp
   src/codestream/dc_group.cpp
   src/codestream/entropy.cpp
@@ -456,6 +457,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME dc_group
     COMMAND gjxl_dc_group_test
+  )
+
+  add_executable(
+    gjxl_ac_group_test
+    tests/ac_group_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_group_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME ac_group
+    COMMAND gjxl_ac_group_test
   )
 
   add_executable(
