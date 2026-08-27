@@ -569,6 +569,10 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                            partial_count, &staging_bytes);
   if (!status.ok())
     return status;
+  status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
+                           source_extent_.width, &staging_bytes);
+  if (!status.ok())
+    return status;
   status = AddPlannedPlane(DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
   if (!status.ok())
     return status;
@@ -708,6 +712,11 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   status =
       staging_.AllocatePlane(DeviceElementType::kF32, {partial_count, 1},
                              partial_count, kBufferAlignment, &reduction_b_);
+  if (!status.ok())
+    return status;
+  status = staging_.AllocatePlane(DeviceElementType::kF32, source_extent_,
+                                  source_extent_.width, kBufferAlignment,
+                                  &distance_map_);
   if (!status.ok())
     return status;
   status = staging_.AllocatePlane(DeviceElementType::kF32, {1, 1}, 1,
@@ -871,10 +880,29 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       255.0f / options_.opsin_intensity_target,
   };
 
+  status = PrepareDeviceButteraugli(
+      *backend_,
+      {.reference_linear_rgb = {{{original_[0], original_[1], original_[2]}}},
+       .options = options_.butteraugli},
+      &butteraugli_);
+  if (!status.ok())
+    return status;
+  const DeviceButteraugliMemoryStats butteraugli_memory =
+      butteraugli_->memory_stats();
+  if (butteraugli_memory.prepared_allocation_bytes >
+          std::numeric_limits<size_t>::max() - staging_.capacity_bytes() ||
+      butteraugli_memory.peak_comparison_scratch_bytes >
+          std::numeric_limits<size_t>::max() - staging_.capacity_bytes()) {
+    return Status::InvalidArgument(
+        "Prepared AQ Butteraugli memory accounting overflows");
+  }
+
   memory_stats_ = {
       persistent_.capacity_bytes(),
-      staging_.capacity_bytes(),
-      staging_.capacity_bytes(),
+      staging_.capacity_bytes() +
+          butteraugli_memory.prepared_allocation_bytes,
+      staging_.capacity_bytes() +
+          butteraugli_memory.peak_comparison_scratch_bytes,
   };
   return Status::Ok();
 }

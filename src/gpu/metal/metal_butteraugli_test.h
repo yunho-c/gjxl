@@ -44,13 +44,7 @@ enum class MetalButteraugliStage : size_t {
   kCount,
 };
 
-/// Test- and benchmark-only accounting for one prepared Metal state.
-struct MetalButteraugliResourceUsage {
-  size_t prepared_allocation_bytes = 0;
-  size_t cached_reference_bytes = 0;
-  size_t gaussian_kernel_bytes = 0;
-  size_t peak_comparison_scratch_bytes = 0;
-};
+using MetalButteraugliResourceUsage = DeviceButteraugliMemoryStats;
 
 /// Selects one stage to copy into preallocated diagnostic storage during the
 /// next comparison. Only non-expanded, single-scale prepared states support
@@ -68,11 +62,5 @@ struct MetalButteraugliResourceUsage {
 [[nodiscard]] Status QueryMetalButteraugliResourceUsageForTest(
   PreparedDeviceButteraugli& prepared,
   MetalButteraugliResourceUsage* usage);
-
-/// Injects a failure into the next Metal compute submission only.
-[[nodiscard]] Status ArmNextMetalSubmissionFailureForTest(
-  GpuBackend& backend,
-  bool fail_submission,
-  bool fail_completion);
 
 }  // namespace gjxl

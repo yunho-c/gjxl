@@ -19,8 +19,10 @@ strided device images, reusable scratch, per-command submission handles,
 batched transforms, a fixed optional image-primitive capability, and an
 optional prepared AQ operation. The prepared Metal path now completes
 coefficient coding, reconstruction, loop filtering, and cropped opsin-to-linear
-conversion while keeping both reconstructed images resident. Butteraugli, AQ
-block reduction, and production policy integration remain unavailable.
+conversion, then compares the resident linear image with a prepared Metal
+Butteraugli reference. Reconstructed images and the pixel distance map remain
+resident. AQ block reduction and production policy integration remain
+unavailable.
 
 ## Goals
 
@@ -66,10 +68,10 @@ differential tests, intermediate-stage fixtures, the explicit device
 Butteraugli operation, prepared-reference behavior, and Butteraugli-specific
 numerical tolerances.
 
-Butteraugli Milestone 7 now fixes the backend-neutral preparation, synchronous
-comparison, device-output, readback, validation, and lifetime contracts. Its
-test-only staged path exercises this substrate but contains no Butteraugli
-kernels. This does not complete the Metal AQ Milestone 5 integration gate.
+Butteraugli Milestones 7 through 9 fix the backend-neutral operation contract,
+complete Metal map/score implementation, prepared-reference cache, numerical
+gates, and standalone qualification. Metal AQ Milestone 5 consumes that
+operation without extending the shared backend contract.
 
 ### Shared GPU infrastructure
 
@@ -276,7 +278,7 @@ oracle coverage.
 
 ## Milestones
 
-Milestones 0 through 4 are complete. Milestones 5 through 8 remain pending and
+Milestones 0 through 5 are complete. Milestones 6 through 8 remain pending and
 must not be treated as complete until their stated exit criteria pass.
 
 ### 0. Refresh the AQ baseline and freeze the evaluation contract — complete (2026-08-26)
@@ -697,9 +699,9 @@ planes. Its option-derived filter plan allocates zero scratch images when all
 filters are disabled, one for a single enabled stage, and two for every longer
 Gaborish/EPF chain. Encoding alternates those images without copying. With both
 filters disabled, color conversion reads reconstructed opsin directly and the
-plan reports zero filter and copy dispatches. The default `89x57 -> 96x64`
-prepared case now reports 319232 persistent bytes and 459008 staging/peak-
-scratch bytes, including two padded filter images.
+plan reports zero filter and copy dispatches. At the Milestone 4 boundary, the
+default `89x57 -> 96x64` prepared case reported 319232 persistent bytes and
+459008 staging/peak-scratch bytes, including two padded filter images.
 
 The direct Metal diagnostic covers source/coding extents `5x3 -> 8x8`, aligned
 `16x8`, narrow `3x17 -> 8x24`, odd `17x9 -> 24x16`, and heavily padded
@@ -728,7 +730,7 @@ all prior AQ, DCT, primitive, and Butteraugli coverage. Production `Evaluate`
 remains explicitly unavailable until the resident Butteraugli and block-map
 stages are connected. This milestone makes no performance or crossover claim.
 
-### 5. Integrate the device Butteraugli operation
+### 5. Integrate the device Butteraugli operation — complete (2026-08-27)
 
 - Implement the device operation and intermediate parity milestones owned by
   [`butteraugli.md`](butteraugli.md).
@@ -741,6 +743,53 @@ stages are connected. This milestone makes no performance or crossover claim.
 Exit criterion: the complete Metal distance map and score pass the Butteraugli
 corpus, and repeated prepared comparisons require no reference recomputation,
 device allocation, or pixel-image transfer.
+
+The AQ and Butteraugli branches are now reconciled in one backend. Metal binds
+both pipeline registries and exposes both optional coherent operations; the
+combined metallib retains each shader unit's established arithmetic flags.
+Fresh combined Release baselines passed 38/38 reference-enabled and 32/32
+reference-disabled tests before AQ integration.
+
+AQ preparation uploads the original linear image, prepares and retains one
+`PreparedDeviceButteraugli`, and caches its main and optional half-resolution
+psycho-image decomposition in one submission. The AQ state now owns a
+source-sized float32 distance map. Each diagnostic evaluation submits the
+existing reconstruction/filter/color chain, checks its scalar device error,
+then passes `reconstructed_linear_` directly to the prepared Butteraugli
+comparison. The linear image, map, and score never pass through a host image
+between stages. Butteraugli owns one following synchronous submission; merging
+the two command buffers is deliberately deferred to Milestone 6's one-
+submission evaluation gate.
+
+The mixed `91x57 -> 96x64` integration case contains all seven supported AC
+strategies, Gaborish plus all three EPF passes, non-default filter and intensity
+options, and three raw-quant/global-scale variants. An isolated oracle feeds
+the exact Metal linear reconstruction into native CPU Butteraugli and retains
+the standalone `1.5e-3` map/score limit. The complete CPU reconstruction-
+through-Butteraugli comparison uses a fixed `2e-3` accumulated limit. Observed
+maximum errors on the M4 Pro were `7.24792e-5` and `8.7738e-5`, respectively.
+Three repeated comparisons add six evaluation submissions and zero allocations
+after preparation; the companion Milestone 4 diagnostic accounts for the
+other three submissions in the combined test.
+
+Preparation adds exactly three prepared-state allocations (persistent,
+staging, and the Butteraugli arena) and one reference-cache submission.
+Backend-neutral Butteraugli memory accounting is included in AQ staging and
+peak-scratch reports. The default `89x57 -> 96x64` case now reports 319232
+persistent bytes, 1306036 staging bytes, and 1047824 peak-scratch bytes.
+Validation preserves atomic diagnostic output for Butteraugli submission,
+completion, and post-comparison readback failures, rejects a null snapshot
+without submitting, invalidates the AQ state after operational failure, and
+runs independent prepared states concurrently. The standalone Butteraugli
+corpus continues to cover all leaf stages, small/odd/strided geometry,
+reference-cache reuse, and the full numerical boundary.
+
+Production `Evaluate` remains explicitly unavailable until Milestone 6 adds
+the strategy-aware block reduction, bounded readback, and CPU quant-field
+policy integration. This milestone inherits the standalone Butteraugli
+performance evidence but makes no complete-AQ speedup claim. Fresh final
+Release matrices pass all 38 reference-enabled and all 32 reference-disabled
+tests.
 
 ### 6. Add device AQ block reduction and CPU policy integration
 
@@ -856,12 +905,12 @@ encoder decisions.
 
 ## Implementation order
 
-Milestones 0 through 4 are complete. The validated prepared-operation contract
-now carries resident reconstructed opsin through loop filtering into cropped
-linear RGB. The standalone Butteraugli operation in Milestone 5 is the next
-full-resolution stage; Milestone 6 joins it to device block reduction and the
-iterative CPU policy. Milestones 7 and 8 harden and qualify the result for
-rollout.
+Milestones 0 through 5 are complete. The validated prepared-operation contract
+now carries resident reconstructed opsin through loop filtering, cropped linear
+RGB, and the prepared Butteraugli comparison into a resident pixel distance
+map and scalar score. Milestone 6 adds device block reduction, joins the
+evaluation into one submission, and runs the iterative CPU policy. Milestones
+7 and 8 harden and qualify the result for rollout.
 
 Removing libjxl from the production dependency graph is tracked independently
 in [`butteraugli.md`](butteraugli.md). It may proceed in parallel and does not

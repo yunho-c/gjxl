@@ -439,7 +439,8 @@ public:
     return submission->Wait();
   }
 
-  [[nodiscard]] MetalButteraugliResourceUsage ResourceUsage() const noexcept {
+  [[nodiscard]] DeviceButteraugliMemoryStats memory_stats()
+    const noexcept override {
     return {
       scratch_.capacity_bytes(),
       cached_reference_bytes_,
@@ -1527,22 +1528,7 @@ Status QueryMetalButteraugliResourceUsageForTest(
     return Status::InvalidArgument(
       "Butteraugli resource usage requires a Metal prepared state");
   }
-  *usage = metal->ResourceUsage();
-  return Status::Ok();
-}
-
-Status ArmNextMetalSubmissionFailureForTest(
-  GpuBackend& backend,
-  bool fail_submission,
-  bool fail_completion) {
-
-  auto* metal = dynamic_cast<metal_internal::MetalBackend*>(&backend);
-  if (metal == nullptr) {
-    return Status::InvalidArgument(
-      "Submission failure injection requires a Metal backend");
-  }
-  metal->ArmNextSubmissionFailureForTest(
-    fail_submission, fail_completion);
+  *usage = metal->memory_stats();
   return Status::Ok();
 }
 

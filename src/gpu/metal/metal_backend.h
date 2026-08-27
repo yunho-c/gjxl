@@ -80,4 +80,10 @@ Status CreateMetalBackend(
   const MetalBackendOptions& options,
   std::unique_ptr<GpuBackend>* out);
 
+/// Injects a failure into the next Metal compute submission only.
+[[nodiscard]] Status ArmNextMetalSubmissionFailureForTest(
+  GpuBackend& backend,
+  bool fail_submission,
+  bool fail_completion);
+
 }  // namespace gjxl

@@ -26,6 +26,13 @@ struct DeviceButteraugliComparisonDescriptor {
   DevicePlaneView score;
 };
 
+struct DeviceButteraugliMemoryStats {
+  size_t prepared_allocation_bytes = 0;
+  size_t cached_reference_bytes = 0;
+  size_t gaussian_kernel_bytes = 0;
+  size_t peak_comparison_scratch_bytes = 0;
+};
+
 /// Validates the device-resident reference image and immutable options.
 [[nodiscard]] Status ValidateDeviceButteraugliPrepareDescriptor(
   const GpuBackend& backend,
@@ -55,6 +62,8 @@ public:
   [[nodiscard]] Extent2D extent() const noexcept;
   [[nodiscard]] ButteraugliOptions options() const noexcept;
   [[nodiscard]] bool valid() const noexcept;
+  [[nodiscard]] virtual DeviceButteraugliMemoryStats memory_stats()
+    const noexcept = 0;
 
   /// Validates and executes one comparison. Reference, distorted, and output
   /// buffers must remain alive until this call returns. The output buffers for

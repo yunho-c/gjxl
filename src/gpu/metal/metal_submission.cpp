@@ -118,3 +118,22 @@ void MetalBackend::ArmNextSubmissionFailureForTest(
 }
 
 }  // namespace gjxl::metal_internal
+
+namespace gjxl {
+
+Status ArmNextMetalSubmissionFailureForTest(
+  GpuBackend& backend,
+  bool fail_submission,
+  bool fail_completion) {
+
+  auto* metal = dynamic_cast<metal_internal::MetalBackend*>(&backend);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "Submission failure injection requires a Metal backend");
+  }
+  metal->ArmNextSubmissionFailureForTest(
+    fail_submission, fail_completion);
+  return Status::Ok();
+}
+
+}  // namespace gjxl

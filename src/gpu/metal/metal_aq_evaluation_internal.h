@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/ac_strategy.h"
+#include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
@@ -151,6 +152,11 @@ public:
   Status RunReconstructionAndPostprocess(
       AqEvaluationInput input, MetalAqPostprocessSnapshotForTesting *snapshot);
   Status GetPostprocessPlan(MetalAqPostprocessPlanForTesting *plan) const;
+  Status RunButteraugli(
+      AqEvaluationInput input,
+      MetalAqButteraugliSnapshotForTesting *snapshot);
+  Status FailNextButteraugli(bool fail_submission, bool fail_completion,
+                            bool fail_readback);
 
 private:
   enum class State {
@@ -210,6 +216,7 @@ private:
   DevicePlaneView probe_output_;
   DevicePlaneView reduction_a_;
   DevicePlaneView reduction_b_;
+  DevicePlaneView distance_map_;
   DevicePlaneView score_;
   DevicePlaneView gathered_pixels_;
   DevicePlaneView forward_coefficients_;
@@ -249,12 +256,16 @@ private:
   std::array<std::vector<float>, 3> reconstructed_readback_;
   std::array<std::vector<float>, 3> filtered_readback_;
   std::array<std::vector<float>, 3> linear_readback_;
+  std::unique_ptr<PreparedDeviceButteraugli> butteraugli_;
   std::vector<int32_t> quant_probe_quantized_readback_;
   std::vector<float> quant_probe_dequantized_readback_;
   mutable std::mutex mutex_;
   State state_ = State::kReady;
   std::unique_ptr<GpuSubmission> submission_;
   bool fail_next_readback_ = false;
+  bool fail_next_butteraugli_submission_ = false;
+  bool fail_next_butteraugli_completion_ = false;
+  bool fail_next_butteraugli_readback_ = false;
   bool *wait_observer_ = nullptr;
 };
 

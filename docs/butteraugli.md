@@ -35,6 +35,11 @@ performance qualification. The shared contracts and complete resident AQ
 integration are owned by [`metal-aq.md`](metal-aq.md); this document owns the
 standalone device Butteraugli operation and its perceptual validation.
 
+Metal AQ Milestone 5 now prepares this operation from the AQ-owned original
+image and consumes its resident reconstructed linear RGB directly. The
+standalone synchronous comparison contract remains unchanged; command-buffer
+fusion with AQ block reduction is owned by Metal AQ Milestone 6.
+
 ## Goals
 
 - Provide a readable scalar CPU implementation owned by gjxl.
@@ -261,8 +266,8 @@ reduction. Malta reads zero outside its 9x9 support at image borders. The
 complete-map path separately edge-replicates dimensions smaller than eight,
 crops the expanded result, and adds exactly one half-resolution scale for
 images at least 15x15. All results are staged before output writes, reusable
-scratch owns the intermediate images, and the public facade remains on
-libjxl pending Milestone 5.
+scratch owns the intermediate images, and at this milestone boundary the
+public facade remained on libjxl pending Milestone 5.
 
 The strict 16x12 scalar stage goldens and four 32x24 scalar map/score goldens
 pass. A dedicated pinned-scalar executable also covers every eligible stage,
@@ -615,7 +620,9 @@ is therefore `(32x24, 64x48]`.
 Resource reporting separates implementation-owned storage from caller-owned
 buffers. `prepared_allocation` is the actual single Metal allocation;
 `cached_reference` and `peak_logical_comparison_scratch` are logical byte
-counts, and Gaussian kernels occupy 292 bytes. Representative values are:
+counts, and Gaussian kernels occupy 292 bytes. The backend-neutral prepared
+operation now exposes the same accounting so composite AQ memory reports can
+include the retained arena. Representative values are:
 
 | Workload | Prepared allocation | Cached reference | Peak logical comparison scratch |
 |---|---:|---:|---:|

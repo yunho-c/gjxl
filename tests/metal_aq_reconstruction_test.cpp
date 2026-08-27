@@ -558,10 +558,14 @@ bool CheckReconstructionFailure(gjxl::MetalBackendOptions backend_options,
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   InputStorage input;
   if (!CheckStatus(
-          gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, backend_options, &gpu),
+          gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
           "failure reconstruction backend") ||
       !InputStorage::Make(image, &input) ||
-      !Prepare(*gpu, image, strategies, &prepared)) {
+      !Prepare(*gpu, image, strategies, &prepared) ||
+      !CheckStatus(gjxl::ArmNextMetalSubmissionFailureForTest(
+                       *gpu, backend_options.test_fail_submission,
+                       backend_options.test_fail_completion),
+                   "AQ reconstruction failure injection")) {
     return false;
   }
   auto snapshot = PoisonedSnapshot();

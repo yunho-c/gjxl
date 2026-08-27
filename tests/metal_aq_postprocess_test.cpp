@@ -16,12 +16,14 @@
 #include <vector>
 
 #include "codec/chroma_from_luma.h"
+#include "codec/butteraugli.h"
 #include "codec/color_transform.h"
 #include "codec/loop_filter.h"
 #include "codec/reconstruction.h"
 #include "core/ac_strategy.h"
 #include "core/quantizer.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
+#include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/aq_evaluation.h"
@@ -34,10 +36,14 @@ constexpr double kColorAbsolute = 1.0e-4;
 constexpr double kColorRelative = 5.0e-5;
 constexpr double kCombinedAbsolute = 2.0e-4;
 constexpr double kCombinedRelative = 1.0e-4;
+constexpr double kButteraugliAbsolute = 1.5e-3;
+constexpr double kChainedButteraugliAbsolute = 2.0e-3;
 
 double g_max_filter_error = 0.0;
 double g_max_color_error = 0.0;
 double g_max_combined_error = 0.0;
+double g_max_butteraugli_error = 0.0;
+double g_max_chained_butteraugli_error = 0.0;
 
 bool CheckStatus(gjxl::Status status, std::string_view operation) {
   if (status.ok())
@@ -472,6 +478,79 @@ bool CompareChainedReconstruction(
                                   input.View().epf_inverse_sigma, options);
 }
 
+bool ComputeChainedLinear(const HostImage &coding,
+                          gjxl::Extent2D source_extent,
+                          const gjxl::AcStrategyGrid &strategies,
+                          const EvaluationInputStorage &input,
+                          gjxl::AqEvaluationOptions options,
+                          HostImage *linear) {
+  gjxl::Quantizer quantizer;
+  gjxl::QuantizedCoefficientFrame frame;
+  HostImage reconstructed(coding.extent, coding.extent.width);
+  HostImage filtered(coding.extent, coding.extent.width);
+  return CheckStatus(gjxl::Quantizer::Create(input.quantizer, &quantizer),
+                     "Butteraugli CPU quantizer") &&
+         CheckStatus(gjxl::ComputeQuantizedCoefficients(
+                         coding.ConstView(), strategies,
+                         input.View().raw_quant_field, quantizer, input.color,
+                         options.coefficient_coding, &frame),
+                     "Butteraugli CPU coefficient oracle") &&
+         CheckStatus(gjxl::ReconstructQuantizedCoefficients(
+                         frame, quantizer, input.color,
+                         options.coefficient_coding, reconstructed.View()),
+                     "Butteraugli CPU reconstruction oracle") &&
+         CheckStatus(gjxl::ApplyLoopFilters(
+                         reconstructed.ConstView(),
+                         input.View().epf_inverse_sigma, options.loop_filter,
+                         filtered.View()),
+                     "Butteraugli CPU loop-filter oracle") &&
+         CheckStatus(gjxl::OpsinToLinearRgb(
+                         filtered.Cropped(source_extent),
+                         options.opsin_intensity_target, linear->View()),
+                     "Butteraugli CPU color-conversion oracle");
+}
+
+bool ComputeButteraugliOracle(const HostImage &original,
+                              const HostImage &distorted,
+                              gjxl::ButteraugliOptions options,
+                              std::vector<float> *distance_map,
+                              double *score) {
+  distance_map->assign(original.extent.width * original.extent.height, 0.0f);
+  return CheckStatus(
+      gjxl::ComputeButteraugliDistance(
+          original.ConstView(), distorted.ConstView(), options,
+          {distance_map->data(), original.extent, original.extent.width},
+          score),
+      "CPU Butteraugli oracle");
+}
+
+bool CompareButteraugliSnapshot(
+    const gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting &snapshot,
+    const std::vector<float> &expected_map, double expected_score,
+    double tolerance, double *maximum_error, std::string_view stage) {
+  if (snapshot.distance_map.size() != expected_map.size()) {
+    std::cerr << stage << " map size mismatch\n";
+    return false;
+  }
+  for (size_t index = 0; index < expected_map.size(); ++index) {
+    if (!Near(snapshot.distance_map[index], expected_map[index], tolerance,
+              0.0, maximum_error)) {
+      std::cerr << stage << " map mismatch at index " << index << ": actual "
+                << snapshot.distance_map[index] << ", expected "
+                << expected_map[index] << '\n';
+      return false;
+    }
+  }
+  const double score_error = std::abs(snapshot.score - expected_score);
+  *maximum_error = std::max(*maximum_error, score_error);
+  if (!std::isfinite(snapshot.score) || score_error > tolerance) {
+    std::cerr << stage << " score mismatch: actual " << snapshot.score
+              << ", expected " << expected_score << '\n';
+    return false;
+  }
+  return true;
+}
+
 bool CheckChainedPath(gjxl::GpuBackend &gpu) {
   constexpr gjxl::Extent2D source_extent{91, 57};
   constexpr gjxl::Extent2D coding_extent{96, 64};
@@ -483,11 +562,28 @@ bool CheckChainedPath(gjxl::GpuBackend &gpu) {
   EvaluationInputStorage input;
   const gjxl::AqEvaluationOptions options = MakeOptions(true, 3, true);
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  const gjxl::GpuBackendStats before_prepare = gpu.stats();
   if (!MakeMixedStrategies(&strategies) || !input.Initialize(coding) ||
       !Prepare(gpu, original, coding, strategies, options, &prepared)) {
     return false;
   }
+  const gjxl::GpuBackendStats after_prepare = gpu.stats();
+  if (after_prepare.successful_allocations !=
+          before_prepare.successful_allocations + 3 ||
+      after_prepare.committed_submissions !=
+          before_prepare.committed_submissions + 1) {
+    std::cerr << "Prepared AQ Butteraugli resource contract failed\n";
+    return false;
+  }
   const gjxl::GpuBackendStats before = gpu.stats();
+  input.SetVariant(0);
+  if (!ExpectCode(gjxl::metal_internal::RunMetalAqButteraugliForTesting(
+                      *prepared, input.View(), nullptr),
+                  gjxl::StatusCode::kInvalidArgument,
+                  "null AQ Butteraugli snapshot") ||
+      gpu.stats().committed_submissions != before.committed_submissions) {
+    return false;
+  }
   for (uint32_t variant = 0; variant < 3; ++variant) {
     input.SetVariant(variant);
     gjxl::metal_internal::MetalAqPostprocessSnapshotForTesting snapshot;
@@ -499,11 +595,48 @@ bool CheckChainedPath(gjxl::GpuBackend &gpu) {
                                       options)) {
       return false;
     }
+
+    HostImage metal_linear(source_extent, source_extent.width);
+    HostImage cpu_linear(source_extent, source_extent.width);
+    for (size_t channel = 0; channel < 3; ++channel) {
+      metal_linear.plane[channel] = snapshot.reconstructed_linear[channel];
+    }
+    std::vector<float> isolated_map;
+    std::vector<float> chained_map;
+    double isolated_score = 0.0;
+    double chained_score = 0.0;
+    if (!ComputeChainedLinear(coding, source_extent, strategies, input, options,
+                              &cpu_linear) ||
+        !ComputeButteraugliOracle(original, metal_linear,
+                                  options.butteraugli, &isolated_map,
+                                  &isolated_score) ||
+        !ComputeButteraugliOracle(original, cpu_linear, options.butteraugli,
+                                  &chained_map, &chained_score)) {
+      return false;
+    }
+
+    gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting
+        butteraugli_snapshot;
+    if (!CheckStatus(gjxl::metal_internal::RunMetalAqButteraugliForTesting(
+                         *prepared, input.View(), &butteraugli_snapshot),
+                     "chained Metal AQ Butteraugli") ||
+        butteraugli_snapshot.source_extent != source_extent ||
+        !CompareButteraugliSnapshot(
+            butteraugli_snapshot, isolated_map, isolated_score,
+            kButteraugliAbsolute, &g_max_butteraugli_error,
+            "isolated AQ Butteraugli") ||
+        !CompareButteraugliSnapshot(
+            butteraugli_snapshot, chained_map, chained_score,
+            kChainedButteraugliAbsolute,
+            &g_max_chained_butteraugli_error,
+            "chained AQ Butteraugli")) {
+      return false;
+    }
   }
   const gjxl::GpuBackendStats after = gpu.stats();
   if (after.successful_allocations != before.successful_allocations ||
-      after.committed_submissions != before.committed_submissions + 3) {
-    std::cerr << "Chained AQ postprocess did not preserve residency\n";
+      after.committed_submissions != before.committed_submissions + 9) {
+    std::cerr << "Chained AQ Butteraugli did not preserve residency\n";
     return false;
   }
   return true;
@@ -526,6 +659,117 @@ bool IsPoisoned(const gjxl::metal_internal::MetalAqPostprocessSnapshotForTesting
          snapshot.reconstructed_opsin[0] == std::vector<float>{123.0f} &&
          snapshot.filtered_opsin[1] == std::vector<float>{456.0f} &&
          snapshot.reconstructed_linear[2] == std::vector<float>{789.0f};
+}
+
+gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting
+PoisonedButteraugliSnapshot() {
+  gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting snapshot;
+  snapshot.source_extent = {77, 88};
+  snapshot.distance_map = {123.0f};
+  snapshot.score = 456.0;
+  return snapshot;
+}
+
+bool IsPoisoned(
+    const gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting
+        &snapshot) {
+  return snapshot.source_extent == gjxl::Extent2D{77, 88} &&
+         snapshot.distance_map == std::vector<float>{123.0f} &&
+         snapshot.score == 456.0;
+}
+
+struct ButteraugliFixture {
+  HostImage original{{91, 57}, 94};
+  HostImage coding{{96, 64}, 101};
+  gjxl::AcStrategyGrid strategies;
+  EvaluationInputStorage input;
+  gjxl::AqEvaluationOptions options = MakeOptions(true, 3, true);
+
+  bool Initialize() {
+    FillLinear(&original);
+    FillOpsin(&coding, 0x8192u);
+    if (!MakeMixedStrategies(&strategies) || !input.Initialize(coding)) {
+      return false;
+    }
+    input.SetVariant(0);
+    return true;
+  }
+};
+
+bool CheckButteraugliFailure(gjxl::GpuBackend &gpu, bool fail_submission,
+                             bool fail_completion, bool fail_readback,
+                             gjxl::StatusCode expected,
+                             uint64_t expected_submissions) {
+  ButteraugliFixture fixture;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!fixture.Initialize() ||
+      !Prepare(gpu, fixture.original, fixture.coding, fixture.strategies,
+               fixture.options, &prepared)) {
+    return false;
+  }
+  if (!CheckStatus(gjxl::metal_internal::FailNextMetalAqButteraugliForTesting(
+                       *prepared, fail_submission, fail_completion,
+                       fail_readback),
+                   "AQ Butteraugli failure injection")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats before = gpu.stats();
+  auto snapshot = PoisonedButteraugliSnapshot();
+  if (!ExpectCode(gjxl::metal_internal::RunMetalAqButteraugliForTesting(
+                      *prepared, fixture.input.View(), &snapshot),
+                  expected, "injected AQ Butteraugli failure") ||
+      !IsPoisoned(snapshot)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after = gpu.stats();
+  if (after.successful_allocations != before.successful_allocations ||
+      after.committed_submissions !=
+          before.committed_submissions + expected_submissions ||
+      !ExpectCode(gjxl::metal_internal::RunMetalAqButteraugliForTesting(
+                      *prepared, fixture.input.View(), &snapshot),
+                  gjxl::StatusCode::kFailedPrecondition,
+                  "AQ Butteraugli reuse after failure") ||
+      !IsPoisoned(snapshot) || gpu.stats().committed_submissions !=
+                                   after.committed_submissions) {
+    return false;
+  }
+  return true;
+}
+
+bool CheckButteraugliConcurrency(gjxl::GpuBackend &gpu) {
+  ButteraugliFixture fixture;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> first;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> second;
+  if (!fixture.Initialize() ||
+      !Prepare(gpu, fixture.original, fixture.coding, fixture.strategies,
+               fixture.options, &first) ||
+      !Prepare(gpu, fixture.original, fixture.coding, fixture.strategies,
+               fixture.options, &second)) {
+    return false;
+  }
+  gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting first_snapshot;
+  gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting second_snapshot;
+  gjxl::Status first_status;
+  gjxl::Status second_status;
+  const gjxl::GpuBackendStats before = gpu.stats();
+  std::thread first_thread([&] {
+    first_status = gjxl::metal_internal::RunMetalAqButteraugliForTesting(
+        *first, fixture.input.View(), &first_snapshot);
+  });
+  std::thread second_thread([&] {
+    second_status = gjxl::metal_internal::RunMetalAqButteraugliForTesting(
+        *second, fixture.input.View(), &second_snapshot);
+  });
+  first_thread.join();
+  second_thread.join();
+  const gjxl::GpuBackendStats after = gpu.stats();
+  return CheckStatus(first_status, "first concurrent AQ Butteraugli") &&
+         CheckStatus(second_status, "second concurrent AQ Butteraugli") &&
+         after.successful_allocations == before.successful_allocations &&
+         after.committed_submissions == before.committed_submissions + 4 &&
+         first_snapshot.source_extent == second_snapshot.source_extent &&
+         first_snapshot.distance_map == second_snapshot.distance_map &&
+         first_snapshot.score == second_snapshot.score;
 }
 
 struct FailureFixture {
@@ -613,10 +857,14 @@ bool CheckInjectedFailure(gjxl::MetalBackendOptions backend_options,
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!fixture.Initialize() ||
       !CheckStatus(
-          gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, backend_options, &gpu),
+          gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
           "postprocess failure backend") ||
       !Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
-               fixture.options, &prepared)) {
+               fixture.options, &prepared) ||
+      !CheckStatus(gjxl::ArmNextMetalSubmissionFailureForTest(
+                       *gpu, backend_options.test_fail_submission,
+                       backend_options.test_fail_completion),
+                   "postprocess failure injection")) {
     return false;
   }
   if (inject_readback &&
@@ -688,6 +936,13 @@ int main() {
   if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
                    "Metal AQ postprocess backend") ||
       !CheckDirectCorpus(*gpu) || !CheckChainedPath(*gpu) ||
+      !CheckButteraugliFailure(*gpu, true, false, false,
+                               gjxl::StatusCode::kSubmissionFailed, 1) ||
+      !CheckButteraugliFailure(*gpu, false, true, false,
+                               gjxl::StatusCode::kDeviceError, 2) ||
+      !CheckButteraugliFailure(*gpu, false, false, true,
+                               gjxl::StatusCode::kDeviceError, 2) ||
+      !CheckButteraugliConcurrency(*gpu) ||
       !CheckValidationAndNumericFailure(*gpu) ||
       !CheckInjectedFailure({.test_fail_submission = true},
                             gjxl::StatusCode::kSubmissionFailed, false) ||
@@ -700,6 +955,9 @@ int main() {
   std::cout
       << "Metal AQ Milestone 4 postprocess tests passed; max filter error "
       << g_max_filter_error << ", max color error " << g_max_color_error
-      << ", max combined error " << g_max_combined_error << '\n';
+      << ", max combined error " << g_max_combined_error
+      << "; Milestone 5 max isolated Butteraugli error "
+      << g_max_butteraugli_error << ", max chained error "
+      << g_max_chained_butteraugli_error << '\n';
   return EXIT_SUCCESS;
 }

@@ -668,6 +668,7 @@ add_library(
 
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_backend.cpp
+  src/gpu/metal/metal_aq_butteraugli.cpp
   src/gpu/metal/metal_aq_evaluation.cpp
   src/gpu/metal/metal_aq_postprocess.cpp
   src/gpu/metal/metal_aq_reconstruction.cpp

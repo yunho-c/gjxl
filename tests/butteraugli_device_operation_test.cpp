@@ -242,6 +242,11 @@ public:
   }
 
 private:
+  [[nodiscard]] gjxl::DeviceButteraugliMemoryStats memory_stats()
+    const noexcept override {
+    return {};
+  }
+
   [[nodiscard]] gjxl::Status CompareValidated(
     const gjxl::DeviceButteraugliComparisonDescriptor&) override {
 
@@ -267,6 +272,11 @@ public:
     : PreparedDeviceButteraugli(backend, descriptor) {}
 
 private:
+  [[nodiscard]] gjxl::DeviceButteraugliMemoryStats memory_stats()
+    const noexcept override {
+    return {};
+  }
+
   [[nodiscard]] gjxl::Status CompareValidated(
     const gjxl::DeviceButteraugliComparisonDescriptor&) override {
     return gjxl::Status::Ok();

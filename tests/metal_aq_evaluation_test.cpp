@@ -687,14 +687,17 @@ bool CheckOperationalFailure(
   const gjxl::AqEvaluationOptions& options) {
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
-  if (!CheckStatus(gjxl::CreateMetalBackend(
-        GJXL_METALLIB_PATH, backend_options, &gpu),
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
         "failure-injection backend creation")) {
     return false;
   }
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!Prepare(
-        *gpu, original, coding, strategies, options, &prepared)) {
+        *gpu, original, coding, strategies, options, &prepared) ||
+      !CheckStatus(gjxl::ArmNextMetalSubmissionFailureForTest(
+        *gpu, backend_options.test_fail_submission,
+        backend_options.test_fail_completion),
+        "AQ operational failure injection")) {
     return false;
   }
   EvaluationInputStorage input = EvaluationInputStorage::Make(8);
