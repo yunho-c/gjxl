@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/ac_strategy.h"
+#include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
 #include "gpu/scratch.h"
@@ -78,6 +79,36 @@ struct AqQuantizationProbeParams {
   float matrix_multiplier;
 };
 
+struct AqGaborishParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride;
+  uint32_t output_stride;
+  std::array<float, 3> center_weight;
+  std::array<float, 3> axis_weight;
+  std::array<float, 3> diagonal_weight;
+};
+
+struct AqEpfParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride;
+  uint32_t output_stride;
+  uint32_t inverse_sigma_stride;
+  uint32_t pass;
+  float sigma_scale;
+  float border_sad_multiplier;
+  std::array<float, 3> channel_scale;
+};
+
+struct AqOpsinToLinearParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride;
+  uint32_t output_stride;
+  float scale;
+};
+
 struct AqStrategyBatch {
   AcStrategyType strategy = AcStrategyType::kCount;
   size_t anchor_offset = 0;
@@ -114,6 +145,12 @@ public:
   Status RunQuantizationProbe(const MetalAqQuantizationProbeForTesting &probe,
                               std::vector<int32_t> *quantized,
                               std::vector<float> *dequantized);
+  Status RunPostprocess(ConstImage3FView reconstructed_opsin,
+                        ConstPlaneF32View epf_inverse_sigma,
+                        MetalAqPostprocessSnapshotForTesting *snapshot);
+  Status RunReconstructionAndPostprocess(
+      AqEvaluationInput input, MetalAqPostprocessSnapshotForTesting *snapshot);
+  Status GetPostprocessPlan(MetalAqPostprocessPlanForTesting *plan) const;
 
 private:
   enum class State {
@@ -142,6 +179,18 @@ private:
   EncodeQuantizationProbeSubmission(MetalBackend &backend,
                                     MTL::ComputeCommandEncoder *encoder,
                                     const void *context);
+  static void EncodePostprocessSubmission(MetalBackend &backend,
+                                          MTL::ComputeCommandEncoder *encoder,
+                                          const void *context);
+  static void EncodeReconstructionAndPostprocessSubmission(
+      MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
+      const void *context);
+
+  void EncodePostprocess(MetalBackend &backend,
+                         MTL::ComputeCommandEncoder *encoder) const;
+  [[nodiscard]] std::array<DevicePlaneView, 3>
+  FinalFilteredImage() const noexcept;
+  Status FinishPostprocess(MetalAqPostprocessSnapshotForTesting *snapshot);
 
   MetalBackend *backend_ = nullptr;
   DeviceScratchArena persistent_;
@@ -149,6 +198,8 @@ private:
   std::array<DevicePlaneView, 3> original_;
   std::array<DevicePlaneView, 3> coding_;
   std::array<DevicePlaneView, 3> reconstructed_;
+  std::array<std::array<DevicePlaneView, 3>, 2> filter_scratch_;
+  std::array<DevicePlaneView, 3> reconstructed_linear_;
   DevicePlaneView strategies_;
   DevicePlaneView anchors_;
   DevicePlaneView quant_tables_;
@@ -178,11 +229,16 @@ private:
   size_t coefficient_value_count_ = 0;
   size_t anchor_count_ = 0;
   size_t maximum_coefficient_count_ = 0;
+  size_t filter_scratch_image_count_ = 0;
+  int final_filter_scratch_index_ = -1;
   AqEvaluationOptions options_;
   AqEvaluationMemoryStats memory_stats_;
   AqContractProbeParams probe_params_{};
   AqResetParams reset_params_{};
   AqQuantizationProbeParams quant_probe_params_{};
+  AqGaborishParams gaborish_params_{};
+  std::array<AqEpfParams, 3> epf_params_{};
+  AqOpsinToLinearParams opsin_to_linear_params_{};
   std::array<AqStrategyBatch, 7> batches_{};
   std::array<AqReconstructionParams, 7> reconstruction_params_{};
   std::vector<AqAnchor> row_major_anchors_;
@@ -191,6 +247,8 @@ private:
   std::vector<int32_t> quantized_readback_;
   std::vector<float> dc_readback_;
   std::array<std::vector<float>, 3> reconstructed_readback_;
+  std::array<std::vector<float>, 3> filtered_readback_;
+  std::array<std::vector<float>, 3> linear_readback_;
   std::vector<int32_t> quant_probe_quantized_readback_;
   std::vector<float> quant_probe_dequantized_readback_;
   mutable std::mutex mutex_;

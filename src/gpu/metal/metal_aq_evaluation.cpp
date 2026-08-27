@@ -46,6 +46,15 @@ static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
 static_assert(sizeof(AqReconstructionParams) == 80);
 static_assert(sizeof(AqResetParams) == 12);
 static_assert(sizeof(AqQuantizationProbeParams) == 24);
+static_assert(std::is_standard_layout_v<AqGaborishParams>);
+static_assert(std::is_trivially_copyable_v<AqGaborishParams>);
+static_assert(sizeof(AqGaborishParams) == 52);
+static_assert(std::is_standard_layout_v<AqEpfParams>);
+static_assert(std::is_trivially_copyable_v<AqEpfParams>);
+static_assert(sizeof(AqEpfParams) == 44);
+static_assert(std::is_standard_layout_v<AqOpsinToLinearParams>);
+static_assert(std::is_trivially_copyable_v<AqOpsinToLinearParams>);
+static_assert(sizeof(AqOpsinToLinearParams) == 20);
 
 [[nodiscard]] bool SupportedAqStrategy(AcStrategyType strategy) noexcept {
   switch (strategy) {
@@ -366,6 +375,13 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       (coding_extent_.height + 63) / 64,
   };
   options_ = preparation.options;
+  const size_t filter_stage_count =
+    (options_.loop_filter.gaborish ? size_t{1} : size_t{0}) +
+    options_.loop_filter.epf_options.iterations;
+  filter_scratch_image_count_ = std::min<size_t>(2, filter_stage_count);
+  final_filter_scratch_index_ = filter_stage_count == 0
+    ? -1
+    : static_cast<int>((filter_stage_count - 1) % 2);
   (void)block_extent_.try_area(&block_count_);
   (void)coding_extent_.try_area(&pixel_count_);
   if (pixel_count_ >
@@ -447,8 +463,19 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     forward_readback_.resize(coefficient_value_count_);
     quantized_readback_.resize(coefficient_value_count_);
     dc_readback_.resize(3 * block_count_);
+    size_t source_pixel_count = 0;
+    if (!source_extent_.try_area(&source_pixel_count)) {
+      return Status::InvalidArgument(
+        "Prepared AQ source image dimensions are too large");
+    }
     for (std::vector<float> &plane : reconstructed_readback_) {
       plane.resize(pixel_count_);
+    }
+    for (std::vector<float> &plane : filtered_readback_) {
+      plane.resize(pixel_count_);
+    }
+    for (std::vector<float> &plane : linear_readback_) {
+      plane.resize(source_pixel_count);
     }
     quant_probe_quantized_readback_.resize(maximum_coefficient_count_);
     quant_probe_dequantized_readback_.resize(maximum_coefficient_count_);
@@ -483,6 +510,12 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     if (!status.ok())
       return status;
   }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
+                             source_extent_.width, &persistent_bytes);
+    if (!status.ok())
+      return status;
+  }
   status = AddPlannedPlane(DeviceElementType::kI32,
                            {block_extent_.width * 2, block_extent_.height},
                            block_extent_.width * 2, &persistent_bytes);
@@ -508,6 +541,14 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                            block_extent_.width, &staging_bytes);
   if (!status.ok())
     return status;
+  for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
+                               coding_extent_.width, &staging_bytes);
+      if (!status.ok())
+        return status;
+    }
+  }
   status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
                            tile_extent_.width, &staging_bytes);
   if (!status.ok())
@@ -602,6 +643,13 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     if (!status.ok())
       return status;
   }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    status = persistent_.AllocatePlane(DeviceElementType::kF32, source_extent_,
+                                       source_extent_.width, kBufferAlignment,
+                                       &reconstructed_linear_[channel]);
+    if (!status.ok())
+      return status;
+  }
   status = persistent_.AllocatePlane(
       DeviceElementType::kI32, {block_extent_.width * 2, block_extent_.height},
       block_extent_.width * 2, kBufferAlignment, &strategies_);
@@ -628,6 +676,15 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                                   &inverse_sigma_);
   if (!status.ok())
     return status;
+  for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = staging_.AllocatePlane(DeviceElementType::kF32, coding_extent_,
+                                      coding_extent_.width, kBufferAlignment,
+                                      &filter_scratch_[image][channel]);
+      if (!status.ok())
+        return status;
+    }
+  }
   status =
       staging_.AllocatePlane(DeviceElementType::kI8, tile_extent_,
                              tile_extent_.width, kBufferAlignment, &y_to_x_);
@@ -768,6 +825,50 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       static_cast<uint32_t>(coefficient_value_count_),
       static_cast<uint32_t>(3 * block_count_),
       static_cast<uint32_t>(pixel_count_),
+  };
+
+  gaborish_params_ = {
+      static_cast<uint32_t>(coding_extent_.width),
+      static_cast<uint32_t>(coding_extent_.height),
+      static_cast<uint32_t>(reconstructed_[0].row_stride),
+      static_cast<uint32_t>(coding_extent_.width),
+  };
+  for (size_t channel = 0; channel < 3; ++channel) {
+    const float weight1 =
+      options_.loop_filter.gaborish_options.weight1[channel];
+    const float weight2 =
+      options_.loop_filter.gaborish_options.weight2[channel];
+    const float divisor = 1.0f + 4.0f * (weight1 + weight2);
+    gaborish_params_.center_weight[channel] = 1.0f / divisor;
+    gaborish_params_.axis_weight[channel] = weight1 / divisor;
+    gaborish_params_.diagonal_weight[channel] = weight2 / divisor;
+  }
+  constexpr std::array<uint32_t, 3> kEpfPasses = {0, 1, 2};
+  for (size_t index = 0; index < epf_params_.size(); ++index) {
+    const uint32_t pass = kEpfPasses[index];
+    const float pass_scale = pass == 0
+      ? options_.loop_filter.epf_options.pass0_sigma_scale
+      : pass == 2
+        ? options_.loop_filter.epf_options.pass2_sigma_scale
+        : 1.0f;
+    epf_params_[index] = {
+        static_cast<uint32_t>(coding_extent_.width),
+        static_cast<uint32_t>(coding_extent_.height),
+        static_cast<uint32_t>(coding_extent_.width),
+        static_cast<uint32_t>(coding_extent_.width),
+        static_cast<uint32_t>(inverse_sigma_.row_stride),
+        pass,
+        1.65f * pass_scale,
+        options_.loop_filter.epf_options.border_sad_multiplier,
+        options_.loop_filter.epf_options.channel_scale,
+    };
+  }
+  opsin_to_linear_params_ = {
+      static_cast<uint32_t>(source_extent_.width),
+      static_cast<uint32_t>(source_extent_.height),
+      static_cast<uint32_t>(coding_extent_.width),
+      static_cast<uint32_t>(reconstructed_linear_[0].row_stride),
+      255.0f / options_.opsin_intensity_target,
   };
 
   memory_stats_ = {
@@ -1182,6 +1283,31 @@ Status CreateAqPipelines(
     if ((*pipeline)->maxTotalThreadsPerThreadgroup() < kReconstructionThreads) {
       return Status::Unavailable(
           "Metal cannot launch an AQ reconstruction threadgroup");
+    }
+  }
+  const std::array<
+      std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
+      3>
+      postprocess = {{
+          {"gjxl_aq_gaborish_f32", &pipelines.gaborish},
+          {"gjxl_aq_epf_f32", &pipelines.epf},
+          {"gjxl_aq_opsin_to_linear_rgb_f32", &pipelines.opsin_to_linear},
+      }};
+  for (const auto &[name, pipeline] : postprocess) {
+    status = CreateAqPipeline(device, library, name, pipeline);
+    if (!status.ok()) {
+      return {
+          status.code(),
+          std::string(
+            "Failed to create required AQ postprocess pipeline: ") +
+            std::string(status.message()),
+      };
+    }
+    constexpr NS::UInteger kPostprocessThreads = 8 * 8;
+    if ((*pipeline)->maxTotalThreadsPerThreadgroup() <
+        kPostprocessThreads) {
+      return Status::Unavailable(
+        "Metal cannot launch an AQ postprocess threadgroup");
     }
   }
   *out = std::move(pipelines);

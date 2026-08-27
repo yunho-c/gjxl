@@ -332,6 +332,11 @@ set(
 )
 
 set(
+  GJXL_AQ_POSTPROCESS_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_postprocess.metal"
+)
+
+set(
   GJXL_AQ_QUANTIZATION_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_quantization.h"
 )
@@ -359,6 +364,11 @@ set(
 set(
   GJXL_AQ_RECONSTRUCTION_METAL_IR
   "${GJXL_METAL_DIR}/aq_reconstruction.ir"
+)
+
+set(
+  GJXL_AQ_POSTPROCESS_METAL_IR
+  "${GJXL_METAL_DIR}/aq_postprocess.ir"
 )
 
 set(
@@ -481,6 +491,36 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_AQ_POSTPROCESS_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    -fmetal-math-mode=safe
+    -fmetal-math-fp32-functions=precise
+    -ffp-contract=off
+    "${GJXL_AQ_POSTPROCESS_METAL_SOURCE}"
+    -o
+    "${GJXL_AQ_POSTPROCESS_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_AQ_POSTPROCESS_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling Metal AQ postprocess shaders"
+
+  VERBATIM
+)
+
 # .ir -> .metallib
 
 add_custom_command(
@@ -497,12 +537,14 @@ add_custom_command(
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_CONTRACT_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
+    "${GJXL_AQ_POSTPROCESS_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_CONTRACT_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
+    "${GJXL_AQ_POSTPROCESS_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -526,6 +568,7 @@ add_library(
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_backend.cpp
   src/gpu/metal/metal_aq_evaluation.cpp
+  src/gpu/metal/metal_aq_postprocess.cpp
   src/gpu/metal/metal_aq_reconstruction.cpp
   src/gpu/metal/metal_primitives.cpp
   src/gpu/metal/metal_submission.cpp
@@ -1178,6 +1221,34 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_aq_reconstruction
     COMMAND gjxl_metal_aq_reconstruction_test
+  )
+
+  add_executable(
+    gjxl_metal_aq_postprocess_test
+    tests/metal_aq_postprocess_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_aq_postprocess_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_aq_postprocess_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_metal_aq_postprocess_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_aq_postprocess
+    COMMAND gjxl_metal_aq_postprocess_test
   )
 
   add_executable(

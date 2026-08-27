@@ -18,9 +18,9 @@ The public GPU substrate now supports buffer allocation, host transfers,
 strided device images, reusable scratch, per-command submission handles,
 batched transforms, a fixed optional image-primitive capability, and an
 optional prepared AQ operation. The prepared Metal path now completes
-coefficient coding and reconstruction while keeping its reconstructed padded
-opsin image resident. Filtering, color conversion, Butteraugli, AQ block
-reduction, and production policy integration remain unavailable.
+coefficient coding, reconstruction, loop filtering, and cropped opsin-to-linear
+conversion while keeping both reconstructed images resident. Butteraugli, AQ
+block reduction, and production policy integration remain unavailable.
 
 ## Goals
 
@@ -271,7 +271,7 @@ oracle coverage.
 
 ## Milestones
 
-Milestones 0 through 2 are complete. Milestones 3 through 8 remain pending and
+Milestones 0 through 4 are complete. Milestones 5 through 8 remain pending and
 must not be treated as complete until their stated exit criteria pass.
 
 ### 0. Refresh the AQ baseline and freeze the evaluation contract — complete (2026-08-26)
@@ -664,7 +664,7 @@ object. The shared Milestone 2 state tests continue to cover same-object
 reentry, independent prepared-state concurrency, and destruction with
 outstanding work.
 
-### 4. Port loop filters and color conversion
+### 4. Port loop filters and color conversion — complete (2026-08-26)
 
 - Port the enabled Gaborish and EPF paths used by the AQ reference subset.
 - Preserve disabled-filter behavior without unnecessary copies or dispatches.
@@ -677,6 +677,51 @@ outstanding work.
 Exit criterion: reconstructed linear RGB meets its fixed CPU-oracle tolerance
 for odd source extents, padded edges, every supported filter configuration, and
 the varied quantization corpus.
+
+The Metal backend now binds three exact AQ postprocess entry points for
+normalized decoder Gaborish, EPF, and opsin-to-linear RGB. Gaborish preserves
+the CPU mirror boundary and channel-specific normalization. One EPF pipeline
+implements passes 0, 1, and 2 with the same patch and pixel SAD neighborhoods,
+block-border scaling, inverse-sigma lookup, and pass sequences `{1}`, `{1,2}`,
+and `{0,1,2}`. Color conversion dispatches only the unpadded source extent, so
+the right and bottom crop never requires a separate copy. The new shader unit
+uses safe, precise FP32 math with floating-point contraction disabled.
+
+Preparation allocates three persistent source-sized reconstructed-linear
+planes. Its option-derived filter plan allocates zero scratch images when all
+filters are disabled, one for a single enabled stage, and two for every longer
+Gaborish/EPF chain. Encoding alternates those images without copying. With both
+filters disabled, color conversion reads reconstructed opsin directly and the
+plan reports zero filter and copy dispatches. The default `89x57 -> 96x64`
+prepared case now reports 319232 persistent bytes and 459008 staging/peak-
+scratch bytes, including two padded filter images.
+
+The direct Metal diagnostic covers source/coding extents `5x3 -> 8x8`, aligned
+`16x8`, narrow `3x17 -> 8x24`, odd `17x9 -> 24x16`, and heavily padded
+`121x89 -> 128x96`. It crosses Gaborish enabled/disabled with EPF iteration
+counts 0 through 3, then repeats all eight configurations with non-default
+weights, channel scales, pass scales, border scaling, and intensity target.
+Every filtered pixel passes `2e-5 + 2e-5 * abs(x)`, isolated color conversion
+passes `1e-4 + 5e-5 * abs(x)`, and the combined stage passes
+`2e-4 + 1e-4 * abs(x)`. Observed maxima on the M4 Pro were `1.19209e-7`,
+`2.38419e-7`, and `8.34465e-7`, respectively.
+
+A second diagnostic encodes Milestone 3 reconstruction and all Milestone 4
+work into one submission with no intermediate synchronization or readback. Its
+odd padded mixed grid contains all seven supported strategies and exercises
+three quant-field/global-scale variants. Reconstructed opsin retains its
+Milestone 3 tolerance; filtering and color conversion use that exact Metal
+reconstruction as their independent CPU-oracle input. Three repeats add three
+submissions and zero allocations. Validation also covers malformed and
+non-finite input, invalid inverse sigma, finite overflow, atomic diagnostic
+commit, independent-state concurrency, and injected submission, completion,
+and post-completion readback failure.
+
+Fresh AppleClang 17 Release matrices pass all 35 reference-enabled and all 29
+reference-disabled tests, including real Metal execution for the new stage and
+all prior AQ, DCT, primitive, and Butteraugli coverage. Production `Evaluate`
+remains explicitly unavailable until the resident Butteraugli and block-map
+stages are connected. This milestone makes no performance or crossover claim.
 
 ### 5. Integrate the device Butteraugli operation
 
@@ -806,12 +851,12 @@ encoder decisions.
 
 ## Implementation order
 
-Milestones 0 through 3 are complete. The validated prepared-operation contract
-and resident reconstructed-opsin boundary now fix the handoff for subsequent
-work. Loop-filter/color-conversion work (Milestone 4) and the standalone
-Butteraugli operation (Milestone 5) may proceed independently. Milestone 6
-joins them into the iterative loop; Milestones 7 and 8 harden and qualify the
-result for rollout.
+Milestones 0 through 4 are complete. The validated prepared-operation contract
+now carries resident reconstructed opsin through loop filtering into cropped
+linear RGB. The standalone Butteraugli operation in Milestone 5 is the next
+full-resolution stage; Milestone 6 joins it to device block reduction and the
+iterative CPU policy. Milestones 7 and 8 harden and qualify the result for
+rollout.
 
 Removing libjxl from the production dependency graph is tracked independently
 in [`butteraugli.md`](butteraugli.md). It may proceed in parallel and does not
