@@ -7,12 +7,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <span>
 #include <string_view>
 
 #include "core/status.h"
 #include "gpu/buffer.h"
-#include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/transform.h"
 #include "gpu/submission.h"
 
@@ -75,30 +73,6 @@ public:
   virtual Status InverseTransform(
     const TransformBatch& batch,
     std::unique_ptr<GpuSubmission>* submission) = 0;
-
-  /// Enqueues one same-strategy batch of complete AC candidate costs.
-  /// Candidate selection and search traversal remain on the CPU.
-  virtual Status EvaluateAcStrategyCandidates(
-    const AcStrategyCandidateBatch&) {
-
-    return Status::Unavailable(
-      "GPU backend does not implement AC-strategy evaluation");
-  }
-
-  /// Enqueues several candidate batches in one backend submission. Each batch
-  /// is internally same-strategy; batches may select different strategies,
-  /// execute in span order, and reuse scratch buffers.
-  virtual Status EvaluateAcStrategyCandidateBatches(
-    std::span<const AcStrategyCandidateBatch>) {
-
-    return Status::Unavailable(
-      "GPU backend does not implement batched AC-strategy evaluation");
-  }
-
-  // Explicit synchronization is useful for tests and benchmarks.
-  virtual Status Synchronize() {
-    return Status::Ok();
-  }
 
 protected:
   GpuBackend()

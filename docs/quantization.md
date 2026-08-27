@@ -374,6 +374,14 @@ table without changing merge order, priorities, boundary checks, or tie policy.
 For a complete 8x8-block color tile this stages 258 candidates; enumerating
 every geometrically valid 32-point anchor would stage 320.
 
+Candidate evaluation is exposed through the optional
+`GpuAcStrategyEvaluation` capability rather than codec-specific virtual methods
+on `GpuBackend`. A successful non-empty batch returns its own caller-owned
+`GpuSubmission`; the search waits that exact submission before cost readback.
+This keeps validation and completion failures attached to the command that
+produced the costs and permits independent candidate submissions without a
+backend-wide “latest command” synchronization slot.
+
 Release measurements on an Apple M4 Pro on 2026-08-26 used three independent
 invocations of 12 samples with alternating CPU/GPU order. GPU E2E includes
 strided host packing, candidate and quant-norm construction, all buffer
@@ -414,6 +422,8 @@ common quantization pipeline without adding a GPU dependency to `gjxl_codec`.
 Initial AQ, Gaborish, first-pass CfL, search decisions, iterative AQ, coefficient
 coding, reconstruction, and final `VarDctEncoderFrame` assembly remain on the
 CPU. Only the candidate-cost portion of AC-strategy search executes on Metal.
+Backends without `GpuAcStrategyEvaluation` return `Unavailable` before any
+allocation or submission owned by the search operation.
 
 The Metal backend uses the same transform-dispatch helper for public DCT
 batches and candidate evaluation. Scalar, SIMD-group, and factored radix-2
@@ -423,7 +433,8 @@ bindings. Candidate and full-search tests cover all three implementations.
 An end-to-end fixture compares the CPU and GPU-search paths exactly through the
 final frame, including strategy cells, raw quantization, CfL, EPF, quantized
 and decoder-equivalent DC, fixed AC rows, reconstructed pixels, distance map,
-and score history. Its
+and score history. Serializing both frames produces identical bytes, and
+repeated serialization of the GPU-search frame is byte-deterministic. Its
 257x17 source pads to 33x3 blocks, crossing the 256-pixel AC-group boundary and
 verifying the 1x3-block edge group. Broader quantization-boundary sensitivity
 still follows the documented candidate-cost accuracy contract.

@@ -405,11 +405,17 @@ Status FindAcStrategyGridGpu(
         .butteraugli_target = options.butteraugli_target,
       };
     }
-    status = gpu.EvaluateAcStrategyCandidateBatches(batches);
+    std::unique_ptr<GpuSubmission> submission;
+    status = EvaluateAcStrategyCandidateBatches(
+      gpu, batches, &submission);
     if (!status.ok()) {
       return status;
     }
-    status = gpu.Synchronize();
+    if (submission == nullptr) {
+      return Status::Internal(
+        "GPU AC-strategy search returned no submission");
+    }
+    status = submission->Wait();
     if (!status.ok()) {
       return status;
     }

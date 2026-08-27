@@ -109,6 +109,60 @@ bool CheckStatus(
   return false;
 }
 
+class BackendWithoutAc final : public gjxl::GpuBackend {
+public:
+  [[nodiscard]] gjxl::BackendKind kind() const noexcept override {
+    return gjxl::BackendKind::kMetal;
+  }
+
+  [[nodiscard]] std::string_view name() const noexcept override {
+    return "backend without AC evaluation";
+  }
+
+  gjxl::Status Allocate(
+    size_t,
+    std::unique_ptr<gjxl::DeviceBuffer>*) override {
+
+    return gjxl::Status::Unavailable("Allocation is not implemented");
+  }
+
+  gjxl::Status CopyHostToDevice(
+    gjxl::DeviceBuffer&,
+    const void*,
+    size_t,
+    size_t) override {
+
+    return gjxl::Status::Unavailable("Upload is not implemented");
+  }
+
+  gjxl::Status CopyDeviceToHost(
+    const gjxl::DeviceBuffer&,
+    void*,
+    size_t,
+    size_t) override {
+
+    return gjxl::Status::Unavailable("Readback is not implemented");
+  }
+
+  gjxl::Status ForwardTransform(
+    const gjxl::TransformBatch&,
+    std::unique_ptr<gjxl::GpuSubmission>* submission) override {
+
+    if (submission != nullptr)
+      submission->reset();
+    return gjxl::Status::Unavailable("Transform is not implemented");
+  }
+
+  gjxl::Status InverseTransform(
+    const gjxl::TransformBatch&,
+    std::unique_ptr<gjxl::GpuSubmission>* submission) override {
+
+    if (submission != nullptr)
+      submission->reset();
+    return gjxl::Status::Unavailable("Transform is not implemented");
+  }
+};
+
 std::vector<gjxl::AcStrategyCandidate> MakeCandidates(
   gjxl::AcStrategyType strategy,
   const Fixture& fixture) {
@@ -295,10 +349,12 @@ bool RunStrategyCase(
     .candidate_count = candidates.size(),
     .butteraugli_target = kButteraugliTarget,
   };
+  std::unique_ptr<gjxl::GpuSubmission> submission;
   if (!CheckStatus(
-        gpu.EvaluateAcStrategyCandidates(batch),
+        gjxl::EvaluateAcStrategyCandidates(gpu, batch, &submission),
         "Submit candidate batch") ||
-      !CheckStatus(gpu.Synchronize(), "Synchronize candidate batch") ||
+      submission == nullptr ||
+      !CheckStatus(submission->Wait(), "Wait for candidate batch") ||
       !CheckStatus(
         gpu.CopyDeviceToHost(
           *device_costs, poisoned_costs.data(), cost_bytes),
@@ -329,6 +385,31 @@ bool RunStrategyCase(
             << " max absolute cost error " << max_absolute_error
             << ", max relative error " << max_relative_error << '\n';
 
+  const gjxl::GpuBackendStats before_submissions = gpu.stats();
+  std::unique_ptr<gjxl::GpuSubmission> first_submission;
+  std::unique_ptr<gjxl::GpuSubmission> second_submission;
+  if (!CheckStatus(
+        gjxl::EvaluateAcStrategyCandidates(
+          gpu, batch, &first_submission),
+        "Submit first independent candidate batch") ||
+      !CheckStatus(
+        gjxl::EvaluateAcStrategyCandidates(
+          gpu, batch, &second_submission),
+        "Submit second independent candidate batch") ||
+      first_submission == nullptr || second_submission == nullptr ||
+      !CheckStatus(
+        second_submission->Wait(), "Wait for second candidate batch") ||
+      !CheckStatus(
+        first_submission->Wait(), "Wait for first candidate batch") ||
+      !CheckStatus(
+        first_submission->Wait(), "Repeat first candidate wait") ||
+      gpu.stats().committed_submissions !=
+        before_submissions.committed_submissions + 2) {
+    std::cerr << implementation << ' ' << info->name
+              << " did not return independent submission handles\n";
+    return false;
+  }
+
   candidates[0].block_x = std::numeric_limits<uint32_t>::max();
   candidates[1].quant_norm = std::numeric_limits<float>::quiet_NaN();
   if (!CheckStatus(
@@ -336,9 +417,10 @@ bool RunStrategyCase(
           *device_candidates, candidates.data(), candidate_bytes),
         "Upload invalid candidates") ||
       !CheckStatus(
-        gpu.EvaluateAcStrategyCandidates(batch),
+        gjxl::EvaluateAcStrategyCandidates(gpu, batch, &submission),
         "Submit invalid candidate batch") ||
-      !CheckStatus(gpu.Synchronize(), "Synchronize invalid candidate batch") ||
+      submission == nullptr ||
+      !CheckStatus(submission->Wait(), "Wait for invalid candidate batch") ||
       !CheckStatus(
         gpu.CopyDeviceToHost(
           *device_costs, poisoned_costs.data(), cost_bytes),
@@ -352,7 +434,8 @@ bool RunStrategyCase(
 
   gjxl::AcStrategyCandidateBatch aliased_batch = batch;
   aliased_batch.scratch_b = aliased_batch.scratch_a;
-  if (gpu.EvaluateAcStrategyCandidates(aliased_batch).ok()) {
+  if (gjxl::EvaluateAcStrategyCandidates(
+        gpu, aliased_batch, &submission).ok() || submission != nullptr) {
     std::cerr << implementation << ' ' << info->name
               << " aliased scratch buffers were accepted\n";
     return false;
@@ -404,6 +487,22 @@ bool CheckImplementation(
 }
 
 bool CheckValidation() {
+  BackendWithoutAc without_ac;
+  std::unique_ptr<gjxl::GpuSubmission> submission;
+  gjxl::AcStrategyCandidateBatch nonempty;
+  nonempty.candidate_count = 1;
+  const gjxl::Status unavailable = gjxl::EvaluateAcStrategyCandidates(
+    without_ac, nonempty, &submission);
+  if (gjxl::QueryGpuAcStrategyEvaluation(without_ac) != nullptr ||
+      unavailable.code() != gjxl::StatusCode::kUnavailable ||
+      submission != nullptr ||
+      gjxl::EvaluateAcStrategyCandidates(
+        without_ac, nonempty, nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument) {
+    std::cerr << "Optional AC-strategy capability contract failed\n";
+    return false;
+  }
+
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!CheckStatus(
         gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
@@ -411,13 +510,16 @@ bool CheckValidation() {
     return false;
   }
 
-  if (!gpu->EvaluateAcStrategyCandidates({}).ok()) {
+  if (gjxl::QueryGpuAcStrategyEvaluation(*gpu) == nullptr ||
+      !gjxl::EvaluateAcStrategyCandidates(*gpu, {}, &submission).ok() ||
+      submission != nullptr) {
     std::cerr << "Zero-sized candidate batch was rejected\n";
     return false;
   }
   gjxl::AcStrategyCandidateBatch invalid;
   invalid.candidate_count = 1;
-  if (gpu->EvaluateAcStrategyCandidates(invalid).ok()) {
+  if (gjxl::EvaluateAcStrategyCandidates(
+        *gpu, invalid, &submission).ok() || submission != nullptr) {
     std::cerr << "Candidate batch with missing buffers was accepted\n";
     return false;
   }

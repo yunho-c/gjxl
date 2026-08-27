@@ -15,6 +15,7 @@
 
 #include "codec/color_transform.h"
 #include "codec/quantization_pipeline.h"
+#include "codestream/encoder.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/quantization_pipeline.h"
 
@@ -289,6 +290,20 @@ bool CheckGpuPipelineParity() {
       edge_group.block_extent != gjxl::Extent2D{1, 3} ||
       edge_group.used_coefficient_count != 192) {
     std::cerr << "GPU-search frame has an invalid edge AC group\n";
+    return false;
+  }
+
+  std::vector<uint8_t> cpu_codestream;
+  std::vector<uint8_t> first_gpu_codestream;
+  std::vector<uint8_t> second_gpu_codestream;
+  if (!gjxl::EncodeVarDctCodestream(cpu.frame, &cpu_codestream).ok() ||
+      !gjxl::EncodeVarDctCodestream(
+        accelerated.frame, &first_gpu_codestream).ok() ||
+      !gjxl::EncodeVarDctCodestream(
+        accelerated.frame, &second_gpu_codestream).ok() ||
+      cpu_codestream.empty() || cpu_codestream != first_gpu_codestream ||
+      first_gpu_codestream != second_gpu_codestream) {
+    std::cerr << "CPU/GPU-search codestream bytes are not deterministic\n";
     return false;
   }
   return true;

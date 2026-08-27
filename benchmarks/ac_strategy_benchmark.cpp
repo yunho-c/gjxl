@@ -316,8 +316,15 @@ public:
   }
 
   void EvaluateMetalResident() {
-    Require(gpu_.EvaluateAcStrategyCandidates(batch_), "Metal candidate submission");
-    Require(gpu_.Synchronize(), "Metal candidate synchronization");
+    std::unique_ptr<gjxl::GpuSubmission> submission;
+    Require(
+      gjxl::EvaluateAcStrategyCandidates(gpu_, batch_, &submission),
+      "Metal candidate submission");
+    if (submission == nullptr) {
+      std::cerr << "Metal candidate submission is null\n";
+      std::exit(EXIT_FAILURE);
+    }
+    Require(submission->Wait(), "Metal candidate synchronization");
   }
 
   void EvaluateMetalRoundTrip() {

@@ -21,6 +21,7 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/butteraugli.h"
 #include "gpu/ops/primitives.h"
@@ -157,6 +158,7 @@ private:
 
 class MetalBackend final
   : public GpuBackend,
+    public GpuAcStrategyEvaluation,
     public GpuImagePrimitives,
     public GpuAqEvaluation,
     public DeviceButteraugliOperation {
@@ -174,7 +176,7 @@ public:
     bool test_fail_submission,
     bool test_fail_completion);
 
-  ~MetalBackend() override;
+  ~MetalBackend() override = default;
 
   [[nodiscard]] BackendKind kind() const noexcept override;
   [[nodiscard]] std::string_view name() const noexcept override;
@@ -203,13 +205,9 @@ public:
     const TransformBatch& batch,
     std::unique_ptr<GpuSubmission>* submission) override;
 
-  Status EvaluateAcStrategyCandidates(
-    const AcStrategyCandidateBatch& batch) override;
-
   Status EvaluateAcStrategyCandidateBatches(
-    std::span<const AcStrategyCandidateBatch> batches) override;
-
-  Status Synchronize() override;
+    std::span<const AcStrategyCandidateBatch> batches,
+    std::unique_ptr<GpuSubmission>* submission) override;
 
   Status SubmitImagePrimitiveSequence(
     std::span<const ImagePrimitiveCommand> commands,
@@ -313,7 +311,8 @@ private:
     const ValidatedAcStrategyBatch& validated);
 
   Status SubmitAcStrategyCandidates(
-    std::span<const AcStrategyCandidateBatch> batches);
+    std::span<const AcStrategyCandidateBatch> batches,
+    std::unique_ptr<GpuSubmission>* submission);
 
   Status SubmitCompute(
     const char* label,
@@ -421,7 +420,6 @@ private:
   bool test_fail_completion_ = false;
   std::atomic<bool> test_fail_next_submission_{false};
   std::atomic<bool> test_fail_next_completion_{false};
-  std::unique_ptr<GpuSubmission> pending_ac_submission_;
   std::string name_;
 };
 

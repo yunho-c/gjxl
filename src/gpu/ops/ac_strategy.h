@@ -5,11 +5,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <span>
 #include <type_traits>
 
 #include "core/ac_strategy.h"
 #include "core/geometry.h"
+#include "core/status.h"
+#include "gpu/backend.h"
 #include "gpu/buffer.h"
+#include "gpu/submission.h"
 
 namespace gjxl {
 
@@ -70,5 +75,72 @@ struct AcStrategyCandidateBatch {
   size_t candidate_count = 0;
   float butteraugli_target = 1.0f;
 };
+
+/// Optional coherent AC-strategy candidate operation implemented by a backend.
+/// Candidate selection and search traversal remain on the CPU.
+class GpuAcStrategyEvaluation {
+public:
+  virtual ~GpuAcStrategyEvaluation() = default;
+
+  /// Enqueues several candidate batches in one submission. Each batch is
+  /// internally same-strategy; batches may select different strategies,
+  /// execute in span order, and reuse scratch buffers. A successful non-empty
+  /// sequence returns a non-null caller-owned submission. An empty sequence
+  /// succeeds with a null submission.
+  virtual Status EvaluateAcStrategyCandidateBatches(
+    std::span<const AcStrategyCandidateBatch> batches,
+    std::unique_ptr<GpuSubmission>* submission) = 0;
+};
+
+[[nodiscard]] inline GpuAcStrategyEvaluation* QueryGpuAcStrategyEvaluation(
+  GpuBackend& backend) noexcept {
+
+  return dynamic_cast<GpuAcStrategyEvaluation*>(&backend);
+}
+
+[[nodiscard]] inline Status EvaluateAcStrategyCandidateBatches(
+  GpuBackend& backend,
+  std::span<const AcStrategyCandidateBatch> batches,
+  std::unique_ptr<GpuSubmission>* submission) {
+
+  if (submission == nullptr) {
+    return Status::InvalidArgument(
+      "AC-strategy submission output pointer is null");
+  }
+  submission->reset();
+  GpuAcStrategyEvaluation* capability =
+    QueryGpuAcStrategyEvaluation(backend);
+  if (capability == nullptr) {
+    return Status::Unavailable(
+      "GPU backend does not provide AC-strategy evaluation");
+  }
+  Status status = capability->EvaluateAcStrategyCandidateBatches(
+    batches, submission);
+  if (!status.ok()) {
+    submission->reset();
+    return status;
+  }
+  bool has_work = false;
+  for (const AcStrategyCandidateBatch& batch : batches) {
+    has_work = has_work || batch.candidate_count != 0;
+  }
+  if (has_work != (*submission != nullptr)) {
+    submission->reset();
+    return Status::Internal(
+      "GPU AC-strategy capability returned an invalid submission");
+  }
+  return Status::Ok();
+}
+
+[[nodiscard]] inline Status EvaluateAcStrategyCandidates(
+  GpuBackend& backend,
+  const AcStrategyCandidateBatch& batch,
+  std::unique_ptr<GpuSubmission>* submission) {
+
+  return EvaluateAcStrategyCandidateBatches(
+    backend,
+    std::span<const AcStrategyCandidateBatch>(&batch, 1),
+    submission);
+}
 
 }  // namespace gjxl

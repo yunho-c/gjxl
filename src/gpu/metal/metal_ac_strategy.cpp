@@ -112,30 +112,11 @@ Status CreateAcStrategyPipelines(
   return Status::Ok();
 }
 
-MetalBackend::~MetalBackend() {
-  (void)Synchronize();
-}
-
-Status MetalBackend::EvaluateAcStrategyCandidates(
-  const AcStrategyCandidateBatch& batch) {
-
-  return SubmitAcStrategyCandidates(
-    std::span<const AcStrategyCandidateBatch>(&batch, 1));
-}
-
 Status MetalBackend::EvaluateAcStrategyCandidateBatches(
-  std::span<const AcStrategyCandidateBatch> batches) {
+  std::span<const AcStrategyCandidateBatch> batches,
+  std::unique_ptr<GpuSubmission>* submission) {
 
-  return SubmitAcStrategyCandidates(batches);
-}
-
-Status MetalBackend::Synchronize() {
-  if (!pending_ac_submission_) {
-    return Status::Ok();
-  }
-  const Status status = pending_ac_submission_->Wait();
-  pending_ac_submission_.reset();
-  return status;
+  return SubmitAcStrategyCandidates(batches, submission);
 }
 
 bool MetalBackend::TryMultiply(
@@ -516,7 +497,14 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
 }
 
 Status MetalBackend::SubmitAcStrategyCandidates(
-  std::span<const AcStrategyCandidateBatch> batches) {
+  std::span<const AcStrategyCandidateBatch> batches,
+  std::unique_ptr<GpuSubmission>* submission) {
+
+  if (submission == nullptr) {
+    return Status::InvalidArgument(
+      "AC-strategy submission output pointer is null");
+  }
+  submission->reset();
 
   std::vector<ValidatedAcStrategyBatch> validated_batches;
   try {
@@ -542,23 +530,13 @@ Status MetalBackend::SubmitAcStrategyCandidates(
   if (validated_batches.empty()) {
     return Status::Ok();
   }
-  Status status = Synchronize();
-  if (!status.ok()) {
-    return status;
-  }
 
   const AcStrategyEncodeContext context{validated_batches};
-  std::unique_ptr<GpuSubmission> submission;
-  status = SubmitCompute(
+  return SubmitCompute(
     "gjxl staged AC candidate evaluation",
     &MetalBackend::EncodeAcStrategySubmission,
     &context,
-    &submission);
-  if (!status.ok()) {
-    return status;
-  }
-  pending_ac_submission_ = std::move(submission);
-  return Status::Ok();
+    submission);
 }
 
 }  // namespace gjxl::metal_internal

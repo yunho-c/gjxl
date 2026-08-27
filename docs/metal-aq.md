@@ -233,14 +233,14 @@ transition requires it, but must not commit and synchronize after each leaf
 operation. Submission failure and command-buffer failure must be distinguishable
 from invalid caller input.
 
-Every successful non-empty transform or image-primitive submission returns an
-owning `GpuSubmission`. `Wait()` is thread-safe, idempotent, and returns its
-cached completion status. The handle retains the native objects required to
-wait and may outlive the backend; destroying the handle does not implicitly
-wait. Failed validation or command-buffer creation resets the output handle and
-submits no work. Empty image-primitive sequences are invalid. Zero-transform
-batches retain their established no-op contract and return success with a null
-handle.
+Every successful non-empty transform, image-primitive, or AC-candidate
+submission returns an owning `GpuSubmission`. `Wait()` is thread-safe,
+idempotent, and returns its cached completion status. The handle retains the
+native objects required to wait and may outlive the backend; destroying the
+handle does not implicitly wait. Failed validation or command-buffer creation
+resets the output handle and submits no work. Empty image-primitive sequences
+are invalid. Zero-transform and zero-candidate batches retain their established
+no-op contracts and return success with a null handle.
 
 Prepared operations must retain all outstanding submissions and wait before
 destroying, resizing, or reusing referenced scratch. Backend allocation and
@@ -257,6 +257,8 @@ separable-convolution, and maximum-reduction command set is exposed through the
 optional `GpuImagePrimitives` capability instead of the core backend interface.
 Prepared Butteraugli and AQ operations will own their private kernel sequences
 rather than extending that command variant.
+Staged AC candidate evaluation follows the same rule through the optional
+`GpuAcStrategyEvaluation` capability and returns its own submission handle.
 
 Caller-visible output is committed only after validation and successful GPU
 completion. Invalid requests must submit no work. Tests may read intermediate
@@ -919,9 +921,17 @@ evaluation into one submission, and runs the iterative CPU policy. Milestones
 The 2026-08-27 codestream integration made the encoder frame profile the single
 CPU/GPU option contract and added modular DC quantization parity to the resident
 Metal reconstruction. Fresh AppleClang 17 Release matrices pass 54/54 tests
-with the pinned reference enabled and 47/47 with it disabled, including
+with the pinned reference enabled and 48/48 with it disabled, including
 codestream conformance, scalar/dispatched Butteraugli differentials, Metal DCT
 and AC-strategy search, and the full staged Metal AQ diagnostics.
+
+The integration checkpoint also moves staged AC candidate evaluation out of
+`GpuBackend` into `GpuAcStrategyEvaluation`. Metal returns one caller-owned
+submission for the complete multi-strategy batch; search, tests, and benchmarks
+wait that handle directly. The core backend consequently retains only buffer,
+copy, and transform operations, with no codec-specific AC methods or
+backend-wide synchronization state. Factored-radix DCT selection and the shared
+device-basis fast path remain unchanged.
 
 Removing libjxl from the production dependency graph is tracked independently
 in [`butteraugli.md`](butteraugli.md). It may proceed in parallel and does not
