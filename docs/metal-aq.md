@@ -135,14 +135,12 @@ after the complete resident path is measured and a separate GPU port can
 preserve its decisions. The first implementation must not obscure their upload
 cost in end-to-end measurements.
 
-Milestone 6 deliberately stops at the bounded policy result: the final quant
-field, block-distance map, score history, and exact raw-quant decisions used as
-its acceptance oracle. Milestone 7 separately defines reconstructed-image and
-`VarDctEncoderFrame` materialization before the Metal AQ path replaces CPU AQ in
-the complete quantization pipeline. Milestone 6 must not add a redundant CPU
-final evaluation merely to fabricate those outputs. A future encoder handoff
-may retain final coefficients on the device, but that representation must not
-be invented implicitly by scratch buffers.
+Milestone 6 established the bounded policy result: final quant field,
+block-distance map, score history, and exact raw-quant decisions. Milestone 7
+adds reconstructed-image and `VarDctEncoderFrame` materialization from the last
+resident evaluation and uses that path in the complete GPU quantization
+pipeline. A future encoder handoff may retain final coefficients on the device,
+but that representation is not invented implicitly by scratch buffers.
 
 ## Residency and transfer contract
 
@@ -187,19 +185,19 @@ Intermediate AQ evaluations read back only:
 
 The pixel-resolution distance map must remain device-resident. Reading it back
 to perform the 16-norm reduction on the CPU is not an acceptable steady-state
-path. During Milestone 6, including the last policy evaluation, the prepared
-operation returns only this bounded result. CPU orchestration atomically commits
-the final quant field, block-distance map, and score history after the complete
-loop succeeds; exact raw quant values are a decision-level acceptance oracle,
-not an additional public output. Milestone 7 owns reconstructed linear RGB and
-encoder-frame materialization.
+path. Bounded policy calls, including their last evaluation, return only this
+result. Full calls request reconstructed linear RGB, quantized AC, and
+quantized DC from the last evaluation after the same wait, then atomically
+commit the field, block map, score history, image, and assembled encoder frame.
+Exact raw quant values remain a decision-level acceptance oracle, not an
+additional public output.
 
 ### Synchronization, concurrency, and failure
 
-The initial operation is host-synchronous at the CPU policy boundary. One call
-encodes one Metal submission, waits for its bounded block-map and score
-readback, and returns only after those values are available. The implementation
-must not hide additional submissions or full-resolution diagnostic readbacks.
+The operation is host-synchronous at the CPU policy boundary. One evaluation
+encodes one Metal submission and waits once. Intermediate calls read back the
+bounded block map and score; an explicitly requested final call additionally
+downloads its final image/frame payload without another submission.
 
 A prepared object is not concurrently reentrant because its evaluations reuse
 mutable scratch. Independent prepared objects may execute concurrently and
@@ -880,7 +878,7 @@ installed static consumer and all CPU/Metal AQ targets. The separately built
 pinned libjxl decoder also accepts all 21 codestream-conformance fixtures and
 the checked workflow sample.
 
-### 7. Materialize final output and connect the complete pipeline
+### 7. Materialize final output and connect the complete pipeline — complete (2026-08-27)
 
 - Define and atomically materialize final reconstructed linear RGB and the
   existing `VarDctEncoderFrame` separately from scratch layout.
@@ -895,6 +893,70 @@ Exit criterion: failures never expose partially committed CPU output, resource
 lifetimes are explicit, the steady-state path has no per-evaluation device
 allocation, and the complete GPU pipeline produces the existing reconstructed
 image and encoder-frame outputs atomically.
+
+`PreparedAqEvaluation::Evaluate` now accepts an optional final-output
+descriptor. The shared policy marks its last evaluation explicitly, so bounded
+calls retain the Milestone 6 readback while full calls use that same submission
+and wait to download reconstructed linear RGB, quantized AC, and authoritative
+quantized DC. Invalid final descriptors submit nothing; failures after an
+accepted submission leave bounded and final output untouched and invalidate
+the prepared state.
+
+The reconstruction kernel retains quantized DC before replacing its working DC
+planes with decoder-equivalent values. An internal codec assembler combines
+those integers with the final host-owned raw field, quantizer, CfL, EPF
+sharpness, strategy grid, and batch-major quantized AC views. It packs the
+existing row-major fixed-capacity AC groups, reconstructs the DC cache from the
+authoritative integers, zeros unused group tails, and validates the candidate
+`VarDctEncoderFrame`; no source transform or reconstruction is repeated on the
+CPU.
+
+`RunGpuAdaptiveQuantization` atomically returns the existing full AQ output,
+while `RunGpuAdaptiveQuantizationPolicy` remains the bounded interface.
+Quantization orchestration now injects both AC-search and AQ providers:
+`RunCpuQuantizationPipeline` is unchanged, and `RunGpuQuantizationPipeline`
+preflights prepared-AQ support before using GPU search and GPU AQ without a CPU
+fallback. The public codestream workflow remains CPU-selected pending the
+Milestone 8 rollout decision.
+
+Full-AQ comparisons cover zero, one, and two updates with default and
+non-default profiles. The existing bounded maxima remain `7.62939e-5` for
+score, `4.65393e-4` for block distance, and `1.02818e-5` for the float field;
+the maximum final reconstructed-RGB error is `5.36442e-6`. Raw quant, quantizer,
+CfL, EPF sharpness, quantized and decoder-equivalent DC, grouped AC storage,
+complete frame state, and supported codestream bytes are exact.
+
+The default two-update complete pipeline observes maxima of `1.14441e-5` for
+the quant field, `7.39694e-5` for block distance, `1.03533e-4` for score, and
+`6.3777e-6` for reconstructed RGB, with exact frame and codestream output. The
+separate 257x17 AC-group-edge corpus keeps its deliberately float-sensitive
+block/RGB results under a fixed `2.5e-2` boundary (`2.21866e-2` and
+`2.01165e-2` observed) while retaining exact frame and codestream decisions.
+
+Final materialization adds no submission and no device allocation: preparation
+still adds three allocations and one reference-cache submission, and each
+policy evaluation adds exactly one submission. The non-default prepared memory
+figures are:
+
+| Source -> coding geometry | Persistent | Staging | Peak scratch |
+| --- | ---: | ---: | ---: |
+| 89x57 -> 96x64 | 319232 | 1306804 | 1048592 |
+| 128x96 -> 128x96 | 640512 | 2945588 | 2330752 |
+| 510x532 -> 512x536 | 13215232 | 64976692 | 51408544 |
+| 854x480 -> 856x480 | 19849728 | 97888436 | 77391888 |
+| 1280x720 | 44514816 | 219901748 | 173821312 |
+| 1920x1080 | 100099072 | 494763060 | 391082528 |
+
+Missing capability, invalid/strided final output, atomic descriptor rejection,
+upload/submission/completion/numeric/readback failure, reuse and invalidation,
+outstanding destruction, poisoned padding, independent prepared states, and
+complete-pipeline atomic statistics are covered. This milestone makes no
+performance, crossover, automatic-selection, or rollout claim.
+
+Fresh AppleClang 17 Release matrices pass `55/55` tests with the pinned
+Butteraugli reference enabled and `49/49` with it disabled. Both include the
+installed static consumer, and the separately built pinned libjxl decoder
+accepts all 21 codestream-conformance fixtures and the checked workflow sample.
 
 ### 8. Establish the end-to-end performance and rollout gate
 
@@ -982,14 +1044,12 @@ encoder decisions.
 
 ## Implementation order
 
-Milestones 0 through 6 are complete. The validated prepared operation now
-carries resident reconstructed opsin through filtering, cropped linear RGB,
-prepared Butteraugli comparison, and strategy-aware block reduction in one
-submission, then runs the shared iterative CPU policy while deliberately
-stopping at bounded policy output. Milestone 7 materializes the existing
-reconstructed-image and encoder-frame outputs and connects the full pipeline
-without a redundant CPU evaluation. Milestone 8 qualifies that complete path
-for rollout.
+Milestones 0 through 7 are complete. The prepared operation carries resident
+reconstructed opsin through filtering, cropped linear RGB, prepared
+Butteraugli comparison, and strategy-aware block reduction in one submission;
+the shared CPU policy requests final RGB and frame materialization only from
+its last evaluation. The complete GPU quantization pipeline is callable without
+a redundant CPU evaluation. Milestone 8 qualifies that path for rollout.
 
 The pre-Milestone-6 2026-08-27 codestream integration made the encoder frame
 profile the single CPU/GPU option contract and added modular DC quantization

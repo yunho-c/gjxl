@@ -19,6 +19,15 @@
 
 namespace gjxl {
 
+class VarDctEncoderFrame;
+
+namespace vardct_frame_internal {
+struct QuantizedFrameAssemblyInput;
+[[nodiscard]] Status AssembleVarDctEncoderFrame(
+  QuantizedFrameAssemblyInput,
+  VarDctEncoderFrame*);
+}  // namespace vardct_frame_internal
+
 inline constexpr size_t kVarDctAcGroupDimension = 256;
 inline constexpr size_t kVarDctAcGroupBlockDimension =
   kVarDctAcGroupDimension / kJxlBlockDimension;
@@ -108,6 +117,10 @@ private:
   friend Status ReconstructQuantizedCoefficients(
     const VarDctEncoderFrame&,
     Image3FView);
+
+  friend Status vardct_frame_internal::AssembleVarDctEncoderFrame(
+    vardct_frame_internal::QuantizedFrameAssemblyInput,
+    VarDctEncoderFrame*);
 
   [[nodiscard]] size_t AcGroupChannelOffset(
     size_t group_index,

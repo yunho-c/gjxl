@@ -112,12 +112,13 @@ kernel void gjxl_aq_reset_reconstruction(
   device int* quantized_coefficients [[buffer(2)]],
   device float* reconstruction_coefficients [[buffer(3)]],
   device float* dc [[buffer(4)]],
-  device float* reconstructed_x [[buffer(5)]],
-  device float* reconstructed_y [[buffer(6)]],
-  device float* reconstructed_b [[buffer(7)]],
-  device atomic_uint* error [[buffer(8)]],
-  device float* block_distance [[buffer(9)]],
-  constant AqResetParams& params [[buffer(10)]],
+  device int* quantized_dc [[buffer(5)]],
+  device float* reconstructed_x [[buffer(6)]],
+  device float* reconstructed_y [[buffer(7)]],
+  device float* reconstructed_b [[buffer(8)]],
+  device atomic_uint* error [[buffer(9)]],
+  device float* block_distance [[buffer(10)]],
+  constant AqResetParams& params [[buffer(11)]],
   uint index [[thread_position_in_grid]]) {
 
   constexpr uint kPoison = 0x7fc12345u;
@@ -133,6 +134,7 @@ kernel void gjxl_aq_reset_reconstruction(
   }
   if (index < params.dc_value_count) {
     dc[index] = as_type<float>(kPoison);
+    quantized_dc[index] = int(0x81234567u);
   }
   if (index < params.pixel_value_count) {
     reconstructed_x[index] = as_type<float>(kPoison);
@@ -181,8 +183,9 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   device int* quantized_coefficients [[buffer(6)]],
   device float* reconstruction_coefficients [[buffer(7)]],
   device float* dc [[buffer(8)]],
-  device atomic_uint* error [[buffer(9)]],
-  constant AqReconstructionParams& params [[buffer(10)]],
+  device int* quantized_dc [[buffer(9)]],
+  device atomic_uint* error [[buffer(10)]],
+  constant AqReconstructionParams& params [[buffer(11)]],
   uint anchor_index [[threadgroup_position_in_grid]],
   uint thread_index [[thread_index_in_threadgroup]]) {
 
@@ -254,6 +257,9 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
     const int quantized_b = aq_round_dc(
       (dc[2u * block_count + block_index] - reconstructed_y) * inverse_b,
       error);
+    quantized_dc[block_index] = quantized_x;
+    quantized_dc[block_count + block_index] = quantized_y;
+    quantized_dc[2u * block_count + block_index] = quantized_b;
     dc[block_index] = float(quantized_x) / inverse_x;
     dc[block_count + block_index] = reconstructed_y;
     dc[2u * block_count + block_index] =

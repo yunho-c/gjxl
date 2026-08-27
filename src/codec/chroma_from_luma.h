@@ -16,6 +16,15 @@
 
 namespace gjxl {
 
+class ColorCorrelationMap;
+
+namespace chroma_from_luma_internal {
+[[nodiscard]] Status CreateColorCorrelationMap(
+  ConstPlaneI8View,
+  ConstPlaneI8View,
+  ColorCorrelationMap*);
+}  // namespace chroma_from_luma_internal
+
 inline constexpr size_t kColorTileDimension = 64;
 inline constexpr int32_t kDefaultColorFactor = 84;
 
@@ -50,6 +59,10 @@ private:
     ConstPlaneI32View,
     const Quantizer&,
     bool,
+    ColorCorrelationMap*);
+  friend Status chroma_from_luma_internal::CreateColorCorrelationMap(
+    ConstPlaneI8View,
+    ConstPlaneI8View,
     ColorCorrelationMap*);
 
   Extent2D tile_extent_;

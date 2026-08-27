@@ -417,27 +417,37 @@ just ac-strategy-search-benchmark
 
 ### Full pipeline integration
 
-`RunGpuQuantizationPipeline` injects staged GPU candidate evaluation into the
-common quantization pipeline without adding a GPU dependency to `gjxl_codec`.
-Initial AQ, Gaborish, first-pass CfL, search decisions, iterative AQ, coefficient
-coding, reconstruction, and final `VarDctEncoderFrame` assembly remain on the
-CPU. Only the candidate-cost portion of AC-strategy search executes on Metal.
-Backends without `GpuAcStrategyEvaluation` return `Unavailable` before any
-allocation or submission owned by the search operation.
+`RunGpuQuantizationPipeline` injects GPU AC candidate evaluation and prepared
+GPU adaptive quantization into the common codec orchestration without adding a
+GPU dependency to `gjxl_codec`. Initial quantization, Gaborish preprocessing,
+first-pass CfL, search decisions, and the deterministic AQ update policy remain
+on the CPU. Each AQ evaluation performs coefficient coding, reconstruction,
+filters, color conversion, Butteraugli, and block reduction in one Metal
+submission. The last evaluation additionally downloads final RGB and the
+already quantized coefficient payload; it does not repeat the evaluation on
+the CPU.
+
+The optional prepared-AQ capability is preflighted before pipeline work. A
+backend without it returns `Unavailable` without changing output or search
+statistics, and there is no silent CPU fallback. The bounded
+`RunGpuAdaptiveQuantizationPolicy` API remains available when callers need only
+the final field, block map, and score history; `RunGpuAdaptiveQuantization`
+materializes the existing full adaptive-quantization output atomically.
 
 The Metal backend uses the same transform-dispatch helper for public DCT
 batches and candidate evaluation. Scalar, SIMD-group, and factored radix-2
 implementations therefore share packing, partial-threadgroup guards, and buffer
 bindings. Candidate and full-search tests cover all three implementations.
 
-An end-to-end fixture compares the CPU and GPU-search paths exactly through the
-final frame, including strategy cells, raw quantization, CfL, EPF, quantized
-and decoder-equivalent DC, fixed AC rows, reconstructed pixels, distance map,
-and score history. Serializing both frames produces identical bytes, and
-repeated serialization of the GPU-search frame is byte-deterministic. Its
-257x17 source pads to 33x3 blocks, crossing the 256-pixel AC-group boundary and
-verifying the 1x3-block edge group. Broader quantization-boundary sensitivity
-still follows the documented candidate-cost accuracy contract.
+The default two-update complete-pipeline fixture keeps quant field, block map,
+score history, and reconstructed RGB below the fixed `2e-3` accumulated gate;
+its observed maxima are `1.14441e-5`, `7.39694e-5`, `1.03533e-4`, and
+`6.3777e-6`, respectively. Raw quantization, all frame state, and serialized
+codestream bytes are exact. A separate 257x17 source crosses the 256-pixel
+AC-group boundary and verifies the 1x3-block edge group with zero updates. Its
+float-DCT-sensitive maximum block/RGB deviations are `2.21866e-2` and
+`2.01165e-2`, below a separately fixed `2.5e-2` narrow-geometry boundary; its
+frame and codestream remain exact.
 
 Relevant implementations:
 
@@ -472,10 +482,12 @@ remains authoritative for CPU algorithm order, supported strategies, known
 codec deviations, and reference outputs.
 
 Initial quantization and AC-strategy search are siblings of iterative AQ and
-remain separate GPU efforts. Within iterative AQ, quant-field convergence,
-clamping, and rounding-progress decisions initially stay on the CPU. The Metal
-path accelerates the complete encode/reconstruct/measure evaluation and reads
-back only the block-distance map and score required by that unchanged policy.
+remain separate GPU operations. Within iterative AQ, quant-field convergence,
+clamping, and rounding-progress decisions stay on the CPU. Intermediate Metal
+evaluations read back only the block-distance map and score required by that
+unchanged policy. The last evaluation also reads back reconstructed RGB,
+quantized AC, and quantized DC to materialize the existing encoder frame
+without a redundant CPU evaluation.
 
 Every GPU stage must be compared with the CPU reference and, where applicable,
 the pinned libjxl oracle. Direct intermediate comparisons, final AQ decisions,

@@ -3,6 +3,10 @@
 
 #include "gpu/ops/quantization_pipeline.h"
 
+#include "codec/quantization_pipeline_internal.h"
+#include "gpu/ops/adaptive_quantization.h"
+#include "gpu/ops/aq_evaluation.h"
+
 namespace gjxl {
 namespace {
 
@@ -39,6 +43,29 @@ private:
   AcStrategyGpuSearchStats stats_;
 };
 
+class GpuAdaptiveQuantizationProvider final
+    : public quantization_pipeline_internal::AdaptiveQuantizationProvider {
+public:
+  explicit GpuAdaptiveQuantizationProvider(GpuBackend& gpu) : gpu_(gpu) {}
+
+  Status Find(
+    ConstImage3FView original_linear_rgb,
+    ConstImage3FView opsin,
+    const AcStrategyGrid& strategies,
+    ConstPlaneF32View initial_quant_field,
+    ConstPlaneU8View epf_sharpness,
+    AdaptiveQuantizationOptions options,
+    AdaptiveQuantizationOutput output) override {
+
+    return RunGpuAdaptiveQuantization(
+      gpu_, original_linear_rgb, opsin, strategies, initial_quant_field,
+      epf_sharpness, options, output);
+  }
+
+private:
+  GpuBackend& gpu_;
+};
+
 }  // namespace
 
 Status RunGpuQuantizationPipeline(
@@ -49,13 +76,16 @@ Status RunGpuQuantizationPipeline(
   CpuQuantizationPipelineOutput output,
   AcStrategyGpuSearchStats* stats) {
 
+  if (QueryGpuAqEvaluation(gpu) == nullptr) {
+    return Status::Unavailable(
+      "GPU quantization pipeline requires prepared AQ support");
+  }
   GpuAcStrategySearchProvider strategy_search(gpu);
-  const Status status = RunQuantizationPipeline(
-    original_linear_rgb,
-    opsin,
-    strategy_search,
-    options,
-    output);
+  GpuAdaptiveQuantizationProvider adaptive_quantization(gpu);
+  const Status status =
+    quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
+      original_linear_rgb, opsin, strategy_search, adaptive_quantization,
+      options, output);
   if (!status.ok()) {
     return status;
   }

@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "codec/color_transform.h"
@@ -27,9 +29,6 @@ namespace {
 
 constexpr gjxl::Extent2D kOriginalExtent{257, 17};
 constexpr gjxl::Extent2D kPaddedExtent{264, 24};
-constexpr gjxl::Extent2D kBlockExtent{33, 3};
-constexpr size_t kPaddedPixelCount = kPaddedExtent.width * kPaddedExtent.height;
-constexpr size_t kBlockCount = kBlockExtent.width * kBlockExtent.height;
 
 struct ImageStorage {
   explicit ImageStorage(gjxl::Extent2D extent, float fill = -777.0f)
@@ -85,12 +84,25 @@ void FillImages(ImageStorage *original, ImageStorage *padded) {
 }
 
 struct PipelineStorage {
-  std::vector<float> initial_quant = std::vector<float>(kBlockCount);
-  std::vector<float> strategy_mask = std::vector<float>(kBlockCount);
-  std::vector<float> pixel_mask = std::vector<float>(kPaddedPixelCount);
-  std::vector<float> final_quant = std::vector<float>(kBlockCount);
-  std::vector<float> block_distance = std::vector<float>(kBlockCount);
-  ImageStorage reconstructed{kOriginalExtent};
+  PipelineStorage(gjxl::Extent2D original_extent,
+                  gjxl::Extent2D padded_extent)
+      : block_extent{padded_extent.width / 8, padded_extent.height / 8},
+        padded_extent(padded_extent),
+        initial_quant(block_extent.width * block_extent.height),
+        strategy_mask(block_extent.width * block_extent.height),
+        pixel_mask(padded_extent.width * padded_extent.height),
+        final_quant(block_extent.width * block_extent.height),
+        block_distance(block_extent.width * block_extent.height),
+        reconstructed(original_extent) {}
+
+  gjxl::Extent2D block_extent;
+  gjxl::Extent2D padded_extent;
+  std::vector<float> initial_quant;
+  std::vector<float> strategy_mask;
+  std::vector<float> pixel_mask;
+  std::vector<float> final_quant;
+  std::vector<float> block_distance;
+  ImageStorage reconstructed;
   gjxl::VarDctEncoderFrame frame;
   std::vector<double> scores;
 
@@ -98,19 +110,19 @@ struct PipelineStorage {
     return {
         .initial_quantization =
             {
-                .quant_field = {initial_quant.data(), kBlockExtent,
-                                kBlockExtent.width},
-                .strategy_mask = {strategy_mask.data(), kBlockExtent,
-                                  kBlockExtent.width},
-                .pixel_mask = {pixel_mask.data(), kPaddedExtent,
-                               kPaddedExtent.width},
+                .quant_field = {initial_quant.data(), block_extent,
+                                block_extent.width},
+                .strategy_mask = {strategy_mask.data(), block_extent,
+                                  block_extent.width},
+                .pixel_mask = {pixel_mask.data(), padded_extent,
+                               padded_extent.width},
             },
         .adaptive_quantization =
             {
-                .quant_field = {final_quant.data(), kBlockExtent,
-                                kBlockExtent.width},
-                .block_distance_map = {block_distance.data(), kBlockExtent,
-                                       kBlockExtent.width},
+                .quant_field = {final_quant.data(), block_extent,
+                                block_extent.width},
+                .block_distance_map = {block_distance.data(), block_extent,
+                                       block_extent.width},
                 .reconstructed_linear_rgb = reconstructed.View(),
                 .frame = &frame,
                 .score_history = &scores,
@@ -217,25 +229,78 @@ bool FramesEqual(const gjxl::VarDctEncoderFrame &left,
   return true;
 }
 
-gjxl::MetalBackendOptions FactoredOptions() {
-  constexpr auto implementation = gjxl::MetalDctImplementation::kFactoredRadix2;
-  return {
-      .forward_dct8 = implementation,
-      .inverse_dct8 = implementation,
-      .forward_dct16x16 = implementation,
-      .inverse_dct16x16 = implementation,
-      .forward_dct32x32 = implementation,
-      .inverse_dct32x32 = implementation,
-      .forward_dct16x8 = implementation,
-      .inverse_dct16x8 = implementation,
-      .forward_dct8x16 = implementation,
-      .inverse_dct8x16 = implementation,
-      .forward_dct32x16 = implementation,
-      .inverse_dct32x16 = implementation,
-      .forward_dct16x32 = implementation,
-      .inverse_dct16x32 = implementation,
-  };
+double MaximumError(const std::vector<float>& left,
+                    const std::vector<float>& right) {
+  double maximum = 0.0;
+  for (size_t index = 0; index < left.size(); ++index) {
+    maximum = std::max(
+      maximum,
+      std::abs(static_cast<double>(left[index]) - right[index]));
+  }
+  return maximum;
 }
+
+double MaximumScoreError(const std::vector<double>& left,
+                         const std::vector<double>& right) {
+  if (left.size() != right.size()) {
+    return std::numeric_limits<double>::infinity();
+  }
+  double maximum = 0.0;
+  for (size_t index = 0; index < left.size(); ++index) {
+    maximum = std::max(maximum, std::abs(left[index] - right[index]));
+  }
+  return maximum;
+}
+
+double MaximumImageError(const ImageStorage& left,
+                         const ImageStorage& right) {
+  double maximum = 0.0;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < left.extent.height; ++y) {
+      for (size_t x = 0; x < left.extent.width; ++x) {
+        maximum = std::max(
+          maximum,
+          std::abs(static_cast<double>(
+            left.plane[channel][y * left.stride + x]) -
+            right.plane[channel][y * right.stride + x]));
+      }
+    }
+  }
+  return maximum;
+}
+
+class BackendWithoutAq final : public gjxl::GpuBackend {
+public:
+  gjxl::BackendKind kind() const noexcept override {
+    return gjxl::BackendKind::kMetal;
+  }
+  std::string_view name() const noexcept override { return "no AQ"; }
+  gjxl::Status Allocate(
+      size_t, std::unique_ptr<gjxl::DeviceBuffer>* out) override {
+    if (out != nullptr) out->reset();
+    return gjxl::Status::Unavailable("not implemented");
+  }
+  gjxl::Status CopyHostToDevice(
+      gjxl::DeviceBuffer&, const void*, size_t, size_t) override {
+    return gjxl::Status::Unavailable("not implemented");
+  }
+  gjxl::Status CopyDeviceToHost(
+      const gjxl::DeviceBuffer&, void*, size_t, size_t) override {
+    return gjxl::Status::Unavailable("not implemented");
+  }
+  gjxl::Status ForwardTransform(
+      const gjxl::TransformBatch&,
+      std::unique_ptr<gjxl::GpuSubmission>* submission) override {
+    if (submission != nullptr) submission->reset();
+    return gjxl::Status::Unavailable("not implemented");
+  }
+  gjxl::Status InverseTransform(
+      const gjxl::TransformBatch&,
+      std::unique_ptr<gjxl::GpuSubmission>* submission) override {
+    if (submission != nullptr) submission->reset();
+    return gjxl::Status::Unavailable("not implemented");
+  }
+};
 
 bool CheckGpuPipelineParity() {
   ImageStorage original(kOriginalExtent);
@@ -250,13 +315,13 @@ bool CheckGpuPipelineParity() {
   gjxl::CpuQuantizationPipelineOptions options;
   options.butteraugli_target = 1.2f;
   options.adaptive_quantization.iterations = 0;
-  PipelineStorage cpu;
+  PipelineStorage cpu(kOriginalExtent, kPaddedExtent);
   const gjxl::Status cpu_status = gjxl::RunCpuQuantizationPipeline(
       original.ConstView(), opsin.ConstView(), options, cpu.Output());
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
   const gjxl::Status create_status =
-      gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, FactoredOptions(), &gpu);
+      gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu);
   if (!cpu_status.ok() || !create_status.ok()) {
     std::cerr << "Unable to initialize pipeline parity test: CPU="
               << cpu_status.message() << ", GPU=" << create_status.message()
@@ -264,22 +329,36 @@ bool CheckGpuPipelineParity() {
     return false;
   }
 
-  PipelineStorage accelerated;
+  PipelineStorage accelerated(kOriginalExtent, kPaddedExtent);
   gjxl::AcStrategyGpuSearchStats stats;
   const gjxl::Status gpu_status = gjxl::RunGpuQuantizationPipeline(
       *gpu, original.ConstView(), opsin.ConstView(), options,
       accelerated.Output(), &stats);
+  constexpr double kTolerance = 2.0e-3;
+  constexpr double kNarrowAccumulatedTolerance = 2.5e-2;
+  const double quant_error = MaximumError(
+    cpu.final_quant, accelerated.final_quant);
+  const double block_error = MaximumError(
+    cpu.block_distance, accelerated.block_distance);
+  const double score_error = MaximumScoreError(cpu.scores, accelerated.scores);
+  const double image_error = MaximumImageError(
+    cpu.reconstructed, accelerated.reconstructed);
+  const bool frames_equal = FramesEqual(cpu.frame, accelerated.frame);
   if (!gpu_status.ok() || stats.total_candidate_count == 0 ||
       cpu.initial_quant != accelerated.initial_quant ||
       cpu.strategy_mask != accelerated.strategy_mask ||
       cpu.pixel_mask != accelerated.pixel_mask ||
-      cpu.final_quant != accelerated.final_quant ||
-      cpu.block_distance != accelerated.block_distance ||
-      cpu.reconstructed.plane != accelerated.reconstructed.plane ||
-      cpu.scores != accelerated.scores ||
-      !FramesEqual(cpu.frame, accelerated.frame)) {
+      quant_error > kTolerance ||
+      block_error > kNarrowAccumulatedTolerance ||
+      score_error > kTolerance ||
+      image_error > kNarrowAccumulatedTolerance ||
+      !frames_equal) {
     std::cerr << "GPU-search pipeline differs from CPU: "
-              << gpu_status.message() << '\n';
+              << gpu_status.message() << ", quant=" << quant_error
+              << ", block=" << block_error << ", score=" << score_error
+              << ", image=" << image_error
+              << ", frame=" << (frames_equal ? "exact" : "different")
+              << '\n';
     return false;
   }
 
@@ -306,15 +385,123 @@ bool CheckGpuPipelineParity() {
     std::cerr << "CPU/GPU-search codestream bytes are not deterministic\n";
     return false;
   }
+  std::cout << "Complete GPU pipeline errors: quant=" << quant_error
+            << " block=" << block_error << " score=" << score_error
+            << " image=" << image_error
+            << "; frame and codestream exact\n";
+  return true;
+}
+
+bool CheckDefaultUpdatePipelineParity() {
+  constexpr gjxl::Extent2D kExtent{96, 64};
+  ImageStorage original(kExtent);
+  ImageStorage padded_linear(kExtent);
+  ImageStorage opsin(kExtent);
+  for (size_t y = 0; y < kExtent.height; ++y) {
+    for (size_t x = 0; x < kExtent.width; ++x) {
+      const float fx = static_cast<float>(x);
+      const float fy = static_cast<float>(y);
+      const std::array<float, 3> rgb = {
+        0.12f + 0.006f * fx + 0.004f * fy,
+        0.18f + 0.003f * fx + 0.006f * fy,
+        0.08f + 0.005f * fx + 0.004f * fy,
+      };
+      for (size_t channel = 0; channel < 3; ++channel) {
+        original.plane[channel][y * original.stride + x] = rgb[channel];
+        padded_linear.plane[channel][y * padded_linear.stride + x] =
+          rgb[channel];
+      }
+    }
+  }
+  if (!gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, opsin.View()).ok()) {
+    return false;
+  }
+
+  gjxl::CpuQuantizationPipelineOptions options;
+  options.butteraugli_target = 1.0f;
+  PipelineStorage cpu(kExtent, kExtent);
+  if (!gjxl::RunCpuQuantizationPipeline(
+        original.ConstView(), opsin.ConstView(), options, cpu.Output()).ok()) {
+    return false;
+  }
+
+  BackendWithoutAq unavailable;
+  PipelineStorage unavailable_output(kExtent, kExtent);
+  const std::vector<float> unavailable_initial =
+    unavailable_output.initial_quant;
+  gjxl::AcStrategyGpuSearchStats unavailable_stats;
+  unavailable_stats.total_candidate_count = 987654;
+  const gjxl::Status unavailable_status = gjxl::RunGpuQuantizationPipeline(
+    unavailable, original.ConstView(), opsin.ConstView(), options,
+    unavailable_output.Output(), &unavailable_stats);
+  if (unavailable_status.code() != gjxl::StatusCode::kUnavailable ||
+      unavailable_output.initial_quant != unavailable_initial ||
+      unavailable_output.frame.valid() ||
+      !unavailable_output.scores.empty() ||
+      unavailable_stats.total_candidate_count != 987654) {
+    std::cerr << "Missing prepared AQ capability changed pipeline output\n";
+    return false;
+  }
+
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+    return false;
+  }
+  PipelineStorage accelerated(kExtent, kExtent);
+  gjxl::AcStrategyGpuSearchStats stats;
+  const gjxl::GpuBackendStats before = gpu->stats();
+  const gjxl::Status status = gjxl::RunGpuQuantizationPipeline(
+    *gpu, original.ConstView(), opsin.ConstView(), options,
+    accelerated.Output(), &stats);
+  const gjxl::GpuBackendStats after = gpu->stats();
+  constexpr double kTolerance = 2.0e-3;
+  const double quant_error = MaximumError(
+    cpu.final_quant, accelerated.final_quant);
+  const double block_error = MaximumError(
+    cpu.block_distance, accelerated.block_distance);
+  const double score_error = MaximumScoreError(cpu.scores, accelerated.scores);
+  const double image_error = MaximumImageError(
+    cpu.reconstructed, accelerated.reconstructed);
+  if (!status.ok() || stats.total_candidate_count == 0 ||
+      after.committed_submissions !=
+        before.committed_submissions + options.adaptive_quantization.iterations +
+          3 ||
+      cpu.initial_quant != accelerated.initial_quant ||
+      cpu.strategy_mask != accelerated.strategy_mask ||
+      cpu.pixel_mask != accelerated.pixel_mask ||
+      quant_error > kTolerance || block_error > kTolerance ||
+      score_error > kTolerance || image_error > kTolerance ||
+      !FramesEqual(cpu.frame, accelerated.frame)) {
+    std::cerr << "Default-update GPU pipeline differs: " << status.message()
+              << ", quant=" << quant_error << ", block=" << block_error
+              << ", score=" << score_error << ", image=" << image_error
+              << '\n';
+    return false;
+  }
+
+  std::vector<uint8_t> cpu_codestream;
+  std::vector<uint8_t> gpu_codestream;
+  if (!gjxl::EncodeVarDctCodestream(cpu.frame, &cpu_codestream).ok() ||
+      !gjxl::EncodeVarDctCodestream(
+        accelerated.frame, &gpu_codestream).ok() ||
+      cpu_codestream != gpu_codestream) {
+    std::cerr << "Default-update GPU pipeline codestream differs\n";
+    return false;
+  }
+  std::cout << "Default-update GPU pipeline errors: quant=" << quant_error
+            << " block=" << block_error << " score=" << score_error
+            << " image=" << image_error
+            << "; frame and codestream exact\n";
   return true;
 }
 
 } // namespace
 
 int main() {
-  if (!CheckGpuPipelineParity()) {
+  if (!CheckGpuPipelineParity() || !CheckDefaultUpdatePipelineParity()) {
     return EXIT_FAILURE;
   }
-  std::cout << "GPU-search quantization pipeline matches CPU.\n";
+  std::cout << "Complete GPU quantization pipeline matches CPU.\n";
   return EXIT_SUCCESS;
 }

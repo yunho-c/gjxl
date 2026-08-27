@@ -31,4 +31,19 @@ struct GpuAdaptiveQuantizationPolicyOutput {
   AdaptiveQuantizationOptions options,
   GpuAdaptiveQuantizationPolicyOutput output);
 
+/// Runs GPU adaptive quantization and materializes the final resident
+/// reconstruction and encoder frame from the last evaluation.
+///
+/// Prepared AQ support is required; this operation never silently falls back
+/// to CPU evaluation. All caller-visible outputs are committed atomically.
+[[nodiscard]] Status RunGpuAdaptiveQuantization(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationOutput output);
+
 }  // namespace gjxl

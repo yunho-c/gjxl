@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "codec/butteraugli.h"
+#include "codec/vardct_frame.h"
 #include "core/ac_strategy.h"
 #include "core/status.h"
 #include "gpu/backend.h"
@@ -31,6 +32,15 @@ constexpr float kPoison = std::bit_cast<float>(kPoisonBits);
 constexpr float kReductionTolerance = 2.0e-6f;
 float g_max_reduction_error = 0.0f;
 gjxl::AqEvaluationMemoryStats g_memory_stats;
+
+struct MemoryObservation {
+  std::string_view label;
+  gjxl::Extent2D source;
+  gjxl::Extent2D coding;
+  gjxl::AqEvaluationMemoryStats stats;
+};
+
+std::vector<MemoryObservation> g_memory_observations;
 
 bool CheckStatus(gjxl::Status status, std::string_view operation) {
   if (status.ok()) return true;
@@ -61,6 +71,14 @@ struct HostImage {
   }
 
   [[nodiscard]] gjxl::ConstImage3FView View() const {
+    return {{{
+      {plane[0].data(), extent, stride},
+      {plane[1].data(), extent, stride},
+      {plane[2].data(), extent, stride},
+    }}};
+  }
+
+  [[nodiscard]] gjxl::Image3FView MutableView() {
     return {{{
       {plane[0].data(), extent, stride},
       {plane[1].data(), extent, stride},
@@ -227,12 +245,15 @@ struct EvaluationOutputStorage {
 bool Prepare(gjxl::GpuBackend& gpu, const HostImage& original,
              const HostImage& coding, const gjxl::AcStrategyGrid& strategies,
              std::unique_ptr<gjxl::PreparedAqEvaluation>* prepared) {
+  const gjxl::Extent2D blocks = strategies.extent();
+  const std::vector<uint8_t> sharpness(blocks.width * blocks.height, 4);
   return CheckStatus(gjxl::PrepareAqEvaluation(
     gpu,
     {
       .original_linear_rgb = original.View(),
       .coding_opsin = coding.View(),
       .strategies = &strategies,
+      .epf_sharpness = {sharpness.data(), blocks, blocks.width},
       .options = MakeOptions(),
     },
     prepared), "Metal AQ preparation");
@@ -387,6 +408,66 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
     return false;
   }
 
+  EvaluationOutputStorage rejected_final(fixture.strategies.extent());
+  gjxl::VarDctEncoderFrame rejected_frame;
+  gjxl::AqEvaluationOutput::Final invalid_final{
+    .reconstructed_linear_rgb = {},
+    .frame = &rejected_frame,
+  };
+  gjxl::AqEvaluationOutput invalid_final_output = rejected_final.View();
+  invalid_final_output.final = &invalid_final;
+  const uint64_t before_rejected_final =
+    gpu.stats().committed_submissions;
+  if (!ExpectCode(
+        prepared->Evaluate(fixture.input.View(), invalid_final_output),
+        gjxl::StatusCode::kInvalidArgument,
+        "invalid final AQ output") ||
+      !rejected_final.Poisoned() || rejected_frame.valid() ||
+      gpu.stats().committed_submissions != before_rejected_final) {
+    return false;
+  }
+
+  EvaluationOutputStorage final_bounded(fixture.strategies.extent());
+  HostImage final_rgb(fixture.original.extent, fixture.original.extent.width + 5);
+  gjxl::VarDctEncoderFrame final_frame;
+  gjxl::AqEvaluationOutput::Final final_output{
+    .reconstructed_linear_rgb = final_rgb.MutableView(),
+    .frame = &final_frame,
+  };
+  gjxl::AqEvaluationOutput complete_output = final_bounded.View();
+  complete_output.final = &final_output;
+  const gjxl::GpuBackendStats before_final = gpu.stats();
+  if (!CheckStatus(
+        prepared->Evaluate(fixture.input.View(), complete_output),
+        "production final AQ evaluation") ||
+      !final_bounded.ValidAndPadded() || !final_frame.valid()) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_final = gpu.stats();
+  if (after_final.successful_allocations !=
+        before_final.successful_allocations ||
+      after_final.committed_submissions !=
+        before_final.committed_submissions + 1) {
+    std::cerr << "Final AQ materialization added an allocation or submission\n";
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < final_rgb.extent.height; ++y) {
+      for (size_t x = 0; x < final_rgb.extent.width; ++x) {
+        if (!std::isfinite(final_rgb.plane[channel][y * final_rgb.stride + x])) {
+          std::cerr << "Final AQ RGB contains a non-finite pixel\n";
+          return false;
+        }
+      }
+      for (size_t x = final_rgb.extent.width; x < final_rgb.stride; ++x) {
+        if (final_rgb.plane[channel][y * final_rgb.stride + x] != -777.0f) {
+          std::cerr << "Final AQ RGB changed host padding\n";
+          return false;
+        }
+      }
+    }
+  }
+
   gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting staged;
   if (!CheckStatus(gjxl::metal_internal::RunMetalAqButteraugliForTesting(
         *prepared, fixture.input.View(), &staged),
@@ -431,6 +512,55 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
   return CheckStatus(prepared->Evaluate(fixture.input.View(), reused.View()),
                      "reuse after rejected production input") &&
          reused.ValidAndPadded();
+}
+
+bool CheckMemoryScaling(gjxl::GpuBackend& gpu) {
+  constexpr std::array<MemoryObservation, 5> cases = {{
+    {"128x96", {128, 96}, {128, 96}, {}},
+    {"Flower", {510, 532}, {512, 536}, {}},
+    {"480p", {854, 480}, {856, 480}, {}},
+    {"720p", {1280, 720}, {1280, 720}, {}},
+    {"1080p", {1920, 1080}, {1920, 1080}, {}},
+  }};
+  size_t previous_persistent = 0;
+  size_t previous_staging = 0;
+  size_t previous_peak = 0;
+  for (const MemoryObservation& test_case : cases) {
+    HostImage original(
+      test_case.source, test_case.source.width, 0.0f);
+    HostImage coding(
+      test_case.coding, test_case.coding.width, 0.0f);
+    const gjxl::Extent2D blocks{
+      test_case.coding.width / 8, test_case.coding.height / 8};
+    gjxl::AcStrategyGrid strategies;
+    if (!CheckStatus(
+          gjxl::AcStrategyGrid::Create(blocks, &strategies),
+          "memory strategy grid")) {
+      return false;
+    }
+    strategies.fill_dct8();
+    std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+    const gjxl::GpuBackendStats before = gpu.stats();
+    if (!Prepare(gpu, original, coding, strategies, &prepared)) {
+      return false;
+    }
+    const gjxl::GpuBackendStats after = gpu.stats();
+    const gjxl::AqEvaluationMemoryStats stats = prepared->memory_stats();
+    if (after.successful_allocations != before.successful_allocations + 3 ||
+        after.committed_submissions != before.committed_submissions + 1 ||
+        stats.persistent_bytes <= previous_persistent ||
+        stats.staging_bytes <= previous_staging ||
+        stats.peak_scratch_bytes <= previous_peak) {
+      std::cerr << "Prepared AQ memory accounting did not scale monotonically\n";
+      return false;
+    }
+    previous_persistent = stats.persistent_bytes;
+    previous_staging = stats.staging_bytes;
+    previous_peak = stats.peak_scratch_bytes;
+    g_memory_observations.push_back(
+      {test_case.label, test_case.source, test_case.coding, stats});
+  }
+  return true;
 }
 
 bool CheckSplitSeamAndDestruction(gjxl::GpuBackend& gpu) {
@@ -505,6 +635,47 @@ bool CheckFailure(gjxl::StatusCode expected, bool submission,
                   gjxl::StatusCode::kFailedPrecondition,
                   "reuse after production failure") ||
       !output.Poisoned()) {
+    return false;
+  }
+  return true;
+}
+
+bool CheckFinalReadbackFailure() {
+  Fixture fixture;
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!fixture.Initialize() ||
+      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "final failure backend") ||
+      !Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared) ||
+      !CheckStatus(gjxl::metal_internal::FailNextMetalAqReadbackForTesting(
+        *prepared), "final readback injection")) {
+    return false;
+  }
+  EvaluationOutputStorage bounded(fixture.strategies.extent());
+  HostImage reconstructed(
+    fixture.original.extent, fixture.original.extent.width + 3);
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::AqEvaluationOutput::Final final{
+    .reconstructed_linear_rgb = reconstructed.MutableView(),
+    .frame = &frame,
+  };
+  gjxl::AqEvaluationOutput output = bounded.View();
+  output.final = &final;
+  if (!ExpectCode(prepared->Evaluate(fixture.input.View(), output),
+                  gjxl::StatusCode::kDeviceError,
+                  "final readback failure") ||
+      !bounded.Poisoned() || frame.valid() ||
+      !std::ranges::all_of(
+        reconstructed.plane,
+        [](const std::vector<float>& plane) {
+          return std::ranges::all_of(
+            plane, [](float value) { return value == -777.0f; });
+        }) ||
+      !ExpectCode(prepared->Evaluate(fixture.input.View(), output),
+                  gjxl::StatusCode::kFailedPrecondition,
+                  "reuse after final readback failure")) {
     return false;
   }
   return true;
@@ -617,16 +788,20 @@ public:
 
 bool CheckCapabilityBoundary() {
   Fixture fixture;
+  if (!fixture.Initialize()) return false;
   BackendWithoutAq backend;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const std::vector<uint8_t> sharpness(blocks.width * blocks.height, 4);
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
-  return fixture.Initialize() &&
-    gjxl::QueryGpuAqEvaluation(backend) == nullptr &&
+  return gjxl::QueryGpuAqEvaluation(backend) == nullptr &&
     ExpectCode(gjxl::PrepareAqEvaluation(
       backend,
       {
         .original_linear_rgb = fixture.original.View(),
         .coding_opsin = fixture.coding.View(),
         .strategies = &fixture.strategies,
+        .epf_sharpness = {
+          sharpness.data(), blocks, blocks.width},
         .options = MakeOptions(),
       },
       &prepared), gjxl::StatusCode::kUnavailable, "missing AQ capability") &&
@@ -642,20 +817,31 @@ int main() {
       !CheckCapabilityBoundary() ||
       !CheckReductionCorpus(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||
+      !CheckMemoryScaling(*gpu) ||
       !CheckSplitSeamAndDestruction(*gpu) ||
       !CheckUploadOrNumericFailure(true) ||
       !CheckFailure(gjxl::StatusCode::kSubmissionFailed, true, false, false) ||
       !CheckFailure(gjxl::StatusCode::kDeviceError, false, true, false) ||
       !CheckUploadOrNumericFailure(false) ||
       !CheckFailure(gjxl::StatusCode::kDeviceError, false, false, true) ||
+      !CheckFinalReadbackFailure() ||
       !CheckIndependentConcurrency(*gpu)) {
     return EXIT_FAILURE;
   }
-  std::cout << "Metal AQ Milestone 6 evaluation tests passed; max block "
+  std::cout << "Metal AQ Milestone 7 evaluation tests passed; max block "
             << "reduction error " << g_max_reduction_error
             << "; memory persistent " << g_memory_stats.persistent_bytes
             << ", staging " << g_memory_stats.staging_bytes
             << ", peak scratch " << g_memory_stats.peak_scratch_bytes
             << " bytes\n";
+  for (const MemoryObservation& observation : g_memory_observations) {
+    std::cout << "AQ memory " << observation.label << " ("
+              << observation.source.width << 'x' << observation.source.height
+              << " -> " << observation.coding.width << 'x'
+              << observation.coding.height << "): persistent="
+              << observation.stats.persistent_bytes << " staging="
+              << observation.stats.staging_bytes << " peak="
+              << observation.stats.peak_scratch_bytes << " bytes\n";
+  }
   return EXIT_SUCCESS;
 }

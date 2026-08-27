@@ -966,6 +966,7 @@ public:
   Status Evaluate(
     ConstPlaneF32View quant_field,
     float quant_dc,
+    bool,
     aqi::AdaptiveQuantizationEvaluation* evaluation,
     aqi::EvaluationProfile* profile) override {
 
@@ -1157,6 +1158,7 @@ Status RunAdaptiveQuantizationPolicy(
       status = evaluator.Evaluate(
         {quant_field.data(), block_extent, block_extent.width},
         quant_dc,
+        iteration == options.iterations,
         &evaluation,
         profile == nullptr ? nullptr : &evaluation_profile);
       if (!status.ok()) {

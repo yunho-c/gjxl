@@ -18,6 +18,8 @@
 #include "codec/chroma_from_luma.h"
 #include "codec/epf.h"
 #include "codec/quantization.h"
+#include "core/image_buffer.h"
+#include "core/image_ops.h"
 #include "gpu/ops/aq_evaluation.h"
 
 namespace gjxl {
@@ -68,6 +70,27 @@ void CopyContiguousPlane(
   return Status::Ok();
 }
 
+[[nodiscard]] Status ValidateFullOutput(
+  Extent2D source_extent,
+  Extent2D block_extent,
+  const AdaptiveQuantizationOutput& output) {
+
+  if (!ValidHostPlaneLayout(output.quant_field) ||
+      !ValidHostPlaneLayout(output.block_distance_map) ||
+      !output.reconstructed_linear_rgb.valid() ||
+      !std::ranges::all_of(
+        output.reconstructed_linear_rgb.plane,
+        [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }) ||
+      output.frame == nullptr || output.score_history == nullptr ||
+      output.quant_field.extent != block_extent ||
+      output.block_distance_map.extent != block_extent ||
+      output.reconstructed_linear_rgb.extent() != source_extent) {
+    return Status::InvalidArgument(
+      "GPU adaptive-quantization output is invalid");
+  }
+  return Status::Ok();
+}
+
 class PreparedGpuAdaptiveQuantizationEvaluator final
     : public aqi::AdaptiveQuantizationEvaluator {
 public:
@@ -76,16 +99,24 @@ public:
     const AcStrategyGrid& strategies,
     ConstPlaneU8View epf_sharpness,
     AdaptiveQuantizationOptions options,
-    std::unique_ptr<PreparedAqEvaluation> prepared)
+    std::unique_ptr<PreparedAqEvaluation> prepared,
+    bool materialize_final,
+    Extent2D source_extent)
     : opsin_(opsin),
       strategies_(strategies),
       epf_sharpness_(epf_sharpness),
       options_(options),
-      prepared_(std::move(prepared)) {}
+      prepared_(std::move(prepared)),
+      materialize_final_(materialize_final) {
+    if (materialize_final_) {
+      final_reconstructed_.resize(source_extent);
+    }
+  }
 
   Status Evaluate(
     ConstPlaneF32View quant_field,
     float quant_dc,
+    bool is_final_evaluation,
     aqi::AdaptiveQuantizationEvaluation* evaluation,
     aqi::EvaluationProfile* profile) override {
 
@@ -139,6 +170,19 @@ public:
       candidate.block_distance.resize(block_count);
       const ConstPlaneI8View y_to_x = color_correlation.y_to_x_map();
       const ConstPlaneI8View y_to_b = color_correlation.y_to_b_map();
+      AqEvaluationOutput::Final final_output;
+      AqEvaluationOutput prepared_output{
+        .block_distance_map = {
+          candidate.block_distance.data(), block_extent, block_extent.width},
+        .score = &candidate.score,
+      };
+      if (materialize_final_ && is_final_evaluation) {
+        final_output = {
+          .reconstructed_linear_rgb = final_reconstructed_.view(),
+          .frame = &final_frame_,
+        };
+        prepared_output.final = &final_output;
+      }
       status = prepared_->Evaluate(
         {
           .raw_quant_field = {
@@ -149,12 +193,7 @@ public:
           .epf_inverse_sigma = {
             inverse_sigma.data(), block_extent, block_extent.width},
         },
-        {
-          .block_distance_map = {
-            candidate.block_distance.data(), block_extent,
-            block_extent.width},
-          .score = &candidate.score,
-        });
+        prepared_output);
       if (!status.ok()) {
         return status;
       }
@@ -170,13 +209,114 @@ public:
     }
   }
 
+  [[nodiscard]] bool HasFinalOutput() const noexcept {
+    return !materialize_final_ || final_frame_.valid();
+  }
+
+  [[nodiscard]] Image3FBuffer&& TakeFinalReconstruction() noexcept {
+    return std::move(final_reconstructed_);
+  }
+
+  [[nodiscard]] VarDctEncoderFrame&& TakeFinalFrame() noexcept {
+    return std::move(final_frame_);
+  }
+
 private:
   ConstImage3FView opsin_;
   const AcStrategyGrid& strategies_;
   ConstPlaneU8View epf_sharpness_;
   AdaptiveQuantizationOptions options_;
   std::unique_ptr<PreparedAqEvaluation> prepared_;
+  bool materialize_final_ = false;
+  Image3FBuffer final_reconstructed_;
+  VarDctEncoderFrame final_frame_;
 };
+
+Status RunGpuAdaptiveQuantizationImpl(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationPolicyOutput* bounded_output,
+  AdaptiveQuantizationOutput* full_output) {
+
+  Status status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
+    original_linear_rgb, opsin, strategies, initial_quant_field,
+    epf_sharpness, options);
+  if (status.ok()) {
+    if (full_output == nullptr) {
+      if (bounded_output == nullptr) {
+        return Status::InvalidArgument(
+          "GPU adaptive-quantization bounded output is null");
+      }
+      status = ValidateOutput(strategies.extent(), *bounded_output);
+    } else {
+      status = ValidateFullOutput(
+        original_linear_rgb.extent(), strategies.extent(), *full_output);
+    }
+  }
+  if (!status.ok()) {
+    return status;
+  }
+
+  std::unique_ptr<PreparedAqEvaluation> prepared;
+  status = PrepareAqEvaluation(
+    gpu,
+    {
+      .original_linear_rgb = original_linear_rgb,
+      .coding_opsin = opsin,
+      .strategies = &strategies,
+      .epf_sharpness = epf_sharpness,
+      .options = {options.profile, options.butteraugli},
+    },
+    &prepared);
+  if (!status.ok()) {
+    return status;
+  }
+
+  try {
+    PreparedGpuAdaptiveQuantizationEvaluator evaluator(
+      opsin, strategies, epf_sharpness, options, std::move(prepared),
+      full_output != nullptr, original_linear_rgb.extent());
+    aqi::AdaptiveQuantizationPolicyResult result;
+    status = aqi::RunAdaptiveQuantizationPolicy(
+      strategies, initial_quant_field, options, evaluator, &result, nullptr);
+    if (!status.ok()) {
+      return status;
+    }
+    if (!evaluator.HasFinalOutput()) {
+      return Status::Internal(
+        "GPU adaptive quantization did not materialize its final output");
+    }
+
+    if (full_output == nullptr) {
+      CopyContiguousPlane(result.quant_field, bounded_output->quant_field);
+      CopyContiguousPlane(
+        result.block_distance, bounded_output->block_distance_map);
+      *bounded_output->score_history = std::move(result.score_history);
+    } else {
+      Image3FBuffer reconstructed = evaluator.TakeFinalReconstruction();
+      VarDctEncoderFrame frame = evaluator.TakeFinalFrame();
+      CopyContiguousPlane(result.quant_field, full_output->quant_field);
+      CopyContiguousPlane(
+        result.block_distance, full_output->block_distance_map);
+      CopyImage(
+        reconstructed.const_view(), full_output->reconstructed_linear_rgb);
+      *full_output->frame = std::move(frame);
+      *full_output->score_history = std::move(result.score_history);
+    }
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate GPU adaptive-quantization final storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "GPU adaptive-quantization final dimensions are too large");
+  }
+}
 
 }  // namespace
 
@@ -190,43 +330,24 @@ Status RunGpuAdaptiveQuantizationPolicy(
   AdaptiveQuantizationOptions options,
   GpuAdaptiveQuantizationPolicyOutput output) {
 
-  Status status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
-    original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options);
-  if (status.ok()) {
-    status = ValidateOutput(strategies.extent(), output);
-  }
-  if (!status.ok()) {
-    return status;
-  }
+  return RunGpuAdaptiveQuantizationImpl(
+    gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
+    epf_sharpness, options, &output, nullptr);
+}
 
-  std::unique_ptr<PreparedAqEvaluation> prepared;
-  status = PrepareAqEvaluation(
-    gpu,
-    {
-      .original_linear_rgb = original_linear_rgb,
-      .coding_opsin = opsin,
-      .strategies = &strategies,
-      .options = {options.profile, options.butteraugli},
-    },
-    &prepared);
-  if (!status.ok()) {
-    return status;
-  }
+Status RunGpuAdaptiveQuantization(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationOutput output) {
 
-  PreparedGpuAdaptiveQuantizationEvaluator evaluator(
-    opsin, strategies, epf_sharpness, options, std::move(prepared));
-  aqi::AdaptiveQuantizationPolicyResult result;
-  status = aqi::RunAdaptiveQuantizationPolicy(
-    strategies, initial_quant_field, options, evaluator, &result, nullptr);
-  if (!status.ok()) {
-    return status;
-  }
-
-  CopyContiguousPlane(result.quant_field, output.quant_field);
-  CopyContiguousPlane(result.block_distance, output.block_distance_map);
-  *output.score_history = std::move(result.score_history);
-  return Status::Ok();
+  return RunGpuAdaptiveQuantizationImpl(
+    gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
+    epf_sharpness, options, nullptr, &output);
 }
 
 }  // namespace gjxl

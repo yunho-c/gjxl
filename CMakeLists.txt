@@ -1777,6 +1777,7 @@ if(GJXL_BUILD_TESTS)
     gjxl_adaptive_quantization_gpu_policy_test
     PRIVATE
       gjxl_codec
+      gjxl_codestream
       gjxl_metal
   )
 

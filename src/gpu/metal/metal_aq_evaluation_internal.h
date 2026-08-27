@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/ac_strategy.h"
+#include "codec/vardct_frame_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
@@ -224,6 +225,7 @@ private:
   DevicePlaneView quantized_coefficients_;
   DevicePlaneView reconstruction_coefficients_;
   DevicePlaneView dc_;
+  DevicePlaneView quantized_dc_;
   DevicePlaneView reconstruction_error_;
   DevicePlaneView quant_probe_input_;
   DevicePlaneView quant_probe_quantized_;
@@ -240,6 +242,12 @@ private:
   size_t filter_scratch_image_count_ = 0;
   int final_filter_scratch_index_ = -1;
   AqEvaluationOptions options_;
+  AcStrategyGrid strategies_host_;
+  std::vector<uint8_t> epf_sharpness_host_;
+  std::vector<int32_t> last_raw_quant_;
+  std::vector<int8_t> last_y_to_x_;
+  std::vector<int8_t> last_y_to_b_;
+  Quantizer last_quantizer_;
   AqEvaluationMemoryStats memory_stats_;
   AqResetParams reset_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};
@@ -250,10 +258,13 @@ private:
   std::array<AqStrategyBatch, 7> batches_{};
   std::array<AqReconstructionParams, 7> reconstruction_params_{};
   std::vector<AqAnchor> row_major_anchors_;
+  std::vector<vardct_frame_internal::QuantizedAcTransformView>
+    final_transform_views_;
   std::vector<float> readback_;
   std::vector<float> forward_readback_;
   std::vector<int32_t> quantized_readback_;
   std::vector<float> dc_readback_;
+  std::vector<int32_t> quantized_dc_readback_;
   std::array<std::vector<float>, 3> reconstructed_readback_;
   std::array<std::vector<float>, 3> filtered_readback_;
   std::array<std::vector<float>, 3> linear_readback_;

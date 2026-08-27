@@ -14,6 +14,7 @@
 #include "codec/ac_strategy.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/gaborish.h"
+#include "codec/quantization_pipeline_internal.h"
 #include "core/block_grid.h"
 #include "core/geometry.h"
 #include "core/image_buffer.h"
@@ -39,6 +40,24 @@ public:
       color_correlation,
       options,
       out);
+  }
+};
+
+class CpuAdaptiveQuantizationProvider final
+    : public quantization_pipeline_internal::AdaptiveQuantizationProvider {
+public:
+  Status Find(
+    ConstImage3FView original_linear_rgb,
+    ConstImage3FView opsin,
+    const AcStrategyGrid& strategies,
+    ConstPlaneF32View initial_quant_field,
+    ConstPlaneU8View epf_sharpness,
+    AdaptiveQuantizationOptions options,
+    AdaptiveQuantizationOutput output) override {
+
+    return FindBestQuantization(
+      original_linear_rgb, opsin, strategies, initial_quant_field,
+      epf_sharpness, options, output);
   }
 };
 Status ValidatePipelineInputs(
@@ -90,10 +109,12 @@ Status ValidatePipelineInputs(
 
 }  // namespace
 
-Status RunQuantizationPipeline(
+Status quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
   AcStrategySearchProvider& strategy_search,
+  quantization_pipeline_internal::AdaptiveQuantizationProvider&
+    adaptive_quantization,
   CpuQuantizationPipelineOptions options,
   CpuQuantizationPipelineOutput output) {
 
@@ -191,7 +212,7 @@ Status RunQuantizationPipeline(
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
     adaptive_options.butteraugli_target = options.butteraugli_target;
-    status = FindBestQuantization(
+    status = adaptive_quantization.Find(
       original_linear_rgb,
       preprocessed_opsin.const_view(),
       strategies,
@@ -236,6 +257,19 @@ Status RunQuantizationPipeline(
   }
 
   return Status::Ok();
+}
+
+Status RunQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  AcStrategySearchProvider& strategy_search,
+  CpuQuantizationPipelineOptions options,
+  CpuQuantizationPipelineOutput output) {
+
+  CpuAdaptiveQuantizationProvider adaptive_quantization;
+  return quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
+    original_linear_rgb, opsin, strategy_search, adaptive_quantization,
+    options, output);
 }
 
 Status RunCpuQuantizationPipeline(

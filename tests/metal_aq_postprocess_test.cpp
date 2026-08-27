@@ -183,11 +183,15 @@ bool Prepare(gjxl::GpuBackend &gpu, const HostImage &original,
              const HostImage &coding, const gjxl::AcStrategyGrid &strategies,
              gjxl::AqEvaluationOptions options,
              std::unique_ptr<gjxl::PreparedAqEvaluation> *prepared) {
+  const gjxl::Extent2D blocks = strategies.extent();
+  const std::vector<uint8_t> sharpness(blocks.width * blocks.height, 4);
   return CheckStatus(
       gjxl::PrepareAqEvaluation(gpu,
                                 {.original_linear_rgb = original.ConstView(),
                                  .coding_opsin = coding.ConstView(),
                                  .strategies = &strategies,
+                                 .epf_sharpness = {
+                                   sharpness.data(), blocks, blocks.width},
                                  .options = options},
                                 prepared),
       "prepared AQ postprocess creation");

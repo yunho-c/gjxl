@@ -25,6 +25,7 @@ struct AqEvaluationPreparation {
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
   const AcStrategyGrid* strategies = nullptr;
+  ConstPlaneU8View epf_sharpness;
   AqEvaluationOptions options;
 };
 
@@ -37,8 +38,16 @@ struct AqEvaluationInput {
 };
 
 struct AqEvaluationOutput {
+  struct Final;
+
   PlaneF32View block_distance_map;
   double* score = nullptr;
+  Final* final = nullptr;
+};
+
+struct AqEvaluationOutput::Final {
+  Image3FView reconstructed_linear_rgb;
+  VarDctEncoderFrame* frame = nullptr;
 };
 
 struct AqEvaluationMemoryStats {
@@ -57,8 +66,9 @@ public:
   PreparedAqEvaluation& operator=(const PreparedAqEvaluation&) = delete;
 
   /// Executes one complete resident reconstruction, filtering, Butteraugli,
-  /// and strategy-aware block reduction. Failure never changes caller-visible
-  /// output.
+  /// and strategy-aware block reduction. When `output.final` is non-null, the
+  /// same submission also materializes reconstructed RGB and the encoder
+  /// frame. Failure never changes caller-visible output.
   [[nodiscard]] virtual Status Evaluate(
     AqEvaluationInput input,
     AqEvaluationOutput output) = 0;

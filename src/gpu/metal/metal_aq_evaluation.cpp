@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "codec/quantization_tables_generated.h"
+#include "codec/vardct_frame_internal.h"
 #include "core/quantizer.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
@@ -379,10 +380,26 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     }
     strategy_records.resize(block_count_ * 2);
     readback_.resize(block_count_);
+    strategies_host_ = *preparation.strategies;
+    epf_sharpness_host_.resize(block_count_);
+    last_raw_quant_.resize(block_count_);
+    size_t tile_count = 0;
+    if (!tile_extent_.try_area(&tile_count)) {
+      return Status::InvalidArgument(
+        "Prepared AQ color-tile extent is too large");
+    }
+    last_y_to_x_.resize(tile_count);
+    last_y_to_b_.resize(tile_count);
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory("Unable to allocate prepared AQ host staging");
   } catch (const std::length_error &) {
     return Status::InvalidArgument("Prepared AQ host staging is too large");
+  }
+
+  for (size_t y = 0; y < block_extent_.height; ++y) {
+    std::copy_n(
+      preparation.epf_sharpness.Row(y), block_extent_.width,
+      epf_sharpness_host_.data() + y * block_extent_.width);
   }
 
   for (size_t y = 0; y < block_extent_.height; ++y) {
@@ -440,6 +457,27 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     forward_readback_.resize(coefficient_value_count_);
     quantized_readback_.resize(coefficient_value_count_);
     dc_readback_.resize(3 * block_count_);
+    quantized_dc_readback_.resize(3 * block_count_);
+    final_transform_views_.reserve(row_major_anchors_.size());
+    for (const AqAnchor& anchor : row_major_anchors_) {
+      const AqStrategyBatch& batch = batches_[anchor.batch_index];
+      const size_t channel_stride =
+        batch.anchor_count * batch.coefficient_count;
+      vardct_frame_internal::QuantizedAcTransformView transform{
+        .block_x = anchor.block_x,
+        .block_y = anchor.block_y,
+        .strategy = anchor.strategy,
+      };
+      for (size_t channel = 0; channel < 3; ++channel) {
+        const size_t offset = batch.coefficient_offset +
+          channel * channel_stride +
+          anchor.index_in_batch * batch.coefficient_count;
+        transform.coefficients[channel] = std::span<const int32_t>(
+          quantized_readback_.data() + offset,
+          batch.coefficient_count);
+      }
+      final_transform_views_.push_back(transform);
+    }
     size_t source_pixel_count = 0;
     if (!source_extent_.try_area(&source_pixel_count)) {
       return Status::InvalidArgument(
@@ -564,6 +602,10 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
   status = AddPlannedPlane(DeviceElementType::kF32, {3 * block_count_, 1},
+                           3 * block_count_, &staging_bytes);
+  if (!status.ok())
+    return status;
+  status = AddPlannedPlane(DeviceElementType::kI32, {3 * block_count_, 1},
                            3 * block_count_, &staging_bytes);
   if (!status.ok())
     return status;
@@ -704,6 +746,11 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   status =
       staging_.AllocatePlane(DeviceElementType::kF32, {3 * block_count_, 1},
                              3 * block_count_, kBufferAlignment, &dc_);
+  if (!status.ok())
+    return status;
+  status = staging_.AllocatePlane(
+      DeviceElementType::kI32, {3 * block_count_, 1}, 3 * block_count_,
+      kBufferAlignment, &quantized_dc_);
   if (!status.ok())
     return status;
   status = staging_.AllocatePlane(DeviceElementType::kI32, {1, 1}, 1,
@@ -1016,11 +1063,109 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
       "Metal AQ bounded readback is not finite and non-negative");
   }
 
+  VarDctEncoderFrame final_frame;
+  if (output.final != nullptr) {
+    status = backend_->CopyDeviceToHost(
+      *quantized_coefficients_.buffer,
+      quantized_readback_.data(),
+      quantized_readback_.size() * sizeof(int32_t),
+      quantized_coefficients_.offset_bytes);
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+        *quantized_dc_.buffer,
+        quantized_dc_readback_.data(),
+        quantized_dc_readback_.size() * sizeof(int32_t),
+        quantized_dc_.offset_bytes);
+    }
+    const size_t linear_row_bytes = source_extent_.width * sizeof(float);
+    for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
+      for (size_t y = 0; status.ok() && y < source_extent_.height; ++y) {
+        status = backend_->CopyDeviceToHost(
+          *reconstructed_linear_[channel].buffer,
+          linear_readback_[channel].data() + y * source_extent_.width,
+          linear_row_bytes,
+          reconstructed_linear_[channel].offset_bytes +
+            y * reconstructed_linear_[channel].row_stride * sizeof(float));
+      }
+    }
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+
+    constexpr int32_t kQuantizedPoison =
+      static_cast<int32_t>(0x81234567u);
+    if (std::ranges::find(quantized_readback_, kQuantizedPoison) !=
+          quantized_readback_.end() ||
+        std::ranges::find(quantized_dc_readback_, kQuantizedPoison) !=
+          quantized_dc_readback_.end() ||
+        !std::ranges::all_of(
+          linear_readback_,
+          [](const std::vector<float>& plane) {
+            return std::ranges::all_of(
+              plane, [](float value) { return std::isfinite(value); });
+          })) {
+      Invalidate();
+      return Status::Internal(
+        "Metal AQ final readback contains poison or non-finite pixels");
+    }
+
+    FrameGeometry geometry;
+    status = FrameGeometry::Create(source_extent_, &geometry);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+    const ConstImage3I32View quantized_dc{{
+      ConstPlaneI32View{
+        quantized_dc_readback_.data(), block_extent_, block_extent_.width},
+      ConstPlaneI32View{
+        quantized_dc_readback_.data() + block_count_,
+        block_extent_, block_extent_.width},
+      ConstPlaneI32View{
+        quantized_dc_readback_.data() + 2 * block_count_,
+        block_extent_, block_extent_.width},
+    }};
+    status = vardct_frame_internal::AssembleVarDctEncoderFrame(
+      {
+        .geometry = geometry,
+        .strategies = &strategies_host_,
+        .raw_quant_field = {
+          last_raw_quant_.data(), block_extent_, block_extent_.width},
+        .quantizer = &last_quantizer_,
+        .y_to_x = {
+          last_y_to_x_.data(), tile_extent_, tile_extent_.width},
+        .y_to_b = {
+          last_y_to_b_.data(), tile_extent_, tile_extent_.width},
+        .epf_sharpness = {
+          epf_sharpness_host_.data(), block_extent_, block_extent_.width},
+        .profile = options_.profile,
+        .quantized_dc = quantized_dc,
+        .transforms = final_transform_views_,
+      },
+      &final_frame);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+  }
+
   for (size_t y = 0; y < block_extent_.height; ++y) {
     std::copy_n(readback_.data() + y * block_extent_.width, block_extent_.width,
                 output.block_distance_map.Row(y));
   }
   *output.score = static_cast<double>(score);
+  if (output.final != nullptr) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      for (size_t y = 0; y < source_extent_.height; ++y) {
+        std::copy_n(
+          linear_readback_[channel].data() + y * source_extent_.width,
+          source_extent_.width,
+          output.final->reconstructed_linear_rgb.plane[channel].Row(y));
+      }
+    }
+    *output.final->frame = std::move(final_frame);
+  }
   CompleteOperation();
   return Status::Ok();
 }
@@ -1199,9 +1344,11 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
   };
   if (preparation.strategies == nullptr ||
       !preparation.strategies->complete() ||
-      preparation.strategies->extent() != blocks) {
+      preparation.strategies->extent() != blocks ||
+      !ValidHostPlaneLayout(preparation.epf_sharpness) ||
+      preparation.epf_sharpness.extent != blocks) {
     return Status::InvalidArgument(
-        "Prepared AQ strategy grid is incomplete or differently sized");
+        "Prepared AQ strategy or EPF grid is invalid or differently sized");
   }
   for (size_t y = 0; y < blocks.height; ++y) {
     for (size_t x = 0; x < blocks.width; ++x) {
@@ -1210,6 +1357,10 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
       if (!status.ok() || !SupportedAqStrategy(cell.strategy)) {
         return Status::InvalidArgument(
             "Prepared AQ strategy grid contains an unsupported strategy");
+      }
+      if (preparation.epf_sharpness.Row(y)[x] >= 8) {
+        return Status::InvalidArgument(
+            "Prepared AQ EPF sharpness is out of range");
       }
     }
   }
@@ -1259,6 +1410,16 @@ MetalPreparedAqEvaluation::ValidateOutput(AqEvaluationOutput output) const {
       output.score == nullptr) {
     return Status::InvalidArgument("Prepared AQ evaluation output is invalid");
   }
+  if (output.final != nullptr &&
+      (!output.final->reconstructed_linear_rgb.valid() ||
+       output.final->reconstructed_linear_rgb.extent() != source_extent_ ||
+       !std::ranges::all_of(
+         output.final->reconstructed_linear_rgb.plane,
+         [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }) ||
+       output.final->frame == nullptr)) {
+    return Status::InvalidArgument(
+        "Prepared AQ final evaluation output is invalid");
+  }
   return Status::Ok();
 }
 
@@ -1285,6 +1446,24 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   }
   if (status.ok()) {
     status = UploadPlane(*backend_, input.y_to_b, y_to_b_);
+  }
+  if (status.ok()) {
+    status = Quantizer::Create(input.quantizer, &last_quantizer_);
+  }
+  if (status.ok()) {
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      std::copy_n(
+        input.raw_quant_field.Row(y), block_extent_.width,
+        last_raw_quant_.data() + y * block_extent_.width);
+    }
+    for (size_t y = 0; y < tile_extent_.height; ++y) {
+      std::copy_n(
+        input.y_to_x.Row(y), tile_extent_.width,
+        last_y_to_x_.data() + y * tile_extent_.width);
+      std::copy_n(
+        input.y_to_b.Row(y), tile_extent_.width,
+        last_y_to_b_.data() + y * tile_extent_.width);
+    }
   }
   return status;
 }

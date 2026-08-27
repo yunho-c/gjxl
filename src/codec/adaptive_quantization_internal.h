@@ -66,6 +66,7 @@ public:
   [[nodiscard]] virtual Status Evaluate(
     ConstPlaneF32View quant_field,
     float quant_dc,
+    bool is_final_evaluation,
     AdaptiveQuantizationEvaluation* evaluation,
     EvaluationProfile* profile) = 0;
 

@@ -231,10 +231,13 @@ bool Prepare(gjxl::GpuBackend &gpu, const HostImage &image,
              const gjxl::AcStrategyGrid &strategies,
              std::unique_ptr<gjxl::PreparedAqEvaluation> *prepared) {
 
+  const std::vector<uint8_t> sharpness(kBlockExtent.width * kBlockExtent.height, 4);
   const gjxl::AqEvaluationPreparation preparation{
       .original_linear_rgb = image.View(),
       .coding_opsin = image.View(),
       .strategies = &strategies,
+      .epf_sharpness = {
+          sharpness.data(), kBlockExtent, kBlockExtent.width},
       .options = Options(),
   };
   return CheckStatus(gjxl::PrepareAqEvaluation(gpu, preparation, prepared),

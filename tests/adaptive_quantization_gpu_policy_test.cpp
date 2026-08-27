@@ -16,6 +16,7 @@
 #include "codec/adaptive_quantization.h"
 #include "codec/color_transform.h"
 #include "codec/quantization.h"
+#include "codestream/encoder.h"
 #include "gpu/backend.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/adaptive_quantization.h"
@@ -31,6 +32,7 @@ constexpr double kTolerance = 2.0e-3;
 double g_max_score_error = 0.0;
 double g_max_quant_error = 0.0;
 double g_max_block_error = 0.0;
+double g_max_image_error = 0.0;
 
 bool CheckStatus(gjxl::Status status, std::string_view operation) {
   if (status.ok()) return true;
@@ -115,6 +117,46 @@ struct CpuOutputStorage {
       .frame = &frame,
       .score_history = &score_history,
     };
+  }
+
+  [[nodiscard]] bool PaddingPoisoned() const {
+    for (size_t y = 0; y < kBlockExtent.height; ++y) {
+      for (size_t x = kBlockExtent.width; x < kBlockStride; ++x) {
+        if (std::bit_cast<uint32_t>(
+              quant_field[y * kBlockStride + x]) != kPoisonBits ||
+            std::bit_cast<uint32_t>(
+              block_distance[y * kBlockStride + x]) != kPoisonBits) {
+          return false;
+        }
+      }
+    }
+    for (const std::vector<float>& plane : reconstructed.plane) {
+      for (size_t y = 0; y < reconstructed.extent.height; ++y) {
+        for (size_t x = reconstructed.extent.width;
+             x < reconstructed.stride; ++x) {
+          if (plane[y * reconstructed.stride + x] != -777.0f) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  [[nodiscard]] bool Poisoned() const {
+    return std::ranges::all_of(quant_field, [](float value) {
+             return std::bit_cast<uint32_t>(value) == kPoisonBits;
+           }) &&
+           std::ranges::all_of(block_distance, [](float value) {
+             return std::bit_cast<uint32_t>(value) == kPoisonBits;
+           }) &&
+           std::ranges::all_of(
+             reconstructed.plane,
+             [](const std::vector<float>& plane) {
+               return std::ranges::all_of(
+                 plane, [](float value) { return value == -777.0f; });
+             }) &&
+           !frame.valid() && score_history.empty();
   }
 
   ImageStorage reconstructed;
@@ -213,6 +255,97 @@ bool MakeMixedStrategies(gjxl::AcStrategyGrid* strategies) {
   return strategies->complete();
 }
 
+template <typename T>
+bool PlanesEqual(gjxl::PlaneView<const T> left,
+                 gjxl::PlaneView<const T> right) {
+  if (left.extent != right.extent) return false;
+  for (size_t y = 0; y < left.extent.height; ++y) {
+    if (!std::equal(
+          left.Row(y), left.Row(y) + left.extent.width, right.Row(y))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool GridsEqual(const gjxl::AcStrategyGrid& left,
+                const gjxl::AcStrategyGrid& right) {
+  if (left.extent() != right.extent()) return false;
+  for (size_t y = 0; y < left.extent().height; ++y) {
+    for (size_t x = 0; x < left.extent().width; ++x) {
+      gjxl::AcStrategyCell left_cell;
+      gjxl::AcStrategyCell right_cell;
+      if (!left.Get(x, y, &left_cell).ok() ||
+          !right.Get(x, y, &right_cell).ok() ||
+          left_cell.strategy != right_cell.strategy ||
+          left_cell.is_anchor != right_cell.is_anchor) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool FramesEqual(const gjxl::VarDctEncoderFrame& left,
+                 const gjxl::VarDctEncoderFrame& right) {
+  if (!left.valid() || !right.valid() ||
+      left.geometry().frame() != right.geometry().frame() ||
+      left.geometry().padded_frame() != right.geometry().padded_frame() ||
+      !GridsEqual(left.strategies(), right.strategies()) ||
+      !PlanesEqual(left.raw_quant_field(), right.raw_quant_field()) ||
+      !PlanesEqual(left.epf_sharpness(), right.epf_sharpness()) ||
+      left.quantizer().params().global_scale !=
+        right.quantizer().params().global_scale ||
+      left.quantizer().params().quant_dc !=
+        right.quantizer().params().quant_dc ||
+      left.profile() != right.profile() ||
+      left.ac_group_extent() != right.ac_group_extent() ||
+      left.ac_group_count() != right.ac_group_count()) {
+    return false;
+  }
+  const auto& left_cfl = left.color_correlation();
+  const auto& right_cfl = right.color_correlation();
+  if (!PlanesEqual(left_cfl.y_to_x_map(), right_cfl.y_to_x_map()) ||
+      !PlanesEqual(left_cfl.y_to_b_map(), right_cfl.y_to_b_map())) {
+    return false;
+  }
+  const gjxl::ConstImage3I32View left_dc = left.quantized_dc();
+  const gjxl::ConstImage3I32View right_dc = right.quantized_dc();
+  const gjxl::ConstImage3FView left_reconstructed_dc = left.dc();
+  const gjxl::ConstImage3FView right_reconstructed_dc = right.dc();
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (!PlanesEqual(left_dc.plane[channel], right_dc.plane[channel]) ||
+        !PlanesEqual(
+          left_reconstructed_dc.plane[channel],
+          right_reconstructed_dc.plane[channel])) {
+      return false;
+    }
+  }
+  for (size_t group_index = 0; group_index < left.ac_group_count();
+       ++group_index) {
+    gjxl::VarDctAcGroupView left_group;
+    gjxl::VarDctAcGroupView right_group;
+    if (!left.GetAcGroup(group_index, &left_group).ok() ||
+        !right.GetAcGroup(group_index, &right_group).ok() ||
+        left_group.block_x != right_group.block_x ||
+        left_group.block_y != right_group.block_y ||
+        left_group.block_extent != right_group.block_extent ||
+        left_group.used_coefficient_count !=
+          right_group.used_coefficient_count) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      if (!std::equal(
+            left_group.coefficients[channel].begin(),
+            left_group.coefficients[channel].end(),
+            right_group.coefficients[channel].begin())) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool ComparePolicyResult(const CpuOutputStorage& cpu,
                          const GpuOutputStorage& gpu,
                          gjxl::AdaptiveQuantizationOptions options) {
@@ -294,6 +427,64 @@ bool ComparePolicyResult(const CpuOutputStorage& cpu,
   return true;
 }
 
+bool CompareFullResult(const CpuOutputStorage& cpu,
+                       const GpuOutputStorage& bounded,
+                       const CpuOutputStorage& full) {
+  if (!full.frame.valid() || !full.PaddingPoisoned() ||
+      bounded.score_history != full.score_history ||
+      !FramesEqual(cpu.frame, full.frame)) {
+    std::cerr << "GPU full AQ output shape or bounded result differs\n";
+    return false;
+  }
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      if (bounded.quant_field[y * GpuOutputStorage::kBlockStride + x] !=
+            full.quant_field[y * CpuOutputStorage::kBlockStride + x] ||
+          bounded.block_distance[y * GpuOutputStorage::kBlockStride + x] !=
+            full.block_distance[y * CpuOutputStorage::kBlockStride + x]) {
+        std::cerr << "GPU bounded and full AQ fields differ\n";
+        return false;
+      }
+    }
+  }
+
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kOriginalExtent.height; ++y) {
+      for (size_t x = 0; x < kOriginalExtent.width; ++x) {
+        const double error = std::abs(
+          static_cast<double>(full.reconstructed.plane[channel][
+            y * full.reconstructed.stride + x]) -
+          cpu.reconstructed.plane[channel][
+            y * cpu.reconstructed.stride + x]);
+        g_max_image_error = std::max(g_max_image_error, error);
+        if (error > kTolerance) {
+          std::cerr << "CPU/GPU reconstructed RGB mismatch at " << x << ','
+                    << y << " channel " << channel << ": " << error << '\n';
+          return false;
+        }
+      }
+    }
+  }
+
+  if (cpu.frame.profile().intensity_target == 255.0f &&
+      cpu.frame.profile().x_qm_scale == 2 &&
+      cpu.frame.profile().b_qm_scale == 2) {
+    std::vector<uint8_t> cpu_codestream;
+    std::vector<uint8_t> gpu_codestream;
+    if (!CheckStatus(
+          gjxl::EncodeVarDctCodestream(cpu.frame, &cpu_codestream),
+          "CPU full AQ codestream") ||
+        !CheckStatus(
+          gjxl::EncodeVarDctCodestream(full.frame, &gpu_codestream),
+          "GPU full AQ codestream") ||
+        cpu_codestream != gpu_codestream) {
+      std::cerr << "CPU/GPU full AQ frame codestream differs\n";
+      return false;
+    }
+  }
+  return true;
+}
+
 bool CheckCase(gjxl::GpuBackend& gpu, bool non_default, size_t iterations,
                gjxl::ConstImage3FView original,
                gjxl::ConstImage3FView opsin,
@@ -322,7 +513,43 @@ bool CheckCase(gjxl::GpuBackend& gpu, bool non_default, size_t iterations,
     std::cerr << "GPU AQ policy preparation/evaluation resource count differs\n";
     return false;
   }
-  return ComparePolicyResult(cpu, bounded, options);
+  if (!ComparePolicyResult(cpu, bounded, options)) {
+    return false;
+  }
+
+  CpuOutputStorage full;
+  CpuOutputStorage rejected_full;
+  gjxl::AdaptiveQuantizationOutput invalid_full = rejected_full.Output();
+  for (gjxl::PlaneF32View& plane :
+       invalid_full.reconstructed_linear_rgb.plane) {
+    --plane.extent.width;
+  }
+  const gjxl::GpuBackendStats before_rejected = gpu.stats();
+  if (!ExpectCode(gjxl::RunGpuAdaptiveQuantization(
+        gpu, original, opsin, strategies, initial, sharpness, options,
+        invalid_full), gjxl::StatusCode::kInvalidArgument,
+        "invalid GPU full AQ output") ||
+      !rejected_full.Poisoned() || gpu.stats().successful_allocations !=
+        before_rejected.successful_allocations ||
+      gpu.stats().committed_submissions !=
+        before_rejected.committed_submissions) {
+    return false;
+  }
+  const gjxl::GpuBackendStats before_full = gpu.stats();
+  if (!CheckStatus(gjxl::RunGpuAdaptiveQuantization(
+        gpu, original, opsin, strategies, initial, sharpness, options,
+        full.Output()), "GPU full AQ")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_full = gpu.stats();
+  if (after_full.successful_allocations !=
+        before_full.successful_allocations + 3 ||
+      after_full.committed_submissions !=
+        before_full.committed_submissions + iterations + 2) {
+    std::cerr << "GPU final materialization added a submission or allocation\n";
+    return false;
+  }
+  return CompareFullResult(cpu, bounded, full);
 }
 
 class BackendWithoutAq final : public gjxl::GpuBackend {
@@ -366,11 +593,17 @@ bool CheckAtomicCapabilityFailure(
     gjxl::ConstPlaneU8View sharpness) {
   BackendWithoutAq backend;
   GpuOutputStorage output;
+  CpuOutputStorage full_output;
   return ExpectCode(gjxl::RunGpuAdaptiveQuantizationPolicy(
       backend, original, opsin, strategies, initial, sharpness,
       MakeOptions(false, 0), output.Output()),
     gjxl::StatusCode::kUnavailable, "missing GPU AQ policy capability") &&
-    output.Poisoned();
+    output.Poisoned() &&
+    ExpectCode(gjxl::RunGpuAdaptiveQuantization(
+      backend, original, opsin, strategies, initial, sharpness,
+      MakeOptions(false, 0), full_output.Output()),
+      gjxl::StatusCode::kUnavailable, "missing GPU full AQ capability") &&
+    full_output.Poisoned();
 }
 
 }  // namespace
@@ -422,6 +655,8 @@ int main() {
   std::cout << "GPU AQ policy parity passed; max score error "
             << g_max_score_error << ", quant-field error "
             << g_max_quant_error << ", block-map error "
-            << g_max_block_error << ", raw quant exact\n";
+            << g_max_block_error << ", reconstructed RGB error "
+            << g_max_image_error
+            << "; raw quant, frame, and supported codestream exact\n";
   return EXIT_SUCCESS;
 }

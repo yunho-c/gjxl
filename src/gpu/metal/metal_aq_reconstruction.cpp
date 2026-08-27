@@ -74,12 +74,13 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
   BindPlane(encoder, self.quantized_coefficients_, 2);
   BindPlane(encoder, self.reconstruction_coefficients_, 3);
   BindPlane(encoder, self.dc_, 4);
+  BindPlane(encoder, self.quantized_dc_, 5);
   for (size_t channel = 0; channel < 3; ++channel) {
-    BindPlane(encoder, self.reconstructed_[channel], channel + 5);
+    BindPlane(encoder, self.reconstructed_[channel], channel + 6);
   }
-  BindPlane(encoder, self.reconstruction_error_, 8);
-  BindPlane(encoder, self.block_distance_, 9);
-  encoder->setBytes(&self.reset_params_, sizeof(self.reset_params_), 10);
+  BindPlane(encoder, self.reconstruction_error_, 9);
+  BindPlane(encoder, self.block_distance_, 10);
+  encoder->setBytes(&self.reset_params_, sizeof(self.reset_params_), 11);
   DispatchThreads1d(encoder,
                     std::max({self.coefficient_value_count_,
                               3 * self.block_count_, self.pixel_count_,
@@ -135,8 +136,9 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     BindPlane(encoder, self.quantized_coefficients_, 6);
     BindPlane(encoder, self.reconstruction_coefficients_, 7);
     BindPlane(encoder, self.dc_, 8);
-    BindPlane(encoder, self.reconstruction_error_, 9);
-    encoder->setBytes(&params, sizeof(params), 10);
+    BindPlane(encoder, self.quantized_dc_, 9);
+    BindPlane(encoder, self.reconstruction_error_, 10);
+    encoder->setBytes(&params, sizeof(params), 11);
     encoder->dispatchThreadgroups(
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
         MTL::Size(kAqThreadCount, 1, 1));

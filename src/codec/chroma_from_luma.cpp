@@ -234,6 +234,49 @@ Status AppendStrategyCoefficients(
 
 }  // namespace
 
+namespace chroma_from_luma_internal {
+
+Status CreateColorCorrelationMap(
+  ConstPlaneI8View y_to_x,
+  ConstPlaneI8View y_to_b,
+  ColorCorrelationMap* out) {
+
+  if (out == nullptr || !y_to_x.valid() || !y_to_b.valid() ||
+      y_to_x.extent != y_to_b.extent) {
+    return Status::InvalidArgument(
+      "Color-correlation map input or output is invalid");
+  }
+  size_t tile_count = 0;
+  if (!y_to_x.extent.try_area(&tile_count)) {
+    return Status::InvalidArgument(
+      "Color-correlation map dimensions are too large");
+  }
+  try {
+    ColorCorrelationMap result;
+    result.tile_extent_ = y_to_x.extent;
+    result.y_to_x_.resize(tile_count);
+    result.y_to_b_.resize(tile_count);
+    for (size_t y = 0; y < y_to_x.extent.height; ++y) {
+      std::copy_n(
+        y_to_x.Row(y), y_to_x.extent.width,
+        result.y_to_x_.data() + y * y_to_x.extent.width);
+      std::copy_n(
+        y_to_b.Row(y), y_to_b.extent.width,
+        result.y_to_b_.data() + y * y_to_b.extent.width);
+    }
+    *out = std::move(result);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate color-correlation map storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Color-correlation map dimensions are too large");
+  }
+}
+
+}  // namespace chroma_from_luma_internal
+
 bool ColorCorrelationMap::valid() const noexcept {
   size_t tile_count = 0;
   return !tile_extent_.empty() &&
