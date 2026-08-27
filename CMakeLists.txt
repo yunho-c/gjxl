@@ -327,6 +327,16 @@ set(
 )
 
 set(
+  GJXL_AQ_RECONSTRUCTION_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_reconstruction.metal"
+)
+
+set(
+  GJXL_AQ_QUANTIZATION_HEADER
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_quantization.h"
+)
+
+set(
   GJXL_DCT_BASIS_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
 )
@@ -344,6 +354,11 @@ set(
 set(
   GJXL_AQ_CONTRACT_METAL_IR
   "${GJXL_METAL_DIR}/aq_contract.ir"
+)
+
+set(
+  GJXL_AQ_RECONSTRUCTION_METAL_IR
+  "${GJXL_METAL_DIR}/aq_reconstruction.ir"
 )
 
 set(
@@ -428,9 +443,40 @@ add_custom_command(
 
   DEPENDS
     "${GJXL_AQ_CONTRACT_METAL_SOURCE}"
+    "${GJXL_AQ_QUANTIZATION_HEADER}"
 
   COMMENT
     "Compiling Metal AQ contract probe"
+
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT
+    "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    -fmetal-math-mode=safe
+    -ffp-contract=off
+    "${GJXL_AQ_RECONSTRUCTION_METAL_SOURCE}"
+    -o
+    "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_AQ_RECONSTRUCTION_METAL_SOURCE}"
+    "${GJXL_AQ_QUANTIZATION_HEADER}"
+
+  COMMENT
+    "Compiling Metal AQ reconstruction shaders"
 
   VERBATIM
 )
@@ -450,11 +496,13 @@ add_custom_command(
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_CONTRACT_METAL_IR}"
+    "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_CONTRACT_METAL_IR}"
+    "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -478,6 +526,7 @@ add_library(
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_backend.cpp
   src/gpu/metal/metal_aq_evaluation.cpp
+  src/gpu/metal/metal_aq_reconstruction.cpp
   src/gpu/metal/metal_primitives.cpp
   src/gpu/metal/metal_submission.cpp
 )
@@ -1100,6 +1149,35 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_aq_evaluation
     COMMAND gjxl_metal_aq_evaluation_test
+  )
+
+  add_executable(
+    gjxl_metal_aq_reconstruction_test
+    tests/dct_reference.cpp
+    tests/metal_aq_reconstruction_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_aq_reconstruction_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_aq_reconstruction_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_metal_aq_reconstruction_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_aq_reconstruction
+    COMMAND gjxl_metal_aq_reconstruction_test
   )
 
   add_executable(

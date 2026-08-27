@@ -52,6 +52,11 @@ struct PrimitivePipelines {
 
 struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> contract_probe;
+  NS::SharedPtr<MTL::ComputePipelineState> reset_reconstruction;
+  NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
+  NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;
+  NS::SharedPtr<MTL::ComputePipelineState> quantization_probe;
 };
 
 class MetalPreparedAqEvaluation;
@@ -141,6 +146,16 @@ public:
 
 private:
   friend class MetalPreparedAqEvaluation;
+  struct TransformEncodeContext {
+    const TransformPipeline* pipeline = nullptr;
+    TransformDirection direction = TransformDirection::kForward;
+    const MetalBuffer* input = nullptr;
+    MetalBuffer* output = nullptr;
+    size_t input_offset_bytes = 0;
+    size_t output_offset_bytes = 0;
+    size_t transform_count = 0;
+  };
+
   struct ResolvedConstPlane {
     ConstDevicePlaneView view;
     DeviceMemoryRange range;
@@ -182,6 +197,16 @@ private:
     MetalBackend& backend,
     MTL::ComputeCommandEncoder* encoder,
     const void* context);
+
+  void EncodeTransformBatch(
+    MTL::ComputeCommandEncoder* encoder,
+    TransformDirection direction,
+    AcStrategyType strategy,
+    const MetalBuffer& input,
+    size_t input_offset_bytes,
+    MetalBuffer& output,
+    size_t output_offset_bytes,
+    size_t transform_count) const;
 
   Status ResolvePlane(
     ConstDevicePlaneView view,

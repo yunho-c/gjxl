@@ -16,10 +16,11 @@ limit synchronization to the data required by the CPU update policy.
 
 The public GPU substrate now supports buffer allocation, host transfers,
 strided device images, reusable scratch, per-command submission handles,
-batched transforms, and a fixed optional image-primitive capability. It does
-not yet model a prepared codec operation that owns persistent frame state and
-iteration staging. Existing Metal DCT and image-primitive kernels remain the
-foundation; they are not by themselves an AQ implementation.
+batched transforms, a fixed optional image-primitive capability, and an
+optional prepared AQ operation. The prepared Metal path now completes
+coefficient coding and reconstruction while keeping its reconstructed padded
+opsin image resident. Filtering, color conversion, Butteraugli, AQ block
+reduction, and production policy integration remain unavailable.
 
 ## Goals
 
@@ -549,10 +550,14 @@ finite static samples, and complete coverage by the seven supported strategy
 types before allocating. It packs the original and coding images, explicit
 strategy-and-anchor records, and all five quantization-table families into one
 persistent arena. A separate staging arena owns quant, EPF, color-correlation,
-probe-output, reduction, and scalar-result storage. For the guarded 89x57 to
-96x64 validation case, the transitional plan reports 183552 persistent bytes,
-2564 staging bytes, and 8 peak scratch bytes; these are probe capacities, not a
-projection of the complete AQ pipeline.
+probe-output, reduction, and scalar-result storage. At the Milestone 2
+boundary, the guarded 89x57 to 96x64 validation case used 183552 persistent
+bytes, 2564 staging bytes, and 8 peak scratch bytes. The current Milestone 3
+layout extends the same checked preparation plan and reports 257792 persistent
+bytes and 311552 staging/peak-scratch bytes for that case. The resident
+reconstructed image is included only in persistent storage; coefficient, DC,
+diagnostic-probe, and existing contract-probe storage are included in the
+staging upper bound.
 
 The internal probe samples every class of prepared and per-evaluation upload,
 then performs maximum reduction in the same compute encoder and command-buffer
@@ -571,8 +576,8 @@ completion, and post-completion readback failures preserve poisoned caller
 output and permanently invalidate the prepared object. Destruction with an
 outstanding probe observes a completed `Wait()` before releasing its arenas.
 
-Both Release matrices pass on the real Metal device: 33/33 tests with the
-pinned libjxl reference enabled and 27/27 with it disabled. These matrices also
+Both Release matrices pass on the real Metal device: 34/34 tests with the
+pinned libjxl reference enabled and 28/28 with it disabled. These matrices also
 retain the DCT and fixed image-primitive GPU coverage. Reproduce them with:
 
 ```sh
@@ -588,7 +593,7 @@ cmake --build build/no-reference -j
 ctest --test-dir build/no-reference --output-on-failure
 ```
 
-### 3. Port coefficient coding and reconstruction
+### 3. Port coefficient coding and reconstruction — complete (2026-08-26)
 
 - Gather source pixels for every selected transform and channel.
 - Reuse the registered Metal forward and inverse transforms for all seven
@@ -604,6 +609,60 @@ Exit criterion: forward coefficients, quantized coefficients, reconstructed
 opsin, and multi-transform output match independent CPU oracles for every
 strategy, including asymmetric impulses, deterministic random blocks,
 quantization boundaries, partial groups, and NaN-poisoned multi-block output.
+
+The concrete prepared implementation is declared in the private
+`metal_aq_evaluation_internal.h` boundary. Preparation and shared state handling
+remain in `metal_aq_evaluation.cpp`; coefficient orchestration, readback, and
+diagnostics live in `metal_aq_reconstruction.cpp`. No AQ method was added to
+`GpuBackend`, and the fixed `ImagePrimitiveCommand` set remains unchanged. A
+private offset-aware transform encoder lets one prepared AQ submission reuse
+whichever scalar or SIMD pipelines the backend selected for all seven supported
+strategies.
+
+Preparation enumerates transform anchors in row-major order, groups them by
+strategy for dispatch, and uploads explicit anchor coordinates. It allocates
+packed channel-major gathered pixels, preserved forward coefficients, exact
+`int32_t` quantized coefficients, reconstruction coefficients, three block-DC
+planes, a device error flag, and three persistent reconstructed-opsin planes.
+The diagnostic snapshot restores row-major transform order only after the
+entire submission, device-error check, and readback succeed.
+
+One compute encoder resets every destination to a sentinel, gathers transform
+pixels, invokes each selected forward DCT batch, extracts DC/LLF, quantizes Y,
+applies forward CfL to X/B, quantizes X/B, dequantizes and restores inverse
+CfL/LLF, invokes each inverse DCT batch, and scatters the complete padded opsin
+image. Non-finite scaled coefficients and `int32_t` overflow set a device error
+that permanently invalidates the prepared object. Production `Evaluate`
+remains `Unavailable`; full reconstructed-image readback is an internal
+Milestone 3 diagnostic only, while the device image remains resident for
+Milestone 4.
+
+Quantization table-family offsets and coefficient helpers are shared by the
+Milestone 2 contract probe and the reconstruction shader. Only the new
+coefficient/reconstruction Metal translation unit is compiled with safe math
+and floating-point contraction disabled. Existing DCT shader compilation and
+numerics are unchanged.
+
+Real-Metal validation runs both single-strategy grids for all seven strategies
+and a mixed grid containing all seven, with structured random, asymmetric
+impulse, chromatic, and flat-DC samples under both all-scalar and all-SIMD DCT
+selections. Forward coefficients are compared
+with the independent double-precision DCT oracle at `1e-5 + 5e-5 * abs(x)` for
+DCT8 and `2e-5 + 5e-5 * abs(x)` otherwise. Quantized coefficients match the CPU
+frame exactly; DC uses `2e-4 + 5e-5 * abs(x)` and reconstructed opsin uses
+`7.5e-4 + 1e-4 * abs(x)`.
+
+The direct safe-math probe covers every strategy, both rectangular transpose
+pairs, every XYB channel, raw quant 1 and 256, non-default matrix multipliers,
+threshold and ties-to-even inputs, LLF zeroing, non-finite input, and finite
+overflow. Its quantized output is exact and dequantization passes
+`2e-6 + 2e-6 * abs(x)`. After preparation, three reconstruction repeats each
+add exactly one submission and zero device allocations. Invalid descriptors
+submit nothing; injected submission, completion, post-completion readback, and
+device numeric failures leave diagnostic output unchanged and invalidate the
+object. The shared Milestone 2 state tests continue to cover same-object
+reentry, independent prepared-state concurrency, and destruction with
+outstanding work.
 
 ### 4. Port loop filters and color conversion
 
@@ -747,12 +806,12 @@ encoder decisions.
 
 ## Implementation order
 
-Milestones 0 through 2 are complete. The validated prepared-operation contract
-now fixes the residency and lifetime boundary for subsequent work.
-Reconstruction/filter work (Milestones 3 and 4) and the standalone Butteraugli
-operation (Milestone 5) may proceed independently. Milestone 6 joins them into
-the iterative loop; Milestones 7 and 8 harden and qualify the result for
-rollout.
+Milestones 0 through 3 are complete. The validated prepared-operation contract
+and resident reconstructed-opsin boundary now fix the handoff for subsequent
+work. Loop-filter/color-conversion work (Milestone 4) and the standalone
+Butteraugli operation (Milestone 5) may proceed independently. Milestone 6
+joins them into the iterative loop; Milestones 7 and 8 harden and qualify the
+result for rollout.
 
 Removing libjxl from the production dependency graph is tracked independently
 in [`butteraugli.md`](butteraugli.md). It may proceed in parallel and does not

@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+
+#pragma once
+
+#include <Metal/Metal.hpp>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <vector>
+
+#include "core/ac_strategy.h"
+#include "gpu/metal/metal_aq_reconstruction_test.h"
+#include "gpu/metal/metal_backend_internal.h"
+#include "gpu/scratch.h"
+
+namespace gjxl::metal_internal {
+
+struct AqContractProbeParams {
+  uint32_t source_width;
+  uint32_t source_height;
+  uint32_t coding_width;
+  uint32_t coding_height;
+  uint32_t block_width;
+  uint32_t block_height;
+  uint32_t tile_width;
+  uint32_t tile_height;
+  uint32_t original_stride;
+  uint32_t coding_stride;
+  uint32_t strategy_stride;
+  uint32_t raw_quant_stride;
+  uint32_t inverse_sigma_stride;
+  uint32_t color_stride;
+  uint32_t output_stride;
+  uint32_t global_scale;
+  uint32_t quant_dc;
+  float option_probe;
+};
+
+struct AqReconstructionParams {
+  uint32_t coding_width;
+  uint32_t coding_height;
+  uint32_t coding_stride;
+  uint32_t block_width;
+  uint32_t block_height;
+  uint32_t raw_quant_stride;
+  uint32_t color_width;
+  uint32_t color_stride;
+  uint32_t anchor_offset;
+  uint32_t anchor_count;
+  uint32_t coefficient_offset;
+  uint32_t coefficient_count;
+  uint32_t pixel_width;
+  uint32_t pixel_height;
+  uint32_t covered_width;
+  uint32_t covered_height;
+  uint32_t strategy;
+  uint32_t global_scale;
+  float x_matrix_multiplier;
+  float b_matrix_multiplier;
+};
+
+struct AqResetParams {
+  uint32_t coefficient_value_count;
+  uint32_t dc_value_count;
+  uint32_t pixel_value_count;
+};
+
+struct AqQuantizationProbeParams {
+  uint32_t coefficient_count;
+  uint32_t strategy;
+  uint32_t channel;
+  int32_t raw_quant;
+  uint32_t global_scale;
+  float matrix_multiplier;
+};
+
+struct AqStrategyBatch {
+  AcStrategyType strategy = AcStrategyType::kCount;
+  size_t anchor_offset = 0;
+  size_t anchor_count = 0;
+  size_t coefficient_offset = 0;
+  size_t coefficient_count = 0;
+};
+
+struct AqAnchor {
+  size_t block_x = 0;
+  size_t block_y = 0;
+  AcStrategyType strategy = AcStrategyType::kCount;
+  size_t batch_index = 0;
+  size_t index_in_batch = 0;
+};
+
+class MetalPreparedAqEvaluation final : public PreparedAqEvaluation {
+public:
+  explicit MetalPreparedAqEvaluation(MetalBackend &backend);
+  ~MetalPreparedAqEvaluation() override;
+
+  Status Prepare(const AqEvaluationPreparation &preparation);
+  Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
+  AqEvaluationMemoryStats memory_stats() const noexcept override;
+
+  Status RunProbe(AqEvaluationInput input, AqEvaluationOutput output);
+  Status SubmitProbe(AqEvaluationInput input);
+  Status FinishProbe(AqEvaluationOutput output);
+  Status FailNextReadback();
+  Status SetWaitObserver(bool *observed);
+
+  Status RunReconstruction(AqEvaluationInput input,
+                           MetalAqReconstructionSnapshotForTesting *snapshot);
+  Status RunQuantizationProbe(const MetalAqQuantizationProbeForTesting &probe,
+                              std::vector<int32_t> *quantized,
+                              std::vector<float> *dequantized);
+
+private:
+  enum class State {
+    kReady,
+    kBusy,
+    kInvalid,
+  };
+
+  Status ValidatePreparation(const AqEvaluationPreparation &preparation) const;
+  Status ValidateInput(AqEvaluationInput input) const;
+  Status ValidateOutput(AqEvaluationOutput output) const;
+  Status BeginOperation();
+  Status UploadInput(AqEvaluationInput input);
+  Status WaitForOperation();
+  void CompleteOperation();
+  void Invalidate();
+
+  static void EncodeProbeSubmission(MetalBackend &backend,
+                                    MTL::ComputeCommandEncoder *encoder,
+                                    const void *context);
+  static void
+  EncodeReconstructionSubmission(MetalBackend &backend,
+                                 MTL::ComputeCommandEncoder *encoder,
+                                 const void *context);
+  static void
+  EncodeQuantizationProbeSubmission(MetalBackend &backend,
+                                    MTL::ComputeCommandEncoder *encoder,
+                                    const void *context);
+
+  MetalBackend *backend_ = nullptr;
+  DeviceScratchArena persistent_;
+  DeviceScratchArena staging_;
+  std::array<DevicePlaneView, 3> original_;
+  std::array<DevicePlaneView, 3> coding_;
+  std::array<DevicePlaneView, 3> reconstructed_;
+  DevicePlaneView strategies_;
+  DevicePlaneView anchors_;
+  DevicePlaneView quant_tables_;
+  DevicePlaneView raw_quant_;
+  DevicePlaneView inverse_sigma_;
+  DevicePlaneView y_to_x_;
+  DevicePlaneView y_to_b_;
+  DevicePlaneView probe_output_;
+  DevicePlaneView reduction_a_;
+  DevicePlaneView reduction_b_;
+  DevicePlaneView score_;
+  DevicePlaneView gathered_pixels_;
+  DevicePlaneView forward_coefficients_;
+  DevicePlaneView quantized_coefficients_;
+  DevicePlaneView reconstruction_coefficients_;
+  DevicePlaneView dc_;
+  DevicePlaneView reconstruction_error_;
+  DevicePlaneView quant_probe_input_;
+  DevicePlaneView quant_probe_quantized_;
+  DevicePlaneView quant_probe_dequantized_;
+  Extent2D source_extent_;
+  Extent2D coding_extent_;
+  Extent2D block_extent_;
+  Extent2D tile_extent_;
+  size_t block_count_ = 0;
+  size_t pixel_count_ = 0;
+  size_t coefficient_value_count_ = 0;
+  size_t anchor_count_ = 0;
+  size_t maximum_coefficient_count_ = 0;
+  AqEvaluationOptions options_;
+  AqEvaluationMemoryStats memory_stats_;
+  AqContractProbeParams probe_params_{};
+  AqResetParams reset_params_{};
+  AqQuantizationProbeParams quant_probe_params_{};
+  std::array<AqStrategyBatch, 7> batches_{};
+  std::array<AqReconstructionParams, 7> reconstruction_params_{};
+  std::vector<AqAnchor> row_major_anchors_;
+  std::vector<float> readback_;
+  std::vector<float> forward_readback_;
+  std::vector<int32_t> quantized_readback_;
+  std::vector<float> dc_readback_;
+  std::array<std::vector<float>, 3> reconstructed_readback_;
+  std::vector<int32_t> quant_probe_quantized_readback_;
+  std::vector<float> quant_probe_dequantized_readback_;
+  mutable std::mutex mutex_;
+  State state_ = State::kReady;
+  std::unique_ptr<GpuSubmission> submission_;
+  bool fail_next_readback_ = false;
+  bool *wait_observer_ = nullptr;
+};
+
+} // namespace gjxl::metal_internal

@@ -369,17 +369,6 @@ Status CreateTransformPipeline(
 }  // namespace
 
 namespace metal_internal {
-namespace {
-
-struct TransformSubmissionContext {
-  const TransformPipeline* pipeline = nullptr;
-  const MetalBuffer* input = nullptr;
-  MetalBuffer* output = nullptr;
-  size_t transform_count = 0;
-};
-
-}  // namespace
-
 MetalBackend::MetalBackend(
   NS::SharedPtr<MTL::Device> device,
   NS::SharedPtr<MTL::CommandQueue> command_queue,
@@ -604,19 +593,45 @@ Status MetalBackend::ValidateTransformBatch(
 }
 
 void MetalBackend::EncodeTransformSubmission(
-  MetalBackend&,
+  MetalBackend& backend,
   MTL::ComputeCommandEncoder* encoder,
   const void* context) {
 
   const auto& transform =
-    *static_cast<const TransformSubmissionContext*>(context);
-  encoder->setComputePipelineState(transform.pipeline->state.get());
-  encoder->setBuffer(transform.input->handle(), 0, 0);
-  encoder->setBuffer(transform.output->handle(), 0, 1);
+    *static_cast<const TransformEncodeContext*>(context);
+  backend.EncodeTransformBatch(
+    encoder,
+    transform.direction,
+    transform.pipeline->strategy,
+    *transform.input,
+    transform.input_offset_bytes,
+    *transform.output,
+    transform.output_offset_bytes,
+    transform.transform_count);
+}
+
+void MetalBackend::EncodeTransformBatch(
+  MTL::ComputeCommandEncoder* encoder,
+  TransformDirection direction,
+  AcStrategyType strategy,
+  const MetalBuffer& input,
+  size_t input_offset_bytes,
+  MetalBuffer& output,
+  size_t output_offset_bytes,
+  size_t transform_count) const {
+
+  const TransformPipelinePair& pair =
+    transform_pipelines_[StrategyIndex(strategy)];
+  const TransformPipeline& pipeline =
+    direction == TransformDirection::kForward
+      ? pair.forward
+      : pair.inverse;
+  encoder->setComputePipelineState(pipeline.state.get());
+  encoder->setBuffer(input.handle(), input_offset_bytes, 0);
+  encoder->setBuffer(output.handle(), output_offset_bytes, 1);
   encoder->dispatchThreadgroups(
-    MTL::Size(
-      static_cast<NS::UInteger>(transform.transform_count), 1, 1),
-    MTL::Size(transform.pipeline->threads_per_threadgroup, 1, 1));
+    MTL::Size(static_cast<NS::UInteger>(transform_count), 1, 1),
+    MTL::Size(pipeline.threads_per_threadgroup, 1, 1));
 }
 
 Status MetalBackend::SubmitTransform(
@@ -669,8 +684,8 @@ Status MetalBackend::SubmitTransform(
       "Transform batch exceeds Metal grid range");
   }
 
-  const TransformSubmissionContext context{
-    &pipeline, input, output, batch.transform_count};
+  const TransformEncodeContext context{
+    &pipeline, direction, input, output, 0, 0, batch.transform_count};
   return SubmitCompute(
     pipeline.label.c_str(),
     &MetalBackend::EncodeTransformSubmission,

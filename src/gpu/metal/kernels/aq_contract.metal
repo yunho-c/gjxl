@@ -3,6 +3,8 @@
 
 #include <metal_stdlib>
 
+#include "aq_quantization.h"
+
 using namespace metal;
 
 struct AqContractProbeParams {
@@ -25,19 +27,6 @@ struct AqContractProbeParams {
   uint quant_dc;
   float option_probe;
 };
-
-static uint2 aq_quant_table_offsets(uint strategy) {
-  switch (strategy) {
-    case 0:  return uint2(0, 192);       // DCT8
-    case 4:  return uint2(384, 1152);    // DCT16x16
-    case 5:  return uint2(1920, 4992);   // DCT32x32
-    case 6:  return uint2(8064, 8448);   // DCT16x8
-    case 7:  return uint2(8064, 8448);   // DCT8x16
-    case 10: return uint2(8832, 10368);  // DCT32x16
-    case 11: return uint2(8832, 10368);  // DCT16x32
-    default: return uint2(0, 192);
-  }
-}
 
 kernel void gjxl_aq_contract_probe(
   device const float* original_x [[buffer(0)]],
