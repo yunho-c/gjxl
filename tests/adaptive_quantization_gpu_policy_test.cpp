@@ -1,0 +1,427 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
+#include <string_view>
+#include <vector>
+
+#include "codec/adaptive_quantization.h"
+#include "codec/color_transform.h"
+#include "codec/quantization.h"
+#include "gpu/backend.h"
+#include "gpu/metal/metal_backend.h"
+#include "gpu/ops/adaptive_quantization.h"
+
+namespace {
+
+constexpr gjxl::Extent2D kOriginalExtent{96, 64};
+constexpr gjxl::Extent2D kPaddedExtent{96, 64};
+constexpr gjxl::Extent2D kBlockExtent{12, 8};
+constexpr uint32_t kPoisonBits = 0x7fc12345u;
+constexpr float kPoison = std::bit_cast<float>(kPoisonBits);
+constexpr double kTolerance = 2.0e-3;
+double g_max_score_error = 0.0;
+double g_max_quant_error = 0.0;
+double g_max_block_error = 0.0;
+
+bool CheckStatus(gjxl::Status status, std::string_view operation) {
+  if (status.ok()) return true;
+  std::cerr << operation << " failed: " << status.message() << '\n';
+  return false;
+}
+
+bool ExpectCode(gjxl::Status status, gjxl::StatusCode expected,
+                std::string_view operation) {
+  if (status.code() == expected) return true;
+  std::cerr << operation << " returned " << static_cast<int>(status.code())
+            << ", expected " << static_cast<int>(expected) << ": "
+            << status.message() << '\n';
+  return false;
+}
+
+struct ImageStorage {
+  explicit ImageStorage(gjxl::Extent2D image_extent, float fill = -777.0f)
+      : extent(image_extent), stride(image_extent.width + 3) {
+    for (std::vector<float>& values : plane) {
+      values.assign(stride * extent.height, fill);
+    }
+  }
+
+  [[nodiscard]] gjxl::Image3FView View() {
+    return {{{
+      {plane[0].data(), extent, stride},
+      {plane[1].data(), extent, stride},
+      {plane[2].data(), extent, stride},
+    }}};
+  }
+
+  [[nodiscard]] gjxl::ConstImage3FView ConstView() const {
+    return {{{
+      {plane[0].data(), extent, stride},
+      {plane[1].data(), extent, stride},
+      {plane[2].data(), extent, stride},
+    }}};
+  }
+
+  gjxl::Extent2D extent;
+  size_t stride;
+  std::array<std::vector<float>, 3> plane;
+};
+
+void FillPaddedLinear(ImageStorage* padded, ImageStorage* original) {
+  for (size_t y = 0; y < kPaddedExtent.height; ++y) {
+    const size_t source_y = std::min(y, kOriginalExtent.height - 1);
+    for (size_t x = 0; x < kPaddedExtent.width; ++x) {
+      const size_t source_x = std::min(x, kOriginalExtent.width - 1);
+      const float fx = static_cast<float>(source_x);
+      const float fy = static_cast<float>(source_y);
+      const std::array<float, 3> rgb = {
+        0.12f + 0.006f * fx + 0.004f * fy,
+        0.18f + 0.003f * fx + 0.006f * fy,
+        0.08f + 0.005f * fx + 0.004f * fy,
+      };
+      for (size_t channel = 0; channel < 3; ++channel) {
+        padded->plane[channel][y * padded->stride + x] = rgb[channel];
+        if (x < kOriginalExtent.width && y < kOriginalExtent.height) {
+          original->plane[channel][y * original->stride + x] = rgb[channel];
+        }
+      }
+    }
+  }
+}
+
+struct CpuOutputStorage {
+  static constexpr size_t kBlockStride = kBlockExtent.width + 2;
+
+  CpuOutputStorage()
+      : reconstructed(kOriginalExtent),
+        quant_field(kBlockStride * kBlockExtent.height, kPoison),
+        block_distance(kBlockStride * kBlockExtent.height, kPoison) {}
+
+  [[nodiscard]] gjxl::AdaptiveQuantizationOutput Output() {
+    return {
+      .quant_field = {quant_field.data(), kBlockExtent, kBlockStride},
+      .block_distance_map = {
+        block_distance.data(), kBlockExtent, kBlockStride},
+      .reconstructed_linear_rgb = reconstructed.View(),
+      .frame = &frame,
+      .score_history = &score_history,
+    };
+  }
+
+  ImageStorage reconstructed;
+  std::vector<float> quant_field;
+  std::vector<float> block_distance;
+  gjxl::VarDctEncoderFrame frame;
+  std::vector<double> score_history;
+};
+
+struct GpuOutputStorage {
+  static constexpr size_t kBlockStride = kBlockExtent.width + 4;
+  std::vector<float> quant_field =
+    std::vector<float>(kBlockStride * kBlockExtent.height, kPoison);
+  std::vector<float> block_distance =
+    std::vector<float>(kBlockStride * kBlockExtent.height, kPoison);
+  std::vector<double> score_history;
+
+  [[nodiscard]] gjxl::GpuAdaptiveQuantizationPolicyOutput Output() {
+    return {
+      .quant_field = {quant_field.data(), kBlockExtent, kBlockStride},
+      .block_distance_map = {
+        block_distance.data(), kBlockExtent, kBlockStride},
+      .score_history = &score_history,
+    };
+  }
+
+  [[nodiscard]] bool PaddingPoisoned() const {
+    for (size_t y = 0; y < kBlockExtent.height; ++y) {
+      for (size_t x = kBlockExtent.width; x < kBlockStride; ++x) {
+        if (std::bit_cast<uint32_t>(
+              quant_field[y * kBlockStride + x]) != kPoisonBits ||
+            std::bit_cast<uint32_t>(
+              block_distance[y * kBlockStride + x]) != kPoisonBits) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  [[nodiscard]] bool Poisoned() const {
+    return std::ranges::all_of(quant_field, [](float value) {
+             return std::bit_cast<uint32_t>(value) == kPoisonBits;
+           }) &&
+           std::ranges::all_of(block_distance, [](float value) {
+             return std::bit_cast<uint32_t>(value) == kPoisonBits;
+           }) &&
+           score_history.empty();
+  }
+};
+
+gjxl::AdaptiveQuantizationOptions MakeOptions(bool non_default,
+                                               size_t iterations) {
+  gjxl::AdaptiveQuantizationOptions options;
+  options.butteraugli_target = 1.1f;
+  options.iterations = iterations;
+  if (non_default) {
+    options.fast_color_correlation = false;
+    options.profile.x_qm_scale = 3;
+    options.profile.b_qm_scale = 1;
+    options.profile.loop_filter.gaborish = true;
+    options.profile.loop_filter.gaborish_options.weight1 =
+      {0.071f, 0.093f, 0.057f};
+    options.profile.loop_filter.gaborish_options.weight2 =
+      {0.039f, 0.027f, 0.045f};
+    options.profile.loop_filter.epf_options.iterations = 3;
+    options.profile.loop_filter.epf_options.channel_scale =
+      {31.0f, 7.0f, 4.25f};
+    options.profile.loop_filter.epf_options.pass0_sigma_scale = 1.17f;
+    options.profile.loop_filter.epf_options.pass2_sigma_scale = 4.75f;
+    options.profile.loop_filter.epf_options.border_sad_multiplier = 0.81f;
+    options.profile.intensity_target = 183.0f;
+    options.butteraugli = {0.91f, 1.07f, 80.0f};
+  }
+  return options;
+}
+
+bool MakeMixedStrategies(gjxl::AcStrategyGrid* strategies) {
+  if (!CheckStatus(gjxl::AcStrategyGrid::Create(kBlockExtent, strategies),
+                   "mixed policy strategy creation") ||
+      !CheckStatus(strategies->Set(
+        0, 0, gjxl::AcStrategyType::kDct32x32), "policy DCT32x32") ||
+      !CheckStatus(strategies->Set(
+        4, 0, gjxl::AcStrategyType::kDct16x32), "policy DCT16x32") ||
+      !CheckStatus(strategies->Set(
+        8, 0, gjxl::AcStrategyType::kDct32x16), "policy DCT32x16") ||
+      !CheckStatus(strategies->Set(
+        10, 0, gjxl::AcStrategyType::kDct16x16), "policy DCT16x16") ||
+      !CheckStatus(strategies->Set(
+        10, 2, gjxl::AcStrategyType::kDct16x8), "policy DCT16x8") ||
+      !CheckStatus(strategies->Set(
+        10, 4, gjxl::AcStrategyType::kDct8x16), "policy DCT8x16")) {
+    return false;
+  }
+  strategies->fill_empty_dct8();
+  return strategies->complete();
+}
+
+bool ComparePolicyResult(const CpuOutputStorage& cpu,
+                         const GpuOutputStorage& gpu,
+                         gjxl::AdaptiveQuantizationOptions options) {
+  if (cpu.score_history.size() != gpu.score_history.size() ||
+      cpu.score_history.size() != options.iterations + 1 ||
+      !cpu.frame.valid() || !gpu.PaddingPoisoned()) {
+    std::cerr << "CPU/GPU AQ policy result shape mismatch\n";
+    return false;
+  }
+  bool within_tolerance = true;
+  for (size_t index = 0; index < cpu.score_history.size(); ++index) {
+    const double error =
+      std::abs(cpu.score_history[index] - gpu.score_history[index]);
+    g_max_score_error = std::max(g_max_score_error, error);
+    if (error > kTolerance) {
+      std::cerr << "CPU/GPU score mismatch at " << index
+                << ": CPU " << cpu.score_history[index] << ", GPU "
+                << gpu.score_history[index] << ", error " << error << '\n';
+      within_tolerance = false;
+    }
+  }
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      const float cpu_quant =
+        cpu.quant_field[y * CpuOutputStorage::kBlockStride + x];
+      const float gpu_quant =
+        gpu.quant_field[y * GpuOutputStorage::kBlockStride + x];
+      const float cpu_block =
+        cpu.block_distance[y * CpuOutputStorage::kBlockStride + x];
+      const float gpu_block =
+        gpu.block_distance[y * GpuOutputStorage::kBlockStride + x];
+      const double quant_error = std::abs(cpu_quant - gpu_quant);
+      const double block_error = std::abs(cpu_block - gpu_block);
+      g_max_quant_error = std::max(g_max_quant_error, quant_error);
+      g_max_block_error = std::max(g_max_block_error, block_error);
+      if (quant_error > kTolerance || block_error > kTolerance) {
+        std::cerr << "CPU/GPU bounded policy mismatch at " << x << ',' << y
+                  << ": quant error " << quant_error << ", block error "
+                  << block_error << '\n';
+        within_tolerance = false;
+      }
+    }
+  }
+
+  if (!within_tolerance) return false;
+
+  float quant_dc = 0.0f;
+  if (!CheckStatus(gjxl::ComputeInitialQuantDc(
+        options.butteraugli_target, &quant_dc), "policy quant DC")) {
+    return false;
+  }
+  std::array<int32_t, kBlockExtent.width * kBlockExtent.height> raw{};
+  gjxl::Quantizer quantizer;
+  if (!CheckStatus(gjxl::CreateQuantizerFromField(
+        quant_dc,
+        {gpu.quant_field.data(), kBlockExtent,
+         GpuOutputStorage::kBlockStride},
+        {raw.data(), kBlockExtent, kBlockExtent.width},
+        &quantizer), "GPU final raw-quant reconstruction")) {
+    return false;
+  }
+  if (quantizer.params().global_scale !=
+        cpu.frame.quantizer().params().global_scale ||
+      quantizer.params().quant_dc !=
+        cpu.frame.quantizer().params().quant_dc) {
+    std::cerr << "CPU/GPU final quantizer differs\n";
+    return false;
+  }
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      if (raw[y * kBlockExtent.width + x] !=
+          cpu.frame.raw_quant_field().Row(y)[x]) {
+        std::cerr << "CPU/GPU final raw quant differs at " << x << ',' << y
+                  << '\n';
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool CheckCase(gjxl::GpuBackend& gpu, bool non_default, size_t iterations,
+               gjxl::ConstImage3FView original,
+               gjxl::ConstImage3FView opsin,
+               const gjxl::AcStrategyGrid& strategies,
+               gjxl::ConstPlaneF32View initial,
+               gjxl::ConstPlaneU8View sharpness) {
+  const gjxl::AdaptiveQuantizationOptions options =
+    MakeOptions(non_default, iterations);
+  CpuOutputStorage cpu;
+  GpuOutputStorage bounded;
+  if (!CheckStatus(gjxl::FindBestQuantization(
+        original, opsin, strategies, initial, sharpness, options,
+        cpu.Output()), "CPU AQ policy")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats before = gpu.stats();
+  if (!CheckStatus(gjxl::RunGpuAdaptiveQuantizationPolicy(
+        gpu, original, opsin, strategies, initial, sharpness, options,
+        bounded.Output()), "GPU AQ policy")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after = gpu.stats();
+  if (after.successful_allocations != before.successful_allocations + 3 ||
+      after.committed_submissions !=
+        before.committed_submissions + iterations + 2) {
+    std::cerr << "GPU AQ policy preparation/evaluation resource count differs\n";
+    return false;
+  }
+  return ComparePolicyResult(cpu, bounded, options);
+}
+
+class BackendWithoutAq final : public gjxl::GpuBackend {
+public:
+  gjxl::BackendKind kind() const noexcept override {
+    return gjxl::BackendKind::kMetal;
+  }
+  std::string_view name() const noexcept override { return "no AQ"; }
+  gjxl::Status Allocate(
+      size_t, std::unique_ptr<gjxl::DeviceBuffer>* out) override {
+    if (out != nullptr) out->reset();
+    return gjxl::Status::Unavailable("not implemented");
+  }
+  gjxl::Status CopyHostToDevice(
+      gjxl::DeviceBuffer&, const void*, size_t, size_t) override {
+    return gjxl::Status::Unavailable("not implemented");
+  }
+  gjxl::Status CopyDeviceToHost(
+      const gjxl::DeviceBuffer&, void*, size_t, size_t) override {
+    return gjxl::Status::Unavailable("not implemented");
+  }
+  gjxl::Status ForwardTransform(
+      const gjxl::TransformBatch&,
+      std::unique_ptr<gjxl::GpuSubmission>* submission) override {
+    if (submission != nullptr) submission->reset();
+    return gjxl::Status::Unavailable("not implemented");
+  }
+  gjxl::Status InverseTransform(
+      const gjxl::TransformBatch&,
+      std::unique_ptr<gjxl::GpuSubmission>* submission) override {
+    if (submission != nullptr) submission->reset();
+    return gjxl::Status::Unavailable("not implemented");
+  }
+};
+
+bool CheckAtomicCapabilityFailure(
+    gjxl::ConstImage3FView original,
+    gjxl::ConstImage3FView opsin,
+    const gjxl::AcStrategyGrid& strategies,
+    gjxl::ConstPlaneF32View initial,
+    gjxl::ConstPlaneU8View sharpness) {
+  BackendWithoutAq backend;
+  GpuOutputStorage output;
+  return ExpectCode(gjxl::RunGpuAdaptiveQuantizationPolicy(
+      backend, original, opsin, strategies, initial, sharpness,
+      MakeOptions(false, 0), output.Output()),
+    gjxl::StatusCode::kUnavailable, "missing GPU AQ policy capability") &&
+    output.Poisoned();
+}
+
+}  // namespace
+
+int main() {
+  ImageStorage original(kOriginalExtent);
+  ImageStorage padded_linear(kPaddedExtent);
+  ImageStorage opsin(kPaddedExtent);
+  FillPaddedLinear(&padded_linear, &original);
+  gjxl::AcStrategyGrid strategies;
+  std::vector<float> initial_values(
+    kBlockExtent.width * kBlockExtent.height);
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      initial_values[y * kBlockExtent.width + x] =
+        0.41f + 0.01f * static_cast<float>((7 * x + 3 * y) % 9);
+    }
+  }
+  std::vector<uint8_t> sharpness(
+    kBlockExtent.width * kBlockExtent.height, 4);
+  const gjxl::ConstPlaneF32View initial{
+    initial_values.data(), kBlockExtent, kBlockExtent.width};
+  const gjxl::ConstPlaneU8View sharpness_view{
+    sharpness.data(), kBlockExtent, kBlockExtent.width};
+
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!CheckStatus(gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, opsin.View()),
+        "policy opsin conversion") ||
+      !MakeMixedStrategies(&strategies) ||
+      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "GPU AQ policy backend") ||
+      !CheckAtomicCapabilityFailure(
+        original.ConstView(), opsin.ConstView(), strategies, initial,
+        sharpness_view)) {
+    return EXIT_FAILURE;
+  }
+
+  for (bool non_default : {false, true}) {
+    for (size_t iterations = 0; iterations <= 2; ++iterations) {
+      if (!CheckCase(*gpu, non_default, iterations,
+                     original.ConstView(), opsin.ConstView(), strategies,
+                     initial, sharpness_view)) {
+        return EXIT_FAILURE;
+      }
+    }
+  }
+
+  std::cout << "GPU AQ policy parity passed; max score error "
+            << g_max_score_error << ", quant-field error "
+            << g_max_quant_error << ", block-map error "
+            << g_max_block_error << ", raw quant exact\n";
+  return EXIT_SUCCESS;
+}

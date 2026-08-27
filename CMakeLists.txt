@@ -405,6 +405,7 @@ add_library(
   STATIC
 
   src/gpu/ops/ac_strategy_search.cpp
+  src/gpu/ops/adaptive_quantization.cpp
   src/gpu/ops/quantization_pipeline.cpp
 )
 
@@ -473,8 +474,8 @@ set(
 )
 
 set(
-  GJXL_AQ_CONTRACT_METAL_SOURCE
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_contract.metal"
+  GJXL_AQ_REDUCTION_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_reduction.metal"
 )
 
 set(
@@ -518,8 +519,8 @@ set(
 )
 
 set(
-  GJXL_AQ_CONTRACT_METAL_IR
-  "${GJXL_METAL_DIR}/aq_contract.ir"
+  GJXL_AQ_REDUCTION_METAL_IR
+  "${GJXL_METAL_DIR}/aq_reduction.ir"
 )
 
 set(
@@ -628,7 +629,7 @@ add_custom_command(
 
 add_custom_command(
   OUTPUT
-    "${GJXL_AQ_CONTRACT_METAL_IR}"
+    "${GJXL_AQ_REDUCTION_METAL_IR}"
 
   COMMAND
     "${CMAKE_COMMAND}"
@@ -640,16 +641,18 @@ add_custom_command(
     -sdk macosx
     metal
     -c
-    "${GJXL_AQ_CONTRACT_METAL_SOURCE}"
+    -fmetal-math-mode=safe
+    -fmetal-math-fp32-functions=precise
+    -ffp-contract=off
+    "${GJXL_AQ_REDUCTION_METAL_SOURCE}"
     -o
-    "${GJXL_AQ_CONTRACT_METAL_IR}"
+    "${GJXL_AQ_REDUCTION_METAL_IR}"
 
   DEPENDS
-    "${GJXL_AQ_CONTRACT_METAL_SOURCE}"
-    "${GJXL_AQ_QUANTIZATION_HEADER}"
+    "${GJXL_AQ_REDUCTION_METAL_SOURCE}"
 
   COMMENT
-    "Compiling Metal AQ contract probe"
+    "Compiling Metal AQ block-reduction shader"
 
   VERBATIM
 )
@@ -759,7 +762,7 @@ add_custom_command(
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
-    "${GJXL_AQ_CONTRACT_METAL_IR}"
+    "${GJXL_AQ_REDUCTION_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
     "${GJXL_AQ_POSTPROCESS_METAL_IR}"
     "${GJXL_BUTTERAUGLI_METAL_IR}"
@@ -768,7 +771,7 @@ add_custom_command(
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
-    "${GJXL_AQ_CONTRACT_METAL_IR}"
+    "${GJXL_AQ_REDUCTION_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
     "${GJXL_AQ_POSTPROCESS_METAL_IR}"
     "${GJXL_BUTTERAUGLI_METAL_IR}"
@@ -1763,6 +1766,34 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_aq_evaluation
     COMMAND gjxl_metal_aq_evaluation_test
+  )
+
+  add_executable(
+    gjxl_adaptive_quantization_gpu_policy_test
+    tests/adaptive_quantization_gpu_policy_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_adaptive_quantization_gpu_policy_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_adaptive_quantization_gpu_policy_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_adaptive_quantization_gpu_policy_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME adaptive_quantization_gpu_policy
+    COMMAND gjxl_adaptive_quantization_gpu_policy_test
   )
 
   add_executable(

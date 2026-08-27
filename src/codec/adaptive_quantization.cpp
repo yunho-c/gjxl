@@ -948,27 +948,105 @@ Status EvaluateQuantization(
   return Status::Ok();
 }
 
-Status ValidateAdaptiveQuantizationInputs(
+class CpuAdaptiveQuantizationEvaluator final
+    : public aqi::AdaptiveQuantizationEvaluator {
+public:
+  CpuAdaptiveQuantizationEvaluator(
+    ConstImage3FView original_linear_rgb,
+    ConstImage3FView opsin,
+    const AcStrategyGrid& strategies,
+    ConstPlaneU8View epf_sharpness,
+    AdaptiveQuantizationOptions options)
+    : original_linear_rgb_(original_linear_rgb),
+      opsin_(opsin),
+      strategies_(strategies),
+      epf_sharpness_(epf_sharpness),
+      options_(options) {}
+
+  Status Evaluate(
+    ConstPlaneF32View quant_field,
+    float quant_dc,
+    aqi::AdaptiveQuantizationEvaluation* evaluation,
+    aqi::EvaluationProfile* profile) override {
+
+    if (evaluation == nullptr) {
+      return Status::InvalidArgument(
+        "CPU adaptive-quantization evaluation output is null");
+    }
+    QuantizationEvaluation detailed;
+    Status status = EvaluateQuantization(
+      original_linear_rgb_, opsin_, strategies_, quant_field,
+      epf_sharpness_, quant_dc, options_, &detailed, profile);
+    if (!status.ok()) {
+      return status;
+    }
+
+    aqi::AdaptiveQuantizationEvaluation bounded;
+    bounded.block_distance = std::move(detailed.block_distance);
+    bounded.quantizer = detailed.frame.quantizer();
+    bounded.score = detailed.score;
+    final_evaluation_ = std::move(detailed);
+    *evaluation = std::move(bounded);
+    return Status::Ok();
+  }
+
+  [[nodiscard]] QuantizationEvaluation&& TakeFinalEvaluation() noexcept {
+    return std::move(final_evaluation_);
+  }
+
+private:
+  ConstImage3FView original_linear_rgb_;
+  ConstImage3FView opsin_;
+  const AcStrategyGrid& strategies_;
+  ConstPlaneU8View epf_sharpness_;
+  AdaptiveQuantizationOptions options_;
+  QuantizationEvaluation final_evaluation_;
+};
+
+Status ValidateAdaptiveQuantizationOutput(
   ConstImage3FView original_linear_rgb,
-  ConstImage3FView opsin,
   const AcStrategyGrid& strategies,
-  ConstPlaneF32View initial_quant_field,
-  ConstPlaneU8View epf_sharpness,
-  AdaptiveQuantizationOptions options,
   const AdaptiveQuantizationOutput& output) {
 
-  if (!original_linear_rgb.valid() ||
-      !opsin.valid() ||
-      !strategies.complete() ||
-      !initial_quant_field.valid() ||
-      !epf_sharpness.valid() ||
-      !output.quant_field.valid() ||
+  if (!output.quant_field.valid() ||
       !output.block_distance_map.valid() ||
       !output.reconstructed_linear_rgb.valid() ||
       output.frame == nullptr ||
       output.score_history == nullptr) {
     return Status::InvalidArgument(
-      "Adaptive-quantization inputs or outputs are invalid");
+      "Adaptive-quantization output is invalid");
+  }
+
+  const Extent2D block_extent = strategies.extent();
+  if (output.quant_field.extent != block_extent ||
+      output.block_distance_map.extent != block_extent ||
+      output.reconstructed_linear_rgb.extent() !=
+        original_linear_rgb.extent()) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization output geometry does not match");
+  }
+  return Status::Ok();
+}
+
+}  // namespace
+
+namespace adaptive_quantization_internal {
+
+Status ValidateAdaptiveQuantizationPolicyInputs(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options) {
+
+  if (!original_linear_rgb.valid() ||
+      !opsin.valid() ||
+      !strategies.complete() ||
+      !initial_quant_field.valid() ||
+      !epf_sharpness.valid()) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization inputs are invalid");
   }
 
   const Extent2D block_extent = strategies.extent();
@@ -977,11 +1055,7 @@ Status ValidateAdaptiveQuantizationInputs(
         &padded_pixel_extent) ||
       opsin.extent() != padded_pixel_extent ||
       initial_quant_field.extent != block_extent ||
-      epf_sharpness.extent != block_extent ||
-      output.quant_field.extent != block_extent ||
-      output.block_distance_map.extent != block_extent ||
-      output.reconstructed_linear_rgb.extent() !=
-        original_linear_rgb.extent()) {
+      epf_sharpness.extent != block_extent) {
     return Status::InvalidArgument(
       "Adaptive-quantization image and block geometry do not match");
   }
@@ -1007,41 +1081,24 @@ Status ValidateAdaptiveQuantizationInputs(
   return Status::Ok();
 }
 
-}  // namespace
-
-namespace {
-
-Status FindBestQuantizationImpl(
-  ConstImage3FView original_linear_rgb,
-  ConstImage3FView opsin,
+Status RunAdaptiveQuantizationPolicy(
   const AcStrategyGrid& strategies,
   ConstPlaneF32View initial_quant_field,
-  ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options,
-  AdaptiveQuantizationOutput output,
-  aqi::AdaptiveQuantizationProfile* profile) {
-
-  Status status = ValidateAdaptiveQuantizationInputs(
-    original_linear_rgb,
-    opsin,
-    strategies,
-    initial_quant_field,
-    epf_sharpness,
-    options,
-    output);
-  if (!status.ok()) {
-    return status;
-  }
+  AdaptiveQuantizationEvaluator& evaluator,
+  AdaptiveQuantizationPolicyResult* result,
+  AdaptiveQuantizationProfile* profile) {
 
   const Extent2D block_extent = strategies.extent();
   size_t block_count = 0;
-  if (!block_extent.try_area(&block_count)) {
+  if (result == nullptr || !block_extent.try_area(&block_count) ||
+      initial_quant_field.extent != block_extent) {
     return Status::InvalidArgument(
-      "Adaptive-quantization block grid is too large");
+      "Adaptive-quantization policy input or output is invalid");
   }
 
   try {
-    aqi::AdaptiveQuantizationProfile local_profile;
+    AdaptiveQuantizationProfile local_profile;
     if (profile != nullptr) {
       local_profile.evaluations.reserve(options.iterations + 1);
     }
@@ -1049,7 +1106,7 @@ Status FindBestQuantizationImpl(
       ? ProfileClock::time_point{}
       : ProfileClock::now();
     std::vector<float> quant_field(block_count);
-    status = AdjustQuantField(
+    Status status = AdjustQuantField(
       strategies,
       options.butteraugli_target,
       initial_quant_field,
@@ -1060,8 +1117,7 @@ Status FindBestQuantizationImpl(
     const std::vector<float> adjusted_initial = quant_field;
 
     const auto [minimum_it, maximum_it] = std::minmax_element(
-      adjusted_initial.begin(),
-      adjusted_initial.end());
+      adjusted_initial.begin(), adjusted_initial.end());
     const float initial_minimum = *minimum_it;
     const float initial_maximum = *maximum_it;
     const float initial_ratio = initial_maximum / initial_minimum;
@@ -1084,9 +1140,7 @@ Status FindBestQuantizationImpl(
     }
 
     float quant_dc = 0.0f;
-    status = ComputeInitialQuantDc(
-      options.butteraugli_target,
-      &quant_dc);
+    status = ComputeInitialQuantDc(options.butteraugli_target, &quant_dc);
     if (!status.ok()) {
       return status;
     }
@@ -1097,27 +1151,27 @@ Status FindBestQuantizationImpl(
 
     std::vector<double> score_history;
     score_history.reserve(options.iterations + 1);
-    QuantizationEvaluation evaluation;
-    for (size_t iteration = 0;
-         iteration <= options.iterations;
-         ++iteration) {
-      aqi::EvaluationProfile evaluation_profile;
-      status = EvaluateQuantization(
-        original_linear_rgb,
-        opsin,
-        strategies,
-        {
-          quant_field.data(),
-          block_extent,
-          block_extent.width,
-        },
-        epf_sharpness,
+    AdaptiveQuantizationEvaluation evaluation;
+    for (size_t iteration = 0; iteration <= options.iterations; ++iteration) {
+      EvaluationProfile evaluation_profile;
+      status = evaluator.Evaluate(
+        {quant_field.data(), block_extent, block_extent.width},
         quant_dc,
-        options,
         &evaluation,
         profile == nullptr ? nullptr : &evaluation_profile);
       if (!status.ok()) {
         return status;
+      }
+      if (evaluation.block_distance.size() != block_count ||
+          !std::ranges::all_of(
+            evaluation.block_distance,
+            [](float value) {
+              return std::isfinite(value) && value >= 0.0f;
+            }) ||
+          !evaluation.quantizer.valid() ||
+          !std::isfinite(evaluation.score) || evaluation.score < 0.0) {
+        return Status::Internal(
+          "Adaptive-quantization evaluator returned an invalid result");
       }
       if (profile != nullptr) {
         local_profile.evaluations.push_back(evaluation_profile);
@@ -1139,9 +1193,7 @@ Status FindBestQuantizationImpl(
             0.6f * adjusted_initial[index];
           if (quant_field[index] < clamp) {
             quant_field[index] = std::clamp(
-              clamp,
-              lower_bound,
-              upper_bound);
+              clamp, lower_bound, upper_bound);
           }
         }
       }
@@ -1164,18 +1216,16 @@ Status FindBestQuantizationImpl(
           const float old = quant_field[index];
           quant_field[index] *= difference;
           const long old_raw = std::lround(
-            old * evaluation.frame.quantizer().inverse_global_scale());
+            old * evaluation.quantizer.inverse_global_scale());
           const long new_raw = std::lround(
             quant_field[index] *
-            evaluation.frame.quantizer().inverse_global_scale());
+            evaluation.quantizer.inverse_global_scale());
           if (old_raw == new_raw) {
-            quant_field[index] = old + evaluation.frame.quantizer().scale();
+            quant_field[index] = old + evaluation.quantizer.scale();
           }
         }
         quant_field[index] = std::clamp(
-          quant_field[index],
-          lower_bound,
-          upper_bound);
+          quant_field[index], lower_bound, upper_bound);
       }
       if (profile != nullptr) {
         local_profile.quant_field_update_nanoseconds +=
@@ -1183,21 +1233,12 @@ Status FindBestQuantizationImpl(
       }
     }
 
-    const auto commit_begin = profile == nullptr
-      ? ProfileClock::time_point{}
-      : ProfileClock::now();
-    CopyContiguousPlane(quant_field, output.quant_field);
-    CopyContiguousPlane(
-      evaluation.block_distance,
-      output.block_distance_map);
-    CopyImage(
-      evaluation.reconstructed_linear.const_view(),
-      output.reconstructed_linear_rgb);
-    *output.frame = std::move(evaluation.frame);
-    *output.score_history = std::move(score_history);
+    AdaptiveQuantizationPolicyResult candidate;
+    candidate.quant_field = std::move(quant_field);
+    candidate.block_distance = std::move(evaluation.block_distance);
+    candidate.score_history = std::move(score_history);
+    *result = std::move(candidate);
     if (profile != nullptr) {
-      local_profile.output_commit_nanoseconds =
-        ElapsedNanoseconds(commit_begin);
       *profile = std::move(local_profile);
     }
   } catch (const std::bad_alloc&) {
@@ -1207,8 +1248,67 @@ Status FindBestQuantizationImpl(
     return Status::InvalidArgument(
       "Adaptive-quantization dimensions are too large");
   }
-
   return Status::Ok();
+}
+
+}  // namespace adaptive_quantization_internal
+
+namespace {
+
+Status FindBestQuantizationImpl(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationOutput output,
+  aqi::AdaptiveQuantizationProfile* profile) {
+
+  Status status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
+    original_linear_rgb,
+    opsin,
+    strategies,
+    initial_quant_field,
+    epf_sharpness,
+    options);
+  if (status.ok()) {
+    status = ValidateAdaptiveQuantizationOutput(
+      original_linear_rgb, strategies, output);
+  }
+  if (!status.ok()) {
+    return status;
+  }
+
+  CpuAdaptiveQuantizationEvaluator evaluator(
+    original_linear_rgb, opsin, strategies, epf_sharpness, options);
+  aqi::AdaptiveQuantizationPolicyResult policy_result;
+  aqi::AdaptiveQuantizationProfile local_profile;
+  status = aqi::RunAdaptiveQuantizationPolicy(
+    strategies, initial_quant_field, options, evaluator, &policy_result,
+    profile == nullptr ? nullptr : &local_profile);
+  if (!status.ok()) {
+    return status;
+  }
+
+  QuantizationEvaluation evaluation = evaluator.TakeFinalEvaluation();
+  const auto commit_begin = profile == nullptr
+    ? ProfileClock::time_point{}
+    : ProfileClock::now();
+  CopyContiguousPlane(policy_result.quant_field, output.quant_field);
+  CopyContiguousPlane(policy_result.block_distance, output.block_distance_map);
+  CopyImage(
+    evaluation.reconstructed_linear.const_view(),
+    output.reconstructed_linear_rgb);
+  *output.frame = std::move(evaluation.frame);
+  *output.score_history = std::move(policy_result.score_history);
+  if (profile != nullptr) {
+    local_profile.output_commit_nanoseconds =
+      ElapsedNanoseconds(commit_begin);
+    *profile = std::move(local_profile);
+  }
+  return Status::Ok();
+
 }
 
 }  // namespace

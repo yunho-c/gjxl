@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +45,7 @@ double g_max_color_error = 0.0;
 double g_max_combined_error = 0.0;
 double g_max_butteraugli_error = 0.0;
 double g_max_chained_butteraugli_error = 0.0;
+double g_max_production_error = 0.0;
 
 bool CheckStatus(gjxl::Status status, std::string_view operation) {
   if (status.ok())
@@ -639,6 +641,59 @@ bool CheckChainedPath(gjxl::GpuBackend &gpu) {
       return false;
     }
 
+    constexpr size_t kBlockStride = 17;
+    constexpr uint32_t kPoisonBits = 0x7fc12345u;
+    const float poison = std::bit_cast<float>(kPoisonBits);
+    const gjxl::Extent2D block_extent = strategies.extent();
+    std::vector<float> expected_blocks(
+        block_extent.width * block_extent.height);
+    std::vector<float> actual_blocks(
+        kBlockStride * block_extent.height, poison);
+    double production_score = -1.0;
+    if (!CheckStatus(gjxl::ReduceButteraugliDistanceMap(
+                         {chained_map.data(), source_extent,
+                          source_extent.width},
+                         strategies,
+                         {expected_blocks.data(), block_extent,
+                          block_extent.width}),
+                     "production block-reduction oracle") ||
+        !CheckStatus(prepared->Evaluate(
+                         input.View(),
+                         {{actual_blocks.data(), block_extent, kBlockStride},
+                          &production_score}),
+                     "production chained AQ evaluation")) {
+      return false;
+    }
+    g_max_production_error = std::max(
+        g_max_production_error,
+        std::abs(production_score - chained_score));
+    if (!std::isfinite(production_score) ||
+        std::abs(production_score - chained_score) >
+            kChainedButteraugliAbsolute) {
+      std::cerr << "Production AQ score differs from chained CPU oracle\n";
+      return false;
+    }
+    for (size_t y = 0; y < block_extent.height; ++y) {
+      for (size_t x = 0; x < block_extent.width; ++x) {
+        const double error = std::abs(
+            static_cast<double>(actual_blocks[y * kBlockStride + x]) -
+            expected_blocks[y * block_extent.width + x]);
+        g_max_production_error = std::max(g_max_production_error, error);
+        if (error > kChainedButteraugliAbsolute) {
+          std::cerr << "Production AQ block map differs at " << x << ','
+                    << y << ": error " << error << '\n';
+          return false;
+        }
+      }
+      for (size_t x = block_extent.width; x < kBlockStride; ++x) {
+        if (std::bit_cast<uint32_t>(actual_blocks[y * kBlockStride + x]) !=
+            kPoisonBits) {
+          std::cerr << "Production AQ changed host block-map padding\n";
+          return false;
+        }
+      }
+    }
+
     gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting
         butteraugli_snapshot;
     if (!CheckStatus(gjxl::metal_internal::RunMetalAqButteraugliForTesting(
@@ -659,7 +714,7 @@ bool CheckChainedPath(gjxl::GpuBackend &gpu) {
   }
   const gjxl::GpuBackendStats after = gpu.stats();
   if (after.successful_allocations != before.successful_allocations ||
-      after.committed_submissions != before.committed_submissions + 9) {
+      after.committed_submissions != before.committed_submissions + 12) {
     std::cerr << "Chained AQ Butteraugli did not preserve residency\n";
     return false;
   }
@@ -982,6 +1037,8 @@ int main() {
       << ", max combined error " << g_max_combined_error
       << "; Milestone 5 max isolated Butteraugli error "
       << g_max_butteraugli_error << ", max chained error "
-      << g_max_chained_butteraugli_error << '\n';
+      << g_max_chained_butteraugli_error
+      << "; Milestone 6 max production error "
+      << g_max_production_error << '\n';
   return EXIT_SUCCESS;
 }

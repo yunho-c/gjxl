@@ -18,10 +18,12 @@ The public GPU substrate now supports buffer allocation, host transfers,
 strided device images, reusable scratch, per-command submission handles,
 batched transforms, a fixed optional image-primitive capability, and an
 optional prepared AQ operation. The prepared Metal path now completes
-coefficient coding, reconstruction, loop filtering, and cropped opsin-to-linear
-conversion, then compares the resident linear image with a prepared Metal
-Butteraugli reference. Reconstructed images and the pixel distance map remain
-resident. AQ block reduction and production policy integration remain
+coefficient coding, reconstruction, loop filtering, cropped opsin-to-linear
+conversion, prepared Butteraugli comparison, and strategy-aware block reduction
+in one submission. Reconstructed images and the pixel distance map remain
+resident, while the bounded GPU policy returns only the final quant field,
+block map, and score history. Reconstructed-image and encoder-frame
+materialization, complete-pipeline switching, and rollout qualification remain
 unavailable.
 
 ## Goals
@@ -205,11 +207,12 @@ must not share mutable storage. Geometry, strategy, option, or backend mismatch
 is rejected before submission and leaves the prepared object usable.
 
 Invalid input submits no work. Allocation or validation failure during
-preparation returns no object. Submission, command-buffer, synchronization, or
-readback failure commits no caller-visible CPU output and invalidates the
-prepared object; the caller must prepare a new object before retrying. Backend
-unavailability remains an explicit status handled by CPU fallback above the
-operation rather than by silently switching implementations inside it.
+preparation returns no object. Upload, submission, command-buffer,
+synchronization, device-numeric, or readback failure commits no caller-visible
+CPU output and invalidates the prepared object; the caller must prepare a new
+object before retrying. Backend unavailability remains an explicit status
+handled by the caller rather than by silently switching implementations inside
+the bounded GPU policy.
 
 ## Shared GPU contracts
 
@@ -289,7 +292,7 @@ oracle coverage.
 
 ## Milestones
 
-Milestones 0 through 5 are complete. Milestones 6 through 8 remain pending and
+Milestones 0 through 6 are complete. Milestones 7 and 8 remain pending and
 must not be treated as complete until their stated exit criteria pass.
 
 ### 0. Refresh the AQ baseline and freeze the evaluation contract — complete (2026-08-26)
@@ -797,14 +800,14 @@ runs independent prepared states concurrently. The standalone Butteraugli
 corpus continues to cover all leaf stages, small/odd/strided geometry,
 reference-cache reuse, and the full numerical boundary.
 
-Production `Evaluate` remains explicitly unavailable until Milestone 6 adds
-the strategy-aware block reduction, bounded readback, and CPU quant-field
-policy integration. This milestone inherits the standalone Butteraugli
-performance evidence but makes no complete-AQ speedup claim. Fresh final
-Release matrices pass all 38 reference-enabled and all 32 reference-disabled
-tests.
+At the Milestone 5 boundary, production `Evaluate` remained unavailable until
+Milestone 6 added the strategy-aware block reduction, bounded readback, and CPU
+quant-field policy integration. Milestone 5 inherited the standalone
+Butteraugli performance evidence but made no complete-AQ speedup claim. Its
+fresh final Release matrices passed all 38 reference-enabled and all 32
+reference-disabled tests.
 
-### 6. Add device AQ block reduction and CPU policy integration
+### 6. Add device AQ block reduction and CPU policy integration — complete (2026-08-27)
 
 - Reduce the pixel distance map to the transform-aware 16-norm block map on the
   GPU.
@@ -829,18 +832,63 @@ fixed tolerances, every raw quant decision matches exactly, each evaluation uses
 one submission and one bounded readback, no pixel-resolution plane crosses the
 CPU/GPU boundary, and the CPU reference path remains bit-for-bit unchanged.
 
-### 7. Harden residency, failure behavior, and final output
+The implementation factors one internal evaluator interface and policy driver
+from `FindBestQuantization`. The CPU evaluator still owns reconstructed linear
+RGB, `VarDctEncoderFrame`, and profiling, while
+`RunGpuAdaptiveQuantizationPolicy` explicitly requires the optional prepared-AQ
+capability and never falls back. The shared driver owns initial strategy
+adjustment, bounds, second-update clamp, power update, raw-rounding progress,
+and iteration order. Existing CPU score, field, raw-quant, and profiled-path
+pins remain unchanged.
 
-- Reuse prepared state across repeated calls with compatible geometry and
-  options, or reject incompatible reuse explicitly.
-- Verify concurrent prepared states do not share mutable scratch.
-- Exercise device loss, command-buffer errors where injectable, allocation
-  failure, malformed descriptors, and destruction with outstanding work.
+Metal now appends its already validated prepared Butteraugli comparison to the
+AQ command encoder and dispatches one 256-thread reduction group per transform
+anchor for each of the seven strategy batches. The reduction squares four
+times, averages only source pixels inside right and bottom edges, takes the
+sixteenth root, multiplies by `1.2`, and fills every covered base block. The
+transitional contract-probe shader, pipeline, and storage were removed; its
+split submit/finish seam now exercises the production evaluation.
+
+The isolated reduction corpus covers all seven strategies, both rectangular
+transpose pairs, aligned and mixed grids, and right/bottom partial edges. Its
+maximum absolute error was `2.38419e-7` against the fixed `2e-6` oracle gate.
+The existing `91x57 -> 96x64` chained CPU oracle observed `3.05176e-5` maximum
+production block-map/score error against the fixed `2e-3` accumulated gate.
+Each production evaluation added exactly one submission and zero device
+allocations after preparation, preserved poisoned host padding, and read back
+only the block map and scalar score.
+
+Bounded policy comparisons cover zero, one, and two updates with default and
+representative non-default filter and Butteraugli options. Observed maxima were
+`7.62939e-5` for score history, `4.65393e-4` for block distance, and
+`1.02818e-5` for the final float field, all below the fixed `2e-3` gate; every
+final raw-quant value and quantizer parameter matched the corresponding CPU
+frame exactly. Missing capability, invalid and overflowing strided descriptors,
+atomic output, upload/submission/completion/numeric/readback failure,
+post-failure rejection, reuse after descriptor rejection, non-reentrancy,
+outstanding-work destruction, and independent concurrent states are covered.
+
+For the documented `89x57 -> 96x64` prepared case, the completed layout uses
+`319232` persistent bytes, `1305524` staging bytes, and `1047312` peak-scratch
+bytes. Preparation still adds three device allocations and one reference-cache
+submission. This milestone makes no performance, crossover, automatic
+selection, or complete-pipeline claim.
+
+Fresh AppleClang 17 Release matrices pass `55/55` tests with the pinned
+Butteraugli reference enabled and `49/49` with it disabled. Both include the
+installed static consumer and all CPU/Metal AQ targets. The separately built
+pinned libjxl decoder also accepts all 21 codestream-conformance fixtures and
+the checked workflow sample.
+
+### 7. Materialize final output and connect the complete pipeline
+
 - Define and atomically materialize final reconstructed linear RGB and the
   existing `VarDctEncoderFrame` separately from scratch layout.
 - Connect Metal AQ to the public complete quantization pipeline without a
   redundant CPU final evaluation; keep any later device-resident encoder
   handoff as a separate extension.
+- Extend the completed bounded-path lifetime and failure guarantees to final
+  image/frame materialization and complete-pipeline output.
 - Report persistent and peak scratch memory by image size.
 
 Exit criterion: failures never expose partially committed CPU output, resource
@@ -934,22 +982,21 @@ encoder decisions.
 
 ## Implementation order
 
-Milestones 0 through 5 are complete. The validated prepared-operation contract
-now carries resident reconstructed opsin through loop filtering, cropped linear
-RGB, and the prepared Butteraugli comparison into a resident pixel distance
-map and scalar score. Milestone 6 adds device block reduction, joins the
-evaluation into one submission, and runs the iterative CPU policy while
-deliberately stopping at bounded policy output. Milestone 7 materializes the
-existing reconstructed-image and encoder-frame outputs and connects the full
-pipeline without a redundant CPU evaluation. Milestone 8 qualifies that
-complete path for rollout.
+Milestones 0 through 6 are complete. The validated prepared operation now
+carries resident reconstructed opsin through filtering, cropped linear RGB,
+prepared Butteraugli comparison, and strategy-aware block reduction in one
+submission, then runs the shared iterative CPU policy while deliberately
+stopping at bounded policy output. Milestone 7 materializes the existing
+reconstructed-image and encoder-frame outputs and connects the full pipeline
+without a redundant CPU evaluation. Milestone 8 qualifies that complete path
+for rollout.
 
-The 2026-08-27 codestream integration made the encoder frame profile the single
-CPU/GPU option contract and added modular DC quantization parity to the resident
-Metal reconstruction. Fresh AppleClang 17 Release matrices pass 54/54 tests
-with the pinned reference enabled and 48/48 with it disabled, including
-codestream conformance, scalar/dispatched Butteraugli differentials, Metal DCT
-and AC-strategy search, and the full staged Metal AQ diagnostics.
+The pre-Milestone-6 2026-08-27 codestream integration made the encoder frame
+profile the single CPU/GPU option contract and added modular DC quantization
+parity to the resident Metal reconstruction. Its AppleClang 17 Release matrices
+passed 54/54 tests with the pinned reference enabled and 48/48 with it disabled,
+including codestream conformance, scalar/dispatched Butteraugli differentials,
+Metal DCT and AC-strategy search, and the full staged Metal AQ diagnostics.
 
 The integration checkpoint also moves staged AC candidate evaluation out of
 `GpuBackend` into `GpuAcStrategyEvaluation`. Metal returns one caller-owned

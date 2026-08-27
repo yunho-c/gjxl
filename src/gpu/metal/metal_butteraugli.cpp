@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/metal_butteraugli_encoding.h"
 
 #include <algorithm>
 #include <array>
@@ -501,6 +502,25 @@ public:
       return Status::OutOfMemory(
         "Unable to allocate Metal Butteraugli stage readback");
     }
+  }
+
+  [[nodiscard]] Status ValidateEncodingDescriptor(
+    const DeviceButteraugliComparisonDescriptor& descriptor) const {
+
+    if (!valid()) {
+      return Status::FailedPrecondition(
+        "Prepared Metal Butteraugli state is invalid");
+    }
+    return ValidateDeviceButteraugliComparisonDescriptor(
+      metal_, reference_linear_rgb(), extent(), descriptor);
+  }
+
+  void EncodeValidatedComparison(
+    MTL::ComputeCommandEncoder* encoder,
+    const DeviceButteraugliComparisonDescriptor& descriptor) {
+
+    capture_ready_ = false;
+    EncodeComparison(encoder, descriptor);
   }
 
 private:
@@ -1387,6 +1407,29 @@ private:
   std::optional<MetalButteraugliStage> capture_stage_;
   bool capture_ready_ = false;
 };
+
+Status ValidatePreparedMetalButteraugliEncoding(
+  PreparedDeviceButteraugli& prepared,
+  const DeviceButteraugliComparisonDescriptor& descriptor) {
+
+  auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "Prepared Butteraugli state is not a Metal implementation");
+  }
+  return metal->ValidateEncodingDescriptor(descriptor);
+}
+
+void EncodePreparedMetalButteraugli(
+  PreparedDeviceButteraugli& prepared,
+  MTL::ComputeCommandEncoder* encoder,
+  const DeviceButteraugliComparisonDescriptor& descriptor) {
+
+  auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
+  if (metal != nullptr && encoder != nullptr) {
+    metal->EncodeValidatedComparison(encoder, descriptor);
+  }
+}
 
 Status CreateButteraugliPipelines(
   MTL::Device* device,

@@ -56,8 +56,9 @@ public:
   PreparedAqEvaluation(const PreparedAqEvaluation&) = delete;
   PreparedAqEvaluation& operator=(const PreparedAqEvaluation&) = delete;
 
-  /// Production execution remains unavailable until the full AQ pipeline is
-  /// connected. Failure never changes caller-visible output.
+  /// Executes one complete resident reconstruction, filtering, Butteraugli,
+  /// and strategy-aware block reduction. Failure never changes caller-visible
+  /// output.
   [[nodiscard]] virtual Status Evaluate(
     AqEvaluationInput input,
     AqEvaluationOutput output) = 0;

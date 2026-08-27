@@ -35,6 +35,8 @@ struct AqResetParams {
   uint coefficient_value_count;
   uint dc_value_count;
   uint pixel_value_count;
+  uint block_value_count;
+  uint test_error_mask;
 };
 
 struct AqQuantizationProbeParams {
@@ -114,12 +116,14 @@ kernel void gjxl_aq_reset_reconstruction(
   device float* reconstructed_y [[buffer(6)]],
   device float* reconstructed_b [[buffer(7)]],
   device atomic_uint* error [[buffer(8)]],
-  constant AqResetParams& params [[buffer(9)]],
+  device float* block_distance [[buffer(9)]],
+  constant AqResetParams& params [[buffer(10)]],
   uint index [[thread_position_in_grid]]) {
 
   constexpr uint kPoison = 0x7fc12345u;
   if (index == 0u) {
-    atomic_store_explicit(error, 0u, memory_order_relaxed);
+    atomic_store_explicit(
+      error, params.test_error_mask, memory_order_relaxed);
   }
   if (index < params.coefficient_value_count) {
     gathered_pixels[index] = as_type<float>(kPoison);
@@ -134,6 +138,9 @@ kernel void gjxl_aq_reset_reconstruction(
     reconstructed_x[index] = as_type<float>(kPoison);
     reconstructed_y[index] = as_type<float>(kPoison);
     reconstructed_b[index] = as_type<float>(kPoison);
+  }
+  if (index < params.block_value_count) {
+    block_distance[index] = as_type<float>(kPoison);
   }
 }
 

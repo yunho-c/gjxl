@@ -21,27 +21,6 @@
 
 namespace gjxl::metal_internal {
 
-struct AqContractProbeParams {
-  uint32_t source_width;
-  uint32_t source_height;
-  uint32_t coding_width;
-  uint32_t coding_height;
-  uint32_t block_width;
-  uint32_t block_height;
-  uint32_t tile_width;
-  uint32_t tile_height;
-  uint32_t original_stride;
-  uint32_t coding_stride;
-  uint32_t strategy_stride;
-  uint32_t raw_quant_stride;
-  uint32_t inverse_sigma_stride;
-  uint32_t color_stride;
-  uint32_t output_stride;
-  uint32_t global_scale;
-  uint32_t quant_dc;
-  float option_probe;
-};
-
 struct AqReconstructionParams {
   uint32_t coding_width;
   uint32_t coding_height;
@@ -70,6 +49,21 @@ struct AqResetParams {
   uint32_t coefficient_value_count;
   uint32_t dc_value_count;
   uint32_t pixel_value_count;
+  uint32_t block_value_count;
+  uint32_t test_error_mask;
+};
+
+struct AqBlockReductionParams {
+  uint32_t source_width;
+  uint32_t source_height;
+  uint32_t distance_stride;
+  uint32_t block_stride;
+  uint32_t anchor_offset;
+  uint32_t anchor_count;
+  uint32_t pixel_width;
+  uint32_t pixel_height;
+  uint32_t covered_width;
+  uint32_t covered_height;
 };
 
 struct AqQuantizationProbeParams {
@@ -136,11 +130,14 @@ public:
   Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
   AqEvaluationMemoryStats memory_stats() const noexcept override;
 
-  Status RunProbe(AqEvaluationInput input, AqEvaluationOutput output);
-  Status SubmitProbe(AqEvaluationInput input);
-  Status FinishProbe(AqEvaluationOutput output);
+  Status SubmitEvaluation(AqEvaluationInput input);
+  Status FinishEvaluation(AqEvaluationOutput output);
+  Status FailNextUpload();
+  Status FailNextNumeric();
   Status FailNextReadback();
   Status SetWaitObserver(bool *observed);
+  Status RunBlockReduction(ConstPlaneF32View distance_map,
+                           PlaneF32View block_distance_map);
 
   Status RunReconstruction(AqEvaluationInput input,
                            MetalAqReconstructionSnapshotForTesting *snapshot);
@@ -175,9 +172,12 @@ private:
   void CompleteOperation();
   void Invalidate();
 
-  static void EncodeProbeSubmission(MetalBackend &backend,
-                                    MTL::ComputeCommandEncoder *encoder,
-                                    const void *context);
+  static void EncodeEvaluationSubmission(MetalBackend &backend,
+                                         MTL::ComputeCommandEncoder *encoder,
+                                         const void *context);
+  static void EncodeBlockReductionSubmission(
+      MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
+      const void *context);
   static void
   EncodeReconstructionSubmission(MetalBackend &backend,
                                  MTL::ComputeCommandEncoder *encoder,
@@ -195,6 +195,8 @@ private:
 
   void EncodePostprocess(MetalBackend &backend,
                          MTL::ComputeCommandEncoder *encoder) const;
+  void EncodeBlockReduction(MetalBackend &backend,
+                            MTL::ComputeCommandEncoder *encoder) const;
   [[nodiscard]] std::array<DevicePlaneView, 3>
   FinalFilteredImage() const noexcept;
   Status FinishPostprocess(MetalAqPostprocessSnapshotForTesting *snapshot);
@@ -214,9 +216,7 @@ private:
   DevicePlaneView inverse_sigma_;
   DevicePlaneView y_to_x_;
   DevicePlaneView y_to_b_;
-  DevicePlaneView probe_output_;
-  DevicePlaneView reduction_a_;
-  DevicePlaneView reduction_b_;
+  DevicePlaneView block_distance_;
   DevicePlaneView distance_map_;
   DevicePlaneView score_;
   DevicePlaneView gathered_pixels_;
@@ -241,8 +241,8 @@ private:
   int final_filter_scratch_index_ = -1;
   AqEvaluationOptions options_;
   AqEvaluationMemoryStats memory_stats_;
-  AqContractProbeParams probe_params_{};
   AqResetParams reset_params_{};
+  std::array<AqBlockReductionParams, 7> block_reduction_params_{};
   AqQuantizationProbeParams quant_probe_params_{};
   AqGaborishParams gaborish_params_{};
   std::array<AqEpfParams, 3> epf_params_{};
@@ -264,6 +264,8 @@ private:
   State state_ = State::kReady;
   std::unique_ptr<GpuSubmission> submission_;
   bool fail_next_readback_ = false;
+  bool fail_next_upload_ = false;
+  bool fail_next_numeric_ = false;
   bool fail_next_butteraugli_submission_ = false;
   bool fail_next_butteraugli_completion_ = false;
   bool fail_next_butteraugli_readback_ = false;

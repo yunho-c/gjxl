@@ -22,6 +22,7 @@
 #include "codec/quantization_tables_generated.h"
 #include "core/quantizer.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
+#include "gpu/metal/metal_butteraugli_encoding.h"
 #include "gpu/metal/metal_status.h"
 #include "gpu/scratch.h"
 
@@ -29,7 +30,7 @@ namespace gjxl::metal_internal {
 namespace {
 
 inline constexpr size_t kBufferAlignment = 256;
-inline constexpr size_t kReductionThreadCount = 256;
+inline constexpr NS::UInteger kBlockReductionThreadCount = 256;
 inline constexpr size_t kQuantTableValueCount = 11904;
 inline constexpr std::array<AcStrategyType, 7> kSupportedAqStrategies = {
     AcStrategyType::kDct8,     AcStrategyType::kDct16x16,
@@ -38,13 +39,13 @@ inline constexpr std::array<AcStrategyType, 7> kSupportedAqStrategies = {
     AcStrategyType::kDct16x32,
 };
 
-static_assert(std::is_standard_layout_v<AqContractProbeParams>);
-static_assert(std::is_trivially_copyable_v<AqContractProbeParams>);
-static_assert(sizeof(AqContractProbeParams) == 72);
 static_assert(std::is_standard_layout_v<AqReconstructionParams>);
 static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
 static_assert(sizeof(AqReconstructionParams) == 84);
-static_assert(sizeof(AqResetParams) == 12);
+static_assert(sizeof(AqResetParams) == 20);
+static_assert(std::is_standard_layout_v<AqBlockReductionParams>);
+static_assert(std::is_trivially_copyable_v<AqBlockReductionParams>);
+static_assert(sizeof(AqBlockReductionParams) == 40);
 static_assert(sizeof(AqQuantizationProbeParams) == 24);
 static_assert(std::is_standard_layout_v<AqGaborishParams>);
 static_assert(std::is_trivially_copyable_v<AqGaborishParams>);
@@ -82,9 +83,6 @@ static_assert(sizeof(AqOpsinToLinearParams) == 20);
 [[nodiscard]] bool FinitePositive(float value) noexcept {
   return std::isfinite(value) && value > 0.0f;
 }
-
-[[nodiscard]] float OptionProbeValue(
-  const AqEvaluationOptions& options) noexcept;
 
 template <typename T>
 [[nodiscard]] bool ValidHostPlaneLayout(PlaneView<T> plane) noexcept {
@@ -139,10 +137,6 @@ template <typename T>
       return Status::InvalidArgument(
         "Prepared AQ EPF channel scales are invalid");
     }
-  }
-  if (!std::isfinite(OptionProbeValue(options))) {
-    return Status::InvalidArgument(
-      "Prepared AQ options exceed the contract-probe numeric range");
   }
   return Status::Ok();
 }
@@ -285,23 +279,6 @@ void AppendQuantTable(const Range& values, std::vector<float>* packed) {
     return Status::Internal("Prepared AQ quantization table layout changed");
   }
   return Status::Ok();
-}
-
-[[nodiscard]] float OptionProbeValue(
-  const AqEvaluationOptions& options) noexcept {
-
-  float value = QuantizationMatrixMultiplier(options.profile.x_qm_scale) *
-    0.0625f;
-  value += QuantizationMatrixMultiplier(options.profile.b_qm_scale) * 0.03125f;
-  value += options.profile.intensity_target * (1.0f / 1024.0f);
-  value += options.butteraugli.hf_asymmetry * (1.0f / 64.0f);
-  value += options.butteraugli.x_multiplier * (1.0f / 128.0f);
-  value += options.butteraugli.intensity_target * (1.0f / 2048.0f);
-  value += options.profile.loop_filter.gaborish ? 0.25f : 0.0f;
-  value += static_cast<float>(
-    options.profile.loop_filter.epf_options.iterations) *
-    (1.0f / 64.0f);
-  return value;
 }
 
 [[nodiscard]] Status CreateAqPipeline(
@@ -530,8 +507,6 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
 
-  const size_t partial_count = std::max<size_t>(
-      1, (block_count_ + kReductionThreadCount - 1) / kReductionThreadCount);
   size_t staging_bytes = 0;
   status = AddPlannedPlane(DeviceElementType::kI32, block_extent_,
                            block_extent_.width, &staging_bytes);
@@ -559,14 +534,6 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     return status;
   status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
                            block_extent_.width, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kF32, {partial_count, 1},
-                           partial_count, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kF32, {partial_count, 1},
-                           partial_count, &staging_bytes);
   if (!status.ok())
     return status;
   status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
@@ -701,17 +668,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     return status;
   status = staging_.AllocatePlane(DeviceElementType::kF32, block_extent_,
                                   block_extent_.width, kBufferAlignment,
-                                  &probe_output_);
-  if (!status.ok())
-    return status;
-  status =
-      staging_.AllocatePlane(DeviceElementType::kF32, {partial_count, 1},
-                             partial_count, kBufferAlignment, &reduction_a_);
-  if (!status.ok())
-    return status;
-  status =
-      staging_.AllocatePlane(DeviceElementType::kF32, {partial_count, 1},
-                             partial_count, kBufferAlignment, &reduction_b_);
+                                  &block_distance_);
   if (!status.ok())
     return status;
   status = staging_.AllocatePlane(DeviceElementType::kF32, source_extent_,
@@ -830,11 +787,25 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         QuantizationMatrixMultiplier(options_.profile.x_qm_scale),
         QuantizationMatrixMultiplier(options_.profile.b_qm_scale),
     };
+    block_reduction_params_[batch_index] = {
+        static_cast<uint32_t>(source_extent_.width),
+        static_cast<uint32_t>(source_extent_.height),
+        static_cast<uint32_t>(distance_map_.row_stride),
+        static_cast<uint32_t>(block_distance_.row_stride),
+        static_cast<uint32_t>(batch.anchor_offset),
+        static_cast<uint32_t>(batch.anchor_count),
+        static_cast<uint32_t>(info->pixel_extent().width),
+        static_cast<uint32_t>(info->pixel_extent().height),
+        static_cast<uint32_t>(info->covered_blocks.width),
+        static_cast<uint32_t>(info->covered_blocks.height),
+    };
   }
   reset_params_ = {
       static_cast<uint32_t>(coefficient_value_count_),
       static_cast<uint32_t>(3 * block_count_),
       static_cast<uint32_t>(pixel_count_),
+      static_cast<uint32_t>(block_count_),
+      0,
   };
 
   gaborish_params_ = {
@@ -908,20 +879,17 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   return Status::Ok();
 }
 
-Status MetalPreparedAqEvaluation::Evaluate(AqEvaluationInput,
-                                           AqEvaluationOutput) {
-
-  std::unique_lock lock(mutex_, std::try_to_lock);
-  if (!lock.owns_lock() || state_ == State::kBusy) {
-    return Status::FailedPrecondition(
-        "Prepared AQ evaluation is already in use");
+Status MetalPreparedAqEvaluation::Evaluate(AqEvaluationInput input,
+                                           AqEvaluationOutput output) {
+  Status status = ValidateOutput(output);
+  if (!status.ok()) {
+    return status;
   }
-  if (state_ == State::kInvalid) {
-    return Status::FailedPrecondition(
-        "Prepared AQ evaluation was invalidated by an operational failure");
+  status = SubmitEvaluation(input);
+  if (!status.ok()) {
+    return status;
   }
-  return Status::Unavailable(
-      "Metal AQ production evaluation has remaining stages to connect");
+  return FinishEvaluation(output);
 }
 
 AqEvaluationMemoryStats
@@ -929,19 +897,25 @@ MetalPreparedAqEvaluation::memory_stats() const noexcept {
   return memory_stats_;
 }
 
-Status MetalPreparedAqEvaluation::RunProbe(AqEvaluationInput input,
-                                           AqEvaluationOutput output) {
-  Status status = ValidateOutput(output);
-  if (!status.ok())
-    return status;
-  status = SubmitProbe(input);
-  if (!status.ok())
-    return status;
-  return FinishProbe(output);
-}
-
-Status MetalPreparedAqEvaluation::SubmitProbe(AqEvaluationInput input) {
+Status MetalPreparedAqEvaluation::SubmitEvaluation(AqEvaluationInput input) {
   Status status = ValidateInput(input);
+  if (!status.ok()) {
+    return status;
+  }
+
+  if (butteraugli_ == nullptr) {
+    return Status::FailedPrecondition(
+      "Prepared AQ Butteraugli state is missing");
+  }
+  status = ValidatePreparedMetalButteraugliEncoding(
+    *butteraugli_,
+    {
+      .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                 reconstructed_linear_[1],
+                                 reconstructed_linear_[2]}}},
+      .distance_map = distance_map_,
+      .score = score_,
+    });
   if (!status.ok()) {
     return status;
   }
@@ -949,41 +923,41 @@ Status MetalPreparedAqEvaluation::SubmitProbe(AqEvaluationInput input) {
   status = BeginOperation();
   if (!status.ok())
     return status;
+  bool fail_upload = false;
+  bool fail_numeric = false;
+  {
+    std::lock_guard lock(mutex_);
+    fail_upload = fail_next_upload_;
+    fail_numeric = fail_next_numeric_;
+    fail_next_upload_ = false;
+    fail_next_numeric_ = false;
+  }
+  if (fail_upload) {
+    Invalidate();
+    return Status::DeviceError("Injected Metal AQ upload failure");
+  }
+  reset_params_.test_error_mask = fail_numeric ? 512u : 0u;
   status = UploadInput(input);
   if (!status.ok()) {
     Invalidate();
     return status;
   }
 
-  probe_params_ = {
-      static_cast<uint32_t>(source_extent_.width),
-      static_cast<uint32_t>(source_extent_.height),
-      static_cast<uint32_t>(coding_extent_.width),
-      static_cast<uint32_t>(coding_extent_.height),
-      static_cast<uint32_t>(block_extent_.width),
-      static_cast<uint32_t>(block_extent_.height),
-      static_cast<uint32_t>(tile_extent_.width),
-      static_cast<uint32_t>(tile_extent_.height),
-      static_cast<uint32_t>(original_[0].row_stride),
-      static_cast<uint32_t>(coding_[0].row_stride),
-      static_cast<uint32_t>(strategies_.row_stride),
-      static_cast<uint32_t>(raw_quant_.row_stride),
-      static_cast<uint32_t>(inverse_sigma_.row_stride),
-      static_cast<uint32_t>(y_to_x_.row_stride),
-      static_cast<uint32_t>(probe_output_.row_stride),
-      input.quantizer.global_scale,
-      input.quantizer.quant_dc,
-      OptionProbeValue(options_),
-  };
+  for (AqReconstructionParams& params : reconstruction_params_) {
+    params.global_scale = input.quantizer.global_scale;
+    params.quant_dc = input.quantizer.quant_dc;
+  }
 
   std::unique_ptr<GpuSubmission> submission;
   status = backend_->SubmitCompute(
-      "gjxl prepared AQ contract probe",
-      &MetalPreparedAqEvaluation::EncodeProbeSubmission, this, &submission);
+      "gjxl prepared AQ production evaluation",
+      &MetalPreparedAqEvaluation::EncodeEvaluationSubmission, this,
+      &submission);
   if (!status.ok() || submission == nullptr) {
     Invalidate();
     return status.ok()
-               ? Status::Internal("Prepared AQ probe returned no submission")
+               ? Status::Internal(
+                   "Prepared AQ evaluation returned no submission")
                : status;
   }
   std::lock_guard lock(mutex_);
@@ -991,7 +965,7 @@ Status MetalPreparedAqEvaluation::SubmitProbe(AqEvaluationInput input) {
   return Status::Ok();
 }
 
-Status MetalPreparedAqEvaluation::FinishProbe(AqEvaluationOutput output) {
+Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
   Status status = ValidateOutput(output);
   if (!status.ok()) {
     return status;
@@ -1001,19 +975,45 @@ Status MetalPreparedAqEvaluation::FinishProbe(AqEvaluationOutput output) {
   if (!status.ok())
     return status;
 
-  const size_t output_bytes = block_count_ * sizeof(float);
-  status = backend_->CopyDeviceToHost(*probe_output_.buffer, readback_.data(),
-                                      output_bytes, probe_output_.offset_bytes);
+  uint32_t device_error = 0;
+  status = backend_->CopyDeviceToHost(
+    *reconstruction_error_.buffer, &device_error, sizeof(device_error),
+    reconstruction_error_.offset_bytes);
+  if (!status.ok() || device_error != 0) {
+    Invalidate();
+    return status.ok()
+      ? Status::DeviceError(
+          "Metal AQ evaluation produced invalid device numerics (flag " +
+          std::to_string(device_error) + ")")
+      : status;
+  }
+
+  const size_t row_bytes = block_extent_.width * sizeof(float);
+  for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
+    status = backend_->CopyDeviceToHost(
+      *block_distance_.buffer,
+      readback_.data() + y * block_extent_.width,
+      row_bytes,
+      block_distance_.offset_bytes +
+        y * block_distance_.row_stride * sizeof(float));
+  }
+  float score = 0.0f;
+  if (status.ok()) {
+    status = backend_->CopyDeviceToHost(
+      *score_.buffer, &score, sizeof(score), score_.offset_bytes);
+  }
   if (!status.ok()) {
     Invalidate();
     return status;
   }
-  float score = 0.0f;
-  status = backend_->CopyDeviceToHost(*score_.buffer, &score, sizeof(score),
-                                      score_.offset_bytes);
-  if (!status.ok()) {
+
+  if (!std::ranges::all_of(readback_, [](float value) {
+        return std::isfinite(value) && value >= 0.0f;
+      }) ||
+      !std::isfinite(score) || score < 0.0f) {
     Invalidate();
-    return status;
+    return Status::Internal(
+      "Metal AQ bounded readback is not finite and non-negative");
   }
 
   for (size_t y = 0; y < block_extent_.height; ++y) {
@@ -1022,6 +1022,126 @@ Status MetalPreparedAqEvaluation::FinishProbe(AqEvaluationOutput output) {
   }
   *output.score = static_cast<double>(score);
   CompleteOperation();
+  return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::RunBlockReduction(
+    ConstPlaneF32View distance_map, PlaneF32View block_distance_map) {
+
+  if (!ValidHostPlaneLayout(distance_map) ||
+      distance_map.extent != source_extent_ ||
+      !ValidHostPlaneLayout(block_distance_map) ||
+      block_distance_map.extent != block_extent_) {
+    return Status::InvalidArgument(
+      "Metal AQ block-reduction diagnostic geometry is invalid");
+  }
+  for (size_t y = 0; y < distance_map.extent.height; ++y) {
+    for (size_t x = 0; x < distance_map.extent.width; ++x) {
+      const float value = distance_map.Row(y)[x];
+      if (!std::isfinite(value) || value < 0.0f) {
+        return Status::InvalidArgument(
+          "Metal AQ block-reduction input is invalid");
+      }
+    }
+  }
+
+  Status status = BeginOperation();
+  if (!status.ok()) {
+    return status;
+  }
+  status = UploadPlane(*backend_, distance_map, distance_map_);
+  std::fill(
+    readback_.begin(), readback_.end(),
+    std::numeric_limits<float>::quiet_NaN());
+  if (status.ok()) {
+    status = UploadPlane(
+      *backend_,
+      ConstPlaneF32View{
+        readback_.data(), block_extent_, block_extent_.width},
+      block_distance_);
+  }
+  const uint32_t zero = 0;
+  if (status.ok()) {
+    status = backend_->CopyHostToDevice(
+      *reconstruction_error_.buffer, &zero, sizeof(zero),
+      reconstruction_error_.offset_bytes);
+  }
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+
+  std::unique_ptr<GpuSubmission> submission;
+  status = backend_->SubmitCompute(
+    "gjxl AQ block-reduction diagnostic",
+    &MetalPreparedAqEvaluation::EncodeBlockReductionSubmission,
+    this, &submission);
+  if (!status.ok() || submission == nullptr) {
+    Invalidate();
+    return status.ok()
+      ? Status::Internal(
+          "Metal AQ block-reduction diagnostic returned no submission")
+      : status;
+  }
+  {
+    std::lock_guard lock(mutex_);
+    submission_ = std::move(submission);
+  }
+  status = WaitForOperation();
+  if (!status.ok()) {
+    return status;
+  }
+
+  uint32_t device_error = 0;
+  status = backend_->CopyDeviceToHost(
+    *reconstruction_error_.buffer, &device_error, sizeof(device_error),
+    reconstruction_error_.offset_bytes);
+  const size_t row_bytes = block_extent_.width * sizeof(float);
+  for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
+    status = backend_->CopyDeviceToHost(
+      *block_distance_.buffer,
+      readback_.data() + y * block_extent_.width,
+      row_bytes,
+      block_distance_.offset_bytes +
+        y * block_distance_.row_stride * sizeof(float));
+  }
+  if (!status.ok() || device_error != 0 ||
+      !std::ranges::all_of(readback_, [](float value) {
+        return std::isfinite(value) && value >= 0.0f;
+      })) {
+    Invalidate();
+    return status.ok()
+      ? Status::DeviceError(
+          "Metal AQ block reduction produced invalid device output")
+      : status;
+  }
+
+  for (size_t y = 0; y < block_extent_.height; ++y) {
+    std::copy_n(
+      readback_.data() + y * block_extent_.width,
+      block_extent_.width, block_distance_map.Row(y));
+  }
+  CompleteOperation();
+  return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::FailNextUpload() {
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || state_ != State::kReady) {
+    return Status::FailedPrecondition(
+        "Prepared AQ upload injection requires a ready object");
+  }
+  fail_next_upload_ = true;
+  return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::FailNextNumeric() {
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || state_ != State::kReady) {
+    return Status::FailedPrecondition(
+        "Prepared AQ numeric injection requires a ready object");
+  }
+  fail_next_numeric_ = true;
   return Status::Ok();
 }
 
@@ -1210,55 +1330,61 @@ void MetalPreparedAqEvaluation::Invalidate() {
   state_ = State::kInvalid;
 }
 
-void MetalPreparedAqEvaluation::EncodeProbeSubmission(
-    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
-    const void *context) {
+void MetalPreparedAqEvaluation::EncodeBlockReduction(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
 
-  const auto &self = *static_cast<const MetalPreparedAqEvaluation *>(context);
-  encoder->setComputePipelineState(backend.aq_pipelines_.contract_probe.get());
-  for (size_t channel = 0; channel < 3; ++channel) {
-    const MetalBuffer *buffer =
-        MetalBackend::AsMetalBuffer(*self.original_[channel].buffer);
-    encoder->setBuffer(buffer->handle(), self.original_[channel].offset_bytes,
-                       channel);
-  }
-  for (size_t channel = 0; channel < 3; ++channel) {
-    const MetalBuffer *buffer =
-        MetalBackend::AsMetalBuffer(*self.coding_[channel].buffer);
-    encoder->setBuffer(buffer->handle(), self.coding_[channel].offset_bytes,
-                       channel + 3);
-  }
-  const std::array<DevicePlaneView, 7> bindings = {
-      self.strategies_,    self.quant_tables_, self.raw_quant_,
-      self.inverse_sigma_, self.y_to_x_,       self.y_to_b_,
-      self.probe_output_,
-  };
-  for (size_t i = 0; i < bindings.size(); ++i) {
-    MetalBuffer *buffer = MetalBackend::AsMetalBuffer(*bindings[i].buffer);
-    encoder->setBuffer(buffer->handle(), bindings[i].offset_bytes, i + 6);
-  }
-  encoder->setBytes(&self.probe_params_, sizeof(self.probe_params_), 13);
-  MetalBackend::DispatchPlane(encoder, self.block_extent_);
-
-  ConstDevicePlaneView input = self.probe_output_;
-  size_t input_count = self.block_count_;
-  bool use_a = true;
-  while (true) {
-    const size_t output_count =
-        (input_count + kReductionThreadCount - 1) / kReductionThreadCount;
-    DevicePlaneView destination =
-        output_count == 1 ? self.score_
-                          : (use_a ? self.reduction_a_ : self.reduction_b_);
-    backend.EncodeReductionPass(encoder, input, input_count, destination);
-    if (output_count == 1) {
-      break;
+  encoder->setComputePipelineState(backend.aq_pipelines_.block_reduction.get());
+  const MetalBuffer* distance =
+    MetalBackend::AsMetalBuffer(*distance_map_.buffer);
+  const MetalBuffer* anchors = MetalBackend::AsMetalBuffer(*anchors_.buffer);
+  MetalBuffer* block = MetalBackend::AsMetalBuffer(*block_distance_.buffer);
+  MetalBuffer* error =
+    MetalBackend::AsMetalBuffer(*reconstruction_error_.buffer);
+  for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
+    const AqStrategyBatch& batch = batches_[batch_index];
+    if (batch.anchor_count == 0) {
+      continue;
     }
-    input = destination;
-    input.extent = {output_count, 1};
-    input.row_stride = output_count;
-    input_count = output_count;
-    use_a = !use_a;
+    encoder->setBuffer(distance->handle(), distance_map_.offset_bytes, 0);
+    encoder->setBuffer(anchors->handle(), anchors_.offset_bytes, 1);
+    encoder->setBuffer(block->handle(), block_distance_.offset_bytes, 2);
+    encoder->setBuffer(
+      error->handle(), reconstruction_error_.offset_bytes, 3);
+    encoder->setBytes(
+      &block_reduction_params_[batch_index],
+      sizeof(block_reduction_params_[batch_index]), 4);
+    encoder->dispatchThreadgroups(
+      MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
+      MTL::Size(kBlockReductionThreadCount, 1, 1));
   }
+}
+
+void MetalPreparedAqEvaluation::EncodeBlockReductionSubmission(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    const void* context) {
+
+  const auto& self = *static_cast<const MetalPreparedAqEvaluation*>(context);
+  self.EncodeBlockReduction(backend, encoder);
+}
+
+void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    const void* context) {
+
+  EncodeReconstructionSubmission(backend, encoder, context);
+  auto& self = *static_cast<MetalPreparedAqEvaluation*>(
+    const_cast<void*>(context));
+  self.EncodePostprocess(backend, encoder);
+  EncodePreparedMetalButteraugli(
+    *self.butteraugli_, encoder,
+    {
+      .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                 self.reconstructed_linear_[1],
+                                 self.reconstructed_linear_[2]}}},
+      .distance_map = self.distance_map_,
+      .score = self.score_,
+    });
+  self.EncodeBlockReduction(backend, encoder);
 }
 
 Status CreateAqPipelines(
@@ -1271,19 +1397,19 @@ Status CreateAqPipelines(
   }
   AqPipelines pipelines;
   Status status = CreateAqPipeline(
-    device, library, "gjxl_aq_contract_probe", &pipelines.contract_probe);
+    device, library, "gjxl_aq_reduce_block_distance_f32",
+    &pipelines.block_reduction);
   if (!status.ok()) {
     return {
       status.code(),
-      std::string("Failed to create required AQ contract pipeline: ") +
+      std::string("Failed to create required AQ block-reduction pipeline: ") +
         std::string(status.message()),
     };
   }
-  constexpr NS::UInteger kProbeThreads = 8 * 8;
-  if (pipelines.contract_probe->maxTotalThreadsPerThreadgroup() <
-      kProbeThreads) {
+  if (pipelines.block_reduction->maxTotalThreadsPerThreadgroup() <
+      kBlockReductionThreadCount) {
     return Status::Unavailable(
-      "Metal cannot launch the AQ contract-probe threadgroup");
+      "Metal cannot launch the AQ block-reduction threadgroup");
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
@@ -1376,41 +1502,63 @@ MetalPreparedAqEvaluation* AsMetalPrepared(
 
 }  // namespace
 
-Status RunMetalAqContractProbeForTesting(
-  PreparedAqEvaluation& prepared,
-  AqEvaluationInput input,
-  AqEvaluationOutput output) {
-
-  MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
-  if (metal == nullptr) {
-    return Status::InvalidArgument(
-      "AQ contract probe requires a Metal prepared evaluation");
-  }
-  return metal->RunProbe(input, output);
-}
-
-Status SubmitMetalAqContractProbeForTesting(
+Status SubmitMetalAqEvaluationForTesting(
   PreparedAqEvaluation& prepared,
   AqEvaluationInput input) {
 
   MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
   if (metal == nullptr) {
     return Status::InvalidArgument(
-      "AQ contract probe requires a Metal prepared evaluation");
+      "AQ evaluation seam requires a Metal prepared evaluation");
   }
-  return metal->SubmitProbe(input);
+  return metal->SubmitEvaluation(input);
 }
 
-Status FinishMetalAqContractProbeForTesting(
+Status FinishMetalAqEvaluationForTesting(
   PreparedAqEvaluation& prepared,
   AqEvaluationOutput output) {
 
   MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
   if (metal == nullptr) {
     return Status::InvalidArgument(
-      "AQ contract probe requires a Metal prepared evaluation");
+      "AQ evaluation seam requires a Metal prepared evaluation");
   }
-  return metal->FinishProbe(output);
+  return metal->FinishEvaluation(output);
+}
+
+Status RunMetalAqBlockReductionForTesting(
+  PreparedAqEvaluation& prepared,
+  ConstPlaneF32View distance_map,
+  PlaneF32View block_distance_map) {
+
+  MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "AQ block reduction requires a Metal prepared evaluation");
+  }
+  return metal->RunBlockReduction(distance_map, block_distance_map);
+}
+
+Status FailNextMetalAqUploadForTesting(
+  PreparedAqEvaluation& prepared) {
+
+  MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "AQ upload injection requires a Metal prepared evaluation");
+  }
+  return metal->FailNextUpload();
+}
+
+Status FailNextMetalAqNumericForTesting(
+  PreparedAqEvaluation& prepared) {
+
+  MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "AQ numeric injection requires a Metal prepared evaluation");
+  }
+  return metal->FailNextNumeric();
 }
 
 Status FailNextMetalAqReadbackForTesting(

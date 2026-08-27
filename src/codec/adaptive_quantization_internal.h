@@ -46,6 +46,59 @@ struct AdaptiveQuantizationProfile {
   operator==(const AdaptiveQuantizationProfile&) const = default;
 };
 
+/// Bounded result returned by one adaptive-quantization evaluator.
+struct AdaptiveQuantizationEvaluation {
+  std::vector<float> block_distance;
+  Quantizer quantizer;
+  double score = 0.0;
+};
+
+/// Supplies the expensive encode/reconstruct/measure portion of AQ while the
+/// deterministic quant-field policy remains shared on the CPU.
+class AdaptiveQuantizationEvaluator {
+public:
+  virtual ~AdaptiveQuantizationEvaluator() = default;
+
+  AdaptiveQuantizationEvaluator(const AdaptiveQuantizationEvaluator&) = delete;
+  AdaptiveQuantizationEvaluator& operator=(
+    const AdaptiveQuantizationEvaluator&) = delete;
+
+  [[nodiscard]] virtual Status Evaluate(
+    ConstPlaneF32View quant_field,
+    float quant_dc,
+    AdaptiveQuantizationEvaluation* evaluation,
+    EvaluationProfile* profile) = 0;
+
+protected:
+  AdaptiveQuantizationEvaluator() = default;
+};
+
+/// Atomic scratch result of the shared bounded AQ policy.
+struct AdaptiveQuantizationPolicyResult {
+  std::vector<float> quant_field;
+  std::vector<float> block_distance;
+  std::vector<double> score_history;
+};
+
+/// Validates the input and option contract shared by CPU and GPU evaluators.
+[[nodiscard]] Status ValidateAdaptiveQuantizationPolicyInputs(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options);
+
+/// Runs initial adjustment, bounds, clamp, power, rounding-progress, and
+/// iteration order identically for every evaluator.
+[[nodiscard]] Status RunAdaptiveQuantizationPolicy(
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationEvaluator& evaluator,
+  AdaptiveQuantizationPolicyResult* result,
+  AdaptiveQuantizationProfile* profile);
+
 /// Runs the production AQ implementation and atomically returns diagnostics.
 ///
 /// The profile has one evaluation entry per score. On failure, both the

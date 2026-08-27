@@ -78,10 +78,12 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     BindPlane(encoder, self.reconstructed_[channel], channel + 5);
   }
   BindPlane(encoder, self.reconstruction_error_, 8);
-  encoder->setBytes(&self.reset_params_, sizeof(self.reset_params_), 9);
+  BindPlane(encoder, self.block_distance_, 9);
+  encoder->setBytes(&self.reset_params_, sizeof(self.reset_params_), 10);
   DispatchThreads1d(encoder,
                     std::max({self.coefficient_value_count_,
-                              3 * self.block_count_, self.pixel_count_}));
+                              3 * self.block_count_, self.pixel_count_,
+                              self.block_count_}));
 
   const MetalBuffer *anchors =
       MetalBackend::AsMetalBuffer(*self.anchors_.buffer);

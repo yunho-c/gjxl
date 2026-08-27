@@ -8,22 +8,29 @@
 
 namespace gjxl::metal_internal {
 
-/// Runs the transitional Milestone 2 upload/dispatch/readback contract probe.
-/// This is deliberately not part of the production AQ operation.
-[[nodiscard]] Status RunMetalAqContractProbeForTesting(
-  PreparedAqEvaluation& prepared,
-  AqEvaluationInput input,
-  AqEvaluationOutput output);
-
-/// Leaves one probe submission outstanding so tests can exercise lifetime and
-/// non-reentrancy behavior. Finish must be called before ordinary reuse.
-[[nodiscard]] Status SubmitMetalAqContractProbeForTesting(
+/// Leaves one production evaluation outstanding so tests can exercise
+/// lifetime and non-reentrancy behavior. Finish must precede ordinary reuse.
+[[nodiscard]] Status SubmitMetalAqEvaluationForTesting(
   PreparedAqEvaluation& prepared,
   AqEvaluationInput input);
 
-[[nodiscard]] Status FinishMetalAqContractProbeForTesting(
+[[nodiscard]] Status FinishMetalAqEvaluationForTesting(
   PreparedAqEvaluation& prepared,
   AqEvaluationOutput output);
+
+/// Runs only the strategy-aware AQ reduction against a controlled pixel map.
+[[nodiscard]] Status RunMetalAqBlockReductionForTesting(
+  PreparedAqEvaluation& prepared,
+  ConstPlaneF32View distance_map,
+  PlaneF32View block_distance_map);
+
+/// Injects a failure at the next production input upload boundary.
+[[nodiscard]] Status FailNextMetalAqUploadForTesting(
+  PreparedAqEvaluation& prepared);
+
+/// Injects a device numeric flag into the next production submission.
+[[nodiscard]] Status FailNextMetalAqNumericForTesting(
+  PreparedAqEvaluation& prepared);
 
 /// Injects a failure after successful GPU completion but before readback.
 [[nodiscard]] Status FailNextMetalAqReadbackForTesting(
