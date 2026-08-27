@@ -10,10 +10,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <span>
 #include <string_view>
 #include <vector>
 
+#include "butteraugli_test_tolerances.h"
 #include "codec/color_transform.h"
 #include "codec/quantization_pipeline.h"
 
@@ -182,6 +185,84 @@ struct PipelineStorage {
   std::vector<double> score_history;
 };
 
+struct PinnedPipelineExpectation {
+  std::span<const double> score_history;
+  std::span<const float> final_quant;
+  std::span<const int32_t> raw_quant;
+};
+
+struct PipelinePinErrors {
+  double score = 0.0;
+  float final_quant = 0.0f;
+};
+
+PipelinePinErrors g_pipeline_pin_errors;
+
+// Captured from the pinned scalar libjxl facade on the current encoder-facing
+// frame path. These pin the complete pipeline independently of the native
+// implementation under test.
+constexpr std::array<double, 3> kGradientScores = {
+  0.77270066738128662, 0.74707221984863281, 0.83709925413131714,
+};
+constexpr std::array<float, 6> kGradientQuant = {
+  0.481174707f, 0.481174707f, 0.42561236f,
+  0.481174707f, 0.481174707f, 0.46136421f,
+};
+constexpr std::array<int32_t, 6> kGradientRaw = {5, 5, 4, 5, 5, 5};
+
+constexpr std::array<double, 3> kTextureScores = {
+  1.3905420303344727, 1.2227764129638672, 1.1728103160858154,
+};
+constexpr std::array<float, 12> kTextureQuant = {
+  0.288997948f, 0.288997948f, 0.288997948f, 0.288997948f,
+  0.288997948f, 0.288997948f, 0.288997948f, 0.288997948f,
+  0.238946572f, 0.238946572f, 0.275047153f, 0.293088138f,
+};
+constexpr std::array<int32_t, 12> kTextureRaw = {
+  5, 5, 5, 5, 5, 5, 5, 5, 4, 4, 5, 5,
+};
+
+constexpr std::array<double, 3> kEdgeScores = {
+  0.38765567541122437, 0.25208407640457153, 0.5032426118850708,
+};
+constexpr std::array<float, 15> kEdgeQuant = {
+  0.373375535f, 0.348478884f, 0.308532476f, 0.347244233f, 0.347244233f,
+  0.373375535f, 0.348478884f, 0.308532476f, 0.347244233f, 0.347244233f,
+  0.365922272f, 0.336216688f, 0.29024151f, 0.341497988f, 0.355246842f,
+};
+constexpr std::array<int32_t, 15> kEdgeRaw = {
+  6, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 4, 5, 5,
+};
+
+constexpr std::array<double, 3> kSaturatedScores = {
+  1.2866182327270508, 0.93513578176498413, 1.0999740362167358,
+};
+constexpr std::array<float, 12> kSaturatedQuant = {
+  0.35565272f, 0.351121515f, 0.341823757f, 0.34577021f,
+  0.338695794f, 0.295190215f, 0.334397554f, 0.39328593f,
+  0.338091403f, 0.302160114f, 0.316598177f, 0.339293212f,
+};
+constexpr std::array<int32_t, 12> kSaturatedRaw = {
+  5, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5,
+};
+
+constexpr std::array<double, 3> kColorTileBoundaryScores = {
+  0.72999769449234009, 1.1198194026947021, 1.0420322418212891,
+};
+constexpr std::array<float, 27> kColorTileBoundaryQuant = {
+  0.533921301f, 0.534172654f, 0.531107306f, 0.511819124f, 0.512488067f,
+  0.504248977f, 0.530951858f, 0.504164755f, 0.499569744f,
+  0.48984915f, 0.507297099f, 0.531107306f, 0.511819124f, 0.48673296f,
+  0.504248977f, 0.49812749f, 0.454993427f, 0.472017586f,
+  0.456338674f, 0.436746508f, 0.411371619f, 0.404257655f, 0.398665518f,
+  0.408385038f, 0.458916575f, 0.426485449f, 0.444808453f,
+};
+constexpr std::array<int32_t, 27> kColorTileBoundaryRaw = {
+  6, 6, 6, 6, 6, 5, 6, 5, 5,
+  5, 5, 6, 6, 5, 5, 5, 5, 5,
+  5, 5, 4, 4, 4, 4, 5, 5, 5,
+};
+
 bool CheckResult(
   const PipelineStorage& result,
   size_t expected_score_count = 3,
@@ -261,10 +342,60 @@ bool CheckResult(
   return true;
 }
 
+bool CheckPinnedResult(
+  const PipelineStorage& result,
+  PinnedPipelineExpectation expected) {
+
+  const size_t block_count =
+    result.block_extent.width * result.block_extent.height;
+  if (result.score_history.size() != expected.score_history.size() ||
+      block_count != expected.final_quant.size() ||
+      block_count != expected.raw_quant.size()) {
+    return false;
+  }
+  for (size_t index = 0; index < expected.score_history.size(); ++index) {
+    const double error =
+      std::abs(result.score_history[index] - expected.score_history[index]);
+    g_pipeline_pin_errors.score =
+      std::max(g_pipeline_pin_errors.score, error);
+    if (error >
+        gjxl::butteraugli_test::kPinnedAqTolerance) {
+      std::cerr << "Pinned pipeline score differs at " << index
+                << ": actual=" << std::setprecision(17)
+                << result.score_history[index]
+                << " expected=" << expected.score_history[index]
+                << " error=" << error << '\n';
+      return false;
+    }
+  }
+  for (size_t index = 0; index < block_count; ++index) {
+    const size_t x = index % result.block_extent.width;
+    const size_t y = index / result.block_extent.width;
+    const size_t strided_index = y * result.block_stride + x;
+    const float quant_error = std::abs(
+      result.final_quant[strided_index] - expected.final_quant[index]);
+    g_pipeline_pin_errors.final_quant =
+      std::max(g_pipeline_pin_errors.final_quant, quant_error);
+    if (quant_error >
+          gjxl::butteraugli_test::kPinnedAqTolerance ||
+        result.frame.raw_quant_field().Row(y)[x] != expected.raw_quant[index]) {
+      std::cerr << "Pinned pipeline field differs at " << index
+                << ": quant=" << std::setprecision(9)
+                << result.final_quant[strided_index]
+                << " expected_quant=" << expected.final_quant[index]
+                << " raw=" << result.frame.raw_quant_field().Row(y)[x]
+                << " expected_raw=" << expected.raw_quant[index] << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
 bool RunFixture(
   Fixture fixture,
   std::string_view name,
-  gjxl::Extent2D original_extent) {
+  gjxl::Extent2D original_extent,
+  PinnedPipelineExpectation expected) {
 
   const gjxl::Extent2D padded_extent = Padded(original_extent);
   ImageStorage original(original_extent);
@@ -288,6 +419,25 @@ bool RunFixture(
   if (!status.ok() || !CheckResult(output)) {
     std::cerr << "CPU quantization pipeline failed for " << name
               << ": " << status.message() << '\n';
+    return false;
+  }
+  if (!CheckPinnedResult(output, expected)) {
+    std::cerr << std::setprecision(17) << name << " actual scores:";
+    for (double value : output.score_history) std::cerr << ' ' << value;
+    std::cerr << std::setprecision(9) << "\nactual quant:";
+    for (size_t y = 0; y < output.block_extent.height; ++y) {
+      for (size_t x = 0; x < output.block_extent.width; ++x) {
+        std::cerr << ' '
+                  << output.final_quant[y * output.block_stride + x];
+      }
+    }
+    std::cerr << "\nactual raw:";
+    for (size_t y = 0; y < output.block_extent.height; ++y) {
+      for (size_t x = 0; x < output.block_extent.width; ++x) {
+        std::cerr << ' ' << output.frame.raw_quant_field().Row(y)[x];
+      }
+    }
+    std::cerr << '\n';
     return false;
   }
   return true;
@@ -395,19 +545,31 @@ bool CheckGaborishDisabledPath() {
 }  // namespace
 
 int main() {
-  if (!RunFixture(Fixture::kGradient, "odd gradient", {21, 13}) ||
-      !RunFixture(Fixture::kTexture, "texture", {32, 24}) ||
-      !RunFixture(Fixture::kEdge, "hard edge", {33, 17}) ||
-      !RunFixture(Fixture::kSaturated, "saturated colors", {19, 25}) ||
+  if (!RunFixture(Fixture::kGradient, "odd gradient", {21, 13},
+                  {kGradientScores, kGradientQuant, kGradientRaw}) ||
+      !RunFixture(Fixture::kTexture, "texture", {32, 24},
+                  {kTextureScores, kTextureQuant, kTextureRaw}) ||
+      !RunFixture(Fixture::kEdge, "hard edge", {33, 17},
+                  {kEdgeScores, kEdgeQuant, kEdgeRaw}) ||
+      !RunFixture(Fixture::kSaturated, "saturated colors", {19, 25},
+                  {kSaturatedScores, kSaturatedQuant, kSaturatedRaw}) ||
       !RunFixture(
         Fixture::kColorTileBoundary,
         "64-pixel color-tile boundary",
-        {69, 17}) ||
+        {69, 17},
+        {kColorTileBoundaryScores,
+         kColorTileBoundaryQuant,
+         kColorTileBoundaryRaw}) ||
       !CheckGaborishDisabledPath() ||
       !CheckInvalidRequestIsAtomic() ||
       !CheckInvalidOutputsAreRejected()) {
     return EXIT_FAILURE;
   }
-  std::cout << "All CPU quantization pipeline tests passed.\n";
+  std::cout << std::setprecision(9)
+            << "Pipeline pin maximum errors: score="
+            << g_pipeline_pin_errors.score
+            << " final_quant=" << g_pipeline_pin_errors.final_quant
+            << " raw_quant=exact\n"
+            << "All CPU quantization pipeline tests passed.\n";
   return EXIT_SUCCESS;
 }

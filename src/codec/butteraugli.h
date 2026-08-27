@@ -15,8 +15,9 @@ struct ButteraugliOptions {
   float intensity_target = 80.0f;
 };
 
-/// Computes the pinned libjxl Butteraugli map and its maximum aggregate score.
-/// Inputs are linear sRGB values. Outputs are committed atomically.
+/// Computes the native CPU Butteraugli map and its maximum aggregate score.
+/// Inputs are linear sRGB values. Strided outputs and input/output overlap are
+/// supported, and outputs are committed atomically.
 [[nodiscard]] Status ComputeButteraugliDistance(
   ConstImage3FView reference_linear_rgb,
   ConstImage3FView distorted_linear_rgb,

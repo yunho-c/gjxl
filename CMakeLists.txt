@@ -9,6 +9,9 @@ project(
   LANGUAGES CXX
 )
 
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
 # TEMP
 if(NOT APPLE)
   message(FATAL_ERROR
@@ -31,11 +34,12 @@ option(
 
 option(
   GJXL_ENABLE_LIBJXL_REFERENCE
-  "Build the libjxl-backed Butteraugli and iterative-AQ reference path"
-  ON
+  "Build the pinned libjxl Butteraugli reference tests and benchmarks"
+  OFF
 )
 
-if(GJXL_ENABLE_LIBJXL_REFERENCE)
+if(GJXL_ENABLE_LIBJXL_REFERENCE AND
+   (GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS))
   if(NOT EXISTS
       "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/third_party/highway/CMakeLists.txt")
     message(FATAL_ERROR
@@ -44,21 +48,19 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE)
 
   # Butteraugli is the perceptual oracle used by iterative AQ. Build only its
   # required libjxl translation units plus Highway, rather than the full
-  # encoder/decoder libraries. Normal variables keep these subproject settings
-  # local instead of overwriting a parent project's cache.
-  set(HWY_ENABLE_TESTS OFF)
-  set(HWY_ENABLE_EXAMPLES OFF)
-  set(HWY_ENABLE_CONTRIB OFF)
+  # encoder/decoder libraries. Highway resets CMP0077 to OLD, so cache entries
+  # are required to keep its bundled tests and examples disabled on CMake 4.
+  set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+  set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
   add_subdirectory(
     third_party/libjxl/third_party/highway
     third_party/highway
     EXCLUDE_FROM_ALL
   )
 
-  add_library(
-    gjxl_butteraugli_reference
-    STATIC
-
+  set(
+    GJXL_BUTTERAUGLI_REFERENCE_SOURCES
     third_party/libjxl/lib/jxl/butteraugli/butteraugli.cc
     third_party/libjxl/lib/jxl/convolve_slow.cc
     third_party/libjxl/lib/jxl/enc_convolve_separable5.cc
@@ -67,30 +69,133 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE)
     third_party/libjxl/lib/jxl/simd_util.cc
   )
 
-  target_include_directories(
-    gjxl_butteraugli_reference
-    PRIVATE
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
-  )
+  function(gjxl_add_butteraugli_reference target_name)
+    add_library(
+      "${target_name}"
+      STATIC
+      ${GJXL_BUTTERAUGLI_REFERENCE_SOURCES}
+    )
 
-  target_compile_features(
-    gjxl_butteraugli_reference
-    PRIVATE
-      cxx_std_20
-  )
+    target_include_directories(
+      "${target_name}"
+      PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
+    )
 
-  target_link_libraries(
-    gjxl_butteraugli_reference
-    PRIVATE
-      hwy
-  )
+    target_compile_features(
+      "${target_name}"
+      PRIVATE
+        cxx_std_20
+    )
+
+    target_link_libraries(
+      "${target_name}"
+      PRIVATE
+        hwy
+    )
+  endfunction()
+
+  gjxl_add_butteraugli_reference(gjxl_butteraugli_reference)
+
+  if(GJXL_BUILD_TESTS)
+    gjxl_add_butteraugli_reference(gjxl_butteraugli_reference_scalar)
+    target_compile_definitions(
+      gjxl_butteraugli_reference_scalar
+      PRIVATE
+        HWY_COMPILE_ONLY_SCALAR=1
+    )
+  endif()
+
+  if(GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS)
+    add_library(
+      gjxl_butteraugli_fixtures
+      STATIC
+      tests/butteraugli_fixtures.cpp
+    )
+    target_include_directories(
+      gjxl_butteraugli_fixtures
+      PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
+    )
+    target_compile_features(
+      gjxl_butteraugli_fixtures
+      PUBLIC
+        cxx_std_20
+    )
+
+    add_library(
+      gjxl_butteraugli_oracle
+      STATIC
+      tests/butteraugli_oracle.cpp
+    )
+    target_include_directories(
+      gjxl_butteraugli_oracle
+      PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
+      PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+    )
+    target_compile_features(
+      gjxl_butteraugli_oracle
+      PUBLIC
+        cxx_std_20
+    )
+    target_link_libraries(
+      gjxl_butteraugli_oracle
+      PRIVATE
+        gjxl_butteraugli_reference
+        hwy
+    )
+  endif()
+
+  if(GJXL_BUILD_TESTS)
+    add_library(
+      gjxl_butteraugli_oracle_scalar
+      STATIC
+      tests/butteraugli_oracle.cpp
+    )
+    target_include_directories(
+      gjxl_butteraugli_oracle_scalar
+      PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
+      PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+    )
+    target_compile_features(
+      gjxl_butteraugli_oracle_scalar
+      PUBLIC
+        cxx_std_20
+    )
+    target_compile_definitions(
+      gjxl_butteraugli_oracle_scalar
+      PRIVATE
+        HWY_COMPILE_ONLY_SCALAR=1
+    )
+    target_link_libraries(
+      gjxl_butteraugli_oracle_scalar
+      PRIVATE
+        gjxl_butteraugli_reference_scalar
+        hwy
+    )
+  endif()
 endif()
 
 # C++ common interface
 add_library(
   gjxl_core
   INTERFACE
+)
+
+add_library(gjxl::core ALIAS gjxl_core)
+
+set_target_properties(
+  gjxl_core
+  PROPERTIES
+    EXPORT_NAME core
 )
 
 target_compile_features(
@@ -102,7 +207,8 @@ target_compile_features(
 target_include_directories(
   gjxl_core
   INTERFACE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Codec algorithms
@@ -113,6 +219,8 @@ add_library(
   src/codec/ac_strategy.cpp
   src/codec/adaptive_quantization.cpp
   src/codec/butteraugli.cpp
+  src/codec/butteraugli_distance_internal.cpp
+  src/codec/butteraugli_internal.cpp
   src/codec/chroma_from_luma.cpp
   src/codec/color_transform.cpp
   src/codec/convolution.cpp
@@ -127,6 +235,14 @@ add_library(
   src/codec/reconstruction.cpp
   src/codec/codestream.cpp
   src/codec/vardct_frame.cpp
+)
+
+add_library(gjxl::codec ALIAS gjxl_codec)
+
+set_target_properties(
+  gjxl_codec
+  PROPERTIES
+    EXPORT_NAME codec
 )
 
 target_link_libraries(
@@ -156,32 +272,55 @@ target_link_libraries(
     gjxl_codec
 )
 
-if(GJXL_ENABLE_LIBJXL_REFERENCE)
-  target_compile_definitions(
+install(
+  TARGETS
+    gjxl_core
     gjxl_codec
-    PRIVATE
-      GJXL_ENABLE_LIBJXL_REFERENCE=1
-  )
+  EXPORT gjxlTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
 
-  target_include_directories(
-    gjxl_codec
-    PRIVATE
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
-  )
+install(
+  DIRECTORY src/core
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+)
 
-  target_link_libraries(
-    gjxl_codec
-    PRIVATE
-      gjxl_butteraugli_reference
-  )
-else()
-  target_compile_definitions(
-    gjxl_codec
-    PRIVATE
-      GJXL_ENABLE_LIBJXL_REFERENCE=0
-  )
-endif()
+install(
+  DIRECTORY src/codec
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*_internal.h" EXCLUDE
+    PATTERN "quantization_tables_generated.h" EXCLUDE
+)
+
+configure_package_config_file(
+  cmake/gjxlConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+
+install(
+  EXPORT gjxlTargets
+  FILE gjxlTargets.cmake
+  NAMESPACE gjxl::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
+
+install(
+  FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
 
 # Backend-independent GPU codec operations
 add_library(
@@ -579,6 +718,54 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_butteraugli_primitives_test
+    tests/butteraugli_primitives_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_primitives_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME butteraugli_primitives
+    COMMAND gjxl_butteraugli_primitives_test
+  )
+
+  add_executable(
+    gjxl_butteraugli_stages_test
+    tests/butteraugli_stages_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_stages_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME butteraugli_stages
+    COMMAND gjxl_butteraugli_stages_test
+  )
+
+  add_executable(
+    gjxl_butteraugli_distance_test
+    tests/butteraugli_distance_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_distance_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME butteraugli_distance
+    COMMAND gjxl_butteraugli_distance_test
+  )
+
+  add_executable(
     gjxl_core_geometry_test
     tests/core_geometry_test.cpp
   )
@@ -757,23 +944,21 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_adaptive_quantization_test
   )
 
-  if(GJXL_ENABLE_LIBJXL_REFERENCE)
-    add_executable(
-      gjxl_adaptive_quantization_loop_test
-      tests/adaptive_quantization_loop_test.cpp
-    )
+  add_executable(
+    gjxl_adaptive_quantization_loop_test
+    tests/adaptive_quantization_loop_test.cpp
+  )
 
-    target_link_libraries(
-      gjxl_adaptive_quantization_loop_test
-      PRIVATE
-        gjxl_codec
-    )
+  target_link_libraries(
+    gjxl_adaptive_quantization_loop_test
+    PRIVATE
+      gjxl_codec
+  )
 
-    add_test(
-      NAME adaptive_quantization_loop
-      COMMAND gjxl_adaptive_quantization_loop_test
-    )
-  endif()
+  add_test(
+    NAME adaptive_quantization_loop
+    COMMAND gjxl_adaptive_quantization_loop_test
+  )
 
   add_executable(
     gjxl_color_transform_test
@@ -791,23 +976,21 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_color_transform_test
   )
 
-  if(GJXL_ENABLE_LIBJXL_REFERENCE)
-    add_executable(
-      gjxl_quantization_pipeline_test
-      tests/quantization_pipeline_test.cpp
-    )
+  add_executable(
+    gjxl_quantization_pipeline_test
+    tests/quantization_pipeline_test.cpp
+  )
 
-    target_link_libraries(
-      gjxl_quantization_pipeline_test
-      PRIVATE
-        gjxl_codec
-    )
+  target_link_libraries(
+    gjxl_quantization_pipeline_test
+    PRIVATE
+      gjxl_codec
+  )
 
-    add_test(
-      NAME quantization_pipeline
-      COMMAND gjxl_quantization_pipeline_test
-    )
-  endif()
+  add_test(
+    NAME quantization_pipeline
+    COMMAND gjxl_quantization_pipeline_test
+  )
 
   add_executable(
     gjxl_gaborish_test
@@ -921,37 +1104,148 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_loop_filter_test
   )
 
+  add_executable(
+    gjxl_butteraugli_test
+    tests/butteraugli_facade_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME butteraugli
+    COMMAND gjxl_butteraugli_test
+  )
+
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(
-      gjxl_butteraugli_test
+      gjxl_butteraugli_reference_test
       tests/butteraugli_test.cpp
     )
 
     target_link_libraries(
-      gjxl_butteraugli_test
+      gjxl_butteraugli_reference_test
       PRIVATE
         gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_reference_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
     )
 
     add_test(
-      NAME butteraugli
-      COMMAND gjxl_butteraugli_test
+      NAME butteraugli_reference
+      COMMAND gjxl_butteraugli_reference_test
     )
-  else()
+
     add_executable(
-      gjxl_butteraugli_unavailable_test
-      tests/butteraugli_unavailable_test.cpp
+      gjxl_butteraugli_blur_differential_test
+      tests/butteraugli_blur_differential_test.cpp
     )
 
     target_link_libraries(
-      gjxl_butteraugli_unavailable_test
+      gjxl_butteraugli_blur_differential_test
       PRIVATE
         gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_blur_differential_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
     )
 
     add_test(
-      NAME butteraugli_unavailable
-      COMMAND gjxl_butteraugli_unavailable_test
+      NAME butteraugli_blur_differential
+      COMMAND gjxl_butteraugli_blur_differential_test
+    )
+
+    add_executable(
+      gjxl_butteraugli_frequency_differential_test
+      tests/butteraugli_frequency_differential_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_butteraugli_frequency_differential_test
+      PRIVATE
+        gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_frequency_differential_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
+
+    add_test(
+      NAME butteraugli_frequency_differential
+      COMMAND gjxl_butteraugli_frequency_differential_test
+    )
+
+    add_executable(
+      gjxl_butteraugli_distance_differential_test
+      tests/butteraugli_distance_differential_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_butteraugli_distance_differential_test
+      PRIVATE
+        gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_distance_differential_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+        GJXL_NATIVE_DISTANCE_ORACLE_SCALAR=0
+    )
+
+    add_test(
+      NAME butteraugli_distance_differential
+      COMMAND gjxl_butteraugli_distance_differential_test
+    )
+
+    # Compile the internal scalar implementation directly so this executable
+    # links only the pinned scalar libjxl oracle, without the production
+    # facade's dispatched reference dependency.
+    add_executable(
+      gjxl_butteraugli_distance_scalar_differential_test
+      tests/butteraugli_distance_differential_test.cpp
+      src/codec/butteraugli_distance_internal.cpp
+      src/codec/butteraugli_internal.cpp
+    )
+
+    target_link_libraries(
+      gjxl_butteraugli_distance_scalar_differential_test
+      PRIVATE
+        gjxl_core
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle_scalar
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_distance_scalar_differential_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+        GJXL_NATIVE_DISTANCE_ORACLE_SCALAR=1
+    )
+
+    add_test(
+      NAME butteraugli_distance_scalar_differential
+      COMMAND gjxl_butteraugli_distance_scalar_differential_test
     )
   endif()
 
@@ -960,6 +1254,29 @@ if(GJXL_BUILD_TESTS)
     COMPONENTS Interpreter
     REQUIRED
   )
+
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    add_executable(
+      gjxl_butteraugli_golden_generator
+      tools/generate_butteraugli_goldens.cpp
+    )
+    target_link_libraries(
+      gjxl_butteraugli_golden_generator
+      PRIVATE
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle_scalar
+    )
+
+    add_test(
+      NAME butteraugli_goldens_generated
+      COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_butteraugli_goldens.py"
+        --generator $<TARGET_FILE:gjxl_butteraugli_golden_generator>
+        --output "${CMAKE_CURRENT_SOURCE_DIR}/tests/butteraugli_goldens_generated.h"
+        --check
+    )
+  endif()
 
   add_test(
     NAME quantization_tables_generated
@@ -1083,22 +1400,50 @@ if(GJXL_BUILD_TESTS)
     )
   endif()
 
+  add_test(
+    NAME codec_install_consumer
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DGJXL_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+      "-DGJXL_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      "-DGJXL_TEST_CONFIG=$<CONFIG>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_consumer.cmake"
+  )
 endif()
 
 if(GJXL_BUILD_BENCHMARKS)
 
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(
-      gjxl_quantization_benchmark
-      benchmarks/quantization_benchmark.cpp
+      gjxl_butteraugli_benchmark
+      benchmarks/butteraugli_benchmark.cpp
     )
 
     target_link_libraries(
-      gjxl_quantization_benchmark
+      gjxl_butteraugli_benchmark
       PRIVATE
         gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_butteraugli_oracle
+    )
+
+    target_compile_definitions(
+      gjxl_butteraugli_benchmark
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
     )
   endif()
+
+  add_executable(
+    gjxl_quantization_benchmark
+    benchmarks/quantization_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_quantization_benchmark
+    PRIVATE
+      gjxl_codec
+  )
 
   add_executable(
     gjxl_dct_benchmark

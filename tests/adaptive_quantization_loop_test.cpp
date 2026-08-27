@@ -10,9 +10,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <vector>
 
+#include "butteraugli_test_tolerances.h"
 #include "codec/adaptive_quantization.h"
 #include "codec/color_transform.h"
 
@@ -228,7 +230,8 @@ bool CheckLoopAndUpdateRule() {
     const size_t y = index / kBlockExtent.width;
     if (std::abs(
           updated.quant_field[y * AqStorage::kBlockStride + x] -
-          expected[index]) > 2.0e-6f ||
+          expected[index]) >
+          gjxl::butteraugli_test::kAqUpdateTolerance ||
         updated.frame.raw_quant_field().Row(y)[x] < 1 ||
         !std::isfinite(
           updated.block_distance[y * AqStorage::kBlockStride + x])) {
@@ -236,6 +239,90 @@ bool CheckLoopAndUpdateRule() {
       return false;
     }
   }
+  AqStorage two_updates;
+  updated_options.iterations = 2;
+  const gjxl::Status two_update_status = gjxl::FindBestQuantization(
+    original.ConstView(),
+    opsin.ConstView(),
+    strategies,
+    initial,
+    sharpness_view,
+    updated_options,
+    two_updates.Output());
+  if (!two_update_status.ok() || two_updates.score_history.size() != 3 ||
+      !PaddingIsUntouched(two_updates)) {
+    std::cerr << "Two-update AQ evaluation failed\n";
+    return false;
+  }
+  constexpr std::array<double, 3> kPinnedScoreHistory = {
+    1.573393702507019,
+    1.4235906600952148,
+    1.2938419580459595,
+  };
+  constexpr std::array<float, 6> kPinnedQuantField = {
+    0.848191023f, 0.810860574f, 0.748267889f,
+    0.958660662f, 0.856463075f, 0.802448153f,
+  };
+  constexpr std::array<int32_t, 6> kPinnedRawQuantField = {
+    7, 7, 6,
+    8, 7, 6,
+  };
+  constexpr std::array<float, 6> kPinnedBlockDistance = {
+    1.4115169f, 1.37227523f, 1.39127612f,
+    1.36678886f, 1.29607725f, 1.29839003f,
+  };
+  double maximum_score_error = 0.0;
+  for (size_t index = 0; index < kPinnedScoreHistory.size(); ++index) {
+    const double error = std::abs(two_updates.score_history[index] -
+                                  kPinnedScoreHistory[index]);
+    maximum_score_error = std::max(maximum_score_error, error);
+    if (error >
+          gjxl::butteraugli_test::kPinnedAqTolerance) {
+      std::cerr << "Two-update AQ score history differs at " << index
+                << ": actual=" << std::setprecision(17)
+                << two_updates.score_history[index]
+                << " expected=" << kPinnedScoreHistory[index]
+                << " error=" << error << '\n';
+      return false;
+    }
+  }
+  float maximum_quant_error = 0.0f;
+  float maximum_block_distance_error = 0.0f;
+  for (size_t index = 0; index < kPinnedQuantField.size(); ++index) {
+    const size_t x = index % kBlockExtent.width;
+    const size_t y = index / kBlockExtent.width;
+    const size_t strided_index = y * AqStorage::kBlockStride + x;
+    const float quant_error = std::abs(
+      two_updates.quant_field[strided_index] - kPinnedQuantField[index]);
+    const float block_distance_error = std::abs(
+      two_updates.block_distance[strided_index] - kPinnedBlockDistance[index]);
+    maximum_quant_error = std::max(maximum_quant_error, quant_error);
+    maximum_block_distance_error =
+      std::max(maximum_block_distance_error, block_distance_error);
+    if (quant_error >
+          gjxl::butteraugli_test::kPinnedAqTolerance ||
+        two_updates.frame.raw_quant_field().Row(y)[x] !=
+          kPinnedRawQuantField[index] ||
+        block_distance_error >
+          gjxl::butteraugli_test::kPinnedAqTolerance) {
+      std::cerr << "Two-update AQ fields differ from the pin\n";
+      std::cerr << "index=" << index << " quant="
+                << two_updates.quant_field[strided_index]
+                << " expected_quant=" << kPinnedQuantField[index]
+                << " raw=" << two_updates.frame.raw_quant_field().Row(y)[x]
+                << " expected_raw=" << kPinnedRawQuantField[index]
+                << " block=" << two_updates.block_distance[strided_index]
+                << " expected_block=" << kPinnedBlockDistance[index] << '\n';
+      return false;
+    }
+  }
+
+  std::cout << std::setprecision(9)
+            << "Two-update pin maximum errors: score="
+            << maximum_score_error << " quant=" << maximum_quant_error
+            << " block_distance=" << maximum_block_distance_error
+            << " raw_quant=exact\n";
+
   return true;
 }
 
