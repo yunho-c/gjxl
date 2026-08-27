@@ -18,6 +18,7 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/primitives.h"
 
 namespace gjxl::metal_internal {
@@ -48,6 +49,12 @@ struct PrimitivePipelines {
   NS::SharedPtr<MTL::ComputePipelineState> convolution_vertical;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
 };
+
+struct AqPipelines {
+  NS::SharedPtr<MTL::ComputePipelineState> contract_probe;
+};
+
+class MetalPreparedAqEvaluation;
 
 class MetalBuffer final : public DeviceBuffer {
 public:
@@ -80,7 +87,10 @@ private:
   NS::SharedPtr<MTL::Buffer> buffer_;
 };
 
-class MetalBackend final : public GpuBackend, public GpuImagePrimitives {
+class MetalBackend final
+  : public GpuBackend,
+    public GpuImagePrimitives,
+    public GpuAqEvaluation {
 public:
   MetalBackend(
     NS::SharedPtr<MTL::Device> device,
@@ -88,6 +98,7 @@ public:
     NS::SharedPtr<MTL::Library> library,
     TransformPipelineRegistry transform_pipelines,
     PrimitivePipelines primitive_pipelines,
+    AqPipelines aq_pipelines,
     bool test_fail_submission,
     bool test_fail_completion);
 
@@ -124,7 +135,12 @@ public:
     std::span<const ImagePrimitiveCommand> commands,
     std::unique_ptr<GpuSubmission>* submission) override;
 
+  Status PrepareAqEvaluation(
+    const AqEvaluationPreparation& preparation,
+    std::unique_ptr<PreparedAqEvaluation>* prepared) override;
+
 private:
+  friend class MetalPreparedAqEvaluation;
   struct ResolvedConstPlane {
     ConstDevicePlaneView view;
     DeviceMemoryRange range;
@@ -233,6 +249,7 @@ private:
   NS::SharedPtr<MTL::Library> library_;
   TransformPipelineRegistry transform_pipelines_;
   PrimitivePipelines primitive_pipelines_;
+  AqPipelines aq_pipelines_;
   bool test_fail_submission_ = false;
   bool test_fail_completion_ = false;
   std::string name_;
@@ -242,5 +259,10 @@ Status CreatePrimitivePipelines(
   MTL::Device* device,
   MTL::Library* library,
   PrimitivePipelines* out);
+
+Status CreateAqPipelines(
+  MTL::Device* device,
+  MTL::Library* library,
+  AqPipelines* out);
 
 }  // namespace gjxl::metal_internal

@@ -14,11 +14,12 @@ encode/reconstruct/measure evaluations. A useful Metal path must keep the
 large images and intermediate planes resident across those evaluations and
 limit synchronization to the data required by the CPU update policy.
 
-The current public GPU abstraction supports buffer allocation, host transfers,
-batched transforms, and explicit synchronization. It does not yet model
-strided device images, reusable scratch, multi-kernel codec operations, or
-reductions. Existing Metal DCT kernels and their independent CPU oracles are
-the transform foundation; they are not by themselves an AQ implementation.
+The public GPU substrate now supports buffer allocation, host transfers,
+strided device images, reusable scratch, per-command submission handles,
+batched transforms, and a fixed optional image-primitive capability. It does
+not yet model a prepared codec operation that owns persistent frame state and
+iteration staging. Existing Metal DCT and image-primitive kernels remain the
+foundation; they are not by themselves an AQ implementation.
 
 ## Goals
 
@@ -269,7 +270,7 @@ oracle coverage.
 
 ## Milestones
 
-Milestones 0 and 1 are complete. Milestones 2 through 8 remain pending and
+Milestones 0 through 2 are complete. Milestones 3 through 8 remain pending and
 must not be treated as complete until their stated exit criteria pass.
 
 ### 0. Refresh the AQ baseline and freeze the evaluation contract — complete (2026-08-26)
@@ -449,23 +450,143 @@ injected completion failures were covered directly. Submission handles were
 also exercised after backend destruction, through repeated and concurrent
 waits, and from concurrent submission threads.
 
-### 2. Define and validate the prepared AQ evaluation operation
+### 2. Define and validate the prepared AQ evaluation operation — complete (2026-08-26)
 
-- Add a GPU operation that separates one-time preparation from repeated
-  evaluations.
-- Upload static images, strategies, and tables during preparation.
-- Allocate buffers for the largest supported evaluation before the first
-  submission.
-- Validate backend/device ownership, geometry, offsets, strides, aliasing,
-  options, strategy support, and all size arithmetic.
-- Add disabled/unavailable-backend behavior without adding a Metal dependency to
-  the CPU codec library.
-- Provide a test-only no-op or staged path that verifies transfer and lifetime
-  contracts before reconstruction kernels are connected.
+Milestone 2 establishes the operation and lifetime boundary without claiming a
+working GPU AQ result. Production evaluation remains unavailable until the
+reconstruction, filtering, Butteraugli, and block-reduction stages are
+connected in later milestones.
 
-Exit criterion: malformed requests fail before submission, valid prepared state
-can execute repeated evaluations without allocation, and destruction safely
-waits for outstanding work.
+#### Public operation contract
+
+- Add `src/gpu/ops/aq_evaluation.h` with a non-copyable
+  `PreparedAqEvaluation` and an optional `GpuAqEvaluation` factory capability.
+  Querying a backend without that capability returns `Unavailable`; do not add
+  an AQ method to `GpuBackend` or an AQ command to `ImagePrimitiveCommand`.
+- Preparation accepts the original unpadded linear RGB image, padded coding
+  opsin image, complete strategy grid, coefficient-coding options, loop-filter
+  options, Butteraugli options, and opsin intensity target. The prepared object
+  copies these host inputs and does not retain their views.
+- One evaluation accepts only the CPU-produced raw quant field,
+  `QuantizerParams`, the two final color-correlation planes, and the EPF
+  inverse-sigma plane. Its eventual host-visible result is one block-resolution
+  distance map and one score. Final reconstructed-image readback remains a
+  later explicit extension rather than implicit scratch output.
+- The production `Evaluate` entry point is host-synchronous and atomically
+  commits its bounded result only after upload, one GPU submission, successful
+  `Wait()`, and readback. During Milestone 2 it returns `Unavailable`; only an
+  internal test probe may exercise the staged submission path.
+
+#### Prepared-state and failure contract
+
+- Validate source, padded, block, and color-tile geometry; complete coverage by
+  the supported seven DCT strategies; finite supported options; every checked
+  byte calculation; and all output pointers before allocating or uploading.
+- Canonicalize each strategy cell as an explicit strategy-and-anchor record for
+  device upload. Do not expose or copy `AcStrategyGrid`'s private byte encoding.
+- Upload the two source images, canonical strategy grid, and quantization tables
+  during preparation. Allocate all persistent, per-evaluation staging,
+  readback, and contract-probe storage before returning the prepared object.
+- Record persistent bytes, staging bytes, and peak planned scratch separately.
+  Milestone 2 sizes only the staged path; each later kernel milestone must
+  extend the checked plan before enabling that stage. Do not present the probe's
+  capacity as the final AQ scratch requirement.
+- The backend must outlive its prepared objects. A prepared object owns all
+  device buffers and any outstanding `GpuSubmission`, is not concurrently
+  reentrant, and waits before destroying or reusing referenced storage.
+  Independent prepared objects may use one backend concurrently.
+- Descriptor or compatibility rejection submits nothing and leaves the object
+  ready. Upload, submission, completion, or readback failure leaves caller
+  output unchanged and permanently invalidates the object. Preparation failure
+  clears the output object and leaks no allocation.
+
+#### Metal staging and build boundary
+
+- Keep the backend-neutral descriptors under `src/gpu/ops/` and the concrete
+  prepared state, exact pipeline binding, validation, encoding, and resource
+  layout under `src/gpu/metal/`. The CPU codec target must not link Metal; later
+  policy integration queries the optional capability and owns CPU fallback.
+- Add one private contract-probe pipeline that derives guarded output from every
+  class of static and per-evaluation upload. Compare it with an independent CPU
+  oracle, encode the probe and its reduction in one submission, and never route
+  its synthetic output through the production `Evaluate` entry point.
+- Bind probe functions by exact name at backend creation. The probe is
+  transitional test infrastructure and must be removed when the first complete
+  production evaluation replaces it.
+
+#### Required validation
+
+- Cover a padded odd source, mixed supported strategies, non-packed host views,
+  color-tile edges, poisoned output, and maximum checked dimensions that can be
+  represented without allocating a large test image.
+- Reject mismatched and overflowing geometry, incomplete or unsupported
+  strategies, invalid quantizer and option values, missing capability, null
+  outputs, and reuse after an operational failure without committing work.
+- After one warmup, run at least three probes with distinct per-evaluation data;
+  each must add exactly one submission and zero allocations while matching its
+  CPU oracle. Run two independently prepared objects concurrently.
+- Inject submission and completion failure, destroy a prepared object with an
+  outstanding probe, and verify idempotent waiting, unchanged caller output,
+  invalidation, and resource release.
+- Run the full reference-enabled and reference-disabled Release matrices,
+  including real Metal DCT and image-primitive tests.
+
+Exit criterion: the public contract and unavailable path are stable; malformed
+requests fail before submission; repeated real-Metal contract probes use one
+submission and no steady-state allocation; independent prepared objects do not
+share mutable state; and destruction safely waits for outstanding work. No
+probe result is exposed as a completed AQ evaluation.
+
+The implementation adds the backend-neutral `GpuAqEvaluation` capability and
+non-copyable `PreparedAqEvaluation` state without changing `GpuBackend` or the
+fixed image-primitive command set. The Metal backend binds the exact private
+`gjxl_aq_contract_probe` function when the backend is created. Production
+`Evaluate` remains explicitly `Unavailable`, submits no work, and leaves output
+unchanged until the real pipeline is connected.
+
+Preparation validates checked host layouts, padded geometry, supported options,
+finite static samples, and complete coverage by the seven supported strategy
+types before allocating. It packs the original and coding images, explicit
+strategy-and-anchor records, and all five quantization-table families into one
+persistent arena. A separate staging arena owns quant, EPF, color-correlation,
+probe-output, reduction, and scalar-result storage. For the guarded 89x57 to
+96x64 validation case, the transitional plan reports 183552 persistent bytes,
+2564 staging bytes, and 8 peak scratch bytes; these are probe capacities, not a
+projection of the complete AQ pipeline.
+
+The internal probe samples every class of prepared and per-evaluation upload,
+then performs maximum reduction in the same compute encoder and command-buffer
+commit. Its independent CPU oracle obtains quantization matrices through
+`GetDefaultQuantizationMatrix` rather than sharing the device table-offset
+logic. The odd padded, strided, mixed-strategy test observed a maximum absolute
+map error of 9.53674e-7. After warmup, three distinct evaluations each added
+one submission and zero allocations. Two separately prepared objects also ran
+concurrently through one backend without sharing mutable scratch.
+
+Validation covers missing capability, maximum representable and overflowing
+geometry, incomplete and unsupported strategies, invalid options, static
+non-finite samples, invalid quant and EPF fields, invalid quantizer parameters,
+null output, poisoned row padding, and same-object reentry. Injected submission,
+completion, and post-completion readback failures preserve poisoned caller
+output and permanently invalidate the prepared object. Destruction with an
+outstanding probe observes a completed `Wait()` before releasing its arenas.
+
+Both Release matrices pass on the real Metal device: 33/33 tests with the
+pinned libjxl reference enabled and 27/27 with it disabled. These matrices also
+retain the DCT and fixed image-primitive GPU coverage. Reproduce them with:
+
+```sh
+cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release \
+  -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
+cmake --build build/release -j
+ctest --test-dir build/release --output-on-failure
+
+cmake -S . -B build/no-reference -DCMAKE_BUILD_TYPE=Release \
+  -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON \
+  -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+cmake --build build/no-reference -j
+ctest --test-dir build/no-reference --output-on-failure
+```
 
 ### 3. Port coefficient coding and reconstruction
 
@@ -626,10 +747,9 @@ encoder decisions.
 
 ## Implementation order
 
-Milestones 0 and 1 are complete. Milestone 2 is the next implementation task
-and fixes residency and lifetime contracts for the prepared AQ operation.
-After that contract is validated,
-reconstruction/filter work (Milestones 3 and 4) and the standalone Butteraugli
+Milestones 0 through 2 are complete. The validated prepared-operation contract
+now fixes the residency and lifetime boundary for subsequent work.
+Reconstruction/filter work (Milestones 3 and 4) and the standalone Butteraugli
 operation (Milestone 5) may proceed independently. Milestone 6 joins them into
 the iterative loop; Milestones 7 and 8 harden and qualify the result for
 rollout.

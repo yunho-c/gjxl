@@ -14,6 +14,7 @@ enum class StatusCode {
   kInvalidArgument,
   kUnavailable,
   kOutOfMemory,
+  kFailedPrecondition,
   kSubmissionFailed,
   kDeviceError,
   kInternal,
@@ -40,6 +41,10 @@ public:
 
   [[nodiscard]] static Status OutOfMemory(std::string message) {
     return {StatusCode::kOutOfMemory, std::move(message)};
+  }
+
+  [[nodiscard]] static Status FailedPrecondition(std::string message) {
+    return {StatusCode::kFailedPrecondition, std::move(message)};
   }
 
   [[nodiscard]] static Status SubmissionFailed(std::string message) {

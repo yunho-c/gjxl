@@ -322,6 +322,11 @@ set(
 )
 
 set(
+  GJXL_AQ_CONTRACT_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_contract.metal"
+)
+
+set(
   GJXL_DCT_BASIS_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
 )
@@ -334,6 +339,11 @@ set(
 set(
   GJXL_PRIMITIVES_METAL_IR
   "${GJXL_METAL_DIR}/primitives.ir"
+)
+
+set(
+  GJXL_AQ_CONTRACT_METAL_IR
+  "${GJXL_METAL_DIR}/aq_contract.ir"
 )
 
 set(
@@ -398,6 +408,33 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_AQ_CONTRACT_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    "${GJXL_AQ_CONTRACT_METAL_SOURCE}"
+    -o
+    "${GJXL_AQ_CONTRACT_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_AQ_CONTRACT_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling Metal AQ contract probe"
+
+  VERBATIM
+)
+
 # .ir -> .metallib
 
 add_custom_command(
@@ -412,10 +449,12 @@ add_custom_command(
     "${GJXL_METALLIB}"
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
+    "${GJXL_AQ_CONTRACT_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
+    "${GJXL_AQ_CONTRACT_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -438,6 +477,7 @@ add_library(
 
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_backend.cpp
+  src/gpu/metal/metal_aq_evaluation.cpp
   src/gpu/metal/metal_primitives.cpp
   src/gpu/metal/metal_submission.cpp
 )
@@ -1032,6 +1072,34 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME metal_gpu_primitives
     COMMAND gjxl_gpu_primitives_metal_test
+  )
+
+  add_executable(
+    gjxl_metal_aq_evaluation_test
+    tests/metal_aq_evaluation_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_aq_evaluation_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_aq_evaluation_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_metal_aq_evaluation_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_aq_evaluation
+    COMMAND gjxl_metal_aq_evaluation_test
   )
 
   add_executable(
