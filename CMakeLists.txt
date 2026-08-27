@@ -144,6 +144,8 @@ add_library(
   src/codestream/bit_writer.cpp
   src/codestream/dc_group.cpp
   src/codestream/entropy.cpp
+  src/codestream/encoder.cpp
+  src/codestream/headers.cpp
   src/codestream/huffman.cpp
   src/codestream/sections.cpp
 )
@@ -473,6 +475,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME ac_group
     COMMAND gjxl_ac_group_test
+  )
+
+  add_executable(
+    gjxl_codestream_encoder_test
+    tests/codestream_encoder_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_codestream_encoder_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME codestream_encoder
+    COMMAND gjxl_codestream_encoder_test
   )
 
   add_executable(
