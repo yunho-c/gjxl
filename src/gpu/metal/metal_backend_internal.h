@@ -438,6 +438,10 @@ Status CreateAqPipelines(
   MTL::Library* library,
   AqPipelines* out);
 
+[[nodiscard]] Status GetMetalSubmissionGpuDuration(
+  GpuSubmission& submission,
+  uint64_t* nanoseconds);
+
 Status CreateButteraugliPipelines(
   MTL::Device* device,
   MTL::Library* library,

@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 
 #include "core/status.h"
@@ -78,6 +80,21 @@ Status CreateMetalBackend(
 
 Status CreateMetalBackend(
   std::string_view metallib_path,
+  const MetalBackendOptions& options,
+  std::unique_ptr<GpuBackend>* out);
+
+/// Creates a Metal backend from an in-memory precompiled shader library.
+Status CreateMetalBackend(
+  std::span<const uint8_t> metallib,
+  std::unique_ptr<GpuBackend>* out);
+
+Status CreateMetalBackend(
+  std::span<const uint8_t> metallib,
+  const MetalBackendOptions& options,
+  std::unique_ptr<GpuBackend>* out);
+
+/// Creates the production backend from the build-embedded shader library.
+Status CreateEmbeddedMetalBackend(
   const MetalBackendOptions& options,
   std::unique_ptr<GpuBackend>* out);
 

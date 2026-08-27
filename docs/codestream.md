@@ -361,14 +361,24 @@ Acceptance criteria:
 
 `EncodeLinearRgbVarDctCodestream` is the backend-neutral, in-memory public
 workflow. It edge-extends strided linear-sRGB input to the codec block extent,
-converts it to XYB, runs the native CPU quantization and default two-update AQ
+converts it to XYB, runs the selected quantization and default two-update AQ
 pipeline, passes the resulting owned `VarDctEncoderFrame` directly to
 `EncodeVarDctCodestream`, and atomically commits the byte vector and optional
 analysis summary. The summary reports dimensions, encoded bytes, score history,
-and transform-anchor counts without exposing pipeline scratch storage.
+transform-anchor counts, and the selected CPU or Metal backend without exposing
+pipeline scratch storage.
 
-The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and a
-Butteraugli target. It writes through a same-directory temporary file,
+The default `kAutomatic` preference uses the embedded, process-cached Metal
+backend only on the qualified Apple M4 Pro geometry range established in
+[`metal-aq.md`](metal-aq.md); small images, unqualified devices, unavailable
+Metal, or missing capabilities use CPU before pipeline execution. Explicit
+`kCpu` and `kMetal` overrides are available. Forced Metal bypasses the
+automatic size/device gate but never falls back, and operational errors after
+GPU work starts are returned atomically instead of retrying on CPU.
+
+The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input, a
+Butteraugli target, and `--backend auto|cpu|metal`. It writes through a
+same-directory temporary file,
 synchronizes it, and renames it over the destination only after the complete
 codestream succeeds. Invalid options, malformed or non-finite PFM input,
 encoding failure, and output failure cannot expose a partial destination. The
@@ -388,6 +398,7 @@ Encode a PFM with:
 
 ```sh
 just encode testdata/codestream_sample.pfm output.jxl 1.0
+# Or call gjxl_encode directly with --backend cpu|metal.
 ```
 
 Relevant implementations:

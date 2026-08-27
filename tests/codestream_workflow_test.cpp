@@ -74,7 +74,9 @@ bool CheckDeterministicWorkflow() {
   if (!status.ok() || first.size() < 2 || first[0] != 0xff ||
       first[1] != 0x0a || first_summary.extent != kExtent ||
       first_summary.encoded_bytes != first.size() ||
-      first_summary.score_history.size() != 3) {
+      first_summary.score_history.size() != 3 ||
+      first_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kCpu) {
     std::cerr << "Public workflow failed: " << status.message() << '\n';
     return false;
   }
@@ -133,7 +135,11 @@ bool CheckInvalidRequestsAreAtomic() {
   };
 
   if (!rejected_atomically(image.View(), {.butteraugli_target = 0.0f}) ||
-      !rejected_atomically({}, {.butteraugli_target = 1.0f})) {
+      !rejected_atomically({}, {.butteraugli_target = 1.0f}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .backend = static_cast<gjxl::VarDctBackendPreference>(99)})) {
     std::cerr << "Invalid workflow request changed output\n";
     return false;
   }

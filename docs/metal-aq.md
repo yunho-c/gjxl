@@ -23,8 +23,11 @@ conversion, prepared Butteraugli comparison, and strategy-aware block reduction
 in one submission. Reconstructed images and the pixel distance map remain
 resident, while the bounded GPU policy returns only the final quant field,
 block map, and score history. Reconstructed-image and encoder-frame
-materialization, complete-pipeline switching, and rollout qualification remain
-unavailable.
+materialization, complete-pipeline switching, and a decision-preserving
+automatic rollout are now available. The qualified rollout keeps the exact CPU
+coefficient/reconstruction/filter prefix and uses the prepared Metal submission
+for Butteraugli and block reduction; the fully resident float path remains
+available through the prepared operation but is not selected automatically.
 
 ## Goals
 
@@ -290,8 +293,7 @@ oracle coverage.
 
 ## Milestones
 
-Milestones 0 through 6 are complete. Milestones 7 and 8 remain pending and
-must not be treated as complete until their stated exit criteria pass.
+Milestones 0 through 8 are complete.
 
 ### 0. Refresh the AQ baseline and freeze the evaluation contract — complete (2026-08-26)
 
@@ -958,7 +960,7 @@ Butteraugli reference enabled and `49/49` with it disabled. Both include the
 installed static consumer, and the separately built pinned libjxl decoder
 accepts all 21 codestream-conformance fixtures and the checked workflow sample.
 
-### 8. Establish the end-to-end performance and rollout gate
+### 8. Establish the end-to-end performance and rollout gate — complete (2026-08-27)
 
 - Benchmark CPU, Metal-resident, and full-E2E evaluation paths with balanced
   order and repeated independent Release processes.
@@ -973,6 +975,96 @@ accepts all 21 codestream-conformance fixtures and the checked workflow sample.
 Exit criterion: Metal provides a stable full-E2E speedup for the target image
 sizes, all correctness gates pass, and the documented fallback policy handles
 small images or unavailable Metal devices without changing the CPU contract.
+
+The expanded Flower and resolution sweep exposed decision discontinuities in
+the fully resident float reconstruction path: a first Flower diagnostic had
+40 different raw-quant values, a `0.114605` float-field delta, and a
+`0.048073` score delta. The fixed `2e-3` decision gate was not relaxed. The
+rollout evaluator instead computes the authoritative coefficient frame,
+decoder reconstruction, loop filters, and linear RGB with the unchanged CPU
+reference, uploads that exact comparison image, and executes prepared
+Butteraugli plus strategy-aware block reduction in one Metal submission. GPU
+AC search and the CPU AQ update policy remain unchanged. The direct prepared
+operation still supports the complete resident reconstruction chain for tests
+and future precision work, but automatic and forced workflow selection use the
+decision-preserving composite path.
+
+`VarDctEncodingOptions` now selects `kAutomatic`, `kCpu`, or `kMetal`, and the
+summary reports the backend that actually ran. The CLI exposes the same policy
+as `--backend auto|cpu|metal`. The production metallib is embedded as a
+`679800`-byte library image, so installed consumers need no shader path or
+resource bundle. Backend construction is lazy and cached once per process.
+Automatic selection is qualified only for the exact backend name
+`Metal: Apple M4 Pro` and padded coding geometries with at least `128x96`
+pixels, area at least `12288`, and minimum dimension at least `96`. Other
+devices, smaller images, backend unavailability, or missing capabilities use
+CPU before pipeline execution. Forced Metal ignores the device qualification
+and size cutoff but requires both capabilities. Once GPU pipeline execution
+begins, every error is returned atomically; it never triggers a CPU retry.
+
+Three independent AppleClang 17 Release processes used one warmup rotation and
+three measured rotations of all 16 phases. Each workload first enforced exact
+frame and codestream output and the unchanged `2e-3` numeric gate. Cells below
+are ranges of process medians in milliseconds; `Metal one` and `Metal AQ2`
+include the exact CPU prefix, preparation, upload, synchronization, bounded
+readback, and final download as applicable.
+
+| Workload | CPU one | Metal one | CPU AQ2 | Metal AQ2 | CPU pipeline | Metal pipeline | CPU public | Metal cold public |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Synthetic 128x96 | 14.043–14.835 | 9.069–9.427 | 42.195–43.174 | 24.139–24.683 | 53.873–55.026 | 27.435–28.584 | 57.189–58.302 | 32.159–34.226 |
+| Odd 121x89 -> 128x96 | 12.443–13.013 | 8.317–9.850 | 37.025–38.152 | 21.592–21.865 | 49.945–51.200 | 23.780–26.245 | 53.957–56.640 | 31.686–32.576 |
+| Flower 510x532 | 303.998–307.460 | 136.965–148.400 | 908.629–962.251 | 393.205–404.173 | 1187.000–1216.841 | 458.216–565.296 | 1203.493–1566.048 | 484.971–496.848 |
+| Padded 480p | 461.052–517.509 | 201.176–348.622 | 1376.035–1821.417 | 597.875–786.046 | 1754.996–1961.197 | 695.578–901.443 | 1785.945–2458.735 | 717.864–890.746 |
+| Padded 720p | 1035.719–1225.345 | 455.652–546.217 | 3109.737–3665.874 | 1322.697–1691.286 | 3947.403–4130.377 | 1517.808–1806.671 | 3992.456–4295.592 | 1573.067–1744.441 |
+| Padded 1080p | 2341.748–2362.551 | 1005.584–1033.969 | 7020.374–7100.934 | 2912.645–2916.732 | 8873.342–9012.107 | 3322.967–3397.221 | 8953.741–9086.560 | 3411.637–3475.737 |
+
+Cold public-workflow speedups were `1.70–1.78x` at 128x96,
+`1.66–1.78x` on the odd fixture, `2.48–3.15x` on Flower,
+`2.44–2.76x` at 480p, `2.46–2.54x` at 720p, and `2.61–2.65x` at
+1080p. The crossover sweep was:
+
+| Coding geometry | CPU public median range | Metal cold median range | Result |
+| --- | ---: | ---: | --- |
+| 32x24 | 4.646–4.856 | 5.945–9.906 | CPU won every process |
+| 64x48 | 14.894–15.902 | 13.477–15.362 | Metal medians won, sample ranges overlapped |
+| 96x64 | 28.997–30.720 | 20.068–21.164 | Metal ranges did not overlap CPU |
+| 128x96 | 57.189–58.302 | 32.159–34.226 | Metal won with rollout headroom |
+
+The measured stable crossover bracket is therefore `(64x48, 96x64]`; the
+automatic floor deliberately advances one full measured step to 128x96.
+
+The profiled prepared perceptual tail separates upload, submission, wait, GPU
+timestamps, and readbacks. Process-median ranges were:
+
+| Workload | Input upload | Submit | Completion wait | GPU time | Bounded readback | Final readback | Commit |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Flower | 0.272–3.404 | 0.063–0.100 | 4.834–29.746 | 3.625–9.578 | 0.006–0.012 | 1.205–1.974 | 0.186–0.943 |
+| 1080p | 1.932–10.990 | 0.099–0.108 | 23.497–77.058 | 17.635–18.334 | 0.025–0.064 | 8.873–12.791 | 1.620–6.696 |
+
+The complete corpus observed maximum errors of `1.838893e-3` for the final
+float quant field, `3.623962e-5` for the block map, and `1.144409e-5` for the
+score history. Reconstructed RGB, raw quant, the complete encoder frame, and
+serialized codestream bytes were exact. Preparation and the perceptual tail
+retain the Milestone 7 allocation contract: one reference-cache submission at
+preparation, exactly one submission per evaluation, and zero steady-state
+device allocations. Current prepared memory is:
+
+| Source -> coding geometry | Persistent | Staging | Peak scratch |
+| --- | ---: | ---: | ---: |
+| 128x96 | 639488 | 2945588 | 2330752 |
+| 121x89 -> 128x96 | 604416 | 2698292 | 2154696 |
+| 510x532 -> 512x536 | 13195264 | 64976692 | 51408544 |
+| 854x479 -> 856x480 | 19789824 | 97756084 | 77292880 |
+| 1279x719 -> 1280x720 | 44376576 | 219592244 | 173589432 |
+| 1919x1079 -> 1920x1080 | 99822080 | 494296372 | 390734776 |
+
+Fresh AppleClang 17 Release matrices pass `55/55` tests with the pinned
+Butteraugli reference enabled and `49/49` with it disabled. Both matrices
+include the installed static-library consumer, which creates the backend from
+the embedded metallib. The separately built pinned libjxl decoder accepts all
+21 codestream-conformance fixtures and the checked workflow sample. Reproduce
+one balanced process with `just quantization-benchmark all simd 3 1`; the
+ranges above combine three independent invocations.
 
 ## Validation matrix
 
@@ -1044,12 +1136,14 @@ encoder decisions.
 
 ## Implementation order
 
-Milestones 0 through 7 are complete. The prepared operation carries resident
+Milestones 0 through 8 are complete. The prepared operation carries resident
 reconstructed opsin through filtering, cropped linear RGB, prepared
 Butteraugli comparison, and strategy-aware block reduction in one submission;
 the shared CPU policy requests final RGB and frame materialization only from
-its last evaluation. The complete GPU quantization pipeline is callable without
-a redundant CPU evaluation. Milestone 8 qualifies that path for rollout.
+its last evaluation. Milestone 8 retains that operation for direct use but
+qualifies the decision-preserving CPU-prefix/Metal-perceptual-tail composite
+for automatic rollout, because the broader corpus did not permit the fully
+resident float path to satisfy the unchanged decision gate.
 
 The pre-Milestone-6 2026-08-27 codestream integration made the encoder frame
 profile the single CPU/GPU option contract and added modular DC quantization

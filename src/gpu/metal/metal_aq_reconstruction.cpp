@@ -86,6 +86,10 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
                               3 * self.block_count_, self.pixel_count_,
                               self.block_count_}));
 
+  if (self.exact_linear_reconstruction_) {
+    return;
+  }
+
   const MetalBuffer *anchors =
       MetalBackend::AsMetalBuffer(*self.anchors_.buffer);
   const MetalBuffer *gathered =

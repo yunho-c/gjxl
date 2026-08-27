@@ -421,18 +421,23 @@ just ac-strategy-search-benchmark
 GPU adaptive quantization into the common codec orchestration without adding a
 GPU dependency to `gjxl_codec`. Initial quantization, Gaborish preprocessing,
 first-pass CfL, search decisions, and the deterministic AQ update policy remain
-on the CPU. Each AQ evaluation performs coefficient coding, reconstruction,
-filters, color conversion, Butteraugli, and block reduction in one Metal
-submission. The last evaluation additionally downloads final RGB and the
-already quantized coefficient payload; it does not repeat the evaluation on
-the CPU.
+on the CPU. The direct prepared operation can perform coefficient coding,
+reconstruction, filters, color conversion, Butteraugli, and block reduction in
+one Metal submission. Milestone 8's qualified workflow uses a stricter
+decision-preserving boundary: CPU coefficient coding, decoder reconstruction,
+filters, and color conversion produce the exact comparison image, then one
+prepared Metal submission performs Butteraugli and block reduction. This
+avoids float-transform and filter discontinuities found by the broader rollout
+corpus without repeating Butteraugli on the CPU.
 
 The optional prepared-AQ capability is preflighted before pipeline work. A
 backend without it returns `Unavailable` without changing output or search
 statistics, and there is no silent CPU fallback. The bounded
 `RunGpuAdaptiveQuantizationPolicy` API remains available when callers need only
 the final field, block map, and score history; `RunGpuAdaptiveQuantization`
-materializes the existing full adaptive-quantization output atomically.
+materializes the existing full adaptive-quantization output atomically. Both
+use the decision-preserving composite evaluator, while direct
+`PreparedAqEvaluation` calls retain the fully resident operation.
 
 The Metal backend uses the same transform-dispatch helper for public DCT
 batches and candidate evaluation. Scalar, SIMD-group, and factored radix-2
@@ -448,6 +453,13 @@ AC-group boundary and verifies the 1x3-block edge group with zero updates. Its
 float-DCT-sensitive maximum block/RGB deviations are `2.21866e-2` and
 `2.01165e-2`, below a separately fixed `2.5e-2` narrow-geometry boundary; its
 frame and codestream remain exact.
+
+The Milestone 8 resolution sweep keeps the unchanged `2e-3` gate and observes
+maxima of `1.838893e-3` for the float field, `3.623962e-5` for block distance,
+and `1.144409e-5` for score. Reconstructed RGB, raw quant, complete frame state,
+and codestream bytes are exact across 128x96, odd padded, Flower, 480p, 720p,
+and 1080p workloads. Automatic workflow selection is documented in
+[`metal-aq.md`](metal-aq.md).
 
 Relevant implementations:
 
@@ -485,9 +497,11 @@ Initial quantization and AC-strategy search are siblings of iterative AQ and
 remain separate GPU operations. Within iterative AQ, quant-field convergence,
 clamping, and rounding-progress decisions stay on the CPU. Intermediate Metal
 evaluations read back only the block-distance map and score required by that
-unchanged policy. The last evaluation also reads back reconstructed RGB,
-quantized AC, and quantized DC to materialize the existing encoder frame
-without a redundant CPU evaluation.
+unchanged policy. Direct resident calls may also read back reconstructed RGB,
+quantized AC, and quantized DC. The qualified rollout retains the exact CPU
+frame and uploads exact reconstructed linear RGB for the Metal perceptual tail,
+so its last evaluation downloads only that unchanged image while returning the
+authoritative frame.
 
 Every GPU stage must be compared with the CPU reference and, where applicable,
 the pinned libjxl oracle. Direct intermediate comparisons, final AQ decisions,

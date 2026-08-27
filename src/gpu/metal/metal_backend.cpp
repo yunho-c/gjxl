@@ -2,6 +2,7 @@
 
 #include <Foundation/Foundation.hpp>
 #include <Metal/Metal.hpp>
+#include <dispatch/dispatch.h>
 
 #include <algorithm>
 #include <array>
@@ -25,6 +26,7 @@
 #include "gpu/backend.h"
 #include "gpu/buffer.h"
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/metal_embedded_library_internal.h"
 #include "gpu/metal/metal_status.h"
 #include "gpu/ops/ac_strategy.h"
 
@@ -64,6 +66,11 @@ struct DctSelection {
   AcStrategyType strategy;
   MetalDctImplementation forward;
   MetalDctImplementation inverse;
+};
+
+struct MetalLibrarySource {
+  std::string_view path;
+  std::span<const uint8_t> bytes;
 };
 
 constexpr std::array<DctImplementationSpec, 21>
@@ -928,8 +935,8 @@ Status CreateMetalBackend(
     out);
 }
 
-Status CreateMetalBackend(
-  std::string_view metallib_path,
+Status CreateMetalBackendImpl(
+  MetalLibrarySource metallib,
   const MetalBackendOptions& options,
   std::unique_ptr<GpuBackend>* out) {
 
@@ -937,10 +944,11 @@ Status CreateMetalBackend(
     return Status::InvalidArgument(
       "CreateMetalBackend output pointer is null");
   }
+  out->reset();
 
-  if (metallib_path.empty()) {
+  if (metallib.path.empty() == metallib.bytes.empty()) {
     return Status::InvalidArgument(
-      "Metal library path is empty");
+      "Exactly one Metal library source is required");
   }
 
   const std::array<DctSelection, 7> dct_selections{{
@@ -1031,25 +1039,32 @@ Status CreateMetalBackend(
       "Failed to create Metal command queue");
   }
 
-  const std::string path(metallib_path);
-
-  NS::String* ns_path =
-    NS::String::string(
-      path.c_str(),
-      NS::UTF8StringEncoding);
-
   NS::Error* error = nullptr;
-
-  auto library =
-    NS::TransferPtr(
-      device->newLibrary(
-        ns_path,
-        &error));
+  MTL::Library* raw_library = nullptr;
+  if (!metallib.path.empty()) {
+    const std::string path(metallib.path);
+    NS::String* ns_path = NS::String::string(
+      path.c_str(), NS::UTF8StringEncoding);
+    raw_library = device->newLibrary(ns_path, &error);
+  } else {
+    dispatch_data_t library_data = dispatch_data_create(
+      metallib.bytes.data(), metallib.bytes.size(), nullptr,
+      DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    if (library_data == nullptr) {
+      return Status::OutOfMemory(
+        "Unable to wrap the embedded Metal library");
+    }
+    raw_library = device->newLibrary(library_data, &error);
+    dispatch_release(library_data);
+  }
+  auto library = NS::TransferPtr(raw_library);
 
   if (!library) {
     return metal::ErrorToStatus(
       error,
-      "Loading gjxl.metallib");
+      metallib.path.empty()
+        ? "Loading embedded gjxl.metallib"
+        : "Loading gjxl.metallib");
   }
 
   TransformPipelineRegistry transform_pipelines;
@@ -1173,6 +1188,39 @@ Status CreateMetalBackend(
       options.test_fail_completion));
 
   return Status::Ok();
+}
+
+Status CreateMetalBackend(
+  std::string_view metallib_path,
+  const MetalBackendOptions& options,
+  std::unique_ptr<GpuBackend>* out) {
+
+  return CreateMetalBackendImpl(
+    {.path = metallib_path}, options, out);
+}
+
+Status CreateMetalBackend(
+  std::span<const uint8_t> metallib,
+  std::unique_ptr<GpuBackend>* out) {
+
+  return CreateMetalBackend(metallib, MetalBackendOptions{}, out);
+}
+
+Status CreateMetalBackend(
+  std::span<const uint8_t> metallib,
+  const MetalBackendOptions& options,
+  std::unique_ptr<GpuBackend>* out) {
+
+  return CreateMetalBackendImpl(
+    {.bytes = metallib}, options, out);
+}
+
+Status CreateEmbeddedMetalBackend(
+  const MetalBackendOptions& options,
+  std::unique_ptr<GpuBackend>* out) {
+
+  return CreateMetalBackend(
+    metal_internal::EmbeddedMetalLibrary(), options, out);
 }
 
 }  // namespace gjxl

@@ -15,6 +15,7 @@
 #include "core/ac_strategy.h"
 #include "codec/vardct_frame_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
+#include "gpu/metal/metal_aq_evaluation_profile.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
@@ -129,9 +130,12 @@ public:
 
   Status Prepare(const AqEvaluationPreparation &preparation);
   Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
+  Status EvaluateProfiled(AqEvaluationInput input, AqEvaluationOutput output,
+                          MetalAqEvaluationProfile* profile);
   AqEvaluationMemoryStats memory_stats() const noexcept override;
 
-  Status SubmitEvaluation(AqEvaluationInput input);
+  Status SubmitEvaluation(AqEvaluationInput input,
+                          bool profiling_reserved = false);
   Status FinishEvaluation(AqEvaluationOutput output);
   Status FailNextUpload();
   Status FailNextNumeric();
@@ -167,7 +171,7 @@ private:
   Status ValidatePreparation(const AqEvaluationPreparation &preparation) const;
   Status ValidateInput(AqEvaluationInput input) const;
   Status ValidateOutput(AqEvaluationOutput output) const;
-  Status BeginOperation();
+  Status BeginOperation(bool profiling_reserved = false);
   Status UploadInput(AqEvaluationInput input);
   Status WaitForOperation();
   void CompleteOperation();
@@ -281,6 +285,9 @@ private:
   bool fail_next_butteraugli_completion_ = false;
   bool fail_next_butteraugli_readback_ = false;
   bool *wait_observer_ = nullptr;
+  MetalAqEvaluationProfile* active_profile_ = nullptr;
+  bool exact_coefficients_ = false;
+  bool exact_linear_reconstruction_ = false;
 };
 
 } // namespace gjxl::metal_internal

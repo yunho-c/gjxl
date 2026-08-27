@@ -21,6 +21,7 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
+#include "gpu/metal/metal_aq_evaluation_profile.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/aq_evaluation.h"
@@ -333,6 +334,7 @@ bool CheckReductionCase(gjxl::GpuBackend& gpu, gjxl::Extent2D source_extent,
     std::cerr << label << " allocated or submitted more than once\n";
     return false;
   }
+
   for (size_t y = 0; y < blocks.height; ++y) {
     for (size_t x = 0; x < blocks.width; ++x) {
       const float error = std::abs(
@@ -405,6 +407,38 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
   if (after.successful_allocations != before.successful_allocations ||
       after.committed_submissions != before.committed_submissions + 1) {
     std::cerr << "Production AQ evaluation violated residency\n";
+    return false;
+  }
+
+  EvaluationOutputStorage profiled_output(fixture.strategies.extent());
+  gjxl::metal_internal::MetalAqEvaluationProfile profile;
+  const gjxl::GpuBackendStats before_profile = gpu.stats();
+  if (!ExpectCode(
+          gjxl::metal_internal::EvaluateMetalAqProfiled(
+              *prepared, fixture.input.View(), profiled_output.View(),
+              nullptr),
+          gjxl::StatusCode::kInvalidArgument, "null AQ profile") ||
+      !profiled_output.Poisoned() ||
+      gpu.stats().committed_submissions !=
+          before_profile.committed_submissions ||
+      !CheckStatus(
+          gjxl::metal_internal::EvaluateMetalAqProfiled(
+              *prepared, fixture.input.View(), profiled_output.View(),
+              &profile),
+          "profiled AQ evaluation") ||
+      !profiled_output.ValidAndPadded() ||
+      profile.input_upload_nanoseconds == 0 ||
+      profile.submission_nanoseconds == 0 ||
+      profile.completion_wait_nanoseconds == 0 ||
+      profile.command_buffer_gpu_nanoseconds == 0 ||
+      profile.bounded_readback_nanoseconds == 0 ||
+      profile.output_commit_nanoseconds == 0 ||
+      profile.final_readback_nanoseconds != 0 ||
+      gpu.stats().successful_allocations !=
+          before_profile.successful_allocations ||
+      gpu.stats().committed_submissions !=
+          before_profile.committed_submissions + 1) {
+    std::cerr << "Profiled AQ evaluation did not preserve its contract\n";
     return false;
   }
 

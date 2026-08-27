@@ -35,7 +35,28 @@ struct Options {
   fs::path input;
   fs::path output;
   float butteraugli_target = 0.0f;
+  gjxl::VarDctBackendPreference backend =
+    gjxl::VarDctBackendPreference::kAutomatic;
 };
+
+[[nodiscard]] bool ParseBackend(
+  std::string_view text,
+  gjxl::VarDctBackendPreference* backend) {
+
+  if (backend == nullptr) {
+    return false;
+  }
+  if (text == "auto") {
+    *backend = gjxl::VarDctBackendPreference::kAutomatic;
+  } else if (text == "cpu") {
+    *backend = gjxl::VarDctBackendPreference::kCpu;
+  } else if (text == "metal") {
+    *backend = gjxl::VarDctBackendPreference::kMetal;
+  } else {
+    return false;
+  }
+  return true;
+}
 
 [[nodiscard]] bool ParsePositiveFloat(
   std::string_view text,
@@ -71,6 +92,11 @@ struct Options {
       if (index + 1 >= argc ||
           !ParsePositiveFloat(argv[++index],
                               &candidate.butteraugli_target)) {
+        return false;
+      }
+    } else if (argument == "--backend") {
+      if (index + 1 >= argc ||
+          !ParseBackend(argv[++index], &candidate.backend)) {
         return false;
       }
     } else if (!argument.empty() && argument.front() == '-') {
@@ -185,7 +211,8 @@ struct Options {
 
 void PrintUsage(const char* executable) {
   std::cerr << "Usage: " << executable
-            << " --distance VALUE INPUT.pfm OUTPUT.jxl\n";
+            << " --distance VALUE [--backend auto|cpu|metal] "
+               "INPUT.pfm OUTPUT.jxl\n";
 }
 
 }  // namespace
@@ -208,7 +235,8 @@ int main(int argc, char** argv) {
   gjxl::VarDctEncodingSummary summary;
   status = gjxl::EncodeLinearRgbVarDctCodestream(
     linear_rgb.const_view(),
-    {.butteraugli_target = options.butteraugli_target},
+    {.butteraugli_target = options.butteraugli_target,
+     .backend = options.backend},
     &codestream,
     &summary);
   if (!status.ok()) {
@@ -224,7 +252,12 @@ int main(int argc, char** argv) {
   std::cout << "Encoded " << summary.extent.width << 'x'
             << summary.extent.height << " linear RGB to "
             << summary.encoded_bytes << " bytes at Butteraugli target "
-            << options.butteraugli_target << ".\nStrategies:";
+            << options.butteraugli_target << " using "
+            << (summary.execution_backend ==
+                    gjxl::VarDctExecutionBackend::kMetal
+                  ? "Metal"
+                  : "CPU")
+            << ".\nStrategies:";
   for (size_t index = 0; index < summary.strategy_counts.size(); ++index) {
     if (summary.strategy_counts[index] == 0) {
       continue;

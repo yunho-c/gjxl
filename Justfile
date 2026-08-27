@@ -39,11 +39,11 @@ ac-strategy-search-benchmark samples="12":
     cmake --build build/release --target gjxl_ac_strategy_search_benchmark
     build/release/gjxl_ac_strategy_search_benchmark "{{ samples }}"
 
-# Measure the CPU quantization and adaptive-quantization baseline.
-quantization-benchmark workload="all" samples="5" warmups="3":
+# Measure CPU and Metal quantization workflows with alternating phase order.
+quantization-benchmark workload="all" implementation="simd" samples="5" warmups="3":
     cmake -S . -B "{{ build_dir }}/release" -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
     cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
-    "{{ build_dir }}/release/gjxl_quantization_benchmark" --workload "{{ workload }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+    "{{ build_dir }}/release/gjxl_quantization_benchmark" --workload "{{ workload }}" --implementation "{{ implementation }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
 # Measure native CPU and prepared Metal Butteraugli paths.
 butteraugli-metal-benchmark workload="all" samples="15" warmups="3":

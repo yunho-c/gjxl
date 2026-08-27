@@ -337,6 +337,7 @@ install(
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   FILES_MATCHING
     PATTERN "*.h"
+    PATTERN "*_internal.h" EXCLUDE
 )
 
 install(
@@ -453,6 +454,12 @@ find_program(
   REQUIRED
 )
 
+find_program(
+  XXD_EXECUTABLE
+  xxd
+  REQUIRED
+)
+
 set(
   GJXL_METAL_DIR
   "${CMAKE_CURRENT_BINARY_DIR}/metal"
@@ -541,6 +548,11 @@ set(
 set(
   GJXL_METALLIB
   "${GJXL_METAL_DIR}/gjxl.metallib"
+)
+
+set(
+  GJXL_EMBEDDED_METALLIB_INCLUDE
+  "${GJXL_METAL_DIR}/gjxl_embedded_metallib.inc"
 )
 
 # .metal -> .ir
@@ -789,6 +801,32 @@ add_custom_target(
     "${GJXL_METALLIB}"
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_EMBEDDED_METALLIB_INCLUDE}"
+
+  COMMAND
+    "${XXD_EXECUTABLE}"
+    -i
+    -n gjxl_embedded_metallib
+    "${GJXL_METALLIB}"
+    "${GJXL_EMBEDDED_METALLIB_INCLUDE}"
+
+  DEPENDS
+    "${GJXL_METALLIB}"
+
+  COMMENT
+    "Embedding gjxl.metallib"
+
+  VERBATIM
+)
+
+add_custom_target(
+  gjxl_embedded_metal_shaders
+  DEPENDS
+    "${GJXL_EMBEDDED_METALLIB_INCLUDE}"
+)
+
 # Metal backend
 
 add_library(
@@ -798,6 +836,7 @@ add_library(
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_ac_strategy.cpp
   src/gpu/metal/metal_backend.cpp
+  src/gpu/metal/metal_embedded_library.cpp
   src/gpu/metal/metal_aq_butteraugli.cpp
   src/gpu/metal/metal_aq_evaluation.cpp
   src/gpu/metal/metal_aq_postprocess.cpp
@@ -809,7 +848,20 @@ add_library(
 
 add_dependencies(
   gjxl_metal
-  gjxl_metal_shaders
+  gjxl_embedded_metal_shaders
+)
+
+set_source_files_properties(
+  src/gpu/metal/metal_embedded_library.cpp
+  PROPERTIES
+    OBJECT_DEPENDS "${GJXL_EMBEDDED_METALLIB_INCLUDE}"
+)
+
+target_include_directories(
+  gjxl_metal
+  PRIVATE
+    "${GJXL_METAL_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/metal-cpp"
 )
 
 target_link_libraries(
@@ -821,10 +873,36 @@ target_link_libraries(
     gjxl_gpu_ops
 
   PRIVATE
-    metal_cpp
     "${METAL_FRAMEWORK}"
     "${FOUNDATION_FRAMEWORK}"
     "${COREGRAPHICS_FRAMEWORK}"
+)
+
+target_link_libraries(
+  gjxl_codestream
+  PUBLIC
+    gjxl_metal
+)
+
+install(
+  TARGETS
+    gjxl_gpu
+    gjxl_gpu_butteraugli
+    gjxl_gpu_ops
+    gjxl_metal
+  EXPORT gjxlTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
+
+install(
+  DIRECTORY src/gpu
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*_internal.h" EXCLUDE
+    PATTERN "*_profile.h" EXCLUDE
+    PATTERN "*_test.h" EXCLUDE
+    PATTERN "metal/kernels" EXCLUDE
 )
 
 target_compile_features(
@@ -2034,13 +2112,19 @@ if(GJXL_BUILD_BENCHMARKS)
   target_link_libraries(
     gjxl_quantization_benchmark
     PRIVATE
-      gjxl_codec
+      gjxl_codestream
+      gjxl_metal
   )
 
   target_compile_definitions(
     gjxl_quantization_benchmark
     PRIVATE
       GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+  )
+
+  add_dependencies(
+    gjxl_quantization_benchmark
+    gjxl_embedded_metal_shaders
   )
 
   add_executable(

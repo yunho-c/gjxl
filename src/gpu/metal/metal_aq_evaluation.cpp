@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -29,6 +30,14 @@
 
 namespace gjxl::metal_internal {
 namespace {
+
+using ProfileClock = std::chrono::steady_clock;
+
+uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
+  return static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      ProfileClock::now() - begin).count());
+}
 
 inline constexpr size_t kBufferAlignment = 256;
 inline constexpr NS::UInteger kBlockReductionThreadCount = 256;
@@ -939,12 +948,47 @@ Status MetalPreparedAqEvaluation::Evaluate(AqEvaluationInput input,
   return FinishEvaluation(output);
 }
 
+Status MetalPreparedAqEvaluation::EvaluateProfiled(
+  AqEvaluationInput input,
+  AqEvaluationOutput output,
+  MetalAqEvaluationProfile* profile) {
+
+  if (profile == nullptr) {
+    return Status::InvalidArgument(
+      "Metal AQ evaluation profile output is null");
+  }
+  *profile = {};
+  {
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || state_ != State::kReady ||
+        active_profile_ != nullptr) {
+      return Status::FailedPrecondition(
+        "Metal AQ profiling requires a ready prepared evaluation");
+    }
+    active_profile_ = profile;
+  }
+  Status status = ValidateOutput(output);
+  if (status.ok()) {
+    status = SubmitEvaluation(input, true);
+  }
+  if (status.ok()) {
+    status = FinishEvaluation(output);
+  }
+  {
+    std::lock_guard lock(mutex_);
+    active_profile_ = nullptr;
+  }
+  return status;
+}
+
 AqEvaluationMemoryStats
 MetalPreparedAqEvaluation::memory_stats() const noexcept {
   return memory_stats_;
 }
 
-Status MetalPreparedAqEvaluation::SubmitEvaluation(AqEvaluationInput input) {
+Status MetalPreparedAqEvaluation::SubmitEvaluation(
+  AqEvaluationInput input,
+  bool profiling_reserved) {
   Status status = ValidateInput(input);
   if (!status.ok()) {
     return status;
@@ -967,7 +1011,7 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(AqEvaluationInput input) {
     return status;
   }
 
-  status = BeginOperation();
+  status = BeginOperation(profiling_reserved);
   if (!status.ok())
     return status;
   bool fail_upload = false;
@@ -984,7 +1028,13 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(AqEvaluationInput input) {
     return Status::DeviceError("Injected Metal AQ upload failure");
   }
   reset_params_.test_error_mask = fail_numeric ? 512u : 0u;
+  const ProfileClock::time_point upload_begin = active_profile_ != nullptr
+    ? ProfileClock::now() : ProfileClock::time_point{};
   status = UploadInput(input);
+  if (active_profile_ != nullptr) {
+    active_profile_->input_upload_nanoseconds =
+      ElapsedNanoseconds(upload_begin);
+  }
   if (!status.ok()) {
     Invalidate();
     return status;
@@ -996,10 +1046,16 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(AqEvaluationInput input) {
   }
 
   std::unique_ptr<GpuSubmission> submission;
+  const ProfileClock::time_point submission_begin = active_profile_ != nullptr
+    ? ProfileClock::now() : ProfileClock::time_point{};
   status = backend_->SubmitCompute(
       "gjxl prepared AQ production evaluation",
       &MetalPreparedAqEvaluation::EncodeEvaluationSubmission, this,
       &submission);
+  if (active_profile_ != nullptr) {
+    active_profile_->submission_nanoseconds =
+      ElapsedNanoseconds(submission_begin);
+  }
   if (!status.ok() || submission == nullptr) {
     Invalidate();
     return status.ok()
@@ -1018,10 +1074,18 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
     return status;
   }
 
+  const ProfileClock::time_point wait_begin = active_profile_ != nullptr
+    ? ProfileClock::now() : ProfileClock::time_point{};
   status = WaitForOperation();
+  if (active_profile_ != nullptr) {
+    active_profile_->completion_wait_nanoseconds =
+      ElapsedNanoseconds(wait_begin);
+  }
   if (!status.ok())
     return status;
 
+  const ProfileClock::time_point bounded_begin = active_profile_ != nullptr
+    ? ProfileClock::now() : ProfileClock::time_point{};
   uint32_t device_error = 0;
   status = backend_->CopyDeviceToHost(
     *reconstruction_error_.buffer, &device_error, sizeof(device_error),
@@ -1062,20 +1126,28 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
     return Status::Internal(
       "Metal AQ bounded readback is not finite and non-negative");
   }
+  if (active_profile_ != nullptr) {
+    active_profile_->bounded_readback_nanoseconds =
+      ElapsedNanoseconds(bounded_begin);
+  }
 
   VarDctEncoderFrame final_frame;
+  const ProfileClock::time_point final_begin = active_profile_ != nullptr
+    ? ProfileClock::now() : ProfileClock::time_point{};
   if (output.final != nullptr) {
-    status = backend_->CopyDeviceToHost(
-      *quantized_coefficients_.buffer,
-      quantized_readback_.data(),
-      quantized_readback_.size() * sizeof(int32_t),
-      quantized_coefficients_.offset_bytes);
-    if (status.ok()) {
+    if (!exact_coefficients_) {
       status = backend_->CopyDeviceToHost(
-        *quantized_dc_.buffer,
-        quantized_dc_readback_.data(),
-        quantized_dc_readback_.size() * sizeof(int32_t),
-        quantized_dc_.offset_bytes);
+        *quantized_coefficients_.buffer,
+        quantized_readback_.data(),
+        quantized_readback_.size() * sizeof(int32_t),
+        quantized_coefficients_.offset_bytes);
+      if (status.ok()) {
+        status = backend_->CopyDeviceToHost(
+          *quantized_dc_.buffer,
+          quantized_dc_readback_.data(),
+          quantized_dc_readback_.size() * sizeof(int32_t),
+          quantized_dc_.offset_bytes);
+      }
     }
     const size_t linear_row_bytes = source_extent_.width * sizeof(float);
     for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
@@ -1149,7 +1221,13 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
       return status;
     }
   }
+  if (active_profile_ != nullptr && output.final != nullptr) {
+    active_profile_->final_readback_nanoseconds =
+      ElapsedNanoseconds(final_begin);
+  }
 
+  const ProfileClock::time_point commit_begin = active_profile_ != nullptr
+    ? ProfileClock::now() : ProfileClock::time_point{};
   for (size_t y = 0; y < block_extent_.height; ++y) {
     std::copy_n(readback_.data() + y * block_extent_.width, block_extent_.width,
                 output.block_distance_map.Row(y));
@@ -1165,6 +1243,10 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
       }
     }
     *output.final->frame = std::move(final_frame);
+  }
+  if (active_profile_ != nullptr) {
+    active_profile_->output_commit_nanoseconds =
+      ElapsedNanoseconds(commit_begin);
   }
   CompleteOperation();
   return Status::Ok();
@@ -1373,6 +1455,13 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
 }
 
 Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
+  if ((input.exact_coefficients != nullptr) !=
+          input.exact_reconstructed_linear_rgb.valid() ||
+      (input.exact_coefficients != nullptr &&
+       input.exact_reconstructed_linear_rgb.extent() != source_extent_)) {
+    return Status::InvalidArgument(
+        "Exact AQ coefficients and reconstructions must be supplied together");
+  }
   if (!ValidHostPlaneLayout(input.raw_quant_field) ||
       input.raw_quant_field.extent != block_extent_ ||
       !ValidHostPlaneLayout(input.epf_inverse_sigma) ||
@@ -1400,6 +1489,53 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
       }
     }
   }
+  if (input.exact_coefficients != nullptr) {
+    const VarDctEncoderFrame& frame = *input.exact_coefficients;
+    if (!frame.valid() || frame.geometry().frame() != source_extent_ ||
+        frame.geometry().padded_frame() != coding_extent_ ||
+        frame.strategies().extent() != strategies_host_.extent() ||
+        frame.raw_quant_field().extent != block_extent_ ||
+        frame.epf_sharpness().extent != block_extent_ ||
+        frame.color_correlation().tile_extent() != tile_extent_ ||
+        frame.quantizer().params().global_scale != input.quantizer.global_scale ||
+        frame.quantizer().params().quant_dc != input.quantizer.quant_dc ||
+        frame.profile() != options_.profile) {
+      return Status::InvalidArgument(
+          "Exact AQ coefficient frame does not match prepared state");
+    }
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        AcStrategyCell frame_cell;
+        AcStrategyCell prepared_cell;
+        if (!frame.strategies().Get(x, y, &frame_cell).ok() ||
+            !strategies_host_.Get(x, y, &prepared_cell).ok() ||
+            frame_cell.strategy != prepared_cell.strategy ||
+            frame_cell.is_anchor != prepared_cell.is_anchor ||
+            frame.raw_quant_field().Row(y)[x] !=
+                input.raw_quant_field.Row(y)[x] ||
+            frame.epf_sharpness().Row(y)[x] !=
+                epf_sharpness_host_[y * block_extent_.width + x]) {
+          return Status::InvalidArgument(
+              "Exact AQ coefficient decisions do not match evaluation input");
+        }
+      }
+    }
+    const ConstPlaneI8View frame_x = frame.color_correlation().y_to_x_map();
+    const ConstPlaneI8View frame_b = frame.color_correlation().y_to_b_map();
+    for (size_t y = 0; y < tile_extent_.height; ++y) {
+      for (size_t x = 0; x < tile_extent_.width; ++x) {
+        if (frame_x.Row(y)[x] != input.y_to_x.Row(y)[x] ||
+            frame_b.Row(y)[x] != input.y_to_b.Row(y)[x]) {
+          return Status::InvalidArgument(
+              "Exact AQ coefficient color factors do not match input");
+        }
+      }
+    }
+    status = ValidateFiniteImage(
+        input.exact_reconstructed_linear_rgb,
+        "Exact AQ reconstructed linear RGB");
+    if (!status.ok()) return status;
+  }
   return Status::Ok();
 }
 
@@ -1423,7 +1559,7 @@ MetalPreparedAqEvaluation::ValidateOutput(AqEvaluationOutput output) const {
   return Status::Ok();
 }
 
-Status MetalPreparedAqEvaluation::BeginOperation() {
+Status MetalPreparedAqEvaluation::BeginOperation(bool profiling_reserved) {
   std::unique_lock lock(mutex_, std::try_to_lock);
   if (!lock.owns_lock() || state_ == State::kBusy) {
     return Status::FailedPrecondition(
@@ -1431,6 +1567,10 @@ Status MetalPreparedAqEvaluation::BeginOperation() {
   }
   if (state_ == State::kInvalid) {
     return Status::FailedPrecondition("Prepared AQ evaluation was invalidated");
+  }
+  if ((active_profile_ != nullptr) != profiling_reserved) {
+    return Status::FailedPrecondition(
+        "Prepared AQ evaluation is reserved for profiling");
   }
   state_ = State::kBusy;
   return Status::Ok();
@@ -1465,6 +1605,76 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
         last_y_to_b_.data() + y * tile_extent_.width);
     }
   }
+  exact_coefficients_ = input.exact_coefficients != nullptr;
+  exact_linear_reconstruction_ =
+      input.exact_reconstructed_linear_rgb.valid();
+  if (status.ok() && exact_coefficients_) {
+    const VarDctEncoderFrame& frame = *input.exact_coefficients;
+    const ConstImage3I32View quantized_dc = frame.quantized_dc();
+    for (size_t channel = 0; channel < 3; ++channel) {
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        std::copy_n(
+            quantized_dc.plane[channel].Row(y), block_extent_.width,
+            quantized_dc_readback_.data() + channel * block_count_ +
+                y * block_extent_.width);
+      }
+    }
+
+    std::vector<size_t> group_offsets(frame.ac_group_count(), 0);
+    for (const AqAnchor& anchor : row_major_anchors_) {
+      const AcStrategyInfo* info = GetAcStrategyInfo(anchor.strategy);
+      if (info == nullptr) {
+        return Status::Internal(
+            "Exact AQ coefficient strategy disappeared during upload");
+      }
+      const size_t group_x =
+          anchor.block_x / kVarDctAcGroupBlockDimension;
+      const size_t group_y =
+          anchor.block_y / kVarDctAcGroupBlockDimension;
+      const size_t group_index =
+          group_y * frame.ac_group_extent().width + group_x;
+      VarDctAcGroupView group;
+      status = frame.GetAcGroup(group_index, &group);
+      if (!status.ok()) return status;
+      const size_t source_offset = group_offsets[group_index];
+      const AqStrategyBatch& batch = batches_[anchor.batch_index];
+      const size_t channel_stride =
+          batch.anchor_count * batch.coefficient_count;
+      if (batch.coefficient_count != info->coefficient_count() ||
+          source_offset > group.used_coefficient_count ||
+          batch.coefficient_count >
+              group.used_coefficient_count - source_offset) {
+        return Status::InvalidArgument(
+            "Exact AQ coefficient group layout does not match strategies");
+      }
+      for (size_t channel = 0; channel < 3; ++channel) {
+        const size_t destination_offset = batch.coefficient_offset +
+            channel * channel_stride +
+            anchor.index_in_batch * batch.coefficient_count;
+        std::copy_n(group.coefficients[channel].data() + source_offset,
+                    batch.coefficient_count,
+                    quantized_readback_.data() + destination_offset);
+      }
+      group_offsets[group_index] += batch.coefficient_count;
+    }
+    for (size_t group_index = 0; group_index < group_offsets.size();
+         ++group_index) {
+      VarDctAcGroupView group;
+      status = frame.GetAcGroup(group_index, &group);
+      if (!status.ok()) return status;
+      if (group_offsets[group_index] != group.used_coefficient_count) {
+        return Status::InvalidArgument(
+            "Exact AQ coefficient group contains unconsumed values");
+      }
+    }
+  }
+  if (status.ok() && exact_linear_reconstruction_) {
+    for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
+      status = UploadPlane(
+          *backend_, input.exact_reconstructed_linear_rgb.plane[channel],
+          reconstructed_linear_[channel]);
+    }
+  }
   return status;
 }
 
@@ -1484,6 +1694,13 @@ Status MetalPreparedAqEvaluation::WaitForOperation() {
     observer = wait_observer_;
   }
   Status status = submission->Wait();
+  if (status.ok() && active_profile_ != nullptr) {
+    uint64_t gpu_nanoseconds = 0;
+    if (GetMetalSubmissionGpuDuration(
+          *submission, &gpu_nanoseconds).ok()) {
+      active_profile_->command_buffer_gpu_nanoseconds = gpu_nanoseconds;
+    }
+  }
   if (observer != nullptr) {
     *observer = true;
   }
@@ -1553,7 +1770,9 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
   EncodeReconstructionSubmission(backend, encoder, context);
   auto& self = *static_cast<MetalPreparedAqEvaluation*>(
     const_cast<void*>(context));
-  self.EncodePostprocess(backend, encoder);
+  if (!self.exact_linear_reconstruction_) {
+    self.EncodePostprocess(backend, encoder);
+  }
   EncodePreparedMetalButteraugli(
     *self.butteraugli_, encoder,
     {
@@ -1680,6 +1899,20 @@ MetalPreparedAqEvaluation* AsMetalPrepared(
 }
 
 }  // namespace
+
+Status EvaluateMetalAqProfiled(
+  PreparedAqEvaluation& prepared,
+  AqEvaluationInput input,
+  AqEvaluationOutput output,
+  MetalAqEvaluationProfile* profile) {
+
+  MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "AQ profiling requires a Metal prepared evaluation");
+  }
+  return metal->EvaluateProfiled(input, output, profile);
+}
 
 Status SubmitMetalAqEvaluationForTesting(
   PreparedAqEvaluation& prepared,

@@ -12,12 +12,15 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <vector>
 
 #include "codec/color_transform.h"
 #include "codec/quantization_pipeline.h"
 #include "codestream/encoder.h"
+#include "codestream/workflow.h"
+#include "codestream/workflow_internal.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/quantization_pipeline.h"
 
@@ -496,10 +499,183 @@ bool CheckDefaultUpdatePipelineParity() {
   return true;
 }
 
+bool CheckWorkflowBackendSelection() {
+  constexpr gjxl::Extent2D kExtent{128, 96};
+  ImageStorage original(kExtent);
+  for (size_t y = 0; y < kExtent.height; ++y) {
+    for (size_t x = 0; x < kExtent.width; ++x) {
+      const float fx = static_cast<float>(x) /
+          static_cast<float>(kExtent.width - 1);
+      const float fy = static_cast<float>(y) /
+          static_cast<float>(kExtent.height - 1);
+      original.plane[0][y * original.stride + x] =
+          0.06f + 0.78f * fx;
+      original.plane[1][y * original.stride + x] =
+          0.08f + 0.72f * fy + 0.03f * std::sin(19.0f * fx);
+      original.plane[2][y * original.stride + x] =
+          0.04f + 0.31f * fx + 0.46f * fy;
+    }
+  }
+
+  if (gjxl::codestream_internal::IsAutomaticMetalGeometryEligible({64, 48}) ||
+      gjxl::codestream_internal::IsAutomaticMetalGeometryEligible({96, 64}) ||
+      !gjxl::codestream_internal::IsAutomaticMetalGeometryEligible(kExtent) ||
+      !gjxl::codestream_internal::IsAutomaticMetalGeometryEligible({128, 96})) {
+    std::cerr << "Automatic Metal geometry policy changed\n";
+    return false;
+  }
+
+  std::vector<uint8_t> cpu_bytes;
+  std::vector<uint8_t> forced_bytes;
+  std::vector<uint8_t> automatic_bytes;
+  std::vector<uint8_t> unqualified_bytes;
+  gjxl::VarDctEncodingSummary cpu_summary;
+  gjxl::VarDctEncodingSummary forced_summary;
+  gjxl::VarDctEncodingSummary automatic_summary;
+  gjxl::VarDctEncodingSummary unqualified_summary;
+  const auto encode = [&](gjxl::VarDctBackendPreference preference,
+                          gjxl::GpuBackend* backend, bool qualified,
+                          std::vector<uint8_t>* bytes,
+                          gjxl::VarDctEncodingSummary* summary) {
+    return gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+            original.ConstView(),
+            {.butteraugli_target = 1.0f, .backend = preference}, backend,
+            qualified, bytes, summary);
+  };
+  if (!encode(gjxl::VarDctBackendPreference::kCpu, nullptr, false,
+              &cpu_bytes, &cpu_summary).ok()) {
+    return false;
+  }
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok() ||
+      !encode(gjxl::VarDctBackendPreference::kMetal, gpu.get(), false,
+              &forced_bytes, &forced_summary).ok() ||
+      !encode(gjxl::VarDctBackendPreference::kAutomatic, gpu.get(), true,
+              &automatic_bytes, &automatic_summary).ok() ||
+      !encode(gjxl::VarDctBackendPreference::kAutomatic, gpu.get(), false,
+              &unqualified_bytes, &unqualified_summary).ok()) {
+    std::cerr << "Public workflow backend selection failed\n";
+    return false;
+  }
+  if (cpu_bytes != forced_bytes || cpu_bytes != automatic_bytes ||
+      cpu_bytes != unqualified_bytes ||
+      MaximumScoreError(cpu_summary.score_history,
+                        forced_summary.score_history) > 2.0e-3 ||
+      MaximumScoreError(cpu_summary.score_history,
+                        automatic_summary.score_history) > 2.0e-3 ||
+      cpu_summary.score_history != unqualified_summary.score_history ||
+      cpu_summary.strategy_counts != forced_summary.strategy_counts ||
+      cpu_summary.strategy_counts != automatic_summary.strategy_counts ||
+      cpu_summary.strategy_counts != unqualified_summary.strategy_counts ||
+      cpu_summary.execution_backend != gjxl::VarDctExecutionBackend::kCpu ||
+      forced_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kMetal ||
+      automatic_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kMetal ||
+      unqualified_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kCpu) {
+    std::cerr << "Public workflow backend changed accepted decisions\n";
+    return false;
+  }
+
+  std::vector<uint8_t> failed_bytes{9, 2, 6};
+  const std::vector<uint8_t> failed_bytes_original = failed_bytes;
+  gjxl::VarDctEncodingSummary failed_summary{
+      .extent = {5, 4}, .encoded_bytes = 71, .score_history = {3.0}};
+  const gjxl::VarDctEncodingSummary failed_summary_original = failed_summary;
+  if (!gjxl::ArmNextMetalSubmissionFailureForTest(
+           *gpu, true, false).ok()) {
+    return false;
+  }
+  const gjxl::Status operational_failure = encode(
+      gjxl::VarDctBackendPreference::kAutomatic, gpu.get(), true,
+      &failed_bytes, &failed_summary);
+  if (operational_failure.code() != gjxl::StatusCode::kSubmissionFailed ||
+      failed_bytes != failed_bytes_original ||
+      failed_summary != failed_summary_original) {
+    std::cerr << "Automatic Metal operational failure fell back or committed\n";
+    return false;
+  }
+  std::vector<uint8_t> retry_bytes;
+  gjxl::VarDctEncodingSummary retry_summary;
+  if (!encode(gjxl::VarDctBackendPreference::kMetal, gpu.get(), false,
+              &retry_bytes, &retry_summary).ok() ||
+      retry_bytes != cpu_bytes) {
+    std::cerr << "Metal backend was not reusable after AC submission failure\n";
+    return false;
+  }
+
+  std::unique_ptr<gjxl::GpuBackend> embedded;
+  if (!gjxl::CreateEmbeddedMetalBackend({}, &embedded).ok() ||
+      embedded == nullptr) {
+    std::cerr << "Embedded production Metal backend is unavailable\n";
+    return false;
+  }
+  const gjxl::VarDctExecutionBackend expected_production_backend =
+      gjxl::codestream_internal::IsAutomaticMetalBackendQualified(*embedded)
+          ? gjxl::VarDctExecutionBackend::kMetal
+          : gjxl::VarDctExecutionBackend::kCpu;
+  std::vector<uint8_t> production_auto_bytes;
+  gjxl::VarDctEncodingSummary production_auto_summary;
+  if (!gjxl::EncodeLinearRgbVarDctCodestream(
+           original.ConstView(),
+           {.butteraugli_target = 1.0f,
+            .backend = gjxl::VarDctBackendPreference::kAutomatic},
+           &production_auto_bytes, &production_auto_summary).ok() ||
+      production_auto_bytes != cpu_bytes ||
+      production_auto_summary.execution_backend !=
+          expected_production_backend) {
+    std::cerr << "Production automatic Metal selection failed\n";
+    return false;
+  }
+  const gjxl::Status empty_library = gjxl::CreateMetalBackend(
+      std::span<const uint8_t>{}, &embedded);
+  if (empty_library.code() != gjxl::StatusCode::kInvalidArgument ||
+      embedded != nullptr) {
+    std::cerr << "Empty in-memory Metal library was accepted\n";
+    return false;
+  }
+
+  BackendWithoutAq missing;
+  std::vector<uint8_t> missing_auto_bytes;
+  gjxl::VarDctEncodingSummary missing_auto_summary;
+  if (!encode(gjxl::VarDctBackendPreference::kAutomatic, &missing, true,
+              &missing_auto_bytes, &missing_auto_summary).ok() ||
+      missing_auto_bytes != cpu_bytes ||
+      missing_auto_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kCpu) {
+    std::cerr << "Automatic workflow did not fall back before GPU execution\n";
+    return false;
+  }
+  std::vector<uint8_t> sentinel_bytes{3, 1, 4};
+  const std::vector<uint8_t> original_sentinel = sentinel_bytes;
+  gjxl::VarDctEncodingSummary sentinel_summary{
+      .extent = {7, 5}, .encoded_bytes = 19, .score_history = {2.0}};
+  const gjxl::VarDctEncodingSummary original_summary = sentinel_summary;
+  const gjxl::Status missing_status =
+      gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+              original.ConstView(),
+              {.butteraugli_target = 1.0f,
+               .backend = gjxl::VarDctBackendPreference::kMetal},
+              &missing, true, &sentinel_bytes, &sentinel_summary);
+  if (missing_status.code() != gjxl::StatusCode::kUnavailable ||
+      sentinel_bytes != original_sentinel ||
+      sentinel_summary != original_summary) {
+    std::cerr << "Forced Metal capability failure was not atomic\n";
+    return false;
+  }
+
+  std::cout << "Automatic and forced Metal preserve public workflow bytes\n";
+  return true;
+}
+
 } // namespace
 
 int main() {
-  if (!CheckGpuPipelineParity() || !CheckDefaultUpdatePipelineParity()) {
+  if (!CheckGpuPipelineParity() || !CheckDefaultUpdatePipelineParity() ||
+      !CheckWorkflowBackendSelection()) {
     return EXIT_FAILURE;
   }
   std::cout << "Complete GPU quantization pipeline matches CPU.\n";

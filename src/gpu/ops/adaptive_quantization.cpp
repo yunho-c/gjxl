@@ -16,8 +16,11 @@
 
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/chroma_from_luma.h"
+#include "codec/color_transform.h"
 #include "codec/epf.h"
+#include "codec/loop_filter.h"
 #include "codec/quantization.h"
+#include "codec/reconstruction.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "gpu/ops/aq_evaluation.h"
@@ -107,7 +110,8 @@ public:
       epf_sharpness_(epf_sharpness),
       options_(options),
       prepared_(std::move(prepared)),
-      materialize_final_(materialize_final) {
+      materialize_final_(materialize_final),
+      original_source_extent_(source_extent) {
     if (materialize_final_) {
       final_reconstructed_.resize(source_extent);
     }
@@ -148,7 +152,6 @@ public:
       if (!status.ok()) {
         return status;
       }
-
       ColorCorrelationMap color_correlation;
       status = ComputeFinalColorCorrelationMap(
         opsin_, strategies_,
@@ -162,6 +165,54 @@ public:
         {raw_quant.data(), block_extent, block_extent.width},
         quantizer, epf_sharpness_, options_.profile.epf_sigma,
         {inverse_sigma.data(), block_extent, block_extent.width});
+      if (!status.ok()) {
+        return status;
+      }
+
+      FrameGeometry geometry;
+      status = FrameGeometry::Create(
+          original_source_extent_, &geometry);
+      if (!status.ok()) {
+        return status;
+      }
+      VarDctEncoderFrame exact_coefficients;
+      status = ComputeQuantizedCoefficients(
+          opsin_,
+          {
+              .geometry = geometry,
+              .strategies = &strategies_,
+              .raw_quant_field = {
+                  raw_quant.data(), block_extent, block_extent.width},
+              .quantizer = &quantizer,
+              .color_correlation = &color_correlation,
+              .epf_sharpness = epf_sharpness_,
+          },
+          options_.profile, &exact_coefficients);
+      if (!status.ok()) {
+        return status;
+      }
+      Image3FBuffer exact_reconstruction(opsin_.extent());
+      status = ReconstructQuantizedCoefficients(
+          exact_coefficients, exact_reconstruction.view());
+      if (!status.ok()) {
+        return status;
+      }
+      Image3FBuffer cropped_reconstruction(original_source_extent_);
+      CopyImage(
+          exact_reconstruction.cropped_view(original_source_extent_),
+          cropped_reconstruction.view());
+      Image3FBuffer filtered_opsin(original_source_extent_);
+      status = ApplyLoopFilters(
+          cropped_reconstruction.const_view(),
+          {inverse_sigma.data(), block_extent, block_extent.width},
+          options_.profile.loop_filter, filtered_opsin.view());
+      if (!status.ok()) {
+        return status;
+      }
+      Image3FBuffer exact_linear(original_source_extent_);
+      status = OpsinToLinearRgb(
+          filtered_opsin.const_view(), options_.profile.intensity_target,
+          exact_linear.view());
       if (!status.ok()) {
         return status;
       }
@@ -192,6 +243,8 @@ public:
           .y_to_b = y_to_b,
           .epf_inverse_sigma = {
             inverse_sigma.data(), block_extent, block_extent.width},
+          .exact_coefficients = &exact_coefficients,
+          .exact_reconstructed_linear_rgb = exact_linear.const_view(),
         },
         prepared_output);
       if (!status.ok()) {
@@ -230,6 +283,7 @@ private:
   bool materialize_final_ = false;
   Image3FBuffer final_reconstructed_;
   VarDctEncoderFrame final_frame_;
+  Extent2D original_source_extent_;
 };
 
 Status RunGpuAdaptiveQuantizationImpl(

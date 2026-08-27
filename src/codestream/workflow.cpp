@@ -6,8 +6,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <memory>
+#include <mutex>
 #include <new>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -15,13 +18,79 @@
 #include "codec/quantization_pipeline.h"
 #include "codec/vardct_frame.h"
 #include "codestream/encoder.h"
+#include "codestream/workflow_internal.h"
 #include "core/frame_geometry.h"
 #include "core/image_buffer.h"
+#include "gpu/metal/metal_backend.h"
+#include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/quantization_pipeline.h"
 
 namespace gjxl {
 namespace {
 
 constexpr float kInitialProfileIntensityTarget = 255.0f;
+
+// Cold 64x48 ranges overlap on the qualified M4 Pro; 96x64 is the first
+// non-overlapping win. Keep one measured step of headroom, so automatic
+// selection begins at 128x96.
+constexpr size_t kAutomaticMetalMinimumCodingPixels = 128 * 96;
+constexpr size_t kAutomaticMetalMinimumCodingDimension = 96;
+constexpr std::string_view kQualifiedMetalBackend = "Metal: Apple M4 Pro";
+
+MetalBackendOptions ProductionMetalBackendOptions() {
+  constexpr auto implementation =
+    MetalDctImplementation::kSimdgroupMatmul;
+  return {
+    .forward_dct8 = implementation,
+    .inverse_dct8 = implementation,
+    .forward_dct16x16 = implementation,
+    .inverse_dct16x16 = implementation,
+    .forward_dct32x32 = implementation,
+    .inverse_dct32x32 = implementation,
+    .forward_dct16x8 = implementation,
+    .inverse_dct16x8 = implementation,
+    .forward_dct8x16 = implementation,
+    .inverse_dct8x16 = implementation,
+    .forward_dct32x16 = implementation,
+    .inverse_dct32x16 = implementation,
+    .forward_dct16x32 = implementation,
+    .inverse_dct16x32 = implementation,
+  };
+}
+
+Status ResolveProductionMetalBackend(GpuBackend** out) {
+  if (out == nullptr) {
+    return Status::InvalidArgument(
+      "Production Metal backend output pointer is null");
+  }
+  *out = nullptr;
+  struct Cache {
+    std::once_flag once;
+    std::unique_ptr<GpuBackend> backend;
+    Status status = Status::Unavailable(
+      "Production Metal backend has not been initialized");
+  };
+  static Cache cache;
+  std::call_once(cache.once, [&] {
+    cache.status = CreateEmbeddedMetalBackend(
+      ProductionMetalBackendOptions(), &cache.backend);
+    if (cache.status.ok() && cache.backend == nullptr) {
+      cache.status = Status::Internal(
+        "Embedded Metal factory returned no backend");
+    }
+  });
+  if (!cache.status.ok()) {
+    return cache.status;
+  }
+  *out = cache.backend.get();
+  return Status::Ok();
+}
+
+bool HasCompleteGpuQuantizationCapabilities(GpuBackend& backend) {
+  return QueryGpuAcStrategyEvaluation(backend) != nullptr &&
+    QueryGpuAqEvaluation(backend) != nullptr;
+}
 
 struct PipelineStorage {
   PipelineStorage(Extent2D frame_extent, Extent2D padded_extent)
@@ -115,9 +184,12 @@ struct PipelineStorage {
 
 }  // namespace
 
-Status EncodeLinearRgbVarDctCodestream(
+Status EncodeLinearRgbVarDctCodestreamImpl(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,
+  GpuBackend* supplied_backend,
+  bool supplied_backend_is_qualified,
+  bool resolve_production_backend,
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary) {
 
@@ -126,6 +198,16 @@ Status EncodeLinearRgbVarDctCodestream(
       options.butteraugli_target <= 0.0f) {
     return Status::InvalidArgument(
       "VarDCT encoding input, target, or output is invalid");
+  }
+
+  switch (options.backend) {
+    case VarDctBackendPreference::kAutomatic:
+    case VarDctBackendPreference::kCpu:
+    case VarDctBackendPreference::kMetal:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "VarDCT encoding backend preference is invalid");
   }
 
   try {
@@ -152,11 +234,60 @@ Status EncodeLinearRgbVarDctCodestream(
     PipelineStorage pipeline(linear_rgb.extent(), geometry.padded_frame());
     CpuQuantizationPipelineOptions pipeline_options;
     pipeline_options.butteraugli_target = options.butteraugli_target;
-    status = RunCpuQuantizationPipeline(
-      linear_rgb,
-      opsin.const_view(),
-      pipeline_options,
-      pipeline.Output());
+    GpuBackend* selected_gpu = nullptr;
+    bool selected_metal = false;
+    if (options.backend != VarDctBackendPreference::kCpu) {
+      const bool geometry_eligible =
+        codestream_internal::IsAutomaticMetalGeometryEligible(
+          geometry.padded_frame());
+      const bool should_resolve =
+        options.backend == VarDctBackendPreference::kMetal ||
+        (options.backend == VarDctBackendPreference::kAutomatic &&
+         geometry_eligible);
+      if (should_resolve) {
+        selected_gpu = supplied_backend;
+        bool qualified = supplied_backend_is_qualified;
+        if (selected_gpu == nullptr && resolve_production_backend) {
+          status = ResolveProductionMetalBackend(&selected_gpu);
+          if (!status.ok()) {
+            if (options.backend == VarDctBackendPreference::kAutomatic &&
+                status.code() == StatusCode::kUnavailable) {
+              selected_gpu = nullptr;
+              status = Status::Ok();
+            } else {
+              return status;
+            }
+          }
+          qualified = selected_gpu != nullptr &&
+            codestream_internal::IsAutomaticMetalBackendQualified(
+              *selected_gpu);
+        }
+        if (selected_gpu != nullptr) {
+          if (!HasCompleteGpuQuantizationCapabilities(*selected_gpu)) {
+            if (options.backend == VarDctBackendPreference::kMetal) {
+              return Status::Unavailable(
+                "Forced Metal workflow requires complete GPU quantization");
+            }
+            selected_gpu = nullptr;
+          } else if (options.backend == VarDctBackendPreference::kMetal ||
+                     qualified) {
+            selected_metal = true;
+          } else {
+            selected_gpu = nullptr;
+          }
+        } else if (options.backend == VarDctBackendPreference::kMetal) {
+          return Status::Unavailable(
+            "Forced Metal workflow has no available backend");
+        }
+      }
+    }
+    status = selected_metal
+      ? RunGpuQuantizationPipeline(
+          *selected_gpu, linear_rgb, opsin.const_view(), pipeline_options,
+          pipeline.Output())
+      : RunCpuQuantizationPipeline(
+          linear_rgb, opsin.const_view(), pipeline_options,
+          pipeline.Output());
     if (!status.ok()) {
       return status;
     }
@@ -171,6 +302,9 @@ Status EncodeLinearRgbVarDctCodestream(
     candidate_summary.extent = linear_rgb.extent();
     candidate_summary.encoded_bytes = candidate.size();
     candidate_summary.score_history = std::move(pipeline.score_history);
+    candidate_summary.execution_backend = selected_metal
+      ? VarDctExecutionBackend::kMetal
+      : VarDctExecutionBackend::kCpu;
     status = pipeline.frame.strategies().ForEachAnchor(
       [&](size_t, size_t, AcStrategyType strategy) {
         const size_t index = static_cast<size_t>(strategy);
@@ -198,5 +332,47 @@ Status EncodeLinearRgbVarDctCodestream(
   }
   return Status::Ok();
 }
+
+Status EncodeLinearRgbVarDctCodestream(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary) {
+
+  return EncodeLinearRgbVarDctCodestreamImpl(
+    linear_rgb, options, nullptr, false, true, codestream, summary);
+}
+
+namespace codestream_internal {
+
+bool IsAutomaticMetalGeometryEligible(Extent2D padded_extent) noexcept {
+  size_t area = 0;
+  return padded_extent.try_area(&area) &&
+    area >= kAutomaticMetalMinimumCodingPixels &&
+    std::min(padded_extent.width, padded_extent.height) >=
+      kAutomaticMetalMinimumCodingDimension;
+}
+
+bool IsAutomaticMetalBackendQualified(
+  const GpuBackend& backend) noexcept {
+
+  return backend.kind() == BackendKind::kMetal &&
+    backend.name() == kQualifiedMetalBackend;
+}
+
+Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  GpuBackend* backend,
+  bool backend_is_qualified_for_automatic,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary) {
+
+  return EncodeLinearRgbVarDctCodestreamImpl(
+    linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
+    codestream, summary);
+}
+
+}  // namespace codestream_internal
 
 }  // namespace gjxl

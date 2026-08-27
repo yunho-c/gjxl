@@ -3,6 +3,9 @@
 
 #include "gpu/metal/metal_backend_internal.h"
 
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <mutex>
 #include <utility>
 
@@ -43,6 +46,28 @@ public:
     return completion_status_;
   }
 
+  Status GpuDuration(uint64_t* nanoseconds) const {
+    if (nanoseconds == nullptr) {
+      return Status::InvalidArgument(
+        "Metal GPU duration output pointer is null");
+    }
+    if (!completion_status_.ok() ||
+        command_buffer_->status() != MTL::CommandBufferStatusCompleted) {
+      return Status::FailedPrecondition(
+        "Metal GPU duration requires successful completion");
+    }
+    const double begin = command_buffer_->GPUStartTime();
+    const double end = command_buffer_->GPUEndTime();
+    const double duration = (end - begin) * 1.0e9;
+    if (!std::isfinite(duration) || duration < 0.0 ||
+        duration > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+      return Status::DeviceError(
+        "Metal command buffer returned invalid GPU timestamps");
+    }
+    *nanoseconds = static_cast<uint64_t>(duration);
+    return Status::Ok();
+  }
+
 private:
   NS::SharedPtr<MTL::CommandBuffer> command_buffer_;
   NS::SharedPtr<MTL::CommandQueue> command_queue_;
@@ -53,6 +78,18 @@ private:
 };
 
 }  // namespace
+
+Status GetMetalSubmissionGpuDuration(
+  GpuSubmission& submission,
+  uint64_t* nanoseconds) {
+
+  auto* metal = dynamic_cast<MetalSubmission*>(&submission);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "GPU duration requires a Metal submission");
+  }
+  return metal->GpuDuration(nanoseconds);
+}
 
 Status MetalBackend::SubmitCompute(
   const char* label,

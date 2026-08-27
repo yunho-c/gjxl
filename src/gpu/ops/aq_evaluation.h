@@ -35,6 +35,12 @@ struct AqEvaluationInput {
   ConstPlaneI8View y_to_x;
   ConstPlaneI8View y_to_b;
   ConstPlaneF32View epf_inverse_sigma;
+  // Optional exact CPU evaluation prefix. Composite production paths use it
+  // to preserve coefficient, reconstruction, and filtering decisions while
+  // accelerating Butteraugli and block reduction on the device. Backends
+  // that do not consume it may reject it.
+  const VarDctEncoderFrame* exact_coefficients = nullptr;
+  ConstImage3FView exact_reconstructed_linear_rgb;
 };
 
 struct AqEvaluationOutput {
