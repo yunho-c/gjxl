@@ -7,6 +7,7 @@
 #include <Metal/Metal.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -19,6 +20,7 @@
 #include "gpu/backend.h"
 #include "gpu/image.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/butteraugli.h"
 #include "gpu/ops/primitives.h"
 
 namespace gjxl::metal_internal {
@@ -64,6 +66,34 @@ struct AqPipelines {
 
 class MetalPreparedAqEvaluation;
 
+struct ButteraugliPipelines {
+  NS::SharedPtr<MTL::ComputePipelineState> copy;
+  NS::SharedPtr<MTL::ComputePipelineState> clear;
+  NS::SharedPtr<MTL::ComputePipelineState> add;
+  NS::SharedPtr<MTL::ComputePipelineState> expand;
+  NS::SharedPtr<MTL::ComputePipelineState> subsample;
+  NS::SharedPtr<MTL::ComputePipelineState> blur5_horizontal;
+  NS::SharedPtr<MTL::ComputePipelineState> blur5_vertical;
+  NS::SharedPtr<MTL::ComputePipelineState> convolution_transpose;
+  NS::SharedPtr<MTL::ComputePipelineState> opsin;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_high;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_suppress_x;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_ultra;
+  NS::SharedPtr<MTL::ComputePipelineState> malta_scale;
+  NS::SharedPtr<MTL::ComputePipelineState> malta_response;
+  NS::SharedPtr<MTL::ComputePipelineState> l2;
+  NS::SharedPtr<MTL::ComputePipelineState> mask_precompute;
+  NS::SharedPtr<MTL::ComputePipelineState> fuzzy_erosion;
+  NS::SharedPtr<MTL::ComputePipelineState> masked_ac;
+  NS::SharedPtr<MTL::ComputePipelineState> final;
+  NS::SharedPtr<MTL::ComputePipelineState> crop;
+  NS::SharedPtr<MTL::ComputePipelineState> compose;
+  NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
+};
+
+class MetalPreparedDeviceButteraugli;
+
 class MetalBuffer final : public DeviceBuffer {
 public:
   MetalBuffer(
@@ -98,7 +128,8 @@ private:
 class MetalBackend final
   : public GpuBackend,
     public GpuImagePrimitives,
-    public GpuAqEvaluation {
+    public GpuAqEvaluation,
+    public DeviceButteraugliOperation {
 public:
   MetalBackend(
     NS::SharedPtr<MTL::Device> device,
@@ -107,6 +138,7 @@ public:
     TransformPipelineRegistry transform_pipelines,
     PrimitivePipelines primitive_pipelines,
     AqPipelines aq_pipelines,
+    ButteraugliPipelines butteraugli_pipelines,
     bool test_fail_submission,
     bool test_fail_completion);
 
@@ -147,8 +179,18 @@ public:
     const AqEvaluationPreparation& preparation,
     std::unique_ptr<PreparedAqEvaluation>* prepared) override;
 
+  Status Prepare(
+    GpuBackend& backend,
+    const DeviceButteraugliPrepareDescriptor& descriptor,
+    std::unique_ptr<PreparedDeviceButteraugli>* prepared) override;
+
+  void ArmNextSubmissionFailureForTest(
+    bool fail_submission,
+    bool fail_completion) noexcept;
+
 private:
   friend class MetalPreparedAqEvaluation;
+  friend class MetalPreparedDeviceButteraugli;
   struct TransformEncodeContext {
     const TransformPipeline* pipeline = nullptr;
     TransformDirection direction = TransformDirection::kForward;
@@ -278,8 +320,11 @@ private:
   TransformPipelineRegistry transform_pipelines_;
   PrimitivePipelines primitive_pipelines_;
   AqPipelines aq_pipelines_;
+  ButteraugliPipelines butteraugli_pipelines_;
   bool test_fail_submission_ = false;
   bool test_fail_completion_ = false;
+  std::atomic<bool> test_fail_next_submission_{false};
+  std::atomic<bool> test_fail_next_completion_{false};
   std::string name_;
 };
 
@@ -292,5 +337,10 @@ Status CreateAqPipelines(
   MTL::Device* device,
   MTL::Library* library,
   AqPipelines* out);
+
+Status CreateButteraugliPipelines(
+  MTL::Device* device,
+  MTL::Library* library,
+  ButteraugliPipelines* out);
 
 }  // namespace gjxl::metal_internal

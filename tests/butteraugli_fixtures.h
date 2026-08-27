@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "butteraugli_oracle.h"
+#include "butteraugli_oracle_types.h"
 
 namespace gjxl::butteraugli_test {
 
@@ -77,6 +77,9 @@ struct FixturePair {
 
 [[nodiscard]] std::vector<FixturePair>
 BuildDifferentialCorpus(const std::string &flower_ppm_path);
+
+/// Builds the deterministic corpus that has no external test-data dependency.
+[[nodiscard]] std::vector<FixturePair> BuildSyntheticDifferentialCorpus();
 
 [[nodiscard]] bool PaddingIsPoisoned(const ImageStorage &image);
 

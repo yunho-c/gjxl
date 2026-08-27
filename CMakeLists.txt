@@ -9,6 +9,9 @@ project(
   LANGUAGES CXX
 )
 
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
 # TEMP
 if(NOT APPLE)
   message(FATAL_ERROR
@@ -32,10 +35,11 @@ option(
 option(
   GJXL_ENABLE_LIBJXL_REFERENCE
   "Build the pinned libjxl Butteraugli reference tests and benchmarks"
-  ON
+  OFF
 )
 
-if(GJXL_ENABLE_LIBJXL_REFERENCE)
+if(GJXL_ENABLE_LIBJXL_REFERENCE AND
+   (GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS))
   if(NOT EXISTS
       "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/third_party/highway/CMakeLists.txt")
     message(FATAL_ERROR
@@ -105,23 +109,6 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE)
 
   if(GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS)
     add_library(
-      gjxl_butteraugli_fixtures
-      STATIC
-      tests/butteraugli_fixtures.cpp
-    )
-    target_include_directories(
-      gjxl_butteraugli_fixtures
-      PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
-    )
-    target_compile_features(
-      gjxl_butteraugli_fixtures
-      PUBLIC
-        cxx_std_20
-    )
-
-    add_library(
       gjxl_butteraugli_oracle
       STATIC
       tests/butteraugli_oracle.cpp
@@ -180,10 +167,36 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE)
   endif()
 endif()
 
+if(GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS)
+  add_library(
+    gjxl_butteraugli_fixtures
+    STATIC
+    tests/butteraugli_fixtures.cpp
+  )
+  target_include_directories(
+    gjxl_butteraugli_fixtures
+    PUBLIC
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+  )
+  target_compile_features(
+    gjxl_butteraugli_fixtures
+    PUBLIC
+      cxx_std_20
+  )
+endif()
+
 # C++ common interface
 add_library(
   gjxl_core
   INTERFACE
+)
+
+add_library(gjxl::core ALIAS gjxl_core)
+
+set_target_properties(
+  gjxl_core
+  PROPERTIES
+    EXPORT_NAME core
 )
 
 target_compile_features(
@@ -195,7 +208,8 @@ target_compile_features(
 target_include_directories(
   gjxl_core
   INTERFACE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Codec algorithms
@@ -221,38 +235,69 @@ add_library(
   src/codec/reconstruction.cpp
 )
 
+add_library(gjxl::codec ALIAS gjxl_codec)
+
+set_target_properties(
+  gjxl_codec
+  PROPERTIES
+    EXPORT_NAME codec
+)
+
 target_link_libraries(
   gjxl_codec
   PUBLIC
     gjxl_core
 )
 
-if(GJXL_ENABLE_LIBJXL_REFERENCE)
-  target_compile_definitions(
+install(
+  TARGETS
+    gjxl_core
     gjxl_codec
-    PRIVATE
-      GJXL_ENABLE_LIBJXL_REFERENCE=1
-  )
+  EXPORT gjxlTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
 
-  target_include_directories(
-    gjxl_codec
-    PRIVATE
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
-      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include"
-  )
+install(
+  DIRECTORY src/core
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+)
 
-  target_link_libraries(
-    gjxl_codec
-    PRIVATE
-      gjxl_butteraugli_reference
-  )
-else()
-  target_compile_definitions(
-    gjxl_codec
-    PRIVATE
-      GJXL_ENABLE_LIBJXL_REFERENCE=0
-  )
-endif()
+install(
+  DIRECTORY src/codec
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*_internal.h" EXCLUDE
+    PATTERN "quantization_tables_generated.h" EXCLUDE
+)
+
+configure_package_config_file(
+  cmake/gjxlConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+
+install(
+  EXPORT gjxlTargets
+  FILE gjxlTargets.cmake
+  NAMESPACE gjxl::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
+
+install(
+  FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+)
 
 # Backend-neutral GPU infrastructure
 add_library(
@@ -267,6 +312,20 @@ target_link_libraries(
   gjxl_gpu
   PUBLIC
     gjxl_core
+)
+
+# Codec-specific GPU operation contracts
+add_library(
+  gjxl_gpu_butteraugli
+  STATIC
+
+  src/gpu/ops/butteraugli.cpp
+)
+
+target_link_libraries(
+  gjxl_gpu_butteraugli
+  PUBLIC
+    gjxl_gpu
 )
 
 # metal-cpp
@@ -342,6 +401,11 @@ set(
 )
 
 set(
+  GJXL_BUTTERAUGLI_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/butteraugli.metal"
+)
+
+set(
   GJXL_DCT_BASIS_HEADER
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dct_basis.h"
 )
@@ -369,6 +433,11 @@ set(
 set(
   GJXL_AQ_POSTPROCESS_METAL_IR
   "${GJXL_METAL_DIR}/aq_postprocess.ir"
+)
+
+set(
+  GJXL_BUTTERAUGLI_METAL_IR
+  "${GJXL_METAL_DIR}/butteraugli.ir"
 )
 
 set(
@@ -521,6 +590,36 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
+
+  COMMAND
+    "${CMAKE_COMMAND}"
+    -E make_directory
+    "${GJXL_METAL_DIR}"
+
+  COMMAND
+    "${XCRUN_EXECUTABLE}"
+    -sdk macosx
+    metal
+    -c
+    -fmetal-math-mode=safe
+    -fmetal-math-fp32-functions=precise
+    -ffp-contract=off
+    "${GJXL_BUTTERAUGLI_METAL_SOURCE}"
+    -o
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
+
+  DEPENDS
+    "${GJXL_BUTTERAUGLI_METAL_SOURCE}"
+
+  COMMENT
+    "Compiling strict-math Metal Butteraugli shaders"
+
+  VERBATIM
+)
+
 # .ir -> .metallib
 
 add_custom_command(
@@ -538,6 +637,7 @@ add_custom_command(
     "${GJXL_AQ_CONTRACT_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
     "${GJXL_AQ_POSTPROCESS_METAL_IR}"
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
 
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
@@ -545,6 +645,7 @@ add_custom_command(
     "${GJXL_AQ_CONTRACT_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
     "${GJXL_AQ_POSTPROCESS_METAL_IR}"
+    "${GJXL_BUTTERAUGLI_METAL_IR}"
 
   COMMENT
     "Linking gjxl.metallib"
@@ -570,6 +671,7 @@ add_library(
   src/gpu/metal/metal_aq_evaluation.cpp
   src/gpu/metal/metal_aq_postprocess.cpp
   src/gpu/metal/metal_aq_reconstruction.cpp
+  src/gpu/metal/metal_butteraugli.cpp
   src/gpu/metal/metal_primitives.cpp
   src/gpu/metal/metal_submission.cpp
 )
@@ -584,6 +686,7 @@ target_link_libraries(
 
   PUBLIC
     gjxl_gpu
+    gjxl_gpu_butteraugli
 
   PRIVATE
     metal_cpp
@@ -1167,6 +1270,72 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_butteraugli_device_operation_test
+    tests/butteraugli_device_operation_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_butteraugli_device_operation_test
+    PRIVATE
+      gjxl_codec
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_butteraugli_device_operation_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+
+  add_dependencies(
+    gjxl_butteraugli_device_operation_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_butteraugli_operation_contract
+    COMMAND gjxl_butteraugli_device_operation_test
+  )
+
+  add_executable(
+    gjxl_metal_butteraugli_test
+    tests/metal_butteraugli_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_butteraugli_test
+    PRIVATE
+      gjxl_codec
+      gjxl_butteraugli_fixtures
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_butteraugli_test
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+      GJXL_METAL_BUTTERAUGLI_REFERENCE_FIXTURES=$<BOOL:${GJXL_ENABLE_LIBJXL_REFERENCE}>
+  )
+
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    target_compile_definitions(
+      gjxl_metal_butteraugli_test
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
+  endif()
+
+  add_dependencies(
+    gjxl_metal_butteraugli_test
+    gjxl_metal_shaders
+  )
+
+  add_test(
+    NAME metal_butteraugli
+    COMMAND gjxl_metal_butteraugli_test
+  )
+
+  add_executable(
     gjxl_metal_aq_evaluation_test
     tests/metal_aq_evaluation_test.cpp
   )
@@ -1279,9 +1448,44 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_dct_test
   )
 
+  add_test(
+    NAME codec_install_consumer
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DGJXL_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+      "-DGJXL_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      "-DGJXL_TEST_CONFIG=$<CONFIG>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_consumer.cmake"
+  )
+
 endif()
 
 if(GJXL_BUILD_BENCHMARKS)
+
+  add_executable(
+    gjxl_metal_butteraugli_benchmark
+    benchmarks/metal_butteraugli_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_butteraugli_benchmark
+    PRIVATE
+      gjxl_codec
+      gjxl_butteraugli_fixtures
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_butteraugli_benchmark
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+  )
+
+  add_dependencies(
+    gjxl_metal_butteraugli_benchmark
+    gjxl_metal_shaders
+  )
 
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(
