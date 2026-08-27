@@ -18,6 +18,7 @@
 
 #include "codec/butteraugli.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/ops/butteraugli.h"
 #include "gpu_test_utils.h"
 
@@ -644,7 +645,7 @@ private:
          prepared == nullptr;
 }
 
-[[nodiscard]] bool CheckSubmissionAndCompletionFailures() {
+[[nodiscard]] bool CheckPreparationFailures() {
   const auto check = [](gjxl::MetalBackendOptions options,
                         gjxl::StatusCode expected,
                         uint64_t expected_submissions) {
@@ -660,8 +661,45 @@ private:
     std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
     const gjxl::DeviceButteraugliPrepareDescriptor prepare{
       reference.ConstView(), {}};
+    const uint64_t before = backend->stats().committed_submissions;
+    const gjxl::Status status = gjxl::PrepareDeviceButteraugli(
+      *backend, prepare, &prepared);
+    return IsCode(status, expected) && prepared == nullptr &&
+           backend->stats().committed_submissions ==
+             before + expected_submissions;
+  };
+
+  gjxl::MetalBackendOptions submission_failure;
+  submission_failure.test_fail_submission = true;
+  gjxl::MetalBackendOptions completion_failure;
+  completion_failure.test_fail_completion = true;
+  return check(submission_failure, gjxl::StatusCode::kSubmissionFailed, 0) &&
+         check(completion_failure, gjxl::StatusCode::kDeviceError, 1);
+}
+
+[[nodiscard]] bool CheckComparisonFailures() {
+  const auto check = [](bool fail_submission,
+                        bool fail_completion,
+                        gjxl::StatusCode expected,
+                        uint64_t expected_submissions) {
+    std::unique_ptr<gjxl::GpuBackend> backend;
+    GuardedImage3 reference;
+    GuardedImage3 distorted;
+    gjxl::test::GuardedDevicePlane distance_map;
+    gjxl::test::GuardedDevicePlane score;
+    if (!PrepareMetalCase({}, &backend, &reference, &distorted,
+                          &distance_map, &score)) {
+      return false;
+    }
+    std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
+    const gjxl::DeviceButteraugliPrepareDescriptor prepare{
+      reference.ConstView(), {}};
     if (!gjxl::PrepareDeviceButteraugli(
           *backend, prepare, &prepared).ok()) return false;
+    if (!gjxl::ArmNextMetalSubmissionFailureForTest(
+          *backend, fail_submission, fail_completion).ok()) {
+      return false;
+    }
     const uint64_t before = backend->stats().committed_submissions;
     const gjxl::Status status = prepared->Compare(
       MakeComparison(distorted, distance_map, score));
@@ -681,12 +719,8 @@ private:
            });
   };
 
-  gjxl::MetalBackendOptions submission_failure;
-  submission_failure.test_fail_submission = true;
-  gjxl::MetalBackendOptions completion_failure;
-  completion_failure.test_fail_completion = true;
-  return check(submission_failure, gjxl::StatusCode::kSubmissionFailed, 0) &&
-         check(completion_failure, gjxl::StatusCode::kDeviceError, 1);
+  return check(true, false, gjxl::StatusCode::kSubmissionFailed, 0) &&
+         check(false, true, gjxl::StatusCode::kDeviceError, 1);
 }
 
 [[nodiscard]] bool CheckInvalidComputedReadback() {
@@ -841,8 +875,33 @@ private:
   independent_b.Release();
   thread_a.join();
   thread_b.join();
-  return status_a.ok() && status_b.ok() &&
-         independent_a.valid() && independent_b.valid();
+  if (!status_a.ok() || !status_b.ok() ||
+      !independent_a.valid() || !independent_b.valid()) {
+    return false;
+  }
+
+  std::unique_ptr<gjxl::PreparedDeviceButteraugli> metal_a;
+  std::unique_ptr<gjxl::PreparedDeviceButteraugli> metal_b;
+  if (!gjxl::PrepareDeviceButteraugli(
+        *backend, prepare, &metal_a).ok() ||
+      !gjxl::PrepareDeviceButteraugli(
+        *backend, prepare, &metal_b).ok()) {
+    return false;
+  }
+  gjxl::Status metal_status_a;
+  gjxl::Status metal_status_b;
+  std::thread metal_thread_a([&] {
+    metal_status_a = metal_a->Compare(
+      MakeComparison(distorted, distance_map_a, score_a));
+  });
+  std::thread metal_thread_b([&] {
+    metal_status_b = metal_b->Compare(
+      MakeComparison(distorted, distance_map_b, score_b));
+  });
+  metal_thread_a.join();
+  metal_thread_b.join();
+  return metal_status_a.ok() && metal_status_b.ok() &&
+         metal_a->valid() && metal_b->valid();
 }
 
 }  // namespace
@@ -854,8 +913,8 @@ int main() {
     std::pair{"small strided comparison", &CheckSmallStridedCase},
     std::pair{"availability and allocation failure",
               &CheckUnavailableAndAllocationFailure},
-    std::pair{"submission and completion failures",
-              &CheckSubmissionAndCompletionFailures},
+    std::pair{"preparation failures", &CheckPreparationFailures},
+    std::pair{"comparison failures", &CheckComparisonFailures},
     std::pair{"invalid computed readback", &CheckInvalidComputedReadback},
     std::pair{"injected readback failure", &CheckInjectedReadbackFailure},
     std::pair{"prepared concurrency", &CheckPreparedConcurrency},

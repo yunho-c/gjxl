@@ -7,6 +7,7 @@
 #include <Metal/Metal.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -162,6 +163,10 @@ public:
     const DeviceButteraugliPrepareDescriptor& descriptor,
     std::unique_ptr<PreparedDeviceButteraugli>* prepared) override;
 
+  void ArmNextSubmissionFailureForTest(
+    bool fail_submission,
+    bool fail_completion) noexcept;
+
 private:
   friend class MetalPreparedDeviceButteraugli;
 
@@ -276,6 +281,8 @@ private:
   ButteraugliPipelines butteraugli_pipelines_;
   bool test_fail_submission_ = false;
   bool test_fail_completion_ = false;
+  std::atomic<bool> test_fail_next_submission_{false};
+  std::atomic<bool> test_fail_next_completion_{false};
   std::string name_;
 };
 

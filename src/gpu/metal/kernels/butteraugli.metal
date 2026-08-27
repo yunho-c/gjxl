@@ -75,7 +75,8 @@ struct FrequencyChannelParams {
 struct MaltaScaleParams {
   uint width;
   uint height;
-  uint input_stride;
+  uint reference_stride;
+  uint distorted_stride;
   uint output_stride;
   uint low_frequency;
   float norm2_0_gt_1;
@@ -94,7 +95,9 @@ struct MaltaResponseParams {
 struct DifferenceParams {
   uint width;
   uint height;
-  uint stride;
+  uint reference_stride;
+  uint distorted_stride;
+  uint work_stride;
   float asymmetry;
 };
 
@@ -534,10 +537,13 @@ kernel void gjxl_butteraugli_malta_scale_f32(
   uint2 position [[thread_position_in_grid]]) {
 
   if (position.x >= params.width || position.y >= params.height) return;
-  const uint input_index = position.y * params.input_stride + position.x;
+  const uint reference_index =
+    position.y * params.reference_stride + position.x;
+  const uint distorted_index =
+    position.y * params.distorted_stride + position.x;
   const uint output_index = position.y * params.output_stride + position.x;
-  const float value0 = reference[input_index];
-  const float value1 = distorted[input_index];
+  const float value0 = reference[reference_index];
+  const float value1 = distorted[distorted_index];
   const float absolute = 0.5f * (abs(value0) + abs(value1));
   const float difference = value0 - value1;
   const float scaler = params.norm2_0_gt_1 / (params.norm + absolute);
@@ -676,26 +682,33 @@ kernel void gjxl_butteraugli_l2_f32(
   uint2 position [[thread_position_in_grid]]) {
 
   if (position.x >= params.width || position.y >= params.height) return;
-  const uint index = position.y * params.stride + position.x;
+  const uint reference_index =
+    position.y * params.reference_stride + position.x;
+  const uint distorted_index =
+    position.y * params.distorted_stride + position.x;
+  const uint work_index = position.y * params.work_stride + position.x;
   const float inv_asymmetry = 1.0f / params.asymmetry;
-  float total0 = l2_asymmetric(rhigh0[index], dhigh0[index],
+  float total0 = l2_asymmetric(rhigh0[reference_index],
+                               dhigh0[distorted_index],
                                400.0f * params.asymmetry,
-                               400.0f * inv_asymmetry, ac0[index]);
-  float total1 = l2_asymmetric(rhigh1[index], dhigh1[index],
+                               400.0f * inv_asymmetry, ac0[work_index]);
+  float total1 = l2_asymmetric(rhigh1[reference_index],
+                               dhigh1[distorted_index],
                                1.50815703118f * params.asymmetry,
-                               1.50815703118f * inv_asymmetry, ac1[index]);
-  const float md0 = rmed0[index] - dmed0[index];
-  const float md1 = rmed1[index] - dmed1[index];
-  const float md2 = rmed2[index] - dmed2[index];
-  ac0[index] = unfused_multiply_add(md0 * md0, 2150.0f, total0);
-  ac1[index] = unfused_multiply_add(md1 * md1, 10.6195433239f, total1);
-  ac2[index] = md2 * md2 * 16.2176043152f;
-  const float ld0 = rlow0[index] - dlow0[index];
-  const float ld1 = rlow1[index] - dlow1[index];
-  const float ld2 = rlow2[index] - dlow2[index];
-  dc0[index] = ld0 * ld0 * 29.2353797994f;
-  dc1[index] = ld1 * ld1 * 0.844626970982f;
-  dc2[index] = ld2 * ld2 * 0.703646627719f;
+                               1.50815703118f * inv_asymmetry,
+                               ac1[work_index]);
+  const float md0 = rmed0[reference_index] - dmed0[distorted_index];
+  const float md1 = rmed1[reference_index] - dmed1[distorted_index];
+  const float md2 = rmed2[reference_index] - dmed2[distorted_index];
+  ac0[work_index] = unfused_multiply_add(md0 * md0, 2150.0f, total0);
+  ac1[work_index] = unfused_multiply_add(md1 * md1, 10.6195433239f, total1);
+  ac2[work_index] = md2 * md2 * 16.2176043152f;
+  const float ld0 = rlow0[reference_index] - dlow0[distorted_index];
+  const float ld1 = rlow1[reference_index] - dlow1[distorted_index];
+  const float ld2 = rlow2[reference_index] - dlow2[distorted_index];
+  dc0[work_index] = ld0 * ld0 * 29.2353797994f;
+  dc1[work_index] = ld1 * ld1 * 0.844626970982f;
+  dc2[work_index] = ld2 * ld2 * 0.703646627719f;
 }
 
 kernel void gjxl_butteraugli_mask_precompute_f32(

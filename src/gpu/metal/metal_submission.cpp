@@ -69,7 +69,11 @@ Status MetalBackend::SubmitCompute(
     return Status::Internal(
       "Metal compute submission callback is invalid");
   }
-  if (test_fail_submission_) {
+  const bool fail_submission =
+    test_fail_submission_ || test_fail_next_submission_.exchange(false);
+  const bool fail_completion =
+    test_fail_completion_ || test_fail_next_completion_.exchange(false);
+  if (fail_submission) {
     return Status::SubmissionFailed(
       "Injected Metal submission failure");
   }
@@ -98,11 +102,19 @@ Status MetalBackend::SubmitCompute(
       command_buffer,
       command_queue_,
       device_,
-      test_fail_completion_));
+      fail_completion));
   raw_command_buffer->commit();
   RecordCommittedSubmission();
   *submission = std::move(pending);
   return Status::Ok();
+}
+
+void MetalBackend::ArmNextSubmissionFailureForTest(
+  bool fail_submission,
+  bool fail_completion) noexcept {
+
+  test_fail_next_submission_.store(fail_submission);
+  test_fail_next_completion_.store(fail_completion);
 }
 
 }  // namespace gjxl::metal_internal

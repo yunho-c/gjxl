@@ -187,9 +187,30 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
   const gjxl::DeviceButteraugliPrepareDescriptor preparation{
     device_reference.View(), options};
+  const gjxl::GpuBackendStats before_preparation = backend->stats();
   if (!gjxl::PrepareDeviceButteraugli(
         *backend, preparation, &prepared).ok() ||
       prepared == nullptr) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_preparation = backend->stats();
+  if (after_preparation.successful_allocations !=
+        before_preparation.successful_allocations + 1 ||
+      after_preparation.committed_submissions !=
+        before_preparation.committed_submissions + 1) {
+    std::cerr << "Metal preparation allocation/submission invariant failed\n";
+    return false;
+  }
+  gjxl::MetalButteraugliResourceUsage usage;
+  if (!gjxl::QueryMetalButteraugliResourceUsageForTest(
+        *prepared, &usage).ok() ||
+      usage.cached_reference_bytes == 0 ||
+      usage.gaussian_kernel_bytes != 73 * sizeof(float) ||
+      usage.peak_comparison_scratch_bytes == 0 ||
+      usage.prepared_allocation_bytes <
+        usage.cached_reference_bytes + usage.gaussian_kernel_bytes +
+        usage.peak_comparison_scratch_bytes) {
+    std::cerr << "Metal prepared resource accounting is inconsistent\n";
     return false;
   }
   const gjxl::GpuBackendStats before = backend->stats();
@@ -283,6 +304,156 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   }
   return bt::PaddingIsPoisoned(fixture.reference) &&
          bt::PaddingIsPoisoned(fixture.distorted);
+}
+
+[[nodiscard]] bool SameBits(
+  const std::vector<float>& left,
+  const std::vector<float>& right) {
+
+  if (left.size() != right.size()) return false;
+  for (size_t index = 0; index < left.size(); ++index) {
+    if (std::bit_cast<uint32_t>(left[index]) !=
+        std::bit_cast<uint32_t>(right[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool CheckReferenceCaching(gjxl::Extent2D extent) {
+  HostImage reference(extent);
+  HostImage distorted(extent);
+  FillFixture(&reference, &distorted, false);
+  HostImage alternate(extent);
+  FillFixture(&reference, &alternate, true);
+  HostImage mutated(extent);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < extent.height; ++y) {
+      for (size_t x = 0; x < extent.width; ++x) {
+        mutated.values[channel][y * mutated.stride + x] =
+          0.7f + 0.09f * static_cast<float>(channel) +
+          0.002f * static_cast<float>((11 * x + 17 * y) % 53);
+      }
+    }
+  }
+
+  std::unique_ptr<gjxl::GpuBackend> backend;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backend).ok()) {
+    return false;
+  }
+  DeviceImage device_reference;
+  DeviceImage device_distorted;
+  DeviceImage device_alternate;
+  gjxl::test::GuardedDevicePlane device_map;
+  gjxl::test::GuardedDevicePlane device_score;
+  if (!device_reference.Prepare(*backend, extent, 3) ||
+      !device_distorted.Prepare(*backend, extent, 5) ||
+      !device_alternate.Prepare(*backend, extent, 7) ||
+      !device_reference.Upload(reference) ||
+      !device_distorted.Upload(distorted) ||
+      !device_alternate.Upload(alternate) ||
+      !device_map.Prepare(*backend, extent, extent.width + 9).ok() ||
+      !device_score.Prepare(*backend, {1, 1}, 3).ok()) {
+    return false;
+  }
+
+  const auto prepare = [&]() {
+    std::unique_ptr<gjxl::PreparedDeviceButteraugli> result;
+    const gjxl::GpuBackendStats before = backend->stats();
+    if (!gjxl::PrepareDeviceButteraugli(
+          *backend, {device_reference.View(), {}}, &result).ok() ||
+        result == nullptr) {
+      return result;
+    }
+    const gjxl::GpuBackendStats after = backend->stats();
+    if (after.successful_allocations != before.successful_allocations + 1 ||
+        after.committed_submissions != before.committed_submissions + 1) {
+      result.reset();
+    }
+    return result;
+  };
+  auto prepared = prepare();
+  if (prepared == nullptr) return false;
+
+  gjxl::MetalButteraugliResourceUsage usage;
+  const size_t working_width = std::max<size_t>(8, extent.width);
+  const size_t working_height = std::max<size_t>(8, extent.height);
+  const size_t main_cache =
+    10 * working_width * working_height * sizeof(float);
+  const size_t sub_cache = extent.width >= 15 && extent.height >= 15
+    ? 10 * ((extent.width + 1) / 2) * ((extent.height + 1) / 2) *
+        sizeof(float)
+    : 0;
+  if (!gjxl::QueryMetalButteraugliResourceUsageForTest(
+        *prepared, &usage).ok() ||
+      usage.cached_reference_bytes != main_cache + sub_cache) {
+    return false;
+  }
+
+  const auto compare = [&](gjxl::ConstDeviceImage3View image,
+                           std::vector<float>* map,
+                           double* score) {
+    const gjxl::GpuBackendStats before = backend->stats();
+    if (!prepared->Compare(
+          {image, device_map.View(), device_score.View()}).ok()) {
+      return false;
+    }
+    const gjxl::GpuBackendStats after = backend->stats();
+    if (after.successful_allocations != before.successful_allocations ||
+        after.committed_submissions != before.committed_submissions + 1) {
+      return false;
+    }
+    map->assign(extent.width * extent.height, kHostPoison);
+    return prepared->ReadDistanceMap(
+             {map->data(), extent, extent.width}).ok() &&
+           prepared->ReadScore(score).ok();
+  };
+
+  std::vector<float> first_map;
+  std::vector<float> alternate_map;
+  std::vector<float> repeated_map;
+  std::vector<float> after_mutation_map;
+  double first_score = -1.0;
+  double alternate_score = -1.0;
+  double repeated_score = -1.0;
+  double after_mutation_score = -1.0;
+  if (!compare(device_distorted.View(), &first_map, &first_score) ||
+      !compare(device_alternate.View(), &alternate_map, &alternate_score) ||
+      (SameBits(first_map, alternate_map) &&
+       std::bit_cast<uint64_t>(first_score) ==
+         std::bit_cast<uint64_t>(alternate_score)) ||
+      !compare(device_distorted.View(), &repeated_map, &repeated_score) ||
+      !SameBits(first_map, repeated_map) ||
+      std::bit_cast<uint64_t>(first_score) !=
+        std::bit_cast<uint64_t>(repeated_score) ||
+      !device_reference.Upload(mutated) ||
+      !compare(
+        device_distorted.View(), &after_mutation_map,
+        &after_mutation_score) ||
+      !SameBits(first_map, after_mutation_map) ||
+      std::bit_cast<uint64_t>(first_score) !=
+        std::bit_cast<uint64_t>(after_mutation_score)) {
+    std::cerr << "Metal cached reference changed across reuse for "
+              << extent.width << 'x' << extent.height << '\n';
+    return false;
+  }
+
+  auto fresh = prepare();
+  if (fresh == nullptr) return false;
+  prepared = std::move(fresh);
+  std::vector<float> fresh_map;
+  double fresh_score = -1.0;
+  if (!compare(device_distorted.View(), &fresh_map, &fresh_score)) {
+    return false;
+  }
+  if (SameBits(first_map, fresh_map) &&
+      std::bit_cast<uint64_t>(first_score) ==
+        std::bit_cast<uint64_t>(fresh_score)) {
+    std::cerr << "Fresh Metal preparation ignored mutated reference for "
+              << extent.width << 'x' << extent.height << '\n';
+    return false;
+  }
+  return true;
 }
 
 [[nodiscard]] float Decode(uint32_t bits) {
@@ -405,6 +576,10 @@ int main() {
         {32, 24}, {}, true,
         &maximum_map_error, &maximum_score_error)) {
     return EXIT_FAILURE;
+  }
+  for (gjxl::Extent2D extent :
+       std::array<gjxl::Extent2D, 3>{{{3, 7}, {9, 13}, {17, 29}}}) {
+    if (!CheckReferenceCaching(extent)) return EXIT_FAILURE;
   }
   for (const bt::FixturePair& fixture :
        bt::BuildSyntheticDifferentialCorpus()) {

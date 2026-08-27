@@ -1245,6 +1245,31 @@ endif()
 
 if(GJXL_BUILD_BENCHMARKS)
 
+  add_executable(
+    gjxl_metal_butteraugli_benchmark
+    benchmarks/metal_butteraugli_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_metal_butteraugli_benchmark
+    PRIVATE
+      gjxl_codec
+      gjxl_butteraugli_fixtures
+      gjxl_metal
+  )
+
+  target_compile_definitions(
+    gjxl_metal_butteraugli_benchmark
+    PRIVATE
+      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+  )
+
+  add_dependencies(
+    gjxl_metal_butteraugli_benchmark
+    gjxl_metal_shaders
+  )
+
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(
       gjxl_butteraugli_benchmark

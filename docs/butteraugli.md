@@ -29,11 +29,11 @@ ranges, reusable scratch, multi-kernel submissions, and maximum reduction. A
 backend-neutral prepared Butteraugli operation contract defines its validation,
 lifetime, output, and readback behavior. The Metal backend now implements the
 complete standalone Butteraugli map and score pipeline with fixed scalar and
-pinned-fixture parity gates. Prepared-reference caching and standalone
-performance qualification remain pending. The shared contracts and complete
-resident AQ integration are owned by [`metal-aq.md`](metal-aq.md); this
-document owns the standalone device Butteraugli operation and its perceptual
-validation.
+pinned-fixture parity gates. Preparation caches the reference psycho-image
+decomposition, and repeated comparisons have passed the standalone
+performance qualification. The shared contracts and complete resident AQ
+integration are owned by [`metal-aq.md`](metal-aq.md); this document owns the
+standalone device Butteraugli operation and its perceptual validation.
 
 ## Goals
 
@@ -529,7 +529,7 @@ libjxl oracle, golden-generator, or Butteraugli benchmark. This milestone makes
 no speedup, crossover, or Metal memory-usage claim; those measurements require
 the prepared-reference work and balanced benchmark protocol in Milestone 9.
 
-### 9. Add prepared-reference reuse and qualify standalone performance
+### 9. Add prepared-reference reuse and qualify standalone performance — complete (2026-08-26)
 
 - Cache the original image's opsin and frequency decomposition for repeated AQ
   comparisons.
@@ -546,6 +546,92 @@ the prepared-reference work and balanced benchmark protocol in Milestone 9.
 Exit criterion: repeated prepared comparisons require no reference
 recomputation or steady-state allocation and provide a stable standalone
 full-E2E speedup at the target image sizes.
+
+Preparation now evaluates and retains the main ten-plane reference
+psycho-image decomposition and, for multiscale images, its ten-plane
+half-resolution decomposition. The original 38-plane arena remains the owner
+of the main cache and comparison scratch; the half-scale cache is appended to
+that same allocation only when required. Preparation performs exactly one
+synchronous submission. A normal comparison reads only the cached reference,
+evaluates the distorted main and optional half scale, composes the map, and
+reduces the score in exactly one synchronous submission with no allocation.
+Test-only intermediate capture may deliberately recompute reference stages
+inside the capture submission; that diagnostic path is not used by production
+comparisons.
+
+Reference-cache tests cover expanded `3x7`, ordinary `9x13`, and multiscale
+`17x29` inputs. Alternating A/B/A distortions reproduce A bit-for-bit. Mutating
+the still-live reference buffer after preparation leaves the reused map and
+score bit-identical, while a fresh state prepared from the mutated buffer
+produces a different result. Independent real Metal states also compare
+concurrently. Preparation submission and completion failures are injected
+independently from comparison failures. Existing lifetime, validation,
+readback atomicity, non-reentrancy, and invalidation contracts remain
+unchanged.
+
+The scalar numerical gates did not change: Metal remains limited to `1.5e-3`
+for stages, maps, and scores and `1e-7` for identity, with no architecture or
+GPU-specific branch. On the M4 Pro, the maximum intermediate-stage error was
+`0.000396729`; maximum map and score errors were both `0.000549316`. The
+unchanged AQ score-history, final-quant-field, block-distance, raw-quant, and
+complete pipeline gates also passed in both build matrices.
+
+The standalone benchmark is built regardless of
+`GJXL_ENABLE_LIBJXL_REFERENCE`. It rotates nine equal-fixture phases: native
+CPU one-shot, reference upload, Metal preparation, distorted upload, resident
+comparison, score readback, resident-consumer end to end, optional map
+readback, and unamortized first comparison. The performance boundary includes
+distorted upload, comparison and synchronization, and score readback; the map
+remains device-resident. Backend creation is excluded. Each of three
+independent Release processes used three warmup rotations and 15 measured
+rotations. Cells below show the range of run medians followed by the total
+observed range, in milliseconds.
+
+| Workload | Native one shot | Metal preparation | Resident comparison | Resident-consumer E2E | First comparison E2E |
+|---|---:|---:|---:|---:|---:|
+| Synthetic 128x96 | 6.104209–6.659583 / 5.401208–7.133125 | 0.818916–1.204750 / 0.442292–1.519250 | 0.861333–1.402583 / 0.473375–2.117375 | 1.062041–1.406917 / 0.492417–1.788708 | 2.127458–2.549542 / 1.023333–4.558750 |
+| Odd 121x89 | 4.832375–5.695708 / 4.674000–5.947833 | 0.788750–0.907958 / 0.352208–1.475666 | 0.565292–0.635625 / 0.450667–1.858583 | 0.559125–0.625625 / 0.443792–3.481917 | 1.016958–1.181708 / 0.896834–3.107667 |
+| Flower 510x532 | 128.009334–131.196000 / 126.185542–180.432208 | 5.483334–5.702958 / 2.154417–8.881459 | 7.786583–8.754500 / 2.549958–10.370250 | 3.799625–4.063666 / 2.457292–10.499750 | 6.692125–7.068083 / 5.353541–11.601416 |
+| Padded 480p, 854x479 | 189.874375–193.868334 / 186.914000–215.075083 | 7.856250–8.086709 / 3.275417–9.627000 | 8.872667–9.101417 / 3.423458–14.317708 | 4.692708–5.017542 / 3.485917–11.911083 | 8.174625–8.363625 / 7.598541–11.895959 |
+| Padded 720p, 1279x719 | 436.203917–443.040292 / 424.309000–486.843000 | 14.548000–15.808750 / 7.263625–18.585000 | 9.414583–9.636458 / 7.269834–19.052375 | 7.542125–7.615416 / 7.355917–10.207208 | 17.514792–20.422000 / 16.047041–24.814916 |
+| Padded 1080p, 1919x1079 | 987.404500–1007.110500 / 978.745666–1145.090166 | 26.716750–28.916375 / 18.310416–47.019417 | 17.578334–18.326041 / 16.584208–36.818083 | 17.104083–17.185833 / 16.842750–25.383750 | 42.747792–44.481167 / 36.629500–63.605459 |
+
+| Workload | Reference upload | Distorted upload | Score readback | Map readback |
+|---|---:|---:|---:|---:|
+| Synthetic 128x96 | 0.002417–0.003167 / 0.002084–0.005958 | 0.002750–0.003375 / 0.001875–0.008583 | 0.000334–0.000708 / 0.000041–0.001750 | 0.009834–0.030041 / 0.008167–0.037375 |
+| Odd 121x89 | 0.002042–0.003000 / 0.001625–0.010916 | 0.002459–0.006041 / 0.001542–0.008292 | 0.000334–0.000375 / 0.000084–0.001125 | 0.008167–0.009792 / 0.007125–0.090541 |
+| Flower 510x532 | 0.051375–0.051959 / 0.046958–0.165917 | 0.056250–0.088500 / 0.047500–0.147250 | 0.001125–0.001500 / 0.000041–0.002958 | 0.182708–0.216000 / 0.142292–0.622292 |
+| Padded 480p, 854x479 | 0.075083–0.077666 / 0.070917–0.196084 | 0.117542–0.123416 / 0.073125–0.320417 | 0.001208–0.001541 / 0.000042–0.003125 | 0.339750–0.387542 / 0.264958–0.717375 |
+| Padded 720p, 1279x719 | 0.166125–0.168416 / 0.161875–0.193750 | 0.182125–0.204167 / 0.166958–0.306292 | 0.001542–0.001834 / 0.000042–0.002834 | 0.751833–0.818917 / 0.659167–1.294291 |
+| Padded 1080p, 1919x1079 | 0.389667–0.684791 / 0.374208–2.077875 | 0.407250–0.424583 / 0.382875–2.056292 | 0.001792–0.002125 / 0.000042–0.007542 | 2.028708–2.179625 / 1.695333–3.009583 |
+
+The target-size completion gate passed in every process. Native-over-resident
+median speedup ranges were `31.89–34.53x` for Flower, `38.48–41.31x` for
+480p, `57.46–58.18x` for 720p, and `57.72–58.88x` for 1080p. In the prescribed
+crossover sweep, `32x24` lost all three runs (`0.40–0.56x`) and `64x48` won all
+three (`2.86–3.36x`); every larger point also won. The stable crossover bracket
+is therefore `(32x24, 64x48]`.
+
+Resource reporting separates implementation-owned storage from caller-owned
+buffers. `prepared_allocation` is the actual single Metal allocation;
+`cached_reference` and `peak_logical_comparison_scratch` are logical byte
+counts, and Gaussian kernels occupy 292 bytes. Representative values are:
+
+| Workload | Prepared allocation | Cached reference | Peak logical comparison scratch |
+|---|---:|---:|---:|
+| Synthetic 128x96 | 1,991,476 B | 614,400 B | 1,376,640 B |
+| Odd 121x89 | 1,750,068 B | 540,560 B | 1,206,472 B |
+| Flower 510x532 | 43,964,468 B | 13,566,000 B | 30,396,320 B |
+| Padded 480p, 854x479 | 66,291,380 B | 20,461,840 B | 45,828,176 B |
+| Padded 720p, 1279x719 | 149,026,868 B | 46,000,040 B | 103,024,056 B |
+| Padded 1080p, 1919x1079 | 335,533,620 B | 103,560,040 B | 231,972,024 B |
+
+Fresh Release builds passed all 28 requested reference-disabled and all 34
+requested reference-enabled tests excluding `metal_dct`. The disabled graph
+contains the standalone Metal benchmark but no libjxl oracle, golden generator,
+or libjxl Butteraugli benchmark. The enabled graph retains those test-only
+compatibility targets. No tolerance, shader arithmetic flag, public API, or
+JPEG XL attribution was changed.
 
 The strategy-aware 16-norm block reduction, CPU quant-field update, resident
 reconstruction chain, and complete AQ speedup gate are not Butteraugli
@@ -569,9 +655,9 @@ only for deliberate compatibility validation.
 
 ## Recommended implementation order
 
-Milestones 1 through 8 establish the standalone CPU correctness baseline,
+Milestones 1 through 9 establish the standalone CPU correctness baseline,
 production dependency boundary, shared GPU substrate, device-operation
-contract, and complete scalar-parity Metal pipeline and are complete. Add
-prepared-reference optimization and standalone qualification in Milestone 9.
-Full iterative-AQ integration proceeds only through the gates in
+contract, complete scalar-parity Metal pipeline, prepared-reference reuse,
+and standalone performance qualification and are complete. Full iterative-AQ
+integration proceeds only through the gates in
 `metal-aq.md`, while the native CPU map remains the primary readable oracle.
