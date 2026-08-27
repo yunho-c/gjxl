@@ -57,19 +57,21 @@ if(NOT build_result EQUAL 0)
     "downstream build failed:\n${build_output}\n${build_error}")
 endif()
 
-set(consumer_executable "${consumer_build}/gjxl_codec_consumer")
-if(NOT EXISTS "${consumer_executable}")
-  set(consumer_executable
-    "${consumer_build}/${GJXL_TEST_CONFIG}/gjxl_codec_consumer")
-endif()
+foreach(consumer gjxl_codec_consumer gjxl_codestream_consumer)
+  set(consumer_executable "${consumer_build}/${consumer}")
+  if(NOT EXISTS "${consumer_executable}")
+    set(consumer_executable
+      "${consumer_build}/${GJXL_TEST_CONFIG}/${consumer}")
+  endif()
 
-execute_process(
-  COMMAND "${consumer_executable}"
-  RESULT_VARIABLE run_result
-  OUTPUT_VARIABLE run_output
-  ERROR_VARIABLE run_error
-)
-if(NOT run_result EQUAL 0)
-  message(FATAL_ERROR
-    "downstream consumer failed:\n${run_output}\n${run_error}")
-endif()
+  execute_process(
+    COMMAND "${consumer_executable}"
+    RESULT_VARIABLE run_result
+    OUTPUT_VARIABLE run_output
+    ERROR_VARIABLE run_error
+  )
+  if(NOT run_result EQUAL 0)
+    message(FATAL_ERROR
+      "downstream ${consumer} failed:\n${run_output}\n${run_error}")
+  endif()
+endforeach()

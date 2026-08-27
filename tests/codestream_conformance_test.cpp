@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "codec/chroma_from_luma.h"
+#include "codec/butteraugli.h"
 #include "codec/color_transform.h"
 #include "codec/epf.h"
 #include "codec/gaborish.h"
@@ -102,6 +103,8 @@ struct Comparison {
 struct Options {
   fs::path decoder;
   fs::path info;
+  fs::path encoder;
+  fs::path sample;
   fs::path artifacts;
   bool smoke = false;
 };
@@ -110,6 +113,14 @@ template <typename T>
 gjxl::PlaneView<const T> View(
   const std::vector<T>& values, gjxl::Extent2D extent) {
   return {values.data(), extent, extent.width};
+}
+
+gjxl::ConstImage3FView View(const PfmImage& image) {
+  return {{
+    View(image.plane[0], image.extent),
+    View(image.plane[1], image.extent),
+    View(image.plane[2], image.extent),
+  }};
 }
 
 uint32_t Mix(uint32_t value) {
@@ -795,6 +806,87 @@ bool RunFixture(
   return true;
 }
 
+bool RunWorkflowSample(
+  const Options& options,
+  const fs::path& directory) {
+
+  std::error_code fs_error;
+  fs::create_directories(directory, fs_error);
+  if (fs_error) {
+    std::cerr << "workflow-sample: cannot create artifact directory: "
+              << fs_error.message() << '\n';
+    return false;
+  }
+
+  const fs::path compressed = directory / "encoded.jxl";
+  const fs::path decoded = directory / "decoded.pfm";
+  const fs::path encoder_log = directory / "encoder.log";
+  const fs::path decoder_log = directory / "djxl.log";
+  const fs::path info_log = directory / "jxlinfo.log";
+  const std::array<std::string, 4> encoder_arguments = {
+    "--distance", "1.0", options.sample.string(), compressed.string()};
+  if (RunTool(options.encoder, encoder_arguments, encoder_log) != 0) {
+    std::cerr << "workflow-sample: encoder failed\n";
+    return false;
+  }
+
+  const std::array<std::string, 4> decode_arguments = {
+    "--quiet", "--num_threads=0", compressed.string(), decoded.string()};
+  if (RunTool(options.decoder, decode_arguments, decoder_log) != 0) {
+    std::cerr << "workflow-sample: decoder failed\n";
+    return false;
+  }
+
+  PfmImage source;
+  PfmImage reconstructed;
+  std::string error;
+  if (!ReadPfm(options.sample, &source, &error) ||
+      !ReadPfm(decoded, &reconstructed, &error) ||
+      source.extent != reconstructed.extent) {
+    std::cerr << "workflow-sample: invalid source or decoded PFM: "
+              << error << '\n';
+    return false;
+  }
+
+  size_t pixel_count = 0;
+  if (!source.extent.try_area(&pixel_count)) {
+    return false;
+  }
+  std::vector<float> distance_map(pixel_count);
+  double distance = 0.0;
+  const gjxl::Status status = gjxl::ComputeButteraugliDistance(
+    View(source),
+    View(reconstructed),
+    {},
+    {distance_map.data(), source.extent, source.extent.width},
+    &distance);
+  constexpr double kMaximumWorkflowDistance = 1.5;
+  if (!status.ok() || !std::isfinite(distance) || distance < 0.0 ||
+      distance > kMaximumWorkflowDistance) {
+    std::cerr << "workflow-sample: decoded Butteraugli distance "
+              << distance << " exceeds " << kMaximumWorkflowDistance
+              << ": " << status.message() << '\n';
+    return false;
+  }
+
+  const std::array<std::string, 2> info_arguments = {
+    "-v", compressed.string()};
+  const Fixture metadata_fixture{
+    "workflow-sample", source.extent, Pattern::kGradient};
+  std::string info_text;
+  if (RunTool(options.info, info_arguments, info_log) != 0 ||
+      !ReadText(info_log, &info_text) ||
+      !ContainsMetadata(info_text, metadata_fixture, &error)) {
+    std::cerr << "workflow-sample: metadata check failed: " << error << '\n';
+    return false;
+  }
+
+  std::cout << "workflow-sample: " << fs::file_size(compressed)
+            << " bytes, Butteraugli distance=" << std::setprecision(9)
+            << distance << '\n';
+  return true;
+}
+
 bool CheckCorruption(
   std::string_view name,
   std::vector<uint8_t> bytes,
@@ -862,6 +954,14 @@ bool ParseOptions(int argc, char** argv, Options* options) {
       if (!take_path(&options->info)) {
         return false;
       }
+    } else if (argument == "--encoder") {
+      if (!take_path(&options->encoder)) {
+        return false;
+      }
+    } else if (argument == "--sample") {
+      if (!take_path(&options->sample)) {
+        return false;
+      }
     } else if (argument == "--artifacts") {
       if (!take_path(&options->artifacts)) {
         return false;
@@ -873,6 +973,7 @@ bool ParseOptions(int argc, char** argv, Options* options) {
     }
   }
   return !options->decoder.empty() && !options->info.empty() &&
+    !options->encoder.empty() && !options->sample.empty() &&
     !options->artifacts.empty();
 }
 
@@ -882,11 +983,13 @@ int main(int argc, char** argv) {
   Options options;
   if (!ParseOptions(argc, argv, &options)) {
     std::cerr << "Usage: " << argv[0]
-              << " --decoder DJXL --info JXLINFO --artifacts DIR [--smoke]\n";
+              << " --decoder DJXL --info JXLINFO --encoder GJXL_ENCODE"
+              << " --sample INPUT.pfm --artifacts DIR [--smoke]\n";
     return EXIT_FAILURE;
   }
-  if (!fs::exists(options.decoder) || !fs::exists(options.info)) {
-    std::cerr << "Decoder tools do not exist\n";
+  if (!fs::exists(options.decoder) || !fs::exists(options.info) ||
+      !fs::exists(options.encoder) || !fs::exists(options.sample)) {
+    std::cerr << "Conformance tools or sample do not exist\n";
     return EXIT_FAILURE;
   }
 
@@ -907,6 +1010,8 @@ int main(int argc, char** argv) {
     success &= RunFixture(
       fixture, options, run_directory / fixture.name, &corruption_source);
   }
+  success &= RunWorkflowSample(
+    options, run_directory / "workflow-sample");
   success &= RunCorruptionChecks(
     corruption_source, options, run_directory / "corruption");
 

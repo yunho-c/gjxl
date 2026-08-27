@@ -334,7 +334,7 @@ Acceptance criteria:
 - Corruption tests fail cleanly and never masquerade as successful encodes.
 - At least one small deterministic fixture has a pinned codestream hash.
 
-### 6. Public encoding workflow
+### 6. Public encoding workflow — complete (2026-08-27)
 
 Provide an end-to-end path only after the frame serializer passes decoder
 conformance.
@@ -359,6 +359,45 @@ Acceptance criteria:
 - The core codestream library remains independent of command-line parsing and
   filesystem policy.
 
+`EncodeLinearRgbVarDctCodestream` is the backend-neutral, in-memory public
+workflow. It edge-extends strided linear-sRGB input to the codec block extent,
+converts it to XYB, runs the native CPU quantization and default two-update AQ
+pipeline, passes the resulting owned `VarDctEncoderFrame` directly to
+`EncodeVarDctCodestream`, and atomically commits the byte vector and optional
+analysis summary. The summary reports dimensions, encoded bytes, score history,
+and transform-anchor counts without exposing pipeline scratch storage.
+
+The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and a
+Butteraugli target. It writes through a same-directory temporary file,
+synchronizes it, and renames it over the destination only after the complete
+codestream succeeds. Invalid options, malformed or non-finite PFM input,
+encoding failure, and output failure cannot expose a partial destination. The
+codec and codestream libraries contain no command-line parsing or filesystem
+policy.
+
+The checked `17x13` sample encodes to 291 bytes at target `1.0`; its codestream
+SHA-256 is
+`48abd331b4b4e37f0b158af86ef7c766c72ed760a51ce6903a415bf2544031c7`.
+Pinned `djxl` decodes it as linear sRGB with native Butteraugli distance
+`0.999045551` from the input. The workflow also has an independent in-memory
+FNV-1a codestream pin, deterministic repeated-encode coverage, strided input,
+strategy reporting, invalid-input atomicity, installed-consumer coverage, and
+a generated-sample freshness check.
+
+Encode a PFM with:
+
+```sh
+just encode testdata/codestream_sample.pfm output.jxl 1.0
+```
+
+Relevant implementations:
+
+- [`workflow.h`](../src/codestream/workflow.h)
+- [`gjxl_encode.cpp`](../tools/gjxl_encode.cpp)
+- [`pfm.cpp`](../src/io/pfm.cpp)
+- [`codestream_workflow_test.cpp`](../tests/codestream_workflow_test.cpp)
+- [`RunCodestreamCliTest.cmake`](../cmake/RunCodestreamCliTest.cmake)
+
 ## Completion definition
 
 The initial codestream milestone is complete when all of the following are
@@ -372,6 +411,14 @@ true:
 - raw `.jxl` output decodes with pinned libjxl across the required corpus; and
 - decoded pixels match the frontend's decoder-equivalent reconstruction under
   assertion-based tolerances.
+
+The initial profile and public CPU workflow now satisfy this definition. The
+pinned conformance target retains the direct reconstruction comparison for all
+21 serializer fixtures and additionally exercises the checked public-workflow
+sample through the installed-style CLI and independent decoder. The completed
+Release validation passed all 39 reference-disabled tests, all 46
+reference-enabled tests, and the full 21-fixture pinned-decoder corpus plus the
+workflow sample.
 
 ## Deferred work
 

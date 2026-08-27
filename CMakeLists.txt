@@ -264,6 +264,15 @@ add_library(
   src/codestream/headers.cpp
   src/codestream/huffman.cpp
   src/codestream/sections.cpp
+  src/codestream/workflow.cpp
+)
+
+add_library(gjxl::codestream ALIAS gjxl_codestream)
+
+set_target_properties(
+  gjxl_codestream
+  PROPERTIES
+    EXPORT_NAME codestream
 )
 
 target_link_libraries(
@@ -272,10 +281,36 @@ target_link_libraries(
     gjxl_codec
 )
 
+# Floating-point interchange support used by the command-line frontend.
+add_library(
+  gjxl_pfm_io
+  STATIC
+  src/io/pfm.cpp
+)
+
+target_link_libraries(
+  gjxl_pfm_io
+  PUBLIC
+    gjxl_core
+)
+
+add_executable(
+  gjxl_encode
+  tools/gjxl_encode.cpp
+)
+
+target_link_libraries(
+  gjxl_encode
+  PRIVATE
+    gjxl_codestream
+    gjxl_pfm_io
+)
+
 install(
   TARGETS
     gjxl_core
     gjxl_codec
+    gjxl_codestream
   EXPORT gjxlTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )
@@ -294,6 +329,18 @@ install(
     PATTERN "*.h"
     PATTERN "*_internal.h" EXCLUDE
     PATTERN "quantization_tables_generated.h" EXCLUDE
+)
+
+install(
+  DIRECTORY src/codestream
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+)
+
+install(
+  TARGETS gjxl_encode
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
 
 configure_package_config_file(
@@ -536,6 +583,12 @@ if(GJXL_BUILD_TESTS)
 
   enable_testing()
 
+  find_package(
+    Python3
+    COMPONENTS Interpreter
+    REQUIRED
+  )
+
   add_executable(
     gjxl_codestream_conformance_test
     tests/codestream_conformance_test.cpp
@@ -577,11 +630,14 @@ if(GJXL_BUILD_TESTS)
       gjxl_codestream_conformance_test
       --decoder "${GJXL_PINNED_LIBJXL_BUILD}/tools/djxl"
       --info "${GJXL_PINNED_LIBJXL_BUILD}/tools/jxlinfo"
+      --encoder $<TARGET_FILE:gjxl_encode>
+      --sample "${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
       --artifacts
         "${CMAKE_CURRENT_BINARY_DIR}/codestream-conformance-artifacts"
     DEPENDS
       gjxl_codestream_conformance_test
       gjxl_pinned_decoder
+      gjxl_encode
     USES_TERMINAL
     VERBATIM
   )
@@ -595,10 +651,13 @@ if(GJXL_BUILD_TESTS)
         gjxl_codestream_conformance_test
         --decoder "${GJXL_SYSTEM_DJXL}"
         --info "${GJXL_SYSTEM_JXLINFO}"
+        --encoder $<TARGET_FILE:gjxl_encode>
+        --sample "${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
         --artifacts "${CMAKE_CURRENT_BINARY_DIR}/codestream-smoke-artifacts"
         --smoke
       DEPENDS
         gjxl_codestream_conformance_test
+        gjxl_encode
       USES_TERMINAL
       VERBATIM
     )
@@ -609,6 +668,8 @@ if(GJXL_BUILD_TESTS)
         gjxl_codestream_conformance_test
         --decoder "${GJXL_SYSTEM_DJXL}"
         --info "${GJXL_SYSTEM_JXLINFO}"
+        --encoder $<TARGET_FILE:gjxl_encode>
+        --sample "${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
         --artifacts "${CMAKE_CURRENT_BINARY_DIR}/codestream-smoke-artifacts"
         --smoke
     )
@@ -715,6 +776,42 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME codestream_encoder
     COMMAND gjxl_codestream_encoder_test
+  )
+
+  add_executable(
+    gjxl_codestream_workflow_test
+    tests/codestream_workflow_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_codestream_workflow_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME codestream_workflow
+    COMMAND gjxl_codestream_workflow_test
+  )
+
+  add_test(
+    NAME codestream_cli
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DGJXL_ENCODER=$<TARGET_FILE:gjxl_encode>"
+      "-DGJXL_SAMPLE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
+      "-DGJXL_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/codestream-cli-test"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunCodestreamCliTest.cmake"
+  )
+
+  add_test(
+    NAME codestream_sample_generated
+    COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_codestream_sample.py"
+      --output
+      "${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
+      --check
   )
 
   add_executable(
@@ -1248,12 +1345,6 @@ if(GJXL_BUILD_TESTS)
       COMMAND gjxl_butteraugli_distance_scalar_differential_test
     )
   endif()
-
-  find_package(
-    Python3
-    COMPONENTS Interpreter
-    REQUIRED
-  )
 
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(

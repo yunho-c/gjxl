@@ -17,3 +17,14 @@ target_link_libraries(
   PRIVATE
     gjxl::codec
 )
+
+add_executable(
+  gjxl_codestream_consumer
+  codestream_consumer.cpp
+)
+
+target_link_libraries(
+  gjxl_codestream_consumer
+  PRIVATE
+    gjxl::codestream
+)
