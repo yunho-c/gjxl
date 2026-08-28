@@ -381,6 +381,65 @@ deterministic-byte tests cover the parallel path.
 - Record warm/cold latency, device memory, peak scratch, output size, and every
   profile phase. A missing phase or excluded transfer invalidates the claim.
 
+## Image-level throughput driver
+
+`VarDctBatchEncoder` is a persistent bounded worker pool for independent public
+workflow calls. A batch retains input order and returns one status, codestream,
+summary, and timing record per image. Each worker owns its prepared image state
+while all forced or automatically selected Metal calls reuse the process-wide
+production backend. This is coarse-grained pipelining: CPU preparation and
+codestream serialization for some images can overlap other images' Metal work,
+but images are not packed into a new fused kernel dispatch.
+
+The benchmark compares a persistent one-worker driver with persistent
+`1`, `2`, `4`, and `8` worker drivers. Each row processes exactly the reported
+batch size. Samples alternate serial-first and batch-first order, and every
+result must match the single-image codestream and deterministic summary before
+its timing is accepted. The measured boundary starts with an already-generated
+linear RGB image and ends with in-memory codestreams; image decoding, input
+generation, file I/O, and driver construction are excluded. The same synthetic
+read-only source is submitted for every item, while all preparation, GPU
+scratch, summaries, and codestream outputs remain independent.
+
+A directional Apple M4 Pro Release run on 2026-08-28, rebased onto `0e96f0b`,
+used maximum-throughput Metal AQ, one warmup per path, and three alternating
+paired samples. It is one process, not a retained cross-process performance
+claim:
+
+| Workload | Batch | Batch median | Median/image | Images/s | Paired speedup median (range) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 64x64 | 1 | 6.602 ms | 6.602 ms | 151.5 | 1.011x (0.932-1.052x) |
+| 64x64 | 2 | 6.756 ms | 3.378 ms | 296.0 | 2.063x (1.874-2.120x) |
+| 64x64 | 4 | 10.458 ms | 2.615 ms | 382.5 | 2.594x (2.358-2.724x) |
+| 64x64 | 8 | 8.087 ms | 1.011 ms | 989.2 | 3.743x (3.676-4.389x) |
+| 256x192 | 1 | 8.236 ms | 8.236 ms | 121.4 | 1.006x (0.909-1.025x) |
+| 256x192 | 2 | 9.229 ms | 4.614 ms | 216.7 | 1.853x (1.686-1.932x) |
+| 256x192 | 4 | 9.287 ms | 2.322 ms | 430.7 | 3.117x (2.952-3.295x) |
+| 256x192 | 8 | 18.436 ms | 2.305 ms | 433.9 | 4.001x (3.809-4.577x) |
+| 512x384 | 1 | 14.233 ms | 14.233 ms | 70.3 | 1.029x (0.977-1.032x) |
+| 512x384 | 2 | 21.719 ms | 10.859 ms | 92.1 | 1.777x (1.737-1.808x) |
+| 512x384 | 4 | 20.242 ms | 5.060 ms | 197.6 | 2.900x (2.584-3.013x) |
+| 512x384 | 8 | 33.538 ms | 4.192 ms | 238.5 | 4.253x (3.435-4.724x) |
+| 1080p | 1 | 98.469 ms | 98.469 ms | 10.2 | 1.032x (0.984-1.036x) |
+| 1080p | 2 | 114.191 ms | 57.095 ms | 17.5 | 1.800x (1.643-1.931x) |
+| 1080p | 4 | 160.499 ms | 40.125 ms | 24.9 | 2.593x (2.303-2.636x) |
+| 1080p | 8 | 363.938 ms | 45.492 ms | 22.0 | 2.287x (2.214-2.431x) |
+| 4K | 1 | 341.618 ms | 341.618 ms | 2.9 | 1.003x (0.902-1.046x) |
+| 4K | 2 | 458.673 ms | 229.337 ms | 4.4 | 1.450x (1.351-1.636x) |
+| 4K | 4 | 978.583 ms | 244.646 ms | 4.1 | 1.317x (1.299-2.047x) |
+| 4K | 8 | 1837.427 ms | 229.678 ms | 4.4 | 1.355x (1.288-1.820x) |
+
+The batch-size-one rows remain near parity, so the driver does not improve
+single-image latency. This directional run shows positive median overlap at
+every image size, with the strongest scaling at the three smaller sizes and
+flatter, more variable gains at 1080p and especially 4K. It does not establish
+stable scaling for separately decoded source images, exact AQ, target-size
+searches, or a multi-process service. Reproduce the complete matrix with:
+
+```sh
+just image-batch-benchmark all 1,2,4,8 3 1 metal maximum-throughput
+```
+
 ## Stop rules
 
 - Do not optimize a standalone DCT, Butteraugli, or AC-search kernel unless the

@@ -259,6 +259,7 @@ add_library(
   STATIC
 
   src/codestream/ac_group.cpp
+  src/codestream/batch_workflow.cpp
   src/codestream/bit_writer.cpp
   src/codestream/dc_group.cpp
   src/codestream/entropy.cpp
@@ -1156,6 +1157,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME codestream_workflow
     COMMAND gjxl_codestream_workflow_test
+  )
+
+  add_executable(
+    gjxl_codestream_batch_workflow_test
+    tests/codestream_batch_workflow_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_codestream_batch_workflow_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME codestream_batch_workflow
+    COMMAND gjxl_codestream_batch_workflow_test
   )
 
   add_executable(
@@ -2240,6 +2257,22 @@ if(GJXL_BUILD_BENCHMARKS)
 
   add_dependencies(
     gjxl_quantization_benchmark
+    gjxl_embedded_metal_shaders
+  )
+
+  add_executable(
+    gjxl_image_batch_benchmark
+    benchmarks/image_batch_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_image_batch_benchmark
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_dependencies(
+    gjxl_image_batch_benchmark
     gjxl_embedded_metal_shaders
   )
 
