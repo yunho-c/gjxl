@@ -506,7 +506,7 @@ private:
   bool fail_next_butteraugli_completion_ = false;
   bool fail_next_butteraugli_readback_ = false;
   bool *wait_observer_ = nullptr;
-  MetalAqReadbackStatsForTesting resident_policy_readback_stats_;
+  MetalAqReadbackStatsForTesting last_readback_stats_;
   MetalAqEvaluationProfile* active_profile_ = nullptr;
   bool exact_coefficients_ = false;
   bool exact_coefficient_reconstruction_ = false;

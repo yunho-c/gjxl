@@ -25,6 +25,7 @@
 #include "codestream/encoder.h"
 #include "codestream/workflow.h"
 #include "codestream/workflow_internal.h"
+#include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/gaborish.h"
@@ -114,6 +115,7 @@ struct PipelineStorage {
   ImageStorage reconstructed;
   gjxl::VarDctEncoderFrame frame;
   std::vector<double> scores;
+  gjxl::MaximumErrorResult maximum_error_result;
 
   [[nodiscard]] gjxl::CpuQuantizationPipelineOutput Output() {
     return {
@@ -135,6 +137,7 @@ struct PipelineStorage {
                 .reconstructed_linear_rgb = reconstructed.View(),
                 .frame = &frame,
                 .score_history = &scores,
+                .maximum_error_result = &maximum_error_result,
             },
     };
   }
@@ -769,6 +772,171 @@ bool CheckDefaultUpdatePipelineParity() {
       !reconstruction_untouched) {
     std::cerr << "Encoding-only resident pipeline changed diagnostics or "
                  "frame output: " << encoding_status.message() << '\n';
+    return false;
+  }
+
+  const auto poison_prepared_diagnostics = [kDiagnosticPoison](auto& prepared) {
+    std::fill(
+      prepared.final_quant.begin(), prepared.final_quant.end(),
+      kDiagnosticPoison);
+    std::fill(
+      prepared.block_distance.begin(), prepared.block_distance.end(),
+      kDiagnosticPoison);
+    const gjxl::Image3FView reconstruction =
+      prepared.reconstructed_linear.view();
+    for (gjxl::PlaneF32View plane : reconstruction.plane) {
+      for (size_t y = 0; y < plane.extent.height; ++y) {
+        std::fill_n(plane.Row(y), plane.extent.width, kDiagnosticPoison);
+      }
+    }
+  };
+  const auto diagnostics_untouched = [kDiagnosticPoison](const auto& prepared) {
+    if (!std::ranges::all_of(
+          prepared.final_quant,
+          [kDiagnosticPoison](float value) {
+            return value == kDiagnosticPoison;
+          }) ||
+        !std::ranges::all_of(
+          prepared.block_distance,
+          [kDiagnosticPoison](float value) {
+            return value == kDiagnosticPoison;
+          })) {
+      return false;
+    }
+    return std::ranges::all_of(
+      prepared.reconstructed_linear.const_view().plane,
+      [kDiagnosticPoison](gjxl::ConstPlaneF32View plane) {
+        for (size_t y = 0; y < plane.extent.height; ++y) {
+          if (!std::ranges::all_of(
+                std::span<const float>(plane.Row(y), plane.extent.width),
+                [kDiagnosticPoison](float value) {
+                  return value == kDiagnosticPoison;
+                })) {
+            return false;
+          }
+        }
+        return true;
+      });
+  };
+
+  gjxl::quantization_pipeline_internal::PreparedQuantizationPipeline
+    exact_encoding_prepared;
+  gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
+    exact_encoding_aq;
+  gjxl::Status exact_encoding_status =
+    gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), options,
+      &exact_encoding_prepared, false, false);
+  poison_prepared_diagnostics(exact_encoding_prepared);
+  gjxl::VarDctEncoderFrame exact_encoding_frame;
+  std::vector<double> exact_encoding_scores;
+  if (exact_encoding_status.ok()) {
+    exact_encoding_status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipelineForEncoding(
+        *gpu, original.ConstView(), exact_encoding_prepared, options,
+        gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+        {
+          .frame = &exact_encoding_frame,
+          .score_history = &exact_encoding_scores,
+        },
+        nullptr, &exact_encoding_aq);
+  }
+  std::vector<uint8_t> exact_encoding_codestream;
+  if (exact_encoding_status.ok()) {
+    exact_encoding_status = gjxl::EncodeVarDctCodestream(
+      exact_encoding_frame, &exact_encoding_codestream);
+  }
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting
+    exact_encoding_readback;
+  if (exact_encoding_status.ok() && exact_encoding_aq.evaluation != nullptr) {
+    exact_encoding_status =
+      gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+        *exact_encoding_aq.evaluation, &exact_encoding_readback);
+  }
+  if (!exact_encoding_status.ok() ||
+      exact_encoding_scores != accelerated.scores ||
+      !FramesEqual(exact_encoding_frame, accelerated.frame) ||
+      exact_encoding_codestream != gpu_codestream ||
+      !diagnostics_untouched(exact_encoding_prepared) ||
+      exact_encoding_readback.score_history_bytes != sizeof(float) ||
+      exact_encoding_readback.block_distance_map_bytes == 0 ||
+      exact_encoding_readback.frame_bytes != 0 ||
+      exact_encoding_readback.reconstructed_rgb_bytes != 0) {
+    std::cerr << "Encoding-only exact pipeline changed output or read "
+                 "diagnostics: " << exact_encoding_status.message() << '\n';
+    return false;
+  }
+
+  gjxl::CpuQuantizationPipelineOptions maximum_error_options = options;
+  maximum_error_options.adaptive_quantization.control_mode =
+    gjxl::AdaptiveQuantizationControlMode::kMaximumError;
+  maximum_error_options.adaptive_quantization.maximum_error =
+    {0.05f, 0.05f, 0.05f};
+  PipelineStorage maximum_error_full(kExtent, kExtent);
+  gjxl::Status maximum_error_status = gjxl::RunGpuQuantizationPipeline(
+    *gpu, original.ConstView(), opsin.ConstView(), maximum_error_options,
+    gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+    maximum_error_full.Output());
+  std::vector<uint8_t> maximum_error_codestream;
+  if (maximum_error_status.ok()) {
+    maximum_error_status = gjxl::EncodeVarDctCodestream(
+      maximum_error_full.frame, &maximum_error_codestream);
+  }
+
+  gjxl::quantization_pipeline_internal::PreparedQuantizationPipeline
+    maximum_encoding_prepared;
+  gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
+    maximum_encoding_aq;
+  if (maximum_error_status.ok()) {
+    maximum_error_status =
+      gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
+        original.ConstView(), opsin.ConstView(), maximum_error_options,
+        &maximum_encoding_prepared, false, false);
+  }
+  poison_prepared_diagnostics(maximum_encoding_prepared);
+  gjxl::VarDctEncoderFrame maximum_encoding_frame;
+  std::vector<double> maximum_encoding_scores;
+  gjxl::MaximumErrorResult maximum_encoding_result;
+  if (maximum_error_status.ok()) {
+    maximum_error_status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipelineForEncoding(
+        *gpu, original.ConstView(), maximum_encoding_prepared,
+        maximum_error_options,
+        gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+        {
+          .frame = &maximum_encoding_frame,
+          .score_history = &maximum_encoding_scores,
+          .maximum_error_result = &maximum_encoding_result,
+        },
+        nullptr, &maximum_encoding_aq);
+  }
+  std::vector<uint8_t> maximum_encoding_codestream;
+  if (maximum_error_status.ok()) {
+    maximum_error_status = gjxl::EncodeVarDctCodestream(
+      maximum_encoding_frame, &maximum_encoding_codestream);
+  }
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting
+    maximum_encoding_readback;
+  if (maximum_error_status.ok() &&
+      maximum_encoding_aq.evaluation != nullptr) {
+    maximum_error_status =
+      gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+        *maximum_encoding_aq.evaluation, &maximum_encoding_readback);
+  }
+  if (!maximum_error_status.ok() ||
+      maximum_encoding_scores != maximum_error_full.scores ||
+      maximum_encoding_result != maximum_error_full.maximum_error_result ||
+      !FramesEqual(maximum_encoding_frame, maximum_error_full.frame) ||
+      maximum_encoding_codestream != maximum_error_codestream ||
+      !diagnostics_untouched(maximum_encoding_prepared) ||
+      maximum_encoding_readback.score_history_bytes != 0 ||
+      maximum_encoding_readback.maximum_error_bytes == 0 ||
+      maximum_encoding_readback.block_distance_map_bytes == 0 ||
+      maximum_encoding_readback.frame_bytes != 0 ||
+      maximum_encoding_readback.reconstructed_rgb_bytes != 0) {
+    std::cerr << "Encoding-only maximum-error pipeline changed output or "
+                 "read diagnostics: " << maximum_error_status.message()
+              << '\n';
     return false;
   }
 

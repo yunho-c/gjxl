@@ -108,7 +108,10 @@ struct AqEvaluationOutput {
 };
 
 struct AqEvaluationOutput::Final {
+  /// Optional diagnostic image. An empty view keeps reconstructed RGB on the
+  /// device while still allowing frame materialization.
   Image3FView reconstructed_linear_rgb;
+  /// Required encoder frame when final materialization is requested.
   VarDctEncoderFrame* frame = nullptr;
 };
 
@@ -149,8 +152,8 @@ public:
   /// Executes one complete resident reconstruction and filtering pass, then
   /// the prepared Butteraugli or maximum-error metric and strategy-aware
   /// reduction. When `output.final` is non-null, the same submission also
-  /// materializes reconstructed RGB and the encoder frame. Failure never
-  /// changes caller-visible output.
+  /// materializes the encoder frame and, when requested, reconstructed RGB.
+  /// Failure never changes caller-visible output.
   [[nodiscard]] virtual Status Evaluate(
     AqEvaluationInput input,
     AqEvaluationOutput output) = 0;

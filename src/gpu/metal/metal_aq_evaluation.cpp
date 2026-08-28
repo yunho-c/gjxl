@@ -164,10 +164,11 @@ template <typename T>
          plane.extent.height != 0 || plane.stride != 0;
 }
 
+template <typename T>
 [[nodiscard]] bool ImageDescriptorSpecified(
-    ConstImage3FView image) noexcept {
+    Image3View<T> image) noexcept {
   return std::ranges::any_of(
-      image.plane, [](ConstPlaneF32View plane) {
+      image.plane, [](PlaneView<T> plane) {
         return plane.data != nullptr || plane.extent.width != 0 ||
                plane.extent.height != 0 || plane.stride != 0;
       });
@@ -1827,8 +1828,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
     }
     if (status.ok()) status = ReadbackRawQuant();
     if (status.ok()) {
+      candidate_readback_stats.quantizer_bytes = sizeof(resident_quantizer);
       candidate_readback_stats.frame_bytes =
-        sizeof(resident_quantizer) +
         quantized_readback_.size() * sizeof(int32_t) +
         quantized_dc_readback_.size() * sizeof(int32_t) +
         last_raw_quant_.size() * sizeof(int32_t);
@@ -1934,7 +1935,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
     }
   }
   if (output.frame != nullptr) *output.frame = std::move(candidate_frame);
-  resident_policy_readback_stats_ = candidate_readback_stats;
+  last_readback_stats_ = candidate_readback_stats;
   CompleteOperation();
   return Status::Ok();
 }
@@ -2215,6 +2216,10 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   if (!status.ok()) {
     return status;
   }
+  const bool frame_requested = output.final != nullptr;
+  const bool reconstruction_requested = output.final != nullptr &&
+    ImageDescriptorSpecified(output.final->reconstructed_linear_rgb);
+  MetalAqReadbackStatsForTesting candidate_readback_stats;
 
   const ProfileClock::time_point wait_begin = active_profile_ != nullptr
     ? ProfileClock::now() : ProfileClock::time_point{};
@@ -2226,7 +2231,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   if (!status.ok())
     return status;
 
-  if (output.final != nullptr) {
+  if (reconstruction_requested) {
     status = PrepareLinearReadback();
     if (!status.ok()) {
       CompleteOperation();
@@ -2248,6 +2253,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
           std::to_string(device_error) + ")")
       : status;
   }
+  candidate_readback_stats.control_bytes = sizeof(device_error);
 
   QuantizerParams resident_quantizer;
   if (resident_quantization_active_) {
@@ -2261,6 +2267,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
       Invalidate();
       return status;
     }
+    candidate_readback_stats.quantizer_bytes = sizeof(resident_quantizer);
   }
 
   const size_t row_bytes = block_extent_.width * sizeof(float);
@@ -2272,12 +2279,19 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
       block_distance_.offset_bytes +
         y * block_distance_.row_stride * sizeof(float));
   }
+  if (status.ok()) {
+    candidate_readback_stats.block_distance_map_bytes =
+      block_count_ * sizeof(float);
+  }
   float score = 0.0f;
   MaximumErrorReduction maximum_error;
   if (status.ok() &&
       options_.metric == AqEvaluationMetric::kButteraugli) {
     status = backend_->CopyDeviceToHost(
       *score_.buffer, &score, sizeof(score), score_.offset_bytes);
+    if (status.ok()) {
+      candidate_readback_stats.score_history_bytes = sizeof(score);
+    }
   }
   if (status.ok() &&
       options_.metric == AqEvaluationMetric::kMaximumError) {
@@ -2286,6 +2300,10 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
       transform_maximum_error_readback_.data(),
       3 * anchor_count_ * sizeof(float),
       transform_maximum_error_.offset_bytes);
+    if (status.ok()) {
+      candidate_readback_stats.maximum_error_bytes =
+        3 * anchor_count_ * sizeof(float);
+    }
     for (size_t anchor = 0; status.ok() && anchor < anchor_count_; ++anchor) {
       for (size_t channel = 0; channel < 3; ++channel) {
         const float value =
@@ -2326,7 +2344,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   VarDctEncoderFrame final_frame;
   const ProfileClock::time_point final_begin = active_profile_ != nullptr
     ? ProfileClock::now() : ProfileClock::time_point{};
-  if (output.final != nullptr) {
+  if (frame_requested) {
     if (!exact_coefficients_) {
       status = backend_->CopyDeviceToHost(
         *quantized_coefficients_.buffer,
@@ -2344,7 +2362,18 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
             AcCoefficientDecisionMode::kAdjustedSharedQuant) {
         status = ReadbackRawQuant();
       }
+      if (status.ok()) {
+        candidate_readback_stats.frame_bytes =
+          quantized_readback_.size() * sizeof(int32_t) +
+          quantized_dc_readback_.size() * sizeof(int32_t) +
+          (coefficient_decision_mode_ ==
+               AcCoefficientDecisionMode::kAdjustedSharedQuant
+             ? last_raw_quant_.size() * sizeof(int32_t)
+             : 0);
+      }
     }
+  }
+  if (reconstruction_requested) {
     const size_t linear_row_bytes = source_extent_.width * sizeof(float);
     for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
       for (size_t y = 0; status.ok() && y < source_extent_.height; ++y) {
@@ -2360,14 +2389,10 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
       Invalidate();
       return status;
     }
+    candidate_readback_stats.reconstructed_rgb_bytes =
+      3 * source_extent_.width * source_extent_.height * sizeof(float);
 
-    constexpr int32_t kQuantizedPoison =
-      static_cast<int32_t>(0x81234567u);
-    if (std::ranges::find(quantized_readback_, kQuantizedPoison) !=
-          quantized_readback_.end() ||
-        std::ranges::find(quantized_dc_readback_, kQuantizedPoison) !=
-          quantized_dc_readback_.end() ||
-        !std::ranges::all_of(
+    if (!std::ranges::all_of(
           linear_readback_,
           [](const std::vector<float>& plane) {
             return std::ranges::all_of(
@@ -2375,16 +2400,29 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
           })) {
       Invalidate();
       return Status::Internal(
-        "Metal AQ final readback contains poison or non-finite pixels");
+        "Metal AQ final readback contains non-finite pixels");
     }
+  }
 
+  if (frame_requested) {
+    constexpr int32_t kQuantizedPoison =
+      static_cast<int32_t>(0x81234567u);
+    if (std::ranges::find(quantized_readback_, kQuantizedPoison) !=
+          quantized_readback_.end() ||
+        std::ranges::find(quantized_dc_readback_, kQuantizedPoison) !=
+          quantized_dc_readback_.end()) {
+      Invalidate();
+      return Status::Internal(
+        "Metal AQ final frame readback contains poison");
+    }
     status = AssembleFrameFromReadback(&final_frame);
     if (!status.ok()) {
       Invalidate();
       return status;
     }
   }
-  if (active_profile_ != nullptr && output.final != nullptr) {
+  if (active_profile_ != nullptr &&
+      (frame_requested || reconstruction_requested)) {
     active_profile_->final_readback_nanoseconds =
       ElapsedNanoseconds(final_begin);
   }
@@ -2402,7 +2440,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   if (resident_quantization_active_ && output.quantizer != nullptr) {
     *output.quantizer = resident_quantizer;
   }
-  if (output.final != nullptr) {
+  if (reconstruction_requested) {
     for (size_t channel = 0; channel < 3; ++channel) {
       for (size_t y = 0; y < source_extent_.height; ++y) {
         std::copy_n(
@@ -2411,8 +2449,9 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
           output.final->reconstructed_linear_rgb.plane[channel].Row(y));
       }
     }
-    *output.final->frame = std::move(final_frame);
   }
+  if (frame_requested) *output.final->frame = std::move(final_frame);
+  last_readback_stats_ = candidate_readback_stats;
   if (active_profile_ != nullptr) {
     active_profile_->output_commit_nanoseconds =
       ElapsedNanoseconds(commit_begin);
@@ -2584,7 +2623,7 @@ Status MetalPreparedAqEvaluation::GetReadbackStats(
     return Status::FailedPrecondition(
       "Prepared AQ readback stats require a ready object");
   }
-  *stats = resident_policy_readback_stats_;
+  *stats = last_readback_stats_;
   return Status::Ok();
 }
 
@@ -2847,15 +2886,19 @@ MetalPreparedAqEvaluation::ValidateOutput(AqEvaluationOutput output) const {
        output.maximum_error == nullptr)) {
     return Status::InvalidArgument("Prepared AQ evaluation output is invalid");
   }
-  if (output.final != nullptr &&
-      (!output.final->reconstructed_linear_rgb.valid() ||
-       output.final->reconstructed_linear_rgb.extent() != source_extent_ ||
-       !std::ranges::all_of(
-         output.final->reconstructed_linear_rgb.plane,
-         [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }) ||
-       output.final->frame == nullptr)) {
-    return Status::InvalidArgument(
-        "Prepared AQ final evaluation output is invalid");
+  if (output.final != nullptr) {
+    const bool reconstruction_requested =
+      ImageDescriptorSpecified(output.final->reconstructed_linear_rgb);
+    if (output.final->frame == nullptr ||
+        (reconstruction_requested &&
+         (!output.final->reconstructed_linear_rgb.valid() ||
+          output.final->reconstructed_linear_rgb.extent() != source_extent_ ||
+          !std::ranges::all_of(
+            output.final->reconstructed_linear_rgb.plane,
+            [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); })))) {
+      return Status::InvalidArgument(
+          "Prepared AQ final evaluation output is invalid");
+    }
   }
   return Status::Ok();
 }

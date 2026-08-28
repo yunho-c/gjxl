@@ -701,25 +701,32 @@ final frame validity, and atomic upload/submission/completion/numeric/readback
 failure. The initial adjustment and invariant CfL binding are intentionally
 outside the fused command buffer.
 
-### Selective resident output materialization
+### Selective codestream output materialization
 
-**Status:** complete for fully-resident and throughput Butteraugli encoding.
+**Status:** complete for all Metal codestream workflows.
 
 The codestream workflow now uses an internal encoding-only pipeline output for
-the two resident Butteraugli modes. It requests the score history and final
+exact-coefficient, fully-resident, and throughput modes; maximum-throughput
+retains its existing frame-only path. It requests the policy result and final
 `VarDctEncoderFrame`, but leaves the final float quant field, block-distance
 map, reconstructed linear RGB, and public initial-field diagnostics untouched.
-The fused Metal finalizer therefore reads the device error word and contiguous
-score history, followed only by quantizer metadata, raw quant, and quantized
-DC/AC needed to assemble the frame. It no longer reads the redundant scalar
-score or any pixel-resolution image in this production path.
+Maximum-error control forwards its required final outcome through the same
+lean output.
 
-All public diagnostic APIs preserve their prior output contract. Exact-
-coefficient and maximum-error workflows retain their existing materialization,
-and an unavailable fused backend may still use the heavier serial fallback.
-Focused tests account for each readback byte class, cover zero through four
-updates and optional map/full/score-only outputs, preserve padded destinations,
-and prove frame/codestream parity plus atomic staging and device-failure paths.
+The fused resident finalizer reads the device error word and contiguous score
+history, followed only by quantizer metadata, raw quant, and quantized DC/AC
+needed to assemble the frame. The serial exact-coefficient and maximum-error
+policies retain their bounded block/scalar readbacks, but their final
+evaluation no longer downloads reconstructed linear RGB. Exact-coefficient
+mode reuses its authoritative host frame and therefore performs no final
+coefficient-frame download either.
+
+All public diagnostic APIs preserve their prior output contract, and an
+unavailable fused backend may still use the serial fallback. Focused tests
+account for each readback byte class, cover zero through four resident updates,
+exercise exact-coefficient and six-evaluation maximum-error encoding, preserve
+padded or poisoned diagnostic destinations, and prove frame/codestream parity
+plus atomic staging and device-failure paths.
 
 On Apple M4 Pro, one warmup and five balanced padded-1080p samples at target
 `1.2` measured fully resident at `274.965 ms` total (`257.452-299.968`) and
@@ -729,6 +736,14 @@ preceding chained-policy checkpoint, the median reductions are `4.6%`/`3.4%`
 for fully resident total/pipeline and `6.8%`/`8.1%` for throughput. These are
 directional same-machine results; the ranges remain the primary latency
 evidence.
+
+A fresh Apple M4 Pro Release run with one warmup and five balanced
+padded-1080p exact-coefficient samples measured `624.544 ms` total
+(`614.039-641.636`), `362.392 ms` in the quantization pipeline, and `10.384x`
+paired CPU/Metal speedup (`10.107-10.601x`). CPU and Metal produced the same
+`636092`-byte codestream. This optimization removes a `24847212`-byte final RGB
+transfer for that geometry, but there is no isolated same-revision pre-change
+distribution, so the timing is a checkpoint rather than a claimed speedup.
 
 ### Final resident-frontend audit
 

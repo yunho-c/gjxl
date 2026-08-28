@@ -487,6 +487,33 @@ The 4672x5584 doughnut sample again produced exactly `2769119` bytes and score
 4672x5584 PFM. As before, this single natural-image timing is a regression and
 decode check rather than a retained latency distribution.
 
+#### Codestream-only RGB-readback checkpoint (2026-08-28)
+
+The internal encoding-only materialization now also covers exact-coefficient
+and maximum-error Metal workflows. Their serial CPU policy still consumes the
+per-evaluation block map and metric scalars, but the last evaluation requests
+the `VarDctEncoderFrame` without reconstructed linear RGB. Exact-coefficient
+mode already owns the authoritative frame on the host, so its last evaluation
+does not download coefficients either. Maximum-throughput was already
+frame-only. Public AQ and quantization-pipeline calls retain their complete
+diagnostic output.
+
+Direct Release tests compare full and frame-only generic evaluations, account
+for Butteraugli and maximum-error readback classes, and verify zero RGB bytes
+for frame-only output. Encoding-only exact and six-evaluation maximum-error
+pipelines preserve score history, maximum-error outcome, frame, and codestream
+while poisoned quant-field, block-map, and RGB diagnostics remain untouched.
+The focused Metal, policy, pipeline, and codestream-workflow tests pass.
+
+One Apple M4 Pro balanced public-workflow run used one warmup and five
+padded-1080p exact-coefficient samples at target `1.2`. Metal measured
+`624.544 ms` total (`614.039-641.636`), `362.392 ms` in the quantization
+pipeline, and `10.384x` paired speedup (`10.107-10.601x`); CPU and Metal both
+produced `636092` bytes. The removed final RGB transfer is `24847212` bytes for
+the `1919x1079` source. Because no isolated same-revision pre-change
+distribution was retained, this is a post-change checkpoint rather than a
+speedup attribution.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

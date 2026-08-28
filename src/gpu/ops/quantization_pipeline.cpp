@@ -481,13 +481,15 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_aq) {
 
-  if ((aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+  if ((aq_mode != GpuAdaptiveQuantizationMode::kExactCoefficients &&
+       aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
        aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
-      options.adaptive_quantization.control_mode !=
-        AdaptiveQuantizationControlMode::kButteraugli ||
-      output.frame == nullptr || output.score_history == nullptr) {
+      output.frame == nullptr || output.score_history == nullptr ||
+      (options.adaptive_quantization.control_mode ==
+         AdaptiveQuantizationControlMode::kMaximumError &&
+       output.maximum_error_result == nullptr)) {
     return Status::InvalidArgument(
-      "Encoding-only GPU pipeline requires resident Butteraugli output");
+      "Encoding-only GPU pipeline output is invalid");
   }
   const CpuQuantizationPipelineOutput pipeline_output{
     .initial_quantization = {
@@ -511,7 +513,7 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
       .reconstructed_linear_rgb = prepared.reconstructed_linear.view(),
       .frame = output.frame,
       .score_history = output.score_history,
-      .maximum_error_result = &prepared.maximum_error_result,
+      .maximum_error_result = output.maximum_error_result,
     },
   };
   return RunPreparedGpuQuantizationPipelineImpl(

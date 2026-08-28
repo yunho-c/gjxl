@@ -58,6 +58,7 @@ struct PreparedQuantizationPipeline;
 struct GpuEncodingQuantizationPipelineOutput {
   VarDctEncoderFrame* frame = nullptr;
   std::vector<double>* score_history = nullptr;
+  MaximumErrorResult* maximum_error_result = nullptr;
 };
 
 /// Reuses target-invariant host preparation across complete GPU attempts.
@@ -72,8 +73,8 @@ struct GpuEncodingQuantizationPipelineOutput {
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_aq = nullptr);
 
-/// Runs the resident Butteraugli pipeline for codestream encoding without
-/// materializing diagnostic quant fields, block maps, or reconstructed RGB.
+/// Runs a Metal pipeline for codestream encoding without materializing
+/// diagnostic quant fields, block maps, or reconstructed RGB.
 [[nodiscard]] Status RunPreparedGpuQuantizationPipelineForEncoding(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,

@@ -520,6 +520,43 @@ bool CheckMaximumErrorReduction(gjxl::GpuBackend& gpu) {
     return false;
   }
 
+  EvaluationOutputStorage frame_only(blocks);
+  gjxl::MaximumErrorReduction frame_only_reduction;
+  gjxl::VarDctEncoderFrame frame_only_frame;
+  gjxl::AqEvaluationOutput::Final frame_only_final{
+    .frame = &frame_only_frame,
+  };
+  gjxl::AqEvaluationOutput frame_only_output = frame_only.View();
+  frame_only_output.maximum_error = &frame_only_reduction;
+  frame_only_output.final = &frame_only_final;
+  if (!CheckStatus(prepared->Evaluate(
+        fixture.input.View(), frame_only_output),
+        "frame-only maximum-error evaluation") ||
+      !CompareOutputs(actual, frame_only) ||
+      frame_only_reduction.channel_maximum !=
+        actual_reduction.channel_maximum ||
+      frame_only_reduction.normalized_maximum !=
+        actual_reduction.normalized_maximum ||
+      !frame_only_frame.valid()) {
+    std::cerr << "Frame-only maximum-error output differs\n";
+    return false;
+  }
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting frame_only_stats;
+  if (!CheckStatus(
+        gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+          *prepared, &frame_only_stats),
+        "frame-only maximum-error readback stats") ||
+      frame_only_stats.control_bytes != sizeof(uint32_t) ||
+      frame_only_stats.score_history_bytes != 0 ||
+      frame_only_stats.maximum_error_bytes == 0 ||
+      frame_only_stats.block_distance_map_bytes !=
+        blocks.width * blocks.height * sizeof(float) ||
+      frame_only_stats.frame_bytes == 0 ||
+      frame_only_stats.reconstructed_rgb_bytes != 0) {
+    std::cerr << "Frame-only maximum-error readback accounting differs\n";
+    return false;
+  }
+
   EvaluationOutputStorage rejected(blocks);
   const uint64_t submissions = gpu.stats().committed_submissions;
   if (!ExpectCode(
@@ -594,10 +631,8 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
   }
 
   EvaluationOutputStorage rejected_final(fixture.strategies.extent());
-  gjxl::VarDctEncoderFrame rejected_frame;
   gjxl::AqEvaluationOutput::Final invalid_final{
     .reconstructed_linear_rgb = {},
-    .frame = &rejected_frame,
   };
   gjxl::AqEvaluationOutput invalid_final_output = rejected_final.View();
   invalid_final_output.final = &invalid_final;
@@ -607,7 +642,7 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
         prepared->Evaluate(fixture.input.View(), invalid_final_output),
         gjxl::StatusCode::kInvalidArgument,
         "invalid final AQ output") ||
-      !rejected_final.Poisoned() || rejected_frame.valid() ||
+      !rejected_final.Poisoned() ||
       gpu.stats().committed_submissions != before_rejected_final) {
     return false;
   }
@@ -634,6 +669,56 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
       after_final.committed_submissions !=
         before_final.committed_submissions + 1) {
     std::cerr << "Final AQ materialization added an allocation or submission\n";
+    return false;
+  }
+  const size_t block_count = fixture.strategies.extent().width *
+    fixture.strategies.extent().height;
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting full_stats;
+  if (!CheckStatus(
+        gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+          *prepared, &full_stats),
+        "full evaluation readback stats") ||
+      full_stats.control_bytes != sizeof(uint32_t) ||
+      full_stats.score_history_bytes != sizeof(float) ||
+      full_stats.maximum_error_bytes != 0 ||
+      full_stats.quantizer_bytes != 0 ||
+      full_stats.block_distance_map_bytes != block_count * sizeof(float) ||
+      full_stats.frame_bytes == 0 ||
+      full_stats.reconstructed_rgb_bytes !=
+        3 * fixture.original.extent.width * fixture.original.extent.height *
+          sizeof(float)) {
+    std::cerr << "Full evaluation readback accounting differs\n";
+    return false;
+  }
+
+  EvaluationOutputStorage frame_only_bounded(fixture.strategies.extent());
+  gjxl::VarDctEncoderFrame frame_only_frame;
+  gjxl::AqEvaluationOutput::Final frame_only_final{
+    .frame = &frame_only_frame,
+  };
+  gjxl::AqEvaluationOutput frame_only_output = frame_only_bounded.View();
+  frame_only_output.final = &frame_only_final;
+  if (!CheckStatus(prepared->Evaluate(
+        fixture.input.View(), frame_only_output),
+        "production frame-only AQ evaluation") ||
+      !CompareOutputs(final_bounded, frame_only_bounded) ||
+      !QuantizedCoefficientsEqual(final_frame, frame_only_frame)) {
+    std::cerr << "Frame-only AQ output differs from full output\n";
+    return false;
+  }
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting frame_only_stats;
+  if (!CheckStatus(
+        gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+          *prepared, &frame_only_stats),
+        "frame-only evaluation readback stats") ||
+      frame_only_stats.control_bytes != sizeof(uint32_t) ||
+      frame_only_stats.score_history_bytes != sizeof(float) ||
+      frame_only_stats.maximum_error_bytes != 0 ||
+      frame_only_stats.block_distance_map_bytes !=
+        block_count * sizeof(float) ||
+      frame_only_stats.frame_bytes == 0 ||
+      frame_only_stats.reconstructed_rgb_bytes != 0) {
+    std::cerr << "Frame-only evaluation readback accounting differs\n";
     return false;
   }
   for (size_t channel = 0; channel < 3; ++channel) {
@@ -763,6 +848,37 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
       after_exact_coeff.committed_submissions !=
           before_exact_coeff.committed_submissions + 1) {
     std::cerr << "Exact-coefficient AQ evaluation violated residency\n";
+    return false;
+  }
+  EvaluationOutputStorage exact_frame_only_bounded(
+    fixture.strategies.extent());
+  gjxl::VarDctEncoderFrame exact_frame_only_frame;
+  gjxl::AqEvaluationOutput::Final exact_frame_only_final{
+    .frame = &exact_frame_only_frame,
+  };
+  gjxl::AqEvaluationOutput exact_frame_only_output =
+    exact_frame_only_bounded.View();
+  exact_frame_only_output.final = &exact_frame_only_final;
+  if (!CheckStatus(prepared->Evaluate(
+        exact_coeff_input, exact_frame_only_output),
+        "exact-coefficient frame-only AQ evaluation") ||
+      !CompareOutputs(exact_coeff_bounded, exact_frame_only_bounded) ||
+      !QuantizedCoefficientsEqual(final_frame, exact_frame_only_frame)) {
+    std::cerr << "Exact-coefficient frame-only output differs\n";
+    return false;
+  }
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting exact_frame_only_stats;
+  if (!CheckStatus(
+        gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+          *prepared, &exact_frame_only_stats),
+        "exact-coefficient frame-only readback stats") ||
+      exact_frame_only_stats.control_bytes != sizeof(uint32_t) ||
+      exact_frame_only_stats.score_history_bytes != sizeof(float) ||
+      exact_frame_only_stats.block_distance_map_bytes !=
+        block_count * sizeof(float) ||
+      exact_frame_only_stats.frame_bytes != 0 ||
+      exact_frame_only_stats.reconstructed_rgb_bytes != 0) {
+    std::cerr << "Exact frame-only evaluation read extra final data\n";
     return false;
   }
   double exact_coeff_block_error = 0.0;

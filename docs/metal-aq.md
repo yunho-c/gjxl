@@ -246,27 +246,32 @@ Intermediate AQ evaluations read back only:
 The pixel-resolution distance map must remain device-resident. Reading it back
 to perform the 16-norm reduction on the CPU is not an acceptable steady-state
 path. Bounded policy calls, including their last evaluation, return only this
-result. Full calls request reconstructed linear RGB, quantized AC, and
-quantized DC from the last evaluation after the same wait, then atomically
-commit the field, block map, score history, image, and assembled encoder frame.
-Exact raw quant values remain a decision-level acceptance oracle, not an
-additional public output.
+result. Full diagnostic calls request reconstructed linear RGB and the encoder
+frame from the last evaluation after the same wait, then atomically commit the
+field, block map, score history, image, and frame. An internal codestream-only
+call may request that frame without reconstructed RGB. Exact raw quant values
+remain a decision-level acceptance oracle, not an additional public output.
 
 The fused resident-policy output makes those materializations independent.
 Production fully-resident and throughput Butteraugli encoding requests only
 the score history and final frame, so it transfers the device error word, the
 contiguous one-to-five-float score history, quantizer metadata, raw quant, and
-quantized DC/AC. A diagnostic caller may additionally request the final block
-map, final float quant field, or reconstructed linear RGB. The public GPU AQ
-and quantization-pipeline APIs continue to request and populate every legacy
+quantized DC/AC. Serial exact-coefficient and maximum-error codestream calls
+still read the bounded block values and scalar metric results required by their
+CPU policy, but their final evaluation requests the frame without downloading
+reconstructed linear RGB. The exact-coefficient frame is already the
+authoritative host decision, so that final request adds no coefficient-frame
+download. A diagnostic caller may additionally request the final block map,
+final float quant field, or reconstructed linear RGB. The public GPU AQ and
+quantization-pipeline APIs continue to request and populate every legacy
 diagnostic.
 
 ### Synchronization, concurrency, and failure
 
 The operation is host-synchronous at the CPU policy boundary. One evaluation
 encodes one Metal submission and waits once. Intermediate calls read back the
-bounded block map and score; an explicitly requested final call additionally
-downloads its final image/frame payload without another submission.
+bounded block map and score; an explicitly requested final call downloads its
+frame plus the optional image payload without another submission.
 
 A prepared object is not concurrently reentrant because its evaluations reuse
 mutable scratch. Independent prepared objects may execute concurrently and

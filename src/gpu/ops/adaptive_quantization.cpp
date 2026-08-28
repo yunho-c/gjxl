@@ -171,7 +171,8 @@ public:
     PreparedAqEvaluation& prepared,
     prepared_coefficients_internal::PreparedForwardDctCoefficients
       forward_coefficients,
-    bool materialize_final,
+    bool materialize_frame,
+    bool materialize_reconstruction,
     Extent2D source_extent)
     : strategies_(strategies),
       epf_sharpness_(epf_sharpness),
@@ -179,9 +180,10 @@ public:
       mode_(mode),
       prepared_(&prepared),
       forward_coefficients_(std::move(forward_coefficients)),
-      materialize_final_(materialize_final),
+      materialize_frame_(materialize_frame),
+      materialize_reconstruction_(materialize_reconstruction),
       original_source_extent_(source_extent) {
-    if (materialize_final_) {
+    if (materialize_reconstruction_) {
       final_reconstructed_.resize(source_extent);
     }
   }
@@ -227,11 +229,13 @@ public:
               : nullptr,
           .quantizer = &quantizer_params,
         };
-        if (materialize_final_ && is_final_evaluation) {
-          final_output = {
-            .reconstructed_linear_rgb = final_reconstructed_.view(),
-            .frame = &final_frame_,
-          };
+        if ((materialize_frame_ || materialize_reconstruction_) &&
+            is_final_evaluation) {
+          if (materialize_reconstruction_) {
+            final_output.reconstructed_linear_rgb =
+              final_reconstructed_.view();
+          }
+          if (materialize_frame_) final_output.frame = &final_frame_;
           prepared_output.final = &final_output;
         }
         const Status resident_status = prepared_->Evaluate(
@@ -323,11 +327,13 @@ public:
             ? &candidate.maximum_error
             : nullptr,
       };
-      if (materialize_final_ && is_final_evaluation) {
-        final_output = {
-          .reconstructed_linear_rgb = final_reconstructed_.view(),
-          .frame = &final_frame_,
-        };
+      if ((materialize_frame_ || materialize_reconstruction_) &&
+          is_final_evaluation) {
+        if (materialize_reconstruction_) {
+          final_output.reconstructed_linear_rgb =
+            final_reconstructed_.view();
+        }
+        if (materialize_frame_) final_output.frame = &final_frame_;
         prepared_output.final = &final_output;
       }
       AqEvaluationInput prepared_input{
@@ -358,7 +364,7 @@ public:
   }
 
   [[nodiscard]] bool HasFinalOutput() const noexcept {
-    return !materialize_final_ || final_frame_.valid();
+    return !materialize_frame_ || final_frame_.valid();
   }
 
   [[nodiscard]] Image3FBuffer&& TakeFinalReconstruction() noexcept {
@@ -377,7 +383,8 @@ private:
   PreparedAqEvaluation* prepared_ = nullptr;
   prepared_coefficients_internal::PreparedForwardDctCoefficients
     forward_coefficients_;
-  bool materialize_final_ = false;
+  bool materialize_frame_ = false;
+  bool materialize_reconstruction_ = false;
   Image3FBuffer final_reconstructed_;
   VarDctEncoderFrame final_frame_;
   Extent2D original_source_extent_;
@@ -654,6 +661,7 @@ Status RunGpuAdaptiveQuantizationImpl(
     PreparedGpuAdaptiveQuantizationEvaluator evaluator(
       strategies, epf_sharpness, options, mode, *prepared,
       std::move(forward_coefficients), full_output != nullptr,
+      full_output != nullptr && materialization.reconstructed_linear_rgb,
       original_linear_rgb.extent());
     aqi::AdaptiveQuantizationPolicyResult result;
     status = resident_quantization
