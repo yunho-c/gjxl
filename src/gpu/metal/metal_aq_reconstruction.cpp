@@ -335,6 +335,29 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
                     sizeof(self.initial_quant_gradient_params_), 1);
   DispatchThreads1d(encoder, 1);
 
+  if (self.resident_ac_strategy_inputs_ &&
+      self.options_.profile.loop_filter.gaborish) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      const Symmetric5Weights weights =
+          gaborish_internal::GaborishInverseWeights(
+              self.options_.profile.gaborish_inverse_multipliers[channel]);
+      backend.EncodePrimitive(
+          encoder,
+          Symmetric5ConvolutionCommand{
+              .input = self.coding_[channel],
+              .output = self.reconstructed_[channel],
+              .weights = {
+                  weights.distance0,
+                  weights.distance1,
+                  weights.distance2,
+                  weights.distance4,
+                  weights.distance8,
+                  weights.distance5,
+              },
+          });
+    }
+  }
+
   encoder->setComputePipelineState(
       backend.aq_pipelines_.initial_quant_gradient.get());
   BindPlane(encoder, self.coding_[1], 0);
@@ -524,6 +547,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     fail_next_upload_ = false;
     fail_next_numeric_ = false;
   }
+  resident_initial_quant_ready_ = false;
   resident_quantizer_ready_ = false;
   if (fail_upload) {
     Invalidate();
@@ -599,11 +623,45 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
   CopyContiguousPlane(last_initial_quant_field_, output.quant_field);
   CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
   CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
+  resident_initial_quant_ready_ = true;
   if (frame_only_resident_quantizer_) {
     resident_quantizer_ready_ = true;
     if (quantizer != nullptr) *quantizer = device_quantizer;
   }
   CompleteOperation();
+  return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::GetResidentAcStrategyInputs(
+    ResidentAcStrategyInputs* inputs) {
+  if (inputs == nullptr) {
+    return Status::InvalidArgument(
+        "Resident AC-strategy input output is null");
+  }
+  std::lock_guard lock(mutex_);
+  if (!resident_ac_strategy_inputs_) {
+    return Status::FailedPrecondition(
+        "Resident AC-strategy inputs were not prepared");
+  }
+  if (state_ == State::kInvalid) {
+    return Status::FailedPrecondition(
+        "Prepared AQ evaluation is invalid");
+  }
+  if (state_ == State::kBusy) {
+    return Status::FailedPrecondition(
+        "Prepared AQ evaluation is already in use");
+  }
+  if (!resident_initial_quant_ready_) {
+    return Status::FailedPrecondition(
+        "Resident initial quantization has not been computed");
+  }
+  const std::array<DevicePlaneView, 3>& search_opsin =
+      options_.profile.loop_filter.gaborish ? reconstructed_ : coding_;
+  *inputs = {
+      .opsin = {{{search_opsin[0], search_opsin[1], search_opsin[2]}}},
+      .quant_field = initial_quant_field_,
+      .pixel_mask = initial_quant_pixel_mask_,
+  };
   return Status::Ok();
 }
 

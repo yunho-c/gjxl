@@ -276,6 +276,7 @@ bool RunStrategyCase(
   }
 
   const size_t image_bytes = fixture.packed_opsin.size() * sizeof(float);
+  const size_t quant_bytes = fixture.quant_field.size() * sizeof(float);
   const size_t mask_bytes = fixture.pixel_mask.size() * sizeof(float);
   const size_t matrix_bytes = matrices.size() * sizeof(float);
   const size_t candidate_bytes =
@@ -288,6 +289,7 @@ bool RunStrategyCase(
 
   std::unique_ptr<gjxl::DeviceBuffer> device_opsin;
   std::unique_ptr<gjxl::DeviceBuffer> device_mask;
+  std::unique_ptr<gjxl::DeviceBuffer> device_quant;
   std::unique_ptr<gjxl::DeviceBuffer> device_matrices;
   std::unique_ptr<gjxl::DeviceBuffer> device_candidates;
   std::unique_ptr<gjxl::DeviceBuffer> scratch_a;
@@ -296,6 +298,7 @@ bool RunStrategyCase(
   std::unique_ptr<gjxl::DeviceBuffer> device_costs;
   if (!Allocate(gpu, image_bytes, "Allocate opsin", &device_opsin) ||
       !Allocate(gpu, mask_bytes, "Allocate mask", &device_mask) ||
+      !Allocate(gpu, quant_bytes, "Allocate quant field", &device_quant) ||
       !Allocate(gpu, matrix_bytes, "Allocate matrices", &device_matrices) ||
       !Allocate(
         gpu, candidate_bytes, "Allocate candidates", &device_candidates) ||
@@ -311,6 +314,10 @@ bool RunStrategyCase(
         gpu.CopyHostToDevice(
           *device_mask, fixture.pixel_mask.data(), mask_bytes),
         "Upload mask") ||
+      !CheckStatus(
+        gpu.CopyHostToDevice(
+          *device_quant, fixture.quant_field.data(), quant_bytes),
+        "Upload quant field") ||
       !CheckStatus(
         gpu.CopyHostToDevice(
           *device_matrices, matrices.data(), matrix_bytes),
@@ -384,6 +391,61 @@ bool RunStrategyCase(
   std::cout << implementation << ' ' << info->name
             << " max absolute cost error " << max_absolute_error
             << ", max relative error " << max_relative_error << '\n';
+
+  std::vector<gjxl::AcStrategyCandidate> resident_candidates = candidates;
+  for (gjxl::AcStrategyCandidate& candidate : resident_candidates) {
+    candidate.quant_norm = 1.0f;
+  }
+  const size_t plane_elements = kPixelExtent.width * kPixelExtent.height;
+  gjxl::AcStrategyCandidateBatch resident_batch = batch;
+  resident_batch.resident_opsin = gjxl::ConstDeviceImage3View{{{
+    {device_opsin.get(), 0, gjxl::DeviceElementType::kF32,
+     kPixelExtent, kPixelExtent.width},
+    {device_opsin.get(), plane_elements * sizeof(float),
+     gjxl::DeviceElementType::kF32, kPixelExtent, kPixelExtent.width},
+    {device_opsin.get(), 2 * plane_elements * sizeof(float),
+     gjxl::DeviceElementType::kF32, kPixelExtent, kPixelExtent.width},
+  }}};
+  resident_batch.resident_pixel_mask = {
+    device_mask.get(), 0, gjxl::DeviceElementType::kF32,
+    kPixelExtent, kPixelExtent.width};
+  resident_batch.resident_quant_field = {
+    device_quant.get(), 0, gjxl::DeviceElementType::kF32,
+    kBlockExtent, kBlockExtent.width};
+  std::ranges::fill(poisoned_costs,
+                    std::numeric_limits<float>::quiet_NaN());
+  if (!CheckStatus(
+        gpu.CopyHostToDevice(
+          *device_candidates, resident_candidates.data(), candidate_bytes),
+        "Upload resident candidates") ||
+      !CheckStatus(
+        gpu.CopyHostToDevice(
+          *device_costs, poisoned_costs.data(), cost_bytes),
+        "Poison resident costs") ||
+      !CheckStatus(
+        gjxl::EvaluateAcStrategyCandidates(
+          gpu, resident_batch, &submission),
+        "Submit resident candidate batch") ||
+      submission == nullptr ||
+      !CheckStatus(submission->Wait(), "Wait for resident candidate batch") ||
+      !CheckStatus(
+        gpu.CopyDeviceToHost(
+          *device_costs, poisoned_costs.data(), cost_bytes),
+        "Download resident candidate costs")) {
+    return false;
+  }
+  for (size_t i = 0; i < expected.size(); ++i) {
+    const double error = std::abs(
+        static_cast<double>(poisoned_costs[i]) - expected[i]);
+    if (!std::isfinite(poisoned_costs[i]) ||
+        error > 0.005 + 1.0e-6 * std::abs(expected[i])) {
+      std::cerr << implementation << ' ' << info->name
+                << " resident quant-norm mismatch at candidate " << i
+                << ": expected " << expected[i]
+                << ", got " << poisoned_costs[i] << '\n';
+      return false;
+    }
+  }
 
   const gjxl::GpuBackendStats before_submissions = gpu.stats();
   std::unique_ptr<gjxl::GpuSubmission> first_submission;

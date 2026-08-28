@@ -422,6 +422,8 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       preparation.frame_only_resident_initial_cfl;
   frame_only_resident_initial_quant_ =
       preparation.frame_only_resident_initial_quant;
+  resident_ac_strategy_inputs_ =
+      preparation.resident_ac_strategy_inputs;
   frame_only_resident_quantizer_ =
       preparation.frame_only_resident_quantizer;
   const size_t filter_stage_count =
@@ -1983,9 +1985,15 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
         "Resident initial CfL requires frame-only preparation");
   }
   if (preparation.frame_only_resident_initial_quant &&
-      !preparation.frame_only) {
+      !preparation.frame_only &&
+      !preparation.resident_ac_strategy_inputs) {
     return Status::InvalidArgument(
-        "Resident initial quantization requires frame-only preparation");
+        "Resident initial quantization requires a resident consumer");
+  }
+  if (preparation.resident_ac_strategy_inputs &&
+      !preparation.frame_only_resident_initial_quant) {
+    return Status::InvalidArgument(
+        "Resident AC-strategy inputs require initial quantization");
   }
   if (preparation.frame_only_resident_quantizer &&
       (!preparation.frame_only ||

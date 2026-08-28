@@ -202,25 +202,68 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   }
 
   const Extent2D transform_extent = strategy_info->pixel_extent();
+  const Extent2D block_extent{
+      batch.pixel_extent.width / kJxlBlockDimension,
+      batch.pixel_extent.height / kJxlBlockDimension,
+  };
+  const bool use_resident =
+      batch.resident_opsin.plane[0].buffer != nullptr;
   if (batch.pixel_extent.empty() ||
       batch.pixel_extent.width % kJxlBlockDimension != 0 ||
       batch.pixel_extent.height % kJxlBlockDimension != 0 ||
       transform_extent.width > batch.pixel_extent.width ||
-      transform_extent.height > batch.pixel_extent.height ||
-      batch.opsin_row_stride < batch.pixel_extent.width ||
-      batch.pixel_mask_row_stride < batch.pixel_extent.width) {
+      transform_extent.height > batch.pixel_extent.height) {
     return Status::InvalidArgument(
       "AC-strategy batch image geometry is invalid");
   }
 
-  size_t minimum_plane_stride = 0;
-  if (!TryMultiply(
-        batch.opsin_row_stride,
-        batch.pixel_extent.height,
-        &minimum_plane_stride) ||
-      batch.opsin_plane_stride < minimum_plane_stride) {
-    return Status::InvalidArgument(
-      "AC-strategy batch opsin strides are invalid");
+  std::array<ConstDevicePlaneView, 3> opsin_views;
+  ConstDevicePlaneView mask_view;
+  ConstDevicePlaneView quant_view;
+  bool use_device_quant_norm = false;
+  if (use_resident) {
+    opsin_views = batch.resident_opsin.plane;
+    mask_view = batch.resident_pixel_mask;
+    quant_view = batch.resident_quant_field;
+    use_device_quant_norm = quant_view.buffer != nullptr;
+    if (std::ranges::any_of(opsin_views, [&](ConstDevicePlaneView view) {
+          return view.extent != batch.pixel_extent ||
+                 view.row_stride < batch.pixel_extent.width;
+        }) ||
+        mask_view.extent != batch.pixel_extent ||
+        mask_view.row_stride < batch.pixel_extent.width ||
+        (use_device_quant_norm &&
+         (quant_view.extent != block_extent ||
+          quant_view.row_stride < block_extent.width))) {
+      return Status::InvalidArgument(
+          "Resident AC-strategy input geometry is invalid");
+    }
+  } else {
+    size_t minimum_plane_stride = 0;
+    if (batch.opsin_row_stride < batch.pixel_extent.width ||
+        batch.pixel_mask_row_stride < batch.pixel_extent.width ||
+        !TryMultiply(batch.opsin_row_stride, batch.pixel_extent.height,
+                     &minimum_plane_stride) ||
+        batch.opsin_plane_stride < minimum_plane_stride) {
+      return Status::InvalidArgument(
+          "AC-strategy batch input strides are invalid");
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      opsin_views[channel] = {
+          batch.opsin,
+          channel * batch.opsin_plane_stride * sizeof(float),
+          DeviceElementType::kF32,
+          batch.pixel_extent,
+          batch.opsin_row_stride,
+      };
+    }
+    mask_view = {
+        batch.pixel_mask,
+        0,
+        DeviceElementType::kF32,
+        batch.pixel_extent,
+        batch.pixel_mask_row_stride,
+    };
   }
   if (!std::isfinite(batch.butteraugli_target) ||
       batch.butteraugli_target <= 0.0f) {
@@ -230,15 +273,23 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
 
   constexpr size_t kUint32Maximum =
     std::numeric_limits<uint32_t>::max();
-  const std::array<size_t, 8> uint32_values = {
+  const size_t opsin_row_stride = opsin_views[0].row_stride;
+  if (opsin_views[1].row_stride != opsin_row_stride ||
+      opsin_views[2].row_stride != opsin_row_stride) {
+    return Status::InvalidArgument(
+        "AC-strategy opsin plane strides differ");
+  }
+  const std::array<size_t, 9> uint32_values = {
     batch.pixel_extent.width,
     batch.pixel_extent.height,
-    batch.opsin_row_stride,
-    batch.opsin_plane_stride,
-    batch.pixel_mask_row_stride,
+    opsin_row_stride,
+    mask_view.row_stride,
+    use_device_quant_norm ? quant_view.row_stride : size_t{0},
     batch.candidate_count,
     transform_extent.width,
     transform_extent.height,
+    strategy_info->covered_blocks.width *
+      strategy_info->covered_blocks.height,
   };
   if (std::ranges::any_of(
         uint32_values,
@@ -251,10 +302,6 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   size_t transform_count = 0;
   size_t packed_element_count = 0;
   size_t packed_bytes = 0;
-  size_t opsin_floats = 0;
-  size_t opsin_bytes = 0;
-  size_t mask_floats = 0;
-  size_t mask_bytes = 0;
   size_t matrix_floats = 0;
   size_t matrix_bytes = 0;
   size_t candidate_bytes = 0;
@@ -270,16 +317,6 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
         coefficient_count,
         &packed_element_count) ||
       !TryMultiply(packed_element_count, sizeof(float), &packed_bytes) ||
-      !TryMultiply(
-        batch.opsin_plane_stride,
-        kAcStrategyCandidateChannelCount,
-        &opsin_floats) ||
-      !TryMultiply(opsin_floats, sizeof(float), &opsin_bytes) ||
-      !TryMultiply(
-        batch.pixel_mask_row_stride,
-        batch.pixel_extent.height,
-        &mask_floats) ||
-      !TryMultiply(mask_floats, sizeof(float), &mask_bytes) ||
       !TryMultiply(
         coefficient_count,
         kAcStrategyCostMatrixCount,
@@ -304,9 +341,12 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
       "AC-strategy batch buffer size overflows");
   }
 
-  const std::array<const DeviceBuffer*, 4> inputs = {
-    batch.opsin,
-    batch.pixel_mask,
+  const std::array<const DeviceBuffer*, 7> inputs = {
+    opsin_views[0].buffer,
+    opsin_views[1].buffer,
+    opsin_views[2].buffer,
+    mask_view.buffer,
+    quant_view.buffer,
     batch.matrices,
     batch.candidates,
   };
@@ -334,15 +374,26 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   }
 
   ValidatedAcStrategyBatch validated;
-  Status status = RequireMetalBuffer(
-    batch.opsin, opsin_bytes, "Opsin", &validated.opsin);
-  if (!status.ok()) {
-    return status;
+  std::array<ResolvedConstPlane, 3> resolved_opsin;
+  Status status = Status::Ok();
+  for (size_t channel = 0; channel < 3; ++channel) {
+    status = ResolvePlane(opsin_views[channel], &resolved_opsin[channel]);
+    if (!status.ok()) return status;
+    validated.opsin[channel] = resolved_opsin[channel].buffer;
+    validated.opsin_offset_bytes[channel] =
+        resolved_opsin[channel].view.offset_bytes;
   }
-  status = RequireMetalBuffer(
-    batch.pixel_mask, mask_bytes, "Pixel mask", &validated.pixel_mask);
-  if (!status.ok()) {
-    return status;
+  ResolvedConstPlane resolved_mask;
+  status = ResolvePlane(mask_view, &resolved_mask);
+  if (!status.ok()) return status;
+  validated.pixel_mask = resolved_mask.buffer;
+  validated.pixel_mask_offset_bytes = resolved_mask.view.offset_bytes;
+  if (use_device_quant_norm) {
+    ResolvedConstPlane resolved_quant;
+    status = ResolvePlane(quant_view, &resolved_quant);
+    if (!status.ok()) return status;
+    validated.quant_field = resolved_quant.buffer;
+    validated.quant_field_offset_bytes = resolved_quant.view.offset_bytes;
   }
   status = RequireMetalBuffer(
     batch.matrices,
@@ -359,6 +410,9 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
     &validated.candidates);
   if (!status.ok()) {
     return status;
+  }
+  if (!use_device_quant_norm) {
+    validated.quant_field = validated.candidates;
   }
   status = RequireMetalBuffer(
     batch.scratch_a, packed_bytes, "Scratch A", &validated.scratch_a);
@@ -399,17 +453,23 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   validated.params = {
     .pixel_width = static_cast<uint32_t>(batch.pixel_extent.width),
     .pixel_height = static_cast<uint32_t>(batch.pixel_extent.height),
-    .opsin_row_stride = static_cast<uint32_t>(batch.opsin_row_stride),
-    .opsin_plane_stride = static_cast<uint32_t>(batch.opsin_plane_stride),
+    .opsin_row_stride = static_cast<uint32_t>(opsin_row_stride),
     .pixel_mask_row_stride =
-      static_cast<uint32_t>(batch.pixel_mask_row_stride),
+      static_cast<uint32_t>(mask_view.row_stride),
+    .quant_field_row_stride = static_cast<uint32_t>(
+      use_device_quant_norm ? quant_view.row_stride : 0),
     .candidate_count = static_cast<uint32_t>(batch.candidate_count),
     .coefficient_count = static_cast<uint32_t>(coefficient_count),
     .transform_width = static_cast<uint32_t>(transform_extent.width),
     .transform_height = static_cast<uint32_t>(transform_extent.height),
+    .covered_block_width = static_cast<uint32_t>(
+      strategy_info->covered_blocks.width),
+    .covered_block_height = static_cast<uint32_t>(
+      strategy_info->covered_blocks.height),
     .covered_block_count = static_cast<uint32_t>(
       strategy_info->covered_blocks.width *
       strategy_info->covered_blocks.height),
+    .use_device_quant_norm = use_device_quant_norm ? 1u : 0u,
     .info_loss_multiplier = 1.2f * std::pow(
       ratio, 0.33677806662454718f),
     .zeros_multiplier = 9.3089059022677905f * std::pow(
@@ -441,10 +501,13 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   const ValidatedAcStrategyBatch& validated) {
 
   encoder->setComputePipelineState(ac_strategy_pipelines_.gather.get());
-  encoder->setBuffer(validated.opsin->handle(), 0, 0);
-  encoder->setBuffer(validated.candidates->handle(), 0, 1);
-  encoder->setBuffer(validated.scratch_a->handle(), 0, 2);
-  encoder->setBytes(&validated.params, sizeof(validated.params), 3);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    encoder->setBuffer(validated.opsin[channel]->handle(),
+                       validated.opsin_offset_bytes[channel], channel);
+  }
+  encoder->setBuffer(validated.candidates->handle(), 0, 3);
+  encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
+  encoder->setBytes(&validated.params, sizeof(validated.params), 5);
   encoder->dispatchThreads(
     MTL::Size(
       static_cast<NS::UInteger>(validated.packed_element_count), 1, 1),
@@ -465,9 +528,11 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
   encoder->setBuffer(validated.matrices->handle(), 0, 1);
   encoder->setBuffer(validated.candidates->handle(), 0, 2);
-  encoder->setBuffer(validated.scratch_a->handle(), 0, 3);
-  encoder->setBuffer(validated.rate_scratch->handle(), 0, 4);
-  encoder->setBytes(&validated.params, sizeof(validated.params), 5);
+  encoder->setBuffer(validated.quant_field->handle(),
+                     validated.quant_field_offset_bytes, 3);
+  encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
+  encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
+  encoder->setBytes(&validated.params, sizeof(validated.params), 6);
   encoder->dispatchThreadgroups(
     MTL::Size(
       static_cast<NS::UInteger>(validated.transform_count), 1, 1),
@@ -485,11 +550,14 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
 
   encoder->setComputePipelineState(ac_strategy_pipelines_.cost.get());
   encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
-  encoder->setBuffer(validated.pixel_mask->handle(), 0, 1);
+  encoder->setBuffer(validated.pixel_mask->handle(),
+                     validated.pixel_mask_offset_bytes, 1);
   encoder->setBuffer(validated.candidates->handle(), 0, 2);
   encoder->setBuffer(validated.rate_scratch->handle(), 0, 3);
   encoder->setBuffer(validated.costs->handle(), 0, 4);
-  encoder->setBytes(&validated.params, sizeof(validated.params), 5);
+  encoder->setBuffer(validated.quant_field->handle(),
+                     validated.quant_field_offset_bytes, 5);
+  encoder->setBytes(&validated.params, sizeof(validated.params), 6);
   encoder->dispatchThreadgroups(
     MTL::Size(
       static_cast<NS::UInteger>(validated.params.candidate_count), 1, 1),

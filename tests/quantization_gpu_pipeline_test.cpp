@@ -682,19 +682,28 @@ bool CheckDefaultUpdatePipelineParity() {
       &resident_stats);
   const gjxl::GpuBackendStats after_resident = gpu->stats();
   std::vector<uint8_t> resident_codestream;
+  const double resident_initial_error = MaximumError(
+      cpu.initial_quant, resident.initial_quant);
+  const double resident_strategy_mask_error = MaximumError(
+      cpu.strategy_mask, resident.strategy_mask);
+  const double resident_pixel_mask_error = MaximumError(
+      cpu.pixel_mask, resident.pixel_mask);
   if (!resident_status.ok() || resident_stats.total_candidate_count == 0 ||
       after_resident.committed_submissions !=
           before_resident.committed_submissions +
-              options.adaptive_quantization.iterations + 4 ||
-      cpu.initial_quant != resident.initial_quant ||
-      cpu.strategy_mask != resident.strategy_mask ||
-      cpu.pixel_mask != resident.pixel_mask || !resident.frame.valid() ||
+              options.adaptive_quantization.iterations + 5 ||
+      resident_initial_error > 2.0e-6 ||
+      resident_strategy_mask_error > 2.0e-6 ||
+      resident_pixel_mask_error > 3.0e-5 || !resident.frame.valid() ||
       resident.scores.size() != options.adaptive_quantization.iterations + 1 ||
       !gjxl::EncodeVarDctCodestream(
            resident.frame, &resident_codestream).ok() ||
       resident_codestream.empty()) {
     std::cerr << "Fully resident complete GPU pipeline failed: "
-              << resident_status.message() << '\n';
+              << resident_status.message()
+              << " initial=" << resident_initial_error
+              << " strategy_mask=" << resident_strategy_mask_error
+              << " pixel_mask=" << resident_pixel_mask_error << '\n';
     return false;
   }
 
@@ -707,19 +716,28 @@ bool CheckDefaultUpdatePipelineParity() {
       &throughput_stats);
   const gjxl::GpuBackendStats after_throughput = gpu->stats();
   std::vector<uint8_t> throughput_codestream;
+  const double throughput_initial_error = MaximumError(
+      cpu.initial_quant, throughput.initial_quant);
+  const double throughput_strategy_mask_error = MaximumError(
+      cpu.strategy_mask, throughput.strategy_mask);
+  const double throughput_pixel_mask_error = MaximumError(
+      cpu.pixel_mask, throughput.pixel_mask);
   if (!throughput_status.ok() ||
       throughput_stats.total_candidate_count == 0 ||
       after_throughput.committed_submissions !=
-          before_throughput.committed_submissions + 5 ||
-      cpu.initial_quant != throughput.initial_quant ||
-      cpu.strategy_mask != throughput.strategy_mask ||
-      cpu.pixel_mask != throughput.pixel_mask || !throughput.frame.valid() ||
+          before_throughput.committed_submissions + 6 ||
+      throughput_initial_error > 2.0e-6 ||
+      throughput_strategy_mask_error > 2.0e-6 ||
+      throughput_pixel_mask_error > 3.0e-5 || !throughput.frame.valid() ||
       throughput.scores.size() != 2 ||
       !gjxl::EncodeVarDctCodestream(
            throughput.frame, &throughput_codestream).ok() ||
       throughput_codestream.empty()) {
     std::cerr << "Throughput GPU pipeline failed: "
-              << throughput_status.message() << '\n';
+              << throughput_status.message()
+              << " initial=" << throughput_initial_error
+              << " strategy_mask=" << throughput_strategy_mask_error
+              << " pixel_mask=" << throughput_pixel_mask_error << '\n';
     return false;
   }
 
@@ -876,7 +894,31 @@ bool CheckPreparedGpuAttemptReuse() {
     std::cerr << "Prepared GPU pipeline cached target-dependent output\n";
     return false;
   }
-  std::cout << "Prepared GPU attempts reuse one AQ allocation exactly\n";
+  gjxl::PreparedAqEvaluation* first_frontend = nullptr;
+  for (size_t index = 0; index < kTargets.size(); ++index) {
+    gjxl::CpuQuantizationPipelineOptions options = preparation_options;
+    options.butteraugli_target = kTargets[index];
+    PipelineStorage resident_reused(kExtent, kExtent);
+    status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipeline(
+        *gpu, original.ConstView(), host_prepared, options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        resident_reused.Output(), nullptr, &gpu_prepared);
+    if (!status.ok() || gpu_prepared.resident_frontend == nullptr ||
+        !resident_reused.frame.valid()) {
+      std::cerr << "Prepared resident GPU attempt failed at target "
+                << kTargets[index] << ": " << status.message() << '\n';
+      return false;
+    }
+    if (index == 0) {
+      first_frontend = gpu_prepared.resident_frontend.get();
+    } else if (gpu_prepared.resident_frontend.get() != first_frontend) {
+      std::cerr << "Prepared resident frontend was replaced between targets\n";
+      return false;
+    }
+  }
+  std::cout << "Prepared GPU attempts reuse AQ and resident frontend "
+               "allocations exactly\n";
   return true;
 }
 

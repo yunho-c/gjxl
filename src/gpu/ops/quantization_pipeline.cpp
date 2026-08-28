@@ -43,8 +43,10 @@ private:
 
 class GpuAcStrategySearchProvider final : public AcStrategySearchProvider {
 public:
-  explicit GpuAcStrategySearchProvider(GpuBackend& gpu)
-    : gpu_(gpu) {}
+  explicit GpuAcStrategySearchProvider(
+      GpuBackend& gpu,
+      const ResidentAcStrategySearchInputs* resident = nullptr)
+    : gpu_(gpu), resident_(resident) {}
 
   Status Find(
     ConstImage3FView opsin,
@@ -54,15 +56,13 @@ public:
     AcStrategySearchOptions options,
     AcStrategyGrid* out) override {
 
-    return FindAcStrategyGridGpu(
-      gpu_,
-      opsin,
-      quant_field,
-      pixel_mask,
-      color_correlation,
-      options,
-      out,
-      &stats_);
+    return resident_ == nullptr
+      ? FindAcStrategyGridGpu(
+          gpu_, opsin, quant_field, pixel_mask, color_correlation,
+          options, out, &stats_)
+      : FindAcStrategyGridGpuResident(
+          gpu_, opsin, quant_field, pixel_mask, color_correlation,
+          *resident_, options, out, &stats_);
   }
 
   [[nodiscard]] const AcStrategyGpuSearchStats& stats() const noexcept {
@@ -71,6 +71,7 @@ public:
 
 private:
   GpuBackend& gpu_;
+  const ResidentAcStrategySearchInputs* resident_ = nullptr;
   AcStrategyGpuSearchStats stats_;
 };
 
@@ -112,6 +113,114 @@ private:
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_ = nullptr;
 };
+
+bool SamePlaneIdentity(ConstPlaneF32View left, ConstPlaneF32View right) {
+  return left.data == right.data && left.extent == right.extent &&
+    left.stride == right.stride;
+}
+
+bool SameImageIdentity(ConstImage3FView left, ConstImage3FView right) {
+  return SamePlaneIdentity(left.plane[0], right.plane[0]) &&
+    SamePlaneIdentity(left.plane[1], right.plane[1]) &&
+    SamePlaneIdentity(left.plane[2], right.plane[2]);
+}
+
+Status PrepareResidentAcStrategyInputs(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  quantization_pipeline_internal::PreparedQuantizationPipeline& prepared,
+  CpuQuantizationPipelineOptions options,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization& state,
+  ResidentAcStrategySearchInputs* resident) {
+
+  if (resident == nullptr) {
+    return Status::InvalidArgument(
+        "Resident AC-strategy input output is null");
+  }
+  const bool compatible = state.resident_frontend != nullptr &&
+    state.resident_frontend_backend == &gpu &&
+    SameImageIdentity(state.resident_frontend_original_linear_rgb,
+                      original_linear_rgb) &&
+    SameImageIdentity(state.resident_frontend_coding_opsin,
+                      prepared.coding_opsin.const_view()) &&
+    state.resident_frontend_profile == options.adaptive_quantization.profile;
+  if (!compatible) {
+    state.resident_frontend.reset();
+    AcStrategyGrid provisional_strategies;
+    Status status = AcStrategyGrid::Create(
+        prepared.block_extent, &provisional_strategies);
+    if (!status.ok()) return status;
+    provisional_strategies.fill_dct8();
+    status = PrepareAqEvaluation(
+      gpu,
+      {
+        .original_linear_rgb = original_linear_rgb,
+        .coding_opsin = prepared.coding_opsin.const_view(),
+        .strategies = &provisional_strategies,
+        .epf_sharpness = {
+          prepared.epf_sharpness.data(), prepared.block_extent,
+          prepared.block_extent.width},
+        .options = {
+          options.adaptive_quantization.profile,
+          options.adaptive_quantization.butteraugli,
+        },
+        .frame_only = true,
+        .frame_only_resident_initial_quant = true,
+        .resident_ac_strategy_inputs = true,
+        .coefficient_decision_mode =
+          AcCoefficientDecisionMode::kAdjustedSharedQuant,
+      },
+      &state.resident_frontend);
+    if (!status.ok()) return status;
+    state.resident_frontend_backend = &gpu;
+    state.resident_frontend_original_linear_rgb = original_linear_rgb;
+    state.resident_frontend_coding_opsin =
+      prepared.coding_opsin.const_view();
+    state.resident_frontend_profile = options.adaptive_quantization.profile;
+  }
+
+  constexpr float kMaximumErrorInitializationTarget = 1.0f;
+  const float control_target =
+    options.adaptive_quantization.control_mode ==
+        AdaptiveQuantizationControlMode::kMaximumError
+      ? kMaximumErrorInitializationTarget
+      : options.butteraugli_target;
+  const float initial_quant_target =
+    options.adaptive_quantization.profile.loop_filter.gaborish
+      ? control_target : 0.62f * control_target;
+  Status status = state.resident_frontend->ComputeInitialQuantization(
+    {
+      .butteraugli_target = initial_quant_target,
+      .rescale = options.initial_quant_rescale,
+    },
+    {
+      .quant_field = {
+        prepared.initial_quant.data(), prepared.block_extent,
+        prepared.block_extent.width},
+      .strategy_mask = {
+        prepared.strategy_mask.data(), prepared.block_extent,
+        prepared.block_extent.width},
+      .pixel_mask = {
+        prepared.pixel_mask.data(), prepared.padded_extent,
+        prepared.padded_extent.width},
+    });
+  if (!status.ok()) {
+    state.resident_frontend.reset();
+    return status;
+  }
+  ResidentAcStrategyInputs views;
+  status = state.resident_frontend->GetResidentAcStrategyInputs(&views);
+  if (!status.ok()) {
+    state.resident_frontend.reset();
+    return status;
+  }
+  *resident = {
+      .opsin = views.opsin,
+      .quant_field = views.quant_field,
+      .pixel_mask = views.pixel_mask,
+  };
+  return Status::Ok();
+}
 
 }  // namespace
 
@@ -300,12 +409,25 @@ Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
       return status;
     }
   }
-  GpuAcStrategySearchProvider strategy_search(gpu);
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
+    local_prepared_aq;
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+    aq_state = prepared_aq;
+  ResidentAcStrategySearchInputs resident_inputs;
+  if (resident) {
+    if (aq_state == nullptr) aq_state = &local_prepared_aq;
+    Status status = PrepareResidentAcStrategyInputs(
+        gpu, original_linear_rgb, prepared, options, *aq_state,
+        &resident_inputs);
+    if (!status.ok()) return status;
+  }
+  GpuAcStrategySearchProvider strategy_search(
+      gpu, resident ? &resident_inputs : nullptr);
   GpuAdaptiveQuantizationProvider adaptive_quantization(
-    gpu, aq_mode, prepared_aq);
+    gpu, aq_mode, aq_state);
   const Status status = RunPreparedQuantizationPipelineWithProviders(
     original_linear_rgb, prepared, strategy_search, adaptive_quantization,
-    options, output);
+    options, output, resident);
   if (!status.ok()) {
     return status;
   }

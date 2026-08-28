@@ -14,6 +14,7 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/buffer.h"
+#include "gpu/image.h"
 #include "gpu/submission.h"
 
 namespace gjxl {
@@ -62,6 +63,14 @@ struct AcStrategyCandidateBatch {
   const DeviceBuffer* pixel_mask = nullptr;
   const DeviceBuffer* matrices = nullptr;
   const DeviceBuffer* candidates = nullptr;
+
+  // Optional checked device views used by prepared resident frontends. When
+  // the first opsin plane is non-null, these replace the legacy packed opsin
+  // and pixel-mask buffers above. A non-null quant field also makes the
+  // strategy-aware quant norm a device-side decision.
+  ConstDeviceImage3View resident_opsin;
+  ConstDevicePlaneView resident_pixel_mask;
+  ConstDevicePlaneView resident_quant_field;
 
   DeviceBuffer* scratch_a = nullptr;
   DeviceBuffer* scratch_b = nullptr;

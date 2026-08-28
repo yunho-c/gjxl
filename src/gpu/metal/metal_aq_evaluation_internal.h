@@ -229,6 +229,8 @@ public:
       InitialQuantFieldOutput output,
       QuantizerParams* quantizer = nullptr,
       float quant_dc = 0.0f) override;
+  Status GetResidentAcStrategyInputs(
+      ResidentAcStrategyInputs* inputs) override;
   Status EvaluateProfiled(AqEvaluationInput input, AqEvaluationOutput output,
                           MetalAqEvaluationProfile* profile);
   AqEvaluationMemoryStats memory_stats() const noexcept override;
@@ -439,7 +441,9 @@ private:
   bool frame_only_inverse_gaborish_ = false;
   bool frame_only_resident_initial_cfl_ = false;
   bool frame_only_resident_initial_quant_ = false;
+  bool resident_ac_strategy_inputs_ = false;
   bool frame_only_resident_quantizer_ = false;
+  bool resident_initial_quant_ready_ = false;
   bool resident_quantizer_ready_ = false;
 };
 

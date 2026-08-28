@@ -91,7 +91,8 @@ struct PreparedQuantizationPipeline {
   AcStrategySearchProvider& strategy_search,
   AdaptiveQuantizationProvider& adaptive_quantization,
   CpuQuantizationPipelineOptions options,
-  CpuQuantizationPipelineOutput output);
+  CpuQuantizationPipelineOutput output,
+  bool initial_quantization_ready = false);
 
 [[nodiscard]] Status RunPreparedCpuQuantizationPipeline(
   ConstImage3FView original_linear_rgb,

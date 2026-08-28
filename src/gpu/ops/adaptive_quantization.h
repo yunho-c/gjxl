@@ -69,8 +69,8 @@ struct GpuFrameOnlyQuantizationOutput {
   GpuFrameOnlyQuantizationOutput output);
 
 /// Maximum-throughput frontend that computes initial quantization and initial
-/// CfL from the prepared resident coding image. The block field returns to the
-/// CPU for quantizer construction in this intermediate implementation.
+/// CfL from the prepared resident coding image. Quantizer selection and raw
+/// quantization remain in the same prepared Metal allocation.
 [[nodiscard]] Status RunGpuFrameOnlyQuantizationResidentFrontend(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
@@ -158,6 +158,11 @@ struct PreparedAdaptiveQuantization {
   ConstImage3FView coding_opsin;
   AqEvaluationOptions evaluation_options;
   std::unique_ptr<PreparedAqEvaluation> evaluation;
+  GpuBackend* resident_frontend_backend = nullptr;
+  ConstImage3FView resident_frontend_original_linear_rgb;
+  ConstImage3FView resident_frontend_coding_opsin;
+  SimpleVarDctCodestreamProfile resident_frontend_profile;
+  std::unique_ptr<PreparedAqEvaluation> resident_frontend;
 };
 
 [[nodiscard]] Status RunPreparedGpuAdaptiveQuantization(

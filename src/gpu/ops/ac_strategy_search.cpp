@@ -149,6 +149,7 @@ Status MakeCandidates(
   Extent2D tile_extent,
   ConstPlaneF32View quant_field,
   const ColorCorrelationMap& color_correlation,
+  bool device_quant_norm,
   std::vector<AcStrategyCandidate>* candidates) {
   if (candidates == nullptr) {
     return Status::Internal("GPU AC-strategy candidate output is null");
@@ -200,14 +201,16 @@ Status MakeCandidates(
         local_y += staged.anchor_step) {
         for (size_t local_x = 0; local_x + covered.width <= tile_width;
           local_x += staged.anchor_step) {
-          float quant_norm = 0.0f;
-          Status status = ComputeAcStrategyQuantNorm(staged.strategy,
-            block_x + local_x,
-            block_y + local_y,
-            quant_field,
-            &quant_norm);
-          if (!status.ok()) {
-            return status;
+          float quant_norm = 1.0f;
+          if (!device_quant_norm) {
+            Status status = ComputeAcStrategyQuantNorm(staged.strategy,
+              block_x + local_x,
+              block_y + local_y,
+              quant_field,
+              &quant_norm);
+            if (!status.ok()) {
+              return status;
+            }
           }
           candidates->push_back({
             .block_x = static_cast<uint32_t>(block_x + local_x),
@@ -248,12 +251,13 @@ struct StrategyResources {
 
 }  // namespace
 
-Status FindAcStrategyGridGpu(
+static Status FindAcStrategyGridGpuImpl(
   GpuBackend& gpu,
   ConstImage3FView opsin,
   ConstPlaneF32View quant_field,
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,
+  const ResidentAcStrategySearchInputs* resident,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
   AcStrategyGpuSearchStats* stats) {
@@ -274,25 +278,54 @@ Status FindAcStrategyGridGpu(
   if (!status.ok()) {
     return status;
   }
+  if (resident != nullptr) {
+    status = ValidateDeviceImage3View(resident->opsin, gpu.id());
+    if (!status.ok()) return status;
+    if (std::ranges::any_of(
+          resident->opsin.plane,
+          [&](ConstDevicePlaneView plane) {
+            return plane.element_type != DeviceElementType::kF32 ||
+              plane.extent != opsin.extent();
+          }) ||
+        resident->quant_field.element_type != DeviceElementType::kF32 ||
+        resident->quant_field.extent != block_extent ||
+        resident->pixel_mask.element_type != DeviceElementType::kF32 ||
+        resident->pixel_mask.extent != opsin.extent()) {
+      return Status::InvalidArgument(
+          "Resident GPU AC-strategy inputs have invalid geometry");
+    }
+    DeviceMemoryRange range;
+    status = ComputeDevicePlaneRange(
+        resident->quant_field, gpu.id(), &range);
+    if (status.ok()) {
+      status = ComputeDevicePlaneRange(
+          resident->pixel_mask, gpu.id(), &range);
+    }
+    if (!status.ok()) return status;
+  }
 
   try {
-    const std::vector<float> packed_opsin = PackOpsin(opsin, pixel_count);
-    const std::vector<float> packed_mask = PackPlane(pixel_mask);
+    const std::vector<float> packed_opsin = resident == nullptr
+      ? PackOpsin(opsin, pixel_count) : std::vector<float>{};
+    const std::vector<float> packed_mask = resident == nullptr
+      ? PackPlane(pixel_mask) : std::vector<float>{};
     std::unique_ptr<DeviceBuffer> device_opsin;
     std::unique_ptr<DeviceBuffer> device_mask;
-    status = AllocateAndUpload(gpu,
-      packed_opsin.data(),
-      packed_opsin.size() * sizeof(float),
-      &device_opsin);
-    if (!status.ok()) {
-      return status;
-    }
-    status = AllocateAndUpload(gpu,
-      packed_mask.data(),
-      packed_mask.size() * sizeof(float),
-      &device_mask);
-    if (!status.ok()) {
-      return status;
+    if (resident == nullptr) {
+      status = AllocateAndUpload(gpu,
+        packed_opsin.data(),
+        packed_opsin.size() * sizeof(float),
+        &device_opsin);
+      if (!status.ok()) {
+        return status;
+      }
+      status = AllocateAndUpload(gpu,
+        packed_mask.data(),
+        packed_mask.size() * sizeof(float),
+        &device_mask);
+      if (!status.ok()) {
+        return status;
+      }
     }
 
     constexpr const auto& kStages =
@@ -310,6 +343,7 @@ Status FindAcStrategyGridGpu(
         tile_extent,
         quant_field,
         color_correlation,
+        resident != nullptr,
         &resource.candidates);
       if (!status.ok()) {
         return status;
@@ -393,6 +427,12 @@ Status FindAcStrategyGridGpu(
         .pixel_mask = device_mask.get(),
         .matrices = resource.device_matrices.get(),
         .candidates = resource.device_candidates.get(),
+        .resident_opsin = resident == nullptr
+          ? ConstDeviceImage3View{} : resident->opsin,
+        .resident_pixel_mask = resident == nullptr
+          ? ConstDevicePlaneView{} : resident->pixel_mask,
+        .resident_quant_field = resident == nullptr
+          ? ConstDevicePlaneView{} : resident->quant_field,
         .scratch_a = scratch_a.get(),
         .scratch_b = scratch_b.get(),
         .rate_scratch = rate_scratch.get(),
@@ -459,6 +499,37 @@ Status FindAcStrategyGridGpu(
     return Status::InvalidArgument(
       "GPU AC-strategy search dimensions are too large");
   }
+}
+
+Status FindAcStrategyGridGpu(
+  GpuBackend& gpu,
+  ConstImage3FView opsin,
+  ConstPlaneF32View quant_field,
+  ConstPlaneF32View pixel_mask,
+  const ColorCorrelationMap& color_correlation,
+  AcStrategySearchOptions options,
+  AcStrategyGrid* out,
+  AcStrategyGpuSearchStats* stats) {
+
+  return FindAcStrategyGridGpuImpl(
+      gpu, opsin, quant_field, pixel_mask, color_correlation, nullptr,
+      options, out, stats);
+}
+
+Status FindAcStrategyGridGpuResident(
+  GpuBackend& gpu,
+  ConstImage3FView opsin,
+  ConstPlaneF32View quant_field,
+  ConstPlaneF32View pixel_mask,
+  const ColorCorrelationMap& color_correlation,
+  ResidentAcStrategySearchInputs resident,
+  AcStrategySearchOptions options,
+  AcStrategyGrid* out,
+  AcStrategyGpuSearchStats* stats) {
+
+  return FindAcStrategyGridGpuImpl(
+      gpu, opsin, quant_field, pixel_mask, color_correlation, &resident,
+      options, out, stats);
 }
 
 }  // namespace gjxl

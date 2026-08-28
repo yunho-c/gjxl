@@ -516,10 +516,10 @@ input near a threshold may therefore make a different, internally consistent
 adjustment decision. Resident output remains experimental and is not described
 as CPU-bit-exact.
 
-## Maximum-throughput frontend residency sequence
+## Resident frontend sequence
 
-Rate-control policy is complete for the current profile, but the explicit
-maximum-throughput path still has avoidable CPU preprocessing and host/device
+Rate-control policy is complete for the current profile, but the experimental
+resident paths still have avoidable CPU preprocessing and host/device
 handoffs. The implementation order is deliberately narrower than changing the
 authoritative exact-coefficient policy:
 
@@ -617,6 +617,43 @@ speedup median was `76.484x`, and the padded-1080p output remained `765599`
 bytes. Relative to the bounded-CPU-decision slice, the directional medians
 improved by `1.02x` publicly and `1.07x` inside the pipeline. These remain
 single-process checkpoints rather than the final retained claim.
+
+### Resident AC-search inputs
+
+**Status:** complete for fully-resident and throughput encoding.
+
+Those two experimental paths now generate their initial quant field and masks
+through a reusable prepared frontend. The same initial-quant submission also
+materializes inverse-Gaborish opsin when the profile requires it. Checked
+non-owning device views keep that search-domain image, the blurred pixel mask,
+and the initial block field alive through AC candidate evaluation. The search
+therefore omits its former full opsin and mask allocations/uploads, and its
+Metal residual/cost kernels derive each strategy-aware quant norm directly
+from the resident field. Only compact candidate descriptors and scalar costs
+cross for the established CPU merge order and tie policy.
+
+The diagnostic host copies remain part of the public pipeline output, and the
+CPU still performs the existing initial-CfL/final-CfL policy work. Exact-
+coefficient and automatic workflows retain their prior CPU initial-field and
+ordinary GPU-search contracts; maximum-throughput continues to bypass AC
+search entirely. Repeated prepared rate-control attempts reuse both the AQ and
+resident-frontend allocations.
+
+Direct Metal tests deliberately replace every candidate's host quant norm with
+`1.0` and recover the CPU-oracle costs for all seven strategies, demonstrating
+that the device field is authoritative. Prepared-view state/geometry checks,
+flat and structured initial-quant fixtures, complete fully-resident and
+throughput integration, and exact final frame/codestream parity on the focused
+fixture also pass.
+
+One Apple M4 Pro Release process with one warmup and three alternating pairs
+measured padded-1080p fully-resident encoding at `270.234 ms`
+(`266.775-270.819 ms`) and `23.108x` paired speedup
+(`23.015-23.325x`), with `622784` bytes. Throughput measured `238.075 ms`
+(`236.711-243.464 ms`) and `26.597x` (`26.195-26.849x`), with `623449`
+bytes. Relative to the preceding same-protocol checkpoints, the directional
+Metal medians improved by `1.03x` and `1.08x`; these remain single-process
+signals rather than retained multi-process claims.
 
 ## Suggested milestones
 

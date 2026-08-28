@@ -1129,11 +1129,19 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
       .options = Options(),
       .frame_only = true,
       .frame_only_resident_initial_quant = true,
+      .resident_ac_strategy_inputs = true,
       .frame_only_resident_quantizer = true,
   };
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!CheckStatus(gjxl::PrepareAqEvaluation(*gpu, preparation, &prepared),
                    "resident initial-quant preparation")) {
+    return false;
+  }
+  gjxl::ResidentAcStrategyInputs pending_inputs;
+  if (!ExpectCode(
+        prepared->GetResidentAcStrategyInputs(&pending_inputs),
+        gjxl::StatusCode::kFailedPrecondition,
+        "resident AC inputs before initial quantization")) {
     return false;
   }
 
@@ -1209,6 +1217,19 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
       std::cerr << "Resident initial quantization differs: quant="
                 << quant_error << " strategy=" << strategy_error
                 << " pixel=" << pixel_error << '\n';
+      return false;
+    }
+    gjxl::ResidentAcStrategyInputs resident_inputs;
+    if (!CheckStatus(
+          prepared->GetResidentAcStrategyInputs(&resident_inputs),
+          "resident AC input handoff") ||
+        resident_inputs.opsin.plane[0].buffer == nullptr ||
+        resident_inputs.opsin.plane[0].extent != kPixelExtent ||
+        resident_inputs.quant_field.extent != kBlockExtent ||
+        resident_inputs.pixel_mask.extent != kPixelExtent ||
+        resident_inputs.quant_field.buffer == nullptr ||
+        resident_inputs.pixel_mask.buffer == nullptr) {
+      std::cerr << "Resident AC input views are invalid\n";
       return false;
     }
     gjxl::ColorCorrelationMap color;

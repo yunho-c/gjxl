@@ -96,20 +96,23 @@ struct MetalAcStrategyBatchParams {
   uint32_t pixel_width;
   uint32_t pixel_height;
   uint32_t opsin_row_stride;
-  uint32_t opsin_plane_stride;
   uint32_t pixel_mask_row_stride;
+  uint32_t quant_field_row_stride;
   uint32_t candidate_count;
   uint32_t coefficient_count;
   uint32_t transform_width;
   uint32_t transform_height;
+  uint32_t covered_block_width;
+  uint32_t covered_block_height;
   uint32_t covered_block_count;
+  uint32_t use_device_quant_norm;
   float info_loss_multiplier;
   float zeros_multiplier;
   float cost_delta;
 };
 
 static_assert(std::is_standard_layout_v<MetalAcStrategyBatchParams>);
-static_assert(sizeof(MetalAcStrategyBatchParams) == 13 * sizeof(uint32_t));
+static_assert(sizeof(MetalAcStrategyBatchParams) == 16 * sizeof(uint32_t));
 
 class MetalPreparedAqEvaluation;
 
@@ -269,8 +272,12 @@ private:
 
   struct ValidatedAcStrategyBatch {
     AcStrategyType strategy = AcStrategyType::kCount;
-    const MetalBuffer* opsin = nullptr;
+    std::array<const MetalBuffer*, 3> opsin{};
+    std::array<size_t, 3> opsin_offset_bytes{};
     const MetalBuffer* pixel_mask = nullptr;
+    size_t pixel_mask_offset_bytes = 0;
+    const MetalBuffer* quant_field = nullptr;
+    size_t quant_field_offset_bytes = 0;
     const MetalBuffer* matrices = nullptr;
     const MetalBuffer* candidates = nullptr;
     MetalBuffer* scratch_a = nullptr;

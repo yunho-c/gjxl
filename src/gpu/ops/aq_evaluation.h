@@ -17,6 +17,7 @@
 #include "core/quantizer.h"
 #include "core/status.h"
 #include "gpu/backend.h"
+#include "gpu/image.h"
 
 namespace gjxl {
 
@@ -48,8 +49,13 @@ struct AqEvaluationPreparation {
   /// allows the input color-map views to be omitted.
   bool frame_only_resident_initial_cfl = false;
   /// Enables initial quant-field and masking-map generation from the resident
-  /// coding image. Valid only for frame-only preparation.
+  /// coding image. A complete preparation must also select a resident
+  /// consumer for these fields.
   bool frame_only_resident_initial_quant = false;
+  /// Retains the initial field, blurred mask, and search-domain opsin as
+  /// device views for AC-strategy candidate evaluation. Requires resident
+  /// initial quantization, but is valid for a complete AQ preparation.
+  bool resident_ac_strategy_inputs = false;
   /// Consumes device-generated raw quantization and permits the raw-quant and
   /// EPF input views to be omitted. Requires resident initial quantization.
   bool frame_only_resident_quantizer = false;
@@ -57,6 +63,12 @@ struct AqEvaluationPreparation {
   /// quant or applies the encoder's shared AdjustQuantBlockAC decision.
   AcCoefficientDecisionMode coefficient_decision_mode =
     AcCoefficientDecisionMode::kFixedRawQuant;
+};
+
+struct ResidentAcStrategyInputs {
+  ConstDeviceImage3View opsin;
+  ConstDevicePlaneView quant_field;
+  ConstDevicePlaneView pixel_mask;
 };
 
 struct AqEvaluationInput {
@@ -142,6 +154,16 @@ public:
     (void)quant_dc;
     return Status::Unavailable(
       "Prepared resident initial quantization is unavailable");
+  }
+
+  /// Returns non-owning views into a successfully computed resident initial
+  /// quantization. The prepared operation owns the storage and must outlive
+  /// every submission that consumes these views.
+  [[nodiscard]] virtual Status GetResidentAcStrategyInputs(
+    ResidentAcStrategyInputs* inputs) {
+    (void)inputs;
+    return Status::Unavailable(
+      "Prepared resident AC-strategy inputs are unavailable");
   }
 
   [[nodiscard]] virtual AqEvaluationMemoryStats memory_stats() const noexcept = 0;

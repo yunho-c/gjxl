@@ -272,7 +272,8 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   AcStrategySearchProvider& strategy_search,
   AdaptiveQuantizationProvider& adaptive_quantization,
   CpuQuantizationPipelineOptions options,
-  CpuQuantizationPipelineOutput output) {
+  CpuQuantizationPipelineOutput output,
+  bool initial_quantization_ready) {
 
   Extent2D block_extent;
   Status status = ValidatePipelineInputs(
@@ -300,23 +301,25 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   const float initial_quant_target = prepared.profile.loop_filter.gaborish
     ? control_target
     : 0.62f * control_target;
-  status = ComputeInitialQuantField(
-    prepared.coding_opsin.const_view(),
-    {
-      .butteraugli_target = initial_quant_target,
-      .rescale = options.initial_quant_rescale,
-    },
-    {
-      .quant_field = {
-        prepared.initial_quant.data(), block_extent, block_extent.width},
-      .strategy_mask = {
-        prepared.strategy_mask.data(), block_extent, block_extent.width},
-      .pixel_mask = {
-        prepared.pixel_mask.data(), prepared.padded_extent,
-        prepared.padded_extent.width},
-    });
-  if (!status.ok()) {
-    return status;
+  if (!initial_quantization_ready) {
+    status = ComputeInitialQuantField(
+      prepared.coding_opsin.const_view(),
+      {
+        .butteraugli_target = initial_quant_target,
+        .rescale = options.initial_quant_rescale,
+      },
+      {
+        .quant_field = {
+          prepared.initial_quant.data(), block_extent, block_extent.width},
+        .strategy_mask = {
+          prepared.strategy_mask.data(), block_extent, block_extent.width},
+        .pixel_mask = {
+          prepared.pixel_mask.data(), prepared.padded_extent,
+          prepared.padded_extent.width},
+      });
+    if (!status.ok()) {
+      return status;
+    }
   }
 
   status = strategy_search.Find(
