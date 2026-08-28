@@ -818,73 +818,99 @@ bool RunWorkflowSample(
     return false;
   }
 
-  const fs::path compressed = directory / "encoded.jxl";
-  const fs::path decoded = directory / "decoded.pfm";
-  const fs::path encoder_log = directory / "encoder.log";
-  const fs::path decoder_log = directory / "djxl.log";
-  const fs::path info_log = directory / "jxlinfo.log";
-  const std::array<std::string, 4> encoder_arguments = {
-    "--distance", "1.0", options.sample.string(), compressed.string()};
-  if (RunTool(options.encoder, encoder_arguments, encoder_log) != 0) {
-    std::cerr << "workflow-sample: encoder failed\n";
-    return false;
-  }
-
-  const std::array<std::string, 4> decode_arguments = {
-    "--quiet", "--num_threads=0", compressed.string(), decoded.string()};
-  if (RunTool(options.decoder, decode_arguments, decoder_log) != 0) {
-    std::cerr << "workflow-sample: decoder failed\n";
-    return false;
-  }
-
   PfmImage source;
-  PfmImage reconstructed;
   std::string error;
-  if (!ReadPfm(options.sample, &source, &error) ||
-      !ReadPfm(decoded, &reconstructed, &error) ||
-      source.extent != reconstructed.extent) {
-    std::cerr << "workflow-sample: invalid source or decoded PFM: "
-              << error << '\n';
+  if (!ReadPfm(options.sample, &source, &error)) {
+    std::cerr << "workflow-sample: invalid source PFM: " << error << '\n';
     return false;
   }
-
-  size_t pixel_count = 0;
-  if (!source.extent.try_area(&pixel_count)) {
-    return false;
-  }
-  std::vector<float> distance_map(pixel_count);
-  double distance = 0.0;
-  const gjxl::Status status = gjxl::ComputeButteraugliDistance(
-    View(source),
-    View(reconstructed),
-    {},
-    {distance_map.data(), source.extent, source.extent.width},
-    &distance);
-  constexpr double kMaximumWorkflowDistance = 1.5;
-  if (!status.ok() || !std::isfinite(distance) || distance < 0.0 ||
-      distance > kMaximumWorkflowDistance) {
-    std::cerr << "workflow-sample: decoded Butteraugli distance "
-              << distance << " exceeds " << kMaximumWorkflowDistance
-              << ": " << status.message() << '\n';
-    return false;
-  }
-
-  const std::array<std::string, 2> info_arguments = {
-    "-v", compressed.string()};
   const Fixture metadata_fixture{
     "workflow-sample", source.extent, Pattern::kGradient};
-  std::string info_text;
-  if (RunTool(options.info, info_arguments, info_log) != 0 ||
-      !ReadText(info_log, &info_text) ||
-      !ContainsMetadata(info_text, metadata_fixture, &error)) {
-    std::cerr << "workflow-sample: metadata check failed: " << error << '\n';
-    return false;
-  }
+  const auto run_variant = [&](
+    std::string_view name,
+    std::vector<std::string> encoder_arguments,
+    size_t maximum_bytes) {
 
-  std::cout << "workflow-sample: " << fs::file_size(compressed)
-            << " bytes, Butteraugli distance=" << std::setprecision(9)
-            << distance << '\n';
-  return true;
+    const fs::path compressed = directory / (std::string(name) + ".jxl");
+    const fs::path decoded = directory / (std::string(name) + ".pfm");
+    const fs::path encoder_log =
+      directory / (std::string(name) + "-encoder.log");
+    const fs::path decoder_log =
+      directory / (std::string(name) + "-djxl.log");
+    const fs::path info_log =
+      directory / (std::string(name) + "-jxlinfo.log");
+    encoder_arguments.push_back(options.sample.string());
+    encoder_arguments.push_back(compressed.string());
+    if (RunTool(options.encoder, encoder_arguments, encoder_log) != 0) {
+      std::cerr << "workflow-sample/" << name << ": encoder failed\n";
+      return false;
+    }
+    if (maximum_bytes != 0 && fs::file_size(compressed) > maximum_bytes) {
+      std::cerr << "workflow-sample/" << name
+                << ": encoder exceeded byte target\n";
+      return false;
+    }
+
+    const std::array<std::string, 4> decode_arguments = {
+      "--quiet", "--num_threads=0", compressed.string(), decoded.string()};
+    if (RunTool(options.decoder, decode_arguments, decoder_log) != 0) {
+      std::cerr << "workflow-sample/" << name << ": decoder failed\n";
+      return false;
+    }
+
+    PfmImage reconstructed;
+    if (!ReadPfm(decoded, &reconstructed, &error) ||
+        source.extent != reconstructed.extent) {
+      std::cerr << "workflow-sample/" << name
+                << ": invalid decoded PFM: " << error << '\n';
+      return false;
+    }
+    size_t pixel_count = 0;
+    if (!source.extent.try_area(&pixel_count)) {
+      return false;
+    }
+    std::vector<float> distance_map(pixel_count);
+    double distance = 0.0;
+    const gjxl::Status status = gjxl::ComputeButteraugliDistance(
+      View(source),
+      View(reconstructed),
+      {},
+      {distance_map.data(), source.extent, source.extent.width},
+      &distance);
+    constexpr double kMaximumWorkflowDistance = 1.5;
+    if (!status.ok() || !std::isfinite(distance) || distance < 0.0 ||
+        distance > kMaximumWorkflowDistance) {
+      std::cerr << "workflow-sample/" << name
+                << ": decoded Butteraugli distance " << distance
+                << " exceeds " << kMaximumWorkflowDistance << ": "
+                << status.message() << '\n';
+      return false;
+    }
+
+    const std::array<std::string, 2> info_arguments = {
+      "-v", compressed.string()};
+    std::string info_text;
+    if (RunTool(options.info, info_arguments, info_log) != 0 ||
+        !ReadText(info_log, &info_text) ||
+        !ContainsMetadata(info_text, metadata_fixture, &error)) {
+      std::cerr << "workflow-sample/" << name
+                << ": metadata check failed: " << error << '\n';
+      return false;
+    }
+
+    std::cout << "workflow-sample/" << name << ": "
+              << fs::file_size(compressed)
+              << " bytes, Butteraugli distance=" << std::setprecision(9)
+              << distance << '\n';
+    return true;
+  };
+
+  return run_variant("distance", {"--distance", "1.0"}, 0) &&
+    run_variant(
+      "target-bytes",
+      {"--target-bytes", "280", "--size-tolerance", "0.1",
+       "--max-attempts", "8", "--backend", "cpu"},
+      280);
 }
 
 bool CheckCorruption(

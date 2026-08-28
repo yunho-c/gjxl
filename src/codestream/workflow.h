@@ -44,8 +44,17 @@ struct VarDctEncodingOptions {
     VarDctRateControlMode::kButteraugliTarget;
   /// Maximum normalized reconstruction error for X, Y, and B respectively.
   std::array<float, 3> maximum_error{};
+  /// Serialized-byte budget for `kTargetBytes`.
   size_t target_bytes = 0;
+  /// Bits per unpadded source pixel for `kTargetBitsPerPixel`. The normalized
+  /// internal byte budget is rounded down.
   double target_bits_per_pixel = 0.0;
+  /// Relative target-size tolerance in [0, 1]. The corresponding byte
+  /// tolerance is rounded up; zero requires an exact byte count.
+  double target_size_tolerance = 0.005;
+  /// Complete encode attempts, including the two search endpoints. Valid
+  /// values are in [1, 64].
+  size_t target_size_maximum_attempts = 12;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
   /// Selects the Metal AQ implementation. Fully resident mode requires an
   /// explicitly forced Metal backend and may change encoder decisions.
@@ -61,10 +70,14 @@ struct VarDctEncodingSummary {
     VarDctRateControlMode::kButteraugliTarget;
   size_t requested_target_bytes = 0;
   size_t effective_target_bytes = 0;
+  /// Absolute under-budget tolerance derived from the request.
+  size_t target_size_tolerance_bytes = 0;
   double requested_target_bits_per_pixel = 0.0;
   double achieved_bits_per_pixel = 0.0;
   float selected_butteraugli_target = 0.0f;
   size_t encode_attempt_count = 0;
+  /// True only when the selected size is at or below the effective budget and
+  /// no farther below it than `target_size_tolerance_bytes`.
   bool target_size_met = false;
   std::array<size_t, kAcStrategyCount> strategy_counts{};
   std::vector<double> score_history;

@@ -264,6 +264,7 @@ add_library(
   src/codestream/encoder.cpp
   src/codestream/headers.cpp
   src/codestream/huffman.cpp
+  src/codestream/rate_control.cpp
   src/codestream/sections.cpp
   src/codestream/workflow.cpp
 )
@@ -1136,6 +1137,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME codestream_workflow
     COMMAND gjxl_codestream_workflow_test
+  )
+
+  add_executable(
+    gjxl_rate_control_search_test
+    tests/rate_control_search_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_rate_control_search_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME rate_control_search
+    COMMAND gjxl_rate_control_search_test
   )
 
   add_test(

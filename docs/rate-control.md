@@ -52,18 +52,26 @@ behavior. The AQ implementation already provides:
 
 The remaining rate-control gaps are:
 
-- no public mode for maximum error, target bytes, or target BPP;
-- no target-size search or prepared multi-attempt workflow;
+- no implemented maximum-error mode;
+- no prepared state reused across target-size attempts;
 - no `AdjustQuantBlockAC` application;
 - no maximum-error block reduction or update policy; and
 - no resampling-specific AQ bypass. The bypass policy is small, but the current
   codestream profile does not support resampling.
 
 The public request/result types now represent all four modes and validate only
-the active mode. Until their policies land, valid maximum-error, target-byte,
-and target-BPP requests return `Unavailable` atomically. The
-`gjxl_rate_control_probe` tool measures the implemented Butteraugli mode across
-strictly increasing targets and one or more PFM corpus inputs. For example:
+the active mode. Maximum-error requests remain explicitly `Unavailable` until
+that policy lands. Target-byte and target-BPP requests use a bounded search over
+complete encodes in the Butteraugli interval `[0.01, 10.0]`. The default allows
+12 attempts and accepts the largest result at or below the budget within a
+relative tolerance of `0.005`; the result reports the effective byte and
+tolerance budgets, selected Butteraugli target, attempt count, and whether the
+requested tolerance was met. Infeasible requests still return a valid best
+candidate and report `target_size_met = false`.
+
+The `gjxl_rate_control_probe` tool measures the implemented Butteraugli mode
+across strictly increasing targets and one or more PFM corpus inputs. For
+example:
 
 ```sh
 just rate-control-probe testdata/codestream_sample.pfm 1.0,1.2 --backend cpu

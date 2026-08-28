@@ -19,6 +19,7 @@
 #include "codec/quantization_pipeline.h"
 #include "codec/vardct_frame.h"
 #include "codestream/encoder.h"
+#include "codestream/rate_control_internal.h"
 #include "codestream/workflow_internal.h"
 #include "core/frame_geometry.h"
 #include "core/image_buffer.h"
@@ -73,13 +74,15 @@ Status EffectiveTargetBytes(
 Status ValidateRateControlOptions(
   Extent2D source_extent,
   const VarDctEncodingOptions& options,
-  size_t* effective_target_bytes) {
+  size_t* effective_target_bytes,
+  size_t* tolerance_bytes) {
 
-  if (effective_target_bytes == nullptr) {
+  if (effective_target_bytes == nullptr || tolerance_bytes == nullptr) {
     return Status::InvalidArgument(
-      "Effective target-byte output is null");
+      "Rate-control derived-value output is null");
   }
   *effective_target_bytes = 0;
+  *tolerance_bytes = 0;
   switch (options.rate_control_mode) {
     case VarDctRateControlMode::kButteraugliTarget:
       if (!std::isfinite(options.butteraugli_target) ||
@@ -104,16 +107,43 @@ Status ValidateRateControlOptions(
           "Target byte count must be nonzero");
       }
       *effective_target_bytes = options.target_bytes;
-      return Status::Ok();
+      break;
 
-    case VarDctRateControlMode::kTargetBitsPerPixel:
-      return EffectiveTargetBytes(
+    case VarDctRateControlMode::kTargetBitsPerPixel: {
+      Status status = EffectiveTargetBytes(
         source_extent,
         options.target_bits_per_pixel,
         effective_target_bytes);
+      if (!status.ok()) {
+        return status;
+      }
+      break;
+    }
+
+    default:
+      return Status::InvalidArgument(
+        "VarDCT rate-control mode is invalid");
   }
-  return Status::InvalidArgument(
-    "VarDCT rate-control mode is invalid");
+
+  if (!std::isfinite(options.target_size_tolerance) ||
+      options.target_size_tolerance < 0.0 ||
+      options.target_size_tolerance > 1.0 ||
+      options.target_size_maximum_attempts == 0 ||
+      options.target_size_maximum_attempts >
+        codestream_internal::kMaximumTargetSizeEncodeAttempts) {
+    return Status::InvalidArgument(
+      "Target-size tolerance or attempt limit is invalid");
+  }
+  const long double tolerance = std::ceil(
+    static_cast<long double>(*effective_target_bytes) *
+    static_cast<long double>(options.target_size_tolerance));
+  if (tolerance >
+      static_cast<long double>(std::numeric_limits<size_t>::max())) {
+    return Status::InvalidArgument(
+      "Target-size tolerance is not representable");
+  }
+  *tolerance_bytes = static_cast<size_t>(tolerance);
+  return Status::Ok();
 }
 
 MetalBackendOptions ProductionMetalBackendOptions() {
@@ -276,8 +306,12 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       "VarDCT encoding input or output is invalid");
   }
   size_t effective_target_bytes = 0;
+  size_t target_size_tolerance_bytes = 0;
   Status status = ValidateRateControlOptions(
-    linear_rgb.extent(), options, &effective_target_bytes);
+    linear_rgb.extent(),
+    options,
+    &effective_target_bytes,
+    &target_size_tolerance_bytes);
   if (!status.ok()) {
     return status;
   }
@@ -303,10 +337,66 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       return Status::InvalidArgument(
         "VarDCT Metal AQ mode is invalid");
   }
-  if (options.rate_control_mode !=
-      VarDctRateControlMode::kButteraugliTarget) {
+  if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     return Status::Unavailable(
       "Requested VarDCT rate-control mode is not implemented");
+  }
+  if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
+      options.rate_control_mode ==
+        VarDctRateControlMode::kTargetBitsPerPixel) {
+    try {
+      codestream_internal::TargetSizeSearchResult search_result;
+      status = codestream_internal::SearchTargetSize(
+        {
+          .target_bytes = effective_target_bytes,
+          .tolerance_bytes = target_size_tolerance_bytes,
+          .maximum_attempts = options.target_size_maximum_attempts,
+        },
+        [&](float butteraugli_target,
+            std::vector<uint8_t>* attempt_codestream,
+            VarDctEncodingSummary* attempt_summary) {
+          VarDctEncodingOptions attempt_options = options;
+          attempt_options.butteraugli_target = butteraugli_target;
+          attempt_options.rate_control_mode =
+            VarDctRateControlMode::kButteraugliTarget;
+          return EncodeLinearRgbVarDctCodestreamImpl(
+            linear_rgb,
+            attempt_options,
+            supplied_backend,
+            supplied_backend_is_qualified,
+            resolve_production_backend,
+            attempt_codestream,
+            attempt_summary);
+        },
+        &search_result);
+      if (!status.ok()) {
+        return status;
+      }
+
+      search_result.summary.rate_control_mode = options.rate_control_mode;
+      search_result.summary.effective_target_bytes = effective_target_bytes;
+      search_result.summary.target_size_tolerance_bytes =
+        target_size_tolerance_bytes;
+      search_result.summary.encode_attempt_count = search_result.attempt_count;
+      search_result.summary.target_size_met = search_result.target_size_met;
+      if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes) {
+        search_result.summary.requested_target_bytes = options.target_bytes;
+      } else {
+        search_result.summary.requested_target_bits_per_pixel =
+          options.target_bits_per_pixel;
+      }
+      *codestream = std::move(search_result.codestream);
+      if (summary != nullptr) {
+        *summary = std::move(search_result.summary);
+      }
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate target-size workflow storage");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+        "Target-size workflow storage is too large");
+    }
+    return Status::Ok();
   }
 
   try {
@@ -405,6 +495,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     candidate_summary.encoded_bytes = candidate.size();
     candidate_summary.rate_control_mode = options.rate_control_mode;
     candidate_summary.effective_target_bytes = effective_target_bytes;
+    candidate_summary.target_size_tolerance_bytes =
+      target_size_tolerance_bytes;
     if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes) {
       candidate_summary.requested_target_bytes = options.target_bytes;
     } else if (options.rate_control_mode ==

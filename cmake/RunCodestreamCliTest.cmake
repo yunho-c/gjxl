@@ -43,6 +43,38 @@ if(NOT sentinel_contents STREQUAL "unchanged")
   message(FATAL_ERROR "Invalid backend changed an existing output")
 endif()
 
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --target-bytes 280
+    "${GJXL_SAMPLE}" "${sentinel}"
+  RESULT_VARIABLE conflicting_rate_control_result
+  OUTPUT_QUIET
+  ERROR_QUIET
+)
+if(conflicting_rate_control_result EQUAL 0)
+  message(FATAL_ERROR "CLI accepted conflicting rate-control modes")
+endif()
+file(READ "${sentinel}" sentinel_contents)
+if(NOT sentinel_contents STREQUAL "unchanged")
+  message(FATAL_ERROR "Conflicting rate control changed an existing output")
+endif()
+
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --target-bytes 280 --size-tolerance 1.01
+    "${GJXL_SAMPLE}" "${sentinel}"
+  RESULT_VARIABLE invalid_tolerance_result
+  OUTPUT_QUIET
+  ERROR_QUIET
+)
+if(invalid_tolerance_result EQUAL 0)
+  message(FATAL_ERROR "CLI accepted an invalid size tolerance")
+endif()
+file(READ "${sentinel}" sentinel_contents)
+if(NOT sentinel_contents STREQUAL "unchanged")
+  message(FATAL_ERROR "Invalid size tolerance changed an existing output")
+endif()
+
 set(malformed "${GJXL_TEST_DIR}/malformed.pfm")
 file(WRITE "${malformed}" "PF\n2 2\n-1.0\ntruncated")
 execute_process(
@@ -121,6 +153,63 @@ endforeach()
 string(FIND "${metal_output}" "using Metal" metal_found)
 if(metal_found EQUAL -1)
   message(FATAL_ERROR "Forced Metal CLI report did not identify Metal")
+endif()
+
+set(target_bytes_first "${GJXL_TEST_DIR}/target-bytes-first.jxl")
+set(target_bytes_second "${GJXL_TEST_DIR}/target-bytes-second.jxl")
+set(target_bpp "${GJXL_TEST_DIR}/target-bpp.jxl")
+foreach(target_output IN ITEMS
+        "${target_bytes_first}" "${target_bytes_second}")
+  execute_process(
+    COMMAND
+      "${GJXL_ENCODER}" --target-bytes 280 --size-tolerance 0.1
+      --max-attempts 8 --backend cpu "${GJXL_SAMPLE}" "${target_output}"
+    RESULT_VARIABLE target_result
+    OUTPUT_VARIABLE target_report
+    ERROR_VARIABLE target_error
+  )
+  if(NOT target_result EQUAL 0)
+    message(FATAL_ERROR "Target-byte CLI encode failed: ${target_error}")
+  endif()
+  foreach(expected "for target 280 bytes (met"
+                   "selected Butteraugli target" "in 5 attempts"
+                   "using CPU")
+    string(FIND "${target_report}" "${expected}" found)
+    if(found EQUAL -1)
+      message(FATAL_ERROR "Target-byte CLI report is missing: ${expected}")
+    endif()
+  endforeach()
+endforeach()
+file(SIZE "${target_bytes_first}" target_size)
+if(target_size GREATER 280 OR target_size LESS 252)
+  message(FATAL_ERROR
+    "Target-byte output ${target_size} is outside [252, 280]")
+endif()
+file(SHA256 "${target_bytes_first}" target_bytes_first_hash)
+file(SHA256 "${target_bytes_second}" target_bytes_second_hash)
+if(NOT target_bytes_first_hash STREQUAL target_bytes_second_hash)
+  message(FATAL_ERROR "Target-byte CLI output is not deterministic")
+endif()
+
+# 10.14 * (17 * 13) / 8 floors to the same 280-byte budget.
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --target-bpp 10.14 --size-tolerance 0.1
+    --max-attempts 8 --backend cpu "${GJXL_SAMPLE}" "${target_bpp}"
+  RESULT_VARIABLE target_bpp_result
+  OUTPUT_VARIABLE target_bpp_report
+  ERROR_VARIABLE target_bpp_error
+)
+if(NOT target_bpp_result EQUAL 0)
+  message(FATAL_ERROR "Target-BPP CLI encode failed: ${target_bpp_error}")
+endif()
+string(FIND "${target_bpp_report}" "10.14 bpp / 280 bytes (met" bpp_found)
+if(bpp_found EQUAL -1)
+  message(FATAL_ERROR "Target-BPP CLI report did not expose its byte budget")
+endif()
+file(SHA256 "${target_bpp}" target_bpp_hash)
+if(NOT target_bpp_hash STREQUAL target_bytes_first_hash)
+  message(FATAL_ERROR "Equivalent byte and BPP targets diverged")
 endif()
 
 file(GLOB temporary_outputs "${GJXL_TEST_DIR}/*.tmp.*")

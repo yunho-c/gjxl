@@ -78,6 +78,7 @@ bool CheckDeterministicWorkflow() {
           gjxl::VarDctRateControlMode::kButteraugliTarget ||
       first_summary.requested_target_bytes != 0 ||
       first_summary.effective_target_bytes != 0 ||
+      first_summary.target_size_tolerance_bytes != 0 ||
       first_summary.requested_target_bits_per_pixel != 0.0 ||
       first_summary.achieved_bits_per_pixel !=
           8.0 * static_cast<double>(first.size()) /
@@ -216,6 +217,37 @@ bool CheckInvalidRequestsAreAtomic() {
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
+           .rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+           .target_bytes = 1024,
+           .target_size_tolerance =
+             std::numeric_limits<double>::quiet_NaN()}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+           .target_bytes = 1024,
+           .target_size_tolerance = -0.1}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+           .target_bytes = 1024,
+           .target_size_tolerance = 1.1}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+           .target_bytes = 1024,
+           .target_size_maximum_attempts = 0}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+           .target_bytes = 1024,
+           .target_size_maximum_attempts = 65}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
            .backend = static_cast<gjxl::VarDctBackendPreference>(99)}) ||
       !rejected_atomically(
           image.View(),
@@ -243,19 +275,7 @@ bool CheckInvalidRequestsAreAtomic() {
   if (!unavailable_atomically(
         {.butteraugli_target = nan,
          .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError,
-         .maximum_error = {1.0f, 2.0f, 3.0f}}) ||
-      !unavailable_atomically(
-        {.butteraugli_target = nan,
-         .rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
-         .target_bytes = 1024,
-         .target_bits_per_pixel =
-           std::numeric_limits<double>::quiet_NaN()}) ||
-      !unavailable_atomically(
-        {.butteraugli_target = nan,
-         .rate_control_mode =
-           gjxl::VarDctRateControlMode::kTargetBitsPerPixel,
-         .target_bytes = 1024,
-         .target_bits_per_pixel = 1.0})) {
+         .maximum_error = {1.0f, 2.0f, 3.0f}})) {
     std::cerr << "Valid unavailable rate-control mode changed output\n";
     return false;
   }
@@ -266,6 +286,9 @@ bool CheckInvalidRequestsAreAtomic() {
   inactive_fields.target_bytes = 1024;
   inactive_fields.target_bits_per_pixel =
     std::numeric_limits<double>::quiet_NaN();
+  inactive_fields.target_size_tolerance =
+    std::numeric_limits<double>::quiet_NaN();
+  inactive_fields.target_size_maximum_attempts = 0;
   std::vector<uint8_t> baseline_bytes;
   gjxl::VarDctEncodingSummary baseline_summary;
   const gjxl::Status baseline_status =
@@ -294,10 +317,122 @@ bool CheckInvalidRequestsAreAtomic() {
   return true;
 }
 
+bool CheckTargetSizeControl() {
+  ImageStorage image;
+  FillImage(&image);
+  constexpr size_t kTargetBytes = 280;
+  constexpr double kTolerance = 0.1;
+  constexpr size_t kMaximumAttempts = 8;
+
+  gjxl::VarDctEncodingOptions byte_options;
+  byte_options.butteraugli_target =
+    std::numeric_limits<float>::quiet_NaN();
+  byte_options.rate_control_mode =
+    gjxl::VarDctRateControlMode::kTargetBytes;
+  byte_options.target_bytes = kTargetBytes;
+  byte_options.target_bits_per_pixel =
+    std::numeric_limits<double>::quiet_NaN();
+  byte_options.target_size_tolerance = kTolerance;
+  byte_options.target_size_maximum_attempts = kMaximumAttempts;
+  byte_options.backend = gjxl::VarDctBackendPreference::kCpu;
+
+  std::vector<uint8_t> byte_codestream;
+  gjxl::VarDctEncodingSummary byte_summary;
+  gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), byte_options, &byte_codestream, &byte_summary);
+  if (!status.ok() || byte_codestream.empty() ||
+      byte_summary.rate_control_mode !=
+        gjxl::VarDctRateControlMode::kTargetBytes ||
+      byte_summary.requested_target_bytes != kTargetBytes ||
+      byte_summary.effective_target_bytes != kTargetBytes ||
+      byte_summary.target_size_tolerance_bytes != 28 ||
+      byte_summary.encoded_bytes != byte_codestream.size() ||
+      byte_summary.encoded_bytes > kTargetBytes ||
+      kTargetBytes - byte_summary.encoded_bytes >
+        byte_summary.target_size_tolerance_bytes ||
+      !byte_summary.target_size_met ||
+      byte_summary.encode_attempt_count == 0 ||
+      byte_summary.encode_attempt_count > kMaximumAttempts ||
+      !std::isfinite(byte_summary.selected_butteraugli_target) ||
+      byte_summary.selected_butteraugli_target <= 0.0f) {
+    std::cerr << "Target-byte workflow failed: " << status.message() << '\n';
+    return false;
+  }
+
+  std::vector<uint8_t> repeated_codestream;
+  gjxl::VarDctEncodingSummary repeated_summary;
+  status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), byte_options, &repeated_codestream, &repeated_summary);
+  if (!status.ok() || repeated_codestream != byte_codestream ||
+      repeated_summary != byte_summary) {
+    std::cerr << "Target-byte workflow is not deterministic\n";
+    return false;
+  }
+
+  gjxl::VarDctEncodingOptions bpp_options = byte_options;
+  bpp_options.rate_control_mode =
+    gjxl::VarDctRateControlMode::kTargetBitsPerPixel;
+  bpp_options.target_bytes = 0;
+  bpp_options.target_bits_per_pixel =
+    (static_cast<double>(kTargetBytes) + 0.5) * 8.0 /
+    static_cast<double>(kExtent.width * kExtent.height);
+  std::vector<uint8_t> bpp_codestream;
+  gjxl::VarDctEncodingSummary bpp_summary;
+  status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), bpp_options, &bpp_codestream, &bpp_summary);
+  if (!status.ok() || bpp_codestream != byte_codestream ||
+      bpp_summary.rate_control_mode !=
+        gjxl::VarDctRateControlMode::kTargetBitsPerPixel ||
+      bpp_summary.requested_target_bytes != 0 ||
+      bpp_summary.effective_target_bytes != kTargetBytes ||
+      bpp_summary.requested_target_bits_per_pixel !=
+        bpp_options.target_bits_per_pixel ||
+      bpp_summary.selected_butteraugli_target !=
+        byte_summary.selected_butteraugli_target ||
+      bpp_summary.encode_attempt_count != byte_summary.encode_attempt_count ||
+      !bpp_summary.target_size_met) {
+    std::cerr << "Target-BPP workflow did not normalize to the byte budget\n";
+    return false;
+  }
+
+  gjxl::VarDctEncodingOptions oversized = byte_options;
+  oversized.target_bytes = 100000;
+  oversized.target_size_tolerance = 0.0;
+  std::vector<uint8_t> oversized_codestream;
+  gjxl::VarDctEncodingSummary oversized_summary;
+  status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), oversized, &oversized_codestream, &oversized_summary);
+  if (!status.ok() || oversized_codestream.empty() ||
+      oversized_summary.encoded_bytes >= oversized.target_bytes ||
+      oversized_summary.encode_attempt_count != 1 ||
+      oversized_summary.target_size_met) {
+    std::cerr << "Oversized byte target was not reported as infeasible\n";
+    return false;
+  }
+
+  gjxl::VarDctEncodingOptions undersized = byte_options;
+  undersized.target_bytes = 1;
+  undersized.target_size_tolerance = 0.0;
+  undersized.target_size_maximum_attempts = 2;
+  std::vector<uint8_t> undersized_codestream;
+  gjxl::VarDctEncodingSummary undersized_summary;
+  status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), undersized, &undersized_codestream, &undersized_summary);
+  if (!status.ok() || undersized_codestream.size() <= undersized.target_bytes ||
+      undersized_summary.encode_attempt_count != 2 ||
+      undersized_summary.target_size_met) {
+    std::cerr << "Undersized byte target was not reported as infeasible\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
-  if (!CheckDeterministicWorkflow() || !CheckInvalidRequestsAreAtomic()) {
+  if (!CheckDeterministicWorkflow() ||
+      !CheckInvalidRequestsAreAtomic() ||
+      !CheckTargetSizeControl()) {
     return EXIT_FAILURE;
   }
   std::cout << "All public codestream workflow tests passed.\n";
