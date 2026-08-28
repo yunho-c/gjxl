@@ -50,6 +50,9 @@ struct AqEvaluationPreparation {
   /// Enables initial quant-field and masking-map generation from the resident
   /// coding image. Valid only for frame-only preparation.
   bool frame_only_resident_initial_quant = false;
+  /// Consumes device-generated raw quantization and permits the raw-quant and
+  /// EPF input views to be omitted. Requires resident initial quantization.
+  bool frame_only_resident_quantizer = false;
   /// Selects whether resident coefficient coding preserves the input raw
   /// quant or applies the encoder's shared AdjustQuantBlockAC decision.
   AcCoefficientDecisionMode coefficient_decision_mode =
@@ -130,9 +133,13 @@ public:
   /// may expose this only for an explicitly enabled frame-only preparation.
   [[nodiscard]] virtual Status ComputeInitialQuantization(
     InitialQuantizationOptions options,
-    InitialQuantFieldOutput output) {
+    InitialQuantFieldOutput output,
+    QuantizerParams* quantizer = nullptr,
+    float quant_dc = 0.0f) {
     (void)options;
     (void)output;
+    (void)quantizer;
+    (void)quant_dc;
     return Status::Unavailable(
       "Prepared resident initial quantization is unavailable");
   }

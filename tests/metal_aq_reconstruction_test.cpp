@@ -1129,6 +1129,7 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
       .options = Options(),
       .frame_only = true,
       .frame_only_resident_initial_quant = true,
+      .frame_only_resident_quantizer = true,
   };
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!CheckStatus(gjxl::PrepareAqEvaluation(*gpu, preparation, &prepared),
@@ -1147,6 +1148,9 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
     std::vector<float> actual_quant(block_count, -1.0f);
     std::vector<float> actual_strategy(block_count, -1.0f);
     std::vector<float> actual_pixel(pixel_count, -1.0f);
+    std::vector<int32_t> expected_raw(block_count);
+    float quant_dc = 0.0f;
+    gjxl::Quantizer expected_quantizer;
     if (!CheckStatus(
             gjxl::ComputeInitialQuantField(
                 image.View(), options,
@@ -1161,7 +1165,20 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
             "resident initial-quant CPU oracle")) {
       return false;
     }
+    if (!CheckStatus(
+            gjxl::ComputeInitialQuantDc(options.butteraugli_target, &quant_dc),
+            "resident initial-quant DC oracle") ||
+        !CheckStatus(
+            gjxl::CreateQuantizerFromField(
+                quant_dc,
+                {expected_quant.data(), kBlockExtent, kBlockExtent.width},
+                {expected_raw.data(), kBlockExtent, kBlockExtent.width},
+                &expected_quantizer),
+            "resident initial quantizer CPU oracle")) {
+      return false;
+    }
     const gjxl::GpuBackendStats before = gpu->stats();
+    gjxl::QuantizerParams actual_quantizer;
     if (!CheckStatus(
             prepared->ComputeInitialQuantization(
                 options,
@@ -1172,7 +1189,8 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
                                       kBlockExtent.width},
                     .pixel_mask = {actual_pixel.data(), kPixelExtent,
                                    kPixelExtent.width},
-                }),
+                },
+                &actual_quantizer, quant_dc),
             "resident initial-quant Metal execution")) {
       return false;
     }
@@ -1184,10 +1202,35 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
     if (after.successful_allocations != before.successful_allocations ||
         after.committed_submissions != before.committed_submissions + 1 ||
         quant_error > 2.0e-6 || strategy_error > 2.0e-6 ||
-        pixel_error > 2.0e-5) {
+        pixel_error > 2.0e-5 ||
+        actual_quantizer.global_scale !=
+            expected_quantizer.params().global_scale ||
+        actual_quantizer.quant_dc != expected_quantizer.params().quant_dc) {
       std::cerr << "Resident initial quantization differs: quant="
                 << quant_error << " strategy=" << strategy_error
                 << " pixel=" << pixel_error << '\n';
+      return false;
+    }
+    gjxl::ColorCorrelationMap color;
+    gjxl::VarDctEncoderFrame frame;
+    if (!CheckStatus(
+            gjxl::ComputeInitialColorCorrelationMap(image.View(), &color),
+            "resident initial-quant color map") ||
+        !CheckStatus(
+            prepared->EncodeFrame(
+                {
+                    .quantizer = actual_quantizer,
+                    .y_to_x = color.y_to_x_map(),
+                    .y_to_b = color.y_to_b_map(),
+                },
+                &frame),
+            "resident initial-quant frame readback") ||
+        !std::equal(expected_raw.begin(), expected_raw.end(),
+                    frame.raw_quant_field().data) ||
+        gpu->stats().successful_allocations != before.successful_allocations ||
+        gpu->stats().committed_submissions !=
+            before.committed_submissions + 2) {
+      std::cerr << "Resident raw quantization differs from CPU oracle\n";
       return false;
     }
   }
@@ -1201,10 +1244,15 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
       .pixel_mask = {failed_pixel.data(), kPixelExtent, kPixelExtent.width},
   };
   const gjxl::GpuBackendStats before_failure = gpu->stats();
+  float failure_quant_dc = 0.0f;
   if (!CheckStatus(
+          gjxl::ComputeInitialQuantDc(1.0f, &failure_quant_dc),
+          "resident initial-quant failure DC") ||
+      !CheckStatus(
           gjxl::metal_internal::FailNextMetalAqNumericForTesting(*prepared),
           "resident initial-quant numeric failure injection") ||
-      !ExpectCode(prepared->ComputeInitialQuantization({}, failure_output),
+      !ExpectCode(prepared->ComputeInitialQuantization(
+                      {}, failure_output, nullptr, failure_quant_dc),
                   gjxl::StatusCode::kDeviceError,
                   "resident initial-quant numeric failure") ||
       !std::ranges::all_of(failed_quant,
@@ -1217,7 +1265,8 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
           before_failure.successful_allocations ||
       gpu->stats().committed_submissions !=
           before_failure.committed_submissions + 1 ||
-      !ExpectCode(prepared->ComputeInitialQuantization({}, failure_output),
+      !ExpectCode(prepared->ComputeInitialQuantization(
+                      {}, failure_output, nullptr, failure_quant_dc),
                   gjxl::StatusCode::kFailedPrecondition,
                   "resident initial-quant reuse after numeric failure")) {
     return false;

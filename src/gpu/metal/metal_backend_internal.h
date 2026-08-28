@@ -69,6 +69,12 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_gradient;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_fuzzy_erosion;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_modulation;
+  NS::SharedPtr<MTL::ComputePipelineState> initial_quant_sort_prepare;
+  NS::SharedPtr<MTL::ComputePipelineState> initial_quant_sort_step;
+  NS::SharedPtr<MTL::ComputePipelineState> initial_quant_capture_median;
+  NS::SharedPtr<MTL::ComputePipelineState> initial_quant_deviation_prepare;
+  NS::SharedPtr<MTL::ComputePipelineState> initial_quant_finalize_quantizer;
+  NS::SharedPtr<MTL::ComputePipelineState> initial_quant_raw_quant;
   NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;

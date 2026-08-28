@@ -386,10 +386,77 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
               kNormalize * kFilter[3],
           },
       });
+
+  if (!self.frame_only_resident_quantizer_) return;
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_sort_prepare.get());
+  BindPlane(encoder, self.initial_quant_field_, 0);
+  BindPlane(encoder, self.initial_quant_sort_, 1);
+  encoder->setBytes(&self.initial_quant_selection_params_,
+                    sizeof(self.initial_quant_selection_params_), 2);
+  DispatchThreads1d(encoder, self.initial_quant_sort_count_);
+
+  const auto encode_sort = [&] {
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.initial_quant_sort_step.get());
+    for (size_t sequence = 2; sequence <= self.initial_quant_sort_count_;
+         sequence *= 2) {
+      for (size_t distance = sequence / 2; distance != 0; distance /= 2) {
+        const AqInitialQuantSortParams params{
+            static_cast<uint32_t>(distance),
+            static_cast<uint32_t>(sequence),
+            static_cast<uint32_t>(self.initial_quant_sort_count_),
+        };
+        BindPlane(encoder, self.initial_quant_sort_, 0);
+        encoder->setBytes(&params, sizeof(params), 1);
+        DispatchThreads1d(encoder, self.initial_quant_sort_count_);
+      }
+    }
+  };
+  encode_sort();
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_capture_median.get());
+  BindPlane(encoder, self.initial_quant_sort_, 0);
+  BindPlane(encoder, self.initial_quant_median_, 1);
+  encoder->setBytes(&self.initial_quant_selection_params_,
+                    sizeof(self.initial_quant_selection_params_), 2);
+  DispatchThreads1d(encoder, 1);
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_deviation_prepare.get());
+  BindPlane(encoder, self.initial_quant_field_, 0);
+  BindPlane(encoder, self.initial_quant_median_, 1);
+  BindPlane(encoder, self.initial_quant_sort_, 2);
+  encoder->setBytes(&self.initial_quant_selection_params_,
+                    sizeof(self.initial_quant_selection_params_), 3);
+  DispatchThreads1d(encoder, self.initial_quant_sort_count_);
+  encode_sort();
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_finalize_quantizer.get());
+  BindPlane(encoder, self.initial_quant_median_, 0);
+  BindPlane(encoder, self.initial_quant_sort_, 1);
+  BindPlane(encoder, self.initial_quantizer_params_, 2);
+  BindPlane(encoder, self.reconstruction_error_, 3);
+  encoder->setBytes(&self.initial_quant_selection_params_,
+                    sizeof(self.initial_quant_selection_params_), 4);
+  DispatchThreads1d(encoder, 1);
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_raw_quant.get());
+  BindPlane(encoder, self.initial_quant_field_, 0);
+  BindPlane(encoder, self.initial_quantizer_params_, 1);
+  BindPlane(encoder, self.raw_quant_, 2);
+  BindPlane(encoder, self.reconstruction_error_, 3);
+  encoder->setBytes(&self.initial_quant_selection_params_,
+                    sizeof(self.initial_quant_selection_params_), 4);
+  DispatchThreads2d(encoder, self.block_extent_);
 }
 
 Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
-    InitialQuantizationOptions options, InitialQuantFieldOutput output) {
+    InitialQuantizationOptions options, InitialQuantFieldOutput output,
+    QuantizerParams* quantizer, float quant_dc) {
 
   if (!frame_only_resident_initial_quant_) {
     return Status::FailedPrecondition(
@@ -405,6 +472,12 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
       output.pixel_mask.extent != coding_extent_) {
     return Status::InvalidArgument(
         "Resident initial quantization inputs or outputs are invalid");
+  }
+  if (frame_only_resident_quantizer_ &&
+      (!std::isfinite(quant_dc) || quant_dc <= 0.0f ||
+       quant_dc > static_cast<float>(kMaxQuantDc))) {
+    return Status::InvalidArgument(
+        "Resident initial quantizer DC input is invalid");
   }
 
   constexpr std::array<float, 4> kMulBase = {0.125f, 0.1f, 0.09f, 0.06f};
@@ -433,6 +506,12 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
   }
   initial_quant_modulation_params_.multiplier = scale * dampen;
   initial_quant_modulation_params_.addend = (1.0f - dampen) * base_level;
+  if (frame_only_resident_quantizer_) {
+    initial_quant_selection_params_.quant_dc = quant_dc;
+    initial_quant_selection_params_.scaled_quant_dc =
+        static_cast<uint32_t>(static_cast<int32_t>(
+            static_cast<double>(quant_dc * 4096.0f) * 1.6));
+  }
 
   Status status = BeginOperation();
   if (!status.ok()) return status;
@@ -445,6 +524,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     fail_next_upload_ = false;
     fail_next_numeric_ = false;
   }
+  resident_quantizer_ready_ = false;
   if (fail_upload) {
     Invalidate();
     return Status::DeviceError(
@@ -492,6 +572,14 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
         *backend_, initial_quant_pixel_mask_, last_initial_pixel_mask_.data(),
         last_initial_pixel_mask_.size() * sizeof(float));
   }
+  QuantizerParams device_quantizer;
+  if (status.ok() && frame_only_resident_quantizer_) {
+    status = CopyReadback(*backend_, initial_quantizer_params_,
+                          &device_quantizer, sizeof(device_quantizer));
+    if (status.ok()) {
+      status = Quantizer::Create(device_quantizer, &last_quantizer_);
+    }
+  }
   const auto valid_values = [](const std::vector<float>& values) {
     return std::ranges::all_of(values, [](float value) {
       return std::isfinite(value) && value > 0.0f;
@@ -511,6 +599,10 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
   CopyContiguousPlane(last_initial_quant_field_, output.quant_field);
   CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
   CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
+  if (frame_only_resident_quantizer_) {
+    resident_quantizer_ready_ = true;
+    if (quantizer != nullptr) *quantizer = device_quantizer;
+  }
   CompleteOperation();
   return Status::Ok();
 }
@@ -595,8 +687,10 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
                           quantized_dc_readback_.data(),
                           quantized_dc_readback_.size() * sizeof(int32_t));
   }
-  if (status.ok() && coefficient_decision_mode_ ==
-        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
+  if (status.ok() &&
+      (coefficient_decision_mode_ ==
+           AcCoefficientDecisionMode::kAdjustedSharedQuant ||
+       frame_only_resident_quantizer_)) {
     status = ReadbackRawQuant();
   }
   if (status.ok() && frame_only_resident_initial_cfl_) {

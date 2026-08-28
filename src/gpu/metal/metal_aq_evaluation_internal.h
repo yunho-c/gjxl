@@ -99,6 +99,24 @@ struct AqInitialQuantModulationParams {
   float addend;
 };
 
+struct AqInitialQuantSelectionParams {
+  uint32_t value_count;
+  uint32_t padded_count;
+  uint32_t median_index;
+  uint32_t quant_width;
+  uint32_t quant_height;
+  uint32_t quant_stride;
+  uint32_t raw_quant_stride;
+  uint32_t scaled_quant_dc;
+  float quant_dc;
+};
+
+struct AqInitialQuantSortParams {
+  uint32_t compare_distance;
+  uint32_t sequence_length;
+  uint32_t value_count;
+};
+
 struct AqBlockReductionParams {
   uint32_t source_width;
   uint32_t source_height;
@@ -208,7 +226,9 @@ public:
                      VarDctEncoderFrame *frame) override;
   Status ComputeInitialQuantization(
       InitialQuantizationOptions options,
-      InitialQuantFieldOutput output) override;
+      InitialQuantFieldOutput output,
+      QuantizerParams* quantizer = nullptr,
+      float quant_dc = 0.0f) override;
   Status EvaluateProfiled(AqEvaluationInput input, AqEvaluationOutput output,
                           MetalAqEvaluationProfile* profile);
   AqEvaluationMemoryStats memory_stats() const noexcept override;
@@ -327,6 +347,9 @@ private:
   DevicePlaneView initial_quant_field_;
   DevicePlaneView initial_quant_strategy_mask_;
   DevicePlaneView initial_quant_pixel_mask_;
+  DevicePlaneView initial_quant_sort_;
+  DevicePlaneView initial_quant_median_;
+  DevicePlaneView initial_quantizer_params_;
   DevicePlaneView block_distance_;
   DevicePlaneView distance_map_;
   DevicePlaneView score_;
@@ -350,6 +373,7 @@ private:
   size_t coefficient_value_count_ = 0;
   size_t anchor_count_ = 0;
   size_t maximum_coefficient_count_ = 0;
+  size_t initial_quant_sort_count_ = 0;
   size_t filter_scratch_image_count_ = 0;
   int final_filter_scratch_index_ = -1;
   AqEvaluationOptions options_;
@@ -368,6 +392,7 @@ private:
   AqInitialQuantGradientParams initial_quant_gradient_params_{};
   AqInitialQuantErosionParams initial_quant_erosion_params_{};
   AqInitialQuantModulationParams initial_quant_modulation_params_{};
+  AqInitialQuantSelectionParams initial_quant_selection_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};
   std::array<AqMaximumErrorReductionParams, 7>
     maximum_error_reduction_params_{};
@@ -414,6 +439,8 @@ private:
   bool frame_only_inverse_gaborish_ = false;
   bool frame_only_resident_initial_cfl_ = false;
   bool frame_only_resident_initial_quant_ = false;
+  bool frame_only_resident_quantizer_ = false;
+  bool resident_quantizer_ready_ = false;
 };
 
 } // namespace gjxl::metal_internal

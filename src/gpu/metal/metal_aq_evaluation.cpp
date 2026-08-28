@@ -68,6 +68,12 @@ static_assert(sizeof(AqInitialQuantErosionParams) == 44);
 static_assert(std::is_standard_layout_v<AqInitialQuantModulationParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialQuantModulationParams>);
 static_assert(sizeof(AqInitialQuantModulationParams) == 24);
+static_assert(std::is_standard_layout_v<AqInitialQuantSelectionParams>);
+static_assert(std::is_trivially_copyable_v<AqInitialQuantSelectionParams>);
+static_assert(sizeof(AqInitialQuantSelectionParams) == 36);
+static_assert(std::is_standard_layout_v<AqInitialQuantSortParams>);
+static_assert(std::is_trivially_copyable_v<AqInitialQuantSortParams>);
+static_assert(sizeof(AqInitialQuantSortParams) == 12);
 static_assert(std::is_standard_layout_v<AqBlockReductionParams>);
 static_assert(std::is_trivially_copyable_v<AqBlockReductionParams>);
 static_assert(sizeof(AqBlockReductionParams) == 40);
@@ -416,6 +422,8 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       preparation.frame_only_resident_initial_cfl;
   frame_only_resident_initial_quant_ =
       preparation.frame_only_resident_initial_quant;
+  frame_only_resident_quantizer_ =
+      preparation.frame_only_resident_quantizer;
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
@@ -425,6 +433,17 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     : static_cast<int>((filter_stage_count - 1) % 2);
   (void)block_extent_.try_area(&block_count_);
   (void)coding_extent_.try_area(&pixel_count_);
+  if (frame_only_resident_quantizer_) {
+    initial_quant_sort_count_ = 1;
+    while (initial_quant_sort_count_ < block_count_) {
+      if (initial_quant_sort_count_ >
+          std::numeric_limits<uint32_t>::max() / 2) {
+        return Status::InvalidArgument(
+            "Resident initial-quant sort dimensions are too large");
+      }
+      initial_quant_sort_count_ *= 2;
+    }
+  }
   if (pixel_count_ >
       static_cast<size_t>(std::numeric_limits<uint32_t>::max()) / 3) {
     return Status::InvalidArgument(
@@ -643,6 +662,18 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
                              coding_extent_.width, &staging_bytes);
     if (!status.ok()) return status;
+    if (frame_only_resident_quantizer_) {
+      status = AddPlannedPlane(
+        DeviceElementType::kF32, {initial_quant_sort_count_, 1},
+        initial_quant_sort_count_, &staging_bytes);
+      if (!status.ok()) return status;
+      status = AddPlannedPlane(
+        DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
+      if (!status.ok()) return status;
+      status = AddPlannedPlane(
+        DeviceElementType::kI32, {2, 1}, 2, &staging_bytes);
+      if (!status.ok()) return status;
+    }
   }
   for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -812,6 +843,20 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       DeviceElementType::kF32, coding_extent_, coding_extent_.width,
       kBufferAlignment, &initial_quant_pixel_mask_);
     if (!status.ok()) return status;
+    if (frame_only_resident_quantizer_) {
+      status = staging_.AllocatePlane(
+        DeviceElementType::kF32, {initial_quant_sort_count_, 1},
+        initial_quant_sort_count_, kBufferAlignment, &initial_quant_sort_);
+      if (!status.ok()) return status;
+      status = staging_.AllocatePlane(
+        DeviceElementType::kF32, {1, 1}, 1, kBufferAlignment,
+        &initial_quant_median_);
+      if (!status.ok()) return status;
+      status = staging_.AllocatePlane(
+        DeviceElementType::kI32, {2, 1}, 2, kBufferAlignment,
+        &initial_quantizer_params_);
+      if (!status.ok()) return status;
+    }
   }
   for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -1049,6 +1094,19 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         0.0f,
         0.0f,
     };
+    if (frame_only_resident_quantizer_) {
+      initial_quant_selection_params_ = {
+          static_cast<uint32_t>(block_count_),
+          static_cast<uint32_t>(initial_quant_sort_count_),
+          static_cast<uint32_t>(block_count_ / 2),
+          static_cast<uint32_t>(block_extent_.width),
+          static_cast<uint32_t>(block_extent_.height),
+          static_cast<uint32_t>(initial_quant_field_.row_stride),
+          static_cast<uint32_t>(raw_quant_.row_stride),
+          0,
+          0.0f,
+      };
+    }
   }
 
   gaborish_params_ = {
@@ -1929,6 +1987,12 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
     return Status::InvalidArgument(
         "Resident initial quantization requires frame-only preparation");
   }
+  if (preparation.frame_only_resident_quantizer &&
+      (!preparation.frame_only ||
+       !preparation.frame_only_resident_initial_quant)) {
+    return Status::InvalidArgument(
+        "Resident quantizer requires resident frame-only initial quantization");
+  }
   switch (preparation.coefficient_decision_mode) {
     case AcCoefficientDecisionMode::kAdjustedSharedQuant:
     case AcCoefficientDecisionMode::kFixedRawQuant:
@@ -1992,15 +2056,22 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
     return Status::InvalidArgument(
         "Resident initial CfL does not accept exact coefficients");
   }
+  if (frame_only_resident_quantizer_ &&
+      input.exact_coefficients != nullptr) {
+    return Status::InvalidArgument(
+        "Resident initial quantizer does not accept exact coefficients");
+  }
   const bool valid_host_cfl =
       ValidHostPlaneLayout(input.y_to_x) &&
       input.y_to_x.extent == tile_extent_ &&
       ValidHostPlaneLayout(input.y_to_b) &&
       input.y_to_b.extent == tile_extent_;
-  if (!ValidHostPlaneLayout(input.raw_quant_field) ||
-      input.raw_quant_field.extent != block_extent_ ||
-      !ValidHostPlaneLayout(input.epf_inverse_sigma) ||
-      input.epf_inverse_sigma.extent != block_extent_ ||
+  const bool valid_host_quant =
+      ValidHostPlaneLayout(input.raw_quant_field) &&
+      input.raw_quant_field.extent == block_extent_ &&
+      ValidHostPlaneLayout(input.epf_inverse_sigma) &&
+      input.epf_inverse_sigma.extent == block_extent_;
+  if ((!frame_only_resident_quantizer_ && !valid_host_quant) ||
       (!frame_only_resident_initial_cfl_ && !valid_host_cfl)) {
     return Status::InvalidArgument(
         "Prepared AQ evaluation input geometry is invalid");
@@ -2010,14 +2081,27 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
   if (!status.ok()) {
     return status;
   }
-  for (size_t y = 0; y < block_extent_.height; ++y) {
-    for (size_t x = 0; x < block_extent_.width; ++x) {
-      const int32_t raw_quant = input.raw_quant_field.Row(y)[x];
-      const float inverse_sigma = input.epf_inverse_sigma.Row(y)[x];
-      if (raw_quant < 1 || raw_quant > kMaxRawQuant ||
-          !std::isfinite(inverse_sigma) || inverse_sigma >= 0.0f) {
-        return Status::InvalidArgument(
-            "Prepared AQ quant or EPF input value is invalid");
+  if (frame_only_resident_quantizer_) {
+    if (!resident_quantizer_ready_) {
+      return Status::FailedPrecondition(
+          "Resident initial quantizer has not been computed");
+    }
+    if (input.quantizer.global_scale !=
+            last_quantizer_.params().global_scale ||
+        input.quantizer.quant_dc != last_quantizer_.params().quant_dc) {
+      return Status::InvalidArgument(
+          "Resident initial quantizer parameters do not match device state");
+    }
+  } else {
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        const int32_t raw_quant = input.raw_quant_field.Row(y)[x];
+        const float inverse_sigma = input.epf_inverse_sigma.Row(y)[x];
+        if (raw_quant < 1 || raw_quant > kMaxRawQuant ||
+            !std::isfinite(inverse_sigma) || inverse_sigma >= 0.0f) {
+          return Status::InvalidArgument(
+              "Prepared AQ quant or EPF input value is invalid");
+        }
       }
     }
   }
@@ -2112,8 +2196,11 @@ Status MetalPreparedAqEvaluation::BeginOperation(bool profiling_reserved) {
 }
 
 Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
-  Status status = UploadPlane(*backend_, input.raw_quant_field, raw_quant_);
-  if (status.ok()) {
+  Status status = Status::Ok();
+  if (!frame_only_resident_quantizer_) {
+    status = UploadPlane(*backend_, input.raw_quant_field, raw_quant_);
+  }
+  if (status.ok() && !frame_only_resident_quantizer_) {
     status = UploadPlane(*backend_, input.epf_inverse_sigma, inverse_sigma_);
   }
   if (status.ok() && !frame_only_resident_initial_cfl_) {
@@ -2125,7 +2212,7 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   if (status.ok()) {
     status = Quantizer::Create(input.quantizer, &last_quantizer_);
   }
-  if (status.ok()) {
+  if (status.ok() && !frame_only_resident_quantizer_) {
     for (size_t y = 0; y < block_extent_.height; ++y) {
       std::copy_n(
         input.raw_quant_field.Row(y), block_extent_.width,
@@ -2517,7 +2604,7 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      13>
+      19>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
@@ -2532,6 +2619,18 @@ Status CreateAqPipelines(
            &pipelines.initial_quant_fuzzy_erosion},
           {"gjxl_aq_initial_quant_modulation",
            &pipelines.initial_quant_modulation},
+          {"gjxl_aq_initial_quant_sort_prepare",
+           &pipelines.initial_quant_sort_prepare},
+          {"gjxl_aq_initial_quant_sort_step",
+           &pipelines.initial_quant_sort_step},
+          {"gjxl_aq_initial_quant_capture_median",
+           &pipelines.initial_quant_capture_median},
+          {"gjxl_aq_initial_quant_deviation_prepare",
+           &pipelines.initial_quant_deviation_prepare},
+          {"gjxl_aq_initial_quant_finalize_quantizer",
+           &pipelines.initial_quant_finalize_quantizer},
+          {"gjxl_aq_initial_quant_raw_quant",
+           &pipelines.initial_quant_raw_quant},
           {"gjxl_aq_gather_transform_pixels",
            &pipelines.gather_transform_pixels},
           {"gjxl_aq_encode_reconstruction_coefficients",

@@ -83,6 +83,24 @@ struct AqInitialQuantModulationParams {
   float addend;
 };
 
+struct AqInitialQuantSelectionParams {
+  uint value_count;
+  uint padded_count;
+  uint median_index;
+  uint quant_width;
+  uint quant_height;
+  uint quant_stride;
+  uint raw_quant_stride;
+  uint scaled_quant_dc;
+  float quant_dc;
+};
+
+struct AqInitialQuantSortParams {
+  uint compare_distance;
+  uint sequence_length;
+  uint value_count;
+};
+
 struct AqQuantizationProbeParams {
   uint coefficient_count;
   uint strategy;
@@ -646,6 +664,118 @@ kernel void gjxl_aq_initial_quant_modulation(
   if (!isfinite(gamma_overall) || gamma_overall <= 0.0f ||
       !isfinite(result) || result <= 0.0f) {
     atomic_fetch_or_explicit(error, 8192u, memory_order_relaxed);
+  }
+}
+
+kernel void gjxl_aq_initial_quant_sort_prepare(
+  device const float* quant_field [[buffer(0)]],
+  device float* sort_values [[buffer(1)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(2)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index >= params.padded_count) return;
+  if (index < params.value_count) {
+    const uint y = index / params.quant_width;
+    const uint x = index - y * params.quant_width;
+    sort_values[index] = quant_field[y * params.quant_stride + x];
+  } else {
+    sort_values[index] = INFINITY;
+  }
+}
+
+kernel void gjxl_aq_initial_quant_sort_step(
+  device float* values [[buffer(0)]],
+  constant AqInitialQuantSortParams& params [[buffer(1)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index >= params.value_count) return;
+  const uint partner = index ^ params.compare_distance;
+  if (partner <= index || partner >= params.value_count) return;
+  const bool ascending = (index & params.sequence_length) == 0u;
+  const float left = values[index];
+  const float right = values[partner];
+  if ((ascending && left > right) || (!ascending && left < right)) {
+    values[index] = right;
+    values[partner] = left;
+  }
+}
+
+kernel void gjxl_aq_initial_quant_capture_median(
+  device const float* sort_values [[buffer(0)]],
+  device float* median [[buffer(1)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(2)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index == 0u) median[0] = sort_values[params.median_index];
+}
+
+kernel void gjxl_aq_initial_quant_deviation_prepare(
+  device const float* quant_field [[buffer(0)]],
+  device const float* median [[buffer(1)]],
+  device float* sort_values [[buffer(2)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(3)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index >= params.padded_count) return;
+  if (index < params.value_count) {
+    const uint y = index / params.quant_width;
+    const uint x = index - y * params.quant_width;
+    sort_values[index] =
+      abs(quant_field[y * params.quant_stride + x] - median[0]);
+  } else {
+    sort_values[index] = INFINITY;
+  }
+}
+
+kernel void gjxl_aq_initial_quant_finalize_quantizer(
+  device const float* median [[buffer(0)]],
+  device const float* sorted_deviations [[buffer(1)]],
+  device uint* quantizer_params [[buffer(2)]],
+  device atomic_uint* error [[buffer(3)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(4)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index != 0u) return;
+  const float median_value = median[0];
+  const float deviation = sorted_deviations[params.median_index];
+  float scale = 65536.0f * (median_value - deviation) / 5.0f;
+  scale = clamp(scale, 1.0f, 32768.0f);
+  uint global_scale = uint(scale);
+  if (global_scale > params.scaled_quant_dc) {
+    global_scale = max(1u, params.scaled_quant_dc);
+  }
+  const float inverse_global_scale = 65536.0f / float(global_scale);
+  const float quant_dc = min(
+    65536.0f, params.quant_dc * inverse_global_scale + 0.5f);
+  quantizer_params[0] = global_scale;
+  quantizer_params[1] = uint(quant_dc);
+  if (!isfinite(median_value) || median_value <= 0.0f ||
+      !isfinite(deviation) || deviation < 0.0f || global_scale == 0u ||
+      global_scale > 32768u || quantizer_params[1] == 0u ||
+      quantizer_params[1] > 65536u) {
+    atomic_fetch_or_explicit(error, 32768u, memory_order_relaxed);
+  }
+}
+
+kernel void gjxl_aq_initial_quant_raw_quant(
+  device const float* quant_field [[buffer(0)]],
+  device const uint* quantizer_params [[buffer(1)]],
+  device int* raw_quant [[buffer(2)]],
+  device atomic_uint* error [[buffer(3)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(4)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.quant_width ||
+      position.y >= params.quant_height) return;
+  const float inverse_global_scale =
+    65536.0f / float(quantizer_params[0]);
+  const float value = quant_field[
+    position.y * params.quant_stride + position.x] *
+    inverse_global_scale + 0.5f;
+  const int raw = int(clamp(value, 1.0f, 256.0f));
+  raw_quant[position.y * params.raw_quant_stride + position.x] = raw;
+  if (!isfinite(value) || raw < 1 || raw > 256) {
+    atomic_fetch_or_explicit(error, 65536u, memory_order_relaxed);
   }
 }
 

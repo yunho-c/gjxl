@@ -587,6 +587,37 @@ single-process medians, this is a directional `1.48x` public-boundary and
 `1.84x` pipeline improvement. Retained claims still wait for the final balanced
 multi-process audit.
 
+### Resident median, MAD, and raw quantization
+
+**Status:** complete for maximum-throughput frame-only encoding.
+
+The maximum-throughput decision path no longer consumes the host copy of the
+initial block field. Metal pads the positive block values to a power of two,
+performs deterministic bitonic selection for the upper median, repeats the
+selection over absolute deviations, derives the serialized quantizer
+parameters, and constructs the raw-quant field in the same initial-quant
+submission. Only the scalar DC-quant policy input is computed on the CPU. The
+two quantizer integers cross the boundary for frame metadata; raw quant remains
+resident until coefficient coding and its final codestream-state readback.
+
+The existing initial quant, strategy-mask, and pixel-mask host copies remain so
+the diagnostic pipeline output contract is unchanged, but none feeds the
+maximum-throughput decision. The frame submission also omits the initial
+raw-quant and EPF uploads: fixed DCT8 coverage lets resident
+`AdjustQuantBlockAC` rewrite every raw value and corresponding inverse sigma.
+Direct tests compare quantizer parameters and every initial raw-quant value
+exactly with the CPU median/MAD oracle across flat and structured inputs and two
+targets. The edge-geometry integration fixture retains exact final frame and
+codestream bytes.
+
+One Apple M4 Pro Release process with one warmup and three CPU/Metal pairs
+measured a public Metal median of `81.219 ms` (`76.894-82.208 ms`) and a
+quantization-pipeline median of `40.666 ms` (`37.408-43.346 ms`). The paired
+speedup median was `76.484x`, and the padded-1080p output remained `765599`
+bytes. Relative to the bounded-CPU-decision slice, the directional medians
+improved by `1.02x` publicly and `1.07x` inside the pipeline. These remain
+single-process checkpoints rather than the final retained claim.
+
 ## Suggested milestones
 
 ### RC0: Observable best-effort size control

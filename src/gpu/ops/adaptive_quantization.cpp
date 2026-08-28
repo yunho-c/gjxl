@@ -734,6 +734,25 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
     return Status::InvalidArgument(
       "Resident frame-only frontend inputs or outputs are invalid");
   }
+  size_t block_count = 0;
+  size_t dct8_count = 0;
+  Status strategy_status = strategies.ForEachAnchor(
+      [&](size_t, size_t, AcStrategyType strategy) {
+        if (strategy != AcStrategyType::kDct8) {
+          return Status::InvalidArgument(
+            "Resident frame-only frontend requires DCT8 strategies");
+        }
+        ++dct8_count;
+        return Status::Ok();
+      });
+  if (!strategy_status.ok() ||
+      !strategies.extent().try_area(&block_count) ||
+      dct8_count != block_count) {
+    return strategy_status.ok()
+      ? Status::InvalidArgument(
+          "Resident frame-only frontend requires a complete DCT8 grid")
+      : strategy_status;
+  }
   try {
     std::unique_ptr<PreparedAqEvaluation> prepared;
     Status status = PrepareAqEvaluation(
@@ -748,13 +767,18 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
         .frame_only_inverse_gaborish = options.profile.loop_filter.gaborish,
         .frame_only_resident_initial_cfl = true,
         .frame_only_resident_initial_quant = true,
+        .frame_only_resident_quantizer = true,
         .coefficient_decision_mode =
           AcCoefficientDecisionMode::kAdjustedSharedQuant,
       },
       &prepared);
     if (!status.ok()) return status;
+    float quant_dc = 0.0f;
+    status = ComputeInitialQuantDc(options.butteraugli_target, &quant_dc);
+    if (!status.ok()) return status;
+    QuantizerParams quantizer;
     status = prepared->ComputeInitialQuantization(
-      initial_options, initial_output);
+      initial_options, initial_output, &quantizer, quant_dc);
     if (!status.ok()) return status;
     const ConstPlaneF32View initial_quant{
       initial_output.quant_field.data,
@@ -765,9 +789,19 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
       original_linear_rgb, opsin, strategies, initial_quant,
       epf_sharpness, options);
     if (!status.ok()) return status;
-    return FinishGpuFrameOnlyQuantization(
-      *prepared, strategies, initial_quant, epf_sharpness,
-      nullptr, options, output);
+    VarDctEncoderFrame candidate;
+    status = prepared->EncodeFrame(
+      {
+        .quantizer = quantizer,
+      },
+      &candidate);
+    if (!status.ok()) return status;
+    for (size_t y = 0; y < strategies.extent().height; ++y) {
+      std::copy_n(initial_quant.Row(y), strategies.extent().width,
+                  output.quant_field.Row(y));
+    }
+    *output.frame = std::move(candidate);
+    return Status::Ok();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate resident frame-only frontend storage");
