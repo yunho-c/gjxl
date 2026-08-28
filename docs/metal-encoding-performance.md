@@ -102,6 +102,14 @@ prints every profile boundary, and reports paired speedups. The broader
 Exit criterion: balanced profiles show a stable reduction in exact-coefficient
 Metal AQ and public-workflow time with exact output.
 
+The first retained P1 change replaces per-anchor coefficient, quantized-value,
+pixel, and DC allocations with one maximum-strategy scratch arena per coding
+call. Three interleaved A/B pairs on the padded 1080p workload used two warmups
+and nine samples per process. Baseline/reused-scratch medians were
+`96.076/93.288`, `96.920/92.912`, and `94.055/93.413` ms, or directional wins
+of approximately `0.7-4.3%`. Sample ranges overlapped, so this supports the
+narrow allocation change rather than a complete-pipeline speedup claim.
+
 ### P2. Provide a fast GPU coefficient decision path
 
 - Keep the current float fully resident implementation as the throughput

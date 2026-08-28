@@ -97,7 +97,7 @@ void CopyPixelsFromImage(
   size_t block_x,
   size_t block_y,
   Extent2D pixel_extent,
-  std::vector<float>* pixels) {
+  std::span<float> pixels) {
 
   for (size_t y = 0; y < pixel_extent.height; ++y) {
     const float* source = plane.Row(
@@ -106,12 +106,12 @@ void CopyPixelsFromImage(
     std::copy_n(
       source,
       pixel_extent.width,
-      pixels->data() + y * pixel_extent.width);
+      pixels.data() + y * pixel_extent.width);
   }
 }
 
 void CopyPixelsToImage(
-  const std::vector<float>& pixels,
+  std::span<const float> pixels,
   size_t block_x,
   size_t block_y,
   Extent2D pixel_extent,
@@ -208,6 +208,13 @@ Status ComputeQuantizedCoefficients(
       group_count * 3 * kVarDctAcGroupCoefficientCapacity,
       0);
 
+    constexpr size_t kMaxCoefficientCount = 32 * 32;
+    constexpr size_t kMaxDcCount = 4 * 4;
+    std::array<std::array<float, kMaxCoefficientCount>, 3> coefficients{};
+    std::array<std::array<int32_t, kMaxCoefficientCount>, 3> quantized{};
+    std::array<float, kMaxCoefficientCount> pixels{};
+    std::array<float, kMaxDcCount> dc{};
+
     status = input.strategies->ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
         const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
@@ -228,22 +235,24 @@ Status ComputeQuantizedCoefficients(
         const size_t group_index =
           group_y * result.ac_group_extent_.width + group_x;
         const size_t coefficient_count = info->coefficient_count();
-        std::array<std::vector<float>, 3> coefficients;
-        std::array<std::vector<int32_t>, 3> quantized;
-        std::vector<float> pixels(coefficient_count);
+        if (coefficient_count > kMaxCoefficientCount) {
+          return Status::Internal(
+            "Coefficient coding strategy exceeds its scratch capacity");
+        }
+        const std::span<float> pixel_span{pixels.data(), coefficient_count};
         for (size_t channel = 0; channel < coefficients.size(); ++channel) {
-          coefficients[channel].resize(coefficient_count);
-          quantized[channel].resize(coefficient_count);
+          const std::span<float> coefficient_span{
+            coefficients[channel].data(), coefficient_count};
           CopyPixelsFromImage(
             opsin.plane[channel],
             block_x,
             block_y,
             info->pixel_extent(),
-            &pixels);
+            pixel_span);
           Status transform_status = ForwardDctCpu(
             strategy,
-            pixels,
-            coefficients[channel]);
+            pixel_span,
+            coefficient_span);
           if (!transform_status.ok()) {
             return transform_status;
           }
@@ -264,7 +273,10 @@ Status ComputeQuantizedCoefficients(
             MatrixMultiplier(2, profile),
           };
           const std::array<std::span<const float>, 3> coefficient_views = {
-            coefficients[0], coefficients[1], coefficients[2]};
+            std::span<const float>{coefficients[0].data(), coefficient_count},
+            std::span<const float>{coefficients[1].data(), coefficient_count},
+            std::span<const float>{coefficients[2].data(), coefficient_count},
+          };
           block_status = SelectAdjustedAcQuantization(
             strategy,
             result.quantizer_,
@@ -284,16 +296,20 @@ Status ComputeQuantizedCoefficients(
 
         // Y is round-trip dequantized before removing its prediction from
         // X/B, exactly as in libjxl's VarDCT coefficient path.
-        std::vector<float> y_dc(
-          info->covered_blocks.width * info->covered_blocks.height);
+        const size_t dc_count =
+          info->covered_blocks.width * info->covered_blocks.height;
+        if (dc_count > dc.size()) {
+          return Status::Internal(
+            "Coefficient coding strategy exceeds its DC scratch capacity");
+        }
         const PlaneF32View y_dc_view{
-          .data = y_dc.data(),
+          .data = dc.data(),
           .extent = info->covered_blocks,
           .stride = info->covered_blocks.width,
         };
         block_status = ConvertLowFrequenciesToDc(
           strategy,
-          coefficients[1],
+          {coefficients[1].data(), coefficient_count},
           y_dc_view);
         if (!block_status.ok()) {
           return block_status;
@@ -302,7 +318,7 @@ Status ComputeQuantizedCoefficients(
           for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
             result.dc_[1][
               (block_y + dy) * block_extent.width + block_x + dx] =
-                y_dc[dy * info->covered_blocks.width + dx];
+                dc[dy * info->covered_blocks.width + dx];
           }
         }
 
@@ -312,15 +328,15 @@ Status ComputeQuantizedCoefficients(
               strategy,
               result.quantizer_,
               quantization_decision,
-              coefficients[1],
-              quantized[1])
+              {coefficients[1].data(), coefficient_count},
+              {quantized[1].data(), coefficient_count})
           : QuantizeAcBlock(
               strategy,
               result.quantizer_,
               initial_raw_quant,
               {.channel = XybChannel::kY},
-              coefficients[1],
-              quantized[1]);
+              {coefficients[1].data(), coefficient_count},
+              {quantized[1].data(), coefficient_count});
         if (!block_status.ok()) {
           return block_status;
         }
@@ -329,8 +345,8 @@ Status ComputeQuantizedCoefficients(
           result.quantizer_,
           quantization_decision.raw_quant,
           {.channel = XybChannel::kY},
-          quantized[1],
-          coefficients[1]);
+          {quantized[1].data(), coefficient_count},
+          {coefficients[1].data(), coefficient_count});
         if (!block_status.ok()) {
           return block_status;
         }
@@ -343,8 +359,6 @@ Status ComputeQuantizedCoefficients(
         }
 
         for (size_t channel : {size_t{0}, size_t{2}}) {
-          std::vector<float> dc(
-            info->covered_blocks.width * info->covered_blocks.height);
           const PlaneF32View dc_view{
             .data = dc.data(),
             .extent = info->covered_blocks,
@@ -352,7 +366,7 @@ Status ComputeQuantizedCoefficients(
           };
           block_status = ConvertLowFrequenciesToDc(
             strategy,
-            coefficients[channel],
+            {coefficients[channel].data(), coefficient_count},
             dc_view);
           if (!block_status.ok()) {
             return block_status;
@@ -373,8 +387,8 @@ Status ComputeQuantizedCoefficients(
               .channel = kChannels[channel],
               .matrix_multiplier = MatrixMultiplier(channel, profile),
             },
-            coefficients[channel],
-            quantized[channel]);
+            {coefficients[channel].data(), coefficient_count},
+            {quantized[channel].data(), coefficient_count});
           if (!block_status.ok()) {
             return block_status;
           }
@@ -388,9 +402,9 @@ Status ComputeQuantizedCoefficients(
             "VarDCT AC group coefficient storage overflowed");
         }
         for (size_t channel = 0; channel < 3; ++channel) {
-          std::copy(
+          std::copy_n(
             quantized[channel].begin(),
-            quantized[channel].end(),
+            coefficient_count,
             result.ac_coefficients_.begin() +
               result.AcGroupChannelOffset(group_index, channel) +
               group_offset);
