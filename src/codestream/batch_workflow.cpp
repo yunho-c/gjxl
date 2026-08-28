@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codestream/batch_workflow.h"
+#include "codestream/batch_workflow_internal.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -18,16 +19,36 @@ namespace {
 
 void EncodeOne(
   const VarDctBatchEncodingRequest& request,
-  VarDctBatchEncodingResult* result) noexcept {
+  VarDctBatchEncodingResult* result,
+  codestream_internal::VarDctBatchEncodingStageProfile* profile,
+  size_t worker_index) noexcept {
 
   VarDctBatchEncodingResult candidate;
   try {
-    candidate.status = EncodeLinearRgbVarDctCodestreamProfiled(
-      request.linear_rgb,
-      request.options,
-      &candidate.codestream,
-      &candidate.summary,
-      &candidate.timing);
+    if (profile == nullptr) {
+      candidate.status = EncodeLinearRgbVarDctCodestreamProfiled(
+        request.linear_rgb,
+        request.options,
+        &candidate.codestream,
+        &candidate.summary,
+        &candidate.timing);
+    } else {
+      codestream_internal::VarDctEncodingStageProfile candidate_profile;
+      candidate.status =
+        codestream_internal::EncodeLinearRgbVarDctCodestreamStageProfiled(
+          request.linear_rgb,
+          request.options,
+          &candidate.codestream,
+          &candidate.summary,
+          &candidate.timing,
+          &candidate_profile);
+      if (candidate.status.ok()) {
+        *profile = {
+          .worker_index = worker_index,
+          .encoding = candidate_profile,
+        };
+      }
+    }
   } catch (const std::bad_alloc&) {
     candidate.status = Status::OutOfMemory(
       "Unable to allocate batch image encoding storage");
@@ -59,7 +80,7 @@ public:
     try {
       workers_.reserve(max_in_flight_);
       for (size_t index = 0; index < max_in_flight_; ++index) {
-        workers_.emplace_back([this] { WorkerLoop(); });
+        workers_.emplace_back([this, index] { WorkerLoop(index); });
       }
     } catch (const std::bad_alloc&) {
       Stop();
@@ -83,7 +104,9 @@ public:
 
   [[nodiscard]] Status Encode(
     std::span<const VarDctBatchEncodingRequest> requests,
-    std::vector<VarDctBatchEncodingResult>* results) {
+    std::vector<VarDctBatchEncodingResult>* results,
+    std::vector<codestream_internal::VarDctBatchEncodingStageProfile>*
+      profiles) {
 
     if (results == nullptr) {
       return Status::InvalidArgument(
@@ -91,8 +114,13 @@ public:
     }
 
     std::vector<VarDctBatchEncodingResult> candidate;
+    std::vector<codestream_internal::VarDctBatchEncodingStageProfile>
+      candidate_profiles;
     try {
       candidate.resize(requests.size());
+      if (profiles != nullptr) {
+        candidate_profiles.resize(requests.size());
+      }
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate image batch results");
@@ -104,6 +132,9 @@ public:
     std::unique_lock encode_lock(encode_mutex_);
     if (requests.empty()) {
       *results = std::move(candidate);
+      if (profiles != nullptr) {
+        *profiles = std::move(candidate_profiles);
+      }
       return Status::Ok();
     }
 
@@ -111,6 +142,7 @@ public:
       std::lock_guard work_lock(work_mutex_);
       requests_ = requests;
       results_ = &candidate;
+      profiles_ = profiles == nullptr ? nullptr : &candidate_profiles;
       next_index_.store(0, std::memory_order_relaxed);
       remaining_workers_ = workers_.size();
       ++generation_;
@@ -124,9 +156,13 @@ public:
       });
       requests_ = {};
       results_ = nullptr;
+      profiles_ = nullptr;
     }
 
     *results = std::move(candidate);
+    if (profiles != nullptr) {
+      *profiles = std::move(candidate_profiles);
+    }
     return Status::Ok();
   }
 
@@ -145,11 +181,13 @@ private:
     workers_.clear();
   }
 
-  void WorkerLoop() noexcept {
+  void WorkerLoop(size_t worker_index) noexcept {
     size_t observed_generation = 0;
     while (true) {
       std::span<const VarDctBatchEncodingRequest> requests;
       std::vector<VarDctBatchEncodingResult>* results = nullptr;
+      std::vector<codestream_internal::VarDctBatchEncodingStageProfile>*
+        profiles = nullptr;
       {
         std::unique_lock lock(work_mutex_);
         work_available_.wait(lock, [&] {
@@ -161,6 +199,7 @@ private:
         observed_generation = generation_;
         requests = requests_;
         results = results_;
+        profiles = profiles_;
       }
 
       while (true) {
@@ -169,7 +208,9 @@ private:
         if (index >= requests.size()) {
           break;
         }
-        EncodeOne(requests[index], &(*results)[index]);
+        EncodeOne(
+          requests[index], &(*results)[index],
+          profiles == nullptr ? nullptr : &(*profiles)[index], worker_index);
       }
 
       {
@@ -192,6 +233,8 @@ private:
   size_t remaining_workers_ = 0;
   std::span<const VarDctBatchEncodingRequest> requests_;
   std::vector<VarDctBatchEncodingResult>* results_ = nullptr;
+  std::vector<codestream_internal::VarDctBatchEncodingStageProfile>*
+    profiles_ = nullptr;
   std::atomic<size_t> next_index_{0};
 };
 
@@ -239,7 +282,30 @@ Status VarDctBatchEncoder::Encode(
   std::span<const VarDctBatchEncodingRequest> requests,
   std::vector<VarDctBatchEncodingResult>* results) {
 
-  return impl_->Encode(requests, results);
+  return impl_->Encode(requests, results, nullptr);
+}
+
+Status codestream_internal::VarDctBatchProfileAccess::Encode(
+  VarDctBatchEncoder& encoder,
+  std::span<const VarDctBatchEncodingRequest> requests,
+  std::vector<VarDctBatchEncodingResult>* results,
+  std::vector<VarDctBatchEncodingStageProfile>* profiles) {
+
+  if (profiles == nullptr) {
+    return Status::InvalidArgument(
+      "Image batch stage-profile output is null");
+  }
+  return encoder.impl_->Encode(requests, results, profiles);
+}
+
+Status codestream_internal::EncodeVarDctBatchProfiled(
+  VarDctBatchEncoder& encoder,
+  std::span<const VarDctBatchEncodingRequest> requests,
+  std::vector<VarDctBatchEncodingResult>* results,
+  std::vector<VarDctBatchEncodingStageProfile>* profiles) {
+
+  return VarDctBatchProfileAccess::Encode(
+    encoder, requests, results, profiles);
 }
 
 }  // namespace gjxl

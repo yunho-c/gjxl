@@ -19,6 +19,7 @@
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/ops/aq_evaluation_profile_internal.h"
 #include "gpu/scratch.h"
 
 namespace gjxl::metal_internal {
@@ -213,7 +214,9 @@ struct AqAnchor {
   size_t index_in_batch = 0;
 };
 
-class MetalPreparedAqEvaluation final : public PreparedAqEvaluation {
+class MetalPreparedAqEvaluation final
+    : public PreparedAqEvaluation,
+      public gpu_profile_internal::ProfiledFrameEncoder {
 public:
   explicit MetalPreparedAqEvaluation(MetalBackend &backend);
   ~MetalPreparedAqEvaluation() override;
@@ -224,11 +227,20 @@ public:
                      ConstPlaneU8View epf_sharpness) override;
   Status EncodeFrame(AqEvaluationInput input,
                      VarDctEncoderFrame *frame) override;
+  Status EncodeFrameProfiled(
+      AqEvaluationInput input, VarDctEncoderFrame* frame,
+      gpu_profile_internal::FrameEncodingProfile* profile) override;
   Status ComputeInitialQuantization(
       InitialQuantizationOptions options,
       InitialQuantFieldOutput output,
       QuantizerParams* quantizer = nullptr,
       float quant_dc = 0.0f) override;
+  Status ComputeInitialQuantizationProfiled(
+      InitialQuantizationOptions options,
+      InitialQuantFieldOutput output,
+      QuantizerParams* quantizer,
+      float quant_dc,
+      gpu_profile_internal::FrameEncodingProfile* profile) override;
   Status GetResidentAcStrategyInputs(
       ResidentAcStrategyInputs* inputs) override;
   Status EvaluateProfiled(AqEvaluationInput input, AqEvaluationOutput output,
@@ -284,7 +296,17 @@ private:
   Status ReadbackRawQuant();
   Status ReadbackColorCorrelation();
   Status AssembleFrameFromReadback(VarDctEncoderFrame *frame) const;
-  Status WaitForOperation();
+  Status WaitForOperation(
+      gpu_profile_internal::CommandBufferProfile* profile = nullptr);
+  Status EncodeFrameImpl(
+      AqEvaluationInput input, VarDctEncoderFrame* frame,
+      gpu_profile_internal::FrameEncodingProfile* profile);
+  Status ComputeInitialQuantizationImpl(
+      InitialQuantizationOptions options,
+      InitialQuantFieldOutput output,
+      QuantizerParams* quantizer,
+      float quant_dc,
+      gpu_profile_internal::FrameEncodingProfile* profile);
   void CompleteOperation();
   void Invalidate();
 

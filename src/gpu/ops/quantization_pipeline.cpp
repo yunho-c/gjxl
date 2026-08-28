@@ -14,6 +14,7 @@
 #include "core/block_grid.h"
 #include "core/image_ops.h"
 #include "gpu/ops/adaptive_quantization.h"
+#include "gpu/ops/adaptive_quantization_profile_internal.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/gaborish.h"
 
@@ -224,12 +225,13 @@ Status PrepareResidentAcStrategyInputs(
 
 }  // namespace
 
-Status RunGpuFrameOnlyQuantizationPipeline(
+Status RunGpuFrameOnlyQuantizationPipelineImpl(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
   CpuQuantizationPipelineOptions options,
-  GpuFrameOnlyPipelineOutput output) {
+  GpuFrameOnlyPipelineOutput output,
+  quantization_pipeline_internal::GpuFrameOnlyPipelineProfile* profile) {
 
   if (!original_linear_rgb.valid() || !opsin.valid() ||
       !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
@@ -263,6 +265,8 @@ Status RunGpuFrameOnlyQuantizationPipeline(
       "GPU frame-only pipeline dimensions are too large");
   }
   try {
+    profile_internal::Begin(
+      profile == nullptr ? nullptr : &profile->initial_field_preparation);
     std::vector<float> initial_quant(block_count);
     std::vector<float> strategy_mask(block_count);
     std::vector<float> pixel_mask(pixel_count);
@@ -278,34 +282,45 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     status = FillDefaultEpfSharpness(
       {sharpness.data(), block_extent, block_extent.width});
     if (!status.ok()) return status;
+    profile_internal::End(
+      profile == nullptr ? nullptr : &profile->initial_field_preparation);
     std::vector<float> final_quant(block_count);
     VarDctEncoderFrame frame;
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
     adaptive_options.butteraugli_target = options.butteraugli_target;
-    status = RunGpuFrameOnlyQuantizationResidentFrontend(
-      gpu, original_linear_rgb, opsin, strategies,
-      {sharpness.data(), block_extent, block_extent.width},
-      {
-        .butteraugli_target = initial_quant_target,
-        .rescale = options.initial_quant_rescale,
-      },
-      adaptive_options,
-      {
-        .quant_field = {
-          initial_quant.data(), block_extent, block_extent.width},
-        .strategy_mask = {
-          strategy_mask.data(), block_extent, block_extent.width},
-        .pixel_mask = {
-          pixel_mask.data(), opsin.extent(), opsin.width()},
-      },
-      {
-        .quant_field = {
-          final_quant.data(), block_extent, block_extent.width},
-        .frame = &frame,
-      });
+    const InitialQuantizationOptions initial_options = {
+      .butteraugli_target = initial_quant_target,
+      .rescale = options.initial_quant_rescale,
+    };
+    const InitialQuantFieldOutput initial_output = {
+      .quant_field = {
+        initial_quant.data(), block_extent, block_extent.width},
+      .strategy_mask = {
+        strategy_mask.data(), block_extent, block_extent.width},
+      .pixel_mask = {
+        pixel_mask.data(), opsin.extent(), opsin.width()},
+    };
+    const GpuFrameOnlyQuantizationOutput frame_output = {
+      .quant_field = {
+        final_quant.data(), block_extent, block_extent.width},
+      .frame = &frame,
+    };
+    status = profile == nullptr
+      ? RunGpuFrameOnlyQuantizationResidentFrontend(
+          gpu, original_linear_rgb, opsin, strategies,
+          {sharpness.data(), block_extent, block_extent.width},
+          initial_options, adaptive_options, initial_output, frame_output)
+      : adaptive_quantization_gpu_internal::
+          RunGpuFrameOnlyQuantizationResidentFrontendProfiled(
+            gpu, original_linear_rgb, opsin, strategies,
+            {sharpness.data(), block_extent, block_extent.width},
+            initial_options, adaptive_options, initial_output, frame_output,
+            profile);
     if (!status.ok()) return status;
 
+    profile_internal::Begin(
+      profile == nullptr ? nullptr : &profile->output_commit);
     CopyContiguousPlane(
       initial_quant, output.initial_quantization.quant_field);
     CopyContiguousPlane(
@@ -313,6 +328,8 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     CopyContiguousPlane(pixel_mask, output.initial_quantization.pixel_mask);
     CopyContiguousPlane(final_quant, output.quant_field);
     *output.frame = std::move(frame);
+    profile_internal::End(
+      profile == nullptr ? nullptr : &profile->output_commit);
     return Status::Ok();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
@@ -321,6 +338,39 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     return Status::InvalidArgument(
       "GPU frame-only pipeline dimensions are too large");
   }
+}
+
+Status RunGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output) {
+
+  return RunGpuFrameOnlyQuantizationPipelineImpl(
+    gpu, original_linear_rgb, opsin, options, output, nullptr);
+}
+
+Status quantization_pipeline_internal::
+RunGpuFrameOnlyQuantizationPipelineProfiled(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output,
+  GpuFrameOnlyPipelineProfile* profile) {
+
+  if (profile == nullptr) {
+    return Status::InvalidArgument(
+      "GPU frame-only pipeline profile output is null");
+  }
+  GpuFrameOnlyPipelineProfile candidate;
+  Status status = RunGpuFrameOnlyQuantizationPipelineImpl(
+    gpu, original_linear_rgb, opsin, options, output, &candidate);
+  if (status.ok()) {
+    *profile = candidate;
+  }
+  return status;
 }
 
 Status RunGpuQuantizationPipeline(

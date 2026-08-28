@@ -159,38 +159,62 @@ Status CombineFrameSections(
 Status EncodeVarDctCodestreamImpl(
   const VarDctEncoderFrame& frame,
   std::vector<uint8_t>* output,
-  codestream_internal::VarDctCodestreamProfile* profile) {
+  codestream_internal::VarDctCodestreamProfile* profile,
+  codestream_internal::VarDctCodestreamStageProfile* stage_profile) {
 
   if (output == nullptr) {
     return Status::InvalidArgument("Codestream output is null");
   }
   codestream_internal::VarDctCodestreamProfile candidate_profile;
+  codestream_internal::VarDctCodestreamStageProfile candidate_stage_profile;
+  profile_internal::Begin(
+    stage_profile == nullptr ? nullptr : &candidate_stage_profile.total);
   const ProfileClock::time_point total_begin = ProfileBegin(profile);
+  profile_internal::Begin(
+    stage_profile == nullptr ? nullptr : &candidate_stage_profile.validation);
   const ProfileClock::time_point validation_begin = ProfileBegin(profile);
   const Status validation = ValidateSimpleCodestreamFrame(frame);
   ProfileEnd(
     profile, validation_begin, &candidate_profile.validation_nanoseconds);
+  profile_internal::End(
+    stage_profile == nullptr ? nullptr : &candidate_stage_profile.validation);
   if (!validation.ok()) {
     return validation;
   }
 
   try {
+    profile_internal::Begin(
+      stage_profile == nullptr
+        ? nullptr
+        : &candidate_stage_profile.dc_tokenization);
     const ProfileClock::time_point dc_tokenization_begin = ProfileBegin(profile);
     std::vector<SimpleDcGroupTokenStreams> dc_groups;
     Status status = TokenizeSimpleDcGroups(frame, &dc_groups);
     ProfileEnd(
       profile, dc_tokenization_begin,
       &candidate_profile.dc_tokenization_nanoseconds);
+    profile_internal::End(
+      stage_profile == nullptr
+        ? nullptr
+        : &candidate_stage_profile.dc_tokenization);
     if (!status.ok()) {
       return status;
     }
 
+    profile_internal::Begin(
+      stage_profile == nullptr
+        ? nullptr
+        : &candidate_stage_profile.ac_tokenization);
     const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
     std::vector<SimpleAcGroupTokenStream> ac_groups;
     status = TokenizeSimpleAcGroups(frame, &ac_groups);
     ProfileEnd(
       profile, ac_tokenization_begin,
       &candidate_profile.ac_tokenization_nanoseconds);
+    profile_internal::End(
+      stage_profile == nullptr
+        ? nullptr
+        : &candidate_stage_profile.ac_tokenization);
     if (!status.ok()) {
       return status;
     }
@@ -198,6 +222,10 @@ Status EncodeVarDctCodestreamImpl(
       return Status::Internal("Validated frame produced no codestream groups");
     }
 
+    profile_internal::Begin(
+      stage_profile == nullptr
+        ? nullptr
+        : &candidate_stage_profile.entropy_optimization);
     const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
     std::vector<std::vector<EntropyToken>> dc_streams;
     if (dc_groups.size() > dc_streams.max_size() / 2) {
@@ -230,7 +258,15 @@ Status EncodeVarDctCodestreamImpl(
     ProfileEnd(
       profile, entropy_begin,
       &candidate_profile.entropy_optimization_nanoseconds);
+    profile_internal::End(
+      stage_profile == nullptr
+        ? nullptr
+        : &candidate_stage_profile.entropy_optimization);
 
+    profile_internal::Begin(
+      stage_profile == nullptr
+        ? nullptr
+        : &candidate_stage_profile.section_writing);
     const ProfileClock::time_point sections_begin = ProfileBegin(profile);
     if (dc_groups.size() > std::numeric_limits<size_t>::max() -
                            ac_groups.size() - 2) {
@@ -269,7 +305,13 @@ Status EncodeVarDctCodestreamImpl(
     }
     ProfileEnd(
       profile, sections_begin, &candidate_profile.section_writing_nanoseconds);
+    profile_internal::End(
+      stage_profile == nullptr
+        ? nullptr
+        : &candidate_stage_profile.section_writing);
 
+    profile_internal::Begin(
+      stage_profile == nullptr ? nullptr : &candidate_stage_profile.assembly);
     const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
     BitWriter writer;
     if (Status status = WriteSimpleCodestreamHeader(
@@ -294,10 +336,16 @@ Status EncodeVarDctCodestreamImpl(
     std::vector<uint8_t> candidate(bytes.begin(), bytes.end());
     ProfileEnd(
       profile, assembly_begin, &candidate_profile.assembly_nanoseconds);
+    profile_internal::End(
+      stage_profile == nullptr ? nullptr : &candidate_stage_profile.assembly);
     *output = std::move(candidate);
     if (profile != nullptr) {
       candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
       *profile = candidate_profile;
+    }
+    if (stage_profile != nullptr) {
+      profile_internal::End(&candidate_stage_profile.total);
+      *stage_profile = candidate_stage_profile;
     }
     return Status::Ok();
   } catch (const std::bad_alloc&) {
@@ -312,18 +360,19 @@ Status EncodeVarDctCodestreamImpl(
 Status EncodeVarDctCodestream(
   const VarDctEncoderFrame& frame, std::vector<uint8_t>* output) {
 
-  return EncodeVarDctCodestreamImpl(frame, output, nullptr);
+  return EncodeVarDctCodestreamImpl(frame, output, nullptr, nullptr);
 }
 
 Status codestream_internal::EncodeVarDctCodestreamProfiled(
   const VarDctEncoderFrame& frame,
   std::vector<uint8_t>* output,
-  VarDctCodestreamProfile* profile) {
+  VarDctCodestreamProfile* profile,
+  VarDctCodestreamStageProfile* stage_profile) {
 
   if (profile == nullptr) {
     return Status::InvalidArgument("Codestream profile output is null");
   }
-  return EncodeVarDctCodestreamImpl(frame, output, profile);
+  return EncodeVarDctCodestreamImpl(frame, output, profile, stage_profile);
 }
 
 }  // namespace gjxl

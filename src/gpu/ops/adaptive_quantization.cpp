@@ -22,6 +22,7 @@
 #include "codec/reconstruction_internal.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
+#include "gpu/ops/adaptive_quantization_profile_internal.h"
 #include "gpu/ops/aq_evaluation.h"
 
 namespace gjxl {
@@ -713,7 +714,7 @@ Status RunGpuFrameOnlyQuantizationResidentInitialCfl(
       epf_sharpness, nullptr, true, options, output);
 }
 
-Status RunGpuFrameOnlyQuantizationResidentFrontend(
+Status RunGpuFrameOnlyQuantizationResidentFrontendImpl(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
@@ -722,7 +723,8 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
   InitialQuantizationOptions initial_options,
   AdaptiveQuantizationOptions options,
   InitialQuantFieldOutput initial_output,
-  GpuFrameOnlyQuantizationOutput output) {
+  GpuFrameOnlyQuantizationOutput output,
+  quantization_pipeline_internal::GpuFrameOnlyPipelineProfile* profile) {
 
   if (!std::isfinite(initial_options.butteraugli_target) ||
       initial_options.butteraugli_target <= 0.0f ||
@@ -755,6 +757,8 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
   }
   try {
     std::unique_ptr<PreparedAqEvaluation> prepared;
+    profile_internal::Begin(
+      profile == nullptr ? nullptr : &profile->prepared_evaluation_setup);
     Status status = PrepareAqEvaluation(
       gpu,
       {
@@ -773,12 +777,34 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
       },
       &prepared);
     if (!status.ok()) return status;
+    profile_internal::End(
+      profile == nullptr ? nullptr : &profile->prepared_evaluation_setup);
+    profile_internal::Begin(
+      profile == nullptr
+        ? nullptr
+        : &profile->quantization_parameter_preparation);
     float quant_dc = 0.0f;
     status = ComputeInitialQuantDc(options.butteraugli_target, &quant_dc);
     if (!status.ok()) return status;
+    profile_internal::End(
+      profile == nullptr
+        ? nullptr
+        : &profile->quantization_parameter_preparation);
     QuantizerParams quantizer;
-    status = prepared->ComputeInitialQuantization(
-      initial_options, initial_output, &quantizer, quant_dc);
+    gpu_profile_internal::ProfiledFrameEncoder* profiled = nullptr;
+    if (profile != nullptr) {
+      profiled = gpu_profile_internal::QueryProfiledFrameEncoder(*prepared);
+      if (profiled == nullptr) {
+        return Status::Unavailable(
+          "Prepared resident frame profiling is unavailable");
+      }
+    }
+    status = profile == nullptr
+      ? prepared->ComputeInitialQuantization(
+          initial_options, initial_output, &quantizer, quant_dc)
+      : profiled->ComputeInitialQuantizationProfiled(
+          initial_options, initial_output, &quantizer, quant_dc,
+          &profile->initial_quantization);
     if (!status.ok()) return status;
     const ConstPlaneF32View initial_quant{
       initial_output.quant_field.data,
@@ -790,11 +816,13 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
       epf_sharpness, options);
     if (!status.ok()) return status;
     VarDctEncoderFrame candidate;
-    status = prepared->EncodeFrame(
-      {
-        .quantizer = quantizer,
-      },
-      &candidate);
+    const AqEvaluationInput evaluation_input = {
+      .quantizer = quantizer,
+    };
+    status = profile == nullptr
+      ? prepared->EncodeFrame(evaluation_input, &candidate)
+      : profiled->EncodeFrameProfiled(
+          evaluation_input, &candidate, &profile->frame_encoding);
     if (!status.ok()) return status;
     for (size_t y = 0; y < strategies.extent().height; ++y) {
       std::copy_n(initial_quant.Row(y), strategies.extent().width,
@@ -809,6 +837,44 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
     return Status::InvalidArgument(
       "Resident frame-only frontend dimensions are too large");
   }
+}
+
+Status RunGpuFrameOnlyQuantizationResidentFrontend(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output) {
+
+  return RunGpuFrameOnlyQuantizationResidentFrontendImpl(
+    gpu, original_linear_rgb, opsin, strategies, epf_sharpness,
+    initial_options, options, initial_output, output, nullptr);
+}
+
+Status adaptive_quantization_gpu_internal::
+RunGpuFrameOnlyQuantizationResidentFrontendProfiled(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output,
+  quantization_pipeline_internal::GpuFrameOnlyPipelineProfile* profile) {
+
+  if (profile == nullptr) {
+    return Status::InvalidArgument(
+      "GPU frame-only pipeline profile output is null");
+  }
+  return RunGpuFrameOnlyQuantizationResidentFrontendImpl(
+    gpu, original_linear_rgb, opsin, strategies, epf_sharpness,
+    initial_options, options, initial_output, output, profile);
 }
 
 Status RunGpuAdaptiveQuantizationPolicy(

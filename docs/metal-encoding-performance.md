@@ -440,6 +440,32 @@ searches, or a multi-process service. Reproduce the complete matrix with:
 just image-batch-benchmark all 1,2,4,8 3 1 metal maximum-throughput
 ```
 
+Pass `true` as the final recipe argument to append diagnostic stage timelines:
+
+```sh
+just image-batch-benchmark 1080p 1,2,4,8 3 1 metal maximum-throughput true
+```
+
+This enables the benchmark's `--profile-stages` mode. Warmups remain
+uninstrumented, measured serial and batched calls collect timestamps in memory,
+and CSV is emitted only after the throughput summary. Every row identifies the
+sample, serial or batched path, image index, worker index, processor category,
+stage, availability, and start/end time relative to that batch invocation. CPU
+workflow and serializer stages are available for every backend. Unsupported GPU
+paths retain explicit unavailable command-buffer rows rather than reporting
+zero-duration device work.
+
+The maximum-throughput Metal path reports two device intervals per image: the
+resident initial-quantization command buffer and the frame-encoding command
+buffer. Metal timestamps are relative to system Mach time, so the profiler uses
+the same host clock. The `host_envelope_aligned` column reports whether a raw
+device interval falls within that image's submission-to-completion envelope.
+Metal may report an earlier command-buffer start under concurrent load; the raw
+value is retained with alignment set to `0` instead of being silently clamped or
+misrepresented as image-local overlap. These timelines are diagnostic: their
+throughput should not replace uninstrumented retained results, and command-buffer
+intervals do not by themselves measure kernel occupancy or memory stalls.
+
 ## Stop rules
 
 - Do not optimize a standalone DCT, Butteraugli, or AC-search kernel unless the

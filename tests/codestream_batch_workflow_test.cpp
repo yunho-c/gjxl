@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "codestream/batch_workflow.h"
+#include "codestream/batch_workflow_internal.h"
 #include "codestream/workflow.h"
 #include "core/image.h"
 
@@ -49,6 +50,15 @@ struct ImageStorage {
 
   std::array<std::vector<float>, 3> plane;
 };
+
+[[nodiscard]] bool ValidInterval(
+  gjxl::profile_internal::HostInterval interval,
+  gjxl::profile_internal::HostInterval total) {
+
+  return interval.available() && total.available() &&
+    interval.begin_nanoseconds >= total.begin_nanoseconds &&
+    interval.end_nanoseconds <= total.end_nanoseconds;
+}
 
 bool CheckBatchMatchesSequential() {
   constexpr size_t kImageCount = 5;
@@ -176,6 +186,86 @@ bool CheckPerImageFailureAndEmptyBatch() {
   return true;
 }
 
+bool CheckCpuStageProfiles() {
+  constexpr size_t kImageCount = 3;
+  std::array<ImageStorage, kImageCount> images = {
+    ImageStorage(8), ImageStorage(9), ImageStorage(10)};
+  std::vector<gjxl::VarDctBatchEncodingRequest> requests;
+  for (const ImageStorage& image : images) {
+    requests.push_back({
+      .linear_rgb = image.View(),
+      .options = {
+        .butteraugli_target = 1.0f,
+        .backend = gjxl::VarDctBackendPreference::kCpu,
+      },
+    });
+  }
+
+  std::unique_ptr<gjxl::VarDctBatchEncoder> encoder;
+  gjxl::Status status = gjxl::VarDctBatchEncoder::Create(2, &encoder);
+  if (!status.ok() || encoder == nullptr) return false;
+  std::vector<gjxl::VarDctBatchEncodingResult> results;
+  std::vector<gjxl::codestream_internal::VarDctBatchEncodingStageProfile>
+    profiles;
+  status = gjxl::codestream_internal::EncodeVarDctBatchProfiled(
+    *encoder, requests, &results, &profiles);
+  if (!status.ok() || results.size() != kImageCount ||
+      profiles.size() != kImageCount) {
+    std::cerr << "CPU stage-profiled batch scheduling failed\n";
+    return false;
+  }
+  for (size_t index = 0; index < kImageCount; ++index) {
+    const auto& profile = profiles[index];
+    const auto& encoding = profile.encoding;
+    if (!results[index].status.ok() || profile.worker_index >= 2 ||
+        !ValidInterval(encoding.input_preparation, encoding.total) ||
+        !ValidInterval(encoding.backend_selection, encoding.total) ||
+        !ValidInterval(encoding.quantization_pipeline, encoding.total) ||
+        !ValidInterval(encoding.codestream_encoding, encoding.total) ||
+        !ValidInterval(encoding.summary_assembly, encoding.total) ||
+        !ValidInterval(encoding.codestream.total, encoding.total) ||
+        !ValidInterval(
+          encoding.codestream.entropy_optimization, encoding.total) ||
+        encoding.maximum_throughput.initial_quantization.command_buffer
+          .available() ||
+        encoding.maximum_throughput.frame_encoding.command_buffer
+          .available()) {
+      std::cerr << "CPU stage profile " << index << " is invalid\n";
+      return false;
+    }
+  }
+
+  std::vector<gjxl::VarDctBatchEncodingResult> sentinel_results(1);
+  sentinel_results[0].codestream = {1, 2, 3};
+  const auto original_results = sentinel_results;
+  if (gjxl::codestream_internal::EncodeVarDctBatchProfiled(
+        *encoder, requests, &sentinel_results, nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      sentinel_results.size() != original_results.size() ||
+      sentinel_results[0].codestream != original_results[0].codestream) {
+    std::cerr << "Null batch stage-profile output was not atomic\n";
+    return false;
+  }
+
+  profiles = {{.worker_index = 77}};
+  if (gjxl::codestream_internal::EncodeVarDctBatchProfiled(
+        *encoder, requests, nullptr, &profiles).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      profiles.size() != 1 || profiles[0].worker_index != 77) {
+    std::cerr << "Null profiled batch result output was not atomic\n";
+    return false;
+  }
+
+  profiles.push_back({.worker_index = 99});
+  status = gjxl::codestream_internal::EncodeVarDctBatchProfiled(
+    *encoder, {}, &results, &profiles);
+  if (!status.ok() || !results.empty() || !profiles.empty()) {
+    std::cerr << "Empty profiled batch did not commit empty outputs\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckInvalidDriverArguments() {
   std::unique_ptr<gjxl::VarDctBatchEncoder> encoder;
   gjxl::Status status = gjxl::VarDctBatchEncoder::Create(0, &encoder);
@@ -245,6 +335,50 @@ bool CheckSharedMetalBackendIfAvailable() {
       return false;
     }
   }
+
+  std::vector<gjxl::codestream_internal::VarDctBatchEncodingStageProfile>
+    profiles;
+  status = gjxl::codestream_internal::EncodeVarDctBatchProfiled(
+    *encoder, requests, &results, &profiles);
+  if (!status.ok() || profiles.size() != kImageCount) {
+    std::cerr << "Profiled concurrent Metal batch failed: "
+              << status.message() << '\n';
+    return false;
+  }
+  for (size_t index = 0; index < profiles.size(); ++index) {
+    const auto& encoding = profiles[index].encoding;
+    const auto& initial = encoding.maximum_throughput.initial_quantization;
+    const auto& frame = encoding.maximum_throughput.frame_encoding;
+    const auto command_within_host_envelope = [](
+        const auto& command, const auto& submission, const auto& wait) {
+      return command.available() && submission.available() &&
+        wait.available() &&
+        (!command.host_envelope_aligned ||
+         (command.start_host_nanoseconds >= submission.begin_nanoseconds &&
+          command.end_host_nanoseconds <= wait.end_nanoseconds));
+    };
+    if (!results[index].status.ok() ||
+        results[index].codestream != expected_codestream ||
+        results[index].summary != expected_summary ||
+        !ValidInterval(
+          encoding.maximum_throughput.prepared_evaluation_setup,
+          encoding.total) ||
+        !ValidInterval(initial.submission, encoding.total) ||
+        !ValidInterval(initial.readback, encoding.total) ||
+        !command_within_host_envelope(
+          initial.command_buffer, initial.submission,
+          initial.completion_wait) ||
+        !ValidInterval(frame.input_upload, encoding.total) ||
+        !ValidInterval(frame.submission, encoding.total) ||
+        !ValidInterval(frame.readback, encoding.total) ||
+        !command_within_host_envelope(
+          frame.command_buffer, frame.submission,
+          frame.completion_wait)) {
+      std::cerr << "Profiled concurrent Metal result " << index
+                << " is invalid\n";
+      return false;
+    }
+  }
   return true;
 }
 
@@ -253,6 +387,7 @@ bool CheckSharedMetalBackendIfAvailable() {
 int main() {
   if (!CheckBatchMatchesSequential() ||
       !CheckPerImageFailureAndEmptyBatch() ||
+      !CheckCpuStageProfiles() ||
       !CheckInvalidDriverArguments() ||
       !CheckSharedMetalBackendIfAvailable()) {
     return EXIT_FAILURE;

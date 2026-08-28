@@ -23,6 +23,7 @@
 #include "gpu/image.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/aq_evaluation_profile_internal.h"
 #include "gpu/ops/butteraugli.h"
 #include "gpu/ops/primitives.h"
 
@@ -471,6 +472,10 @@ Status CreateAqPipelines(
 [[nodiscard]] Status GetMetalSubmissionGpuDuration(
   GpuSubmission& submission,
   uint64_t* nanoseconds);
+
+[[nodiscard]] Status GetMetalSubmissionGpuProfile(
+  GpuSubmission& submission,
+  gpu_profile_internal::CommandBufferProfile* profile);
 
 Status CreateButteraugliPipelines(
   MTL::Device* device,

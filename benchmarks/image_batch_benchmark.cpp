@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include "codestream/batch_workflow.h"
+#include "codestream/batch_workflow_internal.h"
 #include "codestream/workflow.h"
 #include "core/image.h"
 
@@ -40,6 +42,7 @@ struct CommandLineOptions {
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
   bool metal_aq_explicit = false;
+  bool profile_stages = false;
 };
 
 struct WorkloadSpec {
@@ -91,6 +94,23 @@ struct BenchmarkRow {
   Distribution sequential_ms;
   Distribution batched_ms;
   Distribution paired_speedup;
+};
+
+struct BatchRun {
+  double elapsed_ms = 0.0;
+  uint64_t begin_host_nanoseconds = 0;
+  uint64_t end_host_nanoseconds = 0;
+  std::vector<gjxl::codestream_internal::VarDctBatchEncodingStageProfile>
+    profiles;
+};
+
+struct ProfiledRun {
+  WorkloadSpec workload;
+  size_t batch_size = 0;
+  std::string_view path;
+  size_t sample = 0;
+  std::string_view order;
+  BatchRun run;
 };
 
 [[nodiscard]] size_t ParsePositiveSize(
@@ -228,7 +248,7 @@ void PrintUsage(std::string_view executable) {
        " [--batch-sizes 1,2,4,8] [--samples N] [--warmups N]"
        " [--distance VALUE] [--backend auto|cpu|metal]"
        " [--metal-aq exact-coefficients|fully-resident|throughput|"
-       "maximum-throughput]\n";
+       "maximum-throughput] [--profile-stages]\n";
 }
 
 [[nodiscard]] CommandLineOptions ParseCommandLine(int argc, char** argv) {
@@ -258,6 +278,8 @@ void PrintUsage(std::string_view executable) {
     } else if (argument == "--metal-aq") {
       options.metal_aq_mode = ParseMetalAqMode(value(argument));
       options.metal_aq_explicit = true;
+    } else if (argument == "--profile-stages") {
+      options.profile_stages = true;
     } else if (argument == "--help") {
       PrintUsage(argv[0]);
       std::exit(EXIT_SUCCESS);
@@ -319,23 +341,35 @@ void FillImage(ImageStorage* image) {
   return {values.front(), median, values.back()};
 }
 
-[[nodiscard]] double RunBatch(
+[[nodiscard]] BatchRun RunBatch(
   gjxl::VarDctBatchEncoder& encoder,
   std::span<const gjxl::VarDctBatchEncodingRequest> requests,
   const std::vector<uint8_t>& expected_codestream,
-  const gjxl::VarDctEncodingSummary& expected_summary) {
+  const gjxl::VarDctEncodingSummary& expected_summary,
+  bool profile_stages) {
 
   std::vector<gjxl::VarDctBatchEncodingResult> results;
+  BatchRun run;
+  run.begin_host_nanoseconds =
+    gjxl::profile_internal::HostNowNanoseconds();
   const Clock::time_point begin = Clock::now();
-  const gjxl::Status status = encoder.Encode(requests, &results);
-  const double elapsed_ms =
+  const gjxl::Status status = profile_stages
+    ? gjxl::codestream_internal::EncodeVarDctBatchProfiled(
+        encoder, requests, &results, &run.profiles)
+    : encoder.Encode(requests, &results);
+  run.elapsed_ms =
     std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
+  run.end_host_nanoseconds =
+    gjxl::profile_internal::HostNowNanoseconds();
   if (!status.ok()) {
     throw std::runtime_error(
       "Batch scheduler failed: " + std::string(status.message()));
   }
   if (results.size() != requests.size()) {
     throw std::runtime_error("Batch scheduler changed result count");
+  }
+  if (profile_stages && run.profiles.size() != requests.size()) {
+    throw std::runtime_error("Batch profiler changed result count");
   }
   for (size_t index = 0; index < results.size(); ++index) {
     if (!results[index].status.ok()) {
@@ -350,8 +384,62 @@ void FillImage(ImageStorage* image) {
         "Image " + std::to_string(index) +
         " did not match the single-image reference");
     }
+    if (profile_stages) {
+      const auto& profile = run.profiles[index].encoding;
+      const auto contained = [&](const gjxl::profile_internal::HostInterval&
+                                   interval) {
+        return interval.available() &&
+          interval.begin_nanoseconds >= run.begin_host_nanoseconds &&
+          interval.end_nanoseconds <= run.end_host_nanoseconds;
+      };
+      if (!contained(profile.total) ||
+          !contained(profile.input_preparation) ||
+          !contained(profile.backend_selection) ||
+          !contained(profile.quantization_pipeline) ||
+          !contained(profile.codestream_encoding) ||
+          !contained(profile.summary_assembly) ||
+          !contained(profile.codestream.total) ||
+          !contained(profile.codestream.validation) ||
+          !contained(profile.codestream.dc_tokenization) ||
+          !contained(profile.codestream.ac_tokenization) ||
+          !contained(profile.codestream.entropy_optimization) ||
+          !contained(profile.codestream.section_writing) ||
+          !contained(profile.codestream.assembly)) {
+        throw std::runtime_error(
+          "Image " + std::to_string(index) +
+          " returned an invalid CPU stage timeline");
+      }
+      if (results[index].summary.execution_backend ==
+            gjxl::VarDctExecutionBackend::kMetal &&
+          results[index].summary.metal_aq_mode ==
+            gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput) {
+        const auto& maximum = profile.maximum_throughput;
+        const auto valid_frame_stage = [&](const auto& frame) {
+          return contained(frame.submission) &&
+            contained(frame.completion_wait) &&
+            contained(frame.readback) &&
+            contained(frame.frame_assembly) &&
+            frame.command_buffer.available() &&
+            frame.command_buffer.start_host_nanoseconds >=
+              run.begin_host_nanoseconds &&
+            frame.command_buffer.end_host_nanoseconds <=
+              run.end_host_nanoseconds;
+        };
+        if (!contained(maximum.initial_field_preparation) ||
+            !contained(maximum.quantization_parameter_preparation) ||
+            !contained(maximum.prepared_evaluation_setup) ||
+            !valid_frame_stage(maximum.initial_quantization) ||
+            !contained(maximum.frame_encoding.input_upload) ||
+            !valid_frame_stage(maximum.frame_encoding) ||
+            !contained(maximum.output_commit)) {
+          throw std::runtime_error(
+            "Image " + std::to_string(index) +
+            " returned an invalid maximum-throughput timeline");
+        }
+      }
+    }
   }
-  return elapsed_ms;
+  return run;
 }
 
 [[nodiscard]] BenchmarkRow BenchmarkBatchSize(
@@ -360,7 +448,8 @@ void FillImage(ImageStorage* image) {
   gjxl::ConstImage3FView image,
   const std::vector<uint8_t>& expected_codestream,
   const gjxl::VarDctEncodingSummary& expected_summary,
-  size_t batch_size) {
+  size_t batch_size,
+  std::vector<ProfiledRun>* profiled_runs) {
 
   std::vector<gjxl::VarDctBatchEncodingRequest> requests(
     batch_size,
@@ -388,14 +477,14 @@ void FillImage(ImageStorage* image) {
   for (size_t warmup = 0; warmup < options.warmups; ++warmup) {
     if (warmup % 2 == 0) {
       (void) RunBatch(
-        *sequential, requests, expected_codestream, expected_summary);
+        *sequential, requests, expected_codestream, expected_summary, false);
       (void) RunBatch(
-        *batched, requests, expected_codestream, expected_summary);
+        *batched, requests, expected_codestream, expected_summary, false);
     } else {
       (void) RunBatch(
-        *batched, requests, expected_codestream, expected_summary);
+        *batched, requests, expected_codestream, expected_summary, false);
       (void) RunBatch(
-        *sequential, requests, expected_codestream, expected_summary);
+        *sequential, requests, expected_codestream, expected_summary, false);
     }
   }
 
@@ -408,17 +497,46 @@ void FillImage(ImageStorage* image) {
   for (size_t sample = 0; sample < options.samples; ++sample) {
     double sequential_ms = 0.0;
     double batched_ms = 0.0;
+    BatchRun sequential_run;
+    BatchRun batched_run;
     const bool batch_first = sample % 2 != 0;
     if (batch_first) {
-      batched_ms = RunBatch(
-        *batched, requests, expected_codestream, expected_summary);
-      sequential_ms = RunBatch(
-        *sequential, requests, expected_codestream, expected_summary);
+      batched_run = RunBatch(
+        *batched, requests, expected_codestream, expected_summary,
+        options.profile_stages);
+      sequential_run = RunBatch(
+        *sequential, requests, expected_codestream, expected_summary,
+        options.profile_stages);
     } else {
-      sequential_ms = RunBatch(
-        *sequential, requests, expected_codestream, expected_summary);
-      batched_ms = RunBatch(
-        *batched, requests, expected_codestream, expected_summary);
+      sequential_run = RunBatch(
+        *sequential, requests, expected_codestream, expected_summary,
+        options.profile_stages);
+      batched_run = RunBatch(
+        *batched, requests, expected_codestream, expected_summary,
+        options.profile_stages);
+    }
+    sequential_ms = sequential_run.elapsed_ms;
+    batched_ms = batched_run.elapsed_ms;
+    if (profiled_runs != nullptr) {
+      const std::string_view order = batch_first
+        ? "batch-first"
+        : "serial-first";
+      profiled_runs->push_back({
+        .workload = workload,
+        .batch_size = batch_size,
+        .path = "serial",
+        .sample = sample + 1,
+        .order = order,
+        .run = std::move(sequential_run),
+      });
+      profiled_runs->push_back({
+        .workload = workload,
+        .batch_size = batch_size,
+        .path = "batch",
+        .sample = sample + 1,
+        .order = order,
+        .run = std::move(batched_run),
+      });
     }
     sequential_samples.push_back(sequential_ms);
     batched_samples.push_back(batched_ms);
@@ -467,6 +585,152 @@ void PrintRows(const std::vector<BenchmarkRow>& rows) {
   }
 }
 
+void PrintProfileInterval(
+  const ProfiledRun& profiled,
+  size_t image_index,
+  size_t worker_index,
+  std::string_view processor,
+  std::string_view stage,
+  gjxl::profile_internal::HostInterval interval,
+  bool host_envelope_aligned = true) {
+
+  std::cout << profiled.workload.name << ','
+            << profiled.workload.extent.width << ','
+            << profiled.workload.extent.height << ','
+            << profiled.batch_size << ','
+            << profiled.path << ','
+            << profiled.sample << ','
+            << profiled.order << ','
+            << image_index << ','
+            << worker_index << ','
+            << processor << ','
+            << stage << ','
+            << (interval.available() ? 1 : 0) << ',';
+  if (interval.available()) {
+    const double start_ms = static_cast<double>(
+      interval.begin_nanoseconds - profiled.run.begin_host_nanoseconds) /
+      1.0e6;
+    const double end_ms = static_cast<double>(
+      interval.end_nanoseconds - profiled.run.begin_host_nanoseconds) /
+      1.0e6;
+    const double duration_ms = static_cast<double>(
+      interval.duration_nanoseconds()) / 1.0e6;
+    std::cout << (host_envelope_aligned ? 1 : 0) << ','
+              << std::fixed << std::setprecision(6)
+              << start_ms << ',' << end_ms << ',' << duration_ms;
+  } else {
+    std::cout << ",,,";
+  }
+  std::cout << '\n';
+}
+
+void PrintCommandBuffer(
+  const ProfiledRun& profiled,
+  size_t image_index,
+  size_t worker_index,
+  std::string_view stage,
+  const gjxl::gpu_profile_internal::CommandBufferProfile& command) {
+
+  PrintProfileInterval(
+    profiled, image_index, worker_index, "gpu", stage,
+    {
+      .begin_nanoseconds = command.start_host_nanoseconds,
+      .end_nanoseconds = command.end_host_nanoseconds,
+    },
+    command.host_envelope_aligned);
+}
+
+void PrintFrameEncodingProfile(
+  const ProfiledRun& profiled,
+  size_t image_index,
+  size_t worker_index,
+  std::string_view prefix,
+  const gjxl::gpu_profile_internal::FrameEncodingProfile& frame) {
+
+  const std::string base(prefix);
+  PrintProfileInterval(
+    profiled, image_index, worker_index, "cpu",
+    base + "_input_upload", frame.input_upload);
+  PrintProfileInterval(
+    profiled, image_index, worker_index, "cpu",
+    base + "_submission", frame.submission);
+  PrintProfileInterval(
+    profiled, image_index, worker_index, "wait",
+    base + "_completion_wait", frame.completion_wait);
+  PrintCommandBuffer(
+    profiled, image_index, worker_index,
+    base + "_command_buffer", frame.command_buffer);
+  PrintProfileInterval(
+    profiled, image_index, worker_index, "cpu",
+    base + "_readback", frame.readback);
+  PrintProfileInterval(
+    profiled, image_index, worker_index, "cpu",
+    base + "_assembly", frame.frame_assembly);
+}
+
+void PrintProfileRows(const std::vector<ProfiledRun>& runs) {
+  if (runs.empty()) return;
+  std::cout
+    << "\nprofile_workload,width,height,batch_size,path,sample,order,"
+       "image_index,worker_index,processor,stage,available,"
+       "host_envelope_aligned,start_ms,end_ms,duration_ms\n";
+  for (const ProfiledRun& profiled : runs) {
+    for (size_t image_index = 0;
+         image_index < profiled.run.profiles.size(); ++image_index) {
+      const auto& batch_profile = profiled.run.profiles[image_index];
+      const auto& profile = batch_profile.encoding;
+      const size_t worker_index = batch_profile.worker_index;
+      const auto print = [&](std::string_view processor,
+                             std::string_view stage,
+                             gjxl::profile_internal::HostInterval interval) {
+        PrintProfileInterval(
+          profiled, image_index, worker_index, processor, stage, interval);
+      };
+      print("mixed", "workflow_total", profile.total);
+      print("cpu", "input_preparation", profile.input_preparation);
+      print("cpu", "backend_selection", profile.backend_selection);
+      print("mixed", "quantization_pipeline", profile.quantization_pipeline);
+      print("cpu", "codestream_encoding", profile.codestream_encoding);
+      print("cpu", "codestream_validation", profile.codestream.validation);
+      print("cpu", "dc_tokenization", profile.codestream.dc_tokenization);
+      print("cpu", "ac_tokenization", profile.codestream.ac_tokenization);
+      print(
+        "cpu", "entropy_optimization",
+        profile.codestream.entropy_optimization);
+      print("cpu", "section_writing", profile.codestream.section_writing);
+      print("cpu", "codestream_assembly", profile.codestream.assembly);
+      print("cpu", "summary_assembly", profile.summary_assembly);
+
+      const auto& maximum = profile.maximum_throughput;
+      if (maximum.initial_field_preparation.available()) {
+        print(
+          "cpu", "maximum_initial_field_preparation",
+          maximum.initial_field_preparation);
+        print(
+          "cpu", "maximum_quantization_parameter_preparation",
+          maximum.quantization_parameter_preparation);
+        print(
+          "mixed", "maximum_prepared_evaluation_setup",
+          maximum.prepared_evaluation_setup);
+        PrintFrameEncodingProfile(
+          profiled, image_index, worker_index, "initial_quantization",
+          maximum.initial_quantization);
+        PrintFrameEncodingProfile(
+          profiled, image_index, worker_index, "frame_encoding",
+          maximum.frame_encoding);
+        print("cpu", "maximum_output_commit", maximum.output_commit);
+      } else {
+        PrintCommandBuffer(
+          profiled, image_index, worker_index,
+          "initial_quantization_command_buffer", {});
+        PrintCommandBuffer(
+          profiled, image_index, worker_index,
+          "frame_encoding_command_buffer", {});
+      }
+    }
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -477,12 +741,15 @@ int main(int argc, char** argv) {
               << " metal_aq=" << MetalAqModeName(options.metal_aq_mode)
               << " distance=" << options.butteraugli_target
               << " samples=" << options.samples
-              << " warmups=" << options.warmups << '\n';
+              << " warmups=" << options.warmups
+              << " profile_stages="
+              << (options.profile_stages ? "true" : "false") << '\n';
     std::cout << "Boundary: linear RGB input through in-memory codestream; "
                  "input generation, file I/O, and driver construction are "
                  "excluded.\n";
 
     std::vector<BenchmarkRow> rows;
+    std::vector<ProfiledRun> profiled_runs;
     for (const WorkloadSpec& workload : kWorkloads) {
       if (options.workload != "all" && options.workload != workload.name) {
         continue;
@@ -510,10 +777,12 @@ int main(int argc, char** argv) {
       for (size_t batch_size : options.batch_sizes) {
         rows.push_back(BenchmarkBatchSize(
           workload, options, image.View(), reference_codestream,
-          reference_summary, batch_size));
+          reference_summary, batch_size,
+          options.profile_stages ? &profiled_runs : nullptr));
       }
     }
     PrintRows(rows);
+    PrintProfileRows(profiled_runs);
     return EXIT_SUCCESS;
   } catch (const std::exception& error) {
     std::cerr << "Benchmark error: " << error.what() << '\n';

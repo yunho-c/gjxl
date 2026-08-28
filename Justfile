@@ -66,10 +66,10 @@ encode-benchmark workload="padded_1080p" implementation="simd" samples="3" warmu
     "{{ build_dir }}/release/gjxl_quantization_benchmark" --scope public-workflow --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
 # Compare warm sequential and bounded-concurrency multi-image throughput.
-image-batch-benchmark workload="all" batch_sizes="1,2,4,8" samples="3" warmups="1" backend="metal" gpu_aq="maximum-throughput":
+image-batch-benchmark workload="all" batch_sizes="1,2,4,8" samples="3" warmups="1" backend="metal" gpu_aq="maximum-throughput" profile_stages="false":
     cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
     cmake --build "{{ build_dir }}/release" --target gjxl_image_batch_benchmark -j
-    "{{ build_dir }}/release/gjxl_image_batch_benchmark" --workload "{{ workload }}" --batch-sizes "{{ batch_sizes }}" --samples "{{ samples }}" --warmups "{{ warmups }}" --backend "{{ backend }}" --metal-aq "{{ gpu_aq }}"
+    "{{ build_dir }}/release/gjxl_image_batch_benchmark" --workload "{{ workload }}" --batch-sizes "{{ batch_sizes }}" --samples "{{ samples }}" --warmups "{{ warmups }}" --backend "{{ backend }}" --metal-aq "{{ gpu_aq }}" {{ if profile_stages == "true" { "--profile-stages" } else { "" } }}
 
 # Measure the CPU coefficient-decision boundary without the complete AQ loop.
 coefficient-benchmark workload="padded_1080p" samples="9" warmups="2":

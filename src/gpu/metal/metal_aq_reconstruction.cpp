@@ -468,6 +468,33 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     InitialQuantizationOptions options, InitialQuantFieldOutput output,
     QuantizerParams* quantizer, float quant_dc) {
 
+  return ComputeInitialQuantizationImpl(
+    options, output, quantizer, quant_dc, nullptr);
+}
+
+Status MetalPreparedAqEvaluation::ComputeInitialQuantizationProfiled(
+    InitialQuantizationOptions options, InitialQuantFieldOutput output,
+    QuantizerParams* quantizer, float quant_dc,
+    gpu_profile_internal::FrameEncodingProfile* profile) {
+
+  if (profile == nullptr) {
+    return Status::InvalidArgument(
+      "Resident initial-quantization profile output is null");
+  }
+  gpu_profile_internal::FrameEncodingProfile candidate;
+  Status status = ComputeInitialQuantizationImpl(
+    options, output, quantizer, quant_dc, &candidate);
+  if (status.ok()) {
+    *profile = candidate;
+  }
+  return status;
+}
+
+Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
+    InitialQuantizationOptions options, InitialQuantFieldOutput output,
+    QuantizerParams* quantizer, float quant_dc,
+    gpu_profile_internal::FrameEncodingProfile* profile) {
+
   if (!frame_only_resident_initial_quant_) {
     return Status::FailedPrecondition(
         "Resident initial quantization was not prepared");
@@ -543,6 +570,8 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
   }
   initial_quant_gradient_params_.test_error_mask = fail_numeric ? 16384u : 0u;
   std::unique_ptr<GpuSubmission> submission;
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->submission);
   status = backend_->SubmitCompute(
       "gjxl prepared initial quantization",
       &MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission, this,
@@ -557,9 +586,26 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     std::lock_guard lock(mutex_);
     submission_ = std::move(submission);
   }
-  status = WaitForOperation();
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->submission);
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->completion_wait);
+  status = WaitForOperation(
+    profile == nullptr ? nullptr : &profile->command_buffer);
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->completion_wait);
   if (!status.ok()) return status;
 
+  if (profile != nullptr) {
+    profile->command_buffer.host_envelope_aligned =
+      profile->command_buffer.start_host_nanoseconds >=
+        profile->submission.begin_nanoseconds &&
+      profile->command_buffer.end_host_nanoseconds <=
+        profile->completion_wait.end_nanoseconds;
+  }
+
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->readback);
   uint32_t device_error = 0;
   status = CopyReadback(*backend_, reconstruction_error_, &device_error,
                         sizeof(device_error));
@@ -607,6 +653,10 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     Invalidate();
     return status;
   }
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->readback);
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->frame_assembly);
   CopyContiguousPlane(last_initial_quant_field_, output.quant_field);
   CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
   CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
@@ -615,6 +665,8 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     resident_quantizer_ready_ = true;
     if (quantizer != nullptr) *quantizer = device_quantizer;
   }
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->frame_assembly);
   CompleteOperation();
   return Status::Ok();
 }
@@ -655,6 +707,29 @@ Status MetalPreparedAqEvaluation::GetResidentAcStrategyInputs(
 Status MetalPreparedAqEvaluation::EncodeFrame(
     AqEvaluationInput input, VarDctEncoderFrame *frame) {
 
+  return EncodeFrameImpl(input, frame, nullptr);
+}
+
+Status MetalPreparedAqEvaluation::EncodeFrameProfiled(
+    AqEvaluationInput input, VarDctEncoderFrame* frame,
+    gpu_profile_internal::FrameEncodingProfile* profile) {
+
+  if (profile == nullptr) {
+    return Status::InvalidArgument(
+      "AQ frame-only profile output is null");
+  }
+  gpu_profile_internal::FrameEncodingProfile candidate;
+  Status status = EncodeFrameImpl(input, frame, &candidate);
+  if (status.ok()) {
+    *profile = candidate;
+  }
+  return status;
+}
+
+Status MetalPreparedAqEvaluation::EncodeFrameImpl(
+    AqEvaluationInput input, VarDctEncoderFrame* frame,
+    gpu_profile_internal::FrameEncodingProfile* profile) {
+
   if (frame == nullptr) {
     return Status::InvalidArgument("AQ frame-only output is null");
   }
@@ -687,6 +762,8 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
     return Status::DeviceError("Injected Metal AQ upload failure");
   }
   reset_params_.test_error_mask = fail_numeric ? 512u : 0u;
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->input_upload);
   status = UploadInput(input);
   if (!status.ok()) {
     Invalidate();
@@ -696,8 +773,12 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
     params.global_scale = input.quantizer.global_scale;
     params.quant_dc = input.quantizer.quant_dc;
   }
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->input_upload);
 
   std::unique_ptr<GpuSubmission> submission;
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->submission);
   status = backend_->SubmitCompute(
       "gjxl prepared AQ frame encoding",
       &MetalPreparedAqEvaluation::EncodeFrameSubmission, this, &submission);
@@ -711,10 +792,27 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
     std::lock_guard lock(mutex_);
     submission_ = std::move(submission);
   }
-  status = WaitForOperation();
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->submission);
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->completion_wait);
+  status = WaitForOperation(
+    profile == nullptr ? nullptr : &profile->command_buffer);
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->completion_wait);
   if (!status.ok())
     return status;
 
+  if (profile != nullptr) {
+    profile->command_buffer.host_envelope_aligned =
+      profile->command_buffer.start_host_nanoseconds >=
+        profile->submission.begin_nanoseconds &&
+      profile->command_buffer.end_host_nanoseconds <=
+        profile->completion_wait.end_nanoseconds;
+  }
+
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->readback);
   uint32_t device_error = 0;
   status = CopyReadback(*backend_, reconstruction_error_, &device_error,
                         sizeof(device_error));
@@ -755,7 +853,11 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
     Invalidate();
     return status;
   }
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->readback);
 
+  profile_internal::Begin(
+    profile == nullptr ? nullptr : &profile->frame_assembly);
   VarDctEncoderFrame candidate;
   status = AssembleFrameFromReadback(&candidate);
   if (!status.ok()) {
@@ -763,6 +865,8 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
     return status;
   }
   *frame = std::move(candidate);
+  profile_internal::End(
+    profile == nullptr ? nullptr : &profile->frame_assembly);
   CompleteOperation();
   return Status::Ok();
 }

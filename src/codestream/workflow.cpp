@@ -518,9 +518,11 @@ struct PreparedWorkflow {
   bool resolve_production_backend,
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary,
-  codestream_internal::VarDctEncodingProfile* profile) {
+  codestream_internal::VarDctEncodingProfile* profile,
+  codestream_internal::VarDctEncodingStageProfile* stage_profile) {
 
   codestream_internal::VarDctEncodingProfile candidate_profile;
+  codestream_internal::VarDctEncodingStageProfile candidate_stage_profile;
 
   CpuQuantizationPipelineOptions pipeline_options;
   pipeline_options.butteraugli_target = options.butteraugli_target;
@@ -533,6 +535,10 @@ struct PreparedWorkflow {
 
   GpuBackend* selected_gpu = nullptr;
   bool selected_metal = false;
+  profile_internal::Begin(
+    stage_profile == nullptr
+      ? nullptr
+      : &candidate_stage_profile.backend_selection);
   const WorkflowClock::time_point selection_begin = ProfileBegin(profile);
   Status status = SelectAttemptBackend(
     prepared, options, supplied_backend, supplied_backend_is_qualified,
@@ -543,6 +549,14 @@ struct PreparedWorkflow {
   ProfileEnd(
     profile, selection_begin,
     &candidate_profile.backend_selection_nanoseconds);
+  profile_internal::End(
+    stage_profile == nullptr
+      ? nullptr
+      : &candidate_stage_profile.backend_selection);
+  profile_internal::Begin(
+    stage_profile == nullptr
+      ? nullptr
+      : &candidate_stage_profile.quantization_pipeline);
   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
   prepared.pipeline.score_history.clear();
   prepared.pipeline.maximum_error_result = {};
@@ -550,16 +564,23 @@ struct PreparedWorkflow {
         GpuAdaptiveQuantizationMode::kMaximumThroughput) {
     const CpuQuantizationPipelineOutput pipeline_output =
       prepared.pipeline.Output();
-    status = RunGpuFrameOnlyQuantizationPipeline(
-      *selected_gpu, prepared.original_linear_rgb(),
-      prepared.opsin.const_view(), pipeline_options,
-      {
-        .initial_quantization = pipeline_output.initial_quantization,
-        .quant_field = {
-          prepared.pipeline.final_quant.data(), prepared.pipeline.block_extent,
-          prepared.pipeline.block_extent.width},
-        .frame = &prepared.pipeline.frame,
-      });
+    const GpuFrameOnlyPipelineOutput pipeline_output_view = {
+      .initial_quantization = pipeline_output.initial_quantization,
+      .quant_field = {
+        prepared.pipeline.final_quant.data(), prepared.pipeline.block_extent,
+        prepared.pipeline.block_extent.width},
+      .frame = &prepared.pipeline.frame,
+    };
+    status = stage_profile == nullptr
+      ? RunGpuFrameOnlyQuantizationPipeline(
+          *selected_gpu, prepared.original_linear_rgb(),
+          prepared.opsin.const_view(), pipeline_options, pipeline_output_view)
+      : quantization_pipeline_internal::
+          RunGpuFrameOnlyQuantizationPipelineProfiled(
+            *selected_gpu, prepared.original_linear_rgb(),
+            prepared.opsin.const_view(), pipeline_options,
+            pipeline_output_view,
+            &candidate_stage_profile.maximum_throughput);
   } else {
     status = selected_metal
       ? quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
@@ -576,20 +597,39 @@ struct PreparedWorkflow {
   ProfileEnd(
     profile, pipeline_begin,
     &candidate_profile.quantization_pipeline_nanoseconds);
+  profile_internal::End(
+    stage_profile == nullptr
+      ? nullptr
+      : &candidate_stage_profile.quantization_pipeline);
 
   std::vector<uint8_t> candidate;
+  profile_internal::Begin(
+    stage_profile == nullptr
+      ? nullptr
+      : &candidate_stage_profile.codestream_encoding);
   const WorkflowClock::time_point codestream_begin = ProfileBegin(profile);
-  status = profile == nullptr
+  status = profile == nullptr && stage_profile == nullptr
     ? EncodeVarDctCodestream(prepared.pipeline.frame, &candidate)
     : codestream_internal::EncodeVarDctCodestreamProfiled(
-        prepared.pipeline.frame, &candidate, &candidate_profile.codestream);
+        prepared.pipeline.frame, &candidate, &candidate_profile.codestream,
+        stage_profile == nullptr
+          ? nullptr
+          : &candidate_stage_profile.codestream);
   ProfileEnd(
     profile, codestream_begin,
     &candidate_profile.codestream_encoding_nanoseconds);
+  profile_internal::End(
+    stage_profile == nullptr
+      ? nullptr
+      : &candidate_stage_profile.codestream_encoding);
   if (!status.ok()) {
     return status;
   }
 
+  profile_internal::Begin(
+    stage_profile == nullptr
+      ? nullptr
+      : &candidate_stage_profile.summary_assembly);
   const WorkflowClock::time_point summary_begin = ProfileBegin(profile);
   VarDctEncodingSummary candidate_summary;
   candidate_summary.extent = prepared.geometry.frame();
@@ -651,6 +691,10 @@ struct PreparedWorkflow {
   ProfileEnd(
     profile, summary_begin,
     &candidate_profile.summary_assembly_nanoseconds);
+  profile_internal::End(
+    stage_profile == nullptr
+      ? nullptr
+      : &candidate_stage_profile.summary_assembly);
   candidate_profile.execution_backend = selected_metal
     ? VarDctExecutionBackend::kMetal
     : VarDctExecutionBackend::kCpu;
@@ -661,6 +705,9 @@ struct PreparedWorkflow {
   }
   if (profile != nullptr) {
     *profile = candidate_profile;
+  }
+  if (stage_profile != nullptr) {
+    *stage_profile = candidate_stage_profile;
   }
   return Status::Ok();
 }
@@ -676,14 +723,19 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary,
   VarDctEncodingTiming* timing,
-  codestream_internal::VarDctEncodingProfile* profile) {
+  codestream_internal::VarDctEncodingProfile* profile,
+  codestream_internal::VarDctEncodingStageProfile* stage_profile) {
 
-  const bool profiling = timing != nullptr || profile != nullptr;
+  const bool profiling =
+    timing != nullptr || profile != nullptr || stage_profile != nullptr;
   const auto total_begin = !profiling
     ? WorkflowClock::time_point{}
     : WorkflowClock::now();
   VarDctEncodingTiming local_timing;
   codestream_internal::VarDctEncodingProfile local_profile;
+  codestream_internal::VarDctEncodingStageProfile local_stage_profile;
+  profile_internal::Begin(
+    stage_profile == nullptr ? nullptr : &local_stage_profile.total);
   if (codestream == nullptr || !linear_rgb.valid()) {
     return Status::InvalidArgument(
       "VarDCT encoding input or output is invalid");
@@ -736,6 +788,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       const auto preparation_begin = !profiling
         ? WorkflowClock::time_point{}
         : WorkflowClock::now();
+      profile_internal::Begin(
+        stage_profile == nullptr
+          ? nullptr
+          : &local_stage_profile.input_preparation);
       status = PrepareWorkflow(linear_rgb, options, &prepared);
       if (!status.ok()) {
         return status;
@@ -748,6 +804,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         local_profile.input_preparation_nanoseconds =
           ElapsedNanoseconds(preparation_begin);
       }
+      profile_internal::End(
+        stage_profile == nullptr
+          ? nullptr
+          : &local_stage_profile.input_preparation);
       codestream_internal::TargetSizeSearchResult search_result;
       const auto search_begin = timing == nullptr
         ? WorkflowClock::time_point{}
@@ -774,7 +834,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
             *prepared, attempt_options, 0, 0, supplied_backend,
             supplied_backend_is_qualified, resolve_production_backend,
             attempt_codestream, attempt_summary,
-            profile == nullptr ? nullptr : &attempt_profile);
+            profile == nullptr ? nullptr : &attempt_profile, nullptr);
           if (profile != nullptr && attempt_status.ok()) {
             AccumulateEncodingProfile(attempt_profile, &local_profile);
           }
@@ -839,6 +899,9 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
           search_result.summary.execution_backend;
         local_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
       }
+      if (stage_profile != nullptr) {
+        profile_internal::End(&local_stage_profile.total);
+      }
       *codestream = std::move(search_result.codestream);
       if (summary != nullptr) {
         *summary = std::move(search_result.summary);
@@ -849,6 +912,9 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       }
       if (profile != nullptr) {
         *profile = local_profile;
+      }
+      if (stage_profile != nullptr) {
+        *stage_profile = local_stage_profile;
       }
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
@@ -865,6 +931,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     const auto preparation_begin = !profiling
       ? WorkflowClock::time_point{}
       : WorkflowClock::now();
+    profile_internal::Begin(
+      stage_profile == nullptr
+        ? nullptr
+        : &local_stage_profile.input_preparation);
     status = PrepareWorkflow(linear_rgb, options, &prepared);
     if (!status.ok()) {
       return status;
@@ -877,9 +947,14 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       local_profile.input_preparation_nanoseconds =
         ElapsedNanoseconds(preparation_begin);
     }
+    profile_internal::End(
+      stage_profile == nullptr
+        ? nullptr
+        : &local_stage_profile.input_preparation);
     std::vector<uint8_t> candidate;
     VarDctEncodingSummary candidate_summary;
     codestream_internal::VarDctEncodingProfile attempt_profile;
+    codestream_internal::VarDctEncodingStageProfile attempt_stage_profile;
     const auto attempt_begin = timing == nullptr
       ? WorkflowClock::time_point{}
       : WorkflowClock::now();
@@ -888,7 +963,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       target_size_tolerance_bytes, supplied_backend,
       supplied_backend_is_qualified, resolve_production_backend,
       &candidate, &candidate_summary,
-      profile == nullptr ? nullptr : &attempt_profile);
+      profile == nullptr ? nullptr : &attempt_profile,
+      stage_profile == nullptr ? nullptr : &attempt_stage_profile);
     if (timing != nullptr) {
       local_timing.attempts.push_back({
         .butteraugli_target =
@@ -906,6 +982,14 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     }
     if (profile != nullptr) {
       AccumulateEncodingProfile(attempt_profile, &local_profile);
+    }
+    if (stage_profile != nullptr) {
+      const profile_internal::HostInterval total = local_stage_profile.total;
+      const profile_internal::HostInterval preparation =
+        local_stage_profile.input_preparation;
+      local_stage_profile = attempt_stage_profile;
+      local_stage_profile.total = total;
+      local_stage_profile.input_preparation = preparation;
     }
 
     if (timing != nullptr) {
@@ -926,6 +1010,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       local_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
       *profile = local_profile;
     }
+    if (stage_profile != nullptr) {
+      profile_internal::End(&local_stage_profile.total);
+      *stage_profile = local_stage_profile;
+    }
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate public VarDCT encoding storage");
@@ -944,7 +1032,7 @@ Status EncodeLinearRgbVarDctCodestream(
 
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, nullptr,
-    nullptr);
+    nullptr, nullptr);
 }
 
 Status EncodeLinearRgbVarDctCodestreamProfiled(
@@ -960,7 +1048,7 @@ Status EncodeLinearRgbVarDctCodestreamProfiled(
   }
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, timing,
-    nullptr);
+    nullptr, nullptr);
 }
 
 namespace codestream_internal {
@@ -996,7 +1084,7 @@ Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
 
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
-    codestream, summary, nullptr, nullptr);
+    codestream, summary, nullptr, nullptr, nullptr);
 }
 
 Status EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
@@ -1013,7 +1101,24 @@ Status EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
   }
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
-    codestream, summary, nullptr, profile);
+    codestream, summary, nullptr, profile, nullptr);
+}
+
+Status EncodeLinearRgbVarDctCodestreamStageProfiled(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingTiming* timing,
+  VarDctEncodingStageProfile* profile) {
+
+  if (timing == nullptr || profile == nullptr) {
+    return Status::InvalidArgument(
+      "Stage-profiled VarDCT timing output is null");
+  }
+  return EncodeLinearRgbVarDctCodestreamImpl(
+    linear_rgb, options, nullptr, false, true, codestream, summary, timing,
+    nullptr, profile);
 }
 
 }  // namespace codestream_internal

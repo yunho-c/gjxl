@@ -14,6 +14,19 @@
 namespace gjxl::metal_internal {
 namespace {
 
+Status SecondsToNanoseconds(double seconds, uint64_t* nanoseconds) {
+  const long double converted =
+    static_cast<long double>(seconds) * 1.0e9L;
+  if (!std::isfinite(seconds) || seconds <= 0.0 ||
+      converted >
+        static_cast<long double>(std::numeric_limits<uint64_t>::max())) {
+    return Status::DeviceError(
+      "Metal command buffer returned an invalid host timestamp");
+  }
+  *nanoseconds = static_cast<uint64_t>(converted);
+  return Status::Ok();
+}
+
 class MetalSubmission final : public GpuSubmission {
 public:
   MetalSubmission(
@@ -51,20 +64,39 @@ public:
       return Status::InvalidArgument(
         "Metal GPU duration output pointer is null");
     }
+    gpu_profile_internal::CommandBufferProfile profile;
+    Status status = GpuProfile(&profile);
+    if (!status.ok()) return status;
+    *nanoseconds = profile.duration_nanoseconds();
+    return Status::Ok();
+  }
+
+  Status GpuProfile(
+    gpu_profile_internal::CommandBufferProfile* profile) const {
+
+    if (profile == nullptr) {
+      return Status::InvalidArgument(
+        "Metal GPU profile output pointer is null");
+    }
     if (!completion_status_.ok() ||
         command_buffer_->status() != MTL::CommandBufferStatusCompleted) {
       return Status::FailedPrecondition(
-        "Metal GPU duration requires successful completion");
+        "Metal GPU profile requires successful completion");
     }
     const double begin = command_buffer_->GPUStartTime();
     const double end = command_buffer_->GPUEndTime();
-    const double duration = (end - begin) * 1.0e9;
-    if (!std::isfinite(duration) || duration < 0.0 ||
-        duration > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+    if (!std::isfinite(begin) || !std::isfinite(end) || end < begin) {
       return Status::DeviceError(
         "Metal command buffer returned invalid GPU timestamps");
     }
-    *nanoseconds = static_cast<uint64_t>(duration);
+    gpu_profile_internal::CommandBufferProfile candidate;
+    Status status = SecondsToNanoseconds(
+      begin, &candidate.start_host_nanoseconds);
+    if (status.ok()) {
+      status = SecondsToNanoseconds(end, &candidate.end_host_nanoseconds);
+    }
+    if (!status.ok()) return status;
+    *profile = candidate;
     return Status::Ok();
   }
 
@@ -89,6 +121,18 @@ Status GetMetalSubmissionGpuDuration(
       "GPU duration requires a Metal submission");
   }
   return metal->GpuDuration(nanoseconds);
+}
+
+Status GetMetalSubmissionGpuProfile(
+  GpuSubmission& submission,
+  gpu_profile_internal::CommandBufferProfile* profile) {
+
+  auto* metal = dynamic_cast<MetalSubmission*>(&submission);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "GPU profile requires a Metal submission");
+  }
+  return metal->GpuProfile(profile);
 }
 
 Status MetalBackend::SubmitCompute(

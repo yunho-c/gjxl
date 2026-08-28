@@ -12,6 +12,10 @@
 
 namespace gjxl {
 
+namespace codestream_internal {
+class VarDctBatchProfileAccess;
+}
+
 struct VarDctBatchEncodingRequest {
   ConstImage3FView linear_rgb;
   VarDctEncodingOptions options;
@@ -57,6 +61,7 @@ public:
     std::vector<VarDctBatchEncodingResult>* results);
 
 private:
+  friend class codestream_internal::VarDctBatchProfileAccess;
   class Impl;
 
   explicit VarDctBatchEncoder(std::unique_ptr<Impl> impl);

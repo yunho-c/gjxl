@@ -9,6 +9,7 @@
 #include "codestream/encoder_internal.h"
 #include "codestream/workflow.h"
 #include "gpu/backend.h"
+#include "gpu/ops/quantization_pipeline_profile_internal.h"
 
 namespace gjxl::codestream_internal {
 
@@ -23,6 +24,18 @@ struct VarDctEncodingProfile {
   VarDctCodestreamProfile codestream;
 
   bool operator==(const VarDctEncodingProfile&) const = default;
+};
+
+struct VarDctEncodingStageProfile {
+  profile_internal::HostInterval total;
+  profile_internal::HostInterval input_preparation;
+  profile_internal::HostInterval backend_selection;
+  profile_internal::HostInterval quantization_pipeline;
+  profile_internal::HostInterval codestream_encoding;
+  profile_internal::HostInterval summary_assembly;
+  VarDctCodestreamStageProfile codestream;
+  quantization_pipeline_internal::GpuFrameOnlyPipelineProfile
+    maximum_throughput;
 };
 
 [[nodiscard]] bool IsAutomaticMetalGeometryEligible(
@@ -53,5 +66,16 @@ EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary,
   VarDctEncodingProfile* profile);
+
+/// Diagnostic-only production workflow entry point used by benchmarks. On
+/// failure all caller-visible outputs, including both profiles, remain
+/// unchanged.
+[[nodiscard]] Status EncodeLinearRgbVarDctCodestreamStageProfiled(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingTiming* timing,
+  VarDctEncodingStageProfile* profile);
 
 }  // namespace gjxl::codestream_internal

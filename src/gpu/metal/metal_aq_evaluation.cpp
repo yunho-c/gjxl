@@ -2473,7 +2473,8 @@ Status MetalPreparedAqEvaluation::PrepareExactCoefficientStaging(
   }
 }
 
-Status MetalPreparedAqEvaluation::WaitForOperation() {
+Status MetalPreparedAqEvaluation::WaitForOperation(
+    gpu_profile_internal::CommandBufferProfile* profile) {
   std::unique_ptr<GpuSubmission> submission;
   bool fail_readback = false;
   bool *observer = nullptr;
@@ -2489,6 +2490,9 @@ Status MetalPreparedAqEvaluation::WaitForOperation() {
     observer = wait_observer_;
   }
   Status status = submission->Wait();
+  if (status.ok() && profile != nullptr) {
+    status = GetMetalSubmissionGpuProfile(*submission, profile);
+  }
   if (status.ok() && active_profile_ != nullptr) {
     uint64_t gpu_nanoseconds = 0;
     if (GetMetalSubmissionGpuDuration(
