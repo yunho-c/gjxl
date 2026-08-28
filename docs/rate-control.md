@@ -54,17 +54,17 @@ The remaining rate-control gaps are:
 
 - no prepared state reused across target-size attempts;
 - no hardened failed-candidate or configurable closest-absolute size search;
-- no resident Metal maximum-error reduction;
 - no fully resident `AdjustQuantBlockAC` device pass; and
 - no resampling-specific AQ bypass. The bypass policy is small, but the current
   codestream profile does not support resampling.
 
 The public request/result types represent all four modes and validate only the
-active mode. Maximum-error requests are implemented on the CPU; explicitly
-forced Metal remains `Unavailable` until task 10 lands. The result reports the
-requested and achieved per-channel XYB errors, normalized maximum, fixed
-evaluation count, and whether the request was met, exhausted the iteration
-budget, or exhausted the representable quantization range.
+active mode. Maximum-error requests are implemented on the CPU and explicitly
+forced Metal paths. Automatic maximum-error selection remains on the CPU; this
+milestone did not widen the qualified automatic-backend gate. The result
+reports the requested and achieved per-channel XYB errors, normalized maximum,
+fixed evaluation count, and whether the request was met, exhausted the
+iteration budget, or exhausted the representable quantization range.
 
 Maximum-error AQ uses a named internal initialization target of `1.0` and a
 fixed initial DC quantization of `16 * sqrt(0.1)`, independent of the inactive
@@ -331,6 +331,9 @@ Acceptance criteria:
 
 **Estimate:** 1–2 weeks after the CPU oracle.
 
+**Status:** complete for exact-coefficient and experimental fully resident
+Metal modes; automatic selection remains CPU-only.
+
 Reuse the prepared Metal reconstruction and add a strategy-aware per-transform
 maximum-error reduction. Keep reconstructed images resident and read back only
 the bounded transform-error map required by the unchanged CPU update policy.
@@ -339,6 +342,20 @@ Validation must compare the reduction directly against the CPU oracle before
 testing the composed policy. Exact-coefficient Metal must preserve the CPU
 raw-quant and final-frame decisions. Fully resident numerical deviations remain
 a separately reported experimental result.
+
+The prepared Metal evaluator now selects either Butteraugli or maximum-error as
+its active metric. The maximum-error kernel compares resident coding and
+filtered reconstructed opsin, ignores padded pixels, reduces each of the seven
+strategy footprints, and returns only the block map plus three actual channel
+maxima per transform. It performs one submission and no steady-state device
+allocation per evaluation.
+
+The direct mixed-strategy, odd-edge fixture agrees with the CPU reduction oracle
+within `1e-6`. The composed exact-coefficient path preserves the CPU final frame
+and codestream exactly; accumulated quant-field, error-map, score, achieved
+error, and reconstruction diagnostics remain within the existing `2e-3`
+cross-backend cap. The fully resident path returns deterministic finite results
+but retains its experimental decision-parity status.
 
 ### 11. Harden target-size search
 
@@ -426,6 +443,9 @@ Expected cumulative effort: approximately 3–5 weeks.
 
 Complete tasks 8 and 10.
 
+**Status:** complete for the current profile. This does not widen automatic
+Metal selection for maximum-error requests.
+
 Exit criteria:
 
 - exact-coefficient Metal preserves authoritative CPU coefficient decisions in
@@ -493,6 +513,7 @@ The following must not be counted as easy or medium rate-control completion:
 - [`adaptive_quantization_internal.h`](../src/codec/adaptive_quantization_internal.h)
 - [`maximum_error.h`](../src/codec/maximum_error.h)
 - [`maximum_error.cpp`](../src/codec/maximum_error.cpp)
+- [`gpu/metal/kernels/aq_reduction.metal`](../src/gpu/metal/kernels/aq_reduction.metal)
 - [`quantization.h`](../src/codec/quantization.h)
 - [`quantization.cpp`](../src/codec/quantization.cpp)
 - [`gpu/ops/adaptive_quantization.h`](../src/gpu/ops/adaptive_quantization.h)

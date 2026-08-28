@@ -339,11 +339,6 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       return Status::InvalidArgument(
         "VarDCT Metal AQ mode is invalid");
   }
-  if (options.rate_control_mode == VarDctRateControlMode::kMaximumError &&
-      options.backend == VarDctBackendPreference::kMetal) {
-    return Status::Unavailable(
-      "Maximum-error AQ is not yet available on forced Metal");
-  }
   if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
       options.rate_control_mode ==
         VarDctRateControlMode::kTargetBitsPerPixel) {
@@ -435,7 +430,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     GpuBackend* selected_gpu = nullptr;
     bool selected_metal = false;
     if (options.backend != VarDctBackendPreference::kCpu &&
-        options.rate_control_mode != VarDctRateControlMode::kMaximumError) {
+        (options.rate_control_mode != VarDctRateControlMode::kMaximumError ||
+         options.backend == VarDctBackendPreference::kMetal)) {
       const bool geometry_eligible =
         codestream_internal::IsAutomaticMetalGeometryEligible(
           geometry.padded_frame());

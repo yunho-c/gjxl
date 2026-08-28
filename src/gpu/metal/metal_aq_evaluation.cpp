@@ -59,6 +59,9 @@ static_assert(sizeof(AqResetParams) == 20);
 static_assert(std::is_standard_layout_v<AqBlockReductionParams>);
 static_assert(std::is_trivially_copyable_v<AqBlockReductionParams>);
 static_assert(sizeof(AqBlockReductionParams) == 40);
+static_assert(std::is_standard_layout_v<AqMaximumErrorReductionParams>);
+static_assert(std::is_trivially_copyable_v<AqMaximumErrorReductionParams>);
+static_assert(sizeof(AqMaximumErrorReductionParams) == 56);
 static_assert(sizeof(AqQuantizationProbeParams) == 24);
 static_assert(std::is_standard_layout_v<AqGaborishParams>);
 static_assert(std::is_trivially_copyable_v<AqGaborishParams>);
@@ -123,12 +126,30 @@ template <typename T>
 }
 
 [[nodiscard]] Status ValidateOptions(const AqEvaluationOptions& options) {
-  if (!options.profile.valid() ||
-      !FinitePositive(options.butteraugli.hf_asymmetry) ||
-      !FinitePositive(options.butteraugli.x_multiplier) ||
-      !FinitePositive(options.butteraugli.intensity_target)) {
+  if (!options.profile.valid()) {
     return Status::InvalidArgument(
       "Prepared AQ scalar options must be finite and positive");
+  }
+  switch (options.metric) {
+    case AqEvaluationMetric::kButteraugli:
+      if (!FinitePositive(options.butteraugli.hf_asymmetry) ||
+          !FinitePositive(options.butteraugli.x_multiplier) ||
+          !FinitePositive(options.butteraugli.intensity_target)) {
+        return Status::InvalidArgument(
+          "Prepared AQ Butteraugli options must be finite and positive");
+      }
+      break;
+    case AqEvaluationMetric::kMaximumError:
+      if (!std::ranges::all_of(
+            options.maximum_error,
+            [](float value) { return FinitePositive(value); })) {
+        return Status::InvalidArgument(
+          "Prepared AQ maximum-error limits must be finite and positive");
+      }
+      break;
+    default:
+      return Status::InvalidArgument(
+        "Prepared AQ evaluation metric is invalid");
   }
 
   if (options.profile.loop_filter.gaborish) {
@@ -448,6 +469,15 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     }
   }
   anchor_count_ = row_major_anchors_.size();
+  try {
+    transform_maximum_error_readback_.resize(3 * anchor_count_);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate maximum-error readback storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Maximum-error readback storage is too large");
+  }
   size_t coefficient_offset = 0;
   size_t anchor_offset = 0;
   for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
@@ -603,6 +633,11 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   status = AddPlannedPlane(DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
   if (!status.ok())
     return status;
+  status = AddPlannedPlane(
+      DeviceElementType::kF32, {3 * anchor_count_, 1}, 3 * anchor_count_,
+      &staging_bytes);
+  if (!status.ok())
+    return status;
   status =
       AddPlannedPlane(DeviceElementType::kF32, {coefficient_value_count_, 1},
                       coefficient_value_count_, &staging_bytes);
@@ -745,6 +780,11 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
   status = staging_.AllocatePlane(
+      DeviceElementType::kF32, {3 * anchor_count_, 1}, 3 * anchor_count_,
+      kBufferAlignment, &transform_maximum_error_);
+  if (!status.ok())
+    return status;
+  status = staging_.AllocatePlane(
       DeviceElementType::kF32, {coefficient_value_count_, 1},
       coefficient_value_count_, kBufferAlignment, &gathered_pixels_);
   if (!status.ok())
@@ -868,6 +908,22 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         static_cast<uint32_t>(info->covered_blocks.width),
         static_cast<uint32_t>(info->covered_blocks.height),
     };
+    maximum_error_reduction_params_[batch_index] = {
+        static_cast<uint32_t>(source_extent_.width),
+        static_cast<uint32_t>(source_extent_.height),
+        static_cast<uint32_t>(coding_[0].row_stride),
+        static_cast<uint32_t>(FinalFilteredImage()[0].row_stride),
+        static_cast<uint32_t>(block_distance_.row_stride),
+        static_cast<uint32_t>(batch.anchor_offset),
+        static_cast<uint32_t>(batch.anchor_count),
+        static_cast<uint32_t>(info->pixel_extent().width),
+        static_cast<uint32_t>(info->pixel_extent().height),
+        static_cast<uint32_t>(info->covered_blocks.width),
+        static_cast<uint32_t>(info->covered_blocks.height),
+        options_.maximum_error[0],
+        options_.maximum_error[1],
+        options_.maximum_error[2],
+    };
   }
   reset_params_ = {
       static_cast<uint32_t>(coefficient_value_count_),
@@ -921,15 +977,17 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       255.0f / options_.profile.intensity_target,
   };
 
-  status = PrepareDeviceButteraugli(
-      *backend_,
-      {.reference_linear_rgb = {{{original_[0], original_[1], original_[2]}}},
-       .options = options_.butteraugli},
-      &butteraugli_);
-  if (!status.ok())
-    return status;
-  const DeviceButteraugliMemoryStats butteraugli_memory =
-      butteraugli_->memory_stats();
+  DeviceButteraugliMemoryStats butteraugli_memory;
+  if (options_.metric == AqEvaluationMetric::kButteraugli) {
+    status = PrepareDeviceButteraugli(
+        *backend_,
+        {.reference_linear_rgb = {{{original_[0], original_[1], original_[2]}}},
+         .options = options_.butteraugli},
+        &butteraugli_);
+    if (!status.ok())
+      return status;
+    butteraugli_memory = butteraugli_->memory_stats();
+  }
   if (butteraugli_memory.prepared_allocation_bytes >
           std::numeric_limits<size_t>::max() - staging_.capacity_bytes() ||
       butteraugli_memory.peak_comparison_scratch_bytes >
@@ -1007,21 +1065,24 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(
     return status;
   }
 
-  if (butteraugli_ == nullptr) {
+  if (options_.metric == AqEvaluationMetric::kButteraugli &&
+      butteraugli_ == nullptr) {
     return Status::FailedPrecondition(
       "Prepared AQ Butteraugli state is missing");
   }
-  status = ValidatePreparedMetalButteraugliEncoding(
-    *butteraugli_,
-    {
-      .distorted_linear_rgb = {{{reconstructed_linear_[0],
-                                 reconstructed_linear_[1],
-                                 reconstructed_linear_[2]}}},
-      .distance_map = distance_map_,
-      .score = score_,
-    });
-  if (!status.ok()) {
-    return status;
+  if (options_.metric == AqEvaluationMetric::kButteraugli) {
+    status = ValidatePreparedMetalButteraugliEncoding(
+      *butteraugli_,
+      {
+        .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                   reconstructed_linear_[1],
+                                   reconstructed_linear_[2]}}},
+        .distance_map = distance_map_,
+        .score = score_,
+      });
+    if (!status.ok()) {
+      return status;
+    }
   }
 
   status = BeginOperation(profiling_reserved);
@@ -1122,9 +1183,37 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
         y * block_distance_.row_stride * sizeof(float));
   }
   float score = 0.0f;
-  if (status.ok()) {
+  MaximumErrorReduction maximum_error;
+  if (status.ok() &&
+      options_.metric == AqEvaluationMetric::kButteraugli) {
     status = backend_->CopyDeviceToHost(
       *score_.buffer, &score, sizeof(score), score_.offset_bytes);
+  }
+  if (status.ok() &&
+      options_.metric == AqEvaluationMetric::kMaximumError) {
+    status = backend_->CopyDeviceToHost(
+      *transform_maximum_error_.buffer,
+      transform_maximum_error_readback_.data(),
+      transform_maximum_error_readback_.size() * sizeof(float),
+      transform_maximum_error_.offset_bytes);
+    for (size_t anchor = 0; status.ok() && anchor < anchor_count_; ++anchor) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        const float value =
+          transform_maximum_error_readback_[3 * anchor + channel];
+        if (!std::isfinite(value) || value < 0.0f) {
+          status = Status::Internal(
+            "Metal AQ maximum-error readback is invalid");
+          break;
+        }
+        maximum_error.channel_maximum[channel] = std::max(
+          maximum_error.channel_maximum[channel], value);
+      }
+    }
+    if (status.ok()) {
+      maximum_error.normalized_maximum =
+        *std::ranges::max_element(readback_);
+      score = maximum_error.normalized_maximum;
+    }
   }
   if (!status.ok()) {
     Invalidate();
@@ -1246,6 +1335,9 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
                 output.block_distance_map.Row(y));
   }
   *output.score = static_cast<double>(score);
+  if (options_.metric == AqEvaluationMetric::kMaximumError) {
+    *output.maximum_error = maximum_error;
+  }
   if (output.final != nullptr) {
     for (size_t channel = 0; channel < 3; ++channel) {
       for (size_t y = 0; y < source_extent_.height; ++y) {
@@ -1474,7 +1566,9 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
   if ((linear_specified && !exact_linear) ||
       (exact_linear && input.exact_coefficients == nullptr) ||
       (exact_linear &&
-       input.exact_reconstructed_linear_rgb.extent() != source_extent_)) {
+       input.exact_reconstructed_linear_rgb.extent() != source_extent_) ||
+      (exact_linear &&
+       options_.metric == AqEvaluationMetric::kMaximumError)) {
     return Status::InvalidArgument(
         "An exact AQ linear image must be correctly sized and accompanied "
         "by exact coefficients");
@@ -1561,7 +1655,9 @@ Status
 MetalPreparedAqEvaluation::ValidateOutput(AqEvaluationOutput output) const {
   if (!ValidHostPlaneLayout(output.block_distance_map) ||
       output.block_distance_map.extent != block_extent_ ||
-      output.score == nullptr) {
+      output.score == nullptr ||
+      (options_.metric == AqEvaluationMetric::kMaximumError &&
+       output.maximum_error == nullptr)) {
     return Status::InvalidArgument("Prepared AQ evaluation output is invalid");
   }
   if (output.final != nullptr &&
@@ -1861,6 +1957,49 @@ void MetalPreparedAqEvaluation::EncodeBlockReduction(
   }
 }
 
+void MetalPreparedAqEvaluation::EncodeMaximumErrorReduction(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+
+  encoder->setComputePipelineState(
+    backend.aq_pipelines_.maximum_error_reduction.get());
+  const auto reconstructed = FinalFilteredImage();
+  const MetalBuffer* anchors = MetalBackend::AsMetalBuffer(*anchors_.buffer);
+  MetalBuffer* block = MetalBackend::AsMetalBuffer(*block_distance_.buffer);
+  MetalBuffer* maxima =
+    MetalBackend::AsMetalBuffer(*transform_maximum_error_.buffer);
+  MetalBuffer* error =
+    MetalBackend::AsMetalBuffer(*reconstruction_error_.buffer);
+  for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
+    const AqStrategyBatch& batch = batches_[batch_index];
+    if (batch.anchor_count == 0) {
+      continue;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      const MetalBuffer* reference =
+        MetalBackend::AsMetalBuffer(*coding_[channel].buffer);
+      const MetalBuffer* candidate =
+        MetalBackend::AsMetalBuffer(*reconstructed[channel].buffer);
+      encoder->setBuffer(
+        reference->handle(), coding_[channel].offset_bytes, channel);
+      encoder->setBuffer(
+        candidate->handle(), reconstructed[channel].offset_bytes,
+        channel + 3);
+    }
+    encoder->setBuffer(anchors->handle(), anchors_.offset_bytes, 6);
+    encoder->setBuffer(block->handle(), block_distance_.offset_bytes, 7);
+    encoder->setBuffer(
+      maxima->handle(), transform_maximum_error_.offset_bytes, 8);
+    encoder->setBuffer(
+      error->handle(), reconstruction_error_.offset_bytes, 9);
+    encoder->setBytes(
+      &maximum_error_reduction_params_[batch_index],
+      sizeof(maximum_error_reduction_params_[batch_index]), 10);
+    encoder->dispatchThreadgroups(
+      MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
+      MTL::Size(kBlockReductionThreadCount, 1, 1));
+  }
+}
+
 void MetalPreparedAqEvaluation::EncodeBlockReductionSubmission(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
     const void* context) {
@@ -1879,16 +2018,20 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
   if (!self.exact_linear_reconstruction_) {
     self.EncodePostprocess(backend, encoder);
   }
-  EncodePreparedMetalButteraugli(
-    *self.butteraugli_, encoder,
-    {
-      .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                 self.reconstructed_linear_[1],
-                                 self.reconstructed_linear_[2]}}},
-      .distance_map = self.distance_map_,
-      .score = self.score_,
-    });
-  self.EncodeBlockReduction(backend, encoder);
+  if (self.options_.metric == AqEvaluationMetric::kButteraugli) {
+    EncodePreparedMetalButteraugli(
+      *self.butteraugli_, encoder,
+      {
+        .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                   self.reconstructed_linear_[1],
+                                   self.reconstructed_linear_[2]}}},
+        .distance_map = self.distance_map_,
+        .score = self.score_,
+      });
+    self.EncodeBlockReduction(backend, encoder);
+  } else {
+    self.EncodeMaximumErrorReduction(backend, encoder);
+  }
 }
 
 Status CreateAqPipelines(
@@ -1914,6 +2057,22 @@ Status CreateAqPipelines(
       kBlockReductionThreadCount) {
     return Status::Unavailable(
       "Metal cannot launch the AQ block-reduction threadgroup");
+  }
+  status = CreateAqPipeline(
+    device, library, "gjxl_aq_reduce_maximum_error_f32",
+    &pipelines.maximum_error_reduction);
+  if (!status.ok()) {
+    return {
+      status.code(),
+      std::string(
+        "Failed to create required AQ maximum-error pipeline: ") +
+        std::string(status.message()),
+    };
+  }
+  if (pipelines.maximum_error_reduction->maxTotalThreadsPerThreadgroup() <
+      kBlockReductionThreadCount) {
+    return Status::Unavailable(
+      "Metal cannot launch the AQ maximum-error threadgroup");
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,

@@ -3,11 +3,13 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <memory>
 
 #include "codec/butteraugli.h"
 #include "codec/codestream.h"
+#include "codec/maximum_error.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
 #include "core/quantizer.h"
@@ -16,9 +18,16 @@
 
 namespace gjxl {
 
+enum class AqEvaluationMetric {
+  kButteraugli,
+  kMaximumError,
+};
+
 struct AqEvaluationOptions {
   SimpleVarDctCodestreamProfile profile;
   ButteraugliOptions butteraugli;
+  AqEvaluationMetric metric = AqEvaluationMetric::kButteraugli;
+  std::array<float, 3> maximum_error{};
 };
 
 struct AqEvaluationPreparation {
@@ -48,6 +57,7 @@ struct AqEvaluationOutput {
 
   PlaneF32View block_distance_map;
   double* score = nullptr;
+  MaximumErrorReduction* maximum_error = nullptr;
   Final* final = nullptr;
 };
 
@@ -71,10 +81,11 @@ public:
   PreparedAqEvaluation(const PreparedAqEvaluation&) = delete;
   PreparedAqEvaluation& operator=(const PreparedAqEvaluation&) = delete;
 
-  /// Executes one complete resident reconstruction, filtering, Butteraugli,
-  /// and strategy-aware block reduction. When `output.final` is non-null, the
-  /// same submission also materializes reconstructed RGB and the encoder
-  /// frame. Failure never changes caller-visible output.
+  /// Executes one complete resident reconstruction and filtering pass, then
+  /// the prepared Butteraugli or maximum-error metric and strategy-aware
+  /// reduction. When `output.final` is non-null, the same submission also
+  /// materializes reconstructed RGB and the encoder frame. Failure never
+  /// changes caller-visible output.
   [[nodiscard]] virtual Status Evaluate(
     AqEvaluationInput input,
     AqEvaluationOutput output) = 0;

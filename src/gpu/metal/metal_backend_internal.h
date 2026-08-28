@@ -59,6 +59,7 @@ struct PrimitivePipelines {
 
 struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> block_reduction;
+  NS::SharedPtr<MTL::ComputePipelineState> maximum_error_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> reset_exact_evaluation;
   NS::SharedPtr<MTL::ComputePipelineState> reset_exact_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> reset_reconstruction;

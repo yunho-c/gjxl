@@ -18,6 +18,7 @@
 #include "codec/butteraugli.h"
 #include "codec/color_transform.h"
 #include "codec/loop_filter.h"
+#include "codec/maximum_error.h"
 #include "codec/reconstruction.h"
 #include "codec/vardct_frame.h"
 #include "core/ac_strategy.h"
@@ -26,6 +27,7 @@
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
+#include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/aq_evaluation.h"
 
@@ -248,7 +250,8 @@ struct EvaluationOutputStorage {
 
 bool Prepare(gjxl::GpuBackend& gpu, const HostImage& original,
              const HostImage& coding, const gjxl::AcStrategyGrid& strategies,
-             std::unique_ptr<gjxl::PreparedAqEvaluation>* prepared) {
+             std::unique_ptr<gjxl::PreparedAqEvaluation>* prepared,
+             gjxl::AqEvaluationOptions options = MakeOptions()) {
   const gjxl::Extent2D blocks = strategies.extent();
   const std::vector<uint8_t> sharpness(blocks.width * blocks.height, 4);
   return CheckStatus(gjxl::PrepareAqEvaluation(
@@ -258,7 +261,7 @@ bool Prepare(gjxl::GpuBackend& gpu, const HostImage& original,
       .coding_opsin = coding.View(),
       .strategies = &strategies,
       .epf_sharpness = {sharpness.data(), blocks, blocks.width},
-      .options = MakeOptions(),
+      .options = options,
     },
     prepared), "Metal AQ preparation");
 }
@@ -428,6 +431,102 @@ bool CheckReductionCorpus(gjxl::GpuBackend& gpu) {
   return MakeMixedStrategies(&mixed) &&
     CheckReductionCase(
       gpu, {91, 57}, {96, 64}, mixed, "mixed partial-edge reduction");
+}
+
+bool CheckMaximumErrorReduction(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+
+  gjxl::AqEvaluationOptions options = MakeOptions();
+  options.metric = gjxl::AqEvaluationMetric::kMaximumError;
+  options.maximum_error = {0.004f, 0.007f, 0.01f};
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!Prepare(gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared, options)) {
+    return false;
+  }
+
+  gjxl::metal_internal::MetalAqPostprocessSnapshotForTesting snapshot;
+  if (!CheckStatus(
+        gjxl::metal_internal::
+          RunMetalAqReconstructionAndPostprocessForTesting(
+            *prepared, fixture.input.View(), &snapshot),
+        "maximum-error oracle reconstruction")) {
+    return false;
+  }
+  const gjxl::ConstImage3FView filtered{{{
+    {snapshot.filtered_opsin[0].data(), snapshot.coding_extent,
+     snapshot.coding_extent.width},
+    {snapshot.filtered_opsin[1].data(), snapshot.coding_extent,
+     snapshot.coding_extent.width},
+    {snapshot.filtered_opsin[2].data(), snapshot.coding_extent,
+     snapshot.coding_extent.width},
+  }}};
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  std::vector<float> expected_map(blocks.width * blocks.height);
+  gjxl::MaximumErrorReduction expected;
+  if (!CheckStatus(gjxl::ReduceMaximumError(
+        fixture.coding.View(), filtered, fixture.original.extent,
+        fixture.strategies, options.maximum_error,
+        {expected_map.data(), blocks, blocks.width}, &expected),
+        "CPU maximum-error reduction oracle")) {
+    return false;
+  }
+
+  EvaluationOutputStorage actual(blocks);
+  gjxl::MaximumErrorReduction actual_reduction{{-1.0f, -1.0f, -1.0f}, -1.0f};
+  gjxl::AqEvaluationOutput output = actual.View();
+  output.maximum_error = &actual_reduction;
+  const gjxl::GpuBackendStats before = gpu.stats();
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), output),
+                   "Metal maximum-error reduction") ||
+      !actual.ValidAndPadded()) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after = gpu.stats();
+  if (after.successful_allocations != before.successful_allocations ||
+      after.committed_submissions != before.committed_submissions + 1) {
+    std::cerr << "Maximum-error evaluation violated residency\n";
+    return false;
+  }
+
+  float maximum_difference = 0.0f;
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      maximum_difference = std::max(
+        maximum_difference,
+        std::abs(actual.map[y * actual.stride + x] -
+                 expected_map[y * blocks.width + x]));
+    }
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    maximum_difference = std::max(
+      maximum_difference,
+      std::abs(actual_reduction.channel_maximum[channel] -
+               expected.channel_maximum[channel]));
+  }
+  maximum_difference = std::max(
+    maximum_difference,
+    std::abs(actual_reduction.normalized_maximum -
+             expected.normalized_maximum));
+  if (maximum_difference > 1.0e-6f ||
+      actual.score != actual_reduction.normalized_maximum) {
+    std::cerr << "Metal maximum-error reduction differs from CPU oracle by "
+              << maximum_difference << '\n';
+    return false;
+  }
+
+  EvaluationOutputStorage rejected(blocks);
+  const uint64_t submissions = gpu.stats().committed_submissions;
+  if (!ExpectCode(
+        prepared->Evaluate(fixture.input.View(), rejected.View()),
+        gjxl::StatusCode::kInvalidArgument,
+        "missing maximum-error result output") ||
+      !rejected.Poisoned() ||
+      gpu.stats().committed_submissions != submissions) {
+    return false;
+  }
+  return true;
 }
 
 bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
@@ -1079,6 +1178,7 @@ int main() {
                    "Metal AQ backend") ||
       !CheckCapabilityBoundary() ||
       !CheckReductionCorpus(*gpu) ||
+      !CheckMaximumErrorReduction(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||
       !CheckMemoryScaling(*gpu) ||
       !CheckSplitSeamAndDestruction(*gpu) ||

@@ -431,15 +431,15 @@ GPU adaptive quantization into the common codec orchestration without adding a
 GPU dependency to `gjxl_codec`. Initial quantization, Gaborish preprocessing,
 first-pass CfL, search decisions, and the deterministic AQ update policy remain
 on the CPU. The direct prepared operation can perform coefficient coding,
-reconstruction, filters, color conversion, Butteraugli, and block reduction in
-one Metal submission. Milestone 9's qualified workflow uses a
+reconstruction, filters, and either Butteraugli or transform-local
+maximum-error reduction in one Metal submission. The qualified workflow uses a
 decision-preserving coefficient boundary: CPU coefficient coding,
 dequantization, inverse CfL, and DC/LLF conversion prepare exact packed
 reconstruction coefficients, then one prepared Metal submission performs
-inverse transforms, source-domain filters, color conversion, Butteraugli, and
-block reduction. This moves the dominating reconstruction and image tail to
-Metal while retaining exact coefficient decisions and avoiding a redundant
-CPU reconstruction or Butteraugli pass.
+inverse transforms and source-domain filters. Butteraugli mode then performs
+color conversion, comparison, and block reduction; maximum-error mode compares
+resident coding and filtered reconstructed opsin directly. Both retain exact
+coefficient decisions and avoid a redundant CPU reconstruction or metric pass.
 
 The optional prepared-AQ capability is preflighted before pipeline work. A
 backend without it returns `Unavailable` without changing output or search
@@ -452,7 +452,9 @@ evaluator. Explicit overloads accept `GpuAdaptiveQuantizationMode`: the
 production `kExactCoefficients` mode preserves CPU coefficient decisions,
 while experimental `kFullyResident` runs forward transforms and coefficient
 coding on the GPU and may change the quant field, frame, and codestream. The
-complete GPU pipeline exposes the same explicit mode. This two-value public
+complete GPU pipeline exposes the same explicit mode for both Butteraugli and
+maximum-error control. Automatic maximum-error requests remain on CPU; forced
+Metal requests may select either mode. This two-value public
 contract replaces the temporary generic handoff selector without exposing the
 discarded exact-linear or exact-opsin policy prototypes.
 

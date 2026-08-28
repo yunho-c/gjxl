@@ -20,7 +20,9 @@ batched transforms, a fixed optional image-primitive capability, and an
 optional prepared AQ operation. The prepared Metal path now completes
 coefficient coding, reconstruction, loop filtering, cropped opsin-to-linear
 conversion, prepared Butteraugli comparison, and strategy-aware block reduction
-in one submission. Reconstructed images and the pixel distance map remain
+or, for maximum-error control, compares coding and filtered reconstructed opsin
+and reduces per-transform maxima in one submission. Reconstructed images and
+pixel-resolution metric inputs remain
 resident, while the bounded GPU policy returns only the final quant field,
 block map, and score history. Reconstructed-image and encoder-frame
 materialization, complete-pipeline switching, and a decision-preserving
@@ -152,7 +154,7 @@ but that representation is not invented implicitly by scratch buffers.
 ### Prepared state
 
 The prepared state is bound to one backend device, source geometry, strategy
-grid, Butteraugli option set, and `SimpleVarDctCodestreamProfile`. The profile
+grid, active metric and its options, and `SimpleVarDctCodestreamProfile`. The profile
 is the authoritative source for quantization-matrix scales, loop-filter
 settings, and the opsin intensity target. The prepared state owns or retains
 device-resident copies of:
@@ -162,7 +164,7 @@ device-resident copies of:
 - Complete AC-strategy metadata.
 - Quantization tables and transform constants required by the selected
   strategies.
-- Prepared Butteraugli reference data.
+- Prepared Butteraugli reference data when Butteraugli is active.
 - Reusable coefficient, image, filter, perceptual, and reduction scratch.
 
 Preparation must finish validation and allocation before any evaluation is
@@ -186,7 +188,8 @@ device conversion. Every transfer must be reported in the full-E2E benchmark.
 Intermediate AQ evaluations read back only:
 
 - One block-resolution distance per base block.
-- The aggregate Butteraugli score.
+- The aggregate metric score.
+- For maximum-error control, three actual channel maxima per transform.
 
 The pixel-resolution distance map must remain device-resident. Reading it back
 to perform the 16-norm reduction on the CPU is not an acceptable steady-state
@@ -1293,6 +1296,13 @@ The fully resident path is a first-class experimental opt-in because it does
 not satisfy the unchanged decision gate. Exact coefficients remain the default
 and the only automatic mode; automatic selection additionally requires a
 Butteraugli target in `[1.0, 1.2]`.
+
+The rate-control RC2 extension also adds the alternate resident maximum-error
+tail. Its strategy-aware kernel ignores padded pixels and returns only the
+block map and per-transform channel maxima required by the unchanged CPU
+policy. Exact-coefficient Metal preserves CPU frame and codestream decisions;
+fully resident maximum-error remains an explicit experimental mode. Automatic
+maximum-error requests continue to use CPU.
 
 The pre-Milestone-6 2026-08-27 codestream integration made the encoder frame
 profile the single CPU/GPU option contract and added modular DC quantization

@@ -73,6 +73,7 @@ void CopyContiguousPlane(
 [[nodiscard]] Status ValidateFullOutput(
   Extent2D source_extent,
   Extent2D block_extent,
+  AdaptiveQuantizationOptions options,
   const AdaptiveQuantizationOutput& output) {
 
   if (!ValidHostPlaneLayout(output.quant_field) ||
@@ -82,6 +83,9 @@ void CopyContiguousPlane(
         output.reconstructed_linear_rgb.plane,
         [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }) ||
       output.frame == nullptr || output.score_history == nullptr ||
+      (options.control_mode ==
+         AdaptiveQuantizationControlMode::kMaximumError &&
+       output.maximum_error_result == nullptr) ||
       output.quant_field.extent != block_extent ||
       output.block_distance_map.extent != block_extent ||
       output.reconstructed_linear_rgb.extent() != source_extent) {
@@ -219,6 +223,11 @@ public:
         .block_distance_map = {
           candidate.block_distance.data(), block_extent, block_extent.width},
         .score = &candidate.score,
+        .maximum_error =
+          options_.control_mode ==
+              AdaptiveQuantizationControlMode::kMaximumError
+            ? &candidate.maximum_error
+            : nullptr,
       };
       if (materialize_final_ && is_final_evaluation) {
         final_output = {
@@ -292,11 +301,6 @@ Status RunGpuAdaptiveQuantizationImpl(
   AdaptiveQuantizationOutput* full_output) {
 
   Status status = ValidateMode(mode);
-  if (status.ok() && options.control_mode ==
-      AdaptiveQuantizationControlMode::kMaximumError) {
-    return Status::Unavailable(
-      "GPU maximum-error reduction is not implemented");
-  }
   if (status.ok()) {
     status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
       original_linear_rgb, opsin, strategies, initial_quant_field,
@@ -311,7 +315,8 @@ Status RunGpuAdaptiveQuantizationImpl(
       status = ValidateOutput(strategies.extent(), *bounded_output);
     } else {
       status = ValidateFullOutput(
-        original_linear_rgb.extent(), strategies.extent(), *full_output);
+        original_linear_rgb.extent(), strategies.extent(), options,
+        *full_output);
     }
   }
   if (!status.ok()) {
@@ -326,7 +331,15 @@ Status RunGpuAdaptiveQuantizationImpl(
       .coding_opsin = opsin,
       .strategies = &strategies,
       .epf_sharpness = epf_sharpness,
-      .options = {options.profile, options.butteraugli},
+      .options = {
+        .profile = options.profile,
+        .butteraugli = options.butteraugli,
+        .metric = options.control_mode ==
+              AdaptiveQuantizationControlMode::kMaximumError
+            ? AqEvaluationMetric::kMaximumError
+            : AqEvaluationMetric::kButteraugli,
+        .maximum_error = options.maximum_error,
+      },
     },
     &prepared);
   if (!status.ok()) {
@@ -363,6 +376,9 @@ Status RunGpuAdaptiveQuantizationImpl(
         reconstructed.const_view(), full_output->reconstructed_linear_rgb);
       *full_output->frame = std::move(frame);
       *full_output->score_history = std::move(result.score_history);
+      if (full_output->maximum_error_result != nullptr) {
+        *full_output->maximum_error_result = result.maximum_error;
+      }
     }
     return Status::Ok();
   } catch (const std::bad_alloc&) {

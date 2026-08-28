@@ -679,6 +679,81 @@ bool CheckWorkflowBackendSelection() {
     return false;
   }
 
+  const gjxl::VarDctEncodingOptions maximum_error_options{
+    .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError,
+    .maximum_error = {0.05f, 0.05f, 0.05f},
+  };
+  std::vector<uint8_t> maximum_cpu_bytes;
+  std::vector<uint8_t> maximum_metal_bytes;
+  std::vector<uint8_t> maximum_automatic_bytes;
+  gjxl::VarDctEncodingSummary maximum_cpu_summary;
+  gjxl::VarDctEncodingSummary maximum_metal_summary;
+  gjxl::VarDctEncodingSummary maximum_automatic_summary;
+  auto maximum_cpu_options = maximum_error_options;
+  maximum_cpu_options.backend = gjxl::VarDctBackendPreference::kCpu;
+  auto maximum_metal_options = maximum_error_options;
+  maximum_metal_options.backend = gjxl::VarDctBackendPreference::kMetal;
+  auto maximum_automatic_options = maximum_error_options;
+  maximum_automatic_options.backend =
+    gjxl::VarDctBackendPreference::kAutomatic;
+  if (!gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+          original.ConstView(), maximum_cpu_options, nullptr, false,
+          &maximum_cpu_bytes, &maximum_cpu_summary).ok() ||
+      !gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+          original.ConstView(), maximum_metal_options, gpu.get(), false,
+          &maximum_metal_bytes, &maximum_metal_summary).ok() ||
+      !gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+          original.ConstView(), maximum_automatic_options, gpu.get(), true,
+          &maximum_automatic_bytes, &maximum_automatic_summary).ok() ||
+      maximum_cpu_bytes != maximum_metal_bytes ||
+      maximum_cpu_bytes != maximum_automatic_bytes ||
+      maximum_cpu_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kCpu ||
+      maximum_metal_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kMetal ||
+      maximum_automatic_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kCpu ||
+      maximum_metal_summary.maximum_error_evaluation_count != 6 ||
+      maximum_metal_summary.maximum_error_outcome !=
+        maximum_cpu_summary.maximum_error_outcome ||
+      MaximumScoreError(maximum_cpu_summary.score_history,
+                        maximum_metal_summary.score_history) > 2.0e-3) {
+    std::cerr << "Maximum-error workflow backend parity failed\n";
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (std::abs(
+          maximum_cpu_summary.achieved_maximum_error[channel] -
+          maximum_metal_summary.achieved_maximum_error[channel]) > 2.0e-3f) {
+      std::cerr << "Maximum-error workflow diagnostics differ\n";
+      return false;
+    }
+  }
+
+  std::vector<uint8_t> maximum_resident_bytes;
+  gjxl::VarDctEncodingSummary maximum_resident_summary;
+  auto maximum_resident_options = maximum_metal_options;
+  maximum_resident_options.metal_aq_mode =
+    gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  if (!gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+          original.ConstView(), maximum_resident_options, gpu.get(), false,
+          &maximum_resident_bytes, &maximum_resident_summary).ok() ||
+      maximum_resident_bytes.empty() ||
+      maximum_resident_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kMetal ||
+      maximum_resident_summary.metal_aq_mode !=
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
+      maximum_resident_summary.maximum_error_evaluation_count != 6 ||
+      !std::isfinite(
+        maximum_resident_summary.achieved_maximum_error_ratio)) {
+    std::cerr << "Resident maximum-error workflow failed\n";
+    return false;
+  }
+
   std::vector<uint8_t> resident_bytes;
   gjxl::VarDctEncodingSummary resident_summary;
   if (!gjxl::codestream_internal::

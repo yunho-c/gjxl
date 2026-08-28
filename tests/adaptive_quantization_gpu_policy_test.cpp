@@ -116,6 +116,7 @@ struct CpuOutputStorage {
       .reconstructed_linear_rgb = reconstructed.View(),
       .frame = &frame,
       .score_history = &score_history,
+      .maximum_error_result = &maximum_error,
     };
   }
 
@@ -164,6 +165,7 @@ struct CpuOutputStorage {
   std::vector<float> block_distance;
   gjxl::VarDctEncoderFrame frame;
   std::vector<double> score_history;
+  gjxl::MaximumErrorResult maximum_error;
 };
 
 struct GpuOutputStorage {
@@ -643,6 +645,120 @@ bool CheckFullyResidentCase(
       "fully resident frame codestream") && !codestream.empty();
 }
 
+bool CheckMaximumErrorCase(
+    gjxl::GpuBackend& gpu,
+    gjxl::ConstImage3FView original,
+    gjxl::ConstImage3FView opsin,
+    const gjxl::AcStrategyGrid& strategies,
+    gjxl::ConstPlaneF32View initial,
+    gjxl::ConstPlaneU8View sharpness,
+    gjxl::GpuAdaptiveQuantizationMode mode) {
+  gjxl::AdaptiveQuantizationOptions options = MakeOptions(false, 0);
+  options.control_mode =
+    gjxl::AdaptiveQuantizationControlMode::kMaximumError;
+  options.maximum_error = {0.05f, 0.05f, 0.05f};
+
+  CpuOutputStorage cpu;
+  CpuOutputStorage gpu_output;
+  if (!CheckStatus(gjxl::FindBestQuantization(
+        original, opsin, strategies, initial, sharpness, options,
+        cpu.Output()), "CPU maximum-error AQ") ||
+      !CheckStatus(gjxl::RunGpuAdaptiveQuantization(
+        gpu, original, opsin, strategies, initial, sharpness, options, mode,
+        gpu_output.Output()), "Metal maximum-error AQ")) {
+    return false;
+  }
+  if (!cpu.PaddingPoisoned() || !gpu_output.PaddingPoisoned() ||
+      cpu.score_history.size() != 6 ||
+      gpu_output.score_history.size() != 6 ||
+      gpu_output.maximum_error.evaluation_count != 6 ||
+      gpu_output.maximum_error.outcome ==
+        gjxl::MaximumErrorOutcome::kNotApplicable) {
+    std::cerr << "Maximum-error AQ result shape is invalid\n";
+    return false;
+  }
+
+  if (mode == gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients) {
+    const bool frame_equal = FramesEqual(cpu.frame, gpu_output.frame);
+    if (!frame_equal ||
+        cpu.maximum_error.evaluation_count !=
+          gpu_output.maximum_error.evaluation_count ||
+        cpu.maximum_error.outcome != gpu_output.maximum_error.outcome) {
+      std::cerr << "Exact Metal maximum-error frame or outcome differs "
+                   "from CPU\n";
+      return false;
+    }
+    double maximum_difference = std::abs(
+      static_cast<double>(cpu.maximum_error.normalized_maximum) -
+      gpu_output.maximum_error.normalized_maximum);
+    for (size_t channel = 0; channel < 3; ++channel) {
+      maximum_difference = std::max(
+        maximum_difference,
+        std::abs(
+          static_cast<double>(cpu.maximum_error.achieved[channel]) -
+          gpu_output.maximum_error.achieved[channel]));
+      for (size_t y = 0; y < kOriginalExtent.height; ++y) {
+        for (size_t x = 0; x < kOriginalExtent.width; ++x) {
+          maximum_difference = std::max(
+            maximum_difference,
+            std::abs(static_cast<double>(
+              cpu.reconstructed.plane[channel][
+                y * cpu.reconstructed.stride + x]) -
+              gpu_output.reconstructed.plane[channel][
+                y * gpu_output.reconstructed.stride + x]));
+        }
+      }
+    }
+    for (size_t index = 0; index < cpu.score_history.size(); ++index) {
+      maximum_difference = std::max(
+        maximum_difference,
+        std::abs(cpu.score_history[index] -
+                 gpu_output.score_history[index]));
+    }
+    for (size_t y = 0; y < kBlockExtent.height; ++y) {
+      for (size_t x = 0; x < kBlockExtent.width; ++x) {
+        maximum_difference = std::max(
+          maximum_difference,
+          std::abs(static_cast<double>(
+            cpu.quant_field[y * CpuOutputStorage::kBlockStride + x]) -
+            gpu_output.quant_field[
+              y * CpuOutputStorage::kBlockStride + x]));
+        maximum_difference = std::max(
+          maximum_difference,
+          std::abs(static_cast<double>(
+            cpu.block_distance[y * CpuOutputStorage::kBlockStride + x]) -
+            gpu_output.block_distance[
+              y * CpuOutputStorage::kBlockStride + x]));
+      }
+    }
+    if (maximum_difference > kTolerance) {
+      std::cerr << "Exact Metal maximum-error diagnostics differ from CPU "
+                << "by " << maximum_difference << '\n';
+      return false;
+    }
+    std::vector<uint8_t> cpu_codestream;
+    std::vector<uint8_t> gpu_codestream;
+    if (!CheckStatus(gjxl::EncodeVarDctCodestream(
+          cpu.frame, &cpu_codestream),
+          "CPU maximum-error codestream") ||
+        !CheckStatus(gjxl::EncodeVarDctCodestream(
+          gpu_output.frame, &gpu_codestream),
+          "Metal maximum-error codestream") ||
+        cpu_codestream != gpu_codestream) {
+      std::cerr << "Exact Metal maximum-error codestream differs from CPU\n";
+      return false;
+    }
+  } else {
+    for (double score : gpu_output.score_history) {
+      if (!std::isfinite(score) || score < 0.0) {
+        std::cerr << "Resident maximum-error score is invalid\n";
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckInvalidModeIsAtomic(
     gjxl::GpuBackend& gpu,
     gjxl::ConstImage3FView original,
@@ -777,6 +893,16 @@ int main() {
         return EXIT_FAILURE;
       }
     }
+  }
+  if (!CheckMaximumErrorCase(
+        *gpu, original.ConstView(), opsin.ConstView(), strategies, initial,
+        sharpness_view,
+        gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients) ||
+      !CheckMaximumErrorCase(
+        *gpu, original.ConstView(), opsin.ConstView(), strategies, initial,
+        sharpness_view,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident)) {
+    return EXIT_FAILURE;
   }
 
   std::cout << "GPU AQ policy parity passed; max score error "

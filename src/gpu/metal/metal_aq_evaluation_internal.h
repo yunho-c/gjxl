@@ -68,6 +68,23 @@ struct AqBlockReductionParams {
   uint32_t covered_height;
 };
 
+struct AqMaximumErrorReductionParams {
+  uint32_t source_width;
+  uint32_t source_height;
+  uint32_t reference_stride;
+  uint32_t reconstruction_stride;
+  uint32_t block_stride;
+  uint32_t anchor_offset;
+  uint32_t anchor_count;
+  uint32_t pixel_width;
+  uint32_t pixel_height;
+  uint32_t covered_width;
+  uint32_t covered_height;
+  float limit_x;
+  float limit_y;
+  float limit_b;
+};
+
 struct AqQuantizationProbeParams {
   uint32_t coefficient_count;
   uint32_t strategy;
@@ -202,6 +219,8 @@ private:
                          MTL::ComputeCommandEncoder *encoder) const;
   void EncodeBlockReduction(MetalBackend &backend,
                             MTL::ComputeCommandEncoder *encoder) const;
+  void EncodeMaximumErrorReduction(
+      MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const;
   [[nodiscard]] std::array<DevicePlaneView, 3>
   FinalFilteredImage() const noexcept;
   Status FinishPostprocess(MetalAqPostprocessSnapshotForTesting *snapshot);
@@ -224,6 +243,7 @@ private:
   DevicePlaneView block_distance_;
   DevicePlaneView distance_map_;
   DevicePlaneView score_;
+  DevicePlaneView transform_maximum_error_;
   DevicePlaneView gathered_pixels_;
   DevicePlaneView forward_coefficients_;
   DevicePlaneView quantized_coefficients_;
@@ -255,6 +275,8 @@ private:
   AqEvaluationMemoryStats memory_stats_;
   AqResetParams reset_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};
+  std::array<AqMaximumErrorReductionParams, 7>
+    maximum_error_reduction_params_{};
   AqQuantizationProbeParams quant_probe_params_{};
   AqGaborishParams gaborish_params_{};
   std::array<AqEpfParams, 3> epf_params_{};
@@ -265,6 +287,7 @@ private:
   std::vector<vardct_frame_internal::QuantizedAcTransformView>
     final_transform_views_;
   std::vector<float> readback_;
+  std::vector<float> transform_maximum_error_readback_;
   std::vector<float> forward_readback_;
   std::vector<float> exact_reconstruction_coefficients_;
   std::vector<int32_t> quantized_readback_;
