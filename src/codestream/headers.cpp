@@ -15,6 +15,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "codestream/simple_ac_context.h"
+
 namespace gjxl {
 namespace {
 
@@ -72,12 +74,6 @@ constexpr EntropyToken kContextTreeTokens[] = {
 };
 
 static_assert(std::size(kContextTreeTokens) == 313);
-
-constexpr std::array<uint8_t, 39> kCompactBlockContextMap = {
-  0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-  2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-  2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-};
 
 Status WriteFields(BitWriter* writer, std::span<const BitField> fields) {
   for (const BitField field : fields) {
@@ -163,9 +159,10 @@ Status WriteQuantizerInternal(QuantizerParams params, BitWriter* writer) {
 
 Status WriteCompactBlockContextMap(BitWriter* writer) {
   EntropyCode map;
-  map.context_count = kCompactBlockContextMap.size();
+  map.context_count = codestream_internal::kSimpleBlockContextMap.size();
   map.context_map.assign(
-    kCompactBlockContextMap.begin(), kCompactBlockContextMap.end());
+    codestream_internal::kSimpleBlockContextMap.begin(),
+    codestream_internal::kSimpleBlockContextMap.end());
   // Prefix codes are irrelevant to context-map serialization, but retaining
   // the four referenced clusters keeps the EntropyCode structurally valid.
   map.prefix_codes.resize(4);

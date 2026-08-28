@@ -57,6 +57,7 @@ enum class Pattern {
   kFlat,
   kImpulse,
   kRandom,
+  kSubtleRandom,
   kGradient,
   kTexture,
   kHardEdge,
@@ -74,6 +75,7 @@ struct Fixture {
   int32_t raw_quant = 29;
   bool require_large_tokens = false;
   uint64_t expected_hash = 0;
+  bool mixed_strategies = false;
 };
 
 struct PreparedFixture {
@@ -162,6 +164,16 @@ std::array<float, 3> PatternPixel(
         static_cast<float>(Mix(base + 2) & 0xFFFFu) / 65535.0f,
       };
     }
+    case Pattern::kSubtleRandom: {
+      const uint32_t base = Mix(
+        static_cast<uint32_t>(x) * 0x9E3779B9u ^
+        static_cast<uint32_t>(y) * 0x85EBCA6Bu ^ 0xA511E9B3u);
+      return {
+        0.25f + 0.5f * static_cast<float>(Mix(base + 0) & 0xFFFFu) / 65535.0f,
+        0.25f + 0.5f * static_cast<float>(Mix(base + 1) & 0xFFFFu) / 65535.0f,
+        0.25f + 0.5f * static_cast<float>(Mix(base + 2) & 0xFFFFu) / 65535.0f,
+      };
+    }
     case Pattern::kGradient:
       return {fx, fy, 0.15f + 0.7f * (0.65f * fx + 0.35f * fy)};
     case Pattern::kTexture:
@@ -220,11 +232,44 @@ int64_t AbsInt32(int32_t value) {
   return value >= 0 ? value : -static_cast<int64_t>(value);
 }
 
+gjxl::Status ConfigureMixedStrategies(gjxl::AcStrategyGrid* strategies) {
+  constexpr gjxl::Extent2D kMixedBlocks{8, 8};
+  if (strategies == nullptr || strategies->extent() != kMixedBlocks) {
+    return gjxl::Status::InvalidArgument(
+      "Mixed-strategy fixture requires an 8x8 block grid");
+  }
+
+  struct Placement {
+    size_t x;
+    size_t y;
+    gjxl::AcStrategyType strategy;
+  };
+  constexpr std::array kPlacements = {
+    Placement{0, 0, gjxl::AcStrategyType::kDct32x32},
+    Placement{4, 0, gjxl::AcStrategyType::kDct32x16},
+    Placement{0, 4, gjxl::AcStrategyType::kDct16x32},
+    Placement{4, 4, gjxl::AcStrategyType::kDct16x16},
+    Placement{6, 4, gjxl::AcStrategyType::kDct16x8},
+    Placement{0, 6, gjxl::AcStrategyType::kDct8x16},
+    Placement{2, 6, gjxl::AcStrategyType::kDct8},
+  };
+  for (const Placement placement : kPlacements) {
+    if (gjxl::Status status = strategies->Set(
+          placement.x, placement.y, placement.strategy);
+        !status.ok()) {
+      return status;
+    }
+  }
+  strategies->fill_empty_dct8();
+  return gjxl::Status::Ok();
+}
+
 gjxl::Status PrepareFixture(
   const Fixture& fixture, PreparedFixture* prepared) {
 
   if (prepared == nullptr || fixture.extent.empty() ||
-      fixture.raw_quant < 1 || fixture.raw_quant > gjxl::kMaxRawQuant) {
+      fixture.raw_quant < 1 || fixture.raw_quant > gjxl::kMaxRawQuant ||
+      (fixture.force_single_strategy && fixture.mixed_strategies)) {
     return gjxl::Status::InvalidArgument("Conformance fixture is invalid");
   }
 
@@ -263,7 +308,12 @@ gjxl::Status PrepareFixture(
   if (!status.ok()) {
     return status;
   }
-  if (fixture.force_single_strategy) {
+  if (fixture.mixed_strategies) {
+    status = ConfigureMixedStrategies(&strategies);
+    if (!status.ok()) {
+      return status;
+    }
+  } else if (fixture.force_single_strategy) {
     const gjxl::AcStrategyInfo* info =
       gjxl::GetAcStrategyInfo(fixture.strategy);
     if (info == nullptr || info->covered_blocks != blocks) {
@@ -658,6 +708,12 @@ std::vector<Fixture> SmokeFixtures() {
     {"one-pixel-flat", {1, 1}, Pattern::kFlat},
     {"odd-gradient", {13, 17}, Pattern::kGradient},
     {"ac-edge-random", {257, 9}, Pattern::kRandom},
+    {
+      .name = "mixed-strategy-random",
+      .extent = {64, 64},
+      .pattern = Pattern::kSubtleRandom,
+      .mixed_strategies = true,
+    },
   };
 }
 
@@ -682,6 +738,12 @@ std::vector<Fixture> FullFixtures() {
      gjxl::AcStrategyType::kDct8, false, {3541, 10}, 256},
     {"large-signed-tokens", {8, 8}, Pattern::kLargeOpsin,
      gjxl::AcStrategyType::kDct8, false, {32768, 1}, 256, true},
+    {
+      .name = "mixed-strategy-random",
+      .extent = {64, 64},
+      .pattern = Pattern::kSubtleRandom,
+      .mixed_strategies = true,
+    },
   };
   constexpr std::array strategies = {
     gjxl::AcStrategyType::kDct8,

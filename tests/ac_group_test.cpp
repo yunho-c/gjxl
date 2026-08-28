@@ -125,12 +125,12 @@ struct TokenGolden {
 // Full token hashes from the pinned tiny/libjxl context and scan equations.
 constexpr std::array<TokenGolden, 7> kTokenGoldens = {{
   {gjxl::AcStrategyType::kDct8, 192, 0x4bc215f68f1ece9dull},
-  {gjxl::AcStrategyType::kDct16x16, 759, 0x3c0be07550ae20e9ull},
-  {gjxl::AcStrategyType::kDct32x32, 3027, 0x6b51649963521c99ull},
+  {gjxl::AcStrategyType::kDct16x16, 759, 0xb4eb38be028e0165ull},
+  {gjxl::AcStrategyType::kDct32x32, 3027, 0x7fa649fd5ea7a5d5ull},
   {gjxl::AcStrategyType::kDct16x8, 381, 0xd61b35ea9efaa9e2ull},
   {gjxl::AcStrategyType::kDct8x16, 381, 0xd61b35ea9efaa9e2ull},
-  {gjxl::AcStrategyType::kDct32x16, 1515, 0x0b58b71dce6ee8b9ull},
-  {gjxl::AcStrategyType::kDct16x32, 1515, 0x0b58b71dce6ee8b9ull},
+  {gjxl::AcStrategyType::kDct32x16, 1515, 0x85c67d0bcd6d70bcull},
+  {gjxl::AcStrategyType::kDct16x32, 1515, 0x85c67d0bcd6d70bcull},
 }};
 
 gjxl::VarDctAcGroupView MakeGroupView(
@@ -197,15 +197,69 @@ bool CheckPinnedStrategyTokenStreams() {
     std::vector<gjxl::EntropyToken> tokens;
     const gjxl::Status status =
       gjxl::TokenizeSimpleAcGroup(group, strategies, &tokens);
+    const uint64_t token_hash = HashTokens(tokens);
     if (!status.ok() || tokens.size() != golden.token_count
-        || HashTokens(tokens) != golden.hash
+        || token_hash != golden.hash
         || !std::ranges::all_of(tokens, [](gjxl::EntropyToken token) {
              return token.context < gjxl::kSimpleAcContextCount;
            })) {
       std::cerr << "Pinned AC tokens differ for strategy "
                 << static_cast<int>(golden.strategy) << ": " << status.message()
-                << '\n';
+                << " count=" << tokens.size() << " hash=0x" << std::hex
+                << token_hash << std::dec << '\n';
       return false;
+    }
+  }
+  return true;
+}
+
+bool CheckPinnedStrategyBlockContexts() {
+  struct ContextGolden {
+    gjxl::AcStrategyType strategy;
+    std::array<uint32_t, 3> first_token_contexts;
+  };
+  constexpr std::array<ContextGolden, 7> kContextGoldens = {{
+    {gjxl::AcStrategyType::kDct8, {80, 82, 82}},
+    {gjxl::AcStrategyType::kDct16x16, {80, 82, 82}},
+    {gjxl::AcStrategyType::kDct32x32, {80, 82, 82}},
+    {gjxl::AcStrategyType::kDct16x8, {81, 83, 83}},
+    {gjxl::AcStrategyType::kDct8x16, {81, 83, 83}},
+    {gjxl::AcStrategyType::kDct32x16, {81, 83, 83}},
+    {gjxl::AcStrategyType::kDct16x32, {81, 83, 83}},
+  }};
+
+  for (const ContextGolden& golden : kContextGoldens) {
+    const gjxl::AcStrategyInfo* info = gjxl::GetAcStrategyInfo(golden.strategy);
+    gjxl::AcStrategyGrid strategies;
+    if (info == nullptr
+        || !gjxl::AcStrategyGrid::Create(info->covered_blocks, &strategies).ok()
+        || !strategies.Set(0, 0, golden.strategy).ok()) {
+      return false;
+    }
+
+    const size_t size = info->coefficient_count();
+    std::array<std::vector<int32_t>, 3> storage;
+    for (std::vector<int32_t>& coefficients : storage) {
+      coefficients.assign(size, 0);
+    }
+    const gjxl::VarDctAcGroupView group =
+      MakeGroupView(info->covered_blocks, size, storage);
+    std::vector<gjxl::EntropyToken> tokens;
+    const gjxl::Status status =
+      gjxl::TokenizeSimpleAcGroup(group, strategies, &tokens);
+    if (!status.ok() || tokens.size() != golden.first_token_contexts.size()) {
+      std::cerr << "Block-context fixture failed for strategy "
+                << static_cast<int>(golden.strategy) << '\n';
+      return false;
+    }
+    for (size_t channel = 0; channel < tokens.size(); ++channel) {
+      if (tokens[channel].context != golden.first_token_contexts[channel]
+          || tokens[channel].value != 0) {
+        std::cerr << "Block context differs for strategy "
+                  << static_cast<int>(golden.strategy) << " at token "
+                  << channel << '\n';
+        return false;
+      }
     }
   }
   return true;
@@ -545,7 +599,8 @@ bool CheckFrameTraversalAndAtomicity() {
 }  // namespace
 
 int main() {
-  if (!CheckNaturalOrders() || !CheckPinnedStrategyTokenStreams()
+  if (!CheckNaturalOrders() || !CheckPinnedStrategyBlockContexts()
+      || !CheckPinnedStrategyTokenStreams()
       || !CheckZeroDenseAndSignedExtremes()
       || !CheckMultiblockPredictionAndOffsets()
       || !CheckMalformedGroupsAreAtomic()

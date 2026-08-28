@@ -20,6 +20,7 @@
 
 #include "codec/codestream.h"
 #include "codec/vardct_frame.h"
+#include "codestream/simple_ac_context.h"
 
 namespace gjxl {
 namespace {
@@ -45,15 +46,6 @@ constexpr std::array<uint16_t, 64> kCoefficientNonzeroContext = {
   180,   180, 180, 180, 180, 180, 180, 206, 206, 206, 206, 206, 206,
   206,   206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206,
   206,   206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206,
-};
-
-// X, Y, and B rows for all 27 raw strategy codes. This is the tiny initial-
-// profile map, not libjxl's more general default block-context map.
-constexpr std::array<uint8_t, 3 * kAcStrategyCount> kBlockContextMap = {
-  2, 0, 0, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 3, 3, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
 
 struct StrategyAnchor {
@@ -406,7 +398,7 @@ Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
         const uint32_t prediction =
           PredictNonzeros(map, group.block_extent, anchor.x, anchor.y);
         const uint32_t block_context =
-          kBlockContextMap[channel * kAcStrategyCount + strategy_index];
+          codestream_internal::SimpleBlockContext(anchor.strategy, channel);
         candidate.push_back({
           NonzeroContext(prediction, block_context),
           static_cast<uint32_t>(nonzeros),
