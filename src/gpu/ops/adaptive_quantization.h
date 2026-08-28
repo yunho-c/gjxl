@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "codec/adaptive_quantization.h"
 #include "gpu/backend.h"
+#include "gpu/ops/aq_evaluation.h"
 
 namespace gjxl {
 
@@ -87,5 +89,34 @@ struct GpuAdaptiveQuantizationPolicyOutput {
   AdaptiveQuantizationOptions options,
   GpuAdaptiveQuantizationMode mode,
   AdaptiveQuantizationOutput output);
+
+namespace adaptive_quantization_gpu_internal {
+
+/// Reusable frame-level GPU AQ state for repeated rate-control attempts.
+///
+/// The state remembers the backend, source views, and evaluation options that
+/// define the prepared allocation. Compatible calls only rebind the strategy
+/// and EPF metadata; incompatible calls transparently prepare a new state.
+struct PreparedAdaptiveQuantization {
+  GpuBackend* backend = nullptr;
+  ConstImage3FView original_linear_rgb;
+  ConstImage3FView coding_opsin;
+  AqEvaluationOptions evaluation_options;
+  std::unique_ptr<PreparedAqEvaluation> evaluation;
+};
+
+[[nodiscard]] Status RunPreparedGpuAdaptiveQuantization(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationMode mode,
+  PreparedAdaptiveQuantization* prepared,
+  AdaptiveQuantizationOutput output);
+
+}  // namespace adaptive_quantization_gpu_internal
 
 }  // namespace gjxl

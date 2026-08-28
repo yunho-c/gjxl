@@ -116,7 +116,7 @@ public:
     ConstPlaneU8View epf_sharpness,
     AdaptiveQuantizationOptions options,
     GpuAdaptiveQuantizationMode mode,
-    std::unique_ptr<PreparedAqEvaluation> prepared,
+    PreparedAqEvaluation& prepared,
     bool materialize_final,
     Extent2D source_extent)
     : opsin_(opsin),
@@ -124,7 +124,7 @@ public:
       epf_sharpness_(epf_sharpness),
       options_(options),
       mode_(mode),
-      prepared_(std::move(prepared)),
+      prepared_(&prepared),
       materialize_final_(materialize_final),
       original_source_extent_(source_extent) {
     if (materialize_final_) {
@@ -281,7 +281,7 @@ private:
   ConstPlaneU8View epf_sharpness_;
   AdaptiveQuantizationOptions options_;
   GpuAdaptiveQuantizationMode mode_;
-  std::unique_ptr<PreparedAqEvaluation> prepared_;
+  PreparedAqEvaluation* prepared_ = nullptr;
   bool materialize_final_ = false;
   Image3FBuffer final_reconstructed_;
   VarDctEncoderFrame final_frame_;
@@ -297,6 +297,8 @@ Status RunGpuAdaptiveQuantizationImpl(
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options,
   GpuAdaptiveQuantizationMode mode,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+    reusable,
   GpuAdaptiveQuantizationPolicyOutput* bounded_output,
   AdaptiveQuantizationOutput* full_output) {
 
@@ -323,37 +325,105 @@ Status RunGpuAdaptiveQuantizationImpl(
     return status;
   }
 
-  std::unique_ptr<PreparedAqEvaluation> prepared;
-  status = PrepareAqEvaluation(
-    gpu,
-    {
-      .original_linear_rgb = original_linear_rgb,
-      .coding_opsin = opsin,
-      .strategies = &strategies,
-      .epf_sharpness = epf_sharpness,
-      .options = {
-        .profile = options.profile,
-        .butteraugli = options.butteraugli,
-        .metric = options.control_mode ==
-              AdaptiveQuantizationControlMode::kMaximumError
-            ? AqEvaluationMetric::kMaximumError
-            : AqEvaluationMetric::kButteraugli,
-        .maximum_error = options.maximum_error,
+  const AqEvaluationOptions evaluation_options{
+    .profile = options.profile,
+    .butteraugli = options.butteraugli,
+    .metric = options.control_mode ==
+          AdaptiveQuantizationControlMode::kMaximumError
+        ? AqEvaluationMetric::kMaximumError
+        : AqEvaluationMetric::kButteraugli,
+    .maximum_error = options.maximum_error,
+  };
+  std::unique_ptr<PreparedAqEvaluation> local_prepared;
+  PreparedAqEvaluation* prepared = nullptr;
+  if (reusable == nullptr) {
+    status = PrepareAqEvaluation(
+      gpu,
+      {
+        .original_linear_rgb = original_linear_rgb,
+        .coding_opsin = opsin,
+        .strategies = &strategies,
+        .epf_sharpness = epf_sharpness,
+        .options = evaluation_options,
       },
-    },
-    &prepared);
+      &local_prepared);
+    prepared = local_prepared.get();
+  } else {
+    const auto same_plane = [](ConstPlaneF32View left,
+                               ConstPlaneF32View right) {
+      return left.data == right.data && left.extent == right.extent &&
+        left.stride == right.stride;
+    };
+    const auto same_image = [&](ConstImage3FView left,
+                                ConstImage3FView right) {
+      return same_plane(left.plane[0], right.plane[0]) &&
+        same_plane(left.plane[1], right.plane[1]) &&
+        same_plane(left.plane[2], right.plane[2]);
+    };
+    const ButteraugliOptions& previous_butteraugli =
+      reusable->evaluation_options.butteraugli;
+    const ButteraugliOptions& current_butteraugli =
+      evaluation_options.butteraugli;
+    const bool compatible = reusable->evaluation != nullptr &&
+      reusable->backend == &gpu &&
+      same_image(reusable->original_linear_rgb, original_linear_rgb) &&
+      same_image(reusable->coding_opsin, opsin) &&
+      reusable->evaluation_options.profile == evaluation_options.profile &&
+      previous_butteraugli.hf_asymmetry ==
+        current_butteraugli.hf_asymmetry &&
+      previous_butteraugli.x_multiplier ==
+        current_butteraugli.x_multiplier &&
+      previous_butteraugli.intensity_target ==
+        current_butteraugli.intensity_target &&
+      reusable->evaluation_options.metric == evaluation_options.metric &&
+      reusable->evaluation_options.maximum_error ==
+        evaluation_options.maximum_error;
+    if (compatible) {
+      status = reusable->evaluation->Reconfigure(
+        strategies, epf_sharpness);
+    } else {
+      reusable->evaluation.reset();
+      status = PrepareAqEvaluation(
+        gpu,
+        {
+          .original_linear_rgb = original_linear_rgb,
+          .coding_opsin = opsin,
+          .strategies = &strategies,
+          .epf_sharpness = epf_sharpness,
+          .options = evaluation_options,
+        },
+        &reusable->evaluation);
+      if (status.ok()) {
+        reusable->backend = &gpu;
+        reusable->original_linear_rgb = original_linear_rgb;
+        reusable->coding_opsin = opsin;
+        reusable->evaluation_options = evaluation_options;
+      }
+    }
+    prepared = reusable->evaluation.get();
+  }
   if (!status.ok()) {
+    if (reusable != nullptr) {
+      reusable->evaluation.reset();
+    }
     return status;
+  }
+  if (prepared == nullptr) {
+    return Status::Internal(
+      "GPU adaptive quantization preparation produced no state");
   }
 
   try {
     PreparedGpuAdaptiveQuantizationEvaluator evaluator(
-      opsin, strategies, epf_sharpness, options, mode, std::move(prepared),
+      opsin, strategies, epf_sharpness, options, mode, *prepared,
       full_output != nullptr, original_linear_rgb.extent());
     aqi::AdaptiveQuantizationPolicyResult result;
     status = aqi::RunAdaptiveQuantizationPolicy(
       strategies, initial_quant_field, options, evaluator, &result, nullptr);
     if (!status.ok()) {
+      if (reusable != nullptr) {
+        reusable->evaluation.reset();
+      }
       return status;
     }
     if (!evaluator.HasFinalOutput()) {
@@ -405,7 +475,8 @@ Status RunGpuAdaptiveQuantizationPolicy(
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
     epf_sharpness, options,
-    GpuAdaptiveQuantizationMode::kExactCoefficients, &output, nullptr);
+    GpuAdaptiveQuantizationMode::kExactCoefficients, nullptr, &output,
+    nullptr);
 }
 
 Status RunGpuAdaptiveQuantizationPolicy(
@@ -421,7 +492,7 @@ Status RunGpuAdaptiveQuantizationPolicy(
 
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, mode, &output, nullptr);
+    epf_sharpness, options, mode, nullptr, &output, nullptr);
 }
 
 Status RunGpuAdaptiveQuantization(
@@ -437,7 +508,8 @@ Status RunGpuAdaptiveQuantization(
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
     epf_sharpness, options,
-    GpuAdaptiveQuantizationMode::kExactCoefficients, nullptr, &output);
+    GpuAdaptiveQuantizationMode::kExactCoefficients, nullptr, nullptr,
+    &output);
 }
 
 Status RunGpuAdaptiveQuantization(
@@ -453,7 +525,29 @@ Status RunGpuAdaptiveQuantization(
 
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, mode, nullptr, &output);
+    epf_sharpness, options, mode, nullptr, nullptr, &output);
+}
+
+Status adaptive_quantization_gpu_internal::
+RunPreparedGpuAdaptiveQuantization(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationMode mode,
+  PreparedAdaptiveQuantization* prepared,
+  AdaptiveQuantizationOutput output) {
+
+  if (prepared == nullptr) {
+    return Status::InvalidArgument(
+      "Reusable GPU adaptive-quantization state is null");
+  }
+  return RunGpuAdaptiveQuantizationImpl(
+    gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
+    epf_sharpness, options, mode, prepared, nullptr, &output);
 }
 
 }  // namespace gjxl

@@ -765,6 +765,7 @@ Status EvaluateQuantization(
   ConstPlaneU8View epf_sharpness,
   float quant_dc,
   AdaptiveQuantizationOptions options,
+  PreparedButteraugliReference* prepared_reference,
   QuantizationEvaluation* evaluation,
   aqi::EvaluationProfile* profile) {
 
@@ -931,16 +932,16 @@ Status EvaluateQuantization(
       measured,
       aqi::EvaluationStage::kButteraugli,
       [&] {
-        return ComputeButteraugliDistance(
-          original_linear_rgb,
-          result.reconstructed_linear.const_view(),
-          options.butteraugli,
-          {
-            distance_map.data(),
-            original_linear_rgb.extent(),
-            original_linear_rgb.width(),
-          },
-          &result.score);
+        const PlaneF32View map{
+          distance_map.data(), original_linear_rgb.extent(),
+          original_linear_rgb.width()};
+        return prepared_reference == nullptr
+          ? ComputeButteraugliDistance(
+              original_linear_rgb,
+              result.reconstructed_linear.const_view(),
+              options.butteraugli, map, &result.score)
+          : prepared_reference->Compare(
+              result.reconstructed_linear.const_view(), map, &result.score);
       });
     if (status.ok()) {
       status = MeasureEvaluationStage(
@@ -979,12 +980,14 @@ public:
     ConstImage3FView opsin,
     const AcStrategyGrid& strategies,
     ConstPlaneU8View epf_sharpness,
-    AdaptiveQuantizationOptions options)
+    AdaptiveQuantizationOptions options,
+    PreparedButteraugliReference* prepared_reference)
     : original_linear_rgb_(original_linear_rgb),
       opsin_(opsin),
       strategies_(strategies),
       epf_sharpness_(epf_sharpness),
-      options_(options) {}
+      options_(options),
+      prepared_reference_(prepared_reference) {}
 
   Status Evaluate(
     ConstPlaneF32View quant_field,
@@ -1000,7 +1003,8 @@ public:
     QuantizationEvaluation detailed;
     Status status = EvaluateQuantization(
       original_linear_rgb_, opsin_, strategies_, quant_field,
-      epf_sharpness_, quant_dc, options_, &detailed, profile);
+      epf_sharpness_, quant_dc, options_, prepared_reference_, &detailed,
+      profile);
     if (!status.ok()) {
       return status;
     }
@@ -1025,6 +1029,7 @@ private:
   const AcStrategyGrid& strategies_;
   ConstPlaneU8View epf_sharpness_;
   AdaptiveQuantizationOptions options_;
+  PreparedButteraugliReference* prepared_reference_ = nullptr;
   QuantizationEvaluation final_evaluation_;
 };
 
@@ -1448,6 +1453,7 @@ Status FindBestQuantizationImpl(
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options,
   AdaptiveQuantizationOutput output,
+  PreparedButteraugliReference* prepared_reference,
   aqi::AdaptiveQuantizationProfile* profile) {
 
   Status status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
@@ -1464,9 +1470,18 @@ Status FindBestQuantizationImpl(
   if (!status.ok()) {
     return status;
   }
+  if (options.control_mode == AdaptiveQuantizationControlMode::kButteraugli &&
+      prepared_reference != nullptr &&
+      (!prepared_reference->ready() ||
+       prepared_reference->extent() != original_linear_rgb.extent() ||
+       prepared_reference->options() != options.butteraugli)) {
+    return Status::InvalidArgument(
+      "Prepared Butteraugli reference does not match CPU AQ");
+  }
 
   CpuAdaptiveQuantizationEvaluator evaluator(
-    original_linear_rgb, opsin, strategies, epf_sharpness, options);
+    original_linear_rgb, opsin, strategies, epf_sharpness, options,
+    prepared_reference);
   aqi::AdaptiveQuantizationPolicyResult policy_result;
   aqi::AdaptiveQuantizationProfile local_profile;
   status = aqi::RunAdaptiveQuantizationPolicy(
@@ -1518,6 +1533,7 @@ Status FindBestQuantization(
     epf_sharpness,
     options,
     output,
+    nullptr,
     nullptr);
 }
 
@@ -1545,7 +1561,23 @@ Status FindBestQuantizationProfiled(
     epf_sharpness,
     options,
     output,
+    nullptr,
     profile);
+}
+
+Status FindBestQuantizationPrepared(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  PreparedButteraugliReference* prepared_reference,
+  AdaptiveQuantizationOutput output) {
+
+  return FindBestQuantizationImpl(
+    original_linear_rgb, opsin, strategies, initial_quant_field,
+    epf_sharpness, options, output, prepared_reference, nullptr);
 }
 
 }  // namespace adaptive_quantization_internal

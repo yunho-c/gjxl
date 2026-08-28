@@ -3,7 +3,12 @@
 
 #pragma once
 
+#include <memory>
+#include <vector>
+
+#include "codec/chroma_from_luma.h"
 #include "codec/quantization_pipeline.h"
+#include "core/image_buffer.h"
 
 namespace gjxl::quantization_pipeline_internal {
 
@@ -18,11 +23,59 @@ public:
     ConstPlaneF32View initial_quant_field,
     ConstPlaneU8View epf_sharpness,
     AdaptiveQuantizationOptions options,
+    PreparedButteraugliReference* prepared_reference,
     AdaptiveQuantizationOutput output) = 0;
 
 protected:
   AdaptiveQuantizationProvider() = default;
 };
+
+/// Target-invariant preparation and reusable atomic staging for repeated
+/// complete quantization attempts over one source/profile pair.
+struct PreparedQuantizationPipeline {
+  Extent2D source_extent;
+  Extent2D padded_extent;
+  Extent2D block_extent;
+  float initial_quant_rescale = 1.0f;
+  SimpleVarDctCodestreamProfile profile;
+  Image3FBuffer coding_opsin;
+  Image3FBuffer preprocessed_opsin;
+  ColorCorrelationMap initial_color_correlation;
+  std::vector<uint8_t> epf_sharpness;
+  std::vector<float> initial_quant;
+  std::vector<float> strategy_mask;
+  std::vector<float> pixel_mask;
+  AcStrategyGrid strategies;
+  std::vector<float> final_quant;
+  std::vector<float> block_distance;
+  Image3FBuffer reconstructed_linear;
+  VarDctEncoderFrame frame;
+  std::vector<double> score_history;
+  MaximumErrorResult maximum_error_result;
+  ButteraugliOptions butteraugli_options;
+  std::unique_ptr<PreparedButteraugliReference> butteraugli_reference;
+};
+
+[[nodiscard]] Status PrepareQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  PreparedQuantizationPipeline* prepared,
+  bool prepare_cpu_butteraugli = true);
+
+[[nodiscard]] Status RunPreparedQuantizationPipelineWithProviders(
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
+  AcStrategySearchProvider& strategy_search,
+  AdaptiveQuantizationProvider& adaptive_quantization,
+  CpuQuantizationPipelineOptions options,
+  CpuQuantizationPipelineOutput output);
+
+[[nodiscard]] Status RunPreparedCpuQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
+  CpuQuantizationPipelineOptions options,
+  CpuQuantizationPipelineOutput output);
 
 [[nodiscard]] Status RunQuantizationPipelineWithProviders(
   ConstImage3FView original_linear_rgb,

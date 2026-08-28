@@ -14,6 +14,78 @@
 
 namespace gjxl {
 
+struct PreparedButteraugliReference::Impl {
+  butteraugli_internal::NativePreparedButteraugliReference native;
+};
+
+PreparedButteraugliReference::PreparedButteraugliReference() = default;
+PreparedButteraugliReference::~PreparedButteraugliReference() = default;
+PreparedButteraugliReference::PreparedButteraugliReference(
+  PreparedButteraugliReference&&) noexcept = default;
+PreparedButteraugliReference& PreparedButteraugliReference::operator=(
+  PreparedButteraugliReference&&) noexcept = default;
+
+Status PreparedButteraugliReference::Prepare(
+  ConstImage3FView reference_linear_rgb,
+  ButteraugliOptions options) {
+
+  const butteraugli_internal::NativeButteraugliParams params{
+    .hf_asymmetry = options.hf_asymmetry,
+    .x_multiplier = options.x_multiplier,
+    .intensity_target = options.intensity_target,
+  };
+  try {
+    auto candidate = std::make_unique<Impl>();
+    Status status = butteraugli_internal::PrepareButteraugliReferenceNative(
+      reference_linear_rgb, params, &candidate->native);
+    if (!status.ok()) {
+      return status;
+    }
+    impl_ = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate prepared Butteraugli reference");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Prepared Butteraugli reference dimensions are too large");
+  }
+  return Status::Ok();
+}
+
+Status PreparedButteraugliReference::Compare(
+  ConstImage3FView distorted_linear_rgb,
+  PlaneF32View distance_map,
+  double* score) {
+
+  if (impl_ == nullptr) {
+    return Status::FailedPrecondition(
+      "Butteraugli reference has not been prepared");
+  }
+  return butteraugli_internal::CompareButteraugliReferenceNative(
+    &impl_->native, distorted_linear_rgb, distance_map, score);
+}
+
+Extent2D PreparedButteraugliReference::extent() const noexcept {
+  return impl_ == nullptr ? Extent2D{} : impl_->native.extent();
+}
+
+ButteraugliOptions PreparedButteraugliReference::options() const noexcept {
+  if (impl_ == nullptr) {
+    return {};
+  }
+  const butteraugli_internal::NativeButteraugliParams params =
+    impl_->native.params();
+  return {
+    .hf_asymmetry = params.hf_asymmetry,
+    .x_multiplier = params.x_multiplier,
+    .intensity_target = params.intensity_target,
+  };
+}
+
+bool PreparedButteraugliReference::ready() const noexcept {
+  return impl_ != nullptr && impl_->native.ready();
+}
+
 Status ComputeButteraugliDistance(
   ConstImage3FView reference_linear_rgb,
   ConstImage3FView distorted_linear_rgb,

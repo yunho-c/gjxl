@@ -416,6 +416,48 @@ bool CheckTargetSizeControl() {
     return false;
   }
 
+  std::vector<uint8_t> profiled_codestream;
+  gjxl::VarDctEncodingSummary profiled_summary;
+  gjxl::VarDctEncodingTiming timing;
+  status = gjxl::EncodeLinearRgbVarDctCodestreamProfiled(
+    image.View(), byte_options, &profiled_codestream, &profiled_summary,
+    &timing);
+  const uint64_t attempted_nanoseconds = std::accumulate(
+    timing.attempts.begin(), timing.attempts.end(), uint64_t{0},
+    [](uint64_t total, const gjxl::VarDctEncodingAttemptTiming& attempt) {
+      return total + attempt.encode_and_serialize_nanoseconds;
+    });
+  const size_t successful_attempts = static_cast<size_t>(std::count_if(
+    timing.attempts.begin(), timing.attempts.end(),
+    [](const gjxl::VarDctEncodingAttemptTiming& attempt) {
+      return attempt.succeeded;
+    }));
+  const bool selected_timing_present = std::ranges::any_of(
+    timing.attempts,
+    [&](const gjxl::VarDctEncodingAttemptTiming& attempt) {
+      return attempt.succeeded &&
+        attempt.butteraugli_target ==
+          profiled_summary.selected_butteraugli_target &&
+        attempt.encoded_bytes == profiled_codestream.size() &&
+        attempt.encode_and_serialize_nanoseconds ==
+          timing.selected_attempt_nanoseconds;
+    });
+  if (!status.ok() || profiled_codestream != byte_codestream ||
+      profiled_summary != byte_summary ||
+      timing.preparation_nanoseconds == 0 ||
+      timing.aggregate_search_nanoseconds == 0 ||
+      timing.selected_attempt_nanoseconds == 0 ||
+      timing.total_nanoseconds < timing.preparation_nanoseconds ||
+      timing.total_nanoseconds < timing.aggregate_search_nanoseconds ||
+      timing.aggregate_search_nanoseconds < attempted_nanoseconds ||
+      timing.attempts.size() != profiled_summary.encode_attempt_count ||
+      successful_attempts + profiled_summary.failed_encode_attempt_count !=
+        profiled_summary.encode_attempt_count ||
+      !selected_timing_present) {
+    std::cerr << "Profiled target-size workflow returned invalid timing\n";
+    return false;
+  }
+
   std::vector<uint8_t> repeated_codestream;
   gjxl::VarDctEncodingSummary repeated_summary;
   status = gjxl::EncodeLinearRgbVarDctCodestream(
@@ -504,13 +546,53 @@ bool CheckTargetSizeControl() {
   return true;
 }
 
+bool CheckSingleAttemptTiming() {
+  ImageStorage image;
+  FillImage(&image);
+  std::vector<uint8_t> profiled;
+  gjxl::VarDctEncodingSummary summary;
+  gjxl::VarDctEncodingTiming timing;
+  const gjxl::Status status =
+    gjxl::EncodeLinearRgbVarDctCodestreamProfiled(
+      image.View(), {.butteraugli_target = 1.0f}, &profiled, &summary,
+      &timing);
+  if (!status.ok() || profiled.empty() ||
+      timing.preparation_nanoseconds == 0 ||
+      timing.aggregate_search_nanoseconds != 0 ||
+      timing.selected_attempt_nanoseconds == 0 ||
+      timing.total_nanoseconds < timing.preparation_nanoseconds ||
+      timing.attempts.size() != 1 || !timing.attempts[0].succeeded ||
+      timing.attempts[0].encoded_bytes != profiled.size() ||
+      timing.attempts[0].butteraugli_target != 1.0f ||
+      timing.attempts[0].encode_and_serialize_nanoseconds !=
+        timing.selected_attempt_nanoseconds) {
+    std::cerr << "Single-attempt workflow timing is invalid\n";
+    return false;
+  }
+
+  std::vector<uint8_t> sentinel{3, 1, 4};
+  const std::vector<uint8_t> original = sentinel;
+  gjxl::VarDctEncodingSummary sentinel_summary{
+    .extent = {7, 5}, .encoded_bytes = 19, .score_history = {2.0}};
+  const gjxl::VarDctEncodingSummary original_summary = sentinel_summary;
+  if (gjxl::EncodeLinearRgbVarDctCodestreamProfiled(
+        image.View(), {}, &sentinel, &sentinel_summary, nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      sentinel != original || sentinel_summary != original_summary) {
+    std::cerr << "Null timing output was not rejected atomically\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
   if (!CheckDeterministicWorkflow() ||
       !CheckInvalidRequestsAreAtomic() ||
       !CheckMaximumErrorControl() ||
-      !CheckTargetSizeControl()) {
+      !CheckTargetSizeControl() ||
+      !CheckSingleAttemptTiming()) {
     return EXIT_FAILURE;
   }
   std::cout << "All public codestream workflow tests passed.\n";

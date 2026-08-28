@@ -419,7 +419,8 @@ int main(int argc, char** argv) {
 
   std::vector<uint8_t> codestream;
   gjxl::VarDctEncodingSummary summary;
-  status = gjxl::EncodeLinearRgbVarDctCodestream(
+  gjxl::VarDctEncodingTiming timing;
+  status = gjxl::EncodeLinearRgbVarDctCodestreamProfiled(
     linear_rgb.const_view(),
     {.butteraugli_target = options.butteraugli_target,
      .rate_control_mode = options.rate_control_mode,
@@ -433,7 +434,8 @@ int main(int argc, char** argv) {
      .backend = options.backend,
      .metal_aq_mode = options.metal_aq_mode},
     &codestream,
-    &summary);
+    &summary,
+    &timing);
   if (!status.ok()) {
     std::cerr << "Encoding error: " << status.message() << '\n';
     return EXIT_FAILURE;
@@ -507,6 +509,27 @@ int main(int argc, char** argv) {
     std::cout << "\nFinal perceptual score: "
               << summary.score_history.back();
   }
+  constexpr double kNanosecondsPerMillisecond = 1.0e6;
+  std::cout << "\nTiming: preparation="
+            << static_cast<double>(timing.preparation_nanoseconds) /
+                 kNanosecondsPerMillisecond
+            << " ms, selected-attempt="
+            << static_cast<double>(timing.selected_attempt_nanoseconds) /
+                 kNanosecondsPerMillisecond
+            << " ms";
+  if (summary.rate_control_mode ==
+        gjxl::VarDctRateControlMode::kTargetBytes ||
+      summary.rate_control_mode ==
+        gjxl::VarDctRateControlMode::kTargetBitsPerPixel) {
+    std::cout << ", aggregate-search="
+              << static_cast<double>(timing.aggregate_search_nanoseconds) /
+                   kNanosecondsPerMillisecond
+              << " ms";
+  }
+  std::cout << ", total="
+            << static_cast<double>(timing.total_nanoseconds) /
+                 kNanosecondsPerMillisecond
+            << " ms";
   std::cout << '\n';
   return EXIT_SUCCESS;
 }

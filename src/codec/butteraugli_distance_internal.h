@@ -34,6 +34,8 @@ enum class DifferenceStage : size_t {
 inline constexpr size_t kDifferenceStageCount =
     static_cast<size_t>(DifferenceStage::kCount);
 
+class NativePreparedButteraugliReference;
+
 /// Contiguous storage for all observable native difference stages.
 class OwnedDifferenceStages {
 public:
@@ -72,6 +74,9 @@ public:
 
 private:
   [[nodiscard]] Status Prepare(Extent2D extent);
+  [[nodiscard]] Status PrepareOutputStaging(Extent2D extent) {
+    return staged_output_.Resize(extent);
+  }
 
   OwnedPlaneF32 malta_diffs_;
   OwnedPlaneF32 mask_activity0_;
@@ -83,12 +88,17 @@ private:
   OwnedImage3F block_diff_ac_;
   OwnedImage3F block_diff_dc_;
   BlurScratch blur_;
+  OwnedDifferenceStages staged_output_;
 
   friend Status ComputeDifferenceStages(const OwnedPsychoImage &,
                                         const OwnedPsychoImage &,
                                         NativeButteraugliParams,
                                         DifferenceScratch *,
                                         OwnedDifferenceStages *);
+  friend Status PrepareButteraugliReferenceNative(
+    ConstImage3FView,
+    NativeButteraugliParams,
+    NativePreparedButteraugliReference*);
 };
 
 /// Reusable allocation state for complete native map and score computation.
@@ -124,6 +134,68 @@ private:
                                                  NativeButteraugliParams,
                                                  NativeButteraugliScratch *,
                                                  PlaneF32View, double *);
+};
+
+/// Target-invariant native reference representation plus reusable comparison
+/// scratch. This is wrapped by the public PreparedButteraugliReference API.
+class NativePreparedButteraugliReference {
+public:
+  NativePreparedButteraugliReference() = default;
+
+  NativePreparedButteraugliReference(
+    const NativePreparedButteraugliReference&) = delete;
+  NativePreparedButteraugliReference& operator=(
+    const NativePreparedButteraugliReference&) = delete;
+  NativePreparedButteraugliReference(
+    NativePreparedButteraugliReference&&) noexcept = default;
+  NativePreparedButteraugliReference& operator=(
+    NativePreparedButteraugliReference&&) noexcept = default;
+
+  [[nodiscard]] Extent2D extent() const noexcept {
+    return requested_extent_;
+  }
+  [[nodiscard]] NativeButteraugliParams params() const noexcept {
+    return params_;
+  }
+  [[nodiscard]] bool ready() const noexcept { return ready_; }
+
+private:
+  NativeButteraugliParams params_;
+  Extent2D requested_extent_;
+  Extent2D working_extent_;
+  size_t xborder_ = 0;
+  size_t yborder_ = 0;
+  bool expanded_ = false;
+  bool has_subscale_ = false;
+  bool ready_ = false;
+
+  OwnedImage3F main_input_;
+  OwnedImage3F sub_input_;
+  OwnedImage3F main_xyb_;
+  OwnedImage3F sub_xyb_;
+  OwnedPsychoImage main_reference_;
+  OwnedPsychoImage sub_reference_;
+  OwnedPsychoImage main_distorted_;
+  OwnedPsychoImage sub_distorted_;
+  OwnedDifferenceStages main_stages_;
+  OwnedDifferenceStages sub_stages_;
+  OwnedPlaneF32 final_map_;
+  OpsinScratch main_opsin_;
+  OpsinScratch sub_opsin_;
+  FrequencyScratch main_frequency_;
+  FrequencyScratch sub_frequency_;
+  DifferenceScratch main_difference_;
+  DifferenceScratch sub_difference_;
+
+  friend Status PrepareButteraugliReferenceNative(
+    ConstImage3FView,
+    NativeButteraugliParams,
+    NativePreparedButteraugliReference*);
+  friend Status CompareButteraugliReferenceNative(
+    NativePreparedButteraugliReference*,
+    ConstImage3FView,
+    PlaneF32View,
+    double*);
 };
 
 /// Adds the symmetric weighted L2 term to `output`.
@@ -172,5 +244,13 @@ private:
     ConstImage3FView reference, ConstImage3FView distorted,
     NativeButteraugliParams params, NativeButteraugliScratch *scratch,
     PlaneF32View distance_map, double *score);
+
+[[nodiscard]] Status PrepareButteraugliReferenceNative(
+    ConstImage3FView reference, NativeButteraugliParams params,
+    NativePreparedButteraugliReference* prepared);
+
+[[nodiscard]] Status CompareButteraugliReferenceNative(
+    NativePreparedButteraugliReference* prepared,
+    ConstImage3FView distorted, PlaneF32View distance_map, double* score);
 
 } // namespace gjxl::butteraugli_internal

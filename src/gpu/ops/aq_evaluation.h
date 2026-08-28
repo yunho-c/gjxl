@@ -90,6 +90,12 @@ public:
     AqEvaluationInput input,
     AqEvaluationOutput output) = 0;
 
+  /// Rebinds target-dependent strategy and EPF metadata without reallocating
+  /// the prepared source, metric reference, or evaluation scratch.
+  [[nodiscard]] virtual Status Reconfigure(
+    const AcStrategyGrid& strategies,
+    ConstPlaneU8View epf_sharpness) = 0;
+
   [[nodiscard]] virtual AqEvaluationMemoryStats memory_stats() const noexcept = 0;
 
 protected:

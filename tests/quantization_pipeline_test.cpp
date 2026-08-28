@@ -19,6 +19,8 @@
 #include "butteraugli_test_tolerances.h"
 #include "codec/color_transform.h"
 #include "codec/quantization_pipeline.h"
+#include "codec/quantization_pipeline_internal.h"
+#include "codestream/encoder.h"
 
 namespace {
 
@@ -541,6 +543,69 @@ bool CheckGaborishDisabledPath() {
   return true;
 }
 
+bool CheckPreparedReuse() {
+  constexpr gjxl::Extent2D kExtent{32, 24};
+  ImageStorage original(kExtent);
+  ImageStorage padded_linear(kExtent);
+  ImageStorage opsin(kExtent);
+  FillImages(Fixture::kTexture, &original, &padded_linear);
+  if (!gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, opsin.View()).ok()) {
+    return false;
+  }
+
+  gjxl::CpuQuantizationPipelineOptions preparation_options;
+  gjxl::quantization_pipeline_internal::PreparedQuantizationPipeline prepared;
+  gjxl::Status status =
+    gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), preparation_options,
+      &prepared);
+  if (!status.ok()) {
+    std::cerr << "Prepared quantization setup failed: "
+              << status.message() << '\n';
+    return false;
+  }
+
+  std::array<std::vector<uint8_t>, 2> reused_bytes;
+  constexpr std::array<float, 2> kTargets = {0.8f, 2.0f};
+  for (size_t index = 0; index < kTargets.size(); ++index) {
+    gjxl::CpuQuantizationPipelineOptions options = preparation_options;
+    options.butteraugli_target = kTargets[index];
+    PipelineStorage one_shot(kExtent, kExtent);
+    PipelineStorage reused(kExtent, kExtent);
+    status = gjxl::RunCpuQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), options, one_shot.Output());
+    if (status.ok()) {
+      status = gjxl::quantization_pipeline_internal::
+        RunPreparedCpuQuantizationPipeline(
+          original.ConstView(), prepared, options, reused.Output());
+    }
+    std::vector<uint8_t> one_shot_bytes;
+    if (status.ok()) {
+      status = gjxl::EncodeVarDctCodestream(
+        one_shot.frame, &one_shot_bytes);
+    }
+    if (status.ok()) {
+      status = gjxl::EncodeVarDctCodestream(
+        reused.frame, &reused_bytes[index]);
+    }
+    if (!status.ok() || one_shot_bytes != reused_bytes[index] ||
+        one_shot.score_history != reused.score_history ||
+        one_shot.initial_quant != reused.initial_quant ||
+        one_shot.final_quant != reused.final_quant ||
+        one_shot.block_distance != reused.block_distance) {
+      std::cerr << "Prepared quantization attempt differs at target "
+                << kTargets[index] << ": " << status.message() << '\n';
+      return false;
+    }
+  }
+  if (reused_bytes[0] == reused_bytes[1]) {
+    std::cerr << "Prepared quantization cached target-dependent decisions\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -560,6 +625,7 @@ int main() {
          kColorTileBoundaryQuant,
          kColorTileBoundaryRaw}) ||
       !CheckGaborishDisabledPath() ||
+      !CheckPreparedReuse() ||
       !CheckInvalidRequestIsAtomic() ||
       !CheckInvalidOutputsAreRejected()) {
     return EXIT_FAILURE;

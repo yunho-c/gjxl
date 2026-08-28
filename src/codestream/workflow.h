@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "core/ac_strategy.h"
@@ -115,6 +116,31 @@ struct VarDctEncodingSummary {
     const VarDctEncodingSummary&) = default;
 };
 
+/// Wall-clock time for one complete attempted encode, including
+/// quantization, reconstruction, metric evaluation, and serialization.
+struct VarDctEncodingAttemptTiming {
+  float butteraugli_target = 0.0f;
+  uint64_t encode_and_serialize_nanoseconds = 0;
+  size_t encoded_bytes = 0;
+  bool succeeded = false;
+};
+
+/// Non-deterministic timing diagnostics kept separate from the result summary.
+struct VarDctEncodingTiming {
+  /// Post-validation source preparation: geometry, edge extension, color
+  /// conversion, host workspaces, and any CPU perceptual reference.
+  uint64_t preparation_nanoseconds = 0;
+  /// Complete target-size search wall time, including all attempted encodes,
+  /// serialization, failures, and final candidate selection. Zero for a
+  /// single-target or maximum-error request.
+  uint64_t aggregate_search_nanoseconds = 0;
+  /// Duration of the successful attempt retained as the final codestream.
+  uint64_t selected_attempt_nanoseconds = 0;
+  /// End-to-end workflow time, including validation and output commit.
+  uint64_t total_nanoseconds = 0;
+  std::vector<VarDctEncodingAttemptTiming> attempts;
+};
+
 /// Converts linear sRGB, selects the requested CPU/Metal quantization path, and
 /// serializes one initial-profile raw JPEG XL codestream.
 ///
@@ -125,5 +151,15 @@ struct VarDctEncodingSummary {
   VarDctEncodingOptions options,
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary = nullptr);
+
+/// Encodes identically to EncodeLinearRgbVarDctCodestream and atomically
+/// returns wall-clock diagnostics. Timing values are observational and are
+/// intentionally excluded from deterministic summary equality.
+[[nodiscard]] Status EncodeLinearRgbVarDctCodestreamProfiled(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingTiming* timing);
 
 }  // namespace gjxl

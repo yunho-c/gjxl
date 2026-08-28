@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "butteraugli_test_tolerances.h"
+#include "codec/butteraugli.h"
 #include "codec/butteraugli_distance_internal.h"
 
 namespace {
@@ -458,6 +459,68 @@ SnapshotStages(const bi::OwnedDifferenceStages &stages) {
   return true;
 }
 
+[[nodiscard]] bool CheckPreparedReference() {
+  constexpr std::array<gjxl::Extent2D, 3> kExtents = {
+      gjxl::Extent2D{3, 7},
+      gjxl::Extent2D{9, 8},
+      gjxl::Extent2D{17, 19},
+  };
+  for (gjxl::Extent2D extent : kExtents) {
+    ImageStorage reference(extent, 3);
+    ImageStorage distorted(extent, 5);
+    FillImage(&reference);
+    FillImage(&distorted, 0.013f);
+    gjxl::PreparedButteraugliReference prepared;
+    gjxl::Status status = prepared.Prepare(reference.ConstView(), {});
+    if (!status.ok() || !prepared.ready() || prepared.extent() != extent) {
+      std::cerr << "Prepared Butteraugli setup failed: "
+                << status.message() << '\n';
+      return false;
+    }
+    for (float offset : {0.013f, 0.027f}) {
+      FillImage(&distorted, offset);
+      PlaneStorage expected(extent, 7);
+      PlaneStorage actual(extent, 9);
+      bi::NativeButteraugliScratch scratch;
+      double expected_score = kScorePoison;
+      double actual_score = kScorePoison;
+      if (!RunNative(reference, distorted, {}, &scratch, &expected,
+                     &expected_score) ||
+          !prepared.Compare(
+            distorted.ConstView(), actual.View(), &actual_score).ok() ||
+          expected_score != actual_score || !expected.PaddingIsUntouched() ||
+          !actual.PaddingIsUntouched()) {
+        std::cerr << "Prepared Butteraugli comparison failed at "
+                  << extent.width << 'x' << extent.height << '\n';
+        return false;
+      }
+      for (size_t y = 0; y < extent.height; ++y) {
+        if (!std::equal(
+              expected.ConstView().Row(y),
+              expected.ConstView().Row(y) + extent.width,
+              actual.ConstView().Row(y))) {
+          std::cerr << "Prepared Butteraugli map differs at "
+                    << extent.width << 'x' << extent.height << '\n';
+          return false;
+        }
+      }
+    }
+
+    PlaneStorage poison(extent, 4);
+    const std::vector<float> before = poison.values;
+    double poison_score = kScorePoison;
+    ImageStorage wrong({extent.width + 1, extent.height});
+    FillImage(&wrong);
+    status = prepared.Compare(wrong.ConstView(), poison.View(), &poison_score);
+    if (status.code() != gjxl::StatusCode::kInvalidArgument ||
+        poison.values != before || poison_score != kScorePoison) {
+      std::cerr << "Prepared Butteraugli invalid comparison was not atomic\n";
+      return false;
+    }
+  }
+  return true;
+}
+
 [[nodiscard]] bool CheckValidationAtomicityAndAliasing() {
   constexpr gjxl::Extent2D kExtent{9, 8};
   ImageStorage reference(kExtent);
@@ -539,7 +602,8 @@ SnapshotStages(const bi::OwnedDifferenceStages &stages) {
 int main() {
   if (!CheckDifferenceStorage() || !CheckL2Terms() ||
       !CheckMaltaAndMaskPrimitives() || !CheckDifferenceStageValidation() ||
-      !CheckCompleteMapBehavior() || !CheckValidationAtomicityAndAliasing()) {
+      !CheckCompleteMapBehavior() || !CheckPreparedReference() ||
+      !CheckValidationAtomicityAndAliasing()) {
     return EXIT_FAILURE;
   }
   std::cout << "All native Butteraugli distance tests passed.\n";

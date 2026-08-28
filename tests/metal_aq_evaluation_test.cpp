@@ -925,6 +925,104 @@ bool CheckMemoryScaling(gjxl::GpuBackend& gpu) {
   return true;
 }
 
+bool CheckReconfiguration(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!fixture.Initialize() ||
+      !Prepare(gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+
+  gjxl::AcStrategyGrid dct8;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  if (!CheckStatus(gjxl::AcStrategyGrid::Create(blocks, &dct8),
+                   "DCT8 reconfiguration grid")) {
+    return false;
+  }
+  dct8.fill_empty_dct8();
+  std::vector<uint8_t> sharpness(blocks.width * blocks.height);
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      sharpness[y * blocks.width + x] =
+        static_cast<uint8_t>(2 + (x + 3 * y) % 4);
+    }
+  }
+
+  const gjxl::AqEvaluationMemoryStats memory = prepared->memory_stats();
+  const gjxl::GpuBackendStats before = gpu.stats();
+  if (!CheckStatus(prepared->Reconfigure(
+        dct8, {sharpness.data(), blocks, blocks.width}),
+        "Metal AQ reconfiguration")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_reconfigure = gpu.stats();
+  if (after_reconfigure.successful_allocations !=
+        before.successful_allocations ||
+      after_reconfigure.committed_submissions !=
+        before.committed_submissions ||
+      prepared->memory_stats().persistent_bytes != memory.persistent_bytes ||
+      prepared->memory_stats().staging_bytes != memory.staging_bytes ||
+      prepared->memory_stats().peak_scratch_bytes !=
+        memory.peak_scratch_bytes) {
+    std::cerr << "Metal AQ reconfiguration changed allocations or memory\n";
+    return false;
+  }
+
+  EvaluationOutputStorage reconfigured(blocks);
+  if (!CheckStatus(prepared->Evaluate(
+        fixture.input.View(), reconfigured.View()),
+        "reconfigured Metal AQ evaluation") ||
+      !reconfigured.ValidAndPadded() ||
+      gpu.stats().successful_allocations != before.successful_allocations ||
+      gpu.stats().committed_submissions != before.committed_submissions + 1) {
+    std::cerr << "Reconfigured Metal AQ evaluation violated residency\n";
+    return false;
+  }
+
+  std::unique_ptr<gjxl::PreparedAqEvaluation> fresh;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(
+        gpu,
+        {
+          .original_linear_rgb = fixture.original.View(),
+          .coding_opsin = fixture.coding.View(),
+          .strategies = &dct8,
+          .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+          .options = MakeOptions(),
+        },
+        &fresh), "fresh DCT8 AQ preparation")) {
+    return false;
+  }
+  EvaluationOutputStorage expected(blocks);
+  if (!CheckStatus(fresh->Evaluate(fixture.input.View(), expected.View()),
+                   "fresh DCT8 AQ evaluation") ||
+      !CompareOutputs(reconfigured, expected)) {
+    std::cerr << "Reconfigured AQ output differs from fresh preparation\n";
+    return false;
+  }
+
+  sharpness[0] = 8;
+  const gjxl::GpuBackendStats before_invalid = gpu.stats();
+  if (!ExpectCode(prepared->Reconfigure(
+        dct8, {sharpness.data(), blocks, blocks.width}),
+        gjxl::StatusCode::kInvalidArgument,
+        "invalid AQ reconfiguration") ||
+      gpu.stats().successful_allocations !=
+        before_invalid.successful_allocations ||
+      gpu.stats().committed_submissions !=
+        before_invalid.committed_submissions) {
+    return false;
+  }
+  EvaluationOutputStorage retained(blocks);
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), retained.View()),
+                   "AQ evaluation after invalid reconfiguration") ||
+      !CompareOutputs(reconfigured, retained)) {
+    std::cerr << "Invalid AQ reconfiguration changed the prepared state\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckSplitSeamAndDestruction(gjxl::GpuBackend& gpu) {
   Fixture fixture;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
@@ -1180,6 +1278,7 @@ int main() {
       !CheckReductionCorpus(*gpu) ||
       !CheckMaximumErrorReduction(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||
+      !CheckReconfiguration(*gpu) ||
       !CheckMemoryScaling(*gpu) ||
       !CheckSplitSeamAndDestruction(*gpu) ||
       !CheckUploadOrNumericFailure(true) ||

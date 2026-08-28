@@ -52,7 +52,6 @@ behavior. The AQ implementation already provides:
 
 The remaining rate-control gaps are:
 
-- no prepared state reused across target-size attempts;
 - no fully resident `AdjustQuantBlockAC` device pass; and
 - no resampling-specific AQ bypass. The bypass policy is small, but the current
   codestream profile does not support resampling.
@@ -396,6 +395,9 @@ modes use final score and then the lower Butteraugli target as stable tie-breaks
 
 **Estimate:** 2–4 weeks.
 
+**Status:** complete for CPU and exact-coefficient/experimental resident Metal
+attempts in the current profile.
+
 Refactor the monolithic public workflow into prepared and per-attempt state so a
 target-size search can retain:
 
@@ -409,6 +411,57 @@ Do not assume that the initial quant field, AC-strategy grid, color correlation,
 or final AQ state is invariant across quality targets. Cache only inputs proven
 independent of the searched control value. Report preparation, aggregate search,
 and selected-attempt time separately.
+
+The workflow now separates `PreparedWorkflow` from `EncodePreparedAttempt`.
+Preparation retains validated geometry, the edge-extended linear source,
+converted coding opsin, inverse-Gaborish opsin, initial color correlation,
+default EPF sharpness, CPU workspaces, and a native
+`PreparedButteraugliReference`. The cached reference stores both required
+perceptual scales, so every CPU AQ evaluation and every subsequent search
+attempt transforms only the distorted reconstruction. Initial quantization,
+strategy selection, final color correlation, quantizer state, coefficient
+decisions, reconstruction, and AQ output are recomputed for each target.
+
+The first Metal attempt prepares one worst-case frame allocation and device
+Butteraugli reference. Later attempts call `PreparedAqEvaluation::Reconfigure`
+to upload only the new strategy and EPF metadata while retaining source,
+pipelines, buffers, and scratch. Direct mixed-to-DCT8 reconfiguration matches a
+fresh preparation exactly, performs no device allocation or evaluation
+submission, and preserves the prior state after invalid metadata. Complete
+two-target GPU attempts retain the same prepared object while matching one-shot
+frames and codestreams exactly.
+
+`EncodeLinearRgbVarDctCodestreamProfiled` keeps non-deterministic timing out of
+`VarDctEncodingSummary`. It reports source/host preparation, every attempted
+encode including serialization and failures, aggregate search including final
+candidate selection, the retained attempt, and end-to-end time atomically. The
+CLI prints the same preparation, selected-attempt, aggregate-search, and total
+boundaries.
+
+#### RC3 latency snapshot
+
+These measurements are observational, not compression-ratio claims. They used
+a Release build on an Apple M4 Pro running macOS 15.6, one warmup followed by
+five sequential samples, the under-budget policy, a 12-attempt maximum, and
+the exact-coefficient Metal mode. The `128x96` input is a three-channel center
+crop of pinned libjxl's `grayscale_patches_on_splines.pfm`; the `17x13` input is
+`testdata/codestream_sample.pfm`. Times are min-max milliseconds.
+
+| Input and request | Backend | Attempts | Preparation | Selected attempt | Aggregate search | Total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 17x13, 280 B, tolerance 0.1 | CPU | 7 | 0.194-0.251 | 1.120-3.011 | 7.722-11.052 | 7.917-11.303 |
+| 17x13, 280 B, tolerance 0.005 | CPU | 12 | 0.190-0.194 | 1.143-1.190 | 12.792-13.109 | 12.984-13.299 |
+| 128x96, 3400 B, tolerance 0.1 | CPU | 7 | 6.612-6.792 | 34.679-39.020 | 235.894-252.850 | 242.687-259.633 |
+| 128x96, 3400 B, tolerance 0.005 | CPU | 12 | 6.680-6.956 | 35.062-39.393 | 403.268-429.504 | 410.025-436.360 |
+| 128x96, 3400 B, tolerance 0.1 | forced Metal | 7 | 1.757-1.890 | 10.658-11.117 | 119.682-131.878 | 121.572-133.672 |
+| 128x96, 3400 B, tolerance 0.005 | forced Metal | 12 | 1.817-1.914 | 10.629-12.041 | 167.916-186.970 | 169.775-188.787 |
+
+Both tolerances selected deterministic 272-byte and 3206-byte codestreams for
+the small and cropped inputs respectively. Tolerance `0.1` met each budget;
+the tighter tolerance exhausted the bounded search without finding a candidate
+inside the requested window. CPU and forced Metal bytes were identical. Pinned
+`djxl` independently decoded the four `128x96`
+CPU/Metal, loose/tight outputs and both `17x13` backend outputs.
 
 ### 13. Port `AdjustQuantBlockAC` to the fully resident path
 
@@ -432,6 +485,8 @@ parity remains research-risky and has no guaranteed schedule.
 
 Complete tasks 1–5.
 
+**Status:** complete for the current byte and BPP request contract.
+
 Exit criteria:
 
 - the existing API remains source-compatible;
@@ -445,6 +500,8 @@ Expected effort: approximately one focused week.
 ### RC1: Current-profile CPU decision completeness
 
 Complete tasks 7 and 9, then validate the existing Butteraugli path again.
+
+**Status:** complete for the current seven-strategy profile.
 
 Exit criteria:
 
@@ -475,6 +532,8 @@ Exit criteria:
 ### RC3: Production target-size latency
 
 Complete tasks 11 and 12.
+
+**Status:** complete for the current profile and bounded search contract.
 
 Exit criteria:
 
@@ -528,6 +587,7 @@ The following must not be counted as easy or medium rate-control completion:
 - [`adaptive_quantization.h`](../src/codec/adaptive_quantization.h)
 - [`adaptive_quantization.cpp`](../src/codec/adaptive_quantization.cpp)
 - [`adaptive_quantization_internal.h`](../src/codec/adaptive_quantization_internal.h)
+- [`butteraugli.h`](../src/codec/butteraugli.h)
 - [`maximum_error.h`](../src/codec/maximum_error.h)
 - [`maximum_error.cpp`](../src/codec/maximum_error.cpp)
 - [`gpu/metal/kernels/aq_reduction.metal`](../src/gpu/metal/kernels/aq_reduction.metal)

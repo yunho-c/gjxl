@@ -18,6 +18,7 @@
 
 #include "codec/color_transform.h"
 #include "codec/quantization_pipeline.h"
+#include "codec/quantization_pipeline_internal.h"
 #include "codestream/encoder.h"
 #include "codestream/workflow.h"
 #include "codestream/workflow_internal.h"
@@ -558,6 +559,107 @@ bool CheckDefaultUpdatePipelineParity() {
   return true;
 }
 
+bool CheckPreparedGpuAttemptReuse() {
+  constexpr gjxl::Extent2D kExtent{96, 64};
+  ImageStorage original(kExtent);
+  ImageStorage padded_linear(kExtent);
+  ImageStorage opsin(kExtent);
+  for (size_t y = 0; y < kExtent.height; ++y) {
+    for (size_t x = 0; x < kExtent.width; ++x) {
+      const float fx = static_cast<float>(x);
+      const float fy = static_cast<float>(y);
+      const std::array<float, 3> rgb = {
+        0.08f + 0.005f * fx + 0.003f * fy,
+        0.12f + 0.002f * fx + 0.007f * fy,
+        ((x / 9 + y / 7) & 1u) == 0 ? 0.09f : 0.78f,
+      };
+      for (size_t channel = 0; channel < 3; ++channel) {
+        original.plane[channel][y * original.stride + x] = rgb[channel];
+        padded_linear.plane[channel][y * padded_linear.stride + x] =
+          rgb[channel];
+      }
+    }
+  }
+  if (!gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, opsin.View()).ok()) {
+    return false;
+  }
+
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+    return false;
+  }
+  gjxl::CpuQuantizationPipelineOptions preparation_options;
+  gjxl::quantization_pipeline_internal::PreparedQuantizationPipeline
+    host_prepared;
+  gjxl::Status status =
+    gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), preparation_options,
+      &host_prepared, false);
+  if (!status.ok()) {
+    std::cerr << "Prepared GPU host setup failed: "
+              << status.message() << '\n';
+    return false;
+  }
+  gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
+    gpu_prepared;
+  constexpr std::array<float, 2> kTargets = {0.8f, 2.0f};
+  std::array<std::vector<uint8_t>, 2> reused_codestreams;
+  gjxl::PreparedAqEvaluation* first_evaluation = nullptr;
+  for (size_t index = 0; index < kTargets.size(); ++index) {
+    gjxl::CpuQuantizationPipelineOptions options = preparation_options;
+    options.butteraugli_target = kTargets[index];
+    PipelineStorage one_shot(kExtent, kExtent);
+    PipelineStorage reused(kExtent, kExtent);
+    status = gjxl::RunGpuQuantizationPipeline(
+      *gpu, original.ConstView(), opsin.ConstView(), options,
+      one_shot.Output());
+    if (status.ok()) {
+      status = gjxl::quantization_pipeline_internal::
+        RunPreparedGpuQuantizationPipeline(
+          *gpu, original.ConstView(), host_prepared, options,
+          gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+          reused.Output(), nullptr, &gpu_prepared);
+    }
+    std::vector<uint8_t> one_shot_codestream;
+    if (status.ok()) {
+      status = gjxl::EncodeVarDctCodestream(
+        one_shot.frame, &one_shot_codestream);
+    }
+    if (status.ok()) {
+      status = gjxl::EncodeVarDctCodestream(
+        reused.frame, &reused_codestreams[index]);
+    }
+    if (!status.ok() || gpu_prepared.evaluation == nullptr ||
+        one_shot_codestream != reused_codestreams[index] ||
+        one_shot.initial_quant != reused.initial_quant ||
+        one_shot.strategy_mask != reused.strategy_mask ||
+        one_shot.pixel_mask != reused.pixel_mask ||
+        one_shot.final_quant != reused.final_quant ||
+        one_shot.block_distance != reused.block_distance ||
+        one_shot.scores != reused.scores ||
+        MaximumImageError(one_shot.reconstructed, reused.reconstructed) !=
+          0.0 ||
+        !FramesEqual(one_shot.frame, reused.frame)) {
+      std::cerr << "Prepared GPU attempt differs at target "
+                << kTargets[index] << ": " << status.message() << '\n';
+      return false;
+    }
+    if (index == 0) {
+      first_evaluation = gpu_prepared.evaluation.get();
+    } else if (gpu_prepared.evaluation.get() != first_evaluation) {
+      std::cerr << "Prepared GPU AQ allocation was replaced between targets\n";
+      return false;
+    }
+  }
+  if (reused_codestreams[0] == reused_codestreams[1]) {
+    std::cerr << "Prepared GPU pipeline cached target-dependent output\n";
+    return false;
+  }
+  std::cout << "Prepared GPU attempts reuse one AQ allocation exactly\n";
+  return true;
+}
+
 bool CheckWorkflowBackendSelection() {
   constexpr gjxl::Extent2D kExtent{128, 96};
   ImageStorage original(kExtent);
@@ -957,6 +1059,7 @@ bool CheckWorkflowBackendSelection() {
 
 int main() {
   if (!CheckGpuPipelineParity() || !CheckDefaultUpdatePipelineParity() ||
+      !CheckPreparedGpuAttemptReuse() ||
       !CheckWorkflowBackendSelection()) {
     return EXIT_FAILURE;
   }

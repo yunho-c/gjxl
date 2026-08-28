@@ -662,7 +662,18 @@ Status ComputeDifferenceStages(const OwnedPsychoImage &reference,
         "Butteraugli difference images, parameters, or scratch are invalid");
   }
 
-  OwnedDifferenceStages candidate;
+  OwnedDifferenceStages candidate = std::move(scratch->staged_output_);
+  struct CandidateGuard {
+    OwnedDifferenceStages* staging = nullptr;
+    OwnedDifferenceStages* candidate = nullptr;
+    bool committed = false;
+
+    ~CandidateGuard() {
+      if (!committed) {
+        *staging = std::move(*candidate);
+      }
+    }
+  } guard{&scratch->staged_output_, &candidate};
   Status status = candidate.Resize(extent);
   if (!status.ok()) {
     return status;
@@ -819,7 +830,9 @@ Status ComputeDifferenceStages(const OwnedPsychoImage &reference,
           "Butteraugli difference computation produced non-finite values");
     }
   }
+  scratch->staged_output_ = std::move(*output);
   *output = std::move(candidate);
+  guard.committed = true;
   return Status::Ok();
 }
 
@@ -965,6 +978,218 @@ Status ComputeButteraugliDistanceNative(ConstImage3FView reference,
   }
 
   CopyPlane(scratch->final_map_.ConstView(), distance_map);
+  *score = maximum;
+  return Status::Ok();
+}
+
+Status PrepareButteraugliReferenceNative(
+    ConstImage3FView reference, NativeButteraugliParams params,
+    NativePreparedButteraugliReference* prepared) {
+  if (!ValidImage(reference) || !ValidParams(params) || prepared == nullptr ||
+      !ImageIsFinite(reference)) {
+    return Status::InvalidArgument(
+        "Native Butteraugli reference preparation is invalid");
+  }
+
+  NativePreparedButteraugliReference candidate;
+  candidate.params_ = params;
+  candidate.requested_extent_ = reference.extent();
+  candidate.working_extent_ = reference.extent();
+  candidate.expanded_ = reference.width() < 8 || reference.height() < 8;
+  if (candidate.expanded_) {
+    candidate.working_extent_ = {
+        std::max<size_t>(8, reference.width()),
+        std::max<size_t>(8, reference.height())};
+    candidate.xborder_ = reference.width() < 8
+        ? (8 - reference.width()) / 2
+        : 0;
+    candidate.yborder_ = reference.height() < 8
+        ? (8 - reference.height()) / 2
+        : 0;
+  }
+  candidate.has_subscale_ = !candidate.expanded_ &&
+      reference.width() >= 15 && reference.height() >= 15;
+
+  const auto prepare_scale = [&params](
+      ConstImage3FView scale_reference, OwnedImage3F* xyb,
+      OpsinScratch* opsin, FrequencyScratch* frequency,
+      OwnedPsychoImage* reference_psycho,
+      OwnedPsychoImage* distorted_psycho,
+      DifferenceScratch* difference,
+      OwnedDifferenceStages* stages) -> Status {
+    Status status = xyb->Resize(scale_reference.extent());
+    if (!status.ok()) {
+      return status;
+    }
+    status = OpsinDynamicsImage(
+        scale_reference, params.intensity_target, opsin, xyb->View());
+    if (!status.ok()) {
+      return status;
+    }
+    status = SeparateFrequencies(
+        xyb->ConstView(), frequency, reference_psycho);
+    if (!status.ok()) {
+      return status;
+    }
+    status = distorted_psycho->Resize(scale_reference.extent());
+    if (!status.ok()) {
+      return status;
+    }
+    // Prepares all difference storage during reference preparation. The
+    // zero self-comparison is internal and is overwritten by Compare.
+    return ComputeDifferenceStages(
+        *reference_psycho, *reference_psycho, params, difference, stages);
+  };
+
+  ConstImage3FView working_reference = reference;
+  if (candidate.expanded_) {
+    Status status = candidate.main_input_.Resize(candidate.working_extent_);
+    if (!status.ok()) {
+      return status;
+    }
+    ExpandImage(reference, candidate.xborder_, candidate.yborder_,
+                candidate.main_input_.View());
+    working_reference = candidate.main_input_.ConstView();
+  }
+  Status status = prepare_scale(
+      working_reference, &candidate.main_xyb_, &candidate.main_opsin_,
+      &candidate.main_frequency_, &candidate.main_reference_,
+      &candidate.main_distorted_, &candidate.main_difference_,
+      &candidate.main_stages_);
+  if (!status.ok()) {
+    return status;
+  }
+  status = candidate.main_difference_.PrepareOutputStaging(
+      candidate.working_extent_);
+  if (!status.ok()) {
+    return status;
+  }
+
+  if (candidate.has_subscale_) {
+    const Extent2D sub_extent{
+        (reference.width() + 1) / 2, (reference.height() + 1) / 2};
+    status = candidate.sub_input_.Resize(sub_extent);
+    if (!status.ok()) {
+      return status;
+    }
+    Subsample2x(reference, candidate.sub_input_.View());
+    status = prepare_scale(
+        candidate.sub_input_.ConstView(), &candidate.sub_xyb_,
+        &candidate.sub_opsin_, &candidate.sub_frequency_,
+        &candidate.sub_reference_, &candidate.sub_distorted_,
+        &candidate.sub_difference_, &candidate.sub_stages_);
+    if (!status.ok()) {
+      return status;
+    }
+    status = candidate.sub_difference_.PrepareOutputStaging(sub_extent);
+    if (!status.ok()) {
+      return status;
+    }
+  }
+  status = candidate.final_map_.Resize(reference.extent());
+  if (!status.ok()) {
+    return status;
+  }
+  candidate.ready_ = true;
+  *prepared = std::move(candidate);
+  return Status::Ok();
+}
+
+Status CompareButteraugliReferenceNative(
+    NativePreparedButteraugliReference* prepared,
+    ConstImage3FView distorted, PlaneF32View distance_map, double* score) {
+  if (prepared == nullptr || !prepared->ready_ || !ValidImage(distorted) ||
+      distorted.extent() != prepared->requested_extent_ ||
+      !ValidPlane(distance_map) ||
+      distance_map.extent != prepared->requested_extent_ || score == nullptr ||
+      !ImageIsFinite(distorted)) {
+    return Status::InvalidArgument(
+        "Prepared native Butteraugli comparison is invalid");
+  }
+
+  const auto transform_distorted = [prepared](
+      ConstImage3FView input, OwnedImage3F* xyb, OpsinScratch* opsin,
+      FrequencyScratch* frequency,
+      OwnedPsychoImage* psycho) -> Status {
+    Status status = OpsinDynamicsImage(
+        input, prepared->params_.intensity_target, opsin, xyb->View());
+    if (!status.ok()) {
+      return status;
+    }
+    return SeparateFrequencies(xyb->ConstView(), frequency, psycho);
+  };
+
+  ConstImage3FView working_distorted = distorted;
+  if (prepared->expanded_) {
+    ExpandImage(distorted, prepared->xborder_, prepared->yborder_,
+                prepared->main_input_.View());
+    working_distorted = prepared->main_input_.ConstView();
+  }
+  Status status = transform_distorted(
+      working_distorted, &prepared->main_xyb_, &prepared->main_opsin_,
+      &prepared->main_frequency_, &prepared->main_distorted_);
+  if (!status.ok()) {
+    return status;
+  }
+  status = ComputeDifferenceStages(
+      prepared->main_reference_, prepared->main_distorted_, prepared->params_,
+      &prepared->main_difference_, &prepared->main_stages_);
+  if (!status.ok()) {
+    return status;
+  }
+
+  PlaneF32View staged_map = prepared->final_map_.View();
+  const ConstPlaneF32View main_map =
+      std::as_const(prepared->main_stages_)
+          .StageView(DifferenceStage::kFinalComposition);
+  if (prepared->expanded_) {
+    for (size_t y = 0; y < prepared->requested_extent_.height; ++y) {
+      std::copy_n(
+          main_map.Row(y + prepared->yborder_) + prepared->xborder_,
+          prepared->requested_extent_.width, staged_map.Row(y));
+    }
+  } else if (prepared->has_subscale_) {
+    Subsample2x(distorted, prepared->sub_input_.View());
+    status = transform_distorted(
+        prepared->sub_input_.ConstView(), &prepared->sub_xyb_,
+        &prepared->sub_opsin_, &prepared->sub_frequency_,
+        &prepared->sub_distorted_);
+    if (!status.ok()) {
+      return status;
+    }
+    status = ComputeDifferenceStages(
+        prepared->sub_reference_, prepared->sub_distorted_,
+        prepared->params_, &prepared->sub_difference_,
+        &prepared->sub_stages_);
+    if (!status.ok()) {
+      return status;
+    }
+    const ConstPlaneF32View sub_map =
+        std::as_const(prepared->sub_stages_)
+            .StageView(DifferenceStage::kFinalComposition);
+    for (size_t y = 0; y < prepared->requested_extent_.height; ++y) {
+      for (size_t x = 0; x < prepared->requested_extent_.width; ++x) {
+        staged_map.Row(y)[x] =
+            main_map.Row(y)[x] * 0.85f +
+            0.5f * sub_map.Row(y / 2)[x / 2];
+      }
+    }
+  } else {
+    CopyPlane(main_map, staged_map);
+  }
+
+  float maximum = 0.0f;
+  for (size_t y = 0; y < prepared->requested_extent_.height; ++y) {
+    for (size_t x = 0; x < prepared->requested_extent_.width; ++x) {
+      const float value = staged_map.Row(y)[x];
+      if (!std::isfinite(value) || value < 0.0f) {
+        return Status::Internal(
+            "Prepared native Butteraugli produced an invalid distance map");
+      }
+      maximum = std::max(maximum, value);
+    }
+  }
+  CopyPlane(prepared->final_map_.ConstView(), distance_map);
   *score = maximum;
   return Status::Ok();
 }

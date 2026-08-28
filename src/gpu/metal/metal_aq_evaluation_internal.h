@@ -147,6 +147,8 @@ public:
 
   Status Prepare(const AqEvaluationPreparation &preparation);
   Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
+  Status Reconfigure(const AcStrategyGrid& strategies,
+                     ConstPlaneU8View epf_sharpness) override;
   Status EvaluateProfiled(AqEvaluationInput input, AqEvaluationOutput output,
                           MetalAqEvaluationProfile* profile);
   AqEvaluationMemoryStats memory_stats() const noexcept override;

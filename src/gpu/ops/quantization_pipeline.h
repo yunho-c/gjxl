@@ -35,4 +35,22 @@ namespace gjxl {
   CpuQuantizationPipelineOutput output,
   AcStrategyGpuSearchStats* stats = nullptr);
 
+namespace quantization_pipeline_internal {
+
+struct PreparedQuantizationPipeline;
+
+/// Reuses target-invariant host preparation across complete GPU attempts.
+[[nodiscard]] Status RunPreparedGpuQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
+  CpuQuantizationPipelineOptions options,
+  GpuAdaptiveQuantizationMode aq_mode,
+  CpuQuantizationPipelineOutput output,
+  AcStrategyGpuSearchStats* stats = nullptr,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+    prepared_aq = nullptr);
+
+}  // namespace quantization_pipeline_internal
+
 }  // namespace gjxl

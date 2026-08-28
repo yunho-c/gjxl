@@ -48,8 +48,10 @@ class GpuAdaptiveQuantizationProvider final
 public:
   GpuAdaptiveQuantizationProvider(
     GpuBackend& gpu,
-    GpuAdaptiveQuantizationMode mode)
-    : gpu_(gpu), mode_(mode) {}
+    GpuAdaptiveQuantizationMode mode,
+    adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+      prepared)
+    : gpu_(gpu), mode_(mode), prepared_(prepared) {}
 
   Status Find(
     ConstImage3FView original_linear_rgb,
@@ -58,8 +60,16 @@ public:
     ConstPlaneF32View initial_quant_field,
     ConstPlaneU8View epf_sharpness,
     AdaptiveQuantizationOptions options,
+    PreparedButteraugliReference*,
     AdaptiveQuantizationOutput output) override {
 
+    if (prepared_ != nullptr) {
+      return adaptive_quantization_gpu_internal::
+        RunPreparedGpuAdaptiveQuantization(
+          gpu_, original_linear_rgb, opsin, strategies,
+          initial_quant_field, epf_sharpness, options, mode_, prepared_,
+          output);
+    }
     return RunGpuAdaptiveQuantization(
       gpu_, original_linear_rgb, opsin, strategies, initial_quant_field,
       epf_sharpness, options, mode_, output);
@@ -68,6 +78,8 @@ public:
 private:
   GpuBackend& gpu_;
   GpuAdaptiveQuantizationMode mode_;
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+    prepared_ = nullptr;
 };
 
 }  // namespace
@@ -106,12 +118,45 @@ Status RunGpuQuantizationPipeline(
     return Status::Unavailable(
       "GPU quantization pipeline requires prepared AQ support");
   }
+  quantization_pipeline_internal::PreparedQuantizationPipeline prepared;
+  Status status = quantization_pipeline_internal::PrepareQuantizationPipeline(
+    original_linear_rgb, opsin, options, &prepared, false);
+  if (!status.ok()) {
+    return status;
+  }
+  return quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
+    gpu, original_linear_rgb, prepared, options, aq_mode, output, stats);
+}
+
+Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
+  CpuQuantizationPipelineOptions options,
+  GpuAdaptiveQuantizationMode aq_mode,
+  CpuQuantizationPipelineOutput output,
+  AcStrategyGpuSearchStats* stats,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+    prepared_aq) {
+
+  switch (aq_mode) {
+    case GpuAdaptiveQuantizationMode::kExactCoefficients:
+    case GpuAdaptiveQuantizationMode::kFullyResident:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "GPU quantization pipeline AQ mode is invalid");
+  }
+  if (QueryGpuAqEvaluation(gpu) == nullptr) {
+    return Status::Unavailable(
+      "GPU quantization pipeline requires prepared AQ support");
+  }
   GpuAcStrategySearchProvider strategy_search(gpu);
-  GpuAdaptiveQuantizationProvider adaptive_quantization(gpu, aq_mode);
-  const Status status =
-    quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
-      original_linear_rgb, opsin, strategy_search, adaptive_quantization,
-      options, output);
+  GpuAdaptiveQuantizationProvider adaptive_quantization(
+    gpu, aq_mode, prepared_aq);
+  const Status status = RunPreparedQuantizationPipelineWithProviders(
+    original_linear_rgb, prepared, strategy_search, adaptive_quantization,
+    options, output);
   if (!status.ok()) {
     return status;
   }

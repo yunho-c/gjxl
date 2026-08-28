@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "codec/ac_strategy.h"
+#include "codec/adaptive_quantization_internal.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline_internal.h"
@@ -53,11 +54,12 @@ public:
     ConstPlaneF32View initial_quant_field,
     ConstPlaneU8View epf_sharpness,
     AdaptiveQuantizationOptions options,
+    PreparedButteraugliReference* prepared_reference,
     AdaptiveQuantizationOutput output) override {
 
-    return FindBestQuantization(
+    return adaptive_quantization_internal::FindBestQuantizationPrepared(
       original_linear_rgb, opsin, strategies, initial_quant_field,
-      epf_sharpness, options, output);
+      epf_sharpness, options, prepared_reference, output);
   }
 };
 Status ValidatePipelineInputs(
@@ -124,166 +126,260 @@ Status ValidatePipelineInputs(
 
 }  // namespace
 
-Status quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
+Status quantization_pipeline_internal::PrepareQuantizationPipeline(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  PreparedQuantizationPipeline* prepared,
+  bool prepare_cpu_butteraugli) {
+
+  if (prepared == nullptr || !original_linear_rgb.valid() || !opsin.valid() ||
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
+      !options.adaptive_quantization.profile.valid() ||
+      !std::isfinite(options.initial_quant_rescale) ||
+      options.initial_quant_rescale <= 0.0f ||
+      original_linear_rgb.width() > opsin.width() ||
+      original_linear_rgb.height() > opsin.height() ||
+      original_linear_rgb.width() <= opsin.width() - kJxlBlockDimension ||
+      original_linear_rgb.height() <= opsin.height() - kJxlBlockDimension) {
+    return Status::InvalidArgument(
+      "Quantization pipeline preparation is invalid");
+  }
+
+  try {
+    PreparedQuantizationPipeline candidate;
+    candidate.source_extent = original_linear_rgb.extent();
+    candidate.padded_extent = opsin.extent();
+    candidate.block_extent =
+      BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
+    candidate.initial_quant_rescale = options.initial_quant_rescale;
+    candidate.profile = options.adaptive_quantization.profile;
+    size_t block_count = 0;
+    size_t pixel_count = 0;
+    if (!candidate.block_extent.try_area(&block_count) ||
+        !candidate.padded_extent.try_area(&pixel_count)) {
+      return Status::InvalidArgument(
+        "Quantization pipeline dimensions are too large");
+    }
+    candidate.coding_opsin.resize(candidate.padded_extent);
+    CopyImage(opsin, candidate.coding_opsin.view());
+    candidate.preprocessed_opsin.resize(candidate.padded_extent);
+    if (candidate.profile.loop_filter.gaborish) {
+      Status status = ApplyGaborishInverse(
+        opsin,
+        candidate.profile.gaborish_inverse_multipliers,
+        candidate.preprocessed_opsin.view());
+      if (!status.ok()) {
+        return status;
+      }
+    } else {
+      CopyImage(opsin, candidate.preprocessed_opsin.view());
+    }
+    Status status = ComputeInitialColorCorrelationMap(
+      candidate.preprocessed_opsin.const_view(),
+      &candidate.initial_color_correlation);
+    if (!status.ok()) {
+      return status;
+    }
+    candidate.epf_sharpness.resize(block_count);
+    status = FillDefaultEpfSharpness({
+      candidate.epf_sharpness.data(), candidate.block_extent,
+      candidate.block_extent.width});
+    if (!status.ok()) {
+      return status;
+    }
+    candidate.initial_quant.resize(block_count);
+    candidate.strategy_mask.resize(block_count);
+    candidate.pixel_mask.resize(pixel_count);
+    candidate.final_quant.resize(block_count);
+    candidate.block_distance.resize(block_count);
+    candidate.reconstructed_linear.resize(candidate.source_extent);
+    candidate.butteraugli_options = options.adaptive_quantization.butteraugli;
+    if (prepare_cpu_butteraugli &&
+        options.adaptive_quantization.control_mode ==
+          AdaptiveQuantizationControlMode::kButteraugli) {
+      auto reference = std::make_unique<PreparedButteraugliReference>();
+      status = reference->Prepare(
+        original_linear_rgb, candidate.butteraugli_options);
+      if (!status.ok()) {
+        return status;
+      }
+      candidate.butteraugli_reference = std::move(reference);
+    }
+    *prepared = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate quantization pipeline preparation");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Quantization pipeline preparation is too large");
+  }
+  return Status::Ok();
+}
+
+Status
+quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
   AcStrategySearchProvider& strategy_search,
-  quantization_pipeline_internal::AdaptiveQuantizationProvider&
-    adaptive_quantization,
+  AdaptiveQuantizationProvider& adaptive_quantization,
   CpuQuantizationPipelineOptions options,
   CpuQuantizationPipelineOutput output) {
 
   Extent2D block_extent;
   Status status = ValidatePipelineInputs(
-    original_linear_rgb,
-    opsin,
-    options,
-    output,
-    &block_extent);
+    original_linear_rgb, prepared.preprocessed_opsin.const_view(), options,
+    output, &block_extent);
+  if (!status.ok()) {
+    return status;
+  }
+  if (prepared.source_extent != original_linear_rgb.extent() ||
+      prepared.padded_extent != prepared.preprocessed_opsin.extent() ||
+      prepared.block_extent != block_extent ||
+      prepared.profile != options.adaptive_quantization.profile ||
+      prepared.initial_quant_rescale != options.initial_quant_rescale) {
+    return Status::InvalidArgument(
+      "Prepared quantization pipeline does not match this attempt");
+  }
+
+  constexpr float kMaximumErrorInitializationTarget = 1.0f;
+  const float control_target =
+    options.adaptive_quantization.control_mode ==
+        AdaptiveQuantizationControlMode::kMaximumError
+      ? kMaximumErrorInitializationTarget
+      : options.butteraugli_target;
+  const float initial_quant_target = prepared.profile.loop_filter.gaborish
+    ? control_target
+    : 0.62f * control_target;
+  status = ComputeInitialQuantField(
+    prepared.coding_opsin.const_view(),
+    {
+      .butteraugli_target = initial_quant_target,
+      .rescale = options.initial_quant_rescale,
+    },
+    {
+      .quant_field = {
+        prepared.initial_quant.data(), block_extent, block_extent.width},
+      .strategy_mask = {
+        prepared.strategy_mask.data(), block_extent, block_extent.width},
+      .pixel_mask = {
+        prepared.pixel_mask.data(), prepared.padded_extent,
+        prepared.padded_extent.width},
+    });
   if (!status.ok()) {
     return status;
   }
 
-  size_t block_count = 0;
-  size_t pixel_count = 0;
-  if (!block_extent.try_area(&block_count) ||
-      !opsin.extent().try_area(&pixel_count)) {
-    return Status::InvalidArgument(
-      "Quantization pipeline dimensions are too large");
+  status = strategy_search.Find(
+    prepared.preprocessed_opsin.const_view(),
+    {prepared.initial_quant.data(), block_extent, block_extent.width},
+    {prepared.pixel_mask.data(), prepared.padded_extent,
+     prepared.padded_extent.width},
+    prepared.initial_color_correlation,
+    {.butteraugli_target = control_target},
+    &prepared.strategies);
+  if (!status.ok()) {
+    return status;
   }
 
-  try {
-    constexpr float kMaximumErrorInitializationTarget = 1.0f;
-    const float control_target =
-      options.adaptive_quantization.control_mode ==
-          AdaptiveQuantizationControlMode::kMaximumError
-        ? kMaximumErrorInitializationTarget
-        : options.butteraugli_target;
-    std::vector<float> initial_quant(block_count);
-    std::vector<float> strategy_mask(block_count);
-    std::vector<float> pixel_mask(pixel_count);
-    const float initial_quant_target =
-      options.adaptive_quantization.profile.loop_filter.gaborish
-        ? control_target
-        : 0.62f * control_target;
-    status = ComputeInitialQuantField(
-      opsin,
-      {
-        .butteraugli_target = initial_quant_target,
-        .rescale = options.initial_quant_rescale,
-      },
-      {
-        .quant_field = {
-          initial_quant.data(), block_extent, block_extent.width},
-        .strategy_mask = {
-          strategy_mask.data(), block_extent, block_extent.width},
-        .pixel_mask = {
-          pixel_mask.data(), opsin.extent(), opsin.width()},
-      });
-    if (!status.ok()) {
-      return status;
-    }
+  AdaptiveQuantizationOptions adaptive_options =
+    options.adaptive_quantization;
+  adaptive_options.butteraugli_target = control_target;
+  status = adaptive_quantization.Find(
+    original_linear_rgb,
+    prepared.preprocessed_opsin.const_view(),
+    prepared.strategies,
+    {prepared.initial_quant.data(), block_extent, block_extent.width},
+    {prepared.epf_sharpness.data(), block_extent, block_extent.width},
+    adaptive_options,
+    prepared.butteraugli_reference.get(),
+    {
+      .quant_field = {
+        prepared.final_quant.data(), block_extent, block_extent.width},
+      .block_distance_map = {
+        prepared.block_distance.data(), block_extent, block_extent.width},
+      .reconstructed_linear_rgb = prepared.reconstructed_linear.view(),
+      .frame = &prepared.frame,
+      .score_history = &prepared.score_history,
+      .maximum_error_result = &prepared.maximum_error_result,
+    });
+  if (!status.ok()) {
+    return status;
+  }
 
-    Image3FBuffer preprocessed_opsin(opsin.extent());
-    if (options.adaptive_quantization.profile.loop_filter.gaborish) {
-      status = ApplyGaborishInverse(
-        opsin,
-        options.adaptive_quantization.profile.
-          gaborish_inverse_multipliers,
-        preprocessed_opsin.view());
+  CopyContiguousPlane(
+    prepared.initial_quant, output.initial_quantization.quant_field);
+  CopyContiguousPlane(
+    prepared.strategy_mask, output.initial_quantization.strategy_mask);
+  CopyContiguousPlane(
+    prepared.pixel_mask, output.initial_quantization.pixel_mask);
+  CopyContiguousPlane(
+    prepared.final_quant, output.adaptive_quantization.quant_field);
+  CopyContiguousPlane(
+    prepared.block_distance,
+    output.adaptive_quantization.block_distance_map);
+  CopyImage(
+    prepared.reconstructed_linear.const_view(),
+    output.adaptive_quantization.reconstructed_linear_rgb);
+  *output.adaptive_quantization.frame = std::move(prepared.frame);
+  *output.adaptive_quantization.score_history = prepared.score_history;
+  if (output.adaptive_quantization.maximum_error_result != nullptr) {
+    *output.adaptive_quantization.maximum_error_result =
+      prepared.maximum_error_result;
+  }
+  return Status::Ok();
+}
+
+Status quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  AcStrategySearchProvider& strategy_search,
+  AdaptiveQuantizationProvider& adaptive_quantization,
+  CpuQuantizationPipelineOptions options,
+  CpuQuantizationPipelineOutput output) {
+
+  PreparedQuantizationPipeline prepared;
+  Status status = PrepareQuantizationPipeline(
+    original_linear_rgb, opsin, options, &prepared);
+  if (!status.ok()) {
+    return status;
+  }
+  return RunPreparedQuantizationPipelineWithProviders(
+    original_linear_rgb, prepared, strategy_search, adaptive_quantization,
+    options, output);
+}
+
+Status quantization_pipeline_internal::RunPreparedCpuQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
+  CpuQuantizationPipelineOptions options,
+  CpuQuantizationPipelineOutput output) {
+
+  if (options.adaptive_quantization.control_mode ==
+      AdaptiveQuantizationControlMode::kButteraugli &&
+      (prepared.butteraugli_reference == nullptr ||
+       prepared.butteraugli_options !=
+         options.adaptive_quantization.butteraugli)) {
+    try {
+      auto reference = std::make_unique<PreparedButteraugliReference>();
+      Status status = reference->Prepare(
+        original_linear_rgb, options.adaptive_quantization.butteraugli);
       if (!status.ok()) {
         return status;
       }
-    } else {
-      CopyImage(opsin, preprocessed_opsin.view());
+      prepared.butteraugli_options =
+        options.adaptive_quantization.butteraugli;
+      prepared.butteraugli_reference = std::move(reference);
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate the prepared CPU Butteraugli reference");
     }
-
-    ColorCorrelationMap initial_color_correlation;
-    status = ComputeInitialColorCorrelationMap(
-      preprocessed_opsin.const_view(),
-      &initial_color_correlation);
-    if (!status.ok()) {
-      return status;
-    }
-
-    AcStrategyGrid strategies;
-    status = strategy_search.Find(
-      preprocessed_opsin.const_view(),
-      {initial_quant.data(), block_extent, block_extent.width},
-      {pixel_mask.data(), opsin.extent(), opsin.width()},
-      initial_color_correlation,
-      {.butteraugli_target = control_target},
-      &strategies);
-    if (!status.ok()) {
-      return status;
-    }
-
-    std::vector<uint8_t> sharpness(block_count);
-    status = FillDefaultEpfSharpness(
-      {sharpness.data(), block_extent, block_extent.width});
-    if (!status.ok()) {
-      return status;
-    }
-
-    std::vector<float> final_quant(block_count);
-    std::vector<float> block_distance(block_count);
-    Image3FBuffer reconstructed_linear(original_linear_rgb.extent());
-    VarDctEncoderFrame frame;
-    std::vector<double> score_history;
-    MaximumErrorResult maximum_error_result;
-    AdaptiveQuantizationOptions adaptive_options =
-      options.adaptive_quantization;
-    adaptive_options.butteraugli_target = control_target;
-    status = adaptive_quantization.Find(
-      original_linear_rgb,
-      preprocessed_opsin.const_view(),
-      strategies,
-      {initial_quant.data(), block_extent, block_extent.width},
-      {sharpness.data(), block_extent, block_extent.width},
-      adaptive_options,
-      {
-        .quant_field = {
-          final_quant.data(), block_extent, block_extent.width},
-        .block_distance_map = {
-          block_distance.data(), block_extent, block_extent.width},
-        .reconstructed_linear_rgb = reconstructed_linear.view(),
-        .frame = &frame,
-        .score_history = &score_history,
-        .maximum_error_result = &maximum_error_result,
-      });
-    if (!status.ok()) {
-      return status;
-    }
-
-    CopyContiguousPlane(
-      initial_quant, output.initial_quantization.quant_field);
-    CopyContiguousPlane(
-      strategy_mask, output.initial_quantization.strategy_mask);
-    CopyContiguousPlane(
-      pixel_mask, output.initial_quantization.pixel_mask);
-    CopyContiguousPlane(
-      final_quant, output.adaptive_quantization.quant_field);
-    CopyContiguousPlane(
-      block_distance,
-      output.adaptive_quantization.block_distance_map);
-    CopyImage(
-      reconstructed_linear.const_view(),
-      output.adaptive_quantization.reconstructed_linear_rgb);
-    *output.adaptive_quantization.frame = std::move(frame);
-    *output.adaptive_quantization.score_history = std::move(score_history);
-    if (output.adaptive_quantization.maximum_error_result != nullptr) {
-      *output.adaptive_quantization.maximum_error_result =
-        maximum_error_result;
-    }
-  } catch (const std::bad_alloc&) {
-    return Status::OutOfMemory(
-      "Unable to allocate quantization pipeline storage");
-  } catch (const std::length_error&) {
-    return Status::InvalidArgument(
-      "Quantization pipeline dimensions are too large");
   }
-
-  return Status::Ok();
+  CpuAcStrategySearchProvider strategy_search;
+  CpuAdaptiveQuantizationProvider adaptive_quantization;
+  return RunPreparedQuantizationPipelineWithProviders(
+    original_linear_rgb, prepared, strategy_search, adaptive_quantization,
+    options, output);
 }
 
 Status RunQuantizationPipeline(

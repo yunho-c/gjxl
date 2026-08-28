@@ -113,4 +113,14 @@ struct AdaptiveQuantizationPolicyResult {
     ConstPlaneU8View epf_sharpness, AdaptiveQuantizationOptions options,
     AdaptiveQuantizationOutput output, AdaptiveQuantizationProfile* profile);
 
+/// Runs CPU AQ using an already prepared perceptual reference. Maximum-error
+/// mode ignores the pointer. The reference must match the source and active
+/// Butteraugli options.
+[[nodiscard]] Status FindBestQuantizationPrepared(
+    ConstImage3FView original_linear_rgb, ConstImage3FView opsin,
+    const AcStrategyGrid& strategies, ConstPlaneF32View initial_quant_field,
+    ConstPlaneU8View epf_sharpness, AdaptiveQuantizationOptions options,
+    PreparedButteraugliReference* prepared_reference,
+    AdaptiveQuantizationOutput output);
+
 }  // namespace gjxl::adaptive_quantization_internal

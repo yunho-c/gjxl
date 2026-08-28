@@ -1484,7 +1484,7 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(
     gjxl_quantization_pipeline_test
     PRIVATE
-      gjxl_codec
+      gjxl_codestream
   )
 
   add_test(

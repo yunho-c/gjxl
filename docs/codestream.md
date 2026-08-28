@@ -393,6 +393,8 @@ of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus
 `--size-tolerance`, `--max-attempts`, and
 `--size-selection under-budget|closest`. Fully resident mode requires
 `--backend metal`; automatic maximum-error control remains CPU-only. The
+CLI also reports prepared-source, selected-attempt, aggregate size-search, and
+end-to-end timing from the profiled workflow API. The
 frontend writes through a
 same-directory temporary file,
 synchronizes it, and renames it over the destination only after the complete

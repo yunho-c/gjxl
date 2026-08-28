@@ -470,7 +470,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   }
   anchor_count_ = row_major_anchors_.size();
   try {
-    transform_maximum_error_readback_.resize(3 * anchor_count_);
+    transform_maximum_error_readback_.resize(3 * block_count_);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate maximum-error readback storage");
@@ -510,7 +510,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     quantized_readback_.resize(coefficient_value_count_);
     dc_readback_.resize(3 * block_count_);
     quantized_dc_readback_.resize(3 * block_count_);
-    final_transform_views_.reserve(row_major_anchors_.size());
+    final_transform_views_.reserve(block_count_);
     for (const AqAnchor& anchor : row_major_anchors_) {
       const AqStrategyBatch& batch = batches_[anchor.batch_index];
       const size_t channel_stride =
@@ -588,8 +588,8 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                            block_extent_.width * 2, &persistent_bytes);
   if (!status.ok())
     return status;
-  status = AddPlannedPlane(DeviceElementType::kI32, {2 * anchor_count_, 1},
-                           2 * anchor_count_, &persistent_bytes);
+  status = AddPlannedPlane(DeviceElementType::kI32, {2 * block_count_, 1},
+                           2 * block_count_, &persistent_bytes);
   if (!status.ok())
     return status;
   status = AddPlannedPlane(DeviceElementType::kF32, {kQuantTableValueCount, 1},
@@ -634,7 +634,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
   status = AddPlannedPlane(
-      DeviceElementType::kF32, {3 * anchor_count_, 1}, 3 * anchor_count_,
+      DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
       &staging_bytes);
   if (!status.ok())
     return status;
@@ -726,8 +726,8 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
   status =
-      persistent_.AllocatePlane(DeviceElementType::kI32, {2 * anchor_count_, 1},
-                                2 * anchor_count_, kBufferAlignment, &anchors_);
+      persistent_.AllocatePlane(DeviceElementType::kI32, {2 * block_count_, 1},
+                                2 * block_count_, kBufferAlignment, &anchors_);
   if (!status.ok())
     return status;
   status = persistent_.AllocatePlane(
@@ -780,7 +780,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
   status = staging_.AllocatePlane(
-      DeviceElementType::kF32, {3 * anchor_count_, 1}, 3 * anchor_count_,
+      DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
       kBufferAlignment, &transform_maximum_error_);
   if (!status.ok())
     return status;
@@ -854,8 +854,9 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
   status = UploadPlane(*backend_,
-                       ConstPlaneI32View{anchor_records.data(), anchors_.extent,
-                                         anchors_.row_stride},
+                       ConstPlaneI32View{
+                         anchor_records.data(), {2 * anchor_count_, 1},
+                         2 * anchor_count_},
                        anchors_);
   if (!status.ok())
     return status;
@@ -1004,6 +1005,211 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
           butteraugli_memory.peak_comparison_scratch_bytes,
   };
   return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::Reconfigure(
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness) {
+
+  if (!strategies.complete() || strategies.extent() != block_extent_ ||
+      !ValidHostPlaneLayout(epf_sharpness) ||
+      epf_sharpness.extent != block_extent_) {
+    return Status::InvalidArgument(
+      "Prepared AQ reconfiguration geometry is invalid");
+  }
+  for (size_t y = 0; y < block_extent_.height; ++y) {
+    for (size_t x = 0; x < block_extent_.width; ++x) {
+      AcStrategyCell cell;
+      const Status status = strategies.Get(x, y, &cell);
+      if (!status.ok() || !SupportedAqStrategy(cell.strategy) ||
+          epf_sharpness.Row(y)[x] >= 8) {
+        return Status::InvalidArgument(
+          "Prepared AQ reconfiguration metadata is invalid");
+      }
+    }
+  }
+
+  Status status = BeginOperation();
+  if (!status.ok()) {
+    return status;
+  }
+  try {
+    std::vector<int32_t> strategy_records(2 * block_count_);
+    std::vector<int32_t> anchor_records;
+    anchor_records.reserve(2 * block_count_);
+    std::array<std::vector<std::array<int32_t, 2>>, 7> grouped_anchors;
+    std::vector<AqAnchor> row_major_anchors;
+    row_major_anchors.reserve(block_count_);
+    std::vector<uint8_t> sharpness(block_count_);
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      std::copy_n(
+        epf_sharpness.Row(y), block_extent_.width,
+        sharpness.data() + y * block_extent_.width);
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        AcStrategyCell cell;
+        status = strategies.Get(x, y, &cell);
+        if (!status.ok()) {
+          Invalidate();
+          return status;
+        }
+        const size_t record = 2 * (y * block_extent_.width + x);
+        strategy_records[record] = static_cast<int32_t>(cell.strategy);
+        strategy_records[record + 1] = cell.is_anchor ? 1 : 0;
+        if (cell.is_anchor) {
+          const size_t batch_index = AqStrategyBatchIndex(cell.strategy);
+          const size_t index_in_batch = grouped_anchors[batch_index].size();
+          grouped_anchors[batch_index].push_back(
+            {static_cast<int32_t>(x), static_cast<int32_t>(y)});
+          row_major_anchors.push_back(
+            {x, y, cell.strategy, batch_index, index_in_batch});
+        }
+      }
+    }
+
+    std::array<AqStrategyBatch, 7> batches;
+    std::array<AqReconstructionParams, 7> reconstruction_params;
+    std::array<AqBlockReductionParams, 7> block_reduction_params;
+    std::array<AqMaximumErrorReductionParams, 7>
+      maximum_error_reduction_params;
+    size_t coefficient_offset = 0;
+    size_t anchor_offset = 0;
+    for (size_t batch_index = 0; batch_index < batches.size(); ++batch_index) {
+      const AcStrategyType strategy = kSupportedAqStrategies[batch_index];
+      const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
+      if (info == nullptr) {
+        Invalidate();
+        return Status::Internal(
+          "AQ reconfiguration strategy disappeared");
+      }
+      const size_t coefficient_count = info->coefficient_count();
+      const size_t count = grouped_anchors[batch_index].size();
+      batches[batch_index] = {
+        strategy, anchor_offset, count, coefficient_offset,
+        coefficient_count};
+      for (const auto& anchor : grouped_anchors[batch_index]) {
+        anchor_records.push_back(anchor[0]);
+        anchor_records.push_back(anchor[1]);
+      }
+      reconstruction_params[batch_index] = {
+        static_cast<uint32_t>(coding_extent_.width),
+        static_cast<uint32_t>(coding_extent_.height),
+        static_cast<uint32_t>(coding_[0].row_stride),
+        static_cast<uint32_t>(block_extent_.width),
+        static_cast<uint32_t>(block_extent_.height),
+        static_cast<uint32_t>(raw_quant_.row_stride),
+        static_cast<uint32_t>(tile_extent_.width),
+        static_cast<uint32_t>(y_to_x_.row_stride),
+        static_cast<uint32_t>(anchor_offset),
+        static_cast<uint32_t>(count),
+        static_cast<uint32_t>(coefficient_offset),
+        static_cast<uint32_t>(coefficient_count),
+        static_cast<uint32_t>(info->pixel_extent().width),
+        static_cast<uint32_t>(info->pixel_extent().height),
+        static_cast<uint32_t>(info->covered_blocks.width),
+        static_cast<uint32_t>(info->covered_blocks.height),
+        static_cast<uint32_t>(strategy),
+        0,
+        0,
+        QuantizationMatrixMultiplier(options_.profile.x_qm_scale),
+        QuantizationMatrixMultiplier(options_.profile.b_qm_scale),
+      };
+      block_reduction_params[batch_index] = {
+        static_cast<uint32_t>(source_extent_.width),
+        static_cast<uint32_t>(source_extent_.height),
+        static_cast<uint32_t>(distance_map_.row_stride),
+        static_cast<uint32_t>(block_distance_.row_stride),
+        static_cast<uint32_t>(anchor_offset),
+        static_cast<uint32_t>(count),
+        static_cast<uint32_t>(info->pixel_extent().width),
+        static_cast<uint32_t>(info->pixel_extent().height),
+        static_cast<uint32_t>(info->covered_blocks.width),
+        static_cast<uint32_t>(info->covered_blocks.height),
+      };
+      maximum_error_reduction_params[batch_index] = {
+        static_cast<uint32_t>(source_extent_.width),
+        static_cast<uint32_t>(source_extent_.height),
+        static_cast<uint32_t>(coding_[0].row_stride),
+        static_cast<uint32_t>(FinalFilteredImage()[0].row_stride),
+        static_cast<uint32_t>(block_distance_.row_stride),
+        static_cast<uint32_t>(anchor_offset),
+        static_cast<uint32_t>(count),
+        static_cast<uint32_t>(info->pixel_extent().width),
+        static_cast<uint32_t>(info->pixel_extent().height),
+        static_cast<uint32_t>(info->covered_blocks.width),
+        static_cast<uint32_t>(info->covered_blocks.height),
+        options_.maximum_error[0],
+        options_.maximum_error[1],
+        options_.maximum_error[2],
+      };
+      anchor_offset += count;
+      coefficient_offset += 3 * count * coefficient_count;
+    }
+    if (anchor_offset != row_major_anchors.size() ||
+        coefficient_offset != coefficient_value_count_) {
+      Invalidate();
+      return Status::Internal(
+        "Reconfigured AQ anchors do not cover the coding image exactly");
+    }
+
+    std::vector<vardct_frame_internal::QuantizedAcTransformView>
+      transform_views;
+    transform_views.reserve(row_major_anchors.size());
+    for (const AqAnchor& anchor : row_major_anchors) {
+      const AqStrategyBatch& batch = batches[anchor.batch_index];
+      const size_t channel_stride =
+        batch.anchor_count * batch.coefficient_count;
+      vardct_frame_internal::QuantizedAcTransformView transform{
+        .block_x = anchor.block_x,
+        .block_y = anchor.block_y,
+        .strategy = anchor.strategy,
+      };
+      for (size_t channel = 0; channel < 3; ++channel) {
+        const size_t offset = batch.coefficient_offset +
+          channel * channel_stride +
+          anchor.index_in_batch * batch.coefficient_count;
+        transform.coefficients[channel] = std::span<const int32_t>(
+          quantized_readback_.data() + offset, batch.coefficient_count);
+      }
+      transform_views.push_back(transform);
+    }
+
+    status = UploadPlane(
+      *backend_,
+      ConstPlaneI32View{
+        strategy_records.data(), strategies_.extent, strategies_.row_stride},
+      strategies_);
+    if (status.ok()) {
+      status = UploadPlane(
+        *backend_,
+        ConstPlaneI32View{
+          anchor_records.data(), {2 * anchor_offset, 1}, 2 * anchor_offset},
+        anchors_);
+    }
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+
+    strategies_host_ = strategies;
+    epf_sharpness_host_ = std::move(sharpness);
+    batches_ = batches;
+    reconstruction_params_ = reconstruction_params;
+    block_reduction_params_ = block_reduction_params;
+    maximum_error_reduction_params_ = maximum_error_reduction_params;
+    row_major_anchors_ = std::move(row_major_anchors);
+    final_transform_views_ = std::move(transform_views);
+    anchor_count_ = anchor_offset;
+    CompleteOperation();
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    Invalidate();
+    return Status::OutOfMemory(
+      "Unable to allocate AQ reconfiguration storage");
+  } catch (const std::length_error&) {
+    Invalidate();
+    return Status::InvalidArgument(
+      "AQ reconfiguration storage is too large");
+  }
 }
 
 Status MetalPreparedAqEvaluation::Evaluate(AqEvaluationInput input,
@@ -1194,7 +1400,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
     status = backend_->CopyDeviceToHost(
       *transform_maximum_error_.buffer,
       transform_maximum_error_readback_.data(),
-      transform_maximum_error_readback_.size() * sizeof(float),
+      3 * anchor_count_ * sizeof(float),
       transform_maximum_error_.offset_bytes);
     for (size_t anchor = 0; status.ok() && anchor < anchor_count_; ++anchor) {
       for (size_t channel = 0; channel < 3; ++channel) {
