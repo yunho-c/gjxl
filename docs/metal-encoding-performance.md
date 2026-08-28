@@ -85,12 +85,19 @@ just encode-benchmark padded_1080p simd 5 1 exact-coefficients
 just encode-benchmark padded_1080p simd 5 1 fully-resident
 just encode-benchmark padded_1080p simd 5 1 throughput
 just encode-benchmark padded_1080p simd 5 1 maximum-throughput
+just metal-encode-benchmark padded_4k simd 7 2 fully-resident
 just coefficient-benchmark padded_1080p 9 2
 ```
 
 The benchmark performs one correctness validation, alternates CPU/Metal order,
 prints every profile boundary, and reports paired speedups. The broader
 `just aq-benchmark` matrix remains the correctness and exploratory phase gate.
+For large-image optimization loops, `metal-encode-benchmark` performs the same
+initial CPU/Metal codestream validation and then times only repeated complete
+Metal public encodes. This avoids placing a roughly 26-second 4K CPU encode
+between every approximately one-second Metal sample. It is the preferred 4K
+regression signal for Metal changes; the alternating multi-process CPU/Metal
+protocol above remains the final speedup gate.
 
 ## Ordered implementation plan
 
