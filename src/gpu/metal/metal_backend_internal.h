@@ -67,6 +67,7 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> quantization_probe;
+  NS::SharedPtr<MTL::ComputePipelineState> adjustment_probe;
   NS::SharedPtr<MTL::ComputePipelineState> gaborish;
   NS::SharedPtr<MTL::ComputePipelineState> epf;
   NS::SharedPtr<MTL::ComputePipelineState> opsin_to_linear;

@@ -94,6 +94,17 @@ struct AqQuantizationProbeParams {
   float matrix_multiplier;
 };
 
+struct AqAdjustmentProbeParams {
+  uint32_t coefficient_count;
+  uint32_t coefficient_width;
+  uint32_t coefficient_height;
+  uint32_t strategy;
+  int32_t initial_raw_quant;
+  uint32_t global_scale;
+  float x_matrix_multiplier;
+  float b_matrix_multiplier;
+};
+
 struct AqGaborishParams {
   uint32_t width;
   uint32_t height;
@@ -168,6 +179,9 @@ public:
   Status RunQuantizationProbe(const MetalAqQuantizationProbeForTesting &probe,
                               std::vector<int32_t> *quantized,
                               std::vector<float> *dequantized);
+  Status RunAdjustmentProbe(
+      const MetalAqAdjustmentProbeForTesting& probe,
+      MetalAqAdjustmentResultForTesting* result);
   Status RunPostprocess(ConstImage3FView reconstructed_opsin,
                         ConstPlaneF32View epf_inverse_sigma,
                         MetalAqPostprocessSnapshotForTesting *snapshot);
@@ -210,6 +224,9 @@ private:
   EncodeQuantizationProbeSubmission(MetalBackend &backend,
                                     MTL::ComputeCommandEncoder *encoder,
                                     const void *context);
+  static void EncodeAdjustmentProbeSubmission(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      const void* context);
   static void EncodePostprocessSubmission(MetalBackend &backend,
                                           MTL::ComputeCommandEncoder *encoder,
                                           const void *context);
@@ -280,6 +297,7 @@ private:
   std::array<AqMaximumErrorReductionParams, 7>
     maximum_error_reduction_params_{};
   AqQuantizationProbeParams quant_probe_params_{};
+  AqAdjustmentProbeParams adjustment_probe_params_{};
   AqGaborishParams gaborish_params_{};
   std::array<AqEpfParams, 3> epf_params_{};
   AqOpsinToLinearParams opsin_to_linear_params_{};

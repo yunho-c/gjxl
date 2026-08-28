@@ -565,6 +565,210 @@ bool CheckQuantizationProbe(const HostImage &image,
          dequantized == std::vector<float>{456.0f};
 }
 
+enum class AdjustmentPattern {
+  kFlat,
+  kSparse,
+  kActive,
+  kHighFrequencyBorder,
+  kThresholdTie,
+  kQuantLimit,
+};
+
+void FillAdjustmentCoefficients(
+    AdjustmentPattern pattern, size_t channel, int32_t raw_quant,
+    float matrix_multiplier, const gjxl::Quantizer& quantizer,
+    const gjxl::QuantizationMatrixView& matrix,
+    std::vector<float>* coefficients) {
+
+  std::fill(coefficients->begin(), coefficients->end(), 0.0f);
+  const size_t width = matrix.coefficient_extent.width;
+  const size_t height = matrix.coefficient_extent.height;
+  switch (pattern) {
+    case AdjustmentPattern::kFlat:
+      return;
+    case AdjustmentPattern::kSparse:
+      for (size_t i = channel + 3; i < coefficients->size(); i += 97) {
+        (*coefficients)[i] = (i & 1) == 0 ? 0.31f : -0.27f;
+      }
+      return;
+    case AdjustmentPattern::kActive:
+      for (size_t i = 0; i < coefficients->size(); ++i) {
+        (*coefficients)[i] = static_cast<float>(static_cast<int32_t>(
+          (i * 37 + channel * 13) % 101) - 50) * 0.019f;
+      }
+      return;
+    case AdjustmentPattern::kHighFrequencyBorder:
+    case AdjustmentPattern::kQuantLimit:
+      for (size_t y = 0; y < height; ++y) {
+        for (size_t x = 0; x < width; ++x) {
+          if (x + 1 == width || y + 1 == height) {
+            (*coefficients)[y * width + x] =
+              ((x + y + channel) & 1) == 0 ? 0.83f : -0.71f;
+          }
+        }
+      }
+      return;
+    case AdjustmentPattern::kThresholdTie: {
+      const size_t index = width * height - 1;
+      const size_t block_count = width * height / 64;
+      const float threshold = std::max(
+        0.54f,
+        0.64f - std::clamp(0.003f * static_cast<float>(block_count),
+                           0.0f, 0.08f));
+      (*coefficients)[index] = threshold /
+        (matrix.inverse_dequant[index] * quantizer.scale() *
+         static_cast<float>(raw_quant) * matrix_multiplier);
+      return;
+    }
+  }
+}
+
+bool CheckAdjustmentProbe(const HostImage& image,
+                          const gjxl::AcStrategyGrid& strategies) {
+
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "adjustment-probe backend") ||
+      !Prepare(*gpu, image, strategies, &prepared)) {
+    return false;
+  }
+  const gjxl::QuantizerParams params{3541, 10};
+  gjxl::Quantizer quantizer;
+  if (!CheckStatus(gjxl::Quantizer::Create(params, &quantizer),
+                   "adjustment-probe quantizer")) {
+    return false;
+  }
+  const std::array<float, 3> matrix_multipliers = {
+    gjxl::QuantizationMatrixMultiplier(1),
+    1.0f,
+    gjxl::QuantizationMatrixMultiplier(3),
+  };
+  constexpr std::array<gjxl::AcStrategyType, 7> kStrategies = {
+    gjxl::AcStrategyType::kDct8,     gjxl::AcStrategyType::kDct16x16,
+    gjxl::AcStrategyType::kDct32x32, gjxl::AcStrategyType::kDct16x8,
+    gjxl::AcStrategyType::kDct8x16,  gjxl::AcStrategyType::kDct32x16,
+    gjxl::AcStrategyType::kDct16x32,
+  };
+  constexpr std::array<AdjustmentPattern, 6> kPatterns = {
+    AdjustmentPattern::kFlat,
+    AdjustmentPattern::kSparse,
+    AdjustmentPattern::kActive,
+    AdjustmentPattern::kHighFrequencyBorder,
+    AdjustmentPattern::kThresholdTie,
+    AdjustmentPattern::kQuantLimit,
+  };
+  const gjxl::GpuBackendStats before = gpu->stats();
+  size_t probe_count = 0;
+  for (gjxl::AcStrategyType strategy : kStrategies) {
+    std::array<gjxl::QuantizationMatrixView, 3> matrices;
+    for (size_t channel = 0; channel < 3; ++channel) {
+      constexpr std::array<gjxl::XybChannel, 3> kChannels = {
+        gjxl::XybChannel::kX, gjxl::XybChannel::kY,
+        gjxl::XybChannel::kB};
+      if (!CheckStatus(gjxl::GetDefaultQuantizationMatrix(
+            strategy, kChannels[channel], &matrices[channel]),
+            "adjustment-probe matrix")) {
+        return false;
+      }
+    }
+    for (AdjustmentPattern pattern : kPatterns) {
+      const int32_t raw_quant = pattern == AdjustmentPattern::kQuantLimit
+        ? gjxl::kMaxRawQuant
+        : 37;
+      std::array<std::vector<float>, 3> coefficients;
+      std::array<std::span<const float>, 3> coefficient_views;
+      for (size_t channel = 0; channel < 3; ++channel) {
+        coefficients[channel].resize(matrices[channel].dequant.size());
+        FillAdjustmentCoefficients(
+          pattern, channel, raw_quant, matrix_multipliers[channel], quantizer,
+          matrices[channel], &coefficients[channel]);
+        coefficient_views[channel] = coefficients[channel];
+      }
+      gjxl::AdjustedAcQuantization expected;
+      std::vector<int32_t> expected_y(coefficients[1].size());
+      if (!CheckStatus(gjxl::SelectAdjustedAcQuantization(
+            strategy, quantizer, raw_quant, matrix_multipliers,
+            coefficient_views, &expected), "CPU adjustment probe") ||
+          !CheckStatus(gjxl::QuantizeAdjustedYAcBlock(
+            strategy, quantizer, expected, coefficients[1], expected_y),
+            "CPU adjusted-Y probe")) {
+        return false;
+      }
+      gjxl::metal_internal::MetalAqAdjustmentResultForTesting actual;
+      if (!CheckStatus(
+            gjxl::metal_internal::RunMetalAqAdjustmentProbeForTesting(
+              *prepared,
+              {
+                .strategy = strategy,
+                .initial_raw_quant = raw_quant,
+                .quantizer = params,
+                .matrix_multipliers = matrix_multipliers,
+                .coefficients = coefficient_views,
+              },
+              &actual),
+            "Metal adjustment probe") ||
+          actual.decision.raw_quant != expected.raw_quant ||
+          actual.quantized_y != expected_y) {
+        std::cerr << "Adjusted Metal decision differs for strategy "
+                  << static_cast<int>(strategy) << ", pattern "
+                  << static_cast<int>(pattern) << ": raw="
+                  << actual.decision.raw_quant << ", expected="
+                  << expected.raw_quant << '\n';
+        return false;
+      }
+      for (size_t quadrant = 0; quadrant < 4; ++quadrant) {
+        if (!Near(actual.decision.y_thresholds[quadrant],
+                  expected.y_thresholds[quadrant], 2.0e-6, 2.0e-6)) {
+          std::cerr << "Adjusted Y threshold differs for quadrant "
+                    << quadrant << '\n';
+          return false;
+        }
+      }
+      ++probe_count;
+    }
+  }
+  const gjxl::GpuBackendStats after = gpu->stats();
+  if (after.successful_allocations != before.successful_allocations ||
+      after.committed_submissions !=
+        before.committed_submissions + probe_count) {
+    std::cerr << "Adjustment probe violated prepared residency\n";
+    return false;
+  }
+
+  std::array<std::vector<float>, 3> invalid_coefficients;
+  std::array<std::span<const float>, 3> invalid_views;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    invalid_coefficients[channel].assign(64, 0.0f);
+    invalid_views[channel] = invalid_coefficients[channel];
+  }
+  invalid_coefficients[2][17] = std::numeric_limits<float>::infinity();
+  invalid_views[2] = invalid_coefficients[2];
+  gjxl::metal_internal::MetalAqAdjustmentResultForTesting sentinel{
+    .decision = {
+      .raw_quant = 123,
+      .y_thresholds = {1.0f, 2.0f, 3.0f, 4.0f},
+    },
+    .quantized_y = {5, 6, 7},
+  };
+  const auto original = sentinel;
+  return ExpectCode(
+           gjxl::metal_internal::RunMetalAqAdjustmentProbeForTesting(
+             *prepared,
+             {
+               .strategy = gjxl::AcStrategyType::kDct8,
+               .initial_raw_quant = 37,
+               .quantizer = params,
+               .matrix_multipliers = matrix_multipliers,
+               .coefficients = invalid_views,
+             },
+             &sentinel),
+           gjxl::StatusCode::kDeviceError,
+           "non-finite adjustment probe") &&
+    sentinel.decision == original.decision &&
+    sentinel.quantized_y == original.quantized_y;
+}
+
 gjxl::metal_internal::MetalAqReconstructionSnapshotForTesting
 PoisonedSnapshot() {
   gjxl::metal_internal::MetalAqReconstructionSnapshotForTesting snapshot;
@@ -727,6 +931,7 @@ int main() {
       !CheckRoundTrip({}, flat, strategies, false) ||
       !CheckRoundTrip(SimdOptions(), flat, strategies, false) ||
       !CheckQuantizationProbe(structured, strategies) ||
+      !CheckAdjustmentProbe(structured, strategies) ||
       !CheckReconstructionFailure({.test_fail_submission = true},
                                   gjxl::StatusCode::kSubmissionFailed,
                                   structured, strategies) ||

@@ -451,6 +451,170 @@ Status MetalPreparedAqEvaluation::RunQuantizationProbe(
   return Status::Ok();
 }
 
+void MetalPreparedAqEvaluation::EncodeAdjustmentProbeSubmission(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    const void* context) {
+
+  const auto& self = *static_cast<const MetalPreparedAqEvaluation*>(context);
+  encoder->setComputePipelineState(backend.aq_pipelines_.adjustment_probe.get());
+  BindPlane(encoder, self.forward_coefficients_, 0);
+  BindPlane(encoder, self.quant_tables_, 1);
+  BindPlane(encoder, self.quantized_coefficients_, 2);
+  BindPlane(encoder, self.quant_probe_quantized_, 3);
+  BindPlane(encoder, self.quant_probe_dequantized_, 4);
+  BindPlane(encoder, self.reconstruction_error_, 5);
+  encoder->setBytes(
+      &self.adjustment_probe_params_, sizeof(self.adjustment_probe_params_), 6);
+  DispatchThreads1d(encoder, 1);
+}
+
+Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
+    const MetalAqAdjustmentProbeForTesting& probe,
+    MetalAqAdjustmentResultForTesting* result) {
+
+  if (result == nullptr) {
+    return Status::InvalidArgument("AQ adjustment probe output is null");
+  }
+  const AcStrategyInfo* info = GetAcStrategyInfo(probe.strategy);
+  QuantizationMatrixView matrix;
+  if (info == nullptr || info->coefficient_count() == 0 ||
+      info->coefficient_count() > maximum_coefficient_count_ ||
+      3 * info->coefficient_count() > coefficient_value_count_ ||
+      !GetDefaultQuantizationMatrix(
+          probe.strategy, XybChannel::kY, &matrix).ok() ||
+      probe.initial_raw_quant < 1 || probe.initial_raw_quant > kMaxRawQuant ||
+      probe.matrix_multipliers[1] != 1.0f) {
+    return Status::InvalidArgument(
+        "AQ adjustment probe strategy or quantization is invalid");
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (probe.coefficients[channel].size() != info->coefficient_count() ||
+        !std::isfinite(probe.matrix_multipliers[channel]) ||
+        probe.matrix_multipliers[channel] <= 0.0f) {
+      return Status::InvalidArgument(
+          "AQ adjustment probe coefficients or multipliers are invalid");
+    }
+  }
+  Quantizer quantizer;
+  Status status = Quantizer::Create(probe.quantizer, &quantizer);
+  if (!status.ok()) return status;
+
+  std::vector<float> packed_coefficients;
+  try {
+    packed_coefficients.reserve(3 * info->coefficient_count());
+    for (std::span<const float> channel : probe.coefficients) {
+      packed_coefficients.insert(
+          packed_coefficients.end(), channel.begin(), channel.end());
+    }
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+        "Unable to allocate AQ adjustment probe input");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument("AQ adjustment probe input is too large");
+  }
+
+  status = BeginOperation();
+  if (!status.ok()) return status;
+  status = UploadContiguous(
+      *backend_, std::span<const float>(packed_coefficients),
+      forward_coefficients_);
+  const uint32_t zero = 0;
+  if (status.ok()) {
+    status = backend_->CopyHostToDevice(
+        *reconstruction_error_.buffer, &zero, sizeof(zero),
+        reconstruction_error_.offset_bytes);
+  }
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  adjustment_probe_params_ = {
+      static_cast<uint32_t>(info->coefficient_count()),
+      static_cast<uint32_t>(matrix.coefficient_extent.width),
+      static_cast<uint32_t>(matrix.coefficient_extent.height),
+      static_cast<uint32_t>(probe.strategy),
+      probe.initial_raw_quant,
+      probe.quantizer.global_scale,
+      probe.matrix_multipliers[0],
+      probe.matrix_multipliers[2],
+  };
+
+  std::unique_ptr<GpuSubmission> submission;
+  status = backend_->SubmitCompute(
+      "gjxl AQ adjustment probe",
+      &MetalPreparedAqEvaluation::EncodeAdjustmentProbeSubmission, this,
+      &submission);
+  if (!status.ok() || submission == nullptr) {
+    Invalidate();
+    return status.ok()
+        ? Status::Internal("AQ adjustment probe returned no submission")
+        : status;
+  }
+  {
+    std::lock_guard lock(mutex_);
+    submission_ = std::move(submission);
+  }
+  status = WaitForOperation();
+  if (!status.ok()) return status;
+
+  uint32_t device_error = 0;
+  int32_t adjusted_raw_quant = 0;
+  std::array<float, 4> adjusted_y_thresholds{};
+  const size_t coefficient_count = info->coefficient_count();
+  status = CopyReadback(
+      *backend_, reconstruction_error_, &device_error, sizeof(device_error));
+  if (status.ok()) {
+    status = CopyReadback(
+        *backend_, quant_probe_quantized_, &adjusted_raw_quant,
+        sizeof(adjusted_raw_quant));
+  }
+  if (status.ok()) {
+    status = CopyReadback(
+        *backend_, quant_probe_dequantized_, adjusted_y_thresholds.data(),
+        adjusted_y_thresholds.size() * sizeof(float));
+  }
+  if (status.ok()) {
+    status = CopyReadback(
+        *backend_, quantized_coefficients_, quantized_readback_.data(),
+        coefficient_count * sizeof(int32_t));
+  }
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  if (device_error != 0 || adjusted_raw_quant < 1 ||
+      adjusted_raw_quant > kMaxRawQuant ||
+      !std::ranges::all_of(adjusted_y_thresholds, [](float threshold) {
+        return std::isfinite(threshold) && threshold >= 0.0f;
+      })) {
+    Invalidate();
+    return Status::DeviceError(
+        "Metal AQ adjustment probe produced invalid output");
+  }
+  try {
+    MetalAqAdjustmentResultForTesting candidate{
+        .decision = {
+            .raw_quant = adjusted_raw_quant,
+            .y_thresholds = adjusted_y_thresholds,
+        },
+        .quantized_y = std::vector<int32_t>(
+            quantized_readback_.begin(),
+            quantized_readback_.begin() +
+                static_cast<std::ptrdiff_t>(coefficient_count)),
+    };
+    *result = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    CompleteOperation();
+    return Status::OutOfMemory(
+        "Unable to allocate AQ adjustment probe output");
+  } catch (const std::length_error&) {
+    CompleteOperation();
+    return Status::InvalidArgument("AQ adjustment probe output is too large");
+  }
+  CompleteOperation();
+  return Status::Ok();
+}
+
 Status RunMetalAqReconstructionForTesting(
     PreparedAqEvaluation &prepared, AqEvaluationInput input,
     MetalAqReconstructionSnapshotForTesting *snapshot) {
@@ -474,6 +638,19 @@ Status RunMetalAqQuantizationProbeForTesting(
         "AQ quantization probe requires a Metal prepared evaluation");
   }
   return metal->RunQuantizationProbe(probe, quantized, dequantized);
+}
+
+Status RunMetalAqAdjustmentProbeForTesting(
+    PreparedAqEvaluation& prepared,
+    const MetalAqAdjustmentProbeForTesting& probe,
+    MetalAqAdjustmentResultForTesting* result) {
+
+  MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+        "AQ adjustment probe requires a Metal prepared evaluation");
+  }
+  return metal->RunAdjustmentProbe(probe, result);
 }
 
 } // namespace gjxl::metal_internal

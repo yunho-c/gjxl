@@ -48,6 +48,17 @@ struct AqQuantizationProbeParams {
   float matrix_multiplier;
 };
 
+struct AqAdjustmentProbeParams {
+  uint coefficient_count;
+  uint coefficient_width;
+  uint coefficient_height;
+  uint strategy;
+  int initial_raw_quant;
+  uint global_scale;
+  float x_matrix_multiplier;
+  float b_matrix_multiplier;
+};
+
 kernel void gjxl_aq_reset_exact_evaluation(
   device atomic_uint* error [[buffer(0)]],
   device float* block_distance [[buffer(1)]],
@@ -478,4 +489,40 @@ kernel void gjxl_aq_quantization_probe(
     params.matrix_multiplier,
     params.channel,
     error);
+}
+
+kernel void gjxl_aq_adjustment_probe(
+  device const float* coefficients [[buffer(0)]],
+  device const float* quant_tables [[buffer(1)]],
+  device int* quantized_y [[buffer(2)]],
+  device int* adjusted_raw_quant [[buffer(3)]],
+  device float* adjusted_y_thresholds [[buffer(4)]],
+  device atomic_uint* error [[buffer(5)]],
+  constant AqAdjustmentProbeParams& params [[buffer(6)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index != 0u) return;
+  const AqAdjustedQuantization decision = aq_select_adjusted_quantization(
+    coefficients, quant_tables, params.coefficient_count,
+    params.coefficient_width, params.coefficient_height, params.strategy,
+    params.global_scale, params.initial_raw_quant,
+    params.x_matrix_multiplier, params.b_matrix_multiplier, error);
+  adjusted_raw_quant[0] = decision.raw_quant;
+  for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
+    adjusted_y_thresholds[quadrant] = decision.y_thresholds[quadrant];
+  }
+
+  const uint2 table_offsets = aq_quant_table_offsets(params.strategy);
+  for (uint coefficient = 0u;
+       coefficient < params.coefficient_count; ++coefficient) {
+    const uint x = coefficient % params.coefficient_width;
+    const uint y = coefficient / params.coefficient_width;
+    const uint quadrant = uint(y >= params.coefficient_height / 2u) * 2u +
+      uint(x >= params.coefficient_width / 2u);
+    const uint table = params.coefficient_count + coefficient;
+    quantized_y[coefficient] = aq_quantize_coefficient(
+      coefficients[params.coefficient_count + coefficient],
+      quant_tables[table_offsets.y + table], params.global_scale,
+      decision.raw_quant, 1.0f, decision.y_thresholds[quadrant], error);
+  }
 }

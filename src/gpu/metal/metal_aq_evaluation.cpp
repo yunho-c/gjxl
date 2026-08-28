@@ -63,6 +63,7 @@ static_assert(std::is_standard_layout_v<AqMaximumErrorReductionParams>);
 static_assert(std::is_trivially_copyable_v<AqMaximumErrorReductionParams>);
 static_assert(sizeof(AqMaximumErrorReductionParams) == 56);
 static_assert(sizeof(AqQuantizationProbeParams) == 24);
+static_assert(sizeof(AqAdjustmentProbeParams) == 32);
 static_assert(std::is_standard_layout_v<AqGaborishParams>);
 static_assert(std::is_trivially_copyable_v<AqGaborishParams>);
 static_assert(sizeof(AqGaborishParams) == 52);
@@ -2282,7 +2283,7 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      7>
+      8>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
@@ -2296,6 +2297,7 @@ Status CreateAqPipelines(
           {"gjxl_aq_scatter_reconstructed_pixels",
            &pipelines.scatter_reconstructed_pixels},
           {"gjxl_aq_quantization_probe", &pipelines.quantization_probe},
+          {"gjxl_aq_adjustment_probe", &pipelines.adjustment_probe},
       }};
   for (const auto &[name, pipeline] : reconstruction) {
     status = CreateAqPipeline(device, library, name, pipeline);
