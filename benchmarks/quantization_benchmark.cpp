@@ -1425,6 +1425,17 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
                   stage.block_extent.width},
           },
           two_update_options.profile, &resident_exact_frame));
+  std::vector<float> resident_exact_inverse_sigma(block_count);
+  RequireStatus(
+      "Resident exact EPF inverse sigma",
+      gjxl::ComputeEpfInverseSigma(
+          resident_exact_frame.strategies(),
+          resident_exact_frame.raw_quant_field(),
+          resident_exact_frame.quantizer(),
+          resident_exact_frame.epf_sharpness(),
+          two_update_options.profile.epf_sigma,
+          {resident_exact_inverse_sigma.data(), stage.block_extent,
+           stage.block_extent.width}));
   ImageStorage resident_reconstructed_opsin(coding_extent);
   RequireStatus(
       "Resident exact reconstruction",
@@ -1522,13 +1533,16 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       profiled_prepared->Evaluate(
           {
               .raw_quant_field = {
-                  resident_raw_quant.data(), stage.block_extent,
-                  stage.block_extent.width},
-              .quantizer = resident_quantizer.params(),
-              .y_to_x = resident_color.y_to_x_map(),
-              .y_to_b = resident_color.y_to_b_map(),
+                  resident_exact_frame.raw_quant_field().data,
+                  stage.block_extent,
+                  resident_exact_frame.raw_quant_field().stride},
+              .quantizer = resident_exact_frame.quantizer().params(),
+              .y_to_x =
+                  resident_exact_frame.color_correlation().y_to_x_map(),
+              .y_to_b =
+                  resident_exact_frame.color_correlation().y_to_b_map(),
               .epf_inverse_sigma = {
-                  resident_inverse_sigma.data(), stage.block_extent,
+                  resident_exact_inverse_sigma.data(), stage.block_extent,
                   stage.block_extent.width},
               .exact_coefficients = &resident_exact_frame,
           },
@@ -1651,13 +1665,16 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           *profiled_prepared,
           {
               .raw_quant_field = {
-                  resident_raw_quant.data(), stage.block_extent,
-                  stage.block_extent.width},
-              .quantizer = resident_quantizer.params(),
-              .y_to_x = resident_color.y_to_x_map(),
-              .y_to_b = resident_color.y_to_b_map(),
+                  resident_exact_frame.raw_quant_field().data,
+                  stage.block_extent,
+                  resident_exact_frame.raw_quant_field().stride},
+              .quantizer = resident_exact_frame.quantizer().params(),
+              .y_to_x =
+                  resident_exact_frame.color_correlation().y_to_x_map(),
+              .y_to_b =
+                  resident_exact_frame.color_correlation().y_to_b_map(),
               .epf_inverse_sigma = {
-                  resident_inverse_sigma.data(), stage.block_extent,
+                  resident_exact_inverse_sigma.data(), stage.block_extent,
                   stage.block_extent.width},
               .exact_coefficients = &resident_exact_frame,
               .exact_reconstructed_linear_rgb =
@@ -1676,13 +1693,16 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           *profiled_prepared,
           {
               .raw_quant_field = {
-                  resident_raw_quant.data(), stage.block_extent,
-                  stage.block_extent.width},
-              .quantizer = resident_quantizer.params(),
-              .y_to_x = resident_color.y_to_x_map(),
-              .y_to_b = resident_color.y_to_b_map(),
+                  resident_exact_frame.raw_quant_field().data,
+                  stage.block_extent,
+                  resident_exact_frame.raw_quant_field().stride},
+              .quantizer = resident_exact_frame.quantizer().params(),
+              .y_to_x =
+                  resident_exact_frame.color_correlation().y_to_x_map(),
+              .y_to_b =
+                  resident_exact_frame.color_correlation().y_to_b_map(),
               .epf_inverse_sigma = {
-                  resident_inverse_sigma.data(), stage.block_extent,
+                  resident_exact_inverse_sigma.data(), stage.block_extent,
                   stage.block_extent.width},
               .exact_coefficients = &resident_exact_frame,
           },

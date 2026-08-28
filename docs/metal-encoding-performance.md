@@ -330,6 +330,24 @@ maximum-error throughput requests. Decoded-quality and corpus-size claims from
 the earlier maximum-throughput output do not transfer to the changed adjusted
 codestream; they require a fresh named-corpus quality run.
 
+#### Resident-frontend completion checkpoint (2026-08-28)
+
+The five-step initial-CfL/initial-quant residency sequence supersedes the
+maximum-throughput timing above. Three fresh Release processes each used one
+warmup and five alternating CPU/Metal pairs. CPU process medians were
+`6219.973-6313.653 ms`, Metal process medians were `78.077-81.855 ms`, and
+paired process-median speedups were `77.496-80.666x`; every individual pair
+was `69.529-92.592x`. Metal quantization-pipeline process medians were
+`42.781-45.619 ms`. The codestream remains `765599` bytes.
+
+The experimental AC-search handoff also produced directional one-process
+improvements. Fully-resident measured `270.234 ms` (`266.775-270.819 ms`)
+and `23.108x` paired speedup (`23.015-23.325x`) at `622784` bytes;
+throughput measured `238.075 ms` (`236.711-243.464 ms`) and `26.597x`
+(`26.195-26.849x`) at `623449` bytes. These two rows use one warmup and three
+alternating pairs and remain regression signals rather than retained
+multi-process claims.
+
 One additional 4K process with one warmup and three alternating pairs was a
 directional regression check. CPU median was `25388.6 ms`, Metal median was
 `417.7 ms`, and paired speedup median was `61.21x` with a

@@ -655,6 +655,36 @@ bytes. Relative to the preceding same-protocol checkpoints, the directional
 Metal medians improved by `1.03x` and `1.08x`; these remain single-process
 signals rather than retained multi-process claims.
 
+### Final resident-frontend audit
+
+**Status:** complete for the five-step sequence.
+
+The final audit preserves the authoritative boundaries: exact-coefficient and
+automatic workflows still use CPU initial quantization and the ordinary GPU
+search upload contract, while maximum-throughput remains explicitly forced,
+DCT8-only, and scoreless. Focused exact/automatic integration retains exact
+frame and codestream bytes. The full-scope diagnostic benchmark was repaired
+to pair an exact coefficient frame with its post-`AdjustQuantBlockAC` raw-quant
+and EPF state; it now exercises the resident, exact-coefficient, and
+perceptual-tail phases instead of failing setup.
+
+A complete Release build succeeded. CTest passed `53/54`; the sole exception
+is the inherited `quantization_pipeline` pinned Butteraugli golden mismatch
+(`4.45247e-05` at score index 1), whose tolerance and expected value were not
+changed. All Metal, AC-search, AQ, codestream, CLI, and install-consumer tests
+passed. Installed `djxl` 0.12 independently decoded 17x13 outputs from
+exact-coefficient, fully-resident, throughput, and maximum-throughput modes.
+
+The retained padded-1080p maximum-throughput measurement uses three fresh
+Release processes, each with one warmup and five alternating CPU/Metal pairs.
+CPU process medians were `6219.973-6313.653 ms`, Metal process medians were
+`78.077-81.855 ms`, and paired process-median speedups were
+`77.496-80.666x`; individual pairs ranged from `69.529x` to `92.592x`.
+Metal quantization-pipeline process medians were `42.781-45.619 ms`, and every
+run produced the unchanged `765599`-byte codestream. Relative to the prior
+post-adjustment checkpoint, this is a `1.39-1.52x` public-boundary and
+`1.76-1.89x` pipeline improvement, depending on paired process endpoints.
+
 ## Suggested milestones
 
 ### RC0: Observable best-effort size control
