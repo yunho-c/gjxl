@@ -264,6 +264,9 @@ bool CheckEncodedFrame(
   if (!status.ok() || first.size() != expected_size ||
       hash != expected_hash || first != second || first != profiled ||
       profile_stage_total == 0 ||
+      profile.entropy_model_bits == 0 || profile.entropy_token_bits == 0 ||
+      profile.dc_entropy_clusters == 0 ||
+      profile.ac_entropy_clusters == 0 ||
       profile.total_nanoseconds < profile_stage_total || first.size() < 2 ||
       first[0] != 0xFF || first[1] != 0x0A) {
     std::cerr << "Encoded " << width << 'x' << height
@@ -277,8 +280,8 @@ bool CheckEncodedFrame(
 bool CheckAssemblyAndDeterminism() {
   // Values are pinned after independent header fixtures and section-layout
   // checks establish the constituent bit encodings.
-  return CheckEncodedFrame(8, 8, 237, 16983340324475694044ull) &&
-         CheckEncodedFrame(257, 9, 4064, 18196131526582637282ull);
+  return CheckEncodedFrame(8, 8, 221, 14593304018200005812ull) &&
+         CheckEncodedFrame(257, 9, 3933, 17004366854296277694ull);
 }
 
 bool CheckAtomicRejections() {

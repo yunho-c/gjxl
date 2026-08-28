@@ -140,7 +140,7 @@ bool CheckDeterministicWorkflow() {
   }
 
   const uint64_t hash = Fnv1a64(first);
-  constexpr uint64_t kExpectedHash = 3600727464566139258ull;
+  constexpr uint64_t kExpectedHash = 13980071275010581324ull;
   if (hash != kExpectedHash) {
     std::cerr << "Public workflow hash changed: " << hash << '\n';
     return false;
@@ -446,7 +446,7 @@ bool CheckMaximumErrorControl() {
 bool CheckTargetSizeControl() {
   ImageStorage image;
   FillImage(&image);
-  constexpr size_t kTargetBytes = 280;
+  constexpr size_t kTargetBytes = 275;
   constexpr double kTolerance = 0.1;
   constexpr size_t kMaximumAttempts = 8;
 
@@ -485,7 +485,12 @@ bool CheckTargetSizeControl() {
       byte_summary.target_size_search_exhausted ||
       !std::isfinite(byte_summary.selected_butteraugli_target) ||
       byte_summary.selected_butteraugli_target <= 0.0f) {
-    std::cerr << "Target-byte workflow failed: " << status.message() << '\n';
+    std::cerr << "Target-byte workflow failed: " << status.message()
+              << ", bytes=" << byte_codestream.size()
+              << ", met=" << byte_summary.target_size_met
+              << ", attempts=" << byte_summary.encode_attempt_count
+              << ", selected="
+              << byte_summary.selected_butteraugli_target << '\n';
     return false;
   }
 

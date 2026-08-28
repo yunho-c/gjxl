@@ -68,6 +68,10 @@ void AccumulateCodestreamProfile(
     source.ac_tokenization_nanoseconds;
   destination->entropy_optimization_nanoseconds +=
     source.entropy_optimization_nanoseconds;
+  destination->entropy_model_bits += source.entropy_model_bits;
+  destination->entropy_token_bits += source.entropy_token_bits;
+  destination->dc_entropy_clusters += source.dc_entropy_clusters;
+  destination->ac_entropy_clusters += source.ac_entropy_clusters;
   destination->section_writing_nanoseconds +=
     source.section_writing_nanoseconds;
   destination->assembly_nanoseconds += source.assembly_nanoseconds;

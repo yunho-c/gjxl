@@ -434,11 +434,11 @@ after the shared entropy codes are finalized. Each worker owns one `BitWriter`;
 the TOC and final assembly retain canonical section order, so parallelism does
 not change codestream bytes or failure atomicity.
 
-The checked `17x13` sample encodes to 291 bytes at target `1.0`; its codestream
+The checked `17x13` sample encodes to 277 bytes at target `1.0`; its codestream
 SHA-256 is
-`48abd331b4b4e37f0b158af86ef7c766c72ed760a51ce6903a415bf2544031c7`.
+`22a3f4ed821d57e0daa13afca0585daa9ebd7a0168e3f7cbd43923dce71a9487`.
 Pinned `djxl` decodes it as linear sRGB with native Butteraugli distance
-`0.999045551` from the input. The workflow also has an independent in-memory
+`0.988296747` from the input. The workflow also has an independent in-memory
 FNV-1a codestream pin, deterministic repeated-encode coverage, strided input,
 strategy reporting, invalid-input atomicity, installed-consumer coverage, and
 a generated-sample freshness check.
@@ -511,7 +511,8 @@ The following are explicitly outside the first codestream milestone:
 - custom coefficient orders;
 - progressive or multi-pass coding;
 - LZ77;
-- entropy-model or size optimization beyond a correct deterministic model;
+- ANS entropy coding and broader size optimization beyond the bounded prefix
+  optimizer;
 - lossless and modular-only image coding; and
 - GPU tokenization or entropy coding.
 
@@ -521,21 +522,22 @@ silently inferred or partially signaled by the initial writer.
 ## Compression-density roadmap
 
 The current writer prioritizes a correct, deterministic subset over exhaustive
-compression optimization. Its main entropy limitations are a maximum of eight
-prefix-code clusters, one fixed HybridUint configuration for every cluster,
-natural coefficient orders, and a compact fixed block-context map. The profile
-also fixes the X/B quantization-matrix scales at `2/2`, although the header and
-reconstruction paths can represent other values.
+compression optimization. Its bounded prefix optimizer searches up to 32
+clusters and selects HybridUint configurations per cluster. The remaining
+major limitations are natural coefficient orders and a compact fixed
+block-context map. The profile also fixes the X/B quantization-matrix scales at
+`2/2`, although the header and reconstruction paths can represent other
+values.
 
 A directional local comparison used the Release encoder, four natural images
 around 500 pixels in size, identical linear-PFM inputs, raw `.jxl` output, and
 installed libjxl tools. External Butteraugli scores were measured at 255 nits.
 The aggregate encoded sizes were:
 
-| Target distance | GJXL | `cjxl -e 7` | Difference | `cjxl -e 9` | Difference |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | 153,464 B | 151,714 B | -1.1% | 147,386 B | -4.0% |
-| 2 | 94,430 B | 93,414 B | -1.1% | 88,578 B | -6.2% |
+| Target distance | GJXL before | GJXL now | Change | `cjxl -e 7` | Current gap | `cjxl -e 9` | Current gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 153,464 B | 153,278 B | -0.12% | 151,714 B | -1.0% | 147,386 B | -3.8% |
+| 2 | 94,430 B | 94,327 B | -0.11% | 93,414 B | -1.0% | 88,578 B | -6.1% |
 
 These are same-target rather than matched-quality results. The external scores
 were close but not identical, so the table indicates the scale of the current
@@ -553,14 +555,32 @@ The recommended implementation order is below. Effort and size reductions are
 rough hypotheses for general natural images, are not additive, and should be
 replaced by corpus measurements as each step lands.
 
-1. Improve the existing prefix-code optimizer before adding ANS (roughly two to
-   four days; plausibly 1-4%). Search candidate cluster counts such as 1, 2, 4,
-   8, 16, and 32 using the complete serialized cost, including context maps and
-   code trees. Choose HybridUint parameters per final cluster, add merge or
-   refinement passes after the current seeding, and report model overhead
-   separately from token payload. This stays within the existing entropy format
-   and directly addresses the clearest low-effort modeling limitations in
-   [`entropy.cpp`](../src/codestream/entropy.cpp).
+1. **Complete (2026-08-28): improve the existing prefix-code optimizer before
+   adding ANS.** The always-on bounded search considers cluster caps 1, 2, 4,
+   8, 16, and 32 using exact serialized model-plus-token cost. It reuses a
+   deterministic farthest-first seed order, refines the best candidate and its
+   next larger cap with prefix-code costs, and selects among four HybridUint
+   configurations per final cluster. The former eight-cluster, fixed-config
+   result remains a fallback and is replaced only when the complete serialized
+   cost is strictly smaller.
+
+   The four-image natural corpus improved by 0.12% at distance 1 and 0.11% at
+   distance 2, with no individual regression. The flower result improved from
+   46,082 to 45,963 bytes (0.26%). Across the 22 pinned serializer fixtures,
+   aggregate size improved from 29,466 to 28,580 bytes (3.01%), again with no
+   regression. Since entropy coding does not alter decoded coefficients, the
+   independent reconstruction and quality results remain unchanged.
+
+   On the Apple M4 Pro flower benchmark with two warmups and five samples, CPU
+   public-workflow median time changed from 910.437 ms to 936.360 ms (+2.85%),
+   while its entropy-optimization component changed from 6.381 ms to 27.889 ms.
+   Metal public-workflow median changed from 109.255 ms to 131.322 ms (+20.2%)
+   because the same host entropy work is a larger fraction of that path. The
+   raw-sample schema now reports model and token bits separately plus selected
+   DC/AC cluster counts; the flower stream used 6,456 model bits, 359,939 token
+   bits, 8 DC clusters, and 16 AC clusters. The natural-image gain is therefore
+   below the original 1-4% hypothesis, and the remaining gap is unlikely to be
+   closed by prefix clustering alone.
 
 2. Enable a libjxl-style X/B quantization-matrix-scale heuristic (roughly one to
    two days; plausibly 1-3%). A conservative first version would use X=3 and B=2

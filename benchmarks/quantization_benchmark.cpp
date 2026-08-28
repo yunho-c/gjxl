@@ -804,6 +804,10 @@ struct RawWorkflowSample {
   std::string_view backend;
   std::array<uint64_t, kWorkflowProfileNames.size()> phase_nanoseconds{};
   size_t encoded_bytes = 0;
+  uint64_t entropy_model_bits = 0;
+  uint64_t entropy_token_bits = 0;
+  size_t dc_entropy_clusters = 0;
+  size_t ac_entropy_clusters = 0;
   bool has_final_score = false;
   double final_score = 0.0;
 };
@@ -900,7 +904,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 1,\n"
+           << "  \"schema_version\": 2,\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
            << "  \"validation\": \""
@@ -933,6 +937,12 @@ void WriteRawWorkflowSamples(
         output << "        {\"sample_index\": " << sample.sample_index
                << ", \"backend\": \"" << sample.backend
                << "\", \"encoded_bytes\": " << sample.encoded_bytes
+               << ", \"entropy_bits\": {\"model\": "
+               << sample.entropy_model_bits << ", \"tokens\": "
+               << sample.entropy_token_bits << "}"
+               << ", \"entropy_clusters\": {\"dc\": "
+               << sample.dc_entropy_clusters << ", \"ac\": "
+               << sample.ac_entropy_clusters << "}"
                << ", \"final_score\": ";
         if (sample.has_final_score) {
           output << std::setprecision(17) << sample.final_score;
@@ -1236,6 +1246,12 @@ void RunPublicWorkflowOnlyWorkload(
     raw_sample.backend = backend;
     raw_sample.phase_nanoseconds = WorkflowProfileValues(profile);
     raw_sample.encoded_bytes = bytes.size();
+    raw_sample.entropy_model_bits = profile.codestream.entropy_model_bits;
+    raw_sample.entropy_token_bits = profile.codestream.entropy_token_bits;
+    raw_sample.dc_entropy_clusters =
+      profile.codestream.dc_entropy_clusters;
+    raw_sample.ac_entropy_clusters =
+      profile.codestream.ac_entropy_clusters;
     raw_sample.has_final_score = !summary.score_history.empty();
     if (raw_sample.has_final_score) {
       raw_sample.final_score = summary.score_history.back();

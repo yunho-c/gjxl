@@ -247,7 +247,7 @@ if(NOT maximum_hash STREQUAL maximum_repeat_hash)
   message(FATAL_ERROR "Maximum-throughput CLI output is not deterministic")
 endif()
 set(expected_hash
-  0cf93a5c330f19c5faad0cf20d42c446f820adfbc685aa9a29ae5251643da5a8)
+  22a3f4ed821d57e0daa13afca0585daa9ebd7a0168e3f7cbd43923dce71a9487)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
@@ -388,7 +388,7 @@ if(NOT maximum_error_first_hash STREQUAL maximum_error_second_hash)
   message(FATAL_ERROR "Maximum-error CLI output is not deterministic")
 endif()
 set(expected_maximum_error_hash
-  4ffe300d01d3ae46a669cd3c06267442227de7f5e0474b39cdeab5cb22dbbcf0)
+  fe8e8bab94acd59cc2f792133c7bd37e98757ab7c4cdde7d631bdb3178fdd872)
 if(NOT maximum_error_first_hash STREQUAL expected_maximum_error_hash)
   message(FATAL_ERROR
     "Maximum-error sample hash changed: ${maximum_error_first_hash}")

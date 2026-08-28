@@ -216,17 +216,33 @@ Status EncodeVarDctCodestreamImpl(
     }
 
     EntropyCode dc_code;
+    EntropyCodeCost dc_cost;
     if (Status status = OptimizeEntropyCode(
-          dc_streams, {.context_count = kSimpleDcContextCount}, &dc_code);
+          dc_streams, {.context_count = kSimpleDcContextCount}, &dc_code,
+          &dc_cost);
         !status.ok()) {
       return status;
     }
     EntropyCode ac_code;
+    EntropyCodeCost ac_cost;
     if (Status status = OptimizeEntropyCode(
-          ac_streams, {.context_count = kSimpleAcContextCount}, &ac_code);
+          ac_streams, {.context_count = kSimpleAcContextCount}, &ac_code,
+          &ac_cost);
         !status.ok()) {
       return status;
     }
+    if (dc_cost.model_bits >
+          std::numeric_limits<uint64_t>::max() - ac_cost.model_bits ||
+        dc_cost.token_bits >
+          std::numeric_limits<uint64_t>::max() - ac_cost.token_bits) {
+      return Status::InvalidArgument("Entropy profile bit count overflow");
+    }
+    candidate_profile.entropy_model_bits =
+      dc_cost.model_bits + ac_cost.model_bits;
+    candidate_profile.entropy_token_bits =
+      dc_cost.token_bits + ac_cost.token_bits;
+    candidate_profile.dc_entropy_clusters = dc_cost.cluster_count;
+    candidate_profile.ac_entropy_clusters = ac_cost.cluster_count;
     ProfileEnd(
       profile, entropy_begin,
       &candidate_profile.entropy_optimization_nanoseconds);
