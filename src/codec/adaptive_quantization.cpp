@@ -17,6 +17,7 @@
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/color_transform.h"
 #include "codec/convolution.h"
+#include "codec/maximum_error.h"
 #include "codec/quantization.h"
 #include "core/block_grid.h"
 #include "core/geometry.h"
@@ -753,6 +754,7 @@ struct QuantizationEvaluation {
   Image3FBuffer reconstructed_linear;
   VarDctEncoderFrame frame;
   double score = 0.0;
+  MaximumErrorReduction maximum_error;
 };
 
 Status EvaluateQuantization(
@@ -900,45 +902,62 @@ Status EvaluateQuantization(
     return status;
   }
 
-  size_t pixel_count = 0;
-  if (!original_linear_rgb.extent().try_area(&pixel_count)) {
-    return Status::InvalidArgument(
-      "Adaptive-quantization reference extent is too large");
-  }
-  std::vector<float> distance_map(pixel_count);
-  status = MeasureEvaluationStage(
-    measured,
-    aqi::EvaluationStage::kButteraugli,
-    [&] {
-      return ComputeButteraugliDistance(
-        original_linear_rgb,
-        result.reconstructed_linear.const_view(),
-        options.butteraugli,
-        {
-          distance_map.data(),
+  result.block_distance.resize(block_count);
+  if (options.control_mode ==
+      AdaptiveQuantizationControlMode::kMaximumError) {
+    status = MeasureEvaluationStage(
+      measured,
+      aqi::EvaluationStage::kBlockReduction,
+      [&] {
+        const Status reduction_status = ReduceMaximumError(
+          opsin,
+          filtered_opsin.const_view(),
           original_linear_rgb.extent(),
-          original_linear_rgb.width(),
-        },
-        &result.score);
-    });
-  if (!status.ok()) {
-    return status;
+          strategies,
+          options.maximum_error,
+          {result.block_distance.data(), block_extent, block_extent.width},
+          &result.maximum_error);
+        result.score = result.maximum_error.normalized_maximum;
+        return reduction_status;
+      });
+  } else {
+    size_t pixel_count = 0;
+    if (!original_linear_rgb.extent().try_area(&pixel_count)) {
+      return Status::InvalidArgument(
+        "Adaptive-quantization reference extent is too large");
+    }
+    std::vector<float> distance_map(pixel_count);
+    status = MeasureEvaluationStage(
+      measured,
+      aqi::EvaluationStage::kButteraugli,
+      [&] {
+        return ComputeButteraugliDistance(
+          original_linear_rgb,
+          result.reconstructed_linear.const_view(),
+          options.butteraugli,
+          {
+            distance_map.data(),
+            original_linear_rgb.extent(),
+            original_linear_rgb.width(),
+          },
+          &result.score);
+      });
+    if (status.ok()) {
+      status = MeasureEvaluationStage(
+        measured,
+        aqi::EvaluationStage::kBlockReduction,
+        [&] {
+          return ReduceButteraugliDistanceMap(
+            {
+              distance_map.data(),
+              original_linear_rgb.extent(),
+              original_linear_rgb.width(),
+            },
+            strategies,
+            {result.block_distance.data(), block_extent, block_extent.width});
+        });
+    }
   }
-
-  status = MeasureEvaluationStage(
-    measured,
-    aqi::EvaluationStage::kBlockReduction,
-    [&] {
-      result.block_distance.resize(block_count);
-      return ReduceButteraugliDistanceMap(
-        {
-          distance_map.data(),
-          original_linear_rgb.extent(),
-          original_linear_rgb.width(),
-        },
-        strategies,
-        {result.block_distance.data(), block_extent, block_extent.width});
-    });
   if (!status.ok()) {
     return status;
   }
@@ -990,6 +1009,7 @@ public:
     bounded.block_distance = std::move(detailed.block_distance);
     bounded.quantizer = detailed.frame.quantizer();
     bounded.score = detailed.score;
+    bounded.maximum_error = detailed.maximum_error;
     final_evaluation_ = std::move(detailed);
     *evaluation = std::move(bounded);
     return Status::Ok();
@@ -1011,13 +1031,17 @@ private:
 Status ValidateAdaptiveQuantizationOutput(
   ConstImage3FView original_linear_rgb,
   const AcStrategyGrid& strategies,
+  AdaptiveQuantizationOptions options,
   const AdaptiveQuantizationOutput& output) {
 
   if (!output.quant_field.valid() ||
       !output.block_distance_map.valid() ||
       !output.reconstructed_linear_rgb.valid() ||
       output.frame == nullptr ||
-      output.score_history == nullptr) {
+      output.score_history == nullptr ||
+      (options.control_mode ==
+         AdaptiveQuantizationControlMode::kMaximumError &&
+       output.maximum_error_result == nullptr)) {
     return Status::InvalidArgument(
       "Adaptive-quantization output is invalid");
   }
@@ -1075,12 +1099,29 @@ Status ValidateAdaptiveQuantizationPolicyInputs(
       "Adaptive-quantization padding exceeds one partial block");
   }
 
-  if (!std::isfinite(options.butteraugli_target) ||
-      options.butteraugli_target <= 0.0f ||
-      !options.profile.valid() ||
-      options.iterations > 4) {
+  if (!options.profile.valid()) {
     return Status::InvalidArgument(
-      "Adaptive-quantization options are invalid");
+      "Adaptive-quantization profile is invalid");
+  }
+  switch (options.control_mode) {
+    case AdaptiveQuantizationControlMode::kButteraugli:
+      if (!std::isfinite(options.butteraugli_target) ||
+          options.butteraugli_target <= 0.0f || options.iterations > 4) {
+        return Status::InvalidArgument(
+          "Butteraugli adaptive-quantization options are invalid");
+      }
+      break;
+    case AdaptiveQuantizationControlMode::kMaximumError:
+      if (!std::ranges::all_of(options.maximum_error, [](float value) {
+            return std::isfinite(value) && value > 0.0f;
+          })) {
+        return Status::InvalidArgument(
+          "Maximum-error adaptive-quantization limits are invalid");
+      }
+      break;
+    default:
+      return Status::InvalidArgument(
+        "Adaptive-quantization control mode is invalid");
   }
 
   return Status::Ok();
@@ -1103,6 +1144,144 @@ Status RunAdaptiveQuantizationPolicy(
   }
 
   try {
+    if (options.control_mode ==
+        AdaptiveQuantizationControlMode::kMaximumError) {
+      constexpr float kInitializationTarget = 1.0f;
+      constexpr float kInitialQuantDc = 0x1.43d136p+2f;
+      constexpr size_t kUpdateCount = 5;
+      constexpr size_t kEvaluationCount = kUpdateCount + 1;
+
+      AdaptiveQuantizationProfile local_profile;
+      if (profile != nullptr) {
+        local_profile.evaluations.reserve(kEvaluationCount);
+      }
+      const auto setup_begin = profile == nullptr
+        ? ProfileClock::time_point{}
+        : ProfileClock::now();
+      std::vector<float> quant_field(block_count);
+      Status status = AdjustQuantField(
+        strategies,
+        kInitializationTarget,
+        initial_quant_field,
+        {quant_field.data(), block_extent, block_extent.width});
+      if (!status.ok()) {
+        return status;
+      }
+      if (profile != nullptr) {
+        local_profile.loop_setup_nanoseconds =
+          ElapsedNanoseconds(setup_begin);
+      }
+
+      std::vector<double> score_history;
+      score_history.reserve(kEvaluationCount);
+      AdaptiveQuantizationEvaluation evaluation;
+      bool upper_bound_limited = false;
+      std::vector<float> best_feasible_field;
+      float best_feasible_error = -1.0f;
+      const auto evaluate = [&](bool is_final) -> Status {
+        EvaluationProfile evaluation_profile;
+        Status evaluation_status = evaluator.Evaluate(
+          {quant_field.data(), block_extent, block_extent.width},
+          kInitialQuantDc,
+          is_final,
+          &evaluation,
+          profile == nullptr ? nullptr : &evaluation_profile);
+        if (!evaluation_status.ok()) {
+          return evaluation_status;
+        }
+        if (evaluation.block_distance.size() != block_count ||
+            !std::ranges::all_of(
+              evaluation.block_distance,
+              [](float value) {
+                return std::isfinite(value) && value >= 0.0f;
+              }) ||
+            !evaluation.quantizer.valid() ||
+            !std::isfinite(evaluation.score) || evaluation.score < 0.0 ||
+            !std::isfinite(
+              evaluation.maximum_error.normalized_maximum) ||
+            evaluation.maximum_error.normalized_maximum < 0.0f ||
+            !std::ranges::all_of(
+              evaluation.maximum_error.channel_maximum,
+              [](float value) {
+                return std::isfinite(value) && value >= 0.0f;
+              })) {
+          return Status::Internal(
+            "Maximum-error evaluator returned an invalid result");
+        }
+        if (profile != nullptr) {
+          local_profile.evaluations.push_back(evaluation_profile);
+        }
+        score_history.push_back(evaluation.score);
+        return Status::Ok();
+      };
+
+      // Apply all five pinned updates, but retain the closest already-valid
+      // field so a later transform-local oscillation cannot discard a field
+      // that satisfies the hard global maximum.
+      for (size_t iteration = 0; iteration < kUpdateCount; ++iteration) {
+        status = evaluate(false);
+        if (!status.ok()) {
+          return status;
+        }
+        const float normalized =
+          evaluation.maximum_error.normalized_maximum;
+        if (normalized <= 1.0f && normalized > best_feasible_error) {
+          best_feasible_error = normalized;
+          best_feasible_field = quant_field;
+        }
+
+        const auto update_begin = profile == nullptr
+          ? ProfileClock::time_point{}
+          : ProfileClock::now();
+        std::vector<float> updated(block_count);
+        bool iteration_limited = false;
+        status = UpdateMaximumErrorQuantField(
+          strategies,
+          {evaluation.block_distance.data(), block_extent,
+           block_extent.width},
+          {quant_field.data(), block_extent, block_extent.width},
+          {updated.data(), block_extent, block_extent.width},
+          &iteration_limited);
+        if (!status.ok()) {
+          return status;
+        }
+        upper_bound_limited |= iteration_limited;
+        quant_field = std::move(updated);
+        if (profile != nullptr) {
+          local_profile.quant_field_update_nanoseconds +=
+            ElapsedNanoseconds(update_begin);
+        }
+      }
+      if (!best_feasible_field.empty()) {
+        quant_field = std::move(best_feasible_field);
+      }
+      status = evaluate(true);
+      if (!status.ok()) {
+        return status;
+      }
+
+      AdaptiveQuantizationPolicyResult candidate;
+      candidate.quant_field = std::move(quant_field);
+      candidate.block_distance = std::move(evaluation.block_distance);
+      candidate.score_history = std::move(score_history);
+      candidate.maximum_error = {
+        .achieved = evaluation.maximum_error.channel_maximum,
+        .normalized_maximum =
+          evaluation.maximum_error.normalized_maximum,
+        .evaluation_count = kEvaluationCount,
+        .outcome = evaluation.maximum_error.normalized_maximum <= 1.0f
+          ? MaximumErrorOutcome::kMet
+          : (upper_bound_limited
+              ? MaximumErrorOutcome::kQuantizationRangeExhausted
+              : MaximumErrorOutcome::kIterationLimit),
+      };
+      *result = std::move(candidate);
+      if (profile != nullptr) {
+        *profile = std::move(local_profile);
+      }
+      return Status::Ok();
+    }
+
     AdaptiveQuantizationProfile local_profile;
     if (profile != nullptr) {
       local_profile.evaluations.reserve(options.iterations + 1);
@@ -1280,7 +1459,7 @@ Status FindBestQuantizationImpl(
     options);
   if (status.ok()) {
     status = ValidateAdaptiveQuantizationOutput(
-      original_linear_rgb, strategies, output);
+      original_linear_rgb, strategies, options, output);
   }
   if (!status.ok()) {
     return status;
@@ -1308,6 +1487,9 @@ Status FindBestQuantizationImpl(
     output.reconstructed_linear_rgb);
   *output.frame = std::move(evaluation.frame);
   *output.score_history = std::move(policy_result.score_history);
+  if (output.maximum_error_result != nullptr) {
+    *output.maximum_error_result = policy_result.maximum_error;
+  }
   if (profile != nullptr) {
     local_profile.output_commit_nanoseconds =
       ElapsedNanoseconds(commit_begin);

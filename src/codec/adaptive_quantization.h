@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <vector>
 
@@ -16,6 +17,33 @@
 #include "core/status.h"
 
 namespace gjxl {
+
+enum class AdaptiveQuantizationControlMode {
+  kButteraugli,
+  kMaximumError,
+};
+
+enum class MaximumErrorOutcome {
+  kNotApplicable,
+  kMet,
+  kIterationLimit,
+  kQuantizationRangeExhausted,
+};
+
+struct MaximumErrorResult {
+  std::array<float, 3> achieved{};
+  float normalized_maximum = 0.0f;
+  size_t evaluation_count = 0;
+  MaximumErrorOutcome outcome = MaximumErrorOutcome::kNotApplicable;
+
+  [[nodiscard]] bool limit_met() const noexcept {
+    return outcome == MaximumErrorOutcome::kMet;
+  }
+
+  friend bool operator==(
+    const MaximumErrorResult&,
+    const MaximumErrorResult&) = default;
+};
 
 struct InitialQuantizationOptions {
   float butteraugli_target = 1.0f;
@@ -52,7 +80,11 @@ struct InitialQuantFieldOutput {
   PlaneF32View output);
 
 struct AdaptiveQuantizationOptions {
+  AdaptiveQuantizationControlMode control_mode =
+    AdaptiveQuantizationControlMode::kButteraugli;
   float butteraugli_target = 1.0f;
+  /// Absolute XYB reconstruction-error limits in X/Y/B order.
+  std::array<float, 3> maximum_error{};
   size_t iterations = 2;
   bool fast_color_correlation = true;
   SimpleVarDctCodestreamProfile profile;
@@ -61,10 +93,15 @@ struct AdaptiveQuantizationOptions {
 
 struct AdaptiveQuantizationOutput {
   PlaneF32View quant_field;
+  /// Transform-footprint Butteraugli distance or normalized maximum error,
+  /// according to the active control mode.
   PlaneF32View block_distance_map;
   Image3FView reconstructed_linear_rgb;
   VarDctEncoderFrame* frame = nullptr;
+  /// Aggregate Butteraugli score or normalized maximum-error history.
   std::vector<double>* score_history = nullptr;
+  /// Required in maximum-error mode. Optional otherwise.
+  MaximumErrorResult* maximum_error_result = nullptr;
 };
 
 /// Refines an initial quant field with libjxl's deterministic perceptual loop.

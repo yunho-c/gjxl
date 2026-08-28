@@ -52,23 +52,34 @@ behavior. The AQ implementation already provides:
 
 The remaining rate-control gaps are:
 
-- no implemented maximum-error mode;
 - no prepared state reused across target-size attempts;
 - no hardened failed-candidate or configurable closest-absolute size search;
-- no maximum-error block reduction or update policy;
+- no resident Metal maximum-error reduction;
 - no fully resident `AdjustQuantBlockAC` device pass; and
 - no resampling-specific AQ bypass. The bypass policy is small, but the current
   codestream profile does not support resampling.
 
-The public request/result types now represent all four modes and validate only
-the active mode. Maximum-error requests remain explicitly `Unavailable` until
-that policy lands. Target-byte and target-BPP requests use a bounded search over
-complete encodes in the Butteraugli interval `[0.01, 10.0]`. The default allows
-12 attempts and accepts the largest result at or below the budget within a
-relative tolerance of `0.005`; the result reports the effective byte and
-tolerance budgets, selected Butteraugli target, attempt count, and whether the
-requested tolerance was met. Infeasible requests still return a valid best
-candidate and report `target_size_met = false`.
+The public request/result types represent all four modes and validate only the
+active mode. Maximum-error requests are implemented on the CPU; explicitly
+forced Metal remains `Unavailable` until task 10 lands. The result reports the
+requested and achieved per-channel XYB errors, normalized maximum, fixed
+evaluation count, and whether the request was met, exhausted the iteration
+budget, or exhausted the representable quantization range.
+
+Maximum-error AQ uses a named internal initialization target of `1.0` and a
+fixed initial DC quantization of `16 * sqrt(0.1)`, independent of the inactive
+public Butteraugli target. It performs five pinned transform-local updates and
+one final verification evaluation. The policy retains the closest evaluated
+field at or below the hard maximum, preventing a later below-half update from
+discarding a valid result through loop-filter interaction.
+
+Target-byte and target-BPP requests use a bounded search over complete encodes
+in the Butteraugli interval `[0.01, 10.0]`. The default allows 12 attempts and
+accepts the largest result at or below the budget within a relative tolerance
+of `0.005`; the result reports the effective byte and tolerance budgets,
+selected Butteraugli target, attempt count, and whether the requested tolerance
+was met. Infeasible requests still return a valid best candidate and report
+`target_size_met = false`.
 
 The `gjxl_rate_control_probe` tool measures the implemented Butteraugli mode
 across strictly increasing targets and one or more PFM corpus inputs. For
@@ -290,6 +301,8 @@ automatically.
 
 **Estimate:** 1–2 weeks.
 
+**Status:** complete for the current seven-strategy profile.
+
 Add an alternate deterministic policy that, for each transform anchor:
 
 - computes the maximum normalized reconstruction error over all covered source
@@ -478,6 +491,8 @@ The following must not be counted as easy or medium rate-control completion:
 - [`adaptive_quantization.h`](../src/codec/adaptive_quantization.h)
 - [`adaptive_quantization.cpp`](../src/codec/adaptive_quantization.cpp)
 - [`adaptive_quantization_internal.h`](../src/codec/adaptive_quantization_internal.h)
+- [`maximum_error.h`](../src/codec/maximum_error.h)
+- [`maximum_error.cpp`](../src/codec/maximum_error.cpp)
 - [`quantization.h`](../src/codec/quantization.h)
 - [`quantization.cpp`](../src/codec/quantization.cpp)
 - [`gpu/ops/adaptive_quantization.h`](../src/gpu/ops/adaptive_quantization.h)

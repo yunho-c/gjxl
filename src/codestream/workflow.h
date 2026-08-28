@@ -75,6 +75,12 @@ struct VarDctEncodingSummary {
   double requested_target_bits_per_pixel = 0.0;
   double achieved_bits_per_pixel = 0.0;
   float selected_butteraugli_target = 0.0f;
+  std::array<float, 3> requested_maximum_error{};
+  std::array<float, 3> achieved_maximum_error{};
+  float achieved_maximum_error_ratio = 0.0f;
+  size_t maximum_error_evaluation_count = 0;
+  MaximumErrorOutcome maximum_error_outcome =
+    MaximumErrorOutcome::kNotApplicable;
   size_t encode_attempt_count = 0;
   /// True only when the selected size is at or below the effective budget and
   /// no farther below it than `target_size_tolerance_bytes`.

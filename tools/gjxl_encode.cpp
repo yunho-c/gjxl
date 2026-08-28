@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cmath>
 #include <cstddef>
@@ -37,6 +38,7 @@ struct Options {
   float butteraugli_target = 1.0f;
   gjxl::VarDctRateControlMode rate_control_mode =
     gjxl::VarDctRateControlMode::kButteraugliTarget;
+  std::array<float, 3> maximum_error{};
   size_t target_bytes = 0;
   double target_bits_per_pixel = 0.0;
   double target_size_tolerance = 0.005;
@@ -183,6 +185,19 @@ struct Options {
       }
       candidate.rate_control_mode =
         gjxl::VarDctRateControlMode::kButteraugliTarget;
+      rate_control_set = true;
+    } else if (argument == "--maximum-error") {
+      if (rate_control_set || index + 3 >= argc ||
+          !ParsePositiveFloat(
+            argv[++index], &candidate.maximum_error[0]) ||
+          !ParsePositiveFloat(
+            argv[++index], &candidate.maximum_error[1]) ||
+          !ParsePositiveFloat(
+            argv[++index], &candidate.maximum_error[2])) {
+        return false;
+      }
+      candidate.rate_control_mode =
+        gjxl::VarDctRateControlMode::kMaximumError;
       rate_control_set = true;
     } else if (argument == "--target-bytes") {
       if (rate_control_set || index + 1 >= argc ||
@@ -349,7 +364,8 @@ struct Options {
 
 void PrintUsage(const char* executable) {
   std::cerr << "Usage: " << executable
-            << " (--distance VALUE | --target-bytes BYTES | "
+            << " (--distance VALUE | --maximum-error X Y B | "
+               "--target-bytes BYTES | "
                "--target-bpp BPP) [--size-tolerance FRACTION] "
                "[--max-attempts N] [--backend auto|cpu|metal] "
                "[--metal-aq exact-coefficients|fully-resident] "
@@ -378,6 +394,7 @@ int main(int argc, char** argv) {
     linear_rgb.const_view(),
     {.butteraugli_target = options.butteraugli_target,
      .rate_control_mode = options.rate_control_mode,
+     .maximum_error = options.maximum_error,
      .target_bytes = options.target_bytes,
      .target_bits_per_pixel = options.target_bits_per_pixel,
      .target_size_tolerance = options.target_size_tolerance,
@@ -421,7 +438,19 @@ int main(int argc, char** argv) {
                 << summary.encode_attempt_count << " attempts)";
       break;
     case gjxl::VarDctRateControlMode::kMaximumError:
-      std::cout << " under maximum-error control";
+      std::cout << " under maximum-error control ("
+                << summary.requested_maximum_error[0] << ','
+                << summary.requested_maximum_error[1] << ','
+                << summary.requested_maximum_error[2] << "; achieved "
+                << summary.achieved_maximum_error[0] << ','
+                << summary.achieved_maximum_error[1] << ','
+                << summary.achieved_maximum_error[2] << "; "
+                << (summary.maximum_error_outcome ==
+                          gjxl::MaximumErrorOutcome::kMet
+                      ? "met"
+                      : "unmet")
+                << " in " << summary.maximum_error_evaluation_count
+                << " evaluations)";
       break;
   }
   std::cout << " using "
@@ -440,7 +469,9 @@ int main(int argc, char** argv) {
     std::cout << ' ' << gjxl::kAcStrategyInfos[index].name << '='
               << summary.strategy_counts[index];
   }
-  if (!summary.score_history.empty()) {
+  if (!summary.score_history.empty() &&
+      summary.rate_control_mode !=
+        gjxl::VarDctRateControlMode::kMaximumError) {
     std::cout << "\nFinal perceptual score: "
               << summary.score_history.back();
   }

@@ -70,8 +70,6 @@ Status ValidatePipelineInputs(
   if (!original_linear_rgb.valid() ||
       !opsin.valid() ||
       !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
-      !std::isfinite(options.butteraugli_target) ||
-      options.butteraugli_target <= 0.0f ||
       !std::isfinite(options.initial_quant_rescale) ||
       options.initial_quant_rescale <= 0.0f ||
       block_extent == nullptr) {
@@ -81,6 +79,20 @@ Status ValidatePipelineInputs(
   if (!options.adaptive_quantization.profile.valid()) {
     return Status::InvalidArgument(
       "Quantization pipeline profile is invalid");
+  }
+  switch (options.adaptive_quantization.control_mode) {
+    case AdaptiveQuantizationControlMode::kButteraugli:
+      if (!std::isfinite(options.butteraugli_target) ||
+          options.butteraugli_target <= 0.0f) {
+        return Status::InvalidArgument(
+          "Quantization pipeline Butteraugli target is invalid");
+      }
+      break;
+    case AdaptiveQuantizationControlMode::kMaximumError:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "Quantization pipeline control mode is invalid");
   }
 
   *block_extent =
@@ -93,6 +105,9 @@ Status ValidatePipelineInputs(
       !output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
       output.adaptive_quantization.frame == nullptr ||
       output.adaptive_quantization.score_history == nullptr ||
+      (options.adaptive_quantization.control_mode ==
+         AdaptiveQuantizationControlMode::kMaximumError &&
+       output.adaptive_quantization.maximum_error_result == nullptr) ||
       output.initial_quantization.quant_field.extent != *block_extent ||
       output.initial_quantization.strategy_mask.extent != *block_extent ||
       output.initial_quantization.pixel_mask.extent != opsin.extent() ||
@@ -138,13 +153,19 @@ Status quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
   }
 
   try {
+    constexpr float kMaximumErrorInitializationTarget = 1.0f;
+    const float control_target =
+      options.adaptive_quantization.control_mode ==
+          AdaptiveQuantizationControlMode::kMaximumError
+        ? kMaximumErrorInitializationTarget
+        : options.butteraugli_target;
     std::vector<float> initial_quant(block_count);
     std::vector<float> strategy_mask(block_count);
     std::vector<float> pixel_mask(pixel_count);
     const float initial_quant_target =
       options.adaptive_quantization.profile.loop_filter.gaborish
-        ? options.butteraugli_target
-        : 0.62f * options.butteraugli_target;
+        ? control_target
+        : 0.62f * control_target;
     status = ComputeInitialQuantField(
       opsin,
       {
@@ -191,7 +212,7 @@ Status quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
       {initial_quant.data(), block_extent, block_extent.width},
       {pixel_mask.data(), opsin.extent(), opsin.width()},
       initial_color_correlation,
-      {.butteraugli_target = options.butteraugli_target},
+      {.butteraugli_target = control_target},
       &strategies);
     if (!status.ok()) {
       return status;
@@ -209,9 +230,10 @@ Status quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
     Image3FBuffer reconstructed_linear(original_linear_rgb.extent());
     VarDctEncoderFrame frame;
     std::vector<double> score_history;
+    MaximumErrorResult maximum_error_result;
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
-    adaptive_options.butteraugli_target = options.butteraugli_target;
+    adaptive_options.butteraugli_target = control_target;
     status = adaptive_quantization.Find(
       original_linear_rgb,
       preprocessed_opsin.const_view(),
@@ -227,6 +249,7 @@ Status quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
         .reconstructed_linear_rgb = reconstructed_linear.view(),
         .frame = &frame,
         .score_history = &score_history,
+        .maximum_error_result = &maximum_error_result,
       });
     if (!status.ok()) {
       return status;
@@ -248,6 +271,10 @@ Status quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
       output.adaptive_quantization.reconstructed_linear_rgb);
     *output.adaptive_quantization.frame = std::move(frame);
     *output.adaptive_quantization.score_history = std::move(score_history);
+    if (output.adaptive_quantization.maximum_error_result != nullptr) {
+      *output.adaptive_quantization.maximum_error_result =
+        maximum_error_result;
+    }
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate quantization pipeline storage");

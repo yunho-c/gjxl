@@ -147,10 +147,11 @@ Relevant implementations:
 - Compare intermediate coefficients and reconstructed images with libjxl.
 
 The CPU reference stores modular-stream quantized DC separately from AC and
-retains its decoder-equivalent floating-point reconstruction for the perceptual
-round trip. It intentionally does not yet run libjxl's optional
-`AdjustQuantBlockAC` encoder heuristic; fixed-raw-quant coefficient coding and
-decoder reconstruction are parity-tested independently of that heuristic.
+retains its decoder-equivalent floating-point reconstruction for the AQ round
+trip. Production coefficient coding applies the pinned `AdjustQuantBlockAC`
+cross-channel shared-quant decision and adjusted Y dead zones. The fixed-raw-
+quant mode remains an explicit oracle for the experimental fully resident Metal
+path until its device adjustment pass lands.
 
 Relevant implementations:
 
@@ -189,14 +190,21 @@ Relevant implementation:
 - Update the quant field from the perceptual distance map.
 - Match libjxl convergence, clamping, and stopping behavior.
 - Keep iteration order deterministic.
-- Add maximum-error behavior only when the primary perceptual loop is stable.
+- Keep Butteraugli and maximum-error policies independently testable.
 
 `FindBestQuantization` performs the default two field updates and three
 measurements used by libjxl. It derives the same asymmetric bounds from the
 adjusted initial field, applies the `0.2` under-target power, advances a field
 value by one quantizer scale when rounding would otherwise stall, and applies
 the second-update clamp toward the initial field. A caller may request zero to
-four updates; maximum-error mode remains deliberately outside this milestone.
+four Butteraugli updates.
+
+Maximum-error mode uses the alternate pinned transform-local update rule over
+normalized XYB reconstruction error. It performs five updates and a fixed final
+verification, ignores padded source pixels, and reports whether the selected
+field met the limit, exhausted the iteration budget, or reached the
+representable quantization bound. See [`rate-control.md`](rate-control.md) for
+the public contract and Metal completion boundary.
 
 Each measurement recomputes raw quantization, final CfL, and EPF sigma before
 coefficient coding, reconstruction, loop filtering, XYB-to-linear conversion,
@@ -207,6 +215,7 @@ all outputs only if every evaluation succeeds.
 Relevant implementations:
 
 - [`adaptive_quantization.cpp`](../src/codec/adaptive_quantization.cpp)
+- [`maximum_error.cpp`](../src/codec/maximum_error.cpp)
 - [`color_transform.cpp`](../src/codec/color_transform.cpp)
 - [`adaptive_quantization_loop_test.cpp`](../tests/adaptive_quantization_loop_test.cpp)
 

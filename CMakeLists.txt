@@ -231,6 +231,7 @@ add_library(
   src/codec/epf.cpp
   src/codec/gaborish.cpp
   src/codec/loop_filter.cpp
+  src/codec/maximum_error.cpp
   src/codec/quantization.cpp
   src/codec/quantization_pipeline.cpp
   src/codec/reconstruction.cpp
@@ -1376,6 +1377,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME quantization_adjustment
     COMMAND gjxl_quantization_adjustment_test
+  )
+
+  add_executable(
+    gjxl_maximum_error_test
+    tests/maximum_error_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_maximum_error_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME maximum_error
+    COMMAND gjxl_maximum_error_test
   )
 
   add_executable(

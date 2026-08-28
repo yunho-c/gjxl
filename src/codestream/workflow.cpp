@@ -231,6 +231,7 @@ struct PipelineStorage {
         .reconstructed_linear_rgb = reconstructed.view(),
         .frame = &frame,
         .score_history = &score_history,
+        .maximum_error_result = &maximum_error_result,
       },
     };
   }
@@ -261,6 +262,7 @@ struct PipelineStorage {
   Image3FBuffer reconstructed;
   VarDctEncoderFrame frame;
   std::vector<double> score_history;
+  MaximumErrorResult maximum_error_result;
 };
 
 [[nodiscard]] Status EdgeExtend(
@@ -337,9 +339,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       return Status::InvalidArgument(
         "VarDCT Metal AQ mode is invalid");
   }
-  if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
+  if (options.rate_control_mode == VarDctRateControlMode::kMaximumError &&
+      options.backend == VarDctBackendPreference::kMetal) {
     return Status::Unavailable(
-      "Requested VarDCT rate-control mode is not implemented");
+      "Maximum-error AQ is not yet available on forced Metal");
   }
   if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
       options.rate_control_mode ==
@@ -423,9 +426,16 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     PipelineStorage pipeline(linear_rgb.extent(), geometry.padded_frame());
     CpuQuantizationPipelineOptions pipeline_options;
     pipeline_options.butteraugli_target = options.butteraugli_target;
+    if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
+      pipeline_options.adaptive_quantization.control_mode =
+        AdaptiveQuantizationControlMode::kMaximumError;
+      pipeline_options.adaptive_quantization.maximum_error =
+        options.maximum_error;
+    }
     GpuBackend* selected_gpu = nullptr;
     bool selected_metal = false;
-    if (options.backend != VarDctBackendPreference::kCpu) {
+    if (options.backend != VarDctBackendPreference::kCpu &&
+        options.rate_control_mode != VarDctRateControlMode::kMaximumError) {
       const bool geometry_eligible =
         codestream_internal::IsAutomaticMetalGeometryEligible(
           geometry.padded_frame());
@@ -514,7 +524,20 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       8.0 * static_cast<double>(candidate.size()) /
       static_cast<double>(source_pixel_count);
     candidate_summary.selected_butteraugli_target =
-      options.butteraugli_target;
+      options.rate_control_mode == VarDctRateControlMode::kMaximumError
+        ? 0.0f
+        : options.butteraugli_target;
+    if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
+      candidate_summary.requested_maximum_error = options.maximum_error;
+      candidate_summary.achieved_maximum_error =
+        pipeline.maximum_error_result.achieved;
+      candidate_summary.achieved_maximum_error_ratio =
+        pipeline.maximum_error_result.normalized_maximum;
+      candidate_summary.maximum_error_evaluation_count =
+        pipeline.maximum_error_result.evaluation_count;
+      candidate_summary.maximum_error_outcome =
+        pipeline.maximum_error_result.outcome;
+    }
     candidate_summary.encode_attempt_count = 1;
     candidate_summary.score_history = std::move(pipeline.score_history);
     candidate_summary.execution_backend = selected_metal

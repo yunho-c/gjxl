@@ -907,6 +907,10 @@ bool RunWorkflowSample(
 
   return run_variant("distance", {"--distance", "1.0"}, 0) &&
     run_variant(
+      "maximum-error",
+      {"--maximum-error", "0.05", "0.05", "0.05", "--backend", "cpu"},
+      0) &&
+    run_variant(
       "target-bytes",
       {"--target-bytes", "280", "--size-tolerance", "0.1",
        "--max-attempts", "8", "--backend", "cpu"},

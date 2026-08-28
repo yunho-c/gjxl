@@ -146,15 +146,6 @@ bool CheckInvalidRequestsAreAtomic() {
       summary == original_summary;
   };
 
-  const auto unavailable_atomically = [&](gjxl::VarDctEncodingOptions options) {
-    std::vector<uint8_t> bytes = original_bytes;
-    gjxl::VarDctEncodingSummary summary = original_summary;
-    const gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
-      image.View(), options, &bytes, &summary);
-    return status.code() == gjxl::StatusCode::kUnavailable &&
-      bytes == original_bytes && summary == original_summary;
-  };
-
   if (!rejected_atomically(image.View(), {.butteraugli_target = 0.0f}) ||
       !rejected_atomically(
           image.View(),
@@ -272,14 +263,6 @@ bool CheckInvalidRequestsAreAtomic() {
   }
 
   const float nan = std::numeric_limits<float>::quiet_NaN();
-  if (!unavailable_atomically(
-        {.butteraugli_target = nan,
-         .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError,
-         .maximum_error = {1.0f, 2.0f, 3.0f}})) {
-    std::cerr << "Valid unavailable rate-control mode changed output\n";
-    return false;
-  }
-
   gjxl::VarDctEncodingOptions inactive_fields;
   inactive_fields.butteraugli_target = 1.0f;
   inactive_fields.maximum_error = {nan, -1.0f, 0.0f};
@@ -312,6 +295,67 @@ bool CheckInvalidRequestsAreAtomic() {
       gjxl::EncodeLinearRgbVarDctCodestream(
         image.View(), {.butteraugli_target = 1.0f}, nullptr).ok()) {
     std::cerr << "Non-finite or null-output workflow request was accepted\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckMaximumErrorControl() {
+  ImageStorage image;
+  FillImage(&image);
+  gjxl::VarDctEncodingOptions options;
+  options.butteraugli_target =
+    std::numeric_limits<float>::quiet_NaN();
+  options.rate_control_mode =
+    gjxl::VarDctRateControlMode::kMaximumError;
+  options.maximum_error = {0.1f, 0.1f, 0.1f};
+  options.backend = gjxl::VarDctBackendPreference::kCpu;
+
+  std::vector<uint8_t> first;
+  gjxl::VarDctEncodingSummary first_summary;
+  gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), options, &first, &first_summary);
+  if (!status.ok() || first.empty() ||
+      first_summary.rate_control_mode !=
+        gjxl::VarDctRateControlMode::kMaximumError ||
+      first_summary.requested_maximum_error != options.maximum_error ||
+      first_summary.maximum_error_evaluation_count != 6 ||
+      first_summary.score_history.size() != 6 ||
+      first_summary.selected_butteraugli_target != 0.0f ||
+      first_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kCpu ||
+      first_summary.maximum_error_outcome !=
+        gjxl::MaximumErrorOutcome::kMet ||
+      first_summary.achieved_maximum_error_ratio > 1.0f) {
+    std::cerr << "Maximum-error workflow failed: " << status.message()
+              << " ratio="
+              << first_summary.achieved_maximum_error_ratio
+              << " outcome="
+              << static_cast<int>(first_summary.maximum_error_outcome)
+              << " history=";
+    for (double score : first_summary.score_history) {
+      std::cerr << score << ',';
+    }
+    std::cerr << '\n';
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (first_summary.achieved_maximum_error[channel] >
+        options.maximum_error[channel]) {
+      std::cerr << "Maximum-error channel limit was not met\n";
+      return false;
+    }
+  }
+
+  std::vector<uint8_t> repeated;
+  gjxl::VarDctEncodingSummary repeated_summary;
+  options.butteraugli_target = 42.0f;
+  status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), options, &repeated, &repeated_summary);
+  if (!status.ok() || repeated != first ||
+      repeated_summary != first_summary) {
+    std::cerr << "Maximum-error workflow is not deterministic or used the "
+                 "inactive Butteraugli target\n";
     return false;
   }
   return true;
@@ -432,6 +476,7 @@ bool CheckTargetSizeControl() {
 int main() {
   if (!CheckDeterministicWorkflow() ||
       !CheckInvalidRequestsAreAtomic() ||
+      !CheckMaximumErrorControl() ||
       !CheckTargetSizeControl()) {
     return EXIT_FAILURE;
   }

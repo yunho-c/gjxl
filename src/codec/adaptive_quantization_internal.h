@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "codec/adaptive_quantization.h"
+#include "codec/maximum_error.h"
 
 namespace gjxl::adaptive_quantization_internal {
 
@@ -51,6 +52,7 @@ struct AdaptiveQuantizationEvaluation {
   std::vector<float> block_distance;
   Quantizer quantizer;
   double score = 0.0;
+  MaximumErrorReduction maximum_error;
 };
 
 /// Supplies the expensive encode/reconstruct/measure portion of AQ while the
@@ -79,6 +81,7 @@ struct AdaptiveQuantizationPolicyResult {
   std::vector<float> quant_field;
   std::vector<float> block_distance;
   std::vector<double> score_history;
+  MaximumErrorResult maximum_error;
 };
 
 /// Validates the input and option contract shared by CPU and GPU evaluators.

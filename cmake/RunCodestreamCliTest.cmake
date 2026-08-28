@@ -212,6 +212,43 @@ if(NOT target_bpp_hash STREQUAL target_bytes_first_hash)
   message(FATAL_ERROR "Equivalent byte and BPP targets diverged")
 endif()
 
+set(maximum_error_first "${GJXL_TEST_DIR}/maximum-error-first.jxl")
+set(maximum_error_second "${GJXL_TEST_DIR}/maximum-error-second.jxl")
+foreach(maximum_error_output IN ITEMS
+        "${maximum_error_first}" "${maximum_error_second}")
+  execute_process(
+    COMMAND
+      "${GJXL_ENCODER}" --maximum-error 0.1 0.1 0.1 --backend cpu
+      "${GJXL_SAMPLE}" "${maximum_error_output}"
+    RESULT_VARIABLE maximum_error_result
+    OUTPUT_VARIABLE maximum_error_report
+    ERROR_VARIABLE maximum_error_error
+  )
+  if(NOT maximum_error_result EQUAL 0)
+    message(FATAL_ERROR
+      "Maximum-error CLI encode failed: ${maximum_error_error}")
+  endif()
+  foreach(expected "under maximum-error control (0.1,0.1,0.1"
+                   "met in 6 evaluations" "using CPU")
+    string(FIND "${maximum_error_report}" "${expected}" found)
+    if(found EQUAL -1)
+      message(FATAL_ERROR
+        "Maximum-error CLI report is missing: ${expected}")
+    endif()
+  endforeach()
+endforeach()
+file(SHA256 "${maximum_error_first}" maximum_error_first_hash)
+file(SHA256 "${maximum_error_second}" maximum_error_second_hash)
+if(NOT maximum_error_first_hash STREQUAL maximum_error_second_hash)
+  message(FATAL_ERROR "Maximum-error CLI output is not deterministic")
+endif()
+set(expected_maximum_error_hash
+  4ffe300d01d3ae46a669cd3c06267442227de7f5e0474b39cdeab5cb22dbbcf0)
+if(NOT maximum_error_first_hash STREQUAL expected_maximum_error_hash)
+  message(FATAL_ERROR
+    "Maximum-error sample hash changed: ${maximum_error_first_hash}")
+endif()
+
 file(GLOB temporary_outputs "${GJXL_TEST_DIR}/*.tmp.*")
 if(temporary_outputs)
   message(FATAL_ERROR "CLI left temporary outputs: ${temporary_outputs}")

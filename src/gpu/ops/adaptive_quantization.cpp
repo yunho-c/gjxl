@@ -292,6 +292,11 @@ Status RunGpuAdaptiveQuantizationImpl(
   AdaptiveQuantizationOutput* full_output) {
 
   Status status = ValidateMode(mode);
+  if (status.ok() && options.control_mode ==
+      AdaptiveQuantizationControlMode::kMaximumError) {
+    return Status::Unavailable(
+      "GPU maximum-error reduction is not implemented");
+  }
   if (status.ok()) {
     status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
       original_linear_rgb, opsin, strategies, initial_quant_field,
