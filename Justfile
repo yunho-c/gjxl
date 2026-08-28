@@ -31,6 +31,12 @@ rate-control-probe input targets="0.5,0.75,1.0,1.2,1.5,2.0,3.0,4.0" *args:
     cmake --build build/release --target gjxl_rate_control_probe
     build/release/gjxl_rate_control_probe --targets "{{ targets }}" "${@:3}" "{{ input }}"
 
+# Measure bounded-memory PFM loading in a Release build.
+pfm-benchmark input samples="9" warmups="2":
+    cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
+    cmake --build build/release --target gjxl_pfm_benchmark -j
+    build/release/gjxl_pfm_benchmark --input "{{ input }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+
 # Compare all Metal DCT implementations.
 dct-benchmark blocks="65536" iterations="200": build
     "{{ build_dir }}/gjxl_dct_benchmark" "{{ blocks }}" "{{ iterations }}"

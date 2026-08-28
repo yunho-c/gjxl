@@ -1204,6 +1204,22 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_pfm_test
+    tests/pfm_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_pfm_test
+    PRIVATE
+      gjxl_pfm_io
+  )
+
+  add_test(
+    NAME pfm
+    COMMAND gjxl_pfm_test
+  )
+
+  add_executable(
     gjxl_butteraugli_primitives_test
     tests/butteraugli_primitives_test.cpp
   )
@@ -2146,6 +2162,17 @@ if(GJXL_BUILD_TESTS)
 endif()
 
 if(GJXL_BUILD_BENCHMARKS)
+
+  add_executable(
+    gjxl_pfm_benchmark
+    benchmarks/pfm_benchmark.cpp
+  )
+
+  target_link_libraries(
+    gjxl_pfm_benchmark
+    PRIVATE
+      gjxl_pfm_io
+  )
 
   add_executable(
     gjxl_metal_butteraugli_benchmark
