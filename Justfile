@@ -17,14 +17,15 @@ codestream-conformance:
     cmake -S . -B "{{ build_dir }}" -G Ninja -DGJXL_BUILD_TESTS=ON -DHWY_ENABLE_TESTS=OFF
     cmake --build "{{ build_dir }}" --target codestream-conformance
 
-# Encode a linear-RGB PFM with the standalone native CPU workflow.
-encode input output distance="1.0":
+# Encode a linear-RGB PFM, forwarding optional arguments.
+[positional-arguments]
+encode input output distance="1.0" *args:
     cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
     cmake --build build/release --target gjxl_encode
-    build/release/gjxl_encode --distance "{{ distance }}" "{{ input }}" "{{ output }}"
+    build/release/gjxl_encode --distance "{{ distance }}" "${@:4}" "{{ input }}" "{{ output }}"
 
 # Compare all Metal DCT implementations.
-benchmark blocks="65536" iterations="200": build
+dct-benchmark blocks="65536" iterations="200": build
     "{{ build_dir }}/gjxl_dct_benchmark" "{{ blocks }}" "{{ iterations }}"
 
 # Compare CPU and Metal batched AC candidate evaluation in a Release build.
@@ -40,7 +41,7 @@ ac-strategy-search-benchmark samples="12":
     build/release/gjxl_ac_strategy_search_benchmark "{{ samples }}"
 
 # Measure CPU and Metal quantization workflows with alternating phase order.
-quantization-benchmark workload="all" implementation="simd" samples="5" warmups="3" gpu_aq="exact-coefficients":
+aq-benchmark workload="all" implementation="simd" samples="5" warmups="3" gpu_aq="exact-coefficients":
     cmake -S . -B "{{ build_dir }}/release" -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
     cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
     "{{ build_dir }}/release/gjxl_quantization_benchmark" --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
