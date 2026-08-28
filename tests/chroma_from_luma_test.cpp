@@ -138,6 +138,54 @@ bool CheckPinnedMap() {
   return true;
 }
 
+bool CheckFastInitialMap() {
+  constexpr std::array<int8_t, 4> kXExpected = {48, -27, 90, 6};
+  constexpr std::array<int8_t, 4> kBExpected = {18, -22, 48, -8};
+  OpsinStorage opsin;
+  gjxl::ColorCorrelationMap map;
+  if (!gjxl::chroma_from_luma_internal::
+        ComputeInitialColorCorrelationMapFast(opsin.View(), &map).ok() ||
+      !map.valid() || map.tile_extent() != gjxl::Extent2D{2, 2}) {
+    std::cerr << "Fast initial CfL did not produce a valid map\n";
+    return false;
+  }
+  bool matches = true;
+  for (size_t y = 0; y < 2; ++y) {
+    for (size_t x = 0; x < 2; ++x) {
+      const size_t index = y * 2 + x;
+      const int8_t actual_x = map.y_to_x_map().Row(y)[x];
+      const int8_t actual_b = map.y_to_b_map().Row(y)[x];
+      if (actual_x != kXExpected[index] ||
+          actual_b != kBExpected[index]) {
+        std::cerr << "Fast initial CfL differs at tile (" << x << ", "
+                  << y << "): " << static_cast<int>(actual_x) << ", "
+                  << static_cast<int>(actual_b) << '\n';
+        matches = false;
+      }
+    }
+  }
+  if (!matches) return false;
+  const std::array<int8_t, 4> original_x = kXExpected;
+  const std::array<int8_t, 4> original_b = kBExpected;
+  opsin.plane[0][7 * kStride + 9] =
+    std::numeric_limits<float>::quiet_NaN();
+  if (gjxl::chroma_from_luma_internal::
+        ComputeInitialColorCorrelationMapFast(opsin.View(), &map).ok()) {
+    std::cerr << "Fast initial CfL accepted a non-finite input\n";
+    return false;
+  }
+  for (size_t y = 0; y < 2; ++y) {
+    for (size_t x = 0; x < 2; ++x) {
+      if (map.y_to_x_map().Row(y)[x] != original_x[y * 2 + x] ||
+          map.y_to_b_map().Row(y)[x] != original_b[y * 2 + x]) {
+        std::cerr << "Failed fast initial CfL changed its output\n";
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckPinnedFinalMap() {
   constexpr gjxl::Extent2D kPixels{32, 32};
   constexpr gjxl::Extent2D kBlocks{4, 4};
@@ -307,6 +355,7 @@ bool CheckValidationAndAtomicCommit() {
 int main() {
   if (!CheckColorTileExtent() ||
       !CheckPinnedMap() ||
+      !CheckFastInitialMap() ||
       !CheckPinnedFinalMap() ||
       !CheckValidationAndAtomicCommit()) {
     return EXIT_FAILURE;

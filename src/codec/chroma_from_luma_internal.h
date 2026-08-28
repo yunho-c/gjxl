@@ -8,7 +8,7 @@
 
 namespace gjxl::chroma_from_luma_internal {
 
-/// Uses the deterministic one-pass CfL regression for the initial DCT8 map.
+/// Uses a deterministic tilewise pixel-domain regression for the initial map.
 [[nodiscard]] Status ComputeInitialColorCorrelationMapFast(
   ConstImage3FView opsin,
   ColorCorrelationMap* out);

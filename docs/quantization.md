@@ -432,11 +432,11 @@ GPU dependency to `gjxl_codec`. In exact-coefficient mode, initial
 quantization, Gaborish preprocessing, first-pass CfL, search decisions, and the
 deterministic AQ update policy remain on the CPU. Fully resident mode instead
 uses the backend image primitives for inverse Gaborish and selects the existing
-deterministic one-pass initial-CfL fit; initial quantization and policy decisions
-remain on the CPU. The direct prepared operation can perform coefficient coding,
-reconstruction, filters, color conversion, and either Butteraugli or
-transform-local maximum-error block reduction in one Metal submission. The
-qualified workflow uses a
+deterministic tilewise pixel-domain initial-CfL seed; initial quantization and
+policy decisions remain on the CPU. The direct prepared operation can perform
+coefficient coding, reconstruction, filters, color conversion, and either
+Butteraugli or transform-local maximum-error block reduction in one Metal
+submission. The qualified workflow uses a
 decision-preserving coefficient boundary: CPU coefficient coding,
 dequantization, inverse CfL, and DC/LLF conversion prepare exact packed
 reconstruction coefficients, then one prepared Metal submission performs
@@ -456,7 +456,7 @@ evaluator. Explicit overloads accept `GpuAdaptiveQuantizationMode`: the
 production `kExactCoefficients` mode preserves CPU coefficient decisions,
 while experimental `kFullyResident` runs forward transforms and coefficient
 coding on the GPU, uses GPU Gaborish preprocessing and the faster initial-CfL
-policy, and may change the quant field, frame, and codestream. The complete GPU
+seed, and may change the quant field, frame, and codestream. The complete GPU
 pipeline exposes the same explicit mode for both Butteraugli and maximum-error
 control. Automatic maximum-error requests remain on CPU; forced Metal requests
 may select either mode. This two-value public

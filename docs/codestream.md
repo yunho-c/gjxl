@@ -384,7 +384,7 @@ GPU work starts are returned atomically instead of retrying on CPU.
 Forced Metal additionally accepts `GpuAdaptiveQuantizationMode::kFullyResident`
 as an experimental first-class option. It keeps forward transforms and
 coefficient coding on Metal, applies inverse Gaborish through Metal, and uses a
-faster deterministic initial-CfL policy. It therefore does not promise the CPU
+deterministic tilewise pixel-domain initial-CfL seed. It therefore does not promise the CPU
 reference's quant field, frame, or codestream bytes. Automatic and CPU
 preferences reject that mode rather than
 silently selecting a different implementation; exact coefficients remain the

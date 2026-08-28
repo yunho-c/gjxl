@@ -89,6 +89,22 @@ Derivatives CflDerivatives(
   return result;
 }
 
+int8_t QuantizeMultiplier(float x) {
+  constexpr float kTowardsZero = 2.6f;
+  if (x >= kTowardsZero) {
+    x -= kTowardsZero;
+  } else if (x <= -kTowardsZero) {
+    x += kTowardsZero;
+  } else {
+    x = 0.0f;
+  }
+
+  return static_cast<int8_t>(std::clamp(
+    std::round(x),
+    -128.0f,
+    127.0f));
+}
+
 int8_t FindBestMultiplier(
   std::span<const float> luma,
   std::span<const float> chroma,
@@ -140,19 +156,96 @@ int8_t FindBestMultiplier(
     }
   }
 
-  constexpr float kTowardsZero = 2.6f;
-  if (x >= kTowardsZero) {
-    x -= kTowardsZero;
-  } else if (x <= -kTowardsZero) {
-    x += kTowardsZero;
-  } else {
-    x = 0.0f;
-  }
+  return QuantizeMultiplier(x);
+}
 
-  return static_cast<int8_t>(std::clamp(
-    std::round(x),
-    -128.0f,
-    127.0f));
+Status ComputeInitialPixelColorCorrelationMap(
+  ConstImage3FView opsin,
+  ColorCorrelationMap* out) {
+
+  const Extent2D tile_extent = ColorTileExtent(opsin.extent());
+  size_t tile_count = 0;
+  if (!tile_extent.try_area(&tile_count)) {
+    return Status::InvalidArgument(
+      "Chroma-from-luma map dimensions are too large");
+  }
+  try {
+    std::vector<int8_t> y_to_x(tile_count);
+    std::vector<int8_t> y_to_b(tile_count);
+    for (size_t tile_y = 0; tile_y < tile_extent.height; ++tile_y) {
+      const size_t y_begin = tile_y * kColorTileDimension;
+      const size_t y_end = std::min(
+        y_begin + kColorTileDimension, opsin.height());
+      for (size_t tile_x = 0; tile_x < tile_extent.width; ++tile_x) {
+        const size_t x_begin = tile_x * kColorTileDimension;
+        const size_t x_end = std::min(
+          x_begin + kColorTileDimension, opsin.width());
+        std::array<float, 4> sum_y{};
+        std::array<float, 4> sum_x{};
+        std::array<float, 4> sum_b{};
+        size_t sample_index = 0;
+        for (size_t y = y_begin; y < y_end; ++y) {
+          for (size_t x = x_begin; x < x_end; ++x, ++sample_index) {
+            const size_t lane = sample_index & 3u;
+            const float value_y = opsin.plane[1].Row(y)[x];
+            const float value_x = opsin.plane[0].Row(y)[x];
+            const float value_b = opsin.plane[2].Row(y)[x];
+            if (!std::isfinite(value_y) || !std::isfinite(value_x) ||
+                !std::isfinite(value_b)) {
+              return Status::InvalidArgument(
+                "Chroma-from-luma input must contain only finite values");
+            }
+            sum_y[lane] += value_y;
+            sum_x[lane] += value_x;
+            sum_b[lane] += value_b;
+          }
+        }
+        const auto horizontal_sum = [](const std::array<float, 4>& lanes) {
+          return (lanes[0] + lanes[1]) + (lanes[2] + lanes[3]);
+        };
+        const float sample_count = static_cast<float>(sample_index);
+        const float mean_y = horizontal_sum(sum_y) / sample_count;
+        const float mean_x = horizontal_sum(sum_x) / sample_count;
+        const float mean_b = horizontal_sum(sum_b) / sample_count;
+        std::array<float, 4> quadratic{};
+        std::array<float, 4> linear_x{};
+        std::array<float, 4> linear_b{};
+        sample_index = 0;
+        for (size_t y = y_begin; y < y_end; ++y) {
+          for (size_t x = x_begin; x < x_end; ++x, ++sample_index) {
+            const size_t lane = sample_index & 3u;
+            const float centered_y = opsin.plane[1].Row(y)[x] - mean_y;
+            const float a = centered_y /
+              static_cast<float>(kDefaultColorFactor);
+            quadratic[lane] = std::fma(a, a, quadratic[lane]);
+            linear_x[lane] = std::fma(
+              a, -(opsin.plane[0].Row(y)[x] - mean_x), linear_x[lane]);
+            linear_b[lane] = std::fma(
+              a,
+              centered_y - (opsin.plane[2].Row(y)[x] - mean_b),
+              linear_b[lane]);
+          }
+        }
+        const float denominator = horizontal_sum(quadratic) +
+          sample_count * kDistanceMultiplierAc * 0.5f;
+        const size_t tile_index = tile_y * tile_extent.width + tile_x;
+        y_to_x[tile_index] = QuantizeMultiplier(
+          -horizontal_sum(linear_x) / denominator);
+        y_to_b[tile_index] = QuantizeMultiplier(
+          -horizontal_sum(linear_b) / denominator);
+      }
+    }
+    return chroma_from_luma_internal::CreateColorCorrelationMap(
+      {y_to_x.data(), tile_extent, tile_extent.width},
+      {y_to_b.data(), tile_extent, tile_extent.width},
+      out);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate pixel-domain chroma-from-luma storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Chroma-from-luma map dimensions are too large");
+  }
 }
 
 Status AppendStrategyCoefficients(
@@ -329,9 +422,8 @@ std::array<float, 3> ColorCorrelationMap::AcFactors(
   };
 }
 
-Status chroma_from_luma_internal::ComputeInitialColorCorrelationMapWithMode(
+Status ComputeInitialColorCorrelationMap(
   ConstImage3FView opsin,
-  bool fast,
   ColorCorrelationMap* out) {
 
   if (out == nullptr) {
@@ -404,12 +496,12 @@ Status chroma_from_luma_internal::ComputeInitialColorCorrelationMapWithMode(
           values[0],
           values[1],
           kBaseCorrelationX,
-          fast);
+          false);
         result.y_to_b_[tile_index] = FindBestMultiplier(
           values[2],
           values[3],
           kBaseCorrelationB,
-          fast);
+          false);
       }
     }
 
@@ -425,19 +517,16 @@ Status chroma_from_luma_internal::ComputeInitialColorCorrelationMapWithMode(
   return Status::Ok();
 }
 
-Status ComputeInitialColorCorrelationMap(
-  ConstImage3FView opsin,
-  ColorCorrelationMap* out) {
-
-  return chroma_from_luma_internal::ComputeInitialColorCorrelationMapWithMode(
-    opsin, false, out);
-}
-
 Status chroma_from_luma_internal::ComputeInitialColorCorrelationMapFast(
   ConstImage3FView opsin,
   ColorCorrelationMap* out) {
 
-  return ComputeInitialColorCorrelationMapWithMode(opsin, true, out);
+  if (out == nullptr || !opsin.valid() ||
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent())) {
+    return Status::InvalidArgument(
+      "Fast chroma-from-luma input or output is invalid");
+  }
+  return ComputeInitialPixelColorCorrelationMap(opsin, out);
 }
 
 Status ComputeFinalColorCorrelationMap(

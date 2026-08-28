@@ -136,8 +136,8 @@ Exit criterion: the throughput track removes CPU forward transforms and
 coefficient coding from every AQ evaluation and has independent decoder/quality
 evidence. The exact track advances only if its decision contract passes.
 
-The retained throughput policy also replaces the iterative initial-CfL search
-with its deterministic one-pass regression. On the padded 1080p workload, one
+The first throughput-policy slice replaced the iterative initial-CfL search
+with a deterministic one-pass DCT-domain regression. On the padded 1080p workload, one
 alternating process with one warmup and three samples measured Metal public
 workflow at `512.0-542.8 ms` and paired speedup at `11.71-12.47x` (median
 `11.92x`). Against exact coefficients, the full-pipeline score-history maximum
@@ -145,6 +145,18 @@ was `0.006122`; final quant field, block map, and reconstructed-RGB maxima were
 `0.128`, `0.404`, and `0.913`. The codestream changed from `630517` to `630802`
 bytes. This is an explicit quality-policy trade, not an exact-path optimization;
 independent decode and Butteraugli checks remain part of P6.
+
+That seed was subsequently replaced by a tilewise pixel-domain regression,
+removing its CPU DCT pass while retaining per-tile luma/chroma covariance and
+the final perceptual AQ loop. One alternating padded-1080p process with one
+warmup and three samples measured Metal at `414.8-439.8 ms` (median `417.4 ms`)
+and paired speedup at `14.47-15.26x` (median `15.19x`). The pipeline median was
+`343.6 ms`; the codestream changed to `617220` bytes. Against exact
+coefficients, full-pipeline maxima were `0.202` for the final field, `0.406` for
+the block map, `0.0540` for score history, and `0.978` for reconstructed RGB.
+This approximately `47 ms` public-boundary win increases the score delta from
+the preceding DCT-domain seed, so it remains throughput-only and requires P6's
+independent decoded-quality evidence before any broader use.
 
 ### P3. Make the whole frontend resident
 

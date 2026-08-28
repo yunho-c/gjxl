@@ -33,10 +33,6 @@ namespace chroma_from_luma_internal {
   const Quantizer&,
   bool,
   ColorCorrelationMap*);
-[[nodiscard]] Status ComputeInitialColorCorrelationMapWithMode(
-  ConstImage3FView,
-  bool,
-  ColorCorrelationMap*);
 }  // namespace chroma_from_luma_internal
 
 inline constexpr size_t kColorTileDimension = 64;
@@ -67,11 +63,6 @@ private:
   friend Status ComputeInitialColorCorrelationMap(
     ConstImage3FView,
     ColorCorrelationMap*);
-  friend Status chroma_from_luma_internal::
-    ComputeInitialColorCorrelationMapWithMode(
-      ConstImage3FView,
-      bool,
-      ColorCorrelationMap*);
   friend Status ComputeFinalColorCorrelationMap(
     ConstImage3FView,
     const AcStrategyGrid&,
