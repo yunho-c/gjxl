@@ -71,6 +71,10 @@ metal-encode-benchmark workload="padded_4k" implementation="simd" samples="7" wa
     cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
     "{{ build_dir }}/release/gjxl_quantization_benchmark" --scope metal-public-workflow --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
+# Build symbolized shaders, benchmark untraced, and capture Metal System Trace.
+metal-profile workload="padded_4k" implementation="simd" samples="7" warmups="2" gpu_aq="fully-resident" distance="1.2" profile_build_dir="build/metal-profile" output_root="logs/metal-profile":
+    python3 tools/metal_profile.py --workload "{{ workload }}" --implementation "{{ implementation }}" --samples "{{ samples }}" --warmups "{{ warmups }}" --gpu-aq "{{ gpu_aq }}" --distance "{{ distance }}" --build-dir "{{ profile_build_dir }}" --output-root "{{ output_root }}"
+
 # Compare warm sequential and bounded-concurrency multi-image throughput.
 image-batch-benchmark workload="all" batch_sizes="1,2,4,8" samples="3" warmups="1" backend="metal" gpu_aq="maximum-throughput":
     cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF

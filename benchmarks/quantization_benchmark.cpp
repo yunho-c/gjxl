@@ -12,10 +12,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -61,6 +63,11 @@ enum class BenchmarkScope {
   kPublicWorkflow,
   kMetalPublicWorkflow,
   kCoefficientCoding,
+};
+
+enum class ValidationMode {
+  kCpuMetal,
+  kMetalOnly,
 };
 
 enum class Phase : size_t {
@@ -117,8 +124,11 @@ constexpr std::array<std::string_view, aqi::kEvaluationStageCount>
 struct CommandLineOptions {
   std::string workload = "all";
   std::string input_path;
+  std::string metallib_path;
+  std::string raw_samples_path;
   std::string implementation = "simd";
   BenchmarkScope scope = BenchmarkScope::kFull;
+  ValidationMode validation = ValidationMode::kCpuMetal;
   gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
       gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   float butteraugli_target = kDefaultButteraugliTarget;
@@ -482,6 +492,27 @@ struct FrameCoefficientError {
   return "invalid";
 }
 
+[[nodiscard]] ValidationMode ParseValidationMode(std::string_view text) {
+  if (text == "cpu-metal") {
+    return ValidationMode::kCpuMetal;
+  }
+  if (text == "metal-only") {
+    return ValidationMode::kMetalOnly;
+  }
+  throw std::runtime_error("Unknown benchmark validation mode: " +
+                           std::string(text));
+}
+
+[[nodiscard]] std::string_view ValidationModeName(ValidationMode mode) {
+  switch (mode) {
+    case ValidationMode::kCpuMetal:
+      return "cpu-metal";
+    case ValidationMode::kMetalOnly:
+      return "metal-only";
+  }
+  return "invalid";
+}
+
 [[nodiscard]] std::string_view GpuAqModeName(
     gjxl::GpuAdaptiveQuantizationMode mode) {
   switch (mode) {
@@ -510,6 +541,8 @@ struct FrameCoefficientError {
                    "[--implementation scalar|simd|factored] "
                    "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                    "maximum-throughput] "
+                   "[--validation cpu-metal|metal-only] "
+                   "[--metallib PATH] [--raw-samples PATH] "
                    "[--distance D] [--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
     }
@@ -521,8 +554,14 @@ struct FrameCoefficientError {
       options.workload = value;
     } else if (argument == "--input") {
       options.input_path = value;
+    } else if (argument == "--metallib") {
+      options.metallib_path = value;
+    } else if (argument == "--raw-samples") {
+      options.raw_samples_path = value;
     } else if (argument == "--scope") {
       options.scope = ParseBenchmarkScope(value);
+    } else if (argument == "--validation") {
+      options.validation = ParseValidationMode(value);
     } else if (argument == "--implementation") {
       if (value != "scalar" && value != "simd" && value != "factored") {
         throw std::runtime_error(
@@ -548,6 +587,17 @@ struct FrameCoefficientError {
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
     throw std::runtime_error(
       "Maximum-throughput mode requires a public-workflow scope");
+  }
+  if (options.validation == ValidationMode::kMetalOnly &&
+      options.scope != BenchmarkScope::kMetalPublicWorkflow) {
+    throw std::runtime_error(
+        "Metal-only validation requires metal-public-workflow scope");
+  }
+  if (!options.raw_samples_path.empty() &&
+      options.scope != BenchmarkScope::kPublicWorkflow &&
+      options.scope != BenchmarkScope::kMetalPublicWorkflow) {
+    throw std::runtime_error(
+        "Raw workflow samples require a public-workflow scope");
   }
   return options;
 }
@@ -749,13 +799,31 @@ constexpr std::array<std::string_view, 12> kWorkflowProfileNames = {
     "codestream_assembly",
 };
 
+struct RawWorkflowSample {
+  size_t sample_index = 0;
+  std::string_view backend;
+  std::array<uint64_t, kWorkflowProfileNames.size()> phase_nanoseconds{};
+  size_t encoded_bytes = 0;
+  bool has_final_score = false;
+  double final_score = 0.0;
+};
+
+struct RawWorkflowWorkload {
+  std::string workload;
+  gjxl::Extent2D source_extent;
+  std::string codestream_comparison;
+  std::vector<RawWorkflowSample> samples;
+};
+
 using WorkflowProfileSamples =
     std::array<std::vector<double>, kWorkflowProfileNames.size()>;
 
-void AppendWorkflowProfile(
-    const gjxl::codestream_internal::VarDctEncodingProfile& profile,
-    WorkflowProfileSamples* samples) {
-  const std::array<uint64_t, kWorkflowProfileNames.size()> values = {
+using WorkflowProfileNanoseconds =
+    std::array<uint64_t, kWorkflowProfileNames.size()>;
+
+[[nodiscard]] WorkflowProfileNanoseconds WorkflowProfileValues(
+    const gjxl::codestream_internal::VarDctEncodingProfile& profile) {
+  return {
       profile.total_nanoseconds,
       profile.input_preparation_nanoseconds,
       profile.backend_selection_nanoseconds,
@@ -769,8 +837,143 @@ void AppendWorkflowProfile(
       profile.codestream.section_writing_nanoseconds,
       profile.codestream.assembly_nanoseconds,
   };
+}
+
+void AppendWorkflowProfile(
+    const gjxl::codestream_internal::VarDctEncodingProfile& profile,
+    WorkflowProfileSamples* samples) {
+  const WorkflowProfileNanoseconds values = WorkflowProfileValues(profile);
   for (size_t index = 0; index < values.size(); ++index) {
     (*samples)[index].push_back(NanosecondsToMilliseconds(values[index]));
+  }
+}
+
+[[nodiscard]] std::string JsonEscape(std::string_view value) {
+  std::ostringstream escaped;
+  for (const unsigned char character : value) {
+    switch (character) {
+      case '\"':
+        escaped << "\\\"";
+        break;
+      case '\\':
+        escaped << "\\\\";
+        break;
+      case '\b':
+        escaped << "\\b";
+        break;
+      case '\f':
+        escaped << "\\f";
+        break;
+      case '\n':
+        escaped << "\\n";
+        break;
+      case '\r':
+        escaped << "\\r";
+        break;
+      case '\t':
+        escaped << "\\t";
+        break;
+      default:
+        if (character < 0x20) {
+          escaped << "\\u" << std::hex << std::setw(4)
+                  << std::setfill('0') << static_cast<unsigned>(character)
+                  << std::dec << std::setfill(' ');
+        } else {
+          escaped << static_cast<char>(character);
+        }
+    }
+  }
+  return escaped.str();
+}
+
+void WriteRawWorkflowSamples(
+    const std::filesystem::path& destination,
+    const CommandLineOptions& options,
+    const std::vector<RawWorkflowWorkload>& workloads) {
+  std::filesystem::path temporary = destination;
+  const uint64_t suffix = static_cast<uint64_t>(
+      Clock::now().time_since_epoch().count());
+  temporary += ".tmp-" + std::to_string(suffix);
+
+  try {
+    std::ofstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
+    output.open(temporary, std::ios::out | std::ios::trunc);
+    output << "{\n"
+           << "  \"schema_version\": 1,\n"
+           << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
+           << "\",\n"
+           << "  \"validation\": \""
+           << ValidationModeName(options.validation) << "\",\n"
+           << "  \"implementation\": \""
+           << JsonEscape(options.implementation) << "\",\n"
+           << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
+           << "\",\n"
+           << "  \"distance\": " << std::setprecision(9)
+           << options.butteraugli_target << ",\n"
+           << "  \"warmups\": " << options.warmups << ",\n"
+           << "  \"sample_count\": " << options.samples << ",\n"
+           << "  \"workloads\": [\n";
+    for (size_t workload_index = 0; workload_index < workloads.size();
+         ++workload_index) {
+      const RawWorkflowWorkload& workload = workloads[workload_index];
+      output << "    {\n"
+             << "      \"name\": \"" << JsonEscape(workload.workload)
+             << "\",\n"
+             << "      \"source_width\": " << workload.source_extent.width
+             << ",\n"
+             << "      \"source_height\": " << workload.source_extent.height
+             << ",\n"
+             << "      \"codestream_comparison\": \""
+             << workload.codestream_comparison << "\",\n"
+             << "      \"samples\": [\n";
+      for (size_t sample_index = 0; sample_index < workload.samples.size();
+           ++sample_index) {
+        const RawWorkflowSample& sample = workload.samples[sample_index];
+        output << "        {\"sample_index\": " << sample.sample_index
+               << ", \"backend\": \"" << sample.backend
+               << "\", \"encoded_bytes\": " << sample.encoded_bytes
+               << ", \"final_score\": ";
+        if (sample.has_final_score) {
+          output << std::setprecision(17) << sample.final_score;
+        } else {
+          output << "null";
+        }
+        output << ", \"phase_nanoseconds\": {";
+        for (size_t phase = 0; phase < kWorkflowProfileNames.size(); ++phase) {
+          if (phase != 0) {
+            output << ", ";
+          }
+          output << '\"' << kWorkflowProfileNames[phase] << "\": "
+                 << sample.phase_nanoseconds[phase];
+        }
+        output << "}}";
+        if (sample_index + 1 != workload.samples.size()) {
+          output << ',';
+        }
+        output << '\n';
+      }
+      output << "      ]\n"
+             << "    }";
+      if (workload_index + 1 != workloads.size()) {
+        output << ',';
+      }
+      output << '\n';
+    }
+    output << "  ]\n}\n";
+    output.close();
+
+    std::error_code rename_error;
+    std::filesystem::rename(temporary, destination, rename_error);
+    if (rename_error) {
+      throw std::runtime_error(
+          "Could not atomically replace raw-samples output: " +
+          rename_error.message());
+    }
+  } catch (...) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    throw;
   }
 }
 
@@ -914,8 +1117,9 @@ void RunPublicWorkflowOnlyWorkload(
     const WorkloadSpec& spec, size_t warmups, size_t samples,
     float butteraugli_target,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
-    std::string_view input_path, bool metal_only, gjxl::GpuBackend& gpu,
-    double* global_sink) {
+    std::string_view input_path, bool metal_only, ValidationMode validation,
+    gjxl::GpuBackend& gpu,
+    std::vector<RawWorkflowWorkload>* raw_results, double* global_sink) {
   ImageStorage original = !input_path.empty()
       ? LoadPpm(input_path)
       : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
@@ -948,24 +1152,29 @@ void RunPublicWorkflowOnlyWorkload(
   gjxl::VarDctEncodingSummary cpu_summary;
   gjxl::VarDctEncodingSummary gpu_summary;
   gjxl::codestream_internal::VarDctEncodingProfile ignored_profile;
-  RequireStatus(
-      "CPU public-workflow validation",
-      encode(gjxl::VarDctBackendPreference::kCpu,
-             gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
-             &cpu_bytes, &cpu_summary, &ignored_profile));
+  if (validation == ValidationMode::kCpuMetal) {
+    RequireStatus(
+        "CPU public-workflow validation",
+        encode(gjxl::VarDctBackendPreference::kCpu,
+               gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+               &cpu_bytes, &cpu_summary, &ignored_profile));
+  }
   RequireStatus(
       "Metal public-workflow validation",
       encode(gjxl::VarDctBackendPreference::kMetal, gpu_aq_mode, &gpu_bytes,
              &gpu_summary, &ignored_profile));
-  const bool codestreams_equal = cpu_bytes == gpu_bytes;
-  if (cpu_bytes.size() < 2 || gpu_bytes.size() < 2 ||
-      cpu_bytes[0] != 0xff || cpu_bytes[1] != 0x0a ||
+  const bool codestreams_equal =
+      validation == ValidationMode::kCpuMetal && cpu_bytes == gpu_bytes;
+  if (gpu_bytes.size() < 2 ||
       gpu_bytes[0] != 0xff || gpu_bytes[1] != 0x0a ||
-      cpu_summary.execution_backend != gjxl::VarDctExecutionBackend::kCpu ||
       gpu_summary.execution_backend != gjxl::VarDctExecutionBackend::kMetal ||
-      (gpu_aq_mode ==
+      (validation == ValidationMode::kCpuMetal &&
+       (cpu_bytes.size() < 2 || cpu_bytes[0] != 0xff ||
+        cpu_bytes[1] != 0x0a ||
+        cpu_summary.execution_backend != gjxl::VarDctExecutionBackend::kCpu ||
+        (gpu_aq_mode ==
            gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
-       !codestreams_equal)) {
+         !codestreams_equal)))) {
     throw std::runtime_error(
         "Public-workflow benchmark validation failed");
   }
@@ -1003,6 +1212,36 @@ void RunPublicWorkflowOnlyWorkload(
   WorkflowProfileSamples cpu_samples;
   WorkflowProfileSamples gpu_samples;
   std::vector<double> paired_speedups;
+  RawWorkflowWorkload raw_workload{
+      .workload = std::string(spec.name),
+      .source_extent = original.extent,
+      .codestream_comparison =
+          validation == ValidationMode::kCpuMetal
+              ? (codestreams_equal ? "exact" : "different")
+              : "not-compared",
+  };
+  raw_workload.samples.reserve(
+      samples * (metal_only ? size_t{1} : size_t{2}));
+  const auto append_raw_sample = [&](size_t sample_index,
+                                     std::string_view backend,
+                                     const gjxl::codestream_internal::
+                                         VarDctEncodingProfile& profile,
+                                     const std::vector<uint8_t>& bytes,
+                                     const gjxl::VarDctEncodingSummary& summary) {
+    if (raw_results == nullptr) {
+      return;
+    }
+    RawWorkflowSample raw_sample;
+    raw_sample.sample_index = sample_index;
+    raw_sample.backend = backend;
+    raw_sample.phase_nanoseconds = WorkflowProfileValues(profile);
+    raw_sample.encoded_bytes = bytes.size();
+    raw_sample.has_final_score = !summary.score_history.empty();
+    if (raw_sample.has_final_score) {
+      raw_sample.final_score = summary.score_history.back();
+    }
+    raw_workload.samples.push_back(raw_sample);
+  };
   double sink = 0.0;
   for (size_t sample = 0; sample < samples; ++sample) {
     gjxl::codestream_internal::VarDctEncodingProfile cpu_profile;
@@ -1034,6 +1273,7 @@ void RunPublicWorkflowOnlyWorkload(
                  &cpu_bytes, &cpu_summary, &cpu_profile));
     }
     AppendWorkflowProfile(gpu_profile, &gpu_samples);
+    append_raw_sample(sample, "metal", gpu_profile, gpu_bytes, gpu_summary);
     if (metal_only) {
       sink += static_cast<double>(gpu_bytes.size()) +
               (gpu_summary.score_history.empty()
@@ -1041,6 +1281,7 @@ void RunPublicWorkflowOnlyWorkload(
                  : gpu_summary.score_history.back());
     } else {
       AppendWorkflowProfile(cpu_profile, &cpu_samples);
+      append_raw_sample(sample, "cpu", cpu_profile, cpu_bytes, cpu_summary);
       paired_speedups.push_back(
           static_cast<double>(cpu_profile.total_nanoseconds) /
           static_cast<double>(gpu_profile.total_nanoseconds));
@@ -1059,8 +1300,13 @@ void RunPublicWorkflowOnlyWorkload(
             << " scope="
             << (metal_only ? "metal-public-workflow" : "public-workflow")
             << " codestream="
-            << (codestreams_equal ? "exact" : "different")
-            << " cpu_bytes=" << cpu_bytes.size()
+            << (validation == ValidationMode::kCpuMetal
+                    ? (codestreams_equal ? "exact" : "different")
+                    : "not-compared");
+  if (validation == ValidationMode::kCpuMetal) {
+    std::cout << " cpu_bytes=" << cpu_bytes.size();
+  }
+  std::cout
             << " gpu_bytes=" << gpu_bytes.size() << '\n';
   if (!metal_only) {
     PrintWorkflowProfile("cpu", cpu_samples);
@@ -1070,6 +1316,9 @@ void RunPublicWorkflowOnlyWorkload(
     PrintRatioStats("paired_speedup_x", paired_speedups);
   }
   std::cout << "  sink=" << sink << '\n';
+  if (raw_results != nullptr) {
+    raw_results->push_back(std::move(raw_workload));
+  }
   *global_sink += sink;
 }
 
@@ -2010,8 +2259,14 @@ int main(int argc, char** argv) {
         BackendOptions(options.implementation);
     std::unique_ptr<gjxl::GpuBackend> gpu;
     if (options.scope != BenchmarkScope::kCoefficientCoding) {
-      RequireStatus("Create embedded benchmark Metal backend",
-                    gjxl::CreateEmbeddedMetalBackend(backend_options, &gpu));
+      if (options.metallib_path.empty()) {
+        RequireStatus("Create embedded benchmark Metal backend",
+                      gjxl::CreateEmbeddedMetalBackend(backend_options, &gpu));
+      } else {
+        RequireStatus("Create external benchmark Metal backend",
+                      gjxl::CreateMetalBackend(options.metallib_path,
+                                               backend_options, &gpu));
+      }
     }
     std::cout << std::fixed << std::setprecision(3)
               << "CPU/Metal quantization benchmark: backend="
@@ -2027,6 +2282,9 @@ int main(int argc, char** argv) {
     }
     std::cout << '\n';
     double sink = 0.0;
+    std::vector<RawWorkflowWorkload> raw_results;
+    std::vector<RawWorkflowWorkload>* raw_results_pointer =
+        options.raw_samples_path.empty() ? nullptr : &raw_results;
     if (!options.input_path.empty()) {
       if (options.scope == BenchmarkScope::kCoefficientCoding) {
         RunCoefficientCodingOnlyWorkload(
@@ -2039,7 +2297,7 @@ int main(int argc, char** argv) {
             options.butteraugli_target, options.gpu_aq_mode,
             options.input_path,
             options.scope == BenchmarkScope::kMetalPublicWorkflow,
-            *gpu, &sink);
+            options.validation, *gpu, raw_results_pointer, &sink);
       } else {
         RunWorkload({"external_input", {}, false}, options.warmups,
                     options.samples, options.butteraugli_target,
@@ -2060,7 +2318,7 @@ int main(int argc, char** argv) {
                 workload, options.warmups, options.samples,
                 options.butteraugli_target, options.gpu_aq_mode, {},
                 options.scope == BenchmarkScope::kMetalPublicWorkflow,
-                *gpu, &sink);
+                options.validation, *gpu, raw_results_pointer, &sink);
           } else if (workload.gpu_complete_aq_only) {
             RunGpuCompleteAqOnlyWorkload(
                 workload, options.warmups, options.samples,
@@ -2072,6 +2330,9 @@ int main(int argc, char** argv) {
           }
         }
       }
+    }
+    if (!options.raw_samples_path.empty()) {
+      WriteRawWorkflowSamples(options.raw_samples_path, options, raw_results);
     }
     std::cout << "global_sink=" << sink << '\n';
   } catch (const std::exception& error) {

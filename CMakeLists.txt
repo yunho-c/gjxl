@@ -38,6 +38,12 @@ option(
   OFF
 )
 
+option(
+  GJXL_ENABLE_METAL_PROFILING
+  "Emit line tables, recorded sources, and a flat symbol companion for Metal shaders"
+  OFF
+)
+
 if(GJXL_ENABLE_LIBJXL_REFERENCE AND
    (GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS))
   if(NOT EXISTS
@@ -571,6 +577,14 @@ set(
   "${GJXL_METAL_DIR}/gjxl_embedded_metallib.inc"
 )
 
+set(GJXL_METAL_PROFILING_FLAGS)
+if(GJXL_ENABLE_METAL_PROFILING)
+  list(APPEND GJXL_METAL_PROFILING_FLAGS
+    -gline-tables-only
+    -frecord-sources=yes
+  )
+endif()
+
 # .metal -> .ir
 
 add_custom_command(
@@ -587,6 +601,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_PROFILING_FLAGS}
     "${GJXL_DCT_METAL_SOURCE}"
     -o
     "${GJXL_DCT_METAL_IR}"
@@ -615,6 +630,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_PROFILING_FLAGS}
     "${GJXL_AC_STRATEGY_METAL_SOURCE}"
     -o
     "${GJXL_AC_STRATEGY_METAL_IR}"
@@ -642,6 +658,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_PROFILING_FLAGS}
     "${GJXL_PRIMITIVES_METAL_SOURCE}"
     -o
     "${GJXL_PRIMITIVES_METAL_IR}"
@@ -669,6 +686,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_PROFILING_FLAGS}
     -fmetal-math-mode=safe
     -fmetal-math-fp32-functions=precise
     -ffp-contract=off
@@ -699,6 +717,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_PROFILING_FLAGS}
     -fmetal-math-mode=safe
     -ffp-contract=off
     "${GJXL_AQ_RECONSTRUCTION_METAL_SOURCE}"
@@ -729,6 +748,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_PROFILING_FLAGS}
     -fmetal-math-mode=safe
     -fmetal-math-fp32-functions=precise
     -ffp-contract=off
@@ -759,6 +779,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_PROFILING_FLAGS}
     -fmetal-math-mode=safe
     -fmetal-math-fp32-functions=precise
     -ffp-contract=off
@@ -816,6 +837,41 @@ add_custom_target(
   DEPENDS
     "${GJXL_METALLIB}"
 )
+
+if(GJXL_ENABLE_METAL_PROFILING)
+  set(
+    GJXL_METALLIB_SYMBOLS
+    "${GJXL_METAL_DIR}/gjxl.metallibsym"
+  )
+
+  add_custom_command(
+    OUTPUT
+      "${GJXL_METALLIB_SYMBOLS}"
+
+    COMMAND
+      "${XCRUN_EXECUTABLE}"
+      -sdk macosx
+      metal-dsymutil
+      --flat
+      -o
+      "${GJXL_METALLIB_SYMBOLS}"
+      "${GJXL_METALLIB}"
+
+    DEPENDS
+      "${GJXL_METALLIB}"
+
+    COMMENT
+      "Generating gjxl.metallib shader symbols"
+
+    VERBATIM
+  )
+
+  add_custom_target(
+    gjxl_metal_profile_symbols
+    DEPENDS
+      "${GJXL_METALLIB_SYMBOLS}"
+  )
+endif()
 
 add_custom_command(
   OUTPUT
@@ -936,6 +992,14 @@ if(GJXL_BUILD_TESTS)
     COMPONENTS Interpreter
     REQUIRED
   )
+
+  add_test(
+    NAME metal_profile_driver
+    COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/metal_profile_test.py"
+  )
+  set_tests_properties(metal_profile_driver PROPERTIES LABELS cli)
 
   find_program(GJXL_IMAGEMAGICK_EXECUTABLE NAMES magick)
   if(GJXL_IMAGEMAGICK_EXECUTABLE)
@@ -2259,6 +2323,21 @@ if(GJXL_BUILD_BENCHMARKS)
     gjxl_quantization_benchmark
     gjxl_embedded_metal_shaders
   )
+
+  if(GJXL_BUILD_TESTS)
+    add_test(
+      NAME quantization_benchmark_cli
+      COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/quantization_benchmark_cli_test.py"
+        --benchmark $<TARGET_FILE:gjxl_quantization_benchmark>
+        --metallib "${GJXL_METALLIB}"
+    )
+    set_tests_properties(
+      quantization_benchmark_cli
+      PROPERTIES LABELS "benchmark;cli;metal"
+    )
+  endif()
 
   add_executable(
     gjxl_image_batch_benchmark

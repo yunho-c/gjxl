@@ -99,6 +99,50 @@ between every approximately one-second Metal sample. It is the preferred 4K
 regression signal for Metal changes; the alternating multi-process CPU/Metal
 protocol above remains the final speedup gate.
 
+### Reproducible Metal profiling
+
+Use the profiling workflow when aggregate phase timings identify a GPU-heavy
+region but do not explain its command-buffer and encoder behavior:
+
+```sh
+just metal-profile
+just metal-profile synthetic_128x96 simd 1 1 fully-resident
+```
+
+The default invocation creates a new, never-overwritten directory under
+`logs/metal-profile/`, named with the UTC capture time, workload, AQ mode, and
+Git revision. It configures an isolated Release build at
+`build/metal-profile`, compiles the optimized Metal shaders with line tables
+and recorded sources, generates `metal/gjxl.metallibsym`, and makes the
+benchmark load that exact external metallib.
+
+Each artifact contains:
+
+- `raw-samples.json`, with every untraced workflow phase recorded as integer
+  nanoseconds for all seven default samples;
+- `capture.trace`, `trace-toc.xml`, `trace.stdout`, and `trace-sample.json` for
+  one instrumented Metal sample;
+- build, benchmark, and `xctrace` logs;
+- `manifest.json`, including the complete commands and exit status, Git state,
+  selected environment, macOS/Xcode/Metal/xctrace versions, display/GPU data,
+  and SHA-256 hashes of the benchmark, metallib, and symbol companion; and
+- starting worktree/index patches plus an untracked-file hash inventory.
+
+Open `capture.trace` in Instruments. Keep `gjxl.metallib` and
+`gjxl.metallibsym` together in the profiling build so Instruments can resolve
+shader symbols and source locations. The driver allows a dirty checkout but
+records it. If tracked or untracked source state changes during the workflow,
+the artifact is preserved as failed and the command exits nonzero. Missing
+tools, failed builds, failed benchmark validation, and failed trace export are
+handled the same way.
+
+Treat `raw-samples.json` as the performance comparison evidence. Metal System
+Trace adds instrumentation overhead, so the trace sample is for attribution
+and scheduling analysis rather than a latency claim. The default Xcode Metal
+System Trace configuration exposes command-buffer and encoder activity, but it
+does not enable GPU counters, Shader Timeline, or project-level per-dispatch
+timers; those remain separate profiling improvements.
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
