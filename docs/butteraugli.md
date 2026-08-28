@@ -645,7 +645,7 @@ reconstruction chain, and complete AQ speedup gate are not Butteraugli
 milestones. They are tracked in [`metal-aq.md`](metal-aq.md), which consumes the
 device-resident distance map produced here.
 
-### 10. Consolidate and maintain Butteraugli
+### 10. Consolidate and maintain Butteraugli — in progress (2026-08-28)
 
 - Remove Butteraugli-specific transitional selectors and duplicate scratch
   paths after CPU and Metal contracts stabilize.
@@ -659,6 +659,25 @@ device-resident distance map produced here.
 Exit criterion: native CPU is the standalone correctness baseline, the device
 operation is an optional accelerated implementation, and libjxl is required
 only for deliberate compatibility validation.
+
+The first maintenance optimization removes six full-plane dispatches from
+each Metal difference scale. Malta's fixed `{4, 5, 2, 3, 0, 1}` accumulation
+order begins with one UHF response for each of the two populated AC channels,
+so those responses can initialize their destination planes directly. The L2
+kernel fully overwrites AC channel 2 and all three DC planes. The preceding six
+clears were therefore redundant; later Malta responses retain their original
+addition order and arithmetic.
+
+Three independent Apple M4 Pro Release process pairs alternated retained
+pre-change and post-change binaries. Each process used two warmups and eleven
+rotated padded-1080p samples. Resident-consumer E2E medians moved from
+`17.682333-17.727541 ms` to `16.933625-17.032958 ms`, a per-pair reduction of
+`3.74-4.23%`. Resident-comparison medians moved from
+`17.569459-18.315833 ms` to `17.164000-18.092791 ms`; their observed ranges
+overlap, so that narrower kernel boundary is directional evidence only. The
+standalone operation contract, full Metal Butteraugli differential, resident
+AQ evaluation and policy, and Metal quantization-pipeline tests pass without a
+tolerance, shader arithmetic, public API, or memory-contract change.
 
 ## Recommended implementation order
 

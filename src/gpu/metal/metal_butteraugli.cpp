@@ -663,23 +663,6 @@ private:
     }
   }
 
-  void EncodeClear(
-    MTL::ComputeCommandEncoder* encoder,
-    DevicePlaneView output,
-    Extent2D plane_extent) {
-
-    const PlaneParams params{
-      static_cast<uint32_t>(plane_extent.width),
-      static_cast<uint32_t>(plane_extent.height),
-      0,
-      static_cast<uint32_t>(output.row_stride),
-    };
-    encoder->setComputePipelineState(metal_.butteraugli_pipelines_.clear.get());
-    Bind(encoder, Handle(metal_, output), output.offset_bytes, 0);
-    encoder->setBytes(&params, sizeof(params), 1);
-    metal_.DispatchPlane(encoder, plane_extent);
-  }
-
   void EncodeAdd(
     MTL::ComputeCommandEncoder* encoder,
     ConstDevicePlaneView input,
@@ -957,11 +940,6 @@ private:
     Extent2D scale_extent,
     DevicePlaneView output) {
 
-    for (size_t channel = 0; channel < 3; ++channel) {
-      EncodeClear(encoder, Plane(kAc + channel, scale_extent), scale_extent);
-      EncodeClear(encoder, Plane(kDc + channel, scale_extent), scale_extent);
-    }
-
     const float asymmetry = options().hf_asymmetry;
     const float sqrt_asymmetry = std::sqrt(asymmetry);
     for (size_t stage_index : kMaltaAccumulationOrder) {
@@ -1034,9 +1012,16 @@ private:
         AsConst(response),
         scale_extent);
       const size_t channel = stage_index % 2 == 0 ? 1 : 0;
-      EncodeAdd(
-        encoder, AsConst(response), Plane(kAc + channel, scale_extent),
-        scale_extent);
+      DevicePlaneView accumulation = Plane(kAc + channel, scale_extent);
+      // The first UHF response for each channel initializes the Malta sum.
+      // The following L2 pass overwrites AC channel 2 and every DC plane, so
+      // none of those four planes needs an explicit full-plane clear either.
+      if (stage_index >= 4) {
+        EncodeCopy(encoder, AsConst(response), accumulation, scale_extent);
+      } else {
+        EncodeAdd(
+          encoder, AsConst(response), accumulation, scale_extent);
+      }
     }
 
     const DifferenceParams difference_params{

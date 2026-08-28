@@ -514,6 +514,24 @@ the `1919x1079` source. Because no isolated same-revision pre-change
 distribution was retained, this is a post-change checkpoint rather than a
 speedup attribution.
 
+#### Butteraugli Malta-accumulation checkpoint (2026-08-28)
+
+The next resident-kernel slice removes six full-plane dispatches from every
+Butteraugli difference scale. The first UHF Malta response for each populated
+AC channel now initializes that accumulator directly; AC channel 2 and all
+three DC planes are left for the following L2 kernel, which overwrites them.
+Later Malta responses retain the established UHF, HF, then MF addition order.
+
+Three independent Apple M4 Pro Release process pairs alternated retained
+pre-change and post-change standalone benchmark binaries. Each process used
+two warmups and eleven rotated padded-1080p samples. Resident-consumer E2E
+medians moved from `17.682333-17.727541 ms` to
+`16.933625-17.032958 ms`, a per-pair reduction of `3.74-4.23%`.
+Resident-comparison median ranges overlapped, so the leaf-kernel result is not
+yet attributed to the complete public encoder. Focused standalone
+Butteraugli, resident AQ, policy, and quantization-pipeline coverage passes
+without changing numerical tolerances or materialization contracts.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.
