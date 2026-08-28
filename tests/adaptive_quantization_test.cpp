@@ -4,6 +4,7 @@
 /// @file
 /// Validates the initial CPU quantization heuristic against pinned libjxl.
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -566,6 +567,63 @@ bool CheckAdjustedQuantField() {
   return true;
 }
 
+bool CheckParallelInitialQuantization() {
+  constexpr gjxl::Extent2D pixels{256, 256};
+  constexpr gjxl::Extent2D blocks{32, 32};
+  constexpr size_t pixel_count = pixels.width * pixels.height;
+  constexpr size_t block_count = blocks.width * blocks.height;
+  std::array<std::vector<float>, 3> opsin;
+  for (size_t channel = 0; channel < opsin.size(); ++channel) {
+    opsin[channel].resize(pixel_count);
+    for (size_t y = 0; y < pixels.height; ++y) {
+      for (size_t x = 0; x < pixels.width; ++x) {
+        opsin[channel][y * pixels.width + x] =
+          OpsinSample(channel, x, y);
+      }
+    }
+  }
+  std::vector<float> quant(block_count, -1.0f);
+  std::vector<float> strategy(block_count, -1.0f);
+  std::vector<float> mask(pixel_count, -1.0f);
+  const gjxl::ConstImage3FView input{{
+    gjxl::ConstPlaneF32View{opsin[0].data(), pixels, pixels.width},
+    gjxl::ConstPlaneF32View{opsin[1].data(), pixels, pixels.width},
+    gjxl::ConstPlaneF32View{opsin[2].data(), pixels, pixels.width},
+  }};
+  const gjxl::InitialQuantFieldOutput output{
+    .quant_field = {quant.data(), blocks, blocks.width},
+    .strategy_mask = {strategy.data(), blocks, blocks.width},
+    .pixel_mask = {mask.data(), pixels, pixels.width},
+  };
+  if (!gjxl::ComputeInitialQuantField(input, {}, output).ok() ||
+      !std::ranges::all_of(quant, [](float value) {
+        return std::isfinite(value) && value > 0.0f;
+      }) ||
+      !std::ranges::all_of(strategy, [](float value) {
+        return std::isfinite(value) && value > 0.0f;
+      }) ||
+      !std::ranges::all_of(mask, [](float value) {
+        return std::isfinite(value) && value > 0.0f;
+      })) {
+    std::cerr << "Parallel initial quantization produced invalid output\n";
+    return false;
+  }
+
+  opsin[1].back() = std::numeric_limits<float>::quiet_NaN();
+  std::fill(quant.begin(), quant.end(), 41.0f);
+  std::fill(strategy.begin(), strategy.end(), 41.0f);
+  std::fill(mask.begin(), mask.end(), 41.0f);
+  if (gjxl::ComputeInitialQuantField(input, {}, output).ok() ||
+      !std::ranges::all_of(quant, [](float value) { return value == 41.0f; }) ||
+      !std::ranges::all_of(
+        strategy, [](float value) { return value == 41.0f; }) ||
+      !std::ranges::all_of(mask, [](float value) { return value == 41.0f; })) {
+    std::cerr << "Parallel invalid initial quantization was not atomic\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -574,6 +632,7 @@ int main() {
       !CheckRescaleContract() ||
       !CheckTileBoundaryGoldens() ||
       !CheckAdjustedQuantField() ||
+      !CheckParallelInitialQuantization() ||
       !CheckInvalidInputs()) {
     return EXIT_FAILURE;
   }

@@ -215,6 +215,17 @@ paired speedup at `20.54-22.03x` (median `21.02x`). Exact pixel conversion and
 the existing frame/codestream contracts remain unchanged; this is still an
 iteration result rather than the P6 process matrix.
 
+The fourth retained P3 slice computes the initial quantizer's independent
+four-row masking bands on up to twelve host workers. Each band preserves the
+original vertical and horizontal accumulation order, small images stay serial,
+and a 256x256 contract test covers finite output plus atomic invalid-input
+behavior. A single full-profile sample reduced the standalone padded-1080p
+initial-quant field from the preceding `42.7 ms` observation to `32.7 ms`.
+One process with one warmup and three alternating public samples measured
+Metal at `259.7-299.4 ms` (median `271.9 ms`) and paired speedup at
+`20.30-23.37x` (median `22.22x`). The range remains noisy, so the exact
+four-row decomposition and unchanged output are the primary retained claims.
+
 ### P4. Remove per-evaluation CPU synchronization
 
 - Port final CfL, EPF inverse sigma, and deterministic quant-field updates.

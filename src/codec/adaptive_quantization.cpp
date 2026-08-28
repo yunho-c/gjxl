@@ -5,12 +5,15 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -35,6 +38,67 @@ uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
   return static_cast<uint64_t>(
     std::chrono::duration_cast<std::chrono::nanoseconds>(
       ProfileClock::now() - begin).count());
+}
+
+template <typename Function>
+Status RunParallelInitialQuantWork(
+  size_t count,
+  size_t value_count,
+  Function&& function) {
+
+  if (count == 0) return Status::Ok();
+  constexpr size_t kMinimumParallelValues = 256 * 256;
+  constexpr size_t kMaximumWorkers = 12;
+  const size_t hardware_workers = std::max<size_t>(
+    std::thread::hardware_concurrency(), 1);
+  const size_t worker_count = value_count < kMinimumParallelValues
+    ? 1
+    : std::min(count, std::min(kMaximumWorkers, hardware_workers));
+  if (worker_count == 1) {
+    for (size_t index = 0; index < count; ++index) {
+      Status status = function(index);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
+
+  std::vector<Status> statuses(count);
+  std::atomic<size_t> next_index{0};
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  try {
+    for (size_t worker = 0; worker < worker_count; ++worker) {
+      workers.emplace_back([&] {
+        while (true) {
+          const size_t index =
+            next_index.fetch_add(1, std::memory_order_relaxed);
+          if (index >= count) break;
+          try {
+            statuses[index] = function(index);
+          } catch (const std::bad_alloc&) {
+            statuses[index] = Status::OutOfMemory(
+              "Unable to allocate initial-quantization worker storage");
+          } catch (...) {
+            statuses[index] = Status::Internal(
+              "Initial-quantization worker failed unexpectedly");
+          }
+        }
+      });
+    }
+  } catch (const std::system_error&) {
+    next_index.store(count, std::memory_order_relaxed);
+    for (std::thread& worker : workers) worker.join();
+    for (size_t index = 0; index < count; ++index) {
+      Status status = function(index);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
+  for (std::thread& worker : workers) worker.join();
+  for (const Status& status : statuses) {
+    if (!status.ok()) return status;
+  }
+  return Status::Ok();
 }
 
 template <typename Function>
@@ -547,7 +611,6 @@ Status ComputeInitialQuantField(
 
   try {
     std::vector<float> pixel_mask(pixel_count);
-    std::vector<float> row_differences(opsin.width());
     const Extent2D pre_erosion_extent{
       .width = opsin.width() / 4,
       .height = opsin.height() / 4,
@@ -557,42 +620,46 @@ Status ComputeInitialQuantField(
 
     constexpr float kMatchGammaOffset = 0.019f;
     constexpr float kDifferenceLimit = 0.2f;
+    status = RunParallelInitialQuantWork(
+      pre_erosion_extent.height, pixel_count,
+      [&](size_t group_y) {
+        std::vector<float> row_differences(opsin.width());
+        const size_t y_begin = group_y * 4;
+        for (size_t row_index = 0; row_index < 4; ++row_index) {
+          const size_t y = y_begin + row_index;
+          const size_t top = y == 0 ? y : y - 1;
+          const size_t bottom = y + 1 < opsin.height() ? y + 1 : y;
+          const float* row = opsin.plane[1].Row(y);
+          const float* top_row = opsin.plane[1].Row(top);
+          const float* bottom_row = opsin.plane[1].Row(bottom);
 
-    for (size_t y = 0; y < opsin.height(); ++y) {
-      const size_t top = y == 0 ? y : y - 1;
-      const size_t bottom = y + 1 < opsin.height() ? y + 1 : y;
-      const float* row = opsin.plane[1].Row(y);
-      const float* top_row = opsin.plane[1].Row(top);
-      const float* bottom_row = opsin.plane[1].Row(bottom);
+          for (size_t x = 0; x < opsin.width(); ++x) {
+            const size_t left = x == 0 ? x : x - 1;
+            const size_t right = x + 1 < opsin.width() ? x + 1 : x;
+            const float base = 0.25f * (
+              bottom_row[x] + top_row[x] + row[left] + row[right]);
+            const float gamma = GammaDerivativeRatio<false>(
+              row[x] + kMatchGammaOffset);
 
-      for (size_t x = 0; x < opsin.width(); ++x) {
-        const size_t left = x == 0 ? x : x - 1;
-        const size_t right = x + 1 < opsin.width() ? x + 1 : x;
-        const float base = 0.25f * (
-          bottom_row[x] + top_row[x] + row[left] + row[right]);
-        const float gamma = GammaDerivativeRatio<false>(
-          row[x] + kMatchGammaOffset);
+            float pixel_difference = std::abs(gamma * (row[x] - base));
+            pixel_difference = std::log1p(pixel_difference);
+            pixel_mask[y * opsin.width() + x] =
+              1.0f / (pixel_difference + 0.01f);
 
-        float pixel_difference = std::abs(gamma * (row[x] - base));
-        pixel_difference = std::log1p(pixel_difference);
-        pixel_mask[y * opsin.width() + x] =
-          1.0f / (pixel_difference + 0.01f);
-
-        float block_difference = gamma * (row[x] - base);
-        block_difference *= block_difference;
-        block_difference = std::min(block_difference, kDifferenceLimit);
-        block_difference = MaskingSqrt(block_difference);
-
-        if ((y & 3u) == 0) {
-          row_differences[x] = block_difference;
-        } else {
-          row_differences[x] += block_difference;
+            float block_difference = gamma * (row[x] - base);
+            block_difference *= block_difference;
+            block_difference = std::min(block_difference, kDifferenceLimit);
+            block_difference = MaskingSqrt(block_difference);
+            if (row_index == 0) {
+              row_differences[x] = block_difference;
+            } else {
+              row_differences[x] += block_difference;
+            }
+          }
         }
-      }
 
-      if ((y & 3u) == 3) {
-        float* destination = pre_erosion.data() +
-          (y / 4) * pre_erosion_extent.width;
+        float* destination =
+          pre_erosion.data() + group_y * pre_erosion_extent.width;
         for (size_t x = 0; x < pre_erosion_extent.width; ++x) {
           destination[x] = (
             row_differences[x * 4] +
@@ -600,8 +667,9 @@ Status ComputeInitialQuantField(
             row_differences[x * 4 + 2] +
             row_differences[x * 4 + 3]) * 0.25f;
         }
-      }
-    }
+        return Status::Ok();
+      });
+    if (!status.ok()) return status;
 
     std::vector<float> quant_field;
     FuzzyErosion(
