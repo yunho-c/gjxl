@@ -32,6 +32,10 @@
 #include "gpu/metal/metal_status.h"
 #include "gpu/scratch.h"
 
+#define setComputePipelineState(state)                                    \
+  setComputePipelineState(state);                                         \
+  ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
+
 namespace gjxl::metal_internal {
 namespace {
 
@@ -62,7 +66,8 @@ void BindPlane(MTL::ComputeCommandEncoder* encoder, DevicePlaneView plane,
 
 void DispatchThreads1d(MTL::ComputeCommandEncoder* encoder,
                        size_t thread_count) {
-  encoder->dispatchThreads(
+  DispatchMetalThreads(
+    encoder,
     MTL::Size(static_cast<NS::UInteger>(thread_count), 1, 1),
     MTL::Size(kAqThreadCount, 1, 1));
 }
@@ -401,6 +406,7 @@ void AppendQuantTable(const Range& values, std::vector<float>* packed) {
   if (!pipeline) {
     return metal::ErrorToStatus(error, "newComputePipelineState");
   }
+  RegisterMetalComputePipeline(pipeline.get(), function_name);
   *out = std::move(pipeline);
   return Status::Ok();
 }
@@ -1596,6 +1602,50 @@ Status MetalPreparedAqEvaluation::Evaluate(AqEvaluationInput input,
 Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
     AqResidentButteraugliPolicyInput input,
     AqResidentButteraugliPolicyOutput output) {
+  return EvaluateResidentButteraugliPolicyImpl(
+    input, output, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    nullptr);
+}
+
+Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyProfiled(
+    AqResidentButteraugliPolicyInput input,
+    AqResidentButteraugliPolicyOutput output,
+    gpu_profile_internal::GpuProfilingMode mode,
+    gpu_profile_internal::GpuExecutionProfile* profile) {
+  if (profile == nullptr) {
+    return Status::InvalidArgument(
+      "Resident GPU execution profile output is null");
+  }
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Resident GPU execution profiling mode is disabled");
+  }
+  return EvaluateResidentButteraugliPolicyImpl(input, output, mode, profile);
+}
+
+Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
+    AqResidentButteraugliPolicyInput input,
+    AqResidentButteraugliPolicyOutput output,
+    gpu_profile_internal::GpuProfilingMode profiling_mode,
+    gpu_profile_internal::GpuExecutionProfile* profile) {
+  const bool profiling =
+    profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
+  gpu_profile_internal::GpuExecutionProfile candidate_profile;
+  if (profiling) {
+    candidate_profile.mode = profiling_mode;
+    candidate_profile.capabilities = backend_->ProfilingCapabilities();
+    if (!candidate_profile.capabilities.timestamp_counter ||
+        !candidate_profile.capabilities.stage_boundary) {
+      return Status::Unavailable(
+        "Metal stage-boundary timestamp sampling is unavailable");
+    }
+    if (profiling_mode ==
+          gpu_profile_internal::GpuProfilingMode::kDispatch &&
+        !candidate_profile.capabilities.dispatch_boundary) {
+      return Status::Unavailable(
+        "Metal dispatch-boundary timestamp sampling is unavailable");
+    }
+  }
   if (!resident_quantization_ ||
       options_.metric != AqEvaluationMetric::kButteraugli) {
     return Status::Unavailable(
@@ -1733,10 +1783,134 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
   resident_policy_update_params_.upper_bound = input.upper_bound;
 
   std::unique_ptr<GpuSubmission> submission;
-  status = backend_->SubmitCompute(
-    "gjxl prepared resident Butteraugli policy",
-    &MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission,
-    this, &submission);
+  if (profiling) {
+    std::vector<ResidentProfileStageContext> contexts;
+    std::vector<MetalProfiledComputeStage> stages;
+    const uint32_t epf_iterations =
+      options_.profile.loop_filter.epf_options.iterations;
+    const bool butteraugli_multiscale =
+      source_extent_.width >= 15 && source_extent_.height >= 15;
+    const size_t stages_per_iteration =
+      9 + static_cast<size_t>(butteraugli_multiscale) * 4 +
+      static_cast<size_t>(options_.profile.loop_filter.gaborish) +
+      epf_iterations;
+    const size_t stage_count =
+      (resident_policy_iterations_ + 1) * stages_per_iteration + 1;
+    try {
+      contexts.reserve(stage_count);
+      stages.reserve(stage_count);
+    } catch (const std::bad_alloc&) {
+      Invalidate();
+      return Status::OutOfMemory(
+        "Unable to allocate resident GPU stage metadata");
+    } catch (const std::length_error&) {
+      Invalidate();
+      return Status::InvalidArgument(
+        "Resident GPU stage metadata is too large");
+    }
+    const auto append_stage = [&](const char* stage_id,
+                                  ResidentProfileStage stage,
+                                  uint32_t iteration,
+                                  uint32_t epf_pass = 0,
+                                  MetalButteraugliProfileStage butter_stage =
+                                    MetalButteraugliProfileStage::
+                                      kDistortedPsychoMain) {
+      contexts.push_back(
+        {this, stage, iteration, epf_pass, butter_stage});
+      stages.push_back({
+        .stage_id = stage_id,
+        .iteration = iteration,
+        .invocation = iteration,
+        .encode = &MetalPreparedAqEvaluation::EncodeResidentProfileStage,
+        .context = &contexts.back(),
+      });
+    };
+    try {
+      const uint32_t first_epf_pass = epf_iterations == 3 ? 0 : 1;
+      for (uint32_t iteration = 0;
+           iteration <= resident_policy_iterations_; ++iteration) {
+        append_stage(
+          "aq.reconstruction", ResidentProfileStage::kReconstruction,
+          iteration);
+        if (iteration == 0) {
+          append_stage(
+            "aq.policy_initialize",
+            ResidentProfileStage::kPolicyInitialize, iteration);
+        }
+        if (options_.profile.loop_filter.gaborish) {
+          append_stage(
+            "aq.gaborish", ResidentProfileStage::kGaborish, iteration);
+        }
+        for (uint32_t pass = first_epf_pass;
+             pass < first_epf_pass + epf_iterations; ++pass) {
+          const char* id = pass == 0 ? "aq.epf.pass_0"
+                           : pass == 1 ? "aq.epf.pass_1"
+                                       : "aq.epf.pass_2";
+          append_stage(id, ResidentProfileStage::kEpf, iteration, pass);
+        }
+        append_stage(
+          "aq.opsin_to_linear", ResidentProfileStage::kOpsinToLinear,
+          iteration);
+        append_stage(
+          "butteraugli.psycho.main", ResidentProfileStage::kButteraugli,
+          iteration, 0,
+          MetalButteraugliProfileStage::kDistortedPsychoMain);
+        append_stage(
+          "butteraugli.malta.main", ResidentProfileStage::kButteraugli,
+          iteration, 0, MetalButteraugliProfileStage::kMaltaMain);
+        append_stage(
+          "butteraugli.l2.main", ResidentProfileStage::kButteraugli,
+          iteration, 0, MetalButteraugliProfileStage::kL2Main);
+        append_stage(
+          "butteraugli.mask_final.main",
+          ResidentProfileStage::kButteraugli, iteration, 0,
+          MetalButteraugliProfileStage::kMaskAndFinalMain);
+        if (butteraugli_multiscale) {
+          append_stage(
+            "butteraugli.psycho.sub", ResidentProfileStage::kButteraugli,
+            iteration, 0,
+            MetalButteraugliProfileStage::kDistortedPsychoSub);
+          append_stage(
+            "butteraugli.malta.sub", ResidentProfileStage::kButteraugli,
+            iteration, 0, MetalButteraugliProfileStage::kMaltaSub);
+          append_stage(
+            "butteraugli.l2.sub", ResidentProfileStage::kButteraugli,
+            iteration, 0, MetalButteraugliProfileStage::kL2Sub);
+          append_stage(
+            "butteraugli.mask_final.sub",
+            ResidentProfileStage::kButteraugli, iteration, 0,
+            MetalButteraugliProfileStage::kMaskAndFinalSub);
+        }
+        append_stage(
+          "butteraugli.score_reduction",
+          ResidentProfileStage::kButteraugli, iteration, 0,
+          MetalButteraugliProfileStage::kScoreReduction);
+        append_stage(
+          "aq.block_reduction", ResidentProfileStage::kBlockReduction,
+          iteration);
+        append_stage(
+          "aq.policy_update", ResidentProfileStage::kPolicyUpdate,
+          iteration);
+      }
+    } catch (const std::bad_alloc&) {
+      Invalidate();
+      return Status::OutOfMemory(
+        "Unable to allocate resident GPU stage metadata");
+    } catch (const std::length_error&) {
+      Invalidate();
+      return Status::InvalidArgument(
+        "Resident GPU stage metadata is too large");
+    }
+    status = backend_->SubmitComputeProfiled(
+      "gjxl profiled resident Butteraugli policy", stages,
+      profiling_mode, &submission);
+    reset_params_.preserve_error = 0u;
+  } else {
+    status = backend_->SubmitCompute(
+      "gjxl prepared resident Butteraugli policy",
+      &MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission,
+      this, &submission);
+  }
   if (!status.ok() || submission == nullptr) {
     Invalidate();
     return status.ok()
@@ -1749,8 +1923,22 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
     submission_ = std::move(submission);
   }
 
-  status = WaitForOperation();
+  gpu_profile_internal::GpuSubmissionProfile submission_profile;
+  status = WaitForOperation(profiling ? &submission_profile : nullptr);
   if (!status.ok()) return status;
+  if (profiling) {
+    try {
+      candidate_profile.submissions.push_back(std::move(submission_profile));
+    } catch (const std::bad_alloc&) {
+      Invalidate();
+      return Status::OutOfMemory(
+        "Unable to retain resident GPU execution profile");
+    } catch (const std::length_error&) {
+      Invalidate();
+      return Status::InvalidArgument(
+        "Resident GPU execution profile is too large");
+    }
+  }
 
   MetalAqReadbackStatsForTesting candidate_readback_stats;
   uint32_t device_error = 0;
@@ -1936,6 +2124,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
   }
   if (output.frame != nullptr) *output.frame = std::move(candidate_frame);
   last_readback_stats_ = candidate_readback_stats;
+  if (profiling) *profile = std::move(candidate_profile);
   CompleteOperation();
   return Status::Ok();
 }
@@ -3174,7 +3363,8 @@ Status MetalPreparedAqEvaluation::PrepareLinearReadback() {
   }
 }
 
-Status MetalPreparedAqEvaluation::WaitForOperation() {
+Status MetalPreparedAqEvaluation::WaitForOperation(
+    gpu_profile_internal::GpuSubmissionProfile* gpu_profile) {
   std::unique_ptr<GpuSubmission> submission;
   bool fail_readback = false;
   bool *observer = nullptr;
@@ -3190,6 +3380,9 @@ Status MetalPreparedAqEvaluation::WaitForOperation() {
     observer = wait_observer_;
   }
   Status status = submission->Wait();
+  if (status.ok() && gpu_profile != nullptr) {
+    status = GetMetalSubmissionGpuProfile(*submission, gpu_profile);
+  }
   if (status.ok() && active_profile_ != nullptr) {
     uint64_t gpu_nanoseconds = 0;
     if (GetMetalSubmissionGpuDuration(
@@ -3245,7 +3438,8 @@ void MetalPreparedAqEvaluation::EncodeBlockReduction(
     encoder->setBytes(
       &block_reduction_params_[batch_index],
       sizeof(block_reduction_params_[batch_index]), 4);
-    encoder->dispatchThreadgroups(
+    DispatchMetalThreadgroups(
+      encoder,
       MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
       MTL::Size(kBlockReductionThreadCount, 1, 1));
   }
@@ -3288,7 +3482,8 @@ void MetalPreparedAqEvaluation::EncodeMaximumErrorReduction(
     encoder->setBytes(
       &maximum_error_reduction_params_[batch_index],
       sizeof(maximum_error_reduction_params_[batch_index]), 10);
-    encoder->dispatchThreadgroups(
+    DispatchMetalThreadgroups(
+      encoder,
       MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
       MTL::Size(kBlockReductionThreadCount, 1, 1));
   }
@@ -3339,17 +3534,7 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     EncodeReconstructionSubmission(backend, encoder, &self);
 
     if (iteration == 0) {
-      encoder->setComputePipelineState(
-        backend.aq_pipelines_.resident_policy_initialize.get());
-      BindPlane(encoder, self.resident_quant_field_, 0);
-      BindPlane(encoder, self.resident_policy_initial_field_, 1);
-      BindPlane(encoder, self.resident_policy_scores_, 2);
-      BindPlane(encoder, self.reconstruction_error_, 3);
-      encoder->setBytes(
-        &self.resident_policy_initialize_params_,
-        sizeof(self.resident_policy_initialize_params_), 4);
-      DispatchThreads1d(
-        encoder, std::max(self.block_count_, size_t{5}));
+      self.EncodeResidentPolicyInitialize(backend, encoder);
     }
 
     self.EncodePostprocess(backend, encoder);
@@ -3364,27 +3549,89 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
       });
     self.EncodeBlockReduction(backend, encoder);
 
-    self.resident_policy_update_params_.score_index =
-      static_cast<uint32_t>(iteration);
-    self.resident_policy_update_params_.iteration =
-      static_cast<uint32_t>(iteration);
-    self.resident_policy_update_params_.apply_update =
-      iteration < self.resident_policy_iterations_ ? 1u : 0u;
-    encoder->setComputePipelineState(
-      backend.aq_pipelines_.resident_policy_update.get());
-    BindPlane(encoder, self.resident_quant_field_, 0);
-    BindPlane(encoder, self.resident_policy_initial_field_, 1);
-    BindPlane(encoder, self.block_distance_, 2);
-    BindPlane(encoder, self.score_, 3);
-    BindPlane(encoder, self.resident_policy_scores_, 4);
-    BindPlane(encoder, self.resident_quantizer_params_, 5);
-    BindPlane(encoder, self.reconstruction_error_, 6);
-    encoder->setBytes(
-      &self.resident_policy_update_params_,
-      sizeof(self.resident_policy_update_params_), 7);
-    DispatchThreads1d(encoder, self.block_count_);
+    self.EncodeResidentPolicyUpdate(
+      backend, encoder, static_cast<uint32_t>(iteration));
   }
   self.reset_params_.preserve_error = 0u;
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentPolicyInitialize(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  encoder->setComputePipelineState(
+    backend.aq_pipelines_.resident_policy_initialize.get());
+  BindPlane(encoder, resident_quant_field_, 0);
+  BindPlane(encoder, resident_policy_initial_field_, 1);
+  BindPlane(encoder, resident_policy_scores_, 2);
+  BindPlane(encoder, reconstruction_error_, 3);
+  encoder->setBytes(
+    &resident_policy_initialize_params_,
+    sizeof(resident_policy_initialize_params_), 4);
+  DispatchThreads1d(encoder, std::max(block_count_, size_t{5}));
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentPolicyUpdate(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    uint32_t iteration) {
+  resident_policy_update_params_.score_index = iteration;
+  resident_policy_update_params_.iteration = iteration;
+  resident_policy_update_params_.apply_update =
+    iteration < resident_policy_iterations_ ? 1u : 0u;
+  encoder->setComputePipelineState(
+    backend.aq_pipelines_.resident_policy_update.get());
+  BindPlane(encoder, resident_quant_field_, 0);
+  BindPlane(encoder, resident_policy_initial_field_, 1);
+  BindPlane(encoder, block_distance_, 2);
+  BindPlane(encoder, score_, 3);
+  BindPlane(encoder, resident_policy_scores_, 4);
+  BindPlane(encoder, resident_quantizer_params_, 5);
+  BindPlane(encoder, reconstruction_error_, 6);
+  encoder->setBytes(
+    &resident_policy_update_params_,
+    sizeof(resident_policy_update_params_), 7);
+  DispatchThreads1d(encoder, block_count_);
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    const void* context) {
+  auto& stage = *static_cast<const ResidentProfileStageContext*>(context);
+  MetalPreparedAqEvaluation& self = *stage.self;
+  switch (stage.stage) {
+    case ResidentProfileStage::kReconstruction:
+      self.reset_params_.preserve_error = stage.iteration == 0 ? 0u : 1u;
+      EncodeReconstructionSubmission(backend, encoder, &self);
+      break;
+    case ResidentProfileStage::kPolicyInitialize:
+      self.EncodeResidentPolicyInitialize(backend, encoder);
+      break;
+    case ResidentProfileStage::kGaborish:
+      self.EncodeGaborish(backend, encoder);
+      break;
+    case ResidentProfileStage::kEpf:
+      self.EncodeEpfPass(backend, encoder, stage.epf_pass);
+      break;
+    case ResidentProfileStage::kOpsinToLinear:
+      self.EncodeOpsinToLinear(backend, encoder);
+      break;
+    case ResidentProfileStage::kButteraugli:
+      EncodePreparedMetalButteraugliProfileStage(
+        *self.butteraugli_, encoder,
+        {
+          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                     self.reconstructed_linear_[1],
+                                     self.reconstructed_linear_[2]}}},
+          .distance_map = self.distance_map_,
+          .score = self.score_,
+        },
+        stage.butteraugli_stage);
+      break;
+    case ResidentProfileStage::kBlockReduction:
+      self.EncodeBlockReduction(backend, encoder);
+      break;
+    case ResidentProfileStage::kPolicyUpdate:
+      self.EncodeResidentPolicyUpdate(backend, encoder, stage.iteration);
+      break;
+  }
 }
 
 Status CreateAqPipelines(
@@ -3688,3 +3935,5 @@ Status ValidateMetalAqGeometryForTesting(
 }
 
 }  // namespace gjxl::metal_internal
+
+#undef setComputePipelineState

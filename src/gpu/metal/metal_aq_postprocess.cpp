@@ -16,6 +16,10 @@
 #include <type_traits>
 #include <utility>
 
+#define setComputePipelineState(state)                                    \
+  setComputePipelineState(state);                                         \
+  ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
+
 namespace gjxl::metal_internal {
 namespace {
 
@@ -121,38 +125,57 @@ MetalPreparedAqEvaluation::FinalFilteredImage() const noexcept {
 
 void MetalPreparedAqEvaluation::EncodePostprocess(
     MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const {
-  std::array<DevicePlaneView, 3> current = reconstructed_;
-  size_t filter_stage = 0;
-
   if (options_.profile.loop_filter.gaborish) {
-    const std::array<DevicePlaneView, 3> output = filter_scratch_[0];
-    encoder->setComputePipelineState(backend.aq_pipelines_.gaborish.get());
-    BindImage(encoder, current, 0);
-    BindImage(encoder, output, 3);
-    BindPlane(encoder, reconstruction_error_, 6);
-    encoder->setBytes(&gaborish_params_, sizeof(gaborish_params_), 7);
-    MetalBackend::DispatchPlane(encoder, source_extent_);
-    current = output;
-    ++filter_stage;
+    EncodeGaborish(backend, encoder);
   }
 
   const uint32_t iterations =
     options_.profile.loop_filter.epf_options.iterations;
   const uint32_t first_pass = iterations == 3 ? 0 : 1;
   for (uint32_t pass = first_pass; pass < first_pass + iterations; ++pass) {
-    const size_t scratch_index = filter_stage % 2;
-    const std::array<DevicePlaneView, 3> output =
-        filter_scratch_[scratch_index];
-    encoder->setComputePipelineState(backend.aq_pipelines_.epf.get());
-    BindImage(encoder, current, 0);
-    BindPlane(encoder, inverse_sigma_, 3);
-    BindImage(encoder, output, 4);
-    BindPlane(encoder, reconstruction_error_, 7);
-    encoder->setBytes(&epf_params_[pass], sizeof(epf_params_[pass]), 8);
-    MetalBackend::DispatchPlane(encoder, source_extent_);
-    current = output;
-    ++filter_stage;
+    EncodeEpfPass(backend, encoder, pass);
   }
+
+  EncodeOpsinToLinear(backend, encoder);
+}
+
+void MetalPreparedAqEvaluation::EncodeGaborish(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  const std::array<DevicePlaneView, 3> output = filter_scratch_[0];
+  encoder->setComputePipelineState(backend.aq_pipelines_.gaborish.get());
+  BindImage(encoder, reconstructed_, 0);
+  BindImage(encoder, output, 3);
+  BindPlane(encoder, reconstruction_error_, 6);
+  encoder->setBytes(&gaborish_params_, sizeof(gaborish_params_), 7);
+  MetalBackend::DispatchPlane(encoder, source_extent_);
+}
+
+void MetalPreparedAqEvaluation::EncodeEpfPass(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    uint32_t pass) const {
+  const uint32_t iterations =
+    options_.profile.loop_filter.epf_options.iterations;
+  const uint32_t first_pass = iterations == 3 ? 0 : 1;
+  const size_t filter_stage =
+    static_cast<size_t>(options_.profile.loop_filter.gaborish) +
+    static_cast<size_t>(pass - first_pass);
+  const std::array<DevicePlaneView, 3> current = filter_stage == 0
+    ? reconstructed_
+    : filter_scratch_[(filter_stage - 1) % 2];
+  const std::array<DevicePlaneView, 3> output =
+    filter_scratch_[filter_stage % 2];
+  encoder->setComputePipelineState(backend.aq_pipelines_.epf.get());
+  BindImage(encoder, current, 0);
+  BindPlane(encoder, inverse_sigma_, 3);
+  BindImage(encoder, output, 4);
+  BindPlane(encoder, reconstruction_error_, 7);
+  encoder->setBytes(&epf_params_[pass], sizeof(epf_params_[pass]), 8);
+  MetalBackend::DispatchPlane(encoder, source_extent_);
+}
+
+void MetalPreparedAqEvaluation::EncodeOpsinToLinear(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  const std::array<DevicePlaneView, 3> current = FinalFilteredImage();
 
   encoder->setComputePipelineState(backend.aq_pipelines_.opsin_to_linear.get());
   BindImage(encoder, current, 0);
@@ -418,3 +441,5 @@ GetMetalAqPostprocessPlanForTesting(PreparedAqEvaluation &prepared,
 }
 
 } // namespace gjxl::metal_internal
+
+#undef setComputePipelineState

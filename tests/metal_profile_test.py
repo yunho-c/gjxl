@@ -51,11 +51,26 @@ class FakeCommandRunner:
             (build_dir / "metal" / "gjxl.metallibsym").write_bytes(b"symbols")
             return
         if Path(command[0]).name == "gjxl_quantization_benchmark":
-            raw_path = Path(command[command.index("--raw-samples") + 1])
-            raw_path.write_text(
-                json.dumps({"schema_version": 1, "workloads": []}),
-                encoding="utf-8",
-            )
+            if "--gpu-profile-output" in command:
+                output = Path(command[command.index("--gpu-profile-output") + 1])
+                output.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "stage",
+                            "gpu_aq": "fully-resident",
+                            "distance": 1.2,
+                            "workloads": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            else:
+                raw_path = Path(command[command.index("--raw-samples") + 1])
+                raw_path.write_text(
+                    json.dumps({"schema_version": 1, "workloads": []}),
+                    encoding="utf-8",
+                )
             return
         if command[:3] == ["xcrun", "xctrace", "record"]:
             if self.mutate_source is not None:
@@ -156,10 +171,15 @@ class MetalProfileTest(unittest.TestCase):
         manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["status"], "complete")
         self.assertFalse(manifest["git"]["source_changed_during_run"])
-        self.assertEqual(len(manifest["commands"]), 5)
+        self.assertEqual(manifest["schema_version"], 2)
+        self.assertEqual(len(manifest["commands"]), 6)
         benchmark = manifest["commands"][2]["command"]
-        trace = manifest["commands"][3]["command"]
+        gpu_profile = manifest["commands"][3]["command"]
+        trace = manifest["commands"][4]["command"]
         self.assertEqual(benchmark[benchmark.index("--validation") + 1], "cpu-metal")
+        self.assertEqual(
+            gpu_profile[gpu_profile.index("--gpu-profile") + 1], "stage"
+        )
         self.assertEqual(trace[trace.index("--validation") + 1], "metal-only")
         self.assertIn("gjxl_metal_profile_symbols", manifest["commands"][1]["command"])
         for artifact in manifest["build_artifacts"].values():
@@ -167,6 +187,56 @@ class MetalProfileTest(unittest.TestCase):
         self.assertTrue((output / "worktree.patch").exists())
         self.assertTrue((output / "index.patch").exists())
         self.assertTrue((output / "untracked-files.json").exists())
+        self.assertTrue((output / "gpu-stage-samples.json").exists())
+        self.assertTrue((output / "gpu-stage-summary.json").exists())
+
+    def test_stage_aggregation_reports_cumulative_medians(self) -> None:
+        payload = {
+            "schema_version": 1,
+            "mode": "stage",
+            "gpu_aq": "fully-resident",
+            "distance": 1.2,
+            "workloads": [
+                {
+                    "name": "fixture",
+                    "source_width": 16,
+                    "source_height": 16,
+                    "samples": [
+                        {
+                            "submissions": [
+                                {
+                                    "command_buffer_gpu_nanoseconds": 100,
+                                    "stages": [
+                                        {
+                                            "stage_id": "aq.epf.pass_1",
+                                            "iteration": 0,
+                                            "gpu_nanoseconds": 20,
+                                            "dispatches": [{}, {}],
+                                        },
+                                        {
+                                            "stage_id": "aq.epf.pass_1",
+                                            "iteration": 1,
+                                            "gpu_nanoseconds": 30,
+                                            "dispatches": [{}, {}],
+                                        },
+                                    ],
+                                }
+                            ]
+                        }
+                    ],
+                }
+            ],
+        }
+
+        summary = metal_profile.aggregate_gpu_stage_samples(payload)
+
+        workload = summary["workloads"][0]
+        self.assertEqual(workload["median_sampled_stage_coverage_percent"], 50)
+        stage = workload["stages"][0]
+        self.assertEqual(stage["median_cumulative_gpu_nanoseconds"], 50)
+        self.assertEqual(stage["median_call_count"], 2)
+        self.assertEqual(stage["median_dispatch_count"], 4)
+        self.assertEqual(stage["median_percent_of_command_buffer_gpu_time"], 50)
 
     def test_trace_failure_preserves_partial_failed_manifest(self) -> None:
         output = self.directory / "failed-artifact"

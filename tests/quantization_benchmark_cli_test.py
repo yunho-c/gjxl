@@ -111,6 +111,43 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(destination.read_text(encoding="utf-8"), "sentinel")
 
+    def test_stage_profile_records_ordered_gpu_intervals_and_dispatches(self) -> None:
+        destination = self.directory / "gpu-stages.json"
+
+        result = self.run_benchmark(
+            "--validation",
+            "metal-only",
+            "--metallib",
+            str(self.metallib),
+            "--gpu-profile",
+            "stage",
+            "--gpu-profile-output",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["schema_version"], 1)
+        self.assertEqual(document["mode"], "stage")
+        sample = document["workloads"][0]["samples"][0]
+        self.assertTrue(sample["capabilities"]["timestamp_counter"])
+        self.assertTrue(sample["capabilities"]["stage_boundary"])
+        submission = sample["submissions"][0]
+        self.assertGreater(submission["command_buffer_gpu_nanoseconds"], 0)
+        stages = submission["stages"]
+        self.assertIn("aq.reconstruction", {stage["stage_id"] for stage in stages})
+        self.assertIn("aq.epf.pass_1", {stage["stage_id"] for stage in stages})
+        self.assertIn(
+            "butteraugli.malta.main", {stage["stage_id"] for stage in stages}
+        )
+        for stage in stages:
+            self.assertGreaterEqual(stage["end_timestamp"], stage["begin_timestamp"])
+            self.assertEqual(
+                stage["gpu_nanoseconds"],
+                stage["end_timestamp"] - stage["begin_timestamp"],
+            )
+            self.assertTrue(stage["dispatches"])
+
     def test_metal_only_validation_rejects_other_scopes(self) -> None:
         result = subprocess.run(
             [

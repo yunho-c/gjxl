@@ -21,6 +21,10 @@
 #include "core/quantizer.h"
 #include "gpu/ops/primitives.h"
 
+#define setComputePipelineState(state)                                    \
+  setComputePipelineState(state);                                         \
+  ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
+
 namespace gjxl::metal_internal {
 namespace {
 
@@ -58,13 +62,15 @@ void BindPlane(MTL::ComputeCommandEncoder *encoder, DevicePlaneView plane,
 void DispatchThreads1d(MTL::ComputeCommandEncoder *encoder,
                        size_t thread_count) {
 
-  encoder->dispatchThreads(
+  DispatchMetalThreads(
+      encoder,
       MTL::Size(static_cast<NS::UInteger>(thread_count), 1, 1),
       MTL::Size(kAqThreadCount, 1, 1));
 }
 
 void DispatchThreads2d(MTL::ComputeCommandEncoder* encoder, Extent2D extent) {
-  encoder->dispatchThreads(
+  DispatchMetalThreads(
+      encoder,
       MTL::Size(static_cast<NS::UInteger>(extent.width),
                 static_cast<NS::UInteger>(extent.height), 1),
       MTL::Size(8, 8, 1));
@@ -198,7 +204,8 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
                   ? self.resident_quantizer_params_
                   : self.raw_quant_,
                 14);
-      encoder->dispatchThreadgroups(
+      DispatchMetalThreadgroups(
+          encoder,
           MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
           MTL::Size(kAqThreadCount, 1, 1));
     }
@@ -424,7 +431,8 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
     BindPlane(encoder, self.quantized_dc_, 7);
     BindPlane(encoder, self.reconstruction_error_, 8);
     encoder->setBytes(&params, sizeof(params), 9);
-    encoder->dispatchThreadgroups(
+    DispatchMetalThreadgroups(
+        encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
         MTL::Size(kAqThreadCount, 1, 1));
   }
@@ -1548,3 +1556,5 @@ Status RunMetalAqAdjustmentProbeForTesting(
 }
 
 } // namespace gjxl::metal_internal
+
+#undef setComputePipelineState

@@ -23,6 +23,7 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/adaptive_quantization_profile_internal.h"
 
 namespace gjxl {
 namespace {
@@ -404,7 +405,16 @@ Status RunGpuAdaptiveQuantizationImpl(
   GpuAdaptiveQuantizationPolicyOutput* bounded_output,
   AdaptiveQuantizationOutput* full_output,
   adaptive_quantization_gpu_internal::AdaptiveQuantizationMaterialization
-    materialization) {
+    materialization,
+  gpu_profile_internal::GpuProfilingMode profiling_mode,
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+
+  const bool profiling =
+    profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
+  if (profiling != (gpu_profile != nullptr)) {
+    return Status::InvalidArgument(
+      "GPU adaptive-quantization profiling request is invalid");
+  }
 
   Status status = ValidateMode(mode);
   if (status.ok()) {
@@ -612,16 +622,26 @@ Status RunGpuAdaptiveQuantizationImpl(
         }
         fused_output.frame = &fused_frame;
       }
-      status = prepared->EvaluateResidentButteraugliPolicy(
-        {
+      const AqResidentButteraugliPolicyInput resident_input{
           .adjusted_initial_quant_field = policy_initial,
           .quant_dc = setup.quant_dc,
           .butteraugli_target = options.butteraugli_target,
           .lower_bound = setup.lower_bound,
           .upper_bound = setup.upper_bound,
           .iterations = options.iterations,
-        },
-        fused_output);
+      };
+      if (profiling) {
+        auto* profiler = dynamic_cast<
+          gpu_profile_internal::PreparedAqEvaluationProfiler*>(prepared);
+        status = profiler == nullptr
+          ? Status::Unavailable(
+              "Prepared AQ evaluator does not support GPU profiling")
+          : profiler->EvaluateResidentButteraugliPolicyProfiled(
+              resident_input, fused_output, profiling_mode, gpu_profile);
+      } else {
+        status = prepared->EvaluateResidentButteraugliPolicy(
+          resident_input, fused_output);
+      }
       if (status.ok()) {
         if (full_output == nullptr) {
           CopyContiguousPlane(
@@ -986,7 +1006,7 @@ Status RunGpuAdaptiveQuantizationPolicy(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
     epf_sharpness, options,
     GpuAdaptiveQuantizationMode::kExactCoefficients, nullptr, &output,
-    nullptr, {});
+    nullptr, {}, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 Status RunGpuAdaptiveQuantizationPolicy(
@@ -1002,7 +1022,8 @@ Status RunGpuAdaptiveQuantizationPolicy(
 
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, mode, nullptr, &output, nullptr, {});
+    epf_sharpness, options, mode, nullptr, &output, nullptr, {},
+    gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 Status RunGpuAdaptiveQuantization(
@@ -1019,7 +1040,7 @@ Status RunGpuAdaptiveQuantization(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
     epf_sharpness, options,
     GpuAdaptiveQuantizationMode::kExactCoefficients, nullptr, nullptr,
-    &output, {});
+    &output, {}, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 Status RunGpuAdaptiveQuantization(
@@ -1035,7 +1056,8 @@ Status RunGpuAdaptiveQuantization(
 
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, mode, nullptr, nullptr, &output, {});
+    epf_sharpness, options, mode, nullptr, nullptr, &output, {},
+    gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 Status adaptive_quantization_gpu_internal::
@@ -1059,7 +1081,39 @@ RunPreparedGpuAdaptiveQuantization(
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
     epf_sharpness, options, mode, prepared, nullptr, &output,
-    materialization);
+    materialization, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    nullptr);
+}
+
+Status adaptive_quantization_gpu_internal::
+RunPreparedGpuAdaptiveQuantizationProfiled(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationMode mode,
+  PreparedAdaptiveQuantization* prepared,
+  AdaptiveQuantizationOutput output,
+  AdaptiveQuantizationMaterialization materialization,
+  gpu_profile_internal::GpuProfilingMode profiling_mode,
+  gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  if (prepared == nullptr) {
+    return Status::InvalidArgument(
+      "Reusable GPU adaptive-quantization state is null");
+  }
+  if (mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+      mode != GpuAdaptiveQuantizationMode::kThroughput) {
+    return Status::InvalidArgument(
+      "GPU execution profiling requires resident adaptive quantization");
+  }
+  return RunGpuAdaptiveQuantizationImpl(
+    gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
+    epf_sharpness, options, mode, prepared, nullptr, &output,
+    materialization, profiling_mode, profile);
 }
 
 }  // namespace gjxl

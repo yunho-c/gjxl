@@ -12,6 +12,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import time
@@ -352,6 +353,19 @@ def make_commands(
             "gjxl_metal_profile_symbols",
         ],
         "benchmark": benchmark_command,
+        "gpu_profile": [
+            *common,
+            "--validation",
+            "metal-only",
+            "--warmups",
+            str(args.warmups),
+            "--samples",
+            str(args.samples),
+            "--gpu-profile",
+            "stage",
+            "--gpu-profile-output",
+            str(artifact_dir / "gpu-stage-samples.json"),
+        ],
         "trace": [
             "xcrun",
             "xctrace",
@@ -377,6 +391,100 @@ def make_commands(
             "--output",
             str(artifact_dir / "trace-toc.xml"),
         ],
+    }
+
+
+def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
+    workloads: list[dict[str, Any]] = []
+    for workload in payload["workloads"]:
+        per_stage: dict[str, list[dict[str, float]]] = {}
+        per_iteration: dict[tuple[str, int], list[dict[str, float]]] = {}
+        coverage_percent: list[float] = []
+        for sample in workload["samples"]:
+            total_gpu = sum(
+                submission["command_buffer_gpu_nanoseconds"]
+                for submission in sample["submissions"]
+            )
+            stage_totals: dict[str, dict[str, float]] = {}
+            iteration_totals: dict[tuple[str, int], dict[str, float]] = {}
+            sampled_gpu = 0
+            for submission in sample["submissions"]:
+                for stage in submission["stages"]:
+                    duration = stage["gpu_nanoseconds"]
+                    sampled_gpu += duration
+                    stage_entry = stage_totals.setdefault(
+                        stage["stage_id"],
+                        {"duration": 0.0, "calls": 0.0, "dispatches": 0.0},
+                    )
+                    stage_entry["duration"] += duration
+                    stage_entry["calls"] += 1
+                    stage_entry["dispatches"] += len(stage["dispatches"])
+                    key = (stage["stage_id"], stage["iteration"])
+                    iteration_entry = iteration_totals.setdefault(
+                        key,
+                        {"duration": 0.0, "calls": 0.0, "dispatches": 0.0},
+                    )
+                    iteration_entry["duration"] += duration
+                    iteration_entry["calls"] += 1
+                    iteration_entry["dispatches"] += len(stage["dispatches"])
+            for stage_id, values in stage_totals.items():
+                values["percent"] = (
+                    100.0 * values["duration"] / total_gpu if total_gpu else 0.0
+                )
+                per_stage.setdefault(stage_id, []).append(values)
+            for key, values in iteration_totals.items():
+                values["percent"] = (
+                    100.0 * values["duration"] / total_gpu if total_gpu else 0.0
+                )
+                per_iteration.setdefault(key, []).append(values)
+            coverage_percent.append(
+                100.0 * sampled_gpu / total_gpu if total_gpu else 0.0
+            )
+
+        def summarize(values: list[dict[str, float]]) -> dict[str, Any]:
+            return {
+                "median_cumulative_gpu_nanoseconds": int(
+                    statistics.median(value["duration"] for value in values)
+                ),
+                "median_call_count": statistics.median(
+                    value["calls"] for value in values
+                ),
+                "median_dispatch_count": statistics.median(
+                    value["dispatches"] for value in values
+                ),
+                "median_percent_of_command_buffer_gpu_time": statistics.median(
+                    value["percent"] for value in values
+                ),
+            }
+
+        stages = [
+            {"stage_id": stage_id, **summarize(values)}
+            for stage_id, values in sorted(per_stage.items())
+        ]
+        iterations = [
+            {"stage_id": key[0], "iteration": key[1], **summarize(values)}
+            for key, values in sorted(per_iteration.items())
+        ]
+        workloads.append(
+            {
+                "name": workload["name"],
+                "source_width": workload["source_width"],
+                "source_height": workload["source_height"],
+                "sample_count": len(workload["samples"]),
+                "median_sampled_stage_coverage_percent": statistics.median(
+                    coverage_percent
+                ),
+                "stages": stages,
+                "iterations": iterations,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "source_schema_version": payload["schema_version"],
+        "mode": payload["mode"],
+        "gpu_aq": payload["gpu_aq"],
+        "distance": payload["distance"],
+        "workloads": workloads,
     }
 
 
@@ -453,6 +561,7 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_arguments(argv)
+    gpu_stage_enabled = args.gpu_aq in ("fully-resident", "throughput")
     repo = args.repo.resolve()
     if platform.system() != "Darwin":
         print("Metal profiling requires macOS", file=sys.stderr)
@@ -495,7 +604,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     started_at = utc_now()
     commands: list[dict[str, Any]] = []
     manifest: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "running",
         "started_at": started_at,
         "artifact_directory": str(artifact_dir),
@@ -510,6 +619,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "cmake_build_type": "Release",
             "cmake_generator": "Ninja",
             "metal_trace_template": "Metal System Trace",
+            "gpu_diagnostic_profile": (
+                "stage" if gpu_stage_enabled else "unsupported-for-mode"
+            ),
         },
         "environment": {
             name: os.environ[name]
@@ -547,6 +659,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             cwd=repo,
             log_path=artifact_dir / "benchmark.stdout",
         )
+        if gpu_stage_enabled:
+            runner.run(
+                commands_by_phase["gpu_profile"],
+                cwd=repo,
+                log_path=artifact_dir / "gpu-stage-profile.stdout",
+            )
+            gpu_stage_payload = json.loads(
+                (artifact_dir / "gpu-stage-samples.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            atomic_write_json(
+                artifact_dir / "gpu-stage-summary.json",
+                aggregate_gpu_stage_samples(gpu_stage_payload),
+            )
         runner.run(
             commands_by_phase["trace"],
             cwd=repo,
@@ -557,17 +684,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             cwd=repo,
             log_path=artifact_dir / "xctrace-export.log",
         )
-        for path in (
+        expected_outputs = [
             artifact_dir / "raw-samples.json",
             artifact_dir / "trace-sample.json",
             artifact_dir / "capture.trace",
             artifact_dir / "trace-toc.xml",
             artifact_dir / "trace.stdout",
-        ):
+        ]
+        if gpu_stage_enabled:
+            expected_outputs.extend(
+                (
+                    artifact_dir / "gpu-stage-samples.json",
+                    artifact_dir / "gpu-stage-summary.json",
+                )
+            )
+        for path in expected_outputs:
             if not path.exists() or (path.is_file() and path.stat().st_size == 0):
                 raise RuntimeError(f"Expected profiling output is missing: {path}")
         json.loads((artifact_dir / "raw-samples.json").read_text(encoding="utf-8"))
         json.loads((artifact_dir / "trace-sample.json").read_text(encoding="utf-8"))
+        if gpu_stage_enabled:
+            json.loads(
+                (artifact_dir / "gpu-stage-samples.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            json.loads(
+                (artifact_dir / "gpu-stage-summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
     except (OSError, RuntimeError, json.JSONDecodeError) as error:
         failure = str(error)
     finally:

@@ -20,6 +20,7 @@
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/metal_butteraugli_encoding.h"
 #include "gpu/scratch.h"
 
 namespace gjxl::metal_internal {
@@ -252,7 +253,9 @@ struct AqAnchor {
   size_t index_in_batch = 0;
 };
 
-class MetalPreparedAqEvaluation final : public PreparedAqEvaluation {
+class MetalPreparedAqEvaluation final
+    : public PreparedAqEvaluation,
+      public gpu_profile_internal::PreparedAqEvaluationProfiler {
 public:
   explicit MetalPreparedAqEvaluation(MetalBackend &backend);
   ~MetalPreparedAqEvaluation() override;
@@ -262,6 +265,11 @@ public:
   Status EvaluateResidentButteraugliPolicy(
       AqResidentButteraugliPolicyInput input,
       AqResidentButteraugliPolicyOutput output) override;
+  Status EvaluateResidentButteraugliPolicyProfiled(
+      AqResidentButteraugliPolicyInput input,
+      AqResidentButteraugliPolicyOutput output,
+      gpu_profile_internal::GpuProfilingMode mode,
+      gpu_profile_internal::GpuExecutionProfile* profile) override;
   Status SetInvariantColorCorrelation(
       ConstPlaneI8View y_to_x,
       ConstPlaneI8View y_to_b) override;
@@ -317,6 +325,26 @@ public:
                             bool fail_readback);
 
 private:
+  enum class ResidentProfileStage : uint8_t {
+    kReconstruction,
+    kPolicyInitialize,
+    kGaborish,
+    kEpf,
+    kOpsinToLinear,
+    kButteraugli,
+    kBlockReduction,
+    kPolicyUpdate,
+  };
+
+  struct ResidentProfileStageContext {
+    MetalPreparedAqEvaluation* self = nullptr;
+    ResidentProfileStage stage = ResidentProfileStage::kReconstruction;
+    uint32_t iteration = 0;
+    uint32_t epf_pass = 0;
+    MetalButteraugliProfileStage butteraugli_stage =
+      MetalButteraugliProfileStage::kDistortedPsychoMain;
+  };
+
   enum class State {
     kReady,
     kBusy,
@@ -336,7 +364,8 @@ private:
   Status ReadbackRawQuant();
   Status ReadbackColorCorrelation();
   Status AssembleFrameFromReadback(VarDctEncoderFrame *frame) const;
-  Status WaitForOperation();
+  Status WaitForOperation(
+      gpu_profile_internal::GpuSubmissionProfile* gpu_profile = nullptr);
   void CompleteOperation();
   void Invalidate();
 
@@ -344,6 +373,9 @@ private:
                                          MTL::ComputeCommandEncoder *encoder,
                                          const void *context);
   static void EncodeResidentButteraugliPolicySubmission(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      const void* context);
+  static void EncodeResidentProfileStage(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       const void* context);
   static void EncodeBlockReductionSubmission(
@@ -378,6 +410,23 @@ private:
 
   void EncodePostprocess(MetalBackend &backend,
                          MTL::ComputeCommandEncoder *encoder) const;
+  void EncodeGaborish(MetalBackend& backend,
+                      MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeEpfPass(MetalBackend& backend,
+                     MTL::ComputeCommandEncoder* encoder,
+                     uint32_t pass) const;
+  void EncodeOpsinToLinear(MetalBackend& backend,
+                           MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeResidentPolicyInitialize(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeResidentPolicyUpdate(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      uint32_t iteration);
+  Status EvaluateResidentButteraugliPolicyImpl(
+      AqResidentButteraugliPolicyInput input,
+      AqResidentButteraugliPolicyOutput output,
+      gpu_profile_internal::GpuProfilingMode mode,
+      gpu_profile_internal::GpuExecutionProfile* profile);
   void EncodeBlockReduction(MetalBackend &backend,
                             MTL::ComputeCommandEncoder *encoder) const;
   void EncodeResidentQuantizer(MetalBackend& backend,

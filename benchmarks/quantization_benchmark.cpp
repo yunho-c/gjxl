@@ -126,6 +126,7 @@ struct CommandLineOptions {
   std::string input_path;
   std::string metallib_path;
   std::string raw_samples_path;
+  std::string gpu_profile_path;
   std::string implementation = "simd";
   BenchmarkScope scope = BenchmarkScope::kFull;
   ValidationMode validation = ValidationMode::kCpuMetal;
@@ -134,6 +135,8 @@ struct CommandLineOptions {
   float butteraugli_target = kDefaultButteraugliTarget;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
+  gjxl::gpu_profile_internal::GpuProfilingMode gpu_profiling_mode =
+    gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
 };
 
 struct WorkloadSpec {
@@ -462,6 +465,18 @@ struct FrameCoefficientError {
   throw std::runtime_error("Unknown GPU AQ mode: " + std::string(text));
 }
 
+[[nodiscard]] gjxl::gpu_profile_internal::GpuProfilingMode
+ParseGpuProfilingMode(std::string_view text) {
+  if (text == "stage") {
+    return gjxl::gpu_profile_internal::GpuProfilingMode::kStage;
+  }
+  if (text == "dispatch") {
+    return gjxl::gpu_profile_internal::GpuProfilingMode::kDispatch;
+  }
+  throw std::runtime_error("Unknown GPU profiling mode: " +
+                           std::string(text));
+}
+
 [[nodiscard]] BenchmarkScope ParseBenchmarkScope(std::string_view text) {
   if (text == "full") {
     return BenchmarkScope::kFull;
@@ -543,6 +558,8 @@ struct FrameCoefficientError {
                    "maximum-throughput] "
                    "[--validation cpu-metal|metal-only] "
                    "[--metallib PATH] [--raw-samples PATH] "
+                   "[--gpu-profile stage|dispatch] "
+                   "[--gpu-profile-output PATH] "
                    "[--distance D] [--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
     }
@@ -558,6 +575,10 @@ struct FrameCoefficientError {
       options.metallib_path = value;
     } else if (argument == "--raw-samples") {
       options.raw_samples_path = value;
+    } else if (argument == "--gpu-profile") {
+      options.gpu_profiling_mode = ParseGpuProfilingMode(value);
+    } else if (argument == "--gpu-profile-output") {
+      options.gpu_profile_path = value;
     } else if (argument == "--scope") {
       options.scope = ParseBenchmarkScope(value);
     } else if (argument == "--validation") {
@@ -598,6 +619,26 @@ struct FrameCoefficientError {
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
     throw std::runtime_error(
         "Raw workflow samples require a public-workflow scope");
+  }
+  const bool gpu_profiling = options.gpu_profiling_mode !=
+    gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
+  if (gpu_profiling != !options.gpu_profile_path.empty()) {
+    throw std::runtime_error(
+      "GPU profiling mode and output path must be specified together");
+  }
+  if (gpu_profiling &&
+      (options.scope != BenchmarkScope::kMetalPublicWorkflow ||
+       options.validation != ValidationMode::kMetalOnly ||
+       (options.gpu_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kFullyResident &&
+        options.gpu_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kThroughput))) {
+    throw std::runtime_error(
+      "GPU profiling requires a resident metal-only public workflow");
+  }
+  if (gpu_profiling && !options.raw_samples_path.empty()) {
+    throw std::runtime_error(
+      "GPU profiling output is separate from raw workflow samples");
   }
   return options;
 }
@@ -815,6 +856,17 @@ struct RawWorkflowWorkload {
   std::vector<RawWorkflowSample> samples;
 };
 
+struct RawGpuProfileSample {
+  size_t sample_index = 0;
+  gjxl::gpu_profile_internal::GpuExecutionProfile profile;
+};
+
+struct RawGpuProfileWorkload {
+  std::string workload;
+  gjxl::Extent2D source_extent;
+  std::vector<RawGpuProfileSample> samples;
+};
+
 using WorkflowProfileSamples =
     std::array<std::vector<double>, kWorkflowProfileNames.size()>;
 
@@ -969,6 +1021,148 @@ void WriteRawWorkflowSamples(
       throw std::runtime_error(
           "Could not atomically replace raw-samples output: " +
           rename_error.message());
+    }
+  } catch (...) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    throw;
+  }
+}
+
+[[nodiscard]] std::string_view GpuProfilingModeName(
+    gjxl::gpu_profile_internal::GpuProfilingMode mode) {
+  switch (mode) {
+    case gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled:
+      return "disabled";
+    case gjxl::gpu_profile_internal::GpuProfilingMode::kStage:
+      return "stage";
+    case gjxl::gpu_profile_internal::GpuProfilingMode::kDispatch:
+      return "dispatch";
+  }
+  return "invalid";
+}
+
+void WriteGpuProfileSamples(
+    const std::filesystem::path& destination,
+    const CommandLineOptions& options,
+    const std::vector<RawGpuProfileWorkload>& workloads) {
+  const std::filesystem::path temporary =
+    destination.string() + ".tmp-" + std::to_string(
+      static_cast<unsigned long long>(
+        std::chrono::steady_clock::now().time_since_epoch().count()));
+  try {
+    if (!destination.parent_path().empty()) {
+      std::filesystem::create_directories(destination.parent_path());
+    }
+    std::ofstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
+    output.open(temporary, std::ios::out | std::ios::trunc);
+    output << "{\n"
+           << "  \"schema_version\": 1,\n"
+           << "  \"scope\": \"metal-public-workflow\",\n"
+           << "  \"mode\": \""
+           << GpuProfilingModeName(options.gpu_profiling_mode) << "\",\n"
+           << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
+           << "\",\n"
+           << "  \"distance\": " << std::setprecision(9)
+           << options.butteraugli_target << ",\n"
+           << "  \"warmups\": " << options.warmups << ",\n"
+           << "  \"sample_count\": " << options.samples << ",\n"
+           << "  \"workloads\": [\n";
+    for (size_t workload_index = 0; workload_index < workloads.size();
+         ++workload_index) {
+      const RawGpuProfileWorkload& workload = workloads[workload_index];
+      output << "    {\n"
+             << "      \"name\": \"" << JsonEscape(workload.workload)
+             << "\",\n"
+             << "      \"source_width\": " << workload.source_extent.width
+             << ",\n"
+             << "      \"source_height\": " << workload.source_extent.height
+             << ",\n"
+             << "      \"samples\": [\n";
+      for (size_t sample_index = 0; sample_index < workload.samples.size();
+           ++sample_index) {
+        const RawGpuProfileSample& sample = workload.samples[sample_index];
+        const auto& profile = sample.profile;
+        output << "        {\n"
+               << "          \"sample_index\": " << sample.sample_index
+               << ",\n"
+               << "          \"capabilities\": {"
+               << "\"timestamp_counter\": "
+               << (profile.capabilities.timestamp_counter ? "true" : "false")
+               << ", \"stage_boundary\": "
+               << (profile.capabilities.stage_boundary ? "true" : "false")
+               << ", \"dispatch_boundary\": "
+               << (profile.capabilities.dispatch_boundary ? "true" : "false")
+               << "},\n"
+               << "          \"submissions\": [\n";
+        for (size_t submission_index = 0;
+             submission_index < profile.submissions.size();
+             ++submission_index) {
+          const auto& submission = profile.submissions[submission_index];
+          output << "            {\"submission_index\": "
+                 << submission_index
+                 << ", \"command_buffer_gpu_nanoseconds\": "
+                 << submission.command_buffer_gpu_nanoseconds
+                 << ", \"stages\": [\n";
+          for (size_t stage_index = 0;
+               stage_index < submission.stages.size(); ++stage_index) {
+            const auto& stage = submission.stages[stage_index];
+            output << "              {\"stage_id\": \""
+                   << JsonEscape(stage.stage_id)
+                   << "\", \"iteration\": " << stage.iteration
+                   << ", \"invocation\": " << stage.invocation
+                   << ", \"begin_timestamp\": " << stage.begin_timestamp
+                   << ", \"end_timestamp\": " << stage.end_timestamp
+                   << ", \"gpu_nanoseconds\": " << stage.gpu_nanoseconds
+                   << ", \"dispatches\": [";
+            for (size_t dispatch_index = 0;
+                 dispatch_index < stage.dispatches.size(); ++dispatch_index) {
+              const auto& dispatch = stage.dispatches[dispatch_index];
+              if (dispatch_index != 0) output << ", ";
+              output << "{\"kernel_id\": \""
+                     << JsonEscape(dispatch.kernel_id)
+                     << "\", \"kind\": \""
+                     << (dispatch.kind ==
+                           gjxl::gpu_profile_internal::GpuDispatchKind::kThreads
+                           ? "threads" : "threadgroups")
+                     << "\", \"invocation\": " << dispatch.invocation
+                     << ", \"grid\": [" << dispatch.grid.width << ", "
+                     << dispatch.grid.height << ", " << dispatch.grid.depth
+                     << "], \"threads_per_threadgroup\": ["
+                     << dispatch.threads_per_threadgroup.width << ", "
+                     << dispatch.threads_per_threadgroup.height << ", "
+                     << dispatch.threads_per_threadgroup.depth
+                     << "], \"begin_timestamp\": "
+                     << dispatch.begin_timestamp
+                     << ", \"end_timestamp\": " << dispatch.end_timestamp
+                     << ", \"gpu_nanoseconds\": "
+                     << dispatch.gpu_nanoseconds << '}';
+            }
+            output << "]}";
+            if (stage_index + 1 != submission.stages.size()) output << ',';
+            output << '\n';
+          }
+          output << "            ]}";
+          if (submission_index + 1 != profile.submissions.size()) output << ',';
+          output << '\n';
+        }
+        output << "          ]\n        }";
+        if (sample_index + 1 != workload.samples.size()) output << ',';
+        output << '\n';
+      }
+      output << "      ]\n    }";
+      if (workload_index + 1 != workloads.size()) output << ',';
+      output << '\n';
+    }
+    output << "  ]\n}\n";
+    output.close();
+    std::error_code rename_error;
+    std::filesystem::rename(temporary, destination, rename_error);
+    if (rename_error) {
+      throw std::runtime_error(
+        "Could not atomically replace GPU-profile output: " +
+        rename_error.message());
     }
   } catch (...) {
     std::error_code ignored;
@@ -1319,6 +1513,95 @@ void RunPublicWorkflowOnlyWorkload(
   if (raw_results != nullptr) {
     raw_results->push_back(std::move(raw_workload));
   }
+  *global_sink += sink;
+}
+
+void RunGpuProfileWorkflowWorkload(
+    const WorkloadSpec& spec, size_t warmups, size_t samples,
+    float butteraugli_target,
+    gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
+    gjxl::gpu_profile_internal::GpuProfilingMode profiling_mode,
+    std::string_view input_path, gjxl::GpuBackend& gpu,
+    std::vector<RawGpuProfileWorkload>* results, double* global_sink) {
+  ImageStorage original = !input_path.empty()
+      ? LoadPpm(input_path)
+      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
+  if (!spec.flower && input_path.empty()) {
+    if (spec.workflow_gradient) {
+      FillWorkflowGradient(&original);
+    } else {
+      FillSynthetic(&original);
+    }
+  }
+
+  const gjxl::VarDctEncodingOptions encoding_options{
+    .butteraugli_target = butteraugli_target,
+    .backend = gjxl::VarDctBackendPreference::kMetal,
+    .metal_aq_mode = gpu_aq_mode,
+  };
+  std::vector<uint8_t> expected;
+  gjxl::VarDctEncodingSummary expected_summary;
+  gjxl::codestream_internal::VarDctEncodingProfile host_profile;
+  RequireStatus(
+    "Unprofiled Metal public-workflow validation",
+    gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
+        original.ConstView(), encoding_options, &gpu, true, &expected,
+        &expected_summary, &host_profile));
+  if (expected.size() < 2 || expected[0] != 0xff || expected[1] != 0x0a ||
+      expected_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kMetal) {
+    throw std::runtime_error(
+      "GPU-profile public-workflow validation failed");
+  }
+
+  const auto encode_profiled = [&](
+      std::vector<uint8_t>* bytes,
+      gjxl::VarDctEncodingSummary* summary,
+      gjxl::gpu_profile_internal::GpuExecutionProfile* profile) {
+    gjxl::codestream_internal::VarDctEncodingProfile ignored_host_profile;
+    return gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(
+        original.ConstView(), encoding_options, &gpu, true, profiling_mode,
+        bytes, summary, &ignored_host_profile, profile);
+  };
+
+  std::vector<uint8_t> bytes;
+  gjxl::VarDctEncodingSummary summary;
+  for (size_t warmup = 0; warmup < warmups; ++warmup) {
+    gjxl::gpu_profile_internal::GpuExecutionProfile profile;
+    RequireStatus(
+      "GPU-profile public-workflow warmup",
+      encode_profiled(&bytes, &summary, &profile));
+  }
+
+  RawGpuProfileWorkload workload{
+    .workload = std::string(spec.name),
+    .source_extent = original.extent,
+  };
+  workload.samples.reserve(samples);
+  double sink = 0.0;
+  for (size_t sample = 0; sample < samples; ++sample) {
+    gjxl::gpu_profile_internal::GpuExecutionProfile profile;
+    RequireStatus(
+      "GPU-profile public-workflow sample",
+      encode_profiled(&bytes, &summary, &profile));
+    if (bytes != expected ||
+        summary.execution_backend != gjxl::VarDctExecutionBackend::kMetal ||
+        profile.mode != profiling_mode || profile.submissions.empty()) {
+      throw std::runtime_error(
+        "GPU-profile public-workflow changed the encoded result");
+    }
+    workload.samples.push_back({sample, std::move(profile)});
+    sink += static_cast<double>(bytes.size()) +
+      (summary.score_history.empty() ? 0.0 : summary.score_history.back());
+  }
+  std::cout << "workload " << spec.name << " source="
+            << original.extent.width << 'x' << original.extent.height
+            << " distance=" << butteraugli_target
+            << " gpu_aq=" << GpuAqModeName(gpu_aq_mode)
+            << " scope=gpu-profile samples=" << samples << '\n';
+  results->push_back(std::move(workload));
   *global_sink += sink;
 }
 
@@ -2283,6 +2566,7 @@ int main(int argc, char** argv) {
     std::cout << '\n';
     double sink = 0.0;
     std::vector<RawWorkflowWorkload> raw_results;
+    std::vector<RawGpuProfileWorkload> gpu_profile_results;
     std::vector<RawWorkflowWorkload>* raw_results_pointer =
         options.raw_samples_path.empty() ? nullptr : &raw_results;
     if (!options.input_path.empty()) {
@@ -2292,12 +2576,20 @@ int main(int argc, char** argv) {
             options.butteraugli_target, options.input_path, &sink);
       } else if (options.scope == BenchmarkScope::kPublicWorkflow ||
                  options.scope == BenchmarkScope::kMetalPublicWorkflow) {
-        RunPublicWorkflowOnlyWorkload(
+        if (!options.gpu_profile_path.empty()) {
+          RunGpuProfileWorkflowWorkload(
             {"external_input", {}, false}, options.warmups, options.samples,
             options.butteraugli_target, options.gpu_aq_mode,
-            options.input_path,
-            options.scope == BenchmarkScope::kMetalPublicWorkflow,
-            options.validation, *gpu, raw_results_pointer, &sink);
+            options.gpu_profiling_mode, options.input_path, *gpu,
+            &gpu_profile_results, &sink);
+        } else {
+          RunPublicWorkflowOnlyWorkload(
+              {"external_input", {}, false}, options.warmups, options.samples,
+              options.butteraugli_target, options.gpu_aq_mode,
+              options.input_path,
+              options.scope == BenchmarkScope::kMetalPublicWorkflow,
+              options.validation, *gpu, raw_results_pointer, &sink);
+        }
       } else {
         RunWorkload({"external_input", {}, false}, options.warmups,
                     options.samples, options.butteraugli_target,
@@ -2314,11 +2606,19 @@ int main(int argc, char** argv) {
           } else if (options.scope == BenchmarkScope::kPublicWorkflow ||
                      options.scope ==
                          BenchmarkScope::kMetalPublicWorkflow) {
-            RunPublicWorkflowOnlyWorkload(
+            if (!options.gpu_profile_path.empty()) {
+              RunGpuProfileWorkflowWorkload(
                 workload, options.warmups, options.samples,
-                options.butteraugli_target, options.gpu_aq_mode, {},
-                options.scope == BenchmarkScope::kMetalPublicWorkflow,
-                options.validation, *gpu, raw_results_pointer, &sink);
+                options.butteraugli_target, options.gpu_aq_mode,
+                options.gpu_profiling_mode, {}, *gpu, &gpu_profile_results,
+                &sink);
+            } else {
+              RunPublicWorkflowOnlyWorkload(
+                  workload, options.warmups, options.samples,
+                  options.butteraugli_target, options.gpu_aq_mode, {},
+                  options.scope == BenchmarkScope::kMetalPublicWorkflow,
+                  options.validation, *gpu, raw_results_pointer, &sink);
+            }
           } else if (workload.gpu_complete_aq_only) {
             RunGpuCompleteAqOnlyWorkload(
                 workload, options.warmups, options.samples,
@@ -2333,6 +2633,10 @@ int main(int argc, char** argv) {
     }
     if (!options.raw_samples_path.empty()) {
       WriteRawWorkflowSamples(options.raw_samples_path, options, raw_results);
+    }
+    if (!options.gpu_profile_path.empty()) {
+      WriteGpuProfileSamples(
+        options.gpu_profile_path, options, gpu_profile_results);
     }
     std::cout << "global_sink=" << sink << '\n';
   } catch (const std::exception& error) {

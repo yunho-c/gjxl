@@ -120,6 +120,11 @@ Each artifact contains:
 
 - `raw-samples.json`, with every untraced workflow phase recorded as integer
   nanoseconds for all seven default samples;
+- `gpu-stage-samples.json`, with raw timestamp intervals, stable stage and
+  stage-local dispatch IDs, iteration numbers, dispatch geometry, and device
+  counter-sampling capabilities for fully-resident or throughput AQ;
+- `gpu-stage-summary.json`, with median cumulative time, call and dispatch
+  counts, command-buffer percentage, and per-iteration breakdowns;
 - `capture.trace`, `trace-toc.xml`, `trace.stdout`, and `trace-sample.json` for
   one instrumented Metal sample;
 - build, benchmark, and `xctrace` logs;
@@ -136,12 +141,14 @@ the artifact is preserved as failed and the command exits nonzero. Missing
 tools, failed builds, failed benchmark validation, and failed trace export are
 handled the same way.
 
-Treat `raw-samples.json` as the performance comparison evidence. Metal System
-Trace adds instrumentation overhead, so the trace sample is for attribution
-and scheduling analysis rather than a latency claim. The default Xcode Metal
-System Trace configuration exposes command-buffer and encoder activity, but it
-does not enable GPU counters, Shader Timeline, or project-level per-dispatch
-timers; those remain separate profiling improvements.
+Treat `raw-samples.json` as the performance comparison evidence. The stage
+profile splits the resident command buffer into logical compute encoders, and
+Metal System Trace adds its own instrumentation overhead, so both are for
+attribution rather than latency claims. Dispatch timing can be requested from
+the benchmark with `--gpu-profile dispatch`, but it fails before submission on
+devices such as the Apple M4 Pro that do not expose dispatch-boundary counter
+sampling. The workflow never emulates dispatch timestamps by changing every
+dispatch into a separate encoder.
 
 ## Ordered implementation plan
 

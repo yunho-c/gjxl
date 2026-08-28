@@ -24,9 +24,41 @@
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/butteraugli.h"
+#include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/primitives.h"
 
 namespace gjxl::metal_internal {
+
+class MetalBackend;
+
+using MetalComputeEncodeCallback = void (*)(
+  MetalBackend&,
+  MTL::ComputeCommandEncoder*,
+  const void*);
+
+struct MetalProfiledComputeStage {
+  const char* stage_id = nullptr;
+  uint32_t iteration = 0;
+  uint32_t invocation = 0;
+  MetalComputeEncodeCallback encode = nullptr;
+  const void* context = nullptr;
+};
+
+void DispatchMetalThreads(
+  MTL::ComputeCommandEncoder* encoder,
+  MTL::Size threads_per_grid,
+  MTL::Size threads_per_threadgroup);
+
+void DispatchMetalThreadgroups(
+  MTL::ComputeCommandEncoder* encoder,
+  MTL::Size threadgroups_per_grid,
+  MTL::Size threads_per_threadgroup);
+
+void RegisterMetalComputePipeline(
+  MTL::ComputePipelineState* pipeline,
+  std::string_view kernel_id);
+
+void RecordMetalComputePipelineState(MTL::ComputePipelineState* pipeline);
 
 enum class TransformDirection {
   kForward,
@@ -303,10 +335,7 @@ private:
     std::span<const ValidatedAcStrategyBatch> batches;
   };
 
-  using ComputeEncodeCallback = void (*)(
-    MetalBackend&,
-    MTL::ComputeCommandEncoder*,
-    const void*);
+  using ComputeEncodeCallback = MetalComputeEncodeCallback;
 
   static MetalBuffer* AsMetalBuffer(DeviceBuffer& buffer);
   static const MetalBuffer* AsMetalBuffer(const DeviceBuffer& buffer);
@@ -349,6 +378,15 @@ private:
     const char* label,
     ComputeEncodeCallback encode,
     const void* context,
+    std::unique_ptr<GpuSubmission>* submission);
+
+  [[nodiscard]] gpu_profile_internal::GpuProfilingCapabilities
+  ProfilingCapabilities() const;
+
+  Status SubmitComputeProfiled(
+    const char* label,
+    std::span<const MetalProfiledComputeStage> stages,
+    gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<GpuSubmission>* submission);
 
   Status ValidateTransformBatch(
@@ -477,6 +515,10 @@ Status CreateAqPipelines(
 [[nodiscard]] Status GetMetalSubmissionGpuDuration(
   GpuSubmission& submission,
   uint64_t* nanoseconds);
+
+[[nodiscard]] Status GetMetalSubmissionGpuProfile(
+  GpuSubmission& submission,
+  gpu_profile_internal::GpuSubmissionProfile* profile);
 
 Status CreateButteraugliPipelines(
   MTL::Device* device,

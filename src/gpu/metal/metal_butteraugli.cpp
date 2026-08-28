@@ -23,6 +23,10 @@
 #include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/scratch.h"
 
+#define setComputePipelineState(state)                                    \
+  setComputePipelineState(state);                                         \
+  ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
+
 namespace gjxl::metal_internal {
 namespace {
 
@@ -251,6 +255,7 @@ static_assert(sizeof(ReductionParams) == 12);
   if (!pipeline) {
     return metal::ErrorToStatus(error, "newComputePipelineState");
   }
+  RegisterMetalComputePipeline(pipeline.get(), function_name);
   *out = std::move(pipeline);
   return Status::Ok();
 }
@@ -526,7 +531,21 @@ public:
     EncodeComparison(encoder, descriptor);
   }
 
+  void EncodeValidatedComparisonProfileStage(
+    MTL::ComputeCommandEncoder* encoder,
+    const DeviceButteraugliComparisonDescriptor& descriptor,
+    MetalButteraugliProfileStage stage) {
+
+    EncodeComparisonProfileStage(encoder, descriptor, stage);
+  }
+
 private:
+  enum class DifferenceProfileStage : uint8_t {
+    kAll,
+    kMalta,
+    kL2,
+    kMaskAndFinal,
+  };
   struct PreparationContext {
     MetalPreparedDeviceButteraugli* prepared = nullptr;
   };
@@ -960,11 +979,14 @@ private:
     const PsychoPlanes& distorted,
     ConstDevicePlaneView mask_blurred_reference,
     Extent2D scale_extent,
-    DevicePlaneView output) {
+    DevicePlaneView output,
+    DifferenceProfileStage profile_stage = DifferenceProfileStage::kAll) {
 
     const float asymmetry = options().hf_asymmetry;
     const float sqrt_asymmetry = std::sqrt(asymmetry);
-    for (size_t stage_index : kMaltaAccumulationOrder) {
+    if (profile_stage == DifferenceProfileStage::kAll ||
+        profile_stage == DifferenceProfileStage::kMalta) {
+      for (size_t stage_index : kMaltaAccumulationOrder) {
       const double weight_up = stage_index < 2
         ? kMaltaWeights[stage_index]
         : stage_index < 4
@@ -1031,16 +1053,20 @@ private:
       Bind(encoder, Handle(metal_, accumulation), accumulation.offset_bytes, 2);
       encoder->setBytes(&response_params, sizeof(response_params), 3);
       metal_.DispatchPlane(encoder, scale_extent);
-      MaybeCapture(
-        encoder,
-        static_cast<MetalButteraugliStage>(
-          static_cast<size_t>(
-            MetalButteraugliStage::kMaltaMediumFrequencyY) + stage_index),
-        AsConst(response),
-        scale_extent);
+        MaybeCapture(
+          encoder,
+          static_cast<MetalButteraugliStage>(
+            static_cast<size_t>(
+              MetalButteraugliStage::kMaltaMediumFrequencyY) + stage_index),
+          AsConst(response),
+          scale_extent);
+      }
     }
+    if (profile_stage == DifferenceProfileStage::kMalta) return;
 
-    const DifferenceParams difference_params{
+    if (profile_stage == DifferenceProfileStage::kAll ||
+        profile_stage == DifferenceProfileStage::kL2) {
+      const DifferenceParams difference_params{
       static_cast<uint32_t>(scale_extent.width),
       static_cast<uint32_t>(scale_extent.height),
       static_cast<uint32_t>(reference[0].row_stride),
@@ -1048,23 +1074,25 @@ private:
       static_cast<uint32_t>(Plane(kAc, scale_extent).row_stride),
       asymmetry,
     };
-    encoder->setComputePipelineState(metal_.butteraugli_pipelines_.l2.get());
-    for (size_t index = 0; index < 8; ++index) {
-      DevicePlaneView plane = reference[index];
-      Bind(encoder, Handle(metal_, plane), plane.offset_bytes, index);
+      encoder->setComputePipelineState(metal_.butteraugli_pipelines_.l2.get());
+      for (size_t index = 0; index < 8; ++index) {
+        DevicePlaneView plane = reference[index];
+        Bind(encoder, Handle(metal_, plane), plane.offset_bytes, index);
+      }
+      for (size_t index = 0; index < 8; ++index) {
+        DevicePlaneView plane = distorted[index];
+        Bind(encoder, Handle(metal_, plane), plane.offset_bytes, 8 + index);
+      }
+      for (size_t channel = 0; channel < 3; ++channel) {
+        DevicePlaneView ac = Plane(kAc + channel, scale_extent);
+        DevicePlaneView dc = Plane(kDc + channel, scale_extent);
+        Bind(encoder, Handle(metal_, ac), ac.offset_bytes, 16 + channel);
+        Bind(encoder, Handle(metal_, dc), dc.offset_bytes, 19 + channel);
+      }
+      encoder->setBytes(&difference_params, sizeof(difference_params), 22);
+      metal_.DispatchPlane(encoder, scale_extent);
     }
-    for (size_t index = 0; index < 8; ++index) {
-      DevicePlaneView plane = distorted[index];
-      Bind(encoder, Handle(metal_, plane), plane.offset_bytes, 8 + index);
-    }
-    for (size_t channel = 0; channel < 3; ++channel) {
-      DevicePlaneView ac = Plane(kAc + channel, scale_extent);
-      DevicePlaneView dc = Plane(kDc + channel, scale_extent);
-      Bind(encoder, Handle(metal_, ac), ac.offset_bytes, 16 + channel);
-      Bind(encoder, Handle(metal_, dc), dc.offset_bytes, 19 + channel);
-    }
-    encoder->setBytes(&difference_params, sizeof(difference_params), 22);
-    metal_.DispatchPlane(encoder, scale_extent);
+    if (profile_stage == DifferenceProfileStage::kL2) return;
 
     DevicePlaneView precomputed = Plane(kWork, scale_extent);
     DevicePlaneView mask = Plane(kWork + 3, scale_extent);
@@ -1225,7 +1253,8 @@ private:
     Bind(encoder, Handle(metal_, input), input.offset_bytes, 0);
     Bind(encoder, Handle(metal_, output), output.offset_bytes, 1);
     encoder->setBytes(&params, sizeof(params), 2);
-    encoder->dispatchThreadgroups(
+    DispatchMetalThreadgroups(
+      encoder,
       MTL::Size(static_cast<NS::UInteger>(output_count), 1, 1),
       MTL::Size(kReductionWidth, 1, 1));
   }
@@ -1382,6 +1411,120 @@ private:
       encoder, descriptor.distance_map, descriptor.score);
   }
 
+  void EncodeComparisonProfileStage(
+    MTL::ComputeCommandEncoder* encoder,
+    const DeviceButteraugliComparisonDescriptor& descriptor,
+    MetalButteraugliProfileStage stage) {
+
+    const Extent2D requested = extent();
+    const PsychoPlanes reference_main =
+      PsychoSlots(kPsychoReference, working_extent_);
+    const PsychoPlanes distorted_main =
+      PsychoSlots(kPsychoDistorted, working_extent_);
+
+    if (stage == MetalButteraugliProfileStage::kDistortedPsychoMain) {
+      if (expanded_) {
+        EncodeExpand(
+          encoder, descriptor.distorted_linear_rgb, requested,
+          working_extent_);
+        EncodePsychoImage(
+          encoder, ImageSlots(working_extent_), distorted_main,
+          working_extent_, false);
+      } else {
+        EncodePsychoImage(
+          encoder, descriptor.distorted_linear_rgb, distorted_main,
+          requested, false);
+      }
+      return;
+    }
+
+    if (stage == MetalButteraugliProfileStage::kDistortedPsychoSub) {
+      if (multiscale_) {
+        EncodeSubsample(
+          encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+        EncodePsychoImage(
+          encoder, ImageSlots(sub_extent_), distorted_main, sub_extent_,
+          false);
+      }
+      return;
+    }
+
+    if (stage == MetalButteraugliProfileStage::kScoreReduction) {
+      EncodeMaximumReduction(
+        encoder, descriptor.distance_map, descriptor.score);
+      return;
+    }
+
+    const bool sub_stage =
+      stage == MetalButteraugliProfileStage::kMaltaSub ||
+      stage == MetalButteraugliProfileStage::kL2Sub ||
+      stage == MetalButteraugliProfileStage::kMaskAndFinalSub;
+    const DifferenceProfileStage difference_stage =
+      stage == MetalButteraugliProfileStage::kMaltaMain ||
+          stage == MetalButteraugliProfileStage::kMaltaSub
+        ? DifferenceProfileStage::kMalta
+        : stage == MetalButteraugliProfileStage::kL2Main ||
+              stage == MetalButteraugliProfileStage::kL2Sub
+          ? DifferenceProfileStage::kL2
+          : DifferenceProfileStage::kMaskAndFinal;
+    if (sub_stage) {
+      if (!multiscale_) return;
+      DevicePlaneView sub_map = Plane(kFinalStaging, sub_extent_);
+      EncodeDifference(
+        encoder, ReferenceSubSlots(), distorted_main, {}, sub_extent_, sub_map,
+        difference_stage);
+      if (stage == MetalButteraugliProfileStage::kMaskAndFinalSub) {
+        const ComposeParams params{
+          static_cast<uint32_t>(requested.width),
+          static_cast<uint32_t>(requested.height),
+          static_cast<uint32_t>(descriptor.distance_map.row_stride),
+          static_cast<uint32_t>(sub_map.row_stride),
+          static_cast<uint32_t>(descriptor.distance_map.row_stride),
+        };
+        encoder->setComputePipelineState(
+          metal_.butteraugli_pipelines_.compose.get());
+        Bind(encoder, Handle(metal_, descriptor.distance_map),
+             descriptor.distance_map.offset_bytes, 0);
+        Bind(encoder, Handle(metal_, sub_map), sub_map.offset_bytes, 1);
+        Bind(encoder, Handle(metal_, descriptor.distance_map),
+             descriptor.distance_map.offset_bytes, 2);
+        encoder->setBytes(&params, sizeof(params), 3);
+        metal_.DispatchPlane(encoder, requested);
+      }
+      return;
+    }
+    if (expanded_) {
+      DevicePlaneView staging = Plane(kFinalStaging, working_extent_);
+      EncodeDifference(
+        encoder, reference_main, distorted_main,
+        AsConst(Plane(kReferenceMask, working_extent_)), working_extent_,
+        staging, difference_stage);
+      if (stage == MetalButteraugliProfileStage::kMaskAndFinalMain) {
+        const CropParams params{
+          static_cast<uint32_t>(requested.width),
+          static_cast<uint32_t>(requested.height),
+          static_cast<uint32_t>(staging.row_stride),
+          static_cast<uint32_t>(descriptor.distance_map.row_stride),
+          static_cast<uint32_t>(xborder_),
+          static_cast<uint32_t>(yborder_),
+        };
+        encoder->setComputePipelineState(
+          metal_.butteraugli_pipelines_.crop.get());
+        Bind(encoder, Handle(metal_, staging), staging.offset_bytes, 0);
+        Bind(encoder, Handle(metal_, descriptor.distance_map),
+             descriptor.distance_map.offset_bytes, 1);
+        encoder->setBytes(&params, sizeof(params), 2);
+        metal_.DispatchPlane(encoder, requested);
+      }
+      return;
+    }
+
+    EncodeDifference(
+      encoder, reference_main, distorted_main,
+      AsConst(Plane(kReferenceMask, requested)), requested,
+      descriptor.distance_map, difference_stage);
+  }
+
   MetalBackend& metal_;
   DeviceScratchArena scratch_;
   std::array<DevicePlaneView, kWorkingPlaneCount> planes_;
@@ -1422,6 +1565,18 @@ void EncodePreparedMetalButteraugli(
   auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
   if (metal != nullptr && encoder != nullptr) {
     metal->EncodeValidatedComparison(encoder, descriptor);
+  }
+}
+
+void EncodePreparedMetalButteraugliProfileStage(
+  PreparedDeviceButteraugli& prepared,
+  MTL::ComputeCommandEncoder* encoder,
+  const DeviceButteraugliComparisonDescriptor& descriptor,
+  MetalButteraugliProfileStage stage) {
+
+  auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
+  if (metal != nullptr && encoder != nullptr) {
+    metal->EncodeValidatedComparisonProfileStage(encoder, descriptor, stage);
   }
 }
 
@@ -1568,3 +1723,5 @@ Status QueryMetalButteraugliResourceUsageForTest(
 }
 
 }  // namespace gjxl
+
+#undef setComputePipelineState

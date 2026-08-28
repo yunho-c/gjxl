@@ -381,7 +381,8 @@ void MetalBackend::DispatchPlane(
   MTL::ComputeCommandEncoder* encoder,
   Extent2D extent) {
 
-  encoder->dispatchThreads(
+  DispatchMetalThreads(
+    encoder,
     MTL::Size(
       static_cast<NS::UInteger>(extent.width),
       static_cast<NS::UInteger>(extent.height),
@@ -499,7 +500,8 @@ void MetalBackend::EncodeReductionPass(
   encoder->setBuffer(input->handle(), input_view.offset_bytes, 0);
   encoder->setBuffer(output->handle(), output_view.offset_bytes, 1);
   encoder->setBytes(&params, sizeof(params), 2);
-  encoder->dispatchThreadgroups(
+  DispatchMetalThreadgroups(
+    encoder,
     MTL::Size(static_cast<NS::UInteger>(output_count), 1, 1),
     MTL::Size(kReductionThreadCount, 1, 1));
 }

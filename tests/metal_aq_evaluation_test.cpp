@@ -28,6 +28,7 @@
 #include "gpu/backend.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
+#include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_backend.h"
@@ -1329,6 +1330,111 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
         std::cerr << "Fused resident policy overwrote output padding\n";
         return false;
       }
+    }
+  }
+
+  auto* profiler = dynamic_cast<
+    gjxl::gpu_profile_internal::PreparedAqEvaluationProfiler*>(fused.get());
+  if (profiler == nullptr) {
+    std::cerr << "Metal resident policy profiler is unavailable\n";
+    return false;
+  }
+  std::vector<float> profiled_quant(stride * blocks.height, kPoison);
+  std::vector<float> profiled_block(stride * blocks.height, kPoison);
+  std::vector<double> profiled_scores;
+  gjxl::gpu_profile_internal::GpuExecutionProfile gpu_profile;
+  const gjxl::GpuBackendStats before_profile = gpu.stats();
+  if (!CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
+        {
+          .adjusted_initial_quant_field = {
+            initial.data(), blocks, blocks.width},
+          .quant_dc = setup.quant_dc,
+          .butteraugli_target = kTarget,
+          .lower_bound = setup.lower_bound,
+          .upper_bound = setup.upper_bound,
+          .iterations = kIterations,
+        },
+        {
+          .quant_field = {profiled_quant.data(), blocks, stride},
+          .block_distance_map = {profiled_block.data(), blocks, stride},
+          .score_history = &profiled_scores,
+        },
+        gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+        &gpu_profile), "profiled resident policy") ||
+      gpu.stats().committed_submissions !=
+        before_profile.committed_submissions + 1 ||
+      gpu_profile.mode !=
+        gjxl::gpu_profile_internal::GpuProfilingMode::kStage ||
+      !gpu_profile.capabilities.timestamp_counter ||
+      !gpu_profile.capabilities.stage_boundary ||
+      gpu_profile.submissions.size() != 1 ||
+      gpu_profile.submissions[0].command_buffer_gpu_nanoseconds == 0 ||
+      gpu_profile.submissions[0].stages.empty() ||
+      profiled_scores.size() != actual_scores.size()) {
+    std::cerr << "Profiled resident policy contract differs\n";
+    return false;
+  }
+  bool saw_reconstruction = false;
+  bool saw_epf = false;
+  bool saw_malta = false;
+  for (const auto& stage : gpu_profile.submissions[0].stages) {
+    saw_reconstruction |= stage.stage_id == "aq.reconstruction";
+    saw_epf |= stage.stage_id == "aq.epf.pass_1";
+    saw_malta |= stage.stage_id == "butteraugli.malta.main";
+    if (stage.end_timestamp < stage.begin_timestamp ||
+        stage.gpu_nanoseconds !=
+          stage.end_timestamp - stage.begin_timestamp ||
+        stage.dispatches.empty()) {
+      std::cerr << "Profiled resident stage metadata is invalid\n";
+      return false;
+    }
+  }
+  if (!saw_reconstruction || !saw_epf || !saw_malta) {
+    std::cerr << "Profiled resident stages are incomplete\n";
+    return false;
+  }
+  for (size_t index = 0; index < actual_scores.size(); ++index) {
+    if (std::abs(profiled_scores[index] - actual_scores[index]) > 2.0e-4) {
+      std::cerr << "Profiled resident scores changed\n";
+      return false;
+    }
+  }
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      const size_t index = y * stride + x;
+      if (std::abs(profiled_quant[index] - actual_quant[index]) > 1.0e-5f ||
+          std::abs(profiled_block[index] - actual_block[index]) > 5.0e-4f) {
+        std::cerr << "Profiled resident output changed\n";
+        return false;
+      }
+    }
+  }
+
+  if (!gpu_profile.capabilities.dispatch_boundary) {
+    std::vector<double> rejected_scores = {-91.0};
+    gjxl::gpu_profile_internal::GpuExecutionProfile rejected_profile =
+      gpu_profile;
+    const auto expected_profile = rejected_profile;
+    const uint64_t before_dispatch = gpu.stats().committed_submissions;
+    if (!ExpectCode(profiler->EvaluateResidentButteraugliPolicyProfiled(
+          {
+            .adjusted_initial_quant_field = {
+              initial.data(), blocks, blocks.width},
+            .quant_dc = setup.quant_dc,
+            .butteraugli_target = kTarget,
+            .lower_bound = setup.lower_bound,
+            .upper_bound = setup.upper_bound,
+            .iterations = kIterations,
+          },
+          {.score_history = &rejected_scores},
+          gjxl::gpu_profile_internal::GpuProfilingMode::kDispatch,
+          &rejected_profile), gjxl::StatusCode::kUnavailable,
+          "unsupported dispatch profiling") ||
+        rejected_scores != std::vector<double>{-91.0} ||
+        rejected_profile != expected_profile ||
+        gpu.stats().committed_submissions != before_dispatch) {
+      std::cerr << "Unsupported dispatch profiling was not atomic\n";
+      return false;
     }
   }
   return true;

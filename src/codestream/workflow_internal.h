@@ -9,6 +9,7 @@
 #include "codestream/encoder_internal.h"
 #include "codestream/workflow.h"
 #include "gpu/backend.h"
+#include "gpu/ops/gpu_execution_profile_internal.h"
 
 namespace gjxl::codestream_internal {
 
@@ -53,5 +54,19 @@ EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary,
   VarDctEncodingProfile* profile);
+
+/// Diagnostic-only public-workflow entry point with resident Metal GPU
+/// timestamps. On failure, every caller-visible output remains unchanged.
+[[nodiscard]] Status
+EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  GpuBackend* backend,
+  bool backend_is_qualified_for_automatic,
+  gpu_profile_internal::GpuProfilingMode profiling_mode,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingProfile* profile,
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile);
 
 }  // namespace gjxl::codestream_internal

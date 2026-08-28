@@ -30,6 +30,10 @@
 #include "gpu/metal/metal_status.h"
 #include "gpu/ops/ac_strategy.h"
 
+#define setComputePipelineState(state)                                    \
+  setComputePipelineState(state);                                         \
+  ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
+
 namespace gjxl {
 namespace {
 
@@ -448,6 +452,9 @@ Status CreatePipeline(
       "newComputePipelineState");
   }
 
+  metal_internal::RegisterMetalComputePipeline(
+    pipeline.get(), function_name);
+
   *out = std::move(pipeline);
 
   return Status::Ok();
@@ -852,7 +859,8 @@ void MetalBackend::EncodeTransformBatch(
   const size_t threadgroup_count = transform_count == 0
     ? 0
     : 1 + (transform_count - 1) / pipeline.transforms_per_threadgroup;
-  encoder->dispatchThreadgroups(
+  DispatchMetalThreadgroups(
+    encoder,
     MTL::Size(static_cast<NS::UInteger>(threadgroup_count), 1, 1),
     MTL::Size(pipeline.threads_per_threadgroup, 1, 1));
 }
@@ -1224,3 +1232,5 @@ Status CreateEmbeddedMetalBackend(
 }
 
 }  // namespace gjxl
+
+#undef setComputePipelineState

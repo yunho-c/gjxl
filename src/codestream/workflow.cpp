@@ -30,6 +30,7 @@
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/quantization_pipeline.h"
+#include "gpu/ops/quantization_pipeline_profile_internal.h"
 
 namespace gjxl {
 namespace {
@@ -518,9 +519,12 @@ struct PreparedWorkflow {
   bool resolve_production_backend,
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary,
-  codestream_internal::VarDctEncodingProfile* profile) {
+  codestream_internal::VarDctEncodingProfile* profile,
+  gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
 
   codestream_internal::VarDctEncodingProfile candidate_profile;
+  gpu_profile_internal::GpuExecutionProfile candidate_gpu_profile;
 
   CpuQuantizationPipelineOptions pipeline_options;
   pipeline_options.butteraugli_target = options.butteraugli_target;
@@ -561,17 +565,25 @@ struct PreparedWorkflow {
         .frame = &prepared.pipeline.frame,
       });
   } else if (selected_metal) {
-    status = quantization_pipeline_internal::
-      RunPreparedGpuQuantizationPipelineForEncoding(
-        *selected_gpu, prepared.original_linear_rgb(), prepared.quantization,
-        pipeline_options, options.metal_aq_mode,
-        {
-          .frame = &prepared.pipeline.frame,
-          .score_history = &prepared.pipeline.score_history,
-          .maximum_error_result =
-            &prepared.pipeline.maximum_error_result,
-        },
-        nullptr, &prepared.gpu_adaptive_quantization);
+    const quantization_pipeline_internal::GpuEncodingQuantizationPipelineOutput
+      encoding_output{
+      .frame = &prepared.pipeline.frame,
+      .score_history = &prepared.pipeline.score_history,
+      .maximum_error_result = &prepared.pipeline.maximum_error_result,
+    };
+    status = gpu_profile == nullptr
+      ? quantization_pipeline_internal::
+          RunPreparedGpuQuantizationPipelineForEncoding(
+            *selected_gpu, prepared.original_linear_rgb(),
+            prepared.quantization, pipeline_options, options.metal_aq_mode,
+            encoding_output, nullptr, &prepared.gpu_adaptive_quantization)
+      : quantization_pipeline_internal::
+          RunPreparedGpuQuantizationPipelineForEncodingProfiled(
+            *selected_gpu, prepared.original_linear_rgb(),
+            prepared.quantization,
+            pipeline_options, options.metal_aq_mode, encoding_output,
+            &prepared.gpu_adaptive_quantization, gpu_profiling_mode,
+            &candidate_gpu_profile);
   } else {
     status = quantization_pipeline_internal::
       RunPreparedCpuQuantizationPipeline(
@@ -670,6 +682,9 @@ struct PreparedWorkflow {
   if (profile != nullptr) {
     *profile = candidate_profile;
   }
+  if (gpu_profile != nullptr) {
+    *gpu_profile = std::move(candidate_gpu_profile);
+  }
   return Status::Ok();
 }
 
@@ -684,7 +699,16 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary,
   VarDctEncodingTiming* timing,
-  codestream_internal::VarDctEncodingProfile* profile) {
+  codestream_internal::VarDctEncodingProfile* profile,
+  gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+
+  const bool gpu_profiling =
+    gpu_profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
+  if (gpu_profiling != (gpu_profile != nullptr)) {
+    return Status::InvalidArgument(
+      "VarDCT GPU profiling request is invalid");
+  }
 
   const bool profiling = timing != nullptr || profile != nullptr;
   const auto total_begin = !profiling
@@ -692,6 +716,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     : WorkflowClock::now();
   VarDctEncodingTiming local_timing;
   codestream_internal::VarDctEncodingProfile local_profile;
+  gpu_profile_internal::GpuExecutionProfile local_gpu_profile;
   if (codestream == nullptr || !linear_rgb.valid()) {
     return Status::InvalidArgument(
       "VarDCT encoding input or output is invalid");
@@ -735,6 +760,16 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     return Status::InvalidArgument(
       "Maximum-throughput AQ does not evaluate maximum error");
+  }
+  if (gpu_profiling &&
+      (options.backend != VarDctBackendPreference::kMetal ||
+       (options.metal_aq_mode !=
+          GpuAdaptiveQuantizationMode::kFullyResident &&
+        options.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+       options.rate_control_mode !=
+          VarDctRateControlMode::kButteraugliTarget)) {
+    return Status::InvalidArgument(
+      "GPU profiling requires a resident Metal Butteraugli-target workflow");
   }
   if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
       options.rate_control_mode ==
@@ -782,7 +817,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
             *prepared, attempt_options, 0, 0, supplied_backend,
             supplied_backend_is_qualified, resolve_production_backend,
             attempt_codestream, attempt_summary,
-            profile == nullptr ? nullptr : &attempt_profile);
+            profile == nullptr ? nullptr : &attempt_profile,
+            gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
           if (profile != nullptr && attempt_status.ok()) {
             AccumulateEncodingProfile(attempt_profile, &local_profile);
           }
@@ -896,7 +932,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       target_size_tolerance_bytes, supplied_backend,
       supplied_backend_is_qualified, resolve_production_backend,
       &candidate, &candidate_summary,
-      profile == nullptr ? nullptr : &attempt_profile);
+      profile == nullptr ? nullptr : &attempt_profile,
+      gpu_profiling_mode, gpu_profiling ? &local_gpu_profile : nullptr);
     if (timing != nullptr) {
       local_timing.attempts.push_back({
         .butteraugli_target =
@@ -934,6 +971,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       local_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
       *profile = local_profile;
     }
+    if (gpu_profiling) *gpu_profile = std::move(local_gpu_profile);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate public VarDCT encoding storage");
@@ -952,7 +990,7 @@ Status EncodeLinearRgbVarDctCodestream(
 
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, nullptr,
-    nullptr);
+    nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 Status EncodeLinearRgbVarDctCodestreamProfiled(
@@ -968,7 +1006,7 @@ Status EncodeLinearRgbVarDctCodestreamProfiled(
   }
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, timing,
-    nullptr);
+    nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 namespace codestream_internal {
@@ -1004,7 +1042,8 @@ Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
 
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
-    codestream, summary, nullptr, nullptr);
+    codestream, summary, nullptr, nullptr,
+    gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 Status EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
@@ -1021,7 +1060,28 @@ Status EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
   }
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
-    codestream, summary, nullptr, profile);
+    codestream, summary, nullptr, profile,
+    gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
+}
+
+Status EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  GpuBackend* backend,
+  bool backend_is_qualified_for_automatic,
+  gpu_profile_internal::GpuProfilingMode profiling_mode,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingProfile* profile,
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+
+  if (profile == nullptr || gpu_profile == nullptr) {
+    return Status::InvalidArgument(
+      "VarDCT GPU profile outputs are null");
+  }
+  return EncodeLinearRgbVarDctCodestreamImpl(
+    linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
+    codestream, summary, nullptr, profile, profiling_mode, gpu_profile);
 }
 
 }  // namespace codestream_internal
