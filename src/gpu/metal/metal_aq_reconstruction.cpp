@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/gaborish_internal.h"
 #include "core/image_ops.h"
 #include "core/quantizer.h"
@@ -91,6 +92,42 @@ AsMetalPrepared(PreparedAqEvaluation &prepared) noexcept {
 
 } // namespace
 
+void MetalPreparedAqEvaluation::EncodeForwardCoefficients(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+
+  const MetalBuffer* anchors =
+      MetalBackend::AsMetalBuffer(*anchors_.buffer);
+  const MetalBuffer* gathered =
+      MetalBackend::AsMetalBuffer(*gathered_pixels_.buffer);
+  MetalBuffer* forward =
+      MetalBackend::AsMetalBuffer(*forward_coefficients_.buffer);
+  for (size_t batch_index = 0; batch_index < batches_.size();
+       ++batch_index) {
+    const AqStrategyBatch& batch = batches_[batch_index];
+    if (batch.anchor_count == 0) continue;
+    const AqReconstructionParams& params =
+        reconstruction_params_[batch_index];
+    const size_t batch_value_count =
+        3 * batch.anchor_count * batch.coefficient_count;
+    const size_t coefficient_offset_bytes =
+        batch.coefficient_offset * sizeof(float);
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.gather_transform_pixels.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      BindPlane(encoder, coding_[channel], channel);
+    }
+    encoder->setBuffer(anchors->handle(), anchors_.offset_bytes, 3);
+    BindPlane(encoder, gathered_pixels_, 4);
+    encoder->setBytes(&params, sizeof(params), 5);
+    DispatchThreads1d(encoder, batch_value_count);
+    backend.EncodeTransformBatch(
+        encoder, TransformDirection::kForward, batch.strategy, *gathered,
+        gathered_pixels_.offset_bytes + coefficient_offset_bytes, *forward,
+        forward_coefficients_.offset_bytes + coefficient_offset_bytes,
+        3 * batch.anchor_count);
+  }
+}
+
 void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
     const void *context) {
@@ -142,12 +179,17 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     self.EncodeResidentQuantizer(backend, encoder);
   }
 
+  if (!self.exact_coefficient_reconstruction_) {
+    if (self.resident_color_correlation_pending_) {
+      self.EncodeForwardCoefficients(backend, encoder);
+      self.EncodeFinalColorCorrelation(backend, encoder);
+    } else if (self.reset_params_.preserve_forward_coefficients == 0u) {
+      self.EncodeForwardCoefficients(backend, encoder);
+    }
+  }
+
   const MetalBuffer *anchors =
       MetalBackend::AsMetalBuffer(*self.anchors_.buffer);
-  const MetalBuffer *gathered =
-      MetalBackend::AsMetalBuffer(*self.gathered_pixels_.buffer);
-  MetalBuffer *forward =
-      MetalBackend::AsMetalBuffer(*self.forward_coefficients_.buffer);
   const MetalBuffer *reconstruction =
       MetalBackend::AsMetalBuffer(*self.reconstruction_coefficients_.buffer);
   MetalBuffer *inverse_output =
@@ -166,23 +208,6 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
         batch.coefficient_offset * sizeof(float);
 
     if (!self.exact_coefficient_reconstruction_) {
-      encoder->setComputePipelineState(
-          backend.aq_pipelines_.gather_transform_pixels.get());
-      for (size_t channel = 0; channel < 3; ++channel) {
-        BindPlane(encoder, self.coding_[channel], channel);
-      }
-      encoder->setBuffer(anchors->handle(), self.anchors_.offset_bytes, 3);
-      BindPlane(encoder, self.gathered_pixels_, 4);
-      encoder->setBytes(&params, sizeof(params), 5);
-      DispatchThreads1d(encoder, batch_value_count);
-
-      backend.EncodeTransformBatch(
-          encoder, TransformDirection::kForward, batch.strategy, *gathered,
-          self.gathered_pixels_.offset_bytes + coefficient_offset_bytes,
-          *forward,
-          self.forward_coefficients_.offset_bytes + coefficient_offset_bytes,
-          3 * batch.anchor_count);
-
       encoder->setComputePipelineState(
           backend.aq_pipelines_.encode_reconstruction_coefficients.get());
       BindPlane(encoder, self.anchors_, 0);
@@ -299,6 +324,27 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
   encoder->setBytes(&resident_quant_selection_params_,
                     sizeof(resident_quant_selection_params_), 4);
   DispatchThreads2d(encoder, block_extent_);
+}
+
+void MetalPreparedAqEvaluation::EncodeFinalColorCorrelation(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  encoder->setComputePipelineState(backend.aq_pipelines_.final_cfl.get());
+  BindPlane(encoder, color_transform_records_, 0);
+  BindPlane(encoder, color_tile_offsets_, 1);
+  BindPlane(encoder, quant_tables_, 2);
+  BindPlane(encoder, forward_coefficients_, 3);
+  BindPlane(encoder, raw_quant_, 4);
+  BindPlane(encoder, resident_quantizer_params_, 5);
+  BindPlane(encoder, y_to_x_, 6);
+  BindPlane(encoder, y_to_b_, 7);
+  BindPlane(encoder, reconstruction_error_, 8);
+  encoder->setBytes(&final_cfl_params_, sizeof(final_cfl_params_), 9);
+  DispatchMetalThreadgroups(
+      encoder,
+      MTL::Size(static_cast<NS::UInteger>(
+                    tile_extent_.width * tile_extent_.height),
+                1, 1),
+      MTL::Size(4, 1, 1));
 }
 
 void MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission(
@@ -472,6 +518,23 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
               },
           });
     }
+  }
+
+  if (self.frame_only_resident_initial_cfl_) {
+    encoder->setComputePipelineState(backend.aq_pipelines_.initial_cfl.get());
+    const std::array<DevicePlaneView, 3>& cfl_source =
+      self.options_.profile.loop_filter.gaborish
+        ? self.reconstructed_ : self.coding_;
+    for (size_t channel = 0; channel < 3; ++channel) {
+      BindPlane(encoder, cfl_source[channel], channel);
+    }
+    BindPlane(encoder, self.y_to_x_, 3);
+    BindPlane(encoder, self.y_to_b_, 4);
+    BindPlane(encoder, self.reconstruction_error_, 5);
+    encoder->setBytes(&self.initial_cfl_params_,
+                      sizeof(self.initial_cfl_params_), 6);
+    DispatchThreads1d(
+      encoder, self.tile_extent_.width * self.tile_extent_.height);
   }
 
   encoder->setComputePipelineState(
@@ -794,16 +857,18 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
 
 Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     InitialQuantizationOptions options, InitialQuantFieldOutput output,
-    QuantizerParams* quantizer, float quant_dc) {
+    QuantizerParams* quantizer, float quant_dc,
+    ColorCorrelationMap* initial_color_correlation) {
 
   return ComputeInitialQuantizationImpl(
-    options, output, quantizer, quant_dc,
+    options, output, quantizer, quant_dc, initial_color_correlation,
     gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 Status MetalPreparedAqEvaluation::ComputeInitialQuantizationProfiled(
     InitialQuantizationOptions options, InitialQuantFieldOutput output,
     QuantizerParams* quantizer, float quant_dc,
+    ColorCorrelationMap* initial_color_correlation,
     gpu_profile_internal::GpuProfilingMode mode,
     gpu_profile_internal::GpuExecutionProfile* profile) {
 
@@ -813,12 +878,14 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationProfiled(
       "Profiled initial-quantization request is invalid");
   }
   return ComputeInitialQuantizationImpl(
-    options, output, quantizer, quant_dc, mode, profile);
+    options, output, quantizer, quant_dc, initial_color_correlation, mode,
+    profile);
 }
 
 Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
     InitialQuantizationOptions options, InitialQuantFieldOutput output,
     QuantizerParams* quantizer, float quant_dc,
+    ColorCorrelationMap* initial_color_correlation,
     gpu_profile_internal::GpuProfilingMode profiling_mode,
     gpu_profile_internal::GpuExecutionProfile* profile) {
 
@@ -851,6 +918,11 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
        quant_dc > static_cast<float>(kMaxQuantDc))) {
     return Status::InvalidArgument(
         "Resident initial quantizer DC input is invalid");
+  }
+  if (initial_color_correlation != nullptr &&
+      !frame_only_resident_initial_cfl_) {
+    return Status::InvalidArgument(
+      "Resident initial CfL output was not prepared");
   }
 
   constexpr std::array<float, 4> kMulBase = {0.125f, 0.1f, 0.09f, 0.06f};
@@ -968,6 +1040,16 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
       status = Quantizer::Create(device_quantizer, &last_quantizer_);
     }
   }
+  ColorCorrelationMap device_color_correlation;
+  if (status.ok() && initial_color_correlation != nullptr) {
+    status = ReadbackColorCorrelation();
+    if (status.ok()) {
+      status = chroma_from_luma_internal::CreateColorCorrelationMap(
+        {last_y_to_x_.data(), tile_extent_, tile_extent_.width},
+        {last_y_to_b_.data(), tile_extent_, tile_extent_.width},
+        &device_color_correlation);
+    }
+  }
   const auto valid_values = [](const std::vector<float>& values) {
     return std::ranges::all_of(values, [](float value) {
       return std::isfinite(value) && value > 0.0f;
@@ -1005,6 +1087,9 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
   if (frame_only_resident_quantizer_) {
     resident_quantizer_ready_ = true;
     if (quantizer != nullptr) *quantizer = device_quantizer;
+  }
+  if (initial_color_correlation != nullptr) {
+    *initial_color_correlation = std::move(device_color_correlation);
   }
   if (profiling) *profile = std::move(candidate_profile);
   CompleteOperation();

@@ -147,12 +147,15 @@ Treat `raw-samples.json` as the performance comparison evidence. Profile schema
 2 covers every current compute submission in one profiled public encode. The
 frontend keeps each existing command buffer as one timestamped stage, while
 the resident AQ command buffer is split into its logical stage encoders. Its
-stable submission IDs are `frontend.preprocessing.gaborish`,
-`frontend.initial_quantization`, `frontend.ac_strategy`,
+stable fully-resident submission IDs are `frontend.initial_quantization`,
+`frontend.ac_strategy`,
 `frontend.prepare_aq.reference`, `frontend.quant_adjustment`, and
 `resident.aq`. The reference-preparation submission appears when persistent
 Butteraugli reference state is constructed; a reusable compatible evaluator
-instead reports `frontend.reconfigure_aq` as a preparation wall span.
+instead reports `frontend.reconfigure_aq` as a preparation wall span. The
+resident frame-only frontend folds preprocessing and initial CfL into
+`frontend.initial_quantization`; there is no separate preprocessing submission
+or host CfL upload on that path.
 
 Typed steady-clock wall spans separate preparation, upload, wait, readback,
 and host work around those submissions. Operation spans can contain narrower
@@ -222,11 +225,11 @@ a matched-build stage A/B rather than attributed from dispatch count alone.
 
 These schema-1 artifacts exposed the instrumentation boundary that motivated
 schema 2: the resident buffer was much shorter than the complete quantization
-pipeline. The extended profile now attributes initial-field work, strategy
-search, reference preparation, quant-field adjustment, preprocessing, host
-CfL work, transfers, waits, and the resident policy under the same diagnostic
-session. Uninstrumented public-workflow runs remain the final judge for any
-retained performance claim.
+pipeline. The extended profile now attributes resident initial-field and
+preprocessing work, strategy search, reference preparation, quant-field
+adjustment, host CfL scheduling, transfers, waits, and the resident policy
+under the same diagnostic session. Uninstrumented public-workflow runs remain
+the final judge for any retained performance claim.
 
 ## Ordered implementation plan
 

@@ -44,6 +44,7 @@ struct AqResetParams {
   uint block_value_count;
   uint test_error_mask;
   uint preserve_error;
+  uint preserve_forward_coefficients;
 };
 
 struct AqResidentPolicyInitializeParams {
@@ -75,6 +76,22 @@ struct AqInitialCflParams {
   uint tile_width;
   uint tile_height;
   uint color_stride;
+};
+
+struct AqFinalCflParams {
+  uint tile_width;
+  uint tile_height;
+  uint color_stride;
+  uint transform_count;
+};
+
+struct AqColorTransformRecord {
+  uint coefficient_offset;
+  uint channel_stride;
+  uint coefficient_count;
+  uint strategy;
+  uint raw_quant_index;
+  uint tile_value_offset;
 };
 
 struct AqInitialQuantGradientParams {
@@ -255,7 +272,9 @@ kernel void gjxl_aq_reset_reconstruction(
   }
   if (index < params.coefficient_value_count) {
     gathered_pixels[index] = as_type<float>(kPoison);
-    forward_coefficients[index] = as_type<float>(kPoison);
+    if (params.preserve_forward_coefficients == 0u) {
+      forward_coefficients[index] = as_type<float>(kPoison);
+    }
     quantized_coefficients[index] = int(0x81234567u);
     reconstruction_coefficients[index] = as_type<float>(kPoison);
   }
@@ -366,6 +385,187 @@ kernel void gjxl_aq_initial_cfl(
   const uint color_index = tile_y * params.color_stride + tile_x;
   y_to_x[color_index] = aq_quantize_initial_cfl(-linear_x_sum / denominator);
   y_to_b[color_index] = aq_quantize_initial_cfl(-linear_b_sum / denominator);
+}
+
+static bool aq_final_cfl_layout(
+  uint strategy,
+  thread uint& coefficient_width,
+  thread uint& coefficient_height,
+  thread uint& low_frequency_width,
+  thread uint& low_frequency_height) {
+
+  switch (strategy) {
+    case 0u:
+      coefficient_width = 8u;
+      coefficient_height = 8u;
+      low_frequency_width = 1u;
+      low_frequency_height = 1u;
+      return true;
+    case 4u:
+      coefficient_width = 16u;
+      coefficient_height = 16u;
+      low_frequency_width = 2u;
+      low_frequency_height = 2u;
+      return true;
+    case 5u:
+      coefficient_width = 32u;
+      coefficient_height = 32u;
+      low_frequency_width = 4u;
+      low_frequency_height = 4u;
+      return true;
+    case 6u:
+    case 7u:
+      coefficient_width = 16u;
+      coefficient_height = 8u;
+      low_frequency_width = 2u;
+      low_frequency_height = 1u;
+      return true;
+    case 10u:
+    case 11u:
+      coefficient_width = 32u;
+      coefficient_height = 16u;
+      low_frequency_width = 4u;
+      low_frequency_height = 2u;
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Mirrors ComputeFinalColorCorrelationMapPrepared(..., fast=true). Four
+// threads preserve its four independent accumulation lanes and their final
+// pairwise reduction order.
+kernel void gjxl_aq_final_cfl(
+  device const AqColorTransformRecord* transforms [[buffer(0)]],
+  device const uint* tile_offsets [[buffer(1)]],
+  device const float* quant_tables [[buffer(2)]],
+  device const float* forward_coefficients [[buffer(3)]],
+  device const int* raw_quant [[buffer(4)]],
+  device const uint* resident_quantizer [[buffer(5)]],
+  device char* y_to_x [[buffer(6)]],
+  device char* y_to_b [[buffer(7)]],
+  device atomic_uint* error [[buffer(8)]],
+  constant AqFinalCflParams& params [[buffer(9)]],
+  uint tile_index [[threadgroup_position_in_grid]],
+  uint lane [[thread_index_in_threadgroup]]) {
+
+  if (tile_index >= params.tile_width * params.tile_height || lane >= 4u) {
+    return;
+  }
+  const uint begin = tile_offsets[tile_index];
+  const uint end = tile_offsets[tile_index + 1u];
+  if (begin >= end || end > params.transform_count) {
+    if (lane == 0u) {
+      atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+    }
+    return;
+  }
+
+  const uint global_scale = resident_quantizer[0];
+  float quadratic_x = 0.0f;
+  float linear_x = 0.0f;
+  float quadratic_b = 0.0f;
+  float linear_b = 0.0f;
+  for (uint transform_index = begin; transform_index < end;
+       ++transform_index) {
+    const AqColorTransformRecord transform = transforms[transform_index];
+    uint coefficient_width = 0u;
+    uint coefficient_height = 0u;
+    uint low_frequency_width = 0u;
+    uint low_frequency_height = 0u;
+    if (!aq_final_cfl_layout(
+          transform.strategy, coefficient_width, coefficient_height,
+          low_frequency_width, low_frequency_height) ||
+        coefficient_width * coefficient_height !=
+          transform.coefficient_count) {
+      atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+      continue;
+    }
+    const int raw = raw_quant[transform.raw_quant_index];
+    if (raw < 1 || raw > 256 || global_scale == 0u ||
+        global_scale > 32768u) {
+      atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+      continue;
+    }
+    const float quant_scale =
+      (float(global_scale) * (1.0f / 65536.0f)) * 128.0f * float(raw);
+    const uint2 table_offsets = aq_quant_table_offsets(transform.strategy);
+    const uint first =
+      (lane + 4u - (transform.tile_value_offset & 3u)) & 3u;
+    for (uint coefficient = first;
+         coefficient < transform.coefficient_count;
+         coefficient += 4u) {
+      const uint x = coefficient % coefficient_width;
+      const uint y = coefficient / coefficient_width;
+      if (x < low_frequency_width && y < low_frequency_height) {
+        continue;
+      }
+      const uint base = transform.coefficient_offset + coefficient;
+      const float coefficient_y =
+        forward_coefficients[base + transform.channel_stride];
+      const float coefficient_x = forward_coefficients[base];
+      const float coefficient_b =
+        forward_coefficients[base + 2u * transform.channel_stride];
+      const float value_y_x = coefficient_y *
+        quant_tables[table_offsets.y + coefficient] * quant_scale;
+      const float value_x = coefficient_x *
+        quant_tables[table_offsets.y + coefficient] * quant_scale;
+      const float value_y_b = coefficient_y *
+        quant_tables[
+          table_offsets.y + 2u * transform.coefficient_count + coefficient] *
+        quant_scale;
+      const float value_b = coefficient_b *
+        quant_tables[
+          table_offsets.y + 2u * transform.coefficient_count + coefficient] *
+        quant_scale;
+      const float a_x = value_y_x * (1.0f / 84.0f);
+      const float a_b = value_y_b * (1.0f / 84.0f);
+      quadratic_x = fma(a_x, a_x, quadratic_x);
+      linear_x = fma(a_x, -value_x, linear_x);
+      quadratic_b = fma(a_b, a_b, quadratic_b);
+      linear_b = fma(a_b, value_y_b - value_b, linear_b);
+    }
+  }
+
+  threadgroup float quadratic_x_lanes[4];
+  threadgroup float linear_x_lanes[4];
+  threadgroup float quadratic_b_lanes[4];
+  threadgroup float linear_b_lanes[4];
+  quadratic_x_lanes[lane] = quadratic_x;
+  linear_x_lanes[lane] = linear_x;
+  quadratic_b_lanes[lane] = quadratic_b;
+  linear_b_lanes[lane] = linear_b;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (lane != 0u) return;
+
+  const AqColorTransformRecord last = transforms[end - 1u];
+  const float sample_count =
+    float(last.tile_value_offset + last.coefficient_count);
+  const float quadratic_x_sum =
+    (quadratic_x_lanes[0] + quadratic_x_lanes[1]) +
+    (quadratic_x_lanes[2] + quadratic_x_lanes[3]);
+  const float linear_x_sum =
+    (linear_x_lanes[0] + linear_x_lanes[1]) +
+    (linear_x_lanes[2] + linear_x_lanes[3]);
+  const float quadratic_b_sum =
+    (quadratic_b_lanes[0] + quadratic_b_lanes[1]) +
+    (quadratic_b_lanes[2] + quadratic_b_lanes[3]);
+  const float linear_b_sum =
+    (linear_b_lanes[0] + linear_b_lanes[1]) +
+    (linear_b_lanes[2] + linear_b_lanes[3]);
+  const float result_x = -linear_x_sum /
+    (quadratic_x_sum + sample_count * 5.0e-10f);
+  const float result_b = -linear_b_sum /
+    (quadratic_b_sum + sample_count * 5.0e-10f);
+  if (!isfinite(result_x) || !isfinite(result_b)) {
+    atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+    return;
+  }
+  const uint color_index =
+    (tile_index / params.tile_width) * params.color_stride +
+    tile_index % params.tile_width;
+  y_to_x[color_index] = aq_quantize_initial_cfl(result_x);
+  y_to_b[color_index] = aq_quantize_initial_cfl(result_b);
 }
 
 kernel void gjxl_aq_reset_initial_quant(

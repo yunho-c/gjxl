@@ -138,7 +138,6 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(
             submission_ids,
             [
-                "frontend.preprocessing.gaborish",
                 "frontend.initial_quantization",
                 "frontend.ac_strategy",
                 "frontend.prepare_aq.reference",
@@ -153,10 +152,16 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
             (stage["stage_id"], stage["kind"]): stage
             for stage in sample["wall_stages"]
         }
-        self.assertIn(("frontend.preprocessing", "operation"), wall_stages)
+        self.assertIn(
+            ("frontend.prepare_evaluator", "preparation"), wall_stages
+        )
+        self.assertIn(
+            ("frontend.initial_quantization", "operation"), wall_stages
+        )
         self.assertIn(("frontend.ac_strategy.wait", "wait"), wall_stages)
         self.assertIn(("frontend.prepare_aq", "preparation"), wall_stages)
-        self.assertIn(("frontend.cfl_upload", "upload"), wall_stages)
+        self.assertIn(("frontend.fixed_cfl", "host"), wall_stages)
+        self.assertNotIn(("frontend.cfl_upload", "upload"), wall_stages)
         self.assertIn(("resident.aq", "operation"), wall_stages)
         for wall_stage in sample["wall_stages"]:
             self.assertEqual(wall_stage["invocation"], 0)
@@ -172,6 +177,14 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertIn("aq.epf.pass_1", {stage["stage_id"] for stage in stages})
         self.assertIn(
             "butteraugli.malta.main", {stage["stage_id"] for stage in stages}
+        )
+        self.assertEqual(
+            sum(
+                dispatch["kernel_id"] == "gjxl_aq_final_cfl"
+                for stage in stages
+                for dispatch in stage["dispatches"]
+            ),
+            1,
         )
         for stage in stages:
             self.assertGreaterEqual(stage["end_timestamp"], stage["begin_timestamp"])

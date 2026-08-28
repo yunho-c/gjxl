@@ -155,6 +155,7 @@ Status MakeCandidates(
   if (candidates == nullptr) {
     return Status::Internal("GPU AC-strategy candidate output is null");
   }
+  candidates->clear();
   const Extent2D covered = GetAcStrategyInfo(staged.strategy)->covered_blocks;
   size_t candidate_count = 0;
   for (size_t tile_y = 0; tile_y < tile_extent.height; ++tile_y) {
@@ -228,12 +229,32 @@ Status MakeCandidates(
   return Status::Ok();
 }
 
-Status AllocateAndUpload(
+Status EnsureAllocation(
+  GpuBackend& gpu,
+  size_t size_bytes,
+  std::unique_ptr<DeviceBuffer>* buffer) {
+
+  if (buffer == nullptr || size_bytes == 0) {
+    return Status::InvalidArgument(
+      "GPU AC-strategy allocation request is invalid");
+  }
+  if (*buffer != nullptr && (*buffer)->size_bytes() >= size_bytes &&
+      gpu.owns(**buffer)) {
+    return Status::Ok();
+  }
+  std::unique_ptr<DeviceBuffer> replacement;
+  Status status = gpu.Allocate(size_bytes, &replacement);
+  if (!status.ok()) return status;
+  *buffer = std::move(replacement);
+  return Status::Ok();
+}
+
+Status EnsureAndUpload(
   GpuBackend& gpu,
   const void* data,
   size_t size_bytes,
   std::unique_ptr<DeviceBuffer>* buffer) {
-  Status status = gpu.Allocate(size_bytes, buffer);
+  Status status = EnsureAllocation(gpu, size_bytes, buffer);
   if (!status.ok()) {
     return status;
   }
@@ -252,6 +273,25 @@ struct StrategyResources {
 
 }  // namespace
 
+namespace ac_strategy_search_internal {
+
+struct Prepared {
+  GpuBackend* backend = nullptr;
+  std::array<StrategyResources,
+             ac_strategy_internal::kCandidateStages.size()> resources;
+  std::array<std::vector<float>, kAcStrategyCount> cost_storage;
+  std::unique_ptr<DeviceBuffer> device_opsin;
+  std::unique_ptr<DeviceBuffer> device_mask;
+  std::unique_ptr<DeviceBuffer> scratch_a;
+  std::unique_ptr<DeviceBuffer> scratch_b;
+  std::unique_ptr<DeviceBuffer> rate_scratch;
+};
+
+}  // namespace ac_strategy_search_internal
+
+PreparedAcStrategySearch::PreparedAcStrategySearch() = default;
+PreparedAcStrategySearch::~PreparedAcStrategySearch() = default;
+
 static Status FindAcStrategyGridGpuImpl(
   GpuBackend& gpu,
   ConstImage3FView opsin,
@@ -259,6 +299,7 @@ static Status FindAcStrategyGridGpuImpl(
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,
   const ResidentAcStrategySearchInputs* resident,
+  ac_strategy_search_internal::Prepared* prepared,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
   AcStrategyGpuSearchStats* stats,
@@ -323,24 +364,29 @@ static Status FindAcStrategyGridGpuImpl(
     const auto preparation_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
+    ac_strategy_search_internal::Prepared local_prepared;
+    ac_strategy_search_internal::Prepared& state =
+      prepared == nullptr ? local_prepared : *prepared;
+    if (state.backend != nullptr && state.backend != &gpu) {
+      state = ac_strategy_search_internal::Prepared{};
+    }
+    state.backend = &gpu;
     const std::vector<float> packed_opsin = resident == nullptr
       ? PackOpsin(opsin, pixel_count) : std::vector<float>{};
     const std::vector<float> packed_mask = resident == nullptr
       ? PackPlane(pixel_mask) : std::vector<float>{};
-    std::unique_ptr<DeviceBuffer> device_opsin;
-    std::unique_ptr<DeviceBuffer> device_mask;
     if (resident == nullptr) {
-      status = AllocateAndUpload(gpu,
+      status = EnsureAndUpload(gpu,
         packed_opsin.data(),
         packed_opsin.size() * sizeof(float),
-        &device_opsin);
+        &state.device_opsin);
       if (!status.ok()) {
         return status;
       }
-      status = AllocateAndUpload(gpu,
+      status = EnsureAndUpload(gpu,
         packed_mask.data(),
         packed_mask.size() * sizeof(float),
-        &device_mask);
+        &state.device_mask);
       if (!status.ok()) {
         return status;
       }
@@ -348,8 +394,8 @@ static Status FindAcStrategyGridGpuImpl(
 
     constexpr const auto& kStages =
       ac_strategy_internal::kCandidateStages;
-    std::array<StrategyResources, kStages.size()> resources;
-    std::array<std::vector<float>, kAcStrategyCount> cost_storage;
+    auto& resources = state.resources;
+    auto& cost_storage = state.cost_storage;
     AcStrategyGpuSearchStats result_stats;
     size_t maximum_packed_bytes = 0;
     size_t maximum_rate_bytes = 0;
@@ -382,22 +428,23 @@ static Status FindAcStrategyGridGpuImpl(
       if (resource.candidates.empty()) {
         continue;
       }
-      status = AllocateAndUpload(gpu,
+      status = EnsureAndUpload(gpu,
         resource.candidates.data(),
         resource.candidates.size() * sizeof(AcStrategyCandidate),
         &resource.device_candidates);
       if (!status.ok()) {
         return status;
       }
-      status = AllocateAndUpload(gpu,
+      status = EnsureAndUpload(gpu,
         resource.matrices.data(),
         resource.matrices.size() * sizeof(float),
         &resource.device_matrices);
       if (!status.ok()) {
         return status;
       }
-      status = gpu.Allocate(
-        resource.costs.size() * sizeof(float), &resource.device_costs);
+      status = EnsureAllocation(
+        gpu, resource.costs.size() * sizeof(float),
+        &resource.device_costs);
       if (!status.ok()) {
         return status;
       }
@@ -420,18 +467,15 @@ static Status FindAcStrategyGridGpuImpl(
       maximum_rate_bytes = std::max(maximum_rate_bytes, rate_bytes);
     }
 
-    std::unique_ptr<DeviceBuffer> scratch_a;
-    std::unique_ptr<DeviceBuffer> scratch_b;
-    std::unique_ptr<DeviceBuffer> rate_scratch;
-    status = gpu.Allocate(maximum_packed_bytes, &scratch_a);
+    status = EnsureAllocation(gpu, maximum_packed_bytes, &state.scratch_a);
     if (!status.ok()) {
       return status;
     }
-    status = gpu.Allocate(maximum_packed_bytes, &scratch_b);
+    status = EnsureAllocation(gpu, maximum_packed_bytes, &state.scratch_b);
     if (!status.ok()) {
       return status;
     }
-    status = gpu.Allocate(maximum_rate_bytes, &rate_scratch);
+    status = EnsureAllocation(gpu, maximum_rate_bytes, &state.rate_scratch);
     if (!status.ok()) {
       return status;
     }
@@ -441,8 +485,8 @@ static Status FindAcStrategyGridGpuImpl(
       StrategyResources& resource = resources[i];
       batches[i] = {
         .strategy = resource.staged.strategy,
-        .opsin = device_opsin.get(),
-        .pixel_mask = device_mask.get(),
+        .opsin = resident == nullptr ? state.device_opsin.get() : nullptr,
+        .pixel_mask = resident == nullptr ? state.device_mask.get() : nullptr,
         .matrices = resource.device_matrices.get(),
         .candidates = resource.device_candidates.get(),
         .resident_opsin = resident == nullptr
@@ -451,9 +495,9 @@ static Status FindAcStrategyGridGpuImpl(
           ? ConstDevicePlaneView{} : resident->pixel_mask,
         .resident_quant_field = resident == nullptr
           ? ConstDevicePlaneView{} : resident->quant_field,
-        .scratch_a = scratch_a.get(),
-        .scratch_b = scratch_b.get(),
-        .rate_scratch = rate_scratch.get(),
+        .scratch_a = state.scratch_a.get(),
+        .scratch_b = state.scratch_b.get(),
+        .rate_scratch = state.rate_scratch.get(),
         .costs = resource.device_costs.get(),
         .pixel_extent = opsin.extent(),
         .opsin_row_stride = opsin.width(),
@@ -579,7 +623,7 @@ Status FindAcStrategyGridGpu(
 
   return FindAcStrategyGridGpuImpl(
       gpu, opsin, quant_field, pixel_mask, color_correlation, nullptr,
-      options, out, stats, nullptr);
+      nullptr, options, out, stats, nullptr);
 }
 
 Status FindAcStrategyGridGpuResident(
@@ -591,10 +635,22 @@ Status FindAcStrategyGridGpuResident(
   ResidentAcStrategySearchInputs resident,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
-  AcStrategyGpuSearchStats* stats) {
+  AcStrategyGpuSearchStats* stats,
+  PreparedAcStrategySearch* prepared) {
+
+  if (prepared != nullptr && prepared->impl_ == nullptr) {
+    try {
+      prepared->impl_ =
+        std::make_unique<ac_strategy_search_internal::Prepared>();
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate prepared GPU AC-strategy search state");
+    }
+  }
 
   return FindAcStrategyGridGpuImpl(
       gpu, opsin, quant_field, pixel_mask, color_correlation, &resident,
+      prepared == nullptr ? nullptr : prepared->impl_.get(),
       options, out, stats, nullptr);
 }
 
@@ -607,6 +663,7 @@ Status gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
   ResidentAcStrategySearchInputs resident,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
+  PreparedAcStrategySearch* prepared,
   GpuProfilingSession* profiling_session,
   AcStrategyGpuSearchStats* stats) {
 
@@ -614,8 +671,18 @@ Status gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
     return Status::InvalidArgument(
       "GPU AC-strategy profiling session is null");
   }
+  if (prepared != nullptr && prepared->impl_ == nullptr) {
+    try {
+      prepared->impl_ =
+        std::make_unique<ac_strategy_search_internal::Prepared>();
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate prepared GPU AC-strategy search state");
+    }
+  }
   return FindAcStrategyGridGpuImpl(
     gpu, opsin, quant_field, pixel_mask, color_correlation, &resident,
+    prepared == nullptr ? nullptr : prepared->impl_.get(),
     options, out, stats, profiling_session);
 }
 

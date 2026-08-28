@@ -58,9 +58,10 @@ public:
   explicit GpuAcStrategySearchProvider(
       GpuBackend& gpu,
       const ResidentAcStrategySearchInputs* resident = nullptr,
+      PreparedAcStrategySearch* prepared = nullptr,
       gpu_profile_internal::GpuProfilingSession* profiling_session = nullptr)
     : gpu_(gpu), resident_(resident),
-      profiling_session_(profiling_session) {}
+      prepared_(prepared), profiling_session_(profiling_session) {}
 
   Status Find(
     ConstImage3FView opsin,
@@ -78,10 +79,10 @@ public:
     return profiling_session_ == nullptr
       ? FindAcStrategyGridGpuResident(
           gpu_, opsin, quant_field, pixel_mask, color_correlation,
-          *resident_, options, out, &stats_)
+          *resident_, options, out, &stats_, prepared_)
       : gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
           gpu_, opsin, quant_field, pixel_mask, color_correlation,
-          *resident_, options, out, profiling_session_, &stats_);
+          *resident_, options, out, prepared_, profiling_session_, &stats_);
   }
 
   [[nodiscard]] const AcStrategyGpuSearchStats& stats() const noexcept {
@@ -91,6 +92,7 @@ public:
 private:
   GpuBackend& gpu_;
   const ResidentAcStrategySearchInputs* resident_ = nullptr;
+  PreparedAcStrategySearch* prepared_ = nullptr;
   gpu_profile_internal::GpuProfilingSession* profiling_session_ = nullptr;
   AcStrategyGpuSearchStats stats_;
 };
@@ -184,7 +186,11 @@ Status PrepareResidentAcStrategyInputs(
     const auto preparation_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
+    // The complete evaluator may borrow the frontend's filtered coding image.
+    // Destroy the borrower before replacing its owner.
+    state.evaluation.reset();
     state.resident_frontend.reset();
+    state.resident_coding_opsin = {};
     AcStrategyGrid provisional_strategies;
     Status status = AcStrategyGrid::Create(
         prepared.block_extent, &provisional_strategies);
@@ -204,6 +210,7 @@ Status PrepareResidentAcStrategyInputs(
           options.adaptive_quantization.butteraugli,
         },
         .frame_only = true,
+        .frame_only_resident_initial_cfl = true,
         .frame_only_resident_initial_quant = true,
         .resident_ac_strategy_inputs = true,
         .coefficient_decision_mode =
@@ -255,7 +262,8 @@ Status PrepareResidentAcStrategyInputs(
   Status status;
   if (profiling_session == nullptr) {
     status = state.resident_frontend->ComputeInitialQuantization(
-      initial_options, initial_output);
+      initial_options, initial_output, nullptr, 0.0f,
+      &prepared.initial_color_correlation);
   } else {
     auto* profiler = dynamic_cast<
       gpu_profile_internal::PreparedAqEvaluationProfiler*>(
@@ -267,7 +275,8 @@ Status PrepareResidentAcStrategyInputs(
     gpu_profile_internal::GpuExecutionProfile child_profile;
     status = profiler->ComputeInitialQuantizationProfiled(
       initial_options, initial_output, nullptr, 0.0f,
-      profiling_session->mode(), &child_profile);
+      &prepared.initial_color_correlation, profiling_session->mode(),
+      &child_profile);
     if (status.ok()) {
       status = profiling_session->Append(std::move(child_profile));
     }
@@ -279,15 +288,22 @@ Status PrepareResidentAcStrategyInputs(
     }
   }
   if (!status.ok()) {
+    state.evaluation.reset();
     state.resident_frontend.reset();
+    state.resident_coding_opsin = {};
     return status;
   }
   ResidentAcStrategyInputs views;
   status = state.resident_frontend->GetResidentAcStrategyInputs(&views);
   if (!status.ok()) {
+    state.evaluation.reset();
     state.resident_frontend.reset();
+    state.resident_coding_opsin = {};
     return status;
   }
+  state.resident_coding_opsin = views.opsin;
+  prepared.preprocessing_ready = true;
+  prepared.fast_initial_color_correlation = true;
   *resident = {
       .opsin = views.opsin,
       .quant_field = views.quant_field,
@@ -479,8 +495,9 @@ Status RunPreparedGpuQuantizationPipelineImpl(
   if (aq_mode == GpuAdaptiveQuantizationMode::kThroughput) {
     options.adaptive_quantization.iterations = 1;
   }
-  if (!prepared.preprocessing_ready ||
-      prepared.fast_initial_color_correlation != resident) {
+  if (!resident &&
+      (!prepared.preprocessing_ready ||
+       prepared.fast_initial_color_correlation)) {
     GpuPipelineGaborishProvider gaborish_inverse(
       gpu, resident, profiling_session);
     const auto preprocessing_begin = profiling_session == nullptr
@@ -511,7 +528,9 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     if (!status.ok()) return status;
   }
   GpuAcStrategySearchProvider strategy_search(
-      gpu, resident ? &resident_inputs : nullptr, profiling_session);
+      gpu, resident ? &resident_inputs : nullptr,
+      resident ? &aq_state->ac_strategy_search : nullptr,
+      profiling_session);
   GpuAdaptiveQuantizationProvider adaptive_quantization(
     gpu, aq_mode, aq_state,
     {

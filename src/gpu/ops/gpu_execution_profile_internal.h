@@ -246,6 +246,7 @@ public:
     InitialQuantFieldOutput output,
     QuantizerParams* quantizer,
     float quant_dc,
+    ColorCorrelationMap* initial_color_correlation,
     GpuProfilingMode mode,
     GpuExecutionProfile* profile) = 0;
 

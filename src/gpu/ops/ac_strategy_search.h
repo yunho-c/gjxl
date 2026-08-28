@@ -5,12 +5,17 @@
 
 #include <array>
 #include <cstddef>
+#include <memory>
 
 #include "codec/ac_strategy.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
 
 namespace gjxl {
+
+namespace ac_strategy_search_internal {
+struct Prepared;
+}
 
 struct AcStrategyGpuSearchStats {
   std::array<size_t, kAcStrategyCount> candidate_counts{};
@@ -21,6 +26,44 @@ struct ResidentAcStrategySearchInputs {
   ConstDeviceImage3View opsin;
   ConstDevicePlaneView quant_field;
   ConstDevicePlaneView pixel_mask;
+};
+
+class PreparedAcStrategySearch;
+
+namespace gpu_profile_internal {
+class GpuProfilingSession;
+
+[[nodiscard]] Status FindAcStrategyGridGpuResidentProfiled(
+  GpuBackend&, ConstImage3FView, ConstPlaneF32View, ConstPlaneF32View,
+  const ColorCorrelationMap&, ResidentAcStrategySearchInputs,
+  AcStrategySearchOptions, AcStrategyGrid*, PreparedAcStrategySearch*,
+  GpuProfilingSession*, AcStrategyGpuSearchStats*);
+}
+
+/// Reuses host staging and device allocations across compatible AC-strategy
+/// searches. The backend must outlive every search and the prepared state.
+class PreparedAcStrategySearch {
+public:
+  PreparedAcStrategySearch();
+  ~PreparedAcStrategySearch();
+
+  PreparedAcStrategySearch(const PreparedAcStrategySearch&) = delete;
+  PreparedAcStrategySearch& operator=(const PreparedAcStrategySearch&) =
+    delete;
+
+private:
+  std::unique_ptr<ac_strategy_search_internal::Prepared> impl_;
+
+  friend Status FindAcStrategyGridGpuResident(
+    GpuBackend&, ConstImage3FView, ConstPlaneF32View, ConstPlaneF32View,
+    const ColorCorrelationMap&, ResidentAcStrategySearchInputs,
+    AcStrategySearchOptions, AcStrategyGrid*, AcStrategyGpuSearchStats*,
+    PreparedAcStrategySearch*);
+  friend Status gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
+    GpuBackend&, ConstImage3FView, ConstPlaneF32View, ConstPlaneF32View,
+    const ColorCorrelationMap&, ResidentAcStrategySearchInputs,
+    AcStrategySearchOptions, AcStrategyGrid*, PreparedAcStrategySearch*,
+    gpu_profile_internal::GpuProfilingSession*, AcStrategyGpuSearchStats*);
 };
 
 /// Selects an AC-strategy grid after staging every dependency-safe candidate
@@ -49,6 +92,7 @@ struct ResidentAcStrategySearchInputs {
   ResidentAcStrategySearchInputs resident,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
-  AcStrategyGpuSearchStats* stats = nullptr);
+  AcStrategyGpuSearchStats* stats = nullptr,
+  PreparedAcStrategySearch* prepared = nullptr);
 
 }  // namespace gjxl

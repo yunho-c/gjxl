@@ -75,12 +75,15 @@ void DispatchThreads1d(MTL::ComputeCommandEncoder* encoder,
 static_assert(std::is_standard_layout_v<AqReconstructionParams>);
 static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
 static_assert(sizeof(AqReconstructionParams) == 136);
-static_assert(sizeof(AqResetParams) == 24);
+static_assert(sizeof(AqResetParams) == 28);
 static_assert(sizeof(AqResidentPolicyInitializeParams) == 20);
 static_assert(sizeof(AqResidentPolicyUpdateParams) == 44);
 static_assert(std::is_standard_layout_v<AqInitialCflParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialCflParams>);
 static_assert(sizeof(AqInitialCflParams) == 24);
+static_assert(std::is_standard_layout_v<AqFinalCflParams>);
+static_assert(std::is_trivially_copyable_v<AqFinalCflParams>);
+static_assert(sizeof(AqFinalCflParams) == 16);
 static_assert(std::is_standard_layout_v<AqInitialQuantGradientParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialQuantGradientParams>);
 static_assert(sizeof(AqInitialQuantGradientParams) == 28);
@@ -141,6 +144,89 @@ static_assert(sizeof(AqOpsinToLinearParams) == 20);
   return found == kSupportedAqStrategies.end()
              ? kSupportedAqStrategies.size()
              : static_cast<size_t>(found - kSupportedAqStrategies.begin());
+}
+
+[[nodiscard]] Status BuildColorTransformMetadata(
+  const std::vector<AqAnchor>& row_major_anchors,
+  const std::array<AqStrategyBatch, 7>& batches,
+  Extent2D block_extent,
+  Extent2D tile_extent,
+  std::vector<int32_t>* records,
+  std::vector<int32_t>* tile_offsets) {
+
+  if (records == nullptr || tile_offsets == nullptr) {
+    return Status::Internal(
+      "Prepared AQ color-transform metadata output is null");
+  }
+  size_t tile_count = 0;
+  if (!tile_extent.try_area(&tile_count) ||
+      row_major_anchors.size() >
+        static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+    return Status::InvalidArgument(
+      "Prepared AQ color-transform metadata is too large");
+  }
+  try {
+    records->assign(6 * row_major_anchors.size(), 0);
+    tile_offsets->assign(tile_count + 1, 0);
+    for (const AqAnchor& anchor : row_major_anchors) {
+      const size_t tile_index =
+        (anchor.block_y / 8) * tile_extent.width + anchor.block_x / 8;
+      if (tile_index >= tile_count ||
+          (*tile_offsets)[tile_index + 1] ==
+            std::numeric_limits<int32_t>::max()) {
+        return Status::InvalidArgument(
+          "Prepared AQ color-transform tile count exceeds Metal limits");
+      }
+      ++(*tile_offsets)[tile_index + 1];
+    }
+    for (size_t tile_index = 0; tile_index < tile_count; ++tile_index) {
+      (*tile_offsets)[tile_index + 1] += (*tile_offsets)[tile_index];
+    }
+    std::vector<int32_t> positions = *tile_offsets;
+    std::vector<size_t> tile_value_offsets(tile_count, 0);
+    for (const AqAnchor& anchor : row_major_anchors) {
+      const size_t tile_index =
+        (anchor.block_y / 8) * tile_extent.width + anchor.block_x / 8;
+      if (anchor.batch_index >= batches.size()) {
+        return Status::Internal(
+          "Prepared AQ color-transform batch disappeared");
+      }
+      const AqStrategyBatch& batch = batches[anchor.batch_index];
+      const size_t channel_stride =
+        batch.anchor_count * batch.coefficient_count;
+      const size_t coefficient_offset = batch.coefficient_offset +
+        anchor.index_in_batch * batch.coefficient_count;
+      const size_t raw_quant_index =
+        anchor.block_y * block_extent.width + anchor.block_x;
+      const std::array<size_t, 6> values = {
+        coefficient_offset,
+        channel_stride,
+        batch.coefficient_count,
+        static_cast<size_t>(anchor.strategy),
+        raw_quant_index,
+        tile_value_offsets[tile_index],
+      };
+      const size_t record_index =
+        static_cast<size_t>(positions[tile_index]++);
+      for (size_t field = 0; field < values.size(); ++field) {
+        if (values[field] > static_cast<size_t>(
+              std::numeric_limits<int32_t>::max())) {
+          return Status::InvalidArgument(
+            "Prepared AQ color-transform record exceeds Metal limits");
+        }
+        (*records)[6 * record_index + field] =
+          static_cast<int32_t>(values[field]);
+      }
+      tile_value_offsets[tile_index] += batch.coefficient_count;
+    }
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate prepared AQ color-transform metadata");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Prepared AQ color-transform metadata is too large");
+  }
+  return Status::Ok();
 }
 
 [[nodiscard]] bool FinitePositive(float value) noexcept {
@@ -478,6 +564,8 @@ Status MetalPreparedAqEvaluation::Prepare(
   frame_only_resident_quantizer_ =
       preparation.frame_only_resident_quantizer;
   resident_quantization_ = preparation.resident_quantization;
+  borrowed_coding_opsin_ =
+    preparation.resident_coding_opsin.plane[0].buffer != nullptr;
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
@@ -512,6 +600,8 @@ Status MetalPreparedAqEvaluation::Prepare(
 
   std::vector<int32_t> strategy_records;
   std::vector<int32_t> anchor_records;
+  std::vector<int32_t> color_transform_records;
+  std::vector<int32_t> color_tile_offsets;
   std::vector<float> quant_tables;
   std::array<std::vector<std::array<int32_t, 2>>, 7> grouped_anchors;
   try {
@@ -648,6 +738,12 @@ Status MetalPreparedAqEvaluation::Prepare(
   if (!status.ok()) {
     return status;
   }
+  if (resident_quantization_) {
+    status = BuildColorTransformMetadata(
+      row_major_anchors_, batches_, block_extent_, tile_extent_,
+      &color_transform_records, &color_tile_offsets);
+    if (!status.ok()) return status;
+  }
 
   size_t persistent_bytes = 0;
   if (!frame_only_) {
@@ -658,11 +754,13 @@ Status MetalPreparedAqEvaluation::Prepare(
         return status;
     }
   }
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
-                             coding_extent_.width, &persistent_bytes);
-    if (!status.ok())
-      return status;
+  if (!borrowed_coding_opsin_) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
+                               coding_extent_.width, &persistent_bytes);
+      if (!status.ok())
+        return status;
+    }
   }
   if (needs_reconstructed) {
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -699,6 +797,14 @@ Status MetalPreparedAqEvaluation::Prepare(
   if (!status.ok())
     return status;
   if (resident_quantization_) {
+    status = AddPlannedPlane(
+      DeviceElementType::kI32, {6 * block_count_, 1},
+      6 * block_count_, &persistent_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(
+      DeviceElementType::kI32, {color_tile_offsets.size(), 1},
+      color_tile_offsets.size(), &persistent_bytes);
+    if (!status.ok()) return status;
     status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
                              tile_extent_.width, &persistent_bytes);
     if (!status.ok()) return status;
@@ -876,11 +982,19 @@ Status MetalPreparedAqEvaluation::Prepare(
     }
   }
   for (size_t channel = 0; channel < 3; ++channel) {
-    status = persistent_.AllocatePlane(DeviceElementType::kF32, coding_extent_,
-                                       coding_extent_.width, kBufferAlignment,
-                                       &coding_[channel]);
-    if (!status.ok())
-      return status;
+    if (borrowed_coding_opsin_) {
+      const ConstDevicePlaneView plane =
+        preparation.resident_coding_opsin.plane[channel];
+      coding_[channel] = {
+        const_cast<DeviceBuffer*>(plane.buffer), plane.offset_bytes,
+        plane.element_type, plane.extent, plane.row_stride};
+    } else {
+      status = persistent_.AllocatePlane(
+          DeviceElementType::kF32, coding_extent_, coding_extent_.width,
+          kBufferAlignment, &coding_[channel]);
+      if (!status.ok())
+        return status;
+    }
   }
   if (needs_reconstructed) {
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -922,6 +1036,17 @@ Status MetalPreparedAqEvaluation::Prepare(
       kQuantTableValueCount, kBufferAlignment, &quant_tables_);
   if (!status.ok())
     return status;
+  if (resident_quantization_) {
+    status = persistent_.AllocatePlane(
+      DeviceElementType::kI32, {6 * block_count_, 1},
+      6 * block_count_, kBufferAlignment,
+      &color_transform_records_);
+    if (!status.ok()) return status;
+    status = persistent_.AllocatePlane(
+      DeviceElementType::kI32, {color_tile_offsets.size(), 1},
+      color_tile_offsets.size(), kBufferAlignment, &color_tile_offsets_);
+    if (!status.ok()) return status;
+  }
 
   status = staging_.AllocatePlane(DeviceElementType::kI32, block_extent_,
                                   block_extent_.width, kBufferAlignment,
@@ -1109,10 +1234,12 @@ Status MetalPreparedAqEvaluation::Prepare(
       if (!status.ok())
         return status;
     }
-    status = UploadPlane(*backend_, preparation.coding_opsin.plane[channel],
-                         coding_[channel]);
-    if (!status.ok())
-      return status;
+    if (!borrowed_coding_opsin_) {
+      status = UploadPlane(*backend_, preparation.coding_opsin.plane[channel],
+                           coding_[channel]);
+      if (!status.ok())
+        return status;
+    }
   }
   if (!frame_only_) {
     status = UploadPlane(
@@ -1140,6 +1267,23 @@ Status MetalPreparedAqEvaluation::Prepare(
                   quant_tables_);
   if (!status.ok())
     return status;
+  if (resident_quantization_) {
+    status = UploadPlane(
+      *backend_,
+      ConstPlaneI32View{
+        color_transform_records.data(), {color_transform_records.size(), 1},
+        color_transform_records.size()},
+      color_transform_records_);
+    if (status.ok()) {
+      status = UploadPlane(
+        *backend_,
+        ConstPlaneI32View{
+          color_tile_offsets.data(), color_tile_offsets_.extent,
+          color_tile_offsets_.row_stride},
+        color_tile_offsets_);
+    }
+    if (!status.ok()) return status;
+  }
 
   for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
     const AqStrategyBatch &batch = batches_[batch_index];
@@ -1223,6 +1367,12 @@ Status MetalPreparedAqEvaluation::Prepare(
       static_cast<uint32_t>(tile_extent_.width),
       static_cast<uint32_t>(tile_extent_.height),
       static_cast<uint32_t>(y_to_x_.row_stride),
+  };
+  final_cfl_params_ = {
+      static_cast<uint32_t>(tile_extent_.width),
+      static_cast<uint32_t>(tile_extent_.height),
+      static_cast<uint32_t>(y_to_x_.row_stride),
+      static_cast<uint32_t>(anchor_count_),
   };
   if (frame_only_resident_initial_quant_) {
     initial_quant_gradient_params_ = {
@@ -1555,6 +1705,18 @@ Status MetalPreparedAqEvaluation::Reconfigure(
         "Reconfigured AQ anchors do not cover the coding image exactly");
     }
 
+    std::vector<int32_t> color_transform_records;
+    std::vector<int32_t> color_tile_offsets;
+    if (resident_quantization_) {
+      status = BuildColorTransformMetadata(
+        row_major_anchors, batches, block_extent_, tile_extent_,
+        &color_transform_records, &color_tile_offsets);
+      if (!status.ok()) {
+        Invalidate();
+        return status;
+      }
+    }
+
     std::vector<vardct_frame_internal::QuantizedAcTransformView>
       transform_views;
     transform_views.reserve(row_major_anchors.size());
@@ -1592,6 +1754,23 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     if (status.ok()) {
       status = UploadPlane(*backend_, epf_sharpness, epf_sharpness_);
     }
+    if (status.ok() && resident_quantization_) {
+      status = UploadPlane(
+        *backend_,
+        ConstPlaneI32View{
+          color_transform_records.data(),
+          {color_transform_records.size(), 1},
+          color_transform_records.size()},
+        color_transform_records_);
+    }
+    if (status.ok() && resident_quantization_) {
+      status = UploadPlane(
+        *backend_,
+        ConstPlaneI32View{
+          color_tile_offsets.data(), {color_tile_offsets.size(), 1},
+          color_tile_offsets.size()},
+        color_tile_offsets_);
+    }
     if (!status.ok()) {
       Invalidate();
       return status;
@@ -1606,7 +1785,12 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     row_major_anchors_ = std::move(row_major_anchors);
     final_transform_views_ = std::move(transform_views);
     anchor_count_ = anchor_offset;
+    final_cfl_params_.transform_count =
+      static_cast<uint32_t>(anchor_count_);
     invariant_color_correlation_ready_ = false;
+    resident_forward_coefficients_ready_ = false;
+    resident_color_correlation_pending_ = false;
+    resident_color_correlation_readback_needed_ = false;
     CompleteOperation();
     return Status::Ok();
   } catch (const std::bad_alloc&) {
@@ -1954,6 +2138,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       "gjxl profiled resident Butteraugli policy", stages,
       profiling_mode, &submission);
     reset_params_.preserve_error = 0u;
+    reset_params_.preserve_forward_coefficients = 0u;
   } else {
     status = backend_->SubmitCompute(
       "gjxl prepared resident Butteraugli policy",
@@ -2002,6 +2187,14 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           "Metal resident AQ policy produced invalid device numerics (flag " +
           std::to_string(device_error) + ")")
       : status;
+  }
+  if (resident_color_correlation_readback_needed_) {
+    status = ReadbackColorCorrelation();
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+    resident_color_correlation_readback_needed_ = false;
   }
   candidate_readback_stats.control_bytes = sizeof(device_error);
 
@@ -2174,6 +2367,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   }
   if (output.frame != nullptr) *output.frame = std::move(candidate_frame);
   last_readback_stats_ = candidate_readback_stats;
+  resident_forward_coefficients_ready_ = true;
   if (profiling) *profile = std::move(candidate_profile);
   CompleteOperation();
   return Status::Ok();
@@ -2234,7 +2428,48 @@ Status MetalPreparedAqEvaluation::SetInvariantColorCorrelation(
   last_y_to_x_ = std::move(host_y_to_x);
   last_y_to_b_ = std::move(host_y_to_b);
   invariant_color_correlation_ready_ = true;
+  resident_color_correlation_pending_ = false;
+  resident_color_correlation_readback_needed_ = false;
   CompleteOperation();
+  return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
+    ConstPlaneF32View quant_field, float quant_dc) {
+
+  if (!resident_quantization_ || frame_only_) {
+    return Status::FailedPrecondition(
+      "Resident final color correlation was not prepared");
+  }
+  if (!ValidHostPlaneLayout(quant_field) ||
+      quant_field.extent != block_extent_ || !std::isfinite(quant_dc) ||
+      quant_dc <= 0.0f || quant_dc > static_cast<float>(kMaxQuantDc)) {
+    return Status::InvalidArgument(
+      "Resident final color-correlation input is invalid");
+  }
+  for (size_t y = 0; y < block_extent_.height; ++y) {
+    for (size_t x = 0; x < block_extent_.width; ++x) {
+      const float value = quant_field.Row(y)[x];
+      if (!std::isfinite(value) || value <= 0.0f) {
+        return Status::InvalidArgument(
+          "Resident final color-correlation field is invalid");
+      }
+    }
+  }
+
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || state_ != State::kReady) {
+    return Status::FailedPrecondition(
+      "Prepared resident color correlation requires ready state");
+  }
+  // The next resident evaluation already uploads this field and selects its
+  // quantizer. Schedule final CfL in that same command buffer so no additional
+  // submission or host synchronization is introduced.
+  (void)quant_dc;
+  invariant_color_correlation_ready_ = true;
+  resident_forward_coefficients_ready_ = false;
+  resident_color_correlation_pending_ = true;
+  resident_color_correlation_readback_needed_ = false;
   return Status::Ok();
 }
 
@@ -2410,6 +2645,9 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(
     Invalidate();
     return status;
   }
+  reset_params_.preserve_forward_coefficients =
+    resident_quantization_active_ && resident_forward_coefficients_ready_
+      ? 1u : 0u;
 
   if (resident_quantization_active_) {
     resident_quant_selection_params_.quant_dc = input.quant_dc;
@@ -2491,6 +2729,14 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
           "Metal AQ evaluation produced invalid device numerics (flag " +
           std::to_string(device_error) + ")")
       : status;
+  }
+  if (resident_color_correlation_readback_needed_) {
+    status = ReadbackColorCorrelation();
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+    resident_color_correlation_readback_needed_ = false;
   }
   candidate_readback_stats.control_bytes = sizeof(device_error);
 
@@ -2695,6 +2941,9 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
     active_profile_->output_commit_nanoseconds =
       ElapsedNanoseconds(commit_begin);
   }
+  if (resident_quantization_active_) {
+    resident_forward_coefficients_ready_ = true;
+  }
   if (complete_operation) CompleteOperation();
   return Status::Ok();
 }
@@ -2886,6 +3135,21 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
                                      preparation.coding_opsin.extent());
   if (!status.ok())
     return status;
+  const bool resident_coding_specified = std::ranges::any_of(
+    preparation.resident_coding_opsin.plane,
+    [](ConstDevicePlaneView plane) { return plane.buffer != nullptr; });
+  if (resident_coding_specified) {
+    status = ValidateDeviceImage3View(
+      preparation.resident_coding_opsin, backend_->id());
+    if (!status.ok() ||
+        preparation.resident_coding_opsin.plane[0].element_type !=
+          DeviceElementType::kF32 ||
+        preparation.resident_coding_opsin.plane[0].extent !=
+          preparation.coding_opsin.extent()) {
+      return Status::InvalidArgument(
+        "Prepared AQ resident coding image is invalid");
+    }
+  }
   status = ValidateOptions(preparation.options);
   if (!status.ok())
     return status;
@@ -2967,6 +3231,7 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
                                "Prepared AQ original");
   if (!status.ok())
     return status;
+  if (resident_coding_specified) return Status::Ok();
   return ValidateFiniteImage(preparation.coding_opsin,
                              "Prepared AQ coding opsin");
 }
@@ -3551,9 +3816,16 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
     const void* context) {
 
-  EncodeReconstructionSubmission(backend, encoder, context);
   auto& self = *static_cast<MetalPreparedAqEvaluation*>(
     const_cast<void*>(context));
+  const bool prepared_color_correlation =
+    self.resident_color_correlation_pending_;
+  EncodeReconstructionSubmission(backend, encoder, &self);
+  if (prepared_color_correlation) {
+    self.resident_color_correlation_pending_ = false;
+    self.resident_color_correlation_readback_needed_ = true;
+    self.resident_forward_coefficients_ready_ = true;
+  }
   if (!self.exact_linear_reconstruction_) {
     self.EncodePostprocess(backend, encoder);
   }
@@ -3580,8 +3852,8 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     const_cast<void*>(context));
   for (size_t iteration = 0;
        iteration <= self.resident_policy_iterations_; ++iteration) {
-    self.reset_params_.preserve_error = iteration == 0 ? 0u : 1u;
-    EncodeReconstructionSubmission(backend, encoder, &self);
+    self.EncodeResidentReconstruction(
+      backend, encoder, static_cast<uint32_t>(iteration));
 
     if (iteration == 0) {
       self.EncodeResidentPolicyInitialize(backend, encoder);
@@ -3603,6 +3875,23 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
       backend, encoder, static_cast<uint32_t>(iteration));
   }
   self.reset_params_.preserve_error = 0u;
+  self.reset_params_.preserve_forward_coefficients = 0u;
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentReconstruction(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    uint32_t iteration) {
+  reset_params_.preserve_error = iteration == 0 ? 0u : 1u;
+  reset_params_.preserve_forward_coefficients =
+    iteration == 0 && !resident_forward_coefficients_ready_ ? 0u : 1u;
+  const bool prepared_color_correlation =
+    resident_color_correlation_pending_;
+  EncodeReconstructionSubmission(backend, encoder, this);
+  if (prepared_color_correlation) {
+    resident_color_correlation_pending_ = false;
+    resident_color_correlation_readback_needed_ = true;
+    resident_forward_coefficients_ready_ = true;
+  }
 }
 
 void MetalPreparedAqEvaluation::EncodeResidentPolicyInitialize(
@@ -3648,8 +3937,8 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
   MetalPreparedAqEvaluation& self = *stage.self;
   switch (stage.stage) {
     case ResidentProfileStage::kReconstruction:
-      self.reset_params_.preserve_error = stage.iteration == 0 ? 0u : 1u;
-      EncodeReconstructionSubmission(backend, encoder, &self);
+      self.EncodeResidentReconstruction(
+        backend, encoder, stage.iteration);
       break;
     case ResidentProfileStage::kPolicyInitialize:
       self.EncodeResidentPolicyInitialize(backend, encoder);
@@ -3726,7 +4015,7 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      29>
+      30>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
@@ -3735,6 +4024,7 @@ Status CreateAqPipelines(
           {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
           {"gjxl_aq_reset_frame_encoding", &pipelines.reset_frame_encoding},
           {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
+          {"gjxl_aq_final_cfl", &pipelines.final_cfl},
           {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
           {"gjxl_aq_initial_quant_gradient",
            &pipelines.initial_quant_gradient},

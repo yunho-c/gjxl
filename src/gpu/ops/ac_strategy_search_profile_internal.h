@@ -17,6 +17,7 @@ namespace gjxl::gpu_profile_internal {
   ResidentAcStrategySearchInputs resident,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
+  PreparedAcStrategySearch* prepared,
   GpuProfilingSession* profiling_session,
   AcStrategyGpuSearchStats* stats = nullptr);
 

@@ -62,6 +62,7 @@ struct AqResetParams {
   uint32_t block_value_count;
   uint32_t test_error_mask;
   uint32_t preserve_error;
+  uint32_t preserve_forward_coefficients;
 };
 
 struct AqResidentPolicyInitializeParams {
@@ -93,6 +94,13 @@ struct AqInitialCflParams {
   uint32_t tile_width;
   uint32_t tile_height;
   uint32_t color_stride;
+};
+
+struct AqFinalCflParams {
+  uint32_t tile_width;
+  uint32_t tile_height;
+  uint32_t color_stride;
+  uint32_t transform_count;
 };
 
 struct AqInitialQuantGradientParams {
@@ -277,6 +285,9 @@ public:
   Status SetInvariantColorCorrelation(
       ConstPlaneI8View y_to_x,
       ConstPlaneI8View y_to_b) override;
+  Status PrepareInvariantColorCorrelationResident(
+      ConstPlaneF32View quant_field,
+      float quant_dc) override;
   Status AdjustQuantFieldResident(float butteraugli_target,
                                   ConstPlaneF32View input,
                                   PlaneF32View output) override;
@@ -294,12 +305,14 @@ public:
       InitialQuantizationOptions options,
       InitialQuantFieldOutput output,
       QuantizerParams* quantizer = nullptr,
-      float quant_dc = 0.0f) override;
+      float quant_dc = 0.0f,
+      ColorCorrelationMap* initial_color_correlation = nullptr) override;
   Status ComputeInitialQuantizationProfiled(
       InitialQuantizationOptions options,
       InitialQuantFieldOutput output,
       QuantizerParams* quantizer,
       float quant_dc,
+      ColorCorrelationMap* initial_color_correlation,
       gpu_profile_internal::GpuProfilingMode mode,
       gpu_profile_internal::GpuExecutionProfile* profile) override;
   Status GetResidentAcStrategyInputs(
@@ -385,6 +398,7 @@ private:
       InitialQuantFieldOutput output,
       QuantizerParams* quantizer,
       float quant_dc,
+      ColorCorrelationMap* initial_color_correlation,
       gpu_profile_internal::GpuProfilingMode mode,
       gpu_profile_internal::GpuExecutionProfile* profile);
   Status BeginOperation(bool profiling_reserved = false);
@@ -452,6 +466,9 @@ private:
                            MTL::ComputeCommandEncoder* encoder) const;
   void EncodeResidentPolicyInitialize(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeResidentReconstruction(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      uint32_t iteration);
   void EncodeResidentPolicyUpdate(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       uint32_t iteration);
@@ -464,6 +481,10 @@ private:
                             MTL::ComputeCommandEncoder *encoder) const;
   void EncodeResidentQuantizer(MetalBackend& backend,
                                MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeForwardCoefficients(MetalBackend& backend,
+                                 MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeFinalColorCorrelation(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
   void EncodeMaximumErrorReduction(
       MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const;
   [[nodiscard]] std::array<DevicePlaneView, 3>
@@ -486,6 +507,8 @@ private:
   DevicePlaneView inverse_sigma_;
   DevicePlaneView y_to_x_;
   DevicePlaneView y_to_b_;
+  DevicePlaneView color_transform_records_;
+  DevicePlaneView color_tile_offsets_;
   DevicePlaneView initial_quant_pre_erosion_;
   DevicePlaneView initial_quant_unblurred_pixel_mask_;
   DevicePlaneView initial_quant_field_;
@@ -542,6 +565,7 @@ private:
   AqResidentPolicyInitializeParams resident_policy_initialize_params_{};
   AqResidentPolicyUpdateParams resident_policy_update_params_{};
   AqInitialCflParams initial_cfl_params_{};
+  AqFinalCflParams final_cfl_params_{};
   AqInitialQuantGradientParams initial_quant_gradient_params_{};
   AqInitialQuantErosionParams initial_quant_erosion_params_{};
   AqInitialQuantModulationParams initial_quant_modulation_params_{};
@@ -602,11 +626,15 @@ private:
   bool resident_ac_strategy_inputs_ = false;
   bool frame_only_resident_quantizer_ = false;
   bool resident_quantization_ = false;
+  bool borrowed_coding_opsin_ = false;
   bool resident_quantization_active_ = false;
   size_t resident_policy_iterations_ = 0;
   bool resident_initial_quant_ready_ = false;
   bool resident_quantizer_ready_ = false;
   bool invariant_color_correlation_ready_ = false;
+  bool resident_forward_coefficients_ready_ = false;
+  bool resident_color_correlation_pending_ = false;
+  bool resident_color_correlation_readback_needed_ = false;
 };
 
 } // namespace gjxl::metal_internal

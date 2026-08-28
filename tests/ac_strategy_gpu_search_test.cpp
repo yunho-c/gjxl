@@ -4,6 +4,7 @@
 /// @file
 /// Validates staged GPU candidate evaluation inside the CPU AC search.
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -247,6 +248,107 @@ bool CheckValidationAndAtomicCommit(gjxl::GpuBackend& gpu) {
   return true;
 }
 
+bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu) {
+  const SearchFixture fixture({128, 96}, 0.35f);
+  size_t pixel_count = 0;
+  size_t block_count = 0;
+  if (!fixture.pixel_extent.try_area(&pixel_count) ||
+      !fixture.block_extent.try_area(&block_count)) {
+    return false;
+  }
+  std::array<std::vector<float>, 3> packed_opsin;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    packed_opsin[channel].resize(pixel_count);
+    for (size_t y = 0; y < fixture.pixel_extent.height; ++y) {
+      std::copy_n(
+        fixture.Opsin().plane[channel].Row(y), fixture.pixel_extent.width,
+        packed_opsin[channel].data() + y * fixture.pixel_extent.width);
+    }
+  }
+  std::vector<float> packed_quant(block_count);
+  for (size_t y = 0; y < fixture.block_extent.height; ++y) {
+    std::copy_n(
+      fixture.QuantField().Row(y), fixture.block_extent.width,
+      packed_quant.data() + y * fixture.block_extent.width);
+  }
+  std::vector<float> packed_mask(pixel_count);
+  for (size_t y = 0; y < fixture.pixel_extent.height; ++y) {
+    std::copy_n(
+      fixture.PixelMask().Row(y), fixture.pixel_extent.width,
+      packed_mask.data() + y * fixture.pixel_extent.width);
+  }
+
+  std::array<std::unique_ptr<gjxl::DeviceBuffer>, 3> device_opsin;
+  std::unique_ptr<gjxl::DeviceBuffer> device_quant;
+  std::unique_ptr<gjxl::DeviceBuffer> device_mask;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (!gpu.Allocate(pixel_count * sizeof(float), &device_opsin[channel])
+          .ok() ||
+        !gpu.CopyHostToDevice(
+          *device_opsin[channel], packed_opsin[channel].data(),
+          pixel_count * sizeof(float)).ok()) {
+      return false;
+    }
+  }
+  if (!gpu.Allocate(block_count * sizeof(float), &device_quant).ok() ||
+      !gpu.CopyHostToDevice(
+        *device_quant, packed_quant.data(),
+        block_count * sizeof(float)).ok() ||
+      !gpu.Allocate(pixel_count * sizeof(float), &device_mask).ok() ||
+      !gpu.CopyHostToDevice(
+        *device_mask, packed_mask.data(),
+        pixel_count * sizeof(float)).ok()) {
+    return false;
+  }
+  const gjxl::ResidentAcStrategySearchInputs resident{
+    .opsin = {{{
+      {device_opsin[0].get(), 0, gjxl::DeviceElementType::kF32,
+       fixture.pixel_extent, fixture.pixel_extent.width},
+      {device_opsin[1].get(), 0, gjxl::DeviceElementType::kF32,
+       fixture.pixel_extent, fixture.pixel_extent.width},
+      {device_opsin[2].get(), 0, gjxl::DeviceElementType::kF32,
+       fixture.pixel_extent, fixture.pixel_extent.width},
+    }}},
+    .quant_field = {
+      device_quant.get(), 0, gjxl::DeviceElementType::kF32,
+      fixture.block_extent, fixture.block_extent.width},
+    .pixel_mask = {
+      device_mask.get(), 0, gjxl::DeviceElementType::kF32,
+      fixture.pixel_extent, fixture.pixel_extent.width},
+  };
+  gjxl::ColorCorrelationMap color_map;
+  if (!gjxl::ComputeInitialColorCorrelationMap(fixture.Opsin(), &color_map)
+        .ok()) {
+    return false;
+  }
+  gjxl::PreparedAcStrategySearch prepared;
+  gjxl::AcStrategyGrid first;
+  gjxl::AcStrategyGrid second;
+  if (!gjxl::FindAcStrategyGridGpuResident(
+        gpu, fixture.Opsin(), fixture.QuantField(), fixture.PixelMask(),
+        color_map, resident, {.butteraugli_target = 1.2f}, &first, nullptr,
+        &prepared).ok()) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_first = gpu.stats();
+  if (!gjxl::FindAcStrategyGridGpuResident(
+        gpu, fixture.Opsin(), fixture.QuantField(), fixture.PixelMask(),
+        color_map, resident, {.butteraugli_target = 0.9f}, &second, nullptr,
+        &prepared).ok()) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_second = gpu.stats();
+  if (after_second.successful_allocations !=
+        after_first.successful_allocations ||
+      after_second.committed_submissions !=
+        after_first.committed_submissions + 1 ||
+      !first.complete() || !second.complete()) {
+    std::cerr << "Prepared resident AC search did not reuse allocations\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -268,7 +370,8 @@ int main() {
       !CheckSearchParity(*gpu, {80, 72}, 1.2f, 0.8f, false) ||
       !CheckSearchParity(*gpu, {80, 72}, 2.0f, 1.2f, false) ||
       !CheckSearchParity(*gpu, {128, 96}, 1.2f, 1.6f, false) ||
-      !CheckValidationAndAtomicCommit(*gpu)) {
+      !CheckValidationAndAtomicCommit(*gpu) ||
+      !CheckPreparedResidentReuse(*gpu)) {
     return EXIT_FAILURE;
   }
 

@@ -22,6 +22,8 @@
 
 namespace gjxl {
 
+class ColorCorrelationMap;
+
 enum class AqEvaluationMetric {
   kButteraugli,
   kMaximumError,
@@ -37,6 +39,11 @@ struct AqEvaluationOptions {
 struct AqEvaluationPreparation {
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
+  /// Optional resident coding image owned by another prepared operation.
+  /// When present, the host coding view supplies geometry and validation only;
+  /// the backend borrows these device planes instead of allocating and
+  /// uploading a duplicate image. The owner must outlive this evaluation.
+  ConstDeviceImage3View resident_coding_opsin;
   const AcStrategyGrid* strategies = nullptr;
   ConstPlaneU8View epf_sharpness;
   AqEvaluationOptions options;
@@ -183,6 +190,18 @@ public:
       "Prepared invariant color correlation is unavailable");
   }
 
+  /// Derives and retains the fixed final color-correlation map from resident
+  /// coding pixels and the supplied initial quantization field. Backends may
+  /// also retain invariant forward coefficients for later evaluations.
+  [[nodiscard]] virtual Status PrepareInvariantColorCorrelationResident(
+    ConstPlaneF32View quant_field,
+    float quant_dc) {
+    (void)quant_field;
+    (void)quant_dc;
+    return Status::Unavailable(
+      "Prepared resident color correlation is unavailable");
+  }
+
   /// Applies the prepared strategy grid's adjustment to one host field using
   /// device execution. The adjusted field is committed atomically after the
   /// submission and readback complete.
@@ -223,11 +242,13 @@ public:
     InitialQuantizationOptions options,
     InitialQuantFieldOutput output,
     QuantizerParams* quantizer = nullptr,
-    float quant_dc = 0.0f) {
+    float quant_dc = 0.0f,
+    ColorCorrelationMap* initial_color_correlation = nullptr) {
     (void)options;
     (void)output;
     (void)quantizer;
     (void)quant_dc;
+    (void)initial_color_correlation;
     return Status::Unavailable(
       "Prepared resident initial quantization is unavailable");
   }

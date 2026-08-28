@@ -1179,6 +1179,65 @@ bool CheckInvariantColorCorrelation(gjxl::GpuBackend& gpu) {
          CompareOutputs(rebound, expected);
 }
 
+enum class ResidentForwardDispatchPattern {
+  kFirstIterationOnly,
+  kNone,
+};
+
+bool CheckResidentForwardDispatches(
+    const gjxl::gpu_profile_internal::GpuExecutionProfile& profile,
+    size_t expected_reconstruction_count,
+    ResidentForwardDispatchPattern pattern,
+    std::string_view operation,
+    size_t expected_initial_extra_dispatches = 0) {
+  if (profile.submissions.size() != 1) {
+    std::cerr << operation << " returned an invalid submission count\n";
+    return false;
+  }
+  size_t reconstruction_count = 0;
+  size_t initial_dispatch_count = 0;
+  size_t initial_gather_count = 0;
+  bool saw_initial = false;
+  for (const auto& stage : profile.submissions[0].stages) {
+    if (stage.stage_id != "aq.reconstruction") continue;
+    ++reconstruction_count;
+    const size_t gather_count = static_cast<size_t>(std::count_if(
+        stage.dispatches.begin(), stage.dispatches.end(),
+        [](const auto& dispatch) {
+          return dispatch.kernel_id == "gjxl_aq_gather_transform_pixels";
+        }));
+    if (pattern == ResidentForwardDispatchPattern::kNone) {
+      if (gather_count != 0) {
+        std::cerr << operation << " recomputed cached forward transforms\n";
+        return false;
+      }
+      continue;
+    }
+    if (stage.iteration == 0) {
+      saw_initial = true;
+      initial_dispatch_count = stage.dispatches.size();
+      initial_gather_count = gather_count;
+      if (initial_gather_count == 0) {
+        std::cerr << operation << " omitted initial forward preparation\n";
+        return false;
+      }
+    } else if (!saw_initial || gather_count != 0 ||
+               stage.dispatches.size() + 2 * initial_gather_count +
+                   expected_initial_extra_dispatches !=
+                   initial_dispatch_count) {
+      std::cerr << operation << " did not reuse initial forward transforms\n";
+      return false;
+    }
+  }
+  if (reconstruction_count != expected_reconstruction_count ||
+      (pattern == ResidentForwardDispatchPattern::kFirstIterationOnly &&
+       !saw_initial)) {
+    std::cerr << operation << " returned incomplete reconstruction stages\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
   Fixture fixture;
   if (!fixture.Initialize()) return false;
@@ -1396,6 +1455,12 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
     std::cerr << "Profiled resident stages are incomplete\n";
     return false;
   }
+  if (!CheckResidentForwardDispatches(
+          gpu_profile, kIterations + 1,
+          ResidentForwardDispatchPattern::kNone,
+          "repeated resident profile")) {
+    return false;
+  }
   for (size_t index = 0; index < actual_scores.size(); ++index) {
     if (std::abs(profiled_scores[index] - actual_scores[index]) > 2.0e-4) {
       std::cerr << "Profiled resident scores changed\n";
@@ -1410,6 +1475,126 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
         std::cerr << "Profiled resident output changed\n";
         return false;
       }
+    }
+  }
+
+  std::unique_ptr<gjxl::PreparedAqEvaluation> first_use;
+  if (!prepare(&first_use)) return false;
+  auto* first_use_profiler = dynamic_cast<
+      gjxl::gpu_profile_internal::PreparedAqEvaluationProfiler*>(
+      first_use.get());
+  std::vector<double> first_use_scores;
+  gjxl::gpu_profile_internal::GpuExecutionProfile first_use_profile;
+  if (first_use_profiler == nullptr ||
+      !CheckStatus(first_use_profiler->EvaluateResidentButteraugliPolicyProfiled(
+          {
+            .adjusted_initial_quant_field = {
+                initial.data(), blocks, blocks.width},
+            .quant_dc = setup.quant_dc,
+            .butteraugli_target = kTarget,
+            .lower_bound = setup.lower_bound,
+            .upper_bound = setup.upper_bound,
+            .iterations = kIterations,
+          },
+          {.score_history = &first_use_scores},
+          gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+          &first_use_profile),
+          "first-use resident profile") ||
+      !CheckResidentForwardDispatches(
+          first_use_profile, kIterations + 1,
+          ResidentForwardDispatchPattern::kFirstIterationOnly,
+          "first-use resident profile") ||
+      first_use_scores.size() != actual_scores.size()) {
+    return false;
+  }
+  for (size_t index = 0; index < actual_scores.size(); ++index) {
+    if (std::abs(first_use_scores[index] - actual_scores[index]) > 2.0e-4) {
+      std::cerr << "First-use resident profile changed scores\n";
+      return false;
+    }
+  }
+
+  if (!CheckStatus(fused->PrepareInvariantColorCorrelationResident(
+          {initial.data(), blocks, blocks.width}, setup.quant_dc),
+          "profiled resident final CfL preparation")) {
+    return false;
+  }
+  std::vector<double> final_cfl_scores;
+  gjxl::gpu_profile_internal::GpuExecutionProfile final_cfl_profile;
+  if (!CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
+          {
+            .adjusted_initial_quant_field = {
+                initial.data(), blocks, blocks.width},
+            .quant_dc = setup.quant_dc,
+            .butteraugli_target = kTarget,
+            .lower_bound = setup.lower_bound,
+            .upper_bound = setup.upper_bound,
+            .iterations = kIterations,
+          },
+          {.score_history = &final_cfl_scores},
+          gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+          &final_cfl_profile),
+          "resident final CfL profile") ||
+      !CheckResidentForwardDispatches(
+          final_cfl_profile, kIterations + 1,
+          ResidentForwardDispatchPattern::kFirstIterationOnly,
+          "resident final CfL profile", 1)) {
+    return false;
+  }
+  size_t final_cfl_dispatches = 0;
+  for (const auto& stage : final_cfl_profile.submissions[0].stages) {
+    for (const auto& dispatch : stage.dispatches) {
+      if (dispatch.kernel_id == "gjxl_aq_final_cfl") {
+        if (stage.stage_id != "aq.reconstruction" || stage.iteration != 0) {
+          std::cerr << "Resident final CfL dispatch has invalid attribution\n";
+          return false;
+        }
+        ++final_cfl_dispatches;
+      }
+    }
+  }
+  if (final_cfl_dispatches != 1 ||
+      final_cfl_scores.size() != actual_scores.size()) {
+    std::cerr << "Resident final CfL dispatch was not profiled exactly once\n";
+    return false;
+  }
+
+  if (!CheckStatus(fused->Reconfigure(
+          fixture.strategies, {sharpness.data(), blocks, blocks.width}),
+          "profiled resident reconfiguration") ||
+      !CheckStatus(fused->SetInvariantColorCorrelation(
+          fixture.input.View().y_to_x, fixture.input.View().y_to_b),
+          "reconfigured resident invariant CfL")) {
+    return false;
+  }
+  std::vector<double> reconfigured_scores;
+  gjxl::gpu_profile_internal::GpuExecutionProfile reconfigured_profile;
+  if (!CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
+          {
+            .adjusted_initial_quant_field = {
+                initial.data(), blocks, blocks.width},
+            .quant_dc = setup.quant_dc,
+            .butteraugli_target = kTarget,
+            .lower_bound = setup.lower_bound,
+            .upper_bound = setup.upper_bound,
+            .iterations = kIterations,
+          },
+          {.score_history = &reconfigured_scores},
+          gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+          &reconfigured_profile),
+          "reconfigured resident profile") ||
+      !CheckResidentForwardDispatches(
+          reconfigured_profile, kIterations + 1,
+          ResidentForwardDispatchPattern::kFirstIterationOnly,
+          "reconfigured resident profile") ||
+      reconfigured_scores.size() != actual_scores.size()) {
+    return false;
+  }
+  for (size_t index = 0; index < actual_scores.size(); ++index) {
+    if (std::abs(reconfigured_scores[index] - actual_scores[index]) >
+        2.0e-4) {
+      std::cerr << "Reconfigured resident profile changed scores\n";
+      return false;
     }
   }
 

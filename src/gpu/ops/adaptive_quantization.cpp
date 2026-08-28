@@ -114,53 +114,6 @@ void CopyContiguousPlane(
     "GPU adaptive-quantization mode is invalid");
 }
 
-Status PrepareFixedThroughputColorCorrelation(
-  ConstImage3FView opsin,
-  const AcStrategyGrid& strategies,
-  ConstPlaneF32View adjusted_quant_field,
-  float butteraugli_target,
-  prepared_coefficients_internal::PreparedForwardDctCoefficients*
-    forward_coefficients,
-  ColorCorrelationMap* color_correlation) {
-
-  if (forward_coefficients == nullptr || color_correlation == nullptr) {
-    return Status::InvalidArgument(
-      "Fixed throughput CfL output is null");
-  }
-  size_t block_count = 0;
-  if (!strategies.extent().try_area(&block_count)) {
-    return Status::InvalidArgument(
-      "Fixed throughput CfL block grid is too large");
-  }
-  try {
-    Status status =
-      prepared_coefficients_internal::PrepareForwardDctCoefficients(
-        opsin, strategies, forward_coefficients);
-    if (!status.ok()) return status;
-    float quant_dc = 0.0f;
-    status = ComputeInitialQuantDc(butteraugli_target, &quant_dc);
-    if (!status.ok()) return status;
-    std::vector<int32_t> raw_quant(block_count);
-    Quantizer quantizer;
-    status = CreateQuantizerFromField(
-      quant_dc,
-      adjusted_quant_field,
-      {raw_quant.data(), strategies.extent(), strategies.extent().width},
-      &quantizer);
-    if (!status.ok()) return status;
-    return chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
-      *forward_coefficients,
-      {raw_quant.data(), strategies.extent(), strategies.extent().width},
-      quantizer, true, color_correlation);
-  } catch (const std::bad_alloc&) {
-    return Status::OutOfMemory(
-      "Unable to allocate fixed throughput CfL storage");
-  } catch (const std::length_error&) {
-    return Status::InvalidArgument(
-      "Fixed throughput CfL dimensions are too large");
-  }
-}
-
 class PreparedGpuAdaptiveQuantizationEvaluator final
     : public aqi::AdaptiveQuantizationEvaluator {
 public:
@@ -454,6 +407,8 @@ Status RunGpuAdaptiveQuantizationImpl(
   const AqEvaluationPreparation evaluation_preparation{
     .original_linear_rgb = original_linear_rgb,
     .coding_opsin = opsin,
+    .resident_coding_opsin = reusable == nullptr
+      ? ConstDeviceImage3View{} : reusable->resident_coding_opsin,
     .strategies = &strategies,
     .epf_sharpness = epf_sharpness,
     .options = evaluation_options,
@@ -612,37 +567,28 @@ Status RunGpuAdaptiveQuantizationImpl(
 
     prepared_coefficients_internal::PreparedForwardDctCoefficients
       forward_coefficients;
-    ColorCorrelationMap fixed_color_correlation;
     const auto cfl_begin = profiling
       ? gpu_profile_internal::GpuProfilingSession::BeginWallStage()
       : gpu_profile_internal::GpuProfilingSession::TimePoint{};
-    status = resident_quantization
-        ? PrepareFixedThroughputColorCorrelation(
-            opsin, strategies, policy_initial, adjustment_target,
-            &forward_coefficients, &fixed_color_correlation)
-        : prepared_coefficients_internal::PrepareForwardDctCoefficients(
-            opsin, strategies, &forward_coefficients);
+    if (resident_quantization) {
+      float invariant_quant_dc = 0.0f;
+      status = ComputeInitialQuantDc(
+        adjustment_target, &invariant_quant_dc);
+      if (status.ok()) {
+        status = prepared->PrepareInvariantColorCorrelationResident(
+          policy_initial, invariant_quant_dc);
+      }
+      if (!status.ok()) return status;
+    } else {
+      status = prepared_coefficients_internal::PrepareForwardDctCoefficients(
+        opsin, strategies, &forward_coefficients);
+    }
     if (status.ok() && profiling) {
       status = profiling_session->EndWallStage(
         "frontend.fixed_cfl",
         gpu_profile_internal::GpuWallStageKind::kHost, cfl_begin);
     }
     if (!status.ok()) return status;
-    if (resident_quantization) {
-      const auto upload_begin = profiling
-        ? gpu_profile_internal::GpuProfilingSession::BeginWallStage()
-        : gpu_profile_internal::GpuProfilingSession::TimePoint{};
-      status = prepared->SetInvariantColorCorrelation(
-          fixed_color_correlation.y_to_x_map(),
-          fixed_color_correlation.y_to_b_map());
-      if (status.ok() && profiling) {
-        status = profiling_session->EndWallStage(
-          "frontend.cfl_upload",
-          gpu_profile_internal::GpuWallStageKind::kUpload, upload_begin);
-      }
-      if (!status.ok()) return status;
-      forward_coefficients = {};
-    }
 
     if (resident_quantization &&
         options.control_mode ==

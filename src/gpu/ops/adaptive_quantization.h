@@ -8,6 +8,7 @@
 
 #include "codec/adaptive_quantization.h"
 #include "gpu/backend.h"
+#include "gpu/ops/ac_strategy_search.h"
 #include "gpu/ops/aq_evaluation.h"
 
 namespace gjxl {
@@ -162,17 +163,20 @@ struct AdaptiveQuantizationMaterialization {
 /// define the prepared allocation. Compatible calls only rebind the strategy
 /// and EPF metadata; incompatible calls transparently prepare a new state.
 struct PreparedAdaptiveQuantization {
-  GpuBackend* backend = nullptr;
-  ConstImage3FView original_linear_rgb;
-  ConstImage3FView coding_opsin;
-  AqEvaluationOptions evaluation_options;
-  bool resident_quantization = false;
-  std::unique_ptr<PreparedAqEvaluation> evaluation;
+  PreparedAcStrategySearch ac_strategy_search;
   GpuBackend* resident_frontend_backend = nullptr;
   ConstImage3FView resident_frontend_original_linear_rgb;
   ConstImage3FView resident_frontend_coding_opsin;
   SimpleVarDctCodestreamProfile resident_frontend_profile;
   std::unique_ptr<PreparedAqEvaluation> resident_frontend;
+  ConstDeviceImage3View resident_coding_opsin;
+  GpuBackend* backend = nullptr;
+  ConstImage3FView original_linear_rgb;
+  ConstImage3FView coding_opsin;
+  AqEvaluationOptions evaluation_options;
+  bool resident_quantization = false;
+  // Declared after resident_frontend so the borrower is destroyed first.
+  std::unique_ptr<PreparedAqEvaluation> evaluation;
 };
 
 [[nodiscard]] Status RunPreparedGpuAdaptiveQuantization(
