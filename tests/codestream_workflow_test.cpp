@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "codestream/workflow.h"
+#include "codestream/workflow_internal.h"
 #include "core/image.h"
 
 namespace {
@@ -113,6 +114,31 @@ bool CheckDeterministicWorkflow() {
     return false;
   }
 
+  std::vector<uint8_t> profiled;
+  gjxl::VarDctEncodingSummary profiled_summary;
+  gjxl::codestream_internal::VarDctEncodingProfile profile;
+  status = gjxl::codestream_internal::
+    EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
+      image.View(),
+      {.butteraugli_target = 1.0f,
+       .backend = gjxl::VarDctBackendPreference::kCpu},
+      nullptr, false, &profiled, &profiled_summary, &profile);
+  const uint64_t profile_stage_total =
+    profile.input_preparation_nanoseconds +
+    profile.backend_selection_nanoseconds +
+    profile.quantization_pipeline_nanoseconds +
+    profile.codestream_encoding_nanoseconds +
+    profile.summary_assembly_nanoseconds;
+  if (!status.ok() || profiled != first || profiled_summary != first_summary ||
+      profile.execution_backend != gjxl::VarDctExecutionBackend::kCpu ||
+      profile_stage_total == 0 || profile.total_nanoseconds < profile_stage_total ||
+      profile.codestream.total_nanoseconds == 0 ||
+      profile.codestream_encoding_nanoseconds <
+        profile.codestream.total_nanoseconds) {
+    std::cerr << "Profiled public workflow changed its result or profile\n";
+    return false;
+  }
+
   const uint64_t hash = Fnv1a64(first);
   constexpr uint64_t kExpectedHash = 3600727464566139258ull;
   if (hash != kExpectedHash) {
@@ -135,6 +161,8 @@ bool CheckInvalidRequestsAreAtomic() {
     .strategy_counts = {},
     .score_history = {2.0, 1.0},
   };
+  gjxl::codestream_internal::VarDctEncodingProfile original_profile;
+  original_profile.total_nanoseconds = 321;
 
   const auto rejected_atomically = [&](gjxl::ConstImage3FView input,
                                        gjxl::VarDctEncodingOptions options) {
@@ -295,6 +323,19 @@ bool CheckInvalidRequestsAreAtomic() {
       inactive_bytes != baseline_bytes ||
       inactive_summary != baseline_summary) {
     std::cerr << "Inactive rate-control fields affected the request\n";
+    return false;
+  }
+
+  std::vector<uint8_t> profiled_bytes = original_bytes;
+  gjxl::VarDctEncodingSummary profiled_summary = original_summary;
+  auto profile = original_profile;
+  if (gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
+          image.View(), {.butteraugli_target = 0.0f}, nullptr, false,
+          &profiled_bytes, &profiled_summary, &profile).ok() ||
+      profiled_bytes != original_bytes || profiled_summary != original_summary ||
+      profile != original_profile) {
+    std::cerr << "Rejected profiled workflow changed output\n";
     return false;
   }
 

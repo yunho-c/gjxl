@@ -53,6 +53,18 @@ aq-benchmark workload="all" implementation="simd" samples="5" warmups="3" gpu_aq
     cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
     "{{ build_dir }}/release/gjxl_quantization_benchmark" --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
+# Measure only the public CPU/Metal encoder boundary with phase profiles.
+encode-benchmark workload="padded_1080p" implementation="simd" samples="3" warmups="1" gpu_aq="exact-coefficients":
+    cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
+    cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
+    "{{ build_dir }}/release/gjxl_quantization_benchmark" --scope public-workflow --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+
+# Measure the CPU coefficient-decision boundary without the complete AQ loop.
+coefficient-benchmark workload="padded_1080p" samples="9" warmups="2":
+    cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
+    cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
+    "{{ build_dir }}/release/gjxl_quantization_benchmark" --scope coefficient-coding --workload "{{ workload }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+
 # Measure native CPU and prepared Metal Butteraugli paths.
 butteraugli-metal-benchmark workload="all" samples="15" warmups="3":
     cmake -S . -B "{{ build_dir }}/release" -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON

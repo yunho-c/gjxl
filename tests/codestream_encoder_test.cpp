@@ -16,6 +16,7 @@
 #include "codec/vardct_frame.h"
 #include "codestream/bit_writer.h"
 #include "codestream/encoder.h"
+#include "codestream/encoder_internal.h"
 #include "codestream/headers.h"
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
@@ -242,15 +243,28 @@ bool CheckEncodedFrame(
   gjxl::Status status = MakeFrame(width, height, {3541, 10}, {}, &frame);
   std::vector<uint8_t> first;
   std::vector<uint8_t> second;
+  std::vector<uint8_t> profiled;
+  gjxl::codestream_internal::VarDctCodestreamProfile profile;
   if (status.ok()) {
     status = gjxl::EncodeVarDctCodestream(frame, &first);
   }
   if (status.ok()) {
     status = gjxl::EncodeVarDctCodestream(frame, &second);
   }
+  if (status.ok()) {
+    status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+      frame, &profiled, &profile);
+  }
+  const uint64_t profile_stage_total =
+    profile.validation_nanoseconds + profile.dc_tokenization_nanoseconds +
+    profile.ac_tokenization_nanoseconds +
+    profile.entropy_optimization_nanoseconds +
+    profile.section_writing_nanoseconds + profile.assembly_nanoseconds;
   const uint64_t hash = Fnv1a64(first);
   if (!status.ok() || first.size() != expected_size ||
-      hash != expected_hash || first != second || first.size() < 2 ||
+      hash != expected_hash || first != second || first != profiled ||
+      profile_stage_total == 0 ||
+      profile.total_nanoseconds < profile_stage_total || first.size() < 2 ||
       first[0] != 0xFF || first[1] != 0x0A) {
     std::cerr << "Encoded " << width << 'x' << height
               << " fixture failed: " << status.message()
@@ -271,9 +285,16 @@ bool CheckAtomicRejections() {
   const std::vector<uint8_t> sentinel = {9, 8, 7};
   std::vector<uint8_t> output = sentinel;
   gjxl::VarDctEncoderFrame empty;
+  gjxl::codestream_internal::VarDctCodestreamProfile timing_profile;
+  timing_profile.total_nanoseconds = 123;
+  const auto original_timing_profile = timing_profile;
   if (gjxl::EncodeVarDctCodestream(empty, &output).code() !=
         gjxl::StatusCode::kInvalidArgument ||
-      output != sentinel) {
+      output != sentinel ||
+      gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+        empty, &output, &timing_profile).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+      output != sentinel || timing_profile != original_timing_profile) {
     std::cerr << "Rejected empty frame changed the byte output\n";
     return false;
   }

@@ -367,6 +367,9 @@ pipeline, passes the resulting owned `VarDctEncoderFrame` directly to
 analysis summary. The summary reports dimensions, encoded bytes, score history,
 transform-anchor counts, the selected CPU or Metal backend, and the selected
 Metal AQ mode without exposing pipeline scratch storage.
+The complete public-boundary profiling contract and `50x` optimization plan are
+maintained in
+[`metal-encoding-performance.md`](metal-encoding-performance.md).
 
 The default `kAutomatic` preference uses the embedded, process-cached Metal
 backend only on the qualified Apple M4 Pro geometry range and Butteraugli

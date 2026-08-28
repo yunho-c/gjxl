@@ -5,6 +5,7 @@
 
 #include "codestream/encoder.h"
 
+#include <chrono>
 #include <cstddef>
 #include <limits>
 #include <new>
@@ -18,12 +19,35 @@
 #include "codestream/ac_group.h"
 #include "codestream/bit_writer.h"
 #include "codestream/dc_group.h"
+#include "codestream/encoder_internal.h"
 #include "codestream/entropy.h"
 #include "codestream/headers.h"
 #include "codestream/sections.h"
 
 namespace gjxl {
 namespace {
+
+using ProfileClock = std::chrono::steady_clock;
+
+uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
+  return static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      ProfileClock::now() - begin).count());
+}
+
+ProfileClock::time_point ProfileBegin(
+  const codestream_internal::VarDctCodestreamProfile* profile) {
+  return profile == nullptr ? ProfileClock::time_point{} : ProfileClock::now();
+}
+
+void ProfileEnd(
+  const codestream_internal::VarDctCodestreamProfile* requested,
+  ProfileClock::time_point begin,
+  uint64_t* destination) {
+  if (requested != nullptr) {
+    *destination = ElapsedNanoseconds(begin);
+  }
+}
 
 Status AllocationFailure() {
   return Status::OutOfMemory("Codestream assembly allocation failed");
@@ -76,33 +100,49 @@ Status CombineFrameSections(
   return WriteTocAndSections(*sections, writer);
 }
 
-}  // namespace
-
-Status EncodeVarDctCodestream(
-  const VarDctEncoderFrame& frame, std::vector<uint8_t>* output) {
+Status EncodeVarDctCodestreamImpl(
+  const VarDctEncoderFrame& frame,
+  std::vector<uint8_t>* output,
+  codestream_internal::VarDctCodestreamProfile* profile) {
 
   if (output == nullptr) {
     return Status::InvalidArgument("Codestream output is null");
   }
-  if (Status status = ValidateSimpleCodestreamFrame(frame); !status.ok()) {
-    return status;
+  codestream_internal::VarDctCodestreamProfile candidate_profile;
+  const ProfileClock::time_point total_begin = ProfileBegin(profile);
+  const ProfileClock::time_point validation_begin = ProfileBegin(profile);
+  const Status validation = ValidateSimpleCodestreamFrame(frame);
+  ProfileEnd(
+    profile, validation_begin, &candidate_profile.validation_nanoseconds);
+  if (!validation.ok()) {
+    return validation;
   }
 
   try {
+    const ProfileClock::time_point dc_tokenization_begin = ProfileBegin(profile);
     std::vector<SimpleDcGroupTokenStreams> dc_groups;
-    if (Status status = TokenizeSimpleDcGroups(frame, &dc_groups);
-        !status.ok()) {
+    Status status = TokenizeSimpleDcGroups(frame, &dc_groups);
+    ProfileEnd(
+      profile, dc_tokenization_begin,
+      &candidate_profile.dc_tokenization_nanoseconds);
+    if (!status.ok()) {
       return status;
     }
+
+    const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
     std::vector<SimpleAcGroupTokenStream> ac_groups;
-    if (Status status = TokenizeSimpleAcGroups(frame, &ac_groups);
-        !status.ok()) {
+    status = TokenizeSimpleAcGroups(frame, &ac_groups);
+    ProfileEnd(
+      profile, ac_tokenization_begin,
+      &candidate_profile.ac_tokenization_nanoseconds);
+    if (!status.ok()) {
       return status;
     }
     if (dc_groups.empty() || ac_groups.empty()) {
       return Status::Internal("Validated frame produced no codestream groups");
     }
 
+    const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
     std::vector<std::vector<EntropyToken>> dc_streams;
     if (dc_groups.size() > dc_streams.max_size() / 2) {
       return AllocationFailure();
@@ -131,7 +171,11 @@ Status EncodeVarDctCodestream(
         !status.ok()) {
       return status;
     }
+    ProfileEnd(
+      profile, entropy_begin,
+      &candidate_profile.entropy_optimization_nanoseconds);
 
+    const ProfileClock::time_point sections_begin = ProfileBegin(profile);
     if (dc_groups.size() > std::numeric_limits<size_t>::max() -
                            ac_groups.size() - 2) {
       return AllocationFailure();
@@ -167,7 +211,10 @@ Status EncodeVarDctCodestream(
         return status;
       }
     }
+    ProfileEnd(
+      profile, sections_begin, &candidate_profile.section_writing_nanoseconds);
 
+    const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
     BitWriter writer;
     if (Status status = WriteSimpleCodestreamHeader(
           frame.geometry().frame(), &writer);
@@ -189,13 +236,38 @@ Status EncodeVarDctCodestream(
 
     const std::span<const uint8_t> bytes = writer.padded_bytes();
     std::vector<uint8_t> candidate(bytes.begin(), bytes.end());
+    ProfileEnd(
+      profile, assembly_begin, &candidate_profile.assembly_nanoseconds);
     *output = std::move(candidate);
+    if (profile != nullptr) {
+      candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
+      *profile = candidate_profile;
+    }
     return Status::Ok();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
     return AllocationFailure();
   }
+}
+
+}  // namespace
+
+Status EncodeVarDctCodestream(
+  const VarDctEncoderFrame& frame, std::vector<uint8_t>* output) {
+
+  return EncodeVarDctCodestreamImpl(frame, output, nullptr);
+}
+
+Status codestream_internal::EncodeVarDctCodestreamProfiled(
+  const VarDctEncoderFrame& frame,
+  std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile) {
+
+  if (profile == nullptr) {
+    return Status::InvalidArgument("Codestream profile output is null");
+  }
+  return EncodeVarDctCodestreamImpl(frame, output, profile);
 }
 
 }  // namespace gjxl

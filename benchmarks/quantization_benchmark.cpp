@@ -35,6 +35,7 @@
 #include "codec/reconstruction.h"
 #include "codestream/workflow.h"
 #include "codestream/workflow_internal.h"
+#include "core/frame_geometry.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
 #include "gpu/ops/ac_strategy_search.h"
@@ -54,6 +55,12 @@ using Clock = std::chrono::steady_clock;
 constexpr size_t kDefaultWarmups = 3;
 constexpr size_t kDefaultSamples = 5;
 constexpr float kDefaultButteraugliTarget = 1.2f;
+
+enum class BenchmarkScope {
+  kFull,
+  kPublicWorkflow,
+  kCoefficientCoding,
+};
 
 enum class Phase : size_t {
   kInitialQuantField,
@@ -110,6 +117,7 @@ struct CommandLineOptions {
   std::string workload = "all";
   std::string input_path;
   std::string implementation = "simd";
+  BenchmarkScope scope = BenchmarkScope::kFull;
   gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
       gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   float butteraugli_target = kDefaultButteraugliTarget;
@@ -437,6 +445,31 @@ struct FrameCoefficientError {
   throw std::runtime_error("Unknown GPU AQ mode: " + std::string(text));
 }
 
+[[nodiscard]] BenchmarkScope ParseBenchmarkScope(std::string_view text) {
+  if (text == "full") {
+    return BenchmarkScope::kFull;
+  }
+  if (text == "public-workflow") {
+    return BenchmarkScope::kPublicWorkflow;
+  }
+  if (text == "coefficient-coding") {
+    return BenchmarkScope::kCoefficientCoding;
+  }
+  throw std::runtime_error("Unknown benchmark scope: " + std::string(text));
+}
+
+[[nodiscard]] std::string_view BenchmarkScopeName(BenchmarkScope scope) {
+  switch (scope) {
+    case BenchmarkScope::kFull:
+      return "full";
+    case BenchmarkScope::kPublicWorkflow:
+      return "public-workflow";
+    case BenchmarkScope::kCoefficientCoding:
+      return "coefficient-coding";
+  }
+  return "invalid";
+}
+
 [[nodiscard]] std::string_view GpuAqModeName(
     gjxl::GpuAdaptiveQuantizationMode mode) {
   switch (mode) {
@@ -456,6 +489,7 @@ struct FrameCoefficientError {
       std::cout << "usage: gjxl_quantization_benchmark "
                    "[--workload NAME|all] "
                    "[--input IMAGE.ppm] "
+                   "[--scope full|public-workflow|coefficient-coding] "
                    "[--implementation scalar|simd|factored] "
                    "[--gpu-aq exact-coefficients|fully-resident] "
                    "[--distance D] [--warmups N] [--samples N]\n";
@@ -469,6 +503,8 @@ struct FrameCoefficientError {
       options.workload = value;
     } else if (argument == "--input") {
       options.input_path = value;
+    } else if (argument == "--scope") {
+      options.scope = ParseBenchmarkScope(value);
     } else if (argument == "--implementation") {
       if (value != "scalar" && value != "simd" && value != "factored") {
         throw std::runtime_error(
@@ -661,8 +697,330 @@ void PrintStats(std::string_view label, const std::vector<double>& samples) {
             << "]\n";
 }
 
+void PrintRatioStats(std::string_view label,
+                     const std::vector<double>& samples) {
+  const TimingStats stats = Summarize(samples);
+  std::cout << "  ratio " << label << " median=" << stats.median_ms
+            << " range=[" << stats.minimum_ms << ',' << stats.maximum_ms
+            << "]\n";
+}
+
 [[nodiscard]] double NanosecondsToMilliseconds(uint64_t nanoseconds) {
   return static_cast<double>(nanoseconds) / 1.0e6;
+}
+
+constexpr std::array<std::string_view, 12> kWorkflowProfileNames = {
+    "total",
+    "input_preparation",
+    "backend_selection",
+    "quantization_pipeline",
+    "codestream_encoding",
+    "summary_assembly",
+    "codestream_validation",
+    "codestream_dc_tokenization",
+    "codestream_ac_tokenization",
+    "codestream_entropy_optimization",
+    "codestream_section_writing",
+    "codestream_assembly",
+};
+
+using WorkflowProfileSamples =
+    std::array<std::vector<double>, kWorkflowProfileNames.size()>;
+
+void AppendWorkflowProfile(
+    const gjxl::codestream_internal::VarDctEncodingProfile& profile,
+    WorkflowProfileSamples* samples) {
+  const std::array<uint64_t, kWorkflowProfileNames.size()> values = {
+      profile.total_nanoseconds,
+      profile.input_preparation_nanoseconds,
+      profile.backend_selection_nanoseconds,
+      profile.quantization_pipeline_nanoseconds,
+      profile.codestream_encoding_nanoseconds,
+      profile.summary_assembly_nanoseconds,
+      profile.codestream.validation_nanoseconds,
+      profile.codestream.dc_tokenization_nanoseconds,
+      profile.codestream.ac_tokenization_nanoseconds,
+      profile.codestream.entropy_optimization_nanoseconds,
+      profile.codestream.section_writing_nanoseconds,
+      profile.codestream.assembly_nanoseconds,
+  };
+  for (size_t index = 0; index < values.size(); ++index) {
+    (*samples)[index].push_back(NanosecondsToMilliseconds(values[index]));
+  }
+}
+
+void PrintWorkflowProfile(
+    std::string_view backend, const WorkflowProfileSamples& samples) {
+  for (size_t index = 0; index < samples.size(); ++index) {
+    PrintStats(
+        std::string(backend) + "." + std::string(kWorkflowProfileNames[index]),
+        samples[index]);
+  }
+}
+
+void RunCoefficientCodingOnlyWorkload(
+    const WorkloadSpec& spec, size_t warmups, size_t samples,
+    float butteraugli_target, std::string_view input_path,
+    double* global_sink) {
+  ImageStorage original = !input_path.empty()
+      ? LoadPpm(input_path)
+      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
+  if (!spec.flower && input_path.empty()) {
+    if (spec.workflow_gradient) {
+      FillWorkflowGradient(&original);
+    } else {
+      FillSynthetic(&original);
+    }
+  }
+  const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);
+  ImageStorage padded_linear(coding_extent);
+  ImageStorage opsin(coding_extent);
+  ImageStorage preprocessed(coding_extent);
+  EdgePad(original, &padded_linear);
+  RequireStatus(
+      "linear-to-opsin setup",
+      gjxl::LinearRgbToOpsin(
+          padded_linear.ConstView(), 255.0f, opsin.View()));
+  RequireStatus(
+      "Gaborish setup",
+      gjxl::ApplyGaborishInverse(
+          opsin.ConstView(), {1.0f, 1.0f, 1.0f}, preprocessed.View()));
+
+  StageOutput stage(original.extent, coding_extent);
+  RequireStatus(
+      "initial quantization setup",
+      gjxl::ComputeInitialQuantField(
+          opsin.ConstView(), {.butteraugli_target = butteraugli_target},
+          stage.InitialOutput()));
+  gjxl::ColorCorrelationMap initial_color_correlation;
+  RequireStatus(
+      "initial color-correlation setup",
+      gjxl::ComputeInitialColorCorrelationMap(
+          preprocessed.ConstView(), &initial_color_correlation));
+  RequireStatus(
+      "AC-strategy setup",
+      gjxl::FindAcStrategyGrid(
+          preprocessed.ConstView(),
+          {stage.initial_quant.data(), stage.block_extent,
+           stage.block_extent.width},
+          {stage.pixel_mask.data(), coding_extent, coding_extent.width},
+          initial_color_correlation,
+          {.butteraugli_target = butteraugli_target}, &stage.strategies));
+  std::vector<uint8_t> sharpness(
+      stage.block_extent.width * stage.block_extent.height);
+  RequireStatus(
+      "EPF-sharpness setup",
+      gjxl::FillDefaultEpfSharpness(
+          {sharpness.data(), stage.block_extent, stage.block_extent.width}));
+
+  float quant_dc = 0.0f;
+  RequireStatus(
+      "initial DC quantization setup",
+      gjxl::ComputeInitialQuantDc(butteraugli_target, &quant_dc));
+  std::vector<int32_t> raw_quant(
+      stage.block_extent.width * stage.block_extent.height);
+  gjxl::Quantizer quantizer;
+  RequireStatus(
+      "quantizer setup",
+      gjxl::CreateQuantizerFromField(
+          quant_dc,
+          {stage.initial_quant.data(), stage.block_extent,
+           stage.block_extent.width},
+          {raw_quant.data(), stage.block_extent, stage.block_extent.width},
+          &quantizer));
+  gjxl::ColorCorrelationMap color_correlation;
+  RequireStatus(
+      "final color-correlation setup",
+      gjxl::ComputeFinalColorCorrelationMap(
+          preprocessed.ConstView(), stage.strategies,
+          {raw_quant.data(), stage.block_extent, stage.block_extent.width},
+          quantizer, false, &color_correlation));
+  gjxl::FrameGeometry geometry;
+  RequireStatus(
+      "frame geometry setup",
+      gjxl::FrameGeometry::Create(original.extent, &geometry));
+
+  gjxl::VarDctEncoderFrame frame;
+  const auto run_coefficient_coding = [&] {
+    return gjxl::ComputeQuantizedCoefficients(
+        preprocessed.ConstView(),
+        {
+            .geometry = geometry,
+            .strategies = &stage.strategies,
+            .raw_quant_field = {
+                raw_quant.data(), stage.block_extent, stage.block_extent.width},
+            .quantizer = &quantizer,
+            .color_correlation = &color_correlation,
+            .epf_sharpness = {
+                sharpness.data(), stage.block_extent, stage.block_extent.width},
+        },
+        {}, &frame);
+  };
+  for (size_t warmup = 0; warmup < warmups; ++warmup) {
+    RequireStatus("coefficient-coding warmup", run_coefficient_coding());
+  }
+
+  std::vector<double> coding_samples;
+  coding_samples.reserve(samples);
+  double sink = 0.0;
+  for (size_t sample = 0; sample < samples; ++sample) {
+    const auto begin = Clock::now();
+    RequireStatus("coefficient-coding sample", run_coefficient_coding());
+    const auto end = Clock::now();
+    coding_samples.push_back(
+        std::chrono::duration<double, std::milli>(end - begin).count());
+    sink += static_cast<double>(frame.ac_group_count()) +
+            static_cast<double>(frame.raw_quant_field().Row(0)[0]);
+  }
+  if (!frame.valid()) {
+    throw std::runtime_error("Coefficient-coding benchmark frame is invalid");
+  }
+  std::cout << "workload " << spec.name << " source="
+            << original.extent.width << 'x' << original.extent.height
+            << " coding=" << coding_extent.width << 'x'
+            << coding_extent.height << " distance=" << butteraugli_target
+            << " scope=coefficient-coding\n";
+  PrintStats("coefficient_coding", coding_samples);
+  std::cout << "  sink=" << sink << '\n';
+  *global_sink += sink;
+}
+
+void RunPublicWorkflowOnlyWorkload(
+    const WorkloadSpec& spec, size_t warmups, size_t samples,
+    float butteraugli_target,
+    gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
+    std::string_view input_path, gjxl::GpuBackend& gpu,
+    double* global_sink) {
+  ImageStorage original = !input_path.empty()
+      ? LoadPpm(input_path)
+      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
+  if (!spec.flower && input_path.empty()) {
+    if (spec.workflow_gradient) {
+      FillWorkflowGradient(&original);
+    } else {
+      FillSynthetic(&original);
+    }
+  }
+
+  const auto encode = [&](gjxl::VarDctBackendPreference backend,
+                          gjxl::GpuAdaptiveQuantizationMode mode,
+                          std::vector<uint8_t>* bytes,
+                          gjxl::VarDctEncodingSummary* summary,
+                          gjxl::codestream_internal::VarDctEncodingProfile*
+                              profile) {
+    return gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
+            original.ConstView(),
+            {.butteraugli_target = butteraugli_target,
+             .backend = backend,
+             .metal_aq_mode = mode},
+            backend == gjxl::VarDctBackendPreference::kMetal ? &gpu : nullptr,
+            true, bytes, summary, profile);
+  };
+
+  std::vector<uint8_t> cpu_bytes;
+  std::vector<uint8_t> gpu_bytes;
+  gjxl::VarDctEncodingSummary cpu_summary;
+  gjxl::VarDctEncodingSummary gpu_summary;
+  gjxl::codestream_internal::VarDctEncodingProfile ignored_profile;
+  RequireStatus(
+      "CPU public-workflow validation",
+      encode(gjxl::VarDctBackendPreference::kCpu,
+             gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+             &cpu_bytes, &cpu_summary, &ignored_profile));
+  RequireStatus(
+      "Metal public-workflow validation",
+      encode(gjxl::VarDctBackendPreference::kMetal, gpu_aq_mode, &gpu_bytes,
+             &gpu_summary, &ignored_profile));
+  const bool codestreams_equal = cpu_bytes == gpu_bytes;
+  if (cpu_bytes.size() < 2 || gpu_bytes.size() < 2 ||
+      cpu_bytes[0] != 0xff || cpu_bytes[1] != 0x0a ||
+      gpu_bytes[0] != 0xff || gpu_bytes[1] != 0x0a ||
+      cpu_summary.execution_backend != gjxl::VarDctExecutionBackend::kCpu ||
+      gpu_summary.execution_backend != gjxl::VarDctExecutionBackend::kMetal ||
+      (gpu_aq_mode ==
+           gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
+       !codestreams_equal)) {
+    throw std::runtime_error(
+        "Public-workflow benchmark validation failed");
+  }
+
+  for (size_t warmup = 0; warmup < warmups; ++warmup) {
+    gjxl::codestream_internal::VarDctEncodingProfile warmup_profile;
+    if ((warmup & 1u) == 0) {
+      RequireStatus(
+          "CPU public-workflow warmup",
+          encode(gjxl::VarDctBackendPreference::kCpu,
+                 gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                 &cpu_bytes, &cpu_summary, &warmup_profile));
+      RequireStatus(
+          "Metal public-workflow warmup",
+          encode(gjxl::VarDctBackendPreference::kMetal, gpu_aq_mode,
+                 &gpu_bytes, &gpu_summary, &warmup_profile));
+    } else {
+      RequireStatus(
+          "Metal public-workflow warmup",
+          encode(gjxl::VarDctBackendPreference::kMetal, gpu_aq_mode,
+                 &gpu_bytes, &gpu_summary, &warmup_profile));
+      RequireStatus(
+          "CPU public-workflow warmup",
+          encode(gjxl::VarDctBackendPreference::kCpu,
+                 gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                 &cpu_bytes, &cpu_summary, &warmup_profile));
+    }
+  }
+
+  WorkflowProfileSamples cpu_samples;
+  WorkflowProfileSamples gpu_samples;
+  std::vector<double> paired_speedups;
+  double sink = 0.0;
+  for (size_t sample = 0; sample < samples; ++sample) {
+    gjxl::codestream_internal::VarDctEncodingProfile cpu_profile;
+    gjxl::codestream_internal::VarDctEncodingProfile gpu_profile;
+    if ((sample & 1u) == 0) {
+      RequireStatus(
+          "CPU public-workflow sample",
+          encode(gjxl::VarDctBackendPreference::kCpu,
+                 gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                 &cpu_bytes, &cpu_summary, &cpu_profile));
+      RequireStatus(
+          "Metal public-workflow sample",
+          encode(gjxl::VarDctBackendPreference::kMetal, gpu_aq_mode,
+                 &gpu_bytes, &gpu_summary, &gpu_profile));
+    } else {
+      RequireStatus(
+          "Metal public-workflow sample",
+          encode(gjxl::VarDctBackendPreference::kMetal, gpu_aq_mode,
+                 &gpu_bytes, &gpu_summary, &gpu_profile));
+      RequireStatus(
+          "CPU public-workflow sample",
+          encode(gjxl::VarDctBackendPreference::kCpu,
+                 gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                 &cpu_bytes, &cpu_summary, &cpu_profile));
+    }
+    AppendWorkflowProfile(cpu_profile, &cpu_samples);
+    AppendWorkflowProfile(gpu_profile, &gpu_samples);
+    paired_speedups.push_back(
+        static_cast<double>(cpu_profile.total_nanoseconds) /
+        static_cast<double>(gpu_profile.total_nanoseconds));
+    sink += static_cast<double>(cpu_bytes.size() + gpu_bytes.size()) +
+            cpu_summary.score_history.back() +
+            gpu_summary.score_history.back();
+  }
+
+  std::cout << "workload " << spec.name << " source="
+            << original.extent.width << 'x' << original.extent.height
+            << " distance=" << butteraugli_target
+            << " gpu_aq=" << GpuAqModeName(gpu_aq_mode)
+            << " scope=public-workflow codestream="
+            << (codestreams_equal ? "exact" : "different")
+            << " cpu_bytes=" << cpu_bytes.size()
+            << " gpu_bytes=" << gpu_bytes.size() << '\n';
+  PrintWorkflowProfile("cpu", cpu_samples);
+  PrintWorkflowProfile("metal", gpu_samples);
+  PrintRatioStats("paired_speedup_x", paired_speedups);
+  std::cout << "  sink=" << sink << '\n';
+  *global_sink += sink;
 }
 
 void RunGpuCompleteAqOnlyWorkload(
@@ -1575,26 +1933,53 @@ int main(int argc, char** argv) {
     const gjxl::MetalBackendOptions backend_options =
         BackendOptions(options.implementation);
     std::unique_ptr<gjxl::GpuBackend> gpu;
-    RequireStatus("Create embedded benchmark Metal backend",
-                  gjxl::CreateEmbeddedMetalBackend(backend_options, &gpu));
+    if (options.scope != BenchmarkScope::kCoefficientCoding) {
+      RequireStatus("Create embedded benchmark Metal backend",
+                    gjxl::CreateEmbeddedMetalBackend(backend_options, &gpu));
+    }
     std::cout << std::fixed << std::setprecision(3)
-              << "CPU/Metal quantization benchmark: backend=" << gpu->name()
+              << "CPU/Metal quantization benchmark: backend="
+              << (gpu == nullptr ? "cpu-only" : gpu->name())
               << " implementation=" << options.implementation
+              << " scope=" << BenchmarkScopeName(options.scope)
               << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
               << " distance=" << options.butteraugli_target
               << " warmups=" << options.warmups
-              << " samples=" << options.samples
-              << " rotated_phases=" << kPhaseCount << '\n';
+              << " samples=" << options.samples;
+    if (options.scope == BenchmarkScope::kFull) {
+      std::cout << " rotated_phases=" << kPhaseCount;
+    }
+    std::cout << '\n';
     double sink = 0.0;
     if (!options.input_path.empty()) {
-      RunWorkload({"external_input", {}, false}, options.warmups,
-                  options.samples, options.butteraugli_target,
-                  options.gpu_aq_mode, options.input_path, *gpu,
-                  backend_options, &sink);
+      if (options.scope == BenchmarkScope::kCoefficientCoding) {
+        RunCoefficientCodingOnlyWorkload(
+            {"external_input", {}, false}, options.warmups, options.samples,
+            options.butteraugli_target, options.input_path, &sink);
+      } else if (options.scope == BenchmarkScope::kPublicWorkflow) {
+        RunPublicWorkflowOnlyWorkload(
+            {"external_input", {}, false}, options.warmups, options.samples,
+            options.butteraugli_target, options.gpu_aq_mode,
+            options.input_path, *gpu, &sink);
+      } else {
+        RunWorkload({"external_input", {}, false}, options.warmups,
+                    options.samples, options.butteraugli_target,
+                    options.gpu_aq_mode, options.input_path, *gpu,
+                    backend_options, &sink);
+      }
     } else {
       for (const WorkloadSpec& workload : kWorkloads) {
         if (options.workload == "all" || options.workload == workload.name) {
-          if (workload.gpu_complete_aq_only) {
+          if (options.scope == BenchmarkScope::kCoefficientCoding) {
+            RunCoefficientCodingOnlyWorkload(
+                workload, options.warmups, options.samples,
+                options.butteraugli_target, {}, &sink);
+          } else if (options.scope == BenchmarkScope::kPublicWorkflow) {
+            RunPublicWorkflowOnlyWorkload(
+                workload, options.warmups, options.samples,
+                options.butteraugli_target, options.gpu_aq_mode, {}, *gpu,
+                &sink);
+          } else if (workload.gpu_complete_aq_only) {
             RunGpuCompleteAqOnlyWorkload(
                 workload, options.warmups, options.samples,
                 options.butteraugli_target, options.gpu_aq_mode, *gpu, &sink);

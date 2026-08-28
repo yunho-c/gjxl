@@ -13,6 +13,9 @@ performs two quant-field updates and therefore three complete
 encode/reconstruct/measure evaluations. A useful Metal path must keep the
 large images and intermediate planes resident across those evaluations and
 limit synchronization to the data required by the CPU update policy.
+The cross-stage plan for reaching the complete encoder's `50x` performance
+target is maintained in
+[`metal-encoding-performance.md`](metal-encoding-performance.md).
 
 The public GPU substrate now supports buffer allocation, host transfers,
 strided device images, reusable scratch, per-command submission handles,
