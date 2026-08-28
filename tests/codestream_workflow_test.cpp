@@ -74,6 +74,17 @@ bool CheckDeterministicWorkflow() {
   if (!status.ok() || first.size() < 2 || first[0] != 0xff ||
       first[1] != 0x0a || first_summary.extent != kExtent ||
       first_summary.encoded_bytes != first.size() ||
+      first_summary.rate_control_mode !=
+          gjxl::VarDctRateControlMode::kButteraugliTarget ||
+      first_summary.requested_target_bytes != 0 ||
+      first_summary.effective_target_bytes != 0 ||
+      first_summary.requested_target_bits_per_pixel != 0.0 ||
+      first_summary.achieved_bits_per_pixel !=
+          8.0 * static_cast<double>(first.size()) /
+            static_cast<double>(kExtent.width * kExtent.height) ||
+      first_summary.selected_butteraugli_target != 1.0f ||
+      first_summary.encode_attempt_count != 1 ||
+      first_summary.target_size_met ||
       first_summary.score_history.size() != 3 ||
       first_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kCpu) {
@@ -134,8 +145,74 @@ bool CheckInvalidRequestsAreAtomic() {
       summary == original_summary;
   };
 
+  const auto unavailable_atomically = [&](gjxl::VarDctEncodingOptions options) {
+    std::vector<uint8_t> bytes = original_bytes;
+    gjxl::VarDctEncodingSummary summary = original_summary;
+    const gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
+      image.View(), options, &bytes, &summary);
+    return status.code() == gjxl::StatusCode::kUnavailable &&
+      bytes == original_bytes && summary == original_summary;
+  };
+
   if (!rejected_atomically(image.View(), {.butteraugli_target = 0.0f}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target =
+             std::numeric_limits<float>::quiet_NaN()}) ||
       !rejected_atomically({}, {.butteraugli_target = 1.0f}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             static_cast<gjxl::VarDctRateControlMode>(99)}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             gjxl::VarDctRateControlMode::kMaximumError}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             gjxl::VarDctRateControlMode::kMaximumError,
+           .maximum_error = {1.0f, 0.0f, 1.0f}}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             gjxl::VarDctRateControlMode::kMaximumError,
+           .maximum_error = {
+             1.0f, std::numeric_limits<float>::quiet_NaN(), 1.0f}}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             gjxl::VarDctRateControlMode::kTargetBytes}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             gjxl::VarDctRateControlMode::kTargetBitsPerPixel}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             gjxl::VarDctRateControlMode::kTargetBitsPerPixel,
+           .target_bits_per_pixel =
+             std::numeric_limits<double>::quiet_NaN()}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             gjxl::VarDctRateControlMode::kTargetBitsPerPixel,
+           .target_bits_per_pixel = 1.0e-9}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .rate_control_mode =
+             gjxl::VarDctRateControlMode::kTargetBitsPerPixel,
+           .target_bits_per_pixel =
+             std::numeric_limits<double>::max()}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
@@ -159,6 +236,50 @@ bool CheckInvalidRequestsAreAtomic() {
            .metal_aq_mode =
                static_cast<gjxl::GpuAdaptiveQuantizationMode>(99)})) {
     std::cerr << "Invalid workflow request changed output\n";
+    return false;
+  }
+
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  if (!unavailable_atomically(
+        {.butteraugli_target = nan,
+         .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError,
+         .maximum_error = {1.0f, 2.0f, 3.0f}}) ||
+      !unavailable_atomically(
+        {.butteraugli_target = nan,
+         .rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+         .target_bytes = 1024,
+         .target_bits_per_pixel =
+           std::numeric_limits<double>::quiet_NaN()}) ||
+      !unavailable_atomically(
+        {.butteraugli_target = nan,
+         .rate_control_mode =
+           gjxl::VarDctRateControlMode::kTargetBitsPerPixel,
+         .target_bytes = 1024,
+         .target_bits_per_pixel = 1.0})) {
+    std::cerr << "Valid unavailable rate-control mode changed output\n";
+    return false;
+  }
+
+  gjxl::VarDctEncodingOptions inactive_fields;
+  inactive_fields.butteraugli_target = 1.0f;
+  inactive_fields.maximum_error = {nan, -1.0f, 0.0f};
+  inactive_fields.target_bytes = 1024;
+  inactive_fields.target_bits_per_pixel =
+    std::numeric_limits<double>::quiet_NaN();
+  std::vector<uint8_t> baseline_bytes;
+  gjxl::VarDctEncodingSummary baseline_summary;
+  const gjxl::Status baseline_status =
+    gjxl::EncodeLinearRgbVarDctCodestream(
+      image.View(), {}, &baseline_bytes, &baseline_summary);
+  std::vector<uint8_t> inactive_bytes;
+  gjxl::VarDctEncodingSummary inactive_summary;
+  const gjxl::Status inactive_status =
+    gjxl::EncodeLinearRgbVarDctCodestream(
+      image.View(), inactive_fields, &inactive_bytes, &inactive_summary);
+  if (!baseline_status.ok() || !inactive_status.ok() ||
+      inactive_bytes != baseline_bytes ||
+      inactive_summary != baseline_summary) {
+    std::cerr << "Inactive rate-control fields affected the request\n";
     return false;
   }
 

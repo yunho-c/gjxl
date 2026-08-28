@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -41,6 +42,79 @@ constexpr size_t kAutomaticMetalMinimumCodingDimension = 96;
 constexpr float kAutomaticMetalMinimumButteraugliTarget = 1.0f;
 constexpr float kAutomaticMetalMaximumButteraugliTarget = 1.2f;
 constexpr std::string_view kQualifiedMetalBackend = "Metal: Apple M4 Pro";
+
+Status EffectiveTargetBytes(
+  Extent2D source_extent,
+  double bits_per_pixel,
+  size_t* target_bytes) {
+
+  if (target_bytes == nullptr || !std::isfinite(bits_per_pixel) ||
+      bits_per_pixel <= 0.0) {
+    return Status::InvalidArgument(
+      "Target bits per pixel must be finite and positive");
+  }
+  size_t pixel_count = 0;
+  if (!source_extent.try_area(&pixel_count)) {
+    return Status::InvalidArgument(
+      "Target bits-per-pixel source dimensions are too large");
+  }
+  const long double bytes =
+    static_cast<long double>(bits_per_pixel) *
+    static_cast<long double>(pixel_count) / 8.0L;
+  if (bytes < 1.0L ||
+      bytes > static_cast<long double>(std::numeric_limits<size_t>::max())) {
+    return Status::InvalidArgument(
+      "Target bits per pixel does not produce a representable byte budget");
+  }
+  *target_bytes = static_cast<size_t>(bytes);
+  return Status::Ok();
+}
+
+Status ValidateRateControlOptions(
+  Extent2D source_extent,
+  const VarDctEncodingOptions& options,
+  size_t* effective_target_bytes) {
+
+  if (effective_target_bytes == nullptr) {
+    return Status::InvalidArgument(
+      "Effective target-byte output is null");
+  }
+  *effective_target_bytes = 0;
+  switch (options.rate_control_mode) {
+    case VarDctRateControlMode::kButteraugliTarget:
+      if (!std::isfinite(options.butteraugli_target) ||
+          options.butteraugli_target <= 0.0f) {
+        return Status::InvalidArgument(
+          "Butteraugli target must be finite and positive");
+      }
+      return Status::Ok();
+
+    case VarDctRateControlMode::kMaximumError:
+      for (float maximum_error : options.maximum_error) {
+        if (!std::isfinite(maximum_error) || maximum_error <= 0.0f) {
+          return Status::InvalidArgument(
+            "Maximum-error limits must be finite and positive");
+        }
+      }
+      return Status::Ok();
+
+    case VarDctRateControlMode::kTargetBytes:
+      if (options.target_bytes == 0) {
+        return Status::InvalidArgument(
+          "Target byte count must be nonzero");
+      }
+      *effective_target_bytes = options.target_bytes;
+      return Status::Ok();
+
+    case VarDctRateControlMode::kTargetBitsPerPixel:
+      return EffectiveTargetBytes(
+        source_extent,
+        options.target_bits_per_pixel,
+        effective_target_bytes);
+  }
+  return Status::InvalidArgument(
+    "VarDCT rate-control mode is invalid");
+}
 
 MetalBackendOptions ProductionMetalBackendOptions() {
   constexpr auto implementation =
@@ -197,13 +271,16 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary) {
 
-  if (codestream == nullptr || !linear_rgb.valid() ||
-      !std::isfinite(options.butteraugli_target) ||
-      options.butteraugli_target <= 0.0f) {
+  if (codestream == nullptr || !linear_rgb.valid()) {
     return Status::InvalidArgument(
-      "VarDCT encoding input, target, or output is invalid");
+      "VarDCT encoding input or output is invalid");
   }
-
+  size_t effective_target_bytes = 0;
+  Status status = ValidateRateControlOptions(
+    linear_rgb.extent(), options, &effective_target_bytes);
+  if (!status.ok()) {
+    return status;
+  }
   switch (options.backend) {
     case VarDctBackendPreference::kAutomatic:
     case VarDctBackendPreference::kCpu:
@@ -226,10 +303,15 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       return Status::InvalidArgument(
         "VarDCT Metal AQ mode is invalid");
   }
+  if (options.rate_control_mode !=
+      VarDctRateControlMode::kButteraugliTarget) {
+    return Status::Unavailable(
+      "Requested VarDCT rate-control mode is not implemented");
+  }
 
   try {
     FrameGeometry geometry;
-    Status status = FrameGeometry::Create(linear_rgb.extent(), &geometry);
+    status = FrameGeometry::Create(linear_rgb.extent(), &geometry);
     if (!status.ok()) {
       return status;
     }
@@ -321,6 +403,27 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     VarDctEncodingSummary candidate_summary;
     candidate_summary.extent = linear_rgb.extent();
     candidate_summary.encoded_bytes = candidate.size();
+    candidate_summary.rate_control_mode = options.rate_control_mode;
+    candidate_summary.effective_target_bytes = effective_target_bytes;
+    if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes) {
+      candidate_summary.requested_target_bytes = options.target_bytes;
+    } else if (options.rate_control_mode ==
+               VarDctRateControlMode::kTargetBitsPerPixel) {
+      candidate_summary.requested_target_bits_per_pixel =
+        options.target_bits_per_pixel;
+    }
+    size_t source_pixel_count = 0;
+    if (!linear_rgb.extent().try_area(&source_pixel_count) ||
+        source_pixel_count == 0) {
+      return Status::Internal(
+        "Validated VarDCT source has no representable pixels");
+    }
+    candidate_summary.achieved_bits_per_pixel =
+      8.0 * static_cast<double>(candidate.size()) /
+      static_cast<double>(source_pixel_count);
+    candidate_summary.selected_butteraugli_target =
+      options.butteraugli_target;
+    candidate_summary.encode_attempt_count = 1;
     candidate_summary.score_history = std::move(pipeline.score_history);
     candidate_summary.execution_backend = selected_metal
       ? VarDctExecutionBackend::kMetal

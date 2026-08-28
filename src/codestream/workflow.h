@@ -30,9 +30,22 @@ enum class VarDctExecutionBackend {
   kMetal,
 };
 
+enum class VarDctRateControlMode {
+  kButteraugliTarget,
+  kMaximumError,
+  kTargetBytes,
+  kTargetBitsPerPixel,
+};
+
 /// Options for the public VarDCT encoding workflow.
 struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
+  VarDctRateControlMode rate_control_mode =
+    VarDctRateControlMode::kButteraugliTarget;
+  /// Maximum normalized reconstruction error for X, Y, and B respectively.
+  std::array<float, 3> maximum_error{};
+  size_t target_bytes = 0;
+  double target_bits_per_pixel = 0.0;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
   /// Selects the Metal AQ implementation. Fully resident mode requires an
   /// explicitly forced Metal backend and may change encoder decisions.
@@ -44,6 +57,15 @@ struct VarDctEncodingOptions {
 struct VarDctEncodingSummary {
   Extent2D extent;
   size_t encoded_bytes = 0;
+  VarDctRateControlMode rate_control_mode =
+    VarDctRateControlMode::kButteraugliTarget;
+  size_t requested_target_bytes = 0;
+  size_t effective_target_bytes = 0;
+  double requested_target_bits_per_pixel = 0.0;
+  double achieved_bits_per_pixel = 0.0;
+  float selected_butteraugli_target = 0.0f;
+  size_t encode_attempt_count = 0;
+  bool target_size_met = false;
   std::array<size_t, kAcStrategyCount> strategy_counts{};
   std::vector<double> score_history;
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;
