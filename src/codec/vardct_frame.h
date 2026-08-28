@@ -24,8 +24,8 @@ class VarDctEncoderFrame;
 enum class AcCoefficientDecisionMode {
   /// Applies the pinned cross-channel AdjustQuantBlockAC policy.
   kAdjustedSharedQuant,
-  /// Retains the supplied raw quant. This is the explicit CPU oracle for the
-  /// experimental fully resident path until its device adjustment pass lands.
+  /// Retains the supplied raw quant as an independently testable diagnostic
+  /// coefficient-coding mode.
   kFixedRawQuant,
 };
 

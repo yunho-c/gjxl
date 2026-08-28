@@ -1268,6 +1268,28 @@ bool CheckCapabilityBoundary() {
     prepared == nullptr;
 }
 
+bool CheckInvalidCoefficientDecisionMode(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const std::vector<uint8_t> sharpness(blocks.width * blocks.height, 4);
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  return ExpectCode(gjxl::PrepareAqEvaluation(
+      gpu,
+      {
+        .original_linear_rgb = fixture.original.View(),
+        .coding_opsin = fixture.coding.View(),
+        .strategies = &fixture.strategies,
+        .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+        .options = MakeOptions(),
+        .coefficient_decision_mode =
+            static_cast<gjxl::AcCoefficientDecisionMode>(99),
+      },
+      &prepared), gjxl::StatusCode::kInvalidArgument,
+      "invalid coefficient decision mode") &&
+    prepared == nullptr;
+}
+
 }  // namespace
 
 int main() {
@@ -1275,6 +1297,7 @@ int main() {
   if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
                    "Metal AQ backend") ||
       !CheckCapabilityBoundary() ||
+      !CheckInvalidCoefficientDecisionMode(*gpu) ||
       !CheckReductionCorpus(*gpu) ||
       !CheckMaximumErrorReduction(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||

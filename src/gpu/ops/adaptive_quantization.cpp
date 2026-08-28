@@ -417,6 +417,8 @@ Status RunGpuAdaptiveQuantizationImpl(
         .strategies = &strategies,
         .epf_sharpness = epf_sharpness,
         .options = evaluation_options,
+        .coefficient_decision_mode =
+          AcCoefficientDecisionMode::kAdjustedSharedQuant,
       },
       &local_prepared);
     prepared = local_prepared.get();
@@ -463,6 +465,8 @@ Status RunGpuAdaptiveQuantizationImpl(
           .strategies = &strategies,
           .epf_sharpness = epf_sharpness,
           .options = evaluation_options,
+          .coefficient_decision_mode =
+            AcCoefficientDecisionMode::kAdjustedSharedQuant,
         },
         &reusable->evaluation);
       if (status.ok()) {
@@ -616,6 +620,8 @@ Status RunGpuFrameOnlyQuantization(
         .frame_only = true,
         .frame_only_inverse_gaborish =
           options.profile.loop_filter.gaborish,
+        .coefficient_decision_mode =
+          AcCoefficientDecisionMode::kAdjustedSharedQuant,
       },
       &prepared);
     if (!status.ok()) return status;

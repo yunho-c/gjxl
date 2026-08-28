@@ -29,6 +29,11 @@ struct AqReconstructionParams {
   uint quant_dc;
   float x_matrix_multiplier;
   float b_matrix_multiplier;
+  uint adjust_ac_quant;
+  uint inverse_sigma_stride;
+  uint epf_sharpness_stride;
+  float epf_quant_multiplier;
+  float epf_sharpness_lut[8];
 };
 
 struct AqResetParams {
@@ -227,7 +232,7 @@ kernel void gjxl_aq_gather_transform_pixels(
 kernel void gjxl_aq_encode_reconstruction_coefficients(
   device const uint2* anchors [[buffer(0)]],
   device const float* quant_tables [[buffer(1)]],
-  device const int* raw_quant [[buffer(2)]],
+  device int* raw_quant [[buffer(2)]],
   device const char* y_to_x [[buffer(3)]],
   device const char* y_to_b [[buffer(4)]],
   device const float* forward_coefficients [[buffer(5)]],
@@ -237,6 +242,8 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   device int* quantized_dc [[buffer(9)]],
   device atomic_uint* error [[buffer(10)]],
   constant AqReconstructionParams& params [[buffer(11)]],
+  device float* inverse_sigma [[buffer(12)]],
+  device const uchar* epf_sharpness [[buffer(13)]],
   uint anchor_index [[threadgroup_position_in_grid]],
   uint thread_index [[thread_index_in_threadgroup]]) {
 
@@ -250,11 +257,66 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   const uint2 table_offsets = aq_quant_table_offsets(params.strategy);
   const uint coefficient_width = max(params.pixel_width, params.pixel_height);
   const uint coefficient_height = min(params.pixel_width, params.pixel_height);
-  const int raw = raw_quant[anchor.y * params.raw_quant_stride + anchor.x];
+  const uint raw_index = anchor.y * params.raw_quant_stride + anchor.x;
+  const int initial_raw = raw_quant[raw_index];
   const uint color_index =
     (anchor.y / 8u) * params.color_stride + anchor.x / 8u;
   const float cfl_x = float(y_to_x[color_index]) * (1.0f / 84.0f);
   const float cfl_b = 1.0f + float(y_to_b[color_index]) * (1.0f / 84.0f);
+  threadgroup int selected_raw = 0;
+  threadgroup float selected_y_thresholds[4] = {};
+  if (thread_index == 0u) {
+    if (params.adjust_ac_quant != 0u) {
+      const AqAdjustedQuantization decision = aq_select_adjusted_quantization(
+        forward_coefficients + transform_offset, quant_tables,
+        params.coefficient_count, group_channel_stride,
+        coefficient_width, coefficient_height, params.strategy,
+        params.global_scale, initial_raw, params.x_matrix_multiplier,
+        params.b_matrix_multiplier, error);
+      selected_raw = decision.raw_quant;
+      for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
+        selected_y_thresholds[quadrant] = decision.y_thresholds[quadrant];
+      }
+      raw_quant[raw_index] = decision.raw_quant;
+    } else {
+      selected_raw = initial_raw;
+      selected_y_thresholds[0] = 0.58f;
+      selected_y_thresholds[1] = 0.64f;
+      selected_y_thresholds[2] = 0.64f;
+      selected_y_thresholds[3] = 0.64f;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const int raw = selected_raw;
+
+  if (params.adjust_ac_quant != 0u) {
+    constexpr float kInverseSigmaNumerator = -1.1715728752538099024f;
+    const float quantizer_scale =
+      float(params.global_scale) * (1.0f / 65536.0f);
+    const float sigma_quant = params.epf_quant_multiplier /
+      (quantizer_scale * float(raw) * kInverseSigmaNumerator);
+    for (uint block = thread_index; block < covered_count; block += 256u) {
+      const uint x = block % params.covered_width;
+      const uint y = block / params.covered_width;
+      const uint sharpness_index =
+        (anchor.y + y) * params.epf_sharpness_stride + anchor.x + x;
+      const uint sharpness = uint(epf_sharpness[sharpness_index]);
+      if (sharpness >= 8u) {
+        atomic_fetch_or_explicit(error, 64u, memory_order_relaxed);
+        continue;
+      }
+      float sigma = sigma_quant * params.epf_sharpness_lut[sharpness];
+      sigma = min(-1.0e-4f, sigma);
+      const float value = 1.0f / sigma;
+      if (!isfinite(value) || value >= 0.0f) {
+        atomic_fetch_or_explicit(error, 128u, memory_order_relaxed);
+        continue;
+      }
+      inverse_sigma[
+        (anchor.y + y) * params.inverse_sigma_stride + anchor.x + x] = value;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_device);
 
   // DC is extracted from the preserved forward coefficients. The LLF portion
   // of dequantized Y is exactly zero, so this also equals post-CfL X/B DC.
@@ -324,8 +386,15 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
        coefficient += 256u) {
     const uint channel = 1u;
     const uint offset = transform_offset + channel * group_channel_stride + coefficient;
-    const float threshold = aq_quantization_threshold(
-      channel, covered_count, coefficient, coefficient_width, coefficient_height);
+    const uint x = coefficient % coefficient_width;
+    const uint y = coefficient / coefficient_width;
+    const uint quadrant = uint(y >= coefficient_height / 2u) * 2u +
+      uint(x >= coefficient_width / 2u);
+    const float threshold = params.adjust_ac_quant != 0u
+      ? selected_y_thresholds[quadrant]
+      : aq_quantization_threshold(
+          channel, covered_count, coefficient,
+          coefficient_width, coefficient_height);
     const uint table = channel * params.coefficient_count + coefficient;
     const int quantized = aq_quantize_coefficient(
       forward_coefficients[offset],
@@ -504,6 +573,7 @@ kernel void gjxl_aq_adjustment_probe(
   if (index != 0u) return;
   const AqAdjustedQuantization decision = aq_select_adjusted_quantization(
     coefficients, quant_tables, params.coefficient_count,
+    params.coefficient_count,
     params.coefficient_width, params.coefficient_height, params.strategy,
     params.global_scale, params.initial_raw_quant,
     params.x_matrix_multiplier, params.b_matrix_multiplier, error);

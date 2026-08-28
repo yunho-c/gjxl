@@ -123,6 +123,7 @@ static uint2 aq_quant_table_offsets(uint strategy) {
   device const float* coefficients,
   device const float* quant_tables,
   uint coefficient_count,
+  uint channel_stride,
   uint coefficient_width,
   uint coefficient_height,
   uint strategy,
@@ -158,7 +159,7 @@ static uint2 aq_quant_table_offsets(uint strategy) {
       const uint quadrant = uint(y >= coefficient_height / 2u) * 2u +
         uint(x >= coefficient_width / 2u);
       const uint table = channel * coefficient_count + index;
-      const float coefficient = coefficients[channel * coefficient_count + index];
+      const float coefficient = coefficients[channel * channel_stride + index];
       const float value = coefficient *
         (quant_tables[table_offsets.y + table] * qac * matrix_multiplier);
       if (!isfinite(coefficient) || !isfinite(value)) {
@@ -297,6 +298,7 @@ static uint2 aq_quant_table_offsets(uint strategy) {
   device const float* coefficients,
   device const float* quant_tables,
   uint coefficient_count,
+  uint channel_stride,
   uint coefficient_width,
   uint coefficient_height,
   uint strategy,
@@ -318,7 +320,8 @@ static uint2 aq_quant_table_offsets(uint strategy) {
       ? x_matrix_multiplier
       : (channel == 2u ? b_matrix_multiplier : 1.0f);
     const int candidate = aq_adjust_quant_for_channel(
-      coefficients, quant_tables, coefficient_count, coefficient_width,
+      coefficients, quant_tables, coefficient_count, channel_stride,
+      coefficient_width,
       coefficient_height, strategy, channel, global_scale,
       initial_raw_quant, matrix_multiplier, thresholds, error);
     if (channel == 1u) result.y_thresholds = thresholds;

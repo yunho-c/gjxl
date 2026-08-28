@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "codec/chroma_from_luma.h"
+#include "codec/epf.h"
 #include "codec/quantization.h"
 #include "codec/reconstruction.h"
 #include "core/ac_strategy.h"
@@ -231,9 +232,12 @@ gjxl::MetalBackendOptions SimdOptions() {
 
 bool Prepare(gjxl::GpuBackend &gpu, const HostImage &image,
              const gjxl::AcStrategyGrid &strategies,
-             std::unique_ptr<gjxl::PreparedAqEvaluation> *prepared) {
+             std::unique_ptr<gjxl::PreparedAqEvaluation> *prepared,
+             gjxl::AcCoefficientDecisionMode decision_mode =
+                 gjxl::AcCoefficientDecisionMode::kFixedRawQuant) {
 
-  const std::vector<uint8_t> sharpness(kBlockExtent.width * kBlockExtent.height, 4);
+  const std::vector<uint8_t> sharpness(
+      kBlockExtent.width * kBlockExtent.height, 4);
   const gjxl::AqEvaluationPreparation preparation{
       .original_linear_rgb = image.View(),
       .coding_opsin = image.View(),
@@ -241,6 +245,7 @@ bool Prepare(gjxl::GpuBackend &gpu, const HostImage &image,
       .epf_sharpness = {
           sharpness.data(), kBlockExtent, kBlockExtent.width},
       .options = Options(),
+      .coefficient_decision_mode = decision_mode,
   };
   return CheckStatus(gjxl::PrepareAqEvaluation(gpu, preparation, prepared),
                      "prepared AQ reconstruction creation");
@@ -563,6 +568,125 @@ bool CheckQuantizationProbe(const HostImage &image,
                     "overflowing quantization probe") &&
          quantized == std::vector<int32_t>{123} &&
          dequantized == std::vector<float>{456.0f};
+}
+
+bool CheckResidentAdjustmentIntegration(
+    const HostImage& image, const gjxl::AcStrategyGrid& strategies) {
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  InputStorage input;
+  std::vector<uint8_t> sharpness(
+      kBlockExtent.width * kBlockExtent.height);
+  for (size_t index = 0; index < sharpness.size(); ++index) {
+    sharpness[index] = static_cast<uint8_t>(index % 8);
+  }
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "resident-adjustment backend") ||
+      !InputStorage::Make(image, &input) ||
+      !Prepare(*gpu, image, strategies, &prepared,
+               gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant) ||
+      !CheckStatus(prepared->Reconfigure(
+                       strategies,
+                       {sharpness.data(), kBlockExtent,
+                        kBlockExtent.width}),
+                   "resident-adjustment reconfiguration")) {
+    return false;
+  }
+
+  const gjxl::GpuBackendStats before = gpu->stats();
+  gjxl::metal_internal::MetalAqReconstructionSnapshotForTesting snapshot;
+  if (!CheckStatus(gjxl::metal_internal::RunMetalAqReconstructionForTesting(
+                       *prepared, input.View(), &snapshot),
+                   "resident adjustment integration")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after = gpu->stats();
+  if (after.successful_allocations != before.successful_allocations ||
+      after.committed_submissions != before.committed_submissions + 1 ||
+      snapshot.raw_quant.size() != input.raw_quant.size() ||
+      snapshot.epf_inverse_sigma.size() != input.inverse_sigma.size()) {
+    std::cerr << "Resident adjustment violated residency or readback shape\n";
+    return false;
+  }
+
+  gjxl::Quantizer quantizer;
+  if (!CheckStatus(gjxl::Quantizer::Create(input.params, &quantizer),
+                   "resident-adjustment quantizer")) {
+    return false;
+  }
+  const std::array<float, 3> matrix_multipliers = {
+      gjxl::QuantizationMatrixMultiplier(Options().profile.x_qm_scale),
+      1.0f,
+      gjxl::QuantizationMatrixMultiplier(Options().profile.b_qm_scale),
+  };
+  bool changed_anchor = false;
+  for (const auto& transform : snapshot.transforms) {
+    const size_t raw_index =
+        transform.block_y * kBlockExtent.width + transform.block_x;
+    const std::array<std::span<const float>, 3> coefficients = {
+        transform.forward_coefficients[0],
+        transform.forward_coefficients[1],
+        transform.forward_coefficients[2],
+    };
+    gjxl::AdjustedAcQuantization expected;
+    std::vector<int32_t> expected_y(
+        transform.forward_coefficients[1].size());
+    if (!CheckStatus(gjxl::SelectAdjustedAcQuantization(
+                         transform.strategy, quantizer,
+                         input.raw_quant[raw_index], matrix_multipliers,
+                         coefficients, &expected),
+                     "resident-adjustment CPU decision") ||
+        !CheckStatus(gjxl::QuantizeAdjustedYAcBlock(
+                         transform.strategy, quantizer, expected,
+                         coefficients[1], expected_y),
+                     "resident-adjustment CPU Y quantization") ||
+        snapshot.raw_quant[raw_index] != expected.raw_quant ||
+        transform.quantized_coefficients[1] != expected_y) {
+      std::cerr << "Resident adjustment differs at transform anchor "
+                << transform.block_x << ',' << transform.block_y << '\n';
+      return false;
+    }
+    changed_anchor |= expected.raw_quant != input.raw_quant[raw_index];
+  }
+  if (!changed_anchor) {
+    std::cerr << "Resident adjustment integration fixture changed no anchor\n";
+    return false;
+  }
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      gjxl::AcStrategyCell cell;
+      if (!strategies.Get(x, y, &cell).ok() ||
+          (!cell.is_anchor &&
+           snapshot.raw_quant[y * kBlockExtent.width + x] !=
+               input.raw_quant[y * kBlockExtent.width + x])) {
+        std::cerr << "Resident adjustment changed a non-anchor raw quant\n";
+        return false;
+      }
+    }
+  }
+
+  std::vector<float> expected_inverse_sigma(snapshot.raw_quant.size());
+  if (!CheckStatus(gjxl::ComputeEpfInverseSigma(
+                       strategies,
+                       {snapshot.raw_quant.data(), kBlockExtent,
+                        kBlockExtent.width},
+                       quantizer,
+                       {sharpness.data(), kBlockExtent, kBlockExtent.width},
+                       Options().profile.epf_sigma,
+                       {expected_inverse_sigma.data(), kBlockExtent,
+                        kBlockExtent.width}),
+                   "resident-adjustment EPF oracle")) {
+    return false;
+  }
+  for (size_t index = 0; index < expected_inverse_sigma.size(); ++index) {
+    if (!Near(snapshot.epf_inverse_sigma[index],
+              expected_inverse_sigma[index], 2.0e-5, 2.0e-6)) {
+      std::cerr << "Resident adjusted EPF sigma differs at block "
+                << index << '\n';
+      return false;
+    }
+  }
+  return true;
 }
 
 enum class AdjustmentPattern {
@@ -932,6 +1056,7 @@ int main() {
       !CheckRoundTrip(SimdOptions(), flat, strategies, false) ||
       !CheckQuantizationProbe(structured, strategies) ||
       !CheckAdjustmentProbe(structured, strategies) ||
+      !CheckResidentAdjustmentIntegration(structured, strategies) ||
       !CheckReconstructionFailure({.test_fail_submission = true},
                                   gjxl::StatusCode::kSubmissionFailed,
                                   structured, strategies) ||

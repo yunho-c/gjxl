@@ -27,6 +27,8 @@ struct MetalAqReconstructionSnapshotForTesting {
   Extent2D block_extent;
   Extent2D pixel_extent;
   std::vector<MetalAqTransformSnapshotForTesting> transforms;
+  std::vector<int32_t> raw_quant;
+  std::vector<float> epf_inverse_sigma;
   std::array<std::vector<float>, 3> dc;
   std::array<std::vector<float>, 3> reconstructed_opsin;
 };

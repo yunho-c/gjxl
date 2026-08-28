@@ -166,6 +166,8 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
       BindPlane(encoder, self.quantized_dc_, 9);
       BindPlane(encoder, self.reconstruction_error_, 10);
       encoder->setBytes(&params, sizeof(params), 11);
+      BindPlane(encoder, self.inverse_sigma_, 12);
+      BindPlane(encoder, self.epf_sharpness_, 13);
       encoder->dispatchThreadgroups(
           MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
           MTL::Size(kAqThreadCount, 1, 1));
@@ -290,6 +292,8 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
     BindPlane(encoder, self.quantized_dc_, 9);
     BindPlane(encoder, self.reconstruction_error_, 10);
     encoder->setBytes(&params, sizeof(params), 11);
+    BindPlane(encoder, self.inverse_sigma_, 12);
+    BindPlane(encoder, self.epf_sharpness_, 13);
     encoder->dispatchThreadgroups(
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
         MTL::Size(kAqThreadCount, 1, 1));
@@ -375,6 +379,10 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
     status = CopyReadback(*backend_, quantized_dc_,
                           quantized_dc_readback_.data(),
                           quantized_dc_readback_.size() * sizeof(int32_t));
+  }
+  if (status.ok() && coefficient_decision_mode_ ==
+        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
+    status = ReadbackRawQuant();
   }
   constexpr int32_t kQuantizedPoison =
       static_cast<int32_t>(0x81234567u);
@@ -476,6 +484,19 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
     status = CopyReadback(*backend_, dc_, dc_readback_.data(),
                           dc_readback_.size() * sizeof(float));
   }
+  if (status.ok()) {
+    status = ReadbackRawQuant();
+  }
+  const size_t inverse_sigma_row_bytes =
+      block_extent_.width * sizeof(float);
+  for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
+    status = backend_->CopyDeviceToHost(
+        *inverse_sigma_.buffer,
+        readback_.data() + y * block_extent_.width,
+        inverse_sigma_row_bytes,
+        inverse_sigma_.offset_bytes +
+            y * inverse_sigma_.row_stride * sizeof(float));
+  }
   for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
     status =
         CopyReadback(*backend_, reconstructed_[channel],
@@ -491,6 +512,8 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
     MetalAqReconstructionSnapshotForTesting result;
     result.block_extent = block_extent_;
     result.pixel_extent = coding_extent_;
+    result.raw_quant = last_raw_quant_;
+    result.epf_inverse_sigma = readback_;
     result.transforms.reserve(row_major_anchors_.size());
     for (const AqAnchor &anchor : row_major_anchors_) {
       const AqStrategyBatch &batch = batches_[anchor.batch_index];

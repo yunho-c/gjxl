@@ -54,7 +54,7 @@ inline constexpr std::array<AcStrategyType, 7> kSupportedAqStrategies = {
 
 static_assert(std::is_standard_layout_v<AqReconstructionParams>);
 static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
-static_assert(sizeof(AqReconstructionParams) == 84);
+static_assert(sizeof(AqReconstructionParams) == 132);
 static_assert(sizeof(AqResetParams) == 20);
 static_assert(std::is_standard_layout_v<AqBlockReductionParams>);
 static_assert(std::is_trivially_copyable_v<AqBlockReductionParams>);
@@ -396,6 +396,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       (coding_extent_.height + 63) / 64,
   };
   options_ = preparation.options;
+  coefficient_decision_mode_ = preparation.coefficient_decision_mode;
   frame_only_ = preparation.frame_only;
   frame_only_inverse_gaborish_ =
       preparation.frame_only_inverse_gaborish;
@@ -585,6 +586,10 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                            2 * block_count_, &persistent_bytes);
   if (!status.ok())
     return status;
+  status = AddPlannedPlane(DeviceElementType::kU8, block_extent_,
+                           block_extent_.width, &persistent_bytes);
+  if (!status.ok())
+    return status;
   status = AddPlannedPlane(DeviceElementType::kF32, {kQuantTableValueCount, 1},
                            kQuantTableValueCount, &persistent_bytes);
   if (!status.ok())
@@ -724,6 +729,11 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
   status = persistent_.AllocatePlane(
+      DeviceElementType::kU8, block_extent_, block_extent_.width,
+      kBufferAlignment, &epf_sharpness_);
+  if (!status.ok())
+    return status;
+  status = persistent_.AllocatePlane(
       DeviceElementType::kF32, {kQuantTableValueCount, 1},
       kQuantTableValueCount, kBufferAlignment, &quant_tables_);
   if (!status.ok())
@@ -855,6 +865,9 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                        anchors_);
   if (!status.ok())
     return status;
+  status = UploadPlane(*backend_, preparation.epf_sharpness, epf_sharpness_);
+  if (!status.ok())
+    return status;
   status =
       UploadPlane(*backend_,
                   ConstPlaneF32View{quant_tables.data(), quant_tables_.extent,
@@ -891,6 +904,14 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         0,
         QuantizationMatrixMultiplier(options_.profile.x_qm_scale),
         QuantizationMatrixMultiplier(options_.profile.b_qm_scale),
+        coefficient_decision_mode_ ==
+            AcCoefficientDecisionMode::kAdjustedSharedQuant
+          ? 1u
+          : 0u,
+        static_cast<uint32_t>(inverse_sigma_.row_stride),
+        static_cast<uint32_t>(epf_sharpness_.row_stride),
+        options_.profile.epf_sigma.quant_multiplier,
+        options_.profile.epf_sigma.sharpness_lut,
     };
     block_reduction_params_[batch_index] = {
         static_cast<uint32_t>(source_extent_.width),
@@ -1115,6 +1136,14 @@ Status MetalPreparedAqEvaluation::Reconfigure(
         0,
         QuantizationMatrixMultiplier(options_.profile.x_qm_scale),
         QuantizationMatrixMultiplier(options_.profile.b_qm_scale),
+        coefficient_decision_mode_ ==
+            AcCoefficientDecisionMode::kAdjustedSharedQuant
+          ? 1u
+          : 0u,
+        static_cast<uint32_t>(inverse_sigma_.row_stride),
+        static_cast<uint32_t>(epf_sharpness_.row_stride),
+        options_.profile.epf_sigma.quant_multiplier,
+        options_.profile.epf_sigma.sharpness_lut,
       };
       block_reduction_params[batch_index] = {
         static_cast<uint32_t>(source_extent_.width),
@@ -1187,6 +1216,9 @@ Status MetalPreparedAqEvaluation::Reconfigure(
         ConstPlaneI32View{
           anchor_records.data(), {2 * anchor_offset, 1}, 2 * anchor_offset},
         anchors_);
+    }
+    if (status.ok()) {
+      status = UploadPlane(*backend_, epf_sharpness, epf_sharpness_);
     }
     if (!status.ok()) {
       Invalidate();
@@ -1264,6 +1296,26 @@ Status MetalPreparedAqEvaluation::EvaluateProfiled(
 AqEvaluationMemoryStats
 MetalPreparedAqEvaluation::memory_stats() const noexcept {
   return memory_stats_;
+}
+
+Status MetalPreparedAqEvaluation::ReadbackRawQuant() {
+  const size_t row_bytes = block_extent_.width * sizeof(int32_t);
+  Status status = Status::Ok();
+  for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
+    status = backend_->CopyDeviceToHost(
+      *raw_quant_.buffer,
+      last_raw_quant_.data() + y * block_extent_.width,
+      row_bytes,
+      raw_quant_.offset_bytes + y * raw_quant_.row_stride * sizeof(int32_t));
+  }
+  if (!status.ok()) return status;
+  if (!std::ranges::all_of(last_raw_quant_, [](int32_t raw_quant) {
+        return raw_quant >= 1 && raw_quant <= kMaxRawQuant;
+      })) {
+    return Status::DeviceError(
+      "Metal AQ adjusted raw-quant readback is invalid");
+  }
+  return Status::Ok();
 }
 
 Status MetalPreparedAqEvaluation::AssembleFrameFromReadback(
@@ -1499,6 +1551,10 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
           quantized_dc_readback_.data(),
           quantized_dc_readback_.size() * sizeof(int32_t),
           quantized_dc_.offset_bytes);
+      }
+      if (status.ok() && coefficient_decision_mode_ ==
+            AcCoefficientDecisionMode::kAdjustedSharedQuant) {
+        status = ReadbackRawQuant();
       }
     }
     const size_t linear_row_bytes = source_extent_.width * sizeof(float);
@@ -1745,6 +1801,14 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
        !preparation.options.profile.loop_filter.gaborish)) {
     return Status::InvalidArgument(
         "Frame-only inverse Gaborish preparation is inconsistent");
+  }
+  switch (preparation.coefficient_decision_mode) {
+    case AcCoefficientDecisionMode::kAdjustedSharedQuant:
+    case AcCoefficientDecisionMode::kFixedRawQuant:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "Prepared AQ coefficient decision mode is invalid");
   }
 
   const Extent2D coding = preparation.coding_opsin.extent();

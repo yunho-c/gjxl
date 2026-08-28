@@ -45,6 +45,11 @@ struct AqReconstructionParams {
   uint32_t quant_dc;
   float x_matrix_multiplier;
   float b_matrix_multiplier;
+  uint32_t adjust_ac_quant;
+  uint32_t inverse_sigma_stride;
+  uint32_t epf_sharpness_stride;
+  float epf_quant_multiplier;
+  std::array<float, 8> epf_sharpness_lut;
 };
 
 struct AqResetParams {
@@ -212,6 +217,7 @@ private:
   Status PrepareReconstructionDiagnosticReadback();
   Status PreparePostprocessDiagnosticReadback();
   Status PrepareQuantizationProbeReadback();
+  Status ReadbackRawQuant();
   Status AssembleFrameFromReadback(VarDctEncoderFrame *frame) const;
   Status WaitForOperation();
   void CompleteOperation();
@@ -264,6 +270,7 @@ private:
   std::array<DevicePlaneView, 3> reconstructed_linear_;
   DevicePlaneView strategies_;
   DevicePlaneView anchors_;
+  DevicePlaneView epf_sharpness_;
   DevicePlaneView quant_tables_;
   DevicePlaneView raw_quant_;
   DevicePlaneView inverse_sigma_;
@@ -343,6 +350,8 @@ private:
   bool exact_coefficients_ = false;
   bool exact_coefficient_reconstruction_ = false;
   bool exact_linear_reconstruction_ = false;
+  AcCoefficientDecisionMode coefficient_decision_mode_ =
+    AcCoefficientDecisionMode::kFixedRawQuant;
   bool frame_only_ = false;
   bool frame_only_inverse_gaborish_ = false;
 };

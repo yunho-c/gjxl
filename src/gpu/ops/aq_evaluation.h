@@ -10,6 +10,7 @@
 #include "codec/butteraugli.h"
 #include "codec/codestream.h"
 #include "codec/maximum_error.h"
+#include "codec/vardct_frame.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
 #include "core/quantizer.h"
@@ -41,6 +42,10 @@ struct AqEvaluationPreparation {
   /// Applies the profile's inverse Gaborish filter on device before frame-only
   /// coefficient coding, avoiding a host materialization boundary.
   bool frame_only_inverse_gaborish = false;
+  /// Selects whether resident coefficient coding preserves the input raw
+  /// quant or applies the encoder's shared AdjustQuantBlockAC decision.
+  AcCoefficientDecisionMode coefficient_decision_mode =
+    AcCoefficientDecisionMode::kFixedRawQuant;
 };
 
 struct AqEvaluationInput {
