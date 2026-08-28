@@ -307,6 +307,18 @@ target_link_libraries(
     gjxl_pfm_io
 )
 
+add_executable(
+  gjxl_rate_control_probe
+  tools/rate_control_probe.cpp
+)
+
+target_link_libraries(
+  gjxl_rate_control_probe
+  PRIVATE
+    gjxl_codestream
+    gjxl_pfm_io
+)
+
 install(
   TARGETS
     gjxl_core
@@ -1124,6 +1136,15 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME codestream_workflow
     COMMAND gjxl_codestream_workflow_test
+  )
+
+  add_test(
+    NAME rate_control_probe
+    COMMAND
+      gjxl_rate_control_probe
+      --backend cpu
+      --targets 1.0,1.2
+      "${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
   )
 
   add_test(

@@ -24,6 +24,13 @@ encode input output distance="1.0" *args:
     cmake --build build/release --target gjxl_encode
     build/release/gjxl_encode --distance "{{ distance }}" "${@:4}" "{{ input }}" "{{ output }}"
 
+# Probe a PFM across increasing Butteraugli targets and emit CSV.
+[positional-arguments]
+rate-control-probe input targets="0.5,0.75,1.0,1.2,1.5,2.0,3.0,4.0" *args:
+    cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+    cmake --build build/release --target gjxl_rate_control_probe
+    build/release/gjxl_rate_control_probe --targets "{{ targets }}" "${@:3}" "{{ input }}"
+
 # Compare all Metal DCT implementations.
 dct-benchmark blocks="65536" iterations="200": build
     "{{ build_dir }}/gjxl_dct_benchmark" "{{ blocks }}" "{{ iterations }}"

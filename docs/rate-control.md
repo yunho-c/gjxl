@@ -59,6 +59,20 @@ The remaining rate-control gaps are:
 - no resampling-specific AQ bypass. The bypass policy is small, but the current
   codestream profile does not support resampling.
 
+The public request/result types now represent all four modes and validate only
+the active mode. Until their policies land, valid maximum-error, target-byte,
+and target-BPP requests return `Unavailable` atomically. The
+`gjxl_rate_control_probe` tool measures the implemented Butteraugli mode across
+strictly increasing targets and one or more PFM corpus inputs. For example:
+
+```sh
+just rate-control-probe testdata/codestream_sample.pfm 1.0,1.2 --backend cpu
+```
+
+The probe emits CSV containing the input and extent, requested target, encoded
+bytes and BPP, final score, actual backend and Metal mode, per-encode and total
+time, size-monotonicity flag, and strategy counts.
+
 The qualified Metal boundary intentionally retains authoritative coefficient
 decisions on the CPU. The fully resident path remains experimental because
 FP32 coefficient ties can change integer coefficient decisions and compound
