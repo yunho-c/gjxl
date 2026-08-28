@@ -454,6 +454,39 @@ decoding produced a 4672x5584 PFM. This natural-image timing is noisier and
 slower than the preceding single run, so it is a decode/regression check rather
 than a speedup claim.
 
+#### Selective resident-readback checkpoint (2026-08-28)
+
+The production fully-resident and throughput Butteraugli workflows now use an
+encoding-only materialization request. After the fused command buffer, Metal
+reads one device error word, the contiguous score history, and only the
+quantizer/raw-quant/quantized DC and AC payload needed for the final frame.
+Final float quant, block-map, and reconstructed-RGB transfers are independently
+optional and remain enabled for public diagnostic calls. Exact-coefficient,
+maximum-error, maximum-throughput, public AQ, and public pipeline contracts are
+unchanged. Host RGB and resident quant-field staging are allocated lazily when
+those diagnostics are actually requested.
+
+Direct tests account for each readback byte class, exercise zero through four
+updates, compare full and frame-only coefficient output, preserve padded and
+poisoned diagnostic storage, and inject staging, upload, submission,
+completion, numeric, and readback failures. The encoding-only pipeline produces
+the same frame, score history, and codestream as the full resident diagnostic
+path.
+
+One Apple M4 Pro balanced public-workflow run used one warmup and five samples
+at padded 1080p and target `1.2`. Fully resident measured `274.965 ms` total
+(`257.452-299.968`) and `230.141 ms` in the quantization pipeline, versus the
+preceding `288.205/238.171 ms` checkpoint. Throughput measured `241.725 ms`
+total (`223.755-264.516`) and `198.266 ms` in the pipeline, versus
+`259.226/215.820 ms`. The corresponding median reductions are `4.6%`/`3.4%`
+and `6.8%`/`8.1%`; the ranges are noisy, so these remain directional.
+
+The 4672x5584 doughnut sample again produced exactly `2769119` bytes and score
+`1.69531`. One run measured `4547.1 ms` total (`183.4 ms` preparation and
+`4363.7 ms` selected attempt), and `djxl` 0.12 independently decoded it to a
+4672x5584 PFM. As before, this single natural-image timing is a regression and
+decode check rather than a retained latency distribution.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

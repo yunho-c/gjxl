@@ -348,6 +348,8 @@ Status MetalPreparedAqEvaluation::RunReconstructionAndPostprocess(
 }
 
 Status MetalPreparedAqEvaluation::PreparePostprocessDiagnosticReadback() {
+  Status status = PrepareLinearReadback();
+  if (!status.ok()) return status;
   try {
     for (std::vector<float> &plane : reconstructed_readback_) {
       plane.resize(pixel_count_);

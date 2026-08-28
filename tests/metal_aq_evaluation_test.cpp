@@ -334,6 +334,7 @@ bool QuantizedCoefficientsEqual(const gjxl::VarDctEncoderFrame& expected,
       }
     }
   }
+
   return true;
 }
 
@@ -402,6 +403,7 @@ bool CheckReductionCase(gjxl::GpuBackend& gpu, gjxl::Extent2D source_extent,
       }
     }
   }
+
   return true;
 }
 
@@ -1216,6 +1218,196 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
   return true;
 }
 
+bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const size_t block_count = blocks.width * blocks.height;
+  const std::vector<uint8_t> sharpness(block_count, 4);
+  std::vector<float> initial(block_count, 0.75f);
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(
+        gpu,
+        {
+          .original_linear_rgb = fixture.original.View(),
+          .coding_opsin = fixture.coding.View(),
+          .strategies = &fixture.strategies,
+          .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+          .options = MakeOptions(),
+          .resident_quantization = true,
+          .coefficient_decision_mode =
+            gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        }, &prepared), "resident materialization preparation") ||
+      !CheckStatus(prepared->SetInvariantColorCorrelation(
+        fixture.input.View().y_to_x, fixture.input.View().y_to_b),
+        "resident materialization invariant CfL")) {
+    return false;
+  }
+  constexpr size_t kIterations = 4;
+  gjxl::adaptive_quantization_internal::ButteraugliPolicySetup setup;
+  if (!CheckStatus(
+        gjxl::adaptive_quantization_internal::PrepareButteraugliPolicy(
+          {initial.data(), blocks, blocks.width}, 1.0f, &setup),
+        "resident materialization setup")) {
+    return false;
+  }
+  const gjxl::AqResidentButteraugliPolicyInput input{
+    .adjusted_initial_quant_field = {
+      initial.data(), blocks, blocks.width},
+    .quant_dc = setup.quant_dc,
+    .butteraugli_target = 1.0f,
+    .lower_bound = setup.lower_bound,
+    .upper_bound = setup.upper_bound,
+    .iterations = kIterations,
+  };
+
+  std::vector<float> full_quant(block_count, kPoison);
+  std::vector<float> full_block(block_count, kPoison);
+  std::vector<double> full_scores;
+  HostImage full_reconstruction(
+    fixture.original.extent, fixture.original.extent.width + 7);
+  gjxl::VarDctEncoderFrame full_frame;
+  if (!CheckStatus(prepared->EvaluateResidentButteraugliPolicy(
+        input,
+        {
+          .quant_field = {full_quant.data(), blocks, blocks.width},
+          .block_distance_map = {full_block.data(), blocks, blocks.width},
+          .score_history = &full_scores,
+          .reconstructed_linear_rgb = full_reconstruction.MutableView(),
+          .frame = &full_frame,
+        }), "full resident policy materialization")) {
+    return false;
+  }
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting full_stats;
+  if (!CheckStatus(
+        gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+          *prepared, &full_stats),
+        "full resident readback stats") ||
+      full_stats.control_bytes != sizeof(uint32_t) ||
+      full_stats.score_history_bytes !=
+        (kIterations + 1) * sizeof(float) ||
+      full_stats.quant_field_bytes != block_count * sizeof(float) ||
+      full_stats.block_distance_map_bytes != block_count * sizeof(float) ||
+      full_stats.frame_bytes == 0 ||
+      full_stats.reconstructed_rgb_bytes !=
+        3 * fixture.original.extent.width * fixture.original.extent.height *
+          sizeof(float)) {
+    std::cerr << "Full resident readback accounting differs\n";
+    return false;
+  }
+
+  std::vector<float> map_only(block_count, kPoison);
+  std::vector<double> map_only_scores;
+  if (!CheckStatus(prepared->EvaluateResidentButteraugliPolicy(
+        input,
+        {
+          .block_distance_map = {
+            map_only.data(), blocks, blocks.width},
+          .score_history = &map_only_scores,
+        }), "map-only resident policy materialization")) {
+    return false;
+  }
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting map_only_stats;
+  if (!CheckStatus(
+        gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+          *prepared, &map_only_stats),
+        "map-only resident readback stats") ||
+      map_only != full_block || map_only_scores != full_scores ||
+      map_only_stats.control_bytes != sizeof(uint32_t) ||
+      map_only_stats.score_history_bytes !=
+        (kIterations + 1) * sizeof(float) ||
+      map_only_stats.quant_field_bytes != 0 ||
+      map_only_stats.block_distance_map_bytes !=
+        block_count * sizeof(float) ||
+      map_only_stats.frame_bytes != 0 ||
+      map_only_stats.reconstructed_rgb_bytes != 0) {
+    std::cerr << "Map-only resident readback accounting differs\n";
+    return false;
+  }
+
+  std::vector<double> lean_scores;
+  gjxl::VarDctEncoderFrame lean_frame;
+  if (!CheckStatus(prepared->EvaluateResidentButteraugliPolicy(
+        input, {.score_history = &lean_scores, .frame = &lean_frame}),
+        "lean resident policy materialization")) {
+    return false;
+  }
+  gjxl::metal_internal::MetalAqReadbackStatsForTesting lean_stats;
+  if (!CheckStatus(
+        gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+          *prepared, &lean_stats),
+        "lean resident readback stats") ||
+      lean_scores != full_scores ||
+      !QuantizedCoefficientsEqual(full_frame, lean_frame) ||
+      lean_stats.control_bytes != sizeof(uint32_t) ||
+      lean_stats.score_history_bytes !=
+        (kIterations + 1) * sizeof(float) ||
+      lean_stats.quant_field_bytes != 0 ||
+      lean_stats.block_distance_map_bytes != 0 ||
+      lean_stats.frame_bytes == 0 ||
+      lean_stats.reconstructed_rgb_bytes != 0) {
+    std::cerr << "Lean resident policy changed output or read extra data\n";
+    return false;
+  }
+
+  HostImage failed_reconstruction(
+    fixture.original.extent, fixture.original.extent.width + 9);
+  gjxl::VarDctEncoderFrame failed_frame;
+  std::vector<double> failed_scores = {-73.0};
+  if (!CheckStatus(
+        gjxl::metal_internal::FailNextMetalAqResidentStagingForTesting(
+          *prepared),
+        "resident staging failure injection") ||
+      !ExpectCode(prepared->EvaluateResidentButteraugliPolicy(
+          input,
+          {
+            .score_history = &failed_scores,
+            .reconstructed_linear_rgb =
+              failed_reconstruction.MutableView(),
+            .frame = &failed_frame,
+          }),
+        gjxl::StatusCode::kOutOfMemory,
+        "resident staging allocation failure") ||
+      failed_scores != std::vector<double>{-73.0} || failed_frame.valid() ||
+      !std::ranges::all_of(
+        failed_reconstruction.plane,
+        [](const std::vector<float>& plane) {
+          return std::ranges::all_of(
+            plane, [](float value) { return value == -777.0f; });
+        })) {
+    std::cerr << "Resident staging failure changed output\n";
+    return false;
+  }
+
+  for (size_t iterations = 0; iterations <= 4; ++iterations) {
+    std::vector<double> score_only;
+    gjxl::AqResidentButteraugliPolicyInput score_input = input;
+    score_input.iterations = iterations;
+    if (!CheckStatus(prepared->EvaluateResidentButteraugliPolicy(
+          score_input, {.score_history = &score_only}),
+          "score-only resident policy")) {
+      return false;
+    }
+    gjxl::metal_internal::MetalAqReadbackStatsForTesting score_stats;
+    if (!CheckStatus(
+          gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+            *prepared, &score_stats),
+          "score-only resident readback stats") ||
+        score_only.size() != iterations + 1 ||
+        score_stats.control_bytes != sizeof(uint32_t) ||
+        score_stats.score_history_bytes !=
+          (iterations + 1) * sizeof(float) ||
+        score_stats.quant_field_bytes != 0 ||
+        score_stats.block_distance_map_bytes != 0 ||
+        score_stats.frame_bytes != 0 ||
+        score_stats.reconstructed_rgb_bytes != 0) {
+      std::cerr << "Score-only resident readback accounting differs\n";
+      return false;
+    }
+  }
+  return true;
+}
+
 enum class ResidentPolicyFailure {
   kUpload,
   kSubmission,
@@ -1290,6 +1482,7 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
   std::vector<float> quant(block_count, kPoison);
   std::vector<float> block(block_count, kPoison);
   std::vector<double> scores = {-91.0};
+  gjxl::VarDctEncoderFrame frame;
   const gjxl::AqResidentButteraugliPolicyInput input{
     .adjusted_initial_quant_field = {
       initial.data(), blocks, blocks.width},
@@ -1304,6 +1497,7 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
       .quant_field = {quant.data(), blocks, blocks.width},
       .block_distance_map = {block.data(), blocks, blocks.width},
       .score_history = &scores,
+      .frame = &frame,
     };
   };
   const gjxl::StatusCode expected =
@@ -1318,7 +1512,7 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
       }) ||
       !std::ranges::all_of(block, [](float value) {
         return std::bit_cast<uint32_t>(value) == kPoisonBits;
-      }) || scores != std::vector<double>{-91.0} ||
+      }) || scores != std::vector<double>{-91.0} || frame.valid() ||
       !ExpectCode(prepared->EvaluateResidentButteraugliPolicy(
                     input, make_output()),
                   gjxl::StatusCode::kFailedPrecondition,
@@ -1706,6 +1900,7 @@ int main() {
       !CheckProductionEvaluation(*gpu) ||
       !CheckInvariantColorCorrelation(*gpu) ||
       !CheckResidentButteraugliPolicy(*gpu) ||
+      !CheckResidentPolicyMaterialization(*gpu) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kUpload) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kSubmission) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kCompletion) ||

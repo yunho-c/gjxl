@@ -72,6 +72,13 @@ struct PreparedQuantizationPipeline {
   std::unique_ptr<PreparedButteraugliReference> butteraugli_reference;
 };
 
+struct QuantizationPipelineMaterialization {
+  bool initial_quantization = true;
+  bool adaptive_quant_field = true;
+  bool block_distance_map = true;
+  bool reconstructed_linear_rgb = true;
+};
+
 [[nodiscard]] Status PrepareQuantizationPipeline(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
@@ -92,7 +99,8 @@ struct PreparedQuantizationPipeline {
   AdaptiveQuantizationProvider& adaptive_quantization,
   CpuQuantizationPipelineOptions options,
   CpuQuantizationPipelineOutput output,
-  bool initial_quantization_ready = false);
+  bool initial_quantization_ready = false,
+  QuantizationPipelineMaterialization materialization = {});
 
 [[nodiscard]] Status RunPreparedCpuQuantizationPipeline(
   ConstImage3FView original_linear_rgb,

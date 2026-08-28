@@ -82,8 +82,11 @@ public:
     GpuBackend& gpu,
     GpuAdaptiveQuantizationMode mode,
     adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
-      prepared)
-    : gpu_(gpu), mode_(mode), prepared_(prepared) {}
+      prepared,
+    adaptive_quantization_gpu_internal::AdaptiveQuantizationMaterialization
+      materialization = {})
+    : gpu_(gpu), mode_(mode), prepared_(prepared),
+      materialization_(materialization) {}
 
   Status Find(
     ConstImage3FView original_linear_rgb,
@@ -100,7 +103,7 @@ public:
         RunPreparedGpuAdaptiveQuantization(
           gpu_, original_linear_rgb, opsin, strategies,
           initial_quant_field, epf_sharpness, options, mode_, prepared_,
-          output);
+          output, materialization_);
     }
     return RunGpuAdaptiveQuantization(
       gpu_, original_linear_rgb, opsin, strategies, initial_quant_field,
@@ -112,6 +115,8 @@ private:
   GpuAdaptiveQuantizationMode mode_;
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_ = nullptr;
+  adaptive_quantization_gpu_internal::AdaptiveQuantizationMaterialization
+    materialization_;
 };
 
 bool SamePlaneIdentity(ConstPlaneF32View left, ConstPlaneF32View right) {
@@ -371,7 +376,10 @@ Status RunGpuQuantizationPipeline(
     gpu, original_linear_rgb, prepared, options, aq_mode, output, stats);
 }
 
-Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
+namespace quantization_pipeline_internal {
+namespace {
+
+Status RunPreparedGpuQuantizationPipelineImpl(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   PreparedQuantizationPipeline& prepared,
@@ -380,7 +388,8 @@ Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
   CpuQuantizationPipelineOutput output,
   AcStrategyGpuSearchStats* stats,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
-    prepared_aq) {
+    prepared_aq,
+  QuantizationPipelineMaterialization materialization) {
 
   switch (aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
@@ -424,10 +433,16 @@ Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
   GpuAcStrategySearchProvider strategy_search(
       gpu, resident ? &resident_inputs : nullptr);
   GpuAdaptiveQuantizationProvider adaptive_quantization(
-    gpu, aq_mode, aq_state);
+    gpu, aq_mode, aq_state,
+    {
+      .quant_field = materialization.adaptive_quant_field,
+      .block_distance_map = materialization.block_distance_map,
+      .reconstructed_linear_rgb =
+        materialization.reconstructed_linear_rgb,
+    });
   const Status status = RunPreparedQuantizationPipelineWithProviders(
     original_linear_rgb, prepared, strategy_search, adaptive_quantization,
-    options, output, resident);
+    options, output, resident, materialization);
   if (!status.ok()) {
     return status;
   }
@@ -436,5 +451,80 @@ Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
   }
   return Status::Ok();
 }
+
+}  // namespace
+
+Status RunPreparedGpuQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
+  CpuQuantizationPipelineOptions options,
+  GpuAdaptiveQuantizationMode aq_mode,
+  CpuQuantizationPipelineOutput output,
+  AcStrategyGpuSearchStats* stats,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+    prepared_aq) {
+
+  return RunPreparedGpuQuantizationPipelineImpl(
+    gpu, original_linear_rgb, prepared, options, aq_mode, output, stats,
+    prepared_aq, {});
+}
+
+Status RunPreparedGpuQuantizationPipelineForEncoding(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
+  CpuQuantizationPipelineOptions options,
+  GpuAdaptiveQuantizationMode aq_mode,
+  GpuEncodingQuantizationPipelineOutput output,
+  AcStrategyGpuSearchStats* stats,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+    prepared_aq) {
+
+  if ((aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+       aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+      options.adaptive_quantization.control_mode !=
+        AdaptiveQuantizationControlMode::kButteraugli ||
+      output.frame == nullptr || output.score_history == nullptr) {
+    return Status::InvalidArgument(
+      "Encoding-only GPU pipeline requires resident Butteraugli output");
+  }
+  const CpuQuantizationPipelineOutput pipeline_output{
+    .initial_quantization = {
+      .quant_field = {
+        prepared.initial_quant.data(), prepared.block_extent,
+        prepared.block_extent.width},
+      .strategy_mask = {
+        prepared.strategy_mask.data(), prepared.block_extent,
+        prepared.block_extent.width},
+      .pixel_mask = {
+        prepared.pixel_mask.data(), prepared.padded_extent,
+        prepared.padded_extent.width},
+    },
+    .adaptive_quantization = {
+      .quant_field = {
+        prepared.final_quant.data(), prepared.block_extent,
+        prepared.block_extent.width},
+      .block_distance_map = {
+        prepared.block_distance.data(), prepared.block_extent,
+        prepared.block_extent.width},
+      .reconstructed_linear_rgb = prepared.reconstructed_linear.view(),
+      .frame = output.frame,
+      .score_history = output.score_history,
+      .maximum_error_result = &prepared.maximum_error_result,
+    },
+  };
+  return RunPreparedGpuQuantizationPipelineImpl(
+    gpu, original_linear_rgb, prepared, options, aq_mode, pipeline_output,
+    stats, prepared_aq,
+    {
+      .initial_quantization = false,
+      .adaptive_quant_field = false,
+      .block_distance_map = false,
+      .reconstructed_linear_rgb = false,
+    });
+}
+
+}  // namespace quantization_pipeline_internal
 
 }  // namespace gjxl

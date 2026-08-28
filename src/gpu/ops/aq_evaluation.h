@@ -122,10 +122,13 @@ struct AqResidentButteraugliPolicyInput {
 };
 
 struct AqResidentButteraugliPolicyOutput {
+  /// Optional diagnostic materializations. An empty view leaves that result
+  /// resident instead of transferring it to the host.
   PlaneF32View quant_field;
   PlaneF32View block_distance_map;
   std::vector<double>* score_history = nullptr;
-  AqEvaluationOutput::Final* final = nullptr;
+  Image3FView reconstructed_linear_rgb;
+  VarDctEncoderFrame* frame = nullptr;
 };
 
 struct AqEvaluationMemoryStats {

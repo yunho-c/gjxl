@@ -701,6 +701,35 @@ final frame validity, and atomic upload/submission/completion/numeric/readback
 failure. The initial adjustment and invariant CfL binding are intentionally
 outside the fused command buffer.
 
+### Selective resident output materialization
+
+**Status:** complete for fully-resident and throughput Butteraugli encoding.
+
+The codestream workflow now uses an internal encoding-only pipeline output for
+the two resident Butteraugli modes. It requests the score history and final
+`VarDctEncoderFrame`, but leaves the final float quant field, block-distance
+map, reconstructed linear RGB, and public initial-field diagnostics untouched.
+The fused Metal finalizer therefore reads the device error word and contiguous
+score history, followed only by quantizer metadata, raw quant, and quantized
+DC/AC needed to assemble the frame. It no longer reads the redundant scalar
+score or any pixel-resolution image in this production path.
+
+All public diagnostic APIs preserve their prior output contract. Exact-
+coefficient and maximum-error workflows retain their existing materialization,
+and an unavailable fused backend may still use the heavier serial fallback.
+Focused tests account for each readback byte class, cover zero through four
+updates and optional map/full/score-only outputs, preserve padded destinations,
+and prove frame/codestream parity plus atomic staging and device-failure paths.
+
+On Apple M4 Pro, one warmup and five balanced padded-1080p samples at target
+`1.2` measured fully resident at `274.965 ms` total (`257.452-299.968`) and
+`230.141 ms` in the quantization pipeline. Throughput measured `241.725 ms`
+total (`223.755-264.516`) and `198.266 ms` in the pipeline. Relative to the
+preceding chained-policy checkpoint, the median reductions are `4.6%`/`3.4%`
+for fully resident total/pipeline and `6.8%`/`8.1%` for throughput. These are
+directional same-machine results; the ranges remain the primary latency
+evidence.
+
 ### Final resident-frontend audit
 
 **Status:** complete for the five-step sequence.

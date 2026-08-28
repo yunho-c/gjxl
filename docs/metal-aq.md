@@ -142,11 +142,10 @@ one bounded readback
 CPU quant-field update policy
 ```
 
-Keeping quantizer construction, final CfL, and EPF field generation on the CPU
-is an initial boundary, not a permanent performance claim. Each may move only
-after the complete resident path is measured and a separate GPU port can
-preserve its decisions. The first implementation must not obscure their upload
-cost in end-to-end measurements.
+The exact-coefficient and generic prepared paths retain this CPU boundary. The
+later resident path constructs the quantizer, raw-quant field, and EPF sigma on
+Metal and binds one invariant CfL map across the dependent evaluations. The
+separate boundaries remain visible in end-to-end measurements.
 
 Milestone 6 established the bounded policy result: final quant field,
 block-distance map, score history, and exact raw-quant decisions. Milestone 7
@@ -173,8 +172,8 @@ one Metal command buffer, N + 1 passes
                |
                v
 one completion wait and final readback
-  final quant field + final block map + all scores
-  requested final frame + reconstructed RGB
+  all scores + requested final coefficient frame
+  optional final block map, quant field, and reconstructed RGB diagnostics
 ```
 
 The default two-update policy therefore uses one dependent-evaluation
@@ -252,6 +251,15 @@ quantized DC from the last evaluation after the same wait, then atomically
 commit the field, block map, score history, image, and assembled encoder frame.
 Exact raw quant values remain a decision-level acceptance oracle, not an
 additional public output.
+
+The fused resident-policy output makes those materializations independent.
+Production fully-resident and throughput Butteraugli encoding requests only
+the score history and final frame, so it transfers the device error word, the
+contiguous one-to-five-float score history, quantizer metadata, raw quant, and
+quantized DC/AC. A diagnostic caller may additionally request the final block
+map, final float quant field, or reconstructed linear RGB. The public GPU AQ
+and quantization-pipeline APIs continue to request and populate every legacy
+diagnostic.
 
 ### Synchronization, concurrency, and failure
 

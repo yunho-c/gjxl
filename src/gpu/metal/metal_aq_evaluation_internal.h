@@ -16,6 +16,7 @@
 #include "codec/vardct_frame_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
+#include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
@@ -289,7 +290,9 @@ public:
   Status FailNextUpload();
   Status FailNextNumeric();
   Status FailNextReadback();
+  Status FailNextResidentStaging();
   Status SetWaitObserver(bool *observed);
+  Status GetReadbackStats(MetalAqReadbackStatsForTesting* stats) const;
   Status RunBlockReduction(ConstPlaneF32View distance_map,
                            PlaneF32View block_distance_map);
 
@@ -326,6 +329,7 @@ private:
   Status BeginOperation(bool profiling_reserved = false);
   Status UploadInput(AqEvaluationInput input);
   Status PrepareExactCoefficientStaging(AqEvaluationInput input);
+  Status PrepareLinearReadback();
   Status PrepareReconstructionDiagnosticReadback();
   Status PreparePostprocessDiagnosticReadback();
   Status PrepareQuantizationProbeReadback();
@@ -495,12 +499,14 @@ private:
   State state_ = State::kReady;
   std::unique_ptr<GpuSubmission> submission_;
   bool fail_next_readback_ = false;
+  bool fail_next_resident_staging_ = false;
   bool fail_next_upload_ = false;
   bool fail_next_numeric_ = false;
   bool fail_next_butteraugli_submission_ = false;
   bool fail_next_butteraugli_completion_ = false;
   bool fail_next_butteraugli_readback_ = false;
   bool *wait_observer_ = nullptr;
+  MetalAqReadbackStatsForTesting resident_policy_readback_stats_;
   MetalAqEvaluationProfile* active_profile_ = nullptr;
   bool exact_coefficients_ = false;
   bool exact_coefficient_reconstruction_ = false;

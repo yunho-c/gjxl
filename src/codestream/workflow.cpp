@@ -560,15 +560,33 @@ struct PreparedWorkflow {
           prepared.pipeline.block_extent.width},
         .frame = &prepared.pipeline.frame,
       });
+  } else if (selected_metal &&
+             options.rate_control_mode !=
+               VarDctRateControlMode::kMaximumError &&
+             (options.metal_aq_mode ==
+                GpuAdaptiveQuantizationMode::kFullyResident ||
+              options.metal_aq_mode ==
+                GpuAdaptiveQuantizationMode::kThroughput)) {
+    status = quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipelineForEncoding(
+        *selected_gpu, prepared.original_linear_rgb(), prepared.quantization,
+        pipeline_options, options.metal_aq_mode,
+        {
+          .frame = &prepared.pipeline.frame,
+          .score_history = &prepared.pipeline.score_history,
+        },
+        nullptr, &prepared.gpu_adaptive_quantization);
+  } else if (selected_metal) {
+    status = quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipeline(
+        *selected_gpu, prepared.original_linear_rgb(), prepared.quantization,
+        pipeline_options, options.metal_aq_mode, prepared.pipeline.Output(),
+        nullptr, &prepared.gpu_adaptive_quantization);
   } else {
-    status = selected_metal
-      ? quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
-          *selected_gpu, prepared.original_linear_rgb(), prepared.quantization,
-          pipeline_options, options.metal_aq_mode, prepared.pipeline.Output(),
-          nullptr, &prepared.gpu_adaptive_quantization)
-      : quantization_pipeline_internal::RunPreparedCpuQuantizationPipeline(
-          prepared.original_linear_rgb(), prepared.quantization,
-          pipeline_options, prepared.pipeline.Output());
+    status = quantization_pipeline_internal::
+      RunPreparedCpuQuantizationPipeline(
+        prepared.original_linear_rgb(), prepared.quantization,
+        pipeline_options, prepared.pipeline.Output());
   }
   if (!status.ok()) {
     return status;

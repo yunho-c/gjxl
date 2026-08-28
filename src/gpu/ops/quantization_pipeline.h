@@ -55,6 +55,11 @@ namespace quantization_pipeline_internal {
 
 struct PreparedQuantizationPipeline;
 
+struct GpuEncodingQuantizationPipelineOutput {
+  VarDctEncoderFrame* frame = nullptr;
+  std::vector<double>* score_history = nullptr;
+};
+
 /// Reuses target-invariant host preparation across complete GPU attempts.
 [[nodiscard]] Status RunPreparedGpuQuantizationPipeline(
   GpuBackend& gpu,
@@ -63,6 +68,19 @@ struct PreparedQuantizationPipeline;
   CpuQuantizationPipelineOptions options,
   GpuAdaptiveQuantizationMode aq_mode,
   CpuQuantizationPipelineOutput output,
+  AcStrategyGpuSearchStats* stats = nullptr,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
+    prepared_aq = nullptr);
+
+/// Runs the resident Butteraugli pipeline for codestream encoding without
+/// materializing diagnostic quant fields, block maps, or reconstructed RGB.
+[[nodiscard]] Status RunPreparedGpuQuantizationPipelineForEncoding(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared,
+  CpuQuantizationPipelineOptions options,
+  GpuAdaptiveQuantizationMode aq_mode,
+  GpuEncodingQuantizationPipelineOutput output,
   AcStrategyGpuSearchStats* stats = nullptr,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_aq = nullptr);

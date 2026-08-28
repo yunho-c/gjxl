@@ -273,7 +273,8 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   AdaptiveQuantizationProvider& adaptive_quantization,
   CpuQuantizationPipelineOptions options,
   CpuQuantizationPipelineOutput output,
-  bool initial_quantization_ready) {
+  bool initial_quantization_ready,
+  QuantizationPipelineMaterialization materialization) {
 
   Extent2D block_extent;
   Status status = ValidatePipelineInputs(
@@ -359,20 +360,28 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     return status;
   }
 
-  CopyContiguousPlane(
-    prepared.initial_quant, output.initial_quantization.quant_field);
-  CopyContiguousPlane(
-    prepared.strategy_mask, output.initial_quantization.strategy_mask);
-  CopyContiguousPlane(
-    prepared.pixel_mask, output.initial_quantization.pixel_mask);
-  CopyContiguousPlane(
-    prepared.final_quant, output.adaptive_quantization.quant_field);
-  CopyContiguousPlane(
-    prepared.block_distance,
-    output.adaptive_quantization.block_distance_map);
-  CopyImage(
-    prepared.reconstructed_linear.const_view(),
-    output.adaptive_quantization.reconstructed_linear_rgb);
+  if (materialization.initial_quantization) {
+    CopyContiguousPlane(
+      prepared.initial_quant, output.initial_quantization.quant_field);
+    CopyContiguousPlane(
+      prepared.strategy_mask, output.initial_quantization.strategy_mask);
+    CopyContiguousPlane(
+      prepared.pixel_mask, output.initial_quantization.pixel_mask);
+  }
+  if (materialization.adaptive_quant_field) {
+    CopyContiguousPlane(
+      prepared.final_quant, output.adaptive_quantization.quant_field);
+  }
+  if (materialization.block_distance_map) {
+    CopyContiguousPlane(
+      prepared.block_distance,
+      output.adaptive_quantization.block_distance_map);
+  }
+  if (materialization.reconstructed_linear_rgb) {
+    CopyImage(
+      prepared.reconstructed_linear.const_view(),
+      output.adaptive_quantization.reconstructed_linear_rgb);
+  }
   *output.adaptive_quantization.frame = std::move(prepared.frame);
   *output.adaptive_quantization.score_history = prepared.score_history;
   if (output.adaptive_quantization.maximum_error_result != nullptr) {

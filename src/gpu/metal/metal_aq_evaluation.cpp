@@ -501,9 +501,6 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     if (!frame_only_) {
       readback_.resize(block_count_);
     }
-    if (resident_quantization_) {
-      resident_policy_quant_readback_.resize(block_count_);
-    }
     strategies_host_ = *preparation.strategies;
     epf_sharpness_host_.resize(block_count_);
     last_raw_quant_.resize(block_count_);
@@ -617,16 +614,6 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
           batch.coefficient_count);
       }
       final_transform_views_.push_back(transform);
-    }
-    size_t source_pixel_count = 0;
-    if (!source_extent_.try_area(&source_pixel_count)) {
-      return Status::InvalidArgument(
-        "Prepared AQ source image dimensions are too large");
-    }
-    if (!frame_only_) {
-      for (std::vector<float> &plane : linear_readback_) {
-        plane.resize(source_pixel_count);
-      }
     }
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory(
@@ -1626,21 +1613,29 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
     return Status::InvalidArgument(
       "Resident Butteraugli policy input is invalid");
   }
-  if (!ValidHostPlaneLayout(output.quant_field) ||
-      output.quant_field.extent != block_extent_ ||
-      !ValidHostPlaneLayout(output.block_distance_map) ||
-      output.block_distance_map.extent != block_extent_ ||
+  const bool quant_field_requested =
+    PlaneDescriptorSpecified(output.quant_field);
+  const bool block_map_requested =
+    PlaneDescriptorSpecified(output.block_distance_map);
+  const bool reconstruction_requested = std::ranges::any_of(
+    output.reconstructed_linear_rgb.plane,
+    [](PlaneF32View plane) { return PlaneDescriptorSpecified(plane); });
+  if ((quant_field_requested &&
+       (!ValidHostPlaneLayout(output.quant_field) ||
+        output.quant_field.extent != block_extent_)) ||
+      (block_map_requested &&
+       (!ValidHostPlaneLayout(output.block_distance_map) ||
+        output.block_distance_map.extent != block_extent_)) ||
       output.score_history == nullptr) {
     return Status::InvalidArgument(
       "Resident Butteraugli policy output is invalid");
   }
-  if (output.final != nullptr &&
-      (!output.final->reconstructed_linear_rgb.valid() ||
-       output.final->reconstructed_linear_rgb.extent() != source_extent_ ||
+  if (reconstruction_requested &&
+      (!output.reconstructed_linear_rgb.valid() ||
+       output.reconstructed_linear_rgb.extent() != source_extent_ ||
        !std::ranges::all_of(
-         output.final->reconstructed_linear_rgb.plane,
-         [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }) ||
-       output.final->frame == nullptr)) {
+         output.reconstructed_linear_rgb.plane,
+         [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }))) {
     return Status::InvalidArgument(
       "Resident Butteraugli final output is invalid");
   }
@@ -1666,26 +1661,43 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
     });
   if (!status.ok()) return status;
 
-  std::vector<float> candidate_block_distance;
+  status = BeginOperation();
+  if (!status.ok()) return status;
+  bool fail_staging = false;
+  {
+    std::lock_guard lock(mutex_);
+    fail_staging = fail_next_resident_staging_;
+    fail_next_resident_staging_ = false;
+  }
+  if (fail_staging) {
+    CompleteOperation();
+    return Status::OutOfMemory(
+      "Injected resident Butteraugli host-staging failure");
+  }
+
   std::vector<double> candidate_scores;
-  Image3FBuffer candidate_reconstruction;
   VarDctEncoderFrame candidate_frame;
   try {
-    candidate_block_distance.resize(block_count_);
     candidate_scores.resize(input.iterations + 1);
-    if (output.final != nullptr) {
-      candidate_reconstruction.resize(source_extent_);
+    if (quant_field_requested) {
+      resident_policy_quant_readback_.resize(block_count_);
     }
   } catch (const std::bad_alloc&) {
+    CompleteOperation();
     return Status::OutOfMemory(
       "Unable to allocate resident Butteraugli policy readback");
   } catch (const std::length_error&) {
+    CompleteOperation();
     return Status::InvalidArgument(
       "Resident Butteraugli policy dimensions are too large");
   }
-
-  status = BeginOperation();
-  if (!status.ok()) return status;
+  if (reconstruction_requested) {
+    status = PrepareLinearReadback();
+    if (!status.ok()) {
+      CompleteOperation();
+      return status;
+    }
+  }
   bool fail_upload = false;
   bool fail_numeric = false;
   {
@@ -1736,44 +1748,115 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
     submission_ = std::move(submission);
   }
 
-  double final_score = 0.0;
-  AqEvaluationOutput::Final candidate_final;
-  AqEvaluationOutput evaluation_output{
-      .block_distance_map = {
-        candidate_block_distance.data(), block_extent_, block_extent_.width},
-      .score = &final_score,
-  };
-  if (output.final != nullptr) {
-    candidate_final = {
-      .reconstructed_linear_rgb = candidate_reconstruction.view(),
-      .frame = &candidate_frame,
-    };
-    evaluation_output.final = &candidate_final;
-  }
-  status = FinishEvaluation(evaluation_output, false);
+  status = WaitForOperation();
   if (!status.ok()) return status;
 
-  const size_t row_bytes = block_extent_.width * sizeof(float);
-  for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
-    status = backend_->CopyDeviceToHost(
-      *resident_quant_field_.buffer,
-      resident_policy_quant_readback_.data() + y * block_extent_.width,
-      row_bytes,
-      resident_quant_field_.offset_bytes +
-        y * resident_quant_field_.row_stride * sizeof(float));
+  MetalAqReadbackStatsForTesting candidate_readback_stats;
+  uint32_t device_error = 0;
+  status = backend_->CopyDeviceToHost(
+    *reconstruction_error_.buffer, &device_error, sizeof(device_error),
+    reconstruction_error_.offset_bytes);
+  if (!status.ok() || device_error != 0) {
+    Invalidate();
+    return status.ok()
+      ? Status::DeviceError(
+          "Metal resident AQ policy produced invalid device numerics (flag " +
+          std::to_string(device_error) + ")")
+      : status;
   }
+  candidate_readback_stats.control_bytes = sizeof(device_error);
+
+  status = backend_->CopyDeviceToHost(
+    *resident_policy_scores_.buffer,
+    resident_policy_score_readback_.data(),
+    (input.iterations + 1) * sizeof(float),
+    resident_policy_scores_.offset_bytes);
   if (status.ok()) {
+    candidate_readback_stats.score_history_bytes =
+      (input.iterations + 1) * sizeof(float);
+  }
+  const size_t row_bytes = block_extent_.width * sizeof(float);
+  if (quant_field_requested) {
+    for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
+      status = backend_->CopyDeviceToHost(
+        *resident_quant_field_.buffer,
+        resident_policy_quant_readback_.data() + y * block_extent_.width,
+        row_bytes,
+        resident_quant_field_.offset_bytes +
+          y * resident_quant_field_.row_stride * sizeof(float));
+    }
+    if (status.ok()) {
+      candidate_readback_stats.quant_field_bytes =
+        block_count_ * sizeof(float);
+    }
+  }
+  if (block_map_requested) {
+    for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
+      status = backend_->CopyDeviceToHost(
+        *block_distance_.buffer,
+        readback_.data() + y * block_extent_.width,
+        row_bytes,
+        block_distance_.offset_bytes +
+          y * block_distance_.row_stride * sizeof(float));
+    }
+    if (status.ok()) {
+      candidate_readback_stats.block_distance_map_bytes =
+        block_count_ * sizeof(float);
+    }
+  }
+
+  QuantizerParams resident_quantizer;
+  if (output.frame != nullptr) {
     status = backend_->CopyDeviceToHost(
-      *resident_policy_scores_.buffer,
-      resident_policy_score_readback_.data(),
-      (input.iterations + 1) * sizeof(float),
-      resident_policy_scores_.offset_bytes);
+      *resident_quantizer_params_.buffer, &resident_quantizer,
+      sizeof(resident_quantizer), resident_quantizer_params_.offset_bytes);
+    if (status.ok()) {
+      status = Quantizer::Create(resident_quantizer, &last_quantizer_);
+    }
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+        *quantized_coefficients_.buffer, quantized_readback_.data(),
+        quantized_readback_.size() * sizeof(int32_t),
+        quantized_coefficients_.offset_bytes);
+    }
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+        *quantized_dc_.buffer, quantized_dc_readback_.data(),
+        quantized_dc_readback_.size() * sizeof(int32_t),
+        quantized_dc_.offset_bytes);
+    }
+    if (status.ok()) status = ReadbackRawQuant();
+    if (status.ok()) {
+      candidate_readback_stats.frame_bytes =
+        sizeof(resident_quantizer) +
+        quantized_readback_.size() * sizeof(int32_t) +
+        quantized_dc_readback_.size() * sizeof(int32_t) +
+        last_raw_quant_.size() * sizeof(int32_t);
+    }
+  }
+  if (reconstruction_requested) {
+    const size_t linear_row_bytes = source_extent_.width * sizeof(float);
+    for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
+      for (size_t y = 0; status.ok() && y < source_extent_.height; ++y) {
+        status = backend_->CopyDeviceToHost(
+          *reconstructed_linear_[channel].buffer,
+          linear_readback_[channel].data() + y * source_extent_.width,
+          linear_row_bytes,
+          reconstructed_linear_[channel].offset_bytes +
+            y * reconstructed_linear_[channel].row_stride * sizeof(float));
+      }
+    }
+    if (status.ok()) {
+      candidate_readback_stats.reconstructed_rgb_bytes =
+        3 * source_extent_.width * source_extent_.height * sizeof(float);
+    }
   }
   if (!status.ok()) {
     Invalidate();
     return status;
   }
-  if (!std::ranges::all_of(
+
+  if (quant_field_requested && !std::ranges::all_of(
         resident_policy_quant_readback_, [](float value) {
           return std::isfinite(value) && value > 0.0f;
         })) {
@@ -1790,27 +1873,68 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicy(
     }
     candidate_scores[index] = static_cast<double>(score);
   }
+  if (block_map_requested &&
+      !std::ranges::all_of(readback_, [](float value) {
+        return std::isfinite(value) && value >= 0.0f;
+      })) {
+    Invalidate();
+    return Status::Internal(
+      "Resident Butteraugli block-distance readback is invalid");
+  }
+  constexpr int32_t kQuantizedPoison =
+    static_cast<int32_t>(0x81234567u);
+  if (output.frame != nullptr &&
+      (std::ranges::find(quantized_readback_, kQuantizedPoison) !=
+         quantized_readback_.end() ||
+       std::ranges::find(quantized_dc_readback_, kQuantizedPoison) !=
+         quantized_dc_readback_.end())) {
+    Invalidate();
+    return Status::Internal(
+      "Resident Butteraugli frame readback contains poison");
+  }
+  if (reconstruction_requested &&
+      !std::ranges::all_of(
+        linear_readback_, [](const std::vector<float>& plane) {
+          return std::ranges::all_of(
+            plane, [](float value) { return std::isfinite(value); });
+        })) {
+    Invalidate();
+    return Status::Internal(
+      "Resident Butteraugli reconstruction readback is invalid");
+  }
+  if (output.frame != nullptr) {
+    status = AssembleFrameFromReadback(&candidate_frame);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+  }
 
   for (size_t y = 0; y < block_extent_.height; ++y) {
-    std::copy_n(
-      resident_policy_quant_readback_.data() + y * block_extent_.width,
-      block_extent_.width, output.quant_field.Row(y));
-    std::copy_n(
-      candidate_block_distance.data() + y * block_extent_.width,
-      block_extent_.width, output.block_distance_map.Row(y));
+    if (quant_field_requested) {
+      std::copy_n(
+        resident_policy_quant_readback_.data() + y * block_extent_.width,
+        block_extent_.width, output.quant_field.Row(y));
+    }
+    if (block_map_requested) {
+      std::copy_n(
+        readback_.data() + y * block_extent_.width,
+        block_extent_.width, output.block_distance_map.Row(y));
+    }
   }
   *output.score_history = std::move(candidate_scores);
-  if (output.final != nullptr) {
+  if (reconstruction_requested) {
     for (size_t channel = 0; channel < 3; ++channel) {
       for (size_t y = 0; y < source_extent_.height; ++y) {
         std::copy_n(
-          candidate_reconstruction.const_view().plane[channel].Row(y),
+          linear_readback_[channel].data() + y * source_extent_.width,
           source_extent_.width,
-          output.final->reconstructed_linear_rgb.plane[channel].Row(y));
+          output.reconstructed_linear_rgb.plane[channel].Row(y));
       }
     }
-    *output.final->frame = std::move(candidate_frame);
   }
+  if (output.frame != nullptr) *output.frame = std::move(candidate_frame);
+  resident_policy_readback_stats_ = candidate_readback_stats;
   CompleteOperation();
   return Status::Ok();
 }
@@ -2101,6 +2225,14 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   }
   if (!status.ok())
     return status;
+
+  if (output.final != nullptr) {
+    status = PrepareLinearReadback();
+    if (!status.ok()) {
+      CompleteOperation();
+      return status;
+    }
+  }
 
   const ProfileClock::time_point bounded_begin = active_profile_ != nullptr
     ? ProfileClock::now() : ProfileClock::time_point{};
@@ -2419,6 +2551,16 @@ Status MetalPreparedAqEvaluation::FailNextReadback() {
   return Status::Ok();
 }
 
+Status MetalPreparedAqEvaluation::FailNextResidentStaging() {
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || state_ != State::kReady) {
+    return Status::FailedPrecondition(
+      "Prepared AQ staging injection requires a ready object");
+  }
+  fail_next_resident_staging_ = true;
+  return Status::Ok();
+}
+
 Status MetalPreparedAqEvaluation::SetWaitObserver(bool *observed) {
   if (observed == nullptr) {
     return Status::InvalidArgument("Prepared AQ wait observer is null");
@@ -2429,6 +2571,20 @@ Status MetalPreparedAqEvaluation::SetWaitObserver(bool *observed) {
         "Prepared AQ wait observer cannot be changed during use");
   }
   wait_observer_ = observed;
+  return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::GetReadbackStats(
+    MetalAqReadbackStatsForTesting* stats) const {
+  if (stats == nullptr) {
+    return Status::InvalidArgument("Prepared AQ readback stats output is null");
+  }
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || state_ != State::kReady) {
+    return Status::FailedPrecondition(
+      "Prepared AQ readback stats require a ready object");
+  }
+  *stats = resident_policy_readback_stats_;
   return Status::Ok();
 }
 
@@ -2955,6 +3111,26 @@ Status MetalPreparedAqEvaluation::PrepareExactCoefficientStaging(
   }
 }
 
+Status MetalPreparedAqEvaluation::PrepareLinearReadback() {
+  size_t source_pixel_count = 0;
+  if (!source_extent_.try_area(&source_pixel_count)) {
+    return Status::InvalidArgument(
+      "Prepared AQ source image dimensions are too large");
+  }
+  try {
+    for (std::vector<float>& plane : linear_readback_) {
+      plane.resize(source_pixel_count);
+    }
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate AQ reconstruction host readback");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "AQ reconstruction host readback is too large");
+  }
+}
+
 Status MetalPreparedAqEvaluation::WaitForOperation() {
   std::unique_ptr<GpuSubmission> submission;
   bool fail_readback = false;
@@ -3426,6 +3602,17 @@ Status FailNextMetalAqReadbackForTesting(
   return metal->FailNextReadback();
 }
 
+Status FailNextMetalAqResidentStagingForTesting(
+  PreparedAqEvaluation& prepared) {
+
+  MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "AQ staging injection requires a Metal prepared evaluation");
+  }
+  return metal->FailNextResidentStaging();
+}
+
 Status SetMetalAqWaitObserverForTesting(
   PreparedAqEvaluation& prepared,
   bool* observed) {
@@ -3436,6 +3623,18 @@ Status SetMetalAqWaitObserverForTesting(
       "AQ wait observation requires a Metal prepared evaluation");
   }
   return metal->SetWaitObserver(observed);
+}
+
+Status GetMetalAqReadbackStatsForTesting(
+  PreparedAqEvaluation& prepared,
+  MetalAqReadbackStatsForTesting* stats) {
+
+  MetalPreparedAqEvaluation* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "AQ readback stats require a Metal prepared evaluation");
+  }
+  return metal->GetReadbackStats(stats);
 }
 
 Status ValidateMetalAqGeometryForTesting(

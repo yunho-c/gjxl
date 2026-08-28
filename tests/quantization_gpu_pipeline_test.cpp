@@ -706,6 +706,72 @@ bool CheckDefaultUpdatePipelineParity() {
     return false;
   }
 
+  gjxl::quantization_pipeline_internal::PreparedQuantizationPipeline
+    encoding_prepared;
+  gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
+    encoding_aq;
+  gjxl::Status encoding_status =
+    gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), options, &encoding_prepared,
+      false, false);
+  constexpr float kDiagnosticPoison = -431.25f;
+  std::fill(
+    encoding_prepared.final_quant.begin(),
+    encoding_prepared.final_quant.end(), kDiagnosticPoison);
+  std::fill(
+    encoding_prepared.block_distance.begin(),
+    encoding_prepared.block_distance.end(), kDiagnosticPoison);
+  gjxl::Image3FView encoding_reconstruction =
+    encoding_prepared.reconstructed_linear.view();
+  for (gjxl::PlaneF32View plane : encoding_reconstruction.plane) {
+    for (size_t y = 0; y < plane.extent.height; ++y) {
+      std::fill_n(plane.Row(y), plane.extent.width, kDiagnosticPoison);
+    }
+  }
+  gjxl::VarDctEncoderFrame encoding_frame;
+  std::vector<double> encoding_scores;
+  if (encoding_status.ok()) {
+    encoding_status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipelineForEncoding(
+        *gpu, original.ConstView(), encoding_prepared, options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        {
+          .frame = &encoding_frame,
+          .score_history = &encoding_scores,
+        },
+        nullptr, &encoding_aq);
+  }
+  std::vector<uint8_t> encoding_codestream;
+  if (encoding_status.ok()) {
+    encoding_status = gjxl::EncodeVarDctCodestream(
+      encoding_frame, &encoding_codestream);
+  }
+  const bool reconstruction_untouched = std::ranges::all_of(
+    encoding_reconstruction.plane, [](gjxl::PlaneF32View plane) {
+      for (size_t y = 0; y < plane.extent.height; ++y) {
+        if (!std::ranges::all_of(
+              std::span<const float>(plane.Row(y), plane.extent.width),
+              [](float value) { return value == kDiagnosticPoison; })) {
+          return false;
+        }
+      }
+      return true;
+    });
+  if (!encoding_status.ok() || encoding_scores != resident.scores ||
+      !FramesEqual(encoding_frame, resident.frame) ||
+      encoding_codestream != resident_codestream ||
+      !std::ranges::all_of(
+        encoding_prepared.final_quant,
+        [](float value) { return value == kDiagnosticPoison; }) ||
+      !std::ranges::all_of(
+        encoding_prepared.block_distance,
+        [](float value) { return value == kDiagnosticPoison; }) ||
+      !reconstruction_untouched) {
+    std::cerr << "Encoding-only resident pipeline changed diagnostics or "
+                 "frame output: " << encoding_status.message() << '\n';
+    return false;
+  }
+
   PipelineStorage throughput(kExtent, kExtent);
   gjxl::AcStrategyGpuSearchStats throughput_stats;
   const gjxl::GpuBackendStats before_throughput = gpu->stats();

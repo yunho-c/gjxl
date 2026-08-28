@@ -147,6 +147,15 @@ struct GpuFrameOnlyQuantizationOutput {
 
 namespace adaptive_quantization_gpu_internal {
 
+/// Selects optional diagnostic results for an internal full-output call.
+/// The encoder always requests the frame and score history, while public
+/// APIs retain the default of materializing every diagnostic.
+struct AdaptiveQuantizationMaterialization {
+  bool quant_field = true;
+  bool block_distance_map = true;
+  bool reconstructed_linear_rgb = true;
+};
+
 /// Reusable frame-level GPU AQ state for repeated rate-control attempts.
 ///
 /// The state remembers the backend, source views, and evaluation options that
@@ -176,7 +185,8 @@ struct PreparedAdaptiveQuantization {
   AdaptiveQuantizationOptions options,
   GpuAdaptiveQuantizationMode mode,
   PreparedAdaptiveQuantization* prepared,
-  AdaptiveQuantizationOutput output);
+  AdaptiveQuantizationOutput output,
+  AdaptiveQuantizationMaterialization materialization = {});
 
 }  // namespace adaptive_quantization_gpu_internal
 

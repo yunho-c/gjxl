@@ -8,6 +8,20 @@
 
 namespace gjxl::metal_internal {
 
+struct MetalAqReadbackStatsForTesting {
+  size_t control_bytes = 0;
+  size_t score_history_bytes = 0;
+  size_t quant_field_bytes = 0;
+  size_t block_distance_map_bytes = 0;
+  size_t frame_bytes = 0;
+  size_t reconstructed_rgb_bytes = 0;
+
+  [[nodiscard]] size_t total_bytes() const noexcept {
+    return control_bytes + score_history_bytes + quant_field_bytes +
+      block_distance_map_bytes + frame_bytes + reconstructed_rgb_bytes;
+  }
+};
+
 /// Leaves one production evaluation outstanding so tests can exercise
 /// lifetime and non-reentrancy behavior. Finish must precede ordinary reuse.
 [[nodiscard]] Status SubmitMetalAqEvaluationForTesting(
@@ -36,10 +50,19 @@ namespace gjxl::metal_internal {
 [[nodiscard]] Status FailNextMetalAqReadbackForTesting(
   PreparedAqEvaluation& prepared);
 
+/// Injects an allocation failure before optional resident host staging.
+[[nodiscard]] Status FailNextMetalAqResidentStagingForTesting(
+  PreparedAqEvaluation& prepared);
+
 /// Records whether this prepared object waits for an outstanding submission.
 [[nodiscard]] Status SetMetalAqWaitObserverForTesting(
   PreparedAqEvaluation& prepared,
   bool* observed);
+
+/// Returns the byte classes transferred by the last successful fused policy.
+[[nodiscard]] Status GetMetalAqReadbackStatsForTesting(
+  PreparedAqEvaluation& prepared,
+  MetalAqReadbackStatsForTesting* stats);
 
 /// Exercises checked geometry limits without requiring correspondingly large
 /// host allocations.

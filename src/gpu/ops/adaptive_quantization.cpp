@@ -395,7 +395,9 @@ Status RunGpuAdaptiveQuantizationImpl(
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     reusable,
   GpuAdaptiveQuantizationPolicyOutput* bounded_output,
-  AdaptiveQuantizationOutput* full_output) {
+  AdaptiveQuantizationOutput* full_output,
+  adaptive_quantization_gpu_internal::AdaptiveQuantizationMaterialization
+    materialization) {
 
   Status status = ValidateMode(mode);
   if (status.ok()) {
@@ -574,27 +576,34 @@ Status RunGpuAdaptiveQuantizationImpl(
           "Resident AQ block grid is too large");
       }
       aqi::AdaptiveQuantizationPolicyResult fused_result;
-      fused_result.quant_field.resize(block_count);
-      fused_result.block_distance.resize(block_count);
+      if (materialization.quant_field) {
+        fused_result.quant_field.resize(block_count);
+      }
+      if (materialization.block_distance_map) {
+        fused_result.block_distance.resize(block_count);
+      }
       Image3FBuffer fused_reconstruction;
       VarDctEncoderFrame fused_frame;
-      AqEvaluationOutput::Final fused_final;
       AqResidentButteraugliPolicyOutput fused_output{
-        .quant_field = {
-          fused_result.quant_field.data(), strategies.extent(),
-          strategies.extent().width},
-        .block_distance_map = {
-          fused_result.block_distance.data(), strategies.extent(),
-          strategies.extent().width},
         .score_history = &fused_result.score_history,
       };
+      if (materialization.quant_field) {
+        fused_output.quant_field = {
+          fused_result.quant_field.data(), strategies.extent(),
+          strategies.extent().width};
+      }
+      if (materialization.block_distance_map) {
+        fused_output.block_distance_map = {
+          fused_result.block_distance.data(), strategies.extent(),
+          strategies.extent().width};
+      }
       if (full_output != nullptr) {
-        fused_reconstruction.resize(original_linear_rgb.extent());
-        fused_final = {
-          .reconstructed_linear_rgb = fused_reconstruction.view(),
-          .frame = &fused_frame,
-        };
-        fused_output.final = &fused_final;
+        if (materialization.reconstructed_linear_rgb) {
+          fused_reconstruction.resize(original_linear_rgb.extent());
+          fused_output.reconstructed_linear_rgb =
+            fused_reconstruction.view();
+        }
+        fused_output.frame = &fused_frame;
       }
       status = prepared->EvaluateResidentButteraugliPolicy(
         {
@@ -616,14 +625,20 @@ Status RunGpuAdaptiveQuantizationImpl(
           *bounded_output->score_history =
             std::move(fused_result.score_history);
         } else {
-          CopyContiguousPlane(
-            fused_result.quant_field, full_output->quant_field);
-          CopyContiguousPlane(
-            fused_result.block_distance,
-            full_output->block_distance_map);
-          CopyImage(
-            fused_reconstruction.const_view(),
-            full_output->reconstructed_linear_rgb);
+          if (materialization.quant_field) {
+            CopyContiguousPlane(
+              fused_result.quant_field, full_output->quant_field);
+          }
+          if (materialization.block_distance_map) {
+            CopyContiguousPlane(
+              fused_result.block_distance,
+              full_output->block_distance_map);
+          }
+          if (materialization.reconstructed_linear_rgb) {
+            CopyImage(
+              fused_reconstruction.const_view(),
+              full_output->reconstructed_linear_rgb);
+          }
           *full_output->frame = std::move(fused_frame);
           *full_output->score_history =
             std::move(fused_result.score_history);
@@ -665,11 +680,17 @@ Status RunGpuAdaptiveQuantizationImpl(
     } else {
       Image3FBuffer reconstructed = evaluator.TakeFinalReconstruction();
       VarDctEncoderFrame frame = evaluator.TakeFinalFrame();
-      CopyContiguousPlane(result.quant_field, full_output->quant_field);
-      CopyContiguousPlane(
-        result.block_distance, full_output->block_distance_map);
-      CopyImage(
-        reconstructed.const_view(), full_output->reconstructed_linear_rgb);
+      if (materialization.quant_field) {
+        CopyContiguousPlane(result.quant_field, full_output->quant_field);
+      }
+      if (materialization.block_distance_map) {
+        CopyContiguousPlane(
+          result.block_distance, full_output->block_distance_map);
+      }
+      if (materialization.reconstructed_linear_rgb) {
+        CopyImage(
+          reconstructed.const_view(), full_output->reconstructed_linear_rgb);
+      }
       *full_output->frame = std::move(frame);
       *full_output->score_history = std::move(result.score_history);
       if (full_output->maximum_error_result != nullptr) {
@@ -957,7 +978,7 @@ Status RunGpuAdaptiveQuantizationPolicy(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
     epf_sharpness, options,
     GpuAdaptiveQuantizationMode::kExactCoefficients, nullptr, &output,
-    nullptr);
+    nullptr, {});
 }
 
 Status RunGpuAdaptiveQuantizationPolicy(
@@ -973,7 +994,7 @@ Status RunGpuAdaptiveQuantizationPolicy(
 
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, mode, nullptr, &output, nullptr);
+    epf_sharpness, options, mode, nullptr, &output, nullptr, {});
 }
 
 Status RunGpuAdaptiveQuantization(
@@ -990,7 +1011,7 @@ Status RunGpuAdaptiveQuantization(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
     epf_sharpness, options,
     GpuAdaptiveQuantizationMode::kExactCoefficients, nullptr, nullptr,
-    &output);
+    &output, {});
 }
 
 Status RunGpuAdaptiveQuantization(
@@ -1006,7 +1027,7 @@ Status RunGpuAdaptiveQuantization(
 
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, mode, nullptr, nullptr, &output);
+    epf_sharpness, options, mode, nullptr, nullptr, &output, {});
 }
 
 Status adaptive_quantization_gpu_internal::
@@ -1020,7 +1041,8 @@ RunPreparedGpuAdaptiveQuantization(
   AdaptiveQuantizationOptions options,
   GpuAdaptiveQuantizationMode mode,
   PreparedAdaptiveQuantization* prepared,
-  AdaptiveQuantizationOutput output) {
+  AdaptiveQuantizationOutput output,
+  AdaptiveQuantizationMaterialization materialization) {
 
   if (prepared == nullptr) {
     return Status::InvalidArgument(
@@ -1028,7 +1050,8 @@ RunPreparedGpuAdaptiveQuantization(
   }
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, mode, prepared, nullptr, &output);
+    epf_sharpness, options, mode, prepared, nullptr, &output,
+    materialization);
 }
 
 }  // namespace gjxl
