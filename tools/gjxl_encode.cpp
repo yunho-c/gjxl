@@ -81,6 +81,8 @@ struct Options {
     *mode = gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   } else if (text == "fully-resident") {
     *mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  } else if (text == "throughput") {
+    *mode = gjxl::GpuAdaptiveQuantizationMode::kThroughput;
   } else {
     return false;
   }
@@ -288,8 +290,8 @@ struct Options {
       (target_search_option_set &&
        candidate.rate_control_mode ==
          gjxl::VarDctRateControlMode::kButteraugliTarget) ||
-      (candidate.metal_aq_mode ==
-         gjxl::GpuAdaptiveQuantizationMode::kFullyResident &&
+      (candidate.metal_aq_mode !=
+         gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
        candidate.backend != gjxl::VarDctBackendPreference::kMetal)) {
     return false;
   }
@@ -397,7 +399,7 @@ void PrintUsage(const char* executable) {
                "[--max-attempts N] "
                "[--size-selection under-budget|closest] "
                "[--backend auto|cpu|metal] "
-               "[--metal-aq exact-coefficients|fully-resident] "
+               "[--metal-aq exact-coefficients|fully-resident|throughput] "
                "INPUT.pfm OUTPUT.jxl\n";
 }
 
@@ -491,9 +493,12 @@ int main(int argc, char** argv) {
             << (summary.execution_backend ==
                     gjxl::VarDctExecutionBackend::kMetal
                   ? (summary.metal_aq_mode ==
-                           gjxl::GpuAdaptiveQuantizationMode::kFullyResident
-                       ? "Metal fully-resident AQ"
-                       : "Metal exact-coefficient AQ")
+                           gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients
+                       ? "Metal exact-coefficient AQ"
+                       : (summary.metal_aq_mode ==
+                                gjxl::GpuAdaptiveQuantizationMode::kThroughput
+                            ? "Metal throughput AQ"
+                            : "Metal fully-resident AQ"))
                   : "CPU")
             << ".\nStrategies:";
   for (size_t index = 0; index < summary.strategy_counts.size(); ++index) {

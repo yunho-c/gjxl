@@ -132,6 +132,7 @@ Status RunGpuQuantizationPipeline(
   switch (aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
     case GpuAdaptiveQuantizationMode::kFullyResident:
+    case GpuAdaptiveQuantizationMode::kThroughput:
       break;
     default:
       return Status::InvalidArgument(
@@ -141,12 +142,12 @@ Status RunGpuQuantizationPipeline(
     return Status::Unavailable(
       "GPU quantization pipeline requires prepared AQ support");
   }
-  const bool fully_resident =
-    aq_mode == GpuAdaptiveQuantizationMode::kFullyResident;
+  const bool resident =
+    aq_mode != GpuAdaptiveQuantizationMode::kExactCoefficients;
   quantization_pipeline_internal::PreparedQuantizationPipeline prepared;
   Status status = quantization_pipeline_internal::PrepareQuantizationPipeline(
     original_linear_rgb, opsin, options, &prepared, false,
-    !fully_resident);
+    !resident);
   if (!status.ok()) {
     return status;
   }
@@ -168,6 +169,7 @@ Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
   switch (aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
     case GpuAdaptiveQuantizationMode::kFullyResident:
+    case GpuAdaptiveQuantizationMode::kThroughput:
       break;
     default:
       return Status::InvalidArgument(
@@ -177,13 +179,16 @@ Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
     return Status::Unavailable(
       "GPU quantization pipeline requires prepared AQ support");
   }
-  const bool fully_resident =
-    aq_mode == GpuAdaptiveQuantizationMode::kFullyResident;
+  const bool resident =
+    aq_mode != GpuAdaptiveQuantizationMode::kExactCoefficients;
+  if (aq_mode == GpuAdaptiveQuantizationMode::kThroughput) {
+    options.adaptive_quantization.iterations = 1;
+  }
   if (!prepared.preprocessing_ready ||
-      prepared.fast_initial_color_correlation != fully_resident) {
-    GpuPipelineGaborishProvider gaborish_inverse(gpu, fully_resident);
+      prepared.fast_initial_color_correlation != resident) {
+    GpuPipelineGaborishProvider gaborish_inverse(gpu, resident);
     Status status = PrepareQuantizationPreprocessing(
-      prepared, gaborish_inverse, fully_resident);
+      prepared, gaborish_inverse, resident);
     if (!status.ok()) {
       return status;
     }

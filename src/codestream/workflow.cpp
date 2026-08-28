@@ -417,8 +417,8 @@ struct PreparedWorkflow {
       preparation_options,
       &candidate->quantization,
       options.backend != VarDctBackendPreference::kMetal,
-      options.metal_aq_mode !=
-        GpuAdaptiveQuantizationMode::kFullyResident);
+      options.metal_aq_mode ==
+        GpuAdaptiveQuantizationMode::kExactCoefficients);
     if (!status.ok()) {
       return status;
     }
@@ -688,9 +688,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
       break;
     case GpuAdaptiveQuantizationMode::kFullyResident:
+    case GpuAdaptiveQuantizationMode::kThroughput:
       if (options.backend != VarDctBackendPreference::kMetal) {
         return Status::InvalidArgument(
-          "Fully resident AQ requires an explicitly forced Metal backend");
+          "Resident AQ requires an explicitly forced Metal backend");
       }
       break;
     default:

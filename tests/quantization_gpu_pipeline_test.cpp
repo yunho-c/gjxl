@@ -580,6 +580,31 @@ bool CheckDefaultUpdatePipelineParity() {
     return false;
   }
 
+  PipelineStorage throughput(kExtent, kExtent);
+  gjxl::AcStrategyGpuSearchStats throughput_stats;
+  const gjxl::GpuBackendStats before_throughput = gpu->stats();
+  const gjxl::Status throughput_status = gjxl::RunGpuQuantizationPipeline(
+      *gpu, original.ConstView(), opsin.ConstView(), options,
+      gjxl::GpuAdaptiveQuantizationMode::kThroughput, throughput.Output(),
+      &throughput_stats);
+  const gjxl::GpuBackendStats after_throughput = gpu->stats();
+  std::vector<uint8_t> throughput_codestream;
+  if (!throughput_status.ok() ||
+      throughput_stats.total_candidate_count == 0 ||
+      after_throughput.committed_submissions !=
+          before_throughput.committed_submissions + 5 ||
+      cpu.initial_quant != throughput.initial_quant ||
+      cpu.strategy_mask != throughput.strategy_mask ||
+      cpu.pixel_mask != throughput.pixel_mask || !throughput.frame.valid() ||
+      throughput.scores.size() != 2 ||
+      !gjxl::EncodeVarDctCodestream(
+           throughput.frame, &throughput_codestream).ok() ||
+      throughput_codestream.empty()) {
+    std::cerr << "Throughput GPU pipeline failed: "
+              << throughput_status.message() << '\n';
+    return false;
+  }
+
   PipelineStorage invalid_mode_output(kExtent, kExtent);
   gjxl::AcStrategyGpuSearchStats invalid_mode_stats;
   invalid_mode_stats.total_candidate_count = 424242;
@@ -934,6 +959,27 @@ bool CheckWorkflowBackendSelection() {
       resident_summary.metal_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
     std::cerr << "Forced fully resident public workflow failed\n";
+    return false;
+  }
+
+  std::vector<uint8_t> throughput_bytes;
+  gjxl::VarDctEncodingSummary throughput_summary;
+  if (!gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+              original.ConstView(),
+              {.butteraugli_target = 1.0f,
+               .backend = gjxl::VarDctBackendPreference::kMetal,
+               .metal_aq_mode =
+                   gjxl::GpuAdaptiveQuantizationMode::kThroughput},
+              gpu.get(), false, &throughput_bytes, &throughput_summary)
+          .ok() ||
+      throughput_bytes.empty() ||
+      throughput_summary.score_history.size() != 2 ||
+      throughput_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kMetal ||
+      throughput_summary.metal_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kThroughput) {
+    std::cerr << "Forced throughput public workflow failed\n";
     return false;
   }
 

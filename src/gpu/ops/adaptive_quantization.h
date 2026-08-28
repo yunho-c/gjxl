@@ -21,6 +21,10 @@ enum class GpuAdaptiveQuantizationMode {
   /// GPU. This is an explicit experimental mode and may change encoder
   /// decisions relative to the CPU reference.
   kFullyResident,
+  /// Uses the fully resident evaluator but caps the complete pipeline at one
+  /// host-synchronized AQ update instead of two. This is an explicit
+  /// speed/size/quality trade and is never selected automatically.
+  kThroughput,
 };
 
 struct GpuAdaptiveQuantizationPolicyOutput {
@@ -45,8 +49,9 @@ struct GpuAdaptiveQuantizationPolicyOutput {
   GpuAdaptiveQuantizationPolicyOutput output);
 
 /// Runs the bounded policy with the explicitly selected GPU evaluation mode.
-/// `kFullyResident` is intended for error measurement and numerical research;
-/// it does not promise CPU-identical encoder decisions.
+/// Resident modes are intended for error measurement and numerical research;
+/// neither promises CPU-identical encoder decisions. `kThroughput` changes the
+/// complete pipeline's policy iteration bound, not this direct operation.
 [[nodiscard]] Status RunGpuAdaptiveQuantizationPolicy(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
@@ -76,7 +81,7 @@ struct GpuAdaptiveQuantizationPolicyOutput {
   AdaptiveQuantizationOutput output);
 
 /// Runs full GPU adaptive quantization with an explicit evaluation mode.
-/// Fully resident output is valid and atomic, but may differ from the CPU
+/// Resident output is valid and atomic, but may differ from the CPU
 /// quant field, frame, and codestream because coefficient ties are resolved in
 /// GPU float arithmetic.
 [[nodiscard]] Status RunGpuAdaptiveQuantization(

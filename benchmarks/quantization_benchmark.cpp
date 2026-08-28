@@ -100,7 +100,7 @@ constexpr std::array<std::string_view, kPhaseCount> kPhaseNames = {
     "gpu_exact_coefficient_reconstruction_tail",
     "gpu_aq_one_evaluation_e2e",
     "gpu_iterative_aq_two_updates_e2e",
-    "gpu_complete_pipeline_two_updates",
+    "gpu_complete_pipeline",
     "cpu_public_workflow",
     "gpu_warm_public_workflow",
     "gpu_cold_public_workflow",
@@ -442,6 +442,9 @@ struct FrameCoefficientError {
   if (text == "fully-resident") {
     return gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   }
+  if (text == "throughput") {
+    return gjxl::GpuAdaptiveQuantizationMode::kThroughput;
+  }
   throw std::runtime_error("Unknown GPU AQ mode: " + std::string(text));
 }
 
@@ -477,6 +480,8 @@ struct FrameCoefficientError {
       return "exact-coefficients";
     case gjxl::GpuAdaptiveQuantizationMode::kFullyResident:
       return "fully-resident";
+    case gjxl::GpuAdaptiveQuantizationMode::kThroughput:
+      return "throughput";
   }
   return "invalid";
 }
@@ -491,7 +496,7 @@ struct FrameCoefficientError {
                    "[--input IMAGE.ppm] "
                    "[--scope full|public-workflow|coefficient-coding] "
                    "[--implementation scalar|simd|factored] "
-                   "[--gpu-aq exact-coefficients|fully-resident] "
+                   "[--gpu-aq exact-coefficients|fully-resident|throughput] "
                    "[--distance D] [--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
     }
@@ -1286,6 +1291,11 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       pipeline_stage.block_distance, gpu_pipeline_stage.block_distance);
   const double pipeline_score_error = maximum_score_error(
       pipeline_stage.scores, gpu_pipeline_stage.scores);
+  const double pipeline_final_score_error =
+      pipeline_stage.scores.empty() || gpu_pipeline_stage.scores.empty()
+        ? std::numeric_limits<double>::infinity()
+        : std::abs(
+            pipeline_stage.scores.back() - gpu_pipeline_stage.scores.back());
   const double pipeline_reconstruction_error = maximum_image_error(
       pipeline_stage.reconstructed, gpu_pipeline_stage.reconstructed);
   const double one_block_error = maximum_vector_error(
@@ -1829,6 +1839,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
             << "  rollout_errors pipeline_quant=" << pipeline_quant_error
             << " pipeline_block=" << pipeline_block_error
             << " pipeline_score=" << pipeline_score_error
+            << " pipeline_final_score=" << pipeline_final_score_error
             << " pipeline_rgb=" << pipeline_reconstruction_error
             << " one_block=" << one_block_error
             << " one_score=" << one_score_error

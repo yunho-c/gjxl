@@ -42,6 +42,21 @@ file(READ "${sentinel}" sentinel_contents)
 if(NOT sentinel_contents STREQUAL "unchanged")
   message(FATAL_ERROR "Invalid backend changed an existing output")
 endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --metal-aq throughput
+    "${GJXL_SAMPLE}" "${sentinel}"
+  RESULT_VARIABLE implicit_throughput_result
+  OUTPUT_QUIET
+  ERROR_QUIET
+)
+if(implicit_throughput_result EQUAL 0)
+  message(FATAL_ERROR "CLI accepted throughput AQ without forced Metal")
+endif()
+file(READ "${sentinel}" sentinel_contents)
+if(NOT sentinel_contents STREQUAL "unchanged")
+  message(FATAL_ERROR "Invalid throughput request changed an existing output")
+endif()
 
 execute_process(
   COMMAND
@@ -111,6 +126,8 @@ endif()
 set(first "${GJXL_TEST_DIR}/first.jxl")
 set(second "${GJXL_TEST_DIR}/second.jxl")
 set(metal "${GJXL_TEST_DIR}/metal.jxl")
+set(throughput "${GJXL_TEST_DIR}/throughput.jxl")
+set(throughput_repeat "${GJXL_TEST_DIR}/throughput-repeat.jxl")
 execute_process(
   COMMAND
     "${GJXL_ENCODER}" --distance 1.0 --backend cpu
@@ -143,15 +160,43 @@ execute_process(
 if(NOT metal_result EQUAL 0)
   message(FATAL_ERROR "Forced Metal CLI encode failed: ${metal_error}")
 endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend metal
+    --metal-aq throughput "${GJXL_SAMPLE}" "${throughput}"
+  RESULT_VARIABLE throughput_result
+  OUTPUT_VARIABLE throughput_output
+  ERROR_VARIABLE throughput_error
+)
+if(NOT throughput_result EQUAL 0)
+  message(FATAL_ERROR "Throughput CLI encode failed: ${throughput_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend metal
+    --metal-aq throughput "${GJXL_SAMPLE}" "${throughput_repeat}"
+  RESULT_VARIABLE throughput_repeat_result
+  OUTPUT_QUIET
+  ERROR_VARIABLE throughput_repeat_error
+)
+if(NOT throughput_repeat_result EQUAL 0)
+  message(FATAL_ERROR
+    "Repeated throughput CLI encode failed: ${throughput_repeat_error}")
+endif()
 
 file(SHA256 "${first}" first_hash)
 file(SHA256 "${second}" second_hash)
 file(SHA256 "${metal}" metal_hash)
+file(SHA256 "${throughput}" throughput_hash)
+file(SHA256 "${throughput_repeat}" throughput_repeat_hash)
 if(NOT first_hash STREQUAL second_hash)
   message(FATAL_ERROR "CLI output is not deterministic")
 endif()
 if(NOT first_hash STREQUAL metal_hash)
   message(FATAL_ERROR "Forced Metal changed the CLI codestream")
+endif()
+if(NOT throughput_hash STREQUAL throughput_repeat_hash)
+  message(FATAL_ERROR "Throughput CLI output is not deterministic")
 endif()
 set(expected_hash
   0cf93a5c330f19c5faad0cf20d42c446f820adfbc685aa9a29ae5251643da5a8)
@@ -169,6 +214,10 @@ endforeach()
 string(FIND "${metal_output}" "using Metal" metal_found)
 if(metal_found EQUAL -1)
   message(FATAL_ERROR "Forced Metal CLI report did not identify Metal")
+endif()
+string(FIND "${throughput_output}" "Metal throughput AQ" throughput_found)
+if(throughput_found EQUAL -1)
+  message(FATAL_ERROR "Throughput CLI report did not identify its policy")
 endif()
 
 set(target_bytes_first "${GJXL_TEST_DIR}/target-bytes-first.jxl")

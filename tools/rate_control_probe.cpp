@@ -119,6 +119,9 @@ struct ProbeRow {
   if (text == "fully-resident") {
     return gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   }
+  if (text == "throughput") {
+    return gjxl::GpuAdaptiveQuantizationMode::kThroughput;
+  }
   throw std::runtime_error("Unknown Metal AQ mode: " + std::string(text));
 }
 
@@ -126,7 +129,7 @@ void PrintUsage(std::string_view executable) {
   std::cout
     << "Usage: " << executable
     << " [--targets D1,D2,...] [--backend cpu|auto|metal] "
-       "[--metal-aq exact-coefficients|fully-resident] "
+       "[--metal-aq exact-coefficients|fully-resident|throughput] "
        "INPUT.pfm [INPUT.pfm ...]\n";
 }
 
@@ -163,11 +166,11 @@ void PrintUsage(std::string_view executable) {
     throw std::runtime_error(
       "The rate-control probe requires at least one PFM input");
   }
-  if (options.metal_aq_mode ==
-        gjxl::GpuAdaptiveQuantizationMode::kFullyResident &&
+  if (options.metal_aq_mode !=
+        gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
       options.backend != gjxl::VarDctBackendPreference::kMetal) {
     throw std::runtime_error(
-      "Fully resident AQ requires the forced Metal backend");
+      "Resident AQ requires the forced Metal backend");
   }
   return options;
 }
@@ -196,6 +199,8 @@ void PrintUsage(std::string_view executable) {
       return "exact-coefficients";
     case gjxl::GpuAdaptiveQuantizationMode::kFullyResident:
       return "fully-resident";
+    case gjxl::GpuAdaptiveQuantizationMode::kThroughput:
+      return "throughput";
   }
   return "invalid";
 }

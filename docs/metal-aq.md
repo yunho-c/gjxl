@@ -1138,19 +1138,25 @@ interchangeable.
 After Milestone 9, the rejected boundary was promoted from a private diagnostic
 to an explicit public experimental mode so its errors and candidate fixes can
 be measured without test-only shims. `GpuAdaptiveQuantizationMode` selects
-`kExactCoefficients` or `kFullyResident` in bounded AQ, full AQ, and the
-complete GPU quantization pipeline. `VarDctEncodingOptions::metal_aq_mode` and
-the CLI's `--metal-aq fully-resident` carry the same choice through codestream
-generation. Fully resident mode requires forced Metal, is reported in the
-workflow summary, and never participates in automatic selection. Its output is
-atomic and structurally valid but is intentionally not covered by the CPU
-decision-parity promise. The throughput policy also applies inverse Gaborish
-through one three-channel Metal primitive submission and uses the deterministic
-tilewise pixel-domain initial-CfL seed. Exact-coefficient mode retains the
+`kExactCoefficients`, `kFullyResident`, or `kThroughput` in bounded AQ, full AQ,
+and the complete GPU quantization pipeline.
+`VarDctEncodingOptions::metal_aq_mode` and the CLI's `--metal-aq` option carry
+the same choice through codestream generation. Both resident modes require
+forced Metal, are reported in the workflow summary, and never participate in
+automatic selection. Their output is atomic and structurally valid but is
+intentionally not covered by the CPU decision-parity promise. Both also apply
+inverse Gaborish through one three-channel Metal primitive submission and use
+the deterministic tilewise pixel-domain initial-CfL seed. Exact-coefficient
+mode retains the
 original CPU Gaborish and DCT-domain iterative initial-CfL paths. After strategy
-selection, throughput mode computes one fast strategy-aware final-CfL map from
-the adjusted initial quant field and reuses it across perceptual evaluations;
-the exact path retains evaluation-local quant-dependent maps.
+selection, each resident mode computes one fast strategy-aware final-CfL map
+from the adjusted initial quant field and reuses it across perceptual
+evaluations; the exact path retains evaluation-local quant-dependent maps.
+The separate throughput mode retains the resident coefficient path while
+limiting the complete quantization pipeline to one AQ update. Direct fully
+resident AQ APIs still honor their requested iteration count; the bounded
+policy is therefore explicit rather than a hidden reinterpretation of
+`kFullyResident`.
 
 The production corpus covers 13 built-in workloads at Butteraugli targets
 `1.0` and `1.2`, plus four independent 1919x1079 natural, HDR-like, and

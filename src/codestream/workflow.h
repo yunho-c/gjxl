@@ -68,8 +68,8 @@ struct VarDctEncodingOptions {
   TargetSizeSelectionPolicy target_size_selection =
     TargetSizeSelectionPolicy::kLargestAtOrBelow;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
-  /// Selects the Metal AQ implementation. Fully resident mode requires an
-  /// explicitly forced Metal backend and may change encoder decisions.
+  /// Selects the Metal AQ implementation. Resident modes require an explicitly
+  /// forced Metal backend and may change encoder decisions or policy bounds.
   GpuAdaptiveQuantizationMode metal_aq_mode =
     GpuAdaptiveQuantizationMode::kExactCoefficients;
 };

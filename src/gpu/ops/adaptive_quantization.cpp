@@ -103,6 +103,7 @@ void CopyContiguousPlane(
   switch (mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
     case GpuAdaptiveQuantizationMode::kFullyResident:
+    case GpuAdaptiveQuantizationMode::kThroughput:
       return Status::Ok();
   }
   return Status::InvalidArgument(
@@ -227,7 +228,7 @@ public:
       ColorCorrelationMap color_correlation;
       const ColorCorrelationMap* selected_color_correlation =
         &fixed_color_correlation_;
-      if (mode_ != GpuAdaptiveQuantizationMode::kFullyResident) {
+      if (mode_ == GpuAdaptiveQuantizationMode::kExactCoefficients) {
         status =
           chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
             forward_coefficients_,
@@ -484,7 +485,7 @@ Status RunGpuAdaptiveQuantizationImpl(
   prepared_coefficients_internal::PreparedForwardDctCoefficients
     forward_coefficients;
   ColorCorrelationMap fixed_color_correlation;
-  status = mode == GpuAdaptiveQuantizationMode::kFullyResident
+  status = mode != GpuAdaptiveQuantizationMode::kExactCoefficients
     ? PrepareFixedThroughputColorCorrelation(
         opsin, strategies, initial_quant_field, options.butteraugli_target,
         &forward_coefficients, &fixed_color_correlation)
@@ -493,7 +494,7 @@ Status RunGpuAdaptiveQuantizationImpl(
   if (!status.ok()) {
     return status;
   }
-  if (mode == GpuAdaptiveQuantizationMode::kFullyResident) {
+  if (mode != GpuAdaptiveQuantizationMode::kExactCoefficients) {
     forward_coefficients = {};
   }
 

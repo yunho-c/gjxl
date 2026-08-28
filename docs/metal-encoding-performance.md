@@ -27,15 +27,18 @@ The primary throughput gate is:
 - The reported speedup is the range of paired process medians, not a ratio of
   unrelated best cases.
 
-Two accuracy tracks are explicit:
+Three accuracy tracks are explicit:
 
 - `exact-coefficients` is the production track. Raw quantization, encoder frame,
   and codestream bytes remain exact; existing numerical gates are not widened.
-- `fully-resident` is the throughput track. Byte identity is not required, but
-  output must be deterministic for a fixed backend, structurally valid,
+- `fully-resident` is the resident-quality track. Byte identity is not required,
+  but output must be deterministic for a fixed backend, structurally valid,
   independently accepted by the pinned `djxl`, finite after decoding, and
   measured for Butteraugli/decoded-pixel drift. Any policy or quality change is
   reported instead of being hidden behind a tolerance.
+- `throughput` is a more aggressive opt-in policy layered on the resident
+  evaluator. It performs one AQ update instead of the default two and reports
+  its additional size and quality drift separately.
 
 The `50x` objective may be satisfied first by the throughput track. Production
 rollout remains separately gated on the exact track.
@@ -76,6 +79,7 @@ Use the focused benchmark while iterating:
 ```sh
 just encode-benchmark padded_1080p simd 5 1 exact-coefficients
 just encode-benchmark padded_1080p simd 5 1 fully-resident
+just encode-benchmark padded_1080p simd 5 1 throughput
 just coefficient-benchmark padded_1080p 9 2
 ```
 
@@ -242,6 +246,21 @@ Metal at `394.4-424.5 ms` (median `410.1 ms`) and paired speedup at
 maximum remained `0.0540`; field, block-map, and RGB maxima were `0.202`,
 `0.424`, and `0.979`. This only removes repeated host regression: quantizer and
 EPF preparation plus three submission/readback boundaries remain.
+
+The second retained P4 slice adds an explicit `throughput` mode that uses the
+resident evaluator but caps the public pipeline at one AQ update. Existing
+`fully-resident` calls continue to honor the configured iteration count. On
+one padded-1080p process with one warmup and five alternating samples, the new
+mode measured `237.4-270.0 ms` (median `266.5 ms`) and paired speedup at
+`22.69-25.89x` (median `23.23x`). Relative to the exact pipeline, one full
+profile observed `0.161` final-field, `0.494` block-map, `0.0768` final-score,
+and `0.972` reconstructed-RGB maximum error; the codestream was `618217` bytes
+versus `630517` exact and `617093` for two-update fully resident. A rejected
+zero-update experiment reached a `243.3 ms` public median but increased the
+final-score error to `0.356` and the codestream to `637091` bytes. Throughput
+mode is never automatic and requires explicitly forced Metal.
+An independently installed `djxl` 0.12 decoder also accepted the CLI's
+throughput sample and produced a 17x13 linear-RGB PFM.
 
 ### P5. Parallelize the codestream tail
 
