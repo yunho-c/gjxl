@@ -50,11 +50,9 @@ behavior. The AQ implementation already provides:
 - a qualified Metal exact-coefficient path; and
 - an experimental fully resident Metal coefficient path.
 
-The remaining rate-control gaps are:
-
-- no fully resident `AdjustQuantBlockAC` device pass; and
-- no resampling-specific AQ bypass. The bypass policy is small, but the current
-  codestream profile does not support resampling.
+The remaining rate-control gap is the resampling-specific AQ bypass. The bypass
+policy is small, but the current codestream profile does not support
+resampling, so exposing that rule would not yet provide an end-to-end feature.
 
 The public request/result types represent all four modes and validate only the
 active mode. Maximum-error requests are implemented on the CPU and explicitly
@@ -94,6 +92,24 @@ The probe emits CSV containing the input and extent, requested target, encoded
 bytes and BPP, final score, actual backend and Metal mode, per-encode and total
 time, size-monotonicity flag, and strategy counts.
 
+Forced Metal exposes four coefficient/AQ execution choices without changing
+the outer rate-control request:
+
+- `exact-coefficients` retains authoritative CPU coefficient decisions and is
+  the only Metal mode eligible for automatic selection;
+- `fully-resident` keeps iterative coefficient coding, reconstruction, and
+  scoring on Metal for the requested AQ iteration count;
+- `throughput` uses the same resident path with one AQ update; and
+- `maximum-throughput` fixes DCT8, encodes the adjusted initial field, and
+  skips reconstruction and perceptual scoring.
+
+The three experimental modes require an explicitly forced Metal backend.
+Target-byte and target-BPP searches can use all four because they select from
+actual serialized sizes. Maximum-error control can use exact, fully resident,
+or throughput modes, but rejects maximum-throughput because that path does not
+perform the error evaluation. The corpus rate-control probe likewise excludes
+maximum-throughput because its CSV contract requires a score history.
+
 The qualified Metal boundary intentionally retains authoritative coefficient
 decisions on the CPU. CPU coefficient coding now applies the pinned
 `AdjustQuantBlockAC` policy in Y, X, B evaluation order, stores the selected
@@ -102,10 +118,15 @@ thresholds, and requantizes all three channels from that decision. The
 exact-coefficient Metal path consumes the resulting frame and adjusted raw
 field, including its EPF input, so frame and codestream decisions remain exact.
 
-The fully resident path remains experimental and explicitly uses the fixed-raw-
-quant decision mode as its CPU oracle until task 13 lands. FP32 coefficient ties
-can change integer coefficient decisions and compound across AQ iterations.
-Rate-control work must not silently weaken that boundary.
+The fully resident and throughput paths now apply `AdjustQuantBlockAC` directly
+to their Metal forward coefficients. The selected shared raw quant is stored at
+the transform anchor, the adjusted Y thresholds feed Y quantization, and EPF
+inverse sigma is recomputed on device from the selected anchor. Final frame
+materialization reads back the block-resolution raw-quant field but no pixel
+image for this decision. The paths remain experimental because FP32 forward-
+transform ties can still differ from the CPU double-precision coefficient
+oracle and compound across AQ iterations; this work does not weaken that
+boundary or make either mode eligible for automatic selection.
 
 ## Dependency order
 
@@ -209,8 +230,8 @@ Recommended initial semantics are:
 
 - prefer the largest valid codestream at or below the byte budget;
 - if no candidate is below the budget, return the smallest valid candidate;
-- break equal-size ties using the lower perceptual score, then the lower target
-  value;
+- break equal-size ties using the lower perceptual score when one is available,
+  then the lower target value;
 - stop on the configured byte tolerance, an unchanged-size plateau, exhausted
   bracket, or maximum attempt count; and
 - produce identical bytes and summary for identical input and options.
@@ -287,8 +308,8 @@ Acceptance criteria:
 
 **Estimate:** 2–4 days after the CPU implementation.
 
-**Status:** complete for exact-coefficient Metal; the fully resident device
-port remains task 13.
+**Status:** complete for exact-coefficient Metal. The resident device
+composition is tracked separately in task 13.
 
 The production Metal path already accepts authoritative CPU coefficient
 decisions. Feed the adjusted raw-quant field and coefficient frame through that
@@ -389,7 +410,10 @@ inconsistent byte count or summary remains a terminal internal-contract error.
 `TargetSizeSelectionPolicy::kLargestAtOrBelow` retains the source-compatible
 default. `kClosestAbsolute` minimizes absolute byte error and prefers the
 under-budget candidate on equal-distance ties. Equal-size candidates in both
-modes use final score and then the lower Butteraugli target as stable tie-breaks.
+modes use final score when present and then the lower Butteraugli target as a
+stable tie-break. A scoreless maximum-throughput candidate remains valid
+because serialized size, not an internal perceptual evaluation, is the rate
+contract.
 
 ### 12. Reuse target-invariant preparation across attempts
 
@@ -467,17 +491,30 @@ CPU/Metal, loose/tight outputs and both `17x13` backend outputs.
 
 **Estimate:** 2–4 weeks plus numerical-parity contingency.
 
-Add a device pass that computes the cross-channel shared-quant adjustment,
-retains the adjusted Y thresholds, and requantizes the transform without
-pixel-sized host readback. Validate its intermediate decisions directly for all
-strategies before composing it with iterative AQ.
+**Status:** complete for the current seven-strategy resident and frame-only
+Metal coefficient paths. CPU-identical resident forward coefficients remain
+outside the claim.
 
-This task sits at the medium/hard boundary. The heuristic contains
-threshold-sensitive integer decisions, while the current fully resident FP32
-transform path already fails the unchanged production decision gate. A bounded
-CPU decision handoff is acceptable only if the resulting path is described as
-a hybrid boundary rather than fully resident. Pure-resident exact decision
-parity remains research-risky and has no guaranteed schedule.
+The tested adjustment primitive is composed into the existing per-transform
+resident coefficient kernel, so it adds neither an allocation nor a command
+submission. One thread selects the cross-channel shared quant and adjusted Y
+thresholds; the threadgroup then requantizes all channels with that decision.
+The same command rewrites EPF inverse sigma over the transform footprint from
+the adjusted anchor raw quant and the prepared sharpness LUT. Covered
+non-anchor raw-quant cells remain unchanged, matching the pinned encoder.
+
+Direct threshold, tie, quant-limit, and non-finite fixtures cover all seven
+strategies. A mixed-strategy batched integration test checks shared raw quant,
+adjusted Y coefficients, EPF inverse sigma, one-submission execution, and zero
+post-preparation allocation against CPU oracles. Final frame assembly adds only
+the block-grid raw-quant readback already required for codestream state; it
+does not round-trip coefficients or a pixel-sized image for the decision.
+
+The remaining research risk is a different claim: the resident Metal forward
+transform is FP32 while the CPU oracle accumulates in double precision. An
+input near a threshold may therefore make a different, internally consistent
+adjustment decision. Resident output remains experimental and is not described
+as CPU-bit-exact.
 
 ## Suggested milestones
 
@@ -546,7 +583,8 @@ Exit criteria:
 
 Expected cumulative effort for RC0 through RC3: approximately 6–10 weeks.
 
-Task 13 is an experimental follow-on and is not an RC3 exit criterion.
+Task 13 is complete as an experimental resident feature and remains outside
+the automatic-selection RC3 exit criterion.
 
 ## Cross-cutting validation
 

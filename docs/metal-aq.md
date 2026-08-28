@@ -1159,11 +1159,24 @@ resident AQ APIs still honor their requested iteration count; the bounded
 policy is therefore explicit rather than a hidden reinterpretation of
 `kFullyResident`.
 
+Resident coefficient coding now composes the pinned `AdjustQuantBlockAC`
+heuristic into the existing per-transform Metal kernel. It selects one shared
+raw quant from Y, X, and B, retains the adjusted Y dead-zone thresholds, and
+recomputes EPF inverse sigma from the adjusted anchor on device. The final
+frame reads back the block-grid raw-quant field, but the decision adds no
+allocation, command submission, coefficient readback, or pixel-sized host
+boundary. Direct fixtures cover all seven strategies, and a mixed-strategy
+integration check verifies the batched decision and EPF field against CPU
+oracles. This does not make resident output CPU-bit-exact: its adjustment acts
+on Metal FP32 forward coefficients rather than the CPU double-precision
+coefficients.
+
 Maximum-throughput mode bypasses AC search with a complete DCT8 grid, adjusts
 the initial quant field once, and invokes `PreparedAqEvaluation::EncodeFrame`.
 The Metal implementation runs reset, inverse Gaborish, gather,
 forward-transform, and coefficient-quantization commands in one submission,
-then reads back only device error state, quantized DC, and quantized AC.
+then reads back only device error state, quantized DC, quantized AC, and the
+block-grid adjusted raw-quant field required by frame serialization.
 `AqEvaluationPreparation::frame_only` omits the original-image upload and
 prepared Butteraugli reference. No inverse transform reconstruction, decoder
 loop-filter evaluation, linear-RGB reconstruction, Butteraugli comparison,

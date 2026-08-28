@@ -393,10 +393,11 @@ than silently selecting a different implementation; exact coefficients remain
 the default and the only automatically selected Metal AQ mode.
 Throughput mode additionally performs one AQ update instead of the default two;
 fully resident mode continues to honor the requested iteration count.
-Maximum-throughput mode instead fixes every transform to DCT8, quantizes the
-adjusted initial field, and stops before inverse reconstruction or perceptual
-scoring. Its summary score history is empty; the policy must be evaluated with
-an independent decoder and quality metric.
+Maximum-throughput mode instead fixes every transform to DCT8, applies the
+resident `AdjustQuantBlockAC` shared-quant decision to the adjusted initial
+field, and stops before inverse reconstruction or perceptual scoring. Its
+summary score history is empty; the policy must be evaluated with an
+independent decoder and quality metric.
 
 The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and one
 of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus

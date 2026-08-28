@@ -296,6 +296,47 @@ automatic and exposes no internal perceptual score; these independent
 decoded-quality measurements are the only quality claim for the speed-first
 policy.
 
+#### Post-adjustment reconciliation checkpoint (2026-08-28)
+
+After the performance stack was reconciled with rate control and the resident
+`AdjustQuantBlockAC` decision was composed into production coefficient coding,
+the public boundary was remeasured on the same Apple M4 Pro Release build. The
+new block-grid raw-quant readback, codestream serialization, and all ordinary
+workflow preparation are included.
+
+Maximum-throughput used three independent processes, each with one warmup and
+five alternating CPU/Metal pairs. CPU process medians were
+`6313.1-6369.3 ms`, Metal process medians were `113.6-118.7 ms`, and paired
+process-median speedups were `53.43-55.58x`; every individual pair was
+`51.03-59.21x`. Metal quantization-pipeline process medians were
+`80.1-80.8 ms`. The current maximum-throughput codestream is `765599` bytes
+versus `637706` exact, a `20.1%` increase. These figures supersede the earlier
+pre-adjustment 1080p size and speed checkpoint for the current implementation.
+
+The other modes received one process with one warmup and three alternating
+pairs, so these are directional checkpoints rather than retained
+multi-process ranges:
+
+| Mode | Metal median (range) | Paired speedup median (range) | Bytes |
+| --- | ---: | ---: | ---: |
+| exact-coefficients | 626.3 ms (600.0-673.0) | 10.06x (9.34-10.51) | 637706 |
+| fully-resident | 279.0 ms (272.8-279.2) | 22.56x (22.55-23.15) | 622784 |
+| throughput | 256.7 ms (248.3-257.3) | 24.68x (24.56-25.43) | 623449 |
+
+The exact track retained identical CPU/Metal codestream bytes. All four modes
+also produced independently decodable 17x13 CLI codestreams after the
+adjustment integration, including target-size maximum-throughput and
+maximum-error throughput requests. Decoded-quality and corpus-size claims from
+the earlier maximum-throughput output do not transfer to the changed adjusted
+codestream; they require a fresh named-corpus quality run.
+
+One additional 4K process with one warmup and three alternating pairs was a
+directional regression check. CPU median was `25388.6 ms`, Metal median was
+`417.7 ms`, and paired speedup median was `61.21x` with a
+`57.36-65.25x` per-pair range. The current output was `3061311` bytes versus
+`2540027` exact (`20.5%` larger). A refreshed retained 4K claim would still
+require the other two independent processes specified by the primary gate.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

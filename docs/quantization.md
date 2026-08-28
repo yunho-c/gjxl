@@ -150,8 +150,10 @@ The CPU reference stores modular-stream quantized DC separately from AC and
 retains its decoder-equivalent floating-point reconstruction for the AQ round
 trip. Production coefficient coding applies the pinned `AdjustQuantBlockAC`
 cross-channel shared-quant decision and adjusted Y dead zones. The fixed-raw-
-quant mode remains an explicit oracle for the experimental fully resident Metal
-path until its device adjustment pass lands.
+quant mode remains an explicit diagnostic oracle. Experimental resident Metal
+coefficient coding applies the same heuristic to its device FP32 forward
+coefficients; those inputs are not claimed to be identical to the CPU's
+double-precision forward transform.
 
 Relevant implementations:
 
@@ -504,19 +506,17 @@ Relevant implementations:
 ## Accuracy scope and known deviations
 
 The CPU pipeline is an executable reference for the currently supported seven
-DCT strategies and fixed-raw-quant coefficient path. It is not yet a complete
-libjxl encoder replacement:
+DCT strategies, including the adjusted shared-quant coefficient path. It is
+not yet a complete libjxl encoder replacement:
 
 - Default 4:4:4 DC quantization and DC chroma-from-luma are modeled. Modular DC
   entropy tokenization and adaptive DC smoothing are not modeled yet.
-- The optional encoder-side `AdjustQuantBlockAC` heuristic is not applied.
-- Maximum-error AQ, resampling-specific AQ bypasses, HDR transfer functions,
-  and non-default opsin matrices are outside the current contract.
-- Exact pinned parity applies to the individual numerical stages and fixed
-  coefficient fixtures. Because of the coefficient-heuristic omission, the
-  complete score trajectory is tested for deterministic composition and the
-  libjxl update rule, not claimed to be bit-identical to a full libjxl encode
-  round trip.
+- Resampling-specific AQ bypasses, HDR transfer functions, and non-default
+  opsin matrices are outside the current contract.
+- Exact pinned parity applies to the individual numerical stages and complete
+  CPU coefficient decisions. The broader score trajectory is tested for
+  deterministic composition and the libjxl update rule, not claimed to be
+  bit-identical to every full libjxl encoder configuration.
 
 These deviations do not block GPU ports of the established leaf operations.
 They do block claiming complete encoder or bitstream parity.
