@@ -256,21 +256,21 @@ bool CheckLoopAndUpdateRule() {
     return false;
   }
   constexpr std::array<double, 3> kPinnedScoreHistory = {
-    1.573393702507019,
-    1.4235906600952148,
-    1.2938419580459595,
+    1.4379985332489014,
+    1.5877672433853149,
+    1.3390514850616455,
   };
   constexpr std::array<float, 6> kPinnedQuantField = {
-    0.848191023f, 0.810860574f, 0.748267889f,
-    0.958660662f, 0.856463075f, 0.802448153f,
+    0.80643332f, 0.735941947f, 0.637496114f,
+    0.94307363f, 0.828147173f, 0.76855731f,
   };
   constexpr std::array<int32_t, 6> kPinnedRawQuantField = {
     7, 7, 6,
-    8, 7, 6,
+    8, 8, 7,
   };
   constexpr std::array<float, 6> kPinnedBlockDistance = {
-    1.4115169f, 1.37227523f, 1.39127612f,
-    1.36678886f, 1.29607725f, 1.29839003f,
+    1.43354511f, 1.42750943f, 1.46047115f,
+    1.4229573f, 1.41002619f, 1.39885497f,
   };
   double maximum_score_error = 0.0;
   for (size_t index = 0; index < kPinnedScoreHistory.size(); ++index) {

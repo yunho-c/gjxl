@@ -200,14 +200,15 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
       !frame.strategies().Get(0, 0, &cell).ok() ||
       cell.strategy != strategy ||
       !cell.is_anchor ||
-      frame.raw_quant_field().Row(0)[0] != 37 ||
       group.block_x != 0 || group.block_y != 0 ||
       group.used_coefficient_count != info->coefficient_count()) {
     std::cerr << "Stored coefficient metadata is incorrect\n";
     return false;
   }
   if (strategy == gjxl::AcStrategyType::kDct32x32) {
-    constexpr uint64_t kPinnedQuantizedHash = 0x4fa3ae70ffbbecfdull;
+    // Includes the pinned AdjustQuantBlockAC shared-quant and Y dead-zone
+    // decisions before X/B color-correlation removal.
+    constexpr uint64_t kPinnedQuantizedHash = 0x6c0b64bd3bffc4a7ull;
     // Default 4:4:4 DC quantization of the pinned libjxl LLF outputs for this
     // fixture, in X/Y/B plane order.
     constexpr std::array<std::array<int32_t, 4>, 3> kPinnedQuantizedDc = {{
@@ -339,6 +340,19 @@ bool CheckFlatDcQuantization() {
         &frame).ok()) {
     return false;
   }
+  if (frame.raw_quant_field().Row(0)[0] != 4) {
+    std::cerr << "Flat transform anchor did not retain adjusted raw quant\n";
+    return false;
+  }
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      if ((x != 0 || y != 0) &&
+          frame.raw_quant_field().Row(y)[x] != 1) {
+        std::cerr << "Flat covered non-anchor raw quant was overwritten\n";
+        return false;
+      }
+    }
+  }
   const auto& inverse_dc_steps = quantizer.inverse_dc_steps();
   const auto& dc_steps = quantizer.dc_steps();
   const int32_t quantized_y = static_cast<int32_t>(
@@ -441,6 +455,19 @@ bool CheckMixedGridAndInvalidInputs() {
         0.8f) {
     std::cerr << "Mixed-grid coefficient coding failed\n";
     return false;
+  }
+
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      gjxl::AcStrategyCell cell;
+      if (!grid.Get(x, y, &cell).ok()) return false;
+      const int32_t stored = frame.raw_quant_field().Row(y)[x];
+      if (!cell.is_anchor &&
+          stored != raw_quant[y * kBlockExtent.width + x]) {
+        std::cerr << "Covered non-anchor raw quant was overwritten\n";
+        return false;
+      }
+    }
   }
 
   ImageStorage reconstructed(kPixelExtent);

@@ -171,14 +171,6 @@ public:
       if (!status.ok()) {
         return status;
       }
-      status = ComputeEpfInverseSigma(
-        strategies_,
-        {raw_quant.data(), block_extent, block_extent.width},
-        quantizer, epf_sharpness_, options_.profile.epf_sigma,
-        {inverse_sigma.data(), block_extent, block_extent.width});
-      if (!status.ok()) {
-        return status;
-      }
 
       VarDctEncoderFrame exact_coefficients;
       if (mode_ == GpuAdaptiveQuantizationMode::kExactCoefficients) {
@@ -204,6 +196,20 @@ public:
         }
       }
 
+      const ConstPlaneI32View evaluation_raw_quant =
+        mode_ == GpuAdaptiveQuantizationMode::kExactCoefficients
+          ? exact_coefficients.raw_quant_field()
+          : ConstPlaneI32View{
+              raw_quant.data(), block_extent, block_extent.width};
+      status = ComputeEpfInverseSigma(
+        strategies_,
+        evaluation_raw_quant,
+        quantizer, epf_sharpness_, options_.profile.epf_sigma,
+        {inverse_sigma.data(), block_extent, block_extent.width});
+      if (!status.ok()) {
+        return status;
+      }
+
       aqi::AdaptiveQuantizationEvaluation candidate;
       candidate.block_distance.resize(block_count);
       const ConstPlaneI8View y_to_x = color_correlation.y_to_x_map();
@@ -222,8 +228,7 @@ public:
         prepared_output.final = &final_output;
       }
       AqEvaluationInput prepared_input{
-          .raw_quant_field = {
-            raw_quant.data(), block_extent, block_extent.width},
+          .raw_quant_field = evaluation_raw_quant,
           .quantizer = quantizer.params(),
           .y_to_x = y_to_x,
           .y_to_b = y_to_b,

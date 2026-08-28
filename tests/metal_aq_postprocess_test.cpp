@@ -494,7 +494,9 @@ gjxl::Status ComputeCpuFrame(
        .color_correlation = &input.color,
        .epf_sharpness = {epf_sharpness.data(), strategies.extent(),
                          strategies.extent().width}},
-      options.profile, frame);
+      options.profile,
+      frame,
+      gjxl::AcCoefficientDecisionMode::kFixedRawQuant);
 }
 
 bool CompareChainedReconstruction(

@@ -204,7 +204,9 @@ gjxl::Status ComputeCpuFrame(
        .color_correlation = &input.color,
        .epf_sharpness =
            {epf_sharpness.data(), kBlockExtent, kBlockExtent.width}},
-      Options().profile, frame);
+      Options().profile,
+      frame,
+      gjxl::AcCoefficientDecisionMode::kFixedRawQuant);
 }
 
 gjxl::MetalBackendOptions SimdOptions() {

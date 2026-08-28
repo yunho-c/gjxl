@@ -138,7 +138,7 @@ if(NOT first_hash STREQUAL metal_hash)
   message(FATAL_ERROR "Forced Metal changed the CLI codestream")
 endif()
 set(expected_hash
-  48abd331b4b4e37f0b158af86ef7c766c72ed760a51ce6903a415bf2544031c7)
+  0cf93a5c330f19c5faad0cf20d42c446f820adfbc685aa9a29ae5251643da5a8)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")

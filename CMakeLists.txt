@@ -1363,6 +1363,22 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_quantization_adjustment_test
+    tests/quantization_adjustment_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_quantization_adjustment_test
+    PRIVATE
+      gjxl_codec
+  )
+
+  add_test(
+    NAME quantization_adjustment
+    COMMAND gjxl_quantization_adjustment_test
+  )
+
+  add_executable(
     gjxl_dc_conversion_test
     tests/dct_reference.cpp
     tests/dc_conversion_test.cpp

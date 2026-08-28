@@ -21,6 +21,14 @@ namespace gjxl {
 
 class VarDctEncoderFrame;
 
+enum class AcCoefficientDecisionMode {
+  /// Applies the pinned cross-channel AdjustQuantBlockAC policy.
+  kAdjustedSharedQuant,
+  /// Retains the supplied raw quant. This is the explicit CPU oracle for the
+  /// experimental fully resident path until its device adjustment pass lands.
+  kFixedRawQuant,
+};
+
 namespace vardct_frame_internal {
 struct QuantizedFrameAssemblyInput;
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
@@ -112,7 +120,8 @@ private:
     ConstImage3FView,
     VarDctFrameInput,
     SimpleVarDctCodestreamProfile,
-    VarDctEncoderFrame*);
+    VarDctEncoderFrame*,
+    AcCoefficientDecisionMode);
 
   friend Status ReconstructQuantizedCoefficients(
     const VarDctEncoderFrame&,

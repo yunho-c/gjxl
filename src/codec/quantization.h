@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <span>
 
@@ -51,11 +52,43 @@ struct AcQuantizationOptions {
   float matrix_multiplier = 1.0f;
 };
 
+/// Cross-channel encoder decision selected before final AC quantization.
+/// `raw_quant` is shared by X/Y/B; `y_thresholds` retains the adjusted Y
+/// dead-zone policy used by the pinned encoder heuristic.
+struct AdjustedAcQuantization {
+  int32_t raw_quant = 0;
+  std::array<float, 4> y_thresholds{};
+
+  friend bool operator==(
+    const AdjustedAcQuantization&,
+    const AdjustedAcQuantization&) = default;
+};
+
+/// Selects the shared raw quant in Y, X, B evaluation order from the three
+/// unquantized coefficient planes. Coefficients and multipliers are in X/Y/B
+/// order. Failure leaves `out` unchanged.
+[[nodiscard]] Status SelectAdjustedAcQuantization(
+  AcStrategyType strategy,
+  const Quantizer& quantizer,
+  int32_t initial_raw_quant,
+  const std::array<float, 3>& matrix_multipliers,
+  const std::array<std::span<const float>, 3>& coefficients,
+  AdjustedAcQuantization* out);
+
 [[nodiscard]] Status QuantizeAcBlock(
   AcStrategyType strategy,
   const Quantizer& quantizer,
   int32_t raw_quant,
   AcQuantizationOptions options,
+  std::span<const float> coefficients,
+  std::span<int32_t> quantized);
+
+/// Quantizes Y with the shared raw quant and retained Y dead-zone thresholds
+/// selected by `SelectAdjustedAcQuantization`.
+[[nodiscard]] Status QuantizeAdjustedYAcBlock(
+  AcStrategyType strategy,
+  const Quantizer& quantizer,
+  const AdjustedAcQuantization& decision,
   std::span<const float> coefficients,
   std::span<int32_t> quantized);
 

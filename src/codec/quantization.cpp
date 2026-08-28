@@ -214,6 +214,265 @@ float AdjustQuantizationBias(int32_t quantized, XybChannel channel) {
   return value - kDefaultQuantBias[3] / value;
 }
 
+Status QuantizeAcBlockWithThresholds(
+  AcStrategyType strategy,
+  const Quantizer& quantizer,
+  int32_t raw_quant,
+  AcQuantizationOptions options,
+  const std::array<float, 4>& thresholds,
+  std::span<const float> coefficients,
+  std::span<int32_t> quantized) {
+
+  QuantizationMatrixView matrix;
+  Status status = ValidateAcOperation(
+    strategy,
+    quantizer,
+    raw_quant,
+    options,
+    coefficients.size(),
+    quantized.size(),
+    &matrix);
+  if (!status.ok()) {
+    return status;
+  }
+  if (!std::ranges::all_of(thresholds, [](float threshold) {
+        return std::isfinite(threshold) && threshold >= 0.0f;
+      })) {
+    return Status::InvalidArgument(
+      "AC quantization thresholds must be finite and non-negative");
+  }
+
+  const float quantization_scale =
+    quantizer.scale() *
+    static_cast<float>(raw_quant) *
+    options.matrix_multiplier;
+  const size_t width = matrix.coefficient_extent.width;
+  const size_t height = matrix.coefficient_extent.height;
+
+  for (size_t index = 0; index < coefficients.size(); ++index) {
+    if (!std::isfinite(coefficients[index])) {
+      return Status::InvalidArgument(
+        "AC coefficients must be finite");
+    }
+
+    const size_t x = index % width;
+    const size_t y = index / width;
+    const size_t threshold_index =
+      static_cast<size_t>(y >= height / 2) * 2 +
+      static_cast<size_t>(x >= width / 2);
+    const float value =
+      matrix.inverse_dequant[index] *
+      quantization_scale *
+      coefficients[index];
+
+    if (!std::isfinite(value)) {
+      return Status::InvalidArgument(
+        "Scaled AC coefficient is not finite");
+    }
+
+    if (std::abs(value) < thresholds[threshold_index]) {
+      quantized[index] = 0;
+      continue;
+    }
+
+    const double rounded = std::nearbyint(static_cast<double>(value));
+    if (rounded < static_cast<double>(std::numeric_limits<int32_t>::min()) ||
+        rounded > static_cast<double>(std::numeric_limits<int32_t>::max())) {
+      return Status::InvalidArgument(
+        "Quantized AC coefficient exceeds int32 range");
+    }
+    quantized[index] = static_cast<int32_t>(rounded);
+  }
+  return Status::Ok();
+}
+
+Status AdjustQuantForChannel(
+  const Quantizer& quantizer,
+  size_t channel,
+  float matrix_multiplier,
+  AcStrategyType strategy,
+  const QuantizationMatrixView& matrix,
+  std::span<const float> coefficients,
+  std::array<float, 4>* thresholds,
+  int32_t* raw_quant) {
+
+  const size_t xsize = matrix.coefficient_extent.width / kJxlBlockDimension;
+  const size_t ysize = matrix.coefficient_extent.height / kJxlBlockDimension;
+  const float qac = quantizer.scale() * static_cast<float>(*raw_quant);
+  if (xsize > 1 || ysize > 1) {
+    const float reduction = std::clamp(
+      0.003f * static_cast<float>(xsize * ysize), 0.0f, 0.08f);
+    for (float& threshold : *thresholds) {
+      threshold = std::max(0.54f, threshold - reduction);
+    }
+  }
+
+  float highest_frequency_border_sum = 0.0f;
+  float error_sum = 0.0f;
+  float value_sum = 0.0f;
+  std::array<float, 4> high_frequency_nonzeros{};
+  std::array<float, 4> high_frequency_max_error{};
+  for (size_t y = 0; y < matrix.coefficient_extent.height; ++y) {
+    for (size_t x = 0; x < matrix.coefficient_extent.width; ++x) {
+      const size_t index = y * matrix.coefficient_extent.width + x;
+      if (x < xsize && y < ysize) {
+        continue;
+      }
+      const size_t quadrant =
+        static_cast<size_t>(y >= matrix.coefficient_extent.height / 2) * 2 +
+        static_cast<size_t>(x >= matrix.coefficient_extent.width / 2);
+      const float value = coefficients[index] *
+        (matrix.inverse_dequant[index] * qac * matrix_multiplier);
+      if (!std::isfinite(value)) {
+        return Status::InvalidArgument(
+          "Adjusted AC coefficient is not finite");
+      }
+      const float quantized = std::abs(value) < (*thresholds)[quadrant]
+        ? 0.0f
+        : std::rint(value);
+      const float error = std::abs(value - quantized);
+      error_sum += error;
+      value_sum += std::abs(quantized);
+      if (channel == 1 && quantized == 0.0f) {
+        high_frequency_max_error[quadrant] = std::max(
+          high_frequency_max_error[quadrant], error);
+      }
+      if (quantized != 0.0f) {
+        high_frequency_nonzeros[quadrant] += std::abs(quantized);
+        const bool in_corner = y >= 7 * ysize && x >= 7 * xsize;
+        const bool on_border =
+          y + 1 == matrix.coefficient_extent.height ||
+          x + 1 == matrix.coefficient_extent.width;
+        const bool in_larger_corner = x >= 4 * xsize && y >= 4 * ysize;
+        if (in_corner || (on_border && in_larger_corner)) {
+          highest_frequency_border_sum += std::abs(value);
+        }
+      }
+    }
+  }
+
+  if (channel == 1 &&
+      value_sum * 8.0f < static_cast<float>(xsize * ysize)) {
+    constexpr std::array<double, 4> kLimit = {
+      0.46, 0.46, 0.46, 0.46};
+    constexpr std::array<double, 4> kMultiplier = {
+      0.9999, 0.9999, 0.9999, 0.9999};
+    const int32_t original_quant = *raw_quant;
+    int32_t new_quant = *raw_quant;
+    for (size_t quadrant = 1; quadrant < 4; ++quadrant) {
+      if (high_frequency_nonzeros[quadrant] == 0.0f &&
+          high_frequency_max_error[quadrant] > kLimit[quadrant]) {
+        new_quant = original_quant + 1;
+        break;
+      }
+    }
+    *raw_quant = new_quant;
+    if (high_frequency_nonzeros[3] == 0.0f &&
+        high_frequency_max_error[3] > kLimit[3]) {
+      (*thresholds)[3] = static_cast<float>(
+        kMultiplier[3] * high_frequency_max_error[3] * new_quant /
+        original_quant);
+    } else if ((high_frequency_nonzeros[1] == 0.0f &&
+                high_frequency_max_error[1] > kLimit[1]) ||
+               (high_frequency_nonzeros[2] == 0.0f &&
+                high_frequency_max_error[2] > kLimit[2])) {
+      (*thresholds)[1] = static_cast<float>(
+        kMultiplier[1] * std::max(
+          high_frequency_max_error[1], high_frequency_max_error[2]) *
+        new_quant / original_quant);
+      (*thresholds)[2] = (*thresholds)[1];
+    } else if (high_frequency_nonzeros[0] == 0.0f &&
+               high_frequency_max_error[0] > kLimit[0]) {
+      (*thresholds)[0] = static_cast<float>(
+        kMultiplier[0] * high_frequency_max_error[0] * new_quant /
+        original_quant);
+    }
+  }
+
+  const float all_nonzeros =
+    high_frequency_nonzeros[0] + high_frequency_nonzeros[1] +
+    high_frequency_nonzeros[2] + high_frequency_nonzeros[3] + 1.0f;
+  constexpr std::array<float, 3> kBorderMultiplier = {70.0f, 30.0f, 60.0f};
+  if (kBorderMultiplier[channel] * highest_frequency_border_sum >=
+      all_nonzeros) {
+    *raw_quant += kBorderMultiplier[channel] *
+      highest_frequency_border_sum / all_nonzeros;
+    if (*raw_quant >= kMaxRawQuant) {
+      *raw_quant = kMaxRawQuant - 1;
+    }
+  }
+
+  if (strategy == AcStrategyType::kDct8 &&
+      high_frequency_nonzeros[0] + high_frequency_nonzeros[1] +
+        high_frequency_nonzeros[2] + high_frequency_nonzeros[3] < 11.0f) {
+    ++*raw_quant;
+    if (*raw_quant >= kMaxRawQuant) {
+      *raw_quant = kMaxRawQuant - 1;
+    }
+  }
+
+  constexpr double kFirstMultiplier[4][3] = {
+    {0.22080615753848404, 0.45797479824262011, 0.29859235095977965},
+    {0.70109486510286834, 0.16185281305512639, 0.14387691730035473},
+    {0.114985964456218638, 0.44656840441027695, 0.10587658215149048},
+    {0.46849665264409396, 0.41239077937781954, 0.088667407767185444},
+  };
+  constexpr double kSecondMultiplier[4][3] = {
+    {0.27450281941822197, 1.1255766549984996, 0.98950459134128388},
+    {0.4652168675598285, 0.40945807983455818, 0.36581899811751367},
+    {0.28034972424715715, 0.9182653201929738, 1.5581531543057416},
+    {0.26873118114033728, 0.68863712390392484, 1.2082185408666786},
+  };
+  constexpr double kQuantNormalizer = 2.2942708343284721;
+  error_sum *= kQuantNormalizer;
+  value_sum *= kQuantNormalizer;
+  if (static_cast<size_t>(strategy) >=
+      static_cast<size_t>(AcStrategyType::kDct16x16)) {
+    size_t strategy_class = 3;
+    if (strategy == AcStrategyType::kDct32x16 ||
+        strategy == AcStrategyType::kDct16x32) {
+      strategy_class = 1;
+    } else if (strategy == AcStrategyType::kDct16x16) {
+      strategy_class = 0;
+    } else if (strategy == AcStrategyType::kDct32x32) {
+      strategy_class = 2;
+    }
+    const double threshold =
+      kFirstMultiplier[strategy_class][channel] *
+        xsize * ysize * kJxlBlockDimension * kJxlBlockDimension +
+      kSecondMultiplier[strategy_class][channel] * value_sum;
+    int32_t step = static_cast<int32_t>(error_sum / threshold);
+    step = std::clamp(step, 0, 2);
+    if (error_sum > threshold) {
+      *raw_quant += step;
+      if (*raw_quant >= kMaxRawQuant) {
+        *raw_quant = kMaxRawQuant - 1;
+      }
+    }
+  }
+
+  const int32_t divisor = static_cast<int32_t>(xsize * ysize);
+  const float minimum_nonzeros = *std::min_element(
+    high_frequency_nonzeros.begin(), high_frequency_nonzeros.end());
+  int32_t activity = 15;
+  if (minimum_nonzeros < 15.0f * divisor) {
+    activity =
+      (static_cast<int32_t>(minimum_nonzeros) + divisor / 2) / divisor;
+  }
+  int32_t adjusted_quant = *raw_quant - activity;
+  if (channel == 1) {
+    for (size_t quadrant = 1; quadrant < 4; ++quadrant) {
+      (*thresholds)[quadrant] += 0.01f * activity;
+    }
+  }
+  const int32_t original_quant_limit = std::max(4, *raw_quant / 2);
+  if (adjusted_quant < original_quant_limit) {
+    adjusted_quant = original_quant_limit;
+  }
+  *raw_quant = adjusted_quant;
+  return Status::Ok();
+}
+
 }  // namespace
 
 Status CreateUniformQuantizer(
@@ -453,76 +712,103 @@ Status QuantizeAcBlock(
   std::span<const float> coefficients,
   std::span<int32_t> quantized) {
 
-  QuantizationMatrixView matrix;
-  Status status = ValidateAcOperation(
-    strategy,
-    quantizer,
-    raw_quant,
-    options,
-    coefficients.size(),
-    quantized.size(),
-    &matrix);
-
-  if (!status.ok()) {
-    return status;
-  }
-
   const AcStrategyInfo* strategy_info = GetAcStrategyInfo(strategy);
   if (strategy_info == nullptr) {
-    return Status::Internal(
-      "Validated AC strategy disappeared");
+    return Status::InvalidArgument("Unknown AC strategy");
   }
-
   const size_t covered_block_count =
     strategy_info->covered_blocks.width *
     strategy_info->covered_blocks.height;
   const std::array<float, 4> thresholds =
     QuantizationThresholds(options.channel, covered_block_count);
-  const float quantization_scale =
-    quantizer.scale() *
-    static_cast<float>(raw_quant) *
-    options.matrix_multiplier;
-  const size_t width = matrix.coefficient_extent.width;
-  const size_t height = matrix.coefficient_extent.height;
+  return QuantizeAcBlockWithThresholds(
+    strategy, quantizer, raw_quant, options, thresholds,
+    coefficients, quantized);
+}
 
-  for (size_t index = 0; index < coefficients.size(); ++index) {
-    if (!std::isfinite(coefficients[index])) {
+Status SelectAdjustedAcQuantization(
+  AcStrategyType strategy,
+  const Quantizer& quantizer,
+  int32_t initial_raw_quant,
+  const std::array<float, 3>& matrix_multipliers,
+  const std::array<std::span<const float>, 3>& coefficients,
+  AdjustedAcQuantization* out) {
+
+  if (out == nullptr) {
+    return Status::InvalidArgument(
+      "Adjusted AC quantization output is null");
+  }
+  constexpr std::array<XybChannel, 3> kAdjustmentChannels = {
+    XybChannel::kX, XybChannel::kY, XybChannel::kB};
+  std::array<QuantizationMatrixView, 3> matrices;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    Status status = ValidateAcOperation(
+      strategy,
+      quantizer,
+      initial_raw_quant,
+      {
+        .channel = kAdjustmentChannels[channel],
+        .matrix_multiplier = matrix_multipliers[channel],
+      },
+      coefficients[channel].size(),
+      coefficients[channel].size(),
+      &matrices[channel]);
+    if (!status.ok()) {
+      return status;
+    }
+    if (!std::ranges::all_of(coefficients[channel], [](float coefficient) {
+          return std::isfinite(coefficient);
+        })) {
       return Status::InvalidArgument(
-        "AC coefficients must be finite");
+        "Adjusted AC coefficients must be finite");
     }
-
-    const size_t x = index % width;
-    const size_t y = index / width;
-    const size_t threshold_index =
-      static_cast<size_t>(y >= height / 2) * 2 +
-      static_cast<size_t>(x >= width / 2);
-    const float value =
-      matrix.inverse_dequant[index] *
-      quantization_scale *
-      coefficients[index];
-
-    if (!std::isfinite(value)) {
-      return Status::InvalidArgument(
-        "Scaled AC coefficient is not finite");
-    }
-
-    if (std::abs(value) < thresholds[threshold_index]) {
-      quantized[index] = 0;
-      continue;
-    }
-
-    const double rounded = std::nearbyint(static_cast<double>(value));
-    if (rounded < static_cast<double>(std::numeric_limits<int32_t>::min()) ||
-        rounded > static_cast<double>(std::numeric_limits<int32_t>::max())) {
-
-      return Status::InvalidArgument(
-        "Quantized AC coefficient exceeds int32 range");
-    }
-
-    quantized[index] = static_cast<int32_t>(rounded);
   }
 
+  AdjustedAcQuantization result;
+  result.y_thresholds = {0.58f, 0.64f, 0.64f, 0.64f};
+  for (size_t channel : {size_t{1}, size_t{0}, size_t{2}}) {
+    std::array<float, 4> thresholds = {0.58f, 0.64f, 0.64f, 0.64f};
+    int32_t candidate_quant = initial_raw_quant;
+    Status status = AdjustQuantForChannel(
+      quantizer,
+      channel,
+      matrix_multipliers[channel],
+      strategy,
+      matrices[channel],
+      coefficients[channel],
+      &thresholds,
+      &candidate_quant);
+    if (!status.ok()) {
+      return status;
+    }
+    if (channel == 1) {
+      result.y_thresholds = thresholds;
+    }
+    result.raw_quant = std::max(result.raw_quant, candidate_quant);
+  }
+  if (result.raw_quant < 1 || result.raw_quant > kMaxRawQuant) {
+    return Status::Internal(
+      "Adjusted AC quantization is outside the encoder range");
+  }
+  *out = result;
   return Status::Ok();
+}
+
+Status QuantizeAdjustedYAcBlock(
+  AcStrategyType strategy,
+  const Quantizer& quantizer,
+  const AdjustedAcQuantization& decision,
+  std::span<const float> coefficients,
+  std::span<int32_t> quantized) {
+
+  return QuantizeAcBlockWithThresholds(
+    strategy,
+    quantizer,
+    decision.raw_quant,
+    {.channel = XybChannel::kY},
+    decision.y_thresholds,
+    coefficients,
+    quantized);
 }
 
 Status DequantizeAcBlock(

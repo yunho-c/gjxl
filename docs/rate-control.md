@@ -54,8 +54,9 @@ The remaining rate-control gaps are:
 
 - no implemented maximum-error mode;
 - no prepared state reused across target-size attempts;
-- no `AdjustQuantBlockAC` application;
-- no maximum-error block reduction or update policy; and
+- no hardened failed-candidate or configurable closest-absolute size search;
+- no maximum-error block reduction or update policy;
+- no fully resident `AdjustQuantBlockAC` device pass; and
 - no resampling-specific AQ bypass. The bypass policy is small, but the current
   codestream profile does not support resampling.
 
@@ -82,9 +83,17 @@ bytes and BPP, final score, actual backend and Metal mode, per-encode and total
 time, size-monotonicity flag, and strategy counts.
 
 The qualified Metal boundary intentionally retains authoritative coefficient
-decisions on the CPU. The fully resident path remains experimental because
-FP32 coefficient ties can change integer coefficient decisions and compound
-across AQ iterations. Rate-control work must not silently weaken that boundary.
+decisions on the CPU. CPU coefficient coding now applies the pinned
+`AdjustQuantBlockAC` policy in Y, X, B evaluation order, stores the selected
+shared raw quant at the transform anchor only, retains Y's adjusted dead-zone
+thresholds, and requantizes all three channels from that decision. The
+exact-coefficient Metal path consumes the resulting frame and adjusted raw
+field, including its EPF input, so frame and codestream decisions remain exact.
+
+The fully resident path remains experimental and explicitly uses the fixed-raw-
+quant decision mode as its CPU oracle until task 13 lands. FP32 coefficient ties
+can change integer coefficient decisions and compound across AQ iterations.
+Rate-control work must not silently weaken that boundary.
 
 ## Dependency order
 
@@ -235,6 +244,8 @@ to end-to-end tests.
 
 **Estimate:** 1–2 weeks.
 
+**Status:** complete for the current seven-strategy profile.
+
 Port the pinned encoder heuristic for the current seven strategies. It must:
 
 - inspect unquantized coefficients for all three XYB channels;
@@ -263,6 +274,9 @@ Acceptance criteria:
 ### 8. Integrate adjusted coefficients into qualified Metal AQ
 
 **Estimate:** 2–4 days after the CPU implementation.
+
+**Status:** complete for exact-coefficient Metal; the fully resident device
+port remains task 13.
 
 The production Metal path already accepts authoritative CPU coefficient
 decisions. Feed the adjusted raw-quant field and coefficient frame through that

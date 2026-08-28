@@ -16,7 +16,9 @@ namespace gjxl {
   ConstImage3FView opsin,
   VarDctFrameInput input,
   SimpleVarDctCodestreamProfile profile,
-  VarDctEncoderFrame* out);
+  VarDctEncoderFrame* out,
+  AcCoefficientDecisionMode decision_mode =
+    AcCoefficientDecisionMode::kAdjustedSharedQuant);
 
 /// Dequantizes one coefficient frame, restores CfL and decoder-equivalent DC,
 /// and applies the inverse transforms. Output is committed atomically.

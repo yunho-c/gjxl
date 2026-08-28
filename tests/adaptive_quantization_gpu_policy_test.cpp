@@ -416,10 +416,14 @@ bool ComparePolicyResult(const CpuOutputStorage& cpu,
   }
   for (size_t y = 0; y < kBlockExtent.height; ++y) {
     for (size_t x = 0; x < kBlockExtent.width; ++x) {
-      if (raw[y * kBlockExtent.width + x] !=
-          cpu.frame.raw_quant_field().Row(y)[x]) {
-        std::cerr << "CPU/GPU final raw quant differs at " << x << ',' << y
-                  << '\n';
+      gjxl::AcStrategyCell cell;
+      if (!cpu.frame.strategies().Get(x, y, &cell).ok()) return false;
+      const int32_t frame_raw = cpu.frame.raw_quant_field().Row(y)[x];
+      if (frame_raw < 1 || frame_raw > gjxl::kMaxRawQuant ||
+          (!cell.is_anchor &&
+           raw[y * kBlockExtent.width + x] != frame_raw)) {
+        std::cerr << "CPU final adjusted raw quant is invalid at "
+                  << x << ',' << y << '\n';
         return false;
       }
     }

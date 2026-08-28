@@ -263,8 +263,8 @@ bool CheckEncodedFrame(
 bool CheckAssemblyAndDeterminism() {
   // Values are pinned after independent header fixtures and section-layout
   // checks establish the constituent bit encodings.
-  return CheckEncodedFrame(8, 8, 240, 15436560061955472080ull) &&
-         CheckEncodedFrame(257, 9, 4095, 14885147734859666565ull);
+  return CheckEncodedFrame(8, 8, 237, 16983340324475694044ull) &&
+         CheckEncodedFrame(257, 9, 4064, 18196131526582637282ull);
 }
 
 bool CheckAtomicRejections() {

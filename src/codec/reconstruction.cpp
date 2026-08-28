@@ -134,11 +134,20 @@ Status ComputeQuantizedCoefficients(
   ConstImage3FView opsin,
   VarDctFrameInput input,
   SimpleVarDctCodestreamProfile profile,
-  VarDctEncoderFrame* out) {
+  VarDctEncoderFrame* out,
+  AcCoefficientDecisionMode decision_mode) {
 
   if (out == nullptr) {
     return Status::InvalidArgument(
       "Quantized coefficient output is null");
+  }
+  switch (decision_mode) {
+    case AcCoefficientDecisionMode::kAdjustedSharedQuant:
+    case AcCoefficientDecisionMode::kFixedRawQuant:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "AC coefficient decision mode is invalid");
   }
 
   Status status = ValidateImageContract(
@@ -240,8 +249,38 @@ Status ComputeQuantizedCoefficients(
           }
         }
 
-        const int32_t raw_quant =
+        const int32_t initial_raw_quant =
           result.raw_quant_field_[block_y * block_extent.width + block_x];
+        AdjustedAcQuantization quantization_decision{
+          .raw_quant = initial_raw_quant,
+          .y_thresholds = {0.58f, 0.64f, 0.64f, 0.64f},
+        };
+        Status block_status = Status::Ok();
+        if (decision_mode ==
+            AcCoefficientDecisionMode::kAdjustedSharedQuant) {
+          const std::array<float, 3> matrix_multipliers = {
+            MatrixMultiplier(0, profile),
+            1.0f,
+            MatrixMultiplier(2, profile),
+          };
+          const std::array<std::span<const float>, 3> coefficient_views = {
+            coefficients[0], coefficients[1], coefficients[2]};
+          block_status = SelectAdjustedAcQuantization(
+            strategy,
+            result.quantizer_,
+            initial_raw_quant,
+            matrix_multipliers,
+            coefficient_views,
+            &quantization_decision);
+          if (!block_status.ok()) {
+            return block_status;
+          }
+          // The pinned encoder stores the shared decision at the transform
+          // anchor only; covered non-anchor raw-quant cells remain unchanged.
+          result.raw_quant_field_[
+            block_y * block_extent.width + block_x] =
+              quantization_decision.raw_quant;
+        }
 
         // Y is round-trip dequantized before removing its prediction from
         // X/B, exactly as in libjxl's VarDCT coefficient path.
@@ -252,7 +291,7 @@ Status ComputeQuantizedCoefficients(
           .extent = info->covered_blocks,
           .stride = info->covered_blocks.width,
         };
-        Status block_status = ConvertLowFrequenciesToDc(
+        block_status = ConvertLowFrequenciesToDc(
           strategy,
           coefficients[1],
           y_dc_view);
@@ -267,20 +306,28 @@ Status ComputeQuantizedCoefficients(
           }
         }
 
-        block_status = QuantizeAcBlock(
-          strategy,
-          result.quantizer_,
-          raw_quant,
-          {.channel = XybChannel::kY},
-          coefficients[1],
-          quantized[1]);
+        block_status = decision_mode ==
+            AcCoefficientDecisionMode::kAdjustedSharedQuant
+          ? QuantizeAdjustedYAcBlock(
+              strategy,
+              result.quantizer_,
+              quantization_decision,
+              coefficients[1],
+              quantized[1])
+          : QuantizeAcBlock(
+              strategy,
+              result.quantizer_,
+              initial_raw_quant,
+              {.channel = XybChannel::kY},
+              coefficients[1],
+              quantized[1]);
         if (!block_status.ok()) {
           return block_status;
         }
         block_status = DequantizeAcBlock(
           strategy,
           result.quantizer_,
-          raw_quant,
+          quantization_decision.raw_quant,
           {.channel = XybChannel::kY},
           quantized[1],
           coefficients[1]);
@@ -321,7 +368,7 @@ Status ComputeQuantizedCoefficients(
           block_status = QuantizeAcBlock(
             strategy,
             result.quantizer_,
-            raw_quant,
+            quantization_decision.raw_quant,
             {
               .channel = kChannels[channel],
               .matrix_multiplier = MatrixMultiplier(channel, profile),

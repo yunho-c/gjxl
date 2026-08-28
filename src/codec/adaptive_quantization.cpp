@@ -807,13 +807,7 @@ Status EvaluateQuantization(
       if (!field_status.ok()) {
         return field_status;
       }
-      return ComputeEpfInverseSigma(
-        strategies,
-        {raw_quant.data(), block_extent, block_extent.width},
-        quantizer,
-        epf_sharpness,
-        options.profile.epf_sigma,
-        {inverse_sigma.data(), block_extent, block_extent.width});
+      return Status::Ok();
     });
   if (!status.ok()) {
     return status;
@@ -829,7 +823,7 @@ Status EvaluateQuantization(
       if (!coding_status.ok()) {
         return coding_status;
       }
-      return ComputeQuantizedCoefficients(
+      coding_status = ComputeQuantizedCoefficients(
         opsin,
         {
           .geometry = geometry,
@@ -842,6 +836,16 @@ Status EvaluateQuantization(
         },
         options.profile,
         &result.frame);
+      if (!coding_status.ok()) {
+        return coding_status;
+      }
+      return ComputeEpfInverseSigma(
+        strategies,
+        result.frame.raw_quant_field(),
+        quantizer,
+        epf_sharpness,
+        options.profile.epf_sigma,
+        {inverse_sigma.data(), block_extent, block_extent.width});
     });
   if (!status.ok()) {
     return status;
