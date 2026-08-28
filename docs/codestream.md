@@ -403,6 +403,17 @@ encoding failure, and output failure cannot expose a partial destination. The
 codec and codestream libraries contain no command-line parsing or filesystem
 policy.
 
+The `just encode` workflow also accepts normal single-frame image files when
+the optional ImageMagick 7 `magick` executable is available. The repository's
+`tools/encode_image.py` wrapper applies stored orientation, converts the image
+to linear RGB, composites transparency over a white linear-RGB background,
+forces three color channels, and writes a temporary PFM before invoking the
+unchanged `gjxl_encode` binary. PFM input bypasses ImageMagick entirely.
+Animated and multi-page inputs are rejected rather than selecting a frame
+silently. Set `GJXL_MAGICK` to an alternate `magick` executable or
+`GJXL_ALPHA_BACKGROUND=black` to use a black alpha-compositing background.
+Input conversion is outside the encoder workflow timing reported by the CLI.
+
 The checked `17x13` sample encodes to 291 bytes at target `1.0`; its codestream
 SHA-256 is
 `48abd331b4b4e37f0b158af86ef7c766c72ed760a51ce6903a415bf2544031c7`.
@@ -416,6 +427,8 @@ Encode a PFM with:
 
 ```sh
 just encode testdata/codestream_sample.pfm output.jxl 1.0
+# PNG, JPEG, and other formats supported by the installed ImageMagick build:
+just encode input.png output.jxl 1.0
 # Or call gjxl_encode directly with --backend cpu|metal.
 # Experimental resident path:
 build/release/gjxl_encode --distance 1.0 --backend metal \
@@ -429,6 +442,7 @@ Relevant implementations:
 
 - [`workflow.h`](../src/codestream/workflow.h)
 - [`gjxl_encode.cpp`](../tools/gjxl_encode.cpp)
+- [`encode_image.py`](../tools/encode_image.py)
 - [`pfm.cpp`](../src/io/pfm.cpp)
 - [`codestream_workflow_test.cpp`](../tests/codestream_workflow_test.cpp)
 - [`RunCodestreamCliTest.cmake`](../cmake/RunCodestreamCliTest.cmake)

@@ -17,12 +17,12 @@ codestream-conformance:
     cmake -S . -B "{{ build_dir }}" -G Ninja -DGJXL_BUILD_TESTS=ON -DHWY_ENABLE_TESTS=OFF
     cmake --build "{{ build_dir }}" --target codestream-conformance
 
-# Encode a linear-RGB PFM, forwarding optional arguments.
+# Encode a PFM directly or prepare a normal still image with ImageMagick.
 [positional-arguments]
 encode input output distance="1.0" *args:
     cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
     cmake --build build/release --target gjxl_encode
-    build/release/gjxl_encode --distance "{{ distance }}" "${@:4}" "{{ input }}" "{{ output }}"
+    python3 tools/encode_image.py --encoder build/release/gjxl_encode "{{ input }}" "{{ output }}" -- --distance "{{ distance }}" "${@:4}"
 
 # Probe a PFM across increasing Butteraugli targets and emit CSV.
 [positional-arguments]

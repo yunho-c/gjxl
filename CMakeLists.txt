@@ -935,6 +935,23 @@ if(GJXL_BUILD_TESTS)
     REQUIRED
   )
 
+  find_program(GJXL_IMAGEMAGICK_EXECUTABLE NAMES magick)
+  if(GJXL_IMAGEMAGICK_EXECUTABLE)
+    add_test(
+      NAME encode_image
+      COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/encode_image_test.py"
+        --wrapper "${CMAKE_CURRENT_SOURCE_DIR}/tools/encode_image.py"
+        --encoder $<TARGET_FILE:gjxl_encode>
+        --magick "${GJXL_IMAGEMAGICK_EXECUTABLE}"
+    )
+    set_tests_properties(encode_image PROPERTIES LABELS cli)
+  else()
+    message(STATUS
+      "ImageMagick not found; optional normal-image wrapper test is unavailable")
+  endif()
+
   add_executable(
     gjxl_codestream_conformance_test
     tests/codestream_conformance_test.cpp
