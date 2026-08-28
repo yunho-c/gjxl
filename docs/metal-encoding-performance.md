@@ -202,6 +202,15 @@ EPF preparation plus three submission/readback boundaries remain.
 - Profile histogram optimization separately before considering a GPU entropy
   implementation.
 
+The first retained P5 slice writes independent DC and AC group sections on up
+to eight host workers after entropy models are fixed. On one padded-1080p
+alternating process with one warmup and three samples, section writing fell
+from the prior `18.7-22.2 ms` range to `2.7-3.5 ms`; complete codestream
+encoding measured `26.8-30.8 ms`. Metal public workflow measured
+`376.2-409.0 ms` (median `376.5 ms`) with paired speedup `15.28-16.59x`
+(median `16.53x`). Existing frame, conformance, installed-consumer, and
+deterministic-byte tests cover the parallel path.
+
 ### P6. Close the 50x gate
 
 - Run the required independent-process 1080p and 4K benchmark matrix.

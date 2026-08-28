@@ -419,6 +419,11 @@ silently. Set `GJXL_MAGICK` to an alternate `magick` executable or
 `GJXL_ALPHA_BACKGROUND=black` to use a black alpha-compositing background.
 Input conversion is outside the encoder workflow timing reported by the CLI.
 
+DC- and AC-group section writers run independently on up to eight host workers
+after the shared entropy codes are finalized. Each worker owns one `BitWriter`;
+the TOC and final assembly retain canonical section order, so parallelism does
+not change codestream bytes or failure atomicity.
+
 The checked `17x13` sample encodes to 291 bytes at target `1.0`; its codestream
 SHA-256 is
 `48abd331b4b4e37f0b158af86ef7c766c72ed760a51ce6903a415bf2544031c7`.
