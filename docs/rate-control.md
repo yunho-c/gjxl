@@ -53,7 +53,6 @@ behavior. The AQ implementation already provides:
 The remaining rate-control gaps are:
 
 - no prepared state reused across target-size attempts;
-- no hardened failed-candidate or configurable closest-absolute size search;
 - no fully resident `AdjustQuantBlockAC` device pass; and
 - no resampling-specific AQ bypass. The bypass policy is small, but the current
   codestream profile does not support resampling.
@@ -73,13 +72,16 @@ one final verification evaluation. The policy retains the closest evaluated
 field at or below the hard maximum, preventing a later below-half update from
 discarding a valid result through loop-filter interaction.
 
-Target-byte and target-BPP requests use a bounded search over complete encodes
-in the Butteraugli interval `[0.01, 10.0]`. The default allows 12 attempts and
-accepts the largest result at or below the budget within a relative tolerance
-of `0.005`; the result reports the effective byte and tolerance budgets,
-selected Butteraugli target, attempt count, and whether the requested tolerance
-was met. Infeasible requests still return a valid best candidate and report
-`target_size_met = false`.
+Target-byte and target-BPP requests use a deterministic bounded subdivision
+over complete encodes in the Butteraugli interval `[0.01, 10.0]`. The search
+does not use endpoint sizes as proof of monotonicity. The default allows 12
+attempts and accepts the largest result at or below the budget within a
+relative tolerance of `0.005`; callers may instead request the closest absolute
+byte count, whose tolerance is symmetric. The result reports the effective byte
+and tolerance budgets, selection policy, selected Butteraugli target, total and
+failed attempt counts, whether the requested tolerance was met, and whether the
+bounded search was exhausted. Infeasible requests still return a valid best
+candidate and report `target_size_met = false`.
 
 The `gjxl_rate_control_probe` tool measures the implemented Butteraugli mode
 across strictly increasing targets and one or more PFM corpus inputs. For
@@ -361,6 +363,8 @@ but retains its experimental decision-parity status.
 
 **Estimate:** 1–2 weeks after the simple controller and corpus probe.
 
+**Status:** complete for the current public byte and BPP modes.
+
 Replace strict-bisection assumptions with a deterministic bounded search that
 handles:
 
@@ -374,6 +378,19 @@ handles:
 Use actual serialized bytes as the authoritative rate measurement. Estimated
 entropy cost may guide candidate selection but cannot satisfy the target-size
 contract.
+
+The hardened search subdivides the widest remaining target interval with a
+stable lower-target tie-break, so local reversals do not corrupt a monotonic
+bracket. Every successful candidate remains eligible for deterministic final
+selection. Candidate-local encoder failures count against the bounded attempt
+budget but no longer discard an earlier valid result; if every attempt fails,
+the first failure is returned atomically. A successful evaluator result with an
+inconsistent byte count or summary remains a terminal internal-contract error.
+
+`TargetSizeSelectionPolicy::kLargestAtOrBelow` retains the source-compatible
+default. `kClosestAbsolute` minimizes absolute byte error and prefers the
+under-budget candidate on equal-distance ties. Equal-size candidates in both
+modes use final score and then the lower Butteraugli target as stable tie-breaks.
 
 ### 12. Reuse target-invariant preparation across attempts
 

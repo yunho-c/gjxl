@@ -75,6 +75,22 @@ if(NOT sentinel_contents STREQUAL "unchanged")
   message(FATAL_ERROR "Invalid size tolerance changed an existing output")
 endif()
 
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --target-bytes 280 --size-selection invalid
+    "${GJXL_SAMPLE}" "${sentinel}"
+  RESULT_VARIABLE invalid_selection_result
+  OUTPUT_QUIET
+  ERROR_QUIET
+)
+if(invalid_selection_result EQUAL 0)
+  message(FATAL_ERROR "CLI accepted an invalid size-selection policy")
+endif()
+file(READ "${sentinel}" sentinel_contents)
+if(NOT sentinel_contents STREQUAL "unchanged")
+  message(FATAL_ERROR "Invalid size selection changed an existing output")
+endif()
+
 set(malformed "${GJXL_TEST_DIR}/malformed.pfm")
 file(WRITE "${malformed}" "PF\n2 2\n-1.0\ntruncated")
 execute_process(
@@ -158,6 +174,7 @@ endif()
 set(target_bytes_first "${GJXL_TEST_DIR}/target-bytes-first.jxl")
 set(target_bytes_second "${GJXL_TEST_DIR}/target-bytes-second.jxl")
 set(target_bpp "${GJXL_TEST_DIR}/target-bpp.jxl")
+set(target_closest "${GJXL_TEST_DIR}/target-closest.jxl")
 foreach(target_output IN ITEMS
         "${target_bytes_first}" "${target_bytes_second}")
   execute_process(
@@ -172,7 +189,7 @@ foreach(target_output IN ITEMS
     message(FATAL_ERROR "Target-byte CLI encode failed: ${target_error}")
   endif()
   foreach(expected "for target 280 bytes (met"
-                   "selected Butteraugli target" "in 5 attempts"
+                   "selected Butteraugli target" "in 7 attempts"
                    "using CPU")
     string(FIND "${target_report}" "${expected}" found)
     if(found EQUAL -1)
@@ -211,6 +228,27 @@ file(SHA256 "${target_bpp}" target_bpp_hash)
 if(NOT target_bpp_hash STREQUAL target_bytes_first_hash)
   message(FATAL_ERROR "Equivalent byte and BPP targets diverged")
 endif()
+
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --target-bytes 280 --size-tolerance 0.1
+    --max-attempts 8 --size-selection closest --backend cpu
+    "${GJXL_SAMPLE}" "${target_closest}"
+  RESULT_VARIABLE target_closest_result
+  OUTPUT_VARIABLE target_closest_report
+  ERROR_VARIABLE target_closest_error
+)
+if(NOT target_closest_result EQUAL 0)
+  message(FATAL_ERROR
+    "Closest-absolute CLI encode failed: ${target_closest_error}")
+endif()
+foreach(expected "for target 280 bytes (met" "0 failed" "using CPU")
+  string(FIND "${target_closest_report}" "${expected}" found)
+  if(found EQUAL -1)
+    message(FATAL_ERROR
+      "Closest-absolute CLI report is missing: ${expected}")
+  endif()
+endforeach()
 
 set(maximum_error_first "${GJXL_TEST_DIR}/maximum-error-first.jxl")
 set(maximum_error_second "${GJXL_TEST_DIR}/maximum-error-second.jxl")

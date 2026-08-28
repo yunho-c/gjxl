@@ -43,6 +43,8 @@ struct Options {
   double target_bits_per_pixel = 0.0;
   double target_size_tolerance = 0.005;
   size_t target_size_maximum_attempts = 12;
+  gjxl::TargetSizeSelectionPolicy target_size_selection =
+    gjxl::TargetSizeSelectionPolicy::kLargestAtOrBelow;
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kAutomatic;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
@@ -79,6 +81,24 @@ struct Options {
     *mode = gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   } else if (text == "fully-resident") {
     *mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool ParseTargetSizeSelection(
+  std::string_view text,
+  gjxl::TargetSizeSelectionPolicy* selection) {
+
+  if (selection == nullptr) {
+    return false;
+  }
+  if (text == "under-budget") {
+    *selection =
+      gjxl::TargetSizeSelectionPolicy::kLargestAtOrBelow;
+  } else if (text == "closest") {
+    *selection = gjxl::TargetSizeSelectionPolicy::kClosestAbsolute;
   } else {
     return false;
   }
@@ -236,6 +256,13 @@ struct Options {
         return false;
       }
       target_search_option_set = true;
+    } else if (argument == "--size-selection") {
+      if (index + 1 >= argc ||
+          !ParseTargetSizeSelection(
+            argv[++index], &candidate.target_size_selection)) {
+        return false;
+      }
+      target_search_option_set = true;
     } else if (argument == "--backend") {
       if (index + 1 >= argc ||
           !ParseBackend(argv[++index], &candidate.backend)) {
@@ -367,7 +394,9 @@ void PrintUsage(const char* executable) {
             << " (--distance VALUE | --maximum-error X Y B | "
                "--target-bytes BYTES | "
                "--target-bpp BPP) [--size-tolerance FRACTION] "
-               "[--max-attempts N] [--backend auto|cpu|metal] "
+               "[--max-attempts N] "
+               "[--size-selection under-budget|closest] "
+               "[--backend auto|cpu|metal] "
                "[--metal-aq exact-coefficients|fully-resident] "
                "INPUT.pfm OUTPUT.jxl\n";
 }
@@ -400,6 +429,7 @@ int main(int argc, char** argv) {
      .target_size_tolerance = options.target_size_tolerance,
      .target_size_maximum_attempts =
        options.target_size_maximum_attempts,
+     .target_size_selection = options.target_size_selection,
      .backend = options.backend,
      .metal_aq_mode = options.metal_aq_mode},
     &codestream,
@@ -427,7 +457,8 @@ int main(int argc, char** argv) {
                 << " bytes (" << (summary.target_size_met ? "met" : "unmet")
                 << "; selected Butteraugli target "
                 << summary.selected_butteraugli_target << " in "
-                << summary.encode_attempt_count << " attempts)";
+                << summary.encode_attempt_count << " attempts, "
+                << summary.failed_encode_attempt_count << " failed)";
       break;
     case gjxl::VarDctRateControlMode::kTargetBitsPerPixel:
       std::cout << " for target " << options.target_bits_per_pixel
@@ -435,7 +466,8 @@ int main(int argc, char** argv) {
                 << (summary.target_size_met ? "met" : "unmet")
                 << "; selected Butteraugli target "
                 << summary.selected_butteraugli_target << " in "
-                << summary.encode_attempt_count << " attempts)";
+                << summary.encode_attempt_count << " attempts, "
+                << summary.failed_encode_attempt_count << " failed)";
       break;
     case gjxl::VarDctRateControlMode::kMaximumError:
       std::cout << " under maximum-error control ("

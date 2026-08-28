@@ -134,6 +134,14 @@ Status ValidateRateControlOptions(
     return Status::InvalidArgument(
       "Target-size tolerance or attempt limit is invalid");
   }
+  switch (options.target_size_selection) {
+    case TargetSizeSelectionPolicy::kLargestAtOrBelow:
+    case TargetSizeSelectionPolicy::kClosestAbsolute:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "Target-size selection policy is invalid");
+  }
   const long double tolerance = std::ceil(
     static_cast<long double>(*effective_target_bytes) *
     static_cast<long double>(options.target_size_tolerance));
@@ -349,6 +357,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
           .target_bytes = effective_target_bytes,
           .tolerance_bytes = target_size_tolerance_bytes,
           .maximum_attempts = options.target_size_maximum_attempts,
+          .selection = options.target_size_selection,
         },
         [&](float butteraugli_target,
             std::vector<uint8_t>* attempt_codestream,
@@ -376,7 +385,13 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       search_result.summary.target_size_tolerance_bytes =
         target_size_tolerance_bytes;
       search_result.summary.encode_attempt_count = search_result.attempt_count;
+      search_result.summary.failed_encode_attempt_count =
+        search_result.failed_attempt_count;
+      search_result.summary.target_size_selection =
+        options.target_size_selection;
       search_result.summary.target_size_met = search_result.target_size_met;
+      search_result.summary.target_size_search_exhausted =
+        search_result.search_exhausted;
       if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes) {
         search_result.summary.requested_target_bytes = options.target_bytes;
       } else {

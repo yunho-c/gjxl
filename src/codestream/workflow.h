@@ -37,6 +37,15 @@ enum class VarDctRateControlMode {
   kTargetBitsPerPixel,
 };
 
+enum class TargetSizeSelectionPolicy {
+  /// Prefer the largest valid codestream no larger than the budget. If every
+  /// valid candidate is over budget, select the smallest one.
+  kLargestAtOrBelow,
+  /// Select the valid codestream with the smallest absolute byte error.
+  /// Equal-distance ties prefer the under-budget candidate.
+  kClosestAbsolute,
+};
+
 /// Options for the public VarDCT encoding workflow.
 struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
@@ -55,6 +64,8 @@ struct VarDctEncodingOptions {
   /// Complete encode attempts, including the two search endpoints. Valid
   /// values are in [1, 64].
   size_t target_size_maximum_attempts = 12;
+  TargetSizeSelectionPolicy target_size_selection =
+    TargetSizeSelectionPolicy::kLargestAtOrBelow;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
   /// Selects the Metal AQ implementation. Fully resident mode requires an
   /// explicitly forced Metal backend and may change encoder decisions.
@@ -82,9 +93,16 @@ struct VarDctEncodingSummary {
   MaximumErrorOutcome maximum_error_outcome =
     MaximumErrorOutcome::kNotApplicable;
   size_t encode_attempt_count = 0;
-  /// True only when the selected size is at or below the effective budget and
-  /// no farther below it than `target_size_tolerance_bytes`.
+  size_t failed_encode_attempt_count = 0;
+  TargetSizeSelectionPolicy target_size_selection =
+    TargetSizeSelectionPolicy::kLargestAtOrBelow;
+  /// For `kLargestAtOrBelow`, true only when the selected size is at or below
+  /// the effective budget and no farther below it than the byte tolerance.
+  /// For `kClosestAbsolute`, the tolerance is symmetric.
   bool target_size_met = false;
+  /// True when no candidate met the tolerance before the attempt or
+  /// representable-target search space was exhausted.
+  bool target_size_search_exhausted = false;
   std::array<size_t, kAcStrategyCount> strategy_counts{};
   std::vector<double> score_history;
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;

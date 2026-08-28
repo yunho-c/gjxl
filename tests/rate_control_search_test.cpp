@@ -94,7 +94,8 @@ bool CheckInfeasibleTargets() {
     MakeEvaluator(MonotonicSize),
     &oversized);
   if (!status.ok() || oversized.codestream.size() != 1999 ||
-      oversized.attempt_count != 1 || oversized.target_size_met ||
+      oversized.attempt_count != 12 || oversized.target_size_met ||
+      !oversized.search_exhausted ||
       oversized.summary.selected_butteraugli_target !=
         gjxl::codestream_internal::kMinimumTargetSizeButteraugliTarget) {
     std::cerr << "Oversized target-size request was mishandled\n";
@@ -110,7 +111,8 @@ bool CheckInfeasibleTargets() {
     MakeEvaluator(MonotonicSize),
     &undersized);
   if (!status.ok() || undersized.codestream.size() != 1000 ||
-      undersized.attempt_count != 2 || undersized.target_size_met ||
+      undersized.attempt_count != 12 || undersized.target_size_met ||
+      !undersized.search_exhausted ||
       undersized.summary.selected_butteraugli_target !=
         gjxl::codestream_internal::kMaximumTargetSizeButteraugliTarget) {
     std::cerr << "Undersized target-size request was mishandled\n";
@@ -129,7 +131,8 @@ bool CheckAttemptLimitAndPlateau() {
     MakeEvaluator(MonotonicSize),
     &limited);
   if (!status.ok() || limited.codestream.size() != 1000 ||
-      limited.attempt_count != 2 || limited.target_size_met) {
+      limited.attempt_count != 2 || limited.target_size_met ||
+      !limited.search_exhausted) {
     std::cerr << "Target-size attempt limit was not honored\n";
     return false;
   }
@@ -143,7 +146,8 @@ bool CheckAttemptLimitAndPlateau() {
     MakeEvaluator([](float) { return size_t{1000}; }),
     &plateau);
   if (!status.ok() || plateau.codestream.size() != 1000 ||
-      plateau.attempt_count != 2 || plateau.target_size_met ||
+      plateau.attempt_count != 12 || plateau.target_size_met ||
+      !plateau.search_exhausted ||
       plateau.summary.selected_butteraugli_target !=
         gjxl::codestream_internal::kMinimumTargetSizeButteraugliTarget) {
     std::cerr << "Target-size plateau selection is invalid\n";
@@ -179,8 +183,12 @@ bool CheckNonMonotonicSelection() {
       MakeEvaluator(size_for_target),
       &result);
   if (!status.ok() || result.codestream.size() != 1500 ||
-      result.attempt_count != 5 || !result.target_size_met) {
-    std::cerr << "Non-monotonic target-size selection failed\n";
+      result.attempt_count != 7 || !result.target_size_met ||
+      result.search_exhausted) {
+    std::cerr << "Non-monotonic target-size selection failed: size="
+              << result.codestream.size() << " attempts="
+              << result.attempt_count << " met=" << result.target_size_met
+              << " exhausted=" << result.search_exhausted << '\n';
     return false;
   }
   return true;
@@ -236,6 +244,112 @@ bool CheckAtomicFailures() {
   return true;
 }
 
+bool CheckCandidateFailures() {
+  size_t failure_count = 0;
+  const Evaluator intermittent = [&](
+      float target,
+      std::vector<uint8_t>* codestream,
+      gjxl::VarDctEncodingSummary* summary) {
+    if (target ==
+        gjxl::codestream_internal::kMaximumTargetSizeButteraugliTarget) {
+      ++failure_count;
+      return gjxl::Status::SubmissionFailed(
+        "injected candidate-local failure");
+    }
+    const size_t size = MonotonicSize(target);
+    codestream->assign(size, 0x4a);
+    *summary = MakeSummary(target, size, target);
+    return gjxl::Status::Ok();
+  };
+  SearchResult result;
+  const gjxl::Status status = gjxl::codestream_internal::SearchTargetSize(
+    {
+      .target_bytes = 1500,
+      .maximum_attempts = 8,
+    },
+    intermittent,
+    &result);
+  if (!status.ok() || result.codestream.size() != 1500 ||
+      result.attempt_count != 3 || result.failed_attempt_count != 1 ||
+      failure_count != 1 || !result.target_size_met) {
+    std::cerr << "Candidate-local failure discarded valid search state\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckSelectionPolicies() {
+  const Evaluator evaluator = MakeEvaluator([](float target) {
+    return target < 1.0f ? size_t{1600} : size_t{1300};
+  });
+  SearchResult under_budget;
+  gjxl::Status status = gjxl::codestream_internal::SearchTargetSize(
+    {
+      .target_bytes = 1500,
+      .maximum_attempts = 2,
+      .selection =
+        gjxl::TargetSizeSelectionPolicy::kLargestAtOrBelow,
+    },
+    evaluator,
+    &under_budget);
+  SearchResult closest;
+  if (status.ok()) {
+    status = gjxl::codestream_internal::SearchTargetSize(
+      {
+        .target_bytes = 1500,
+        .maximum_attempts = 2,
+        .selection =
+          gjxl::TargetSizeSelectionPolicy::kClosestAbsolute,
+      },
+      evaluator,
+      &closest);
+  }
+  if (!status.ok() || under_budget.codestream.size() != 1300 ||
+      closest.codestream.size() != 1600 ||
+      under_budget.target_size_met || closest.target_size_met ||
+      !under_budget.search_exhausted || !closest.search_exhausted) {
+    std::cerr << "Target-size selection policy was not honored\n";
+    return false;
+  }
+
+  SearchResult symmetric_tolerance;
+  status = gjxl::codestream_internal::SearchTargetSize(
+    {
+      .target_bytes = 1500,
+      .tolerance_bytes = 100,
+      .maximum_attempts = 8,
+      .selection =
+        gjxl::TargetSizeSelectionPolicy::kClosestAbsolute,
+    },
+    evaluator,
+    &symmetric_tolerance);
+  if (!status.ok() || symmetric_tolerance.codestream.size() != 1600 ||
+      symmetric_tolerance.attempt_count != 1 ||
+      !symmetric_tolerance.target_size_met ||
+      symmetric_tolerance.search_exhausted) {
+    std::cerr << "Closest-absolute symmetric tolerance failed\n";
+    return false;
+  }
+
+  SearchResult tie;
+  status = gjxl::codestream_internal::SearchTargetSize(
+    {
+      .target_bytes = 1500,
+      .maximum_attempts = 2,
+      .selection =
+        gjxl::TargetSizeSelectionPolicy::kClosestAbsolute,
+    },
+    MakeEvaluator([](float target) {
+      return target < 1.0f ? size_t{1600} : size_t{1400};
+    }),
+    &tie);
+  if (!status.ok() || tie.codestream.size() != 1400) {
+    std::cerr << "Closest-absolute equal-distance tie is invalid\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckInvalidOptions() {
   const Evaluator evaluator = MakeEvaluator(MonotonicSize);
   SearchResult result;
@@ -265,6 +379,12 @@ bool CheckInvalidOptions() {
         .minimum_butteraugli_target =
           std::numeric_limits<float>::quiet_NaN(),
       }) ||
+      !rejected({
+        .target_bytes = 1000,
+        .maximum_attempts = 12,
+        .selection =
+          static_cast<gjxl::TargetSizeSelectionPolicy>(99),
+      }) ||
       gjxl::codestream_internal::SearchTargetSize(
         {.target_bytes = 1000, .maximum_attempts = 12}, {}, &result).code() !=
           gjxl::StatusCode::kInvalidArgument ||
@@ -285,6 +405,8 @@ int main() {
       !CheckAttemptLimitAndPlateau() ||
       !CheckNonMonotonicSelection() ||
       !CheckAtomicFailures() ||
+      !CheckCandidateFailures() ||
+      !CheckSelectionPolicies() ||
       !CheckInvalidOptions()) {
     return EXIT_FAILURE;
   }

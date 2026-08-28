@@ -386,10 +386,14 @@ codestream bytes. Automatic and CPU preferences reject that mode rather than
 silently selecting a different implementation; exact coefficients remain the
 default and the only automatically selected Metal AQ mode.
 
-The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input, a
-Butteraugli target, `--backend auto|cpu|metal`, and
-`--metal-aq exact-coefficients|fully-resident`. Fully resident mode requires
-`--backend metal`. The frontend writes through a
+The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and one
+of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus
+`--backend auto|cpu|metal` and
+`--metal-aq exact-coefficients|fully-resident`. Size searches accept
+`--size-tolerance`, `--max-attempts`, and
+`--size-selection under-budget|closest`. Fully resident mode requires
+`--backend metal`; automatic maximum-error control remains CPU-only. The
+frontend writes through a
 same-directory temporary file,
 synchronizes it, and renames it over the destination only after the complete
 codestream succeeds. Invalid options, malformed or non-finite PFM input,
@@ -414,6 +418,9 @@ just encode testdata/codestream_sample.pfm output.jxl 1.0
 # Experimental resident path:
 build/release/gjxl_encode --distance 1.0 --backend metal \
   --metal-aq fully-resident testdata/codestream_sample.pfm output.jxl
+# Closest absolute serialized size within the bounded attempt budget:
+build/release/gjxl_encode --target-bytes 4096 --size-selection closest \
+  testdata/codestream_sample.pfm output.jxl
 ```
 
 Relevant implementations:

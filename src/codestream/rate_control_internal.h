@@ -21,6 +21,8 @@ struct TargetSizeSearchOptions {
   size_t target_bytes = 0;
   size_t tolerance_bytes = 0;
   size_t maximum_attempts = 0;
+  TargetSizeSelectionPolicy selection =
+    TargetSizeSelectionPolicy::kLargestAtOrBelow;
   float minimum_butteraugli_target =
     kMinimumTargetSizeButteraugliTarget;
   float maximum_butteraugli_target =
@@ -31,7 +33,9 @@ struct TargetSizeSearchResult {
   std::vector<uint8_t> codestream;
   VarDctEncodingSummary summary;
   size_t attempt_count = 0;
+  size_t failed_attempt_count = 0;
   bool target_size_met = false;
+  bool search_exhausted = false;
 
   friend bool operator==(
     const TargetSizeSearchResult&,
