@@ -202,6 +202,14 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
   status = BeginOperation();
   if (!status.ok())
     return status;
+  status = PrepareExactCoefficientStaging(input);
+  if (status.ok()) {
+    status = PrepareReconstructionDiagnosticReadback();
+  }
+  if (!status.ok()) {
+    CompleteOperation();
+    return status;
+  }
   status = UploadInput(input);
   if (!status.ok()) {
     Invalidate();
@@ -318,6 +326,23 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
   return Status::Ok();
 }
 
+Status MetalPreparedAqEvaluation::PrepareReconstructionDiagnosticReadback() {
+  try {
+    forward_readback_.resize(coefficient_value_count_);
+    dc_readback_.resize(3 * block_count_);
+    for (std::vector<float> &plane : reconstructed_readback_) {
+      plane.resize(pixel_count_);
+    }
+    return Status::Ok();
+  } catch (const std::bad_alloc &) {
+    return Status::OutOfMemory(
+        "Unable to allocate AQ reconstruction diagnostic readback");
+  } catch (const std::length_error &) {
+    return Status::InvalidArgument(
+        "AQ reconstruction diagnostic readback is too large");
+  }
+}
+
 void MetalPreparedAqEvaluation::EncodeQuantizationProbeSubmission(
     MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
     const void *context) {
@@ -364,6 +389,11 @@ Status MetalPreparedAqEvaluation::RunQuantizationProbe(
   status = BeginOperation();
   if (!status.ok())
     return status;
+  status = PrepareQuantizationProbeReadback();
+  if (!status.ok()) {
+    CompleteOperation();
+    return status;
+  }
   status = UploadContiguous(*backend_, probe.coefficients, quant_probe_input_);
   const uint32_t zero = 0;
   if (status.ok()) {
@@ -613,6 +643,20 @@ Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
   }
   CompleteOperation();
   return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::PrepareQuantizationProbeReadback() {
+  try {
+    quant_probe_quantized_readback_.resize(maximum_coefficient_count_);
+    quant_probe_dequantized_readback_.resize(maximum_coefficient_count_);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate AQ quantization-probe readback");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "AQ quantization-probe readback is too large");
+  }
 }
 
 Status RunMetalAqReconstructionForTesting(

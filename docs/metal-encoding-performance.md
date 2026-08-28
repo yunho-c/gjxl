@@ -177,6 +177,20 @@ median was `390.2 ms`, and the codestream remained `630802` bytes relative to
 the preceding fast-CfL slice. This is still a host/device round trip rather than
 the prepared frame context required by the P3 exit criterion.
 
+The second retained P3 slice defers exact-coefficient staging and the full
+reconstruction/postprocess diagnostic readbacks until an operation actually
+requests them. A padded 1920x1080 throughput preparation therefore avoids
+allocating and value-initializing three unused `3 * pixel_count` float stores,
+or approximately `71.2 MiB` of host memory. The normal final coefficient, DC,
+and linear-image readbacks remain eager because the public workflow consumes
+them. Lazy allocation occurs only after the prepared evaluator atomically owns
+its operation slot, and allocation failure restores the ready state. One warm
+padded-1080p process with one warmup and three alternating samples measured
+Metal at `371.8-374.4 ms` (median `372.1 ms`) and paired speedup at
+`16.58-16.74x` (median `16.59x`). The prior retained result was not rerun as a
+same-process binary A/B, so this timing is directional; the deterministic
+memory reduction and unchanged output contracts are the retained claims.
+
 ### P4. Remove per-evaluation CPU synchronization
 
 - Port final CfL, EPF inverse sigma, and deterministic quant-field updates.

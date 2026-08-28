@@ -254,6 +254,11 @@ Status MetalPreparedAqEvaluation::RunPostprocess(
   status = BeginOperation();
   if (!status.ok())
     return status;
+  status = PreparePostprocessDiagnosticReadback();
+  if (!status.ok()) {
+    CompleteOperation();
+    return status;
+  }
 
   for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
     status = UploadPlane(*backend_, reconstructed_opsin.plane[channel],
@@ -303,6 +308,17 @@ Status MetalPreparedAqEvaluation::RunReconstructionAndPostprocess(
   status = BeginOperation();
   if (!status.ok())
     return status;
+  status = PrepareExactCoefficientStaging(input);
+  if (status.ok()) {
+    status = PrepareReconstructionDiagnosticReadback();
+  }
+  if (status.ok()) {
+    status = PreparePostprocessDiagnosticReadback();
+  }
+  if (!status.ok()) {
+    CompleteOperation();
+    return status;
+  }
   status = UploadInput(input);
   if (!status.ok()) {
     Invalidate();
@@ -329,6 +345,24 @@ Status MetalPreparedAqEvaluation::RunReconstructionAndPostprocess(
     submission_ = std::move(submission);
   }
   return FinishPostprocess(snapshot);
+}
+
+Status MetalPreparedAqEvaluation::PreparePostprocessDiagnosticReadback() {
+  try {
+    for (std::vector<float> &plane : reconstructed_readback_) {
+      plane.resize(pixel_count_);
+    }
+    for (std::vector<float> &plane : filtered_readback_) {
+      plane.resize(pixel_count_);
+    }
+    return Status::Ok();
+  } catch (const std::bad_alloc &) {
+    return Status::OutOfMemory(
+        "Unable to allocate AQ postprocess diagnostic readback");
+  } catch (const std::length_error &) {
+    return Status::InvalidArgument(
+        "AQ postprocess diagnostic readback is too large");
+  }
 }
 
 Status MetalPreparedAqEvaluation::GetPostprocessPlan(

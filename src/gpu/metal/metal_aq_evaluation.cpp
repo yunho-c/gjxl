@@ -506,10 +506,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         "Prepared AQ anchors do not cover the coding image exactly");
   }
   try {
-    forward_readback_.resize(coefficient_value_count_);
-    exact_reconstruction_coefficients_.resize(coefficient_value_count_);
     quantized_readback_.resize(coefficient_value_count_);
-    dc_readback_.resize(3 * block_count_);
     quantized_dc_readback_.resize(3 * block_count_);
     final_transform_views_.reserve(block_count_);
     for (const AqAnchor& anchor : row_major_anchors_) {
@@ -536,17 +533,9 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       return Status::InvalidArgument(
         "Prepared AQ source image dimensions are too large");
     }
-    for (std::vector<float> &plane : reconstructed_readback_) {
-      plane.resize(pixel_count_);
-    }
-    for (std::vector<float> &plane : filtered_readback_) {
-      plane.resize(pixel_count_);
-    }
     for (std::vector<float> &plane : linear_readback_) {
       plane.resize(source_pixel_count);
     }
-    quant_probe_quantized_readback_.resize(maximum_coefficient_count_);
-    quant_probe_dequantized_readback_.resize(maximum_coefficient_count_);
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory(
         "Unable to allocate AQ reconstruction host readback");
@@ -1295,6 +1284,11 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(
   status = BeginOperation(profiling_reserved);
   if (!status.ok())
     return status;
+  status = PrepareExactCoefficientStaging(input);
+  if (!status.ok()) {
+    CompleteOperation();
+    return status;
+  }
   bool fail_upload = false;
   bool fail_numeric = false;
   {
@@ -2085,6 +2079,24 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
     }
   }
   return status;
+}
+
+Status MetalPreparedAqEvaluation::PrepareExactCoefficientStaging(
+    AqEvaluationInput input) {
+  if (input.exact_coefficients == nullptr ||
+      input.exact_reconstructed_linear_rgb.valid()) {
+    return Status::Ok();
+  }
+  try {
+    exact_reconstruction_coefficients_.resize(coefficient_value_count_);
+    return Status::Ok();
+  } catch (const std::bad_alloc &) {
+    return Status::OutOfMemory(
+        "Unable to allocate exact AQ coefficient staging");
+  } catch (const std::length_error &) {
+    return Status::InvalidArgument(
+        "Exact AQ coefficient staging is too large");
+  }
 }
 
 Status MetalPreparedAqEvaluation::WaitForOperation() {

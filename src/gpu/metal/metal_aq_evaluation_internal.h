@@ -206,6 +206,10 @@ private:
   Status ValidateOutput(AqEvaluationOutput output) const;
   Status BeginOperation(bool profiling_reserved = false);
   Status UploadInput(AqEvaluationInput input);
+  Status PrepareExactCoefficientStaging(AqEvaluationInput input);
+  Status PrepareReconstructionDiagnosticReadback();
+  Status PreparePostprocessDiagnosticReadback();
+  Status PrepareQuantizationProbeReadback();
   Status WaitForOperation();
   void CompleteOperation();
   void Invalidate();
