@@ -109,6 +109,58 @@ void CopyContiguousPlane(
     "GPU adaptive-quantization mode is invalid");
 }
 
+Status PrepareFixedThroughputColorCorrelation(
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  float butteraugli_target,
+  prepared_coefficients_internal::PreparedForwardDctCoefficients*
+    forward_coefficients,
+  ColorCorrelationMap* color_correlation) {
+
+  if (forward_coefficients == nullptr || color_correlation == nullptr) {
+    return Status::InvalidArgument(
+      "Fixed throughput CfL output is null");
+  }
+  size_t block_count = 0;
+  if (!strategies.extent().try_area(&block_count)) {
+    return Status::InvalidArgument(
+      "Fixed throughput CfL block grid is too large");
+  }
+  try {
+    Status status =
+      prepared_coefficients_internal::PrepareForwardDctCoefficients(
+        opsin, strategies, forward_coefficients);
+    if (!status.ok()) return status;
+    std::vector<float> adjusted_quant(block_count);
+    status = AdjustQuantField(
+      strategies, butteraugli_target, initial_quant_field,
+      {adjusted_quant.data(), strategies.extent(), strategies.extent().width});
+    if (!status.ok()) return status;
+    float quant_dc = 0.0f;
+    status = ComputeInitialQuantDc(butteraugli_target, &quant_dc);
+    if (!status.ok()) return status;
+    std::vector<int32_t> raw_quant(block_count);
+    Quantizer quantizer;
+    status = CreateQuantizerFromField(
+      quant_dc,
+      {adjusted_quant.data(), strategies.extent(), strategies.extent().width},
+      {raw_quant.data(), strategies.extent(), strategies.extent().width},
+      &quantizer);
+    if (!status.ok()) return status;
+    return chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
+      *forward_coefficients,
+      {raw_quant.data(), strategies.extent(), strategies.extent().width},
+      quantizer, true, color_correlation);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate fixed throughput CfL storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Fixed throughput CfL dimensions are too large");
+  }
+}
+
 class PreparedGpuAdaptiveQuantizationEvaluator final
     : public aqi::AdaptiveQuantizationEvaluator {
 public:
@@ -120,6 +172,7 @@ public:
     PreparedAqEvaluation& prepared,
     prepared_coefficients_internal::PreparedForwardDctCoefficients
       forward_coefficients,
+    ColorCorrelationMap fixed_color_correlation,
     bool materialize_final,
     Extent2D source_extent)
     : strategies_(strategies),
@@ -128,6 +181,7 @@ public:
       mode_(mode),
       prepared_(&prepared),
       forward_coefficients_(std::move(forward_coefficients)),
+      fixed_color_correlation_(std::move(fixed_color_correlation)),
       materialize_final_(materialize_final),
       original_source_extent_(source_extent) {
     if (materialize_final_) {
@@ -171,13 +225,18 @@ public:
         return status;
       }
       ColorCorrelationMap color_correlation;
-      status =
-        chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
-          forward_coefficients_,
-          {raw_quant.data(), block_extent, block_extent.width},
-          quantizer, options_.fast_color_correlation, &color_correlation);
-      if (!status.ok()) {
-        return status;
+      const ColorCorrelationMap* selected_color_correlation =
+        &fixed_color_correlation_;
+      if (mode_ != GpuAdaptiveQuantizationMode::kFullyResident) {
+        status =
+          chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
+            forward_coefficients_,
+            {raw_quant.data(), block_extent, block_extent.width},
+            quantizer, options_.fast_color_correlation, &color_correlation);
+        if (!status.ok()) {
+          return status;
+        }
+        selected_color_correlation = &color_correlation;
       }
 
       VarDctEncoderFrame exact_coefficients;
@@ -221,8 +280,10 @@ public:
 
       aqi::AdaptiveQuantizationEvaluation candidate;
       candidate.block_distance.resize(block_count);
-      const ConstPlaneI8View y_to_x = color_correlation.y_to_x_map();
-      const ConstPlaneI8View y_to_b = color_correlation.y_to_b_map();
+      const ConstPlaneI8View y_to_x =
+        selected_color_correlation->y_to_x_map();
+      const ConstPlaneI8View y_to_b =
+        selected_color_correlation->y_to_b_map();
       AqEvaluationOutput::Final final_output;
       AqEvaluationOutput prepared_output{
         .block_distance_map = {
@@ -288,6 +349,7 @@ private:
   PreparedAqEvaluation* prepared_ = nullptr;
   prepared_coefficients_internal::PreparedForwardDctCoefficients
     forward_coefficients_;
+  ColorCorrelationMap fixed_color_correlation_;
   bool materialize_final_ = false;
   Image3FBuffer final_reconstructed_;
   VarDctEncoderFrame final_frame_;
@@ -421,16 +483,25 @@ Status RunGpuAdaptiveQuantizationImpl(
 
   prepared_coefficients_internal::PreparedForwardDctCoefficients
     forward_coefficients;
-  status = prepared_coefficients_internal::PrepareForwardDctCoefficients(
-    opsin, strategies, &forward_coefficients);
+  ColorCorrelationMap fixed_color_correlation;
+  status = mode == GpuAdaptiveQuantizationMode::kFullyResident
+    ? PrepareFixedThroughputColorCorrelation(
+        opsin, strategies, initial_quant_field, options.butteraugli_target,
+        &forward_coefficients, &fixed_color_correlation)
+    : prepared_coefficients_internal::PrepareForwardDctCoefficients(
+        opsin, strategies, &forward_coefficients);
   if (!status.ok()) {
     return status;
+  }
+  if (mode == GpuAdaptiveQuantizationMode::kFullyResident) {
+    forward_coefficients = {};
   }
 
   try {
     PreparedGpuAdaptiveQuantizationEvaluator evaluator(
       strategies, epf_sharpness, options, mode, *prepared,
-      std::move(forward_coefficients), full_output != nullptr,
+      std::move(forward_coefficients), std::move(fixed_color_correlation),
+      full_output != nullptr,
       original_linear_rgb.extent());
     aqi::AdaptiveQuantizationPolicyResult result;
     status = aqi::RunAdaptiveQuantizationPolicy(

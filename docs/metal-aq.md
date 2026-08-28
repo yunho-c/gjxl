@@ -1147,7 +1147,10 @@ atomic and structurally valid but is intentionally not covered by the CPU
 decision-parity promise. The throughput policy also applies inverse Gaborish
 through one three-channel Metal primitive submission and uses the deterministic
 tilewise pixel-domain initial-CfL seed. Exact-coefficient mode retains the
-original CPU Gaborish and DCT-domain iterative initial-CfL paths.
+original CPU Gaborish and DCT-domain iterative initial-CfL paths. After strategy
+selection, throughput mode computes one fast strategy-aware final-CfL map from
+the adjusted initial quant field and reuses it across perceptual evaluations;
+the exact path retains evaluation-local quant-dependent maps.
 
 The production corpus covers 13 built-in workloads at Butteraugli targets
 `1.0` and `1.2`, plus four independent 1919x1079 natural, HDR-like, and

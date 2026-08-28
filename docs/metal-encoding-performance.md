@@ -184,6 +184,16 @@ the prepared frame context required by the P3 exit criterion.
   boundary when policy dependencies allow it.
 - Read back only final policy results and the requested final frame/image.
 
+The first retained P4 slice prepares one fast, strategy-aware final-CfL map
+from the adjusted initial quant field and reuses it for all fully resident AQ
+evaluations. Exact mode still recomputes the quant-dependent map. One warm
+padded-1080p process with one warmup and three alternating samples measured
+Metal at `394.4-424.5 ms` (median `410.1 ms`) and paired speedup at
+`14.91-16.09x` (median `15.50x`). Relative to exact coefficients, the score
+maximum remained `0.0540`; field, block-map, and RGB maxima were `0.202`,
+`0.424`, and `0.979`. This only removes repeated host regression: quantizer and
+EPF preparation plus three submission/readback boundaries remain.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

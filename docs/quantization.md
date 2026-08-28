@@ -433,10 +433,13 @@ quantization, Gaborish preprocessing, first-pass CfL, search decisions, and the
 deterministic AQ update policy remain on the CPU. Fully resident mode instead
 uses the backend image primitives for inverse Gaborish and selects the existing
 deterministic tilewise pixel-domain initial-CfL seed; initial quantization and
-policy decisions remain on the CPU. The direct prepared operation can perform
-coefficient coding, reconstruction, filters, color conversion, and either
-Butteraugli or transform-local maximum-error block reduction in one Metal
-submission. The qualified workflow uses a
+policy decisions remain on the CPU. It prepares one strategy-aware final-CfL
+map from the adjusted initial field and reuses that map for every throughput
+evaluation; exact mode continues to recompute quant-dependent final CfL. The
+direct prepared operation can perform coefficient coding, reconstruction,
+filters, color conversion, and either Butteraugli or transform-local
+maximum-error block reduction in one Metal submission. The qualified workflow
+uses a
 decision-preserving coefficient boundary: CPU coefficient coding,
 dequantization, inverse CfL, and DC/LLF conversion prepare exact packed
 reconstruction coefficients, then one prepared Metal submission performs
