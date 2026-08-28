@@ -44,6 +44,15 @@ struct AqResetParams {
   uint test_error_mask;
 };
 
+struct AqInitialCflParams {
+  uint width;
+  uint height;
+  uint coding_stride;
+  uint tile_width;
+  uint tile_height;
+  uint color_stride;
+};
+
 struct AqQuantizationProbeParams {
   uint coefficient_count;
   uint strategy;
@@ -176,6 +185,101 @@ kernel void gjxl_aq_reset_reconstruction(
   if (index < params.block_value_count) {
     block_distance[index] = as_type<float>(kPoison);
   }
+}
+
+static char aq_quantize_initial_cfl(float value) {
+  constexpr float kTowardsZero = 2.6f;
+  if (value >= kTowardsZero) {
+    value -= kTowardsZero;
+  } else if (value <= -kTowardsZero) {
+    value += kTowardsZero;
+  } else {
+    value = 0.0f;
+  }
+  return char(clamp(round(value), -128.0f, 127.0f));
+}
+
+// The maximum-throughput encoder's initial CfL policy accumulates four CPU
+// SIMD lanes independently. One Metal thread owns a complete 64x64 tile and
+// preserves that order exactly; tiles remain independent and run in parallel.
+kernel void gjxl_aq_initial_cfl(
+  device const float* coding_x [[buffer(0)]],
+  device const float* coding_y [[buffer(1)]],
+  device const float* coding_b [[buffer(2)]],
+  device char* y_to_x [[buffer(3)]],
+  device char* y_to_b [[buffer(4)]],
+  device atomic_uint* error [[buffer(5)]],
+  constant AqInitialCflParams& params [[buffer(6)]],
+  uint tile_index [[thread_position_in_grid]]) {
+
+  const uint tile_count = params.tile_width * params.tile_height;
+  if (tile_index >= tile_count) return;
+  const uint tile_x = tile_index % params.tile_width;
+  const uint tile_y = tile_index / params.tile_width;
+  const uint x_begin = tile_x * 64u;
+  const uint y_begin = tile_y * 64u;
+  const uint x_end = min(x_begin + 64u, params.width);
+  const uint y_end = min(y_begin + 64u, params.height);
+
+  float sum_y[4] = {};
+  float sum_x[4] = {};
+  float sum_b[4] = {};
+  uint sample_index = 0u;
+  for (uint y = y_begin; y < y_end; ++y) {
+    const uint row = y * params.coding_stride;
+    for (uint x = x_begin; x < x_end; ++x, ++sample_index) {
+      const uint lane = sample_index & 3u;
+      const float value_y = coding_y[row + x];
+      const float value_x = coding_x[row + x];
+      const float value_b = coding_b[row + x];
+      if (!isfinite(value_y) || !isfinite(value_x) || !isfinite(value_b)) {
+        atomic_fetch_or_explicit(error, 1024u, memory_order_relaxed);
+        return;
+      }
+      sum_y[lane] += value_y;
+      sum_x[lane] += value_x;
+      sum_b[lane] += value_b;
+    }
+  }
+  if (sample_index == 0u) {
+    atomic_fetch_or_explicit(error, 1024u, memory_order_relaxed);
+    return;
+  }
+  const float sample_count = float(sample_index);
+  const float mean_y = ((sum_y[0] + sum_y[1]) + (sum_y[2] + sum_y[3])) /
+    sample_count;
+  const float mean_x = ((sum_x[0] + sum_x[1]) + (sum_x[2] + sum_x[3])) /
+    sample_count;
+  const float mean_b = ((sum_b[0] + sum_b[1]) + (sum_b[2] + sum_b[3])) /
+    sample_count;
+
+  float quadratic[4] = {};
+  float linear_x[4] = {};
+  float linear_b[4] = {};
+  sample_index = 0u;
+  for (uint y = y_begin; y < y_end; ++y) {
+    const uint row = y * params.coding_stride;
+    for (uint x = x_begin; x < x_end; ++x, ++sample_index) {
+      const uint lane = sample_index & 3u;
+      const float centered_y = coding_y[row + x] - mean_y;
+      const float a = centered_y * (1.0f / 84.0f);
+      quadratic[lane] = fma(a, a, quadratic[lane]);
+      linear_x[lane] = fma(
+        a, -(coding_x[row + x] - mean_x), linear_x[lane]);
+      linear_b[lane] = fma(
+        a, centered_y - (coding_b[row + x] - mean_b), linear_b[lane]);
+    }
+  }
+  const float quadratic_sum =
+    (quadratic[0] + quadratic[1]) + (quadratic[2] + quadratic[3]);
+  const float linear_x_sum =
+    (linear_x[0] + linear_x[1]) + (linear_x[2] + linear_x[3]);
+  const float linear_b_sum =
+    (linear_b[0] + linear_b[1]) + (linear_b[2] + linear_b[3]);
+  const float denominator = quadratic_sum + sample_count * 5.0e-10f;
+  const uint color_index = tile_y * params.color_stride + tile_x;
+  y_to_x[color_index] = aq_quantize_initial_cfl(-linear_x_sum / denominator);
+  y_to_b[color_index] = aq_quantize_initial_cfl(-linear_b_sum / denominator);
 }
 
 kernel void gjxl_aq_reset_exact_coefficients(

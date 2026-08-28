@@ -56,6 +56,9 @@ static_assert(std::is_standard_layout_v<AqReconstructionParams>);
 static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
 static_assert(sizeof(AqReconstructionParams) == 132);
 static_assert(sizeof(AqResetParams) == 20);
+static_assert(std::is_standard_layout_v<AqInitialCflParams>);
+static_assert(std::is_trivially_copyable_v<AqInitialCflParams>);
+static_assert(sizeof(AqInitialCflParams) == 24);
 static_assert(std::is_standard_layout_v<AqBlockReductionParams>);
 static_assert(std::is_trivially_copyable_v<AqBlockReductionParams>);
 static_assert(sizeof(AqBlockReductionParams) == 40);
@@ -400,6 +403,8 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   frame_only_ = preparation.frame_only;
   frame_only_inverse_gaborish_ =
       preparation.frame_only_inverse_gaborish;
+  frame_only_resident_initial_cfl_ =
+      preparation.frame_only_resident_initial_cfl;
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
@@ -949,6 +954,14 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       static_cast<uint32_t>(block_count_),
       0,
   };
+  initial_cfl_params_ = {
+      static_cast<uint32_t>(coding_extent_.width),
+      static_cast<uint32_t>(coding_extent_.height),
+      static_cast<uint32_t>(coding_[0].row_stride),
+      static_cast<uint32_t>(tile_extent_.width),
+      static_cast<uint32_t>(tile_extent_.height),
+      static_cast<uint32_t>(y_to_x_.row_stride),
+  };
 
   gaborish_params_ = {
       static_cast<uint32_t>(source_extent_.width),
@@ -1316,6 +1329,22 @@ Status MetalPreparedAqEvaluation::ReadbackRawQuant() {
       "Metal AQ adjusted raw-quant readback is invalid");
   }
   return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::ReadbackColorCorrelation() {
+  size_t tile_count = 0;
+  if (!tile_extent_.try_area(&tile_count)) {
+    return Status::Internal("Prepared AQ color-tile extent changed");
+  }
+  Status status = backend_->CopyDeviceToHost(
+      *y_to_x_.buffer, last_y_to_x_.data(), tile_count * sizeof(int8_t),
+      y_to_x_.offset_bytes);
+  if (status.ok()) {
+    status = backend_->CopyDeviceToHost(
+        *y_to_b_.buffer, last_y_to_b_.data(), tile_count * sizeof(int8_t),
+        y_to_b_.offset_bytes);
+  }
+  return status;
 }
 
 Status MetalPreparedAqEvaluation::AssembleFrameFromReadback(
@@ -1802,6 +1831,11 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
     return Status::InvalidArgument(
         "Frame-only inverse Gaborish preparation is inconsistent");
   }
+  if (preparation.frame_only_resident_initial_cfl &&
+      !preparation.frame_only) {
+    return Status::InvalidArgument(
+        "Resident initial CfL requires frame-only preparation");
+  }
   switch (preparation.coefficient_decision_mode) {
     case AcCoefficientDecisionMode::kAdjustedSharedQuant:
     case AcCoefficientDecisionMode::kFixedRawQuant:
@@ -1860,14 +1894,21 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
         "An exact AQ linear image must be correctly sized and accompanied "
         "by exact coefficients");
   }
+  if (frame_only_resident_initial_cfl_ &&
+      input.exact_coefficients != nullptr) {
+    return Status::InvalidArgument(
+        "Resident initial CfL does not accept exact coefficients");
+  }
+  const bool valid_host_cfl =
+      ValidHostPlaneLayout(input.y_to_x) &&
+      input.y_to_x.extent == tile_extent_ &&
+      ValidHostPlaneLayout(input.y_to_b) &&
+      input.y_to_b.extent == tile_extent_;
   if (!ValidHostPlaneLayout(input.raw_quant_field) ||
       input.raw_quant_field.extent != block_extent_ ||
       !ValidHostPlaneLayout(input.epf_inverse_sigma) ||
       input.epf_inverse_sigma.extent != block_extent_ ||
-      !ValidHostPlaneLayout(input.y_to_x) ||
-      input.y_to_x.extent != tile_extent_ ||
-      !ValidHostPlaneLayout(input.y_to_b) ||
-      input.y_to_b.extent != tile_extent_) {
+      (!frame_only_resident_initial_cfl_ && !valid_host_cfl)) {
     return Status::InvalidArgument(
         "Prepared AQ evaluation input geometry is invalid");
   }
@@ -1982,10 +2023,10 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   if (status.ok()) {
     status = UploadPlane(*backend_, input.epf_inverse_sigma, inverse_sigma_);
   }
-  if (status.ok()) {
+  if (status.ok() && !frame_only_resident_initial_cfl_) {
     status = UploadPlane(*backend_, input.y_to_x, y_to_x_);
   }
-  if (status.ok()) {
+  if (status.ok() && !frame_only_resident_initial_cfl_) {
     status = UploadPlane(*backend_, input.y_to_b, y_to_b_);
   }
   if (status.ok()) {
@@ -1997,13 +2038,15 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
         input.raw_quant_field.Row(y), block_extent_.width,
         last_raw_quant_.data() + y * block_extent_.width);
     }
-    for (size_t y = 0; y < tile_extent_.height; ++y) {
-      std::copy_n(
-        input.y_to_x.Row(y), tile_extent_.width,
-        last_y_to_x_.data() + y * tile_extent_.width);
-      std::copy_n(
-        input.y_to_b.Row(y), tile_extent_.width,
-        last_y_to_b_.data() + y * tile_extent_.width);
+    if (!frame_only_resident_initial_cfl_) {
+      for (size_t y = 0; y < tile_extent_.height; ++y) {
+        std::copy_n(
+          input.y_to_x.Row(y), tile_extent_.width,
+          last_y_to_x_.data() + y * tile_extent_.width);
+        std::copy_n(
+          input.y_to_b.Row(y), tile_extent_.width,
+          last_y_to_b_.data() + y * tile_extent_.width);
+      }
     }
   }
   exact_coefficients_ = input.exact_coefficients != nullptr;
@@ -2381,13 +2424,14 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      8>
+      9>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
           {"gjxl_aq_reset_exact_coefficients",
            &pipelines.reset_exact_coefficients},
           {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
+          {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
           {"gjxl_aq_gather_transform_pixels",
            &pipelines.gather_transform_pixels},
           {"gjxl_aq_encode_reconstruction_coefficients",

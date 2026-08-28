@@ -56,6 +56,18 @@ struct GpuFrameOnlyQuantizationOutput {
   AdaptiveQuantizationOptions options,
   GpuFrameOnlyQuantizationOutput output);
 
+/// Frame-only variant that computes the fast initial chroma-from-luma map
+/// from the already resident coding image in the encoding submission.
+[[nodiscard]] Status RunGpuFrameOnlyQuantizationResidentInitialCfl(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuFrameOnlyQuantizationOutput output);
+
 /// Runs the bounded adaptive-quantization policy with a prepared GPU evaluator.
 ///
 /// The optional AQ capability is required; this operation never silently falls

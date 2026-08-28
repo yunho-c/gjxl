@@ -556,14 +556,17 @@ Status RunGpuAdaptiveQuantizationImpl(
 
 }  // namespace
 
-Status RunGpuFrameOnlyQuantization(
+namespace {
+
+Status RunGpuFrameOnlyQuantizationImpl(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
   const AcStrategyGrid& strategies,
   ConstPlaneF32View initial_quant_field,
   ConstPlaneU8View epf_sharpness,
-  const ColorCorrelationMap& color_correlation,
+  const ColorCorrelationMap* color_correlation,
+  bool resident_initial_cfl,
   AdaptiveQuantizationOptions options,
   GpuFrameOnlyQuantizationOutput output) {
 
@@ -620,6 +623,7 @@ Status RunGpuFrameOnlyQuantization(
         .frame_only = true,
         .frame_only_inverse_gaborish =
           options.profile.loop_filter.gaborish,
+        .frame_only_resident_initial_cfl = resident_initial_cfl,
         .coefficient_decision_mode =
           AcCoefficientDecisionMode::kAdjustedSharedQuant,
       },
@@ -631,8 +635,12 @@ Status RunGpuFrameOnlyQuantization(
         .raw_quant_field = {
           raw_quant.data(), strategies.extent(), strategies.extent().width},
         .quantizer = quantizer.params(),
-        .y_to_x = color_correlation.y_to_x_map(),
-        .y_to_b = color_correlation.y_to_b_map(),
+        .y_to_x = color_correlation == nullptr
+          ? ConstPlaneI8View{}
+          : color_correlation->y_to_x_map(),
+        .y_to_b = color_correlation == nullptr
+          ? ConstPlaneI8View{}
+          : color_correlation->y_to_b_map(),
         .epf_inverse_sigma = {
           inverse_sigma.data(), strategies.extent(), strategies.extent().width},
       },
@@ -648,6 +656,39 @@ Status RunGpuFrameOnlyQuantization(
     return Status::InvalidArgument(
       "GPU frame-only quantization dimensions are too large");
   }
+}
+
+}  // namespace
+
+Status RunGpuFrameOnlyQuantization(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  const ColorCorrelationMap& color_correlation,
+  AdaptiveQuantizationOptions options,
+  GpuFrameOnlyQuantizationOutput output) {
+
+  return RunGpuFrameOnlyQuantizationImpl(
+      gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
+      epf_sharpness, &color_correlation, false, options, output);
+}
+
+Status RunGpuFrameOnlyQuantizationResidentInitialCfl(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuFrameOnlyQuantizationOutput output) {
+
+  return RunGpuFrameOnlyQuantizationImpl(
+      gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
+      epf_sharpness, nullptr, true, options, output);
 }
 
 Status RunGpuAdaptiveQuantizationPolicy(

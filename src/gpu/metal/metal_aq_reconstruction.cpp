@@ -217,6 +217,20 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
                               3 * self.block_count_, self.pixel_count_,
                               self.block_count_}));
 
+  if (self.frame_only_resident_initial_cfl_) {
+    encoder->setComputePipelineState(backend.aq_pipelines_.initial_cfl.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      BindPlane(encoder, self.coding_[channel], channel);
+    }
+    BindPlane(encoder, self.y_to_x_, 3);
+    BindPlane(encoder, self.y_to_b_, 4);
+    BindPlane(encoder, self.reconstruction_error_, 5);
+    encoder->setBytes(&self.initial_cfl_params_,
+                      sizeof(self.initial_cfl_params_), 6);
+    DispatchThreads1d(encoder, self.tile_extent_.width *
+                                   self.tile_extent_.height);
+  }
+
   if (self.frame_only_inverse_gaborish_) {
     for (size_t channel = 0; channel < 3; ++channel) {
       const Symmetric5Weights weights =
@@ -383,6 +397,9 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
   if (status.ok() && coefficient_decision_mode_ ==
         AcCoefficientDecisionMode::kAdjustedSharedQuant) {
     status = ReadbackRawQuant();
+  }
+  if (status.ok() && frame_only_resident_initial_cfl_) {
+    status = ReadbackColorCorrelation();
   }
   constexpr int32_t kQuantizedPoison =
       static_cast<int32_t>(0x81234567u);

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "codec/chroma_from_luma.h"
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/epf.h"
 #include "codec/quantization.h"
 #include "codec/reconstruction.h"
@@ -1028,6 +1029,74 @@ bool CheckConcurrentReconstruction(
          CompareCoefficientOracle(image, strategies, input, second_snapshot);
 }
 
+bool CheckResidentInitialCfl(const HostImage& image,
+                             const gjxl::AcStrategyGrid& strategies) {
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  InputStorage input;
+  const std::vector<uint8_t> sharpness(
+      kBlockExtent.width * kBlockExtent.height, 4);
+  gjxl::ColorCorrelationMap expected;
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "resident initial-CfL backend") ||
+      !InputStorage::Make(image, &input) ||
+      !CheckStatus(
+          gjxl::chroma_from_luma_internal::
+              ComputeInitialColorCorrelationMapFast(image.View(), &expected),
+          "resident initial-CfL CPU oracle")) {
+    return false;
+  }
+
+  const gjxl::AqEvaluationPreparation preparation{
+      .original_linear_rgb = image.View(),
+      .coding_opsin = image.View(),
+      .strategies = &strategies,
+      .epf_sharpness = {
+          sharpness.data(), kBlockExtent, kBlockExtent.width},
+      .options = Options(),
+      .frame_only = true,
+      .frame_only_resident_initial_cfl = true,
+  };
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(
+                       *gpu, preparation, &prepared),
+                   "resident initial-CfL preparation")) {
+    return false;
+  }
+  gjxl::AqEvaluationInput resident_input = input.View();
+  resident_input.y_to_x = {};
+  resident_input.y_to_b = {};
+  gjxl::VarDctEncoderFrame frame;
+  const gjxl::GpuBackendStats before = gpu->stats();
+  if (!CheckStatus(prepared->EncodeFrame(resident_input, &frame),
+                   "resident initial-CfL frame encoding")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after = gpu->stats();
+  if (after.successful_allocations != before.successful_allocations ||
+      after.committed_submissions != before.committed_submissions + 1) {
+    std::cerr << "Resident initial CfL escaped the prepared submission\n";
+    return false;
+  }
+  const auto expected_x = expected.y_to_x_map();
+  const auto expected_b = expected.y_to_b_map();
+  const auto actual_x = frame.color_correlation().y_to_x_map();
+  const auto actual_b = frame.color_correlation().y_to_b_map();
+  for (size_t y = 0; y < expected.tile_extent().height; ++y) {
+    for (size_t x = 0; x < expected.tile_extent().width; ++x) {
+      if (actual_x.Row(y)[x] != expected_x.Row(y)[x] ||
+          actual_b.Row(y)[x] != expected_b.Row(y)[x]) {
+        std::cerr << "Resident initial CfL differs at tile " << x << ',' << y
+                  << ": X " << static_cast<int>(actual_x.Row(y)[x]) << '/'
+                  << static_cast<int>(expected_x.Row(y)[x]) << ", B "
+                  << static_cast<int>(actual_b.Row(y)[x]) << '/'
+                  << static_cast<int>(expected_b.Row(y)[x]) << '\n';
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 int main() {
@@ -1064,6 +1133,8 @@ int main() {
                                   gjxl::StatusCode::kDeviceError, structured,
                                   strategies) ||
       !CheckReconstructionValidationAndReadback(structured, strategies) ||
+      !CheckResidentInitialCfl(structured, strategies) ||
+      !CheckResidentInitialCfl(flat, strategies) ||
       !CheckConcurrentReconstruction(structured, strategies)) {
     return EXIT_FAILURE;
   }

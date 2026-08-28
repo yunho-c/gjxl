@@ -60,6 +60,15 @@ struct AqResetParams {
   uint32_t test_error_mask;
 };
 
+struct AqInitialCflParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t coding_stride;
+  uint32_t tile_width;
+  uint32_t tile_height;
+  uint32_t color_stride;
+};
+
 struct AqBlockReductionParams {
   uint32_t source_width;
   uint32_t source_height;
@@ -218,6 +227,7 @@ private:
   Status PreparePostprocessDiagnosticReadback();
   Status PrepareQuantizationProbeReadback();
   Status ReadbackRawQuant();
+  Status ReadbackColorCorrelation();
   Status AssembleFrameFromReadback(VarDctEncoderFrame *frame) const;
   Status WaitForOperation();
   void CompleteOperation();
@@ -310,6 +320,7 @@ private:
   Quantizer last_quantizer_;
   AqEvaluationMemoryStats memory_stats_;
   AqResetParams reset_params_{};
+  AqInitialCflParams initial_cfl_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};
   std::array<AqMaximumErrorReductionParams, 7>
     maximum_error_reduction_params_{};
@@ -354,6 +365,7 @@ private:
     AcCoefficientDecisionMode::kFixedRawQuant;
   bool frame_only_ = false;
   bool frame_only_inverse_gaborish_ = false;
+  bool frame_only_resident_initial_cfl_ = false;
 };
 
 } // namespace gjxl::metal_internal

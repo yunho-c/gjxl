@@ -177,10 +177,6 @@ Status RunGpuFrameOnlyQuantizationPipeline(
       });
     if (!status.ok()) return status;
 
-    ColorCorrelationMap color_correlation;
-    status = chroma_from_luma_internal::ComputeInitialColorCorrelationMapFast(
-      opsin, &color_correlation);
-    if (!status.ok()) return status;
     AcStrategyGrid strategies;
     status = AcStrategyGrid::Create(block_extent, &strategies);
     if (!status.ok()) return status;
@@ -194,11 +190,10 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
     adaptive_options.butteraugli_target = options.butteraugli_target;
-    status = RunGpuFrameOnlyQuantization(
+    status = RunGpuFrameOnlyQuantizationResidentInitialCfl(
       gpu, original_linear_rgb, opsin, strategies,
       {initial_quant.data(), block_extent, block_extent.width},
-      {sharpness.data(), block_extent, block_extent.width}, color_correlation,
-      adaptive_options,
+      {sharpness.data(), block_extent, block_extent.width}, adaptive_options,
       {
         .quant_field = {
           final_quant.data(), block_extent, block_extent.width},

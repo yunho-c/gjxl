@@ -42,6 +42,10 @@ struct AqEvaluationPreparation {
   /// Applies the profile's inverse Gaborish filter on device before frame-only
   /// coefficient coding, avoiding a host materialization boundary.
   bool frame_only_inverse_gaborish = false;
+  /// Computes the fast pixel-domain initial chroma-from-luma map from the
+  /// resident coding image. This is valid only for frame-only encoding and
+  /// allows the input color-map views to be omitted.
+  bool frame_only_resident_initial_cfl = false;
   /// Selects whether resident coefficient coding preserves the input raw
   /// quant or applies the encoder's shared AdjustQuantBlockAC decision.
   AcCoefficientDecisionMode coefficient_decision_mode =

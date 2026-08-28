@@ -516,6 +516,48 @@ input near a threshold may therefore make a different, internally consistent
 adjustment decision. Resident output remains experimental and is not described
 as CPU-bit-exact.
 
+## Maximum-throughput frontend residency sequence
+
+Rate-control policy is complete for the current profile, but the explicit
+maximum-throughput path still has avoidable CPU preprocessing and host/device
+handoffs. The implementation order is deliberately narrower than changing the
+authoritative exact-coefficient policy:
+
+1. compute the fast pixel-domain initial CfL map from resident opsin;
+2. generate the initial quant field and masks on Metal, retaining the small
+   block-grid CPU quantizer decision at first;
+3. move median, median absolute deviation, and raw-quant construction to Metal;
+4. pass resident initial fields and masks directly into the experimental AC
+   search paths; and
+5. audit exact-coefficient and automatic modes for non-regression after every
+   slice.
+
+### Resident initial CfL
+
+**Status:** complete for maximum-throughput frame-only encoding.
+
+The frame-only preparation may now request its deterministic fast initial CfL
+map from the already uploaded, pre-Gaborish coding opsin. The CfL kernel runs in
+the existing coefficient-coding submission before inverse Gaborish and writes
+the two signed 64x64-tile maps directly into the prepared reconstruction
+buffers. It preserves the CPU policy's four-lane accumulation order and exact
+integer factors on flat, structured, and partial-edge tile fixtures.
+
+No pixel image or coefficient buffer crosses the host boundary for this step.
+Final frame assembly reads back only the two compact tile maps, which are part
+of the codestream state. Direct tests require one submission and zero
+post-preparation allocations. Exact-coefficient, fully-resident, and throughput
+mode inputs retain their prior host-map contracts; automatic backend selection
+is unchanged.
+
+A directional Apple M4 Pro Release run on padded 1080p used one warmup and five
+CPU/Metal pairs. The public maximum-throughput Metal boundary measured a
+`122.553 ms` median (`107.175-124.989 ms`), with `79.980 ms`
+(`64.153-83.358 ms`) in the quantization pipeline and a `52.672x` paired
+speedup median. The range overlaps the pre-port checkpoint, so this single
+process is a regression guard, not a retained speedup claim. A balanced
+multi-process comparison belongs at the end of the complete frontend sequence.
+
 ## Suggested milestones
 
 ### RC0: Observable best-effort size control
