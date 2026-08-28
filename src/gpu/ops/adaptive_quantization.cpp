@@ -558,6 +558,74 @@ Status RunGpuAdaptiveQuantizationImpl(
 
 namespace {
 
+Status FinishGpuFrameOnlyQuantization(
+  PreparedAqEvaluation& prepared,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  const ColorCorrelationMap* color_correlation,
+  AdaptiveQuantizationOptions options,
+  GpuFrameOnlyQuantizationOutput output) {
+
+  size_t block_count = 0;
+  if (!strategies.extent().try_area(&block_count)) {
+    return Status::InvalidArgument(
+      "GPU frame-only block grid is too large");
+  }
+  try {
+    std::vector<float> adjusted_quant(block_count);
+    Status status = AdjustQuantField(
+      strategies, options.butteraugli_target, initial_quant_field,
+      {adjusted_quant.data(), strategies.extent(), strategies.extent().width});
+    if (!status.ok()) return status;
+    float quant_dc = 0.0f;
+    status = ComputeInitialQuantDc(options.butteraugli_target, &quant_dc);
+    if (!status.ok()) return status;
+    std::vector<int32_t> raw_quant(block_count);
+    Quantizer quantizer;
+    status = CreateQuantizerFromField(
+      quant_dc,
+      {adjusted_quant.data(), strategies.extent(), strategies.extent().width},
+      {raw_quant.data(), strategies.extent(), strategies.extent().width},
+      &quantizer);
+    if (!status.ok()) return status;
+    std::vector<float> inverse_sigma(block_count);
+    status = ComputeEpfInverseSigma(
+      strategies,
+      {raw_quant.data(), strategies.extent(), strategies.extent().width},
+      quantizer, epf_sharpness, options.profile.epf_sigma,
+      {inverse_sigma.data(), strategies.extent(), strategies.extent().width});
+    if (!status.ok()) return status;
+
+    VarDctEncoderFrame candidate;
+    status = prepared.EncodeFrame(
+      {
+        .raw_quant_field = {
+          raw_quant.data(), strategies.extent(), strategies.extent().width},
+        .quantizer = quantizer.params(),
+        .y_to_x = color_correlation == nullptr
+          ? ConstPlaneI8View{}
+          : color_correlation->y_to_x_map(),
+        .y_to_b = color_correlation == nullptr
+          ? ConstPlaneI8View{}
+          : color_correlation->y_to_b_map(),
+        .epf_inverse_sigma = {
+          inverse_sigma.data(), strategies.extent(), strategies.extent().width},
+      },
+      &candidate);
+    if (!status.ok()) return status;
+    CopyContiguousPlane(adjusted_quant, output.quant_field);
+    *output.frame = std::move(candidate);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate GPU frame-only quantization storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "GPU frame-only quantization dimensions are too large");
+  }
+}
+
 Status RunGpuFrameOnlyQuantizationImpl(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
@@ -581,36 +649,7 @@ Status RunGpuFrameOnlyQuantizationImpl(
       "GPU frame-only quantization output is invalid");
   }
 
-  size_t block_count = 0;
-  if (!strategies.extent().try_area(&block_count)) {
-    return Status::InvalidArgument(
-      "GPU frame-only block grid is too large");
-  }
   try {
-    std::vector<float> adjusted_quant(block_count);
-    status = AdjustQuantField(
-      strategies, options.butteraugli_target, initial_quant_field,
-      {adjusted_quant.data(), strategies.extent(), strategies.extent().width});
-    if (!status.ok()) return status;
-    float quant_dc = 0.0f;
-    status = ComputeInitialQuantDc(options.butteraugli_target, &quant_dc);
-    if (!status.ok()) return status;
-    std::vector<int32_t> raw_quant(block_count);
-    Quantizer quantizer;
-    status = CreateQuantizerFromField(
-      quant_dc,
-      {adjusted_quant.data(), strategies.extent(), strategies.extent().width},
-      {raw_quant.data(), strategies.extent(), strategies.extent().width},
-      &quantizer);
-    if (!status.ok()) return status;
-    std::vector<float> inverse_sigma(block_count);
-    status = ComputeEpfInverseSigma(
-      strategies,
-      {raw_quant.data(), strategies.extent(), strategies.extent().width},
-      quantizer, epf_sharpness, options.profile.epf_sigma,
-      {inverse_sigma.data(), strategies.extent(), strategies.extent().width});
-    if (!status.ok()) return status;
-
     std::unique_ptr<PreparedAqEvaluation> prepared;
     status = PrepareAqEvaluation(
       gpu,
@@ -629,26 +668,9 @@ Status RunGpuFrameOnlyQuantizationImpl(
       },
       &prepared);
     if (!status.ok()) return status;
-    VarDctEncoderFrame candidate;
-    status = prepared->EncodeFrame(
-      {
-        .raw_quant_field = {
-          raw_quant.data(), strategies.extent(), strategies.extent().width},
-        .quantizer = quantizer.params(),
-        .y_to_x = color_correlation == nullptr
-          ? ConstPlaneI8View{}
-          : color_correlation->y_to_x_map(),
-        .y_to_b = color_correlation == nullptr
-          ? ConstPlaneI8View{}
-          : color_correlation->y_to_b_map(),
-        .epf_inverse_sigma = {
-          inverse_sigma.data(), strategies.extent(), strategies.extent().width},
-      },
-      &candidate);
-    if (!status.ok()) return status;
-    CopyContiguousPlane(adjusted_quant, output.quant_field);
-    *output.frame = std::move(candidate);
-    return Status::Ok();
+    return FinishGpuFrameOnlyQuantization(
+      *prepared, strategies, initial_quant_field, epf_sharpness,
+      color_correlation, options, output);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU frame-only quantization storage");
@@ -689,6 +711,70 @@ Status RunGpuFrameOnlyQuantizationResidentInitialCfl(
   return RunGpuFrameOnlyQuantizationImpl(
       gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
       epf_sharpness, nullptr, true, options, output);
+}
+
+Status RunGpuFrameOnlyQuantizationResidentFrontend(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output) {
+
+  if (!std::isfinite(initial_options.butteraugli_target) ||
+      initial_options.butteraugli_target <= 0.0f ||
+      !std::isfinite(initial_options.rescale) ||
+      initial_options.rescale <= 0.0f ||
+      !output.quant_field.valid() ||
+      output.quant_field.extent != strategies.extent() ||
+      output.frame == nullptr) {
+    return Status::InvalidArgument(
+      "Resident frame-only frontend inputs or outputs are invalid");
+  }
+  try {
+    std::unique_ptr<PreparedAqEvaluation> prepared;
+    Status status = PrepareAqEvaluation(
+      gpu,
+      {
+        .original_linear_rgb = original_linear_rgb,
+        .coding_opsin = opsin,
+        .strategies = &strategies,
+        .epf_sharpness = epf_sharpness,
+        .options = {options.profile, options.butteraugli},
+        .frame_only = true,
+        .frame_only_inverse_gaborish = options.profile.loop_filter.gaborish,
+        .frame_only_resident_initial_cfl = true,
+        .frame_only_resident_initial_quant = true,
+        .coefficient_decision_mode =
+          AcCoefficientDecisionMode::kAdjustedSharedQuant,
+      },
+      &prepared);
+    if (!status.ok()) return status;
+    status = prepared->ComputeInitialQuantization(
+      initial_options, initial_output);
+    if (!status.ok()) return status;
+    const ConstPlaneF32View initial_quant{
+      initial_output.quant_field.data,
+      initial_output.quant_field.extent,
+      initial_output.quant_field.stride,
+    };
+    status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
+      original_linear_rgb, opsin, strategies, initial_quant,
+      epf_sharpness, options);
+    if (!status.ok()) return status;
+    return FinishGpuFrameOnlyQuantization(
+      *prepared, strategies, initial_quant, epf_sharpness,
+      nullptr, options, output);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate resident frame-only frontend storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Resident frame-only frontend dimensions are too large");
+  }
 }
 
 Status RunGpuAdaptiveQuantizationPolicy(

@@ -59,6 +59,15 @@ static_assert(sizeof(AqResetParams) == 20);
 static_assert(std::is_standard_layout_v<AqInitialCflParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialCflParams>);
 static_assert(sizeof(AqInitialCflParams) == 24);
+static_assert(std::is_standard_layout_v<AqInitialQuantGradientParams>);
+static_assert(std::is_trivially_copyable_v<AqInitialQuantGradientParams>);
+static_assert(sizeof(AqInitialQuantGradientParams) == 28);
+static_assert(std::is_standard_layout_v<AqInitialQuantErosionParams>);
+static_assert(std::is_trivially_copyable_v<AqInitialQuantErosionParams>);
+static_assert(sizeof(AqInitialQuantErosionParams) == 44);
+static_assert(std::is_standard_layout_v<AqInitialQuantModulationParams>);
+static_assert(std::is_trivially_copyable_v<AqInitialQuantModulationParams>);
+static_assert(sizeof(AqInitialQuantModulationParams) == 24);
 static_assert(std::is_standard_layout_v<AqBlockReductionParams>);
 static_assert(std::is_trivially_copyable_v<AqBlockReductionParams>);
 static_assert(sizeof(AqBlockReductionParams) == 40);
@@ -405,6 +414,8 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       preparation.frame_only_inverse_gaborish;
   frame_only_resident_initial_cfl_ =
       preparation.frame_only_resident_initial_cfl;
+  frame_only_resident_initial_quant_ =
+      preparation.frame_only_resident_initial_quant;
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
@@ -442,6 +453,11 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     }
     last_y_to_x_.resize(tile_count);
     last_y_to_b_.resize(tile_count);
+    if (frame_only_resident_initial_quant_) {
+      last_initial_quant_field_.resize(block_count_);
+      last_initial_strategy_mask_.resize(block_count_);
+      last_initial_pixel_mask_.resize(pixel_count_);
+    }
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory("Unable to allocate prepared AQ host staging");
   } catch (const std::length_error &) {
@@ -609,6 +625,25 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                            block_extent_.width, &staging_bytes);
   if (!status.ok())
     return status;
+  if (frame_only_resident_initial_quant_) {
+    const Extent2D pre_erosion_extent{
+      coding_extent_.width / 4, coding_extent_.height / 4};
+    status = AddPlannedPlane(DeviceElementType::kF32, pre_erosion_extent,
+                             pre_erosion_extent.width, &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
+                             coding_extent_.width, &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
+                             block_extent_.width, &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
+                             block_extent_.width, &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
+                             coding_extent_.width, &staging_bytes);
+    if (!status.ok()) return status;
+  }
   for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
     for (size_t channel = 0; channel < 3; ++channel) {
       status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
@@ -754,6 +789,30 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                                   &inverse_sigma_);
   if (!status.ok())
     return status;
+  if (frame_only_resident_initial_quant_) {
+    const Extent2D pre_erosion_extent{
+      coding_extent_.width / 4, coding_extent_.height / 4};
+    status = staging_.AllocatePlane(
+      DeviceElementType::kF32, pre_erosion_extent, pre_erosion_extent.width,
+      kBufferAlignment, &initial_quant_pre_erosion_);
+    if (!status.ok()) return status;
+    status = staging_.AllocatePlane(
+      DeviceElementType::kF32, coding_extent_, coding_extent_.width,
+      kBufferAlignment, &initial_quant_unblurred_pixel_mask_);
+    if (!status.ok()) return status;
+    status = staging_.AllocatePlane(
+      DeviceElementType::kF32, block_extent_, block_extent_.width,
+      kBufferAlignment, &initial_quant_field_);
+    if (!status.ok()) return status;
+    status = staging_.AllocatePlane(
+      DeviceElementType::kF32, block_extent_, block_extent_.width,
+      kBufferAlignment, &initial_quant_strategy_mask_);
+    if (!status.ok()) return status;
+    status = staging_.AllocatePlane(
+      DeviceElementType::kF32, coding_extent_, coding_extent_.width,
+      kBufferAlignment, &initial_quant_pixel_mask_);
+    if (!status.ok()) return status;
+  }
   for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
     for (size_t channel = 0; channel < 3; ++channel) {
       status = staging_.AllocatePlane(DeviceElementType::kF32, coding_extent_,
@@ -962,6 +1021,35 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       static_cast<uint32_t>(tile_extent_.height),
       static_cast<uint32_t>(y_to_x_.row_stride),
   };
+  if (frame_only_resident_initial_quant_) {
+    initial_quant_gradient_params_ = {
+        static_cast<uint32_t>(coding_extent_.width),
+        static_cast<uint32_t>(coding_extent_.height),
+        static_cast<uint32_t>(coding_[0].row_stride),
+        static_cast<uint32_t>(initial_quant_unblurred_pixel_mask_.row_stride),
+        static_cast<uint32_t>(initial_quant_pre_erosion_.extent.width),
+        static_cast<uint32_t>(initial_quant_pre_erosion_.row_stride),
+        0,
+    };
+    initial_quant_erosion_params_ = {
+        static_cast<uint32_t>(initial_quant_pre_erosion_.extent.width),
+        static_cast<uint32_t>(initial_quant_pre_erosion_.extent.height),
+        static_cast<uint32_t>(initial_quant_pre_erosion_.row_stride),
+        static_cast<uint32_t>(block_extent_.width),
+        static_cast<uint32_t>(block_extent_.height),
+        static_cast<uint32_t>(initial_quant_field_.row_stride),
+        static_cast<uint32_t>(initial_quant_strategy_mask_.row_stride),
+        {},
+    };
+    initial_quant_modulation_params_ = {
+        static_cast<uint32_t>(coding_[0].row_stride),
+        static_cast<uint32_t>(block_extent_.width),
+        static_cast<uint32_t>(block_extent_.height),
+        static_cast<uint32_t>(initial_quant_field_.row_stride),
+        0.0f,
+        0.0f,
+    };
+  }
 
   gaborish_params_ = {
       static_cast<uint32_t>(source_extent_.width),
@@ -1836,6 +1924,11 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
     return Status::InvalidArgument(
         "Resident initial CfL requires frame-only preparation");
   }
+  if (preparation.frame_only_resident_initial_quant &&
+      !preparation.frame_only) {
+    return Status::InvalidArgument(
+        "Resident initial quantization requires frame-only preparation");
+  }
   switch (preparation.coefficient_decision_mode) {
     case AcCoefficientDecisionMode::kAdjustedSharedQuant:
     case AcCoefficientDecisionMode::kFixedRawQuant:
@@ -2424,7 +2517,7 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      9>
+      13>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
@@ -2432,6 +2525,13 @@ Status CreateAqPipelines(
            &pipelines.reset_exact_coefficients},
           {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
           {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
+          {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
+          {"gjxl_aq_initial_quant_gradient",
+           &pipelines.initial_quant_gradient},
+          {"gjxl_aq_initial_quant_fuzzy_erosion",
+           &pipelines.initial_quant_fuzzy_erosion},
+          {"gjxl_aq_initial_quant_modulation",
+           &pipelines.initial_quant_modulation},
           {"gjxl_aq_gather_transform_pixels",
            &pipelines.gather_transform_pixels},
           {"gjxl_aq_encode_reconstruction_coefficients",

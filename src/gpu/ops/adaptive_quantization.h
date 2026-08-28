@@ -68,6 +68,20 @@ struct GpuFrameOnlyQuantizationOutput {
   AdaptiveQuantizationOptions options,
   GpuFrameOnlyQuantizationOutput output);
 
+/// Maximum-throughput frontend that computes initial quantization and initial
+/// CfL from the prepared resident coding image. The block field returns to the
+/// CPU for quantizer construction in this intermediate implementation.
+[[nodiscard]] Status RunGpuFrameOnlyQuantizationResidentFrontend(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output);
+
 /// Runs the bounded adaptive-quantization policy with a prepared GPU evaluator.
 ///
 /// The optional AQ capability is required; this operation never silently falls

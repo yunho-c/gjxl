@@ -558,6 +558,35 @@ speedup median. The range overlaps the pre-port checkpoint, so this single
 process is a regression guard, not a retained speedup claim. A balanced
 multi-process comparison belongs at the end of the complete frontend sequence.
 
+### Resident initial quantization with a bounded CPU decision
+
+**Status:** complete for maximum-throughput frame-only encoding.
+
+The pre-Gaborish resident opsin now feeds one Metal submission containing the
+initial luma gradient and pixel mask, quarter-resolution aggregation, fuzzy
+erosion, strategy mask, per-block gamma/high-frequency/blue modulation, and
+the codec's mirrored 5x5 pixel-mask blur. The prepared frame context retains
+all intermediate planes and is reused by the subsequent resident-CfL and
+coefficient submission. The full-resolution masking maps are read back only to
+preserve the existing diagnostic output contract; the CPU quantizer consumes
+the much smaller final block field.
+
+Direct structured and flat fixtures exercise two perceptual targets, the
+high-target dampening branch, image boundaries, repeated prepared use, injected
+numeric failure, atomic output, one submission per evaluation, and zero
+post-preparation device allocation. Against the CPU oracle, the observed
+maximum errors are below `2e-6` for the quant and strategy fields and `2e-5`
+for the blurred pixel mask. The padded-1080p maximum-throughput codestream
+remains `765599` bytes, matching the pre-port resident-CfL checkpoint.
+
+A directional Apple M4 Pro Release run with one warmup and three CPU/Metal
+pairs measured a public Metal median of `82.757 ms` (`68.933-94.248 ms`) and a
+quantization-pipeline median of `43.492 ms` (`34.167-49.406 ms`). The paired
+speedup median was `75.287x`. Relative to the preceding resident-CfL slice's
+single-process medians, this is a directional `1.48x` public-boundary and
+`1.84x` pipeline improvement. Retained claims still wait for the final balanced
+multi-process audit.
+
 ## Suggested milestones
 
 ### RC0: Observable best-effort size control

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "codec/gaborish_internal.h"
+#include "core/image_ops.h"
 #include "core/quantizer.h"
 #include "gpu/ops/primitives.h"
 
@@ -47,6 +48,13 @@ void DispatchThreads1d(MTL::ComputeCommandEncoder *encoder,
   encoder->dispatchThreads(
       MTL::Size(static_cast<NS::UInteger>(thread_count), 1, 1),
       MTL::Size(kAqThreadCount, 1, 1));
+}
+
+void DispatchThreads2d(MTL::ComputeCommandEncoder* encoder, Extent2D extent) {
+  encoder->dispatchThreads(
+      MTL::Size(static_cast<NS::UInteger>(extent.width),
+                static_cast<NS::UInteger>(extent.height), 1),
+      MTL::Size(8, 8, 1));
 }
 
 Status CopyReadback(MetalBackend &backend, DevicePlaneView source,
@@ -312,6 +320,199 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
         MTL::Size(kAqThreadCount, 1, 1));
   }
+}
+
+void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    const void* context) {
+
+  const auto& self =
+      *static_cast<const MetalPreparedAqEvaluation*>(context);
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.reset_initial_quant.get());
+  BindPlane(encoder, self.reconstruction_error_, 0);
+  encoder->setBytes(&self.initial_quant_gradient_params_,
+                    sizeof(self.initial_quant_gradient_params_), 1);
+  DispatchThreads1d(encoder, 1);
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_gradient.get());
+  BindPlane(encoder, self.coding_[1], 0);
+  BindPlane(encoder, self.initial_quant_unblurred_pixel_mask_, 1);
+  BindPlane(encoder, self.initial_quant_pre_erosion_, 2);
+  BindPlane(encoder, self.reconstruction_error_, 3);
+  encoder->setBytes(&self.initial_quant_gradient_params_,
+                    sizeof(self.initial_quant_gradient_params_), 4);
+  DispatchThreads2d(encoder, self.initial_quant_pre_erosion_.extent);
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_fuzzy_erosion.get());
+  BindPlane(encoder, self.initial_quant_pre_erosion_, 0);
+  BindPlane(encoder, self.initial_quant_field_, 1);
+  BindPlane(encoder, self.initial_quant_strategy_mask_, 2);
+  BindPlane(encoder, self.reconstruction_error_, 3);
+  encoder->setBytes(&self.initial_quant_erosion_params_,
+                    sizeof(self.initial_quant_erosion_params_), 4);
+  DispatchThreads2d(encoder, self.block_extent_);
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_modulation.get());
+  for (size_t channel = 0; channel < 3; ++channel) {
+    BindPlane(encoder, self.coding_[channel], channel);
+  }
+  BindPlane(encoder, self.initial_quant_field_, 3);
+  BindPlane(encoder, self.reconstruction_error_, 4);
+  encoder->setBytes(&self.initial_quant_modulation_params_,
+                    sizeof(self.initial_quant_modulation_params_), 5);
+  DispatchThreads2d(encoder, self.block_extent_);
+
+  constexpr std::array<float, 5> kFilter = {
+      0.364911248f, 0.05f, 0.1688888021f, 0.221069183f, 0.306563504f};
+  constexpr double kWeightSum =
+      1.0 + 4.0 * (kFilter[0] + kFilter[1] + kFilter[2] + kFilter[4] +
+                   2.0 * kFilter[3]);
+  constexpr float kNormalize = static_cast<float>(1.0 / kWeightSum);
+  backend.EncodePrimitive(
+      encoder,
+      Symmetric5ConvolutionCommand{
+          .input = self.initial_quant_unblurred_pixel_mask_,
+          .output = self.initial_quant_pixel_mask_,
+          .weights = {
+              kNormalize,
+              kNormalize * kFilter[0],
+              kNormalize * kFilter[2],
+              kNormalize * kFilter[1],
+              kNormalize * kFilter[4],
+              kNormalize * kFilter[3],
+          },
+      });
+}
+
+Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
+    InitialQuantizationOptions options, InitialQuantFieldOutput output) {
+
+  if (!frame_only_resident_initial_quant_) {
+    return Status::FailedPrecondition(
+        "Resident initial quantization was not prepared");
+  }
+  if (!std::isfinite(options.butteraugli_target) ||
+      options.butteraugli_target <= 0.0f || !std::isfinite(options.rescale) ||
+      options.rescale <= 0.0f || !output.quant_field.valid() ||
+      output.quant_field.extent != block_extent_ ||
+      !output.strategy_mask.valid() ||
+      output.strategy_mask.extent != block_extent_ ||
+      !output.pixel_mask.valid() ||
+      output.pixel_mask.extent != coding_extent_) {
+    return Status::InvalidArgument(
+        "Resident initial quantization inputs or outputs are invalid");
+  }
+
+  constexpr std::array<float, 4> kMulBase = {0.125f, 0.1f, 0.09f, 0.06f};
+  constexpr std::array<float, 4> kMulAdd = {0.0f, -0.1f, -0.09f, -0.06f};
+  constexpr float kTotal = 0.29959705784054957f;
+  const float target_mix = options.butteraugli_target < 2.0f
+      ? (2.0f - options.butteraugli_target) * 0.5f
+      : 0.0f;
+  float weight_sum = 0.0f;
+  for (size_t index = 0; index < 4; ++index) {
+    initial_quant_erosion_params_.weights[index] =
+        kMulBase[index] + target_mix * kMulAdd[index];
+    weight_sum += initial_quant_erosion_params_.weights[index];
+  }
+  for (float& weight : initial_quant_erosion_params_.weights) {
+    weight *= kTotal / weight_sum;
+  }
+  constexpr float kAcQuant = 0.765f;
+  const float scale =
+      kAcQuant / options.butteraugli_target * options.rescale;
+  const float base_level = 0.48f * scale;
+  float dampen = 1.0f;
+  if (options.butteraugli_target >= 2.0f) {
+    dampen = 1.0f - (options.butteraugli_target - 2.0f) / 12.0f;
+    dampen = std::max(dampen, 0.0f);
+  }
+  initial_quant_modulation_params_.multiplier = scale * dampen;
+  initial_quant_modulation_params_.addend = (1.0f - dampen) * base_level;
+
+  Status status = BeginOperation();
+  if (!status.ok()) return status;
+  bool fail_upload = false;
+  bool fail_numeric = false;
+  {
+    std::lock_guard lock(mutex_);
+    fail_upload = fail_next_upload_;
+    fail_numeric = fail_next_numeric_;
+    fail_next_upload_ = false;
+    fail_next_numeric_ = false;
+  }
+  if (fail_upload) {
+    Invalidate();
+    return Status::DeviceError(
+        "Injected Metal initial-quantization upload failure");
+  }
+  initial_quant_gradient_params_.test_error_mask = fail_numeric ? 16384u : 0u;
+  std::unique_ptr<GpuSubmission> submission;
+  status = backend_->SubmitCompute(
+      "gjxl prepared initial quantization",
+      &MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission, this,
+      &submission);
+  if (!status.ok() || submission == nullptr) {
+    Invalidate();
+    return status.ok()
+        ? Status::Internal("Initial quantization returned no submission")
+        : status;
+  }
+  {
+    std::lock_guard lock(mutex_);
+    submission_ = std::move(submission);
+  }
+  status = WaitForOperation();
+  if (!status.ok()) return status;
+
+  uint32_t device_error = 0;
+  status = CopyReadback(*backend_, reconstruction_error_, &device_error,
+                        sizeof(device_error));
+  if (status.ok() && device_error != 0) {
+    status = Status::DeviceError(
+        "Metal initial quantization detected an invalid numeric result");
+  }
+  if (status.ok()) {
+    status = CopyReadback(
+        *backend_, initial_quant_field_, last_initial_quant_field_.data(),
+        last_initial_quant_field_.size() * sizeof(float));
+  }
+  if (status.ok()) {
+    status = CopyReadback(
+        *backend_, initial_quant_strategy_mask_,
+        last_initial_strategy_mask_.data(),
+        last_initial_strategy_mask_.size() * sizeof(float));
+  }
+  if (status.ok()) {
+    status = CopyReadback(
+        *backend_, initial_quant_pixel_mask_, last_initial_pixel_mask_.data(),
+        last_initial_pixel_mask_.size() * sizeof(float));
+  }
+  const auto valid_values = [](const std::vector<float>& values) {
+    return std::ranges::all_of(values, [](float value) {
+      return std::isfinite(value) && value > 0.0f;
+    });
+  };
+  if (status.ok() &&
+      (!valid_values(last_initial_quant_field_) ||
+       !valid_values(last_initial_strategy_mask_) ||
+       !valid_values(last_initial_pixel_mask_))) {
+    status = Status::DeviceError(
+        "Metal initial quantization readback is invalid");
+  }
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  CopyContiguousPlane(last_initial_quant_field_, output.quant_field);
+  CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
+  CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
+  CompleteOperation();
+  return Status::Ok();
 }
 
 Status MetalPreparedAqEvaluation::EncodeFrame(

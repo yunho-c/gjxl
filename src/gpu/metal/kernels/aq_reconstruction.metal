@@ -53,6 +53,36 @@ struct AqInitialCflParams {
   uint color_stride;
 };
 
+struct AqInitialQuantGradientParams {
+  uint width;
+  uint height;
+  uint coding_stride;
+  uint pixel_mask_stride;
+  uint pre_erosion_width;
+  uint pre_erosion_stride;
+  uint test_error_mask;
+};
+
+struct AqInitialQuantErosionParams {
+  uint pre_erosion_width;
+  uint pre_erosion_height;
+  uint pre_erosion_stride;
+  uint block_width;
+  uint block_height;
+  uint quant_stride;
+  uint strategy_mask_stride;
+  float weights[4];
+};
+
+struct AqInitialQuantModulationParams {
+  uint coding_stride;
+  uint block_width;
+  uint block_height;
+  uint quant_stride;
+  float multiplier;
+  float addend;
+};
+
 struct AqQuantizationProbeParams {
   uint coefficient_count;
   uint strategy;
@@ -280,6 +310,343 @@ kernel void gjxl_aq_initial_cfl(
   const uint color_index = tile_y * params.color_stride + tile_x;
   y_to_x[color_index] = aq_quantize_initial_cfl(-linear_x_sum / denominator);
   y_to_b[color_index] = aq_quantize_initial_cfl(-linear_b_sum / denominator);
+}
+
+kernel void gjxl_aq_reset_initial_quant(
+  device atomic_uint* error [[buffer(0)]],
+  constant AqInitialQuantGradientParams& params [[buffer(1)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index == 0u) {
+    atomic_store_explicit(error, params.test_error_mask, memory_order_relaxed);
+  }
+}
+
+template <bool Invert>
+static float aq_initial_quant_gamma_ratio(float value) {
+  constexpr float kEpsilon = 1.0e-2f;
+  constexpr float kSgMul = 226.77216153508914f;
+  constexpr float kSgMul2 = 1.0f / 73.377132366608819f;
+  constexpr float kInverseLog2E = 0.6931471805599453f;
+  constexpr float kSgReturnMul =
+    kSgMul2 * 18.6580932135f * kInverseLog2E;
+  constexpr float kSgOffset = 7.7825991679894591f;
+  value = max(value, 0.0f);
+  const float squared = value * value;
+  const float numerator = fma(
+    kSgReturnMul * 3.0f * kSgMul, squared, kEpsilon);
+  const float denominator = fma(
+    kInverseLog2E * kSgMul * value, squared,
+    kSgOffset * kInverseLog2E + kEpsilon);
+  return Invert ? numerator / denominator : denominator / numerator;
+}
+
+static float aq_initial_quant_masking_sqrt(float value) {
+  constexpr float kLogOffset = 27.505837037000106f;
+  constexpr float kMul = 211.66567973503678f;
+  const float inner_scale = sqrt(kMul * 1.0e8f);
+  return 0.25f * sqrt(fma(value, inner_scale, kLogOffset));
+}
+
+static float aq_initial_quant_log1p(float value) {
+  const float sum = 1.0f + value;
+  const float correction = (value - (sum - 1.0f)) / sum;
+  return log(sum) + correction;
+}
+
+kernel void gjxl_aq_initial_quant_gradient(
+  device const float* coding_y [[buffer(0)]],
+  device float* pixel_mask [[buffer(1)]],
+  device float* pre_erosion [[buffer(2)]],
+  device atomic_uint* error [[buffer(3)]],
+  constant AqInitialQuantGradientParams& params [[buffer(4)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.pre_erosion_width ||
+      position.y >= params.height / 4u) return;
+  constexpr float kMatchGammaOffset = 0.019f;
+  constexpr float kDifferenceLimit = 0.2f;
+  float row_differences[4] = {};
+  const uint x_begin = position.x * 4u;
+  const uint y_begin = position.y * 4u;
+  for (uint row_index = 0u; row_index < 4u; ++row_index) {
+    const uint y = y_begin + row_index;
+    const uint top = y == 0u ? y : y - 1u;
+    const uint bottom = min(y + 1u, params.height - 1u);
+    for (uint column = 0u; column < 4u; ++column) {
+      const uint x = x_begin + column;
+      const uint left = x == 0u ? x : x - 1u;
+      const uint right = min(x + 1u, params.width - 1u);
+      const float center = coding_y[y * params.coding_stride + x];
+      const float base = 0.25f * (
+        coding_y[bottom * params.coding_stride + x] +
+        coding_y[top * params.coding_stride + x] +
+        coding_y[y * params.coding_stride + left] +
+        coding_y[y * params.coding_stride + right]);
+      const float gamma =
+        aq_initial_quant_gamma_ratio<false>(center + kMatchGammaOffset);
+      const float delta = gamma * (center - base);
+      const float mask =
+        1.0f / (aq_initial_quant_log1p(abs(delta)) + 0.01f);
+      pixel_mask[y * params.pixel_mask_stride + x] = mask;
+      float block_difference = min(delta * delta, kDifferenceLimit);
+      block_difference = aq_initial_quant_masking_sqrt(block_difference);
+      row_differences[column] += block_difference;
+      if (!isfinite(mask) || mask <= 0.0f ||
+          !isfinite(block_difference)) {
+        atomic_fetch_or_explicit(error, 2048u, memory_order_relaxed);
+      }
+    }
+  }
+  const float value = (((row_differences[0] + row_differences[1]) +
+                        row_differences[2]) + row_differences[3]) * 0.25f;
+  pre_erosion[position.y * params.pre_erosion_stride + position.x] = value;
+  if (!isfinite(value) || value <= 0.0f) {
+    atomic_fetch_or_explicit(error, 2048u, memory_order_relaxed);
+  }
+}
+
+static void aq_initial_quant_store_min4(
+  float value,
+  thread float& min0,
+  thread float& min1,
+  thread float& min2,
+  thread float& min3) {
+
+  if (value >= min3) return;
+  if (value < min0) {
+    min3 = min2;
+    min2 = min1;
+    min1 = min0;
+    min0 = value;
+  } else if (value < min1) {
+    min3 = min2;
+    min2 = min1;
+    min1 = value;
+  } else if (value < min2) {
+    min3 = min2;
+    min2 = value;
+  } else {
+    min3 = value;
+  }
+}
+
+static void aq_initial_quant_sort4(thread float values[4]) {
+  if (values[0] > values[1]) {
+    const float value = values[0];
+    values[0] = values[1];
+    values[1] = value;
+  }
+  if (values[0] > values[2]) {
+    const float value = values[0];
+    values[0] = values[2];
+    values[2] = value;
+  }
+  if (values[0] > values[3]) {
+    const float value = values[0];
+    values[0] = values[3];
+    values[3] = value;
+  }
+  if (values[1] > values[2]) {
+    const float value = values[1];
+    values[1] = values[2];
+    values[2] = value;
+  }
+  if (values[1] > values[3]) {
+    const float value = values[1];
+    values[1] = values[3];
+    values[3] = value;
+  }
+  if (values[2] > values[3]) {
+    const float value = values[2];
+    values[2] = values[3];
+    values[3] = value;
+  }
+}
+
+static float aq_initial_quant_eroded_value(
+  device const float* source,
+  uint x,
+  uint y,
+  constant AqInitialQuantErosionParams& params) {
+
+  const uint top = y == 0u ? y : y - 1u;
+  const uint bottom = min(y + 1u, params.pre_erosion_height - 1u);
+  const uint left = x == 0u ? x : x - 1u;
+  const uint right = min(x + 1u, params.pre_erosion_width - 1u);
+  const auto at = [&](uint sample_x, uint sample_y) {
+    return source[sample_y * params.pre_erosion_stride + sample_x];
+  };
+  float minima[4] = {at(x, y), at(left, y), at(right, y), at(left, top)};
+  aq_initial_quant_sort4(minima);
+  aq_initial_quant_store_min4(
+    at(x, top), minima[0], minima[1], minima[2], minima[3]);
+  aq_initial_quant_store_min4(
+    at(right, top), minima[0], minima[1], minima[2], minima[3]);
+  aq_initial_quant_store_min4(
+    at(left, bottom), minima[0], minima[1], minima[2], minima[3]);
+  aq_initial_quant_store_min4(
+    at(x, bottom), minima[0], minima[1], minima[2], minima[3]);
+  aq_initial_quant_store_min4(
+    at(right, bottom), minima[0], minima[1], minima[2], minima[3]);
+  return ((params.weights[0] * minima[0] +
+           params.weights[1] * minima[1]) +
+          params.weights[2] * minima[2]) +
+         params.weights[3] * minima[3];
+}
+
+kernel void gjxl_aq_initial_quant_fuzzy_erosion(
+  device const float* pre_erosion [[buffer(0)]],
+  device float* quant_field [[buffer(1)]],
+  device float* strategy_mask [[buffer(2)]],
+  device atomic_uint* error [[buffer(3)]],
+  constant AqInitialQuantErosionParams& params [[buffer(4)]],
+  uint2 block [[thread_position_in_grid]]) {
+
+  if (block.x >= params.block_width || block.y >= params.block_height) return;
+  const uint source_x = block.x * 2u;
+  const uint source_y = block.y * 2u;
+  float value = aq_initial_quant_eroded_value(
+    pre_erosion, source_x, source_y, params);
+  value += aq_initial_quant_eroded_value(
+    pre_erosion, source_x + 1u, source_y, params);
+  value += aq_initial_quant_eroded_value(
+    pre_erosion, source_x, source_y + 1u, params);
+  value += aq_initial_quant_eroded_value(
+    pre_erosion, source_x + 1u, source_y + 1u, params);
+  const uint quant_index = block.y * params.quant_stride + block.x;
+  const float strategy = 1.0f / (value + 0.001f);
+  quant_field[quant_index] = value;
+  strategy_mask[block.y * params.strategy_mask_stride + block.x] = strategy;
+  if (!isfinite(value) || value <= 0.0f ||
+      !isfinite(strategy) || strategy <= 0.0f) {
+    atomic_fetch_or_explicit(error, 4096u, memory_order_relaxed);
+  }
+}
+
+static float aq_initial_quant_compute_mask(float value) {
+  constexpr float kBase = -0.7647f;
+  constexpr float kMul4 = 9.4708735624378946f;
+  constexpr float kMul2 = 17.35036561631863f;
+  constexpr float kOffset2 = 302.59587815579727f;
+  constexpr float kMul3 = 6.7943250517376494f;
+  constexpr float kOffset3 = 3.7179635626140772f;
+  constexpr float kOffset4 = 0.25f * kOffset3;
+  constexpr float kMul0 = 0.80061762862741759f;
+  const float v1 = max(value * kMul0, 1.0e-3f);
+  const float v2 = 1.0f / (v1 + kOffset2);
+  const float v3 = 1.0f / fma(v1, v1, kOffset3);
+  const float v4 = 1.0f / fma(v1, v1, kOffset4);
+  return kBase + fma(kMul4, v4, fma(kMul2, v2, kMul3 * v3));
+}
+
+static float aq_initial_quant_fast_log2(float value) {
+  constexpr float kP0 = -1.8503833400518310e-06f;
+  constexpr float kP1 = 1.4287160470083755f;
+  constexpr float kP2 = 0.74245873327820566f;
+  constexpr float kQ0 = 0.99032814277590719f;
+  constexpr float kQ1 = 1.0096718572241148f;
+  constexpr float kQ2 = 0.17409343003366853f;
+  const uint value_bits = as_type<uint>(value);
+  const int shifted_exponent = int(value_bits - 0x3f2aaaabu) >> 23;
+  const uint mantissa_bits =
+    value_bits - (uint(shifted_exponent) << 23);
+  const float x = as_type<float>(mantissa_bits) - 1.0f;
+  float numerator = fma(kP2, x, kP1);
+  numerator = fma(numerator, x, kP0);
+  float denominator = fma(kQ2, x, kQ1);
+  denominator = fma(denominator, x, kQ0);
+  return numerator / denominator + float(shifted_exponent);
+}
+
+static float aq_initial_quant_fast_pow2(float value) {
+  const float floor_value = floor(value);
+  const int exponent = int(floor_value) + 127;
+  const float exponent_value = as_type<float>(uint(exponent) << 23);
+  const float fraction = value - floor_value;
+  float numerator = fraction + 1.01749063e+01f;
+  numerator = fma(numerator, fraction, 4.88687798e+01f);
+  numerator = fma(numerator, fraction, 9.85506591e+01f);
+  numerator *= exponent_value;
+  float denominator = fma(fraction, 2.10242958e-01f, -2.22328856e-02f);
+  denominator = fma(denominator, fraction, -1.94414990e+01f);
+  denominator = fma(denominator, fraction, 9.85506633e+01f);
+  return numerator / denominator;
+}
+
+kernel void gjxl_aq_initial_quant_modulation(
+  device const float* coding_x [[buffer(0)]],
+  device const float* coding_y [[buffer(1)]],
+  device const float* coding_b [[buffer(2)]],
+  device float* quant_field [[buffer(3)]],
+  device atomic_uint* error [[buffer(4)]],
+  constant AqInitialQuantModulationParams& params [[buffer(5)]],
+  uint2 block [[thread_position_in_grid]]) {
+
+  if (block.x >= params.block_width || block.y >= params.block_height) return;
+  constexpr float kGammaBias = 0.16f;
+  constexpr float kFrequencyLimit = 0.0206f;
+  constexpr float kBlueLimit = 0.010474084867598155f;
+  constexpr float kBlueOffset = 0.0031994768654636393f;
+  float gamma_lanes[4] = {};
+  float frequency_lanes[4] = {};
+  float blue_lanes[4] = {};
+  const uint pixel_x = block.x * 8u;
+  const uint pixel_y = block.y * 8u;
+  for (uint dy = 0u; dy < 8u; ++dy) {
+    const uint row = (pixel_y + dy) * params.coding_stride + pixel_x;
+    const uint next_row = dy + 1u < 8u ? row + params.coding_stride : row;
+    for (uint dx = 0u; dx < 8u; ++dx) {
+      const uint lane = dx & 3u;
+      const float value_x = coding_x[row + dx];
+      const float value_y = coding_y[row + dx];
+      const float value_b = coding_b[row + dx];
+      const float in_y = value_y + kGammaBias;
+      gamma_lanes[lane] +=
+        aq_initial_quant_gamma_ratio<true>(in_y - value_x);
+      gamma_lanes[lane] +=
+        aq_initial_quant_gamma_ratio<true>(in_y + value_x);
+      if (dx + 1u < 8u) {
+        frequency_lanes[lane] += min(
+          kFrequencyLimit, abs(value_y - coding_y[row + dx + 1u]));
+      }
+      frequency_lanes[lane] += min(
+        kFrequencyLimit, abs(value_y - coding_y[next_row + dx]));
+      const float effective_y = value_y + kBlueOffset + abs(value_x);
+      if (value_b > effective_y) {
+        blue_lanes[lane] += min(value_b - effective_y, kBlueLimit);
+      }
+    }
+  }
+  const float gamma_overall =
+    ((gamma_lanes[0] + gamma_lanes[1]) +
+     (gamma_lanes[2] + gamma_lanes[3])) * (0.5f / 64.0f);
+  const uint quant_index = block.y * params.quant_stride + block.x;
+  const float mask = aq_initial_quant_compute_mask(quant_field[quant_index]);
+  constexpr float kGamma = 0.1005613337192697f;
+  const float gamma_value = fma(
+    kGamma, aq_initial_quant_fast_log2(gamma_overall), mask);
+  const float frequency_sum =
+    (frequency_lanes[0] + frequency_lanes[1]) +
+    (frequency_lanes[2] + frequency_lanes[3]);
+  const float frequency_value =
+    gamma_value + (frequency_sum * -0.38f + 0.42f);
+  float blue_sum =
+    (blue_lanes[0] + blue_lanes[1]) +
+    (blue_lanes[2] + blue_lanes[3]);
+  if (blue_sum >= 32.0f * kBlueLimit) {
+    blue_sum = 64.0f * kBlueLimit - blue_sum;
+  }
+  blue_sum = min(blue_sum, 15.463398341612438f * kBlueLimit);
+  const float blue_value = gamma_value + blue_sum * 0.90590804735610064f;
+  const float exponent = min(frequency_value, blue_value);
+  const float result = aq_initial_quant_fast_pow2(exponent * 1.442695041f) *
+    params.multiplier + params.addend;
+  quant_field[quant_index] = result;
+  if (!isfinite(gamma_overall) || gamma_overall <= 0.0f ||
+      !isfinite(result) || result <= 0.0f) {
+    atomic_fetch_or_explicit(error, 8192u, memory_order_relaxed);
+  }
 }
 
 kernel void gjxl_aq_reset_exact_coefficients(

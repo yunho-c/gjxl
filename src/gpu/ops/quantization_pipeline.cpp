@@ -161,24 +161,8 @@ Status RunGpuFrameOnlyQuantizationPipeline(
       options.adaptive_quantization.profile.loop_filter.gaborish
         ? options.butteraugli_target
         : 0.62f * options.butteraugli_target;
-    Status status = ComputeInitialQuantField(
-      opsin,
-      {
-        .butteraugli_target = initial_quant_target,
-        .rescale = options.initial_quant_rescale,
-      },
-      {
-        .quant_field = {
-          initial_quant.data(), block_extent, block_extent.width},
-        .strategy_mask = {
-          strategy_mask.data(), block_extent, block_extent.width},
-        .pixel_mask = {
-          pixel_mask.data(), opsin.extent(), opsin.width()},
-      });
-    if (!status.ok()) return status;
-
     AcStrategyGrid strategies;
-    status = AcStrategyGrid::Create(block_extent, &strategies);
+    Status status = AcStrategyGrid::Create(block_extent, &strategies);
     if (!status.ok()) return status;
     strategies.fill_dct8();
     std::vector<uint8_t> sharpness(block_count);
@@ -190,10 +174,22 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
     adaptive_options.butteraugli_target = options.butteraugli_target;
-    status = RunGpuFrameOnlyQuantizationResidentInitialCfl(
+    status = RunGpuFrameOnlyQuantizationResidentFrontend(
       gpu, original_linear_rgb, opsin, strategies,
-      {initial_quant.data(), block_extent, block_extent.width},
-      {sharpness.data(), block_extent, block_extent.width}, adaptive_options,
+      {sharpness.data(), block_extent, block_extent.width},
+      {
+        .butteraugli_target = initial_quant_target,
+        .rescale = options.initial_quant_rescale,
+      },
+      adaptive_options,
+      {
+        .quant_field = {
+          initial_quant.data(), block_extent, block_extent.width},
+        .strategy_mask = {
+          strategy_mask.data(), block_extent, block_extent.width},
+        .pixel_mask = {
+          pixel_mask.data(), opsin.extent(), opsin.width()},
+      },
       {
         .quant_field = {
           final_quant.data(), block_extent, block_extent.width},

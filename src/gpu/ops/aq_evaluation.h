@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <memory>
 
+#include "codec/adaptive_quantization.h"
 #include "codec/butteraugli.h"
 #include "codec/codestream.h"
 #include "codec/maximum_error.h"
@@ -46,6 +47,9 @@ struct AqEvaluationPreparation {
   /// resident coding image. This is valid only for frame-only encoding and
   /// allows the input color-map views to be omitted.
   bool frame_only_resident_initial_cfl = false;
+  /// Enables initial quant-field and masking-map generation from the resident
+  /// coding image. Valid only for frame-only preparation.
+  bool frame_only_resident_initial_quant = false;
   /// Selects whether resident coefficient coding preserves the input raw
   /// quant or applies the encoder's shared AdjustQuantBlockAC decision.
   AcCoefficientDecisionMode coefficient_decision_mode =
@@ -120,6 +124,17 @@ public:
     (void)frame;
     return Status::Unavailable(
       "Prepared AQ frame-only encoding is unavailable");
+  }
+
+  /// Computes initial quantization from the prepared coding image. Backends
+  /// may expose this only for an explicitly enabled frame-only preparation.
+  [[nodiscard]] virtual Status ComputeInitialQuantization(
+    InitialQuantizationOptions options,
+    InitialQuantFieldOutput output) {
+    (void)options;
+    (void)output;
+    return Status::Unavailable(
+      "Prepared resident initial quantization is unavailable");
   }
 
   [[nodiscard]] virtual AqEvaluationMemoryStats memory_stats() const noexcept = 0;

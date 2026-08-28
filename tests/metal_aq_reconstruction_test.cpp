@@ -1097,6 +1097,134 @@ bool CheckResidentInitialCfl(const HostImage& image,
   return true;
 }
 
+double MaximumError(std::span<const float> left,
+                    std::span<const float> right) {
+  if (left.size() != right.size()) {
+    return std::numeric_limits<double>::infinity();
+  }
+  double error = 0.0;
+  for (size_t index = 0; index < left.size(); ++index) {
+    error = std::max(
+        error, std::abs(static_cast<double>(left[index]) - right[index]));
+  }
+  return error;
+}
+
+bool CheckResidentInitialQuantization(const HostImage& image) {
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  gjxl::AcStrategyGrid strategies;
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "resident initial-quant backend") ||
+      !MakeUniformStrategies(gjxl::AcStrategyType::kDct8, &strategies)) {
+    return false;
+  }
+  const std::vector<uint8_t> sharpness(
+      kBlockExtent.width * kBlockExtent.height, 4);
+  const gjxl::AqEvaluationPreparation preparation{
+      .original_linear_rgb = image.View(),
+      .coding_opsin = image.View(),
+      .strategies = &strategies,
+      .epf_sharpness = {
+          sharpness.data(), kBlockExtent, kBlockExtent.width},
+      .options = Options(),
+      .frame_only = true,
+      .frame_only_resident_initial_quant = true,
+  };
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(*gpu, preparation, &prepared),
+                   "resident initial-quant preparation")) {
+    return false;
+  }
+
+  const size_t block_count = kBlockExtent.width * kBlockExtent.height;
+  const size_t pixel_count = kPixelExtent.width * kPixelExtent.height;
+  for (const gjxl::InitialQuantizationOptions options :
+       {gjxl::InitialQuantizationOptions{1.0f, 1.0f},
+        gjxl::InitialQuantizationOptions{2.4f, 0.87f}}) {
+    std::vector<float> expected_quant(block_count);
+    std::vector<float> expected_strategy(block_count);
+    std::vector<float> expected_pixel(pixel_count);
+    std::vector<float> actual_quant(block_count, -1.0f);
+    std::vector<float> actual_strategy(block_count, -1.0f);
+    std::vector<float> actual_pixel(pixel_count, -1.0f);
+    if (!CheckStatus(
+            gjxl::ComputeInitialQuantField(
+                image.View(), options,
+                {
+                    .quant_field = {expected_quant.data(), kBlockExtent,
+                                    kBlockExtent.width},
+                    .strategy_mask = {expected_strategy.data(), kBlockExtent,
+                                      kBlockExtent.width},
+                    .pixel_mask = {expected_pixel.data(), kPixelExtent,
+                                   kPixelExtent.width},
+                }),
+            "resident initial-quant CPU oracle")) {
+      return false;
+    }
+    const gjxl::GpuBackendStats before = gpu->stats();
+    if (!CheckStatus(
+            prepared->ComputeInitialQuantization(
+                options,
+                {
+                    .quant_field = {actual_quant.data(), kBlockExtent,
+                                    kBlockExtent.width},
+                    .strategy_mask = {actual_strategy.data(), kBlockExtent,
+                                      kBlockExtent.width},
+                    .pixel_mask = {actual_pixel.data(), kPixelExtent,
+                                   kPixelExtent.width},
+                }),
+            "resident initial-quant Metal execution")) {
+      return false;
+    }
+    const gjxl::GpuBackendStats after = gpu->stats();
+    const double quant_error = MaximumError(expected_quant, actual_quant);
+    const double strategy_error =
+        MaximumError(expected_strategy, actual_strategy);
+    const double pixel_error = MaximumError(expected_pixel, actual_pixel);
+    if (after.successful_allocations != before.successful_allocations ||
+        after.committed_submissions != before.committed_submissions + 1 ||
+        quant_error > 2.0e-6 || strategy_error > 2.0e-6 ||
+        pixel_error > 2.0e-5) {
+      std::cerr << "Resident initial quantization differs: quant="
+                << quant_error << " strategy=" << strategy_error
+                << " pixel=" << pixel_error << '\n';
+      return false;
+    }
+  }
+  std::vector<float> failed_quant(block_count, -7.0f);
+  std::vector<float> failed_strategy(block_count, -8.0f);
+  std::vector<float> failed_pixel(pixel_count, -9.0f);
+  const auto failure_output = gjxl::InitialQuantFieldOutput{
+      .quant_field = {failed_quant.data(), kBlockExtent, kBlockExtent.width},
+      .strategy_mask = {
+          failed_strategy.data(), kBlockExtent, kBlockExtent.width},
+      .pixel_mask = {failed_pixel.data(), kPixelExtent, kPixelExtent.width},
+  };
+  const gjxl::GpuBackendStats before_failure = gpu->stats();
+  if (!CheckStatus(
+          gjxl::metal_internal::FailNextMetalAqNumericForTesting(*prepared),
+          "resident initial-quant numeric failure injection") ||
+      !ExpectCode(prepared->ComputeInitialQuantization({}, failure_output),
+                  gjxl::StatusCode::kDeviceError,
+                  "resident initial-quant numeric failure") ||
+      !std::ranges::all_of(failed_quant,
+                           [](float value) { return value == -7.0f; }) ||
+      !std::ranges::all_of(failed_strategy,
+                           [](float value) { return value == -8.0f; }) ||
+      !std::ranges::all_of(failed_pixel,
+                           [](float value) { return value == -9.0f; }) ||
+      gpu->stats().successful_allocations !=
+          before_failure.successful_allocations ||
+      gpu->stats().committed_submissions !=
+          before_failure.committed_submissions + 1 ||
+      !ExpectCode(prepared->ComputeInitialQuantization({}, failure_output),
+                  gjxl::StatusCode::kFailedPrecondition,
+                  "resident initial-quant reuse after numeric failure")) {
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 int main() {
@@ -1135,6 +1263,8 @@ int main() {
       !CheckReconstructionValidationAndReadback(structured, strategies) ||
       !CheckResidentInitialCfl(structured, strategies) ||
       !CheckResidentInitialCfl(flat, strategies) ||
+      !CheckResidentInitialQuantization(structured) ||
+      !CheckResidentInitialQuantization(flat) ||
       !CheckConcurrentReconstruction(structured, strategies)) {
     return EXIT_FAILURE;
   }

@@ -69,6 +69,36 @@ struct AqInitialCflParams {
   uint32_t color_stride;
 };
 
+struct AqInitialQuantGradientParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t coding_stride;
+  uint32_t pixel_mask_stride;
+  uint32_t pre_erosion_width;
+  uint32_t pre_erosion_stride;
+  uint32_t test_error_mask;
+};
+
+struct AqInitialQuantErosionParams {
+  uint32_t pre_erosion_width;
+  uint32_t pre_erosion_height;
+  uint32_t pre_erosion_stride;
+  uint32_t block_width;
+  uint32_t block_height;
+  uint32_t quant_stride;
+  uint32_t strategy_mask_stride;
+  std::array<float, 4> weights;
+};
+
+struct AqInitialQuantModulationParams {
+  uint32_t coding_stride;
+  uint32_t block_width;
+  uint32_t block_height;
+  uint32_t quant_stride;
+  float multiplier;
+  float addend;
+};
+
 struct AqBlockReductionParams {
   uint32_t source_width;
   uint32_t source_height;
@@ -176,6 +206,9 @@ public:
                      ConstPlaneU8View epf_sharpness) override;
   Status EncodeFrame(AqEvaluationInput input,
                      VarDctEncoderFrame *frame) override;
+  Status ComputeInitialQuantization(
+      InitialQuantizationOptions options,
+      InitialQuantFieldOutput output) override;
   Status EvaluateProfiled(AqEvaluationInput input, AqEvaluationOutput output,
                           MetalAqEvaluationProfile* profile);
   AqEvaluationMemoryStats memory_stats() const noexcept override;
@@ -246,6 +279,9 @@ private:
   static void EncodeFrameSubmission(MetalBackend &backend,
                                     MTL::ComputeCommandEncoder *encoder,
                                     const void *context);
+  static void EncodeInitialQuantizationSubmission(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      const void* context);
   static void
   EncodeQuantizationProbeSubmission(MetalBackend &backend,
                                     MTL::ComputeCommandEncoder *encoder,
@@ -286,6 +322,11 @@ private:
   DevicePlaneView inverse_sigma_;
   DevicePlaneView y_to_x_;
   DevicePlaneView y_to_b_;
+  DevicePlaneView initial_quant_pre_erosion_;
+  DevicePlaneView initial_quant_unblurred_pixel_mask_;
+  DevicePlaneView initial_quant_field_;
+  DevicePlaneView initial_quant_strategy_mask_;
+  DevicePlaneView initial_quant_pixel_mask_;
   DevicePlaneView block_distance_;
   DevicePlaneView distance_map_;
   DevicePlaneView score_;
@@ -317,10 +358,16 @@ private:
   std::vector<int32_t> last_raw_quant_;
   std::vector<int8_t> last_y_to_x_;
   std::vector<int8_t> last_y_to_b_;
+  std::vector<float> last_initial_quant_field_;
+  std::vector<float> last_initial_strategy_mask_;
+  std::vector<float> last_initial_pixel_mask_;
   Quantizer last_quantizer_;
   AqEvaluationMemoryStats memory_stats_;
   AqResetParams reset_params_{};
   AqInitialCflParams initial_cfl_params_{};
+  AqInitialQuantGradientParams initial_quant_gradient_params_{};
+  AqInitialQuantErosionParams initial_quant_erosion_params_{};
+  AqInitialQuantModulationParams initial_quant_modulation_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};
   std::array<AqMaximumErrorReductionParams, 7>
     maximum_error_reduction_params_{};
@@ -366,6 +413,7 @@ private:
   bool frame_only_ = false;
   bool frame_only_inverse_gaborish_ = false;
   bool frame_only_resident_initial_cfl_ = false;
+  bool frame_only_resident_initial_quant_ = false;
 };
 
 } // namespace gjxl::metal_internal

@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "codec/color_transform.h"
+#include "codec/chroma_from_luma_internal.h"
+#include "codec/epf.h"
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
@@ -24,6 +26,7 @@
 #include "codestream/workflow.h"
 #include "codestream/workflow_internal.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/gaborish.h"
 #include "gpu/ops/quantization_pipeline.h"
 
@@ -454,6 +457,121 @@ bool CheckGpuPipelineParity() {
             << " block=" << block_error << " score=" << score_error
             << " image=" << image_error
             << "; frame and codestream exact\n";
+  return true;
+}
+
+bool CheckMaximumThroughputFrontendParity() {
+  ImageStorage original(kOriginalExtent);
+  ImageStorage padded_linear(kPaddedExtent);
+  ImageStorage opsin(kPaddedExtent);
+  FillImages(&original, &padded_linear);
+  if (!gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, opsin.View()).ok()) {
+    return false;
+  }
+  const gjxl::Extent2D blocks{
+      kPaddedExtent.width / gjxl::kJxlBlockDimension,
+      kPaddedExtent.height / gjxl::kJxlBlockDimension};
+  const size_t block_count = blocks.width * blocks.height;
+  const size_t pixel_count = kPaddedExtent.width * kPaddedExtent.height;
+  gjxl::CpuQuantizationPipelineOptions pipeline_options;
+  pipeline_options.butteraugli_target = 1.2f;
+  const float initial_target =
+      pipeline_options.adaptive_quantization.profile.loop_filter.gaborish
+          ? pipeline_options.butteraugli_target
+          : 0.62f * pipeline_options.butteraugli_target;
+  const gjxl::InitialQuantizationOptions initial_options{
+      .butteraugli_target = initial_target,
+      .rescale = pipeline_options.initial_quant_rescale,
+  };
+  std::vector<float> expected_quant(block_count);
+  std::vector<float> expected_strategy(block_count);
+  std::vector<float> expected_pixel(pixel_count);
+  if (!gjxl::ComputeInitialQuantField(
+           opsin.ConstView(), initial_options,
+           {
+             .quant_field = {
+               expected_quant.data(), blocks, blocks.width},
+             .strategy_mask = {
+               expected_strategy.data(), blocks, blocks.width},
+             .pixel_mask = {
+               expected_pixel.data(), kPaddedExtent, kPaddedExtent.width},
+           }).ok()) {
+    return false;
+  }
+  gjxl::ColorCorrelationMap color;
+  gjxl::AcStrategyGrid strategies;
+  std::vector<uint8_t> sharpness(block_count);
+  if (!gjxl::chroma_from_luma_internal::ComputeInitialColorCorrelationMapFast(
+        opsin.ConstView(), &color).ok() ||
+      !gjxl::AcStrategyGrid::Create(blocks, &strategies).ok() ||
+      !gjxl::FillDefaultEpfSharpness(
+        {sharpness.data(), blocks, blocks.width}).ok()) {
+    return false;
+  }
+  strategies.fill_dct8();
+  gjxl::AdaptiveQuantizationOptions adaptive_options =
+      pipeline_options.adaptive_quantization;
+  adaptive_options.butteraugli_target =
+      pipeline_options.butteraugli_target;
+
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+    return false;
+  }
+  std::vector<float> expected_final(block_count);
+  gjxl::VarDctEncoderFrame expected_frame;
+  if (!gjxl::RunGpuFrameOnlyQuantization(
+        *gpu, original.ConstView(), opsin.ConstView(), strategies,
+        {expected_quant.data(), blocks, blocks.width},
+        {sharpness.data(), blocks, blocks.width}, color, adaptive_options,
+        {
+          .quant_field = {expected_final.data(), blocks, blocks.width},
+          .frame = &expected_frame,
+        }).ok()) {
+    return false;
+  }
+
+  std::vector<float> actual_quant(block_count);
+  std::vector<float> actual_strategy(block_count);
+  std::vector<float> actual_pixel(pixel_count);
+  std::vector<float> actual_final(block_count);
+  gjxl::VarDctEncoderFrame actual_frame;
+  if (!gjxl::RunGpuFrameOnlyQuantizationResidentFrontend(
+        *gpu, original.ConstView(), opsin.ConstView(), strategies,
+        {sharpness.data(), blocks, blocks.width}, initial_options,
+        adaptive_options,
+        {
+          .quant_field = {actual_quant.data(), blocks, blocks.width},
+          .strategy_mask = {actual_strategy.data(), blocks, blocks.width},
+          .pixel_mask = {
+            actual_pixel.data(), kPaddedExtent, kPaddedExtent.width},
+        },
+        {
+          .quant_field = {actual_final.data(), blocks, blocks.width},
+          .frame = &actual_frame,
+        }).ok()) {
+    return false;
+  }
+  std::vector<uint8_t> expected_bytes;
+  std::vector<uint8_t> actual_bytes;
+  const double quant_error = MaximumError(expected_quant, actual_quant);
+  const double strategy_error =
+      MaximumError(expected_strategy, actual_strategy);
+  const double pixel_error = MaximumError(expected_pixel, actual_pixel);
+  const double final_error = MaximumError(expected_final, actual_final);
+  if (quant_error > 2.0e-6 || strategy_error > 2.0e-6 ||
+      pixel_error > 2.0e-5 || final_error > 2.0e-6 ||
+      !FramesEqual(expected_frame, actual_frame) ||
+      !gjxl::EncodeVarDctCodestream(expected_frame, &expected_bytes).ok() ||
+      !gjxl::EncodeVarDctCodestream(actual_frame, &actual_bytes).ok() ||
+      expected_bytes != actual_bytes) {
+    std::cerr << "Resident maximum-throughput frontend differs: quant="
+              << quant_error << " strategy=" << strategy_error
+              << " pixel=" << pixel_error << " final=" << final_error
+              << '\n';
+    return false;
+  }
   return true;
 }
 
@@ -1262,6 +1380,7 @@ bool CheckWorkflowBackendSelection() {
 
 int main() {
   if (!CheckGpuGaborish() || !CheckGpuPipelineParity() ||
+      !CheckMaximumThroughputFrontendParity() ||
       !CheckDefaultUpdatePipelineParity() ||
       !CheckPreparedGpuAttemptReuse() ||
       !CheckWorkflowBackendSelection()) {
