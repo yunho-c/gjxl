@@ -575,6 +575,58 @@ in one, so the retained claim stays at the repeated consumer boundary.
 Numerical tolerances, response capture, memory accounting, and public APIs are
 unchanged.
 
+#### Large-image resident-kernel checkpoint (2026-08-28)
+
+The cumulative resident-kernel comparison uses `960ebcc` as the pre-change
+baseline and `46d0b0d` as the optimized path. The measured changes are the
+redundant Malta-clear removal, cached full-resolution reference mask, and
+fused Malta response accumulation described above; the AC quant-norm benchmark
+commit changes no production shader. Both detached builds include only the
+same `metal-public-workflow` benchmark scope, which performs one CPU/Metal
+codestream validation pair and then measures repeated complete Metal public
+encodes without interleaving a long CPU encode between GPU samples.
+
+Three independent Apple M4 Pro Release process pairs were run at both required
+large-image sizes. Every process used two warmups; the first pair used eleven
+samples per build and the other two used seven. Build order was reversed
+between pairs. The fully-resident output remained deterministic at `620711`
+bytes for padded 1080p and `2472782` bytes for padded 4K.
+
+| Workload | Baseline total medians | Optimized total medians | Per-pair total reduction | Baseline Metal-pipeline medians | Optimized Metal-pipeline medians | Per-pair pipeline reduction |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `255.491-261.794 ms` | `252.409-257.179 ms` | `1.21-2.71%` | `207.921-214.073 ms` | `204.360-208.125 ms` | `1.65-3.68%` |
+| Padded 4K | `972.082-998.564 ms` | `956.953-972.133 ms` | `1.20-3.50%` | `821.673-846.639 ms` | `809.325-820.309 ms` | `1.50-3.11%` |
+
+The focused codestream, Butteraugli operation, Butteraugli differential,
+resident AQ, policy, reconstruction, postprocess, and Metal quantization-
+pipeline gates pass `8/8`. The complete serial Release suite passes `55/56`;
+the sole failure is the unchanged pinned CPU `quantization_pipeline` score
+mismatch of `4.4524669647216797e-05` at index 1.
+
+The first 4K pair's process-wide peak RSS was `4.58-4.68 GB`; this includes
+the one-time CPU validation, libraries, allocator retention, all host output,
+and Metal allocations. The two observations are not used to claim a memory
+reduction. A separate alternating CPU/Metal 4K smoke pair measured about
+`26.2 s` for CPU and `1.23-1.29 s` for Metal, but repeated paired samples had
+wide thermal and unified-memory variance. The Metal-only public scope is
+therefore the retained kernel-regression signal; the alternating protocol
+remains the end-user speedup gate.
+
+Several broader source-level opportunities were rejected rather than retained
+without a measured large-boundary result. Production-only removal of three
+coefficient-sized scratch poisons and one DC scratch poison would avoid
+`75,038,400` reset bytes per padded-1080p reconstruction while preserving
+final-output poisons and full diagnostic poisoning. Its matched command-buffer
+median moved only from `20.672 ms` to `20.609 ms` with overlapping ranges, so
+the added mode and weaker production scratch-coverage signal were removed. An
+8x8 threadgroup-tiled EPF implementation passed the direct odd/partial/filter
+corpus and AQ-policy tests but measured `20.606 ms` at the same command-buffer
+boundary; a 16x8 variant was also neutral. Both were removed. Hoisting 5-tap
+Gaussian weight normalization into dispatch constants likewise failed to
+provide a stable matched-build win and was removed. These results keep the
+remaining optimization order tied to measured 1080p and 4K public encode time
+rather than memory-traffic estimates alone.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.
