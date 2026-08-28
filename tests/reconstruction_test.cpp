@@ -590,6 +590,48 @@ bool CheckMixedGridAndInvalidInputs() {
   return true;
 }
 
+bool CheckParallelPreparedCoefficients() {
+  constexpr gjxl::Extent2D kBlockExtent{32, 32};
+  constexpr gjxl::Extent2D kPixelExtent{256, 256};
+  ImageStorage input(kPixelExtent);
+  FillSignal(&input);
+
+  gjxl::AcStrategyGrid grid;
+  if (!gjxl::AcStrategyGrid::Create(kBlockExtent, &grid).ok()) {
+    return false;
+  }
+  grid.fill_empty_dct8();
+  std::vector<int32_t> raw_quant(
+    kBlockExtent.width * kBlockExtent.height, 29);
+  gjxl::Quantizer quantizer;
+  gjxl::ColorCorrelationMap color_correlation;
+  if (!gjxl::Quantizer::Create({3541, 10}, &quantizer).ok() ||
+      !gjxl::ComputeInitialColorCorrelationMap(
+        input.ConstView(), &color_correlation).ok()) {
+    return false;
+  }
+
+  gjxl::VarDctEncoderFrame direct_frame;
+  gjxl::VarDctEncoderFrame prepared_frame;
+  gjxl::prepared_coefficients_internal::PreparedForwardDctCoefficients
+    prepared;
+  const gjxl::ConstPlaneI32View raw_view{
+    raw_quant.data(), kBlockExtent, kBlockExtent.width};
+  if (!ComputeFrame(
+        input.ConstView(), grid, raw_view, quantizer, color_correlation, {},
+        &direct_frame).ok() ||
+      !gjxl::prepared_coefficients_internal::PrepareForwardDctCoefficients(
+        input.ConstView(), grid, &prepared).ok() ||
+      !ComputeFrame(
+        input.ConstView(), grid, raw_view, quantizer, color_correlation, {},
+        &prepared_frame, &prepared).ok() ||
+      !FramesEqual(direct_frame, prepared_frame)) {
+    std::cerr << "Parallel prepared coefficients changed the encoder frame\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -598,7 +640,8 @@ int main() {
       return EXIT_FAILURE;
     }
   }
-  if (!CheckFlatDcQuantization() || !CheckMixedGridAndInvalidInputs()) {
+  if (!CheckFlatDcQuantization() || !CheckMixedGridAndInvalidInputs() ||
+      !CheckParallelPreparedCoefficients()) {
     return EXIT_FAILURE;
   }
 

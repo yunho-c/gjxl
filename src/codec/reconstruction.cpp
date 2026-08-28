@@ -5,10 +5,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <new>
 #include <stdexcept>
+#include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -30,6 +33,70 @@ constexpr std::array<XybChannel, 3> kChannels = {
   XybChannel::kY,
   XybChannel::kB,
 };
+
+template <typename Function>
+Status RunParallelForwardTransforms(
+  size_t count,
+  size_t coefficient_count,
+  Function&& function) {
+
+  if (count == 0) return Status::Ok();
+  constexpr size_t kMinimumParallelCoefficients = 256 * 256;
+  constexpr size_t kMaximumWorkers = 8;
+  const size_t hardware_workers = std::max<size_t>(
+    std::thread::hardware_concurrency(), 1);
+  const size_t worker_count = coefficient_count < kMinimumParallelCoefficients
+    ? 1
+    : std::min(count, std::min(kMaximumWorkers, hardware_workers));
+  if (worker_count == 1) {
+    for (size_t index = 0; index < count; ++index) {
+      Status status = function(index);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
+
+  std::vector<Status> statuses(count);
+  std::atomic<size_t> next_index{0};
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  try {
+    for (size_t worker = 0; worker < worker_count; ++worker) {
+      workers.emplace_back([&] {
+        while (true) {
+          const size_t index =
+            next_index.fetch_add(1, std::memory_order_relaxed);
+          if (index >= count) break;
+          try {
+            statuses[index] = function(index);
+          } catch (const std::bad_alloc&) {
+            statuses[index] = Status::OutOfMemory(
+              "Unable to allocate forward-transform worker storage");
+          } catch (const std::length_error&) {
+            statuses[index] = Status::InvalidArgument(
+              "Forward-transform worker storage is too large");
+          } catch (...) {
+            statuses[index] = Status::Internal(
+              "Forward-transform worker failed unexpectedly");
+          }
+        }
+      });
+    }
+  } catch (const std::system_error&) {
+    next_index.store(count, std::memory_order_relaxed);
+    for (std::thread& worker : workers) worker.join();
+    for (size_t index = 0; index < count; ++index) {
+      Status status = function(index);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
+  for (std::thread& worker : workers) worker.join();
+  for (const Status& status : statuses) {
+    if (!status.ok()) return status;
+  }
+  return Status::Ok();
+}
 
 float MatrixMultiplier(
   size_t channel,
@@ -220,8 +287,6 @@ Status PrepareForwardDctCoefficients(
       channel.resize(pixel_count);
     }
     std::vector<std::vector<size_t>> tile_transforms(tile_count);
-    constexpr size_t kMaxCoefficientCount = 32 * 32;
-    std::array<float, kMaxCoefficientCount> pixels{};
     size_t coefficient_offset = 0;
     Status status = strategies.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
@@ -231,8 +296,7 @@ Status PrepareForwardDctCoefficients(
             "Forward-coefficient preparation does not support a strategy");
         }
         const size_t coefficient_count = info->coefficient_count();
-        if (coefficient_count > pixels.size() ||
-            coefficient_offset > pixel_count ||
+        if (coefficient_offset > pixel_count ||
             coefficient_count > pixel_count - coefficient_offset) {
           return Status::Internal(
             "Forward-coefficient preparation exceeded its storage");
@@ -258,25 +322,6 @@ Status PrepareForwardDctCoefficients(
           block_x, block_y, strategy, coefficient_offset, coefficient_count});
         tile_transforms[tile_y * tile_extent.width + tile_x].push_back(
           transform_index);
-        const std::span<float> pixel_span{
-          pixels.data(), coefficient_count};
-        for (size_t channel = 0; channel < 3; ++channel) {
-          CopyPixelsFromImage(
-            opsin.plane[channel], block_x, block_y, info->pixel_extent(),
-            pixel_span);
-          if (!std::ranges::all_of(
-                pixel_span, [](float value) { return std::isfinite(value); })) {
-            return Status::InvalidArgument(
-              "Forward-coefficient input must contain finite values");
-          }
-          Status transform_status = ForwardDctCpu(
-            strategy, pixel_span,
-            std::span<float>(candidate.coefficients[channel]).subspan(
-              coefficient_offset, coefficient_count));
-          if (!transform_status.ok()) {
-            return transform_status;
-          }
-        }
         coefficient_offset += coefficient_count;
         return Status::Ok();
       });
@@ -287,6 +332,41 @@ Status PrepareForwardDctCoefficients(
       return Status::Internal(
         "Prepared transforms do not cover the coefficient image");
     }
+
+    constexpr size_t kMaxCoefficientCount = 32 * 32;
+    status = RunParallelForwardTransforms(
+      candidate.transforms.size(), pixel_count,
+      [&](size_t transform_index) {
+        const PreparedTransform& transform =
+          candidate.transforms[transform_index];
+        const AcStrategyInfo* info = GetAcStrategyInfo(transform.strategy);
+        if (info == nullptr ||
+            info->coefficient_count() != transform.coefficient_count ||
+            transform.coefficient_count > kMaxCoefficientCount) {
+          return Status::Internal(
+            "Prepared forward-transform strategy disappeared");
+        }
+        std::array<float, kMaxCoefficientCount> pixels;
+        const std::span<float> pixel_span{
+          pixels.data(), transform.coefficient_count};
+        for (size_t channel = 0; channel < 3; ++channel) {
+          CopyPixelsFromImage(
+            opsin.plane[channel], transform.block_x, transform.block_y,
+            info->pixel_extent(), pixel_span);
+          if (!std::ranges::all_of(
+                pixel_span, [](float value) { return std::isfinite(value); })) {
+            return Status::InvalidArgument(
+              "Forward-coefficient input must contain finite values");
+          }
+          Status transform_status = ForwardDctCpu(
+            transform.strategy, pixel_span,
+            std::span<float>(candidate.coefficients[channel]).subspan(
+              transform.coefficient_offset, transform.coefficient_count));
+          if (!transform_status.ok()) return transform_status;
+        }
+        return Status::Ok();
+      });
+    if (!status.ok()) return status;
 
     candidate.color_tile_offsets.reserve(tile_count + 1);
     candidate.color_tile_offsets.push_back(0);

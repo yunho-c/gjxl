@@ -123,6 +123,19 @@ fully resident check fell from `785.9-801.5 ms` to `617.3-628.9 ms`, reaching
 a `10.28-10.49x` paired range. These are iteration results, not the independent-
 process P6 claim.
 
+The third retained P1 change enumerates and validates the strategy layout
+serially, then prepares independent forward transforms on up to eight host
+workers. Workloads below 256x256 coefficients stay serial, and inability to
+start the worker set falls back to the serial implementation. A 256x256
+contract test compares the prepared result with direct coefficient coding.
+One padded-1080p process with one warmup and three alternating samples measured
+the fully resident Metal workflow at `295.8-328.2 ms` (median `309.6 ms`) and
+paired speedup at `18.92-20.86x` (median `20.14x`), versus the preceding
+`372.1 ms` Metal median. The exact-coefficient workflow measured
+`601.8-623.8 ms` (median `607.6 ms`) and retained its `630517` byte codestream,
+reaching a `10.23x` paired median. These are single-process iteration results;
+the P6 independent-process gate remains open.
+
 ### P2. Provide a fast GPU coefficient decision path
 
 - Keep the current float fully resident implementation as the throughput
