@@ -5,10 +5,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <new>
 #include <stdexcept>
+#include <system_error>
+#include <thread>
+#include <vector>
 
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
@@ -32,6 +36,67 @@ constexpr std::array<std::array<float, 3>, 3> kInverseOpsinMatrix = {{
     1.9459282392156863f}},
 }};
 
+template <typename Function>
+Status RunParallelRows(
+  Extent2D extent,
+  Function&& function) {
+
+  constexpr size_t kMinimumParallelPixels = 256 * 256;
+  constexpr size_t kMaximumWorkers = 12;
+  size_t pixel_count = 0;
+  if (!extent.try_area(&pixel_count)) {
+    return Status::InvalidArgument(
+      "Color-transform image dimensions are too large");
+  }
+  const size_t hardware_workers = std::max<size_t>(
+    std::thread::hardware_concurrency(), 1);
+  const size_t worker_count = pixel_count < kMinimumParallelPixels
+    ? 1
+    : std::min(extent.height, std::min(kMaximumWorkers, hardware_workers));
+  if (worker_count == 1) {
+    for (size_t y = 0; y < extent.height; ++y) {
+      Status status = function(y);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
+
+  std::vector<Status> statuses(extent.height);
+  std::atomic<size_t> next_row{0};
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  try {
+    for (size_t worker = 0; worker < worker_count; ++worker) {
+      workers.emplace_back([&] {
+        while (true) {
+          const size_t y =
+            next_row.fetch_add(1, std::memory_order_relaxed);
+          if (y >= extent.height) break;
+          try {
+            statuses[y] = function(y);
+          } catch (...) {
+            statuses[y] = Status::Internal(
+              "Color-transform worker failed unexpectedly");
+          }
+        }
+      });
+    }
+  } catch (const std::system_error&) {
+    next_row.store(extent.height, std::memory_order_relaxed);
+    for (std::thread& worker : workers) worker.join();
+    for (size_t y = 0; y < extent.height; ++y) {
+      Status status = function(y);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
+  for (std::thread& worker : workers) worker.join();
+  for (const Status& status : statuses) {
+    if (!status.ok()) return status;
+  }
+  return Status::Ok();
+}
+
 template <typename Convert>
 Status ConvertImage(
   ConstImage3FView input,
@@ -51,7 +116,7 @@ Status ConvertImage(
   try {
     Image3FBuffer result(input.extent());
     const Image3FView result_view = result.view();
-    for (size_t y = 0; y < input.height(); ++y) {
+    Status status = RunParallelRows(input.extent(), [&](size_t y) {
       for (size_t x = 0; x < input.width(); ++x) {
         const std::array<float, 3> value = {
           input.plane[0].Row(y)[x],
@@ -77,7 +142,9 @@ Status ConvertImage(
           result_view.plane[channel].Row(y)[x] = converted[channel];
         }
       }
-    }
+      return Status::Ok();
+    });
+    if (!status.ok()) return status;
     CopyImage(result.const_view(), output);
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(

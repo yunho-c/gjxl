@@ -156,10 +156,90 @@ bool CheckValidationIsAtomic() {
   return true;
 }
 
+bool CheckParallelRoundTripAndAtomicity() {
+  constexpr gjxl::Extent2D extent{256, 256};
+  constexpr size_t stride = 259;
+  std::array<std::vector<float>, 3> input;
+  std::array<std::vector<float>, 3> opsin;
+  std::array<std::vector<float>, 3> reconstructed;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    input[channel].resize(stride * extent.height);
+    opsin[channel].assign(stride * extent.height, -91.0f);
+    reconstructed[channel].assign(stride * extent.height, -92.0f);
+  }
+  for (size_t y = 0; y < extent.height; ++y) {
+    for (size_t x = 0; x < extent.width; ++x) {
+      input[0][y * stride + x] =
+        static_cast<float>((3 * x + 5 * y) % 257) / 256.0f;
+      input[1][y * stride + x] =
+        static_cast<float>((7 * x + 2 * y) % 251) / 250.0f;
+      input[2][y * stride + x] =
+        static_cast<float>((11 * x + 13 * y) % 263) / 262.0f;
+    }
+  }
+  const gjxl::ConstImage3FView input_view{{
+    gjxl::ConstPlaneF32View{input[0].data(), extent, stride},
+    gjxl::ConstPlaneF32View{input[1].data(), extent, stride},
+    gjxl::ConstPlaneF32View{input[2].data(), extent, stride},
+  }};
+  const gjxl::Image3FView opsin_view{{
+    gjxl::PlaneF32View{opsin[0].data(), extent, stride},
+    gjxl::PlaneF32View{opsin[1].data(), extent, stride},
+    gjxl::PlaneF32View{opsin[2].data(), extent, stride},
+  }};
+  const gjxl::ConstImage3FView const_opsin_view{{
+    gjxl::ConstPlaneF32View{opsin[0].data(), extent, stride},
+    gjxl::ConstPlaneF32View{opsin[1].data(), extent, stride},
+    gjxl::ConstPlaneF32View{opsin[2].data(), extent, stride},
+  }};
+  const gjxl::Image3FView reconstructed_view{{
+    gjxl::PlaneF32View{reconstructed[0].data(), extent, stride},
+    gjxl::PlaneF32View{reconstructed[1].data(), extent, stride},
+    gjxl::PlaneF32View{reconstructed[2].data(), extent, stride},
+  }};
+  if (!gjxl::LinearRgbToOpsin(
+        input_view, 255.0f, opsin_view).ok() ||
+      !gjxl::OpsinToLinearRgb(
+        const_opsin_view, 255.0f, reconstructed_view).ok()) {
+    return false;
+  }
+  float maximum_error = 0.0f;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < extent.height; ++y) {
+      for (size_t x = 0; x < extent.width; ++x) {
+        maximum_error = std::max(
+          maximum_error,
+          std::abs(input[channel][y * stride + x] -
+                   reconstructed[channel][y * stride + x]));
+      }
+    }
+  }
+  if (maximum_error > 2.0e-5f) {
+    std::cerr << "Parallel color-transform round trip is inaccurate\n";
+    return false;
+  }
+
+  input[1][(extent.height - 1) * stride + extent.width - 1] =
+    std::numeric_limits<float>::quiet_NaN();
+  for (std::vector<float>& plane : opsin) {
+    std::fill(plane.begin(), plane.end(), 41.0f);
+  }
+  if (gjxl::LinearRgbToOpsin(input_view, 255.0f, opsin_view).ok() ||
+      !std::ranges::all_of(opsin, [](const std::vector<float>& plane) {
+        return std::ranges::all_of(
+          plane, [](float value) { return value == 41.0f; });
+      })) {
+    std::cerr << "Parallel invalid color transform was not atomic\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
-  if (!CheckRoundTripAndInvariants() || !CheckValidationIsAtomic()) {
+  if (!CheckRoundTripAndInvariants() || !CheckValidationIsAtomic() ||
+      !CheckParallelRoundTripAndAtomicity()) {
     return EXIT_FAILURE;
   }
   std::cout << "All color transform tests passed.\n";

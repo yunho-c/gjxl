@@ -204,6 +204,17 @@ Metal at `371.8-374.4 ms` (median `372.1 ms`) and paired speedup at
 same-process binary A/B, so this timing is directional; the deterministic
 memory reduction and unchanged output contracts are the retained claims.
 
+The third retained P3 slice parallelizes the independent RGB-to-opsin rows on
+up to twelve host workers while preserving each pixel's operation order and
+the existing scratch-image atomic commit. Images below 256x256 stay serial and
+worker-start failure falls back to a complete serial conversion. On the padded
+1080p public workflow, input preparation fell from the preceding `27.7 ms`
+median to `9.2-11.8 ms` (median `10.6 ms`). One process with one warmup and five
+alternating samples measured Metal at `278.1-297.9 ms` (median `292.1 ms`) and
+paired speedup at `20.54-22.03x` (median `21.02x`). Exact pixel conversion and
+the existing frame/codestream contracts remain unchanged; this is still an
+iteration result rather than the P6 process matrix.
+
 ### P4. Remove per-evaluation CPU synchronization
 
 - Port final CfL, EPF inverse sigma, and deterministic quant-field updates.
