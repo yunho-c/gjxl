@@ -89,7 +89,9 @@ struct MaltaResponseParams {
   uint height;
   uint input_stride;
   uint output_stride;
+  uint accumulation_stride;
   uint low_frequency;
+  uint initialize_accumulation;
 };
 
 struct DifferenceParams {
@@ -154,27 +156,6 @@ kernel void gjxl_butteraugli_copy_f32(
   if (position.x >= params.width || position.y >= params.height) return;
   output[position.y * params.output_stride + position.x] =
     input[position.y * params.input_stride + position.x];
-}
-
-kernel void gjxl_butteraugli_clear_f32(
-  device float* output [[buffer(0)]],
-  constant PlaneParams& params [[buffer(1)]],
-  uint2 position [[thread_position_in_grid]]) {
-
-  if (position.x >= params.width || position.y >= params.height) return;
-  output[position.y * params.output_stride + position.x] = 0.0f;
-}
-
-kernel void gjxl_butteraugli_add_f32(
-  device const float* input [[buffer(0)]],
-  device float* output [[buffer(1)]],
-  constant PlaneParams& params [[buffer(2)]],
-  uint2 position [[thread_position_in_grid]]) {
-
-  if (position.x >= params.width || position.y >= params.height) return;
-  const uint input_index = position.y * params.input_stride + position.x;
-  const uint output_index = position.y * params.output_stride + position.x;
-  output[output_index] += input[input_index];
 }
 
 kernel void gjxl_butteraugli_expand_f32(
@@ -639,7 +620,8 @@ inline float malta_full(device const float* input, int x, int y,
 kernel void gjxl_butteraugli_malta_response_f32(
   device const float* input [[buffer(0)]],
   device float* output [[buffer(1)]],
-  constant MaltaResponseParams& params [[buffer(2)]],
+  device float* accumulation [[buffer(2)]],
+  constant MaltaResponseParams& params [[buffer(3)]],
   uint2 position [[thread_position_in_grid]]) {
 
   if (position.x >= params.width || position.y >= params.height) return;
@@ -647,6 +629,13 @@ kernel void gjxl_butteraugli_malta_response_f32(
     ? malta_lf(input, int(position.x), int(position.y), params)
     : malta_full(input, int(position.x), int(position.y), params);
   output[position.y * params.output_stride + position.x] = result;
+  const uint accumulation_index =
+    position.y * params.accumulation_stride + position.x;
+  if (params.initialize_accumulation != 0) {
+    accumulation[accumulation_index] = result;
+  } else {
+    accumulation[accumulation_index] += result;
+  }
 }
 
 inline float l2_asymmetric(float value0, float value1, float weight_up,

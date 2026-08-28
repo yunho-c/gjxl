@@ -128,8 +128,6 @@ class MetalPreparedAqEvaluation;
 
 struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> copy;
-  NS::SharedPtr<MTL::ComputePipelineState> clear;
-  NS::SharedPtr<MTL::ComputePipelineState> add;
   NS::SharedPtr<MTL::ComputePipelineState> expand;
   NS::SharedPtr<MTL::ComputePipelineState> subsample;
   NS::SharedPtr<MTL::ComputePipelineState> blur5_horizontal;

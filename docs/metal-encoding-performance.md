@@ -551,6 +551,23 @@ unamortized first-comparison results were mixed, so this is a repeated-AQ
 comparison optimization rather than a cold or one-shot claim. Focused
 Butteraugli, resident policy, and quantization-pipeline gates pass unchanged.
 
+#### Butteraugli response-accumulation checkpoint (2026-08-28)
+
+Each Malta response dispatch now also initializes or adds to its AC
+accumulator while retaining the response plane for diagnostic capture. The
+fixed UHF, HF, then MF order is unchanged. This removes six full-plane
+copy/add dispatches and response rereads per scale; the obsolete clear and add
+pipelines are no longer created.
+
+Three matched-build Apple M4 Pro Release process pairs alternated the cached-
+mask baseline and fused path. Each process used two warmups and eleven rotated
+padded-1080p samples. Resident-consumer E2E improved in all three pairs, from
+`16.591958-17.633542 ms` to `16.212292-17.284333 ms`, a `0.87-2.29%`
+reduction. Resident-comparison medians improved in two pairs and were neutral
+in one, so the retained claim stays at the repeated consumer boundary.
+Numerical tolerances, response capture, memory accounting, and public APIs are
+unchanged.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

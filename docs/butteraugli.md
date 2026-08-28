@@ -484,7 +484,7 @@ Exit criterion: the Metal distance map and score meet fixed numerical
 tolerances on the complete corpus without uninitialized, stale, or
 out-of-bounds output.
 
-The Metal backend now binds 23 exact Butteraugli compute entry points when the
+The Metal backend now binds 21 exact Butteraugli compute entry points when the
 backend is created. The shader library implements small-image edge expansion,
 both Gaussian boundary modes, opsin dynamics, frequency separation,
 symmetric/asymmetric L2 terms, all LF and full Malta stencils, masking and
@@ -699,6 +699,24 @@ reduction. Preparation and unamortized first-comparison distributions remained
 mixed, so this is retained specifically as a repeated-comparison AQ win. The
 fixed standalone, AQ-policy, and complete-pipeline numerical gates pass with
 the updated exact memory accounting.
+
+The third maintenance optimization folds AC accumulation into each Malta
+response dispatch. The response plane is still written for diagnostic stage
+capture, while the same thread initializes or adds to the appropriate AC
+plane in the fixed UHF, HF, then MF order. This removes six full-plane
+copy/add dispatches and six response-plane rereads per scale. The now-unused
+clear and add entry points were also removed, reducing backend Butteraugli
+pipeline creation from 23 to 21 states.
+
+Three matched-build Apple M4 Pro Release process pairs alternated the cached-
+mask baseline and fused response path with two warmups and eleven rotated
+padded-1080p samples. Resident-consumer E2E improved in every pair, from
+`16.591958-17.633542 ms` to `16.212292-17.284333 ms`, or `0.87-2.29%`.
+Resident-comparison medians were more variable: two pairs improved by
+`3.93-5.69%` and one was neutral at `-0.27%`. This supports the retained E2E
+dispatch and traffic reduction without a narrower leaf-kernel claim. The
+response-capture, fixed numerical, AQ-policy, and pipeline gates remain
+unchanged.
 
 ## Recommended implementation order
 

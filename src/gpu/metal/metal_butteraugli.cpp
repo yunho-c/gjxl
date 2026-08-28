@@ -148,7 +148,9 @@ struct MaltaResponseParams {
   uint32_t height;
   uint32_t input_stride;
   uint32_t output_stride;
+  uint32_t accumulation_stride;
   uint32_t low_frequency;
+  uint32_t initialize_accumulation;
 };
 
 struct DifferenceParams {
@@ -200,7 +202,7 @@ static_assert(sizeof(OpsinParams) == 32);
 static_assert(sizeof(FrequencyParams) == 16);
 static_assert(sizeof(FrequencyChannelParams) == 24);
 static_assert(sizeof(MaltaScaleParams) == 36);
-static_assert(sizeof(MaltaResponseParams) == 20);
+static_assert(sizeof(MaltaResponseParams) == 28);
 static_assert(sizeof(DifferenceParams) == 24);
 static_assert(sizeof(FinalParams) == 20);
 static_assert(sizeof(CropParams) == 24);
@@ -664,25 +666,6 @@ private:
     }
   }
 
-  void EncodeAdd(
-    MTL::ComputeCommandEncoder* encoder,
-    ConstDevicePlaneView input,
-    DevicePlaneView output,
-    Extent2D plane_extent) {
-
-    const PlaneParams params{
-      static_cast<uint32_t>(plane_extent.width),
-      static_cast<uint32_t>(plane_extent.height),
-      static_cast<uint32_t>(input.row_stride),
-      static_cast<uint32_t>(output.row_stride),
-    };
-    encoder->setComputePipelineState(metal_.butteraugli_pipelines_.add.get());
-    Bind(encoder, Handle(metal_, input), input.offset_bytes, 0);
-    Bind(encoder, Handle(metal_, output), output.offset_bytes, 1);
-    encoder->setBytes(&params, sizeof(params), 2);
-    metal_.DispatchPlane(encoder, plane_extent);
-  }
-
   void EncodeBlur(
     MTL::ComputeCommandEncoder* encoder,
     ConstDevicePlaneView input,
@@ -1030,18 +1013,23 @@ private:
       metal_.DispatchPlane(encoder, scale_extent);
 
       DevicePlaneView response = Plane(kWork + 1, scale_extent);
+      const size_t channel = stage_index % 2 == 0 ? 1 : 0;
+      DevicePlaneView accumulation = Plane(kAc + channel, scale_extent);
       const MaltaResponseParams response_params{
         static_cast<uint32_t>(scale_extent.width),
         static_cast<uint32_t>(scale_extent.height),
         static_cast<uint32_t>(scaled.row_stride),
         static_cast<uint32_t>(response.row_stride),
+        static_cast<uint32_t>(accumulation.row_stride),
         static_cast<uint32_t>(low_frequency),
+        static_cast<uint32_t>(stage_index >= 4),
       };
       encoder->setComputePipelineState(
         metal_.butteraugli_pipelines_.malta_response.get());
       Bind(encoder, Handle(metal_, scaled), scaled.offset_bytes, 0);
       Bind(encoder, Handle(metal_, response), response.offset_bytes, 1);
-      encoder->setBytes(&response_params, sizeof(response_params), 2);
+      Bind(encoder, Handle(metal_, accumulation), accumulation.offset_bytes, 2);
+      encoder->setBytes(&response_params, sizeof(response_params), 3);
       metal_.DispatchPlane(encoder, scale_extent);
       MaybeCapture(
         encoder,
@@ -1050,17 +1038,6 @@ private:
             MetalButteraugliStage::kMaltaMediumFrequencyY) + stage_index),
         AsConst(response),
         scale_extent);
-      const size_t channel = stage_index % 2 == 0 ? 1 : 0;
-      DevicePlaneView accumulation = Plane(kAc + channel, scale_extent);
-      // The first UHF response for each channel initializes the Malta sum.
-      // The following L2 pass overwrites AC channel 2 and every DC plane, so
-      // none of those four planes needs an explicit full-plane clear either.
-      if (stage_index >= 4) {
-        EncodeCopy(encoder, AsConst(response), accumulation, scale_extent);
-      } else {
-        EncodeAdd(
-          encoder, AsConst(response), accumulation, scale_extent);
-      }
     }
 
     const DifferenceParams difference_params{
@@ -1460,10 +1437,8 @@ Status CreateButteraugliPipelines(
   ButteraugliPipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 23> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 21> bindings{{
     {"gjxl_butteraugli_copy_f32", &pipelines.copy},
-    {"gjxl_butteraugli_clear_f32", &pipelines.clear},
-    {"gjxl_butteraugli_add_f32", &pipelines.add},
     {"gjxl_butteraugli_expand_f32", &pipelines.expand},
     {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
     {"gjxl_butteraugli_blur5_horizontal_f32", &pipelines.blur5_horizontal},
