@@ -16,6 +16,7 @@
 #include "codec/dc_quantization.h"
 #include "codec/dct.h"
 #include "codec/quantization.h"
+#include "codec/reconstruction_internal.h"
 #include "core/block_grid.h"
 #include "core/geometry.h"
 #include "core/image_buffer.h"
@@ -43,13 +44,12 @@ float MatrixMultiplier(
   return 1.0f;
 }
 
-Status ValidateImageContract(
-  ConstImage3FView opsin,
+Status ValidateFrameContract(
+  Extent2D coefficient_extent,
   VarDctFrameInput input,
   const SimpleVarDctCodestreamProfile& profile) {
 
-  if (!opsin.valid() ||
-      input.geometry.frame().empty() ||
+  if (coefficient_extent.empty() || input.geometry.frame().empty() ||
       input.strategies == nullptr ||
       !input.strategies->complete() ||
       !input.raw_quant_field.valid() ||
@@ -67,12 +67,12 @@ Status ValidateImageContract(
   }
 
   const Extent2D block_extent = input.strategies->extent();
-  if (opsin.extent() != input.geometry.padded_frame()) {
+  if (coefficient_extent != input.geometry.padded_frame()) {
     return Status::InvalidArgument(
       "Coefficient image does not match its block grid");
   }
 
-  const Extent2D expected_color_tiles = ColorTileExtent(opsin.extent());
+  const Extent2D expected_color_tiles = ColorTileExtent(coefficient_extent);
   if (input.color_correlation->tile_extent() != expected_color_tiles) {
     return Status::InvalidArgument(
       "Color-correlation map does not match the coefficient image");
@@ -90,6 +90,17 @@ Status ValidateImageContract(
   }
 
   return Status::Ok();
+}
+
+Status ValidateImageContract(
+  ConstImage3FView opsin,
+  VarDctFrameInput input,
+  const SimpleVarDctCodestreamProfile& profile) {
+
+  if (!opsin.valid()) {
+    return Status::InvalidArgument("Coefficient image is invalid");
+  }
+  return ValidateFrameContract(opsin.extent(), input, profile);
 }
 
 void CopyPixelsFromImage(
@@ -130,8 +141,184 @@ void CopyPixelsToImage(
 
 }  // namespace
 
-Status ComputeQuantizedCoefficients(
+namespace prepared_coefficients_internal {
+
+bool PreparedForwardDctCoefficients::valid() const noexcept {
+  size_t pixel_count = 0;
+  size_t tile_count = 0;
+  if (pixel_extent.empty() || block_extent.empty() ||
+      !BlockGrid::IsPaddedPixelExtent(pixel_extent) ||
+      block_extent !=
+        BlockGrid::FromPaddedPixelExtent(pixel_extent).blocks ||
+      color_tile_extent != ColorTileExtent(pixel_extent) ||
+      !pixel_extent.try_area(&pixel_count) ||
+      !color_tile_extent.try_area(&tile_count) ||
+      color_tile_offsets.size() != tile_count + 1 ||
+      color_tile_offsets.empty() || color_tile_offsets.front() != 0 ||
+      color_tile_offsets.back() != color_tile_transform_indices.size() ||
+      color_tile_transform_indices.size() != transforms.size()) {
+    return false;
+  }
+  for (size_t index = 1; index < color_tile_offsets.size(); ++index) {
+    if (color_tile_offsets[index] < color_tile_offsets[index - 1] ||
+        color_tile_offsets[index] > color_tile_transform_indices.size()) {
+      return false;
+    }
+  }
+  for (const auto& channel : coefficients) {
+    if (channel.size() != pixel_count) {
+      return false;
+    }
+  }
+  size_t expected_offset = 0;
+  for (const PreparedTransform& transform : transforms) {
+    if (transform.strategy == AcStrategyType::kCount ||
+        transform.coefficient_offset != expected_offset ||
+        transform.coefficient_count == 0 || expected_offset > pixel_count ||
+        transform.coefficient_count > pixel_count - expected_offset) {
+      return false;
+    }
+    expected_offset += transform.coefficient_count;
+  }
+  if (expected_offset != pixel_count) {
+    return false;
+  }
+  return std::ranges::all_of(
+    color_tile_transform_indices,
+    [&](size_t index) { return index < transforms.size(); });
+}
+
+Status PrepareForwardDctCoefficients(
   ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  PreparedForwardDctCoefficients* out) {
+
+  if (out == nullptr || !opsin.valid() ||
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
+      !strategies.complete() ||
+      strategies.extent() !=
+        BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks) {
+    return Status::InvalidArgument(
+      "Forward-coefficient preparation inputs are invalid");
+  }
+
+  size_t pixel_count = 0;
+  const Extent2D tile_extent = ColorTileExtent(opsin.extent());
+  size_t tile_count = 0;
+  if (!opsin.extent().try_area(&pixel_count) ||
+      !tile_extent.try_area(&tile_count)) {
+    return Status::InvalidArgument(
+      "Forward-coefficient preparation dimensions are too large");
+  }
+
+  try {
+    PreparedForwardDctCoefficients candidate;
+    candidate.pixel_extent = opsin.extent();
+    candidate.block_extent = strategies.extent();
+    candidate.color_tile_extent = tile_extent;
+    for (auto& channel : candidate.coefficients) {
+      channel.resize(pixel_count);
+    }
+    std::vector<std::vector<size_t>> tile_transforms(tile_count);
+    constexpr size_t kMaxCoefficientCount = 32 * 32;
+    std::array<float, kMaxCoefficientCount> pixels{};
+    size_t coefficient_offset = 0;
+    Status status = strategies.ForEachAnchor(
+      [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
+        const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
+        if (info == nullptr || !SupportsCpuDct(strategy)) {
+          return Status::Unavailable(
+            "Forward-coefficient preparation does not support a strategy");
+        }
+        const size_t coefficient_count = info->coefficient_count();
+        if (coefficient_count > pixels.size() ||
+            coefficient_offset > pixel_count ||
+            coefficient_count > pixel_count - coefficient_offset) {
+          return Status::Internal(
+            "Forward-coefficient preparation exceeded its storage");
+        }
+        const size_t tile_x = block_x /
+          (kColorTileDimension / kJxlBlockDimension);
+        const size_t tile_y = block_y /
+          (kColorTileDimension / kJxlBlockDimension);
+        const size_t tile_block_end_x = std::min(
+          (tile_x + 1) * (kColorTileDimension / kJxlBlockDimension),
+          strategies.extent().width);
+        const size_t tile_block_end_y = std::min(
+          (tile_y + 1) * (kColorTileDimension / kJxlBlockDimension),
+          strategies.extent().height);
+        if (block_x + info->covered_blocks.width > tile_block_end_x ||
+            block_y + info->covered_blocks.height > tile_block_end_y) {
+          return Status::InvalidArgument(
+            "Forward-coefficient strategy crosses a color tile");
+        }
+
+        const size_t transform_index = candidate.transforms.size();
+        candidate.transforms.push_back({
+          block_x, block_y, strategy, coefficient_offset, coefficient_count});
+        tile_transforms[tile_y * tile_extent.width + tile_x].push_back(
+          transform_index);
+        const std::span<float> pixel_span{
+          pixels.data(), coefficient_count};
+        for (size_t channel = 0; channel < 3; ++channel) {
+          CopyPixelsFromImage(
+            opsin.plane[channel], block_x, block_y, info->pixel_extent(),
+            pixel_span);
+          if (!std::ranges::all_of(
+                pixel_span, [](float value) { return std::isfinite(value); })) {
+            return Status::InvalidArgument(
+              "Forward-coefficient input must contain finite values");
+          }
+          Status transform_status = ForwardDctCpu(
+            strategy, pixel_span,
+            std::span<float>(candidate.coefficients[channel]).subspan(
+              coefficient_offset, coefficient_count));
+          if (!transform_status.ok()) {
+            return transform_status;
+          }
+        }
+        coefficient_offset += coefficient_count;
+        return Status::Ok();
+      });
+    if (!status.ok()) {
+      return status;
+    }
+    if (coefficient_offset != pixel_count) {
+      return Status::Internal(
+        "Prepared transforms do not cover the coefficient image");
+    }
+
+    candidate.color_tile_offsets.reserve(tile_count + 1);
+    candidate.color_tile_offsets.push_back(0);
+    for (const auto& indices : tile_transforms) {
+      candidate.color_tile_transform_indices.insert(
+        candidate.color_tile_transform_indices.end(),
+        indices.begin(), indices.end());
+      candidate.color_tile_offsets.push_back(
+        candidate.color_tile_transform_indices.size());
+    }
+    if (!candidate.valid()) {
+      return Status::Internal(
+        "Forward-coefficient preparation produced invalid storage");
+    }
+    *out = std::move(candidate);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate prepared forward coefficients");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Prepared forward-coefficient dimensions are too large");
+  }
+}
+
+}  // namespace prepared_coefficients_internal
+
+namespace prepared_coefficients_internal {
+
+Status ComputeQuantizedCoefficientsImpl(
+  ConstImage3FView opsin,
+  const PreparedForwardDctCoefficients* prepared,
   VarDctFrameInput input,
   SimpleVarDctCodestreamProfile profile,
   VarDctEncoderFrame* out,
@@ -150,10 +337,15 @@ Status ComputeQuantizedCoefficients(
         "AC coefficient decision mode is invalid");
   }
 
-  Status status = ValidateImageContract(
-    opsin,
-    input,
-    profile);
+  Status status = prepared == nullptr
+    ? ValidateImageContract(opsin, input, profile)
+    : ValidateFrameContract(prepared->pixel_extent, input, profile);
+  if (status.ok() && prepared != nullptr &&
+      (!prepared->valid() ||
+       prepared->block_extent != input.strategies->extent())) {
+    status = Status::InvalidArgument(
+      "Prepared coefficients do not match the coefficient-coding grid");
+  }
   if (!status.ok()) {
     return status;
   }
@@ -215,6 +407,7 @@ Status ComputeQuantizedCoefficients(
     std::array<float, kMaxCoefficientCount> pixels{};
     std::array<float, kMaxDcCount> dc{};
 
+    size_t prepared_index = 0;
     status = input.strategies->ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
         const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
@@ -239,22 +432,39 @@ Status ComputeQuantizedCoefficients(
           return Status::Internal(
             "Coefficient coding strategy exceeds its scratch capacity");
         }
-        const std::span<float> pixel_span{pixels.data(), coefficient_count};
-        for (size_t channel = 0; channel < coefficients.size(); ++channel) {
-          const std::span<float> coefficient_span{
-            coefficients[channel].data(), coefficient_count};
-          CopyPixelsFromImage(
-            opsin.plane[channel],
-            block_x,
-            block_y,
-            info->pixel_extent(),
-            pixel_span);
-          Status transform_status = ForwardDctCpu(
-            strategy,
-            pixel_span,
-            coefficient_span);
-          if (!transform_status.ok()) {
-            return transform_status;
+        if (prepared != nullptr) {
+          if (prepared_index >= prepared->transforms.size()) {
+            return Status::InvalidArgument(
+              "Prepared coefficients contain too few transforms");
+          }
+          const PreparedTransform& transform =
+            prepared->transforms[prepared_index];
+          if (transform.block_x != block_x || transform.block_y != block_y ||
+              transform.strategy != strategy ||
+              transform.coefficient_count != coefficient_count) {
+            return Status::InvalidArgument(
+              "Prepared coefficients do not match the strategy grid");
+          }
+          for (size_t channel = 0; channel < coefficients.size(); ++channel) {
+            std::copy_n(
+              prepared->coefficients[channel].data() +
+                transform.coefficient_offset,
+              coefficient_count, coefficients[channel].begin());
+          }
+        } else {
+          const std::span<float> pixel_span{
+            pixels.data(), coefficient_count};
+          for (size_t channel = 0; channel < coefficients.size(); ++channel) {
+            const std::span<float> coefficient_span{
+              coefficients[channel].data(), coefficient_count};
+            CopyPixelsFromImage(
+              opsin.plane[channel], block_x, block_y, info->pixel_extent(),
+              pixel_span);
+            Status transform_status = ForwardDctCpu(
+              strategy, pixel_span, coefficient_span);
+            if (!transform_status.ok()) {
+              return transform_status;
+            }
           }
         }
 
@@ -411,10 +621,15 @@ Status ComputeQuantizedCoefficients(
         }
         result.group_used_coefficient_count_[group_index] +=
           coefficient_count;
+        ++prepared_index;
         return Status::Ok();
       });
     if (!status.ok()) {
       return status;
+    }
+    if (prepared != nullptr && prepared_index != prepared->transforms.size()) {
+      return Status::InvalidArgument(
+        "Prepared coefficients contain extra transforms");
     }
 
     const Image3I32View quantized_dc{{
@@ -452,6 +667,30 @@ Status ComputeQuantizedCoefficients(
   }
 
   return Status::Ok();
+}
+
+}  // namespace prepared_coefficients_internal
+
+Status ComputeQuantizedCoefficients(
+  ConstImage3FView opsin,
+  VarDctFrameInput input,
+  SimpleVarDctCodestreamProfile profile,
+  VarDctEncoderFrame* out,
+  AcCoefficientDecisionMode decision_mode) {
+
+  return prepared_coefficients_internal::ComputeQuantizedCoefficientsImpl(
+    opsin, nullptr, input, profile, out, decision_mode);
+}
+
+Status prepared_coefficients_internal::ComputeQuantizedCoefficientsPrepared(
+  const PreparedForwardDctCoefficients& prepared,
+  VarDctFrameInput input,
+  SimpleVarDctCodestreamProfile profile,
+  VarDctEncoderFrame* out,
+  AcCoefficientDecisionMode decision_mode) {
+
+  return ComputeQuantizedCoefficientsImpl(
+    {}, &prepared, input, profile, out, decision_mode);
 }
 
 Status ReconstructQuantizedCoefficients(

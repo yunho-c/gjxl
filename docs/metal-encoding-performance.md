@@ -95,6 +95,8 @@ prints every profile boundary, and reports paired speedups. The broader
 ### P1. Remove repeated CPU coefficient-staging overhead - in progress
 
 - Replace per-transform heap allocation with reusable, maximum-strategy scratch.
+- Prepare invariant forward transforms once per selected strategy grid and
+  share them across final CfL and exact coefficient production.
 - Fuse exact coefficient production with the packed reconstruction handoff where
   doing so avoids a second frame traversal.
 - Retain exact raw quantization, frame, and codestream output.
@@ -109,6 +111,17 @@ and nine samples per process. Baseline/reused-scratch medians were
 `96.076/93.288`, `96.920/92.912`, and `94.055/93.413` ms, or directional wins
 of approximately `0.7-4.3%`. Sample ranges overlapped, so this supports the
 narrow allocation change rather than a complete-pipeline speedup claim.
+
+The second retained P1 change caches the three forward-transform planes after
+strategy selection. Final CfL and exact coefficient coding reuse the cache for
+all three AQ evaluations. The cache adds approximately `24.9 MB` of 1080p host
+coefficient storage. In one balanced iteration process with one warmup and
+three alternating samples, exact Metal public-workflow time fell from a prior
+`1148.9-1162.5 ms` range to `712.9-752.9 ms`; the median paired speedup rose
+from `5.64x` to `9.00x`. Exact codestream bytes remained unchanged. The same
+fully resident check fell from `785.9-801.5 ms` to `617.3-628.9 ms`, reaching
+a `10.28-10.49x` paired range. These are iteration results, not the independent-
+process P6 claim.
 
 ### P2. Provide a fast GPU coefficient decision path
 

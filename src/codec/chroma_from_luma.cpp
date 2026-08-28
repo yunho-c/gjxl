@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codec/chroma_from_luma.h"
+#include "codec/prepared_coefficients_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -541,6 +542,124 @@ Status ComputeFinalColorCorrelationMap(
       "Final chroma-from-luma map dimensions are too large");
   }
   return Status::Ok();
+}
+
+Status chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
+  const prepared_coefficients_internal::PreparedForwardDctCoefficients&
+    prepared,
+  ConstPlaneI32View raw_quant_field,
+  const Quantizer& quantizer,
+  bool fast,
+  ColorCorrelationMap* out) {
+
+  if (out == nullptr || !prepared.valid() || !raw_quant_field.valid() ||
+      raw_quant_field.extent != prepared.block_extent || !quantizer.valid()) {
+    return Status::InvalidArgument(
+      "Prepared final chroma-from-luma inputs are invalid");
+  }
+  for (size_t y = 0; y < raw_quant_field.extent.height; ++y) {
+    for (size_t x = 0; x < raw_quant_field.extent.width; ++x) {
+      const int32_t raw_quant = raw_quant_field.Row(y)[x];
+      if (raw_quant < 1 || raw_quant > kMaxRawQuant) {
+        return Status::InvalidArgument(
+          "Prepared final chroma-from-luma quantization is out of range");
+      }
+    }
+  }
+
+  try {
+    size_t tile_count = 0;
+    if (!prepared.color_tile_extent.try_area(&tile_count)) {
+      return Status::InvalidArgument(
+        "Prepared final chroma-from-luma dimensions are too large");
+    }
+    ColorCorrelationMap result;
+    result.tile_extent_ = prepared.color_tile_extent;
+    result.y_to_x_.resize(tile_count);
+    result.y_to_b_.resize(tile_count);
+    for (size_t tile_index = 0; tile_index < tile_count; ++tile_index) {
+      const size_t transform_begin = prepared.color_tile_offsets[tile_index];
+      const size_t transform_end =
+        prepared.color_tile_offsets[tile_index + 1];
+      size_t coefficient_count = 0;
+      for (size_t position = transform_begin; position < transform_end;
+           ++position) {
+        const size_t transform_index =
+          prepared.color_tile_transform_indices[position];
+        coefficient_count +=
+          prepared.transforms[transform_index].coefficient_count;
+      }
+      std::array<std::vector<float>, 4> values;
+      for (auto& channel_values : values) {
+        channel_values.reserve(coefficient_count);
+      }
+
+      for (size_t position = transform_begin; position < transform_end;
+           ++position) {
+        const size_t transform_index =
+          prepared.color_tile_transform_indices[position];
+        const prepared_coefficients_internal::PreparedTransform& transform =
+          prepared.transforms[transform_index];
+        const AcStrategyInfo* info = GetAcStrategyInfo(transform.strategy);
+        if (info == nullptr ||
+            info->coefficient_count() != transform.coefficient_count) {
+          return Status::Internal(
+            "Prepared final chroma-from-luma strategy disappeared");
+        }
+        QuantizationMatrixView matrix_x;
+        QuantizationMatrixView matrix_b;
+        Status status = GetDefaultQuantizationMatrix(
+          transform.strategy, XybChannel::kX, &matrix_x);
+        if (status.ok()) {
+          status = GetDefaultQuantizationMatrix(
+            transform.strategy, XybChannel::kB, &matrix_b);
+        }
+        if (!status.ok()) {
+          return status;
+        }
+        const float quant_scale = quantizer.scale() * 128.0f *
+          static_cast<float>(
+            raw_quant_field.Row(transform.block_y)[transform.block_x]);
+        const Extent2D coefficient_extent = info->coefficient_extent();
+        const Extent2D low_frequency_extent = info->low_frequency_extent();
+        for (size_t index = 0; index < transform.coefficient_count; ++index) {
+          const size_t x = index % coefficient_extent.width;
+          const size_t y = index / coefficient_extent.width;
+          const bool low_frequency =
+            x < low_frequency_extent.width && y < low_frequency_extent.height;
+          const float coefficient_y = low_frequency
+            ? 0.0f
+            : prepared.coefficients[1][transform.coefficient_offset + index];
+          const float coefficient_x = low_frequency
+            ? 0.0f
+            : prepared.coefficients[0][transform.coefficient_offset + index];
+          const float coefficient_b = low_frequency
+            ? 0.0f
+            : prepared.coefficients[2][transform.coefficient_offset + index];
+          values[0].push_back(
+            coefficient_y * matrix_x.inverse_dequant[index] * quant_scale);
+          values[1].push_back(
+            coefficient_x * matrix_x.inverse_dequant[index] * quant_scale);
+          values[2].push_back(
+            coefficient_y * matrix_b.inverse_dequant[index] * quant_scale);
+          values[3].push_back(
+            coefficient_b * matrix_b.inverse_dequant[index] * quant_scale);
+        }
+      }
+      result.y_to_x_[tile_index] = FindBestMultiplier(
+        values[0], values[1], kBaseCorrelationX, fast);
+      result.y_to_b_[tile_index] = FindBestMultiplier(
+        values[2], values[3], kBaseCorrelationB, fast);
+    }
+    *out = std::move(result);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate prepared final chroma-from-luma storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Prepared final chroma-from-luma dimensions are too large");
+  }
 }
 
 }  // namespace gjxl

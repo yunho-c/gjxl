@@ -17,6 +17,7 @@
 
 #include "codec/chroma_from_luma.h"
 #include "codec/reconstruction.h"
+#include "codec/reconstruction_internal.h"
 
 namespace {
 
@@ -116,7 +117,9 @@ gjxl::Status ComputeFrame(
   const gjxl::Quantizer& quantizer,
   const gjxl::ColorCorrelationMap& color_correlation,
   gjxl::SimpleVarDctCodestreamProfile profile,
-  gjxl::VarDctEncoderFrame* frame) {
+  gjxl::VarDctEncoderFrame* frame,
+  const gjxl::prepared_coefficients_internal::
+    PreparedForwardDctCoefficients* prepared = nullptr) {
 
   gjxl::FrameGeometry geometry;
   gjxl::Status status = gjxl::FrameGeometry::Create(
@@ -129,19 +132,84 @@ gjxl::Status ComputeFrame(
     return gjxl::Status::InvalidArgument("Test block grid is too large");
   }
   std::vector<uint8_t> epf_sharpness(block_count, 4);
-  return gjxl::ComputeQuantizedCoefficients(
-    input,
-    {
-      .geometry = geometry,
-      .strategies = &strategies,
-      .raw_quant_field = raw_quant,
-      .quantizer = &quantizer,
-      .color_correlation = &color_correlation,
-      .epf_sharpness = {
-        epf_sharpness.data(), strategies.extent(), strategies.extent().width},
-    },
-    profile,
-    frame);
+  const gjxl::VarDctFrameInput frame_input{
+    .geometry = geometry,
+    .strategies = &strategies,
+    .raw_quant_field = raw_quant,
+    .quantizer = &quantizer,
+    .color_correlation = &color_correlation,
+    .epf_sharpness = {
+      epf_sharpness.data(), strategies.extent(), strategies.extent().width},
+  };
+  return prepared == nullptr
+    ? gjxl::ComputeQuantizedCoefficients(input, frame_input, profile, frame)
+    : gjxl::prepared_coefficients_internal::
+        ComputeQuantizedCoefficientsPrepared(
+          *prepared, frame_input, profile, frame);
+}
+
+bool FramesEqual(
+  const gjxl::VarDctEncoderFrame& left,
+  const gjxl::VarDctEncoderFrame& right) {
+
+  if (!left.valid() || !right.valid() ||
+      left.geometry().frame() != right.geometry().frame() ||
+      left.geometry().padded_frame() != right.geometry().padded_frame() ||
+      left.profile() != right.profile() ||
+      left.quantizer().params().global_scale !=
+        right.quantizer().params().global_scale ||
+      left.quantizer().params().quant_dc != right.quantizer().params().quant_dc ||
+      left.ac_group_extent() != right.ac_group_extent() ||
+      left.ac_group_count() != right.ac_group_count()) {
+    return false;
+  }
+  const gjxl::Extent2D blocks = left.strategies().extent();
+  if (blocks != right.strategies().extent()) {
+    return false;
+  }
+  const gjxl::ConstImage3I32View left_dc = left.quantized_dc();
+  const gjxl::ConstImage3I32View right_dc = right.quantized_dc();
+  for (size_t y = 0; y < blocks.height; ++y) {
+    if (!std::equal(
+          left.raw_quant_field().Row(y),
+          left.raw_quant_field().Row(y) + blocks.width,
+          right.raw_quant_field().Row(y)) ||
+        !std::equal(
+          left.epf_sharpness().Row(y),
+          left.epf_sharpness().Row(y) + blocks.width,
+          right.epf_sharpness().Row(y))) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      if (!std::equal(
+            left_dc.plane[channel].Row(y),
+            left_dc.plane[channel].Row(y) + blocks.width,
+            right_dc.plane[channel].Row(y))) {
+        return false;
+      }
+    }
+  }
+  for (size_t group_index = 0; group_index < left.ac_group_count();
+       ++group_index) {
+    gjxl::VarDctAcGroupView left_group;
+    gjxl::VarDctAcGroupView right_group;
+    if (!left.GetAcGroup(group_index, &left_group).ok() ||
+        !right.GetAcGroup(group_index, &right_group).ok() ||
+        left_group.used_coefficient_count !=
+          right_group.used_coefficient_count) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      if (!std::equal(
+            left_group.coefficients[channel].begin(),
+            left_group.coefficients[channel].begin() +
+              left_group.used_coefficient_count,
+            right_group.coefficients[channel].begin())) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 bool CheckStrategy(gjxl::AcStrategyType strategy) {
@@ -191,6 +259,19 @@ bool CheckStrategy(gjxl::AcStrategyType strategy) {
       !frame.valid() ||
       frame.ac_group_count() != 1) {
     std::cerr << "Coefficient coding failed for a supported strategy\n";
+    return false;
+  }
+
+  gjxl::prepared_coefficients_internal::PreparedForwardDctCoefficients
+    prepared;
+  gjxl::VarDctEncoderFrame prepared_frame;
+  if (!gjxl::prepared_coefficients_internal::PrepareForwardDctCoefficients(
+        input.ConstView(), grid, &prepared).ok() ||
+      !ComputeFrame(
+        input.ConstView(), grid, raw_view, quantizer, color_correlation, {},
+        &prepared_frame, &prepared).ok() ||
+      !FramesEqual(frame, prepared_frame)) {
+    std::cerr << "Prepared coefficient coding changed the encoder frame\n";
     return false;
   }
 

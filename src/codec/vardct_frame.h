@@ -52,6 +52,17 @@ struct VarDctFrameInput {
   ConstPlaneU8View epf_sharpness;
 };
 
+namespace prepared_coefficients_internal {
+struct PreparedForwardDctCoefficients;
+[[nodiscard]] Status ComputeQuantizedCoefficientsImpl(
+  ConstImage3FView,
+  const PreparedForwardDctCoefficients*,
+  VarDctFrameInput,
+  SimpleVarDctCodestreamProfile,
+  VarDctEncoderFrame*,
+  AcCoefficientDecisionMode);
+}  // namespace prepared_coefficients_internal
+
 /// Read-only view of one fixed-capacity VarDCT AC group.
 struct VarDctAcGroupView {
   size_t block_x = 0;
@@ -122,6 +133,15 @@ private:
     SimpleVarDctCodestreamProfile,
     VarDctEncoderFrame*,
     AcCoefficientDecisionMode);
+
+  friend Status prepared_coefficients_internal::
+    ComputeQuantizedCoefficientsImpl(
+      ConstImage3FView,
+      const prepared_coefficients_internal::PreparedForwardDctCoefficients*,
+      VarDctFrameInput,
+      SimpleVarDctCodestreamProfile,
+      VarDctEncoderFrame*,
+      AcCoefficientDecisionMode);
 
   friend Status ReconstructQuantizedCoefficients(
     const VarDctEncoderFrame&,

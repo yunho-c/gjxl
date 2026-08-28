@@ -15,6 +15,8 @@
 
 #include "codec/adaptive_quantization.h"
 #include "codec/chroma_from_luma.h"
+#include "codec/chroma_from_luma_internal.h"
+#include "codec/prepared_coefficients_internal.h"
 #include "codec/quantization.h"
 
 namespace {
@@ -206,19 +208,38 @@ bool CheckPinnedFinalMap() {
   }
 
   gjxl::ColorCorrelationMap map;
+  gjxl::ColorCorrelationMap prepared_map;
+  gjxl::prepared_coefficients_internal::PreparedForwardDctCoefficients
+    prepared;
   const gjxl::ConstPlaneI32View raw_const{
     raw_quant.data(), kBlocks, kBlocks.width};
-  if (!gjxl::ComputeFinalColorCorrelationMap(
+  if (!gjxl::prepared_coefficients_internal::PrepareForwardDctCoefficients(
+        opsin, strategies, &prepared).ok() ||
+      !gjxl::ComputeFinalColorCorrelationMap(
         opsin, strategies, raw_const, quantizer, false, &map).ok() ||
+      !gjxl::chroma_from_luma_internal::
+        ComputeFinalColorCorrelationMapPrepared(
+          prepared, raw_const, quantizer, false, &prepared_map).ok() ||
       map.y_to_x_map().Row(0)[0] != 27 ||
-      map.y_to_b_map().Row(0)[0] != 11) {
+      map.y_to_b_map().Row(0)[0] != 11 ||
+      prepared_map.y_to_x_map().Row(0)[0] !=
+        map.y_to_x_map().Row(0)[0] ||
+      prepared_map.y_to_b_map().Row(0)[0] !=
+        map.y_to_b_map().Row(0)[0]) {
     std::cerr << "Final CfL map differs from pinned libjxl\n";
     return false;
   }
   if (!gjxl::ComputeFinalColorCorrelationMap(
         opsin, strategies, raw_const, quantizer, true, &map).ok() ||
+      !gjxl::chroma_from_luma_internal::
+        ComputeFinalColorCorrelationMapPrepared(
+          prepared, raw_const, quantizer, true, &prepared_map).ok() ||
       map.y_to_x_map().Row(0)[0] != 27 ||
-      map.y_to_b_map().Row(0)[0] != 13) {
+      map.y_to_b_map().Row(0)[0] != 13 ||
+      prepared_map.y_to_x_map().Row(0)[0] !=
+        map.y_to_x_map().Row(0)[0] ||
+      prepared_map.y_to_b_map().Row(0)[0] !=
+        map.y_to_b_map().Row(0)[0]) {
     std::cerr << "Fast final CfL map differs from pinned libjxl\n";
     return false;
   }
@@ -228,8 +249,13 @@ bool CheckPinnedFinalMap() {
   const int8_t original_b = map.y_to_b_map().Row(0)[0];
   if (gjxl::ComputeFinalColorCorrelationMap(
         opsin, strategies, raw_const, quantizer, false, &map).ok() ||
+      gjxl::chroma_from_luma_internal::
+        ComputeFinalColorCorrelationMapPrepared(
+          prepared, raw_const, quantizer, false, &prepared_map).ok() ||
       map.y_to_x_map().Row(0)[0] != original_x ||
-      map.y_to_b_map().Row(0)[0] != original_b) {
+      map.y_to_b_map().Row(0)[0] != original_b ||
+      prepared_map.y_to_x_map().Row(0)[0] != original_x ||
+      prepared_map.y_to_b_map().Row(0)[0] != original_b) {
     std::cerr << "Invalid final CfL input changed output\n";
     return false;
   }

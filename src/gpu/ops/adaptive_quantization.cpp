@@ -16,8 +16,10 @@
 
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/chroma_from_luma.h"
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/epf.h"
 #include "codec/quantization.h"
+#include "codec/reconstruction_internal.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "gpu/ops/aq_evaluation.h"
@@ -111,20 +113,21 @@ class PreparedGpuAdaptiveQuantizationEvaluator final
     : public aqi::AdaptiveQuantizationEvaluator {
 public:
   PreparedGpuAdaptiveQuantizationEvaluator(
-    ConstImage3FView opsin,
     const AcStrategyGrid& strategies,
     ConstPlaneU8View epf_sharpness,
     AdaptiveQuantizationOptions options,
     GpuAdaptiveQuantizationMode mode,
     PreparedAqEvaluation& prepared,
+    prepared_coefficients_internal::PreparedForwardDctCoefficients
+      forward_coefficients,
     bool materialize_final,
     Extent2D source_extent)
-    : opsin_(opsin),
-      strategies_(strategies),
+    : strategies_(strategies),
       epf_sharpness_(epf_sharpness),
       options_(options),
       mode_(mode),
       prepared_(&prepared),
+      forward_coefficients_(std::move(forward_coefficients)),
       materialize_final_(materialize_final),
       original_source_extent_(source_extent) {
     if (materialize_final_) {
@@ -168,10 +171,11 @@ public:
         return status;
       }
       ColorCorrelationMap color_correlation;
-      status = ComputeFinalColorCorrelationMap(
-        opsin_, strategies_,
-        {raw_quant.data(), block_extent, block_extent.width},
-        quantizer, options_.fast_color_correlation, &color_correlation);
+      status =
+        chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
+          forward_coefficients_,
+          {raw_quant.data(), block_extent, block_extent.width},
+          quantizer, options_.fast_color_correlation, &color_correlation);
       if (!status.ok()) {
         return status;
       }
@@ -183,8 +187,9 @@ public:
         if (!status.ok()) {
           return status;
         }
-        status = ComputeQuantizedCoefficients(
-            opsin_,
+        status = prepared_coefficients_internal::
+          ComputeQuantizedCoefficientsPrepared(
+            forward_coefficients_,
             {
                 .geometry = geometry,
                 .strategies = &strategies_,
@@ -276,12 +281,13 @@ public:
   }
 
 private:
-  ConstImage3FView opsin_;
   const AcStrategyGrid& strategies_;
   ConstPlaneU8View epf_sharpness_;
   AdaptiveQuantizationOptions options_;
   GpuAdaptiveQuantizationMode mode_;
   PreparedAqEvaluation* prepared_ = nullptr;
+  prepared_coefficients_internal::PreparedForwardDctCoefficients
+    forward_coefficients_;
   bool materialize_final_ = false;
   Image3FBuffer final_reconstructed_;
   VarDctEncoderFrame final_frame_;
@@ -413,10 +419,19 @@ Status RunGpuAdaptiveQuantizationImpl(
       "GPU adaptive quantization preparation produced no state");
   }
 
+  prepared_coefficients_internal::PreparedForwardDctCoefficients
+    forward_coefficients;
+  status = prepared_coefficients_internal::PrepareForwardDctCoefficients(
+    opsin, strategies, &forward_coefficients);
+  if (!status.ok()) {
+    return status;
+  }
+
   try {
     PreparedGpuAdaptiveQuantizationEvaluator evaluator(
-      opsin, strategies, epf_sharpness, options, mode, *prepared,
-      full_output != nullptr, original_linear_rgb.extent());
+      strategies, epf_sharpness, options, mode, *prepared,
+      std::move(forward_coefficients), full_output != nullptr,
+      original_linear_rgb.extent());
     aqi::AdaptiveQuantizationPolicyResult result;
     status = aqi::RunAdaptiveQuantizationPolicy(
       strategies, initial_quant_field, options, evaluator, &result, nullptr);

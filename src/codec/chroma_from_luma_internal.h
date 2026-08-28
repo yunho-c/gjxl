@@ -4,6 +4,7 @@
 #pragma once
 
 #include "codec/chroma_from_luma.h"
+#include "codec/prepared_coefficients_internal.h"
 
 namespace gjxl::chroma_from_luma_internal {
 
@@ -11,6 +12,16 @@ namespace gjxl::chroma_from_luma_internal {
 [[nodiscard]] Status CreateColorCorrelationMap(
   ConstPlaneI8View y_to_x,
   ConstPlaneI8View y_to_b,
+  ColorCorrelationMap* out);
+
+/// Recomputes final CfL from cached forward transforms. Quant-dependent
+/// scaling and the reference multiplier search remain evaluation-local.
+[[nodiscard]] Status ComputeFinalColorCorrelationMapPrepared(
+  const prepared_coefficients_internal::PreparedForwardDctCoefficients&
+    prepared,
+  ConstPlaneI32View raw_quant_field,
+  const Quantizer& quantizer,
+  bool fast,
   ColorCorrelationMap* out);
 
 }  // namespace gjxl::chroma_from_luma_internal

@@ -18,10 +18,20 @@ namespace gjxl {
 
 class ColorCorrelationMap;
 
+namespace prepared_coefficients_internal {
+struct PreparedForwardDctCoefficients;
+}  // namespace prepared_coefficients_internal
+
 namespace chroma_from_luma_internal {
 [[nodiscard]] Status CreateColorCorrelationMap(
   ConstPlaneI8View,
   ConstPlaneI8View,
+  ColorCorrelationMap*);
+[[nodiscard]] Status ComputeFinalColorCorrelationMapPrepared(
+  const prepared_coefficients_internal::PreparedForwardDctCoefficients&,
+  ConstPlaneI32View,
+  const Quantizer&,
+  bool,
   ColorCorrelationMap*);
 }  // namespace chroma_from_luma_internal
 
@@ -64,6 +74,13 @@ private:
     ConstPlaneI8View,
     ConstPlaneI8View,
     ColorCorrelationMap*);
+  friend Status chroma_from_luma_internal::
+    ComputeFinalColorCorrelationMapPrepared(
+      const prepared_coefficients_internal::PreparedForwardDctCoefficients&,
+      ConstPlaneI32View,
+      const Quantizer&,
+      bool,
+      ColorCorrelationMap*);
 
   Extent2D tile_extent_;
   std::vector<int8_t> y_to_x_;
