@@ -679,6 +679,27 @@ standalone operation contract, full Metal Butteraugli differential, resident
 AQ evaluation and policy, and Metal quantization-pipeline tests pass without a
 tolerance, shader arithmetic, public API, or memory-contract change.
 
+The second maintenance optimization also prepares and retains the blurred
+full-resolution reference activity mask used by both fuzzy erosion and masked
+AC comparison. Each repeated comparison therefore omits the invariant mask
+precompute and two-pass 13-tap blur. The optional half-resolution scale keeps
+its established recomputation sequence. One padded-1080p cached plane adds
+`8,282,432` allocation bytes (`8,282,404` logical reference bytes), increasing
+the prepared allocation from `335,533,620` to `343,816,052` bytes and cached
+reference accounting from `103,560,040` to `111,842,444` bytes; peak logical
+comparison scratch remains `231,972,024` bytes.
+
+Three additional Apple M4 Pro Release process pairs alternated the retained
+post-Malta binary and the full-resolution cache. Each process again used two
+warmups and eleven rotated padded-1080p samples. Resident-comparison medians
+moved from `16.998583-17.261250 ms` to `16.527125-16.825083 ms`, a per-pair
+reduction of `2.18-3.50%`. Resident-consumer E2E medians moved from
+`16.944083-17.127541 ms` to `16.546041-16.824500 ms`, a `0.82-3.40%`
+reduction. Preparation and unamortized first-comparison distributions remained
+mixed, so this is retained specifically as a repeated-comparison AQ win. The
+fixed standalone, AQ-policy, and complete-pipeline numerical gates pass with
+the updated exact memory accounting.
+
 ## Recommended implementation order
 
 Milestones 1 through 9 establish the standalone CPU correctness baseline,

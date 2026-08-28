@@ -532,6 +532,25 @@ yet attributed to the complete public encoder. Focused standalone
 Butteraugli, resident AQ, policy, and quantization-pipeline coverage passes
 without changing numerical tolerances or materialization contracts.
 
+#### Butteraugli reference-mask checkpoint (2026-08-28)
+
+Prepared Butteraugli now retains the blurred full-resolution reference
+activity mask used by fuzzy erosion and masked AC comparison. Repeated
+comparisons omit the invariant precompute and two-pass 13-tap blur; the
+half-resolution scale preserves its prior recomputation sequence. At padded
+1080p the cache adds `8,282,432` allocation bytes while peak logical comparison
+scratch remains unchanged.
+
+Three Apple M4 Pro Release process pairs alternated the retained post-Malta
+binary and the cache. Each process used two warmups and eleven rotated samples.
+Resident-comparison medians moved from `16.998583-17.261250 ms` to
+`16.527125-16.825083 ms`, a per-pair reduction of `2.18-3.50%`.
+Resident-consumer E2E medians moved from `16.944083-17.127541 ms` to
+`16.546041-16.824500 ms`, a `0.82-3.40%` reduction. Preparation and
+unamortized first-comparison results were mixed, so this is a repeated-AQ
+comparison optimization rather than a cold or one-shot claim. Focused
+Butteraugli, resident policy, and quantization-pipeline gates pass unchanged.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

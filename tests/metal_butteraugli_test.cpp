@@ -379,7 +379,7 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   const size_t working_width = std::max<size_t>(8, extent.width);
   const size_t working_height = std::max<size_t>(8, extent.height);
   const size_t main_cache =
-    10 * working_width * working_height * sizeof(float);
+    11 * working_width * working_height * sizeof(float);
   const size_t sub_cache = extent.width >= 15 && extent.height >= 15
     ? 10 * ((extent.width + 1) / 2) * ((extent.height + 1) / 2) *
         sizeof(float)
