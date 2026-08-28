@@ -517,3 +517,85 @@ The following are explicitly outside the first codestream milestone:
 
 These features may extend the frame/profile contract later. They must not be
 silently inferred or partially signaled by the initial writer.
+
+## Compression-density roadmap
+
+The current writer prioritizes a correct, deterministic subset over exhaustive
+compression optimization. Its main entropy limitations are a maximum of eight
+prefix-code clusters, one fixed HybridUint configuration for every cluster,
+natural coefficient orders, and a compact fixed block-context map. The profile
+also fixes the X/B quantization-matrix scales at `2/2`, although the header and
+reconstruction paths can represent other values.
+
+A directional local comparison used the Release encoder, four natural images
+around 500 pixels in size, identical linear-PFM inputs, raw `.jxl` output, and
+installed libjxl tools. External Butteraugli scores were measured at 255 nits.
+The aggregate encoded sizes were:
+
+| Target distance | GJXL | `cjxl -e 7` | Difference | `cjxl -e 9` | Difference |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 153,464 B | 151,714 B | -1.1% | 147,386 B | -4.0% |
+| 2 | 94,430 B | 93,414 B | -1.1% | 88,578 B | -6.2% |
+
+These are same-target rather than matched-quality results. The external scores
+were close but not identical, so the table indicates the scale of the current
+gap; it is not a BD-rate result or a claim of equal visual quality. On the
+flower input at target distance 1, GJXL produced 46,082 bytes at external
+distance 1.42955, `cjxl -e 7` produced 45,014 bytes at 1.42125, and
+`cjxl -e 9` produced 43,496 bytes at 1.39970. As another directional signal,
+`cjxl -e 1` and `-e 2` produced 47,368-byte files at identical external
+distance 1.58041, while `-e 3` produced 45,363 bytes at the same distance. The
+4.2% reduction suggests useful entropy-modeling headroom, but the effort tier
+changes more than one variable and does not isolate ANS from clustering or
+other encoder decisions.
+
+The recommended implementation order is below. Effort and size reductions are
+rough hypotheses for general natural images, are not additive, and should be
+replaced by corpus measurements as each step lands.
+
+1. Improve the existing prefix-code optimizer before adding ANS (roughly two to
+   four days; plausibly 1-4%). Search candidate cluster counts such as 1, 2, 4,
+   8, 16, and 32 using the complete serialized cost, including context maps and
+   code trees. Choose HybridUint parameters per final cluster, add merge or
+   refinement passes after the current seeding, and report model overhead
+   separately from token payload. This stays within the existing entropy format
+   and directly addresses the clearest low-effort modeling limitations in
+   [`entropy.cpp`](../src/codestream/entropy.cpp).
+
+2. Enable a libjxl-style X/B quantization-matrix-scale heuristic (roughly one to
+   two days; plausibly 1-3%). A conservative first version would use X=3 and B=2
+   for ordinary Butteraugli operation, retain 2/2 for maximum-error mode, and
+   then add the pixel-statistics heuristic. Adaptive quantization must run with
+   the selected scales; changing only the serialized header would change the
+   reconstruction without making the encoder's search consistent with it.
+
+3. Add custom coefficient orders (roughly three to five days; plausibly
+   0.5-2%). Count coefficient-zero frequency by strategy family and channel,
+   stable-sort while preserving the LLF contract, serialize the selected orders
+   once in AC global, and tokenize against those same orders. Keep the natural
+   order whenever its smaller signaling cost wins.
+
+4. Make block-context maps adaptive for sufficiently large images (roughly two
+   to three days; small expected benefit on thumbnails and plausibly 1-2% on
+   larger images). Candidate maps can use raw quantization and strategy classes,
+   but must be selected by total serialized cost rather than token entropy
+   alone.
+
+5. Add a full ANS path only after the prefix optimizer establishes the remaining
+   gap (roughly one to two weeks; plausibly another 2-4%). This is broader and
+   riskier than improving the current code, so the earlier measurements should
+   determine whether it is justified.
+
+6. Offer four adaptive-quantization iterations as an optional high-density mode
+   (less than one day; probably below 1%). The internal workflow already permits
+   up to four iterations, while the public workflow currently fixes two. This
+   should remain an explicit slower mode because the encode-time increase is
+   likely much larger than the size improvement.
+
+LZ77, adaptive DC smoothing, additional transform decisions, patches/dots/
+splines, chroma subsampling, and GPU entropy coding are not first-line size
+work. They target narrower content, change quality semantics, or require more
+implementation scope for less likely general-image benefit. Each accepted
+optimization should be evaluated on a broader corpus with decoded-output
+validation and matched-quality size comparisons, not only the same nominal
+distance.
