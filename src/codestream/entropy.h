@@ -17,7 +17,7 @@
 namespace gjxl {
 
 inline constexpr size_t kPrefixAlphabetSize = 128;
-inline constexpr size_t kMaximumPrefixClusters = 8;
+inline constexpr size_t kMaximumPrefixClusters = 32;
 
 struct EntropyToken {
   uint32_t context = 0;
@@ -73,9 +73,9 @@ struct PrefixCode {
 };
 
 struct EntropyCode {
-  HybridUintConfig uint_config = kDefaultHybridUintConfig;
   uint32_t context_count = 0;
   std::vector<uint8_t> context_map;
+  std::vector<HybridUintConfig> uint_configs;
   std::vector<PrefixCode> prefix_codes;
 
   friend bool operator==(const EntropyCode&, const EntropyCode&) = default;
@@ -90,11 +90,22 @@ struct EntropyCodeOptions {
   HybridUintConfig uint_config = kDefaultHybridUintConfig;
 };
 
+struct EntropyCodeCost {
+  uint64_t model_bits = 0;
+  uint64_t token_bits = 0;
+  size_t cluster_count = 0;
+
+  friend bool operator==(
+    const EntropyCodeCost&,
+    const EntropyCodeCost&) = default;
+};
+
 /// Builds one entropy model over all supplied section token streams.
 [[nodiscard]] Status OptimizeEntropyCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCodeOptions& options,
-  EntropyCode* code);
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr);
 
 /// Builds a canonical maximum-15-bit prefix code for a histogram.
 [[nodiscard]] Status BuildPrefixCode(
@@ -105,6 +116,12 @@ struct EntropyCodeOptions {
 [[nodiscard]] Status WritePrefixCodes(
   std::span<const PrefixCode> prefix_codes,
   HybridUintConfig config,
+  BitWriter* writer);
+
+/// Serializes one HybridUint configuration per prefix code.
+[[nodiscard]] Status WritePrefixCodes(
+  std::span<const PrefixCode> prefix_codes,
+  std::span<const HybridUintConfig> configs,
   BitWriter* writer);
 
 /// Serializes the optimized context map.

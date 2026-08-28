@@ -165,6 +165,7 @@ Status WriteCompactBlockContextMap(BitWriter* writer) {
     codestream_internal::kSimpleBlockContextMap.end());
   // Prefix codes are irrelevant to context-map serialization, but retaining
   // the four referenced clusters keeps the EntropyCode structurally valid.
+  map.uint_configs.resize(4, kDefaultHybridUintConfig);
   map.prefix_codes.resize(4);
   return WriteContextMap(map, writer);
 }
