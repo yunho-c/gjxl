@@ -375,6 +375,25 @@ Reproduce the benchmark with:
 just ac-strategy-benchmark
 ```
 
+The same benchmark accepts `device-quant` as its third recipe argument. That
+mode binds checked resident opsin, mask, and quant-field views and poisons the
+descriptor quant norms to `1.0`, so validation proves that the device field is
+authoritative while timing includes its shader-side strategy aggregation:
+
+```sh
+just ac-strategy-benchmark 4096 12 device-quant
+```
+
+This mode was added while evaluating whether the residual kernel should share
+one quant-norm calculation across a whole threadgroup. Both a threadgroup
+barrier and a barrier-free SIMD-group broadcast were tested against the direct
+per-thread expression on the Apple M4 Pro. Max-batch medians varied by strategy
+and the proposed broadcasts did not provide a stable aggregate win, so the
+production shader retains the direct expression. The benchmark coverage is
+retained to keep future resident-field changes measurable instead of assuming
+that source-level duplicate work survives Metal compilation or dominates the
+kernel.
+
 ### Complete staged search
 
 `FindAcStrategyGridGpu` precomputes every candidate anchor that the existing

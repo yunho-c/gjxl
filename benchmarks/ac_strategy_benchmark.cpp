@@ -36,6 +36,11 @@ constexpr size_t kMinimumCandidatesPerSample = 256;
 constexpr size_t kMinimumGpuBatchesPerSample = 16;
 constexpr double kMaximumRelativeCostError = 0.01;
 
+enum class QuantNormSource {
+  kCandidate,
+  kDeviceField,
+};
+
 constexpr std::array kStrategies = {
   gjxl::AcStrategyType::kDct8,
   gjxl::AcStrategyType::kDct16x8,
@@ -242,11 +247,13 @@ public:
     gjxl::GpuBackend& gpu,
     const Fixture& fixture,
     gjxl::AcStrategyType strategy,
-    size_t candidate_count)
+    size_t candidate_count,
+    QuantNormSource quant_norm_source)
     : gpu_(gpu),
       fixture_(fixture),
       strategy_(strategy),
       candidates_(MakeCandidates(strategy, candidate_count, fixture)),
+      uploaded_candidates_(candidates_),
       matrices_(PackMatrices(strategy)),
       cpu_costs_(candidate_count),
       metal_costs_(candidate_count) {
@@ -261,8 +268,18 @@ public:
       fixture.pixel_mask,
       "pixel mask",
       &device_mask_);
+    if (quant_norm_source == QuantNormSource::kDeviceField) {
+      AllocateAndUpload(
+        fixture.quant_field,
+        "quant field",
+        &device_quant_field_);
+      for (gjxl::AcStrategyCandidate& candidate : uploaded_candidates_) {
+        candidate.quant_norm = 1.0f;
+      }
+    }
     AllocateAndUpload(matrices_, "matrices", &device_matrices_);
-    AllocateAndUpload(candidates_, "candidates", &device_candidates_);
+    AllocateAndUpload(
+      uploaded_candidates_, "candidates", &device_candidates_);
 
     const size_t packed_bytes =
       candidate_count * 3 * coefficient_count * sizeof(float);
@@ -291,6 +308,27 @@ public:
       .candidate_count = candidate_count,
       .butteraugli_target = kButteraugliTarget,
     };
+    if (quant_norm_source == QuantNormSource::kDeviceField) {
+      const size_t plane_stride =
+        kPixelExtent.width * kPixelExtent.height;
+      for (size_t channel = 0; channel < 3; ++channel) {
+        batch_.resident_opsin.plane[channel] = {
+          device_opsin_.get(),
+          channel * plane_stride * sizeof(float),
+          gjxl::DeviceElementType::kF32,
+          kPixelExtent,
+          kPixelExtent.width,
+        };
+      }
+      batch_.resident_pixel_mask = {
+        device_mask_.get(), 0, gjxl::DeviceElementType::kF32,
+        kPixelExtent, kPixelExtent.width,
+      };
+      batch_.resident_quant_field = {
+        device_quant_field_.get(), 0, gjxl::DeviceElementType::kF32,
+        kBlockExtent, kBlockExtent.width,
+      };
+    }
   }
 
   void EvaluateCpu() {
@@ -329,11 +367,11 @@ public:
 
   void EvaluateMetalRoundTrip() {
     const size_t candidate_bytes =
-      candidates_.size() * sizeof(gjxl::AcStrategyCandidate);
+      uploaded_candidates_.size() * sizeof(gjxl::AcStrategyCandidate);
     const size_t cost_bytes = metal_costs_.size() * sizeof(float);
     Require(
       gpu_.CopyHostToDevice(
-        *device_candidates_, candidates_.data(), candidate_bytes),
+        *device_candidates_, uploaded_candidates_.data(), candidate_bytes),
       "Upload candidate descriptors");
     EvaluateMetalResident();
     Require(
@@ -392,11 +430,13 @@ private:
   const Fixture& fixture_;
   gjxl::AcStrategyType strategy_;
   std::vector<gjxl::AcStrategyCandidate> candidates_;
+  std::vector<gjxl::AcStrategyCandidate> uploaded_candidates_;
   std::vector<float> matrices_;
   std::vector<float> cpu_costs_;
   std::vector<float> metal_costs_;
   std::unique_ptr<gjxl::DeviceBuffer> device_opsin_;
   std::unique_ptr<gjxl::DeviceBuffer> device_mask_;
+  std::unique_ptr<gjxl::DeviceBuffer> device_quant_field_;
   std::unique_ptr<gjxl::DeviceBuffer> device_matrices_;
   std::unique_ptr<gjxl::DeviceBuffer> device_candidates_;
   std::unique_ptr<gjxl::DeviceBuffer> scratch_a_;
@@ -457,10 +497,11 @@ void BenchmarkCase(
   const Fixture& fixture,
   gjxl::AcStrategyType strategy,
   size_t candidate_count,
-  size_t sample_count) {
+  size_t sample_count,
+  QuantNormSource quant_norm_source) {
 
   CandidateBenchmarkCase benchmark_case(
-    gpu, fixture, strategy, candidate_count);
+    gpu, fixture, strategy, candidate_count, quant_norm_source);
   benchmark_case.Validate();
   const size_t cpu_repetitions = std::max(
     size_t{1},
@@ -549,9 +590,17 @@ int main(int argc, char** argv) {
     argc > 1 ? ParsePositive(argv[1], "DCT8-equivalent count") : 4096;
   const size_t sample_count =
     argc > 2 ? ParsePositive(argv[2], "sample count") : 12;
-  if (argc > 3) {
+  QuantNormSource quant_norm_source = QuantNormSource::kCandidate;
+  if (argc > 3 && std::string_view(argv[3]) == "device-quant") {
+    quant_norm_source = QuantNormSource::kDeviceField;
+  } else if (argc > 3 && std::string_view(argv[3]) != "host-quant") {
+    std::cerr << "Invalid quant-norm source: " << argv[3] << '\n';
+    return EXIT_FAILURE;
+  }
+  if (argc > 4) {
     std::cerr << "Usage: " << argv[0]
-              << " [DCT8-equivalent candidates] [samples]\n";
+              << " [DCT8-equivalent candidates] [samples] "
+                 "[host-quant|device-quant]\n";
     return EXIT_FAILURE;
   }
 
@@ -565,6 +614,10 @@ int main(int argc, char** argv) {
   const Fixture fixture;
 
   std::cout << "Backend: " << gpu->name() << " [simdgroup matmul]\n"
+            << "Quant norm source: "
+            << (quant_norm_source == QuantNormSource::kDeviceField
+                  ? "resident device field"
+                  : "candidate descriptors") << "\n"
             << "Image residency and quantization matrices are outside timing; "
                "Metal E2E includes candidate upload and cost download.\n"
             << "Each row reports median milliseconds per batch and CPU/GPU "
@@ -593,7 +646,8 @@ int main(int argc, char** argv) {
           fixture,
           strategy,
           candidate_count,
-          sample_count);
+          sample_count,
+          quant_norm_source);
       }
     }
   }
