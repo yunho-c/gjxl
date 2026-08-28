@@ -16,11 +16,8 @@
 
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/chroma_from_luma.h"
-#include "codec/color_transform.h"
 #include "codec/epf.h"
-#include "codec/loop_filter.h"
 #include "codec/quantization.h"
-#include "codec/reconstruction.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "gpu/ops/aq_evaluation.h"
@@ -169,13 +166,12 @@ public:
         return status;
       }
 
+      VarDctEncoderFrame exact_coefficients;
       FrameGeometry geometry;
-      status = FrameGeometry::Create(
-          original_source_extent_, &geometry);
+      status = FrameGeometry::Create(original_source_extent_, &geometry);
       if (!status.ok()) {
         return status;
       }
-      VarDctEncoderFrame exact_coefficients;
       status = ComputeQuantizedCoefficients(
           opsin_,
           {
@@ -188,31 +184,6 @@ public:
               .epf_sharpness = epf_sharpness_,
           },
           options_.profile, &exact_coefficients);
-      if (!status.ok()) {
-        return status;
-      }
-      Image3FBuffer exact_reconstruction(opsin_.extent());
-      status = ReconstructQuantizedCoefficients(
-          exact_coefficients, exact_reconstruction.view());
-      if (!status.ok()) {
-        return status;
-      }
-      Image3FBuffer cropped_reconstruction(original_source_extent_);
-      CopyImage(
-          exact_reconstruction.cropped_view(original_source_extent_),
-          cropped_reconstruction.view());
-      Image3FBuffer filtered_opsin(original_source_extent_);
-      status = ApplyLoopFilters(
-          cropped_reconstruction.const_view(),
-          {inverse_sigma.data(), block_extent, block_extent.width},
-          options_.profile.loop_filter, filtered_opsin.view());
-      if (!status.ok()) {
-        return status;
-      }
-      Image3FBuffer exact_linear(original_source_extent_);
-      status = OpsinToLinearRgb(
-          filtered_opsin.const_view(), options_.profile.intensity_target,
-          exact_linear.view());
       if (!status.ok()) {
         return status;
       }
@@ -234,8 +205,7 @@ public:
         };
         prepared_output.final = &final_output;
       }
-      status = prepared_->Evaluate(
-        {
+      AqEvaluationInput prepared_input{
           .raw_quant_field = {
             raw_quant.data(), block_extent, block_extent.width},
           .quantizer = quantizer.params(),
@@ -244,9 +214,8 @@ public:
           .epf_inverse_sigma = {
             inverse_sigma.data(), block_extent, block_extent.width},
           .exact_coefficients = &exact_coefficients,
-          .exact_reconstructed_linear_rgb = exact_linear.const_view(),
-        },
-        prepared_output);
+      };
+      status = prepared_->Evaluate(prepared_input, prepared_output);
       if (!status.ok()) {
         return status;
       }

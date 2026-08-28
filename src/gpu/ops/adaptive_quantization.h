@@ -32,7 +32,9 @@ struct GpuAdaptiveQuantizationPolicyOutput {
   GpuAdaptiveQuantizationPolicyOutput output);
 
 /// Runs GPU adaptive quantization and materializes the final resident
-/// reconstruction and encoder frame from the last evaluation.
+/// reconstruction and encoder frame from the last evaluation. Exact CPU
+/// quantized and dequantized reconstruction coefficients are transformed,
+/// filtered, and evaluated by the prepared GPU operation.
 ///
 /// Prepared AQ support is required; this operation never silently falls back
 /// to CPU evaluation. All caller-visible outputs are committed atomically.

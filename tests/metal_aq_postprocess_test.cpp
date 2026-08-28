@@ -260,9 +260,18 @@ bool ComparePostprocessOracle(
     const gjxl::metal_internal::MetalAqPostprocessSnapshotForTesting &snapshot,
     const HostImage &reconstructed, gjxl::ConstPlaneF32View sigma,
     gjxl::AqEvaluationOptions options) {
-  HostImage filtered(reconstructed.extent, reconstructed.extent.width + 5,
+  HostImage cropped(snapshot.source_extent, snapshot.source_extent.width + 4,
+                    -776.0f);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < snapshot.source_extent.height; ++y) {
+      std::copy_n(reconstructed.plane[channel].data() + y * reconstructed.stride,
+                  snapshot.source_extent.width,
+                  cropped.plane[channel].data() + y * cropped.stride);
+    }
+  }
+  HostImage filtered(snapshot.source_extent, snapshot.source_extent.width + 5,
                      -777.0f);
-  if (!CheckStatus(gjxl::ApplyLoopFilters(reconstructed.ConstView(), sigma,
+  if (!CheckStatus(gjxl::ApplyLoopFilters(cropped.ConstView(), sigma,
                                           options.profile.loop_filter,
                                           filtered.View()),
                    "CPU loop-filter oracle")) {
@@ -271,27 +280,34 @@ bool ComparePostprocessOracle(
   HostImage linear(snapshot.source_extent, snapshot.source_extent.width + 3,
                    -888.0f);
   if (!CheckStatus(
-          gjxl::OpsinToLinearRgb(filtered.Cropped(snapshot.source_extent),
+          gjxl::OpsinToLinearRgb(filtered.ConstView(),
                                  options.profile.intensity_target,
                                  linear.View()),
           "CPU color-conversion oracle")) {
     return false;
   }
-  HostImage actual_filtered(reconstructed.extent, reconstructed.extent.width);
+  HostImage actual_filtered(snapshot.source_extent,
+                            snapshot.source_extent.width);
   for (size_t channel = 0; channel < 3; ++channel) {
-    actual_filtered.plane[channel] = snapshot.filtered_opsin[channel];
+    for (size_t y = 0; y < snapshot.source_extent.height; ++y) {
+      std::copy_n(snapshot.filtered_opsin[channel].data() +
+                      y * snapshot.coding_extent.width,
+                  snapshot.source_extent.width,
+                  actual_filtered.plane[channel].data() +
+                      y * actual_filtered.stride);
+    }
   }
   HostImage isolated_linear(snapshot.source_extent,
                             snapshot.source_extent.width + 1, -999.0f);
   if (!CheckStatus(gjxl::OpsinToLinearRgb(
-                       actual_filtered.Cropped(snapshot.source_extent),
+                       actual_filtered.ConstView(),
                        options.profile.intensity_target,
                        isolated_linear.View()),
                    "CPU isolated color-conversion oracle")) {
     return false;
   }
   for (size_t channel = 0; channel < 3; ++channel) {
-    if (!CompareSnapshotPlane(snapshot.filtered_opsin[channel], filtered,
+    if (!CompareSnapshotPlane(actual_filtered.plane[channel], filtered,
                               channel, kFilterAbsolute, kFilterRelative,
                               &g_max_filter_error, "filtered opsin") ||
         !CompareSnapshotPlane(snapshot.reconstructed_linear[channel],
@@ -521,22 +537,35 @@ bool ComputeChainedLinear(const HostImage &coding,
                           HostImage *linear) {
   gjxl::VarDctEncoderFrame frame;
   HostImage reconstructed(coding.extent, coding.extent.width);
-  HostImage filtered(coding.extent, coding.extent.width);
+  HostImage cropped(source_extent, source_extent.width);
+  HostImage filtered(source_extent, source_extent.width);
+  auto crop_reconstruction = [&]() {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      for (size_t y = 0; y < source_extent.height; ++y) {
+        std::copy_n(reconstructed.plane[channel].data() +
+                        y * reconstructed.stride,
+                    source_extent.width,
+                    cropped.plane[channel].data() + y * cropped.stride);
+      }
+    }
+    return true;
+  };
   return CheckStatus(ComputeCpuFrame(coding, strategies, input, options,
                                      &frame),
                      "Butteraugli CPU coefficient oracle") &&
          CheckStatus(gjxl::ReconstructQuantizedCoefficients(
                          frame, reconstructed.View()),
                      "Butteraugli CPU reconstruction oracle") &&
+         crop_reconstruction() &&
          CheckStatus(gjxl::ApplyLoopFilters(
-                         reconstructed.ConstView(),
+                         cropped.ConstView(),
                          input.View().epf_inverse_sigma,
                          options.profile.loop_filter,
                          filtered.View()),
                      "Butteraugli CPU loop-filter oracle") &&
          CheckStatus(gjxl::OpsinToLinearRgb(
-                         filtered.Cropped(source_extent),
-                         options.profile.intensity_target, linear->View()),
+                         filtered.ConstView(), options.profile.intensity_target,
+                         linear->View()),
                      "Butteraugli CPU color-conversion oracle");
 }
 

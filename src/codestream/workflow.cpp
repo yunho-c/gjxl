@@ -36,6 +36,10 @@ constexpr float kInitialProfileIntensityTarget = 255.0f;
 // selection begins at 128x96.
 constexpr size_t kAutomaticMetalMinimumCodingPixels = 128 * 96;
 constexpr size_t kAutomaticMetalMinimumCodingDimension = 96;
+// Policy sweeps preserve exact frame decisions in this closed interval;
+// threshold-sensitive fixtures outside it remain on the CPU in auto mode.
+constexpr float kAutomaticMetalMinimumButteraugliTarget = 1.0f;
+constexpr float kAutomaticMetalMaximumButteraugliTarget = 1.2f;
 constexpr std::string_view kQualifiedMetalBackend = "Metal: Apple M4 Pro";
 
 MetalBackendOptions ProductionMetalBackendOptions() {
@@ -240,10 +244,13 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       const bool geometry_eligible =
         codestream_internal::IsAutomaticMetalGeometryEligible(
           geometry.padded_frame());
+      const bool target_eligible =
+        codestream_internal::IsAutomaticMetalTargetEligible(
+          options.butteraugli_target);
       const bool should_resolve =
         options.backend == VarDctBackendPreference::kMetal ||
         (options.backend == VarDctBackendPreference::kAutomatic &&
-         geometry_eligible);
+         geometry_eligible && target_eligible);
       if (should_resolve) {
         selected_gpu = supplied_backend;
         bool qualified = supplied_backend_is_qualified;
@@ -351,6 +358,12 @@ bool IsAutomaticMetalGeometryEligible(Extent2D padded_extent) noexcept {
     area >= kAutomaticMetalMinimumCodingPixels &&
     std::min(padded_extent.width, padded_extent.height) >=
       kAutomaticMetalMinimumCodingDimension;
+}
+
+bool IsAutomaticMetalTargetEligible(float butteraugli_target) noexcept {
+  return std::isfinite(butteraugli_target) &&
+    butteraugli_target >= kAutomaticMetalMinimumButteraugliTarget &&
+    butteraugli_target <= kAutomaticMetalMaximumButteraugliTarget;
 }
 
 bool IsAutomaticMetalBackendQualified(

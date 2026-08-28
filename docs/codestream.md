@@ -369,11 +369,13 @@ transform-anchor counts, and the selected CPU or Metal backend without exposing
 pipeline scratch storage.
 
 The default `kAutomatic` preference uses the embedded, process-cached Metal
-backend only on the qualified Apple M4 Pro geometry range established in
-[`metal-aq.md`](metal-aq.md); small images, unqualified devices, unavailable
+backend only on the qualified Apple M4 Pro geometry range and Butteraugli
+target interval `[1.0, 1.2]` established in [`metal-aq.md`](metal-aq.md);
+small images, targets outside that interval, unqualified devices, unavailable
 Metal, or missing capabilities use CPU before pipeline execution. Explicit
 `kCpu` and `kMetal` overrides are available. Forced Metal bypasses the
-automatic size/device gate but never falls back, and operational errors after
+automatic size, target, and device gates but never falls back; the broader
+quality range is an explicit unqualified override. Operational errors after
 GPU work starts are returned atomically instead of retrying on CPU.
 
 The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input, a

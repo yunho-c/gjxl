@@ -13,6 +13,9 @@ namespace gjxl::codestream_internal {
 [[nodiscard]] bool IsAutomaticMetalGeometryEligible(
   Extent2D padded_extent) noexcept;
 
+[[nodiscard]] bool IsAutomaticMetalTargetEligible(
+  float butteraugli_target) noexcept;
+
 [[nodiscard]] bool IsAutomaticMetalBackendQualified(
   const GpuBackend& backend) noexcept;
 

@@ -14,12 +14,13 @@
 namespace gjxl {
 
 enum class VarDctBackendPreference {
-  /// Uses qualified Metal only above the measured geometry floor. Availability
-  /// failures before pipeline execution fall back to CPU; runtime errors do not.
+  /// Uses qualified Metal only within the validated quality interval and above
+  /// the measured geometry floor. Availability failures before pipeline
+  /// execution fall back to CPU; runtime errors do not.
   kAutomatic,
   /// Always uses the CPU reference pipeline.
   kCpu,
-  /// Requires Metal regardless of the automatic qualification and size gates.
+  /// Requires Metal regardless of automatic device, quality, and size gates.
   kMetal,
 };
 

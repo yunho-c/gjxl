@@ -423,12 +423,14 @@ GPU dependency to `gjxl_codec`. Initial quantization, Gaborish preprocessing,
 first-pass CfL, search decisions, and the deterministic AQ update policy remain
 on the CPU. The direct prepared operation can perform coefficient coding,
 reconstruction, filters, color conversion, Butteraugli, and block reduction in
-one Metal submission. Milestone 8's qualified workflow uses a stricter
-decision-preserving boundary: CPU coefficient coding, decoder reconstruction,
-filters, and color conversion produce the exact comparison image, then one
-prepared Metal submission performs Butteraugli and block reduction. This
-avoids float-transform and filter discontinuities found by the broader rollout
-corpus without repeating Butteraugli on the CPU.
+one Metal submission. Milestone 9's qualified workflow uses a
+decision-preserving coefficient boundary: CPU coefficient coding,
+dequantization, inverse CfL, and DC/LLF conversion prepare exact packed
+reconstruction coefficients, then one prepared Metal submission performs
+inverse transforms, source-domain filters, color conversion, Butteraugli, and
+block reduction. This moves the dominating reconstruction and image tail to
+Metal while retaining exact coefficient decisions and avoiding a redundant
+CPU reconstruction or Butteraugli pass.
 
 The optional prepared-AQ capability is preflighted before pipeline work. A
 backend without it returns `Unavailable` without changing output or search
@@ -436,8 +438,11 @@ statistics, and there is no silent CPU fallback. The bounded
 `RunGpuAdaptiveQuantizationPolicy` API remains available when callers need only
 the final field, block map, and score history; `RunGpuAdaptiveQuantization`
 materializes the existing full adaptive-quantization output atomically. Both
-use the decision-preserving composite evaluator, while direct
-`PreparedAqEvaluation` calls retain the fully resident operation.
+use the exact-coefficient composite evaluator, while direct
+`PreparedAqEvaluation` calls retain the pre-existing exact-linear and fully
+resident operations for independent validation. The temporary policy-level
+selector used to compare experimental handoffs is not part of the shipped
+interface.
 
 The Metal backend uses the same transform-dispatch helper for public DCT
 batches and candidate evaluation. Scalar, SIMD-group, and factored radix-2
@@ -454,12 +459,13 @@ float-DCT-sensitive maximum block/RGB deviations are `2.21866e-2` and
 `2.01165e-2`, below a separately fixed `2.5e-2` narrow-geometry boundary; its
 frame and codestream remain exact.
 
-The Milestone 8 resolution sweep keeps the unchanged `2e-3` gate and observes
-maxima of `1.838893e-3` for the float field, `3.623962e-5` for block distance,
-and `1.144409e-5` for score. Reconstructed RGB, raw quant, complete frame state,
-and codestream bytes are exact across 128x96, odd padded, Flower, 480p, 720p,
-and 1080p workloads. Automatic workflow selection is documented in
-[`metal-aq.md`](metal-aq.md).
+The Milestone 9 corpus keeps the unchanged `2e-3` gate and observes maxima of
+`1.838893e-3` for the float field, `2.745390e-4` for block distance,
+`2.551079e-5` for score, and `5.960464e-6` for reconstructed RGB at validated
+targets `1.0` and `1.2`. Raw quant, complete frame state, and codestream bytes
+are exact across the built-in resolution sweep and four additional 1080p
+images. Automatic workflow selection is limited to that target interval and is
+documented in [`metal-aq.md`](metal-aq.md).
 
 Relevant implementations:
 
@@ -499,9 +505,10 @@ clamping, and rounding-progress decisions stay on the CPU. Intermediate Metal
 evaluations read back only the block-distance map and score required by that
 unchanged policy. Direct resident calls may also read back reconstructed RGB,
 quantized AC, and quantized DC. The qualified rollout retains the exact CPU
-frame and uploads exact reconstructed linear RGB for the Metal perceptual tail,
-so its last evaluation downloads only that unchanged image while returning the
-authoritative frame.
+coefficient frame and uploads its dequantized, inverse-CfL, DC/LLF-replaced
+coefficient stream. Metal performs inverse transforms and the image/perceptual
+tail, and the last evaluation downloads the reconstructed source image while
+returning an exact authoritative frame.
 
 Every GPU stage must be compared with the CPU reference and, where applicable,
 the pinned libjxl oracle. Direct intermediate comparisons, final AQ decisions,

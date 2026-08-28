@@ -20,6 +20,9 @@
 #include <utility>
 #include <vector>
 
+#include "codec/chroma_from_luma.h"
+#include "codec/dc_conversion.h"
+#include "codec/quantization.h"
 #include "codec/quantization_tables_generated.h"
 #include "codec/vardct_frame_internal.h"
 #include "core/quantizer.h"
@@ -108,6 +111,15 @@ template <typename T>
     (plane.extent.height - 1) * plane.stride + plane.extent.width;
   using Value = std::remove_const_t<T>;
   return elements <= std::numeric_limits<size_t>::max() / sizeof(Value);
+}
+
+[[nodiscard]] bool ImageDescriptorSpecified(
+    ConstImage3FView image) noexcept {
+  return std::ranges::any_of(
+      image.plane, [](ConstPlaneF32View plane) {
+        return plane.data != nullptr || plane.extent.width != 0 ||
+               plane.extent.height != 0 || plane.stride != 0;
+      });
 }
 
 [[nodiscard]] Status ValidateOptions(const AqEvaluationOptions& options) {
@@ -464,6 +476,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   }
   try {
     forward_readback_.resize(coefficient_value_count_);
+    exact_reconstruction_coefficients_.resize(coefficient_value_count_);
     quantized_readback_.resize(coefficient_value_count_);
     dc_readback_.resize(3 * block_count_);
     quantized_dc_readback_.resize(3 * block_count_);
@@ -865,10 +878,10 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   };
 
   gaborish_params_ = {
-      static_cast<uint32_t>(coding_extent_.width),
-      static_cast<uint32_t>(coding_extent_.height),
+      static_cast<uint32_t>(source_extent_.width),
+      static_cast<uint32_t>(source_extent_.height),
       static_cast<uint32_t>(reconstructed_[0].row_stride),
-      static_cast<uint32_t>(coding_extent_.width),
+      static_cast<uint32_t>(filter_scratch_[0][0].row_stride),
   };
   for (size_t channel = 0; channel < 3; ++channel) {
     const float weight1 =
@@ -889,10 +902,10 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         ? options_.profile.loop_filter.epf_options.pass2_sigma_scale
         : 1.0f;
     epf_params_[index] = {
-        static_cast<uint32_t>(coding_extent_.width),
-        static_cast<uint32_t>(coding_extent_.height),
-        static_cast<uint32_t>(coding_extent_.width),
-        static_cast<uint32_t>(coding_extent_.width),
+        static_cast<uint32_t>(source_extent_.width),
+        static_cast<uint32_t>(source_extent_.height),
+        static_cast<uint32_t>(filter_scratch_[0][0].row_stride),
+        static_cast<uint32_t>(filter_scratch_[0][0].row_stride),
         static_cast<uint32_t>(inverse_sigma_.row_stride),
         pass,
         1.65f * pass_scale,
@@ -1455,12 +1468,16 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
 }
 
 Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
-  if ((input.exact_coefficients != nullptr) !=
-          input.exact_reconstructed_linear_rgb.valid() ||
-      (input.exact_coefficients != nullptr &&
+  const bool linear_specified =
+      ImageDescriptorSpecified(input.exact_reconstructed_linear_rgb);
+  const bool exact_linear = input.exact_reconstructed_linear_rgb.valid();
+  if ((linear_specified && !exact_linear) ||
+      (exact_linear && input.exact_coefficients == nullptr) ||
+      (exact_linear &&
        input.exact_reconstructed_linear_rgb.extent() != source_extent_)) {
     return Status::InvalidArgument(
-        "Exact AQ coefficients and reconstructions must be supplied together");
+        "An exact AQ linear image must be correctly sized and accompanied "
+        "by exact coefficients");
   }
   if (!ValidHostPlaneLayout(input.raw_quant_field) ||
       input.raw_quant_field.extent != block_extent_ ||
@@ -1531,10 +1548,11 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
         }
       }
     }
-    status = ValidateFiniteImage(
-        input.exact_reconstructed_linear_rgb,
-        "Exact AQ reconstructed linear RGB");
-    if (!status.ok()) return status;
+    if (exact_linear) {
+      status = ValidateFiniteImage(input.exact_reconstructed_linear_rgb,
+                                   "Exact AQ reconstructed linear RGB");
+      if (!status.ok()) return status;
+    }
   }
   return Status::Ok();
 }
@@ -1608,6 +1626,8 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   exact_coefficients_ = input.exact_coefficients != nullptr;
   exact_linear_reconstruction_ =
       input.exact_reconstructed_linear_rgb.valid();
+  exact_coefficient_reconstruction_ = exact_coefficients_ &&
+      !exact_linear_reconstruction_;
   if (status.ok() && exact_coefficients_) {
     const VarDctEncoderFrame& frame = *input.exact_coefficients;
     const ConstImage3I32View quantized_dc = frame.quantized_dc();
@@ -1654,6 +1674,85 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
         std::copy_n(group.coefficients[channel].data() + source_offset,
                     batch.coefficient_count,
                     quantized_readback_.data() + destination_offset);
+        if (exact_coefficient_reconstruction_) {
+          constexpr std::array<XybChannel, 3> kChannels = {
+              XybChannel::kX, XybChannel::kY, XybChannel::kB};
+          const float matrix_multiplier = channel == 0
+              ? QuantizationMatrixMultiplier(options_.profile.x_qm_scale)
+              : (channel == 2
+                     ? QuantizationMatrixMultiplier(
+                           options_.profile.b_qm_scale)
+                     : 1.0f);
+          status = DequantizeAcBlock(
+              anchor.strategy, frame.quantizer(),
+              input.raw_quant_field.Row(anchor.block_y)[anchor.block_x],
+              {.channel = kChannels[channel],
+               .matrix_multiplier = matrix_multiplier},
+              std::span<const int32_t>(
+                  group.coefficients[channel].data() + source_offset,
+                  batch.coefficient_count),
+              std::span<float>(
+                  exact_reconstruction_coefficients_.data() +
+                      destination_offset,
+                  batch.coefficient_count));
+          if (!status.ok()) return status;
+        }
+      }
+      if (exact_coefficient_reconstruction_) {
+        // Preserve the CPU reference's double-accumulated coefficient-coding
+        // decisions and its DC/LLF conversion. The Metal handoff starts at
+        // inverse transforms, where the remaining float error is stable and
+        // does not perturb the accepted raw-quant decisions.
+        const std::array<float, 3> factors =
+            frame.color_correlation().AcFactors(
+                anchor.block_x /
+                    (kColorTileDimension / kJxlBlockDimension),
+                anchor.block_y /
+                    (kColorTileDimension / kJxlBlockDimension));
+        const size_t x_offset = batch.coefficient_offset +
+            anchor.index_in_batch * batch.coefficient_count;
+        const size_t y_offset = x_offset + channel_stride;
+        const size_t b_offset = y_offset + channel_stride;
+        for (size_t coefficient = 0;
+             coefficient < batch.coefficient_count; ++coefficient) {
+          const float reconstructed_y =
+              exact_reconstruction_coefficients_[y_offset + coefficient];
+          exact_reconstruction_coefficients_[x_offset + coefficient] +=
+              factors[0] * reconstructed_y;
+          exact_reconstruction_coefficients_[b_offset + coefficient] +=
+              factors[2] * reconstructed_y;
+        }
+
+        const ConstImage3FView frame_dc = frame.dc();
+        for (size_t channel = 0; channel < 3; ++channel) {
+          // The largest supported strategy covers a 4x4 base-block region.
+          std::array<float, 16> dc{};
+          const size_t dc_count = info->covered_blocks.width *
+              info->covered_blocks.height;
+          if (dc_count > dc.size()) {
+            return Status::Internal(
+                "Exact AQ strategy exceeds the DC preparation workspace");
+          }
+          for (size_t y = 0; y < info->covered_blocks.height; ++y) {
+            std::copy_n(
+                frame_dc.plane[channel].Row(anchor.block_y + y) +
+                    anchor.block_x,
+                info->covered_blocks.width,
+                dc.data() + y * info->covered_blocks.width);
+          }
+          const ConstPlaneF32View dc_view{
+              dc.data(), info->covered_blocks, info->covered_blocks.width};
+          const size_t destination_offset = batch.coefficient_offset +
+              channel * channel_stride +
+              anchor.index_in_batch * batch.coefficient_count;
+          status = ConvertDcToLowFrequencies(
+              anchor.strategy, dc_view,
+              std::span<float>(
+                  exact_reconstruction_coefficients_.data() +
+                      destination_offset,
+                  batch.coefficient_count));
+          if (!status.ok()) return status;
+        }
       }
       group_offsets[group_index] += batch.coefficient_count;
     }
@@ -1666,6 +1765,13 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
         return Status::InvalidArgument(
             "Exact AQ coefficient group contains unconsumed values");
       }
+    }
+    if (exact_coefficient_reconstruction_) {
+      status = backend_->CopyHostToDevice(
+          *reconstruction_coefficients_.buffer,
+          exact_reconstruction_coefficients_.data(),
+          exact_reconstruction_coefficients_.size() * sizeof(float),
+          reconstruction_coefficients_.offset_bytes);
     }
   }
   if (status.ok() && exact_linear_reconstruction_) {
@@ -1811,8 +1917,12 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      5>
+      7>
       reconstruction = {{
+          {"gjxl_aq_reset_exact_evaluation",
+           &pipelines.reset_exact_evaluation},
+          {"gjxl_aq_reset_exact_coefficients",
+           &pipelines.reset_exact_coefficients},
           {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
           {"gjxl_aq_gather_transform_pixels",
            &pipelines.gather_transform_pixels},

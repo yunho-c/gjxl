@@ -53,7 +53,7 @@ using Clock = std::chrono::steady_clock;
 
 constexpr size_t kDefaultWarmups = 3;
 constexpr size_t kDefaultSamples = 5;
-constexpr float kButteraugliTarget = 1.2f;
+constexpr float kDefaultButteraugliTarget = 1.2f;
 
 enum class Phase : size_t {
   kInitialQuantField,
@@ -65,7 +65,9 @@ enum class Phase : size_t {
   kCompletePipeline,
   kGpuAcStrategySearch,
   kGpuPreparation,
+  kGpuFullyResidentEvaluation,
   kGpuResidentEvaluation,
+  kGpuExactCoefficientEvaluation,
   kGpuAqOneEvaluation,
   kGpuAqTwoUpdates,
   kGpuCompletePipeline,
@@ -86,7 +88,9 @@ constexpr std::array<std::string_view, kPhaseCount> kPhaseNames = {
     "cpu_complete_pipeline_two_updates",
     "gpu_ac_strategy_search",
     "gpu_preparation",
+    "gpu_fully_resident_evaluation",
     "gpu_resident_perceptual_tail",
+    "gpu_exact_coefficient_reconstruction_tail",
     "gpu_aq_one_evaluation_e2e",
     "gpu_iterative_aq_two_updates_e2e",
     "gpu_complete_pipeline_two_updates",
@@ -104,7 +108,9 @@ constexpr std::array<std::string_view, aqi::kEvaluationStageCount>
 
 struct CommandLineOptions {
   std::string workload = "all";
+  std::string input_path;
   std::string implementation = "simd";
+  float butteraugli_target = kDefaultButteraugliTarget;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
 };
@@ -113,13 +119,15 @@ struct WorkloadSpec {
   std::string_view name;
   gjxl::Extent2D source_extent;
   bool flower = false;
+  bool workflow_gradient = false;
 };
 
-constexpr std::array<WorkloadSpec, 12> kWorkloads = {{
+constexpr std::array<WorkloadSpec, 13> kWorkloads = {{
     {"crossover_32x24", {32, 24}, false},
     {"crossover_64x48", {64, 48}, false},
     {"crossover_96x64", {96, 64}, false},
     {"synthetic_128x96", {128, 96}, false},
+    {"workflow_gradient_128x96", {128, 96}, false, true},
     {"crossover_192x128", {192, 128}, false},
     {"crossover_256x192", {256, 192}, false},
     {"crossover_512x384", {512, 384}, false},
@@ -305,6 +313,65 @@ template <typename T>
   return "none";
 }
 
+struct FrameCoefficientError {
+  size_t quantized_dc_count = 0;
+  int64_t quantized_dc_max_delta = 0;
+  size_t quantized_ac_count = 0;
+  int64_t quantized_ac_max_delta = 0;
+  double reconstructed_dc_max_error = 0.0;
+};
+
+[[nodiscard]] FrameCoefficientError CompareFrameCoefficients(
+    const gjxl::VarDctEncoderFrame& expected,
+    const gjxl::VarDctEncoderFrame& actual) {
+  FrameCoefficientError result;
+  const gjxl::ConstImage3I32View expected_dc = expected.quantized_dc();
+  const gjxl::ConstImage3I32View actual_dc = actual.quantized_dc();
+  const gjxl::ConstImage3FView expected_reconstructed_dc = expected.dc();
+  const gjxl::ConstImage3FView actual_reconstructed_dc = actual.dc();
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < expected_dc.extent().height; ++y) {
+      for (size_t x = 0; x < expected_dc.extent().width; ++x) {
+        const int64_t delta = std::abs(
+            static_cast<int64_t>(expected_dc.plane[channel].Row(y)[x]) -
+            actual_dc.plane[channel].Row(y)[x]);
+        result.quantized_dc_count += delta != 0;
+        result.quantized_dc_max_delta =
+            std::max(result.quantized_dc_max_delta, delta);
+        result.reconstructed_dc_max_error = std::max(
+            result.reconstructed_dc_max_error,
+            std::abs(static_cast<double>(
+                         expected_reconstructed_dc.plane[channel].Row(y)[x]) -
+                     actual_reconstructed_dc.plane[channel].Row(y)[x]));
+      }
+    }
+  }
+  const size_t group_count =
+      std::min(expected.ac_group_count(), actual.ac_group_count());
+  for (size_t group_index = 0; group_index < group_count; ++group_index) {
+    gjxl::VarDctAcGroupView expected_group;
+    gjxl::VarDctAcGroupView actual_group;
+    if (!expected.GetAcGroup(group_index, &expected_group).ok() ||
+        !actual.GetAcGroup(group_index, &actual_group).ok()) {
+      continue;
+    }
+    const size_t coefficient_count = std::min(
+        expected_group.used_coefficient_count,
+        actual_group.used_coefficient_count);
+    for (size_t channel = 0; channel < 3; ++channel) {
+      for (size_t index = 0; index < coefficient_count; ++index) {
+        const int64_t delta = std::abs(
+            static_cast<int64_t>(expected_group.coefficients[channel][index]) -
+            actual_group.coefficients[channel][index]);
+        result.quantized_ac_count += delta != 0;
+        result.quantized_ac_max_delta =
+            std::max(result.quantized_ac_max_delta, delta);
+      }
+    }
+  }
+  return result;
+}
+
 [[nodiscard]] gjxl::Extent2D PaddedExtent(gjxl::Extent2D extent) {
   return {
       (extent.width + gjxl::kJxlBlockDimension - 1) / gjxl::kJxlBlockDimension *
@@ -327,6 +394,19 @@ template <typename T>
   return static_cast<size_t>(value);
 }
 
+[[nodiscard]] float ParsePositiveFloat(std::string_view text) {
+  if (text.empty()) {
+    throw std::runtime_error("Benchmark floating-point argument is invalid");
+  }
+  size_t parsed = 0;
+  const double value = std::stod(std::string(text), &parsed);
+  if (parsed != text.size() || !std::isfinite(value) || value <= 0.0 ||
+      value > std::numeric_limits<float>::max()) {
+    throw std::runtime_error("Benchmark floating-point argument is invalid");
+  }
+  return static_cast<float>(value);
+}
+
 [[nodiscard]] CommandLineOptions ParseCommandLine(int argc, char** argv) {
   CommandLineOptions options;
   for (int index = 1; index < argc; ++index) {
@@ -334,8 +414,9 @@ template <typename T>
     if (argument == "--help") {
       std::cout << "usage: gjxl_quantization_benchmark "
                    "[--workload NAME|all] "
+                   "[--input IMAGE.ppm] "
                    "[--implementation scalar|simd|factored] "
-                   "[--warmups N] [--samples N]\n";
+                   "[--distance D] [--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
     }
     if (index + 1 >= argc) {
@@ -344,12 +425,16 @@ template <typename T>
     const std::string_view value = argv[++index];
     if (argument == "--workload") {
       options.workload = value;
+    } else if (argument == "--input") {
+      options.input_path = value;
     } else if (argument == "--implementation") {
       if (value != "scalar" && value != "simd" && value != "factored") {
         throw std::runtime_error(
             "Unknown Metal DCT implementation: " + std::string(value));
       }
       options.implementation = value;
+    } else if (argument == "--distance") {
+      options.butteraugli_target = ParsePositiveFloat(value);
     } else if (argument == "--warmups") {
       options.warmups = ParseSize(value, true);
     } else if (argument == "--samples") {
@@ -406,21 +491,22 @@ template <typename T>
   }
   *input >> token;
   if (!*input) {
-    throw std::runtime_error("Malformed Flower PPM header");
+    throw std::runtime_error("Malformed PPM header");
   }
   return token;
 }
 
-[[nodiscard]] ImageStorage LoadFlower() {
-  std::ifstream input(GJXL_FLOWER_PPM_PATH, std::ios::binary);
+[[nodiscard]] ImageStorage LoadPpm(std::string_view path) {
+  std::ifstream input(std::string(path), std::ios::binary);
   if (!input || ReadPpmToken(&input) != "P6") {
-    throw std::runtime_error("Unable to open the pinned binary Flower PPM");
+    throw std::runtime_error("Unable to open binary PPM: " +
+                             std::string(path));
   }
   const size_t width = std::stoull(ReadPpmToken(&input));
   const size_t height = std::stoull(ReadPpmToken(&input));
   const unsigned long maximum = std::stoul(ReadPpmToken(&input));
-  if (width != 510 || height != 532 || maximum != 255) {
-    throw std::runtime_error("Pinned Flower PPM dimensions or depth changed");
+  if (maximum != 255) {
+    throw std::runtime_error("Benchmark PPM must have 8-bit samples");
   }
   char separator = 0;
   input.get(separator);
@@ -429,13 +515,13 @@ template <typename T>
   if (!input || !std::isspace(static_cast<unsigned char>(separator)) ||
       !extent.try_area(&pixel_count) ||
       pixel_count > std::numeric_limits<size_t>::max() / 3) {
-    throw std::runtime_error("Pinned Flower PPM is malformed or too large");
+    throw std::runtime_error("Benchmark PPM is malformed or too large");
   }
   std::vector<uint8_t> bytes(pixel_count * 3);
   input.read(reinterpret_cast<char *>(bytes.data()),
              static_cast<std::streamsize>(bytes.size()));
   if (input.gcount() != static_cast<std::streamsize>(bytes.size())) {
-    throw std::runtime_error("Pinned Flower PPM pixel data is truncated");
+    throw std::runtime_error("Benchmark PPM pixel data is truncated");
   }
 
   ImageStorage image(extent);
@@ -443,6 +529,14 @@ template <typename T>
     for (size_t channel = 0; channel < 3; ++channel) {
       image.plane[channel][index] = SrgbToLinear(bytes[index * 3 + channel]);
     }
+  }
+  return image;
+}
+
+[[nodiscard]] ImageStorage LoadFlower() {
+  ImageStorage image = LoadPpm(GJXL_FLOWER_PPM_PATH);
+  if (image.extent != gjxl::Extent2D{510, 532}) {
+    throw std::runtime_error("Pinned Flower PPM dimensions changed");
   }
   return image;
 }
@@ -467,6 +561,22 @@ void FillSynthetic(ImageStorage* image) {
           0.0f, 1.0f);
       image->plane[2][y * image->extent.width + x] =
           ((x / 7 + y / 5) & 1u) == 0 ? 0.12f : 0.84f;
+    }
+  }
+}
+
+void FillWorkflowGradient(ImageStorage* image) {
+  for (size_t y = 0; y < image->extent.height; ++y) {
+    for (size_t x = 0; x < image->extent.width; ++x) {
+      const float fx = static_cast<float>(x) /
+          static_cast<float>(image->extent.width - 1);
+      const float fy = static_cast<float>(y) /
+          static_cast<float>(image->extent.height - 1);
+      image->plane[0][y * image->extent.width + x] = 0.06f + 0.78f * fx;
+      image->plane[1][y * image->extent.width + x] =
+          0.08f + 0.72f * fy + 0.03f * std::sin(19.0f * fx);
+      image->plane[2][y * image->extent.width + x] =
+          0.04f + 0.31f * fx + 0.46f * fy;
     }
   }
 }
@@ -512,14 +622,21 @@ void PrintStats(std::string_view label, const std::vector<double>& samples) {
 }
 
 void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
+                 float butteraugli_target,
+                 std::string_view input_path,
                  gjxl::GpuBackend& gpu,
                  const gjxl::MetalBackendOptions& backend_options,
                  double* global_sink) {
 
-  ImageStorage original =
-      spec.flower ? LoadFlower() : ImageStorage(spec.source_extent);
-  if (!spec.flower) {
-    FillSynthetic(&original);
+  ImageStorage original = !input_path.empty()
+      ? LoadPpm(input_path)
+      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
+  if (!spec.flower && input_path.empty()) {
+    if (spec.workflow_gradient) {
+      FillWorkflowGradient(&original);
+    } else {
+      FillSynthetic(&original);
+    }
   }
   const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);
   ImageStorage padded_linear(coding_extent);
@@ -537,7 +654,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
   RequireStatus(
       "initial quantization setup",
       gjxl::ComputeInitialQuantField(opsin.ConstView(),
-                                     {.butteraugli_target = kButteraugliTarget},
+                                     {.butteraugli_target = butteraugli_target},
                                      stage.InitialOutput()));
   gjxl::ColorCorrelationMap initial_color_correlation;
   RequireStatus("initial color-correlation setup",
@@ -550,7 +667,8 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           {stage.initial_quant.data(), stage.block_extent,
            stage.block_extent.width},
           {stage.pixel_mask.data(), coding_extent, coding_extent.width},
-          initial_color_correlation, {.butteraugli_target = kButteraugliTarget},
+          initial_color_correlation,
+          {.butteraugli_target = butteraugli_target},
           &stage.strategies));
   std::vector<uint8_t> sharpness(stage.block_extent.width *
                                  stage.block_extent.height);
@@ -560,7 +678,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           {sharpness.data(), stage.block_extent, stage.block_extent.width}));
 
   gjxl::AdaptiveQuantizationOptions one_evaluation_options;
-  one_evaluation_options.butteraugli_target = kButteraugliTarget;
+  one_evaluation_options.butteraugli_target = butteraugli_target;
   one_evaluation_options.iterations = 0;
   gjxl::AdaptiveQuantizationOptions two_update_options = one_evaluation_options;
   two_update_options.iterations = 2;
@@ -573,17 +691,13 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
   std::vector<uint8_t> workflow_bytes;
   gjxl::VarDctEncodingSummary workflow_summary;
   gjxl::CpuQuantizationPipelineOptions pipeline_options;
-  pipeline_options.butteraugli_target = kButteraugliTarget;
+  pipeline_options.butteraugli_target = butteraugli_target;
   pipeline_options.adaptive_quantization.iterations = 2;
 
   RequireStatus("CPU pipeline validation",
                 gjxl::RunCpuQuantizationPipeline(
                     original.ConstView(), opsin.ConstView(), pipeline_options,
                     pipeline_stage.PipelineOutput()));
-  RequireStatus("GPU pipeline validation",
-                gjxl::RunGpuQuantizationPipeline(
-                    gpu, original.ConstView(), opsin.ConstView(),
-                    pipeline_options, gpu_pipeline_stage.PipelineOutput()));
   RequireStatus(
       "CPU resident validation",
       gjxl::FindBestQuantization(
@@ -592,10 +706,16 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
            stage.block_extent.width},
           {sharpness.data(), stage.block_extent, stage.block_extent.width},
           one_evaluation_options, stage.AdaptiveOutput()));
+  RequireStatus("GPU pipeline validation",
+                gjxl::RunGpuQuantizationPipeline(
+                    gpu, original.ConstView(), opsin.ConstView(),
+                    pipeline_options,
+                    gpu_pipeline_stage.PipelineOutput()));
   RequireStatus(
       "GPU resident validation",
       gjxl::RunGpuAdaptiveQuantization(
-          gpu, original.ConstView(), preprocessed.ConstView(), stage.strategies,
+          gpu, original.ConstView(), preprocessed.ConstView(),
+          stage.strategies,
           {stage.initial_quant.data(), stage.block_extent,
            stage.block_extent.width},
           {sharpness.data(), stage.block_extent, stage.block_extent.width},
@@ -610,7 +730,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       gjxl::codestream_internal::
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
               original.ConstView(),
-              {.butteraugli_target = kButteraugliTarget,
+              {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kCpu},
               nullptr, false, &cpu_validation_bytes,
               &cpu_validation_summary));
@@ -619,9 +739,10 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       gjxl::codestream_internal::
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
               original.ConstView(),
-              {.butteraugli_target = kButteraugliTarget,
+              {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal},
-              &gpu, true, &gpu_validation_bytes, &gpu_validation_summary));
+              &gpu, true, &gpu_validation_bytes,
+              &gpu_validation_summary));
   const auto maximum_vector_error = [](const std::vector<float>& left,
                                        const std::vector<float>& right) {
     if (left.size() != right.size()) {
@@ -681,17 +802,20 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
   const std::string one_frame_difference =
       FrameDifference(stage.frame, gpu_stage.frame);
   constexpr double kRolloutTolerance = 2.0e-3;
-  if (cpu_validation_bytes != gpu_validation_bytes ||
-      cpu_validation_summary.strategy_counts !=
-          gpu_validation_summary.strategy_counts ||
-      pipeline_frame_difference != "none" || one_frame_difference != "none" ||
-      pipeline_quant_error > kRolloutTolerance ||
-      pipeline_block_error > kRolloutTolerance ||
-      pipeline_score_error > kRolloutTolerance ||
-      pipeline_reconstruction_error > kRolloutTolerance ||
-      one_block_error > kRolloutTolerance ||
-      one_score_error > kRolloutTolerance ||
-      one_reconstruction_error > kRolloutTolerance) {
+  const bool rollout_matches =
+      cpu_validation_bytes == gpu_validation_bytes &&
+      cpu_validation_summary.strategy_counts ==
+          gpu_validation_summary.strategy_counts &&
+      pipeline_frame_difference == "none" &&
+      one_frame_difference == "none" &&
+      pipeline_quant_error <= kRolloutTolerance &&
+      pipeline_block_error <= kRolloutTolerance &&
+      pipeline_score_error <= kRolloutTolerance &&
+      pipeline_reconstruction_error <= kRolloutTolerance &&
+      one_block_error <= kRolloutTolerance &&
+      one_score_error <= kRolloutTolerance &&
+      one_reconstruction_error <= kRolloutTolerance;
+  if (!rollout_matches) {
     throw std::runtime_error(
         "CPU/Metal rollout gate failed: bytes=" +
         std::string(cpu_validation_bytes == gpu_validation_bytes
@@ -715,14 +839,14 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
   RequireStatus(
       "Resident quant-field adjustment",
       gjxl::AdjustQuantField(
-          stage.strategies, kButteraugliTarget,
+          stage.strategies, butteraugli_target,
           {stage.initial_quant.data(), stage.block_extent,
            stage.block_extent.width},
           {resident_quant_field.data(), stage.block_extent,
            stage.block_extent.width}));
   float quant_dc = 0.0f;
   RequireStatus("Resident DC quantization",
-                gjxl::ComputeInitialQuantDc(kButteraugliTarget, &quant_dc));
+                gjxl::ComputeInitialQuantDc(butteraugli_target, &quant_dc));
   std::vector<int32_t> resident_raw_quant(block_count);
   std::vector<float> resident_inverse_sigma(block_count);
   gjxl::Quantizer resident_quantizer;
@@ -828,14 +952,92 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       .reconstructed_linear_rgb = resident_stage.reconstructed.View(),
       .frame = &resident_stage.frame,
   };
+  StageOutput coefficient_prototype_stage(original.extent, coding_extent);
+  gjxl::AqEvaluationOutput::Final coefficient_prototype_final{
+      .reconstructed_linear_rgb =
+          coefficient_prototype_stage.reconstructed.View(),
+      .frame = &coefficient_prototype_stage.frame,
+  };
+  StageOutput fully_resident_stage(original.extent, coding_extent);
+  gjxl::AqEvaluationOutput::Final fully_resident_final{
+      .reconstructed_linear_rgb = fully_resident_stage.reconstructed.View(),
+      .frame = &fully_resident_stage.frame,
+  };
   double resident_score = 0.0;
+  double coefficient_prototype_score = 0.0;
+  double fully_resident_score = 0.0;
   gjxl::metal_internal::MetalAqEvaluationProfile gpu_profile;
+  gjxl::metal_internal::MetalAqEvaluationProfile coefficient_gpu_profile;
+  gjxl::metal_internal::MetalAqEvaluationProfile fully_resident_gpu_profile;
+
+  RequireStatus(
+      "Fully resident prototype validation",
+      profiled_prepared->Evaluate(
+          {
+              .raw_quant_field = {
+                  resident_raw_quant.data(), stage.block_extent,
+                  stage.block_extent.width},
+              .quantizer = resident_quantizer.params(),
+              .y_to_x = resident_color.y_to_x_map(),
+              .y_to_b = resident_color.y_to_b_map(),
+              .epf_inverse_sigma = {
+                  resident_inverse_sigma.data(), stage.block_extent,
+                  stage.block_extent.width},
+          },
+          {
+              .block_distance_map = {
+                  fully_resident_stage.block_distance.data(),
+                  stage.block_extent, stage.block_extent.width},
+              .score = &fully_resident_score,
+              .final = &fully_resident_final,
+          }));
+
+  RequireStatus(
+      "Exact-coefficient prototype validation",
+      profiled_prepared->Evaluate(
+          {
+              .raw_quant_field = {
+                  resident_raw_quant.data(), stage.block_extent,
+                  stage.block_extent.width},
+              .quantizer = resident_quantizer.params(),
+              .y_to_x = resident_color.y_to_x_map(),
+              .y_to_b = resident_color.y_to_b_map(),
+              .epf_inverse_sigma = {
+                  resident_inverse_sigma.data(), stage.block_extent,
+                  stage.block_extent.width},
+              .exact_coefficients = &resident_exact_frame,
+          },
+          {
+              .block_distance_map = {
+                  coefficient_prototype_stage.block_distance.data(),
+                  stage.block_extent, stage.block_extent.width},
+              .score = &coefficient_prototype_score,
+              .final = &coefficient_prototype_final,
+          }));
+  const double coefficient_prototype_block_error = maximum_vector_error(
+      stage.block_distance, coefficient_prototype_stage.block_distance);
+  const double coefficient_prototype_score_error = std::abs(
+      stage.scores.back() - coefficient_prototype_score);
+  const double coefficient_prototype_rgb_error = maximum_image_error(
+      stage.reconstructed, coefficient_prototype_stage.reconstructed);
+  const std::string coefficient_prototype_frame_difference = FrameDifference(
+      stage.frame, coefficient_prototype_stage.frame);
+  const double fully_resident_block_error = maximum_vector_error(
+      stage.block_distance, fully_resident_stage.block_distance);
+  const double fully_resident_score_error = std::abs(
+      stage.scores.back() - fully_resident_score);
+  const double fully_resident_rgb_error = maximum_image_error(
+      stage.reconstructed, fully_resident_stage.reconstructed);
+  const std::string fully_resident_frame_difference = FrameDifference(
+      stage.frame, fully_resident_stage.frame);
+  const FrameCoefficientError fully_resident_coefficient_error =
+      CompareFrameCoefficients(stage.frame, fully_resident_stage.frame);
 
   auto run_phase = [&](Phase phase, aqi::AdaptiveQuantizationProfile* profile) {
     switch (phase) {
     case Phase::kInitialQuantField:
       return gjxl::ComputeInitialQuantField(
-          opsin.ConstView(), {.butteraugli_target = kButteraugliTarget},
+          opsin.ConstView(), {.butteraugli_target = butteraugli_target},
           stage.InitialOutput());
     case Phase::kGaborishInverse:
       return gjxl::ApplyGaborishInverse(opsin.ConstView(), {1.0f, 1.0f, 1.0f},
@@ -849,7 +1051,8 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           {stage.initial_quant.data(), stage.block_extent,
            stage.block_extent.width},
           {stage.pixel_mask.data(), coding_extent, coding_extent.width},
-          initial_color_correlation, {.butteraugli_target = kButteraugliTarget},
+          initial_color_correlation,
+          {.butteraugli_target = butteraugli_target},
           &stage.strategies);
     case Phase::kAqOneEvaluation: {
       aqi::AdaptiveQuantizationProfile ignored;
@@ -879,7 +1082,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
            stage.block_extent.width},
           {stage.pixel_mask.data(), coding_extent, coding_extent.width},
           initial_color_correlation,
-          {.butteraugli_target = kButteraugliTarget}, &gpu_strategies,
+          {.butteraugli_target = butteraugli_target}, &gpu_strategies,
           &gpu_search_stats);
     case Phase::kGpuPreparation: {
       std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
@@ -896,6 +1099,28 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           },
           &prepared);
     }
+    case Phase::kGpuFullyResidentEvaluation:
+      return gjxl::metal_internal::EvaluateMetalAqProfiled(
+          *profiled_prepared,
+          {
+              .raw_quant_field = {
+                  resident_raw_quant.data(), stage.block_extent,
+                  stage.block_extent.width},
+              .quantizer = resident_quantizer.params(),
+              .y_to_x = resident_color.y_to_x_map(),
+              .y_to_b = resident_color.y_to_b_map(),
+              .epf_inverse_sigma = {
+                  resident_inverse_sigma.data(), stage.block_extent,
+                  stage.block_extent.width},
+          },
+          {
+              .block_distance_map = {
+                  fully_resident_stage.block_distance.data(),
+                  stage.block_extent, stage.block_extent.width},
+              .score = &fully_resident_score,
+              .final = &fully_resident_final,
+          },
+          &fully_resident_gpu_profile);
     case Phase::kGpuResidentEvaluation:
       return gjxl::metal_internal::EvaluateMetalAqProfiled(
           *profiled_prepared,
@@ -921,6 +1146,29 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
               .final = &resident_final,
           },
           &gpu_profile);
+    case Phase::kGpuExactCoefficientEvaluation:
+      return gjxl::metal_internal::EvaluateMetalAqProfiled(
+          *profiled_prepared,
+          {
+              .raw_quant_field = {
+                  resident_raw_quant.data(), stage.block_extent,
+                  stage.block_extent.width},
+              .quantizer = resident_quantizer.params(),
+              .y_to_x = resident_color.y_to_x_map(),
+              .y_to_b = resident_color.y_to_b_map(),
+              .epf_inverse_sigma = {
+                  resident_inverse_sigma.data(), stage.block_extent,
+                  stage.block_extent.width},
+              .exact_coefficients = &resident_exact_frame,
+          },
+          {
+              .block_distance_map = {
+                  coefficient_prototype_stage.block_distance.data(),
+                  stage.block_extent, stage.block_extent.width},
+              .score = &coefficient_prototype_score,
+              .final = &coefficient_prototype_final,
+          },
+          &coefficient_gpu_profile);
     case Phase::kGpuAqOneEvaluation:
       return gjxl::RunGpuAdaptiveQuantization(
           gpu, original.ConstView(), preprocessed.ConstView(), stage.strategies,
@@ -943,14 +1191,14 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       return gjxl::codestream_internal::
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
               original.ConstView(),
-              {.butteraugli_target = kButteraugliTarget,
+              {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kCpu},
               nullptr, false, &workflow_bytes, &workflow_summary);
     case Phase::kGpuWarmPublicWorkflow:
       return gjxl::codestream_internal::
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
               original.ConstView(),
-              {.butteraugli_target = kButteraugliTarget,
+              {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal},
               &gpu, true, &workflow_bytes, &workflow_summary);
     case Phase::kGpuColdPublicWorkflow: {
@@ -963,7 +1211,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       return gjxl::codestream_internal::
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
               original.ConstView(),
-              {.butteraugli_target = kButteraugliTarget,
+              {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal},
               cold_gpu.get(), true, &workflow_bytes, &workflow_summary);
     }
@@ -989,6 +1237,8 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
   std::array<std::vector<double>, aqi::kEvaluationStageCount> stage_samples;
   std::vector<double> commit_samples;
   std::array<std::vector<double>, 7> gpu_profile_samples;
+  std::array<std::vector<double>, 7> coefficient_gpu_profile_samples;
+  std::array<std::vector<double>, 7> fully_resident_gpu_profile_samples;
   for (size_t sample = 0; sample < samples; ++sample) {
     for (size_t offset = 0; offset < kPhaseCount; ++offset) {
       const Phase phase = static_cast<Phase>((sample + offset) % kPhaseCount);
@@ -1017,6 +1267,20 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
         }
         commit_samples.push_back(
             NanosecondsToMilliseconds(profile.output_commit_nanoseconds));
+      } else if (phase == Phase::kGpuFullyResidentEvaluation) {
+        const std::array<uint64_t, 7> values = {
+            fully_resident_gpu_profile.input_upload_nanoseconds,
+            fully_resident_gpu_profile.submission_nanoseconds,
+            fully_resident_gpu_profile.completion_wait_nanoseconds,
+            fully_resident_gpu_profile.command_buffer_gpu_nanoseconds,
+            fully_resident_gpu_profile.bounded_readback_nanoseconds,
+            fully_resident_gpu_profile.final_readback_nanoseconds,
+            fully_resident_gpu_profile.output_commit_nanoseconds,
+        };
+        for (size_t index = 0; index < values.size(); ++index) {
+          fully_resident_gpu_profile_samples[index].push_back(
+              NanosecondsToMilliseconds(values[index]));
+        }
       } else if (phase == Phase::kGpuResidentEvaluation) {
         const std::array<uint64_t, 7> values = {
             gpu_profile.input_upload_nanoseconds,
@@ -1031,6 +1295,20 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           gpu_profile_samples[index].push_back(
               NanosecondsToMilliseconds(values[index]));
         }
+      } else if (phase == Phase::kGpuExactCoefficientEvaluation) {
+        const std::array<uint64_t, 7> values = {
+            coefficient_gpu_profile.input_upload_nanoseconds,
+            coefficient_gpu_profile.submission_nanoseconds,
+            coefficient_gpu_profile.completion_wait_nanoseconds,
+            coefficient_gpu_profile.command_buffer_gpu_nanoseconds,
+            coefficient_gpu_profile.bounded_readback_nanoseconds,
+            coefficient_gpu_profile.final_readback_nanoseconds,
+            coefficient_gpu_profile.output_commit_nanoseconds,
+        };
+        for (size_t index = 0; index < values.size(); ++index) {
+          coefficient_gpu_profile_samples[index].push_back(
+              NanosecondsToMilliseconds(values[index]));
+        }
       }
       sink += stage.scores.empty() ? stage.initial_quant.front()
                                    : stage.scores.back();
@@ -1040,6 +1318,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
   std::cout << "workload " << spec.name << " source=" << original.extent.width
             << 'x' << original.extent.height
             << " coding=" << coding_extent.width << 'x' << coding_extent.height
+            << " distance=" << butteraugli_target
             << '\n';
   std::cout << std::scientific << std::setprecision(6)
             << "  rollout_errors pipeline_quant=" << pipeline_quant_error
@@ -1049,7 +1328,32 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
             << " one_block=" << one_block_error
             << " one_score=" << one_score_error
             << " one_rgb=" << one_reconstruction_error
-            << " frame=exact codestream=exact\n"
+            << " frame=" << pipeline_frame_difference
+            << " codestream="
+            << (cpu_validation_bytes == gpu_validation_bytes ? "exact"
+                                                             : "different")
+            << " gate=" << (rollout_matches ? "pass" : "fail") << '\n'
+            << "  fully_resident_errors block="
+            << fully_resident_block_error
+            << " score=" << fully_resident_score_error
+            << " rgb=" << fully_resident_rgb_error
+            << " frame=" << fully_resident_frame_difference
+            << " qdc_count="
+            << fully_resident_coefficient_error.quantized_dc_count
+            << " qdc_max_delta="
+            << fully_resident_coefficient_error.quantized_dc_max_delta
+            << " ac_count="
+            << fully_resident_coefficient_error.quantized_ac_count
+            << " ac_max_delta="
+            << fully_resident_coefficient_error.quantized_ac_max_delta
+            << " dc_max_error="
+            << fully_resident_coefficient_error.reconstructed_dc_max_error
+            << '\n'
+            << "  exact_coefficient_errors block="
+            << coefficient_prototype_block_error
+            << " score=" << coefficient_prototype_score_error
+            << " rgb=" << coefficient_prototype_rgb_error
+            << " frame=" << coefficient_prototype_frame_difference << '\n'
             << std::fixed << std::setprecision(3);
   std::cout << "  memory_bytes persistent=" << memory_stats.persistent_bytes
             << " staging=" << memory_stats.staging_bytes
@@ -1069,9 +1373,19 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       "command_buffer_gpu", "bounded_readback", "final_readback",
       "output_commit",
   };
+  std::cout << "  gpu_fully_resident_profile\n";
+  for (size_t index = 0; index < kGpuProfileNames.size(); ++index) {
+    PrintStats(kGpuProfileNames[index],
+               fully_resident_gpu_profile_samples[index]);
+  }
   std::cout << "  gpu_resident_perceptual_profile\n";
   for (size_t index = 0; index < kGpuProfileNames.size(); ++index) {
     PrintStats(kGpuProfileNames[index], gpu_profile_samples[index]);
+  }
+  std::cout << "  gpu_exact_coefficient_reconstruction_profile\n";
+  for (size_t index = 0; index < kGpuProfileNames.size(); ++index) {
+    PrintStats(kGpuProfileNames[index],
+               coefficient_gpu_profile_samples[index]);
   }
   std::cout << "  sink=" << sink << '\n';
   *global_sink += sink;
@@ -1088,7 +1402,8 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
 int main(int argc, char** argv) {
   try {
     const CommandLineOptions options = ParseCommandLine(argc, argv);
-    if (options.workload != "all" && !IsKnownWorkload(options.workload)) {
+    if (options.input_path.empty() && options.workload != "all" &&
+        !IsKnownWorkload(options.workload)) {
       throw std::runtime_error("Unknown quantization workload: " +
                                options.workload);
     }
@@ -1100,14 +1415,22 @@ int main(int argc, char** argv) {
     std::cout << std::fixed << std::setprecision(3)
               << "CPU/Metal quantization benchmark: backend=" << gpu->name()
               << " implementation=" << options.implementation
+              << " distance=" << options.butteraugli_target
               << " warmups=" << options.warmups
               << " samples=" << options.samples
               << " rotated_phases=" << kPhaseCount << '\n';
     double sink = 0.0;
-    for (const WorkloadSpec& workload : kWorkloads) {
-      if (options.workload == "all" || options.workload == workload.name) {
-        RunWorkload(workload, options.warmups, options.samples, *gpu,
-                    backend_options, &sink);
+    if (!options.input_path.empty()) {
+      RunWorkload({"external_input", {}, false}, options.warmups,
+                  options.samples, options.butteraugli_target,
+                  options.input_path, *gpu, backend_options, &sink);
+    } else {
+      for (const WorkloadSpec& workload : kWorkloads) {
+        if (options.workload == "all" || options.workload == workload.name) {
+          RunWorkload(workload, options.warmups, options.samples,
+                      options.butteraugli_target, {}, *gpu, backend_options,
+                      &sink);
+        }
       }
     }
     std::cout << "global_sink=" << sink << '\n';

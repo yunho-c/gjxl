@@ -131,7 +131,7 @@ void MetalPreparedAqEvaluation::EncodePostprocess(
     BindImage(encoder, output, 3);
     BindPlane(encoder, reconstruction_error_, 6);
     encoder->setBytes(&gaborish_params_, sizeof(gaborish_params_), 7);
-    MetalBackend::DispatchPlane(encoder, coding_extent_);
+    MetalBackend::DispatchPlane(encoder, source_extent_);
     current = output;
     ++filter_stage;
   }
@@ -149,7 +149,7 @@ void MetalPreparedAqEvaluation::EncodePostprocess(
     BindImage(encoder, output, 4);
     BindPlane(encoder, reconstruction_error_, 7);
     encoder->setBytes(&epf_params_[pass], sizeof(epf_params_[pass]), 8);
-    MetalBackend::DispatchPlane(encoder, coding_extent_);
+    MetalBackend::DispatchPlane(encoder, source_extent_);
     current = output;
     ++filter_stage;
   }

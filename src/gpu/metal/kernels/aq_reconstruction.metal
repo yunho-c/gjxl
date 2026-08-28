@@ -48,6 +48,22 @@ struct AqQuantizationProbeParams {
   float matrix_multiplier;
 };
 
+kernel void gjxl_aq_reset_exact_evaluation(
+  device atomic_uint* error [[buffer(0)]],
+  device float* block_distance [[buffer(1)]],
+  constant AqResetParams& params [[buffer(2)]],
+  uint index [[thread_position_in_grid]]) {
+
+  constexpr uint kPoison = 0x7fc12345u;
+  if (index == 0u) {
+    atomic_store_explicit(
+      error, params.test_error_mask, memory_order_relaxed);
+  }
+  if (index < params.block_value_count) {
+    block_distance[index] = as_type<float>(kPoison);
+  }
+}
+
 static uint aq_coefficient_index(
   constant AqReconstructionParams& params,
   uint vertical_frequency,
@@ -135,6 +151,30 @@ kernel void gjxl_aq_reset_reconstruction(
   if (index < params.dc_value_count) {
     dc[index] = as_type<float>(kPoison);
     quantized_dc[index] = int(0x81234567u);
+  }
+  if (index < params.pixel_value_count) {
+    reconstructed_x[index] = as_type<float>(kPoison);
+    reconstructed_y[index] = as_type<float>(kPoison);
+    reconstructed_b[index] = as_type<float>(kPoison);
+  }
+  if (index < params.block_value_count) {
+    block_distance[index] = as_type<float>(kPoison);
+  }
+}
+
+kernel void gjxl_aq_reset_exact_coefficients(
+  device float* reconstructed_x [[buffer(0)]],
+  device float* reconstructed_y [[buffer(1)]],
+  device float* reconstructed_b [[buffer(2)]],
+  device atomic_uint* error [[buffer(3)]],
+  device float* block_distance [[buffer(4)]],
+  constant AqResetParams& params [[buffer(5)]],
+  uint index [[thread_position_in_grid]]) {
+
+  constexpr uint kPoison = 0x7fc12345u;
+  if (index == 0u) {
+    atomic_store_explicit(
+      error, params.test_error_mask, memory_order_relaxed);
   }
   if (index < params.pixel_value_count) {
     reconstructed_x[index] = as_type<float>(kPoison);

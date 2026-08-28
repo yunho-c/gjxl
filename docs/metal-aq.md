@@ -24,10 +24,12 @@ in one submission. Reconstructed images and the pixel distance map remain
 resident, while the bounded GPU policy returns only the final quant field,
 block map, and score history. Reconstructed-image and encoder-frame
 materialization, complete-pipeline switching, and a decision-preserving
-automatic rollout are now available. The qualified rollout keeps the exact CPU
-coefficient/reconstruction/filter prefix and uses the prepared Metal submission
-for Butteraugli and block reduction; the fully resident float path remains
-available through the prepared operation but is not selected automatically.
+automatic rollout are now available. The qualified rollout keeps exact CPU
+coefficient coding, dequantization, inverse CfL, and DC-to-low-frequency
+conversion, then uses Metal inverse transforms, source-domain filtering, color
+conversion, Butteraugli, and block reduction. The fully resident float path
+remains available through the prepared operation but is not selected
+automatically.
 
 ## Goals
 
@@ -293,7 +295,7 @@ oracle coverage.
 
 ## Milestones
 
-Milestones 0 through 8 are complete.
+Milestones 0 through 9 are complete.
 
 ### 0. Refresh the AQ baseline and freeze the evaluation contract — complete (2026-08-26)
 
@@ -980,14 +982,16 @@ The expanded Flower and resolution sweep exposed decision discontinuities in
 the fully resident float reconstruction path: a first Flower diagnostic had
 40 different raw-quant values, a `0.114605` float-field delta, and a
 `0.048073` score delta. The fixed `2e-3` decision gate was not relaxed. The
-rollout evaluator instead computes the authoritative coefficient frame,
+Milestone 8's rollout evaluator instead computes the authoritative coefficient
+frame,
 decoder reconstruction, loop filters, and linear RGB with the unchanged CPU
 reference, uploads that exact comparison image, and executes prepared
 Butteraugli plus strategy-aware block reduction in one Metal submission. GPU
 AC search and the CPU AQ update policy remain unchanged. The direct prepared
 operation still supports the complete resident reconstruction chain for tests
-and future precision work, but automatic and forced workflow selection use the
-decision-preserving composite path.
+and future precision work. At that milestone, automatic and forced workflow
+selection used the decision-preserving exact-linear composite; Milestone 9
+below supersedes that handoff.
 
 `VarDctEncodingOptions` now selects `kAutomatic`, `kCpu`, or `kMetal`, and the
 summary reports the backend that actually ran. The CLI exposes the same policy
@@ -1066,6 +1070,128 @@ the embedded metallib. The separately built pinned libjxl decoder accepts all
 one balanced process with `just quantization-benchmark all simd 3 1`; the
 ranges above combine three independent invocations.
 
+### 9. Explore and qualify the reconstruction handoff — complete (2026-08-27)
+
+- Localize the decision error in the fully resident evaluator rather than
+  widening the fixed `2e-3` gate.
+- Compare exact-linear, exact-reconstructed-opsin, exact-coefficient, and fully
+  resident CPU/Metal handoffs under one benchmark and oracle harness.
+- Exercise default and non-default quality targets, filtering options, smooth
+  and textured synthetic images, odd padding, natural images, and 720p/1080p
+  inputs.
+- Select the deepest boundary that preserves the authoritative encoder frame,
+  integrate it into bounded AQ and the complete workflow, and remove the
+  temporary policy-level selector used for the comparison.
+
+The investigation first found a correctness bug independent of transform
+precision: the resident path filtered the padded coding extent, whereas the CPU
+reference crops reconstructed opsin to the source extent before Gaborish and
+EPF. Metal filter parameters and dispatches now use the source width and height
+while retaining the padded device stride. An isolated postprocess oracle covers
+the corrected right and bottom boundary behavior.
+
+Four handoffs were then compared:
+
+| Boundary | CPU work per evaluation | Metal work | Decision result |
+| --- | --- | --- | --- |
+| Exact linear | coefficient coding through color conversion | Butteraugli and block reduction | Stable, but leaves most AQ work on CPU |
+| Exact reconstructed opsin | coefficient coding and inverse reconstruction | filters through block reduction | Stable at the default target after the crop fix |
+| Exact coefficients | coefficient coding, dequantization, inverse CfL, and DC/LLF conversion | inverse transforms through block reduction | Selected production boundary |
+| Fully resident | policy-side fields only | forward transforms through block reduction | Rejected; float coefficient ties compound across policy updates |
+
+The selected evaluator uploads packed float reconstruction coefficients after
+the CPU reference has made the quantized-AC and quantized-DC decisions, applied
+dequantization and inverse CfL, and replaced transform low frequencies from the
+authoritative frame DC. Metal begins with the inverse transforms and retains
+reconstruction, source-domain filtering, opsin-to-linear conversion, prepared
+Butteraugli comparison, and strategy-aware reduction in the same submission.
+The final `VarDctEncoderFrame` is assembled from the exact uploaded coefficient
+decisions, so there is no redundant CPU reconstruction or final perceptual
+evaluation. Preparation storage is reused: each evaluation still adds exactly
+one submission and zero device allocations. Device memory is unchanged from
+Milestone 8; the new host preparation workspace is one packed float coefficient
+array.
+
+| Source -> coding geometry | Device persistent | Device staging | Device peak scratch | Packed host coefficients |
+| --- | ---: | ---: | ---: | ---: |
+| 128x96 | 639488 | 2945588 | 2330752 | 147456 |
+| 510x532 -> 512x536 | 13195264 | 64976692 | 51408544 | 3293184 |
+| 1279x719 -> 1280x720 | 44376576 | 219592244 | 173589432 | 11059200 |
+| 1919x1079 -> 1920x1080 | 99822080 | 494296372 | 390734776 | 24883200 |
+
+The fully resident variant is faster, but it is not a safe encoder boundary.
+Sparse one-unit quantized-DC and quantized-AC differences can cross policy
+rounding thresholds and amplify on the next update. A natural 1080p crop
+reached `0.123` final-field and `0.524` block-map error, and a smooth-gradient
+case reached `0.112` score-history error. CPU transforms accumulate in double
+precision while Metal transforms use float arithmetic; duplicating the CPU
+dequantization, CfL, and DC/LLF preparation proved sufficient to retain safe
+float inverse transforms without pretending those coefficient ties are
+interchangeable.
+
+The production corpus covers 13 built-in workloads at Butteraugli targets
+`1.0` and `1.2`, plus four independent 1919x1079 natural, HDR-like, and
+high-contrast images at `1.2`. The selected path observed maxima of
+`1.838893e-3` for the final float field, `2.745390e-4` for the block map,
+`2.551079e-5` for score history, and `5.960464e-6` for reconstructed RGB. Raw
+quantization, complete frame state, and codestream bytes were exact. Direct
+exact-coefficient evaluation remained below the same `2e-3` gate, preserved
+poisoned host padding, and retained the one-submission/zero-allocation
+contract.
+
+Targets `0.5` and `2.0` were also explored. Even an exact-linear handoff can
+cross a policy discontinuity at `0.5`, while moving the inverse reconstruction
+to Metal introduced additional threshold cases at both extremes. Automatic
+workflow selection is therefore qualified only for finite Butteraugli targets
+in `[1.0, 1.2]`, in addition to the existing device and geometry gates. Outside
+that window automatic mode selects CPU before pipeline execution. Forced Metal
+remains explicit for diagnostics and callers that accept the unqualified
+quality range, returns any failure atomically, and never retries on CPU.
+
+Three independent Apple M4 Pro Release processes each used one warmup and
+three measured rotations of all 22 exploratory phases. The cells are ranges
+of process medians. The committed benchmark removes the temporary policy
+handoff matrix and retains 18 durable production and prepared-operation
+phases.
+
+| Workload | CPU AQ2 | Metal AQ2 | CPU complete pipeline | Metal complete pipeline | CPU public | Metal cold public |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 128x96 | 27.943–29.646 ms | 5.551–5.764 ms | 35.850–37.042 ms | 8.223–8.274 ms | 38.075–40.797 ms | 15.726–16.716 ms |
+| Flower 510x532 | 640.883–660.979 ms | 100.495–102.700 ms | 824.642–845.000 ms | 133.000–143.928 ms | 848.807–855.194 ms | 148.533–152.821 ms |
+| 1279x719 -> 1280x720 | 2193.056–2226.364 ms | 324.751–335.515 ms | 2779.794–2805.685 ms | 463.664–480.656 ms | 2813.722–2828.943 ms | 502.435–516.657 ms |
+| 1919x1079 -> 1920x1080 | 4974.302–4990.734 ms | 706.189–726.516 ms | 6247.826–6291.163 ms | 1023.175–1030.042 ms | 6345.863–6374.548 ms | 1084.067–1117.815 ms |
+
+Paired cold-public speedups were `2.29–2.59x`, `5.60–5.74x`, `5.47–5.63x`,
+and `5.70–5.87x`, respectively. Complete-pipeline speedup was `5.80–6.00x` at
+720p and `6.08–6.11x` at 1080p; selected-boundary AQ itself reached
+`6.86–7.07x` at 1080p. The rejected fully resident AQ prototype reached
+`12.2–12.8x` there, demonstrating that 10x compute throughput is possible but
+not decision-safe. A production 10x result would require an exact or
+decision-equivalent GPU coefficient coder; the tested float implementation
+does not meet that prerequisite, so it is deliberately not integrated.
+
+A selective CPU-repair handoff was also considered. At the default target the
+larger fixtures showed only one to six one-unit quantized-DC mismatches and no
+AC mismatch; the 1080p `0.5` experiment also exposed one AC mismatch. Sparsity
+alone is not a correctness contract: the float device result cannot prove on
+which side of the CPU double-accumulation rounding boundary the reference lies.
+Conservatively finding every repair candidate still needs a validated
+transform-specific error interval, and recomputing all candidates with the CPU
+transform returns the measured coefficient-coding cost to the critical path.
+No false-negative repair bound was established across all seven strategies, so
+the repair prototype is retained as future precision research rather than a
+production shortcut.
+
+Fresh AppleClang 17 Release matrices pass `55/55` tests with the pinned
+Butteraugli reference enabled and `49/49` with it disabled. Both include the
+installed static-library consumer. Targeted tests observed `2.38419e-7`
+maximum block-reduction error, `1.19209e-7` filter error, `2.38419e-7` color
+error, `4.57764e-5` chained production-evaluation error, `3.58582e-4`
+policy block-map error, `1.06812e-4` policy score error, and `5.30481e-6`
+policy reconstructed-RGB error. The separately built pinned libjxl decoder
+accepts all 21 codestream-conformance fixtures and the checked workflow sample.
+`git diff --check` is clean.
+
 ## Validation matrix
 
 GPU validation is layered so a final round trip cannot hide a wrong
@@ -1136,14 +1262,17 @@ encoder decisions.
 
 ## Implementation order
 
-Milestones 0 through 8 are complete. The prepared operation carries resident
+Milestones 0 through 9 are complete. The prepared operation can carry resident
 reconstructed opsin through filtering, cropped linear RGB, prepared
 Butteraugli comparison, and strategy-aware block reduction in one submission;
 the shared CPU policy requests final RGB and frame materialization only from
-its last evaluation. Milestone 8 retains that operation for direct use but
-qualifies the decision-preserving CPU-prefix/Metal-perceptual-tail composite
-for automatic rollout, because the broader corpus did not permit the fully
-resident float path to satisfy the unchanged decision gate.
+its last evaluation. Milestone 9 supersedes Milestone 8's conservative
+exact-linear rollout with the qualified exact-coefficient boundary: CPU owns
+the coefficient decisions, dequantization, inverse CfL, and DC/LLF conversion,
+while Metal owns inverse transforms and the complete image/perceptual tail.
+The fully resident path remains an internal diagnostic because it does not
+satisfy the unchanged decision gate. Automatic selection additionally requires
+a Butteraugli target in `[1.0, 1.2]`.
 
 The pre-Milestone-6 2026-08-27 codestream integration made the encoder frame
 profile the single CPU/GPU option contract and added modular DC quantization

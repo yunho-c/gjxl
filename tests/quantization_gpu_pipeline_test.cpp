@@ -520,8 +520,18 @@ bool CheckWorkflowBackendSelection() {
   if (gjxl::codestream_internal::IsAutomaticMetalGeometryEligible({64, 48}) ||
       gjxl::codestream_internal::IsAutomaticMetalGeometryEligible({96, 64}) ||
       !gjxl::codestream_internal::IsAutomaticMetalGeometryEligible(kExtent) ||
-      !gjxl::codestream_internal::IsAutomaticMetalGeometryEligible({128, 96})) {
-    std::cerr << "Automatic Metal geometry policy changed\n";
+      !gjxl::codestream_internal::IsAutomaticMetalGeometryEligible({128, 96}) ||
+      gjxl::codestream_internal::IsAutomaticMetalTargetEligible(0.5f) ||
+      gjxl::codestream_internal::IsAutomaticMetalTargetEligible(0.999f) ||
+      !gjxl::codestream_internal::IsAutomaticMetalTargetEligible(1.0f) ||
+      !gjxl::codestream_internal::IsAutomaticMetalTargetEligible(1.2f) ||
+      gjxl::codestream_internal::IsAutomaticMetalTargetEligible(1.201f) ||
+      gjxl::codestream_internal::IsAutomaticMetalTargetEligible(2.0f) ||
+      gjxl::codestream_internal::IsAutomaticMetalTargetEligible(
+          std::numeric_limits<float>::infinity()) ||
+      gjxl::codestream_internal::IsAutomaticMetalTargetEligible(
+          std::numeric_limits<float>::quiet_NaN())) {
+    std::cerr << "Automatic Metal geometry or quality policy changed\n";
     return false;
   }
 
@@ -575,8 +585,97 @@ bool CheckWorkflowBackendSelection() {
           gjxl::VarDctExecutionBackend::kMetal ||
       unqualified_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kCpu) {
-    std::cerr << "Public workflow backend changed accepted decisions\n";
+    std::cerr << "Public workflow backend changed accepted decisions: "
+              << "forced_bytes=" << (cpu_bytes == forced_bytes)
+              << " automatic_bytes=" << (cpu_bytes == automatic_bytes)
+              << " unqualified_bytes=" << (cpu_bytes == unqualified_bytes)
+              << " forced_score_error="
+              << MaximumScoreError(cpu_summary.score_history,
+                                   forced_summary.score_history)
+              << " automatic_score_error="
+              << MaximumScoreError(cpu_summary.score_history,
+                                   automatic_summary.score_history)
+              << " unqualified_scores="
+              << (cpu_summary.score_history ==
+                  unqualified_summary.score_history)
+              << " forced_strategies="
+              << (cpu_summary.strategy_counts ==
+                  forced_summary.strategy_counts)
+              << " automatic_strategies="
+              << (cpu_summary.strategy_counts ==
+                  automatic_summary.strategy_counts)
+              << " unqualified_strategies="
+              << (cpu_summary.strategy_counts ==
+                  unqualified_summary.strategy_counts)
+              << " backends="
+              << static_cast<int>(cpu_summary.execution_backend) << ','
+              << static_cast<int>(forced_summary.execution_backend) << ','
+              << static_cast<int>(automatic_summary.execution_backend) << ','
+              << static_cast<int>(unqualified_summary.execution_backend)
+              << '\n';
     return false;
+  }
+
+  {
+    std::vector<uint8_t> upper_cpu_bytes;
+    std::vector<uint8_t> upper_automatic_bytes;
+    gjxl::VarDctEncodingSummary upper_cpu_summary;
+    gjxl::VarDctEncodingSummary upper_automatic_summary;
+    if (!gjxl::codestream_internal::
+            EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+                original.ConstView(),
+                {.butteraugli_target = 1.2f,
+                 .backend = gjxl::VarDctBackendPreference::kCpu},
+                nullptr, false, &upper_cpu_bytes, &upper_cpu_summary)
+            .ok() ||
+        !gjxl::codestream_internal::
+            EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+                original.ConstView(),
+                {.butteraugli_target = 1.2f,
+                 .backend = gjxl::VarDctBackendPreference::kAutomatic},
+                gpu.get(), true, &upper_automatic_bytes,
+                &upper_automatic_summary)
+            .ok() ||
+        upper_cpu_bytes != upper_automatic_bytes ||
+        MaximumScoreError(upper_cpu_summary.score_history,
+                          upper_automatic_summary.score_history) > 2.0e-3 ||
+        upper_automatic_summary.execution_backend !=
+            gjxl::VarDctExecutionBackend::kMetal) {
+      std::cerr << "Automatic Metal did not accept the upper quality bound\n";
+      return false;
+    }
+  }
+
+  for (float target : {0.5f, 0.999f, 1.201f, 2.0f}) {
+    std::vector<uint8_t> target_cpu_bytes;
+    std::vector<uint8_t> target_automatic_bytes;
+    gjxl::VarDctEncodingSummary target_cpu_summary;
+    gjxl::VarDctEncodingSummary target_automatic_summary;
+    if (!gjxl::codestream_internal::
+            EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+                original.ConstView(),
+                {.butteraugli_target = target,
+                 .backend = gjxl::VarDctBackendPreference::kCpu},
+                nullptr, false, &target_cpu_bytes, &target_cpu_summary)
+            .ok() ||
+        !gjxl::codestream_internal::
+            EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+                original.ConstView(),
+                {.butteraugli_target = target,
+                 .backend = gjxl::VarDctBackendPreference::kAutomatic},
+                gpu.get(), true, &target_automatic_bytes,
+                &target_automatic_summary)
+            .ok() ||
+        target_cpu_bytes != target_automatic_bytes ||
+        target_cpu_summary.score_history !=
+            target_automatic_summary.score_history ||
+        target_automatic_summary.execution_backend !=
+            gjxl::VarDctExecutionBackend::kCpu) {
+      std::cerr << "Automatic Metal did not preserve CPU outside its quality "
+                   "window at distance "
+                << target << '\n';
+      return false;
+    }
   }
 
   std::vector<uint8_t> failed_bytes{9, 2, 6};

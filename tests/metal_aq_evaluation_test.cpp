@@ -16,6 +16,9 @@
 #include <vector>
 
 #include "codec/butteraugli.h"
+#include "codec/color_transform.h"
+#include "codec/loop_filter.h"
+#include "codec/reconstruction.h"
 #include "codec/vardct_frame.h"
 #include "core/ac_strategy.h"
 #include "core/status.h"
@@ -289,6 +292,46 @@ bool CompareOutputs(const EvaluationOutputStorage& left,
   return true;
 }
 
+bool QuantizedCoefficientsEqual(const gjxl::VarDctEncoderFrame& expected,
+                                const gjxl::VarDctEncoderFrame& actual) {
+  if (!expected.valid() || !actual.valid() ||
+      expected.ac_group_count() != actual.ac_group_count()) {
+    return false;
+  }
+  const gjxl::ConstImage3I32View expected_dc = expected.quantized_dc();
+  const gjxl::ConstImage3I32View actual_dc = actual.quantized_dc();
+  if (expected_dc.extent() != actual_dc.extent()) return false;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < expected_dc.extent().height; ++y) {
+      if (!std::equal(expected_dc.plane[channel].Row(y),
+                      expected_dc.plane[channel].Row(y) +
+                          expected_dc.extent().width,
+                      actual_dc.plane[channel].Row(y))) {
+        return false;
+      }
+    }
+  }
+  for (size_t group_index = 0; group_index < expected.ac_group_count();
+       ++group_index) {
+    gjxl::VarDctAcGroupView expected_group;
+    gjxl::VarDctAcGroupView actual_group;
+    if (!expected.GetAcGroup(group_index, &expected_group).ok() ||
+        !actual.GetAcGroup(group_index, &actual_group).ok() ||
+        expected_group.used_coefficient_count !=
+            actual_group.used_coefficient_count) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      if (!std::equal(expected_group.coefficients[channel].begin(),
+                      expected_group.coefficients[channel].end(),
+                      actual_group.coefficients[channel].begin())) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckReductionCase(gjxl::GpuBackend& gpu, gjxl::Extent2D source_extent,
                         gjxl::Extent2D coding_extent,
                         const gjxl::AcStrategyGrid& strategies,
@@ -500,6 +543,192 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
         }
       }
     }
+  }
+
+  EvaluationOutputStorage exact_linear_bounded(fixture.strategies.extent());
+  HostImage exact_linear_rgb(
+      fixture.original.extent, fixture.original.extent.width + 3);
+  gjxl::VarDctEncoderFrame exact_linear_frame;
+  gjxl::AqEvaluationOutput::Final exact_linear_final{
+    .reconstructed_linear_rgb = exact_linear_rgb.MutableView(),
+    .frame = &exact_linear_frame,
+  };
+  gjxl::AqEvaluationOutput exact_linear_output = exact_linear_bounded.View();
+  exact_linear_output.final = &exact_linear_final;
+  gjxl::AqEvaluationInput exact_linear_input = fixture.input.View();
+  exact_linear_input.exact_coefficients = &final_frame;
+  HostImage exact_cpu_reconstruction(
+      fixture.coding.extent, fixture.coding.extent.width + 4);
+  HostImage exact_cpu_cropped(
+      fixture.original.extent, fixture.original.extent.width + 2);
+  HostImage exact_cpu_filtered(
+      fixture.original.extent, fixture.original.extent.width + 1);
+  HostImage exact_cpu_linear(
+      fixture.original.extent, fixture.original.extent.width + 4);
+  if (!CheckStatus(gjxl::ReconstructQuantizedCoefficients(
+                       final_frame, exact_cpu_reconstruction.MutableView()),
+                   "exact-linear CPU reconstruction")) {
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < fixture.original.extent.height; ++y) {
+      std::copy_n(
+          exact_cpu_reconstruction.plane[channel].data() +
+              y * exact_cpu_reconstruction.stride,
+          fixture.original.extent.width,
+          exact_cpu_cropped.plane[channel].data() +
+              y * exact_cpu_cropped.stride);
+    }
+  }
+  const gjxl::AqEvaluationOptions exact_options = MakeOptions();
+  if (!CheckStatus(gjxl::ApplyLoopFilters(
+                       exact_cpu_cropped.View(),
+                       fixture.input.View().epf_inverse_sigma,
+                       exact_options.profile.loop_filter,
+                       exact_cpu_filtered.MutableView()),
+                   "exact-linear CPU loop filters") ||
+      !CheckStatus(gjxl::OpsinToLinearRgb(
+                       exact_cpu_filtered.View(),
+                       exact_options.profile.intensity_target,
+                       exact_cpu_linear.MutableView()),
+                   "exact-linear CPU color conversion")) {
+    return false;
+  }
+  exact_linear_input.exact_reconstructed_linear_rgb = exact_cpu_linear.View();
+  const gjxl::GpuBackendStats before_exact_linear = gpu.stats();
+  if (!CheckStatus(prepared->Evaluate(exact_linear_input, exact_linear_output),
+                   "exact-linear AQ evaluation") ||
+      !exact_linear_bounded.ValidAndPadded() || !exact_linear_frame.valid()) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_exact_linear = gpu.stats();
+  if (after_exact_linear.successful_allocations !=
+          before_exact_linear.successful_allocations ||
+      after_exact_linear.committed_submissions !=
+          before_exact_linear.committed_submissions + 1) {
+    std::cerr << "Exact-linear AQ evaluation violated residency\n";
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < exact_linear_rgb.extent.height; ++y) {
+      for (size_t x = 0; x < exact_linear_rgb.extent.width; ++x) {
+        if (!std::isfinite(
+                exact_linear_rgb.plane[channel][y * exact_linear_rgb.stride +
+                                                x])) {
+          std::cerr << "Exact-linear AQ RGB contains a non-finite pixel\n";
+          return false;
+        }
+      }
+      for (size_t x = exact_linear_rgb.extent.width;
+           x < exact_linear_rgb.stride; ++x) {
+        if (exact_linear_rgb.plane[channel][y * exact_linear_rgb.stride + x] !=
+            -777.0f) {
+          std::cerr << "Exact-linear AQ RGB changed host padding\n";
+          return false;
+        }
+      }
+    }
+  }
+
+  EvaluationOutputStorage exact_coeff_bounded(fixture.strategies.extent());
+  HostImage exact_coeff_rgb(
+      fixture.original.extent, fixture.original.extent.width + 4);
+  gjxl::VarDctEncoderFrame exact_coeff_frame;
+  gjxl::AqEvaluationOutput::Final exact_coeff_final{
+    .reconstructed_linear_rgb = exact_coeff_rgb.MutableView(),
+    .frame = &exact_coeff_frame,
+  };
+  gjxl::AqEvaluationOutput exact_coeff_output = exact_coeff_bounded.View();
+  exact_coeff_output.final = &exact_coeff_final;
+  gjxl::AqEvaluationInput exact_coeff_input = fixture.input.View();
+  exact_coeff_input.exact_coefficients = &final_frame;
+  const gjxl::GpuBackendStats before_exact_coeff = gpu.stats();
+  if (!CheckStatus(prepared->Evaluate(exact_coeff_input, exact_coeff_output),
+                   "exact-coefficient AQ evaluation") ||
+      !exact_coeff_bounded.ValidAndPadded() ||
+      !QuantizedCoefficientsEqual(final_frame, exact_coeff_frame)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_exact_coeff = gpu.stats();
+  if (after_exact_coeff.successful_allocations !=
+          before_exact_coeff.successful_allocations ||
+      after_exact_coeff.committed_submissions !=
+          before_exact_coeff.committed_submissions + 1) {
+    std::cerr << "Exact-coefficient AQ evaluation violated residency\n";
+    return false;
+  }
+  double exact_coeff_block_error = 0.0;
+  double exact_coeff_rgb_error = 0.0;
+  for (size_t y = 0; y < exact_coeff_bounded.blocks.height; ++y) {
+    for (size_t x = 0; x < exact_coeff_bounded.blocks.width; ++x) {
+      exact_coeff_block_error = std::max(
+          exact_coeff_block_error,
+          std::abs(static_cast<double>(
+                   exact_coeff_bounded.map[
+                           y * exact_coeff_bounded.stride + x]) -
+                   exact_linear_bounded.map[
+                       y * exact_linear_bounded.stride + x]));
+    }
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < exact_coeff_rgb.extent.height; ++y) {
+      for (size_t x = 0; x < exact_coeff_rgb.extent.width; ++x) {
+        exact_coeff_rgb_error = std::max(
+            exact_coeff_rgb_error,
+            std::abs(static_cast<double>(
+                         exact_coeff_rgb.plane[channel][
+                             y * exact_coeff_rgb.stride + x]) -
+                     exact_linear_rgb.plane[channel][
+                         y * exact_linear_rgb.stride + x]));
+      }
+    }
+  }
+  if (exact_coeff_block_error > 2.0e-3 ||
+      std::abs(exact_coeff_bounded.score - exact_linear_bounded.score) >
+          2.0e-3 ||
+      exact_coeff_rgb_error > 2.0e-3) {
+    std::cerr << "Exact-coefficient AQ reconstruction exceeded tolerance: "
+              << "block=" << exact_coeff_block_error
+              << " score="
+              << std::abs(exact_coeff_bounded.score -
+                          exact_linear_bounded.score)
+              << " RGB=" << exact_coeff_rgb_error << '\n';
+    return false;
+  }
+
+  EvaluationOutputStorage rejected_exact(fixture.strategies.extent());
+  gjxl::AqEvaluationInput orphan_exact = fixture.input.View();
+  orphan_exact.exact_reconstructed_linear_rgb = exact_cpu_linear.View();
+  const uint64_t before_rejected_exact = gpu.stats().committed_submissions;
+  if (!ExpectCode(prepared->Evaluate(orphan_exact, rejected_exact.View()),
+                  gjxl::StatusCode::kInvalidArgument,
+                  "exact AQ image without coefficients") ||
+      !rejected_exact.Poisoned() ||
+      gpu.stats().committed_submissions != before_rejected_exact) {
+    return false;
+  }
+  gjxl::AqEvaluationInput malformed_exact = exact_linear_input;
+  malformed_exact.exact_reconstructed_linear_rgb.plane[1].stride =
+      malformed_exact.exact_reconstructed_linear_rgb.width() - 1;
+  if (!ExpectCode(prepared->Evaluate(malformed_exact, rejected_exact.View()),
+                  gjxl::StatusCode::kInvalidArgument,
+                  "malformed exact AQ image") ||
+      !rejected_exact.Poisoned() ||
+      gpu.stats().committed_submissions != before_rejected_exact) {
+    return false;
+  }
+  HostImage wrong_exact_linear(
+      {fixture.original.extent.width + 1, fixture.original.extent.height},
+      fixture.original.extent.width + 3);
+  FillOriginal(&wrong_exact_linear);
+  gjxl::AqEvaluationInput mismatched_exact = exact_linear_input;
+  mismatched_exact.exact_reconstructed_linear_rgb = wrong_exact_linear.View();
+  if (!ExpectCode(prepared->Evaluate(mismatched_exact, rejected_exact.View()),
+                  gjxl::StatusCode::kInvalidArgument,
+                  "mismatched exact-linear geometry") ||
+      !rejected_exact.Poisoned() ||
+      gpu.stats().committed_submissions != before_rejected_exact) {
+    return false;
   }
 
   gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting staged;

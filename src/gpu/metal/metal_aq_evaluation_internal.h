@@ -266,6 +266,7 @@ private:
     final_transform_views_;
   std::vector<float> readback_;
   std::vector<float> forward_readback_;
+  std::vector<float> exact_reconstruction_coefficients_;
   std::vector<int32_t> quantized_readback_;
   std::vector<float> dc_readback_;
   std::vector<int32_t> quantized_dc_readback_;
@@ -287,6 +288,7 @@ private:
   bool *wait_observer_ = nullptr;
   MetalAqEvaluationProfile* active_profile_ = nullptr;
   bool exact_coefficients_ = false;
+  bool exact_coefficient_reconstruction_ = false;
   bool exact_linear_reconstruction_ = false;
 };
 
