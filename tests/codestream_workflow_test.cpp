@@ -139,7 +139,25 @@ bool CheckInvalidRequestsAreAtomic() {
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
-           .backend = static_cast<gjxl::VarDctBackendPreference>(99)})) {
+           .backend = static_cast<gjxl::VarDctBackendPreference>(99)}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .backend = gjxl::VarDctBackendPreference::kCpu,
+           .metal_aq_mode =
+               gjxl::GpuAdaptiveQuantizationMode::kFullyResident}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .backend = gjxl::VarDctBackendPreference::kAutomatic,
+           .metal_aq_mode =
+               gjxl::GpuAdaptiveQuantizationMode::kFullyResident}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .backend = gjxl::VarDctBackendPreference::kMetal,
+           .metal_aq_mode =
+               static_cast<gjxl::GpuAdaptiveQuantizationMode>(99)})) {
     std::cerr << "Invalid workflow request changed output\n";
     return false;
   }

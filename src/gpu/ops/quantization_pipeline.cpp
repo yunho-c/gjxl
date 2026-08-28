@@ -46,7 +46,10 @@ private:
 class GpuAdaptiveQuantizationProvider final
     : public quantization_pipeline_internal::AdaptiveQuantizationProvider {
 public:
-  explicit GpuAdaptiveQuantizationProvider(GpuBackend& gpu) : gpu_(gpu) {}
+  GpuAdaptiveQuantizationProvider(
+    GpuBackend& gpu,
+    GpuAdaptiveQuantizationMode mode)
+    : gpu_(gpu), mode_(mode) {}
 
   Status Find(
     ConstImage3FView original_linear_rgb,
@@ -59,11 +62,12 @@ public:
 
     return RunGpuAdaptiveQuantization(
       gpu_, original_linear_rgb, opsin, strategies, initial_quant_field,
-      epf_sharpness, options, output);
+      epf_sharpness, options, mode_, output);
   }
 
 private:
   GpuBackend& gpu_;
+  GpuAdaptiveQuantizationMode mode_;
 };
 
 }  // namespace
@@ -76,12 +80,34 @@ Status RunGpuQuantizationPipeline(
   CpuQuantizationPipelineOutput output,
   AcStrategyGpuSearchStats* stats) {
 
+  return RunGpuQuantizationPipeline(
+    gpu, original_linear_rgb, opsin, options,
+    GpuAdaptiveQuantizationMode::kExactCoefficients, output, stats);
+}
+
+Status RunGpuQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  GpuAdaptiveQuantizationMode aq_mode,
+  CpuQuantizationPipelineOutput output,
+  AcStrategyGpuSearchStats* stats) {
+
+  switch (aq_mode) {
+    case GpuAdaptiveQuantizationMode::kExactCoefficients:
+    case GpuAdaptiveQuantizationMode::kFullyResident:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "GPU quantization pipeline AQ mode is invalid");
+  }
   if (QueryGpuAqEvaluation(gpu) == nullptr) {
     return Status::Unavailable(
       "GPU quantization pipeline requires prepared AQ support");
   }
   GpuAcStrategySearchProvider strategy_search(gpu);
-  GpuAdaptiveQuantizationProvider adaptive_quantization(gpu);
+  GpuAdaptiveQuantizationProvider adaptive_quantization(gpu, aq_mode);
   const Status status =
     quantization_pipeline_internal::RunQuantizationPipelineWithProviders(
       original_linear_rgb, opsin, strategy_search, adaptive_quantization,

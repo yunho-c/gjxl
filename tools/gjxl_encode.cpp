@@ -37,6 +37,8 @@ struct Options {
   float butteraugli_target = 0.0f;
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kAutomatic;
+  gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
+    gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
 };
 
 [[nodiscard]] bool ParseBackend(
@@ -52,6 +54,23 @@ struct Options {
     *backend = gjxl::VarDctBackendPreference::kCpu;
   } else if (text == "metal") {
     *backend = gjxl::VarDctBackendPreference::kMetal;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool ParseMetalAqMode(
+  std::string_view text,
+  gjxl::GpuAdaptiveQuantizationMode* mode) {
+
+  if (mode == nullptr) {
+    return false;
+  }
+  if (text == "exact-coefficients") {
+    *mode = gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+  } else if (text == "fully-resident") {
+    *mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   } else {
     return false;
   }
@@ -99,6 +118,11 @@ struct Options {
           !ParseBackend(argv[++index], &candidate.backend)) {
         return false;
       }
+    } else if (argument == "--metal-aq") {
+      if (index + 1 >= argc ||
+          !ParseMetalAqMode(argv[++index], &candidate.metal_aq_mode)) {
+        return false;
+      }
     } else if (!argument.empty() && argument.front() == '-') {
       return false;
     } else if (candidate.input.empty()) {
@@ -110,7 +134,10 @@ struct Options {
     }
   }
   if (candidate.input.empty() || candidate.output.empty() ||
-      candidate.butteraugli_target <= 0.0f) {
+      candidate.butteraugli_target <= 0.0f ||
+      (candidate.metal_aq_mode ==
+         gjxl::GpuAdaptiveQuantizationMode::kFullyResident &&
+       candidate.backend != gjxl::VarDctBackendPreference::kMetal)) {
     return false;
   }
   *options = std::move(candidate);
@@ -212,6 +239,7 @@ struct Options {
 void PrintUsage(const char* executable) {
   std::cerr << "Usage: " << executable
             << " --distance VALUE [--backend auto|cpu|metal] "
+               "[--metal-aq exact-coefficients|fully-resident] "
                "INPUT.pfm OUTPUT.jxl\n";
 }
 
@@ -236,7 +264,8 @@ int main(int argc, char** argv) {
   status = gjxl::EncodeLinearRgbVarDctCodestream(
     linear_rgb.const_view(),
     {.butteraugli_target = options.butteraugli_target,
-     .backend = options.backend},
+     .backend = options.backend,
+     .metal_aq_mode = options.metal_aq_mode},
     &codestream,
     &summary);
   if (!status.ok()) {
@@ -255,7 +284,10 @@ int main(int argc, char** argv) {
             << options.butteraugli_target << " using "
             << (summary.execution_backend ==
                     gjxl::VarDctExecutionBackend::kMetal
-                  ? "Metal"
+                  ? (summary.metal_aq_mode ==
+                           gjxl::GpuAdaptiveQuantizationMode::kFullyResident
+                       ? "Metal fully-resident AQ"
+                       : "Metal exact-coefficient AQ")
                   : "CPU")
             << ".\nStrategies:";
   for (size_t index = 0; index < summary.strategy_counts.size(); ++index) {

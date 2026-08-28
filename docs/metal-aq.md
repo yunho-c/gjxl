@@ -1129,6 +1129,17 @@ dequantization, CfL, and DC/LLF preparation proved sufficient to retain safe
 float inverse transforms without pretending those coefficient ties are
 interchangeable.
 
+After Milestone 9, the rejected boundary was promoted from a private diagnostic
+to an explicit public experimental mode so its errors and candidate fixes can
+be measured without test-only shims. `GpuAdaptiveQuantizationMode` selects
+`kExactCoefficients` or `kFullyResident` in bounded AQ, full AQ, and the
+complete GPU quantization pipeline. `VarDctEncodingOptions::metal_aq_mode` and
+the CLI's `--metal-aq fully-resident` carry the same choice through codestream
+generation. Fully resident mode requires forced Metal, is reported in the
+workflow summary, and never participates in automatic selection. Its output is
+atomic and structurally valid but is intentionally not covered by the CPU
+decision-parity promise.
+
 The production corpus covers 13 built-in workloads at Butteraugli targets
 `1.0` and `1.2`, plus four independent 1919x1079 natural, HDR-like, and
 high-contrast images at `1.2`. The selected path observed maxima of
@@ -1152,7 +1163,9 @@ Three independent Apple M4 Pro Release processes each used one warmup and
 three measured rotations of all 22 exploratory phases. The cells are ranges
 of process medians. The committed benchmark removes the temporary policy
 handoff matrix and retains 18 durable production and prepared-operation
-phases.
+phases. `--gpu-aq fully-resident` now selects the resident policy, complete
+pipeline, and public-workflow phases while retaining the CPU baselines and
+printing their numerical and codestream deltas.
 
 | Workload | CPU AQ2 | Metal AQ2 | CPU complete pipeline | Metal complete pipeline | CPU public | Metal cold public |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -1164,11 +1177,11 @@ phases.
 Paired cold-public speedups were `2.29–2.59x`, `5.60–5.74x`, `5.47–5.63x`,
 and `5.70–5.87x`, respectively. Complete-pipeline speedup was `5.80–6.00x` at
 720p and `6.08–6.11x` at 1080p; selected-boundary AQ itself reached
-`6.86–7.07x` at 1080p. The rejected fully resident AQ prototype reached
+`6.86–7.07x` at 1080p. The non-production fully resident AQ mode reached
 `12.2–12.8x` there, demonstrating that 10x compute throughput is possible but
-not decision-safe. A production 10x result would require an exact or
+not decision-safe. A production-default 10x result would require an exact or
 decision-equivalent GPU coefficient coder; the tested float implementation
-does not meet that prerequisite, so it is deliberately not integrated.
+does not meet that prerequisite, so the mode remains explicitly opt-in.
 
 A selective CPU-repair handoff was also considered. At the default target the
 larger fixtures showed only one to six one-unit quantized-DC mismatches and no
@@ -1270,9 +1283,10 @@ its last evaluation. Milestone 9 supersedes Milestone 8's conservative
 exact-linear rollout with the qualified exact-coefficient boundary: CPU owns
 the coefficient decisions, dequantization, inverse CfL, and DC/LLF conversion,
 while Metal owns inverse transforms and the complete image/perceptual tail.
-The fully resident path remains an internal diagnostic because it does not
-satisfy the unchanged decision gate. Automatic selection additionally requires
-a Butteraugli target in `[1.0, 1.2]`.
+The fully resident path is a first-class experimental opt-in because it does
+not satisfy the unchanged decision gate. Exact coefficients remain the default
+and the only automatic mode; automatic selection additionally requires a
+Butteraugli target in `[1.0, 1.2]`.
 
 The pre-Milestone-6 2026-08-27 codestream integration made the encoder frame
 profile the single CPU/GPU option contract and added modular DC quantization

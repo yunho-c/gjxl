@@ -10,6 +10,7 @@
 #include "core/ac_strategy.h"
 #include "core/image.h"
 #include "core/status.h"
+#include "gpu/ops/adaptive_quantization.h"
 
 namespace gjxl {
 
@@ -33,6 +34,10 @@ enum class VarDctExecutionBackend {
 struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
+  /// Selects the Metal AQ implementation. Fully resident mode requires an
+  /// explicitly forced Metal backend and may change encoder decisions.
+  GpuAdaptiveQuantizationMode metal_aq_mode =
+    GpuAdaptiveQuantizationMode::kExactCoefficients;
 };
 
 /// Encoder analysis reported without exposing temporary pipeline storage.
@@ -42,6 +47,9 @@ struct VarDctEncodingSummary {
   std::array<size_t, kAcStrategyCount> strategy_counts{};
   std::vector<double> score_history;
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;
+  /// Reports the requested mode when `execution_backend` is Metal.
+  GpuAdaptiveQuantizationMode metal_aq_mode =
+    GpuAdaptiveQuantizationMode::kExactCoefficients;
 
   friend bool operator==(
     const VarDctEncodingSummary&,

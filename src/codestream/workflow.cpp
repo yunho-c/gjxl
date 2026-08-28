@@ -213,6 +213,19 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       return Status::InvalidArgument(
         "VarDCT encoding backend preference is invalid");
   }
+  switch (options.metal_aq_mode) {
+    case GpuAdaptiveQuantizationMode::kExactCoefficients:
+      break;
+    case GpuAdaptiveQuantizationMode::kFullyResident:
+      if (options.backend != VarDctBackendPreference::kMetal) {
+        return Status::InvalidArgument(
+          "Fully resident AQ requires an explicitly forced Metal backend");
+      }
+      break;
+    default:
+      return Status::InvalidArgument(
+        "VarDCT Metal AQ mode is invalid");
+  }
 
   try {
     FrameGeometry geometry;
@@ -291,7 +304,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     status = selected_metal
       ? RunGpuQuantizationPipeline(
           *selected_gpu, linear_rgb, opsin.const_view(), pipeline_options,
-          pipeline.Output())
+          options.metal_aq_mode, pipeline.Output())
       : RunCpuQuantizationPipeline(
           linear_rgb, opsin.const_view(), pipeline_options,
           pipeline.Output());
@@ -312,6 +325,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     candidate_summary.execution_backend = selected_metal
       ? VarDctExecutionBackend::kMetal
       : VarDctExecutionBackend::kCpu;
+    candidate_summary.metal_aq_mode = options.metal_aq_mode;
     status = pipeline.frame.strategies().ForEachAnchor(
       [&](size_t, size_t, AcStrategyType strategy) {
         const size_t index = static_cast<size_t>(strategy);

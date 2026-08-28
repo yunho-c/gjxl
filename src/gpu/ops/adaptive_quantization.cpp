@@ -91,6 +91,18 @@ void CopyContiguousPlane(
   return Status::Ok();
 }
 
+[[nodiscard]] Status ValidateMode(
+  GpuAdaptiveQuantizationMode mode) noexcept {
+
+  switch (mode) {
+    case GpuAdaptiveQuantizationMode::kExactCoefficients:
+    case GpuAdaptiveQuantizationMode::kFullyResident:
+      return Status::Ok();
+  }
+  return Status::InvalidArgument(
+    "GPU adaptive-quantization mode is invalid");
+}
+
 class PreparedGpuAdaptiveQuantizationEvaluator final
     : public aqi::AdaptiveQuantizationEvaluator {
 public:
@@ -99,6 +111,7 @@ public:
     const AcStrategyGrid& strategies,
     ConstPlaneU8View epf_sharpness,
     AdaptiveQuantizationOptions options,
+    GpuAdaptiveQuantizationMode mode,
     std::unique_ptr<PreparedAqEvaluation> prepared,
     bool materialize_final,
     Extent2D source_extent)
@@ -106,6 +119,7 @@ public:
       strategies_(strategies),
       epf_sharpness_(epf_sharpness),
       options_(options),
+      mode_(mode),
       prepared_(std::move(prepared)),
       materialize_final_(materialize_final),
       original_source_extent_(source_extent) {
@@ -167,25 +181,27 @@ public:
       }
 
       VarDctEncoderFrame exact_coefficients;
-      FrameGeometry geometry;
-      status = FrameGeometry::Create(original_source_extent_, &geometry);
-      if (!status.ok()) {
-        return status;
-      }
-      status = ComputeQuantizedCoefficients(
-          opsin_,
-          {
-              .geometry = geometry,
-              .strategies = &strategies_,
-              .raw_quant_field = {
-                  raw_quant.data(), block_extent, block_extent.width},
-              .quantizer = &quantizer,
-              .color_correlation = &color_correlation,
-              .epf_sharpness = epf_sharpness_,
-          },
-          options_.profile, &exact_coefficients);
-      if (!status.ok()) {
-        return status;
+      if (mode_ == GpuAdaptiveQuantizationMode::kExactCoefficients) {
+        FrameGeometry geometry;
+        status = FrameGeometry::Create(original_source_extent_, &geometry);
+        if (!status.ok()) {
+          return status;
+        }
+        status = ComputeQuantizedCoefficients(
+            opsin_,
+            {
+                .geometry = geometry,
+                .strategies = &strategies_,
+                .raw_quant_field = {
+                    raw_quant.data(), block_extent, block_extent.width},
+                .quantizer = &quantizer,
+                .color_correlation = &color_correlation,
+                .epf_sharpness = epf_sharpness_,
+            },
+            options_.profile, &exact_coefficients);
+        if (!status.ok()) {
+          return status;
+        }
       }
 
       aqi::AdaptiveQuantizationEvaluation candidate;
@@ -213,8 +229,10 @@ public:
           .y_to_b = y_to_b,
           .epf_inverse_sigma = {
             inverse_sigma.data(), block_extent, block_extent.width},
-          .exact_coefficients = &exact_coefficients,
       };
+      if (mode_ == GpuAdaptiveQuantizationMode::kExactCoefficients) {
+        prepared_input.exact_coefficients = &exact_coefficients;
+      }
       status = prepared_->Evaluate(prepared_input, prepared_output);
       if (!status.ok()) {
         return status;
@@ -248,6 +266,7 @@ private:
   const AcStrategyGrid& strategies_;
   ConstPlaneU8View epf_sharpness_;
   AdaptiveQuantizationOptions options_;
+  GpuAdaptiveQuantizationMode mode_;
   std::unique_ptr<PreparedAqEvaluation> prepared_;
   bool materialize_final_ = false;
   Image3FBuffer final_reconstructed_;
@@ -263,12 +282,16 @@ Status RunGpuAdaptiveQuantizationImpl(
   ConstPlaneF32View initial_quant_field,
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationMode mode,
   GpuAdaptiveQuantizationPolicyOutput* bounded_output,
   AdaptiveQuantizationOutput* full_output) {
 
-  Status status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
-    original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options);
+  Status status = ValidateMode(mode);
+  if (status.ok()) {
+    status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
+      original_linear_rgb, opsin, strategies, initial_quant_field,
+      epf_sharpness, options);
+  }
   if (status.ok()) {
     if (full_output == nullptr) {
       if (bounded_output == nullptr) {
@@ -302,7 +325,7 @@ Status RunGpuAdaptiveQuantizationImpl(
 
   try {
     PreparedGpuAdaptiveQuantizationEvaluator evaluator(
-      opsin, strategies, epf_sharpness, options, std::move(prepared),
+      opsin, strategies, epf_sharpness, options, mode, std::move(prepared),
       full_output != nullptr, original_linear_rgb.extent());
     aqi::AdaptiveQuantizationPolicyResult result;
     status = aqi::RunAdaptiveQuantizationPolicy(
@@ -355,7 +378,24 @@ Status RunGpuAdaptiveQuantizationPolicy(
 
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, &output, nullptr);
+    epf_sharpness, options,
+    GpuAdaptiveQuantizationMode::kExactCoefficients, &output, nullptr);
+}
+
+Status RunGpuAdaptiveQuantizationPolicy(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationMode mode,
+  GpuAdaptiveQuantizationPolicyOutput output) {
+
+  return RunGpuAdaptiveQuantizationImpl(
+    gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
+    epf_sharpness, options, mode, &output, nullptr);
 }
 
 Status RunGpuAdaptiveQuantization(
@@ -370,7 +410,24 @@ Status RunGpuAdaptiveQuantization(
 
   return RunGpuAdaptiveQuantizationImpl(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
-    epf_sharpness, options, nullptr, &output);
+    epf_sharpness, options,
+    GpuAdaptiveQuantizationMode::kExactCoefficients, nullptr, &output);
+}
+
+Status RunGpuAdaptiveQuantization(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationMode mode,
+  AdaptiveQuantizationOutput output) {
+
+  return RunGpuAdaptiveQuantizationImpl(
+    gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
+    epf_sharpness, options, mode, nullptr, &output);
 }
 
 }  // namespace gjxl

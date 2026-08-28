@@ -492,10 +492,69 @@ bool CheckDefaultUpdatePipelineParity() {
     std::cerr << "Default-update GPU pipeline codestream differs\n";
     return false;
   }
+
+  PipelineStorage resident(kExtent, kExtent);
+  gjxl::AcStrategyGpuSearchStats resident_stats;
+  const gjxl::GpuBackendStats before_resident = gpu->stats();
+  const gjxl::Status resident_status = gjxl::RunGpuQuantizationPipeline(
+      *gpu, original.ConstView(), opsin.ConstView(), options,
+      gjxl::GpuAdaptiveQuantizationMode::kFullyResident, resident.Output(),
+      &resident_stats);
+  const gjxl::GpuBackendStats after_resident = gpu->stats();
+  std::vector<uint8_t> resident_codestream;
+  if (!resident_status.ok() || resident_stats.total_candidate_count == 0 ||
+      after_resident.committed_submissions !=
+          before_resident.committed_submissions +
+              options.adaptive_quantization.iterations + 3 ||
+      cpu.initial_quant != resident.initial_quant ||
+      cpu.strategy_mask != resident.strategy_mask ||
+      cpu.pixel_mask != resident.pixel_mask || !resident.frame.valid() ||
+      resident.scores.size() != options.adaptive_quantization.iterations + 1 ||
+      !gjxl::EncodeVarDctCodestream(
+           resident.frame, &resident_codestream).ok() ||
+      resident_codestream.empty()) {
+    std::cerr << "Fully resident complete GPU pipeline failed: "
+              << resident_status.message() << '\n';
+    return false;
+  }
+
+  PipelineStorage invalid_mode_output(kExtent, kExtent);
+  gjxl::AcStrategyGpuSearchStats invalid_mode_stats;
+  invalid_mode_stats.total_candidate_count = 424242;
+  const std::vector<float> invalid_initial = invalid_mode_output.initial_quant;
+  const gjxl::GpuBackendStats before_invalid = gpu->stats();
+  const gjxl::Status invalid_mode_status = gjxl::RunGpuQuantizationPipeline(
+      *gpu, original.ConstView(), opsin.ConstView(), options,
+      static_cast<gjxl::GpuAdaptiveQuantizationMode>(99),
+      invalid_mode_output.Output(), &invalid_mode_stats);
+  if (invalid_mode_status.code() != gjxl::StatusCode::kInvalidArgument ||
+      invalid_mode_output.initial_quant != invalid_initial ||
+      invalid_mode_output.frame.valid() ||
+      !invalid_mode_output.scores.empty() ||
+      invalid_mode_stats.total_candidate_count != 424242 ||
+      gpu->stats().successful_allocations !=
+          before_invalid.successful_allocations ||
+      gpu->stats().committed_submissions !=
+          before_invalid.committed_submissions) {
+    std::cerr << "Invalid GPU pipeline AQ mode was not rejected atomically\n";
+    return false;
+  }
   std::cout << "Default-update GPU pipeline errors: quant=" << quant_error
             << " block=" << block_error << " score=" << score_error
             << " image=" << image_error
-            << "; frame and codestream exact\n";
+            << "; frame and codestream exact\n"
+            << "Fully resident diagnostic errors: quant="
+            << MaximumError(cpu.final_quant, resident.final_quant)
+            << " block="
+            << MaximumError(cpu.block_distance, resident.block_distance)
+            << " score=" << MaximumScoreError(cpu.scores, resident.scores)
+            << " image="
+            << MaximumImageError(cpu.reconstructed, resident.reconstructed)
+            << " frame="
+            << (FramesEqual(cpu.frame, resident.frame) ? "exact" : "different")
+            << " codestream="
+            << (cpu_codestream == resident_codestream ? "exact" : "different")
+            << '\n';
   return true;
 }
 
@@ -584,7 +643,11 @@ bool CheckWorkflowBackendSelection() {
       automatic_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
       unqualified_summary.execution_backend !=
-          gjxl::VarDctExecutionBackend::kCpu) {
+          gjxl::VarDctExecutionBackend::kCpu ||
+      forced_summary.metal_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients ||
+      automatic_summary.metal_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients) {
     std::cerr << "Public workflow backend changed accepted decisions: "
               << "forced_bytes=" << (cpu_bytes == forced_bytes)
               << " automatic_bytes=" << (cpu_bytes == automatic_bytes)
@@ -614,6 +677,51 @@ bool CheckWorkflowBackendSelection() {
               << static_cast<int>(unqualified_summary.execution_backend)
               << '\n';
     return false;
+  }
+
+  std::vector<uint8_t> resident_bytes;
+  gjxl::VarDctEncodingSummary resident_summary;
+  if (!gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+              original.ConstView(),
+              {.butteraugli_target = 1.0f,
+               .backend = gjxl::VarDctBackendPreference::kMetal,
+               .metal_aq_mode =
+                   gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
+              gpu.get(), false, &resident_bytes, &resident_summary)
+          .ok() ||
+      resident_bytes.empty() || resident_summary.score_history.size() != 3 ||
+      resident_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kMetal ||
+      resident_summary.metal_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
+    std::cerr << "Forced fully resident public workflow failed\n";
+    return false;
+  }
+
+  for (gjxl::VarDctBackendPreference backend : {
+           gjxl::VarDctBackendPreference::kAutomatic,
+           gjxl::VarDctBackendPreference::kCpu}) {
+    std::vector<uint8_t> rejected_bytes{8, 6, 7};
+    const std::vector<uint8_t> original_rejected_bytes = rejected_bytes;
+    gjxl::VarDctEncodingSummary rejected_summary{
+        .extent = {3, 2}, .encoded_bytes = 99, .score_history = {4.0}};
+    const gjxl::VarDctEncodingSummary original_rejected_summary =
+        rejected_summary;
+    const gjxl::Status rejected = gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+            original.ConstView(),
+            {.butteraugli_target = 1.0f,
+             .backend = backend,
+             .metal_aq_mode =
+                 gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
+            gpu.get(), true, &rejected_bytes, &rejected_summary);
+    if (rejected.code() != gjxl::StatusCode::kInvalidArgument ||
+        rejected_bytes != original_rejected_bytes ||
+        rejected_summary != original_rejected_summary) {
+      std::cerr << "Fully resident workflow was not explicit or atomic\n";
+      return false;
+    }
   }
 
   {

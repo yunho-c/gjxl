@@ -110,6 +110,8 @@ struct CommandLineOptions {
   std::string workload = "all";
   std::string input_path;
   std::string implementation = "simd";
+  gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
+      gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   float butteraugli_target = kDefaultButteraugliTarget;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
@@ -314,6 +316,8 @@ template <typename T>
 }
 
 struct FrameCoefficientError {
+  size_t raw_quant_count = 0;
+  int64_t raw_quant_max_delta = 0;
   size_t quantized_dc_count = 0;
   int64_t quantized_dc_max_delta = 0;
   size_t quantized_ac_count = 0;
@@ -325,6 +329,18 @@ struct FrameCoefficientError {
     const gjxl::VarDctEncoderFrame& expected,
     const gjxl::VarDctEncoderFrame& actual) {
   FrameCoefficientError result;
+  const gjxl::ConstPlaneI32View expected_raw = expected.raw_quant_field();
+  const gjxl::ConstPlaneI32View actual_raw = actual.raw_quant_field();
+  for (size_t y = 0; y < expected_raw.extent.height; ++y) {
+    for (size_t x = 0; x < expected_raw.extent.width; ++x) {
+      const int64_t delta = std::abs(
+          static_cast<int64_t>(expected_raw.Row(y)[x]) -
+          actual_raw.Row(y)[x]);
+      result.raw_quant_count += delta != 0;
+      result.raw_quant_max_delta =
+          std::max(result.raw_quant_max_delta, delta);
+    }
+  }
   const gjxl::ConstImage3I32View expected_dc = expected.quantized_dc();
   const gjxl::ConstImage3I32View actual_dc = actual.quantized_dc();
   const gjxl::ConstImage3FView expected_reconstructed_dc = expected.dc();
@@ -407,6 +423,28 @@ struct FrameCoefficientError {
   return static_cast<float>(value);
 }
 
+[[nodiscard]] gjxl::GpuAdaptiveQuantizationMode ParseGpuAqMode(
+    std::string_view text) {
+  if (text == "exact-coefficients") {
+    return gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+  }
+  if (text == "fully-resident") {
+    return gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  }
+  throw std::runtime_error("Unknown GPU AQ mode: " + std::string(text));
+}
+
+[[nodiscard]] std::string_view GpuAqModeName(
+    gjxl::GpuAdaptiveQuantizationMode mode) {
+  switch (mode) {
+    case gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients:
+      return "exact-coefficients";
+    case gjxl::GpuAdaptiveQuantizationMode::kFullyResident:
+      return "fully-resident";
+  }
+  return "invalid";
+}
+
 [[nodiscard]] CommandLineOptions ParseCommandLine(int argc, char** argv) {
   CommandLineOptions options;
   for (int index = 1; index < argc; ++index) {
@@ -416,6 +454,7 @@ struct FrameCoefficientError {
                    "[--workload NAME|all] "
                    "[--input IMAGE.ppm] "
                    "[--implementation scalar|simd|factored] "
+                   "[--gpu-aq exact-coefficients|fully-resident] "
                    "[--distance D] [--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
     }
@@ -433,6 +472,8 @@ struct FrameCoefficientError {
             "Unknown Metal DCT implementation: " + std::string(value));
       }
       options.implementation = value;
+    } else if (argument == "--gpu-aq") {
+      options.gpu_aq_mode = ParseGpuAqMode(value);
     } else if (argument == "--distance") {
       options.butteraugli_target = ParsePositiveFloat(value);
     } else if (argument == "--warmups") {
@@ -623,6 +664,7 @@ void PrintStats(std::string_view label, const std::vector<double>& samples) {
 
 void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
                  float butteraugli_target,
+                 gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
                  std::string_view input_path,
                  gjxl::GpuBackend& gpu,
                  const gjxl::MetalBackendOptions& backend_options,
@@ -709,7 +751,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
   RequireStatus("GPU pipeline validation",
                 gjxl::RunGpuQuantizationPipeline(
                     gpu, original.ConstView(), opsin.ConstView(),
-                    pipeline_options,
+                    pipeline_options, gpu_aq_mode,
                     gpu_pipeline_stage.PipelineOutput()));
   RequireStatus(
       "GPU resident validation",
@@ -719,7 +761,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           {stage.initial_quant.data(), stage.block_extent,
            stage.block_extent.width},
           {sharpness.data(), stage.block_extent, stage.block_extent.width},
-          one_evaluation_options, gpu_stage.AdaptiveOutput()));
+          one_evaluation_options, gpu_aq_mode, gpu_stage.AdaptiveOutput()));
 
   std::vector<uint8_t> cpu_validation_bytes;
   std::vector<uint8_t> gpu_validation_bytes;
@@ -740,7 +782,8 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
-               .backend = gjxl::VarDctBackendPreference::kMetal},
+               .backend = gjxl::VarDctBackendPreference::kMetal,
+               .metal_aq_mode = gpu_aq_mode},
               &gpu, true, &gpu_validation_bytes,
               &gpu_validation_summary));
   const auto maximum_vector_error = [](const std::vector<float>& left,
@@ -799,6 +842,8 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       stage.reconstructed, gpu_stage.reconstructed);
   const std::string pipeline_frame_difference =
       FrameDifference(pipeline_stage.frame, gpu_pipeline_stage.frame);
+  const FrameCoefficientError pipeline_coefficient_error =
+      CompareFrameCoefficients(pipeline_stage.frame, gpu_pipeline_stage.frame);
   const std::string one_frame_difference =
       FrameDifference(stage.frame, gpu_stage.frame);
   constexpr double kRolloutTolerance = 2.0e-3;
@@ -815,7 +860,9 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       one_block_error <= kRolloutTolerance &&
       one_score_error <= kRolloutTolerance &&
       one_reconstruction_error <= kRolloutTolerance;
-  if (!rollout_matches) {
+  if (!rollout_matches &&
+      gpu_aq_mode ==
+          gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients) {
     throw std::runtime_error(
         "CPU/Metal rollout gate failed: bytes=" +
         std::string(cpu_validation_bytes == gpu_validation_bytes
@@ -1175,18 +1222,19 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           {stage.initial_quant.data(), stage.block_extent,
            stage.block_extent.width},
           {sharpness.data(), stage.block_extent, stage.block_extent.width},
-          one_evaluation_options, gpu_stage.AdaptiveOutput());
+          one_evaluation_options, gpu_aq_mode, gpu_stage.AdaptiveOutput());
     case Phase::kGpuAqTwoUpdates:
       return gjxl::RunGpuAdaptiveQuantization(
           gpu, original.ConstView(), preprocessed.ConstView(), stage.strategies,
           {stage.initial_quant.data(), stage.block_extent,
            stage.block_extent.width},
           {sharpness.data(), stage.block_extent, stage.block_extent.width},
-          two_update_options, gpu_stage.AdaptiveOutput());
+          two_update_options, gpu_aq_mode, gpu_stage.AdaptiveOutput());
     case Phase::kGpuCompletePipeline:
       return gjxl::RunGpuQuantizationPipeline(
           gpu, original.ConstView(), opsin.ConstView(), pipeline_options,
-          gpu_pipeline_stage.PipelineOutput(), &gpu_search_stats);
+          gpu_aq_mode, gpu_pipeline_stage.PipelineOutput(),
+          &gpu_search_stats);
     case Phase::kCpuPublicWorkflow:
       return gjxl::codestream_internal::
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
@@ -1199,7 +1247,8 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
-               .backend = gjxl::VarDctBackendPreference::kMetal},
+               .backend = gjxl::VarDctBackendPreference::kMetal,
+               .metal_aq_mode = gpu_aq_mode},
               &gpu, true, &workflow_bytes, &workflow_summary);
     case Phase::kGpuColdPublicWorkflow: {
       std::unique_ptr<gjxl::GpuBackend> cold_gpu;
@@ -1212,7 +1261,8 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
-               .backend = gjxl::VarDctBackendPreference::kMetal},
+               .backend = gjxl::VarDctBackendPreference::kMetal,
+               .metal_aq_mode = gpu_aq_mode},
               cold_gpu.get(), true, &workflow_bytes, &workflow_summary);
     }
     case Phase::kCount:
@@ -1319,6 +1369,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
             << 'x' << original.extent.height
             << " coding=" << coding_extent.width << 'x' << coding_extent.height
             << " distance=" << butteraugli_target
+            << " gpu_aq=" << GpuAqModeName(gpu_aq_mode)
             << '\n';
   std::cout << std::scientific << std::setprecision(6)
             << "  rollout_errors pipeline_quant=" << pipeline_quant_error
@@ -1329,15 +1380,33 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
             << " one_score=" << one_score_error
             << " one_rgb=" << one_reconstruction_error
             << " frame=" << pipeline_frame_difference
+            << " raw_count=" << pipeline_coefficient_error.raw_quant_count
+            << " raw_max_delta="
+            << pipeline_coefficient_error.raw_quant_max_delta
+            << " qdc_count="
+            << pipeline_coefficient_error.quantized_dc_count
+            << " qdc_max_delta="
+            << pipeline_coefficient_error.quantized_dc_max_delta
+            << " ac_count="
+            << pipeline_coefficient_error.quantized_ac_count
+            << " ac_max_delta="
+            << pipeline_coefficient_error.quantized_ac_max_delta
             << " codestream="
             << (cpu_validation_bytes == gpu_validation_bytes ? "exact"
                                                              : "different")
-            << " gate=" << (rollout_matches ? "pass" : "fail") << '\n'
+            << " cpu_bytes=" << cpu_validation_bytes.size()
+            << " gpu_bytes=" << gpu_validation_bytes.size()
+            << " parity=" << (rollout_matches ? "pass" : "different")
+            << '\n'
             << "  fully_resident_errors block="
             << fully_resident_block_error
             << " score=" << fully_resident_score_error
             << " rgb=" << fully_resident_rgb_error
             << " frame=" << fully_resident_frame_difference
+            << " raw_count="
+            << fully_resident_coefficient_error.raw_quant_count
+            << " raw_max_delta="
+            << fully_resident_coefficient_error.raw_quant_max_delta
             << " qdc_count="
             << fully_resident_coefficient_error.quantized_dc_count
             << " qdc_max_delta="
@@ -1415,6 +1484,7 @@ int main(int argc, char** argv) {
     std::cout << std::fixed << std::setprecision(3)
               << "CPU/Metal quantization benchmark: backend=" << gpu->name()
               << " implementation=" << options.implementation
+              << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
               << " distance=" << options.butteraugli_target
               << " warmups=" << options.warmups
               << " samples=" << options.samples
@@ -1423,13 +1493,14 @@ int main(int argc, char** argv) {
     if (!options.input_path.empty()) {
       RunWorkload({"external_input", {}, false}, options.warmups,
                   options.samples, options.butteraugli_target,
-                  options.input_path, *gpu, backend_options, &sink);
+                  options.gpu_aq_mode, options.input_path, *gpu,
+                  backend_options, &sink);
     } else {
       for (const WorkloadSpec& workload : kWorkloads) {
         if (options.workload == "all" || options.workload == workload.name) {
           RunWorkload(workload, options.warmups, options.samples,
-                      options.butteraugli_target, {}, *gpu, backend_options,
-                      &sink);
+                      options.butteraugli_target, options.gpu_aq_mode, {},
+                      *gpu, backend_options, &sink);
         }
       }
     }

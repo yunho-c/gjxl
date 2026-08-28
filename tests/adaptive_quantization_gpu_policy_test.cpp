@@ -552,6 +552,119 @@ bool CheckCase(gjxl::GpuBackend& gpu, bool non_default, size_t iterations,
   return CompareFullResult(cpu, bounded, full);
 }
 
+bool CheckFullyResidentCase(
+    gjxl::GpuBackend& gpu, bool non_default, size_t iterations,
+    gjxl::ConstImage3FView original, gjxl::ConstImage3FView opsin,
+    const gjxl::AcStrategyGrid& strategies,
+    gjxl::ConstPlaneF32View initial,
+    gjxl::ConstPlaneU8View sharpness) {
+  const gjxl::AdaptiveQuantizationOptions options =
+      MakeOptions(non_default, iterations);
+  constexpr auto mode =
+      gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  GpuOutputStorage bounded;
+  CpuOutputStorage full;
+  const gjxl::GpuBackendStats before_bounded = gpu.stats();
+  if (!CheckStatus(gjxl::RunGpuAdaptiveQuantizationPolicy(
+          gpu, original, opsin, strategies, initial, sharpness, options, mode,
+          bounded.Output()), "fully resident GPU AQ policy")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_bounded = gpu.stats();
+  if (after_bounded.successful_allocations !=
+          before_bounded.successful_allocations + 3 ||
+      after_bounded.committed_submissions !=
+          before_bounded.committed_submissions + iterations + 2) {
+    std::cerr << "Fully resident bounded resource count differs\n";
+    return false;
+  }
+  const gjxl::GpuBackendStats before_full = gpu.stats();
+  if (!CheckStatus(gjxl::RunGpuAdaptiveQuantization(
+          gpu, original, opsin, strategies, initial, sharpness, options, mode,
+          full.Output()), "fully resident GPU full AQ")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_full = gpu.stats();
+  if (after_full.successful_allocations !=
+          before_full.successful_allocations + 3 ||
+      after_full.committed_submissions !=
+          before_full.committed_submissions + iterations + 2 ||
+      !bounded.PaddingPoisoned() || !full.PaddingPoisoned() ||
+      !full.frame.valid() ||
+      bounded.score_history.size() != iterations + 1 ||
+      bounded.score_history != full.score_history) {
+    std::cerr << "Fully resident output or resource contract differs\n";
+    return false;
+  }
+  for (double score : full.score_history) {
+    if (!std::isfinite(score) || score < 0.0) {
+      std::cerr << "Fully resident score is invalid\n";
+      return false;
+    }
+  }
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      const float bounded_quant =
+          bounded.quant_field[y * GpuOutputStorage::kBlockStride + x];
+      const float bounded_block =
+          bounded.block_distance[y * GpuOutputStorage::kBlockStride + x];
+      if (bounded_quant !=
+              full.quant_field[y * CpuOutputStorage::kBlockStride + x] ||
+          bounded_block !=
+              full.block_distance[y * CpuOutputStorage::kBlockStride + x] ||
+          !std::isfinite(bounded_quant) || bounded_quant <= 0.0f ||
+          !std::isfinite(bounded_block) || bounded_block < 0.0f) {
+        std::cerr << "Fully resident bounded and full fields differ\n";
+        return false;
+      }
+    }
+  }
+  for (const std::vector<float>& plane : full.reconstructed.plane) {
+    for (size_t y = 0; y < full.reconstructed.extent.height; ++y) {
+      for (size_t x = 0; x < full.reconstructed.extent.width; ++x) {
+        if (!std::isfinite(
+                plane[y * full.reconstructed.stride + x])) {
+          std::cerr << "Fully resident reconstruction is invalid\n";
+          return false;
+        }
+      }
+    }
+  }
+  if (non_default) {
+    return true;
+  }
+  std::vector<uint8_t> codestream;
+  return CheckStatus(
+      gjxl::EncodeVarDctCodestream(full.frame, &codestream),
+      "fully resident frame codestream") && !codestream.empty();
+}
+
+bool CheckInvalidModeIsAtomic(
+    gjxl::GpuBackend& gpu,
+    gjxl::ConstImage3FView original,
+    gjxl::ConstImage3FView opsin,
+    const gjxl::AcStrategyGrid& strategies,
+    gjxl::ConstPlaneF32View initial,
+    gjxl::ConstPlaneU8View sharpness) {
+  const auto invalid =
+      static_cast<gjxl::GpuAdaptiveQuantizationMode>(99);
+  const gjxl::AdaptiveQuantizationOptions options = MakeOptions(false, 0);
+  GpuOutputStorage bounded;
+  CpuOutputStorage full;
+  const gjxl::GpuBackendStats before = gpu.stats();
+  return ExpectCode(gjxl::RunGpuAdaptiveQuantizationPolicy(
+          gpu, original, opsin, strategies, initial, sharpness, options,
+          invalid, bounded.Output()), gjxl::StatusCode::kInvalidArgument,
+          "invalid bounded GPU AQ mode") &&
+      ExpectCode(gjxl::RunGpuAdaptiveQuantization(
+          gpu, original, opsin, strategies, initial, sharpness, options,
+          invalid, full.Output()), gjxl::StatusCode::kInvalidArgument,
+          "invalid full GPU AQ mode") &&
+      bounded.Poisoned() && full.Poisoned() &&
+      gpu.stats().successful_allocations == before.successful_allocations &&
+      gpu.stats().committed_submissions == before.committed_submissions;
+}
+
 class BackendWithoutAq final : public gjxl::GpuBackend {
 public:
   gjxl::BackendKind kind() const noexcept override {
@@ -638,6 +751,9 @@ int main() {
                    "GPU AQ policy backend") ||
       !CheckAtomicCapabilityFailure(
         original.ConstView(), opsin.ConstView(), strategies, initial,
+        sharpness_view) ||
+      !CheckInvalidModeIsAtomic(
+        *gpu, original.ConstView(), opsin.ConstView(), strategies, initial,
         sharpness_view)) {
     return EXIT_FAILURE;
   }
@@ -647,6 +763,13 @@ int main() {
       if (!CheckCase(*gpu, non_default, iterations,
                      original.ConstView(), opsin.ConstView(), strategies,
                      initial, sharpness_view)) {
+        return EXIT_FAILURE;
+      }
+    }
+    for (size_t iterations : {size_t{0}, size_t{2}}) {
+      if (!CheckFullyResidentCase(
+              *gpu, non_default, iterations, original.ConstView(),
+              opsin.ConstView(), strategies, initial, sharpness_view)) {
         return EXIT_FAILURE;
       }
     }

@@ -365,8 +365,8 @@ converts it to XYB, runs the selected quantization and default two-update AQ
 pipeline, passes the resulting owned `VarDctEncoderFrame` directly to
 `EncodeVarDctCodestream`, and atomically commits the byte vector and optional
 analysis summary. The summary reports dimensions, encoded bytes, score history,
-transform-anchor counts, and the selected CPU or Metal backend without exposing
-pipeline scratch storage.
+transform-anchor counts, the selected CPU or Metal backend, and the selected
+Metal AQ mode without exposing pipeline scratch storage.
 
 The default `kAutomatic` preference uses the embedded, process-cached Metal
 backend only on the qualified Apple M4 Pro geometry range and Butteraugli
@@ -378,8 +378,18 @@ automatic size, target, and device gates but never falls back; the broader
 quality range is an explicit unqualified override. Operational errors after
 GPU work starts are returned atomically instead of retrying on CPU.
 
+Forced Metal additionally accepts `GpuAdaptiveQuantizationMode::kFullyResident`
+as an experimental first-class option. It keeps forward transforms and
+coefficient coding on Metal for error measurement and precision research, and
+therefore does not promise the CPU reference's quant field, frame, or
+codestream bytes. Automatic and CPU preferences reject that mode rather than
+silently selecting a different implementation; exact coefficients remain the
+default and the only automatically selected Metal AQ mode.
+
 The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input, a
-Butteraugli target, and `--backend auto|cpu|metal`. It writes through a
+Butteraugli target, `--backend auto|cpu|metal`, and
+`--metal-aq exact-coefficients|fully-resident`. Fully resident mode requires
+`--backend metal`. The frontend writes through a
 same-directory temporary file,
 synchronizes it, and renames it over the destination only after the complete
 codestream succeeds. Invalid options, malformed or non-finite PFM input,
@@ -401,6 +411,9 @@ Encode a PFM with:
 ```sh
 just encode testdata/codestream_sample.pfm output.jxl 1.0
 # Or call gjxl_encode directly with --backend cpu|metal.
+# Experimental resident path:
+build/release/gjxl_encode --distance 1.0 --backend metal \
+  --metal-aq fully-resident testdata/codestream_sample.pfm output.jxl
 ```
 
 Relevant implementations:

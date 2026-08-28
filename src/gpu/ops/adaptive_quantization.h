@@ -10,6 +10,17 @@
 
 namespace gjxl {
 
+/// Selects where GPU adaptive-quantization evaluation begins.
+enum class GpuAdaptiveQuantizationMode {
+  /// CPU coefficient decisions are authoritative; the GPU starts at inverse
+  /// reconstruction. This is the production and automatic-workflow default.
+  kExactCoefficients,
+  /// Forward transforms, coefficient coding, and reconstruction remain on the
+  /// GPU. This is an explicit experimental mode and may change encoder
+  /// decisions relative to the CPU reference.
+  kFullyResident,
+};
+
 struct GpuAdaptiveQuantizationPolicyOutput {
   PlaneF32View quant_field;
   PlaneF32View block_distance_map;
@@ -31,6 +42,20 @@ struct GpuAdaptiveQuantizationPolicyOutput {
   AdaptiveQuantizationOptions options,
   GpuAdaptiveQuantizationPolicyOutput output);
 
+/// Runs the bounded policy with the explicitly selected GPU evaluation mode.
+/// `kFullyResident` is intended for error measurement and numerical research;
+/// it does not promise CPU-identical encoder decisions.
+[[nodiscard]] Status RunGpuAdaptiveQuantizationPolicy(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationMode mode,
+  GpuAdaptiveQuantizationPolicyOutput output);
+
 /// Runs GPU adaptive quantization and materializes the final resident
 /// reconstruction and encoder frame from the last evaluation. Exact CPU
 /// quantized and dequantized reconstruction coefficients are transformed,
@@ -46,6 +71,21 @@ struct GpuAdaptiveQuantizationPolicyOutput {
   ConstPlaneF32View initial_quant_field,
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationOutput output);
+
+/// Runs full GPU adaptive quantization with an explicit evaluation mode.
+/// Fully resident output is valid and atomic, but may differ from the CPU
+/// quant field, frame, and codestream because coefficient ties are resolved in
+/// GPU float arithmetic.
+[[nodiscard]] Status RunGpuAdaptiveQuantization(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options,
+  GpuAdaptiveQuantizationMode mode,
   AdaptiveQuantizationOutput output);
 
 }  // namespace gjxl

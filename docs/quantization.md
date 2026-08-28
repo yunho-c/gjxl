@@ -437,12 +437,21 @@ backend without it returns `Unavailable` without changing output or search
 statistics, and there is no silent CPU fallback. The bounded
 `RunGpuAdaptiveQuantizationPolicy` API remains available when callers need only
 the final field, block map, and score history; `RunGpuAdaptiveQuantization`
-materializes the existing full adaptive-quantization output atomically. Both
-use the exact-coefficient composite evaluator, while direct
-`PreparedAqEvaluation` calls retain the pre-existing exact-linear and fully
-resident operations for independent validation. The temporary policy-level
-selector used to compare experimental handoffs is not part of the shipped
-interface.
+materializes the existing full adaptive-quantization output atomically. Their
+source-compatible default overloads use the exact-coefficient composite
+evaluator. Explicit overloads accept `GpuAdaptiveQuantizationMode`: the
+production `kExactCoefficients` mode preserves CPU coefficient decisions,
+while experimental `kFullyResident` runs forward transforms and coefficient
+coding on the GPU and may change the quant field, frame, and codestream. The
+complete GPU pipeline exposes the same explicit mode. This two-value public
+contract replaces the temporary generic handoff selector without exposing the
+discarded exact-linear or exact-opsin policy prototypes.
+
+The benchmark accepts `--gpu-aq exact-coefficients|fully-resident`. Exact mode
+retains the fixed rollout gate; fully resident mode completes normally and
+reports CPU deltas for quant field, block map, score history, reconstructed
+RGB, frame coefficients, and codestream bytes so numerical experiments do not
+need a private API.
 
 The Metal backend uses the same transform-dispatch helper for public DCT
 batches and candidate evaluation. Scalar, SIMD-group, and factored radix-2
