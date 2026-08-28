@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <new>
 #include <stdexcept>
 #include <utility>
@@ -43,7 +44,9 @@ struct SearchInterval {
 [[nodiscard]] double FinalScore(
   const VarDctEncodingSummary& summary) noexcept {
 
-  return summary.score_history.back();
+  return summary.score_history.empty()
+    ? std::numeric_limits<double>::infinity()
+    : summary.score_history.back();
 }
 
 [[nodiscard]] bool BetterCandidate(
@@ -140,8 +143,8 @@ struct SearchInterval {
       summary.rate_control_mode !=
         VarDctRateControlMode::kButteraugliTarget ||
       summary.selected_butteraugli_target != butteraugli_target ||
-      summary.score_history.empty() ||
-      !std::isfinite(summary.score_history.back())) {
+      (!summary.score_history.empty() &&
+       !std::isfinite(summary.score_history.back()))) {
     return Status::Internal(
       "Target-size evaluator returned an invalid candidate");
   }

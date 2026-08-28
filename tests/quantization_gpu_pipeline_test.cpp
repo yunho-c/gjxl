@@ -1002,6 +1002,36 @@ bool CheckWorkflowBackendSelection() {
     return false;
   }
 
+  std::vector<uint8_t> maximum_target_bytes;
+  gjxl::VarDctEncodingSummary maximum_target_summary;
+  gjxl::VarDctEncodingOptions maximum_target_options{
+      .rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+      .target_bytes = 280,
+      .target_size_tolerance = 0.1,
+      .target_size_selection =
+          gjxl::TargetSizeSelectionPolicy::kClosestAbsolute,
+      .backend = gjxl::VarDctBackendPreference::kMetal,
+      .metal_aq_mode =
+          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput,
+  };
+  if (!gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+              original.ConstView(), maximum_target_options, gpu.get(), false,
+              &maximum_target_bytes, &maximum_target_summary)
+          .ok() ||
+      maximum_target_bytes.empty() ||
+      maximum_target_summary.rate_control_mode !=
+          gjxl::VarDctRateControlMode::kTargetBytes ||
+      maximum_target_summary.encode_attempt_count == 0 ||
+      !maximum_target_summary.score_history.empty() ||
+      maximum_target_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kMetal ||
+      maximum_target_summary.metal_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput) {
+    std::cerr << "Maximum-throughput target-size workflow failed\n";
+    return false;
+  }
+
   std::vector<uint8_t> maximum_failed_bytes{4, 2, 1};
   const std::vector<uint8_t> maximum_failed_bytes_original =
       maximum_failed_bytes;

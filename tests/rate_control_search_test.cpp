@@ -350,6 +350,33 @@ bool CheckSelectionPolicies() {
   return true;
 }
 
+bool CheckScorelessCandidates() {
+  const Evaluator evaluator = [](
+      float target,
+      std::vector<uint8_t>* codestream,
+      gjxl::VarDctEncodingSummary* summary) {
+    codestream->assign(1000, 0x3c);
+    *summary = MakeSummary(target, codestream->size(), target);
+    summary->score_history.clear();
+    return gjxl::Status::Ok();
+  };
+  SearchResult result;
+  const gjxl::Status status = gjxl::codestream_internal::SearchTargetSize(
+    {
+      .target_bytes = 1000,
+      .maximum_attempts = 4,
+    },
+    evaluator,
+    &result);
+  if (!status.ok() || result.codestream.size() != 1000 ||
+      !result.summary.score_history.empty() || result.attempt_count != 1 ||
+      !result.target_size_met || result.search_exhausted) {
+    std::cerr << "Scoreless target-size candidate was not accepted\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckInvalidOptions() {
   const Evaluator evaluator = MakeEvaluator(MonotonicSize);
   SearchResult result;
@@ -407,6 +434,7 @@ int main() {
       !CheckAtomicFailures() ||
       !CheckCandidateFailures() ||
       !CheckSelectionPolicies() ||
+      !CheckScorelessCandidates() ||
       !CheckInvalidOptions()) {
     return EXIT_FAILURE;
   }

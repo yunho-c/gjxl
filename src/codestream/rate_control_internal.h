@@ -47,8 +47,9 @@ using TargetSizeEvaluator = std::function<Status(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary)>;
 
-/// Performs a bounded target-size search over complete Butteraugli encodes.
-/// Failure leaves `result` unchanged.
+/// Performs a bounded target-size search over complete encodes controlled by a
+/// Butteraugli-target-like scalar. Score history is optional; when present its
+/// final value is an equal-size tie-break. Failure leaves `result` unchanged.
 [[nodiscard]] Status SearchTargetSize(
   const TargetSizeSearchOptions& options,
   const TargetSizeEvaluator& evaluator,
