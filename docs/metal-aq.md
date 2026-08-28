@@ -1256,6 +1256,12 @@ Required workloads are:
 - An odd, heavily padded integration fixture.
 - The 510x532 Flower crop used by Butteraugli validation.
 - Padded 480p, 720p, and 1080p workloads.
+- Padded 1440p and 4K workloads for the
+  `gpu_iterative_aq_two_updates_e2e` phase only. These high-resolution cases do
+  not execute separate CPU AQ baselines, exploratory prepared subphases, the
+  complete quantization pipeline, or public codestream workflow phases. The
+  production exact-coefficient Metal mode retains its documented CPU decision
+  boundary inside the GPU AQ operation.
 
 Report at least:
 

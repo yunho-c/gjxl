@@ -122,9 +122,10 @@ struct WorkloadSpec {
   gjxl::Extent2D source_extent;
   bool flower = false;
   bool workflow_gradient = false;
+  bool gpu_complete_aq_only = false;
 };
 
-constexpr std::array<WorkloadSpec, 13> kWorkloads = {{
+constexpr std::array<WorkloadSpec, 15> kWorkloads = {{
     {"crossover_32x24", {32, 24}, false},
     {"crossover_64x48", {64, 48}, false},
     {"crossover_96x64", {96, 64}, false},
@@ -138,6 +139,8 @@ constexpr std::array<WorkloadSpec, 13> kWorkloads = {{
     {"padded_480p", {854, 479}, false},
     {"padded_720p", {1279, 719}, false},
     {"padded_1080p", {1919, 1079}, false},
+    {"padded_1440p", {2559, 1439}, false, false, true},
+    {"padded_4k", {3839, 2159}, false, false, true},
 }};
 
 struct ImageStorage {
@@ -660,6 +663,99 @@ void PrintStats(std::string_view label, const std::vector<double>& samples) {
 
 [[nodiscard]] double NanosecondsToMilliseconds(uint64_t nanoseconds) {
   return static_cast<double>(nanoseconds) / 1.0e6;
+}
+
+void RunGpuCompleteAqOnlyWorkload(
+    const WorkloadSpec& spec, size_t warmups, size_t samples,
+    float butteraugli_target,
+    gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode, gjxl::GpuBackend& gpu,
+    double* global_sink) {
+  ImageStorage original(spec.source_extent);
+  FillSynthetic(&original);
+  const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);
+  ImageStorage padded_linear(coding_extent);
+  ImageStorage opsin(coding_extent);
+  ImageStorage preprocessed(coding_extent);
+  EdgePad(original, &padded_linear);
+  RequireStatus(
+      "linear-to-opsin setup",
+      gjxl::LinearRgbToOpsin(padded_linear.ConstView(), 255.0f, opsin.View()));
+  RequireStatus("Gaborish setup",
+                gjxl::ApplyGaborishInverse(
+                    opsin.ConstView(), {1.0f, 1.0f, 1.0f},
+                    preprocessed.View()));
+
+  StageOutput stage(original.extent, coding_extent);
+  RequireStatus(
+      "initial quantization setup",
+      gjxl::ComputeInitialQuantField(
+          opsin.ConstView(), {.butteraugli_target = butteraugli_target},
+          stage.InitialOutput()));
+  gjxl::ColorCorrelationMap initial_color_correlation;
+  RequireStatus(
+      "initial color-correlation setup",
+      gjxl::ComputeInitialColorCorrelationMap(
+          preprocessed.ConstView(), &initial_color_correlation));
+  RequireStatus(
+      "AC-strategy setup",
+      gjxl::FindAcStrategyGrid(
+          preprocessed.ConstView(),
+          {stage.initial_quant.data(), stage.block_extent,
+           stage.block_extent.width},
+          {stage.pixel_mask.data(), coding_extent, coding_extent.width},
+          initial_color_correlation,
+          {.butteraugli_target = butteraugli_target}, &stage.strategies));
+  std::vector<uint8_t> sharpness(stage.block_extent.width *
+                                 stage.block_extent.height);
+  RequireStatus(
+      "EPF-sharpness setup",
+      gjxl::FillDefaultEpfSharpness(
+          {sharpness.data(), stage.block_extent, stage.block_extent.width}));
+
+  gjxl::AdaptiveQuantizationOptions options;
+  options.butteraugli_target = butteraugli_target;
+  options.iterations = 2;
+  StageOutput gpu_stage(original.extent, coding_extent);
+  const auto run_complete_aq = [&] {
+    return gjxl::RunGpuAdaptiveQuantization(
+        gpu, original.ConstView(), preprocessed.ConstView(), stage.strategies,
+        {stage.initial_quant.data(), stage.block_extent,
+         stage.block_extent.width},
+        {sharpness.data(), stage.block_extent, stage.block_extent.width},
+        options, gpu_aq_mode, gpu_stage.AdaptiveOutput());
+  };
+
+  double sink = 0.0;
+  for (size_t warmup = 0; warmup < warmups; ++warmup) {
+    RequireStatus("gpu_iterative_aq_two_updates_e2e", run_complete_aq());
+    sink += gpu_stage.scores.back();
+  }
+
+  std::vector<double> complete_aq_samples;
+  complete_aq_samples.reserve(samples);
+  for (size_t sample = 0; sample < samples; ++sample) {
+    const auto begin = Clock::now();
+    RequireStatus("gpu_iterative_aq_two_updates_e2e", run_complete_aq());
+    const auto end = Clock::now();
+    complete_aq_samples.push_back(
+        std::chrono::duration<double, std::milli>(end - begin).count());
+    sink += gpu_stage.scores.back();
+  }
+  if (!gpu_stage.frame.valid() ||
+      gpu_stage.scores.size() != options.iterations + 1) {
+    throw std::runtime_error(
+        "GPU-only complete AQ produced an invalid final result");
+  }
+
+  std::cout << "workload " << spec.name << " source="
+            << original.extent.width << 'x' << original.extent.height
+            << " coding=" << coding_extent.width << 'x'
+            << coding_extent.height << " distance=" << butteraugli_target
+            << " gpu_aq=" << GpuAqModeName(gpu_aq_mode)
+            << " phases=gpu_complete_aq_only\n";
+  PrintStats("gpu_iterative_aq_two_updates_e2e", complete_aq_samples);
+  std::cout << "  sink=" << sink << '\n';
+  *global_sink += sink;
 }
 
 void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
@@ -1498,9 +1594,15 @@ int main(int argc, char** argv) {
     } else {
       for (const WorkloadSpec& workload : kWorkloads) {
         if (options.workload == "all" || options.workload == workload.name) {
-          RunWorkload(workload, options.warmups, options.samples,
-                      options.butteraugli_target, options.gpu_aq_mode, {},
-                      *gpu, backend_options, &sink);
+          if (workload.gpu_complete_aq_only) {
+            RunGpuCompleteAqOnlyWorkload(
+                workload, options.warmups, options.samples,
+                options.butteraugli_target, options.gpu_aq_mode, *gpu, &sink);
+          } else {
+            RunWorkload(workload, options.warmups, options.samples,
+                        options.butteraugli_target, options.gpu_aq_mode, {},
+                        *gpu, backend_options, &sink);
+          }
         }
       }
     }
