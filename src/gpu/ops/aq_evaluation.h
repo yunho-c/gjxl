@@ -124,7 +124,9 @@ public:
     AqEvaluationOutput output) = 0;
 
   /// Rebinds target-dependent strategy and EPF metadata without reallocating
-  /// the prepared source, metric reference, or evaluation scratch.
+  /// the prepared source, metric reference, or evaluation scratch. A backend
+  /// may reject this for a frame-only preparation whose minimal arena omits
+  /// reconfiguration storage.
   [[nodiscard]] virtual Status Reconfigure(
     const AcStrategyGrid& strategies,
     ConstPlaneU8View epf_sharpness) = 0;

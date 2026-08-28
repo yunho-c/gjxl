@@ -23,12 +23,14 @@
 #include "codec/quantization.h"
 #include "codec/reconstruction.h"
 #include "core/ac_strategy.h"
+#include "core/image_buffer.h"
 #include "core/quantizer.h"
 #include "dct_reference.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/gaborish.h"
 
 namespace {
 
@@ -182,8 +184,10 @@ gjxl::AqEvaluationOptions Options() {
 }
 
 gjxl::Status ComputeCpuFrame(
-    const HostImage &image, const gjxl::AcStrategyGrid &strategies,
-    const InputStorage &input, gjxl::VarDctEncoderFrame *frame) {
+    gjxl::ConstImage3FView opsin, const gjxl::AcStrategyGrid &strategies,
+    const InputStorage &input, gjxl::VarDctEncoderFrame *frame,
+    gjxl::AcCoefficientDecisionMode decision_mode =
+        gjxl::AcCoefficientDecisionMode::kFixedRawQuant) {
   gjxl::Quantizer quantizer;
   gjxl::Status status = gjxl::Quantizer::Create(input.params, &quantizer);
   if (!status.ok())
@@ -198,7 +202,7 @@ gjxl::Status ComputeCpuFrame(
   }
   std::vector<uint8_t> epf_sharpness(block_count, 4);
   return gjxl::ComputeQuantizedCoefficients(
-      image.View(),
+      opsin,
       {.geometry = geometry,
        .strategies = &strategies,
        .raw_quant_field = input.View().raw_quant_field,
@@ -208,7 +212,7 @@ gjxl::Status ComputeCpuFrame(
            {epf_sharpness.data(), kBlockExtent, kBlockExtent.width}},
       Options().profile,
       frame,
-      gjxl::AcCoefficientDecisionMode::kFixedRawQuant);
+      decision_mode);
 }
 
 gjxl::MetalBackendOptions SimdOptions() {
@@ -250,6 +254,181 @@ bool Prepare(gjxl::GpuBackend &gpu, const HostImage &image,
   };
   return CheckStatus(gjxl::PrepareAqEvaluation(gpu, preparation, prepared),
                      "prepared AQ reconstruction creation");
+}
+
+bool PrepareFrame(
+    gjxl::GpuBackend &gpu, const HostImage &image,
+    const gjxl::AcStrategyGrid &strategies, bool inverse_gaborish,
+    gjxl::AcCoefficientDecisionMode decision_mode,
+    std::unique_ptr<gjxl::PreparedAqEvaluation> *prepared) {
+
+  const std::vector<uint8_t> sharpness(
+      kBlockExtent.width * kBlockExtent.height, 4);
+  const gjxl::AqEvaluationPreparation preparation{
+      .original_linear_rgb = image.View(),
+      .coding_opsin = image.View(),
+      .strategies = &strategies,
+      .epf_sharpness = {
+          sharpness.data(), kBlockExtent, kBlockExtent.width},
+      .options = Options(),
+      .frame_only = true,
+      .frame_only_inverse_gaborish = inverse_gaborish,
+      .coefficient_decision_mode = decision_mode,
+  };
+  return CheckStatus(gjxl::PrepareAqEvaluation(gpu, preparation, prepared),
+                     "prepared AQ frame creation");
+}
+
+size_t AppendPlannedBytes(size_t bytes, size_t plane_bytes) {
+  constexpr size_t kAlignment = 256;
+  return ((bytes + kAlignment - 1) & ~(kAlignment - 1)) + plane_bytes;
+}
+
+bool ExpectedFrameMemory(const gjxl::AcStrategyGrid &strategies,
+                         bool inverse_gaborish,
+                         gjxl::AqEvaluationMemoryStats *expected) {
+  if (expected == nullptr)
+    return false;
+  size_t anchor_count = 0;
+  const gjxl::Status status = strategies.ForEachAnchor(
+      [&](size_t, size_t, gjxl::AcStrategyType) {
+        ++anchor_count;
+        return gjxl::Status::Ok();
+      });
+  if (!status.ok())
+    return false;
+
+  constexpr size_t kPackedQuantTableValues = 11904;
+  const size_t pixel_count = kPixelExtent.width * kPixelExtent.height;
+  const size_t block_count = kBlockExtent.width * kBlockExtent.height;
+  const size_t tile_count =
+      ((kPixelExtent.width + 63) / 64) * ((kPixelExtent.height + 63) / 64);
+  const size_t coefficient_count = 3 * pixel_count;
+
+  size_t persistent = 0;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    persistent = AppendPlannedBytes(persistent, pixel_count * sizeof(float));
+  }
+  if (inverse_gaborish) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      persistent = AppendPlannedBytes(
+          persistent, pixel_count * sizeof(float));
+    }
+  }
+  persistent = AppendPlannedBytes(
+      persistent, 2 * anchor_count * sizeof(int32_t));
+  persistent = AppendPlannedBytes(
+      persistent, block_count * sizeof(uint8_t));
+  persistent = AppendPlannedBytes(
+      persistent, kPackedQuantTableValues * sizeof(float));
+
+  size_t staging = 0;
+  staging = AppendPlannedBytes(staging, block_count * sizeof(int32_t));
+  staging = AppendPlannedBytes(staging, tile_count * sizeof(int8_t));
+  staging = AppendPlannedBytes(staging, tile_count * sizeof(int8_t));
+  staging = AppendPlannedBytes(
+      staging, coefficient_count * sizeof(float));
+  staging = AppendPlannedBytes(
+      staging, coefficient_count * sizeof(float));
+  staging = AppendPlannedBytes(
+      staging, coefficient_count * sizeof(int32_t));
+  staging = AppendPlannedBytes(
+      staging, 3 * block_count * sizeof(int32_t));
+  staging = AppendPlannedBytes(staging, sizeof(int32_t));
+  *expected = {persistent, staging, staging};
+  return true;
+}
+
+template <typename T>
+bool EqualPlane(gjxl::PlaneView<const T> left,
+                gjxl::PlaneView<const T> right) {
+  if (left.extent != right.extent)
+    return false;
+  for (size_t y = 0; y < left.extent.height; ++y) {
+    if (!std::equal(left.Row(y), left.Row(y) + left.extent.width,
+                    right.Row(y))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool EqualFrames(const gjxl::VarDctEncoderFrame &expected,
+                 const gjxl::VarDctEncoderFrame &actual,
+                 int32_t maximum_ac_delta = 0,
+                 size_t maximum_ac_mismatches = 0) {
+  if (!expected.valid() || !actual.valid() ||
+      expected.geometry().frame() != actual.geometry().frame() ||
+      expected.geometry().padded_frame() != actual.geometry().padded_frame() ||
+      expected.profile() != actual.profile() ||
+      expected.quantizer().params().global_scale !=
+          actual.quantizer().params().global_scale ||
+      expected.quantizer().params().quant_dc !=
+          actual.quantizer().params().quant_dc ||
+      !EqualPlane(expected.raw_quant_field(), actual.raw_quant_field()) ||
+      !EqualPlane(expected.epf_sharpness(), actual.epf_sharpness()) ||
+      !EqualPlane(expected.color_correlation().y_to_x_map(),
+                  actual.color_correlation().y_to_x_map()) ||
+      !EqualPlane(expected.color_correlation().y_to_b_map(),
+                  actual.color_correlation().y_to_b_map()) ||
+      expected.ac_group_extent() != actual.ac_group_extent() ||
+      expected.ac_group_count() != actual.ac_group_count()) {
+    std::cerr << "Frame-only metadata differs\n";
+    return false;
+  }
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      gjxl::AcStrategyCell expected_cell;
+      gjxl::AcStrategyCell actual_cell;
+      if (!expected.strategies().Get(x, y, &expected_cell).ok() ||
+          !actual.strategies().Get(x, y, &actual_cell).ok() ||
+          expected_cell.strategy != actual_cell.strategy ||
+          expected_cell.is_anchor != actual_cell.is_anchor) {
+        std::cerr << "Frame-only strategy differs at " << x << ',' << y
+                  << '\n';
+        return false;
+      }
+    }
+  }
+  const gjxl::ConstImage3I32View expected_dc = expected.quantized_dc();
+  const gjxl::ConstImage3I32View actual_dc = actual.quantized_dc();
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (!EqualPlane(expected_dc.plane[channel], actual_dc.plane[channel])) {
+      std::cerr << "Frame-only DC differs in channel " << channel << '\n';
+      return false;
+    }
+  }
+  for (size_t group_index = 0; group_index < expected.ac_group_count();
+       ++group_index) {
+    gjxl::VarDctAcGroupView expected_group;
+    gjxl::VarDctAcGroupView actual_group;
+    if (!expected.GetAcGroup(group_index, &expected_group).ok() ||
+        !actual.GetAcGroup(group_index, &actual_group).ok() ||
+        expected_group.used_coefficient_count !=
+            actual_group.used_coefficient_count) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      for (size_t index = 0;
+           index < expected_group.coefficients[channel].size(); ++index) {
+        const int64_t delta = std::abs(
+            static_cast<int64_t>(expected_group.coefficients[channel][index]) -
+            static_cast<int64_t>(actual_group.coefficients[channel][index]));
+        if (delta != 0) {
+          if (delta > maximum_ac_delta || maximum_ac_mismatches == 0) {
+            std::cerr << "Frame-only AC differs in group " << group_index
+                      << ", channel " << channel << ", coefficient "
+                      << index << ": "
+                      << expected_group.coefficients[channel][index] << " vs "
+                      << actual_group.coefficients[channel][index] << '\n';
+            return false;
+          }
+          --maximum_ac_mismatches;
+        }
+      }
+    }
+  }
+  return true;
 }
 
 bool CompareForward(
@@ -298,7 +477,7 @@ bool CompareCoefficientOracle(
         &snapshot) {
 
   gjxl::VarDctEncoderFrame frame;
-  if (!CheckStatus(ComputeCpuFrame(image, strategies, input, &frame),
+  if (!CheckStatus(ComputeCpuFrame(image.View(), strategies, input, &frame),
                    "CPU coefficient oracle")) {
     return false;
   }
@@ -684,6 +863,142 @@ bool CheckResidentAdjustmentIntegration(
               expected_inverse_sigma[index], 2.0e-5, 2.0e-6)) {
       std::cerr << "Resident adjusted EPF sigma differs at block "
                 << index << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
+bool CheckFrameOnlyEncoding(const HostImage &image,
+                            const gjxl::AcStrategyGrid &strategies) {
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  InputStorage input;
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "frame-only backend") ||
+      !InputStorage::Make(image, &input)) {
+    return false;
+  }
+
+  constexpr std::array<gjxl::AcCoefficientDecisionMode, 2> kDecisionModes = {
+      gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+      gjxl::AcCoefficientDecisionMode::kFixedRawQuant,
+  };
+  for (const gjxl::AcCoefficientDecisionMode decision_mode : kDecisionModes) {
+    for (bool inverse_gaborish : {false, true}) {
+      std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+      if (!PrepareFrame(*gpu, image, strategies, inverse_gaborish,
+                        decision_mode, &prepared)) {
+        return false;
+      }
+      const std::vector<uint8_t> sharpness(
+          kBlockExtent.width * kBlockExtent.height, 4);
+      if (!ExpectCode(
+              prepared->Reconfigure(
+                  strategies,
+                  {sharpness.data(), kBlockExtent, kBlockExtent.width}),
+              gjxl::StatusCode::kFailedPrecondition,
+              "frame-only reconfiguration")) {
+        return false;
+      }
+      gjxl::AqEvaluationMemoryStats expected_memory;
+      if (!ExpectedFrameMemory(strategies, inverse_gaborish,
+                               &expected_memory) ||
+          prepared->memory_stats().persistent_bytes !=
+              expected_memory.persistent_bytes ||
+          prepared->memory_stats().staging_bytes !=
+              expected_memory.staging_bytes ||
+          prepared->memory_stats().peak_scratch_bytes !=
+              expected_memory.peak_scratch_bytes) {
+        std::cerr << "Frame-only AQ arena does not match its minimal plan\n";
+        return false;
+      }
+
+      gjxl::Image3FBuffer filtered(kPixelExtent);
+      gjxl::ConstImage3FView cpu_opsin = image.View();
+      if (inverse_gaborish) {
+        if (!CheckStatus(
+                gjxl::ApplyGaborishInverseGpu(
+                    *gpu, image.View(),
+                    Options().profile.gaborish_inverse_multipliers,
+                    filtered.view()),
+                "Metal inverse Gaborish oracle")) {
+          return false;
+        }
+        cpu_opsin = filtered.const_view();
+      }
+      gjxl::VarDctEncoderFrame expected;
+      if (!CheckStatus(
+              ComputeCpuFrame(cpu_opsin, strategies, input, &expected,
+                              decision_mode),
+              "CPU frame-only oracle")) {
+        return false;
+      }
+      const gjxl::GpuBackendStats before = gpu->stats();
+      gjxl::VarDctEncoderFrame actual;
+      if (!CheckStatus(prepared->EncodeFrame(input.View(), &actual),
+                       "Metal frame-only encoding")) {
+        return false;
+      }
+      const gjxl::GpuBackendStats after = gpu->stats();
+      const bool frames_equal = EqualFrames(
+          expected, actual, inverse_gaborish ? 1 : 0,
+          inverse_gaborish ? 64 : 0);
+      if (after.successful_allocations != before.successful_allocations ||
+          after.committed_submissions != before.committed_submissions + 1 ||
+          !frames_equal) {
+        std::cerr << "Frame-only AQ output or residency mismatch: inverse="
+                  << inverse_gaborish << ", decision="
+                  << static_cast<int>(decision_mode) << ", allocations "
+                  << before.successful_allocations << " -> "
+                  << after.successful_allocations << ", submissions "
+                  << before.committed_submissions << " -> "
+                  << after.committed_submissions << ", frame_equal="
+                  << frames_equal << '\n';
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool CheckFrameOnlyFailures(const HostImage &image,
+                            const gjxl::AcStrategyGrid &strategies) {
+  using FailureInjector =
+      gjxl::Status (*)(gjxl::PreparedAqEvaluation &prepared);
+  const std::array<std::pair<FailureInjector, std::string_view>, 3> failures = {{
+      {&gjxl::metal_internal::FailNextMetalAqUploadForTesting, "upload"},
+      {&gjxl::metal_internal::FailNextMetalAqNumericForTesting, "numeric"},
+      {&gjxl::metal_internal::FailNextMetalAqReadbackForTesting, "readback"},
+  }};
+  InputStorage input;
+  if (!InputStorage::Make(image, &input))
+    return false;
+  gjxl::VarDctEncoderFrame original;
+  if (!CheckStatus(
+          ComputeCpuFrame(image.View(), strategies, input, &original),
+          "frame-only failure oracle")) {
+    return false;
+  }
+  for (const auto &[inject, name] : failures) {
+    std::unique_ptr<gjxl::GpuBackend> gpu;
+    std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+    if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                     "frame-only failure backend") ||
+        !PrepareFrame(*gpu, image, strategies, false,
+                      gjxl::AcCoefficientDecisionMode::kFixedRawQuant,
+                      &prepared) ||
+        !CheckStatus(inject(*prepared), "frame-only failure injection")) {
+      return false;
+    }
+    gjxl::VarDctEncoderFrame output = original;
+    if (!ExpectCode(prepared->EncodeFrame(input.View(), &output),
+                    gjxl::StatusCode::kDeviceError, name) ||
+        !EqualFrames(original, output) ||
+        !ExpectCode(prepared->EncodeFrame(input.View(), &output),
+                    gjxl::StatusCode::kFailedPrecondition,
+                    "frame-only reuse after failure") ||
+        !EqualFrames(original, output)) {
+      std::cerr << "Frame-only " << name << " failure was not atomic\n";
       return false;
     }
   }
@@ -1316,6 +1631,13 @@ int main() {
         !CheckRoundTrip(SimdOptions(), structured, uniform, false)) {
       return EXIT_FAILURE;
     }
+  }
+  gjxl::AcStrategyGrid frame_uniform;
+  if (!MakeUniformStrategies(gjxl::AcStrategyType::kDct8, &frame_uniform) ||
+      !CheckFrameOnlyEncoding(structured, frame_uniform) ||
+      !CheckFrameOnlyEncoding(structured, strategies) ||
+      !CheckFrameOnlyFailures(structured, strategies)) {
+    return EXIT_FAILURE;
   }
   if (!CheckRoundTrip({}, structured, strategies, true) ||
       !CheckRoundTrip(SimdOptions(), structured, strategies, true) ||

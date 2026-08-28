@@ -779,6 +779,25 @@ kernel void gjxl_aq_initial_quant_raw_quant(
   }
 }
 
+kernel void gjxl_aq_reset_frame_encoding(
+  device int* quantized_coefficients [[buffer(0)]],
+  device int* quantized_dc [[buffer(1)]],
+  device atomic_uint* error [[buffer(2)]],
+  constant AqResetParams& params [[buffer(3)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index == 0u) {
+    atomic_store_explicit(
+      error, params.test_error_mask, memory_order_relaxed);
+  }
+  if (index < params.coefficient_value_count) {
+    quantized_coefficients[index] = int(0x81234567u);
+  }
+  if (index < params.dc_value_count) {
+    quantized_dc[index] = int(0x81234567u);
+  }
+}
+
 kernel void gjxl_aq_reset_exact_coefficients(
   device float* reconstructed_x [[buffer(0)]],
   device float* reconstructed_y [[buffer(1)]],
@@ -1086,6 +1105,179 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
     reconstruction_coefficients[
       transform_offset + channel * group_channel_stride +
       aq_coefficient_index(params, v, u)] = value;
+  }
+}
+
+kernel void gjxl_aq_encode_frame_coefficients(
+  device const uint2* anchors [[buffer(0)]],
+  device const float* quant_tables [[buffer(1)]],
+  device int* raw_quant [[buffer(2)]],
+  device const char* y_to_x [[buffer(3)]],
+  device const char* y_to_b [[buffer(4)]],
+  device const float* forward_coefficients [[buffer(5)]],
+  device int* quantized_coefficients [[buffer(6)]],
+  device int* quantized_dc [[buffer(7)]],
+  device atomic_uint* error [[buffer(8)]],
+  constant AqReconstructionParams& params [[buffer(9)]],
+  uint anchor_index [[threadgroup_position_in_grid]],
+  uint thread_index [[thread_index_in_threadgroup]]) {
+
+  if (anchor_index >= params.anchor_count) return;
+  threadgroup float dc[3 * 16];
+  threadgroup float reconstructed_y[32 * 32];
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index];
+  const uint block_count = params.block_width * params.block_height;
+  const uint covered_count = params.covered_width * params.covered_height;
+  const uint group_channel_stride = params.anchor_count * params.coefficient_count;
+  const uint transform_offset =
+    params.coefficient_offset + anchor_index * params.coefficient_count;
+  const uint2 table_offsets = aq_quant_table_offsets(params.strategy);
+  const uint coefficient_width = max(params.pixel_width, params.pixel_height);
+  const uint coefficient_height = min(params.pixel_width, params.pixel_height);
+  const uint raw_index = anchor.y * params.raw_quant_stride + anchor.x;
+  const int initial_raw = raw_quant[raw_index];
+  const uint color_index =
+    (anchor.y / 8u) * params.color_stride + anchor.x / 8u;
+  const float cfl_x = float(y_to_x[color_index]) * (1.0f / 84.0f);
+  const float cfl_b = 1.0f + float(y_to_b[color_index]) * (1.0f / 84.0f);
+  threadgroup int selected_raw = 0;
+  threadgroup float selected_y_thresholds[4] = {};
+  if (thread_index == 0u) {
+    if (params.adjust_ac_quant != 0u) {
+      const AqAdjustedQuantization decision = aq_select_adjusted_quantization(
+        forward_coefficients + transform_offset, quant_tables,
+        params.coefficient_count, group_channel_stride,
+        coefficient_width, coefficient_height, params.strategy,
+        params.global_scale, initial_raw, params.x_matrix_multiplier,
+        params.b_matrix_multiplier, error);
+      selected_raw = decision.raw_quant;
+      for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
+        selected_y_thresholds[quadrant] = decision.y_thresholds[quadrant];
+      }
+      raw_quant[raw_index] = decision.raw_quant;
+    } else {
+      selected_raw = initial_raw;
+      selected_y_thresholds[0] = 0.58f;
+      selected_y_thresholds[1] = 0.64f;
+      selected_y_thresholds[2] = 0.64f;
+      selected_y_thresholds[3] = 0.64f;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const int raw = selected_raw;
+
+  for (uint dc_task = thread_index;
+       dc_task < 3u * covered_count;
+       dc_task += 256u) {
+    const uint channel = dc_task / covered_count;
+    const uint small = dc_task - channel * covered_count;
+    const uint x = small % params.covered_width;
+    const uint y = small / params.covered_width;
+    float value = 0.0f;
+    for (uint v = 0u; v < params.covered_height; ++v) {
+      for (uint u = 0u; u < params.covered_width; ++u) {
+        const uint coefficient = aq_coefficient_index(params, v, u);
+        const float scaled = forward_coefficients[
+          transform_offset + channel * group_channel_stride + coefficient] *
+          aq_downsample_scale(params.covered_height, v) *
+          aq_downsample_scale(params.covered_width, u);
+        value += scaled *
+          aq_inverse_basis(params.covered_height, v, y) *
+          aq_inverse_basis(params.covered_width, u, x);
+      }
+    }
+    if (!isfinite(value)) {
+      atomic_fetch_or_explicit(error, 8u, memory_order_relaxed);
+      value = 0.0f;
+    }
+    dc[dc_task] = value;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint small = thread_index; small < covered_count; small += 256u) {
+    const uint x = small % params.covered_width;
+    const uint y = small / params.covered_width;
+    const uint block_index =
+      (anchor.y + y) * params.block_width + anchor.x + x;
+    const float quant_scale =
+      (float(params.global_scale) / 65536.0f) * float(params.quant_dc);
+    const float inverse_x = 4096.0f * quant_scale;
+    const float inverse_y = 512.0f * quant_scale;
+    const float inverse_b = 256.0f * quant_scale;
+    const int quantized_y = aq_round_dc(
+      dc[covered_count + small] * inverse_y, error);
+    const float reconstructed_dc_y = float(quantized_y) / inverse_y;
+    const int quantized_x = aq_round_dc(
+      dc[small] * inverse_x, error);
+    const int quantized_b = aq_round_dc(
+      (dc[2u * covered_count + small] - reconstructed_dc_y) * inverse_b,
+      error);
+    quantized_dc[block_index] = quantized_x;
+    quantized_dc[block_count + block_index] = quantized_y;
+    quantized_dc[2u * block_count + block_index] = quantized_b;
+  }
+
+  for (uint coefficient = thread_index;
+       coefficient < params.coefficient_count;
+       coefficient += 256u) {
+    const uint channel = 1u;
+    const uint offset =
+      transform_offset + channel * group_channel_stride + coefficient;
+    const uint x = coefficient % coefficient_width;
+    const uint y = coefficient / coefficient_width;
+    const uint quadrant = uint(y >= coefficient_height / 2u) * 2u +
+      uint(x >= coefficient_width / 2u);
+    const float threshold = params.adjust_ac_quant != 0u
+      ? selected_y_thresholds[quadrant]
+      : aq_quantization_threshold(
+          channel, covered_count, coefficient, coefficient_width,
+          coefficient_height);
+    const uint table = channel * params.coefficient_count + coefficient;
+    const int quantized = aq_quantize_coefficient(
+      forward_coefficients[offset],
+      quant_tables[table_offsets.y + table],
+      params.global_scale,
+      raw,
+      1.0f,
+      threshold,
+      error);
+    quantized_coefficients[offset] = quantized;
+    reconstructed_y[coefficient] = aq_dequantize_coefficient(
+      quantized,
+      quant_tables[table_offsets.x + table],
+      params.global_scale,
+      raw,
+      1.0f,
+      channel,
+      error);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint coefficient = thread_index;
+       coefficient < params.coefficient_count;
+       coefficient += 256u) {
+    for (uint channel : {0u, 2u}) {
+      const uint offset =
+        transform_offset + channel * group_channel_stride + coefficient;
+      const float factor = channel == 0u ? cfl_x : cfl_b;
+      const float multiplier = channel == 0u
+        ? params.x_matrix_multiplier
+        : params.b_matrix_multiplier;
+      const float predicted =
+        forward_coefficients[offset] - factor * reconstructed_y[coefficient];
+      const float threshold = aq_quantization_threshold(
+        channel, covered_count, coefficient, coefficient_width,
+        coefficient_height);
+      const uint table = channel * params.coefficient_count + coefficient;
+      quantized_coefficients[offset] = aq_quantize_coefficient(
+        predicted,
+        quant_tables[table_offsets.y + table],
+        params.global_scale,
+        raw,
+        multiplier,
+        threshold,
+        error);
+    }
   }
 }
 

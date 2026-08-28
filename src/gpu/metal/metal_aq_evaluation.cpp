@@ -429,10 +429,15 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
-  filter_scratch_image_count_ = std::min<size_t>(2, filter_stage_count);
-  final_filter_scratch_index_ = filter_stage_count == 0
-    ? -1
-    : static_cast<int>((filter_stage_count - 1) % 2);
+  filter_scratch_image_count_ =
+      frame_only_ ? 0 : std::min<size_t>(2, filter_stage_count);
+  final_filter_scratch_index_ = frame_only_ || filter_stage_count == 0
+      ? -1
+      : static_cast<int>((filter_stage_count - 1) % 2);
+  const bool needs_reconstructed = !frame_only_ ||
+      frame_only_inverse_gaborish_ ||
+      (resident_ac_strategy_inputs_ &&
+       options_.profile.loop_filter.gaborish);
   (void)block_extent_.try_area(&block_count_);
   (void)coding_extent_.try_area(&pixel_count_);
   if (frame_only_resident_quantizer_) {
@@ -463,7 +468,9 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
           "Prepared AQ strategy-record count overflows");
     }
     strategy_records.resize(block_count_ * 2);
-    readback_.resize(block_count_);
+    if (!frame_only_) {
+      readback_.resize(block_count_);
+    }
     strategies_host_ = *preparation.strategies;
     epf_sharpness_host_.resize(block_count_);
     last_raw_quant_.resize(block_count_);
@@ -516,14 +523,18 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     }
   }
   anchor_count_ = row_major_anchors_.size();
-  try {
-    transform_maximum_error_readback_.resize(3 * block_count_);
-  } catch (const std::bad_alloc&) {
-    return Status::OutOfMemory(
-      "Unable to allocate maximum-error readback storage");
-  } catch (const std::length_error&) {
-    return Status::InvalidArgument(
-      "Maximum-error readback storage is too large");
+  const size_t anchor_capacity_count =
+      frame_only_ ? anchor_count_ : block_count_;
+  if (!frame_only_) {
+    try {
+      transform_maximum_error_readback_.resize(3 * block_count_);
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate maximum-error readback storage");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+        "Maximum-error readback storage is too large");
+    }
   }
   size_t coefficient_offset = 0;
   size_t anchor_offset = 0;
@@ -579,8 +590,10 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       return Status::InvalidArgument(
         "Prepared AQ source image dimensions are too large");
     }
-    for (std::vector<float> &plane : linear_readback_) {
-      plane.resize(source_pixel_count);
+    if (!frame_only_) {
+      for (std::vector<float> &plane : linear_readback_) {
+        plane.resize(source_pixel_count);
+      }
     }
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory(
@@ -595,11 +608,13 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   }
 
   size_t persistent_bytes = 0;
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
-                             source_extent_.width, &persistent_bytes);
-    if (!status.ok())
-      return status;
+  if (!frame_only_) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
+                               source_extent_.width, &persistent_bytes);
+      if (!status.ok())
+        return status;
+    }
   }
   for (size_t channel = 0; channel < 3; ++channel) {
     status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
@@ -607,25 +622,30 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     if (!status.ok())
       return status;
   }
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
-                             coding_extent_.width, &persistent_bytes);
+  if (needs_reconstructed) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
+                               coding_extent_.width, &persistent_bytes);
+      if (!status.ok())
+        return status;
+    }
+  }
+  if (!frame_only_) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
+                               source_extent_.width, &persistent_bytes);
+      if (!status.ok())
+        return status;
+    }
+    status = AddPlannedPlane(DeviceElementType::kI32,
+                             {block_extent_.width * 2, block_extent_.height},
+                             block_extent_.width * 2, &persistent_bytes);
     if (!status.ok())
       return status;
   }
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
-                             source_extent_.width, &persistent_bytes);
-    if (!status.ok())
-      return status;
-  }
-  status = AddPlannedPlane(DeviceElementType::kI32,
-                           {block_extent_.width * 2, block_extent_.height},
-                           block_extent_.width * 2, &persistent_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kI32, {2 * block_count_, 1},
-                           2 * block_count_, &persistent_bytes);
+  status = AddPlannedPlane(
+      DeviceElementType::kI32, {2 * anchor_capacity_count, 1},
+      2 * anchor_capacity_count, &persistent_bytes);
   if (!status.ok())
     return status;
   status = AddPlannedPlane(DeviceElementType::kU8, block_extent_,
@@ -642,10 +662,12 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                            block_extent_.width, &staging_bytes);
   if (!status.ok())
     return status;
-  status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
-                           block_extent_.width, &staging_bytes);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
+                             block_extent_.width, &staging_bytes);
+    if (!status.ok())
+      return status;
+  }
   if (frame_only_resident_initial_quant_) {
     const Extent2D pre_erosion_extent{
       coding_extent_.width / 4, coding_extent_.height / 4};
@@ -693,22 +715,25 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                            tile_extent_.width, &staging_bytes);
   if (!status.ok())
     return status;
-  status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
-                           block_extent_.width, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
-                           source_extent_.width, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(
-      DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
-      &staging_bytes);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
+                             block_extent_.width, &staging_bytes);
+    if (!status.ok())
+      return status;
+    status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
+                             source_extent_.width, &staging_bytes);
+    if (!status.ok())
+      return status;
+    status =
+        AddPlannedPlane(DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
+    if (!status.ok())
+      return status;
+    status = AddPlannedPlane(
+        DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
+        &staging_bytes);
+    if (!status.ok())
+      return status;
+  }
   status =
       AddPlannedPlane(DeviceElementType::kF32, {coefficient_value_count_, 1},
                       coefficient_value_count_, &staging_bytes);
@@ -724,15 +749,18 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                       coefficient_value_count_, &staging_bytes);
   if (!status.ok())
     return status;
-  status =
-      AddPlannedPlane(DeviceElementType::kF32, {coefficient_value_count_, 1},
-                      coefficient_value_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kF32, {3 * block_count_, 1},
-                           3 * block_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = AddPlannedPlane(
+        DeviceElementType::kF32, {coefficient_value_count_, 1},
+        coefficient_value_count_, &staging_bytes);
+    if (!status.ok())
+      return status;
+    status = AddPlannedPlane(DeviceElementType::kF32,
+                             {3 * block_count_, 1}, 3 * block_count_,
+                             &staging_bytes);
+    if (!status.ok())
+      return status;
+  }
   status = AddPlannedPlane(DeviceElementType::kI32, {3 * block_count_, 1},
                            3 * block_count_, &staging_bytes);
   if (!status.ok())
@@ -740,21 +768,23 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   status = AddPlannedPlane(DeviceElementType::kI32, {1, 1}, 1, &staging_bytes);
   if (!status.ok())
     return status;
-  status =
-      AddPlannedPlane(DeviceElementType::kF32, {maximum_coefficient_count_, 1},
-                      maximum_coefficient_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status =
-      AddPlannedPlane(DeviceElementType::kI32, {maximum_coefficient_count_, 1},
-                      maximum_coefficient_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status =
-      AddPlannedPlane(DeviceElementType::kF32, {maximum_coefficient_count_, 1},
-                      maximum_coefficient_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = AddPlannedPlane(
+        DeviceElementType::kF32, {maximum_coefficient_count_, 1},
+        maximum_coefficient_count_, &staging_bytes);
+    if (!status.ok())
+      return status;
+    status = AddPlannedPlane(
+        DeviceElementType::kI32, {maximum_coefficient_count_, 1},
+        maximum_coefficient_count_, &staging_bytes);
+    if (!status.ok())
+      return status;
+    status = AddPlannedPlane(
+        DeviceElementType::kF32, {maximum_coefficient_count_, 1},
+        maximum_coefficient_count_, &staging_bytes);
+    if (!status.ok())
+      return status;
+  }
 
   status = persistent_.Prepare(*backend_, persistent_bytes);
   if (!status.ok())
@@ -763,12 +793,14 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
   if (!status.ok())
     return status;
 
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = persistent_.AllocatePlane(DeviceElementType::kF32, source_extent_,
-                                       source_extent_.width, kBufferAlignment,
-                                       &original_[channel]);
-    if (!status.ok())
-      return status;
+  if (!frame_only_) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = persistent_.AllocatePlane(
+          DeviceElementType::kF32, source_extent_, source_extent_.width,
+          kBufferAlignment, &original_[channel]);
+      if (!status.ok())
+        return status;
+    }
   }
   for (size_t channel = 0; channel < 3; ++channel) {
     status = persistent_.AllocatePlane(DeviceElementType::kF32, coding_extent_,
@@ -777,28 +809,34 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     if (!status.ok())
       return status;
   }
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = persistent_.AllocatePlane(DeviceElementType::kF32, coding_extent_,
-                                       coding_extent_.width, kBufferAlignment,
-                                       &reconstructed_[channel]);
+  if (needs_reconstructed) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = persistent_.AllocatePlane(
+          DeviceElementType::kF32, coding_extent_, coding_extent_.width,
+          kBufferAlignment, &reconstructed_[channel]);
+      if (!status.ok())
+        return status;
+    }
+  }
+  if (!frame_only_) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = persistent_.AllocatePlane(
+          DeviceElementType::kF32, source_extent_, source_extent_.width,
+          kBufferAlignment, &reconstructed_linear_[channel]);
+      if (!status.ok())
+        return status;
+    }
+    status = persistent_.AllocatePlane(
+        DeviceElementType::kI32,
+        {block_extent_.width * 2, block_extent_.height},
+        block_extent_.width * 2, kBufferAlignment, &strategies_);
     if (!status.ok())
       return status;
   }
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = persistent_.AllocatePlane(DeviceElementType::kF32, source_extent_,
-                                       source_extent_.width, kBufferAlignment,
-                                       &reconstructed_linear_[channel]);
-    if (!status.ok())
-      return status;
-  }
-  status = persistent_.AllocatePlane(
-      DeviceElementType::kI32, {block_extent_.width * 2, block_extent_.height},
-      block_extent_.width * 2, kBufferAlignment, &strategies_);
-  if (!status.ok())
-    return status;
   status =
-      persistent_.AllocatePlane(DeviceElementType::kI32, {2 * block_count_, 1},
-                                2 * block_count_, kBufferAlignment, &anchors_);
+      persistent_.AllocatePlane(
+          DeviceElementType::kI32, {2 * anchor_capacity_count, 1},
+          2 * anchor_capacity_count, kBufferAlignment, &anchors_);
   if (!status.ok())
     return status;
   status = persistent_.AllocatePlane(
@@ -817,11 +855,13 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                                   &raw_quant_);
   if (!status.ok())
     return status;
-  status = staging_.AllocatePlane(DeviceElementType::kF32, block_extent_,
-                                  block_extent_.width, kBufferAlignment,
-                                  &inverse_sigma_);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = staging_.AllocatePlane(DeviceElementType::kF32, block_extent_,
+                                    block_extent_.width, kBufferAlignment,
+                                    &inverse_sigma_);
+    if (!status.ok())
+      return status;
+  }
   if (frame_only_resident_initial_quant_) {
     const Extent2D pre_erosion_extent{
       coding_extent_.width / 4, coding_extent_.height / 4};
@@ -879,25 +919,27 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                              tile_extent_.width, kBufferAlignment, &y_to_b_);
   if (!status.ok())
     return status;
-  status = staging_.AllocatePlane(DeviceElementType::kF32, block_extent_,
-                                  block_extent_.width, kBufferAlignment,
-                                  &block_distance_);
-  if (!status.ok())
-    return status;
-  status = staging_.AllocatePlane(DeviceElementType::kF32, source_extent_,
-                                  source_extent_.width, kBufferAlignment,
-                                  &distance_map_);
-  if (!status.ok())
-    return status;
-  status = staging_.AllocatePlane(DeviceElementType::kF32, {1, 1}, 1,
-                                  kBufferAlignment, &score_);
-  if (!status.ok())
-    return status;
-  status = staging_.AllocatePlane(
-      DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
-      kBufferAlignment, &transform_maximum_error_);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = staging_.AllocatePlane(DeviceElementType::kF32, block_extent_,
+                                    block_extent_.width, kBufferAlignment,
+                                    &block_distance_);
+    if (!status.ok())
+      return status;
+    status = staging_.AllocatePlane(DeviceElementType::kF32, source_extent_,
+                                    source_extent_.width, kBufferAlignment,
+                                    &distance_map_);
+    if (!status.ok())
+      return status;
+    status = staging_.AllocatePlane(DeviceElementType::kF32, {1, 1}, 1,
+                                    kBufferAlignment, &score_);
+    if (!status.ok())
+      return status;
+    status = staging_.AllocatePlane(
+        DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
+        kBufferAlignment, &transform_maximum_error_);
+    if (!status.ok())
+      return status;
+  }
   status = staging_.AllocatePlane(
       DeviceElementType::kF32, {coefficient_value_count_, 1},
       coefficient_value_count_, kBufferAlignment, &gathered_pixels_);
@@ -913,17 +955,19 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       coefficient_value_count_, kBufferAlignment, &quantized_coefficients_);
   if (!status.ok())
     return status;
-  status = staging_.AllocatePlane(DeviceElementType::kF32,
-                                  {coefficient_value_count_, 1},
-                                  coefficient_value_count_, kBufferAlignment,
-                                  &reconstruction_coefficients_);
-  if (!status.ok())
-    return status;
-  status =
-      staging_.AllocatePlane(DeviceElementType::kF32, {3 * block_count_, 1},
-                             3 * block_count_, kBufferAlignment, &dc_);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = staging_.AllocatePlane(DeviceElementType::kF32,
+                                    {coefficient_value_count_, 1},
+                                    coefficient_value_count_, kBufferAlignment,
+                                    &reconstruction_coefficients_);
+    if (!status.ok())
+      return status;
+    status = staging_.AllocatePlane(
+        DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
+        kBufferAlignment, &dc_);
+    if (!status.ok())
+      return status;
+  }
   status = staging_.AllocatePlane(
       DeviceElementType::kI32, {3 * block_count_, 1}, 3 * block_count_,
       kBufferAlignment, &quantized_dc_);
@@ -933,21 +977,24 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                                   kBufferAlignment, &reconstruction_error_);
   if (!status.ok())
     return status;
-  status = staging_.AllocatePlane(
-      DeviceElementType::kF32, {maximum_coefficient_count_, 1},
-      maximum_coefficient_count_, kBufferAlignment, &quant_probe_input_);
-  if (!status.ok())
-    return status;
-  status = staging_.AllocatePlane(
-      DeviceElementType::kI32, {maximum_coefficient_count_, 1},
-      maximum_coefficient_count_, kBufferAlignment, &quant_probe_quantized_);
-  if (!status.ok())
-    return status;
-  status = staging_.AllocatePlane(
-      DeviceElementType::kF32, {maximum_coefficient_count_, 1},
-      maximum_coefficient_count_, kBufferAlignment, &quant_probe_dequantized_);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = staging_.AllocatePlane(
+        DeviceElementType::kF32, {maximum_coefficient_count_, 1},
+        maximum_coefficient_count_, kBufferAlignment, &quant_probe_input_);
+    if (!status.ok())
+      return status;
+    status = staging_.AllocatePlane(
+        DeviceElementType::kI32, {maximum_coefficient_count_, 1},
+        maximum_coefficient_count_, kBufferAlignment, &quant_probe_quantized_);
+    if (!status.ok())
+      return status;
+    status = staging_.AllocatePlane(
+        DeviceElementType::kF32, {maximum_coefficient_count_, 1},
+        maximum_coefficient_count_, kBufferAlignment,
+        &quant_probe_dequantized_);
+    if (!status.ok())
+      return status;
+  }
 
   for (size_t channel = 0; channel < 3; ++channel) {
     if (!frame_only_) {
@@ -962,13 +1009,15 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     if (!status.ok())
       return status;
   }
-  status =
-      UploadPlane(*backend_,
-                  ConstPlaneI32View{strategy_records.data(), strategies_.extent,
-                                    strategies_.row_stride},
-                  strategies_);
-  if (!status.ok())
-    return status;
+  if (!frame_only_) {
+    status = UploadPlane(
+        *backend_,
+        ConstPlaneI32View{strategy_records.data(), strategies_.extent,
+                          strategies_.row_stride},
+        strategies_);
+    if (!status.ok())
+      return status;
+  }
   status = UploadPlane(*backend_,
                        ConstPlaneI32View{
                          anchor_records.data(), {2 * anchor_count_, 1},
@@ -1024,34 +1073,36 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         options_.profile.epf_sigma.quant_multiplier,
         options_.profile.epf_sigma.sharpness_lut,
     };
-    block_reduction_params_[batch_index] = {
-        static_cast<uint32_t>(source_extent_.width),
-        static_cast<uint32_t>(source_extent_.height),
-        static_cast<uint32_t>(distance_map_.row_stride),
-        static_cast<uint32_t>(block_distance_.row_stride),
-        static_cast<uint32_t>(batch.anchor_offset),
-        static_cast<uint32_t>(batch.anchor_count),
-        static_cast<uint32_t>(info->pixel_extent().width),
-        static_cast<uint32_t>(info->pixel_extent().height),
-        static_cast<uint32_t>(info->covered_blocks.width),
-        static_cast<uint32_t>(info->covered_blocks.height),
-    };
-    maximum_error_reduction_params_[batch_index] = {
-        static_cast<uint32_t>(source_extent_.width),
-        static_cast<uint32_t>(source_extent_.height),
-        static_cast<uint32_t>(coding_[0].row_stride),
-        static_cast<uint32_t>(FinalFilteredImage()[0].row_stride),
-        static_cast<uint32_t>(block_distance_.row_stride),
-        static_cast<uint32_t>(batch.anchor_offset),
-        static_cast<uint32_t>(batch.anchor_count),
-        static_cast<uint32_t>(info->pixel_extent().width),
-        static_cast<uint32_t>(info->pixel_extent().height),
-        static_cast<uint32_t>(info->covered_blocks.width),
-        static_cast<uint32_t>(info->covered_blocks.height),
-        options_.maximum_error[0],
-        options_.maximum_error[1],
-        options_.maximum_error[2],
-    };
+    if (!frame_only_) {
+      block_reduction_params_[batch_index] = {
+          static_cast<uint32_t>(source_extent_.width),
+          static_cast<uint32_t>(source_extent_.height),
+          static_cast<uint32_t>(distance_map_.row_stride),
+          static_cast<uint32_t>(block_distance_.row_stride),
+          static_cast<uint32_t>(batch.anchor_offset),
+          static_cast<uint32_t>(batch.anchor_count),
+          static_cast<uint32_t>(info->pixel_extent().width),
+          static_cast<uint32_t>(info->pixel_extent().height),
+          static_cast<uint32_t>(info->covered_blocks.width),
+          static_cast<uint32_t>(info->covered_blocks.height),
+      };
+      maximum_error_reduction_params_[batch_index] = {
+          static_cast<uint32_t>(source_extent_.width),
+          static_cast<uint32_t>(source_extent_.height),
+          static_cast<uint32_t>(coding_[0].row_stride),
+          static_cast<uint32_t>(FinalFilteredImage()[0].row_stride),
+          static_cast<uint32_t>(block_distance_.row_stride),
+          static_cast<uint32_t>(batch.anchor_offset),
+          static_cast<uint32_t>(batch.anchor_count),
+          static_cast<uint32_t>(info->pixel_extent().width),
+          static_cast<uint32_t>(info->pixel_extent().height),
+          static_cast<uint32_t>(info->covered_blocks.width),
+          static_cast<uint32_t>(info->covered_blocks.height),
+          options_.maximum_error[0],
+          options_.maximum_error[1],
+          options_.maximum_error[2],
+      };
+    }
   }
   reset_params_ = {
       static_cast<uint32_t>(coefficient_value_count_),
@@ -1111,49 +1162,51 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     }
   }
 
-  gaborish_params_ = {
-      static_cast<uint32_t>(source_extent_.width),
-      static_cast<uint32_t>(source_extent_.height),
-      static_cast<uint32_t>(reconstructed_[0].row_stride),
-      static_cast<uint32_t>(filter_scratch_[0][0].row_stride),
-  };
-  for (size_t channel = 0; channel < 3; ++channel) {
-    const float weight1 =
-      options_.profile.loop_filter.gaborish_options.weight1[channel];
-    const float weight2 =
-      options_.profile.loop_filter.gaborish_options.weight2[channel];
-    const float divisor = 1.0f + 4.0f * (weight1 + weight2);
-    gaborish_params_.center_weight[channel] = 1.0f / divisor;
-    gaborish_params_.axis_weight[channel] = weight1 / divisor;
-    gaborish_params_.diagonal_weight[channel] = weight2 / divisor;
-  }
-  constexpr std::array<uint32_t, 3> kEpfPasses = {0, 1, 2};
-  for (size_t index = 0; index < epf_params_.size(); ++index) {
-    const uint32_t pass = kEpfPasses[index];
-    const float pass_scale = pass == 0
-      ? options_.profile.loop_filter.epf_options.pass0_sigma_scale
-      : pass == 2
-        ? options_.profile.loop_filter.epf_options.pass2_sigma_scale
-        : 1.0f;
-    epf_params_[index] = {
+  if (!frame_only_) {
+    gaborish_params_ = {
         static_cast<uint32_t>(source_extent_.width),
         static_cast<uint32_t>(source_extent_.height),
+        static_cast<uint32_t>(reconstructed_[0].row_stride),
         static_cast<uint32_t>(filter_scratch_[0][0].row_stride),
-        static_cast<uint32_t>(filter_scratch_[0][0].row_stride),
-        static_cast<uint32_t>(inverse_sigma_.row_stride),
-        pass,
-        1.65f * pass_scale,
-        options_.profile.loop_filter.epf_options.border_sad_multiplier,
-        options_.profile.loop_filter.epf_options.channel_scale,
+    };
+    for (size_t channel = 0; channel < 3; ++channel) {
+      const float weight1 =
+        options_.profile.loop_filter.gaborish_options.weight1[channel];
+      const float weight2 =
+        options_.profile.loop_filter.gaborish_options.weight2[channel];
+      const float divisor = 1.0f + 4.0f * (weight1 + weight2);
+      gaborish_params_.center_weight[channel] = 1.0f / divisor;
+      gaborish_params_.axis_weight[channel] = weight1 / divisor;
+      gaborish_params_.diagonal_weight[channel] = weight2 / divisor;
+    }
+    constexpr std::array<uint32_t, 3> kEpfPasses = {0, 1, 2};
+    for (size_t index = 0; index < epf_params_.size(); ++index) {
+      const uint32_t pass = kEpfPasses[index];
+      const float pass_scale = pass == 0
+        ? options_.profile.loop_filter.epf_options.pass0_sigma_scale
+        : pass == 2
+          ? options_.profile.loop_filter.epf_options.pass2_sigma_scale
+          : 1.0f;
+      epf_params_[index] = {
+          static_cast<uint32_t>(source_extent_.width),
+          static_cast<uint32_t>(source_extent_.height),
+          static_cast<uint32_t>(filter_scratch_[0][0].row_stride),
+          static_cast<uint32_t>(filter_scratch_[0][0].row_stride),
+          static_cast<uint32_t>(inverse_sigma_.row_stride),
+          pass,
+          1.65f * pass_scale,
+          options_.profile.loop_filter.epf_options.border_sad_multiplier,
+          options_.profile.loop_filter.epf_options.channel_scale,
+      };
+    }
+    opsin_to_linear_params_ = {
+        static_cast<uint32_t>(source_extent_.width),
+        static_cast<uint32_t>(source_extent_.height),
+        static_cast<uint32_t>(coding_extent_.width),
+        static_cast<uint32_t>(reconstructed_linear_[0].row_stride),
+        255.0f / options_.profile.intensity_target,
     };
   }
-  opsin_to_linear_params_ = {
-      static_cast<uint32_t>(source_extent_.width),
-      static_cast<uint32_t>(source_extent_.height),
-      static_cast<uint32_t>(coding_extent_.width),
-      static_cast<uint32_t>(reconstructed_linear_[0].row_stride),
-      255.0f / options_.profile.intensity_target,
-  };
 
   if (frame_only_) {
     memory_stats_ = {
@@ -1196,6 +1249,10 @@ Status MetalPreparedAqEvaluation::Reconfigure(
   const AcStrategyGrid& strategies,
   ConstPlaneU8View epf_sharpness) {
 
+  if (frame_only_) {
+    return Status::FailedPrecondition(
+      "Frame-only prepared AQ state cannot be reconfigured");
+  }
   if (!strategies.complete() || strategies.extent() != block_extent_ ||
       !ValidHostPlaneLayout(epf_sharpness) ||
       epf_sharpness.extent != block_extent_) {
@@ -2208,7 +2265,7 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   if (!frame_only_resident_quantizer_) {
     status = UploadPlane(*backend_, input.raw_quant_field, raw_quant_);
   }
-  if (status.ok() && !frame_only_resident_quantizer_) {
+  if (status.ok() && !frame_only_) {
     status = UploadPlane(*backend_, input.epf_inverse_sigma, inverse_sigma_);
   }
   if (status.ok() && !frame_only_resident_initial_cfl_) {
@@ -2612,13 +2669,14 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      19>
+      21>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
           {"gjxl_aq_reset_exact_coefficients",
            &pipelines.reset_exact_coefficients},
           {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
+          {"gjxl_aq_reset_frame_encoding", &pipelines.reset_frame_encoding},
           {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
           {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
           {"gjxl_aq_initial_quant_gradient",
@@ -2643,6 +2701,8 @@ Status CreateAqPipelines(
            &pipelines.gather_transform_pixels},
           {"gjxl_aq_encode_reconstruction_coefficients",
            &pipelines.encode_reconstruction_coefficients},
+          {"gjxl_aq_encode_frame_coefficients",
+           &pipelines.encode_frame_coefficients},
           {"gjxl_aq_scatter_reconstructed_pixels",
            &pipelines.scatter_reconstructed_pixels},
           {"gjxl_aq_quantization_probe", &pipelines.quantization_probe},

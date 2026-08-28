@@ -207,23 +207,14 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
 
   const auto &self = *static_cast<const MetalPreparedAqEvaluation *>(context);
   encoder->setComputePipelineState(
-      backend.aq_pipelines_.reset_reconstruction.get());
-  BindPlane(encoder, self.gathered_pixels_, 0);
-  BindPlane(encoder, self.forward_coefficients_, 1);
-  BindPlane(encoder, self.quantized_coefficients_, 2);
-  BindPlane(encoder, self.reconstruction_coefficients_, 3);
-  BindPlane(encoder, self.dc_, 4);
-  BindPlane(encoder, self.quantized_dc_, 5);
-  for (size_t channel = 0; channel < 3; ++channel) {
-    BindPlane(encoder, self.reconstructed_[channel], channel + 6);
-  }
-  BindPlane(encoder, self.reconstruction_error_, 9);
-  BindPlane(encoder, self.block_distance_, 10);
-  encoder->setBytes(&self.reset_params_, sizeof(self.reset_params_), 11);
+      backend.aq_pipelines_.reset_frame_encoding.get());
+  BindPlane(encoder, self.quantized_coefficients_, 0);
+  BindPlane(encoder, self.quantized_dc_, 1);
+  BindPlane(encoder, self.reconstruction_error_, 2);
+  encoder->setBytes(&self.reset_params_, sizeof(self.reset_params_), 3);
   DispatchThreads1d(encoder,
-                    std::max({self.coefficient_value_count_,
-                              3 * self.block_count_, self.pixel_count_,
-                              self.block_count_}));
+                    std::max(self.coefficient_value_count_,
+                             3 * self.block_count_));
 
   if (self.frame_only_resident_initial_cfl_) {
     encoder->setComputePipelineState(backend.aq_pipelines_.initial_cfl.get());
@@ -301,7 +292,7 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
         3 * batch.anchor_count);
 
     encoder->setComputePipelineState(
-        backend.aq_pipelines_.encode_reconstruction_coefficients.get());
+        backend.aq_pipelines_.encode_frame_coefficients.get());
     BindPlane(encoder, self.anchors_, 0);
     BindPlane(encoder, self.quant_tables_, 1);
     BindPlane(encoder, self.raw_quant_, 2);
@@ -309,13 +300,9 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
     BindPlane(encoder, self.y_to_b_, 4);
     BindPlane(encoder, self.forward_coefficients_, 5);
     BindPlane(encoder, self.quantized_coefficients_, 6);
-    BindPlane(encoder, self.reconstruction_coefficients_, 7);
-    BindPlane(encoder, self.dc_, 8);
-    BindPlane(encoder, self.quantized_dc_, 9);
-    BindPlane(encoder, self.reconstruction_error_, 10);
-    encoder->setBytes(&params, sizeof(params), 11);
-    BindPlane(encoder, self.inverse_sigma_, 12);
-    BindPlane(encoder, self.epf_sharpness_, 13);
+    BindPlane(encoder, self.quantized_dc_, 7);
+    BindPlane(encoder, self.reconstruction_error_, 8);
+    encoder->setBytes(&params, sizeof(params), 9);
     encoder->dispatchThreadgroups(
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
         MTL::Size(kAqThreadCount, 1, 1));

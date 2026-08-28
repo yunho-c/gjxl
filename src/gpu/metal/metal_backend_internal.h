@@ -64,6 +64,7 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> reset_exact_evaluation;
   NS::SharedPtr<MTL::ComputePipelineState> reset_exact_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> reset_reconstruction;
+  NS::SharedPtr<MTL::ComputePipelineState> reset_frame_encoding;
   NS::SharedPtr<MTL::ComputePipelineState> initial_cfl;
   NS::SharedPtr<MTL::ComputePipelineState> reset_initial_quant;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_gradient;
@@ -77,6 +78,7 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_raw_quant;
   NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> encode_frame_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> quantization_probe;
   NS::SharedPtr<MTL::ComputePipelineState> adjustment_probe;
