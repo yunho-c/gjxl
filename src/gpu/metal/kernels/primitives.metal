@@ -22,6 +22,19 @@ struct ConvolutionParams {
   uint kernel_size;
 };
 
+struct Symmetric5Params {
+  uint width;
+  uint height;
+  uint input_stride;
+  uint output_stride;
+  float distance0;
+  float distance1;
+  float distance2;
+  float distance4;
+  float distance8;
+  float distance5;
+};
+
 struct ReductionParams {
   uint width;
   uint input_stride;
@@ -94,6 +107,62 @@ kernel void gjxl_convolve_vertical_f32(
     weight_sum += weight;
   }
   output[position.y * params.output_stride + position.x] = sum / weight_sum;
+}
+
+static uint gjxl_mirror_radius2(int coordinate, uint size) {
+  if (size == 1u) return 0u;
+  if (coordinate < 0) return uint(-coordinate - 1);
+  if (coordinate >= int(size)) return 2u * size - 1u - uint(coordinate);
+  return uint(coordinate);
+}
+
+static float gjxl_symmetric5_weighted_row(
+  device const float* input,
+  int x,
+  int y,
+  constant Symmetric5Params& params,
+  float center_weight,
+  float near_weight,
+  float far_weight) {
+
+  const uint source_y = gjxl_mirror_radius2(y, params.height);
+  const uint far_left = gjxl_mirror_radius2(x - 2, params.width);
+  const uint near_left = gjxl_mirror_radius2(x - 1, params.width);
+  const uint center = gjxl_mirror_radius2(x, params.width);
+  const uint near_right = gjxl_mirror_radius2(x + 1, params.width);
+  const uint far_right = gjxl_mirror_radius2(x + 2, params.width);
+  device const float* row = input + source_y * params.input_stride;
+  const float far = far_weight * (row[far_left] + row[far_right]);
+  const float near = near_weight * (row[near_left] + row[near_right]);
+  const float center_value = center_weight * row[center];
+  return far + (near + center_value);
+}
+
+kernel void gjxl_convolve_symmetric5_f32(
+  device const float* input [[buffer(0)]],
+  device float* output [[buffer(1)]],
+  constant Symmetric5Params& params [[buffer(2)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height) return;
+  const int x = int(position.x);
+  const int y = int(position.y);
+  float sum0 = gjxl_symmetric5_weighted_row(
+    input, x, y, params, params.distance0, params.distance1,
+    params.distance2);
+  sum0 += gjxl_symmetric5_weighted_row(
+    input, x, y - 2, params, params.distance2, params.distance5,
+    params.distance8);
+  float sum1 = gjxl_symmetric5_weighted_row(
+    input, x, y + 2, params, params.distance2, params.distance5,
+    params.distance8);
+  sum0 += gjxl_symmetric5_weighted_row(
+    input, x, y - 1, params, params.distance1, params.distance4,
+    params.distance5);
+  sum1 += gjxl_symmetric5_weighted_row(
+    input, x, y + 1, params, params.distance1, params.distance4,
+    params.distance5);
+  output[position.y * params.output_stride + position.x] = sum0 + sum1;
 }
 
 kernel void gjxl_reduce_max_f32(

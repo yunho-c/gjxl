@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -11,6 +12,19 @@
 #include "core/image_buffer.h"
 
 namespace gjxl::quantization_pipeline_internal {
+
+class GaborishInverseProvider {
+public:
+  virtual ~GaborishInverseProvider() = default;
+
+  [[nodiscard]] virtual Status Apply(
+    ConstImage3FView input,
+    std::array<float, 3> multipliers,
+    Image3FView output) = 0;
+
+protected:
+  GaborishInverseProvider() = default;
+};
 
 class AdaptiveQuantizationProvider {
 public:
@@ -41,6 +55,8 @@ struct PreparedQuantizationPipeline {
   Image3FBuffer coding_opsin;
   Image3FBuffer preprocessed_opsin;
   ColorCorrelationMap initial_color_correlation;
+  bool preprocessing_ready = false;
+  bool fast_initial_color_correlation = false;
   std::vector<uint8_t> epf_sharpness;
   std::vector<float> initial_quant;
   std::vector<float> strategy_mask;
@@ -61,7 +77,13 @@ struct PreparedQuantizationPipeline {
   ConstImage3FView opsin,
   CpuQuantizationPipelineOptions options,
   PreparedQuantizationPipeline* prepared,
-  bool prepare_cpu_butteraugli = true);
+  bool prepare_cpu_butteraugli = true,
+  bool prepare_cpu_preprocessing = true);
+
+[[nodiscard]] Status PrepareQuantizationPreprocessing(
+  PreparedQuantizationPipeline& prepared,
+  GaborishInverseProvider& gaborish_inverse,
+  bool fast_initial_color_correlation);
 
 [[nodiscard]] Status RunPreparedQuantizationPipelineWithProviders(
   ConstImage3FView original_linear_rgb,

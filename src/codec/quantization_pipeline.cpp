@@ -14,6 +14,7 @@
 #include "codec/ac_strategy.h"
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/chroma_from_luma.h"
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline_internal.h"
 #include "core/block_grid.h"
@@ -23,6 +24,18 @@
 
 namespace gjxl {
 namespace {
+
+class CpuGaborishInverseProvider final
+    : public quantization_pipeline_internal::GaborishInverseProvider {
+public:
+  Status Apply(
+    ConstImage3FView input,
+    std::array<float, 3> multipliers,
+    Image3FView output) override {
+
+    return ApplyGaborishInverse(input, multipliers, output);
+  }
+};
 
 class CpuAcStrategySearchProvider final : public AcStrategySearchProvider {
 public:
@@ -126,12 +139,55 @@ Status ValidatePipelineInputs(
 
 }  // namespace
 
+Status quantization_pipeline_internal::PrepareQuantizationPreprocessing(
+  PreparedQuantizationPipeline& prepared,
+  GaborishInverseProvider& gaborish_inverse,
+  bool fast_initial_color_correlation) {
+
+  if (!prepared.coding_opsin.const_view().valid() ||
+      !prepared.preprocessed_opsin.const_view().valid() ||
+      prepared.coding_opsin.extent() != prepared.padded_extent ||
+      prepared.preprocessed_opsin.extent() != prepared.padded_extent ||
+      !prepared.profile.valid()) {
+    return Status::InvalidArgument(
+      "Prepared quantization preprocessing is invalid");
+  }
+  Status status = Status::Ok();
+  if (prepared.profile.loop_filter.gaborish) {
+    status = gaborish_inverse.Apply(
+      prepared.coding_opsin.const_view(),
+      prepared.profile.gaborish_inverse_multipliers,
+      prepared.preprocessed_opsin.view());
+  } else {
+    CopyImage(
+      prepared.coding_opsin.const_view(), prepared.preprocessed_opsin.view());
+  }
+  if (!status.ok()) {
+    return status;
+  }
+  status = fast_initial_color_correlation
+    ? chroma_from_luma_internal::ComputeInitialColorCorrelationMapFast(
+        prepared.preprocessed_opsin.const_view(),
+        &prepared.initial_color_correlation)
+    : ComputeInitialColorCorrelationMap(
+        prepared.preprocessed_opsin.const_view(),
+        &prepared.initial_color_correlation);
+  if (!status.ok()) {
+    return status;
+  }
+  prepared.preprocessing_ready = true;
+  prepared.fast_initial_color_correlation =
+    fast_initial_color_correlation;
+  return Status::Ok();
+}
+
 Status quantization_pipeline_internal::PrepareQuantizationPipeline(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
   CpuQuantizationPipelineOptions options,
   PreparedQuantizationPipeline* prepared,
-  bool prepare_cpu_butteraugli) {
+  bool prepare_cpu_butteraugli,
+  bool prepare_cpu_preprocessing) {
 
   if (prepared == nullptr || !original_linear_rgb.valid() || !opsin.valid() ||
       !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
@@ -164,22 +220,14 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
     candidate.coding_opsin.resize(candidate.padded_extent);
     CopyImage(opsin, candidate.coding_opsin.view());
     candidate.preprocessed_opsin.resize(candidate.padded_extent);
-    if (candidate.profile.loop_filter.gaborish) {
-      Status status = ApplyGaborishInverse(
-        opsin,
-        candidate.profile.gaborish_inverse_multipliers,
-        candidate.preprocessed_opsin.view());
+    Status status = Status::Ok();
+    if (prepare_cpu_preprocessing) {
+      CpuGaborishInverseProvider gaborish_inverse;
+      status = PrepareQuantizationPreprocessing(
+        candidate, gaborish_inverse, false);
       if (!status.ok()) {
         return status;
       }
-    } else {
-      CopyImage(opsin, candidate.preprocessed_opsin.view());
-    }
-    Status status = ComputeInitialColorCorrelationMap(
-      candidate.preprocessed_opsin.const_view(),
-      &candidate.initial_color_correlation);
-    if (!status.ok()) {
-      return status;
     }
     candidate.epf_sharpness.resize(block_count);
     status = FillDefaultEpfSharpness({
@@ -233,7 +281,8 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   if (!status.ok()) {
     return status;
   }
-  if (prepared.source_extent != original_linear_rgb.extent() ||
+  if (!prepared.preprocessing_ready ||
+      prepared.source_extent != original_linear_rgb.extent() ||
       prepared.padded_extent != prepared.preprocessed_opsin.extent() ||
       prepared.block_extent != block_extent ||
       prepared.profile != options.adaptive_quantization.profile ||
@@ -355,6 +404,15 @@ Status quantization_pipeline_internal::RunPreparedCpuQuantizationPipeline(
   CpuQuantizationPipelineOptions options,
   CpuQuantizationPipelineOutput output) {
 
+  if (!prepared.preprocessing_ready ||
+      prepared.fast_initial_color_correlation) {
+    CpuGaborishInverseProvider gaborish_inverse;
+    Status status = PrepareQuantizationPreprocessing(
+      prepared, gaborish_inverse, false);
+    if (!status.ok()) {
+      return status;
+    }
+  }
   if (options.adaptive_quantization.control_mode ==
       AdaptiveQuantizationControlMode::kButteraugli &&
       (prepared.butteraugli_reference == nullptr ||

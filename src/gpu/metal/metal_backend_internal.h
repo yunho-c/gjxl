@@ -54,6 +54,7 @@ struct PrimitivePipelines {
   NS::SharedPtr<MTL::ComputePipelineState> affine;
   NS::SharedPtr<MTL::ComputePipelineState> convolution_horizontal;
   NS::SharedPtr<MTL::ComputePipelineState> convolution_vertical;
+  NS::SharedPtr<MTL::ComputePipelineState> symmetric5_convolution;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
 };
 
@@ -369,6 +370,7 @@ private:
 
   Status ValidatePrimitive(const PointwiseAffineCommand& command) const;
   Status ValidatePrimitive(const SeparableConvolutionCommand& command) const;
+  Status ValidatePrimitive(const Symmetric5ConvolutionCommand& command) const;
   Status ValidatePrimitive(const MaximumReductionCommand& command) const;
   Status ValidatePrimitiveCommand(
     const ImagePrimitiveCommand& command) const;
@@ -391,6 +393,10 @@ private:
   void EncodePrimitive(
     MTL::ComputeCommandEncoder* encoder,
     const SeparableConvolutionCommand& command);
+
+  void EncodePrimitive(
+    MTL::ComputeCommandEncoder* encoder,
+    const Symmetric5ConvolutionCommand& command);
 
   void EncodeReductionPass(
     MTL::ComputeCommandEncoder* encoder,

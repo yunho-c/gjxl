@@ -1144,7 +1144,10 @@ the CLI's `--metal-aq fully-resident` carry the same choice through codestream
 generation. Fully resident mode requires forced Metal, is reported in the
 workflow summary, and never participates in automatic selection. Its output is
 atomic and structurally valid but is intentionally not covered by the CPU
-decision-parity promise.
+decision-parity promise. The throughput policy also applies inverse Gaborish
+through one three-channel Metal primitive submission and uses the deterministic
+one-pass initial-CfL regression. Exact-coefficient mode retains the original CPU
+Gaborish and iterative initial-CfL paths.
 
 The production corpus covers 13 built-in workloads at Butteraugli targets
 `1.0` and `1.2`, plus four independent 1919x1079 natural, HDR-like, and

@@ -17,12 +17,14 @@
 #include <vector>
 
 #include "codec/color_transform.h"
+#include "codec/gaborish.h"
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
 #include "codestream/encoder.h"
 #include "codestream/workflow.h"
 #include "codestream/workflow_internal.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/ops/gaborish.h"
 #include "gpu/ops/quantization_pipeline.h"
 
 #ifndef GJXL_METALLIB_PATH
@@ -273,6 +275,65 @@ double MaximumImageError(const ImageStorage& left,
   return maximum;
 }
 
+bool CheckGpuGaborish() {
+  constexpr gjxl::Extent2D kExtent{17, 11};
+  constexpr std::array<float, 3> kMultipliers{1.0f, 0.8f, 1.1f};
+  ImageStorage input(kExtent);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kExtent.height; ++y) {
+      for (size_t x = 0; x < kExtent.width; ++x) {
+        input.plane[channel][y * input.stride + x] =
+          0.01f * static_cast<float>(3 * x + 5 * y + 7 * channel) +
+          0.2f * std::sin(static_cast<float>(x + channel * y));
+      }
+    }
+  }
+  ImageStorage expected(kExtent);
+  if (!gjxl::ApplyGaborishInverse(
+        input.ConstView(), kMultipliers, expected.View()).ok()) {
+    return false;
+  }
+
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+    return false;
+  }
+  ImageStorage output(kExtent);
+  const gjxl::Status status = gjxl::ApplyGaborishInverseGpu(
+    *gpu, input.ConstView(), kMultipliers, output.View());
+  ImageStorage aliased = input;
+  const gjxl::Status alias_status = gjxl::ApplyGaborishInverseGpu(
+    *gpu, aliased.ConstView(), kMultipliers, aliased.View());
+  const double output_error = MaximumImageError(expected, output);
+  const double alias_error = MaximumImageError(expected, aliased);
+  if (!status.ok() || !alias_status.ok() || output_error > 2.0e-6 ||
+      alias_error > 2.0e-6) {
+    std::cerr << "GPU Gaborish mismatch: " << status.message()
+              << " output=" << output_error << " alias=" << alias_error
+              << '\n';
+    return false;
+  }
+
+  ImageStorage nonfinite = input;
+  nonfinite.plane[1][2 * nonfinite.stride + 3] =
+    std::numeric_limits<float>::quiet_NaN();
+  ImageStorage atomic_output(kExtent, 91.0f);
+  const auto original_output = atomic_output.plane;
+  const gjxl::GpuBackendStats before = gpu->stats();
+  const gjxl::Status invalid = gjxl::ApplyGaborishInverseGpu(
+    *gpu, nonfinite.ConstView(), kMultipliers, atomic_output.View());
+  const gjxl::GpuBackendStats after = gpu->stats();
+  if (invalid.code() != gjxl::StatusCode::kInvalidArgument ||
+      atomic_output.plane != original_output ||
+      before.successful_allocations != after.successful_allocations ||
+      before.committed_submissions != after.committed_submissions) {
+    std::cerr << "GPU Gaborish invalid input was not atomic\n";
+    return false;
+  }
+  std::cout << "GPU Gaborish max error=" << output_error << '\n';
+  return true;
+}
+
 class BackendWithoutAq final : public gjxl::GpuBackend {
 public:
   gjxl::BackendKind kind() const noexcept override {
@@ -506,7 +567,7 @@ bool CheckDefaultUpdatePipelineParity() {
   if (!resident_status.ok() || resident_stats.total_candidate_count == 0 ||
       after_resident.committed_submissions !=
           before_resident.committed_submissions +
-              options.adaptive_quantization.iterations + 3 ||
+              options.adaptive_quantization.iterations + 4 ||
       cpu.initial_quant != resident.initial_quant ||
       cpu.strategy_mask != resident.strategy_mask ||
       cpu.pixel_mask != resident.pixel_mask || !resident.frame.valid() ||
@@ -1058,7 +1119,8 @@ bool CheckWorkflowBackendSelection() {
 } // namespace
 
 int main() {
-  if (!CheckGpuPipelineParity() || !CheckDefaultUpdatePipelineParity() ||
+  if (!CheckGpuGaborish() || !CheckGpuPipelineParity() ||
+      !CheckDefaultUpdatePipelineParity() ||
       !CheckPreparedGpuAttemptReuse() ||
       !CheckWorkflowBackendSelection()) {
     return EXIT_FAILURE;

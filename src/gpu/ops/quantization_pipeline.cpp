@@ -3,12 +3,35 @@
 
 #include "gpu/ops/quantization_pipeline.h"
 
+#include "codec/gaborish.h"
 #include "codec/quantization_pipeline_internal.h"
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/gaborish.h"
 
 namespace gjxl {
 namespace {
+
+class GpuPipelineGaborishProvider final
+    : public quantization_pipeline_internal::GaborishInverseProvider {
+public:
+  GpuPipelineGaborishProvider(GpuBackend& gpu, bool use_gpu)
+    : gpu_(gpu), use_gpu_(use_gpu) {}
+
+  Status Apply(
+    ConstImage3FView input,
+    std::array<float, 3> multipliers,
+    Image3FView output) override {
+
+    return use_gpu_
+      ? ApplyGaborishInverseGpu(gpu_, input, multipliers, output)
+      : ApplyGaborishInverse(input, multipliers, output);
+  }
+
+private:
+  GpuBackend& gpu_;
+  bool use_gpu_;
+};
 
 class GpuAcStrategySearchProvider final : public AcStrategySearchProvider {
 public:
@@ -118,9 +141,12 @@ Status RunGpuQuantizationPipeline(
     return Status::Unavailable(
       "GPU quantization pipeline requires prepared AQ support");
   }
+  const bool fully_resident =
+    aq_mode == GpuAdaptiveQuantizationMode::kFullyResident;
   quantization_pipeline_internal::PreparedQuantizationPipeline prepared;
   Status status = quantization_pipeline_internal::PrepareQuantizationPipeline(
-    original_linear_rgb, opsin, options, &prepared, false);
+    original_linear_rgb, opsin, options, &prepared, false,
+    !fully_resident);
   if (!status.ok()) {
     return status;
   }
@@ -150,6 +176,17 @@ Status quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
   if (QueryGpuAqEvaluation(gpu) == nullptr) {
     return Status::Unavailable(
       "GPU quantization pipeline requires prepared AQ support");
+  }
+  const bool fully_resident =
+    aq_mode == GpuAdaptiveQuantizationMode::kFullyResident;
+  if (!prepared.preprocessing_ready ||
+      prepared.fast_initial_color_correlation != fully_resident) {
+    GpuPipelineGaborishProvider gaborish_inverse(gpu, fully_resident);
+    Status status = PrepareQuantizationPreprocessing(
+      prepared, gaborish_inverse, fully_resident);
+    if (!status.ok()) {
+      return status;
+    }
   }
   GpuAcStrategySearchProvider strategy_search(gpu);
   GpuAdaptiveQuantizationProvider adaptive_quantization(

@@ -136,6 +136,16 @@ Exit criterion: the throughput track removes CPU forward transforms and
 coefficient coding from every AQ evaluation and has independent decoder/quality
 evidence. The exact track advances only if its decision contract passes.
 
+The retained throughput policy also replaces the iterative initial-CfL search
+with its deterministic one-pass regression. On the padded 1080p workload, one
+alternating process with one warmup and three samples measured Metal public
+workflow at `512.0-542.8 ms` and paired speedup at `11.71-12.47x` (median
+`11.92x`). Against exact coefficients, the full-pipeline score-history maximum
+was `0.006122`; final quant field, block map, and reconstructed-RGB maxima were
+`0.128`, `0.404`, and `0.913`. The codestream changed from `630517` to `630802`
+bytes. This is an explicit quality-policy trade, not an exact-path optimization;
+independent decode and Butteraugli checks remain part of P6.
+
 ### P3. Make the whole frontend resident
 
 - Introduce one prepared frame context shared by input conversion, initial quant,
@@ -144,6 +154,16 @@ evidence. The exact track advances only if its decision contract passes.
   the search-to-AQ boundary.
 - Keep strategies, quant fields, and coefficients device-resident until the
   final frame or entropy handoff requires them.
+
+The first retained P3 slice moves inverse Gaborish from the CPU to a mirrored-
+boundary Metal 5x5 primitive for fully resident mode. Direct CPU/Metal coverage
+observed `2.98e-7` maximum error, including aliased output and atomic invalid-
+input behavior. A warm padded-1080p public benchmark with one warmup and three
+alternating samples measured Metal at `445.6-467.5 ms` (median `464.1 ms`) and
+paired speedup at `13.71-15.12x` (median `13.88x`). The quantization-pipeline
+median was `390.2 ms`, and the codestream remained `630802` bytes relative to
+the preceding fast-CfL slice. This is still a host/device round trip rather than
+the prepared frame context required by the P3 exit criterion.
 
 ### P4. Remove per-evaluation CPU synchronization
 

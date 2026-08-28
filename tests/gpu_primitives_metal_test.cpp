@@ -18,6 +18,7 @@
 #include <thread>
 #include <vector>
 
+#include "codec/convolution.h"
 #include "gpu/backend.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/primitives.h"
@@ -203,6 +204,64 @@ bool RunConvolutionCase(
   return Compare(
            "convolution", output.Logical(), expected, 2e-5f, 2e-5f) &&
          output.GuardsIntact() && intermediate.GuardsIntact();
+}
+
+bool RunSymmetric5Case(
+  gjxl::GpuBackend& gpu,
+  gjxl::GpuImagePrimitives& primitives,
+  gjxl::Extent2D extent) {
+
+  const std::vector<float> input_values = MakeInput(extent, 7654);
+  constexpr gjxl::Symmetric5ConvolutionWeights kGpuWeights{
+    .distance0 = 0.91f,
+    .distance1 = -0.021f,
+    .distance2 = 0.009f,
+    .distance4 = -0.013f,
+    .distance8 = -0.0007f,
+    .distance5 = 0.003f,
+  };
+  constexpr gjxl::Symmetric5Weights kCpuWeights{
+    kGpuWeights.distance0,
+    kGpuWeights.distance1,
+    kGpuWeights.distance2,
+    kGpuWeights.distance4,
+    kGpuWeights.distance8,
+    kGpuWeights.distance5,
+  };
+  std::vector<float> expected(input_values.size());
+  if (!CheckStatus(
+        gjxl::ConvolveSymmetric5(
+          {input_values.data(), extent, extent.width}, kCpuWeights,
+          {expected.data(), extent, extent.width}),
+        "symmetric5 CPU reference")) {
+    return false;
+  }
+
+  gjxl::test::GuardedDevicePlane input;
+  gjxl::test::GuardedDevicePlane output;
+  if (!PreparePlane(gpu, extent, extent.width + 5, &input) ||
+      !PreparePlane(gpu, extent, extent.width + 7, &output)) {
+    return false;
+  }
+  input.SetLogical(input_values);
+  output.PoisonLogical();
+  if (!CheckStatus(input.Upload(), "symmetric5 input upload") ||
+      !CheckStatus(output.Upload(), "symmetric5 output poison")) {
+    return false;
+  }
+  const gjxl::ImagePrimitiveCommand command =
+    gjxl::Symmetric5ConvolutionCommand{
+      input.ConstView(), output.View(), kGpuWeights};
+  if (!SubmitAndWait(
+        primitives,
+        std::span<const gjxl::ImagePrimitiveCommand>(&command, 1),
+        "symmetric5") ||
+      !CheckStatus(output.Download(), "symmetric5 output download")) {
+    return false;
+  }
+  return Compare(
+           "symmetric5", output.Logical(), expected, 2e-6f, 2e-6f) &&
+         input.GuardsIntact() && output.GuardsIntact();
 }
 
 bool CheckPrimitiveChain(
@@ -697,6 +756,8 @@ int main() {
       !CheckPrimitiveChain(*gpu, *primitives) ||
       !RunConvolutionCase(*gpu, *primitives, 1) ||
       !RunConvolutionCase(*gpu, *primitives, 33) ||
+      !RunSymmetric5Case(*gpu, *primitives, {17, 11}) ||
+      !RunSymmetric5Case(*gpu, *primitives, {1, 1}) ||
       !CheckLargeMaximum(*gpu, *primitives) ||
       !CheckInPlaceAndConstant(*gpu, *primitives) ||
       !CheckValidation(*gpu, *primitives) ||

@@ -35,6 +35,19 @@ struct ConvolutionParams {
   uint32_t kernel_size;
 };
 
+struct Symmetric5Params {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride;
+  uint32_t output_stride;
+  float distance0;
+  float distance1;
+  float distance2;
+  float distance4;
+  float distance8;
+  float distance5;
+};
+
 struct ReductionParams {
   uint32_t width;
   uint32_t input_stride;
@@ -43,12 +56,15 @@ struct ReductionParams {
 
 static_assert(std::is_standard_layout_v<AffineParams>);
 static_assert(std::is_standard_layout_v<ConvolutionParams>);
+static_assert(std::is_standard_layout_v<Symmetric5Params>);
 static_assert(std::is_standard_layout_v<ReductionParams>);
 static_assert(std::is_trivially_copyable_v<AffineParams>);
 static_assert(std::is_trivially_copyable_v<ConvolutionParams>);
+static_assert(std::is_trivially_copyable_v<Symmetric5Params>);
 static_assert(std::is_trivially_copyable_v<ReductionParams>);
 static_assert(sizeof(AffineParams) == 24);
 static_assert(sizeof(ConvolutionParams) == 20);
+static_assert(sizeof(Symmetric5Params) == 40);
 static_assert(sizeof(ReductionParams) == 12);
 
 inline constexpr size_t kReductionThreadCount = 256;
@@ -100,10 +116,11 @@ Status CreatePrimitivePipelines(
   PrimitivePipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 4> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 5> bindings{{
     {"gjxl_pointwise_affine_f32", &pipelines.affine},
     {"gjxl_convolve_horizontal_f32", &pipelines.convolution_horizontal},
     {"gjxl_convolve_vertical_f32", &pipelines.convolution_vertical},
+    {"gjxl_convolve_symmetric5_f32", &pipelines.symmetric5_convolution},
     {"gjxl_reduce_max_f32", &pipelines.maximum_reduction},
   }};
   for (const auto& [name, pipeline] : bindings) {
@@ -121,6 +138,8 @@ Status CreatePrimitivePipelines(
       pipelines.convolution_horizontal->maxTotalThreadsPerThreadgroup() <
         kPointwiseThreads ||
       pipelines.convolution_vertical->maxTotalThreadsPerThreadgroup() <
+        kPointwiseThreads ||
+      pipelines.symmetric5_convolution->maxTotalThreadsPerThreadgroup() <
         kPointwiseThreads ||
       pipelines.maximum_reduction->maxTotalThreadsPerThreadgroup() <
         kReductionThreadCount) {
@@ -270,6 +289,41 @@ Status MetalBackend::ValidatePrimitive(
 }
 
 Status MetalBackend::ValidatePrimitive(
+  const Symmetric5ConvolutionCommand& command) const {
+
+  ResolvedConstPlane input;
+  ResolvedPlane output;
+  Status status = ResolvePlane(command.input, &input);
+  if (!status.ok()) return status;
+  status = ResolvePlane(command.output, &output);
+  if (!status.ok()) return status;
+  const std::array weights{
+    command.weights.distance0,
+    command.weights.distance1,
+    command.weights.distance2,
+    command.weights.distance4,
+    command.weights.distance8,
+    command.weights.distance5,
+  };
+  if (input.view.extent != output.view.extent) {
+    return Status::InvalidArgument(
+      "Symmetric5 convolution planes have different geometry");
+  }
+  for (float weight : weights) {
+    if (!std::isfinite(weight)) {
+      return Status::InvalidArgument(
+        "Symmetric5 convolution weights must be finite");
+    }
+  }
+  status = RejectOverlap(
+    input.range,
+    output.range,
+    "Symmetric5 convolution planes overlap");
+  if (!status.ok()) return status;
+  return Status::Ok();
+}
+
+Status MetalBackend::ValidatePrimitive(
   const MaximumReductionCommand& command) const {
 
   ResolvedConstPlane input;
@@ -397,6 +451,32 @@ void MetalBackend::EncodePrimitive(
     command.intermediate,
     command.kernel,
     command.output);
+}
+
+void MetalBackend::EncodePrimitive(
+  MTL::ComputeCommandEncoder* encoder,
+  const Symmetric5ConvolutionCommand& command) {
+
+  const MetalBuffer* input = AsMetalBuffer(*command.input.buffer);
+  MetalBuffer* output = AsMetalBuffer(*command.output.buffer);
+  const Symmetric5Params params{
+    static_cast<uint32_t>(command.input.extent.width),
+    static_cast<uint32_t>(command.input.extent.height),
+    static_cast<uint32_t>(command.input.row_stride),
+    static_cast<uint32_t>(command.output.row_stride),
+    command.weights.distance0,
+    command.weights.distance1,
+    command.weights.distance2,
+    command.weights.distance4,
+    command.weights.distance8,
+    command.weights.distance5,
+  };
+  encoder->setComputePipelineState(
+    primitive_pipelines_.symmetric5_convolution.get());
+  encoder->setBuffer(input->handle(), command.input.offset_bytes, 0);
+  encoder->setBuffer(output->handle(), command.output.offset_bytes, 1);
+  encoder->setBytes(&params, sizeof(params), 2);
+  DispatchPlane(encoder, command.input.extent);
 }
 
 void MetalBackend::EncodeReductionPass(

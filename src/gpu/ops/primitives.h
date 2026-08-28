@@ -32,6 +32,23 @@ struct SeparableConvolutionCommand {
   DevicePlaneView output;
 };
 
+struct Symmetric5ConvolutionWeights {
+  float distance0 = 0.0f;
+  float distance1 = 0.0f;
+  float distance2 = 0.0f;
+  float distance4 = 0.0f;
+  float distance8 = 0.0f;
+  float distance5 = 0.0f;
+};
+
+struct Symmetric5ConvolutionCommand {
+  /// Applies the codec's mirrored-boundary symmetric 5x5 convolution.
+  /// Input and output must be distinct float32 planes with equal geometry.
+  ConstDevicePlaneView input;
+  DevicePlaneView output;
+  Symmetric5ConvolutionWeights weights;
+};
+
 struct MaximumReductionCommand {
   /// Returns the exact maximum of finite float32 logical input values.
   /// Scratch planes are contiguous one-row capacities for partial maxima.
@@ -44,6 +61,7 @@ struct MaximumReductionCommand {
 using ImagePrimitiveCommand = std::variant<
   PointwiseAffineCommand,
   SeparableConvolutionCommand,
+  Symmetric5ConvolutionCommand,
   MaximumReductionCommand>;
 
 /// Optional capability for a fixed set of reusable image primitives.

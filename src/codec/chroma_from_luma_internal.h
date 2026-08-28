@@ -8,6 +8,11 @@
 
 namespace gjxl::chroma_from_luma_internal {
 
+/// Uses the deterministic one-pass CfL regression for the initial DCT8 map.
+[[nodiscard]] Status ComputeInitialColorCorrelationMapFast(
+  ConstImage3FView opsin,
+  ColorCorrelationMap* out);
+
 /// Copies validated signed-byte CfL maps into their owning codec form.
 [[nodiscard]] Status CreateColorCorrelationMap(
   ConstPlaneI8View y_to_x,

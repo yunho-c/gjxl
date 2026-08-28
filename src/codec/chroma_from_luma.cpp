@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codec/chroma_from_luma.h"
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/prepared_coefficients_internal.h"
 
 #include <algorithm>
@@ -328,8 +329,9 @@ std::array<float, 3> ColorCorrelationMap::AcFactors(
   };
 }
 
-Status ComputeInitialColorCorrelationMap(
+Status chroma_from_luma_internal::ComputeInitialColorCorrelationMapWithMode(
   ConstImage3FView opsin,
+  bool fast,
   ColorCorrelationMap* out) {
 
   if (out == nullptr) {
@@ -402,12 +404,12 @@ Status ComputeInitialColorCorrelationMap(
           values[0],
           values[1],
           kBaseCorrelationX,
-          false);
+          fast);
         result.y_to_b_[tile_index] = FindBestMultiplier(
           values[2],
           values[3],
           kBaseCorrelationB,
-          false);
+          fast);
       }
     }
 
@@ -421,6 +423,21 @@ Status ComputeInitialColorCorrelationMap(
   }
 
   return Status::Ok();
+}
+
+Status ComputeInitialColorCorrelationMap(
+  ConstImage3FView opsin,
+  ColorCorrelationMap* out) {
+
+  return chroma_from_luma_internal::ComputeInitialColorCorrelationMapWithMode(
+    opsin, false, out);
+}
+
+Status chroma_from_luma_internal::ComputeInitialColorCorrelationMapFast(
+  ConstImage3FView opsin,
+  ColorCorrelationMap* out) {
+
+  return ComputeInitialColorCorrelationMapWithMode(opsin, true, out);
 }
 
 Status ComputeFinalColorCorrelationMap(

@@ -421,6 +421,7 @@ add_library(
 
   src/gpu/ops/ac_strategy_search.cpp
   src/gpu/ops/adaptive_quantization.cpp
+  src/gpu/ops/gaborish.cpp
   src/gpu/ops/quantization_pipeline.cpp
 )
 

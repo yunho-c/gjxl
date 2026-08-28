@@ -416,7 +416,9 @@ struct PreparedWorkflow {
       candidate->original_linear_rgb(), candidate->opsin.const_view(),
       preparation_options,
       &candidate->quantization,
-      options.backend != VarDctBackendPreference::kMetal);
+      options.backend != VarDctBackendPreference::kMetal,
+      options.metal_aq_mode !=
+        GpuAdaptiveQuantizationMode::kFullyResident);
     if (!status.ok()) {
       return status;
     }

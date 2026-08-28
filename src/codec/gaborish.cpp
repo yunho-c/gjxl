@@ -12,13 +12,14 @@
 #include <stdexcept>
 
 #include "codec/convolution.h"
+#include "codec/gaborish_internal.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 
 namespace gjxl {
-namespace {
+namespace gaborish_internal {
 
-Symmetric5Weights GaborishWeights(float multiplier) {
+Symmetric5Weights GaborishInverseWeights(float multiplier) noexcept {
   constexpr std::array<float, 5> kGaborish = {
     -0.09495815671340026f,
     -0.041031725066768575f,
@@ -43,7 +44,7 @@ Symmetric5Weights GaborishWeights(float multiplier) {
   };
 }
 
-}  // namespace
+}  // namespace gaborish_internal
 
 Status ApplyGaborishInverse(
   ConstImage3FView input,
@@ -69,7 +70,7 @@ Status ApplyGaborishInverse(
     for (size_t channel = 0; channel < 3; ++channel) {
       Status status = ConvolveSymmetric5(
         input.plane[channel],
-        GaborishWeights(multipliers[channel]),
+        gaborish_internal::GaborishInverseWeights(multipliers[channel]),
         filtered_view.plane[channel]);
       if (!status.ok()) {
         return status;
