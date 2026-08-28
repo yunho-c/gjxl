@@ -396,6 +396,9 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       (coding_extent_.height + 63) / 64,
   };
   options_ = preparation.options;
+  frame_only_ = preparation.frame_only;
+  frame_only_inverse_gaborish_ =
+      preparation.frame_only_inverse_gaborish;
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
@@ -826,11 +829,13 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
     return status;
 
   for (size_t channel = 0; channel < 3; ++channel) {
-    status =
-        UploadPlane(*backend_, preparation.original_linear_rgb.plane[channel],
-                    original_[channel]);
-    if (!status.ok())
-      return status;
+    if (!frame_only_) {
+      status = UploadPlane(
+          *backend_, preparation.original_linear_rgb.plane[channel],
+          original_[channel]);
+      if (!status.ok())
+        return status;
+    }
     status = UploadPlane(*backend_, preparation.coding_opsin.plane[channel],
                          coding_[channel]);
     if (!status.ok())
@@ -968,6 +973,14 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       255.0f / options_.profile.intensity_target,
   };
 
+  if (frame_only_) {
+    memory_stats_ = {
+        persistent_.capacity_bytes(),
+        staging_.capacity_bytes(),
+        staging_.capacity_bytes(),
+    };
+    return Status::Ok();
+  }
   DeviceButteraugliMemoryStats butteraugli_memory;
   if (options_.metric == AqEvaluationMetric::kButteraugli) {
     status = PrepareDeviceButteraugli(
@@ -1253,6 +1266,42 @@ MetalPreparedAqEvaluation::memory_stats() const noexcept {
   return memory_stats_;
 }
 
+Status MetalPreparedAqEvaluation::AssembleFrameFromReadback(
+    VarDctEncoderFrame *frame) const {
+
+  if (frame == nullptr) {
+    return Status::InvalidArgument("AQ frame assembly output is null");
+  }
+  FrameGeometry geometry;
+  Status status = FrameGeometry::Create(source_extent_, &geometry);
+  if (!status.ok())
+    return status;
+  const ConstImage3I32View quantized_dc{{
+      ConstPlaneI32View{quantized_dc_readback_.data(), block_extent_,
+                        block_extent_.width},
+      ConstPlaneI32View{quantized_dc_readback_.data() + block_count_,
+                        block_extent_, block_extent_.width},
+      ConstPlaneI32View{quantized_dc_readback_.data() + 2 * block_count_,
+                        block_extent_, block_extent_.width},
+  }};
+  return vardct_frame_internal::AssembleVarDctEncoderFrame(
+      {
+          .geometry = geometry,
+          .strategies = &strategies_host_,
+          .raw_quant_field = {last_raw_quant_.data(), block_extent_,
+                              block_extent_.width},
+          .quantizer = &last_quantizer_,
+          .y_to_x = {last_y_to_x_.data(), tile_extent_, tile_extent_.width},
+          .y_to_b = {last_y_to_b_.data(), tile_extent_, tile_extent_.width},
+          .epf_sharpness = {epf_sharpness_host_.data(), block_extent_,
+                            block_extent_.width},
+          .profile = options_.profile,
+          .quantized_dc = quantized_dc,
+          .transforms = final_transform_views_,
+      },
+      frame);
+}
+
 Status MetalPreparedAqEvaluation::SubmitEvaluation(
   AqEvaluationInput input,
   bool profiling_reserved) {
@@ -1485,40 +1534,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
         "Metal AQ final readback contains poison or non-finite pixels");
     }
 
-    FrameGeometry geometry;
-    status = FrameGeometry::Create(source_extent_, &geometry);
-    if (!status.ok()) {
-      Invalidate();
-      return status;
-    }
-    const ConstImage3I32View quantized_dc{{
-      ConstPlaneI32View{
-        quantized_dc_readback_.data(), block_extent_, block_extent_.width},
-      ConstPlaneI32View{
-        quantized_dc_readback_.data() + block_count_,
-        block_extent_, block_extent_.width},
-      ConstPlaneI32View{
-        quantized_dc_readback_.data() + 2 * block_count_,
-        block_extent_, block_extent_.width},
-    }};
-    status = vardct_frame_internal::AssembleVarDctEncoderFrame(
-      {
-        .geometry = geometry,
-        .strategies = &strategies_host_,
-        .raw_quant_field = {
-          last_raw_quant_.data(), block_extent_, block_extent_.width},
-        .quantizer = &last_quantizer_,
-        .y_to_x = {
-          last_y_to_x_.data(), tile_extent_, tile_extent_.width},
-        .y_to_b = {
-          last_y_to_b_.data(), tile_extent_, tile_extent_.width},
-        .epf_sharpness = {
-          epf_sharpness_host_.data(), block_extent_, block_extent_.width},
-        .profile = options_.profile,
-        .quantized_dc = quantized_dc,
-        .transforms = final_transform_views_,
-      },
-      &final_frame);
+    status = AssembleFrameFromReadback(&final_frame);
     if (!status.ok()) {
       Invalidate();
       return status;
@@ -1724,6 +1740,12 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
   status = ValidateOptions(preparation.options);
   if (!status.ok())
     return status;
+  if (preparation.frame_only_inverse_gaborish &&
+      (!preparation.frame_only ||
+       !preparation.options.profile.loop_filter.gaborish)) {
+    return Status::InvalidArgument(
+        "Frame-only inverse Gaborish preparation is inconsistent");
+  }
 
   const Extent2D coding = preparation.coding_opsin.extent();
   const Extent2D blocks{

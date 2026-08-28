@@ -70,6 +70,8 @@ struct VarDctEncodingOptions {
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
   /// Selects the Metal AQ implementation. Resident modes require an explicitly
   /// forced Metal backend and may change encoder decisions or policy bounds.
+  /// Maximum-throughput mode omits perceptual diagnostics, so its reported
+  /// score history is empty.
   GpuAdaptiveQuantizationMode metal_aq_mode =
     GpuAdaptiveQuantizationMode::kExactCoefficients;
 };

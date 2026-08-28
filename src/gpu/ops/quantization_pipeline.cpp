@@ -3,8 +3,16 @@
 
 #include "gpu/ops/quantization_pipeline.h"
 
+#include <cmath>
+#include <new>
+#include <stdexcept>
+#include <vector>
+
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline_internal.h"
+#include "core/block_grid.h"
+#include "core/image_ops.h"
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/gaborish.h"
@@ -106,6 +114,114 @@ private:
 };
 
 }  // namespace
+
+Status RunGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output) {
+
+  if (!original_linear_rgb.valid() || !opsin.valid() ||
+      !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
+      !std::isfinite(options.butteraugli_target) ||
+      options.butteraugli_target <= 0.0f ||
+      !std::isfinite(options.initial_quant_rescale) ||
+      options.initial_quant_rescale <= 0.0f ||
+      !options.adaptive_quantization.profile.valid() ||
+      output.frame == nullptr) {
+    return Status::InvalidArgument(
+      "GPU frame-only pipeline inputs or options are invalid");
+  }
+  const Extent2D block_extent =
+    BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
+  if (!output.initial_quantization.quant_field.valid() ||
+      output.initial_quantization.quant_field.extent != block_extent ||
+      !output.initial_quantization.strategy_mask.valid() ||
+      output.initial_quantization.strategy_mask.extent != block_extent ||
+      !output.initial_quantization.pixel_mask.valid() ||
+      output.initial_quantization.pixel_mask.extent != opsin.extent() ||
+      !output.quant_field.valid() || output.quant_field.extent != block_extent) {
+    return Status::InvalidArgument(
+      "GPU frame-only pipeline output geometry is invalid");
+  }
+
+  size_t block_count = 0;
+  size_t pixel_count = 0;
+  if (!block_extent.try_area(&block_count) ||
+      !opsin.extent().try_area(&pixel_count)) {
+    return Status::InvalidArgument(
+      "GPU frame-only pipeline dimensions are too large");
+  }
+  try {
+    std::vector<float> initial_quant(block_count);
+    std::vector<float> strategy_mask(block_count);
+    std::vector<float> pixel_mask(pixel_count);
+    const float initial_quant_target =
+      options.adaptive_quantization.profile.loop_filter.gaborish
+        ? options.butteraugli_target
+        : 0.62f * options.butteraugli_target;
+    Status status = ComputeInitialQuantField(
+      opsin,
+      {
+        .butteraugli_target = initial_quant_target,
+        .rescale = options.initial_quant_rescale,
+      },
+      {
+        .quant_field = {
+          initial_quant.data(), block_extent, block_extent.width},
+        .strategy_mask = {
+          strategy_mask.data(), block_extent, block_extent.width},
+        .pixel_mask = {
+          pixel_mask.data(), opsin.extent(), opsin.width()},
+      });
+    if (!status.ok()) return status;
+
+    ColorCorrelationMap color_correlation;
+    status = chroma_from_luma_internal::ComputeInitialColorCorrelationMapFast(
+      opsin, &color_correlation);
+    if (!status.ok()) return status;
+    AcStrategyGrid strategies;
+    status = AcStrategyGrid::Create(block_extent, &strategies);
+    if (!status.ok()) return status;
+    strategies.fill_dct8();
+    std::vector<uint8_t> sharpness(block_count);
+    status = FillDefaultEpfSharpness(
+      {sharpness.data(), block_extent, block_extent.width});
+    if (!status.ok()) return status;
+    std::vector<float> final_quant(block_count);
+    VarDctEncoderFrame frame;
+    AdaptiveQuantizationOptions adaptive_options =
+      options.adaptive_quantization;
+    adaptive_options.butteraugli_target = options.butteraugli_target;
+    status = RunGpuFrameOnlyQuantization(
+      gpu, original_linear_rgb, opsin, strategies,
+      {initial_quant.data(), block_extent, block_extent.width},
+      {sharpness.data(), block_extent, block_extent.width}, color_correlation,
+      adaptive_options,
+      {
+        .quant_field = {
+          final_quant.data(), block_extent, block_extent.width},
+        .frame = &frame,
+      });
+    if (!status.ok()) return status;
+
+    CopyContiguousPlane(
+      initial_quant, output.initial_quantization.quant_field);
+    CopyContiguousPlane(
+      strategy_mask, output.initial_quantization.strategy_mask);
+    CopyContiguousPlane(pixel_mask, output.initial_quantization.pixel_mask);
+    CopyContiguousPlane(final_quant, output.quant_field);
+    *output.frame = std::move(frame);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate GPU frame-only pipeline storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "GPU frame-only pipeline dimensions are too large");
+  }
+}
 
 Status RunGpuQuantizationPipeline(
   GpuBackend& gpu,

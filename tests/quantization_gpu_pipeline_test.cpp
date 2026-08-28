@@ -605,6 +605,22 @@ bool CheckDefaultUpdatePipelineParity() {
     return false;
   }
 
+  PipelineStorage maximum_output(kExtent, kExtent);
+  gjxl::AcStrategyGpuSearchStats maximum_stats;
+  maximum_stats.total_candidate_count = 31337;
+  const gjxl::Status maximum_pipeline_status =
+      gjxl::RunGpuQuantizationPipeline(
+          *gpu, original.ConstView(), opsin.ConstView(), options,
+          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput,
+          maximum_output.Output(), &maximum_stats);
+  if (maximum_pipeline_status.code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+      maximum_output.frame.valid() || !maximum_output.scores.empty() ||
+      maximum_stats.total_candidate_count != 31337) {
+    std::cerr << "Maximum-throughput mode reached the iterative pipeline\n";
+    return false;
+  }
+
   PipelineStorage invalid_mode_output(kExtent, kExtent);
   gjxl::AcStrategyGpuSearchStats invalid_mode_stats;
   invalid_mode_stats.total_candidate_count = 424242;
@@ -959,6 +975,56 @@ bool CheckWorkflowBackendSelection() {
       resident_summary.metal_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
     std::cerr << "Forced fully resident public workflow failed\n";
+    return false;
+  }
+
+  std::vector<uint8_t> maximum_bytes;
+  gjxl::VarDctEncodingSummary maximum_summary;
+  if (!gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+              original.ConstView(),
+              {.butteraugli_target = 1.0f,
+               .backend = gjxl::VarDctBackendPreference::kMetal,
+               .metal_aq_mode =
+                   gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput},
+              gpu.get(), false, &maximum_bytes, &maximum_summary)
+          .ok() ||
+      maximum_bytes.empty() || !maximum_summary.score_history.empty() ||
+      maximum_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kMetal ||
+      maximum_summary.metal_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput ||
+      maximum_summary.strategy_counts[
+          static_cast<size_t>(gjxl::AcStrategyType::kDct8)] !=
+          (kExtent.width / gjxl::kJxlBlockDimension) *
+            (kExtent.height / gjxl::kJxlBlockDimension)) {
+    std::cerr << "Forced maximum-throughput public workflow failed\n";
+    return false;
+  }
+
+  std::vector<uint8_t> maximum_failed_bytes{4, 2, 1};
+  const std::vector<uint8_t> maximum_failed_bytes_original =
+      maximum_failed_bytes;
+  gjxl::VarDctEncodingSummary maximum_failed_summary{
+      .extent = {9, 7}, .encoded_bytes = 23, .score_history = {5.0}};
+  const gjxl::VarDctEncodingSummary maximum_failed_summary_original =
+      maximum_failed_summary;
+  if (!gjxl::ArmNextMetalSubmissionFailureForTest(*gpu, true, false).ok()) {
+    std::cerr << "Could not arm maximum-throughput submission failure\n";
+    return false;
+  }
+  const gjxl::Status maximum_failure = gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+          original.ConstView(),
+          {.butteraugli_target = 1.0f,
+           .backend = gjxl::VarDctBackendPreference::kMetal,
+           .metal_aq_mode =
+               gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput},
+          gpu.get(), false, &maximum_failed_bytes, &maximum_failed_summary);
+  if (maximum_failure.ok() ||
+      maximum_failed_bytes != maximum_failed_bytes_original ||
+      maximum_failed_summary != maximum_failed_summary_original) {
+    std::cerr << "Maximum-throughput failure was not atomic\n";
     return false;
   }
 

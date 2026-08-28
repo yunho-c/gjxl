@@ -445,6 +445,9 @@ struct FrameCoefficientError {
   if (text == "throughput") {
     return gjxl::GpuAdaptiveQuantizationMode::kThroughput;
   }
+  if (text == "maximum-throughput") {
+    return gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
+  }
   throw std::runtime_error("Unknown GPU AQ mode: " + std::string(text));
 }
 
@@ -482,6 +485,8 @@ struct FrameCoefficientError {
       return "fully-resident";
     case gjxl::GpuAdaptiveQuantizationMode::kThroughput:
       return "throughput";
+    case gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput:
+      return "maximum-throughput";
   }
   return "invalid";
 }
@@ -496,7 +501,8 @@ struct FrameCoefficientError {
                    "[--input IMAGE.ppm] "
                    "[--scope full|public-workflow|coefficient-coding] "
                    "[--implementation scalar|simd|factored] "
-                   "[--gpu-aq exact-coefficients|fully-resident|throughput] "
+                   "[--gpu-aq exact-coefficients|fully-resident|throughput|"
+                   "maximum-throughput] "
                    "[--distance D] [--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
     }
@@ -528,6 +534,12 @@ struct FrameCoefficientError {
       throw std::runtime_error("Unknown quantization benchmark option: " +
                                std::string(argument));
     }
+  }
+  if (options.gpu_aq_mode ==
+        gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput &&
+      options.scope != BenchmarkScope::kPublicWorkflow) {
+    throw std::runtime_error(
+      "Maximum-throughput mode requires public-workflow scope");
   }
   return options;
 }
@@ -1010,7 +1022,9 @@ void RunPublicWorkflowOnlyWorkload(
         static_cast<double>(gpu_profile.total_nanoseconds));
     sink += static_cast<double>(cpu_bytes.size() + gpu_bytes.size()) +
             cpu_summary.score_history.back() +
-            gpu_summary.score_history.back();
+            (gpu_summary.score_history.empty()
+               ? 0.0
+               : gpu_summary.score_history.back());
   }
 
   std::cout << "workload " << spec.name << " source="

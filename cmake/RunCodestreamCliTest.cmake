@@ -57,6 +57,23 @@ file(READ "${sentinel}" sentinel_contents)
 if(NOT sentinel_contents STREQUAL "unchanged")
   message(FATAL_ERROR "Invalid throughput request changed an existing output")
 endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --metal-aq maximum-throughput
+    "${GJXL_SAMPLE}" "${sentinel}"
+  RESULT_VARIABLE implicit_maximum_result
+  OUTPUT_QUIET
+  ERROR_QUIET
+)
+if(implicit_maximum_result EQUAL 0)
+  message(FATAL_ERROR
+    "CLI accepted maximum-throughput AQ without forced Metal")
+endif()
+file(READ "${sentinel}" sentinel_contents)
+if(NOT sentinel_contents STREQUAL "unchanged")
+  message(FATAL_ERROR
+    "Invalid maximum-throughput request changed an existing output")
+endif()
 
 execute_process(
   COMMAND
@@ -128,6 +145,8 @@ set(second "${GJXL_TEST_DIR}/second.jxl")
 set(metal "${GJXL_TEST_DIR}/metal.jxl")
 set(throughput "${GJXL_TEST_DIR}/throughput.jxl")
 set(throughput_repeat "${GJXL_TEST_DIR}/throughput-repeat.jxl")
+set(maximum "${GJXL_TEST_DIR}/maximum-throughput.jxl")
+set(maximum_repeat "${GJXL_TEST_DIR}/maximum-throughput-repeat.jxl")
 execute_process(
   COMMAND
     "${GJXL_ENCODER}" --distance 1.0 --backend cpu
@@ -183,12 +202,38 @@ if(NOT throughput_repeat_result EQUAL 0)
   message(FATAL_ERROR
     "Repeated throughput CLI encode failed: ${throughput_repeat_error}")
 endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend metal
+    --metal-aq maximum-throughput "${GJXL_SAMPLE}" "${maximum}"
+  RESULT_VARIABLE maximum_result
+  OUTPUT_VARIABLE maximum_output
+  ERROR_VARIABLE maximum_error
+)
+if(NOT maximum_result EQUAL 0)
+  message(FATAL_ERROR
+    "Maximum-throughput CLI encode failed: ${maximum_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend metal
+    --metal-aq maximum-throughput "${GJXL_SAMPLE}" "${maximum_repeat}"
+  RESULT_VARIABLE maximum_repeat_result
+  OUTPUT_QUIET
+  ERROR_VARIABLE maximum_repeat_error
+)
+if(NOT maximum_repeat_result EQUAL 0)
+  message(FATAL_ERROR
+    "Repeated maximum-throughput CLI encode failed: ${maximum_repeat_error}")
+endif()
 
 file(SHA256 "${first}" first_hash)
 file(SHA256 "${second}" second_hash)
 file(SHA256 "${metal}" metal_hash)
 file(SHA256 "${throughput}" throughput_hash)
 file(SHA256 "${throughput_repeat}" throughput_repeat_hash)
+file(SHA256 "${maximum}" maximum_hash)
+file(SHA256 "${maximum_repeat}" maximum_repeat_hash)
 if(NOT first_hash STREQUAL second_hash)
   message(FATAL_ERROR "CLI output is not deterministic")
 endif()
@@ -197,6 +242,9 @@ if(NOT first_hash STREQUAL metal_hash)
 endif()
 if(NOT throughput_hash STREQUAL throughput_repeat_hash)
   message(FATAL_ERROR "Throughput CLI output is not deterministic")
+endif()
+if(NOT maximum_hash STREQUAL maximum_repeat_hash)
+  message(FATAL_ERROR "Maximum-throughput CLI output is not deterministic")
 endif()
 set(expected_hash
   0cf93a5c330f19c5faad0cf20d42c446f820adfbc685aa9a29ae5251643da5a8)
@@ -218,6 +266,16 @@ endif()
 string(FIND "${throughput_output}" "Metal throughput AQ" throughput_found)
 if(throughput_found EQUAL -1)
   message(FATAL_ERROR "Throughput CLI report did not identify its policy")
+endif()
+string(FIND "${maximum_output}" "Metal maximum-throughput AQ" maximum_found)
+if(maximum_found EQUAL -1)
+  message(FATAL_ERROR
+    "Maximum-throughput CLI report did not identify its policy")
+endif()
+string(FIND "${maximum_output}" "Final perceptual score:" maximum_score_found)
+if(NOT maximum_score_found EQUAL -1)
+  message(FATAL_ERROR
+    "Maximum-throughput CLI report claimed a perceptual score")
 endif()
 
 set(target_bytes_first "${GJXL_TEST_DIR}/target-bytes-first.jxl")

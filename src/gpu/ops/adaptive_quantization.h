@@ -25,6 +25,10 @@ enum class GpuAdaptiveQuantizationMode {
   /// host-synchronized AQ update instead of two. This is an explicit
   /// speed/size/quality trade and is never selected automatically.
   kThroughput,
+  /// Uses a separate frame-only pipeline with fixed DCT8 strategies and no
+  /// perceptual AQ evaluations. This maximum-throughput policy is never
+  /// selected automatically and does not produce a score history.
+  kMaximumThroughput,
 };
 
 struct GpuAdaptiveQuantizationPolicyOutput {
@@ -32,6 +36,25 @@ struct GpuAdaptiveQuantizationPolicyOutput {
   PlaneF32View block_distance_map;
   std::vector<double>* score_history = nullptr;
 };
+
+struct GpuFrameOnlyQuantizationOutput {
+  PlaneF32View quant_field;
+  VarDctEncoderFrame* frame = nullptr;
+};
+
+/// Quantizes one explicitly selected field into an encoder frame without
+/// inverse reconstruction or perceptual scoring. This is an experimental
+/// speed/quality trade for callers that do not require AQ diagnostics.
+[[nodiscard]] Status RunGpuFrameOnlyQuantization(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  const ColorCorrelationMap& color_correlation,
+  AdaptiveQuantizationOptions options,
+  GpuFrameOnlyQuantizationOutput output);
 
 /// Runs the bounded adaptive-quantization policy with a prepared GPU evaluator.
 ///
@@ -52,6 +75,7 @@ struct GpuAdaptiveQuantizationPolicyOutput {
 /// Resident modes are intended for error measurement and numerical research;
 /// neither promises CPU-identical encoder decisions. `kThroughput` changes the
 /// complete pipeline's policy iteration bound, not this direct operation.
+/// `kMaximumThroughput` is unsupported by this direct operation.
 [[nodiscard]] Status RunGpuAdaptiveQuantizationPolicy(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,

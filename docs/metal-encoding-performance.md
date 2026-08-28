@@ -27,7 +27,7 @@ The primary throughput gate is:
 - The reported speedup is the range of paired process medians, not a ratio of
   unrelated best cases.
 
-Three accuracy tracks are explicit:
+Four accuracy tracks are explicit:
 
 - `exact-coefficients` is the production track. Raw quantization, encoder frame,
   and codestream bytes remain exact; existing numerical gates are not widened.
@@ -39,9 +39,13 @@ Three accuracy tracks are explicit:
 - `throughput` is a more aggressive opt-in policy layered on the resident
   evaluator. It performs one AQ update instead of the default two and reports
   its additional size and quality drift separately.
+- `maximum-throughput` is the explicit speed-first track. It uses only DCT8,
+  quantizes the adjusted initial field directly on Metal, and omits inverse
+  reconstruction and perceptual AQ scoring. Its score history is therefore
+  empty, and decoded quality must be measured independently.
 
-The `50x` objective may be satisfied first by the throughput track. Production
-rollout remains separately gated on the exact track.
+The `50x` objective may be satisfied first by the maximum-throughput track.
+Production rollout remains separately gated on the exact track.
 
 ## Current baseline
 
@@ -80,6 +84,7 @@ Use the focused benchmark while iterating:
 just encode-benchmark padded_1080p simd 5 1 exact-coefficients
 just encode-benchmark padded_1080p simd 5 1 fully-resident
 just encode-benchmark padded_1080p simd 5 1 throughput
+just encode-benchmark padded_1080p simd 5 1 maximum-throughput
 just coefficient-benchmark padded_1080p 9 2
 ```
 
@@ -262,6 +267,35 @@ mode is never automatic and requires explicitly forced Metal.
 An independently installed `djxl` 0.12 decoder also accepted the CLI's
 throughput sample and produced a 17x13 linear-RGB PFM.
 
+The third retained P4 slice adds a separate `maximum-throughput` workflow. It
+uses a complete DCT8 grid and a frame-only prepared Metal operation that stops
+after forward transforms and quantized coefficient readback. Inverse Gaborish
+runs in that same command buffer immediately before coefficient coding, so the
+filtered image never returns to the host. Frame-only preparation also omits the
+unused original-image upload and prepared Butteraugli state.
+
+Three independent Apple M4 Pro Release processes each used one warmup and five
+alternating 1080p pairs. CPU process medians were `6260.8-6266.9 ms`; Metal
+process medians were `104.0-115.6 ms`; paired process medians were
+`54.73-60.42x`. Every individual pair was `51.95-62.85x`. The quantization
+pipeline itself measured `73.1-78.7 ms` by process median. The `710572`-byte
+maximum-throughput codestream was `12.7%` larger than the `630517`-byte exact
+output.
+
+The same three-process protocol at padded 4K measured CPU medians of
+`24972.8-25062.9 ms`, Metal medians of `367.6-387.5 ms`, and paired process
+medians of `64.35-68.20x`; every pair was `61.04-69.12x`. The
+maximum-throughput codestream was `2846429` bytes versus `2512415` exact, a
+`13.3%` increase.
+
+Independent decodes with both installed `djxl` 0.12 and pinned libjxl revision
+`e8ff09762481785938d8e4e01333ed3917571161` succeeded for the 17x13 CLI sample
+and a 510x532 natural Flower image. Native Butteraugli distances at target
+`1.0` were `1.1921773` and `1.34573984`, respectively. The mode is never
+automatic and exposes no internal perceptual score; these independent
+decoded-quality measurements are the only quality claim for the speed-first
+policy.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.
@@ -281,9 +315,10 @@ deterministic-byte tests cover the parallel path.
 
 ### P6. Close the 50x gate
 
-- Run the required independent-process 1080p and 4K benchmark matrix.
-- Validate deterministic output, pinned-`djxl` acceptance, decoded pixels, and
-  Butteraugli drift for the winning accuracy track.
+- The required independent-process 1080p and 4K benchmark matrix is complete
+  for maximum-throughput mode, with process-median speedups above `50x`.
+- Deterministic output, independent-`djxl` acceptance, decoded pixels, and
+  Butteraugli drift are validated for the two decoded quality fixtures above.
 - Record warm/cold latency, device memory, peak scratch, output size, and every
   profile phase. A missing phase or excluded transfer invalidates the claim.
 

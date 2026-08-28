@@ -36,6 +36,11 @@ struct AqEvaluationPreparation {
   const AcStrategyGrid* strategies = nullptr;
   ConstPlaneU8View epf_sharpness;
   AqEvaluationOptions options;
+  /// Omits perceptual-reference preparation when only EncodeFrame is used.
+  bool frame_only = false;
+  /// Applies the profile's inverse Gaborish filter on device before frame-only
+  /// coefficient coding, avoiding a host materialization boundary.
+  bool frame_only_inverse_gaborish = false;
 };
 
 struct AqEvaluationInput {
@@ -95,6 +100,18 @@ public:
   [[nodiscard]] virtual Status Reconfigure(
     const AcStrategyGrid& strategies,
     ConstPlaneU8View epf_sharpness) = 0;
+
+  /// Materializes only the quantized encoder frame. Backends may use this
+  /// explicit fast path to omit inverse reconstruction and perceptual scoring.
+  /// Failure leaves `frame` unchanged.
+  [[nodiscard]] virtual Status EncodeFrame(
+    AqEvaluationInput input,
+    VarDctEncoderFrame* frame) {
+    (void)input;
+    (void)frame;
+    return Status::Unavailable(
+      "Prepared AQ frame-only encoding is unavailable");
+  }
 
   [[nodiscard]] virtual AqEvaluationMemoryStats memory_stats() const noexcept = 0;
 

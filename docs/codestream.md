@@ -381,8 +381,9 @@ automatic size, target, and device gates but never falls back; the broader
 quality range is an explicit unqualified override. Operational errors after
 GPU work starts are returned atomically instead of retrying on CPU.
 
-Forced Metal additionally accepts `GpuAdaptiveQuantizationMode::kFullyResident`
-and `kThroughput` as experimental first-class options. Both keep forward
+Forced Metal additionally accepts `GpuAdaptiveQuantizationMode::kFullyResident`,
+`kThroughput`, and `kMaximumThroughput` as experimental first-class options.
+The first two keep forward
 transforms and coefficient coding on Metal, apply inverse Gaborish through
 Metal, and use a deterministic tilewise pixel-domain initial-CfL seed. They do
 not promise the CPU reference's quant field, frame, or codestream bytes. Their
@@ -392,14 +393,20 @@ than silently selecting a different implementation; exact coefficients remain
 the default and the only automatically selected Metal AQ mode.
 Throughput mode additionally performs one AQ update instead of the default two;
 fully resident mode continues to honor the requested iteration count.
+Maximum-throughput mode instead fixes every transform to DCT8, quantizes the
+adjusted initial field, and stops before inverse reconstruction or perceptual
+scoring. Its summary score history is empty; the policy must be evaluated with
+an independent decoder and quality metric.
 
 The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and one
 of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus
 `--backend auto|cpu|metal` and
-`--metal-aq exact-coefficients|fully-resident|throughput`. Size searches accept
+`--metal-aq exact-coefficients|fully-resident|throughput|maximum-throughput`.
+Size searches accept
 `--size-tolerance`, `--max-attempts`, and
-`--size-selection under-budget|closest`. Both resident modes require
-`--backend metal`; automatic maximum-error control remains CPU-only. The
+`--size-selection under-budget|closest`. All three experimental modes require
+`--backend metal`; automatic maximum-error control remains CPU-only, and
+maximum-throughput mode does not support maximum-error control. The
 CLI also reports prepared-source, selected-attempt, aggregate size-search, and
 end-to-end timing from the profiled workflow API. The
 frontend writes through a
@@ -448,6 +455,9 @@ build/release/gjxl_encode --distance 1.0 --backend metal \
 # Or the explicitly bounded one-update policy:
 build/release/gjxl_encode --distance 1.0 --backend metal \
   --metal-aq throughput testdata/codestream_sample.pfm output.jxl
+# Or the speed-first frame-only policy:
+build/release/gjxl_encode --distance 1.0 --backend metal \
+  --metal-aq maximum-throughput testdata/codestream_sample.pfm output.jxl
 # Closest absolute serialized size within the bounded attempt budget:
 build/release/gjxl_encode --target-bytes 4096 --size-selection closest \
   testdata/codestream_sample.pfm output.jxl

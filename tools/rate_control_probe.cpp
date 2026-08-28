@@ -201,6 +201,8 @@ void PrintUsage(std::string_view executable) {
       return "fully-resident";
     case gjxl::GpuAdaptiveQuantizationMode::kThroughput:
       return "throughput";
+    case gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput:
+      return "maximum-throughput";
   }
   return "invalid";
 }

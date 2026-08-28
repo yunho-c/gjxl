@@ -16,7 +16,9 @@
 #include <utility>
 #include <vector>
 
+#include "codec/gaborish_internal.h"
 #include "core/quantizer.h"
+#include "gpu/ops/primitives.h"
 
 namespace gjxl::metal_internal {
 namespace {
@@ -187,6 +189,217 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     encoder->setBytes(&params, sizeof(params), 5);
     DispatchThreads1d(encoder, batch_value_count);
   }
+}
+
+void MetalPreparedAqEvaluation::EncodeFrameSubmission(
+    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
+    const void *context) {
+
+  const auto &self = *static_cast<const MetalPreparedAqEvaluation *>(context);
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.reset_reconstruction.get());
+  BindPlane(encoder, self.gathered_pixels_, 0);
+  BindPlane(encoder, self.forward_coefficients_, 1);
+  BindPlane(encoder, self.quantized_coefficients_, 2);
+  BindPlane(encoder, self.reconstruction_coefficients_, 3);
+  BindPlane(encoder, self.dc_, 4);
+  BindPlane(encoder, self.quantized_dc_, 5);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    BindPlane(encoder, self.reconstructed_[channel], channel + 6);
+  }
+  BindPlane(encoder, self.reconstruction_error_, 9);
+  BindPlane(encoder, self.block_distance_, 10);
+  encoder->setBytes(&self.reset_params_, sizeof(self.reset_params_), 11);
+  DispatchThreads1d(encoder,
+                    std::max({self.coefficient_value_count_,
+                              3 * self.block_count_, self.pixel_count_,
+                              self.block_count_}));
+
+  if (self.frame_only_inverse_gaborish_) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      const Symmetric5Weights weights =
+          gaborish_internal::GaborishInverseWeights(
+              self.options_.profile.gaborish_inverse_multipliers[channel]);
+      backend.EncodePrimitive(
+          encoder,
+          Symmetric5ConvolutionCommand{
+              .input = self.coding_[channel],
+              .output = self.reconstructed_[channel],
+              .weights = {
+                  weights.distance0,
+                  weights.distance1,
+                  weights.distance2,
+                  weights.distance4,
+                  weights.distance8,
+                  weights.distance5,
+              },
+          });
+    }
+  }
+
+  const MetalBuffer *anchors =
+      MetalBackend::AsMetalBuffer(*self.anchors_.buffer);
+  const MetalBuffer *gathered =
+      MetalBackend::AsMetalBuffer(*self.gathered_pixels_.buffer);
+  MetalBuffer *forward =
+      MetalBackend::AsMetalBuffer(*self.forward_coefficients_.buffer);
+  for (size_t batch_index = 0; batch_index < self.batches_.size();
+       ++batch_index) {
+    const AqStrategyBatch &batch = self.batches_[batch_index];
+    if (batch.anchor_count == 0)
+      continue;
+    const AqReconstructionParams &params =
+        self.reconstruction_params_[batch_index];
+    const size_t batch_value_count =
+        3 * batch.anchor_count * batch.coefficient_count;
+    const size_t coefficient_offset_bytes =
+        batch.coefficient_offset * sizeof(float);
+
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.gather_transform_pixels.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      BindPlane(encoder,
+                self.frame_only_inverse_gaborish_
+                    ? self.reconstructed_[channel]
+                    : self.coding_[channel],
+                channel);
+    }
+    encoder->setBuffer(anchors->handle(), self.anchors_.offset_bytes, 3);
+    BindPlane(encoder, self.gathered_pixels_, 4);
+    encoder->setBytes(&params, sizeof(params), 5);
+    DispatchThreads1d(encoder, batch_value_count);
+
+    backend.EncodeTransformBatch(
+        encoder, TransformDirection::kForward, batch.strategy, *gathered,
+        self.gathered_pixels_.offset_bytes + coefficient_offset_bytes,
+        *forward,
+        self.forward_coefficients_.offset_bytes + coefficient_offset_bytes,
+        3 * batch.anchor_count);
+
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.encode_reconstruction_coefficients.get());
+    BindPlane(encoder, self.anchors_, 0);
+    BindPlane(encoder, self.quant_tables_, 1);
+    BindPlane(encoder, self.raw_quant_, 2);
+    BindPlane(encoder, self.y_to_x_, 3);
+    BindPlane(encoder, self.y_to_b_, 4);
+    BindPlane(encoder, self.forward_coefficients_, 5);
+    BindPlane(encoder, self.quantized_coefficients_, 6);
+    BindPlane(encoder, self.reconstruction_coefficients_, 7);
+    BindPlane(encoder, self.dc_, 8);
+    BindPlane(encoder, self.quantized_dc_, 9);
+    BindPlane(encoder, self.reconstruction_error_, 10);
+    encoder->setBytes(&params, sizeof(params), 11);
+    encoder->dispatchThreadgroups(
+        MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
+        MTL::Size(kAqThreadCount, 1, 1));
+  }
+}
+
+Status MetalPreparedAqEvaluation::EncodeFrame(
+    AqEvaluationInput input, VarDctEncoderFrame *frame) {
+
+  if (frame == nullptr) {
+    return Status::InvalidArgument("AQ frame-only output is null");
+  }
+  if (!frame_only_) {
+    return Status::FailedPrecondition(
+        "AQ frame-only encoding requires frame-only preparation");
+  }
+  Status status = ValidateInput(input);
+  if (!status.ok())
+    return status;
+  if (input.exact_coefficients != nullptr ||
+      input.exact_reconstructed_linear_rgb.valid()) {
+    return Status::InvalidArgument(
+        "AQ frame-only encoding requires resident coefficients");
+  }
+  status = BeginOperation();
+  if (!status.ok())
+    return status;
+  bool fail_upload = false;
+  bool fail_numeric = false;
+  {
+    std::lock_guard lock(mutex_);
+    fail_upload = fail_next_upload_;
+    fail_numeric = fail_next_numeric_;
+    fail_next_upload_ = false;
+    fail_next_numeric_ = false;
+  }
+  if (fail_upload) {
+    Invalidate();
+    return Status::DeviceError("Injected Metal AQ upload failure");
+  }
+  reset_params_.test_error_mask = fail_numeric ? 512u : 0u;
+  status = UploadInput(input);
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  for (AqReconstructionParams &params : reconstruction_params_) {
+    params.global_scale = input.quantizer.global_scale;
+    params.quant_dc = input.quantizer.quant_dc;
+  }
+
+  std::unique_ptr<GpuSubmission> submission;
+  status = backend_->SubmitCompute(
+      "gjxl prepared AQ frame encoding",
+      &MetalPreparedAqEvaluation::EncodeFrameSubmission, this, &submission);
+  if (!status.ok() || submission == nullptr) {
+    Invalidate();
+    return status.ok()
+               ? Status::Internal("AQ frame encoding returned no submission")
+               : status;
+  }
+  {
+    std::lock_guard lock(mutex_);
+    submission_ = std::move(submission);
+  }
+  status = WaitForOperation();
+  if (!status.ok())
+    return status;
+
+  uint32_t device_error = 0;
+  status = CopyReadback(*backend_, reconstruction_error_, &device_error,
+                        sizeof(device_error));
+  if (status.ok() && device_error != 0) {
+    status = Status::DeviceError(
+        "Metal AQ frame encoding detected invalid numeric input");
+  }
+  if (status.ok()) {
+    status = CopyReadback(*backend_, quantized_coefficients_,
+                          quantized_readback_.data(),
+                          quantized_readback_.size() * sizeof(int32_t));
+  }
+  if (status.ok()) {
+    status = CopyReadback(*backend_, quantized_dc_,
+                          quantized_dc_readback_.data(),
+                          quantized_dc_readback_.size() * sizeof(int32_t));
+  }
+  constexpr int32_t kQuantizedPoison =
+      static_cast<int32_t>(0x81234567u);
+  if (status.ok() &&
+      (std::ranges::find(quantized_readback_, kQuantizedPoison) !=
+           quantized_readback_.end() ||
+       std::ranges::find(quantized_dc_readback_, kQuantizedPoison) !=
+           quantized_dc_readback_.end())) {
+    status = Status::Internal(
+        "Metal AQ frame encoding readback contains poison");
+  }
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+
+  VarDctEncoderFrame candidate;
+  status = AssembleFrameFromReadback(&candidate);
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  *frame = std::move(candidate);
+  CompleteOperation();
+  return Status::Ok();
 }
 
 Status MetalPreparedAqEvaluation::RunReconstruction(

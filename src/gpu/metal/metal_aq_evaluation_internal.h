@@ -160,6 +160,8 @@ public:
   Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
   Status Reconfigure(const AcStrategyGrid& strategies,
                      ConstPlaneU8View epf_sharpness) override;
+  Status EncodeFrame(AqEvaluationInput input,
+                     VarDctEncoderFrame *frame) override;
   Status EvaluateProfiled(AqEvaluationInput input, AqEvaluationOutput output,
                           MetalAqEvaluationProfile* profile);
   AqEvaluationMemoryStats memory_stats() const noexcept override;
@@ -210,6 +212,7 @@ private:
   Status PrepareReconstructionDiagnosticReadback();
   Status PreparePostprocessDiagnosticReadback();
   Status PrepareQuantizationProbeReadback();
+  Status AssembleFrameFromReadback(VarDctEncoderFrame *frame) const;
   Status WaitForOperation();
   void CompleteOperation();
   void Invalidate();
@@ -224,6 +227,9 @@ private:
   EncodeReconstructionSubmission(MetalBackend &backend,
                                  MTL::ComputeCommandEncoder *encoder,
                                  const void *context);
+  static void EncodeFrameSubmission(MetalBackend &backend,
+                                    MTL::ComputeCommandEncoder *encoder,
+                                    const void *context);
   static void
   EncodeQuantizationProbeSubmission(MetalBackend &backend,
                                     MTL::ComputeCommandEncoder *encoder,
@@ -337,6 +343,8 @@ private:
   bool exact_coefficients_ = false;
   bool exact_coefficient_reconstruction_ = false;
   bool exact_linear_reconstruction_ = false;
+  bool frame_only_ = false;
+  bool frame_only_inverse_gaborish_ = false;
 };
 
 } // namespace gjxl::metal_internal

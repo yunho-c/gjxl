@@ -302,6 +302,26 @@ bool CheckInvalidRequestsAreAtomic() {
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
+           .backend = gjxl::VarDctBackendPreference::kCpu,
+           .metal_aq_mode =
+               gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .backend = gjxl::VarDctBackendPreference::kAutomatic,
+           .metal_aq_mode =
+               gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
+      !rejected_atomically(
+          image.View(),
+          {.rate_control_mode =
+             gjxl::VarDctRateControlMode::kMaximumError,
+           .maximum_error = {0.01f, 0.01f, 0.01f},
+           .backend = gjxl::VarDctBackendPreference::kMetal,
+           .metal_aq_mode =
+               gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kMetal,
            .metal_aq_mode =
                static_cast<gjxl::GpuAdaptiveQuantizationMode>(99)})) {

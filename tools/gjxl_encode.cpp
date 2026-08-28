@@ -83,6 +83,8 @@ struct Options {
     *mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   } else if (text == "throughput") {
     *mode = gjxl::GpuAdaptiveQuantizationMode::kThroughput;
+  } else if (text == "maximum-throughput") {
+    *mode = gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
   } else {
     return false;
   }
@@ -290,6 +292,10 @@ struct Options {
       (target_search_option_set &&
        candidate.rate_control_mode ==
          gjxl::VarDctRateControlMode::kButteraugliTarget) ||
+      (candidate.metal_aq_mode ==
+         gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput &&
+       candidate.rate_control_mode ==
+         gjxl::VarDctRateControlMode::kMaximumError) ||
       (candidate.metal_aq_mode !=
          gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
        candidate.backend != gjxl::VarDctBackendPreference::kMetal)) {
@@ -399,7 +405,8 @@ void PrintUsage(const char* executable) {
                "[--max-attempts N] "
                "[--size-selection under-budget|closest] "
                "[--backend auto|cpu|metal] "
-               "[--metal-aq exact-coefficients|fully-resident|throughput] "
+               "[--metal-aq exact-coefficients|fully-resident|throughput|"
+               "maximum-throughput] "
                "INPUT.pfm OUTPUT.jxl\n";
 }
 
@@ -498,7 +505,11 @@ int main(int argc, char** argv) {
                        : (summary.metal_aq_mode ==
                                 gjxl::GpuAdaptiveQuantizationMode::kThroughput
                             ? "Metal throughput AQ"
-                            : "Metal fully-resident AQ"))
+                            : (summary.metal_aq_mode ==
+                                     gjxl::GpuAdaptiveQuantizationMode::
+                                       kMaximumThroughput
+                                 ? "Metal maximum-throughput AQ"
+                                 : "Metal fully-resident AQ")))
                   : "CPU")
             << ".\nStrategies:";
   for (size_t index = 0; index < summary.strategy_counts.size(); ++index) {

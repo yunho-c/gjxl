@@ -260,9 +260,13 @@ Status ResolveProductionMetalBackend(GpuBackend** out) {
   return Status::Ok();
 }
 
-bool HasCompleteGpuQuantizationCapabilities(GpuBackend& backend) {
-  return QueryGpuAcStrategyEvaluation(backend) != nullptr &&
-    QueryGpuAqEvaluation(backend) != nullptr;
+bool HasRequiredGpuQuantizationCapabilities(
+  GpuBackend& backend,
+  GpuAdaptiveQuantizationMode mode) {
+
+  return QueryGpuAqEvaluation(backend) != nullptr &&
+    (mode == GpuAdaptiveQuantizationMode::kMaximumThroughput ||
+     QueryGpuAcStrategyEvaluation(backend) != nullptr);
 }
 
 struct PipelineStorage {
@@ -487,10 +491,11 @@ struct PreparedWorkflow {
           "Forced Metal workflow has no available backend")
       : Status::Ok();
   }
-  if (!HasCompleteGpuQuantizationCapabilities(**selected_gpu)) {
+  if (!HasRequiredGpuQuantizationCapabilities(
+        **selected_gpu, options.metal_aq_mode)) {
     if (options.backend == VarDctBackendPreference::kMetal) {
       return Status::Unavailable(
-        "Forced Metal workflow requires complete GPU quantization");
+        "Forced Metal workflow lacks a required GPU capability");
     }
     *selected_gpu = nullptr;
     return Status::Ok();
@@ -539,14 +544,32 @@ struct PreparedWorkflow {
     profile, selection_begin,
     &candidate_profile.backend_selection_nanoseconds);
   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
-  status = selected_metal
-    ? quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
-        *selected_gpu, prepared.original_linear_rgb(), prepared.quantization,
-        pipeline_options, options.metal_aq_mode, prepared.pipeline.Output(),
-        nullptr, &prepared.gpu_adaptive_quantization)
-    : quantization_pipeline_internal::RunPreparedCpuQuantizationPipeline(
-        prepared.original_linear_rgb(), prepared.quantization,
-        pipeline_options, prepared.pipeline.Output());
+  prepared.pipeline.score_history.clear();
+  prepared.pipeline.maximum_error_result = {};
+  if (selected_metal && options.metal_aq_mode ==
+        GpuAdaptiveQuantizationMode::kMaximumThroughput) {
+    const CpuQuantizationPipelineOutput pipeline_output =
+      prepared.pipeline.Output();
+    status = RunGpuFrameOnlyQuantizationPipeline(
+      *selected_gpu, prepared.original_linear_rgb(),
+      prepared.opsin.const_view(), pipeline_options,
+      {
+        .initial_quantization = pipeline_output.initial_quantization,
+        .quant_field = {
+          prepared.pipeline.final_quant.data(), prepared.pipeline.block_extent,
+          prepared.pipeline.block_extent.width},
+        .frame = &prepared.pipeline.frame,
+      });
+  } else {
+    status = selected_metal
+      ? quantization_pipeline_internal::RunPreparedGpuQuantizationPipeline(
+          *selected_gpu, prepared.original_linear_rgb(), prepared.quantization,
+          pipeline_options, options.metal_aq_mode, prepared.pipeline.Output(),
+          nullptr, &prepared.gpu_adaptive_quantization)
+      : quantization_pipeline_internal::RunPreparedCpuQuantizationPipeline(
+          prepared.original_linear_rgb(), prepared.quantization,
+          pipeline_options, prepared.pipeline.Output());
+  }
   if (!status.ok()) {
     return status;
   }
@@ -689,14 +712,21 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       break;
     case GpuAdaptiveQuantizationMode::kFullyResident:
     case GpuAdaptiveQuantizationMode::kThroughput:
+    case GpuAdaptiveQuantizationMode::kMaximumThroughput:
       if (options.backend != VarDctBackendPreference::kMetal) {
         return Status::InvalidArgument(
-          "Resident AQ requires an explicitly forced Metal backend");
+          "Experimental AQ requires an explicitly forced Metal backend");
       }
       break;
     default:
       return Status::InvalidArgument(
         "VarDCT Metal AQ mode is invalid");
+  }
+  if (options.metal_aq_mode ==
+        GpuAdaptiveQuantizationMode::kMaximumThroughput &&
+      options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
+    return Status::InvalidArgument(
+      "Maximum-throughput AQ does not evaluate maximum error");
   }
   if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
       options.rate_control_mode ==
@@ -847,7 +877,6 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       local_profile.input_preparation_nanoseconds =
         ElapsedNanoseconds(preparation_begin);
     }
-
     std::vector<uint8_t> candidate;
     VarDctEncodingSummary candidate_summary;
     codestream_internal::VarDctEncodingProfile attempt_profile;

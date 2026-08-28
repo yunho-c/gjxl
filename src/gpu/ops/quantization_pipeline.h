@@ -10,6 +10,22 @@
 
 namespace gjxl {
 
+struct GpuFrameOnlyPipelineOutput {
+  InitialQuantFieldOutput initial_quantization;
+  PlaneF32View quant_field;
+  VarDctEncoderFrame* frame = nullptr;
+};
+
+/// Builds a DCT8-only resident frame from the initial quant field without AC
+/// search, inverse reconstruction, or perceptual scoring. This explicit path
+/// is intended only for the maximum-throughput workflow policy.
+[[nodiscard]] Status RunGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output);
+
 /// Runs the complete quantization pipeline with GPU AC search and prepared AQ.
 ///
 /// Both optional GPU capabilities are required; this operation never silently

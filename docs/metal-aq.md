@@ -1139,7 +1139,8 @@ After Milestone 9, the rejected boundary was promoted from a private diagnostic
 to an explicit public experimental mode so its errors and candidate fixes can
 be measured without test-only shims. `GpuAdaptiveQuantizationMode` selects
 `kExactCoefficients`, `kFullyResident`, or `kThroughput` in bounded AQ, full AQ,
-and the complete GPU quantization pipeline.
+and the complete iterative GPU quantization pipeline. The separate
+`kMaximumThroughput` value selects only the public frame-only workflow.
 `VarDctEncodingOptions::metal_aq_mode` and the CLI's `--metal-aq` option carry
 the same choice through codestream generation. Both resident modes require
 forced Metal, are reported in the workflow summary, and never participate in
@@ -1157,6 +1158,17 @@ limiting the complete quantization pipeline to one AQ update. Direct fully
 resident AQ APIs still honor their requested iteration count; the bounded
 policy is therefore explicit rather than a hidden reinterpretation of
 `kFullyResident`.
+
+Maximum-throughput mode bypasses AC search with a complete DCT8 grid, adjusts
+the initial quant field once, and invokes `PreparedAqEvaluation::EncodeFrame`.
+The Metal implementation runs reset, inverse Gaborish, gather,
+forward-transform, and coefficient-quantization commands in one submission,
+then reads back only device error state, quantized DC, and quantized AC.
+`AqEvaluationPreparation::frame_only` omits the original-image upload and
+prepared Butteraugli reference. No inverse transform reconstruction, decoder
+loop-filter evaluation, linear-RGB reconstruction, Butteraugli comparison,
+block reduction, or score readback runs, so the workflow reports an empty
+score history.
 
 The production corpus covers 13 built-in workloads at Butteraugli targets
 `1.0` and `1.2`, plus four independent 1919x1079 natural, HDR-like, and
