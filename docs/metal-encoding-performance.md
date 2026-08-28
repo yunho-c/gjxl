@@ -388,6 +388,39 @@ the fully-resident mode: reported preparation was `311.8 ms`, the selected AQ
 attempt was `4531.3 ms`, total encoder time was `4843.1 ms`, and the output was
 `3127908` bytes. Independent `djxl` 0.12 decoding produced a 4672x5584 PFM.
 
+#### Resident invariant-metadata checkpoint (2026-08-28)
+
+The following P4 slice keeps the fixed CfL map beside the already persistent
+strategy, anchor, and EPF metadata. Fully-resident and throughput evaluations
+now omit both CfL planes, so their only per-evaluation input transfer is the
+updated float quant field. The map is uploaded once per configured
+rate-control attempt; successful strategy reconfiguration invalidates it and
+requires an explicit rebind before another evaluation.
+
+The profiled direct contract confirms exactly four uploaded bytes per block on
+the resident path, with no CfL bytes. Binding allocates no device memory and
+submits no command buffer. Host-map poisoning, repeated-evaluation parity,
+stale-binding rejection, explicit rebound, public resident AQ, and the Metal
+quantization pipeline pass their focused tests. A serial complete Release run
+passed `55/56`; the only failure was the unchanged pinned `4.45247e-05` CPU
+golden mismatch at score index 1. A parallel run also exposed the existing
+Metal profile's sensitivity to concurrent device timing, while ten consecutive
+isolated profile runs passed.
+
+A same-machine one-warmup/five-sample directional check measured fully
+resident at `303.2 ms` total (`266.0-329.5`) and `253.1 ms` in the
+quantization pipeline. Throughput measured `257.0 ms` (`236.5-383.7`) and
+`209.6 ms` in the pipeline. The immediately preceding checkpoint was
+`298.4/250.9 ms` and `252.7/205.9 ms`, respectively. The ranges overlap, so
+the small transfer reduction is performance-neutral at this public boundary;
+its main value is simplifying the dependency chain before evaluation
+submission and synchronization are fused.
+
+The 4672x5584 doughnut sample also completed at target `1.2` in `4698.8 ms`
+(`191.9 ms` preparation and `4506.9 ms` selected attempt), producing a
+`2769119`-byte codestream. Independent `djxl` 0.12 decoded it back to a
+4672x5584 PFM.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

@@ -235,6 +235,9 @@ public:
 
   Status Prepare(const AqEvaluationPreparation &preparation);
   Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
+  Status SetInvariantColorCorrelation(
+      ConstPlaneI8View y_to_x,
+      ConstPlaneI8View y_to_b) override;
   Status AdjustQuantFieldResident(float butteraugli_target,
                                   ConstPlaneF32View input,
                                   PlaneF32View output) override;
@@ -478,6 +481,7 @@ private:
   bool resident_quantization_active_ = false;
   bool resident_initial_quant_ready_ = false;
   bool resident_quantizer_ready_ = false;
+  bool invariant_color_correlation_ready_ = false;
 };
 
 } // namespace gjxl::metal_internal

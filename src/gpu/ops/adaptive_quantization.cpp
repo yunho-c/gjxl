@@ -171,7 +171,6 @@ public:
     PreparedAqEvaluation& prepared,
     prepared_coefficients_internal::PreparedForwardDctCoefficients
       forward_coefficients,
-    ColorCorrelationMap fixed_color_correlation,
     bool materialize_final,
     Extent2D source_extent)
     : strategies_(strategies),
@@ -180,7 +179,6 @@ public:
       mode_(mode),
       prepared_(&prepared),
       forward_coefficients_(std::move(forward_coefficients)),
-      fixed_color_correlation_(std::move(fixed_color_correlation)),
       materialize_final_(materialize_final),
       original_source_extent_(source_extent) {
     if (materialize_final_) {
@@ -238,8 +236,6 @@ public:
         }
         const Status resident_status = prepared_->Evaluate(
           {
-            .y_to_x = fixed_color_correlation_.y_to_x_map(),
-            .y_to_b = fixed_color_correlation_.y_to_b_map(),
             .quant_field = quant_field,
             .quant_dc = quant_dc,
           },
@@ -264,18 +260,13 @@ public:
         return status;
       }
       ColorCorrelationMap color_correlation;
-      const ColorCorrelationMap* selected_color_correlation =
-        &fixed_color_correlation_;
-      if (mode_ == GpuAdaptiveQuantizationMode::kExactCoefficients) {
-        status =
-          chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
-            forward_coefficients_,
-            {raw_quant.data(), block_extent, block_extent.width},
-            quantizer, options_.fast_color_correlation, &color_correlation);
-        if (!status.ok()) {
-          return status;
-        }
-        selected_color_correlation = &color_correlation;
+      status =
+        chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
+          forward_coefficients_,
+          {raw_quant.data(), block_extent, block_extent.width},
+          quantizer, options_.fast_color_correlation, &color_correlation);
+      if (!status.ok()) {
+        return status;
       }
 
       VarDctEncoderFrame exact_coefficients;
@@ -319,10 +310,8 @@ public:
 
       aqi::AdaptiveQuantizationEvaluation candidate;
       candidate.block_distance.resize(block_count);
-      const ConstPlaneI8View y_to_x =
-        selected_color_correlation->y_to_x_map();
-      const ConstPlaneI8View y_to_b =
-        selected_color_correlation->y_to_b_map();
+      const ConstPlaneI8View y_to_x = color_correlation.y_to_x_map();
+      const ConstPlaneI8View y_to_b = color_correlation.y_to_b_map();
       AqEvaluationOutput::Final final_output;
       AqEvaluationOutput prepared_output{
         .block_distance_map = {
@@ -388,7 +377,6 @@ private:
   PreparedAqEvaluation* prepared_ = nullptr;
   prepared_coefficients_internal::PreparedForwardDctCoefficients
     forward_coefficients_;
-  ColorCorrelationMap fixed_color_correlation_;
   bool materialize_final_ = false;
   Image3FBuffer final_reconstructed_;
   VarDctEncoderFrame final_frame_;
@@ -564,12 +552,17 @@ Status RunGpuAdaptiveQuantizationImpl(
       : prepared_coefficients_internal::PrepareForwardDctCoefficients(
           opsin, strategies, &forward_coefficients);
     if (!status.ok()) return status;
-    if (resident_quantization) forward_coefficients = {};
+    if (resident_quantization) {
+      status = prepared->SetInvariantColorCorrelation(
+          fixed_color_correlation.y_to_x_map(),
+          fixed_color_correlation.y_to_b_map());
+      if (!status.ok()) return status;
+      forward_coefficients = {};
+    }
 
     PreparedGpuAdaptiveQuantizationEvaluator evaluator(
       strategies, epf_sharpness, options, mode, *prepared,
-      std::move(forward_coefficients), std::move(fixed_color_correlation),
-      full_output != nullptr,
+      std::move(forward_coefficients), full_output != nullptr,
       original_linear_rgb.extent());
     aqi::AdaptiveQuantizationPolicyResult result;
     status = resident_quantization

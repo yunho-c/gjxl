@@ -141,6 +141,12 @@ template <typename T>
   return elements <= std::numeric_limits<size_t>::max() / sizeof(Value);
 }
 
+template <typename T>
+[[nodiscard]] bool PlaneDescriptorSpecified(PlaneView<T> plane) noexcept {
+  return plane.data != nullptr || plane.extent.width != 0 ||
+         plane.extent.height != 0 || plane.stride != 0;
+}
+
 [[nodiscard]] bool ImageDescriptorSpecified(
     ConstImage3FView image) noexcept {
   return std::ranges::any_of(
@@ -663,6 +669,14 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
                            kQuantTableValueCount, &persistent_bytes);
   if (!status.ok())
     return status;
+  if (resident_quantization_) {
+    status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
+                             tile_extent_.width, &persistent_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
+                             tile_extent_.width, &persistent_bytes);
+    if (!status.ok()) return status;
+  }
 
   size_t staging_bytes = 0;
   status = AddPlannedPlane(DeviceElementType::kI32, block_extent_,
@@ -731,14 +745,14 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         return status;
     }
   }
-  status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
-                           tile_extent_.width, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
-                           tile_extent_.width, &staging_bytes);
-  if (!status.ok())
-    return status;
+  if (!resident_quantization_) {
+    status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
+                             tile_extent_.width, &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
+                             tile_extent_.width, &staging_bytes);
+    if (!status.ok()) return status;
+  }
   if (!frame_only_) {
     status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
                              block_extent_.width, &staging_bytes);
@@ -955,14 +969,16 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         return status;
     }
   }
+  DeviceScratchArena& color_arena =
+      resident_quantization_ ? persistent_ : staging_;
   status =
-      staging_.AllocatePlane(DeviceElementType::kI8, tile_extent_,
-                             tile_extent_.width, kBufferAlignment, &y_to_x_);
+      color_arena.AllocatePlane(DeviceElementType::kI8, tile_extent_,
+                                tile_extent_.width, kBufferAlignment, &y_to_x_);
   if (!status.ok())
     return status;
   status =
-      staging_.AllocatePlane(DeviceElementType::kI8, tile_extent_,
-                             tile_extent_.width, kBufferAlignment, &y_to_b_);
+      color_arena.AllocatePlane(DeviceElementType::kI8, tile_extent_,
+                                tile_extent_.width, kBufferAlignment, &y_to_b_);
   if (!status.ok())
     return status;
   if (!frame_only_) {
@@ -1511,6 +1527,7 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     row_major_anchors_ = std::move(row_major_anchors);
     final_transform_views_ = std::move(transform_views);
     anchor_count_ = anchor_offset;
+    invariant_color_correlation_ready_ = false;
     CompleteOperation();
     return Status::Ok();
   } catch (const std::bad_alloc&) {
@@ -1535,6 +1552,65 @@ Status MetalPreparedAqEvaluation::Evaluate(AqEvaluationInput input,
     return status;
   }
   return FinishEvaluation(output);
+}
+
+Status MetalPreparedAqEvaluation::SetInvariantColorCorrelation(
+    ConstPlaneI8View y_to_x, ConstPlaneI8View y_to_b) {
+  if (frame_only_resident_initial_cfl_) {
+    return Status::FailedPrecondition(
+        "Resident initial CfL owns the prepared color-correlation state");
+  }
+  if (!ValidHostPlaneLayout(y_to_x) || y_to_x.extent != tile_extent_ ||
+      !ValidHostPlaneLayout(y_to_b) || y_to_b.extent != tile_extent_) {
+    return Status::InvalidArgument(
+        "Prepared invariant color-correlation geometry is invalid");
+  }
+
+  std::vector<int8_t> host_y_to_x;
+  std::vector<int8_t> host_y_to_b;
+  try {
+    size_t tile_count = 0;
+    if (!tile_extent_.try_area(&tile_count)) {
+      return Status::InvalidArgument(
+          "Prepared invariant color-correlation grid is too large");
+    }
+    host_y_to_x.resize(tile_count);
+    host_y_to_b.resize(tile_count);
+    for (size_t y = 0; y < tile_extent_.height; ++y) {
+      std::copy_n(y_to_x.Row(y), tile_extent_.width,
+                  host_y_to_x.data() + y * tile_extent_.width);
+      std::copy_n(y_to_b.Row(y), tile_extent_.width,
+                  host_y_to_b.data() + y * tile_extent_.width);
+    }
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+        "Unable to allocate invariant color-correlation staging");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+        "Invariant color-correlation dimensions are too large");
+  }
+
+  Status status = BeginOperation();
+  if (!status.ok()) return status;
+  status = UploadPlane(
+      *backend_,
+      ConstPlaneI8View{host_y_to_x.data(), tile_extent_, tile_extent_.width},
+      y_to_x_);
+  if (status.ok()) {
+    status = UploadPlane(
+        *backend_,
+        ConstPlaneI8View{host_y_to_b.data(), tile_extent_, tile_extent_.width},
+        y_to_b_);
+  }
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  last_y_to_x_ = std::move(host_y_to_x);
+  last_y_to_b_ = std::move(host_y_to_b);
+  invariant_color_correlation_ready_ = true;
+  CompleteOperation();
+  return Status::Ok();
 }
 
 Status MetalPreparedAqEvaluation::EvaluateProfiled(
@@ -2238,6 +2314,9 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
       input.y_to_x.extent == tile_extent_ &&
       ValidHostPlaneLayout(input.y_to_b) &&
       input.y_to_b.extent == tile_extent_;
+  const bool host_cfl_specified =
+      PlaneDescriptorSpecified(input.y_to_x) ||
+      PlaneDescriptorSpecified(input.y_to_b);
   const bool valid_host_quant =
       ValidHostPlaneLayout(input.raw_quant_field) &&
       input.raw_quant_field.extent == block_extent_ &&
@@ -2245,7 +2324,9 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
       input.epf_inverse_sigma.extent == block_extent_;
   if ((!resident_field && !frame_only_resident_quantizer_ &&
        !valid_host_quant) ||
-      (!frame_only_resident_initial_cfl_ && !valid_host_cfl)) {
+      (!frame_only_resident_initial_cfl_ &&
+       ((invariant_color_correlation_ready_ && host_cfl_specified) ||
+        (!invariant_color_correlation_ready_ && !valid_host_cfl)))) {
     return Status::InvalidArgument(
         "Prepared AQ evaluation input geometry is invalid");
   }
@@ -2312,10 +2393,18 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
     }
     const ConstPlaneI8View frame_x = frame.color_correlation().y_to_x_map();
     const ConstPlaneI8View frame_b = frame.color_correlation().y_to_b_map();
+    const ConstPlaneI8View input_x = invariant_color_correlation_ready_
+        ? ConstPlaneI8View{last_y_to_x_.data(), tile_extent_,
+                           tile_extent_.width}
+        : input.y_to_x;
+    const ConstPlaneI8View input_b = invariant_color_correlation_ready_
+        ? ConstPlaneI8View{last_y_to_b_.data(), tile_extent_,
+                           tile_extent_.width}
+        : input.y_to_b;
     for (size_t y = 0; y < tile_extent_.height; ++y) {
       for (size_t x = 0; x < tile_extent_.width; ++x) {
-        if (frame_x.Row(y)[x] != input.y_to_x.Row(y)[x] ||
-            frame_b.Row(y)[x] != input.y_to_b.Row(y)[x]) {
+        if (frame_x.Row(y)[x] != input_x.Row(y)[x] ||
+            frame_b.Row(y)[x] != input_b.Row(y)[x]) {
           return Status::InvalidArgument(
               "Exact AQ coefficient color factors do not match input");
         }
@@ -2371,21 +2460,29 @@ Status MetalPreparedAqEvaluation::BeginOperation(bool profiling_reserved) {
 
 Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   Status status = Status::Ok();
+  uint64_t upload_bytes = 0;
   resident_quantization_active_ = input.quant_field.valid();
   if (resident_quantization_active_) {
     status = UploadPlane(*backend_, input.quant_field,
                          resident_quant_field_);
+    upload_bytes += block_count_ * sizeof(float);
   } else if (!frame_only_resident_quantizer_) {
     status = UploadPlane(*backend_, input.raw_quant_field, raw_quant_);
+    upload_bytes += block_count_ * sizeof(int32_t);
   }
   if (status.ok() && !frame_only_ && !resident_quantization_active_) {
     status = UploadPlane(*backend_, input.epf_inverse_sigma, inverse_sigma_);
+    upload_bytes += block_count_ * sizeof(float);
   }
-  if (status.ok() && !frame_only_resident_initial_cfl_) {
+  if (status.ok() && !frame_only_resident_initial_cfl_ &&
+      !invariant_color_correlation_ready_) {
     status = UploadPlane(*backend_, input.y_to_x, y_to_x_);
+    upload_bytes += last_y_to_x_.size() * sizeof(int8_t);
   }
-  if (status.ok() && !frame_only_resident_initial_cfl_) {
+  if (status.ok() && !frame_only_resident_initial_cfl_ &&
+      !invariant_color_correlation_ready_) {
     status = UploadPlane(*backend_, input.y_to_b, y_to_b_);
+    upload_bytes += last_y_to_b_.size() * sizeof(int8_t);
   }
   if (status.ok() && !resident_quantization_active_) {
     status = Quantizer::Create(input.quantizer, &last_quantizer_);
@@ -2398,7 +2495,8 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
         last_raw_quant_.data() + y * block_extent_.width);
     }
   }
-  if (status.ok() && !frame_only_resident_initial_cfl_) {
+  if (status.ok() && !frame_only_resident_initial_cfl_ &&
+      !invariant_color_correlation_ready_) {
     for (size_t y = 0; y < tile_extent_.height; ++y) {
       std::copy_n(
         input.y_to_x.Row(y), tile_extent_.width,
@@ -2557,6 +2655,8 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
           exact_reconstruction_coefficients_.data(),
           exact_reconstruction_coefficients_.size() * sizeof(float),
           reconstruction_coefficients_.offset_bytes);
+      upload_bytes +=
+          exact_reconstruction_coefficients_.size() * sizeof(float);
     }
   }
   if (status.ok() && exact_linear_reconstruction_) {
@@ -2564,7 +2664,12 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
       status = UploadPlane(
           *backend_, input.exact_reconstructed_linear_rgb.plane[channel],
           reconstructed_linear_[channel]);
+      upload_bytes += source_extent_.width * source_extent_.height *
+          sizeof(float);
     }
+  }
+  if (active_profile_ != nullptr) {
+    active_profile_->input_upload_bytes = upload_bytes;
   }
   return status;
 }

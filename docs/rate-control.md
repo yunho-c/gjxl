@@ -646,6 +646,25 @@ flat and structured initial-quant fixtures, complete fully-resident and
 throughput integration, and exact final frame/codestream parity on the focused
 fixture also pass.
 
+### Invariant resident evaluation metadata
+
+**Status:** complete for fully-resident and throughput encoding.
+
+Strategy records, anchor batches, and EPF sharpness already remain resident
+from preparation or the rate-control attempt's `Reconfigure` call. The fixed
+throughput CfL map is now bound once alongside that metadata after the initial
+field adjustment. Every AQ evaluation omits both CfL planes and uploads only
+the updated float quant field; device quantizer, raw-quant, and EPF-sigma
+construction consume that field without another host metadata boundary.
+
+The binding is explicit rather than pointer-cached. Host CfL input is rejected
+while a resident binding is active, successful strategy reconfiguration marks
+the old binding stale, and evaluation cannot resume until the new map is
+bound. Direct tests poison the original host maps after binding, compare
+repeated resident output exactly with an ordinary upload, verify zero
+allocation/submission during binding, and measure the production input upload
+as exactly one float per block.
+
 One Apple M4 Pro Release process with one warmup and three alternating pairs
 measured padded-1080p fully-resident encoding at `270.234 ms`
 (`266.775-270.819 ms`) and `23.108x` paired speedup

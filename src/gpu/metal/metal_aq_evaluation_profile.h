@@ -11,6 +11,7 @@ namespace gjxl::metal_internal {
 
 /// Diagnostic host/device timing for one production prepared evaluation.
 struct MetalAqEvaluationProfile {
+  uint64_t input_upload_bytes = 0;
   uint64_t input_upload_nanoseconds = 0;
   uint64_t submission_nanoseconds = 0;
   uint64_t completion_wait_nanoseconds = 0;

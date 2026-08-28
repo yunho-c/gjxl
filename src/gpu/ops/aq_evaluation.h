@@ -135,6 +135,18 @@ public:
     AqEvaluationInput input,
     AqEvaluationOutput output) = 0;
 
+  /// Uploads one color-correlation map for reuse by every later evaluation.
+  /// Once configured, evaluation inputs must omit `y_to_x` and `y_to_b`.
+  /// Reconfiguring strategy metadata invalidates this binding.
+  [[nodiscard]] virtual Status SetInvariantColorCorrelation(
+    ConstPlaneI8View y_to_x,
+    ConstPlaneI8View y_to_b) {
+    (void)y_to_x;
+    (void)y_to_b;
+    return Status::Unavailable(
+      "Prepared invariant color correlation is unavailable");
+  }
+
   /// Applies the prepared strategy grid's adjustment to one host field using
   /// device execution. The adjusted field is committed atomically after the
   /// submission and readback complete.

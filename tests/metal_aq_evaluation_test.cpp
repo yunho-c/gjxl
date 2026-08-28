@@ -569,6 +569,11 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
               &profile),
           "profiled AQ evaluation") ||
       !profiled_output.ValidAndPadded() ||
+      profile.input_upload_bytes !=
+          2 * fixture.input.blocks.width * fixture.input.blocks.height *
+              sizeof(float) +
+          2 * fixture.input.tiles.width * fixture.input.tiles.height *
+              sizeof(int8_t) ||
       profile.input_upload_nanoseconds == 0 ||
       profile.submission_nanoseconds == 0 ||
       profile.completion_wait_nanoseconds == 0 ||
@@ -923,6 +928,134 @@ bool CheckMemoryScaling(gjxl::GpuBackend& gpu) {
       {test_case.label, test_case.source, test_case.coding, stats});
   }
   return true;
+}
+
+bool CheckInvariantColorCorrelation(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const size_t block_count = blocks.width * blocks.height;
+  const std::vector<uint8_t> sharpness(block_count, 4);
+  std::vector<float> quant_field(block_count);
+  for (size_t index = 0; index < block_count; ++index) {
+    quant_field[index] = 0.7f +
+        0.015f * static_cast<float>((13 * index) % 29);
+  }
+  const auto prepare_resident = [&](std::unique_ptr<
+                                    gjxl::PreparedAqEvaluation>* output) {
+    return CheckStatus(gjxl::PrepareAqEvaluation(
+        gpu,
+        {
+          .original_linear_rgb = fixture.original.View(),
+          .coding_opsin = fixture.coding.View(),
+          .strategies = &fixture.strategies,
+          .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+          .options = MakeOptions(),
+          .resident_quantization = true,
+          .coefficient_decision_mode =
+              gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        },
+        output), "resident invariant-CfL preparation");
+  };
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> baseline;
+  if (!prepare_resident(&prepared) || !prepare_resident(&baseline)) {
+    return false;
+  }
+
+  gjxl::AqEvaluationInput uploaded_input{
+    .y_to_x = fixture.input.View().y_to_x,
+    .y_to_b = fixture.input.View().y_to_b,
+    .quant_field = {quant_field.data(), blocks, blocks.width},
+    .quant_dc = 1.0f,
+  };
+  EvaluationOutputStorage expected(fixture.strategies.extent());
+  if (!CheckStatus(baseline->Evaluate(uploaded_input, expected.View()),
+                   "invariant-CfL baseline evaluation")) {
+    return false;
+  }
+
+  const gjxl::GpuBackendStats before_invalid = gpu.stats();
+  if (!ExpectCode(prepared->SetInvariantColorCorrelation(
+                      fixture.input.View().y_to_x, {}),
+                  gjxl::StatusCode::kInvalidArgument,
+                  "partial invariant-CfL binding") ||
+      gpu.stats().successful_allocations !=
+          before_invalid.successful_allocations ||
+      gpu.stats().committed_submissions !=
+          before_invalid.committed_submissions) {
+    return false;
+  }
+
+  const std::vector<int8_t> retained_x = fixture.input.y_to_x;
+  const std::vector<int8_t> retained_b = fixture.input.y_to_b;
+  const gjxl::AqEvaluationMemoryStats memory = prepared->memory_stats();
+  const gjxl::GpuBackendStats before_binding = gpu.stats();
+  if (!CheckStatus(prepared->SetInvariantColorCorrelation(
+                       fixture.input.View().y_to_x,
+                       fixture.input.View().y_to_b),
+                   "invariant-CfL binding") ||
+      prepared->memory_stats().persistent_bytes != memory.persistent_bytes ||
+      prepared->memory_stats().staging_bytes != memory.staging_bytes ||
+      prepared->memory_stats().peak_scratch_bytes !=
+          memory.peak_scratch_bytes ||
+      gpu.stats().successful_allocations !=
+          before_binding.successful_allocations ||
+      gpu.stats().committed_submissions !=
+          before_binding.committed_submissions) {
+    std::cerr << "Invariant CfL binding changed prepared residency\n";
+    return false;
+  }
+
+  gjxl::AqEvaluationInput resident_input = uploaded_input;
+  resident_input.y_to_x = {};
+  resident_input.y_to_b = {};
+  EvaluationOutputStorage rejected(fixture.strategies.extent());
+  const uint64_t submissions = gpu.stats().committed_submissions;
+  if (!ExpectCode(prepared->Evaluate(uploaded_input, rejected.View()),
+                  gjxl::StatusCode::kInvalidArgument,
+                  "host CfL after invariant binding") ||
+      !rejected.Poisoned() ||
+      gpu.stats().committed_submissions != submissions) {
+    return false;
+  }
+
+  std::fill(fixture.input.y_to_x.begin(), fixture.input.y_to_x.end(), 97);
+  std::fill(fixture.input.y_to_b.begin(), fixture.input.y_to_b.end(), -97);
+  EvaluationOutputStorage first(fixture.strategies.extent());
+  gjxl::metal_internal::MetalAqEvaluationProfile profile;
+  if (!CheckStatus(gjxl::metal_internal::EvaluateMetalAqProfiled(
+                       *prepared, resident_input, first.View(), &profile),
+                   "profiled invariant-CfL evaluation") ||
+      profile.input_upload_bytes !=
+          fixture.input.blocks.width * fixture.input.blocks.height *
+              sizeof(float) ||
+      !CompareOutputs(first, expected)) {
+    std::cerr << "Invariant CfL was reuploaded or changed the evaluation\n";
+    return false;
+  }
+
+  if (!CheckStatus(prepared->Reconfigure(
+                       fixture.strategies,
+                       {sharpness.data(), blocks, blocks.width}),
+                   "invariant-CfL strategy reconfiguration") ||
+      !ExpectCode(prepared->Evaluate(resident_input, rejected.View()),
+                  gjxl::StatusCode::kInvalidArgument,
+                  "stale invariant CfL after reconfiguration")) {
+    return false;
+  }
+
+  const gjxl::ConstPlaneI8View retained_x_view{
+      retained_x.data(), fixture.input.tiles, fixture.input.color_stride};
+  const gjxl::ConstPlaneI8View retained_b_view{
+      retained_b.data(), fixture.input.tiles, fixture.input.color_stride};
+  EvaluationOutputStorage rebound(fixture.strategies.extent());
+  return CheckStatus(prepared->SetInvariantColorCorrelation(
+                         retained_x_view, retained_b_view),
+                     "rebound invariant CfL") &&
+         CheckStatus(prepared->Evaluate(resident_input, rebound.View()),
+                     "evaluation after invariant-CfL rebound") &&
+         CompareOutputs(rebound, expected);
 }
 
 bool CheckReconfiguration(gjxl::GpuBackend& gpu) {
@@ -1301,6 +1434,7 @@ int main() {
       !CheckReductionCorpus(*gpu) ||
       !CheckMaximumErrorReduction(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||
+      !CheckInvariantColorCorrelation(*gpu) ||
       !CheckReconfiguration(*gpu) ||
       !CheckMemoryScaling(*gpu) ||
       !CheckSplitSeamAndDestruction(*gpu) ||

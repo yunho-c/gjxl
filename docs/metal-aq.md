@@ -183,6 +183,15 @@ The initial implementation uploads only iteration-dependent data:
 - Final color-correlation map.
 - EPF inverse-sigma field and any enabled-filter controls.
 
+The resident-quantization extension narrows that boundary further. It binds
+the fixed final color-correlation map once after strategy configuration, keeps
+the map beside the already persistent strategy/anchor metadata, and omits both
+CfL planes from every evaluation input. A successful strategy reconfiguration
+invalidates the binding, so a later rate-control attempt must explicitly bind
+its newly computed map before evaluation. The only per-evaluation upload on
+this path is then the policy's updated float quant field; raw quantization,
+quantizer parameters, and EPF inverse sigma are derived on device.
+
 The float quant field remains a CPU policy input unless profiling justifies a
 device conversion. Every transfer must be reported in the full-E2E benchmark.
 
