@@ -59,6 +59,29 @@ struct AqResetParams {
   uint32_t pixel_value_count;
   uint32_t block_value_count;
   uint32_t test_error_mask;
+  uint32_t preserve_error;
+};
+
+struct AqResidentPolicyInitializeParams {
+  uint32_t block_width;
+  uint32_t block_height;
+  uint32_t quant_stride;
+  uint32_t initial_stride;
+  uint32_t score_count;
+};
+
+struct AqResidentPolicyUpdateParams {
+  uint32_t block_width;
+  uint32_t block_height;
+  uint32_t quant_stride;
+  uint32_t initial_stride;
+  uint32_t block_distance_stride;
+  uint32_t score_index;
+  uint32_t iteration;
+  uint32_t apply_update;
+  float butteraugli_target;
+  float lower_bound;
+  float upper_bound;
 };
 
 struct AqInitialCflParams {
@@ -235,6 +258,9 @@ public:
 
   Status Prepare(const AqEvaluationPreparation &preparation);
   Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
+  Status EvaluateResidentButteraugliPolicy(
+      AqResidentButteraugliPolicyInput input,
+      AqResidentButteraugliPolicyOutput output) override;
   Status SetInvariantColorCorrelation(
       ConstPlaneI8View y_to_x,
       ConstPlaneI8View y_to_b) override;
@@ -258,7 +284,8 @@ public:
 
   Status SubmitEvaluation(AqEvaluationInput input,
                           bool profiling_reserved = false);
-  Status FinishEvaluation(AqEvaluationOutput output);
+  Status FinishEvaluation(AqEvaluationOutput output,
+                          bool complete_operation = true);
   Status FailNextUpload();
   Status FailNextNumeric();
   Status FailNextReadback();
@@ -312,6 +339,9 @@ private:
   static void EncodeEvaluationSubmission(MetalBackend &backend,
                                          MTL::ComputeCommandEncoder *encoder,
                                          const void *context);
+  static void EncodeResidentButteraugliPolicySubmission(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      const void* context);
   static void EncodeBlockReductionSubmission(
       MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
       const void *context);
@@ -379,6 +409,8 @@ private:
   DevicePlaneView initial_quant_median_;
   DevicePlaneView initial_quantizer_params_;
   DevicePlaneView resident_quant_field_;
+  DevicePlaneView resident_policy_initial_field_;
+  DevicePlaneView resident_policy_scores_;
   DevicePlaneView resident_quant_histogram_;
   DevicePlaneView resident_quant_selection_state_;
   DevicePlaneView resident_quant_statistics_;
@@ -421,6 +453,8 @@ private:
   Quantizer last_quantizer_;
   AqEvaluationMemoryStats memory_stats_;
   AqResetParams reset_params_{};
+  AqResidentPolicyInitializeParams resident_policy_initialize_params_{};
+  AqResidentPolicyUpdateParams resident_policy_update_params_{};
   AqInitialCflParams initial_cfl_params_{};
   AqInitialQuantGradientParams initial_quant_gradient_params_{};
   AqInitialQuantErosionParams initial_quant_erosion_params_{};
@@ -443,6 +477,8 @@ private:
   std::vector<vardct_frame_internal::QuantizedAcTransformView>
     final_transform_views_;
   std::vector<float> readback_;
+  std::vector<float> resident_policy_quant_readback_;
+  std::array<float, 5> resident_policy_score_readback_{};
   std::vector<float> transform_maximum_error_readback_;
   std::vector<float> forward_readback_;
   std::vector<float> exact_reconstruction_coefficients_;
@@ -479,6 +515,7 @@ private:
   bool frame_only_resident_quantizer_ = false;
   bool resident_quantization_ = false;
   bool resident_quantization_active_ = false;
+  size_t resident_policy_iterations_ = 0;
   bool resident_initial_quant_ready_ = false;
   bool resident_quantizer_ready_ = false;
   bool invariant_color_correlation_ready_ = false;

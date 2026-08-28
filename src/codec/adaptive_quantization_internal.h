@@ -84,6 +84,19 @@ struct AdaptiveQuantizationPolicyResult {
   MaximumErrorResult maximum_error;
 };
 
+struct ButteraugliPolicySetup {
+  float quant_dc = 0.0f;
+  float lower_bound = 0.0f;
+  float upper_bound = 0.0f;
+};
+
+/// Computes the libjxl-derived bounds and DC quantization shared by the CPU
+/// policy loop and resident GPU implementations.
+[[nodiscard]] Status PrepareButteraugliPolicy(
+  ConstPlaneF32View adjusted_initial_quant_field,
+  float butteraugli_target,
+  ButteraugliPolicySetup* setup);
+
 /// Validates the input and option contract shared by CPU and GPU evaluators.
 [[nodiscard]] Status ValidateAdaptiveQuantizationPolicyInputs(
   ConstImage3FView original_linear_rgb,

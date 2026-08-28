@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <memory>
+#include <vector>
 
 #include "codec/adaptive_quantization.h"
 #include "codec/butteraugli.h"
@@ -111,6 +112,22 @@ struct AqEvaluationOutput::Final {
   VarDctEncoderFrame* frame = nullptr;
 };
 
+struct AqResidentButteraugliPolicyInput {
+  ConstPlaneF32View adjusted_initial_quant_field;
+  float quant_dc = 0.0f;
+  float butteraugli_target = 0.0f;
+  float lower_bound = 0.0f;
+  float upper_bound = 0.0f;
+  size_t iterations = 0;
+};
+
+struct AqResidentButteraugliPolicyOutput {
+  PlaneF32View quant_field;
+  PlaneF32View block_distance_map;
+  std::vector<double>* score_history = nullptr;
+  AqEvaluationOutput::Final* final = nullptr;
+};
+
 struct AqEvaluationMemoryStats {
   size_t persistent_bytes = 0;
   size_t staging_bytes = 0;
@@ -134,6 +151,19 @@ public:
   [[nodiscard]] virtual Status Evaluate(
     AqEvaluationInput input,
     AqEvaluationOutput output) = 0;
+
+  /// Executes the complete bounded Butteraugli policy while keeping each
+  /// dependent quant-field update resident. Implementations may encode every
+  /// evaluation into one submission. Failure never changes caller-visible
+  /// output.
+  [[nodiscard]] virtual Status EvaluateResidentButteraugliPolicy(
+    AqResidentButteraugliPolicyInput input,
+    AqResidentButteraugliPolicyOutput output) {
+    (void)input;
+    (void)output;
+    return Status::Unavailable(
+      "Prepared resident Butteraugli policy is unavailable");
+  }
 
   /// Uploads one color-correlation map for reuse by every later evaluation.
   /// Once configured, evaluation inputs must omit `y_to_x` and `y_to_b`.

@@ -580,7 +580,7 @@ bool CheckFullyResidentCase(
   if (after_bounded.successful_allocations !=
           before_bounded.successful_allocations + 3 ||
       after_bounded.committed_submissions !=
-          before_bounded.committed_submissions + iterations + 3) {
+          before_bounded.committed_submissions + 3) {
     std::cerr << "Fully resident bounded resource count differs\n";
     return false;
   }
@@ -594,7 +594,7 @@ bool CheckFullyResidentCase(
   if (after_full.successful_allocations !=
           before_full.successful_allocations + 3 ||
       after_full.committed_submissions !=
-          before_full.committed_submissions + iterations + 3 ||
+          before_full.committed_submissions + 3 ||
       !bounded.PaddingPoisoned() || !full.PaddingPoisoned() ||
       !full.frame.valid() ||
       bounded.score_history.size() != iterations + 1 ||
@@ -886,7 +886,7 @@ int main() {
         return EXIT_FAILURE;
       }
     }
-    for (size_t iterations : {size_t{0}, size_t{2}}) {
+    for (size_t iterations = 0; iterations <= 4; ++iterations) {
       if (!CheckFullyResidentCase(
               *gpu, non_default, iterations, original.ConstView(),
               opsin.ConstView(), strategies, initial, sharpness_view)) {

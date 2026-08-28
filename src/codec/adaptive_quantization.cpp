@@ -1134,6 +1134,55 @@ Status ValidateAdaptiveQuantizationOutput(
 
 namespace adaptive_quantization_internal {
 
+Status PrepareButteraugliPolicy(
+  ConstPlaneF32View adjusted_initial_quant_field,
+  float butteraugli_target,
+  ButteraugliPolicySetup* setup) {
+
+  if (setup == nullptr || !adjusted_initial_quant_field.valid() ||
+      !std::isfinite(butteraugli_target) || butteraugli_target <= 0.0f) {
+    return Status::InvalidArgument(
+      "Butteraugli policy setup input is invalid");
+  }
+  float initial_minimum = std::numeric_limits<float>::infinity();
+  float initial_maximum = 0.0f;
+  for (size_t y = 0; y < adjusted_initial_quant_field.extent.height; ++y) {
+    for (size_t x = 0; x < adjusted_initial_quant_field.extent.width; ++x) {
+      const float value = adjusted_initial_quant_field.Row(y)[x];
+      if (!std::isfinite(value) || value <= 0.0f) {
+        return Status::InvalidArgument(
+          "Adjusted quant field must contain finite positive values");
+      }
+      initial_minimum = std::min(initial_minimum, value);
+      initial_maximum = std::max(initial_maximum, value);
+    }
+  }
+  const float initial_ratio = initial_maximum / initial_minimum;
+  const float maximum_deviation = std::sqrt(250.0f / initial_ratio);
+  const float asymmetry = std::min(2.0f, maximum_deviation);
+  ButteraugliPolicySetup candidate;
+  candidate.lower_bound =
+    initial_minimum / (asymmetry * maximum_deviation);
+  candidate.upper_bound =
+    initial_maximum * (maximum_deviation / asymmetry);
+  if (!std::isfinite(candidate.lower_bound) ||
+      !std::isfinite(candidate.upper_bound) ||
+      candidate.lower_bound <= 0.0f ||
+      candidate.upper_bound < candidate.lower_bound ||
+      candidate.upper_bound / candidate.lower_bound >= 253.0f ||
+      candidate.upper_bound >
+        static_cast<float>(std::numeric_limits<long>::max()) /
+          static_cast<float>(kQuantGlobalScaleDenominator)) {
+    return Status::InvalidArgument(
+      "Initial quant field cannot form libjxl AQ bounds");
+  }
+  Status status = ComputeInitialQuantDc(
+    butteraugli_target, &candidate.quant_dc);
+  if (!status.ok()) return status;
+  *setup = candidate;
+  return Status::Ok();
+}
+
 Status ValidateAdaptiveQuantizationPolicyInputs(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
@@ -1404,31 +1453,10 @@ Status RunAdaptiveQuantizationPolicyImpl(
     }
     const std::vector<float> adjusted_initial = quant_field;
 
-    const auto [minimum_it, maximum_it] = std::minmax_element(
-      adjusted_initial.begin(), adjusted_initial.end());
-    const float initial_minimum = *minimum_it;
-    const float initial_maximum = *maximum_it;
-    const float initial_ratio = initial_maximum / initial_minimum;
-    const float maximum_deviation = std::sqrt(250.0f / initial_ratio);
-    const float asymmetry = std::min(2.0f, maximum_deviation);
-    const float lower_bound =
-      initial_minimum / (asymmetry * maximum_deviation);
-    const float upper_bound =
-      initial_maximum * (maximum_deviation / asymmetry);
-    if (!std::isfinite(lower_bound) ||
-        !std::isfinite(upper_bound) ||
-        lower_bound <= 0.0f ||
-        upper_bound < lower_bound ||
-        upper_bound / lower_bound >= 253.0f ||
-        upper_bound >
-          static_cast<float>(std::numeric_limits<long>::max()) /
-            static_cast<float>(kQuantGlobalScaleDenominator)) {
-      return Status::InvalidArgument(
-        "Initial quant field cannot form libjxl AQ bounds");
-    }
-
-    float quant_dc = 0.0f;
-    status = ComputeInitialQuantDc(options.butteraugli_target, &quant_dc);
+    ButteraugliPolicySetup setup;
+    status = PrepareButteraugliPolicy(
+      {adjusted_initial.data(), block_extent, block_extent.width},
+      options.butteraugli_target, &setup);
     if (!status.ok()) {
       return status;
     }
@@ -1444,7 +1472,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
       EvaluationProfile evaluation_profile;
       status = evaluator.Evaluate(
         {quant_field.data(), block_extent, block_extent.width},
-        quant_dc,
+        setup.quant_dc,
         iteration == options.iterations,
         &evaluation,
         profile == nullptr ? nullptr : &evaluation_profile);
@@ -1482,7 +1510,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
             0.6f * adjusted_initial[index];
           if (quant_field[index] < clamp) {
             quant_field[index] = std::clamp(
-              clamp, lower_bound, upper_bound);
+              clamp, setup.lower_bound, setup.upper_bound);
           }
         }
       }
@@ -1514,7 +1542,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
           }
         }
         quant_field[index] = std::clamp(
-          quant_field[index], lower_bound, upper_bound);
+          quant_field[index], setup.lower_bound, setup.upper_bound);
       }
       if (profile != nullptr) {
         local_profile.quant_field_update_nanoseconds +=

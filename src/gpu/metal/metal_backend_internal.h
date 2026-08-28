@@ -82,6 +82,8 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_histogram;
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_select_bucket;
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_finalize_quantizer;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_policy_initialize;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_policy_update;
   NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_frame_coefficients;

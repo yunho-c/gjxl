@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "codec/adaptive_quantization_internal.h"
 #include "codec/butteraugli.h"
 #include "codec/color_transform.h"
 #include "codec/loop_filter.h"
@@ -23,6 +24,7 @@
 #include "codec/vardct_frame.h"
 #include "core/ac_strategy.h"
 #include "core/status.h"
+#include "core/quantizer.h"
 #include "gpu/backend.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
@@ -1058,6 +1060,274 @@ bool CheckInvariantColorCorrelation(gjxl::GpuBackend& gpu) {
          CompareOutputs(rebound, expected);
 }
 
+bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const size_t block_count = blocks.width * blocks.height;
+  const std::vector<uint8_t> sharpness(block_count, 4);
+  std::vector<float> initial(block_count);
+  for (size_t index = 0; index < block_count; ++index) {
+    initial[index] = 0.53f +
+      0.017f * static_cast<float>((11 * index + 7) % 31);
+  }
+  const auto prepare = [&](std::unique_ptr<gjxl::PreparedAqEvaluation>* out) {
+    return CheckStatus(gjxl::PrepareAqEvaluation(
+      gpu,
+      {
+        .original_linear_rgb = fixture.original.View(),
+        .coding_opsin = fixture.coding.View(),
+        .strategies = &fixture.strategies,
+        .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+        .options = MakeOptions(),
+        .resident_quantization = true,
+        .coefficient_decision_mode =
+          gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+      }, out), "resident policy preparation") &&
+      CheckStatus((*out)->SetInvariantColorCorrelation(
+        fixture.input.View().y_to_x, fixture.input.View().y_to_b),
+        "resident policy invariant CfL");
+  };
+  std::unique_ptr<gjxl::PreparedAqEvaluation> serial;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> fused;
+  if (!prepare(&serial) || !prepare(&fused)) return false;
+
+  constexpr float kTarget = 1.15f;
+  constexpr size_t kIterations = 4;
+  gjxl::adaptive_quantization_internal::ButteraugliPolicySetup setup;
+  if (!CheckStatus(
+        gjxl::adaptive_quantization_internal::PrepareButteraugliPolicy(
+          {initial.data(), blocks, blocks.width}, kTarget, &setup),
+        "resident policy setup")) {
+    return false;
+  }
+
+  std::vector<float> expected_quant = initial;
+  std::vector<float> expected_block(block_count);
+  std::vector<double> expected_scores;
+  expected_scores.reserve(kIterations + 1);
+  for (size_t iteration = 0; iteration <= kIterations; ++iteration) {
+    double score = 0.0;
+    gjxl::QuantizerParams quantizer_params;
+    if (!CheckStatus(serial->Evaluate(
+          {
+            .quant_field = {
+              expected_quant.data(), blocks, blocks.width},
+            .quant_dc = setup.quant_dc,
+          },
+          {
+            .block_distance_map = {
+              expected_block.data(), blocks, blocks.width},
+            .score = &score,
+            .quantizer = &quantizer_params,
+          }), "serial resident policy evaluation")) {
+      return false;
+    }
+    expected_scores.push_back(score);
+    if (iteration == kIterations) break;
+    gjxl::Quantizer quantizer;
+    if (!CheckStatus(gjxl::Quantizer::Create(
+          quantizer_params, &quantizer), "serial resident quantizer")) {
+      return false;
+    }
+    if (iteration == 1) {
+      for (size_t index = 0; index < block_count; ++index) {
+        const float constrained =
+          0.4f * expected_quant[index] + 0.6f * initial[index];
+        if (expected_quant[index] < constrained) {
+          expected_quant[index] = std::clamp(
+            constrained, setup.lower_bound, setup.upper_bound);
+        }
+      }
+    }
+    for (size_t index = 0; index < block_count; ++index) {
+      const float difference = expected_block[index] / kTarget;
+      if (difference <= 1.0f) {
+        if (iteration < 2) {
+          expected_quant[index] *= std::pow(difference, 0.2f);
+        }
+      } else {
+        const float old = expected_quant[index];
+        expected_quant[index] *= difference;
+        if (std::lround(old * quantizer.inverse_global_scale()) ==
+            std::lround(expected_quant[index] *
+                        quantizer.inverse_global_scale())) {
+          expected_quant[index] = old + quantizer.scale();
+        }
+      }
+      expected_quant[index] = std::clamp(
+        expected_quant[index], setup.lower_bound, setup.upper_bound);
+    }
+  }
+
+  const size_t stride = blocks.width + 5;
+  std::vector<float> actual_quant(stride * blocks.height, kPoison);
+  std::vector<float> actual_block(stride * blocks.height, kPoison);
+  std::vector<double> actual_scores;
+  const gjxl::GpuBackendStats before = gpu.stats();
+  if (!CheckStatus(fused->EvaluateResidentButteraugliPolicy(
+        {
+          .adjusted_initial_quant_field = {
+            initial.data(), blocks, blocks.width},
+          .quant_dc = setup.quant_dc,
+          .butteraugli_target = kTarget,
+          .lower_bound = setup.lower_bound,
+          .upper_bound = setup.upper_bound,
+          .iterations = kIterations,
+        },
+        {
+          .quant_field = {actual_quant.data(), blocks, stride},
+          .block_distance_map = {actual_block.data(), blocks, stride},
+          .score_history = &actual_scores,
+        }), "fused resident policy") ||
+      gpu.stats().committed_submissions !=
+        before.committed_submissions + 1 ||
+      actual_scores.size() != expected_scores.size()) {
+    return false;
+  }
+  for (size_t index = 0; index < actual_scores.size(); ++index) {
+    if (std::abs(actual_scores[index] - expected_scores[index]) > 2.0e-4) {
+      std::cerr << "Fused resident policy score differs from serial\n";
+      return false;
+    }
+  }
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      const size_t contiguous = y * blocks.width + x;
+      const size_t padded = y * stride + x;
+      if (std::abs(actual_quant[padded] - expected_quant[contiguous]) >
+            1.0e-5f ||
+          std::abs(actual_block[padded] - expected_block[contiguous]) >
+            5.0e-4f) {
+        std::cerr << "Fused resident policy differs from serial oracle\n";
+        return false;
+      }
+    }
+    for (size_t x = blocks.width; x < stride; ++x) {
+      if (std::bit_cast<uint32_t>(actual_quant[y * stride + x]) !=
+            kPoisonBits ||
+          std::bit_cast<uint32_t>(actual_block[y * stride + x]) !=
+            kPoisonBits) {
+        std::cerr << "Fused resident policy overwrote output padding\n";
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+enum class ResidentPolicyFailure {
+  kUpload,
+  kSubmission,
+  kCompletion,
+  kNumeric,
+  kReadback,
+};
+
+bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
+  Fixture fixture;
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!fixture.Initialize() ||
+      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "resident policy failure backend")) {
+    return false;
+  }
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const size_t block_count = blocks.width * blocks.height;
+  const std::vector<uint8_t> sharpness(block_count, 4);
+  std::vector<float> initial(block_count, 0.75f);
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(
+        *gpu,
+        {
+          .original_linear_rgb = fixture.original.View(),
+          .coding_opsin = fixture.coding.View(),
+          .strategies = &fixture.strategies,
+          .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+          .options = MakeOptions(),
+          .resident_quantization = true,
+          .coefficient_decision_mode =
+            gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        }, &prepared), "resident policy failure preparation") ||
+      !CheckStatus(prepared->SetInvariantColorCorrelation(
+        fixture.input.View().y_to_x, fixture.input.View().y_to_b),
+        "resident policy failure invariant CfL")) {
+    return false;
+  }
+  gjxl::adaptive_quantization_internal::ButteraugliPolicySetup setup;
+  if (!CheckStatus(
+        gjxl::adaptive_quantization_internal::PrepareButteraugliPolicy(
+          {initial.data(), blocks, blocks.width}, 1.0f, &setup),
+        "resident policy failure setup")) {
+    return false;
+  }
+  gjxl::Status injection;
+  switch (failure) {
+    case ResidentPolicyFailure::kUpload:
+      injection =
+        gjxl::metal_internal::FailNextMetalAqUploadForTesting(*prepared);
+      break;
+    case ResidentPolicyFailure::kSubmission:
+      injection = gjxl::ArmNextMetalSubmissionFailureForTest(
+        *gpu, true, false);
+      break;
+    case ResidentPolicyFailure::kCompletion:
+      injection = gjxl::ArmNextMetalSubmissionFailureForTest(
+        *gpu, false, true);
+      break;
+    case ResidentPolicyFailure::kNumeric:
+      injection =
+        gjxl::metal_internal::FailNextMetalAqNumericForTesting(*prepared);
+      break;
+    case ResidentPolicyFailure::kReadback:
+      injection =
+        gjxl::metal_internal::FailNextMetalAqReadbackForTesting(*prepared);
+      break;
+  }
+  if (!CheckStatus(injection, "resident policy failure injection")) {
+    return false;
+  }
+  std::vector<float> quant(block_count, kPoison);
+  std::vector<float> block(block_count, kPoison);
+  std::vector<double> scores = {-91.0};
+  const gjxl::AqResidentButteraugliPolicyInput input{
+    .adjusted_initial_quant_field = {
+      initial.data(), blocks, blocks.width},
+    .quant_dc = setup.quant_dc,
+    .butteraugli_target = 1.0f,
+    .lower_bound = setup.lower_bound,
+    .upper_bound = setup.upper_bound,
+    .iterations = 2,
+  };
+  const auto make_output = [&] {
+    return gjxl::AqResidentButteraugliPolicyOutput{
+      .quant_field = {quant.data(), blocks, blocks.width},
+      .block_distance_map = {block.data(), blocks, blocks.width},
+      .score_history = &scores,
+    };
+  };
+  const gjxl::StatusCode expected =
+    failure == ResidentPolicyFailure::kSubmission
+      ? gjxl::StatusCode::kSubmissionFailed
+      : gjxl::StatusCode::kDeviceError;
+  if (!ExpectCode(prepared->EvaluateResidentButteraugliPolicy(
+                    input, make_output()),
+                  expected, "injected resident policy failure") ||
+      !std::ranges::all_of(quant, [](float value) {
+        return std::bit_cast<uint32_t>(value) == kPoisonBits;
+      }) ||
+      !std::ranges::all_of(block, [](float value) {
+        return std::bit_cast<uint32_t>(value) == kPoisonBits;
+      }) || scores != std::vector<double>{-91.0} ||
+      !ExpectCode(prepared->EvaluateResidentButteraugliPolicy(
+                    input, make_output()),
+                  gjxl::StatusCode::kFailedPrecondition,
+                  "resident policy reuse after failure")) {
+    return false;
+  }
+  return true;
+}
+
 bool CheckReconfiguration(gjxl::GpuBackend& gpu) {
   Fixture fixture;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
@@ -1435,6 +1705,12 @@ int main() {
       !CheckMaximumErrorReduction(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||
       !CheckInvariantColorCorrelation(*gpu) ||
+      !CheckResidentButteraugliPolicy(*gpu) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kUpload) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kSubmission) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kCompletion) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kNumeric) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kReadback) ||
       !CheckReconfiguration(*gpu) ||
       !CheckMemoryScaling(*gpu) ||
       !CheckSplitSeamAndDestruction(*gpu) ||

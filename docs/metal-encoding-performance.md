@@ -421,6 +421,39 @@ The 4672x5584 doughnut sample also completed at target `1.2` in `4698.8 ms`
 `2769119`-byte codestream. Independent `djxl` 0.12 decoded it back to a
 4672x5584 PFM.
 
+#### Chained resident-evaluation checkpoint (2026-08-28)
+
+The next P4 slice moves the deterministic distance-driven Butteraugli policy
+update onto Metal and encodes all dependent evaluations into one compute
+command buffer. The adjusted initial field is retained separately for the
+second-update pull, up to five scores remain device-resident, and numeric
+failure state is sticky across every pass. One final completion wait reads the
+final field, final block map, all scores, quantizer/frame state, and requested
+reconstructed RGB. Initial field adjustment and CPU fixed-CfL preparation
+remain separate. Exact-coefficient and maximum-error modes are unchanged.
+
+Direct Release tests compare the fused zero-to-four-update path with the serial
+policy oracle, verify one dependent-evaluation submission independent of the
+iteration count, preserve padded outputs, and inject upload, submission,
+completion, numeric, and readback failures. The complete serial suite passed
+`55/56`; the sole failure remains the inherited pinned CPU score mismatch of
+`4.4524669647216797e-05` at index 1.
+
+One Apple M4 Pro directional public-workflow run used one warmup and five
+alternating samples at padded 1080p and target `1.2`. Fully resident measured
+`288.2 ms` total (`260.6-383.4`) and `238.2 ms` in the quantization pipeline,
+versus the preceding `303.2/253.1 ms` checkpoint. Throughput measured
+`259.2 ms` total (`232.5-410.1`) and `215.8 ms` in the pipeline, versus
+`257.0/209.6 ms`. The ranges are noisy and overlap; the fully-resident shift is
+a directional 5-6% improvement, while throughput is performance-neutral.
+
+The 4672x5584 doughnut sample retained its `2769119`-byte output and `1.69531`
+reported final score. A single run measured `5157.6 ms` total (`188.1 ms`
+preparation and `4969.4 ms` selected attempt), and independent `djxl` 0.12
+decoding produced a 4672x5584 PFM. This natural-image timing is noisier and
+slower than the preceding single run, so it is a decode/regression check rather
+than a speedup claim.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

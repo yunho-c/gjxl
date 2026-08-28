@@ -10,9 +10,10 @@ Butteraugli operation remain documented in
 The objective is an end-to-end reduction in the time spent by
 `FindBestQuantization`, not isolated kernel speedups. The default AQ policy
 performs two quant-field updates and therefore three complete
-encode/reconstruct/measure evaluations. A useful Metal path must keep the
-large images and intermediate planes resident across those evaluations and
-limit synchronization to the data required by the CPU update policy.
+encode/reconstruct/measure evaluations. The experimental resident Butteraugli
+path now keeps the large images, intermediate planes, policy field, and score
+history resident across those evaluations and synchronizes only after the
+final pass.
 The cross-stage plan for reaching the complete encoder's `50x` performance
 target is maintained in
 [`metal-encoding-performance.md`](metal-encoding-performance.md).
@@ -41,7 +42,8 @@ automatically.
 - Accelerate the complete AQ encode/reconstruct/measure evaluation on Metal.
 - Retain the CPU implementation as the readable executable specification and
   fallback path.
-- Keep quant-field convergence policy and iteration order on the CPU initially.
+- Keep one shared quant-field policy definition and preserve its iteration
+  order across CPU and resident Metal implementations.
 - Keep original, coding, reconstruction, filtering, and perceptual images
   device-resident when doing so removes avoidable transfers.
 - Reuse device-image, submission, scratch, and reduction infrastructure across
@@ -55,8 +57,8 @@ automatically.
 
 - Moving initial quant-field generation or AC-strategy search into this effort.
   They precede iterative AQ and have separate dataflow and benchmarks.
-- Moving quant-field update policy, convergence decisions, or iteration order
-  to the GPU before profiling demonstrates a need.
+- Changing quant-field convergence decisions or iteration order while moving
+  their arithmetic to the GPU.
 - Retuning Butteraugli, quantization matrices, loop filters, or encoder policy.
 - Requiring bit-identical CPU and GPU floating-point intermediates.
 - Claiming complete JPEG XL encoder or bitstream parity for features outside
@@ -102,8 +104,9 @@ creation, command encoding, resource validation, and synchronization remain in
 
 ## Evaluation boundary
 
-The first Metal implementation keeps field construction and policy on the CPU
-and moves the throughput-heavy image path to the GPU:
+The exact-coefficient and generic prepared-evaluation paths keep field
+construction and policy on the CPU and move the throughput-heavy image path to
+the GPU:
 
 ```text
 CPU, once per frame
@@ -151,6 +154,44 @@ adds reconstructed-image and `VarDctEncoderFrame` materialization from the last
 resident evaluation and uses that path in the complete GPU quantization
 pipeline. A future encoder handoff may retain final coefficients on the device,
 but that representation is not invented implicitly by scratch buffers.
+
+The fully-resident and throughput Butteraugli paths use a later optional
+prepared-operation boundary:
+
+```text
+CPU, once per rate-control attempt
+  adjusted initial quant field
+  shared policy bounds + DC quant scalar
+  fixed CfL map binding
+               |
+               v
+one Metal command buffer, N + 1 passes
+  resident quantizer + raw quant + EPF sigma
+  encode + reconstruct + loop filters
+  Butteraugli + block reduction
+  record score + deterministic quant-field update
+               |
+               v
+one completion wait and final readback
+  final quant field + final block map + all scores
+  requested final frame + reconstructed RGB
+```
+
+The default two-update policy therefore uses one dependent-evaluation
+submission rather than three. The initial strategy-aware field adjustment
+remains a separate submission, and fixed CfL preparation remains CPU work.
+Exact-coefficient and maximum-error control retain their previous serial
+orchestration. Backends that return `Unavailable` for the optional fused
+operation fall back to that orchestration; any other error is terminal.
+
+The policy-update kernel preserves the adjusted initial field, applies the
+second-update pull toward that field, the `difference^0.2` early update, the
+raw-quant rounding-progress rule, and the shared lower/upper clamps. Reset
+kernels clear the numeric error word only for the first pass, so a failure from
+any earlier pass remains sticky through final readback. Direct tests compare
+the fused result with the serial CPU policy oracle for zero through four
+updates and cover padded outputs plus upload, submission, completion, numeric,
+and readback failure atomicity.
 
 ## Residency and transfer contract
 

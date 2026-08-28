@@ -674,6 +674,33 @@ bytes. Relative to the preceding same-protocol checkpoints, the directional
 Metal medians improved by `1.03x` and `1.08x`; these remain single-process
 signals rather than retained multi-process claims.
 
+### Chained resident Butteraugli policy
+
+**Status:** complete for fully-resident and throughput Butteraugli encoding.
+
+The prepared evaluator now exposes an optional bounded resident-policy
+operation. The CPU computes the shared libjxl-derived field bounds and DC-quant
+scalar, then Metal preserves the adjusted initial field and executes every
+configured evaluation and dependent field update in one command buffer. A
+five-float device score history covers the supported zero-to-four update
+range. Only the final quant field, final block map, complete score history, and
+requested final frame/RGB are read after one completion wait.
+
+The Metal update matches the CPU policy's iteration-one pull toward the initial
+field, early `pow(difference, 0.2)` rule, positive `lround`-equivalent progress
+check, quantizer-scale increment, and bounds clamp. Device numeric failures are
+sticky across passes, and caller outputs commit only after every final readback
+validates. The high-level policy falls back only when a prepared backend
+reports the fused capability as unavailable. Maximum-error control retains its
+six-evaluation best-feasible policy, and exact-coefficient mode retains its
+CPU update loop.
+
+Focused tests cover every Butteraugli update count from zero through four,
+serial-oracle tolerance, one dependent-evaluation submission, output padding,
+final frame validity, and atomic upload/submission/completion/numeric/readback
+failure. The initial adjustment and invariant CfL binding are intentionally
+outside the fused command buffer.
+
 ### Final resident-frontend audit
 
 **Status:** complete for the five-step sequence.
@@ -687,7 +714,7 @@ to pair an exact coefficient frame with its post-`AdjustQuantBlockAC` raw-quant
 and EPF state; it now exercises the resident, exact-coefficient, and
 perceptual-tail phases instead of failing setup.
 
-A complete Release build succeeded. CTest passed `53/54`; the sole exception
+A complete Release build succeeded. CTest passed `55/56`; the sole exception
 is the inherited `quantization_pipeline` pinned Butteraugli golden mismatch
 (`4.45247e-05` at score index 1), whose tolerance and expected value were not
 changed. All Metal, AC-search, AQ, codestream, CLI, and install-consumer tests

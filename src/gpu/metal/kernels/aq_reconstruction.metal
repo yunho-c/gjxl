@@ -43,6 +43,29 @@ struct AqResetParams {
   uint pixel_value_count;
   uint block_value_count;
   uint test_error_mask;
+  uint preserve_error;
+};
+
+struct AqResidentPolicyInitializeParams {
+  uint block_width;
+  uint block_height;
+  uint quant_stride;
+  uint initial_stride;
+  uint score_count;
+};
+
+struct AqResidentPolicyUpdateParams {
+  uint block_width;
+  uint block_height;
+  uint quant_stride;
+  uint initial_stride;
+  uint block_distance_stride;
+  uint score_index;
+  uint iteration;
+  uint apply_update;
+  float butteraugli_target;
+  float lower_bound;
+  float upper_bound;
 };
 
 struct AqInitialCflParams {
@@ -143,7 +166,7 @@ kernel void gjxl_aq_reset_exact_evaluation(
   uint index [[thread_position_in_grid]]) {
 
   constexpr uint kPoison = 0x7fc12345u;
-  if (index == 0u) {
+  if (index == 0u && params.preserve_error == 0u) {
     atomic_store_explicit(
       error, params.test_error_mask, memory_order_relaxed);
   }
@@ -226,7 +249,7 @@ kernel void gjxl_aq_reset_reconstruction(
   uint index [[thread_position_in_grid]]) {
 
   constexpr uint kPoison = 0x7fc12345u;
-  if (index == 0u) {
+  if (index == 0u && params.preserve_error == 0u) {
     atomic_store_explicit(
       error, params.test_error_mask, memory_order_relaxed);
   }
@@ -930,6 +953,106 @@ kernel void gjxl_aq_resident_quant_finalize_quantizer(
   }
 }
 
+kernel void gjxl_aq_resident_policy_initialize(
+  device const float* quant_field [[buffer(0)]],
+  device float* initial_quant_field [[buffer(1)]],
+  device float* scores [[buffer(2)]],
+  device atomic_uint* error [[buffer(3)]],
+  constant AqResidentPolicyInitializeParams& params [[buffer(4)]],
+  uint index [[thread_position_in_grid]]) {
+
+  constexpr uint kPoison = 0x7fc12345u;
+  const uint block_count = params.block_width * params.block_height;
+  if (index < block_count) {
+    const uint y = index / params.block_width;
+    const uint x = index - y * params.block_width;
+    const float value = quant_field[y * params.quant_stride + x];
+    if (!isfinite(value) || value <= 0.0f) {
+      atomic_fetch_or_explicit(error, 1048576u, memory_order_relaxed);
+    }
+    initial_quant_field[y * params.initial_stride + x] = value;
+  }
+  if (index < params.score_count) {
+    scores[index] = as_type<float>(kPoison);
+  }
+}
+
+kernel void gjxl_aq_resident_policy_update(
+  device float* quant_field [[buffer(0)]],
+  device const float* initial_quant_field [[buffer(1)]],
+  device const float* block_distance [[buffer(2)]],
+  device const float* score [[buffer(3)]],
+  device float* scores [[buffer(4)]],
+  device const uint* quantizer_params [[buffer(5)]],
+  device atomic_uint* error [[buffer(6)]],
+  constant AqResidentPolicyUpdateParams& params [[buffer(7)]],
+  uint index [[thread_position_in_grid]]) {
+
+  const uint block_count = params.block_width * params.block_height;
+  const uint global_scale = quantizer_params[0];
+  if (index == 0u) {
+    const float value = score[0];
+    scores[params.score_index] = value;
+    if (!isfinite(value) || value < 0.0f || global_scale == 0u ||
+        global_scale > 32768u || quantizer_params[1] == 0u ||
+        quantizer_params[1] > 65536u) {
+      atomic_fetch_or_explicit(error, 1048576u, memory_order_relaxed);
+    }
+  }
+  if (index >= block_count) return;
+  const uint y = index / params.block_width;
+  const uint x = index - y * params.block_width;
+  const uint quant_index = y * params.quant_stride + x;
+  float quant = quant_field[quant_index];
+  const float initial =
+    initial_quant_field[y * params.initial_stride + x];
+  const float distance =
+    block_distance[y * params.block_distance_stride + x];
+  if (!isfinite(quant) || quant <= 0.0f ||
+      !isfinite(initial) || initial <= 0.0f ||
+      !isfinite(distance) || distance < 0.0f ||
+      !isfinite(params.butteraugli_target) ||
+      params.butteraugli_target <= 0.0f ||
+      !isfinite(params.lower_bound) || params.lower_bound <= 0.0f ||
+      !isfinite(params.upper_bound) ||
+      params.upper_bound < params.lower_bound || global_scale == 0u) {
+    atomic_fetch_or_explicit(error, 1048576u, memory_order_relaxed);
+    return;
+  }
+  if (params.apply_update == 0u) return;
+
+  if (params.iteration == 1u) {
+    const float initial_clamp = 0.4f * quant + 0.6f * initial;
+    if (quant < initial_clamp) {
+      quant = clamp(
+        initial_clamp, params.lower_bound, params.upper_bound);
+    }
+  }
+  const float difference = distance / params.butteraugli_target;
+  if (!isfinite(difference) || difference < 0.0f) {
+    atomic_fetch_or_explicit(error, 1048576u, memory_order_relaxed);
+    return;
+  }
+  if (difference <= 1.0f) {
+    if (params.iteration < 2u) quant *= pow(difference, 0.2f);
+  } else {
+    const float old = quant;
+    quant *= difference;
+    const float inverse_global_scale = 65536.0f / float(global_scale);
+    const float old_raw = floor(old * inverse_global_scale + 0.5f);
+    const float new_raw = floor(quant * inverse_global_scale + 0.5f);
+    if (old_raw == new_raw) {
+      quant = old + float(global_scale) / 65536.0f;
+    }
+  }
+  if (!isfinite(quant)) {
+    atomic_fetch_or_explicit(error, 1048576u, memory_order_relaxed);
+    return;
+  }
+  quant_field[quant_index] = clamp(
+    quant, params.lower_bound, params.upper_bound);
+}
+
 kernel void gjxl_aq_reset_frame_encoding(
   device int* quantized_coefficients [[buffer(0)]],
   device int* quantized_dc [[buffer(1)]],
@@ -937,7 +1060,7 @@ kernel void gjxl_aq_reset_frame_encoding(
   constant AqResetParams& params [[buffer(3)]],
   uint index [[thread_position_in_grid]]) {
 
-  if (index == 0u) {
+  if (index == 0u && params.preserve_error == 0u) {
     atomic_store_explicit(
       error, params.test_error_mask, memory_order_relaxed);
   }
@@ -959,7 +1082,7 @@ kernel void gjxl_aq_reset_exact_coefficients(
   uint index [[thread_position_in_grid]]) {
 
   constexpr uint kPoison = 0x7fc12345u;
-  if (index == 0u) {
+  if (index == 0u && params.preserve_error == 0u) {
     atomic_store_explicit(
       error, params.test_error_mask, memory_order_relaxed);
   }

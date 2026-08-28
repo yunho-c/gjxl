@@ -560,6 +560,82 @@ Status RunGpuAdaptiveQuantizationImpl(
       forward_coefficients = {};
     }
 
+    if (resident_quantization &&
+        options.control_mode ==
+          AdaptiveQuantizationControlMode::kButteraugli) {
+      aqi::ButteraugliPolicySetup setup;
+      status = aqi::PrepareButteraugliPolicy(
+        policy_initial, options.butteraugli_target, &setup);
+      if (!status.ok()) return status;
+
+      size_t block_count = 0;
+      if (!strategies.extent().try_area(&block_count)) {
+        return Status::InvalidArgument(
+          "Resident AQ block grid is too large");
+      }
+      aqi::AdaptiveQuantizationPolicyResult fused_result;
+      fused_result.quant_field.resize(block_count);
+      fused_result.block_distance.resize(block_count);
+      Image3FBuffer fused_reconstruction;
+      VarDctEncoderFrame fused_frame;
+      AqEvaluationOutput::Final fused_final;
+      AqResidentButteraugliPolicyOutput fused_output{
+        .quant_field = {
+          fused_result.quant_field.data(), strategies.extent(),
+          strategies.extent().width},
+        .block_distance_map = {
+          fused_result.block_distance.data(), strategies.extent(),
+          strategies.extent().width},
+        .score_history = &fused_result.score_history,
+      };
+      if (full_output != nullptr) {
+        fused_reconstruction.resize(original_linear_rgb.extent());
+        fused_final = {
+          .reconstructed_linear_rgb = fused_reconstruction.view(),
+          .frame = &fused_frame,
+        };
+        fused_output.final = &fused_final;
+      }
+      status = prepared->EvaluateResidentButteraugliPolicy(
+        {
+          .adjusted_initial_quant_field = policy_initial,
+          .quant_dc = setup.quant_dc,
+          .butteraugli_target = options.butteraugli_target,
+          .lower_bound = setup.lower_bound,
+          .upper_bound = setup.upper_bound,
+          .iterations = options.iterations,
+        },
+        fused_output);
+      if (status.ok()) {
+        if (full_output == nullptr) {
+          CopyContiguousPlane(
+            fused_result.quant_field, bounded_output->quant_field);
+          CopyContiguousPlane(
+            fused_result.block_distance,
+            bounded_output->block_distance_map);
+          *bounded_output->score_history =
+            std::move(fused_result.score_history);
+        } else {
+          CopyContiguousPlane(
+            fused_result.quant_field, full_output->quant_field);
+          CopyContiguousPlane(
+            fused_result.block_distance,
+            full_output->block_distance_map);
+          CopyImage(
+            fused_reconstruction.const_view(),
+            full_output->reconstructed_linear_rgb);
+          *full_output->frame = std::move(fused_frame);
+          *full_output->score_history =
+            std::move(fused_result.score_history);
+        }
+        return Status::Ok();
+      }
+      if (status.code() != StatusCode::kUnavailable) {
+        if (reusable != nullptr) reusable->evaluation.reset();
+        return status;
+      }
+    }
+
     PreparedGpuAdaptiveQuantizationEvaluator evaluator(
       strategies, epf_sharpness, options, mode, *prepared,
       std::move(forward_coefficients), full_output != nullptr,

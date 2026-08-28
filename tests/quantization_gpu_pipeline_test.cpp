@@ -690,8 +690,7 @@ bool CheckDefaultUpdatePipelineParity() {
       cpu.pixel_mask, resident.pixel_mask);
   if (!resident_status.ok() || resident_stats.total_candidate_count == 0 ||
       after_resident.committed_submissions !=
-          before_resident.committed_submissions +
-              options.adaptive_quantization.iterations + 6 ||
+          before_resident.committed_submissions + 6 ||
       resident_initial_error > 2.0e-6 ||
       resident_strategy_mask_error > 2.0e-6 ||
       resident_pixel_mask_error > 3.0e-5 || !resident.frame.valid() ||
@@ -725,7 +724,7 @@ bool CheckDefaultUpdatePipelineParity() {
   if (!throughput_status.ok() ||
       throughput_stats.total_candidate_count == 0 ||
       after_throughput.committed_submissions !=
-          before_throughput.committed_submissions + 7 ||
+          before_throughput.committed_submissions + 6 ||
       throughput_initial_error > 2.0e-6 ||
       throughput_strategy_mask_error > 2.0e-6 ||
       throughput_pixel_mask_error > 3.0e-5 || !throughput.frame.valid() ||
