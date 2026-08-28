@@ -157,6 +157,7 @@ struct PreparedAdaptiveQuantization {
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
   AqEvaluationOptions evaluation_options;
+  bool resident_quantization = false;
   std::unique_ptr<PreparedAqEvaluation> evaluation;
   GpuBackend* resident_frontend_backend = nullptr;
   ConstImage3FView resident_frontend_original_linear_rgb;

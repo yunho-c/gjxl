@@ -50,6 +50,7 @@ struct AqReconstructionParams {
   uint32_t epf_sharpness_stride;
   float epf_quant_multiplier;
   std::array<float, 8> epf_sharpness_lut;
+  uint32_t use_resident_quantizer;
 };
 
 struct AqResetParams {
@@ -115,6 +116,20 @@ struct AqInitialQuantSortParams {
   uint32_t compare_distance;
   uint32_t sequence_length;
   uint32_t value_count;
+};
+
+struct AqQuantFieldAdjustmentParams {
+  uint32_t quant_stride;
+  uint32_t anchor_offset;
+  uint32_t anchor_count;
+  uint32_t covered_width;
+  uint32_t covered_height;
+  float mean_max_mixer;
+};
+
+struct AqResidentQuantSelectionPass {
+  uint32_t shift;
+  uint32_t deviation;
 };
 
 struct AqBlockReductionParams {
@@ -220,6 +235,9 @@ public:
 
   Status Prepare(const AqEvaluationPreparation &preparation);
   Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
+  Status AdjustQuantFieldResident(float butteraugli_target,
+                                  ConstPlaneF32View input,
+                                  PlaneF32View output) override;
   Status Reconfigure(const AcStrategyGrid& strategies,
                      ConstPlaneU8View epf_sharpness) override;
   Status EncodeFrame(AqEvaluationInput input,
@@ -304,6 +322,9 @@ private:
   static void EncodeInitialQuantizationSubmission(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       const void* context);
+  static void EncodeQuantFieldAdjustmentSubmission(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      const void* context);
   static void
   EncodeQuantizationProbeSubmission(MetalBackend &backend,
                                     MTL::ComputeCommandEncoder *encoder,
@@ -322,6 +343,8 @@ private:
                          MTL::ComputeCommandEncoder *encoder) const;
   void EncodeBlockReduction(MetalBackend &backend,
                             MTL::ComputeCommandEncoder *encoder) const;
+  void EncodeResidentQuantizer(MetalBackend& backend,
+                               MTL::ComputeCommandEncoder* encoder) const;
   void EncodeMaximumErrorReduction(
       MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const;
   [[nodiscard]] std::array<DevicePlaneView, 3>
@@ -352,6 +375,11 @@ private:
   DevicePlaneView initial_quant_sort_;
   DevicePlaneView initial_quant_median_;
   DevicePlaneView initial_quantizer_params_;
+  DevicePlaneView resident_quant_field_;
+  DevicePlaneView resident_quant_histogram_;
+  DevicePlaneView resident_quant_selection_state_;
+  DevicePlaneView resident_quant_statistics_;
+  DevicePlaneView resident_quantizer_params_;
   DevicePlaneView block_distance_;
   DevicePlaneView distance_map_;
   DevicePlaneView score_;
@@ -395,6 +423,9 @@ private:
   AqInitialQuantErosionParams initial_quant_erosion_params_{};
   AqInitialQuantModulationParams initial_quant_modulation_params_{};
   AqInitialQuantSelectionParams initial_quant_selection_params_{};
+  AqInitialQuantSelectionParams resident_quant_selection_params_{};
+  std::array<AqQuantFieldAdjustmentParams, 7>
+    quant_field_adjustment_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};
   std::array<AqMaximumErrorReductionParams, 7>
     maximum_error_reduction_params_{};
@@ -443,6 +474,8 @@ private:
   bool frame_only_resident_initial_quant_ = false;
   bool resident_ac_strategy_inputs_ = false;
   bool frame_only_resident_quantizer_ = false;
+  bool resident_quantization_ = false;
+  bool resident_quantization_active_ = false;
   bool resident_initial_quant_ready_ = false;
   bool resident_quantizer_ready_ = false;
 };

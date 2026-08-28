@@ -54,7 +54,7 @@ inline constexpr std::array<AcStrategyType, 7> kSupportedAqStrategies = {
 
 static_assert(std::is_standard_layout_v<AqReconstructionParams>);
 static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
-static_assert(sizeof(AqReconstructionParams) == 132);
+static_assert(sizeof(AqReconstructionParams) == 136);
 static_assert(sizeof(AqResetParams) == 20);
 static_assert(std::is_standard_layout_v<AqInitialCflParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialCflParams>);
@@ -74,6 +74,12 @@ static_assert(sizeof(AqInitialQuantSelectionParams) == 36);
 static_assert(std::is_standard_layout_v<AqInitialQuantSortParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialQuantSortParams>);
 static_assert(sizeof(AqInitialQuantSortParams) == 12);
+static_assert(std::is_standard_layout_v<AqQuantFieldAdjustmentParams>);
+static_assert(std::is_trivially_copyable_v<AqQuantFieldAdjustmentParams>);
+static_assert(sizeof(AqQuantFieldAdjustmentParams) == 24);
+static_assert(std::is_standard_layout_v<AqResidentQuantSelectionPass>);
+static_assert(std::is_trivially_copyable_v<AqResidentQuantSelectionPass>);
+static_assert(sizeof(AqResidentQuantSelectionPass) == 8);
 static_assert(std::is_standard_layout_v<AqBlockReductionParams>);
 static_assert(std::is_trivially_copyable_v<AqBlockReductionParams>);
 static_assert(sizeof(AqBlockReductionParams) == 40);
@@ -426,6 +432,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       preparation.resident_ac_strategy_inputs;
   frame_only_resident_quantizer_ =
       preparation.frame_only_resident_quantizer;
+  resident_quantization_ = preparation.resident_quantization;
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
@@ -699,6 +706,23 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       if (!status.ok()) return status;
     }
   }
+  if (resident_quantization_) {
+    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
+                             block_extent_.width, &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kI32, {256, 1}, 256,
+                             &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kI32, {3, 1}, 3,
+                             &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kF32, {2, 1}, 2,
+                             &staging_bytes);
+    if (!status.ok()) return status;
+    status = AddPlannedPlane(DeviceElementType::kI32, {2, 1}, 2,
+                             &staging_bytes);
+    if (!status.ok()) return status;
+  }
   for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
     for (size_t channel = 0; channel < 3; ++channel) {
       status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
@@ -899,6 +923,28 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         &initial_quantizer_params_);
       if (!status.ok()) return status;
     }
+  }
+  if (resident_quantization_) {
+    status = staging_.AllocatePlane(
+      DeviceElementType::kF32, block_extent_, block_extent_.width,
+      kBufferAlignment, &resident_quant_field_);
+    if (!status.ok()) return status;
+    status = staging_.AllocatePlane(
+      DeviceElementType::kI32, {256, 1}, 256, kBufferAlignment,
+      &resident_quant_histogram_);
+    if (!status.ok()) return status;
+    status = staging_.AllocatePlane(
+      DeviceElementType::kI32, {3, 1}, 3, kBufferAlignment,
+      &resident_quant_selection_state_);
+    if (!status.ok()) return status;
+    status = staging_.AllocatePlane(
+      DeviceElementType::kF32, {2, 1}, 2, kBufferAlignment,
+      &resident_quant_statistics_);
+    if (!status.ok()) return status;
+    status = staging_.AllocatePlane(
+      DeviceElementType::kI32, {2, 1}, 2, kBufferAlignment,
+      &resident_quantizer_params_);
+    if (!status.ok()) return status;
   }
   for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -1160,6 +1206,19 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
           0.0f,
       };
     }
+  }
+  if (resident_quantization_) {
+    resident_quant_selection_params_ = {
+        static_cast<uint32_t>(block_count_),
+        static_cast<uint32_t>(block_count_),
+        static_cast<uint32_t>(block_count_ / 2),
+        static_cast<uint32_t>(block_extent_.width),
+        static_cast<uint32_t>(block_extent_.height),
+        static_cast<uint32_t>(resident_quant_field_.row_stride),
+        static_cast<uint32_t>(raw_quant_.row_stride),
+        0,
+        0.0f,
+    };
   }
 
   if (!frame_only_) {
@@ -1650,9 +1709,19 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(
     return status;
   }
 
+  if (resident_quantization_active_) {
+    resident_quant_selection_params_.quant_dc = input.quant_dc;
+    resident_quant_selection_params_.scaled_quant_dc =
+      static_cast<uint32_t>(static_cast<int32_t>(
+        static_cast<double>(input.quant_dc * 4096.0f) * 1.6));
+  }
   for (AqReconstructionParams& params : reconstruction_params_) {
-    params.global_scale = input.quantizer.global_scale;
-    params.quant_dc = input.quantizer.quant_dc;
+    params.use_resident_quantizer =
+      resident_quantization_active_ ? 1u : 0u;
+    if (!resident_quantization_active_) {
+      params.global_scale = input.quantizer.global_scale;
+      params.quant_dc = input.quantizer.quant_dc;
+    }
   }
 
   std::unique_ptr<GpuSubmission> submission;
@@ -1707,6 +1776,20 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
           "Metal AQ evaluation produced invalid device numerics (flag " +
           std::to_string(device_error) + ")")
       : status;
+  }
+
+  QuantizerParams resident_quantizer;
+  if (resident_quantization_active_) {
+    status = backend_->CopyDeviceToHost(
+      *resident_quantizer_params_.buffer, &resident_quantizer,
+      sizeof(resident_quantizer), resident_quantizer_params_.offset_bytes);
+    if (status.ok()) {
+      status = Quantizer::Create(resident_quantizer, &last_quantizer_);
+    }
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
   }
 
   const size_t row_bytes = block_extent_.width * sizeof(float);
@@ -1844,6 +1927,9 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(AqEvaluationOutput output) {
   *output.score = static_cast<double>(score);
   if (options_.metric == AqEvaluationMetric::kMaximumError) {
     *output.maximum_error = maximum_error;
+  }
+  if (resident_quantization_active_ && output.quantizer != nullptr) {
+    *output.quantizer = resident_quantizer;
   }
   if (output.final != nullptr) {
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -2058,6 +2144,16 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
     return Status::InvalidArgument(
         "Resident quantizer requires resident frame-only initial quantization");
   }
+  if (preparation.resident_quantization && preparation.frame_only) {
+    return Status::InvalidArgument(
+      "Resident AQ quantization requires complete evaluation preparation");
+  }
+  if (preparation.resident_quantization &&
+      preparation.coefficient_decision_mode !=
+        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
+    return Status::InvalidArgument(
+      "Resident AQ quantization requires adjusted coefficient decisions");
+  }
   switch (preparation.coefficient_decision_mode) {
     case AcCoefficientDecisionMode::kAdjustedSharedQuant:
     case AcCoefficientDecisionMode::kFixedRawQuant:
@@ -2103,6 +2199,17 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
 }
 
 Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
+  const bool resident_field = input.quant_field.valid();
+  if (resident_field &&
+      (!resident_quantization_ || input.quant_field.extent != block_extent_ ||
+       !std::isfinite(input.quant_dc) || input.quant_dc <= 0.0f ||
+       input.quant_dc > static_cast<float>(kMaxQuantDc) ||
+       input.raw_quant_field.valid() || input.epf_inverse_sigma.valid() ||
+       input.exact_coefficients != nullptr ||
+       input.exact_reconstructed_linear_rgb.valid())) {
+    return Status::InvalidArgument(
+      "Resident AQ quant-field input is invalid or was not prepared");
+  }
   const bool linear_specified =
       ImageDescriptorSpecified(input.exact_reconstructed_linear_rgb);
   const bool exact_linear = input.exact_reconstructed_linear_rgb.valid();
@@ -2136,15 +2243,17 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
       input.raw_quant_field.extent == block_extent_ &&
       ValidHostPlaneLayout(input.epf_inverse_sigma) &&
       input.epf_inverse_sigma.extent == block_extent_;
-  if ((!frame_only_resident_quantizer_ && !valid_host_quant) ||
+  if ((!resident_field && !frame_only_resident_quantizer_ &&
+       !valid_host_quant) ||
       (!frame_only_resident_initial_cfl_ && !valid_host_cfl)) {
     return Status::InvalidArgument(
         "Prepared AQ evaluation input geometry is invalid");
   }
   Quantizer quantizer;
-  Status status = Quantizer::Create(input.quantizer, &quantizer);
-  if (!status.ok()) {
-    return status;
+  Status status = Status::Ok();
+  if (!resident_field) {
+    status = Quantizer::Create(input.quantizer, &quantizer);
+    if (!status.ok()) return status;
   }
   if (frame_only_resident_quantizer_) {
     if (!resident_quantizer_ready_) {
@@ -2157,7 +2266,7 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
       return Status::InvalidArgument(
           "Resident initial quantizer parameters do not match device state");
     }
-  } else {
+  } else if (!resident_field) {
     for (size_t y = 0; y < block_extent_.height; ++y) {
       for (size_t x = 0; x < block_extent_.width; ++x) {
         const int32_t raw_quant = input.raw_quant_field.Row(y)[x];
@@ -2262,10 +2371,14 @@ Status MetalPreparedAqEvaluation::BeginOperation(bool profiling_reserved) {
 
 Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   Status status = Status::Ok();
-  if (!frame_only_resident_quantizer_) {
+  resident_quantization_active_ = input.quant_field.valid();
+  if (resident_quantization_active_) {
+    status = UploadPlane(*backend_, input.quant_field,
+                         resident_quant_field_);
+  } else if (!frame_only_resident_quantizer_) {
     status = UploadPlane(*backend_, input.raw_quant_field, raw_quant_);
   }
-  if (status.ok() && !frame_only_) {
+  if (status.ok() && !frame_only_ && !resident_quantization_active_) {
     status = UploadPlane(*backend_, input.epf_inverse_sigma, inverse_sigma_);
   }
   if (status.ok() && !frame_only_resident_initial_cfl_) {
@@ -2274,24 +2387,25 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   if (status.ok() && !frame_only_resident_initial_cfl_) {
     status = UploadPlane(*backend_, input.y_to_b, y_to_b_);
   }
-  if (status.ok()) {
+  if (status.ok() && !resident_quantization_active_) {
     status = Quantizer::Create(input.quantizer, &last_quantizer_);
   }
-  if (status.ok() && !frame_only_resident_quantizer_) {
+  if (status.ok() && !frame_only_resident_quantizer_ &&
+      !resident_quantization_active_) {
     for (size_t y = 0; y < block_extent_.height; ++y) {
       std::copy_n(
         input.raw_quant_field.Row(y), block_extent_.width,
         last_raw_quant_.data() + y * block_extent_.width);
     }
-    if (!frame_only_resident_initial_cfl_) {
-      for (size_t y = 0; y < tile_extent_.height; ++y) {
-        std::copy_n(
-          input.y_to_x.Row(y), tile_extent_.width,
-          last_y_to_x_.data() + y * tile_extent_.width);
-        std::copy_n(
-          input.y_to_b.Row(y), tile_extent_.width,
-          last_y_to_b_.data() + y * tile_extent_.width);
-      }
+  }
+  if (status.ok() && !frame_only_resident_initial_cfl_) {
+    for (size_t y = 0; y < tile_extent_.height; ++y) {
+      std::copy_n(
+        input.y_to_x.Row(y), tile_extent_.width,
+        last_y_to_x_.data() + y * tile_extent_.width);
+      std::copy_n(
+        input.y_to_b.Row(y), tile_extent_.width,
+        last_y_to_b_.data() + y * tile_extent_.width);
     }
   }
   exact_coefficients_ = input.exact_coefficients != nullptr;
@@ -2669,7 +2783,7 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      21>
+      27>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
@@ -2697,6 +2811,17 @@ Status CreateAqPipelines(
            &pipelines.initial_quant_finalize_quantizer},
           {"gjxl_aq_initial_quant_raw_quant",
            &pipelines.initial_quant_raw_quant},
+          {"gjxl_aq_adjust_quant_field", &pipelines.adjust_quant_field},
+          {"gjxl_aq_resident_quant_select_initialize",
+           &pipelines.resident_quant_select_initialize},
+          {"gjxl_aq_resident_quant_histogram_reset",
+           &pipelines.resident_quant_histogram_reset},
+          {"gjxl_aq_resident_quant_histogram",
+           &pipelines.resident_quant_histogram},
+          {"gjxl_aq_resident_quant_select_bucket",
+           &pipelines.resident_quant_select_bucket},
+          {"gjxl_aq_resident_quant_finalize_quantizer",
+           &pipelines.resident_quant_finalize_quantizer},
           {"gjxl_aq_gather_transform_pixels",
            &pipelines.gather_transform_pixels},
           {"gjxl_aq_encode_reconstruction_coefficients",

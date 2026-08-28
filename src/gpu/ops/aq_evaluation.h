@@ -59,6 +59,10 @@ struct AqEvaluationPreparation {
   /// Consumes device-generated raw quantization and permits the raw-quant and
   /// EPF input views to be omitted. Requires resident initial quantization.
   bool frame_only_resident_quantizer = false;
+  /// Enables strategy-aware quant-field adjustment and per-evaluation
+  /// quantizer/raw-quant construction inside the prepared operation. This is
+  /// an explicit experimental resident path; backends may reject it.
+  bool resident_quantization = false;
   /// Selects whether resident coefficient coding preserves the input raw
   /// quant or applies the encoder's shared AdjustQuantBlockAC decision.
   AcCoefficientDecisionMode coefficient_decision_mode =
@@ -77,6 +81,11 @@ struct AqEvaluationInput {
   ConstPlaneI8View y_to_x;
   ConstPlaneI8View y_to_b;
   ConstPlaneF32View epf_inverse_sigma;
+  /// Optional resident field-construction input. When valid, the prepared
+  /// operation derives `quantizer`, raw quantization, and EPF sigma on device;
+  /// the host raw-quant and inverse-sigma views must be omitted.
+  ConstPlaneF32View quant_field;
+  float quant_dc = 0.0f;
   // Optional exact CPU evaluation prefix. Exact coefficients alone request
   // device reconstruction; an exact linear image advances the handoff past
   // reconstruction and filtering. Backends that do not consume these fields
@@ -91,6 +100,9 @@ struct AqEvaluationOutput {
   PlaneF32View block_distance_map;
   double* score = nullptr;
   MaximumErrorReduction* maximum_error = nullptr;
+  /// Receives the device-constructed quantizer for a resident field input.
+  /// It is committed only after the evaluation completes successfully.
+  QuantizerParams* quantizer = nullptr;
   Final* final = nullptr;
 };
 
@@ -122,6 +134,20 @@ public:
   [[nodiscard]] virtual Status Evaluate(
     AqEvaluationInput input,
     AqEvaluationOutput output) = 0;
+
+  /// Applies the prepared strategy grid's adjustment to one host field using
+  /// device execution. The adjusted field is committed atomically after the
+  /// submission and readback complete.
+  [[nodiscard]] virtual Status AdjustQuantFieldResident(
+    float butteraugli_target,
+    ConstPlaneF32View input,
+    PlaneF32View output) {
+    (void)butteraugli_target;
+    (void)input;
+    (void)output;
+    return Status::Unavailable(
+      "Prepared resident quant-field adjustment is unavailable");
+  }
 
   /// Rebinds target-dependent strategy and EPF metadata without reallocating
   /// the prepared source, metric reference, or evaluation scratch. A backend

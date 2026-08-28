@@ -116,7 +116,7 @@ void CopyContiguousPlane(
 Status PrepareFixedThroughputColorCorrelation(
   ConstImage3FView opsin,
   const AcStrategyGrid& strategies,
-  ConstPlaneF32View initial_quant_field,
+  ConstPlaneF32View adjusted_quant_field,
   float butteraugli_target,
   prepared_coefficients_internal::PreparedForwardDctCoefficients*
     forward_coefficients,
@@ -136,11 +136,6 @@ Status PrepareFixedThroughputColorCorrelation(
       prepared_coefficients_internal::PrepareForwardDctCoefficients(
         opsin, strategies, forward_coefficients);
     if (!status.ok()) return status;
-    std::vector<float> adjusted_quant(block_count);
-    status = AdjustQuantField(
-      strategies, butteraugli_target, initial_quant_field,
-      {adjusted_quant.data(), strategies.extent(), strategies.extent().width});
-    if (!status.ok()) return status;
     float quant_dc = 0.0f;
     status = ComputeInitialQuantDc(butteraugli_target, &quant_dc);
     if (!status.ok()) return status;
@@ -148,7 +143,7 @@ Status PrepareFixedThroughputColorCorrelation(
     Quantizer quantizer;
     status = CreateQuantizerFromField(
       quant_dc,
-      {adjusted_quant.data(), strategies.extent(), strategies.extent().width},
+      adjusted_quant_field,
       {raw_quant.data(), strategies.extent(), strategies.extent().width},
       &quantizer);
     if (!status.ok()) return status;
@@ -217,6 +212,46 @@ public:
     }
 
     try {
+      if (mode_ != GpuAdaptiveQuantizationMode::kExactCoefficients) {
+        aqi::AdaptiveQuantizationEvaluation candidate;
+        candidate.block_distance.resize(block_count);
+        QuantizerParams quantizer_params;
+        AqEvaluationOutput::Final final_output;
+        AqEvaluationOutput prepared_output{
+          .block_distance_map = {
+            candidate.block_distance.data(), block_extent,
+            block_extent.width},
+          .score = &candidate.score,
+          .maximum_error =
+            options_.control_mode ==
+                AdaptiveQuantizationControlMode::kMaximumError
+              ? &candidate.maximum_error
+              : nullptr,
+          .quantizer = &quantizer_params,
+        };
+        if (materialize_final_ && is_final_evaluation) {
+          final_output = {
+            .reconstructed_linear_rgb = final_reconstructed_.view(),
+            .frame = &final_frame_,
+          };
+          prepared_output.final = &final_output;
+        }
+        const Status resident_status = prepared_->Evaluate(
+          {
+            .y_to_x = fixed_color_correlation_.y_to_x_map(),
+            .y_to_b = fixed_color_correlation_.y_to_b_map(),
+            .quant_field = quant_field,
+            .quant_dc = quant_dc,
+          },
+          prepared_output);
+        if (!resident_status.ok()) return resident_status;
+        Status status = Quantizer::Create(
+          quantizer_params, &candidate.quantizer);
+        if (!status.ok()) return status;
+        *evaluation = std::move(candidate);
+        return Status::Ok();
+      }
+
       std::vector<int32_t> raw_quant(block_count);
       std::vector<float> inverse_sigma(block_count);
       Quantizer quantizer;
@@ -406,6 +441,8 @@ Status RunGpuAdaptiveQuantizationImpl(
         : AqEvaluationMetric::kButteraugli,
     .maximum_error = options.maximum_error,
   };
+  const bool resident_quantization =
+    mode != GpuAdaptiveQuantizationMode::kExactCoefficients;
   std::unique_ptr<PreparedAqEvaluation> local_prepared;
   PreparedAqEvaluation* prepared = nullptr;
   if (reusable == nullptr) {
@@ -417,6 +454,7 @@ Status RunGpuAdaptiveQuantizationImpl(
         .strategies = &strategies,
         .epf_sharpness = epf_sharpness,
         .options = evaluation_options,
+        .resident_quantization = resident_quantization,
         .coefficient_decision_mode =
           AcCoefficientDecisionMode::kAdjustedSharedQuant,
       },
@@ -451,7 +489,8 @@ Status RunGpuAdaptiveQuantizationImpl(
         current_butteraugli.intensity_target &&
       reusable->evaluation_options.metric == evaluation_options.metric &&
       reusable->evaluation_options.maximum_error ==
-        evaluation_options.maximum_error;
+        evaluation_options.maximum_error &&
+      reusable->resident_quantization == resident_quantization;
     if (compatible) {
       status = reusable->evaluation->Reconfigure(
         strategies, epf_sharpness);
@@ -465,6 +504,7 @@ Status RunGpuAdaptiveQuantizationImpl(
           .strategies = &strategies,
           .epf_sharpness = epf_sharpness,
           .options = evaluation_options,
+          .resident_quantization = resident_quantization,
           .coefficient_decision_mode =
             AcCoefficientDecisionMode::kAdjustedSharedQuant,
         },
@@ -474,6 +514,7 @@ Status RunGpuAdaptiveQuantizationImpl(
         reusable->original_linear_rgb = original_linear_rgb;
         reusable->coding_opsin = opsin;
         reusable->evaluation_options = evaluation_options;
+        reusable->resident_quantization = resident_quantization;
       }
     }
     prepared = reusable->evaluation.get();
@@ -489,31 +530,53 @@ Status RunGpuAdaptiveQuantizationImpl(
       "GPU adaptive quantization preparation produced no state");
   }
 
-  prepared_coefficients_internal::PreparedForwardDctCoefficients
-    forward_coefficients;
-  ColorCorrelationMap fixed_color_correlation;
-  status = mode != GpuAdaptiveQuantizationMode::kExactCoefficients
-    ? PrepareFixedThroughputColorCorrelation(
-        opsin, strategies, initial_quant_field, options.butteraugli_target,
-        &forward_coefficients, &fixed_color_correlation)
-    : prepared_coefficients_internal::PrepareForwardDctCoefficients(
-        opsin, strategies, &forward_coefficients);
-  if (!status.ok()) {
-    return status;
-  }
-  if (mode != GpuAdaptiveQuantizationMode::kExactCoefficients) {
-    forward_coefficients = {};
-  }
-
   try {
+    std::vector<float> adjusted_initial;
+    ConstPlaneF32View policy_initial = initial_quant_field;
+    const float adjustment_target =
+      options.control_mode == AdaptiveQuantizationControlMode::kMaximumError
+        ? 1.0f
+        : options.butteraugli_target;
+    if (resident_quantization) {
+      size_t block_count = 0;
+      if (!strategies.extent().try_area(&block_count)) {
+        return Status::InvalidArgument(
+          "Resident AQ block grid is too large");
+      }
+      adjusted_initial.resize(block_count);
+      status = prepared->AdjustQuantFieldResident(
+        adjustment_target, initial_quant_field,
+        {adjusted_initial.data(), strategies.extent(),
+         strategies.extent().width});
+      if (!status.ok()) return status;
+      policy_initial = {
+        adjusted_initial.data(), strategies.extent(),
+        strategies.extent().width};
+    }
+
+    prepared_coefficients_internal::PreparedForwardDctCoefficients
+      forward_coefficients;
+    ColorCorrelationMap fixed_color_correlation;
+    status = resident_quantization
+      ? PrepareFixedThroughputColorCorrelation(
+          opsin, strategies, policy_initial, adjustment_target,
+          &forward_coefficients, &fixed_color_correlation)
+      : prepared_coefficients_internal::PrepareForwardDctCoefficients(
+          opsin, strategies, &forward_coefficients);
+    if (!status.ok()) return status;
+    if (resident_quantization) forward_coefficients = {};
+
     PreparedGpuAdaptiveQuantizationEvaluator evaluator(
       strategies, epf_sharpness, options, mode, *prepared,
       std::move(forward_coefficients), std::move(fixed_color_correlation),
       full_output != nullptr,
       original_linear_rgb.extent());
     aqi::AdaptiveQuantizationPolicyResult result;
-    status = aqi::RunAdaptiveQuantizationPolicy(
-      strategies, initial_quant_field, options, evaluator, &result, nullptr);
+    status = resident_quantization
+      ? aqi::RunAdaptiveQuantizationPolicyAdjusted(
+          strategies, policy_initial, options, evaluator, &result, nullptr)
+      : aqi::RunAdaptiveQuantizationPolicy(
+          strategies, policy_initial, options, evaluator, &result, nullptr);
     if (!status.ok()) {
       if (reusable != nullptr) {
         reusable->evaluation.reset();

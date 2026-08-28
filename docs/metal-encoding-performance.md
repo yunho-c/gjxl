@@ -355,6 +355,39 @@ directional regression check. CPU median was `25388.6 ms`, Metal median was
 `2540027` exact (`20.5%` larger). A refreshed retained 4K claim would still
 require the other two independent processes specified by the primary gate.
 
+#### Resident quantization-preparation checkpoint (2026-08-28)
+
+The next P4 slice moves strategy-aware initial field adjustment and each
+resident evaluation's median/MAD quantizer plus raw-quant construction to
+Metal. The existing adjusted-coefficient kernel now consumes the device
+quantizer and prepares EPF inverse sigma from the final device raw quant, so
+resident evaluations no longer allocate or upload host raw-quant and sigma
+fields. The exact track remains on the original CPU preparation path. CPU
+distance-driven policy updates, block-distance readback, fixed-CfL upload, and
+the serial evaluation boundaries remain.
+
+The iterative selector uses exact four-pass byte-radix histograms for both the
+upper median and median absolute deviation. Direct mixed-strategy tests retain
+CPU-identical quantizer parameters, bounded field tolerance, output padding,
+allocation reuse, and atomic numeric failure. The complete Release suite was
+`55/56`; the only failure was the unchanged pinned `4.45247e-05` CPU golden
+mismatch at score index 1.
+
+One same-machine directional comparison used clean detached `ad2c529` as the
+pre-change baseline and the working tree as the new path. Each command used
+one warmup and five public-workflow samples. Fully resident moved from a
+`303.2 ms` total median (`263.3-377.2`) to `298.4 ms`
+(`261.0-358.1`), while quantization-pipeline medians moved from `259.6 ms` to
+`250.9 ms`. Throughput was effectively neutral: `251.1 ms`
+(`229.9-282.2`) before and `252.7 ms` (`235.5-317.2`) after, with pipeline
+medians of `206.4 ms` and `205.9 ms`. The ranges overlap substantially, so
+these are regression signals rather than a retained speedup claim.
+
+The 4672x5584 doughnut sample encoded successfully through `just encode` in
+the fully-resident mode: reported preparation was `311.8 ms`, the selected AQ
+attempt was `4531.3 ms`, total encoder time was `4843.1 ms`, and the output was
+`3127908` bytes. Independent `djxl` 0.12 decoding produced a 4672x5584 PFM.
+
 ### P5. Parallelize the codestream tail
 
 - Parallelize independent DC/AC group tokenization and section writing.

@@ -1200,13 +1200,16 @@ Status ValidateAdaptiveQuantizationPolicyInputs(
   return Status::Ok();
 }
 
-Status RunAdaptiveQuantizationPolicy(
+namespace {
+
+Status RunAdaptiveQuantizationPolicyImpl(
   const AcStrategyGrid& strategies,
   ConstPlaneF32View initial_quant_field,
   AdaptiveQuantizationOptions options,
   AdaptiveQuantizationEvaluator& evaluator,
   AdaptiveQuantizationPolicyResult* result,
-  AdaptiveQuantizationProfile* profile) {
+  AdaptiveQuantizationProfile* profile,
+  bool input_adjusted) {
 
   const Extent2D block_extent = strategies.extent();
   size_t block_count = 0;
@@ -1232,11 +1235,25 @@ Status RunAdaptiveQuantizationPolicy(
         ? ProfileClock::time_point{}
         : ProfileClock::now();
       std::vector<float> quant_field(block_count);
-      Status status = AdjustQuantField(
-        strategies,
-        kInitializationTarget,
-        initial_quant_field,
-        {quant_field.data(), block_extent, block_extent.width});
+      Status status = Status::Ok();
+      if (input_adjusted) {
+        for (size_t y = 0; y < block_extent.height; ++y) {
+          for (size_t x = 0; x < block_extent.width; ++x) {
+            const float value = initial_quant_field.Row(y)[x];
+            if (!std::isfinite(value) || value <= 0.0f) {
+              return Status::InvalidArgument(
+                "Adjusted quant field must contain finite positive values");
+            }
+            quant_field[y * block_extent.width + x] = value;
+          }
+        }
+      } else {
+        status = AdjustQuantField(
+          strategies,
+          kInitializationTarget,
+          initial_quant_field,
+          {quant_field.data(), block_extent, block_extent.width});
+      }
       if (!status.ok()) {
         return status;
       }
@@ -1363,11 +1380,25 @@ Status RunAdaptiveQuantizationPolicy(
       ? ProfileClock::time_point{}
       : ProfileClock::now();
     std::vector<float> quant_field(block_count);
-    Status status = AdjustQuantField(
-      strategies,
-      options.butteraugli_target,
-      initial_quant_field,
-      {quant_field.data(), block_extent, block_extent.width});
+    Status status = Status::Ok();
+    if (input_adjusted) {
+      for (size_t y = 0; y < block_extent.height; ++y) {
+        for (size_t x = 0; x < block_extent.width; ++x) {
+          const float value = initial_quant_field.Row(y)[x];
+          if (!std::isfinite(value) || value <= 0.0f) {
+            return Status::InvalidArgument(
+              "Adjusted quant field must contain finite positive values");
+          }
+          quant_field[y * block_extent.width + x] = value;
+        }
+      }
+    } else {
+      status = AdjustQuantField(
+        strategies,
+        options.butteraugli_target,
+        initial_quant_field,
+        {quant_field.data(), block_extent, block_extent.width});
+    }
     if (!status.ok()) {
       return status;
     }
@@ -1507,6 +1538,34 @@ Status RunAdaptiveQuantizationPolicy(
       "Adaptive-quantization dimensions are too large");
   }
   return Status::Ok();
+}
+
+}  // namespace
+
+Status RunAdaptiveQuantizationPolicy(
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationEvaluator& evaluator,
+  AdaptiveQuantizationPolicyResult* result,
+  AdaptiveQuantizationProfile* profile) {
+
+  return RunAdaptiveQuantizationPolicyImpl(
+    strategies, initial_quant_field, options, evaluator, result, profile,
+    false);
+}
+
+Status RunAdaptiveQuantizationPolicyAdjusted(
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View adjusted_initial_quant_field,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationEvaluator& evaluator,
+  AdaptiveQuantizationPolicyResult* result,
+  AdaptiveQuantizationProfile* profile) {
+
+  return RunAdaptiveQuantizationPolicyImpl(
+    strategies, adjusted_initial_quant_field, options, evaluator, result,
+    profile, true);
 }
 
 }  // namespace adaptive_quantization_internal

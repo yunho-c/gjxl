@@ -35,6 +35,19 @@ Status UploadContiguous(MetalBackend &backend, std::span<const T> source,
                                   destination.offset_bytes);
 }
 
+Status UploadFloatPlane(MetalBackend& backend, ConstPlaneF32View source,
+                        DevicePlaneView destination) {
+  const size_t row_bytes = source.extent.width * sizeof(float);
+  Status status = Status::Ok();
+  for (size_t y = 0; status.ok() && y < source.extent.height; ++y) {
+    status = backend.CopyHostToDevice(
+      *destination.buffer, source.Row(y), row_bytes,
+      destination.offset_bytes +
+        y * destination.row_stride * sizeof(float));
+  }
+  return status;
+}
+
 void BindPlane(MTL::ComputeCommandEncoder *encoder, DevicePlaneView plane,
                NS::UInteger index) {
 
@@ -119,6 +132,10 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
                                 self.block_count_}));
   }
 
+  if (self.resident_quantization_active_) {
+    self.EncodeResidentQuantizer(backend, encoder);
+  }
+
   const MetalBuffer *anchors =
       MetalBackend::AsMetalBuffer(*self.anchors_.buffer);
   const MetalBuffer *gathered =
@@ -176,6 +193,11 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
       encoder->setBytes(&params, sizeof(params), 11);
       BindPlane(encoder, self.inverse_sigma_, 12);
       BindPlane(encoder, self.epf_sharpness_, 13);
+      BindPlane(encoder,
+                self.resident_quantization_active_
+                  ? self.resident_quantizer_params_
+                  : self.raw_quant_,
+                14);
       encoder->dispatchThreadgroups(
           MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
           MTL::Size(kAqThreadCount, 1, 1));
@@ -198,6 +220,105 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     }
     encoder->setBytes(&params, sizeof(params), 5);
     DispatchThreads1d(encoder, batch_value_count);
+  }
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_quant_select_initialize.get());
+  BindPlane(encoder, resident_quant_selection_state_, 0);
+  encoder->setBytes(&resident_quant_selection_params_,
+                    sizeof(resident_quant_selection_params_), 1);
+  DispatchThreads1d(encoder, 1);
+
+  const auto encode_selection = [&](bool deviation) {
+    if (deviation) {
+      encoder->setComputePipelineState(
+          backend.aq_pipelines_.resident_quant_select_initialize.get());
+      BindPlane(encoder, resident_quant_selection_state_, 0);
+      encoder->setBytes(&resident_quant_selection_params_,
+                        sizeof(resident_quant_selection_params_), 1);
+      DispatchThreads1d(encoder, 1);
+    }
+    constexpr std::array<uint32_t, 4> kShifts = {24, 16, 8, 0};
+    for (uint32_t shift : kShifts) {
+      const AqResidentQuantSelectionPass pass{
+          shift, deviation ? 1u : 0u};
+      encoder->setComputePipelineState(
+          backend.aq_pipelines_.resident_quant_histogram_reset.get());
+      BindPlane(encoder, resident_quant_histogram_, 0);
+      DispatchThreads1d(encoder, 256);
+
+      encoder->setComputePipelineState(
+          backend.aq_pipelines_.resident_quant_histogram.get());
+      BindPlane(encoder, resident_quant_field_, 0);
+      BindPlane(encoder, resident_quant_statistics_, 1);
+      BindPlane(encoder, resident_quant_histogram_, 2);
+      BindPlane(encoder, resident_quant_selection_state_, 3);
+      encoder->setBytes(&resident_quant_selection_params_,
+                        sizeof(resident_quant_selection_params_), 4);
+      encoder->setBytes(&pass, sizeof(pass), 5);
+      DispatchThreads1d(encoder, block_count_);
+
+      encoder->setComputePipelineState(
+          backend.aq_pipelines_.resident_quant_select_bucket.get());
+      BindPlane(encoder, resident_quant_histogram_, 0);
+      BindPlane(encoder, resident_quant_selection_state_, 1);
+      BindPlane(encoder, resident_quant_statistics_, 2);
+      encoder->setBytes(&pass, sizeof(pass), 3);
+      DispatchThreads1d(encoder, 1);
+    }
+  };
+  encode_selection(false);
+  encode_selection(true);
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_quant_finalize_quantizer.get());
+  BindPlane(encoder, resident_quant_statistics_, 0);
+  BindPlane(encoder, resident_quantizer_params_, 1);
+  BindPlane(encoder, reconstruction_error_, 2);
+  encoder->setBytes(&resident_quant_selection_params_,
+                    sizeof(resident_quant_selection_params_), 3);
+  DispatchThreads1d(encoder, 1);
+
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.initial_quant_raw_quant.get());
+  BindPlane(encoder, resident_quant_field_, 0);
+  BindPlane(encoder, resident_quantizer_params_, 1);
+  BindPlane(encoder, raw_quant_, 2);
+  BindPlane(encoder, reconstruction_error_, 3);
+  encoder->setBytes(&resident_quant_selection_params_,
+                    sizeof(resident_quant_selection_params_), 4);
+  DispatchThreads2d(encoder, block_extent_);
+}
+
+void MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    const void* context) {
+
+  const auto& self =
+      *static_cast<const MetalPreparedAqEvaluation*>(context);
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.reset_initial_quant.get());
+  BindPlane(encoder, self.reconstruction_error_, 0);
+  encoder->setBytes(&self.initial_quant_gradient_params_,
+                    sizeof(self.initial_quant_gradient_params_), 1);
+  DispatchThreads1d(encoder, 1);
+
+  for (size_t batch_index = 0; batch_index < self.batches_.size();
+       ++batch_index) {
+    const AqStrategyBatch& batch = self.batches_[batch_index];
+    if (batch.anchor_count == 0) continue;
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.adjust_quant_field.get());
+    BindPlane(encoder, self.anchors_, 0);
+    BindPlane(encoder, self.resident_quant_field_, 1);
+    BindPlane(encoder, self.reconstruction_error_, 2);
+    encoder->setBytes(&self.quant_field_adjustment_params_[batch_index],
+                      sizeof(AqQuantFieldAdjustmentParams), 3);
+    DispatchThreads1d(encoder, batch.anchor_count);
   }
 }
 
@@ -462,6 +583,142 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
   encoder->setBytes(&self.initial_quant_selection_params_,
                     sizeof(self.initial_quant_selection_params_), 4);
   DispatchThreads2d(encoder, self.block_extent_);
+}
+
+Status MetalPreparedAqEvaluation::AdjustQuantFieldResident(
+    float butteraugli_target, ConstPlaneF32View input, PlaneF32View output) {
+
+  if (!resident_quantization_) {
+    return Status::FailedPrecondition(
+      "Resident quant-field adjustment was not prepared");
+  }
+  if (!input.valid() || !output.valid() ||
+      input.extent != block_extent_ || output.extent != block_extent_ ||
+      !std::isfinite(butteraugli_target) || butteraugli_target <= 0.0f) {
+    return Status::InvalidArgument(
+      "Resident quant-field adjustment inputs are invalid");
+  }
+  for (size_t y = 0; y < block_extent_.height; ++y) {
+    for (size_t x = 0; x < block_extent_.width; ++x) {
+      const float value = input.Row(y)[x];
+      if (!std::isfinite(value) || value <= 0.0f) {
+        return Status::InvalidArgument(
+          "Resident quant field must contain finite positive values");
+      }
+    }
+  }
+
+  float mean_max_mixer = 1.0f;
+  constexpr float kMixerLimit = 1.54138f;
+  constexpr float kMixerSlope = 0.56391f;
+  if (butteraugli_target > kMixerLimit) {
+    mean_max_mixer = std::max(
+      0.0f,
+      mean_max_mixer -
+        (butteraugli_target - kMixerLimit) * kMixerSlope);
+  }
+  for (size_t batch_index = 0; batch_index < batches_.size();
+       ++batch_index) {
+    const AqStrategyBatch& batch = batches_[batch_index];
+    const AcStrategyInfo* info = GetAcStrategyInfo(batch.strategy);
+    if (info == nullptr) {
+      return Status::Internal(
+        "Resident quant-field strategy disappeared");
+    }
+    quant_field_adjustment_params_[batch_index] = {
+        static_cast<uint32_t>(resident_quant_field_.row_stride),
+        static_cast<uint32_t>(batch.anchor_offset),
+        static_cast<uint32_t>(batch.anchor_count),
+        static_cast<uint32_t>(info->covered_blocks.width),
+        static_cast<uint32_t>(info->covered_blocks.height),
+        mean_max_mixer,
+    };
+  }
+
+  Status status = BeginOperation();
+  if (!status.ok()) return status;
+  bool fail_upload = false;
+  bool fail_numeric = false;
+  {
+    std::lock_guard lock(mutex_);
+    fail_upload = fail_next_upload_;
+    fail_numeric = fail_next_numeric_;
+    fail_next_upload_ = false;
+    fail_next_numeric_ = false;
+  }
+  if (fail_upload) {
+    Invalidate();
+    return Status::DeviceError(
+      "Injected Metal resident quant-field upload failure");
+  }
+  status = UploadFloatPlane(*backend_, input, resident_quant_field_);
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  initial_quant_gradient_params_.test_error_mask =
+      fail_numeric ? 262144u : 0u;
+  std::unique_ptr<GpuSubmission> submission;
+  status = backend_->SubmitCompute(
+      "gjxl resident quant-field adjustment",
+      &MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission,
+      this, &submission);
+  if (!status.ok() || submission == nullptr) {
+    Invalidate();
+    return status.ok()
+      ? Status::Internal(
+          "Resident quant-field adjustment returned no submission")
+      : status;
+  }
+  {
+    std::lock_guard lock(mutex_);
+    submission_ = std::move(submission);
+  }
+  status = WaitForOperation();
+  if (!status.ok()) return status;
+
+  uint32_t device_error = 0;
+  status = CopyReadback(*backend_, reconstruction_error_, &device_error,
+                        sizeof(device_error));
+  if (!status.ok() || device_error != 0) {
+    Invalidate();
+    return status.ok()
+      ? Status::DeviceError(
+          "Metal resident quant-field adjustment detected invalid numerics")
+      : status;
+  }
+  try {
+    std::vector<float> adjusted(block_count_);
+    const size_t row_bytes = block_extent_.width * sizeof(float);
+    for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
+      status = backend_->CopyDeviceToHost(
+        *resident_quant_field_.buffer,
+        adjusted.data() + y * block_extent_.width,
+        row_bytes,
+        resident_quant_field_.offset_bytes +
+          y * resident_quant_field_.row_stride * sizeof(float));
+    }
+    if (!status.ok() || !std::ranges::all_of(adjusted, [](float value) {
+          return std::isfinite(value) && value > 0.0f;
+        })) {
+      Invalidate();
+      return status.ok()
+        ? Status::DeviceError(
+            "Metal resident quant-field readback is invalid")
+        : status;
+    }
+    CopyContiguousPlane(adjusted, output);
+  } catch (const std::bad_alloc&) {
+    Invalidate();
+    return Status::OutOfMemory(
+      "Unable to allocate resident quant-field readback");
+  } catch (const std::length_error&) {
+    Invalidate();
+    return Status::InvalidArgument(
+      "Resident quant-field readback is too large");
+  }
+  CompleteOperation();
+  return Status::Ok();
 }
 
 Status MetalPreparedAqEvaluation::ComputeInitialQuantization(

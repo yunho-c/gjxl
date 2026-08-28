@@ -34,6 +34,7 @@ struct AqReconstructionParams {
   uint epf_sharpness_stride;
   float epf_quant_multiplier;
   float epf_sharpness_lut[8];
+  uint use_resident_quantizer;
 };
 
 struct AqResetParams {
@@ -99,6 +100,20 @@ struct AqInitialQuantSortParams {
   uint compare_distance;
   uint sequence_length;
   uint value_count;
+};
+
+struct AqQuantFieldAdjustmentParams {
+  uint quant_stride;
+  uint anchor_offset;
+  uint anchor_count;
+  uint covered_width;
+  uint covered_height;
+  float mean_max_mixer;
+};
+
+struct AqResidentQuantSelectionPass {
+  uint shift;
+  uint deviation;
 };
 
 struct AqQuantizationProbeParams {
@@ -779,6 +794,142 @@ kernel void gjxl_aq_initial_quant_raw_quant(
   }
 }
 
+kernel void gjxl_aq_adjust_quant_field(
+  device const uint2* anchors [[buffer(0)]],
+  device float* quant_field [[buffer(1)]],
+  device atomic_uint* error [[buffer(2)]],
+  constant AqQuantFieldAdjustmentParams& params [[buffer(3)]],
+  uint anchor_index [[thread_position_in_grid]]) {
+
+  if (anchor_index >= params.anchor_count) return;
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index];
+  const uint covered_count = params.covered_width * params.covered_height;
+  float maximum = quant_field[
+    anchor.y * params.quant_stride + anchor.x];
+  float mean = 0.0f;
+  for (uint y = 0u; y < params.covered_height; ++y) {
+    for (uint x = 0u; x < params.covered_width; ++x) {
+      const float value = quant_field[
+        (anchor.y + y) * params.quant_stride + anchor.x + x];
+      maximum = max(maximum, value);
+      mean += value;
+    }
+  }
+  mean /= float(covered_count);
+  const float result = covered_count < 4u
+    ? maximum
+    : maximum * params.mean_max_mixer +
+        mean * (1.0f - params.mean_max_mixer);
+  if (!isfinite(result) || result <= 0.0f) {
+    atomic_fetch_or_explicit(error, 131072u, memory_order_relaxed);
+    return;
+  }
+  for (uint y = 0u; y < params.covered_height; ++y) {
+    for (uint x = 0u; x < params.covered_width; ++x) {
+      quant_field[
+        (anchor.y + y) * params.quant_stride + anchor.x + x] = result;
+    }
+  }
+}
+
+kernel void gjxl_aq_resident_quant_select_initialize(
+  device uint* state [[buffer(0)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(1)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index != 0u) return;
+  state[0] = 0u;
+  state[1] = 0u;
+  state[2] = params.median_index;
+}
+
+kernel void gjxl_aq_resident_quant_histogram_reset(
+  device atomic_uint* histogram [[buffer(0)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index < 256u) {
+    atomic_store_explicit(
+      histogram + index, 0u, memory_order_relaxed);
+  }
+}
+
+kernel void gjxl_aq_resident_quant_histogram(
+  device const float* quant_field [[buffer(0)]],
+  device const float* statistics [[buffer(1)]],
+  device atomic_uint* histogram [[buffer(2)]],
+  device const uint* state [[buffer(3)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(4)]],
+  constant AqResidentQuantSelectionPass& pass [[buffer(5)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index >= params.value_count) return;
+  const uint y = index / params.quant_width;
+  const uint x = index - y * params.quant_width;
+  float value = quant_field[y * params.quant_stride + x];
+  if (pass.deviation != 0u) value = abs(value - statistics[0]);
+  const uint bits = as_type<uint>(value);
+  if ((bits & state[1]) != state[0]) return;
+  const uint bucket = (bits >> pass.shift) & 255u;
+  atomic_fetch_add_explicit(
+    histogram + bucket, 1u, memory_order_relaxed);
+}
+
+kernel void gjxl_aq_resident_quant_select_bucket(
+  device const atomic_uint* histogram [[buffer(0)]],
+  device uint* state [[buffer(1)]],
+  device float* statistics [[buffer(2)]],
+  constant AqResidentQuantSelectionPass& pass [[buffer(3)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index != 0u) return;
+  uint rank = state[2];
+  uint prefix_count = 0u;
+  for (uint bucket = 0u; bucket < 256u; ++bucket) {
+    const uint count = atomic_load_explicit(
+      histogram + bucket, memory_order_relaxed);
+    if (rank < prefix_count + count) {
+      state[0] |= bucket << pass.shift;
+      state[1] |= 255u << pass.shift;
+      state[2] = rank - prefix_count;
+      if (pass.shift == 0u) {
+        statistics[pass.deviation != 0u ? 1u : 0u] =
+          as_type<float>(state[0]);
+      }
+      return;
+    }
+    prefix_count += count;
+  }
+}
+
+kernel void gjxl_aq_resident_quant_finalize_quantizer(
+  device const float* statistics [[buffer(0)]],
+  device uint* quantizer_params [[buffer(1)]],
+  device atomic_uint* error [[buffer(2)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(3)]],
+  uint index [[thread_position_in_grid]]) {
+
+  if (index != 0u) return;
+  const float median_value = statistics[0];
+  const float deviation = statistics[1];
+  float scale = 65536.0f * (median_value - deviation) / 5.0f;
+  scale = clamp(scale, 1.0f, 32768.0f);
+  uint global_scale = uint(scale);
+  if (global_scale > params.scaled_quant_dc) {
+    global_scale = max(1u, params.scaled_quant_dc);
+  }
+  const float inverse_global_scale = 65536.0f / float(global_scale);
+  const float quant_dc = min(
+    65536.0f, params.quant_dc * inverse_global_scale + 0.5f);
+  quantizer_params[0] = global_scale;
+  quantizer_params[1] = uint(quant_dc);
+  if (!isfinite(median_value) || median_value <= 0.0f ||
+      !isfinite(deviation) || deviation < 0.0f || global_scale == 0u ||
+      global_scale > 32768u || quantizer_params[1] == 0u ||
+      quantizer_params[1] > 65536u) {
+    atomic_fetch_or_explicit(error, 524288u, memory_order_relaxed);
+  }
+}
+
 kernel void gjxl_aq_reset_frame_encoding(
   device int* quantized_coefficients [[buffer(0)]],
   device int* quantized_dc [[buffer(1)]],
@@ -864,10 +1015,17 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   constant AqReconstructionParams& params [[buffer(11)]],
   device float* inverse_sigma [[buffer(12)]],
   device const uchar* epf_sharpness [[buffer(13)]],
+  device const uint* resident_quantizer [[buffer(14)]],
   uint anchor_index [[threadgroup_position_in_grid]],
   uint thread_index [[thread_index_in_threadgroup]]) {
 
   if (anchor_index >= params.anchor_count) return;
+  const uint global_scale = params.use_resident_quantizer != 0u
+    ? resident_quantizer[0]
+    : params.global_scale;
+  const uint quant_dc = params.use_resident_quantizer != 0u
+    ? resident_quantizer[1]
+    : params.quant_dc;
   const uint2 anchor = anchors[params.anchor_offset + anchor_index];
   const uint block_count = params.block_width * params.block_height;
   const uint covered_count = params.covered_width * params.covered_height;
@@ -891,7 +1049,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
         forward_coefficients + transform_offset, quant_tables,
         params.coefficient_count, group_channel_stride,
         coefficient_width, coefficient_height, params.strategy,
-        params.global_scale, initial_raw, params.x_matrix_multiplier,
+        global_scale, initial_raw, params.x_matrix_multiplier,
         params.b_matrix_multiplier, error);
       selected_raw = decision.raw_quant;
       for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
@@ -912,7 +1070,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   if (params.adjust_ac_quant != 0u) {
     constexpr float kInverseSigmaNumerator = -1.1715728752538099024f;
     const float quantizer_scale =
-      float(params.global_scale) * (1.0f / 65536.0f);
+      float(global_scale) * (1.0f / 65536.0f);
     const float sigma_quant = params.epf_quant_multiplier /
       (quantizer_scale * float(raw) * kInverseSigmaNumerator);
     for (uint block = thread_index; block < covered_count; block += 256u) {
@@ -978,7 +1136,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
     const uint block_index =
       (anchor.y + y) * params.block_width + anchor.x + x;
     const float quant_scale =
-      (float(params.global_scale) / 65536.0f) * float(params.quant_dc);
+      (float(global_scale) / 65536.0f) * float(quant_dc);
     const float inverse_x = 4096.0f * quant_scale;
     const float inverse_y = 512.0f * quant_scale;
     const float inverse_b = 256.0f * quant_scale;
@@ -1019,7 +1177,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
     const int quantized = aq_quantize_coefficient(
       forward_coefficients[offset],
       quant_tables[table_offsets.y + table],
-      params.global_scale,
+      global_scale,
       raw,
       1.0f,
       threshold,
@@ -1028,7 +1186,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
     reconstruction_coefficients[offset] = aq_dequantize_coefficient(
       quantized,
       quant_tables[table_offsets.x + table],
-      params.global_scale,
+      global_scale,
       raw,
       1.0f,
       channel,
@@ -1054,7 +1212,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
       const int quantized = aq_quantize_coefficient(
         predicted,
         quant_tables[table_offsets.y + table],
-        params.global_scale,
+        global_scale,
         raw,
         multiplier,
         threshold,
@@ -1063,7 +1221,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
       reconstruction_coefficients[offset] = aq_dequantize_coefficient(
         quantized,
         quant_tables[table_offsets.x + table],
-        params.global_scale,
+        global_scale,
         raw,
         multiplier,
         channel,

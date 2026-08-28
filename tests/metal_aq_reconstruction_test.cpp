@@ -1610,6 +1610,185 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
   return true;
 }
 
+bool CheckResidentQuantizationPreparation(
+    const HostImage& image, const gjxl::AcStrategyGrid& strategies) {
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "resident quantization backend")) {
+    return false;
+  }
+  const size_t block_count = kBlockExtent.width * kBlockExtent.height;
+  std::vector<uint8_t> sharpness(block_count, 4);
+  gjxl::AqEvaluationOptions evaluation_options = Options();
+  evaluation_options.metric = gjxl::AqEvaluationMetric::kMaximumError;
+  evaluation_options.maximum_error = {1.0f, 1.0f, 1.0f};
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!CheckStatus(
+        gjxl::PrepareAqEvaluation(
+          *gpu,
+          {
+            .original_linear_rgb = image.View(),
+            .coding_opsin = image.View(),
+            .strategies = &strategies,
+            .epf_sharpness = {
+              sharpness.data(), kBlockExtent, kBlockExtent.width},
+            .options = evaluation_options,
+            .resident_quantization = true,
+            .coefficient_decision_mode =
+              gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+          },
+          &prepared),
+        "resident quantization preparation")) {
+    return false;
+  }
+
+  constexpr size_t kInputStride = kBlockExtent.width + 3;
+  constexpr size_t kOutputStride = kBlockExtent.width + 2;
+  std::vector<float> input(kInputStride * kBlockExtent.height, -91.0f);
+  std::vector<float> expected(kBlockExtent.width * kBlockExtent.height);
+  std::vector<float> actual(kOutputStride * kBlockExtent.height, -73.0f);
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      input[y * kInputStride + x] =
+        1.25f + 0.017f * static_cast<float>((17 * x + 11 * y) % 29);
+    }
+  }
+  for (float target : {1.0f, 2.4f}) {
+    if (!CheckStatus(
+          gjxl::AdjustQuantField(
+            strategies, target,
+            {input.data(), kBlockExtent, kInputStride},
+            {expected.data(), kBlockExtent, kBlockExtent.width}),
+          "resident adjustment CPU oracle")) {
+      return false;
+    }
+    const gjxl::GpuBackendStats before = gpu->stats();
+    if (!CheckStatus(
+          prepared->AdjustQuantFieldResident(
+            target, {input.data(), kBlockExtent, kInputStride},
+            {actual.data(), kBlockExtent, kOutputStride}),
+          "resident quant-field adjustment")) {
+      return false;
+    }
+    const gjxl::GpuBackendStats after = gpu->stats();
+    for (size_t y = 0; y < kBlockExtent.height; ++y) {
+      for (size_t x = 0; x < kBlockExtent.width; ++x) {
+        if (!Near(actual[y * kOutputStride + x],
+                  expected[y * kBlockExtent.width + x], 2.0e-7, 2.0e-6)) {
+          std::cerr << "Resident quant-field adjustment differs at "
+                    << x << ',' << y << '\n';
+          return false;
+        }
+      }
+      for (size_t x = kBlockExtent.width; x < kOutputStride; ++x) {
+        if (actual[y * kOutputStride + x] != -73.0f) {
+          std::cerr << "Resident quant-field adjustment overwrote padding\n";
+          return false;
+        }
+      }
+    }
+    if (after.successful_allocations != before.successful_allocations ||
+        after.committed_submissions != before.committed_submissions + 1) {
+      std::cerr << "Resident quant-field adjustment resource count differs\n";
+      return false;
+    }
+  }
+
+  float quant_dc = 0.0f;
+  std::vector<int32_t> expected_raw(block_count);
+  gjxl::Quantizer expected_quantizer;
+  if (!CheckStatus(gjxl::ComputeInitialQuantDc(2.4f, &quant_dc),
+                   "resident quantizer DC oracle") ||
+      !CheckStatus(
+        gjxl::CreateQuantizerFromField(
+          quant_dc,
+          {actual.data(), kBlockExtent, kOutputStride},
+          {expected_raw.data(), kBlockExtent, kBlockExtent.width},
+          &expected_quantizer),
+        "resident quantizer CPU oracle")) {
+    return false;
+  }
+  gjxl::ColorCorrelationMap color;
+  if (!CheckStatus(gjxl::ComputeInitialColorCorrelationMap(
+                     image.View(), &color),
+                   "resident quantizer color map")) {
+    return false;
+  }
+  std::vector<float> block_distance(block_count, -1.0f);
+  gjxl::Image3FBuffer reconstructed(kPixelExtent);
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::QuantizerParams actual_quantizer;
+  gjxl::MaximumErrorReduction maximum_error;
+  double score = -1.0;
+  gjxl::AqEvaluationOutput::Final final{
+    .reconstructed_linear_rgb = reconstructed.view(),
+    .frame = &frame,
+  };
+  const gjxl::GpuBackendStats before_evaluation = gpu->stats();
+  if (!CheckStatus(
+        prepared->Evaluate(
+          {
+            .y_to_x = color.y_to_x_map(),
+            .y_to_b = color.y_to_b_map(),
+            .quant_field = {actual.data(), kBlockExtent, kOutputStride},
+            .quant_dc = quant_dc,
+          },
+          {
+            .block_distance_map = {
+              block_distance.data(), kBlockExtent, kBlockExtent.width},
+            .score = &score,
+            .maximum_error = &maximum_error,
+            .quantizer = &actual_quantizer,
+            .final = &final,
+          }),
+        "resident quantized-field evaluation")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_evaluation = gpu->stats();
+  if (actual_quantizer.global_scale !=
+        expected_quantizer.params().global_scale ||
+      actual_quantizer.quant_dc != expected_quantizer.params().quant_dc ||
+      frame.quantizer().params().global_scale !=
+        actual_quantizer.global_scale ||
+      frame.quantizer().params().quant_dc != actual_quantizer.quant_dc ||
+      !frame.valid() || !std::isfinite(score) || score < 0.0 ||
+      after_evaluation.successful_allocations !=
+        before_evaluation.successful_allocations ||
+      after_evaluation.committed_submissions !=
+        before_evaluation.committed_submissions + 1) {
+    std::cerr << "Resident device quantizer or resource contract differs\n";
+    return false;
+  }
+
+  std::vector<float> failure_output(block_count, -19.0f);
+  input[0] = std::numeric_limits<float>::quiet_NaN();
+  if (!ExpectCode(
+        prepared->AdjustQuantFieldResident(
+          1.0f, {input.data(), kBlockExtent, kInputStride},
+          {failure_output.data(), kBlockExtent, kBlockExtent.width}),
+        gjxl::StatusCode::kInvalidArgument,
+        "resident quant-field invalid input") ||
+      !std::ranges::all_of(failure_output,
+                           [](float value) { return value == -19.0f; })) {
+    return false;
+  }
+  input[0] = 1.5f;
+  if (!CheckStatus(
+        gjxl::metal_internal::FailNextMetalAqNumericForTesting(*prepared),
+        "resident quant-field numeric failure injection") ||
+      !ExpectCode(
+        prepared->AdjustQuantFieldResident(
+          1.0f, {input.data(), kBlockExtent, kInputStride},
+          {failure_output.data(), kBlockExtent, kBlockExtent.width}),
+        gjxl::StatusCode::kDeviceError,
+        "resident quant-field numeric failure") ||
+      !std::ranges::all_of(failure_output,
+                           [](float value) { return value == -19.0f; })) {
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 int main() {
@@ -1657,6 +1836,7 @@ int main() {
       !CheckResidentInitialCfl(flat, strategies) ||
       !CheckResidentInitialQuantization(structured) ||
       !CheckResidentInitialQuantization(flat) ||
+      !CheckResidentQuantizationPreparation(structured, strategies) ||
       !CheckConcurrentReconstruction(structured, strategies)) {
     return EXIT_FAILURE;
   }

@@ -103,6 +103,17 @@ struct AdaptiveQuantizationPolicyResult {
   AdaptiveQuantizationPolicyResult* result,
   AdaptiveQuantizationProfile* profile);
 
+/// Runs the shared policy from a field whose strategy-aware initial adjustment
+/// has already been applied. The remaining bounds, updates, and iteration
+/// ordering are identical to `RunAdaptiveQuantizationPolicy`.
+[[nodiscard]] Status RunAdaptiveQuantizationPolicyAdjusted(
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View adjusted_initial_quant_field,
+  AdaptiveQuantizationOptions options,
+  AdaptiveQuantizationEvaluator& evaluator,
+  AdaptiveQuantizationPolicyResult* result,
+  AdaptiveQuantizationProfile* profile);
+
 /// Runs the production AQ implementation and atomically returns diagnostics.
 ///
 /// The profile has one evaluation entry per score. On failure, both the
