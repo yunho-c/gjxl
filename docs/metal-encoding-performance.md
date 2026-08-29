@@ -462,6 +462,25 @@ three alternating pairs. Resident consumer end to end changed only from
 `10.523` to `10.479 ms` (`-0.4%`). The fusion was rejected; lower dispatch
 count did not offset the larger per-thread kernel.
 
+#### Butteraugli masked-AC tail fusion (2026-08-29)
+
+Commit `a0d75c4` folds masked-AC accumulation into final map composition. The
+production path now reads the two blurred activity masks directly while
+forming the final distance value, avoiding an in-place full-plane AC update
+and its following read. The separate masked-AC pipeline remains available only
+when that diagnostic stage is explicitly captured, preserving the stage
+oracle.
+
+The padded-1080p screening trace reduced mask/final main from `3.211` to
+`2.921 ms` (`-9.0%`) and mask/final sub from `1.351` to `1.261 ms` (`-6.7%`).
+Each stage loses three dispatches, and the resident submission changes from
+`400` to `394` dispatches and `54.777` to `53.447 ms` (`-2.4%`). Sampled-stage
+coverage remained `99.973%`. All Metal tests pass with unchanged Butteraugli
+map, score, and stage error bounds; the complete suite remains 57/58 with only
+the inherited pinned CPU quantization-pipeline score mismatch. A clean public-
+workflow latency gate is deferred to the combined tail result because unrelated
+system indexing invalidated the contemporaneous CPU-facing pair.
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
