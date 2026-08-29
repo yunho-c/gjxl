@@ -122,20 +122,23 @@ struct OpsinParams {
   float intensity_target;
 };
 
-struct FrequencyParams {
+struct FrequencyLowMediumConvolutionParams {
   uint32_t width;
   uint32_t height;
+  uint32_t intermediate_stride;
   uint32_t xyb_stride;
   uint32_t psycho_stride;
+  uint32_t kernel_size;
 };
 
-struct FrequencyChannelParams {
+struct FrequencyConvolutionChannelParams {
   uint32_t width;
   uint32_t height;
   uint32_t input_stride;
-  uint32_t blurred_stride;
+  uint32_t intermediate_stride;
   uint32_t output_stride;
   uint32_t channel;
+  uint32_t kernel_size;
 };
 
 struct MaltaScaleParams {
@@ -222,8 +225,8 @@ static_assert(sizeof(ExpandParams) == 32);
 static_assert(sizeof(SubsampleParams) == 24);
 static_assert(sizeof(ConvolutionParams) == 20);
 static_assert(sizeof(OpsinParams) == 32);
-static_assert(sizeof(FrequencyParams) == 16);
-static_assert(sizeof(FrequencyChannelParams) == 24);
+static_assert(sizeof(FrequencyLowMediumConvolutionParams) == 24);
+static_assert(sizeof(FrequencyConvolutionChannelParams) == 28);
 static_assert(sizeof(MaltaScaleParams) == 36);
 static_assert(sizeof(MaltaResponseParams) == 32);
 static_assert(sizeof(MaltaFusedParams) == 48);
@@ -853,9 +856,23 @@ private:
     bool capture_reference) {
 
     for (size_t channel = 0; channel < 3; ++channel) {
-      EncodeBlur(
-        encoder, input.plane[channel], 0, kWork,
-        Plane(kImage + 3 + channel, scale_extent), scale_extent);
+      DevicePlaneView horizontal =
+        Plane(kImage + 3 + channel, scale_extent);
+      const ConvolutionParams params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(input.plane[channel].row_stride),
+        static_cast<uint32_t>(horizontal.row_stride),
+        5,
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.blur5_horizontal.get());
+      Bind(encoder, Handle(metal_, input.plane[channel]),
+           input.plane[channel].offset_bytes, 0);
+      Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 1);
+      Bind(encoder, Handle(metal_, horizontal), horizontal.offset_bytes, 2);
+      encoder->setBytes(&params, sizeof(params), 3);
+      metal_.DispatchPlane(encoder, scale_extent);
     }
 
     const OpsinParams opsin_params{
@@ -868,16 +885,20 @@ private:
       static_cast<uint32_t>(working_extent_.width),
       options().intensity_target,
     };
-    encoder->setComputePipelineState(metal_.butteraugli_pipelines_.opsin.get());
+    encoder->setComputePipelineState(
+      metal_.butteraugli_pipelines_.opsin_blur5.get());
     for (size_t channel = 0; channel < 3; ++channel) {
       Bind(encoder, Handle(metal_, input.plane[channel]),
            input.plane[channel].offset_bytes, channel);
-      DevicePlaneView blurred = Plane(kImage + 3 + channel, scale_extent);
-      Bind(encoder, Handle(metal_, blurred), blurred.offset_bytes, 3 + channel);
+      DevicePlaneView horizontal =
+        Plane(kImage + 3 + channel, scale_extent);
+      Bind(encoder, Handle(metal_, horizontal),
+           horizontal.offset_bytes, 3 + channel);
       DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
-      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 6 + channel);
+      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 7 + channel);
     }
-    encoder->setBytes(&opsin_params, sizeof(opsin_params), 9);
+    Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 6);
+    encoder->setBytes(&opsin_params, sizeof(opsin_params), 10);
     metal_.DispatchPlane(encoder, scale_extent);
     if (capture_reference) {
       for (size_t channel = 0; channel < 3; ++channel) {
@@ -891,31 +912,56 @@ private:
     }
 
     for (size_t channel = 0; channel < 3; ++channel) {
-      EncodeBlur(
-        encoder,
-        AsConst(Plane(kImage + channel, scale_extent)),
-        1,
-        kWork,
-        psycho[channel],
-        scale_extent);
+      ConstDevicePlaneView input =
+        AsConst(Plane(kImage + channel, scale_extent));
+      DevicePlaneView intermediate =
+        TransposedPlane(kWork + channel, scale_extent);
+      const ConvolutionParams params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(input.row_stride),
+        static_cast<uint32_t>(intermediate.row_stride),
+        static_cast<uint32_t>(kKernelSizes[1]),
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.convolution_transpose.get());
+      Bind(encoder, Handle(metal_, input), input.offset_bytes, 0);
+      Bind(encoder, Handle(metal_, kernels_[1]),
+           kernels_[1].offset_bytes, 1);
+      Bind(encoder, Handle(metal_, intermediate),
+           intermediate.offset_bytes, 2);
+      encoder->setBytes(&params, sizeof(params), 3);
+      metal_.DispatchPlane(encoder, scale_extent);
     }
-    const FrequencyParams frequency_params{
+    const FrequencyLowMediumConvolutionParams frequency_params{
       static_cast<uint32_t>(scale_extent.width),
       static_cast<uint32_t>(scale_extent.height),
+      static_cast<uint32_t>(
+        TransposedPlane(kWork, scale_extent).row_stride),
       static_cast<uint32_t>(working_extent_.width),
       static_cast<uint32_t>(psycho[0].row_stride),
+      static_cast<uint32_t>(kKernelSizes[1]),
     };
     encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.frequency_low_medium.get());
+      metal_.butteraugli_pipelines_.frequency_low_medium_convolve.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      DevicePlaneView intermediate =
+        TransposedPlane(kWork + channel, scale_extent);
+      Bind(encoder, Handle(metal_, intermediate),
+           intermediate.offset_bytes, channel);
+    }
+    Bind(encoder, Handle(metal_, kernels_[1]),
+         kernels_[1].offset_bytes, 3);
     for (size_t channel = 0; channel < 3; ++channel) {
       DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
       DevicePlaneView low = psycho[channel];
       DevicePlaneView medium = psycho[3 + channel];
-      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, channel);
-      Bind(encoder, Handle(metal_, low), low.offset_bytes, 3 + channel);
-      Bind(encoder, Handle(metal_, medium), medium.offset_bytes, 6 + channel);
+      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 4 + channel);
+      Bind(encoder, Handle(metal_, low), low.offset_bytes, 7 + channel);
+      Bind(encoder, Handle(metal_, medium),
+           medium.offset_bytes, 10 + channel);
     }
-    encoder->setBytes(&frequency_params, sizeof(frequency_params), 9);
+    encoder->setBytes(&frequency_params, sizeof(frequency_params), 13);
     metal_.DispatchPlane(encoder, scale_extent);
     if (capture_reference) {
       for (size_t channel = 0; channel < 3; ++channel) {
@@ -931,29 +977,48 @@ private:
 
     for (size_t channel = 0; channel < 2; ++channel) {
       DevicePlaneView medium = psycho[3 + channel];
-      DevicePlaneView blurred = Plane(kWork + 1, scale_extent);
       DevicePlaneView high = psycho[6 + channel];
-      EncodeBlur(encoder, AsConst(medium), 2, kWork, blurred, scale_extent);
-      const FrequencyChannelParams channel_params{
+      DevicePlaneView intermediate = TransposedPlane(kWork, scale_extent);
+      const ConvolutionParams convolution_params{
         static_cast<uint32_t>(scale_extent.width),
         static_cast<uint32_t>(scale_extent.height),
         static_cast<uint32_t>(medium.row_stride),
-        static_cast<uint32_t>(blurred.row_stride),
-        static_cast<uint32_t>(high.row_stride),
-        static_cast<uint32_t>(channel),
+        static_cast<uint32_t>(intermediate.row_stride),
+        static_cast<uint32_t>(kKernelSizes[2]),
       };
       encoder->setComputePipelineState(
-        metal_.butteraugli_pipelines_.frequency_high.get());
+        metal_.butteraugli_pipelines_.convolution_transpose.get());
       Bind(encoder, Handle(metal_, medium), medium.offset_bytes, 0);
-      Bind(encoder, Handle(metal_, blurred), blurred.offset_bytes, 1);
-      Bind(encoder, Handle(metal_, high), high.offset_bytes, 2);
-      encoder->setBytes(&channel_params, sizeof(channel_params), 3);
+      Bind(encoder, Handle(metal_, kernels_[2]),
+           kernels_[2].offset_bytes, 1);
+      Bind(encoder, Handle(metal_, intermediate),
+           intermediate.offset_bytes, 2);
+      encoder->setBytes(
+        &convolution_params, sizeof(convolution_params), 3);
+      metal_.DispatchPlane(encoder, scale_extent);
+
+      const FrequencyConvolutionChannelParams channel_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(medium.row_stride),
+        static_cast<uint32_t>(intermediate.row_stride),
+        static_cast<uint32_t>(high.row_stride),
+        static_cast<uint32_t>(channel),
+        static_cast<uint32_t>(kKernelSizes[2]),
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.frequency_high_convolve.get());
+      Bind(encoder, Handle(metal_, intermediate),
+           intermediate.offset_bytes, 0);
+      Bind(encoder, Handle(metal_, kernels_[2]),
+           kernels_[2].offset_bytes, 1);
+      Bind(encoder, Handle(metal_, medium), medium.offset_bytes, 2);
+      Bind(encoder, Handle(metal_, high), high.offset_bytes, 3);
+      encoder->setBytes(&channel_params, sizeof(channel_params), 4);
       metal_.DispatchPlane(encoder, scale_extent);
     }
     DevicePlaneView medium_b = psycho[5];
-    DevicePlaneView blurred_b = Plane(kWork + 1, scale_extent);
-    EncodeBlur(encoder, AsConst(medium_b), 2, kWork, blurred_b, scale_extent);
-    EncodeCopy(encoder, AsConst(blurred_b), medium_b, scale_extent);
+    EncodeBlur(encoder, AsConst(medium_b), 2, kWork, medium_b, scale_extent);
 
     DevicePlaneView high_x = psycho[6];
     DevicePlaneView high_y = psycho[7];
@@ -972,23 +1037,44 @@ private:
 
     for (size_t channel = 0; channel < 2; ++channel) {
       DevicePlaneView high = psycho[6 + channel];
-      DevicePlaneView blurred = Plane(kWork + 1, scale_extent);
       DevicePlaneView ultra = psycho[8 + channel];
-      EncodeBlur(encoder, AsConst(high), 3, kWork, blurred, scale_extent);
-      const FrequencyChannelParams channel_params{
+      DevicePlaneView intermediate = TransposedPlane(kWork, scale_extent);
+      const ConvolutionParams convolution_params{
         static_cast<uint32_t>(scale_extent.width),
         static_cast<uint32_t>(scale_extent.height),
         static_cast<uint32_t>(high.row_stride),
-        static_cast<uint32_t>(blurred.row_stride),
-        static_cast<uint32_t>(ultra.row_stride),
-        static_cast<uint32_t>(channel),
+        static_cast<uint32_t>(intermediate.row_stride),
+        static_cast<uint32_t>(kKernelSizes[3]),
       };
       encoder->setComputePipelineState(
-        metal_.butteraugli_pipelines_.frequency_ultra.get());
+        metal_.butteraugli_pipelines_.convolution_transpose.get());
       Bind(encoder, Handle(metal_, high), high.offset_bytes, 0);
-      Bind(encoder, Handle(metal_, blurred), blurred.offset_bytes, 1);
-      Bind(encoder, Handle(metal_, ultra), ultra.offset_bytes, 2);
-      encoder->setBytes(&channel_params, sizeof(channel_params), 3);
+      Bind(encoder, Handle(metal_, kernels_[3]),
+           kernels_[3].offset_bytes, 1);
+      Bind(encoder, Handle(metal_, intermediate),
+           intermediate.offset_bytes, 2);
+      encoder->setBytes(
+        &convolution_params, sizeof(convolution_params), 3);
+      metal_.DispatchPlane(encoder, scale_extent);
+
+      const FrequencyConvolutionChannelParams channel_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(high.row_stride),
+        static_cast<uint32_t>(intermediate.row_stride),
+        static_cast<uint32_t>(ultra.row_stride),
+        static_cast<uint32_t>(channel),
+        static_cast<uint32_t>(kKernelSizes[3]),
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.frequency_ultra_convolve.get());
+      Bind(encoder, Handle(metal_, intermediate),
+           intermediate.offset_bytes, 0);
+      Bind(encoder, Handle(metal_, kernels_[3]),
+           kernels_[3].offset_bytes, 1);
+      Bind(encoder, Handle(metal_, high), high.offset_bytes, 2);
+      Bind(encoder, Handle(metal_, ultra), ultra.offset_bytes, 3);
+      encoder->setBytes(&channel_params, sizeof(channel_params), 4);
       metal_.DispatchPlane(encoder, scale_extent);
     }
     if (capture_reference) {
@@ -1688,11 +1774,14 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_blur5_horizontal_f32", &pipelines.blur5_horizontal},
     {"gjxl_butteraugli_blur5_vertical_f32", &pipelines.blur5_vertical},
     {"gjxl_butteraugli_convolve_transpose_f32", &pipelines.convolution_transpose},
-    {"gjxl_butteraugli_opsin_f32", &pipelines.opsin},
-    {"gjxl_butteraugli_frequency_low_medium_f32", &pipelines.frequency_low_medium},
-    {"gjxl_butteraugli_frequency_high_f32", &pipelines.frequency_high},
+    {"gjxl_butteraugli_opsin_blur5_f32", &pipelines.opsin_blur5},
+    {"gjxl_butteraugli_frequency_low_medium_convolve_f32",
+     &pipelines.frequency_low_medium_convolve},
+    {"gjxl_butteraugli_frequency_high_convolve_f32",
+     &pipelines.frequency_high_convolve},
     {"gjxl_butteraugli_frequency_suppress_x_f32", &pipelines.frequency_suppress_x},
-    {"gjxl_butteraugli_frequency_ultra_f32", &pipelines.frequency_ultra},
+    {"gjxl_butteraugli_frequency_ultra_convolve_f32",
+     &pipelines.frequency_ultra_convolve},
     {"gjxl_butteraugli_malta_scale_f32", &pipelines.malta_scale},
     {"gjxl_butteraugli_malta_response_f32", &pipelines.malta_response},
     {"gjxl_butteraugli_malta_fused_f32", &pipelines.malta_fused},

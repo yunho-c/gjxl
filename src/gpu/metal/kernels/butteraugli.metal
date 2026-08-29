@@ -56,20 +56,23 @@ struct OpsinParams {
   float intensity_target;
 };
 
-struct FrequencyParams {
+struct FrequencyLowMediumConvolutionParams {
   uint width;
   uint height;
+  uint intermediate_stride;
   uint xyb_stride;
   uint psycho_stride;
+  uint kernel_size;
 };
 
-struct FrequencyChannelParams {
+struct FrequencyConvolutionChannelParams {
   uint width;
   uint height;
   uint input_stride;
-  uint blurred_stride;
+  uint intermediate_stride;
   uint output_stride;
   uint channel;
+  uint kernel_size;
 };
 
 struct MaltaScaleParams {
@@ -260,6 +263,21 @@ kernel void gjxl_butteraugli_blur5_horizontal_f32(
       row, int(position.x), int(params.width), weight0, weight1, weight2);
 }
 
+inline float blur5_vertical_value(
+  device const float* input, uint x, int y, int height, uint stride,
+  float weight0, float weight1, float weight2) {
+
+  const auto sample = [&](int source_y) {
+    return input[uint(mirror_coordinate(source_y, height)) * stride + x];
+  };
+  const float center = sample(y);
+  const float pair1 = sample(y - 1) + sample(y + 1);
+  const float pair2 = sample(y - 2) + sample(y + 2);
+  float result = center * weight0;
+  result = unfused_multiply_add(pair1, weight1, result);
+  return unfused_multiply_add(pair2, weight2, result);
+}
+
 kernel void gjxl_butteraugli_blur5_vertical_f32(
   device const float* input [[buffer(0)]],
   device const float* weights [[buffer(1)]],
@@ -276,17 +294,10 @@ kernel void gjxl_butteraugli_blur5_vertical_f32(
   const float weight2 = weights[0] * scale;
   const int y = int(position.y);
   const int height = int(params.height);
-  const auto sample = [&](int source_y) {
-    return input[uint(mirror_coordinate(source_y, height)) *
-                 params.input_stride + position.x];
-  };
-  const float center = sample(y);
-  const float pair1 = sample(y - 1) + sample(y + 1);
-  const float pair2 = sample(y - 2) + sample(y + 2);
-  float result = center * weight0;
-  result = unfused_multiply_add(pair1, weight1, result);
-  result = unfused_multiply_add(pair2, weight2, result);
-  output[position.y * params.output_stride + position.x] = result;
+  output[position.y * params.output_stride + position.x] =
+    blur5_vertical_value(
+      input, position.x, y, height, params.input_stride,
+      weight0, weight1, weight2);
 }
 
 kernel void gjxl_butteraugli_convolve_transpose_f32(
@@ -365,30 +376,45 @@ inline float3 opsin_absorbance(float red, float green, float blue,
   return output;
 }
 
-kernel void gjxl_butteraugli_opsin_f32(
+kernel void gjxl_butteraugli_opsin_blur5_f32(
   device const float* input0 [[buffer(0)]],
   device const float* input1 [[buffer(1)]],
   device const float* input2 [[buffer(2)]],
-  device const float* blurred0 [[buffer(3)]],
-  device const float* blurred1 [[buffer(4)]],
-  device const float* blurred2 [[buffer(5)]],
-  device float* output0 [[buffer(6)]],
-  device float* output1 [[buffer(7)]],
-  device float* output2 [[buffer(8)]],
-  constant OpsinParams& params [[buffer(9)]],
+  device const float* horizontal0 [[buffer(3)]],
+  device const float* horizontal1 [[buffer(4)]],
+  device const float* horizontal2 [[buffer(5)]],
+  device const float* weights [[buffer(6)]],
+  device float* output0 [[buffer(7)]],
+  device float* output1 [[buffer(8)]],
+  device float* output2 [[buffer(9)]],
+  constant OpsinParams& params [[buffer(10)]],
   uint2 position [[thread_position_in_grid]]) {
 
   if (position.x >= params.width || position.y >= params.height) return;
+  float sum_weights = 0.0f;
+  for (uint index = 0; index < 5; ++index) sum_weights += weights[index];
+  const float scale = 1.0f / sum_weights;
+  const float weight0 = weights[2] * scale;
+  const float weight1 = weights[1] * scale;
+  const float weight2 = weights[0] * scale;
+  const int y = int(position.y);
+  const int height = int(params.height);
+  const float3 blurred_rgb(
+    blur5_vertical_value(
+      horizontal0, position.x, y, height, params.blurred_stride,
+      weight0, weight1, weight2),
+    blur5_vertical_value(
+      horizontal1, position.x, y, height, params.blurred_stride,
+      weight0, weight1, weight2),
+    blur5_vertical_value(
+      horizontal2, position.x, y, height, params.blurred_stride,
+      weight0, weight1, weight2));
   const uint index0 = position.y * params.input_stride0 + position.x;
   const uint index1 = position.y * params.input_stride1 + position.x;
   const uint index2 = position.y * params.input_stride2 + position.x;
-  const uint blurred_index = position.y * params.blurred_stride + position.x;
   const uint output_index = position.y * params.output_stride + position.x;
   const float3 input_rgb(
     input0[index0], input1[index1], input2[index2]);
-  const float3 blurred_rgb(
-    blurred0[blurred_index], blurred1[blurred_index],
-    blurred2[blurred_index]);
   if (!all(isfinite(input_rgb)) || !all(isfinite(blurred_rgb))) {
     output0[output_index] = NAN;
     output1[output_index] = NAN;
@@ -416,25 +442,54 @@ kernel void gjxl_butteraugli_opsin_f32(
   output2[output_index] = current.z;
 }
 
-kernel void gjxl_butteraugli_frequency_low_medium_f32(
-  device const float* xyb0 [[buffer(0)]],
-  device const float* xyb1 [[buffer(1)]],
-  device const float* xyb2 [[buffer(2)]],
-  device float* low0 [[buffer(3)]],
-  device float* low1 [[buffer(4)]],
-  device float* low2 [[buffer(5)]],
-  device float* medium0 [[buffer(6)]],
-  device float* medium1 [[buffer(7)]],
-  device float* medium2 [[buffer(8)]],
-  constant FrequencyParams& params [[buffer(9)]],
+inline float convolve_transposed_vertical_value(
+  device const float* input, device const float* weights,
+  uint x, int y, int height, uint input_stride, int radius) {
+
+  const int first = max(0, y - radius);
+  const int last = min(height - 1, y + radius);
+  float weight_sum = 0.0f;
+  float sum = 0.0f;
+  for (int source_y = first; source_y <= last; ++source_y) {
+    const float weight = weights[source_y + radius - y];
+    weight_sum += weight;
+    sum += input[x * input_stride + uint(source_y)] * weight;
+  }
+  return sum / weight_sum;
+}
+
+kernel void gjxl_butteraugli_frequency_low_medium_convolve_f32(
+  device const float* intermediate0 [[buffer(0)]],
+  device const float* intermediate1 [[buffer(1)]],
+  device const float* intermediate2 [[buffer(2)]],
+  device const float* weights [[buffer(3)]],
+  device const float* xyb0 [[buffer(4)]],
+  device const float* xyb1 [[buffer(5)]],
+  device const float* xyb2 [[buffer(6)]],
+  device float* low0 [[buffer(7)]],
+  device float* low1 [[buffer(8)]],
+  device float* low2 [[buffer(9)]],
+  device float* medium0 [[buffer(10)]],
+  device float* medium1 [[buffer(11)]],
+  device float* medium2 [[buffer(12)]],
+  constant FrequencyLowMediumConvolutionParams& params [[buffer(13)]],
   uint2 position [[thread_position_in_grid]]) {
 
   if (position.x >= params.width || position.y >= params.height) return;
+  const int radius = int(params.kernel_size / 2);
+  const int y = int(position.y);
+  const int height = int(params.height);
+  const float low_x = convolve_transposed_vertical_value(
+    intermediate0, weights, position.x, y, height,
+    params.intermediate_stride, radius);
+  const float low_y = convolve_transposed_vertical_value(
+    intermediate1, weights, position.x, y, height,
+    params.intermediate_stride, radius);
+  const float low_b = convolve_transposed_vertical_value(
+    intermediate2, weights, position.x, y, height,
+    params.intermediate_stride, radius);
   const uint xyb_index = position.y * params.xyb_stride + position.x;
   const uint psycho_index = position.y * params.psycho_stride + position.x;
-  const float low_x = low0[psycho_index];
-  const float low_y = low1[psycho_index];
-  const float low_b = low2[psycho_index];
   medium0[psycho_index] = xyb0[xyb_index] - low_x;
   medium1[psycho_index] = xyb1[xyb_index] - low_y;
   medium2[psycho_index] = xyb2[xyb_index] - low_b;
@@ -467,19 +522,21 @@ inline float amplify_range(float value, float width) {
                         : value + value;
 }
 
-kernel void gjxl_butteraugli_frequency_high_f32(
-  device float* medium [[buffer(0)]],
-  device const float* blurred [[buffer(1)]],
-  device float* high [[buffer(2)]],
-  constant FrequencyChannelParams& params [[buffer(3)]],
+kernel void gjxl_butteraugli_frequency_high_convolve_f32(
+  device const float* intermediate [[buffer(0)]],
+  device const float* weights [[buffer(1)]],
+  device float* medium [[buffer(2)]],
+  device float* high [[buffer(3)]],
+  constant FrequencyConvolutionChannelParams& params [[buffer(4)]],
   uint2 position [[thread_position_in_grid]]) {
 
   if (position.x >= params.width || position.y >= params.height) return;
+  const float low_pass = convolve_transposed_vertical_value(
+    intermediate, weights, position.x, int(position.y), int(params.height),
+    params.intermediate_stride, int(params.kernel_size / 2));
   const uint input_index = position.y * params.input_stride + position.x;
-  const uint blurred_index = position.y * params.blurred_stride + position.x;
   const uint output_index = position.y * params.output_stride + position.x;
   const float original = medium[input_index];
-  const float low_pass = blurred[blurred_index];
   high[output_index] = original - low_pass;
   medium[input_index] = params.channel == 0
     ? remove_range(low_pass, 0.29f)
@@ -502,19 +559,21 @@ kernel void gjxl_butteraugli_frequency_suppress_x_f32(
   high_x[x_index] *= scaler;
 }
 
-kernel void gjxl_butteraugli_frequency_ultra_f32(
-  device float* high [[buffer(0)]],
-  device const float* blurred [[buffer(1)]],
-  device float* ultra [[buffer(2)]],
-  constant FrequencyChannelParams& params [[buffer(3)]],
+kernel void gjxl_butteraugli_frequency_ultra_convolve_f32(
+  device const float* intermediate [[buffer(0)]],
+  device const float* weights [[buffer(1)]],
+  device float* high [[buffer(2)]],
+  device float* ultra [[buffer(3)]],
+  constant FrequencyConvolutionChannelParams& params [[buffer(4)]],
   uint2 position [[thread_position_in_grid]]) {
 
   if (position.x >= params.width || position.y >= params.height) return;
+  float low_pass = convolve_transposed_vertical_value(
+    intermediate, weights, position.x, int(position.y), int(params.height),
+    params.intermediate_stride, int(params.kernel_size / 2));
   const uint high_index = position.y * params.input_stride + position.x;
-  const uint blurred_index = position.y * params.blurred_stride + position.x;
   const uint ultra_index = position.y * params.output_stride + position.x;
   const float original = high[high_index];
-  float low_pass = blurred[blurred_index];
   if (params.channel == 0) {
     ultra[ultra_index] = remove_range(original - low_pass, 0.04f);
     high[high_index] = remove_range(low_pass, 1.5f);
