@@ -824,7 +824,8 @@ samples whose stacks include `OptimizeEntropyCode`.
 The call stacks and dependency structure suggest the following implementation
 order.
 
-1. **Remove unused exact costs from shape-only screening.**
+1. **Complete (2026-08-29): remove unused exact costs from shape-only
+   screening.**
    `FastClusterHistograms` computes `HistogramBitCost` for every prepared
    histogram even when `fill_to_limit` selects only `HistogramShapeDistance`
    and the seed-index path returns before exact assignment. Likewise,
@@ -834,6 +835,38 @@ order.
    directly beneath `ClusterHistogramsFromSeeds` and another 1.89% beneath
    `FastClusterHistograms`. Not all of that 10.10% is removable, but this is the
    strongest exact-codestream-preserving first experiment.
+
+   The retained implementation skips prepared costs only when shape-based seed
+   discovery returns before exact assignment. Shape-based seed assignment also
+   omits its unused input and accumulating-cluster costs. Exact-distance seed
+   discovery and assignment retain their former cost updates, while downstream
+   compaction or refinement reconstructs final codes from unchanged counts.
+
+   Five alternating Apple M4 Pro process pairs compared the parent and optimized
+   Release binaries on Kodak image 01, using the Metal public workflow at
+   distance 1.2 and `maximum-throughput`, with three warmups and 20 measured
+   samples per process. Per-pair entropy-optimization medians improved by
+   7.55-8.60%, codestream encoding by 4.30-7.18%, and complete workflow time by
+   5.66-6.73%. Across the pooled 100 samples per binary, entropy changed from
+   58.834 to 54.009 ms (-8.20%), codestream encoding from 77.264 to 72.975 ms
+   (-5.55%), and complete workflow time from 97.826 to 91.583 ms (-6.38%). All
+   200 samples retained identical encoded size, entropy bits and cluster counts,
+   entropy modes, coefficient-order choice, and block-context choice.
+
+   Matched 1 kHz Samply captures used five warmups and 400 encodes per binary.
+   Sampled CPU delta fell 8.51% overall, 10.96% inside `OptimizeEntropyCode`, and
+   20.10% under `CreateHuffmanTree`. Direct Huffman work beneath seeded
+   clustering fell 70.43%, from 7.02% to 2.27% of sampled CPU; the corresponding
+   direct fast-clustering work fell 33.12%, from 1.41% to 1.03%. Exact
+   `HistogramDistance` work changed by only -1.06% and synchronization/waits by
+   -1.38%, supporting the intended work-elimination mechanism. These sampled
+   percentages remain attribution rather than timing claims.
+
+   The focused entropy, encoder, single-image workflow, and batch-workflow tests
+   pass, as do all 22 pinned conformance fixtures and four public workflows under
+   pinned `djxl`. The complete Release suite remains 58/59: the sole
+   `quantization_pipeline` score mismatch exactly reproduces the inherited
+   parent failure and is unrelated to codestream entropy.
 
 2. **Reuse exact histogram state and Huffman scratch.** Each cluster-cap
    candidate copies the same source histograms and rebuilds costs. The exact

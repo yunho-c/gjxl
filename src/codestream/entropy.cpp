@@ -166,6 +166,10 @@ Status FastClusterHistograms(
   std::vector<double> distances(
     input.size(), std::numeric_limits<double>::max());
   std::vector<Histogram> prepared = input;
+  // Shape-only seed discovery returns before exact assignment and never reads
+  // bit_cost. Every other path needs prepared costs for HistogramDistance.
+  const bool needs_exact_bit_costs =
+    !fill_to_limit || seed_indexes == nullptr;
   size_t largest_index = 0;
   for (size_t index = 0; index < prepared.size(); ++index) {
     if (prepared[index].total_count == 0) {
@@ -173,8 +177,10 @@ Status FastClusterHistograms(
       distances[index] = 0.0;
       continue;
     }
-    if (Status status = HistogramBitCost(&prepared[index]); !status.ok()) {
-      return status;
+    if (needs_exact_bit_costs) {
+      if (Status status = HistogramBitCost(&prepared[index]); !status.ok()) {
+        return status;
+      }
     }
     if (prepared[index].total_count >
         prepared[largest_index].total_count) {
@@ -268,9 +274,13 @@ Status AssignHistogramsToSeeds(
     return Status::InvalidArgument("Invalid histogram seed assignment");
   }
   std::vector<Histogram> prepared = input;
-  for (Histogram& histogram : prepared) {
-    if (Status status = HistogramBitCost(&histogram); !status.ok()) {
-      return status;
+  // Shape distance uses only counts and total_count. Compaction or refinement
+  // reconstructs any subsequently needed exact codes from those counts.
+  if (!use_shape_distance) {
+    for (Histogram& histogram : prepared) {
+      if (Status status = HistogramBitCost(&histogram); !status.ok()) {
+        return status;
+      }
     }
   }
   output->clear();
@@ -326,8 +336,10 @@ Status AssignHistogramsToSeeds(
     if (!(*output)[best].AddHistogram(prepared[index])) {
       return Status::InvalidArgument("Clustered histogram count overflow");
     }
-    if (Status status = HistogramBitCost(&(*output)[best]); !status.ok()) {
-      return status;
+    if (!use_shape_distance) {
+      if (Status status = HistogramBitCost(&(*output)[best]); !status.ok()) {
+        return status;
+      }
     }
     (*histogram_symbols)[index] = static_cast<uint32_t>(best);
   }
