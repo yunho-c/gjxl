@@ -34,6 +34,9 @@ struct AqEvaluationOptions {
   ButteraugliOptions butteraugli;
   AqEvaluationMetric metric = AqEvaluationMetric::kButteraugli;
   std::array<float, 3> maximum_error{};
+
+  friend bool operator==(const AqEvaluationOptions&,
+                         const AqEvaluationOptions&) = default;
 };
 
 struct AqEvaluationPreparation {
@@ -53,9 +56,9 @@ struct AqEvaluationPreparation {
   /// coefficient coding, avoiding a host materialization boundary.
   bool frame_only_inverse_gaborish = false;
   /// Computes the fast pixel-domain initial chroma-from-luma map from the
-  /// resident coding image. This is valid only for frame-only encoding and
-  /// allows the input color-map views to be omitted.
-  bool frame_only_resident_initial_cfl = false;
+  /// resident coding image and allows the input color-map views to be omitted.
+  /// Complete evaluators may subsequently replace it with final resident CfL.
+  bool resident_initial_cfl = false;
   /// Enables initial quant-field and masking-map generation from the resident
   /// coding image. A complete preparation must also select a resident
   /// consumer for these fields.

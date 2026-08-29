@@ -622,7 +622,7 @@ private:
     AcCoefficientDecisionMode::kFixedRawQuant;
   bool frame_only_ = false;
   bool frame_only_inverse_gaborish_ = false;
-  bool frame_only_resident_initial_cfl_ = false;
+  bool resident_initial_cfl_ = false;
   bool frame_only_resident_initial_quant_ = false;
   bool resident_ac_strategy_inputs_ = false;
   bool frame_only_resident_quantizer_ = false;

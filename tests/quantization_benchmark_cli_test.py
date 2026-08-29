@@ -194,9 +194,9 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(
             submission_ids,
             [
+                "frontend.prepare_aq.reference",
                 "frontend.initial_quantization",
                 "frontend.ac_strategy",
-                "frontend.prepare_aq.reference",
                 "frontend.quant_adjustment",
                 "resident.aq",
             ],
@@ -215,7 +215,8 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
             ("frontend.initial_quantization", "operation"), wall_stages
         )
         self.assertIn(("frontend.ac_strategy.wait", "wait"), wall_stages)
-        self.assertIn(("frontend.prepare_aq", "preparation"), wall_stages)
+        self.assertIn(("frontend.reconfigure_aq", "preparation"), wall_stages)
+        self.assertNotIn(("frontend.prepare_aq", "preparation"), wall_stages)
         self.assertIn(("frontend.fixed_cfl", "host"), wall_stages)
         self.assertNotIn(("frontend.cfl_upload", "upload"), wall_stages)
         self.assertIn(("resident.aq", "operation"), wall_stages)

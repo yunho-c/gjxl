@@ -175,48 +175,66 @@ Status PrepareResidentAcStrategyInputs(
     return Status::InvalidArgument(
         "Resident AC-strategy input output is null");
   }
-  const bool compatible = state.resident_frontend != nullptr &&
-    state.resident_frontend_backend == &gpu &&
-    SameImageIdentity(state.resident_frontend_original_linear_rgb,
-                      original_linear_rgb) &&
-    SameImageIdentity(state.resident_frontend_coding_opsin,
-                      prepared.coding_opsin.const_view()) &&
-    state.resident_frontend_profile == options.adaptive_quantization.profile;
+  const AqEvaluationOptions evaluation_options{
+    .profile = options.adaptive_quantization.profile,
+    .butteraugli = options.adaptive_quantization.butteraugli,
+    .metric = options.adaptive_quantization.control_mode ==
+          AdaptiveQuantizationControlMode::kMaximumError
+      ? AqEvaluationMetric::kMaximumError
+      : AqEvaluationMetric::kButteraugli,
+    .maximum_error = options.adaptive_quantization.maximum_error,
+  };
+  const bool compatible = state.evaluation != nullptr &&
+    state.backend == &gpu &&
+    SameImageIdentity(state.original_linear_rgb, original_linear_rgb) &&
+    SameImageIdentity(
+      state.coding_opsin, prepared.preprocessed_opsin.const_view()) &&
+    state.evaluation_options == evaluation_options &&
+    state.resident_quantization;
   if (!compatible) {
     const auto preparation_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
-    // The complete evaluator may borrow the frontend's filtered coding image.
-    // Destroy the borrower before replacing its owner.
     state.evaluation.reset();
-    state.resident_frontend.reset();
     state.resident_coding_opsin = {};
     AcStrategyGrid provisional_strategies;
     Status status = AcStrategyGrid::Create(
         prepared.block_extent, &provisional_strategies);
     if (!status.ok()) return status;
     provisional_strategies.fill_dct8();
-    status = PrepareAqEvaluation(
-      gpu,
-      {
-        .original_linear_rgb = original_linear_rgb,
-        .coding_opsin = prepared.coding_opsin.const_view(),
-        .strategies = &provisional_strategies,
-        .epf_sharpness = {
-          prepared.epf_sharpness.data(), prepared.block_extent,
-          prepared.block_extent.width},
-        .options = {
-          options.adaptive_quantization.profile,
-          options.adaptive_quantization.butteraugli,
-        },
-        .frame_only = true,
-        .frame_only_resident_initial_cfl = true,
-        .frame_only_resident_initial_quant = true,
-        .resident_ac_strategy_inputs = true,
-        .coefficient_decision_mode =
-          AcCoefficientDecisionMode::kAdjustedSharedQuant,
-      },
-      &state.resident_frontend);
+    const AqEvaluationPreparation evaluation_preparation{
+      .original_linear_rgb = original_linear_rgb,
+      .coding_opsin = prepared.coding_opsin.const_view(),
+      .strategies = &provisional_strategies,
+      .epf_sharpness = {
+        prepared.epf_sharpness.data(), prepared.block_extent,
+        prepared.block_extent.width},
+      .options = evaluation_options,
+      .resident_initial_cfl = true,
+      .frame_only_resident_initial_quant = true,
+      .resident_ac_strategy_inputs = true,
+      .resident_quantization = true,
+      .coefficient_decision_mode =
+        AcCoefficientDecisionMode::kAdjustedSharedQuant,
+    };
+    if (profiling_session == nullptr) {
+      status = PrepareAqEvaluation(
+        gpu, evaluation_preparation, &state.evaluation);
+    } else {
+      auto* preparation_profiler = dynamic_cast<
+        gpu_profile_internal::GpuAqEvaluationProfiler*>(&gpu);
+      if (preparation_profiler == nullptr) {
+        return Status::Unavailable(
+          "Resident evaluator preparation cannot collect GPU diagnostics");
+      }
+      gpu_profile_internal::GpuExecutionProfile child_profile;
+      status = preparation_profiler->PrepareAqEvaluationProfiled(
+        evaluation_preparation, profiling_session->mode(),
+        &state.evaluation, &child_profile);
+      if (status.ok()) {
+        status = profiling_session->Append(std::move(child_profile));
+      }
+    }
     if (!status.ok()) return status;
     if (profiling_session != nullptr) {
       status = profiling_session->EndWallStage(
@@ -225,11 +243,15 @@ Status PrepareResidentAcStrategyInputs(
         preparation_begin);
       if (!status.ok()) return status;
     }
-    state.resident_frontend_backend = &gpu;
-    state.resident_frontend_original_linear_rgb = original_linear_rgb;
-    state.resident_frontend_coding_opsin =
-      prepared.coding_opsin.const_view();
-    state.resident_frontend_profile = options.adaptive_quantization.profile;
+    state.backend = &gpu;
+    state.original_linear_rgb = original_linear_rgb;
+    // The complete evaluator owns the unfiltered coding image and regenerates
+    // the resident search-domain image during initial quantization. Track the
+    // logical preprocessed view used by the downstream AQ provider so the
+    // same allocation is recognized and reconfigured instead of replaced.
+    state.coding_opsin = prepared.preprocessed_opsin.const_view();
+    state.evaluation_options = evaluation_options;
+    state.resident_quantization = true;
   }
 
   constexpr float kMaximumErrorInitializationTarget = 1.0f;
@@ -261,13 +283,13 @@ Status PrepareResidentAcStrategyInputs(
     : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
   Status status;
   if (profiling_session == nullptr) {
-    status = state.resident_frontend->ComputeInitialQuantization(
+    status = state.evaluation->ComputeInitialQuantization(
       initial_options, initial_output, nullptr, 0.0f,
       &prepared.initial_color_correlation);
   } else {
     auto* profiler = dynamic_cast<
       gpu_profile_internal::PreparedAqEvaluationProfiler*>(
-        state.resident_frontend.get());
+        state.evaluation.get());
     if (profiler == nullptr) {
       return Status::Unavailable(
         "Resident frontend cannot collect GPU diagnostics");
@@ -289,15 +311,13 @@ Status PrepareResidentAcStrategyInputs(
   }
   if (!status.ok()) {
     state.evaluation.reset();
-    state.resident_frontend.reset();
     state.resident_coding_opsin = {};
     return status;
   }
   ResidentAcStrategyInputs views;
-  status = state.resident_frontend->GetResidentAcStrategyInputs(&views);
+  status = state.evaluation->GetResidentAcStrategyInputs(&views);
   if (!status.ok()) {
     state.evaluation.reset();
-    state.resident_frontend.reset();
     state.resident_coding_opsin = {};
     return status;
   }
