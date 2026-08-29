@@ -85,6 +85,11 @@ struct AnsHistogram {
   std::vector<uint16_t> frequencies;
   std::vector<std::vector<uint16_t>> reverse_maps;
 
+  /// Zero selects the flat representation; 1 through 12 encode shift + 1.
+  /// Small one- and two-symbol populations ignore both representation fields.
+  uint8_t method = 12;
+  uint16_t omit_position = 0;
+
   friend bool operator==(const AnsHistogram&, const AnsHistogram&) = default;
 };
 
@@ -126,9 +131,10 @@ struct EntropyCodeCost {
   EntropyCode* code,
   EntropyCodeCost* cost = nullptr);
 
-/// Builds an ANS model using an optimized prefix code's context partition and
-/// HybridUint configurations. The input and outputs remain unchanged on
-/// failure.
+/// Builds an ANS model using an optimized prefix code's context partition.
+/// HybridUint configurations and normalized populations are screened using an
+/// ANS-specific cost estimate, then alphabet widths compete on exact serialized
+/// model-plus-token cost. Inputs and outputs remain unchanged on failure.
 [[nodiscard]] Status OptimizeAnsEntropyCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCode& prefix_partition,

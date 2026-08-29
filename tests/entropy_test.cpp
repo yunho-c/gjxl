@@ -475,6 +475,9 @@ bool CheckAnsRoundTripContract() {
       ans.mode != gjxl::EntropyCodingMode::kAns ||
       ans.ans_log_alpha_size < 5 || ans.ans_log_alpha_size > 8 ||
       ans.ans_histograms.empty() || !ans.prefix_codes.empty() ||
+      ans.uint_configs !=
+        std::vector<gjxl::HybridUintConfig>{{3, 2, 0}} ||
+      ans.ans_histograms[0].method != 0 ||
       !gjxl::WriteEntropyCode(ans, &model).ok() ||
       !gjxl::WriteTokenStream(tokens, ans, &payload).ok() ||
       !gjxl::WriteEntropyCode(ans, &repeat_model).ok() ||
@@ -511,6 +514,82 @@ bool CheckAnsRoundTripContract() {
       atomic.bits_written() != 3 ||
       !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
     std::cerr << "Malformed ANS lookup changed its destination\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckAnsAdaptiveModelSelection() {
+  std::vector<gjxl::EntropyToken> skewed;
+  for (uint32_t value = 0; value < 32; ++value) {
+    const size_t repetitions = value < 10 ? size_t{1024} >> value : 1;
+    for (size_t repeat = 0; repeat < repetitions; ++repeat) {
+      skewed.push_back({0, value});
+    }
+  }
+  const std::array<std::vector<gjxl::EntropyToken>, 1> skewed_sections = {
+    skewed};
+  gjxl::EntropyCode skewed_prefix;
+  gjxl::EntropyCode skewed_ans;
+  if (!gjxl::OptimizeEntropyCode(
+        skewed_sections, {.context_count = 1}, &skewed_prefix).ok() ||
+      !gjxl::OptimizeAnsEntropyCode(
+        skewed_sections, skewed_prefix, &skewed_ans).ok() ||
+      skewed_ans.uint_configs !=
+        std::vector<gjxl::HybridUintConfig>{{3, 1, 0}} ||
+      skewed_ans.ans_log_alpha_size != 5 ||
+      skewed_ans.ans_histograms.size() != 1 ||
+      skewed_ans.ans_histograms[0].method != 1 ||
+      skewed_ans.ans_histograms[0].frequencies != std::vector<uint16_t>{
+        2008, 1024, 512, 256, 128, 64, 32, 16, 16, 8, 16, 16,
+      }) {
+    std::cerr << "ANS precision/config selection fixture failed\n";
+    return false;
+  }
+
+  std::vector<gjxl::EntropyToken> sparse(200, {0, 0});
+  sparse.insert(sparse.end(), 100, {0, 1});
+  sparse.push_back({0, std::numeric_limits<uint32_t>::max()});
+  const std::array<std::vector<gjxl::EntropyToken>, 1> sparse_sections = {
+    sparse};
+  gjxl::EntropyCode sparse_prefix;
+  gjxl::EntropyCode sparse_ans;
+  gjxl::BitWriter sparse_model;
+  gjxl::BitWriter sparse_payload;
+  if (!gjxl::OptimizeEntropyCode(
+        sparse_sections, {.context_count = 1}, &sparse_prefix).ok() ||
+      !gjxl::OptimizeAnsEntropyCode(
+        sparse_sections, sparse_prefix, &sparse_ans).ok() ||
+      sparse_ans.uint_configs !=
+        std::vector<gjxl::HybridUintConfig>{{0, 0, 0}} ||
+      sparse_ans.ans_log_alpha_size != 6 ||
+      sparse_ans.ans_histograms.size() != 1 ||
+      sparse_ans.ans_histograms[0].method != 3 ||
+      sparse_ans.ans_histograms[0].frequencies.size() != 33 ||
+      sparse_ans.ans_histograms[0].frequencies[0] != 2544 ||
+      sparse_ans.ans_histograms[0].frequencies[1] != 1536 ||
+      sparse_ans.ans_histograms[0].frequencies.back() != 16 ||
+      !std::ranges::all_of(
+        sparse_ans.ans_histograms[0].frequencies.begin() + 2,
+        sparse_ans.ans_histograms[0].frequencies.end() - 1,
+        [](uint16_t frequency) { return frequency == 0; }) ||
+      !gjxl::WriteEntropyCode(sparse_ans, &sparse_model).ok() ||
+      !gjxl::WriteTokenStream(sparse, sparse_ans, &sparse_payload).ok() ||
+      sparse_model.bits_written() != 59 ||
+      sparse_payload.bits_written() < 32) {
+    std::cerr << "ANS sparse/RLE selection fixture failed\n";
+    return false;
+  }
+
+  gjxl::EntropyCode malformed = skewed_ans;
+  malformed.ans_histograms[0].method = 0;
+  gjxl::BitWriter atomic;
+  if (!atomic.WriteBits(3, 5).ok() ||
+      gjxl::WriteEntropyCode(malformed, &atomic).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      atomic.bits_written() != 3 ||
+      !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
+    std::cerr << "Malformed ANS representation changed its destination\n";
     return false;
   }
   return true;
@@ -560,6 +639,7 @@ int main() {
       !CheckFullWidthMultiSectionOptimization() ||
       !CheckInitialContextPreclustering() ||
       !CheckAnsRoundTripContract() ||
+      !CheckAnsAdaptiveModelSelection() ||
       !CheckAnsSmallHistograms()) {
     return EXIT_FAILURE;
   }
