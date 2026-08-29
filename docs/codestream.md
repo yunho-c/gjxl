@@ -910,23 +910,68 @@ order.
    complete Release suite remains 58/59 with the exact inherited
    `quantization_pipeline` score mismatch.
 
-3. **Use bounded task parallelism after reducing work.** The seed order is a
-   serial prerequisite, but the six cap evaluations are independent once it is
-   available. They can produce indexed results in parallel followed by the
-   existing deterministic, strict-cost reduction. Per-cluster prefix-code
-   construction is also independent, although its tasks may be too small unless
-   chunked. The current `RunParallelSections` creates and joins fresh
-   `std::thread`s for each call; the profile recorded 5,027 thread records for
-   400 encodes. A shared persistent executor with a concurrency budget is a
-   better foundation than nested worker creation.
+3. **Investigated and rejected (2026-08-29): globally bounded task
+   parallelism.** The experiment replaced the six fresh-thread section waves
+   with one lazy process-wide executor capped at eight workers. Indexed status
+   slots retained deterministic error order, and executor workers cooperatively
+   drained the shared queue while waiting on nested work so full-pool nesting
+   could not deadlock. Concurrent callers shared the same ceiling. The six
+   unique normalized cluster-cap evaluations then wrote independent indexed
+   results in parallel, followed by the unchanged ascending-cap, strict-`<`
+   serial reduction.
 
-   Concurrency policy must distinguish latency from throughput. A single image
-   can use idle cores for cap-level work. `VarDctBatchEncoder` already uses
-   persistent outer workers for independent images, so a saturated batch should
-   normally spend its budget across images rather than multiply inner workers
-   and oversubscribe the host. Measure single-image wall latency and batch
-   images/second separately; CPU-time reduction cannot be inferred from a
-   wall-latency improvement.
+   Focused coverage exercised zero/one-task fallback, exactly-once execution,
+   deterministic failures, allocation and unexpected-exception mapping,
+   concurrent callers, the active-worker bound, and full-occupancy nesting.
+   One hundred repetitions of that executor test passed. Repeated entropy
+   optimization produced identical models and costs. The candidate matched the
+   parent byte-for-byte on the checked small fixture and a 768x512 Kodak-derived
+   encode; all 22 pinned decoder fixtures passed. The complete Release suite was
+   59/60, with only the exact inherited `quantization_pipeline` mismatch of
+   `4.4524669647216797e-05`.
+
+   Five Latin-square process rounds compared the parent, executor-only, and
+   executor-plus-cap binaries on Kodak image 01. Each process used three warmups
+   and 20 measured Metal public-workflow samples at distance 1.2 and
+   `maximum-throughput`. Pooled medians were:
+
+   | Phase | Parent | Executor only | Executor + caps |
+   | --- | ---: | ---: | ---: |
+   | Entropy optimization | 52.140 ms | 52.409 ms (+0.52%) | 51.103 ms (-1.99%) |
+   | Codestream encoding | 70.253 ms | 71.488 ms (+1.76%) | 71.297 ms (+1.49%) |
+   | Complete workflow | 90.313 ms | 91.913 ms (+1.77%) | 91.170 ms (+0.95%) |
+
+   Cap parallelism improved entropy time in every paired round by 1.29-3.60%
+   relative to the parent, but complete workflow time improved in only one of
+   five rounds; its paired range was -0.34% to +2.24%. Executor-only workflow
+   time regressed in all five rounds by 0.91-3.66%. All 300 samples retained the
+   same encoded bytes, entropy bits and clusters, entropy modes, coefficient
+   order, and block-context choice.
+
+   Three independently launched full batch matrices used one warmup, three
+   samples, batch sizes 1/2/4/8, and all five benchmark workloads. The table
+   below reports the median of each process's batch-time median for batch eight:
+
+   | Workload | Parent | Executor only | Executor + caps |
+   | --- | ---: | ---: | ---: |
+   | 64x64 | 20.533 ms | 26.542 ms (+29.27%) | 24.652 ms (+20.06%) |
+   | 512x384 | 190.722 ms | 242.920 ms (+27.37%) | 290.300 ms (+52.21%) |
+   | 1080p | 1,021.094 ms | 1,363.740 ms (+33.56%) | 1,435.783 ms (+40.61%) |
+   | 4K | 3,960.405 ms | 5,508.151 ms (+39.08%) | 5,282.166 ms (+33.37%) |
+
+   For batch sizes 2-8 across 512x384, 1080p, and 4K, executor-only time
+   regressed by 20.15-39.08% and executor-plus-cap time by 26.67-52.21%.
+   `VarDctBatchEncoder` outer workers block while inner work is restricted to
+   the global pool, so the eight-worker ceiling underuses this 14-core M4 Pro.
+   The previous per-image section waves allow materially more host concurrency;
+   their thread-creation cost is not the limiting factor for this workload.
+
+   Both code changes were therefore removed. A new Samply capture was not run
+   after the retention gates failed because it would profile a non-shipping
+   variant. A future revisit should unify outer and inner scheduling with a
+   hardware-sized or measured adaptive budget, rather than applying the former
+   single-image eight-worker limit process-wide. Caller participation and task
+   granularity should be measured independently before adding cap tasks again.
 
 4. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
