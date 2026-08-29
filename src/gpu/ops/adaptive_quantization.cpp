@@ -407,8 +407,6 @@ Status RunGpuAdaptiveQuantizationImpl(
   const AqEvaluationPreparation evaluation_preparation{
     .original_linear_rgb = original_linear_rgb,
     .coding_opsin = opsin,
-    .resident_coding_opsin = reusable == nullptr
-      ? ConstDeviceImage3View{} : reusable->resident_coding_opsin,
     .strategies = &strategies,
     .epf_sharpness = epf_sharpness,
     .options = evaluation_options,
@@ -457,24 +455,11 @@ Status RunGpuAdaptiveQuantizationImpl(
         same_plane(left.plane[1], right.plane[1]) &&
         same_plane(left.plane[2], right.plane[2]);
     };
-    const ButteraugliOptions& previous_butteraugli =
-      reusable->evaluation_options.butteraugli;
-    const ButteraugliOptions& current_butteraugli =
-      evaluation_options.butteraugli;
     const bool compatible = reusable->evaluation != nullptr &&
       reusable->backend == &gpu &&
       same_image(reusable->original_linear_rgb, original_linear_rgb) &&
       same_image(reusable->coding_opsin, opsin) &&
-      reusable->evaluation_options.profile == evaluation_options.profile &&
-      previous_butteraugli.hf_asymmetry ==
-        current_butteraugli.hf_asymmetry &&
-      previous_butteraugli.x_multiplier ==
-        current_butteraugli.x_multiplier &&
-      previous_butteraugli.intensity_target ==
-        current_butteraugli.intensity_target &&
-      reusable->evaluation_options.metric == evaluation_options.metric &&
-      reusable->evaluation_options.maximum_error ==
-        evaluation_options.maximum_error &&
+      reusable->evaluation_options == evaluation_options &&
       reusable->resident_quantization == resident_quantization;
     if (compatible) {
       const auto reconfigure_begin = profiling
@@ -489,6 +474,7 @@ Status RunGpuAdaptiveQuantizationImpl(
           reconfigure_begin);
       }
     } else {
+      reusable->resident_coding_opsin = {};
       reusable->evaluation.reset();
       status = prepare_evaluation(&reusable->evaluation);
       if (status.ok()) {
@@ -862,7 +848,7 @@ Status RunGpuFrameOnlyQuantizationImpl(
         .frame_only = true,
         .frame_only_inverse_gaborish =
           options.profile.loop_filter.gaborish,
-        .frame_only_resident_initial_cfl = resident_initial_cfl,
+        .resident_initial_cfl = resident_initial_cfl,
         .coefficient_decision_mode =
           AcCoefficientDecisionMode::kAdjustedSharedQuant,
       },
@@ -965,7 +951,7 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
         .options = {options.profile, options.butteraugli},
         .frame_only = true,
         .frame_only_inverse_gaborish = options.profile.loop_filter.gaborish,
-        .frame_only_resident_initial_cfl = true,
+        .resident_initial_cfl = true,
         .frame_only_resident_initial_quant = true,
         .frame_only_resident_quantizer = true,
         .coefficient_decision_mode =

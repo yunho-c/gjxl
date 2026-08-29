@@ -121,8 +121,13 @@ void MetalPreparedAqEvaluation::EncodeForwardCoefficientBatch(
       batch.coefficient_offset * sizeof(float);
   encoder->setComputePipelineState(
       backend.aq_pipelines_.gather_transform_pixels.get());
+  const std::array<DevicePlaneView, 3>& coding_source =
+    resident_ac_strategy_inputs_ &&
+        options_.profile.loop_filter.gaborish
+      ? reconstructed_
+      : coding_;
   for (size_t channel = 0; channel < 3; ++channel) {
-    BindPlane(encoder, coding_[channel], channel);
+    BindPlane(encoder, coding_source[channel], channel);
   }
   encoder->setBuffer(anchors->handle(), anchors_.offset_bytes, 3);
   BindPlane(encoder, gathered_pixels_, 4);
@@ -436,7 +441,7 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
                     std::max(self.coefficient_value_count_,
                              3 * self.block_count_));
 
-  if (self.frame_only_resident_initial_cfl_) {
+  if (self.resident_initial_cfl_) {
     encoder->setComputePipelineState(backend.aq_pipelines_.initial_cfl.get());
     for (size_t channel = 0; channel < 3; ++channel) {
       BindPlane(encoder, self.coding_[channel], channel);
@@ -566,7 +571,7 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
     }
   }
 
-  if (self.frame_only_resident_initial_cfl_) {
+  if (self.resident_initial_cfl_) {
     encoder->setComputePipelineState(backend.aq_pipelines_.initial_cfl.get());
     const std::array<DevicePlaneView, 3>& cfl_source =
       self.options_.profile.loop_filter.gaborish
@@ -966,7 +971,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
         "Resident initial quantizer DC input is invalid");
   }
   if (initial_color_correlation != nullptr &&
-      !frame_only_resident_initial_cfl_) {
+      !resident_initial_cfl_) {
     return Status::InvalidArgument(
       "Resident initial CfL output was not prepared");
   }
@@ -1261,7 +1266,7 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
        frame_only_resident_quantizer_)) {
     status = ReadbackRawQuant();
   }
-  if (status.ok() && frame_only_resident_initial_cfl_) {
+  if (status.ok() && resident_initial_cfl_) {
     status = ReadbackColorCorrelation();
   }
   constexpr int32_t kQuantizedPoison =

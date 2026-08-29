@@ -599,8 +599,7 @@ Status MetalPreparedAqEvaluation::Prepare(
   frame_only_ = preparation.frame_only;
   frame_only_inverse_gaborish_ =
       preparation.frame_only_inverse_gaborish;
-  frame_only_resident_initial_cfl_ =
-      preparation.frame_only_resident_initial_cfl;
+  resident_initial_cfl_ = preparation.resident_initial_cfl;
   frame_only_resident_initial_quant_ =
       preparation.frame_only_resident_initial_quant;
   resident_ac_strategy_inputs_ =
@@ -2477,7 +2476,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
 
 Status MetalPreparedAqEvaluation::SetInvariantColorCorrelation(
     ConstPlaneI8View y_to_x, ConstPlaneI8View y_to_b) {
-  if (frame_only_resident_initial_cfl_) {
+  if (resident_initial_cfl_) {
     return Status::FailedPrecondition(
         "Resident initial CfL owns the prepared color-correlation state");
   }
@@ -3261,10 +3260,10 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
     return Status::InvalidArgument(
         "Frame-only inverse Gaborish preparation is inconsistent");
   }
-  if (preparation.frame_only_resident_initial_cfl &&
-      !preparation.frame_only) {
+  if (preparation.resident_initial_cfl &&
+      !preparation.frame_only && !preparation.resident_quantization) {
     return Status::InvalidArgument(
-        "Resident initial CfL requires frame-only preparation");
+        "Resident initial CfL requires a resident consumer");
   }
   if (preparation.frame_only_resident_initial_quant &&
       !preparation.frame_only &&
@@ -3363,7 +3362,7 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
         "An exact AQ linear image must be correctly sized and accompanied "
         "by exact coefficients");
   }
-  if (frame_only_resident_initial_cfl_ &&
+  if (resident_initial_cfl_ &&
       input.exact_coefficients != nullptr) {
     return Status::InvalidArgument(
         "Resident initial CfL does not accept exact coefficients");
@@ -3388,7 +3387,7 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
       input.epf_inverse_sigma.extent == block_extent_;
   if ((!resident_field && !frame_only_resident_quantizer_ &&
        !valid_host_quant) ||
-      (!frame_only_resident_initial_cfl_ &&
+      (!resident_initial_cfl_ &&
        ((invariant_color_correlation_ready_ && host_cfl_specified) ||
         (!invariant_color_correlation_ready_ && !valid_host_cfl)))) {
     return Status::InvalidArgument(
@@ -3542,12 +3541,12 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
     status = UploadPlane(*backend_, input.epf_inverse_sigma, inverse_sigma_);
     upload_bytes += block_count_ * sizeof(float);
   }
-  if (status.ok() && !frame_only_resident_initial_cfl_ &&
+  if (status.ok() && !resident_initial_cfl_ &&
       !invariant_color_correlation_ready_) {
     status = UploadPlane(*backend_, input.y_to_x, y_to_x_);
     upload_bytes += last_y_to_x_.size() * sizeof(int8_t);
   }
-  if (status.ok() && !frame_only_resident_initial_cfl_ &&
+  if (status.ok() && !resident_initial_cfl_ &&
       !invariant_color_correlation_ready_) {
     status = UploadPlane(*backend_, input.y_to_b, y_to_b_);
     upload_bytes += last_y_to_b_.size() * sizeof(int8_t);
@@ -3563,7 +3562,7 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
         last_raw_quant_.data() + y * block_extent_.width);
     }
   }
-  if (status.ok() && !frame_only_resident_initial_cfl_ &&
+  if (status.ok() && !resident_initial_cfl_ &&
       !invariant_color_correlation_ready_) {
     for (size_t y = 0; y < tile_extent_.height; ++y) {
       std::copy_n(

@@ -164,18 +164,12 @@ struct AdaptiveQuantizationMaterialization {
 /// and EPF metadata; incompatible calls transparently prepare a new state.
 struct PreparedAdaptiveQuantization {
   PreparedAcStrategySearch ac_strategy_search;
-  GpuBackend* resident_frontend_backend = nullptr;
-  ConstImage3FView resident_frontend_original_linear_rgb;
-  ConstImage3FView resident_frontend_coding_opsin;
-  SimpleVarDctCodestreamProfile resident_frontend_profile;
-  std::unique_ptr<PreparedAqEvaluation> resident_frontend;
   ConstDeviceImage3View resident_coding_opsin;
   GpuBackend* backend = nullptr;
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
   AqEvaluationOptions evaluation_options;
   bool resident_quantization = false;
-  // Declared after resident_frontend so the borrower is destroyed first.
   std::unique_ptr<PreparedAqEvaluation> evaluation;
 };
 

@@ -1127,7 +1127,7 @@ bool CheckPreparedGpuAttemptReuse() {
     std::cerr << "Prepared GPU pipeline cached target-dependent output\n";
     return false;
   }
-  gjxl::PreparedAqEvaluation* first_frontend = nullptr;
+  gjxl::PreparedAqEvaluation* first_resident_evaluation = nullptr;
   for (size_t index = 0; index < kTargets.size(); ++index) {
     gjxl::CpuQuantizationPipelineOptions options = preparation_options;
     options.butteraugli_target = kTargets[index];
@@ -1137,20 +1137,21 @@ bool CheckPreparedGpuAttemptReuse() {
         *gpu, original.ConstView(), host_prepared, options,
         gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
         resident_reused.Output(), nullptr, &gpu_prepared);
-    if (!status.ok() || gpu_prepared.resident_frontend == nullptr ||
+    if (!status.ok() || gpu_prepared.evaluation == nullptr ||
         !resident_reused.frame.valid()) {
       std::cerr << "Prepared resident GPU attempt failed at target "
                 << kTargets[index] << ": " << status.message() << '\n';
       return false;
     }
     if (index == 0) {
-      first_frontend = gpu_prepared.resident_frontend.get();
-    } else if (gpu_prepared.resident_frontend.get() != first_frontend) {
-      std::cerr << "Prepared resident frontend was replaced between targets\n";
+      first_resident_evaluation = gpu_prepared.evaluation.get();
+    } else if (gpu_prepared.evaluation.get() !=
+               first_resident_evaluation) {
+      std::cerr << "Prepared resident evaluator was replaced between targets\n";
       return false;
     }
   }
-  std::cout << "Prepared GPU attempts reuse AQ and resident frontend "
+  std::cout << "Prepared GPU attempts reuse exact and resident evaluator "
                "allocations exactly\n";
   return true;
 }

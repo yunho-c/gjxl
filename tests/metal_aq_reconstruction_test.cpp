@@ -1369,7 +1369,7 @@ bool CheckResidentInitialCfl(const HostImage& image,
           sharpness.data(), kBlockExtent, kBlockExtent.width},
       .options = Options(),
       .frame_only = true,
-      .frame_only_resident_initial_cfl = true,
+      .resident_initial_cfl = true,
   };
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!CheckStatus(gjxl::PrepareAqEvaluation(
