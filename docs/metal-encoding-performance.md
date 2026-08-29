@@ -334,6 +334,60 @@ adjustment, host CfL scheduling, transfers, waits, and the resident policy
 under the same diagnostic session. Uninstrumented public-workflow runs remain
 the final judge for any retained performance claim.
 
+#### Butteraugli convolution-consumer fusion (2026-08-29)
+
+Commit `cada229` retains the pass-fusion alternative after the generic tiled
+convolution experiments above regressed. The five-tap vertical blur for all
+three input channels now feeds Opsin directly. The final 33-tap convolution
+pass for all three XYB channels is combined with low/medium decomposition, and
+the final 15- and 7-tap passes are combined with their high- and ultra-frequency
+consumers. The B-channel 15-tap blur writes its final result in place instead
+of copying a temporary plane. The fused kernels preserve the original clipped
+support, weight accumulation order, channel transforms, and stage-capture
+outputs; the replaced pointwise pipelines were removed.
+
+The final standalone padded-1080p gate used two warmups, 11 rotated samples,
+and three alternating process pairs. The median of the three process medians
+improved from `13.063 ms` to `11.576 ms` for resident consumer end to end
+(`-11.4%`) and from `13.060 ms` to `11.884 ms` for resident comparison
+(`-9.0%`). The candidate won all six paired boundaries.
+
+The public-encode gate used fully resident SIMD AQ at distance `1.2`, two
+warmups, seven samples, and three alternating process pairs per workload. Each
+value below is the median of the three process medians; the candidate won all
+six total and quantization comparisons.
+
+| Workload | Baseline total | Retained total | Delta | Baseline quantization | Retained quantization | Delta | GPU bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `288.015 ms` | `276.935 ms` | `-3.8%` | `148.335 ms` | `141.101 ms` | `-4.9%` | `453341` |
+| Padded 4K | `939.301 ms` | `911.371 ms` | `-3.0%` | `557.946 ms` | `527.846 ms` | `-5.4%` | `1745707` |
+
+Fresh schema-2 profiles are
+`20260829T041348Z-padded_1080p-fully-resident-cada2296d59f` and
+`20260829T041429Z-padded_4k-fully-resident-cada2296d59f` under
+`logs/metal-profile/`. They completed with `99.976%` and `99.990%` sampled-stage
+coverage and unchanged source fingerprints. Against the immediately preceding
+`02f8c4d` profiles:
+
+| Workload | Reference preparation | Resident GPU buffer | Psycho main | Psycho sub |
+| --- | ---: | ---: | ---: | ---: |
+| Padded 1080p | `7.068 -> 5.475 ms` (`-22.5%`) | `63.036 -> 57.799 ms` (`-8.3%`) | `15.695 -> 11.375 ms` (`-27.5%`) | `4.164 -> 3.331 ms` (`-20.0%`) |
+| Padded 4K | `29.336 -> 21.961 ms` (`-25.1%`) | `242.628 -> 220.389 ms` (`-9.2%`) | `65.332 -> 47.541 ms` (`-27.2%`) | `17.491 -> 12.981 ms` (`-25.8%`) |
+
+Each resident psycho main/sub stage falls by 33 dispatches, reducing the
+resident submission from 490 to 424 dispatches. Reference preparation falls
+from 66 to 44 dispatches. The profiles' separate uninstrumented public runs
+also improve total/quantization medians from `278.660/142.311` to
+`268.863/134.087 ms` at 1080p and from `939.299/552.598` to
+`901.521/510.337 ms` at 4K. The matched multi-process table above remains the
+primary latency evidence.
+
+No tolerance changed. The Metal Butteraugli gate retains maximum map/score
+error `0.000549316` and maximum stage error `0.000396729`; output byte counts
+are unchanged. The full suite remains 57/58, with every Metal test passing and
+only the inherited pinned CPU quantization-pipeline score mismatch
+(`4.4524669647216797e-05`).
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
