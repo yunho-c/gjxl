@@ -252,7 +252,10 @@ uint64_t Fnv1a64(std::span<const uint8_t> bytes) {
 bool CheckEncodedFrame(
   size_t width, size_t height, size_t expected_size,
   uint64_t expected_hash, uint16_t expected_order_mask,
-  bool expect_custom_candidate) {
+  bool expect_custom_candidate,
+  bool expect_dc_ans,
+  bool expect_ac_ans,
+  bool expect_order_ans) {
 
   gjxl::VarDctEncoderFrame frame;
   gjxl::Status status = MakeFrame(width, height, {3541, 10}, {}, &frame);
@@ -282,8 +285,9 @@ bool CheckEncodedFrame(
       profile.entropy_model_bits == 0 || profile.entropy_token_bits == 0 ||
       profile.dc_entropy_clusters == 0 ||
       profile.ac_entropy_clusters == 0 ||
-      profile.dc_entropy_is_ans || profile.ac_entropy_is_ans ||
-      profile.coefficient_order_entropy_is_ans ||
+      profile.dc_entropy_is_ans != expect_dc_ans ||
+      profile.ac_entropy_is_ans != expect_ac_ans ||
+      profile.coefficient_order_entropy_is_ans != expect_order_ans ||
       profile.natural_candidate_bytes == 0 ||
       profile.block_context_candidate_count != 1 ||
       profile.compact_block_context_candidate_bytes != first.size() ||
@@ -303,7 +307,12 @@ bool CheckEncodedFrame(
       first[0] != 0xFF || first[1] != 0x0A) {
     std::cerr << "Encoded " << width << 'x' << height
               << " fixture failed: " << status.message()
-              << ", size=" << first.size() << ", hash=" << hash << '\n';
+              << ", size=" << first.size() << ", hash=" << hash
+              << ", entropy=" << profile.dc_entropy_is_ans << '/'
+              << profile.ac_entropy_is_ans << '/'
+              << profile.coefficient_order_entropy_is_ans
+              << ", candidates=" << profile.natural_candidate_bytes << '/'
+              << profile.custom_order_candidate_bytes << '\n';
     return false;
   }
   return true;
@@ -342,11 +351,14 @@ bool CheckAssemblyAndDeterminism() {
   // Values are pinned after independent header fixtures and section-layout
   // checks establish the constituent bit encodings.
   return CheckEncodedFrame(
-           8, 8, 203, 7880082076206412069ull, 0, false) &&
+           8, 8, 203, 7880082076206412069ull, 0, false,
+           false, false, false) &&
          CheckEncodedFrame(
-           64, 9, 1108, 14974260985011762859ull, 0, true) &&
+           64, 9, 1107, 17820242185032511216ull, 0, true,
+           false, true, false) &&
          CheckEncodedFrame(
-           257, 9, 3876, 14628565505877073831ull, 1, true);
+           257, 9, 3851, 18124942738510227601ull, 1, true,
+           false, true, false);
 }
 
 bool CheckAtomicRejections() {

@@ -532,7 +532,9 @@ The current writer prioritizes a correct, deterministic subset over exhaustive
 compression optimization. Its bounded prefix optimizer searches up to 32
 clusters and selects HybridUint configurations per cluster. Adaptive
 block-context selection is available for sufficiently large images, and the
-writer can serialize either prefix or ANS entropy models.
+writer can serialize either prefix or ANS entropy models. ANS retains the
+prefix-selected context partition, then independently searches a bounded set of
+HybridUint configurations, histogram representations, and alphabet widths.
 Ordinary Butteraugli encoding uses libjxl's target- and pixel-dependent X/B
 quantization-matrix scales; maximum-error encoding retains `2/2`.
 
@@ -542,10 +544,10 @@ libjxl tools at `05be1775629f7fdc01beb70c118043b4b0c69d2a`.
 External Butteraugli scores were measured at 255 nits. The aggregate encoded
 sizes were:
 
-| Target distance | Initial | After #1 | After #2 | After #3 | After #4 | After #5 | #5 vs #4 | `cjxl -e 7` | #5 gap | `cjxl -e 9` | #5 gap |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | 152,111 B | 148,137 B | -2.61% | 151,714 B | -2.4% | 147,386 B | +0.5% |
-| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | 92,065 B | 87,714 B | -4.73% | 93,414 B | -6.1% | 88,578 B | -1.0% |
+| Target distance | Initial | After #1 | After #2 | After #3 | After #4 | After #5 | After #7 | #7 vs #5 | `cjxl -e 7` | #7 gap | `cjxl -e 9` | #7 gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | 152,111 B | 148,137 B | 147,238 B | -0.61% | 151,714 B | -3.0% | 147,386 B | -0.1% |
+| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | 92,065 B | 87,714 B | 87,004 B | -0.81% | 93,414 B | -6.9% | 88,578 B | -1.8% |
 
 These are same-target rather than matched-quality results. The external scores
 were close but not identical, so the table indicates the scale of the current
@@ -778,6 +780,41 @@ replaced by corpus measurements as each step lands.
    157.274 to 179.700 ms (+14.3%). The sub-1% directional density gain therefore
    comes with a deliberately substantial runtime cost, which is why the mode is
    explicit. Raw benchmark schema version 6 records `density=default|high`.
+
+7. **Complete (2026-08-29): make ANS model selection native to ANS.** ANS still
+   reuses the prefix optimizer's bounded context partition, but no longer reuses
+   its prefix-cost HybridUint choice. Each cluster screens eight configurations:
+   the former four plus `{3,1,0}`, `{3,2,0}`, `{4,1,0}`, and `{5,2,0}`. The
+   selected population competes across the flat form and all 12 allowed
+   precision shifts. General histogram headers use the format's repeated-count
+   coding, and alphabet widths 5 through 8 compete on exact serialized
+   model-plus-token bits. The existing exact prefix fallback remains unchanged,
+   so a larger ANS result cannot displace prefix coding.
+
+   On the established four-image PFM corpus, aggregate size changed from
+   148,137 to 147,238 bytes at distance 1 (-0.61%) and from 87,714 to 87,004
+   bytes at distance 2 (-0.81%). Every individual case improved. Histogram
+   precision selection supplied 756 and 584 bytes of those reductions;
+   ANS-specific HybridUint selection supplied the remaining 143 and 126 bytes.
+   Header RLE alone saved only 31 and 12 bytes, while the flat form accounted
+   for 6 and 7 aggregate bytes. A 28-configuration experiment matched the
+   eight-choice result at distance 1 and improved distance 2 by only four more
+   bytes, so the exhaustive search was not retained. Pinned `djxl` accepted all
+   eight production outputs, and each decoded PFM was byte-identical to its #5
+   baseline.
+
+   A seven-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per binary and round. Complete CPU workflow medians
+   were 1,385.965 ms before and 1,383.156 ms after (-0.20%, within run-to-run
+   noise). Complete forced-Metal workflow medians were 290.555 and 306.334 ms
+   (+5.43%). The bounded eight-choice search therefore avoids the roughly 6%
+   complete-CPU overhead observed for the rejected 28-choice experiment, but
+   its host-side work remains more visible on the faster Metal frontend.
+
+   Unit coverage pins flat and non-flat precision selection, the two dominant
+   added HybridUint configurations, sparse-histogram RLE, exact model and
+   payload accounting, and malformed-representation atomicity. The full Release
+   suite passes apart from the inherited pinned quantization-score mismatch.
 
 LZ77, adaptive DC smoothing, additional transform decisions, patches/dots/
 splines, chroma subsampling, and GPU entropy coding are not first-line size

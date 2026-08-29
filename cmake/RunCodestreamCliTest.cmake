@@ -293,7 +293,7 @@ if(NOT high_density_hash STREQUAL high_density_repeat_hash)
   message(FATAL_ERROR "High-density CLI output is not deterministic")
 endif()
 set(expected_hash
-  82f7936f5fc932dd0b484705e9f01d1e18e3e11aa8a7545b8cc082acf136af17)
+  e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
