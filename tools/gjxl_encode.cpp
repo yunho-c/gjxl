@@ -47,6 +47,8 @@ struct Options {
     gjxl::TargetSizeSelectionPolicy::kLargestAtOrBelow;
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kAutomatic;
+  gjxl::VarDctDensityMode density_mode =
+    gjxl::VarDctDensityMode::kDefault;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
 };
@@ -272,6 +274,8 @@ struct Options {
           !ParseBackend(argv[++index], &candidate.backend)) {
         return false;
       }
+    } else if (argument == "--high-density") {
+      candidate.density_mode = gjxl::VarDctDensityMode::kHighDensity;
     } else if (argument == "--metal-aq") {
       if (index + 1 >= argc ||
           !ParseMetalAqMode(argv[++index], &candidate.metal_aq_mode)) {
@@ -296,6 +300,13 @@ struct Options {
          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput &&
        candidate.rate_control_mode ==
          gjxl::VarDctRateControlMode::kMaximumError) ||
+      (candidate.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
+       (candidate.rate_control_mode ==
+          gjxl::VarDctRateControlMode::kMaximumError ||
+        candidate.metal_aq_mode ==
+          gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
+        candidate.metal_aq_mode ==
+          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput)) ||
       (candidate.metal_aq_mode !=
          gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
        candidate.backend != gjxl::VarDctBackendPreference::kMetal)) {
@@ -404,6 +415,7 @@ void PrintUsage(const char* executable) {
                "--target-bpp BPP) [--size-tolerance FRACTION] "
                "[--max-attempts N] "
                "[--size-selection under-budget|closest] "
+               "[--high-density] "
                "[--backend auto|cpu|metal] "
                "[--metal-aq exact-coefficients|fully-resident|throughput|"
                "maximum-throughput] "
@@ -432,6 +444,7 @@ int main(int argc, char** argv) {
   status = gjxl::EncodeLinearRgbVarDctCodestreamProfiled(
     linear_rgb.const_view(),
     {.butteraugli_target = options.butteraugli_target,
+     .density_mode = options.density_mode,
      .rate_control_mode = options.rate_control_mode,
      .maximum_error = options.maximum_error,
      .target_bytes = options.target_bytes,
@@ -511,6 +524,10 @@ int main(int argc, char** argv) {
                                  ? "Metal maximum-throughput AQ"
                                  : "Metal fully-resident AQ")))
                   : "CPU")
+            << (summary.density_mode ==
+                      gjxl::VarDctDensityMode::kHighDensity
+                  ? " with high-density AQ"
+                  : "")
             << ".\nStrategies:";
   for (size_t index = 0; index < summary.strategy_counts.size(); ++index) {
     if (summary.strategy_counts[index] == 0) {

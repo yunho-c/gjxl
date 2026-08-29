@@ -132,6 +132,8 @@ struct CommandLineOptions {
   ValidationMode validation = ValidationMode::kCpuMetal;
   gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
       gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+  gjxl::VarDctDensityMode density_mode =
+      gjxl::VarDctDensityMode::kDefault;
   float butteraugli_target = kDefaultButteraugliTarget;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
@@ -556,6 +558,7 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--implementation scalar|simd|factored] "
                    "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                    "maximum-throughput] "
+                   "[--density default|high] "
                    "[--validation cpu-metal|metal-only] "
                    "[--metallib PATH] [--raw-samples PATH] "
                    "[--gpu-profile stage|dispatch] "
@@ -591,6 +594,15 @@ ParseGpuProfilingMode(std::string_view text) {
       options.implementation = value;
     } else if (argument == "--gpu-aq") {
       options.gpu_aq_mode = ParseGpuAqMode(value);
+    } else if (argument == "--density") {
+      if (value == "default") {
+        options.density_mode = gjxl::VarDctDensityMode::kDefault;
+      } else if (value == "high") {
+        options.density_mode = gjxl::VarDctDensityMode::kHighDensity;
+      } else {
+        throw std::runtime_error(
+          "Unknown density mode: " + std::string(value));
+      }
     } else if (argument == "--distance") {
       options.butteraugli_target = ParsePositiveFloat(value);
     } else if (argument == "--warmups") {
@@ -608,6 +620,20 @@ ParseGpuProfilingMode(std::string_view text) {
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
     throw std::runtime_error(
       "Maximum-throughput mode requires a public-workflow scope");
+  }
+  if (options.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
+      (options.scope != BenchmarkScope::kPublicWorkflow &&
+       options.scope != BenchmarkScope::kMetalPublicWorkflow)) {
+    throw std::runtime_error(
+      "High density requires a public-workflow scope");
+  }
+  if (options.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
+      (options.gpu_aq_mode ==
+         gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
+       options.gpu_aq_mode ==
+         gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput)) {
+    throw std::runtime_error(
+      "High density is incompatible with throughput AQ");
   }
   if (options.validation == ValidationMode::kMetalOnly &&
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
@@ -639,6 +665,11 @@ ParseGpuProfilingMode(std::string_view text) {
   if (gpu_profiling && !options.raw_samples_path.empty()) {
     throw std::runtime_error(
       "GPU profiling output is separate from raw workflow samples");
+  }
+  if (gpu_profiling &&
+      options.density_mode == gjxl::VarDctDensityMode::kHighDensity) {
+    throw std::runtime_error(
+      "High density is unavailable for GPU dispatch profiling");
   }
   return options;
 }
@@ -849,9 +880,17 @@ struct RawWorkflowSample {
   uint64_t entropy_token_bits = 0;
   size_t dc_entropy_clusters = 0;
   size_t ac_entropy_clusters = 0;
+  bool dc_entropy_is_ans = false;
+  bool ac_entropy_is_ans = false;
+  bool coefficient_order_entropy_is_ans = false;
   size_t natural_candidate_bytes = 0;
   size_t custom_order_candidate_bytes = 0;
   uint16_t selected_coefficient_order_mask = 0;
+  size_t block_context_candidate_count = 0;
+  size_t compact_block_context_candidate_bytes = 0;
+  size_t selected_block_context_candidate_index = 0;
+  size_t selected_block_context_count = 0;
+  size_t selected_block_context_qf_threshold_count = 0;
   bool has_final_score = false;
   double final_score = 0.0;
 };
@@ -959,7 +998,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 3,\n"
+           << "  \"schema_version\": 6,\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
            << "  \"validation\": \""
@@ -967,6 +1006,11 @@ void WriteRawWorkflowSamples(
            << "  \"implementation\": \""
            << JsonEscape(options.implementation) << "\",\n"
            << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
+           << "\",\n"
+           << "  \"density\": \""
+           << (options.density_mode == gjxl::VarDctDensityMode::kHighDensity
+                 ? "high"
+                 : "default")
            << "\",\n"
            << "  \"distance\": " << std::setprecision(9)
            << options.butteraugli_target << ",\n"
@@ -998,11 +1042,32 @@ void WriteRawWorkflowSamples(
                << ", \"entropy_clusters\": {\"dc\": "
                << sample.dc_entropy_clusters << ", \"ac\": "
                << sample.ac_entropy_clusters << "}"
+               << ", \"entropy_coding\": {\"dc\": \""
+               << (sample.dc_entropy_is_ans ? "ans" : "prefix")
+               << "\", \"ac\": \""
+               << (sample.ac_entropy_is_ans ? "ans" : "prefix")
+               << "\", \"coefficient_order\": \""
+               << (sample.selected_coefficient_order_mask == 0
+                     ? "none"
+                     : sample.coefficient_order_entropy_is_ans
+                         ? "ans"
+                         : "prefix")
+               << "\"}"
                << ", \"coefficient_order\": {\"natural_bytes\": "
                << sample.natural_candidate_bytes << ", \"custom_bytes\": "
                << sample.custom_order_candidate_bytes
                << ", \"selected_mask\": "
                << sample.selected_coefficient_order_mask << "}"
+               << ", \"block_context\": {\"candidate_count\": "
+               << sample.block_context_candidate_count
+               << ", \"compact_bytes\": "
+               << sample.compact_block_context_candidate_bytes
+               << ", \"selected_index\": "
+               << sample.selected_block_context_candidate_index
+               << ", \"selected_contexts\": "
+               << sample.selected_block_context_count
+               << ", \"qf_thresholds\": "
+               << sample.selected_block_context_qf_threshold_count << "}"
                << ", \"final_score\": ";
         if (sample.has_final_score) {
           output << std::setprecision(17) << sample.final_score;
@@ -1364,6 +1429,7 @@ void RunPublicWorkflowOnlyWorkload(
     const WorkloadSpec& spec, size_t warmups, size_t samples,
     float butteraugli_target,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
+    gjxl::VarDctDensityMode density_mode,
     std::string_view input_path, bool metal_only, ValidationMode validation,
     gjxl::GpuBackend& gpu,
     std::vector<RawWorkflowWorkload>* raw_results, double* global_sink) {
@@ -1388,6 +1454,7 @@ void RunPublicWorkflowOnlyWorkload(
         EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
             original.ConstView(),
             {.butteraugli_target = butteraugli_target,
+             .density_mode = density_mode,
              .backend = backend,
              .metal_aq_mode = mode},
             backend == gjxl::VarDctBackendPreference::kMetal ? &gpu : nullptr,
@@ -1489,12 +1556,26 @@ void RunPublicWorkflowOnlyWorkload(
       profile.codestream.dc_entropy_clusters;
     raw_sample.ac_entropy_clusters =
       profile.codestream.ac_entropy_clusters;
+    raw_sample.dc_entropy_is_ans = profile.codestream.dc_entropy_is_ans;
+    raw_sample.ac_entropy_is_ans = profile.codestream.ac_entropy_is_ans;
+    raw_sample.coefficient_order_entropy_is_ans =
+      profile.codestream.coefficient_order_entropy_is_ans;
     raw_sample.natural_candidate_bytes =
       profile.codestream.natural_candidate_bytes;
     raw_sample.custom_order_candidate_bytes =
       profile.codestream.custom_order_candidate_bytes;
     raw_sample.selected_coefficient_order_mask =
       profile.codestream.selected_coefficient_order_mask;
+    raw_sample.block_context_candidate_count =
+      profile.codestream.block_context_candidate_count;
+    raw_sample.compact_block_context_candidate_bytes =
+      profile.codestream.compact_block_context_candidate_bytes;
+    raw_sample.selected_block_context_candidate_index =
+      profile.codestream.selected_block_context_candidate_index;
+    raw_sample.selected_block_context_count =
+      profile.codestream.selected_block_context_count;
+    raw_sample.selected_block_context_qf_threshold_count =
+      profile.codestream.selected_block_context_qf_threshold_count;
     raw_sample.has_final_score = !summary.score_history.empty();
     if (raw_sample.has_final_score) {
       raw_sample.final_score = summary.score_history.back();
@@ -1556,6 +1637,10 @@ void RunPublicWorkflowOnlyWorkload(
             << original.extent.width << 'x' << original.extent.height
             << " distance=" << butteraugli_target
             << " gpu_aq=" << GpuAqModeName(gpu_aq_mode)
+            << " density="
+            << (density_mode == gjxl::VarDctDensityMode::kHighDensity
+                  ? "high"
+                  : "default")
             << " scope="
             << (metal_only ? "metal-public-workflow" : "public-workflow")
             << " codestream="
@@ -2622,6 +2707,11 @@ int main(int argc, char** argv) {
               << " implementation=" << options.implementation
               << " scope=" << BenchmarkScopeName(options.scope)
               << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
+              << " density="
+              << (options.density_mode ==
+                        gjxl::VarDctDensityMode::kHighDensity
+                    ? "high"
+                    : "default")
               << " distance=" << options.butteraugli_target
               << " warmups=" << options.warmups
               << " samples=" << options.samples;
@@ -2651,6 +2741,7 @@ int main(int argc, char** argv) {
           RunPublicWorkflowOnlyWorkload(
               {"external_input", {}, false}, options.warmups, options.samples,
               options.butteraugli_target, options.gpu_aq_mode,
+              options.density_mode,
               options.input_path,
               options.scope == BenchmarkScope::kMetalPublicWorkflow,
               options.validation, *gpu, raw_results_pointer, &sink);
@@ -2680,7 +2771,8 @@ int main(int argc, char** argv) {
             } else {
               RunPublicWorkflowOnlyWorkload(
                   workload, options.warmups, options.samples,
-                  options.butteraugli_target, options.gpu_aq_mode, {},
+                  options.butteraugli_target, options.gpu_aq_mode,
+                  options.density_mode, {},
                   options.scope == BenchmarkScope::kMetalPublicWorkflow,
                   options.validation, *gpu, raw_results_pointer, &sink);
             }

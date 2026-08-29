@@ -17,6 +17,7 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+struct SimpleBlockContextMap;
 struct SimpleCoefficientOrders;
 struct VarDctAcGroupView;
 
@@ -58,6 +59,13 @@ struct SimpleAcGroupTokenStream {
 [[nodiscard]] Status TokenizeSimpleAcGroups(
   const VarDctEncoderFrame& frame,
   const SimpleCoefficientOrders& orders,
+  std::vector<SimpleAcGroupTokenStream>* groups);
+
+/// Tokenizes every retained AC group with custom orders and block contexts.
+[[nodiscard]] Status TokenizeSimpleAcGroups(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  const SimpleBlockContextMap& block_context_map,
   std::vector<SimpleAcGroupTokenStream>* groups);
 
 }  // namespace gjxl

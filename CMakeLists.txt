@@ -265,8 +265,10 @@ add_library(
   STATIC
 
   src/codestream/ac_group.cpp
+  src/codestream/ans.cpp
   src/codestream/batch_workflow.cpp
   src/codestream/bit_writer.cpp
+  src/codestream/block_context_map.cpp
   src/codestream/coefficient_order.cpp
   src/codestream/dc_group.cpp
   src/codestream/entropy.cpp
@@ -1190,6 +1192,22 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME ac_group
     COMMAND gjxl_ac_group_test
+  )
+
+  add_executable(
+    gjxl_block_context_map_test
+    tests/block_context_map_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_block_context_map_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME block_context_map
+    COMMAND gjxl_block_context_map_test
   )
 
   add_executable(

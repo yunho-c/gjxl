@@ -38,6 +38,13 @@ enum class VarDctRateControlMode {
   kTargetBitsPerPixel,
 };
 
+enum class VarDctDensityMode {
+  /// Uses the established two adaptive-quantization updates.
+  kDefault,
+  /// Uses four adaptive-quantization updates for a slower density search.
+  kHighDensity,
+};
+
 enum class TargetSizeSelectionPolicy {
   /// Prefer the largest valid codestream no larger than the budget. If every
   /// valid candidate is over budget, select the smallest one.
@@ -50,6 +57,9 @@ enum class TargetSizeSelectionPolicy {
 /// Options for the public VarDCT encoding workflow.
 struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
+  /// High density performs four AQ updates instead of the default two. It is
+  /// meaningful only for Butteraugli-target and target-size control.
+  VarDctDensityMode density_mode = VarDctDensityMode::kDefault;
   VarDctRateControlMode rate_control_mode =
     VarDctRateControlMode::kButteraugliTarget;
   /// Maximum normalized reconstruction error for X, Y, and B respectively.
@@ -80,6 +90,7 @@ struct VarDctEncodingOptions {
 struct VarDctEncodingSummary {
   Extent2D extent;
   size_t encoded_bytes = 0;
+  VarDctDensityMode density_mode = VarDctDensityMode::kDefault;
   VarDctRateControlMode rate_control_mode =
     VarDctRateControlMode::kButteraugliTarget;
   size_t requested_target_bytes = 0;

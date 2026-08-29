@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "codestream/ans_internal.h"
 #include "codestream/huffman.h"
 
 namespace gjxl {
@@ -630,7 +631,12 @@ Status ValidatePrefixCode(const PrefixCode& prefix) {
 }
 
 Status ValidateEntropyCode(const EntropyCode& code) {
-  if (code.context_count == 0 ||
+  if (code.mode == EntropyCodingMode::kAns) {
+    return codestream_internal::ValidateAnsEntropyCode(code);
+  }
+  if (code.mode != EntropyCodingMode::kPrefix ||
+      code.ans_log_alpha_size != 0 || !code.ans_histograms.empty() ||
+      code.context_count == 0 ||
       code.context_map.size() != code.context_count ||
       code.prefix_codes.empty() ||
       code.prefix_codes.size() > kMaximumPrefixClusters ||
@@ -1826,6 +1832,9 @@ Status WriteEntropyCode(const EntropyCode& code, BitWriter* writer) {
   if (Status status = ValidateEntropyCode(code); !status.ok()) {
     return status;
   }
+  if (code.mode == EntropyCodingMode::kAns) {
+    return codestream_internal::WriteAnsEntropyCodeModel(code, writer);
+  }
   BitWriter temporary;
   try {
     if (Status status = WriteContextMapInternal(code, &temporary);
@@ -1855,6 +1864,9 @@ Status WriteTokenStream(
   }
   if (Status status = ValidateEntropyCode(code); !status.ok()) {
     return status;
+  }
+  if (code.mode == EntropyCodingMode::kAns) {
+    return codestream_internal::WriteAnsTokenStream(tokens, code, writer);
   }
   BitWriter temporary;
   for (const EntropyToken& token : tokens) {

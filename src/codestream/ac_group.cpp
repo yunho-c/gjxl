@@ -20,19 +20,19 @@
 
 #include "codec/codestream.h"
 #include "codec/vardct_frame.h"
+#include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
 #include "codestream/simple_ac_context.h"
 
 namespace gjxl {
 namespace {
 
-inline constexpr size_t kNonZeroBucketCount = 37;
-inline constexpr size_t kZeroDensityContextCount = 458;
 inline constexpr size_t kBlockContextCount = 4;
 
 static_assert(kSimpleAcContextCount
               == kBlockContextCount
-                   * (kNonZeroBucketCount + kZeroDensityContextCount));
+                   * (kSimpleNonzeroBucketCount +
+                      kSimpleZeroDensityContextCount));
 
 constexpr std::array<uint16_t, 64> kCoefficientFrequencyContext = {
   0xBAD, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14,
@@ -81,11 +81,14 @@ bool IsValidGroupExtent(Extent2D extent, size_t* area) {
          && extent.try_area(area);
 }
 
-uint32_t NonzeroContext(uint32_t prediction, uint32_t block_context) {
+uint32_t NonzeroContext(
+  uint32_t prediction,
+  uint32_t block_context,
+  uint32_t block_context_count) {
   const uint32_t bucket = prediction < 8     ? prediction
                           : prediction >= 64 ? 36
                                              : 4 + prediction / 2;
-  return bucket * kBlockContextCount + block_context;
+  return bucket * block_context_count + block_context;
 }
 
 uint32_t ZeroDensityContext(int32_t nonzeros, size_t scan_index,
@@ -111,6 +114,25 @@ uint32_t PredictNonzeros(std::span<const uint8_t> map, Extent2D extent,
   }
   return static_cast<uint32_t>(
     (map[(y - 1) * extent.width + x] + map[y * extent.width + x - 1] + 1) / 2);
+}
+
+uint32_t BlockContextValidated(
+  const SimpleBlockContextMap& map,
+  AcStrategyType strategy,
+  size_t channel,
+  int32_t raw_quant) {
+
+  size_t qf_segment = 0;
+  while (qf_segment < map.qf_thresholds.size() &&
+         static_cast<uint32_t>(raw_quant) > map.qf_thresholds[qf_segment]) {
+    ++qf_segment;
+  }
+  const size_t channel_row = channel < 2 ? channel ^ 1u : 2;
+  const size_t order = codestream_internal::kSimpleStrategyOrder[
+    static_cast<size_t>(strategy)];
+  return map.context_map[
+    (channel_row * codestream_internal::kSimpleCoefficientOrderCount + order) *
+      (map.qf_thresholds.size() + 1) + qf_segment];
 }
 
 Status ValidateAndCollectAnchors(const VarDctAcGroupView& group,
@@ -327,6 +349,8 @@ Status TokenizeSimpleAcGroupValidated(
   const VarDctAcGroupView& group,
   const AcStrategyGrid& strategies,
   const SimpleCoefficientOrders& coefficient_orders,
+  const SimpleBlockContextMap& block_context_map,
+  ConstPlaneI32View raw_quant_field,
   std::vector<EntropyToken>* tokens) {
   if (tokens == nullptr) {
     return Status::InvalidArgument("AC-group token output is null");
@@ -413,10 +437,28 @@ Status TokenizeSimpleAcGroupValidated(
 
         const uint32_t prediction =
           PredictNonzeros(map, group.block_extent, anchor.x, anchor.y);
-        const uint32_t block_context =
-          codestream_internal::SimpleBlockContext(anchor.strategy, channel);
+        const bool needs_raw_quant =
+          !block_context_map.qf_thresholds.empty();
+        if (needs_raw_quant &&
+            (!raw_quant_field.valid() ||
+             group.block_x + anchor.x >= raw_quant_field.extent.width ||
+             group.block_y + anchor.y >= raw_quant_field.extent.height)) {
+          return Status::InvalidArgument(
+            "AC-group raw quantization field is incomplete");
+        }
+        const int32_t raw_quant = needs_raw_quant
+          ? raw_quant_field.Row(group.block_y + anchor.y)[
+              group.block_x + anchor.x]
+          : 1;
+        if (raw_quant < 1 || raw_quant > 256) {
+          return Status::InvalidArgument(
+            "AC-group raw quantization is out of range");
+        }
+        const uint32_t block_context = BlockContextValidated(
+          block_context_map, anchor.strategy, channel, raw_quant);
         candidate.push_back({
-          NonzeroContext(prediction, block_context),
+          NonzeroContext(
+            prediction, block_context, block_context_map.num_contexts),
           static_cast<uint32_t>(nonzeros),
         });
 
@@ -425,8 +467,9 @@ Status TokenizeSimpleAcGroupValidated(
           nonzeros > static_cast<int32_t>(anchor.coefficient_count / 16) ? 0
                                                                          : 1;
         const uint32_t histogram_offset =
-          static_cast<uint32_t>(kBlockContextCount * kNonZeroBucketCount
-                                + kZeroDensityContextCount * block_context);
+          static_cast<uint32_t>(
+            block_context_map.num_contexts * kSimpleNonzeroBucketCount +
+            kSimpleZeroDensityContextCount * block_context);
         for (size_t scan = covered_blocks;
              scan < anchor.coefficient_count && remaining_nonzeros != 0;
              ++scan) {
@@ -470,8 +513,10 @@ Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
   if (!status.ok()) {
     return status;
   }
+  const SimpleBlockContextMap block_context_map =
+    DefaultSimpleBlockContextMap();
   return TokenizeSimpleAcGroupValidated(
-    group, strategies, coefficient_orders, tokens);
+    group, strategies, coefficient_orders, block_context_map, {}, tokens);
 }
 
 Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
@@ -483,6 +528,7 @@ Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
 
 Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
                               const SimpleCoefficientOrders& orders,
+                              const SimpleBlockContextMap& block_context_map,
                               std::vector<SimpleAcGroupTokenStream>* groups) {
   if (groups == nullptr) {
     return Status::InvalidArgument("AC-group token output is null");
@@ -492,6 +538,10 @@ Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
     return status;
   }
   status = ValidateSimpleCoefficientOrders(orders);
+  if (!status.ok()) {
+    return status;
+  }
+  status = ValidateSimpleBlockContextMap(block_context_map);
   if (!status.ok()) {
     return status;
   }
@@ -512,7 +562,8 @@ Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
         .block_extent = group.block_extent,
       };
       status = TokenizeSimpleAcGroupValidated(
-        group, frame.strategies(), orders, &stream.tokens);
+        group, frame.strategies(), orders, block_context_map,
+        frame.raw_quant_field(), &stream.tokens);
       if (!status.ok()) {
         return status;
       }
@@ -525,6 +576,13 @@ Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
     return AllocationFailure();
   }
   return Status::Ok();
+}
+
+Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
+                              const SimpleCoefficientOrders& orders,
+                              std::vector<SimpleAcGroupTokenStream>* groups) {
+  return TokenizeSimpleAcGroups(
+    frame, orders, DefaultSimpleBlockContextMap(), groups);
 }
 
 Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,

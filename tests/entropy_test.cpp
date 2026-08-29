@@ -427,6 +427,92 @@ bool CheckInitialContextPreclustering() {
   return true;
 }
 
+bool CheckAnsRoundTripContract() {
+  const std::vector<gjxl::EntropyToken> tokens = ComplexFixtureTokens();
+  const std::array<std::vector<gjxl::EntropyToken>, 1> sections = {tokens};
+  gjxl::EntropyCode prefix;
+  gjxl::EntropyCode ans;
+  gjxl::EntropyCodeCost ans_cost;
+  gjxl::BitWriter model;
+  gjxl::BitWriter payload;
+  gjxl::BitWriter repeat_model;
+  gjxl::BitWriter repeat_payload;
+  if (!gjxl::OptimizeEntropyCode(
+        sections, {.context_count = 1}, &prefix).ok() ||
+      !gjxl::OptimizeAnsEntropyCode(
+        sections, prefix, &ans, &ans_cost).ok() ||
+      ans.mode != gjxl::EntropyCodingMode::kAns ||
+      ans.ans_log_alpha_size < 5 || ans.ans_log_alpha_size > 8 ||
+      ans.ans_histograms.empty() || !ans.prefix_codes.empty() ||
+      !gjxl::WriteEntropyCode(ans, &model).ok() ||
+      !gjxl::WriteTokenStream(tokens, ans, &payload).ok() ||
+      !gjxl::WriteEntropyCode(ans, &repeat_model).ok() ||
+      !gjxl::WriteTokenStream(tokens, ans, &repeat_payload).ok() ||
+      ans_cost.model_bits != model.bits_written() ||
+      ans_cost.token_bits != payload.bits_written() ||
+      model.bits_written() == 0 || payload.bits_written() < 32 ||
+      model.bits_written() != repeat_model.bits_written() ||
+      payload.bits_written() != repeat_payload.bits_written() ||
+      !std::ranges::equal(
+        model.padded_bytes(), repeat_model.padded_bytes()) ||
+      !std::ranges::equal(
+        payload.padded_bytes(), repeat_payload.padded_bytes())) {
+    std::cerr << "ANS model or payload contract failed\n";
+    return false;
+  }
+
+  gjxl::EntropyCode malformed = ans;
+  bool damaged = false;
+  for (gjxl::AnsHistogram& histogram : malformed.ans_histograms) {
+    for (std::vector<uint16_t>& reverse : histogram.reverse_maps) {
+      if (!reverse.empty()) {
+        reverse[0] = gjxl::kAnsTableSize;
+        damaged = true;
+        break;
+      }
+    }
+    if (damaged) break;
+  }
+  gjxl::BitWriter atomic;
+  if (!damaged || !atomic.WriteBits(3, 5).ok() ||
+      gjxl::WriteTokenStream(tokens, malformed, &atomic).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      atomic.bits_written() != 3 ||
+      !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
+    std::cerr << "Malformed ANS lookup changed its destination\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckAnsSmallHistograms() {
+  const std::array<std::vector<gjxl::EntropyToken>, 2> fixtures = {{
+    std::vector<gjxl::EntropyToken>(32, {0, 7}),
+    {{0, 3}, {0, 11}, {0, 3}, {0, 11}},
+  }};
+  for (size_t index = 0; index < fixtures.size(); ++index) {
+    const std::array<std::vector<gjxl::EntropyToken>, 1> sections = {
+      fixtures[index]};
+    gjxl::EntropyCode prefix;
+    gjxl::EntropyCode ans;
+    gjxl::BitWriter model;
+    gjxl::BitWriter payload;
+    if (!gjxl::OptimizeEntropyCode(
+          sections, {.context_count = 1}, &prefix).ok() ||
+        !gjxl::OptimizeAnsEntropyCode(sections, prefix, &ans).ok() ||
+        ans.ans_histograms.size() != 1 ||
+        std::ranges::count_if(
+          ans.ans_histograms[0].frequencies,
+          [](uint16_t frequency) { return frequency != 0; }) != index + 1 ||
+        !gjxl::WriteEntropyCode(ans, &model).ok() ||
+        !gjxl::WriteTokenStream(fixtures[index], ans, &payload).ok()) {
+      std::cerr << "ANS small-histogram fixture failed at " << index << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -440,7 +526,9 @@ int main() {
       !CheckDeterministicEntropyFixtures() ||
       !CheckBalancedOptimization() ||
       !CheckFullWidthMultiSectionOptimization() ||
-      !CheckInitialContextPreclustering()) {
+      !CheckInitialContextPreclustering() ||
+      !CheckAnsRoundTripContract() ||
+      !CheckAnsSmallHistograms()) {
     return EXIT_FAILURE;
   }
   std::cout << "All entropy primitive tests passed.\n";

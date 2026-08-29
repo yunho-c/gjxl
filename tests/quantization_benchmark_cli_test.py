@@ -78,8 +78,9 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 3)
+        self.assertEqual(document["schema_version"], 6)
         self.assertEqual(document["validation"], "metal-only")
+        self.assertEqual(document["density"], "default")
         self.assertEqual(document["sample_count"], 1)
         workload = document["workloads"][0]
         self.assertEqual(workload["codestream_comparison"], "not-compared")
@@ -96,6 +97,12 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertGreater(sample["entropy_clusters"]["dc"], 0)
         self.assertGreater(sample["entropy_clusters"]["ac"], 0)
         self.assertEqual(
+            set(sample["entropy_coding"]),
+            {"dc", "ac", "coefficient_order"},
+        )
+        for mode in sample["entropy_coding"].values():
+            self.assertIn(mode, {"prefix", "ans", "none"})
+        self.assertEqual(
             set(sample["coefficient_order"]),
             {"natural_bytes", "custom_bytes", "selected_mask"},
         )
@@ -106,11 +113,43 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertGreaterEqual(
             sample["coefficient_order"]["selected_mask"], 0
         )
+        self.assertEqual(
+            set(sample["block_context"]),
+            {
+                "candidate_count",
+                "compact_bytes",
+                "selected_index",
+                "selected_contexts",
+                "qf_thresholds",
+            },
+        )
+        self.assertGreater(sample["block_context"]["candidate_count"], 0)
+        self.assertGreater(sample["block_context"]["compact_bytes"], 2)
+        self.assertGreaterEqual(sample["block_context"]["selected_index"], 0)
+        self.assertGreater(sample["block_context"]["selected_contexts"], 0)
+        self.assertGreaterEqual(sample["block_context"]["qf_thresholds"], 0)
         self.assertEqual(set(sample["phase_nanoseconds"]), PHASES)
         for value in sample["phase_nanoseconds"].values():
             self.assertIsInstance(value, int)
             self.assertGreaterEqual(value, 0)
         self.assertFalse(list(self.directory.glob("samples.json.tmp-*")))
+
+    def test_high_density_is_explicit_in_raw_samples(self) -> None:
+        destination = self.directory / "high-density.json"
+        result = self.run_benchmark(
+            "--density",
+            "high",
+            "--validation",
+            "metal-only",
+            "--raw-samples",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["schema_version"], 6)
+        self.assertEqual(document["density"], "high")
+        self.assertIn("density=high", result.stdout)
 
     def test_failed_external_metallib_preserves_existing_output(self) -> None:
         destination = self.directory / "samples.json"

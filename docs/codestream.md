@@ -379,7 +379,9 @@ Metal, or missing capabilities use CPU before pipeline execution. Explicit
 `kCpu` and `kMetal` overrides are available. Forced Metal bypasses the
 automatic size, target, and device gates but never falls back; the broader
 quality range is an explicit unqualified override. Operational errors after
-GPU work starts are returned atomically instead of retrying on CPU.
+GPU work starts are returned atomically instead of retrying on CPU. The
+default density policy performs two AQ updates; the explicit high-density
+policy performs four on CPU, exact-coefficient Metal, or fully-resident Metal.
 
 Forced Metal additionally accepts `GpuAdaptiveQuantizationMode::kFullyResident`,
 `kThroughput`, and `kMaximumThroughput` as experimental first-class options.
@@ -403,6 +405,9 @@ The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and one
 of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus
 `--backend auto|cpu|metal` and
 `--metal-aq exact-coefficients|fully-resident|throughput|maximum-throughput`.
+`--high-density` selects four AQ updates for Butteraugli-target and target-size
+control. It is rejected with maximum-error, throughput, and maximum-throughput
+policies rather than being ignored or silently overridden.
 Size searches accept
 `--size-tolerance`, `--max-attempts`, and
 `--size-selection under-budget|closest`. All three experimental modes require
@@ -453,6 +458,9 @@ just encode input.png output.jxl 1.0
 # Experimental resident path:
 build/release/gjxl_encode --distance 1.0 --backend metal \
   --metal-aq fully-resident testdata/codestream_sample.pfm output.jxl
+# Four-update density search on the exact-coefficient path:
+build/release/gjxl_encode --distance 1.0 --high-density \
+  testdata/codestream_sample.pfm output.jxl
 # Or the explicitly bounded one-update policy:
 build/release/gjxl_encode --distance 1.0 --backend metal \
   --metal-aq throughput testdata/codestream_sample.pfm output.jxl
@@ -510,8 +518,8 @@ The following are explicitly outside the first codestream milestone:
 - adaptive DC smoothing;
 - progressive or multi-pass coding;
 - LZ77;
-- ANS entropy coding and broader size optimization beyond the bounded prefix
-  optimizer;
+- broader entropy clustering and size optimization beyond the bounded
+  prefix/ANS optimizer;
 - lossless and modular-only image coding; and
 - GPU tokenization or entropy coding.
 
@@ -522,8 +530,9 @@ silently inferred or partially signaled by the initial writer.
 
 The current writer prioritizes a correct, deterministic subset over exhaustive
 compression optimization. Its bounded prefix optimizer searches up to 32
-clusters and selects HybridUint configurations per cluster. The remaining
-major entropy-modeling limitation is a compact fixed block-context map.
+clusters and selects HybridUint configurations per cluster. Adaptive
+block-context selection is available for sufficiently large images, and the
+writer can serialize either prefix or ANS entropy models.
 Ordinary Butteraugli encoding uses libjxl's target- and pixel-dependent X/B
 quantization-matrix scales; maximum-error encoding retains `2/2`.
 
@@ -533,10 +542,10 @@ libjxl tools at `05be1775629f7fdc01beb70c118043b4b0c69d2a`.
 External Butteraugli scores were measured at 255 nits. The aggregate encoded
 sizes were:
 
-| Target distance | Initial | After #1 | After #2 | After #3 | #3 vs #2 | `cjxl -e 7` | #3 gap | `cjxl -e 9` | #3 gap |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | -1.72% | 151,714 B | -0.7% | 147,386 B | -3.5% |
-| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | -2.45% | 93,414 B | +0.7% | 88,578 B | -4.5% |
+| Target distance | Initial | After #1 | After #2 | After #3 | After #4 | After #5 | #5 vs #4 | `cjxl -e 7` | #5 gap | `cjxl -e 9` | #5 gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | 152,111 B | 148,137 B | -2.61% | 151,714 B | -2.4% | 147,386 B | +0.5% |
+| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | 92,065 B | 87,714 B | -4.73% | 93,414 B | -6.1% | 88,578 B | -1.0% |
 
 These are same-target rather than matched-quality results. The external scores
 were close but not identical, so the table indicates the scale of the current
@@ -661,22 +670,114 @@ replaced by corpus measurements as each step lands.
    Raw benchmark schema version 3 records natural/custom candidate sizes and
    the selected family mask alongside entropy bits, clusters, and phase timing.
 
-4. Make block-context maps adaptive for sufficiently large images (roughly two
-   to three days; small expected benefit on thumbnails and plausibly 1-2% on
-   larger images). Candidate maps can use raw quantization and strategy classes,
-   but must be selected by total serialized cost rather than token entropy
-   alone.
+4. **Complete (2026-08-28): make block-context maps adaptive for sufficiently
+   large images.** Images below 1,024 base blocks retain the exact compact-map
+   path and checked codestream bytes. Larger images consider the compact map,
+   the JPEG XL default map, one- and two-context channel maps, and a
+   deterministic occurrence-clustered strategy map. Images with at least 8,192
+   base blocks additionally consider a median raw-quant split. Every map is
+   crossed with the eligible natural/custom coefficient order, receives an
+   independent prefix model, and is selected by exact complete-codestream bytes
+   including map signaling, entropy models, TOC selectors, and padding. The
+   compact candidate is always present, and exact ties prefer natural order and
+   then the earlier map.
 
-5. Add a full ANS path only after the prefix optimizer establishes the remaining
-   gap (roughly one to two weeks; plausibly another 2-4%). This is broader and
-   riskier than improving the current code, so the earlier measurements should
-   determine whether it is justified.
+   On the established four-image PFM corpus, all eight target/image cases
+   selected an alternate map. Aggregate size changed from 152,722 to 152,111
+   bytes at distance 1 (-0.40%) and from 92,746 to 92,065 bytes at distance 2
+   (-0.73%), with no individual regression. One-, two-, and three-context maps
+   all won at least one case. Pinned `djxl` accepted every output, and each
+   decoded PFM was byte-identical to its pre-change decode. A separate
+   1024x768 natural-image check selected the ten-context, one-quant-threshold
+   candidate; its benchmark codestream was 181,288 bytes versus 181,517 bytes
+   for the compact candidate, and pinned `djxl` accepted the result. This is a
+   real gain, but below the original 1-2% hypothesis.
 
-6. Offer four adaptive-quantization iterations as an optional high-density mode
-   (less than one day; probably below 1%). The internal workflow already permits
-   up to four iterations, while the public workflow currently fixes two. This
-   should remain an explicit slower mode because the encode-time increase is
-   likely much larger than the size improvement.
+   A five-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per round. CPU serializer median changed from 29.396
+   ms (28.134-29.844) to 54.739 ms (53.767-56.527), while complete CPU workflow
+   median changed from 919.861 to 941.536 ms (+2.36%). Metal serializer median
+   changed from 28.631 ms (27.395-29.687) to 55.177 ms (53.702-65.450), while
+   complete Metal workflow median changed from 129.585 to 160.602 ms (+23.9%).
+   The size search is host-side and intentionally bounded away from thumbnails,
+   but its cost is material on the faster Metal frontend. Raw benchmark schema
+   version 4 records the candidate count, compact-candidate bytes, selected map
+   index/context count, and raw-quant-threshold count.
+
+5. **Complete (2026-08-29): add a native ANS entropy path with an exact prefix
+   fallback.** The writer now supports JPEG XL's 12-bit ANS tables with
+   deterministic count normalization, alias-based encoder lookup tables,
+   general and one-/two-symbol histogram serialization, reverse-order state
+   updates, and full-width HybridUint extra bits. Production code has no
+   libjxl dependency; the adapted model and state logic retains upstream BSD
+   attribution.
+
+   Each DC, AC, and eligible coefficient-order model first runs the established
+   prefix optimizer. ANS reuses that optimized context partition and per-cluster
+   HybridUint configuration, then competes on its exact serialized model and
+   payload bits. Strict local ties retain prefix coding. Because section padding,
+   TOC selectors, and interactions between independently selected models can
+   erase a local bit win, every block-map/order candidate additionally measures
+   the complete all-prefix codestream. The all-prefix form wins complete-byte
+   ties. This bounded comparison deliberately does not enumerate every mixed
+   prefix/ANS combination, but it guarantees that enabling ANS cannot make a
+   selected complete candidate larger than its former prefix form.
+
+   On the established four-image PFM corpus, all eight target/image cases used
+   ANS for AC, while DC and coefficient-order models selected prefix or ANS
+   independently. Aggregate size changed from 152,111 to 148,137 bytes at
+   distance 1 (-2.61%) and from 92,065 to 87,714 bytes at distance 2 (-4.73%).
+   The combined reduction was 8,325 bytes (-3.41%), with every individual case
+   improving. Pinned `djxl` accepted all eight outputs, and every decoded PFM
+   was byte-identical to its #4 counterpart. The checked 17x13 sample retained
+   its 259-byte codestream and SHA-256 because the exact all-prefix tie fallback
+   preserved its previous bytes.
+
+   A five-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per round. CPU serializer median changed from 53.146
+   ms (52.022-56.373) to 62.002 ms (59.801-78.186), +16.7%; complete CPU
+   workflow median changed from 954.003 to 965.412 ms, +1.20%. Metal serializer
+   median changed from 54.851 ms (52.903-59.325) to 60.152 ms
+   (59.195-65.062), +9.66%; complete Metal workflow median changed from 149.283
+   to 152.101 ms, +1.89%. The additional complete-prefix measurement roughly
+   doubled section-writing time, but remained a small fraction of either full
+   workflow. Raw benchmark schema version 5 reports the selected DC, AC, and
+   coefficient-order entropy modes.
+
+   Unit coverage pins deterministic ANS model/payload construction, exact cost
+   attribution, malformed reverse-map atomicity, and an encoder fixture that
+   selects ANS. The focused CLI, generated-sample, encoder, entropy, raw-schema,
+   and installed-decoder smoke gates all pass.
+
+6. **Complete (2026-08-29): offer four adaptive-quantization updates as an
+   optional high-density mode.** `VarDctDensityMode::kHighDensity` and the CLI's
+   `--high-density` opt into four updates; the default remains two and retains
+   its checked codestream bytes. The policy is supported by CPU,
+   exact-coefficient Metal, fully-resident Metal, and target-size searches.
+   Maximum-error has its own fixed hard-bound search, while throughput and
+   maximum-throughput intentionally perform less work, so those combinations
+   are rejected atomically.
+
+   Extra updates improve quality at the same requested target rather than
+   directly minimizing bytes. On the four-image PFM corpus, same-target size
+   changed from 148,137 to 148,489 bytes at distance 1 (+0.24%) and from 87,714
+   to 87,991 bytes at distance 2 (+0.32%); every changed case had a lower
+   external Butteraugli score. A bounded six-step per-image target search then
+   matched the #5 external scores within 0.000954 at distance 1 and 0.000631 at
+   distance 2. At those directional matched-quality points, aggregate size was
+   147,688 bytes (-0.30%) and 87,148 bytes (-0.65%), respectively. Two of the
+   eight cases were already unchanged after four updates. Pinned `djxl`
+   accepted every same-target output, and the conformance target now includes
+   the checked high-density public workflow.
+
+   A five-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per mode and round. CPU quantization-pipeline median
+   changed from 760.846 to 1,144.865 ms (+50.5%), and complete CPU workflow
+   median changed from 960.907 to 1,345.529 ms (+40.0%). Metal quantization
+   changed from 63.971 to 87.426 ms (+36.7%), and complete Metal workflow from
+   157.274 to 179.700 ms (+14.3%). The sub-1% directional density gain therefore
+   comes with a deliberately substantial runtime cost, which is why the mode is
+   explicit. Raw benchmark schema version 6 records `density=default|high`.
 
 LZ77, adaptive DC smoothing, additional transform decisions, patches/dots/
 splines, chroma subsampling, and GPU entropy coding are not first-line size
