@@ -1216,11 +1216,11 @@ original CPU Gaborish and DCT-domain iterative initial-CfL paths. After strategy
 selection, each resident mode computes one fast strategy-aware final-CfL map
 from the adjusted initial quant field and reuses it across perceptual
 evaluations; the exact path retains evaluation-local quant-dependent maps.
-The separate throughput mode retains the resident coefficient path while
-limiting the complete quantization pipeline to one AQ update. Direct fully
-resident AQ APIs still honor their requested iteration count; the bounded
-policy is therefore explicit rather than a hidden reinterpretation of
-`kFullyResident`.
+The separate throughput mode retains the resident coefficient path. Complete
+diagnostic calls retain the explicit one-update policy. Encoding-only calls
+apply both default updates, then quantize the resulting final field into the
+frame without reconstructing and perceptually scoring it again. Direct fully
+resident AQ APIs still honor their requested iteration count.
 
 Resident coefficient coding now composes the pinned `AdjustQuantBlockAC`
 heuristic into the existing per-transform Metal kernel. It selects one shared

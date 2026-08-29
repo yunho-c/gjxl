@@ -37,8 +37,9 @@ Four accuracy tracks are explicit:
   measured for Butteraugli/decoded-pixel drift. Any policy or quality change is
   reported instead of being hidden behind a tolerance.
 - `throughput` is a more aggressive opt-in policy layered on the resident
-  evaluator. It performs one AQ update instead of the default two and reports
-  its additional size and quality drift separately.
+  evaluator. Encoding applies the default two AQ updates but omits the third,
+  diagnostic-only reconstruction and perceptual score; diagnostic APIs retain
+  their earlier one-update tradeoff.
 - `maximum-throughput` is the explicit speed-first track. It uses only DCT8,
   quantizes the adjusted initial field directly on Metal, and omits inverse
   reconstruction and perceptual AQ scoring. Its score history is therefore
@@ -564,6 +565,44 @@ CPU quantization-pipeline score mismatch of
 `4.4524669647216797e-05`. Focused coverage additionally verifies that repeated
 fully-resident targets retain the exact same evaluator allocation and preserve
 frame and codestream output.
+
+#### Final-field frame-only experiment (2026-08-29)
+
+The resident dependency audit found no identical AQ iteration to cache or
+remove. Between the first and second updates, every float field entry changed
+at both padded 1080p and padded 4K. The final raw-quant grid changed in
+`3936/32400` and `15071/129600` blocks, respectively, and the device quantizer
+changed from `4644/16` to `4563/17` at 1080p and from `4647/16` to `4561/17`
+at 4K. Because the global quantizer changes, unchanged raw-quant blocks do not
+provide a safe reconstruction-reuse boundary.
+
+The retained experiment instead changes only explicit throughput encoding.
+It performs both configured AQ evaluations and dependent field updates, then
+runs the resident quantizer and coefficient encoder once for the resulting
+field. It omits inverse transforms, reconstructed-pixel scatter, loop filters,
+opsin-to-linear conversion, Butteraugli, block reduction, and the final
+non-updating policy dispatch. Fully-resident mode still evaluates that final
+field and returns all three scores. Throughput returns its two actually
+evaluated scores; its final frame has no corresponding perceptual diagnostic.
+
+Matched schema-3 profiles on the Apple M4 Pro used SIMD AQ at distance `1.2`,
+two warmups, and seven samples. Stage coverage was `99.958%` at 1080p and
+`99.967%` at 4K. The final frame-only quantizer/coefficient work measured
+approximately `5.41 ms` and `17.03 ms`, respectively.
+
+| Workload | Full resident GPU buffer | Final-frame GPU buffer | Delta | Full resident AQ wall span | Final-frame AQ wall span | Delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `53.937 ms` | `42.495 ms` | `-21.2%` | `60.735 ms` | `49.810 ms` | `-18.0%` |
+| Padded 4K | `206.008 ms` | `162.167 ms` | `-21.3%` | `230.939 ms` | `206.446 ms` | `-10.6%` |
+
+One same-process public-workflow screen measured quantization medians of
+`130.144` versus `148.094 ms` at 1080p (`-12.1%`) and `506.602` versus
+`537.848 ms` at 4K (`-5.8%`). Complete public medians were noisy because the
+host entropy tail dominated and had wide ranges, so they are not retained as
+an end-to-end speedup claim. Both large-workload modes produced the same byte
+counts (`420268` and `1640942`), and the focused public integration test
+requires byte-for-byte throughput/fully-resident codestream equality plus
+exact equality of the two shared score-history entries.
 
 ## Ordered implementation plan
 

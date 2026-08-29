@@ -99,7 +99,9 @@ the outer rate-control request:
   the only Metal mode eligible for automatic selection;
 - `fully-resident` keeps iterative coefficient coding, reconstruction, and
   scoring on Metal for the requested AQ iteration count;
-- `throughput` uses the same resident path with one AQ update; and
+- `throughput` uses the same resident path, applies both default updates for
+  encoding, and omits the final field's diagnostic reconstruction and score;
+  and
 - `maximum-throughput` fixes DCT8, encodes the adjusted initial field, and
   skips reconstruction and perceptual scoring.
 
@@ -411,9 +413,10 @@ inconsistent byte count or summary remains a terminal internal-contract error.
 default. `kClosestAbsolute` minimizes absolute byte error and prefers the
 under-budget candidate on equal-distance ties. Equal-size candidates in both
 modes use final score when present and then the lower Butteraugli target as a
-stable tie-break. A scoreless maximum-throughput candidate remains valid
-because serialized size, not an internal perceptual evaluation, is the rate
-contract.
+stable tie-break. Throughput's retained scores precede its final encoded field,
+so they are not used as final-score tie-breaks. A scoreless
+maximum-throughput candidate remains valid because serialized size, not an
+internal perceptual evaluation, is the rate contract.
 
 ### 12. Reuse target-invariant preparation across attempts
 
