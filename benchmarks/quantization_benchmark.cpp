@@ -852,6 +852,11 @@ struct RawWorkflowSample {
   size_t natural_candidate_bytes = 0;
   size_t custom_order_candidate_bytes = 0;
   uint16_t selected_coefficient_order_mask = 0;
+  size_t block_context_candidate_count = 0;
+  size_t compact_block_context_candidate_bytes = 0;
+  size_t selected_block_context_candidate_index = 0;
+  size_t selected_block_context_count = 0;
+  size_t selected_block_context_qf_threshold_count = 0;
   bool has_final_score = false;
   double final_score = 0.0;
 };
@@ -959,7 +964,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 3,\n"
+           << "  \"schema_version\": 4,\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
            << "  \"validation\": \""
@@ -1003,6 +1008,16 @@ void WriteRawWorkflowSamples(
                << sample.custom_order_candidate_bytes
                << ", \"selected_mask\": "
                << sample.selected_coefficient_order_mask << "}"
+               << ", \"block_context\": {\"candidate_count\": "
+               << sample.block_context_candidate_count
+               << ", \"compact_bytes\": "
+               << sample.compact_block_context_candidate_bytes
+               << ", \"selected_index\": "
+               << sample.selected_block_context_candidate_index
+               << ", \"selected_contexts\": "
+               << sample.selected_block_context_count
+               << ", \"qf_thresholds\": "
+               << sample.selected_block_context_qf_threshold_count << "}"
                << ", \"final_score\": ";
         if (sample.has_final_score) {
           output << std::setprecision(17) << sample.final_score;
@@ -1495,6 +1510,16 @@ void RunPublicWorkflowOnlyWorkload(
       profile.codestream.custom_order_candidate_bytes;
     raw_sample.selected_coefficient_order_mask =
       profile.codestream.selected_coefficient_order_mask;
+    raw_sample.block_context_candidate_count =
+      profile.codestream.block_context_candidate_count;
+    raw_sample.compact_block_context_candidate_bytes =
+      profile.codestream.compact_block_context_candidate_bytes;
+    raw_sample.selected_block_context_candidate_index =
+      profile.codestream.selected_block_context_candidate_index;
+    raw_sample.selected_block_context_count =
+      profile.codestream.selected_block_context_count;
+    raw_sample.selected_block_context_qf_threshold_count =
+      profile.codestream.selected_block_context_qf_threshold_count;
     raw_sample.has_final_score = !summary.score_history.empty();
     if (raw_sample.has_final_score) {
       raw_sample.final_score = summary.score_history.back();

@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "codestream/block_context_map.h"
 #include "codestream/simple_ac_context.h"
 
 namespace gjxl {
@@ -176,16 +177,72 @@ Status WriteQuantizerInternal(QuantizerParams params, BitWriter* writer) {
   return WriteFields(writer, fields);
 }
 
-Status WriteCompactBlockContextMap(BitWriter* writer) {
+Status WriteQuantizationThreshold(uint32_t threshold, BitWriter* writer) {
+  if (threshold == 0 || threshold > 255) {
+    return Status::InvalidArgument(
+      "Block-context quantization threshold is invalid");
+  }
+  const uint32_t value = threshold - 1;
+  if (value < 4) {
+    const std::array fields = {BitField{2, 0}, BitField{2, value}};
+    return WriteFields(writer, fields);
+  }
+  if (value < 12) {
+    const std::array fields = {BitField{2, 1}, BitField{3, value - 4}};
+    return WriteFields(writer, fields);
+  }
+  if (value < 44) {
+    const std::array fields = {BitField{2, 2}, BitField{5, value - 12}};
+    return WriteFields(writer, fields);
+  }
+  const std::array fields = {BitField{2, 3}, BitField{8, value - 44}};
+  return WriteFields(writer, fields);
+}
+
+Status WriteBlockContextMap(
+  const SimpleBlockContextMap& block_context_map,
+  BitWriter* writer) {
+
+  Status status = ValidateSimpleBlockContextMap(block_context_map);
+  if (!status.ok()) {
+    return status;
+  }
+  // The JPEG XL default map has a dedicated one-bit representation. The
+  // simple four-context map and adaptive maps use the general representation.
+  static const SimpleBlockContextMap kJxlDefault =
+    JxlDefaultSimpleBlockContextMap();
+  if (block_context_map == kJxlDefault) {
+    return writer->WriteBits(1, 1);
+  }
+  if (Status write = writer->WriteBits(1, 0); !write.ok()) {
+    return write;
+  }
+  // This profile does not split block contexts by quantized DC.
+  const std::array<BitField, 3> dc_threshold_counts = {{
+    {4, 0}, {4, 0}, {4, 0},
+  }};
+  if (Status write = WriteFields(writer, dc_threshold_counts); !write.ok()) {
+    return write;
+  }
+  if (Status write = writer->WriteBits(
+        4, block_context_map.qf_thresholds.size());
+      !write.ok()) {
+    return write;
+  }
+  for (uint32_t threshold : block_context_map.qf_thresholds) {
+    if (Status write = WriteQuantizationThreshold(threshold, writer);
+        !write.ok()) {
+      return write;
+    }
+  }
   EntropyCode map;
-  map.context_count = codestream_internal::kSimpleBlockContextMap.size();
-  map.context_map.assign(
-    codestream_internal::kSimpleBlockContextMap.begin(),
-    codestream_internal::kSimpleBlockContextMap.end());
+  map.context_count = block_context_map.context_map.size();
+  map.context_map = block_context_map.context_map;
   // Prefix codes are irrelevant to context-map serialization, but retaining
-  // the four referenced clusters keeps the EntropyCode structurally valid.
-  map.uint_configs.resize(4, kDefaultHybridUintConfig);
-  map.prefix_codes.resize(4);
+  // the referenced clusters keeps the EntropyCode structurally valid.
+  map.uint_configs.resize(
+    block_context_map.num_contexts, kDefaultHybridUintConfig);
+  map.prefix_codes.resize(block_context_map.num_contexts);
   return WriteContextMap(map, writer);
 }
 
@@ -316,7 +373,9 @@ Status WriteSimpleQuantizer(QuantizerParams params, BitWriter* writer) {
 
 Status WriteSimpleDcGlobal(
   QuantizerParams params, size_t dc_group_count,
-  const EntropyCode& dc_code, BitWriter* writer) {
+  const SimpleBlockContextMap& block_context_map,
+  const EntropyCode& dc_code,
+  BitWriter* writer) {
 
   if (writer == nullptr) {
     return Status::InvalidArgument("DC-global output is null");
@@ -330,11 +389,9 @@ Status WriteSimpleDcGlobal(
         !status.ok()) {
       return status;
     }
-    const std::array<BitField, 2> block_context = {{{1, 0}, {16, 0}}};
-    if (Status status = WriteFields(&temporary, block_context); !status.ok()) {
-      return status;
-    }
-    if (Status status = WriteCompactBlockContextMap(&temporary); !status.ok()) {
+    if (Status status = WriteBlockContextMap(
+          block_context_map, &temporary);
+        !status.ok()) {
       return status;
     }
     if (Status status = temporary.WriteBits(1, 1); !status.ok()) {
@@ -356,6 +413,13 @@ Status WriteSimpleDcGlobal(
   } catch (const std::length_error&) {
     return AllocationFailure("DC-global allocation is too large");
   }
+}
+
+Status WriteSimpleDcGlobal(
+  QuantizerParams params, size_t dc_group_count,
+  const EntropyCode& dc_code, BitWriter* writer) {
+  return WriteSimpleDcGlobal(
+    params, dc_group_count, DefaultSimpleBlockContextMap(), dc_code, writer);
 }
 
 Status WriteSimpleAcGlobal(

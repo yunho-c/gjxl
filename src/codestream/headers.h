@@ -18,6 +18,8 @@
 
 namespace gjxl {
 
+struct SimpleBlockContextMap;
+
 /// Writes the raw marker, size, and initial-profile image metadata.
 [[nodiscard]] Status WriteSimpleCodestreamHeader(
   Extent2D frame_extent, BitWriter* writer);
@@ -34,6 +36,14 @@ namespace gjxl {
 [[nodiscard]] Status WriteSimpleDcGlobal(
   QuantizerParams params, size_t dc_group_count,
   const EntropyCode& dc_code, BitWriter* writer);
+
+/// Writes DC global with the supplied validated AC block-context map.
+[[nodiscard]] Status WriteSimpleDcGlobal(
+  QuantizerParams params,
+  size_t dc_group_count,
+  const SimpleBlockContextMap& block_context_map,
+  const EntropyCode& dc_code,
+  BitWriter* writer);
 
 /// Writes the complete initial-profile AC global section.
 [[nodiscard]] Status WriteSimpleAcGlobal(

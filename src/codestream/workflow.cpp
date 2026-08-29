@@ -78,6 +78,16 @@ void AccumulateCodestreamProfile(
     source.custom_order_candidate_bytes;
   destination->selected_coefficient_order_mask |=
     source.selected_coefficient_order_mask;
+  destination->block_context_candidate_count +=
+    source.block_context_candidate_count;
+  destination->compact_block_context_candidate_bytes +=
+    source.compact_block_context_candidate_bytes;
+  destination->selected_block_context_candidate_index =
+    source.selected_block_context_candidate_index;
+  destination->selected_block_context_count +=
+    source.selected_block_context_count;
+  destination->selected_block_context_qf_threshold_count +=
+    source.selected_block_context_qf_threshold_count;
   destination->section_writing_nanoseconds +=
     source.section_writing_nanoseconds;
   destination->assembly_nanoseconds += source.assembly_nanoseconds;

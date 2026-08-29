@@ -283,6 +283,11 @@ bool CheckEncodedFrame(
       profile.dc_entropy_clusters == 0 ||
       profile.ac_entropy_clusters == 0 ||
       profile.natural_candidate_bytes == 0 ||
+      profile.block_context_candidate_count != 1 ||
+      profile.compact_block_context_candidate_bytes != first.size() ||
+      profile.selected_block_context_candidate_index != 0 ||
+      profile.selected_block_context_count != 4 ||
+      profile.selected_block_context_qf_threshold_count != 0 ||
       profile.selected_coefficient_order_mask != expected_order_mask ||
       (profile.custom_order_candidate_bytes != 0) != expect_custom_candidate ||
       (expected_order_mask == 0 && expect_custom_candidate &&
@@ -297,6 +302,34 @@ bool CheckEncodedFrame(
     std::cerr << "Encoded " << width << 'x' << height
               << " fixture failed: " << status.message()
               << ", size=" << first.size() << ", hash=" << hash << '\n';
+    return false;
+  }
+  return true;
+}
+
+bool CheckAdaptiveBlockContextSelection() {
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::Status status = MakeFrame(256, 256, {3541, 10}, {}, &frame);
+  std::vector<uint8_t> output;
+  gjxl::codestream_internal::VarDctCodestreamProfile profile;
+  if (status.ok()) {
+    status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+      frame, &output, &profile);
+  }
+  if (!status.ok() || profile.block_context_candidate_count != 5 ||
+      profile.compact_block_context_candidate_bytes == 0 ||
+      output.size() > profile.compact_block_context_candidate_bytes ||
+      profile.selected_block_context_candidate_index >=
+        profile.block_context_candidate_count ||
+      profile.selected_block_context_count == 0 ||
+      profile.selected_block_context_count > 16 ||
+      profile.selected_block_context_qf_threshold_count != 0) {
+    std::cerr << "Adaptive block-context selection failed: "
+              << status.message() << ", bytes=" << output.size()
+              << ", compact="
+              << profile.compact_block_context_candidate_bytes
+              << ", selected="
+              << profile.selected_block_context_candidate_index << '\n';
     return false;
   }
   return true;
@@ -352,7 +385,8 @@ bool CheckAtomicRejections() {
 
 int main() {
   if (!CheckCodestreamAndFrameHeaders() || !CheckQuantizerSelectors() ||
-      !CheckAssemblyAndDeterminism() || !CheckAtomicRejections()) {
+      !CheckAssemblyAndDeterminism() || !CheckAdaptiveBlockContextSelection() ||
+      !CheckAtomicRejections()) {
     return EXIT_FAILURE;
   }
   std::cout << "All codestream encoder tests passed.\n";

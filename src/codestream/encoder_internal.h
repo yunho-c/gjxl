@@ -29,6 +29,12 @@ struct VarDctCodestreamProfile {
   size_t custom_order_candidate_bytes = 0;
   /// Zero when natural order wins; otherwise the selected on-wire family mask.
   uint16_t selected_coefficient_order_mask = 0;
+  /// Number of distinct block-map candidates measured by the serializer.
+  size_t block_context_candidate_count = 0;
+  size_t compact_block_context_candidate_bytes = 0;
+  size_t selected_block_context_candidate_index = 0;
+  size_t selected_block_context_count = 0;
+  size_t selected_block_context_qf_threshold_count = 0;
   uint64_t section_writing_nanoseconds = 0;
   uint64_t assembly_nanoseconds = 0;
   uint64_t total_nanoseconds = 0;

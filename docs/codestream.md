@@ -522,8 +522,9 @@ silently inferred or partially signaled by the initial writer.
 
 The current writer prioritizes a correct, deterministic subset over exhaustive
 compression optimization. Its bounded prefix optimizer searches up to 32
-clusters and selects HybridUint configurations per cluster. The remaining
-major entropy-modeling limitation is a compact fixed block-context map.
+clusters and selects HybridUint configurations per cluster. Adaptive
+block-context selection is available for sufficiently large images, but the
+writer still lacks the format's ANS entropy path.
 Ordinary Butteraugli encoding uses libjxl's target- and pixel-dependent X/B
 quantization-matrix scales; maximum-error encoding retains `2/2`.
 
@@ -533,10 +534,10 @@ libjxl tools at `05be1775629f7fdc01beb70c118043b4b0c69d2a`.
 External Butteraugli scores were measured at 255 nits. The aggregate encoded
 sizes were:
 
-| Target distance | Initial | After #1 | After #2 | After #3 | #3 vs #2 | `cjxl -e 7` | #3 gap | `cjxl -e 9` | #3 gap |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | -1.72% | 151,714 B | -0.7% | 147,386 B | -3.5% |
-| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | -2.45% | 93,414 B | +0.7% | 88,578 B | -4.5% |
+| Target distance | Initial | After #1 | After #2 | After #3 | After #4 | #4 vs #3 | `cjxl -e 7` | #4 gap | `cjxl -e 9` | #4 gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | 152,111 B | -0.40% | 151,714 B | -0.3% | 147,386 B | -3.1% |
+| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | 92,065 B | -0.73% | 93,414 B | +1.5% | 88,578 B | -3.8% |
 
 These are same-target rather than matched-quality results. The external scores
 were close but not identical, so the table indicates the scale of the current
@@ -661,11 +662,39 @@ replaced by corpus measurements as each step lands.
    Raw benchmark schema version 3 records natural/custom candidate sizes and
    the selected family mask alongside entropy bits, clusters, and phase timing.
 
-4. Make block-context maps adaptive for sufficiently large images (roughly two
-   to three days; small expected benefit on thumbnails and plausibly 1-2% on
-   larger images). Candidate maps can use raw quantization and strategy classes,
-   but must be selected by total serialized cost rather than token entropy
-   alone.
+4. **Complete (2026-08-28): make block-context maps adaptive for sufficiently
+   large images.** Images below 1,024 base blocks retain the exact compact-map
+   path and checked codestream bytes. Larger images consider the compact map,
+   the JPEG XL default map, one- and two-context channel maps, and a
+   deterministic occurrence-clustered strategy map. Images with at least 8,192
+   base blocks additionally consider a median raw-quant split. Every map is
+   crossed with the eligible natural/custom coefficient order, receives an
+   independent prefix model, and is selected by exact complete-codestream bytes
+   including map signaling, entropy models, TOC selectors, and padding. The
+   compact candidate is always present, and exact ties prefer natural order and
+   then the earlier map.
+
+   On the established four-image PFM corpus, all eight target/image cases
+   selected an alternate map. Aggregate size changed from 152,722 to 152,111
+   bytes at distance 1 (-0.40%) and from 92,746 to 92,065 bytes at distance 2
+   (-0.73%), with no individual regression. One-, two-, and three-context maps
+   all won at least one case. Pinned `djxl` accepted every output, and each
+   decoded PFM was byte-identical to its pre-change decode. A separate
+   1024x768 natural-image check selected the ten-context, one-quant-threshold
+   candidate; its benchmark codestream was 181,288 bytes versus 181,517 bytes
+   for the compact candidate, and pinned `djxl` accepted the result. This is a
+   real gain, but below the original 1-2% hypothesis.
+
+   A five-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per round. CPU serializer median changed from 29.396
+   ms (28.134-29.844) to 54.739 ms (53.767-56.527), while complete CPU workflow
+   median changed from 919.861 to 941.536 ms (+2.36%). Metal serializer median
+   changed from 28.631 ms (27.395-29.687) to 55.177 ms (53.702-65.450), while
+   complete Metal workflow median changed from 129.585 to 160.602 ms (+23.9%).
+   The size search is host-side and intentionally bounded away from thumbnails,
+   but its cost is material on the faster Metal frontend. Raw benchmark schema
+   version 4 records the candidate count, compact-candidate bytes, selected map
+   index/context count, and raw-quant-threshold count.
 
 5. Add a full ANS path only after the prefix optimizer establishes the remaining
    gap (roughly one to two weeks; plausibly another 2-4%). This is broader and
