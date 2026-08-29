@@ -111,7 +111,6 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_raw_quant;
   NS::SharedPtr<MTL::ComputePipelineState> adjust_quant_field;
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_select_initialize;
-  NS::SharedPtr<MTL::ComputePipelineState> resident_quant_histogram_reset;
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_histogram;
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_select_bucket;
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_finalize_quantizer;

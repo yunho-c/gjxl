@@ -63,6 +63,7 @@ struct AqResetParams {
   uint32_t test_error_mask;
   uint32_t preserve_error;
   uint32_t preserve_forward_coefficients;
+  uint32_t poison_outputs;
 };
 
 struct AqResidentPolicyInitializeParams {

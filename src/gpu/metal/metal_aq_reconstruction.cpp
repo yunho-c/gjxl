@@ -169,10 +169,12 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     BindPlane(encoder, self.reconstruction_error_, 9);
     BindPlane(encoder, self.block_distance_, 10);
     encoder->setBytes(&self.reset_params_, sizeof(self.reset_params_), 11);
-    DispatchThreads1d(encoder,
-                      std::max({self.coefficient_value_count_,
-                                3 * self.block_count_, self.pixel_count_,
-                                self.block_count_}));
+    const size_t reset_count = self.reset_params_.poison_outputs != 0u
+      ? std::max({self.coefficient_value_count_,
+                  3 * self.block_count_, self.pixel_count_,
+                  self.block_count_})
+      : 1u;
+    DispatchThreads1d(encoder, reset_count);
   }
 
   if (self.resident_quantization_active_) {
@@ -232,7 +234,9 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
       DispatchMetalThreadgroups(
           encoder,
           MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
-          MTL::Size(kAqThreadCount, 1, 1));
+          MTL::Size(std::min<NS::UInteger>(
+                        kAqThreadCount, batch.coefficient_count),
+                    1, 1));
     }
 
     backend.EncodeTransformBatch(
@@ -261,28 +265,25 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
   encoder->setComputePipelineState(
       backend.aq_pipelines_.resident_quant_select_initialize.get());
   BindPlane(encoder, resident_quant_selection_state_, 0);
+  BindPlane(encoder, resident_quant_histogram_, 1);
   encoder->setBytes(&resident_quant_selection_params_,
-                    sizeof(resident_quant_selection_params_), 1);
-  DispatchThreads1d(encoder, 1);
+                    sizeof(resident_quant_selection_params_), 2);
+  DispatchThreads1d(encoder, 256);
 
   const auto encode_selection = [&](bool deviation) {
     if (deviation) {
       encoder->setComputePipelineState(
           backend.aq_pipelines_.resident_quant_select_initialize.get());
       BindPlane(encoder, resident_quant_selection_state_, 0);
+      BindPlane(encoder, resident_quant_histogram_, 1);
       encoder->setBytes(&resident_quant_selection_params_,
-                        sizeof(resident_quant_selection_params_), 1);
-      DispatchThreads1d(encoder, 1);
+                        sizeof(resident_quant_selection_params_), 2);
+      DispatchThreads1d(encoder, 256);
     }
     constexpr std::array<uint32_t, 4> kShifts = {24, 16, 8, 0};
     for (uint32_t shift : kShifts) {
       const AqResidentQuantSelectionPass pass{
           shift, deviation ? 1u : 0u};
-      encoder->setComputePipelineState(
-          backend.aq_pipelines_.resident_quant_histogram_reset.get());
-      BindPlane(encoder, resident_quant_histogram_, 0);
-      DispatchThreads1d(encoder, 256);
-
       encoder->setComputePipelineState(
           backend.aq_pipelines_.resident_quant_histogram.get());
       BindPlane(encoder, resident_quant_field_, 0);
@@ -300,7 +301,7 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
       BindPlane(encoder, resident_quant_selection_state_, 1);
       BindPlane(encoder, resident_quant_statistics_, 2);
       encoder->setBytes(&pass, sizeof(pass), 3);
-      DispatchThreads1d(encoder, 1);
+      DispatchThreads1d(encoder, 256);
     }
   };
   encode_selection(false);
@@ -1276,10 +1277,12 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
   }
 
   std::unique_ptr<GpuSubmission> submission;
+  reset_params_.poison_outputs = 1u;
   status = backend_->SubmitCompute(
       "gjxl prepared AQ coefficient reconstruction",
       &MetalPreparedAqEvaluation::EncodeReconstructionSubmission, this,
       &submission);
+  reset_params_.poison_outputs = 0u;
   if (!status.ok() || submission == nullptr) {
     Invalidate();
     return status.ok()

@@ -75,7 +75,7 @@ void DispatchThreads1d(MTL::ComputeCommandEncoder* encoder,
 static_assert(std::is_standard_layout_v<AqReconstructionParams>);
 static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
 static_assert(sizeof(AqReconstructionParams) == 136);
-static_assert(sizeof(AqResetParams) == 28);
+static_assert(sizeof(AqResetParams) == 32);
 static_assert(sizeof(AqResidentPolicyInitializeParams) == 20);
 static_assert(sizeof(AqResidentPolicyUpdateParams) == 44);
 static_assert(std::is_standard_layout_v<AqInitialCflParams>);
@@ -4015,7 +4015,7 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      30>
+      29>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
@@ -4047,8 +4047,6 @@ Status CreateAqPipelines(
           {"gjxl_aq_adjust_quant_field", &pipelines.adjust_quant_field},
           {"gjxl_aq_resident_quant_select_initialize",
            &pipelines.resident_quant_select_initialize},
-          {"gjxl_aq_resident_quant_histogram_reset",
-           &pipelines.resident_quant_histogram_reset},
           {"gjxl_aq_resident_quant_histogram",
            &pipelines.resident_quant_histogram},
           {"gjxl_aq_resident_quant_select_bucket",

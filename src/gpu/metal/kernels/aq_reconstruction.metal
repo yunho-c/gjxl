@@ -45,6 +45,7 @@ struct AqResetParams {
   uint test_error_mask;
   uint preserve_error;
   uint preserve_forward_coefficients;
+  uint poison_outputs;
 };
 
 struct AqResidentPolicyInitializeParams {
@@ -270,6 +271,7 @@ kernel void gjxl_aq_reset_reconstruction(
     atomic_store_explicit(
       error, params.test_error_mask, memory_order_relaxed);
   }
+  if (params.poison_outputs == 0u) return;
   if (index < params.coefficient_value_count) {
     gathered_pixels[index] = as_type<float>(kPoison);
     if (params.preserve_forward_coefficients == 0u) {
@@ -1057,19 +1059,15 @@ kernel void gjxl_aq_adjust_quant_field(
 
 kernel void gjxl_aq_resident_quant_select_initialize(
   device uint* state [[buffer(0)]],
-  constant AqInitialQuantSelectionParams& params [[buffer(1)]],
+  device atomic_uint* histogram [[buffer(1)]],
+  constant AqInitialQuantSelectionParams& params [[buffer(2)]],
   uint index [[thread_position_in_grid]]) {
 
-  if (index != 0u) return;
-  state[0] = 0u;
-  state[1] = 0u;
-  state[2] = params.median_index;
-}
-
-kernel void gjxl_aq_resident_quant_histogram_reset(
-  device atomic_uint* histogram [[buffer(0)]],
-  uint index [[thread_position_in_grid]]) {
-
+  if (index == 0u) {
+    state[0] = 0u;
+    state[1] = 0u;
+    state[2] = params.median_index;
+  }
   if (index < 256u) {
     atomic_store_explicit(
       histogram + index, 0u, memory_order_relaxed);
@@ -1098,29 +1096,35 @@ kernel void gjxl_aq_resident_quant_histogram(
 }
 
 kernel void gjxl_aq_resident_quant_select_bucket(
-  device const atomic_uint* histogram [[buffer(0)]],
+  device atomic_uint* histogram [[buffer(0)]],
   device uint* state [[buffer(1)]],
   device float* statistics [[buffer(2)]],
   constant AqResidentQuantSelectionPass& pass [[buffer(3)]],
   uint index [[thread_position_in_grid]]) {
 
-  if (index != 0u) return;
-  uint rank = state[2];
-  uint prefix_count = 0u;
-  for (uint bucket = 0u; bucket < 256u; ++bucket) {
-    const uint count = atomic_load_explicit(
-      histogram + bucket, memory_order_relaxed);
-    if (rank < prefix_count + count) {
-      state[0] |= bucket << pass.shift;
-      state[1] |= 255u << pass.shift;
-      state[2] = rank - prefix_count;
-      if (pass.shift == 0u) {
-        statistics[pass.deviation != 0u ? 1u : 0u] =
-          as_type<float>(state[0]);
+  if (index == 0u) {
+    const uint rank = state[2];
+    uint prefix_count = 0u;
+    for (uint bucket = 0u; bucket < 256u; ++bucket) {
+      const uint count = atomic_load_explicit(
+        histogram + bucket, memory_order_relaxed);
+      if (rank < prefix_count + count) {
+        state[0] |= bucket << pass.shift;
+        state[1] |= 255u << pass.shift;
+        state[2] = rank - prefix_count;
+        if (pass.shift == 0u) {
+          statistics[pass.deviation != 0u ? 1u : 0u] =
+            as_type<float>(state[0]);
+        }
+        break;
       }
-      return;
+      prefix_count += count;
     }
-    prefix_count += count;
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+  if (index < 256u) {
+    atomic_store_explicit(
+      histogram + index, 0u, memory_order_relaxed);
   }
 }
 
@@ -1340,9 +1344,11 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   device const uchar* epf_sharpness [[buffer(13)]],
   device const uint* resident_quantizer [[buffer(14)]],
   uint anchor_index [[threadgroup_position_in_grid]],
-  uint thread_index [[thread_index_in_threadgroup]]) {
+  uint thread_index [[thread_index_in_threadgroup]],
+  uint group_size [[threads_per_threadgroup]]) {
 
   if (anchor_index >= params.anchor_count) return;
+  const uint thread_count = group_size;
   const uint global_scale = params.use_resident_quantizer != 0u
     ? resident_quantizer[0]
     : params.global_scale;
@@ -1396,7 +1402,8 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
       float(global_scale) * (1.0f / 65536.0f);
     const float sigma_quant = params.epf_quant_multiplier /
       (quantizer_scale * float(raw) * kInverseSigmaNumerator);
-    for (uint block = thread_index; block < covered_count; block += 256u) {
+    for (uint block = thread_index; block < covered_count;
+         block += thread_count) {
       const uint x = block % params.covered_width;
       const uint y = block / params.covered_width;
       const uint sharpness_index =
@@ -1423,7 +1430,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   // of dequantized Y is exactly zero, so this also equals post-CfL X/B DC.
   for (uint dc_task = thread_index;
        dc_task < 3u * covered_count;
-       dc_task += 256u) {
+       dc_task += thread_count) {
     const uint channel = dc_task / covered_count;
     const uint small = dc_task - channel * covered_count;
     const uint x = small % params.covered_width;
@@ -1453,7 +1460,8 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   // Mirror the simple codestream's modular DC quantization. Y is rounded and
   // reconstructed first; B then predicts that reconstructed Y with the
   // default DC CfL factor of one, while X has no DC prediction.
-  for (uint small = thread_index; small < covered_count; small += 256u) {
+  for (uint small = thread_index; small < covered_count;
+       small += thread_count) {
     const uint x = small % params.covered_width;
     const uint y = small / params.covered_width;
     const uint block_index =
@@ -1484,7 +1492,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   // Quantize/dequantize Y first because X/B prediction consumes rounded Y.
   for (uint coefficient = thread_index;
        coefficient < params.coefficient_count;
-       coefficient += 256u) {
+       coefficient += thread_count) {
     const uint channel = 1u;
     const uint offset = transform_offset + channel * group_channel_stride + coefficient;
     const uint x = coefficient % coefficient_width;
@@ -1519,7 +1527,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
 
   for (uint coefficient = thread_index;
        coefficient < params.coefficient_count;
-       coefficient += 256u) {
+       coefficient += thread_count) {
     const float reconstructed_y = reconstruction_coefficients[
       transform_offset + group_channel_stride + coefficient];
     for (uint channel : {0u, 2u}) {
@@ -1555,7 +1563,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
 
   for (uint coefficient = thread_index;
        coefficient < params.coefficient_count;
-       coefficient += 256u) {
+       coefficient += thread_count) {
     const float reconstructed_y = reconstruction_coefficients[
       transform_offset + group_channel_stride + coefficient];
     reconstruction_coefficients[transform_offset + coefficient] += cfl_x * reconstructed_y;
@@ -1567,7 +1575,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
 
   for (uint llf_task = thread_index;
        llf_task < 3u * covered_count;
-       llf_task += 256u) {
+       llf_task += thread_count) {
     const uint channel = llf_task / covered_count;
     const uint small = llf_task - channel * covered_count;
     const uint u = small % params.covered_width;
