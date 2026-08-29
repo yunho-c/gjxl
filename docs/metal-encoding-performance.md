@@ -146,15 +146,14 @@ handled the same way.
 Treat `raw-samples.json` as the performance comparison evidence. Profile schema
 3 covers every current compute submission in one profiled public encode and
 adds a stable `group_id` for comparing coarse regions across substage-schema
-changes. The resident AQ command buffer and the two measured frontend hotspots
-are split into logical stage encoders. Its stable submission IDs are
-`frontend.preprocessing.gaborish`,
-`frontend.initial_quantization`, `frontend.ac_strategy`,
-`frontend.prepare_aq.reference`, `frontend.quant_adjustment`, and
-`resident.aq`. The reference-preparation submission appears when persistent
-Butteraugli reference state is constructed; a reusable compatible evaluator
-instead reports `frontend.reconfigure_aq` as a preparation wall span. The
-resident frame-only frontend folds preprocessing and initial CfL into
+changes. The resident AQ command buffer and the measured frontend hotspots are
+split into logical stage encoders. Its stable fully-resident submission IDs are
+`frontend.prepare_aq.reference`, `frontend.initial_quantization`,
+`frontend.ac_strategy`, `frontend.quant_adjustment`, and `resident.aq`.
+Reference preparation now occurs when the single complete resident evaluator
+is constructed before AC search; after search, that compatible evaluator
+reports `frontend.reconfigure_aq` instead of a second `frontend.prepare_aq`
+span. The resident evaluator folds preprocessing and initial CfL into
 `frontend.initial_quantization`; there is no separate preprocessing submission
 or host CfL upload on that path.
 
@@ -521,6 +520,50 @@ expanded to `2.7-3.6 s`; single-sample 4K runs expanded to `7.3-7.9 s` with
 contradictory quantization ordering. Those runs establish successful merged-
 target encoding and byte parity only. The clean alternating-process tables in
 the individual sections remain the performance evidence.
+
+#### Unified resident evaluator preparation (2026-08-29)
+
+Commit `f3181c1` replaces the two prepared evaluators in fully-resident mode
+with one complete evaluator. It is initially configured with a provisional
+DCT8 grid, prepares the Butteraugli reference once, and supplies resident
+preprocessing, initial quantization, CfL, and AC-search views. After strategy
+search, the same allocation is reconfigured with the selected grid instead of
+constructing a second evaluator and uploading the search-domain image and
+initial field again. Forward coefficient coding selects the evaluator's
+Gaborish-preprocessed resident image when that search-domain view is active.
+
+The public-encode gate compared `5972c25` with `f3181c1` on the Apple M4 Pro.
+It used fully resident SIMD AQ at distance `1.2`, Metal-only validation, two
+warmups, seven samples, and three alternating process pairs per workload. Each
+timing below is the median of the three process medians:
+
+| Workload | Baseline total | Unified total | Delta | Baseline quantization | Unified quantization | Delta | Pair wins (total/quantization) | GPU bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `518.015 ms` | `513.871 ms` | `-0.8%` | `132.968 ms` | `131.778 ms` | `-0.9%` | `2/3`, `2/3` | `420268` |
+| Padded 4K | `1471.748 ms` | `1461.458 ms` | `-0.7%` | `490.984 ms` | `475.263 ms` | `-3.2%` | `3/3`, `3/3` | `1640942` |
+
+All 21 samples per build and workload produced the same byte count and final
+score as the baseline. The 1080p latency result is modest and has overlapping
+sample ranges; the stronger retained signal is the 4K quantization boundary,
+where every process pair improved.
+
+Matched seven-sample schema-2 profiles verify the structural change. The
+baseline's second `frontend.prepare_aq` wall span measured `17.149 ms` at
+1080p and `69.378 ms` at 4K. It is absent after unification; final strategy
+installation instead reports `frontend.reconfigure_aq` at `0.282 ms` and
+`1.010 ms`. Complete preparation moves earlier, so those values are not direct
+latency savings. The combined initial-quantization and quant-adjustment spans
+fall from `16.325` to `8.241 ms` at 1080p and from `45.377` to `25.214 ms` at
+4K, consistent with retaining the initial field and coding image on the same
+evaluator. The resident AQ buffer itself is effectively unchanged
+(`59.880 -> 59.810 ms` and `230.050 -> 229.272 ms`).
+
+The complete Release suite passes 58/59 tests. Every Metal test and the updated
+ordered profiling contract pass; the sole failure remains the inherited pinned
+CPU quantization-pipeline score mismatch of
+`4.4524669647216797e-05`. Focused coverage additionally verifies that repeated
+fully-resident targets retain the exact same evaluator allocation and preserve
+frame and codestream output.
 
 ## Ordered implementation plan
 
