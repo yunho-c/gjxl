@@ -698,6 +698,10 @@ int main() {
       .inverse_dct32x16 = implementation.implementation,
       .forward_dct16x32 = implementation.implementation,
       .inverse_dct16x32 = implementation.implementation,
+      .forward_dct64x32 = implementation.implementation,
+      .inverse_dct64x32 = implementation.implementation,
+      .forward_dct32x64 = implementation.implementation,
+      .inverse_dct32x64 = implementation.implementation,
     };
 
     std::unique_ptr<gjxl::GpuBackend> gpu;
@@ -807,6 +811,38 @@ int main() {
         *gpu,
         implementation.name,
         gjxl::AcStrategyType::kDct16x32)) {
+      return EXIT_FAILURE;
+    }
+
+    if (!TestDctKernels(
+        *gpu,
+        implementation.name,
+        gjxl::AcStrategyType::kDct64x32,
+        2e-5,
+        2e-4)) {
+      return EXIT_FAILURE;
+    }
+
+    if (!TestRoundTrip(
+        *gpu,
+        implementation.name,
+        gjxl::AcStrategyType::kDct64x32)) {
+      return EXIT_FAILURE;
+    }
+
+    if (!TestDctKernels(
+        *gpu,
+        implementation.name,
+        gjxl::AcStrategyType::kDct32x64,
+        2e-5,
+        2e-4)) {
+      return EXIT_FAILURE;
+    }
+
+    if (!TestRoundTrip(
+        *gpu,
+        implementation.name,
+        gjxl::AcStrategyType::kDct32x64)) {
       return EXIT_FAILURE;
     }
 

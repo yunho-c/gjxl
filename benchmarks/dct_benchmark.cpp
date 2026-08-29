@@ -23,6 +23,7 @@ constexpr size_t kWarmupIterations = 20;
 struct ImplementationCase {
   gjxl::MetalDctImplementation implementation;
   std::string_view name;
+  std::string_view cli_name;
 };
 
 constexpr std::array<ImplementationCase, 3>
@@ -31,17 +32,33 @@ kImplementations{{
     .implementation =
       gjxl::MetalDctImplementation::kScalarMatmul,
     .name = "scalar matmul",
+    .cli_name = "scalar",
   },
   {
     .implementation =
       gjxl::MetalDctImplementation::kSimdgroupMatmul,
     .name = "simdgroup matmul",
+    .cli_name = "simd",
   },
   {
     .implementation =
       gjxl::MetalDctImplementation::kFactoredRadix2,
     .name = "factored radix-2",
+    .cli_name = "factored",
   },
+}};
+
+constexpr std::array<gjxl::AcStrategyType, 9>
+kBenchmarkedStrategies{{
+  gjxl::AcStrategyType::kDct8,
+  gjxl::AcStrategyType::kDct16x16,
+  gjxl::AcStrategyType::kDct32x32,
+  gjxl::AcStrategyType::kDct16x8,
+  gjxl::AcStrategyType::kDct8x16,
+  gjxl::AcStrategyType::kDct32x16,
+  gjxl::AcStrategyType::kDct16x32,
+  gjxl::AcStrategyType::kDct64x32,
+  gjxl::AcStrategyType::kDct32x64,
 }};
 
 void Require(
@@ -285,6 +302,8 @@ void BenchmarkDctPair(
 int main(int argc, char** argv) {
   size_t dct8_transform_count = 65536;
   size_t iterations = 200;
+  std::string_view implementation_filter;
+  std::string_view strategy_filter;
 
   if (argc >= 2) {
     dct8_transform_count =
@@ -296,6 +315,38 @@ int main(int argc, char** argv) {
     iterations =
       static_cast<size_t>(
         std::strtoull(argv[2], nullptr, 10));
+  }
+
+  if (argc >= 4) {
+    implementation_filter = argv[3];
+    const bool known_implementation =
+      std::any_of(
+        kImplementations.begin(),
+        kImplementations.end(),
+        [implementation_filter](const ImplementationCase& implementation) {
+          return implementation.cli_name == implementation_filter;
+        });
+    if (!known_implementation) {
+      std::cerr << "Implementation must be scalar, simd, or factored\n";
+      return EXIT_FAILURE;
+    }
+  }
+
+  if (argc >= 5) {
+    strategy_filter = argv[4];
+    const bool known_strategy =
+      std::any_of(
+        kBenchmarkedStrategies.begin(),
+        kBenchmarkedStrategies.end(),
+        [strategy_filter](gjxl::AcStrategyType strategy) {
+          const gjxl::AcStrategyInfo* info =
+            gjxl::GetAcStrategyInfo(strategy);
+          return info != nullptr && info->name == strategy_filter;
+        });
+    if (!known_strategy) {
+      std::cerr << "Unknown AC strategy filter: " << strategy_filter << '\n';
+      return EXIT_FAILURE;
+    }
   }
 
   // Keep the number of transformed pixels per launch comparable to DCT8.
@@ -323,9 +374,22 @@ int main(int argc, char** argv) {
     ComparableTransformCount(
       gjxl::AcStrategyType::kDct32x32,
       dct8_transform_count);
+  const size_t dct64x32_transform_count =
+    ComparableTransformCount(
+      gjxl::AcStrategyType::kDct64x32,
+      dct8_transform_count);
+  const size_t dct32x64_transform_count =
+    ComparableTransformCount(
+      gjxl::AcStrategyType::kDct32x64,
+      dct8_transform_count);
 
   for (const ImplementationCase& implementation :
        kImplementations) {
+
+    if (!implementation_filter.empty() &&
+        implementation.cli_name != implementation_filter) {
+      continue;
+    }
 
     const gjxl::MetalBackendOptions options{
       .forward_dct8 = implementation.implementation,
@@ -342,6 +406,10 @@ int main(int argc, char** argv) {
       .inverse_dct32x16 = implementation.implementation,
       .forward_dct16x32 = implementation.implementation,
       .inverse_dct16x32 = implementation.implementation,
+      .forward_dct64x32 = implementation.implementation,
+      .inverse_dct64x32 = implementation.implementation,
+      .forward_dct32x64 = implementation.implementation,
+      .inverse_dct32x64 = implementation.implementation,
     };
 
     std::unique_ptr<gjxl::GpuBackend> gpu;
@@ -361,54 +429,55 @@ int main(int argc, char** argv) {
       << implementation.name
       << "]\n";
 
-    BenchmarkDctPair(
-      *gpu,
-      implementation.name,
+    const auto benchmark_pair =
+      [&](gjxl::AcStrategyType strategy, size_t transform_count) {
+        const gjxl::AcStrategyInfo* info = gjxl::GetAcStrategyInfo(strategy);
+        if (info != nullptr &&
+            (strategy_filter.empty() || info->name == strategy_filter)) {
+          BenchmarkDctPair(
+            *gpu,
+            implementation.name,
+            strategy,
+            transform_count,
+            iterations);
+        }
+      };
+
+    benchmark_pair(
       gjxl::AcStrategyType::kDct8,
-      dct8_transform_count,
-      iterations);
+      dct8_transform_count);
 
-    BenchmarkDctPair(
-      *gpu,
-      implementation.name,
+    benchmark_pair(
       gjxl::AcStrategyType::kDct16x16,
-      dct16_transform_count,
-      iterations);
+      dct16_transform_count);
 
-    BenchmarkDctPair(
-      *gpu,
-      implementation.name,
+    benchmark_pair(
       gjxl::AcStrategyType::kDct32x32,
-      dct32_transform_count,
-      iterations);
+      dct32_transform_count);
 
-    BenchmarkDctPair(
-      *gpu,
-      implementation.name,
+    benchmark_pair(
       gjxl::AcStrategyType::kDct16x8,
-      dct16x8_transform_count,
-      iterations);
+      dct16x8_transform_count);
 
-    BenchmarkDctPair(
-      *gpu,
-      implementation.name,
+    benchmark_pair(
       gjxl::AcStrategyType::kDct8x16,
-      dct8x16_transform_count,
-      iterations);
+      dct8x16_transform_count);
 
-    BenchmarkDctPair(
-      *gpu,
-      implementation.name,
+    benchmark_pair(
       gjxl::AcStrategyType::kDct32x16,
-      dct32x16_transform_count,
-      iterations);
+      dct32x16_transform_count);
 
-    BenchmarkDctPair(
-      *gpu,
-      implementation.name,
+    benchmark_pair(
       gjxl::AcStrategyType::kDct16x32,
-      dct16x32_transform_count,
-      iterations);
+      dct16x32_transform_count);
+
+    benchmark_pair(
+      gjxl::AcStrategyType::kDct64x32,
+      dct64x32_transform_count);
+
+    benchmark_pair(
+      gjxl::AcStrategyType::kDct32x64,
+      dct32x64_transform_count);
   }
 
   return EXIT_SUCCESS;

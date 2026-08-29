@@ -50,6 +50,7 @@ using metal_internal::TransformPipelineRegistry;
 
 enum class TransformDispatchMode {
   kOneThreadPerElement,
+  kFixedThreadCount,
   kFixedSimdgroupCount,
 };
 
@@ -60,6 +61,7 @@ struct DctImplementationSpec {
   std::string_view forward_function_name;
   std::string_view inverse_function_name;
   TransformDispatchMode dispatch_mode;
+  size_t fixed_threads_per_threadgroup = 0;
   size_t simdgroups_per_threadgroup = 0;
   size_t transforms_per_threadgroup = 1;
   bool forward_uses_device_basis = false;
@@ -77,7 +79,7 @@ struct MetalLibrarySource {
   std::span<const uint8_t> bytes;
 };
 
-constexpr std::array<DctImplementationSpec, 21>
+constexpr std::array<DctImplementationSpec, 27>
 kDctImplementationSpecs{{
   {
     .strategy = AcStrategyType::kDct8,
@@ -290,6 +292,68 @@ kDctImplementationSpecs{{
     .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
     .simdgroups_per_threadgroup = 1,
   },
+  {
+    .strategy = AcStrategyType::kDct64x32,
+    .implementation = MetalDctImplementation::kScalarMatmul,
+    .display_name = "scalar matmul",
+    .forward_function_name = "gjxl_dct64x32_forward_scalar_2d_matmul",
+    .inverse_function_name = "gjxl_dct64x32_inverse_scalar_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedThreadCount,
+    .fixed_threads_per_threadgroup = 512,
+    .forward_uses_device_basis = true,
+    .inverse_uses_device_basis = true,
+  },
+  {
+    .strategy = AcStrategyType::kDct64x32,
+    .implementation = MetalDctImplementation::kSimdgroupMatmul,
+    .display_name = "simdgroup matmul",
+    .forward_function_name = "gjxl_dct64x32_forward_simdgroup_2d_matmul",
+    .inverse_function_name = "gjxl_dct64x32_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 8,
+    .forward_uses_device_basis = true,
+    .inverse_uses_device_basis = true,
+  },
+  {
+    .strategy = AcStrategyType::kDct64x32,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name = "gjxl_dct64x32_forward_factored_radix2",
+    .inverse_function_name = "gjxl_dct64x32_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
+  {
+    .strategy = AcStrategyType::kDct32x64,
+    .implementation = MetalDctImplementation::kScalarMatmul,
+    .display_name = "scalar matmul",
+    .forward_function_name = "gjxl_dct32x64_forward_scalar_2d_matmul",
+    .inverse_function_name = "gjxl_dct32x64_inverse_scalar_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedThreadCount,
+    .fixed_threads_per_threadgroup = 512,
+    .forward_uses_device_basis = true,
+    .inverse_uses_device_basis = true,
+  },
+  {
+    .strategy = AcStrategyType::kDct32x64,
+    .implementation = MetalDctImplementation::kSimdgroupMatmul,
+    .display_name = "simdgroup matmul",
+    .forward_function_name = "gjxl_dct32x64_forward_simdgroup_2d_matmul",
+    .inverse_function_name = "gjxl_dct32x64_inverse_simdgroup_2d_matmul",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 4,
+    .forward_uses_device_basis = true,
+    .inverse_uses_device_basis = true,
+  },
+  {
+    .strategy = AcStrategyType::kDct32x64,
+    .implementation = MetalDctImplementation::kFactoredRadix2,
+    .display_name = "factored radix-2",
+    .forward_function_name = "gjxl_dct32x64_forward_factored_radix2",
+    .inverse_function_name = "gjxl_dct32x64_inverse_factored_radix2",
+    .dispatch_mode = TransformDispatchMode::kFixedSimdgroupCount,
+    .simdgroups_per_threadgroup = 1,
+  },
 }};
 
 const DctImplementationSpec* FindDctImplementationSpec(
@@ -310,8 +374,10 @@ constexpr size_t kDct8BasisOffsetFloats = 0;
 constexpr size_t kDct16BasisOffsetFloats = 8 * 8;
 constexpr size_t kDct32BasisOffsetFloats =
   kDct16BasisOffsetFloats + 16 * 16;
-constexpr size_t kDctBasisFloatCount =
+constexpr size_t kDct64BasisOffsetFloats =
   kDct32BasisOffsetFloats + 32 * 32;
+constexpr size_t kDctBasisFloatCount =
+  kDct64BasisOffsetFloats + 64 * 64;
 
 [[nodiscard]] constexpr size_t DctBasisOffsetBytes(size_t length) {
   switch (length) {
@@ -321,6 +387,8 @@ constexpr size_t kDctBasisFloatCount =
       return kDct16BasisOffsetFloats * sizeof(float);
     case 32:
       return kDct32BasisOffsetFloats * sizeof(float);
+    case 64:
+      return kDct64BasisOffsetFloats * sizeof(float);
     default:
       return std::numeric_limits<size_t>::max();
   }
@@ -329,6 +397,7 @@ constexpr size_t kDctBasisFloatCount =
 static_assert(DctBasisOffsetBytes(8) % 256 == 0);
 static_assert(DctBasisOffsetBytes(16) % 256 == 0);
 static_assert(DctBasisOffsetBytes(32) % 256 == 0);
+static_assert(DctBasisOffsetBytes(64) % 256 == 0);
 
 // Mirrors the formula used to generate the Metal constant bases. Keeping the
 // buffer values identical avoids changing the transform's numerical behavior.
@@ -376,6 +445,9 @@ Status CreateDctBasisBuffer(
   FillOrthonormalDctBasis(
     32,
     basis.data() + kDct32BasisOffsetFloats);
+  FillOrthonormalDctBasis(
+    64,
+    basis.data() + kDct64BasisOffsetFloats);
 
   auto buffer =
     NS::TransferPtr(
@@ -466,6 +538,7 @@ Status CreateTransformPipeline(
   AcStrategyType strategy,
   std::string_view implementation_name,
   TransformDispatchMode dispatch_mode,
+  size_t fixed_threads_per_threadgroup,
   size_t simdgroups_per_threadgroup,
   size_t transforms_per_threadgroup,
   bool uses_device_basis,
@@ -514,6 +587,11 @@ Status CreateTransformPipeline(
     case TransformDispatchMode::kOneThreadPerElement:
       threads_per_threadgroup =
         static_cast<NS::UInteger>(coefficient_count);
+      break;
+
+    case TransformDispatchMode::kFixedThreadCount:
+      threads_per_threadgroup =
+        static_cast<NS::UInteger>(fixed_threads_per_threadgroup);
       break;
 
     case TransformDispatchMode::kFixedSimdgroupCount: {
@@ -959,7 +1037,7 @@ Status CreateMetalBackendImpl(
       "Exactly one Metal library source is required");
   }
 
-  const std::array<DctSelection, 7> dct_selections{{
+  const std::array<DctSelection, 9> dct_selections{{
     {
       .strategy = AcStrategyType::kDct8,
       .forward = options.forward_dct8,
@@ -994,6 +1072,16 @@ Status CreateMetalBackendImpl(
       .strategy = AcStrategyType::kDct16x32,
       .forward = options.forward_dct16x32,
       .inverse = options.inverse_dct16x32,
+    },
+    {
+      .strategy = AcStrategyType::kDct64x32,
+      .forward = options.forward_dct64x32,
+      .inverse = options.inverse_dct64x32,
+    },
+    {
+      .strategy = AcStrategyType::kDct32x64,
+      .forward = options.forward_dct32x64,
+      .inverse = options.inverse_dct32x64,
     },
   }};
 
@@ -1118,6 +1206,7 @@ Status CreateMetalBackendImpl(
         selection.strategy,
         forward_spec->display_name,
         forward_spec->dispatch_mode,
+        forward_spec->fixed_threads_per_threadgroup,
         forward_spec->simdgroups_per_threadgroup,
         forward_spec->transforms_per_threadgroup,
         forward_spec->forward_uses_device_basis,
@@ -1136,6 +1225,7 @@ Status CreateMetalBackendImpl(
         selection.strategy,
         inverse_spec->display_name,
         inverse_spec->dispatch_mode,
+        inverse_spec->fixed_threads_per_threadgroup,
         inverse_spec->simdgroups_per_threadgroup,
         inverse_spec->transforms_per_threadgroup,
         inverse_spec->inverse_uses_device_basis,
