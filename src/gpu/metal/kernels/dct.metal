@@ -22,6 +22,10 @@ constant float kInverseDct16x8Scale = 11.3137083f;
 constant float kForwardDct32x16Scale = 0.0441941738f;
 constant float kInverseDct32x16Scale = 22.6274170f;
 
+// 1 / sqrt(64 * 32). The transpose pair has the same normalization.
+constant float kForwardDct64x32Scale = 0.0220970869f;
+constant float kInverseDct64x32Scale = 45.2548340f;
+
 constant float kForwardDct32Scale = 1.0f / 32.0f;
 constant float kInverseDct32Scale = 32.0f;
 
@@ -533,6 +537,61 @@ __attribute__((always_inline)) inline ulong RectangularCoefficientIndex(
 }
 
 
+template <
+  uint Rows,
+  uint Columns,
+  typename VerticalBasisPointer,
+  typename HorizontalBasisPointer>
+__attribute__((always_inline)) inline void ForwardRectangularDctStrided(
+  device const float* A,
+  device       float* B,
+  VerticalBasisPointer vertical_basis,
+  HorizontalBasisPointer horizontal_basis,
+  threadgroup float* T,
+  float scale,
+  uint tid,
+  uint threads_per_threadgroup,
+  uint3 group_position)
+{
+  const ulong base =
+    static_cast<ulong>(group_position.x) * Rows * Columns;
+
+  for (uint element = tid;
+       element < Rows * Columns;
+       element += threads_per_threadgroup) {
+    const uint row = element / Columns;
+    const uint col = element % Columns;
+    float t = 0;
+
+    for (uint i=0; i<Rows; ++i) {
+      t += vertical_basis[Rows*row + i] *
+        A[base + Columns*i + col];
+    }
+
+    T[element] = t;
+  }
+
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint element = tid;
+       element < Rows * Columns;
+       element += threads_per_threadgroup) {
+    const uint row = element / Columns;
+    const uint col = element % Columns;
+    float b = 0;
+
+    for (uint i=0; i<Columns; ++i) {
+      b += T[Columns*row + i] * horizontal_basis[Columns*col + i];
+    }
+
+    const ulong coefficient =
+      RectangularCoefficientIndex<Rows, Columns>(row, col);
+
+    B[base + coefficient] = b * scale;
+  }
+}
+
+
 template <uint Rows, uint Columns>
 __attribute__((always_inline)) inline void ForwardRectangularDct(
   device const float* A,
@@ -544,33 +603,70 @@ __attribute__((always_inline)) inline void ForwardRectangularDct(
   uint tid,
   uint3 group_position)
 {
-  const uint row = tid / Columns;
-  const uint col = tid % Columns;
+  ForwardRectangularDctStrided<Rows, Columns>(
+    A,
+    B,
+    vertical_basis,
+    horizontal_basis,
+    T,
+    scale,
+    tid,
+    Rows * Columns,
+    group_position);
+}
 
+
+template <
+  uint Rows,
+  uint Columns,
+  typename VerticalBasisPointer,
+  typename HorizontalBasisPointer>
+__attribute__((always_inline)) inline void InverseRectangularDctStrided(
+  device const float* A,
+  device       float* B,
+  VerticalBasisPointer vertical_basis,
+  HorizontalBasisPointer horizontal_basis,
+  threadgroup float* T,
+  float scale,
+  uint tid,
+  uint threads_per_threadgroup,
+  uint3 group_position)
+{
   const ulong base =
     static_cast<ulong>(group_position.x) * Rows * Columns;
 
-  float t = 0;
+  for (uint element = tid;
+       element < Rows * Columns;
+       element += threads_per_threadgroup) {
+    const uint row = element / Columns;
+    const uint col = element % Columns;
+    float t = 0;
 
-  for (uint i=0; i<Rows; ++i) {
-    t += vertical_basis[Rows*row + i] *
-      A[base + Columns*i + col];
+    for (uint i=0; i<Rows; ++i) {
+      const ulong coefficient =
+        RectangularCoefficientIndex<Rows, Columns>(i, col);
+
+      t += vertical_basis[Rows*i + row] * A[base + coefficient];
+    }
+
+    T[element] = t;
   }
-
-  T[Columns*row + col] = t;
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  float b = 0;
+  for (uint element = tid;
+       element < Rows * Columns;
+       element += threads_per_threadgroup) {
+    const uint row = element / Columns;
+    const uint col = element % Columns;
+    float b = 0;
 
-  for (uint i=0; i<Columns; ++i) {
-    b += T[Columns*row + i] * horizontal_basis[Columns*col + i];
+    for (uint i=0; i<Columns; ++i) {
+      b += T[Columns*row + i] * horizontal_basis[Columns*i + col];
+    }
+
+    B[base + element] = b * scale;
   }
-
-  const ulong coefficient =
-    RectangularCoefficientIndex<Rows, Columns>(row, col);
-
-  B[base + coefficient] = b * scale;
 }
 
 
@@ -585,32 +681,16 @@ __attribute__((always_inline)) inline void InverseRectangularDct(
   uint tid,
   uint3 group_position)
 {
-  const uint row = tid / Columns;
-  const uint col = tid % Columns;
-
-  const ulong base =
-    static_cast<ulong>(group_position.x) * Rows * Columns;
-
-  float t = 0;
-
-  for (uint i=0; i<Rows; ++i) {
-    const ulong coefficient =
-      RectangularCoefficientIndex<Rows, Columns>(i, col);
-
-    t += vertical_basis[Rows*i + row] * A[base + coefficient];
-  }
-
-  T[Columns*row + col] = t;
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  float b = 0;
-
-  for (uint i=0; i<Columns; ++i) {
-    b += T[Columns*row + i] * horizontal_basis[Columns*i + col];
-  }
-
-  B[base + Columns*row + col] = b * scale;
+  InverseRectangularDctStrided<Rows, Columns>(
+    A,
+    B,
+    vertical_basis,
+    horizontal_basis,
+    T,
+    scale,
+    tid,
+    Rows * Columns,
+    group_position);
 }
 
 
@@ -1300,6 +1380,132 @@ kernel void gjxl_dct16x32_inverse_simdgroup_2d_matmul(
 }
 
 
+// 64x32 and 32x64 bases are supplied from a device buffer to keep the
+// 4096-element DCT64 table out of every compiled kernel's constant data.
+kernel void gjxl_dct64x32_forward_scalar_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[64 * 32];
+
+  ForwardRectangularDctStrided<64, 32>(
+    A, B, vertical_basis, horizontal_basis, intermediate,
+    kForwardDct64x32Scale, tid, tg_size.x, group_position);
+}
+
+
+kernel void gjxl_dct64x32_inverse_scalar_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[64 * 32];
+
+  InverseRectangularDctStrided<64, 32>(
+    A, B, vertical_basis, horizontal_basis, intermediate,
+    kInverseDct64x32Scale, tid, tg_size.x, group_position);
+}
+
+
+kernel void gjxl_dct64x32_forward_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  ForwardRectangularDctSimdgroupWithBasis<64, 32>(
+    A, B, vertical_basis, horizontal_basis, kForwardDct64x32Scale,
+    simdgroup_index, group_position);
+}
+
+
+kernel void gjxl_dct64x32_inverse_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  InverseRectangularDctSimdgroupWithBasis<64, 32>(
+    A, B, vertical_basis, horizontal_basis, kInverseDct64x32Scale,
+    simdgroup_index, group_position);
+}
+
+
+kernel void gjxl_dct32x64_forward_scalar_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[32 * 64];
+
+  ForwardRectangularDctStrided<32, 64>(
+    A, B, vertical_basis, horizontal_basis, intermediate,
+    kForwardDct64x32Scale, tid, tg_size.x, group_position);
+}
+
+
+kernel void gjxl_dct32x64_inverse_scalar_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[32 * 64];
+
+  InverseRectangularDctStrided<32, 64>(
+    A, B, vertical_basis, horizontal_basis, intermediate,
+    kInverseDct64x32Scale, tid, tg_size.x, group_position);
+}
+
+
+kernel void gjxl_dct32x64_forward_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  ForwardRectangularDctSimdgroupWithBasis<32, 64>(
+    A, B, vertical_basis, horizontal_basis, kForwardDct64x32Scale,
+    simdgroup_index, group_position);
+}
+
+
+kernel void gjxl_dct32x64_inverse_simdgroup_2d_matmul(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  device const float* vertical_basis [[buffer(2)]],
+  device const float* horizontal_basis [[buffer(3)]],
+  uint  simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position  [[threadgroup_position_in_grid]])
+{
+  InverseRectangularDctSimdgroupWithBasis<32, 64>(
+    A, B, vertical_basis, horizontal_basis, kInverseDct64x32Scale,
+    simdgroup_index, group_position);
+}
+
+
 // Factored radix-2 transforms
 
 constant float kFactoredDctSqrt2 = 1.41421356237f;
@@ -1346,6 +1552,41 @@ constant float kFactoredDctMultipliers32[16] = {
   10.190008123548033f,
 };
 
+constant float kFactoredDctMultipliers64[32] = {
+  0.50015063602065102f,
+  0.50135845244640842f,
+  0.50378872568104427f,
+  0.50747117207255532f,
+  0.51245147940822466f,
+  0.51879271310533281f,
+  0.52657731515426998f,
+  0.535909816907992f,
+  0.54692043798550882f,
+  0.55976981294708017f,
+  0.57465518403266003f,
+  0.59181853585741651f,
+  0.61155734788250993f,
+  0.63423893668840325f,
+  0.66031980781370614f,
+  0.69037212820021232f,
+  0.72512052237719848f,
+  0.76549416497308898f,
+  0.81270209081449052f,
+  0.86834471522334811f,
+  0.93458359703640748f,
+  1.0144082649970547f,
+  1.1120716205797176f,
+  1.233832737976571f,
+  1.3892939586328277f,
+  1.5939722833856311f,
+  1.8746759800084078f,
+  2.2820500680051619f,
+  2.9246284281582162f,
+  4.0846110781292477f,
+  6.7967507116736332f,
+  20.373878167231453f,
+};
+
 
 template <uint N>
 struct FactoredDctMultipliers;
@@ -1375,6 +1616,13 @@ template <>
 struct FactoredDctMultipliers<32> {
   __attribute__((always_inline)) static float Get(uint index) {
     return kFactoredDctMultipliers32[index];
+  }
+};
+
+template <>
+struct FactoredDctMultipliers<64> {
+  __attribute__((always_inline)) static float Get(uint index) {
+    return kFactoredDctMultipliers64[index];
   }
 };
 
@@ -1810,6 +2058,66 @@ kernel void gjxl_dct16x32_inverse_factored_radix2(
   threadgroup float intermediate[16 * 32];
 
   InverseFactoredDct2D<16, 32>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct64x32_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[64 * 32];
+
+  ForwardFactoredDct2D<64, 32>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct64x32_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[64 * 32];
+
+  InverseFactoredDct2D<64, 32>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct32x64_forward_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[32 * 64];
+
+  ForwardFactoredDct2D<32, 64>(
+    A, B, intermediate, tid, tg_size.x,
+    static_cast<ulong>(group_position.x), true);
+}
+
+
+kernel void gjxl_dct32x64_inverse_factored_radix2(
+  device const float* A [[buffer(0)]],
+  device       float* B [[buffer(1)]],
+  uint              tid [[thread_index_in_threadgroup]],
+  uint3        tg_size  [[threads_per_threadgroup]],
+  uint3  group_position [[threadgroup_position_in_grid]])
+{
+  threadgroup float intermediate[32 * 64];
+
+  InverseFactoredDct2D<32, 64>(
     A, B, intermediate, tid, tg_size.x,
     static_cast<ulong>(group_position.x), true);
 }

@@ -63,6 +63,18 @@ struct MetalBackendOptions {
   MetalDctImplementation inverse_dct16x32 =
     MetalDctImplementation::kScalarMatmul;
 
+  MetalDctImplementation forward_dct64x32 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation inverse_dct64x32 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation forward_dct32x64 =
+    MetalDctImplementation::kScalarMatmul;
+
+  MetalDctImplementation inverse_dct32x64 =
+    MetalDctImplementation::kScalarMatmul;
+
   // Deterministic failure injection used by real-device backend tests.
   bool test_fail_submission = false;
   bool test_fail_completion = false;
