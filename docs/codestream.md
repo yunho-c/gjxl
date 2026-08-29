@@ -1021,7 +1021,54 @@ order.
    single-image eight-worker limit process-wide. Caller participation and task
    granularity should be measured independently before adding cap tasks again.
 
-4. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
+4. **Complete (2026-08-29): count exact ANS candidate payload sizes without
+   materializing them.** `MeasureAnsCode` previously sent every section through
+   the complete production token writer, including model revalidation, reverse
+   chunk allocation, temporary bit-writer growth, and a second pass that copied
+   the chunks into their forward serialized order. An ANS section's exact size
+   is its 32-bit final state, all HybridUint extra bits, and one 16-bit chunk for
+   each renormalization event. The renormalization count still depends on the
+   evolving reverse ANS state, so the retained implementation shares that exact
+   state traversal between the production writer and a count-only sink. The
+   counter discards chunk values and performs no payload allocation or writes.
+   Entropy-model serialization remains unchanged and validates the completed
+   candidate once before its sections are counted.
+
+   Focused coverage compares the measured cost with real serialized payloads
+   across multiple independently reset sections, including an empty section,
+   multiple contexts and clusters, HybridUint extra bits, and repeated
+   renormalization. One- and two-symbol histograms retain the same equality
+   check. Existing deterministic model/payload, malformed reverse-map atomicity,
+   pinned codestream-hash, decoder-conformance, and public-workflow checks also
+   pass.
+
+   Five alternating parent-`863b826`/optimized Release process pairs used Kodak
+   image 01, the Metal public workflow at distance 1.2 and
+   `maximum-throughput`, two warmups, and nine measured samples per process. The
+   host had substantial unrelated editor load, including one visibly
+   contaminated parent process, so medians of the paired improvements are
+   directional rather than final clean qualification: entropy optimization
+   improved 5.16%, codestream encoding 4.08%, and complete workflow time 3.89%.
+   The production section-writing phase was effectively flat at a 0.12% median
+   paired regression. Every run reported the same 110,996-byte output size.
+
+   Matched 1 kHz all-thread Samply captures used five warmups and 400 encodes.
+   CPU delta inside `OptimizeAnsEntropyCode` fell from 27,463.855 to 19,562.470
+   ms (-28.77%). The former measurement-only `WriteAnsTokenStream` subtree,
+   which accounted for 19,946.150 ms, 10.18% of all sampled CPU, and 72.63% of
+   the ANS phase, disappeared. ANS validation beneath the phase fell 76.12%,
+   from 1,230.339 to 293.821 ms. Production ANS writing remained about 1.2% of
+   total sampled CPU. Surrounding prefix work was hotter in the second capture,
+   consistent with the active-host timing noise, so the profile supports the
+   work-elimination mechanism rather than a whole-workflow speedup claim.
+
+   The complete Release suite remains 58/59. Its only failure is the exact
+   inherited `quantization_pipeline` score mismatch, reproduced by the parent
+   build; all codestream, conformance, encoder, entropy, single-image workflow,
+   and batch-workflow tests pass. The focused entropy test also passes 100
+   consecutive repetitions.
+
+5. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
    could cheaply screen coefficient-order and block-context candidates, search
@@ -1031,7 +1078,7 @@ order.
    rates, per-candidate time, bytes saved, and complete-codestream size must
    define this policy; one losing custom-order example is not sufficient.
 
-5. **Defer GPU entropy coding until a residual profile justifies it.** The
+6. **Defer GPU entropy coding until a residual profile justifies it.** The
    dominant exact operation builds many small, branch-heavy, depth-limited
    128-symbol Huffman trees with deterministic tie behavior. Seed assignment
    also mutates cluster state between decisions, and the CPU serializer needs

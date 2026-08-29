@@ -459,39 +459,70 @@ bool CheckInitialContextPreclustering() {
 }
 
 bool CheckAnsRoundTripContract() {
-  const std::vector<gjxl::EntropyToken> tokens = ComplexFixtureTokens();
-  const std::array<std::vector<gjxl::EntropyToken>, 1> sections = {tokens};
+  std::array<std::vector<gjxl::EntropyToken>, 4> sections;
+  for (uint32_t context = 0; context < 4; ++context) {
+    for (uint32_t repeat = 0; repeat < 512; ++repeat) {
+      uint32_t value = 4 * context + (repeat & 1u);
+      if ((repeat & 31u) == 0) {
+        value = (uint32_t{1} << (16 + context)) + repeat;
+      }
+      sections[1 + ((repeat + context) % 3)].push_back({context, value});
+    }
+  }
   gjxl::EntropyCode prefix;
   gjxl::EntropyCode ans;
   gjxl::EntropyCodeCost ans_cost;
   gjxl::BitWriter model;
-  gjxl::BitWriter payload;
   gjxl::BitWriter repeat_model;
-  gjxl::BitWriter repeat_payload;
   if (!gjxl::OptimizeEntropyCode(
-        sections, {.context_count = 1}, &prefix).ok() ||
+        sections, {.context_count = 4}, &prefix).ok() ||
       !gjxl::OptimizeAnsEntropyCode(
         sections, prefix, &ans, &ans_cost).ok() ||
       ans.mode != gjxl::EntropyCodingMode::kAns ||
       ans.ans_log_alpha_size < 5 || ans.ans_log_alpha_size > 8 ||
-      ans.ans_histograms.empty() || !ans.prefix_codes.empty() ||
-      ans.uint_configs !=
-        std::vector<gjxl::HybridUintConfig>{{3, 2, 0}} ||
-      ans.ans_histograms[0].method != 0 ||
+      ans.ans_histograms.size() < 2 || !ans.prefix_codes.empty() ||
       !gjxl::WriteEntropyCode(ans, &model).ok() ||
-      !gjxl::WriteTokenStream(tokens, ans, &payload).ok() ||
       !gjxl::WriteEntropyCode(ans, &repeat_model).ok() ||
-      !gjxl::WriteTokenStream(tokens, ans, &repeat_payload).ok() ||
       ans_cost.model_bits != model.bits_written() ||
-      ans_cost.token_bits != payload.bits_written() ||
-      model.bits_written() == 0 || payload.bits_written() < 32 ||
+      ans_cost.cluster_count != ans.ans_histograms.size() ||
+      model.bits_written() == 0 ||
       model.bits_written() != repeat_model.bits_written() ||
-      payload.bits_written() != repeat_payload.bits_written() ||
       !std::ranges::equal(
-        model.padded_bytes(), repeat_model.padded_bytes()) ||
-      !std::ranges::equal(
-        payload.padded_bytes(), repeat_payload.padded_bytes())) {
+        model.padded_bytes(), repeat_model.padded_bytes())) {
     std::cerr << "ANS model or payload contract failed\n";
+    return false;
+  }
+
+  uint64_t serialized_bits = 0;
+  uint64_t bits_without_renormalization = 32 * sections.size();
+  bool has_extra_bits = false;
+  for (const std::vector<gjxl::EntropyToken>& section : sections) {
+    gjxl::BitWriter payload;
+    gjxl::BitWriter repeat_payload;
+    if (!gjxl::WriteTokenStream(section, ans, &payload).ok() ||
+        !gjxl::WriteTokenStream(section, ans, &repeat_payload).ok() ||
+        payload.bits_written() != repeat_payload.bits_written() ||
+        !std::ranges::equal(
+          payload.padded_bytes(), repeat_payload.padded_bytes()) ||
+        (section.empty() && payload.bits_written() != 32)) {
+      std::cerr << "ANS section payload contract failed\n";
+      return false;
+    }
+    serialized_bits += payload.bits_written();
+    for (const gjxl::EntropyToken& token : section) {
+      const size_t cluster = ans.context_map[token.context];
+      gjxl::HybridUintToken encoded;
+      if (!gjxl::EncodeHybridUint(
+            token.value, ans.uint_configs[cluster], &encoded).ok()) {
+        return false;
+      }
+      bits_without_renormalization += encoded.extra_bit_count;
+      has_extra_bits |= encoded.extra_bit_count != 0;
+    }
+  }
+  if (!has_extra_bits || serialized_bits <= bits_without_renormalization ||
+      ans_cost.token_bits != serialized_bits) {
+    std::cerr << "ANS count-only cost disagrees with serialized sections\n";
     return false;
   }
 
@@ -509,7 +540,7 @@ bool CheckAnsRoundTripContract() {
   }
   gjxl::BitWriter atomic;
   if (!damaged || !atomic.WriteBits(3, 5).ok() ||
-      gjxl::WriteTokenStream(tokens, malformed, &atomic).code() !=
+      gjxl::WriteTokenStream(sections[1], malformed, &atomic).code() !=
         gjxl::StatusCode::kInvalidArgument ||
       atomic.bits_written() != 3 ||
       !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
@@ -605,17 +636,21 @@ bool CheckAnsSmallHistograms() {
       fixtures[index]};
     gjxl::EntropyCode prefix;
     gjxl::EntropyCode ans;
+    gjxl::EntropyCodeCost ans_cost;
     gjxl::BitWriter model;
     gjxl::BitWriter payload;
     if (!gjxl::OptimizeEntropyCode(
           sections, {.context_count = 1}, &prefix).ok() ||
-        !gjxl::OptimizeAnsEntropyCode(sections, prefix, &ans).ok() ||
+        !gjxl::OptimizeAnsEntropyCode(
+          sections, prefix, &ans, &ans_cost).ok() ||
         ans.ans_histograms.size() != 1 ||
         std::ranges::count_if(
           ans.ans_histograms[0].frequencies,
           [](uint16_t frequency) { return frequency != 0; }) != index + 1 ||
         !gjxl::WriteEntropyCode(ans, &model).ok() ||
-        !gjxl::WriteTokenStream(fixtures[index], ans, &payload).ok()) {
+        !gjxl::WriteTokenStream(fixtures[index], ans, &payload).ok() ||
+        ans_cost.model_bits != model.bits_written() ||
+        ans_cost.token_bits != payload.bits_written()) {
       std::cerr << "ANS small-histogram fixture failed at " << index << '\n';
       return false;
     }

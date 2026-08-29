@@ -818,6 +818,82 @@ Status BuildBestAnsHistogram(
   return Status::Ok();
 }
 
+template <typename EmitChunk>
+Status ProcessAnsTokenStream(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  EmitChunk&& emit_chunk,
+  uint32_t* final_state) {
+
+  uint32_t state = kAnsSignature << 16;
+  for (size_t index = tokens.size(); index != 0; --index) {
+    const EntropyToken& token = tokens[index - 1];
+    if (token.context >= code.context_count) {
+      return Status::InvalidArgument("ANS token context is out of range");
+    }
+    const size_t cluster = code.context_map[token.context];
+    HybridUintToken encoded;
+    if (Status status = EncodeHybridUint(
+          token.value, code.uint_configs[cluster], &encoded);
+        !status.ok()) {
+      return status;
+    }
+    const AnsHistogram& histogram = code.ans_histograms[cluster];
+    if (encoded.symbol >= histogram.frequencies.size() ||
+        histogram.frequencies[encoded.symbol] == 0) {
+      return Status::InvalidArgument("ANS token symbol is absent");
+    }
+    if (encoded.extra_bit_count != 0) {
+      emit_chunk(encoded.extra_bits, encoded.extra_bit_count);
+    }
+    const uint32_t frequency = histogram.frequencies[encoded.symbol];
+    if ((state >> (32 - kAnsLogTableSize)) >= frequency) {
+      emit_chunk(state & 0xFFFFu, 16);
+      state >>= 16;
+    }
+    const uint32_t quotient = state / frequency;
+    const uint32_t remainder = state - quotient * frequency;
+    const std::vector<uint16_t>& reverse =
+      histogram.reverse_maps[encoded.symbol];
+    if (remainder >= reverse.size() || reverse[remainder] >= kAnsTableSize) {
+      return Status::InvalidArgument("ANS reverse-map entry is invalid");
+    }
+    state = (quotient << kAnsLogTableSize) + reverse[remainder];
+  }
+  *final_state = state;
+  return Status::Ok();
+}
+
+Status CountAnsTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+
+  if (bit_count == nullptr) {
+    return Status::InvalidArgument("ANS token cost output is null");
+  }
+  // Each token emits at most its 31 HybridUint extra bits and one 16-bit
+  // renormalization chunk. Every section also emits its 32-bit final state.
+  constexpr uint64_t kMaximumBitsPerToken = 31 + 16;
+  if (tokens.size() >
+      (std::numeric_limits<uint64_t>::max() - 32) /
+        kMaximumBitsPerToken) {
+    return Status::InvalidArgument("ANS token cost overflow");
+  }
+  uint64_t candidate = 32;
+  uint32_t final_state = 0;
+  const auto count_chunk = [&candidate](uint32_t, uint8_t chunk_bits) {
+    candidate += chunk_bits;
+  };
+  if (Status status = ProcessAnsTokenStream(
+        tokens, code, count_chunk, &final_state);
+      !status.ok()) {
+    return status;
+  }
+  *bit_count = candidate;
+  return Status::Ok();
+}
+
 Status MeasureAnsCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCode& code,
@@ -834,16 +910,16 @@ Status MeasureAnsCode(
   candidate.model_bits = model.bits_written();
   candidate.cluster_count = code.ans_histograms.size();
   for (const std::vector<EntropyToken>& section : section_tokens) {
-    BitWriter payload;
-    if (Status status = WriteTokenStream(section, code, &payload);
+    uint64_t section_bits = 0;
+    if (Status status = CountAnsTokenStreamBits(section, code, &section_bits);
         !status.ok()) {
       return status;
     }
     if (candidate.token_bits >
-        std::numeric_limits<uint64_t>::max() - payload.bits_written()) {
+        std::numeric_limits<uint64_t>::max() - section_bits) {
       return Status::InvalidArgument("ANS token cost overflow");
     }
-    candidate.token_bits += payload.bits_written();
+    candidate.token_bits += section_bits;
   }
   *cost = candidate;
   return Status::Ok();
@@ -985,43 +1061,17 @@ Status codestream_internal::WriteAnsTokenStream(
     return Status::InvalidArgument("ANS token-stream output is null");
   }
   try {
-    uint32_t state = kAnsSignature << 16;
     std::vector<ReverseBitChunk> reverse_chunks;
     reverse_chunks.reserve(2 * tokens.size());
-    for (size_t index = tokens.size(); index != 0; --index) {
-      const EntropyToken& token = tokens[index - 1];
-      if (token.context >= code.context_count) {
-        return Status::InvalidArgument("ANS token context is out of range");
-      }
-      const size_t cluster = code.context_map[token.context];
-      HybridUintToken encoded;
-      if (Status status = EncodeHybridUint(
-            token.value, code.uint_configs[cluster], &encoded);
-          !status.ok()) {
-        return status;
-      }
-      const AnsHistogram& histogram = code.ans_histograms[cluster];
-      if (encoded.symbol >= histogram.frequencies.size() ||
-          histogram.frequencies[encoded.symbol] == 0) {
-        return Status::InvalidArgument("ANS token symbol is absent");
-      }
-      if (encoded.extra_bit_count != 0) {
-        reverse_chunks.push_back({
-          encoded.extra_bits, encoded.extra_bit_count});
-      }
-      const uint32_t frequency = histogram.frequencies[encoded.symbol];
-      if ((state >> (32 - kAnsLogTableSize)) >= frequency) {
-        reverse_chunks.push_back({state & 0xFFFFu, 16});
-        state >>= 16;
-      }
-      const uint32_t quotient = state / frequency;
-      const uint32_t remainder = state - quotient * frequency;
-      const std::vector<uint16_t>& reverse =
-        histogram.reverse_maps[encoded.symbol];
-      if (remainder >= reverse.size() || reverse[remainder] >= kAnsTableSize) {
-        return Status::InvalidArgument("ANS reverse-map entry is invalid");
-      }
-      state = (quotient << kAnsLogTableSize) + reverse[remainder];
+    const auto append_chunk = [&reverse_chunks](
+                                uint32_t bits, uint8_t bit_count) {
+      reverse_chunks.push_back({bits, bit_count});
+    };
+    uint32_t state = 0;
+    if (Status status = ProcessAnsTokenStream(
+          tokens, code, append_chunk, &state);
+        !status.ok()) {
+      return status;
     }
     BitWriter temporary;
     if (Status status = temporary.WriteBits(32, state); !status.ok()) {
