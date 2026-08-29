@@ -87,11 +87,65 @@ const char* AcStrategyProfileStageId(AcStrategyType strategy) {
   }
 }
 
+struct FusedStageSpec {
+  AcStrategyType strategy;
+  std::string_view forward_function_name;
+  std::string_view residual_inverse_function_name;
+  size_t simdgroups_per_threadgroup;
+};
+
+constexpr std::array kFusedStageSpecs = {
+  FusedStageSpec{
+    AcStrategyType::kDct8,
+    "gjxl_ac_strategy_dct8_forward_fused",
+    "gjxl_ac_strategy_dct8_residual_inverse_fused",
+    1,
+  },
+  FusedStageSpec{
+    AcStrategyType::kDct16x16,
+    "gjxl_ac_strategy_dct16_forward_fused",
+    "gjxl_ac_strategy_dct16_residual_inverse_fused",
+    2,
+  },
+  FusedStageSpec{
+    AcStrategyType::kDct32x32,
+    "gjxl_ac_strategy_dct32_forward_fused",
+    "gjxl_ac_strategy_dct32_residual_inverse_fused",
+    4,
+  },
+  FusedStageSpec{
+    AcStrategyType::kDct16x8,
+    "gjxl_ac_strategy_dct16x8_forward_fused",
+    "gjxl_ac_strategy_dct16x8_residual_inverse_fused",
+    2,
+  },
+  FusedStageSpec{
+    AcStrategyType::kDct8x16,
+    "gjxl_ac_strategy_dct8x16_forward_fused",
+    "gjxl_ac_strategy_dct8x16_residual_inverse_fused",
+    1,
+  },
+  FusedStageSpec{
+    AcStrategyType::kDct32x16,
+    "gjxl_ac_strategy_dct32x16_forward_fused",
+    "gjxl_ac_strategy_dct32x16_residual_inverse_fused",
+    4,
+  },
+  FusedStageSpec{
+    AcStrategyType::kDct16x32,
+    "gjxl_ac_strategy_dct16x32_forward_fused",
+    "gjxl_ac_strategy_dct16x32_residual_inverse_fused",
+    2,
+  },
+};
+
 }  // namespace
 
 Status CreateAcStrategyPipelines(
   MTL::Device* device,
   MTL::Library* library,
+  const std::array<bool, kAcStrategyCount>& fused_forward_enabled,
+  const std::array<bool, kAcStrategyCount>& fused_inverse_enabled,
   AcStrategyPipelines* out) {
 
   if (device == nullptr || library == nullptr || out == nullptr) {
@@ -114,6 +168,40 @@ Status CreateAcStrategyPipelines(
     device, library, "gjxl_ac_strategy_cost", &pipelines.cost);
   if (!status.ok()) {
     return status;
+  }
+
+  for (const FusedStageSpec& spec : kFusedStageSpecs) {
+    const size_t strategy_index = static_cast<size_t>(spec.strategy);
+    AcStrategyPipelines::FusedStages& fused =
+      pipelines.fused[strategy_index];
+    if (fused_forward_enabled[strategy_index]) {
+      status = CreatePipeline(
+        device, library, spec.forward_function_name, &fused.forward);
+      if (!status.ok()) return status;
+      const NS::UInteger simd_width = fused.forward->threadExecutionWidth();
+      if (simd_width == 0 ||
+          spec.simdgroups_per_threadgroup >
+            std::numeric_limits<NS::UInteger>::max() / simd_width) {
+        return Status::Unavailable(
+          "Metal reported invalid fused AC-strategy SIMD dispatch data");
+      }
+      fused.forward_threads_per_threadgroup = simd_width *
+        static_cast<NS::UInteger>(spec.simdgroups_per_threadgroup);
+      if (fused.forward_threads_per_threadgroup == 0 ||
+          fused.forward->maxTotalThreadsPerThreadgroup() <
+            fused.forward_threads_per_threadgroup) {
+        return Status::Unavailable(
+          "Metal cannot launch the fused AC-strategy forward kernel");
+      }
+    }
+    if (fused_inverse_enabled[strategy_index]) {
+      status = CreatePipeline(
+        device,
+        library,
+        spec.residual_inverse_function_name,
+        &fused.residual_inverse);
+      if (!status.ok()) return status;
+    }
   }
 
   constexpr NS::UInteger kPreferredGatherThreads = 256;
@@ -478,8 +566,13 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
     return status;
   }
 
-  if (ac_strategy_pipelines_.residual->maxTotalThreadsPerThreadgroup() <
-        coefficient_count ||
+  const AcStrategyPipelines::FusedStages& fused =
+    ac_strategy_pipelines_.fused[static_cast<size_t>(batch.strategy)];
+  const MTL::ComputePipelineState* residual_pipeline =
+    fused.residual_inverse
+      ? fused.residual_inverse.get()
+      : ac_strategy_pipelines_.residual.get();
+  if (residual_pipeline->maxTotalThreadsPerThreadgroup() < coefficient_count ||
       ac_strategy_pipelines_.cost->maxTotalThreadsPerThreadgroup() <
         coefficient_count) {
     return Status::Unavailable(
@@ -550,52 +643,94 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   MTL::ComputeCommandEncoder* encoder,
   const ValidatedAcStrategyBatch& validated) {
 
-  encoder->setComputePipelineState(ac_strategy_pipelines_.gather.get());
-  for (size_t channel = 0; channel < 3; ++channel) {
-    encoder->setBuffer(validated.opsin[channel]->handle(),
-                       validated.opsin_offset_bytes[channel], channel);
+  const AcStrategyPipelines::FusedStages& fused =
+    ac_strategy_pipelines_.fused[
+      static_cast<size_t>(validated.strategy)];
+  if (fused.forward) {
+    encoder->setComputePipelineState(fused.forward.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      encoder->setBuffer(validated.opsin[channel]->handle(),
+                         validated.opsin_offset_bytes[channel], channel);
+    }
+    encoder->setBuffer(validated.candidates->handle(), 0, 3);
+    encoder->setBuffer(validated.scratch_b->handle(), 0, 4);
+    encoder->setBytes(&validated.params, sizeof(validated.params), 5);
+    DispatchMetalThreadgroups(
+      encoder,
+      MTL::Size(
+        static_cast<NS::UInteger>(validated.transform_count), 1, 1),
+      MTL::Size(fused.forward_threads_per_threadgroup, 1, 1));
+  } else {
+    encoder->setComputePipelineState(ac_strategy_pipelines_.gather.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      encoder->setBuffer(validated.opsin[channel]->handle(),
+                         validated.opsin_offset_bytes[channel], channel);
+    }
+    encoder->setBuffer(validated.candidates->handle(), 0, 3);
+    encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
+    encoder->setBytes(&validated.params, sizeof(validated.params), 5);
+    DispatchMetalThreads(
+      encoder,
+      MTL::Size(
+        static_cast<NS::UInteger>(validated.packed_element_count), 1, 1),
+      MTL::Size(
+        ac_strategy_pipelines_.gather_threads_per_threadgroup, 1, 1));
+
+    EncodeTransformBatch(
+      encoder, TransformDirection::kForward, validated.strategy,
+      *validated.scratch_a, 0, *validated.scratch_b, 0,
+      validated.transform_count);
   }
-  encoder->setBuffer(validated.candidates->handle(), 0, 3);
-  encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
-  encoder->setBytes(&validated.params, sizeof(validated.params), 5);
-  DispatchMetalThreads(
-    encoder,
-    MTL::Size(
-      static_cast<NS::UInteger>(validated.packed_element_count), 1, 1),
-    MTL::Size(
-      ac_strategy_pipelines_.gather_threads_per_threadgroup, 1, 1));
 
-  EncodeTransformBatch(
-    encoder, TransformDirection::kForward, validated.strategy,
-    *validated.scratch_a, 0, *validated.scratch_b, 0,
-    validated.transform_count);
-
-  encoder->setComputePipelineState(ac_strategy_pipelines_.residual.get());
-  encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
-  encoder->setBuffer(validated.matrices->handle(), 0, 1);
-  encoder->setBuffer(validated.candidates->handle(), 0, 2);
-  encoder->setBuffer(validated.quant_field->handle(),
-                     validated.quant_field_offset_bytes, 3);
-  encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
-  encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
-  encoder->setBytes(&validated.params, sizeof(validated.params), 6);
   const NS::UInteger reduction_bytes =
     validated.params.coefficient_count * sizeof(float);
-  encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
-  encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
-  DispatchMetalThreadgroups(
-    encoder,
-    MTL::Size(
-      static_cast<NS::UInteger>(validated.transform_count), 1, 1),
-    MTL::Size(validated.params.coefficient_count, 1, 1));
+  MetalBuffer* residual_pixels = nullptr;
+  if (fused.residual_inverse) {
+    encoder->setComputePipelineState(fused.residual_inverse.get());
+    encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
+    encoder->setBuffer(validated.matrices->handle(), 0, 1);
+    encoder->setBuffer(validated.candidates->handle(), 0, 2);
+    encoder->setBuffer(validated.quant_field->handle(),
+                       validated.quant_field_offset_bytes, 3);
+    encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
+    encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
+    encoder->setBytes(&validated.params, sizeof(validated.params), 6);
+    encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
+    encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
+    encoder->setThreadgroupMemoryLength(reduction_bytes, 2);
+    DispatchMetalThreadgroups(
+      encoder,
+      MTL::Size(
+        static_cast<NS::UInteger>(validated.transform_count), 1, 1),
+      MTL::Size(validated.params.coefficient_count, 1, 1));
+    residual_pixels = validated.scratch_a;
+  } else {
+    encoder->setComputePipelineState(ac_strategy_pipelines_.residual.get());
+    encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
+    encoder->setBuffer(validated.matrices->handle(), 0, 1);
+    encoder->setBuffer(validated.candidates->handle(), 0, 2);
+    encoder->setBuffer(validated.quant_field->handle(),
+                       validated.quant_field_offset_bytes, 3);
+    encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
+    encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
+    encoder->setBytes(&validated.params, sizeof(validated.params), 6);
+    encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
+    encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
+    DispatchMetalThreadgroups(
+      encoder,
+      MTL::Size(
+        static_cast<NS::UInteger>(validated.transform_count), 1, 1),
+      MTL::Size(validated.params.coefficient_count, 1, 1));
 
-  EncodeTransformBatch(
-    encoder, TransformDirection::kInverse, validated.strategy,
-    *validated.scratch_a, 0, *validated.scratch_b, 0,
-    validated.transform_count);
+    EncodeTransformBatch(
+      encoder, TransformDirection::kInverse, validated.strategy,
+      *validated.scratch_a, 0, *validated.scratch_b, 0,
+      validated.transform_count);
+    residual_pixels = validated.scratch_b;
+  }
 
   encoder->setComputePipelineState(ac_strategy_pipelines_.cost.get());
-  encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
+  encoder->setBuffer(residual_pixels->handle(), 0, 0);
   encoder->setBuffer(validated.pixel_mask->handle(),
                      validated.pixel_mask_offset_bytes, 1);
   encoder->setBuffer(validated.candidates->handle(), 0, 2);

@@ -1239,9 +1239,19 @@ Status CreateMetalBackendImpl(
   }
 
   AcStrategyPipelines ac_strategy_pipelines;
+  std::array<bool, kAcStrategyCount> fused_ac_forward_enabled{};
+  std::array<bool, kAcStrategyCount> fused_ac_inverse_enabled{};
+  for (const DctSelection& selection : dct_selections) {
+    fused_ac_forward_enabled[static_cast<size_t>(selection.strategy)] =
+      selection.forward == MetalDctImplementation::kSimdgroupMatmul;
+    fused_ac_inverse_enabled[static_cast<size_t>(selection.strategy)] =
+      selection.inverse == MetalDctImplementation::kSimdgroupMatmul;
+  }
   status = CreateAcStrategyPipelines(
     device.get(),
     library.get(),
+    fused_ac_forward_enabled,
+    fused_ac_inverse_enabled,
     &ac_strategy_pipelines);
   if (!status.ok()) {
     return {
