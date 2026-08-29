@@ -797,3 +797,219 @@ implementation scope for less likely general-image benefit. Each accepted
 optimization should be evaluated on a broader corpus with decoded-output
 validation and matched-quality size comparisons, not only the same nominal
 distance.
+
+## Codestream performance profile and optimization priorities
+
+A symbolized Samply capture on Apple M4 Pro isolated the host codestream tail
+after the prefix-density and custom-coefficient-order changes. The capture used
+the Release `gjxl_quantization_benchmark` binary at
+`56a0790d3549bbd2bebe80522808ff47f7891ef2`, Kodak image 01 as a 768x512 PPM,
+the Metal public workflow in `maximum-throughput` mode at distance 1.2, five
+warmups, 400 measured encodes, and 1 kHz all-thread sampling. It contained
+37,656 positive-CPU samples, 27,886.277 ms of sampled CPU delta, and 99.78%
+weighted leaf-symbol resolution.
+
+Sampling raised the run's reported latency, so these percentages are hotspot
+attribution rather than benchmark speedups. The capture also predates adaptive
+block-context candidates, ANS selection, and high-density AQ. Those features
+make a new current-head capture necessary before claiming current percentages;
+source inspection nevertheless confirms that the profiled prefix-clustering
+and Huffman paths remain in the current writer.
+
+| Stack or mutually exclusive entropy leaf group | Share of all sampled CPU | Share within prefix optimization |
+| --- | ---: | ---: |
+| `OptimizeEntropyCode` inclusive | 77.90% | 100.00% |
+| `OptimizeAcCandidate` inclusive | 76.43% | 98.10% |
+| Huffman-tree construction | 32.17% | 41.30% |
+| Histogram clustering and distance | 24.18% | 31.03% |
+| Allocation and memory traffic | 9.34% | 11.99% |
+| Entropy model and configuration construction | 7.28% | 9.34% |
+| Synchronization and waits | 0.01% | 0.01% |
+
+The hottest flat leaves were `CreateHuffmanTree` at 17.83% of all sampled CPU,
+`ClusterHistogramsFromSeeds` at 12.15%, Huffman `SetDepth` at 9.77%,
+`HistogramDistance` at 7.59%, and `BuildEntropyCodeForPartition` at 6.51%.
+Inclusive rows overlap and must not be added. The leaf-group rows partition only
+samples whose stacks include `OptimizeEntropyCode`.
+
+The call stacks and dependency structure suggest the following implementation
+order.
+
+1. **Complete (2026-08-29): remove unused exact costs from shape-only
+   screening.**
+   `FastClusterHistograms` computes `HistogramBitCost` for every prepared
+   histogram even when `fill_to_limit` selects only `HistogramShapeDistance`
+   and the seed-index path returns before exact assignment. Likewise,
+   `AssignHistogramsToSeeds` computes and updates exact bit costs when
+   `use_shape_distance` is true, although those comparisons use only counts and
+   totals. The capture attributed 8.21% of all sampled CPU to Huffman work
+   directly beneath `ClusterHistogramsFromSeeds` and another 1.89% beneath
+   `FastClusterHistograms`. Not all of that 10.10% is removable, but this is the
+   strongest exact-codestream-preserving first experiment.
+
+   The retained implementation skips prepared costs only when shape-based seed
+   discovery returns before exact assignment. Shape-based seed assignment also
+   omits its unused input and accumulating-cluster costs. Exact-distance seed
+   discovery and assignment retain their former cost updates, while downstream
+   compaction or refinement reconstructs final codes from unchanged counts.
+
+   Five alternating Apple M4 Pro process pairs compared the parent and optimized
+   Release binaries on Kodak image 01, using the Metal public workflow at
+   distance 1.2 and `maximum-throughput`, with three warmups and 20 measured
+   samples per process. Per-pair entropy-optimization medians improved by
+   7.55-8.60%, codestream encoding by 4.30-7.18%, and complete workflow time by
+   5.66-6.73%. Across the pooled 100 samples per binary, entropy changed from
+   58.834 to 54.009 ms (-8.20%), codestream encoding from 77.264 to 72.975 ms
+   (-5.55%), and complete workflow time from 97.826 to 91.583 ms (-6.38%). All
+   200 samples retained identical encoded size, entropy bits and cluster counts,
+   entropy modes, coefficient-order choice, and block-context choice.
+
+   Matched 1 kHz Samply captures used five warmups and 400 encodes per binary.
+   Sampled CPU delta fell 8.51% overall, 10.96% inside `OptimizeEntropyCode`, and
+   20.10% under `CreateHuffmanTree`. Direct Huffman work beneath seeded
+   clustering fell 70.43%, from 7.02% to 2.27% of sampled CPU; the corresponding
+   direct fast-clustering work fell 33.12%, from 1.41% to 1.03%. Exact
+   `HistogramDistance` work changed by only -1.06% and synchronization/waits by
+   -1.38%, supporting the intended work-elimination mechanism. These sampled
+   percentages remain attribution rather than timing claims.
+
+   The focused entropy, encoder, single-image workflow, and batch-workflow tests
+   pass, as do all 22 pinned conformance fixtures and four public workflows under
+   pinned `djxl`. The complete Release suite remains 58/59: the sole
+   `quantization_pipeline` score mismatch exactly reproduces the inherited
+   parent failure and is unrelated to codestream entropy.
+
+2. **Complete (2026-08-29): reuse exact histogram state and Huffman scratch.**
+   Histograms now carry explicit bit-cost validity. Successful count mutations
+   invalidate the cache, while the source histograms compute their exact costs
+   once before clustering so every candidate copy can reuse them. Independently
+   mutable cluster histograms continue to recompute after each merge.
+
+   `CreateHuffmanTree` now uses one uninitialized fixed-capacity array for the
+   128-symbol, 257-node maximum and reuses it across depth-limit retries. An
+   in-place total-order sort uses count ascending and symbol descending, exactly
+   matching the old stable sort's descending-symbol insertion order. Focused
+   tests pin the equal-count depths and canonical bits and exercise a forced
+   depth-limit retry. Eagerly value-initializing the complete scratch array was
+   rejected after it made entropy optimization about 9-11% slower; only nodes
+   written by the current attempt are initialized. A fixed-buffer merge-sort
+   experiment was also slower and was discarded.
+
+   Five alternating Apple M4 Pro process pairs compared the parent `a251caa`
+   binary and the retained Release binary on Kodak image 01 under the same Metal
+   public-workflow, distance-1.2, maximum-throughput setup, with three warmups
+   and 20 measured samples per process. Per-pair entropy medians improved by
+   0.51-2.94%. Across the pooled 100 samples per binary, entropy optimization
+   changed from 52.580 to 51.811 ms (-1.46%), codestream encoding from 70.647 to
+   69.812 ms (-1.18%), and complete workflow time from 89.883 to 88.360 ms
+   (-1.69%). All 200 samples retained identical encoded size, entropy bits and
+   clusters, entropy modes, coefficient-order choice, and block-context choice.
+
+   Matched 1 kHz Samply captures used five warmups and 400 encodes per binary.
+   Sampled CPU delta fell 5.67% overall, 4.76% inside `OptimizeEntropyCode`, and
+   6.39% under `CreateHuffmanTree`; exact `HistogramDistance` work changed by
+   -1.74%. Allocator leaves beneath `CreateHuffmanTree` fell from 586.668 ms to
+   zero, directly confirming the fixed-scratch mechanism. The replacement sort
+   itself was 31.41% hotter than the former stable sort, so a faster
+   allocation-free total-order sort remains a possible follow-up. These sampled
+   CPU deltas are attribution evidence rather than benchmark timing claims.
+
+   The optimized and parent sample codestreams are byte-identical with SHA-256
+   `4f3013a085debbb78d93043d67bffa0587cd155e62d5e84f54cadf2dbf5f0d1d`.
+   The focused entropy, encoder, single-image workflow, and batch-workflow tests
+   pass, as do all 22 pinned conformance fixtures and four public workflows. The
+   complete Release suite remains 58/59 with the exact inherited
+   `quantization_pipeline` score mismatch.
+
+3. **Investigated and rejected (2026-08-29): globally bounded task
+   parallelism.** The experiment replaced the six fresh-thread section waves
+   with one lazy process-wide executor capped at eight workers. Indexed status
+   slots retained deterministic error order, and executor workers cooperatively
+   drained the shared queue while waiting on nested work so full-pool nesting
+   could not deadlock. Concurrent callers shared the same ceiling. The six
+   unique normalized cluster-cap evaluations then wrote independent indexed
+   results in parallel, followed by the unchanged ascending-cap, strict-`<`
+   serial reduction.
+
+   Focused coverage exercised zero/one-task fallback, exactly-once execution,
+   deterministic failures, allocation and unexpected-exception mapping,
+   concurrent callers, the active-worker bound, and full-occupancy nesting.
+   One hundred repetitions of that executor test passed. Repeated entropy
+   optimization produced identical models and costs. The candidate matched the
+   parent byte-for-byte on the checked small fixture and a 768x512 Kodak-derived
+   encode; all 22 pinned decoder fixtures passed. The complete Release suite was
+   59/60, with only the exact inherited `quantization_pipeline` mismatch of
+   `4.4524669647216797e-05`.
+
+   Five Latin-square process rounds compared the parent, executor-only, and
+   executor-plus-cap binaries on Kodak image 01. Each process used three warmups
+   and 20 measured Metal public-workflow samples at distance 1.2 and
+   `maximum-throughput`. Pooled medians were:
+
+   | Phase | Parent | Executor only | Executor + caps |
+   | --- | ---: | ---: | ---: |
+   | Entropy optimization | 52.140 ms | 52.409 ms (+0.52%) | 51.103 ms (-1.99%) |
+   | Codestream encoding | 70.253 ms | 71.488 ms (+1.76%) | 71.297 ms (+1.49%) |
+   | Complete workflow | 90.313 ms | 91.913 ms (+1.77%) | 91.170 ms (+0.95%) |
+
+   Cap parallelism improved entropy time in every paired round by 1.29-3.60%
+   relative to the parent, but complete workflow time improved in only one of
+   five rounds; its paired range was -0.34% to +2.24%. Executor-only workflow
+   time regressed in all five rounds by 0.91-3.66%. All 300 samples retained the
+   same encoded bytes, entropy bits and clusters, entropy modes, coefficient
+   order, and block-context choice.
+
+   Three independently launched full batch matrices used one warmup, three
+   samples, batch sizes 1/2/4/8, and all five benchmark workloads. The table
+   below reports the median of each process's batch-time median for batch eight:
+
+   | Workload | Parent | Executor only | Executor + caps |
+   | --- | ---: | ---: | ---: |
+   | 64x64 | 20.533 ms | 26.542 ms (+29.27%) | 24.652 ms (+20.06%) |
+   | 512x384 | 190.722 ms | 242.920 ms (+27.37%) | 290.300 ms (+52.21%) |
+   | 1080p | 1,021.094 ms | 1,363.740 ms (+33.56%) | 1,435.783 ms (+40.61%) |
+   | 4K | 3,960.405 ms | 5,508.151 ms (+39.08%) | 5,282.166 ms (+33.37%) |
+
+   For batch sizes 2-8 across 512x384, 1080p, and 4K, executor-only time
+   regressed by 20.15-39.08% and executor-plus-cap time by 26.67-52.21%.
+   `VarDctBatchEncoder` outer workers block while inner work is restricted to
+   the global pool, so the eight-worker ceiling underuses this 14-core M4 Pro.
+   The previous per-image section waves allow materially more host concurrency;
+   their thread-creation cost is not the limiting factor for this workload.
+
+   Both code changes were therefore removed. A new Samply capture was not run
+   after the retention gates failed because it would profile a non-shipping
+   variant. A future revisit should unify outer and inner scheduling with a
+   hardware-sized or measured adaptive budget, rather than applying the former
+   single-image eight-worker limit process-wide. Caller participation and task
+   granularity should be measured independently before adding cap tasks again.
+
+4. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
+   `maximum-throughput` reduces AQ work but still invokes the full prefix search
+   for each eligible entropy candidate. A speed-oriented serializer policy
+   could cheaply screen coefficient-order and block-context candidates, search
+   fewer cluster caps, or retain the legacy partition when predicted savings are
+   small. These entropy choices do not alter coefficients, decoded pixels, or
+   Butteraugli distortion, but they may increase file size. Candidate winner
+   rates, per-candidate time, bytes saved, and complete-codestream size must
+   define this policy; one losing custom-order example is not sufficient.
+
+5. **Defer GPU entropy coding until a residual profile justifies it.** The
+   dominant exact operation builds many small, branch-heavy, depth-limited
+   128-symbol Huffman trees with deterministic tie behavior. Seed assignment
+   also mutates cluster state between decisions, and the CPU serializer needs
+   the result immediately. Those properties are a poor match for low-latency
+   Metal dispatch even on unified memory. A future multi-image implementation
+   could batch histogram reductions, shape-distance matrices, or many
+   independent tree builds, but it would require enough cross-image work to
+   amortize dispatch and synchronization. CPU work elimination, scratch reuse,
+   and bounded task scheduling should be measured first.
+
+For exact-output changes, retain the current deterministic serializer fixtures,
+complete-codestream hashes, pinned-`djxl` acceptance, and decoded-pixel checks.
+Performance qualification should add call counts and time for shape screening,
+exact refinement, each cap, each block-map/order candidate, Huffman retries,
+and executor queue/run time. Use warmups plus repeated alternating builds for
+latency, and independent repeated batch processes for throughput. Re-profile
+the winning implementation so a shifted hotspot, rather than the original
+sample percentages, determines the next optimization.

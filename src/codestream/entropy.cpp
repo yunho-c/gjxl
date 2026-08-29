@@ -34,6 +34,7 @@ struct Histogram {
   std::array<uint64_t, kPrefixAlphabetSize> counts{};
   uint64_t total_count = 0;
   double bit_cost = 0.0;
+  bool bit_cost_valid = false;
 
   bool Add(size_t symbol) {
     if (symbol >= counts.size() ||
@@ -43,6 +44,7 @@ struct Histogram {
     }
     ++counts[symbol];
     ++total_count;
+    bit_cost_valid = false;
     return true;
   }
 
@@ -61,6 +63,7 @@ struct Histogram {
       counts[index] += other.counts[index];
     }
     total_count += other.total_count;
+    bit_cost_valid = false;
     return true;
   }
 
@@ -74,8 +77,12 @@ Status HistogramBitCost(Histogram* histogram) {
   if (histogram == nullptr) {
     return Status::InvalidArgument("Histogram output is null");
   }
+  if (histogram->bit_cost_valid) {
+    return Status::Ok();
+  }
   histogram->bit_cost = 0.0;
   if (histogram->total_count == 0) {
+    histogram->bit_cost_valid = true;
     return Status::Ok();
   }
   std::array<uint8_t, kPrefixAlphabetSize> depths{};
@@ -89,12 +96,14 @@ Status HistogramBitCost(Histogram* histogram) {
     populated_symbols += count != 0;
   }
   if (populated_symbols == 1) {
+    histogram->bit_cost_valid = true;
     return Status::Ok();
   }
   for (size_t index = 0; index < depths.size(); ++index) {
     histogram->bit_cost +=
       static_cast<double>(histogram->counts[index]) * depths[index];
   }
+  histogram->bit_cost_valid = true;
   return Status::Ok();
 }
 
@@ -166,6 +175,10 @@ Status FastClusterHistograms(
   std::vector<double> distances(
     input.size(), std::numeric_limits<double>::max());
   std::vector<Histogram> prepared = input;
+  // Shape-only seed discovery returns before exact assignment and never reads
+  // bit_cost. Every other path needs prepared costs for HistogramDistance.
+  const bool needs_exact_bit_costs =
+    !fill_to_limit || seed_indexes == nullptr;
   size_t largest_index = 0;
   for (size_t index = 0; index < prepared.size(); ++index) {
     if (prepared[index].total_count == 0) {
@@ -173,8 +186,10 @@ Status FastClusterHistograms(
       distances[index] = 0.0;
       continue;
     }
-    if (Status status = HistogramBitCost(&prepared[index]); !status.ok()) {
-      return status;
+    if (needs_exact_bit_costs) {
+      if (Status status = HistogramBitCost(&prepared[index]); !status.ok()) {
+        return status;
+      }
     }
     if (prepared[index].total_count >
         prepared[largest_index].total_count) {
@@ -268,9 +283,13 @@ Status AssignHistogramsToSeeds(
     return Status::InvalidArgument("Invalid histogram seed assignment");
   }
   std::vector<Histogram> prepared = input;
-  for (Histogram& histogram : prepared) {
-    if (Status status = HistogramBitCost(&histogram); !status.ok()) {
-      return status;
+  // Shape distance uses only counts and total_count. Compaction or refinement
+  // reconstructs any subsequently needed exact codes from those counts.
+  if (!use_shape_distance) {
+    for (Histogram& histogram : prepared) {
+      if (Status status = HistogramBitCost(&histogram); !status.ok()) {
+        return status;
+      }
     }
   }
   output->clear();
@@ -326,8 +345,10 @@ Status AssignHistogramsToSeeds(
     if (!(*output)[best].AddHistogram(prepared[index])) {
       return Status::InvalidArgument("Clustered histogram count overflow");
     }
-    if (Status status = HistogramBitCost(&(*output)[best]); !status.ok()) {
-      return status;
+    if (!use_shape_distance) {
+      if (Status status = HistogramBitCost(&(*output)[best]); !status.ok()) {
+        return status;
+      }
     }
     (*histogram_symbols)[index] = static_cast<uint32_t>(best);
   }
@@ -1582,6 +1603,15 @@ Status OptimizeEntropyCode(
         if (!histograms[histogram].Add(encoded.symbol)) {
           return Status::InvalidArgument("Entropy histogram count overflow");
         }
+      }
+    }
+
+    // Exact cluster candidates all start from these same source histograms.
+    // Cache their costs once so copies can reuse them while mutations continue
+    // to invalidate only the affected cluster state.
+    for (Histogram& histogram : histograms) {
+      if (Status status = HistogramBitCost(&histogram); !status.ok()) {
+        return status;
       }
     }
 
