@@ -454,6 +454,14 @@ Output remained `1745707` bytes. The exact Metal Butteraugli and AQ tests pass
 with unchanged error bounds, and the complete suite remains 57/58 with only
 the inherited pinned CPU quantization-pipeline score mismatch.
 
+A follow-up dispatch-fusion experiment combined the three five-tap horizontal
+blur channels. It removed four reference-preparation dispatches and two
+dispatches per comparison scale, but the direct padded-1080p resident-
+comparison median regressed from `11.002` to `11.181 ms` (`+1.6%`) and lost all
+three alternating pairs. Resident consumer end to end changed only from
+`10.523` to `10.479 ms` (`-0.4%`). The fusion was rejected; lower dispatch
+count did not offset the larger per-thread kernel.
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
