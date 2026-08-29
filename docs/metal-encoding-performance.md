@@ -487,6 +487,27 @@ resident dispatches, but improved the 1080p sub tail by only `0.041 ms`
 (`1.261 -> 1.220 ms`). That did not justify specialized output routing, so the
 experiment was rejected.
 
+#### Final kernel-series integration audit (2026-08-29)
+
+Merge commit `2973d43` incorporates target `refactor/metal-cpp` commit
+`ff3cac3`, including its new codestream density and entropy work. The target
+changes do not overlap the Metal source tree; `src/gpu/metal` is byte-identical
+before and after the merge, so the per-kernel profiles and matched optimization
+gates above remain applicable to the merged implementation.
+
+The merged tree passes 58/59 tests, including every Metal test and the new
+codestream tests. The sole failure remains the inherited pinned CPU
+quantization-pipeline score mismatch (`4.4524669647216797e-05`). Latest-target
+validation encodes produce identical baseline/candidate GPU sizes of `420268`
+bytes at padded 1080p and `1640942` bytes at padded 4K.
+
+No aggregate latest-target latency is claimed here. During the final gate the
+host load average reached `28`, and normally sub-second 1080p public encodes
+expanded to `2.7-3.6 s`; single-sample 4K runs expanded to `7.3-7.9 s` with
+contradictory quantization ordering. Those runs establish successful merged-
+target encoding and byte parity only. The clean alternating-process tables in
+the individual sections remain the performance evidence.
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
