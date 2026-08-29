@@ -134,6 +134,7 @@ struct CommandLineOptions {
       gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   gjxl::VarDctDensityMode density_mode =
       gjxl::VarDctDensityMode::kDefault;
+  bool collect_final_butteraugli_score = false;
   float butteraugli_target = kDefaultButteraugliTarget;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
@@ -560,11 +561,16 @@ ParseGpuProfilingMode(std::string_view text) {
                    "maximum-throughput] "
                    "[--density default|high] "
                    "[--validation cpu-metal|metal-only] "
+                   "[--collect-final-score] "
                    "[--metallib PATH] [--raw-samples PATH] "
                    "[--gpu-profile stage|dispatch] "
                    "[--gpu-profile-output PATH] "
                    "[--distance D] [--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
+    }
+    if (argument == "--collect-final-score") {
+      options.collect_final_butteraugli_score = true;
+      continue;
     }
     if (index + 1 >= argc) {
       throw std::runtime_error("Benchmark option is missing its value");
@@ -1007,6 +1013,9 @@ void WriteRawWorkflowSamples(
            << JsonEscape(options.implementation) << "\",\n"
            << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
            << "\",\n"
+           << "  \"collect_final_score\": "
+           << (options.collect_final_butteraugli_score ? "true" : "false")
+           << ",\n"
            << "  \"density\": \""
            << (options.density_mode == gjxl::VarDctDensityMode::kHighDensity
                  ? "high"
@@ -1166,6 +1175,9 @@ void WriteGpuProfileSamples(
            << GpuProfilingModeName(options.gpu_profiling_mode) << "\",\n"
            << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
            << "\",\n"
+           << "  \"collect_final_score\": "
+           << (options.collect_final_butteraugli_score ? "true" : "false")
+           << ",\n"
            << "  \"distance\": " << std::setprecision(9)
            << options.butteraugli_target << ",\n"
            << "  \"warmups\": " << options.warmups << ",\n"
@@ -1432,6 +1444,7 @@ void RunPublicWorkflowOnlyWorkload(
     float butteraugli_target,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::VarDctDensityMode density_mode,
+    bool collect_final_butteraugli_score,
     std::string_view input_path, bool metal_only, ValidationMode validation,
     gjxl::GpuBackend& gpu,
     std::vector<RawWorkflowWorkload>* raw_results, double* global_sink) {
@@ -1458,7 +1471,9 @@ void RunPublicWorkflowOnlyWorkload(
             {.butteraugli_target = butteraugli_target,
              .density_mode = density_mode,
              .backend = backend,
-             .metal_aq_mode = mode},
+             .metal_aq_mode = mode,
+             .collect_final_butteraugli_score =
+               collect_final_butteraugli_score},
             backend == gjxl::VarDctBackendPreference::kMetal ? &gpu : nullptr,
             true, bytes, summary, profile);
   };
@@ -1578,7 +1593,9 @@ void RunPublicWorkflowOnlyWorkload(
       profile.codestream.selected_block_context_count;
     raw_sample.selected_block_context_qf_threshold_count =
       profile.codestream.selected_block_context_qf_threshold_count;
-    raw_sample.has_final_score = !summary.score_history.empty();
+    raw_sample.has_final_score =
+      summary.final_butteraugli_score_evaluated &&
+      !summary.score_history.empty();
     if (raw_sample.has_final_score) {
       raw_sample.final_score = summary.score_history.back();
     }
@@ -1618,7 +1635,8 @@ void RunPublicWorkflowOnlyWorkload(
     append_raw_sample(sample, "metal", gpu_profile, gpu_bytes, gpu_summary);
     if (metal_only) {
       sink += static_cast<double>(gpu_bytes.size()) +
-              (gpu_summary.score_history.empty()
+              (!gpu_summary.final_butteraugli_score_evaluated ||
+                   gpu_summary.score_history.empty()
                  ? 0.0
                  : gpu_summary.score_history.back());
     } else {
@@ -1629,7 +1647,8 @@ void RunPublicWorkflowOnlyWorkload(
           static_cast<double>(gpu_profile.total_nanoseconds));
       sink += static_cast<double>(cpu_bytes.size() + gpu_bytes.size()) +
               cpu_summary.score_history.back() +
-              (gpu_summary.score_history.empty()
+              (!gpu_summary.final_butteraugli_score_evaluated ||
+                   gpu_summary.score_history.empty()
                  ? 0.0
                  : gpu_summary.score_history.back());
     }
@@ -1673,6 +1692,7 @@ void RunGpuProfileWorkflowWorkload(
     float butteraugli_target,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::gpu_profile_internal::GpuProfilingMode profiling_mode,
+    bool collect_final_butteraugli_score,
     std::string_view input_path, gjxl::GpuBackend& gpu,
     std::vector<RawGpuProfileWorkload>* results, double* global_sink) {
   ImageStorage original = !input_path.empty()
@@ -1690,6 +1710,7 @@ void RunGpuProfileWorkflowWorkload(
     .butteraugli_target = butteraugli_target,
     .backend = gjxl::VarDctBackendPreference::kMetal,
     .metal_aq_mode = gpu_aq_mode,
+    .collect_final_butteraugli_score = collect_final_butteraugli_score,
   };
   std::vector<uint8_t> expected;
   gjxl::VarDctEncodingSummary expected_summary;
@@ -1746,7 +1767,10 @@ void RunGpuProfileWorkflowWorkload(
     }
     workload.samples.push_back({sample, std::move(profile)});
     sink += static_cast<double>(bytes.size()) +
-      (summary.score_history.empty() ? 0.0 : summary.score_history.back());
+      (!summary.final_butteraugli_score_evaluated ||
+           summary.score_history.empty()
+         ? 0.0
+         : summary.score_history.back());
   }
   std::cout << "workload " << spec.name << " source="
             << original.extent.width << 'x' << original.extent.height
@@ -2709,6 +2733,10 @@ int main(int argc, char** argv) {
               << " implementation=" << options.implementation
               << " scope=" << BenchmarkScopeName(options.scope)
               << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
+              << " final_score="
+              << (options.collect_final_butteraugli_score
+                    ? "collect"
+                    : "skip")
               << " density="
               << (options.density_mode ==
                         gjxl::VarDctDensityMode::kHighDensity
@@ -2737,13 +2765,15 @@ int main(int argc, char** argv) {
           RunGpuProfileWorkflowWorkload(
             {"external_input", {}, false}, options.warmups, options.samples,
             options.butteraugli_target, options.gpu_aq_mode,
-            options.gpu_profiling_mode, options.input_path, *gpu,
+            options.gpu_profiling_mode,
+            options.collect_final_butteraugli_score, options.input_path, *gpu,
             &gpu_profile_results, &sink);
         } else {
           RunPublicWorkflowOnlyWorkload(
               {"external_input", {}, false}, options.warmups, options.samples,
               options.butteraugli_target, options.gpu_aq_mode,
               options.density_mode,
+              options.collect_final_butteraugli_score,
               options.input_path,
               options.scope == BenchmarkScope::kMetalPublicWorkflow,
               options.validation, *gpu, raw_results_pointer, &sink);
@@ -2768,13 +2798,16 @@ int main(int argc, char** argv) {
               RunGpuProfileWorkflowWorkload(
                 workload, options.warmups, options.samples,
                 options.butteraugli_target, options.gpu_aq_mode,
-                options.gpu_profiling_mode, {}, *gpu, &gpu_profile_results,
+                options.gpu_profiling_mode,
+                options.collect_final_butteraugli_score, {}, *gpu,
+                &gpu_profile_results,
                 &sink);
             } else {
               RunPublicWorkflowOnlyWorkload(
                   workload, options.warmups, options.samples,
                   options.butteraugli_target, options.gpu_aq_mode,
-                  options.density_mode, {},
+                  options.density_mode,
+                  options.collect_final_butteraugli_score, {},
                   options.scope == BenchmarkScope::kMetalPublicWorkflow,
                   options.validation, *gpu, raw_results_pointer, &sink);
             }

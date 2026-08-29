@@ -44,8 +44,13 @@ struct SearchInterval {
 [[nodiscard]] double FinalScore(
   const VarDctEncodingSummary& summary) noexcept {
 
-  return summary.score_history.empty() ||
-      summary.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput
+  const bool resident_metal =
+    summary.execution_backend == VarDctExecutionBackend::kMetal &&
+    (summary.metal_aq_mode ==
+       GpuAdaptiveQuantizationMode::kFullyResident ||
+     summary.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput);
+  return resident_metal || !summary.final_butteraugli_score_evaluated ||
+      summary.score_history.empty()
     ? std::numeric_limits<double>::infinity()
     : summary.score_history.back();
 }
@@ -144,6 +149,8 @@ struct SearchInterval {
       summary.rate_control_mode !=
         VarDctRateControlMode::kButteraugliTarget ||
       summary.selected_butteraugli_target != butteraugli_target ||
+      (summary.final_butteraugli_score_evaluated &&
+       summary.score_history.empty()) ||
       (!summary.score_history.empty() &&
        !std::isfinite(summary.score_history.back()))) {
     return Status::Internal(

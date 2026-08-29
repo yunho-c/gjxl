@@ -36,6 +36,7 @@ using Evaluator = gjxl::codestream_internal::TargetSizeEvaluator;
   summary.selected_butteraugli_target = target;
   summary.encode_attempt_count = 1;
   summary.score_history = {score};
+  summary.final_butteraugli_score_evaluated = true;
   return summary;
 }
 
@@ -358,6 +359,7 @@ bool CheckScorelessCandidates() {
     codestream->assign(1000, 0x3c);
     *summary = MakeSummary(target, codestream->size(), target);
     summary->score_history.clear();
+    summary->final_butteraugli_score_evaluated = false;
     return gjxl::Status::Ok();
   };
   SearchResult result;
@@ -372,6 +374,75 @@ bool CheckScorelessCandidates() {
       !result.summary.score_history.empty() || result.attempt_count != 1 ||
       !result.target_size_met || result.search_exhausted) {
     std::cerr << "Scoreless target-size candidate was not accepted\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckUnevaluatedScoresDoNotBreakTies() {
+  const Evaluator evaluator = [](
+      float target,
+      std::vector<uint8_t>* codestream,
+      gjxl::VarDctEncodingSummary* summary) {
+    codestream->assign(1100, 0x3c);
+    *summary = MakeSummary(
+      target, codestream->size(),
+      target == gjxl::codestream_internal::kMinimumTargetSizeButteraugliTarget
+        ? 100.0
+        : 0.0);
+    summary->final_butteraugli_score_evaluated = false;
+    return gjxl::Status::Ok();
+  };
+  SearchResult result;
+  const gjxl::Status status = gjxl::codestream_internal::SearchTargetSize(
+    {
+      .target_bytes = 1000,
+      .maximum_attempts = 2,
+    },
+    evaluator,
+    &result);
+  if (!status.ok() || result.codestream.size() != 1100 ||
+      result.attempt_count != 2 || result.target_size_met ||
+      !result.search_exhausted ||
+      result.summary.selected_butteraugli_target !=
+        gjxl::codestream_internal::kMinimumTargetSizeButteraugliTarget ||
+      result.summary.final_butteraugli_score_evaluated) {
+    std::cerr << "Unevaluated AQ iteration score affected selection\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckResidentDiagnosticScoresDoNotBreakTies() {
+  const Evaluator evaluator = [](
+      float target,
+      std::vector<uint8_t>* codestream,
+      gjxl::VarDctEncodingSummary* summary) {
+    codestream->assign(1100, 0x3c);
+    *summary = MakeSummary(
+      target, codestream->size(),
+      target == gjxl::codestream_internal::kMinimumTargetSizeButteraugliTarget
+        ? 100.0
+        : 0.0);
+    summary->execution_backend = gjxl::VarDctExecutionBackend::kMetal;
+    summary->metal_aq_mode =
+      gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+    return gjxl::Status::Ok();
+  };
+  SearchResult result;
+  const gjxl::Status status = gjxl::codestream_internal::SearchTargetSize(
+    {
+      .target_bytes = 1000,
+      .maximum_attempts = 2,
+    },
+    evaluator,
+    &result);
+  if (!status.ok() || result.codestream.size() != 1100 ||
+      result.attempt_count != 2 ||
+      result.summary.selected_butteraugli_target !=
+        gjxl::codestream_internal::kMinimumTargetSizeButteraugliTarget ||
+      !result.summary.final_butteraugli_score_evaluated) {
+    std::cerr << "Resident diagnostic score affected target selection\n";
     return false;
   }
   return true;
@@ -435,6 +506,8 @@ int main() {
       !CheckCandidateFailures() ||
       !CheckSelectionPolicies() ||
       !CheckScorelessCandidates() ||
+      !CheckUnevaluatedScoresDoNotBreakTies() ||
+      !CheckResidentDiagnosticScoresDoNotBreakTies() ||
       !CheckInvalidOptions()) {
     return EXIT_FAILURE;
   }

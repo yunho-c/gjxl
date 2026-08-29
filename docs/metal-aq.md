@@ -253,10 +253,12 @@ call may request that frame without reconstructed RGB. Exact raw quant values
 remain a decision-level acceptance oracle, not an additional public output.
 
 The fused resident-policy output makes those materializations independent.
-Production fully-resident and throughput Butteraugli encoding requests only
-the score history and final frame, so it transfers the device error word, the
-contiguous one-to-five-float score history, quantizer metadata, raw quant, and
-quantized DC/AC. Serial exact-coefficient and maximum-error codestream calls
+Public fully-resident and throughput Butteraugli encoding requests only
+the evaluated update-score history and final frame. It skips a terminal
+encoded-field evaluation by default, then transfers the device error word,
+the contiguous score history, quantizer metadata, raw quant, and quantized
+DC/AC. An explicit final-score request adds that evaluation without changing
+the field or frame. Serial exact-coefficient and maximum-error codestream calls
 still read the bounded block values and scalar metric results required by their
 CPU policy, but their final evaluation requests the frame without downloading
 reconstructed linear RGB. The exact-coefficient frame is already the
@@ -1217,10 +1219,12 @@ selection, each resident mode computes one fast strategy-aware final-CfL map
 from the adjusted initial quant field and reuses it across perceptual
 evaluations; the exact path retains evaluation-local quant-dependent maps.
 The separate throughput mode retains the resident coefficient path. Complete
-diagnostic calls retain the explicit one-update policy. Encoding-only calls
-apply both default updates, then quantize the resulting final field into the
-frame without reconstructing and perceptually scoring it again. Direct fully
-resident AQ APIs still honor their requested iteration count.
+diagnostic calls retain the explicit one-update policy. Fully resident and
+throughput encoding-only calls apply the configured updates, then quantize the
+resulting final field into the frame without reconstructing and perceptually
+scoring it again by default. A final-score request performs that last
+evaluation but does not reduce the update count or alter the codestream.
+Direct fully resident AQ APIs still honor their requested iteration count.
 
 Resident coefficient coding now composes the pinned `AdjustQuantBlockAC`
 heuristic into the existing per-transform Metal kernel. It selects one shared

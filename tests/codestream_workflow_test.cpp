@@ -260,6 +260,7 @@ bool CheckDeterministicWorkflow() {
       first_summary.encode_attempt_count != 1 ||
       first_summary.target_size_met ||
       first_summary.score_history.size() != 3 ||
+      !first_summary.final_butteraugli_score_evaluated ||
       first_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kCpu) {
     std::cerr << "Public workflow failed: " << status.message() << '\n';
@@ -347,6 +348,7 @@ bool CheckHighDensityMode() {
       first_summary.density_mode !=
         gjxl::VarDctDensityMode::kHighDensity ||
       first_summary.score_history.size() != 5 ||
+      !first_summary.final_butteraugli_score_evaluated ||
       first_summary.execution_backend !=
         gjxl::VarDctExecutionBackend::kCpu) {
     std::cerr << "High-density workflow failed: " << status.message()
@@ -368,7 +370,8 @@ bool CheckHighDensityMode() {
       target_summary.density_mode !=
         gjxl::VarDctDensityMode::kHighDensity ||
       target_summary.encode_attempt_count != 1 ||
-      target_summary.score_history.size() != 5) {
+      target_summary.score_history.size() != 5 ||
+      !target_summary.final_butteraugli_score_evaluated) {
     std::cerr << "High-density target-size workflow failed: "
               << status.message() << '\n';
     return false;
@@ -651,6 +654,7 @@ bool CheckMaximumErrorControl() {
       first_summary.requested_maximum_error != options.maximum_error ||
       first_summary.maximum_error_evaluation_count != 6 ||
       first_summary.score_history.size() != 6 ||
+      first_summary.final_butteraugli_score_evaluated ||
       first_summary.selected_butteraugli_target != 0.0f ||
       first_summary.execution_backend !=
         gjxl::VarDctExecutionBackend::kCpu ||

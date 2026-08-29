@@ -393,12 +393,14 @@ final-CfL map is strategy-aware but fixed from the adjusted initial field
 across AQ evaluations. Automatic and CPU preferences reject those modes rather
 than silently selecting a different implementation; exact coefficients remain
 the default and the only automatically selected Metal AQ mode.
-Throughput encoding applies both default updates, then quantizes the resulting
-field into the final frame without reconstructing and scoring that field a
-third time. Its two reported scores cover the two evaluated fields rather than
-the final encoded field. Complete diagnostic calls retain the earlier explicit
-one-update tradeoff; fully resident mode continues to honor the requested
-iteration count and evaluate the final field.
+Fully resident and throughput encoding apply the configured updates, then
+quantize the resulting field into the final frame without reconstructing and
+scoring that field one more time. Their reported score history therefore
+covers the evaluated update fields, while
+`final_butteraugli_score_evaluated` is false. Setting
+`collect_final_butteraugli_score` performs the terminal evaluation without
+changing the configured update count or encoded frame. Complete throughput
+diagnostic API calls retain their separate explicit one-update policy.
 Maximum-throughput mode instead fixes every transform to DCT8, applies the
 resident `AdjustQuantBlockAC` shared-quant decision to the adjusted initial
 field, and stops before inverse reconstruction or perceptual scoring. Its
@@ -409,6 +411,9 @@ The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and one
 of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus
 `--backend auto|cpu|metal` and
 `--metal-aq exact-coefficients|fully-resident|throughput|maximum-throughput`.
+`--collect-final-score` opts resident Metal encoding into the terminal
+diagnostic evaluation; the default report says that the final score was not
+evaluated.
 `--high-density` selects four AQ updates for Butteraugli-target and target-size
 control. It is rejected with maximum-error, throughput, and maximum-throughput
 policies rather than being ignored or silently overridden.
@@ -462,6 +467,8 @@ just encode input.png output.jxl 1.0
 # Experimental resident path:
 build/release/gjxl_encode --distance 1.0 --backend metal \
   --metal-aq fully-resident testdata/codestream_sample.pfm output.jxl
+# Add --collect-final-score when the terminal encoded-field diagnostic is
+# required; it does not change the fully resident codestream.
 # Four-update density search on the exact-coefficient path:
 build/release/gjxl_encode --distance 1.0 --high-density \
   testdata/codestream_sample.pfm output.jxl

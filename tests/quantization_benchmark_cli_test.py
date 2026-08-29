@@ -81,6 +81,7 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(document["schema_version"], 6)
         self.assertEqual(document["validation"], "metal-only")
         self.assertEqual(document["density"], "default")
+        self.assertFalse(document["collect_final_score"])
         self.assertEqual(document["sample_count"], 1)
         workload = document["workloads"][0]
         self.assertEqual(workload["codestream_comparison"], "not-compared")
@@ -93,6 +94,7 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(set(sample["entropy_bits"]), {"model", "tokens"})
         self.assertGreater(sample["entropy_bits"]["model"], 0)
         self.assertGreater(sample["entropy_bits"]["tokens"], 0)
+        self.assertIsNone(sample["final_score"])
         self.assertEqual(set(sample["entropy_clusters"]), {"dc", "ac"})
         self.assertGreater(sample["entropy_clusters"]["dc"], 0)
         self.assertGreater(sample["entropy_clusters"]["ac"], 0)
@@ -151,6 +153,23 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
 
+    def test_final_score_collection_is_explicit(self) -> None:
+        destination = self.directory / "scored.json"
+        result = self.run_benchmark(
+            "--collect-final-score",
+            "--validation",
+            "metal-only",
+            "--raw-samples",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertTrue(document["collect_final_score"])
+        sample = document["workloads"][0]["samples"][0]
+        self.assertIsInstance(sample["final_score"], float)
+        self.assertIn("final_score=collect", result.stdout)
+
     def test_failed_external_metallib_preserves_existing_output(self) -> None:
         destination = self.directory / "samples.json"
         destination.write_text("sentinel", encoding="utf-8")
@@ -185,6 +204,7 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         document = json.loads(destination.read_text(encoding="utf-8"))
         self.assertEqual(document["schema_version"], 3)
         self.assertEqual(document["mode"], "stage")
+        self.assertFalse(document["collect_final_score"])
         sample = document["workloads"][0]["samples"][0]
         self.assertTrue(sample["capabilities"]["timestamp_counter"])
         self.assertTrue(sample["capabilities"]["stage_boundary"])

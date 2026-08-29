@@ -268,6 +268,7 @@ void PrintUsage(std::string_view executable) {
         .butteraugli_target = target,
         .backend = options.backend,
         .metal_aq_mode = options.metal_aq_mode,
+        .collect_final_butteraugli_score = true,
       },
       &codestream,
       &summary);
@@ -289,6 +290,7 @@ void PrintUsage(std::string_view executable) {
         summary.encode_attempt_count != 1 ||
         !std::isfinite(summary.achieved_bits_per_pixel) ||
         summary.achieved_bits_per_pixel <= 0.0 ||
+        !summary.final_butteraugli_score_evaluated ||
         summary.score_history.empty() ||
         !std::isfinite(summary.score_history.back()) ||
         strategy_count == 0) {

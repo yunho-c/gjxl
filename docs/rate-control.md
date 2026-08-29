@@ -98,9 +98,10 @@ the outer rate-control request:
 - `exact-coefficients` retains authoritative CPU coefficient decisions and is
   the only Metal mode eligible for automatic selection;
 - `fully-resident` keeps iterative coefficient coding, reconstruction, and
-  scoring on Metal for the requested AQ iteration count;
-- `throughput` uses the same resident path, applies both default updates for
-  encoding, and omits the final field's diagnostic reconstruction and score;
+  scoring on Metal for the requested AQ update count, then omits the terminal
+  encoded-field diagnostic by default;
+- `throughput` uses the same resident encoding path and default omission while
+  retaining a separate one-update contract for complete diagnostic API calls;
   and
 - `maximum-throughput` fixes DCT8, encodes the adjusted initial field, and
   skips reconstruction and perceptual scoring.
@@ -412,9 +413,12 @@ inconsistent byte count or summary remains a terminal internal-contract error.
 `TargetSizeSelectionPolicy::kLargestAtOrBelow` retains the source-compatible
 default. `kClosestAbsolute` minimizes absolute byte error and prefers the
 under-budget candidate on equal-distance ties. Equal-size candidates in both
-modes use final score when present and then the lower Butteraugli target as a
-stable tie-break. Throughput's retained scores precede its final encoded field,
-so they are not used as final-score tie-breaks. A scoreless
+modes use a score only when `final_butteraugli_score_evaluated` says that it
+measures the encoded field, then use the lower Butteraugli target as a stable
+tie-break. Resident encoding's retained update scores precede its final encoded
+field, and even an explicitly collected terminal resident score remains a
+diagnostic, so resident scores are not used as target-selection tie-breaks. A
+scoreless
 maximum-throughput candidate remains valid because serialized size, not an
 internal perceptual evaluation, is the rate contract.
 

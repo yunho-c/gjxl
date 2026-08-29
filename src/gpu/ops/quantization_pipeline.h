@@ -59,6 +59,7 @@ struct GpuEncodingQuantizationPipelineOutput {
   VarDctEncoderFrame* frame = nullptr;
   std::vector<double>* score_history = nullptr;
   MaximumErrorResult* maximum_error_result = nullptr;
+  bool collect_final_butteraugli_score = true;
 };
 
 /// Reuses target-invariant host preparation across complete GPU attempts.

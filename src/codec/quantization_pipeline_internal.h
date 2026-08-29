@@ -78,6 +78,9 @@ struct QuantizationPipelineMaterialization {
   bool block_distance_map = true;
   bool reconstructed_linear_rgb = true;
   bool final_perceptual_evaluation = true;
+  /// Public throughput diagnostics retain their one-update policy. Encoding
+  /// paths set this false so requesting a final score cannot change the field.
+  bool apply_throughput_iteration_limit = true;
 };
 
 [[nodiscard]] Status PrepareQuantizationPipeline(

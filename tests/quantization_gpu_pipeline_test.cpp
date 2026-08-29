@@ -1236,12 +1236,16 @@ bool CheckWorkflowBackendSelection() {
       cpu_summary.strategy_counts != automatic_summary.strategy_counts ||
       cpu_summary.strategy_counts != unqualified_summary.strategy_counts ||
       cpu_summary.execution_backend != gjxl::VarDctExecutionBackend::kCpu ||
+      !cpu_summary.final_butteraugli_score_evaluated ||
       forced_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
+      !forced_summary.final_butteraugli_score_evaluated ||
       automatic_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
+      !automatic_summary.final_butteraugli_score_evaluated ||
       unqualified_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kCpu ||
+      !unqualified_summary.final_butteraugli_score_evaluated ||
       forced_summary.metal_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients ||
       automatic_summary.metal_aq_mode !=
@@ -1360,15 +1364,44 @@ bool CheckWorkflowBackendSelection() {
               {.butteraugli_target = 1.0f,
                .backend = gjxl::VarDctBackendPreference::kMetal,
                .metal_aq_mode =
-                   gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
+                   gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+               .collect_final_butteraugli_score = true},
               gpu.get(), false, &resident_bytes, &resident_summary)
           .ok() ||
       resident_bytes.empty() || resident_summary.score_history.size() != 3 ||
+      !resident_summary.final_butteraugli_score_evaluated ||
       resident_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
       resident_summary.metal_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
     std::cerr << "Forced fully resident public workflow failed\n";
+    return false;
+  }
+
+  std::vector<uint8_t> resident_default_bytes;
+  gjxl::VarDctEncodingSummary resident_default_summary;
+  if (!gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+              original.ConstView(),
+              {.butteraugli_target = 1.0f,
+               .backend = gjxl::VarDctBackendPreference::kMetal,
+               .metal_aq_mode =
+                   gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
+              gpu.get(), false, &resident_default_bytes,
+              &resident_default_summary)
+          .ok() ||
+      resident_default_bytes != resident_bytes ||
+      resident_default_summary.score_history.size() != 2 ||
+      resident_default_summary.final_butteraugli_score_evaluated ||
+      !std::equal(
+        resident_default_summary.score_history.begin(),
+        resident_default_summary.score_history.end(),
+        resident_summary.score_history.begin()) ||
+      resident_default_summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kMetal ||
+      resident_default_summary.metal_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
+    std::cerr << "Default fully resident workflow changed encoded output\n";
     return false;
   }
 
@@ -1466,6 +1499,7 @@ bool CheckWorkflowBackendSelection() {
       throughput_bytes.empty() ||
       throughput_bytes != resident_bytes ||
       throughput_summary.score_history.size() != 2 ||
+      throughput_summary.final_butteraugli_score_evaluated ||
       !std::equal(
         throughput_summary.score_history.begin(),
         throughput_summary.score_history.end(),
@@ -1475,6 +1509,29 @@ bool CheckWorkflowBackendSelection() {
       throughput_summary.metal_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kThroughput) {
     std::cerr << "Forced throughput public workflow failed\n";
+    return false;
+  }
+
+  std::vector<uint8_t> throughput_scored_bytes;
+  gjxl::VarDctEncodingSummary throughput_scored_summary;
+  if (!gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+              original.ConstView(),
+              {.butteraugli_target = 1.0f,
+               .backend = gjxl::VarDctBackendPreference::kMetal,
+               .metal_aq_mode =
+                   gjxl::GpuAdaptiveQuantizationMode::kThroughput,
+               .collect_final_butteraugli_score = true},
+              gpu.get(), false, &throughput_scored_bytes,
+              &throughput_scored_summary)
+          .ok() ||
+      throughput_scored_bytes != throughput_bytes ||
+      throughput_scored_summary.score_history !=
+        resident_summary.score_history ||
+      !throughput_scored_summary.final_butteraugli_score_evaluated ||
+      throughput_scored_summary.metal_aq_mode !=
+        gjxl::GpuAdaptiveQuantizationMode::kThroughput) {
+    std::cerr << "Throughput final-score collection changed encoded output\n";
     return false;
   }
 

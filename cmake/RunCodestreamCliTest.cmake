@@ -159,6 +159,8 @@ endif()
 set(first "${GJXL_TEST_DIR}/first.jxl")
 set(second "${GJXL_TEST_DIR}/second.jxl")
 set(metal "${GJXL_TEST_DIR}/metal.jxl")
+set(resident "${GJXL_TEST_DIR}/resident.jxl")
+set(resident_scored "${GJXL_TEST_DIR}/resident-scored.jxl")
 set(throughput "${GJXL_TEST_DIR}/throughput.jxl")
 set(throughput_repeat "${GJXL_TEST_DIR}/throughput-repeat.jxl")
 set(maximum "${GJXL_TEST_DIR}/maximum-throughput.jxl")
@@ -196,6 +198,31 @@ execute_process(
 )
 if(NOT metal_result EQUAL 0)
   message(FATAL_ERROR "Forced Metal CLI encode failed: ${metal_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend metal
+    --metal-aq fully-resident "${GJXL_SAMPLE}" "${resident}"
+  RESULT_VARIABLE resident_result
+  OUTPUT_VARIABLE resident_output
+  ERROR_VARIABLE resident_error
+)
+if(NOT resident_result EQUAL 0)
+  message(FATAL_ERROR
+    "Fully-resident CLI encode failed: ${resident_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend metal
+    --metal-aq fully-resident --collect-final-score
+    "${GJXL_SAMPLE}" "${resident_scored}"
+  RESULT_VARIABLE resident_scored_result
+  OUTPUT_VARIABLE resident_scored_output
+  ERROR_VARIABLE resident_scored_error
+)
+if(NOT resident_scored_result EQUAL 0)
+  message(FATAL_ERROR
+    "Scored fully-resident CLI encode failed: ${resident_scored_error}")
 endif()
 execute_process(
   COMMAND
@@ -271,6 +298,8 @@ endif()
 file(SHA256 "${first}" first_hash)
 file(SHA256 "${second}" second_hash)
 file(SHA256 "${metal}" metal_hash)
+file(SHA256 "${resident}" resident_hash)
+file(SHA256 "${resident_scored}" resident_scored_hash)
 file(SHA256 "${throughput}" throughput_hash)
 file(SHA256 "${throughput_repeat}" throughput_repeat_hash)
 file(SHA256 "${maximum}" maximum_hash)
@@ -282,6 +311,10 @@ if(NOT first_hash STREQUAL second_hash)
 endif()
 if(NOT first_hash STREQUAL metal_hash)
   message(FATAL_ERROR "Forced Metal changed the CLI codestream")
+endif()
+if(NOT resident_hash STREQUAL resident_scored_hash)
+  message(FATAL_ERROR
+    "Final-score collection changed the fully-resident codestream")
 endif()
 if(NOT throughput_hash STREQUAL throughput_repeat_hash)
   message(FATAL_ERROR "Throughput CLI output is not deterministic")
@@ -308,6 +341,29 @@ endforeach()
 string(FIND "${metal_output}" "using Metal" metal_found)
 if(metal_found EQUAL -1)
   message(FATAL_ERROR "Forced Metal CLI report did not identify Metal")
+endif()
+string(FIND "${resident_output}" "Metal fully-resident AQ" resident_found)
+if(resident_found EQUAL -1)
+  message(FATAL_ERROR
+    "Fully-resident CLI report did not identify its policy")
+endif()
+string(FIND "${resident_output}"
+  "Final perceptual score: not evaluated" resident_unscored_found)
+if(resident_unscored_found EQUAL -1)
+  message(FATAL_ERROR
+    "Default fully-resident CLI report claimed a final score")
+endif()
+string(FIND "${resident_scored_output}"
+  "Final perceptual score: not evaluated" resident_scored_missing)
+if(NOT resident_scored_missing EQUAL -1)
+  message(FATAL_ERROR
+    "Opt-in fully-resident CLI report did not collect a final score")
+endif()
+string(FIND "${resident_scored_output}"
+  "Final perceptual score:" resident_scored_found)
+if(resident_scored_found EQUAL -1)
+  message(FATAL_ERROR
+    "Opt-in fully-resident CLI report omitted its final score")
 endif()
 string(FIND "${throughput_output}" "Metal throughput AQ" throughput_found)
 if(throughput_found EQUAL -1)

@@ -616,14 +616,17 @@ changed from `4644/16` to `4563/17` at 1080p and from `4647/16` to `4561/17`
 at 4K. Because the global quantizer changes, unchanged raw-quant blocks do not
 provide a safe reconstruction-reuse boundary.
 
-The retained experiment instead changes only explicit throughput encoding.
-It performs both configured AQ evaluations and dependent field updates, then
-runs the resident quantizer and coefficient encoder once for the resulting
-field. It omits inverse transforms, reconstructed-pixel scatter, loop filters,
+The initial retained experiment changed only explicit throughput encoding. It
+performs both configured AQ evaluations and dependent field updates, then runs
+the resident quantizer and coefficient encoder once for the resulting field.
+It omits inverse transforms, reconstructed-pixel scatter, loop filters,
 opsin-to-linear conversion, Butteraugli, block reduction, and the final
-non-updating policy dispatch. Fully-resident mode still evaluates that final
-field and returns all three scores. Throughput returns its two actually
-evaluated scores; its final frame has no corresponding perceptual diagnostic.
+non-updating policy dispatch. The same frame-only materialization is now the
+default for public fully resident encoding as well. Both modes return the
+scores of fields they actually evaluated and mark that no score corresponds to
+the final frame. `collect_final_butteraugli_score` and the benchmark/CLI
+`--collect-final-score` switch restore the terminal diagnostic without
+changing the configured update count or codestream.
 
 Post-merge schema-3 profiles on the Apple M4 Pro used SIMD AQ at distance
 `1.2`, two warmups, and seven samples. Stage coverage was `99.940%` at 1080p
@@ -657,8 +660,30 @@ Individual 4K total ranges extended from `1485.961` to `2902.937 ms`, and
 quantization ranges from `427.075` to `879.504 ms`. This gate does not
 establish a public-workflow latency improvement. The retained evidence is the
 timestamped removal of resident GPU work and exact output parity; a lower-load
-alternating rerun remains necessary before treating the prototype as a
-large-image end-to-end optimization.
+alternating rerun remains necessary before assigning a stable large-image
+end-to-end speedup. The default is justified by removal of known GPU work plus
+exact codestream equality, not by that noisy public timing gate.
+
+A promotion gate on the integrated branch ran at a load average of about
+`4.4`, using the Metal-only public workflow, SIMD AQ at distance `1.2`, two
+warmups, seven samples, and three alternating process pairs per workload. Pair
+order was unscored/scored, scored/unscored, then unscored/scored. Each value is
+the median of the three process medians; `unscored` is the new default and
+`scored` uses `--collect-final-score`.
+
+| Workload | Unscored total | Scored total | Delta | Unscored quantization | Scored quantization | Delta | Pair wins (total/quantization) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `825.499 ms` | `866.280 ms` | `-4.7%` | `144.104 ms` | `143.791 ms` | `+0.2%` | `3/3`, `2/3` |
+| Padded 4K | `2346.020 ms` | `2619.188 ms` | `-10.4%` | `454.836 ms` | `546.225 ms` | `-16.7%` | `3/3`, `3/3` |
+
+The complete serialized tail was still variable and dominated total time, so
+the host totals are supporting evidence rather than a precise isolated-pass
+speedup. The earlier stage timestamps remain the direct attribution. Every
+sample retained `420268` bytes at 1080p and `1640942` bytes at 4K. Focused
+integration tests additionally require byte-for-byte equality for both fully
+resident and throughput score opt-ins, exact equality of their shared score
+entries, and an explicit summary-validity bit distinguishing update scores
+from the terminal encoded-frame score.
 
 ## Ordered implementation plan
 

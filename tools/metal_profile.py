@@ -595,6 +595,7 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
         "source_schema_version": payload["schema_version"],
         "mode": payload["mode"],
         "gpu_aq": payload["gpu_aq"],
+        "collect_final_score": payload.get("collect_final_score", False),
         "distance": payload["distance"],
         "workloads": workloads,
     }

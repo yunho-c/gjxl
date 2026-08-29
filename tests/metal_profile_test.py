@@ -243,6 +243,7 @@ class MetalProfileTest(unittest.TestCase):
         workload = summary["workloads"][0]
         self.assertEqual(summary["schema_version"], 3)
         self.assertEqual(summary["source_schema_version"], 3)
+        self.assertFalse(summary["collect_final_score"])
         self.assertEqual(workload["median_sampled_stage_coverage_percent"], 50)
         submission = workload["submissions"][0]
         self.assertEqual(submission["submission_id"], "resident.aq")

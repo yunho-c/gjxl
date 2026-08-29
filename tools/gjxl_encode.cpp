@@ -51,6 +51,7 @@ struct Options {
     gjxl::VarDctDensityMode::kDefault;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+  bool collect_final_butteraugli_score = false;
 };
 
 [[nodiscard]] bool ParseBackend(
@@ -281,6 +282,8 @@ struct Options {
           !ParseMetalAqMode(argv[++index], &candidate.metal_aq_mode)) {
         return false;
       }
+    } else if (argument == "--collect-final-score") {
+      candidate.collect_final_butteraugli_score = true;
     } else if (!argument.empty() && argument.front() == '-') {
       return false;
     } else if (candidate.input.empty()) {
@@ -419,6 +422,7 @@ void PrintUsage(const char* executable) {
                "[--backend auto|cpu|metal] "
                "[--metal-aq exact-coefficients|fully-resident|throughput|"
                "maximum-throughput] "
+               "[--collect-final-score] "
                "INPUT.pfm OUTPUT.jxl\n";
 }
 
@@ -454,7 +458,9 @@ int main(int argc, char** argv) {
        options.target_size_maximum_attempts,
      .target_size_selection = options.target_size_selection,
      .backend = options.backend,
-     .metal_aq_mode = options.metal_aq_mode},
+     .metal_aq_mode = options.metal_aq_mode,
+     .collect_final_butteraugli_score =
+       options.collect_final_butteraugli_score},
     &codestream,
     &summary,
     &timing);
@@ -536,11 +542,16 @@ int main(int argc, char** argv) {
     std::cout << ' ' << gjxl::kAcStrategyInfos[index].name << '='
               << summary.strategy_counts[index];
   }
-  if (!summary.score_history.empty() &&
+  if (summary.final_butteraugli_score_evaluated &&
+      !summary.score_history.empty() &&
       summary.rate_control_mode !=
         gjxl::VarDctRateControlMode::kMaximumError) {
     std::cout << "\nFinal perceptual score: "
               << summary.score_history.back();
+  } else if (!summary.score_history.empty() &&
+             summary.rate_control_mode !=
+               gjxl::VarDctRateControlMode::kMaximumError) {
+    std::cout << "\nFinal perceptual score: not evaluated";
   }
   constexpr double kNanosecondsPerMillisecond = 1.0e6;
   std::cout << "\nTiming: preparation="

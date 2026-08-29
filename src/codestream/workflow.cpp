@@ -624,6 +624,11 @@ struct PreparedWorkflow {
       .frame = &prepared.pipeline.frame,
       .score_history = &prepared.pipeline.score_history,
       .maximum_error_result = &prepared.pipeline.maximum_error_result,
+      .collect_final_butteraugli_score =
+        options.collect_final_butteraugli_score ||
+        options.metal_aq_mode ==
+          GpuAdaptiveQuantizationMode::kExactCoefficients ||
+        options.rate_control_mode == VarDctRateControlMode::kMaximumError,
     };
     status = gpu_profile == nullptr
       ? quantization_pipeline_internal::
@@ -706,6 +711,13 @@ struct PreparedWorkflow {
   }
   candidate_summary.encode_attempt_count = 1;
   candidate_summary.score_history = prepared.pipeline.score_history;
+  candidate_summary.final_butteraugli_score_evaluated =
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    !candidate_summary.score_history.empty() &&
+    (!selected_metal ||
+     options.metal_aq_mode ==
+       GpuAdaptiveQuantizationMode::kExactCoefficients ||
+     options.collect_final_butteraugli_score);
   candidate_summary.execution_backend = selected_metal
     ? VarDctExecutionBackend::kMetal
     : VarDctExecutionBackend::kCpu;

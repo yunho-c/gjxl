@@ -84,6 +84,11 @@ struct VarDctEncodingOptions {
   /// score history is empty.
   GpuAdaptiveQuantizationMode metal_aq_mode =
     GpuAdaptiveQuantizationMode::kExactCoefficients;
+  /// Requests a perceptual evaluation of the final encoded field. Resident
+  /// Metal encoding skips this diagnostic-only pass by default; CPU and exact
+  /// coefficient workflows already produce the final score as part of their
+  /// ordinary policy evaluation.
+  bool collect_final_butteraugli_score = false;
 };
 
 /// Encoder analysis reported without exposing temporary pipeline storage.
@@ -119,6 +124,9 @@ struct VarDctEncodingSummary {
   bool target_size_search_exhausted = false;
   std::array<size_t, kAcStrategyCount> strategy_counts{};
   std::vector<double> score_history;
+  /// True only when the final score-history entry evaluates the field used by
+  /// the encoded frame. Earlier entries may still be present when false.
+  bool final_butteraugli_score_evaluated = false;
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;
   /// Reports the requested mode when `execution_backend` is Metal.
   GpuAdaptiveQuantizationMode metal_aq_mode =
