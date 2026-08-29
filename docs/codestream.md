@@ -868,15 +868,47 @@ order.
    `quantization_pipeline` score mismatch exactly reproduces the inherited
    parent failure and is unrelated to codestream entropy.
 
-2. **Reuse exact histogram state and Huffman scratch.** Each cluster-cap
-   candidate copies the same source histograms and rebuilds costs. The exact
-   refinement passes can share precomputed input costs while retaining separate
-   mutable cluster state. `CreateHuffmanTree` also allocates a vector and runs a
-   stable sort for an alphabet capped at 128 symbols, repeating the construction
-   if the depth limit is exceeded. Fixed reusable storage plus an in-place sort
-   with an explicit tie key can preserve the current stable order while reducing
-   allocator traffic. Any such change must demonstrate byte-identical output;
-   a merely equivalent Huffman tree is insufficient for that claim.
+2. **Complete (2026-08-29): reuse exact histogram state and Huffman scratch.**
+   Histograms now carry explicit bit-cost validity. Successful count mutations
+   invalidate the cache, while the source histograms compute their exact costs
+   once before clustering so every candidate copy can reuse them. Independently
+   mutable cluster histograms continue to recompute after each merge.
+
+   `CreateHuffmanTree` now uses one uninitialized fixed-capacity array for the
+   128-symbol, 257-node maximum and reuses it across depth-limit retries. An
+   in-place total-order sort uses count ascending and symbol descending, exactly
+   matching the old stable sort's descending-symbol insertion order. Focused
+   tests pin the equal-count depths and canonical bits and exercise a forced
+   depth-limit retry. Eagerly value-initializing the complete scratch array was
+   rejected after it made entropy optimization about 9-11% slower; only nodes
+   written by the current attempt are initialized. A fixed-buffer merge-sort
+   experiment was also slower and was discarded.
+
+   Five alternating Apple M4 Pro process pairs compared the parent `a251caa`
+   binary and the retained Release binary on Kodak image 01 under the same Metal
+   public-workflow, distance-1.2, maximum-throughput setup, with three warmups
+   and 20 measured samples per process. Per-pair entropy medians improved by
+   0.51-2.94%. Across the pooled 100 samples per binary, entropy optimization
+   changed from 52.580 to 51.811 ms (-1.46%), codestream encoding from 70.647 to
+   69.812 ms (-1.18%), and complete workflow time from 89.883 to 88.360 ms
+   (-1.69%). All 200 samples retained identical encoded size, entropy bits and
+   clusters, entropy modes, coefficient-order choice, and block-context choice.
+
+   Matched 1 kHz Samply captures used five warmups and 400 encodes per binary.
+   Sampled CPU delta fell 5.67% overall, 4.76% inside `OptimizeEntropyCode`, and
+   6.39% under `CreateHuffmanTree`; exact `HistogramDistance` work changed by
+   -1.74%. Allocator leaves beneath `CreateHuffmanTree` fell from 586.668 ms to
+   zero, directly confirming the fixed-scratch mechanism. The replacement sort
+   itself was 31.41% hotter than the former stable sort, so a faster
+   allocation-free total-order sort remains a possible follow-up. These sampled
+   CPU deltas are attribution evidence rather than benchmark timing claims.
+
+   The optimized and parent sample codestreams are byte-identical with SHA-256
+   `4f3013a085debbb78d93043d67bffa0587cd155e62d5e84f54cadf2dbf5f0d1d`.
+   The focused entropy, encoder, single-image workflow, and batch-workflow tests
+   pass, as do all 22 pinned conformance fixtures and four public workflows. The
+   complete Release suite remains 58/59 with the exact inherited
+   `quantization_pipeline` score mismatch.
 
 3. **Use bounded task parallelism after reducing work.** The seed order is a
    serial prerequisite, but the six cap evaluations are independent once it is

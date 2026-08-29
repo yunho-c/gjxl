@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "codestream/entropy.h"
+#include "codestream/huffman.h"
 
 namespace {
 
@@ -32,6 +33,36 @@ bool CheckSignedPacking() {
     gjxl::PackSigned(1) == 2 &&
     gjxl::PackSigned(std::numeric_limits<int32_t>::max()) ==
       std::numeric_limits<uint32_t>::max() - 1;
+}
+
+bool CheckDeterministicHuffmanScratch() {
+  constexpr std::array<uint64_t, 5> equal_counts = {1, 1, 1, 1, 1};
+  constexpr std::array<uint8_t, 5> expected_depths = {2, 2, 2, 3, 3};
+  constexpr std::array<uint16_t, 5> expected_bits = {0, 2, 1, 3, 7};
+  std::array<uint8_t, equal_counts.size()> depths{};
+  std::array<uint16_t, equal_counts.size()> bits{};
+  if (!gjxl::codestream_internal::CreateHuffmanTree(
+        equal_counts, 15, depths).ok() ||
+      depths != expected_depths ||
+      !gjxl::codestream_internal::ConvertBitDepthsToSymbols(
+        depths, bits).ok() ||
+      bits != expected_bits) {
+    std::cerr << "Equal-count Huffman ordering changed\n";
+    return false;
+  }
+
+  constexpr std::array<uint64_t, 8> limited_counts = {
+    1000, 1, 1, 1, 1, 1, 1, 1};
+  constexpr std::array<uint8_t, 8> limited_expected = {
+    3, 3, 3, 3, 3, 3, 3, 3};
+  std::array<uint8_t, limited_counts.size()> limited_depths{};
+  if (!gjxl::codestream_internal::CreateHuffmanTree(
+        limited_counts, 3, limited_depths).ok() ||
+      limited_depths != limited_expected) {
+    std::cerr << "Depth-limited Huffman retry changed\n";
+    return false;
+  }
+  return true;
 }
 
 bool CheckHybridUintBoundaries() {
@@ -521,6 +552,7 @@ int main() {
     return EXIT_FAILURE;
   }
   if (!CheckHybridUintBoundaries() ||
+      !CheckDeterministicHuffmanScratch() ||
       !CheckUintConfigSerialization() ||
       !CheckDegeneratePrefixPayload() ||
       !CheckDeterministicEntropyFixtures() ||

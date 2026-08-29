@@ -34,6 +34,7 @@ struct Histogram {
   std::array<uint64_t, kPrefixAlphabetSize> counts{};
   uint64_t total_count = 0;
   double bit_cost = 0.0;
+  bool bit_cost_valid = false;
 
   bool Add(size_t symbol) {
     if (symbol >= counts.size() ||
@@ -43,6 +44,7 @@ struct Histogram {
     }
     ++counts[symbol];
     ++total_count;
+    bit_cost_valid = false;
     return true;
   }
 
@@ -61,6 +63,7 @@ struct Histogram {
       counts[index] += other.counts[index];
     }
     total_count += other.total_count;
+    bit_cost_valid = false;
     return true;
   }
 
@@ -74,8 +77,12 @@ Status HistogramBitCost(Histogram* histogram) {
   if (histogram == nullptr) {
     return Status::InvalidArgument("Histogram output is null");
   }
+  if (histogram->bit_cost_valid) {
+    return Status::Ok();
+  }
   histogram->bit_cost = 0.0;
   if (histogram->total_count == 0) {
+    histogram->bit_cost_valid = true;
     return Status::Ok();
   }
   std::array<uint8_t, kPrefixAlphabetSize> depths{};
@@ -89,12 +96,14 @@ Status HistogramBitCost(Histogram* histogram) {
     populated_symbols += count != 0;
   }
   if (populated_symbols == 1) {
+    histogram->bit_cost_valid = true;
     return Status::Ok();
   }
   for (size_t index = 0; index < depths.size(); ++index) {
     histogram->bit_cost +=
       static_cast<double>(histogram->counts[index]) * depths[index];
   }
+  histogram->bit_cost_valid = true;
   return Status::Ok();
 }
 
@@ -1594,6 +1603,15 @@ Status OptimizeEntropyCode(
         if (!histograms[histogram].Add(encoded.symbol)) {
           return Status::InvalidArgument("Entropy histogram count overflow");
         }
+      }
+    }
+
+    // Exact cluster candidates all start from these same source histograms.
+    // Cache their costs once so copies can reuse them while mutations continue
+    // to invalidate only the affected cluster state.
+    for (Histogram& histogram : histograms) {
+      if (Status status = HistogramBitCost(&histogram); !status.ok()) {
+        return status;
       }
     }
 
