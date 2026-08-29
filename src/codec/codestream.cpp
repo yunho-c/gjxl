@@ -115,8 +115,7 @@ Status ValidateSimpleCodestreamFrame(const VarDctEncoderFrame& frame) {
       "Channel, pass, or upsampling state is unsupported");
   }
   if (profile.quantization_matrix_mode !=
-        QuantizationMatrixMode::kDefault ||
-      profile.x_qm_scale != 2 || profile.b_qm_scale != 2) {
+        QuantizationMatrixMode::kDefault) {
     return Status::InvalidArgument(
       "Quantization-matrix state is outside the initial profile");
   }

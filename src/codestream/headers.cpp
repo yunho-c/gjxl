@@ -251,7 +251,11 @@ Status WriteSimpleFrameHeader(
   if (writer == nullptr) {
     return Status::InvalidArgument("Frame-header output is null");
   }
-  if (!profile.valid() || profile != SimpleVarDctCodestreamProfile{}) {
+  const SimpleVarDctCodestreamProfile defaults;
+  SimpleVarDctCodestreamProfile normalized = profile;
+  normalized.x_qm_scale = defaults.x_qm_scale;
+  normalized.b_qm_scale = defaults.b_qm_scale;
+  if (!profile.valid() || normalized != defaults) {
     return Status::InvalidArgument(
       "Profile cannot be represented by the simple frame header");
   }

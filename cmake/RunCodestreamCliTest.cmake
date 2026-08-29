@@ -247,7 +247,7 @@ if(NOT maximum_hash STREQUAL maximum_repeat_hash)
   message(FATAL_ERROR "Maximum-throughput CLI output is not deterministic")
 endif()
 set(expected_hash
-  22a3f4ed821d57e0daa13afca0585daa9ebd7a0168e3f7cbd43923dce71a9487)
+  2e5e55764351b66e461cf39c50d2579a8ad682b66a7cc744e822dea71a8dddd2)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")

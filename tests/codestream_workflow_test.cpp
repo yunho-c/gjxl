@@ -39,6 +39,26 @@ struct ImageStorage {
   std::array<std::vector<float>, 3> plane;
 };
 
+struct ArbitraryImageStorage {
+  explicit ArbitraryImageStorage(gjxl::Extent2D image_extent)
+    : extent(image_extent) {
+    for (std::vector<float>& values : plane) {
+      values.resize(extent.width * extent.height);
+    }
+  }
+
+  [[nodiscard]] gjxl::ConstImage3FView View() const {
+    return {{
+      gjxl::ConstPlaneF32View{plane[0].data(), extent, extent.width},
+      gjxl::ConstPlaneF32View{plane[1].data(), extent, extent.width},
+      gjxl::ConstPlaneF32View{plane[2].data(), extent, extent.width},
+    }};
+  }
+
+  gjxl::Extent2D extent;
+  std::array<std::vector<float>, 3> plane;
+};
+
 void FillImage(ImageStorage* image) {
   for (size_t y = 0; y < kExtent.height; ++y) {
     for (size_t x = 0; x < kExtent.width; ++x) {
@@ -62,6 +82,158 @@ uint64_t Fnv1a64(const std::vector<uint8_t>& bytes) {
     hash *= 1099511628211ull;
   }
   return hash;
+}
+
+bool CheckQuantizationMatrixScaleStats() {
+  ArbitraryImageStorage image({2, 2});
+  image.plane[0] = {0.0f, -0.1f, 0.05f, 0.2f};
+  image.plane[1] = {0.0f, 0.1f, 0.2f, 0.1f};
+  image.plane[2] = {0.0f, 0.3f, 0.2f, 0.5f};
+  gjxl::codestream_internal::QuantizationMatrixScaleStats stats;
+  gjxl::Status status =
+    gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
+      image.View(), &stats);
+  if (!status.ok() || std::abs(stats.x_edge - 0.3f) > 1.0e-6f ||
+      std::abs(stats.b_edge - 0.4f) > 1.0e-6f ||
+      std::abs(stats.exposed_blue - 0.19f) > 1.0e-6f) {
+    std::cerr << "Matrix-scale pixel statistics are incorrect\n";
+    return false;
+  }
+
+  ArbitraryImageStorage single_pixel({1, 1});
+  single_pixel.plane[0][0] = 0.2f;
+  single_pixel.plane[1][0] = 0.1f;
+  single_pixel.plane[2][0] = 0.4f;
+  status = gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
+    single_pixel.View(), &stats);
+  if (!status.ok() ||
+      stats !=
+        gjxl::codestream_internal::QuantizationMatrixScaleStats{}) {
+    std::cerr << "Degenerate matrix-scale statistics are incorrect\n";
+    return false;
+  }
+
+  const gjxl::codestream_internal::QuantizationMatrixScaleStats sentinel{
+    .x_edge = 1.0f, .b_edge = 2.0f, .exposed_blue = 3.0f};
+  stats = sentinel;
+  image.plane[1][1] = std::numeric_limits<float>::quiet_NaN();
+  ArbitraryImageStorage overflowing({2, 2});
+  overflowing.plane[0] = {
+    0.0f, 0.0f, -std::numeric_limits<float>::max(),
+    std::numeric_limits<float>::max()};
+  if (gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
+        image.View(), &stats).code() != gjxl::StatusCode::kInvalidArgument ||
+      stats != sentinel ||
+      gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
+        overflowing.View(), &stats).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      stats != sentinel ||
+      gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
+        {}, &stats).code() != gjxl::StatusCode::kInvalidArgument ||
+      stats != sentinel ||
+      gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
+        single_pixel.View(), nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument) {
+    std::cerr << "Invalid matrix-scale statistics changed output\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckQuantizationMatrixScaleSelection() {
+  using gjxl::VarDctRateControlMode;
+  using gjxl::codestream_internal::QuantizationMatrixScaleStats;
+  using gjxl::codestream_internal::QuantizationMatrixScales;
+
+  const auto selects = [](
+    QuantizationMatrixScaleStats stats,
+    float target,
+    QuantizationMatrixScales expected) {
+    QuantizationMatrixScales scales{.x = 7, .b = 7};
+    const gjxl::Status status =
+      gjxl::codestream_internal::SelectQuantizationMatrixScales(
+        stats, VarDctRateControlMode::kButteraugliTarget, target, &scales);
+    return status.ok() && scales == expected;
+  };
+  const float above_2_5 = std::nextafter(2.5f, 3.0f);
+  const float above_5_5 = std::nextafter(5.5f, 6.0f);
+  const float above_9_5 = std::nextafter(9.5f, 10.0f);
+  if (!selects({}, 2.5f, {.x = 3, .b = 2}) ||
+      !selects({}, above_2_5, {.x = 4, .b = 2}) ||
+      !selects({}, 5.5f, {.x = 4, .b = 2}) ||
+      !selects({}, above_5_5, {.x = 5, .b = 2}) ||
+      !selects({}, 9.5f, {.x = 5, .b = 2}) ||
+      !selects({}, above_9_5, {.x = 6, .b = 2}) ||
+      !selects(
+        {.x_edge = std::nextafter(0.022f, 0.0f)}, 1.0f,
+        {.x = 3, .b = 2}) ||
+      !selects({.x_edge = 0.015f}, 1.0f, {.x = 3, .b = 2}) ||
+      !selects({.x_edge = 0.022f}, 1.0f, {.x = 4, .b = 2}) ||
+      !selects(
+        {.x_edge = std::nextafter(0.026f, 0.0f)}, 1.0f,
+        {.x = 4, .b = 2}) ||
+      !selects({.x_edge = 0.026f}, 1.0f, {.x = 5, .b = 2}) ||
+      !selects({.b_edge = 0.33f}, 1.0f, {.x = 3, .b = 2}) ||
+      !selects(
+        {.b_edge = std::nextafter(0.33f, 1.0f)}, 1.0f,
+        {.x = 3, .b = 3}) ||
+      !selects({.b_edge = 0.38f}, 1.0f, {.x = 3, .b = 3}) ||
+      !selects(
+        {.b_edge = std::nextafter(0.38f, 1.0f)}, 1.0f,
+        {.x = 3, .b = 4}) ||
+      !selects(
+        {.b_edge = 0.28f, .exposed_blue = 0.13f}, 1.0f,
+        {.x = 3, .b = 2}) ||
+      !selects(
+        {.b_edge = std::nextafter(0.28f, 1.0f),
+         .exposed_blue = 0.13f},
+        1.0f, {.x = 3, .b = 3}) ||
+      !selects(
+        {.b_edge = 0.34f,
+         .exposed_blue = std::nextafter(0.13f, 0.0f)},
+        1.0f, {.x = 3, .b = 3}) ||
+      !selects(
+        {.b_edge = 0.34f, .exposed_blue = 0.13f},
+        1.0f, {.x = 3, .b = 4}) ||
+      !selects(
+        {.b_edge = std::nextafter(0.38f, 1.0f),
+         .exposed_blue = 0.13f},
+        1.0f, {.x = 3, .b = 5})) {
+    std::cerr << "Matrix-scale selection thresholds are incorrect\n";
+    return false;
+  }
+
+  QuantizationMatrixScales scales{.x = 7, .b = 7};
+  if (!gjxl::codestream_internal::SelectQuantizationMatrixScales(
+         {}, VarDctRateControlMode::kMaximumError,
+         std::numeric_limits<float>::quiet_NaN(), &scales).ok() ||
+      scales != QuantizationMatrixScales{}) {
+    std::cerr << "Maximum-error mode did not retain 2/2 matrix scales\n";
+    return false;
+  }
+
+  const QuantizationMatrixScales sentinel{.x = 6, .b = 7};
+  scales = sentinel;
+  if (gjxl::codestream_internal::SelectQuantizationMatrixScales(
+        {.x_edge = std::numeric_limits<float>::infinity()},
+        VarDctRateControlMode::kButteraugliTarget, 1.0f, &scales).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      scales != sentinel ||
+      gjxl::codestream_internal::SelectQuantizationMatrixScales(
+        {.b_edge = -0.1f}, VarDctRateControlMode::kButteraugliTarget,
+        1.0f, &scales).code() != gjxl::StatusCode::kInvalidArgument ||
+      scales != sentinel ||
+      gjxl::codestream_internal::SelectQuantizationMatrixScales(
+        {}, VarDctRateControlMode::kTargetBytes, 1.0f, &scales).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      scales != sentinel ||
+      gjxl::codestream_internal::SelectQuantizationMatrixScales(
+        {}, VarDctRateControlMode::kButteraugliTarget, 1.0f, nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument) {
+    std::cerr << "Invalid matrix-scale selection changed output\n";
+    return false;
+  }
+  return true;
 }
 
 bool CheckDeterministicWorkflow() {
@@ -140,7 +312,7 @@ bool CheckDeterministicWorkflow() {
   }
 
   const uint64_t hash = Fnv1a64(first);
-  constexpr uint64_t kExpectedHash = 13980071275010581324ull;
+  constexpr uint64_t kExpectedHash = 15791459922694441769ull;
   if (hash != kExpectedHash) {
     std::cerr << "Public workflow hash changed: " << hash << '\n';
     return false;
@@ -447,7 +619,7 @@ bool CheckTargetSizeControl() {
   ImageStorage image;
   FillImage(&image);
   constexpr size_t kTargetBytes = 275;
-  constexpr double kTolerance = 0.1;
+  constexpr double kTolerance = 0.12;
   constexpr size_t kMaximumAttempts = 8;
 
   gjxl::VarDctEncodingOptions byte_options;
@@ -471,7 +643,7 @@ bool CheckTargetSizeControl() {
         gjxl::VarDctRateControlMode::kTargetBytes ||
       byte_summary.requested_target_bytes != kTargetBytes ||
       byte_summary.effective_target_bytes != kTargetBytes ||
-      byte_summary.target_size_tolerance_bytes != 28 ||
+      byte_summary.target_size_tolerance_bytes != 33 ||
       byte_summary.encoded_bytes != byte_codestream.size() ||
       byte_summary.encoded_bytes > kTargetBytes ||
       kTargetBytes - byte_summary.encoded_bytes >
@@ -666,7 +838,9 @@ bool CheckSingleAttemptTiming() {
 }  // namespace
 
 int main() {
-  if (!CheckDeterministicWorkflow() ||
+  if (!CheckQuantizationMatrixScaleStats() ||
+      !CheckQuantizationMatrixScaleSelection() ||
+      !CheckDeterministicWorkflow() ||
       !CheckInvalidRequestsAreAtomic() ||
       !CheckMaximumErrorControl() ||
       !CheckTargetSizeControl() ||

@@ -481,7 +481,8 @@ bool CheckDimensionsAndFrameAtomicity() {
   }
 
   gjxl::SimpleVarDctCodestreamProfile profile;
-  profile.x_qm_scale = 0;
+  profile.quantization_matrix_mode =
+    gjxl::QuantizationMatrixMode::kCustom;
   gjxl::VarDctEncoderFrame invalid_profile;
   gjxl::Status status = MakeFrame(8, profile, &invalid_profile);
   std::vector<gjxl::SimpleDcGroupTokenStreams> groups(1);

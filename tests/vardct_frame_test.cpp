@@ -236,7 +236,7 @@ bool CheckMatrixScaleBoundsAndAtomicRejection() {
   profile.b_qm_scale = 7;
   if (!Encode({8, 8}, &strategies, &frame, profile).ok() ||
       !frame.valid() || frame.profile() != profile ||
-      gjxl::ValidateSimpleCodestreamFrame(frame).ok()) {
+      !gjxl::ValidateSimpleCodestreamFrame(frame).ok()) {
     std::cerr << "Representable matrix-scale bounds were not retained\n";
     return false;
   }

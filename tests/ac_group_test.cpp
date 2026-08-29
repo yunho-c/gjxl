@@ -579,7 +579,8 @@ bool CheckFrameTraversalAndAtomicity() {
   }
 
   gjxl::SimpleVarDctCodestreamProfile profile;
-  profile.b_qm_scale = 7;
+  profile.quantization_matrix_mode =
+    gjxl::QuantizationMatrixMode::kCustom;
   gjxl::VarDctEncoderFrame invalid_profile;
   if (!MakeFrame(8, profile, &invalid_profile).ok()) {
     return false;

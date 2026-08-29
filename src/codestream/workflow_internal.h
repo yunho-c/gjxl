@@ -12,6 +12,36 @@
 
 namespace gjxl::codestream_internal {
 
+struct QuantizationMatrixScaleStats {
+  float x_edge = 0.0f;
+  float b_edge = 0.0f;
+  float exposed_blue = 0.0f;
+
+  bool operator==(const QuantizationMatrixScaleStats&) const = default;
+};
+
+struct QuantizationMatrixScales {
+  uint8_t x = 2;
+  uint8_t b = 2;
+
+  bool operator==(const QuantizationMatrixScales&) const = default;
+};
+
+/// Computes libjxl's source-dependent X/B matrix-scale statistics over the
+/// unpadded opsin image. Failure leaves `stats` unchanged.
+[[nodiscard]] Status ComputeQuantizationMatrixScaleStats(
+  ConstImage3FView opsin,
+  QuantizationMatrixScaleStats* stats);
+
+/// Selects libjxl's X/B matrix scales for one complete encode attempt.
+/// Maximum-error control always selects 2/2 and ignores the Butteraugli
+/// target. Failure leaves `scales` unchanged.
+[[nodiscard]] Status SelectQuantizationMatrixScales(
+  const QuantizationMatrixScaleStats& stats,
+  VarDctRateControlMode mode,
+  float butteraugli_target,
+  QuantizationMatrixScales* scales);
+
 struct VarDctEncodingProfile {
   uint64_t input_preparation_nanoseconds = 0;
   uint64_t backend_selection_nanoseconds = 0;

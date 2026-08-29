@@ -137,6 +137,21 @@ bool CheckScaleMultipliers() {
   return true;
 }
 
+bool CheckRepresentableMatrixScales() {
+  gjxl::SimpleVarDctCodestreamProfile profile;
+  profile.x_qm_scale = 0;
+  profile.b_qm_scale = 7;
+  gjxl::VarDctEncoderFrame frame;
+  const gjxl::Status status = MakeFrame(profile, &frame);
+  if (!status.ok() || !frame.valid() || frame.profile() != profile ||
+      !gjxl::ValidateSimpleCodestreamFrame(frame).ok()) {
+    std::cerr << "Representable matrix scales were rejected: "
+              << status.message() << '\n';
+    return false;
+  }
+  return true;
+}
+
 bool CheckUnsupportedProfileDimensions() {
   return
     RejectsMutation("non-linear sRGB", [](auto* p) {
@@ -162,12 +177,6 @@ bool CheckUnsupportedProfileDimensions() {
     }) &&
     RejectsMutation("custom matrices", [](auto* p) {
       p->quantization_matrix_mode = gjxl::QuantizationMatrixMode::kCustom;
-    }) &&
-    RejectsMutation("minimum X matrix scale", [](auto* p) {
-      p->x_qm_scale = 0;
-    }) &&
-    RejectsMutation("maximum B matrix scale", [](auto* p) {
-      p->b_qm_scale = 7;
     }) &&
     RejectsMutation("DC precision", [](auto* p) {
       p->extra_dc_precision = 1;
@@ -227,6 +236,7 @@ int main() {
         gjxl::StatusCode::kInvalidArgument ||
       !CheckDefaultAndQuantizerBoundary() ||
       !CheckScaleMultipliers() ||
+      !CheckRepresentableMatrixScales() ||
       !CheckUnsupportedProfileDimensions()) {
     return EXIT_FAILURE;
   }

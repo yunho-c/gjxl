@@ -160,12 +160,26 @@ bool CheckCodestreamAndFrameHeaders() {
     return false;
   }
 
+  gjxl::SimpleVarDctCodestreamProfile scaled_profile;
+  scaled_profile.x_qm_scale = 3;
+  scaled_profile.b_qm_scale = 5;
+  gjxl::BitWriter scaled_frame;
+  if (!gjxl::WriteSimpleFrameHeader(scaled_profile, &scaled_frame).ok() ||
+      scaled_frame.bits_written() != 33 ||
+      !HasBytes(
+        scaled_frame,
+        std::array<uint8_t, 5>{0xE0, 0x1B, 0x2B, 0x48, 0x00})) {
+    std::cerr << "Scaled frame-header fixture failed\n";
+    return false;
+  }
+
   gjxl::BitWriter atomic;
   if (!atomic.WriteBits(3, 5).ok()) {
     return false;
   }
   gjxl::SimpleVarDctCodestreamProfile unsupported;
-  unsupported.x_qm_scale = 1;
+  unsupported.quantization_matrix_mode =
+    gjxl::QuantizationMatrixMode::kCustom;
   if (gjxl::WriteSimpleCodestreamHeader({0, 1}, &atomic).code() !=
         gjxl::StatusCode::kInvalidArgument ||
       gjxl::WriteSimpleFrameHeader(unsupported, &atomic).code() !=
