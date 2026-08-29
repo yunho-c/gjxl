@@ -786,3 +786,109 @@ implementation scope for less likely general-image benefit. Each accepted
 optimization should be evaluated on a broader corpus with decoded-output
 validation and matched-quality size comparisons, not only the same nominal
 distance.
+
+## Codestream performance profile and optimization priorities
+
+A symbolized Samply capture on Apple M4 Pro isolated the host codestream tail
+after the prefix-density and custom-coefficient-order changes. The capture used
+the Release `gjxl_quantization_benchmark` binary at
+`56a0790d3549bbd2bebe80522808ff47f7891ef2`, Kodak image 01 as a 768x512 PPM,
+the Metal public workflow in `maximum-throughput` mode at distance 1.2, five
+warmups, 400 measured encodes, and 1 kHz all-thread sampling. It contained
+37,656 positive-CPU samples, 27,886.277 ms of sampled CPU delta, and 99.78%
+weighted leaf-symbol resolution.
+
+Sampling raised the run's reported latency, so these percentages are hotspot
+attribution rather than benchmark speedups. The capture also predates adaptive
+block-context candidates, ANS selection, and high-density AQ. Those features
+make a new current-head capture necessary before claiming current percentages;
+source inspection nevertheless confirms that the profiled prefix-clustering
+and Huffman paths remain in the current writer.
+
+| Stack or mutually exclusive entropy leaf group | Share of all sampled CPU | Share within prefix optimization |
+| --- | ---: | ---: |
+| `OptimizeEntropyCode` inclusive | 77.90% | 100.00% |
+| `OptimizeAcCandidate` inclusive | 76.43% | 98.10% |
+| Huffman-tree construction | 32.17% | 41.30% |
+| Histogram clustering and distance | 24.18% | 31.03% |
+| Allocation and memory traffic | 9.34% | 11.99% |
+| Entropy model and configuration construction | 7.28% | 9.34% |
+| Synchronization and waits | 0.01% | 0.01% |
+
+The hottest flat leaves were `CreateHuffmanTree` at 17.83% of all sampled CPU,
+`ClusterHistogramsFromSeeds` at 12.15%, Huffman `SetDepth` at 9.77%,
+`HistogramDistance` at 7.59%, and `BuildEntropyCodeForPartition` at 6.51%.
+Inclusive rows overlap and must not be added. The leaf-group rows partition only
+samples whose stacks include `OptimizeEntropyCode`.
+
+The call stacks and dependency structure suggest the following implementation
+order.
+
+1. **Remove unused exact costs from shape-only screening.**
+   `FastClusterHistograms` computes `HistogramBitCost` for every prepared
+   histogram even when `fill_to_limit` selects only `HistogramShapeDistance`
+   and the seed-index path returns before exact assignment. Likewise,
+   `AssignHistogramsToSeeds` computes and updates exact bit costs when
+   `use_shape_distance` is true, although those comparisons use only counts and
+   totals. The capture attributed 8.21% of all sampled CPU to Huffman work
+   directly beneath `ClusterHistogramsFromSeeds` and another 1.89% beneath
+   `FastClusterHistograms`. Not all of that 10.10% is removable, but this is the
+   strongest exact-codestream-preserving first experiment.
+
+2. **Reuse exact histogram state and Huffman scratch.** Each cluster-cap
+   candidate copies the same source histograms and rebuilds costs. The exact
+   refinement passes can share precomputed input costs while retaining separate
+   mutable cluster state. `CreateHuffmanTree` also allocates a vector and runs a
+   stable sort for an alphabet capped at 128 symbols, repeating the construction
+   if the depth limit is exceeded. Fixed reusable storage plus an in-place sort
+   with an explicit tie key can preserve the current stable order while reducing
+   allocator traffic. Any such change must demonstrate byte-identical output;
+   a merely equivalent Huffman tree is insufficient for that claim.
+
+3. **Use bounded task parallelism after reducing work.** The seed order is a
+   serial prerequisite, but the six cap evaluations are independent once it is
+   available. They can produce indexed results in parallel followed by the
+   existing deterministic, strict-cost reduction. Per-cluster prefix-code
+   construction is also independent, although its tasks may be too small unless
+   chunked. The current `RunParallelSections` creates and joins fresh
+   `std::thread`s for each call; the profile recorded 5,027 thread records for
+   400 encodes. A shared persistent executor with a concurrency budget is a
+   better foundation than nested worker creation.
+
+   Concurrency policy must distinguish latency from throughput. A single image
+   can use idle cores for cap-level work. `VarDctBatchEncoder` already uses
+   persistent outer workers for independent images, so a saturated batch should
+   normally spend its budget across images rather than multiply inner workers
+   and oversubscribe the host. Measure single-image wall latency and batch
+   images/second separately; CPU-time reduction cannot be inferred from a
+   wall-latency improvement.
+
+4. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
+   `maximum-throughput` reduces AQ work but still invokes the full prefix search
+   for each eligible entropy candidate. A speed-oriented serializer policy
+   could cheaply screen coefficient-order and block-context candidates, search
+   fewer cluster caps, or retain the legacy partition when predicted savings are
+   small. These entropy choices do not alter coefficients, decoded pixels, or
+   Butteraugli distortion, but they may increase file size. Candidate winner
+   rates, per-candidate time, bytes saved, and complete-codestream size must
+   define this policy; one losing custom-order example is not sufficient.
+
+5. **Defer GPU entropy coding until a residual profile justifies it.** The
+   dominant exact operation builds many small, branch-heavy, depth-limited
+   128-symbol Huffman trees with deterministic tie behavior. Seed assignment
+   also mutates cluster state between decisions, and the CPU serializer needs
+   the result immediately. Those properties are a poor match for low-latency
+   Metal dispatch even on unified memory. A future multi-image implementation
+   could batch histogram reductions, shape-distance matrices, or many
+   independent tree builds, but it would require enough cross-image work to
+   amortize dispatch and synchronization. CPU work elimination, scratch reuse,
+   and bounded task scheduling should be measured first.
+
+For exact-output changes, retain the current deterministic serializer fixtures,
+complete-codestream hashes, pinned-`djxl` acceptance, and decoded-pixel checks.
+Performance qualification should add call counts and time for shape screening,
+exact refinement, each cap, each block-map/order candidate, Huffman retries,
+and executor queue/run time. Use warmups plus repeated alternating builds for
+latency, and independent repeated batch processes for throughput. Re-profile
+the winning implementation so a shifted hotspot, rather than the original
+sample percentages, determines the next optimization.
