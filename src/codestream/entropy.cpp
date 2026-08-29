@@ -33,6 +33,7 @@ constexpr std::array<HybridUintConfig, 4> kBalancedUintConfigs = {{
 struct Histogram {
   std::array<uint64_t, kPrefixAlphabetSize> counts{};
   uint64_t total_count = 0;
+  size_t symbol_limit = 0;
   double bit_cost = 0.0;
   bool bit_cost_valid = false;
 
@@ -44,6 +45,7 @@ struct Histogram {
     }
     ++counts[symbol];
     ++total_count;
+    symbol_limit = std::max(symbol_limit, symbol + 1);
     bit_cost_valid = false;
     return true;
   }
@@ -53,16 +55,17 @@ struct Histogram {
         std::numeric_limits<uint64_t>::max() - other.total_count) {
       return false;
     }
-    for (size_t index = 0; index < counts.size(); ++index) {
+    for (size_t index = 0; index < other.symbol_limit; ++index) {
       if (counts[index] >
           std::numeric_limits<uint64_t>::max() - other.counts[index]) {
         return false;
       }
     }
-    for (size_t index = 0; index < counts.size(); ++index) {
+    for (size_t index = 0; index < other.symbol_limit; ++index) {
       counts[index] += other.counts[index];
     }
     total_count += other.total_count;
+    symbol_limit = std::max(symbol_limit, other.symbol_limit);
     bit_cost_valid = false;
     return true;
   }
@@ -73,6 +76,37 @@ uint8_t EncodedPrefixDepth(const PrefixCode& prefix, size_t symbol) {
   return prefix.degenerate_symbol == symbol ? 0 : prefix.depths[symbol];
 }
 
+Status HistogramCountsBitCost(
+  std::span<const uint64_t> counts,
+  uint64_t total_count,
+  double* bit_cost) {
+
+  if (bit_cost == nullptr || counts.size() > kPrefixAlphabetSize) {
+    return Status::InvalidArgument("Invalid histogram cost input");
+  }
+  *bit_cost = 0.0;
+  if (total_count == 0) {
+    return Status::Ok();
+  }
+  std::array<uint8_t, kPrefixAlphabetSize> depths;
+  if (Status status = codestream_internal::CreateHuffmanTree(
+        counts, 15, std::span<uint8_t>(depths).first(counts.size()));
+      !status.ok()) {
+    return status;
+  }
+  size_t populated_symbols = 0;
+  for (uint64_t count : counts) {
+    populated_symbols += count != 0;
+  }
+  if (populated_symbols == 1) {
+    return Status::Ok();
+  }
+  for (size_t index = 0; index < counts.size(); ++index) {
+    *bit_cost += static_cast<double>(counts[index]) * depths[index];
+  }
+  return Status::Ok();
+}
+
 Status HistogramBitCost(Histogram* histogram) {
   if (histogram == nullptr) {
     return Status::InvalidArgument("Histogram output is null");
@@ -80,28 +114,12 @@ Status HistogramBitCost(Histogram* histogram) {
   if (histogram->bit_cost_valid) {
     return Status::Ok();
   }
-  histogram->bit_cost = 0.0;
-  if (histogram->total_count == 0) {
-    histogram->bit_cost_valid = true;
-    return Status::Ok();
-  }
-  std::array<uint8_t, kPrefixAlphabetSize> depths{};
-  if (Status status = codestream_internal::CreateHuffmanTree(
-        histogram->counts, 15, depths);
+  if (Status status = HistogramCountsBitCost(
+        std::span<const uint64_t>(histogram->counts).first(
+          histogram->symbol_limit),
+        histogram->total_count, &histogram->bit_cost);
       !status.ok()) {
     return status;
-  }
-  size_t populated_symbols = 0;
-  for (uint64_t count : histogram->counts) {
-    populated_symbols += count != 0;
-  }
-  if (populated_symbols == 1) {
-    histogram->bit_cost_valid = true;
-    return Status::Ok();
-  }
-  for (size_t index = 0; index < depths.size(); ++index) {
-    histogram->bit_cost +=
-      static_cast<double>(histogram->counts[index]) * depths[index];
   }
   histogram->bit_cost_valid = true;
   return Status::Ok();
@@ -119,14 +137,28 @@ Status HistogramDistance(
     *distance = 0.0;
     return Status::Ok();
   }
-  Histogram combined = left;
-  if (!combined.AddHistogram(right)) {
+  if (left.total_count >
+      std::numeric_limits<uint64_t>::max() - right.total_count) {
     return Status::InvalidArgument("Combined histogram count overflow");
   }
-  if (Status status = HistogramBitCost(&combined); !status.ok()) {
+  const size_t symbol_limit = std::max(
+    left.symbol_limit, right.symbol_limit);
+  std::array<uint64_t, kPrefixAlphabetSize> combined_counts;
+  for (size_t symbol = 0; symbol < symbol_limit; ++symbol) {
+    if (left.counts[symbol] >
+        std::numeric_limits<uint64_t>::max() - right.counts[symbol]) {
+      return Status::InvalidArgument("Combined histogram count overflow");
+    }
+    combined_counts[symbol] = left.counts[symbol] + right.counts[symbol];
+  }
+  double combined_bit_cost = 0.0;
+  if (Status status = HistogramCountsBitCost(
+        std::span<const uint64_t>(combined_counts).first(symbol_limit),
+        left.total_count + right.total_count, &combined_bit_cost);
+      !status.ok()) {
     return status;
   }
-  *distance = combined.bit_cost - left.bit_cost - right.bit_cost;
+  *distance = combined_bit_cost - left.bit_cost - right.bit_cost;
   return Status::Ok();
 }
 
@@ -142,7 +174,9 @@ double HistogramShapeDistance(
   const double left_scale = 1.0 / static_cast<double>(left.total_count);
   const double right_scale = 1.0 / static_cast<double>(right.total_count);
   double distance = 0.0;
-  for (size_t symbol = 0; symbol < kPrefixAlphabetSize; ++symbol) {
+  const size_t symbol_limit = std::max(
+    left.symbol_limit, right.symbol_limit);
+  for (size_t symbol = 0; symbol < symbol_limit; ++symbol) {
     distance += std::abs(
       static_cast<double>(left.counts[symbol]) * left_scale -
       static_cast<double>(right.counts[symbol]) * right_scale);
@@ -174,25 +208,21 @@ Status FastClusterHistograms(
 
   std::vector<double> distances(
     input.size(), std::numeric_limits<double>::max());
-  std::vector<Histogram> prepared = input;
   // Shape-only seed discovery returns before exact assignment and never reads
   // bit_cost. Every other path needs prepared costs for HistogramDistance.
   const bool needs_exact_bit_costs =
     !fill_to_limit || seed_indexes == nullptr;
   size_t largest_index = 0;
-  for (size_t index = 0; index < prepared.size(); ++index) {
-    if (prepared[index].total_count == 0) {
+  for (size_t index = 0; index < input.size(); ++index) {
+    if (input[index].total_count == 0) {
       (*histogram_symbols)[index] = 0;
       distances[index] = 0.0;
       continue;
     }
-    if (needs_exact_bit_costs) {
-      if (Status status = HistogramBitCost(&prepared[index]); !status.ok()) {
-        return status;
-      }
+    if (needs_exact_bit_costs && !input[index].bit_cost_valid) {
+      return Status::Internal("Source histogram cost is not prepared");
     }
-    if (prepared[index].total_count >
-        prepared[largest_index].total_count) {
+    if (input[index].total_count > input[largest_index].total_count) {
       largest_index = index;
     }
   }
@@ -204,19 +234,19 @@ Status FastClusterHistograms(
     if (seed_indexes != nullptr) {
       seed_indexes->push_back(largest_index);
     }
-    output->push_back(prepared[largest_index]);
+    output->push_back(input[largest_index]);
     distances[largest_index] = 0.0;
     largest_index = 0;
-    for (size_t index = 0; index < prepared.size(); ++index) {
+    for (size_t index = 0; index < input.size(); ++index) {
       if (distances[index] == 0.0) {
         continue;
       }
       double distance = 0.0;
       if (fill_to_limit) {
-        distance = HistogramShapeDistance(prepared[index], output->back());
+        distance = HistogramShapeDistance(input[index], output->back());
       } else {
         if (Status status = HistogramDistance(
-              prepared[index], output->back(), &distance);
+              input[index], output->back(), &distance);
             !status.ok()) {
           return status;
         }
@@ -237,21 +267,21 @@ Status FastClusterHistograms(
     return Status::Ok();
   }
 
-  for (size_t index = 0; index < prepared.size(); ++index) {
+  for (size_t index = 0; index < input.size(); ++index) {
     if ((*histogram_symbols)[index] != maximum_histograms) {
       continue;
     }
     size_t best = 0;
     double best_distance = 0.0;
     if (Status status = HistogramDistance(
-          prepared[index], (*output)[best], &best_distance);
+          input[index], (*output)[best], &best_distance);
         !status.ok()) {
       return status;
     }
     for (size_t candidate = 1; candidate < output->size(); ++candidate) {
       double distance = 0.0;
       if (Status status = HistogramDistance(
-            prepared[index], (*output)[candidate], &distance);
+            input[index], (*output)[candidate], &distance);
           !status.ok()) {
         return status;
       }
@@ -260,7 +290,7 @@ Status FastClusterHistograms(
         best_distance = distance;
       }
     }
-    if (!(*output)[best].AddHistogram(prepared[index])) {
+    if (!(*output)[best].AddHistogram(input[index])) {
       return Status::InvalidArgument("Clustered histogram count overflow");
     }
     if (Status status = HistogramBitCost(&(*output)[best]); !status.ok()) {
@@ -282,13 +312,12 @@ Status AssignHistogramsToSeeds(
       histogram_symbols == nullptr) {
     return Status::InvalidArgument("Invalid histogram seed assignment");
   }
-  std::vector<Histogram> prepared = input;
   // Shape distance uses only counts and total_count. Compaction or refinement
   // reconstructs any subsequently needed exact codes from those counts.
   if (!use_shape_distance) {
-    for (Histogram& histogram : prepared) {
-      if (Status status = HistogramBitCost(&histogram); !status.ok()) {
-        return status;
+    for (const Histogram& histogram : input) {
+      if (!histogram.bit_cost_valid) {
+        return Status::Internal("Source histogram cost is not prepared");
       }
     }
   }
@@ -298,16 +327,16 @@ Status AssignHistogramsToSeeds(
     input.size(), static_cast<uint32_t>(seed_indexes.size()));
   for (size_t cluster = 0; cluster < seed_indexes.size(); ++cluster) {
     const size_t seed = seed_indexes[cluster];
-    if (seed >= prepared.size() ||
-        (prepared[seed].total_count == 0 && seed_indexes.size() != 1) ||
+    if (seed >= input.size() ||
+        (input[seed].total_count == 0 && seed_indexes.size() != 1) ||
         (*histogram_symbols)[seed] != seed_indexes.size()) {
       return Status::Internal("Histogram seed is invalid");
     }
-    output->push_back(prepared[seed]);
+    output->push_back(input[seed]);
     (*histogram_symbols)[seed] = static_cast<uint32_t>(cluster);
   }
-  for (size_t index = 0; index < prepared.size(); ++index) {
-    if (prepared[index].total_count == 0) {
+  for (size_t index = 0; index < input.size(); ++index) {
+    if (input[index].total_count == 0) {
       (*histogram_symbols)[index] = 0;
       continue;
     }
@@ -317,10 +346,10 @@ Status AssignHistogramsToSeeds(
     size_t best = 0;
     double best_distance = 0.0;
     if (use_shape_distance) {
-      best_distance = HistogramShapeDistance(prepared[index], (*output)[best]);
+      best_distance = HistogramShapeDistance(input[index], (*output)[best]);
     } else {
       if (Status status = HistogramDistance(
-            prepared[index], (*output)[best], &best_distance);
+            input[index], (*output)[best], &best_distance);
           !status.ok()) {
         return status;
       }
@@ -329,10 +358,10 @@ Status AssignHistogramsToSeeds(
       double distance = 0.0;
       if (use_shape_distance) {
         distance =
-          HistogramShapeDistance(prepared[index], (*output)[candidate]);
+          HistogramShapeDistance(input[index], (*output)[candidate]);
       } else {
         if (Status status = HistogramDistance(
-              prepared[index], (*output)[candidate], &distance);
+              input[index], (*output)[candidate], &distance);
             !status.ok()) {
           return status;
         }
@@ -342,7 +371,7 @@ Status AssignHistogramsToSeeds(
         best_distance = distance;
       }
     }
-    if (!(*output)[best].AddHistogram(prepared[index])) {
+    if (!(*output)[best].AddHistogram(input[index])) {
       return Status::InvalidArgument("Clustered histogram count overflow");
     }
     if (!use_shape_distance) {
@@ -421,7 +450,9 @@ Status RefineHistogramClusters(
     std::vector<PrefixCode> cluster_codes(clustered->size());
     for (size_t cluster = 0; cluster < clustered->size(); ++cluster) {
       if (Status status = BuildPrefixCode(
-            (*clustered)[cluster].counts, &cluster_codes[cluster]);
+            std::span<const uint64_t>((*clustered)[cluster].counts).first(
+              (*clustered)[cluster].symbol_limit),
+            &cluster_codes[cluster]);
           !status.ok()) {
         return status;
       }
@@ -441,7 +472,7 @@ Status RefineHistogramClusters(
       for (size_t candidate = 0; candidate < clustered->size(); ++candidate) {
         uint64_t candidate_cost = 0;
         bool representable = true;
-        for (size_t symbol = 0; symbol < kPrefixAlphabetSize; ++symbol) {
+        for (size_t symbol = 0; symbol < input[index].symbol_limit; ++symbol) {
           const uint64_t count = input[index].counts[symbol];
           if (count == 0) {
             continue;
@@ -1435,11 +1466,15 @@ Status BuildFixedEntropyCodeForPartition(
   uint64_t token_bits = extra_bits;
   for (size_t cluster = 0; cluster < histograms.size(); ++cluster) {
     if (Status status = BuildPrefixCode(
-          histograms[cluster].counts, &candidate.prefix_codes[cluster]);
+          std::span<const uint64_t>(histograms[cluster].counts).first(
+            histograms[cluster].symbol_limit),
+          &candidate.prefix_codes[cluster]);
         !status.ok()) {
       return status;
     }
-    for (size_t symbol = 0; symbol < kPrefixAlphabetSize; ++symbol) {
+    for (size_t symbol = 0;
+         symbol < histograms[cluster].symbol_limit;
+         ++symbol) {
       const uint64_t count = histograms[cluster].counts[symbol];
       if (count == 0) {
         continue;

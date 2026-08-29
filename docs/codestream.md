@@ -947,9 +947,36 @@ order.
    6.39% under `CreateHuffmanTree`; exact `HistogramDistance` work changed by
    -1.74%. Allocator leaves beneath `CreateHuffmanTree` fell from 586.668 ms to
    zero, directly confirming the fixed-scratch mechanism. The replacement sort
-   itself was 31.41% hotter than the former stable sort, so a faster
-   allocation-free total-order sort remains a possible follow-up. These sampled
-   CPU deltas are attribution evidence rather than benchmark timing claims.
+   itself was 31.41% hotter than the former stable sort. These sampled CPU deltas
+   are attribution evidence rather than timing claims.
+
+   A later retained-head investigation measured 493,756 Huffman-tree calls in
+   one Kodak-01 encode. The mean populated alphabet was 19.32 leaves, with p50
+   21, p95 26, p99 27, and a maximum of 51; 99.82% had at most 27 leaves. Only
+   6,984 calls needed depth-limit retries. This strongly favored small-array
+   candidates over another full-width merge sort.
+
+   Exact-order prototypes covered node insertion thresholds 8/16/24/32,
+   packed count-and-symbol keys with `std::sort`, insertion, and Shell sort,
+   indirect one-byte symbol sorting, and allocating stable sort as a reference.
+   A same-process benchmark over 4,096 evenly sampled real histograms used 15
+   balanced rounds and 200 repetitions per round. Both 32-leaf node insertion
+   and packed keys with an eight-leaf insertion cutoff reduced complete
+   tree-construction CPU by about 7.6% relative to the retained node
+   `std::sort`; indirect sorting lost once tree materialization was included.
+
+   That isolated result did not survive the full optimizer. In reversed-order
+   200-encode Samply captures, inclusive `CreateHuffmanTree` CPU was effectively
+   unchanged at 16,986.377 ms for insertion versus 16,980.602 ms for the parent
+   (+0.03%). Five alternating Release process pairs used three warmups and 20
+   samples each. Their median paired changes were a 3.72% entropy-optimization
+   regression, a 0.68% codestream-encoding regression, and a noisy 0.50%
+   complete-workflow improvement; entropy improved clearly in only one pair.
+   Every run reported the same 110,996-byte output size. Substantial unrelated
+   host load increased variance, but neither the profiles nor the timing pairs
+   met the retention gate. All sort prototypes were removed, and the existing
+   exact-order `std::sort` remains. Further exact-candidate reuse is now a
+   stronger target than another local Huffman-sort substitution.
 
    The optimized and parent sample codestreams are byte-identical with SHA-256
    `4f3013a085debbb78d93043d67bffa0587cd155e62d5e84f54cadf2dbf5f0d1d`.
@@ -1068,7 +1095,69 @@ order.
    and batch-workflow tests pass. The focused entropy test also passes 100
    consecutive repetitions.
 
-5. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
+5. **Complete (2026-08-29): bound histogram work and reuse immutable source
+   state.** A retained-head diagnostic encode covered all 64 prefix optimizers
+   and recorded 441,372 exact histogram-distance calls plus 1,031,678 shape
+   comparisons. Their combined symbol spans averaged 21.49 and 20.22 entries,
+   respectively, out of the fixed 128-entry alphabet; neither exceeded 40.
+   Exact invalid-cost requests were 20.65% duplicates, while 40.34% of 8,572
+   final prefix-code requests repeated a prior prefix histogram. The span result
+   offered cheap unconditional work elimination; the duplicate result required
+   a separate cache experiment because exact collision checks and stored counts
+   are not free.
+
+   Histograms now retain their highest potentially populated symbol. Count
+   merges, shape distance, Huffman cost, refinement scoring, final prefix-code
+   construction, and token-bit accumulation stop at that bound. Exact distance
+   constructs only the bounded merged counts in uninitialized stack scratch
+   instead of copying a complete histogram and mutating it through two
+   full-alphabet passes. Source histogram costs remain prepared once by
+   `OptimizeEntropyCode`; seed discovery and assignment now read those immutable
+   sources directly rather than copying the complete source vector for every
+   cap. Exact paths reject an unexpectedly unprepared source cost.
+
+   A 1,024-entry per-optimizer direct-mapped cost cache was also tested. Hash
+   matches performed full span, total-count, and count-array equality checks, so
+   collisions could not change output. Five alternating process pairs showed
+   entropy regressions of 3.12-5.53% and complete-workflow regressions of
+   0.46-9.41%. Hashing, comparisons, count copies, and cache footprint cost more
+   than the avoided trees, so the cache was removed. Storing prefix depths in
+   every histogram was not pursued: after the retained changes, all Huffman work
+   below `BuildPrefixCode` is only 0.36% of sampled CPU, below the cost/risk of
+   enlarging every mutable histogram.
+
+   Five final alternating Release process pairs compared parent `9c75afd` with
+   the retained implementation on Kodak image 01 at distance 1.2 using the
+   Metal public workflow and `maximum-throughput`. Each process used three
+   warmups and 20 measured samples. Per-pair entropy-optimization improvements
+   were 35.43-36.85%, codestream-encoding improvements were 26.84-29.78%, and
+   complete-workflow improvements were 19.81-24.98%. Across the pooled 100
+   samples per binary, medians changed from 49.680 to 31.761 ms (-36.07%) for
+   entropy, 67.677 to 48.608 ms (-28.18%) for codestream encoding, and 86.770
+   to 66.492 ms (-23.37%) for the complete workflow. All 200 samples had one
+   identical output-size, entropy-model, coefficient-order, and block-context
+   tuple.
+
+   Three smaller alternating checks on padded 1080p improved entropy by
+   19.47-21.01% and complete workflow time by 8.76-11.98%. Three sparse padded
+   4K checks improved entropy by 4.85-8.06%, while complete workflow time ranged
+   from a 4.52% improvement to a 1.24% regression; those three-sample 4K results
+   are directional rather than a stable end-to-end claim. Every checked 1080p
+   and 4K sample retained one identical output-decision tuple.
+
+   Matched 1 kHz, all-thread Samply captures used five warmups and 400 encodes.
+   Sampled CPU delta fell 54.58% overall and 61.88% inside
+   `OptimizeEntropyCode`. Exact `HistogramDistance` fell 58.54%, the union of
+   prefix clustering fell 70.48%, clustering work excluding Huffman fell
+   88.50%, and Huffman construction fell 47.09%. `memmove` directly below
+   `ClusterHistogramsFromSeeds` fell from 8,482.198 to 17.279 ms, confirming the
+   source-copy mechanism. Four full Kodak PFM encodes are byte-identical to the
+   parent; Kodak 01 remains 110,996 bytes with SHA-256
+   `d6cfa967fa95ddd4848206eea642976c7bd1f4e7bd0d0937a110bfd99842895c`.
+   The complete Release suite remains 58/59 with only the exact inherited
+   `quantization_pipeline` score mismatch.
+
+6. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
    could cheaply screen coefficient-order and block-context candidates, search
@@ -1078,7 +1167,7 @@ order.
    rates, per-candidate time, bytes saved, and complete-codestream size must
    define this policy; one losing custom-order example is not sufficient.
 
-6. **Defer GPU entropy coding until a residual profile justifies it.** The
+7. **Defer GPU entropy coding until a residual profile justifies it.** The
    dominant exact operation builds many small, branch-heavy, depth-limited
    128-symbol Huffman trees with deterministic tie behavior. Seed assignment
    also mutates cluster state between decisions, and the CPU serializer needs
