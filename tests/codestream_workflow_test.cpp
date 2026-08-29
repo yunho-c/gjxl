@@ -312,7 +312,7 @@ bool CheckDeterministicWorkflow() {
   }
 
   const uint64_t hash = Fnv1a64(first);
-  constexpr uint64_t kExpectedHash = 15791459922694441769ull;
+  constexpr uint64_t kExpectedHash = 1911280946548062062ull;
   if (hash != kExpectedHash) {
     std::cerr << "Public workflow hash changed: " << hash << '\n';
     return false;
@@ -618,7 +618,7 @@ bool CheckMaximumErrorControl() {
 bool CheckTargetSizeControl() {
   ImageStorage image;
   FillImage(&image);
-  constexpr size_t kTargetBytes = 275;
+  constexpr size_t kTargetBytes = 250;
   constexpr double kTolerance = 0.12;
   constexpr size_t kMaximumAttempts = 8;
 
@@ -643,7 +643,7 @@ bool CheckTargetSizeControl() {
         gjxl::VarDctRateControlMode::kTargetBytes ||
       byte_summary.requested_target_bytes != kTargetBytes ||
       byte_summary.effective_target_bytes != kTargetBytes ||
-      byte_summary.target_size_tolerance_bytes != 33 ||
+      byte_summary.target_size_tolerance_bytes != 30 ||
       byte_summary.encoded_bytes != byte_codestream.size() ||
       byte_summary.encoded_bytes > kTargetBytes ||
       kTargetBytes - byte_summary.encoded_bytes >

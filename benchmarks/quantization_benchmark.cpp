@@ -808,6 +808,9 @@ struct RawWorkflowSample {
   uint64_t entropy_token_bits = 0;
   size_t dc_entropy_clusters = 0;
   size_t ac_entropy_clusters = 0;
+  size_t natural_candidate_bytes = 0;
+  size_t custom_order_candidate_bytes = 0;
+  uint16_t selected_coefficient_order_mask = 0;
   bool has_final_score = false;
   double final_score = 0.0;
 };
@@ -904,7 +907,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 2,\n"
+           << "  \"schema_version\": 3,\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
            << "  \"validation\": \""
@@ -943,6 +946,11 @@ void WriteRawWorkflowSamples(
                << ", \"entropy_clusters\": {\"dc\": "
                << sample.dc_entropy_clusters << ", \"ac\": "
                << sample.ac_entropy_clusters << "}"
+               << ", \"coefficient_order\": {\"natural_bytes\": "
+               << sample.natural_candidate_bytes << ", \"custom_bytes\": "
+               << sample.custom_order_candidate_bytes
+               << ", \"selected_mask\": "
+               << sample.selected_coefficient_order_mask << "}"
                << ", \"final_score\": ";
         if (sample.has_final_score) {
           output << std::setprecision(17) << sample.final_score;
@@ -1252,6 +1260,12 @@ void RunPublicWorkflowOnlyWorkload(
       profile.codestream.dc_entropy_clusters;
     raw_sample.ac_entropy_clusters =
       profile.codestream.ac_entropy_clusters;
+    raw_sample.natural_candidate_bytes =
+      profile.codestream.natural_candidate_bytes;
+    raw_sample.custom_order_candidate_bytes =
+      profile.codestream.custom_order_candidate_bytes;
+    raw_sample.selected_coefficient_order_mask =
+      profile.codestream.selected_coefficient_order_mask;
     raw_sample.has_final_score = !summary.score_history.empty();
     if (raw_sample.has_final_score) {
       raw_sample.final_score = summary.score_history.back();

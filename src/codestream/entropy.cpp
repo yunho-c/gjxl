@@ -65,6 +65,10 @@ struct Histogram {
 
 };
 
+uint8_t EncodedPrefixDepth(const PrefixCode& prefix, size_t symbol) {
+  return prefix.degenerate_symbol == symbol ? 0 : prefix.depths[symbol];
+}
+
 Status HistogramBitCost(Histogram* histogram) {
   if (histogram == nullptr) {
     return Status::InvalidArgument("Histogram output is null");
@@ -78,6 +82,13 @@ Status HistogramBitCost(Histogram* histogram) {
         histogram->counts, 15, depths);
       !status.ok()) {
     return status;
+  }
+  size_t populated_symbols = 0;
+  for (uint64_t count : histogram->counts) {
+    populated_symbols += count != 0;
+  }
+  if (populated_symbols == 1) {
+    return Status::Ok();
   }
   for (size_t index = 0; index < depths.size(); ++index) {
     histogram->bit_cost +=
@@ -413,9 +424,14 @@ Status RefineHistogramClusters(
           if (count == 0) {
             continue;
           }
-          const uint8_t depth = cluster_codes[candidate].depths[symbol];
-          if (depth == 0 ||
-              count > std::numeric_limits<uint64_t>::max() / depth ||
+          if (cluster_codes[candidate].depths[symbol] == 0) {
+            representable = false;
+            break;
+          }
+          const uint8_t depth =
+            EncodedPrefixDepth(cluster_codes[candidate], symbol);
+          if ((depth != 0 &&
+               count > std::numeric_limits<uint64_t>::max() / depth) ||
               candidate_cost > std::numeric_limits<uint64_t>::max() -
                                  count * depth) {
             representable = false;
@@ -568,6 +584,7 @@ Status ValidateFullWidthConfig(HybridUintConfig config) {
 
 Status ValidatePrefixCode(const PrefixCode& prefix) {
   std::array<size_t, 16> depth_counts{};
+  size_t symbol_count = 0;
   for (size_t symbol = 0; symbol < prefix.depths.size(); ++symbol) {
     const uint8_t depth = prefix.depths[symbol];
     if (depth > 15 ||
@@ -576,6 +593,19 @@ Status ValidatePrefixCode(const PrefixCode& prefix) {
       return Status::InvalidArgument("Prefix code is malformed");
     }
     ++depth_counts[depth];
+    symbol_count += depth != 0;
+  }
+  if (prefix.degenerate_symbol < kPrefixAlphabetSize) {
+    if (symbol_count != 1 ||
+        prefix.depths[prefix.degenerate_symbol] != 1 ||
+        prefix.bits[prefix.degenerate_symbol] != 0) {
+      return Status::InvalidArgument(
+        "Degenerate prefix code is inconsistent");
+    }
+  } else if (prefix.degenerate_symbol != kPrefixAlphabetSize ||
+             symbol_count == 1) {
+    return Status::InvalidArgument(
+      "Prefix-code degenerate symbol is invalid");
   }
 
   size_t available_slots = 1;
@@ -1063,7 +1093,7 @@ Status WriteValue(
     return Status::InvalidArgument(
       "Token symbol is absent from its prefix code");
   }
-  const uint8_t prefix_depth = prefix.depths[token.symbol];
+  const uint8_t prefix_depth = EncodedPrefixDepth(prefix, token.symbol);
   const uint64_t data = prefix.bits[token.symbol] |
     (static_cast<uint64_t>(token.extra_bits) << prefix_depth);
   return WriteBits(
@@ -1201,10 +1231,14 @@ Status BuildClusterCode(
       if (counts[symbol] == 0) {
         continue;
       }
-      if (prefix.depths[symbol] == 0 ||
-          counts[symbol] > std::numeric_limits<uint64_t>::max() /
-                             prefix.depths[symbol] ||
-          !AddBits(counts[symbol] * prefix.depths[symbol], &token_bits)) {
+      if (prefix.depths[symbol] == 0) {
+        valid = false;
+        break;
+      }
+      const uint8_t depth = EncodedPrefixDepth(prefix, symbol);
+      if ((depth != 0 &&
+           counts[symbol] > std::numeric_limits<uint64_t>::max() / depth) ||
+          !AddBits(counts[symbol] * depth, &token_bits)) {
         valid = false;
         break;
       }
@@ -1272,7 +1306,8 @@ Status MeasureEntropyCode(
       if (encoded.symbol >= kPrefixAlphabetSize ||
           code.prefix_codes[cluster].depths[encoded.symbol] == 0 ||
           !AddBits(
-            code.prefix_codes[cluster].depths[encoded.symbol] +
+            EncodedPrefixDepth(
+              code.prefix_codes[cluster], encoded.symbol) +
               encoded.extra_bit_count,
             &candidate.token_bits)) {
         return Status::InvalidArgument("Entropy token cannot be measured");
@@ -1382,9 +1417,13 @@ Status BuildFixedEntropyCodeForPartition(
       if (count == 0) {
         continue;
       }
-      const uint8_t depth = candidate.prefix_codes[cluster].depths[symbol];
-      if (depth == 0 ||
-          count > std::numeric_limits<uint64_t>::max() / depth ||
+      if (candidate.prefix_codes[cluster].depths[symbol] == 0) {
+        return Status::InvalidArgument("Entropy token bit count overflow");
+      }
+      const uint8_t depth =
+        EncodedPrefixDepth(candidate.prefix_codes[cluster], symbol);
+      if ((depth != 0 &&
+           count > std::numeric_limits<uint64_t>::max() / depth) ||
           !AddBits(count * depth, &token_bits)) {
         return Status::InvalidArgument("Entropy token bit count overflow");
       }
@@ -1462,6 +1501,16 @@ Status BuildPrefixCode(
         std::span<uint16_t>(candidate.bits).first(counts.size()));
       !status.ok()) {
     return status;
+  }
+  size_t populated_symbols = 0;
+  for (size_t symbol = 0; symbol < counts.size(); ++symbol) {
+    if (counts[symbol] != 0) {
+      ++populated_symbols;
+      candidate.degenerate_symbol = static_cast<uint16_t>(symbol);
+    }
+  }
+  if (populated_symbols != 1) {
+    candidate.degenerate_symbol = kPrefixAlphabetSize;
   }
   *code = candidate;
   return Status::Ok();

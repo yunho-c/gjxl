@@ -72,6 +72,11 @@ void AccumulateCodestreamProfile(
   destination->entropy_token_bits += source.entropy_token_bits;
   destination->dc_entropy_clusters += source.dc_entropy_clusters;
   destination->ac_entropy_clusters += source.ac_entropy_clusters;
+  destination->natural_candidate_bytes += source.natural_candidate_bytes;
+  destination->custom_order_candidate_bytes +=
+    source.custom_order_candidate_bytes;
+  destination->selected_coefficient_order_mask |=
+    source.selected_coefficient_order_mask;
   destination->section_writing_nanoseconds +=
     source.section_writing_nanoseconds;
   destination->assembly_nanoseconds += source.assembly_nanoseconds;

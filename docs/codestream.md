@@ -88,7 +88,7 @@ marker. It does not emit an ISO BMFF container or metadata boxes.
 | DC precision | `extra_dc_precision = 0` |
 | DC CfL | Default X=0 and B=1 factors |
 | Adaptive DC smoothing | Skipped |
-| Coefficient orders | Default natural orders |
+| Coefficient orders | Natural or serializer-selected custom orders |
 | Gaborish | Enabled with default weights |
 | EPF | Two iterations with default parameters |
 | Modular transforms | None |
@@ -117,7 +117,7 @@ Deliverables:
 - Add `ValidateSimpleCodestreamFrame` without weakening the general
   `VarDctEncoderFrame::valid()` invariant.
 - Reject unsupported color metadata, extra channels, passes, custom matrices,
-  custom coefficient orders, loop filters, and DC modes.
+  externally supplied custom coefficient orders, loop filters, and DC modes.
 - Preserve atomic output behavior on every validation failure.
 
 Initial-profile acceptance criteria:
@@ -261,7 +261,7 @@ Deliverables:
 - Regular VarDCT frame header.
 - Serialized `global_scale` and `quant_dc` from the frame's quantizer.
 - DC global section with default dequantization and DC correlation.
-- AC global section with default matrices and coefficient orders.
+- AC global section with default matrices and selected coefficient orders.
 - One entropy model shared across DC-group and AC-metadata streams.
 - One entropy model shared across AC-group streams.
 - Section layout in JPEG XL order:
@@ -434,9 +434,9 @@ after the shared entropy codes are finalized. Each worker owns one `BitWriter`;
 the TOC and final assembly retain canonical section order, so parallelism does
 not change codestream bytes or failure atomicity.
 
-The checked `17x13` sample encodes to 276 bytes at target `1.0`; its codestream
+The checked `17x13` sample encodes to 259 bytes at target `1.0`; its codestream
 SHA-256 is
-`2e5e55764351b66e461cf39c50d2579a8ad682b66a7cc744e822dea71a8dddd2`.
+`82f7936f5fc932dd0b484705e9f01d1e18e3e11aa8a7545b8cc082acf136af17`.
 Pinned `djxl` decodes it as linear sRGB with native Butteraugli distance
 `1.09415638` from the input. The workflow also has an independent in-memory
 FNV-1a codestream pin, deterministic repeated-encode coverage, strided input,
@@ -489,11 +489,12 @@ true:
 
 The initial profile and public CPU workflow now satisfy this definition. The
 pinned conformance target retains the direct reconstruction comparison for all
-21 serializer fixtures and additionally exercises the checked public-workflow
-sample through the installed-style CLI and independent decoder. The completed
-Release validation passed all 39 reference-disabled tests, all 46
-reference-enabled tests, and the full 21-fixture pinned-decoder corpus plus the
-workflow sample.
+22 serializer fixtures and additionally exercises the checked public-workflow
+sample through distance, maximum-error, and target-size encodes using the
+installed-style CLI and independent decoder. The initial milestone's completed
+Release validation passed all 39 reference-disabled tests and all 46
+reference-enabled tests; the corpus has since expanded from 21 to 22 serializer
+fixtures and three workflow modes.
 
 ## Deferred work
 
@@ -507,7 +508,6 @@ The following are explicitly outside the first codestream milestone:
 - custom Gaborish or EPF parameters;
 - non-default DC correlation and extra DC precision;
 - adaptive DC smoothing;
-- custom coefficient orders;
 - progressive or multi-pass coding;
 - LZ77;
 - ANS entropy coding and broader size optimization beyond the bounded prefix
@@ -523,10 +523,9 @@ silently inferred or partially signaled by the initial writer.
 The current writer prioritizes a correct, deterministic subset over exhaustive
 compression optimization. Its bounded prefix optimizer searches up to 32
 clusters and selects HybridUint configurations per cluster. The remaining
-major limitations are natural coefficient orders and a compact fixed
-block-context map. Ordinary Butteraugli encoding now uses libjxl's
-target- and pixel-dependent X/B quantization-matrix scales; maximum-error
-encoding retains `2/2`.
+major entropy-modeling limitation is a compact fixed block-context map.
+Ordinary Butteraugli encoding uses libjxl's target- and pixel-dependent X/B
+quantization-matrix scales; maximum-error encoding retains `2/2`.
 
 A directional local comparison used the Release encoder, four natural images
 around 500 pixels in size, identical linear-PFM inputs, raw `.jxl` output, and
@@ -534,10 +533,10 @@ libjxl tools at `05be1775629f7fdc01beb70c118043b4b0c69d2a`.
 External Butteraugli scores were measured at 255 nits. The aggregate encoded
 sizes were:
 
-| Target distance | Initial | After #1 | After #2 | #2 vs #1 | `cjxl -e 7` | #2 gap | `cjxl -e 9` | #2 gap |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 153,464 B | 153,278 B | 155,391 B | +1.38% | 151,714 B | -2.4% | 147,386 B | -5.2% |
-| 2 | 94,430 B | 94,327 B | 95,072 B | +0.79% | 93,414 B | -1.7% | 88,578 B | -6.8% |
+| Target distance | Initial | After #1 | After #2 | After #3 | #3 vs #2 | `cjxl -e 7` | #3 gap | `cjxl -e 9` | #3 gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | -1.72% | 151,714 B | -0.7% | 147,386 B | -3.5% |
+| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | -2.45% | 93,414 B | +0.7% | 88,578 B | -4.5% |
 
 These are same-target rather than matched-quality results. The external scores
 were close but not identical, so the table indicates the scale of the current
@@ -613,11 +612,54 @@ replaced by corpus measurements as each step lands.
    two-iteration AQ policy does not yet justify calling this a general
    compression-density win.
 
-3. Add custom coefficient orders (roughly three to five days; plausibly
-   0.5-2%). Count coefficient-zero frequency by strategy family and channel,
-   stable-sort while preserving the LLF contract, serialize the selected orders
-   once in AC global, and tokenize against those same orders. Keep the natural
-   order whenever its smaller signaling cost wins.
+3. **Complete (2026-08-28): add serializer-local custom coefficient orders.**
+   The always-on candidate counts all coefficient zeros by channel and the five
+   on-wire families used by the seven supported strategies. It retains natural
+   orders when both block dimensions are below five, otherwise applies the
+   pinned-libjxl quantized zero-count stable sort after the exact LLF prefix.
+   Nondefault orders are converted to natural-rank Lehmer permutations, encoded
+   with eight contexts, and serialized once in AC global. AC tokens and order
+   signaling use the same validated orders.
+
+   Natural and custom AC candidates receive independent entropy models. Their
+   exact complete-codestream byte sizes include headers, TOC selectors, section
+   padding, order signaling, and token payloads; custom wins only when strictly
+   smaller, so ties retain natural order. Common DC sections are written once,
+   independent entropy searches run concurrently, and only the selected full
+   codestream is assembled. This policy is internal to the serializer and adds
+   no public encoding option.
+
+   On the four-image PFM corpus, custom order itself was selected for three of
+   four images at each target. Exact candidate sizes changed from 153,245 to
+   152,722 bytes at distance 1 (-0.34%) and from 92,972 to 92,746 bytes at
+   distance 2 (-0.24%). The complete #3 change versus #2 is larger: -1.72% and
+   -2.45%, respectively. Most of that additional gain comes from a required
+   prefix correction exposed by the order payload: JPEG XL's one-symbol
+   Huffman alphabet consumes zero prefix bits. Cost modeling, token writing,
+   and validation now agree on that rule, and the natural zero-order mask also
+   uses its canonical two-bit selector. Pinned libjxl decoded the before/after
+   corpus to byte-identical PFM output.
+
+   The 22 pinned serializer fixtures improved in aggregate from 28,580 to
+   25,679 bytes (-10.15%), predominantly because small synthetic histograms
+   exercise the corrected one-symbol prefix case heavily. Every fixture and
+   the distance, maximum-error, and target-size public workflows decode under
+   pinned libjxl. Unit coverage pins the Lehmer stream, the small-image gate,
+   all five order families and seven strategies, invalid-order atomicity,
+   deterministic derivation, and both outcomes of exact byte selection.
+
+   A five-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per process. CPU serializer median changed from
+   25.765 ms (25.576-26.607) to 26.568 ms (26.388-27.194), +3.12%; complete CPU
+   workflow median changed from 935.565 ms (900.927-948.646) to 915.694 ms
+   (891.932-935.512), -2.12% within the broader pipeline variation. Metal
+   serializer median changed from 25.816 ms (25.519-34.190) to 27.734 ms
+   (26.544-34.410), +7.43%; complete Metal workflow median changed from
+   119.011 ms (115.152-127.786) to 127.471 ms (119.268-134.978), +7.11%.
+   Concurrent candidate optimization kept the entropy phase essentially flat;
+   the remaining host cost is mostly the second AC traversal and model setup.
+   Raw benchmark schema version 3 records natural/custom candidate sizes and
+   the selected family mask alongside entropy bits, clusters, and phase timing.
 
 4. Make block-context maps adaptive for sufficiently large images (roughly two
    to three days; small expected benefit on thumbnails and plausibly 1-2% on

@@ -200,6 +200,48 @@ bool CheckUintConfigSerialization() {
   return true;
 }
 
+bool CheckDegeneratePrefixPayload() {
+  constexpr gjxl::HybridUintConfig config{2, 0, 1};
+  constexpr uint32_t value = 9;
+  constexpr size_t repetitions = 5;
+  gjxl::HybridUintToken encoded;
+  if (!gjxl::EncodeHybridUint(value, config, &encoded).ok() ||
+      encoded.extra_bit_count == 0 ||
+      encoded.symbol >= gjxl::kPrefixAlphabetSize) {
+    std::cerr << "Degenerate-prefix fixture could not encode its value\n";
+    return false;
+  }
+
+  std::array<uint64_t, gjxl::kPrefixAlphabetSize> counts{};
+  counts[encoded.symbol] = repetitions;
+  gjxl::PrefixCode prefix;
+  if (!gjxl::BuildPrefixCode(counts, &prefix).ok() ||
+      prefix.degenerate_symbol != encoded.symbol ||
+      prefix.depths[encoded.symbol] != 1) {
+    std::cerr << "Degenerate prefix was not identified\n";
+    return false;
+  }
+
+  gjxl::EntropyCode code{
+    .context_count = 1,
+    .context_map = {0},
+    .uint_configs = {config},
+    .prefix_codes = {prefix},
+  };
+  std::vector<gjxl::EntropyToken> tokens(
+    repetitions, gjxl::EntropyToken{0, value});
+  gjxl::BitWriter model;
+  gjxl::BitWriter payload;
+  if (!gjxl::WriteEntropyCode(code, &model).ok() ||
+      !gjxl::WriteTokenStream(tokens, code, &payload).ok() ||
+      model.bits_written() == 0 ||
+      payload.bits_written() != repetitions * encoded.extra_bit_count) {
+    std::cerr << "Degenerate prefix emitted a token-prefix bit\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckBalancedOptimization() {
   constexpr size_t kContexts = 16;
   std::array<uint32_t, 2 * kContexts> values{};
@@ -394,6 +436,7 @@ int main() {
   }
   if (!CheckHybridUintBoundaries() ||
       !CheckUintConfigSerialization() ||
+      !CheckDegeneratePrefixPayload() ||
       !CheckDeterministicEntropyFixtures() ||
       !CheckBalancedOptimization() ||
       !CheckFullWidthMultiSectionOptimization() ||

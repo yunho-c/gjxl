@@ -247,7 +247,7 @@ if(NOT maximum_hash STREQUAL maximum_repeat_hash)
   message(FATAL_ERROR "Maximum-throughput CLI output is not deterministic")
 endif()
 set(expected_hash
-  2e5e55764351b66e461cf39c50d2579a8ad682b66a7cc744e822dea71a8dddd2)
+  82f7936f5fc932dd0b484705e9f01d1e18e3e11aa8a7545b8cc082acf136af17)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
@@ -286,7 +286,7 @@ foreach(target_output IN ITEMS
         "${target_bytes_first}" "${target_bytes_second}")
   execute_process(
     COMMAND
-      "${GJXL_ENCODER}" --target-bytes 280 --size-tolerance 0.1
+      "${GJXL_ENCODER}" --target-bytes 260 --size-tolerance 0.1
       --max-attempts 8 --backend cpu "${GJXL_SAMPLE}" "${target_output}"
     RESULT_VARIABLE target_result
     OUTPUT_VARIABLE target_report
@@ -295,7 +295,7 @@ foreach(target_output IN ITEMS
   if(NOT target_result EQUAL 0)
     message(FATAL_ERROR "Target-byte CLI encode failed: ${target_error}")
   endif()
-  foreach(expected "for target 280 bytes (met"
+  foreach(expected "for target 260 bytes (met"
                    "selected Butteraugli target" "in 7 attempts"
                    "using CPU")
     string(FIND "${target_report}" "${expected}" found)
@@ -305,9 +305,9 @@ foreach(target_output IN ITEMS
   endforeach()
 endforeach()
 file(SIZE "${target_bytes_first}" target_size)
-if(target_size GREATER 280 OR target_size LESS 252)
+if(target_size GREATER 260 OR target_size LESS 234)
   message(FATAL_ERROR
-    "Target-byte output ${target_size} is outside [252, 280]")
+    "Target-byte output ${target_size} is outside [234, 260]")
 endif()
 file(SHA256 "${target_bytes_first}" target_bytes_first_hash)
 file(SHA256 "${target_bytes_second}" target_bytes_second_hash)
@@ -315,10 +315,10 @@ if(NOT target_bytes_first_hash STREQUAL target_bytes_second_hash)
   message(FATAL_ERROR "Target-byte CLI output is not deterministic")
 endif()
 
-# 10.14 * (17 * 13) / 8 floors to the same 280-byte budget.
+# 9.42 * (17 * 13) / 8 floors to the same 260-byte budget.
 execute_process(
   COMMAND
-    "${GJXL_ENCODER}" --target-bpp 10.14 --size-tolerance 0.1
+    "${GJXL_ENCODER}" --target-bpp 9.42 --size-tolerance 0.1
     --max-attempts 8 --backend cpu "${GJXL_SAMPLE}" "${target_bpp}"
   RESULT_VARIABLE target_bpp_result
   OUTPUT_VARIABLE target_bpp_report
@@ -327,7 +327,7 @@ execute_process(
 if(NOT target_bpp_result EQUAL 0)
   message(FATAL_ERROR "Target-BPP CLI encode failed: ${target_bpp_error}")
 endif()
-string(FIND "${target_bpp_report}" "10.14 bpp / 280 bytes (met" bpp_found)
+string(FIND "${target_bpp_report}" "9.42 bpp / 260 bytes (met" bpp_found)
 if(bpp_found EQUAL -1)
   message(FATAL_ERROR "Target-BPP CLI report did not expose its byte budget")
 endif()
@@ -338,7 +338,7 @@ endif()
 
 execute_process(
   COMMAND
-    "${GJXL_ENCODER}" --target-bytes 280 --size-tolerance 0.1
+    "${GJXL_ENCODER}" --target-bytes 260 --size-tolerance 0.1
     --max-attempts 8 --size-selection closest --backend cpu
     "${GJXL_SAMPLE}" "${target_closest}"
   RESULT_VARIABLE target_closest_result
@@ -349,7 +349,7 @@ if(NOT target_closest_result EQUAL 0)
   message(FATAL_ERROR
     "Closest-absolute CLI encode failed: ${target_closest_error}")
 endif()
-foreach(expected "for target 280 bytes (met" "0 failed" "using CPU")
+foreach(expected "for target 260 bytes (met" "0 failed" "using CPU")
   string(FIND "${target_closest_report}" "${expected}" found)
   if(found EQUAL -1)
     message(FATAL_ERROR
@@ -388,7 +388,7 @@ if(NOT maximum_error_first_hash STREQUAL maximum_error_second_hash)
   message(FATAL_ERROR "Maximum-error CLI output is not deterministic")
 endif()
 set(expected_maximum_error_hash
-  fe8e8bab94acd59cc2f792133c7bd37e98757ab7c4cdde7d631bdb3178fdd872)
+  2a9ff2a83842adf78d212dd6d4d68e5cebf6fb2fa5cbe3ad97181849391797ef)
 if(NOT maximum_error_first_hash STREQUAL expected_maximum_error_hash)
   message(FATAL_ERROR
     "Maximum-error sample hash changed: ${maximum_error_first_hash}")

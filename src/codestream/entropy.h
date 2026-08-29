@@ -68,6 +68,7 @@ struct HybridUintToken {
 struct PrefixCode {
   std::array<uint8_t, kPrefixAlphabetSize> depths{};
   std::array<uint16_t, kPrefixAlphabetSize> bits{};
+  uint16_t degenerate_symbol = kPrefixAlphabetSize;
 
   friend bool operator==(const PrefixCode&, const PrefixCode&) = default;
 };

@@ -267,6 +267,7 @@ add_library(
   src/codestream/ac_group.cpp
   src/codestream/batch_workflow.cpp
   src/codestream/bit_writer.cpp
+  src/codestream/coefficient_order.cpp
   src/codestream/dc_group.cpp
   src/codestream/entropy.cpp
   src/codestream/encoder.cpp

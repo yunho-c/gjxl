@@ -722,7 +722,7 @@ std::vector<Fixture> FullFixtures() {
     {"one-pixel-flat", {1, 1}, Pattern::kFlat},
     {"single-block-impulse", {8, 8}, Pattern::kImpulse,
      gjxl::AcStrategyType::kDct8, false, {3541, 10}, 29, false,
-     4007096684840127806ull},
+     11459255244783164287ull},
     {"odd-gradient", {13, 17}, Pattern::kGradient},
     {"random", {17, 11}, Pattern::kRandom},
     {"texture", {24, 19}, Pattern::kTexture},

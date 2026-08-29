@@ -135,7 +135,7 @@ Status ValidateSimpleCodestreamFrame(const VarDctEncoderFrame& frame) {
   }
   if (profile.coefficient_order_mode != CoefficientOrderMode::kDefault) {
     return Status::InvalidArgument(
-      "Custom coefficient orders are unsupported");
+      "Externally supplied coefficient orders are unsupported");
   }
 
   const SimpleVarDctCodestreamProfile defaults;
