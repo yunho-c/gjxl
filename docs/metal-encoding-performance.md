@@ -431,6 +431,29 @@ No output bytes or tolerances changed. The exact Metal reconstruction test
 passes, as do all other Metal tests. The complete suite remains 57/58 with only
 the inherited pinned CPU quantization-pipeline score mismatch.
 
+#### Butteraugli prepared-scratch aliasing (2026-08-29)
+
+Commit `9f35e4c` makes the prepared Butteraugli arena reflect actual plane
+lifetimes. Psycho-image input and horizontal-blur planes are dead before
+difference encoding starts, so their six full-resolution allocations now back
+the three AC and three DC accumulators. Psycho convolution intermediates are
+similarly reused as difference scratch. Cached reference data, the reference
+mask, and final diagnostic/multiscale staging remain distinct.
+
+This reduces the arena from 39 to 33 full-resolution planes. The 1080p AQ
+memory gate reports staging reduction from `503446324` to `453679924` bytes
+(`-49.8 MB`, `-9.9%`) and peak scratch from `391471392` to `341704992` bytes
+(`-49.8 MB`, `-12.7%`). Padded 4K avoids `198921624` bytes of prepared storage.
+
+This is a footprint result, not a latency claim. Three alternating padded-4K
+public pairs produced nearly unchanged aggregate quantization medians
+(`509.335 -> 509.135 ms`, two of three wins); total medians changed from
+`891.992` to `886.217 ms`, also two of three wins. A diagnostic trace likewise
+left reference GPU work effectively unchanged (`22.486` versus `22.196 ms`).
+Output remained `1745707` bytes. The exact Metal Butteraugli and AQ tests pass
+with unchanged error bounds, and the complete suite remains 57/58 with only
+the inherited pinned CPU quantization-pipeline score mismatch.
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
