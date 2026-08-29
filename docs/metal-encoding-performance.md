@@ -604,6 +604,22 @@ counts (`420268` and `1640942`), and the focused public integration test
 requires byte-for-byte throughput/fully-resident codestream equality plus
 exact equality of the two shared score-history entries.
 
+A later three-pair gate alternated process order with the same two warmups and
+seven samples while host load average was approximately `19`. Its process-
+median summary was contradictory:
+
+| Workload | Full total | Final-frame total | Pair wins | Full quantization | Final-frame quantization | Pair wins |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `730.770 ms` | `652.230 ms` | `1/3` | `164.658 ms` | `134.396 ms` | `2/3` |
+| Padded 4K | `1822.152 ms` | `2085.274 ms` | `1/3` | `506.547 ms` | `533.199 ms` | `1/3` |
+
+Individual 4K total ranges extended from `1485.961` to `2902.937 ms`, and
+quantization ranges from `427.075` to `879.504 ms`. This gate does not
+establish a public-workflow latency improvement. The retained evidence is the
+timestamped removal of resident GPU work and exact output parity; a lower-load
+alternating rerun remains necessary before treating the prototype as a
+large-image end-to-end optimization.
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
