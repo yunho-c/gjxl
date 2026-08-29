@@ -481,6 +481,12 @@ the inherited pinned CPU quantization-pipeline score mismatch. A clean public-
 workflow latency gate is deferred to the combined tail result because unrelated
 system indexing invalidated the contemporaneous CPU-facing pair.
 
+A second tail experiment folded multiscale final-map composition into the sub-
+scale final kernel. It removed the intermediate sub-map write and three more
+resident dispatches, but improved the 1080p sub tail by only `0.041 ms`
+(`1.261 -> 1.220 ms`). That did not justify specialized output routing, so the
+experiment was rejected.
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
