@@ -20,7 +20,6 @@ namespace gjxl::adaptive_quantization_gpu_internal {
   PreparedAdaptiveQuantization* prepared,
   AdaptiveQuantizationOutput output,
   AdaptiveQuantizationMaterialization materialization,
-  gpu_profile_internal::GpuProfilingMode profiling_mode,
-  gpu_profile_internal::GpuExecutionProfile* profile);
+  gpu_profile_internal::GpuProfilingSession* profiling_session);
 
 }  // namespace gjxl::adaptive_quantization_gpu_internal

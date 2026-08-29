@@ -432,20 +432,47 @@ public:
     return Status::Ok();
   }
 
-  [[nodiscard]] Status PrepareReference() {
+  [[nodiscard]] Status PrepareReference(
+    gpu_profile_internal::GpuProfilingMode profiling_mode =
+      gpu_profile_internal::GpuProfilingMode::kDisabled,
+    gpu_profile_internal::GpuExecutionProfile* profile = nullptr) {
+
+    const bool profiling = profiling_mode !=
+      gpu_profile_internal::GpuProfilingMode::kDisabled;
+    if (profiling != (profile != nullptr)) {
+      return Status::InvalidArgument(
+        "Metal Butteraugli preparation profile request is invalid");
+    }
     const PreparationContext context{this};
     std::unique_ptr<GpuSubmission> submission;
-    Status status = metal_.SubmitCompute(
-      "gjxl Butteraugli reference preparation",
-      &MetalPreparedDeviceButteraugli::EncodePreparationSubmission,
-      &context,
-      &submission);
+    Status status;
+    if (profiling) {
+      const MetalProfiledComputeStage stage{
+        .stage_id = "frontend.prepare_aq.reference",
+        .encode =
+          &MetalPreparedDeviceButteraugli::EncodePreparationSubmission,
+        .context = &context,
+      };
+      status = metal_.SubmitComputeProfiled(
+        "gjxl Butteraugli reference preparation profile",
+        std::span<const MetalProfiledComputeStage>(&stage, 1),
+        profiling_mode, &submission);
+    } else {
+      status = metal_.SubmitCompute(
+        "gjxl Butteraugli reference preparation",
+        &MetalPreparedDeviceButteraugli::EncodePreparationSubmission,
+        &context, &submission);
+    }
     if (!status.ok()) return status;
     if (submission == nullptr) {
       return Status::Internal(
         "Metal Butteraugli preparation submission is null");
     }
-    return submission->Wait();
+    status = submission->Wait();
+    if (!status.ok() || !profiling) return status;
+    return metal_.ResolveGpuSubmissionProfile(
+      *submission, "frontend.prepare_aq.reference", profiling_mode,
+      profile);
   }
 
   [[nodiscard]] DeviceButteraugliMemoryStats memory_stats()
@@ -1656,17 +1683,42 @@ Status MetalBackend::Prepare(
     return Status::InvalidArgument(
       "Metal Butteraugli operation received another backend");
   }
+  return PrepareDeviceButteraugliImpl(
+    descriptor, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    prepared, nullptr);
+}
+
+Status MetalBackend::PrepareDeviceButteraugliImpl(
+  const DeviceButteraugliPrepareDescriptor& descriptor,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<PreparedDeviceButteraugli>* prepared,
+  gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  if (prepared == nullptr) {
+    return Status::InvalidArgument(
+      "Metal Butteraugli prepared output is null");
+  }
+  prepared->reset();
+  const bool profiling =
+    mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
+  if (profiling != (profile != nullptr)) {
+    return Status::InvalidArgument(
+      "Metal Butteraugli preparation profile request is invalid");
+  }
   Status status = ValidateDeviceButteraugliPrepareDescriptor(
-    backend, descriptor);
+    *this, descriptor);
   if (!status.ok()) return status;
   try {
     auto candidate = std::make_unique<MetalPreparedDeviceButteraugli>(
       *this, descriptor);
     status = candidate->PrepareStorage();
     if (!status.ok()) return status;
-    status = candidate->PrepareReference();
+    gpu_profile_internal::GpuExecutionProfile candidate_profile;
+    status = candidate->PrepareReference(
+      mode, profiling ? &candidate_profile : nullptr);
     if (!status.ok()) return status;
     *prepared = std::move(candidate);
+    if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(

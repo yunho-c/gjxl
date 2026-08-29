@@ -56,7 +56,7 @@ class FakeCommandRunner:
                 output.write_text(
                     json.dumps(
                         {
-                            "schema_version": 1,
+                            "schema_version": 2,
                             "mode": "stage",
                             "gpu_aq": "fully-resident",
                             "distance": 1.2,
@@ -192,7 +192,7 @@ class MetalProfileTest(unittest.TestCase):
 
     def test_stage_aggregation_reports_cumulative_medians(self) -> None:
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "mode": "stage",
             "gpu_aq": "fully-resident",
             "distance": 1.2,
@@ -203,8 +203,16 @@ class MetalProfileTest(unittest.TestCase):
                     "source_height": 16,
                     "samples": [
                         {
+                            "wall_stages": [
+                                {
+                                    "stage_id": "frontend.ac_strategy.wait",
+                                    "kind": "wait",
+                                    "wall_nanoseconds": 40,
+                                }
+                            ],
                             "submissions": [
                                 {
+                                    "submission_id": "resident.aq",
                                     "command_buffer_gpu_nanoseconds": 100,
                                     "stages": [
                                         {
@@ -231,12 +239,56 @@ class MetalProfileTest(unittest.TestCase):
         summary = metal_profile.aggregate_gpu_stage_samples(payload)
 
         workload = summary["workloads"][0]
+        self.assertEqual(summary["schema_version"], 2)
+        self.assertEqual(summary["source_schema_version"], 2)
         self.assertEqual(workload["median_sampled_stage_coverage_percent"], 50)
+        submission = workload["submissions"][0]
+        self.assertEqual(submission["submission_id"], "resident.aq")
+        self.assertEqual(submission["median_cumulative_gpu_nanoseconds"], 100)
+        self.assertEqual(submission["median_stage_count"], 2)
+        wall_stage = workload["wall_stages"][0]
+        self.assertEqual(wall_stage["stage_id"], "frontend.ac_strategy.wait")
+        self.assertEqual(wall_stage["kind"], "wait")
+        self.assertEqual(wall_stage["median_cumulative_wall_nanoseconds"], 40)
         stage = workload["stages"][0]
         self.assertEqual(stage["median_cumulative_gpu_nanoseconds"], 50)
         self.assertEqual(stage["median_call_count"], 2)
         self.assertEqual(stage["median_dispatch_count"], 4)
         self.assertEqual(stage["median_percent_of_command_buffer_gpu_time"], 50)
+
+    def test_stage_aggregation_keeps_schema_one_artifacts_readable(self) -> None:
+        payload = {
+            "schema_version": 1,
+            "mode": "stage",
+            "gpu_aq": "fully-resident",
+            "distance": 1.2,
+            "workloads": [
+                {
+                    "name": "legacy",
+                    "source_width": 8,
+                    "source_height": 8,
+                    "samples": [
+                        {
+                            "submissions": [
+                                {
+                                    "command_buffer_gpu_nanoseconds": 10,
+                                    "stages": [],
+                                }
+                            ]
+                        }
+                    ],
+                }
+            ],
+        }
+
+        summary = metal_profile.aggregate_gpu_stage_samples(payload)
+
+        self.assertEqual(summary["source_schema_version"], 1)
+        workload = summary["workloads"][0]
+        self.assertEqual(
+            workload["submissions"][0]["submission_id"], "submission_0"
+        )
+        self.assertEqual(workload["wall_stages"], [])
 
     def test_trace_failure_preserves_partial_failed_manifest(self) -> None:
         output = self.directory / "failed-artifact"

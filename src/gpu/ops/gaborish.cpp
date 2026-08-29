@@ -11,18 +11,21 @@
 #include <memory>
 #include <new>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "codec/gaborish_internal.h"
+#include "gpu/ops/gaborish_profile_internal.h"
 #include "gpu/ops/primitives.h"
 
 namespace gjxl {
 
-Status ApplyGaborishInverseGpu(
+static Status ApplyGaborishInverseGpuImpl(
   GpuBackend& gpu,
   ConstImage3FView input,
   std::array<float, 3> multipliers,
-  Image3FView output) {
+  Image3FView output,
+  gpu_profile_internal::GpuProfilingSession* profiling_session) {
 
   if (!input.valid() || !output.valid() ||
       input.extent() != output.extent()) {
@@ -40,6 +43,17 @@ Status ApplyGaborishInverseGpu(
     return Status::Unavailable(
       "GPU Gaborish requires image primitive support");
   }
+  auto* primitive_profiler = profiling_session == nullptr
+    ? nullptr
+    : dynamic_cast<gpu_profile_internal::GpuImagePrimitivesProfiler*>(&gpu);
+  auto* submission_profiler = profiling_session == nullptr
+    ? nullptr
+    : dynamic_cast<gpu_profile_internal::GpuSubmissionProfiler*>(&gpu);
+  if (profiling_session != nullptr &&
+      (primitive_profiler == nullptr || submission_profiler == nullptr)) {
+    return Status::Unavailable(
+      "GPU Gaborish profiling is unavailable");
+  }
 
   size_t pixel_count = 0;
   if (!input.extent().try_area(&pixel_count) ||
@@ -53,6 +67,9 @@ Status ApplyGaborishInverseGpu(
   const size_t allocation_bytes = 6 * plane_bytes;
 
   try {
+    const auto preparation_begin = profiling_session == nullptr
+      ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
+      : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     std::vector<float> packed_input(image_values);
     for (size_t channel = 0; channel < 3; ++channel) {
       for (size_t y = 0; y < input.height(); ++y) {
@@ -103,15 +120,46 @@ Status ApplyGaborishInverseGpu(
       };
     }
     std::unique_ptr<GpuSubmission> submission;
-    status = primitives->SubmitImagePrimitiveSequence(commands, &submission);
+    status = profiling_session == nullptr
+      ? primitives->SubmitImagePrimitiveSequence(commands, &submission)
+      : primitive_profiler->SubmitImagePrimitiveSequenceProfiled(
+          commands, "frontend.preprocessing.gaborish",
+          profiling_session->mode(), &submission);
     if (!status.ok()) return status;
     if (submission == nullptr) {
       return Status::Internal(
         "GPU Gaborish submission returned no handle");
     }
+    if (profiling_session != nullptr) {
+      status = profiling_session->EndWallStage(
+        "frontend.preprocessing.gaborish.prepare",
+        gpu_profile_internal::GpuWallStageKind::kPreparation,
+        preparation_begin);
+      if (!status.ok()) return status;
+    }
+    const auto wait_begin = profiling_session == nullptr
+      ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
+      : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     status = submission->Wait();
     if (!status.ok()) return status;
+    if (profiling_session != nullptr) {
+      status = profiling_session->EndWallStage(
+        "frontend.preprocessing.gaborish.wait",
+        gpu_profile_internal::GpuWallStageKind::kWait, wait_begin);
+      if (!status.ok()) return status;
+      gpu_profile_internal::GpuExecutionProfile child_profile;
+      status = submission_profiler->ResolveGpuSubmissionProfile(
+        *submission, "frontend.preprocessing.gaborish",
+        profiling_session->mode(), &child_profile);
+      if (status.ok()) {
+        status = profiling_session->Append(std::move(child_profile));
+      }
+      if (!status.ok()) return status;
+    }
 
+    const auto readback_begin = profiling_session == nullptr
+      ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
+      : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     std::vector<float> filtered(image_values);
     status = gpu.CopyDeviceToHost(
       *storage, filtered.data(), 3 * plane_bytes, 3 * plane_bytes);
@@ -130,6 +178,13 @@ Status ApplyGaborishInverseGpu(
           output.plane[channel].Row(y));
       }
     }
+    if (profiling_session != nullptr) {
+      status = profiling_session->EndWallStage(
+        "frontend.preprocessing.gaborish.readback",
+        gpu_profile_internal::GpuWallStageKind::kReadback,
+        readback_begin);
+      if (!status.ok()) return status;
+    }
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU Gaborish storage");
@@ -139,6 +194,31 @@ Status ApplyGaborishInverseGpu(
   }
 
   return Status::Ok();
+}
+
+Status ApplyGaborishInverseGpu(
+  GpuBackend& gpu,
+  ConstImage3FView input,
+  std::array<float, 3> multipliers,
+  Image3FView output) {
+
+  return ApplyGaborishInverseGpuImpl(
+    gpu, input, multipliers, output, nullptr);
+}
+
+Status gpu_profile_internal::ApplyGaborishInverseGpuProfiled(
+  GpuBackend& gpu,
+  ConstImage3FView input,
+  std::array<float, 3> multipliers,
+  Image3FView output,
+  GpuProfilingSession* profiling_session) {
+
+  if (profiling_session == nullptr) {
+    return Status::InvalidArgument(
+      "GPU Gaborish profiling session is null");
+  }
+  return ApplyGaborishInverseGpuImpl(
+    gpu, input, multipliers, output, profiling_session);
 }
 
 }  // namespace gjxl

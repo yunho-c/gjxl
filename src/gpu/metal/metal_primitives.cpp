@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -579,6 +581,42 @@ Status MetalBackend::SubmitImagePrimitiveSequence(
     &MetalBackend::EncodePrimitiveSubmission,
     &commands,
     submission);
+}
+
+Status MetalBackend::SubmitImagePrimitiveSequenceProfiled(
+  std::span<const ImagePrimitiveCommand> commands,
+  std::string_view stage_id,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<GpuSubmission>* submission) {
+
+  if (submission == nullptr || commands.empty() || stage_id.empty() ||
+      mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Profiled image primitive submission is invalid");
+  }
+  submission->reset();
+  for (const ImagePrimitiveCommand& command : commands) {
+    Status status = ValidatePrimitiveCommand(command);
+    if (!status.ok()) return status;
+  }
+  try {
+    const std::string stage_id_storage(stage_id);
+    const MetalProfiledComputeStage stage{
+      .stage_id = stage_id_storage.c_str(),
+      .encode = &MetalBackend::EncodePrimitiveSubmission,
+      .context = &commands,
+    };
+    return SubmitComputeProfiled(
+      "gjxl image primitive sequence profile",
+      std::span<const MetalProfiledComputeStage>(&stage, 1), mode,
+      submission);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate image primitive profile metadata");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Image primitive profile metadata is too large");
+  }
 }
 
 }  // namespace gjxl::metal_internal

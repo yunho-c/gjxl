@@ -366,6 +366,50 @@ Status GetMetalSubmissionGpuProfile(
   return metal->GpuProfile(profile);
 }
 
+GpuProfilingCapabilities MetalBackend::QueryGpuProfilingCapabilities() const {
+  return ProfilingCapabilities();
+}
+
+Status MetalBackend::ResolveGpuSubmissionProfile(
+  GpuSubmission& submission,
+  std::string_view submission_id,
+  GpuProfilingMode mode,
+  gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  if (profile == nullptr || submission_id.empty() ||
+      mode == GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Metal GPU profile output is invalid");
+  }
+  GpuSubmissionProfile submission_profile;
+  Status status = GetMetalSubmissionGpuProfile(
+    submission, &submission_profile);
+  if (!status.ok()) return status;
+  try {
+    submission_profile.submission_id = submission_id;
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate GPU submission profile ID");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "GPU submission profile ID is too large");
+  }
+  gpu_profile_internal::GpuExecutionProfile candidate;
+  candidate.mode = mode;
+  candidate.capabilities = ProfilingCapabilities();
+  try {
+    candidate.submissions.push_back(std::move(submission_profile));
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate GPU submission profile metadata");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "GPU submission profile metadata is too large");
+  }
+  *profile = std::move(candidate);
+  return Status::Ok();
+}
+
 GpuProfilingCapabilities MetalBackend::ProfilingCapabilities() const {
   return {
     .timestamp_counter = FindTimestampCounterSet(device_.get()) != nullptr,

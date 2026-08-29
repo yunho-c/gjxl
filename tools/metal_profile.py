@@ -399,6 +399,8 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
     for workload in payload["workloads"]:
         per_stage: dict[str, list[dict[str, float]]] = {}
         per_iteration: dict[tuple[str, int], list[dict[str, float]]] = {}
+        per_submission: dict[str, list[dict[str, float]]] = {}
+        per_wall_stage: dict[tuple[str, str], list[dict[str, float]]] = {}
         coverage_percent: list[float] = []
         for sample in workload["samples"]:
             total_gpu = sum(
@@ -407,11 +409,27 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
             )
             stage_totals: dict[str, dict[str, float]] = {}
             iteration_totals: dict[tuple[str, int], dict[str, float]] = {}
+            submission_totals: dict[str, dict[str, float]] = {}
+            wall_totals: dict[tuple[str, str], dict[str, float]] = {}
             sampled_gpu = 0
-            for submission in sample["submissions"]:
+            for submission_index, submission in enumerate(sample["submissions"]):
+                submission_id = submission.get(
+                    "submission_id", f"submission_{submission_index}"
+                )
+                submission_entry = submission_totals.setdefault(
+                    submission_id,
+                    {"duration": 0.0, "calls": 0.0, "stages": 0.0,
+                     "dispatches": 0.0},
+                )
+                submission_entry["duration"] += submission[
+                    "command_buffer_gpu_nanoseconds"
+                ]
+                submission_entry["calls"] += 1
+                submission_entry["stages"] += len(submission["stages"])
                 for stage in submission["stages"]:
                     duration = stage["gpu_nanoseconds"]
                     sampled_gpu += duration
+                    submission_entry["dispatches"] += len(stage["dispatches"])
                     stage_entry = stage_totals.setdefault(
                         stage["stage_id"],
                         {"duration": 0.0, "calls": 0.0, "dispatches": 0.0},
@@ -427,6 +445,13 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
                     iteration_entry["duration"] += duration
                     iteration_entry["calls"] += 1
                     iteration_entry["dispatches"] += len(stage["dispatches"])
+            for wall_stage in sample.get("wall_stages", []):
+                key = (wall_stage["stage_id"], wall_stage["kind"])
+                wall_entry = wall_totals.setdefault(
+                    key, {"duration": 0.0, "calls": 0.0}
+                )
+                wall_entry["duration"] += wall_stage["wall_nanoseconds"]
+                wall_entry["calls"] += 1
             for stage_id, values in stage_totals.items():
                 values["percent"] = (
                     100.0 * values["duration"] / total_gpu if total_gpu else 0.0
@@ -437,6 +462,13 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
                     100.0 * values["duration"] / total_gpu if total_gpu else 0.0
                 )
                 per_iteration.setdefault(key, []).append(values)
+            for submission_id, values in submission_totals.items():
+                values["percent"] = (
+                    100.0 * values["duration"] / total_gpu if total_gpu else 0.0
+                )
+                per_submission.setdefault(submission_id, []).append(values)
+            for key, values in wall_totals.items():
+                per_wall_stage.setdefault(key, []).append(values)
             coverage_percent.append(
                 100.0 * sampled_gpu / total_gpu if total_gpu else 0.0
             )
@@ -465,6 +497,40 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
             {"stage_id": key[0], "iteration": key[1], **summarize(values)}
             for key, values in sorted(per_iteration.items())
         ]
+        submissions = [
+            {
+                "submission_id": submission_id,
+                "median_cumulative_gpu_nanoseconds": int(
+                    statistics.median(value["duration"] for value in values)
+                ),
+                "median_call_count": statistics.median(
+                    value["calls"] for value in values
+                ),
+                "median_stage_count": statistics.median(
+                    value["stages"] for value in values
+                ),
+                "median_dispatch_count": statistics.median(
+                    value["dispatches"] for value in values
+                ),
+                "median_percent_of_command_buffer_gpu_time": statistics.median(
+                    value["percent"] for value in values
+                ),
+            }
+            for submission_id, values in sorted(per_submission.items())
+        ]
+        wall_stages = [
+            {
+                "stage_id": key[0],
+                "kind": key[1],
+                "median_cumulative_wall_nanoseconds": int(
+                    statistics.median(value["duration"] for value in values)
+                ),
+                "median_call_count": statistics.median(
+                    value["calls"] for value in values
+                ),
+            }
+            for key, values in sorted(per_wall_stage.items())
+        ]
         workloads.append(
             {
                 "name": workload["name"],
@@ -474,12 +540,14 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
                 "median_sampled_stage_coverage_percent": statistics.median(
                     coverage_percent
                 ),
+                "submissions": submissions,
+                "wall_stages": wall_stages,
                 "stages": stages,
                 "iterations": iterations,
             }
         )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "source_schema_version": payload["schema_version"],
         "mode": payload["mode"],
         "gpu_aq": payload["gpu_aq"],

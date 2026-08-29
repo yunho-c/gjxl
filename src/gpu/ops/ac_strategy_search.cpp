@@ -21,6 +21,7 @@
 #include "core/geometry.h"
 #include "gpu/buffer.h"
 #include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/ac_strategy_search_profile_internal.h"
 
 namespace gjxl {
 namespace {
@@ -260,7 +261,8 @@ static Status FindAcStrategyGridGpuImpl(
   const ResidentAcStrategySearchInputs* resident,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
-  AcStrategyGpuSearchStats* stats) {
+  AcStrategyGpuSearchStats* stats,
+  gpu_profile_internal::GpuProfilingSession* profiling_session) {
   Extent2D block_extent;
   Extent2D tile_extent;
   size_t pixel_count = 0;
@@ -303,8 +305,24 @@ static Status FindAcStrategyGridGpuImpl(
     }
     if (!status.ok()) return status;
   }
+  auto* strategy_profiler = profiling_session == nullptr
+    ? nullptr
+    : dynamic_cast<
+        gpu_profile_internal::GpuAcStrategyEvaluationProfiler*>(&gpu);
+  auto* submission_profiler = profiling_session == nullptr
+    ? nullptr
+    : dynamic_cast<gpu_profile_internal::GpuSubmissionProfiler*>(&gpu);
+  if (profiling_session != nullptr &&
+      (resident == nullptr || strategy_profiler == nullptr ||
+       submission_profiler == nullptr)) {
+    return Status::Unavailable(
+      "GPU AC-strategy search profiling is unavailable");
+  }
 
   try {
+    const auto preparation_begin = profiling_session == nullptr
+      ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
+      : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     const std::vector<float> packed_opsin = resident == nullptr
       ? PackOpsin(opsin, pixel_count) : std::vector<float>{};
     const std::vector<float> packed_mask = resident == nullptr
@@ -446,8 +464,13 @@ static Status FindAcStrategyGridGpuImpl(
       };
     }
     std::unique_ptr<GpuSubmission> submission;
-    status = EvaluateAcStrategyCandidateBatches(
-      gpu, batches, &submission);
+    if (profiling_session == nullptr) {
+      status = EvaluateAcStrategyCandidateBatches(
+        gpu, batches, &submission);
+    } else {
+      status = strategy_profiler->EvaluateAcStrategyCandidateBatchesProfiled(
+        batches, profiling_session->mode(), &submission);
+    }
     if (!status.ok()) {
       return status;
     }
@@ -455,14 +478,41 @@ static Status FindAcStrategyGridGpuImpl(
       return Status::Internal(
         "GPU AC-strategy search returned no submission");
     }
+    if (profiling_session != nullptr) {
+      status = profiling_session->EndWallStage(
+        "frontend.ac_strategy.prepare",
+        gpu_profile_internal::GpuWallStageKind::kPreparation,
+        preparation_begin);
+      if (!status.ok()) return status;
+    }
+    const auto wait_begin = profiling_session == nullptr
+      ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
+      : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     status = submission->Wait();
     if (!status.ok()) {
       return status;
+    }
+    if (profiling_session != nullptr) {
+      status = profiling_session->EndWallStage(
+        "frontend.ac_strategy.wait",
+        gpu_profile_internal::GpuWallStageKind::kWait, wait_begin);
+      if (!status.ok()) return status;
+      gpu_profile_internal::GpuExecutionProfile child_profile;
+      status = submission_profiler->ResolveGpuSubmissionProfile(
+        *submission, "frontend.ac_strategy", profiling_session->mode(),
+        &child_profile);
+      if (status.ok()) {
+        status = profiling_session->Append(std::move(child_profile));
+      }
+      if (!status.ok()) return status;
     }
 
     ac_strategy_internal::CandidateCostTableView table{
       .block_extent = block_extent,
     };
+    const auto readback_begin = profiling_session == nullptr
+      ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
+      : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     for (StrategyResources& resource : resources) {
       if (!resource.candidates.empty()) {
         status = gpu.CopyDeviceToHost(*resource.device_costs,
@@ -482,11 +532,27 @@ static Status FindAcStrategyGridGpuImpl(
       }
       table.strategy_costs[strategy_index] = cost_storage[strategy_index];
     }
+    if (profiling_session != nullptr) {
+      status = profiling_session->EndWallStage(
+        "frontend.ac_strategy.readback",
+        gpu_profile_internal::GpuWallStageKind::kReadback,
+        readback_begin);
+      if (!status.ok()) return status;
+    }
 
+    const auto merge_begin = profiling_session == nullptr
+      ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
+      : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     status = ac_strategy_internal::FindAcStrategyGridFromCandidateCosts(
       opsin, quant_field, pixel_mask, color_correlation, options, table, out);
     if (!status.ok()) {
       return status;
+    }
+    if (profiling_session != nullptr) {
+      status = profiling_session->EndWallStage(
+        "frontend.ac_strategy.merge",
+        gpu_profile_internal::GpuWallStageKind::kHost, merge_begin);
+      if (!status.ok()) return status;
     }
     if (stats != nullptr) {
       *stats = result_stats;
@@ -513,7 +579,7 @@ Status FindAcStrategyGridGpu(
 
   return FindAcStrategyGridGpuImpl(
       gpu, opsin, quant_field, pixel_mask, color_correlation, nullptr,
-      options, out, stats);
+      options, out, stats, nullptr);
 }
 
 Status FindAcStrategyGridGpuResident(
@@ -529,7 +595,28 @@ Status FindAcStrategyGridGpuResident(
 
   return FindAcStrategyGridGpuImpl(
       gpu, opsin, quant_field, pixel_mask, color_correlation, &resident,
-      options, out, stats);
+      options, out, stats, nullptr);
+}
+
+Status gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
+  GpuBackend& gpu,
+  ConstImage3FView opsin,
+  ConstPlaneF32View quant_field,
+  ConstPlaneF32View pixel_mask,
+  const ColorCorrelationMap& color_correlation,
+  ResidentAcStrategySearchInputs resident,
+  AcStrategySearchOptions options,
+  AcStrategyGrid* out,
+  GpuProfilingSession* profiling_session,
+  AcStrategyGpuSearchStats* stats) {
+
+  if (profiling_session == nullptr) {
+    return Status::InvalidArgument(
+      "GPU AC-strategy profiling session is null");
+  }
+  return FindAcStrategyGridGpuImpl(
+    gpu, opsin, quant_field, pixel_mask, color_correlation, &resident,
+    options, out, stats, profiling_session);
 }
 
 }  // namespace gjxl

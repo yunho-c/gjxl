@@ -1367,7 +1367,10 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
         gjxl::gpu_profile_internal::GpuProfilingMode::kStage ||
       !gpu_profile.capabilities.timestamp_counter ||
       !gpu_profile.capabilities.stage_boundary ||
+      !gpu_profile.wall_stages.empty() ||
       gpu_profile.submissions.size() != 1 ||
+      gpu_profile.submissions[0].submission_id != "resident.aq" ||
+      gpu_profile.submissions[0].invocation != 0 ||
       gpu_profile.submissions[0].command_buffer_gpu_nanoseconds == 0 ||
       gpu_profile.submissions[0].stages.empty() ||
       profiled_scores.size() != actual_scores.size()) {
@@ -2065,6 +2068,41 @@ public:
   }
 };
 
+bool CheckProfilingSessionAggregation() {
+  using namespace gjxl::gpu_profile_internal;
+  const GpuProfilingCapabilities capabilities{
+    .timestamp_counter = true,
+    .stage_boundary = true,
+  };
+  GpuProfilingSession session(GpuProfilingMode::kStage, capabilities);
+  for (size_t invocation = 0; invocation < 2; ++invocation) {
+    GpuExecutionProfile child{
+      .mode = GpuProfilingMode::kStage,
+      .capabilities = capabilities,
+    };
+    child.submissions.push_back({.submission_id = "fixture.submission"});
+    if (!CheckStatus(session.Append(std::move(child)),
+                     "append profiling session child")) {
+      return false;
+    }
+    const auto begin = GpuProfilingSession::BeginWallStage();
+    if (!CheckStatus(session.EndWallStage(
+          "fixture.wall", GpuWallStageKind::kHost, begin),
+          "append profiling session wall stage")) {
+      return false;
+    }
+  }
+  GpuExecutionProfile profile = std::move(session).Finish();
+  return profile.mode == GpuProfilingMode::kStage &&
+    profile.capabilities == capabilities &&
+    profile.submissions.size() == 2 &&
+    profile.submissions[0].invocation == 0 &&
+    profile.submissions[1].invocation == 1 &&
+    profile.wall_stages.size() == 2 &&
+    profile.wall_stages[0].invocation == 0 &&
+    profile.wall_stages[1].invocation == 1;
+}
+
 bool CheckCapabilityBoundary() {
   Fixture fixture;
   if (!fixture.Initialize()) return false;
@@ -2115,6 +2153,7 @@ int main() {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
                    "Metal AQ backend") ||
+      !CheckProfilingSessionAggregation() ||
       !CheckCapabilityBoundary() ||
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
       !CheckReductionCorpus(*gpu) ||

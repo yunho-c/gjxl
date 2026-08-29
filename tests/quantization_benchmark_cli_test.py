@@ -127,12 +127,45 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 1)
+        self.assertEqual(document["schema_version"], 2)
         self.assertEqual(document["mode"], "stage")
         sample = document["workloads"][0]["samples"][0]
         self.assertTrue(sample["capabilities"]["timestamp_counter"])
         self.assertTrue(sample["capabilities"]["stage_boundary"])
-        submission = sample["submissions"][0]
+        submission_ids = [
+            submission["submission_id"] for submission in sample["submissions"]
+        ]
+        self.assertEqual(
+            submission_ids,
+            [
+                "frontend.preprocessing.gaborish",
+                "frontend.initial_quantization",
+                "frontend.ac_strategy",
+                "frontend.prepare_aq.reference",
+                "frontend.quant_adjustment",
+                "resident.aq",
+            ],
+        )
+        for submission in sample["submissions"]:
+            self.assertEqual(submission["invocation"], 0)
+            self.assertGreater(submission["command_buffer_gpu_nanoseconds"], 0)
+        wall_stages = {
+            (stage["stage_id"], stage["kind"]): stage
+            for stage in sample["wall_stages"]
+        }
+        self.assertIn(("frontend.preprocessing", "operation"), wall_stages)
+        self.assertIn(("frontend.ac_strategy.wait", "wait"), wall_stages)
+        self.assertIn(("frontend.prepare_aq", "preparation"), wall_stages)
+        self.assertIn(("frontend.cfl_upload", "upload"), wall_stages)
+        self.assertIn(("resident.aq", "operation"), wall_stages)
+        for wall_stage in sample["wall_stages"]:
+            self.assertEqual(wall_stage["invocation"], 0)
+            self.assertGreaterEqual(wall_stage["wall_nanoseconds"], 0)
+        submission = next(
+            item
+            for item in sample["submissions"]
+            if item["submission_id"] == "resident.aq"
+        )
         self.assertGreater(submission["command_buffer_gpu_nanoseconds"], 0)
         stages = submission["stages"]
         self.assertIn("aq.reconstruction", {stage["stage_id"] for stage in stages})
@@ -147,6 +180,48 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
                 stage["end_timestamp"] - stage["begin_timestamp"],
             )
             self.assertTrue(stage["dispatches"])
+
+    def test_unsupported_dispatch_profile_preserves_existing_output(self) -> None:
+        capability_output = self.directory / "capabilities.json"
+        stage_result = self.run_benchmark(
+            "--validation",
+            "metal-only",
+            "--metallib",
+            str(self.metallib),
+            "--gpu-profile",
+            "stage",
+            "--gpu-profile-output",
+            str(capability_output),
+        )
+        self.assertEqual(stage_result.returncode, 0, stage_result.stderr)
+        capability_document = json.loads(
+            capability_output.read_text(encoding="utf-8")
+        )
+        capabilities = capability_document["workloads"][0]["samples"][0][
+            "capabilities"
+        ]
+        if capabilities["dispatch_boundary"]:
+            self.skipTest("device supports dispatch-boundary timestamps")
+
+        destination = self.directory / "dispatch.json"
+        destination.write_text("sentinel", encoding="utf-8")
+        result = self.run_benchmark(
+            "--validation",
+            "metal-only",
+            "--metallib",
+            str(self.metallib),
+            "--gpu-profile",
+            "dispatch",
+            "--gpu-profile-output",
+            str(destination),
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "GPU dispatch-boundary timestamp sampling is unavailable",
+            result.stderr,
+        )
+        self.assertEqual(destination.read_text(encoding="utf-8"), "sentinel")
 
     def test_metal_only_validation_rejects_other_scopes(self) -> None:
         result = subprocess.run(

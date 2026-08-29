@@ -3,12 +3,23 @@
 
 #pragma once
 
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
+#include <memory>
+#include <new>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/status.h"
+#include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/primitives.h"
 
 namespace gjxl::gpu_profile_internal {
 
@@ -65,18 +76,156 @@ struct GpuStageProfile {
 };
 
 struct GpuSubmissionProfile {
+  std::string submission_id;
+  uint32_t invocation = 0;
   uint64_t command_buffer_gpu_nanoseconds = 0;
   std::vector<GpuStageProfile> stages;
 
   bool operator==(const GpuSubmissionProfile&) const = default;
 };
 
+enum class GpuWallStageKind : uint8_t {
+  kOperation,
+  kPreparation,
+  kUpload,
+  kWait,
+  kReadback,
+  kHost,
+};
+
+struct GpuWallStageProfile {
+  std::string stage_id;
+  GpuWallStageKind kind = GpuWallStageKind::kOperation;
+  uint32_t invocation = 0;
+  uint64_t wall_nanoseconds = 0;
+
+  bool operator==(const GpuWallStageProfile&) const = default;
+};
+
 struct GpuExecutionProfile {
   GpuProfilingMode mode = GpuProfilingMode::kDisabled;
   GpuProfilingCapabilities capabilities;
+  std::vector<GpuWallStageProfile> wall_stages;
   std::vector<GpuSubmissionProfile> submissions;
 
   bool operator==(const GpuExecutionProfile&) const = default;
+};
+
+/// Owns one diagnostic pipeline profile until the complete caller-visible
+/// operation succeeds. Ordinary execution never constructs a session.
+class GpuProfilingSession {
+public:
+  using Clock = std::chrono::steady_clock;
+  using TimePoint = Clock::time_point;
+
+  GpuProfilingSession(
+    GpuProfilingMode mode,
+    GpuProfilingCapabilities capabilities) {
+    profile_.mode = mode;
+    profile_.capabilities = capabilities;
+  }
+
+  [[nodiscard]] GpuProfilingMode mode() const noexcept {
+    return profile_.mode;
+  }
+
+  [[nodiscard]] static TimePoint BeginWallStage() noexcept {
+    return Clock::now();
+  }
+
+  [[nodiscard]] Status EndWallStage(
+    std::string_view stage_id,
+    GpuWallStageKind kind,
+    TimePoint begin) {
+
+    if (stage_id.empty()) {
+      return Status::InvalidArgument(
+        "GPU profile wall-stage ID is empty");
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      Clock::now() - begin).count();
+    uint32_t invocation = 0;
+    for (const GpuWallStageProfile& wall_stage : profile_.wall_stages) {
+      if (wall_stage.stage_id == stage_id && wall_stage.kind == kind) {
+        ++invocation;
+      }
+    }
+    try {
+      profile_.wall_stages.push_back({
+        .stage_id = std::string(stage_id),
+        .kind = kind,
+        .invocation = invocation,
+        .wall_nanoseconds = elapsed < 0 ? 0u : static_cast<uint64_t>(elapsed),
+      });
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate GPU wall-stage profile metadata");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+        "GPU wall-stage profile metadata is too large");
+    }
+    return Status::Ok();
+  }
+
+  [[nodiscard]] Status Append(GpuExecutionProfile child) {
+    if (child.mode != profile_.mode ||
+        child.mode == GpuProfilingMode::kDisabled) {
+      return Status::Internal("GPU child profile mode is inconsistent");
+    }
+    if (profile_.capabilities != child.capabilities) {
+      return Status::Internal("GPU child profile capabilities changed");
+    }
+    for (const GpuSubmissionProfile& submission : child.submissions) {
+      if (submission.submission_id.empty()) {
+        return Status::Internal("GPU child submission ID is empty");
+      }
+    }
+    for (size_t child_index = 0;
+         child_index < child.submissions.size(); ++child_index) {
+      GpuSubmissionProfile& submission = child.submissions[child_index];
+      uint32_t invocation = 0;
+      for (const GpuSubmissionProfile& existing : profile_.submissions) {
+        if (existing.submission_id == submission.submission_id) {
+          ++invocation;
+        }
+      }
+      for (size_t prior_index = 0; prior_index < child_index; ++prior_index) {
+        if (child.submissions[prior_index].submission_id ==
+            submission.submission_id) {
+          ++invocation;
+        }
+      }
+      submission.invocation = invocation;
+    }
+    try {
+      profile_.wall_stages.reserve(
+        profile_.wall_stages.size() + child.wall_stages.size());
+      profile_.submissions.reserve(
+        profile_.submissions.size() + child.submissions.size());
+      profile_.wall_stages.insert(
+        profile_.wall_stages.end(),
+        std::make_move_iterator(child.wall_stages.begin()),
+        std::make_move_iterator(child.wall_stages.end()));
+      profile_.submissions.insert(
+        profile_.submissions.end(),
+        std::make_move_iterator(child.submissions.begin()),
+        std::make_move_iterator(child.submissions.end()));
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate GPU pipeline profile metadata");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+        "GPU pipeline profile metadata is too large");
+    }
+    return Status::Ok();
+  }
+
+  [[nodiscard]] GpuExecutionProfile Finish() && {
+    return std::move(profile_);
+  }
+
+private:
+  GpuExecutionProfile profile_;
 };
 
 /// Optional diagnostic interface implemented by prepared evaluators that can
@@ -91,6 +240,72 @@ public:
     AqResidentButteraugliPolicyOutput output,
     GpuProfilingMode mode,
     GpuExecutionProfile* profile) = 0;
+
+  [[nodiscard]] virtual Status ComputeInitialQuantizationProfiled(
+    InitialQuantizationOptions options,
+    InitialQuantFieldOutput output,
+    QuantizerParams* quantizer,
+    float quant_dc,
+    GpuProfilingMode mode,
+    GpuExecutionProfile* profile) = 0;
+
+  [[nodiscard]] virtual Status AdjustQuantFieldResidentProfiled(
+    float butteraugli_target,
+    ConstPlaneF32View input,
+    PlaneF32View output,
+    GpuProfilingMode mode,
+    GpuExecutionProfile* profile) = 0;
+};
+
+/// Optional diagnostic interface for prepared AQ construction. This captures
+/// GPU work performed while building persistent reference state.
+class GpuAqEvaluationProfiler {
+public:
+  virtual ~GpuAqEvaluationProfiler() = default;
+
+  [[nodiscard]] virtual Status PrepareAqEvaluationProfiled(
+    const AqEvaluationPreparation& preparation,
+    GpuProfilingMode mode,
+    std::unique_ptr<PreparedAqEvaluation>* prepared,
+    GpuExecutionProfile* profile) = 0;
+};
+
+/// Optional diagnostic interface for coherent AC-strategy submissions.
+class GpuAcStrategyEvaluationProfiler {
+public:
+  virtual ~GpuAcStrategyEvaluationProfiler() = default;
+
+  [[nodiscard]] virtual Status EvaluateAcStrategyCandidateBatchesProfiled(
+    std::span<const AcStrategyCandidateBatch> batches,
+    GpuProfilingMode mode,
+    std::unique_ptr<GpuSubmission>* submission) = 0;
+};
+
+/// Resolves timestamps retained by one completed profiled submission.
+class GpuSubmissionProfiler {
+public:
+  virtual ~GpuSubmissionProfiler() = default;
+
+  [[nodiscard]] virtual GpuProfilingCapabilities
+  QueryGpuProfilingCapabilities() const = 0;
+
+  [[nodiscard]] virtual Status ResolveGpuSubmissionProfile(
+    GpuSubmission& submission,
+    std::string_view submission_id,
+    GpuProfilingMode mode,
+    GpuExecutionProfile* profile) = 0;
+};
+
+/// Optional diagnostic interface for coherent image-primitive submissions.
+class GpuImagePrimitivesProfiler {
+public:
+  virtual ~GpuImagePrimitivesProfiler() = default;
+
+  [[nodiscard]] virtual Status SubmitImagePrimitiveSequenceProfiled(
+    std::span<const ImagePrimitiveCommand> commands,
+    std::string_view stage_id,
+    GpuProfilingMode mode,
+    std::unique_ptr<GpuSubmission>* submission) = 0;
 };
 
 }  // namespace gjxl::gpu_profile_internal

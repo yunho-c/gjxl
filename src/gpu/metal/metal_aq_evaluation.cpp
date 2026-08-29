@@ -432,8 +432,23 @@ MetalPreparedAqEvaluation::~MetalPreparedAqEvaluation() {
   }
 }
 
-Status
-MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
+Status MetalPreparedAqEvaluation::Prepare(
+  const AqEvaluationPreparation& preparation,
+  gpu_profile_internal::GpuProfilingMode profiling_mode,
+  gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  const bool profiling =
+    profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
+  if (profiling != (profile != nullptr)) {
+    return Status::InvalidArgument(
+      "Prepared AQ profiling request is invalid");
+  }
+  gpu_profile_internal::GpuExecutionProfile candidate_profile;
+  if (profiling) {
+    Status profile_status = InitializeGpuExecutionProfile(
+      profiling_mode, &candidate_profile);
+    if (!profile_status.ok()) return profile_status;
+  }
   Status status = ValidatePreparation(preparation);
   if (!status.ok()) {
     return status;
@@ -1334,15 +1349,33 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
         staging_.capacity_bytes(),
         staging_.capacity_bytes(),
     };
+    if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
   }
   DeviceButteraugliMemoryStats butteraugli_memory;
   if (options_.metric == AqEvaluationMetric::kButteraugli) {
-    status = PrepareDeviceButteraugli(
-        *backend_,
-        {.reference_linear_rgb = {{{original_[0], original_[1], original_[2]}}},
-         .options = options_.butteraugli},
-        &butteraugli_);
+    const DeviceButteraugliPrepareDescriptor descriptor{
+      .reference_linear_rgb = {{{original_[0], original_[1], original_[2]}}},
+      .options = options_.butteraugli,
+    };
+    if (profiling) {
+      gpu_profile_internal::GpuExecutionProfile reference_profile;
+      status = backend_->PrepareDeviceButteraugliImpl(
+        descriptor, profiling_mode, &butteraugli_, &reference_profile);
+      if (status.ok()) {
+        if (reference_profile.mode != profiling_mode ||
+            reference_profile.capabilities !=
+              candidate_profile.capabilities) {
+          return Status::Internal(
+            "Butteraugli preparation profile metadata is inconsistent");
+        }
+        candidate_profile.submissions = std::move(
+          reference_profile.submissions);
+      }
+    } else {
+      status = PrepareDeviceButteraugli(
+        *backend_, descriptor, &butteraugli_);
+    }
     if (!status.ok())
       return status;
     butteraugli_memory = butteraugli_->memory_stats();
@@ -1362,6 +1395,7 @@ MetalPreparedAqEvaluation::Prepare(const AqEvaluationPreparation &preparation) {
       staging_.capacity_bytes() +
           butteraugli_memory.peak_comparison_scratch_bytes,
   };
+  if (profiling) *profile = std::move(candidate_profile);
   return Status::Ok();
 }
 
@@ -1623,6 +1657,31 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyProfiled(
   return EvaluateResidentButteraugliPolicyImpl(input, output, mode, profile);
 }
 
+Status MetalPreparedAqEvaluation::InitializeGpuExecutionProfile(
+    gpu_profile_internal::GpuProfilingMode mode,
+    gpu_profile_internal::GpuExecutionProfile* profile) const {
+  if (profile == nullptr ||
+      mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Metal GPU execution profile request is invalid");
+  }
+  gpu_profile_internal::GpuExecutionProfile candidate;
+  candidate.mode = mode;
+  candidate.capabilities = backend_->ProfilingCapabilities();
+  if (!candidate.capabilities.timestamp_counter ||
+      !candidate.capabilities.stage_boundary) {
+    return Status::Unavailable(
+      "Metal stage-boundary timestamp sampling is unavailable");
+  }
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDispatch &&
+      !candidate.capabilities.dispatch_boundary) {
+    return Status::Unavailable(
+      "Metal dispatch-boundary timestamp sampling is unavailable");
+  }
+  *profile = std::move(candidate);
+  return Status::Ok();
+}
+
 Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     AqResidentButteraugliPolicyInput input,
     AqResidentButteraugliPolicyOutput output,
@@ -1632,19 +1691,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
   gpu_profile_internal::GpuExecutionProfile candidate_profile;
   if (profiling) {
-    candidate_profile.mode = profiling_mode;
-    candidate_profile.capabilities = backend_->ProfilingCapabilities();
-    if (!candidate_profile.capabilities.timestamp_counter ||
-        !candidate_profile.capabilities.stage_boundary) {
-      return Status::Unavailable(
-        "Metal stage-boundary timestamp sampling is unavailable");
-    }
-    if (profiling_mode ==
-          gpu_profile_internal::GpuProfilingMode::kDispatch &&
-        !candidate_profile.capabilities.dispatch_boundary) {
-      return Status::Unavailable(
-        "Metal dispatch-boundary timestamp sampling is unavailable");
-    }
+    Status profile_status = InitializeGpuExecutionProfile(
+      profiling_mode, &candidate_profile);
+    if (!profile_status.ok()) return profile_status;
   }
   if (!resident_quantization_ ||
       options_.metric != AqEvaluationMetric::kButteraugli) {
@@ -1928,6 +1977,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   if (!status.ok()) return status;
   if (profiling) {
     try {
+      submission_profile.submission_id = "resident.aq";
       candidate_profile.submissions.push_back(std::move(submission_profile));
     } catch (const std::bad_alloc&) {
       Invalidate();
@@ -3779,18 +3829,48 @@ Status MetalBackend::PrepareAqEvaluation(
   const AqEvaluationPreparation& preparation,
   std::unique_ptr<PreparedAqEvaluation>* prepared) {
 
-  if (prepared == nullptr) {
+  return PrepareAqEvaluationImpl(
+    preparation, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    prepared, nullptr);
+}
+
+Status MetalBackend::PrepareAqEvaluationProfiled(
+  const AqEvaluationPreparation& preparation,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<PreparedAqEvaluation>* prepared,
+  gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
     return Status::InvalidArgument(
-      "Prepared AQ evaluation output pointer is null");
+      "Profiled AQ preparation mode is disabled");
+  }
+  return PrepareAqEvaluationImpl(
+    preparation, mode, prepared, profile);
+}
+
+Status MetalBackend::PrepareAqEvaluationImpl(
+  const AqEvaluationPreparation& preparation,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<PreparedAqEvaluation>* prepared,
+  gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  const bool profiling =
+    mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
+  if (prepared == nullptr || profiling != (profile != nullptr)) {
+    return Status::InvalidArgument(
+      "Prepared AQ evaluation output request is invalid");
   }
   prepared->reset();
   try {
     auto result = std::make_unique<MetalPreparedAqEvaluation>(*this);
-    Status status = result->Prepare(preparation);
+    gpu_profile_internal::GpuExecutionProfile candidate_profile;
+    Status status = result->Prepare(
+      preparation, mode, profiling ? &candidate_profile : nullptr);
     if (!status.ok()) {
       return status;
     }
     *prepared = std::move(result);
+    if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(

@@ -1042,6 +1042,25 @@ void WriteRawWorkflowSamples(
   return "invalid";
 }
 
+[[nodiscard]] std::string_view GpuWallStageKindName(
+    gjxl::gpu_profile_internal::GpuWallStageKind kind) {
+  switch (kind) {
+    case gjxl::gpu_profile_internal::GpuWallStageKind::kOperation:
+      return "operation";
+    case gjxl::gpu_profile_internal::GpuWallStageKind::kPreparation:
+      return "preparation";
+    case gjxl::gpu_profile_internal::GpuWallStageKind::kUpload:
+      return "upload";
+    case gjxl::gpu_profile_internal::GpuWallStageKind::kWait:
+      return "wait";
+    case gjxl::gpu_profile_internal::GpuWallStageKind::kReadback:
+      return "readback";
+    case gjxl::gpu_profile_internal::GpuWallStageKind::kHost:
+      return "host";
+  }
+  return "invalid";
+}
+
 void WriteGpuProfileSamples(
     const std::filesystem::path& destination,
     const CommandLineOptions& options,
@@ -1058,7 +1077,7 @@ void WriteGpuProfileSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 1,\n"
+           << "  \"schema_version\": 2,\n"
            << "  \"scope\": \"metal-public-workflow\",\n"
            << "  \"mode\": \""
            << GpuProfilingModeName(options.gpu_profiling_mode) << "\",\n"
@@ -1095,6 +1114,19 @@ void WriteGpuProfileSamples(
                << ", \"dispatch_boundary\": "
                << (profile.capabilities.dispatch_boundary ? "true" : "false")
                << "},\n"
+               << "          \"wall_stages\": [";
+        for (size_t wall_index = 0;
+             wall_index < profile.wall_stages.size(); ++wall_index) {
+          const auto& wall = profile.wall_stages[wall_index];
+          if (wall_index != 0) output << ", ";
+          output << "{\"stage_id\": \"" << JsonEscape(wall.stage_id)
+                 << "\", \"kind\": \""
+                 << GpuWallStageKindName(wall.kind)
+                 << "\", \"invocation\": " << wall.invocation
+                 << ", \"wall_nanoseconds\": " << wall.wall_nanoseconds
+                 << '}';
+        }
+        output << "],\n"
                << "          \"submissions\": [\n";
         for (size_t submission_index = 0;
              submission_index < profile.submissions.size();
@@ -1102,6 +1134,9 @@ void WriteGpuProfileSamples(
           const auto& submission = profile.submissions[submission_index];
           output << "            {\"submission_index\": "
                  << submission_index
+                 << ", \"submission_id\": \""
+                 << JsonEscape(submission.submission_id)
+                 << "\", \"invocation\": " << submission.invocation
                  << ", \"command_buffer_gpu_nanoseconds\": "
                  << submission.command_buffer_gpu_nanoseconds
                  << ", \"stages\": [\n";

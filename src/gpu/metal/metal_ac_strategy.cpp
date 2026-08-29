@@ -116,7 +116,21 @@ Status MetalBackend::EvaluateAcStrategyCandidateBatches(
   std::span<const AcStrategyCandidateBatch> batches,
   std::unique_ptr<GpuSubmission>* submission) {
 
-  return SubmitAcStrategyCandidates(batches, submission);
+  return SubmitAcStrategyCandidatesImpl(
+    batches, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    submission);
+}
+
+Status MetalBackend::EvaluateAcStrategyCandidateBatchesProfiled(
+  std::span<const AcStrategyCandidateBatch> batches,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<GpuSubmission>* submission) {
+
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Profiled AC-strategy mode is disabled");
+  }
+  return SubmitAcStrategyCandidatesImpl(batches, mode, submission);
 }
 
 bool MetalBackend::TryMultiply(
@@ -564,8 +578,9 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     MTL::Size(validated.params.coefficient_count, 1, 1));
 }
 
-Status MetalBackend::SubmitAcStrategyCandidates(
+Status MetalBackend::SubmitAcStrategyCandidatesImpl(
   std::span<const AcStrategyCandidateBatch> batches,
+  gpu_profile_internal::GpuProfilingMode mode,
   std::unique_ptr<GpuSubmission>* submission) {
 
   if (submission == nullptr) {
@@ -600,10 +615,21 @@ Status MetalBackend::SubmitAcStrategyCandidates(
   }
 
   const AcStrategyEncodeContext context{validated_batches};
-  return SubmitCompute(
-    "gjxl staged AC candidate evaluation",
-    &MetalBackend::EncodeAcStrategySubmission,
-    &context,
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return SubmitCompute(
+      "gjxl staged AC candidate evaluation",
+      &MetalBackend::EncodeAcStrategySubmission,
+      &context,
+      submission);
+  }
+  const MetalProfiledComputeStage stage{
+    .stage_id = "frontend.ac_strategy",
+    .encode = &MetalBackend::EncodeAcStrategySubmission,
+    .context = &context,
+  };
+  return SubmitComputeProfiled(
+    "gjxl staged AC candidate evaluation profile",
+    std::span<const MetalProfiledComputeStage>(&stage, 1), mode,
     submission);
 }
 

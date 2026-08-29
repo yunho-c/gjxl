@@ -260,7 +260,11 @@ public:
   explicit MetalPreparedAqEvaluation(MetalBackend &backend);
   ~MetalPreparedAqEvaluation() override;
 
-  Status Prepare(const AqEvaluationPreparation &preparation);
+  Status Prepare(
+    const AqEvaluationPreparation& preparation,
+    gpu_profile_internal::GpuProfilingMode profiling_mode =
+      gpu_profile_internal::GpuProfilingMode::kDisabled,
+    gpu_profile_internal::GpuExecutionProfile* profile = nullptr);
   Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override;
   Status EvaluateResidentButteraugliPolicy(
       AqResidentButteraugliPolicyInput input,
@@ -276,6 +280,12 @@ public:
   Status AdjustQuantFieldResident(float butteraugli_target,
                                   ConstPlaneF32View input,
                                   PlaneF32View output) override;
+  Status AdjustQuantFieldResidentProfiled(
+      float butteraugli_target,
+      ConstPlaneF32View input,
+      PlaneF32View output,
+      gpu_profile_internal::GpuProfilingMode mode,
+      gpu_profile_internal::GpuExecutionProfile* profile) override;
   Status Reconfigure(const AcStrategyGrid& strategies,
                      ConstPlaneU8View epf_sharpness) override;
   Status EncodeFrame(AqEvaluationInput input,
@@ -285,6 +295,13 @@ public:
       InitialQuantFieldOutput output,
       QuantizerParams* quantizer = nullptr,
       float quant_dc = 0.0f) override;
+  Status ComputeInitialQuantizationProfiled(
+      InitialQuantizationOptions options,
+      InitialQuantFieldOutput output,
+      QuantizerParams* quantizer,
+      float quant_dc,
+      gpu_profile_internal::GpuProfilingMode mode,
+      gpu_profile_internal::GpuExecutionProfile* profile) override;
   Status GetResidentAcStrategyInputs(
       ResidentAcStrategyInputs* inputs) override;
   Status EvaluateProfiled(AqEvaluationInput input, AqEvaluationOutput output,
@@ -354,6 +371,22 @@ private:
   Status ValidatePreparation(const AqEvaluationPreparation &preparation) const;
   Status ValidateInput(AqEvaluationInput input) const;
   Status ValidateOutput(AqEvaluationOutput output) const;
+  Status InitializeGpuExecutionProfile(
+      gpu_profile_internal::GpuProfilingMode mode,
+      gpu_profile_internal::GpuExecutionProfile* profile) const;
+  Status AdjustQuantFieldResidentImpl(
+      float butteraugli_target,
+      ConstPlaneF32View input,
+      PlaneF32View output,
+      gpu_profile_internal::GpuProfilingMode mode,
+      gpu_profile_internal::GpuExecutionProfile* profile);
+  Status ComputeInitialQuantizationImpl(
+      InitialQuantizationOptions options,
+      InitialQuantFieldOutput output,
+      QuantizerParams* quantizer,
+      float quant_dc,
+      gpu_profile_internal::GpuProfilingMode mode,
+      gpu_profile_internal::GpuExecutionProfile* profile);
   Status BeginOperation(bool profiling_reserved = false);
   Status UploadInput(AqEvaluationInput input);
   Status PrepareExactCoefficientStaging(AqEvaluationInput input);

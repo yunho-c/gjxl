@@ -121,10 +121,12 @@ Each artifact contains:
 - `raw-samples.json`, with every untraced workflow phase recorded as integer
   nanoseconds for all seven default samples;
 - `gpu-stage-samples.json`, with raw timestamp intervals, stable stage and
-  stage-local dispatch IDs, iteration numbers, dispatch geometry, and device
-  counter-sampling capabilities for fully-resident or throughput AQ;
+  stage-local dispatch IDs, stable submission IDs, invocation numbers,
+  dispatch geometry, typed host wall spans, and device counter-sampling
+  capabilities for fully-resident or throughput AQ;
 - `gpu-stage-summary.json`, with median cumulative time, call and dispatch
-  counts, command-buffer percentage, and per-iteration breakdowns;
+  counts, command-buffer percentage, per-submission and per-iteration
+  breakdowns, and wall-span medians;
 - `capture.trace`, `trace-toc.xml`, `trace.stdout`, and `trace-sample.json` for
   one instrumented Metal sample;
 - build, benchmark, and `xctrace` logs;
@@ -141,14 +143,90 @@ the artifact is preserved as failed and the command exits nonzero. Missing
 tools, failed builds, failed benchmark validation, and failed trace export are
 handled the same way.
 
-Treat `raw-samples.json` as the performance comparison evidence. The stage
-profile splits the resident command buffer into logical compute encoders, and
-Metal System Trace adds its own instrumentation overhead, so both are for
-attribution rather than latency claims. Dispatch timing can be requested from
-the benchmark with `--gpu-profile dispatch`, but it fails before submission on
-devices such as the Apple M4 Pro that do not expose dispatch-boundary counter
-sampling. The workflow never emulates dispatch timestamps by changing every
-dispatch into a separate encoder.
+Treat `raw-samples.json` as the performance comparison evidence. Profile schema
+2 covers every current compute submission in one profiled public encode. The
+frontend keeps each existing command buffer as one timestamped stage, while
+the resident AQ command buffer is split into its logical stage encoders. Its
+stable submission IDs are `frontend.preprocessing.gaborish`,
+`frontend.initial_quantization`, `frontend.ac_strategy`,
+`frontend.prepare_aq.reference`, `frontend.quant_adjustment`, and
+`resident.aq`. The reference-preparation submission appears when persistent
+Butteraugli reference state is constructed; a reusable compatible evaluator
+instead reports `frontend.reconfigure_aq` as a preparation wall span.
+
+Typed steady-clock wall spans separate preparation, upload, wait, readback,
+and host work around those submissions. Operation spans can contain narrower
+spans, so wall spans are hierarchical evidence and must not be summed. GPU
+percentages use the sum of all captured command-buffer durations in the
+sample. Counter sampling changes encoder boundaries for the resident buffer,
+and Metal System Trace adds its own instrumentation overhead, so both remain
+attribution tools rather than latency evidence. Dispatch timing can be
+requested from the benchmark with `--gpu-profile dispatch`, but capability
+preflight fails before submission on devices such as the Apple M4 Pro that do
+not expose dispatch-boundary counter sampling. The workflow never emulates
+dispatch timestamps by changing every dispatch into a separate encoder.
+
+The diagnostic session is created only by the explicitly profiled entrypoint.
+Ordinary encoding does not allocate profile metadata or read clocks. A profile
+is published only after the whole caller-visible operation succeeds, and
+stable per-ID invocation numbers disambiguate repeated submissions or wall
+spans without exposing Metal types above the backend capability boundary.
+
+#### Current fully-resident stage baseline (2026-08-28)
+
+Commit `4e28177` was profiled on the Apple M4 Pro with the SIMD implementation,
+target distance `1.2`, two warmups, and seven samples for both required
+large-image workloads. The artifacts are
+`20260828T235258Z-padded_1080p-fully-resident-4e28177196f9` and
+`20260828T235344Z-padded_4k-fully-resident-4e28177196f9` under
+`logs/metal-profile/`. Both completed with an unchanged source fingerprint and
+the same benchmark and metallib hashes. Median sampled-stage coverage was
+`99.970%` at 1080p and `99.969%` at 4K; every profile sample contained one
+resident submission with `553` dispatches.
+
+The uninstrumented public-workflow medians and the separately instrumented
+resident command-buffer medians were:
+
+| Workload | Public total | Input preparation | Quantization pipeline | Codestream encoding | Profiled resident GPU buffer |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `259.939 ms` | `15.639 ms` | `208.461 ms` | `34.310 ms` | `74.206 ms` |
+| Padded 4K | `980.884 ms` | `65.374 ms` | `822.910 ms` | `86.894 ms` | `298.128 ms` |
+
+The resident stage ranking was:
+
+| Stage | 1080p median | 1080p GPU share | 4K median | 4K GPU share | Dispatches |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `aq.reconstruction` | `24.231 ms` | `32.410%` | `83.732 ms` | `28.087%` | `192` |
+| `butteraugli.psycho.main` | `15.283 ms` | `20.548%` | `66.705 ms` | `22.393%` | `90` |
+| `butteraugli.malta.main` | `13.736 ms` | `18.517%` | `57.242 ms` | `19.174%` | `36` |
+| `butteraugli.psycho.sub` | `4.070 ms` | `5.442%` | `17.717 ms` | `5.946%` | `99` |
+| `butteraugli.malta.sub` | `3.493 ms` | `4.684%` | `14.038 ms` | `4.708%` | `36` |
+| `butteraugli.l2.main` | `3.414 ms` | `4.572%` | `14.270 ms` | `4.785%` | `3` |
+| `butteraugli.mask_final.main` | `3.165 ms` | `4.252%` | `13.768 ms` | `4.617%` | `18` |
+
+The top three stages account for `71.475%` of sampled command-buffer time at
+1080p and `69.654%` at 4K. All Butteraugli stages together account for
+`45.786 ms`/`61.552%` and `195.236 ms`/`65.473%`, respectively. Per-iteration
+medians are stable: reconstruction is approximately `8.0 ms` per 1080p
+evaluation and `28.0 ms` per 4K evaluation, while the two largest Butteraugli
+stages are approximately `5.1/4.6 ms` and `22.2/19.0 ms` per evaluation.
+
+This makes `aq.reconstruction` the first stage-level optimization target. Its
+dispatch inventory points first to the repeated transform gather, coefficient
+encode, and reconstructed-pixel scatter sequence, followed by the resident
+quantizer histogram sequence. The next targets are the full-resolution
+Butteraugli psychoacoustic and Malta stages. The psychoacoustic inventory is
+dominated by repeated transpose convolution dispatches, but this device does
+not expose dispatch-boundary timestamps, so a candidate must be isolated with
+a matched-build stage A/B rather than attributed from dispatch count alone.
+
+These schema-1 artifacts exposed the instrumentation boundary that motivated
+schema 2: the resident buffer was much shorter than the complete quantization
+pipeline. The extended profile now attributes initial-field work, strategy
+search, reference preparation, quant-field adjustment, preprocessing, host
+CfL work, transfers, waits, and the resident policy under the same diagnostic
+session. Uninstrumented public-workflow runs remain the final judge for any
+retained performance claim.
 
 ## Ordered implementation plan
 

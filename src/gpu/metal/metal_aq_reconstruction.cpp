@@ -596,6 +596,39 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
 Status MetalPreparedAqEvaluation::AdjustQuantFieldResident(
     float butteraugli_target, ConstPlaneF32View input, PlaneF32View output) {
 
+  return AdjustQuantFieldResidentImpl(
+    butteraugli_target, input, output,
+    gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
+}
+
+Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentProfiled(
+    float butteraugli_target, ConstPlaneF32View input, PlaneF32View output,
+    gpu_profile_internal::GpuProfilingMode mode,
+    gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  if (profile == nullptr ||
+      mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Profiled resident quant-field adjustment request is invalid");
+  }
+  return AdjustQuantFieldResidentImpl(
+    butteraugli_target, input, output, mode, profile);
+}
+
+Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
+    float butteraugli_target, ConstPlaneF32View input, PlaneF32View output,
+    gpu_profile_internal::GpuProfilingMode profiling_mode,
+    gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  const bool profiling = profiling_mode !=
+    gpu_profile_internal::GpuProfilingMode::kDisabled;
+  gpu_profile_internal::GpuExecutionProfile candidate_profile;
+  if (profiling) {
+    Status profile_status = InitializeGpuExecutionProfile(
+      profiling_mode, &candidate_profile);
+    if (!profile_status.ok()) return profile_status;
+  }
+
   if (!resident_quantization_) {
     return Status::FailedPrecondition(
       "Resident quant-field adjustment was not prepared");
@@ -667,10 +700,23 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResident(
   initial_quant_gradient_params_.test_error_mask =
       fail_numeric ? 262144u : 0u;
   std::unique_ptr<GpuSubmission> submission;
-  status = backend_->SubmitCompute(
-      "gjxl resident quant-field adjustment",
-      &MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission,
-      this, &submission);
+  if (profiling) {
+    const MetalProfiledComputeStage stage{
+      .stage_id = "frontend.quant_adjustment",
+      .encode =
+        &MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission,
+      .context = this,
+    };
+    status = backend_->SubmitComputeProfiled(
+      "gjxl resident quant-field adjustment profile",
+      std::span<const MetalProfiledComputeStage>(&stage, 1),
+      profiling_mode, &submission);
+  } else {
+    status = backend_->SubmitCompute(
+        "gjxl resident quant-field adjustment",
+        &MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission,
+        this, &submission);
+  }
   if (!status.ok() || submission == nullptr) {
     Invalidate();
     return status.ok()
@@ -682,7 +728,8 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResident(
     std::lock_guard lock(mutex_);
     submission_ = std::move(submission);
   }
-  status = WaitForOperation();
+  gpu_profile_internal::GpuSubmissionProfile submission_profile;
+  status = WaitForOperation(profiling ? &submission_profile : nullptr);
   if (!status.ok()) return status;
 
   uint32_t device_error = 0;
@@ -715,6 +762,21 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResident(
             "Metal resident quant-field readback is invalid")
         : status;
     }
+    if (profiling) {
+      try {
+        submission_profile.submission_id = "frontend.quant_adjustment";
+        candidate_profile.submissions.push_back(
+          std::move(submission_profile));
+      } catch (const std::bad_alloc&) {
+        Invalidate();
+        return Status::OutOfMemory(
+          "Unable to retain quant-adjustment GPU profile");
+      } catch (const std::length_error&) {
+        Invalidate();
+        return Status::InvalidArgument(
+          "Quant-adjustment GPU profile is too large");
+      }
+    }
     CopyContiguousPlane(adjusted, output);
   } catch (const std::bad_alloc&) {
     Invalidate();
@@ -725,6 +787,7 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResident(
     return Status::InvalidArgument(
       "Resident quant-field readback is too large");
   }
+  if (profiling) *profile = std::move(candidate_profile);
   CompleteOperation();
   return Status::Ok();
 }
@@ -732,6 +795,41 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResident(
 Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     InitialQuantizationOptions options, InitialQuantFieldOutput output,
     QuantizerParams* quantizer, float quant_dc) {
+
+  return ComputeInitialQuantizationImpl(
+    options, output, quantizer, quant_dc,
+    gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
+}
+
+Status MetalPreparedAqEvaluation::ComputeInitialQuantizationProfiled(
+    InitialQuantizationOptions options, InitialQuantFieldOutput output,
+    QuantizerParams* quantizer, float quant_dc,
+    gpu_profile_internal::GpuProfilingMode mode,
+    gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  if (profile == nullptr ||
+      mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Profiled initial-quantization request is invalid");
+  }
+  return ComputeInitialQuantizationImpl(
+    options, output, quantizer, quant_dc, mode, profile);
+}
+
+Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
+    InitialQuantizationOptions options, InitialQuantFieldOutput output,
+    QuantizerParams* quantizer, float quant_dc,
+    gpu_profile_internal::GpuProfilingMode profiling_mode,
+    gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  const bool profiling = profiling_mode !=
+    gpu_profile_internal::GpuProfilingMode::kDisabled;
+  gpu_profile_internal::GpuExecutionProfile candidate_profile;
+  if (profiling) {
+    Status profile_status = InitializeGpuExecutionProfile(
+      profiling_mode, &candidate_profile);
+    if (!profile_status.ok()) return profile_status;
+  }
 
   if (!frame_only_resident_initial_quant_) {
     return Status::FailedPrecondition(
@@ -808,10 +906,23 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
   }
   initial_quant_gradient_params_.test_error_mask = fail_numeric ? 16384u : 0u;
   std::unique_ptr<GpuSubmission> submission;
-  status = backend_->SubmitCompute(
-      "gjxl prepared initial quantization",
-      &MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission, this,
-      &submission);
+  if (profiling) {
+    const MetalProfiledComputeStage stage{
+      .stage_id = "frontend.initial_quantization",
+      .encode =
+        &MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission,
+      .context = this,
+    };
+    status = backend_->SubmitComputeProfiled(
+      "gjxl prepared initial quantization profile",
+      std::span<const MetalProfiledComputeStage>(&stage, 1),
+      profiling_mode, &submission);
+  } else {
+    status = backend_->SubmitCompute(
+        "gjxl prepared initial quantization",
+        &MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission, this,
+        &submission);
+  }
   if (!status.ok() || submission == nullptr) {
     Invalidate();
     return status.ok()
@@ -822,7 +933,8 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     std::lock_guard lock(mutex_);
     submission_ = std::move(submission);
   }
-  status = WaitForOperation();
+  gpu_profile_internal::GpuSubmissionProfile submission_profile;
+  status = WaitForOperation(profiling ? &submission_profile : nullptr);
   if (!status.ok()) return status;
 
   uint32_t device_error = 0;
@@ -872,6 +984,20 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     Invalidate();
     return status;
   }
+  if (profiling) {
+    try {
+      submission_profile.submission_id = "frontend.initial_quantization";
+      candidate_profile.submissions.push_back(std::move(submission_profile));
+    } catch (const std::bad_alloc&) {
+      Invalidate();
+      return Status::OutOfMemory(
+        "Unable to retain initial-quantization GPU profile");
+    } catch (const std::length_error&) {
+      Invalidate();
+      return Status::InvalidArgument(
+        "Initial-quantization GPU profile is too large");
+    }
+  }
   CopyContiguousPlane(last_initial_quant_field_, output.quant_field);
   CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
   CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
@@ -880,6 +1006,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantization(
     resident_quantizer_ready_ = true;
     if (quantizer != nullptr) *quantizer = device_quantizer;
   }
+  if (profiling) *profile = std::move(candidate_profile);
   CompleteOperation();
   return Status::Ok();
 }

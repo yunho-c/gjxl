@@ -218,8 +218,12 @@ private:
 class MetalBackend final
   : public GpuBackend,
     public GpuAcStrategyEvaluation,
+    public gpu_profile_internal::GpuAcStrategyEvaluationProfiler,
+    public gpu_profile_internal::GpuSubmissionProfiler,
     public GpuImagePrimitives,
+    public gpu_profile_internal::GpuImagePrimitivesProfiler,
     public GpuAqEvaluation,
+    public gpu_profile_internal::GpuAqEvaluationProfiler,
     public DeviceButteraugliOperation {
 public:
   MetalBackend(
@@ -268,13 +272,39 @@ public:
     std::span<const AcStrategyCandidateBatch> batches,
     std::unique_ptr<GpuSubmission>* submission) override;
 
+  Status EvaluateAcStrategyCandidateBatchesProfiled(
+    std::span<const AcStrategyCandidateBatch> batches,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
+  [[nodiscard]] gpu_profile_internal::GpuProfilingCapabilities
+  QueryGpuProfilingCapabilities() const override;
+
+  Status ResolveGpuSubmissionProfile(
+    GpuSubmission& submission,
+    std::string_view submission_id,
+    gpu_profile_internal::GpuProfilingMode mode,
+    gpu_profile_internal::GpuExecutionProfile* profile) override;
+
   Status SubmitImagePrimitiveSequence(
     std::span<const ImagePrimitiveCommand> commands,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
+  Status SubmitImagePrimitiveSequenceProfiled(
+    std::span<const ImagePrimitiveCommand> commands,
+    std::string_view stage_id,
+    gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<GpuSubmission>* submission) override;
 
   Status PrepareAqEvaluation(
     const AqEvaluationPreparation& preparation,
     std::unique_ptr<PreparedAqEvaluation>* prepared) override;
+
+  Status PrepareAqEvaluationProfiled(
+    const AqEvaluationPreparation& preparation,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<PreparedAqEvaluation>* prepared,
+    gpu_profile_internal::GpuExecutionProfile* profile) override;
 
   Status Prepare(
     GpuBackend& backend,
@@ -288,6 +318,18 @@ public:
 private:
   friend class MetalPreparedAqEvaluation;
   friend class MetalPreparedDeviceButteraugli;
+
+  Status PrepareDeviceButteraugliImpl(
+    const DeviceButteraugliPrepareDescriptor& descriptor,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<PreparedDeviceButteraugli>* prepared,
+    gpu_profile_internal::GpuExecutionProfile* profile);
+
+  Status PrepareAqEvaluationImpl(
+    const AqEvaluationPreparation& preparation,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<PreparedAqEvaluation>* prepared,
+    gpu_profile_internal::GpuExecutionProfile* profile);
   struct TransformEncodeContext {
     const TransformPipeline* pipeline = nullptr;
     TransformDirection direction = TransformDirection::kForward;
@@ -370,8 +412,9 @@ private:
     MTL::ComputeCommandEncoder* encoder,
     const ValidatedAcStrategyBatch& validated);
 
-  Status SubmitAcStrategyCandidates(
+  Status SubmitAcStrategyCandidatesImpl(
     std::span<const AcStrategyCandidateBatch> batches,
+    gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<GpuSubmission>* submission);
 
   Status SubmitCompute(
