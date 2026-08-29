@@ -173,6 +173,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> frequency_ultra;
   NS::SharedPtr<MTL::ComputePipelineState> malta_scale;
   NS::SharedPtr<MTL::ComputePipelineState> malta_response;
+  NS::SharedPtr<MTL::ComputePipelineState> malta_fused;
   NS::SharedPtr<MTL::ComputePipelineState> l2;
   NS::SharedPtr<MTL::ComputePipelineState> mask_precompute;
   NS::SharedPtr<MTL::ComputePipelineState> fuzzy_erosion;

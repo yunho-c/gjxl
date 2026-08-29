@@ -92,6 +92,22 @@ struct MaltaResponseParams {
   uint accumulation_stride;
   uint low_frequency;
   uint initialize_accumulation;
+  uint write_response;
+};
+
+struct MaltaFusedParams {
+  uint width;
+  uint height;
+  uint reference_stride;
+  uint distorted_stride;
+  uint response_stride;
+  uint accumulation_stride;
+  uint low_frequency;
+  uint initialize_accumulation;
+  uint write_response;
+  float norm2_0_gt_1;
+  float norm2_0_lt_1;
+  float norm;
 };
 
 struct DifferenceParams {
@@ -510,26 +526,14 @@ kernel void gjxl_butteraugli_frequency_ultra_f32(
   }
 }
 
-kernel void gjxl_butteraugli_malta_scale_f32(
-  device const float* reference [[buffer(0)]],
-  device const float* distorted [[buffer(1)]],
-  device float* output [[buffer(2)]],
-  constant MaltaScaleParams& params [[buffer(3)]],
-  uint2 position [[thread_position_in_grid]]) {
-
-  if (position.x >= params.width || position.y >= params.height) return;
-  const uint reference_index =
-    position.y * params.reference_stride + position.x;
-  const uint distorted_index =
-    position.y * params.distorted_stride + position.x;
-  const uint output_index = position.y * params.output_stride + position.x;
-  const float value0 = reference[reference_index];
-  const float value1 = distorted[distorted_index];
+inline float malta_scale_value(float value0, float value1,
+                               float norm2_0_gt_1, float norm2_0_lt_1,
+                               float norm) {
   const float absolute = 0.5f * (abs(value0) + abs(value1));
   const float difference = value0 - value1;
-  const float scaler = params.norm2_0_gt_1 / (params.norm + absolute);
+  const float scaler = norm2_0_gt_1 / (norm + absolute);
   float scaled = scaler * difference;
-  const float scaler2 = params.norm2_0_lt_1 / (params.norm + absolute);
+  const float scaler2 = norm2_0_lt_1 / (norm + absolute);
   const float magnitude = abs(value0);
   const float too_small = 0.55f * magnitude;
   const float too_big = 1.05f * magnitude;
@@ -544,6 +548,25 @@ kernel void gjxl_butteraugli_malta_scale_f32(
   } else if (value1 > too_big) {
     scaled -= scaler2 * (value1 - too_big);
   }
+  return scaled;
+}
+
+kernel void gjxl_butteraugli_malta_scale_f32(
+  device const float* reference [[buffer(0)]],
+  device const float* distorted [[buffer(1)]],
+  device float* output [[buffer(2)]],
+  constant MaltaScaleParams& params [[buffer(3)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height) return;
+  const uint reference_index =
+    position.y * params.reference_stride + position.x;
+  const uint distorted_index =
+    position.y * params.distorted_stride + position.x;
+  const uint output_index = position.y * params.output_stride + position.x;
+  const float scaled = malta_scale_value(
+    reference[reference_index], distorted[distorted_index],
+    params.norm2_0_gt_1, params.norm2_0_lt_1, params.norm);
   output[output_index] = scaled;
 }
 
@@ -617,6 +640,116 @@ inline float malta_full(device const float* input, int x, int y,
   return result;
 }
 
+inline float read_tile(threadgroup const float* input, int x, int y,
+                       uint stride) {
+  return input[uint(y) * stride + uint(x)];
+}
+
+inline float malta_lf_tile(threadgroup const float* input, int x, int y,
+                           uint stride) {
+  const auto v = [&](int dx, int dy) {
+    return read_tile(input, x + dx, y + dy, stride);
+  };
+  float sum = sum5(v(-4,0), v(-2,0), v(0,0), v(2,0), v(4,0));
+  float result = sum * sum;
+  sum = sum5(v(0,-4),v(0,-2),v(0,0),v(0,2),v(0,4)); add_square(sum, result);
+  sum = sum5(v(-3,-3),v(-2,-2),v(0,0),v(2,2),v(3,3)); add_square(sum,result);
+  sum = sum5(v(3,-3),v(2,-2),v(0,0),v(-2,2),v(-3,3)); add_square(sum,result);
+  sum = sum5(v(1,-4),v(1,-2),v(0,0),v(-1,2),v(-1,4)); add_square(sum,result);
+  sum = sum5(v(-1,-4),v(-1,-2),v(0,0),v(1,2),v(1,4)); add_square(sum,result);
+  sum = sum5(v(-4,-1),v(-2,-1),v(0,0),v(2,1),v(4,1)); add_square(sum,result);
+  sum = sum5(v(-4,1),v(-2,1),v(0,0),v(2,-1),v(4,-1)); add_square(sum,result);
+  sum = sum5(v(-2,-3),v(-1,-2),v(0,0),v(1,2),v(2,3)); add_square(sum,result);
+  sum = sum5(v(2,-3),v(1,-2),v(0,0),v(-1,2),v(-2,3)); add_square(sum,result);
+  sum = sum5(v(-3,-2),v(-2,-1),v(0,0),v(2,1),v(3,2)); add_square(sum,result);
+  sum = sum5(v(3,-2),v(2,-1),v(0,0),v(-2,1),v(-3,2)); add_square(sum,result);
+  sum = sum5(v(-4,2),v(-2,1),v(0,0),v(2,-1),v(4,-2)); add_square(sum,result);
+  sum = sum5(v(-4,-2),v(-2,-1),v(0,0),v(2,1),v(4,2)); add_square(sum,result);
+  sum = sum5(v(-2,-4),v(-1,-2),v(0,0),v(1,2),v(2,4)); add_square(sum,result);
+  sum = sum5(v(2,-4),v(1,-2),v(0,0),v(-1,2),v(-2,4)); add_square(sum,result);
+  return result;
+}
+
+inline float malta_full_tile(threadgroup const float* input, int x, int y,
+                             uint stride) {
+  const auto v = [&](int dx, int dy) {
+    return read_tile(input, x + dx, y + dy, stride);
+  };
+  float sum = sum9(v(-4,0),v(-3,0),v(-2,0),v(-1,0),v(0,0),v(1,0),v(2,0),v(3,0),v(4,0));
+  float result = sum * sum;
+  sum=sum9(v(0,-4),v(0,-3),v(0,-2),v(0,-1),v(0,0),v(0,1),v(0,2),v(0,3),v(0,4)); add_square(sum,result);
+  sum=sum7(v(-3,-3),v(-2,-2),v(-1,-1),v(0,0),v(1,1),v(2,2),v(3,3)); add_square(sum,result);
+  sum=sum7(v(3,-3),v(2,-2),v(1,-1),v(0,0),v(-1,1),v(-2,2),v(-3,3)); add_square(sum,result);
+  sum=sum9(v(1,-4),v(1,-3),v(1,-2),v(0,-1),v(0,0),v(0,1),v(-1,2),v(-1,3),v(-1,4)); add_square(sum,result);
+  sum=sum9(v(-1,-4),v(-1,-3),v(-1,-2),v(0,-1),v(0,0),v(0,1),v(1,2),v(1,3),v(1,4)); add_square(sum,result);
+  sum=sum9(v(-4,-1),v(-3,-1),v(-2,-1),v(-1,0),v(0,0),v(1,0),v(2,1),v(3,1),v(4,1)); add_square(sum,result);
+  sum=sum9(v(-4,1),v(-3,1),v(-2,1),v(-1,0),v(0,0),v(1,0),v(2,-1),v(3,-1),v(4,-1)); add_square(sum,result);
+  sum=sum7(v(-2,-3),v(-1,-2),v(-1,-1),v(0,0),v(1,1),v(1,2),v(2,3)); add_square(sum,result);
+  sum=sum7(v(2,-3),v(1,-2),v(1,-1),v(0,0),v(-1,1),v(-1,2),v(-2,3)); add_square(sum,result);
+  sum=sum7(v(-3,-2),v(-2,-1),v(-1,-1),v(0,0),v(1,1),v(2,1),v(3,2)); add_square(sum,result);
+  sum=sum7(v(3,-2),v(2,-1),v(1,-1),v(0,0),v(-1,1),v(-2,1),v(-3,2)); add_square(sum,result);
+  sum=sum9(v(-4,1),v(-3,1),v(-2,1),v(-1,0),v(0,0),v(1,0),v(2,-1),v(3,-1),v(4,-1)); add_square(sum,result);
+  sum=sum9(v(-4,-1),v(-3,-1),v(-2,-1),v(-1,0),v(0,0),v(1,0),v(2,1),v(3,1),v(4,1)); add_square(sum,result);
+  sum=sum9(v(-1,-4),v(-1,-3),v(-1,-2),v(0,-1),v(0,0),v(0,1),v(1,2),v(1,3),v(1,4)); add_square(sum,result);
+  sum=sum9(v(1,-4),v(1,-3),v(1,-2),v(0,-1),v(0,0),v(0,1),v(-1,2),v(-1,3),v(-1,4)); add_square(sum,result);
+  return result;
+}
+
+kernel void gjxl_butteraugli_malta_fused_f32(
+  device const float* reference [[buffer(0)]],
+  device const float* distorted [[buffer(1)]],
+  device float* response [[buffer(2)]],
+  device float* accumulation [[buffer(3)]],
+  constant MaltaFusedParams& params [[buffer(4)]],
+  threadgroup float* scaled_tile [[threadgroup(0)]],
+  uint2 local_position [[thread_position_in_threadgroup]],
+  uint2 group_position [[threadgroup_position_in_grid]],
+  uint2 group_size [[threads_per_threadgroup]]) {
+
+  const uint tile_stride = group_size.x + 8u;
+  const uint tile_height = group_size.y + 8u;
+  const uint thread_index = local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int origin_x = int(group_position.x * group_size.x) - 4;
+  const int origin_y = int(group_position.y * group_size.y) - 4;
+  for (uint index = thread_index; index < tile_stride * tile_height;
+       index += thread_count) {
+    const int source_x = origin_x + int(index % tile_stride);
+    const int source_y = origin_y + int(index / tile_stride);
+    float scaled = 0.0f;
+    if (source_x >= 0 && source_y >= 0 &&
+        source_x < int(params.width) && source_y < int(params.height)) {
+      const uint reference_index =
+        uint(source_y) * params.reference_stride + uint(source_x);
+      const uint distorted_index =
+        uint(source_y) * params.distorted_stride + uint(source_x);
+      scaled = malta_scale_value(
+        reference[reference_index], distorted[distorted_index],
+        params.norm2_0_gt_1, params.norm2_0_lt_1, params.norm);
+    }
+    scaled_tile[index] = scaled;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint2 position = group_position * group_size + local_position;
+  if (position.x >= params.width || position.y >= params.height) return;
+  const int tile_x = int(local_position.x) + 4;
+  const int tile_y = int(local_position.y) + 4;
+  const float result = params.low_frequency != 0
+    ? malta_lf_tile(scaled_tile, tile_x, tile_y, tile_stride)
+    : malta_full_tile(scaled_tile, tile_x, tile_y, tile_stride);
+  if (params.write_response != 0u) {
+    response[position.y * params.response_stride + position.x] = result;
+  }
+  const uint accumulation_index =
+    position.y * params.accumulation_stride + position.x;
+  if (params.initialize_accumulation != 0u) {
+    accumulation[accumulation_index] = result;
+  } else {
+    accumulation[accumulation_index] += result;
+  }
+}
+
 kernel void gjxl_butteraugli_malta_response_f32(
   device const float* input [[buffer(0)]],
   device float* output [[buffer(1)]],
@@ -628,7 +761,9 @@ kernel void gjxl_butteraugli_malta_response_f32(
   const float result = params.low_frequency != 0
     ? malta_lf(input, int(position.x), int(position.y), params)
     : malta_full(input, int(position.x), int(position.y), params);
-  output[position.y * params.output_stride + position.x] = result;
+  if (params.write_response != 0u) {
+    output[position.y * params.output_stride + position.x] = result;
+  }
   const uint accumulation_index =
     position.y * params.accumulation_stride + position.x;
   if (params.initialize_accumulation != 0) {

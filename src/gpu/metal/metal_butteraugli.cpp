@@ -51,6 +51,9 @@ constexpr size_t kWork = 32;
 constexpr size_t kFinalStaging = 37;
 constexpr size_t kReferenceMask = 38;
 constexpr size_t kPsychoPlaneCount = 10;
+constexpr size_t kMaltaTileWidth = 32;
+constexpr size_t kMaltaTileHeight = 8;
+constexpr size_t kMaltaRadius = 4;
 
 using PsychoPlanes = std::array<DevicePlaneView, kPsychoPlaneCount>;
 
@@ -155,6 +158,22 @@ struct MaltaResponseParams {
   uint32_t accumulation_stride;
   uint32_t low_frequency;
   uint32_t initialize_accumulation;
+  uint32_t write_response;
+};
+
+struct MaltaFusedParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t reference_stride;
+  uint32_t distorted_stride;
+  uint32_t response_stride;
+  uint32_t accumulation_stride;
+  uint32_t low_frequency;
+  uint32_t initialize_accumulation;
+  uint32_t write_response;
+  float norm2_0_gt_1;
+  float norm2_0_lt_1;
+  float norm;
 };
 
 struct DifferenceParams {
@@ -206,7 +225,8 @@ static_assert(sizeof(OpsinParams) == 32);
 static_assert(sizeof(FrequencyParams) == 16);
 static_assert(sizeof(FrequencyChannelParams) == 24);
 static_assert(sizeof(MaltaScaleParams) == 36);
-static_assert(sizeof(MaltaResponseParams) == 28);
+static_assert(sizeof(MaltaResponseParams) == 32);
+static_assert(sizeof(MaltaFusedParams) == 48);
 static_assert(sizeof(DifferenceParams) == 24);
 static_assert(sizeof(FinalParams) == 20);
 static_assert(sizeof(CropParams) == 24);
@@ -1039,54 +1059,96 @@ private:
         reference[kMaltaPsychoPlane[stage_index]];
       DevicePlaneView distorted_plane =
         distorted[kMaltaPsychoPlane[stage_index]];
-      DevicePlaneView scaled = Plane(kWork, scale_extent);
-      const MaltaScaleParams scale_params{
-        static_cast<uint32_t>(scale_extent.width),
-        static_cast<uint32_t>(scale_extent.height),
-        static_cast<uint32_t>(reference_plane.row_stride),
-        static_cast<uint32_t>(distorted_plane.row_stride),
-        static_cast<uint32_t>(scaled.row_stride),
-        static_cast<uint32_t>(low_frequency),
-        static_cast<float>(pre_up * kMaltaNorms[stage_index]),
-        static_cast<float>(pre_down * kMaltaNorms[stage_index]),
-        static_cast<float>(kMaltaNorms[stage_index]),
-      };
-      encoder->setComputePipelineState(
-        metal_.butteraugli_pipelines_.malta_scale.get());
-      Bind(encoder, Handle(metal_, reference_plane),
-           reference_plane.offset_bytes, 0);
-      Bind(encoder, Handle(metal_, distorted_plane),
-           distorted_plane.offset_bytes, 1);
-      Bind(encoder, Handle(metal_, scaled), scaled.offset_bytes, 2);
-      encoder->setBytes(&scale_params, sizeof(scale_params), 3);
-      metal_.DispatchPlane(encoder, scale_extent);
-
       DevicePlaneView response = Plane(kWork + 1, scale_extent);
       const size_t channel = stage_index % 2 == 0 ? 1 : 0;
       DevicePlaneView accumulation = Plane(kAc + channel, scale_extent);
-      const MaltaResponseParams response_params{
-        static_cast<uint32_t>(scale_extent.width),
-        static_cast<uint32_t>(scale_extent.height),
-        static_cast<uint32_t>(scaled.row_stride),
-        static_cast<uint32_t>(response.row_stride),
-        static_cast<uint32_t>(accumulation.row_stride),
-        static_cast<uint32_t>(low_frequency),
-        static_cast<uint32_t>(stage_index >= 4),
-      };
-      encoder->setComputePipelineState(
-        metal_.butteraugli_pipelines_.malta_response.get());
-      Bind(encoder, Handle(metal_, scaled), scaled.offset_bytes, 0);
-      Bind(encoder, Handle(metal_, response), response.offset_bytes, 1);
-      Bind(encoder, Handle(metal_, accumulation), accumulation.offset_bytes, 2);
-      encoder->setBytes(&response_params, sizeof(response_params), 3);
-      metal_.DispatchPlane(encoder, scale_extent);
-        MaybeCapture(
+      const auto response_stage =
+        static_cast<MetalButteraugliStage>(
+          static_cast<size_t>(
+            MetalButteraugliStage::kMaltaMediumFrequencyY) + stage_index);
+      const uint32_t write_response =
+        capture_stage_ == response_stage ? 1u : 0u;
+      MTL::ComputePipelineState* fused_pipeline =
+        metal_.butteraugli_pipelines_.malta_fused.get();
+      if (fused_pipeline->maxTotalThreadsPerThreadgroup() >=
+          kMaltaTileWidth * kMaltaTileHeight) {
+        const MaltaFusedParams params{
+          static_cast<uint32_t>(scale_extent.width),
+          static_cast<uint32_t>(scale_extent.height),
+          static_cast<uint32_t>(reference_plane.row_stride),
+          static_cast<uint32_t>(distorted_plane.row_stride),
+          static_cast<uint32_t>(response.row_stride),
+          static_cast<uint32_t>(accumulation.row_stride),
+          static_cast<uint32_t>(low_frequency),
+          static_cast<uint32_t>(stage_index >= 4),
+          write_response,
+          static_cast<float>(pre_up * kMaltaNorms[stage_index]),
+          static_cast<float>(pre_down * kMaltaNorms[stage_index]),
+          static_cast<float>(kMaltaNorms[stage_index]),
+        };
+        encoder->setComputePipelineState(fused_pipeline);
+        Bind(encoder, Handle(metal_, reference_plane),
+             reference_plane.offset_bytes, 0);
+        Bind(encoder, Handle(metal_, distorted_plane),
+             distorted_plane.offset_bytes, 1);
+        Bind(encoder, Handle(metal_, response), response.offset_bytes, 2);
+        Bind(encoder, Handle(metal_, accumulation),
+             accumulation.offset_bytes, 3);
+        encoder->setBytes(&params, sizeof(params), 4);
+        constexpr size_t kThreadgroupMemoryBytes =
+          (kMaltaTileWidth + 2 * kMaltaRadius) *
+          (kMaltaTileHeight + 2 * kMaltaRadius) * sizeof(float);
+        encoder->setThreadgroupMemoryLength(kThreadgroupMemoryBytes, 0);
+        DispatchMetalThreadgroups(
           encoder,
-          static_cast<MetalButteraugliStage>(
-            static_cast<size_t>(
-              MetalButteraugliStage::kMaltaMediumFrequencyY) + stage_index),
-          AsConst(response),
-          scale_extent);
+          MTL::Size(
+            (scale_extent.width + kMaltaTileWidth - 1) / kMaltaTileWidth,
+            (scale_extent.height + kMaltaTileHeight - 1) / kMaltaTileHeight,
+            1),
+          MTL::Size(kMaltaTileWidth, kMaltaTileHeight, 1));
+      } else {
+        DevicePlaneView scaled = Plane(kWork, scale_extent);
+        const MaltaScaleParams scale_params{
+          static_cast<uint32_t>(scale_extent.width),
+          static_cast<uint32_t>(scale_extent.height),
+          static_cast<uint32_t>(reference_plane.row_stride),
+          static_cast<uint32_t>(distorted_plane.row_stride),
+          static_cast<uint32_t>(scaled.row_stride),
+          static_cast<uint32_t>(low_frequency),
+          static_cast<float>(pre_up * kMaltaNorms[stage_index]),
+          static_cast<float>(pre_down * kMaltaNorms[stage_index]),
+          static_cast<float>(kMaltaNorms[stage_index]),
+        };
+        encoder->setComputePipelineState(
+          metal_.butteraugli_pipelines_.malta_scale.get());
+        Bind(encoder, Handle(metal_, reference_plane),
+             reference_plane.offset_bytes, 0);
+        Bind(encoder, Handle(metal_, distorted_plane),
+             distorted_plane.offset_bytes, 1);
+        Bind(encoder, Handle(metal_, scaled), scaled.offset_bytes, 2);
+        encoder->setBytes(&scale_params, sizeof(scale_params), 3);
+        metal_.DispatchPlane(encoder, scale_extent);
+
+        const MaltaResponseParams response_params{
+          static_cast<uint32_t>(scale_extent.width),
+          static_cast<uint32_t>(scale_extent.height),
+          static_cast<uint32_t>(scaled.row_stride),
+          static_cast<uint32_t>(response.row_stride),
+          static_cast<uint32_t>(accumulation.row_stride),
+          static_cast<uint32_t>(low_frequency),
+          static_cast<uint32_t>(stage_index >= 4),
+          write_response,
+        };
+        encoder->setComputePipelineState(
+          metal_.butteraugli_pipelines_.malta_response.get());
+        Bind(encoder, Handle(metal_, scaled), scaled.offset_bytes, 0);
+        Bind(encoder, Handle(metal_, response), response.offset_bytes, 1);
+        Bind(encoder, Handle(metal_, accumulation),
+             accumulation.offset_bytes, 2);
+        encoder->setBytes(&response_params, sizeof(response_params), 3);
+        metal_.DispatchPlane(encoder, scale_extent);
+      }
+      MaybeCapture(encoder, response_stage, AsConst(response), scale_extent);
       }
     }
     if (profile_stage == DifferenceProfileStage::kMalta) return;
@@ -1619,7 +1681,7 @@ Status CreateButteraugliPipelines(
   ButteraugliPipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 21> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 22> bindings{{
     {"gjxl_butteraugli_copy_f32", &pipelines.copy},
     {"gjxl_butteraugli_expand_f32", &pipelines.expand},
     {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
@@ -1633,6 +1695,7 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_frequency_ultra_f32", &pipelines.frequency_ultra},
     {"gjxl_butteraugli_malta_scale_f32", &pipelines.malta_scale},
     {"gjxl_butteraugli_malta_response_f32", &pipelines.malta_response},
+    {"gjxl_butteraugli_malta_fused_f32", &pipelines.malta_fused},
     {"gjxl_butteraugli_l2_f32", &pipelines.l2},
     {"gjxl_butteraugli_mask_precompute_f32", &pipelines.mask_precompute},
     {"gjxl_butteraugli_fuzzy_erosion_f32", &pipelines.fuzzy_erosion},
