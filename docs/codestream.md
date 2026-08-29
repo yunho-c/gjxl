@@ -510,8 +510,8 @@ The following are explicitly outside the first codestream milestone:
 - adaptive DC smoothing;
 - progressive or multi-pass coding;
 - LZ77;
-- ANS entropy coding and broader size optimization beyond the bounded prefix
-  optimizer;
+- broader entropy clustering and size optimization beyond the bounded
+  prefix/ANS optimizer;
 - lossless and modular-only image coding; and
 - GPU tokenization or entropy coding.
 
@@ -523,8 +523,8 @@ silently inferred or partially signaled by the initial writer.
 The current writer prioritizes a correct, deterministic subset over exhaustive
 compression optimization. Its bounded prefix optimizer searches up to 32
 clusters and selects HybridUint configurations per cluster. Adaptive
-block-context selection is available for sufficiently large images, but the
-writer still lacks the format's ANS entropy path.
+block-context selection is available for sufficiently large images, and the
+writer can serialize either prefix or ANS entropy models.
 Ordinary Butteraugli encoding uses libjxl's target- and pixel-dependent X/B
 quantization-matrix scales; maximum-error encoding retains `2/2`.
 
@@ -534,10 +534,10 @@ libjxl tools at `05be1775629f7fdc01beb70c118043b4b0c69d2a`.
 External Butteraugli scores were measured at 255 nits. The aggregate encoded
 sizes were:
 
-| Target distance | Initial | After #1 | After #2 | After #3 | After #4 | #4 vs #3 | `cjxl -e 7` | #4 gap | `cjxl -e 9` | #4 gap |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | 152,111 B | -0.40% | 151,714 B | -0.3% | 147,386 B | -3.1% |
-| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | 92,065 B | -0.73% | 93,414 B | +1.5% | 88,578 B | -3.8% |
+| Target distance | Initial | After #1 | After #2 | After #3 | After #4 | After #5 | #5 vs #4 | `cjxl -e 7` | #5 gap | `cjxl -e 9` | #5 gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | 152,111 B | 148,137 B | -2.61% | 151,714 B | -2.4% | 147,386 B | +0.5% |
+| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | 92,065 B | 87,714 B | -4.73% | 93,414 B | -6.1% | 88,578 B | -1.0% |
 
 These are same-target rather than matched-quality results. The external scores
 were close but not identical, so the table indicates the scale of the current
@@ -696,10 +696,50 @@ replaced by corpus measurements as each step lands.
    version 4 records the candidate count, compact-candidate bytes, selected map
    index/context count, and raw-quant-threshold count.
 
-5. Add a full ANS path only after the prefix optimizer establishes the remaining
-   gap (roughly one to two weeks; plausibly another 2-4%). This is broader and
-   riskier than improving the current code, so the earlier measurements should
-   determine whether it is justified.
+5. **Complete (2026-08-29): add a native ANS entropy path with an exact prefix
+   fallback.** The writer now supports JPEG XL's 12-bit ANS tables with
+   deterministic count normalization, alias-based encoder lookup tables,
+   general and one-/two-symbol histogram serialization, reverse-order state
+   updates, and full-width HybridUint extra bits. Production code has no
+   libjxl dependency; the adapted model and state logic retains upstream BSD
+   attribution.
+
+   Each DC, AC, and eligible coefficient-order model first runs the established
+   prefix optimizer. ANS reuses that optimized context partition and per-cluster
+   HybridUint configuration, then competes on its exact serialized model and
+   payload bits. Strict local ties retain prefix coding. Because section padding,
+   TOC selectors, and interactions between independently selected models can
+   erase a local bit win, every block-map/order candidate additionally measures
+   the complete all-prefix codestream. The all-prefix form wins complete-byte
+   ties. This bounded comparison deliberately does not enumerate every mixed
+   prefix/ANS combination, but it guarantees that enabling ANS cannot make a
+   selected complete candidate larger than its former prefix form.
+
+   On the established four-image PFM corpus, all eight target/image cases used
+   ANS for AC, while DC and coefficient-order models selected prefix or ANS
+   independently. Aggregate size changed from 152,111 to 148,137 bytes at
+   distance 1 (-2.61%) and from 92,065 to 87,714 bytes at distance 2 (-4.73%).
+   The combined reduction was 8,325 bytes (-3.41%), with every individual case
+   improving. Pinned `djxl` accepted all eight outputs, and every decoded PFM
+   was byte-identical to its #4 counterpart. The checked 17x13 sample retained
+   its 259-byte codestream and SHA-256 because the exact all-prefix tie fallback
+   preserved its previous bytes.
+
+   A five-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per round. CPU serializer median changed from 53.146
+   ms (52.022-56.373) to 62.002 ms (59.801-78.186), +16.7%; complete CPU
+   workflow median changed from 954.003 to 965.412 ms, +1.20%. Metal serializer
+   median changed from 54.851 ms (52.903-59.325) to 60.152 ms
+   (59.195-65.062), +9.66%; complete Metal workflow median changed from 149.283
+   to 152.101 ms, +1.89%. The additional complete-prefix measurement roughly
+   doubled section-writing time, but remained a small fraction of either full
+   workflow. Raw benchmark schema version 5 reports the selected DC, AC, and
+   coefficient-order entropy modes.
+
+   Unit coverage pins deterministic ANS model/payload construction, exact cost
+   attribution, malformed reverse-map atomicity, and an encoder fixture that
+   selects ANS. The focused CLI, generated-sample, encoder, entropy, raw-schema,
+   and installed-decoder smoke gates all pass.
 
 6. Offer four adaptive-quantization iterations as an optional high-density mode
    (less than one day; probably below 1%). The internal workflow already permits

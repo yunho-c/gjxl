@@ -78,7 +78,7 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 4)
+        self.assertEqual(document["schema_version"], 5)
         self.assertEqual(document["validation"], "metal-only")
         self.assertEqual(document["sample_count"], 1)
         workload = document["workloads"][0]
@@ -95,6 +95,12 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(set(sample["entropy_clusters"]), {"dc", "ac"})
         self.assertGreater(sample["entropy_clusters"]["dc"], 0)
         self.assertGreater(sample["entropy_clusters"]["ac"], 0)
+        self.assertEqual(
+            set(sample["entropy_coding"]),
+            {"dc", "ac", "coefficient_order"},
+        )
+        for mode in sample["entropy_coding"].values():
+            self.assertIn(mode, {"prefix", "ans", "none"})
         self.assertEqual(
             set(sample["coefficient_order"]),
             {"natural_bytes", "custom_bytes", "selected_mask"},

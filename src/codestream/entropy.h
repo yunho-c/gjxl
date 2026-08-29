@@ -18,6 +18,8 @@ namespace gjxl {
 
 inline constexpr size_t kPrefixAlphabetSize = 128;
 inline constexpr size_t kMaximumPrefixClusters = 32;
+inline constexpr size_t kAnsTableSize = 4096;
+inline constexpr size_t kMaximumAnsAlphabetSize = 256;
 
 struct EntropyToken {
   uint32_t context = 0;
@@ -73,11 +75,27 @@ struct PrefixCode {
   friend bool operator==(const PrefixCode&, const PrefixCode&) = default;
 };
 
+enum class EntropyCodingMode : uint8_t {
+  kPrefix,
+  kAns,
+};
+
+/// One normalized 12-bit ANS population and its encoder lookup tables.
+struct AnsHistogram {
+  std::vector<uint16_t> frequencies;
+  std::vector<std::vector<uint16_t>> reverse_maps;
+
+  friend bool operator==(const AnsHistogram&, const AnsHistogram&) = default;
+};
+
 struct EntropyCode {
+  EntropyCodingMode mode = EntropyCodingMode::kPrefix;
   uint32_t context_count = 0;
   std::vector<uint8_t> context_map;
   std::vector<HybridUintConfig> uint_configs;
   std::vector<PrefixCode> prefix_codes;
+  uint8_t ans_log_alpha_size = 0;
+  std::vector<AnsHistogram> ans_histograms;
 
   friend bool operator==(const EntropyCode&, const EntropyCode&) = default;
 };
@@ -105,6 +123,15 @@ struct EntropyCodeCost {
 [[nodiscard]] Status OptimizeEntropyCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr);
+
+/// Builds an ANS model using an optimized prefix code's context partition and
+/// HybridUint configurations. The input and outputs remain unchanged on
+/// failure.
+[[nodiscard]] Status OptimizeAnsEntropyCode(
+  std::span<const std::vector<EntropyToken>> section_tokens,
+  const EntropyCode& prefix_partition,
   EntropyCode* code,
   EntropyCodeCost* cost = nullptr);
 

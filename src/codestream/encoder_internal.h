@@ -24,6 +24,9 @@ struct VarDctCodestreamProfile {
   uint64_t entropy_token_bits = 0;
   size_t dc_entropy_clusters = 0;
   size_t ac_entropy_clusters = 0;
+  bool dc_entropy_is_ans = false;
+  bool ac_entropy_is_ans = false;
+  bool coefficient_order_entropy_is_ans = false;
   /// Exact complete-codestream sizes considered by one serializer call.
   size_t natural_candidate_bytes = 0;
   size_t custom_order_candidate_bytes = 0;

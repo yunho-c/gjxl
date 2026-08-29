@@ -282,6 +282,8 @@ bool CheckEncodedFrame(
       profile.entropy_model_bits == 0 || profile.entropy_token_bits == 0 ||
       profile.dc_entropy_clusters == 0 ||
       profile.ac_entropy_clusters == 0 ||
+      profile.dc_entropy_is_ans || profile.ac_entropy_is_ans ||
+      profile.coefficient_order_entropy_is_ans ||
       profile.natural_candidate_bytes == 0 ||
       profile.block_context_candidate_count != 1 ||
       profile.compact_block_context_candidate_bytes != first.size() ||
@@ -323,7 +325,8 @@ bool CheckAdaptiveBlockContextSelection() {
         profile.block_context_candidate_count ||
       profile.selected_block_context_count == 0 ||
       profile.selected_block_context_count > 16 ||
-      profile.selected_block_context_qf_threshold_count != 0) {
+      profile.selected_block_context_qf_threshold_count != 0 ||
+      !profile.ac_entropy_is_ans) {
     std::cerr << "Adaptive block-context selection failed: "
               << status.message() << ", bytes=" << output.size()
               << ", compact="

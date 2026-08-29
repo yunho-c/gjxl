@@ -265,6 +265,7 @@ add_library(
   STATIC
 
   src/codestream/ac_group.cpp
+  src/codestream/ans.cpp
   src/codestream/batch_workflow.cpp
   src/codestream/bit_writer.cpp
   src/codestream/block_context_map.cpp
