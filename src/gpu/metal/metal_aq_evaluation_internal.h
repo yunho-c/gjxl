@@ -373,6 +373,8 @@ private:
     kForwardBatch,
     kFinalColorCorrelation,
     kCoefficientBatch,
+    kInverseBatch,
+    kScatterBatch,
     kBatch,
   };
 
@@ -454,6 +456,15 @@ private:
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       size_t batch_index) const;
   void EncodeReconstructionCoefficientBatch(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      size_t batch_index) const;
+  void EncodeAdjustedQuantizationBatch(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      size_t batch_index) const;
+  void EncodeReconstructionInverseBatch(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      size_t batch_index) const;
+  void EncodeReconstructionScatterBatch(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       size_t batch_index) const;
   void EncodeForwardCoefficientBatch(

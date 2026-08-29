@@ -243,6 +243,14 @@ void MetalPreparedAqEvaluation::EncodeReconstructionProfileStage(
     EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);
     return;
   }
+  if (stage == ReconstructionProfileStage::kInverseBatch) {
+    EncodeReconstructionInverseBatch(backend, encoder, batch_index);
+    return;
+  }
+  if (stage == ReconstructionProfileStage::kScatterBatch) {
+    EncodeReconstructionScatterBatch(backend, encoder, batch_index);
+    return;
+  }
   if (stage == ReconstructionProfileStage::kBatch) {
     EncodeReconstructionBatch(backend, encoder, batch_index);
   }
@@ -258,6 +266,7 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
   const AqReconstructionParams& params = reconstruction_params_[batch_index];
 
   if (!exact_coefficient_reconstruction_) {
+    EncodeAdjustedQuantizationBatch(backend, encoder, batch_index);
     encoder->setComputePipelineState(
         backend.aq_pipelines_.encode_reconstruction_coefficients.get());
     BindPlane(encoder, anchors_, 0);
@@ -279,6 +288,7 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
                 ? resident_quantizer_params_
                 : raw_quant_,
               14);
+    BindPlane(encoder, gathered_pixels_, 15);
     DispatchMetalThreadgroups(
         encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
@@ -286,6 +296,32 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
                       kAqThreadCount, batch.coefficient_count),
                   1, 1));
   }
+}
+
+void MetalPreparedAqEvaluation::EncodeAdjustedQuantizationBatch(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    size_t batch_index) const {
+
+  if (batch_index >= batches_.size()) return;
+  const AqStrategyBatch& batch = batches_[batch_index];
+  if (batch.anchor_count == 0) return;
+  const AqReconstructionParams& params = reconstruction_params_[batch_index];
+  if (params.adjust_ac_quant == 0u) return;
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.select_adjusted_quantization.get());
+  BindPlane(encoder, anchors_, 0);
+  BindPlane(encoder, quant_tables_, 1);
+  BindPlane(encoder, raw_quant_, 2);
+  BindPlane(encoder, forward_coefficients_, 3);
+  BindPlane(encoder, gathered_pixels_, 4);
+  BindPlane(encoder, reconstruction_error_, 5);
+  encoder->setBytes(&params, sizeof(params), 6);
+  BindPlane(encoder,
+            resident_quantization_active_
+              ? resident_quantizer_params_
+              : raw_quant_,
+            7);
+  DispatchThreads1d(encoder, batch.anchor_count);
 }
 
 void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
@@ -296,9 +332,17 @@ void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
   const AqStrategyBatch& batch = batches_[batch_index];
   if (batch.anchor_count == 0) return;
   EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);
-  const AqReconstructionParams& params = reconstruction_params_[batch_index];
-  const size_t batch_value_count =
-      3 * batch.anchor_count * batch.coefficient_count;
+  EncodeReconstructionInverseBatch(backend, encoder, batch_index);
+  EncodeReconstructionScatterBatch(backend, encoder, batch_index);
+}
+
+void MetalPreparedAqEvaluation::EncodeReconstructionInverseBatch(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    size_t batch_index) const {
+
+  if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
+  const AqStrategyBatch& batch = batches_[batch_index];
+  if (batch.anchor_count == 0) return;
   const size_t coefficient_offset_bytes =
       batch.coefficient_offset * sizeof(float);
 
@@ -312,6 +356,18 @@ void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
       *inverse_output,
       gathered_pixels_.offset_bytes + coefficient_offset_bytes,
       3 * batch.anchor_count);
+}
+
+void MetalPreparedAqEvaluation::EncodeReconstructionScatterBatch(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    size_t batch_index) const {
+
+  if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
+  const AqStrategyBatch& batch = batches_[batch_index];
+  if (batch.anchor_count == 0) return;
+  const AqReconstructionParams& params = reconstruction_params_[batch_index];
+  const size_t batch_value_count =
+      3 * batch.anchor_count * batch.coefficient_count;
 
   encoder->setComputePipelineState(
       backend.aq_pipelines_.scatter_reconstructed_pixels.get());
@@ -531,6 +587,7 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
         self.forward_coefficients_.offset_bytes + coefficient_offset_bytes,
         3 * batch.anchor_count);
 
+    self.EncodeAdjustedQuantizationBatch(backend, encoder, batch_index);
     encoder->setComputePipelineState(
         backend.aq_pipelines_.encode_frame_coefficients.get());
     BindPlane(encoder, self.anchors_, 0);
@@ -543,6 +600,7 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
     BindPlane(encoder, self.quantized_dc_, 7);
     BindPlane(encoder, self.reconstruction_error_, 8);
     encoder->setBytes(&params, sizeof(params), 9);
+    BindPlane(encoder, self.gathered_pixels_, 10);
     DispatchMetalThreadgroups(
         encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),

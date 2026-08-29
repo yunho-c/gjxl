@@ -251,6 +251,50 @@ static_assert(sizeof(AqOpsinToLinearParams) == 20);
   }
 }
 
+[[nodiscard]] const char* AqReconstructionCoefficientProfileStageId(
+    AcStrategyType strategy) noexcept {
+  switch (strategy) {
+    case AcStrategyType::kDct8:
+      return "aq.reconstruction.coefficients.dct8";
+    case AcStrategyType::kDct16x8:
+      return "aq.reconstruction.coefficients.dct16x8";
+    case AcStrategyType::kDct8x16:
+      return "aq.reconstruction.coefficients.dct8x16";
+    case AcStrategyType::kDct16x16:
+      return "aq.reconstruction.coefficients.dct16";
+    case AcStrategyType::kDct32x16:
+      return "aq.reconstruction.coefficients.dct32x16";
+    case AcStrategyType::kDct16x32:
+      return "aq.reconstruction.coefficients.dct16x32";
+    case AcStrategyType::kDct32x32:
+      return "aq.reconstruction.coefficients.dct32";
+    default:
+      return "aq.reconstruction.coefficients.unsupported";
+  }
+}
+
+[[nodiscard]] const char* AqReconstructionScatterProfileStageId(
+    AcStrategyType strategy) noexcept {
+  switch (strategy) {
+    case AcStrategyType::kDct8:
+      return "aq.reconstruction.scatter.dct8";
+    case AcStrategyType::kDct16x8:
+      return "aq.reconstruction.scatter.dct16x8";
+    case AcStrategyType::kDct8x16:
+      return "aq.reconstruction.scatter.dct8x16";
+    case AcStrategyType::kDct16x16:
+      return "aq.reconstruction.scatter.dct16";
+    case AcStrategyType::kDct32x16:
+      return "aq.reconstruction.scatter.dct32x16";
+    case AcStrategyType::kDct16x32:
+      return "aq.reconstruction.scatter.dct16x32";
+    case AcStrategyType::kDct32x32:
+      return "aq.reconstruction.scatter.dct32";
+    default:
+      return "aq.reconstruction.scatter.unsupported";
+  }
+}
+
 [[nodiscard]] const char* AqForwardCoefficientProfileStageId(
     AcStrategyType strategy) noexcept {
   switch (strategy) {
@@ -2104,7 +2148,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       !exact_coefficient_reconstruction_ &&
       resident_color_correlation_pending_;
     const size_t stages_per_iteration =
-      12 + 2 * kSupportedAqStrategies.size() +
+      12 + 4 * kSupportedAqStrategies.size() +
       static_cast<size_t>(butteraugli_multiscale) * 4 +
       static_cast<size_t>(options_.profile.loop_filter.gaborish) +
       epf_iterations;
@@ -2197,8 +2241,18 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
              ++batch_index) {
           if (batches_[batch_index].anchor_count == 0) continue;
           append_reconstruction_stage(
+            AqReconstructionCoefficientProfileStageId(
+              batches_[batch_index].strategy),
+            ReconstructionProfileStage::kCoefficientBatch, iteration,
+            batch_index);
+          append_reconstruction_stage(
             AqReconstructionProfileStageId(batches_[batch_index].strategy),
-            ReconstructionProfileStage::kBatch, iteration, batch_index);
+            ReconstructionProfileStage::kInverseBatch, iteration, batch_index);
+          append_reconstruction_stage(
+            AqReconstructionScatterProfileStageId(
+              batches_[batch_index].strategy),
+            ReconstructionProfileStage::kScatterBatch, iteration,
+            batch_index);
         }
         if (iteration == 0) {
           append_stage(
@@ -4196,7 +4250,7 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      29>
+      30>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
@@ -4240,6 +4294,8 @@ Status CreateAqPipelines(
            &pipelines.resident_policy_update},
           {"gjxl_aq_gather_transform_pixels",
            &pipelines.gather_transform_pixels},
+          {"gjxl_aq_select_adjusted_quantization",
+           &pipelines.select_adjusted_quantization},
           {"gjxl_aq_encode_reconstruction_coefficients",
            &pipelines.encode_reconstruction_coefficients},
           {"gjxl_aq_encode_frame_coefficients",

@@ -161,12 +161,13 @@ or host CfL upload on that path.
 The `frontend.ac_strategy` group contains one substage for each candidate
 transform strategy. The `aq.reconstruction` group contains `reset`,
 `quantizer`, optional per-strategy `forward.*` and `final_cfl` preparation,
-and one substage for each active reconstruction strategy. Forward preparation
-is reported only when cached coefficients are unavailable; all of its
-gather/forward substages remain ahead of every strategy reconstruction. Each
-strategy substage retains the current coefficient/inverse/scatter sequence and
-its production ordering, so stage mode adds only broad batch boundaries rather
-than emulating unavailable per-dispatch timestamps.
+and `coefficients.*`, inverse-transform `dct*`, and `scatter.*` substages for
+each active reconstruction strategy. Forward preparation is reported only when
+cached coefficients are unavailable; all of its gather/forward substages remain
+ahead of every strategy reconstruction. The three reconstruction substages
+retain production ordering while exposing which part of the former combined
+batch is material. These extra stage-mode boundaries remain attribution
+instrumentation rather than emulated per-dispatch timestamps.
 `gpu-stage-summary.json` reports both substage totals and
 `stage_groups`/`group_iterations`; schema-1 and schema-2 input remains readable
 by treating each legacy stage as its own group.
@@ -1212,6 +1213,59 @@ Gaussian weight normalization into dispatch constants likewise failed to
 provide a stable matched-build win and was removed. These results keep the
 remaining optimization order tied to measured 1080p and 4K public encode time
 rather than memory-traffic estimates alone.
+
+#### Resident quant-adjustment scheduling checkpoint (2026-08-29)
+
+Fresh split-stage profiling at `63f46f3` showed that the combined reconstruction
+labels had obscured the real cost: the inverse 32x32 and rectangular DCTs were
+only a small part of the batch, while `AdjustQuantBlockAC` ran a serial
+coefficient scan in thread zero of every 64-256-thread coefficient group. The
+retained path moves that exact scan into a separate kernel with one thread per
+transform anchor. Thousands of independent anchors are therefore packed into
+ordinary threadgroups instead of reserving a complete threadgroup while all
+but one thread waits. The selected raw quant and four Y thresholds are staged
+in the already-live gathered-pixel buffer, then consumed by the unchanged
+parallel coefficient kernel. No new persistent allocation or host handoff is
+introduced.
+
+Seven independent Apple M4 Pro process pairs alternated the detached
+`63f46f3` baseline and the optimized build. Every process used one warmup and
+one measured `metal-public-workflow` encode with fully-resident SIMD AQ at
+target `1.2`. This boundary begins with the generated linear-RGB image and ends
+with the in-memory codestream; input generation and process/backend creation
+are excluded. The quantization-pipeline result improved in every pair:
+
+| Workload | Baseline pipeline median (range) | Optimized pipeline median (range) | Median reduction | Per-pair reduction |
+| --- | ---: | ---: | ---: | ---: |
+| Padded 1080p | `99.915 ms` (`99.132-104.955`) | `89.395 ms` (`88.837-91.743`) | `10.520 ms` / `10.53%` | `8.18-13.95%` |
+| Padded 4K | `401.058 ms` (`393.493-417.474`) | `357.289 ms` (`345.014-395.121`) | `43.769 ms` / `10.91%` | `5.35-13.28%` |
+
+Complete public-encode medians moved from `463.488` to `457.110 ms` at 1080p
+and from `1406.304` to `1357.618 ms` at 4K. Codestream serialization dominated
+those totals and remained noisy: 1080p pairwise totals were mixed, while six of
+seven 4K pairs improved. The retained performance claim is therefore the
+complete quantization-pipeline boundary, with the public totals reported only
+as end-to-end context. Both variants produced identical `420268`-byte 1080p
+and `1640942`-byte 4K output sizes in every measured process. A separate
+seeded-plasma `3839x2159` parity encode compared the actual files: baseline and
+optimized fully-resident outputs were byte-identical at `1161067` bytes with
+SHA-256 `3df202cd4bcc3eba3f759378cfe6aba176aae85715b831569e78ae9c22ae79a9`;
+`djxl` 0.12 independently decoded the optimized file to `3839x2159` pixels.
+
+With the deliberately finer stage boundaries, median sampled 4K
+`aq.reconstruction` time fell from `72.658` to `18.468 ms`; the three large
+coefficient substages fell from `22.307/15.837/11.927 ms` to
+`2.324/1.497/1.176 ms`. These timestamp-separated values explain attribution
+but are not substituted for the process timings above. A rejected prototype
+instead parallelized each anchor with 12 KiB of threadgroup scratch. It kept
+exact output but regressed all seven 4K pairs from a `396.125` to `412.294 ms`
+pipeline median, so that implementation was removed.
+
+The complete Release suite passes `58/59`; the sole failure is the inherited
+pinned CPU `quantization_pipeline` score mismatch of
+`4.4524669647216797e-05` at index 1. Metal reconstruction, AQ evaluation,
+postprocess, and complete GPU-pipeline tests pass, including exact frame and
+codestream checks and unchanged numeric tolerances.
 
 ### P5. Parallelize the codestream tail
 
