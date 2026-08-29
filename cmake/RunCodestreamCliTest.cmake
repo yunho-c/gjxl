@@ -77,6 +77,22 @@ endif()
 
 execute_process(
   COMMAND
+    "${GJXL_ENCODER}" --maximum-error 0.1 0.1 0.1 --high-density
+    "${GJXL_SAMPLE}" "${sentinel}"
+  RESULT_VARIABLE invalid_high_density_result
+  OUTPUT_QUIET
+  ERROR_QUIET
+)
+if(invalid_high_density_result EQUAL 0)
+  message(FATAL_ERROR "CLI accepted high density with maximum-error control")
+endif()
+file(READ "${sentinel}" sentinel_contents)
+if(NOT sentinel_contents STREQUAL "unchanged")
+  message(FATAL_ERROR "Invalid high-density request changed an existing output")
+endif()
+
+execute_process(
+  COMMAND
     "${GJXL_ENCODER}" --distance 1.0 --target-bytes 280
     "${GJXL_SAMPLE}" "${sentinel}"
   RESULT_VARIABLE conflicting_rate_control_result
@@ -147,6 +163,8 @@ set(throughput "${GJXL_TEST_DIR}/throughput.jxl")
 set(throughput_repeat "${GJXL_TEST_DIR}/throughput-repeat.jxl")
 set(maximum "${GJXL_TEST_DIR}/maximum-throughput.jxl")
 set(maximum_repeat "${GJXL_TEST_DIR}/maximum-throughput-repeat.jxl")
+set(high_density "${GJXL_TEST_DIR}/high-density.jxl")
+set(high_density_repeat "${GJXL_TEST_DIR}/high-density-repeat.jxl")
 execute_process(
   COMMAND
     "${GJXL_ENCODER}" --distance 1.0 --backend cpu
@@ -226,6 +244,29 @@ if(NOT maximum_repeat_result EQUAL 0)
   message(FATAL_ERROR
     "Repeated maximum-throughput CLI encode failed: ${maximum_repeat_error}")
 endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend cpu --high-density
+    "${GJXL_SAMPLE}" "${high_density}"
+  RESULT_VARIABLE high_density_result
+  OUTPUT_VARIABLE high_density_output
+  ERROR_VARIABLE high_density_error
+)
+if(NOT high_density_result EQUAL 0)
+  message(FATAL_ERROR "High-density CLI encode failed: ${high_density_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend cpu --high-density
+    "${GJXL_SAMPLE}" "${high_density_repeat}"
+  RESULT_VARIABLE high_density_repeat_result
+  OUTPUT_QUIET
+  ERROR_VARIABLE high_density_repeat_error
+)
+if(NOT high_density_repeat_result EQUAL 0)
+  message(FATAL_ERROR
+    "Repeated high-density CLI encode failed: ${high_density_repeat_error}")
+endif()
 
 file(SHA256 "${first}" first_hash)
 file(SHA256 "${second}" second_hash)
@@ -234,6 +275,8 @@ file(SHA256 "${throughput}" throughput_hash)
 file(SHA256 "${throughput_repeat}" throughput_repeat_hash)
 file(SHA256 "${maximum}" maximum_hash)
 file(SHA256 "${maximum_repeat}" maximum_repeat_hash)
+file(SHA256 "${high_density}" high_density_hash)
+file(SHA256 "${high_density_repeat}" high_density_repeat_hash)
 if(NOT first_hash STREQUAL second_hash)
   message(FATAL_ERROR "CLI output is not deterministic")
 endif()
@@ -245,6 +288,9 @@ if(NOT throughput_hash STREQUAL throughput_repeat_hash)
 endif()
 if(NOT maximum_hash STREQUAL maximum_repeat_hash)
   message(FATAL_ERROR "Maximum-throughput CLI output is not deterministic")
+endif()
+if(NOT high_density_hash STREQUAL high_density_repeat_hash)
+  message(FATAL_ERROR "High-density CLI output is not deterministic")
 endif()
 set(expected_hash
   82f7936f5fc932dd0b484705e9f01d1e18e3e11aa8a7545b8cc082acf136af17)
@@ -276,6 +322,10 @@ string(FIND "${maximum_output}" "Final perceptual score:" maximum_score_found)
 if(NOT maximum_score_found EQUAL -1)
   message(FATAL_ERROR
     "Maximum-throughput CLI report claimed a perceptual score")
+endif()
+string(FIND "${high_density_output}" "with high-density AQ" high_density_found)
+if(high_density_found EQUAL -1)
+  message(FATAL_ERROR "High-density CLI report did not identify its policy")
 endif()
 
 set(target_bytes_first "${GJXL_TEST_DIR}/target-bytes-first.jxl")

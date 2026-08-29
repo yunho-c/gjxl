@@ -379,7 +379,9 @@ Metal, or missing capabilities use CPU before pipeline execution. Explicit
 `kCpu` and `kMetal` overrides are available. Forced Metal bypasses the
 automatic size, target, and device gates but never falls back; the broader
 quality range is an explicit unqualified override. Operational errors after
-GPU work starts are returned atomically instead of retrying on CPU.
+GPU work starts are returned atomically instead of retrying on CPU. The
+default density policy performs two AQ updates; the explicit high-density
+policy performs four on CPU, exact-coefficient Metal, or fully-resident Metal.
 
 Forced Metal additionally accepts `GpuAdaptiveQuantizationMode::kFullyResident`,
 `kThroughput`, and `kMaximumThroughput` as experimental first-class options.
@@ -403,6 +405,9 @@ The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and one
 of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus
 `--backend auto|cpu|metal` and
 `--metal-aq exact-coefficients|fully-resident|throughput|maximum-throughput`.
+`--high-density` selects four AQ updates for Butteraugli-target and target-size
+control. It is rejected with maximum-error, throughput, and maximum-throughput
+policies rather than being ignored or silently overridden.
 Size searches accept
 `--size-tolerance`, `--max-attempts`, and
 `--size-selection under-budget|closest`. All three experimental modes require
@@ -453,6 +458,9 @@ just encode input.png output.jxl 1.0
 # Experimental resident path:
 build/release/gjxl_encode --distance 1.0 --backend metal \
   --metal-aq fully-resident testdata/codestream_sample.pfm output.jxl
+# Four-update density search on the exact-coefficient path:
+build/release/gjxl_encode --distance 1.0 --high-density \
+  testdata/codestream_sample.pfm output.jxl
 # Or the explicitly bounded one-update policy:
 build/release/gjxl_encode --distance 1.0 --backend metal \
   --metal-aq throughput testdata/codestream_sample.pfm output.jxl
@@ -741,11 +749,35 @@ replaced by corpus measurements as each step lands.
    selects ANS. The focused CLI, generated-sample, encoder, entropy, raw-schema,
    and installed-decoder smoke gates all pass.
 
-6. Offer four adaptive-quantization iterations as an optional high-density mode
-   (less than one day; probably below 1%). The internal workflow already permits
-   up to four iterations, while the public workflow currently fixes two. This
-   should remain an explicit slower mode because the encode-time increase is
-   likely much larger than the size improvement.
+6. **Complete (2026-08-29): offer four adaptive-quantization updates as an
+   optional high-density mode.** `VarDctDensityMode::kHighDensity` and the CLI's
+   `--high-density` opt into four updates; the default remains two and retains
+   its checked codestream bytes. The policy is supported by CPU,
+   exact-coefficient Metal, fully-resident Metal, and target-size searches.
+   Maximum-error has its own fixed hard-bound search, while throughput and
+   maximum-throughput intentionally perform less work, so those combinations
+   are rejected atomically.
+
+   Extra updates improve quality at the same requested target rather than
+   directly minimizing bytes. On the four-image PFM corpus, same-target size
+   changed from 148,137 to 148,489 bytes at distance 1 (+0.24%) and from 87,714
+   to 87,991 bytes at distance 2 (+0.32%); every changed case had a lower
+   external Butteraugli score. A bounded six-step per-image target search then
+   matched the #5 external scores within 0.000954 at distance 1 and 0.000631 at
+   distance 2. At those directional matched-quality points, aggregate size was
+   147,688 bytes (-0.30%) and 87,148 bytes (-0.65%), respectively. Two of the
+   eight cases were already unchanged after four updates. Pinned `djxl`
+   accepted every same-target output, and the conformance target now includes
+   the checked high-density public workflow.
+
+   A five-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per mode and round. CPU quantization-pipeline median
+   changed from 760.846 to 1,144.865 ms (+50.5%), and complete CPU workflow
+   median changed from 960.907 to 1,345.529 ms (+40.0%). Metal quantization
+   changed from 63.971 to 87.426 ms (+36.7%), and complete Metal workflow from
+   157.274 to 179.700 ms (+14.3%). The sub-1% directional density gain therefore
+   comes with a deliberately substantial runtime cost, which is why the mode is
+   explicit. Raw benchmark schema version 6 records `density=default|high`.
 
 LZ77, adaptive DC smoothing, additional transform decisions, patches/dots/
 splines, chroma subsampling, and GPU entropy coding are not first-line size

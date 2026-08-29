@@ -78,8 +78,9 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 5)
+        self.assertEqual(document["schema_version"], 6)
         self.assertEqual(document["validation"], "metal-only")
+        self.assertEqual(document["density"], "default")
         self.assertEqual(document["sample_count"], 1)
         workload = document["workloads"][0]
         self.assertEqual(workload["codestream_comparison"], "not-compared")
@@ -132,6 +133,23 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
             self.assertIsInstance(value, int)
             self.assertGreaterEqual(value, 0)
         self.assertFalse(list(self.directory.glob("samples.json.tmp-*")))
+
+    def test_high_density_is_explicit_in_raw_samples(self) -> None:
+        destination = self.directory / "high-density.json"
+        result = self.run_benchmark(
+            "--density",
+            "high",
+            "--validation",
+            "metal-only",
+            "--raw-samples",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["schema_version"], 6)
+        self.assertEqual(document["density"], "high")
+        self.assertIn("density=high", result.stdout)
 
     def test_failed_external_metallib_preserves_existing_output(self) -> None:
         destination = self.directory / "samples.json"

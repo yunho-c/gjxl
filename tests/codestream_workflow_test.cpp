@@ -323,6 +323,59 @@ bool CheckDeterministicWorkflow() {
   return true;
 }
 
+bool CheckHighDensityMode() {
+  ImageStorage image;
+  FillImage(&image);
+  const gjxl::VarDctEncodingOptions options{
+    .butteraugli_target = 1.0f,
+    .density_mode = gjxl::VarDctDensityMode::kHighDensity,
+    .backend = gjxl::VarDctBackendPreference::kCpu,
+  };
+  std::vector<uint8_t> first;
+  std::vector<uint8_t> second;
+  gjxl::VarDctEncodingSummary first_summary;
+  gjxl::VarDctEncodingSummary second_summary;
+  gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), options, &first, &first_summary);
+  if (status.ok()) {
+    status = gjxl::EncodeLinearRgbVarDctCodestream(
+      image.View(), options, &second, &second_summary);
+  }
+  if (!status.ok() || first.empty() || first != second ||
+      first_summary != second_summary ||
+      first_summary.encoded_bytes != first.size() ||
+      first_summary.density_mode !=
+        gjxl::VarDctDensityMode::kHighDensity ||
+      first_summary.score_history.size() != 5 ||
+      first_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kCpu) {
+    std::cerr << "High-density workflow failed: " << status.message()
+              << " history=" << first_summary.score_history.size() << '\n';
+    return false;
+  }
+
+  gjxl::VarDctEncodingOptions target_options = options;
+  target_options.rate_control_mode =
+    gjxl::VarDctRateControlMode::kTargetBytes;
+  target_options.target_bytes = first.size();
+  target_options.target_size_tolerance = 1.0;
+  target_options.target_size_maximum_attempts = 1;
+  std::vector<uint8_t> target_bytes;
+  gjxl::VarDctEncodingSummary target_summary;
+  status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), target_options, &target_bytes, &target_summary);
+  if (!status.ok() || target_bytes.empty() ||
+      target_summary.density_mode !=
+        gjxl::VarDctDensityMode::kHighDensity ||
+      target_summary.encode_attempt_count != 1 ||
+      target_summary.score_history.size() != 5) {
+    std::cerr << "High-density target-size workflow failed: "
+              << status.message() << '\n';
+    return false;
+  }
+  return true;
+}
+
 bool CheckInvalidRequestsAreAtomic() {
   ImageStorage image;
   FillImage(&image);
@@ -447,6 +500,29 @@ bool CheckInvalidRequestsAreAtomic() {
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = static_cast<gjxl::VarDctBackendPreference>(99)}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .density_mode = static_cast<gjxl::VarDctDensityMode>(99)}) ||
+      !rejected_atomically(
+          image.View(),
+          {.density_mode = gjxl::VarDctDensityMode::kHighDensity,
+           .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError,
+           .maximum_error = {0.1f, 0.1f, 0.1f}}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .density_mode = gjxl::VarDctDensityMode::kHighDensity,
+           .backend = gjxl::VarDctBackendPreference::kMetal,
+           .metal_aq_mode =
+               gjxl::GpuAdaptiveQuantizationMode::kThroughput}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .density_mode = gjxl::VarDctDensityMode::kHighDensity,
+           .backend = gjxl::VarDctBackendPreference::kMetal,
+           .metal_aq_mode =
+               gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
@@ -841,6 +917,7 @@ int main() {
   if (!CheckQuantizationMatrixScaleStats() ||
       !CheckQuantizationMatrixScaleSelection() ||
       !CheckDeterministicWorkflow() ||
+      !CheckHighDensityMode() ||
       !CheckInvalidRequestsAreAtomic() ||
       !CheckMaximumErrorControl() ||
       !CheckTargetSizeControl() ||

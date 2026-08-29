@@ -132,6 +132,8 @@ struct CommandLineOptions {
   ValidationMode validation = ValidationMode::kCpuMetal;
   gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
       gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+  gjxl::VarDctDensityMode density_mode =
+      gjxl::VarDctDensityMode::kDefault;
   float butteraugli_target = kDefaultButteraugliTarget;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
@@ -556,6 +558,7 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--implementation scalar|simd|factored] "
                    "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                    "maximum-throughput] "
+                   "[--density default|high] "
                    "[--validation cpu-metal|metal-only] "
                    "[--metallib PATH] [--raw-samples PATH] "
                    "[--gpu-profile stage|dispatch] "
@@ -591,6 +594,15 @@ ParseGpuProfilingMode(std::string_view text) {
       options.implementation = value;
     } else if (argument == "--gpu-aq") {
       options.gpu_aq_mode = ParseGpuAqMode(value);
+    } else if (argument == "--density") {
+      if (value == "default") {
+        options.density_mode = gjxl::VarDctDensityMode::kDefault;
+      } else if (value == "high") {
+        options.density_mode = gjxl::VarDctDensityMode::kHighDensity;
+      } else {
+        throw std::runtime_error(
+          "Unknown density mode: " + std::string(value));
+      }
     } else if (argument == "--distance") {
       options.butteraugli_target = ParsePositiveFloat(value);
     } else if (argument == "--warmups") {
@@ -608,6 +620,20 @@ ParseGpuProfilingMode(std::string_view text) {
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
     throw std::runtime_error(
       "Maximum-throughput mode requires a public-workflow scope");
+  }
+  if (options.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
+      (options.scope != BenchmarkScope::kPublicWorkflow &&
+       options.scope != BenchmarkScope::kMetalPublicWorkflow)) {
+    throw std::runtime_error(
+      "High density requires a public-workflow scope");
+  }
+  if (options.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
+      (options.gpu_aq_mode ==
+         gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
+       options.gpu_aq_mode ==
+         gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput)) {
+    throw std::runtime_error(
+      "High density is incompatible with throughput AQ");
   }
   if (options.validation == ValidationMode::kMetalOnly &&
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
@@ -639,6 +665,11 @@ ParseGpuProfilingMode(std::string_view text) {
   if (gpu_profiling && !options.raw_samples_path.empty()) {
     throw std::runtime_error(
       "GPU profiling output is separate from raw workflow samples");
+  }
+  if (gpu_profiling &&
+      options.density_mode == gjxl::VarDctDensityMode::kHighDensity) {
+    throw std::runtime_error(
+      "High density is unavailable for GPU dispatch profiling");
   }
   return options;
 }
@@ -967,7 +998,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 5,\n"
+           << "  \"schema_version\": 6,\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
            << "  \"validation\": \""
@@ -975,6 +1006,11 @@ void WriteRawWorkflowSamples(
            << "  \"implementation\": \""
            << JsonEscape(options.implementation) << "\",\n"
            << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
+           << "\",\n"
+           << "  \"density\": \""
+           << (options.density_mode == gjxl::VarDctDensityMode::kHighDensity
+                 ? "high"
+                 : "default")
            << "\",\n"
            << "  \"distance\": " << std::setprecision(9)
            << options.butteraugli_target << ",\n"
@@ -1393,6 +1429,7 @@ void RunPublicWorkflowOnlyWorkload(
     const WorkloadSpec& spec, size_t warmups, size_t samples,
     float butteraugli_target,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
+    gjxl::VarDctDensityMode density_mode,
     std::string_view input_path, bool metal_only, ValidationMode validation,
     gjxl::GpuBackend& gpu,
     std::vector<RawWorkflowWorkload>* raw_results, double* global_sink) {
@@ -1417,6 +1454,7 @@ void RunPublicWorkflowOnlyWorkload(
         EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
             original.ConstView(),
             {.butteraugli_target = butteraugli_target,
+             .density_mode = density_mode,
              .backend = backend,
              .metal_aq_mode = mode},
             backend == gjxl::VarDctBackendPreference::kMetal ? &gpu : nullptr,
@@ -1599,6 +1637,10 @@ void RunPublicWorkflowOnlyWorkload(
             << original.extent.width << 'x' << original.extent.height
             << " distance=" << butteraugli_target
             << " gpu_aq=" << GpuAqModeName(gpu_aq_mode)
+            << " density="
+            << (density_mode == gjxl::VarDctDensityMode::kHighDensity
+                  ? "high"
+                  : "default")
             << " scope="
             << (metal_only ? "metal-public-workflow" : "public-workflow")
             << " codestream="
@@ -2665,6 +2707,11 @@ int main(int argc, char** argv) {
               << " implementation=" << options.implementation
               << " scope=" << BenchmarkScopeName(options.scope)
               << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
+              << " density="
+              << (options.density_mode ==
+                        gjxl::VarDctDensityMode::kHighDensity
+                    ? "high"
+                    : "default")
               << " distance=" << options.butteraugli_target
               << " warmups=" << options.warmups
               << " samples=" << options.samples;
@@ -2694,6 +2741,7 @@ int main(int argc, char** argv) {
           RunPublicWorkflowOnlyWorkload(
               {"external_input", {}, false}, options.warmups, options.samples,
               options.butteraugli_target, options.gpu_aq_mode,
+              options.density_mode,
               options.input_path,
               options.scope == BenchmarkScope::kMetalPublicWorkflow,
               options.validation, *gpu, raw_results_pointer, &sink);
@@ -2723,7 +2771,8 @@ int main(int argc, char** argv) {
             } else {
               RunPublicWorkflowOnlyWorkload(
                   workload, options.warmups, options.samples,
-                  options.butteraugli_target, options.gpu_aq_mode, {},
+                  options.butteraugli_target, options.gpu_aq_mode,
+                  options.density_mode, {},
                   options.scope == BenchmarkScope::kMetalPublicWorkflow,
                   options.validation, *gpu, raw_results_pointer, &sink);
             }

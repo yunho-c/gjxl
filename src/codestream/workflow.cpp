@@ -569,6 +569,8 @@ struct PreparedWorkflow {
 
   CpuQuantizationPipelineOptions pipeline_options;
   pipeline_options.butteraugli_target = options.butteraugli_target;
+  pipeline_options.adaptive_quantization.iterations =
+    options.density_mode == VarDctDensityMode::kHighDensity ? 4 : 2;
   if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     pipeline_options.adaptive_quantization.control_mode =
       AdaptiveQuantizationControlMode::kMaximumError;
@@ -666,6 +668,7 @@ struct PreparedWorkflow {
   VarDctEncodingSummary candidate_summary;
   candidate_summary.extent = prepared.geometry.frame();
   candidate_summary.encoded_bytes = candidate.size();
+  candidate_summary.density_mode = options.density_mode;
   candidate_summary.rate_control_mode = options.rate_control_mode;
   candidate_summary.effective_target_bytes = effective_target_bytes;
   candidate_summary.target_size_tolerance_bytes =
@@ -928,6 +931,14 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       return Status::InvalidArgument(
         "VarDCT encoding backend preference is invalid");
   }
+  switch (options.density_mode) {
+    case VarDctDensityMode::kDefault:
+    case VarDctDensityMode::kHighDensity:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "VarDCT density mode is invalid");
+  }
   switch (options.metal_aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
       break;
@@ -948,6 +959,14 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     return Status::InvalidArgument(
       "Maximum-throughput AQ does not evaluate maximum error");
+  }
+  if (options.density_mode == VarDctDensityMode::kHighDensity &&
+      (options.rate_control_mode == VarDctRateControlMode::kMaximumError ||
+       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput ||
+       options.metal_aq_mode ==
+         GpuAdaptiveQuantizationMode::kMaximumThroughput)) {
+    return Status::InvalidArgument(
+      "High-density AQ requires iterative Butteraugli control");
   }
   if (gpu_profiling &&
       (options.backend != VarDctBackendPreference::kMetal ||

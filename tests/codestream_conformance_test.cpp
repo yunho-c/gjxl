@@ -969,6 +969,8 @@ bool RunWorkflowSample(
 
   return run_variant("distance", {"--distance", "1.0"}, 0) &&
     run_variant(
+      "high-density", {"--distance", "1.0", "--high-density"}, 0) &&
+    run_variant(
       "maximum-error",
       {"--maximum-error", "0.05", "0.05", "0.05", "--backend", "cpu"},
       0) &&
