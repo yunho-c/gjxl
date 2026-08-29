@@ -223,6 +223,70 @@ dominated by repeated transpose convolution dispatches, but this device does
 not expose dispatch-boundary timestamps, so a candidate must be isolated with
 a matched-build stage A/B rather than attributed from dispatch count alone.
 
+#### Butteraugli convolution and Malta experiment (2026-08-28)
+
+The experiment started from `56a0790` on the Apple M4 Pro. Candidate screens
+used the standalone padded-1080p Butteraugli benchmark with two warmups, 11
+rotated samples per process, and three alternating matched process pairs where
+the result was close. Tiling the 7/13/15/33-tap transpose convolutions did not
+pass this screen: the 16x8 variant increased the resident-consumer median from
+`16.441 ms` to `19.128 ms`, while the two 32x8 pairs regressed from
+`17.595/16.801 ms` to `17.927/19.700 ms`. Both convolution variants were
+discarded.
+
+Suppressing the otherwise unused Malta response-plane store improved the
+median resident-comparison result from `20.281 ms` to `19.184 ms`; its
+resident-consumer result improved from `16.913 ms` to `16.588 ms`, with wins
+in two of three pairs. The retained `a1e1725` change goes further: it combines
+Malta scaling and response accumulation in one 32x8 dispatch, stages a
+four-pixel halo in threadgroup memory, and writes the response plane only when
+a diagnostic stage capture requests it. A device unable to launch the
+256-thread tile uses the original two-dispatch path. This reduces each sampled
+main/sub Malta stage from 36 dispatches to 18.
+
+The 16x8 fused candidate already reduced the standalone medians from
+`19.352/15.980 ms` to `15.639/13.063 ms` for resident comparison/consumer. A
+three-pair geometry screen selected 32x8: its resident-comparison median was
+`14.666 ms` versus `15.646 ms` for 16x8, while resident consumer was effectively
+tied at `12.841 ms` versus `12.887 ms`.
+
+The final public-encode gate used fully resident SIMD AQ at distance `1.2`, two
+warmups, seven samples, and three alternating process pairs per workload. Each
+timing below is the median of the three process medians; the candidate won both
+required boundaries in all six pairs.
+
+| Workload | Baseline total | Retained total | Delta | Baseline quantization | Retained quantization | Delta | GPU bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `279.257 ms` | `269.496 ms` | `-3.5%` | `146.643 ms` | `136.144 ms` | `-7.2%` | `453341` |
+| Padded 4K | `967.390 ms` | `922.174 ms` | `-4.7%` | `591.302 ms` | `543.879 ms` | `-8.0%` | `1745707` |
+
+The output byte counts match the baseline in every run. The existing fully
+resident CPU/Metal codestream difference remains (`480842/453341` bytes at
+1080p and `1853069/1745707` bytes at 4K); this experiment neither introduces
+nor expands that policy difference. No numerical tolerance was widened. The
+Metal Butteraugli test passes with maximum map/score error `0.000549316` and
+maximum diagnostic-stage error `0.000396729`.
+
+Post-change schema-2 profiles at `a1e1725` are
+`20260829T014323Z-padded_1080p-fully-resident-a1e17256d763` and
+`20260829T014405Z-padded_4k-fully-resident-a1e17256d763` under
+`logs/metal-profile/`. Both completed successfully with identical benchmark
+and metallib hashes. Their sampled-stage coverage is `99.979%` and `99.994%`;
+the resident submission contains 490 dispatches.
+
+| Workload | Public total | Quantization | Resident GPU buffer | Malta main | Malta sub |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `270.375 ms` | `138.453 ms` | `62.018 ms` | `4.872 ms` | `1.298 ms` |
+| Padded 4K | `921.975 ms` | `539.170 ms` | `240.059 ms` | `19.156 ms` | `4.860 ms` |
+
+Relative to the earlier `4e28177` stage profile, Malta main/sub are lower by
+`64.5%/62.8%` at 1080p and `66.5%/65.4%` at 4K. This cross-commit comparison
+also contains intervening resident-architecture changes, so the matched
+component and public-workflow A/B results above are the isolated speedup
+evidence. In the complete post-change GPU profile, Malta is no longer a top-
+three stage: frontend AC-strategy search, AQ reconstruction, and Butteraugli
+psychoacoustic processing are now the leading GPU targets.
+
 These schema-1 artifacts exposed the instrumentation boundary that motivated
 schema 2: the resident buffer was much shorter than the complete quantization
 pipeline. The extended profile now attributes resident initial-field and
