@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -19,6 +20,15 @@ struct VarDctCodestreamProfile {
   uint64_t dc_tokenization_nanoseconds = 0;
   uint64_t ac_tokenization_nanoseconds = 0;
   uint64_t entropy_optimization_nanoseconds = 0;
+  uint64_t entropy_model_bits = 0;
+  uint64_t entropy_token_bits = 0;
+  size_t dc_entropy_clusters = 0;
+  size_t ac_entropy_clusters = 0;
+  /// Exact complete-codestream sizes considered by one serializer call.
+  size_t natural_candidate_bytes = 0;
+  size_t custom_order_candidate_bytes = 0;
+  /// Zero when natural order wins; otherwise the selected on-wire family mask.
+  uint16_t selected_coefficient_order_mask = 0;
   uint64_t section_writing_nanoseconds = 0;
   uint64_t assembly_nanoseconds = 0;
   uint64_t total_nanoseconds = 0;

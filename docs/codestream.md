@@ -84,11 +84,11 @@ marker. It does not emit an ISO BMFF container or metadata boxes.
 | Passes | One |
 | Upsampling | None |
 | Quantization matrices | JPEG XL defaults |
-| X/B matrix scales | `x_qm_scale = 2`, `b_qm_scale = 2` |
+| X/B matrix scales | libjxl target/pixel heuristic; `2/2` for maximum error |
 | DC precision | `extra_dc_precision = 0` |
 | DC CfL | Default X=0 and B=1 factors |
 | Adaptive DC smoothing | Skipped |
-| Coefficient orders | Default natural orders |
+| Coefficient orders | Natural or serializer-selected custom orders |
 | Gaborish | Enabled with default weights |
 | EPF | Two iterations with default parameters |
 | Modular transforms | None |
@@ -117,7 +117,7 @@ Deliverables:
 - Add `ValidateSimpleCodestreamFrame` without weakening the general
   `VarDctEncoderFrame::valid()` invariant.
 - Reject unsupported color metadata, extra channels, passes, custom matrices,
-  custom coefficient orders, loop filters, and DC modes.
+  externally supplied custom coefficient orders, loop filters, and DC modes.
 - Preserve atomic output behavior on every validation failure.
 
 Initial-profile acceptance criteria:
@@ -261,7 +261,7 @@ Deliverables:
 - Regular VarDCT frame header.
 - Serialized `global_scale` and `quant_dc` from the frame's quantizer.
 - DC global section with default dequantization and DC correlation.
-- AC global section with default matrices and coefficient orders.
+- AC global section with default matrices and selected coefficient orders.
 - One entropy model shared across DC-group and AC-metadata streams.
 - One entropy model shared across AC-group streams.
 - Section layout in JPEG XL order:
@@ -434,11 +434,11 @@ after the shared entropy codes are finalized. Each worker owns one `BitWriter`;
 the TOC and final assembly retain canonical section order, so parallelism does
 not change codestream bytes or failure atomicity.
 
-The checked `17x13` sample encodes to 291 bytes at target `1.0`; its codestream
+The checked `17x13` sample encodes to 259 bytes at target `1.0`; its codestream
 SHA-256 is
-`48abd331b4b4e37f0b158af86ef7c766c72ed760a51ce6903a415bf2544031c7`.
+`82f7936f5fc932dd0b484705e9f01d1e18e3e11aa8a7545b8cc082acf136af17`.
 Pinned `djxl` decodes it as linear sRGB with native Butteraugli distance
-`0.999045551` from the input. The workflow also has an independent in-memory
+`1.09415638` from the input. The workflow also has an independent in-memory
 FNV-1a codestream pin, deterministic repeated-encode coverage, strided input,
 strategy reporting, invalid-input atomicity, installed-consumer coverage, and
 a generated-sample freshness check.
@@ -489,11 +489,12 @@ true:
 
 The initial profile and public CPU workflow now satisfy this definition. The
 pinned conformance target retains the direct reconstruction comparison for all
-21 serializer fixtures and additionally exercises the checked public-workflow
-sample through the installed-style CLI and independent decoder. The completed
-Release validation passed all 39 reference-disabled tests, all 46
-reference-enabled tests, and the full 21-fixture pinned-decoder corpus plus the
-workflow sample.
+22 serializer fixtures and additionally exercises the checked public-workflow
+sample through distance, maximum-error, and target-size encodes using the
+installed-style CLI and independent decoder. The initial milestone's completed
+Release validation passed all 39 reference-disabled tests and all 46
+reference-enabled tests; the corpus has since expanded from 21 to 22 serializer
+fixtures and three workflow modes.
 
 ## Deferred work
 
@@ -504,16 +505,183 @@ The following are explicitly outside the first codestream milestone:
 - alpha or other extra channels;
 - chroma subsampling;
 - custom quantization matrices;
-- non-default X/B quantization-matrix scales;
 - custom Gaborish or EPF parameters;
 - non-default DC correlation and extra DC precision;
 - adaptive DC smoothing;
-- custom coefficient orders;
 - progressive or multi-pass coding;
 - LZ77;
-- entropy-model or size optimization beyond a correct deterministic model;
+- ANS entropy coding and broader size optimization beyond the bounded prefix
+  optimizer;
 - lossless and modular-only image coding; and
 - GPU tokenization or entropy coding.
 
 These features may extend the frame/profile contract later. They must not be
 silently inferred or partially signaled by the initial writer.
+
+## Compression-density roadmap
+
+The current writer prioritizes a correct, deterministic subset over exhaustive
+compression optimization. Its bounded prefix optimizer searches up to 32
+clusters and selects HybridUint configurations per cluster. The remaining
+major entropy-modeling limitation is a compact fixed block-context map.
+Ordinary Butteraugli encoding uses libjxl's target- and pixel-dependent X/B
+quantization-matrix scales; maximum-error encoding retains `2/2`.
+
+A directional local comparison used the Release encoder, four natural images
+around 500 pixels in size, identical linear-PFM inputs, raw `.jxl` output, and
+libjxl tools at `05be1775629f7fdc01beb70c118043b4b0c69d2a`.
+External Butteraugli scores were measured at 255 nits. The aggregate encoded
+sizes were:
+
+| Target distance | Initial | After #1 | After #2 | After #3 | #3 vs #2 | `cjxl -e 7` | #3 gap | `cjxl -e 9` | #3 gap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 153,464 B | 153,278 B | 155,391 B | 152,722 B | -1.72% | 151,714 B | -0.7% | 147,386 B | -3.5% |
+| 2 | 94,430 B | 94,327 B | 95,072 B | 92,746 B | -2.45% | 93,414 B | +0.7% | 88,578 B | -4.5% |
+
+These are same-target rather than matched-quality results. The external scores
+were close but not identical, so the table indicates the scale of the current
+gap; it is not a BD-rate result or a claim of equal visual quality. Before the
+matrix-scale heuristic, the flower input at target distance 1 produced 45,963
+bytes at external distance 1.42955. With the heuristic it produced 46,454
+bytes at 1.43541. `cjxl -e 7` produced 45,014 bytes at 1.42125, and
+`cjxl -e 9` produced 43,496 bytes at 1.39970. As another directional signal,
+`cjxl -e 1` and `-e 2` produced 47,368-byte files at identical external
+distance 1.58041, while `-e 3` produced 45,363 bytes at the same distance. The
+4.2% reduction suggests useful entropy-modeling headroom, but the effort tier
+changes more than one variable and does not isolate ANS from clustering or
+other encoder decisions.
+
+The recommended implementation order is below. Effort and size reductions are
+rough hypotheses for general natural images, are not additive, and should be
+replaced by corpus measurements as each step lands.
+
+1. **Complete (2026-08-28): improve the existing prefix-code optimizer before
+   adding ANS.** The always-on bounded search considers cluster caps 1, 2, 4,
+   8, 16, and 32 using exact serialized model-plus-token cost. It reuses a
+   deterministic farthest-first seed order, refines the best candidate and its
+   next larger cap with prefix-code costs, and selects among four HybridUint
+   configurations per final cluster. The former eight-cluster, fixed-config
+   result remains a fallback and is replaced only when the complete serialized
+   cost is strictly smaller.
+
+   The four-image natural corpus improved by 0.12% at distance 1 and 0.11% at
+   distance 2, with no individual regression. The flower result improved from
+   46,082 to 45,963 bytes (0.26%). Across the 22 pinned serializer fixtures,
+   aggregate size improved from 29,466 to 28,580 bytes (3.01%), again with no
+   regression. Since entropy coding does not alter decoded coefficients, the
+   independent reconstruction and quality results remain unchanged.
+
+   On the Apple M4 Pro flower benchmark with two warmups and five samples, CPU
+   public-workflow median time changed from 910.437 ms to 936.360 ms (+2.85%),
+   while its entropy-optimization component changed from 6.381 ms to 27.889 ms.
+   Metal public-workflow median changed from 109.255 ms to 131.322 ms (+20.2%)
+   because the same host entropy work is a larger fraction of that path. The
+   raw-sample schema now reports model and token bits separately plus selected
+   DC/AC cluster counts; the flower stream used 6,456 model bits, 359,939 token
+   bits, 8 DC clusters, and 16 AC clusters. The natural-image gain is therefore
+   below the original 1-4% hypothesis, and the remaining gap is unlikely to be
+   closed by prefix clustering alone.
+
+2. **Implemented (2026-08-28), with density acceptance still open: enable the
+   libjxl X/B quantization-matrix-scale heuristic.** The workflow computes the
+   pinned libjxl X-edge, B-Y edge, and exposed-blue statistics once over the
+   unpadded opsin image. Every Butteraugli attempt, including target-size
+   searches and all CPU/Metal AQ modes, combines those statistics with the
+   attempt's target to select the serialized three-bit scales. AQ,
+   reconstruction, coefficient coding, and the frame header all consume that
+   same profile. Maximum-error mode remains exactly `2/2` and its checked
+   codestream hash did not change.
+
+   This policy did not produce the hypothesized same-target reduction on the
+   four-image corpus: relative to #1, aggregate size increased 1.38% at target
+   1 and 0.79% at target 2. External quality moved in both directions. A
+   bounded per-image target search against the pre-change external
+   Butteraugli scores found a 152,209-byte aggregate at the target-1 quality
+   points, 0.70% below the 153,278-byte baseline. At target 2 it found 95,831
+   bytes, 1.59% above the 94,327-byte baseline. The closest available scores
+   differed by 0.0001 to 0.0129 at target 1 and 0.0056 to 0.0657 at target 2,
+   so these are directional matched-quality results rather than a
+   rate-distortion curve.
+
+   A balanced five-round Apple M4 Pro comparison alternated the pre-change and
+   heuristic binaries, with one warmup and one measured public-workflow sample
+   per round. CPU median changed from 914.790 to 925.462 ms (+1.17%); Metal
+   median changed from 122.987 to 132.191 ms (+7.48%). The CPU result satisfies
+   the planned 5% guardrail, while Metal does not. The implementation is
+   therefore complete and independently decodable, but the current
+   two-iteration AQ policy does not yet justify calling this a general
+   compression-density win.
+
+3. **Complete (2026-08-28): add serializer-local custom coefficient orders.**
+   The always-on candidate counts all coefficient zeros by channel and the five
+   on-wire families used by the seven supported strategies. It retains natural
+   orders when both block dimensions are below five, otherwise applies the
+   pinned-libjxl quantized zero-count stable sort after the exact LLF prefix.
+   Nondefault orders are converted to natural-rank Lehmer permutations, encoded
+   with eight contexts, and serialized once in AC global. AC tokens and order
+   signaling use the same validated orders.
+
+   Natural and custom AC candidates receive independent entropy models. Their
+   exact complete-codestream byte sizes include headers, TOC selectors, section
+   padding, order signaling, and token payloads; custom wins only when strictly
+   smaller, so ties retain natural order. Common DC sections are written once,
+   independent entropy searches run concurrently, and only the selected full
+   codestream is assembled. This policy is internal to the serializer and adds
+   no public encoding option.
+
+   On the four-image PFM corpus, custom order itself was selected for three of
+   four images at each target. Exact candidate sizes changed from 153,245 to
+   152,722 bytes at distance 1 (-0.34%) and from 92,972 to 92,746 bytes at
+   distance 2 (-0.24%). The complete #3 change versus #2 is larger: -1.72% and
+   -2.45%, respectively. Most of that additional gain comes from a required
+   prefix correction exposed by the order payload: JPEG XL's one-symbol
+   Huffman alphabet consumes zero prefix bits. Cost modeling, token writing,
+   and validation now agree on that rule, and the natural zero-order mask also
+   uses its canonical two-bit selector. Pinned libjxl decoded the before/after
+   corpus to byte-identical PFM output.
+
+   The 22 pinned serializer fixtures improved in aggregate from 28,580 to
+   25,679 bytes (-10.15%), predominantly because small synthetic histograms
+   exercise the corrected one-symbol prefix case heavily. Every fixture and
+   the distance, maximum-error, and target-size public workflows decode under
+   pinned libjxl. Unit coverage pins the Lehmer stream, the small-image gate,
+   all five order families and seven strategies, invalid-order atomicity,
+   deterministic derivation, and both outcomes of exact byte selection.
+
+   A five-round alternating Apple M4 Pro comparison used one warmup and one
+   measured flower encode per process. CPU serializer median changed from
+   25.765 ms (25.576-26.607) to 26.568 ms (26.388-27.194), +3.12%; complete CPU
+   workflow median changed from 935.565 ms (900.927-948.646) to 915.694 ms
+   (891.932-935.512), -2.12% within the broader pipeline variation. Metal
+   serializer median changed from 25.816 ms (25.519-34.190) to 27.734 ms
+   (26.544-34.410), +7.43%; complete Metal workflow median changed from
+   119.011 ms (115.152-127.786) to 127.471 ms (119.268-134.978), +7.11%.
+   Concurrent candidate optimization kept the entropy phase essentially flat;
+   the remaining host cost is mostly the second AC traversal and model setup.
+   Raw benchmark schema version 3 records natural/custom candidate sizes and
+   the selected family mask alongside entropy bits, clusters, and phase timing.
+
+4. Make block-context maps adaptive for sufficiently large images (roughly two
+   to three days; small expected benefit on thumbnails and plausibly 1-2% on
+   larger images). Candidate maps can use raw quantization and strategy classes,
+   but must be selected by total serialized cost rather than token entropy
+   alone.
+
+5. Add a full ANS path only after the prefix optimizer establishes the remaining
+   gap (roughly one to two weeks; plausibly another 2-4%). This is broader and
+   riskier than improving the current code, so the earlier measurements should
+   determine whether it is justified.
+
+6. Offer four adaptive-quantization iterations as an optional high-density mode
+   (less than one day; probably below 1%). The internal workflow already permits
+   up to four iterations, while the public workflow currently fixes two. This
+   should remain an explicit slower mode because the encode-time increase is
+   likely much larger than the size improvement.
+
+LZ77, adaptive DC smoothing, additional transform decisions, patches/dots/
+splines, chroma subsampling, and GPU entropy coding are not first-line size
+work. They target narrower content, change quality semantics, or require more
+implementation scope for less likely general-image benefit. Each accepted
+optimization should be evaluated on a broader corpus with decoded-output
+validation and matched-quality size comparisons, not only the same nominal
+distance.

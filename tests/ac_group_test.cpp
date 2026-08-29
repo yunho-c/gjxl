@@ -19,6 +19,7 @@
 
 #include "codec/chroma_from_luma.h"
 #include "codec/reconstruction.h"
+#include "codestream/coefficient_order.h"
 
 namespace {
 
@@ -260,6 +261,133 @@ bool CheckPinnedStrategyBlockContexts() {
                   << channel << '\n';
         return false;
       }
+    }
+  }
+  return true;
+}
+
+bool CheckCoefficientOrderPermutationTokens() {
+  std::vector<uint32_t> natural;
+  if (!gjxl::ComputeSimpleNaturalCoefficientOrder(
+        gjxl::AcStrategyType::kDct8, &natural).ok()) {
+    return false;
+  }
+  gjxl::SimpleCoefficientOrders orders;
+  orders.used_order_mask = 1;
+  for (std::vector<uint32_t>& channel : orders.orders[0]) {
+    channel = natural;
+    std::swap(channel[1], channel[2]);
+  }
+  const std::array<gjxl::EntropyToken, 6> expected = {{
+    {7, 1}, {0, 1}, {7, 1}, {0, 1}, {7, 1}, {0, 1},
+  }};
+  std::vector<gjxl::EntropyToken> tokens;
+  gjxl::Status status =
+    gjxl::TokenizeSimpleCoefficientOrders(orders, &tokens);
+  if (!status.ok() || !std::ranges::equal(tokens, expected)) {
+    std::cerr << "Coefficient-order permutation tokens differ\n";
+    return false;
+  }
+
+  constexpr gjxl::Extent2D kOneBlock{1, 1};
+  gjxl::AcStrategyGrid strategies;
+  if (!gjxl::AcStrategyGrid::Create(kOneBlock, &strategies).ok() ||
+      !strategies.Set(0, 0, gjxl::AcStrategyType::kDct8).ok()) {
+    return false;
+  }
+  std::array<std::vector<int32_t>, 3> storage;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    storage[channel].assign(64, 0);
+    storage[channel][natural[1]] = static_cast<int32_t>(10 + channel);
+    storage[channel][natural[2]] = static_cast<int32_t>(20 + channel);
+  }
+  const gjxl::VarDctAcGroupView group =
+    MakeGroupView(kOneBlock, 64, storage);
+  std::vector<gjxl::EntropyToken> natural_tokens;
+  std::vector<gjxl::EntropyToken> custom_tokens;
+  if (!gjxl::TokenizeSimpleAcGroup(
+        group, strategies, &natural_tokens).ok() ||
+      !gjxl::TokenizeSimpleAcGroup(
+        group, strategies, orders, &custom_tokens).ok() ||
+      natural_tokens == custom_tokens ||
+      natural_tokens.size() != custom_tokens.size()) {
+    std::cerr << "Custom AC tokenization did not use the signaled order\n";
+    return false;
+  }
+
+  const std::vector<gjxl::EntropyToken> sentinel = {{99, 77}};
+  tokens = sentinel;
+  std::swap(orders.orders[0][0][0], orders.orders[0][0][1]);
+  status = gjxl::TokenizeSimpleCoefficientOrders(orders, &tokens);
+  if (status.code() != gjxl::StatusCode::kInvalidArgument ||
+      tokens != sentinel) {
+    std::cerr << "Invalid LLF order rejection was not atomic\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckCustomOrderStrategyFamilies() {
+  struct StrategyFamily {
+    gjxl::AcStrategyType strategy;
+    size_t family;
+  };
+  constexpr std::array<StrategyFamily, 7> strategies = {{
+    {gjxl::AcStrategyType::kDct8, 0},
+    {gjxl::AcStrategyType::kDct16x16, 2},
+    {gjxl::AcStrategyType::kDct32x32, 3},
+    {gjxl::AcStrategyType::kDct16x8, 4},
+    {gjxl::AcStrategyType::kDct8x16, 4},
+    {gjxl::AcStrategyType::kDct32x16, 6},
+    {gjxl::AcStrategyType::kDct16x32, 6},
+  }};
+
+  for (const StrategyFamily fixture : strategies) {
+    const gjxl::AcStrategyInfo* info =
+      gjxl::GetAcStrategyInfo(fixture.strategy);
+    std::vector<uint32_t> natural;
+    gjxl::AcStrategyGrid grid;
+    if (info == nullptr ||
+        !gjxl::ComputeSimpleNaturalCoefficientOrder(
+          fixture.strategy, &natural).ok() ||
+        !gjxl::AcStrategyGrid::Create(info->covered_blocks, &grid).ok() ||
+        !grid.Set(0, 0, fixture.strategy).ok()) {
+      return false;
+    }
+    const size_t llf =
+      info->covered_blocks.width * info->covered_blocks.height;
+    if (llf + 1 >= natural.size()) {
+      return false;
+    }
+
+    gjxl::SimpleCoefficientOrders orders;
+    orders.used_order_mask = uint16_t{1} << fixture.family;
+    for (std::vector<uint32_t>& channel : orders.orders[fixture.family]) {
+      channel = natural;
+      std::swap(channel[llf], channel[llf + 1]);
+    }
+    std::array<std::vector<int32_t>, 3> storage;
+    for (size_t channel = 0; channel < 3; ++channel) {
+      storage[channel].assign(natural.size(), 0);
+      storage[channel][natural[llf]] = static_cast<int32_t>(10 + channel);
+      storage[channel][natural[llf + 1]] =
+        static_cast<int32_t>(20 + channel);
+    }
+    const gjxl::VarDctAcGroupView group =
+      MakeGroupView(info->covered_blocks, natural.size(), storage);
+    std::vector<gjxl::EntropyToken> order_tokens;
+    std::vector<gjxl::EntropyToken> natural_tokens;
+    std::vector<gjxl::EntropyToken> custom_tokens;
+    if (!gjxl::ValidateSimpleCoefficientOrders(orders).ok() ||
+        !gjxl::TokenizeSimpleCoefficientOrders(orders, &order_tokens).ok() ||
+        !gjxl::TokenizeSimpleAcGroup(group, grid, &natural_tokens).ok() ||
+        !gjxl::TokenizeSimpleAcGroup(
+          group, grid, orders, &custom_tokens).ok() ||
+        order_tokens.empty() || natural_tokens == custom_tokens ||
+        natural_tokens.size() != custom_tokens.size()) {
+      std::cerr << "Custom coefficient order failed for strategy "
+                << static_cast<int>(fixture.strategy) << '\n';
+      return false;
     }
   }
   return true;
@@ -579,7 +707,8 @@ bool CheckFrameTraversalAndAtomicity() {
   }
 
   gjxl::SimpleVarDctCodestreamProfile profile;
-  profile.b_qm_scale = 7;
+  profile.quantization_matrix_mode =
+    gjxl::QuantizationMatrixMode::kCustom;
   gjxl::VarDctEncoderFrame invalid_profile;
   if (!MakeFrame(8, profile, &invalid_profile).ok()) {
     return false;
@@ -596,15 +725,73 @@ bool CheckFrameTraversalAndAtomicity() {
   return true;
 }
 
+bool CheckFrameCoefficientOrderSelection() {
+  gjxl::VarDctEncoderFrame small;
+  gjxl::VarDctEncoderFrame wide;
+  if (!MakeFrame(8, {}, &small).ok() || !MakeFrame(257, {}, &wide).ok()) {
+    return false;
+  }
+  gjxl::SimpleCoefficientOrders small_orders;
+  gjxl::SimpleCoefficientOrders first;
+  gjxl::SimpleCoefficientOrders second;
+  if (!gjxl::ComputeSimpleCoefficientOrders(small, &small_orders).ok() ||
+      !gjxl::ComputeSimpleCoefficientOrders(wide, &first).ok() ||
+      !gjxl::ComputeSimpleCoefficientOrders(wide, &second).ok() ||
+      small_orders.used_order_mask != 0 || first != second ||
+      first.used_order_mask != 1 ||
+      !gjxl::ValidateSimpleCoefficientOrders(first).ok()) {
+    std::cerr << "Frame coefficient-order derivation failed, mask="
+              << first.used_order_mask << '\n';
+    return false;
+  }
+  std::vector<gjxl::EntropyToken> order_tokens;
+  std::vector<gjxl::SimpleAcGroupTokenStream> natural_groups;
+  std::vector<gjxl::SimpleAcGroupTokenStream> custom_groups;
+  if (!gjxl::TokenizeSimpleCoefficientOrders(first, &order_tokens).ok() ||
+      order_tokens.empty() ||
+      !gjxl::TokenizeSimpleAcGroups(wide, &natural_groups).ok() ||
+      !gjxl::TokenizeSimpleAcGroups(wide, first, &custom_groups).ok() ||
+      natural_groups.size() != custom_groups.size() ||
+      natural_groups == custom_groups) {
+    std::cerr << "Frame custom-order tokenization failed\n";
+    return false;
+  }
+  const std::array<uint64_t, 3> order_hashes = {
+    HashValues(first.orders[0][0]),
+    HashValues(first.orders[0][1]),
+    HashValues(first.orders[0][2]),
+  };
+  // Full derived-order and Lehmer-token hashes independently decoded by the
+  // pinned libjxl coefficient-order reader.
+  constexpr std::array<uint64_t, 3> kExpectedOrderHashes = {
+    0x9d7d049a2860fbc1ull,
+    0x4b38d2bcbde38317ull,
+    0x3429f64e9a8101d3ull,
+  };
+  constexpr uint64_t kExpectedTokenHash = 0xb05619bb36b6eac8ull;
+  if (order_hashes != kExpectedOrderHashes ||
+      HashTokens(order_tokens) != kExpectedTokenHash) {
+    std::cerr << "Pinned frame coefficient orders differ: 0x" << std::hex
+              << order_hashes[0] << " 0x" << order_hashes[1] << " 0x"
+              << order_hashes[2] << " tokens=0x"
+              << HashTokens(order_tokens) << std::dec << '\n';
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
   if (!CheckNaturalOrders() || !CheckPinnedStrategyBlockContexts()
       || !CheckPinnedStrategyTokenStreams()
+      || !CheckCoefficientOrderPermutationTokens()
+      || !CheckCustomOrderStrategyFamilies()
       || !CheckZeroDenseAndSignedExtremes()
       || !CheckMultiblockPredictionAndOffsets()
       || !CheckMalformedGroupsAreAtomic()
-      || !CheckFrameTraversalAndAtomicity()) {
+      || !CheckFrameTraversalAndAtomicity()
+      || !CheckFrameCoefficientOrderSelection()) {
     return EXIT_FAILURE;
   }
   std::cout << "All AC-group tokenization tests passed.\n";

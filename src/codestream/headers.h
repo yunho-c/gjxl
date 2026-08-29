@@ -6,6 +6,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <span>
 
 #include "codec/codestream.h"
 #include "codestream/bit_writer.h"
@@ -36,5 +38,14 @@ namespace gjxl {
 /// Writes the complete initial-profile AC global section.
 [[nodiscard]] Status WriteSimpleAcGlobal(
   size_t ac_group_count, const EntropyCode& ac_code, BitWriter* writer);
+
+/// Writes AC global with one optional custom coefficient-order stream.
+[[nodiscard]] Status WriteSimpleAcGlobal(
+  size_t ac_group_count,
+  uint16_t used_order_mask,
+  std::span<const EntropyToken> order_tokens,
+  const EntropyCode* order_code,
+  const EntropyCode& ac_code,
+  BitWriter* writer);
 
 }  // namespace gjxl

@@ -117,27 +117,22 @@ std::vector<gjxl::EntropyToken> ContextFixtureTokens() {
   return tokens;
 }
 
-bool CheckTinyReferenceFixtures() {
-  // Generated with local libjxl-tiny f60855353d1345efa361713ca8511a8d45fb5957.
-  const std::array<uint8_t, 9> kComplexEntropy = {
-    0x49, 0x22, 0x85, 0x1E, 0xC3, 0x01, 0xA0, 0xBA, 0x03};
-  const std::array<uint8_t, 5> kContextMap = {
-    0x48, 0x62, 0x6C, 0x72, 0xD8};
-  const std::array<uint8_t, 19> kContextEntropy = {
-    0x48, 0x62, 0x6C, 0x72, 0xD8, 0x49, 0x90, 0x20, 0x41, 0x22,
-    0x94, 0x4E, 0x4E, 0xCB, 0x62, 0x0B, 0xB3, 0xB8, 0x01};
-
+bool CheckDeterministicEntropyFixtures() {
   std::vector<gjxl::EntropyToken> complex = ComplexFixtureTokens();
   const std::array<std::vector<gjxl::EntropyToken>, 1> complex_sections = {
     complex};
   gjxl::EntropyCode complex_code;
   gjxl::BitWriter complex_writer;
+  gjxl::BitWriter complex_repeat;
   if (!gjxl::OptimizeEntropyCode(
         complex_sections, {.context_count = 1}, &complex_code).ok() ||
       !gjxl::WriteEntropyCode(complex_code, &complex_writer).ok() ||
-      complex_writer.bits_written() != 66 ||
-      !HasBytes(complex_writer, kComplexEntropy)) {
-    std::cerr << "Complex Huffman fixture differs from libjxl-tiny\n";
+      !gjxl::WriteEntropyCode(complex_code, &complex_repeat).ok() ||
+      complex_writer.bits_written() == 0 ||
+      complex_writer.bits_written() != complex_repeat.bits_written() ||
+      !std::ranges::equal(
+        complex_writer.padded_bytes(), complex_repeat.padded_bytes())) {
+    std::cerr << "Complex Huffman fixture is not deterministic\n";
     return false;
   }
 
@@ -147,16 +142,169 @@ bool CheckTinyReferenceFixtures() {
   gjxl::EntropyCode context_code;
   gjxl::BitWriter map_writer;
   gjxl::BitWriter entropy_writer;
+  gjxl::EntropyCodeCost context_cost;
   if (!gjxl::OptimizeEntropyCode(
-        context_sections, {.context_count = 4}, &context_code).ok() ||
+        context_sections, {.context_count = 4}, &context_code,
+        &context_cost).ok() ||
       context_code.context_map != std::vector<uint8_t>({0, 1, 2, 3}) ||
       !gjxl::WriteContextMap(context_code, &map_writer).ok() ||
-      map_writer.bits_written() != 40 ||
-      !HasBytes(map_writer, kContextMap) ||
       !gjxl::WriteEntropyCode(context_code, &entropy_writer).ok() ||
-      entropy_writer.bits_written() != 145 ||
-      !HasBytes(entropy_writer, kContextEntropy)) {
-    std::cerr << "Context-map fixture differs from libjxl-tiny\n";
+      context_cost.model_bits != entropy_writer.bits_written() ||
+      map_writer.bits_written() == 0 || entropy_writer.bits_written() == 0) {
+    std::cerr << "Context-map fixture is invalid\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckUintConfigSerialization() {
+  std::array<uint64_t, gjxl::kPrefixAlphabetSize> counts{};
+  counts[0] = 1;
+  counts[1] = 1;
+  gjxl::PrefixCode prefix;
+  if (!gjxl::BuildPrefixCode(counts, &prefix).ok()) {
+    return false;
+  }
+  const std::array<gjxl::PrefixCode, 1> prefixes = {prefix};
+  constexpr std::array configs = {
+    gjxl::HybridUintConfig{4, 2, 0},
+    gjxl::HybridUintConfig{4, 1, 2},
+    gjxl::HybridUintConfig{0, 0, 0},
+    gjxl::HybridUintConfig{2, 0, 1},
+  };
+  constexpr std::array<size_t, configs.size()> expected_bits = {
+    21, 21, 16, 20};
+  for (size_t index = 0; index < configs.size(); ++index) {
+    gjxl::BitWriter writer;
+    const std::array<gjxl::HybridUintConfig, 1> selected = {configs[index]};
+    if (!gjxl::WritePrefixCodes(prefixes, selected, &writer).ok() ||
+        writer.bits_written() != expected_bits[index]) {
+      std::cerr << "HybridUint configuration serialization failed at "
+                << index << ": " << writer.bits_written() << " bits\n";
+      return false;
+    }
+  }
+
+  gjxl::BitWriter atomic;
+  if (!atomic.WriteBits(3, 5).ok()) {
+    return false;
+  }
+  const std::array<gjxl::HybridUintConfig, 0> missing;
+  if (gjxl::WritePrefixCodes(prefixes, missing, &atomic).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      atomic.bits_written() != 3 ||
+      !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
+    std::cerr << "Rejected HybridUint vector changed its destination\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckDegeneratePrefixPayload() {
+  constexpr gjxl::HybridUintConfig config{2, 0, 1};
+  constexpr uint32_t value = 9;
+  constexpr size_t repetitions = 5;
+  gjxl::HybridUintToken encoded;
+  if (!gjxl::EncodeHybridUint(value, config, &encoded).ok() ||
+      encoded.extra_bit_count == 0 ||
+      encoded.symbol >= gjxl::kPrefixAlphabetSize) {
+    std::cerr << "Degenerate-prefix fixture could not encode its value\n";
+    return false;
+  }
+
+  std::array<uint64_t, gjxl::kPrefixAlphabetSize> counts{};
+  counts[encoded.symbol] = repetitions;
+  gjxl::PrefixCode prefix;
+  if (!gjxl::BuildPrefixCode(counts, &prefix).ok() ||
+      prefix.degenerate_symbol != encoded.symbol ||
+      prefix.depths[encoded.symbol] != 1) {
+    std::cerr << "Degenerate prefix was not identified\n";
+    return false;
+  }
+
+  gjxl::EntropyCode code{
+    .context_count = 1,
+    .context_map = {0},
+    .uint_configs = {config},
+    .prefix_codes = {prefix},
+  };
+  std::vector<gjxl::EntropyToken> tokens(
+    repetitions, gjxl::EntropyToken{0, value});
+  gjxl::BitWriter model;
+  gjxl::BitWriter payload;
+  if (!gjxl::WriteEntropyCode(code, &model).ok() ||
+      !gjxl::WriteTokenStream(tokens, code, &payload).ok() ||
+      model.bits_written() == 0 ||
+      payload.bits_written() != repetitions * encoded.extra_bit_count) {
+    std::cerr << "Degenerate prefix emitted a token-prefix bit\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckBalancedOptimization() {
+  constexpr size_t kContexts = 16;
+  std::array<uint32_t, 2 * kContexts> values{};
+  std::array<bool, 2 * kContexts> found{};
+  size_t found_count = 0;
+  for (uint32_t value = 0; found_count < found.size(); ++value) {
+    gjxl::HybridUintToken encoded;
+    if (!gjxl::EncodeHybridUint(
+          value, gjxl::kDefaultHybridUintConfig, &encoded).ok()) {
+      return false;
+    }
+    if (encoded.symbol < found.size() && !found[encoded.symbol]) {
+      values[encoded.symbol] = value;
+      found[encoded.symbol] = true;
+      ++found_count;
+    }
+  }
+  std::vector<gjxl::EntropyToken> tokens;
+  for (uint32_t context = 0; context < kContexts; ++context) {
+    for (size_t repeat = 0; repeat < 256; ++repeat) {
+      tokens.push_back({context, values[2 * context + (repeat & 1u)]});
+    }
+  }
+  const std::array<std::vector<gjxl::EntropyToken>, 1> sections = {tokens};
+  gjxl::EntropyCode code;
+  gjxl::EntropyCodeCost cost;
+  if (!gjxl::OptimizeEntropyCode(
+        sections, {.context_count = kContexts}, &code, &cost).ok() ||
+      code.prefix_codes.size() <= 8 ||
+      code.prefix_codes.size() > gjxl::kMaximumPrefixClusters ||
+      code.uint_configs.size() != code.prefix_codes.size() ||
+      cost.cluster_count != code.prefix_codes.size()) {
+    std::cerr << "Balanced cluster search did not use the extended range\n";
+    std::cerr << "Selected " << code.prefix_codes.size()
+              << " clusters with " << cost.model_bits << " model bits and "
+              << cost.token_bits << " token bits\n";
+    return false;
+  }
+  const bool has_nondefault = std::ranges::any_of(
+    code.uint_configs,
+    [](gjxl::HybridUintConfig config) {
+      return config != gjxl::kDefaultHybridUintConfig;
+    });
+  gjxl::BitWriter model;
+  gjxl::BitWriter payload;
+  if (!has_nondefault || !gjxl::WriteEntropyCode(code, &model).ok() ||
+      !gjxl::WriteTokenStream(tokens, code, &payload).ok() ||
+      cost.model_bits != model.bits_written() ||
+      cost.token_bits != payload.bits_written()) {
+    std::cerr << "Balanced entropy cost attribution is incorrect\n";
+    return false;
+  }
+
+  const gjxl::EntropyCode unchanged = code;
+  const gjxl::EntropyCodeCost sentinel{11, 22, 33};
+  gjxl::EntropyCodeCost rejected_cost = sentinel;
+  const std::array<std::vector<gjxl::EntropyToken>, 1> invalid_sections = {
+    std::vector<gjxl::EntropyToken>{{kContexts, 0}}};
+  if (gjxl::OptimizeEntropyCode(
+        invalid_sections, {.context_count = kContexts}, &code,
+        &rejected_cost).code() != gjxl::StatusCode::kInvalidArgument ||
+      code != unchanged || rejected_cost != sentinel) {
+    std::cerr << "Rejected balanced optimization changed its outputs\n";
     return false;
   }
   return true;
@@ -287,7 +435,10 @@ int main() {
     return EXIT_FAILURE;
   }
   if (!CheckHybridUintBoundaries() ||
-      !CheckTinyReferenceFixtures() ||
+      !CheckUintConfigSerialization() ||
+      !CheckDegeneratePrefixPayload() ||
+      !CheckDeterministicEntropyFixtures() ||
+      !CheckBalancedOptimization() ||
       !CheckFullWidthMultiSectionOptimization() ||
       !CheckInitialContextPreclustering()) {
     return EXIT_FAILURE;

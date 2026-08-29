@@ -17,6 +17,7 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+struct SimpleCoefficientOrders;
 struct VarDctAcGroupView;
 
 inline constexpr size_t kSimpleAcContextCount = 1980;
@@ -41,9 +42,22 @@ struct SimpleAcGroupTokenStream {
                                            const AcStrategyGrid& strategies,
                                            std::vector<EntropyToken>* tokens);
 
+/// Tokenizes one isolated AC group with the supplied custom order families.
+[[nodiscard]] Status TokenizeSimpleAcGroup(
+  const VarDctAcGroupView& group,
+  const AcStrategyGrid& strategies,
+  const SimpleCoefficientOrders& orders,
+  std::vector<EntropyToken>* tokens);
+
 /// Tokenizes every retained AC group in row-major order, atomically.
 [[nodiscard]] Status TokenizeSimpleAcGroups(
   const VarDctEncoderFrame& frame,
+  std::vector<SimpleAcGroupTokenStream>* groups);
+
+/// Tokenizes every retained AC group with the supplied custom orders.
+[[nodiscard]] Status TokenizeSimpleAcGroups(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
   std::vector<SimpleAcGroupTokenStream>* groups);
 
 }  // namespace gjxl

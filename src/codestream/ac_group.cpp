@@ -20,6 +20,7 @@
 
 #include "codec/codestream.h"
 #include "codec/vardct_frame.h"
+#include "codestream/coefficient_order.h"
 #include "codestream/simple_ac_context.h"
 
 namespace gjxl {
@@ -320,9 +321,13 @@ Status ComputeSimpleNaturalCoefficientOrder(AcStrategyType strategy,
   return Status::Ok();
 }
 
-Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
-                             const AcStrategyGrid& strategies,
-                             std::vector<EntropyToken>* tokens) {
+namespace {
+
+Status TokenizeSimpleAcGroupValidated(
+  const VarDctAcGroupView& group,
+  const AcStrategyGrid& strategies,
+  const SimpleCoefficientOrders& coefficient_orders,
+  std::vector<EntropyToken>* tokens) {
   if (tokens == nullptr) {
     return Status::InvalidArgument("AC-group token output is null");
   }
@@ -349,7 +354,7 @@ Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
     for (std::vector<uint8_t>& map : nonzero_maps) {
       map.assign(block_count, 0);
     }
-    std::array<std::vector<uint32_t>, kAcStrategyCount> orders;
+    std::array<std::vector<uint32_t>, kAcStrategyCount> natural_orders;
     std::array<bool, kAcStrategyCount> order_ready{};
 
     size_t source_offset = 0;
@@ -363,15 +368,19 @@ Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
       }
 
       const size_t strategy_index = static_cast<size_t>(anchor.strategy);
-      if (!order_ready[strategy_index]) {
+      const size_t order_family =
+        codestream_internal::kSimpleStrategyOrder[strategy_index];
+      const bool custom_order =
+        (coefficient_orders.used_order_mask &
+         (uint16_t{1} << order_family)) != 0;
+      if (!custom_order && !order_ready[strategy_index]) {
         status = ComputeSimpleNaturalCoefficientOrder(anchor.strategy,
-                                                      &orders[strategy_index]);
+          &natural_orders[strategy_index]);
         if (!status.ok()) {
           return status;
         }
         order_ready[strategy_index] = true;
       }
-      const std::vector<uint32_t>& order = orders[strategy_index];
       const size_t covered_blocks =
         info->covered_blocks.width * info->covered_blocks.height;
       if (!std::has_single_bit(covered_blocks)) {
@@ -380,6 +389,13 @@ Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
       const size_t log2_covered_blocks = std::countr_zero(covered_blocks);
 
       for (const size_t channel : kChannelOrder) {
+        const std::vector<uint32_t>& order = custom_order
+          ? coefficient_orders.orders[order_family][channel]
+          : natural_orders[strategy_index];
+        if (order.size() != anchor.coefficient_count) {
+          return Status::InvalidArgument(
+            "Coefficient order does not match its AC strategy");
+        }
         const std::span<const int32_t> coefficients =
           group.coefficients[channel].subspan(source_offset,
                                               anchor.coefficient_count);
@@ -425,7 +441,7 @@ Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
         }
         if (remaining_nonzeros != 0) {
           return Status::Internal(
-            "Natural coefficient scan missed a nonzero value");
+            "Coefficient scan missed a nonzero value");
         }
       }
       source_offset += anchor.coefficient_count;
@@ -444,12 +460,38 @@ Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
   return Status::Ok();
 }
 
+}  // namespace
+
+Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
+                             const AcStrategyGrid& strategies,
+                             const SimpleCoefficientOrders& coefficient_orders,
+                             std::vector<EntropyToken>* tokens) {
+  Status status = ValidateSimpleCoefficientOrders(coefficient_orders);
+  if (!status.ok()) {
+    return status;
+  }
+  return TokenizeSimpleAcGroupValidated(
+    group, strategies, coefficient_orders, tokens);
+}
+
+Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
+                             const AcStrategyGrid& strategies,
+                             std::vector<EntropyToken>* tokens) {
+  return TokenizeSimpleAcGroup(
+    group, strategies, SimpleCoefficientOrders{}, tokens);
+}
+
 Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
+                              const SimpleCoefficientOrders& orders,
                               std::vector<SimpleAcGroupTokenStream>* groups) {
   if (groups == nullptr) {
     return Status::InvalidArgument("AC-group token output is null");
   }
   Status status = ValidateSimpleCodestreamFrame(frame);
+  if (!status.ok()) {
+    return status;
+  }
+  status = ValidateSimpleCoefficientOrders(orders);
   if (!status.ok()) {
     return status;
   }
@@ -469,7 +511,8 @@ Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
         .block_y = group.block_y,
         .block_extent = group.block_extent,
       };
-      status = TokenizeSimpleAcGroup(group, frame.strategies(), &stream.tokens);
+      status = TokenizeSimpleAcGroupValidated(
+        group, frame.strategies(), orders, &stream.tokens);
       if (!status.ok()) {
         return status;
       }
@@ -482,6 +525,11 @@ Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
     return AllocationFailure();
   }
   return Status::Ok();
+}
+
+Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
+                              std::vector<SimpleAcGroupTokenStream>* groups) {
+  return TokenizeSimpleAcGroups(frame, SimpleCoefficientOrders{}, groups);
 }
 
 }  // namespace gjxl

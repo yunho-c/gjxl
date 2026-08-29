@@ -69,6 +69,15 @@ void AccumulateCodestreamProfile(
     source.ac_tokenization_nanoseconds;
   destination->entropy_optimization_nanoseconds +=
     source.entropy_optimization_nanoseconds;
+  destination->entropy_model_bits += source.entropy_model_bits;
+  destination->entropy_token_bits += source.entropy_token_bits;
+  destination->dc_entropy_clusters += source.dc_entropy_clusters;
+  destination->ac_entropy_clusters += source.ac_entropy_clusters;
+  destination->natural_candidate_bytes += source.natural_candidate_bytes;
+  destination->custom_order_candidate_bytes +=
+    source.custom_order_candidate_bytes;
+  destination->selected_coefficient_order_mask |=
+    source.selected_coefficient_order_mask;
   destination->section_writing_nanoseconds +=
     source.section_writing_nanoseconds;
   destination->assembly_nanoseconds += source.assembly_nanoseconds;
@@ -101,6 +110,14 @@ constexpr size_t kAutomaticMetalMinimumCodingDimension = 96;
 constexpr float kAutomaticMetalMinimumButteraugliTarget = 1.0f;
 constexpr float kAutomaticMetalMaximumButteraugliTarget = 1.2f;
 constexpr std::string_view kQualifiedMetalBackend = "Metal: Apple M4 Pro";
+
+bool ValidQuantizationMatrixScaleStats(
+  const codestream_internal::QuantizationMatrixScaleStats& stats) {
+
+  return std::isfinite(stats.x_edge) && stats.x_edge >= 0.0f &&
+    std::isfinite(stats.b_edge) && stats.b_edge >= 0.0f &&
+    std::isfinite(stats.exposed_blue) && stats.exposed_blue >= 0.0f;
+}
 
 Status EffectiveTargetBytes(
   Extent2D source_extent,
@@ -376,6 +393,7 @@ struct PreparedWorkflow {
   FrameGeometry geometry;
   Image3FBuffer padded_linear;
   Image3FBuffer opsin;
+  codestream_internal::QuantizationMatrixScaleStats matrix_scale_stats;
   PipelineStorage pipeline;
   quantization_pipeline_internal::PreparedQuantizationPipeline quantization;
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
@@ -407,6 +425,12 @@ struct PreparedWorkflow {
       candidate->padded_linear.const_view(),
       kInitialProfileIntensityTarget,
       candidate->opsin.view());
+    if (!status.ok()) {
+      return status;
+    }
+    status = codestream_internal::ComputeQuantizationMatrixScaleStats(
+      candidate->opsin.cropped_view(geometry.frame()),
+      &candidate->matrix_scale_stats);
     if (!status.ok()) {
       return status;
     }
@@ -534,11 +558,22 @@ struct PreparedWorkflow {
     pipeline_options.adaptive_quantization.maximum_error =
       options.maximum_error;
   }
+  codestream_internal::QuantizationMatrixScales matrix_scales;
+  Status status = codestream_internal::SelectQuantizationMatrixScales(
+    prepared.matrix_scale_stats, options.rate_control_mode,
+    options.butteraugli_target, &matrix_scales);
+  if (!status.ok()) {
+    return status;
+  }
+  pipeline_options.adaptive_quantization.profile.x_qm_scale = matrix_scales.x;
+  pipeline_options.adaptive_quantization.profile.b_qm_scale = matrix_scales.b;
+  prepared.quantization.profile.x_qm_scale = matrix_scales.x;
+  prepared.quantization.profile.b_qm_scale = matrix_scales.b;
 
   GpuBackend* selected_gpu = nullptr;
   bool selected_metal = false;
   const WorkflowClock::time_point selection_begin = ProfileBegin(profile);
-  Status status = SelectAttemptBackend(
+  status = SelectAttemptBackend(
     prepared, options, supplied_backend, supplied_backend_is_qualified,
     resolve_production_backend, &selected_gpu, &selected_metal);
   if (!status.ok()) {
@@ -689,6 +724,142 @@ struct PreparedWorkflow {
 }
 
 }  // namespace
+
+Status codestream_internal::ComputeQuantizationMatrixScaleStats(
+  ConstImage3FView opsin,
+  QuantizationMatrixScaleStats* stats) {
+
+  if (stats == nullptr || !opsin.valid()) {
+    return Status::InvalidArgument(
+      "Quantization-matrix scale statistics input or output is invalid");
+  }
+
+  QuantizationMatrixScaleStats candidate;
+  for (size_t y = 0; y < opsin.height(); ++y) {
+    const float* row_x = opsin.plane[0].Row(y);
+    const float* row_y = opsin.plane[1].Row(y);
+    const float* row_b = opsin.plane[2].Row(y);
+    for (size_t x = 0; x < opsin.width(); ++x) {
+      const float current_x = row_x[x];
+      const float current_y = row_y[x];
+      const float current_b = row_b[x];
+      if (!std::isfinite(current_x) || !std::isfinite(current_y) ||
+          !std::isfinite(current_b)) {
+        return Status::InvalidArgument(
+          "Opsin pixels for matrix-scale statistics must be finite");
+      }
+      if (x == 0 || y == 0) {
+        continue;
+      }
+
+      const float previous_x = row_x[x - 1];
+      const float previous_row_x = opsin.plane[0].Row(y - 1)[x];
+      const float horizontal_x_edge =
+        std::abs(current_x - previous_x);
+      const float vertical_x_edge =
+        std::abs(current_x - previous_row_x);
+      if (!std::isfinite(horizontal_x_edge) ||
+          !std::isfinite(vertical_x_edge)) {
+        return Status::InvalidArgument(
+          "Opsin X edge for matrix-scale statistics is not finite");
+      }
+      candidate.x_edge = std::max(
+        candidate.x_edge,
+        std::max(horizontal_x_edge, vertical_x_edge));
+
+      const float previous_y = row_y[x - 1];
+      const float previous_b = row_b[x - 1];
+      const float previous_row_y = opsin.plane[1].Row(y - 1)[x];
+      const float previous_row_b = opsin.plane[2].Row(y - 1)[x];
+      const float current_difference = current_b - current_y;
+      const float horizontal_b_edge = std::abs(
+        current_difference - (previous_b - previous_y));
+      const float vertical_b_edge = std::abs(
+        current_difference - (previous_row_b - previous_row_y));
+      if (!std::isfinite(horizontal_b_edge) ||
+          !std::isfinite(vertical_b_edge)) {
+        return Status::InvalidArgument(
+          "Opsin B edge for matrix-scale statistics is not finite");
+      }
+      candidate.b_edge = std::max(
+        candidate.b_edge,
+        std::max(horizontal_b_edge, vertical_b_edge));
+
+      float exposed_blue = current_b - 1.2f * current_y;
+      if (exposed_blue >= 0.0f) {
+        exposed_blue *= std::abs(current_b - previous_b) +
+          std::abs(current_b - previous_row_b);
+        if (!std::isfinite(exposed_blue)) {
+          return Status::InvalidArgument(
+            "Exposed-blue matrix-scale statistic is not finite");
+        }
+        candidate.exposed_blue =
+          std::max(candidate.exposed_blue, exposed_blue);
+      } else if (!std::isfinite(exposed_blue)) {
+        return Status::InvalidArgument(
+          "Exposed-blue matrix-scale statistic is not finite");
+      }
+    }
+  }
+  if (!ValidQuantizationMatrixScaleStats(candidate)) {
+    return Status::InvalidArgument(
+      "Quantization-matrix scale statistics are not finite");
+  }
+  *stats = candidate;
+  return Status::Ok();
+}
+
+Status codestream_internal::SelectQuantizationMatrixScales(
+  const QuantizationMatrixScaleStats& stats,
+  VarDctRateControlMode mode,
+  float butteraugli_target,
+  QuantizationMatrixScales* scales) {
+
+  if (scales == nullptr || !ValidQuantizationMatrixScaleStats(stats)) {
+    return Status::InvalidArgument(
+      "Quantization-matrix scale selection input or output is invalid");
+  }
+  if (mode == VarDctRateControlMode::kMaximumError) {
+    *scales = {};
+    return Status::Ok();
+  }
+  if (mode != VarDctRateControlMode::kButteraugliTarget ||
+      !std::isfinite(butteraugli_target) || butteraugli_target <= 0.0f) {
+    return Status::InvalidArgument(
+      "Matrix-scale selection requires a positive Butteraugli target");
+  }
+
+  QuantizationMatrixScales candidate = {.x = 3, .b = 2};
+  for (float threshold : {2.5f, 5.5f, 9.5f}) {
+    if (butteraugli_target > threshold) {
+      ++candidate.x;
+    }
+  }
+  uint8_t x_pixel_adjustment = 0;
+  if (stats.x_edge >= 0.026f) {
+    x_pixel_adjustment = 3;
+  } else if (stats.x_edge >= 0.022f) {
+    x_pixel_adjustment = 2;
+  } else if (stats.x_edge >= 0.015f) {
+    x_pixel_adjustment = 1;
+  }
+  candidate.x = std::max<uint8_t>(candidate.x, 2 + x_pixel_adjustment);
+
+  const uint8_t exposed_blue_adjustment =
+    stats.exposed_blue >= 0.13f ? 1 : 0;
+  uint8_t b_pixel_adjustment = 0;
+  if (stats.b_edge > 0.38f) {
+    b_pixel_adjustment = 2 + exposed_blue_adjustment;
+  } else if (stats.b_edge > 0.33f) {
+    b_pixel_adjustment = 1 + exposed_blue_adjustment;
+  } else if (stats.b_edge > 0.28f) {
+    b_pixel_adjustment = exposed_blue_adjustment;
+  }
+  candidate.b += b_pixel_adjustment;
+
+  *scales = candidate;
+  return Status::Ok();
+}
 
 Status EncodeLinearRgbVarDctCodestreamImpl(
   ConstImage3FView linear_rgb,

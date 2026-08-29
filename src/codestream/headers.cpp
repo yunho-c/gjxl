@@ -110,6 +110,25 @@ Status WriteSize(uint32_t size, BitWriter* writer) {
   return Status::Internal("Validated JPEG XL dimension was not encoded");
 }
 
+Status WriteCoefficientOrderMask(uint16_t mask, BitWriter* writer) {
+  if (mask == 0x5F) {
+    return writer->WriteBits(2, 0);
+  }
+  if (mask == 0x13) {
+    return writer->WriteBits(2, 1);
+  }
+  if (mask == 0) {
+    return writer->WriteBits(2, 2);
+  }
+  if (mask >=
+      (uint16_t{1} << codestream_internal::kSimpleCoefficientOrderCount)) {
+    return Status::InvalidArgument(
+      "Coefficient-order mask cannot be encoded");
+  }
+  const std::array<BitField, 2> fields = {{{2, 3}, {13, mask}}};
+  return WriteFields(writer, fields);
+}
+
 Status WriteQuantizerInternal(QuantizerParams params, BitWriter* writer) {
   if (params.global_scale == 0 ||
       params.global_scale > kMaxEncoderGlobalScale ||
@@ -165,6 +184,7 @@ Status WriteCompactBlockContextMap(BitWriter* writer) {
     codestream_internal::kSimpleBlockContextMap.end());
   // Prefix codes are irrelevant to context-map serialization, but retaining
   // the four referenced clusters keeps the EntropyCode structurally valid.
+  map.uint_configs.resize(4, kDefaultHybridUintConfig);
   map.prefix_codes.resize(4);
   return WriteContextMap(map, writer);
 }
@@ -250,7 +270,11 @@ Status WriteSimpleFrameHeader(
   if (writer == nullptr) {
     return Status::InvalidArgument("Frame-header output is null");
   }
-  if (!profile.valid() || profile != SimpleVarDctCodestreamProfile{}) {
+  const SimpleVarDctCodestreamProfile defaults;
+  SimpleVarDctCodestreamProfile normalized = profile;
+  normalized.x_qm_scale = defaults.x_qm_scale;
+  normalized.b_qm_scale = defaults.b_qm_scale;
+  if (!profile.valid() || normalized != defaults) {
     return Status::InvalidArgument(
       "Profile cannot be represented by the simple frame header");
   }
@@ -335,13 +359,23 @@ Status WriteSimpleDcGlobal(
 }
 
 Status WriteSimpleAcGlobal(
-  size_t ac_group_count, const EntropyCode& ac_code, BitWriter* writer) {
+  size_t ac_group_count,
+  uint16_t used_order_mask,
+  std::span<const EntropyToken> order_tokens,
+  const EntropyCode* order_code,
+  const EntropyCode& ac_code,
+  BitWriter* writer) {
 
   if (writer == nullptr) {
     return Status::InvalidArgument("AC-global output is null");
   }
   if (ac_group_count == 0) {
     return Status::InvalidArgument("AC-group count is zero");
+  }
+  if ((used_order_mask == 0) != order_tokens.empty() ||
+      (used_order_mask == 0) != (order_code == nullptr)) {
+    return Status::InvalidArgument(
+      "Coefficient-order AC-global state is inconsistent");
   }
 
   BitWriter temporary;
@@ -357,14 +391,38 @@ Status WriteSimpleAcGlobal(
       return status;
     }
   }
-  const std::array<BitField, 3> fields = {{{2, 3}, {13, 0}, {1, 0}}};
-  if (Status status = WriteFields(&temporary, fields); !status.ok()) {
+  if (Status status = WriteCoefficientOrderMask(
+        used_order_mask, &temporary);
+      !status.ok()) {
+    return status;
+  }
+  if (used_order_mask != 0) {
+    if (Status status = temporary.WriteBits(1, 0); !status.ok()) {
+      return status;
+    }
+    if (Status status = WriteEntropyCode(*order_code, &temporary);
+        !status.ok()) {
+      return status;
+    }
+    if (Status status = WriteTokenStream(
+          order_tokens, *order_code, &temporary);
+        !status.ok()) {
+      return status;
+    }
+  }
+  if (Status status = temporary.WriteBits(1, 0); !status.ok()) {
     return status;
   }
   if (Status status = WriteEntropyCode(ac_code, &temporary); !status.ok()) {
     return status;
   }
   return AppendTemporary(writer, temporary);
+}
+
+Status WriteSimpleAcGlobal(
+  size_t ac_group_count, const EntropyCode& ac_code, BitWriter* writer) {
+  return WriteSimpleAcGlobal(
+    ac_group_count, 0, {}, nullptr, ac_code, writer);
 }
 
 }  // namespace gjxl

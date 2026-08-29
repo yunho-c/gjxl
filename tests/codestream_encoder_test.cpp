@@ -160,12 +160,26 @@ bool CheckCodestreamAndFrameHeaders() {
     return false;
   }
 
+  gjxl::SimpleVarDctCodestreamProfile scaled_profile;
+  scaled_profile.x_qm_scale = 3;
+  scaled_profile.b_qm_scale = 5;
+  gjxl::BitWriter scaled_frame;
+  if (!gjxl::WriteSimpleFrameHeader(scaled_profile, &scaled_frame).ok() ||
+      scaled_frame.bits_written() != 33 ||
+      !HasBytes(
+        scaled_frame,
+        std::array<uint8_t, 5>{0xE0, 0x1B, 0x2B, 0x48, 0x00})) {
+    std::cerr << "Scaled frame-header fixture failed\n";
+    return false;
+  }
+
   gjxl::BitWriter atomic;
   if (!atomic.WriteBits(3, 5).ok()) {
     return false;
   }
   gjxl::SimpleVarDctCodestreamProfile unsupported;
-  unsupported.x_qm_scale = 1;
+  unsupported.quantization_matrix_mode =
+    gjxl::QuantizationMatrixMode::kCustom;
   if (gjxl::WriteSimpleCodestreamHeader({0, 1}, &atomic).code() !=
         gjxl::StatusCode::kInvalidArgument ||
       gjxl::WriteSimpleFrameHeader(unsupported, &atomic).code() !=
@@ -237,7 +251,8 @@ uint64_t Fnv1a64(std::span<const uint8_t> bytes) {
 
 bool CheckEncodedFrame(
   size_t width, size_t height, size_t expected_size,
-  uint64_t expected_hash) {
+  uint64_t expected_hash, uint16_t expected_order_mask,
+  bool expect_custom_candidate) {
 
   gjxl::VarDctEncoderFrame frame;
   gjxl::Status status = MakeFrame(width, height, {3541, 10}, {}, &frame);
@@ -264,6 +279,19 @@ bool CheckEncodedFrame(
   if (!status.ok() || first.size() != expected_size ||
       hash != expected_hash || first != second || first != profiled ||
       profile_stage_total == 0 ||
+      profile.entropy_model_bits == 0 || profile.entropy_token_bits == 0 ||
+      profile.dc_entropy_clusters == 0 ||
+      profile.ac_entropy_clusters == 0 ||
+      profile.natural_candidate_bytes == 0 ||
+      profile.selected_coefficient_order_mask != expected_order_mask ||
+      (profile.custom_order_candidate_bytes != 0) != expect_custom_candidate ||
+      (expected_order_mask == 0 && expect_custom_candidate &&
+       profile.natural_candidate_bytes >=
+         profile.custom_order_candidate_bytes) ||
+      (expected_order_mask != 0 &&
+       (profile.custom_order_candidate_bytes != first.size() ||
+        profile.natural_candidate_bytes <=
+          profile.custom_order_candidate_bytes)) ||
       profile.total_nanoseconds < profile_stage_total || first.size() < 2 ||
       first[0] != 0xFF || first[1] != 0x0A) {
     std::cerr << "Encoded " << width << 'x' << height
@@ -277,8 +305,12 @@ bool CheckEncodedFrame(
 bool CheckAssemblyAndDeterminism() {
   // Values are pinned after independent header fixtures and section-layout
   // checks establish the constituent bit encodings.
-  return CheckEncodedFrame(8, 8, 237, 16983340324475694044ull) &&
-         CheckEncodedFrame(257, 9, 4064, 18196131526582637282ull);
+  return CheckEncodedFrame(
+           8, 8, 203, 7880082076206412069ull, 0, false) &&
+         CheckEncodedFrame(
+           64, 9, 1108, 14974260985011762859ull, 0, true) &&
+         CheckEncodedFrame(
+           257, 9, 3876, 14628565505877073831ull, 1, true);
 }
 
 bool CheckAtomicRejections() {

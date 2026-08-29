@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <limits>
 #include <new>
 #include <stdexcept>
@@ -21,6 +22,12 @@ namespace gjxl {
 namespace {
 
 constexpr size_t kCodeLengthCodeCount = 18;
+constexpr std::array<HybridUintConfig, 4> kBalancedUintConfigs = {{
+  {4, 2, 0},
+  {4, 1, 2},
+  {0, 0, 0},
+  {2, 0, 1},
+}};
 
 struct Histogram {
   std::array<uint64_t, kPrefixAlphabetSize> counts{};
@@ -55,7 +62,12 @@ struct Histogram {
     total_count += other.total_count;
     return true;
   }
+
 };
+
+uint8_t EncodedPrefixDepth(const PrefixCode& prefix, size_t symbol) {
+  return prefix.degenerate_symbol == symbol ? 0 : prefix.depths[symbol];
+}
 
 Status HistogramBitCost(Histogram* histogram) {
   if (histogram == nullptr) {
@@ -70,6 +82,13 @@ Status HistogramBitCost(Histogram* histogram) {
         histogram->counts, 15, depths);
       !status.ok()) {
     return status;
+  }
+  size_t populated_symbols = 0;
+  for (uint64_t count : histogram->counts) {
+    populated_symbols += count != 0;
+  }
+  if (populated_symbols == 1) {
+    return Status::Ok();
   }
   for (size_t index = 0; index < depths.size(); ++index) {
     histogram->bit_cost +=
@@ -101,11 +120,34 @@ Status HistogramDistance(
   return Status::Ok();
 }
 
+double HistogramShapeDistance(
+  const Histogram& left,
+  const Histogram& right) {
+
+  if (left.total_count == 0 || right.total_count == 0) {
+    return 0.0;
+  }
+  // Normalized L1 distance is cheap enough to screen every candidate cap
+  // before the exact prefix-cost refinement below.
+  const double left_scale = 1.0 / static_cast<double>(left.total_count);
+  const double right_scale = 1.0 / static_cast<double>(right.total_count);
+  double distance = 0.0;
+  for (size_t symbol = 0; symbol < kPrefixAlphabetSize; ++symbol) {
+    distance += std::abs(
+      static_cast<double>(left.counts[symbol]) * left_scale -
+      static_cast<double>(right.counts[symbol]) * right_scale);
+  }
+  return distance * static_cast<double>(
+    std::min(left.total_count, right.total_count));
+}
+
 Status FastClusterHistograms(
   const std::vector<Histogram>& input,
   size_t maximum_histograms,
+  bool fill_to_limit,
   std::vector<Histogram>* output,
-  std::vector<uint32_t>* histogram_symbols) {
+  std::vector<uint32_t>* histogram_symbols,
+  std::vector<size_t>* seed_indexes = nullptr) {
 
   if (input.empty() || maximum_histograms == 0 ||
       output == nullptr || histogram_symbols == nullptr) {
@@ -113,6 +155,10 @@ Status FastClusterHistograms(
   }
   output->clear();
   output->reserve(maximum_histograms);
+  if (seed_indexes != nullptr) {
+    seed_indexes->clear();
+    seed_indexes->reserve(maximum_histograms);
+  }
   histogram_symbols->assign(input.size(),
                             static_cast<uint32_t>(maximum_histograms));
 
@@ -139,6 +185,9 @@ Status FastClusterHistograms(
   while (output->size() < maximum_histograms) {
     (*histogram_symbols)[largest_index] =
       static_cast<uint32_t>(output->size());
+    if (seed_indexes != nullptr) {
+      seed_indexes->push_back(largest_index);
+    }
     output->push_back(prepared[largest_index]);
     distances[largest_index] = 0.0;
     largest_index = 0;
@@ -147,19 +196,29 @@ Status FastClusterHistograms(
         continue;
       }
       double distance = 0.0;
-      if (Status status = HistogramDistance(
-            prepared[index], output->back(), &distance);
-          !status.ok()) {
-        return status;
+      if (fill_to_limit) {
+        distance = HistogramShapeDistance(prepared[index], output->back());
+      } else {
+        if (Status status = HistogramDistance(
+              prepared[index], output->back(), &distance);
+            !status.ok()) {
+          return status;
+        }
       }
       distances[index] = std::min(distance, distances[index]);
       if (distances[index] > distances[largest_index]) {
         largest_index = index;
       }
     }
-    if (distances[largest_index] < kMinimumDistinctDistance) {
+    if ((fill_to_limit && distances[largest_index] <= 0.0) ||
+        (!fill_to_limit &&
+         distances[largest_index] < kMinimumDistinctDistance)) {
       break;
     }
+  }
+
+  if (seed_indexes != nullptr) {
+    return Status::Ok();
   }
 
   for (size_t index = 0; index < prepared.size(); ++index) {
@@ -196,26 +255,244 @@ Status FastClusterHistograms(
   return Status::Ok();
 }
 
+Status AssignHistogramsToSeeds(
+  const std::vector<Histogram>& input,
+  std::span<const size_t> seed_indexes,
+  bool use_shape_distance,
+  std::vector<Histogram>* output,
+  std::vector<uint32_t>* histogram_symbols) {
+
+  if (input.empty() || seed_indexes.empty() || output == nullptr ||
+      histogram_symbols == nullptr) {
+    return Status::InvalidArgument("Invalid histogram seed assignment");
+  }
+  std::vector<Histogram> prepared = input;
+  for (Histogram& histogram : prepared) {
+    if (Status status = HistogramBitCost(&histogram); !status.ok()) {
+      return status;
+    }
+  }
+  output->clear();
+  output->reserve(seed_indexes.size());
+  histogram_symbols->assign(
+    input.size(), static_cast<uint32_t>(seed_indexes.size()));
+  for (size_t cluster = 0; cluster < seed_indexes.size(); ++cluster) {
+    const size_t seed = seed_indexes[cluster];
+    if (seed >= prepared.size() ||
+        (prepared[seed].total_count == 0 && seed_indexes.size() != 1) ||
+        (*histogram_symbols)[seed] != seed_indexes.size()) {
+      return Status::Internal("Histogram seed is invalid");
+    }
+    output->push_back(prepared[seed]);
+    (*histogram_symbols)[seed] = static_cast<uint32_t>(cluster);
+  }
+  for (size_t index = 0; index < prepared.size(); ++index) {
+    if (prepared[index].total_count == 0) {
+      (*histogram_symbols)[index] = 0;
+      continue;
+    }
+    if ((*histogram_symbols)[index] != seed_indexes.size()) {
+      continue;
+    }
+    size_t best = 0;
+    double best_distance = 0.0;
+    if (use_shape_distance) {
+      best_distance = HistogramShapeDistance(prepared[index], (*output)[best]);
+    } else {
+      if (Status status = HistogramDistance(
+            prepared[index], (*output)[best], &best_distance);
+          !status.ok()) {
+        return status;
+      }
+    }
+    for (size_t candidate = 1; candidate < output->size(); ++candidate) {
+      double distance = 0.0;
+      if (use_shape_distance) {
+        distance =
+          HistogramShapeDistance(prepared[index], (*output)[candidate]);
+      } else {
+        if (Status status = HistogramDistance(
+              prepared[index], (*output)[candidate], &distance);
+            !status.ok()) {
+          return status;
+        }
+      }
+      if (distance < best_distance) {
+        best = candidate;
+        best_distance = distance;
+      }
+    }
+    if (!(*output)[best].AddHistogram(prepared[index])) {
+      return Status::InvalidArgument("Clustered histogram count overflow");
+    }
+    if (Status status = HistogramBitCost(&(*output)[best]); !status.ok()) {
+      return status;
+    }
+    (*histogram_symbols)[index] = static_cast<uint32_t>(best);
+  }
+  return Status::Ok();
+}
+
+Status CompactClusters(
+  const std::vector<Histogram>& input,
+  std::vector<Histogram>* clustered,
+  std::vector<uint32_t>* symbols) {
+
+  if (clustered == nullptr || symbols == nullptr ||
+      symbols->size() != input.size()) {
+    return Status::InvalidArgument("Invalid histogram compaction input");
+  }
+  std::vector<size_t> new_indexes(
+    clustered->size(), std::numeric_limits<size_t>::max());
+  size_t next_index = 0;
+  for (size_t index = 0; index < input.size(); ++index) {
+    if (input[index].total_count == 0) {
+      continue;
+    }
+    const uint32_t symbol = (*symbols)[index];
+    if (symbol >= clustered->size()) {
+      return Status::Internal("Histogram cluster index is invalid");
+    }
+    if (new_indexes[symbol] == std::numeric_limits<size_t>::max()) {
+      new_indexes[symbol] = next_index++;
+    }
+  }
+  if (next_index == 0) {
+    clustered->assign(1, Histogram{});
+    std::fill(symbols->begin(), symbols->end(), 0);
+    return Status::Ok();
+  }
+
+  std::vector<Histogram> reordered(next_index);
+  for (size_t index = 0; index < input.size(); ++index) {
+    if (input[index].total_count == 0) {
+      (*symbols)[index] = 0;
+      continue;
+    }
+    const size_t new_index = new_indexes[(*symbols)[index]];
+    if (new_index >= reordered.size() ||
+        !reordered[new_index].AddHistogram(input[index])) {
+      return Status::InvalidArgument("Clustered histogram count overflow");
+    }
+    (*symbols)[index] = static_cast<uint32_t>(new_index);
+  }
+  for (Histogram& histogram : reordered) {
+    if (Status status = HistogramBitCost(&histogram); !status.ok()) {
+      return status;
+    }
+  }
+  *clustered = std::move(reordered);
+  return Status::Ok();
+}
+
+Status RefineHistogramClusters(
+  const std::vector<Histogram>& input,
+  size_t maximum_sweeps,
+  std::vector<Histogram>* clustered,
+  std::vector<uint32_t>* symbols) {
+
+  if (clustered == nullptr || clustered->empty() || symbols == nullptr ||
+      symbols->size() != input.size()) {
+    return Status::InvalidArgument("Invalid histogram refinement input");
+  }
+  for (size_t sweep = 0; sweep < maximum_sweeps; ++sweep) {
+    std::vector<PrefixCode> cluster_codes(clustered->size());
+    for (size_t cluster = 0; cluster < clustered->size(); ++cluster) {
+      if (Status status = BuildPrefixCode(
+            (*clustered)[cluster].counts, &cluster_codes[cluster]);
+          !status.ok()) {
+        return status;
+      }
+    }
+    bool changed = false;
+    for (size_t index = 0; index < input.size(); ++index) {
+      if (input[index].total_count == 0) {
+        continue;
+      }
+      const size_t source = (*symbols)[index];
+      if (source >= clustered->size()) {
+        return Status::Internal("Histogram refinement state is invalid");
+      }
+
+      size_t best = 0;
+      uint64_t best_cost = std::numeric_limits<uint64_t>::max();
+      for (size_t candidate = 0; candidate < clustered->size(); ++candidate) {
+        uint64_t candidate_cost = 0;
+        bool representable = true;
+        for (size_t symbol = 0; symbol < kPrefixAlphabetSize; ++symbol) {
+          const uint64_t count = input[index].counts[symbol];
+          if (count == 0) {
+            continue;
+          }
+          if (cluster_codes[candidate].depths[symbol] == 0) {
+            representable = false;
+            break;
+          }
+          const uint8_t depth =
+            EncodedPrefixDepth(cluster_codes[candidate], symbol);
+          if ((depth != 0 &&
+               count > std::numeric_limits<uint64_t>::max() / depth) ||
+              candidate_cost > std::numeric_limits<uint64_t>::max() -
+                                 count * depth) {
+            representable = false;
+            break;
+          }
+          candidate_cost += count * depth;
+        }
+        if (representable && candidate_cost < best_cost) {
+          best = candidate;
+          best_cost = candidate_cost;
+        }
+      }
+      if (best_cost == std::numeric_limits<uint64_t>::max()) {
+        best = source;
+      }
+      changed = changed || best != source;
+      (*symbols)[index] = static_cast<uint32_t>(best);
+    }
+    if (Status status = CompactClusters(input, clustered, symbols);
+        !status.ok()) {
+      return status;
+    }
+    if (!changed) {
+      break;
+    }
+  }
+  return Status::Ok();
+}
+
 Status ClusterHistograms(
+  const std::vector<Histogram>& input,
+  size_t maximum_histograms,
+  bool fill_to_limit,
+  size_t refinement_sweeps,
   std::vector<Histogram>* histograms,
   std::vector<uint8_t>* context_map) {
 
-  if (histograms == nullptr || context_map == nullptr || histograms->empty()) {
+  if (histograms == nullptr || context_map == nullptr || input.empty() ||
+      maximum_histograms == 0) {
     return Status::InvalidArgument("Invalid histogram-clustering output");
   }
-  if (histograms->size() == 1) {
+  if (input.size() == 1) {
+    *histograms = input;
     context_map->assign(1, 0);
     return Status::Ok();
   }
 
-  const size_t maximum_histograms =
-    std::min(kMaximumPrefixClusters, histograms->size());
+  maximum_histograms = std::min(maximum_histograms, input.size());
   std::vector<Histogram> clustered;
   std::vector<uint32_t> symbols;
   if (Status status = FastClusterHistograms(
-        *histograms, maximum_histograms, &clustered, &symbols);
+        input, maximum_histograms, fill_to_limit, &clustered, &symbols);
       !status.ok()) {
     return status;
+  }
+  if (refinement_sweeps != 0) {
+    if (Status status = RefineHistogramClusters(
+          input, refinement_sweeps, &clustered, &symbols);
+        !status.ok()) {
+      return status;
+    }
   }
 
   std::vector<size_t> new_indexes(
@@ -242,9 +519,55 @@ Status ClusterHistograms(
   return Status::Ok();
 }
 
+Status ClusterHistogramsFromSeeds(
+  const std::vector<Histogram>& input,
+  std::span<const size_t> seed_indexes,
+  bool use_shape_distance,
+  size_t refinement_sweeps,
+  std::vector<Histogram>* histograms,
+  std::vector<uint8_t>* context_map) {
+
+  if (histograms == nullptr || context_map == nullptr) {
+    return Status::InvalidArgument("Invalid seeded histogram output");
+  }
+  std::vector<Histogram> clustered;
+  std::vector<uint32_t> symbols;
+  if (Status status = AssignHistogramsToSeeds(
+        input, seed_indexes, use_shape_distance, &clustered, &symbols);
+      !status.ok()) {
+    return status;
+  }
+  if (refinement_sweeps != 0) {
+    if (Status status = RefineHistogramClusters(
+          input, refinement_sweeps, &clustered, &symbols);
+        !status.ok()) {
+      return status;
+    }
+  } else if (Status status = CompactClusters(input, &clustered, &symbols);
+             !status.ok()) {
+    return status;
+  }
+  context_map->resize(symbols.size());
+  for (size_t index = 0; index < symbols.size(); ++index) {
+    if (symbols[index] >= clustered.size()) {
+      return Status::Internal("Histogram cluster index is invalid");
+    }
+    (*context_map)[index] = static_cast<uint8_t>(symbols[index]);
+  }
+  *histograms = std::move(clustered);
+  return Status::Ok();
+}
+
 Status ValidateConfig(HybridUintConfig config) {
   if (!config.valid()) {
     return Status::InvalidArgument("Invalid HybridUint configuration");
+  }
+  return Status::Ok();
+}
+
+Status ValidateFullWidthConfig(HybridUintConfig config) {
+  if (Status status = ValidateConfig(config); !status.ok()) {
+    return status;
   }
   HybridUintToken largest;
   if (Status status = EncodeHybridUint(
@@ -261,6 +584,7 @@ Status ValidateConfig(HybridUintConfig config) {
 
 Status ValidatePrefixCode(const PrefixCode& prefix) {
   std::array<size_t, 16> depth_counts{};
+  size_t symbol_count = 0;
   for (size_t symbol = 0; symbol < prefix.depths.size(); ++symbol) {
     const uint8_t depth = prefix.depths[symbol];
     if (depth > 15 ||
@@ -269,6 +593,19 @@ Status ValidatePrefixCode(const PrefixCode& prefix) {
       return Status::InvalidArgument("Prefix code is malformed");
     }
     ++depth_counts[depth];
+    symbol_count += depth != 0;
+  }
+  if (prefix.degenerate_symbol < kPrefixAlphabetSize) {
+    if (symbol_count != 1 ||
+        prefix.depths[prefix.degenerate_symbol] != 1 ||
+        prefix.bits[prefix.degenerate_symbol] != 0) {
+      return Status::InvalidArgument(
+        "Degenerate prefix code is inconsistent");
+    }
+  } else if (prefix.degenerate_symbol != kPrefixAlphabetSize ||
+             symbol_count == 1) {
+    return Status::InvalidArgument(
+      "Prefix-code degenerate symbol is invalid");
   }
 
   size_t available_slots = 1;
@@ -293,13 +630,11 @@ Status ValidatePrefixCode(const PrefixCode& prefix) {
 }
 
 Status ValidateEntropyCode(const EntropyCode& code) {
-  if (Status status = ValidateConfig(code.uint_config); !status.ok()) {
-    return status;
-  }
   if (code.context_count == 0 ||
       code.context_map.size() != code.context_count ||
       code.prefix_codes.empty() ||
-      code.prefix_codes.size() > kMaximumPrefixClusters) {
+      code.prefix_codes.size() > kMaximumPrefixClusters ||
+      code.uint_configs.size() != code.prefix_codes.size()) {
     return Status::InvalidArgument("Entropy-code dimensions are invalid");
   }
   for (uint8_t cluster : code.context_map) {
@@ -307,8 +642,13 @@ Status ValidateEntropyCode(const EntropyCode& code) {
       return Status::InvalidArgument("Entropy context map is invalid");
     }
   }
-  for (const PrefixCode& prefix : code.prefix_codes) {
-    if (Status status = ValidatePrefixCode(prefix); !status.ok()) {
+  for (size_t index = 0; index < code.prefix_codes.size(); ++index) {
+    if (Status status = ValidateConfig(code.uint_configs[index]);
+        !status.ok()) {
+      return status;
+    }
+    if (Status status = ValidatePrefixCode(code.prefix_codes[index]);
+        !status.ok()) {
       return status;
     }
   }
@@ -669,25 +1009,43 @@ Status WritePrefixCodeInternal(const PrefixCode& code, BitWriter* writer) {
     std::span<const uint8_t>(code.depths).first(alphabet_size), writer);
 }
 
+Status WriteUintConfig(HybridUintConfig config, BitWriter* writer) {
+  constexpr size_t kPrefixLogAlphabetSize = 15;
+  if (Status status = ValidateConfig(config); !status.ok()) {
+    return status;
+  }
+  if (Status status = WriteBits(writer, 4, config.split_exponent);
+      !status.ok()) {
+    return status;
+  }
+  if (config.split_exponent == kPrefixLogAlphabetSize) {
+    return Status::Ok();
+  }
+  const size_t msb_bits = std::bit_width(
+    static_cast<size_t>(config.split_exponent));
+  if (Status status = WriteBits(writer, msb_bits, config.msb_in_token);
+      !status.ok()) {
+    return status;
+  }
+  const size_t lsb_choices = static_cast<size_t>(
+    config.split_exponent - config.msb_in_token);
+  const size_t lsb_bits = std::bit_width(lsb_choices);
+  return WriteBits(writer, lsb_bits, config.lsb_in_token);
+}
+
 Status WritePrefixCodesInternal(
   std::span<const PrefixCode> prefix_codes,
-  HybridUintConfig config,
+  std::span<const HybridUintConfig> configs,
   BitWriter* writer) {
 
+  if (prefix_codes.empty() || configs.size() != prefix_codes.size()) {
+    return Status::InvalidArgument("Invalid prefix-code configurations");
+  }
   if (Status status = WriteBits(writer, 1, 1); !status.ok()) {
     return status;
   }
-  for (size_t index = 0; index < prefix_codes.size(); ++index) {
-    if (Status status = WriteBits(writer, 4, config.split_exponent);
-        !status.ok()) {
-      return status;
-    }
-    if (Status status = WriteBits(writer, 3, config.msb_in_token);
-        !status.ok()) {
-      return status;
-    }
-    if (Status status = WriteBits(writer, 2, config.lsb_in_token);
-        !status.ok()) {
+  for (const HybridUintConfig config : configs) {
+    if (Status status = WriteUintConfig(config, writer); !status.ok()) {
       return status;
     }
   }
@@ -735,7 +1093,7 @@ Status WriteValue(
     return Status::InvalidArgument(
       "Token symbol is absent from its prefix code");
   }
-  const uint8_t prefix_depth = prefix.depths[token.symbol];
+  const uint8_t prefix_depth = EncodedPrefixDepth(prefix, token.symbol);
   const uint64_t data = prefix.bits[token.symbol] |
     (static_cast<uint64_t>(token.extra_bits) << prefix_depth);
   return WriteBits(
@@ -746,32 +1104,59 @@ Status WriteContextMapInternal(const EntropyCode& code, BitWriter* writer) {
   if (*std::max_element(code.context_map.begin(), code.context_map.end()) == 0) {
     return WriteBits(writer, 3, 1);
   }
-  if (Status status = WriteBits(writer, 3, 0); !status.ok()) {
-    return status;
-  }
 
-  std::array<uint64_t, kPrefixAlphabetSize> counts{};
-  for (uint8_t cluster : code.context_map) {
-    ++counts[cluster];
-  }
-  PrefixCode context_prefix;
-  if (Status status = BuildPrefixCode(counts, &context_prefix); !status.ok()) {
-    return status;
-  }
-  const std::array<PrefixCode, 1> prefix_codes = {context_prefix};
-  if (Status status = WritePrefixCodesInternal(
-        prefix_codes, kDefaultHybridUintConfig, writer);
-      !status.ok()) {
-    return status;
-  }
-  for (uint8_t cluster : code.context_map) {
-    if (Status status = WriteValue(
-          cluster, context_prefix, kDefaultHybridUintConfig, writer);
+  BitWriter best;
+  size_t best_bits = std::numeric_limits<size_t>::max();
+  for (const HybridUintConfig config : kBalancedUintConfigs) {
+    std::array<uint64_t, kPrefixAlphabetSize> counts{};
+    bool valid = true;
+    for (uint8_t cluster : code.context_map) {
+      HybridUintToken token;
+      if (Status status = EncodeHybridUint(cluster, config, &token);
+          !status.ok()) {
+        return status;
+      }
+      if (token.symbol >= counts.size() ||
+          counts[token.symbol] == std::numeric_limits<uint64_t>::max()) {
+        valid = false;
+        break;
+      }
+      ++counts[token.symbol];
+    }
+    if (!valid) {
+      continue;
+    }
+
+    PrefixCode prefix;
+    if (Status status = BuildPrefixCode(counts, &prefix); !status.ok()) {
+      return status;
+    }
+    const std::array<PrefixCode, 1> prefixes = {prefix};
+    const std::array<HybridUintConfig, 1> configs = {config};
+    BitWriter candidate;
+    if (Status status = WritePrefixCodesInternal(
+          prefixes, configs, &candidate);
         !status.ok()) {
       return status;
     }
+    for (uint8_t cluster : code.context_map) {
+      if (Status status = WriteValue(cluster, prefix, config, &candidate);
+          !status.ok()) {
+        return status;
+      }
+    }
+    if (candidate.bits_written() < best_bits) {
+      best_bits = candidate.bits_written();
+      best = std::move(candidate);
+    }
   }
-  return Status::Ok();
+  if (best_bits == std::numeric_limits<size_t>::max()) {
+    return Status::InvalidArgument("Context map cannot be entropy encoded");
+  }
+  if (Status status = WriteBits(writer, 3, 0); !status.ok()) {
+    return status;
+  }
+  return writer->Append(best);
 }
 
 Status AppendTemporary(BitWriter* destination, BitWriter* temporary) {
@@ -779,6 +1164,282 @@ Status AppendTemporary(BitWriter* destination, BitWriter* temporary) {
     return Status::InvalidArgument("Bit-writer output is null");
   }
   return destination->Append(*temporary);
+}
+
+bool AddBits(uint64_t value, uint64_t* total) {
+  if (total == nullptr ||
+      *total > std::numeric_limits<uint64_t>::max() - value) {
+    return false;
+  }
+  *total += value;
+  return true;
+}
+
+Status BuildClusterCode(
+  std::span<const uint32_t> values,
+  HybridUintConfig base_config,
+  bool optimize_config,
+  HybridUintConfig* selected_config,
+  PrefixCode* selected_prefix) {
+
+  if (selected_config == nullptr || selected_prefix == nullptr) {
+    return Status::InvalidArgument("Cluster-code output is null");
+  }
+  std::vector<HybridUintConfig> configs = {base_config};
+  if (optimize_config) {
+    for (const HybridUintConfig config : kBalancedUintConfigs) {
+      if (std::find(configs.begin(), configs.end(), config) == configs.end()) {
+        configs.push_back(config);
+      }
+    }
+  }
+
+  uint64_t best_cost = std::numeric_limits<uint64_t>::max();
+  HybridUintConfig best_config;
+  PrefixCode best_prefix;
+  for (const HybridUintConfig config : configs) {
+    if (Status status = ValidateConfig(config); !status.ok()) {
+      return status;
+    }
+    std::array<uint64_t, kPrefixAlphabetSize> counts{};
+    uint64_t extra_bits = 0;
+    bool valid = true;
+    for (uint32_t value : values) {
+      HybridUintToken token;
+      if (Status status = EncodeHybridUint(value, config, &token);
+          !status.ok()) {
+        return status;
+      }
+      if (token.symbol >= counts.size() ||
+          counts[token.symbol] == std::numeric_limits<uint64_t>::max() ||
+          !AddBits(token.extra_bit_count, &extra_bits)) {
+        valid = false;
+        break;
+      }
+      ++counts[token.symbol];
+    }
+    if (!valid) {
+      continue;
+    }
+
+    PrefixCode prefix;
+    if (Status status = BuildPrefixCode(counts, &prefix); !status.ok()) {
+      return status;
+    }
+    uint64_t token_bits = extra_bits;
+    for (size_t symbol = 0; symbol < counts.size(); ++symbol) {
+      if (counts[symbol] == 0) {
+        continue;
+      }
+      if (prefix.depths[symbol] == 0) {
+        valid = false;
+        break;
+      }
+      const uint8_t depth = EncodedPrefixDepth(prefix, symbol);
+      if ((depth != 0 &&
+           counts[symbol] > std::numeric_limits<uint64_t>::max() / depth) ||
+          !AddBits(counts[symbol] * depth, &token_bits)) {
+        valid = false;
+        break;
+      }
+    }
+    if (!valid) {
+      continue;
+    }
+
+    const std::array<PrefixCode, 1> prefixes = {prefix};
+    const std::array<HybridUintConfig, 1> candidate_configs = {config};
+    BitWriter model;
+    if (Status status = WritePrefixCodesInternal(
+          prefixes, candidate_configs, &model);
+        !status.ok()) {
+      return status;
+    }
+    if (model.bits_written() == 0) {
+      return Status::Internal("Prefix model omitted its marker");
+    }
+    uint64_t total = token_bits;
+    if (!AddBits(model.bits_written() - 1, &total)) {
+      return Status::InvalidArgument("Entropy cost overflow");
+    }
+    if (total < best_cost) {
+      best_cost = total;
+      best_config = config;
+      best_prefix = prefix;
+    }
+  }
+  if (best_cost == std::numeric_limits<uint64_t>::max()) {
+    return Status::InvalidArgument("Cluster values exceed the prefix alphabet");
+  }
+  *selected_config = best_config;
+  *selected_prefix = best_prefix;
+  return Status::Ok();
+}
+
+Status MeasureEntropyCode(
+  std::span<const std::vector<EntropyToken>> section_tokens,
+  const EntropyCode& code,
+  EntropyCodeCost* cost) {
+
+  if (cost == nullptr) {
+    return Status::InvalidArgument("Entropy cost output is null");
+  }
+  BitWriter model;
+  if (Status status = WriteEntropyCode(code, &model); !status.ok()) {
+    return status;
+  }
+  EntropyCodeCost candidate;
+  candidate.model_bits = model.bits_written();
+  candidate.cluster_count = code.prefix_codes.size();
+  for (const std::vector<EntropyToken>& section : section_tokens) {
+    for (const EntropyToken& token : section) {
+      if (token.context >= code.context_count) {
+        return Status::InvalidArgument("Entropy token context is out of range");
+      }
+      const size_t cluster = code.context_map[token.context];
+      HybridUintToken encoded;
+      if (Status status = EncodeHybridUint(
+            token.value, code.uint_configs[cluster], &encoded);
+          !status.ok()) {
+        return status;
+      }
+      if (encoded.symbol >= kPrefixAlphabetSize ||
+          code.prefix_codes[cluster].depths[encoded.symbol] == 0 ||
+          !AddBits(
+            EncodedPrefixDepth(
+              code.prefix_codes[cluster], encoded.symbol) +
+              encoded.extra_bit_count,
+            &candidate.token_bits)) {
+        return Status::InvalidArgument("Entropy token cannot be measured");
+      }
+    }
+  }
+  *cost = candidate;
+  return Status::Ok();
+}
+
+Status BuildEntropyCodeForPartition(
+  std::span<const std::vector<EntropyToken>> section_tokens,
+  const EntropyCodeOptions& options,
+  std::span<const uint8_t> clustered_map,
+  size_t cluster_count,
+  bool optimize_configs,
+  EntropyCode* code,
+  EntropyCodeCost* cost) {
+
+  if (code == nullptr || cost == nullptr || cluster_count == 0 ||
+      cluster_count > kMaximumPrefixClusters) {
+    return Status::InvalidArgument("Invalid entropy partition output");
+  }
+  EntropyCode candidate;
+  candidate.context_count = options.context_count;
+  candidate.context_map.resize(options.context_count);
+  for (size_t context = 0; context < options.context_count; ++context) {
+    const size_t initial = options.initial_context_map.empty()
+      ? context
+      : options.initial_context_map[context];
+    if (initial >= clustered_map.size()) {
+      return Status::Internal("Clustered context map is incomplete");
+    }
+    candidate.context_map[context] = clustered_map[initial];
+  }
+
+  std::vector<std::vector<uint32_t>> values(cluster_count);
+  for (const std::vector<EntropyToken>& section : section_tokens) {
+    for (const EntropyToken& token : section) {
+      if (token.context >= candidate.context_count) {
+        return Status::InvalidArgument("Entropy token context is out of range");
+      }
+      const size_t cluster = candidate.context_map[token.context];
+      if (cluster >= values.size()) {
+        return Status::Internal("Entropy cluster index is invalid");
+      }
+      values[cluster].push_back(token.value);
+    }
+  }
+
+  candidate.uint_configs.resize(cluster_count);
+  candidate.prefix_codes.resize(cluster_count);
+  for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+    if (Status status = BuildClusterCode(
+          values[cluster], options.uint_config, optimize_configs,
+          &candidate.uint_configs[cluster], &candidate.prefix_codes[cluster]);
+        !status.ok()) {
+      return status;
+    }
+  }
+  EntropyCodeCost candidate_cost;
+  if (Status status = MeasureEntropyCode(
+        section_tokens, candidate, &candidate_cost);
+      !status.ok()) {
+    return status;
+  }
+  *code = std::move(candidate);
+  *cost = candidate_cost;
+  return Status::Ok();
+}
+
+Status BuildFixedEntropyCodeForPartition(
+  const EntropyCodeOptions& options,
+  std::span<const uint8_t> clustered_map,
+  std::span<const Histogram> histograms,
+  uint64_t extra_bits,
+  EntropyCode* code,
+  EntropyCodeCost* cost) {
+
+  if (code == nullptr || cost == nullptr || histograms.empty() ||
+      histograms.size() > kMaximumPrefixClusters) {
+    return Status::InvalidArgument("Invalid fixed entropy partition output");
+  }
+  EntropyCode candidate;
+  candidate.context_count = options.context_count;
+  candidate.context_map.resize(options.context_count);
+  for (size_t context = 0; context < options.context_count; ++context) {
+    const size_t initial = options.initial_context_map.empty()
+      ? context
+      : options.initial_context_map[context];
+    if (initial >= clustered_map.size()) {
+      return Status::Internal("Clustered context map is incomplete");
+    }
+    candidate.context_map[context] = clustered_map[initial];
+  }
+  candidate.uint_configs.assign(histograms.size(), options.uint_config);
+  candidate.prefix_codes.resize(histograms.size());
+  uint64_t token_bits = extra_bits;
+  for (size_t cluster = 0; cluster < histograms.size(); ++cluster) {
+    if (Status status = BuildPrefixCode(
+          histograms[cluster].counts, &candidate.prefix_codes[cluster]);
+        !status.ok()) {
+      return status;
+    }
+    for (size_t symbol = 0; symbol < kPrefixAlphabetSize; ++symbol) {
+      const uint64_t count = histograms[cluster].counts[symbol];
+      if (count == 0) {
+        continue;
+      }
+      if (candidate.prefix_codes[cluster].depths[symbol] == 0) {
+        return Status::InvalidArgument("Entropy token bit count overflow");
+      }
+      const uint8_t depth =
+        EncodedPrefixDepth(candidate.prefix_codes[cluster], symbol);
+      if ((depth != 0 &&
+           count > std::numeric_limits<uint64_t>::max() / depth) ||
+          !AddBits(count * depth, &token_bits)) {
+        return Status::InvalidArgument("Entropy token bit count overflow");
+      }
+    }
+  }
+  BitWriter model;
+  if (Status status = WriteEntropyCode(candidate, &model); !status.ok()) {
+    return status;
+  }
+  *code = std::move(candidate);
+  *cost = {
+    .model_bits = model.bits_written(),
+    .token_bits = token_bits,
+    .cluster_count = histograms.size(),
+  };
+  return Status::Ok();
 }
 
 }  // namespace
@@ -841,6 +1502,16 @@ Status BuildPrefixCode(
       !status.ok()) {
     return status;
   }
+  size_t populated_symbols = 0;
+  for (size_t symbol = 0; symbol < counts.size(); ++symbol) {
+    if (counts[symbol] != 0) {
+      ++populated_symbols;
+      candidate.degenerate_symbol = static_cast<uint16_t>(symbol);
+    }
+  }
+  if (populated_symbols != 1) {
+    candidate.degenerate_symbol = kPrefixAlphabetSize;
+  }
   *code = candidate;
   return Status::Ok();
 }
@@ -848,12 +1519,14 @@ Status BuildPrefixCode(
 Status OptimizeEntropyCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCodeOptions& options,
-  EntropyCode* code) {
+  EntropyCode* code,
+  EntropyCodeCost* cost) {
 
   if (code == nullptr || options.context_count == 0) {
     return Status::InvalidArgument("Invalid entropy-code output or context count");
   }
-  if (Status status = ValidateConfig(options.uint_config); !status.ok()) {
+  if (Status status = ValidateFullWidthConfig(options.uint_config);
+      !status.ok()) {
     return status;
   }
 
@@ -878,6 +1551,7 @@ Status OptimizeEntropyCode(
 
   try {
     std::vector<Histogram> histograms(histogram_count);
+    uint64_t fixed_extra_bits = 0;
     for (const std::vector<EntropyToken>& section : section_tokens) {
       for (const EntropyToken& token : section) {
         if (token.context >= options.context_count) {
@@ -893,6 +1567,9 @@ Status OptimizeEntropyCode(
           return Status::InvalidArgument(
             "HybridUint symbol is outside the prefix alphabet");
         }
+        if (!AddBits(encoded.extra_bit_count, &fixed_extra_bits)) {
+          return Status::InvalidArgument("Entropy token bit count overflow");
+        }
         const size_t histogram = options.initial_context_map.empty()
           ? token.context
           : options.initial_context_map[token.context];
@@ -902,31 +1579,168 @@ Status OptimizeEntropyCode(
       }
     }
 
-    std::vector<uint8_t> clustered_map;
-    if (Status status = ClusterHistograms(&histograms, &clustered_map);
+    std::vector<Histogram> legacy_histograms;
+    std::vector<uint8_t> legacy_map;
+    if (Status status = ClusterHistograms(
+          histograms, std::min<size_t>(8, histograms.size()), false, 0,
+          &legacy_histograms, &legacy_map);
         !status.ok()) {
       return status;
     }
 
-    EntropyCode candidate;
-    candidate.uint_config = options.uint_config;
-    candidate.context_count = options.context_count;
-    candidate.context_map.resize(options.context_count);
-    for (size_t context = 0; context < options.context_count; ++context) {
-      const size_t initial = options.initial_context_map.empty()
-        ? context
-        : options.initial_context_map[context];
-      candidate.context_map[context] = clustered_map[initial];
+    EntropyCode best_code;
+    EntropyCodeCost best_cost;
+    if (Status status = BuildFixedEntropyCodeForPartition(
+          options, legacy_map, legacy_histograms, fixed_extra_bits, &best_code,
+          &best_cost);
+        !status.ok()) {
+      return status;
     }
-    candidate.prefix_codes.resize(histograms.size());
-    for (size_t index = 0; index < histograms.size(); ++index) {
-      if (Status status = BuildPrefixCode(
-            histograms[index].counts, &candidate.prefix_codes[index]);
+
+    uint64_t best_total = best_cost.model_bits;
+    if (!AddBits(best_cost.token_bits, &best_total)) {
+      return Status::InvalidArgument("Entropy cost overflow");
+    }
+    std::vector<uint8_t> best_partition_map = legacy_map;
+    size_t best_partition_count = legacy_histograms.size();
+    // Build one deterministic farthest-first seed order, then reuse its
+    // prefixes to screen all supported cluster caps by serialized cost.
+    std::vector<Histogram> maximum_seeded_histograms;
+    std::vector<uint32_t> maximum_seeded_symbols;
+    std::vector<size_t> seed_indexes;
+    if (Status status = FastClusterHistograms(
+          histograms,
+          std::min(kMaximumPrefixClusters, histograms.size()), true,
+          &maximum_seeded_histograms, &maximum_seeded_symbols,
+          &seed_indexes);
+        !status.ok()) {
+      return status;
+    }
+    size_t best_partition_cap = std::min<size_t>(8, seed_indexes.size());
+    constexpr std::array<size_t, 6> kCandidateClusterCaps = {
+      1, 2, 4, 8, 16, 32};
+    size_t previous_cap = 0;
+    for (size_t cap : kCandidateClusterCaps) {
+      cap = std::min(cap, seed_indexes.size());
+      if (cap == 0 || cap == previous_cap) {
+        continue;
+      }
+      previous_cap = cap;
+      std::vector<Histogram> candidate_histograms;
+      std::vector<uint8_t> candidate_map;
+      if (Status status = ClusterHistogramsFromSeeds(
+            histograms, std::span<const size_t>(seed_indexes).first(cap), true,
+            0, &candidate_histograms, &candidate_map);
           !status.ok()) {
         return status;
       }
+      EntropyCode candidate_code;
+      EntropyCodeCost candidate_cost;
+      if (Status status = BuildFixedEntropyCodeForPartition(
+            options, candidate_map, candidate_histograms, fixed_extra_bits,
+            &candidate_code, &candidate_cost);
+          !status.ok()) {
+        return status;
+      }
+      uint64_t candidate_total = candidate_cost.model_bits;
+      if (!AddBits(candidate_cost.token_bits, &candidate_total)) {
+        return Status::InvalidArgument("Entropy cost overflow");
+      }
+      if (candidate_total < best_total) {
+        best_total = candidate_total;
+        best_code = std::move(candidate_code);
+        best_cost = candidate_cost;
+        best_partition_map = std::move(candidate_map);
+        best_partition_count = candidate_histograms.size();
+        best_partition_cap = cap;
+      }
     }
-    *code = std::move(candidate);
+
+    // Refine the screened winner and its next larger cap with actual prefix
+    // depths. This captures most of the exact-search benefit without scoring
+    // every cap through repeated Huffman rebuilds.
+    std::vector<Histogram> refined_histograms;
+    std::vector<uint8_t> refined_map;
+    if (Status status = ClusterHistogramsFromSeeds(
+          histograms,
+          std::span<const size_t>(seed_indexes).first(best_partition_cap),
+          false, 2, &refined_histograms, &refined_map);
+        !status.ok()) {
+      return status;
+    }
+    EntropyCode refined_code;
+    EntropyCodeCost refined_cost;
+    if (Status status = BuildFixedEntropyCodeForPartition(
+          options, refined_map, refined_histograms, fixed_extra_bits,
+          &refined_code, &refined_cost);
+        !status.ok()) {
+      return status;
+    }
+    uint64_t refined_total = refined_cost.model_bits;
+    if (!AddBits(refined_cost.token_bits, &refined_total)) {
+      return Status::InvalidArgument("Entropy cost overflow");
+    }
+    if (refined_total < best_total) {
+      best_total = refined_total;
+      best_code = std::move(refined_code);
+      best_cost = refined_cost;
+      best_partition_map = std::move(refined_map);
+      best_partition_count = refined_histograms.size();
+    }
+
+    const size_t higher_cap =
+      std::min(seed_indexes.size(), best_partition_cap * 2);
+    if (higher_cap > best_partition_cap) {
+      std::vector<Histogram> higher_histograms;
+      std::vector<uint8_t> higher_map;
+      if (Status status = ClusterHistogramsFromSeeds(
+            histograms,
+            std::span<const size_t>(seed_indexes).first(higher_cap), false, 2,
+            &higher_histograms, &higher_map);
+          !status.ok()) {
+        return status;
+      }
+      EntropyCode higher_code;
+      EntropyCodeCost higher_cost;
+      if (Status status = BuildFixedEntropyCodeForPartition(
+            options, higher_map, higher_histograms, fixed_extra_bits,
+            &higher_code, &higher_cost);
+          !status.ok()) {
+        return status;
+      }
+      uint64_t higher_total = higher_cost.model_bits;
+      if (!AddBits(higher_cost.token_bits, &higher_total)) {
+        return Status::InvalidArgument("Entropy cost overflow");
+      }
+      if (higher_total < best_total) {
+        best_total = higher_total;
+        best_code = std::move(higher_code);
+        best_cost = higher_cost;
+        best_partition_map = std::move(higher_map);
+        best_partition_count = higher_histograms.size();
+      }
+    }
+
+    EntropyCode configured_code;
+    EntropyCodeCost configured_cost;
+    if (Status status = BuildEntropyCodeForPartition(
+          section_tokens, options, best_partition_map, best_partition_count,
+          true, &configured_code, &configured_cost);
+        !status.ok()) {
+      return status;
+    }
+    uint64_t configured_total = configured_cost.model_bits;
+    if (!AddBits(configured_cost.token_bits, &configured_total)) {
+      return Status::InvalidArgument("Entropy cost overflow");
+    }
+    if (configured_total < best_total) {
+      best_code = std::move(configured_code);
+      best_cost = configured_cost;
+    }
+    *code = std::move(best_code);
+    if (cost != nullptr) {
+      *cost = best_cost;
+    }
     return Status::Ok();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Entropy-code allocation failed");
@@ -940,17 +1754,30 @@ Status WritePrefixCodes(
   HybridUintConfig config,
   BitWriter* writer) {
 
+  try {
+    const std::vector<HybridUintConfig> configs(prefix_codes.size(), config);
+    return WritePrefixCodes(prefix_codes, configs, writer);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory("Prefix-code serialization allocation failed");
+  } catch (const std::length_error&) {
+    return Status::OutOfMemory("Prefix-code serialization is too large");
+  }
+}
+
+Status WritePrefixCodes(
+  std::span<const PrefixCode> prefix_codes,
+  std::span<const HybridUintConfig> configs,
+  BitWriter* writer) {
+
   if (writer == nullptr || prefix_codes.empty() ||
-      prefix_codes.size() > kMaximumPrefixClusters) {
+      prefix_codes.size() > kMaximumPrefixClusters ||
+      configs.size() != prefix_codes.size()) {
     return Status::InvalidArgument("Invalid prefix-code serialization input");
   }
-  if (Status status = ValidateConfig(config); !status.ok()) {
-    return status;
-  }
   EntropyCode validation;
-  validation.uint_config = config;
   validation.context_count = 1;
   validation.context_map = {0};
+  validation.uint_configs.assign(configs.begin(), configs.end());
   validation.prefix_codes.assign(prefix_codes.begin(), prefix_codes.end());
   if (Status status = ValidateEntropyCode(validation); !status.ok()) {
     return status;
@@ -959,7 +1786,7 @@ Status WritePrefixCodes(
   BitWriter temporary;
   try {
     if (Status status = WritePrefixCodesInternal(
-          prefix_codes, config, &temporary);
+          prefix_codes, configs, &temporary);
         !status.ok()) {
       return status;
     }
@@ -1006,7 +1833,7 @@ Status WriteEntropyCode(const EntropyCode& code, BitWriter* writer) {
       return status;
     }
     if (Status status = WritePrefixCodesInternal(
-          code.prefix_codes, code.uint_config, &temporary);
+          code.prefix_codes, code.uint_configs, &temporary);
         !status.ok()) {
       return status;
     }
@@ -1038,7 +1865,7 @@ Status WriteTokenStream(
     if (Status status = WriteValue(
           token.value,
           code.prefix_codes[cluster],
-          code.uint_config,
+          code.uint_configs[cluster],
           &temporary);
         !status.ok()) {
       return status;

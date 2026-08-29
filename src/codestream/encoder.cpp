@@ -22,6 +22,7 @@
 #include "codec/vardct_frame.h"
 #include "codestream/ac_group.h"
 #include "codestream/bit_writer.h"
+#include "codestream/coefficient_order.h"
 #include "codestream/dc_group.h"
 #include "codestream/encoder_internal.h"
 #include "codestream/entropy.h"
@@ -130,30 +131,302 @@ Status WriteDcGroupSection(
   return WriteTokenStream(metadata_tokens, code, writer);
 }
 
-Status CombineFrameSections(
-  std::vector<BitWriter>* sections,
+struct AcEncodingCandidate {
+  SimpleCoefficientOrders orders;
+  std::vector<std::vector<EntropyToken>> streams;
+  std::vector<EntropyToken> order_tokens;
+  EntropyCode ac_code;
+  EntropyCode order_code;
+  EntropyCodeCost ac_cost;
+  EntropyCodeCost order_cost;
+};
+
+Status MoveAcStreams(
+  std::vector<SimpleAcGroupTokenStream>* groups,
+  std::vector<std::vector<EntropyToken>>* streams) {
+
+  if (groups == nullptr || streams == nullptr) {
+    return Status::InvalidArgument("AC stream output is null");
+  }
+  try {
+    std::vector<std::vector<EntropyToken>> candidate;
+    candidate.reserve(groups->size());
+    for (SimpleAcGroupTokenStream& group : *groups) {
+      candidate.push_back(std::move(group.tokens));
+    }
+    *streams = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
+Status OptimizeAcCandidate(AcEncodingCandidate* candidate) {
+  if (candidate == nullptr || candidate->streams.empty()) {
+    return Status::InvalidArgument("AC encoding candidate is empty");
+  }
+  Status status = OptimizeEntropyCode(
+    candidate->streams, {.context_count = kSimpleAcContextCount},
+    &candidate->ac_code, &candidate->ac_cost);
+  if (!status.ok()) {
+    return status;
+  }
+  if (candidate->orders.used_order_mask == 0) {
+    if (!candidate->order_tokens.empty()) {
+      return Status::Internal("Natural AC candidate retained order tokens");
+    }
+    return Status::Ok();
+  }
+  const std::span<const std::vector<EntropyToken>> order_streams(
+    &candidate->order_tokens, 1);
+  return OptimizeEntropyCode(
+    order_streams,
+    {
+      .context_count = kSimplePermutationContextCount,
+      .uint_config = {0, 0, 0},
+    },
+    &candidate->order_code, &candidate->order_cost);
+}
+
+Status WriteCommonSections(
+  const VarDctEncoderFrame& frame,
+  std::span<const SimpleDcGroupTokenStreams> dc_groups,
+  std::span<const std::vector<EntropyToken>> dc_streams,
+  const EntropyCode& dc_code,
+  std::vector<BitWriter>* sections) {
+
+  if (sections == nullptr || dc_groups.empty() ||
+      dc_streams.size() != 2 * dc_groups.size()) {
+    return Status::InvalidArgument("Common codestream sections are invalid");
+  }
+  try {
+    std::vector<BitWriter> candidate(1 + dc_groups.size());
+    Status status = WriteSimpleDcGlobal(
+      frame.quantizer().params(), dc_groups.size(), dc_code, &candidate[0]);
+    if (!status.ok()) {
+      return status;
+    }
+    status = RunParallelSections(
+      dc_groups.size(),
+      [&](size_t index) {
+        return WriteDcGroupSection(
+          dc_groups[index], dc_streams[2 * index],
+          dc_streams[2 * index + 1], dc_code, &candidate[1 + index]);
+      });
+    if (!status.ok()) {
+      return status;
+    }
+    *sections = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
+Status WriteAcSections(
+  const AcEncodingCandidate& ac,
+  std::vector<BitWriter>* sections) {
+
+  if (sections == nullptr || ac.streams.empty()) {
+    return Status::InvalidArgument("AC codestream sections are invalid");
+  }
+  try {
+    std::vector<BitWriter> candidate(1 + ac.streams.size());
+    Status status = WriteSimpleAcGlobal(
+      ac.streams.size(), ac.orders.used_order_mask, ac.order_tokens,
+      ac.orders.used_order_mask == 0 ? nullptr : &ac.order_code,
+      ac.ac_code, &candidate[0]);
+    if (!status.ok()) {
+      return status;
+    }
+    status = RunParallelSections(
+      ac.streams.size(),
+      [&](size_t index) {
+        return WriteTokenStream(
+          ac.streams[index], ac.ac_code, &candidate[1 + index]);
+      });
+    if (!status.ok()) {
+      return status;
+    }
+    *sections = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
+Status PhysicalSectionSizes(
+  std::span<const BitWriter> common_sections,
+  std::span<const BitWriter> ac_sections,
   size_t ac_group_count,
+  std::vector<size_t>* sizes) {
+
+  if (sizes == nullptr || common_sections.empty() || ac_sections.empty() ||
+      ac_group_count == std::numeric_limits<size_t>::max() ||
+      ac_sections.size() != ac_group_count + 1) {
+    return Status::InvalidArgument("Frame-section dimensions are invalid");
+  }
+  sizes->clear();
+  if (ac_group_count == 1) {
+    if (common_sections.size() != 2 || ac_sections.size() != 2) {
+      return Status::Internal(
+        "Single-group frame has an invalid section count");
+    }
+    size_t combined_bits = 0;
+    for (const BitWriter& section : common_sections) {
+      if (combined_bits >
+          std::numeric_limits<size_t>::max() - section.bits_written()) {
+        return AllocationFailure();
+      }
+      combined_bits += section.bits_written();
+    }
+    for (const BitWriter& section : ac_sections) {
+      if (combined_bits >
+          std::numeric_limits<size_t>::max() - section.bits_written()) {
+        return AllocationFailure();
+      }
+      combined_bits += section.bits_written();
+    }
+    if (combined_bits > std::numeric_limits<size_t>::max() - 7) {
+      return AllocationFailure();
+    }
+    sizes->push_back((combined_bits + 7) / 8);
+    return Status::Ok();
+  }
+
+  try {
+    if (common_sections.size() > sizes->max_size() - ac_sections.size()) {
+      return AllocationFailure();
+    }
+    sizes->reserve(common_sections.size() + ac_sections.size());
+    for (const BitWriter& section : common_sections) {
+      sizes->push_back(section.padded_size());
+    }
+    for (const BitWriter& section : ac_sections) {
+      sizes->push_back(section.padded_size());
+    }
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
+Status WriteFramePrefix(
+  const VarDctEncoderFrame& frame,
   BitWriter* writer) {
 
-  if (sections == nullptr || writer == nullptr || sections->empty()) {
-    return Status::InvalidArgument("Frame-section assembly input is invalid");
+  Status status = WriteSimpleCodestreamHeader(
+    frame.geometry().frame(), writer);
+  if (!status.ok()) {
+    return status;
   }
+  return WriteSimpleFrameHeader(frame.profile(), writer);
+}
 
-  // JPEG XL collapses the four logical sections of a single-group frame into
-  // one physical TOC section.
-  if (ac_group_count == 1) {
-    if (sections->size() != 4) {
-      return Status::Internal("Single-group frame has an invalid section count");
+Status MeasureCandidateSize(
+  const VarDctEncoderFrame& frame,
+  std::span<const BitWriter> common_sections,
+  std::span<const BitWriter> ac_sections,
+  size_t ac_group_count,
+  size_t* size) {
+
+  if (size == nullptr) {
+    return Status::InvalidArgument("Codestream candidate size output is null");
+  }
+  std::vector<size_t> section_sizes;
+  Status status = PhysicalSectionSizes(
+    common_sections, ac_sections, ac_group_count, &section_sizes);
+  if (!status.ok()) {
+    return status;
+  }
+  BitWriter prefix;
+  status = WriteFramePrefix(frame, &prefix);
+  if (!status.ok()) {
+    return status;
+  }
+  status = WriteTocSizes(section_sizes, &prefix);
+  if (!status.ok()) {
+    return status;
+  }
+  size_t candidate = prefix.padded_size();
+  for (size_t section_size : section_sizes) {
+    if (candidate > std::numeric_limits<size_t>::max() - section_size) {
+      return AllocationFailure();
     }
-    for (size_t index = 1; index < sections->size(); ++index) {
-      if (Status status = (*sections)[0].Append((*sections)[index]);
-          !status.ok()) {
-        return status;
+    candidate += section_size;
+  }
+  *size = candidate;
+  return Status::Ok();
+}
+
+Status AssembleCandidate(
+  const VarDctEncoderFrame& frame,
+  std::span<const BitWriter> common_sections,
+  std::span<const BitWriter> ac_sections,
+  size_t ac_group_count,
+  std::vector<uint8_t>* output) {
+
+  if (output == nullptr) {
+    return Status::InvalidArgument("Codestream candidate output is null");
+  }
+  try {
+    std::vector<size_t> section_sizes;
+    Status status = PhysicalSectionSizes(
+      common_sections, ac_sections, ac_group_count, &section_sizes);
+    if (!status.ok()) {
+      return status;
+    }
+    BitWriter writer;
+    status = WriteFramePrefix(frame, &writer);
+    if (!status.ok()) {
+      return status;
+    }
+    if (ac_group_count == 1) {
+      BitWriter collapsed;
+      for (const BitWriter& section : common_sections) {
+        if (Status append = collapsed.Append(section); !append.ok()) {
+          return append;
+        }
+      }
+      for (const BitWriter& section : ac_sections) {
+        if (Status append = collapsed.Append(section); !append.ok()) {
+          return append;
+        }
+      }
+      status = WriteTocAndSections(
+        std::span<const BitWriter>(&collapsed, 1), &writer);
+    } else {
+      status = WriteTocSizes(section_sizes, &writer);
+      if (status.ok()) {
+        status = ConcatenateSections(common_sections, &writer);
+      }
+      if (status.ok()) {
+        status = ConcatenateSections(ac_sections, &writer);
       }
     }
-    sections->resize(1);
+    if (!status.ok()) {
+      return status;
+    }
+    if (!writer.byte_aligned()) {
+      return Status::Internal("Assembled codestream is not byte-aligned");
+    }
+    const std::span<const uint8_t> bytes = writer.padded_bytes();
+    std::vector<uint8_t> candidate(bytes.begin(), bytes.end());
+    *output = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
   }
-  return WriteTocAndSections(*sections, writer);
+  return Status::Ok();
 }
 
 Status EncodeVarDctCodestreamImpl(
@@ -185,20 +458,10 @@ Status EncodeVarDctCodestreamImpl(
       return status;
     }
 
-    const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
-    std::vector<SimpleAcGroupTokenStream> ac_groups;
-    status = TokenizeSimpleAcGroups(frame, &ac_groups);
-    ProfileEnd(
-      profile, ac_tokenization_begin,
-      &candidate_profile.ac_tokenization_nanoseconds);
-    if (!status.ok()) {
-      return status;
-    }
-    if (dc_groups.empty() || ac_groups.empty()) {
+    if (dc_groups.empty()) {
       return Status::Internal("Validated frame produced no codestream groups");
     }
 
-    const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
     std::vector<std::vector<EntropyToken>> dc_streams;
     if (dc_groups.size() > dc_streams.max_size() / 2) {
       return AllocationFailure();
@@ -209,22 +472,67 @@ Status EncodeVarDctCodestreamImpl(
       dc_streams.push_back(std::move(group.ac_metadata_tokens));
     }
 
-    std::vector<std::vector<EntropyToken>> ac_streams;
-    ac_streams.reserve(ac_groups.size());
-    for (SimpleAcGroupTokenStream& group : ac_groups) {
-      ac_streams.push_back(std::move(group.tokens));
-    }
-
-    EntropyCode dc_code;
-    if (Status status = OptimizeEntropyCode(
-          dc_streams, {.context_count = kSimpleDcContextCount}, &dc_code);
-        !status.ok()) {
+    const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
+    AcEncodingCandidate natural;
+    std::vector<SimpleAcGroupTokenStream> natural_groups;
+    AcEncodingCandidate custom;
+    status = RunParallelSections(
+      2,
+      [&](size_t index) {
+        if (index == 0) {
+          Status token_status =
+            TokenizeSimpleAcGroups(frame, &natural_groups);
+          if (!token_status.ok()) {
+            return token_status;
+          }
+          return MoveAcStreams(&natural_groups, &natural.streams);
+        }
+        return ComputeSimpleCoefficientOrders(frame, &custom.orders);
+      });
+    if (!status.ok()) {
       return status;
     }
-    EntropyCode ac_code;
-    if (Status status = OptimizeEntropyCode(
-          ac_streams, {.context_count = kSimpleAcContextCount}, &ac_code);
-        !status.ok()) {
+    if (custom.orders.used_order_mask != 0) {
+      std::vector<SimpleAcGroupTokenStream> custom_groups;
+      status = TokenizeSimpleAcGroups(frame, custom.orders, &custom_groups);
+      if (!status.ok()) {
+        return status;
+      }
+      status = MoveAcStreams(&custom_groups, &custom.streams);
+      if (!status.ok()) {
+        return status;
+      }
+      status = TokenizeSimpleCoefficientOrders(
+        custom.orders, &custom.order_tokens);
+      if (!status.ok()) {
+        return status;
+      }
+    }
+    ProfileEnd(
+      profile, ac_tokenization_begin,
+      &candidate_profile.ac_tokenization_nanoseconds);
+    if (natural.streams.empty()) {
+      return Status::Internal("Validated frame produced no AC groups");
+    }
+
+    const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
+    EntropyCode dc_code;
+    EntropyCodeCost dc_cost;
+    const size_t entropy_task_count =
+      custom.orders.used_order_mask == 0 ? 2 : 3;
+    status = RunParallelSections(
+      entropy_task_count,
+      [&](size_t index) {
+        if (index == 0) {
+          return OptimizeEntropyCode(
+            dc_streams, {.context_count = kSimpleDcContextCount}, &dc_code,
+            &dc_cost);
+        }
+        return index == 1
+          ? OptimizeAcCandidate(&natural)
+          : OptimizeAcCandidate(&custom);
+      });
+    if (!status.ok()) {
       return status;
     }
     ProfileEnd(
@@ -232,69 +540,86 @@ Status EncodeVarDctCodestreamImpl(
       &candidate_profile.entropy_optimization_nanoseconds);
 
     const ProfileClock::time_point sections_begin = ProfileBegin(profile);
-    if (dc_groups.size() > std::numeric_limits<size_t>::max() -
-                           ac_groups.size() - 2) {
-      return AllocationFailure();
-    }
-    const size_t section_count = 2 + dc_groups.size() + ac_groups.size();
-    std::vector<BitWriter> sections(section_count);
-
-    if (Status status = WriteSimpleDcGlobal(
-          frame.quantizer().params(), dc_groups.size(), dc_code, &sections[0]);
-        !status.ok()) {
-      return status;
-    }
-    const size_t ac_global_index = 1 + dc_groups.size();
-    if (Status status = WriteSimpleAcGlobal(
-          ac_groups.size(), ac_code, &sections[ac_global_index]);
-        !status.ok()) {
-      return status;
-    }
-    const size_t ac_group_start = ac_global_index + 1;
-    status = RunParallelSections(
-      dc_groups.size() + ac_groups.size(),
-      [&](size_t index) {
-        if (index < dc_groups.size()) {
-          return WriteDcGroupSection(
-            dc_groups[index], dc_streams[2 * index],
-            dc_streams[2 * index + 1], dc_code, &sections[1 + index]);
-        }
-        const size_t ac_index = index - dc_groups.size();
-        return WriteTokenStream(
-          ac_streams[ac_index], ac_code,
-          &sections[ac_group_start + ac_index]);
-      });
+    std::vector<BitWriter> common_sections;
+    status = WriteCommonSections(
+      frame, dc_groups, dc_streams, dc_code, &common_sections);
     if (!status.ok()) {
       return status;
+    }
+    std::vector<BitWriter> natural_ac_sections;
+    status = WriteAcSections(natural, &natural_ac_sections);
+    if (!status.ok()) {
+      return status;
+    }
+    std::vector<BitWriter> custom_ac_sections;
+    if (custom.orders.used_order_mask != 0) {
+      status = WriteAcSections(custom, &custom_ac_sections);
+      if (!status.ok()) {
+        return status;
+      }
     }
     ProfileEnd(
       profile, sections_begin, &candidate_profile.section_writing_nanoseconds);
 
     const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
-    BitWriter writer;
-    if (Status status = WriteSimpleCodestreamHeader(
-          frame.geometry().frame(), &writer);
-        !status.ok()) {
+    size_t natural_size = 0;
+    status = MeasureCandidateSize(
+      frame, common_sections, natural_ac_sections, natural.streams.size(),
+      &natural_size);
+    if (!status.ok()) {
       return status;
     }
-    if (Status status = WriteSimpleFrameHeader(frame.profile(), &writer);
-        !status.ok()) {
+    size_t custom_size = 0;
+    if (custom.orders.used_order_mask != 0) {
+      status = MeasureCandidateSize(
+        frame, common_sections, custom_ac_sections, custom.streams.size(),
+        &custom_size);
+      if (!status.ok()) {
+        return status;
+      }
+    }
+    const bool use_custom =
+      custom_size != 0 && custom_size < natural_size;
+    const AcEncodingCandidate& selected = use_custom ? custom : natural;
+    const std::vector<BitWriter>& selected_ac_sections =
+      use_custom ? custom_ac_sections : natural_ac_sections;
+    std::vector<uint8_t> candidate_output;
+    status = AssembleCandidate(
+      frame, common_sections, selected_ac_sections, selected.streams.size(),
+      &candidate_output);
+    if (!status.ok()) {
       return status;
     }
-    if (Status status = CombineFrameSections(
-          &sections, ac_groups.size(), &writer);
-        !status.ok()) {
-      return status;
+    if (candidate_output.size() != (use_custom ? custom_size : natural_size)) {
+      return Status::Internal(
+        "Measured codestream candidate size differs from assembly");
     }
-    if (!writer.byte_aligned()) {
-      return Status::Internal("Assembled codestream is not byte-aligned");
-    }
-
-    const std::span<const uint8_t> bytes = writer.padded_bytes();
-    std::vector<uint8_t> candidate(bytes.begin(), bytes.end());
     ProfileEnd(
       profile, assembly_begin, &candidate_profile.assembly_nanoseconds);
-    *output = std::move(candidate);
+
+    candidate_profile.natural_candidate_bytes = natural_size;
+    candidate_profile.custom_order_candidate_bytes = custom_size;
+    candidate_profile.selected_coefficient_order_mask =
+      selected.orders.used_order_mask;
+    uint64_t model_bits = dc_cost.model_bits;
+    uint64_t token_bits = dc_cost.token_bits;
+    const auto add_cost = [&](const EntropyCodeCost& cost) {
+      if (model_bits > std::numeric_limits<uint64_t>::max() - cost.model_bits ||
+          token_bits > std::numeric_limits<uint64_t>::max() - cost.token_bits) {
+        return false;
+      }
+      model_bits += cost.model_bits;
+      token_bits += cost.token_bits;
+      return true;
+    };
+    if (!add_cost(selected.ac_cost) || !add_cost(selected.order_cost)) {
+      return Status::InvalidArgument("Entropy profile bit count overflow");
+    }
+    candidate_profile.entropy_model_bits = model_bits;
+    candidate_profile.entropy_token_bits = token_bits;
+    candidate_profile.dc_entropy_clusters = dc_cost.cluster_count;
+    candidate_profile.ac_entropy_clusters = selected.ac_cost.cluster_count;
+    *output = std::move(candidate_output);
     if (profile != nullptr) {
       candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
       *profile = candidate_profile;
