@@ -287,6 +287,45 @@ evidence. In the complete post-change GPU profile, Malta is no longer a top-
 three stage: frontend AC-strategy search, AQ reconstruction, and Butteraugli
 psychoacoustic processing are now the leading GPU targets.
 
+#### Frontend AC-strategy reduction experiment (2026-08-28)
+
+Commit `02f8c4d` removes a worst-case threadgroup-storage assumption from the
+AC-strategy residual and cost kernels. The previous kernels reserved reduction
+arrays for 1024 coefficients for every strategy. The residual kernel now uses
+dynamic storage sized to the active coefficient count. The cost kernel uses
+three dynamically sized arrays and reduces all color channels concurrently,
+while preserving the existing per-channel reduction tree and final channel
+accumulation order. For an 8x8 strategy, residual reduction storage falls from
+`8192` to `512` bytes and cost storage changes from `4096` to `768` bytes; the
+cost kernel also performs one barrier/reduction sequence instead of three.
+
+Three alternating five-sample standalone-search pairs at 1920x1080 improved
+the complete GPU-search median from `44.179 ms` to `41.414 ms` (`-6.3%`). The
+CPU and GPU strategy grids remained identical. The large-image public gate
+used fully resident SIMD AQ at distance `1.2`, two warmups, seven samples, and
+three alternating process pairs per workload:
+
+| Workload | Baseline total | Retained total | Delta | Baseline quantization | Retained quantization | Delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `291.679 ms` | `282.745 ms` | `-3.1%` | `147.914 ms` | `144.159 ms` | `-2.5%` |
+| Padded 4K | `956.768 ms` | `948.079 ms` | `-0.9%` | `557.771 ms` | `551.464 ms` | `-1.1%` |
+
+Quantization improved in all six pairs. Public total improved in all three
+1080p pairs and two of three 4K pairs; the remaining 4K pair regressed by
+`0.39%`. GPU output sizes remained `453341` and `1745707` bytes.
+
+Post-change profiles are
+`20260829T034606Z-padded_1080p-fully-resident-02f8c4d5c050` and
+`20260829T034636Z-padded_4k-fully-resident-02f8c4d5c050` under
+`logs/metal-profile/`, with `99.979%` and `99.989%` sampled-stage coverage.
+Against the immediately preceding `a1e1725` profiles, the attributed
+`frontend.ac_strategy` GPU stage changed from `25.849` to `24.755 ms` at
+1080p (`-4.2%`) and from `103.717` to `98.078 ms` at 4K (`-5.4%`). Its wait
+span changed from `29.224` to `28.565 ms` and from `116.733` to `112.239 ms`,
+respectively. All AC candidate/search parity tests passed without tolerance
+changes. The complete suite remained 57/58, with only the inherited pinned CPU
+quantization-pipeline score mismatch.
+
 These schema-1 artifacts exposed the instrumentation boundary that motivated
 schema 2: the resident buffer was much shorter than the complete quantization
 pipeline. The extended profile now attributes resident initial-field and
