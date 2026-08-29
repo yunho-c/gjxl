@@ -388,6 +388,49 @@ are unchanged. The full suite remains 57/58, with every Metal test passing and
 only the inherited pinned CPU quantization-pipeline score mismatch
 (`4.4524669647216797e-05`).
 
+#### AQ reconstruction pass streamlining (2026-08-29)
+
+Commit `3fdc682` retains three changes to the resident reconstruction path.
+Production submissions now clear only the reconstruction error word instead of
+poisoning every scratch output; the diagnostic `RunReconstruction` path still
+enables the full poison-and-coverage check. Reconstruction coefficient kernels
+dispatch `min(256, coefficient_count)` threads per transform, avoiding idle
+lanes for 8x8 and rectangular strategies. Finally, quantizer histogram clears
+are folded into the selection initialization and bucket-selection passes,
+removing the separate clear pipeline and 24 dispatches per resident submission.
+
+The public-encode gate used fully resident SIMD AQ at distance `1.2`, two
+warmups, seven samples, and three alternating process pairs per workload. Each
+value is the median of the three process medians:
+
+| Workload | Baseline total | Retained total | Delta | Baseline quantization | Retained quantization | Delta | Pair wins (total/quantization) | GPU bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `262.348 ms` | `261.766 ms` | `-0.2%` | `129.751 ms` | `128.308 ms` | `-1.1%` | `2/3`, `3/3` | `453341` |
+| Padded 4K | `880.241 ms` | `874.980 ms` | `-0.6%` | `501.877 ms` | `493.544 ms` | `-1.7%` | `3/3`, `3/3` | `1745707` |
+
+Fresh schema-2 profiles are
+`20260829T043329Z-padded_1080p-fully-resident-3fdc68228eb1` and
+`20260829T043357Z-padded_4k-fully-resident-3fdc68228eb1` under
+`logs/metal-profile/`. They completed with `99.976%` and `99.981%`
+sampled-stage coverage. Against the immediately preceding `cada229` profiles:
+
+| Workload | AQ reconstruction | Resident GPU buffer | Reconstruction dispatches | Resident dispatches |
+| --- | ---: | ---: | ---: | ---: |
+| Padded 1080p | `23.228 -> 20.349 ms` (`-12.4%`) | `57.799 -> 54.777 ms` (`-5.2%`) | `165 -> 141` | `424 -> 400` |
+| Padded 4K | `77.971 -> 67.101 ms` (`-13.9%`) | `220.389 -> 211.791 ms` (`-3.9%`) | `165 -> 141` | `424 -> 400` |
+
+The profiles' separate uninstrumented public runs improve total/quantization
+medians from `268.863/134.087` to `261.140/127.475 ms` at 1080p and from
+`901.521/510.337` to `878.653/499.096 ms` at 4K. The alternating-process table
+above remains the primary latency evidence. A matching dynamic threadgroup
+experiment on final frame coefficient encoding was rejected: across three
+alternating 1080p pairs, quantization changed from `126.794` to `126.997 ms`
+and total time from `260.940` to `262.878 ms`.
+
+No output bytes or tolerances changed. The exact Metal reconstruction test
+passes, as do all other Metal tests. The complete suite remains 57/58 with only
+the inherited pinned CPU quantization-pipeline score mismatch.
+
 ## Ordered implementation plan
 
 ### P0. Establish the encoder profile and fast iteration loop - complete
