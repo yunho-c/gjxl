@@ -585,15 +585,15 @@ non-updating policy dispatch. Fully-resident mode still evaluates that final
 field and returns all three scores. Throughput returns its two actually
 evaluated scores; its final frame has no corresponding perceptual diagnostic.
 
-Matched schema-3 profiles on the Apple M4 Pro used SIMD AQ at distance `1.2`,
-two warmups, and seven samples. Stage coverage was `99.958%` at 1080p and
-`99.967%` at 4K. The final frame-only quantizer/coefficient work measured
-approximately `5.41 ms` and `17.03 ms`, respectively.
+Post-merge schema-3 profiles on the Apple M4 Pro used SIMD AQ at distance
+`1.2`, two warmups, and seven samples. Stage coverage was `99.940%` at 1080p
+and `99.988%` at 4K. The final frame-only quantizer/coefficient work measured
+approximately `5.54 ms` and `16.97 ms`, respectively.
 
 | Workload | Full resident GPU buffer | Final-frame GPU buffer | Delta | Full resident AQ wall span | Final-frame AQ wall span | Delta |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Padded 1080p | `53.937 ms` | `42.495 ms` | `-21.2%` | `60.735 ms` | `49.810 ms` | `-18.0%` |
-| Padded 4K | `206.008 ms` | `162.167 ms` | `-21.3%` | `230.939 ms` | `206.446 ms` | `-10.6%` |
+| Padded 1080p | `55.024 ms` | `42.225 ms` | `-23.3%` | `62.378 ms` | `51.077 ms` | `-18.1%` |
+| Padded 4K | `213.045 ms` | `158.730 ms` | `-25.5%` | `239.519 ms` | `186.642 ms` | `-22.1%` |
 
 One same-process public-workflow screen measured quantization medians of
 `130.144` versus `148.094 ms` at 1080p (`-12.1%`) and `506.602` versus
