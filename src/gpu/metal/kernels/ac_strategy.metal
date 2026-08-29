@@ -170,6 +170,8 @@ kernel void gjxl_ac_strategy_residual(
   device float* residual_coefficients [[buffer(4)]],
   device ChannelRate* channel_rates [[buffer(5)]],
   constant AcStrategyBatchParams& params [[buffer(6)]],
+  threadgroup float* magnitude_reduction [[threadgroup(0)]],
+  threadgroup uint* nonzero_reduction [[threadgroup(1)]],
   uint tid [[thread_index_in_threadgroup]],
   uint3 group_position [[threadgroup_position_in_grid]]) {
 
@@ -197,8 +199,6 @@ kernel void gjxl_ac_strategy_residual(
   residual_coefficients[base + tid] =
     matrices[matrix_base + tid] * (scaled - rounded);
 
-  threadgroup float magnitude_reduction[1024];
-  threadgroup uint nonzero_reduction[1024];
   magnitude_reduction[tid] = sqrt(abs(rounded));
   nonzero_reduction[tid] = rounded != 0.0f ? 1u : 0u;
   threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -229,6 +229,7 @@ kernel void gjxl_ac_strategy_cost(
   device float* costs [[buffer(4)]],
   device const float* quant_field [[buffer(5)]],
   constant AcStrategyBatchParams& params [[buffer(6)]],
+  threadgroup float* loss_reduction [[threadgroup(0)]],
   uint tid [[thread_index_in_threadgroup]],
   uint3 group_position [[threadgroup_position_in_grid]]) {
 
@@ -253,7 +254,6 @@ kernel void gjxl_ac_strategy_cost(
     pixel_y * params.pixel_mask_row_stride + pixel_x;
   const float mask = pixel_mask[mask_index];
 
-  threadgroup float loss_reduction[1024];
   float entropy = 0.0f;
   float loss = 0.0f;
 
@@ -265,26 +265,33 @@ kernel void gjxl_ac_strategy_cost(
     weighted *= weighted;
     weighted *= weighted;
     weighted *= weighted;
-    loss_reduction[tid] =
+    loss_reduction[channel * params.coefficient_count + tid] =
       isfinite(mask) && mask > 0.0f ? weighted : NAN;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    for (uint stride = params.coefficient_count / 2;
-         stride != 0;
-         stride /= 2) {
+  for (uint stride = params.coefficient_count / 2;
+       stride != 0;
+       stride /= 2) {
+    for (uint channel = 0; channel < 3; ++channel) {
       if (tid < stride) {
-        loss_reduction[tid] += loss_reduction[tid + stride];
+        const uint base = channel * params.coefficient_count;
+        loss_reduction[base + tid] += loss_reduction[base + tid + stride];
       }
-      threadgroup_barrier(mem_flags::mem_threadgroup);
     }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
 
-    if (tid == 0) {
+  if (tid == 0) {
+    for (uint channel = 0; channel < 3; ++channel) {
+      const uint transform_index = candidate_index * 3 + channel;
       const ChannelRate rate = channel_rates[transform_index];
       entropy += params.cost_delta * rate.magnitude;
       const uint nonzero_bits = CeilLog2Nonzero(rate.nonzero_count + 1) + 1;
       entropy += params.zeros_multiplier * float(
         CeilLog2Nonzero(nonzero_bits + 17) + nonzero_bits);
-      loss += loss_reduction[0] * kChannelMultiplier[channel];
+      loss += loss_reduction[channel * params.coefficient_count] *
+        kChannelMultiplier[channel];
 
       if (channel == 0 && params.covered_block_count >= 2) {
         const float weight = 1.0f + min(
@@ -294,10 +301,7 @@ kernel void gjxl_ac_strategy_cost(
         loss *= weight;
       }
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
 
-  if (tid == 0) {
     const float quant_norm = ComputeQuantNorm(
       quant_field, candidate, params);
     const float normalized_loss = loss / float(params.coefficient_count);

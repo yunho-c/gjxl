@@ -547,6 +547,10 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
   encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
   encoder->setBytes(&validated.params, sizeof(validated.params), 6);
+  const NS::UInteger reduction_bytes =
+    validated.params.coefficient_count * sizeof(float);
+  encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
+  encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
   encoder->dispatchThreadgroups(
     MTL::Size(
       static_cast<NS::UInteger>(validated.transform_count), 1, 1),
@@ -572,6 +576,7 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   encoder->setBuffer(validated.quant_field->handle(),
                      validated.quant_field_offset_bytes, 5);
   encoder->setBytes(&validated.params, sizeof(validated.params), 6);
+  encoder->setThreadgroupMemoryLength(3 * reduction_bytes, 0);
   encoder->dispatchThreadgroups(
     MTL::Size(
       static_cast<NS::UInteger>(validated.params.candidate_count), 1, 1),
