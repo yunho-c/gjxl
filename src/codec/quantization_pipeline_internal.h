@@ -77,6 +77,7 @@ struct QuantizationPipelineMaterialization {
   bool adaptive_quant_field = true;
   bool block_distance_map = true;
   bool reconstructed_linear_rgb = true;
+  bool final_perceptual_evaluation = true;
 };
 
 [[nodiscard]] Status PrepareQuantizationPipeline(

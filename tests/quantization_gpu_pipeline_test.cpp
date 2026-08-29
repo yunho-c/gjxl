@@ -1464,7 +1464,12 @@ bool CheckWorkflowBackendSelection() {
               gpu.get(), false, &throughput_bytes, &throughput_summary)
           .ok() ||
       throughput_bytes.empty() ||
+      throughput_bytes != resident_bytes ||
       throughput_summary.score_history.size() != 2 ||
+      !std::equal(
+        throughput_summary.score_history.begin(),
+        throughput_summary.score_history.end(),
+        resident_summary.score_history.begin()) ||
       throughput_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
       throughput_summary.metal_aq_mode !=

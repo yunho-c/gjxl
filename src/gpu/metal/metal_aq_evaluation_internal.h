@@ -372,6 +372,7 @@ private:
     kQuantizer,
     kForwardBatch,
     kFinalColorCorrelation,
+    kCoefficientBatch,
     kBatch,
   };
 
@@ -452,6 +453,9 @@ private:
   void EncodeReconstructionBatch(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       size_t batch_index) const;
+  void EncodeReconstructionCoefficientBatch(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      size_t batch_index) const;
   void EncodeForwardCoefficientBatch(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       size_t batch_index) const;
@@ -492,6 +496,8 @@ private:
   void EncodeResidentReconstruction(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       uint32_t iteration);
+  void EncodeResidentFrame(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder);
   void EncodeResidentPolicyUpdate(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       uint32_t iteration);
@@ -652,6 +658,7 @@ private:
   bool borrowed_coding_opsin_ = false;
   bool resident_quantization_active_ = false;
   size_t resident_policy_iterations_ = 0;
+  bool resident_evaluate_final_field_ = true;
   bool resident_initial_quant_ready_ = false;
   bool resident_quantizer_ready_ = false;
   bool invariant_color_correlation_ready_ = false;

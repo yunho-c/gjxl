@@ -512,7 +512,8 @@ Status RunPreparedGpuQuantizationPipelineImpl(
   }
   const bool resident =
     aq_mode != GpuAdaptiveQuantizationMode::kExactCoefficients;
-  if (aq_mode == GpuAdaptiveQuantizationMode::kThroughput) {
+  if (aq_mode == GpuAdaptiveQuantizationMode::kThroughput &&
+      materialization.final_perceptual_evaluation) {
     options.adaptive_quantization.iterations = 1;
   }
   if (!resident &&
@@ -558,6 +559,8 @@ Status RunPreparedGpuQuantizationPipelineImpl(
       .block_distance_map = materialization.block_distance_map,
       .reconstructed_linear_rgb =
         materialization.reconstructed_linear_rgb,
+      .final_perceptual_evaluation =
+        materialization.final_perceptual_evaluation,
     }, profiling_session);
   const Status status = RunPreparedQuantizationPipelineWithProviders(
     original_linear_rgb, prepared, strategy_search, adaptive_quantization,
@@ -643,6 +646,8 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
       .adaptive_quant_field = false,
       .block_distance_map = false,
       .reconstructed_linear_rgb = false,
+      .final_perceptual_evaluation =
+        aq_mode != GpuAdaptiveQuantizationMode::kThroughput,
     },
     nullptr);
 }
@@ -719,6 +724,8 @@ Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
       .adaptive_quant_field = false,
       .block_distance_map = false,
       .reconstructed_linear_rgb = false,
+      .final_perceptual_evaluation =
+        aq_mode != GpuAdaptiveQuantizationMode::kThroughput,
     },
     &profiling_session);
   if (!status.ok()) return status;

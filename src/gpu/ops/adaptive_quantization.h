@@ -22,9 +22,10 @@ enum class GpuAdaptiveQuantizationMode {
   /// GPU. This is an explicit experimental mode and may change encoder
   /// decisions relative to the CPU reference.
   kFullyResident,
-  /// Uses the fully resident evaluator but caps the complete pipeline at one
-  /// host-synchronized AQ update instead of two. This is an explicit
-  /// speed/size/quality trade and is never selected automatically.
+  /// Encoding-only workflows apply both default AQ updates, then quantize the
+  /// final field directly into the frame without reconstructing and scoring
+  /// it a third time. Diagnostic workflows retain the original one-update
+  /// speed/size/quality trade. This mode is never selected automatically.
   kThroughput,
   /// Uses a separate frame-only pipeline with fixed DCT8 strategies and no
   /// perceptual AQ evaluations. This maximum-throughput policy is never
@@ -101,7 +102,8 @@ struct GpuFrameOnlyQuantizationOutput {
 /// Runs the bounded policy with the explicitly selected GPU evaluation mode.
 /// Resident modes are intended for error measurement and numerical research;
 /// neither promises CPU-identical encoder decisions. `kThroughput` changes the
-/// complete pipeline's policy iteration bound, not this direct operation.
+/// complete diagnostic pipeline's policy iteration bound, not this direct
+/// operation.
 /// `kMaximumThroughput` is unsupported by this direct operation.
 [[nodiscard]] Status RunGpuAdaptiveQuantizationPolicy(
   GpuBackend& gpu,
@@ -149,12 +151,14 @@ struct GpuFrameOnlyQuantizationOutput {
 namespace adaptive_quantization_gpu_internal {
 
 /// Selects optional diagnostic results for an internal full-output call.
-/// The encoder always requests the frame and score history, while public
-/// APIs retain the default of materializing every diagnostic.
+/// The encoder always requests the frame and score history, while public APIs
+/// retain the default of materializing every diagnostic. An explicit
+/// throughput encode may omit the unevaluated final field's perceptual result.
 struct AdaptiveQuantizationMaterialization {
   bool quant_field = true;
   bool block_distance_map = true;
   bool reconstructed_linear_rgb = true;
+  bool final_perceptual_evaluation = true;
 };
 
 /// Reusable frame-level GPU AQ state for repeated rate-control attempts.

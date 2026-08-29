@@ -132,6 +132,13 @@ struct AqResidentButteraugliPolicyInput {
   float lower_bound = 0.0f;
   float upper_bound = 0.0f;
   size_t iterations = 0;
+  /// When false, applies every requested policy update and then quantizes the
+  /// resulting field directly into `output.frame` without reconstructing and
+  /// scoring that final field. Score history then contains `iterations`
+  /// entries instead of `iterations + 1`. This is an explicit encoding-only
+  /// optimization; diagnostic block-map and reconstruction outputs are not
+  /// available for the unevaluated final field.
+  bool evaluate_final_field = true;
 };
 
 struct AqResidentButteraugliPolicyOutput {

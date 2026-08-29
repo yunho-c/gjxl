@@ -239,12 +239,16 @@ void MetalPreparedAqEvaluation::EncodeReconstructionProfileStage(
     }
     return;
   }
+  if (stage == ReconstructionProfileStage::kCoefficientBatch) {
+    EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);
+    return;
+  }
   if (stage == ReconstructionProfileStage::kBatch) {
     EncodeReconstructionBatch(backend, encoder, batch_index);
   }
 }
 
-void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
+void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
     size_t batch_index) const {
 
@@ -252,10 +256,6 @@ void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
   const AqStrategyBatch& batch = batches_[batch_index];
   if (batch.anchor_count == 0) return;
   const AqReconstructionParams& params = reconstruction_params_[batch_index];
-  const size_t batch_value_count =
-      3 * batch.anchor_count * batch.coefficient_count;
-  const size_t coefficient_offset_bytes =
-      batch.coefficient_offset * sizeof(float);
 
   if (!exact_coefficient_reconstruction_) {
     encoder->setComputePipelineState(
@@ -286,6 +286,21 @@ void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
                       kAqThreadCount, batch.coefficient_count),
                   1, 1));
   }
+}
+
+void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    size_t batch_index) const {
+
+  if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
+  const AqStrategyBatch& batch = batches_[batch_index];
+  if (batch.anchor_count == 0) return;
+  EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);
+  const AqReconstructionParams& params = reconstruction_params_[batch_index];
+  const size_t batch_value_count =
+      3 * batch.anchor_count * batch.coefficient_count;
+  const size_t coefficient_offset_bytes =
+      batch.coefficient_offset * sizeof(float);
 
   const MetalBuffer* reconstruction =
       MetalBackend::AsMetalBuffer(*reconstruction_coefficients_.buffer);

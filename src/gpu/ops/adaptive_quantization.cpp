@@ -626,6 +626,8 @@ Status RunGpuAdaptiveQuantizationImpl(
           .lower_bound = setup.lower_bound,
           .upper_bound = setup.upper_bound,
           .iterations = options.iterations,
+          .evaluate_final_field =
+            materialization.final_perceptual_evaluation,
       };
       if (profiling) {
         const auto policy_begin =

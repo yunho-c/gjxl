@@ -44,7 +44,8 @@ struct SearchInterval {
 [[nodiscard]] double FinalScore(
   const VarDctEncodingSummary& summary) noexcept {
 
-  return summary.score_history.empty()
+  return summary.score_history.empty() ||
+      summary.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput
     ? std::numeric_limits<double>::infinity()
     : summary.score_history.back();
 }
