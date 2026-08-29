@@ -178,6 +178,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> fuzzy_erosion;
   NS::SharedPtr<MTL::ComputePipelineState> masked_ac;
   NS::SharedPtr<MTL::ComputePipelineState> final;
+  NS::SharedPtr<MTL::ComputePipelineState> final_masked_ac;
   NS::SharedPtr<MTL::ComputePipelineState> crop;
   NS::SharedPtr<MTL::ComputePipelineState> compose;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;

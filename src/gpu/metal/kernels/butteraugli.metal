@@ -1001,6 +1001,34 @@ kernel void gjxl_butteraugli_final_f32(
     isfinite(result) && result >= 0.0f ? result : NAN;
 }
 
+kernel void gjxl_butteraugli_final_masked_ac_f32(
+  device const float* dc0 [[buffer(0)]], device const float* dc1 [[buffer(1)]],
+  device const float* dc2 [[buffer(2)]], device const float* ac0 [[buffer(3)]],
+  device const float* ac1 [[buffer(4)]], device const float* ac2 [[buffer(5)]],
+  device const float* mask [[buffer(6)]],
+  device const float* mask_blurred_reference [[buffer(7)]],
+  device const float* mask_blurred_distorted [[buffer(8)]],
+  device float* output [[buffer(9)]],
+  constant FinalParams& params [[buffer(10)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height) return;
+  const uint index = position.y * params.stride + position.x;
+  const float difference =
+    mask_blurred_reference[index] - mask_blurred_distorted[index];
+  const float masked_ac_y =
+    ac1[index] + 10.0f * difference * difference;
+  const float mask_value = mask_y(mask[index]);
+  const float dc_mask_value = mask_dc_y(mask[index]);
+  const float masked_dc = dc0[index] * params.x_multiplier * dc_mask_value +
+                          dc1[index] * dc_mask_value + dc2[index] * dc_mask_value;
+  const float masked_ac = ac0[index] * params.x_multiplier * mask_value +
+                          masked_ac_y * mask_value + ac2[index] * mask_value;
+  const float result = sqrt(masked_dc + masked_ac);
+  output[position.y * params.output_stride + position.x] =
+    isfinite(result) && result >= 0.0f ? result : NAN;
+}
+
 kernel void gjxl_butteraugli_crop_f32(
   device const float* input [[buffer(0)]], device float* output [[buffer(1)]],
   constant CropParams& params [[buffer(2)]],

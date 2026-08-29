@@ -1313,24 +1313,28 @@ private:
       encoder, AsConst(precomputed), 4, kWork + 1,
       mask_blurred_distorted, scale_extent);
     DevicePlaneView ac_y = Plane(kAc + 1, scale_extent);
-    const PlaneParams masked_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(mask_blurred_reference.row_stride),
-      static_cast<uint32_t>(ac_y.row_stride),
-    };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.masked_ac.get());
-    Bind(encoder, Handle(metal_, mask_blurred_reference),
-         mask_blurred_reference.offset_bytes, 0);
-    Bind(encoder, Handle(metal_, mask_blurred_distorted),
-         mask_blurred_distorted.offset_bytes, 1);
-    Bind(encoder, Handle(metal_, ac_y), ac_y.offset_bytes, 2);
-    encoder->setBytes(&masked_params, sizeof(masked_params), 3);
-    metal_.DispatchPlane(encoder, scale_extent);
-    MaybeCapture(
-      encoder, MetalButteraugliStage::kMaskedAcY, AsConst(ac_y),
-      scale_extent);
+    const bool capture_masked_ac =
+      capture_stage_ == MetalButteraugliStage::kMaskedAcY;
+    if (capture_masked_ac) {
+      const PlaneParams masked_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(mask_blurred_reference.row_stride),
+        static_cast<uint32_t>(ac_y.row_stride),
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.masked_ac.get());
+      Bind(encoder, Handle(metal_, mask_blurred_reference),
+           mask_blurred_reference.offset_bytes, 0);
+      Bind(encoder, Handle(metal_, mask_blurred_distorted),
+           mask_blurred_distorted.offset_bytes, 1);
+      Bind(encoder, Handle(metal_, ac_y), ac_y.offset_bytes, 2);
+      encoder->setBytes(&masked_params, sizeof(masked_params), 3);
+      metal_.DispatchPlane(encoder, scale_extent);
+      MaybeCapture(
+        encoder, MetalButteraugliStage::kMaskedAcY, AsConst(ac_y),
+        scale_extent);
+    }
 
     const FinalParams final_params{
       static_cast<uint32_t>(scale_extent.width),
@@ -1339,7 +1343,10 @@ private:
       static_cast<uint32_t>(output.row_stride),
       options().x_multiplier,
     };
-    encoder->setComputePipelineState(metal_.butteraugli_pipelines_.final.get());
+    encoder->setComputePipelineState(
+      capture_masked_ac
+        ? metal_.butteraugli_pipelines_.final.get()
+        : metal_.butteraugli_pipelines_.final_masked_ac.get());
     for (size_t channel = 0; channel < 3; ++channel) {
       DevicePlaneView dc = Plane(kDc + channel, scale_extent);
       DevicePlaneView ac = Plane(kAc + channel, scale_extent);
@@ -1347,8 +1354,17 @@ private:
       Bind(encoder, Handle(metal_, ac), ac.offset_bytes, 3 + channel);
     }
     Bind(encoder, Handle(metal_, mask), mask.offset_bytes, 6);
-    Bind(encoder, Handle(metal_, output), output.offset_bytes, 7);
-    encoder->setBytes(&final_params, sizeof(final_params), 8);
+    if (capture_masked_ac) {
+      Bind(encoder, Handle(metal_, output), output.offset_bytes, 7);
+      encoder->setBytes(&final_params, sizeof(final_params), 8);
+    } else {
+      Bind(encoder, Handle(metal_, mask_blurred_reference),
+           mask_blurred_reference.offset_bytes, 7);
+      Bind(encoder, Handle(metal_, mask_blurred_distorted),
+           mask_blurred_distorted.offset_bytes, 8);
+      Bind(encoder, Handle(metal_, output), output.offset_bytes, 9);
+      encoder->setBytes(&final_params, sizeof(final_params), 10);
+    }
     metal_.DispatchPlane(encoder, scale_extent);
     MaybeCapture(
       encoder, MetalButteraugliStage::kFinalComposition, AsConst(output),
@@ -1777,7 +1793,7 @@ Status CreateButteraugliPipelines(
   ButteraugliPipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 22> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 23> bindings{{
     {"gjxl_butteraugli_copy_f32", &pipelines.copy},
     {"gjxl_butteraugli_expand_f32", &pipelines.expand},
     {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
@@ -1800,6 +1816,7 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_fuzzy_erosion_f32", &pipelines.fuzzy_erosion},
     {"gjxl_butteraugli_masked_ac_f32", &pipelines.masked_ac},
     {"gjxl_butteraugli_final_f32", &pipelines.final},
+    {"gjxl_butteraugli_final_masked_ac_f32", &pipelines.final_masked_ac},
     {"gjxl_butteraugli_crop_f32", &pipelines.crop},
     {"gjxl_butteraugli_compose_f32", &pipelines.compose},
     {"gjxl_butteraugli_reduce_max_f32", &pipelines.maximum_reduction},
