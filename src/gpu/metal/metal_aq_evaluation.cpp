@@ -229,6 +229,50 @@ static_assert(sizeof(AqOpsinToLinearParams) == 20);
   return Status::Ok();
 }
 
+[[nodiscard]] const char* AqReconstructionProfileStageId(
+    AcStrategyType strategy) noexcept {
+  switch (strategy) {
+    case AcStrategyType::kDct8:
+      return "aq.reconstruction.dct8";
+    case AcStrategyType::kDct16x8:
+      return "aq.reconstruction.dct16x8";
+    case AcStrategyType::kDct8x16:
+      return "aq.reconstruction.dct8x16";
+    case AcStrategyType::kDct16x16:
+      return "aq.reconstruction.dct16";
+    case AcStrategyType::kDct32x16:
+      return "aq.reconstruction.dct32x16";
+    case AcStrategyType::kDct16x32:
+      return "aq.reconstruction.dct16x32";
+    case AcStrategyType::kDct32x32:
+      return "aq.reconstruction.dct32";
+    default:
+      return "aq.reconstruction.unsupported";
+  }
+}
+
+[[nodiscard]] const char* AqForwardCoefficientProfileStageId(
+    AcStrategyType strategy) noexcept {
+  switch (strategy) {
+    case AcStrategyType::kDct8:
+      return "aq.reconstruction.forward.dct8";
+    case AcStrategyType::kDct16x8:
+      return "aq.reconstruction.forward.dct16x8";
+    case AcStrategyType::kDct8x16:
+      return "aq.reconstruction.forward.dct8x16";
+    case AcStrategyType::kDct16x16:
+      return "aq.reconstruction.forward.dct16";
+    case AcStrategyType::kDct32x16:
+      return "aq.reconstruction.forward.dct32x16";
+    case AcStrategyType::kDct16x32:
+      return "aq.reconstruction.forward.dct16x32";
+    case AcStrategyType::kDct32x32:
+      return "aq.reconstruction.forward.dct32";
+    default:
+      return "aq.reconstruction.forward.unsupported";
+  }
+}
+
 [[nodiscard]] bool FinitePositive(float value) noexcept {
   return std::isfinite(value) && value > 0.0f;
 }
@@ -2023,8 +2067,15 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       options_.profile.loop_filter.epf_options.iterations;
     const bool butteraugli_multiscale =
       source_extent_.width >= 15 && source_extent_.height >= 15;
+    const bool profile_forward_coefficients =
+      !exact_coefficient_reconstruction_ &&
+      !resident_forward_coefficients_ready_;
+    const bool profile_final_color_correlation =
+      !exact_coefficient_reconstruction_ &&
+      resident_color_correlation_pending_;
     const size_t stages_per_iteration =
-      9 + static_cast<size_t>(butteraugli_multiscale) * 4 +
+      12 + 2 * kSupportedAqStrategies.size() +
+      static_cast<size_t>(butteraugli_multiscale) * 4 +
       static_cast<size_t>(options_.profile.loop_filter.gaborish) +
       epf_iterations;
     const size_t stage_count =
@@ -2048,10 +2099,35 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
                                   MetalButteraugliProfileStage butter_stage =
                                     MetalButteraugliProfileStage::
                                       kDistortedPsychoMain) {
-      contexts.push_back(
-        {this, stage, iteration, epf_pass, butter_stage});
+      contexts.push_back({
+        .self = this,
+        .stage = stage,
+        .iteration = iteration,
+        .epf_pass = epf_pass,
+        .butteraugli_stage = butter_stage,
+      });
       stages.push_back({
         .stage_id = stage_id,
+        .group_id = stage_id,
+        .iteration = iteration,
+        .invocation = iteration,
+        .encode = &MetalPreparedAqEvaluation::EncodeResidentProfileStage,
+        .context = &contexts.back(),
+      });
+    };
+    const auto append_reconstruction_stage = [&](const char* stage_id,
+          ReconstructionProfileStage reconstruction_stage,
+          uint32_t iteration, size_t batch_index = 0) {
+      contexts.push_back({
+        .self = this,
+        .stage = ResidentProfileStage::kReconstruction,
+        .iteration = iteration,
+        .reconstruction_stage = reconstruction_stage,
+        .reconstruction_batch_index = batch_index,
+      });
+      stages.push_back({
+        .stage_id = stage_id,
+        .group_id = "aq.reconstruction",
         .iteration = iteration,
         .invocation = iteration,
         .encode = &MetalPreparedAqEvaluation::EncodeResidentProfileStage,
@@ -2062,9 +2138,35 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       const uint32_t first_epf_pass = epf_iterations == 3 ? 0 : 1;
       for (uint32_t iteration = 0;
            iteration <= resident_policy_iterations_; ++iteration) {
-        append_stage(
-          "aq.reconstruction", ResidentProfileStage::kReconstruction,
+        append_reconstruction_stage(
+          "aq.reconstruction.reset", ReconstructionProfileStage::kReset,
           iteration);
+        append_reconstruction_stage(
+          "aq.reconstruction.quantizer",
+          ReconstructionProfileStage::kQuantizer, iteration);
+        if (iteration == 0 && profile_forward_coefficients) {
+          for (size_t batch_index = 0; batch_index < batches_.size();
+               ++batch_index) {
+            if (batches_[batch_index].anchor_count == 0) continue;
+            append_reconstruction_stage(
+              AqForwardCoefficientProfileStageId(
+                batches_[batch_index].strategy),
+              ReconstructionProfileStage::kForwardBatch, iteration,
+              batch_index);
+          }
+        }
+        if (iteration == 0 && profile_final_color_correlation) {
+          append_reconstruction_stage(
+            "aq.reconstruction.final_cfl",
+            ReconstructionProfileStage::kFinalColorCorrelation, iteration);
+        }
+        for (size_t batch_index = 0; batch_index < batches_.size();
+             ++batch_index) {
+          if (batches_[batch_index].anchor_count == 0) continue;
+          append_reconstruction_stage(
+            AqReconstructionProfileStageId(batches_[batch_index].strategy),
+            ReconstructionProfileStage::kBatch, iteration, batch_index);
+        }
         if (iteration == 0) {
           append_stage(
             "aq.policy_initialize",
@@ -3937,8 +4039,22 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
   MetalPreparedAqEvaluation& self = *stage.self;
   switch (stage.stage) {
     case ResidentProfileStage::kReconstruction:
-      self.EncodeResidentReconstruction(
-        backend, encoder, stage.iteration);
+      self.reset_params_.preserve_error = stage.iteration == 0 ? 0u : 1u;
+      self.reset_params_.preserve_forward_coefficients =
+        stage.iteration == 0 &&
+            !self.resident_forward_coefficients_ready_
+          ? 0u
+          : 1u;
+      self.EncodeReconstructionProfileStage(
+        backend, encoder, stage.reconstruction_stage,
+        stage.reconstruction_batch_index);
+      if (stage.reconstruction_stage ==
+            ReconstructionProfileStage::kFinalColorCorrelation &&
+          self.resident_color_correlation_pending_) {
+        self.resident_color_correlation_pending_ = false;
+        self.resident_color_correlation_readback_needed_ = true;
+        self.resident_forward_coefficients_ready_ = true;
+      }
       break;
     case ResidentProfileStage::kPolicyInitialize:
       self.EncodeResidentPolicyInitialize(backend, encoder);

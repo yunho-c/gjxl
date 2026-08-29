@@ -398,7 +398,9 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
     workloads: list[dict[str, Any]] = []
     for workload in payload["workloads"]:
         per_stage: dict[str, list[dict[str, float]]] = {}
+        per_stage_group: dict[str, list[dict[str, float]]] = {}
         per_iteration: dict[tuple[str, int], list[dict[str, float]]] = {}
+        per_group_iteration: dict[tuple[str, int], list[dict[str, float]]] = {}
         per_submission: dict[str, list[dict[str, float]]] = {}
         per_wall_stage: dict[tuple[str, str], list[dict[str, float]]] = {}
         coverage_percent: list[float] = []
@@ -408,7 +410,11 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
                 for submission in sample["submissions"]
             )
             stage_totals: dict[str, dict[str, float]] = {}
+            stage_group_totals: dict[str, dict[str, float]] = {}
             iteration_totals: dict[tuple[str, int], dict[str, float]] = {}
+            group_iteration_totals: dict[
+                tuple[str, int], dict[str, float]
+            ] = {}
             submission_totals: dict[str, dict[str, float]] = {}
             wall_totals: dict[tuple[str, str], dict[str, float]] = {}
             sampled_gpu = 0
@@ -437,6 +443,14 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
                     stage_entry["duration"] += duration
                     stage_entry["calls"] += 1
                     stage_entry["dispatches"] += len(stage["dispatches"])
+                    group_id = stage.get("group_id", stage["stage_id"])
+                    group_entry = stage_group_totals.setdefault(
+                        group_id,
+                        {"duration": 0.0, "calls": 0.0, "dispatches": 0.0},
+                    )
+                    group_entry["duration"] += duration
+                    group_entry["calls"] += 1
+                    group_entry["dispatches"] += len(stage["dispatches"])
                     key = (stage["stage_id"], stage["iteration"])
                     iteration_entry = iteration_totals.setdefault(
                         key,
@@ -445,6 +459,16 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
                     iteration_entry["duration"] += duration
                     iteration_entry["calls"] += 1
                     iteration_entry["dispatches"] += len(stage["dispatches"])
+                    group_key = (group_id, stage["iteration"])
+                    group_iteration_entry = group_iteration_totals.setdefault(
+                        group_key,
+                        {"duration": 0.0, "calls": 0.0, "dispatches": 0.0},
+                    )
+                    group_iteration_entry["duration"] += duration
+                    group_iteration_entry["calls"] += 1
+                    group_iteration_entry["dispatches"] += len(
+                        stage["dispatches"]
+                    )
             for wall_stage in sample.get("wall_stages", []):
                 key = (wall_stage["stage_id"], wall_stage["kind"])
                 wall_entry = wall_totals.setdefault(
@@ -457,11 +481,21 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
                     100.0 * values["duration"] / total_gpu if total_gpu else 0.0
                 )
                 per_stage.setdefault(stage_id, []).append(values)
+            for group_id, values in stage_group_totals.items():
+                values["percent"] = (
+                    100.0 * values["duration"] / total_gpu if total_gpu else 0.0
+                )
+                per_stage_group.setdefault(group_id, []).append(values)
             for key, values in iteration_totals.items():
                 values["percent"] = (
                     100.0 * values["duration"] / total_gpu if total_gpu else 0.0
                 )
                 per_iteration.setdefault(key, []).append(values)
+            for key, values in group_iteration_totals.items():
+                values["percent"] = (
+                    100.0 * values["duration"] / total_gpu if total_gpu else 0.0
+                )
+                per_group_iteration.setdefault(key, []).append(values)
             for submission_id, values in submission_totals.items():
                 values["percent"] = (
                     100.0 * values["duration"] / total_gpu if total_gpu else 0.0
@@ -493,9 +527,17 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
             {"stage_id": stage_id, **summarize(values)}
             for stage_id, values in sorted(per_stage.items())
         ]
+        stage_groups = [
+            {"group_id": group_id, **summarize(values)}
+            for group_id, values in sorted(per_stage_group.items())
+        ]
         iterations = [
             {"stage_id": key[0], "iteration": key[1], **summarize(values)}
             for key, values in sorted(per_iteration.items())
+        ]
+        group_iterations = [
+            {"group_id": key[0], "iteration": key[1], **summarize(values)}
+            for key, values in sorted(per_group_iteration.items())
         ]
         submissions = [
             {
@@ -543,11 +585,13 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
                 "submissions": submissions,
                 "wall_stages": wall_stages,
                 "stages": stages,
+                "stage_groups": stage_groups,
                 "iterations": iterations,
+                "group_iterations": group_iterations,
             }
         )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "source_schema_version": payload["schema_version"],
         "mode": payload["mode"],
         "gpu_aq": payload["gpu_aq"],
@@ -672,7 +716,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     started_at = utc_now()
     commands: list[dict[str, Any]] = []
     manifest: dict[str, Any] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": "running",
         "started_at": started_at,
         "artifact_directory": str(artifact_dir),

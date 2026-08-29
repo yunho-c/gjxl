@@ -65,6 +65,7 @@ struct GpuDispatchProfile {
 
 struct GpuStageProfile {
   std::string stage_id;
+  std::string group_id;
   uint32_t iteration = 0;
   uint32_t invocation = 0;
   uint64_t begin_timestamp = 0;

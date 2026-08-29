@@ -144,11 +144,12 @@ tools, failed builds, failed benchmark validation, and failed trace export are
 handled the same way.
 
 Treat `raw-samples.json` as the performance comparison evidence. Profile schema
-2 covers every current compute submission in one profiled public encode. The
-frontend keeps each existing command buffer as one timestamped stage, while
-the resident AQ command buffer is split into its logical stage encoders. Its
-stable fully-resident submission IDs are `frontend.initial_quantization`,
-`frontend.ac_strategy`,
+3 covers every current compute submission in one profiled public encode and
+adds a stable `group_id` for comparing coarse regions across substage-schema
+changes. The resident AQ command buffer and the two measured frontend hotspots
+are split into logical stage encoders. Its stable submission IDs are
+`frontend.preprocessing.gaborish`,
+`frontend.initial_quantization`, `frontend.ac_strategy`,
 `frontend.prepare_aq.reference`, `frontend.quant_adjustment`, and
 `resident.aq`. The reference-preparation submission appears when persistent
 Butteraugli reference state is constructed; a reusable compatible evaluator
@@ -156,6 +157,19 @@ instead reports `frontend.reconfigure_aq` as a preparation wall span. The
 resident frame-only frontend folds preprocessing and initial CfL into
 `frontend.initial_quantization`; there is no separate preprocessing submission
 or host CfL upload on that path.
+
+The `frontend.ac_strategy` group contains one substage for each candidate
+transform strategy. The `aq.reconstruction` group contains `reset`,
+`quantizer`, optional per-strategy `forward.*` and `final_cfl` preparation,
+and one substage for each active reconstruction strategy. Forward preparation
+is reported only when cached coefficients are unavailable; all of its
+gather/forward substages remain ahead of every strategy reconstruction. Each
+strategy substage retains the current coefficient/inverse/scatter sequence and
+its production ordering, so stage mode adds only broad batch boundaries rather
+than emulating unavailable per-dispatch timestamps.
+`gpu-stage-summary.json` reports both substage totals and
+`stage_groups`/`group_iterations`; schema-1 and schema-2 input remains readable
+by treating each legacy stage as its own group.
 
 Typed steady-clock wall spans separate preparation, upload, wait, readback,
 and host work around those submissions. Operation spans can contain narrower
@@ -327,9 +341,9 @@ changes. The complete suite remained 57/58, with only the inherited pinned CPU
 quantization-pipeline score mismatch.
 
 These schema-1 artifacts exposed the instrumentation boundary that motivated
-schema 2: the resident buffer was much shorter than the complete quantization
-pipeline. The extended profile now attributes resident initial-field and
-preprocessing work, strategy search, reference preparation, quant-field
+schema 2; schema 3 adds stable groups and finer substages. The extended profile
+now attributes resident initial-field and preprocessing work, strategy search,
+reference preparation, quant-field
 adjustment, host CfL scheduling, transfers, waits, and the resident policy
 under the same diagnostic session. Uninstrumented public-workflow runs remain
 the final judge for any retained performance claim.

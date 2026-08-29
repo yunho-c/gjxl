@@ -367,11 +367,22 @@ private:
     kPolicyUpdate,
   };
 
+  enum class ReconstructionProfileStage : uint8_t {
+    kReset,
+    kQuantizer,
+    kForwardBatch,
+    kFinalColorCorrelation,
+    kBatch,
+  };
+
   struct ResidentProfileStageContext {
     MetalPreparedAqEvaluation* self = nullptr;
     ResidentProfileStage stage = ResidentProfileStage::kReconstruction;
     uint32_t iteration = 0;
     uint32_t epf_pass = 0;
+    ReconstructionProfileStage reconstruction_stage =
+      ReconstructionProfileStage::kReset;
+    size_t reconstruction_batch_index = 0;
     MetalButteraugliProfileStage butteraugli_stage =
       MetalButteraugliProfileStage::kDistortedPsychoMain;
   };
@@ -433,6 +444,17 @@ private:
   EncodeReconstructionSubmission(MetalBackend &backend,
                                  MTL::ComputeCommandEncoder *encoder,
                                  const void *context);
+  void EncodeReconstructionReset(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeReconstructionProfileStage(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      ReconstructionProfileStage stage, size_t batch_index) const;
+  void EncodeReconstructionBatch(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      size_t batch_index) const;
+  void EncodeForwardCoefficientBatch(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      size_t batch_index) const;
   static void EncodeFrameSubmission(MetalBackend &backend,
                                     MTL::ComputeCommandEncoder *encoder,
                                     const void *context);

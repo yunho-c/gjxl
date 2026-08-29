@@ -22,6 +22,10 @@
 #include "gpu/submission.h"
 #include "gpu/metal/metal_status.h"
 
+#define setComputePipelineState(state)                                    \
+  setComputePipelineState(state);                                         \
+  ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
+
 namespace gjxl::metal_internal {
 namespace {
 
@@ -57,8 +61,30 @@ Status CreatePipeline(
   if (!pipeline) {
     return metal::ErrorToStatus(error, "newComputePipelineState");
   }
+  RegisterMetalComputePipeline(pipeline.get(), function_name);
   *out = std::move(pipeline);
   return Status::Ok();
+}
+
+const char* AcStrategyProfileStageId(AcStrategyType strategy) {
+  switch (strategy) {
+    case AcStrategyType::kDct8:
+      return "frontend.ac_strategy.dct8";
+    case AcStrategyType::kDct16x8:
+      return "frontend.ac_strategy.dct16x8";
+    case AcStrategyType::kDct8x16:
+      return "frontend.ac_strategy.dct8x16";
+    case AcStrategyType::kDct16x16:
+      return "frontend.ac_strategy.dct16";
+    case AcStrategyType::kDct32x16:
+      return "frontend.ac_strategy.dct32x16";
+    case AcStrategyType::kDct16x32:
+      return "frontend.ac_strategy.dct16x32";
+    case AcStrategyType::kDct32x32:
+      return "frontend.ac_strategy.dct32";
+    default:
+      return "frontend.ac_strategy.unsupported";
+  }
 }
 
 }  // namespace
@@ -510,6 +536,16 @@ void MetalBackend::EncodeAcStrategySubmission(
   }
 }
 
+void MetalBackend::EncodeAcStrategyProfileStage(
+  MetalBackend& backend,
+  MTL::ComputeCommandEncoder* encoder,
+  const void* context) {
+
+  const auto& profile =
+    *static_cast<const AcStrategyProfileContext*>(context);
+  backend.EncodeAcStrategyCandidateBatch(encoder, *profile.batch);
+}
+
 void MetalBackend::EncodeAcStrategyCandidateBatch(
   MTL::ComputeCommandEncoder* encoder,
   const ValidatedAcStrategyBatch& validated) {
@@ -522,20 +558,16 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   encoder->setBuffer(validated.candidates->handle(), 0, 3);
   encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
   encoder->setBytes(&validated.params, sizeof(validated.params), 5);
-  encoder->dispatchThreads(
+  DispatchMetalThreads(
+    encoder,
     MTL::Size(
       static_cast<NS::UInteger>(validated.packed_element_count), 1, 1),
     MTL::Size(
       ac_strategy_pipelines_.gather_threads_per_threadgroup, 1, 1));
 
   EncodeTransformBatch(
-    encoder,
-    TransformDirection::kForward,
-    validated.strategy,
-    *validated.scratch_a,
-    0,
-    *validated.scratch_b,
-    0,
+    encoder, TransformDirection::kForward, validated.strategy,
+    *validated.scratch_a, 0, *validated.scratch_b, 0,
     validated.transform_count);
 
   encoder->setComputePipelineState(ac_strategy_pipelines_.residual.get());
@@ -551,19 +583,15 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     validated.params.coefficient_count * sizeof(float);
   encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
   encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
-  encoder->dispatchThreadgroups(
+  DispatchMetalThreadgroups(
+    encoder,
     MTL::Size(
       static_cast<NS::UInteger>(validated.transform_count), 1, 1),
     MTL::Size(validated.params.coefficient_count, 1, 1));
 
   EncodeTransformBatch(
-    encoder,
-    TransformDirection::kInverse,
-    validated.strategy,
-    *validated.scratch_a,
-    0,
-    *validated.scratch_b,
-    0,
+    encoder, TransformDirection::kInverse, validated.strategy,
+    *validated.scratch_a, 0, *validated.scratch_b, 0,
     validated.transform_count);
 
   encoder->setComputePipelineState(ac_strategy_pipelines_.cost.get());
@@ -577,7 +605,8 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
                      validated.quant_field_offset_bytes, 5);
   encoder->setBytes(&validated.params, sizeof(validated.params), 6);
   encoder->setThreadgroupMemoryLength(3 * reduction_bytes, 0);
-  encoder->dispatchThreadgroups(
+  DispatchMetalThreadgroups(
+    encoder,
     MTL::Size(
       static_cast<NS::UInteger>(validated.params.candidate_count), 1, 1),
     MTL::Size(validated.params.coefficient_count, 1, 1));
@@ -627,15 +656,30 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
       &context,
       submission);
   }
-  const MetalProfiledComputeStage stage{
-    .stage_id = "frontend.ac_strategy",
-    .encode = &MetalBackend::EncodeAcStrategySubmission,
-    .context = &context,
-  };
+  std::vector<AcStrategyProfileContext> contexts;
+  std::vector<MetalProfiledComputeStage> stages;
+  try {
+    contexts.resize(validated_batches.size());
+    stages.resize(validated_batches.size());
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate AC-strategy GPU stage metadata");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "AC-strategy GPU stage metadata is too large");
+  }
+  for (size_t index = 0; index < validated_batches.size(); ++index) {
+    contexts[index] = {&validated_batches[index]};
+    stages[index] = {
+      .stage_id = AcStrategyProfileStageId(validated_batches[index].strategy),
+      .group_id = "frontend.ac_strategy",
+      .encode = &MetalBackend::EncodeAcStrategyProfileStage,
+      .context = &contexts[index],
+    };
+  }
   return SubmitComputeProfiled(
     "gjxl staged AC candidate evaluation profile",
-    std::span<const MetalProfiledComputeStage>(&stage, 1), mode,
-    submission);
+    stages, mode, submission);
 }
 
 }  // namespace gjxl::metal_internal

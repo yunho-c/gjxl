@@ -1160,7 +1160,7 @@ void WriteGpuProfileSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 2,\n"
+           << "  \"schema_version\": 3,\n"
            << "  \"scope\": \"metal-public-workflow\",\n"
            << "  \"mode\": \""
            << GpuProfilingModeName(options.gpu_profiling_mode) << "\",\n"
@@ -1228,6 +1228,8 @@ void WriteGpuProfileSamples(
             const auto& stage = submission.stages[stage_index];
             output << "              {\"stage_id\": \""
                    << JsonEscape(stage.stage_id)
+                   << "\", \"group_id\": \""
+                   << JsonEscape(stage.group_id)
                    << "\", \"iteration\": " << stage.iteration
                    << ", \"invocation\": " << stage.invocation
                    << ", \"begin_timestamp\": " << stage.begin_timestamp

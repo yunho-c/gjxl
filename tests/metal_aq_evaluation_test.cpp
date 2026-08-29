@@ -1194,46 +1194,58 @@ bool CheckResidentForwardDispatches(
     std::cerr << operation << " returned an invalid submission count\n";
     return false;
   }
-  size_t reconstruction_count = 0;
-  size_t initial_dispatch_count = 0;
-  size_t initial_gather_count = 0;
-  bool saw_initial = false;
+  std::vector<size_t> dispatch_counts(expected_reconstruction_count, 0);
+  std::vector<size_t> gather_counts(expected_reconstruction_count, 0);
+  std::vector<size_t> reset_counts(expected_reconstruction_count, 0);
   for (const auto& stage : profile.submissions[0].stages) {
-    if (stage.stage_id != "aq.reconstruction") continue;
-    ++reconstruction_count;
-    const size_t gather_count = static_cast<size_t>(std::count_if(
+    if (stage.group_id != "aq.reconstruction") continue;
+    if (stage.iteration >= expected_reconstruction_count) {
+      std::cerr << operation
+                << " returned an invalid reconstruction iteration\n";
+      return false;
+    }
+    const size_t iteration = stage.iteration;
+    dispatch_counts[iteration] += stage.dispatches.size();
+    const size_t stage_gather_count = static_cast<size_t>(std::count_if(
         stage.dispatches.begin(), stage.dispatches.end(),
         [](const auto& dispatch) {
           return dispatch.kernel_id == "gjxl_aq_gather_transform_pixels";
         }));
-    if (pattern == ResidentForwardDispatchPattern::kNone) {
-      if (gather_count != 0) {
-        std::cerr << operation << " recomputed cached forward transforms\n";
-        return false;
-      }
-      continue;
+    if (stage_gather_count != 0 &&
+        !stage.stage_id.starts_with("aq.reconstruction.forward.")) {
+      std::cerr << operation << " misattributed forward preparation\n";
+      return false;
     }
-    if (stage.iteration == 0) {
-      saw_initial = true;
-      initial_dispatch_count = stage.dispatches.size();
-      initial_gather_count = gather_count;
-      if (initial_gather_count == 0) {
-        std::cerr << operation << " omitted initial forward preparation\n";
-        return false;
-      }
-    } else if (!saw_initial || gather_count != 0 ||
-               stage.dispatches.size() + 2 * initial_gather_count +
-                   expected_initial_extra_dispatches !=
-                   initial_dispatch_count) {
+    gather_counts[iteration] += stage_gather_count;
+    if (stage.stage_id == "aq.reconstruction.reset") {
+      ++reset_counts[iteration];
+    }
+  }
+  if (!std::ranges::all_of(reset_counts,
+                           [](size_t count) { return count == 1; })) {
+    std::cerr << operation << " returned incomplete reconstruction stages\n";
+    return false;
+  }
+  if (pattern == ResidentForwardDispatchPattern::kNone) {
+    if (std::ranges::any_of(gather_counts,
+                            [](size_t count) { return count != 0; })) {
+      std::cerr << operation << " recomputed cached forward transforms\n";
+      return false;
+    }
+    return true;
+  }
+  if (gather_counts.empty() || gather_counts[0] == 0) {
+    std::cerr << operation << " omitted initial forward preparation\n";
+    return false;
+  }
+  for (size_t iteration = 1; iteration < expected_reconstruction_count;
+       ++iteration) {
+    if (gather_counts[iteration] != 0 ||
+        dispatch_counts[iteration] + 2 * gather_counts[0] +
+            expected_initial_extra_dispatches != dispatch_counts[0]) {
       std::cerr << operation << " did not reuse initial forward transforms\n";
       return false;
     }
-  }
-  if (reconstruction_count != expected_reconstruction_count ||
-      (pattern == ResidentForwardDispatchPattern::kFirstIterationOnly &&
-       !saw_initial)) {
-    std::cerr << operation << " returned incomplete reconstruction stages\n";
-    return false;
   }
   return true;
 }
@@ -1436,11 +1448,20 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
     std::cerr << "Profiled resident policy contract differs\n";
     return false;
   }
-  bool saw_reconstruction = false;
+  bool saw_reconstruction_reset = false;
+  bool saw_reconstruction_quantizer = false;
+  bool saw_reconstruction_batch = false;
   bool saw_epf = false;
   bool saw_malta = false;
   for (const auto& stage : gpu_profile.submissions[0].stages) {
-    saw_reconstruction |= stage.stage_id == "aq.reconstruction";
+    if (stage.group_id == "aq.reconstruction") {
+      saw_reconstruction_reset |=
+        stage.stage_id == "aq.reconstruction.reset";
+      saw_reconstruction_quantizer |=
+        stage.stage_id == "aq.reconstruction.quantizer";
+      saw_reconstruction_batch |=
+        stage.stage_id.starts_with("aq.reconstruction.dct");
+    }
     saw_epf |= stage.stage_id == "aq.epf.pass_1";
     saw_malta |= stage.stage_id == "butteraugli.malta.main";
     if (stage.end_timestamp < stage.begin_timestamp ||
@@ -1451,7 +1472,8 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
       return false;
     }
   }
-  if (!saw_reconstruction || !saw_epf || !saw_malta) {
+  if (!saw_reconstruction_reset || !saw_reconstruction_quantizer ||
+      !saw_reconstruction_batch || !saw_epf || !saw_malta) {
     std::cerr << "Profiled resident stages are incomplete\n";
     return false;
   }
@@ -1545,7 +1567,8 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
   for (const auto& stage : final_cfl_profile.submissions[0].stages) {
     for (const auto& dispatch : stage.dispatches) {
       if (dispatch.kernel_id == "gjxl_aq_final_cfl") {
-        if (stage.stage_id != "aq.reconstruction" || stage.iteration != 0) {
+        if (stage.stage_id != "aq.reconstruction.final_cfl" ||
+            stage.group_id != "aq.reconstruction" || stage.iteration != 0) {
           std::cerr << "Resident final CfL dispatch has invalid attribution\n";
           return false;
         }

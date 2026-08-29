@@ -183,7 +183,7 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 2)
+        self.assertEqual(document["schema_version"], 3)
         self.assertEqual(document["mode"], "stage")
         sample = document["workloads"][0]["samples"][0]
         self.assertTrue(sample["capabilities"]["timestamp_counter"])
@@ -229,7 +229,19 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
         )
         self.assertGreater(submission["command_buffer_gpu_nanoseconds"], 0)
         stages = submission["stages"]
-        self.assertIn("aq.reconstruction", {stage["stage_id"] for stage in stages})
+        reconstruction_stages = {
+            stage["stage_id"]
+            for stage in stages
+            if stage["group_id"] == "aq.reconstruction"
+        }
+        self.assertIn("aq.reconstruction.reset", reconstruction_stages)
+        self.assertIn("aq.reconstruction.quantizer", reconstruction_stages)
+        self.assertTrue(
+            any(
+                stage.startswith("aq.reconstruction.dct")
+                for stage in reconstruction_stages
+            )
+        )
         self.assertIn("aq.epf.pass_1", {stage["stage_id"] for stage in stages})
         self.assertIn(
             "butteraugli.malta.main", {stage["stage_id"] for stage in stages}
@@ -243,12 +255,50 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
             1,
         )
         for stage in stages:
-            self.assertGreaterEqual(stage["end_timestamp"], stage["begin_timestamp"])
+            self.assertTrue(stage["group_id"])
+            if stage["group_id"] == "aq.reconstruction":
+                self.assertEqual(stage["invocation"], stage["iteration"])
+            self.assertGreaterEqual(
+                stage["end_timestamp"], stage["begin_timestamp"]
+            )
             self.assertEqual(
                 stage["gpu_nanoseconds"],
                 stage["end_timestamp"] - stage["begin_timestamp"],
             )
             self.assertTrue(stage["dispatches"])
+        ac_submission = next(
+            item
+            for item in sample["submissions"]
+            if item["submission_id"] == "frontend.ac_strategy"
+        )
+        ac_stages = ac_submission["stages"]
+        self.assertEqual(
+            {stage["stage_id"] for stage in ac_stages},
+            {
+                "frontend.ac_strategy.dct8",
+                "frontend.ac_strategy.dct16x8",
+                "frontend.ac_strategy.dct8x16",
+                "frontend.ac_strategy.dct16",
+                "frontend.ac_strategy.dct32x16",
+                "frontend.ac_strategy.dct16x32",
+                "frontend.ac_strategy.dct32",
+            },
+        )
+        self.assertTrue(
+            all(
+                stage["group_id"] == "frontend.ac_strategy"
+                and stage["invocation"] == 0
+                for stage in ac_stages
+            )
+        )
+        self.assertTrue(all(len(stage["dispatches"]) == 5 for stage in ac_stages))
+        for stage in ac_stages:
+            kernel_ids = {
+                dispatch["kernel_id"] for dispatch in stage["dispatches"]
+            }
+            self.assertIn("gjxl_ac_strategy_gather", kernel_ids)
+            self.assertIn("gjxl_ac_strategy_residual", kernel_ids)
+            self.assertIn("gjxl_ac_strategy_cost", kernel_ids)
 
     def test_unsupported_dispatch_profile_preserves_existing_output(self) -> None:
         capability_output = self.directory / "capabilities.json"

@@ -38,6 +38,7 @@ using MetalComputeEncodeCallback = void (*)(
 
 struct MetalProfiledComputeStage {
   const char* stage_id = nullptr;
+  const char* group_id = nullptr;
   uint32_t iteration = 0;
   uint32_t invocation = 0;
   MetalComputeEncodeCallback encode = nullptr;
@@ -379,6 +380,10 @@ private:
     std::span<const ValidatedAcStrategyBatch> batches;
   };
 
+  struct AcStrategyProfileContext {
+    const ValidatedAcStrategyBatch* batch = nullptr;
+  };
+
   using ComputeEncodeCallback = MetalComputeEncodeCallback;
 
   static MetalBuffer* AsMetalBuffer(DeviceBuffer& buffer);
@@ -406,6 +411,11 @@ private:
     ValidatedAcStrategyBatch* out) const;
 
   static void EncodeAcStrategySubmission(
+    MetalBackend& backend,
+    MTL::ComputeCommandEncoder* encoder,
+    const void* context);
+
+  static void EncodeAcStrategyProfileStage(
     MetalBackend& backend,
     MTL::ComputeCommandEncoder* encoder,
     const void* context);

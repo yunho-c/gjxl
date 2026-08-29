@@ -56,7 +56,7 @@ class FakeCommandRunner:
                 output.write_text(
                     json.dumps(
                         {
-                            "schema_version": 2,
+                            "schema_version": 3,
                             "mode": "stage",
                             "gpu_aq": "fully-resident",
                             "distance": 1.2,
@@ -171,7 +171,7 @@ class MetalProfileTest(unittest.TestCase):
         manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["status"], "complete")
         self.assertFalse(manifest["git"]["source_changed_during_run"])
-        self.assertEqual(manifest["schema_version"], 2)
+        self.assertEqual(manifest["schema_version"], 3)
         self.assertEqual(len(manifest["commands"]), 6)
         benchmark = manifest["commands"][2]["command"]
         gpu_profile = manifest["commands"][3]["command"]
@@ -192,7 +192,7 @@ class MetalProfileTest(unittest.TestCase):
 
     def test_stage_aggregation_reports_cumulative_medians(self) -> None:
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
             "mode": "stage",
             "gpu_aq": "fully-resident",
             "distance": 1.2,
@@ -216,13 +216,15 @@ class MetalProfileTest(unittest.TestCase):
                                     "command_buffer_gpu_nanoseconds": 100,
                                     "stages": [
                                         {
-                                            "stage_id": "aq.epf.pass_1",
+                                            "stage_id": "aq.reconstruction.reset",
+                                            "group_id": "aq.reconstruction",
                                             "iteration": 0,
                                             "gpu_nanoseconds": 20,
                                             "dispatches": [{}, {}],
                                         },
                                         {
-                                            "stage_id": "aq.epf.pass_1",
+                                            "stage_id": "aq.reconstruction.gather",
+                                            "group_id": "aq.reconstruction",
                                             "iteration": 1,
                                             "gpu_nanoseconds": 30,
                                             "dispatches": [{}, {}],
@@ -239,8 +241,8 @@ class MetalProfileTest(unittest.TestCase):
         summary = metal_profile.aggregate_gpu_stage_samples(payload)
 
         workload = summary["workloads"][0]
-        self.assertEqual(summary["schema_version"], 2)
-        self.assertEqual(summary["source_schema_version"], 2)
+        self.assertEqual(summary["schema_version"], 3)
+        self.assertEqual(summary["source_schema_version"], 3)
         self.assertEqual(workload["median_sampled_stage_coverage_percent"], 50)
         submission = workload["submissions"][0]
         self.assertEqual(submission["submission_id"], "resident.aq")
@@ -250,11 +252,14 @@ class MetalProfileTest(unittest.TestCase):
         self.assertEqual(wall_stage["stage_id"], "frontend.ac_strategy.wait")
         self.assertEqual(wall_stage["kind"], "wait")
         self.assertEqual(wall_stage["median_cumulative_wall_nanoseconds"], 40)
-        stage = workload["stages"][0]
-        self.assertEqual(stage["median_cumulative_gpu_nanoseconds"], 50)
-        self.assertEqual(stage["median_call_count"], 2)
-        self.assertEqual(stage["median_dispatch_count"], 4)
-        self.assertEqual(stage["median_percent_of_command_buffer_gpu_time"], 50)
+        self.assertEqual(len(workload["stages"]), 2)
+        group = workload["stage_groups"][0]
+        self.assertEqual(group["group_id"], "aq.reconstruction")
+        self.assertEqual(group["median_cumulative_gpu_nanoseconds"], 50)
+        self.assertEqual(group["median_call_count"], 2)
+        self.assertEqual(group["median_dispatch_count"], 4)
+        self.assertEqual(group["median_percent_of_command_buffer_gpu_time"], 50)
+        self.assertEqual(len(workload["group_iterations"]), 2)
 
     def test_stage_aggregation_keeps_schema_one_artifacts_readable(self) -> None:
         payload = {
@@ -272,7 +277,14 @@ class MetalProfileTest(unittest.TestCase):
                             "submissions": [
                                 {
                                     "command_buffer_gpu_nanoseconds": 10,
-                                    "stages": [],
+                                    "stages": [
+                                        {
+                                            "stage_id": "legacy.stage",
+                                            "iteration": 0,
+                                            "gpu_nanoseconds": 10,
+                                            "dispatches": [{}],
+                                        }
+                                    ],
                                 }
                             ]
                         }
@@ -287,6 +299,9 @@ class MetalProfileTest(unittest.TestCase):
         workload = summary["workloads"][0]
         self.assertEqual(
             workload["submissions"][0]["submission_id"], "submission_0"
+        )
+        self.assertEqual(
+            workload["stage_groups"][0]["group_id"], "legacy.stage"
         )
         self.assertEqual(workload["wall_stages"], [])
 

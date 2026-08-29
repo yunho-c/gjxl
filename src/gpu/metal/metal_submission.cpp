@@ -606,6 +606,7 @@ Status MetalBackend::SubmitComputeProfiled(
     try {
       profile.stages.push_back({
         .stage_id = stage.stage_id,
+        .group_id = stage.group_id == nullptr ? stage.stage_id : stage.group_id,
         .iteration = stage.iteration,
         .invocation = stage.invocation,
       });
