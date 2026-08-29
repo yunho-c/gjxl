@@ -348,6 +348,46 @@ adjustment, host CfL scheduling, transfers, waits, and the resident policy
 under the same diagnostic session. Uninstrumented public-workflow runs remain
 the final judge for any retained performance claim.
 
+#### Frontend AC-strategy candidate-pipeline fusion (2026-08-29)
+
+The SIMD AC-candidate path now performs three dispatches per transform family
+instead of five. Candidate pixels are gathered directly into the forward-DCT
+threadgroup tile, eliminating the packed-pixel scratch write/read. Residual
+coefficients are likewise retained in threadgroup memory for the inverse DCT,
+eliminating its scratch write/read and separate dispatch. The masked cost pass
+remains separate because it combines all three reconstructed color transforms.
+Scalar, factored, and mixed DCT selections retain the original gather,
+transform, residual, inverse, and cost fallback.
+
+Direct Metal cost tests cover every candidate transform with scalar, SIMD, and
+factored DCT implementations. The SIMD path retained the preceding maximum
+absolute/relative cost errors, and the complete CPU/GPU search grids remained
+identical. The serial Release suite passes 58/59 tests; the sole failure is the
+unchanged pinned CPU `quantization_pipeline` score difference of
+`4.4524669647216797e-05` at index 1.
+
+A clean same-revision schema-stage pair used two warmups and five samples.
+Across the seven AC-strategy families, the sampled stage total changed from
+`27.075` to `18.670 ms` at padded 1080p (`-31.0%`) and from `103.845` to
+`66.072 ms` at padded 4K (`-36.4%`). The dispatch inventory fell from 35 to
+21. These sampled timestamps explain the candidate; they are not the retained
+latency claim.
+
+The final unprofiled public gate used fully resident SIMD AQ at distance `1.2`,
+two warmups, seven samples, and three process pairs per workload. Pair order was
+baseline/candidate, candidate/baseline, then baseline/candidate. Each table
+value is the median of the three process medians.
+
+| Workload | Baseline total | Fused total | Delta | Baseline quantization | Fused quantization | Delta | GPU bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Padded 1080p | `524.688 ms` | `514.141 ms` | `-2.0%` | `137.237 ms` | `128.111 ms` | `-6.7%` | `420268` |
+| Padded 4K | `1475.565 ms` | `1440.820 ms` | `-2.4%` | `491.362 ms` | `452.611 ms` | `-7.9%` | `1640942` |
+
+Quantization improved in all six pairs: `4.80-10.13%` at 1080p and
+`6.86-9.08%` at 4K. Total time improved by `1.62-2.43%` in two 1080p pairs and
+was effectively tied in the other (`+0.06%`, or `0.315 ms`); all three 4K
+pairs improved by `1.70-4.54%`. GPU output size was unchanged in every sample.
+
 #### Butteraugli convolution-consumer fusion (2026-08-29)
 
 Commit `cada229` retains the pass-fusion alternative after the generic tiled

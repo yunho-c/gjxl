@@ -129,9 +129,16 @@ struct AqPipelines {
 };
 
 struct AcStrategyPipelines {
+  struct FusedStages {
+    NS::SharedPtr<MTL::ComputePipelineState> forward;
+    NS::SharedPtr<MTL::ComputePipelineState> residual_inverse;
+    NS::UInteger forward_threads_per_threadgroup = 0;
+  };
+
   NS::SharedPtr<MTL::ComputePipelineState> gather;
   NS::SharedPtr<MTL::ComputePipelineState> residual;
   NS::SharedPtr<MTL::ComputePipelineState> cost;
+  std::array<FusedStages, kAcStrategyCount> fused;
   NS::UInteger gather_threads_per_threadgroup = 0;
 };
 
@@ -555,6 +562,8 @@ private:
 Status CreateAcStrategyPipelines(
   MTL::Device* device,
   MTL::Library* library,
+  const std::array<bool, kAcStrategyCount>& fused_forward_enabled,
+  const std::array<bool, kAcStrategyCount>& fused_inverse_enabled,
   AcStrategyPipelines* out);
 
 Status CreatePrimitivePipelines(

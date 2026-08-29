@@ -292,13 +292,29 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
                 for stage in ac_stages
             )
         )
-        self.assertTrue(all(len(stage["dispatches"]) == 5 for stage in ac_stages))
+        self.assertTrue(all(len(stage["dispatches"]) == 3 for stage in ac_stages))
         for stage in ac_stages:
             kernel_ids = {
                 dispatch["kernel_id"] for dispatch in stage["dispatches"]
             }
-            self.assertIn("gjxl_ac_strategy_gather", kernel_ids)
-            self.assertIn("gjxl_ac_strategy_residual", kernel_ids)
+            self.assertNotIn("gjxl_ac_strategy_gather", kernel_ids)
+            self.assertEqual(
+                sum(
+                    kernel_id.startswith("gjxl_ac_strategy_dct")
+                    and kernel_id.endswith("_forward_fused")
+                    for kernel_id in kernel_ids
+                ),
+                1,
+            )
+            self.assertNotIn("gjxl_ac_strategy_residual", kernel_ids)
+            self.assertEqual(
+                sum(
+                    kernel_id.startswith("gjxl_ac_strategy_dct")
+                    and kernel_id.endswith("_residual_inverse_fused")
+                    for kernel_id in kernel_ids
+                ),
+                1,
+            )
             self.assertIn("gjxl_ac_strategy_cost", kernel_ids)
 
     def test_unsupported_dispatch_profile_preserves_existing_output(self) -> None:
