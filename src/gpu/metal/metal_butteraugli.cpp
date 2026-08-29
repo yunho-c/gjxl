@@ -31,7 +31,6 @@ namespace gjxl::metal_internal {
 namespace {
 
 constexpr size_t kPlaneAlignment = 64;
-constexpr size_t kWorkingPlaneCount = 39;
 constexpr size_t kReductionWidth = 256;
 constexpr std::array<float, 5> kBlurSigmas{
   1.2f,
@@ -44,13 +43,21 @@ constexpr std::array<size_t, 5> kKernelSizes{5, 33, 15, 7, 13};
 
 constexpr size_t kPsychoReference = 0;
 constexpr size_t kPsychoDistorted = 10;
-constexpr size_t kImage = 20;
-constexpr size_t kAc = 26;
-constexpr size_t kDc = 29;
-constexpr size_t kWork = 32;
-constexpr size_t kFinalStaging = 37;
-constexpr size_t kReferenceMask = 38;
 constexpr size_t kPsychoPlaneCount = 10;
+constexpr size_t kReferenceMask = 20;
+
+// Psycho-image encoding finishes before difference encoding begins. Reuse its
+// six image/blur planes for the three AC and three DC accumulators, and reuse
+// its convolution intermediates for difference scratch. The final staging
+// plane remains distinct because multiscale composition and diagnostic capture
+// can keep it live alongside the difference scratch.
+constexpr size_t kImage = 21;
+constexpr size_t kAc = kImage;
+constexpr size_t kDc = kImage + 3;
+constexpr size_t kPsychoWork = 27;
+constexpr size_t kWork = kPsychoWork;
+constexpr size_t kFinalStaging = 32;
+constexpr size_t kWorkingPlaneCount = 33;
 constexpr size_t kMaltaTileWidth = 32;
 constexpr size_t kMaltaTileHeight = 8;
 constexpr size_t kMaltaRadius = 4;
@@ -915,7 +922,7 @@ private:
       ConstDevicePlaneView input =
         AsConst(Plane(kImage + channel, scale_extent));
       DevicePlaneView intermediate =
-        TransposedPlane(kWork + channel, scale_extent);
+        TransposedPlane(kPsychoWork + channel, scale_extent);
       const ConvolutionParams params{
         static_cast<uint32_t>(scale_extent.width),
         static_cast<uint32_t>(scale_extent.height),
@@ -937,7 +944,7 @@ private:
       static_cast<uint32_t>(scale_extent.width),
       static_cast<uint32_t>(scale_extent.height),
       static_cast<uint32_t>(
-        TransposedPlane(kWork, scale_extent).row_stride),
+        TransposedPlane(kPsychoWork, scale_extent).row_stride),
       static_cast<uint32_t>(working_extent_.width),
       static_cast<uint32_t>(psycho[0].row_stride),
       static_cast<uint32_t>(kKernelSizes[1]),
@@ -946,7 +953,7 @@ private:
       metal_.butteraugli_pipelines_.frequency_low_medium_convolve.get());
     for (size_t channel = 0; channel < 3; ++channel) {
       DevicePlaneView intermediate =
-        TransposedPlane(kWork + channel, scale_extent);
+        TransposedPlane(kPsychoWork + channel, scale_extent);
       Bind(encoder, Handle(metal_, intermediate),
            intermediate.offset_bytes, channel);
     }
@@ -978,7 +985,8 @@ private:
     for (size_t channel = 0; channel < 2; ++channel) {
       DevicePlaneView medium = psycho[3 + channel];
       DevicePlaneView high = psycho[6 + channel];
-      DevicePlaneView intermediate = TransposedPlane(kWork, scale_extent);
+      DevicePlaneView intermediate =
+        TransposedPlane(kPsychoWork, scale_extent);
       const ConvolutionParams convolution_params{
         static_cast<uint32_t>(scale_extent.width),
         static_cast<uint32_t>(scale_extent.height),
@@ -1018,7 +1026,8 @@ private:
       metal_.DispatchPlane(encoder, scale_extent);
     }
     DevicePlaneView medium_b = psycho[5];
-    EncodeBlur(encoder, AsConst(medium_b), 2, kWork, medium_b, scale_extent);
+    EncodeBlur(
+      encoder, AsConst(medium_b), 2, kPsychoWork, medium_b, scale_extent);
 
     DevicePlaneView high_x = psycho[6];
     DevicePlaneView high_y = psycho[7];
@@ -1038,7 +1047,8 @@ private:
     for (size_t channel = 0; channel < 2; ++channel) {
       DevicePlaneView high = psycho[6 + channel];
       DevicePlaneView ultra = psycho[8 + channel];
-      DevicePlaneView intermediate = TransposedPlane(kWork, scale_extent);
+      DevicePlaneView intermediate =
+        TransposedPlane(kPsychoWork, scale_extent);
       const ConvolutionParams convolution_params{
         static_cast<uint32_t>(scale_extent.width),
         static_cast<uint32_t>(scale_extent.height),
