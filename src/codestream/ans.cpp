@@ -58,6 +58,25 @@ struct ReverseBitChunk {
   uint8_t bit_count = 0;
 };
 
+struct WeightedValue {
+  uint32_t value = 0;
+  uint64_t count = 0;
+};
+
+std::vector<WeightedValue> AggregateValues(std::vector<uint32_t> values) {
+  std::ranges::sort(values);
+  std::vector<WeightedValue> aggregated;
+  aggregated.reserve(std::min(values.size(), kMaximumAnsAlphabetSize));
+  for (uint32_t value : values) {
+    if (aggregated.empty() || aggregated.back().value != value) {
+      aggregated.push_back({value, 1});
+    } else {
+      ++aggregated.back().count;
+    }
+  }
+  return aggregated;
+}
+
 Status AllocationFailure() {
   return Status::OutOfMemory("ANS entropy allocation failed");
 }
@@ -1133,26 +1152,33 @@ Status OptimizeAnsEntropyCode(
     };
     std::vector<std::vector<ConfigCandidate>> options(cluster_count);
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+      const std::vector<WeightedValue> weighted_values =
+        AggregateValues(std::move(values[cluster]));
       for (HybridUintConfig config : kAnsUintConfigs) {
         std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
         uint64_t extra_bits = 0;
         size_t maximum_symbol = 0;
         bool valid = true;
-        for (uint32_t value : values[cluster]) {
+        for (const WeightedValue& weighted_value : weighted_values) {
           HybridUintToken encoded;
-          if (Status status = EncodeHybridUint(value, config, &encoded);
+          if (Status status = EncodeHybridUint(
+                weighted_value.value, config, &encoded);
               !status.ok()) {
             return status;
           }
           if (encoded.symbol >= kMaximumAnsAlphabetSize ||
-              counts[encoded.symbol] == std::numeric_limits<uint64_t>::max() ||
-              extra_bits > std::numeric_limits<uint64_t>::max() -
-                encoded.extra_bit_count) {
+              counts[encoded.symbol] >
+                std::numeric_limits<uint64_t>::max() -
+                  weighted_value.count ||
+              (encoded.extra_bit_count != 0 &&
+               weighted_value.count >
+                 (std::numeric_limits<uint64_t>::max() - extra_bits) /
+                   encoded.extra_bit_count)) {
             valid = false;
             break;
           }
-          ++counts[encoded.symbol];
-          extra_bits += encoded.extra_bit_count;
+          counts[encoded.symbol] += weighted_value.count;
+          extra_bits += weighted_value.count * encoded.extra_bit_count;
           maximum_symbol = std::max<size_t>(maximum_symbol, encoded.symbol);
         }
         if (!valid) {

@@ -1157,7 +1157,33 @@ order.
    The complete Release suite remains 58/59 with only the exact inherited
    `quantization_pipeline` score mismatch.
 
-6. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
+6. **In progress (2026-08-29): reduce repeated ANS candidate screening.**
+   The first retained step aggregates each cluster's token values into a
+   deterministic value-sorted `(value, count)` sequence. Each of the eight
+   HybridUint configurations now encodes every distinct value once and weights
+   its symbol population and extra-bit contribution by the checked count,
+   instead of re-encoding every token eight times. The ordered section tokens
+   remain unchanged for exact ANS state traversal, so model selection,
+   tie-breaking, and serialized output are unaffected.
+
+   Five alternating Release process pairs compared parent `0e0428e` with the
+   aggregated implementation on `flower_510x532`, using the Metal public
+   workflow at distance 1.2 and `maximum-throughput`. Each process used two
+   warmups and nine measured samples. Per-pair entropy-optimization improvement
+   was 7.13-8.27%, codestream encoding improved 3.65-6.81%, and complete
+   workflow time improved 2.59-6.79%. The median of the five process medians
+   changed from 40.958 to 37.754 ms for entropy optimization (-7.82%), 54.694
+   to 51.502 ms for codestream encoding (-5.84%), and 73.864 to 70.470 ms for
+   the complete workflow (-4.59%). Every sample retained the same 43,427-byte
+   Metal codestream. A separate one-sample semantic sweep retained identical
+   CPU and Metal codestream sizes for all 15 built-in workloads through padded
+   4K, including the same aggregate byte sink. The focused entropy test passes
+   100 consecutive runs, and the complete Release suite remains 58/59 with only
+   the exact inherited `quantization_pipeline` score mismatch. Width-dependent
+   statistic caching and safe exact-candidate pruning remain separate follow-up
+   steps so their effects can be measured independently.
+
+7. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
    could cheaply screen coefficient-order and block-context candidates, search
@@ -1167,7 +1193,7 @@ order.
    rates, per-candidate time, bytes saved, and complete-codestream size must
    define this policy; one losing custom-order example is not sufficient.
 
-7. **Defer GPU entropy coding until a residual profile justifies it.** The
+8. **Defer GPU entropy coding until a residual profile justifies it.** The
    dominant exact operation builds many small, branch-heavy, depth-limited
    128-symbol Huffman trees with deterministic tie behavior. Seed assignment
    also mutates cluster state between decisions, and the CPU serializer needs
