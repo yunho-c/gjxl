@@ -916,17 +916,14 @@ Status CountAnsTokenStreamBits(
 Status MeasureAnsCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCode& code,
+  uint64_t model_bits,
   EntropyCodeCost* cost) {
 
   if (cost == nullptr) {
     return Status::InvalidArgument("ANS cost output is null");
   }
-  BitWriter model;
-  if (Status status = WriteEntropyCode(code, &model); !status.ok()) {
-    return status;
-  }
   EntropyCodeCost candidate;
-  candidate.model_bits = model.bits_written();
+  candidate.model_bits = model_bits;
   candidate.cluster_count = code.ans_histograms.size();
   for (const std::vector<EntropyToken>& section : section_tokens) {
     uint64_t section_bits = 0;
@@ -942,6 +939,29 @@ Status MeasureAnsCode(
   }
   *cost = candidate;
   return Status::Ok();
+}
+
+bool HasEquivalentAnsTokenCoding(
+  const EntropyCode& left,
+  const EntropyCode& right) {
+
+  if (left.mode != EntropyCodingMode::kAns ||
+      right.mode != EntropyCodingMode::kAns ||
+      left.context_count != right.context_count ||
+      left.context_map != right.context_map ||
+      left.uint_configs != right.uint_configs ||
+      left.ans_histograms.size() != right.ans_histograms.size()) {
+    return false;
+  }
+  for (size_t cluster = 0; cluster < left.ans_histograms.size(); ++cluster) {
+    const AnsHistogram& left_histogram = left.ans_histograms[cluster];
+    const AnsHistogram& right_histogram = right.ans_histograms[cluster];
+    if (left_histogram.frequencies != right_histogram.frequencies ||
+        left_histogram.reverse_maps != right_histogram.reverse_maps) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -1144,11 +1164,22 @@ Status OptimizeAnsEntropyCode(
       }
     }
 
+    constexpr size_t kMinimumLogAlphaSize = 5;
+    constexpr size_t kMaximumLogAlphaSize = 8;
+    constexpr size_t kLogAlphaSizeCount =
+      kMaximumLogAlphaSize - kMinimumLogAlphaSize + 1;
+    struct ConfigWidthStats {
+      bool valid = false;
+      uint64_t config_bits = 0;
+      double estimated_bits = 0.0;
+    };
     struct ConfigCandidate {
       HybridUintConfig config;
       AnsHistogram histogram;
       size_t maximum_symbol = 0;
+      uint64_t extra_bits = 0;
       double estimated_bits = 0.0;
+      std::array<ConfigWidthStats, kLogAlphaSizeCount> width_stats;
     };
     std::vector<std::vector<ConfigCandidate>> options(cluster_count);
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
@@ -1187,6 +1218,7 @@ Status OptimizeAnsEntropyCode(
         ConfigCandidate option;
         option.config = config;
         option.maximum_symbol = maximum_symbol;
+        option.extra_bits = extra_bits;
         if (Status status = BuildBestAnsHistogram(
               counts, &option.histogram);
             !status.ok()) {
@@ -1198,32 +1230,11 @@ Status OptimizeAnsEntropyCode(
           return status;
         }
         option.estimated_bits += static_cast<double>(extra_bits);
-        options[cluster].push_back(std::move(option));
-      }
-      if (options[cluster].empty()) {
-        return Status::InvalidArgument("No valid ANS HybridUint config");
-      }
-    }
-
-    EntropyCode best;
-    EntropyCodeCost best_cost;
-    uint64_t best_total = std::numeric_limits<uint64_t>::max();
-    for (size_t log_alpha_size = 5; log_alpha_size <= 8; ++log_alpha_size) {
-      EntropyCode candidate;
-      candidate.mode = EntropyCodingMode::kAns;
-      candidate.context_count = prefix_partition.context_count;
-      candidate.context_map = prefix_partition.context_map;
-      candidate.ans_log_alpha_size = static_cast<uint8_t>(log_alpha_size);
-      candidate.uint_configs.resize(cluster_count);
-      candidate.ans_histograms.resize(cluster_count);
-      bool valid = true;
-      for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
-        const ConfigCandidate* selected = nullptr;
-        double selected_cost = std::numeric_limits<double>::infinity();
-        const size_t split_limit = size_t{1} << std::bit_width(log_alpha_size);
-        for (const ConfigCandidate& option : options[cluster]) {
+        for (size_t log_alpha_size = kMinimumLogAlphaSize;
+             log_alpha_size <= kMaximumLogAlphaSize; ++log_alpha_size) {
           if (option.maximum_symbol >= (size_t{1} << log_alpha_size) ||
-              option.config.split_exponent >= split_limit) {
+              option.config.split_exponent >=
+                (size_t{1} << std::bit_width(log_alpha_size))) {
             continue;
           }
           BitWriter config_writer;
@@ -1232,17 +1243,68 @@ Status OptimizeAnsEntropyCode(
               !status.ok()) {
             return status;
           }
-          const double option_cost = option.estimated_bits +
-            static_cast<double>(config_writer.bits_written());
-          if (option_cost < selected_cost) {
+          ConfigWidthStats& stats =
+            option.width_stats[log_alpha_size - kMinimumLogAlphaSize];
+          stats.valid = true;
+          stats.config_bits = config_writer.bits_written();
+          stats.estimated_bits = option.estimated_bits +
+            static_cast<double>(stats.config_bits);
+        }
+        options[cluster].push_back(std::move(option));
+      }
+      if (options[cluster].empty()) {
+        return Status::InvalidArgument("No valid ANS HybridUint config");
+      }
+    }
+
+    if (section_tokens.size() >
+        std::numeric_limits<uint64_t>::max() / 32) {
+      return Status::InvalidArgument("ANS token cost overflow");
+    }
+    const uint64_t minimum_section_bits =
+      uint64_t{32} * section_tokens.size();
+    struct WidthCandidate {
+      EntropyCode code;
+      uint64_t model_bits = 0;
+      uint64_t minimum_token_bits = 0;
+      bool survives = true;
+    };
+    std::vector<WidthCandidate> width_candidates;
+    width_candidates.reserve(kLogAlphaSizeCount);
+    for (size_t log_alpha_size = kMinimumLogAlphaSize;
+         log_alpha_size <= kMaximumLogAlphaSize; ++log_alpha_size) {
+      EntropyCode candidate;
+      candidate.mode = EntropyCodingMode::kAns;
+      candidate.context_count = prefix_partition.context_count;
+      candidate.context_map = prefix_partition.context_map;
+      candidate.ans_log_alpha_size = static_cast<uint8_t>(log_alpha_size);
+      candidate.uint_configs.resize(cluster_count);
+      candidate.ans_histograms.resize(cluster_count);
+      uint64_t minimum_token_bits = minimum_section_bits;
+      bool valid = true;
+      for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+        const ConfigCandidate* selected = nullptr;
+        double selected_cost = std::numeric_limits<double>::infinity();
+        for (const ConfigCandidate& option : options[cluster]) {
+          const ConfigWidthStats& stats =
+            option.width_stats[log_alpha_size - kMinimumLogAlphaSize];
+          if (!stats.valid) {
+            continue;
+          }
+          if (stats.estimated_bits < selected_cost) {
             selected = &option;
-            selected_cost = option_cost;
+            selected_cost = stats.estimated_bits;
           }
         }
         if (selected == nullptr) {
           valid = false;
           break;
         }
+        if (minimum_token_bits >
+            std::numeric_limits<uint64_t>::max() - selected->extra_bits) {
+          return Status::InvalidArgument("ANS token cost overflow");
+        }
+        minimum_token_bits += selected->extra_bits;
         candidate.uint_configs[cluster] = selected->config;
         candidate.ans_histograms[cluster] = selected->histogram;
         if (Status status = BuildReverseMaps(
@@ -1256,9 +1318,53 @@ Status OptimizeAnsEntropyCode(
       if (!valid) {
         continue;
       }
+      BitWriter model;
+      if (Status status = WriteEntropyCode(candidate, &model); !status.ok()) {
+        return status;
+      }
+      width_candidates.push_back({
+        std::move(candidate), model.bits_written(), minimum_token_bits, true});
+    }
+
+    for (size_t candidate_index = 0;
+         candidate_index < width_candidates.size(); ++candidate_index) {
+      WidthCandidate& candidate = width_candidates[candidate_index];
+      if (!candidate.survives) {
+        continue;
+      }
+      for (size_t other_index = candidate_index + 1;
+           other_index < width_candidates.size(); ++other_index) {
+        WidthCandidate& other = width_candidates[other_index];
+        if (!other.survives || !HasEquivalentAnsTokenCoding(
+              candidate.code, other.code)) {
+          continue;
+        }
+        if (other.model_bits < candidate.model_bits) {
+          candidate.survives = false;
+          break;
+        }
+        other.survives = false;
+      }
+    }
+
+    EntropyCode best;
+    EntropyCodeCost best_cost;
+    uint64_t best_total = std::numeric_limits<uint64_t>::max();
+    for (WidthCandidate& candidate : width_candidates) {
+      if (!candidate.survives) {
+        continue;
+      }
+      const uint64_t candidate_lower_bound = candidate.model_bits >
+          std::numeric_limits<uint64_t>::max() - candidate.minimum_token_bits
+        ? std::numeric_limits<uint64_t>::max()
+        : candidate.model_bits + candidate.minimum_token_bits;
+      if (candidate_lower_bound >= best_total) {
+        continue;
+      }
       EntropyCodeCost candidate_cost;
       if (Status status = MeasureAnsCode(
-            section_tokens, candidate, &candidate_cost);
+            section_tokens, candidate.code, candidate.model_bits,
+            &candidate_cost);
           !status.ok()) {
         return status;
       }
@@ -1268,7 +1374,7 @@ Status OptimizeAnsEntropyCode(
         : candidate_cost.model_bits + candidate_cost.token_bits;
       if (candidate_total < best_total) {
         best_total = candidate_total;
-        best = std::move(candidate);
+        best = std::move(candidate.code);
         best_cost = candidate_cost;
       }
     }

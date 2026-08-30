@@ -1183,6 +1183,29 @@ order.
    statistic caching and safe exact-candidate pruning remain separate follow-up
    steps so their effects can be measured independently.
 
+   The second step precomputes width validity, exact HybridUint header bits, and
+   the combined screening estimate for every `(cluster, configuration, width)`
+   tuple. It constructs each valid width once and caches its validated exact
+   model size plus a rigorous payload lower bound consisting of the 32-bit
+   final state for every section and the selected configurations' exact
+   extra-bit totals. Before token traversal, a width is discarded only when its
+   complete token coder is identical to another width with an equal-or-smaller
+   model, or when its exact model-plus-payload lower bound cannot beat an
+   already measured candidate. Equality preserves the original smaller-width
+   tie preference. The floating entropy estimate ranks configurations but is
+   never used as a pruning proof.
+
+   Temporary diagnostic counters over one `flower_510x532` workflow encode
+   observed 36 ANS optimizers and 144 valid width candidates. This workload had
+   no complete token-coder equivalences and its payload bounds were too loose
+   to reject a width before traversal. A five-pair, 20-sample alternating check
+   accordingly showed no standalone speed win: four uncontaminated pairs put
+   entropy optimization between a 0.15% and 1.30% regression, while one process
+   was visibly contaminated across unrelated stages. This step is retained as
+   correctness-preserving candidate infrastructure, not promoted as a speedup;
+   the next step must share exact count-only work across surviving widths and
+   pass its own retention gate.
+
 7. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
