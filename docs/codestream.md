@@ -1230,6 +1230,15 @@ order.
    through padded 4K. Focused entropy, encoder, conformance, single-image, and
    batch-workflow coverage passes, including 100 consecutive entropy runs.
 
+   A final five-pair comparison measured the complete three-step series against
+   original parent `0e0428e`, again with three warmups and 30 samples per
+   process. Median paired improvement was 13.66% for entropy optimization,
+   10.92% for codestream encoding, and 8.72% for the complete Metal workflow.
+   All five pairs improved all three boundaries. One broadly slower parent
+   process raised the maxima to 20.48%, 16.00%, and 17.17%; across the other
+   four pairs, the respective ranges were 12.93-13.77%, 10.39-11.41%, and
+   7.80-8.88%. Section writing was not changed by this series.
+
 7. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
