@@ -23,6 +23,7 @@ namespace {
 
 constexpr uint32_t kAnsLogTableSize = 12;
 constexpr uint32_t kAnsSignature = 0x13;
+constexpr size_t kAnsAlphabetWidthCount = 4;
 // Retain the four prefix candidates, then add the four ANS configurations that
 // materially improved the established corpus. The wider 28-choice experiment
 // only saved four additional bytes and added measurable complete-encode cost.
@@ -838,6 +839,36 @@ Status BuildBestAnsHistogram(
 }
 
 template <typename EmitChunk>
+Status AdvanceAnsState(
+  const HybridUintToken& encoded,
+  const AnsHistogram& histogram,
+  EmitChunk&& emit_chunk,
+  uint32_t* state) {
+
+  if (state == nullptr || encoded.symbol >= histogram.frequencies.size() ||
+      histogram.frequencies[encoded.symbol] == 0) {
+    return Status::InvalidArgument("ANS token symbol is absent");
+  }
+  if (encoded.extra_bit_count != 0) {
+    emit_chunk(encoded.extra_bits, encoded.extra_bit_count);
+  }
+  const uint32_t frequency = histogram.frequencies[encoded.symbol];
+  if ((*state >> (32 - kAnsLogTableSize)) >= frequency) {
+    emit_chunk(*state & 0xFFFFu, 16);
+    *state >>= 16;
+  }
+  const uint32_t quotient = *state / frequency;
+  const uint32_t remainder = *state - quotient * frequency;
+  const std::vector<uint16_t>& reverse =
+    histogram.reverse_maps[encoded.symbol];
+  if (remainder >= reverse.size() || reverse[remainder] >= kAnsTableSize) {
+    return Status::InvalidArgument("ANS reverse-map entry is invalid");
+  }
+  *state = (quotient << kAnsLogTableSize) + reverse[remainder];
+  return Status::Ok();
+}
+
+template <typename EmitChunk>
 Status ProcessAnsTokenStream(
   std::span<const EntropyToken> tokens,
   const EntropyCode& code,
@@ -857,27 +888,11 @@ Status ProcessAnsTokenStream(
         !status.ok()) {
       return status;
     }
-    const AnsHistogram& histogram = code.ans_histograms[cluster];
-    if (encoded.symbol >= histogram.frequencies.size() ||
-        histogram.frequencies[encoded.symbol] == 0) {
-      return Status::InvalidArgument("ANS token symbol is absent");
+    if (Status status = AdvanceAnsState(
+          encoded, code.ans_histograms[cluster], emit_chunk, &state);
+        !status.ok()) {
+      return status;
     }
-    if (encoded.extra_bit_count != 0) {
-      emit_chunk(encoded.extra_bits, encoded.extra_bit_count);
-    }
-    const uint32_t frequency = histogram.frequencies[encoded.symbol];
-    if ((state >> (32 - kAnsLogTableSize)) >= frequency) {
-      emit_chunk(state & 0xFFFFu, 16);
-      state >>= 16;
-    }
-    const uint32_t quotient = state / frequency;
-    const uint32_t remainder = state - quotient * frequency;
-    const std::vector<uint16_t>& reverse =
-      histogram.reverse_maps[encoded.symbol];
-    if (remainder >= reverse.size() || reverse[remainder] >= kAnsTableSize) {
-      return Status::InvalidArgument("ANS reverse-map entry is invalid");
-    }
-    state = (quotient << kAnsLogTableSize) + reverse[remainder];
   }
   *final_state = state;
   return Status::Ok();
@@ -941,7 +956,7 @@ Status MeasureAnsCode(
   return Status::Ok();
 }
 
-bool HasEquivalentAnsTokenCoding(
+bool HasEquivalentAnsSymbolCoding(
   const EntropyCode& left,
   const EntropyCode& right) {
 
@@ -956,12 +971,103 @@ bool HasEquivalentAnsTokenCoding(
   for (size_t cluster = 0; cluster < left.ans_histograms.size(); ++cluster) {
     const AnsHistogram& left_histogram = left.ans_histograms[cluster];
     const AnsHistogram& right_histogram = right.ans_histograms[cluster];
-    if (left_histogram.frequencies != right_histogram.frequencies ||
-        left_histogram.reverse_maps != right_histogram.reverse_maps) {
+    if (left_histogram.frequencies != right_histogram.frequencies) {
       return false;
     }
   }
   return true;
+}
+
+bool HasEquivalentAnsTokenCoding(
+  const EntropyCode& left,
+  const EntropyCode& right) {
+
+  if (!HasEquivalentAnsSymbolCoding(left, right)) {
+    return false;
+  }
+  for (size_t cluster = 0; cluster < left.ans_histograms.size(); ++cluster) {
+    if (left.ans_histograms[cluster].reverse_maps !=
+        right.ans_histograms[cluster].reverse_maps) {
+      return false;
+    }
+  }
+  return true;
+}
+
+Status MeasureAnsCodes(
+  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyCode* const> codes,
+  std::span<const uint64_t> model_bits,
+  std::span<EntropyCodeCost> costs) {
+
+  // Compatible widths encode each token to the same HybridUint symbol and
+  // normalized frequency. Traverse the ordered tokens once, but retain one
+  // exact rANS state and reverse map per width because those tables can change
+  // renormalization decisions.
+  if (codes.empty() || codes.size() > kAnsAlphabetWidthCount ||
+      model_bits.size() != codes.size() || costs.size() != codes.size()) {
+    return Status::InvalidArgument("ANS survivor dimensions are invalid");
+  }
+  for (size_t candidate = 0; candidate < codes.size(); ++candidate) {
+    if (codes[candidate] == nullptr ||
+        !HasEquivalentAnsSymbolCoding(*codes[0], *codes[candidate])) {
+      return Status::InvalidArgument("ANS survivor symbols differ");
+    }
+    costs[candidate] = {
+      model_bits[candidate], 0, codes[candidate]->ans_histograms.size()};
+  }
+  if (codes.size() == 1) {
+    return MeasureAnsCode(
+      section_tokens, *codes[0], model_bits[0], &costs[0]);
+  }
+
+  constexpr uint64_t kMaximumBitsPerToken = 31 + 16;
+  std::array<uint32_t, kAnsAlphabetWidthCount> states{};
+  std::array<uint64_t, kAnsAlphabetWidthCount> section_bits{};
+  const EntropyCode& reference = *codes[0];
+  for (const std::vector<EntropyToken>& section : section_tokens) {
+    if (section.size() >
+        (std::numeric_limits<uint64_t>::max() - 32) /
+          kMaximumBitsPerToken) {
+      return Status::InvalidArgument("ANS token cost overflow");
+    }
+    std::fill_n(states.begin(), codes.size(), kAnsSignature << 16);
+    std::fill_n(section_bits.begin(), codes.size(), uint64_t{32});
+    for (size_t token_index = section.size(); token_index != 0;
+         --token_index) {
+      const EntropyToken& token = section[token_index - 1];
+      if (token.context >= reference.context_count) {
+        return Status::InvalidArgument("ANS token context is out of range");
+      }
+      const size_t cluster = reference.context_map[token.context];
+      HybridUintToken encoded;
+      if (Status status = EncodeHybridUint(
+            token.value, reference.uint_configs[cluster], &encoded);
+          !status.ok()) {
+        return status;
+      }
+      for (size_t candidate = 0; candidate < codes.size(); ++candidate) {
+        const auto count_chunk = [&section_bits, candidate](
+                                   uint32_t, uint8_t chunk_bits) {
+          section_bits[candidate] += chunk_bits;
+        };
+        if (Status status = AdvanceAnsState(
+              encoded, codes[candidate]->ans_histograms[cluster],
+              count_chunk, &states[candidate]);
+            !status.ok()) {
+          return status;
+        }
+      }
+    }
+    for (size_t candidate = 0; candidate < codes.size(); ++candidate) {
+      if (costs[candidate].token_bits >
+          std::numeric_limits<uint64_t>::max() - section_bits[candidate]) {
+        return Status::InvalidArgument("ANS token cost overflow");
+      }
+      costs[candidate].token_bits += section_bits[candidate];
+    }
+  }
+  return Status::Ok();
 }
 
 }  // namespace
@@ -1347,41 +1453,76 @@ Status OptimizeAnsEntropyCode(
       }
     }
 
-    EntropyCode best;
     EntropyCodeCost best_cost;
     uint64_t best_total = std::numeric_limits<uint64_t>::max();
-    for (WidthCandidate& candidate : width_candidates) {
-      if (!candidate.survives) {
+    size_t best_candidate = std::numeric_limits<size_t>::max();
+    std::array<bool, kAnsAlphabetWidthCount> grouped{};
+    for (size_t group_seed = 0; group_seed < width_candidates.size();
+         ++group_seed) {
+      if (grouped[group_seed] || !width_candidates[group_seed].survives) {
         continue;
       }
-      const uint64_t candidate_lower_bound = candidate.model_bits >
-          std::numeric_limits<uint64_t>::max() - candidate.minimum_token_bits
-        ? std::numeric_limits<uint64_t>::max()
-        : candidate.model_bits + candidate.minimum_token_bits;
-      if (candidate_lower_bound >= best_total) {
+      std::array<size_t, kAnsAlphabetWidthCount> candidate_indexes{};
+      std::array<const EntropyCode*, kAnsAlphabetWidthCount> candidate_codes{};
+      std::array<uint64_t, kAnsAlphabetWidthCount> candidate_model_bits{};
+      size_t group_size = 0;
+      for (size_t candidate_index = group_seed;
+           candidate_index < width_candidates.size(); ++candidate_index) {
+        WidthCandidate& candidate = width_candidates[candidate_index];
+        if (grouped[candidate_index] || !candidate.survives ||
+            !HasEquivalentAnsSymbolCoding(
+              width_candidates[group_seed].code, candidate.code)) {
+          continue;
+        }
+        grouped[candidate_index] = true;
+        const uint64_t candidate_lower_bound = candidate.model_bits >
+            std::numeric_limits<uint64_t>::max() -
+              candidate.minimum_token_bits
+          ? std::numeric_limits<uint64_t>::max()
+          : candidate.model_bits + candidate.minimum_token_bits;
+        if (candidate_lower_bound > best_total ||
+            (candidate_lower_bound == best_total &&
+             candidate_index > best_candidate)) {
+          continue;
+        }
+        candidate_indexes[group_size] = candidate_index;
+        candidate_codes[group_size] = &candidate.code;
+        candidate_model_bits[group_size] = candidate.model_bits;
+        ++group_size;
+      }
+      if (group_size == 0) {
         continue;
       }
-      EntropyCodeCost candidate_cost;
-      if (Status status = MeasureAnsCode(
-            section_tokens, candidate.code, candidate.model_bits,
-            &candidate_cost);
+      std::array<EntropyCodeCost, kAnsAlphabetWidthCount> candidate_costs{};
+      if (Status status = MeasureAnsCodes(
+            section_tokens,
+            std::span(candidate_codes).first(group_size),
+            std::span(candidate_model_bits).first(group_size),
+            std::span(candidate_costs).first(group_size));
           !status.ok()) {
         return status;
       }
-      const uint64_t candidate_total = candidate_cost.model_bits >
-          std::numeric_limits<uint64_t>::max() - candidate_cost.token_bits
-        ? std::numeric_limits<uint64_t>::max()
-        : candidate_cost.model_bits + candidate_cost.token_bits;
-      if (candidate_total < best_total) {
-        best_total = candidate_total;
-        best = std::move(candidate.code);
-        best_cost = candidate_cost;
+      for (size_t group_index = 0; group_index < group_size; ++group_index) {
+        const EntropyCodeCost& candidate_cost = candidate_costs[group_index];
+        const uint64_t candidate_total = candidate_cost.model_bits >
+            std::numeric_limits<uint64_t>::max() - candidate_cost.token_bits
+          ? std::numeric_limits<uint64_t>::max()
+          : candidate_cost.model_bits + candidate_cost.token_bits;
+        const size_t candidate_index = candidate_indexes[group_index];
+        if (candidate_total < best_total ||
+            (candidate_total == best_total &&
+             candidate_index < best_candidate)) {
+          best_total = candidate_total;
+          best_candidate = candidate_index;
+          best_cost = candidate_cost;
+        }
       }
     }
-    if (best_total == std::numeric_limits<uint64_t>::max()) {
+    if (best_total == std::numeric_limits<uint64_t>::max() ||
+        best_candidate >= width_candidates.size()) {
       return Status::InvalidArgument("No valid ANS alphabet size");
     }
-    *code = std::move(best);
+    *code = std::move(width_candidates[best_candidate].code);
     if (cost != nullptr) {
       *cost = best_cost;
     }

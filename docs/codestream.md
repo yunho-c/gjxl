@@ -1157,7 +1157,7 @@ order.
    The complete Release suite remains 58/59 with only the exact inherited
    `quantization_pipeline` score mismatch.
 
-6. **In progress (2026-08-29): reduce repeated ANS candidate screening.**
+6. **Complete (2026-08-29): reduce repeated ANS candidate screening.**
    The first retained step aggregates each cluster's token values into a
    deterministic value-sorted `(value, count)` sequence. Each of the eight
    HybridUint configurations now encodes every distinct value once and weights
@@ -1205,6 +1205,30 @@ order.
    correctness-preserving candidate infrastructure, not promoted as a speedup;
    the next step must share exact count-only work across surviving widths and
    pass its own retention gate.
+
+   The final step groups surviving widths only when their context map, selected
+   HybridUint configurations, and normalized symbol frequencies are identical.
+   It converts each ordered token to a HybridUint symbol once for the group,
+   then advances a separate exact rANS state through each width's own reverse
+   map. The state transition is shared with the production writer. Thus every
+   survivor retains its exact section-reset, extra-bit, and renormalization
+   count without allocating or materializing candidate payloads, while the
+   common token/configuration work is no longer repeated up to four times.
+   Cached validated model sizes are combined with those exact token counts;
+   final selection explicitly preserves the original smaller-width tie order.
+
+   Five alternating Release process pairs compared parent `97cf864` with the
+   shared traversal on `flower_510x532` under the same Metal public workflow,
+   distance 1.2, and `maximum-throughput` boundary. Each process used three
+   warmups and 30 measured samples. The median paired improvement was 6.47% for
+   entropy optimization, 5.41% for codestream encoding, and 3.92% for the
+   complete workflow. Entropy improved in all five pairs (0.09-11.35%);
+   codestream and complete time each had one effectively flat/noisy pair
+   (-0.45% and -0.14%, respectively). All samples retained the same
+   43,427-byte output. A separate Metal-only semantic sweep matched the parent
+   codestream sizes and aggregate byte sink across all 15 built-in workloads
+   through padded 4K. Focused entropy, encoder, conformance, single-image, and
+   batch-workflow coverage passes, including 100 consecutive entropy runs.
 
 7. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
