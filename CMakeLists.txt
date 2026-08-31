@@ -319,6 +319,7 @@ add_library(
   gjxl_c
   STATIC
   src/c_api/gjxl.cpp
+  $<TARGET_OBJECTS:gjxl_c_api_internal>
 )
 
 add_library(gjxl::c ALIAS gjxl_c)
@@ -326,6 +327,7 @@ add_library(gjxl::c ALIAS gjxl_c)
 set_target_properties(
   gjxl_c
   PROPERTIES
+    EXPORT_NAME c
     OUTPUT_NAME gjxl
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
@@ -350,7 +352,6 @@ target_compile_options(
 target_link_libraries(
   gjxl_c
   PRIVATE
-    gjxl_c_api_internal
     gjxl_codestream
 )
 
@@ -396,8 +397,14 @@ install(
     gjxl_core
     gjxl_codec
     gjxl_codestream
+    gjxl_c
   EXPORT gjxlTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
+
+install(
+  FILES include/gjxl/gjxl.h
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gjxl"
 )
 
 install(
