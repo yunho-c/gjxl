@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -47,6 +48,7 @@ struct Options {
     gjxl::TargetSizeSelectionPolicy::kLargestAtOrBelow;
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kAutomatic;
+  int32_t effort = 7;
   gjxl::VarDctDensityMode density_mode =
     gjxl::VarDctDensityMode::kDefault;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
@@ -202,6 +204,8 @@ struct Options {
   Options candidate;
   bool rate_control_set = false;
   bool target_search_option_set = false;
+  bool effort_set = false;
+  bool high_density_set = false;
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument = argv[index];
     if (argument == "--distance") {
@@ -275,8 +279,20 @@ struct Options {
           !ParseBackend(argv[++index], &candidate.backend)) {
         return false;
       }
+    } else if (argument == "--effort") {
+      size_t effort = 0;
+      if (effort_set || index + 1 >= argc ||
+          !ParsePositiveSize(argv[++index], 10, &effort)) {
+        return false;
+      }
+      candidate.effort = static_cast<int32_t>(effort);
+      effort_set = true;
     } else if (argument == "--high-density") {
+      if (high_density_set) {
+        return false;
+      }
       candidate.density_mode = gjxl::VarDctDensityMode::kHighDensity;
+      high_density_set = true;
     } else if (argument == "--metal-aq") {
       if (index + 1 >= argc ||
           !ParseMetalAqMode(argv[++index], &candidate.metal_aq_mode)) {
@@ -296,6 +312,7 @@ struct Options {
   }
   if (candidate.input.empty() || candidate.output.empty() ||
       !rate_control_set ||
+      (effort_set && high_density_set) ||
       (target_search_option_set &&
        candidate.rate_control_mode ==
          gjxl::VarDctRateControlMode::kButteraugliTarget) ||
@@ -418,6 +435,7 @@ void PrintUsage(const char* executable) {
                "--target-bpp BPP) [--size-tolerance FRACTION] "
                "[--max-attempts N] "
                "[--size-selection under-budget|closest] "
+               "[--effort 1..10] "
                "[--high-density] "
                "[--backend auto|cpu|metal] "
                "[--metal-aq exact-coefficients|fully-resident|throughput|"
@@ -448,6 +466,7 @@ int main(int argc, char** argv) {
   status = gjxl::EncodeLinearRgbVarDctCodestreamProfiled(
     linear_rgb.const_view(),
     {.butteraugli_target = options.butteraugli_target,
+     .effort = options.effort,
      .density_mode = options.density_mode,
      .rate_control_mode = options.rate_control_mode,
      .maximum_error = options.maximum_error,

@@ -329,6 +329,7 @@ bool CheckHighDensityMode() {
   FillImage(&image);
   const gjxl::VarDctEncodingOptions options{
     .butteraugli_target = 1.0f,
+    .effort = 1,
     .density_mode = gjxl::VarDctDensityMode::kHighDensity,
     .backend = gjxl::VarDctBackendPreference::kCpu,
   };
@@ -379,6 +380,85 @@ bool CheckHighDensityMode() {
   return true;
 }
 
+bool CheckEffortPolicy() {
+  ImageStorage image;
+  FillImage(&image);
+  struct EffortCase {
+    int32_t effort;
+    size_t expected_score_count;
+  };
+  constexpr std::array<EffortCase, 10> kCases{{
+    {1, 1},
+    {2, 1},
+    {3, 1},
+    {4, 2},
+    {5, 2},
+    {6, 2},
+    {7, 3},
+    {8, 4},
+    {9, 4},
+    {10, 5},
+  }};
+  std::array<std::vector<uint8_t>, kCases.size()> cpu_bytes;
+
+  std::vector<uint8_t> default_bytes;
+  gjxl::VarDctEncodingSummary default_summary;
+  gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), {.backend = gjxl::VarDctBackendPreference::kCpu},
+    &default_bytes, &default_summary);
+  if (!status.ok()) {
+    std::cerr << "Default effort workflow failed: " << status.message()
+              << '\n';
+    return false;
+  }
+
+  for (size_t index = 0; index < kCases.size(); ++index) {
+    const EffortCase test = kCases[index];
+    std::vector<uint8_t> bytes;
+    gjxl::VarDctEncodingSummary summary;
+    status = gjxl::EncodeLinearRgbVarDctCodestream(
+      image.View(),
+      {.effort = test.effort,
+       .backend = gjxl::VarDctBackendPreference::kCpu},
+      &bytes, &summary);
+    if (!status.ok() || bytes.empty() ||
+        summary.score_history.size() != test.expected_score_count ||
+        !summary.final_butteraugli_score_evaluated) {
+      std::cerr << "Effort " << test.effort << " workflow failed: "
+                << status.message() << " history="
+                << summary.score_history.size() << '\n';
+      return false;
+    }
+    if (test.effort == 7 &&
+        (bytes != default_bytes || summary != default_summary)) {
+      std::cerr << "Explicit effort 7 changed the default workflow\n";
+      return false;
+    }
+    cpu_bytes[index] = std::move(bytes);
+  }
+
+  for (const int32_t effort : {1, 7, 10}) {
+    const size_t index = static_cast<size_t>(effort - 1);
+    std::vector<uint8_t> bytes;
+    gjxl::VarDctEncodingSummary summary;
+    status = gjxl::EncodeLinearRgbVarDctCodestream(
+      image.View(),
+      {.effort = effort,
+       .backend = gjxl::VarDctBackendPreference::kMetal},
+      &bytes, &summary);
+    if (!status.ok() || bytes != cpu_bytes[index] ||
+        summary.score_history.size() != kCases[index].expected_score_count ||
+        summary.execution_backend !=
+          gjxl::VarDctExecutionBackend::kMetal) {
+      std::cerr << "Metal effort " << effort << " workflow failed: "
+                << status.message() << " history="
+                << summary.score_history.size() << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
 bool CheckInvalidRequestsAreAtomic() {
   ImageStorage image;
   FillImage(&image);
@@ -403,6 +483,8 @@ bool CheckInvalidRequestsAreAtomic() {
   };
 
   if (!rejected_atomically(image.View(), {.butteraugli_target = 0.0f}) ||
+      !rejected_atomically(image.View(), {.effort = 0}) ||
+      !rejected_atomically(image.View(), {.effort = 11}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target =
@@ -921,6 +1003,7 @@ int main() {
   if (!CheckQuantizationMatrixScaleStats() ||
       !CheckQuantizationMatrixScaleSelection() ||
       !CheckDeterministicWorkflow() ||
+      !CheckEffortPolicy() ||
       !CheckHighDensityMode() ||
       !CheckInvalidRequestsAreAtomic() ||
       !CheckMaximumErrorControl() ||
