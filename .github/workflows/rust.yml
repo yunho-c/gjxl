@@ -1,0 +1,50 @@
+name: Rust Bindings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CMakeLists.txt'
+      - 'include/gjxl/**'
+      - 'src/c_api/**'
+      - 'rust/**'
+      - '.github/workflows/rust.yml'
+      - '.github/workflows/publish-rust.yml'
+  pull_request:
+    paths:
+      - 'CMakeLists.txt'
+      - 'include/gjxl/**'
+      - 'src/c_api/**'
+      - 'rust/**'
+      - '.github/workflows/rust.yml'
+      - '.github/workflows/publish-rust.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: macOS native wrapper
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: rust
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install build tools
+        run: brew install cmake ninja
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Test workspace
+        run: cargo test --workspace
+
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings

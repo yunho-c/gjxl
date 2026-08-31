@@ -474,7 +474,14 @@ only the intended C surface is exported.
 ### 5. Add an experimental Slimg backend
 
 Keep this as a separate Slimg change after the GJXL interface passes its own
-tests. Slimg should:
+tests. GJXL owns the reusable Rust boundary in `rust/gjxl-sys` and `rust/gjxl`:
+
+- `gjxl-sys` generates the raw C bindings and owns native link metadata;
+- `gjxl` owns validated packed image views, context and output lifetimes, and
+  typed C error translation; and
+- neither crate chooses another codec or defines application fallback policy.
+
+Slimg should consume the safe crate and:
 
 - keep libjxl for decoding;
 - feature-gate the GJXL encoder on supported macOS builds;

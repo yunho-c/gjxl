@@ -1,0 +1,25 @@
+[package]
+name = "gjxl-sys"
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+description = "Raw bindings for GJXL's C interface"
+repository = "https://github.com/yunho-c/gjxl"
+homepage = "https://github.com/yunho-c/gjxl"
+links = "gjxl"
+include = [
+  "build.rs",
+  "src/**/*",
+  "Cargo.toml",
+]
+
+[features]
+default = []
+native = ["dep:bindgen", "dep:cmake"]
+
+[build-dependencies]
+bindgen = { version = "0.71", optional = true }
+cmake = { version = "0.1", optional = true }
+
+[package.metadata.docs.rs]
+no-default-features = true
