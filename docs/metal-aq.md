@@ -452,12 +452,12 @@ libraries, and allocator retention.
 | Padded 720p | 973.6 MiB | 971.1–1046.7 MiB |
 | Padded 1080p | 1992.6 MiB | 1952.5–2074.8 MiB |
 
-Reproduce one process with `just quantization-benchmark`, or select one
+Reproduce one process with `just aq-benchmark`, or select one
 workload explicitly, for example:
 
 ```sh
-just quantization-benchmark padded_1080p 5 3
-/usr/bin/time -l build/release/gjxl_quantization_benchmark \
+just aq-benchmark padded_1080p simd 5 3
+/usr/bin/time -l build/release/gjxl_encoding_benchmark \
   --workload padded_1080p --samples 5 --warmups 3
 ```
 
@@ -1138,7 +1138,7 @@ Butteraugli reference enabled and `49/49` with it disabled. Both matrices
 include the installed static-library consumer, which creates the backend from
 the embedded metallib. The separately built pinned libjxl decoder accepts all
 21 codestream-conformance fixtures and the checked workflow sample. Reproduce
-one balanced process with `just quantization-benchmark all simd 3 1`; the
+one balanced process with `just aq-benchmark all simd 3 1`; the
 ranges above combine three independent invocations.
 
 ### 9. Explore and qualify the reconstruction handoff — complete (2026-08-27)

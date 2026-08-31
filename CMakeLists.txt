@@ -2321,39 +2321,40 @@ if(GJXL_BUILD_BENCHMARKS)
   endif()
 
   add_executable(
-    gjxl_quantization_benchmark
-    benchmarks/quantization_benchmark.cpp
+    gjxl_encoding_benchmark
+    benchmarks/encoding_benchmark.cpp
   )
 
   target_link_libraries(
-    gjxl_quantization_benchmark
+    gjxl_encoding_benchmark
     PRIVATE
       gjxl_codestream
       gjxl_metal
+      gjxl_pfm_io
   )
 
   target_compile_definitions(
-    gjxl_quantization_benchmark
+    gjxl_encoding_benchmark
     PRIVATE
       GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
   )
 
   add_dependencies(
-    gjxl_quantization_benchmark
+    gjxl_encoding_benchmark
     gjxl_embedded_metal_shaders
   )
 
   if(GJXL_BUILD_TESTS)
     add_test(
-      NAME quantization_benchmark_cli
+      NAME encoding_benchmark_cli
       COMMAND
         "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/quantization_benchmark_cli_test.py"
-        --benchmark $<TARGET_FILE:gjxl_quantization_benchmark>
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoding_benchmark_cli_test.py"
+        --benchmark $<TARGET_FILE:gjxl_encoding_benchmark>
         --metallib "${GJXL_METALLIB}"
     )
     set_tests_properties(
-      quantization_benchmark_cli
+      encoding_benchmark_cli
       PROPERTIES LABELS "benchmark;cli;metal"
     )
   endif()

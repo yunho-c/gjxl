@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""CLI coverage for reproducible quantization benchmark samples."""
+"""CLI coverage for reproducible encoding benchmark samples."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -27,7 +28,7 @@ PHASES = {
 }
 
 
-class QuantizationBenchmarkCliTest(unittest.TestCase):
+class EncodingBenchmarkCliTest(unittest.TestCase):
     benchmark: Path
     metallib: Path
 
@@ -135,6 +136,27 @@ class QuantizationBenchmarkCliTest(unittest.TestCase):
             self.assertIsInstance(value, int)
             self.assertGreaterEqual(value, 0)
         self.assertFalse(list(self.directory.glob("samples.json.tmp-*")))
+
+    def test_external_pfm_input_uses_its_source_extent(self) -> None:
+        source = self.directory / "input.pfm"
+        width = 128
+        height = 96
+        source.write_bytes(
+            f"PF\n{width} {height}\n-1.0\n".encode("ascii")
+            + struct.pack("<3f", 0.1, 0.2, 0.3) * (width * height)
+        )
+
+        result = self.run_benchmark(
+            "--validation",
+            "metal-only",
+            "--metallib",
+            str(self.metallib),
+            "--input",
+            str(source),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("workload external_input source=128x96", result.stdout)
 
     def test_high_density_is_explicit_in_raw_samples(self) -> None:
         destination = self.directory / "high-density.json"
@@ -418,8 +440,8 @@ def main() -> None:
     parser.add_argument("--benchmark", type=Path, required=True)
     parser.add_argument("--metallib", type=Path, required=True)
     arguments, remaining = parser.parse_known_args()
-    QuantizationBenchmarkCliTest.benchmark = arguments.benchmark.resolve()
-    QuantizationBenchmarkCliTest.metallib = arguments.metallib.resolve()
+    EncodingBenchmarkCliTest.benchmark = arguments.benchmark.resolve()
+    EncodingBenchmarkCliTest.metallib = arguments.metallib.resolve()
     unittest.main(argv=[__file__, *remaining])
 
 
