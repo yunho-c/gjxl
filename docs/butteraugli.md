@@ -383,7 +383,7 @@ statically links a separate project, and runs a native Butteraugli call.
 Fresh AppleClang 17 Release builds validated both configurations. The default
 reference-disabled build, with benchmarks enabled, passed all 25 tests; its
 target list omitted every libjxl oracle, golden-generator, and Butteraugli
-benchmark target while retaining `gjxl_quantization_benchmark`. The
+benchmark target while retaining `gjxl_encoding_benchmark`. The
 reference-enabled build passed all 31 tests, including scalar and dispatched
 differential coverage and golden regeneration, and its four-phase comparative
 benchmark completed successfully.

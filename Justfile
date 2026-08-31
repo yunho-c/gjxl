@@ -56,20 +56,32 @@ ac-strategy-search-benchmark samples="12":
 # Measure CPU and Metal quantization workflows with alternating phase order.
 aq-benchmark workload="all" implementation="simd" samples="5" warmups="3" gpu_aq="exact-coefficients":
     cmake -S . -B "{{ build_dir }}/release" -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
-    cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
-    "{{ build_dir }}/release/gjxl_quantization_benchmark" --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+    cmake --build "{{ build_dir }}/release" --target gjxl_encoding_benchmark -j
+    "{{ build_dir }}/release/gjxl_encoding_benchmark" --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
 # Measure only the public CPU/Metal encoder boundary with phase profiles.
 encode-benchmark workload="padded_1080p" implementation="simd" samples="3" warmups="1" gpu_aq="exact-coefficients":
     cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
-    cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
-    "{{ build_dir }}/release/gjxl_quantization_benchmark" --scope public-workflow --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+    cmake --build "{{ build_dir }}/release" --target gjxl_encoding_benchmark -j
+    "{{ build_dir }}/release/gjxl_encoding_benchmark" --scope public-workflow --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
 # Measure repeated Metal public encodes after one CPU/Metal validation pair.
 metal-encode-benchmark workload="padded_4k" implementation="simd" samples="7" warmups="2" gpu_aq="fully-resident":
     cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
-    cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
-    "{{ build_dir }}/release/gjxl_quantization_benchmark" --scope metal-public-workflow --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+    cmake --build "{{ build_dir }}/release" --target gjxl_encoding_benchmark -j
+    "{{ build_dir }}/release/gjxl_encoding_benchmark" --scope metal-public-workflow --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+
+# Run the codestream regression set from a natural image through 4K.
+encoding-regression-benchmark implementation="simd" samples="5" warmups="2" gpu_aq="fully-resident" distance="1.0":
+    cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
+    cmake --build "{{ build_dir }}/release" --target gjxl_encoding_benchmark -j
+    for workload in flower_510x532 padded_1080p padded_1440p padded_4k; do "{{ build_dir }}/release/gjxl_encoding_benchmark" --scope metal-public-workflow --workload "$workload" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --validation metal-only --distance "{{ distance }}" --samples "{{ samples }}" --warmups "{{ warmups }}"; done
+
+# Measure a normal still image after one untimed ImageMagick conversion.
+encoding-image-benchmark input implementation="simd" samples="5" warmups="2" gpu_aq="fully-resident" distance="1.0":
+    cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
+    cmake --build "{{ build_dir }}/release" --target gjxl_encoding_benchmark -j
+    python3 tools/benchmark_encoding_image.py --benchmark "{{ build_dir }}/release/gjxl_encoding_benchmark" "{{ input }}" -- --scope metal-public-workflow --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --validation metal-only --distance "{{ distance }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
 # Build symbolized shaders, benchmark untraced, and capture Metal System Trace.
 metal-profile workload="padded_4k" implementation="simd" samples="7" warmups="2" gpu_aq="fully-resident" distance="1.2" profile_build_dir="build/metal-profile" output_root="logs/metal-profile":
@@ -84,8 +96,8 @@ image-batch-benchmark workload="all" batch_sizes="1,2,4,8" samples="3" warmups="
 # Measure the CPU coefficient-decision boundary without the complete AQ loop.
 coefficient-benchmark workload="padded_1080p" samples="9" warmups="2":
     cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
-    cmake --build "{{ build_dir }}/release" --target gjxl_quantization_benchmark -j
-    "{{ build_dir }}/release/gjxl_quantization_benchmark" --scope coefficient-coding --workload "{{ workload }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+    cmake --build "{{ build_dir }}/release" --target gjxl_encoding_benchmark -j
+    "{{ build_dir }}/release/gjxl_encoding_benchmark" --scope coefficient-coding --workload "{{ workload }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
 # Measure native CPU and prepared Metal Butteraugli paths.
 butteraugli-metal-benchmark workload="all" samples="15" warmups="3":

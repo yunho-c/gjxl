@@ -46,11 +46,11 @@ class FakeCommandRunner:
         if command[:2] == ["cmake", "--build"]:
             build_dir = Path(command[2])
             (build_dir / "metal").mkdir(parents=True, exist_ok=True)
-            (build_dir / "gjxl_quantization_benchmark").write_bytes(b"binary")
+            (build_dir / "gjxl_encoding_benchmark").write_bytes(b"binary")
             (build_dir / "metal" / "gjxl.metallib").write_bytes(b"metallib")
             (build_dir / "metal" / "gjxl.metallibsym").write_bytes(b"symbols")
             return
-        if Path(command[0]).name == "gjxl_quantization_benchmark":
+        if Path(command[0]).name == "gjxl_encoding_benchmark":
             if "--gpu-profile-output" in command:
                 output = Path(command[command.index("--gpu-profile-output") + 1])
                 output.write_text(
