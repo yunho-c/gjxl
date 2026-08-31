@@ -28,6 +28,13 @@ if(NOT install_result EQUAL 0)
     "gjxl installation failed:\n${install_output}\n${install_error}")
 endif()
 
+if(NOT EXISTS "${install_prefix}/include/gjxl/gjxl.h")
+  message(FATAL_ERROR "installed C API header is missing")
+endif()
+if(EXISTS "${install_prefix}/include/c_api")
+  message(FATAL_ERROR "private C adapter headers were installed")
+endif()
+
 execute_process(
   COMMAND
     "${CMAKE_COMMAND}"
@@ -57,7 +64,11 @@ if(NOT build_result EQUAL 0)
     "downstream build failed:\n${build_output}\n${build_error}")
 endif()
 
-foreach(consumer gjxl_codec_consumer gjxl_codestream_consumer)
+foreach(
+  consumer
+  gjxl_codec_consumer
+  gjxl_codestream_consumer
+  gjxl_c_consumer)
   set(consumer_executable "${consumer_build}/${consumer}")
   if(NOT EXISTS "${consumer_executable}")
     set(consumer_executable

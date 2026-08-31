@@ -65,6 +65,11 @@ struct VarDctEncodingProfile {
 [[nodiscard]] bool IsAutomaticMetalBackendQualified(
   const GpuBackend& backend) noexcept;
 
+/// Initializes and validates the process-cached production Metal backend.
+/// Used by frontends that promise eager failure for an explicitly forced
+/// Metal execution policy.
+[[nodiscard]] Status EnsureProductionMetalBackendAvailable();
+
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,

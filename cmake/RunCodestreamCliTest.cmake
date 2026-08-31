@@ -44,6 +44,36 @@ if(NOT sentinel_contents STREQUAL "unchanged")
 endif()
 execute_process(
   COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --effort 0
+    "${GJXL_SAMPLE}" "${sentinel}"
+  RESULT_VARIABLE invalid_effort_result
+  OUTPUT_QUIET
+  ERROR_QUIET
+)
+if(invalid_effort_result EQUAL 0)
+  message(FATAL_ERROR "CLI accepted an invalid effort")
+endif()
+file(READ "${sentinel}" sentinel_contents)
+if(NOT sentinel_contents STREQUAL "unchanged")
+  message(FATAL_ERROR "Invalid effort changed an existing output")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --effort 7 --high-density
+    "${GJXL_SAMPLE}" "${sentinel}"
+  RESULT_VARIABLE conflicting_effort_result
+  OUTPUT_QUIET
+  ERROR_QUIET
+)
+if(conflicting_effort_result EQUAL 0)
+  message(FATAL_ERROR "CLI accepted conflicting effort controls")
+endif()
+file(READ "${sentinel}" sentinel_contents)
+if(NOT sentinel_contents STREQUAL "unchanged")
+  message(FATAL_ERROR "Conflicting effort controls changed existing output")
+endif()
+execute_process(
+  COMMAND
     "${GJXL_ENCODER}" --distance 1.0 --metal-aq throughput
     "${GJXL_SAMPLE}" "${sentinel}"
   RESULT_VARIABLE implicit_throughput_result
@@ -158,6 +188,8 @@ endif()
 
 set(first "${GJXL_TEST_DIR}/first.jxl")
 set(second "${GJXL_TEST_DIR}/second.jxl")
+set(effort_7 "${GJXL_TEST_DIR}/effort-7.jxl")
+set(effort_10 "${GJXL_TEST_DIR}/effort-10.jxl")
 set(metal "${GJXL_TEST_DIR}/metal.jxl")
 set(resident "${GJXL_TEST_DIR}/resident.jxl")
 set(resident_scored "${GJXL_TEST_DIR}/resident-scored.jxl")
@@ -187,6 +219,28 @@ execute_process(
 )
 if(NOT second_result EQUAL 0)
   message(FATAL_ERROR "Second CLI encode failed: ${second_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend cpu --effort 7
+    "${GJXL_SAMPLE}" "${effort_7}"
+  RESULT_VARIABLE effort_7_result
+  OUTPUT_QUIET
+  ERROR_VARIABLE effort_7_error
+)
+if(NOT effort_7_result EQUAL 0)
+  message(FATAL_ERROR "Effort-7 CLI encode failed: ${effort_7_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend cpu --effort 10
+    "${GJXL_SAMPLE}" "${effort_10}"
+  RESULT_VARIABLE effort_10_result
+  OUTPUT_QUIET
+  ERROR_VARIABLE effort_10_error
+)
+if(NOT effort_10_result EQUAL 0)
+  message(FATAL_ERROR "Effort-10 CLI encode failed: ${effort_10_error}")
 endif()
 execute_process(
   COMMAND
@@ -297,6 +351,8 @@ endif()
 
 file(SHA256 "${first}" first_hash)
 file(SHA256 "${second}" second_hash)
+file(SHA256 "${effort_7}" effort_7_hash)
+file(SHA256 "${effort_10}" effort_10_hash)
 file(SHA256 "${metal}" metal_hash)
 file(SHA256 "${resident}" resident_hash)
 file(SHA256 "${resident_scored}" resident_scored_hash)
@@ -308,6 +364,9 @@ file(SHA256 "${high_density}" high_density_hash)
 file(SHA256 "${high_density_repeat}" high_density_repeat_hash)
 if(NOT first_hash STREQUAL second_hash)
   message(FATAL_ERROR "CLI output is not deterministic")
+endif()
+if(NOT first_hash STREQUAL effort_7_hash)
+  message(FATAL_ERROR "Explicit effort 7 changed the default CLI output")
 endif()
 if(NOT first_hash STREQUAL metal_hash)
   message(FATAL_ERROR "Forced Metal changed the CLI codestream")
@@ -324,6 +383,9 @@ if(NOT maximum_hash STREQUAL maximum_repeat_hash)
 endif()
 if(NOT high_density_hash STREQUAL high_density_repeat_hash)
   message(FATAL_ERROR "High-density CLI output is not deterministic")
+endif()
+if(NOT effort_10_hash STREQUAL high_density_hash)
+  message(FATAL_ERROR "Effort 10 and high-density output diverged")
 endif()
 set(expected_hash
   e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558)

@@ -39,9 +39,9 @@ enum class VarDctRateControlMode {
 };
 
 enum class VarDctDensityMode {
-  /// Uses the established two adaptive-quantization updates.
+  /// Uses the adaptive-quantization update count derived from effort.
   kDefault,
-  /// Uses four adaptive-quantization updates for a slower density search.
+  /// Compatibility override for a four-update density search.
   kHighDensity,
 };
 
@@ -57,8 +57,12 @@ enum class TargetSizeSelectionPolicy {
 /// Options for the public VarDCT encoding workflow.
 struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
-  /// High density performs four AQ updates instead of the default two. It is
-  /// meaningful only for Butteraugli-target and target-size control.
+  /// User-facing speed-versus-refinement intent in [1, 10]. Effort 7 preserves
+  /// the established two-update adaptive-quantization policy.
+  int32_t effort = 7;
+  /// Compatibility override that performs four AQ updates regardless of
+  /// effort. It is meaningful only for Butteraugli-target and target-size
+  /// control.
   VarDctDensityMode density_mode = VarDctDensityMode::kDefault;
   VarDctRateControlMode rate_control_mode =
     VarDctRateControlMode::kButteraugliTarget;
