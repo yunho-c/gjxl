@@ -1,0 +1,19 @@
+[package]
+name = "gjxl"
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+description = "Safe Rust wrapper for GJXL's C interface"
+repository = "https://github.com/yunho-c/gjxl"
+homepage = "https://github.com/yunho-c/gjxl"
+readme = "README.md"
+
+[features]
+default = ["native"]
+native = ["gjxl-sys/native"]
+
+[dependencies]
+gjxl-sys = { version = "0.0.1", path = "../gjxl-sys", default-features = false }
+
+[package.metadata.docs.rs]
+no-default-features = true
