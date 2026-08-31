@@ -283,7 +283,9 @@ bool CheckEncodedFrame(
     profile.entropy_work.prefix_histogram_cost_nanoseconds +
     profile.entropy_work.prefix_clustering_nanoseconds +
     profile.entropy_work.prefix_code_build_nanoseconds +
-    profile.entropy_work.prefix_uint_config_nanoseconds +
+    profile.entropy_work.prefix_value_collection_nanoseconds +
+    profile.entropy_work.prefix_config_search_nanoseconds +
+    profile.entropy_work.prefix_exact_measurement_nanoseconds +
     profile.entropy_work.ans_prefix_validation_nanoseconds +
     profile.entropy_work.ans_value_collection_nanoseconds +
     profile.entropy_work.ans_value_aggregation_nanoseconds +

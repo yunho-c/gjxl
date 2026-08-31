@@ -1403,7 +1403,8 @@ Status BuildEntropyCodeForPartition(
   size_t cluster_count,
   bool optimize_configs,
   EntropyCode* code,
-  EntropyCodeCost* cost) {
+  EntropyCodeCost* cost,
+  EntropyWorkProfile* profile) {
 
   if (code == nullptr || cost == nullptr || cluster_count == 0 ||
       cluster_count > kMaximumPrefixClusters) {
@@ -1422,6 +1423,8 @@ Status BuildEntropyCodeForPartition(
     candidate.context_map[context] = clustered_map[initial];
   }
 
+  const ProfileClock::time_point value_collection_begin =
+    ProfileBegin(profile);
   std::vector<std::vector<uint32_t>> values(cluster_count);
   for (const std::vector<EntropyToken>& section : section_tokens) {
     for (const EntropyToken& token : section) {
@@ -1435,7 +1438,12 @@ Status BuildEntropyCodeForPartition(
       values[cluster].push_back(token.value);
     }
   }
+  ProfileEnd(
+    profile, value_collection_begin,
+    &EntropyWorkProfile::prefix_value_collection_nanoseconds);
 
+  const ProfileClock::time_point config_search_begin =
+    ProfileBegin(profile);
   candidate.uint_configs.resize(cluster_count);
   candidate.prefix_codes.resize(cluster_count);
   for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
@@ -1446,10 +1454,18 @@ Status BuildEntropyCodeForPartition(
       return status;
     }
   }
+  ProfileEnd(
+    profile, config_search_begin,
+    &EntropyWorkProfile::prefix_config_search_nanoseconds);
+  const ProfileClock::time_point exact_measurement_begin =
+    ProfileBegin(profile);
   EntropyCodeCost candidate_cost;
-  if (Status status = MeasureEntropyCode(
-        section_tokens, candidate, &candidate_cost);
-      !status.ok()) {
+  Status status = MeasureEntropyCode(
+    section_tokens, candidate, &candidate_cost);
+  ProfileEnd(
+    profile, exact_measurement_begin,
+    &EntropyWorkProfile::prefix_exact_measurement_nanoseconds);
+  if (!status.ok()) {
     return status;
   }
   *code = std::move(candidate);
@@ -1869,14 +1885,10 @@ Status OptimizeEntropyCode(
 
     EntropyCode configured_code;
     EntropyCodeCost configured_cost;
-    if (Status status = profile_call(
-          &EntropyWorkProfile::prefix_uint_config_nanoseconds,
-          [&] {
-            return BuildEntropyCodeForPartition(
-              section_tokens, options, best_partition_map,
-              best_partition_count, true, &configured_code,
-              &configured_cost);
-          });
+    if (Status status = BuildEntropyCodeForPartition(
+          section_tokens, options, best_partition_map,
+          best_partition_count, true, &configured_code,
+          &configured_cost, profile);
         !status.ok()) {
       return status;
     }

@@ -144,7 +144,8 @@ performed by overlapping DC, coefficient-order, AC-candidate, and section
 tasks is summed, so those counters can exceed their enclosing wall-clock phase
 and must not be added to complete-encode latency. The new breakdown separates
 block-context and coefficient preparation, coefficient tokenization, prefix
-histogram construction/clustering/code building, ANS value aggregation,
+histogram construction/clustering/code building, prefix value collection,
+HybridUint configuration search and exact measurement, ANS value aggregation,
 HybridUint and histogram/model searches, exact ANS token costing, entropy
 selection, model/header and token-stream writing, candidate measurement, and
 the selected candidate's final header/TOC/section/output assembly. The

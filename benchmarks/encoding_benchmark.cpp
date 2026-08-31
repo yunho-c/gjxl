@@ -894,7 +894,7 @@ void PrintRatioStats(std::string_view label,
   return static_cast<double>(nanoseconds) / 1.0e6;
 }
 
-constexpr std::array<std::string_view, 36> kWorkflowProfileNames = {
+constexpr std::array<std::string_view, 38> kWorkflowProfileNames = {
     "total",
     "input_preparation",
     "backend_selection",
@@ -912,7 +912,9 @@ constexpr std::array<std::string_view, 36> kWorkflowProfileNames = {
     "codestream_entropy_prefix_histogram_cost_work",
     "codestream_entropy_prefix_clustering_work",
     "codestream_entropy_prefix_code_build_work",
-    "codestream_entropy_prefix_uint_config_work",
+    "codestream_entropy_prefix_value_collection_work",
+    "codestream_entropy_prefix_config_search_work",
+    "codestream_entropy_prefix_exact_measurement_work",
     "codestream_entropy_ans_prefix_validation_work",
     "codestream_entropy_ans_value_collection_work",
     "codestream_entropy_ans_value_aggregation_work",
@@ -1001,7 +1003,9 @@ using WorkflowProfileNanoseconds =
       profile.codestream.entropy_work.prefix_histogram_cost_nanoseconds,
       profile.codestream.entropy_work.prefix_clustering_nanoseconds,
       profile.codestream.entropy_work.prefix_code_build_nanoseconds,
-      profile.codestream.entropy_work.prefix_uint_config_nanoseconds,
+      profile.codestream.entropy_work.prefix_value_collection_nanoseconds,
+      profile.codestream.entropy_work.prefix_config_search_nanoseconds,
+      profile.codestream.entropy_work.prefix_exact_measurement_nanoseconds,
       profile.codestream.entropy_work.ans_prefix_validation_nanoseconds,
       profile.codestream.entropy_work.ans_value_collection_nanoseconds,
       profile.codestream.entropy_work.ans_value_aggregation_nanoseconds,
