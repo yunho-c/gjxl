@@ -341,6 +341,104 @@ bool CheckBalancedOptimization() {
   return true;
 }
 
+bool CheckCountedPrefixOptimization() {
+  constexpr uint32_t kContextCount = 4;
+  // Every context contributes more than the 4096-occurrence threshold so the
+  // selected clusters exercise counted aggregation even when none are merged.
+  constexpr size_t kOccurrencesPerContext = 4352;
+  std::array<std::vector<gjxl::EntropyToken>, 5> sections;
+  constexpr std::array<size_t, 3> kPopulatedSections = {1, 2, 4};
+  for (uint32_t context = 0; context < kContextCount; ++context) {
+    for (size_t repeat = 0; repeat < kOccurrencesPerContext; ++repeat) {
+      uint32_t value = 0;
+      switch (context) {
+        case 0:
+          value = (repeat & 15u) == 0 ? 1 : 0;
+          break;
+        case 1:
+          value = (repeat & 7u) == 0 ? 17 : 16;
+          break;
+        case 2:
+          value = (repeat & 31u) == 0 ? 65537 : 257;
+          break;
+        case 3:
+          value = (repeat & 63u) == 0
+            ? std::numeric_limits<uint32_t>::max() - 1
+            : std::numeric_limits<uint32_t>::max();
+          break;
+      }
+      sections[kPopulatedSections[(repeat + context) %
+                                  kPopulatedSections.size()]]
+        .push_back({context, value});
+    }
+  }
+
+  gjxl::EntropyCode code;
+  gjxl::EntropyCode repeat_code;
+  gjxl::EntropyCodeCost cost;
+  gjxl::EntropyCodeCost repeat_cost;
+  const gjxl::EntropyCodeOptions options{.context_count = kContextCount};
+  if (!gjxl::OptimizeEntropyCode(sections, options, &code, &cost).ok() ||
+      !gjxl::OptimizeEntropyCode(
+        sections, options, &repeat_code, &repeat_cost).ok() ||
+      code != repeat_code || cost != repeat_cost ||
+      code.mode != gjxl::EntropyCodingMode::kPrefix ||
+      code.context_map.size() != kContextCount ||
+      code.prefix_codes.size() < 2 ||
+      cost.cluster_count != code.prefix_codes.size()) {
+    std::cerr << "Counted prefix selection is invalid or non-deterministic\n";
+    return false;
+  }
+
+  gjxl::BitWriter model;
+  gjxl::BitWriter repeat_model;
+  gjxl::BitWriter payload;
+  gjxl::BitWriter repeat_payload;
+  if (!gjxl::WriteEntropyCode(code, &model).ok() ||
+      !gjxl::WriteEntropyCode(repeat_code, &repeat_model).ok()) {
+    std::cerr << "Counted prefix model serialization failed\n";
+    return false;
+  }
+  for (const std::vector<gjxl::EntropyToken>& section : sections) {
+    if (!gjxl::WriteTokenStream(section, code, &payload).ok() ||
+        !gjxl::WriteTokenStream(
+          section, repeat_code, &repeat_payload).ok()) {
+      std::cerr << "Counted prefix token serialization failed\n";
+      return false;
+    }
+  }
+  if (cost.model_bits != model.bits_written() ||
+      cost.token_bits != payload.bits_written() ||
+      model.bits_written() != repeat_model.bits_written() ||
+      payload.bits_written() != repeat_payload.bits_written() ||
+      !std::ranges::equal(
+        model.padded_bytes(), repeat_model.padded_bytes()) ||
+      !std::ranges::equal(
+        payload.padded_bytes(), repeat_payload.padded_bytes())) {
+    std::cerr << "Counted prefix cost disagrees with serialized output\n";
+    return false;
+  }
+  const auto hash = [](std::span<const uint8_t> bytes) {
+    uint64_t result = 1469598103934665603ull;
+    for (uint8_t byte : bytes) {
+      result ^= byte;
+      result *= 1099511628211ull;
+    }
+    return result;
+  };
+  const std::vector<gjxl::HybridUintConfig> expected_configs = {
+    {0, 0, 0}, {4, 2, 0}, {4, 1, 2}, {4, 2, 0}};
+  if (code.context_map != std::vector<uint8_t>({0, 1, 2, 3}) ||
+      code.uint_configs != expected_configs || model.bits_written() != 144 ||
+      payload.bits_written() != 166464 ||
+      hash(model.padded_bytes()) != 5815996224897546142ull ||
+      hash(payload.padded_bytes()) != 6576315826512740406ull) {
+    std::cerr << "Counted prefix decision or serialized bytes changed\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckFullWidthMultiSectionOptimization() {
   std::array<std::vector<gjxl::EntropyToken>, 3> sections;
   sections[0] = {{299, std::numeric_limits<uint32_t>::max()}, {0, 0}};
@@ -703,6 +801,7 @@ int main() {
       !CheckDegeneratePrefixPayload() ||
       !CheckDeterministicEntropyFixtures() ||
       !CheckBalancedOptimization() ||
+      !CheckCountedPrefixOptimization() ||
       !CheckFullWidthMultiSectionOptimization() ||
       !CheckInitialContextPreclustering() ||
       !CheckAnsRoundTripContract() ||

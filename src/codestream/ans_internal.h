@@ -3,12 +3,24 @@
 
 #pragma once
 
+#include <cstdint>
 #include <span>
 #include <vector>
 
 #include "codestream/entropy.h"
 
 namespace gjxl::codestream_internal {
+
+struct WeightedValue {
+  uint32_t value = 0;
+  uint64_t count = 0;
+};
+
+/// Aggregates raw values in ascending order. Small inputs sort occurrences;
+/// large inputs count the bounded dense prefix and sort only sparse values.
+[[nodiscard]] Status AggregateEntropyValues(
+  std::vector<uint32_t> values,
+  std::vector<WeightedValue>* aggregated);
 
 [[nodiscard]] Status ValidateAnsEntropyCode(const EntropyCode& code);
 

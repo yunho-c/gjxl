@@ -20,6 +20,7 @@ struct EntropyWorkProfile {
   uint64_t prefix_code_build_nanoseconds = 0;
   uint64_t prefix_value_collection_nanoseconds = 0;
   uint64_t prefix_config_search_nanoseconds = 0;
+  /// Final prefix-model serialization and checked cost assembly.
   uint64_t prefix_exact_measurement_nanoseconds = 0;
   uint64_t ans_prefix_validation_nanoseconds = 0;
   uint64_t ans_value_collection_nanoseconds = 0;
