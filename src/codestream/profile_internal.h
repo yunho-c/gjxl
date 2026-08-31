@@ -69,7 +69,10 @@ inline void AccumulateEntropyWorkProfile(
   destination->selection_nanoseconds += source.selection_nanoseconds;
 }
 
-/// Aggregate worker time spent materializing every codestream candidate.
+/// Aggregate worker time spent measuring every candidate and materializing the
+/// selected candidate. Candidate measurement counts exact token bits without
+/// producing payload BitWriters; model/header and token writing cover only the
+/// selected candidate.
 struct SectionWritingWorkProfile {
   uint64_t model_and_header_nanoseconds = 0;
   uint64_t token_write_nanoseconds = 0;

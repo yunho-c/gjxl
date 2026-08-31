@@ -901,7 +901,7 @@ Status ProcessAnsTokenStream(
   return Status::Ok();
 }
 
-Status CountAnsTokenStreamBits(
+Status CountAnsTokenStreamBitsInternal(
   std::span<const EntropyToken> tokens,
   const EntropyCode& code,
   uint64_t* bit_count) {
@@ -945,7 +945,8 @@ Status MeasureAnsCode(
   candidate.cluster_count = code.ans_histograms.size();
   for (const std::vector<EntropyToken>& section : section_tokens) {
     uint64_t section_bits = 0;
-    if (Status status = CountAnsTokenStreamBits(section, code, &section_bits);
+    if (Status status = CountAnsTokenStreamBitsInternal(
+          section, code, &section_bits);
         !status.ok()) {
       return status;
     }
@@ -1074,6 +1075,14 @@ Status MeasureAnsCodes(
 }
 
 }  // namespace
+
+Status codestream_internal::CountAnsTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+
+  return CountAnsTokenStreamBitsInternal(tokens, code, bit_count);
+}
 
 Status codestream_internal::AggregateEntropyValues(
   std::vector<uint32_t> values,

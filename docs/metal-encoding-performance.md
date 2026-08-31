@@ -151,6 +151,10 @@ HybridUint and histogram/model searches, exact ANS token costing, entropy
 selection, model/header and token-stream writing, candidate measurement, and
 the selected candidate's final header/TOC/section/output assembly. The
 `substage_work_timing` field records the `aggregate-worker-time` semantics.
+Candidate measurement evaluates exact physical section and TOC sizes without
+materializing token payloads. Model/header and token-stream writing therefore
+cover only the selected candidate; `codestream_section_writing` includes both
+the measurement span and that final serialization span.
 
 Open `capture.trace` in Instruments. Keep `gjxl.metallib` and
 `gjxl.metallibsym` together in the profiling build so Instruments can resolve

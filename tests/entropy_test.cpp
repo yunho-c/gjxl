@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "codestream/entropy.h"
+#include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
 
 namespace {
@@ -788,6 +789,67 @@ bool CheckAnsSmallHistograms() {
   return true;
 }
 
+bool CheckExactTokenBitCounting() {
+  std::vector<std::vector<gjxl::EntropyToken>> sections = {
+    {},
+    {{0, 0}, {1, 1}, {0, 17}, {1, UINT32_MAX}},
+    {{1, 4}, {0, 4}, {1, 255}, {0, 65536}, {1, UINT32_MAX}},
+  };
+  gjxl::EntropyCode prefix;
+  gjxl::EntropyCodeCost prefix_cost;
+  if (!gjxl::OptimizeEntropyCode(
+         sections, {.context_count = 2}, &prefix, &prefix_cost).ok()) {
+    std::cerr << "Prefix bit-count fixture optimization failed\n";
+    return false;
+  }
+  gjxl::EntropyCode ans;
+  gjxl::EntropyCodeCost ans_cost;
+  if (!gjxl::OptimizeAnsEntropyCode(
+         sections, prefix, &ans, &ans_cost).ok()) {
+    std::cerr << "ANS bit-count fixture optimization failed\n";
+    return false;
+  }
+
+  for (const gjxl::EntropyCode* code : {&prefix, &ans}) {
+    for (const auto& section : sections) {
+      gjxl::BitWriter writer;
+      uint64_t measured = std::numeric_limits<uint64_t>::max();
+      if (!gjxl::WriteTokenStream(section, *code, &writer).ok() ||
+          !gjxl::codestream_internal::CountTokenStreamBits(
+             section, *code, &measured).ok() ||
+          measured != writer.bits_written() ||
+          (code->mode == gjxl::EntropyCodingMode::kAns && section.empty() &&
+           measured != 32)) {
+        std::cerr << "Exact token bit count differs from serialization\n";
+        return false;
+      }
+    }
+  }
+
+  const std::array<gjxl::EntropyToken, 1> invalid = {{{2, 0}}};
+  uint64_t unchanged = 0xA5A5A5A5A5A5A5A5ull;
+  if (gjxl::codestream_internal::CountTokenStreamBits(
+        invalid, prefix, &unchanged).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      unchanged != 0xA5A5A5A5A5A5A5A5ull ||
+      gjxl::codestream_internal::CountTokenStreamBits(
+        sections[1], prefix, nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument) {
+    std::cerr << "Rejected token bit count changed its output\n";
+    return false;
+  }
+  gjxl::EntropyCode malformed = prefix;
+  malformed.context_map.clear();
+  if (gjxl::codestream_internal::CountTokenStreamBits(
+        sections[1], malformed, &unchanged).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      unchanged != 0xA5A5A5A5A5A5A5A5ull) {
+    std::cerr << "Malformed token bit count changed its output\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -806,7 +868,8 @@ int main() {
       !CheckInitialContextPreclustering() ||
       !CheckAnsRoundTripContract() ||
       !CheckAnsAdaptiveModelSelection() ||
-      !CheckAnsSmallHistograms()) {
+      !CheckAnsSmallHistograms() ||
+      !CheckExactTokenBitCounting()) {
     return EXIT_FAILURE;
   }
   std::cout << "All entropy primitive tests passed.\n";

@@ -33,4 +33,12 @@ struct WeightedValue {
   const EntropyCode& code,
   BitWriter* writer);
 
+/// Counts one ANS stream by traversing the exact encoder state without
+/// allocating or materializing reverse bit chunks. The caller must supply a
+/// validated ANS code.
+[[nodiscard]] Status CountAnsTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count);
+
 }  // namespace gjxl::codestream_internal

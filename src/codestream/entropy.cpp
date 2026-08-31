@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "codestream/ans_internal.h"
+#include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
 #include "codestream/profile_internal.h"
 
@@ -2028,6 +2029,50 @@ Status WriteTokenStream(
     }
   }
   return AppendTemporary(writer, &temporary);
+}
+
+Status codestream_internal::CountTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+
+  if (bit_count == nullptr) {
+    return Status::InvalidArgument("Token-stream bit-count output is null");
+  }
+  if (Status status = ValidateEntropyCode(code); !status.ok()) {
+    return status;
+  }
+  if (code.mode == EntropyCodingMode::kAns) {
+    return CountAnsTokenStreamBits(tokens, code, bit_count);
+  }
+
+  uint64_t candidate = 0;
+  for (const EntropyToken& token : tokens) {
+    if (token.context >= code.context_count) {
+      return Status::InvalidArgument("Entropy token context is out of range");
+    }
+    const uint8_t cluster = code.context_map[token.context];
+    HybridUintToken encoded;
+    if (Status status = EncodeHybridUint(
+          token.value, code.uint_configs[cluster], &encoded);
+        !status.ok()) {
+      return status;
+    }
+    const PrefixCode& prefix = code.prefix_codes[cluster];
+    if (encoded.symbol >= prefix.depths.size() ||
+        prefix.depths[encoded.symbol] == 0) {
+      return Status::InvalidArgument(
+        "Token symbol is absent from its prefix code");
+    }
+    const uint64_t encoded_bits =
+      static_cast<uint64_t>(EncodedPrefixDepth(prefix, encoded.symbol)) +
+      encoded.extra_bit_count;
+    if (!AddBits(encoded_bits, &candidate)) {
+      return Status::InvalidArgument("Token-stream bit count overflow");
+    }
+  }
+  *bit_count = candidate;
+  return Status::Ok();
 }
 
 }  // namespace gjxl

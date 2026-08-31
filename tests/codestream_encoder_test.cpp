@@ -428,12 +428,71 @@ bool CheckAtomicRejections() {
   return true;
 }
 
+bool CheckDeferredCandidatePrimitives() {
+  using gjxl::codestream_internal::CandidateSelectionKey;
+  using gjxl::codestream_internal::PhysicalSectionSizesFromBitCounts;
+  using gjxl::codestream_internal::PreferAllPrefixCandidate;
+  using gjxl::codestream_internal::PreferEncodingCandidate;
+
+  if (!PreferAllPrefixCandidate(100, 100) ||
+      !PreferAllPrefixCandidate(101, 100) ||
+      PreferAllPrefixCandidate(99, 100) ||
+      !PreferEncodingCandidate({99, true, 4}, {100, false, 0}) ||
+      !PreferEncodingCandidate({100, false, 7}, {100, true, 0}) ||
+      !PreferEncodingCandidate({100, false, 2}, {100, false, 3}) ||
+      PreferEncodingCandidate({100, true, 0}, {100, false, 7}) ||
+      PreferEncodingCandidate({100, false, 3}, {100, false, 2})) {
+    std::cerr << "Deferred candidate tie policy changed\n";
+    return false;
+  }
+
+  std::vector<size_t> sizes;
+  const std::array<uint64_t, 2> single_common = {3, 5};
+  const std::array<uint64_t, 2> single_ac = {7, 9};
+  if (!PhysicalSectionSizesFromBitCounts(
+         single_common, single_ac, 1, &sizes).ok() ||
+      sizes != std::vector<size_t>{3}) {
+    std::cerr << "Single-group deferred padding is incorrect\n";
+    return false;
+  }
+
+  const std::array<uint64_t, 3> multi_common = {0, 1, 8};
+  const std::array<uint64_t, 3> multi_ac = {9, 16, 17};
+  if (!PhysicalSectionSizesFromBitCounts(
+         multi_common, multi_ac, 2, &sizes).ok() ||
+      sizes != std::vector<size_t>({0, 1, 1, 2, 2, 3})) {
+    std::cerr << "Multi-group deferred padding is incorrect\n";
+    return false;
+  }
+
+  const std::vector<size_t> sentinel = {9, 8, 7};
+  sizes = sentinel;
+  if (PhysicalSectionSizesFromBitCounts(
+        single_common, single_ac, 2, &sizes).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      sizes != sentinel) {
+    std::cerr << "Rejected deferred dimensions changed their output\n";
+    return false;
+  }
+  const std::array<uint64_t, 2> overflowing_common = {
+    std::numeric_limits<uint64_t>::max(), 1};
+  sizes = sentinel;
+  if (PhysicalSectionSizesFromBitCounts(
+        overflowing_common, single_ac, 1, &sizes).code() !=
+        gjxl::StatusCode::kOutOfMemory ||
+      sizes != sentinel) {
+    std::cerr << "Overflowing deferred size changed its output\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
   if (!CheckCodestreamAndFrameHeaders() || !CheckQuantizerSelectors() ||
       !CheckAssemblyAndDeterminism() || !CheckAdaptiveBlockContextSelection() ||
-      !CheckAtomicRejections()) {
+      !CheckAtomicRejections() || !CheckDeferredCandidatePrimitives()) {
     return EXIT_FAILURE;
   }
   std::cout << "All codestream encoder tests passed.\n";
