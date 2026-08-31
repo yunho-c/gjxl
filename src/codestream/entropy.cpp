@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <new>
@@ -18,9 +19,28 @@
 
 #include "codestream/ans_internal.h"
 #include "codestream/huffman.h"
+#include "codestream/profile_internal.h"
 
 namespace gjxl {
 namespace {
+
+using ProfileClock = std::chrono::steady_clock;
+using EntropyWorkProfile = codestream_internal::EntropyWorkProfile;
+
+ProfileClock::time_point ProfileBegin(const EntropyWorkProfile* profile) {
+  return profile == nullptr ? ProfileClock::time_point{} : ProfileClock::now();
+}
+
+void ProfileEnd(
+  EntropyWorkProfile* profile,
+  ProfileClock::time_point begin,
+  uint64_t EntropyWorkProfile::* destination) {
+
+  if (profile == nullptr) return;
+  profile->*destination += static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      ProfileClock::now() - begin).count());
+}
 
 constexpr size_t kCodeLengthCodeCount = 18;
 constexpr std::array<HybridUintConfig, 4> kBalancedUintConfigs = {{
@@ -1383,7 +1403,8 @@ Status BuildEntropyCodeForPartition(
   size_t cluster_count,
   bool optimize_configs,
   EntropyCode* code,
-  EntropyCodeCost* cost) {
+  EntropyCodeCost* cost,
+  EntropyWorkProfile* profile) {
 
   if (code == nullptr || cost == nullptr || cluster_count == 0 ||
       cluster_count > kMaximumPrefixClusters) {
@@ -1402,6 +1423,8 @@ Status BuildEntropyCodeForPartition(
     candidate.context_map[context] = clustered_map[initial];
   }
 
+  const ProfileClock::time_point value_collection_begin =
+    ProfileBegin(profile);
   std::vector<std::vector<uint32_t>> values(cluster_count);
   for (const std::vector<EntropyToken>& section : section_tokens) {
     for (const EntropyToken& token : section) {
@@ -1415,7 +1438,12 @@ Status BuildEntropyCodeForPartition(
       values[cluster].push_back(token.value);
     }
   }
+  ProfileEnd(
+    profile, value_collection_begin,
+    &EntropyWorkProfile::prefix_value_collection_nanoseconds);
 
+  const ProfileClock::time_point config_search_begin =
+    ProfileBegin(profile);
   candidate.uint_configs.resize(cluster_count);
   candidate.prefix_codes.resize(cluster_count);
   for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
@@ -1426,10 +1454,18 @@ Status BuildEntropyCodeForPartition(
       return status;
     }
   }
+  ProfileEnd(
+    profile, config_search_begin,
+    &EntropyWorkProfile::prefix_config_search_nanoseconds);
+  const ProfileClock::time_point exact_measurement_begin =
+    ProfileBegin(profile);
   EntropyCodeCost candidate_cost;
-  if (Status status = MeasureEntropyCode(
-        section_tokens, candidate, &candidate_cost);
-      !status.ok()) {
+  Status status = MeasureEntropyCode(
+    section_tokens, candidate, &candidate_cost);
+  ProfileEnd(
+    profile, exact_measurement_begin,
+    &EntropyWorkProfile::prefix_exact_measurement_nanoseconds);
+  if (!status.ok()) {
     return status;
   }
   *code = std::move(candidate);
@@ -1582,7 +1618,8 @@ Status OptimizeEntropyCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCodeOptions& options,
   EntropyCode* code,
-  EntropyCodeCost* cost) {
+  EntropyCodeCost* cost,
+  codestream_internal::EntropyWorkProfile* profile) {
 
   if (code == nullptr || options.context_count == 0) {
     return Status::InvalidArgument("Invalid entropy-code output or context count");
@@ -1612,6 +1649,15 @@ Status OptimizeEntropyCode(
   }
 
   try {
+    const auto profile_call = [&](uint64_t EntropyWorkProfile::* destination,
+                                  auto&& operation) {
+      const ProfileClock::time_point begin = ProfileBegin(profile);
+      Status status = operation();
+      ProfileEnd(profile, begin, destination);
+      return status;
+    };
+    const ProfileClock::time_point histogram_build_begin =
+      ProfileBegin(profile);
     std::vector<Histogram> histograms(histogram_count);
     uint64_t fixed_extra_bits = 0;
     for (const std::vector<EntropyToken>& section : section_tokens) {
@@ -1640,30 +1686,46 @@ Status OptimizeEntropyCode(
         }
       }
     }
+    ProfileEnd(
+      profile, histogram_build_begin,
+      &EntropyWorkProfile::prefix_histogram_build_nanoseconds);
 
     // Exact cluster candidates all start from these same source histograms.
     // Cache their costs once so copies can reuse them while mutations continue
     // to invalidate only the affected cluster state.
+    const ProfileClock::time_point histogram_cost_begin =
+      ProfileBegin(profile);
     for (Histogram& histogram : histograms) {
       if (Status status = HistogramBitCost(&histogram); !status.ok()) {
         return status;
       }
     }
+    ProfileEnd(
+      profile, histogram_cost_begin,
+      &EntropyWorkProfile::prefix_histogram_cost_nanoseconds);
 
     std::vector<Histogram> legacy_histograms;
     std::vector<uint8_t> legacy_map;
-    if (Status status = ClusterHistograms(
-          histograms, std::min<size_t>(8, histograms.size()), false, 0,
-          &legacy_histograms, &legacy_map);
+    if (Status status = profile_call(
+          &EntropyWorkProfile::prefix_clustering_nanoseconds,
+          [&] {
+            return ClusterHistograms(
+              histograms, std::min<size_t>(8, histograms.size()), false, 0,
+              &legacy_histograms, &legacy_map);
+          });
         !status.ok()) {
       return status;
     }
 
     EntropyCode best_code;
     EntropyCodeCost best_cost;
-    if (Status status = BuildFixedEntropyCodeForPartition(
-          options, legacy_map, legacy_histograms, fixed_extra_bits, &best_code,
-          &best_cost);
+    if (Status status = profile_call(
+          &EntropyWorkProfile::prefix_code_build_nanoseconds,
+          [&] {
+            return BuildFixedEntropyCodeForPartition(
+              options, legacy_map, legacy_histograms, fixed_extra_bits,
+              &best_code, &best_cost);
+          });
         !status.ok()) {
       return status;
     }
@@ -1679,11 +1741,15 @@ Status OptimizeEntropyCode(
     std::vector<Histogram> maximum_seeded_histograms;
     std::vector<uint32_t> maximum_seeded_symbols;
     std::vector<size_t> seed_indexes;
-    if (Status status = FastClusterHistograms(
-          histograms,
-          std::min(kMaximumPrefixClusters, histograms.size()), true,
-          &maximum_seeded_histograms, &maximum_seeded_symbols,
-          &seed_indexes);
+    if (Status status = profile_call(
+          &EntropyWorkProfile::prefix_clustering_nanoseconds,
+          [&] {
+            return FastClusterHistograms(
+              histograms,
+              std::min(kMaximumPrefixClusters, histograms.size()), true,
+              &maximum_seeded_histograms, &maximum_seeded_symbols,
+              &seed_indexes);
+          });
         !status.ok()) {
       return status;
     }
@@ -1699,17 +1765,26 @@ Status OptimizeEntropyCode(
       previous_cap = cap;
       std::vector<Histogram> candidate_histograms;
       std::vector<uint8_t> candidate_map;
-      if (Status status = ClusterHistogramsFromSeeds(
-            histograms, std::span<const size_t>(seed_indexes).first(cap), true,
-            0, &candidate_histograms, &candidate_map);
+      if (Status status = profile_call(
+            &EntropyWorkProfile::prefix_clustering_nanoseconds,
+            [&] {
+              return ClusterHistogramsFromSeeds(
+                histograms,
+                std::span<const size_t>(seed_indexes).first(cap), true, 0,
+                &candidate_histograms, &candidate_map);
+            });
           !status.ok()) {
         return status;
       }
       EntropyCode candidate_code;
       EntropyCodeCost candidate_cost;
-      if (Status status = BuildFixedEntropyCodeForPartition(
-            options, candidate_map, candidate_histograms, fixed_extra_bits,
-            &candidate_code, &candidate_cost);
+      if (Status status = profile_call(
+            &EntropyWorkProfile::prefix_code_build_nanoseconds,
+            [&] {
+              return BuildFixedEntropyCodeForPartition(
+                options, candidate_map, candidate_histograms,
+                fixed_extra_bits, &candidate_code, &candidate_cost);
+            });
           !status.ok()) {
         return status;
       }
@@ -1732,18 +1807,26 @@ Status OptimizeEntropyCode(
     // every cap through repeated Huffman rebuilds.
     std::vector<Histogram> refined_histograms;
     std::vector<uint8_t> refined_map;
-    if (Status status = ClusterHistogramsFromSeeds(
-          histograms,
-          std::span<const size_t>(seed_indexes).first(best_partition_cap),
-          false, 2, &refined_histograms, &refined_map);
+    if (Status status = profile_call(
+          &EntropyWorkProfile::prefix_clustering_nanoseconds,
+          [&] {
+            return ClusterHistogramsFromSeeds(
+              histograms,
+              std::span<const size_t>(seed_indexes).first(best_partition_cap),
+              false, 2, &refined_histograms, &refined_map);
+          });
         !status.ok()) {
       return status;
     }
     EntropyCode refined_code;
     EntropyCodeCost refined_cost;
-    if (Status status = BuildFixedEntropyCodeForPartition(
-          options, refined_map, refined_histograms, fixed_extra_bits,
-          &refined_code, &refined_cost);
+    if (Status status = profile_call(
+          &EntropyWorkProfile::prefix_code_build_nanoseconds,
+          [&] {
+            return BuildFixedEntropyCodeForPartition(
+              options, refined_map, refined_histograms, fixed_extra_bits,
+              &refined_code, &refined_cost);
+          });
         !status.ok()) {
       return status;
     }
@@ -1764,18 +1847,26 @@ Status OptimizeEntropyCode(
     if (higher_cap > best_partition_cap) {
       std::vector<Histogram> higher_histograms;
       std::vector<uint8_t> higher_map;
-      if (Status status = ClusterHistogramsFromSeeds(
-            histograms,
-            std::span<const size_t>(seed_indexes).first(higher_cap), false, 2,
-            &higher_histograms, &higher_map);
+      if (Status status = profile_call(
+            &EntropyWorkProfile::prefix_clustering_nanoseconds,
+            [&] {
+              return ClusterHistogramsFromSeeds(
+                histograms,
+                std::span<const size_t>(seed_indexes).first(higher_cap),
+                false, 2, &higher_histograms, &higher_map);
+            });
           !status.ok()) {
         return status;
       }
       EntropyCode higher_code;
       EntropyCodeCost higher_cost;
-      if (Status status = BuildFixedEntropyCodeForPartition(
-            options, higher_map, higher_histograms, fixed_extra_bits,
-            &higher_code, &higher_cost);
+      if (Status status = profile_call(
+            &EntropyWorkProfile::prefix_code_build_nanoseconds,
+            [&] {
+              return BuildFixedEntropyCodeForPartition(
+                options, higher_map, higher_histograms, fixed_extra_bits,
+                &higher_code, &higher_cost);
+            });
           !status.ok()) {
         return status;
       }
@@ -1795,8 +1886,9 @@ Status OptimizeEntropyCode(
     EntropyCode configured_code;
     EntropyCodeCost configured_cost;
     if (Status status = BuildEntropyCodeForPartition(
-          section_tokens, options, best_partition_map, best_partition_count,
-          true, &configured_code, &configured_cost);
+          section_tokens, options, best_partition_map,
+          best_partition_count, true, &configured_code,
+          &configured_cost, profile);
         !status.ok()) {
       return status;
     }

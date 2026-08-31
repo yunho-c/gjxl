@@ -6,6 +6,7 @@
 #include "codestream/encoder.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -44,6 +45,20 @@ uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
 ProfileClock::time_point ProfileBegin(
   const codestream_internal::VarDctCodestreamProfile* profile) {
   return profile == nullptr ? ProfileClock::time_point{} : ProfileClock::now();
+}
+
+ProfileClock::time_point WorkBegin(bool enabled) {
+  return enabled ? ProfileClock::now() : ProfileClock::time_point{};
+}
+
+void WorkEnd(
+  bool enabled,
+  ProfileClock::time_point begin,
+  uint64_t* destination) {
+
+  if (enabled) {
+    *destination += ElapsedNanoseconds(begin);
+  }
 }
 
 void ProfileEnd(
@@ -116,20 +131,42 @@ Status WriteDcGroupSection(
   std::span<const EntropyToken> dc_tokens,
   std::span<const EntropyToken> metadata_tokens,
   const EntropyCode& code,
-  BitWriter* writer) {
+  BitWriter* writer,
+  codestream_internal::SectionWritingWorkProfile* profile) {
 
+  const ProfileClock::time_point dc_header_begin =
+    WorkBegin(profile != nullptr);
   if (Status status = WriteSimpleDcGroupModularHeader(writer); !status.ok()) {
     return status;
   }
+  WorkEnd(
+    profile != nullptr, dc_header_begin,
+    profile == nullptr ? nullptr : &profile->model_and_header_nanoseconds);
+  const ProfileClock::time_point dc_tokens_begin =
+    WorkBegin(profile != nullptr);
   if (Status status = WriteTokenStream(dc_tokens, code, writer); !status.ok()) {
     return status;
   }
+  WorkEnd(
+    profile != nullptr, dc_tokens_begin,
+    profile == nullptr ? nullptr : &profile->token_write_nanoseconds);
+  const ProfileClock::time_point metadata_header_begin =
+    WorkBegin(profile != nullptr);
   if (Status status = WriteSimpleAcMetadataModularHeader(
         group.block_extent, group.transform_anchor_count, writer);
       !status.ok()) {
     return status;
   }
-  return WriteTokenStream(metadata_tokens, code, writer);
+  WorkEnd(
+    profile != nullptr, metadata_header_begin,
+    profile == nullptr ? nullptr : &profile->model_and_header_nanoseconds);
+  const ProfileClock::time_point metadata_tokens_begin =
+    WorkBegin(profile != nullptr);
+  Status status = WriteTokenStream(metadata_tokens, code, writer);
+  WorkEnd(
+    profile != nullptr, metadata_tokens_begin,
+    profile == nullptr ? nullptr : &profile->token_write_nanoseconds);
+  return status;
 }
 
 struct AcEncodingCandidate {
@@ -175,7 +212,8 @@ Status OptimizeBestEntropyCode(
   EntropyCode* code,
   EntropyCodeCost* cost,
   EntropyCode* prefix_fallback,
-  EntropyCodeCost* prefix_fallback_cost) {
+  EntropyCodeCost* prefix_fallback_cost,
+  codestream_internal::EntropyWorkProfile* profile) {
 
   if (code == nullptr || cost == nullptr || prefix_fallback == nullptr ||
       prefix_fallback_cost == nullptr) {
@@ -184,17 +222,19 @@ Status OptimizeBestEntropyCode(
   EntropyCode prefix;
   EntropyCodeCost prefix_cost;
   if (Status status = OptimizeEntropyCode(
-        streams, options, &prefix, &prefix_cost);
+        streams, options, &prefix, &prefix_cost, profile);
       !status.ok()) {
     return status;
   }
   EntropyCode ans;
   EntropyCodeCost ans_cost;
   if (Status status = OptimizeAnsEntropyCode(
-        streams, prefix, &ans, &ans_cost);
+        streams, prefix, &ans, &ans_cost, profile);
       !status.ok()) {
     return status;
   }
+  const ProfileClock::time_point selection_begin =
+    WorkBegin(profile != nullptr);
   *prefix_fallback = prefix;
   *prefix_fallback_cost = prefix_cost;
   const auto total_bits = [](const EntropyCodeCost& candidate) {
@@ -210,10 +250,15 @@ Status OptimizeBestEntropyCode(
     *code = std::move(prefix);
     *cost = prefix_cost;
   }
+  WorkEnd(
+    profile != nullptr, selection_begin,
+    profile == nullptr ? nullptr : &profile->selection_nanoseconds);
   return Status::Ok();
 }
 
-Status OptimizeAcCandidate(AcEncodingCandidate* candidate) {
+Status OptimizeAcCandidate(
+  AcEncodingCandidate* candidate,
+  codestream_internal::EntropyWorkProfile* profile) {
   if (candidate == nullptr || candidate->streams.empty()) {
     return Status::InvalidArgument("AC encoding candidate is empty");
   }
@@ -224,7 +269,7 @@ Status OptimizeAcCandidate(AcEncodingCandidate* candidate) {
         candidate->block_context_map.ac_context_count()),
     },
     &candidate->ac_code, &candidate->ac_cost,
-    &candidate->prefix_ac_code, &candidate->prefix_ac_cost);
+    &candidate->prefix_ac_code, &candidate->prefix_ac_cost, profile);
   return status;
 }
 
@@ -234,7 +279,8 @@ Status WriteCommonSections(
   std::span<const std::vector<EntropyToken>> dc_streams,
   const SimpleBlockContextMap& block_context_map,
   const EntropyCode& dc_code,
-  std::vector<BitWriter>* sections) {
+  std::vector<BitWriter>* sections,
+  codestream_internal::SectionWritingWorkProfile* profile) {
 
   if (sections == nullptr || dc_groups.empty() ||
       dc_streams.size() != 2 * dc_groups.size()) {
@@ -242,21 +288,33 @@ Status WriteCommonSections(
   }
   try {
     std::vector<BitWriter> candidate(1 + dc_groups.size());
+    const ProfileClock::time_point global_begin =
+      WorkBegin(profile != nullptr);
     Status status = WriteSimpleDcGlobal(
       frame.quantizer().params(), dc_groups.size(), block_context_map,
       dc_code, &candidate[0]);
     if (!status.ok()) {
       return status;
     }
+    WorkEnd(
+      profile != nullptr, global_begin,
+      profile == nullptr ? nullptr : &profile->model_and_header_nanoseconds);
+    std::vector<codestream_internal::SectionWritingWorkProfile>
+      group_profiles(profile == nullptr ? 0 : dc_groups.size());
     status = RunParallelSections(
       dc_groups.size(),
       [&](size_t index) {
         return WriteDcGroupSection(
           dc_groups[index], dc_streams[2 * index],
-          dc_streams[2 * index + 1], dc_code, &candidate[1 + index]);
+          dc_streams[2 * index + 1], dc_code, &candidate[1 + index],
+          profile == nullptr ? nullptr : &group_profiles[index]);
       });
     if (!status.ok()) {
       return status;
+    }
+    for (const auto& group_profile : group_profiles) {
+      codestream_internal::AccumulateSectionWritingWorkProfile(
+        group_profile, profile);
     }
     *sections = std::move(candidate);
   } catch (const std::bad_alloc&) {
@@ -273,7 +331,8 @@ Status WriteAcSections(
   const SimpleCoefficientOrders& custom_orders,
   std::span<const EntropyToken> order_tokens,
   const EntropyCode* order_code,
-  std::vector<BitWriter>* sections) {
+  std::vector<BitWriter>* sections,
+  codestream_internal::SectionWritingWorkProfile* profile) {
 
   if (sections == nullptr || ac.streams.empty()) {
     return Status::InvalidArgument("AC codestream sections are invalid");
@@ -282,6 +341,8 @@ Status WriteAcSections(
     std::vector<BitWriter> candidate(1 + ac.streams.size());
     const uint16_t used_order_mask =
       ac.custom_order ? custom_orders.used_order_mask : 0;
+    const ProfileClock::time_point global_begin =
+      WorkBegin(profile != nullptr);
     Status status = WriteSimpleAcGlobal(
       ac.streams.size(), used_order_mask,
       ac.custom_order ? order_tokens : std::span<const EntropyToken>{},
@@ -290,14 +351,33 @@ Status WriteAcSections(
     if (!status.ok()) {
       return status;
     }
+    WorkEnd(
+      profile != nullptr, global_begin,
+      profile == nullptr ? nullptr : &profile->model_and_header_nanoseconds);
+    std::vector<codestream_internal::SectionWritingWorkProfile>
+      group_profiles(profile == nullptr ? 0 : ac.streams.size());
     status = RunParallelSections(
       ac.streams.size(),
       [&](size_t index) {
-        return WriteTokenStream(
+        auto* group_profile =
+          profile == nullptr ? nullptr : &group_profiles[index];
+        const ProfileClock::time_point tokens_begin =
+          WorkBegin(group_profile != nullptr);
+        Status token_status = WriteTokenStream(
           ac.streams[index], ac_code, &candidate[1 + index]);
+        WorkEnd(
+          group_profile != nullptr, tokens_begin,
+          group_profile == nullptr
+            ? nullptr
+            : &group_profile->token_write_nanoseconds);
+        return token_status;
       });
     if (!status.ok()) {
       return status;
+    }
+    for (const auto& group_profile : group_profiles) {
+      codestream_internal::AccumulateSectionWritingWorkProfile(
+        group_profile, profile);
     }
     *sections = std::move(candidate);
   } catch (const std::bad_alloc&) {
@@ -419,23 +499,36 @@ Status AssembleCandidate(
   std::span<const BitWriter> common_sections,
   std::span<const BitWriter> ac_sections,
   size_t ac_group_count,
-  std::vector<uint8_t>* output) {
+  std::vector<uint8_t>* output,
+  codestream_internal::AssemblyProfile* profile) {
 
   if (output == nullptr) {
     return Status::InvalidArgument("Codestream candidate output is null");
   }
   try {
     std::vector<size_t> section_sizes;
+    const ProfileClock::time_point section_size_begin =
+      WorkBegin(profile != nullptr);
     Status status = PhysicalSectionSizes(
       common_sections, ac_sections, ac_group_count, &section_sizes);
     if (!status.ok()) {
       return status;
     }
+    WorkEnd(
+      profile != nullptr, section_size_begin,
+      profile == nullptr ? nullptr : &profile->section_size_nanoseconds);
     BitWriter writer;
+    const ProfileClock::time_point frame_header_begin =
+      WorkBegin(profile != nullptr);
     status = WriteFramePrefix(frame, &writer);
     if (!status.ok()) {
       return status;
     }
+    WorkEnd(
+      profile != nullptr, frame_header_begin,
+      profile == nullptr ? nullptr : &profile->frame_header_nanoseconds);
+    const ProfileClock::time_point toc_and_sections_begin =
+      WorkBegin(profile != nullptr);
     if (ac_group_count == 1) {
       BitWriter collapsed;
       for (const BitWriter& section : common_sections) {
@@ -462,12 +555,20 @@ Status AssembleCandidate(
     if (!status.ok()) {
       return status;
     }
+    WorkEnd(
+      profile != nullptr, toc_and_sections_begin,
+      profile == nullptr ? nullptr : &profile->toc_and_sections_nanoseconds);
     if (!writer.byte_aligned()) {
       return Status::Internal("Assembled codestream is not byte-aligned");
     }
+    const ProfileClock::time_point output_copy_begin =
+      WorkBegin(profile != nullptr);
     const std::span<const uint8_t> bytes = writer.padded_bytes();
     std::vector<uint8_t> candidate(bytes.begin(), bytes.end());
     *output = std::move(candidate);
+    WorkEnd(
+      profile != nullptr, output_copy_begin,
+      profile == nullptr ? nullptr : &profile->output_copy_nanoseconds);
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -522,12 +623,18 @@ Status EncodeVarDctCodestreamImpl(
     const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
     std::vector<SimpleBlockContextMap> block_context_maps;
     SimpleCoefficientOrders custom_orders;
+    std::array<uint64_t, 2> preparation_work{};
     status = RunParallelSections(
       2,
       [&](size_t index) {
-        return index == 0
+        const ProfileClock::time_point work_begin =
+          WorkBegin(profile != nullptr);
+        Status work_status = index == 0
           ? ComputeSimpleBlockContextMapCandidates(frame, &block_context_maps)
           : ComputeSimpleCoefficientOrders(frame, &custom_orders);
+        WorkEnd(
+          profile != nullptr, work_begin, &preparation_work[index]);
+        return work_status;
       });
     if (!status.ok()) {
       return status;
@@ -536,10 +643,19 @@ Status EncodeVarDctCodestreamImpl(
       return Status::Internal(
         "Validated frame produced no block-context candidates");
     }
+    candidate_profile.block_context_map_work_nanoseconds =
+      preparation_work[0];
+    candidate_profile.coefficient_order_work_nanoseconds =
+      preparation_work[1];
 
     std::vector<EntropyToken> order_tokens;
     if (custom_orders.used_order_mask != 0) {
+      const ProfileClock::time_point order_tokenization_begin =
+        WorkBegin(profile != nullptr);
       status = TokenizeSimpleCoefficientOrders(custom_orders, &order_tokens);
+      WorkEnd(
+        profile != nullptr, order_tokenization_begin,
+        &candidate_profile.coefficient_order_work_nanoseconds);
       if (!status.ok()) {
         return status;
       }
@@ -567,9 +683,13 @@ Status EncodeVarDctCodestreamImpl(
       }
     }
     const SimpleCoefficientOrders natural_orders;
+    std::vector<uint64_t> coefficient_tokenization_work(
+      profile == nullptr ? 0 : candidates.size());
     status = RunParallelSections(
       candidates.size(),
       [&](size_t index) {
+        const ProfileClock::time_point work_begin =
+          WorkBegin(profile != nullptr);
         AcEncodingCandidate& candidate = candidates[index];
         std::vector<SimpleAcGroupTokenStream> groups;
         Status token_status = TokenizeSimpleAcGroups(
@@ -578,10 +698,19 @@ Status EncodeVarDctCodestreamImpl(
         if (!token_status.ok()) {
           return token_status;
         }
-        return MoveAcStreams(&groups, &candidate.streams);
+        token_status = MoveAcStreams(&groups, &candidate.streams);
+        WorkEnd(
+          profile != nullptr, work_begin,
+          profile == nullptr
+            ? nullptr
+            : &coefficient_tokenization_work[index]);
+        return token_status;
       });
     if (!status.ok()) {
       return status;
+    }
+    for (uint64_t work : coefficient_tokenization_work) {
+      candidate_profile.coefficient_tokenization_work_nanoseconds += work;
     }
     ProfileEnd(
       profile, ac_tokenization_begin,
@@ -601,13 +730,17 @@ Status EncodeVarDctCodestreamImpl(
     EntropyCodeCost prefix_order_cost;
     const size_t order_task_count = has_custom_orders ? 1 : 0;
     const size_t entropy_task_count = 1 + order_task_count + candidates.size();
+    std::vector<codestream_internal::EntropyWorkProfile> entropy_profiles(
+      profile == nullptr ? 0 : entropy_task_count);
     status = RunParallelSections(
       entropy_task_count,
       [&](size_t index) {
+        auto* entropy_profile =
+          profile == nullptr ? nullptr : &entropy_profiles[index];
         if (index == 0) {
           return OptimizeBestEntropyCode(
             dc_streams, {.context_count = kSimpleDcContextCount}, &dc_code,
-            &dc_cost, &prefix_dc_code, &prefix_dc_cost);
+            &dc_cost, &prefix_dc_code, &prefix_dc_cost, entropy_profile);
         }
         if (has_custom_orders && index == 1) {
           const std::span<const std::vector<EntropyToken>> order_streams(
@@ -619,39 +752,54 @@ Status EncodeVarDctCodestreamImpl(
               .uint_config = {0, 0, 0},
             },
             &order_code, &order_cost,
-            &prefix_order_code, &prefix_order_cost);
+            &prefix_order_code, &prefix_order_cost, entropy_profile);
         }
         return OptimizeAcCandidate(
-          &candidates[index - 1 - order_task_count]);
+          &candidates[index - 1 - order_task_count], entropy_profile);
       });
     if (!status.ok()) {
       return status;
+    }
+    for (const auto& entropy_profile : entropy_profiles) {
+      codestream_internal::AccumulateEntropyWorkProfile(
+        entropy_profile, &candidate_profile.entropy_work);
     }
     ProfileEnd(
       profile, entropy_begin,
       &candidate_profile.entropy_optimization_nanoseconds);
 
     const ProfileClock::time_point sections_begin = ProfileBegin(profile);
+    std::vector<codestream_internal::SectionWritingWorkProfile>
+      section_profiles(profile == nullptr ? 0 : candidates.size());
     status = RunParallelSections(
       candidates.size(),
       [&](size_t index) {
+        auto* section_profile =
+          profile == nullptr ? nullptr : &section_profiles[index];
         AcEncodingCandidate& candidate = candidates[index];
         Status write_status = WriteCommonSections(
           frame, dc_groups, dc_streams, candidate.block_context_map,
-          dc_code, &candidate.common_sections);
+          dc_code, &candidate.common_sections, section_profile);
         if (!write_status.ok()) {
           return write_status;
         }
         write_status = WriteAcSections(
           candidate, candidate.ac_code, custom_orders, order_tokens,
           candidate.custom_order ? &order_code : nullptr,
-          &candidate.ac_sections);
+          &candidate.ac_sections, section_profile);
         if (!write_status.ok()) {
           return write_status;
         }
+        const ProfileClock::time_point candidate_measure_begin =
+          WorkBegin(section_profile != nullptr);
         write_status = MeasureCandidateSize(
           frame, candidate.common_sections, candidate.ac_sections,
           candidate.streams.size(), &candidate.complete_size);
+        WorkEnd(
+          section_profile != nullptr, candidate_measure_begin,
+          section_profile == nullptr
+            ? nullptr
+            : &section_profile->candidate_measure_nanoseconds);
         if (!write_status.ok()) {
           return write_status;
         }
@@ -659,7 +807,7 @@ Status EncodeVarDctCodestreamImpl(
         std::vector<BitWriter> prefix_common_sections;
         write_status = WriteCommonSections(
           frame, dc_groups, dc_streams, candidate.block_context_map,
-          prefix_dc_code, &prefix_common_sections);
+          prefix_dc_code, &prefix_common_sections, section_profile);
         if (!write_status.ok()) {
           return write_status;
         }
@@ -667,14 +815,21 @@ Status EncodeVarDctCodestreamImpl(
         write_status = WriteAcSections(
           candidate, candidate.prefix_ac_code, custom_orders, order_tokens,
           candidate.custom_order ? &prefix_order_code : nullptr,
-          &prefix_ac_sections);
+          &prefix_ac_sections, section_profile);
         if (!write_status.ok()) {
           return write_status;
         }
         size_t prefix_size = 0;
+        const ProfileClock::time_point prefix_measure_begin =
+          WorkBegin(section_profile != nullptr);
         write_status = MeasureCandidateSize(
           frame, prefix_common_sections, prefix_ac_sections,
           candidate.streams.size(), &prefix_size);
+        WorkEnd(
+          section_profile != nullptr, prefix_measure_begin,
+          section_profile == nullptr
+            ? nullptr
+            : &section_profile->candidate_measure_nanoseconds);
         if (!write_status.ok()) {
           return write_status;
         }
@@ -691,10 +846,16 @@ Status EncodeVarDctCodestreamImpl(
     if (!status.ok()) {
       return status;
     }
+    for (const auto& section_profile : section_profiles) {
+      codestream_internal::AccumulateSectionWritingWorkProfile(
+        section_profile, &candidate_profile.section_writing_work);
+    }
     ProfileEnd(
       profile, sections_begin, &candidate_profile.section_writing_nanoseconds);
 
     const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
+    const ProfileClock::time_point candidate_selection_begin =
+      WorkBegin(profile != nullptr);
     size_t selected_index = 0;
     for (size_t index = 1; index < candidates.size(); ++index) {
       const AcEncodingCandidate& candidate = candidates[index];
@@ -709,11 +870,15 @@ Status EncodeVarDctCodestreamImpl(
         selected_index = index;
       }
     }
+    WorkEnd(
+      profile != nullptr, candidate_selection_begin,
+      &candidate_profile.assembly.candidate_selection_nanoseconds);
     const AcEncodingCandidate& selected = candidates[selected_index];
     std::vector<uint8_t> candidate_output;
     status = AssembleCandidate(
       frame, selected.common_sections, selected.ac_sections,
-      selected.streams.size(), &candidate_output);
+      selected.streams.size(), &candidate_output,
+      profile == nullptr ? nullptr : &candidate_profile.assembly);
     if (!status.ok()) {
       return status;
     }
