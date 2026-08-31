@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.25)
 project(
   gjxl
   VERSION 0.0.1
-  LANGUAGES CXX
+  LANGUAGES C CXX
 )
 
 include(CMakePackageConfigHelpers)
@@ -297,14 +297,61 @@ target_link_libraries(
 # Private adapters shared by C API and tests.
 add_library(
   gjxl_c_api_internal
-  STATIC
+  OBJECT
   src/c_api/image_conversion.cpp
+)
+
+set_target_properties(
+  gjxl_c_api_internal
+  PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
 )
 
 target_link_libraries(
   gjxl_c_api_internal
   PUBLIC
     gjxl_core
+)
+
+# High-level C interface
+add_library(
+  gjxl_c
+  STATIC
+  src/c_api/gjxl.cpp
+)
+
+add_library(gjxl::c ALIAS gjxl_c)
+
+set_target_properties(
+  gjxl_c
+  PROPERTIES
+    OUTPUT_NAME gjxl
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+
+target_include_directories(
+  gjxl_c
+  PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+
+target_compile_options(
+  gjxl_c
+  PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Werror
+)
+
+target_link_libraries(
+  gjxl_c
+  PRIVATE
+    gjxl_c_api_internal
+    gjxl_codestream
 )
 
 # Floating-point interchange support used by the command-line frontend.
@@ -1330,6 +1377,74 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME c_api_image_conversion
     COMMAND gjxl_c_api_image_conversion_test
+  )
+
+  add_executable(
+    gjxl_c_api_test
+    tests/c_api_test.c
+  )
+
+  set_target_properties(
+    gjxl_c_api_test
+    PROPERTIES
+      LINKER_LANGUAGE CXX
+  )
+
+  target_compile_features(
+    gjxl_c_api_test
+    PRIVATE
+      c_std_11
+  )
+
+  target_compile_options(
+    gjxl_c_api_test
+    PRIVATE
+      -Wall
+      -Wextra
+      -Wpedantic
+      -Werror
+  )
+
+  target_link_libraries(
+    gjxl_c_api_test
+    PRIVATE
+      gjxl_c
+  )
+
+  add_test(
+    NAME c_api
+    COMMAND gjxl_c_api_test
+  )
+
+  add_executable(
+    gjxl_c_api_cpp_test
+    tests/c_api_cpp_test.cpp
+  )
+
+  target_compile_features(
+    gjxl_c_api_cpp_test
+    PRIVATE
+      cxx_std_20
+  )
+
+  target_compile_options(
+    gjxl_c_api_cpp_test
+    PRIVATE
+      -Wall
+      -Wextra
+      -Wpedantic
+      -Werror
+  )
+
+  target_link_libraries(
+    gjxl_c_api_cpp_test
+    PRIVATE
+      gjxl_c
+  )
+
+  add_test(
+    NAME c_api_cpp
+    COMMAND gjxl_c_api_cpp_test
   )
 
   add_executable(

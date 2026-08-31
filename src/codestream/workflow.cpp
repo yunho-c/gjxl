@@ -1276,6 +1276,20 @@ bool IsAutomaticMetalBackendQualified(
     backend.name() == kQualifiedMetalBackend;
 }
 
+Status EnsureProductionMetalBackendAvailable() {
+  GpuBackend* backend = nullptr;
+  Status status = ResolveProductionMetalBackend(&backend);
+  if (!status.ok()) {
+    return status;
+  }
+  if (backend == nullptr || !HasRequiredGpuQuantizationCapabilities(
+        *backend, GpuAdaptiveQuantizationMode::kExactCoefficients)) {
+    return Status::Unavailable(
+      "Production Metal backend lacks a required GPU capability");
+  }
+  return Status::Ok();
+}
+
 Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,
