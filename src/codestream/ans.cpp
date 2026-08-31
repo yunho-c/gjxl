@@ -15,6 +15,7 @@
 #include <new>
 #include <span>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -65,16 +66,53 @@ struct WeightedValue {
 };
 
 std::vector<WeightedValue> AggregateValues(std::vector<uint32_t> values) {
-  std::ranges::sort(values);
-  std::vector<WeightedValue> aggregated;
-  aggregated.reserve(std::min(values.size(), kMaximumAnsAlphabetSize));
+  // Large coefficient-token arrays contain many duplicate small values. Avoid
+  // sorting every occurrence, while retaining the cheaper sort for inputs too
+  // small to amortize zeroing and scanning the dense table.
+  constexpr size_t kDenseValueCount = 1 << 16;
+  constexpr size_t kMinimumCountingInput = 1 << 12;
+  if (values.size() < kMinimumCountingInput) {
+    std::ranges::sort(values);
+    std::vector<WeightedValue> aggregated;
+    aggregated.reserve(std::min(values.size(), kMaximumAnsAlphabetSize));
+    for (uint32_t value : values) {
+      if (aggregated.empty() || aggregated.back().value != value) {
+        aggregated.push_back({value, 1});
+      } else {
+        ++aggregated.back().count;
+      }
+    }
+    return aggregated;
+  }
+
+  std::vector<uint64_t> dense_counts(kDenseValueCount);
+  // Keep uncommon larger raw values sparse so the dense allocation remains
+  // bounded for arbitrary uint32_t inputs.
+  std::unordered_map<uint32_t, uint64_t> sparse_counts;
   for (uint32_t value : values) {
-    if (aggregated.empty() || aggregated.back().value != value) {
-      aggregated.push_back({value, 1});
+    if (value < dense_counts.size()) {
+      ++dense_counts[value];
     } else {
-      ++aggregated.back().count;
+      ++sparse_counts[value];
     }
   }
+
+  std::vector<WeightedValue> aggregated;
+  aggregated.reserve(
+    std::min(values.size(), dense_counts.size() + sparse_counts.size()));
+  for (size_t value = 0; value < dense_counts.size(); ++value) {
+    if (dense_counts[value] != 0) {
+      aggregated.push_back(
+        {static_cast<uint32_t>(value), dense_counts[value]});
+    }
+  }
+  const size_t dense_value_count = aggregated.size();
+  for (const auto& [value, count] : sparse_counts) {
+    aggregated.push_back({value, count});
+  }
+  std::ranges::sort(
+    aggregated.begin() + dense_value_count, aggregated.end(), {},
+    &WeightedValue::value);
   return aggregated;
 }
 

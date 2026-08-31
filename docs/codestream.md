@@ -1239,6 +1239,42 @@ order.
    four pairs, the respective ranges were 12.93-13.77%, 10.39-11.41%, and
    7.80-8.88%. Section writing was not changed by this series.
 
+   A high-resolution follow-up replaces the full occurrence sort inside
+   `AggregateValues` for inputs of at least 4,096 values. Common raw values
+   below 65,536 are counted in a bounded dense table; only distinct larger
+   values enter a sparse map and sorted suffix. Smaller inputs retain the
+   original sort. Temporary diagnostics on padded 4K at distance 1.2 showed
+   that the consequential arrays contained roughly 100 thousand to 9.5 million
+   values but generally only 5-200 distinct values, and all values took the
+   dense path.
+   The added entropy fixture crosses the counting threshold and includes
+   `UINT32_MAX`, so both dense and sparse behavior are exercised.
+
+   Three rotated Release rounds compared `951df02`, current `4b6b27e`, and the
+   counted implementation. Each independent process used the Metal public
+   workflow, fully-resident SIMD AQ, two warmups, and five measured samples.
+   Percentages below are medians of three paired process-median changes; a
+   negative value means that counting is faster.
+
+   | 3839x2159 workload | Total vs current | Entropy vs current | Total vs `951df02` | Entropy vs `951df02` |
+   | --- | ---: | ---: | ---: | ---: |
+   | Padded, distance 1.2 | -35.67% | -52.45% | +7.44% | +22.83% |
+   | Padded, distance 1.0 | -22.32% | -30.36% | +12.65% | +24.27% |
+   | Flower | +5.69% | -4.91% | +8.76% | +2.36% |
+   | Keong Macan | -5.70% | -15.26% | -1.66% | -5.38% |
+   | Riaphotographs | -0.61% | -8.70% | +3.52% | -2.24% |
+   | Bliznaca | -9.53% | -3.54% | -2.78% | +3.21% |
+
+   All 90 current/counted benchmark sample decision records are identical,
+   including the 1,638,673-byte padded distance-1.2 codestream. A separate
+   seeded 3839x2159 PFM encode is byte-identical between those builds and
+   decodes successfully with `djxl`. `951df02` predates native ANS selection
+   and produces 1,640,942 bytes for padded 4K at distance 1.2, so its speed
+   advantage also carries a 2,269-byte (0.138%) size cost in this case. The
+   complete rebuilt Release suite remains 58/59 with only the exact inherited
+   `quantization_pipeline` score mismatch reproduced by the unmodified current
+   build.
+
 7. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy

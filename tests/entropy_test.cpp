@@ -612,6 +612,38 @@ bool CheckAnsAdaptiveModelSelection() {
     return false;
   }
 
+  std::vector<gjxl::EntropyToken> repeated_sparse;
+  repeated_sparse.reserve(sparse.size() * 32);
+  for (size_t repeat = 0; repeat < 32; ++repeat) {
+    repeated_sparse.insert(
+      repeated_sparse.end(), sparse.begin(), sparse.end());
+  }
+  const std::array<std::vector<gjxl::EntropyToken>, 1>
+    repeated_sparse_sections = {repeated_sparse};
+  gjxl::EntropyCode repeated_sparse_prefix;
+  gjxl::EntropyCode repeated_sparse_ans;
+  gjxl::EntropyCodeCost repeated_sparse_cost;
+  gjxl::BitWriter repeated_sparse_model;
+  gjxl::BitWriter repeated_sparse_payload;
+  if (!gjxl::OptimizeEntropyCode(
+        repeated_sparse_sections, {.context_count = 1},
+        &repeated_sparse_prefix).ok() ||
+      !gjxl::OptimizeAnsEntropyCode(
+        repeated_sparse_sections, repeated_sparse_prefix,
+        &repeated_sparse_ans, &repeated_sparse_cost).ok() ||
+      !gjxl::WriteEntropyCode(
+        repeated_sparse_ans, &repeated_sparse_model).ok() ||
+      !gjxl::WriteTokenStream(
+        repeated_sparse, repeated_sparse_ans,
+        &repeated_sparse_payload).ok() ||
+      repeated_sparse_cost.model_bits !=
+        repeated_sparse_model.bits_written() ||
+      repeated_sparse_cost.token_bits !=
+        repeated_sparse_payload.bits_written()) {
+    std::cerr << "ANS counted-value aggregation fixture failed\n";
+    return false;
+  }
+
   gjxl::EntropyCode malformed = skewed_ans;
   malformed.ans_histograms[0].method = 0;
   gjxl::BitWriter atomic;
