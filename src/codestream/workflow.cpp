@@ -67,8 +67,16 @@ void AccumulateCodestreamProfile(
     source.dc_tokenization_nanoseconds;
   destination->ac_tokenization_nanoseconds +=
     source.ac_tokenization_nanoseconds;
+  destination->block_context_map_work_nanoseconds +=
+    source.block_context_map_work_nanoseconds;
+  destination->coefficient_order_work_nanoseconds +=
+    source.coefficient_order_work_nanoseconds;
+  destination->coefficient_tokenization_work_nanoseconds +=
+    source.coefficient_tokenization_work_nanoseconds;
   destination->entropy_optimization_nanoseconds +=
     source.entropy_optimization_nanoseconds;
+  codestream_internal::AccumulateEntropyWorkProfile(
+    source.entropy_work, &destination->entropy_work);
   destination->entropy_model_bits += source.entropy_model_bits;
   destination->entropy_token_bits += source.entropy_token_bits;
   destination->dc_entropy_clusters += source.dc_entropy_clusters;
@@ -97,7 +105,19 @@ void AccumulateCodestreamProfile(
     source.selected_block_context_qf_threshold_count;
   destination->section_writing_nanoseconds +=
     source.section_writing_nanoseconds;
+  codestream_internal::AccumulateSectionWritingWorkProfile(
+    source.section_writing_work, &destination->section_writing_work);
   destination->assembly_nanoseconds += source.assembly_nanoseconds;
+  destination->assembly.candidate_selection_nanoseconds +=
+    source.assembly.candidate_selection_nanoseconds;
+  destination->assembly.section_size_nanoseconds +=
+    source.assembly.section_size_nanoseconds;
+  destination->assembly.frame_header_nanoseconds +=
+    source.assembly.frame_header_nanoseconds;
+  destination->assembly.toc_and_sections_nanoseconds +=
+    source.assembly.toc_and_sections_nanoseconds;
+  destination->assembly.output_copy_nanoseconds +=
+    source.assembly.output_copy_nanoseconds;
   destination->total_nanoseconds += source.total_nanoseconds;
 }
 

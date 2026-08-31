@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "codestream/profile_internal.h"
 #include "core/status.h"
 
 namespace gjxl {
@@ -19,7 +20,11 @@ struct VarDctCodestreamProfile {
   uint64_t validation_nanoseconds = 0;
   uint64_t dc_tokenization_nanoseconds = 0;
   uint64_t ac_tokenization_nanoseconds = 0;
+  uint64_t block_context_map_work_nanoseconds = 0;
+  uint64_t coefficient_order_work_nanoseconds = 0;
+  uint64_t coefficient_tokenization_work_nanoseconds = 0;
   uint64_t entropy_optimization_nanoseconds = 0;
+  EntropyWorkProfile entropy_work;
   uint64_t entropy_model_bits = 0;
   uint64_t entropy_token_bits = 0;
   size_t dc_entropy_clusters = 0;
@@ -39,7 +44,9 @@ struct VarDctCodestreamProfile {
   size_t selected_block_context_count = 0;
   size_t selected_block_context_qf_threshold_count = 0;
   uint64_t section_writing_nanoseconds = 0;
+  SectionWritingWorkProfile section_writing_work;
   uint64_t assembly_nanoseconds = 0;
+  AssemblyProfile assembly;
   uint64_t total_nanoseconds = 0;
 
   bool operator==(const VarDctCodestreamProfile&) const = default;

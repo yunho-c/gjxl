@@ -16,6 +16,10 @@
 
 namespace gjxl {
 
+namespace codestream_internal {
+struct EntropyWorkProfile;
+}  // namespace codestream_internal
+
 inline constexpr size_t kPrefixAlphabetSize = 128;
 inline constexpr size_t kMaximumPrefixClusters = 32;
 inline constexpr size_t kAnsTableSize = 4096;
@@ -129,7 +133,8 @@ struct EntropyCodeCost {
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCodeOptions& options,
   EntropyCode* code,
-  EntropyCodeCost* cost = nullptr);
+  EntropyCodeCost* cost = nullptr,
+  codestream_internal::EntropyWorkProfile* profile = nullptr);
 
 /// Builds an ANS model using an optimized prefix code's context partition.
 /// HybridUint configurations and normalized populations are screened using an
@@ -139,7 +144,8 @@ struct EntropyCodeCost {
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCode& prefix_partition,
   EntropyCode* code,
-  EntropyCodeCost* cost = nullptr);
+  EntropyCodeCost* cost = nullptr,
+  codestream_internal::EntropyWorkProfile* profile = nullptr);
 
 /// Builds a canonical maximum-15-bit prefix code for a histogram.
 [[nodiscard]] Status BuildPrefixCode(

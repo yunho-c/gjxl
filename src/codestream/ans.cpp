@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -19,8 +20,28 @@
 #include <utility>
 #include <vector>
 
+#include "codestream/profile_internal.h"
+
 namespace gjxl {
 namespace {
+
+using ProfileClock = std::chrono::steady_clock;
+using EntropyWorkProfile = codestream_internal::EntropyWorkProfile;
+
+ProfileClock::time_point ProfileBegin(const EntropyWorkProfile* profile) {
+  return profile == nullptr ? ProfileClock::time_point{} : ProfileClock::now();
+}
+
+void ProfileEnd(
+  EntropyWorkProfile* profile,
+  ProfileClock::time_point begin,
+  uint64_t EntropyWorkProfile::* destination) {
+
+  if (profile == nullptr) return;
+  profile->*destination += static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      ProfileClock::now() - begin).count());
+}
 
 constexpr uint32_t kAnsLogTableSize = 12;
 constexpr uint32_t kAnsSignature = 0x13;
@@ -1280,20 +1301,28 @@ Status OptimizeAnsEntropyCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
   const EntropyCode& prefix_partition,
   EntropyCode* code,
-  EntropyCodeCost* cost) {
+  EntropyCodeCost* cost,
+  codestream_internal::EntropyWorkProfile* profile) {
 
   if (code == nullptr || prefix_partition.mode != EntropyCodingMode::kPrefix ||
       prefix_partition.prefix_codes.empty()) {
     return Status::InvalidArgument("ANS partition input is invalid");
   }
+  const ProfileClock::time_point prefix_validation_begin =
+    ProfileBegin(profile);
   BitWriter validated_prefix;
   if (Status status = WriteEntropyCode(
         prefix_partition, &validated_prefix);
       !status.ok()) {
     return status;
   }
+  ProfileEnd(
+    profile, prefix_validation_begin,
+    &EntropyWorkProfile::ans_prefix_validation_nanoseconds);
   try {
     const size_t cluster_count = prefix_partition.prefix_codes.size();
+    const ProfileClock::time_point value_collection_begin =
+      ProfileBegin(profile);
     std::vector<std::vector<uint32_t>> values(cluster_count);
     for (const std::vector<EntropyToken>& section : section_tokens) {
       for (const EntropyToken& token : section) {
@@ -1307,6 +1336,9 @@ Status OptimizeAnsEntropyCode(
         values[cluster].push_back(token.value);
       }
     }
+    ProfileEnd(
+      profile, value_collection_begin,
+      &EntropyWorkProfile::ans_value_collection_nanoseconds);
 
     constexpr size_t kMinimumLogAlphaSize = 5;
     constexpr size_t kMaximumLogAlphaSize = 8;
@@ -1327,9 +1359,16 @@ Status OptimizeAnsEntropyCode(
     };
     std::vector<std::vector<ConfigCandidate>> options(cluster_count);
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+      const ProfileClock::time_point aggregation_begin =
+        ProfileBegin(profile);
       const std::vector<WeightedValue> weighted_values =
         AggregateValues(std::move(values[cluster]));
+      ProfileEnd(
+        profile, aggregation_begin,
+        &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
       for (HybridUintConfig config : kAnsUintConfigs) {
+        const ProfileClock::time_point uint_config_begin =
+          ProfileBegin(profile);
         std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
         uint64_t extra_bits = 0;
         size_t maximum_symbol = 0;
@@ -1356,6 +1395,9 @@ Status OptimizeAnsEntropyCode(
           extra_bits += weighted_value.count * encoded.extra_bit_count;
           maximum_symbol = std::max<size_t>(maximum_symbol, encoded.symbol);
         }
+        ProfileEnd(
+          profile, uint_config_begin,
+          &EntropyWorkProfile::ans_uint_config_nanoseconds);
         if (!valid) {
           continue;
         }
@@ -1363,11 +1405,18 @@ Status OptimizeAnsEntropyCode(
         option.config = config;
         option.maximum_symbol = maximum_symbol;
         option.extra_bits = extra_bits;
+        const ProfileClock::time_point histogram_begin =
+          ProfileBegin(profile);
         if (Status status = BuildBestAnsHistogram(
               counts, &option.histogram);
             !status.ok()) {
           return status;
         }
+        ProfileEnd(
+          profile, histogram_begin,
+          &EntropyWorkProfile::ans_histogram_build_nanoseconds);
+        const ProfileClock::time_point config_cost_begin =
+          ProfileBegin(profile);
         if (Status status = EstimateAnsHistogramCost(
               counts, option.histogram, &option.estimated_bits);
             !status.ok()) {
@@ -1394,6 +1443,9 @@ Status OptimizeAnsEntropyCode(
           stats.estimated_bits = option.estimated_bits +
             static_cast<double>(stats.config_bits);
         }
+        ProfileEnd(
+          profile, config_cost_begin,
+          &EntropyWorkProfile::ans_uint_config_nanoseconds);
         options[cluster].push_back(std::move(option));
       }
       if (options[cluster].empty()) {
@@ -1415,6 +1467,8 @@ Status OptimizeAnsEntropyCode(
     };
     std::vector<WidthCandidate> width_candidates;
     width_candidates.reserve(kLogAlphaSizeCount);
+    const ProfileClock::time_point model_build_begin =
+      ProfileBegin(profile);
     for (size_t log_alpha_size = kMinimumLogAlphaSize;
          log_alpha_size <= kMaximumLogAlphaSize; ++log_alpha_size) {
       EntropyCode candidate;
@@ -1490,6 +1544,9 @@ Status OptimizeAnsEntropyCode(
         other.survives = false;
       }
     }
+    ProfileEnd(
+      profile, model_build_begin,
+      &EntropyWorkProfile::ans_model_build_nanoseconds);
 
     EntropyCodeCost best_cost;
     uint64_t best_total = std::numeric_limits<uint64_t>::max();
@@ -1532,6 +1589,8 @@ Status OptimizeAnsEntropyCode(
         continue;
       }
       std::array<EntropyCodeCost, kAnsAlphabetWidthCount> candidate_costs{};
+      const ProfileClock::time_point token_cost_begin =
+        ProfileBegin(profile);
       if (Status status = MeasureAnsCodes(
             section_tokens,
             std::span(candidate_codes).first(group_size),
@@ -1540,6 +1599,9 @@ Status OptimizeAnsEntropyCode(
           !status.ok()) {
         return status;
       }
+      ProfileEnd(
+        profile, token_cost_begin,
+        &EntropyWorkProfile::ans_token_cost_nanoseconds);
       for (size_t group_index = 0; group_index < group_size; ++group_index) {
         const EntropyCodeCost& candidate_cost = candidate_costs[group_index];
         const uint64_t candidate_total = candidate_cost.model_bits >

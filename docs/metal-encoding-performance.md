@@ -136,6 +136,20 @@ Each artifact contains:
   and SHA-256 hashes of the benchmark, metallib, and symbol companion; and
 - starting worktree/index patches plus an untracked-file hash inventory.
 
+Raw workflow schema 7 keeps the elapsed `codestream_dc_tokenization`,
+`codestream_ac_tokenization`, `codestream_entropy_optimization`,
+`codestream_section_writing`, and `codestream_assembly` phases, and adds finer
+codestream counters. Names ending in `_work` are aggregate worker time: work
+performed by overlapping DC, coefficient-order, AC-candidate, and section
+tasks is summed, so those counters can exceed their enclosing wall-clock phase
+and must not be added to complete-encode latency. The new breakdown separates
+block-context and coefficient preparation, coefficient tokenization, prefix
+histogram construction/clustering/code building, ANS value aggregation,
+HybridUint and histogram/model searches, exact ANS token costing, entropy
+selection, model/header and token-stream writing, candidate measurement, and
+the selected candidate's final header/TOC/section/output assembly. The
+`substage_work_timing` field records the `aggregate-worker-time` semantics.
+
 Open `capture.trace` in Instruments. Keep `gjxl.metallib` and
 `gjxl.metallibsym` together in the profiling build so Instruments can resolve
 shader symbols and source locations. The driver allows a dirty checkout but

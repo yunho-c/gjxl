@@ -22,9 +22,33 @@ PHASES = {
     "codestream_validation",
     "codestream_dc_tokenization",
     "codestream_ac_tokenization",
+    "codestream_block_context_map_work",
+    "codestream_coefficient_order_work",
+    "codestream_coefficient_tokenization_work",
     "codestream_entropy_optimization",
+    "codestream_entropy_prefix_histogram_build_work",
+    "codestream_entropy_prefix_histogram_cost_work",
+    "codestream_entropy_prefix_clustering_work",
+    "codestream_entropy_prefix_code_build_work",
+    "codestream_entropy_prefix_uint_config_work",
+    "codestream_entropy_ans_prefix_validation_work",
+    "codestream_entropy_ans_value_collection_work",
+    "codestream_entropy_ans_value_aggregation_work",
+    "codestream_entropy_ans_uint_config_work",
+    "codestream_entropy_ans_histogram_build_work",
+    "codestream_entropy_ans_model_build_work",
+    "codestream_entropy_ans_token_cost_work",
+    "codestream_entropy_selection_work",
     "codestream_section_writing",
+    "codestream_section_model_and_header_work",
+    "codestream_section_token_write_work",
+    "codestream_section_candidate_measure_work",
     "codestream_assembly",
+    "codestream_assembly_candidate_selection",
+    "codestream_assembly_section_size",
+    "codestream_assembly_frame_header",
+    "codestream_assembly_toc_and_sections",
+    "codestream_assembly_output_copy",
 }
 
 
@@ -79,7 +103,10 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 6)
+        self.assertEqual(document["schema_version"], 7)
+        self.assertEqual(
+            document["substage_work_timing"], "aggregate-worker-time"
+        )
         self.assertEqual(document["validation"], "metal-only")
         self.assertEqual(document["density"], "default")
         self.assertFalse(document["collect_final_score"])
@@ -135,6 +162,9 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         for value in sample["phase_nanoseconds"].values():
             self.assertIsInstance(value, int)
             self.assertGreaterEqual(value, 0)
+        for phase in PHASES:
+            if phase.endswith("_work"):
+                self.assertGreater(sample["phase_nanoseconds"][phase], 0)
         self.assertFalse(list(self.directory.glob("samples.json.tmp-*")))
 
     def test_external_pfm_input_uses_its_source_extent(self) -> None:
@@ -171,7 +201,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 6)
+        self.assertEqual(document["schema_version"], 7)
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
 

@@ -278,10 +278,40 @@ bool CheckEncodedFrame(
     profile.ac_tokenization_nanoseconds +
     profile.entropy_optimization_nanoseconds +
     profile.section_writing_nanoseconds + profile.assembly_nanoseconds;
+  const uint64_t entropy_substage_work =
+    profile.entropy_work.prefix_histogram_build_nanoseconds +
+    profile.entropy_work.prefix_histogram_cost_nanoseconds +
+    profile.entropy_work.prefix_clustering_nanoseconds +
+    profile.entropy_work.prefix_code_build_nanoseconds +
+    profile.entropy_work.prefix_uint_config_nanoseconds +
+    profile.entropy_work.ans_prefix_validation_nanoseconds +
+    profile.entropy_work.ans_value_collection_nanoseconds +
+    profile.entropy_work.ans_value_aggregation_nanoseconds +
+    profile.entropy_work.ans_uint_config_nanoseconds +
+    profile.entropy_work.ans_histogram_build_nanoseconds +
+    profile.entropy_work.ans_model_build_nanoseconds +
+    profile.entropy_work.ans_token_cost_nanoseconds +
+    profile.entropy_work.selection_nanoseconds;
+  const uint64_t section_substage_work =
+    profile.section_writing_work.model_and_header_nanoseconds +
+    profile.section_writing_work.token_write_nanoseconds +
+    profile.section_writing_work.candidate_measure_nanoseconds;
+  const uint64_t assembly_substage_total =
+    profile.assembly.candidate_selection_nanoseconds +
+    profile.assembly.section_size_nanoseconds +
+    profile.assembly.frame_header_nanoseconds +
+    profile.assembly.toc_and_sections_nanoseconds +
+    profile.assembly.output_copy_nanoseconds;
   const uint64_t hash = Fnv1a64(first);
   if (!status.ok() || first.size() != expected_size ||
       hash != expected_hash || first != second || first != profiled ||
       profile_stage_total == 0 ||
+      profile.block_context_map_work_nanoseconds == 0 ||
+      profile.coefficient_order_work_nanoseconds == 0 ||
+      profile.coefficient_tokenization_work_nanoseconds == 0 ||
+      entropy_substage_work == 0 || section_substage_work == 0 ||
+      assembly_substage_total == 0 ||
+      profile.assembly_nanoseconds < assembly_substage_total ||
       profile.entropy_model_bits == 0 || profile.entropy_token_bits == 0 ||
       profile.dc_entropy_clusters == 0 ||
       profile.ac_entropy_clusters == 0 ||
