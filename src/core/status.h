@@ -12,6 +12,7 @@ namespace gjxl {
 enum class StatusCode {
   kOk = 0,
   kInvalidArgument,
+  kUnsupported,
   kUnavailable,
   kOutOfMemory,
   kFailedPrecondition,
@@ -33,6 +34,10 @@ public:
 
   [[nodiscard]] static Status InvalidArgument(std::string message) {
     return {StatusCode::kInvalidArgument, std::move(message)};
+  }
+
+  [[nodiscard]] static Status Unsupported(std::string message) {
+    return {StatusCode::kUnsupported, std::move(message)};
   }
 
   [[nodiscard]] static Status Unavailable(std::string message) {

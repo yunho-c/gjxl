@@ -294,6 +294,19 @@ target_link_libraries(
     gjxl_codec
 )
 
+# Private adapters shared by C API and tests.
+add_library(
+  gjxl_c_api_internal
+  STATIC
+  src/c_api/image_conversion.cpp
+)
+
+target_link_libraries(
+  gjxl_c_api_internal
+  PUBLIC
+    gjxl_core
+)
+
 # Floating-point interchange support used by the command-line frontend.
 add_library(
   gjxl_pfm_io
@@ -1301,6 +1314,22 @@ if(GJXL_BUILD_TESTS)
       --output
       "${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
       --check
+  )
+
+  add_executable(
+    gjxl_c_api_image_conversion_test
+    tests/c_api_image_conversion_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_c_api_image_conversion_test
+    PRIVATE
+      gjxl_c_api_internal
+  )
+
+  add_test(
+    NAME c_api_image_conversion
+    COMMAND gjxl_c_api_image_conversion_test
   )
 
   add_executable(
