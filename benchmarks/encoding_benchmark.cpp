@@ -44,6 +44,7 @@
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/quantization_pipeline.h"
+#include "io/pfm.h"
 
 #ifndef GJXL_FLOWER_PPM_PATH
 #error "GJXL_FLOWER_PPM_PATH must identify the pinned Flower PPM"
@@ -551,9 +552,9 @@ ParseGpuProfilingMode(std::string_view text) {
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument = argv[index];
     if (argument == "--help") {
-      std::cout << "usage: gjxl_quantization_benchmark "
+      std::cout << "usage: gjxl_encoding_benchmark "
                    "[--workload NAME|all] "
-                   "[--input IMAGE.ppm] "
+                   "[--input IMAGE.ppm|IMAGE.pfm] "
                    "[--scope full|public-workflow|metal-public-workflow|"
                    "coefficient-coding] "
                    "[--implementation scalar|simd|factored] "
@@ -616,7 +617,7 @@ ParseGpuProfilingMode(std::string_view text) {
     } else if (argument == "--samples") {
       options.samples = ParseSize(value, false);
     } else {
-      throw std::runtime_error("Unknown quantization benchmark option: " +
+      throw std::runtime_error("Unknown encoding benchmark option: " +
                                std::string(argument));
     }
   }
@@ -764,6 +765,37 @@ ParseGpuProfilingMode(std::string_view text) {
     }
   }
   return image;
+}
+
+[[nodiscard]] ImageStorage LoadPfm(std::string_view path) {
+  gjxl::Image3FBuffer decoded;
+  const gjxl::Status status = gjxl::io::ReadPfm(
+    std::filesystem::path(path), &decoded);
+  if (!status.ok()) {
+    throw std::runtime_error(
+      "Unable to open benchmark PFM: " + std::string(path) + ": " +
+      std::string(status.message()));
+  }
+  ImageStorage image(decoded.extent());
+  for (size_t channel = 0; channel < image.plane.size(); ++channel) {
+    std::copy(
+      decoded.plane(channel).begin(), decoded.plane(channel).end(),
+      image.plane[channel].begin());
+  }
+  return image;
+}
+
+[[nodiscard]] ImageStorage LoadBenchmarkImage(std::string_view path) {
+  std::ifstream input(std::string(path), std::ios::binary);
+  std::array<char, 2> magic{};
+  input.read(magic.data(), static_cast<std::streamsize>(magic.size()));
+  if (!input) {
+    throw std::runtime_error(
+      "Unable to inspect benchmark image: " + std::string(path));
+  }
+  return magic[0] == 'P' && (magic[1] == 'F' || magic[1] == 'f')
+    ? LoadPfm(path)
+    : LoadPpm(path);
 }
 
 [[nodiscard]] ImageStorage LoadFlower() {
@@ -1317,7 +1349,7 @@ void RunCoefficientCodingOnlyWorkload(
     float butteraugli_target, std::string_view input_path,
     double* global_sink) {
   ImageStorage original = !input_path.empty()
-      ? LoadPpm(input_path)
+      ? LoadBenchmarkImage(input_path)
       : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
   if (!spec.flower && input_path.empty()) {
     if (spec.workflow_gradient) {
@@ -1449,7 +1481,7 @@ void RunPublicWorkflowOnlyWorkload(
     gjxl::GpuBackend& gpu,
     std::vector<RawWorkflowWorkload>* raw_results, double* global_sink) {
   ImageStorage original = !input_path.empty()
-      ? LoadPpm(input_path)
+      ? LoadBenchmarkImage(input_path)
       : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
   if (!spec.flower && input_path.empty()) {
     if (spec.workflow_gradient) {
@@ -1696,7 +1728,7 @@ void RunGpuProfileWorkflowWorkload(
     std::string_view input_path, gjxl::GpuBackend& gpu,
     std::vector<RawGpuProfileWorkload>* results, double* global_sink) {
   ImageStorage original = !input_path.empty()
-      ? LoadPpm(input_path)
+      ? LoadBenchmarkImage(input_path)
       : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
   if (!spec.flower && input_path.empty()) {
     if (spec.workflow_gradient) {
@@ -1883,7 +1915,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
                  double* global_sink) {
 
   ImageStorage original = !input_path.empty()
-      ? LoadPpm(input_path)
+      ? LoadBenchmarkImage(input_path)
       : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
   if (!spec.flower && input_path.empty()) {
     if (spec.workflow_gradient) {
@@ -2505,7 +2537,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
     case Phase::kCount:
       break;
     }
-    return gjxl::Status::Internal("Unknown quantization benchmark phase");
+    return gjxl::Status::Internal("Unknown encoding benchmark phase");
   };
 
   double sink = 0.0;
@@ -2728,7 +2760,7 @@ int main(int argc, char** argv) {
       }
     }
     std::cout << std::fixed << std::setprecision(3)
-              << "CPU/Metal quantization benchmark: backend="
+              << "CPU/Metal encoding benchmark: backend="
               << (gpu == nullptr ? "cpu-only" : gpu->name())
               << " implementation=" << options.implementation
               << " scope=" << BenchmarkScopeName(options.scope)

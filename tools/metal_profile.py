@@ -289,7 +289,7 @@ def make_commands(
     build_dir: Path,
     artifact_dir: Path,
 ) -> dict[str, list[str]]:
-    benchmark = (build_dir / "gjxl_quantization_benchmark").resolve()
+    benchmark = (build_dir / "gjxl_encoding_benchmark").resolve()
     metallib = (build_dir / "metal" / "gjxl.metallib").resolve()
     common = [
         str(benchmark),
@@ -349,7 +349,7 @@ def make_commands(
             "--build",
             str(build_dir),
             "--target",
-            "gjxl_quantization_benchmark",
+            "gjxl_encoding_benchmark",
             "gjxl_metal_profile_symbols",
         ],
         "benchmark": benchmark_command,
@@ -603,7 +603,7 @@ def aggregate_gpu_stage_samples(payload: dict[str, Any]) -> dict[str, Any]:
 
 def required_artifacts(build_dir: Path) -> dict[str, Path]:
     return {
-        "benchmark": build_dir / "gjxl_quantization_benchmark",
+        "benchmark": build_dir / "gjxl_encoding_benchmark",
         "metallib": build_dir / "metal" / "gjxl.metallib",
         "metallib_symbols": build_dir / "metal" / "gjxl.metallibsym",
     }

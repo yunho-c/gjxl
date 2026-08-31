@@ -839,7 +839,7 @@ distance.
 
 A symbolized Samply capture on Apple M4 Pro isolated the host codestream tail
 after the prefix-density and custom-coefficient-order changes. The capture used
-the Release `gjxl_quantization_benchmark` binary at
+the Release `gjxl_encoding_benchmark` binary at
 `56a0790d3549bbd2bebe80522808ff47f7891ef2`, Kodak image 01 as a 768x512 PPM,
 the Metal public workflow in `maximum-throughput` mode at distance 1.2, five
 warmups, 400 measured encodes, and 1 kHz all-thread sampling. It contained
@@ -1238,6 +1238,28 @@ order.
    process raised the maxima to 20.48%, 16.00%, and 17.17%; across the other
    four pairs, the respective ranges were 12.93-13.77%, 10.39-11.41%, and
    7.80-8.88%. Section writing was not changed by this series.
+
+   Future speed comparisons must not use the 510x532 flower alone. The retained
+   regression set is `flower_510x532`, `padded_1080p`, `padded_1440p`, and
+   `padded_4k`, run with `just encoding-regression-benchmark`. Real
+   high-resolution images are added with `just encoding-image-benchmark IMAGE`;
+   normal image conversion happens once before warmups and is excluded from the
+   reported encoder stages.
+
+   A post-integration high-resolution audit compared parent `0e0428e` with
+   current head `4b6b27e` under Metal fully-resident AQ at distance 1.0. Three
+   alternating process pairs used two warmups and five samples for the built-in
+   workloads. Median paired improvement was 14.99% for the complete padded
+   1080p workflow and 5.22% for padded 4K; entropy optimization improved 19.70%
+   and 11.27%, respectively. A separate 4672x5584 photographic input used one
+   warmup and three samples per process. The source JPEG SHA-256 was
+   `980b46d44ffdc73e2f1ddfe1ec1e4b208cc8eb647cf3871ba7386b3cb4f83654`.
+   It improved the complete workflow in
+   every pair by 10.23-14.89% and entropy optimization by 24.75-29.30%, with
+   byte-identical direct-CLI output. The unchanged quantization phase remained
+   noisy, and the direct CLI reached roughly 4-5 GB maximum resident memory, so
+   isolated wall-clock observations on this 26-megapixel case can vary despite
+   the retained codestream speedup.
 
    A high-resolution follow-up replaces the full occurrence sort inside
    `AggregateValues` for inputs of at least 4,096 values. Common raw values

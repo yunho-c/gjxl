@@ -254,7 +254,7 @@ Relevant implementations:
 
 - [`quantization_pipeline.cpp`](../src/codec/quantization_pipeline.cpp)
 - [`quantization_pipeline_test.cpp`](../tests/quantization_pipeline_test.cpp)
-- [`quantization_benchmark.cpp`](../benchmarks/quantization_benchmark.cpp)
+- [`encoding_benchmark.cpp`](../benchmarks/encoding_benchmark.cpp)
 
 ### 12. Encoder-facing VarDCT frame — complete
 
@@ -321,8 +321,8 @@ cmake -S . -B build-release \
   -DCMAKE_BUILD_TYPE=Release \
   -DGJXL_BUILD_TESTS=ON \
   -DGJXL_BUILD_BENCHMARKS=ON
-cmake --build build-release -j --target gjxl_quantization_benchmark
-./build-release/gjxl_quantization_benchmark
+cmake --build build-release -j --target gjxl_encoding_benchmark
+./build-release/gjxl_encoding_benchmark
 ```
 
 ## Batched Metal AC candidate evaluation
