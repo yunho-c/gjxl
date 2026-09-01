@@ -28,7 +28,6 @@
 #include "codestream/dc_group.h"
 #include "codestream/encoder_internal.h"
 #include "codestream/entropy.h"
-#include "codestream/entropy_internal.h"
 #include "codestream/headers.h"
 #include "codestream/sections.h"
 
@@ -244,10 +243,10 @@ Status OptimizeBestEntropyCode(
   };
   if (total_bits(ans_cost) < total_bits(prefix_cost)) {
     *code = std::move(ans);
-    *cost = ans_cost;
+    *cost = std::move(ans_cost);
   } else {
     *code = std::move(prefix);
-    *cost = prefix_cost;
+    *cost = std::move(prefix_cost);
   }
   WorkEnd(
     profile != nullptr, selection_begin,
@@ -398,13 +397,12 @@ bool AddMeasuredBits(uint64_t value, uint64_t* total) {
 
 Status MeasureDcGroupSections(
   std::span<const SimpleDcGroupTokenStreams> dc_groups,
-  std::span<const std::vector<EntropyToken>> dc_streams,
-  const EntropyCode& dc_code,
+  const EntropyCodeCost& dc_cost,
   std::vector<uint64_t>* section_bits,
   uint64_t* measurement_work) {
 
   if (section_bits == nullptr || dc_groups.empty() ||
-      dc_streams.size() != 2 * dc_groups.size()) {
+      dc_cost.section_token_bits.size() != 2 * dc_groups.size()) {
     return Status::InvalidArgument("Common section measurement is invalid");
   }
   try {
@@ -428,21 +426,11 @@ Status MeasureDcGroupSections(
           return header_status;
         }
         uint64_t bits = headers.bits_written();
-        uint64_t tokens = 0;
-        if (Status token_status = codestream_internal::CountTokenStreamBits(
-              dc_streams[2 * index], dc_code, &tokens);
-            !token_status.ok()) {
-          return token_status;
-        }
-        if (!AddMeasuredBits(tokens, &bits)) {
+        if (!AddMeasuredBits(dc_cost.section_token_bits[2 * index], &bits)) {
           return Status::InvalidArgument("DC section bit count overflow");
         }
-        if (Status token_status = codestream_internal::CountTokenStreamBits(
-              dc_streams[2 * index + 1], dc_code, &tokens);
-            !token_status.ok()) {
-          return token_status;
-        }
-        if (!AddMeasuredBits(tokens, &bits)) {
+        if (!AddMeasuredBits(
+              dc_cost.section_token_bits[2 * index + 1], &bits)) {
           return Status::InvalidArgument("DC section bit count overflow");
         }
         candidate[index] = bits;
@@ -546,7 +534,6 @@ Status MeasureAcGlobalBits(
 
 Status MeasureAcSections(
   const AcEncodingCandidate& ac,
-  const EntropyCode& ac_code,
   const EntropyCodeCost& ac_cost,
   const SimpleCoefficientOrders& custom_orders,
   const EntropyCodeCost* order_cost,
@@ -554,6 +541,7 @@ Status MeasureAcSections(
   uint64_t* measurement_work) {
 
   if (section_bits == nullptr || ac.streams.empty() ||
+      ac_cost.section_token_bits.size() != ac.streams.size() ||
       (ac.custom_order != (order_cost != nullptr))) {
     return Status::InvalidArgument("AC section measurement is invalid");
   }
@@ -561,7 +549,7 @@ Status MeasureAcSections(
     std::vector<uint64_t> candidate(1 + ac.streams.size());
     const uint16_t used_order_mask =
       ac.custom_order ? custom_orders.used_order_mask : 0;
-    const ProfileClock::time_point global_begin =
+    const ProfileClock::time_point measurement_begin =
       WorkBegin(measurement_work != nullptr);
     if (Status status = MeasureAcGlobalBits(
           ac.streams.size(), used_order_mask, order_cost, ac_cost,
@@ -569,37 +557,12 @@ Status MeasureAcSections(
         !status.ok()) {
       return status;
     }
-    uint64_t global_work = 0;
-    WorkEnd(
-      measurement_work != nullptr, global_begin,
-      measurement_work == nullptr ? nullptr : &global_work);
-    std::vector<uint64_t> group_work(
-      measurement_work == nullptr ? 0 : ac.streams.size());
-    Status status = RunParallelSections(
-      ac.streams.size(),
-      [&](size_t index) {
-        const ProfileClock::time_point work_begin =
-          WorkBegin(measurement_work != nullptr);
-        Status count_status = codestream_internal::CountTokenStreamBits(
-          ac.streams[index], ac_code, &candidate[1 + index]);
-        WorkEnd(
-          measurement_work != nullptr, work_begin,
-          measurement_work == nullptr ? nullptr : &group_work[index]);
-        return count_status;
-      });
-    if (!status.ok()) {
-      return status;
-    }
-    uint64_t work = global_work;
-    for (uint64_t group_nanoseconds : group_work) {
-      if (!AddMeasuredBits(group_nanoseconds, &work)) {
-        return Status::Internal("AC section measurement profile overflow");
-      }
-    }
+    std::copy(
+      ac_cost.section_token_bits.begin(), ac_cost.section_token_bits.end(),
+      candidate.begin() + 1);
     *section_bits = std::move(candidate);
-    if (measurement_work != nullptr) {
-      *measurement_work = work;
-    }
+    WorkEnd(
+      measurement_work != nullptr, measurement_begin, measurement_work);
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -994,13 +957,15 @@ Status EncodeVarDctCodestreamImpl(
     constexpr size_t kPrefixEntropy = 1;
     const std::array<const EntropyCode*, 2> dc_codes = {
       &dc_code, &prefix_dc_code};
+    const std::array<const EntropyCodeCost*, 2> dc_costs = {
+      &dc_cost, &prefix_dc_cost};
     std::array<std::vector<uint64_t>, 2> dc_group_section_bits;
     std::array<uint64_t, 2> dc_group_measurement_work{};
     status = RunParallelSections(
       dc_codes.size(),
       [&](size_t mode) {
         Status measure_status = MeasureDcGroupSections(
-          dc_groups, dc_streams, *dc_codes[mode],
+          dc_groups, *dc_costs[mode],
           &dc_group_section_bits[mode],
           profile == nullptr ? nullptr : &dc_group_measurement_work[mode]);
         return measure_status;
@@ -1046,9 +1011,6 @@ Status EncodeVarDctCodestreamImpl(
         const auto measure = [&](
           size_t mode, size_t* complete_size, uint64_t* measurement_work) {
           const bool all_prefix = mode == kPrefixEntropy;
-          const EntropyCode& ac_code = all_prefix
-            ? candidate.prefix_ac_code
-            : candidate.ac_code;
           const EntropyCodeCost& ac_cost = all_prefix
             ? candidate.prefix_ac_cost
             : candidate.ac_cost;
@@ -1057,7 +1019,7 @@ Status EncodeVarDctCodestreamImpl(
             : nullptr;
           std::vector<uint64_t> ac_section_bits;
           Status measure_status = MeasureAcSections(
-            candidate, ac_code, ac_cost, custom_orders,
+            candidate, ac_cost, custom_orders,
             selected_order_cost, &ac_section_bits, measurement_work);
           if (!measure_status.ok()) {
             return measure_status;

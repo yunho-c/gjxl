@@ -911,19 +911,38 @@ bool CheckExactTokenBitCounting() {
     return false;
   }
 
-  for (const gjxl::EntropyCode* code : {&prefix, &ans}) {
-    for (const auto& section : sections) {
+  const std::array<const gjxl::EntropyCode*, 2> codes = {&prefix, &ans};
+  const std::array<const gjxl::EntropyCodeCost*, 2> costs = {
+    &prefix_cost, &ans_cost};
+  for (size_t code_index = 0; code_index < codes.size(); ++code_index) {
+    const gjxl::EntropyCode& code = *codes[code_index];
+    const gjxl::EntropyCodeCost& cost = *costs[code_index];
+    if (cost.section_token_bits.size() != sections.size()) {
+      std::cerr << "Retained section token-bit count is incomplete\n";
+      return false;
+    }
+    uint64_t retained_total = 0;
+    for (size_t section_index = 0; section_index < sections.size();
+         ++section_index) {
+      const auto& section = sections[section_index];
       gjxl::BitWriter writer;
       uint64_t measured = std::numeric_limits<uint64_t>::max();
-      if (!gjxl::WriteTokenStream(section, *code, &writer).ok() ||
+      if (!gjxl::WriteTokenStream(section, code, &writer).ok() ||
           !gjxl::codestream_internal::CountTokenStreamBits(
-             section, *code, &measured).ok() ||
+             section, code, &measured).ok() ||
           measured != writer.bits_written() ||
-          (code->mode == gjxl::EntropyCodingMode::kAns && section.empty() &&
-           measured != 32)) {
+          measured != cost.section_token_bits[section_index] ||
+          (code.mode == gjxl::EntropyCodingMode::kAns && section.empty() &&
+           measured != 32) ||
+          retained_total > std::numeric_limits<uint64_t>::max() - measured) {
         std::cerr << "Exact token bit count differs from serialization\n";
         return false;
       }
+      retained_total += measured;
+    }
+    if (retained_total != cost.token_bits) {
+      std::cerr << "Retained section token bits differ from total cost\n";
+      return false;
     }
   }
 

@@ -958,6 +958,7 @@ Status MeasureAnsCode(
   EntropyCodeCost candidate;
   candidate.model_bits = model_bits;
   candidate.cluster_count = code.ans_histograms.size();
+  candidate.section_token_bits.reserve(section_tokens.size());
   for (const std::vector<EntropyToken>& section : section_tokens) {
     uint64_t section_bits = 0;
     if (Status status = CountAnsTokenStreamBitsInternal(
@@ -970,8 +971,9 @@ Status MeasureAnsCode(
       return Status::InvalidArgument("ANS token cost overflow");
     }
     candidate.token_bits += section_bits;
+    candidate.section_token_bits.push_back(section_bits);
   }
-  *cost = candidate;
+  *cost = std::move(candidate);
   return Status::Ok();
 }
 
@@ -1033,7 +1035,11 @@ Status MeasureAnsCodes(
       return Status::InvalidArgument("ANS survivor symbols differ");
     }
     costs[candidate] = {
-      model_bits[candidate], 0, codes[candidate]->ans_histograms.size()};
+      .model_bits = model_bits[candidate],
+      .token_bits = 0,
+      .cluster_count = codes[candidate]->ans_histograms.size(),
+      .section_token_bits = std::vector<uint64_t>(section_tokens.size()),
+    };
   }
   if (codes.size() == 1) {
     return MeasureAnsCode(
@@ -1044,7 +1050,9 @@ Status MeasureAnsCodes(
   std::array<uint32_t, kAnsAlphabetWidthCount> states{};
   std::array<uint64_t, kAnsAlphabetWidthCount> section_bits{};
   const EntropyCode& reference = *codes[0];
-  for (const std::vector<EntropyToken>& section : section_tokens) {
+  for (size_t section_index = 0; section_index < section_tokens.size();
+       ++section_index) {
+    const std::vector<EntropyToken>& section = section_tokens[section_index];
     if (section.size() >
         (std::numeric_limits<uint64_t>::max() - 32) /
           kMaximumBitsPerToken) {
@@ -1084,6 +1092,8 @@ Status MeasureAnsCodes(
         return Status::InvalidArgument("ANS token cost overflow");
       }
       costs[candidate].token_bits += section_bits[candidate];
+      costs[candidate].section_token_bits[section_index] =
+        section_bits[candidate];
     }
   }
   return Status::Ok();
@@ -1667,7 +1677,7 @@ Status OptimizeAnsEntropyCode(
     }
     *code = std::move(width_candidates[best_candidate].code);
     if (cost != nullptr) {
-      *cost = best_cost;
+      *cost = std::move(best_cost);
     }
     return Status::Ok();
   } catch (const std::bad_alloc&) {

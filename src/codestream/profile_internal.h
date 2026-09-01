@@ -70,9 +70,9 @@ inline void AccumulateEntropyWorkProfile(
 }
 
 /// Aggregate worker time spent measuring every candidate and materializing the
-/// selected candidate. Candidate measurement counts exact token bits without
-/// producing payload BitWriters; model/header and token writing cover only the
-/// selected candidate.
+/// selected candidate. Candidate measurement reuses exact per-section token
+/// bits retained by entropy optimization; model/header and token writing cover
+/// only the selected candidate.
 struct SectionWritingWorkProfile {
   uint64_t model_and_header_nanoseconds = 0;
   uint64_t token_write_nanoseconds = 0;

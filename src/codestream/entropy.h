@@ -124,6 +124,9 @@ struct EntropyCodeCost {
   uint64_t model_bits = 0;
   uint64_t token_bits = 0;
   size_t cluster_count = 0;
+  /// Exact token bits for each input section, in input order. Their sum is
+  /// token_bits whenever a cost was requested from an optimizer.
+  std::vector<uint64_t> section_token_bits;
 
   friend bool operator==(
     const EntropyCodeCost&,

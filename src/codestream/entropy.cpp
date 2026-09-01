@@ -1254,6 +1254,78 @@ bool AddBits(uint64_t value, uint64_t* total) {
   return true;
 }
 
+Status CountPrefixTokenStreamBitsValidated(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+
+  uint64_t candidate = 0;
+  for (const EntropyToken& token : tokens) {
+    if (token.context >= code.context_count) {
+      return Status::InvalidArgument("Entropy token context is out of range");
+    }
+    const uint8_t cluster = code.context_map[token.context];
+    HybridUintToken encoded;
+    if (Status status = EncodeHybridUint(
+          token.value, code.uint_configs[cluster], &encoded);
+        !status.ok()) {
+      return status;
+    }
+    const PrefixCode& prefix = code.prefix_codes[cluster];
+    if (encoded.symbol >= prefix.depths.size() ||
+        prefix.depths[encoded.symbol] == 0) {
+      return Status::InvalidArgument(
+        "Token symbol is absent from its prefix code");
+    }
+    const uint64_t encoded_bits =
+      static_cast<uint64_t>(EncodedPrefixDepth(prefix, encoded.symbol)) +
+      encoded.extra_bit_count;
+    if (!AddBits(encoded_bits, &candidate)) {
+      return Status::InvalidArgument("Token-stream bit count overflow");
+    }
+  }
+  *bit_count = candidate;
+  return Status::Ok();
+}
+
+Status MeasureSectionTokenBits(
+  std::span<const std::vector<EntropyToken>> section_tokens,
+  const EntropyCode& code,
+  uint64_t expected_total,
+  std::vector<uint64_t>* section_bits) {
+
+  if (section_bits == nullptr) {
+    return Status::InvalidArgument("Section token-bit output is null");
+  }
+  if (Status status = ValidateEntropyCode(code); !status.ok()) {
+    return status;
+  }
+  if (code.mode != EntropyCodingMode::kPrefix) {
+    return Status::InvalidArgument(
+      "Prefix section measurement requires a prefix entropy code");
+  }
+  std::vector<uint64_t> candidate;
+  candidate.reserve(section_tokens.size());
+  uint64_t total = 0;
+  for (const std::vector<EntropyToken>& section : section_tokens) {
+    uint64_t bits = 0;
+    if (Status status = CountPrefixTokenStreamBitsValidated(
+          section, code, &bits);
+        !status.ok()) {
+      return status;
+    }
+    if (!AddBits(bits, &total)) {
+      return Status::InvalidArgument("Entropy token bit count overflow");
+    }
+    candidate.push_back(bits);
+  }
+  if (total != expected_total) {
+    return Status::Internal("Section token bits differ from entropy cost");
+  }
+  *section_bits = std::move(candidate);
+  return Status::Ok();
+}
+
 Status BuildClusterCode(
   std::span<const codestream_internal::WeightedValue> values,
   HybridUintConfig base_config,
@@ -1888,9 +1960,21 @@ Status OptimizeEntropyCode(
       best_code = std::move(configured_code);
       best_cost = configured_cost;
     }
+    if (cost != nullptr) {
+      const ProfileClock::time_point section_bits_begin = ProfileBegin(profile);
+      Status status = MeasureSectionTokenBits(
+        section_tokens, best_code, best_cost.token_bits,
+        &best_cost.section_token_bits);
+      ProfileEnd(
+        profile, section_bits_begin,
+        &EntropyWorkProfile::prefix_exact_measurement_nanoseconds);
+      if (!status.ok()) {
+        return status;
+      }
+    }
     *code = std::move(best_code);
     if (cost != nullptr) {
-      *cost = best_cost;
+      *cost = std::move(best_cost);
     }
     return Status::Ok();
   } catch (const std::bad_alloc&) {
@@ -2045,34 +2129,7 @@ Status codestream_internal::CountTokenStreamBits(
   if (code.mode == EntropyCodingMode::kAns) {
     return CountAnsTokenStreamBits(tokens, code, bit_count);
   }
-
-  uint64_t candidate = 0;
-  for (const EntropyToken& token : tokens) {
-    if (token.context >= code.context_count) {
-      return Status::InvalidArgument("Entropy token context is out of range");
-    }
-    const uint8_t cluster = code.context_map[token.context];
-    HybridUintToken encoded;
-    if (Status status = EncodeHybridUint(
-          token.value, code.uint_configs[cluster], &encoded);
-        !status.ok()) {
-      return status;
-    }
-    const PrefixCode& prefix = code.prefix_codes[cluster];
-    if (encoded.symbol >= prefix.depths.size() ||
-        prefix.depths[encoded.symbol] == 0) {
-      return Status::InvalidArgument(
-        "Token symbol is absent from its prefix code");
-    }
-    const uint64_t encoded_bits =
-      static_cast<uint64_t>(EncodedPrefixDepth(prefix, encoded.symbol)) +
-      encoded.extra_bit_count;
-    if (!AddBits(encoded_bits, &candidate)) {
-      return Status::InvalidArgument("Token-stream bit count overflow");
-    }
-  }
-  *bit_count = candidate;
-  return Status::Ok();
+  return CountPrefixTokenStreamBitsValidated(tokens, code, bit_count);
 }
 
 }  // namespace gjxl
