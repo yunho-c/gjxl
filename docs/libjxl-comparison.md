@@ -1,6 +1,7 @@
 # GJXL/libjxl codestream performance comparison plan
 
-Status: Phase 1 in progress, 2026-09-01.
+Status: Phase 1 nominal-distance timing pilot complete; matched-quality and
+sampled-attribution views pending, 2026-09-01.
 
 ## Purpose
 
@@ -313,6 +314,79 @@ process-pair summary remains the performance source of record. The repository
 does not vendor the corpus itself. `fetch-corpus` reconstructs the hash-pinned
 source set, and retained timing still requires a quiet host.
 
+### Nominal-distance pilot: 2026-09-01
+
+The first complete unprofiled pilot is retained locally at
+`logs/libjxl-comparison/20260901T212206.521314Z-94b1716cab17`. It ran all 38
+canonical inputs from clean GJXL commit `94b1716cab17`, with the pinned libjxl
+revision, requested distance 1.0, libjxl effort 7, three alternating process
+pairs, two warmups, and five measured samples per process. GJXL used the
+factored, fully resident Metal public-workflow path; its entropy coding and
+codestream assembly remained CPU work. Both the one-worker serial diagnostic
+configuration and the normal eight-worker production configuration were run
+without Samply.
+
+The table reports the median of the three per-process medians, averaged per
+image within multi-image categories. `GJXL relative` is complete GJXL time
+divided by complete libjxl time. `Codestream share` is GJXL's profiled
+codestream phase as a percentage of its own complete encode.
+
+| Configuration | Input group | GJXL ms/image | libjxl ms/image | GJXL relative | Codestream share |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Serial | 4K photographs | 2427.7 | 2016.2 | 1.20x slower | 81.2% |
+| Serial | 1080p photographs | 1136.8 | 505.7 | 2.25x slower | 88.7% |
+| Serial | Kodak continuity | 315.6 | 102.3 | 3.09x slower | 87.5% |
+| Serial | Padded 1080p stress | 1444.9 | 464.9 | 3.11x slower | 90.5% |
+| Serial | Padded 4K stress | 4341.1 | 1840.0 | 2.36x slower | 89.1% |
+| Production | 4K photographs | 935.0 | 467.1 | 2.00x slower | 47.2% |
+| Production | 1080p photographs | 347.2 | 123.8 | 2.80x slower | 63.4% |
+| Production | Kodak continuity | 91.9 | 30.4 | 3.02x slower | 67.8% |
+| Production | Padded 1080p stress | 420.3 | 125.9 | 3.34x slower | 68.5% |
+| Production | Padded 4K stress | 1309.1 | 457.7 | 2.86x slower | 63.2% |
+
+The same requested distance did not produce matched decoded quality. Lower
+Butteraugli is better in this table; `Size delta` is aggregate GJXL bytes
+relative to aggregate libjxl bytes.
+
+| Input group | GJXL Butteraugli | libjxl Butteraugli | Size delta |
+| --- | ---: | ---: | ---: |
+| 4K photographs | 1.3224 | 1.3901 | -2.26% |
+| 1080p photographs | 2.2126 | 2.2555 | +1.96% |
+| Kodak continuity | 1.2695 | 1.3480 | -2.29% |
+| Padded 1080p stress | 1.2756 | 1.4552 | +25.73% |
+| Padded 4K stress | 1.4207 | 1.4726 | +28.71% |
+
+This nominal-distance result is therefore policy sensitivity, not the primary
+matched-quality encoder comparison. GJXL produced the lower mean Butteraugli
+score in every category, so the matched-quality calibration remains required
+before attributing the complete speed or size gap to implementation alone.
+
+The run completed 456 benchmark processes plus 304 independent decode and
+Butteraugli commands: all 760 subprocesses exited successfully. It retained
+152 encoder/configuration validations. All 456 raw schemas parsed, encoded
+size was deterministic across process pairs, serial and production streams
+were byte-identical for each encoder/input pair, and an independent rehash of
+all 304 retained codestream and decoded files matched the recorded SHA-256.
+
+Host load is a material caveat. The manifest records load averages of
+26.44/29.09/35.30 at start and 17.34/20.03/21.63 at completion, with AC power
+and no thermal or performance warning. Serial photographic process medians
+were stable to at most 1.33%, but production 1080p ranges reached 34.48% for
+GJXL and 40.44% for libjxl. Every production input still ranked libjxl faster,
+and the gap was larger than the observed range, so the pilot is sufficient for
+directional prioritization. Its production absolute times are not suitable for
+a publication-grade retained claim without a quieter rerun.
+
+GJXL's production entropy-optimization phase consumed 38.0% of complete time
+on 4K photographs, 54.8% on 1080p photographs, 60.7% on Kodak, and 53.1-59.2%
+on the padded stress inputs. Entropy optimization alone took 0.76x libjxl's
+complete 4K-photo time and 1.52-1.98x libjxl's complete time in the other
+categories. The complete GJXL codestream phase took 0.94x libjxl's complete
+4K-photo time and 1.78-2.29x libjxl's complete time elsewhere. These compare a
+direct GJXL phase wall time with complete libjxl latency; they do not measure
+libjxl's entropy stage. They are enough to prioritize GJXL entropy work before
+adding direct libjxl stage instrumentation.
+
 ### 1. Add a comparison driver
 
 Add a GJXL-owned driver that:
@@ -403,6 +477,12 @@ The no-touch pilot is complete when:
 
 The pilot may guide optimization priority. It is not sufficient for an exact
 claim such as "GJXL's entropy stage is N times slower in wall-clock latency."
+
+The 2026-09-01 run satisfies the canonical-input, independent decode and
+quality, binary and raw-artifact, category-separation, and thread-policy parts
+of these criteria. It did not request Samply, so sampled CPU attribution,
+symbol sidecars, and the 95% classifier-resolution gate remain open. Its host
+load also requires the production absolute-time caveat documented above.
 
 ## Phase 2: optional libjxl stage instrumentation
 
@@ -520,7 +600,7 @@ The final artifact directory should contain:
 - `manifest.json` with revisions, hashes, build commands, host state, and input
   provenance;
 - raw unprofiled samples for both encoders;
-- native GJXL schema-9 samples;
+- native GJXL schema-10 samples;
 - parsed libjxl and GJXL Samply operation tables;
 - optional native libjxl stage-profile samples;
 - decoded-quality and encoded-size results;
@@ -558,8 +638,13 @@ time and normalized cost, together with output size and actual decoded quality.
 3. **Complete.** Add the comparison driver and raw unprofiled result schema.
 4. **Complete.** Extend the Samply classifier with the neutral stage mapping
    and tests.
-5. Run the no-libjxl-source-change serial and production pilot.
+5. **Complete with host-load caveat.** Run the no-libjxl-source-change nominal-
+   distance serial and production pilot across all 38 inputs. Retain the
+   directional result, but rerun production timing on a quieter host before a
+   publication-grade absolute-time claim.
 6. Calibrate and run the matched-quality view.
-7. Decide from the pilot whether direct libjxl stage timing is necessary.
+7. **Preliminary decision: defer.** The current gap is sufficient to prioritize
+   GJXL entropy optimization. Reconsider direct libjxl stage timing after the
+   matched-quality and sampled-attribution views.
 8. If required, implement and validate the isolated opt-in libjxl profiler.
 9. Capture the final unprofiled paired runs and publish the retained artifact.
