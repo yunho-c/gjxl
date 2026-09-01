@@ -7,7 +7,7 @@
 #include <span>
 #include <vector>
 
-#include "codestream/entropy.h"
+#include "codestream/entropy_internal.h"
 
 namespace gjxl::codestream_internal {
 
@@ -32,18 +32,17 @@ inline constexpr uint32_t kAnsReciprocalPrecision = 44;
       kAnsReciprocalPrecision);
 }
 
-struct WeightedValue {
-  uint32_t value = 0;
-  uint64_t count = 0;
-};
-
-/// Aggregates raw values in ascending order. Small inputs sort occurrences;
-/// large inputs count the bounded dense prefix and sort only sparse values.
-[[nodiscard]] Status AggregateEntropyValues(
-  std::vector<uint32_t> values,
-  std::vector<WeightedValue>* aggregated);
-
 [[nodiscard]] Status ValidateAnsEntropyCode(const EntropyCode& code);
+
+/// Builds ANS from the prefix optimizer's retained value populations instead
+/// of collecting and aggregating the same ordered token streams again.
+[[nodiscard]] Status OptimizeAnsEntropyCodeWithPreparedClusters(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCode& prefix_partition,
+  const PreparedEntropyClusters& prepared,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr,
+  EntropyWorkProfile* profile = nullptr);
 
 [[nodiscard]] Status WriteAnsEntropyCodeModel(
   const EntropyCode& code,

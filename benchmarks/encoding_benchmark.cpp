@@ -894,7 +894,7 @@ void PrintRatioStats(std::string_view label,
   return static_cast<double>(nanoseconds) / 1.0e6;
 }
 
-constexpr std::array<std::string_view, 39> kWorkflowProfileNames = {
+constexpr std::array<std::string_view, 40> kWorkflowProfileNames = {
     "total",
     "input_preparation",
     "backend_selection",
@@ -919,6 +919,7 @@ constexpr std::array<std::string_view, 39> kWorkflowProfileNames = {
     "codestream_entropy_ans_prefix_validation_work",
     "codestream_entropy_ans_value_collection_work",
     "codestream_entropy_ans_value_aggregation_work",
+    "codestream_entropy_ans_prepared_value_validation_work",
     "codestream_entropy_ans_uint_config_work",
     "codestream_entropy_ans_histogram_build_work",
     "codestream_entropy_ans_model_build_work",
@@ -1015,6 +1016,8 @@ using WorkflowProfileNanoseconds =
       profile.codestream.entropy_work.ans_prefix_validation_nanoseconds,
       profile.codestream.entropy_work.ans_value_collection_nanoseconds,
       profile.codestream.entropy_work.ans_value_aggregation_nanoseconds,
+      profile.codestream.entropy_work
+        .ans_prepared_value_validation_nanoseconds,
       profile.codestream.entropy_work.ans_uint_config_nanoseconds,
       profile.codestream.entropy_work.ans_histogram_build_nanoseconds,
       profile.codestream.entropy_work.ans_model_build_nanoseconds,
@@ -1094,7 +1097,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 8,\n"
+           << "  \"schema_version\": 9,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"

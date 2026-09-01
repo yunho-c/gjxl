@@ -289,6 +289,7 @@ bool CheckEncodedFrame(
     profile.entropy_work.ans_prefix_validation_nanoseconds +
     profile.entropy_work.ans_value_collection_nanoseconds +
     profile.entropy_work.ans_value_aggregation_nanoseconds +
+    profile.entropy_work.ans_prepared_value_validation_nanoseconds +
     profile.entropy_work.ans_uint_config_nanoseconds +
     profile.entropy_work.ans_histogram_build_nanoseconds +
     profile.entropy_work.ans_model_build_nanoseconds +
@@ -319,6 +320,9 @@ bool CheckEncodedFrame(
         profile.coefficient_tokenization_pass_count ||
       profile.coefficient_materialized_token_count !=
         profile.coefficient_token_count ||
+      profile.entropy_work.ans_value_collection_nanoseconds != 0 ||
+      profile.entropy_work.ans_value_aggregation_nanoseconds != 0 ||
+      profile.entropy_work.ans_prepared_value_validation_nanoseconds == 0 ||
       entropy_substage_work == 0 || section_substage_work == 0 ||
       assembly_substage_total == 0 ||
       profile.assembly_nanoseconds < assembly_substage_total ||

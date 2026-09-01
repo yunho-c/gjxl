@@ -944,6 +944,29 @@ bool CheckSplitTokenStreamParity() {
     return false;
   }
 
+  gjxl::EntropyCode prepared_prefix;
+  gjxl::EntropyCodeCost prepared_prefix_cost;
+  gjxl::codestream_internal::PreparedEntropyClusters prepared_clusters;
+  gjxl::EntropyCode prepared_ans;
+  gjxl::EntropyCodeCost prepared_ans_cost;
+  if (!gjxl::codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
+        split_sections, options, &prepared_prefix, &prepared_prefix_cost,
+        &prepared_clusters).ok() ||
+      prepared_prefix != interleaved_prefix ||
+      prepared_prefix_cost != interleaved_prefix_cost ||
+      prepared_clusters.context_count != prepared_prefix.context_count ||
+      prepared_clusters.context_map != prepared_prefix.context_map ||
+      prepared_clusters.values.size() != prepared_prefix.prefix_codes.size() ||
+      !gjxl::codestream_internal::
+        OptimizeAnsEntropyCodeWithPreparedClusters(
+          split_sections, prepared_prefix, prepared_clusters, &prepared_ans,
+          &prepared_ans_cost).ok() ||
+      prepared_ans != interleaved_ans ||
+      prepared_ans_cost != interleaved_ans_cost) {
+    std::cerr << "Prepared entropy clusters changed model selection\n";
+    return false;
+  }
+
   const std::array<const gjxl::EntropyCode*, 2> codes = {
     &interleaved_prefix, &interleaved_ans};
   for (const gjxl::EntropyCode* code : codes) {
@@ -987,6 +1010,25 @@ bool CheckSplitTokenStreamParity() {
         gjxl::StatusCode::kInvalidArgument ||
       unchanged != 0xA5A5A5A5A5A5A5A5ull) {
     std::cerr << "Rejected split token stream changed its output\n";
+    return false;
+  }
+
+  gjxl::codestream_internal::PreparedEntropyClusters malformed =
+    prepared_clusters;
+  auto populated = std::ranges::find_if(
+    malformed.values, [](const auto& cluster) { return !cluster.empty(); });
+  if (populated == malformed.values.end()) {
+    return false;
+  }
+  ++populated->front().count;
+  gjxl::EntropyCode unchanged_code = interleaved_prefix;
+  gjxl::EntropyCodeCost unchanged_cost = interleaved_prefix_cost;
+  if (gjxl::codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
+        split_sections, prepared_prefix, malformed, &unchanged_code,
+        &unchanged_cost).code() != gjxl::StatusCode::kInvalidArgument ||
+      unchanged_code != interleaved_prefix ||
+      unchanged_cost != interleaved_prefix_cost) {
+    std::cerr << "Rejected prepared entropy clusters changed their outputs\n";
     return false;
   }
   return true;

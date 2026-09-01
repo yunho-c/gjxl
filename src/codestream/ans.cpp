@@ -1363,9 +1363,53 @@ Status codestream_internal::WriteAnsTokenStream(
     EntropyTokenStreamView::Interleaved(tokens), code, writer);
 }
 
-Status OptimizeAnsEntropyCode(
+Status ValidatePreparedEntropyClusters(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& prefix_partition,
+  const codestream_internal::PreparedEntropyClusters& prepared) {
+
+  if (prepared.context_count != prefix_partition.context_count ||
+      prepared.context_map != prefix_partition.context_map ||
+      prepared.values.size() != prefix_partition.prefix_codes.size()) {
+    return Status::InvalidArgument(
+      "Prepared entropy clusters do not match the prefix partition");
+  }
+  uint64_t prepared_count = 0;
+  for (const auto& cluster : prepared.values) {
+    uint32_t previous = 0;
+    bool first = true;
+    for (const codestream_internal::WeightedValue weighted_value : cluster) {
+      if (weighted_value.count == 0 ||
+          (!first && weighted_value.value <= previous) ||
+          prepared_count > std::numeric_limits<uint64_t>::max() -
+            weighted_value.count) {
+        return Status::InvalidArgument(
+          "Prepared entropy cluster values are invalid");
+      }
+      prepared_count += weighted_value.count;
+      previous = weighted_value.value;
+      first = false;
+    }
+  }
+  uint64_t token_count = 0;
+  for (const EntropyTokenStreamView section : section_tokens) {
+    if (!section.valid() ||
+        section.size() > std::numeric_limits<uint64_t>::max() - token_count) {
+      return Status::InvalidArgument("ANS token-stream view is invalid");
+    }
+    token_count += section.size();
+  }
+  if (prepared_count != token_count) {
+    return Status::InvalidArgument(
+      "Prepared entropy cluster count differs from token streams");
+  }
+  return Status::Ok();
+}
+
+Status OptimizeAnsEntropyCodeImpl(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCode& prefix_partition,
+  const codestream_internal::PreparedEntropyClusters* prepared,
   EntropyCode* code,
   EntropyCodeCost* cost,
   codestream_internal::EntropyWorkProfile* profile) {
@@ -1387,28 +1431,42 @@ Status OptimizeAnsEntropyCode(
     &EntropyWorkProfile::ans_prefix_validation_nanoseconds);
   try {
     const size_t cluster_count = prefix_partition.prefix_codes.size();
-    const ProfileClock::time_point value_collection_begin =
-      ProfileBegin(profile);
-    std::vector<std::vector<uint32_t>> values(cluster_count);
-    for (const EntropyTokenStreamView section : section_tokens) {
-      if (!section.valid()) {
-        return Status::InvalidArgument("ANS token-stream view is invalid");
+    std::vector<std::vector<uint32_t>> values;
+    if (prepared != nullptr) {
+      const ProfileClock::time_point validation_begin =
+        ProfileBegin(profile);
+      Status status = ValidatePreparedEntropyClusters(
+        section_tokens, prefix_partition, *prepared);
+      ProfileEnd(
+        profile, validation_begin,
+        &EntropyWorkProfile::ans_prepared_value_validation_nanoseconds);
+      if (!status.ok()) {
+        return status;
       }
-      for (size_t index = 0; index < section.size(); ++index) {
-        const EntropyToken token = section[index];
-        if (token.context >= prefix_partition.context_count) {
-          return Status::InvalidArgument("ANS token context is out of range");
+    } else {
+      const ProfileClock::time_point value_collection_begin =
+        ProfileBegin(profile);
+      values.resize(cluster_count);
+      for (const EntropyTokenStreamView section : section_tokens) {
+        if (!section.valid()) {
+          return Status::InvalidArgument("ANS token-stream view is invalid");
         }
-        const size_t cluster = prefix_partition.context_map[token.context];
-        if (cluster >= values.size()) {
-          return Status::Internal("ANS cluster index is invalid");
+        for (size_t index = 0; index < section.size(); ++index) {
+          const EntropyToken token = section[index];
+          if (token.context >= prefix_partition.context_count) {
+            return Status::InvalidArgument("ANS token context is out of range");
+          }
+          const size_t cluster = prefix_partition.context_map[token.context];
+          if (cluster >= values.size()) {
+            return Status::Internal("ANS cluster index is invalid");
+          }
+          values[cluster].push_back(token.value);
         }
-        values[cluster].push_back(token.value);
       }
+      ProfileEnd(
+        profile, value_collection_begin,
+        &EntropyWorkProfile::ans_value_collection_nanoseconds);
     }
-    ProfileEnd(
-      profile, value_collection_begin,
-      &EntropyWorkProfile::ans_value_collection_nanoseconds);
 
     constexpr size_t kMinimumLogAlphaSize = 5;
     constexpr size_t kMaximumLogAlphaSize = 8;
@@ -1429,17 +1487,23 @@ Status OptimizeAnsEntropyCode(
     };
     std::vector<std::vector<ConfigCandidate>> options(cluster_count);
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
-      const ProfileClock::time_point aggregation_begin =
-        ProfileBegin(profile);
       std::vector<codestream_internal::WeightedValue> weighted_values;
-      if (Status status = codestream_internal::AggregateEntropyValues(
-            std::move(values[cluster]), &weighted_values);
-          !status.ok()) {
-        return status;
+      std::span<const codestream_internal::WeightedValue> cluster_values;
+      if (prepared != nullptr) {
+        cluster_values = prepared->values[cluster];
+      } else {
+        const ProfileClock::time_point aggregation_begin =
+          ProfileBegin(profile);
+        if (Status status = codestream_internal::AggregateEntropyValues(
+              std::move(values[cluster]), &weighted_values);
+            !status.ok()) {
+          return status;
+        }
+        ProfileEnd(
+          profile, aggregation_begin,
+          &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
+        cluster_values = weighted_values;
       }
-      ProfileEnd(
-        profile, aggregation_begin,
-        &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
       for (HybridUintConfig config : kAnsUintConfigs) {
         const ProfileClock::time_point uint_config_begin =
           ProfileBegin(profile);
@@ -1448,7 +1512,7 @@ Status OptimizeAnsEntropyCode(
         size_t maximum_symbol = 0;
         bool valid = true;
         for (const codestream_internal::WeightedValue& weighted_value :
-             weighted_values) {
+             cluster_values) {
           HybridUintToken encoded;
           if (Status status = EncodeHybridUint(
                 weighted_value.value, config, &encoded);
@@ -1708,6 +1772,27 @@ Status OptimizeAnsEntropyCode(
   } catch (const std::length_error&) {
     return AllocationFailure();
   }
+}
+
+Status OptimizeAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCode& prefix_partition,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  codestream_internal::EntropyWorkProfile* profile) {
+  return OptimizeAnsEntropyCodeImpl(
+    section_tokens, prefix_partition, nullptr, code, cost, profile);
+}
+
+Status codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCode& prefix_partition,
+  const PreparedEntropyClusters& prepared,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  EntropyWorkProfile* profile) {
+  return OptimizeAnsEntropyCodeImpl(
+    section_tokens, prefix_partition, &prepared, code, cost, profile);
 }
 
 Status OptimizeAnsEntropyCode(

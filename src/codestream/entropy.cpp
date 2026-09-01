@@ -1450,6 +1450,7 @@ Status BuildEntropyCodeForPartition(
   bool optimize_configs,
   EntropyCode* code,
   EntropyCodeCost* cost,
+  codestream_internal::PreparedEntropyClusters* prepared,
   EntropyWorkProfile* profile) {
 
   if (code == nullptr || cost == nullptr || cluster_count == 0 ||
@@ -1497,6 +1498,8 @@ Status BuildEntropyCodeForPartition(
   candidate.uint_configs.resize(cluster_count);
   candidate.prefix_codes.resize(cluster_count);
   std::vector<uint64_t> cluster_token_bits(cluster_count);
+  std::vector<std::vector<codestream_internal::WeightedValue>>
+    prepared_values(prepared == nullptr ? 0 : cluster_count);
   for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
     std::vector<codestream_internal::WeightedValue> weighted_values;
     if (Status status = codestream_internal::AggregateEntropyValues(
@@ -1510,6 +1513,9 @@ Status BuildEntropyCodeForPartition(
           &cluster_token_bits[cluster]);
         !status.ok()) {
       return status;
+    }
+    if (prepared != nullptr) {
+      prepared_values[cluster] = std::move(weighted_values);
     }
   }
   ProfileEnd(
@@ -1535,6 +1541,13 @@ Status BuildEntropyCodeForPartition(
     &EntropyWorkProfile::prefix_exact_measurement_nanoseconds);
   if (!status.ok()) {
     return status;
+  }
+  if (prepared != nullptr) {
+    *prepared = {
+      .context_count = candidate.context_count,
+      .context_map = candidate.context_map,
+      .values = std::move(prepared_values),
+    };
   }
   *code = std::move(candidate);
   *cost = candidate_cost;
@@ -1682,11 +1695,12 @@ Status BuildPrefixCode(
   return Status::Ok();
 }
 
-Status OptimizeEntropyCode(
+Status OptimizeEntropyCodeImpl(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
   EntropyCode* code,
   EntropyCodeCost* cost,
+  codestream_internal::PreparedEntropyClusters* prepared,
   codestream_internal::EntropyWorkProfile* profile) {
 
   if (code == nullptr || options.context_count == 0) {
@@ -1957,10 +1971,12 @@ Status OptimizeEntropyCode(
 
     EntropyCode configured_code;
     EntropyCodeCost configured_cost;
+    codestream_internal::PreparedEntropyClusters configured_values;
     if (Status status = BuildEntropyCodeForPartition(
           section_tokens, options, best_partition_map,
           best_partition_count, true, &configured_code,
-          &configured_cost, profile);
+          &configured_cost, prepared == nullptr ? nullptr : &configured_values,
+          profile);
         !status.ok()) {
       return status;
     }
@@ -1971,6 +1987,13 @@ Status OptimizeEntropyCode(
     if (configured_total < best_total) {
       best_code = std::move(configured_code);
       best_cost = configured_cost;
+    }
+    if (prepared != nullptr &&
+        (configured_values.context_count != best_code.context_count ||
+         configured_values.context_map != best_code.context_map ||
+         configured_values.values.size() != best_code.prefix_codes.size())) {
+      return Status::Internal(
+        "Prepared values differ from the selected prefix partition");
     }
     if (cost != nullptr) {
       const ProfileClock::time_point section_bits_begin = ProfileBegin(profile);
@@ -1988,12 +2011,39 @@ Status OptimizeEntropyCode(
     if (cost != nullptr) {
       *cost = std::move(best_cost);
     }
+    if (prepared != nullptr) {
+      *prepared = std::move(configured_values);
+    }
     return Status::Ok();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Entropy-code allocation failed");
   } catch (const std::length_error&) {
     return Status::OutOfMemory("Entropy-code allocation is too large");
   }
+}
+
+Status OptimizeEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  codestream_internal::EntropyWorkProfile* profile) {
+  return OptimizeEntropyCodeImpl(
+    section_tokens, options, code, cost, nullptr, profile);
+}
+
+Status codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  PreparedEntropyClusters* prepared,
+  EntropyWorkProfile* profile) {
+  if (cost == nullptr || prepared == nullptr) {
+    return Status::InvalidArgument("Prepared entropy output is null");
+  }
+  return OptimizeEntropyCodeImpl(
+    section_tokens, options, code, cost, prepared, profile);
 }
 
 Status OptimizeEntropyCode(

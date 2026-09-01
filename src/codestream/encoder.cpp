@@ -22,12 +22,14 @@
 #include "codec/codestream.h"
 #include "codec/vardct_frame.h"
 #include "codestream/ac_group.h"
+#include "codestream/ans_internal.h"
 #include "codestream/bit_writer.h"
 #include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
 #include "codestream/dc_group.h"
 #include "codestream/encoder_internal.h"
 #include "codestream/entropy.h"
+#include "codestream/entropy_internal.h"
 #include "codestream/headers.h"
 #include "codestream/sections.h"
 
@@ -198,15 +200,18 @@ Status OptimizeBestEntropyCode(
   }
   EntropyCode prefix;
   EntropyCodeCost prefix_cost;
-  if (Status status = OptimizeEntropyCode(
-        streams, options, &prefix, &prefix_cost, profile);
+  codestream_internal::PreparedEntropyClusters prepared;
+  if (Status status =
+        codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
+          streams, options, &prefix, &prefix_cost, &prepared, profile);
       !status.ok()) {
     return status;
   }
   EntropyCode ans;
   EntropyCodeCost ans_cost;
-  if (Status status = OptimizeAnsEntropyCode(
-        streams, prefix, &ans, &ans_cost, profile);
+  if (Status status =
+        codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
+          streams, prefix, prepared, &ans, &ans_cost, profile);
       !status.ok()) {
     return status;
   }

@@ -25,6 +25,7 @@ struct EntropyWorkProfile {
   uint64_t ans_prefix_validation_nanoseconds = 0;
   uint64_t ans_value_collection_nanoseconds = 0;
   uint64_t ans_value_aggregation_nanoseconds = 0;
+  uint64_t ans_prepared_value_validation_nanoseconds = 0;
   uint64_t ans_uint_config_nanoseconds = 0;
   uint64_t ans_histogram_build_nanoseconds = 0;
   uint64_t ans_model_build_nanoseconds = 0;
@@ -59,6 +60,8 @@ inline void AccumulateEntropyWorkProfile(
     source.ans_value_collection_nanoseconds;
   destination->ans_value_aggregation_nanoseconds +=
     source.ans_value_aggregation_nanoseconds;
+  destination->ans_prepared_value_validation_nanoseconds +=
+    source.ans_prepared_value_validation_nanoseconds;
   destination->ans_uint_config_nanoseconds +=
     source.ans_uint_config_nanoseconds;
   destination->ans_histogram_build_nanoseconds +=

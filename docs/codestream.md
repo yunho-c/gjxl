@@ -1348,6 +1348,47 @@ order.
    payloads, and malformed-view atomicity. The complete Release suite is 61/62
    with only the exact inherited `quantization_pipeline` score mismatch.
 
+   A second retained step reuses exact value statistics between the prefix and
+   ANS searches. Prefix HybridUint configuration search already collects every
+   selected cluster's values and reduces them to deterministic, value-sorted
+   `(value,count)` populations. ANS formerly traversed all ordered tokens again,
+   copied their raw values into new cluster vectors, and repeated the same
+   aggregation before trying its configurations. The prefix optimizer now
+   returns those populations with their context partition, and ANS consumes
+   them directly. It still traverses the original ordered streams for exact
+   rANS state/renormalization costs, so symbol order and every coding decision
+   remain unchanged. Before reuse, the internal path checks context-map
+   identity, cluster count, strictly increasing values, nonzero/overflow-safe
+   weights, stream validity, and the exact total token count. Malformed input
+   leaves model and cost outputs unchanged.
+
+   Raw workflow schema 9 retains ANS value-collection and aggregation phases as
+   zero-valued work-elimination sentinels and adds prepared-value validation.
+   On padded 4K at distance 1.2, two stable alternating Release pairs used one
+   warmup and three samples per process. Entropy optimization improved
+   10.38-10.68%, codestream encoding improved 9.03-9.34%, and the complete
+   fully-resident Metal workflow improved 7.54-7.66%; every sample remained
+   1,638,673 bytes. The removed collection and aggregation accounted for
+   1,163-1,174 ms of aggregate parent worker time. A final schema-9 rerun had
+   one broadly contaminated parent process; against the quiet parent, its two
+   candidates still improved entropy by 13.67-21.61% and codestream time by
+   11.46-16.25%. Prepared-value validation itself took only 0.129-0.147 ms of
+   aggregate worker time.
+
+   Two high-resolution distance-1.0 pairs on the 4672x5584 PFM improved entropy
+   optimization by 6.60% and 13.10%, codestream encoding by 5.78% and 14.23%,
+   and complete workflow time by 6.70% and 6.07%, respectively, at an unchanged
+   2,690,877 bytes. A three-pair 510x532 flower check was mixed at this shorter
+   boundary: entropy changed by -7.08%, -20.27%, and +11.87%, while the pooled
+   process-sample median improved 3.37%. Direct parent/candidate CLI output on
+   the high-resolution input remained byte-identical at SHA-256
+   `74dab8b328b12d3a485006b5197059df5d580e1b2aa80ee35a2dfdbc34f2d249`,
+   and `djxl` 0.12.0 decoded the candidate to PFM. Focused parity coverage
+   compares prepared and legacy prefix/ANS models, exact costs, and malformed
+   prepared-input atomicity; it passes 100 consecutive runs. The rebuilt
+   Release suite remains 61/62 with only the inherited
+   `quantization_pipeline` score mismatch.
+
 8. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
