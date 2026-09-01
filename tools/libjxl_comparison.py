@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -39,6 +39,7 @@ from encode_image import (
 PINNED_LIBJXL_REVISION = "e8ff09762481785938d8e4e01333ed3917571161"
 CORPUS_SCHEMA_VERSION = 1
 RESULT_SCHEMA_VERSION = 1
+CALIBRATION_SCHEMA_VERSION = 1
 LINEAR_SRGB_HINT = "RGB_D65_SRG_Rel_Lin"
 
 
@@ -700,6 +701,7 @@ def gjxl_command(
     worker_limit: int,
     output: Path | None,
     samples: int | None = None,
+    distance: float | None = None,
 ) -> list[str]:
     command = [
         str(args.gjxl_benchmark),
@@ -714,7 +716,7 @@ def gjxl_command(
         "--input",
         str(image),
         "--distance",
-        str(args.distance),
+        str(args.distance if distance is None else distance),
         "--warmups",
         str(args.warmups),
         "--samples",
@@ -738,6 +740,7 @@ def libjxl_command(
     thread_count: int,
     output: Path | None,
     samples: int | None = None,
+    distance: float | None = None,
 ) -> list[str]:
     command = [
         str(args.libjxl_benchmark),
@@ -746,7 +749,7 @@ def libjxl_command(
         "--raw-samples",
         str(raw),
         "--distance",
-        str(args.distance),
+        str(args.distance if distance is None else distance),
         "--effort",
         str(args.effort),
         "--num-threads",
@@ -783,6 +786,7 @@ def median_process_row(
             for sample in samples
         ]
         encoded = [sample["encoded_bytes"] for sample in samples]
+        requested_distance = document["distance"]
         policy = {"serializer_workers": document["serializer_workers"]}
     else:
         if document.get("schema_version") != 1 or document.get("encoder") != "libjxl":
@@ -793,6 +797,7 @@ def median_process_row(
         elapsed = [sample["elapsed_nanoseconds"] for sample in samples]
         codestream = []
         encoded = [sample["encoded_bytes"] for sample in samples]
+        requested_distance = document["requested_distance"]
         policy = {"thread_count": document["thread_count"]}
     if not elapsed or len(set(encoded)) != 1:
         raise ComparisonError(f"Invalid or unstable raw samples: {raw_path}")
@@ -815,6 +820,7 @@ def median_process_row(
             statistics.median(codestream) / pixels if codestream else None
         ),
         "encoded_bytes": encoded[0],
+        "requested_distance": requested_distance,
         "thread_policy": policy,
         "bits_per_pixel": 8.0 * encoded[0] / pixels,
         # One nanosecond per pixel is numerically one millisecond per
@@ -840,6 +846,12 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             raise ComparisonError(
                 f"Encoded size changed across processes for {input_name} {encoder}"
             )
+        requested_distances = {row["requested_distance"] for row in group}
+        if len(requested_distances) != 1:
+            raise ComparisonError(
+                f"Requested distance changed across processes for {input_name} "
+                f"{encoder}"
+            )
         codestream_medians = [
             row["codestream_median_nanoseconds"]
             for row in group
@@ -855,6 +867,7 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "median_of_process_medians_nanoseconds": statistics.median(medians),
                 "process_median_range_nanoseconds": [min(medians), max(medians)],
                 "encoded_bytes": group[0]["encoded_bytes"],
+                "requested_distance": requested_distances.pop(),
                 "bits_per_pixel": group[0]["bits_per_pixel"],
                 "median_milliseconds_per_megapixel": statistics.median(
                     row["milliseconds_per_megapixel"] for row in group
@@ -893,6 +906,7 @@ def validate_output(
     codestream: Path,
     directory: Path,
     manifest: dict[str, Any],
+    requested_distance: float | None = None,
 ) -> dict[str, Any]:
     decoded = codestream.with_suffix(".decoded.pfm")
     decode_name = (
@@ -923,7 +937,7 @@ def validate_output(
         score = float(stdout_path.read_text(encoding="utf-8").splitlines()[0])
     except (OSError, ValueError, IndexError) as exc:
         raise ComparisonError("Unable to parse Butteraugli score") from exc
-    return {
+    validation = {
         "input": entry["name"],
         "encoder": encoder,
         "configuration": configuration,
@@ -933,6 +947,483 @@ def validate_output(
         "decoded_sha256": sha256_file(decoded),
         "butteraugli": score,
     }
+    if requested_distance is not None:
+        validation["requested_distance"] = requested_distance
+    return validation
+
+
+def _finite_number(value: Any, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ComparisonError(f"{field} must be a number")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ComparisonError(f"{field} must be finite")
+    return parsed
+
+
+def _positive_distance(value: Any, field: str) -> float:
+    parsed = _finite_number(value, field)
+    if parsed <= 0.0 or parsed > 25.0:
+        raise ComparisonError(f"{field} must be in (0, 25]")
+    return parsed
+
+
+def load_nominal_quality_targets(
+    nominal_summary_path: Path,
+    corpus_manifest_path: Path,
+    entries: list[dict[str, Any]],
+) -> tuple[dict[str, float], dict[str, Any]]:
+    nominal_summary_path = nominal_summary_path.resolve()
+    summary = load_json(nominal_summary_path)
+    manifest_path = nominal_summary_path.parent / "manifest.json"
+    manifest = load_json(manifest_path)
+    if summary.get("schema_version") != RESULT_SCHEMA_VERSION:
+        raise ComparisonError(
+            f"Unexpected nominal summary schema: {nominal_summary_path}"
+        )
+    if manifest.get("schema_version") != RESULT_SCHEMA_VERSION:
+        raise ComparisonError(f"Unexpected nominal manifest schema: {manifest_path}")
+    if manifest.get("corpus_manifest_sha256") != sha256_file(corpus_manifest_path):
+        raise ComparisonError(
+            "Nominal summary corpus does not match the calibration corpus"
+        )
+    if manifest.get("libjxl_revision") != PINNED_LIBJXL_REVISION:
+        raise ComparisonError("Nominal summary uses a different libjxl revision")
+    parameters = manifest.get("parameters")
+    if not isinstance(parameters, dict):
+        raise ComparisonError("Nominal manifest has no parameter record")
+    target_distance = _positive_distance(
+        parameters.get("distance"), "nominal GJXL distance"
+    )
+    effort = parameters.get("effort")
+    if isinstance(effort, bool) or not isinstance(effort, int):
+        raise ComparisonError("Nominal libjxl effort is invalid")
+
+    scores: dict[str, list[float]] = {}
+    for validation in summary.get("validations", []):
+        if validation.get("encoder") != "gjxl":
+            continue
+        name = validation.get("input")
+        if not isinstance(name, str):
+            raise ComparisonError("Nominal GJXL validation has no input name")
+        scores.setdefault(name, []).append(
+            _finite_number(
+                validation.get("butteraugli"),
+                f"nominal Butteraugli score for {name}",
+            )
+        )
+
+    expected = {entry["name"] for entry in entries}
+    if set(scores) != expected:
+        missing = sorted(expected - set(scores))
+        extra = sorted(set(scores) - expected)
+        raise ComparisonError(
+            "Nominal GJXL validation inputs do not match the corpus: "
+            f"missing={missing}, extra={extra}"
+        )
+    targets = {}
+    for name, values in scores.items():
+        if max(values) - min(values) > 1e-9:
+            raise ComparisonError(
+                f"Nominal GJXL score differs across configurations for {name}"
+            )
+        targets[name] = values[0]
+    return targets, {
+        "summary": str(nominal_summary_path),
+        "summary_sha256": sha256_file(nominal_summary_path),
+        "manifest": str(manifest_path),
+        "manifest_sha256": sha256_file(manifest_path),
+        "gjxl_revision": manifest.get("gjxl_revision"),
+        "target_gjxl_distance": target_distance,
+        "effort": effort,
+    }
+
+
+def calibrate_distance(
+    target_score: float,
+    evaluate: Callable[[float], dict[str, Any]],
+    *,
+    minimum_distance: float,
+    maximum_distance: float,
+    initial_distance: float,
+    tolerance: float,
+    maximum_evaluations: int,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Find a requested distance whose decoded score matches target_score."""
+
+    if not minimum_distance < maximum_distance:
+        raise ComparisonError("Calibration distance bounds are empty")
+    if not minimum_distance <= initial_distance <= maximum_distance:
+        raise ComparisonError("Initial calibration distance is outside the bounds")
+    if maximum_evaluations < 3:
+        raise ComparisonError("Calibration requires at least three evaluations")
+    evaluations: list[dict[str, Any]] = []
+    by_distance: dict[float, dict[str, Any]] = {}
+
+    def evaluate_once(distance: float) -> dict[str, Any]:
+        distance = float(distance)
+        if distance not in by_distance:
+            result = dict(evaluate(distance))
+            result["distance"] = distance
+            result["absolute_error"] = abs(
+                _finite_number(result.get("butteraugli"), "calibrated score")
+                - target_score
+            )
+            by_distance[distance] = result
+            evaluations.append(result)
+        return by_distance[distance]
+
+    initial = evaluate_once(initial_distance)
+    if initial["absolute_error"] <= tolerance:
+        return initial, evaluations
+
+    if initial["butteraugli"] > target_score:
+        lower = evaluate_once(minimum_distance)
+        upper = initial
+        bracketed = lower["butteraugli"] <= target_score
+    else:
+        lower = initial
+        upper = evaluate_once(maximum_distance)
+        bracketed = upper["butteraugli"] >= target_score
+    if not bracketed:
+        best = min(evaluations, key=lambda item: item["absolute_error"])
+        if best["absolute_error"] <= tolerance:
+            return best, evaluations
+        raise ComparisonError(
+            "Calibration target is not bracketed by the requested distance bounds: "
+            f"target={target_score:.9g}, lower={lower['butteraugli']:.9g}, "
+            f"upper={upper['butteraugli']:.9g}"
+        )
+
+    while len(evaluations) < maximum_evaluations:
+        midpoint = (lower["distance"] + upper["distance"]) / 2.0
+        if midpoint in by_distance:
+            break
+        candidate = evaluate_once(midpoint)
+        if candidate["absolute_error"] <= tolerance:
+            return candidate, evaluations
+        if candidate["butteraugli"] < target_score:
+            lower = candidate
+        else:
+            upper = candidate
+
+    best = min(evaluations, key=lambda item: item["absolute_error"])
+    if best["absolute_error"] > tolerance:
+        raise ComparisonError(
+            "Calibration did not converge within tolerance: "
+            f"target={target_score:.9g}, best={best['butteraugli']:.9g}, "
+            f"error={best['absolute_error']:.9g}, tolerance={tolerance:.9g}"
+        )
+    return best, evaluations
+
+
+def load_quality_calibration(
+    path: Path,
+    corpus_manifest: Path,
+    entries: list[dict[str, Any]],
+    *,
+    target_distance: float,
+    effort: int,
+) -> tuple[dict[str, float], dict[str, Any]]:
+    path = path.resolve()
+    document = load_json(path)
+    if (
+        document.get("schema_version") != CALIBRATION_SCHEMA_VERSION
+        or document.get("kind") != "libjxl-butteraugli-calibration"
+    ):
+        raise ComparisonError(f"Unexpected quality calibration schema: {path}")
+    if document.get("libjxl_revision") != PINNED_LIBJXL_REVISION:
+        raise ComparisonError("Quality calibration uses a different libjxl revision")
+    if document.get("corpus_manifest_sha256") != sha256_file(corpus_manifest):
+        raise ComparisonError("Quality calibration corpus does not match this run")
+    parameters = document.get("parameters")
+    if not isinstance(parameters, dict):
+        raise ComparisonError("Quality calibration has no parameter record")
+    calibrated_target = _positive_distance(
+        parameters.get("target_gjxl_distance"), "calibrated GJXL distance"
+    )
+    if not math.isclose(calibrated_target, target_distance, rel_tol=0.0, abs_tol=1e-9):
+        raise ComparisonError(
+            "Quality calibration GJXL distance does not match --distance"
+        )
+    if parameters.get("effort") != effort:
+        raise ComparisonError("Quality calibration effort does not match --effort")
+    tolerance = _finite_number(parameters.get("tolerance"), "calibration tolerance")
+    if tolerance <= 0.0:
+        raise ComparisonError("Calibration tolerance must be positive")
+
+    records = document.get("inputs")
+    if not isinstance(records, list):
+        raise ComparisonError("Quality calibration inputs must be a list")
+    expected = {entry["name"] for entry in entries}
+    entries_by_name = {entry["name"]: entry for entry in entries}
+    distances: dict[str, float] = {}
+    for record in records:
+        if not isinstance(record, dict) or not isinstance(record.get("input"), str):
+            raise ComparisonError("Quality calibration input record is invalid")
+        name = record["input"]
+        if name in distances:
+            raise ComparisonError(f"Duplicate quality calibration input: {name}")
+        if name not in entries_by_name:
+            raise ComparisonError(f"Unexpected quality calibration input: {name}")
+        if record.get("canonical_sha256") != entries_by_name[name].get(
+            "canonical_sha256"
+        ):
+            raise ComparisonError(
+                f"Quality calibration canonical input changed for {name}"
+            )
+        record_target_distance = _positive_distance(
+            record.get("target_gjxl_distance"),
+            f"target GJXL distance for {name}",
+        )
+        if not math.isclose(
+            record_target_distance, target_distance, rel_tol=0.0, abs_tol=1e-9
+        ):
+            raise ComparisonError(
+                f"Quality calibration target distance changed for {name}"
+            )
+        distance = _positive_distance(
+            record.get("libjxl_distance"), f"calibrated libjxl distance for {name}"
+        )
+        target_score = _finite_number(
+            record.get("target_butteraugli"), f"target score for {name}"
+        )
+        achieved_score = _finite_number(
+            record.get("achieved_butteraugli"), f"achieved score for {name}"
+        )
+        error = _finite_number(
+            record.get("absolute_error"), f"calibration error for {name}"
+        )
+        calculated_error = abs(target_score - achieved_score)
+        if not math.isclose(error, calculated_error, rel_tol=0.0, abs_tol=1e-12):
+            raise ComparisonError(
+                f"Quality calibration error is inconsistent for {name}"
+            )
+        if error < 0.0 or error > tolerance:
+            raise ComparisonError(
+                f"Quality calibration for {name} exceeds its tolerance"
+            )
+        distances[name] = distance
+    if set(distances) != expected:
+        missing = sorted(expected - set(distances))
+        extra = sorted(set(distances) - expected)
+        raise ComparisonError(
+            "Quality calibration inputs do not match the corpus: "
+            f"missing={missing}, extra={extra}"
+        )
+    return distances, {
+        "path": str(path),
+        "sha256": sha256_file(path),
+        "tolerance": tolerance,
+        "source_gjxl_revision": document.get("source_gjxl_revision"),
+    }
+
+
+def calibrate_quality(args: argparse.Namespace) -> None:
+    repo = args.repo.resolve()
+    corpus_manifest = args.corpus_manifest.resolve()
+    entries = validate_corpus(corpus_manifest)
+    targets, nominal = load_nominal_quality_targets(
+        args.nominal_summary, corpus_manifest, entries
+    )
+    if nominal["effort"] != args.effort:
+        raise ComparisonError(
+            "Calibration effort must match the nominal comparison effort"
+        )
+
+    binaries = {
+        "libjxl_benchmark": args.libjxl_benchmark.resolve(),
+        "djxl": args.djxl.resolve(),
+        "butteraugli": args.butteraugli.resolve(),
+    }
+    for name, path in binaries.items():
+        if not path.is_file():
+            raise ComparisonError(f"Required {name} file does not exist: {path}")
+    args.libjxl_benchmark = binaries["libjxl_benchmark"]
+    args.djxl = binaries["djxl"]
+    args.butteraugli = binaries["butteraugli"]
+
+    gjxl_revision = git_output(repo, "rev-parse", "HEAD")
+    libjxl_source = repo / "third_party/libjxl"
+    libjxl_revision = git_output(libjxl_source, "rev-parse", "HEAD")
+    if libjxl_revision != PINNED_LIBJXL_REVISION:
+        raise ComparisonError(
+            f"libjxl revision is {libjxl_revision}, expected {PINNED_LIBJXL_REVISION}"
+        )
+
+    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+    directory = (
+        args.output_root / f"{timestamp}-{gjxl_revision[:12]}"
+    ).resolve()
+    directory.mkdir(parents=True, exist_ok=False)
+    raw_dir = directory / "raw"
+    candidates_dir = directory / "candidates"
+    raw_dir.mkdir()
+    candidates_dir.mkdir()
+
+    git_diff = run_capture(
+        ["git", "-C", str(repo), "diff", "--binary", "HEAD"], check=False
+    ).stdout.encode("utf-8")
+    manifest: dict[str, Any] = {
+        "schema_version": CALIBRATION_SCHEMA_VERSION,
+        "kind": "libjxl-butteraugli-calibration-run",
+        "created_utc": timestamp,
+        "repo": str(repo),
+        "gjxl_revision": gjxl_revision,
+        "gjxl_dirty": bool(git_output(repo, "status", "--porcelain")),
+        "gjxl_worktree_diff_sha256": hashlib.sha256(git_diff).hexdigest(),
+        "libjxl_revision": libjxl_revision,
+        "corpus_manifest": str(corpus_manifest),
+        "corpus_manifest_sha256": sha256_file(corpus_manifest),
+        "nominal_quality_source": nominal,
+        "parameters": {
+            "target_gjxl_distance": nominal["target_gjxl_distance"],
+            "effort": args.effort,
+            "libjxl_thread_count": args.num_threads,
+            "warmups": args.warmups,
+            "samples": args.samples,
+            "minimum_distance": args.minimum_distance,
+            "maximum_distance": args.maximum_distance,
+            "initial_distance": args.initial_distance,
+            "tolerance": args.tolerance,
+            "maximum_evaluations": args.maximum_evaluations,
+        },
+        "binaries": {
+            name: {"path": str(path), "sha256": sha256_file(path)}
+            for name, path in binaries.items()
+        },
+        "host": host_manifest(),
+        "argv": sys.argv,
+        "processes": [],
+        "evaluations": [],
+        "calibrations": [],
+    }
+    write_json_atomic(directory / "manifest.json", manifest)
+
+    calibrated_inputs = []
+    for entry in entries:
+        image = Path(entry["resolved_path"])
+        slug = safe_name(entry["name"])
+        target = targets[entry["name"]]
+        input_candidates = candidates_dir / slug
+        input_candidates.mkdir()
+
+        def evaluate(distance: float) -> dict[str, Any]:
+            candidate_index = sum(
+                item["input"] == entry["name"]
+                for item in manifest["evaluations"]
+            )
+            candidate_name = f"candidate{candidate_index:02d}"
+            raw = raw_dir / f"{slug}-{candidate_name}-libjxl.json"
+            codestream = input_candidates / f"{candidate_name}.jxl"
+            command = libjxl_command(
+                args,
+                image,
+                raw,
+                args.num_threads,
+                codestream,
+                distance=distance,
+            )
+            process_name = f"{slug}-calibration-{candidate_name}-libjxl"
+            record_process(command, process_name, directory, manifest)
+            validation = validate_output(
+                args,
+                entry,
+                "libjxl",
+                f"calibration-{candidate_name}",
+                codestream,
+                directory,
+                manifest,
+            )
+            raw_document = load_json(raw)
+            encoded_sizes = {
+                sample["encoded_bytes"] for sample in raw_document["samples"]
+            }
+            if len(encoded_sizes) != 1:
+                raise ComparisonError(
+                    f"Calibration encoded size is unstable for {entry['name']}"
+                )
+            result = {
+                "input": entry["name"],
+                "candidate_index": candidate_index,
+                "distance": distance,
+                "encoded_requested_distance": raw_document["requested_distance"],
+                "butteraugli": validation["butteraugli"],
+                "absolute_error": abs(validation["butteraugli"] - target),
+                "encoded_bytes": encoded_sizes.pop(),
+                "raw": str(raw.relative_to(directory)),
+                "codestream": validation["codestream"],
+                "codestream_sha256": validation["codestream_sha256"],
+                "decoded": validation["decoded"],
+                "decoded_sha256": validation["decoded_sha256"],
+                "retained": True,
+            }
+            manifest["evaluations"].append(result)
+            write_json_atomic(directory / "manifest.json", manifest)
+            return result
+
+        selected, evaluations = calibrate_distance(
+            target,
+            evaluate,
+            minimum_distance=args.minimum_distance,
+            maximum_distance=args.maximum_distance,
+            initial_distance=args.initial_distance,
+            tolerance=args.tolerance,
+            maximum_evaluations=args.maximum_evaluations,
+        )
+        selected_index = selected["candidate_index"]
+        for evaluation in evaluations:
+            retained = evaluation["candidate_index"] == selected_index
+            evaluation["retained"] = retained
+            manifest_evaluation = next(
+                item
+                for item in manifest["evaluations"]
+                if item["input"] == entry["name"]
+                and item["candidate_index"] == evaluation["candidate_index"]
+            )
+            manifest_evaluation["retained"] = retained
+            if not retained:
+                (directory / evaluation["codestream"]).unlink()
+                (directory / evaluation["decoded"]).unlink()
+
+        calibration = {
+            "input": entry["name"],
+            "category": entry.get("category", "unspecified"),
+            "canonical_sha256": entry["canonical_sha256"],
+            "target_gjxl_distance": nominal["target_gjxl_distance"],
+            "target_butteraugli": target,
+            "libjxl_distance": selected["distance"],
+            "achieved_butteraugli": selected["butteraugli"],
+            "absolute_error": selected["absolute_error"],
+            "encoded_bytes": selected["encoded_bytes"],
+            "selected_candidate_index": selected_index,
+            "evaluation_count": len(evaluations),
+        }
+        calibrated_inputs.append(calibration)
+        manifest["calibrations"].append(calibration)
+        write_json_atomic(directory / "manifest.json", manifest)
+
+    calibration_document = {
+        "schema_version": CALIBRATION_SCHEMA_VERSION,
+        "kind": "libjxl-butteraugli-calibration",
+        "created_utc": timestamp,
+        "source_gjxl_revision": nominal["gjxl_revision"],
+        "calibration_tool_revision": gjxl_revision,
+        "libjxl_revision": libjxl_revision,
+        "corpus_manifest": str(corpus_manifest),
+        "corpus_manifest_sha256": sha256_file(corpus_manifest),
+        "nominal_quality_source": nominal,
+        "parameters": manifest["parameters"],
+        "inputs": calibrated_inputs,
+    }
+    write_json_atomic(directory / "calibration.json", calibration_document)
+    manifest["calibration"] = {
+        "path": "calibration.json",
+        "sha256": sha256_file(directory / "calibration.json"),
+    }
+    manifest["host_end"] = host_manifest()
+    write_json_atomic(directory / "manifest.json", manifest)
+    print(directory)
 
 
 def capture_profile(
@@ -981,6 +1472,17 @@ def run_comparison(args: argparse.Namespace) -> None:
     args.djxl = binaries["djxl"]
     args.butteraugli = binaries["butteraugli"]
 
+    quality_distances = {entry["name"]: args.distance for entry in entries}
+    quality_calibration = None
+    if args.quality_map is not None:
+        quality_distances, quality_calibration = load_quality_calibration(
+            args.quality_map,
+            corpus_manifest,
+            entries,
+            target_distance=args.distance,
+            effort=args.effort,
+        )
+
     gjxl_revision = git_output(repo, "rev-parse", "HEAD")
     libjxl_source = repo / "third_party/libjxl"
     libjxl_revision = git_output(libjxl_source, "rev-parse", "HEAD")
@@ -1025,6 +1527,9 @@ def run_comparison(args: argparse.Namespace) -> None:
         },
         "parameters": {
             "distance": args.distance,
+            "quality_view": (
+                "matched" if quality_calibration is not None else "nominal-distance"
+            ),
             "effort": args.effort,
             "warmups": args.warmups,
             "samples": args.samples,
@@ -1040,7 +1545,11 @@ def run_comparison(args: argparse.Namespace) -> None:
         "argv": sys.argv,
         "processes": [],
         "validations": [],
+        "quality_matches": [],
     }
+    if quality_calibration is not None:
+        manifest["quality_calibration"] = quality_calibration
+        manifest["libjxl_distances"] = quality_distances
     write_json_atomic(directory / "manifest.json", manifest)
 
     logical_cpus = max(os.cpu_count() or 1, 1)
@@ -1070,6 +1579,10 @@ def run_comparison(args: argparse.Namespace) -> None:
         for entry in entries:
             image = Path(entry["resolved_path"])
             slug = safe_name(entry["name"])
+            encoder_distances = {
+                "gjxl": args.distance,
+                "libjxl": quality_distances[entry["name"]],
+            }
             output_paths = {
                 "gjxl": streams_dir / f"{slug}-{configuration}-gjxl.jxl",
                 "libjxl": streams_dir / f"{slug}-{configuration}-libjxl.jxl",
@@ -1081,11 +1594,21 @@ def run_comparison(args: argparse.Namespace) -> None:
                     output = output_paths[encoder] if pair == 0 else None
                     if encoder == "gjxl":
                         command = gjxl_command(
-                            args, image, raw, gjxl_workers, output
+                            args,
+                            image,
+                            raw,
+                            gjxl_workers,
+                            output,
+                            distance=encoder_distances[encoder],
                         )
                     else:
                         command = libjxl_command(
-                            args, image, raw, libjxl_threads, output
+                            args,
+                            image,
+                            raw,
+                            libjxl_threads,
+                            output,
+                            distance=encoder_distances[encoder],
                         )
                     name = f"{slug}-{configuration}-pair{pair}-{encoder}"
                     record_process(command, name, directory, manifest)
@@ -1095,6 +1618,7 @@ def run_comparison(args: argparse.Namespace) -> None:
                         )
                     )
                     rows[-1]["raw_path"] = str(raw.relative_to(directory))
+            input_validations = {}
             for encoder, path in output_paths.items():
                 validation = validate_output(
                     args,
@@ -1104,9 +1628,34 @@ def run_comparison(args: argparse.Namespace) -> None:
                     path,
                     directory,
                     manifest,
+                    encoder_distances[encoder],
                 )
+                input_validations[encoder] = validation
                 manifest["validations"].append(validation)
                 write_json_atomic(directory / "manifest.json", manifest)
+
+            if quality_calibration is not None:
+                score_delta = abs(
+                    input_validations["gjxl"]["butteraugli"]
+                    - input_validations["libjxl"]["butteraugli"]
+                )
+                quality_match = {
+                    "input": entry["name"],
+                    "configuration": configuration,
+                    "gjxl_butteraugli": input_validations["gjxl"]["butteraugli"],
+                    "libjxl_butteraugli": input_validations["libjxl"]["butteraugli"],
+                    "absolute_difference": score_delta,
+                    "tolerance": quality_calibration["tolerance"],
+                    "within_tolerance": score_delta <= quality_calibration["tolerance"],
+                }
+                manifest["quality_matches"].append(quality_match)
+                write_json_atomic(directory / "manifest.json", manifest)
+                if not quality_match["within_tolerance"]:
+                    raise ComparisonError(
+                        f"Matched-quality validation failed for {entry['name']} "
+                        f"({configuration}): difference={score_delta:.9g}, "
+                        f"tolerance={quality_calibration['tolerance']:.9g}"
+                    )
 
             if args.capture_samply:
                 for encoder in ("gjxl", "libjxl"):
@@ -1120,6 +1669,7 @@ def run_comparison(args: argparse.Namespace) -> None:
                             gjxl_workers,
                             None,
                             args.profile_samples,
+                            encoder_distances[encoder],
                         )
                     else:
                         command = libjxl_command(
@@ -1129,6 +1679,7 @@ def run_comparison(args: argparse.Namespace) -> None:
                             libjxl_threads,
                             None,
                             args.profile_samples,
+                            encoder_distances[encoder],
                         )
                     capture_profile(
                         args,
@@ -1163,6 +1714,7 @@ def run_comparison(args: argparse.Namespace) -> None:
         "process_rows": rows,
         "aggregate_rows": aggregate_rows(rows),
         "validations": manifest["validations"],
+        "quality_matches": manifest["quality_matches"],
     }
     write_json_atomic(directory / "summary.json", summary)
     manifest["host_end"] = host_manifest()
@@ -1216,6 +1768,40 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     build.add_argument("--jobs", type=positive_int, default=8)
     build.set_defaults(function=build_libjxl)
 
+    comparison_build = repo_default / "build/libjxl-comparison"
+    calibrate = subparsers.add_parser("calibrate-quality")
+    calibrate.add_argument("--repo", type=Path, default=repo_default)
+    calibrate.add_argument("--corpus-manifest", type=Path, required=True)
+    calibrate.add_argument("--nominal-summary", type=Path, required=True)
+    calibrate.add_argument(
+        "--libjxl-benchmark",
+        type=Path,
+        default=comparison_build / "harness/gjxl_libjxl_comparison_benchmark",
+    )
+    calibrate.add_argument(
+        "--djxl", type=Path, default=comparison_build / "libjxl/tools/djxl"
+    )
+    calibrate.add_argument(
+        "--butteraugli",
+        type=Path,
+        default=comparison_build / "libjxl/tools/butteraugli_main",
+    )
+    calibrate.add_argument(
+        "--output-root",
+        type=Path,
+        default=repo_default / "logs/libjxl-calibration",
+    )
+    calibrate.add_argument("--effort", type=int, choices=range(1, 11), default=7)
+    calibrate.add_argument("--num-threads", type=positive_int, default=8)
+    calibrate.add_argument("--warmups", type=int, default=0)
+    calibrate.add_argument("--samples", type=positive_int, default=1)
+    calibrate.add_argument("--minimum-distance", type=float, default=0.1)
+    calibrate.add_argument("--maximum-distance", type=float, default=2.0)
+    calibrate.add_argument("--initial-distance", type=float, default=1.0)
+    calibrate.add_argument("--tolerance", type=float, default=0.01)
+    calibrate.add_argument("--maximum-evaluations", type=positive_int, default=12)
+    calibrate.set_defaults(function=calibrate_quality)
+
     run = subparsers.add_parser("run")
     run.add_argument("--repo", type=Path, default=repo_default)
     run.add_argument("--corpus-manifest", type=Path, required=True)
@@ -1224,7 +1810,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         default=repo_default / "build/release/gjxl_encoding_benchmark",
     )
-    comparison_build = repo_default / "build/libjxl-comparison"
     run.add_argument(
         "--libjxl-benchmark",
         type=Path,
@@ -1253,6 +1838,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     run.add_argument("--warmups", type=int, default=2)
     run.add_argument("--samples", type=positive_int, default=5)
     run.add_argument("--distance", type=float, default=1.0)
+    run.add_argument(
+        "--quality-map",
+        type=Path,
+        help="per-input libjxl distance calibration for a matched-quality run",
+    )
     run.add_argument("--effort", type=int, choices=range(1, 11), default=7)
     run.add_argument(
         "--gjxl-implementation",
@@ -1275,6 +1865,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--warmups must be nonnegative")
     if not 0.0 < getattr(args, "distance", 1.0) <= 25.0:
         parser.error("--distance must be in (0, 25]")
+    if args.command == "calibrate-quality":
+        if not 0.0 < args.minimum_distance < args.maximum_distance <= 25.0:
+            parser.error(
+                "calibration bounds must satisfy 0 < minimum < maximum <= 25"
+            )
+        if not args.minimum_distance <= args.initial_distance <= args.maximum_distance:
+            parser.error("--initial-distance must lie within the calibration bounds")
+        if not math.isfinite(args.tolerance) or args.tolerance <= 0.0:
+            parser.error("--tolerance must be positive and finite")
+        if args.maximum_evaluations < 3:
+            parser.error("--maximum-evaluations must be at least 3")
     return args
 
 

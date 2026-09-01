@@ -361,6 +361,7 @@ class RawSummaryTest(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": 10,
+                        "distance": 1.0,
                         "serializer_workers": 1,
                         "workloads": [
                             {
@@ -395,6 +396,7 @@ class RawSummaryTest(unittest.TestCase):
                         "schema_version": 1,
                         "encoder": "libjxl",
                         "revision": comparison.PINNED_LIBJXL_REVISION,
+                        "requested_distance": 0.9,
                         "thread_count": 0,
                         "samples": [
                             {"elapsed_nanoseconds": 2_000_000, "encoded_bytes": 800},
@@ -419,6 +421,8 @@ class RawSummaryTest(unittest.TestCase):
             )
             self.assertEqual(libjxl_row["median_nanoseconds"], 3_000_000)
             self.assertIsNone(libjxl_row["codestream_median_nanoseconds"])
+            self.assertEqual(gjxl_row["requested_distance"], 1.0)
+            self.assertEqual(libjxl_row["requested_distance"], 0.9)
             aggregate = comparison.aggregate_rows(
                 [gjxl_row, dict(gjxl_row, median_nanoseconds=6_000_000)]
             )[0]
@@ -429,6 +433,142 @@ class RawSummaryTest(unittest.TestCase):
                 aggregate["process_median_range_nanoseconds"],
                 [4_000_000, 6_000_000],
             )
+
+
+class QualityCalibrationTest(unittest.TestCase):
+    def test_distance_search_converges_and_records_every_evaluation(self) -> None:
+        calls = []
+
+        def evaluate(distance: float) -> dict[str, float]:
+            calls.append(distance)
+            return {"butteraugli": 2.0 * distance}
+
+        selected, evaluations = comparison.calibrate_distance(
+            1.25,
+            evaluate,
+            minimum_distance=0.1,
+            maximum_distance=2.0,
+            initial_distance=1.0,
+            tolerance=0.001,
+            maximum_evaluations=16,
+        )
+        self.assertLessEqual(selected["absolute_error"], 0.001)
+        self.assertEqual(calls, [item["distance"] for item in evaluations])
+        self.assertEqual(len(calls), len(set(calls)))
+
+    def test_distance_search_rejects_an_unbracketed_target(self) -> None:
+        with self.assertRaisesRegex(comparison.ComparisonError, "not bracketed"):
+            comparison.calibrate_distance(
+                3.0,
+                lambda distance: {"butteraugli": distance},
+                minimum_distance=0.1,
+                maximum_distance=2.0,
+                initial_distance=1.0,
+                tolerance=0.01,
+                maximum_evaluations=8,
+            )
+
+    def test_nominal_targets_are_bound_to_the_corpus(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gjxl-quality-test-") as temporary:
+            root = Path(temporary)
+            corpus = root / "corpus.json"
+            corpus.write_text('{"schema_version": 1}\n', encoding="utf-8")
+            run = root / "nominal"
+            run.mkdir()
+            (run / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "corpus_manifest_sha256": comparison.sha256_file(corpus),
+                        "libjxl_revision": comparison.PINNED_LIBJXL_REVISION,
+                        "gjxl_revision": "a" * 40,
+                        "parameters": {"distance": 1.0, "effort": 7},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            summary = run / "summary.json"
+            summary.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "validations": [
+                            {
+                                "input": "fixture",
+                                "encoder": "gjxl",
+                                "configuration": "serial",
+                                "butteraugli": 1.25,
+                            },
+                            {
+                                "input": "fixture",
+                                "encoder": "gjxl",
+                                "configuration": "production",
+                                "butteraugli": 1.25,
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            targets, metadata = comparison.load_nominal_quality_targets(
+                summary, corpus, [{"name": "fixture"}]
+            )
+            self.assertEqual(targets, {"fixture": 1.25})
+            self.assertEqual(metadata["target_gjxl_distance"], 1.0)
+            self.assertEqual(metadata["effort"], 7)
+
+    def test_quality_map_requires_complete_in_tolerance_corpus(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gjxl-quality-test-") as temporary:
+            root = Path(temporary)
+            corpus = root / "corpus.json"
+            corpus.write_text('{"schema_version": 1}\n', encoding="utf-8")
+            calibration = root / "calibration.json"
+            document = {
+                "schema_version": comparison.CALIBRATION_SCHEMA_VERSION,
+                "kind": "libjxl-butteraugli-calibration",
+                "libjxl_revision": comparison.PINNED_LIBJXL_REVISION,
+                "corpus_manifest_sha256": comparison.sha256_file(corpus),
+                "parameters": {
+                    "target_gjxl_distance": 1.0,
+                    "effort": 7,
+                    "tolerance": 0.01,
+                },
+                "inputs": [
+                    {
+                        "input": "fixture",
+                        "canonical_sha256": "fixture-sha256",
+                        "target_gjxl_distance": 1.0,
+                        "target_butteraugli": 1.25,
+                        "achieved_butteraugli": 1.245,
+                        "libjxl_distance": 0.875,
+                        "absolute_error": 0.005,
+                    }
+                ],
+            }
+            calibration.write_text(json.dumps(document), encoding="utf-8")
+            distances, metadata = comparison.load_quality_calibration(
+                calibration,
+                corpus,
+                [{"name": "fixture", "canonical_sha256": "fixture-sha256"}],
+                target_distance=1.0,
+                effort=7,
+            )
+            self.assertEqual(distances, {"fixture": 0.875})
+            self.assertEqual(metadata["tolerance"], 0.01)
+
+            document["inputs"][0]["achieved_butteraugli"] = 1.23
+            document["inputs"][0]["absolute_error"] = 0.02
+            calibration.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                comparison.ComparisonError, "exceeds its tolerance"
+            ):
+                comparison.load_quality_calibration(
+                    calibration,
+                    corpus,
+                    [{"name": "fixture", "canonical_sha256": "fixture-sha256"}],
+                    target_distance=1.0,
+                    effort=7,
+                )
 
 
 if __name__ == "__main__":

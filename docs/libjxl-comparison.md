@@ -1,7 +1,9 @@
 # GJXL/libjxl codestream performance comparison plan
 
-Status: Phase 1 nominal-distance timing pilot complete; matched-quality and
-sampled-attribution views pending, 2026-09-01.
+Status: Phase 1 is in progress. The corpus, comparison tooling, nominal-distance
+serial and production timing, and independent output validation are complete as
+of 2026-09-01. Per-input matched-quality calibration and Samply CPU attribution
+remain before the Phase 1 exit criteria are satisfied.
 
 ## Purpose
 
@@ -207,6 +209,25 @@ their absolute timings for retained claims.
 
 ## Phase 1: no-libjxl-source-change pilot
 
+### Progress
+
+| Milestone | Status | Evidence or remaining work |
+| --- | --- | --- |
+| Pin and prepare the comparison corpus | Complete | 6 photographic scenes at both 1080p and 4K, 24 Kodak continuity images, and padded 1080p/4K stress inputs; 38 canonical PFM inputs total |
+| Build the isolated libjxl harness and comparison driver | Complete | Pinned libjxl revision, binary hashes, balanced independent processes, serial and production policies, and never-overwritten artifacts are recorded |
+| Run the nominal-distance serial and production pilot | Complete, diagnostic | All 38 inputs ran at requested distance 1.0 and libjxl effort 7; host load makes absolute production timing unsuitable for a publication-grade claim |
+| Validate outputs and retained artifacts | Complete | 760 subprocesses succeeded; every output decoded and received an independent Butteraugli score; retained codestream and decoded-file hashes were rechecked |
+| Run the matched-quality view | Tooling complete; run pending | Calibrate a per-input libjxl distance against each GJXL decoded Butteraugli score, then repeat the unprofiled comparison |
+| Capture neutral-stage sampled CPU attribution | Pending | Capture serial and production Samply profiles, retain symbol sidecars, and pass the 95% serializer-CPU resolution gate |
+| Decide whether direct libjxl stage timing is necessary | Provisionally deferred | The nominal pilot already identifies GJXL entropy optimization as the leading target; revisit after matched-quality timing and sampled attribution show whether profiler uncertainty could change the conclusion |
+
+The completed run used GJXL's factored DCT implementation and the fully
+resident Metal public-workflow path. "Fully resident" describes the Metal AQ
+and coefficient-decision path: entropy coding and final codestream assembly
+still execute on the CPU. The matching libjxl policy used effort 7. The serial
+configuration limited both serializers to one worker; the production
+configuration used the normal eight-worker limit.
+
 ### Implemented tooling
 
 Phase 1 is implemented without modifying the pinned libjxl source. The pieces
@@ -222,10 +243,17 @@ are deliberately separated:
 - `tools/libjxl_comparison.py build-libjxl` verifies the pinned revision,
   builds shared `libjxl`, `djxl`, and `butteraugli_main`, then builds the
   GJXL-owned public-C-API harness under an isolated build root;
+- `tools/libjxl_comparison.py calibrate-quality` takes the independently
+  decoded GJXL scores from a retained nominal summary as immutable per-input
+  targets, searches bounded libjxl distances outside the timed boundary, and
+  emits a corpus-, effort-, revision-, and tolerance-bound calibration map;
 - `tools/libjxl_comparison.py run` alternates independent process pairs,
   retains serial and production policies, writes native raw schemas and
   binary/host/command manifests, independently decodes both outputs, records
-  Butteraugli scores, and emits normalized summaries;
+  Butteraugli scores, and emits normalized summaries. With `--quality-map`, it
+  applies the calibrated distance independently to every libjxl input and
+  fails closed if the newly decoded encoder scores exceed the declared match
+  tolerance;
 - `tools/samply_neutral_stages.py` consumes presymbolicated Samply captures,
   applies an ordered mutually exclusive neutral-stage mapping, rejects weighted
   leaf-symbol resolution below 95%, and labels every result as sampled thread
@@ -309,6 +337,30 @@ python3 tools/libjxl_comparison.py run \
   --configuration both
 ```
 
+After the nominal run, calibrate and run the matched-quality view with:
+
+```sh
+python3 tools/libjxl_comparison.py calibrate-quality \
+  --corpus-manifest \
+    build/libjxl-comparison/corpus-phase1-pilot-pinned/manifest.json \
+  --nominal-summary \
+    logs/libjxl-comparison/<nominal-run>/summary.json
+
+python3 tools/libjxl_comparison.py run \
+  --corpus-manifest \
+    build/libjxl-comparison/corpus-phase1-pilot-pinned/manifest.json \
+  --configuration both \
+  --quality-map \
+    logs/libjxl-calibration/<calibration-run>/calibration.json
+```
+
+The default match tolerance is an absolute Butteraugli difference of 0.01.
+Calibration starts at distance 1.0, verifies the target against the relevant
+0.1 or 2.0 bound, and uses at most 12 evaluations per input. Every search
+evaluation, command, raw encoder record, score, and hash remains in the
+calibration manifest; only the selected candidate's codestream and decoded PFM
+are retained to bound disk usage.
+
 Add `--capture-samply` only to a diagnostic profiling run. The unprofiled
 process-pair summary remains the performance source of record. The repository
 does not vendor the corpus itself. `fetch-corpus` reconstructs the hash-pinned
@@ -387,7 +439,7 @@ direct GJXL phase wall time with complete libjxl latency; they do not measure
 libjxl's entropy stage. They are enough to prioritize GJXL entropy work before
 adding direct libjxl stage instrumentation.
 
-### 1. Add a comparison driver
+### 1. Add a comparison driver — complete
 
 Add a GJXL-owned driver that:
 
@@ -406,7 +458,7 @@ added to the comparison harness. Keep the driver independent of the Metal
 profile driver because the comparison does not require an Instruments GPU
 trace.
 
-### 2. Establish unprofiled end-to-end timings
+### 2. Establish unprofiled end-to-end timings — complete for the nominal view
 
 For every workload and policy point, run at least three independent balanced
 process pairs. Each process should perform at least two warmups and enough
@@ -425,7 +477,12 @@ Retain two thread configurations:
 Report distributions, not a single timing. The final table should show the
 median of per-process medians and the complete range of those medians.
 
-### 3. Capture sampled CPU attribution
+The 2026-09-01 pilot completed this step for requested distance 1.0. Its raw
+distributions are retained, but the busy-host caveat above limits the absolute
+production timings to diagnostic use. The same protocol must be rerun with the
+per-input calibrated libjxl distances for the primary matched-quality view.
+
+### 3. Capture sampled CPU attribution — pending
 
 Capture both encoders directly with Samply at 1 kHz. Keep the symbol sidecar
 beside every capture. Use enough repeated encodes to accumulate a useful sample
@@ -446,7 +503,7 @@ parallel capture to understand distribution across workers, not to infer stage
 wall latency from wait frames. Sampling results are attribution evidence and
 must remain separate from the unprofiled latency table.
 
-### 4. Normalize and report
+### 4. Normalize and report — partial
 
 For every stage, report the native time plus:
 
@@ -461,7 +518,13 @@ No single normalization is sufficient. Time per output byte can reward a
 larger output, while time per pixel can hide different token densities. Keep
 raw time, size, quality, and normalization values adjacent.
 
-### 5. Pilot exit criteria
+The nominal report currently includes absolute complete-encode time, relative
+time, GJXL codestream share, encoded-size delta, and decoded Butteraugli. The
+machine-readable raw and aggregate artifacts retain the data needed for the
+additional per-pixel and per-output-byte views. Neutral-stage CPU
+normalizations remain blocked on the Samply captures.
+
+### 5. Pilot exit criteria — partially satisfied
 
 The no-touch pilot is complete when:
 
@@ -482,7 +545,9 @@ The 2026-09-01 run satisfies the canonical-input, independent decode and
 quality, binary and raw-artifact, category-separation, and thread-policy parts
 of these criteria. It did not request Samply, so sampled CPU attribution,
 symbol sidecars, and the 95% classifier-resolution gate remain open. Its host
-load also requires the production absolute-time caveat documented above.
+load also requires the production absolute-time caveat documented above. The
+matched-quality view is additionally required by the primary-comparison
+contract, even though it is not itself one of the mechanical exit bullets.
 
 ## Phase 2: optional libjxl stage instrumentation
 
