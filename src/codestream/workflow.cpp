@@ -26,6 +26,7 @@
 #include "codestream/workflow_internal.h"
 #include "core/frame_geometry.h"
 #include "core/image_buffer.h"
+#include "core/thread_budget.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
@@ -988,6 +989,12 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     return Status::InvalidArgument(
       "VarDCT effort must be in [1, 10]");
   }
+  if (options.cpu_thread_count > kMaximumCpuThreadCount) {
+    return Status::InvalidArgument(
+      "VarDCT CPU thread count must be zero or at most 256");
+  }
+  const thread_budget_internal::EncodeScope thread_budget(
+    options.cpu_thread_count);
   switch (options.backend) {
     case VarDctBackendPreference::kAutomatic:
     case VarDctBackendPreference::kCpu:

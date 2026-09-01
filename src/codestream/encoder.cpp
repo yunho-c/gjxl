@@ -32,6 +32,7 @@
 #include "codestream/entropy_internal.h"
 #include "codestream/headers.h"
 #include "codestream/sections.h"
+#include "core/thread_budget.h"
 
 namespace gjxl {
 namespace {
@@ -79,12 +80,24 @@ Status AllocationFailure() {
 template <typename Function>
 Status RunParallelSections(size_t count, Function&& function) {
   if (count == 0) return Status::Ok();
+  if (thread_budget_internal::InExplicitParallelScope()) {
+    for (size_t index = 0; index < count; ++index) {
+      Status status = function(index);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
   constexpr size_t kMaximumWorkers = 8;
   const size_t hardware_workers = std::max<size_t>(
     std::thread::hardware_concurrency(), 1);
-  const size_t worker_count = std::min(
+  const size_t automatic_worker_count = std::min(
     count, std::min(kMaximumWorkers, hardware_workers));
-  if (worker_count == 1) {
+  const size_t cpu_thread_count =
+    thread_budget_internal::CpuThreadCount();
+  const size_t participant_count = cpu_thread_count == 0
+    ? automatic_worker_count
+    : std::min(automatic_worker_count, cpu_thread_count);
+  if (participant_count == 1) {
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
       if (!status.ok()) return status;
@@ -95,32 +108,38 @@ Status RunParallelSections(size_t count, Function&& function) {
   std::vector<Status> statuses(count);
   std::atomic<size_t> next_index{0};
   std::vector<std::thread> workers;
-  workers.reserve(worker_count);
+  const size_t spawned_worker_count = cpu_thread_count == 0
+    ? participant_count
+    : participant_count - 1;
+  workers.reserve(spawned_worker_count);
+  const auto run_worker = [&] {
+    thread_budget_internal::ParallelScope scope(cpu_thread_count);
+    while (true) {
+      const size_t index =
+        next_index.fetch_add(1, std::memory_order_relaxed);
+      if (index >= count) break;
+      try {
+        statuses[index] = function(index);
+      } catch (const std::bad_alloc&) {
+        statuses[index] = AllocationFailure();
+      } catch (const std::length_error&) {
+        statuses[index] = AllocationFailure();
+      } catch (...) {
+        statuses[index] = Status::Internal(
+          "Codestream section worker failed unexpectedly");
+      }
+    }
+  };
   try {
-    for (size_t worker = 0; worker < worker_count; ++worker) {
-      workers.emplace_back([&] {
-        while (true) {
-          const size_t index =
-            next_index.fetch_add(1, std::memory_order_relaxed);
-          if (index >= count) break;
-          try {
-            statuses[index] = function(index);
-          } catch (const std::bad_alloc&) {
-            statuses[index] = AllocationFailure();
-          } catch (const std::length_error&) {
-            statuses[index] = AllocationFailure();
-          } catch (...) {
-            statuses[index] = Status::Internal(
-              "Codestream section worker failed unexpectedly");
-          }
-        }
-      });
+    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
+      workers.emplace_back(run_worker);
     }
   } catch (const std::system_error&) {
     next_index.store(count, std::memory_order_relaxed);
     for (std::thread& worker : workers) worker.join();
     return Status::Internal("Unable to start codestream section workers");
   }
+  if (cpu_thread_count != 0) run_worker();
   for (std::thread& worker : workers) worker.join();
   for (const Status& status : statuses) {
     if (!status.ok()) return status;

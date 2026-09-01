@@ -26,11 +26,17 @@
 struct GJXLContext {
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kAutomatic;
+  size_t cpu_thread_count = 0;
 };
 
 namespace {
 
 constexpr size_t kDiagnosticCapacity = 1024;
+constexpr size_t kContextOptionsV1Size =
+  offsetof(GJXLContextOptions, num_cpu_threads);
+constexpr size_t kContextOptionsCpuThreadsSize =
+  offsetof(GJXLContextOptions, num_cpu_threads) + sizeof(uint32_t);
+static_assert(gjxl::kMaximumCpuThreadCount == GJXL_MAX_CPU_THREADS);
 thread_local std::array<char, kDiagnosticCapacity> last_error{};
 
 void ClearLastError() noexcept {
@@ -91,12 +97,15 @@ GJXLResult Guard(Function&& function) noexcept {
 }
 
 template <typename Options>
-GJXLResult InitializeOptions(Options* options, size_t caller_size) noexcept {
+GJXLResult InitializeOptions(
+  Options* options,
+  size_t caller_size,
+  size_t required_size = sizeof(Options)) noexcept {
   if (options == nullptr) {
     return Fail(GJXL_ERROR_INVALID_ARGUMENT,
                 "Options output pointer must not be null");
   }
-  if (caller_size < sizeof(Options) ||
+  if (caller_size < required_size ||
       caller_size > std::numeric_limits<uint32_t>::max()) {
     return Fail(GJXL_ERROR_INVALID_ARGUMENT,
                 "Options allocation size is invalid");
@@ -182,7 +191,8 @@ extern "C" {
 GJXLResult gjxl_context_options_init(
   GJXLContextOptions* options, size_t caller_size) noexcept {
   return Guard([&]() -> GJXLResult {
-    const GJXLResult result = InitializeOptions(options, caller_size);
+    const GJXLResult result = InitializeOptions(
+      options, caller_size, kContextOptionsV1Size);
     if (result != GJXL_OK) {
       return result;
     }
@@ -218,12 +228,20 @@ GJXLResult gjxl_context_create(
 
     gjxl::VarDctBackendPreference backend =
       gjxl::VarDctBackendPreference::kAutomatic;
+    size_t cpu_thread_count = 0;
     if (options != nullptr) {
       GJXLResult result = ValidateSizedStruct(
-        options->struct_size, sizeof(*options),
+        options->struct_size, kContextOptionsV1Size,
         "Context options struct is too small");
       if (result != GJXL_OK) {
         return result;
+      }
+      if (options->struct_size >= kContextOptionsCpuThreadsSize) {
+        cpu_thread_count = options->num_cpu_threads;
+        if (cpu_thread_count > GJXL_MAX_CPU_THREADS) {
+          return Fail(GJXL_ERROR_INVALID_ARGUMENT,
+                      "CPU thread count must be zero or at most 256");
+        }
       }
       result = ParseBackend(options->backend, &backend);
       if (result != GJXL_OK) {
@@ -241,6 +259,7 @@ GJXLResult gjxl_context_create(
 
     auto candidate = std::make_unique<GJXLContext>();
     candidate->backend = backend;
+    candidate->cpu_thread_count = cpu_thread_count;
     *context = candidate.release();
     return GJXL_OK;
   });
@@ -308,6 +327,7 @@ GJXLResult gjxl_encode(
     encoding_options.butteraugli_target = options->distance;
     encoding_options.effort = options->effort;
     encoding_options.backend = context->backend;
+    encoding_options.cpu_thread_count = context->cpu_thread_count;
     std::vector<uint8_t> codestream;
     result = TranslateStatus(gjxl::EncodeLinearRgbVarDctCodestream(
       linear_rgb.const_view(), encoding_options, &codestream));

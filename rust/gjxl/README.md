@@ -7,7 +7,10 @@ crate. Packaged consumers must set `GJXL_SOURCE_DIR` to a GJXL source checkout.
 Only native macOS builds are currently supported.
 
 ```rust
-let context = gjxl::Context::new(gjxl::Backend::Auto)?;
+let context = gjxl::Context::with_options(gjxl::ContextOptions {
+    backend: gjxl::Backend::Auto,
+    cpu_threads: Some(4),
+})?;
 let image = gjxl::ImageView::rgba8(width, height, width as usize * 4, &pixels)?;
 let options = gjxl::EncoderOptions {
     distance: gjxl::distance_from_quality(90.0),

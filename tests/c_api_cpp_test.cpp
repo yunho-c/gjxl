@@ -17,6 +17,7 @@ static_assert(std::is_standard_layout_v<GJXLContextOptions>);
 static_assert(std::is_standard_layout_v<GJXLEncoderOptions>);
 static_assert(std::is_standard_layout_v<GJXLImageView>);
 static_assert(std::is_standard_layout_v<GJXLBuffer>);
+static_assert(GJXL_MAX_CPU_THREADS == 256);
 
 static_assert(noexcept(gjxl_context_options_init(nullptr, 0)));
 static_assert(noexcept(gjxl_encoder_options_init(nullptr, 0)));
@@ -49,7 +50,8 @@ int main() {
   }
   gjxl_context_destroy(context);
 
-  if (gjxl_context_options_init(&options, sizeof(options) - 1) !=
+  if (gjxl_context_options_init(
+        &options, offsetof(GJXLContextOptions, num_cpu_threads) - 1) !=
       GJXL_ERROR_INVALID_ARGUMENT) {
     return 1;
   }

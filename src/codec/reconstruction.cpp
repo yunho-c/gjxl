@@ -24,6 +24,7 @@
 #include "core/geometry.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
+#include "core/thread_budget.h"
 
 namespace gjxl {
 namespace {
@@ -45,10 +46,23 @@ Status RunParallelForwardTransforms(
   constexpr size_t kMaximumWorkers = 8;
   const size_t hardware_workers = std::max<size_t>(
     std::thread::hardware_concurrency(), 1);
-  const size_t worker_count = coefficient_count < kMinimumParallelCoefficients
+  const size_t automatic_worker_count =
+    coefficient_count < kMinimumParallelCoefficients
     ? 1
     : std::min(count, std::min(kMaximumWorkers, hardware_workers));
-  if (worker_count == 1) {
+  const size_t cpu_thread_count =
+    thread_budget_internal::CpuThreadCount();
+  if (thread_budget_internal::InExplicitParallelScope()) {
+    for (size_t index = 0; index < count; ++index) {
+      Status status = function(index);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
+  const size_t participant_count = cpu_thread_count == 0
+    ? automatic_worker_count
+    : std::min(automatic_worker_count, cpu_thread_count);
+  if (participant_count == 1) {
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
       if (!status.ok()) return status;
@@ -59,28 +73,33 @@ Status RunParallelForwardTransforms(
   std::vector<Status> statuses(count);
   std::atomic<size_t> next_index{0};
   std::vector<std::thread> workers;
-  workers.reserve(worker_count);
+  const size_t spawned_worker_count = cpu_thread_count == 0
+    ? participant_count
+    : participant_count - 1;
+  workers.reserve(spawned_worker_count);
+  const auto run_worker = [&] {
+    thread_budget_internal::ParallelScope scope(cpu_thread_count);
+    while (true) {
+      const size_t index =
+        next_index.fetch_add(1, std::memory_order_relaxed);
+      if (index >= count) break;
+      try {
+        statuses[index] = function(index);
+      } catch (const std::bad_alloc&) {
+        statuses[index] = Status::OutOfMemory(
+          "Unable to allocate forward-transform worker storage");
+      } catch (const std::length_error&) {
+        statuses[index] = Status::InvalidArgument(
+          "Forward-transform worker storage is too large");
+      } catch (...) {
+        statuses[index] = Status::Internal(
+          "Forward-transform worker failed unexpectedly");
+      }
+    }
+  };
   try {
-    for (size_t worker = 0; worker < worker_count; ++worker) {
-      workers.emplace_back([&] {
-        while (true) {
-          const size_t index =
-            next_index.fetch_add(1, std::memory_order_relaxed);
-          if (index >= count) break;
-          try {
-            statuses[index] = function(index);
-          } catch (const std::bad_alloc&) {
-            statuses[index] = Status::OutOfMemory(
-              "Unable to allocate forward-transform worker storage");
-          } catch (const std::length_error&) {
-            statuses[index] = Status::InvalidArgument(
-              "Forward-transform worker storage is too large");
-          } catch (...) {
-            statuses[index] = Status::Internal(
-              "Forward-transform worker failed unexpectedly");
-          }
-        }
-      });
+    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
+      workers.emplace_back(run_worker);
     }
   } catch (const std::system_error&) {
     next_index.store(count, std::memory_order_relaxed);
@@ -91,6 +110,7 @@ Status RunParallelForwardTransforms(
     }
     return Status::Ok();
   }
+  if (cpu_thread_count != 0) run_worker();
   for (std::thread& worker : workers) worker.join();
   for (const Status& status : statuses) {
     if (!status.ok()) return status;

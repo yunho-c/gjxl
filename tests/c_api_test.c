@@ -33,12 +33,15 @@ static int ExpectError(GJXLResult actual, GJXLResult expected,
 }
 
 static int CheckInitializers(void) {
+  CHECK(GJXL_MAX_CPU_THREADS == 256,
+        "maximum CPU thread count is incorrect");
   GJXLContextOptions context_options;
   CHECK(gjxl_context_options_init(&context_options,
                                   sizeof(context_options)) == GJXL_OK,
         "context initializer failed");
   CHECK(context_options.struct_size == sizeof(context_options) &&
-          context_options.backend == GJXL_BACKEND_AUTO,
+          context_options.backend == GJXL_BACKEND_AUTO &&
+          context_options.num_cpu_threads == 0,
         "context defaults are incorrect");
 
   GJXLEncoderOptions encoder_options;
@@ -55,7 +58,8 @@ static int CheckInitializers(void) {
   memcpy(&original_context, &small_context, sizeof(small_context));
   CHECK(ExpectError(
           gjxl_context_options_init(&small_context,
-                                    sizeof(small_context) - 1),
+                                    offsetof(GJXLContextOptions,
+                                             num_cpu_threads) - 1),
           GJXL_ERROR_INVALID_ARGUMENT, "small context initializer"),
         "small context initializer result is incorrect");
   CHECK(memcmp(&small_context, &original_context, sizeof(small_context)) == 0,
@@ -83,6 +87,7 @@ static int CheckInitializers(void) {
         "larger context initializer failed");
   CHECK(larger_context.options.struct_size == sizeof(larger_context) &&
           larger_context.options.backend == GJXL_BACKEND_AUTO &&
+          larger_context.options.num_cpu_threads == 0 &&
           larger_context.future_field == 0,
         "larger context initializer did not zero future storage");
 
@@ -166,9 +171,21 @@ static int CheckContexts(GJXLContext** cpu_context) {
         "occupied context output was modified");
 
   GJXLContextOptions options;
+  memset(&options, 0xa5, sizeof(options));
+  CHECK(gjxl_context_options_init(
+          &options, offsetof(GJXLContextOptions, num_cpu_threads)) == GJXL_OK,
+        "legacy context options initialization failed");
+  CHECK(options.struct_size == offsetof(GJXLContextOptions, num_cpu_threads) &&
+          options.backend == GJXL_BACKEND_AUTO,
+        "legacy context options defaults are incorrect");
+  GJXLContext* legacy = NULL;
+  CHECK(gjxl_context_create(&options, &legacy) == GJXL_OK && legacy != NULL,
+        "legacy context options creation failed");
+  gjxl_context_destroy(legacy);
+
   CHECK(gjxl_context_options_init(&options, sizeof(options)) == GJXL_OK,
         "context options initialization failed");
-  options.struct_size = sizeof(options) - 1;
+  options.struct_size = offsetof(GJXLContextOptions, num_cpu_threads) - 1;
   CHECK(ExpectError(gjxl_context_create(&options, cpu_context),
                     GJXL_ERROR_INVALID_ARGUMENT,
                     "small context options"),
@@ -182,6 +199,15 @@ static int CheckContexts(GJXLContext** cpu_context) {
                     "unknown context backend"),
         "unknown context backend result is incorrect");
   CHECK(*cpu_context == NULL, "unknown backend modified context output");
+
+  options.backend = GJXL_BACKEND_CPU;
+  options.num_cpu_threads = 257;
+  CHECK(ExpectError(gjxl_context_create(&options, cpu_context),
+                    GJXL_ERROR_INVALID_ARGUMENT,
+                    "large CPU thread count"),
+        "large CPU thread count result is incorrect");
+  CHECK(*cpu_context == NULL, "large CPU thread count modified context output");
+  options.num_cpu_threads = 0;
 
   options.backend = GJXL_BACKEND_METAL;
   GJXLContext* metal = NULL;
@@ -205,6 +231,7 @@ static int CheckContexts(GJXLContext** cpu_context) {
                                   sizeof(larger_options)) == GJXL_OK,
         "larger CPU context options initialization failed");
   larger_options.options.backend = GJXL_BACKEND_CPU;
+  larger_options.options.num_cpu_threads = 2;
   larger_options.future_field = UINT64_MAX;
   CHECK(gjxl_context_create(&larger_options.options, cpu_context) == GJXL_OK &&
           *cpu_context != NULL,

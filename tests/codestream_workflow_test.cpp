@@ -324,6 +324,51 @@ bool CheckDeterministicWorkflow() {
   return true;
 }
 
+bool CheckCpuThreadBudget() {
+  constexpr gjxl::Extent2D kThreadedExtent{256, 256};
+  ArbitraryImageStorage image(kThreadedExtent);
+  for (size_t y = 0; y < kThreadedExtent.height; ++y) {
+    for (size_t x = 0; x < kThreadedExtent.width; ++x) {
+      const size_t index = y * kThreadedExtent.width + x;
+      const float fx = static_cast<float>(x) / kThreadedExtent.width;
+      const float fy = static_cast<float>(y) / kThreadedExtent.height;
+      image.plane[0][index] = 0.05f + 0.75f * fx;
+      image.plane[1][index] = 0.04f + 0.68f * fy;
+      image.plane[2][index] = 0.03f + 0.35f * fx + 0.42f * fy;
+    }
+  }
+
+  const gjxl::VarDctEncodingOptions automatic_options{
+    .effort = 1,
+    .backend = gjxl::VarDctBackendPreference::kCpu,
+  };
+  std::vector<uint8_t> automatic;
+  gjxl::VarDctEncodingSummary automatic_summary;
+  gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), automatic_options, &automatic, &automatic_summary);
+  if (!status.ok() || automatic.empty()) {
+    std::cerr << "Automatic CPU thread policy failed: " << status.message()
+              << '\n';
+    return false;
+  }
+
+  for (const size_t thread_count : {size_t{1}, size_t{2}, size_t{4}}) {
+    gjxl::VarDctEncodingOptions options = automatic_options;
+    options.cpu_thread_count = thread_count;
+    std::vector<uint8_t> bytes;
+    gjxl::VarDctEncodingSummary summary;
+    status = gjxl::EncodeLinearRgbVarDctCodestream(
+      image.View(), options, &bytes, &summary);
+    if (!status.ok() || bytes != automatic || summary != automatic_summary) {
+      std::cerr << "CPU thread budget " << thread_count
+                << " changed the workflow result: " << status.message()
+                << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
 bool CheckHighDensityMode() {
   ImageStorage image;
   FillImage(&image);
@@ -485,6 +530,9 @@ bool CheckInvalidRequestsAreAtomic() {
   if (!rejected_atomically(image.View(), {.butteraugli_target = 0.0f}) ||
       !rejected_atomically(image.View(), {.effort = 0}) ||
       !rejected_atomically(image.View(), {.effort = 11}) ||
+      !rejected_atomically(
+          image.View(),
+          {.cpu_thread_count = gjxl::kMaximumCpuThreadCount + 1}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target =
@@ -1003,6 +1051,7 @@ int main() {
   if (!CheckQuantizationMatrixScaleStats() ||
       !CheckQuantizationMatrixScaleSelection() ||
       !CheckDeterministicWorkflow() ||
+      !CheckCpuThreadBudget() ||
       !CheckEffortPolicy() ||
       !CheckHighDensityMode() ||
       !CheckInvalidRequestsAreAtomic() ||

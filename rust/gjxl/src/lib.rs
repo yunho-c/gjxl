@@ -66,6 +66,18 @@ pub enum Backend {
     Metal,
 }
 
+/// Maximum supported explicit CPU thread count.
+pub const MAX_CPU_THREADS: usize = sys::GJXL_MAX_CPU_THREADS as usize;
+
+/// Immutable execution policy stored by a reusable [`Context`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ContextOptions {
+    /// CPU/Metal backend preference.
+    pub backend: Backend,
+    /// Maximum participating CPU threads per encode. `None` selects automatic.
+    pub cpu_threads: Option<usize>,
+}
+
 /// Canonical compression controls.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EncoderOptions {
@@ -208,6 +220,7 @@ impl<'a> ImageView<'a> {
 }
 
 /// Reusable immutable GJXL execution context.
+#[derive(Debug)]
 pub struct Context {
     raw: *mut sys::GJXLContext,
 }
@@ -218,6 +231,13 @@ unsafe impl Sync for Context {}
 
 impl Context {
     pub fn new(backend: Backend) -> Result<Self> {
+        Self::with_options(ContextOptions {
+            backend,
+            ..ContextOptions::default()
+        })
+    }
+
+    pub fn with_options(context_options: ContextOptions) -> Result<Self> {
         let mut options = unsafe { std::mem::zeroed::<sys::GJXLContextOptions>() };
         check(unsafe {
             sys::gjxl_context_options_init(
@@ -225,11 +245,27 @@ impl Context {
                 std::mem::size_of::<sys::GJXLContextOptions>(),
             )
         })?;
-        options.backend = match backend {
+        options.backend = match context_options.backend {
             Backend::Auto => sys::GJXL_BACKEND_AUTO,
             Backend::Cpu => sys::GJXL_BACKEND_CPU,
             Backend::Metal => sys::GJXL_BACKEND_METAL,
         } as sys::GJXLBackend;
+        options.num_cpu_threads = match context_options.cpu_threads {
+            None => 0,
+            Some(0) => {
+                return Err(Error::new(
+                    ErrorKind::InvalidArgument,
+                    "CPU thread count must be positive when specified",
+                ));
+            }
+            Some(count) if count > MAX_CPU_THREADS => {
+                return Err(Error::new(
+                    ErrorKind::InvalidArgument,
+                    format!("CPU thread count must not exceed {MAX_CPU_THREADS}"),
+                ));
+            }
+            Some(count) => count as u32,
+        };
 
         let mut raw = ptr::null_mut();
         check(unsafe { sys::gjxl_context_create(&options, &mut raw) })?;
@@ -363,10 +399,41 @@ mod tests {
 
     #[test]
     fn defaults_and_quality_mapping_are_canonical() {
+        assert_eq!(ContextOptions::default().backend, Backend::Auto);
+        assert_eq!(ContextOptions::default().cpu_threads, None);
         assert_eq!(EncoderOptions::default().distance, 1.0);
         assert_eq!(EncoderOptions::default().effort, 7);
         assert_eq!(distance_from_quality(100.0), 0.0);
         assert!((distance_from_quality(80.0) - 1.9).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn context_thread_budget_is_validated() {
+        for cpu_threads in [Some(0), Some(MAX_CPU_THREADS + 1)] {
+            let error = Context::with_options(ContextOptions {
+                backend: Backend::Cpu,
+                cpu_threads,
+            })
+            .expect_err("invalid CPU thread count must fail");
+            assert_eq!(error.kind(), ErrorKind::InvalidArgument);
+        }
+    }
+
+    #[test]
+    fn explicit_thread_budgets_preserve_codestream_bytes() {
+        let pixels = rgba_fixture(64, 64);
+        let image = ImageView::rgba8(64, 64, 256, &pixels).unwrap();
+        let encode = |cpu_threads| {
+            Context::with_options(ContextOptions {
+                backend: Backend::Cpu,
+                cpu_threads,
+            })
+            .unwrap()
+            .encode(&image, EncoderOptions::default())
+            .unwrap()
+        };
+        assert_eq!(encode(Some(1)), encode(Some(2)));
+        assert_eq!(encode(Some(2)), encode(Some(4)));
     }
 
     #[test]

@@ -15,6 +15,8 @@
 
 namespace gjxl {
 
+inline constexpr size_t kMaximumCpuThreadCount = 256;
+
 enum class VarDctBackendPreference {
   /// Uses qualified Metal only within the validated quality interval and above
   /// the measured geometry floor. Availability failures before pipeline
@@ -60,6 +62,9 @@ struct VarDctEncodingOptions {
   /// User-facing speed-versus-refinement intent in [1, 10]. Effort 7 preserves
   /// the established two-update adaptive-quantization policy.
   int32_t effort = 7;
+  /// Maximum participating CPU threads per encode. Zero selects the existing
+  /// automatic stage-specific worker policy. GPU execution is not constrained.
+  size_t cpu_thread_count = 0;
   /// Compatibility override that performs four AQ updates regardless of
   /// effort. It is meaningful only for Butteraugli-target and target-size
   /// control.

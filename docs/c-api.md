@@ -63,7 +63,7 @@ The first version does not expose:
 - faster-decoding controls;
 - target-byte, target-BPP, or maximum-error rate control;
 - fully resident or throughput Metal modes;
-- device indexes or CPU thread budgets;
+- device indexes;
 - streaming input or output;
 - stage-specific profiling data; or
 - internal codec heuristics such as AQ strength, AC-search depth, transform
@@ -108,9 +108,14 @@ enum {
     GJXL_BACKEND_METAL = 2,
 };
 
+enum {
+    GJXL_MAX_CPU_THREADS = 256,
+};
+
 typedef struct {
     uint32_t struct_size;
     GJXLBackend backend;
+    uint32_t num_cpu_threads;
 } GJXLContextOptions;
 
 typedef struct {
@@ -319,10 +324,21 @@ The wrapper stores immutable execution configuration so `gjxl_encode` can be
 called concurrently on one context. Destroying a context must not overlap an
 active call using it.
 
-Device indexes are omitted because the current factory uses the system-default
-Metal device. CPU thread budgets are omitted because internal stages currently
-choose their own bounded worker counts. Neither control should be promised by
-the ABI before the implementation can honor it end to end.
+`num_cpu_threads` limits the participating host CPU threads in each encode.
+Zero retains the existing automatic, stage-specific worker policy; one runs
+CPU work serially; larger values allow the caller plus at most `N - 1`
+background workers. The current maximum explicit value is 256. An explicit
+budget also suppresses nested worker fan-out, so a parallel codestream task
+does not create another pool beneath itself.
+
+The limit is per encode, not a process-wide pool or a cap across concurrent
+calls. It does not constrain Metal threadgroups, although host preparation and
+codestream assembly remain within the CPU budget. The field is an appended
+sized-struct tail: callers built against the original prefix retain automatic
+behavior.
+
+Device indexes remain omitted because the current factory uses the
+system-default Metal device.
 
 ## Image-view contract
 
@@ -542,7 +558,7 @@ tradeoff. A single fixture or one timing sample is directional evidence only.
 The following additions do not require changing the initial encode signature:
 
 - add pixel formats to `GJXLPixelFormat`;
-- append context options when device and thread control exist;
+- append context options when device selection exists;
 - append encoder options only for canonical bitstream intent;
 - add `gjxl_encode_with_stats` with a separately sized stats struct;
 - add a streaming encoder API;

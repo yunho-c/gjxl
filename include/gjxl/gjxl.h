@@ -48,9 +48,16 @@ enum {
   GJXL_BACKEND_METAL = 2,
 };
 
+enum {
+  GJXL_MAX_CPU_THREADS = 256,
+};
+
 typedef struct {
   uint32_t struct_size;
   GJXLBackend backend;
+  /// Maximum participating CPU threads per encode. Zero selects automatic;
+  /// positive values must not exceed GJXL_MAX_CPU_THREADS.
+  uint32_t num_cpu_threads;
 } GJXLContextOptions;
 
 typedef struct {
