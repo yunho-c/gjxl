@@ -1389,6 +1389,20 @@ order.
    Release suite remains 61/62 with only the inherited
    `quantization_pipeline` score mismatch.
 
+   A third experiment attempted to fuse the remaining fixed-HybridUint prefix
+   histogram pass into block-context materialization. It accumulated one exact
+   128-bin population per resolved AC context while each token was already in
+   hand, then moved those populations directly into prefix clustering. On
+   padded 4K at distance 1.2 this reduced aggregate prefix-histogram work from
+   518.505 ms to 9.578-9.799 ms, but it scattered updates across thousands of
+   roughly 1 KiB histograms. Aggregate context-materialization work rose from
+   135.535 ms to 2,046.490-2,252.485 ms, and AC-tokenization wall time rose from
+   90.519 ms to 393.242-401.531 ms. Against the quiet parent, codestream time
+   regressed 22.56-28.91% despite identical 1,638,673-byte output. The entire
+   code experiment was removed. A future revisit would need cache-local group
+   histograms plus a reduction, not direct random writes to the global context
+   table.
+
 8. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
