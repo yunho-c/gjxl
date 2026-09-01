@@ -22,8 +22,18 @@ import sys
 import tempfile
 import time
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
-from encode_image import WrapperError, convert_to_pfm, is_pfm
+from encode_image import (
+    WrapperError,
+    convert_to_pfm,
+    find_executable,
+    is_pfm,
+    require_single_frame,
+    run_checked,
+    validate_pfm,
+)
 
 
 PINNED_LIBJXL_REVISION = "e8ff09762481785938d8e4e01333ed3917571161"
@@ -140,8 +150,164 @@ def inspect_pfm(path: Path) -> tuple[int, int]:
     return width, height
 
 
+def _manifest_dimension(value: Any, field: str, *, allow_zero: bool = False) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ComparisonError(f"Corpus transform {field} must be an integer")
+    minimum = 0 if allow_zero else 1
+    if value < minimum:
+        relation = "nonnegative" if allow_zero else "positive"
+        raise ComparisonError(f"Corpus transform {field} must be {relation}")
+    return value
+
+
+def parse_source_transform(entry: dict[str, Any]) -> dict[str, Any] | None:
+    transform: dict[str, Any] = {}
+    if "crop" in entry:
+        crop = entry["crop"]
+        if not isinstance(crop, dict) or set(crop) != {"x", "y", "width", "height"}:
+            raise ComparisonError(
+                "Corpus crop must contain exactly x, y, width, and height"
+            )
+        transform["crop"] = {
+            "x": _manifest_dimension(crop["x"], "crop.x", allow_zero=True),
+            "y": _manifest_dimension(crop["y"], "crop.y", allow_zero=True),
+            "width": _manifest_dimension(crop["width"], "crop.width"),
+            "height": _manifest_dimension(crop["height"], "crop.height"),
+        }
+    if "resize" in entry:
+        resize = entry["resize"]
+        if not isinstance(resize, dict) or set(resize) != {"width", "height"}:
+            raise ComparisonError(
+                "Corpus resize must contain exactly width and height"
+            )
+        transform["resize"] = {
+            "width": _manifest_dimension(resize["width"], "resize.width"),
+            "height": _manifest_dimension(resize["height"], "resize.height"),
+            "filter": "Lanczos",
+        }
+    return transform or None
+
+
+def validated_downloads(source_manifest: Path) -> list[tuple[Path, str, str]]:
+    document = load_json(source_manifest)
+    if document.get("schema_version") != CORPUS_SCHEMA_VERSION:
+        raise ComparisonError("Unsupported source-manifest schema")
+    entries = document.get("inputs")
+    if not isinstance(entries, list) or not entries:
+        raise ComparisonError("Source manifest must contain a nonempty inputs list")
+    downloads: dict[Path, tuple[str, str]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ComparisonError("Each source-manifest input must be an object")
+        path_value = entry.get("path")
+        url = entry.get("source")
+        digest = entry.get("sha256")
+        if not isinstance(path_value, str) or not path_value:
+            raise ComparisonError("Download input is missing string field path")
+        path = Path(path_value)
+        if path.is_absolute() or ".." in path.parts:
+            raise ComparisonError(f"Download path must be relative and contained: {path}")
+        if not isinstance(url, str) or urlparse(url).scheme != "https":
+            raise ComparisonError(f"Download source must be an HTTPS URL: {url!r}")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ComparisonError(f"Download {path} has an invalid SHA-256")
+        previous = downloads.get(path)
+        if previous is not None and previous != (url, digest):
+            raise ComparisonError(f"Download path has conflicting sources: {path}")
+        downloads[path] = (url, digest)
+    return [(path, url, digest) for path, (url, digest) in downloads.items()]
+
+
+def fetch_corpus_sources(args: argparse.Namespace) -> None:
+    source_manifest = args.source_manifest.resolve()
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    for relative_path, url, expected_sha256 in validated_downloads(source_manifest):
+        destination = output / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            actual_sha256 = sha256_file(destination)
+            if actual_sha256 != expected_sha256:
+                raise ComparisonError(
+                    f"Existing corpus source SHA-256 differs for {destination}: "
+                    f"actual={actual_sha256} expected={expected_sha256}"
+                )
+            continue
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=destination.parent,
+                prefix=destination.name + ".tmp-",
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                request = Request(url, headers={"User-Agent": "gjxl-comparison/1"})
+                with urlopen(request, timeout=args.timeout) as response:
+                    shutil.copyfileobj(response, stream)
+            actual_sha256 = sha256_file(temporary)
+            if actual_sha256 != expected_sha256:
+                raise ComparisonError(
+                    f"Downloaded corpus source SHA-256 differs for {relative_path}: "
+                    f"actual={actual_sha256} expected={expected_sha256}"
+                )
+            temporary.replace(destination)
+        except Exception:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            raise
+    print(output)
+
+
+def convert_transformed_source_to_pfm(
+    magick_command: str,
+    source: Path,
+    destination: Path,
+    background: str,
+    transform: dict[str, Any],
+) -> tuple[tuple[int, int], str]:
+    magick = find_executable(magick_command, "ImageMagick")
+    require_single_frame(magick, source)
+    command = [magick, str(source), "-auto-orient"]
+    display_command = [magick_command, "INPUT", "-auto-orient"]
+    crop = transform.get("crop")
+    if crop is not None:
+        geometry = (
+            f"{crop['width']}x{crop['height']}+{crop['x']}+{crop['y']}"
+        )
+        command.extend(["-crop", geometry, "+repage"])
+        display_command.extend(["-crop", geometry, "+repage"])
+    command.extend(["-colorspace", "RGB"])
+    display_command.extend(["-colorspace", "RGB"])
+    resize = transform.get("resize")
+    if resize is not None:
+        geometry = f"{resize['width']}x{resize['height']}!"
+        command.extend(["-filter", "Lanczos", "-resize", geometry])
+        display_command.extend(["-filter", "Lanczos", "-resize", geometry])
+    suffix = [
+        "-background",
+        background,
+        "-alpha",
+        "remove",
+        "-alpha",
+        "off",
+        "-type",
+        "TrueColor",
+    ]
+    command.extend([*suffix, f"PFM:{destination}"])
+    display_command.extend([*suffix, "PFM:OUTPUT"])
+    run_checked(command, "ImageMagick transformed corpus conversion")
+    return validate_pfm(destination), " ".join(display_command)
+
+
 def prepare_corpus(args: argparse.Namespace) -> None:
     source_manifest = args.source_manifest.resolve()
+    source_root_argument = getattr(args, "source_root", None)
+    source_root = (
+        source_root_argument.resolve()
+        if source_root_argument is not None
+        else source_manifest.parent
+    )
     document = load_json(source_manifest)
     if document.get("schema_version") != CORPUS_SCHEMA_VERSION:
         raise ComparisonError("Unsupported source-manifest schema")
@@ -170,11 +336,30 @@ def prepare_corpus(args: argparse.Namespace) -> None:
             if name in names:
                 raise ComparisonError(f"Duplicate corpus input name: {name}")
             names.add(name)
-            source = (source_manifest.parent / entry["path"]).resolve()
+            source = (source_root / entry["path"]).resolve()
             if not source.is_file():
                 raise ComparisonError(f"Corpus source does not exist: {source}")
+            source_sha256 = sha256_file(source)
+            expected_sha256 = entry.get("sha256")
+            if expected_sha256 is not None:
+                if not isinstance(expected_sha256, str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", expected_sha256
+                ):
+                    raise ComparisonError(
+                        f"Corpus input {name} has an invalid SHA-256"
+                    )
+                if source_sha256 != expected_sha256:
+                    raise ComparisonError(
+                        f"Corpus source SHA-256 differs for {name}: "
+                        f"actual={source_sha256} expected={expected_sha256}"
+                    )
             destination = canonical_dir / f"{name}.pfm"
+            source_transform = parse_source_transform(entry)
             if is_pfm(source):
+                if source_transform is not None:
+                    raise ComparisonError(
+                        f"Identity PFM input {name} cannot request crop or resize"
+                    )
                 if entry["source_color"].lower() not in {
                     "linear-srgb",
                     "linear srgb",
@@ -190,14 +375,23 @@ def prepare_corpus(args: argparse.Namespace) -> None:
                     magick_version = run_capture(
                         [args.magick, "-version"]
                     ).stdout.splitlines()[0]
-                convert_to_pfm(
-                    args.magick, source, destination, args.background
-                )
-                conversion = (
-                    f"{args.magick} INPUT -auto-orient -colorspace RGB "
-                    f"-background {args.background} -alpha remove -alpha off "
-                    "-type TrueColor PFM:OUTPUT"
-                )
+                if source_transform is None:
+                    convert_to_pfm(
+                        args.magick, source, destination, args.background
+                    )
+                    conversion = (
+                        f"{args.magick} INPUT -auto-orient -colorspace RGB "
+                        f"-background {args.background} -alpha remove -alpha off "
+                        "-type TrueColor PFM:OUTPUT"
+                    )
+                else:
+                    _, conversion = convert_transformed_source_to_pfm(
+                        args.magick,
+                        source,
+                        destination,
+                        args.background,
+                        source_transform,
+                    )
             width, height = inspect_pfm(destination)
             retained.append(
                 {
@@ -209,8 +403,9 @@ def prepare_corpus(args: argparse.Namespace) -> None:
                     "canonical_color": "linear-sRGB D65 relative",
                     "canonical_format": "PFM RGB float32, file-bottom-up",
                     "conversion": conversion,
+                    "source_transform": source_transform,
                     "source_path": str(source),
-                    "source_sha256": sha256_file(source),
+                    "source_sha256": source_sha256,
                     "source": entry["source"],
                     "license": entry["license"],
                     "source_color": entry["source_color"],
@@ -221,6 +416,7 @@ def prepare_corpus(args: argparse.Namespace) -> None:
             output / "manifest.json",
             {
                 "schema_version": CORPUS_SCHEMA_VERSION,
+                "source_manifest_sha256": sha256_file(source_manifest),
                 "canonical_color": "linear-sRGB D65 relative",
                 "alpha_background": args.background,
                 "conversion_tool": magick_version,
@@ -934,8 +1130,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    fetch = subparsers.add_parser("fetch-corpus")
+    fetch.add_argument("--source-manifest", type=Path, required=True)
+    fetch.add_argument("--output", type=Path, required=True)
+    fetch.add_argument("--timeout", type=positive_int, default=60)
+    fetch.set_defaults(function=fetch_corpus_sources)
+
     prepare = subparsers.add_parser("prepare-corpus")
     prepare.add_argument("--source-manifest", type=Path, required=True)
+    prepare.add_argument(
+        "--source-root",
+        type=Path,
+        help="resolve manifest input paths under this directory",
+    )
     prepare.add_argument("--output", type=Path, required=True)
     prepare.add_argument("--magick", default=os.environ.get("GJXL_MAGICK", "magick"))
     prepare.add_argument("--background", choices=("white", "black"), default="white")

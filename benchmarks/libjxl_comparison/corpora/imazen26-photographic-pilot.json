@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "name": "imazen-26 PNG-v3 photographic pilot subset",
+    "revision": "187fbf338ce08e8e6654db7f04ddae58d5263da2",
+    "manifest": "https://github.com/imazen/imazen-26",
+    "selection": "six landscape-oriented, public-domain photographs from the canonical test split"
+  },
+  "inputs": [
+    {
+      "name": "imazen26-1029-planter-4k",
+      "path": "1029.sdr.png",
+      "sha256": "93c6f21d9f0a967c244ccbb62593aef6365974a699cfb19d7c909a31bc3fb435",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1000-lilith-photos-general/1029_general_decorative-planter-bed_hotel-zentik-project-valladolid_s23u_iso80-f1p7_20230918-105926_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-4k",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160}
+    },
+    {
+      "name": "imazen26-1029-planter-1080p",
+      "path": "1029.sdr.png",
+      "sha256": "93c6f21d9f0a967c244ccbb62593aef6365974a699cfb19d7c909a31bc3fb435",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1000-lilith-photos-general/1029_general_decorative-planter-bed_hotel-zentik-project-valladolid_s23u_iso80-f1p7_20230918-105926_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-1080p",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160},
+      "resize": {"width": 1920, "height": 1080}
+    },
+    {
+      "name": "imazen26-1039-sun-forest-4k",
+      "path": "1039.sdr.png",
+      "sha256": "40be02822f8212242b8d4af1dba9577f67c93be72eba9efb927cb3d799bc4f47",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1000-lilith-photos-general/1039_general_sun-over-forest_ek-balam_s23u_iso50-f2p2_20230918-160739_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-4k",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160}
+    },
+    {
+      "name": "imazen26-1039-sun-forest-1080p",
+      "path": "1039.sdr.png",
+      "sha256": "40be02822f8212242b8d4af1dba9577f67c93be72eba9efb927cb3d799bc4f47",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1000-lilith-photos-general/1039_general_sun-over-forest_ek-balam_s23u_iso50-f2p2_20230918-160739_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-1080p",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160},
+      "resize": {"width": 1920, "height": 1080}
+    },
+    {
+      "name": "imazen26-1049-river-city-4k",
+      "path": "1049.sdr.png",
+      "sha256": "7e0b3af19aba5f742c3565ebadf4bc883aa36048989021516399c7892e5a8fb7",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1000-lilith-photos-general/1049_general_river-bridge-cityscape_louvre-palace-paris_s23u_iso50-f4p9_20240425-154623_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-4k",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160}
+    },
+    {
+      "name": "imazen26-1049-river-city-1080p",
+      "path": "1049.sdr.png",
+      "sha256": "7e0b3af19aba5f742c3565ebadf4bc883aa36048989021516399c7892e5a8fb7",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1000-lilith-photos-general/1049_general_river-bridge-cityscape_louvre-palace-paris_s23u_iso50-f4p9_20240425-154623_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-1080p",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160},
+      "resize": {"width": 1920, "height": 1080}
+    },
+    {
+      "name": "imazen26-1207-bedroom-noise-4k",
+      "path": "1207.sdr.png",
+      "sha256": "1395e0d5d1dd8f57a0796cd89bf9265fa1ef1a2a71868c24497fe032b9a5990b",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1200-lilith-interiors/1207_interiors_bedroom-with-bed_hotel-zentik-project-valladolid_s23u_iso1600-f1p7_20230917-183439_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-4k",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160}
+    },
+    {
+      "name": "imazen26-1207-bedroom-noise-1080p",
+      "path": "1207.sdr.png",
+      "sha256": "1395e0d5d1dd8f57a0796cd89bf9265fa1ef1a2a71868c24497fe032b9a5990b",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1200-lilith-interiors/1207_interiors_bedroom-with-bed_hotel-zentik-project-valladolid_s23u_iso1600-f1p7_20230917-183439_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-1080p",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160},
+      "resize": {"width": 1920, "height": 1080}
+    },
+    {
+      "name": "imazen26-1409-rainbow-4k",
+      "path": "1409.sdr.png",
+      "sha256": "61ba9c1cf9bb6e71ae7e8f780875d1416e640867c9bd0722e5d8babb9df4a8f9",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1400-lilith-nature/1409_nature_rainbow-over-landscape_maui-hawaii_s21u_iso16-f1p8_20210608-165509_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-4k",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160}
+    },
+    {
+      "name": "imazen26-1409-rainbow-1080p",
+      "path": "1409.sdr.png",
+      "sha256": "61ba9c1cf9bb6e71ae7e8f780875d1416e640867c9bd0722e5d8babb9df4a8f9",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1400-lilith-nature/1409_nature_rainbow-over-landscape_maui-hawaii_s21u_iso16-f1p8_20210608-165509_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-1080p",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160},
+      "resize": {"width": 1920, "height": 1080}
+    },
+    {
+      "name": "imazen26-1609-food-detail-4k",
+      "path": "1609.sdr.png",
+      "sha256": "45f9d77ed79aafd7aca3b99dec8adf1f3d7d0210f3248263b5579941358f0567",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1600-lilith-food/1609_food_tray-of-food_kurama-kibune-cho-kyoto-japan_s23u_iso100-f2p2_20230711-123756_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-4k",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160}
+    },
+    {
+      "name": "imazen26-1609-food-detail-1080p",
+      "path": "1609.sdr.png",
+      "sha256": "45f9d77ed79aafd7aca3b99dec8adf1f3d7d0210f3248263b5579941358f0567",
+      "source": "https://codec-corpus.r2.imazen.org/imazen-26-png-v3/1600-lilith-food/1609_food_tray-of-food_kurama-kibune-cho-kyoto-japan_s23u_iso100-f2p2_20230711-123756_4000x3000.sdr.png",
+      "license": "PD-own; released to the public domain by imazen-26 contributor lilith",
+      "source_color": "8-bit sRGB D65 PNG-v3 SDR render",
+      "category": "photographic-1080p",
+      "crop": {"x": 80, "y": 420, "width": 3840, "height": 2160},
+      "resize": {"width": 1920, "height": 1080}
+    }
+  ]
+}

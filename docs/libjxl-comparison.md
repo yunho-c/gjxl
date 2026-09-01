@@ -1,6 +1,6 @@
 # GJXL/libjxl codestream performance comparison plan
 
-Status: proposed, 2026-09-01.
+Status: Phase 1 in progress, 2026-09-01.
 
 ## Purpose
 
@@ -211,9 +211,12 @@ their absolute timings for retained claims.
 Phase 1 is implemented without modifying the pinned libjxl source. The pieces
 are deliberately separated:
 
+- `tools/libjxl_comparison.py fetch-corpus` downloads each unique HTTPS source
+  atomically and requires its declared SHA-256 before retaining it;
 - `tools/libjxl_comparison.py prepare-corpus` converts or validates sources,
-  requires provenance and license fields, and writes a never-overwritten
-  canonical-PFM corpus with source and canonical SHA-256 hashes;
+  requires provenance and license fields, applies only explicit manifest crop
+  and resize operations, and writes a never-overwritten canonical-PFM corpus
+  with source and canonical SHA-256 hashes;
 - `tools/libjxl_comparison.py build-libjxl` verifies the pinned revision,
   builds shared `libjxl`, `djxl`, and `butteraugli_main`, then builds the
   GJXL-owned public-C-API harness under an isolated build root;
@@ -254,17 +257,46 @@ A source manifest has this minimal form:
 }
 ```
 
+An optional `sha256` pins the fetched source. Optional `crop` and `resize`
+objects make preprocessing reviewable rather than hiding it in a wrapper. Crop
+coordinates apply after EXIF orientation. Resizing occurs after conversion to
+linear RGB and uses a fixed Lanczos filter. A PFM identity input cannot request
+either transform.
+
+The first headline photographic subset is pinned at
+`benchmarks/libjxl_comparison/corpora/imazen26-photographic-pilot.json`. It uses
+six public-domain photographs from the canonical test split of imazen-26 at
+revision `187fbf338ce08e8e6654db7f04ddae58d5263da2`: a textured planter,
+sunlit forest, structured city/river view, ISO-1600 interior, rainbow
+landscape, and detailed food scene. Every source is a 4000x3000 PNG-v3 SDR
+render. The 4K view is the explicit center crop
+`3840x2160+80+420`; the 1080p view is a linear-light Lanczos reduction of that
+same field of view. Source URLs, public-domain status, and source hashes are
+recorded per entry.
+
+This completes the six-photograph 1080p/4K headline prerequisite. The Kodak
+continuity set and generated padded stress inputs still need to be added before
+the complete Phase 1 exit criteria can be claimed.
+
 Run the pilot from this worktree as follows:
 
 ```sh
+python3 tools/libjxl_comparison.py fetch-corpus \
+  --source-manifest \
+    benchmarks/libjxl_comparison/corpora/imazen26-photographic-pilot.json \
+  --output build/libjxl-comparison/corpus-sources
+
 python3 tools/libjxl_comparison.py prepare-corpus \
-  --source-manifest path/to/sources.json \
-  --output build/libjxl-comparison/corpus
+  --source-manifest \
+    benchmarks/libjxl_comparison/corpora/imazen26-photographic-pilot.json \
+  --source-root build/libjxl-comparison/corpus-sources \
+  --output build/libjxl-comparison/corpus-imazen26-pilot-pinned
 
 python3 tools/libjxl_comparison.py build-libjxl
 
 python3 tools/libjxl_comparison.py run \
-  --corpus-manifest build/libjxl-comparison/corpus/manifest.json \
+  --corpus-manifest \
+    build/libjxl-comparison/corpus-imazen26-pilot-pinned/manifest.json \
   --configuration both
 ```
 
@@ -512,8 +544,10 @@ time and normalized cost, together with output size and actual decoded quality.
 
 ## Implementation order
 
-1. **Infrastructure complete; corpus selection remains.** Pin the comparison
-   corpus, canonical conversion, revisions, and host/build manifest.
+1. **Headline photographs complete; continuity/stress inputs remain.** The
+   hash-pinned imazen-26 six-image subset now supplies paired 1080p/4K views.
+   Add the Kodak continuity set and generated padded stress inputs before
+   declaring the full corpus contract complete.
 2. **Complete.** Add the benchmark-only GJXL serializer worker override.
 3. **Complete.** Add the comparison driver and raw unprofiled result schema.
 4. **Complete.** Extend the Samply classifier with the neutral stage mapping
