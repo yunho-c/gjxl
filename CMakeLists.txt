@@ -655,6 +655,11 @@ if(GJXL_ENABLE_METAL_PROFILING)
   )
 endif()
 
+# Some kernels use Metal 3.2 language features such as lambdas. Select the
+# language version explicitly so an embedding application's deployment target
+# does not make the Metal compiler choose an older default.
+set(GJXL_METAL_LANGUAGE_FLAGS -std=metal3.2)
+
 # .metal -> .ir
 
 add_custom_command(
@@ -671,6 +676,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_LANGUAGE_FLAGS}
     ${GJXL_METAL_PROFILING_FLAGS}
     "${GJXL_DCT_METAL_SOURCE}"
     -o
@@ -700,6 +706,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_LANGUAGE_FLAGS}
     ${GJXL_METAL_PROFILING_FLAGS}
     "${GJXL_AC_STRATEGY_METAL_SOURCE}"
     -o
@@ -728,6 +735,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_LANGUAGE_FLAGS}
     ${GJXL_METAL_PROFILING_FLAGS}
     "${GJXL_PRIMITIVES_METAL_SOURCE}"
     -o
@@ -756,6 +764,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_LANGUAGE_FLAGS}
     ${GJXL_METAL_PROFILING_FLAGS}
     -fmetal-math-mode=safe
     -fmetal-math-fp32-functions=precise
@@ -787,6 +796,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_LANGUAGE_FLAGS}
     ${GJXL_METAL_PROFILING_FLAGS}
     -fmetal-math-mode=safe
     -ffp-contract=off
@@ -818,6 +828,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_LANGUAGE_FLAGS}
     ${GJXL_METAL_PROFILING_FLAGS}
     -fmetal-math-mode=safe
     -fmetal-math-fp32-functions=precise
@@ -849,6 +860,7 @@ add_custom_command(
     -sdk macosx
     metal
     -c
+    ${GJXL_METAL_LANGUAGE_FLAGS}
     ${GJXL_METAL_PROFILING_FLAGS}
     -fmetal-math-mode=safe
     -fmetal-math-fp32-functions=precise
