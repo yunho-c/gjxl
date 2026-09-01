@@ -888,14 +888,14 @@ Status AdvanceAnsState(
 
 template <typename EmitChunk>
 Status ProcessAnsTokenStream(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   EmitChunk&& emit_chunk,
   uint32_t* final_state) {
 
   uint32_t state = kAnsSignature << 16;
   for (size_t index = tokens.size(); index != 0; --index) {
-    const EntropyToken& token = tokens[index - 1];
+    const EntropyToken token = tokens[index - 1];
     if (token.context >= code.context_count) {
       return Status::InvalidArgument("ANS token context is out of range");
     }
@@ -917,11 +917,11 @@ Status ProcessAnsTokenStream(
 }
 
 Status CountAnsTokenStreamBitsInternal(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   uint64_t* bit_count) {
 
-  if (bit_count == nullptr) {
+  if (bit_count == nullptr || !tokens.valid()) {
     return Status::InvalidArgument("ANS token cost output is null");
   }
   // Each token emits at most its 31 HybridUint extra bits and one 16-bit
@@ -947,7 +947,7 @@ Status CountAnsTokenStreamBitsInternal(
 }
 
 Status MeasureAnsCode(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& code,
   uint64_t model_bits,
   EntropyCodeCost* cost) {
@@ -959,7 +959,7 @@ Status MeasureAnsCode(
   candidate.model_bits = model_bits;
   candidate.cluster_count = code.ans_histograms.size();
   candidate.section_token_bits.reserve(section_tokens.size());
-  for (const std::vector<EntropyToken>& section : section_tokens) {
+  for (const EntropyTokenStreamView section : section_tokens) {
     uint64_t section_bits = 0;
     if (Status status = CountAnsTokenStreamBitsInternal(
           section, code, &section_bits);
@@ -1016,7 +1016,7 @@ bool HasEquivalentAnsTokenCoding(
 }
 
 Status MeasureAnsCodes(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyTokenStreamView> section_tokens,
   std::span<const EntropyCode* const> codes,
   std::span<const uint64_t> model_bits,
   std::span<EntropyCodeCost> costs) {
@@ -1052,7 +1052,10 @@ Status MeasureAnsCodes(
   const EntropyCode& reference = *codes[0];
   for (size_t section_index = 0; section_index < section_tokens.size();
        ++section_index) {
-    const std::vector<EntropyToken>& section = section_tokens[section_index];
+    const EntropyTokenStreamView section = section_tokens[section_index];
+    if (!section.valid()) {
+      return Status::InvalidArgument("ANS token-stream view is invalid");
+    }
     if (section.size() >
         (std::numeric_limits<uint64_t>::max() - 32) /
           kMaximumBitsPerToken) {
@@ -1062,7 +1065,7 @@ Status MeasureAnsCodes(
     std::fill_n(section_bits.begin(), codes.size(), uint64_t{32});
     for (size_t token_index = section.size(); token_index != 0;
          --token_index) {
-      const EntropyToken& token = section[token_index - 1];
+      const EntropyToken token = section[token_index - 1];
       if (token.context >= reference.context_count) {
         return Status::InvalidArgument("ANS token context is out of range");
       }
@@ -1102,11 +1105,19 @@ Status MeasureAnsCodes(
 }  // namespace
 
 Status codestream_internal::CountAnsTokenStreamBits(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   uint64_t* bit_count) {
 
   return CountAnsTokenStreamBitsInternal(tokens, code, bit_count);
+}
+
+Status codestream_internal::CountAnsTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+  return CountAnsTokenStreamBits(
+    EntropyTokenStreamView::Interleaved(tokens), code, bit_count);
 }
 
 Status codestream_internal::AggregateEntropyValues(
@@ -1304,11 +1315,11 @@ Status codestream_internal::WriteAnsEntropyCodeModel(
 }
 
 Status codestream_internal::WriteAnsTokenStream(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   BitWriter* writer) {
 
-  if (writer == nullptr) {
+  if (writer == nullptr || !tokens.valid()) {
     return Status::InvalidArgument("ANS token-stream output is null");
   }
   try {
@@ -1344,8 +1355,16 @@ Status codestream_internal::WriteAnsTokenStream(
   }
 }
 
+Status codestream_internal::WriteAnsTokenStream(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  BitWriter* writer) {
+  return WriteAnsTokenStream(
+    EntropyTokenStreamView::Interleaved(tokens), code, writer);
+}
+
 Status OptimizeAnsEntropyCode(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& prefix_partition,
   EntropyCode* code,
   EntropyCodeCost* cost,
@@ -1371,8 +1390,12 @@ Status OptimizeAnsEntropyCode(
     const ProfileClock::time_point value_collection_begin =
       ProfileBegin(profile);
     std::vector<std::vector<uint32_t>> values(cluster_count);
-    for (const std::vector<EntropyToken>& section : section_tokens) {
-      for (const EntropyToken& token : section) {
+    for (const EntropyTokenStreamView section : section_tokens) {
+      if (!section.valid()) {
+        return Status::InvalidArgument("ANS token-stream view is invalid");
+      }
+      for (size_t index = 0; index < section.size(); ++index) {
+        const EntropyToken token = section[index];
         if (token.context >= prefix_partition.context_count) {
           return Status::InvalidArgument("ANS token context is out of range");
         }
@@ -1680,6 +1703,27 @@ Status OptimizeAnsEntropyCode(
       *cost = std::move(best_cost);
     }
     return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+}
+
+Status OptimizeAnsEntropyCode(
+  std::span<const std::vector<EntropyToken>> section_tokens,
+  const EntropyCode& prefix_partition,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  codestream_internal::EntropyWorkProfile* profile) {
+  try {
+    std::vector<EntropyTokenStreamView> views;
+    views.reserve(section_tokens.size());
+    for (const std::vector<EntropyToken>& section : section_tokens) {
+      views.push_back(EntropyTokenStreamView::Interleaved(section));
+    }
+    return OptimizeAnsEntropyCode(
+      views, prefix_partition, code, cost, profile);
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {

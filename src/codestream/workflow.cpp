@@ -73,6 +73,15 @@ void AccumulateCodestreamProfile(
     source.coefficient_order_work_nanoseconds;
   destination->coefficient_tokenization_work_nanoseconds +=
     source.coefficient_tokenization_work_nanoseconds;
+  destination->coefficient_context_materialization_work_nanoseconds +=
+    source.coefficient_context_materialization_work_nanoseconds;
+  destination->coefficient_tokenization_pass_count +=
+    source.coefficient_tokenization_pass_count;
+  destination->coefficient_token_count += source.coefficient_token_count;
+  destination->coefficient_context_materialization_count +=
+    source.coefficient_context_materialization_count;
+  destination->coefficient_materialized_token_count +=
+    source.coefficient_materialized_token_count;
   destination->entropy_optimization_nanoseconds +=
     source.entropy_optimization_nanoseconds;
   codestream_internal::AccumulateEntropyWorkProfile(

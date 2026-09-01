@@ -32,6 +32,44 @@ struct EntropyToken {
   friend bool operator==(const EntropyToken&, const EntropyToken&) = default;
 };
 
+/// Read-only entropy-token stream backed either by conventional interleaved
+/// tokens or by shared values plus candidate-specific 16-bit contexts.
+struct EntropyTokenStreamView {
+  std::span<const EntropyToken> tokens;
+  std::span<const uint32_t> values;
+  std::span<const uint16_t> contexts;
+  bool split = false;
+
+  [[nodiscard]] static constexpr EntropyTokenStreamView Interleaved(
+    std::span<const EntropyToken> source) noexcept {
+    return {.tokens = source};
+  }
+
+  [[nodiscard]] static constexpr EntropyTokenStreamView Split(
+    std::span<const uint32_t> source_values,
+    std::span<const uint16_t> source_contexts) noexcept {
+    return {
+      .values = source_values,
+      .contexts = source_contexts,
+      .split = true,
+    };
+  }
+
+  [[nodiscard]] constexpr bool valid() const noexcept {
+    return split
+      ? tokens.empty() && values.size() == contexts.size()
+      : values.empty() && contexts.empty();
+  }
+
+  [[nodiscard]] constexpr size_t size() const noexcept {
+    return split ? values.size() : tokens.size();
+  }
+
+  [[nodiscard]] constexpr EntropyToken operator[](size_t index) const noexcept {
+    return split ? EntropyToken{contexts[index], values[index]} : tokens[index];
+  }
+};
+
 /// Encodes signed integers as 0, 1, 2, 3... in 0, -1, 1, -2... order.
 [[nodiscard]] constexpr uint32_t PackSigned(int32_t value) noexcept {
   return (static_cast<uint32_t>(value) << 1) ^
@@ -141,12 +179,28 @@ struct EntropyCodeCost {
   EntropyCodeCost* cost = nullptr,
   codestream_internal::EntropyWorkProfile* profile = nullptr);
 
+/// Optimizes an entropy model without requiring interleaved token storage.
+[[nodiscard]] Status OptimizeEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr,
+  codestream_internal::EntropyWorkProfile* profile = nullptr);
+
 /// Builds an ANS model using an optimized prefix code's context partition.
 /// HybridUint configurations and normalized populations are screened using an
 /// ANS-specific cost estimate, then alphabet widths compete on exact serialized
 /// model-plus-token cost. Inputs and outputs remain unchanged on failure.
 [[nodiscard]] Status OptimizeAnsEntropyCode(
   std::span<const std::vector<EntropyToken>> section_tokens,
+  const EntropyCode& prefix_partition,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr,
+  codestream_internal::EntropyWorkProfile* profile = nullptr);
+
+/// Optimizes ANS from interleaved or shared-value token streams.
+[[nodiscard]] Status OptimizeAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& prefix_partition,
   EntropyCode* code,
   EntropyCodeCost* cost = nullptr,
@@ -182,6 +236,12 @@ struct EntropyCodeCost {
 /// Encodes a section's tokens using an already optimized entropy model.
 [[nodiscard]] Status WriteTokenStream(
   std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  BitWriter* writer);
+
+/// Encodes a split or interleaved stream using an optimized entropy model.
+[[nodiscard]] Status WriteTokenStream(
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   BitWriter* writer);
 

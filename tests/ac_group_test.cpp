@@ -19,6 +19,7 @@
 
 #include "codec/chroma_from_luma.h"
 #include "codec/reconstruction.h"
+#include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
 
 namespace {
@@ -780,6 +781,84 @@ bool CheckFrameCoefficientOrderSelection() {
   return true;
 }
 
+bool CheckFrameTokenTemplateReuse() {
+  gjxl::VarDctEncoderFrame frame;
+  if (!MakeFrame(257, {}, &frame).ok()) {
+    return false;
+  }
+  gjxl::SimpleCoefficientOrders custom_orders;
+  if (!gjxl::ComputeSimpleCoefficientOrders(frame, &custom_orders).ok() ||
+      custom_orders.used_order_mask == 0) {
+    return false;
+  }
+
+  gjxl::SimpleBlockContextMap qf_map;
+  qf_map.qf_thresholds = {16, 64};
+  qf_map.num_contexts = 6;
+  const size_t segment_count = qf_map.qf_thresholds.size() + 1;
+  qf_map.context_map.resize(
+    3 * gjxl::codestream_internal::kSimpleCoefficientOrderCount *
+    segment_count);
+  for (size_t channel_row = 0; channel_row < 3; ++channel_row) {
+    for (size_t order = 0;
+         order < gjxl::codestream_internal::kSimpleCoefficientOrderCount;
+         ++order) {
+      for (size_t segment = 0; segment < segment_count; ++segment) {
+        qf_map.context_map[
+          (channel_row *
+             gjxl::codestream_internal::kSimpleCoefficientOrderCount +
+           order) *
+            segment_count +
+          segment] = static_cast<uint8_t>(
+          (channel_row + order + segment) % qf_map.num_contexts);
+      }
+    }
+  }
+  const std::array<gjxl::SimpleBlockContextMap, 4> maps = {
+    gjxl::DefaultSimpleBlockContextMap(),
+    gjxl::JxlDefaultSimpleBlockContextMap(),
+    gjxl::TwoChannelSimpleBlockContextMap(),
+    qf_map,
+  };
+  const std::array<gjxl::SimpleCoefficientOrders, 2> orders = {
+    gjxl::SimpleCoefficientOrders{}, custom_orders};
+  for (const gjxl::SimpleCoefficientOrders& order : orders) {
+    std::vector<gjxl::SimpleAcGroupTokenTemplate> templates;
+    if (!gjxl::BuildSimpleAcGroupTokenTemplates(frame, order, &templates).ok() ||
+        templates.size() != frame.ac_group_count()) {
+      std::cerr << "Frame AC token-template construction failed\n";
+      return false;
+    }
+    for (const gjxl::SimpleBlockContextMap& map : maps) {
+      std::vector<gjxl::SimpleAcGroupTokenStream> direct;
+      std::vector<gjxl::SimpleAcGroupTokenStream> materialized;
+      if (!gjxl::ValidateSimpleBlockContextMap(map).ok() ||
+          !gjxl::TokenizeSimpleAcGroups(frame, order, map, &direct).ok() ||
+          !gjxl::MaterializeSimpleAcGroupTokenStreams(
+            templates, map, &materialized).ok() ||
+          materialized != direct) {
+        std::cerr << "Reused AC token template differs from direct tokens\n";
+        return false;
+      }
+    }
+
+    std::vector<gjxl::SimpleAcGroupTokenTemplate> malformed = templates;
+    malformed.front().block_context_keys.front().raw_quant = 0;
+    std::vector<gjxl::SimpleAcGroupTokenStream> output(1);
+    output.front().block_x = 999;
+    const std::vector<gjxl::SimpleAcGroupTokenStream> sentinel = output;
+    const gjxl::Status status =
+      gjxl::MaterializeSimpleAcGroupTokenStreams(
+        malformed, maps.front(), &output);
+    if (status.code() != gjxl::StatusCode::kInvalidArgument ||
+        output != sentinel) {
+      std::cerr << "Invalid AC token template rejection was not atomic\n";
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -791,7 +870,8 @@ int main() {
       || !CheckMultiblockPredictionAndOffsets()
       || !CheckMalformedGroupsAreAtomic()
       || !CheckFrameTraversalAndAtomicity()
-      || !CheckFrameCoefficientOrderSelection()) {
+      || !CheckFrameCoefficientOrderSelection()
+      || !CheckFrameTokenTemplateReuse()) {
     return EXIT_FAILURE;
   }
   std::cout << "All AC-group tokenization tests passed.\n";

@@ -58,7 +58,14 @@ struct VarDctCodestreamProfile {
   uint64_t ac_tokenization_nanoseconds = 0;
   uint64_t block_context_map_work_nanoseconds = 0;
   uint64_t coefficient_order_work_nanoseconds = 0;
+  /// Aggregate worker time spent building map-independent order templates.
   uint64_t coefficient_tokenization_work_nanoseconds = 0;
+  /// Aggregate worker time spent resolving templates for block-map candidates.
+  uint64_t coefficient_context_materialization_work_nanoseconds = 0;
+  size_t coefficient_tokenization_pass_count = 0;
+  size_t coefficient_token_count = 0;
+  size_t coefficient_context_materialization_count = 0;
+  size_t coefficient_materialized_token_count = 0;
   uint64_t entropy_optimization_nanoseconds = 0;
   EntropyWorkProfile entropy_work;
   uint64_t entropy_model_bits = 0;

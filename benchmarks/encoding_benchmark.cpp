@@ -894,7 +894,7 @@ void PrintRatioStats(std::string_view label,
   return static_cast<double>(nanoseconds) / 1.0e6;
 }
 
-constexpr std::array<std::string_view, 38> kWorkflowProfileNames = {
+constexpr std::array<std::string_view, 39> kWorkflowProfileNames = {
     "total",
     "input_preparation",
     "backend_selection",
@@ -907,6 +907,7 @@ constexpr std::array<std::string_view, 38> kWorkflowProfileNames = {
     "codestream_block_context_map_work",
     "codestream_coefficient_order_work",
     "codestream_coefficient_tokenization_work",
+    "codestream_coefficient_context_materialization_work",
     "codestream_entropy_optimization",
     "codestream_entropy_prefix_histogram_build_work",
     "codestream_entropy_prefix_histogram_cost_work",
@@ -955,6 +956,10 @@ struct RawWorkflowSample {
   size_t selected_block_context_candidate_index = 0;
   size_t selected_block_context_count = 0;
   size_t selected_block_context_qf_threshold_count = 0;
+  size_t coefficient_tokenization_pass_count = 0;
+  size_t coefficient_token_count = 0;
+  size_t coefficient_context_materialization_count = 0;
+  size_t coefficient_materialized_token_count = 0;
   bool has_final_score = false;
   double final_score = 0.0;
 };
@@ -998,6 +1003,7 @@ using WorkflowProfileNanoseconds =
       profile.codestream.block_context_map_work_nanoseconds,
       profile.codestream.coefficient_order_work_nanoseconds,
       profile.codestream.coefficient_tokenization_work_nanoseconds,
+      profile.codestream.coefficient_context_materialization_work_nanoseconds,
       profile.codestream.entropy_optimization_nanoseconds,
       profile.codestream.entropy_work.prefix_histogram_build_nanoseconds,
       profile.codestream.entropy_work.prefix_histogram_cost_nanoseconds,
@@ -1088,7 +1094,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 7,\n"
+           << "  \"schema_version\": 8,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
@@ -1162,6 +1168,14 @@ void WriteRawWorkflowSamples(
                << sample.selected_block_context_count
                << ", \"qf_thresholds\": "
                << sample.selected_block_context_qf_threshold_count << "}"
+               << ", \"ac_tokenization\": {\"template_count\": "
+               << sample.coefficient_tokenization_pass_count
+               << ", \"template_tokens\": "
+               << sample.coefficient_token_count
+               << ", \"context_materialization_count\": "
+               << sample.coefficient_context_materialization_count
+               << ", \"materialized_tokens\": "
+               << sample.coefficient_materialized_token_count << "}"
                << ", \"final_score\": ";
         if (sample.has_final_score) {
           output << std::setprecision(17) << sample.final_score;
@@ -1678,6 +1692,14 @@ void RunPublicWorkflowOnlyWorkload(
       profile.codestream.selected_block_context_count;
     raw_sample.selected_block_context_qf_threshold_count =
       profile.codestream.selected_block_context_qf_threshold_count;
+    raw_sample.coefficient_tokenization_pass_count =
+      profile.codestream.coefficient_tokenization_pass_count;
+    raw_sample.coefficient_token_count =
+      profile.codestream.coefficient_token_count;
+    raw_sample.coefficient_context_materialization_count =
+      profile.codestream.coefficient_context_materialization_count;
+    raw_sample.coefficient_materialized_token_count =
+      profile.codestream.coefficient_materialized_token_count;
     raw_sample.has_final_score =
       summary.final_butteraugli_score_evaluated &&
       !summary.score_history.empty();

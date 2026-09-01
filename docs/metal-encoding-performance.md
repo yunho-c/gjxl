@@ -136,14 +136,15 @@ Each artifact contains:
   and SHA-256 hashes of the benchmark, metallib, and symbol companion; and
 - starting worktree/index patches plus an untracked-file hash inventory.
 
-Raw workflow schema 7 keeps the elapsed `codestream_dc_tokenization`,
+Raw workflow schema 8 keeps the elapsed `codestream_dc_tokenization`,
 `codestream_ac_tokenization`, `codestream_entropy_optimization`,
 `codestream_section_writing`, and `codestream_assembly` phases, and adds finer
 codestream counters. Names ending in `_work` are aggregate worker time: work
 performed by overlapping DC, coefficient-order, AC-candidate, and section
 tasks is summed, so those counters can exceed their enclosing wall-clock phase
 and must not be added to complete-encode latency. The new breakdown separates
-block-context and coefficient preparation, coefficient tokenization, prefix
+block-context and coefficient preparation, map-independent coefficient-token
+template construction, candidate-specific context materialization, prefix
 histogram construction/clustering/code building, prefix value collection,
 HybridUint configuration search, final prefix-model serialization and checked
 cost assembly, ANS value aggregation,
@@ -151,6 +152,9 @@ HybridUint and histogram/model searches, exact ANS token costing, entropy
 selection, model/header and token-stream writing, candidate measurement, and
 the selected candidate's final header/TOC/section/output assembly. The
 `substage_work_timing` field records the `aggregate-worker-time` semantics.
+Each sample's `ac_tokenization` object also records template passes and tokens
+plus context-materialization passes and tokens, so repeated full token scans
+cannot disappear behind a lower wall time.
 Entropy optimization retains each candidate model's exact per-section token
 bit counts. Candidate measurement reuses those counts to evaluate physical
 section and TOC sizes without traversing or materializing token payloads.

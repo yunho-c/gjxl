@@ -1255,12 +1255,16 @@ bool AddBits(uint64_t value, uint64_t* total) {
 }
 
 Status CountPrefixTokenStreamBitsValidated(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   uint64_t* bit_count) {
 
+  if (!tokens.valid()) {
+    return Status::InvalidArgument("Entropy token-stream view is invalid");
+  }
   uint64_t candidate = 0;
-  for (const EntropyToken& token : tokens) {
+  for (size_t index = 0; index < tokens.size(); ++index) {
+    const EntropyToken token = tokens[index];
     if (token.context >= code.context_count) {
       return Status::InvalidArgument("Entropy token context is out of range");
     }
@@ -1289,7 +1293,7 @@ Status CountPrefixTokenStreamBitsValidated(
 }
 
 Status MeasureSectionTokenBits(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& code,
   uint64_t expected_total,
   std::vector<uint64_t>* section_bits) {
@@ -1307,7 +1311,7 @@ Status MeasureSectionTokenBits(
   std::vector<uint64_t> candidate;
   candidate.reserve(section_tokens.size());
   uint64_t total = 0;
-  for (const std::vector<EntropyToken>& section : section_tokens) {
+  for (const EntropyTokenStreamView section : section_tokens) {
     uint64_t bits = 0;
     if (Status status = CountPrefixTokenStreamBitsValidated(
           section, code, &bits);
@@ -1439,7 +1443,7 @@ Status BuildClusterCode(
 }
 
 Status BuildEntropyCodeForPartition(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
   std::span<const uint8_t> clustered_map,
   size_t cluster_count,
@@ -1468,8 +1472,12 @@ Status BuildEntropyCodeForPartition(
   const ProfileClock::time_point value_collection_begin =
     ProfileBegin(profile);
   std::vector<std::vector<uint32_t>> values(cluster_count);
-  for (const std::vector<EntropyToken>& section : section_tokens) {
-    for (const EntropyToken& token : section) {
+  for (const EntropyTokenStreamView section : section_tokens) {
+    if (!section.valid()) {
+      return Status::InvalidArgument("Entropy token-stream view is invalid");
+    }
+    for (size_t index = 0; index < section.size(); ++index) {
+      const EntropyToken token = section[index];
       if (token.context >= candidate.context_count) {
         return Status::InvalidArgument("Entropy token context is out of range");
       }
@@ -1675,7 +1683,7 @@ Status BuildPrefixCode(
 }
 
 Status OptimizeEntropyCode(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
   EntropyCode* code,
   EntropyCodeCost* cost,
@@ -1720,8 +1728,12 @@ Status OptimizeEntropyCode(
       ProfileBegin(profile);
     std::vector<Histogram> histograms(histogram_count);
     uint64_t fixed_extra_bits = 0;
-    for (const std::vector<EntropyToken>& section : section_tokens) {
-      for (const EntropyToken& token : section) {
+    for (const EntropyTokenStreamView section : section_tokens) {
+      if (!section.valid()) {
+        return Status::InvalidArgument("Entropy token-stream view is invalid");
+      }
+      for (size_t index = 0; index < section.size(); ++index) {
+        const EntropyToken token = section[index];
         if (token.context >= options.context_count) {
           return Status::InvalidArgument("Entropy token context is out of range");
         }
@@ -1984,6 +1996,26 @@ Status OptimizeEntropyCode(
   }
 }
 
+Status OptimizeEntropyCode(
+  std::span<const std::vector<EntropyToken>> section_tokens,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  codestream_internal::EntropyWorkProfile* profile) {
+  try {
+    std::vector<EntropyTokenStreamView> views;
+    views.reserve(section_tokens.size());
+    for (const std::vector<EntropyToken>& section : section_tokens) {
+      views.push_back(EntropyTokenStreamView::Interleaved(section));
+    }
+    return OptimizeEntropyCode(views, options, code, cost, profile);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory("Entropy token-view allocation failed");
+  } catch (const std::length_error&) {
+    return Status::OutOfMemory("Entropy token-view allocation is too large");
+  }
+}
+
 Status WritePrefixCodes(
   std::span<const PrefixCode> prefix_codes,
   HybridUintConfig config,
@@ -2084,12 +2116,13 @@ Status WriteEntropyCode(const EntropyCode& code, BitWriter* writer) {
 }
 
 Status WriteTokenStream(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   BitWriter* writer) {
 
-  if (writer == nullptr) {
-    return Status::InvalidArgument("Token-stream output is null");
+  if (writer == nullptr || !tokens.valid()) {
+    return Status::InvalidArgument(
+      "Token-stream output is null or its view is invalid");
   }
   if (Status status = ValidateEntropyCode(code); !status.ok()) {
     return status;
@@ -2098,7 +2131,8 @@ Status WriteTokenStream(
     return codestream_internal::WriteAnsTokenStream(tokens, code, writer);
   }
   BitWriter temporary;
-  for (const EntropyToken& token : tokens) {
+  for (size_t index = 0; index < tokens.size(); ++index) {
+    const EntropyToken token = tokens[index];
     if (token.context >= code.context_count) {
       return Status::InvalidArgument("Entropy token context is out of range");
     }
@@ -2115,13 +2149,22 @@ Status WriteTokenStream(
   return AppendTemporary(writer, &temporary);
 }
 
-Status codestream_internal::CountTokenStreamBits(
+Status WriteTokenStream(
   std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  BitWriter* writer) {
+  return WriteTokenStream(
+    EntropyTokenStreamView::Interleaved(tokens), code, writer);
+}
+
+Status codestream_internal::CountTokenStreamBits(
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   uint64_t* bit_count) {
 
-  if (bit_count == nullptr) {
-    return Status::InvalidArgument("Token-stream bit-count output is null");
+  if (bit_count == nullptr || !tokens.valid()) {
+    return Status::InvalidArgument(
+      "Token-stream bit-count output is null or its view is invalid");
   }
   if (Status status = ValidateEntropyCode(code); !status.ok()) {
     return status;
@@ -2130,6 +2173,14 @@ Status codestream_internal::CountTokenStreamBits(
     return CountAnsTokenStreamBits(tokens, code, bit_count);
   }
   return CountPrefixTokenStreamBitsValidated(tokens, code, bit_count);
+}
+
+Status codestream_internal::CountTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+  return CountTokenStreamBits(
+    EntropyTokenStreamView::Interleaved(tokens), code, bit_count);
 }
 
 }  // namespace gjxl

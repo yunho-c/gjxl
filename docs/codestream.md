@@ -1297,7 +1297,58 @@ order.
    `quantization_pipeline` score mismatch reproduced by the unmodified current
    build.
 
-7. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
+7. **Complete (2026-09-01): reuse AC token values and traversal order across
+   block-context candidates.** The former candidate loop tokenized every AC
+   coefficient stream independently for each block-context map and again for
+   natural versus custom coefficient order. Those passes repeated coefficient
+   loads, zero-density state, signed packing, value storage, and allocation even
+   though only the final context labels depended on the block map.
+
+   The retained implementation builds one map-independent template per
+   coefficient-order choice. Each group stores its values in one contiguous
+   `uint32_t` array and a compact four-byte descriptor containing the local
+   context and block-context inputs. Candidate preparation resolves only a
+   two-byte context array. Prefix optimization, ANS optimization, exact
+   count-only measurement, and final token writing accept a read-only split
+   value/context view, so candidate streams share the original values without
+   rebuilding interleaved eight-byte tokens. Descriptor and block-key storage
+   is released after all contexts have been resolved and before entropy search.
+
+   Raw workflow schema 8 separates aggregate template-construction and context-
+   materialization work and records their pass/token counts. On the 4672x5584
+   `doughnuts` PFM at distance 1.0, the selected search built two templates
+   containing 22,115,824 tokens total, then materialized 12 context variants
+   covering 132,694,944 token positions. The exact parent performed 12 full
+   tokenization passes. In the quiet final parent run, aggregate full-
+   tokenization work was 1,696.864 ms; the two candidate runs used
+   147.310-188.621 ms for template construction and 246.579-261.710 ms for
+   context materialization. These are summed worker times, not latency.
+
+   Four final independent Release processes ran parent/candidate/candidate/
+   parent with one warmup and three samples each under the fully-resident Metal
+   workflow. One parent process was broadly contaminated. Against the quiet
+   parent median, the two candidate medians reduced AC-tokenization wall time
+   from 375.754 ms to 229.661-233.748 ms (-38.88% to -37.79%) and codestream
+   time from 2,181.610 ms to 1,816.156-1,946.515 ms (-16.75% to -10.78%).
+   Entropy optimization ranged from an 8.67% improvement to a 0.13% regression,
+   consistent with variable memory pressure. Every sample remained 2,690,877
+   bytes. The nearest quiet distance-1.2 pair improved codestream time 8.22%
+   and AC tokenization 38.21% at an unchanged 2,348,582 bytes. The closest
+   padded-4K comparisons improved codestream time 10.66-11.91% at an unchanged
+   2,132,228 bytes; the second parent there was also contaminated.
+
+   Alternating one-sample memory measurements on the high-resolution input
+   reduced maximum RSS from 5,126,012,928 to 4,935,778,304 bytes (-3.71%) and
+   peak footprint from 14,138,386,224 to 13,478,008,256 bytes (-4.67%). A
+   direct CLI comparison produced byte-identical 2,690,877-byte codestreams
+   with SHA-256
+   `74dab8b328b12d3a485006b5197059df5d580e1b2aa80ee35a2dfdbc34f2d249`;
+   `djxl` 0.12.0 decoded the candidate to PFM. Split/interleaved parity tests
+   cover prefix and ANS model selection, costs, exact counting, serialized
+   payloads, and malformed-view atomicity. The complete Release suite is 61/62
+   with only the exact inherited `quantization_pipeline` score mismatch.
+
+8. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
    could cheaply screen coefficient-order and block-context candidates, search
@@ -1307,7 +1358,7 @@ order.
    rates, per-candidate time, bytes saved, and complete-codestream size must
    define this policy; one losing custom-order example is not sufficient.
 
-8. **Defer GPU entropy coding until a residual profile justifies it.** The
+9. **Defer GPU entropy coding until a residual profile justifies it.** The
    dominant exact operation builds many small, branch-heavy, depth-limited
    128-symbol Huffman trees with deterministic tie behavior. Seed assignment
    also mutates cluster state between decisions, and the CPU serializer needs

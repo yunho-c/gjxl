@@ -311,6 +311,14 @@ bool CheckEncodedFrame(
       profile.block_context_map_work_nanoseconds == 0 ||
       profile.coefficient_order_work_nanoseconds == 0 ||
       profile.coefficient_tokenization_work_nanoseconds == 0 ||
+      profile.coefficient_context_materialization_work_nanoseconds == 0 ||
+      profile.coefficient_tokenization_pass_count !=
+        (expect_custom_candidate ? 2 : 1) ||
+      profile.coefficient_token_count == 0 ||
+      profile.coefficient_context_materialization_count !=
+        profile.coefficient_tokenization_pass_count ||
+      profile.coefficient_materialized_token_count !=
+        profile.coefficient_token_count ||
       entropy_substage_work == 0 || section_substage_work == 0 ||
       assembly_substage_total == 0 ||
       profile.assembly_nanoseconds < assembly_substage_total ||
@@ -362,6 +370,14 @@ bool CheckAdaptiveBlockContextSelection() {
   if (!status.ok() || profile.block_context_candidate_count != 5 ||
       profile.compact_block_context_candidate_bytes == 0 ||
       output.size() > profile.compact_block_context_candidate_bytes ||
+      profile.coefficient_tokenization_pass_count == 0 ||
+      profile.coefficient_tokenization_pass_count > 2 ||
+      profile.coefficient_context_materialization_count !=
+        profile.coefficient_tokenization_pass_count *
+          profile.block_context_candidate_count ||
+      profile.coefficient_materialized_token_count !=
+        profile.coefficient_token_count *
+          profile.block_context_candidate_count ||
       profile.selected_block_context_candidate_index >=
         profile.block_context_candidate_count ||
       profile.selected_block_context_count == 0 ||

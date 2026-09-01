@@ -17,4 +17,9 @@ namespace gjxl::codestream_internal {
   const EntropyCode& code,
   uint64_t* bit_count);
 
+[[nodiscard]] Status CountTokenStreamBits(
+  EntropyTokenStreamView tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count);
+
 }  // namespace gjxl::codestream_internal

@@ -173,7 +173,8 @@ struct AcEncodingCandidate {
   size_t block_context_candidate_index = 0;
   SimpleBlockContextMap block_context_map;
   bool custom_order = false;
-  std::vector<std::vector<EntropyToken>> streams;
+  std::vector<std::vector<uint16_t>> contexts;
+  std::vector<EntropyTokenStreamView> streams;
   EntropyCode ac_code;
   EntropyCodeCost ac_cost;
   EntropyCode prefix_ac_code;
@@ -182,30 +183,8 @@ struct AcEncodingCandidate {
   bool all_prefix_entropy = false;
 };
 
-Status MoveAcStreams(
-  std::vector<SimpleAcGroupTokenStream>* groups,
-  std::vector<std::vector<EntropyToken>>* streams) {
-
-  if (groups == nullptr || streams == nullptr) {
-    return Status::InvalidArgument("AC stream output is null");
-  }
-  try {
-    std::vector<std::vector<EntropyToken>> candidate;
-    candidate.reserve(groups->size());
-    for (SimpleAcGroupTokenStream& group : *groups) {
-      candidate.push_back(std::move(group.tokens));
-    }
-    *streams = std::move(candidate);
-  } catch (const std::bad_alloc&) {
-    return AllocationFailure();
-  } catch (const std::length_error&) {
-    return AllocationFailure();
-  }
-  return Status::Ok();
-}
-
 Status OptimizeBestEntropyCode(
-  std::span<const std::vector<EntropyToken>> streams,
+  std::span<const EntropyTokenStreamView> streams,
   const EntropyCodeOptions& options,
   EntropyCode* code,
   EntropyCodeCost* cost,
@@ -252,6 +231,31 @@ Status OptimizeBestEntropyCode(
     profile != nullptr, selection_begin,
     profile == nullptr ? nullptr : &profile->selection_nanoseconds);
   return Status::Ok();
+}
+
+Status OptimizeBestEntropyCode(
+  std::span<const std::vector<EntropyToken>> streams,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  EntropyCode* prefix_fallback,
+  EntropyCodeCost* prefix_fallback_cost,
+  codestream_internal::EntropyWorkProfile* profile) {
+
+  try {
+    std::vector<EntropyTokenStreamView> views;
+    views.reserve(streams.size());
+    for (const std::vector<EntropyToken>& stream : streams) {
+      views.push_back(EntropyTokenStreamView::Interleaved(stream));
+    }
+    return OptimizeBestEntropyCode(
+      views, options, code, cost, prefix_fallback, prefix_fallback_cost,
+      profile);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
 }
 
 Status OptimizeAcCandidate(
@@ -866,22 +870,18 @@ Status EncodeVarDctCodestreamImpl(
       }
     }
     const SimpleCoefficientOrders natural_orders;
+    const size_t order_template_count = has_custom_orders ? 2 : 1;
+    std::array<std::vector<SimpleAcGroupTokenTemplate>, 2> order_templates;
     std::vector<uint64_t> coefficient_tokenization_work(
-      profile == nullptr ? 0 : candidates.size());
+      profile == nullptr ? 0 : order_template_count);
     status = RunParallelSections(
-      candidates.size(),
+      order_template_count,
       [&](size_t index) {
         const ProfileClock::time_point work_begin =
           WorkBegin(profile != nullptr);
-        AcEncodingCandidate& candidate = candidates[index];
-        std::vector<SimpleAcGroupTokenStream> groups;
-        Status token_status = TokenizeSimpleAcGroups(
-          frame, candidate.custom_order ? custom_orders : natural_orders,
-          candidate.block_context_map, &groups);
-        if (!token_status.ok()) {
-          return token_status;
-        }
-        token_status = MoveAcStreams(&groups, &candidate.streams);
+        Status token_status = BuildSimpleAcGroupTokenTemplates(
+          frame, index == 0 ? natural_orders : custom_orders,
+          &order_templates[index]);
         WorkEnd(
           profile != nullptr, work_begin,
           profile == nullptr
@@ -892,8 +892,91 @@ Status EncodeVarDctCodestreamImpl(
     if (!status.ok()) {
       return status;
     }
-    for (uint64_t work : coefficient_tokenization_work) {
-      candidate_profile.coefficient_tokenization_work_nanoseconds += work;
+    if (profile != nullptr) {
+      for (uint64_t work : coefficient_tokenization_work) {
+        candidate_profile.coefficient_tokenization_work_nanoseconds += work;
+      }
+      candidate_profile.coefficient_tokenization_pass_count =
+        order_template_count;
+      for (size_t order_index = 0; order_index < order_template_count;
+           ++order_index) {
+        for (const SimpleAcGroupTokenTemplate& group :
+             order_templates[order_index]) {
+          if (group.tokens.size() >
+              std::numeric_limits<size_t>::max() -
+                candidate_profile.coefficient_token_count) {
+            return Status::Internal("AC token-template profile overflow");
+          }
+          candidate_profile.coefficient_token_count += group.tokens.size();
+        }
+      }
+    }
+
+    std::vector<uint64_t> context_materialization_work(
+      profile == nullptr ? 0 : candidates.size());
+    status = RunParallelSections(
+      candidates.size(),
+      [&](size_t index) {
+        const ProfileClock::time_point work_begin =
+          WorkBegin(profile != nullptr);
+        AcEncodingCandidate& candidate = candidates[index];
+        const size_t order_index = candidate.custom_order ? 1 : 0;
+        const auto& token_templates = order_templates[order_index];
+        Status token_status = MaterializeSimpleAcGroupContexts(
+          token_templates, candidate.block_context_map, &candidate.contexts);
+        if (!token_status.ok()) {
+          return token_status;
+        }
+        if (candidate.contexts.size() != token_templates.size()) {
+          return Status::Internal("Materialized AC group count differs");
+        }
+        candidate.streams.reserve(token_templates.size());
+        for (size_t group_index = 0; group_index < token_templates.size();
+             ++group_index) {
+          if (candidate.contexts[group_index].size() !=
+              token_templates[group_index].values.size()) {
+            return Status::Internal("Materialized AC token count differs");
+          }
+          candidate.streams.push_back(EntropyTokenStreamView::Split(
+            token_templates[group_index].values,
+            candidate.contexts[group_index]));
+        }
+        WorkEnd(
+          profile != nullptr, work_begin,
+          profile == nullptr ? nullptr : &context_materialization_work[index]);
+        return token_status;
+      });
+    if (!status.ok()) {
+      return status;
+    }
+    if (profile != nullptr) {
+      candidate_profile.coefficient_context_materialization_count =
+        candidates.size();
+      for (size_t index = 0; index < candidates.size(); ++index) {
+        candidate_profile
+          .coefficient_context_materialization_work_nanoseconds +=
+          context_materialization_work[index];
+        for (const EntropyTokenStreamView stream : candidates[index].streams) {
+          if (stream.size() >
+              std::numeric_limits<size_t>::max() -
+                candidate_profile.coefficient_materialized_token_count) {
+            return Status::Internal("Materialized AC token profile overflow");
+          }
+          candidate_profile.coefficient_materialized_token_count +=
+            stream.size();
+        }
+      }
+    }
+    // Entropy candidates retain views of the shared values, but the local
+    // context descriptors and block keys are no longer needed once every map
+    // has been resolved. Release their potentially large capacities before
+    // the parallel entropy searches begin.
+    for (auto& templates : order_templates) {
+      for (SimpleAcGroupTokenTemplate& group : templates) {
+        std::vector<SimpleAcBlockContextKey>().swap(
+          group.block_context_keys);
+        std::vector<SimpleAcTokenTemplate>().swap(group.tokens);
+      }
     }
     ProfileEnd(
       profile, ac_tokenization_begin,
