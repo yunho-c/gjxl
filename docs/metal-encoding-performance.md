@@ -136,7 +136,7 @@ Each artifact contains:
   and SHA-256 hashes of the benchmark, metallib, and symbol companion; and
 - starting worktree/index patches plus an untracked-file hash inventory.
 
-Raw workflow schema 9 keeps the elapsed `codestream_dc_tokenization`,
+Raw workflow schema 10 keeps the elapsed `codestream_dc_tokenization`,
 `codestream_ac_tokenization`, `codestream_entropy_optimization`,
 `codestream_section_writing`, and `codestream_assembly` phases, and adds finer
 codestream counters. Names ending in `_work` are aggregate worker time: work
@@ -152,6 +152,11 @@ HybridUint and histogram/model searches, exact ANS token costing, entropy
 selection, model/header and token-stream writing, candidate measurement, and
 the selected candidate's final header/TOC/section/output assembly. The
 `substage_work_timing` field records the `aggregate-worker-time` semantics.
+The top-level `serializer_workers` field records the diagnostic serializer
+limit; zero means the normal automatic policy. For external-input public
+workflows, `--codestream-output` can atomically write the final in-memory
+codestream after all timed samples, so decoder and quality validation do not
+enter the measured boundary.
 Each sample's `ac_tokenization` object also records template passes and tokens
 plus context-materialization passes and tokens, so repeated full token scans
 cannot disappear behind a lower wall time.

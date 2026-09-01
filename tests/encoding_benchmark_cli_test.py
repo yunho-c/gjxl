@@ -112,7 +112,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 9)
+        self.assertEqual(document["schema_version"], 10)
         self.assertEqual(
             document["substage_work_timing"], "aggregate-worker-time"
         )
@@ -120,6 +120,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(document["density"], "default")
         self.assertFalse(document["collect_final_score"])
         self.assertEqual(document["sample_count"], 1)
+        self.assertEqual(document["serializer_workers"], 0)
         workload = document["workloads"][0]
         self.assertEqual(workload["codestream_comparison"], "not-compared")
         self.assertEqual(len(workload["samples"]), 1)
@@ -229,9 +230,50 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 9)
+        self.assertEqual(document["schema_version"], 10)
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
+
+    def test_serializer_worker_limit_is_recorded(self) -> None:
+        destination = self.directory / "serial.json"
+        result = self.run_benchmark(
+            "--serializer-workers",
+            "1",
+            "--validation",
+            "metal-only",
+            "--raw-samples",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["serializer_workers"], 1)
+        self.assertIn("serializer_workers=1", result.stdout)
+
+    def test_external_input_can_write_the_final_codestream(self) -> None:
+        source = self.directory / "output-input.pfm"
+        width = 128
+        height = 96
+        source.write_bytes(
+            f"PF\n{width} {height}\n-1.0\n".encode("ascii")
+            + struct.pack("<3f", 0.1, 0.2, 0.3) * (width * height)
+        )
+        destination = self.directory / "output.jxl"
+
+        result = self.run_benchmark(
+            "--validation",
+            "metal-only",
+            "--input",
+            str(source),
+            "--codestream-output",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        codestream = destination.read_bytes()
+        self.assertGreater(len(codestream), 2)
+        self.assertEqual(codestream[:2], b"\xff\x0a")
+        self.assertFalse(list(self.directory.glob("output.jxl.tmp-*")))
 
     def test_final_score_collection_is_explicit(self) -> None:
         destination = self.directory / "scored.json"

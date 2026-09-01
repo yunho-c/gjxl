@@ -79,7 +79,7 @@ emission cost.
 
 ### GJXL
 
-The public workflow benchmark emits raw workflow schema 9. Its relevant
+The public workflow benchmark emits raw workflow schema 10. Its relevant
 wall-clock phases are:
 
 - `codestream_dc_tokenization`
@@ -96,10 +96,11 @@ worker durations are summed. They must never be added to complete-encode
 latency. See [metal-encoding-performance.md](metal-encoding-performance.md) for
 the complete schema contract.
 
-GJXL's serializer currently chooses up to eight workers internally. The
-comparison harness needs a benchmark-only worker limit before a serial
-comparison can be called thread-matched. The production comparison should use
-the normal worker policy and configure libjxl with the same worker limit.
+GJXL's serializer normally chooses up to eight workers internally. The
+benchmark-only `--serializer-workers` option now records and enforces a
+process-wide limit: zero preserves the normal policy and one makes serializer
+section work serial. The production comparison should use the normal worker
+policy and configure libjxl with the same worker limit.
 
 ### libjxl without source changes
 
@@ -204,6 +205,74 @@ load. If the host is visibly busy, preserve diagnostic captures but do not use
 their absolute timings for retained claims.
 
 ## Phase 1: no-libjxl-source-change pilot
+
+### Implemented tooling
+
+Phase 1 is implemented without modifying the pinned libjxl source. The pieces
+are deliberately separated:
+
+- `tools/libjxl_comparison.py prepare-corpus` converts or validates sources,
+  requires provenance and license fields, and writes a never-overwritten
+  canonical-PFM corpus with source and canonical SHA-256 hashes;
+- `tools/libjxl_comparison.py build-libjxl` verifies the pinned revision,
+  builds shared `libjxl`, `djxl`, and `butteraugli_main`, then builds the
+  GJXL-owned public-C-API harness under an isolated build root;
+- `tools/libjxl_comparison.py run` alternates independent process pairs,
+  retains serial and production policies, writes native raw schemas and
+  binary/host/command manifests, independently decodes both outputs, records
+  Butteraugli scores, and emits normalized summaries;
+- `tools/samply_neutral_stages.py` consumes presymbolicated Samply captures,
+  applies an ordered mutually exclusive neutral-stage mapping, rejects weighted
+  leaf-symbol resolution below 95%, and labels every result as sampled thread
+  CPU rather than wall time; and
+- `gjxl_encoding_benchmark --serializer-workers` supplies the internal
+  diagnostic worker cap, while `--codestream-output` writes the final measured
+  in-memory result after the timed samples for independent validation. Raw
+  workflow schema 10 records the worker policy.
+
+The libjxl harness parses the canonical PFM once, constructs the parallel
+runner outside the timer, and encloses encoder configuration, image submission,
+and complete in-memory output generation. It performs one untimed validation
+encode before requested warmups, matching the GJXL public-workflow benchmark.
+Optional codestream file output happens after all measured samples.
+
+A source manifest has this minimal form:
+
+```json
+{
+  "schema_version": 1,
+  "inputs": [
+    {
+      "name": "photo-1080p-01",
+      "path": "sources/photo-1080p-01.png",
+      "source": "original URL or corpus identifier",
+      "license": "license and attribution",
+      "source_color": "embedded sRGB",
+      "category": "photographic-1080p"
+    }
+  ]
+}
+```
+
+Run the pilot from this worktree as follows:
+
+```sh
+python3 tools/libjxl_comparison.py prepare-corpus \
+  --source-manifest path/to/sources.json \
+  --output build/libjxl-comparison/corpus
+
+python3 tools/libjxl_comparison.py build-libjxl
+
+python3 tools/libjxl_comparison.py run \
+  --corpus-manifest build/libjxl-comparison/corpus/manifest.json \
+  --configuration both
+```
+
+Add `--capture-samply` only to a diagnostic profiling run. The unprofiled
+process-pair summary remains the performance source of record. The repository
+does not vendor the photographic corpus itself; selecting and licensing the
+retained 1080p/4K sources and running them on a quiet host remain execution
+steps, not implementation steps.
 
 ### 1. Add a comparison driver
 
@@ -443,11 +512,12 @@ time and normalized cost, together with output size and actual decoded quality.
 
 ## Implementation order
 
-1. Pin the comparison corpus, canonical conversion, revisions, and host/build
-   manifest.
-2. Add the benchmark-only GJXL serializer worker override.
-3. Add the comparison driver and raw unprofiled result schema.
-4. Extend the Samply classifier with the neutral stage mapping and tests.
+1. **Infrastructure complete; corpus selection remains.** Pin the comparison
+   corpus, canonical conversion, revisions, and host/build manifest.
+2. **Complete.** Add the benchmark-only GJXL serializer worker override.
+3. **Complete.** Add the comparison driver and raw unprofiled result schema.
+4. **Complete.** Extend the Samply classifier with the neutral stage mapping
+   and tests.
 5. Run the no-libjxl-source-change serial and production pilot.
 6. Calibrate and run the matched-quality view.
 7. Decide from the pilot whether direct libjxl stage timing is necessary.

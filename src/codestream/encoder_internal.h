@@ -17,6 +17,15 @@ class VarDctEncoderFrame;
 
 namespace codestream_internal {
 
+inline constexpr size_t kMaximumCodestreamWorkerCount = 8;
+
+/// Diagnostic-only process-wide serializer worker cap. Zero restores the
+/// normal automatic policy. Values greater than
+/// `kMaximumCodestreamWorkerCount` are rejected without changing the cap.
+/// Callers must configure it only while no serializer invocation is active.
+[[nodiscard]] Status SetCodestreamWorkerLimitForTesting(
+  size_t worker_limit) noexcept;
+
 struct CandidateSelectionKey {
   size_t complete_size = 0;
   bool custom_order = false;

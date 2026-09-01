@@ -127,6 +127,7 @@ struct CommandLineOptions {
   std::string input_path;
   std::string metallib_path;
   std::string raw_samples_path;
+  std::string codestream_output_path;
   std::string gpu_profile_path;
   std::string implementation = "simd";
   BenchmarkScope scope = BenchmarkScope::kFull;
@@ -139,6 +140,7 @@ struct CommandLineOptions {
   float butteraugli_target = kDefaultButteraugliTarget;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
+  size_t serializer_workers = 0;
   gjxl::gpu_profile_internal::GpuProfilingMode gpu_profiling_mode =
     gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
 };
@@ -564,9 +566,11 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--validation cpu-metal|metal-only] "
                    "[--collect-final-score] "
                    "[--metallib PATH] [--raw-samples PATH] "
+                   "[--codestream-output PATH] "
                    "[--gpu-profile stage|dispatch] "
                    "[--gpu-profile-output PATH] "
-                   "[--distance D] [--warmups N] [--samples N]\n";
+                   "[--distance D] [--warmups N] [--samples N] "
+                   "[--serializer-workers 0..8]\n";
       std::exit(EXIT_SUCCESS);
     }
     if (argument == "--collect-final-score") {
@@ -585,6 +589,8 @@ ParseGpuProfilingMode(std::string_view text) {
       options.metallib_path = value;
     } else if (argument == "--raw-samples") {
       options.raw_samples_path = value;
+    } else if (argument == "--codestream-output") {
+      options.codestream_output_path = value;
     } else if (argument == "--gpu-profile") {
       options.gpu_profiling_mode = ParseGpuProfilingMode(value);
     } else if (argument == "--gpu-profile-output") {
@@ -616,6 +622,13 @@ ParseGpuProfilingMode(std::string_view text) {
       options.warmups = ParseSize(value, true);
     } else if (argument == "--samples") {
       options.samples = ParseSize(value, false);
+    } else if (argument == "--serializer-workers") {
+      options.serializer_workers = ParseSize(value, true);
+      if (options.serializer_workers >
+          gjxl::codestream_internal::kMaximumCodestreamWorkerCount) {
+        throw std::runtime_error(
+          "Serializer worker limit must be between 0 and 8");
+      }
     } else {
       throw std::runtime_error("Unknown encoding benchmark option: " +
                                std::string(argument));
@@ -653,8 +666,19 @@ ParseGpuProfilingMode(std::string_view text) {
     throw std::runtime_error(
         "Raw workflow samples require a public-workflow scope");
   }
+  if (!options.codestream_output_path.empty() &&
+      (options.input_path.empty() ||
+       (options.scope != BenchmarkScope::kPublicWorkflow &&
+        options.scope != BenchmarkScope::kMetalPublicWorkflow))) {
+    throw std::runtime_error(
+      "Codestream output requires an external-input public workflow");
+  }
   const bool gpu_profiling = options.gpu_profiling_mode !=
     gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
+  if (gpu_profiling && !options.codestream_output_path.empty()) {
+    throw std::runtime_error(
+      "Codestream output is unavailable during GPU dispatch profiling");
+  }
   if (gpu_profiling != !options.gpu_profile_path.empty()) {
     throw std::runtime_error(
       "GPU profiling mode and output path must be specified together");
@@ -1097,7 +1121,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 9,\n"
+           << "  \"schema_version\": 10,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
@@ -1119,6 +1143,8 @@ void WriteRawWorkflowSamples(
            << options.butteraugli_target << ",\n"
            << "  \"warmups\": " << options.warmups << ",\n"
            << "  \"sample_count\": " << options.samples << ",\n"
+           << "  \"serializer_workers\": "
+           << options.serializer_workers << ",\n"
            << "  \"workloads\": [\n";
     for (size_t workload_index = 0; workload_index < workloads.size();
          ++workload_index) {
@@ -1215,6 +1241,34 @@ void WriteRawWorkflowSamples(
       throw std::runtime_error(
           "Could not atomically replace raw-samples output: " +
           rename_error.message());
+    }
+  } catch (...) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    throw;
+  }
+}
+
+void WriteCodestream(
+    const std::filesystem::path& destination,
+    std::span<const uint8_t> bytes) {
+  std::filesystem::path temporary = destination;
+  temporary += ".tmp-" + std::to_string(static_cast<uint64_t>(
+    Clock::now().time_since_epoch().count()));
+  try {
+    std::ofstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
+    output.open(temporary, std::ios::binary | std::ios::trunc);
+    output.write(
+      reinterpret_cast<const char*>(bytes.data()),
+      static_cast<std::streamsize>(bytes.size()));
+    output.close();
+    std::error_code error;
+    std::filesystem::rename(temporary, destination, error);
+    if (error) {
+      throw std::runtime_error(
+        "Could not atomically replace codestream output: " +
+        error.message());
     }
   } catch (...) {
     std::error_code ignored;
@@ -1547,7 +1601,8 @@ void RunPublicWorkflowOnlyWorkload(
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::VarDctDensityMode density_mode,
     bool collect_final_butteraugli_score,
-    std::string_view input_path, bool metal_only, ValidationMode validation,
+    std::string_view input_path, std::string_view codestream_output_path,
+    bool metal_only, ValidationMode validation,
     gjxl::GpuBackend& gpu,
     std::vector<RawWorkflowWorkload>* raw_results, double* global_sink) {
   ImageStorage original = !input_path.empty()
@@ -1791,6 +1846,9 @@ void RunPublicWorkflowOnlyWorkload(
     PrintRatioStats("paired_speedup_x", paired_speedups);
   }
   std::cout << "  sink=" << sink << '\n';
+  if (!codestream_output_path.empty()) {
+    WriteCodestream(codestream_output_path, gpu_bytes);
+  }
   if (raw_results != nullptr) {
     raw_results->push_back(std::move(raw_workload));
   }
@@ -2819,6 +2877,10 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
 int main(int argc, char** argv) {
   try {
     const CommandLineOptions options = ParseCommandLine(argc, argv);
+    RequireStatus(
+      "Configure diagnostic serializer worker limit",
+      gjxl::codestream_internal::SetCodestreamWorkerLimitForTesting(
+        options.serializer_workers));
     if (options.input_path.empty() && options.workload != "all" &&
         !IsKnownWorkload(options.workload)) {
       throw std::runtime_error("Unknown quantization workload: " +
@@ -2854,7 +2916,11 @@ int main(int argc, char** argv) {
                     : "default")
               << " distance=" << options.butteraugli_target
               << " warmups=" << options.warmups
-              << " samples=" << options.samples;
+              << " samples=" << options.samples
+              << " serializer_workers="
+              << (options.serializer_workers == 0
+                    ? "automatic"
+                    : std::to_string(options.serializer_workers));
     if (options.scope == BenchmarkScope::kFull) {
       std::cout << " rotated_phases=" << kPhaseCount;
     }
@@ -2885,6 +2951,7 @@ int main(int argc, char** argv) {
               options.density_mode,
               options.collect_final_butteraugli_score,
               options.input_path,
+              options.codestream_output_path,
               options.scope == BenchmarkScope::kMetalPublicWorkflow,
               options.validation, *gpu, raw_results_pointer, &sink);
         }
@@ -2918,6 +2985,7 @@ int main(int argc, char** argv) {
                   options.butteraugli_target, options.gpu_aq_mode,
                   options.density_mode,
                   options.collect_final_butteraugli_score, {},
+                  {},
                   options.scope == BenchmarkScope::kMetalPublicWorkflow,
                   options.validation, *gpu, raw_results_pointer, &sink);
             }

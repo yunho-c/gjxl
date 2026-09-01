@@ -1362,7 +1362,7 @@ order.
    weights, stream validity, and the exact total token count. Malformed input
    leaves model and cost outputs unchanged.
 
-   Raw workflow schema 9 retains ANS value-collection and aggregation phases as
+   Raw workflow schema 10 retains ANS value-collection and aggregation phases as
    zero-valued work-elimination sentinels and adds prepared-value validation.
    On padded 4K at distance 1.2, two stable alternating Release pairs used one
    warmup and three samples per process. Entropy optimization improved

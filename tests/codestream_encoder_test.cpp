@@ -413,6 +413,51 @@ bool CheckAssemblyAndDeterminism() {
            false, true, false);
 }
 
+bool CheckDiagnosticWorkerLimit() {
+  using gjxl::codestream_internal::SetCodestreamWorkerLimitForTesting;
+
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::Status status = MakeFrame(257, 65, {3541, 10}, {}, &frame);
+  std::vector<uint8_t> automatic;
+  std::vector<uint8_t> serial;
+  std::vector<uint8_t> parallel;
+  if (status.ok()) {
+    status = SetCodestreamWorkerLimitForTesting(0);
+  }
+  if (status.ok()) {
+    status = gjxl::EncodeVarDctCodestream(frame, &automatic);
+  }
+  if (status.ok()) {
+    status = SetCodestreamWorkerLimitForTesting(1);
+  }
+  if (status.ok()) {
+    status = gjxl::EncodeVarDctCodestream(frame, &serial);
+  }
+  if (status.ok()) {
+    status = SetCodestreamWorkerLimitForTesting(4);
+  }
+  if (status.ok()) {
+    status = gjxl::EncodeVarDctCodestream(frame, &parallel);
+  }
+  if (!status.ok() || automatic != serial || automatic != parallel) {
+    std::cerr << "Diagnostic worker limit changed the codestream: "
+              << status.message() << '\n';
+    (void)SetCodestreamWorkerLimitForTesting(0);
+    return false;
+  }
+  if (SetCodestreamWorkerLimitForTesting(9).code() !=
+        gjxl::StatusCode::kInvalidArgument) {
+    std::cerr << "Out-of-range diagnostic worker limit was accepted\n";
+    (void)SetCodestreamWorkerLimitForTesting(0);
+    return false;
+  }
+  if (!SetCodestreamWorkerLimitForTesting(0).ok()) {
+    std::cerr << "Unable to restore automatic serializer workers\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckAtomicRejections() {
   const std::vector<uint8_t> sentinel = {9, 8, 7};
   std::vector<uint8_t> output = sentinel;
@@ -512,7 +557,8 @@ bool CheckDeferredCandidatePrimitives() {
 int main() {
   if (!CheckCodestreamAndFrameHeaders() || !CheckQuantizerSelectors() ||
       !CheckAssemblyAndDeterminism() || !CheckAdaptiveBlockContextSelection() ||
-      !CheckAtomicRejections() || !CheckDeferredCandidatePrimitives()) {
+      !CheckDiagnosticWorkerLimit() || !CheckAtomicRejections() ||
+      !CheckDeferredCandidatePrimitives()) {
     return EXIT_FAILURE;
   }
   std::cout << "All codestream encoder tests passed.\n";

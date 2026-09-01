@@ -38,6 +38,8 @@ namespace {
 
 using ProfileClock = std::chrono::steady_clock;
 
+std::atomic<size_t> g_codestream_worker_limit{0};
+
 uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
   return static_cast<uint64_t>(
     std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -79,11 +81,15 @@ Status AllocationFailure() {
 template <typename Function>
 Status RunParallelSections(size_t count, Function&& function) {
   if (count == 0) return Status::Ok();
-  constexpr size_t kMaximumWorkers = 8;
+  const size_t configured_worker_limit =
+    g_codestream_worker_limit.load(std::memory_order_relaxed);
+  const size_t worker_limit = configured_worker_limit == 0
+    ? codestream_internal::kMaximumCodestreamWorkerCount
+    : configured_worker_limit;
   const size_t hardware_workers = std::max<size_t>(
     std::thread::hardware_concurrency(), 1);
   const size_t worker_count = std::min(
-    count, std::min(kMaximumWorkers, hardware_workers));
+    count, std::min(worker_limit, hardware_workers));
   if (worker_count == 1) {
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
@@ -1349,6 +1355,16 @@ Status EncodeVarDctCodestreamImpl(
 }
 
 }  // namespace
+
+Status codestream_internal::SetCodestreamWorkerLimitForTesting(
+  size_t worker_limit) noexcept {
+  if (worker_limit > kMaximumCodestreamWorkerCount) {
+    return Status::InvalidArgument(
+      "Codestream worker limit exceeds the serializer maximum");
+  }
+  g_codestream_worker_limit.store(worker_limit, std::memory_order_relaxed);
+  return Status::Ok();
+}
 
 Status codestream_internal::PhysicalSectionSizesFromBitCounts(
   std::span<const uint64_t> common_section_bits,

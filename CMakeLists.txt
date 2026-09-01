@@ -1293,6 +1293,20 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_codestream_encoder_test
   )
 
+  add_test(
+    NAME libjxl_comparison_tool
+    COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/libjxl_comparison_test.py"
+  )
+
+  add_test(
+    NAME samply_neutral_stages
+    COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/samply_neutral_stages_test.py"
+  )
+
   add_executable(
     gjxl_codestream_workflow_test
     tests/codestream_workflow_test.cpp
