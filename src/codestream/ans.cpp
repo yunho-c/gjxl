@@ -1121,7 +1121,7 @@ Status codestream_internal::CountAnsTokenStreamBits(
 }
 
 Status codestream_internal::AggregateEntropyValues(
-  std::vector<uint32_t> values,
+  std::span<uint32_t> values,
   std::vector<WeightedValue>* aggregated) {
 
   if (aggregated == nullptr) {
@@ -1181,6 +1181,13 @@ Status codestream_internal::AggregateEntropyValues(
     &WeightedValue::value);
   *aggregated = std::move(candidate);
   return Status::Ok();
+}
+
+Status codestream_internal::AggregateEntropyValues(
+  std::vector<uint32_t> values,
+  std::vector<WeightedValue>* aggregated) {
+
+  return AggregateEntropyValues(std::span<uint32_t>(values), aggregated);
 }
 
 Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {

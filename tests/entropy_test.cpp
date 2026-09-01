@@ -37,6 +37,39 @@ bool CheckSignedPacking() {
       std::numeric_limits<uint32_t>::max() - 1;
 }
 
+bool CheckMutableValueAggregation() {
+  std::vector<uint32_t> small = {
+    123456789u, 9, 1, 9, UINT32_MAX, 0, 1, 65536, 0, 987654321u};
+  std::vector<gjxl::codestream_internal::WeightedValue> small_aggregated;
+  const std::vector<gjxl::codestream_internal::WeightedValue> expected_small = {
+    {0, 2}, {1, 2}, {9, 2}, {65536, 1}, {UINT32_MAX, 1}};
+  if (!gjxl::codestream_internal::AggregateEntropyValues(
+        std::span<uint32_t>(small).subspan(1, small.size() - 2),
+        &small_aggregated).ok() ||
+      small_aggregated != expected_small || small.front() != 123456789u ||
+      small.back() != 987654321u) {
+    std::cerr << "Mutable small-value aggregation failed\n";
+    return false;
+  }
+
+  constexpr std::array<uint32_t, 5> repeated_values = {
+    0, 7, 65535, 65536, UINT32_MAX};
+  std::vector<uint32_t> large(4096);
+  for (size_t index = 0; index < large.size(); ++index) {
+    large[index] = repeated_values[index % repeated_values.size()];
+  }
+  std::vector<gjxl::codestream_internal::WeightedValue> large_aggregated;
+  const std::vector<gjxl::codestream_internal::WeightedValue> expected_large = {
+    {0, 820}, {7, 819}, {65535, 819}, {65536, 819}, {UINT32_MAX, 819}};
+  if (!gjxl::codestream_internal::AggregateEntropyValues(
+        std::span<uint32_t>(large), &large_aggregated).ok() ||
+      large_aggregated != expected_large) {
+    std::cerr << "Mutable counted-value aggregation failed\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckDeterministicHuffmanScratch() {
   constexpr std::array<uint64_t, 5> equal_counts = {1, 1, 1, 1, 1};
   constexpr std::array<uint8_t, 5> expected_depths = {2, 2, 2, 3, 3};
@@ -1121,7 +1154,8 @@ int main() {
     std::cerr << "Signed packing is incorrect\n";
     return EXIT_FAILURE;
   }
-  if (!CheckHybridUintBoundaries() ||
+  if (!CheckMutableValueAggregation() ||
+      !CheckHybridUintBoundaries() ||
       !CheckDeterministicHuffmanScratch() ||
       !CheckUintConfigSerialization() ||
       !CheckDegeneratePrefixPayload() ||
