@@ -1000,6 +1000,113 @@ bool CheckSplitTokenStreamParity() {
     return false;
   }
 
+  std::vector<std::vector<uint16_t>> alternate_contexts = contexts;
+  std::vector<gjxl::EntropyTokenStreamView> alternate_sections;
+  alternate_sections.reserve(sections.size());
+  for (size_t section_index = 0; section_index < sections.size();
+       ++section_index) {
+    for (uint16_t& context : alternate_contexts[section_index]) {
+      context = static_cast<uint16_t>((context + 1) % 3);
+    }
+    alternate_sections.push_back(gjxl::EntropyTokenStreamView::Split(
+      values[section_index], alternate_contexts[section_index]));
+  }
+  gjxl::EntropyCode alternate_prefix;
+  gjxl::EntropyCodeCost alternate_prefix_cost;
+  gjxl::codestream_internal::PreparedEntropyClusters
+    alternate_prepared_clusters;
+  gjxl::EntropyCode alternate_ans;
+  gjxl::EntropyCodeCost alternate_ans_cost;
+  if (!gjxl::codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
+        alternate_sections, options, &alternate_prefix,
+        &alternate_prefix_cost, &alternate_prepared_clusters).ok() ||
+      !gjxl::codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
+        alternate_sections, alternate_prefix, alternate_prepared_clusters,
+        &alternate_ans, &alternate_ans_cost).ok()) {
+    std::cerr << "Alternate-context ANS optimization failed\n";
+    return false;
+  }
+
+  gjxl::codestream_internal::PreparedAnsEntropyCode deferred;
+  gjxl::codestream_internal::PreparedAnsEntropyCode alternate_deferred;
+  if (!gjxl::codestream_internal::PrepareAnsEntropyCodeWithPreparedClusters(
+        split_sections, prepared_prefix, prepared_clusters, &deferred).ok() ||
+      !gjxl::codestream_internal::PrepareAnsEntropyCodeWithPreparedClusters(
+        alternate_sections, alternate_prefix, alternate_prepared_clusters,
+        &alternate_deferred).ok()) {
+    std::cerr << "Deferred ANS model construction failed\n";
+    return false;
+  }
+  std::vector<uint64_t> deferred_section_bits(
+    sections.size() * deferred.candidates.size());
+  std::vector<uint64_t> alternate_deferred_section_bits(
+    sections.size() * alternate_deferred.candidates.size());
+
+  const std::array<uint32_t, 2> malformed_values = {0, 1};
+  const std::array<uint16_t, 1> malformed_contexts = {0};
+  std::vector<uint64_t> unchanged_deferred_bits(
+    deferred.candidates.size(), 0xA5A5A5A5A5A5A5A5ull);
+  if (gjxl::codestream_internal::MeasurePreparedAnsEntropyCodeSection(
+        gjxl::EntropyTokenStreamView::Split(
+          malformed_values, malformed_contexts),
+        deferred, unchanged_deferred_bits).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      !std::ranges::all_of(
+        unchanged_deferred_bits,
+        [](uint64_t value) { return value == 0xA5A5A5A5A5A5A5A5ull; })) {
+    std::cerr << "Rejected prepared ANS section changed its output\n";
+    return false;
+  }
+
+  for (size_t section_index = 0; section_index < sections.size();
+       ++section_index) {
+    if (!gjxl::codestream_internal::MeasurePreparedAnsEntropyCodeSection(
+          split_sections[section_index], deferred,
+          std::span<uint64_t>(deferred_section_bits).subspan(
+            section_index * deferred.candidates.size(),
+            deferred.candidates.size())).ok() ||
+        !gjxl::codestream_internal::MeasurePreparedAnsEntropyCodeSection(
+          alternate_sections[section_index], alternate_deferred,
+          std::span<uint64_t>(alternate_deferred_section_bits).subspan(
+            section_index * alternate_deferred.candidates.size(),
+            alternate_deferred.candidates.size())).ok()) {
+      std::cerr << "Prepared ANS section measurement failed\n";
+      return false;
+    }
+  }
+  gjxl::codestream_internal::PreparedAnsEntropyCode incomplete_deferred =
+    deferred;
+  std::vector<uint64_t> incomplete_section_bits = deferred_section_bits;
+  incomplete_section_bits.pop_back();
+  gjxl::EntropyCode unchanged_deferred_code = prepared_prefix;
+  gjxl::EntropyCodeCost unchanged_deferred_cost = prepared_prefix_cost;
+  if (gjxl::codestream_internal::FinalizePreparedAnsEntropyCode(
+        &incomplete_deferred, incomplete_section_bits,
+        &unchanged_deferred_code, &unchanged_deferred_cost).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      unchanged_deferred_code != prepared_prefix ||
+      unchanged_deferred_cost != prepared_prefix_cost) {
+    std::cerr << "Rejected deferred ANS costs changed their outputs\n";
+    return false;
+  }
+  gjxl::EntropyCode deferred_ans;
+  gjxl::EntropyCodeCost deferred_ans_cost;
+  gjxl::EntropyCode deferred_alternate_ans;
+  gjxl::EntropyCodeCost deferred_alternate_ans_cost;
+  if (!gjxl::codestream_internal::FinalizePreparedAnsEntropyCode(
+        &deferred, deferred_section_bits,
+        &deferred_ans, &deferred_ans_cost).ok() ||
+      !gjxl::codestream_internal::FinalizePreparedAnsEntropyCode(
+        &alternate_deferred, alternate_deferred_section_bits,
+        &deferred_alternate_ans, &deferred_alternate_ans_cost).ok() ||
+      deferred_ans != prepared_ans ||
+      deferred_ans_cost != prepared_ans_cost ||
+      deferred_alternate_ans != alternate_ans ||
+      deferred_alternate_ans_cost != alternate_ans_cost) {
+    std::cerr << "Deferred ANS selection differs from direct selection\n";
+    return false;
+  }
+
   const std::array<const gjxl::EntropyCode*, 2> codes = {
     &interleaved_prefix, &interleaved_ans};
   for (const gjxl::EntropyCode* code : codes) {
