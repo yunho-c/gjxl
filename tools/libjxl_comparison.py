@@ -639,6 +639,21 @@ def validate_corpus(manifest_path: Path) -> list[dict[str, Any]]:
     return validated
 
 
+def select_corpus_entries(
+    entries: list[dict[str, Any]], names: list[str] | None
+) -> list[dict[str, Any]]:
+    if not names:
+        return entries
+    if len(names) != len(set(names)):
+        raise ComparisonError("Comparison input filter contains duplicates")
+    requested = set(names)
+    available = {entry["name"] for entry in entries}
+    unknown = sorted(requested - available)
+    if unknown:
+        raise ComparisonError(f"Unknown comparison inputs: {unknown}")
+    return [entry for entry in entries if entry["name"] in requested]
+
+
 def command_output(command: list[str]) -> str | None:
     result = run_capture(command, check=False)
     if result.returncode != 0:
@@ -1562,7 +1577,11 @@ def run_comparison(args: argparse.Namespace) -> None:
         args.metallib = args.metallib.resolve()
         binaries["metallib"] = args.metallib
     if args.capture_samply:
+        args.samply = Path(
+            find_executable(str(args.samply), "Samply profiler")
+        ).resolve()
         args.samply_analyzer = args.samply_analyzer.resolve()
+        binaries["samply"] = args.samply
         binaries["samply_analyzer"] = args.samply_analyzer
     for name, path in binaries.items():
         if not path.is_file():
@@ -1582,6 +1601,7 @@ def run_comparison(args: argparse.Namespace) -> None:
             target_distance=args.distance,
             effort=args.effort,
         )
+    entries = select_corpus_entries(entries, args.inputs)
 
     gjxl_revision = git_output(repo, "rev-parse", "HEAD")
     libjxl_source = repo / "third_party/libjxl"
@@ -1636,6 +1656,7 @@ def run_comparison(args: argparse.Namespace) -> None:
             "pairs": args.pairs,
             "gjxl_implementation": args.gjxl_implementation,
             "configurations": args.configuration,
+            "input_filter": args.inputs,
         },
         "binaries": {
             name: {"path": str(path), "sha256": sha256_file(path)}
@@ -1646,10 +1667,14 @@ def run_comparison(args: argparse.Namespace) -> None:
         "processes": [],
         "validations": [],
         "quality_matches": [],
+        "profiles": [],
     }
     if quality_calibration is not None:
         manifest["quality_calibration"] = quality_calibration
-        manifest["libjxl_distances"] = quality_distances
+        manifest["libjxl_distances"] = {
+            entry["name"]: quality_distances[entry["name"]]
+            for entry in entries
+        }
     write_json_atomic(directory / "manifest.json", manifest)
 
     logical_cpus = max(os.cpu_count() or 1, 1)
@@ -1675,6 +1700,7 @@ def run_comparison(args: argparse.Namespace) -> None:
     write_json_atomic(directory / "manifest.json", manifest)
 
     rows = []
+    profile_rows = []
     for configuration, gjxl_workers, libjxl_threads in configurations:
         for entry in entries:
             image = Path(entry["resolved_path"])
@@ -1811,6 +1837,25 @@ def run_comparison(args: argparse.Namespace) -> None:
                         directory,
                         manifest,
                     )
+                    symbols = Path(
+                        str(profile)[: -len(".json.gz")] + ".json.syms.json"
+                    )
+                    if not profile.is_file() or not symbols.is_file():
+                        raise ComparisonError(
+                            f"Samply capture or symbol sidecar is missing: {profile}"
+                        )
+                    profile_record = {
+                        "input": entry["name"],
+                        "category": entry.get("category", "unspecified"),
+                        "configuration": configuration,
+                        "encoder": encoder,
+                        "profile": str(profile.relative_to(directory)),
+                        "profile_sha256": sha256_file(profile),
+                        "symbols": str(symbols.relative_to(directory)),
+                        "symbols_sha256": sha256_file(symbols),
+                    }
+                    manifest["profiles"].append(profile_record)
+                    write_json_atomic(directory / "manifest.json", manifest)
                     for output_format, suffix in (("json", "json"), ("markdown", "md")):
                         analysis_output = profiles_dir / (
                             f"{slug}-{configuration}-{encoder}-neutral.{suffix}"
@@ -1829,6 +1874,25 @@ def run_comparison(args: argparse.Namespace) -> None:
                             directory,
                             manifest,
                         )
+                        if output_format == "json":
+                            analysis = load_json(analysis_output)
+                            profile_rows.append(
+                                {
+                                    **profile_record,
+                                    "analysis": str(
+                                        analysis_output.relative_to(directory)
+                                    ),
+                                    "analysis_sha256": sha256_file(analysis_output),
+                                    "sample_count": analysis["summary"]["sample_count"],
+                                    "sampled_cpu_us": analysis["summary"][
+                                        "cpu_delta_us"
+                                    ],
+                                    "resolved_leaf_cpu_percent": analysis["summary"][
+                                        "resolved_leaf_cpu_percent"
+                                    ],
+                                    "neutral_stages": analysis["neutral_stages"],
+                                }
+                            )
 
     summary = {
         "schema_version": RESULT_SCHEMA_VERSION,
@@ -1837,6 +1901,7 @@ def run_comparison(args: argparse.Namespace) -> None:
         "aggregate_rows": aggregate_rows(rows),
         "validations": manifest["validations"],
         "quality_matches": manifest["quality_matches"],
+        "profile_rows": profile_rows,
     }
     write_json_atomic(directory / "summary.json", summary)
     manifest["host_end"] = host_manifest()
@@ -1956,6 +2021,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--configuration",
         choices=("serial", "production", "both"),
         default="both",
+    )
+    run.add_argument(
+        "--input",
+        dest="inputs",
+        action="append",
+        help="run only this corpus input (repeatable; defaults to the full corpus)",
     )
     run.add_argument("--pairs", type=positive_int, default=3)
     run.add_argument("--warmups", type=int, default=2)

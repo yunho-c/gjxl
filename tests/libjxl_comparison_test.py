@@ -269,6 +269,17 @@ class CorpusTest(unittest.TestCase):
                 {"resize": {"width": 0, "height": 2}}
             )
 
+    def test_input_filter_preserves_corpus_order_and_rejects_unknowns(self) -> None:
+        entries = [{"name": "first"}, {"name": "second"}, {"name": "third"}]
+        self.assertEqual(
+            comparison.select_corpus_entries(entries, ["third", "first"]),
+            [entries[0], entries[2]],
+        )
+        with self.assertRaisesRegex(comparison.ComparisonError, "Unknown"):
+            comparison.select_corpus_entries(entries, ["missing"])
+        with self.assertRaisesRegex(comparison.ComparisonError, "duplicates"):
+            comparison.select_corpus_entries(entries, ["first", "first"])
+
     def test_declared_source_hash_is_enforced(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gjxl-corpus-test-") as temporary:
             root = Path(temporary)

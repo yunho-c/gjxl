@@ -253,7 +253,9 @@ are deliberately separated:
   Butteraugli scores, and emits normalized summaries. With `--quality-map`, it
   applies the calibrated distance independently to every libjxl input and
   fails closed if the newly decoded encoder scores exceed the declared match
-  tolerance;
+  tolerance. Repeatable `--input` filters preserve corpus order for diagnostic
+  profiling subsets while keeping the full corpus manifest and calibration
+  binding;
 - `tools/samply_neutral_stages.py` consumes presymbolicated Samply captures,
   applies an ordered mutually exclusive neutral-stage mapping, rejects weighted
   leaf-symbol resolution below 95%, and labels every result as sampled thread
@@ -382,6 +384,29 @@ Add `--capture-samply` only to a diagnostic profiling run. The unprofiled
 process-pair summary remains the performance source of record. The repository
 does not vendor the corpus itself. `fetch-corpus` reconstructs the hash-pinned
 source set, and retained timing still requires a quiet host.
+
+The retained sampled-attribution pass uses one representative from each
+separately reported workload group under both thread policies:
+
+```sh
+python3 tools/libjxl_comparison.py run \
+  --corpus-manifest \
+    build/libjxl-comparison/corpus-phase1-pilot-pinned/manifest.json \
+  --configuration both \
+  --quality-map \
+    logs/libjxl-calibration/<calibration-run>/calibration.json \
+  --input imazen26-1409-rainbow-4k \
+  --input imazen26-1207-bedroom-noise-1080p \
+  --input kodak-kodim17 \
+  --input padded-stress-1080p \
+  --input padded-stress-4k \
+  --pairs 1 --warmups 0 --samples 1 \
+  --capture-samply --profile-samples 20
+```
+
+This diagnostic run is not a replacement timing source. Its manifest hashes
+each capture, presymbolication sidecar, analyzer, and Samply executable; the
+summary retains the neutral-stage rows and weighted symbol-resolution result.
 
 ### Nominal-distance pilot: 2026-09-01
 
