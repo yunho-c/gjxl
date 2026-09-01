@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import struct
@@ -216,6 +217,37 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("workload external_input source=128x96", result.stdout)
+
+    def test_builtin_source_export_is_atomic_and_deterministic(self) -> None:
+        destination = self.directory / "source.pfm"
+        destination.write_text("sentinel", encoding="utf-8")
+        command = [
+            str(self.benchmark),
+            "--workload",
+            "synthetic_128x96",
+            "--source-output",
+            str(destination),
+        ]
+
+        first = subprocess.run(
+            command, check=False, capture_output=True, text=True
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn("source=128x96", first.stdout)
+        payload = destination.read_bytes()
+        header = b"PF\n128 96\n-1.0\n"
+        self.assertTrue(payload.startswith(header))
+        self.assertEqual(len(payload), len(header) + 128 * 96 * 3 * 4)
+        digest = hashlib.sha256(payload).hexdigest()
+
+        second = subprocess.run(
+            command, check=False, capture_output=True, text=True
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(
+            hashlib.sha256(destination.read_bytes()).hexdigest(), digest
+        )
+        self.assertFalse(list(self.directory.glob("source.pfm.tmp-*")))
 
     def test_high_density_is_explicit_in_raw_samples(self) -> None:
         destination = self.directory / "high-density.json"

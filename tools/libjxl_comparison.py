@@ -188,41 +188,74 @@ def parse_source_transform(entry: dict[str, Any]) -> dict[str, Any] | None:
     return transform or None
 
 
-def validated_downloads(source_manifest: Path) -> list[tuple[Path, str, str]]:
+def validated_source_actions(source_manifest: Path) -> list[dict[str, Any]]:
     document = load_json(source_manifest)
     if document.get("schema_version") != CORPUS_SCHEMA_VERSION:
         raise ComparisonError("Unsupported source-manifest schema")
     entries = document.get("inputs")
     if not isinstance(entries, list) or not entries:
         raise ComparisonError("Source manifest must contain a nonempty inputs list")
-    downloads: dict[Path, tuple[str, str]] = {}
+    actions: dict[Path, dict[str, Any]] = {}
     for entry in entries:
         if not isinstance(entry, dict):
             raise ComparisonError("Each source-manifest input must be an object")
         path_value = entry.get("path")
-        url = entry.get("source")
         digest = entry.get("sha256")
         if not isinstance(path_value, str) or not path_value:
-            raise ComparisonError("Download input is missing string field path")
+            raise ComparisonError("Corpus input is missing string field path")
         path = Path(path_value)
         if path.is_absolute() or ".." in path.parts:
-            raise ComparisonError(f"Download path must be relative and contained: {path}")
-        if not isinstance(url, str) or urlparse(url).scheme != "https":
-            raise ComparisonError(f"Download source must be an HTTPS URL: {url!r}")
+            raise ComparisonError(
+                f"Corpus path must be relative and contained: {path}"
+            )
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise ComparisonError(f"Download {path} has an invalid SHA-256")
-        previous = downloads.get(path)
-        if previous is not None and previous != (url, digest):
-            raise ComparisonError(f"Download path has conflicting sources: {path}")
-        downloads[path] = (url, digest)
-    return [(path, url, digest) for path, (url, digest) in downloads.items()]
+            raise ComparisonError(f"Corpus source {path} has an invalid SHA-256")
+        generator = entry.get("generator")
+        if generator is None:
+            url = entry.get("source")
+            if not isinstance(url, str) or urlparse(url).scheme != "https":
+                raise ComparisonError(
+                    f"Downloaded source must be an HTTPS URL: {url!r}"
+                )
+            action = {
+                "kind": "download",
+                "path": path,
+                "url": url,
+                "sha256": digest,
+            }
+        else:
+            expected_keys = {"kind", "workload"}
+            if not isinstance(generator, dict) or set(generator) != expected_keys:
+                raise ComparisonError(
+                    "Corpus generator must contain exactly kind and workload"
+                )
+            if generator["kind"] != "gjxl-encoding-benchmark-source-v1":
+                raise ComparisonError(
+                    f"Unknown corpus generator: {generator['kind']!r}"
+                )
+            workload = generator["workload"]
+            if not isinstance(workload, str) or not workload:
+                raise ComparisonError("Corpus generator workload must be a string")
+            action = {
+                "kind": "generate",
+                "path": path,
+                "workload": workload,
+                "sha256": digest,
+            }
+        previous = actions.get(path)
+        if previous is not None and previous != action:
+            raise ComparisonError(f"Corpus path has conflicting sources: {path}")
+        actions[path] = action
+    return list(actions.values())
 
 
 def fetch_corpus_sources(args: argparse.Namespace) -> None:
     source_manifest = args.source_manifest.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    for relative_path, url, expected_sha256 in validated_downloads(source_manifest):
+    for action in validated_source_actions(source_manifest):
+        relative_path = action["path"]
+        expected_sha256 = action["sha256"]
         destination = output / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():
@@ -242,13 +275,32 @@ def fetch_corpus_sources(args: argparse.Namespace) -> None:
                 delete=False,
             ) as stream:
                 temporary = Path(stream.name)
-                request = Request(url, headers={"User-Agent": "gjxl-comparison/1"})
-                with urlopen(request, timeout=args.timeout) as response:
-                    shutil.copyfileobj(response, stream)
+                if action["kind"] == "download":
+                    request = Request(
+                        action["url"],
+                        headers={"User-Agent": "gjxl-comparison/1"},
+                    )
+                    with urlopen(request, timeout=args.timeout) as response:
+                        shutil.copyfileobj(response, stream)
+            if action["kind"] == "generate":
+                benchmark = args.gjxl_benchmark.resolve()
+                if not benchmark.is_file():
+                    raise ComparisonError(
+                        f"GJXL benchmark executable is missing: {benchmark}"
+                    )
+                run_capture(
+                    [
+                        str(benchmark),
+                        "--workload",
+                        action["workload"],
+                        "--source-output",
+                        str(temporary),
+                    ]
+                )
             actual_sha256 = sha256_file(temporary)
             if actual_sha256 != expected_sha256:
                 raise ComparisonError(
-                    f"Downloaded corpus source SHA-256 differs for {relative_path}: "
+                    f"Corpus source SHA-256 differs for {relative_path}: "
                     f"actual={actual_sha256} expected={expected_sha256}"
                 )
             temporary.replace(destination)
@@ -1134,6 +1186,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     fetch.add_argument("--source-manifest", type=Path, required=True)
     fetch.add_argument("--output", type=Path, required=True)
     fetch.add_argument("--timeout", type=positive_int, default=60)
+    fetch.add_argument(
+        "--gjxl-benchmark",
+        type=Path,
+        default=repo_default / "build/release/gjxl_encoding_benchmark",
+    )
     fetch.set_defaults(function=fetch_corpus_sources)
 
     prepare = subparsers.add_parser("prepare-corpus")

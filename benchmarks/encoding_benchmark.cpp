@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cctype>
 #include <cmath>
@@ -128,6 +129,7 @@ struct CommandLineOptions {
   std::string metallib_path;
   std::string raw_samples_path;
   std::string codestream_output_path;
+  std::string source_output_path;
   std::string gpu_profile_path;
   std::string implementation = "simd";
   BenchmarkScope scope = BenchmarkScope::kFull;
@@ -567,6 +569,7 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--collect-final-score] "
                    "[--metallib PATH] [--raw-samples PATH] "
                    "[--codestream-output PATH] "
+                   "[--source-output PATH] "
                    "[--gpu-profile stage|dispatch] "
                    "[--gpu-profile-output PATH] "
                    "[--distance D] [--warmups N] [--samples N] "
@@ -591,6 +594,8 @@ ParseGpuProfilingMode(std::string_view text) {
       options.raw_samples_path = value;
     } else if (argument == "--codestream-output") {
       options.codestream_output_path = value;
+    } else if (argument == "--source-output") {
+      options.source_output_path = value;
     } else if (argument == "--gpu-profile") {
       options.gpu_profiling_mode = ParseGpuProfilingMode(value);
     } else if (argument == "--gpu-profile-output") {
@@ -672,6 +677,18 @@ ParseGpuProfilingMode(std::string_view text) {
         options.scope != BenchmarkScope::kMetalPublicWorkflow))) {
     throw std::runtime_error(
       "Codestream output requires an external-input public workflow");
+  }
+  if (!options.source_output_path.empty() &&
+      (!options.input_path.empty() || options.workload == "all")) {
+    throw std::runtime_error(
+      "Source output requires exactly one built-in workload");
+  }
+  if (!options.source_output_path.empty() &&
+      (!options.raw_samples_path.empty() ||
+       !options.codestream_output_path.empty() ||
+       !options.gpu_profile_path.empty())) {
+    throw std::runtime_error(
+      "Source output cannot be combined with benchmark result outputs");
   }
   const bool gpu_profiling = options.gpu_profiling_mode !=
     gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
@@ -868,6 +885,20 @@ void FillWorkflowGradient(ImageStorage* image) {
           0.04f + 0.31f * fx + 0.46f * fy;
     }
   }
+}
+
+[[nodiscard]] ImageStorage MakeWorkloadSource(const WorkloadSpec& spec) {
+  ImageStorage image = spec.flower
+      ? LoadFlower()
+      : ImageStorage(spec.source_extent);
+  if (!spec.flower) {
+    if (spec.workflow_gradient) {
+      FillWorkflowGradient(&image);
+    } else {
+      FillSynthetic(&image);
+    }
+  }
+  return image;
 }
 
 void EdgePad(const ImageStorage& source, ImageStorage* destination) {
@@ -1277,6 +1308,55 @@ void WriteCodestream(
   }
 }
 
+void WriteLittleEndianFloat(std::ofstream* output, float value) {
+  uint32_t bits = std::bit_cast<uint32_t>(value);
+  const std::array<char, 4> bytes = {
+      static_cast<char>(bits),
+      static_cast<char>(bits >> 8),
+      static_cast<char>(bits >> 16),
+      static_cast<char>(bits >> 24),
+  };
+  output->write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+void WritePfm(
+    const std::filesystem::path& destination,
+    const ImageStorage& image) {
+  if (!destination.parent_path().empty()) {
+    std::filesystem::create_directories(destination.parent_path());
+  }
+  std::filesystem::path temporary = destination;
+  temporary += ".tmp-" + std::to_string(static_cast<uint64_t>(
+    Clock::now().time_since_epoch().count()));
+  try {
+    std::ofstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
+    output.open(temporary, std::ios::binary | std::ios::trunc);
+    output << "PF\n" << image.extent.width << ' ' << image.extent.height
+           << "\n-1.0\n";
+    for (size_t reverse_y = 0; reverse_y < image.extent.height; ++reverse_y) {
+      const size_t y = image.extent.height - 1 - reverse_y;
+      for (size_t x = 0; x < image.extent.width; ++x) {
+        const size_t index = y * image.extent.width + x;
+        for (size_t channel = 0; channel < image.plane.size(); ++channel) {
+          WriteLittleEndianFloat(&output, image.plane[channel][index]);
+        }
+      }
+    }
+    output.close();
+    std::error_code error;
+    std::filesystem::rename(temporary, destination, error);
+    if (error) {
+      throw std::runtime_error(
+        "Could not atomically replace source output: " + error.message());
+    }
+  } catch (...) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    throw;
+  }
+}
+
 [[nodiscard]] std::string_view GpuProfilingModeName(
     gjxl::gpu_profile_internal::GpuProfilingMode mode) {
   switch (mode) {
@@ -1472,16 +1552,9 @@ void RunCoefficientCodingOnlyWorkload(
     const WorkloadSpec& spec, size_t warmups, size_t samples,
     float butteraugli_target, std::string_view input_path,
     double* global_sink) {
-  ImageStorage original = !input_path.empty()
-      ? LoadBenchmarkImage(input_path)
-      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
-  if (!spec.flower && input_path.empty()) {
-    if (spec.workflow_gradient) {
-      FillWorkflowGradient(&original);
-    } else {
-      FillSynthetic(&original);
-    }
-  }
+  ImageStorage original = input_path.empty()
+      ? MakeWorkloadSource(spec)
+      : LoadBenchmarkImage(input_path);
   const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);
   ImageStorage padded_linear(coding_extent);
   ImageStorage opsin(coding_extent);
@@ -1605,16 +1678,9 @@ void RunPublicWorkflowOnlyWorkload(
     bool metal_only, ValidationMode validation,
     gjxl::GpuBackend& gpu,
     std::vector<RawWorkflowWorkload>* raw_results, double* global_sink) {
-  ImageStorage original = !input_path.empty()
-      ? LoadBenchmarkImage(input_path)
-      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
-  if (!spec.flower && input_path.empty()) {
-    if (spec.workflow_gradient) {
-      FillWorkflowGradient(&original);
-    } else {
-      FillSynthetic(&original);
-    }
-  }
+  ImageStorage original = input_path.empty()
+      ? MakeWorkloadSource(spec)
+      : LoadBenchmarkImage(input_path);
 
   const auto encode = [&](gjxl::VarDctBackendPreference backend,
                           gjxl::GpuAdaptiveQuantizationMode mode,
@@ -1863,16 +1929,9 @@ void RunGpuProfileWorkflowWorkload(
     bool collect_final_butteraugli_score,
     std::string_view input_path, gjxl::GpuBackend& gpu,
     std::vector<RawGpuProfileWorkload>* results, double* global_sink) {
-  ImageStorage original = !input_path.empty()
-      ? LoadBenchmarkImage(input_path)
-      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
-  if (!spec.flower && input_path.empty()) {
-    if (spec.workflow_gradient) {
-      FillWorkflowGradient(&original);
-    } else {
-      FillSynthetic(&original);
-    }
-  }
+  ImageStorage original = input_path.empty()
+      ? MakeWorkloadSource(spec)
+      : LoadBenchmarkImage(input_path);
 
   const gjxl::VarDctEncodingOptions encoding_options{
     .butteraugli_target = butteraugli_target,
@@ -1954,8 +2013,7 @@ void RunGpuCompleteAqOnlyWorkload(
     float butteraugli_target,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode, gjxl::GpuBackend& gpu,
     double* global_sink) {
-  ImageStorage original(spec.source_extent);
-  FillSynthetic(&original);
+  ImageStorage original = MakeWorkloadSource(spec);
   const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);
   ImageStorage padded_linear(coding_extent);
   ImageStorage opsin(coding_extent);
@@ -2050,16 +2108,9 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
                  const gjxl::MetalBackendOptions& backend_options,
                  double* global_sink) {
 
-  ImageStorage original = !input_path.empty()
-      ? LoadBenchmarkImage(input_path)
-      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
-  if (!spec.flower && input_path.empty()) {
-    if (spec.workflow_gradient) {
-      FillWorkflowGradient(&original);
-    } else {
-      FillSynthetic(&original);
-    }
-  }
+  ImageStorage original = input_path.empty()
+      ? MakeWorkloadSource(spec)
+      : LoadBenchmarkImage(input_path);
   const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);
   ImageStorage padded_linear(coding_extent);
   ImageStorage opsin(coding_extent);
@@ -2872,6 +2923,17 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
       [&](const WorkloadSpec& spec) { return spec.name == name; });
 }
 
+[[nodiscard]] const WorkloadSpec& FindWorkload(std::string_view name) {
+  const auto found = std::find_if(
+      kWorkloads.begin(), kWorkloads.end(),
+      [&](const WorkloadSpec& spec) { return spec.name == name; });
+  if (found == kWorkloads.end()) {
+    throw std::runtime_error("Unknown quantization workload: " +
+                             std::string(name));
+  }
+  return *found;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -2885,6 +2947,16 @@ int main(int argc, char** argv) {
         !IsKnownWorkload(options.workload)) {
       throw std::runtime_error("Unknown quantization workload: " +
                                options.workload);
+    }
+    if (!options.source_output_path.empty()) {
+      const WorkloadSpec& workload = FindWorkload(options.workload);
+      const ImageStorage source = MakeWorkloadSource(workload);
+      WritePfm(options.source_output_path, source);
+      std::cout << "source_output workload=" << workload.name
+                << " source=" << source.extent.width << 'x'
+                << source.extent.height << " path="
+                << options.source_output_path << '\n';
+      return EXIT_SUCCESS;
     }
     const gjxl::MetalBackendOptions backend_options =
         BackendOptions(options.implementation);

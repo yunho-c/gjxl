@@ -76,6 +76,54 @@ class CorpusTest(unittest.TestCase):
                 )
             get.assert_not_called()
 
+    def test_fetch_generates_builtin_workload_once_and_hashes_it(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gjxl-corpus-test-") as temporary:
+            root = Path(temporary)
+            payload = b"generated source bytes"
+            digest = comparison.hashlib.sha256(payload).hexdigest()
+            manifest = root / "sources.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "inputs": [
+                            {
+                                "name": "stress",
+                                "path": "padded.pfm",
+                                "source": "GJXL built-in workload",
+                                "sha256": digest,
+                                "generator": {
+                                    "kind": "gjxl-encoding-benchmark-source-v1",
+                                    "workload": "padded_1080p",
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            benchmark = root / "benchmark"
+            benchmark.write_text("fixture", encoding="utf-8")
+
+            def generate(command: list[str], **unused: object) -> object:
+                Path(command[-1]).write_bytes(payload)
+                return mock.Mock(stdout="")
+
+            output = root / "sources"
+            with mock.patch.object(
+                comparison, "run_capture", side_effect=generate
+            ) as run:
+                comparison.fetch_corpus_sources(
+                    argparse.Namespace(
+                        source_manifest=manifest,
+                        output=output,
+                        timeout=1,
+                        gjxl_benchmark=benchmark,
+                    )
+                )
+            self.assertEqual((output / "padded.pfm").read_bytes(), payload)
+            run.assert_called_once()
+
     def test_identity_linear_pfm_is_hashed_and_never_overwritten(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gjxl-corpus-test-") as temporary:
             root = Path(temporary)

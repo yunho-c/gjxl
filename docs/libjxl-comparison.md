@@ -212,7 +212,8 @@ Phase 1 is implemented without modifying the pinned libjxl source. The pieces
 are deliberately separated:
 
 - `tools/libjxl_comparison.py fetch-corpus` downloads each unique HTTPS source
-  atomically and requires its declared SHA-256 before retaining it;
+  or invokes a declared GJXL built-in-source generator, retains the result
+  atomically, and requires its declared SHA-256;
 - `tools/libjxl_comparison.py prepare-corpus` converts or validates sources,
   requires provenance and license fields, applies only explicit manifest crop
   and resize operations, and writes a never-overwritten canonical-PFM corpus
@@ -263,48 +264,54 @@ coordinates apply after EXIF orientation. Resizing occurs after conversion to
 linear RGB and uses a fixed Lanczos filter. A PFM identity input cannot request
 either transform.
 
-The first headline photographic subset is pinned at
-`benchmarks/libjxl_comparison/corpora/imazen26-photographic-pilot.json`. It uses
-six public-domain photographs from the canonical test split of imazen-26 at
-revision `187fbf338ce08e8e6654db7f04ddae58d5263da2`: a textured planter,
-sunlit forest, structured city/river view, ISO-1600 interior, rainbow
-landscape, and detailed food scene. Every source is a 4000x3000 PNG-v3 SDR
-render. The 4K view is the explicit center crop
-`3840x2160+80+420`; the 1080p view is a linear-light Lanczos reduction of that
-same field of view. Source URLs, public-domain status, and source hashes are
-recorded per entry.
+The complete Phase 1 corpus recipe is pinned at
+`benchmarks/libjxl_comparison/corpora/phase1-pilot.json`. It contains 38
+canonical inputs in four separately reported groups:
 
-This completes the six-photograph 1080p/4K headline prerequisite. The Kodak
-continuity set and generated padded stress inputs still need to be added before
-the complete Phase 1 exit criteria can be claimed.
+- six public-domain photographs from the canonical imazen-26 test split at
+  revision `187fbf338ce08e8e6654db7f04ddae58d5263da2`, each represented by a
+  3840x2160 center crop and a 1920x1080 linear-light Lanczos reduction;
+- all 24 Kodak PhotoCD PCD0992 images at their native 768x512 or 512x768
+  dimensions for continuity with the existing cjxl Samply analysis; and
+- exact exports of GJXL's built-in `padded_1080p` and `padded_4k` synthetic
+  sources at 1919x1079 and 3839x2159 for edge-extension stress testing.
+
+The padded sources use a manifest generator rather than a reimplementation of
+the synthetic formula. `gjxl_encoding_benchmark --source-output` writes the
+same `ImageStorage` produced for the timed workload as an atomic linear-sRGB
+PFM; `fetch-corpus` then checks the pinned hash. This keeps both encoders on
+identical bytes and makes future changes to the built-in source fail closed
+until the corpus recipe is reviewed. Source URLs or generator identity,
+licenses, and SHA-256 hashes are recorded per entry. Kodak and padded results
+must not be folded into the high-resolution photographic aggregate.
 
 Run the pilot from this worktree as follows:
 
 ```sh
 python3 tools/libjxl_comparison.py fetch-corpus \
   --source-manifest \
-    benchmarks/libjxl_comparison/corpora/imazen26-photographic-pilot.json \
-  --output build/libjxl-comparison/corpus-sources
+    benchmarks/libjxl_comparison/corpora/phase1-pilot.json \
+  --output build/libjxl-comparison/corpus-sources \
+  --gjxl-benchmark build/release/gjxl_encoding_benchmark
 
 python3 tools/libjxl_comparison.py prepare-corpus \
   --source-manifest \
-    benchmarks/libjxl_comparison/corpora/imazen26-photographic-pilot.json \
+    benchmarks/libjxl_comparison/corpora/phase1-pilot.json \
   --source-root build/libjxl-comparison/corpus-sources \
-  --output build/libjxl-comparison/corpus-imazen26-pilot-pinned
+  --output build/libjxl-comparison/corpus-phase1-pilot-pinned
 
 python3 tools/libjxl_comparison.py build-libjxl
 
 python3 tools/libjxl_comparison.py run \
   --corpus-manifest \
-    build/libjxl-comparison/corpus-imazen26-pilot-pinned/manifest.json \
+    build/libjxl-comparison/corpus-phase1-pilot-pinned/manifest.json \
   --configuration both
 ```
 
 Add `--capture-samply` only to a diagnostic profiling run. The unprofiled
 process-pair summary remains the performance source of record. The repository
-does not vendor the photographic corpus itself; selecting and licensing the
-retained 1080p/4K sources and running them on a quiet host remain execution
-steps, not implementation steps.
+does not vendor the corpus itself. `fetch-corpus` reconstructs the hash-pinned
+source set, and retained timing still requires a quiet host.
 
 ### 1. Add a comparison driver
 
@@ -544,10 +551,9 @@ time and normalized cost, together with output size and actual decoded quality.
 
 ## Implementation order
 
-1. **Headline photographs complete; continuity/stress inputs remain.** The
-   hash-pinned imazen-26 six-image subset now supplies paired 1080p/4K views.
-   Add the Kodak continuity set and generated padded stress inputs before
-   declaring the full corpus contract complete.
+1. **Complete.** Pin the six-image imazen-26 headline set as paired 1080p/4K
+   views, all 24 native Kodak continuity images, and exact generated padded
+   1080p/4K stress sources in one reproducible corpus recipe.
 2. **Complete.** Add the benchmark-only GJXL serializer worker override.
 3. **Complete.** Add the comparison driver and raw unprofiled result schema.
 4. **Complete.** Extend the Samply classifier with the neutral stage mapping

@@ -90,6 +90,12 @@ just metal-encode-benchmark padded_4k simd 7 2 fully-resident
 just coefficient-benchmark padded_1080p 9 2
 ```
 
+For cross-encoder corpus construction, the benchmark-only
+`--source-output PATH` option exports exactly one built-in workload as an
+atomic linear-sRGB PFM and exits before Metal backend construction. The export
+uses the same source-construction function as the timed workload and is outside
+all performance measurement paths.
+
 The benchmark performs one correctness validation, alternates CPU/Metal order,
 prints every profile boundary, and reports paired speedups. The broader
 `just aq-benchmark` matrix remains the correctness and exploratory phase gate.
