@@ -483,6 +483,25 @@ class QualityCalibrationTest(unittest.TestCase):
         self.assertEqual(selected["butteraugli"], 1.401)
         self.assertLessEqual(selected["absolute_error"], 0.015)
 
+    def test_distance_search_labels_a_boundary_limited_match(self) -> None:
+        selected, _ = comparison.calibrate_distance(
+            3.813,
+            lambda distance: {
+                "butteraugli": 3.89 if distance <= 0.05 else 3.95
+            },
+            minimum_distance=0.05,
+            maximum_distance=2.0,
+            initial_distance=1.0,
+            tolerance=0.015,
+            maximum_evaluations=12,
+            maximum_relative_error=0.025,
+        )
+        self.assertEqual(selected["distance"], 0.05)
+        self.assertEqual(
+            selected["match_kind"], "boundary-limited-relative-tolerance"
+        )
+        self.assertLessEqual(selected["relative_error"], 0.025)
+
     def test_nominal_targets_are_bound_to_the_corpus(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gjxl-quality-test-") as temporary:
             root = Path(temporary)
@@ -547,6 +566,7 @@ class QualityCalibrationTest(unittest.TestCase):
                     "target_gjxl_distance": 1.0,
                     "effort": 7,
                     "tolerance": 0.01,
+                    "maximum_relative_error": 0.01,
                 },
                 "inputs": [
                     {
@@ -557,6 +577,8 @@ class QualityCalibrationTest(unittest.TestCase):
                         "achieved_butteraugli": 1.245,
                         "libjxl_distance": 0.875,
                         "absolute_error": 0.005,
+                        "relative_error": 0.004,
+                        "match_kind": "within-absolute-tolerance",
                     }
                 ],
             }
@@ -573,9 +595,13 @@ class QualityCalibrationTest(unittest.TestCase):
 
             document["inputs"][0]["achieved_butteraugli"] = 1.23
             document["inputs"][0]["absolute_error"] = 0.02
+            document["inputs"][0]["relative_error"] = 0.016
+            document["inputs"][0]["match_kind"] = (
+                "boundary-limited-relative-tolerance"
+            )
             calibration.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(
-                comparison.ComparisonError, "exceeds its tolerance"
+                comparison.ComparisonError, "relative match is inconsistent"
             ):
                 comparison.load_quality_calibration(
                     calibration,

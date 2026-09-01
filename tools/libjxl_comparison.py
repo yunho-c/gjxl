@@ -1048,6 +1048,7 @@ def calibrate_distance(
     initial_distance: float,
     tolerance: float,
     maximum_evaluations: int,
+    maximum_relative_error: float = 0.0,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Find a requested distance whose decoded score matches target_score."""
 
@@ -1059,6 +1060,15 @@ def calibrate_distance(
         raise ComparisonError("Calibration requires at least three evaluations")
     evaluations: list[dict[str, Any]] = []
     by_distance: dict[float, dict[str, Any]] = {}
+
+    def select(result: dict[str, Any], match_kind: str) -> dict[str, Any]:
+        result["relative_error"] = (
+            result["absolute_error"] / target_score
+            if target_score > 0.0
+            else math.inf
+        )
+        result["match_kind"] = match_kind
+        return result
 
     def evaluate_once(distance: float) -> dict[str, Any]:
         distance = float(distance)
@@ -1075,7 +1085,7 @@ def calibrate_distance(
 
     initial = evaluate_once(initial_distance)
     if initial["absolute_error"] <= tolerance:
-        return initial, evaluations
+        return select(initial, "within-absolute-tolerance"), evaluations
 
     if initial["butteraugli"] > target_score:
         lower = evaluate_once(minimum_distance)
@@ -1088,7 +1098,12 @@ def calibrate_distance(
     if not bracketed:
         best = min(evaluations, key=lambda item: item["absolute_error"])
         if best["absolute_error"] <= tolerance:
-            return best, evaluations
+            return select(best, "within-absolute-tolerance"), evaluations
+        if (
+            target_score > 0.0
+            and best["absolute_error"] / target_score <= maximum_relative_error
+        ):
+            return select(best, "boundary-limited-relative-tolerance"), evaluations
         raise ComparisonError(
             "Calibration target is not bracketed by the requested distance bounds: "
             f"target={target_score:.9g}, lower={lower['butteraugli']:.9g}, "
@@ -1101,7 +1116,7 @@ def calibrate_distance(
             break
         candidate = evaluate_once(midpoint)
         if candidate["absolute_error"] <= tolerance:
-            return candidate, evaluations
+            return select(candidate, "within-absolute-tolerance"), evaluations
         if candidate["butteraugli"] < target_score:
             lower = candidate
         else:
@@ -1109,12 +1124,17 @@ def calibrate_distance(
 
     best = min(evaluations, key=lambda item: item["absolute_error"])
     if best["absolute_error"] > tolerance:
+        if (
+            target_score > 0.0
+            and best["absolute_error"] / target_score <= maximum_relative_error
+        ):
+            return select(best, "quantized-relative-tolerance"), evaluations
         raise ComparisonError(
             "Calibration did not converge within tolerance: "
             f"target={target_score:.9g}, best={best['butteraugli']:.9g}, "
             f"error={best['absolute_error']:.9g}, tolerance={tolerance:.9g}"
         )
-    return best, evaluations
+    return select(best, "within-absolute-tolerance"), evaluations
 
 
 def load_quality_calibration(
@@ -1151,6 +1171,12 @@ def load_quality_calibration(
     tolerance = _finite_number(parameters.get("tolerance"), "calibration tolerance")
     if tolerance <= 0.0:
         raise ComparisonError("Calibration tolerance must be positive")
+    maximum_relative_error = _finite_number(
+        parameters.get("maximum_relative_error"),
+        "maximum calibration relative error",
+    )
+    if maximum_relative_error < 0.0:
+        raise ComparisonError("Maximum calibration relative error must be nonnegative")
 
     records = document.get("inputs")
     if not isinstance(records, list):
@@ -1199,7 +1225,42 @@ def load_quality_calibration(
             raise ComparisonError(
                 f"Quality calibration error is inconsistent for {name}"
             )
-        if error < 0.0 or error > tolerance:
+        relative_error = error / target_score if target_score > 0.0 else math.inf
+        recorded_relative_error = _finite_number(
+            record.get("relative_error"), f"calibration relative error for {name}"
+        )
+        if not math.isclose(
+            relative_error, recorded_relative_error, rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise ComparisonError(
+                f"Quality calibration relative error is inconsistent for {name}"
+            )
+        match_kind = record.get("match_kind")
+        if match_kind not in {
+            "within-absolute-tolerance",
+            "boundary-limited-relative-tolerance",
+            "quantized-relative-tolerance",
+        }:
+            raise ComparisonError(
+                f"Quality calibration match kind is invalid for {name}"
+            )
+        if (
+            match_kind == "within-absolute-tolerance"
+            and error > tolerance
+        ):
+            raise ComparisonError(
+                f"Quality calibration absolute match is inconsistent for {name}"
+            )
+        if (
+            match_kind != "within-absolute-tolerance"
+            and relative_error > maximum_relative_error
+        ):
+            raise ComparisonError(
+                f"Quality calibration relative match is inconsistent for {name}"
+            )
+        if error < 0.0 or (
+            error > tolerance and relative_error > maximum_relative_error
+        ):
             raise ComparisonError(
                 f"Quality calibration for {name} exceeds its tolerance"
             )
@@ -1215,6 +1276,7 @@ def load_quality_calibration(
         "path": str(path),
         "sha256": sha256_file(path),
         "tolerance": tolerance,
+        "maximum_relative_error": maximum_relative_error,
         "source_gjxl_revision": document.get("source_gjxl_revision"),
     }
 
@@ -1286,6 +1348,7 @@ def calibrate_quality(args: argparse.Namespace) -> None:
             "maximum_distance": args.maximum_distance,
             "initial_distance": args.initial_distance,
             "tolerance": args.tolerance,
+            "maximum_relative_error": args.maximum_relative_error,
             "maximum_evaluations": args.maximum_evaluations,
         },
         "binaries": {
@@ -1370,6 +1433,7 @@ def calibrate_quality(args: argparse.Namespace) -> None:
             initial_distance=args.initial_distance,
             tolerance=args.tolerance,
             maximum_evaluations=args.maximum_evaluations,
+            maximum_relative_error=args.maximum_relative_error,
         )
         selected_index = selected["candidate_index"]
         for evaluation in evaluations:
@@ -1395,6 +1459,8 @@ def calibrate_quality(args: argparse.Namespace) -> None:
             "libjxl_distance": selected["distance"],
             "achieved_butteraugli": selected["butteraugli"],
             "absolute_error": selected["absolute_error"],
+            "relative_error": selected["relative_error"],
+            "match_kind": selected["match_kind"],
             "encoded_bytes": selected["encoded_bytes"],
             "selected_candidate_index": selected_index,
             "evaluation_count": len(evaluations),
@@ -1639,14 +1705,32 @@ def run_comparison(args: argparse.Namespace) -> None:
                     input_validations["gjxl"]["butteraugli"]
                     - input_validations["libjxl"]["butteraugli"]
                 )
+                gjxl_score = input_validations["gjxl"]["butteraugli"]
+                relative_delta = (
+                    score_delta / gjxl_score if gjxl_score > 0.0 else math.inf
+                )
+                within_absolute = score_delta <= quality_calibration["tolerance"]
+                within_relative = (
+                    relative_delta
+                    <= quality_calibration["maximum_relative_error"]
+                )
                 quality_match = {
                     "input": entry["name"],
                     "configuration": configuration,
-                    "gjxl_butteraugli": input_validations["gjxl"]["butteraugli"],
+                    "gjxl_butteraugli": gjxl_score,
                     "libjxl_butteraugli": input_validations["libjxl"]["butteraugli"],
                     "absolute_difference": score_delta,
+                    "relative_difference": relative_delta,
                     "tolerance": quality_calibration["tolerance"],
-                    "within_tolerance": score_delta <= quality_calibration["tolerance"],
+                    "maximum_relative_error": quality_calibration[
+                        "maximum_relative_error"
+                    ],
+                    "match_kind": (
+                        "within-absolute-tolerance"
+                        if within_absolute
+                        else "within-relative-tolerance"
+                    ),
+                    "within_tolerance": within_absolute or within_relative,
                 }
                 manifest["quality_matches"].append(quality_match)
                 write_json_atomic(directory / "manifest.json", manifest)
@@ -1654,7 +1738,11 @@ def run_comparison(args: argparse.Namespace) -> None:
                     raise ComparisonError(
                         f"Matched-quality validation failed for {entry['name']} "
                         f"({configuration}): difference={score_delta:.9g}, "
-                        f"tolerance={quality_calibration['tolerance']:.9g}"
+                        f"relative={relative_delta:.3%}, "
+                        f"absolute_tolerance="
+                        f"{quality_calibration['tolerance']:.9g}, "
+                        f"relative_tolerance="
+                        f"{quality_calibration['maximum_relative_error']:.3%}"
                     )
 
             if args.capture_samply:
@@ -1795,10 +1883,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     calibrate.add_argument("--num-threads", type=positive_int, default=8)
     calibrate.add_argument("--warmups", type=int, default=0)
     calibrate.add_argument("--samples", type=positive_int, default=1)
-    calibrate.add_argument("--minimum-distance", type=float, default=0.1)
+    calibrate.add_argument("--minimum-distance", type=float, default=0.05)
     calibrate.add_argument("--maximum-distance", type=float, default=2.0)
     calibrate.add_argument("--initial-distance", type=float, default=1.0)
     calibrate.add_argument("--tolerance", type=float, default=0.015)
+    calibrate.add_argument("--maximum-relative-error", type=float, default=0.025)
     calibrate.add_argument("--maximum-evaluations", type=positive_int, default=12)
     calibrate.set_defaults(function=calibrate_quality)
 
@@ -1874,6 +1963,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             parser.error("--initial-distance must lie within the calibration bounds")
         if not math.isfinite(args.tolerance) or args.tolerance <= 0.0:
             parser.error("--tolerance must be positive and finite")
+        if (
+            not math.isfinite(args.maximum_relative_error)
+            or args.maximum_relative_error < 0.0
+        ):
+            parser.error("--maximum-relative-error must be finite and nonnegative")
         if args.maximum_evaluations < 3:
             parser.error("--maximum-evaluations must be at least 3")
     return args

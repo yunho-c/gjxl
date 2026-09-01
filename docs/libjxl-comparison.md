@@ -354,14 +354,24 @@ python3 tools/libjxl_comparison.py run \
     logs/libjxl-calibration/<calibration-run>/calibration.json
 ```
 
-The default match tolerance is an absolute Butteraugli difference of 0.015.
+The normal match tolerance is an absolute Butteraugli difference of 0.015.
 This accommodates discrete quantization-policy transitions while keeping the
-maximum score mismatch close to one percent at the Phase 1 quality targets.
-Calibration starts at distance 1.0, verifies the target against the relevant
-0.1 or 2.0 bound, and uses at most 12 evaluations per input. Every search
-evaluation, command, raw encoder record, score, and hash remains in the
-calibration manifest; only the selected candidate's codestream and decoded PFM
-are retained to bound disk usage.
+maximum score mismatch close to one percent at the usual Phase 1 quality
+targets. Calibration starts at distance 1.0, verifies the target against the
+relevant 0.05 or 2.0 bound, and uses at most 12 evaluations per input. The 0.05
+lower bound is libjxl's minimum lossy VarDCT distance at the pinned revision.
+
+If that bound cannot reach GJXL's score, or a discrete policy transition skips
+over the absolute window, calibration may retain the closest candidate only
+when its relative score difference is at most 2.5%. Such inputs are explicitly
+labeled `boundary-limited-relative-tolerance` or
+`quantized-relative-tolerance`; they must be disclosed separately from normal
+absolute-tolerance matches in the final report. The comparison run rechecks
+both decoded scores and the applicable tolerance rather than trusting the map.
+
+Every search evaluation, command, raw encoder record, score, and hash remains
+in the calibration manifest; only the selected candidate's codestream and
+decoded PFM are retained to bound disk usage.
 
 Add `--capture-samply` only to a diagnostic profiling run. The unprofiled
 process-pair summary remains the performance source of record. The repository
