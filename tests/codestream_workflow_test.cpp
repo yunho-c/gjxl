@@ -325,7 +325,9 @@ bool CheckDeterministicWorkflow() {
 }
 
 bool CheckCpuThreadBudget() {
-  constexpr gjxl::Extent2D kThreadedExtent{256, 256};
+  // Cross both the row-parallel threshold and the 256x256 codestream-group
+  // boundary so the check covers nested and multi-group scheduling.
+  constexpr gjxl::Extent2D kThreadedExtent{320, 272};
   ArbitraryImageStorage image(kThreadedExtent);
   for (size_t y = 0; y < kThreadedExtent.height; ++y) {
     for (size_t x = 0; x < kThreadedExtent.width; ++x) {
@@ -339,30 +341,39 @@ bool CheckCpuThreadBudget() {
   }
 
   const gjxl::VarDctEncodingOptions automatic_options{
-    .effort = 1,
     .backend = gjxl::VarDctBackendPreference::kCpu,
   };
   std::vector<uint8_t> automatic;
   gjxl::VarDctEncodingSummary automatic_summary;
-  gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
-    image.View(), automatic_options, &automatic, &automatic_summary);
-  if (!status.ok() || automatic.empty()) {
+  gjxl::codestream_internal::VarDctEncodingProfile automatic_profile;
+  gjxl::Status status = gjxl::codestream_internal::
+    EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
+      image.View(), automatic_options, nullptr, false, &automatic,
+      &automatic_summary, &automatic_profile);
+  if (!status.ok() || automatic.empty() ||
+      automatic_profile.peak_cpu_participants == 0) {
     std::cerr << "Automatic CPU thread policy failed: " << status.message()
               << '\n';
     return false;
   }
 
-  for (const size_t thread_count : {size_t{1}, size_t{2}, size_t{4}}) {
+  for (const size_t thread_count :
+       {size_t{1}, size_t{2}, size_t{4}, size_t{8}}) {
     gjxl::VarDctEncodingOptions options = automatic_options;
     options.cpu_thread_count = thread_count;
     std::vector<uint8_t> bytes;
     gjxl::VarDctEncodingSummary summary;
-    status = gjxl::EncodeLinearRgbVarDctCodestream(
-      image.View(), options, &bytes, &summary);
-    if (!status.ok() || bytes != automatic || summary != automatic_summary) {
+    gjxl::codestream_internal::VarDctEncodingProfile profile;
+    status = gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
+        image.View(), options, nullptr, false, &bytes, &summary, &profile);
+    if (!status.ok() || bytes != automatic || summary != automatic_summary ||
+        profile.peak_cpu_participants == 0 ||
+        profile.peak_cpu_participants > thread_count) {
       std::cerr << "CPU thread budget " << thread_count
-                << " changed the workflow result: " << status.message()
-                << '\n';
+                << " changed the workflow result or exceeded its cap: "
+                << status.message() << " peak="
+                << profile.peak_cpu_participants << '\n';
       return false;
     }
   }

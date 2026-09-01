@@ -57,6 +57,8 @@ Status RunParallelInitialQuantWork(
     : std::min(count, std::min(kMaximumWorkers, hardware_workers));
   const size_t cpu_thread_count =
     thread_budget_internal::CpuThreadCount();
+  auto* const participant_tracker =
+    thread_budget_internal::ParticipantTracker();
   if (thread_budget_internal::InExplicitParallelScope()) {
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
@@ -68,6 +70,8 @@ Status RunParallelInitialQuantWork(
     ? automatic_worker_count
     : std::min(automatic_worker_count, cpu_thread_count);
   if (participant_count == 1) {
+    thread_budget_internal::ParallelScope scope(
+      cpu_thread_count, participant_tracker);
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
       if (!status.ok()) return status;
@@ -83,7 +87,8 @@ Status RunParallelInitialQuantWork(
     : participant_count - 1;
   workers.reserve(spawned_worker_count);
   const auto run_worker = [&] {
-    thread_budget_internal::ParallelScope scope(cpu_thread_count);
+    thread_budget_internal::ParallelScope scope(
+      cpu_thread_count, participant_tracker);
     while (true) {
       const size_t index =
         next_index.fetch_add(1, std::memory_order_relaxed);

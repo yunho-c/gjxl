@@ -112,17 +112,21 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 9)
+        self.assertEqual(document["schema_version"], 10)
         self.assertEqual(
             document["substage_work_timing"], "aggregate-worker-time"
         )
         self.assertEqual(document["validation"], "metal-only")
         self.assertEqual(document["density"], "default")
+        self.assertEqual(document["cpu_threads"], 0)
         self.assertFalse(document["collect_final_score"])
         self.assertEqual(document["sample_count"], 1)
         workload = document["workloads"][0]
         self.assertEqual(workload["codestream_comparison"], "not-compared")
         self.assertEqual(len(workload["samples"]), 1)
+        self.assertGreater(
+            workload["samples"][0]["peak_cpu_participants"], 0
+        )
         sample = workload["samples"][0]
         self.assertEqual(sample["sample_index"], 0)
         self.assertEqual(sample["backend"], "metal")
@@ -229,9 +233,29 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 9)
+        self.assertEqual(document["schema_version"], 10)
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
+
+    def test_cpu_thread_budget_is_recorded_and_enforced(self) -> None:
+        destination = self.directory / "thread-budget.json"
+        result = self.run_benchmark(
+            "--scope",
+            "public-workflow",
+            "--cpu-threads",
+            "2",
+            "--raw-samples",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["schema_version"], 10)
+        self.assertEqual(document["cpu_threads"], 2)
+        self.assertIn("cpu_threads=2", result.stdout)
+        for sample in document["workloads"][0]["samples"]:
+            self.assertGreater(sample["peak_cpu_participants"], 0)
+            self.assertLessEqual(sample["peak_cpu_participants"], 2)
 
     def test_final_score_collection_is_explicit(self) -> None:
         destination = self.directory / "scored.json"

@@ -137,6 +137,7 @@ struct CommandLineOptions {
       gjxl::VarDctDensityMode::kDefault;
   bool collect_final_butteraugli_score = false;
   float butteraugli_target = kDefaultButteraugliTarget;
+  size_t cpu_thread_count = 0;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
   gjxl::gpu_profile_internal::GpuProfilingMode gpu_profiling_mode =
@@ -566,7 +567,8 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--metallib PATH] [--raw-samples PATH] "
                    "[--gpu-profile stage|dispatch] "
                    "[--gpu-profile-output PATH] "
-                   "[--distance D] [--warmups N] [--samples N]\n";
+                   "[--distance D] [--cpu-threads auto|N] "
+                   "[--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
     }
     if (argument == "--collect-final-score") {
@@ -612,6 +614,12 @@ ParseGpuProfilingMode(std::string_view text) {
       }
     } else if (argument == "--distance") {
       options.butteraugli_target = ParsePositiveFloat(value);
+    } else if (argument == "--cpu-threads") {
+      options.cpu_thread_count = value == "auto" ? 0 : ParseSize(value, false);
+      if (options.cpu_thread_count > gjxl::kMaximumCpuThreadCount) {
+        throw std::runtime_error(
+          "CPU thread count must be auto or at most 256");
+      }
     } else if (argument == "--warmups") {
       options.warmups = ParseSize(value, true);
     } else if (argument == "--samples") {
@@ -646,6 +654,12 @@ ParseGpuProfilingMode(std::string_view text) {
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
     throw std::runtime_error(
         "Metal-only validation requires metal-public-workflow scope");
+  }
+  if (options.cpu_thread_count != 0 &&
+      options.scope != BenchmarkScope::kPublicWorkflow &&
+      options.scope != BenchmarkScope::kMetalPublicWorkflow) {
+    throw std::runtime_error(
+      "CPU thread budgets require a public-workflow scope");
   }
   if (!options.raw_samples_path.empty() &&
       options.scope != BenchmarkScope::kPublicWorkflow &&
@@ -940,6 +954,7 @@ constexpr std::array<std::string_view, 40> kWorkflowProfileNames = {
 struct RawWorkflowSample {
   size_t sample_index = 0;
   std::string_view backend;
+  size_t peak_cpu_participants = 0;
   std::array<uint64_t, kWorkflowProfileNames.size()> phase_nanoseconds{};
   size_t encoded_bytes = 0;
   uint64_t entropy_model_bits = 0;
@@ -1097,7 +1112,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 9,\n"
+           << "  \"schema_version\": 10,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
@@ -1117,6 +1132,7 @@ void WriteRawWorkflowSamples(
            << "\",\n"
            << "  \"distance\": " << std::setprecision(9)
            << options.butteraugli_target << ",\n"
+           << "  \"cpu_threads\": " << options.cpu_thread_count << ",\n"
            << "  \"warmups\": " << options.warmups << ",\n"
            << "  \"sample_count\": " << options.samples << ",\n"
            << "  \"workloads\": [\n";
@@ -1138,7 +1154,9 @@ void WriteRawWorkflowSamples(
         const RawWorkflowSample& sample = workload.samples[sample_index];
         output << "        {\"sample_index\": " << sample.sample_index
                << ", \"backend\": \"" << sample.backend
-               << "\", \"encoded_bytes\": " << sample.encoded_bytes
+               << "\", \"peak_cpu_participants\": "
+               << sample.peak_cpu_participants
+               << ", \"encoded_bytes\": " << sample.encoded_bytes
                << ", \"entropy_bits\": {\"model\": "
                << sample.entropy_model_bits << ", \"tokens\": "
                << sample.entropy_token_bits << "}"
@@ -1543,7 +1561,7 @@ void RunCoefficientCodingOnlyWorkload(
 
 void RunPublicWorkflowOnlyWorkload(
     const WorkloadSpec& spec, size_t warmups, size_t samples,
-    float butteraugli_target,
+    float butteraugli_target, size_t cpu_thread_count,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::VarDctDensityMode density_mode,
     bool collect_final_butteraugli_score,
@@ -1573,6 +1591,7 @@ void RunPublicWorkflowOnlyWorkload(
             {.butteraugli_target = butteraugli_target,
              .density_mode = density_mode,
              .backend = backend,
+             .cpu_thread_count = cpu_thread_count,
              .metal_aq_mode = mode,
              .collect_final_butteraugli_score =
                collect_final_butteraugli_score},
@@ -1667,6 +1686,7 @@ void RunPublicWorkflowOnlyWorkload(
     RawWorkflowSample raw_sample;
     raw_sample.sample_index = sample_index;
     raw_sample.backend = backend;
+    raw_sample.peak_cpu_participants = profile.peak_cpu_participants;
     raw_sample.phase_nanoseconds = WorkflowProfileValues(profile);
     raw_sample.encoded_bytes = bytes.size();
     raw_sample.entropy_model_bits = profile.codestream.entropy_model_bits;
@@ -1772,6 +1792,10 @@ void RunPublicWorkflowOnlyWorkload(
             << (density_mode == gjxl::VarDctDensityMode::kHighDensity
                   ? "high"
                   : "default")
+            << " cpu_threads="
+            << (cpu_thread_count == 0
+                  ? std::string("auto")
+                  : std::to_string(cpu_thread_count))
             << " scope="
             << (metal_only ? "metal-public-workflow" : "public-workflow")
             << " codestream="
@@ -1799,7 +1823,7 @@ void RunPublicWorkflowOnlyWorkload(
 
 void RunGpuProfileWorkflowWorkload(
     const WorkloadSpec& spec, size_t warmups, size_t samples,
-    float butteraugli_target,
+    float butteraugli_target, size_t cpu_thread_count,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::gpu_profile_internal::GpuProfilingMode profiling_mode,
     bool collect_final_butteraugli_score,
@@ -1819,6 +1843,7 @@ void RunGpuProfileWorkflowWorkload(
   const gjxl::VarDctEncodingOptions encoding_options{
     .butteraugli_target = butteraugli_target,
     .backend = gjxl::VarDctBackendPreference::kMetal,
+    .cpu_thread_count = cpu_thread_count,
     .metal_aq_mode = gpu_aq_mode,
     .collect_final_butteraugli_score = collect_final_butteraugli_score,
   };
@@ -2852,6 +2877,10 @@ int main(int argc, char** argv) {
                         gjxl::VarDctDensityMode::kHighDensity
                     ? "high"
                     : "default")
+              << " cpu_threads="
+              << (options.cpu_thread_count == 0
+                    ? std::string("auto")
+                    : std::to_string(options.cpu_thread_count))
               << " distance=" << options.butteraugli_target
               << " warmups=" << options.warmups
               << " samples=" << options.samples;
@@ -2874,14 +2903,16 @@ int main(int argc, char** argv) {
         if (!options.gpu_profile_path.empty()) {
           RunGpuProfileWorkflowWorkload(
             {"external_input", {}, false}, options.warmups, options.samples,
-            options.butteraugli_target, options.gpu_aq_mode,
+            options.butteraugli_target, options.cpu_thread_count,
+            options.gpu_aq_mode,
             options.gpu_profiling_mode,
             options.collect_final_butteraugli_score, options.input_path, *gpu,
             &gpu_profile_results, &sink);
         } else {
           RunPublicWorkflowOnlyWorkload(
               {"external_input", {}, false}, options.warmups, options.samples,
-              options.butteraugli_target, options.gpu_aq_mode,
+              options.butteraugli_target, options.cpu_thread_count,
+              options.gpu_aq_mode,
               options.density_mode,
               options.collect_final_butteraugli_score,
               options.input_path,
@@ -2907,7 +2938,8 @@ int main(int argc, char** argv) {
             if (!options.gpu_profile_path.empty()) {
               RunGpuProfileWorkflowWorkload(
                 workload, options.warmups, options.samples,
-                options.butteraugli_target, options.gpu_aq_mode,
+                options.butteraugli_target, options.cpu_thread_count,
+                options.gpu_aq_mode,
                 options.gpu_profiling_mode,
                 options.collect_final_butteraugli_score, {}, *gpu,
                 &gpu_profile_results,
@@ -2915,7 +2947,8 @@ int main(int argc, char** argv) {
             } else {
               RunPublicWorkflowOnlyWorkload(
                   workload, options.warmups, options.samples,
-                  options.butteraugli_target, options.gpu_aq_mode,
+                  options.butteraugli_target, options.cpu_thread_count,
+                  options.gpu_aq_mode,
                   options.density_mode,
                   options.collect_final_butteraugli_score, {},
                   options.scope == BenchmarkScope::kMetalPublicWorkflow,

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -44,6 +45,8 @@ struct QuantizationMatrixScales {
   QuantizationMatrixScales* scales);
 
 struct VarDctEncodingProfile {
+  /// Maximum CPU threads simultaneously participating in this encode.
+  size_t peak_cpu_participants = 0;
   uint64_t input_preparation_nanoseconds = 0;
   uint64_t backend_selection_nanoseconds = 0;
   uint64_t quantization_pipeline_nanoseconds = 0;

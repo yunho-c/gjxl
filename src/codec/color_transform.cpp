@@ -56,6 +56,8 @@ Status RunParallelRows(
     : std::min(extent.height, std::min(kMaximumWorkers, hardware_workers));
   const size_t cpu_thread_count =
     thread_budget_internal::CpuThreadCount();
+  auto* const participant_tracker =
+    thread_budget_internal::ParticipantTracker();
   if (thread_budget_internal::InExplicitParallelScope()) {
     for (size_t y = 0; y < extent.height; ++y) {
       Status status = function(y);
@@ -67,6 +69,8 @@ Status RunParallelRows(
     ? automatic_worker_count
     : std::min(automatic_worker_count, cpu_thread_count);
   if (participant_count == 1) {
+    thread_budget_internal::ParallelScope scope(
+      cpu_thread_count, participant_tracker);
     for (size_t y = 0; y < extent.height; ++y) {
       Status status = function(y);
       if (!status.ok()) return status;
@@ -82,7 +86,8 @@ Status RunParallelRows(
     : participant_count - 1;
   workers.reserve(spawned_worker_count);
   const auto run_worker = [&] {
-    thread_budget_internal::ParallelScope scope(cpu_thread_count);
+    thread_budget_internal::ParallelScope scope(
+      cpu_thread_count, participant_tracker);
     while (true) {
       const size_t y = next_row.fetch_add(1, std::memory_order_relaxed);
       if (y >= extent.height) break;

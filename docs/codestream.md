@@ -835,6 +835,38 @@ optimization should be evaluated on a broader corpus with decoded-output
 validation and matched-quality size comparisons, not only the same nominal
 distance.
 
+### CPU thread-budget requalification
+
+The Release `gjxl_encoding_benchmark` accepts `--cpu-threads auto|N` for its
+public-workflow scopes. Raw-sample schema 10 records the requested value as
+`cpu_threads` (`0` means automatic) and each encode's observed
+`peak_cpu_participants`. The peak is diagnostic-only internal profiling data;
+normal library encodes do not enable its atomic participant tracker.
+
+A post-prefix-statistics run on Apple M4 Pro compared automatic, 1, 2, 4, and
+8 CPU threads at distance 1.2, effort 7, and default density. Each budget had
+two independent benchmark processes in forward then reverse order. Every
+process performed one warmup and three measured encodes, giving six CPU
+samples per cell. The benchmark's exact-coefficient CPU/Metal validation also
+confirmed identical codestreams within every process.
+
+| Budget | Observed peak | Flower 510x532 total | Flower codestream | Padded 720p total | Padded 720p codestream |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| automatic | 12 | 949.207 ms | 32.367 ms | 3227.548 ms | 154.625 ms |
+| 1 | 1 | 1053.443 ms | 156.183 ms | 3739.456 ms | 749.551 ms |
+| 2 | 2 | 994.152 ms | 85.649 ms | 3336.950 ms | 377.007 ms |
+| 4 | 4 | 949.914 ms | 51.061 ms | 3137.765 ms | 208.820 ms |
+| 8 | 8 | 917.185 ms | 31.177 ms | 3049.494 ms | 148.568 ms |
+
+The explicit cap held exactly in all 48 explicit-budget CPU samples, and each
+workload produced one encoded size across all budgets. Eight threads had the
+lowest total median in this limited M4 Pro study, 3.4% below automatic on
+Flower and 5.5% below automatic on padded 720p. This is not enough evidence to
+replace the automatic default: it establishes that the post-optimization
+scheduler still honors its cap and that an eight-thread consumer preference is
+competitive on this machine. Broader real-image and hardware coverage should
+precede a default-policy change.
+
 ## Codestream performance profile and optimization priorities
 
 A symbolized Samply capture on Apple M4 Pro isolated the host codestream tail

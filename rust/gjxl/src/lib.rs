@@ -432,8 +432,10 @@ mod tests {
             .encode(&image, EncoderOptions::default())
             .unwrap()
         };
-        assert_eq!(encode(Some(1)), encode(Some(2)));
-        assert_eq!(encode(Some(2)), encode(Some(4)));
+        let automatic = encode(None);
+        for cpu_threads in [1, 2, 4, 8] {
+            assert_eq!(encode(Some(cpu_threads)), automatic);
+        }
     }
 
     #[test]

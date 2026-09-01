@@ -135,6 +135,8 @@ void AccumulateEncodingProfile(
   const codestream_internal::VarDctEncodingProfile& source,
   codestream_internal::VarDctEncodingProfile* destination) {
 
+  destination->peak_cpu_participants = std::max(
+    destination->peak_cpu_participants, source.peak_cpu_participants);
   destination->backend_selection_nanoseconds +=
     source.backend_selection_nanoseconds;
   destination->quantization_pipeline_nanoseconds +=
@@ -993,8 +995,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     return Status::InvalidArgument(
       "VarDCT CPU thread count must be zero or at most 256");
   }
+  thread_budget_internal::CpuParticipantTracker participant_tracker;
   const thread_budget_internal::EncodeScope thread_budget(
-    options.cpu_thread_count);
+    options.cpu_thread_count,
+    profile == nullptr ? nullptr : &participant_tracker);
   switch (options.backend) {
     case VarDctBackendPreference::kAutomatic:
     case VarDctBackendPreference::kCpu:
@@ -1172,6 +1176,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         *timing = std::move(local_timing);
       }
       if (profile != nullptr) {
+        local_profile.peak_cpu_participants = participant_tracker.peak();
         *profile = local_profile;
       }
     } catch (const std::bad_alloc&) {
@@ -1249,6 +1254,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       local_profile.execution_backend =
         attempt_profile.execution_backend;
       local_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
+      local_profile.peak_cpu_participants = participant_tracker.peak();
       *profile = local_profile;
     }
     if (gpu_profiling) *gpu_profile = std::move(local_gpu_profile);
