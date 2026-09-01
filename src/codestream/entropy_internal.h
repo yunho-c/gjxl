@@ -36,6 +36,11 @@ struct PreparedEntropyClusters {
 /// Aggregates raw values in ascending order. Small inputs sort occurrences;
 /// large inputs count the bounded dense prefix and sort only sparse values.
 [[nodiscard]] Status AggregateEntropyValues(
+  std::span<uint32_t> values,
+  std::vector<WeightedValue>* aggregated);
+
+/// Owning convenience overload that releases the raw values after aggregation.
+[[nodiscard]] Status AggregateEntropyValues(
   std::vector<uint32_t> values,
   std::vector<WeightedValue>* aggregated);
 

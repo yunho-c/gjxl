@@ -205,6 +205,8 @@ struct AcEncodingCandidate {
   EntropyCodeCost ac_cost;
   EntropyCode prefix_ac_code;
   EntropyCodeCost prefix_ac_cost;
+  codestream_internal::PreparedAnsEntropyCode prepared_ans;
+  std::vector<uint64_t> ans_section_candidate_bits;
   size_t complete_size = 0;
   bool all_prefix_entropy = false;
 };
@@ -287,21 +289,93 @@ Status OptimizeBestEntropyCode(
   }
 }
 
-Status OptimizeAcCandidate(
+Status PrepareAcCandidate(
   AcEncodingCandidate* candidate,
   codestream_internal::EntropyWorkProfile* profile) {
   if (candidate == nullptr || candidate->streams.empty()) {
     return Status::InvalidArgument("AC encoding candidate is empty");
   }
-  Status status = OptimizeBestEntropyCode(
-    candidate->streams,
-    {
-      .context_count = static_cast<uint32_t>(
-        candidate->block_context_map.ac_context_count()),
-    },
-    &candidate->ac_code, &candidate->ac_cost,
-    &candidate->prefix_ac_code, &candidate->prefix_ac_cost, profile);
-  return status;
+  EntropyCode prefix;
+  EntropyCodeCost prefix_cost;
+  codestream_internal::PreparedEntropyClusters prepared_clusters;
+  Status status =
+    codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
+      candidate->streams,
+      {
+        .context_count = static_cast<uint32_t>(
+          candidate->block_context_map.ac_context_count()),
+      },
+      &prefix, &prefix_cost, &prepared_clusters, profile);
+  if (!status.ok()) {
+    return status;
+  }
+  codestream_internal::PreparedAnsEntropyCode prepared_ans;
+  status = codestream_internal::PrepareAnsEntropyCodeWithPreparedClusters(
+    candidate->streams, prefix, prepared_clusters, &prepared_ans, profile);
+  if (!status.ok()) {
+    return status;
+  }
+  if (prepared_ans.candidates.empty()) {
+    return Status::Internal("Prepared ANS candidate set is empty");
+  }
+  if (prepared_ans.section_count != candidate->streams.size()) {
+    return Status::Internal("Prepared ANS section count differs");
+  }
+  if (candidate->streams.size() >
+        std::numeric_limits<size_t>::max() /
+          prepared_ans.candidates.size()) {
+    return AllocationFailure();
+  }
+  try {
+    std::vector<uint64_t> section_candidate_bits(
+      candidate->streams.size() * prepared_ans.candidates.size());
+    candidate->prefix_ac_code = std::move(prefix);
+    candidate->prefix_ac_cost = std::move(prefix_cost);
+    candidate->prepared_ans = std::move(prepared_ans);
+    candidate->ans_section_candidate_bits =
+      std::move(section_candidate_bits);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
+Status FinalizeAcCandidate(
+  AcEncodingCandidate* candidate,
+  codestream_internal::EntropyWorkProfile* profile) {
+  if (candidate == nullptr || candidate->streams.empty()) {
+    return Status::InvalidArgument("AC encoding candidate is empty");
+  }
+  EntropyCode ans;
+  EntropyCodeCost ans_cost;
+  const ProfileClock::time_point selection_begin =
+    WorkBegin(profile != nullptr);
+  Status status = codestream_internal::FinalizePreparedAnsEntropyCode(
+    &candidate->prepared_ans, candidate->ans_section_candidate_bits,
+    &ans, &ans_cost);
+  if (!status.ok()) {
+    return status;
+  }
+  const auto total_bits = [](const EntropyCodeCost& entropy_cost) {
+    return entropy_cost.model_bits >
+        std::numeric_limits<uint64_t>::max() - entropy_cost.token_bits
+      ? std::numeric_limits<uint64_t>::max()
+      : entropy_cost.model_bits + entropy_cost.token_bits;
+  };
+  if (total_bits(ans_cost) < total_bits(candidate->prefix_ac_cost)) {
+    candidate->ac_code = std::move(ans);
+    candidate->ac_cost = std::move(ans_cost);
+  } else {
+    candidate->ac_code = candidate->prefix_ac_code;
+    candidate->ac_cost = candidate->prefix_ac_cost;
+  }
+  candidate->ans_section_candidate_bits.clear();
+  WorkEnd(
+    profile != nullptr, selection_begin,
+    profile == nullptr ? nullptr : &profile->selection_nanoseconds);
+  return Status::Ok();
 }
 
 Status WriteCommonSections(
@@ -1049,8 +1123,81 @@ Status EncodeVarDctCodestreamImpl(
             &order_code, &order_cost,
             &prefix_order_code, &prefix_order_cost, entropy_profile);
         }
-        return OptimizeAcCandidate(
+        return PrepareAcCandidate(
           &candidates[index - 1 - order_task_count], entropy_profile);
+      });
+    if (!status.ok()) {
+      return status;
+    }
+
+    struct AnsSectionTask {
+      size_t candidate_index = 0;
+      size_t section_index = 0;
+    };
+    size_t ans_task_count = 0;
+    for (const AcEncodingCandidate& candidate : candidates) {
+      const size_t candidate_count = candidate.prepared_ans.candidates.size();
+      if (candidate_count == 0 ||
+          candidate.prepared_ans.section_count != candidate.streams.size() ||
+          candidate.streams.size() >
+            std::numeric_limits<size_t>::max() / candidate_count ||
+          candidate.ans_section_candidate_bits.size() !=
+            candidate.streams.size() * candidate_count) {
+        return Status::Internal("AC candidate section dimensions differ");
+      }
+      if (candidate.streams.size() >
+          std::numeric_limits<size_t>::max() - ans_task_count) {
+        return AllocationFailure();
+      }
+      ans_task_count += candidate.streams.size();
+    }
+    std::vector<AnsSectionTask> ans_tasks;
+    ans_tasks.reserve(ans_task_count);
+    for (size_t candidate_index = 0; candidate_index < candidates.size();
+         ++candidate_index) {
+      for (size_t section_index = 0;
+           section_index < candidates[candidate_index].streams.size();
+           ++section_index) {
+        ans_tasks.push_back({candidate_index, section_index});
+      }
+    }
+    std::vector<uint64_t> ans_task_work(
+      profile == nullptr ? 0 : ans_tasks.size());
+    status = RunParallelSections(
+      ans_tasks.size(),
+      [&](size_t task_index) {
+        const ProfileClock::time_point task_begin =
+          WorkBegin(profile != nullptr);
+        const AnsSectionTask task = ans_tasks[task_index];
+        AcEncodingCandidate& candidate = candidates[task.candidate_index];
+        const size_t candidate_count =
+          candidate.prepared_ans.candidates.size();
+        Status measure_status =
+          codestream_internal::MeasurePreparedAnsEntropyCodeSection(
+            candidate.streams[task.section_index], candidate.prepared_ans,
+            std::span<uint64_t>(candidate.ans_section_candidate_bits).subspan(
+              task.section_index * candidate_count, candidate_count));
+        WorkEnd(
+          profile != nullptr, task_begin,
+          profile == nullptr ? nullptr : &ans_task_work[task_index]);
+        return measure_status;
+      });
+    if (!status.ok()) {
+      return status;
+    }
+    if (profile != nullptr) {
+      for (const uint64_t work : ans_task_work) {
+        candidate_profile.entropy_work.ans_token_cost_nanoseconds += work;
+      }
+    }
+    status = RunParallelSections(
+      candidates.size(),
+      [&](size_t candidate_index) {
+        auto* entropy_profile = profile == nullptr
+          ? nullptr
+          : &entropy_profiles[1 + order_task_count + candidate_index];
+        return FinalizeAcCandidate(
+          &candidates[candidate_index], entropy_profile);
       });
     if (!status.ok()) {
       return status;

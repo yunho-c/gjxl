@@ -1435,6 +1435,37 @@ order.
    histograms plus a reduction, not direct random writes to the global context
    table.
 
+   A fourth retained step removes growth from the selected prefix partition's
+   raw-value collection. The fixed-HybridUint source histograms already contain
+   each initial population, so the selected context partition now reduces those
+   totals into exact cluster offsets, allocates one contiguous `uint32_t`
+   buffer, and fills each cluster through a bounds-checked cursor. Mutable-span
+   aggregation sorts or counts each cluster directly in its flat segment. The
+   owning aggregation overload remains available to the legacy ANS path.
+
+   Three extended padded-4K distance-1.2 pairs alternated independent parent
+   and candidate Release processes with one warmup and five samples each. The
+   aggregate prefix-value-collection counter improved in every pair by 3.38%,
+   6.55%, and 5.93%; the median paired changes were 5.93% for value collection,
+   3.88% for entropy optimization, 2.75% for codestream encoding, and 4.63% for
+   the complete workflow. The pooled 15-sample medians improved 4.59%, 5.70%,
+   6.23%, and 6.69%, respectively. Unrelated AC-tokenization and GPU timing
+   remained noisy, including one pair whose complete workflow regressed 4.02%,
+   so the targeted counter is the firmer attribution. All 30 samples retained
+   identical entropy decisions and the same 1,638,673-byte output.
+
+   On the 4672x5584 photographic input, the nearest quiet pair reduced value
+   collection from 1,105.616 to 919.501 ms (-16.83%); subsequent parent runs
+   were allocator-contaminated while candidate collection remained in a much
+   narrower 883.874-992.742 ms range. A direct distance-1.0 CLI comparison was
+   byte-identical at 2,690,877 bytes and SHA-256
+   `74dab8b328b12d3a485006b5197059df5d580e1b2aa80ee35a2dfdbc34f2d249`,
+   and `djxl` 0.12.0 decoded the candidate to PFM. Alternating padded-4K memory
+   checks reduced maximum RSS by 8.79-9.38%, while reported peak footprint rose
+   0.93-1.00%; high-resolution memory results were mixed. Focused entropy,
+   encoder, workflow, and raw-profile tests pass, including mutable-span small
+   and counted aggregation coverage.
+
 8. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy

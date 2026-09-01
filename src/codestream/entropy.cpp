@@ -1446,6 +1446,7 @@ Status BuildEntropyCodeForPartition(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
   std::span<const uint8_t> clustered_map,
+  std::span<const Histogram> source_histograms,
   size_t cluster_count,
   bool optimize_configs,
   EntropyCode* code,
@@ -1454,7 +1455,8 @@ Status BuildEntropyCodeForPartition(
   EntropyWorkProfile* profile) {
 
   if (code == nullptr || cost == nullptr || cluster_count == 0 ||
-      cluster_count > kMaximumPrefixClusters) {
+      cluster_count > kMaximumPrefixClusters ||
+      source_histograms.size() != clustered_map.size()) {
     return Status::InvalidArgument("Invalid entropy partition output");
   }
   EntropyCode candidate;
@@ -1472,7 +1474,34 @@ Status BuildEntropyCodeForPartition(
 
   const ProfileClock::time_point value_collection_begin =
     ProfileBegin(profile);
-  std::vector<std::vector<uint32_t>> values(cluster_count);
+  // The selected partition maps each already-counted source histogram to one
+  // final cluster. Use those exact populations to allocate a single raw-value
+  // buffer, avoiding per-cluster growth and capacity slack.
+  std::vector<size_t> cluster_offsets(cluster_count + 1);
+  for (size_t histogram = 0; histogram < source_histograms.size();
+       ++histogram) {
+    const size_t cluster = clustered_map[histogram];
+    const uint64_t count = source_histograms[histogram].total_count;
+    if (cluster >= cluster_count) {
+      return Status::Internal("Entropy cluster index is invalid");
+    }
+    if (count > std::numeric_limits<size_t>::max() ||
+        cluster_offsets[cluster + 1] >
+          std::numeric_limits<size_t>::max() - static_cast<size_t>(count)) {
+      return Status::OutOfMemory("Entropy cluster values are too large");
+    }
+    cluster_offsets[cluster + 1] += static_cast<size_t>(count);
+  }
+  for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+    if (cluster_offsets[cluster] >
+        std::numeric_limits<size_t>::max() - cluster_offsets[cluster + 1]) {
+      return Status::OutOfMemory("Entropy cluster values are too large");
+    }
+    cluster_offsets[cluster + 1] += cluster_offsets[cluster];
+  }
+  std::vector<uint32_t> values(cluster_offsets.back());
+  std::vector<size_t> write_offsets(
+    cluster_offsets.begin(), cluster_offsets.end() - 1);
   for (const EntropyTokenStreamView section : section_tokens) {
     if (!section.valid()) {
       return Status::InvalidArgument("Entropy token-stream view is invalid");
@@ -1483,10 +1512,20 @@ Status BuildEntropyCodeForPartition(
         return Status::InvalidArgument("Entropy token context is out of range");
       }
       const size_t cluster = candidate.context_map[token.context];
-      if (cluster >= values.size()) {
+      if (cluster >= cluster_count) {
         return Status::Internal("Entropy cluster index is invalid");
       }
-      values[cluster].push_back(token.value);
+      if (write_offsets[cluster] >= cluster_offsets[cluster + 1]) {
+        return Status::Internal(
+          "Entropy cluster population differs from its histogram");
+      }
+      values[write_offsets[cluster]++] = token.value;
+    }
+  }
+  for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+    if (write_offsets[cluster] != cluster_offsets[cluster + 1]) {
+      return Status::Internal(
+        "Entropy cluster population differs from its histogram");
     }
   }
   ProfileEnd(
@@ -1502,8 +1541,10 @@ Status BuildEntropyCodeForPartition(
     prepared_values(prepared == nullptr ? 0 : cluster_count);
   for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
     std::vector<codestream_internal::WeightedValue> weighted_values;
+    const size_t begin = cluster_offsets[cluster];
+    const size_t size = cluster_offsets[cluster + 1] - begin;
     if (Status status = codestream_internal::AggregateEntropyValues(
-          std::move(values[cluster]), &weighted_values);
+          std::span<uint32_t>(values).subspan(begin, size), &weighted_values);
         !status.ok()) {
       return status;
     }
@@ -1973,7 +2014,7 @@ Status OptimizeEntropyCodeImpl(
     EntropyCodeCost configured_cost;
     codestream_internal::PreparedEntropyClusters configured_values;
     if (Status status = BuildEntropyCodeForPartition(
-          section_tokens, options, best_partition_map,
+          section_tokens, options, best_partition_map, histograms,
           best_partition_count, true, &configured_code,
           &configured_cost, prepared == nullptr ? nullptr : &configured_values,
           profile);

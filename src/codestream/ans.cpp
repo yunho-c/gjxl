@@ -1121,7 +1121,7 @@ Status codestream_internal::CountAnsTokenStreamBits(
 }
 
 Status codestream_internal::AggregateEntropyValues(
-  std::vector<uint32_t> values,
+  std::span<uint32_t> values,
   std::vector<WeightedValue>* aggregated) {
 
   if (aggregated == nullptr) {
@@ -1181,6 +1181,13 @@ Status codestream_internal::AggregateEntropyValues(
     &WeightedValue::value);
   *aggregated = std::move(candidate);
   return Status::Ok();
+}
+
+Status codestream_internal::AggregateEntropyValues(
+  std::vector<uint32_t> values,
+  std::vector<WeightedValue>* aggregated) {
+
+  return AggregateEntropyValues(std::span<uint32_t>(values), aggregated);
 }
 
 Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
@@ -1412,9 +1419,11 @@ Status OptimizeAnsEntropyCodeImpl(
   const codestream_internal::PreparedEntropyClusters* prepared,
   EntropyCode* code,
   EntropyCodeCost* cost,
+  codestream_internal::PreparedAnsEntropyCode* deferred,
   codestream_internal::EntropyWorkProfile* profile) {
 
-  if (code == nullptr || prefix_partition.mode != EntropyCodingMode::kPrefix ||
+  if ((code == nullptr) == (deferred == nullptr) ||
+      prefix_partition.mode != EntropyCodingMode::kPrefix ||
       prefix_partition.prefix_codes.empty()) {
     return Status::InvalidArgument("ANS partition input is invalid");
   }
@@ -1598,13 +1607,8 @@ Status OptimizeAnsEntropyCodeImpl(
     }
     const uint64_t minimum_section_bits =
       uint64_t{32} * section_tokens.size();
-    struct WidthCandidate {
-      EntropyCode code;
-      uint64_t model_bits = 0;
-      uint64_t minimum_token_bits = 0;
-      bool survives = true;
-    };
-    std::vector<WidthCandidate> width_candidates;
+    std::vector<codestream_internal::PreparedAnsEntropyCandidate>
+      width_candidates;
     width_candidates.reserve(kLogAlphaSizeCount);
     const ProfileClock::time_point model_build_begin =
       ProfileBegin(profile);
@@ -1666,13 +1670,15 @@ Status OptimizeAnsEntropyCodeImpl(
 
     for (size_t candidate_index = 0;
          candidate_index < width_candidates.size(); ++candidate_index) {
-      WidthCandidate& candidate = width_candidates[candidate_index];
+      codestream_internal::PreparedAnsEntropyCandidate& candidate =
+        width_candidates[candidate_index];
       if (!candidate.survives) {
         continue;
       }
       for (size_t other_index = candidate_index + 1;
            other_index < width_candidates.size(); ++other_index) {
-        WidthCandidate& other = width_candidates[other_index];
+        codestream_internal::PreparedAnsEntropyCandidate& other =
+          width_candidates[other_index];
         if (!other.survives || !HasEquivalentAnsTokenCoding(
               candidate.code, other.code)) {
           continue;
@@ -1687,6 +1693,19 @@ Status OptimizeAnsEntropyCodeImpl(
     ProfileEnd(
       profile, model_build_begin,
       &EntropyWorkProfile::ans_model_build_nanoseconds);
+
+    if (deferred != nullptr) {
+      if (std::ranges::none_of(
+            width_candidates,
+            [](const auto& candidate) { return candidate.survives; })) {
+        return Status::InvalidArgument("No valid ANS alphabet size");
+      }
+      *deferred = {
+        .candidates = std::move(width_candidates),
+        .section_count = section_tokens.size(),
+      };
+      return Status::Ok();
+    }
 
     EntropyCodeCost best_cost;
     uint64_t best_total = std::numeric_limits<uint64_t>::max();
@@ -1703,7 +1722,8 @@ Status OptimizeAnsEntropyCodeImpl(
       size_t group_size = 0;
       for (size_t candidate_index = group_seed;
            candidate_index < width_candidates.size(); ++candidate_index) {
-        WidthCandidate& candidate = width_candidates[candidate_index];
+        codestream_internal::PreparedAnsEntropyCandidate& candidate =
+          width_candidates[candidate_index];
         if (grouped[candidate_index] || !candidate.survives ||
             !HasEquivalentAnsSymbolCoding(
               width_candidates[group_seed].code, candidate.code)) {
@@ -1774,6 +1794,210 @@ Status OptimizeAnsEntropyCodeImpl(
   }
 }
 
+Status codestream_internal::PrepareAnsEntropyCodeWithPreparedClusters(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCode& prefix_partition,
+  const PreparedEntropyClusters& prepared,
+  PreparedAnsEntropyCode* deferred,
+  EntropyWorkProfile* profile) {
+
+  if (deferred == nullptr) {
+    return Status::InvalidArgument("Deferred ANS output is null");
+  }
+  return OptimizeAnsEntropyCodeImpl(
+    section_tokens, prefix_partition, &prepared,
+    nullptr, nullptr, deferred, profile);
+}
+
+Status codestream_internal::MeasurePreparedAnsEntropyCodeSection(
+  EntropyTokenStreamView tokens,
+  const PreparedAnsEntropyCode& prepared,
+  std::span<uint64_t> candidate_bits) {
+
+  if (!tokens.valid() || !tokens.split || prepared.candidates.empty() ||
+      prepared.candidates.size() > kAnsAlphabetWidthCount ||
+      candidate_bits.size() != prepared.candidates.size()) {
+    return Status::InvalidArgument(
+      "Prepared ANS section measurement is invalid");
+  }
+  if (tokens.size() >
+      (std::numeric_limits<uint64_t>::max() - 32) / (31 + 16)) {
+    return Status::InvalidArgument("ANS token cost overflow");
+  }
+
+  struct MeasurementGroup {
+    const EntropyCode* reference = nullptr;
+    std::array<size_t, kAnsAlphabetWidthCount> candidate_indexes{};
+    size_t candidate_count = 0;
+    std::array<uint32_t, kAnsAlphabetWidthCount> states{};
+    std::array<uint64_t, kAnsAlphabetWidthCount> bits{};
+  };
+  std::array<MeasurementGroup, kAnsAlphabetWidthCount> groups{};
+  size_t group_count = 0;
+  std::array<bool, kAnsAlphabetWidthCount> grouped{};
+  bool has_survivor = false;
+  for (size_t group_seed = 0; group_seed < prepared.candidates.size();
+       ++group_seed) {
+    if (grouped[group_seed] || !prepared.candidates[group_seed].survives) {
+      continue;
+    }
+    const EntropyCode& reference = prepared.candidates[group_seed].code;
+    if (reference.mode != EntropyCodingMode::kAns ||
+        reference.context_count == 0 ||
+        reference.context_map.size() != reference.context_count ||
+        reference.uint_configs.size() != reference.ans_histograms.size() ||
+        reference.ans_histograms.empty()) {
+      return Status::InvalidArgument("Prepared ANS candidate is invalid");
+    }
+    MeasurementGroup& group = groups[group_count++];
+    group.reference = &reference;
+    for (size_t candidate_index = group_seed;
+         candidate_index < prepared.candidates.size(); ++candidate_index) {
+      const PreparedAnsEntropyCandidate& candidate =
+        prepared.candidates[candidate_index];
+      if (grouped[candidate_index] || !candidate.survives ||
+          !HasEquivalentAnsSymbolCoding(reference, candidate.code)) {
+        continue;
+      }
+      grouped[candidate_index] = true;
+      group.candidate_indexes[group.candidate_count++] = candidate_index;
+    }
+    if (group.candidate_count == 0) {
+      return Status::Internal("Prepared ANS group is empty");
+    }
+    std::fill_n(
+      group.states.begin(), group.candidate_count, kAnsSignature << 16);
+    std::fill_n(group.bits.begin(), group.candidate_count, uint64_t{32});
+    has_survivor = true;
+  }
+  if (!has_survivor) {
+    return Status::InvalidArgument("Prepared ANS candidates have no survivor");
+  }
+
+  std::array<uint64_t, kAnsAlphabetWidthCount> measured{};
+  for (size_t token_index = tokens.size(); token_index != 0; --token_index) {
+    const size_t index = token_index - 1;
+    const uint32_t value = tokens.values[index];
+    for (size_t group_index = 0; group_index < group_count; ++group_index) {
+      MeasurementGroup& group = groups[group_index];
+      const EntropyCode& reference = *group.reference;
+      const size_t context = tokens.contexts[index];
+      if (context >= reference.context_count) {
+        return Status::InvalidArgument("ANS token context is out of range");
+      }
+      const size_t cluster = reference.context_map[context];
+      if (cluster >= reference.uint_configs.size()) {
+        return Status::InvalidArgument("ANS cluster index is invalid");
+      }
+      HybridUintToken encoded;
+      if (Status status = EncodeHybridUint(
+            value, reference.uint_configs[cluster], &encoded);
+          !status.ok()) {
+        return status;
+      }
+      for (size_t lane = 0; lane < group.candidate_count; ++lane) {
+        const size_t candidate_index = group.candidate_indexes[lane];
+        const EntropyCode& candidate =
+          prepared.candidates[candidate_index].code;
+        if (cluster >= candidate.ans_histograms.size()) {
+          return Status::InvalidArgument("ANS cluster index is invalid");
+        }
+        const auto count_chunk = [&group, lane](
+                                   uint32_t, uint8_t chunk_bits) {
+          group.bits[lane] += chunk_bits;
+        };
+        if (Status status = AdvanceAnsState(
+              encoded, candidate.ans_histograms[cluster], count_chunk,
+              &group.states[lane]);
+            !status.ok()) {
+          return status;
+        }
+      }
+    }
+  }
+  for (size_t group_index = 0; group_index < group_count; ++group_index) {
+    const MeasurementGroup& group = groups[group_index];
+    for (size_t lane = 0; lane < group.candidate_count; ++lane) {
+      measured[group.candidate_indexes[lane]] = group.bits[lane];
+    }
+  }
+  std::ranges::copy(
+    std::span<const uint64_t>(measured).first(prepared.candidates.size()),
+    candidate_bits.begin());
+  return Status::Ok();
+}
+
+Status codestream_internal::FinalizePreparedAnsEntropyCode(
+  PreparedAnsEntropyCode* prepared,
+  std::span<const uint64_t> section_candidate_bits,
+  EntropyCode* code,
+  EntropyCodeCost* cost) {
+
+  if (prepared == nullptr || code == nullptr || prepared->candidates.empty() ||
+      prepared->candidates.size() > kAnsAlphabetWidthCount) {
+    return Status::InvalidArgument("Prepared ANS finalization is invalid");
+  }
+  const size_t candidate_count = prepared->candidates.size();
+  if (prepared->section_count >
+        std::numeric_limits<size_t>::max() / candidate_count ||
+      section_candidate_bits.size() !=
+        prepared->section_count * candidate_count) {
+    return Status::InvalidArgument(
+      "Prepared ANS section measurement is incomplete");
+  }
+  const size_t section_count = prepared->section_count;
+
+  EntropyCodeCost best_cost;
+  uint64_t best_total = std::numeric_limits<uint64_t>::max();
+  size_t best_candidate = std::numeric_limits<size_t>::max();
+  for (size_t candidate_index = 0; candidate_index < candidate_count;
+       ++candidate_index) {
+    const PreparedAnsEntropyCandidate& candidate =
+      prepared->candidates[candidate_index];
+    if (!candidate.survives) {
+      continue;
+    }
+    EntropyCodeCost candidate_cost;
+    candidate_cost.model_bits = candidate.model_bits;
+    candidate_cost.cluster_count = candidate.code.ans_histograms.size();
+    candidate_cost.section_token_bits.reserve(section_count);
+    for (size_t section_index = 0; section_index < section_count;
+         ++section_index) {
+      const uint64_t section_bits =
+        section_candidate_bits[section_index * candidate_count +
+          candidate_index];
+      if (candidate_cost.token_bits >
+          std::numeric_limits<uint64_t>::max() - section_bits) {
+        return Status::InvalidArgument("ANS token cost overflow");
+      }
+      candidate_cost.token_bits += section_bits;
+      candidate_cost.section_token_bits.push_back(section_bits);
+    }
+    const uint64_t candidate_total = candidate.model_bits >
+        std::numeric_limits<uint64_t>::max() - candidate_cost.token_bits
+      ? std::numeric_limits<uint64_t>::max()
+      : candidate.model_bits + candidate_cost.token_bits;
+    if (candidate_total < best_total ||
+        (candidate_total == best_total && candidate_index < best_candidate)) {
+      best_total = candidate_total;
+      best_candidate = candidate_index;
+      best_cost = std::move(candidate_cost);
+    }
+  }
+  if (best_total == std::numeric_limits<uint64_t>::max() ||
+      best_candidate >= candidate_count) {
+    return Status::InvalidArgument("No valid ANS alphabet size");
+  }
+  EntropyCode selected =
+    std::move(prepared->candidates[best_candidate].code);
+  *prepared = {};
+  *code = std::move(selected);
+  if (cost != nullptr) {
+    *cost = std::move(best_cost);
+  }
+  return Status::Ok();
+}
+
 Status OptimizeAnsEntropyCode(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& prefix_partition,
@@ -1781,7 +2005,7 @@ Status OptimizeAnsEntropyCode(
   EntropyCodeCost* cost,
   codestream_internal::EntropyWorkProfile* profile) {
   return OptimizeAnsEntropyCodeImpl(
-    section_tokens, prefix_partition, nullptr, code, cost, profile);
+    section_tokens, prefix_partition, nullptr, code, cost, nullptr, profile);
 }
 
 Status codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
@@ -1792,7 +2016,7 @@ Status codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
   EntropyCodeCost* cost,
   EntropyWorkProfile* profile) {
   return OptimizeAnsEntropyCodeImpl(
-    section_tokens, prefix_partition, &prepared, code, cost, profile);
+    section_tokens, prefix_partition, &prepared, code, cost, nullptr, profile);
 }
 
 Status OptimizeAnsEntropyCode(
