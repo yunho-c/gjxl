@@ -81,62 +81,6 @@ struct ReverseBitChunk {
   uint8_t bit_count = 0;
 };
 
-struct WeightedValue {
-  uint32_t value = 0;
-  uint64_t count = 0;
-};
-
-std::vector<WeightedValue> AggregateValues(std::vector<uint32_t> values) {
-  // Large coefficient-token arrays contain many duplicate small values. Avoid
-  // sorting every occurrence, while retaining the cheaper sort for inputs too
-  // small to amortize zeroing and scanning the dense table.
-  constexpr size_t kDenseValueCount = 1 << 16;
-  constexpr size_t kMinimumCountingInput = 1 << 12;
-  if (values.size() < kMinimumCountingInput) {
-    std::ranges::sort(values);
-    std::vector<WeightedValue> aggregated;
-    aggregated.reserve(std::min(values.size(), kMaximumAnsAlphabetSize));
-    for (uint32_t value : values) {
-      if (aggregated.empty() || aggregated.back().value != value) {
-        aggregated.push_back({value, 1});
-      } else {
-        ++aggregated.back().count;
-      }
-    }
-    return aggregated;
-  }
-
-  std::vector<uint64_t> dense_counts(kDenseValueCount);
-  // Keep uncommon larger raw values sparse so the dense allocation remains
-  // bounded for arbitrary uint32_t inputs.
-  std::unordered_map<uint32_t, uint64_t> sparse_counts;
-  for (uint32_t value : values) {
-    if (value < dense_counts.size()) {
-      ++dense_counts[value];
-    } else {
-      ++sparse_counts[value];
-    }
-  }
-
-  std::vector<WeightedValue> aggregated;
-  aggregated.reserve(
-    std::min(values.size(), dense_counts.size() + sparse_counts.size()));
-  for (size_t value = 0; value < dense_counts.size(); ++value) {
-    if (dense_counts[value] != 0) {
-      aggregated.push_back(
-        {static_cast<uint32_t>(value), dense_counts[value]});
-    }
-  }
-  const size_t dense_value_count = aggregated.size();
-  for (const auto& [value, count] : sparse_counts) {
-    aggregated.push_back({value, count});
-  }
-  std::ranges::sort(
-    aggregated.begin() + dense_value_count, aggregated.end(), {},
-    &WeightedValue::value);
-  return aggregated;
-}
-
 Status AllocationFailure() {
   return Status::OutOfMemory("ANS entropy allocation failed");
 }
@@ -570,20 +514,26 @@ Status InitializeAliasTable(
   return Status::Ok();
 }
 
-Status BuildReverseMaps(
+Status BuildAnsEncoderTables(
   std::span<const uint16_t> frequencies,
   size_t log_alpha_size,
-  std::vector<std::vector<uint16_t>>* reverse_maps) {
+  std::vector<std::vector<uint16_t>>* reverse_maps,
+  std::vector<uint64_t>* reciprocal_frequencies) {
 
-  if (reverse_maps == nullptr) {
-    return Status::InvalidArgument("ANS reverse-map output is null");
+  if (reverse_maps == nullptr || reciprocal_frequencies == nullptr) {
+    return Status::InvalidArgument("ANS encoder-table output is null");
   }
-  reverse_maps->clear();
-  reverse_maps->resize(frequencies.size());
+  std::vector<std::vector<uint16_t>> candidate_reverse_maps(
+    frequencies.size());
+  std::vector<uint64_t> candidate_reciprocals(frequencies.size());
   for (size_t symbol = 0; symbol < frequencies.size(); ++symbol) {
-    (*reverse_maps)[symbol].resize(frequencies[symbol]);
+    candidate_reverse_maps[symbol].resize(frequencies[symbol]);
+    candidate_reciprocals[symbol] =
+      codestream_internal::AnsFrequencyReciprocal(frequencies[symbol]);
   }
   if (frequencies.empty()) {
+    *reverse_maps = std::move(candidate_reverse_maps);
+    *reciprocal_frequencies = std::move(candidate_reciprocals);
     return Status::Ok();
   }
   std::vector<AliasEntry> table;
@@ -601,12 +551,14 @@ Status BuildReverseMaps(
     const bool right = position >= entry.cutoff;
     const size_t symbol = right ? entry.right_value : table_index;
     const size_t offset = (right ? entry.offsets1 : 0) + position;
-    if (symbol >= reverse_maps->size() ||
-        offset >= (*reverse_maps)[symbol].size()) {
+    if (symbol >= candidate_reverse_maps.size() ||
+        offset >= candidate_reverse_maps[symbol].size()) {
       return Status::Internal("ANS reverse-map construction failed");
     }
-    (*reverse_maps)[symbol][offset] = static_cast<uint16_t>(value);
+    candidate_reverse_maps[symbol][offset] = static_cast<uint16_t>(value);
   }
+  *reverse_maps = std::move(candidate_reverse_maps);
+  *reciprocal_frequencies = std::move(candidate_reciprocals);
   return Status::Ok();
 }
 
@@ -905,7 +857,9 @@ Status AdvanceAnsState(
   uint32_t* state) {
 
   if (state == nullptr || encoded.symbol >= histogram.frequencies.size() ||
-      histogram.frequencies[encoded.symbol] == 0) {
+      encoded.symbol >= histogram.reciprocal_frequencies.size() ||
+      histogram.frequencies[encoded.symbol] == 0 ||
+      histogram.reciprocal_frequencies[encoded.symbol] == 0) {
     return Status::InvalidArgument("ANS token symbol is absent");
   }
   if (encoded.extra_bit_count != 0) {
@@ -916,7 +870,12 @@ Status AdvanceAnsState(
     emit_chunk(*state & 0xFFFFu, 16);
     *state >>= 16;
   }
-  const uint32_t quotient = *state / frequency;
+  // Renormalization guarantees state < frequency * 2^20. At 44-bit
+  // reciprocal precision, the product fits uint64_t and its high bits are the
+  // exact integer quotient.
+  const uint32_t quotient =
+    codestream_internal::DivideAnsStateByReciprocal(
+      *state, histogram.reciprocal_frequencies[encoded.symbol]);
   const uint32_t remainder = *state - quotient * frequency;
   const std::vector<uint16_t>& reverse =
     histogram.reverse_maps[encoded.symbol];
@@ -957,7 +916,7 @@ Status ProcessAnsTokenStream(
   return Status::Ok();
 }
 
-Status CountAnsTokenStreamBits(
+Status CountAnsTokenStreamBitsInternal(
   std::span<const EntropyToken> tokens,
   const EntropyCode& code,
   uint64_t* bit_count) {
@@ -1001,7 +960,8 @@ Status MeasureAnsCode(
   candidate.cluster_count = code.ans_histograms.size();
   for (const std::vector<EntropyToken>& section : section_tokens) {
     uint64_t section_bits = 0;
-    if (Status status = CountAnsTokenStreamBits(section, code, &section_bits);
+    if (Status status = CountAnsTokenStreamBitsInternal(
+          section, code, &section_bits);
         !status.ok()) {
       return status;
     }
@@ -1131,6 +1091,77 @@ Status MeasureAnsCodes(
 
 }  // namespace
 
+Status codestream_internal::CountAnsTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+
+  return CountAnsTokenStreamBitsInternal(tokens, code, bit_count);
+}
+
+Status codestream_internal::AggregateEntropyValues(
+  std::vector<uint32_t> values,
+  std::vector<WeightedValue>* aggregated) {
+
+  if (aggregated == nullptr) {
+    return Status::InvalidArgument("Aggregated entropy values are null");
+  }
+  // Large coefficient-token arrays contain many duplicate small values. Avoid
+  // sorting every occurrence, while retaining the cheaper sort for inputs too
+  // small to amortize zeroing and scanning the dense table.
+  constexpr size_t kDenseValueCount = 1 << 16;
+  constexpr size_t kMinimumCountingInput = 1 << 12;
+  std::vector<WeightedValue> candidate;
+  if (values.size() < kMinimumCountingInput) {
+    std::ranges::sort(values);
+    candidate.reserve(std::min(values.size(), kMaximumAnsAlphabetSize));
+    for (uint32_t value : values) {
+      if (candidate.empty() || candidate.back().value != value) {
+        candidate.push_back({value, 1});
+      } else if (candidate.back().count ==
+                 std::numeric_limits<uint64_t>::max()) {
+        return Status::InvalidArgument("Entropy value count overflow");
+      } else {
+        ++candidate.back().count;
+      }
+    }
+    *aggregated = std::move(candidate);
+    return Status::Ok();
+  }
+
+  std::vector<uint64_t> dense_counts(kDenseValueCount);
+  // Keep uncommon larger raw values sparse so the dense allocation remains
+  // bounded for arbitrary uint32_t inputs.
+  std::unordered_map<uint32_t, uint64_t> sparse_counts;
+  for (uint32_t value : values) {
+    uint64_t& count = value < dense_counts.size()
+      ? dense_counts[value]
+      : sparse_counts[value];
+    if (count == std::numeric_limits<uint64_t>::max()) {
+      return Status::InvalidArgument("Entropy value count overflow");
+    }
+    ++count;
+  }
+
+  candidate.reserve(
+    std::min(values.size(), dense_counts.size() + sparse_counts.size()));
+  for (size_t value = 0; value < dense_counts.size(); ++value) {
+    if (dense_counts[value] != 0) {
+      candidate.push_back(
+        {static_cast<uint32_t>(value), dense_counts[value]});
+    }
+  }
+  const size_t dense_value_count = candidate.size();
+  for (const auto& [value, count] : sparse_counts) {
+    candidate.push_back({value, count});
+  }
+  std::ranges::sort(
+    candidate.begin() + dense_value_count, candidate.end(), {},
+    &WeightedValue::value);
+  *aggregated = std::move(candidate);
+  return Status::Ok();
+}
+
 Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
   if (code.mode != EntropyCodingMode::kAns || code.context_count == 0 ||
       code.context_map.size() != code.context_count ||
@@ -1156,6 +1187,8 @@ Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
     const AnsHistogram& histogram = code.ans_histograms[cluster];
     if (histogram.frequencies.size() > alphabet_limit ||
         histogram.reverse_maps.size() != histogram.frequencies.size() ||
+        histogram.reciprocal_frequencies.size() !=
+          histogram.frequencies.size() ||
         (!histogram.frequencies.empty() &&
          histogram.frequencies.back() == 0)) {
       return Status::InvalidArgument("ANS histogram dimensions are invalid");
@@ -1169,6 +1202,10 @@ Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
       populated += frequency != 0 ? 1 : 0;
       if (histogram.reverse_maps[symbol].size() != frequency) {
         return Status::InvalidArgument("ANS reverse map is invalid");
+      }
+      if (histogram.reciprocal_frequencies[symbol] !=
+          codestream_internal::AnsFrequencyReciprocal(frequency)) {
+        return Status::InvalidArgument("ANS frequency reciprocal is invalid");
       }
       for (uint16_t value : histogram.reverse_maps[symbol]) {
         if (value >= kAnsTableSize || seen[value]) {
@@ -1361,8 +1398,12 @@ Status OptimizeAnsEntropyCode(
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
       const ProfileClock::time_point aggregation_begin =
         ProfileBegin(profile);
-      const std::vector<WeightedValue> weighted_values =
-        AggregateValues(std::move(values[cluster]));
+      std::vector<codestream_internal::WeightedValue> weighted_values;
+      if (Status status = codestream_internal::AggregateEntropyValues(
+            std::move(values[cluster]), &weighted_values);
+          !status.ok()) {
+        return status;
+      }
       ProfileEnd(
         profile, aggregation_begin,
         &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
@@ -1373,7 +1414,8 @@ Status OptimizeAnsEntropyCode(
         uint64_t extra_bits = 0;
         size_t maximum_symbol = 0;
         bool valid = true;
-        for (const WeightedValue& weighted_value : weighted_values) {
+        for (const codestream_internal::WeightedValue& weighted_value :
+             weighted_values) {
           HybridUintToken encoded;
           if (Status status = EncodeHybridUint(
                 weighted_value.value, config, &encoded);
@@ -1505,10 +1547,11 @@ Status OptimizeAnsEntropyCode(
         minimum_token_bits += selected->extra_bits;
         candidate.uint_configs[cluster] = selected->config;
         candidate.ans_histograms[cluster] = selected->histogram;
-        if (Status status = BuildReverseMaps(
+        if (Status status = BuildAnsEncoderTables(
               candidate.ans_histograms[cluster].frequencies,
               log_alpha_size,
-              &candidate.ans_histograms[cluster].reverse_maps);
+              &candidate.ans_histograms[cluster].reverse_maps,
+              &candidate.ans_histograms[cluster].reciprocal_frequencies);
             !status.ok()) {
           return status;
         }

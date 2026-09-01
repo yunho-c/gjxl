@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "codestream/profile_internal.h"
@@ -15,6 +16,41 @@ namespace gjxl {
 class VarDctEncoderFrame;
 
 namespace codestream_internal {
+
+struct CandidateSelectionKey {
+  size_t complete_size = 0;
+  bool custom_order = false;
+  size_t block_context_candidate_index = 0;
+};
+
+/// Prefix fallback intentionally wins an equal complete-codestream size.
+[[nodiscard]] constexpr bool PreferAllPrefixCandidate(
+  size_t mixed_size, size_t prefix_size) noexcept {
+  return prefix_size <= mixed_size;
+}
+
+/// Applies the serializer's stable cross-candidate size and tie policy.
+[[nodiscard]] constexpr bool PreferEncodingCandidate(
+  CandidateSelectionKey candidate,
+  CandidateSelectionKey selected) noexcept {
+  if (candidate.complete_size != selected.complete_size) {
+    return candidate.complete_size < selected.complete_size;
+  }
+  if (candidate.custom_order != selected.custom_order) {
+    return !candidate.custom_order;
+  }
+  return candidate.block_context_candidate_index <
+    selected.block_context_candidate_index;
+}
+
+/// Converts exact logical section bit counts into physical byte sizes. A
+/// single AC group collapses all sections before padding; multi-group frames
+/// pad every section independently. The output remains unchanged on failure.
+[[nodiscard]] Status PhysicalSectionSizesFromBitCounts(
+  std::span<const uint64_t> common_section_bits,
+  std::span<const uint64_t> ac_section_bits,
+  size_t ac_group_count,
+  std::vector<size_t>* sizes);
 
 struct VarDctCodestreamProfile {
   uint64_t validation_nanoseconds = 0;

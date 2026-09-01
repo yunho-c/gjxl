@@ -145,11 +145,16 @@ tasks is summed, so those counters can exceed their enclosing wall-clock phase
 and must not be added to complete-encode latency. The new breakdown separates
 block-context and coefficient preparation, coefficient tokenization, prefix
 histogram construction/clustering/code building, prefix value collection,
-HybridUint configuration search and exact measurement, ANS value aggregation,
+HybridUint configuration search, final prefix-model serialization and checked
+cost assembly, ANS value aggregation,
 HybridUint and histogram/model searches, exact ANS token costing, entropy
 selection, model/header and token-stream writing, candidate measurement, and
 the selected candidate's final header/TOC/section/output assembly. The
 `substage_work_timing` field records the `aggregate-worker-time` semantics.
+Candidate measurement evaluates exact physical section and TOC sizes without
+materializing token payloads. Model/header and token-stream writing therefore
+cover only the selected candidate; `codestream_section_writing` includes both
+the measurement span and that final serialization span.
 
 Open `capture.trace` in Instruments. Keep `gjxl.metallib` and
 `gjxl.metallibsym` together in the profiling build so Instruments can resolve

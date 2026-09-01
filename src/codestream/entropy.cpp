@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "codestream/ans_internal.h"
+#include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
 #include "codestream/profile_internal.h"
 
@@ -1254,13 +1255,15 @@ bool AddBits(uint64_t value, uint64_t* total) {
 }
 
 Status BuildClusterCode(
-  std::span<const uint32_t> values,
+  std::span<const codestream_internal::WeightedValue> values,
   HybridUintConfig base_config,
   bool optimize_config,
   HybridUintConfig* selected_config,
-  PrefixCode* selected_prefix) {
+  PrefixCode* selected_prefix,
+  uint64_t* selected_token_bits) {
 
-  if (selected_config == nullptr || selected_prefix == nullptr) {
+  if (selected_config == nullptr || selected_prefix == nullptr ||
+      selected_token_bits == nullptr) {
     return Status::InvalidArgument("Cluster-code output is null");
   }
   std::vector<HybridUintConfig> configs = {base_config};
@@ -1273,6 +1276,7 @@ Status BuildClusterCode(
   }
 
   uint64_t best_cost = std::numeric_limits<uint64_t>::max();
+  uint64_t best_token_bits = 0;
   HybridUintConfig best_config;
   PrefixCode best_prefix;
   for (const HybridUintConfig config : configs) {
@@ -1282,19 +1286,25 @@ Status BuildClusterCode(
     std::array<uint64_t, kPrefixAlphabetSize> counts{};
     uint64_t extra_bits = 0;
     bool valid = true;
-    for (uint32_t value : values) {
+    for (const codestream_internal::WeightedValue& weighted_value : values) {
       HybridUintToken token;
-      if (Status status = EncodeHybridUint(value, config, &token);
+      if (Status status = EncodeHybridUint(
+            weighted_value.value, config, &token);
           !status.ok()) {
         return status;
       }
       if (token.symbol >= counts.size() ||
-          counts[token.symbol] == std::numeric_limits<uint64_t>::max() ||
-          !AddBits(token.extra_bit_count, &extra_bits)) {
+          counts[token.symbol] >
+            std::numeric_limits<uint64_t>::max() - weighted_value.count ||
+          (token.extra_bit_count != 0 &&
+           weighted_value.count >
+             (std::numeric_limits<uint64_t>::max() - extra_bits) /
+               token.extra_bit_count)) {
         valid = false;
         break;
       }
-      ++counts[token.symbol];
+      counts[token.symbol] += weighted_value.count;
+      extra_bits += weighted_value.count * token.extra_bit_count;
     }
     if (!valid) {
       continue;
@@ -1342,6 +1352,7 @@ Status BuildClusterCode(
     }
     if (total < best_cost) {
       best_cost = total;
+      best_token_bits = token_bits;
       best_config = config;
       best_prefix = prefix;
     }
@@ -1351,48 +1362,7 @@ Status BuildClusterCode(
   }
   *selected_config = best_config;
   *selected_prefix = best_prefix;
-  return Status::Ok();
-}
-
-Status MeasureEntropyCode(
-  std::span<const std::vector<EntropyToken>> section_tokens,
-  const EntropyCode& code,
-  EntropyCodeCost* cost) {
-
-  if (cost == nullptr) {
-    return Status::InvalidArgument("Entropy cost output is null");
-  }
-  BitWriter model;
-  if (Status status = WriteEntropyCode(code, &model); !status.ok()) {
-    return status;
-  }
-  EntropyCodeCost candidate;
-  candidate.model_bits = model.bits_written();
-  candidate.cluster_count = code.prefix_codes.size();
-  for (const std::vector<EntropyToken>& section : section_tokens) {
-    for (const EntropyToken& token : section) {
-      if (token.context >= code.context_count) {
-        return Status::InvalidArgument("Entropy token context is out of range");
-      }
-      const size_t cluster = code.context_map[token.context];
-      HybridUintToken encoded;
-      if (Status status = EncodeHybridUint(
-            token.value, code.uint_configs[cluster], &encoded);
-          !status.ok()) {
-        return status;
-      }
-      if (encoded.symbol >= kPrefixAlphabetSize ||
-          code.prefix_codes[cluster].depths[encoded.symbol] == 0 ||
-          !AddBits(
-            EncodedPrefixDepth(
-              code.prefix_codes[cluster], encoded.symbol) +
-              encoded.extra_bit_count,
-            &candidate.token_bits)) {
-        return Status::InvalidArgument("Entropy token cannot be measured");
-      }
-    }
-  }
-  *cost = candidate;
+  *selected_token_bits = best_token_bits;
   return Status::Ok();
 }
 
@@ -1446,10 +1416,18 @@ Status BuildEntropyCodeForPartition(
     ProfileBegin(profile);
   candidate.uint_configs.resize(cluster_count);
   candidate.prefix_codes.resize(cluster_count);
+  std::vector<uint64_t> cluster_token_bits(cluster_count);
   for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+    std::vector<codestream_internal::WeightedValue> weighted_values;
+    if (Status status = codestream_internal::AggregateEntropyValues(
+          std::move(values[cluster]), &weighted_values);
+        !status.ok()) {
+      return status;
+    }
     if (Status status = BuildClusterCode(
-          values[cluster], options.uint_config, optimize_configs,
-          &candidate.uint_configs[cluster], &candidate.prefix_codes[cluster]);
+          weighted_values, options.uint_config, optimize_configs,
+          &candidate.uint_configs[cluster], &candidate.prefix_codes[cluster],
+          &cluster_token_bits[cluster]);
         !status.ok()) {
       return status;
     }
@@ -1459,9 +1437,19 @@ Status BuildEntropyCodeForPartition(
     &EntropyWorkProfile::prefix_config_search_nanoseconds);
   const ProfileClock::time_point exact_measurement_begin =
     ProfileBegin(profile);
+  BitWriter model;
   EntropyCodeCost candidate_cost;
-  Status status = MeasureEntropyCode(
-    section_tokens, candidate, &candidate_cost);
+  Status status = WriteEntropyCode(candidate, &model);
+  if (status.ok()) {
+    candidate_cost.model_bits = model.bits_written();
+    candidate_cost.cluster_count = candidate.prefix_codes.size();
+    for (uint64_t token_bits : cluster_token_bits) {
+      if (!AddBits(token_bits, &candidate_cost.token_bits)) {
+        status = Status::InvalidArgument("Entropy cost overflow");
+        break;
+      }
+    }
+  }
   ProfileEnd(
     profile, exact_measurement_begin,
     &EntropyWorkProfile::prefix_exact_measurement_nanoseconds);
@@ -2041,6 +2029,50 @@ Status WriteTokenStream(
     }
   }
   return AppendTemporary(writer, &temporary);
+}
+
+Status codestream_internal::CountTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+
+  if (bit_count == nullptr) {
+    return Status::InvalidArgument("Token-stream bit-count output is null");
+  }
+  if (Status status = ValidateEntropyCode(code); !status.ok()) {
+    return status;
+  }
+  if (code.mode == EntropyCodingMode::kAns) {
+    return CountAnsTokenStreamBits(tokens, code, bit_count);
+  }
+
+  uint64_t candidate = 0;
+  for (const EntropyToken& token : tokens) {
+    if (token.context >= code.context_count) {
+      return Status::InvalidArgument("Entropy token context is out of range");
+    }
+    const uint8_t cluster = code.context_map[token.context];
+    HybridUintToken encoded;
+    if (Status status = EncodeHybridUint(
+          token.value, code.uint_configs[cluster], &encoded);
+        !status.ok()) {
+      return status;
+    }
+    const PrefixCode& prefix = code.prefix_codes[cluster];
+    if (encoded.symbol >= prefix.depths.size() ||
+        prefix.depths[encoded.symbol] == 0) {
+      return Status::InvalidArgument(
+        "Token symbol is absent from its prefix code");
+    }
+    const uint64_t encoded_bits =
+      static_cast<uint64_t>(EncodedPrefixDepth(prefix, encoded.symbol)) +
+      encoded.extra_bit_count;
+    if (!AddBits(encoded_bits, &candidate)) {
+      return Status::InvalidArgument("Token-stream bit count overflow");
+    }
+  }
+  *bit_count = candidate;
+  return Status::Ok();
 }
 
 }  // namespace gjxl

@@ -20,6 +20,7 @@ struct EntropyWorkProfile {
   uint64_t prefix_code_build_nanoseconds = 0;
   uint64_t prefix_value_collection_nanoseconds = 0;
   uint64_t prefix_config_search_nanoseconds = 0;
+  /// Final prefix-model serialization and checked cost assembly.
   uint64_t prefix_exact_measurement_nanoseconds = 0;
   uint64_t ans_prefix_validation_nanoseconds = 0;
   uint64_t ans_value_collection_nanoseconds = 0;
@@ -68,7 +69,10 @@ inline void AccumulateEntropyWorkProfile(
   destination->selection_nanoseconds += source.selection_nanoseconds;
 }
 
-/// Aggregate worker time spent materializing every codestream candidate.
+/// Aggregate worker time spent measuring every candidate and materializing the
+/// selected candidate. Candidate measurement counts exact token bits without
+/// producing payload BitWriters; model/header and token writing cover only the
+/// selected candidate.
 struct SectionWritingWorkProfile {
   uint64_t model_and_header_nanoseconds = 0;
   uint64_t token_write_nanoseconds = 0;

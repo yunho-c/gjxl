@@ -11,7 +11,9 @@
 #include <span>
 #include <vector>
 
+#include "codestream/ans_internal.h"
 #include "codestream/entropy.h"
+#include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
 
 namespace {
@@ -341,6 +343,104 @@ bool CheckBalancedOptimization() {
   return true;
 }
 
+bool CheckCountedPrefixOptimization() {
+  constexpr uint32_t kContextCount = 4;
+  // Every context contributes more than the 4096-occurrence threshold so the
+  // selected clusters exercise counted aggregation even when none are merged.
+  constexpr size_t kOccurrencesPerContext = 4352;
+  std::array<std::vector<gjxl::EntropyToken>, 5> sections;
+  constexpr std::array<size_t, 3> kPopulatedSections = {1, 2, 4};
+  for (uint32_t context = 0; context < kContextCount; ++context) {
+    for (size_t repeat = 0; repeat < kOccurrencesPerContext; ++repeat) {
+      uint32_t value = 0;
+      switch (context) {
+        case 0:
+          value = (repeat & 15u) == 0 ? 1 : 0;
+          break;
+        case 1:
+          value = (repeat & 7u) == 0 ? 17 : 16;
+          break;
+        case 2:
+          value = (repeat & 31u) == 0 ? 65537 : 257;
+          break;
+        case 3:
+          value = (repeat & 63u) == 0
+            ? std::numeric_limits<uint32_t>::max() - 1
+            : std::numeric_limits<uint32_t>::max();
+          break;
+      }
+      sections[kPopulatedSections[(repeat + context) %
+                                  kPopulatedSections.size()]]
+        .push_back({context, value});
+    }
+  }
+
+  gjxl::EntropyCode code;
+  gjxl::EntropyCode repeat_code;
+  gjxl::EntropyCodeCost cost;
+  gjxl::EntropyCodeCost repeat_cost;
+  const gjxl::EntropyCodeOptions options{.context_count = kContextCount};
+  if (!gjxl::OptimizeEntropyCode(sections, options, &code, &cost).ok() ||
+      !gjxl::OptimizeEntropyCode(
+        sections, options, &repeat_code, &repeat_cost).ok() ||
+      code != repeat_code || cost != repeat_cost ||
+      code.mode != gjxl::EntropyCodingMode::kPrefix ||
+      code.context_map.size() != kContextCount ||
+      code.prefix_codes.size() < 2 ||
+      cost.cluster_count != code.prefix_codes.size()) {
+    std::cerr << "Counted prefix selection is invalid or non-deterministic\n";
+    return false;
+  }
+
+  gjxl::BitWriter model;
+  gjxl::BitWriter repeat_model;
+  gjxl::BitWriter payload;
+  gjxl::BitWriter repeat_payload;
+  if (!gjxl::WriteEntropyCode(code, &model).ok() ||
+      !gjxl::WriteEntropyCode(repeat_code, &repeat_model).ok()) {
+    std::cerr << "Counted prefix model serialization failed\n";
+    return false;
+  }
+  for (const std::vector<gjxl::EntropyToken>& section : sections) {
+    if (!gjxl::WriteTokenStream(section, code, &payload).ok() ||
+        !gjxl::WriteTokenStream(
+          section, repeat_code, &repeat_payload).ok()) {
+      std::cerr << "Counted prefix token serialization failed\n";
+      return false;
+    }
+  }
+  if (cost.model_bits != model.bits_written() ||
+      cost.token_bits != payload.bits_written() ||
+      model.bits_written() != repeat_model.bits_written() ||
+      payload.bits_written() != repeat_payload.bits_written() ||
+      !std::ranges::equal(
+        model.padded_bytes(), repeat_model.padded_bytes()) ||
+      !std::ranges::equal(
+        payload.padded_bytes(), repeat_payload.padded_bytes())) {
+    std::cerr << "Counted prefix cost disagrees with serialized output\n";
+    return false;
+  }
+  const auto hash = [](std::span<const uint8_t> bytes) {
+    uint64_t result = 1469598103934665603ull;
+    for (uint8_t byte : bytes) {
+      result ^= byte;
+      result *= 1099511628211ull;
+    }
+    return result;
+  };
+  const std::vector<gjxl::HybridUintConfig> expected_configs = {
+    {0, 0, 0}, {4, 2, 0}, {4, 1, 2}, {4, 2, 0}};
+  if (code.context_map != std::vector<uint8_t>({0, 1, 2, 3}) ||
+      code.uint_configs != expected_configs || model.bits_written() != 144 ||
+      payload.bits_written() != 166464 ||
+      hash(model.padded_bytes()) != 5815996224897546142ull ||
+      hash(payload.padded_bytes()) != 6576315826512740406ull) {
+    std::cerr << "Counted prefix decision or serialized bytes changed\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckFullWidthMultiSectionOptimization() {
   std::array<std::vector<gjxl::EntropyToken>, 3> sections;
   sections[0] = {{299, std::numeric_limits<uint32_t>::max()}, {0, 0}};
@@ -458,6 +558,80 @@ bool CheckInitialContextPreclustering() {
   return true;
 }
 
+bool CheckAnsFrequencyReciprocalDivision() {
+  if (gjxl::codestream_internal::AnsFrequencyReciprocal(0) != 0) {
+    std::cerr << "Absent ANS symbol has a nonzero reciprocal\n";
+    return false;
+  }
+  uint32_t random = 0x474A584Cu;
+  for (uint32_t frequency = 1; frequency <= gjxl::kAnsTableSize;
+       ++frequency) {
+    const uint64_t reciprocal =
+      gjxl::codestream_internal::AnsFrequencyReciprocal(
+        static_cast<uint16_t>(frequency));
+    const uint64_t expected_reciprocal =
+      ((uint64_t{1} << gjxl::codestream_internal::kAnsReciprocalPrecision) -
+       1) /
+        frequency +
+      1;
+    if (reciprocal != expected_reciprocal) {
+      std::cerr << "ANS reciprocal differs at frequency "
+                << frequency << '\n';
+      return false;
+    }
+    const uint32_t maximum_state = static_cast<uint32_t>(
+      std::min<uint64_t>(
+        std::numeric_limits<uint32_t>::max(),
+        (static_cast<uint64_t>(frequency) << 20) - 1));
+    const auto verify = [&](uint32_t state) {
+      if (state != 0 && reciprocal >
+          std::numeric_limits<uint64_t>::max() / state) {
+        std::cerr << "ANS reciprocal product overflows at frequency "
+                  << frequency << " state " << state << '\n';
+        return false;
+      }
+      const uint32_t quotient =
+        gjxl::codestream_internal::DivideAnsStateByReciprocal(
+          state, reciprocal);
+      if (quotient != state / frequency) {
+        std::cerr << "ANS reciprocal quotient differs at frequency "
+                  << frequency << " state " << state << '\n';
+        return false;
+      }
+      return true;
+    };
+    const std::array<uint32_t, 6> boundary_states = {
+      0,
+      1,
+      std::min(frequency - 1, maximum_state),
+      std::min(frequency, maximum_state),
+      std::min(frequency + 1, maximum_state),
+      maximum_state,
+    };
+    for (uint32_t state : boundary_states) {
+      if (!verify(state)) return false;
+    }
+    const uint32_t last_multiple =
+      maximum_state - maximum_state % frequency;
+    for (int32_t offset = -8; offset <= 8; ++offset) {
+      const int64_t state = static_cast<int64_t>(last_multiple) + offset;
+      if (state >= 0 && state <= maximum_state &&
+          !verify(static_cast<uint32_t>(state))) {
+        return false;
+      }
+    }
+    for (size_t sample = 0; sample < 256; ++sample) {
+      random = random * 1664525u + 1013904223u;
+      const uint32_t state = static_cast<uint32_t>(
+        (static_cast<uint64_t>(random) *
+         (static_cast<uint64_t>(maximum_state) + 1)) >>
+        32);
+      if (!verify(state)) return false;
+    }
+  }
+  return true;
+}
+
 bool CheckAnsRoundTripContract() {
   std::array<std::vector<gjxl::EntropyToken>, 4> sections;
   for (uint32_t context = 0; context < 4; ++context) {
@@ -545,6 +719,32 @@ bool CheckAnsRoundTripContract() {
       atomic.bits_written() != 3 ||
       !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
     std::cerr << "Malformed ANS lookup changed its destination\n";
+    return false;
+  }
+
+  const auto rejects_reciprocals = [&](bool remove) {
+    gjxl::EntropyCode invalid = ans;
+    bool changed = false;
+    for (gjxl::AnsHistogram& histogram : invalid.ans_histograms) {
+      if (histogram.reciprocal_frequencies.empty()) continue;
+      if (remove) {
+        histogram.reciprocal_frequencies.clear();
+      } else {
+        ++histogram.reciprocal_frequencies.front();
+      }
+      changed = true;
+      break;
+    }
+    gjxl::BitWriter destination;
+    return changed && destination.WriteBits(3, 5).ok() &&
+      gjxl::WriteTokenStream(
+        sections[1], invalid, &destination).code() ==
+        gjxl::StatusCode::kInvalidArgument &&
+      destination.bits_written() == 3 &&
+      HasBytes(destination, std::array<uint8_t, 1>{5});
+  };
+  if (!rejects_reciprocals(false) || !rejects_reciprocals(true)) {
+    std::cerr << "Malformed ANS reciprocal changed its destination\n";
     return false;
   }
   return true;
@@ -690,6 +890,67 @@ bool CheckAnsSmallHistograms() {
   return true;
 }
 
+bool CheckExactTokenBitCounting() {
+  std::vector<std::vector<gjxl::EntropyToken>> sections = {
+    {},
+    {{0, 0}, {1, 1}, {0, 17}, {1, UINT32_MAX}},
+    {{1, 4}, {0, 4}, {1, 255}, {0, 65536}, {1, UINT32_MAX}},
+  };
+  gjxl::EntropyCode prefix;
+  gjxl::EntropyCodeCost prefix_cost;
+  if (!gjxl::OptimizeEntropyCode(
+         sections, {.context_count = 2}, &prefix, &prefix_cost).ok()) {
+    std::cerr << "Prefix bit-count fixture optimization failed\n";
+    return false;
+  }
+  gjxl::EntropyCode ans;
+  gjxl::EntropyCodeCost ans_cost;
+  if (!gjxl::OptimizeAnsEntropyCode(
+         sections, prefix, &ans, &ans_cost).ok()) {
+    std::cerr << "ANS bit-count fixture optimization failed\n";
+    return false;
+  }
+
+  for (const gjxl::EntropyCode* code : {&prefix, &ans}) {
+    for (const auto& section : sections) {
+      gjxl::BitWriter writer;
+      uint64_t measured = std::numeric_limits<uint64_t>::max();
+      if (!gjxl::WriteTokenStream(section, *code, &writer).ok() ||
+          !gjxl::codestream_internal::CountTokenStreamBits(
+             section, *code, &measured).ok() ||
+          measured != writer.bits_written() ||
+          (code->mode == gjxl::EntropyCodingMode::kAns && section.empty() &&
+           measured != 32)) {
+        std::cerr << "Exact token bit count differs from serialization\n";
+        return false;
+      }
+    }
+  }
+
+  const std::array<gjxl::EntropyToken, 1> invalid = {{{2, 0}}};
+  uint64_t unchanged = 0xA5A5A5A5A5A5A5A5ull;
+  if (gjxl::codestream_internal::CountTokenStreamBits(
+        invalid, prefix, &unchanged).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      unchanged != 0xA5A5A5A5A5A5A5A5ull ||
+      gjxl::codestream_internal::CountTokenStreamBits(
+        sections[1], prefix, nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument) {
+    std::cerr << "Rejected token bit count changed its output\n";
+    return false;
+  }
+  gjxl::EntropyCode malformed = prefix;
+  malformed.context_map.clear();
+  if (gjxl::codestream_internal::CountTokenStreamBits(
+        sections[1], malformed, &unchanged).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      unchanged != 0xA5A5A5A5A5A5A5A5ull) {
+    std::cerr << "Malformed token bit count changed its output\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -703,11 +964,14 @@ int main() {
       !CheckDegeneratePrefixPayload() ||
       !CheckDeterministicEntropyFixtures() ||
       !CheckBalancedOptimization() ||
+      !CheckCountedPrefixOptimization() ||
       !CheckFullWidthMultiSectionOptimization() ||
       !CheckInitialContextPreclustering() ||
+      !CheckAnsFrequencyReciprocalDivision() ||
       !CheckAnsRoundTripContract() ||
       !CheckAnsAdaptiveModelSelection() ||
-      !CheckAnsSmallHistograms()) {
+      !CheckAnsSmallHistograms() ||
+      !CheckExactTokenBitCounting()) {
     return EXIT_FAILURE;
   }
   std::cout << "All entropy primitive tests passed.\n";
