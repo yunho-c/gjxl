@@ -1088,39 +1088,62 @@ def calibrate_distance(
         return select(initial, "within-absolute-tolerance"), evaluations
 
     if initial["butteraugli"] > target_score:
-        lower = evaluate_once(minimum_distance)
-        upper = initial
-        bracketed = lower["butteraugli"] <= target_score
+        endpoint = evaluate_once(minimum_distance)
     else:
-        lower = initial
-        upper = evaluate_once(maximum_distance)
-        bracketed = upper["butteraugli"] >= target_score
-    if not bracketed:
-        best = min(evaluations, key=lambda item: item["absolute_error"])
-        if best["absolute_error"] <= tolerance:
-            return select(best, "within-absolute-tolerance"), evaluations
-        if (
-            target_score > 0.0
-            and best["absolute_error"] / target_score <= maximum_relative_error
-        ):
-            return select(best, "boundary-limited-relative-tolerance"), evaluations
-        raise ComparisonError(
-            "Calibration target is not bracketed by the requested distance bounds: "
-            f"target={target_score:.9g}, lower={lower['butteraugli']:.9g}, "
-            f"upper={upper['butteraugli']:.9g}"
+        endpoint = evaluate_once(maximum_distance)
+    if endpoint["absolute_error"] <= tolerance:
+        return select(endpoint, "within-absolute-tolerance"), evaluations
+
+    def find_bracket() -> tuple[dict[str, Any], dict[str, Any]] | None:
+        ordered = sorted(evaluations, key=lambda item: item["distance"])
+        brackets = []
+        for lower, upper in zip(ordered, ordered[1:]):
+            lower_delta = lower["butteraugli"] - target_score
+            upper_delta = upper["butteraugli"] - target_score
+            if lower_delta * upper_delta <= 0.0:
+                brackets.append((lower, upper))
+        if not brackets:
+            return None
+        return min(
+            brackets,
+            key=lambda pair: (
+                pair[1]["distance"] - pair[0]["distance"],
+                pair[0]["absolute_error"] + pair[1]["absolute_error"],
+            ),
         )
 
-    while len(evaluations) < maximum_evaluations:
+    bracket = find_bracket()
+    if bracket is None:
+        coarse_candidates = [
+            minimum_distance
+            + index * (maximum_distance - minimum_distance) / 8.0
+            for index in range(9)
+        ]
+        coarse_candidates.sort(key=lambda distance: abs(distance - initial_distance))
+        for distance in coarse_candidates:
+            if len(evaluations) >= maximum_evaluations:
+                break
+            candidate = evaluate_once(distance)
+            if candidate["absolute_error"] <= tolerance:
+                return select(candidate, "within-absolute-tolerance"), evaluations
+            bracket = find_bracket()
+            if bracket is not None:
+                break
+
+    while bracket is not None and len(evaluations) < maximum_evaluations:
+        lower, upper = bracket
         midpoint = (lower["distance"] + upper["distance"]) / 2.0
         if midpoint in by_distance:
             break
         candidate = evaluate_once(midpoint)
         if candidate["absolute_error"] <= tolerance:
             return select(candidate, "within-absolute-tolerance"), evaluations
-        if candidate["butteraugli"] < target_score:
-            lower = candidate
+        lower_delta = lower["butteraugli"] - target_score
+        candidate_delta = candidate["butteraugli"] - target_score
+        if lower_delta * candidate_delta <= 0.0:
+            bracket = (lower, candidate)
         else:
-            upper = candidate
+            bracket = (candidate, upper)
 
     best = min(evaluations, key=lambda item: item["absolute_error"])
     if best["absolute_error"] > tolerance:
@@ -1128,7 +1151,18 @@ def calibrate_distance(
             target_score > 0.0
             and best["absolute_error"] / target_score <= maximum_relative_error
         ):
-            return select(best, "quantized-relative-tolerance"), evaluations
+            at_boundary = best["distance"] in {
+                minimum_distance,
+                maximum_distance,
+            }
+            return select(
+                best,
+                (
+                    "boundary-limited-relative-tolerance"
+                    if at_boundary
+                    else "quantized-relative-tolerance"
+                ),
+            ), evaluations
         raise ComparisonError(
             "Calibration did not converge within tolerance: "
             f"target={target_score:.9g}, best={best['butteraugli']:.9g}, "

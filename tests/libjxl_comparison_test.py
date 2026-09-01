@@ -457,7 +457,9 @@ class QualityCalibrationTest(unittest.TestCase):
         self.assertEqual(len(calls), len(set(calls)))
 
     def test_distance_search_rejects_an_unbracketed_target(self) -> None:
-        with self.assertRaisesRegex(comparison.ComparisonError, "not bracketed"):
+        with self.assertRaisesRegex(
+            comparison.ComparisonError, "did not converge"
+        ):
             comparison.calibrate_distance(
                 3.0,
                 lambda distance: {"butteraugli": distance},
@@ -501,6 +503,22 @@ class QualityCalibrationTest(unittest.TestCase):
             selected["match_kind"], "boundary-limited-relative-tolerance"
         )
         self.assertLessEqual(selected["relative_error"], 0.025)
+
+    def test_distance_search_finds_a_nonmonotonic_interior_bracket(self) -> None:
+        selected, evaluations = comparison.calibrate_distance(
+            1.95,
+            lambda distance: {
+                "butteraugli": 1.92 + (distance - 1.25) ** 2
+            },
+            minimum_distance=0.05,
+            maximum_distance=2.0,
+            initial_distance=1.0,
+            tolerance=0.005,
+            maximum_evaluations=12,
+            maximum_relative_error=0.0,
+        )
+        self.assertLessEqual(selected["absolute_error"], 0.005)
+        self.assertTrue(any(item["distance"] > 1.0 for item in evaluations))
 
     def test_nominal_targets_are_bound_to_the_corpus(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gjxl-quality-test-") as temporary:

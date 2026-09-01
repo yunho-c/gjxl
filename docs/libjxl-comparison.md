@@ -360,6 +360,11 @@ maximum score mismatch close to one percent at the usual Phase 1 quality
 targets. Calibration starts at distance 1.0, verifies the target against the
 relevant 0.05 or 2.0 bound, and uses at most 12 evaluations per input. The 0.05
 lower bound is libjxl's minimum lossy VarDCT distance at the pinned revision.
+If the expected endpoint does not bracket the score, the driver samples a
+bounded coarse grid across the interval and refines any adjacent crossing it
+finds. This is required because libjxl's decoded score can be non-monotonic
+across encoder policy transitions even though requested distance is ordinarily
+directional.
 
 If that bound cannot reach GJXL's score, or a discrete policy transition skips
 over the absolute window, calibration may retain the closest candidate only
