@@ -41,6 +41,7 @@ CORPUS_SCHEMA_VERSION = 1
 RESULT_SCHEMA_VERSION = 1
 CALIBRATION_SCHEMA_VERSION = 1
 LINEAR_SRGB_HINT = "RGB_D65_SRG_Rel_Lin"
+PROFILE_MINIMUM_RESOLUTION_PERCENT = 95.0
 
 
 class ComparisonError(RuntimeError):
@@ -1675,6 +1676,15 @@ def run_comparison(args: argparse.Namespace) -> None:
             entry["name"]: quality_distances[entry["name"]]
             for entry in entries
         }
+    if args.capture_samply:
+        manifest["parameters"]["samply_rate_hz"] = args.samply_rate
+        manifest["parameters"]["profile_samples"] = args.profile_samples
+        manifest["parameters"]["profile_encode_count"] = (
+            1 + args.warmups + args.profile_samples
+        )
+        manifest["parameters"]["minimum_symbol_resolution_percent"] = (
+            PROFILE_MINIMUM_RESOLUTION_PERCENT
+        )
     write_json_atomic(directory / "manifest.json", manifest)
 
     logical_cpus = max(os.cpu_count() or 1, 1)
@@ -1867,6 +1877,8 @@ def run_comparison(args: argparse.Namespace) -> None:
                                 str(profile),
                                 "--format",
                                 output_format,
+                                "--minimum-resolution-percent",
+                                str(PROFILE_MINIMUM_RESOLUTION_PERCENT),
                                 "--output",
                                 str(analysis_output),
                             ],
@@ -1876,6 +1888,27 @@ def run_comparison(args: argparse.Namespace) -> None:
                         )
                         if output_format == "json":
                             analysis = load_json(analysis_output)
+                            profile_encode_count = (
+                                1 + args.warmups + args.profile_samples
+                            )
+                            source_pixels = entry["width"] * entry["height"]
+                            normalized_stages = [
+                                {
+                                    **stage,
+                                    "sampled_cpu_milliseconds_per_encode": (
+                                        stage["cpu_delta_us"]
+                                        / 1000.0
+                                        / profile_encode_count
+                                    ),
+                                    "sampled_cpu_nanoseconds_per_source_pixel": (
+                                        stage["cpu_delta_us"]
+                                        * 1000.0
+                                        / profile_encode_count
+                                        / source_pixels
+                                    ),
+                                }
+                                for stage in analysis["neutral_stages"]
+                            ]
                             profile_rows.append(
                                 {
                                     **profile_record,
@@ -1887,10 +1920,22 @@ def run_comparison(args: argparse.Namespace) -> None:
                                     "sampled_cpu_us": analysis["summary"][
                                         "cpu_delta_us"
                                     ],
+                                    "profile_encode_count": profile_encode_count,
+                                    "sampled_cpu_milliseconds_per_encode": (
+                                        analysis["summary"]["cpu_delta_us"]
+                                        / 1000.0
+                                        / profile_encode_count
+                                    ),
+                                    "sampled_cpu_nanoseconds_per_source_pixel": (
+                                        analysis["summary"]["cpu_delta_us"]
+                                        * 1000.0
+                                        / profile_encode_count
+                                        / source_pixels
+                                    ),
                                     "resolved_leaf_cpu_percent": analysis["summary"][
                                         "resolved_leaf_cpu_percent"
                                     ],
-                                    "neutral_stages": analysis["neutral_stages"],
+                                    "neutral_stages": normalized_stages,
                                 }
                             )
 
