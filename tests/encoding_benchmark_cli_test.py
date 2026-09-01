@@ -25,6 +25,7 @@ PHASES = {
     "codestream_block_context_map_work",
     "codestream_coefficient_order_work",
     "codestream_coefficient_tokenization_work",
+    "codestream_coefficient_context_materialization_work",
     "codestream_entropy_optimization",
     "codestream_entropy_prefix_histogram_build_work",
     "codestream_entropy_prefix_histogram_cost_work",
@@ -36,6 +37,7 @@ PHASES = {
     "codestream_entropy_ans_prefix_validation_work",
     "codestream_entropy_ans_value_collection_work",
     "codestream_entropy_ans_value_aggregation_work",
+    "codestream_entropy_ans_prepared_value_validation_work",
     "codestream_entropy_ans_uint_config_work",
     "codestream_entropy_ans_histogram_build_work",
     "codestream_entropy_ans_model_build_work",
@@ -51,6 +53,11 @@ PHASES = {
     "codestream_assembly_frame_header",
     "codestream_assembly_toc_and_sections",
     "codestream_assembly_output_copy",
+}
+
+ELIMINATED_WORK_PHASES = {
+    "codestream_entropy_ans_value_collection_work",
+    "codestream_entropy_ans_value_aggregation_work",
 }
 
 
@@ -105,7 +112,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 7)
+        self.assertEqual(document["schema_version"], 9)
         self.assertEqual(
             document["substage_work_timing"], "aggregate-worker-time"
         )
@@ -128,6 +135,23 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(set(sample["entropy_clusters"]), {"dc", "ac"})
         self.assertGreater(sample["entropy_clusters"]["dc"], 0)
         self.assertGreater(sample["entropy_clusters"]["ac"], 0)
+        self.assertEqual(
+            set(sample["ac_tokenization"]),
+            {
+                "template_count",
+                "template_tokens",
+                "context_materialization_count",
+                "materialized_tokens",
+            },
+        )
+        self.assertIn(sample["ac_tokenization"]["template_count"], {1, 2})
+        self.assertGreater(sample["ac_tokenization"]["template_tokens"], 0)
+        self.assertGreater(
+            sample["ac_tokenization"]["context_materialization_count"], 0
+        )
+        self.assertGreater(
+            sample["ac_tokenization"]["materialized_tokens"], 0
+        )
         self.assertEqual(
             set(sample["entropy_coding"]),
             {"dc", "ac", "coefficient_order"},
@@ -165,7 +189,9 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             self.assertIsInstance(value, int)
             self.assertGreaterEqual(value, 0)
         for phase in PHASES:
-            if phase.endswith("_work"):
+            if phase in ELIMINATED_WORK_PHASES:
+                self.assertEqual(sample["phase_nanoseconds"][phase], 0)
+            elif phase.endswith("_work"):
                 self.assertGreater(sample["phase_nanoseconds"][phase], 0)
         self.assertFalse(list(self.directory.glob("samples.json.tmp-*")))
 
@@ -203,7 +229,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 7)
+        self.assertEqual(document["schema_version"], 9)
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
 

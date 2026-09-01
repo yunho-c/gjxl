@@ -888,14 +888,14 @@ Status AdvanceAnsState(
 
 template <typename EmitChunk>
 Status ProcessAnsTokenStream(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   EmitChunk&& emit_chunk,
   uint32_t* final_state) {
 
   uint32_t state = kAnsSignature << 16;
   for (size_t index = tokens.size(); index != 0; --index) {
-    const EntropyToken& token = tokens[index - 1];
+    const EntropyToken token = tokens[index - 1];
     if (token.context >= code.context_count) {
       return Status::InvalidArgument("ANS token context is out of range");
     }
@@ -917,11 +917,11 @@ Status ProcessAnsTokenStream(
 }
 
 Status CountAnsTokenStreamBitsInternal(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   uint64_t* bit_count) {
 
-  if (bit_count == nullptr) {
+  if (bit_count == nullptr || !tokens.valid()) {
     return Status::InvalidArgument("ANS token cost output is null");
   }
   // Each token emits at most its 31 HybridUint extra bits and one 16-bit
@@ -947,7 +947,7 @@ Status CountAnsTokenStreamBitsInternal(
 }
 
 Status MeasureAnsCode(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& code,
   uint64_t model_bits,
   EntropyCodeCost* cost) {
@@ -958,7 +958,8 @@ Status MeasureAnsCode(
   EntropyCodeCost candidate;
   candidate.model_bits = model_bits;
   candidate.cluster_count = code.ans_histograms.size();
-  for (const std::vector<EntropyToken>& section : section_tokens) {
+  candidate.section_token_bits.reserve(section_tokens.size());
+  for (const EntropyTokenStreamView section : section_tokens) {
     uint64_t section_bits = 0;
     if (Status status = CountAnsTokenStreamBitsInternal(
           section, code, &section_bits);
@@ -970,8 +971,9 @@ Status MeasureAnsCode(
       return Status::InvalidArgument("ANS token cost overflow");
     }
     candidate.token_bits += section_bits;
+    candidate.section_token_bits.push_back(section_bits);
   }
-  *cost = candidate;
+  *cost = std::move(candidate);
   return Status::Ok();
 }
 
@@ -1014,7 +1016,7 @@ bool HasEquivalentAnsTokenCoding(
 }
 
 Status MeasureAnsCodes(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+  std::span<const EntropyTokenStreamView> section_tokens,
   std::span<const EntropyCode* const> codes,
   std::span<const uint64_t> model_bits,
   std::span<EntropyCodeCost> costs) {
@@ -1033,7 +1035,11 @@ Status MeasureAnsCodes(
       return Status::InvalidArgument("ANS survivor symbols differ");
     }
     costs[candidate] = {
-      model_bits[candidate], 0, codes[candidate]->ans_histograms.size()};
+      .model_bits = model_bits[candidate],
+      .token_bits = 0,
+      .cluster_count = codes[candidate]->ans_histograms.size(),
+      .section_token_bits = std::vector<uint64_t>(section_tokens.size()),
+    };
   }
   if (codes.size() == 1) {
     return MeasureAnsCode(
@@ -1044,7 +1050,12 @@ Status MeasureAnsCodes(
   std::array<uint32_t, kAnsAlphabetWidthCount> states{};
   std::array<uint64_t, kAnsAlphabetWidthCount> section_bits{};
   const EntropyCode& reference = *codes[0];
-  for (const std::vector<EntropyToken>& section : section_tokens) {
+  for (size_t section_index = 0; section_index < section_tokens.size();
+       ++section_index) {
+    const EntropyTokenStreamView section = section_tokens[section_index];
+    if (!section.valid()) {
+      return Status::InvalidArgument("ANS token-stream view is invalid");
+    }
     if (section.size() >
         (std::numeric_limits<uint64_t>::max() - 32) /
           kMaximumBitsPerToken) {
@@ -1054,7 +1065,7 @@ Status MeasureAnsCodes(
     std::fill_n(section_bits.begin(), codes.size(), uint64_t{32});
     for (size_t token_index = section.size(); token_index != 0;
          --token_index) {
-      const EntropyToken& token = section[token_index - 1];
+      const EntropyToken token = section[token_index - 1];
       if (token.context >= reference.context_count) {
         return Status::InvalidArgument("ANS token context is out of range");
       }
@@ -1084,6 +1095,8 @@ Status MeasureAnsCodes(
         return Status::InvalidArgument("ANS token cost overflow");
       }
       costs[candidate].token_bits += section_bits[candidate];
+      costs[candidate].section_token_bits[section_index] =
+        section_bits[candidate];
     }
   }
   return Status::Ok();
@@ -1092,11 +1105,19 @@ Status MeasureAnsCodes(
 }  // namespace
 
 Status codestream_internal::CountAnsTokenStreamBits(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   uint64_t* bit_count) {
 
   return CountAnsTokenStreamBitsInternal(tokens, code, bit_count);
+}
+
+Status codestream_internal::CountAnsTokenStreamBits(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  uint64_t* bit_count) {
+  return CountAnsTokenStreamBits(
+    EntropyTokenStreamView::Interleaved(tokens), code, bit_count);
 }
 
 Status codestream_internal::AggregateEntropyValues(
@@ -1294,11 +1315,11 @@ Status codestream_internal::WriteAnsEntropyCodeModel(
 }
 
 Status codestream_internal::WriteAnsTokenStream(
-  std::span<const EntropyToken> tokens,
+  EntropyTokenStreamView tokens,
   const EntropyCode& code,
   BitWriter* writer) {
 
-  if (writer == nullptr) {
+  if (writer == nullptr || !tokens.valid()) {
     return Status::InvalidArgument("ANS token-stream output is null");
   }
   try {
@@ -1334,9 +1355,61 @@ Status codestream_internal::WriteAnsTokenStream(
   }
 }
 
-Status OptimizeAnsEntropyCode(
-  std::span<const std::vector<EntropyToken>> section_tokens,
+Status codestream_internal::WriteAnsTokenStream(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  BitWriter* writer) {
+  return WriteAnsTokenStream(
+    EntropyTokenStreamView::Interleaved(tokens), code, writer);
+}
+
+Status ValidatePreparedEntropyClusters(
+  std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& prefix_partition,
+  const codestream_internal::PreparedEntropyClusters& prepared) {
+
+  if (prepared.context_count != prefix_partition.context_count ||
+      prepared.context_map != prefix_partition.context_map ||
+      prepared.values.size() != prefix_partition.prefix_codes.size()) {
+    return Status::InvalidArgument(
+      "Prepared entropy clusters do not match the prefix partition");
+  }
+  uint64_t prepared_count = 0;
+  for (const auto& cluster : prepared.values) {
+    uint32_t previous = 0;
+    bool first = true;
+    for (const codestream_internal::WeightedValue weighted_value : cluster) {
+      if (weighted_value.count == 0 ||
+          (!first && weighted_value.value <= previous) ||
+          prepared_count > std::numeric_limits<uint64_t>::max() -
+            weighted_value.count) {
+        return Status::InvalidArgument(
+          "Prepared entropy cluster values are invalid");
+      }
+      prepared_count += weighted_value.count;
+      previous = weighted_value.value;
+      first = false;
+    }
+  }
+  uint64_t token_count = 0;
+  for (const EntropyTokenStreamView section : section_tokens) {
+    if (!section.valid() ||
+        section.size() > std::numeric_limits<uint64_t>::max() - token_count) {
+      return Status::InvalidArgument("ANS token-stream view is invalid");
+    }
+    token_count += section.size();
+  }
+  if (prepared_count != token_count) {
+    return Status::InvalidArgument(
+      "Prepared entropy cluster count differs from token streams");
+  }
+  return Status::Ok();
+}
+
+Status OptimizeAnsEntropyCodeImpl(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCode& prefix_partition,
+  const codestream_internal::PreparedEntropyClusters* prepared,
   EntropyCode* code,
   EntropyCodeCost* cost,
   codestream_internal::EntropyWorkProfile* profile) {
@@ -1358,24 +1431,42 @@ Status OptimizeAnsEntropyCode(
     &EntropyWorkProfile::ans_prefix_validation_nanoseconds);
   try {
     const size_t cluster_count = prefix_partition.prefix_codes.size();
-    const ProfileClock::time_point value_collection_begin =
-      ProfileBegin(profile);
-    std::vector<std::vector<uint32_t>> values(cluster_count);
-    for (const std::vector<EntropyToken>& section : section_tokens) {
-      for (const EntropyToken& token : section) {
-        if (token.context >= prefix_partition.context_count) {
-          return Status::InvalidArgument("ANS token context is out of range");
-        }
-        const size_t cluster = prefix_partition.context_map[token.context];
-        if (cluster >= values.size()) {
-          return Status::Internal("ANS cluster index is invalid");
-        }
-        values[cluster].push_back(token.value);
+    std::vector<std::vector<uint32_t>> values;
+    if (prepared != nullptr) {
+      const ProfileClock::time_point validation_begin =
+        ProfileBegin(profile);
+      Status status = ValidatePreparedEntropyClusters(
+        section_tokens, prefix_partition, *prepared);
+      ProfileEnd(
+        profile, validation_begin,
+        &EntropyWorkProfile::ans_prepared_value_validation_nanoseconds);
+      if (!status.ok()) {
+        return status;
       }
+    } else {
+      const ProfileClock::time_point value_collection_begin =
+        ProfileBegin(profile);
+      values.resize(cluster_count);
+      for (const EntropyTokenStreamView section : section_tokens) {
+        if (!section.valid()) {
+          return Status::InvalidArgument("ANS token-stream view is invalid");
+        }
+        for (size_t index = 0; index < section.size(); ++index) {
+          const EntropyToken token = section[index];
+          if (token.context >= prefix_partition.context_count) {
+            return Status::InvalidArgument("ANS token context is out of range");
+          }
+          const size_t cluster = prefix_partition.context_map[token.context];
+          if (cluster >= values.size()) {
+            return Status::Internal("ANS cluster index is invalid");
+          }
+          values[cluster].push_back(token.value);
+        }
+      }
+      ProfileEnd(
+        profile, value_collection_begin,
+        &EntropyWorkProfile::ans_value_collection_nanoseconds);
     }
-    ProfileEnd(
-      profile, value_collection_begin,
-      &EntropyWorkProfile::ans_value_collection_nanoseconds);
 
     constexpr size_t kMinimumLogAlphaSize = 5;
     constexpr size_t kMaximumLogAlphaSize = 8;
@@ -1396,17 +1487,23 @@ Status OptimizeAnsEntropyCode(
     };
     std::vector<std::vector<ConfigCandidate>> options(cluster_count);
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
-      const ProfileClock::time_point aggregation_begin =
-        ProfileBegin(profile);
       std::vector<codestream_internal::WeightedValue> weighted_values;
-      if (Status status = codestream_internal::AggregateEntropyValues(
-            std::move(values[cluster]), &weighted_values);
-          !status.ok()) {
-        return status;
+      std::span<const codestream_internal::WeightedValue> cluster_values;
+      if (prepared != nullptr) {
+        cluster_values = prepared->values[cluster];
+      } else {
+        const ProfileClock::time_point aggregation_begin =
+          ProfileBegin(profile);
+        if (Status status = codestream_internal::AggregateEntropyValues(
+              std::move(values[cluster]), &weighted_values);
+            !status.ok()) {
+          return status;
+        }
+        ProfileEnd(
+          profile, aggregation_begin,
+          &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
+        cluster_values = weighted_values;
       }
-      ProfileEnd(
-        profile, aggregation_begin,
-        &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
       for (HybridUintConfig config : kAnsUintConfigs) {
         const ProfileClock::time_point uint_config_begin =
           ProfileBegin(profile);
@@ -1415,7 +1512,7 @@ Status OptimizeAnsEntropyCode(
         size_t maximum_symbol = 0;
         bool valid = true;
         for (const codestream_internal::WeightedValue& weighted_value :
-             weighted_values) {
+             cluster_values) {
           HybridUintToken encoded;
           if (Status status = EncodeHybridUint(
                 weighted_value.value, config, &encoded);
@@ -1667,9 +1764,51 @@ Status OptimizeAnsEntropyCode(
     }
     *code = std::move(width_candidates[best_candidate].code);
     if (cost != nullptr) {
-      *cost = best_cost;
+      *cost = std::move(best_cost);
     }
     return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+}
+
+Status OptimizeAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCode& prefix_partition,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  codestream_internal::EntropyWorkProfile* profile) {
+  return OptimizeAnsEntropyCodeImpl(
+    section_tokens, prefix_partition, nullptr, code, cost, profile);
+}
+
+Status codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCode& prefix_partition,
+  const PreparedEntropyClusters& prepared,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  EntropyWorkProfile* profile) {
+  return OptimizeAnsEntropyCodeImpl(
+    section_tokens, prefix_partition, &prepared, code, cost, profile);
+}
+
+Status OptimizeAnsEntropyCode(
+  std::span<const std::vector<EntropyToken>> section_tokens,
+  const EntropyCode& prefix_partition,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  codestream_internal::EntropyWorkProfile* profile) {
+  try {
+    std::vector<EntropyTokenStreamView> views;
+    views.reserve(section_tokens.size());
+    for (const std::vector<EntropyToken>& section : section_tokens) {
+      views.push_back(EntropyTokenStreamView::Interleaved(section));
+    }
+    return OptimizeAnsEntropyCode(
+      views, prefix_partition, code, cost, profile);
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {

@@ -289,6 +289,7 @@ bool CheckEncodedFrame(
     profile.entropy_work.ans_prefix_validation_nanoseconds +
     profile.entropy_work.ans_value_collection_nanoseconds +
     profile.entropy_work.ans_value_aggregation_nanoseconds +
+    profile.entropy_work.ans_prepared_value_validation_nanoseconds +
     profile.entropy_work.ans_uint_config_nanoseconds +
     profile.entropy_work.ans_histogram_build_nanoseconds +
     profile.entropy_work.ans_model_build_nanoseconds +
@@ -311,6 +312,17 @@ bool CheckEncodedFrame(
       profile.block_context_map_work_nanoseconds == 0 ||
       profile.coefficient_order_work_nanoseconds == 0 ||
       profile.coefficient_tokenization_work_nanoseconds == 0 ||
+      profile.coefficient_context_materialization_work_nanoseconds == 0 ||
+      profile.coefficient_tokenization_pass_count !=
+        (expect_custom_candidate ? 2 : 1) ||
+      profile.coefficient_token_count == 0 ||
+      profile.coefficient_context_materialization_count !=
+        profile.coefficient_tokenization_pass_count ||
+      profile.coefficient_materialized_token_count !=
+        profile.coefficient_token_count ||
+      profile.entropy_work.ans_value_collection_nanoseconds != 0 ||
+      profile.entropy_work.ans_value_aggregation_nanoseconds != 0 ||
+      profile.entropy_work.ans_prepared_value_validation_nanoseconds == 0 ||
       entropy_substage_work == 0 || section_substage_work == 0 ||
       assembly_substage_total == 0 ||
       profile.assembly_nanoseconds < assembly_substage_total ||
@@ -362,6 +374,14 @@ bool CheckAdaptiveBlockContextSelection() {
   if (!status.ok() || profile.block_context_candidate_count != 5 ||
       profile.compact_block_context_candidate_bytes == 0 ||
       output.size() > profile.compact_block_context_candidate_bytes ||
+      profile.coefficient_tokenization_pass_count == 0 ||
+      profile.coefficient_tokenization_pass_count > 2 ||
+      profile.coefficient_context_materialization_count !=
+        profile.coefficient_tokenization_pass_count *
+          profile.block_context_candidate_count ||
+      profile.coefficient_materialized_token_count !=
+        profile.coefficient_token_count *
+          profile.block_context_candidate_count ||
       profile.selected_block_context_candidate_index >=
         profile.block_context_candidate_count ||
       profile.selected_block_context_count == 0 ||

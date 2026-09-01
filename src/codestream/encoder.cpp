@@ -22,6 +22,7 @@
 #include "codec/codestream.h"
 #include "codec/vardct_frame.h"
 #include "codestream/ac_group.h"
+#include "codestream/ans_internal.h"
 #include "codestream/bit_writer.h"
 #include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
@@ -174,7 +175,8 @@ struct AcEncodingCandidate {
   size_t block_context_candidate_index = 0;
   SimpleBlockContextMap block_context_map;
   bool custom_order = false;
-  std::vector<std::vector<EntropyToken>> streams;
+  std::vector<std::vector<uint16_t>> contexts;
+  std::vector<EntropyTokenStreamView> streams;
   EntropyCode ac_code;
   EntropyCodeCost ac_cost;
   EntropyCode prefix_ac_code;
@@ -183,30 +185,8 @@ struct AcEncodingCandidate {
   bool all_prefix_entropy = false;
 };
 
-Status MoveAcStreams(
-  std::vector<SimpleAcGroupTokenStream>* groups,
-  std::vector<std::vector<EntropyToken>>* streams) {
-
-  if (groups == nullptr || streams == nullptr) {
-    return Status::InvalidArgument("AC stream output is null");
-  }
-  try {
-    std::vector<std::vector<EntropyToken>> candidate;
-    candidate.reserve(groups->size());
-    for (SimpleAcGroupTokenStream& group : *groups) {
-      candidate.push_back(std::move(group.tokens));
-    }
-    *streams = std::move(candidate);
-  } catch (const std::bad_alloc&) {
-    return AllocationFailure();
-  } catch (const std::length_error&) {
-    return AllocationFailure();
-  }
-  return Status::Ok();
-}
-
 Status OptimizeBestEntropyCode(
-  std::span<const std::vector<EntropyToken>> streams,
+  std::span<const EntropyTokenStreamView> streams,
   const EntropyCodeOptions& options,
   EntropyCode* code,
   EntropyCodeCost* cost,
@@ -220,15 +200,18 @@ Status OptimizeBestEntropyCode(
   }
   EntropyCode prefix;
   EntropyCodeCost prefix_cost;
-  if (Status status = OptimizeEntropyCode(
-        streams, options, &prefix, &prefix_cost, profile);
+  codestream_internal::PreparedEntropyClusters prepared;
+  if (Status status =
+        codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
+          streams, options, &prefix, &prefix_cost, &prepared, profile);
       !status.ok()) {
     return status;
   }
   EntropyCode ans;
   EntropyCodeCost ans_cost;
-  if (Status status = OptimizeAnsEntropyCode(
-        streams, prefix, &ans, &ans_cost, profile);
+  if (Status status =
+        codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
+          streams, prefix, prepared, &ans, &ans_cost, profile);
       !status.ok()) {
     return status;
   }
@@ -244,15 +227,40 @@ Status OptimizeBestEntropyCode(
   };
   if (total_bits(ans_cost) < total_bits(prefix_cost)) {
     *code = std::move(ans);
-    *cost = ans_cost;
+    *cost = std::move(ans_cost);
   } else {
     *code = std::move(prefix);
-    *cost = prefix_cost;
+    *cost = std::move(prefix_cost);
   }
   WorkEnd(
     profile != nullptr, selection_begin,
     profile == nullptr ? nullptr : &profile->selection_nanoseconds);
   return Status::Ok();
+}
+
+Status OptimizeBestEntropyCode(
+  std::span<const std::vector<EntropyToken>> streams,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  EntropyCode* prefix_fallback,
+  EntropyCodeCost* prefix_fallback_cost,
+  codestream_internal::EntropyWorkProfile* profile) {
+
+  try {
+    std::vector<EntropyTokenStreamView> views;
+    views.reserve(streams.size());
+    for (const std::vector<EntropyToken>& stream : streams) {
+      views.push_back(EntropyTokenStreamView::Interleaved(stream));
+    }
+    return OptimizeBestEntropyCode(
+      views, options, code, cost, prefix_fallback, prefix_fallback_cost,
+      profile);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
 }
 
 Status OptimizeAcCandidate(
@@ -398,13 +406,12 @@ bool AddMeasuredBits(uint64_t value, uint64_t* total) {
 
 Status MeasureDcGroupSections(
   std::span<const SimpleDcGroupTokenStreams> dc_groups,
-  std::span<const std::vector<EntropyToken>> dc_streams,
-  const EntropyCode& dc_code,
+  const EntropyCodeCost& dc_cost,
   std::vector<uint64_t>* section_bits,
   uint64_t* measurement_work) {
 
   if (section_bits == nullptr || dc_groups.empty() ||
-      dc_streams.size() != 2 * dc_groups.size()) {
+      dc_cost.section_token_bits.size() != 2 * dc_groups.size()) {
     return Status::InvalidArgument("Common section measurement is invalid");
   }
   try {
@@ -428,21 +435,11 @@ Status MeasureDcGroupSections(
           return header_status;
         }
         uint64_t bits = headers.bits_written();
-        uint64_t tokens = 0;
-        if (Status token_status = codestream_internal::CountTokenStreamBits(
-              dc_streams[2 * index], dc_code, &tokens);
-            !token_status.ok()) {
-          return token_status;
-        }
-        if (!AddMeasuredBits(tokens, &bits)) {
+        if (!AddMeasuredBits(dc_cost.section_token_bits[2 * index], &bits)) {
           return Status::InvalidArgument("DC section bit count overflow");
         }
-        if (Status token_status = codestream_internal::CountTokenStreamBits(
-              dc_streams[2 * index + 1], dc_code, &tokens);
-            !token_status.ok()) {
-          return token_status;
-        }
-        if (!AddMeasuredBits(tokens, &bits)) {
+        if (!AddMeasuredBits(
+              dc_cost.section_token_bits[2 * index + 1], &bits)) {
           return Status::InvalidArgument("DC section bit count overflow");
         }
         candidate[index] = bits;
@@ -546,7 +543,6 @@ Status MeasureAcGlobalBits(
 
 Status MeasureAcSections(
   const AcEncodingCandidate& ac,
-  const EntropyCode& ac_code,
   const EntropyCodeCost& ac_cost,
   const SimpleCoefficientOrders& custom_orders,
   const EntropyCodeCost* order_cost,
@@ -554,6 +550,7 @@ Status MeasureAcSections(
   uint64_t* measurement_work) {
 
   if (section_bits == nullptr || ac.streams.empty() ||
+      ac_cost.section_token_bits.size() != ac.streams.size() ||
       (ac.custom_order != (order_cost != nullptr))) {
     return Status::InvalidArgument("AC section measurement is invalid");
   }
@@ -561,7 +558,7 @@ Status MeasureAcSections(
     std::vector<uint64_t> candidate(1 + ac.streams.size());
     const uint16_t used_order_mask =
       ac.custom_order ? custom_orders.used_order_mask : 0;
-    const ProfileClock::time_point global_begin =
+    const ProfileClock::time_point measurement_begin =
       WorkBegin(measurement_work != nullptr);
     if (Status status = MeasureAcGlobalBits(
           ac.streams.size(), used_order_mask, order_cost, ac_cost,
@@ -569,37 +566,12 @@ Status MeasureAcSections(
         !status.ok()) {
       return status;
     }
-    uint64_t global_work = 0;
-    WorkEnd(
-      measurement_work != nullptr, global_begin,
-      measurement_work == nullptr ? nullptr : &global_work);
-    std::vector<uint64_t> group_work(
-      measurement_work == nullptr ? 0 : ac.streams.size());
-    Status status = RunParallelSections(
-      ac.streams.size(),
-      [&](size_t index) {
-        const ProfileClock::time_point work_begin =
-          WorkBegin(measurement_work != nullptr);
-        Status count_status = codestream_internal::CountTokenStreamBits(
-          ac.streams[index], ac_code, &candidate[1 + index]);
-        WorkEnd(
-          measurement_work != nullptr, work_begin,
-          measurement_work == nullptr ? nullptr : &group_work[index]);
-        return count_status;
-      });
-    if (!status.ok()) {
-      return status;
-    }
-    uint64_t work = global_work;
-    for (uint64_t group_nanoseconds : group_work) {
-      if (!AddMeasuredBits(group_nanoseconds, &work)) {
-        return Status::Internal("AC section measurement profile overflow");
-      }
-    }
+    std::copy(
+      ac_cost.section_token_bits.begin(), ac_cost.section_token_bits.end(),
+      candidate.begin() + 1);
     *section_bits = std::move(candidate);
-    if (measurement_work != nullptr) {
-      *measurement_work = work;
-    }
+    WorkEnd(
+      measurement_work != nullptr, measurement_begin, measurement_work);
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -903,22 +875,18 @@ Status EncodeVarDctCodestreamImpl(
       }
     }
     const SimpleCoefficientOrders natural_orders;
+    const size_t order_template_count = has_custom_orders ? 2 : 1;
+    std::array<std::vector<SimpleAcGroupTokenTemplate>, 2> order_templates;
     std::vector<uint64_t> coefficient_tokenization_work(
-      profile == nullptr ? 0 : candidates.size());
+      profile == nullptr ? 0 : order_template_count);
     status = RunParallelSections(
-      candidates.size(),
+      order_template_count,
       [&](size_t index) {
         const ProfileClock::time_point work_begin =
           WorkBegin(profile != nullptr);
-        AcEncodingCandidate& candidate = candidates[index];
-        std::vector<SimpleAcGroupTokenStream> groups;
-        Status token_status = TokenizeSimpleAcGroups(
-          frame, candidate.custom_order ? custom_orders : natural_orders,
-          candidate.block_context_map, &groups);
-        if (!token_status.ok()) {
-          return token_status;
-        }
-        token_status = MoveAcStreams(&groups, &candidate.streams);
+        Status token_status = BuildSimpleAcGroupTokenTemplates(
+          frame, index == 0 ? natural_orders : custom_orders,
+          &order_templates[index]);
         WorkEnd(
           profile != nullptr, work_begin,
           profile == nullptr
@@ -929,8 +897,91 @@ Status EncodeVarDctCodestreamImpl(
     if (!status.ok()) {
       return status;
     }
-    for (uint64_t work : coefficient_tokenization_work) {
-      candidate_profile.coefficient_tokenization_work_nanoseconds += work;
+    if (profile != nullptr) {
+      for (uint64_t work : coefficient_tokenization_work) {
+        candidate_profile.coefficient_tokenization_work_nanoseconds += work;
+      }
+      candidate_profile.coefficient_tokenization_pass_count =
+        order_template_count;
+      for (size_t order_index = 0; order_index < order_template_count;
+           ++order_index) {
+        for (const SimpleAcGroupTokenTemplate& group :
+             order_templates[order_index]) {
+          if (group.tokens.size() >
+              std::numeric_limits<size_t>::max() -
+                candidate_profile.coefficient_token_count) {
+            return Status::Internal("AC token-template profile overflow");
+          }
+          candidate_profile.coefficient_token_count += group.tokens.size();
+        }
+      }
+    }
+
+    std::vector<uint64_t> context_materialization_work(
+      profile == nullptr ? 0 : candidates.size());
+    status = RunParallelSections(
+      candidates.size(),
+      [&](size_t index) {
+        const ProfileClock::time_point work_begin =
+          WorkBegin(profile != nullptr);
+        AcEncodingCandidate& candidate = candidates[index];
+        const size_t order_index = candidate.custom_order ? 1 : 0;
+        const auto& token_templates = order_templates[order_index];
+        Status token_status = MaterializeSimpleAcGroupContexts(
+          token_templates, candidate.block_context_map, &candidate.contexts);
+        if (!token_status.ok()) {
+          return token_status;
+        }
+        if (candidate.contexts.size() != token_templates.size()) {
+          return Status::Internal("Materialized AC group count differs");
+        }
+        candidate.streams.reserve(token_templates.size());
+        for (size_t group_index = 0; group_index < token_templates.size();
+             ++group_index) {
+          if (candidate.contexts[group_index].size() !=
+              token_templates[group_index].values.size()) {
+            return Status::Internal("Materialized AC token count differs");
+          }
+          candidate.streams.push_back(EntropyTokenStreamView::Split(
+            token_templates[group_index].values,
+            candidate.contexts[group_index]));
+        }
+        WorkEnd(
+          profile != nullptr, work_begin,
+          profile == nullptr ? nullptr : &context_materialization_work[index]);
+        return token_status;
+      });
+    if (!status.ok()) {
+      return status;
+    }
+    if (profile != nullptr) {
+      candidate_profile.coefficient_context_materialization_count =
+        candidates.size();
+      for (size_t index = 0; index < candidates.size(); ++index) {
+        candidate_profile
+          .coefficient_context_materialization_work_nanoseconds +=
+          context_materialization_work[index];
+        for (const EntropyTokenStreamView stream : candidates[index].streams) {
+          if (stream.size() >
+              std::numeric_limits<size_t>::max() -
+                candidate_profile.coefficient_materialized_token_count) {
+            return Status::Internal("Materialized AC token profile overflow");
+          }
+          candidate_profile.coefficient_materialized_token_count +=
+            stream.size();
+        }
+      }
+    }
+    // Entropy candidates retain views of the shared values, but the local
+    // context descriptors and block keys are no longer needed once every map
+    // has been resolved. Release their potentially large capacities before
+    // the parallel entropy searches begin.
+    for (auto& templates : order_templates) {
+      for (SimpleAcGroupTokenTemplate& group : templates) {
+        std::vector<SimpleAcBlockContextKey>().swap(
+          group.block_context_keys);
+        std::vector<SimpleAcTokenTemplate>().swap(group.tokens);
+      }
     }
     ProfileEnd(
       profile, ac_tokenization_begin,
@@ -994,13 +1045,15 @@ Status EncodeVarDctCodestreamImpl(
     constexpr size_t kPrefixEntropy = 1;
     const std::array<const EntropyCode*, 2> dc_codes = {
       &dc_code, &prefix_dc_code};
+    const std::array<const EntropyCodeCost*, 2> dc_costs = {
+      &dc_cost, &prefix_dc_cost};
     std::array<std::vector<uint64_t>, 2> dc_group_section_bits;
     std::array<uint64_t, 2> dc_group_measurement_work{};
     status = RunParallelSections(
       dc_codes.size(),
       [&](size_t mode) {
         Status measure_status = MeasureDcGroupSections(
-          dc_groups, dc_streams, *dc_codes[mode],
+          dc_groups, *dc_costs[mode],
           &dc_group_section_bits[mode],
           profile == nullptr ? nullptr : &dc_group_measurement_work[mode]);
         return measure_status;
@@ -1046,9 +1099,6 @@ Status EncodeVarDctCodestreamImpl(
         const auto measure = [&](
           size_t mode, size_t* complete_size, uint64_t* measurement_work) {
           const bool all_prefix = mode == kPrefixEntropy;
-          const EntropyCode& ac_code = all_prefix
-            ? candidate.prefix_ac_code
-            : candidate.ac_code;
           const EntropyCodeCost& ac_cost = all_prefix
             ? candidate.prefix_ac_cost
             : candidate.ac_cost;
@@ -1057,7 +1107,7 @@ Status EncodeVarDctCodestreamImpl(
             : nullptr;
           std::vector<uint64_t> ac_section_bits;
           Status measure_status = MeasureAcSections(
-            candidate, ac_code, ac_cost, custom_orders,
+            candidate, ac_cost, custom_orders,
             selected_order_cost, &ac_section_bits, measurement_work);
           if (!measure_status.ok()) {
             return measure_status;

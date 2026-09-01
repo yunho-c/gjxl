@@ -1297,7 +1297,113 @@ order.
    `quantization_pipeline` score mismatch reproduced by the unmodified current
    build.
 
-7. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
+7. **Complete (2026-09-01): reuse AC token values and traversal order across
+   block-context candidates.** The former candidate loop tokenized every AC
+   coefficient stream independently for each block-context map and again for
+   natural versus custom coefficient order. Those passes repeated coefficient
+   loads, zero-density state, signed packing, value storage, and allocation even
+   though only the final context labels depended on the block map.
+
+   The retained implementation builds one map-independent template per
+   coefficient-order choice. Each group stores its values in one contiguous
+   `uint32_t` array and a compact four-byte descriptor containing the local
+   context and block-context inputs. Candidate preparation resolves only a
+   two-byte context array. Prefix optimization, ANS optimization, exact
+   count-only measurement, and final token writing accept a read-only split
+   value/context view, so candidate streams share the original values without
+   rebuilding interleaved eight-byte tokens. Descriptor and block-key storage
+   is released after all contexts have been resolved and before entropy search.
+
+   Raw workflow schema 8 separates aggregate template-construction and context-
+   materialization work and records their pass/token counts. On the 4672x5584
+   `doughnuts` PFM at distance 1.0, the selected search built two templates
+   containing 22,115,824 tokens total, then materialized 12 context variants
+   covering 132,694,944 token positions. The exact parent performed 12 full
+   tokenization passes. In the quiet final parent run, aggregate full-
+   tokenization work was 1,696.864 ms; the two candidate runs used
+   147.310-188.621 ms for template construction and 246.579-261.710 ms for
+   context materialization. These are summed worker times, not latency.
+
+   Four final independent Release processes ran parent/candidate/candidate/
+   parent with one warmup and three samples each under the fully-resident Metal
+   workflow. One parent process was broadly contaminated. Against the quiet
+   parent median, the two candidate medians reduced AC-tokenization wall time
+   from 375.754 ms to 229.661-233.748 ms (-38.88% to -37.79%) and codestream
+   time from 2,181.610 ms to 1,816.156-1,946.515 ms (-16.75% to -10.78%).
+   Entropy optimization ranged from an 8.67% improvement to a 0.13% regression,
+   consistent with variable memory pressure. Every sample remained 2,690,877
+   bytes. The nearest quiet distance-1.2 pair improved codestream time 8.22%
+   and AC tokenization 38.21% at an unchanged 2,348,582 bytes. The closest
+   padded-4K comparisons improved codestream time 10.66-11.91% at an unchanged
+   2,132,228 bytes; the second parent there was also contaminated.
+
+   Alternating one-sample memory measurements on the high-resolution input
+   reduced maximum RSS from 5,126,012,928 to 4,935,778,304 bytes (-3.71%) and
+   peak footprint from 14,138,386,224 to 13,478,008,256 bytes (-4.67%). A
+   direct CLI comparison produced byte-identical 2,690,877-byte codestreams
+   with SHA-256
+   `74dab8b328b12d3a485006b5197059df5d580e1b2aa80ee35a2dfdbc34f2d249`;
+   `djxl` 0.12.0 decoded the candidate to PFM. Split/interleaved parity tests
+   cover prefix and ANS model selection, costs, exact counting, serialized
+   payloads, and malformed-view atomicity. The complete Release suite is 61/62
+   with only the exact inherited `quantization_pipeline` score mismatch.
+
+   A second retained step reuses exact value statistics between the prefix and
+   ANS searches. Prefix HybridUint configuration search already collects every
+   selected cluster's values and reduces them to deterministic, value-sorted
+   `(value,count)` populations. ANS formerly traversed all ordered tokens again,
+   copied their raw values into new cluster vectors, and repeated the same
+   aggregation before trying its configurations. The prefix optimizer now
+   returns those populations with their context partition, and ANS consumes
+   them directly. It still traverses the original ordered streams for exact
+   rANS state/renormalization costs, so symbol order and every coding decision
+   remain unchanged. Before reuse, the internal path checks context-map
+   identity, cluster count, strictly increasing values, nonzero/overflow-safe
+   weights, stream validity, and the exact total token count. Malformed input
+   leaves model and cost outputs unchanged.
+
+   Raw workflow schema 9 retains ANS value-collection and aggregation phases as
+   zero-valued work-elimination sentinels and adds prepared-value validation.
+   On padded 4K at distance 1.2, two stable alternating Release pairs used one
+   warmup and three samples per process. Entropy optimization improved
+   10.38-10.68%, codestream encoding improved 9.03-9.34%, and the complete
+   fully-resident Metal workflow improved 7.54-7.66%; every sample remained
+   1,638,673 bytes. The removed collection and aggregation accounted for
+   1,163-1,174 ms of aggregate parent worker time. A final schema-9 rerun had
+   one broadly contaminated parent process; against the quiet parent, its two
+   candidates still improved entropy by 13.67-21.61% and codestream time by
+   11.46-16.25%. Prepared-value validation itself took only 0.129-0.147 ms of
+   aggregate worker time.
+
+   Two high-resolution distance-1.0 pairs on the 4672x5584 PFM improved entropy
+   optimization by 6.60% and 13.10%, codestream encoding by 5.78% and 14.23%,
+   and complete workflow time by 6.70% and 6.07%, respectively, at an unchanged
+   2,690,877 bytes. A three-pair 510x532 flower check was mixed at this shorter
+   boundary: entropy changed by -7.08%, -20.27%, and +11.87%, while the pooled
+   process-sample median improved 3.37%. Direct parent/candidate CLI output on
+   the high-resolution input remained byte-identical at SHA-256
+   `74dab8b328b12d3a485006b5197059df5d580e1b2aa80ee35a2dfdbc34f2d249`,
+   and `djxl` 0.12.0 decoded the candidate to PFM. Focused parity coverage
+   compares prepared and legacy prefix/ANS models, exact costs, and malformed
+   prepared-input atomicity; it passes 100 consecutive runs. The rebuilt
+   Release suite remains 61/62 with only the inherited
+   `quantization_pipeline` score mismatch.
+
+   A third experiment attempted to fuse the remaining fixed-HybridUint prefix
+   histogram pass into block-context materialization. It accumulated one exact
+   128-bin population per resolved AC context while each token was already in
+   hand, then moved those populations directly into prefix clustering. On
+   padded 4K at distance 1.2 this reduced aggregate prefix-histogram work from
+   518.505 ms to 9.578-9.799 ms, but it scattered updates across thousands of
+   roughly 1 KiB histograms. Aggregate context-materialization work rose from
+   135.535 ms to 2,046.490-2,252.485 ms, and AC-tokenization wall time rose from
+   90.519 ms to 393.242-401.531 ms. Against the quiet parent, codestream time
+   regressed 22.56-28.91% despite identical 1,638,673-byte output. The entire
+   code experiment was removed. A future revisit would need cache-local group
+   histograms plus a reduction, not direct random writes to the global context
+   table.
+
+8. **Offer an explicit serializer-effort tradeoff if rate changes are allowed.**
    `maximum-throughput` reduces AQ work but still invokes the full prefix search
    for each eligible entropy candidate. A speed-oriented serializer policy
    could cheaply screen coefficient-order and block-context candidates, search
@@ -1307,7 +1413,7 @@ order.
    rates, per-candidate time, bytes saved, and complete-codestream size must
    define this policy; one losing custom-order example is not sufficient.
 
-8. **Defer GPU entropy coding until a residual profile justifies it.** The
+9. **Defer GPU entropy coding until a residual profile justifies it.** The
    dominant exact operation builds many small, branch-heavy, depth-limited
    128-symbol Huffman trees with deterministic tie behavior. Seed assignment
    also mutates cluster state between decisions, and the CPU serializer needs

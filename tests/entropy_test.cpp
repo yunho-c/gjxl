@@ -890,6 +890,150 @@ bool CheckAnsSmallHistograms() {
   return true;
 }
 
+bool CheckSplitTokenStreamParity() {
+  const std::vector<std::vector<gjxl::EntropyToken>> sections = {
+    {},
+    {{0, 0}, {1, 1}, {2, 17}, {1, UINT32_MAX}},
+    {{2, 4}, {0, 4}, {1, 255}, {2, 65536}, {0, UINT32_MAX}},
+  };
+  std::vector<std::vector<uint32_t>> values(sections.size());
+  std::vector<std::vector<uint16_t>> contexts(sections.size());
+  std::vector<gjxl::EntropyTokenStreamView> split_sections;
+  split_sections.reserve(sections.size());
+  for (size_t section_index = 0; section_index < sections.size();
+       ++section_index) {
+    values[section_index].reserve(sections[section_index].size());
+    contexts[section_index].reserve(sections[section_index].size());
+    for (const gjxl::EntropyToken token : sections[section_index]) {
+      values[section_index].push_back(token.value);
+      contexts[section_index].push_back(
+        static_cast<uint16_t>(token.context));
+    }
+    split_sections.push_back(gjxl::EntropyTokenStreamView::Split(
+      values[section_index], contexts[section_index]));
+  }
+
+  gjxl::EntropyCode interleaved_prefix;
+  gjxl::EntropyCode split_prefix;
+  gjxl::EntropyCodeCost interleaved_prefix_cost;
+  gjxl::EntropyCodeCost split_prefix_cost;
+  constexpr gjxl::EntropyCodeOptions options{.context_count = 3};
+  if (!gjxl::OptimizeEntropyCode(
+        sections, options, &interleaved_prefix,
+        &interleaved_prefix_cost).ok() ||
+      !gjxl::OptimizeEntropyCode(
+        split_sections, options, &split_prefix, &split_prefix_cost).ok() ||
+      split_prefix != interleaved_prefix ||
+      split_prefix_cost != interleaved_prefix_cost) {
+    std::cerr << "Split prefix optimization differs from interleaved input\n";
+    return false;
+  }
+
+  gjxl::EntropyCode interleaved_ans;
+  gjxl::EntropyCode split_ans;
+  gjxl::EntropyCodeCost interleaved_ans_cost;
+  gjxl::EntropyCodeCost split_ans_cost;
+  if (!gjxl::OptimizeAnsEntropyCode(
+        sections, interleaved_prefix, &interleaved_ans,
+        &interleaved_ans_cost).ok() ||
+      !gjxl::OptimizeAnsEntropyCode(
+        split_sections, split_prefix, &split_ans, &split_ans_cost).ok() ||
+      split_ans != interleaved_ans ||
+      split_ans_cost != interleaved_ans_cost) {
+    std::cerr << "Split ANS optimization differs from interleaved input\n";
+    return false;
+  }
+
+  gjxl::EntropyCode prepared_prefix;
+  gjxl::EntropyCodeCost prepared_prefix_cost;
+  gjxl::codestream_internal::PreparedEntropyClusters prepared_clusters;
+  gjxl::EntropyCode prepared_ans;
+  gjxl::EntropyCodeCost prepared_ans_cost;
+  if (!gjxl::codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
+        split_sections, options, &prepared_prefix, &prepared_prefix_cost,
+        &prepared_clusters).ok() ||
+      prepared_prefix != interleaved_prefix ||
+      prepared_prefix_cost != interleaved_prefix_cost ||
+      prepared_clusters.context_count != prepared_prefix.context_count ||
+      prepared_clusters.context_map != prepared_prefix.context_map ||
+      prepared_clusters.values.size() != prepared_prefix.prefix_codes.size() ||
+      !gjxl::codestream_internal::
+        OptimizeAnsEntropyCodeWithPreparedClusters(
+          split_sections, prepared_prefix, prepared_clusters, &prepared_ans,
+          &prepared_ans_cost).ok() ||
+      prepared_ans != interleaved_ans ||
+      prepared_ans_cost != interleaved_ans_cost) {
+    std::cerr << "Prepared entropy clusters changed model selection\n";
+    return false;
+  }
+
+  const std::array<const gjxl::EntropyCode*, 2> codes = {
+    &interleaved_prefix, &interleaved_ans};
+  for (const gjxl::EntropyCode* code : codes) {
+    for (size_t section_index = 0; section_index < sections.size();
+         ++section_index) {
+      gjxl::BitWriter interleaved_writer;
+      gjxl::BitWriter split_writer;
+      uint64_t interleaved_bits = 0;
+      uint64_t split_bits = 0;
+      if (!gjxl::WriteTokenStream(
+            sections[section_index], *code, &interleaved_writer).ok() ||
+          !gjxl::WriteTokenStream(
+            split_sections[section_index], *code, &split_writer).ok() ||
+          !gjxl::codestream_internal::CountTokenStreamBits(
+            sections[section_index], *code, &interleaved_bits).ok() ||
+          !gjxl::codestream_internal::CountTokenStreamBits(
+            split_sections[section_index], *code, &split_bits).ok() ||
+          split_bits != interleaved_bits ||
+          split_writer.bits_written() != interleaved_writer.bits_written() ||
+          !std::ranges::equal(
+            split_writer.padded_bytes(), interleaved_writer.padded_bytes())) {
+        std::cerr << "Split token-stream output differs from interleaved input\n";
+        return false;
+      }
+    }
+  }
+
+  const std::array<uint32_t, 2> invalid_values = {0, 1};
+  const std::array<uint16_t, 1> invalid_contexts = {0};
+  const gjxl::EntropyTokenStreamView invalid =
+    gjxl::EntropyTokenStreamView::Split(invalid_values, invalid_contexts);
+  gjxl::BitWriter atomic;
+  uint64_t unchanged = 0xA5A5A5A5A5A5A5A5ull;
+  if (!atomic.WriteBits(3, 5).ok() ||
+      gjxl::WriteTokenStream(invalid, interleaved_prefix, &atomic).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      atomic.bits_written() != 3 ||
+      !HasBytes(atomic, std::array<uint8_t, 1>{5}) ||
+      gjxl::codestream_internal::CountTokenStreamBits(
+        invalid, interleaved_prefix, &unchanged).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      unchanged != 0xA5A5A5A5A5A5A5A5ull) {
+    std::cerr << "Rejected split token stream changed its output\n";
+    return false;
+  }
+
+  gjxl::codestream_internal::PreparedEntropyClusters malformed =
+    prepared_clusters;
+  auto populated = std::ranges::find_if(
+    malformed.values, [](const auto& cluster) { return !cluster.empty(); });
+  if (populated == malformed.values.end()) {
+    return false;
+  }
+  ++populated->front().count;
+  gjxl::EntropyCode unchanged_code = interleaved_prefix;
+  gjxl::EntropyCodeCost unchanged_cost = interleaved_prefix_cost;
+  if (gjxl::codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
+        split_sections, prepared_prefix, malformed, &unchanged_code,
+        &unchanged_cost).code() != gjxl::StatusCode::kInvalidArgument ||
+      unchanged_code != interleaved_prefix ||
+      unchanged_cost != interleaved_prefix_cost) {
+    std::cerr << "Rejected prepared entropy clusters changed their outputs\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckExactTokenBitCounting() {
   std::vector<std::vector<gjxl::EntropyToken>> sections = {
     {},
@@ -911,19 +1055,38 @@ bool CheckExactTokenBitCounting() {
     return false;
   }
 
-  for (const gjxl::EntropyCode* code : {&prefix, &ans}) {
-    for (const auto& section : sections) {
+  const std::array<const gjxl::EntropyCode*, 2> codes = {&prefix, &ans};
+  const std::array<const gjxl::EntropyCodeCost*, 2> costs = {
+    &prefix_cost, &ans_cost};
+  for (size_t code_index = 0; code_index < codes.size(); ++code_index) {
+    const gjxl::EntropyCode& code = *codes[code_index];
+    const gjxl::EntropyCodeCost& cost = *costs[code_index];
+    if (cost.section_token_bits.size() != sections.size()) {
+      std::cerr << "Retained section token-bit count is incomplete\n";
+      return false;
+    }
+    uint64_t retained_total = 0;
+    for (size_t section_index = 0; section_index < sections.size();
+         ++section_index) {
+      const auto& section = sections[section_index];
       gjxl::BitWriter writer;
       uint64_t measured = std::numeric_limits<uint64_t>::max();
-      if (!gjxl::WriteTokenStream(section, *code, &writer).ok() ||
+      if (!gjxl::WriteTokenStream(section, code, &writer).ok() ||
           !gjxl::codestream_internal::CountTokenStreamBits(
-             section, *code, &measured).ok() ||
+             section, code, &measured).ok() ||
           measured != writer.bits_written() ||
-          (code->mode == gjxl::EntropyCodingMode::kAns && section.empty() &&
-           measured != 32)) {
+          measured != cost.section_token_bits[section_index] ||
+          (code.mode == gjxl::EntropyCodingMode::kAns && section.empty() &&
+           measured != 32) ||
+          retained_total > std::numeric_limits<uint64_t>::max() - measured) {
         std::cerr << "Exact token bit count differs from serialization\n";
         return false;
       }
+      retained_total += measured;
+    }
+    if (retained_total != cost.token_bits) {
+      std::cerr << "Retained section token bits differ from total cost\n";
+      return false;
     }
   }
 
@@ -971,6 +1134,7 @@ int main() {
       !CheckAnsRoundTripContract() ||
       !CheckAnsAdaptiveModelSelection() ||
       !CheckAnsSmallHistograms() ||
+      !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {
     return EXIT_FAILURE;
   }
