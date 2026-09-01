@@ -468,6 +468,21 @@ class QualityCalibrationTest(unittest.TestCase):
                 maximum_evaluations=8,
             )
 
+    def test_distance_search_accepts_a_quantized_policy_transition(self) -> None:
+        selected, _ = comparison.calibrate_distance(
+            1.413,
+            lambda distance: {
+                "butteraugli": 1.401 if distance < 0.999 else 1.446
+            },
+            minimum_distance=0.1,
+            maximum_distance=2.0,
+            initial_distance=1.0,
+            tolerance=0.015,
+            maximum_evaluations=12,
+        )
+        self.assertEqual(selected["butteraugli"], 1.401)
+        self.assertLessEqual(selected["absolute_error"], 0.015)
+
     def test_nominal_targets_are_bound_to_the_corpus(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gjxl-quality-test-") as temporary:
             root = Path(temporary)

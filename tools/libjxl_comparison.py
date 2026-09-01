@@ -1798,7 +1798,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     calibrate.add_argument("--minimum-distance", type=float, default=0.1)
     calibrate.add_argument("--maximum-distance", type=float, default=2.0)
     calibrate.add_argument("--initial-distance", type=float, default=1.0)
-    calibrate.add_argument("--tolerance", type=float, default=0.01)
+    calibrate.add_argument("--tolerance", type=float, default=0.015)
     calibrate.add_argument("--maximum-evaluations", type=positive_int, default=12)
     calibrate.set_defaults(function=calibrate_quality)
 

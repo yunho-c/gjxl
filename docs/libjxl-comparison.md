@@ -354,7 +354,9 @@ python3 tools/libjxl_comparison.py run \
     logs/libjxl-calibration/<calibration-run>/calibration.json
 ```
 
-The default match tolerance is an absolute Butteraugli difference of 0.01.
+The default match tolerance is an absolute Butteraugli difference of 0.015.
+This accommodates discrete quantization-policy transitions while keeping the
+maximum score mismatch close to one percent at the Phase 1 quality targets.
 Calibration starts at distance 1.0, verifies the target against the relevant
 0.1 or 2.0 bound, and uses at most 12 evaluations per input. Every search
 evaluation, command, raw encoder record, score, and hash remains in the
