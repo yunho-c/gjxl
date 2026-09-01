@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import shlex
 import shutil
 import statistics
 import subprocess
@@ -67,6 +68,24 @@ def write_json_atomic(path: Path, value: Any) -> None:
     ) as output:
         json.dump(value, output, indent=2, sort_keys=True)
         output.write("\n")
+        temporary = Path(output.name)
+    try:
+        temporary.replace(path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def write_text_atomic(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=path.name + ".tmp-",
+        delete=False,
+    ) as output:
+        output.write(value)
         temporary = Path(output.name)
     try:
         temporary.replace(path)
@@ -1954,6 +1973,289 @@ def run_comparison(args: argparse.Namespace) -> None:
     print(directory)
 
 
+def _load_result_directory(path: Path) -> tuple[Path, dict[str, Any], dict[str, Any]]:
+    root = path.resolve()
+    manifest_path = root / "manifest.json"
+    summary_path = root / "summary.json"
+    if not root.is_dir() or not manifest_path.is_file() or not summary_path.is_file():
+        raise ComparisonError(f"Comparison result is incomplete: {root}")
+    manifest = load_json(manifest_path)
+    summary = load_json(summary_path)
+    if (
+        manifest.get("schema_version") != RESULT_SCHEMA_VERSION
+        or summary.get("schema_version") != RESULT_SCHEMA_VERSION
+    ):
+        raise ComparisonError(f"Unexpected comparison result schema: {root}")
+    return root, manifest, summary
+
+
+def _verify_result_files(
+    root: Path, manifest: dict[str, Any], summary: dict[str, Any]
+) -> int:
+    checked = 0
+    for process in manifest.get("processes", []):
+        if process.get("exit_code") != 0:
+            raise ComparisonError(
+                f"Comparison result contains a failed process: {root}"
+            )
+    for validation in manifest.get("validations", []):
+        for field, hash_field in (
+            ("codestream", "codestream_sha256"),
+            ("decoded", "decoded_sha256"),
+        ):
+            path = root / validation[field]
+            if not path.is_file() or sha256_file(path) != validation[hash_field]:
+                raise ComparisonError(f"Validation artifact hash mismatch: {path}")
+            checked += 1
+    for profile in manifest.get("profiles", []):
+        for field, hash_field in (
+            ("profile", "profile_sha256"),
+            ("symbols", "symbols_sha256"),
+        ):
+            path = root / profile[field]
+            if not path.is_file() or sha256_file(path) != profile[hash_field]:
+                raise ComparisonError(f"Profile artifact hash mismatch: {path}")
+            checked += 1
+    for row in summary.get("profile_rows", []):
+        path = root / row["analysis"]
+        if not path.is_file() or sha256_file(path) != row["analysis_sha256"]:
+            raise ComparisonError(f"Profile analysis hash mismatch: {path}")
+        checked += 1
+    return checked
+
+
+def bundle_phase1(args: argparse.Namespace) -> None:
+    nominal_root, nominal_manifest, nominal_summary = _load_result_directory(
+        args.nominal_result
+    )
+    matched_root, matched_manifest, matched_summary = _load_result_directory(
+        args.matched_result
+    )
+    profile_root, profile_manifest, profile_summary = _load_result_directory(
+        args.profile_result
+    )
+    calibration_root = args.calibration_result.resolve()
+    calibration_path = calibration_root / "calibration.json"
+    calibration_manifest_path = calibration_root / "manifest.json"
+    if not calibration_path.is_file() or not calibration_manifest_path.is_file():
+        raise ComparisonError(
+            f"Calibration result is incomplete: {calibration_root}"
+        )
+    calibration = load_json(calibration_path)
+    calibration_manifest = load_json(calibration_manifest_path)
+    if (
+        calibration.get("schema_version") != CALIBRATION_SCHEMA_VERSION
+        or calibration.get("kind") != "libjxl-butteraugli-calibration"
+    ):
+        raise ComparisonError("Unexpected Phase 1 calibration schema")
+
+    results = (
+        ("nominal", nominal_root, nominal_manifest, nominal_summary),
+        ("matched", matched_root, matched_manifest, matched_summary),
+        ("profiles", profile_root, profile_manifest, profile_summary),
+    )
+    corpus_hashes = {
+        manifest.get("corpus_manifest_sha256")
+        for _, _, manifest, _ in results
+    }
+    corpus_hashes.add(calibration.get("corpus_manifest_sha256"))
+    if len(corpus_hashes) != 1 or None in corpus_hashes:
+        raise ComparisonError("Phase 1 artifacts do not share one corpus manifest")
+    revisions = {
+        manifest.get("libjxl_revision") for _, _, manifest, _ in results
+    }
+    revisions.add(calibration.get("libjxl_revision"))
+    if revisions != {PINNED_LIBJXL_REVISION}:
+        raise ComparisonError("Phase 1 artifacts do not share pinned libjxl")
+    nominal_quality_view = nominal_manifest.get("parameters", {}).get(
+        "quality_view", "nominal-distance"
+    )
+    if (
+        nominal_quality_view != "nominal-distance"
+        or "quality_calibration" in nominal_manifest
+    ):
+        raise ComparisonError("Nominal result is not a nominal-distance run")
+    if matched_manifest.get("parameters", {}).get("quality_view") != "matched":
+        raise ComparisonError("Matched result is not a matched-quality run")
+    if profile_manifest.get("parameters", {}).get("quality_view") != "matched":
+        raise ComparisonError("Profile result is not matched quality")
+    if len(nominal_manifest.get("inputs", [])) != 38:
+        raise ComparisonError("Nominal result does not cover all 38 inputs")
+    if len(matched_manifest.get("inputs", [])) != 38:
+        raise ComparisonError("Matched result does not cover all 38 inputs")
+    if len(calibration.get("inputs", [])) != 38:
+        raise ComparisonError("Calibration does not cover all 38 inputs")
+
+    matches = matched_manifest.get("quality_matches", [])
+    if len(matches) != 76 or any(not row.get("within_tolerance") for row in matches):
+        raise ComparisonError("Matched result does not contain 76 accepted matches")
+    profile_rows = profile_summary.get("profile_rows", [])
+    if len(profile_rows) != 20 or len(profile_manifest.get("profiles", [])) != 20:
+        raise ComparisonError("Profile result does not contain 20 captures")
+    expected_categories = {
+        "photographic-4k",
+        "photographic-1080p",
+        "kodak-continuity",
+        "padded-stress-1080p",
+        "padded-stress-4k",
+    }
+    if {row.get("category") for row in profile_rows} != expected_categories:
+        raise ComparisonError("Profile result does not cover every workload group")
+    if {row.get("configuration") for row in profile_rows} != {
+        "serial",
+        "production",
+    } or {row.get("encoder") for row in profile_rows} != {"gjxl", "libjxl"}:
+        raise ComparisonError("Profile result does not cover both policies and encoders")
+
+    stage_names = {
+        "coefficient_and_token_preparation",
+        "entropy_model_construction",
+        "token_and_model_emission",
+        "framing_and_assembly",
+        "other_encoder_and_runtime",
+        "unresolved_or_missing_stack",
+    }
+    minimum_resolution = 100.0
+    for row in profile_rows:
+        stages = row.get("neutral_stages", [])
+        if {stage.get("stage") for stage in stages} != stage_names:
+            raise ComparisonError("Profile row has an incomplete neutral-stage map")
+        if sum(stage["cpu_delta_us"] for stage in stages) != row["sampled_cpu_us"]:
+            raise ComparisonError("Profile neutral stages are not mutually exhaustive")
+        minimum_resolution = min(
+            minimum_resolution, row["resolved_leaf_cpu_percent"]
+        )
+    required_resolution = profile_manifest.get("parameters", {}).get(
+        "minimum_symbol_resolution_percent"
+    )
+    if required_resolution is None or minimum_resolution < required_resolution:
+        raise ComparisonError("Profile result fails its symbol-resolution gate")
+
+    checked_files = sum(
+        _verify_result_files(root, manifest, summary)
+        for _, root, manifest, summary in results
+    )
+    if any(
+        process.get("exit_code") != 0
+        for process in calibration_manifest.get("processes", [])
+    ):
+        raise ComparisonError("Calibration contains a failed process")
+    for evaluation in calibration_manifest.get("evaluations", []):
+        if not evaluation.get("retained"):
+            continue
+        for field, hash_field in (
+            ("codestream", "codestream_sha256"),
+            ("decoded", "decoded_sha256"),
+        ):
+            path = calibration_root / evaluation[field]
+            if not path.is_file() or sha256_file(path) != evaluation[hash_field]:
+                raise ComparisonError(f"Calibration artifact hash mismatch: {path}")
+            checked_files += 1
+
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    artifact_sources = {
+        "nominal": nominal_root,
+        "calibration": calibration_root,
+        "matched": matched_root,
+        "profiles": profile_root,
+    }
+    for name, source in artifact_sources.items():
+        (output / name).symlink_to(
+            os.path.relpath(source, output), target_is_directory=True
+        )
+
+    neutral = {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "timing_semantics": "sampled-thread-cpu-attribution-not-stage-wall-time",
+        "source": str(profile_root / "summary.json"),
+        "source_sha256": sha256_file(profile_root / "summary.json"),
+        "parameters": {
+            key: profile_manifest["parameters"][key]
+            for key in (
+                "samply_rate_hz",
+                "profile_samples",
+                "profile_encode_count",
+                "minimum_symbol_resolution_percent",
+            )
+        },
+        "profile_rows": profile_rows,
+    }
+    write_json_atomic(output / "neutral-comparison.json", neutral)
+
+    artifact_index = {}
+    for name, source in artifact_sources.items():
+        files = {}
+        for filename in ("manifest.json", "summary.json", "calibration.json"):
+            path = source / filename
+            if path.is_file():
+                files[filename] = sha256_file(path)
+        artifact_index[name] = {
+            "path": str(source),
+            "link": name,
+            "files": files,
+        }
+    index = {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "kind": "gjxl-libjxl-phase1-bundle",
+        "created_utc": dt.datetime.now(dt.UTC).isoformat(),
+        "corpus_manifest_sha256": corpus_hashes.pop(),
+        "libjxl_revision": PINNED_LIBJXL_REVISION,
+        "artifacts": artifact_index,
+        "verification": {
+            "rehash_count": checked_files,
+            "matched_quality_records": len(matches),
+            "profile_count": len(profile_rows),
+            "minimum_weighted_symbol_resolution_percent": minimum_resolution,
+            "classifier": "ordered-mutually-exclusive-neutral-stages",
+            "unprofiled_timing_source": "matched/summary.json",
+            "sampled_attribution_source": "profiles/summary.json",
+        },
+        "neutral_comparison": {
+            "path": "neutral-comparison.json",
+            "sha256": sha256_file(output / "neutral-comparison.json"),
+        },
+    }
+    write_json_atomic(output / "phase1-index.json", index)
+
+    reproduce = shlex.join(str(value) for value in profile_manifest.get("argv", []))
+    readme = f"""# GJXL/libjxl Phase 1 comparison artifact
+
+This directory indexes the retained no-libjxl-source-change Phase 1 pilot.
+The linked directories are never-overwritten source artifacts; their recorded
+manifests, outputs, profiles, sidecars, and analyses were rehashed while this
+bundle was created.
+
+## Sources of record
+
+- `nominal/`: full 38-input nominal-distance serial and production timing.
+- `calibration/`: per-input matched-quality search and selected outputs.
+- `matched/`: full 38-input matched-quality serial and production timing.
+- `profiles/`: representative five-group serial and production Samply capture.
+- `neutral-comparison.json`: machine-readable mutually exclusive stage table.
+- `phase1-index.json`: paths, hashes, and completion evidence.
+
+## Interpretation
+
+Unprofiled complete-encode timing comes from `matched/summary.json`. Sampled
+stage values come from `profiles/summary.json` and are aggregate thread CPU,
+not stage wall time. Host load was high, so absolute latency remains diagnostic.
+Photographs, Kodak continuity images, and padded stress inputs remain separate.
+
+The pilot supports prioritizing GJXL entropy-model construction. It does not
+support an exact claim about libjxl stage wall-clock latency; direct libjxl
+instrumentation remains optional for that future question.
+
+## Profile reproduction
+
+```sh
+{reproduce}
+```
+"""
+    write_text_atomic(output / "README.md", readme)
+    print(output)
+
+
 def positive_int(value: str) -> int:
     parsed = int(value)
     if parsed <= 0:
@@ -2034,6 +2336,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     calibrate.add_argument("--maximum-relative-error", type=float, default=0.025)
     calibrate.add_argument("--maximum-evaluations", type=positive_int, default=12)
     calibrate.set_defaults(function=calibrate_quality)
+
+    bundle = subparsers.add_parser("bundle-phase1")
+    bundle.add_argument("--nominal-result", type=Path, required=True)
+    bundle.add_argument("--calibration-result", type=Path, required=True)
+    bundle.add_argument("--matched-result", type=Path, required=True)
+    bundle.add_argument("--profile-result", type=Path, required=True)
+    bundle.add_argument("--output", type=Path, required=True)
+    bundle.set_defaults(function=bundle_phase1)
 
     run = subparsers.add_parser("run")
     run.add_argument("--repo", type=Path, default=repo_default)

@@ -1,9 +1,9 @@
 # GJXL/libjxl codestream performance comparison plan
 
-Status: Phase 1 is in progress. The corpus, comparison tooling, nominal-distance
-and matched-quality serial/production timing, and independent output validation
-are complete as of 2026-09-01. Samply CPU attribution remains before the Phase 1
-exit criteria are satisfied.
+Status: Phase 1 complete as of 2026-09-01. The corpus, comparison tooling,
+nominal-distance and matched-quality serial/production timing, independent
+output validation, and representative Samply CPU attribution all satisfy the
+pilot exit criteria. Direct libjxl stage instrumentation is deferred.
 
 ## Purpose
 
@@ -218,8 +218,8 @@ their absolute timings for retained claims.
 | Run the nominal-distance serial and production pilot | Complete, diagnostic | All 38 inputs ran at requested distance 1.0 and libjxl effort 7; host load makes absolute production timing unsuitable for a publication-grade claim |
 | Validate outputs and retained artifacts | Complete | 760 subprocesses succeeded; every output decoded and received an independent Butteraugli score; retained codestream and decoded-file hashes were rechecked |
 | Run the matched-quality view | Complete, diagnostic | All 38 inputs were calibrated and rerun under both thread policies; high host load and a battery-to-AC transition limit absolute-time claims |
-| Capture neutral-stage sampled CPU attribution | Pending | Capture serial and production Samply profiles, retain symbol sidecars, and pass the 95% serializer-CPU resolution gate |
-| Decide whether direct libjxl stage timing is necessary | Provisionally deferred | The nominal pilot already identifies GJXL entropy optimization as the leading target; revisit after matched-quality timing and sampled attribution show whether profiler uncertainty could change the conclusion |
+| Capture neutral-stage sampled CPU attribution | Complete | 20 profiles cover both encoders, both policies, and every reported workload group; all sidecars are retained and weighted symbol resolution is 99.61-99.83% |
+| Decide whether direct libjxl stage timing is necessary | Deferred | Sampled serializer CPU differs by at least 19.7x in every representative group, so profiler uncertainty cannot change the optimization priority; instrumentation remains necessary for an exact wall-time multiplier |
 
 The completed run used GJXL's factored DCT implementation and the fully
 resident Metal public-workflow path. "Fully resident" describes the Metal AQ
@@ -259,7 +259,11 @@ are deliberately separated:
 - `tools/samply_neutral_stages.py` consumes presymbolicated Samply captures,
   applies an ordered mutually exclusive neutral-stage mapping, rejects weighted
   leaf-symbol resolution below 95%, and labels every result as sampled thread
-  CPU rather than wall time; and
+  CPU rather than wall time;
+- `tools/libjxl_comparison.py bundle-phase1` verifies the corpus/revision
+  bindings, exit counts, quality gates, stage coverage, symbol resolution, and
+  all recorded output/profile hashes before emitting one indexed Phase 1
+  artifact; and
 - `gjxl_encoding_benchmark --serializer-workers` supplies the internal
   diagnostic worker cap, while `--codestream-output` writes the final measured
   in-memory result after the timed samples for independent validation. Raw
@@ -452,8 +456,9 @@ relative to aggregate libjxl bytes.
 
 This nominal-distance result is therefore policy sensitivity, not the primary
 matched-quality encoder comparison. GJXL produced the lower mean Butteraugli
-score in every category, so the matched-quality calibration remains required
-before attributing the complete speed or size gap to implementation alone.
+score in every category, so the matched-quality calibration reported below is
+required before attributing the complete speed or size gap to implementation
+alone.
 
 The run completed 456 benchmark processes plus 304 independent decode and
 Butteraugli commands: all 760 subprocesses exited successfully. It retained
@@ -554,8 +559,68 @@ Matched quality strengthens the optimization priority rather than reversing
 it. GJXL remains about 2.0x slower on production 4K photographs and 3.1x slower
 on production 1080p photographs and Kodak. Its codestream phase still consumes
 46.8% of 4K and 62.5-67.5% of 1080p/Kodak complete time. Direct libjxl stage
-instrumentation remains deferred until the sampled CPU attribution shows
-whether uncertainty in the neutral-stage split could change that conclusion.
+instrumentation was therefore deferred pending the sampled CPU attribution
+below.
+
+### Sampled CPU attribution: 2026-09-01
+
+The source-of-record diagnostic capture is retained at
+`logs/libjxl-comparison/20260901T232209.162595Z-cefe85f9bc20`. It profiles one
+representative from each separately reported group under both serial and
+production policies, for 20 captures total. Each capture contains one untimed
+validation encode plus 20 repeated encodes sampled at 1 kHz. The table reports
+sampled thread CPU per encode; it is not stage wall time.
+
+`Serializer CPU` is the mutually exclusive union of coefficient/token
+preparation, entropy-model construction, token/model emission, and framing and
+assembly. `Model CPU` is entropy-model construction as a percentage of all
+sampled encoder CPU, including frontend and runtime work. The ratio compares
+serializer CPU, not complete-encoder latency.
+
+| Configuration | Input group | GJXL serializer CPU ms/encode | libjxl serializer CPU ms/encode | GJXL/libjxl serializer CPU | GJXL model CPU | libjxl model CPU |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Serial | 4K photograph | 1871.82 | 94.98 | 19.71x | 77.01% | 1.09% |
+| Serial | 1080p photograph | 1074.79 | 28.05 | 38.32x | 88.35% | 1.75% |
+| Serial | Kodak continuity | 286.18 | 6.94 | 41.24x | 91.61% | 3.00% |
+| Serial | Padded 1080p stress | 1323.39 | 49.30 | 26.84x | 88.73% | 2.69% |
+| Serial | Padded 4K stress | 3903.45 | 197.61 | 19.75x | 85.61% | 2.42% |
+| Production | 4K photograph | 1926.38 | 77.50 | 24.86x | 78.48% | 0.94% |
+| Production | 1080p photograph | 1111.60 | 22.96 | 48.41x | 89.30% | 1.55% |
+| Production | Kodak continuity | 282.29 | 3.47 | 81.31x | 93.67% | 1.93% |
+| Production | Padded 1080p stress | 1373.98 | 45.39 | 30.27x | 89.62% | 2.40% |
+| Production | Padded 4K stress | 4100.87 | 186.28 | 22.01x | 86.05% | 2.09% |
+
+The corresponding GJXL/libjxl serializer costs in sampled CPU nanoseconds per
+source pixel range from 225.67/11.45 for the serial 4K photograph to
+727.78/17.65 for serial Kodak. All normalized per-encode and per-source-pixel
+values are retained per stage in `summary.json`. A common native token count is
+not available across the two encoders, so the report does not invent a
+nanoseconds-per-token normalization.
+
+Every positive sample is assigned exactly once by the ordered classifier.
+Weighted leaf-symbol resolution ranges from 99.6107% to 99.8342%, comfortably
+above the 95% gate, and no capture assigns CPU to
+`unresolved_or_missing_stack`. `other_encoder_and_runtime` remains large for
+libjxl (89.5-97.0%) because its CPU frontend—particularly AC-strategy search,
+DCT, quantization, and filtering—is intentionally outside the final serializer
+union. `EstimateEntropy` under AC-strategy search is therefore not mislabeled
+as final entropy-model construction.
+
+The artifact contains 20 compressed captures, 20 presymbolication sidecars,
+20 JSON analyses, and 20 Markdown analyses. All 120 subprocesses and 10 fresh
+quality matches succeeded. An independent audit rehashed the 20 captures, 20
+sidecars, 20 analysis files, 20 codestreams, and 20 decoded files with zero
+mismatches, and recomputed every stage sum and normalization with zero failures.
+The run hashes GJXL, libjxl, `djxl`, Butteraugli, Samply 0.13.1, and the analyzer.
+
+Host load rose from 29.83/26.43/21.80 to 26.49/26.96/24.07. That does not make
+the profiler suitable for latency claims, but sampled thread-CPU attribution
+is used only to identify the responsible operation class. The consistent
+19.7-81.3x sampled serializer-CPU gap and GJXL's 77.0-93.7% sampled-CPU share
+in entropy-model construction are decisive for prioritization: optimize GJXL's
+entropy-model construction before modifying libjxl for direct stage timing.
+Direct libjxl instrumentation remains optional if a future claim requires an
+exact parallel stage wall-time ratio.
 
 ### 1. Add a comparison driver — complete
 
@@ -599,7 +664,7 @@ The 2026-09-01 nominal and matched-quality pilots completed this step. Their raw
 distributions are retained, but the busy-host caveats above limit the absolute
 production timings to diagnostic use.
 
-### 3. Capture sampled CPU attribution — pending
+### 3. Capture sampled CPU attribution — complete
 
 Capture both encoders directly with Samply at 1 kHz. Keep the symbol sidecar
 beside every capture. Use enough repeated encodes to accumulate a useful sample
@@ -620,7 +685,7 @@ parallel capture to understand distribution across workers, not to infer stage
 wall latency from wait frames. Sampling results are attribution evidence and
 must remain separate from the unprofiled latency table.
 
-### 4. Normalize and report — partial
+### 4. Normalize and report — complete for Phase 1
 
 For every stage, report the native time plus:
 
@@ -639,10 +704,12 @@ The nominal and matched-quality reports currently include absolute
 complete-encode time, relative time, GJXL codestream share, encoded-size delta,
 and decoded Butteraugli. The machine-readable raw and aggregate artifacts also
 retain milliseconds per megapixel, CPU nanoseconds per pixel, bits per pixel,
-and milliseconds per encoded megabyte. Neutral-stage CPU normalizations remain
-blocked on the Samply captures.
+and milliseconds per encoded megabyte. The sampled-attribution report adds CPU
+milliseconds per encode, CPU nanoseconds per source pixel, and percentage of
+sampled encoder CPU for every neutral stage. Nanoseconds per token are omitted
+because the encoders do not expose a reliable common native token count.
 
-### 5. Pilot exit criteria — partially satisfied
+### 5. Pilot exit criteria — satisfied
 
 The no-touch pilot is complete when:
 
@@ -659,15 +726,15 @@ The no-touch pilot is complete when:
 The pilot may guide optimization priority. It is not sufficient for an exact
 claim such as "GJXL's entropy stage is N times slower in wall-clock latency."
 
-The 2026-09-01 run satisfies the canonical-input, independent decode and
-quality, binary and raw-artifact, category-separation, and thread-policy parts
-of these criteria. It did not request Samply, so sampled CPU attribution,
-symbol sidecars, and the 95% classifier-resolution gate remain open. Its host
-load also requires the production absolute-time caveat documented above. The
-matched-quality view is additionally required by the primary-comparison
-contract, even though it is not itself one of the mechanical exit bullets. That
-view is now complete; only the Samply, symbol-sidecar, and classifier-resolution
-requirements remain open.
+The 2026-09-01 nominal, matched-quality, and Samply runs collectively satisfy
+all of these criteria. The full timing artifacts retain identical canonical
+inputs, independent output decodes and scores, raw schemas, binary hashes, and
+separate photographic/stress and serial/production results. The diagnostic
+profile artifact retains every capture and symbol sidecar, uses a mutually
+exclusive classifier, exceeds 99.61% weighted symbol resolution, and labels
+all stage values as sampled thread CPU rather than wall time. The high-load
+caveat still prevents publication-grade absolute latency claims; it does not
+leave a Phase 1 exit criterion open.
 
 ## Phase 2: optional libjxl stage instrumentation
 
@@ -779,6 +846,29 @@ their perturbation is material.
 
 ## Result artifact
 
+The completed Phase 1 bundle is retained at
+`logs/libjxl-phase1/20260901`. `tools/libjxl_comparison.py bundle-phase1`
+validated and rehashed the four never-overwritten source artifacts, then wrote
+`README.md`, `phase1-index.json`, and `neutral-comparison.json` beside relative
+links to the nominal, calibration, matched-quality, and Samply directories. The
+index records 784 successful rehashes, all 76 matched-quality records, all 20
+profiles, and the 99.6107% minimum weighted symbol resolution.
+
+Recreate the bundle with:
+
+```sh
+python3 tools/libjxl_comparison.py bundle-phase1 \
+  --nominal-result \
+    logs/libjxl-comparison/20260901T212206.521314Z-94b1716cab17 \
+  --calibration-result \
+    logs/libjxl-calibration/20260901T223312.215074Z-80e7c9e9d90d \
+  --matched-result \
+    logs/libjxl-comparison/20260901T223737.519919Z-80e7c9e9d90d \
+  --profile-result \
+    logs/libjxl-comparison/20260901T232209.162595Z-cefe85f9bc20 \
+  --output logs/libjxl-phase1/20260901
+```
+
 The final artifact directory should contain:
 
 - `README.md` with scope, conclusions, caveats, and reproduction commands;
@@ -827,9 +917,13 @@ time and normalized cost, together with output size and actual decoded quality.
    distance serial and production pilot across all 38 inputs. Retain the
    directional result, but rerun production timing on a quieter host before a
    publication-grade absolute-time claim.
-6. Calibrate and run the matched-quality view.
-7. **Preliminary decision: defer.** The current gap is sufficient to prioritize
-   GJXL entropy optimization. Reconsider direct libjxl stage timing after the
-   matched-quality and sampled-attribution views.
-8. If required, implement and validate the isolated opt-in libjxl profiler.
-9. Capture the final unprofiled paired runs and publish the retained artifact.
+6. **Complete.** Calibrate and run the matched-quality view across all 38
+   inputs under both policies.
+7. **Complete: defer direct timing.** The matched-quality and sampled-
+   attribution views consistently prioritize GJXL entropy-model construction;
+   profiler uncertainty cannot reverse a 19.7x minimum sampled-CPU gap.
+8. **Not required for Phase 1.** Implement and validate the isolated opt-in
+   libjxl profiler only if a future claim needs exact stage wall time.
+9. **Complete with host-load caveat.** Retain the full unprofiled runs, sampled
+   profiles, symbol sidecars, neutral table, and indexed Phase 1 bundle. Rerun
+   absolute production timing on a quieter host before publication.
