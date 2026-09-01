@@ -88,6 +88,8 @@ enum class EntropyCodingMode : uint8_t {
 struct AnsHistogram {
   std::vector<uint16_t> frequencies;
   std::vector<std::vector<uint16_t>> reverse_maps;
+  /// Exact ceil(2^44 / frequency) encoder divisors; zero for absent symbols.
+  std::vector<uint64_t> reciprocal_frequencies;
 
   /// Zero selects the flat representation; 1 through 12 encode shift + 1.
   /// Small one- and two-symbol populations ignore both representation fields.

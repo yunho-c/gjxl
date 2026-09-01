@@ -11,6 +11,7 @@
 #include <span>
 #include <vector>
 
+#include "codestream/ans_internal.h"
 #include "codestream/entropy.h"
 #include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
@@ -557,6 +558,80 @@ bool CheckInitialContextPreclustering() {
   return true;
 }
 
+bool CheckAnsFrequencyReciprocalDivision() {
+  if (gjxl::codestream_internal::AnsFrequencyReciprocal(0) != 0) {
+    std::cerr << "Absent ANS symbol has a nonzero reciprocal\n";
+    return false;
+  }
+  uint32_t random = 0x474A584Cu;
+  for (uint32_t frequency = 1; frequency <= gjxl::kAnsTableSize;
+       ++frequency) {
+    const uint64_t reciprocal =
+      gjxl::codestream_internal::AnsFrequencyReciprocal(
+        static_cast<uint16_t>(frequency));
+    const uint64_t expected_reciprocal =
+      ((uint64_t{1} << gjxl::codestream_internal::kAnsReciprocalPrecision) -
+       1) /
+        frequency +
+      1;
+    if (reciprocal != expected_reciprocal) {
+      std::cerr << "ANS reciprocal differs at frequency "
+                << frequency << '\n';
+      return false;
+    }
+    const uint32_t maximum_state = static_cast<uint32_t>(
+      std::min<uint64_t>(
+        std::numeric_limits<uint32_t>::max(),
+        (static_cast<uint64_t>(frequency) << 20) - 1));
+    const auto verify = [&](uint32_t state) {
+      if (state != 0 && reciprocal >
+          std::numeric_limits<uint64_t>::max() / state) {
+        std::cerr << "ANS reciprocal product overflows at frequency "
+                  << frequency << " state " << state << '\n';
+        return false;
+      }
+      const uint32_t quotient =
+        gjxl::codestream_internal::DivideAnsStateByReciprocal(
+          state, reciprocal);
+      if (quotient != state / frequency) {
+        std::cerr << "ANS reciprocal quotient differs at frequency "
+                  << frequency << " state " << state << '\n';
+        return false;
+      }
+      return true;
+    };
+    const std::array<uint32_t, 6> boundary_states = {
+      0,
+      1,
+      std::min(frequency - 1, maximum_state),
+      std::min(frequency, maximum_state),
+      std::min(frequency + 1, maximum_state),
+      maximum_state,
+    };
+    for (uint32_t state : boundary_states) {
+      if (!verify(state)) return false;
+    }
+    const uint32_t last_multiple =
+      maximum_state - maximum_state % frequency;
+    for (int32_t offset = -8; offset <= 8; ++offset) {
+      const int64_t state = static_cast<int64_t>(last_multiple) + offset;
+      if (state >= 0 && state <= maximum_state &&
+          !verify(static_cast<uint32_t>(state))) {
+        return false;
+      }
+    }
+    for (size_t sample = 0; sample < 256; ++sample) {
+      random = random * 1664525u + 1013904223u;
+      const uint32_t state = static_cast<uint32_t>(
+        (static_cast<uint64_t>(random) *
+         (static_cast<uint64_t>(maximum_state) + 1)) >>
+        32);
+      if (!verify(state)) return false;
+    }
+  }
+  return true;
+}
+
 bool CheckAnsRoundTripContract() {
   std::array<std::vector<gjxl::EntropyToken>, 4> sections;
   for (uint32_t context = 0; context < 4; ++context) {
@@ -644,6 +719,32 @@ bool CheckAnsRoundTripContract() {
       atomic.bits_written() != 3 ||
       !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
     std::cerr << "Malformed ANS lookup changed its destination\n";
+    return false;
+  }
+
+  const auto rejects_reciprocals = [&](bool remove) {
+    gjxl::EntropyCode invalid = ans;
+    bool changed = false;
+    for (gjxl::AnsHistogram& histogram : invalid.ans_histograms) {
+      if (histogram.reciprocal_frequencies.empty()) continue;
+      if (remove) {
+        histogram.reciprocal_frequencies.clear();
+      } else {
+        ++histogram.reciprocal_frequencies.front();
+      }
+      changed = true;
+      break;
+    }
+    gjxl::BitWriter destination;
+    return changed && destination.WriteBits(3, 5).ok() &&
+      gjxl::WriteTokenStream(
+        sections[1], invalid, &destination).code() ==
+        gjxl::StatusCode::kInvalidArgument &&
+      destination.bits_written() == 3 &&
+      HasBytes(destination, std::array<uint8_t, 1>{5});
+  };
+  if (!rejects_reciprocals(false) || !rejects_reciprocals(true)) {
+    std::cerr << "Malformed ANS reciprocal changed its destination\n";
     return false;
   }
   return true;
@@ -866,6 +967,7 @@ int main() {
       !CheckCountedPrefixOptimization() ||
       !CheckFullWidthMultiSectionOptimization() ||
       !CheckInitialContextPreclustering() ||
+      !CheckAnsFrequencyReciprocalDivision() ||
       !CheckAnsRoundTripContract() ||
       !CheckAnsAdaptiveModelSelection() ||
       !CheckAnsSmallHistograms() ||

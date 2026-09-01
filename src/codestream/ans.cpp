@@ -514,20 +514,26 @@ Status InitializeAliasTable(
   return Status::Ok();
 }
 
-Status BuildReverseMaps(
+Status BuildAnsEncoderTables(
   std::span<const uint16_t> frequencies,
   size_t log_alpha_size,
-  std::vector<std::vector<uint16_t>>* reverse_maps) {
+  std::vector<std::vector<uint16_t>>* reverse_maps,
+  std::vector<uint64_t>* reciprocal_frequencies) {
 
-  if (reverse_maps == nullptr) {
-    return Status::InvalidArgument("ANS reverse-map output is null");
+  if (reverse_maps == nullptr || reciprocal_frequencies == nullptr) {
+    return Status::InvalidArgument("ANS encoder-table output is null");
   }
-  reverse_maps->clear();
-  reverse_maps->resize(frequencies.size());
+  std::vector<std::vector<uint16_t>> candidate_reverse_maps(
+    frequencies.size());
+  std::vector<uint64_t> candidate_reciprocals(frequencies.size());
   for (size_t symbol = 0; symbol < frequencies.size(); ++symbol) {
-    (*reverse_maps)[symbol].resize(frequencies[symbol]);
+    candidate_reverse_maps[symbol].resize(frequencies[symbol]);
+    candidate_reciprocals[symbol] =
+      codestream_internal::AnsFrequencyReciprocal(frequencies[symbol]);
   }
   if (frequencies.empty()) {
+    *reverse_maps = std::move(candidate_reverse_maps);
+    *reciprocal_frequencies = std::move(candidate_reciprocals);
     return Status::Ok();
   }
   std::vector<AliasEntry> table;
@@ -545,12 +551,14 @@ Status BuildReverseMaps(
     const bool right = position >= entry.cutoff;
     const size_t symbol = right ? entry.right_value : table_index;
     const size_t offset = (right ? entry.offsets1 : 0) + position;
-    if (symbol >= reverse_maps->size() ||
-        offset >= (*reverse_maps)[symbol].size()) {
+    if (symbol >= candidate_reverse_maps.size() ||
+        offset >= candidate_reverse_maps[symbol].size()) {
       return Status::Internal("ANS reverse-map construction failed");
     }
-    (*reverse_maps)[symbol][offset] = static_cast<uint16_t>(value);
+    candidate_reverse_maps[symbol][offset] = static_cast<uint16_t>(value);
   }
+  *reverse_maps = std::move(candidate_reverse_maps);
+  *reciprocal_frequencies = std::move(candidate_reciprocals);
   return Status::Ok();
 }
 
@@ -849,7 +857,9 @@ Status AdvanceAnsState(
   uint32_t* state) {
 
   if (state == nullptr || encoded.symbol >= histogram.frequencies.size() ||
-      histogram.frequencies[encoded.symbol] == 0) {
+      encoded.symbol >= histogram.reciprocal_frequencies.size() ||
+      histogram.frequencies[encoded.symbol] == 0 ||
+      histogram.reciprocal_frequencies[encoded.symbol] == 0) {
     return Status::InvalidArgument("ANS token symbol is absent");
   }
   if (encoded.extra_bit_count != 0) {
@@ -860,7 +870,12 @@ Status AdvanceAnsState(
     emit_chunk(*state & 0xFFFFu, 16);
     *state >>= 16;
   }
-  const uint32_t quotient = *state / frequency;
+  // Renormalization guarantees state < frequency * 2^20. At 44-bit
+  // reciprocal precision, the product fits uint64_t and its high bits are the
+  // exact integer quotient.
+  const uint32_t quotient =
+    codestream_internal::DivideAnsStateByReciprocal(
+      *state, histogram.reciprocal_frequencies[encoded.symbol]);
   const uint32_t remainder = *state - quotient * frequency;
   const std::vector<uint16_t>& reverse =
     histogram.reverse_maps[encoded.symbol];
@@ -1172,6 +1187,8 @@ Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
     const AnsHistogram& histogram = code.ans_histograms[cluster];
     if (histogram.frequencies.size() > alphabet_limit ||
         histogram.reverse_maps.size() != histogram.frequencies.size() ||
+        histogram.reciprocal_frequencies.size() !=
+          histogram.frequencies.size() ||
         (!histogram.frequencies.empty() &&
          histogram.frequencies.back() == 0)) {
       return Status::InvalidArgument("ANS histogram dimensions are invalid");
@@ -1185,6 +1202,10 @@ Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
       populated += frequency != 0 ? 1 : 0;
       if (histogram.reverse_maps[symbol].size() != frequency) {
         return Status::InvalidArgument("ANS reverse map is invalid");
+      }
+      if (histogram.reciprocal_frequencies[symbol] !=
+          codestream_internal::AnsFrequencyReciprocal(frequency)) {
+        return Status::InvalidArgument("ANS frequency reciprocal is invalid");
       }
       for (uint16_t value : histogram.reverse_maps[symbol]) {
         if (value >= kAnsTableSize || seen[value]) {
@@ -1526,10 +1547,11 @@ Status OptimizeAnsEntropyCode(
         minimum_token_bits += selected->extra_bits;
         candidate.uint_configs[cluster] = selected->config;
         candidate.ans_histograms[cluster] = selected->histogram;
-        if (Status status = BuildReverseMaps(
+        if (Status status = BuildAnsEncoderTables(
               candidate.ans_histograms[cluster].frequencies,
               log_alpha_size,
-              &candidate.ans_histograms[cluster].reverse_maps);
+              &candidate.ans_histograms[cluster].reverse_maps,
+              &candidate.ans_histograms[cluster].reciprocal_frequencies);
             !status.ok()) {
           return status;
         }
