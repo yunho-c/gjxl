@@ -20,7 +20,7 @@ validation required to make its result interpretable.
 
 ## Implementation status
 
-As of 2026-09-01, Milestones 1 through 5 are implemented and the Milestone 6
+As of 2026-09-02, Milestones 1 through 5 are implemented and the Milestone 6
 experiment has been run for the retained corpus described below. The result is
 a controlled bridge, a non-installed experimental workflow, and raw
 independent-process measurements:
@@ -77,6 +77,14 @@ independent-process measurements:
   and a libjxl effort sweep; and
 - every retained comparison passed exact float-pixel equality through the
   pinned decoder and stable per-backend codestream hashes across processes.
+
+A follow-up stock-libjxl comparison also found and removed a benchmark-path
+validation cost: `EncodePrecomputedVarDctFrame` recomputed full source and
+post-copy state digests for every encode even though the dedicated
+`AuditPrecomputedVarDctFrame` API and bridge tests already verify that boundary.
+The ordinary encode now validates the input and copies state without hashing
+the complete coefficient storage. The explicit audit path remains unchanged.
+The follow-up tooling and initial cross-encoder results are recorded below.
 
 The result is intentionally not a full Cartesian product of every frontend,
 target, thread count, effort, and workload. CPU-versus-Metal is controlled on
@@ -797,6 +805,87 @@ python3 tools/libjxl_tail_summary.py \
   build/libjxl-tail-results/3f178c3 \
   build/libjxl-tail-results/590f407 \
   --output build/libjxl-tail-results/summary.md
+```
+
+### Stock-libjxl end-to-end follow-up
+
+The same-frame tail comparison does not measure speed relative to stock
+libjxl: both sides share GJXL's frontend. The follow-up comparison therefore
+adds `gjxl_stock_libjxl_benchmark`, which calls the pinned ordinary public
+libjxl encoder from canonical linear-sRGB float pixels, and
+`tools/libjxl_stock_hybrid.py`, which compares that path against the complete
+fully-resident GJXL frontend plus libjxl tail.
+
+The driver calibrates stock libjxl's requested distance independently for each
+input, decodes both outputs with the pinned decoder, scores them with the
+linear-sRGB Butteraugli hint, alternates process order, and retains command,
+host, source-diff, binary-hash, raw-sample, quality, size, and codestream-hash
+evidence. It refuses to time an input whose quality cannot satisfy either the
+0.015 absolute gate or the predeclared 2.5% relative fallback.
+
+The 2026-09-02 working-tree qualification run used an Apple M4 Pro on macOS
+15.6, AC power, no reported thermal or performance warning, eight GJXL CPU
+participants and eight libjxl worker threads, frontend effort 7, libjxl effort
+7, two warmups, five samples, and three alternating independent process pairs.
+Input parsing, runner construction, decoding, Butteraugli scoring, and
+output-file I/O are outside the timed in-memory encode. `Speedup` is
+stock-libjxl wall time divided by hybrid wall time, so a value below one means
+that the hybrid is slower.
+
+| Input | Hybrid ms | Stock libjxl ms | Speedup | Butteraugli H/S | Hybrid/stock bytes | Hybrid size delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Doughnut 4672x5584 | 1586.90 [1569.58, 1691.37] | 1311.56 [1284.49, 1313.66] | 0.828 [0.759, 0.836] | 1.69528/1.68809 | 2259490/2714918 | -16.78% |
+| Kodak `kodim10` | 43.95 [43.52, 47.15] | 30.83 [30.80, 31.29] | 0.701 [0.664, 0.709] | 1.49978/1.48521 | 63890/64236 | -0.54% |
+| Bedroom noise 1920x1080 | 173.42 [160.41, 175.31] | 97.24 [96.86, 99.10] | 0.571 [0.555, 0.604] | 3.46809/3.45248 | 324575/169773 | +91.18% |
+| Bedroom noise 3840x2160 | 550.91 [549.00, 555.14] | 417.79 [416.01, 421.80] | 0.761 [0.749, 0.766] | 1.59238/1.58537 | 1051906/1187270 | -11.40% |
+
+The doughnut, Kodak, and 4K rows passed the absolute quality gate. The noisy
+1080p row used the bounded relative fallback: its absolute difference was
+0.01561 and its relative difference was 0.45%. A separate 1080p sun/forest
+input was not timed because libjxl's discrete policy transition jumped around
+the hybrid score: the closest stock score was 1.71806 versus 1.67318, a 2.68%
+relative difference that exceeded the declared fallback.
+
+Removing the redundant digests changed the doughnut libjxl-tail wall time from
+about 806 ms to 136 ms while preserving the exact `89273ada...` hybrid
+codestream hash. It changed the complete hybrid from about 2203 ms to 1587 ms,
+but did not reverse the stock comparison. In the corrected doughnut run, GJXL
+input preparation plus its fully-resident quantization pipeline still consumed
+about 1396 ms, already longer than stock libjxl's complete 1312 ms encode. The
+other corrected hybrid phase medians were:
+
+| Input | Input preparation ms | Quantization pipeline ms | libjxl tail ms |
+| --- | ---: | ---: | ---: |
+| Kodak `kodim10` | 3.59 | 32.64 | 5.24 |
+| Bedroom noise 1920x1080 | 19.10 | 111.46 | 25.99 |
+| Bedroom noise 3840x2160 | 74.45 | 386.96 | 71.60 |
+
+This initial sample does not support an end-to-end speedup claim over stock
+libjxl. It instead shows a consistent 1.31-1.75x hybrid slowdown at the tested
+effort and quality points, with strongly content-dependent compression results.
+The large Metal-versus-GJXL-CPU gains remain valid for that comparison, but do
+not imply that GJXL's current frontend is faster than libjxl's SIMD/threaded
+frontend. A clean-revision rerun over the full photographic corpus remains the
+publication-grade next step.
+
+The raw follow-up artifacts are local under
+`build/libjxl-stock-hybrid-results/66b92ce-hotpath-three-image` and
+`build/libjxl-stock-hybrid-results/66b92ce-hotpath-bedroom`. The former is
+intentionally incomplete after the rejected sun/forest calibration; its Kodak
+record is complete. The doughnut diagnostic is under
+`build/stock-hybrid-doughnut/no-digest-retained`.
+
+One multi-input command shape is:
+
+```sh
+python3 tools/libjxl_stock_hybrid.py \
+  --input NAME=/absolute/path/to/input.pfm \
+  --gjxl-benchmark build/libjxl-tail-m1-on/gjxl_encoding_benchmark \
+  --stock-benchmark build/libjxl-tail-m1-on/gjxl_stock_libjxl_benchmark \
+  --djxl /absolute/path/to/pinned/djxl \
+  --butteraugli /absolute/path/to/pinned/butteraugli_main \
+  --output build/libjxl-stock-hybrid-results/RUN-NAME \
+  --threads 8 --process-pairs 3 --warmups 2 --samples 5
 ```
 
 ### 7. Decide whether to promote the backend

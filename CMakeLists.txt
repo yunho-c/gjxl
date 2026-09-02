@@ -2668,6 +2668,32 @@ if(GJXL_BUILD_BENCHMARKS)
       gjxl_pfm_io
   )
 
+  if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
+    add_executable(
+      gjxl_stock_libjxl_benchmark
+      benchmarks/libjxl_comparison/libjxl_comparison_benchmark.cpp
+    )
+
+    target_compile_features(
+      gjxl_stock_libjxl_benchmark
+      PRIVATE cxx_std_20
+    )
+
+    target_compile_definitions(
+      gjxl_stock_libjxl_benchmark
+      PRIVATE
+        GJXL_LIBJXL_REVISION="${GJXL_LIBJXL_TAIL_BASE_REVISION}"
+        GJXL_LIBJXL_LINKED_REVISION="${GJXL_LIBJXL_TAIL_PATCH_REVISION}"
+    )
+
+    target_link_libraries(
+      gjxl_stock_libjxl_benchmark
+      PRIVATE
+        jxl
+        jxl_threads
+    )
+  endif()
+
   if(NOT Git_FOUND)
     find_package(Git QUIET)
   endif()
@@ -2728,6 +2754,20 @@ if(GJXL_BUILD_BENCHMARKS)
       encoding_benchmark_cli
       PROPERTIES LABELS "benchmark;cli;metal"
     )
+
+    if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
+      add_test(
+        NAME libjxl_stock_hybrid_tool
+        COMMAND
+          "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/libjxl_stock_hybrid_test.py"
+          --stock-benchmark $<TARGET_FILE:gjxl_stock_libjxl_benchmark>
+      )
+      set_tests_properties(
+        libjxl_stock_hybrid_tool
+        PROPERTIES LABELS "benchmark;cli;libjxl"
+      )
+    endif()
   endif()
 
   add_executable(
