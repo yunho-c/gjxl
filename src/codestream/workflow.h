@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "codestream/entropy_behavior.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
 #include "core/status.h"
@@ -69,6 +70,11 @@ struct VarDctEncodingOptions {
   /// effort. It is meaningful only for Butteraugli-target and target-size
   /// control.
   VarDctDensityMode density_mode = VarDctDensityMode::kDefault;
+  /// Controls only entropy-model and codestream search intensity. Automatic
+  /// resolves from effort and density_mode; maximum compression preserves the
+  /// historical exhaustive serializer without changing AQ or rate control.
+  VarDctCompressionMode compression_mode =
+    VarDctCompressionMode::kAutomatic;
   VarDctRateControlMode rate_control_mode =
     VarDctRateControlMode::kButteraugliTarget;
   /// Maximum normalized reconstruction error for X, Y, and B respectively.
@@ -105,6 +111,10 @@ struct VarDctEncodingSummary {
   Extent2D extent;
   size_t encoded_bytes = 0;
   VarDctDensityMode density_mode = VarDctDensityMode::kDefault;
+  VarDctCompressionMode compression_mode =
+    VarDctCompressionMode::kAutomatic;
+  VarDctEntropyBehavior entropy_behavior =
+    VarDctEntropyBehavior::kBalanced;
   VarDctRateControlMode rate_control_mode =
     VarDctRateControlMode::kButteraugliTarget;
   size_t requested_target_bytes = 0;

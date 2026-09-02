@@ -112,12 +112,13 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 10)
+        self.assertEqual(document["schema_version"], 11)
         self.assertEqual(
             document["substage_work_timing"], "aggregate-worker-time"
         )
         self.assertEqual(document["validation"], "metal-only")
         self.assertEqual(document["density"], "default")
+        self.assertEqual(document["compression"], "automatic")
         self.assertEqual(document["cpu_threads"], 0)
         self.assertFalse(document["collect_final_score"])
         self.assertEqual(document["sample_count"], 1)
@@ -233,9 +234,25 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 10)
+        self.assertEqual(document["schema_version"], 11)
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
+
+    def test_maximum_compression_is_explicit_in_raw_samples(self) -> None:
+        destination = self.directory / "maximum-compression.json"
+        result = self.run_benchmark(
+            "--maximum-compression",
+            "--validation",
+            "metal-only",
+            "--raw-samples",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["schema_version"], 11)
+        self.assertEqual(document["compression"], "maximum")
+        self.assertIn("compression=maximum", result.stdout)
 
     def test_cpu_thread_budget_is_recorded_and_enforced(self) -> None:
         destination = self.directory / "thread-budget.json"
@@ -250,7 +267,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 10)
+        self.assertEqual(document["schema_version"], 11)
         self.assertEqual(document["cpu_threads"], 2)
         self.assertIn("cpu_threads=2", result.stdout)
         for sample in document["workloads"][0]["samples"]:

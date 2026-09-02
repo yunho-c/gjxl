@@ -479,7 +479,11 @@ bool CheckEffortPolicy() {
       &bytes, &summary);
     if (!status.ok() || bytes.empty() ||
         summary.score_history.size() != test.expected_score_count ||
-        !summary.final_butteraugli_score_evaluated) {
+        !summary.final_butteraugli_score_evaluated ||
+        summary.entropy_behavior !=
+          (test.effort >= 9
+             ? gjxl::VarDctEntropyBehavior::kHighDensity
+             : gjxl::VarDctEntropyBehavior::kBalanced)) {
       std::cerr << "Effort " << test.effort << " workflow failed: "
                 << status.message() << " history="
                 << summary.score_history.size() << '\n';
@@ -511,6 +515,61 @@ bool CheckEffortPolicy() {
                 << summary.score_history.size() << '\n';
       return false;
     }
+  }
+  return true;
+}
+
+bool CheckCompressionPolicy() {
+  using gjxl::VarDctCompressionMode;
+  using gjxl::VarDctDensityMode;
+  using gjxl::VarDctEntropyBehavior;
+  using gjxl::codestream_internal::ResolveEntropyBehavior;
+
+  for (const int32_t effort : {1, 7, 8}) {
+    if (ResolveEntropyBehavior({.effort = effort}) !=
+        VarDctEntropyBehavior::kBalanced) {
+      std::cerr << "Effort " << effort
+                << " did not resolve to balanced entropy\n";
+      return false;
+    }
+  }
+  for (const int32_t effort : {9, 10}) {
+    if (ResolveEntropyBehavior({.effort = effort}) !=
+        VarDctEntropyBehavior::kHighDensity) {
+      std::cerr << "Effort " << effort
+                << " did not resolve to high-density entropy\n";
+      return false;
+    }
+  }
+  if (ResolveEntropyBehavior(
+        {.effort = 7, .density_mode = VarDctDensityMode::kHighDensity}) !=
+        VarDctEntropyBehavior::kHighDensity ||
+      ResolveEntropyBehavior(
+        {.effort = 1,
+         .compression_mode =
+           VarDctCompressionMode::kMaximumCompression}) !=
+        VarDctEntropyBehavior::kMaximumCompression) {
+    std::cerr << "Explicit entropy policy resolution failed\n";
+    return false;
+  }
+
+  ImageStorage image;
+  FillImage(&image);
+  std::vector<uint8_t> bytes;
+  gjxl::VarDctEncodingSummary summary;
+  const gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(),
+    {.compression_mode = VarDctCompressionMode::kMaximumCompression,
+     .backend = gjxl::VarDctBackendPreference::kCpu},
+    &bytes, &summary);
+  if (!status.ok() || bytes.empty() ||
+      summary.compression_mode !=
+        VarDctCompressionMode::kMaximumCompression ||
+      summary.entropy_behavior !=
+        VarDctEntropyBehavior::kMaximumCompression) {
+    std::cerr << "Maximum-compression workflow failed: "
+              << status.message() << '\n';
+    return false;
   }
   return true;
 }
@@ -648,6 +707,11 @@ bool CheckInvalidRequestsAreAtomic() {
           image.View(),
           {.butteraugli_target = 1.0f,
            .density_mode = static_cast<gjxl::VarDctDensityMode>(99)}) ||
+      !rejected_atomically(
+          image.View(),
+          {.butteraugli_target = 1.0f,
+           .compression_mode =
+             static_cast<gjxl::VarDctCompressionMode>(99)}) ||
       !rejected_atomically(
           image.View(),
           {.density_mode = gjxl::VarDctDensityMode::kHighDensity,
@@ -1064,6 +1128,7 @@ int main() {
       !CheckDeterministicWorkflow() ||
       !CheckCpuThreadBudget() ||
       !CheckEffortPolicy() ||
+      !CheckCompressionPolicy() ||
       !CheckHighDensityMode() ||
       !CheckInvalidRequestsAreAtomic() ||
       !CheckMaximumErrorControl() ||

@@ -869,13 +869,24 @@ Status AssembleCandidate(
 
 Status EncodeVarDctCodestreamImpl(
   const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
   if (output == nullptr) {
     return Status::InvalidArgument("Codestream output is null");
   }
+  switch (options.entropy_behavior) {
+    case VarDctEntropyBehavior::kBalanced:
+    case VarDctEntropyBehavior::kHighDensity:
+    case VarDctEntropyBehavior::kMaximumCompression:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "VarDCT entropy behavior is invalid");
+  }
   codestream_internal::VarDctCodestreamProfile candidate_profile;
+  candidate_profile.entropy_behavior = options.entropy_behavior;
   const ProfileClock::time_point total_begin = ProfileBegin(profile);
   const ProfileClock::time_point validation_begin = ProfileBegin(profile);
   const Status validation = ValidateSimpleCodestreamFrame(frame);
@@ -1601,7 +1612,15 @@ Status codestream_internal::PhysicalSectionSizesFromBitCounts(
 Status EncodeVarDctCodestream(
   const VarDctEncoderFrame& frame, std::vector<uint8_t>* output) {
 
-  return EncodeVarDctCodestreamImpl(frame, output, nullptr);
+  return EncodeVarDctCodestream(frame, {}, output);
+}
+
+Status EncodeVarDctCodestream(
+  const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output) {
+
+  return EncodeVarDctCodestreamImpl(frame, options, output, nullptr);
 }
 
 Status codestream_internal::EncodeVarDctCodestreamProfiled(
@@ -1609,10 +1628,19 @@ Status codestream_internal::EncodeVarDctCodestreamProfiled(
   std::vector<uint8_t>* output,
   VarDctCodestreamProfile* profile) {
 
+  return EncodeVarDctCodestreamProfiled(frame, {}, output, profile);
+}
+
+Status codestream_internal::EncodeVarDctCodestreamProfiled(
+  const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile) {
+
   if (profile == nullptr) {
     return Status::InvalidArgument("Codestream profile output is null");
   }
-  return EncodeVarDctCodestreamImpl(frame, output, profile);
+  return EncodeVarDctCodestreamImpl(frame, options, output, profile);
 }
 
 }  // namespace gjxl

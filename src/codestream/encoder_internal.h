@@ -8,6 +8,7 @@
 #include <span>
 #include <vector>
 
+#include "codestream/encoder.h"
 #include "codestream/profile_internal.h"
 #include "core/status.h"
 
@@ -53,6 +54,8 @@ struct CandidateSelectionKey {
   std::vector<size_t>* sizes);
 
 struct VarDctCodestreamProfile {
+  VarDctEntropyBehavior entropy_behavior =
+    VarDctEntropyBehavior::kBalanced;
   uint64_t validation_nanoseconds = 0;
   uint64_t dc_tokenization_nanoseconds = 0;
   uint64_t ac_tokenization_nanoseconds = 0;
@@ -99,6 +102,12 @@ struct VarDctCodestreamProfile {
 /// `profile` remain unchanged.
 [[nodiscard]] Status EncodeVarDctCodestreamProfiled(
   const VarDctEncoderFrame& frame,
+  std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile);
+
+[[nodiscard]] Status EncodeVarDctCodestreamProfiled(
+  const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
   VarDctCodestreamProfile* profile);
 

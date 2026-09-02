@@ -29,6 +29,10 @@ struct QuantizationMatrixScales {
   bool operator==(const QuantizationMatrixScales&) const = default;
 };
 
+/// Resolves the public compression request to one serializer behavior.
+[[nodiscard]] VarDctEntropyBehavior ResolveEntropyBehavior(
+  const VarDctEncodingOptions& options) noexcept;
+
 /// Computes libjxl's source-dependent X/B matrix-scale statistics over the
 /// unpadded opsin image. Failure leaves `stats` unchanged.
 [[nodiscard]] Status ComputeQuantizationMatrixScaleStats(

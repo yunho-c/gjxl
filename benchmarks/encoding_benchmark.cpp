@@ -135,6 +135,8 @@ struct CommandLineOptions {
       gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   gjxl::VarDctDensityMode density_mode =
       gjxl::VarDctDensityMode::kDefault;
+  gjxl::VarDctCompressionMode compression_mode =
+      gjxl::VarDctCompressionMode::kAutomatic;
   bool collect_final_butteraugli_score = false;
   float butteraugli_target = kDefaultButteraugliTarget;
   size_t cpu_thread_count = 0;
@@ -562,6 +564,7 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                    "maximum-throughput] "
                    "[--density default|high] "
+                   "[--maximum-compression] "
                    "[--validation cpu-metal|metal-only] "
                    "[--collect-final-score] "
                    "[--metallib PATH] [--raw-samples PATH] "
@@ -573,6 +576,11 @@ ParseGpuProfilingMode(std::string_view text) {
     }
     if (argument == "--collect-final-score") {
       options.collect_final_butteraugli_score = true;
+      continue;
+    }
+    if (argument == "--maximum-compression") {
+      options.compression_mode =
+        gjxl::VarDctCompressionMode::kMaximumCompression;
       continue;
     }
     if (index + 1 >= argc) {
@@ -1112,7 +1120,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 10,\n"
+           << "  \"schema_version\": 11,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
@@ -1129,6 +1137,12 @@ void WriteRawWorkflowSamples(
            << (options.density_mode == gjxl::VarDctDensityMode::kHighDensity
                  ? "high"
                  : "default")
+           << "\",\n"
+           << "  \"compression\": \""
+           << (options.compression_mode ==
+                     gjxl::VarDctCompressionMode::kMaximumCompression
+                 ? "maximum"
+                 : "automatic")
            << "\",\n"
            << "  \"distance\": " << std::setprecision(9)
            << options.butteraugli_target << ",\n"
@@ -1564,6 +1578,7 @@ void RunPublicWorkflowOnlyWorkload(
     float butteraugli_target, size_t cpu_thread_count,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::VarDctDensityMode density_mode,
+    gjxl::VarDctCompressionMode compression_mode,
     bool collect_final_butteraugli_score,
     std::string_view input_path, bool metal_only, ValidationMode validation,
     gjxl::GpuBackend& gpu,
@@ -1590,6 +1605,7 @@ void RunPublicWorkflowOnlyWorkload(
             original.ConstView(),
             {.butteraugli_target = butteraugli_target,
              .density_mode = density_mode,
+             .compression_mode = compression_mode,
              .backend = backend,
              .cpu_thread_count = cpu_thread_count,
              .metal_aq_mode = mode,
@@ -1792,6 +1808,11 @@ void RunPublicWorkflowOnlyWorkload(
             << (density_mode == gjxl::VarDctDensityMode::kHighDensity
                   ? "high"
                   : "default")
+            << " compression="
+            << (compression_mode ==
+                      gjxl::VarDctCompressionMode::kMaximumCompression
+                  ? "maximum"
+                  : "automatic")
             << " cpu_threads="
             << (cpu_thread_count == 0
                   ? std::string("auto")
@@ -2877,6 +2898,11 @@ int main(int argc, char** argv) {
                         gjxl::VarDctDensityMode::kHighDensity
                     ? "high"
                     : "default")
+              << " compression="
+              << (options.compression_mode ==
+                        gjxl::VarDctCompressionMode::kMaximumCompression
+                    ? "maximum"
+                    : "automatic")
               << " cpu_threads="
               << (options.cpu_thread_count == 0
                     ? std::string("auto")
@@ -2914,6 +2940,7 @@ int main(int argc, char** argv) {
               options.butteraugli_target, options.cpu_thread_count,
               options.gpu_aq_mode,
               options.density_mode,
+              options.compression_mode,
               options.collect_final_butteraugli_score,
               options.input_path,
               options.scope == BenchmarkScope::kMetalPublicWorkflow,
@@ -2950,6 +2977,7 @@ int main(int argc, char** argv) {
                   options.butteraugli_target, options.cpu_thread_count,
                   options.gpu_aq_mode,
                   options.density_mode,
+                  options.compression_mode,
                   options.collect_final_butteraugli_score, {},
                   options.scope == BenchmarkScope::kMetalPublicWorkflow,
                   options.validation, *gpu, raw_results_pointer, &sink);

@@ -413,6 +413,52 @@ bool CheckAssemblyAndDeterminism() {
            false, true, false);
 }
 
+bool CheckEntropyBehaviorPlumbing() {
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::Status status = MakeFrame(64, 9, {3541, 10}, {}, &frame);
+  std::vector<uint8_t> reference;
+  if (status.ok()) {
+    status = gjxl::EncodeVarDctCodestream(
+      frame,
+      {.entropy_behavior = gjxl::VarDctEntropyBehavior::kBalanced},
+      &reference);
+  }
+  if (!status.ok() || reference.empty()) {
+    std::cerr << "Balanced entropy behavior failed: "
+              << status.message() << '\n';
+    return false;
+  }
+
+  for (const gjxl::VarDctEntropyBehavior behavior : {
+         gjxl::VarDctEntropyBehavior::kBalanced,
+         gjxl::VarDctEntropyBehavior::kHighDensity,
+         gjxl::VarDctEntropyBehavior::kMaximumCompression}) {
+    std::vector<uint8_t> output;
+    gjxl::codestream_internal::VarDctCodestreamProfile profile;
+    status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+      frame, {.entropy_behavior = behavior}, &output, &profile);
+    if (!status.ok() || output != reference ||
+        profile.entropy_behavior != behavior) {
+      std::cerr << "Entropy behavior plumbing failed: "
+                << status.message() << '\n';
+      return false;
+    }
+  }
+
+  const std::vector<uint8_t> sentinel = {9, 8, 7};
+  std::vector<uint8_t> output = sentinel;
+  if (gjxl::EncodeVarDctCodestream(
+        frame,
+        {.entropy_behavior =
+           static_cast<gjxl::VarDctEntropyBehavior>(99)},
+        &output).code() != gjxl::StatusCode::kInvalidArgument ||
+      output != sentinel) {
+    std::cerr << "Invalid entropy behavior was not rejected atomically\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckAtomicRejections() {
   const std::vector<uint8_t> sentinel = {9, 8, 7};
   std::vector<uint8_t> output = sentinel;
@@ -512,7 +558,8 @@ bool CheckDeferredCandidatePrimitives() {
 int main() {
   if (!CheckCodestreamAndFrameHeaders() || !CheckQuantizerSelectors() ||
       !CheckAssemblyAndDeterminism() || !CheckAdaptiveBlockContextSelection() ||
-      !CheckAtomicRejections() || !CheckDeferredCandidatePrimitives()) {
+      !CheckEntropyBehaviorPlumbing() || !CheckAtomicRejections() ||
+      !CheckDeferredCandidatePrimitives()) {
     return EXIT_FAILURE;
   }
   std::cout << "All codestream encoder tests passed.\n";
