@@ -12,6 +12,23 @@ namespace gjxl::codestream_internal {
 
 bool LibjxlTailExperimentAvailable() noexcept { return false; }
 
+Status AuditVarDctStateWithLibjxl(const VarDctEncoderFrame &frame,
+                                  LibjxlTailOptions options,
+                                  LibjxlTailStateAudit *audit) {
+  if (audit == nullptr) {
+    return Status::InvalidArgument("Libjxl state-audit output is null");
+  }
+  if (options.effort < 1 || options.effort > 10 || options.thread_count == 0) {
+    return Status::InvalidArgument("Libjxl tail options are invalid");
+  }
+  const Status validation = ValidateSimpleCodestreamFrame(frame);
+  if (!validation.ok()) {
+    return validation;
+  }
+  return Status::Unavailable(
+      "GJXL was built without the libjxl tail experiment");
+}
+
 Status EncodeVarDctCodestreamWithLibjxl(const VarDctEncoderFrame &frame,
                                         LibjxlTailOptions options,
                                         std::vector<uint8_t> *output) {

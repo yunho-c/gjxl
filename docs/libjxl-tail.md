@@ -20,7 +20,8 @@ validation required to make its result interpretable.
 
 ## Implementation status
 
-As of 2026-09-01, Milestone 1 is implemented as a controlled bridge seam:
+As of 2026-09-01, Milestones 1 and 2 are implemented through the controlled
+bridge seam:
 
 - the opt-in build verifies the pinned base
   `e8ff09762481785938d8e4e01333ed3917571161` and prints the applied libjxl
@@ -33,14 +34,22 @@ As of 2026-09-01, Milestone 1 is implemented as a controlled bridge seam:
   libjxl bridge from a completed GJXL frame, and receive the expected
   controlled `Unsupported` result; and
 - focused tests verify default-build unavailability, enabled-build bridge
-  reachability, option validation, and caller-output atomicity.
+  reachability, option validation, and caller-output atomicity;
+- libjxl patch `61f8f8d1751397765547668574e71afea37913e2` constructs ordinary
+  `CodecMetadata`, `FrameHeader`, `PassesEncoderState`, quantizer, strategy,
+  control-field, qDC, DC, and AC coefficient state from the GJXL handoff;
+- the qDC path copies authoritative X/Y/B integers into libjxl's Y/X/B
+  modular channel order and uses libjxl's ordinary `DequantDC` path without a
+  float requantization; and
+- field-specific pre/post-copy digests match for both a small fixture and a
+  mixed-strategy 2057x257 fixture spanning partial AC groups and two DC groups.
 
 The Milestone 0 results captured so far are provisional. They cover a small
 fixture, pinned-decoder conformance, and initial padded-1080p profiles, but not
 yet the complete independent-process, 4K, real-photograph, target-1.0/1.2
-matrix required by the milestone. Milestone 2 state conversion is intentionally
-not claimed by the current bridge: no strategies, quantization fields, qDC,
-or AC coefficients have crossed into libjxl yet.
+matrix required by the milestone. Milestone 3 codestream production is not yet
+claimed: the enabled bridge currently validates and copies the completed frame,
+then returns the controlled `Unsupported` result before entropy coding.
 
 ## Questions the experiment must answer
 
