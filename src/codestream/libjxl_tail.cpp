@@ -4,7 +4,9 @@
 #include "codestream/libjxl_tail_internal.h"
 
 #include <jxl/memory_manager.h>
+#include <jxl/thread_parallel_runner.h>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <new>
@@ -27,6 +29,39 @@ struct BridgeFrameStorage {
   std::vector<uint8_t> strategies;
   std::vector<jxl::PrecomputedVarDctAcGroup> ac_groups;
   jxl::PrecomputedVarDctFrame frame;
+};
+
+class ThreadRunnerHandle {
+public:
+  ThreadRunnerHandle() = default;
+  ThreadRunnerHandle(const ThreadRunnerHandle&) = delete;
+  ThreadRunnerHandle& operator=(const ThreadRunnerHandle&) = delete;
+
+  ~ThreadRunnerHandle() {
+    if (opaque_ != nullptr) {
+      JxlThreadParallelRunnerDestroy(opaque_);
+    }
+  }
+
+  Status Create(const JxlMemoryManager& memory_manager, size_t thread_count) {
+    if (thread_count == 1) {
+      return Status::Ok();
+    }
+    opaque_ = JxlThreadParallelRunnerCreate(&memory_manager, thread_count);
+    if (opaque_ == nullptr) {
+      return Status::OutOfMemory("Could not create the libjxl thread runner");
+    }
+    return Status::Ok();
+  }
+
+  [[nodiscard]] JxlParallelRunner runner() const noexcept {
+    return opaque_ == nullptr ? nullptr : JxlThreadParallelRunner;
+  }
+
+  [[nodiscard]] void* opaque() const noexcept { return opaque_; }
+
+private:
+  void* opaque_ = nullptr;
 };
 
 template <typename T>
@@ -154,6 +189,8 @@ Status ValidateRequest(
   LibjxlTailOptions options) {
 
   if (options.effort < 1 || options.effort > 10 ||
+      !std::isfinite(options.butteraugli_distance) ||
+      options.butteraugli_distance <= 0.0f ||
       options.thread_count == 0) {
     return Status::InvalidArgument("Libjxl tail options are invalid");
   }
@@ -199,6 +236,7 @@ Status AuditVarDctStateWithLibjxl(
   }
   const jxl::PrecomputedVarDctEncodeOptions bridge_options{
     .effort = options.effort,
+    .butteraugli_distance = options.butteraugli_distance,
     .num_threads = options.thread_count,
   };
   jxl::PrecomputedVarDctStateAudit bridge_audit;
@@ -236,16 +274,23 @@ Status EncodeVarDctCodestreamWithLibjxl(
   if (!adapter.ok()) {
     return adapter;
   }
-  const jxl::PrecomputedVarDctEncodeOptions bridge_options{
-    .effort = options.effort,
-    .num_threads = options.thread_count,
-  };
-
   JxlMemoryManager memory_manager;
   if (!jxl::MemoryManagerInit(&memory_manager, nullptr)) {
     return Status::OutOfMemory(
       "Could not initialize the libjxl tail memory manager");
   }
+  ThreadRunnerHandle runner;
+  const Status runner_status = runner.Create(memory_manager, options.thread_count);
+  if (!runner_status.ok()) {
+    return runner_status;
+  }
+  const jxl::PrecomputedVarDctEncodeOptions bridge_options{
+    .effort = options.effort,
+    .butteraugli_distance = options.butteraugli_distance,
+    .num_threads = options.thread_count,
+    .runner = runner.runner(),
+    .runner_opaque = runner.opaque(),
+  };
   jxl::PaddedBytes bridge_output(&memory_manager);
   const jxl::Status bridge_status = jxl::EncodePrecomputedVarDctFrame(
     &memory_manager, storage.frame, bridge_options, &bridge_output);

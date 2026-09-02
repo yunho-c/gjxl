@@ -9,11 +9,17 @@
 #include <iostream>
 #include <vector>
 
+#if GJXL_TEST_LIBJXL_TAIL_ENABLED
+#include <jxl/decode.h>
+#include <jxl/encode.h>
+#endif
+
 #include "codec/chroma_from_luma.h"
 #include "codec/codestream.h"
 #include "codec/reconstruction.h"
 #include "codec/vardct_frame.h"
 #include "codestream/libjxl_tail_internal.h"
+#include "codestream/encoder.h"
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
 #include "core/image.h"
@@ -261,6 +267,118 @@ bool CheckStressCoverage(const gjxl::VarDctEncoderFrame &frame) {
          frame.profile().x_qm_scale == 0 && frame.profile().b_qm_scale == 7;
 }
 
+#if GJXL_TEST_LIBJXL_TAIL_ENABLED
+bool DecodePixels(const std::vector<uint8_t> &codestream, size_t expected_width,
+                  size_t expected_height, std::vector<float> *pixels) {
+  JxlDecoder *decoder = JxlDecoderCreate(nullptr);
+  if (decoder == nullptr) {
+    return false;
+  }
+  const auto destroy = [&] { JxlDecoderDestroy(decoder); };
+  if (JxlDecoderSubscribeEvents(decoder,
+                                JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) !=
+          JXL_DEC_SUCCESS ||
+      JxlDecoderSetInput(decoder, codestream.data(), codestream.size()) !=
+          JXL_DEC_SUCCESS) {
+    destroy();
+    return false;
+  }
+  JxlDecoderCloseInput(decoder);
+  const JxlPixelFormat format{
+      3, JXL_TYPE_FLOAT, JXL_NATIVE_ENDIAN, 0,
+  };
+  bool saw_basic_info = false;
+  bool saw_full_image = false;
+  while (true) {
+    const JxlDecoderStatus status = JxlDecoderProcessInput(decoder);
+    if (status == JXL_DEC_BASIC_INFO) {
+      JxlBasicInfo info;
+      if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS ||
+          info.xsize != expected_width || info.ysize != expected_height) {
+        destroy();
+        return false;
+      }
+      saw_basic_info = true;
+    } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
+      size_t byte_count = 0;
+      if (JxlDecoderImageOutBufferSize(decoder, &format, &byte_count) !=
+              JXL_DEC_SUCCESS ||
+          byte_count % sizeof(float) != 0) {
+        destroy();
+        return false;
+      }
+      pixels->resize(byte_count / sizeof(float));
+      if (JxlDecoderSetImageOutBuffer(decoder, &format, pixels->data(),
+                                      byte_count) != JXL_DEC_SUCCESS) {
+        destroy();
+        return false;
+      }
+    } else if (status == JXL_DEC_FULL_IMAGE) {
+      saw_full_image = true;
+    } else if (status == JXL_DEC_SUCCESS) {
+      destroy();
+      return saw_basic_info && saw_full_image;
+    } else {
+      destroy();
+      return false;
+    }
+  }
+}
+
+bool CheckOrdinaryLibjxlEncode() {
+  JxlEncoder *encoder = JxlEncoderCreate(nullptr);
+  if (encoder == nullptr) {
+    return false;
+  }
+  JxlBasicInfo info;
+  JxlEncoderInitBasicInfo(&info);
+  info.xsize = 4;
+  info.ysize = 3;
+  info.bits_per_sample = 8;
+  info.num_color_channels = 3;
+  JxlColorEncoding color;
+  JxlColorEncodingSetToSRGB(&color, JXL_FALSE);
+  const JxlPixelFormat format{
+      3, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0,
+  };
+  std::array<uint8_t, 4 * 3 * 3> pixels{};
+  for (size_t index = 0; index < pixels.size(); ++index) {
+    pixels[index] = static_cast<uint8_t>(index * 7);
+  }
+  JxlEncoderFrameSettings *settings = JxlEncoderFrameSettingsCreate(encoder, nullptr);
+  if (settings == nullptr ||
+      JxlEncoderSetBasicInfo(encoder, &info) != JXL_ENC_SUCCESS ||
+      JxlEncoderSetColorEncoding(encoder, &color) != JXL_ENC_SUCCESS ||
+      JxlEncoderAddImageFrame(settings, &format, pixels.data(), pixels.size()) !=
+          JXL_ENC_SUCCESS) {
+    JxlEncoderDestroy(encoder);
+    return false;
+  }
+  JxlEncoderCloseInput(encoder);
+  std::vector<uint8_t> output(1024);
+  uint8_t *next = output.data();
+  size_t available = output.size();
+  while (true) {
+    const JxlEncoderStatus status =
+        JxlEncoderProcessOutput(encoder, &next, &available);
+    if (status == JXL_ENC_NEED_MORE_OUTPUT) {
+      const size_t used = static_cast<size_t>(next - output.data());
+      output.resize(output.size() * 2);
+      next = output.data() + used;
+      available = output.size() - used;
+    } else if (status == JXL_ENC_SUCCESS) {
+      output.resize(static_cast<size_t>(next - output.data()));
+      JxlEncoderDestroy(encoder);
+      std::vector<float> decoded;
+      return DecodePixels(output, info.xsize, info.ysize, &decoded);
+    } else {
+      JxlEncoderDestroy(encoder);
+      return false;
+    }
+  }
+}
+#endif
+
 } // namespace
 
 int main() {
@@ -331,15 +449,83 @@ int main() {
       gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(frame, {},
                                                                   &output);
 #if GJXL_TEST_LIBJXL_TAIL_ENABLED
-  constexpr gjxl::StatusCode kExpected = gjxl::StatusCode::kUnsupported;
+  if (!CheckOrdinaryLibjxlEncode()) {
+    std::cerr << "The refactored ordinary libjxl one-shot path failed\n";
+    return 1;
+  }
+  if (!CheckStatus(status, gjxl::StatusCode::kOk, "Valid bridge request") ||
+      output.empty() || output == sentinel) {
+    std::cerr << "The enabled libjxl tail did not produce a codestream\n";
+    return 1;
+  }
+  const std::vector<uint8_t> single_thread_output = output;
+  output.clear();
+  if (!CheckStatus(gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
+                       frame, {}, &output),
+                   gjxl::StatusCode::kOk, "Repeated bridge request") ||
+      output != single_thread_output) {
+    std::cerr << "Repeated libjxl-tail output was not deterministic\n";
+    return 1;
+  }
+  output.clear();
+  if (!CheckStatus(gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
+                       frame, {.thread_count = 8}, &output),
+                   gjxl::StatusCode::kOk, "Eight-thread bridge request") ||
+      output != single_thread_output) {
+    std::cerr << "Libjxl-tail output changed with the thread count\n";
+    return 1;
+  }
+
+  std::vector<uint8_t> native_output;
+  if (!gjxl::EncodeVarDctCodestream(frame, &native_output).ok()) {
+    std::cerr << "Could not produce the same-frame native codestream\n";
+    return 1;
+  }
+  std::vector<float> libjxl_pixels;
+  std::vector<float> native_pixels;
+  const gjxl::Extent2D frame_extent = frame.geometry().frame();
+  if (!DecodePixels(single_thread_output, frame_extent.width,
+                    frame_extent.height, &libjxl_pixels) ||
+      !DecodePixels(native_output, frame_extent.width, frame_extent.height,
+                    &native_pixels) ||
+      libjxl_pixels != native_pixels) {
+    std::cerr << "Same-frame tails did not decode to identical pixels\n";
+    return 1;
+  }
+
+  std::vector<uint8_t> stress_single_thread;
+  std::vector<uint8_t> stress_eight_threads;
+  std::vector<uint8_t> stress_native;
+  if (!gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
+           stress_frame, {}, &stress_single_thread)
+           .ok() ||
+      !gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
+           stress_frame, {.thread_count = 8}, &stress_eight_threads)
+           .ok() ||
+      stress_single_thread != stress_eight_threads ||
+      !gjxl::EncodeVarDctCodestream(stress_frame, &stress_native).ok()) {
+    std::cerr << "The mixed multi-group fixture did not encode deterministically\n";
+    return 1;
+  }
+  const gjxl::Extent2D stress_extent = stress_frame.geometry().frame();
+  libjxl_pixels.clear();
+  native_pixels.clear();
+  if (!DecodePixels(stress_single_thread, stress_extent.width,
+                    stress_extent.height, &libjxl_pixels) ||
+      !DecodePixels(stress_native, stress_extent.width, stress_extent.height,
+                    &native_pixels) ||
+      libjxl_pixels != native_pixels) {
+    std::cerr << "Mixed same-frame tails did not decode to identical pixels\n";
+    return 1;
+  }
 #else
-  constexpr gjxl::StatusCode kExpected = gjxl::StatusCode::kUnavailable;
-#endif
-  if (!CheckStatus(status, kExpected, "Valid bridge request") ||
+  if (!CheckStatus(status, gjxl::StatusCode::kUnavailable,
+                   "Valid bridge request") ||
       output != sentinel) {
     std::cerr << "A failed bridge request changed caller-visible output\n";
     return 1;
   }
+#endif
 
   if (!CheckStatus(gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
                        frame, {}, nullptr),

@@ -1447,7 +1447,12 @@ if(GJXL_BUILD_TESTS)
     gjxl_libjxl_tail_test
     PRIVATE
       gjxl_libjxl_tail
+      gjxl_codestream
   )
+
+  if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
+    target_link_libraries(gjxl_libjxl_tail_test PRIVATE jxl)
+  endif()
 
   add_test(
     NAME libjxl_tail_bridge

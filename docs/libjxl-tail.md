@@ -20,7 +20,7 @@ validation required to make its result interpretable.
 
 ## Implementation status
 
-As of 2026-09-01, Milestones 1 and 2 are implemented through the controlled
+As of 2026-09-01, Milestones 1 through 3 are implemented through the controlled
 bridge seam:
 
 - the opt-in build verifies the pinned base
@@ -42,14 +42,20 @@ bridge seam:
   modular channel order and uses libjxl's ordinary `DequantDC` path without a
   float requantization; and
 - field-specific pre/post-copy digests match for both a small fixture and a
-  mixed-strategy 2057x257 fixture spanning partial AC groups and two DC groups.
+  mixed-strategy 2057x257 fixture spanning partial AC groups and two DC groups;
+- libjxl patch `22a71050452f87bd77b5aa7e5edf0c13e8af7fec` refactors the
+  ordinary one-shot post-coefficient and final-assembly paths into private
+  helpers shared by the normal encoder and the prepared-frame bridge; and
+- small and mixed multi-group bridge outputs are deterministic across repeated,
+  one-thread, and eight-worker calls, are accepted by the pinned libjxl decoder,
+  and decode to the same float pixels as GJXL's native tail from the same frame.
 
 The Milestone 0 results captured so far are provisional. They cover a small
 fixture, pinned-decoder conformance, and initial padded-1080p profiles, but not
 yet the complete independent-process, 4K, real-photograph, target-1.0/1.2
-matrix required by the milestone. Milestone 3 codestream production is not yet
-claimed: the enabled bridge currently validates and copies the completed frame,
-then returns the controlled `Unsupported` result before entropy coding.
+matrix required by the milestone. Internal workflow selection, phase profiles,
+and the retained same-frame benchmark are still pending; production entry
+points therefore continue to use GJXL's native tail exclusively.
 
 ## Questions the experiment must answer
 

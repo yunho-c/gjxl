@@ -3,6 +3,7 @@
 
 #include "codestream/libjxl_tail_internal.h"
 
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -18,7 +19,9 @@ Status AuditVarDctStateWithLibjxl(const VarDctEncoderFrame &frame,
   if (audit == nullptr) {
     return Status::InvalidArgument("Libjxl state-audit output is null");
   }
-  if (options.effort < 1 || options.effort > 10 || options.thread_count == 0) {
+  if (options.effort < 1 || options.effort > 10 ||
+      !std::isfinite(options.butteraugli_distance) ||
+      options.butteraugli_distance <= 0.0f || options.thread_count == 0) {
     return Status::InvalidArgument("Libjxl tail options are invalid");
   }
   const Status validation = ValidateSimpleCodestreamFrame(frame);
@@ -36,7 +39,9 @@ Status EncodeVarDctCodestreamWithLibjxl(const VarDctEncoderFrame &frame,
   if (output == nullptr) {
     return Status::InvalidArgument("Libjxl tail output is null");
   }
-  if (options.effort < 1 || options.effort > 10 || options.thread_count == 0) {
+  if (options.effort < 1 || options.effort > 10 ||
+      !std::isfinite(options.butteraugli_distance) ||
+      options.butteraugli_distance <= 0.0f || options.thread_count == 0) {
     return Status::InvalidArgument("Libjxl tail options are invalid");
   }
   const Status validation = ValidateSimpleCodestreamFrame(frame);

@@ -17,6 +17,7 @@ namespace codestream_internal {
 
 struct LibjxlTailOptions {
   int effort = 7;
+  float butteraugli_distance = 1.0f;
   size_t thread_count = 1;
 };
 
