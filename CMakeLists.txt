@@ -39,10 +39,111 @@ option(
 )
 
 option(
+  GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT
+  "Build the experimental pinned-libjxl VarDCT codestream tail"
+  OFF
+)
+
+option(
   GJXL_ENABLE_METAL_PROFILING
   "Emit line tables, recorded sources, and a flat symbol companion for Metal shaders"
   OFF
 )
+
+if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
+  set(
+    GJXL_LIBJXL_TAIL_BASE_REVISION
+    "e8ff09762481785938d8e4e01333ed3917571161"
+  )
+  set(GJXL_LIBJXL_TAIL_SOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl")
+
+  if(NOT EXISTS
+      "${GJXL_LIBJXL_TAIL_SOURCE_DIR}/third_party/highway/CMakeLists.txt")
+    message(FATAL_ERROR
+      "Pinned libjxl dependencies are missing. Run: git submodule update --init --recursive")
+  endif()
+
+  find_package(Git REQUIRED)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" -C "${GJXL_LIBJXL_TAIL_SOURCE_DIR}"
+      rev-parse HEAD
+    RESULT_VARIABLE GJXL_LIBJXL_TAIL_REVISION_RESULT
+    OUTPUT_VARIABLE GJXL_LIBJXL_TAIL_PATCH_REVISION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NOT GJXL_LIBJXL_TAIL_REVISION_RESULT EQUAL 0)
+    message(FATAL_ERROR "Could not determine the pinned libjxl revision")
+  endif()
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" -C "${GJXL_LIBJXL_TAIL_SOURCE_DIR}"
+      merge-base --is-ancestor
+      "${GJXL_LIBJXL_TAIL_BASE_REVISION}"
+      "${GJXL_LIBJXL_TAIL_PATCH_REVISION}"
+    RESULT_VARIABLE GJXL_LIBJXL_TAIL_ANCESTRY_RESULT
+    ERROR_QUIET
+  )
+  if(NOT GJXL_LIBJXL_TAIL_ANCESTRY_RESULT EQUAL 0)
+    message(FATAL_ERROR
+      "Pinned libjxl tail revision ${GJXL_LIBJXL_TAIL_PATCH_REVISION} is not based on ${GJXL_LIBJXL_TAIL_BASE_REVISION}")
+  endif()
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" -C "${GJXL_LIBJXL_TAIL_SOURCE_DIR}"
+      status --porcelain
+    OUTPUT_VARIABLE GJXL_LIBJXL_TAIL_DIRTY_STATE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(GJXL_LIBJXL_TAIL_DIRTY_STATE)
+    string(APPEND GJXL_LIBJXL_TAIL_PATCH_REVISION "-dirty")
+  endif()
+  message(STATUS
+    "GJXL libjxl tail base revision: ${GJXL_LIBJXL_TAIL_BASE_REVISION}")
+  message(STATUS
+    "GJXL libjxl tail patch revision: ${GJXL_LIBJXL_TAIL_PATCH_REVISION}")
+
+  # Keep libjxl's directory-scoped build settings from changing GJXL's normal
+  # configuration. The full dependency exists only for this private target.
+  function(gjxl_add_libjxl_tail_dependency)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    foreach(GJXL_LIBJXL_DISABLED_OPTION IN ITEMS
+        JPEGXL_ENABLE_FUZZERS
+        JPEGXL_ENABLE_DEVTOOLS
+        JPEGXL_ENABLE_TOOLS
+        JPEGXL_ENABLE_DOXYGEN
+        JPEGXL_ENABLE_MANPAGES
+        JPEGXL_ENABLE_BENCHMARK
+        JPEGXL_ENABLE_EXAMPLES
+        JPEGXL_ENABLE_JNI
+        JPEGXL_ENABLE_SJPEG
+        JPEGXL_ENABLE_OPENEXR
+        JPEGXL_ENABLE_VIEWERS
+        JPEGXL_ENABLE_TCMALLOC
+        JPEGXL_ENABLE_PLUGINS
+        JPEGXL_ENABLE_COVERAGE
+        JPEGXL_ENABLE_TRANSCODE_JPEG
+        JPEGXL_ENABLE_BOXES
+        JPEGXL_ENABLE_WASM_THREADS)
+      set(${GJXL_LIBJXL_DISABLED_OPTION} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
+    add_subdirectory(
+      third_party/libjxl
+      third_party/libjxl-tail
+      EXCLUDE_FROM_ALL
+    )
+  endfunction()
+
+  gjxl_add_libjxl_tail_dependency()
+  if(NOT TARGET jxl-internal OR NOT TARGET jxl_threads)
+    message(FATAL_ERROR
+      "Pinned libjxl did not define the required internal and thread targets")
+  endif()
+endif()
 
 if(GJXL_ENABLE_LIBJXL_REFERENCE AND
    (GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS))
@@ -56,14 +157,16 @@ if(GJXL_ENABLE_LIBJXL_REFERENCE AND
   # required libjxl translation units plus Highway, rather than the full
   # encoder/decoder libraries. Highway resets CMP0077 to OLD, so cache entries
   # are required to keep its bundled tests and examples disabled on CMake 4.
-  set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-  set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
-  add_subdirectory(
-    third_party/libjxl/third_party/highway
-    third_party/highway
-    EXCLUDE_FROM_ALL
-  )
+  if(NOT TARGET hwy)
+    set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
+    add_subdirectory(
+      third_party/libjxl/third_party/highway
+      third_party/highway
+      EXCLUDE_FROM_ALL
+    )
+  endif()
 
   set(
     GJXL_BUTTERAUGLI_REFERENCE_SOURCES
@@ -293,6 +396,42 @@ target_link_libraries(
   PUBLIC
     gjxl_codec
 )
+
+# Private experimental adapter. The stub keeps explicit backend requests
+# testable without introducing a full-libjxl dependency into normal builds.
+if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
+  set(GJXL_LIBJXL_TAIL_SOURCE src/codestream/libjxl_tail.cpp)
+else()
+  set(GJXL_LIBJXL_TAIL_SOURCE src/codestream/libjxl_tail_stub.cpp)
+endif()
+
+add_library(
+  gjxl_libjxl_tail
+  STATIC
+  ${GJXL_LIBJXL_TAIL_SOURCE}
+)
+
+set_target_properties(
+  gjxl_libjxl_tail
+  PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+
+target_link_libraries(
+  gjxl_libjxl_tail
+  PUBLIC
+    gjxl_codec
+)
+
+if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
+  target_link_libraries(
+    gjxl_libjxl_tail
+    PRIVATE
+      jxl-internal
+      jxl_threads
+  )
+endif()
 
 # Private adapters shared by C API and tests.
 add_library(
@@ -1291,6 +1430,28 @@ if(GJXL_BUILD_TESTS)
   add_test(
     NAME codestream_encoder
     COMMAND gjxl_codestream_encoder_test
+  )
+
+  add_executable(
+    gjxl_libjxl_tail_test
+    tests/libjxl_tail_test.cpp
+  )
+
+  target_compile_definitions(
+    gjxl_libjxl_tail_test
+    PRIVATE
+      GJXL_TEST_LIBJXL_TAIL_ENABLED=$<BOOL:${GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT}>
+  )
+
+  target_link_libraries(
+    gjxl_libjxl_tail_test
+    PRIVATE
+      gjxl_libjxl_tail
+  )
+
+  add_test(
+    NAME libjxl_tail_bridge
+    COMMAND gjxl_libjxl_tail_test
   )
 
   add_executable(
