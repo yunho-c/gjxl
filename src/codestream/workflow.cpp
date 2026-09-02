@@ -423,6 +423,12 @@ struct PipelineStorage {
   MaximumErrorResult maximum_error_result;
 };
 
+struct EncodingArtifacts {
+  VarDctEncoderFrame frame;
+  std::vector<double> score_history;
+  MaximumErrorResult maximum_error_result;
+};
+
 [[nodiscard]] Status EdgeExtend(
   ConstImage3FView source,
   Image3FView destination) {
@@ -454,8 +460,7 @@ struct PreparedWorkflow {
   explicit PreparedWorkflow(FrameGeometry prepared_geometry)
     : geometry(prepared_geometry),
       padded_linear(geometry.padded_frame()),
-      opsin(geometry.padded_frame()),
-      pipeline(geometry.frame(), geometry.padded_frame()) {}
+      opsin(geometry.padded_frame()) {}
 
   [[nodiscard]] ConstImage3FView original_linear_rgb() const noexcept {
     return padded_linear.cropped_view(geometry.frame());
@@ -465,11 +470,37 @@ struct PreparedWorkflow {
   Image3FBuffer padded_linear;
   Image3FBuffer opsin;
   codestream_internal::QuantizationMatrixScaleStats matrix_scale_stats;
-  PipelineStorage pipeline;
+  // CPU and maximum-throughput adapters retain the public complete-output
+  // shape. The default resident encoder never constructs this storage.
+  std::unique_ptr<PipelineStorage> compatibility_output;
   quantization_pipeline_internal::PreparedQuantizationPipeline quantization;
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
     gpu_adaptive_quantization;
 };
+
+[[nodiscard]] Status EnsureCompatibilityOutput(
+  PreparedWorkflow& prepared,
+  PipelineStorage** output) {
+
+  if (output == nullptr) {
+    return Status::InvalidArgument(
+      "Compatibility pipeline output pointer is null");
+  }
+  try {
+    if (prepared.compatibility_output == nullptr) {
+      prepared.compatibility_output = std::make_unique<PipelineStorage>(
+        prepared.geometry.frame(), prepared.geometry.padded_frame());
+    }
+    *output = prepared.compatibility_output.get();
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate compatibility pipeline output");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Compatibility pipeline output dimensions are too large");
+  }
+}
 
 [[nodiscard]] Status PrepareWorkflow(
   ConstImage3FView linear_rgb,
@@ -516,7 +547,7 @@ struct PreparedWorkflow {
       candidate->original_linear_rgb(), candidate->opsin.const_view(),
       preparation_options,
       &candidate->quantization,
-      options.backend != VarDctBackendPreference::kMetal,
+      options.backend == VarDctBackendPreference::kCpu,
       options.metal_aq_mode ==
         GpuAdaptiveQuantizationMode::kExactCoefficients);
     if (!status.ok()) {
@@ -656,28 +687,35 @@ struct PreparedWorkflow {
     profile, selection_begin,
     &candidate_profile.backend_selection_nanoseconds);
   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
-  prepared.pipeline.score_history.clear();
-  prepared.pipeline.maximum_error_result = {};
+  EncodingArtifacts encoding;
   if (selected_metal && options.metal_aq_mode ==
         GpuAdaptiveQuantizationMode::kMaximumThroughput) {
-    const CpuQuantizationPipelineOutput pipeline_output =
-      prepared.pipeline.Output();
-    status = RunGpuFrameOnlyQuantizationPipeline(
-      *selected_gpu, prepared.original_linear_rgb(),
-      prepared.opsin.const_view(), pipeline_options,
-      {
-        .initial_quantization = pipeline_output.initial_quantization,
-        .quant_field = {
-          prepared.pipeline.final_quant.data(), prepared.pipeline.block_extent,
-          prepared.pipeline.block_extent.width},
-        .frame = &prepared.pipeline.frame,
-      });
+    PipelineStorage* compatibility_output = nullptr;
+    status = EnsureCompatibilityOutput(prepared, &compatibility_output);
+    if (status.ok()) {
+      const CpuQuantizationPipelineOutput pipeline_output =
+        compatibility_output->Output();
+      status = RunGpuFrameOnlyQuantizationPipeline(
+        *selected_gpu, prepared.original_linear_rgb(),
+        prepared.opsin.const_view(), pipeline_options,
+        {
+          .initial_quantization = pipeline_output.initial_quantization,
+          .quant_field = {
+            compatibility_output->final_quant.data(),
+            compatibility_output->block_extent,
+            compatibility_output->block_extent.width},
+          .frame = &compatibility_output->frame,
+        });
+      if (status.ok()) {
+        encoding.frame = std::move(compatibility_output->frame);
+      }
+    }
   } else if (selected_metal) {
     const quantization_pipeline_internal::GpuEncodingQuantizationPipelineOutput
       encoding_output{
-      .frame = &prepared.pipeline.frame,
-      .score_history = &prepared.pipeline.score_history,
-      .maximum_error_result = &prepared.pipeline.maximum_error_result,
+      .frame = &encoding.frame,
+      .score_history = &encoding.score_history,
+      .maximum_error_result = &encoding.maximum_error_result,
       .collect_final_butteraugli_score =
         options.collect_final_butteraugli_score ||
         pipeline_options.adaptive_quantization.iterations == 0 ||
@@ -699,10 +737,20 @@ struct PreparedWorkflow {
             &prepared.gpu_adaptive_quantization, gpu_profiling_mode,
             &candidate_gpu_profile);
   } else {
-    status = quantization_pipeline_internal::
-      RunPreparedCpuQuantizationPipeline(
-        prepared.original_linear_rgb(), prepared.quantization,
-        pipeline_options, prepared.pipeline.Output());
+    PipelineStorage* compatibility_output = nullptr;
+    status = EnsureCompatibilityOutput(prepared, &compatibility_output);
+    if (status.ok()) {
+      status = quantization_pipeline_internal::
+        RunPreparedCpuQuantizationPipeline(
+          prepared.original_linear_rgb(), prepared.quantization,
+          pipeline_options, compatibility_output->Output());
+    }
+    if (status.ok()) {
+      encoding.frame = std::move(compatibility_output->frame);
+      encoding.score_history = std::move(compatibility_output->score_history);
+      encoding.maximum_error_result =
+        compatibility_output->maximum_error_result;
+    }
   }
   if (!status.ok()) {
     return status;
@@ -719,9 +767,9 @@ struct PreparedWorkflow {
   };
   status = profile == nullptr
     ? EncodeVarDctCodestream(
-        prepared.pipeline.frame, codestream_options, &candidate)
+        encoding.frame, codestream_options, &candidate)
     : codestream_internal::EncodeVarDctCodestreamProfiled(
-        prepared.pipeline.frame, codestream_options, &candidate,
+        encoding.frame, codestream_options, &candidate,
         &candidate_profile.codestream);
   ProfileEnd(
     profile, codestream_begin,
@@ -764,16 +812,16 @@ struct PreparedWorkflow {
   if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     candidate_summary.requested_maximum_error = options.maximum_error;
     candidate_summary.achieved_maximum_error =
-      prepared.pipeline.maximum_error_result.achieved;
+      encoding.maximum_error_result.achieved;
     candidate_summary.achieved_maximum_error_ratio =
-      prepared.pipeline.maximum_error_result.normalized_maximum;
+      encoding.maximum_error_result.normalized_maximum;
     candidate_summary.maximum_error_evaluation_count =
-      prepared.pipeline.maximum_error_result.evaluation_count;
+      encoding.maximum_error_result.evaluation_count;
     candidate_summary.maximum_error_outcome =
-      prepared.pipeline.maximum_error_result.outcome;
+      encoding.maximum_error_result.outcome;
   }
   candidate_summary.encode_attempt_count = 1;
-  candidate_summary.score_history = prepared.pipeline.score_history;
+  candidate_summary.score_history = encoding.score_history;
   candidate_summary.final_butteraugli_score_evaluated =
     options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
     !candidate_summary.score_history.empty() &&
@@ -786,7 +834,7 @@ struct PreparedWorkflow {
     ? VarDctExecutionBackend::kMetal
     : VarDctExecutionBackend::kCpu;
   candidate_summary.metal_aq_mode = options.metal_aq_mode;
-  status = prepared.pipeline.frame.strategies().ForEachAnchor(
+  status = encoding.frame.strategies().ForEachAnchor(
     [&](size_t, size_t, AcStrategyType strategy) {
       const size_t index = static_cast<size_t>(strategy);
       if (index >= candidate_summary.strategy_counts.size()) {
