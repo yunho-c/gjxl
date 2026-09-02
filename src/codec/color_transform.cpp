@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <new>
@@ -13,6 +14,10 @@
 #include <system_error>
 #include <thread>
 #include <vector>
+
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
@@ -36,6 +41,65 @@ constexpr std::array<std::array<float, 3>, 3> kInverseOpsinMatrix = {{
   {{-3.6588512862745097f, 2.7129230470588235f,
     1.9459282392156863f}},
 }};
+
+// Pinned from libjxl's CubeRootAndAdd in base/fast_math-inl.h. Inputs are
+// nonnegative, and the three reciprocal-cube-root Newton steps plus final
+// refinement have a documented maximum error of 6 ULP.
+float FastCubeRootAndAdd(float value, float add) {
+  constexpr float kOneThird = 1.0f / 3.0f;
+  constexpr float kFourThirds = 4.0f / 3.0f;
+  constexpr uint32_t kExponentBias = 0x54800000u;
+  constexpr uint32_t kExponentMultiplier = 0x002AAAAAu;
+
+  const uint32_t bits = std::bit_cast<uint32_t>(value);
+  const uint32_t estimate_bits = bits == 0
+    ? 0
+    : kExponentBias - (bits >> 23) * kExponentMultiplier;
+  float reciprocal = std::bit_cast<float>(estimate_bits);
+  const float divided = kOneThird * value;
+  for (size_t iteration = 0; iteration < 3; ++iteration) {
+    const float squared = reciprocal * reciprocal;
+    reciprocal = std::fma(
+      -divided, squared * squared, kFourThirds * reciprocal);
+  }
+  float squared = reciprocal * reciprocal;
+  reciprocal = std::fma(
+    kOneThird,
+    std::fma(-value, squared * squared, reciprocal),
+    reciprocal);
+  squared = reciprocal * reciprocal;
+  return std::fma(squared, value, add);
+}
+
+#if defined(__ARM_NEON)
+float32x4_t FastCubeRootAndAdd(float32x4_t value, float32x4_t add) {
+  constexpr float kOneThird = 1.0f / 3.0f;
+  constexpr float kFourThirds = 4.0f / 3.0f;
+  const uint32x4_t bits = vreinterpretq_u32_f32(value);
+  const uint32x4_t exponent = vshrq_n_u32(bits, 23);
+  uint32x4_t estimate_bits = vsubq_u32(
+    vdupq_n_u32(0x54800000u),
+    vmulq_u32(exponent, vdupq_n_u32(0x002AAAAAu)));
+  estimate_bits = vbslq_u32(
+    vceqq_u32(bits, vdupq_n_u32(0)),
+    vdupq_n_u32(0), estimate_bits);
+  float32x4_t reciprocal = vreinterpretq_f32_u32(estimate_bits);
+  const float32x4_t divided = vmulq_n_f32(value, kOneThird);
+  for (size_t iteration = 0; iteration < 3; ++iteration) {
+    const float32x4_t squared = vmulq_f32(reciprocal, reciprocal);
+    reciprocal = vfmsq_f32(
+      vmulq_n_f32(reciprocal, kFourThirds),
+      divided, vmulq_f32(squared, squared));
+  }
+  float32x4_t squared = vmulq_f32(reciprocal, reciprocal);
+  reciprocal = vfmaq_n_f32(
+    reciprocal,
+    vfmsq_f32(reciprocal, value, vmulq_f32(squared, squared)),
+    kOneThird);
+  squared = vmulq_f32(reciprocal, reciprocal);
+  return vfmaq_f32(add, squared, value);
+}
+#endif
 
 template <typename Function>
 Status RunParallelRows(
@@ -186,29 +250,100 @@ Status LinearRgbToOpsin(
   float intensity_target,
   Image3FView opsin) {
 
-  return ConvertImage(
-    linear_rgb,
-    intensity_target,
-    opsin,
-    [](const std::array<float, 3>& rgb, float intensity) {
-      std::array<float, 3> gamma{};
-      const float scale = intensity / 255.0f;
-      const float bias_cuberoot = std::cbrt(kOpsinBias);
-      for (size_t row = 0; row < 3; ++row) {
-        float mixed = std::fma(
-          scale * kOpsinMatrix[row][2], rgb[2], kOpsinBias);
-        mixed = std::fma(
-          scale * kOpsinMatrix[row][1], rgb[1], mixed);
-        mixed = std::fma(
-          scale * kOpsinMatrix[row][0], rgb[0], mixed);
-        gamma[row] = std::cbrt(std::max(0.0f, mixed)) - bias_cuberoot;
-      }
-      return std::array<float, 3>{
-        0.5f * (gamma[0] - gamma[1]),
-        0.5f * (gamma[0] + gamma[1]),
-        gamma[2],
+  if (!linear_rgb.valid() || !opsin.valid() ||
+      linear_rgb.extent() != opsin.extent() ||
+      !std::isfinite(intensity_target) || intensity_target <= 0.0f) {
+    return Status::InvalidArgument(
+      "Color-transform images or intensity target are invalid");
+  }
+
+  try {
+    Image3FBuffer result(linear_rgb.extent());
+    const Image3FView result_view = result.view();
+    const float scale = intensity_target / 255.0f;
+    const float bias_cuberoot = FastCubeRootAndAdd(kOpsinBias, 0.0f);
+    Status status = RunParallelRows(linear_rgb.extent(), [&](size_t y) {
+      const float* input_r = linear_rgb.plane[0].Row(y);
+      const float* input_g = linear_rgb.plane[1].Row(y);
+      const float* input_b = linear_rgb.plane[2].Row(y);
+      std::array<float*, 3> output = {
+        result_view.plane[0].Row(y),
+        result_view.plane[1].Row(y),
+        result_view.plane[2].Row(y),
       };
+      for (size_t x = 0; x < linear_rgb.width(); ++x) {
+        if (!std::isfinite(input_r[x]) || !std::isfinite(input_g[x]) ||
+            !std::isfinite(input_b[x])) {
+          return Status::InvalidArgument(
+            "Color-transform input pixels must be finite");
+        }
+      }
+      size_t x = 0;
+#if defined(__ARM_NEON)
+      const float32x4_t bias = vdupq_n_f32(kOpsinBias);
+      const float32x4_t negative_bias_cuberoot =
+        vdupq_n_f32(-bias_cuberoot);
+      const float32x4_t zero = vdupq_n_f32(0.0f);
+      for (; x + 4 <= linear_rgb.width(); x += 4) {
+        const float32x4_t red = vld1q_f32(input_r + x);
+        const float32x4_t green = vld1q_f32(input_g + x);
+        const float32x4_t blue = vld1q_f32(input_b + x);
+        std::array<float32x4_t, 3> gamma{};
+        for (size_t row = 0; row < 3; ++row) {
+          float32x4_t value = vfmaq_n_f32(
+            bias, blue, scale * kOpsinMatrix[row][2]);
+          value = vfmaq_n_f32(
+            value, green, scale * kOpsinMatrix[row][1]);
+          value = vfmaq_n_f32(
+            value, red, scale * kOpsinMatrix[row][0]);
+          gamma[row] = FastCubeRootAndAdd(
+            vmaxq_f32(zero, value), negative_bias_cuberoot);
+        }
+        vst1q_f32(
+          output[0] + x,
+          vmulq_n_f32(vsubq_f32(gamma[0], gamma[1]), 0.5f));
+        vst1q_f32(
+          output[1] + x,
+          vmulq_n_f32(vaddq_f32(gamma[0], gamma[1]), 0.5f));
+        vst1q_f32(output[2] + x, gamma[2]);
+      }
+#endif
+      for (; x < linear_rgb.width(); ++x) {
+        std::array<float, 3> gamma{};
+        for (size_t row = 0; row < 3; ++row) {
+          float value = std::fma(
+            scale * kOpsinMatrix[row][2], input_b[x], kOpsinBias);
+          value = std::fma(
+            scale * kOpsinMatrix[row][1], input_g[x], value);
+          value = std::fma(
+            scale * kOpsinMatrix[row][0], input_r[x], value);
+          gamma[row] = FastCubeRootAndAdd(
+            std::max(0.0f, value), -bias_cuberoot);
+        }
+        output[0][x] = 0.5f * (gamma[0] - gamma[1]);
+        output[1][x] = 0.5f * (gamma[0] + gamma[1]);
+        output[2][x] = gamma[2];
+      }
+      for (x = 0; x < linear_rgb.width(); ++x) {
+        if (!std::isfinite(output[0][x]) ||
+            !std::isfinite(output[1][x]) ||
+            !std::isfinite(output[2][x])) {
+          return Status::InvalidArgument(
+            "Color transform produced non-finite pixels");
+        }
+      }
+      return Status::Ok();
     });
+    if (!status.ok()) return status;
+    CopyImage(result.const_view(), opsin);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate color-transform scratch storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Color-transform image dimensions are too large");
+  }
+  return Status::Ok();
 }
 
 Status OpsinToLinearRgb(

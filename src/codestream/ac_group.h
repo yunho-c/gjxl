@@ -139,4 +139,22 @@ struct SimpleAcGroupTokenTemplate {
   const SimpleBlockContextMap& block_context_map,
   std::vector<std::vector<uint16_t>>* contexts);
 
+namespace codestream_internal {
+
+/// Encoder-only per-group primitives. The enclosing serializer validates the
+/// frame, coefficient orders, and block-context map once before dispatching
+/// independent group tasks into fixed output slots.
+[[nodiscard]] Status BuildSimpleAcGroupTokenTemplateForEncoder(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  size_t group_index,
+  SimpleAcGroupTokenTemplate* group);
+
+[[nodiscard]] Status MaterializeSimpleAcGroupContextsForEncoder(
+  const SimpleAcGroupTokenTemplate& token_template,
+  const SimpleBlockContextMap& block_context_map,
+  std::vector<uint16_t>* contexts);
+
+}  // namespace codestream_internal
+
 }  // namespace gjxl
