@@ -46,6 +46,14 @@ struct QuantizationMatrixScales {
   ConstImage3FView opsin,
   QuantizationMatrixScaleStats* stats);
 
+/// Computes matrix-scale statistics without revalidating an Opsin view whose
+/// complete finite-value provenance is owned by the synchronous workflow.
+/// Passing any other view violates this internal contract. Failure leaves
+/// `stats` unchanged.
+[[nodiscard]] Status ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+  ConstImage3FView opsin,
+  QuantizationMatrixScaleStats* stats);
+
 /// Selects libjxl's X/B matrix scales for one complete encode attempt.
 /// Maximum-error control always selects 2/2 and ignores the Butteraugli
 /// target. Failure leaves `scales` unchanged.

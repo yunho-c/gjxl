@@ -2,7 +2,7 @@
 
 - Status: active implementation roadmap
 - Original profile revision: `af3a9e6`
-- Current roadmap baseline: `1e8bb0e`
+- Current roadmap baseline: `c81ff95`
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
 - Profile date: 2026-09-02
 - Related analysis: [entropy behavior alignment](entropy-behavior-alignment.md)
@@ -39,7 +39,7 @@ The roadmap priorities are:
 | ---: | --- | ---: | --- |
 | 2 | Preparation and storage | Direct padded-Opsin slice: padded-4K input preparation 75.09 -> 54.42 ms and peak RSS 1.161 -> 1.043 GiB | Re-profile before considering persistent workspace leases |
 | 3 | Color conversion, validation, and copies | Direct workflow transform plus identity-bound finite-input provenance implemented; redundant scans cost 4.61 ms at 1080p and 18.49 ms at 4K | Qualified; proceed to priority 4 |
-| 4 | Quantization-matrix chromaticity statistics | Effort/mode gate implemented; padded effort-6 preparation improved by 6.03 ms at 1080p and 34.32 ms at 4K | Vectorize the retained effort-7/high-density pass |
+| 4 | Quantization-matrix chromaticity statistics | Gate plus trusted NEON pass implemented; retained effort-7 preparation improved by 5.39 ms at 1080p and 25.49 ms at 4K | Qualified; incorporate effort-7 update policy and re-profile |
 | 5 | Metal readback and frame assembly | about 10.2 ms readback plus 12.9 ms assembly | Remove intermediate copies and redundant full-frame scans |
 | 6 | Residual serializer | 62.6 ms GJXL versus 42.3 ms libjxl | Give one-representation encoding a one-pass token path |
 
@@ -387,15 +387,21 @@ does not independently enable the pixel pass at low effort. The gate is an
 explicit internal policy queried by `PrepareWorkflow()`; the standalone
 statistics helper retains its complete validation contract.
 
-For the retained effort-7 and effort-9 path:
+The second slice optimizes the retained effort-7 and effort-9-like path:
 
-- hoist current and previous row pointers outside the pixel loop;
-- remove per-sample finite checks only when priority 3 supplies a trusted
-  validated Opsin view;
-- vectorize horizontal and vertical X differences, B-minus-Y differences, and
-  exposed-blue products; and
-- if necessary, use independent row stripes that each include one prior row and
-  produce three local maxima for deterministic final reduction.
+- current and previous row pointers are hoisted outside the pixel loop;
+- per-sample finite checks are removed only for the exact Opsin view validated
+  by the synchronous RGB-to-Opsin transform;
+- horizontal and vertical X differences, B-minus-Y differences, and
+  exposed-blue products use four-wide NEON reductions; and
+- scalar handling remains for vector tails and non-NEON targets.
+
+The standalone internal helper retains its checked scalar behavior. A separate
+finite-Opsin entry point makes the trust boundary explicit and leaves results
+unchanged on failure. Independent row stripes were not added: the vectorized
+pass brought preparation close enough to the no-statistics effort-6 floor that
+thread-launch and reduction complexity are not justified by the retained
+profile.
 
 Do not initially fuse this pass into Opsin conversion. Vertical-neighbor state
 and parallel row scheduling make fusion harder to qualify, while a standalone
@@ -426,16 +432,38 @@ that the formerly unused scan was removed without changing its fixed 2/2
 matrix scales. Candidate codestreams, including the deliberately changed
 effort-6 output, were accepted by `djxl` 0.12.0.
 
-### Retained-pass expectation and gates
+### Retained-pass result and gates
 
-The current sampled attribution is about 16.8 ms for GJXL versus 5.9 ms for
-libjxl at 4K, suggesting roughly 8-11 ms of effort-7 optimization headroom. The
-full pass has now disappeared at low efforts and in maximum-error mode.
+Seven alternating independent-process pairs compared the optimized path with
+`c81ff95`, again using Release builds, two warmups, and five samples per process.
+Both sides used fully resident Metal at effort 7, so the matrix statistics were
+retained and codestream behavior was identical:
+
+| Input | Scalar preparation | Trusted NEON preparation | Removed wall time |
+| --- | ---: | ---: | ---: |
+| Padded 1080p | 9.96 ms | 4.57 ms | 5.39 ms (54.1%) |
+| Padded 4K | 41.41 ms | 15.92 ms | 25.49 ms (61.6%) |
+
+Every preparation pair favored the optimized path. Complete-encode cohort
+medians were noisy at 1080p (159.23 versus 164.09 ms) and improved at 4K
+(590.24 versus 561.01 ms); five of seven 1080p pairs and six of seven 4K pairs
+favored the optimized build. The bounded preparation stage is therefore the
+causal result, while a fresh matched end-to-end profile should wait for the
+independently owned effort-7 update-policy change.
+
+The checked scalar and trusted vector paths produce exactly equal statistics on
+degenerate, strided, vector-width, and scalar-tail fixtures. Efforts 6, 7, 9,
+and 10, explicit high density, maximum compression, and maximum-error smoke
+encodes were byte-for-byte identical to `c81ff95`; every candidate was accepted
+by `djxl` 0.12.0. The previously sampled 16.8 ms statistic attribution used a
+different workload and sampled-CPU boundary, so it should not be compared
+directly with the 25.49 ms 4K preparation-stage reduction.
 
 The thresholds `0.015`, `0.022`, `0.026`, `0.28`, `0.33`, `0.38`, and `0.13`
-directly affect the frame header. Add scalar-oracle and `nextafter` fixtures
-around each boundary. Vectorization must preserve per-pixel operation ordering
-or explicitly qualify any codestream changes caused by contraction or rounding.
+directly affect the frame header. Existing `nextafter` selection fixtures cover
+every boundary, and the retained SIMD path is checked against the scalar oracle.
+Any future change to operation contraction or rounding requires renewed
+codestream qualification.
 
 ## Priority 5: shorten the Metal-to-serializer handoff
 
@@ -662,9 +690,10 @@ separates low-risk work elimination from lifetime and layout redesign:
 5. **Completed in `1e8bb0e`:** bind finite-input provenance to the
    exact workflow RGB/Opsin views and skip the measured duplicate scans only in
    private fully resident preparation; retain public GPU validation.
-6. **Completed in the current slice:** apply priority 4's effort/mode gate;
+6. **Completed in `c81ff95`:** apply priority 4's effort/mode gate;
    preserve high-density behavior and keep maximum compression orthogonal.
-7. Vectorize priority 4's retained effort-7/high-density statistics.
+7. **Completed in the current slice:** vectorize priority 4's retained
+   effort-7/high-density statistics under explicit finite-Opsin provenance.
 8. Incorporate the independently owned effort-7 zero-update change and capture
    a fresh matched profile.
 9. Implement priority 5's low-risk direct frame copies and scan fusion.

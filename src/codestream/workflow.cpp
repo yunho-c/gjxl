@@ -4,6 +4,7 @@
 #include "codestream/workflow.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -15,6 +16,10 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 
 #include "codec/color_transform_internal.h"
 #include "codec/quantization_pipeline.h"
@@ -505,7 +510,8 @@ struct PreparedWorkflow {
     }
     if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
           options)) {
-      status = codestream_internal::ComputeQuantizationMatrixScaleStats(
+      status = codestream_internal::
+        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
         candidate->opsin.cropped_view(geometry.frame()),
         &candidate->matrix_scale_stats);
       if (!status.ok()) {
@@ -861,6 +867,15 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
     const float* row_x = opsin.plane[0].Row(y);
     const float* row_y = opsin.plane[1].Row(y);
     const float* row_b = opsin.plane[2].Row(y);
+    const float* previous_row_x = y == 0
+      ? nullptr
+      : opsin.plane[0].Row(y - 1);
+    const float* previous_row_y = y == 0
+      ? nullptr
+      : opsin.plane[1].Row(y - 1);
+    const float* previous_row_b = y == 0
+      ? nullptr
+      : opsin.plane[2].Row(y - 1);
     for (size_t x = 0; x < opsin.width(); ++x) {
       const float current_x = row_x[x];
       const float current_y = row_y[x];
@@ -875,11 +890,10 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
       }
 
       const float previous_x = row_x[x - 1];
-      const float previous_row_x = opsin.plane[0].Row(y - 1)[x];
       const float horizontal_x_edge =
         std::abs(current_x - previous_x);
       const float vertical_x_edge =
-        std::abs(current_x - previous_row_x);
+        std::abs(current_x - previous_row_x[x]);
       if (!std::isfinite(horizontal_x_edge) ||
           !std::isfinite(vertical_x_edge)) {
         return Status::InvalidArgument(
@@ -891,13 +905,11 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
 
       const float previous_y = row_y[x - 1];
       const float previous_b = row_b[x - 1];
-      const float previous_row_y = opsin.plane[1].Row(y - 1)[x];
-      const float previous_row_b = opsin.plane[2].Row(y - 1)[x];
       const float current_difference = current_b - current_y;
       const float horizontal_b_edge = std::abs(
         current_difference - (previous_b - previous_y));
       const float vertical_b_edge = std::abs(
-        current_difference - (previous_row_b - previous_row_y));
+        current_difference - (previous_row_b[x] - previous_row_y[x]));
       if (!std::isfinite(horizontal_b_edge) ||
           !std::isfinite(vertical_b_edge)) {
         return Status::InvalidArgument(
@@ -910,7 +922,7 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
       float exposed_blue = current_b - 1.2f * current_y;
       if (exposed_blue >= 0.0f) {
         exposed_blue *= std::abs(current_b - previous_b) +
-          std::abs(current_b - previous_row_b);
+          std::abs(current_b - previous_row_b[x]);
         if (!std::isfinite(exposed_blue)) {
           return Status::InvalidArgument(
             "Exposed-blue matrix-scale statistic is not finite");
@@ -926,6 +938,123 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
   if (!ValidQuantizationMatrixScaleStats(candidate)) {
     return Status::InvalidArgument(
       "Quantization-matrix scale statistics are not finite");
+  }
+  *stats = candidate;
+  return Status::Ok();
+}
+
+Status codestream_internal::
+ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+  ConstImage3FView opsin,
+  QuantizationMatrixScaleStats* stats) {
+
+  if (stats == nullptr || !opsin.valid()) {
+    return Status::InvalidArgument(
+      "Finite quantization-matrix statistics input or output is invalid");
+  }
+
+  QuantizationMatrixScaleStats candidate;
+  if (opsin.width() > 1 && opsin.height() > 1) {
+#if defined(__ARM_NEON)
+    float32x4_t vector_x_edge = vdupq_n_f32(0.0f);
+    float32x4_t vector_b_edge = vdupq_n_f32(0.0f);
+    float32x4_t vector_exposed_blue = vdupq_n_f32(0.0f);
+    const float32x4_t zero = vdupq_n_f32(0.0f);
+#endif
+    for (size_t y = 1; y < opsin.height(); ++y) {
+      const float* row_x = opsin.plane[0].Row(y);
+      const float* row_y = opsin.plane[1].Row(y);
+      const float* row_b = opsin.plane[2].Row(y);
+      const float* previous_row_x = opsin.plane[0].Row(y - 1);
+      const float* previous_row_y = opsin.plane[1].Row(y - 1);
+      const float* previous_row_b = opsin.plane[2].Row(y - 1);
+      size_t x = 1;
+#if defined(__ARM_NEON)
+      for (; x + 4 <= opsin.width(); x += 4) {
+        const float32x4_t current_x = vld1q_f32(row_x + x);
+        const float32x4_t current_y = vld1q_f32(row_y + x);
+        const float32x4_t current_b = vld1q_f32(row_b + x);
+        const float32x4_t horizontal_x_edge = vabsq_f32(vsubq_f32(
+          current_x, vld1q_f32(row_x + x - 1)));
+        const float32x4_t vertical_x_edge = vabsq_f32(vsubq_f32(
+          current_x, vld1q_f32(previous_row_x + x)));
+        vector_x_edge = vmaxq_f32(
+          vector_x_edge,
+          vmaxq_f32(horizontal_x_edge, vertical_x_edge));
+
+        const float32x4_t current_difference =
+          vsubq_f32(current_b, current_y);
+        const float32x4_t previous_difference = vsubq_f32(
+          vld1q_f32(row_b + x - 1),
+          vld1q_f32(row_y + x - 1));
+        const float32x4_t previous_row_difference = vsubq_f32(
+          vld1q_f32(previous_row_b + x),
+          vld1q_f32(previous_row_y + x));
+        const float32x4_t horizontal_b_edge = vabsq_f32(vsubq_f32(
+          current_difference, previous_difference));
+        const float32x4_t vertical_b_edge = vabsq_f32(vsubq_f32(
+          current_difference, previous_row_difference));
+        vector_b_edge = vmaxq_f32(
+          vector_b_edge,
+          vmaxq_f32(horizontal_b_edge, vertical_b_edge));
+
+        const float32x4_t exposed_blue = vsubq_f32(
+          current_b, vmulq_n_f32(current_y, 1.2f));
+        const float32x4_t blue_edge = vaddq_f32(
+          vabsq_f32(vsubq_f32(
+            current_b, vld1q_f32(row_b + x - 1))),
+          vabsq_f32(vsubq_f32(
+            current_b, vld1q_f32(previous_row_b + x))));
+        vector_exposed_blue = vmaxq_f32(
+          vector_exposed_blue,
+          vmulq_f32(vmaxq_f32(exposed_blue, zero), blue_edge));
+      }
+#endif
+      for (; x < opsin.width(); ++x) {
+        const float current_x = row_x[x];
+        candidate.x_edge = std::max(
+          candidate.x_edge,
+          std::max(
+            std::abs(current_x - row_x[x - 1]),
+            std::abs(current_x - previous_row_x[x])));
+
+        const float current_y = row_y[x];
+        const float current_b = row_b[x];
+        const float current_difference = current_b - current_y;
+        candidate.b_edge = std::max(
+          candidate.b_edge,
+          std::max(
+            std::abs(
+              current_difference - (row_b[x - 1] - row_y[x - 1])),
+            std::abs(
+              current_difference -
+                (previous_row_b[x] - previous_row_y[x]))));
+
+        float exposed_blue = current_b - 1.2f * current_y;
+        if (exposed_blue >= 0.0f) {
+          exposed_blue *= std::abs(current_b - row_b[x - 1]) +
+            std::abs(current_b - previous_row_b[x]);
+          candidate.exposed_blue = std::max(
+            candidate.exposed_blue, exposed_blue);
+        }
+      }
+    }
+#if defined(__ARM_NEON)
+    std::array<float, 4> lanes{};
+    vst1q_f32(lanes.data(), vector_x_edge);
+    candidate.x_edge = std::max(
+      candidate.x_edge, *std::ranges::max_element(lanes));
+    vst1q_f32(lanes.data(), vector_b_edge);
+    candidate.b_edge = std::max(
+      candidate.b_edge, *std::ranges::max_element(lanes));
+    vst1q_f32(lanes.data(), vector_exposed_blue);
+    candidate.exposed_blue = std::max(
+      candidate.exposed_blue, *std::ranges::max_element(lanes));
+#endif
+  }
+  if (!ValidQuantizationMatrixScaleStats(candidate)) {
+    return Status::InvalidArgument(
+      "Finite quantization-matrix statistics are not finite");
   }
   *stats = candidate;
   return Status::Ok();
