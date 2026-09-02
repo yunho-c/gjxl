@@ -985,7 +985,10 @@ struct DirectAnsHistogram {
           std::numeric_limits<uint64_t>::max() - other.extra_bits) {
       return false;
     }
-    for (size_t symbol = 0; symbol < counts.size(); ++symbol) {
+    const size_t alphabet_size = std::max<size_t>(
+      total_count == 0 ? 0 : maximum_symbol + 1,
+      other.total_count == 0 ? 0 : other.maximum_symbol + 1);
+    for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
       if (counts[symbol] >
           std::numeric_limits<uint64_t>::max() - other.counts[symbol]) {
         return false;
@@ -1005,7 +1008,9 @@ double DirectHistogramShannonBits(const DirectAnsHistogram& histogram) {
   }
   const double total = static_cast<double>(histogram.total_count);
   double bits = total * ExactCountLog2(histogram.total_count);
-  for (uint64_t count : histogram.counts) {
+  const size_t alphabet_size = histogram.maximum_symbol + 1;
+  for (uint64_t count :
+       std::span(histogram.counts).first(alphabet_size)) {
     if (count != 0) {
       bits -= static_cast<double>(count) *
         ExactCountLog2(count);
@@ -1022,12 +1027,31 @@ Status DirectHistogramDistance(
   if (distance == nullptr) {
     return Status::InvalidArgument("Direct ANS distance output is null");
   }
-  DirectAnsHistogram combined = left;
-  if (!combined.AddHistogram(right)) {
+  if (left.total_count >
+      std::numeric_limits<uint64_t>::max() - right.total_count) {
     return Status::InvalidArgument("Direct ANS histogram count overflow");
   }
-  *distance = DirectHistogramShannonBits(combined) -
-    left.shannon_bits - right.shannon_bits;
+  const uint64_t total_count = left.total_count + right.total_count;
+  if (total_count == 0) {
+    *distance = 0.0;
+    return Status::Ok();
+  }
+  double combined_bits = static_cast<double>(total_count) *
+    ExactCountLog2(total_count);
+  const size_t alphabet_size = std::max(
+    left.total_count == 0 ? 0 : left.maximum_symbol + 1,
+    right.total_count == 0 ? 0 : right.maximum_symbol + 1);
+  for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
+    if (left.counts[symbol] >
+        std::numeric_limits<uint64_t>::max() - right.counts[symbol]) {
+      return Status::InvalidArgument("Direct ANS histogram count overflow");
+    }
+    const uint64_t count = left.counts[symbol] + right.counts[symbol];
+    if (count != 0) {
+      combined_bits -= static_cast<double>(count) * ExactCountLog2(count);
+    }
+  }
+  *distance = combined_bits - left.shannon_bits - right.shannon_bits;
   return Status::Ok();
 }
 
@@ -2353,6 +2377,18 @@ Status OptimizeAnsEntropyCodeImpl(
     ProfileEnd(
       profile, model_build_begin,
       &EntropyWorkProfile::ans_model_build_nanoseconds);
+
+    if (deferred == nullptr && cost == nullptr &&
+        policy.smallest_alphabet_width) {
+      const auto selected = std::ranges::find_if(
+        width_candidates,
+        [](const auto& candidate) { return candidate.survives; });
+      if (selected == width_candidates.end()) {
+        return Status::InvalidArgument("No valid ANS alphabet size");
+      }
+      *code = std::move(selected->code);
+      return Status::Ok();
+    }
 
     if (deferred != nullptr) {
       if (std::ranges::none_of(

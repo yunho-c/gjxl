@@ -462,6 +462,9 @@ bool CheckEntropyBehaviorPlumbing() {
       behavior == gjxl::VarDctEntropyBehavior::kMaximumCompression;
     if (!status.ok() || output.empty() ||
         profile.entropy_behavior != behavior ||
+        profile.entropy_model_bits == 0 || profile.entropy_token_bits == 0 ||
+        (!exhaustive &&
+         profile.section_writing_work.candidate_measure_nanoseconds != 0) ||
         profile.coefficient_context_materialization_count !=
           (exhaustive ? profile.coefficient_tokenization_pass_count : 1)) {
       std::cerr << "Entropy behavior plumbing failed: "

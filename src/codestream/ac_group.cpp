@@ -781,6 +781,33 @@ Status MaterializeSimpleAcGroupContexts(
   return Status::Ok();
 }
 
+Status codestream_internal::BuildSimpleAcGroupTokenTemplateForEncoder(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  size_t group_index,
+  SimpleAcGroupTokenTemplate* group) {
+
+  if (group == nullptr) {
+    return Status::InvalidArgument("AC-group token-template output is null");
+  }
+  VarDctAcGroupView group_view;
+  if (Status status = frame.GetAcGroup(group_index, &group_view);
+      !status.ok()) {
+    return status;
+  }
+  return BuildSimpleAcGroupTokenTemplateValidated(
+    group_view, frame.strategies(), orders, frame.raw_quant_field(), group);
+}
+
+Status codestream_internal::MaterializeSimpleAcGroupContextsForEncoder(
+  const SimpleAcGroupTokenTemplate& token_template,
+  const SimpleBlockContextMap& block_context_map,
+  std::vector<uint16_t>* contexts) {
+
+  return MaterializeSimpleAcGroupContextsValidated(
+    token_template, block_context_map, contexts);
+}
+
 Status TokenizeSimpleAcGroups(const VarDctEncoderFrame& frame,
                               const SimpleCoefficientOrders& orders,
                               const SimpleBlockContextMap& block_context_map,
