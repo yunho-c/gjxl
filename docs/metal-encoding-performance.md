@@ -27,26 +27,26 @@ The primary throughput gate is:
 - The reported speedup is the range of paired process medians, not a ratio of
   unrelated best cases.
 
-Four accuracy tracks are explicit:
+Four behavior tracks are explicit:
 
-- `exact-coefficients` is the production track. Raw quantization, encoder frame,
-  and codestream bytes remain exact; existing numerical gates are not widened.
-- `fully-resident` is the resident-quality track. Byte identity is not required,
-  but output must be deterministic for a fixed backend, structurally valid,
-  independently accepted by the pinned `djxl`, finite after decoding, and
-  measured for Butteraugli/decoded-pixel drift. Any policy or quality change is
-  reported instead of being hidden behind a tolerance.
-- `throughput` is a more aggressive opt-in policy layered on the resident
-  evaluator. Encoding applies the default two AQ updates but omits the third,
-  diagnostic-only reconstruction and perceptual score; diagnostic APIs retain
-  their earlier one-update tradeoff.
+- `exact-coefficients` is the explicit reference/compatibility track. Raw
+  quantization, encoder frame, and codestream bytes remain exact; existing
+  numerical gates are not widened.
+- `fully-resident` is the production encoding default. Byte identity is not
+  required, but output must be deterministic for a fixed backend, structurally
+  valid, independently accepted by the pinned `djxl`, finite after decoding,
+  and measured for Butteraugli/decoded-pixel drift. Any policy or quality
+  change is reported instead of being hidden behind a tolerance.
+- `throughput` is equivalent to fully resident inside the encoding workflow.
+  Complete diagnostic APIs retain its earlier explicit one-update tradeoff.
 - `maximum-throughput` is the explicit speed-first track. It uses only DCT8,
   quantizes the adjusted initial field directly on Metal, and omits inverse
   reconstruction and perceptual AQ scoring. Its score history is therefore
   empty, and decoded quality must be measured independently.
 
 The `50x` objective may be satisfied first by the maximum-throughput track.
-Production rollout remains separately gated on the exact track.
+Exact-decision compatibility remains separately gated and explicitly
+selectable rather than constraining the default resident path.
 
 ## Current baseline
 
@@ -58,7 +58,7 @@ established the following 1080p public-workflow range:
 | CPU public workflow | 6345.9-6374.5 ms | 1.00x |
 | Exact-coefficient Metal public workflow | 1084.1-1117.8 ms | 5.70-5.87x |
 
-The experimental fully resident AQ operation reached `12.2-12.8x` for AQ
+The then-experimental fully resident AQ operation reached `12.2-12.8x` for AQ
 itself, not for the complete public encoder. A `50x` 1080p result requires a
 complete time no greater than approximately `127 ms` against this CPU baseline.
 
@@ -785,8 +785,10 @@ the P6 independent-process gate remains open.
   baseline.
 - Investigate decision-equivalent accumulation, selective high-precision repair,
   or a bounded throughput policy instead of assuming float ties are exact.
-- Retain both explicit accuracy tracks; automatic selection remains exact until
-  the production gate passes.
+- Retain both accuracy tracks. At this checkpoint automatic selection remained
+  exact pending the production gate; the later codestream policy promotion made
+  fully resident the automatic/default Metal encoding path while preserving
+  exact mode explicitly.
 
 Exit criterion: the throughput track removes CPU forward transforms and
 coefficient coding from every AQ evaluation and has independent decoder/quality

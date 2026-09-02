@@ -34,7 +34,7 @@ struct Options {
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kCpu;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
-    gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+    gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
 };
 
 struct ProbeRow {
@@ -166,11 +166,11 @@ void PrintUsage(std::string_view executable) {
     throw std::runtime_error(
       "The rate-control probe requires at least one PFM input");
   }
-  if (options.metal_aq_mode !=
-        gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
+  if (options.metal_aq_mode ==
+        gjxl::GpuAdaptiveQuantizationMode::kThroughput &&
       options.backend != gjxl::VarDctBackendPreference::kMetal) {
     throw std::runtime_error(
-      "Resident AQ requires the forced Metal backend");
+      "Throughput AQ requires the forced Metal backend");
   }
   return options;
 }

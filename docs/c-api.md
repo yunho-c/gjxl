@@ -29,11 +29,13 @@ current public C++ workflow in [`workflow.h`](../src/codestream/workflow.h):
 - has no progressive or multi-pass mode; and
 - performs tokenization, entropy coding, and codestream assembly on the CPU.
 
-The exact-coefficient Metal path accelerates selected frontend work while
-retaining CPU-authoritative coefficient decisions. Fully resident, throughput,
-and maximum-throughput Metal modes are experimental implementation modes and
-must not be exposed through the initial C interface. The full profile boundary
-is documented in [`codestream.md`](codestream.md).
+The canonical workflow now defaults to fully resident Metal when automatic
+selection qualifies, while the exact-coefficient path remains an explicit
+reference/compatibility implementation. Metal AQ implementation selection is
+deliberately not exposed through the initial C interface; C and Rust callers
+inherit the canonical workflow policy without growing their stable compression
+contract. The full profile boundary is documented in
+[`codestream.md`](codestream.md).
 
 The existing workflow already caches the production Metal backend for the
 process lifetime. The C context should reuse that cache rather than creating a
@@ -64,7 +66,7 @@ The first version does not expose:
 - progressive or responsive coding;
 - faster-decoding controls;
 - target-byte, target-BPP, or maximum-error rate control;
-- fully resident or throughput Metal modes;
+- Metal AQ implementation selection;
 - device indexes;
 - streaming input or output;
 - stage-specific profiling data; or
@@ -320,13 +322,13 @@ therefore contain one field:
 ```text
 AUTO   use the existing qualified automatic policy
 CPU    require the CPU workflow
-METAL  require the exact-coefficient Metal workflow
+METAL  require the default fully resident Metal workflow
 ```
 
 `AUTO` retains the current source-backed policy, including its device,
-geometry, and distance gates. `METAL` is an explicit experimental override;
+geometry, and distance gates. `METAL` is an explicit unqualified override;
 backend creation or capability failure returns an error rather than silently
-falling back. Resident and throughput modes remain internal.
+falling back. Metal AQ implementation selection remains internal.
 
 `gjxl_context_options_init` defaults to `AUTO`, and passing `NULL` options to
 `gjxl_context_create` has the same meaning. Slimg's default quality 80 maps to
