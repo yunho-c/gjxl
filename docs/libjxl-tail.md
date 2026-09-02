@@ -20,8 +20,10 @@ validation required to make its result interpretable.
 
 ## Implementation status
 
-As of 2026-09-01, Milestones 1 through 4 are implemented through the controlled
-bridge seam and a non-installed experimental workflow:
+As of 2026-09-01, Milestones 1 through 5 are implemented and the Milestone 6
+experiment has been run for the retained corpus described below. The result is
+a controlled bridge, a non-installed experimental workflow, and raw
+independent-process measurements:
 
 - the opt-in build verifies the pinned base
   `e8ff09762481785938d8e4e01333ed3917571161` and prints the applied libjxl
@@ -56,6 +58,10 @@ bridge seam and a non-installed experimental workflow:
   qDC authoritative for modular serialization while preserving GJXL's supplied
   decoder-equivalent float DC cache for encoder-side AC metadata and exact
   state auditing;
+- libjxl patch `cde2694f0495360ff2dbc035b047b43719360284` preserves supplied
+  non-DCT8 strategy orders at Falcon-or-faster entropy tiers, rather than
+  applying libjxl's ordinary fast-frontend assumption that every strategy is
+  DCT8;
 - a private backend dispatcher selects GJXL or libjxl explicitly, never falls
   back, and commits output and profile data only after success;
 - an injected serializer seam at the existing post-pipeline boundary keeps
@@ -65,15 +71,21 @@ bridge seam and a non-installed experimental workflow:
   are rejected before frontend work, and enabled/disabled tests cover selection,
   unavailability, option validation, and caller-output atomicity; and
 - the enabled install/export surface remains free of the private experiment
-  target and libjxl implementation details.
+  target and libjxl implementation details;
+- the retained matrix covers a small fixture, medium Flower, padded 1080p/4K,
+  two native-resolution photographs, target-distance and participant controls,
+  and a libjxl effort sweep; and
+- every retained comparison passed exact float-pixel equality through the
+  pinned decoder and stable per-backend codestream hashes across processes.
 
-The Milestone 0 results captured so far are provisional. They cover a small
-fixture, pinned-decoder conformance, and initial padded-1080p profiles, but not
-yet the complete independent-process, 4K, real-photograph, target-1.0/1.2
-matrix required by the milestone. The retained same-frame benchmark is now
-implemented and passes small CPU/Metal correctness smokes, but the final
-multi-process corpus experiment is still pending; production entry points
-continue to use GJXL's native tail exclusively.
+The result is intentionally not a full Cartesian product of every frontend,
+target, thread count, effort, and workload. CPU-versus-Metal is controlled on
+medium Flower, target 1.0 and eight libjxl participants are controlled on
+padded 1080p, and efforts 3/5/7/9 use a same-frame padded-1080p run. The two
+native-resolution photographs, padded 4K, and small fixed-overhead fixture use
+the primary exact-Metal, target-1.2, effort-7, one-participant policy. These
+boundaries are part of the result, not implied coverage. Production entry
+points continue to use GJXL's native tail exclusively.
 
 ## Questions the experiment must answer
 
@@ -398,6 +410,13 @@ separate.
 
 **Estimate:** 0.5-1 day
 
+**Status (2026-09-01): complete for the retained matrix.** Raw JSON records
+carry full GJXL and pinned-libjxl revisions, elapsed-wall timing boundaries,
+frontend/effort/participant policies, output bytes and SHA-256 values, and
+exact decoded validation. Forty-five independent-process result files and a
+SHA-256 manifest are retained locally below `build/libjxl-tail-results/`; the
+reviewable conclusions and reproducing commands are recorded in Milestone 6.
+
 Deliverables:
 
 - Record the GJXL revision, libjxl base revision, compiler, Release flags,
@@ -675,9 +694,123 @@ Exit criteria:
   revision are visible together.
 - Conclusions are limited to the measured corpus and hardware.
 
+#### Retained measurement (2026-09-01)
+
+The retained runs used a 14-core Apple M4 Pro MacBook Pro with 48 GB of memory,
+macOS 15.6 (24G84), and Apple Clang 17.0.0. The build type was Release with
+`GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT=ON`. Metal runs used
+`exact-coefficients`; every table entry used three independent processes, one
+warmup and five alternating pairs for complete workflows, or three warmups and
+five samples per backend for same-frame tails. All values below are elapsed
+wall time. A cell of `x [lo, hi]` is the median and range of the three process
+medians, not a pooled sample statistic.
+
+The core results use GJXL
+`3f178c3bc20901a76b6c5b1017945852e7b0db80`, libjxl base
+`e8ff09762481785938d8e4e01333ed3917571161`, and bridge patch
+`ee0f86c2d5900159132028d84b490a47fea075af`. The effort sweep and complete
+photographic workflows use GJXL
+`590f407cd63e6691b5a847302af09c3c8b2a6dde` and bridge patch
+`cde2694f0495360ff2dbc035b047b43719360284`; that patch changes only
+Falcon-or-faster coefficient-order discovery, so it does not affect effort-7
+behavior. The two lossless PPM benchmark inputs are derived from repository
+fixtures and have these SHA-256 values:
+
+- Flower 2268x1512: `b134697d49b86668c188f8fb1dfd68f05f8d1a7bae7039f1fc60743b9ed4003f`
+- Garden 1600x1200: `27c9574213e31255a9b2d27f32eab64978984a8d455c7a128df1aac215958188`
+
+The primary effort-7 complete-workflow result is:
+
+| Workload/policy | Frontend ms | Native tail ms | libjxl tail ms | Native total ms | Hybrid total ms | Zero-tail bound | Measured speedup | Size delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Gradient 128x96, Metal, d1.2, L1 | 6.65 [5.77, 10.04] | 1.56 [1.38, 1.85] | 2.12 [1.90, 2.62] | 8.36 [7.23, 12.00] | 8.29 [7.79, 12.24] | 1.234 [1.182, 1.245] | 0.941 [0.928, 1.009] | -6.09% |
+| Flower 510x532, Metal, d1.2, L1 | 86.71 [83.16, 87.72] | 29.90 [29.51, 30.26] | 12.43 [12.39, 12.66] | 119.05 [117.12, 119.61] | 101.14 [100.37, 101.37] | 1.341 [1.329, 1.353] | 1.139 [1.109, 1.166] | -3.86% |
+| Flower 510x532, CPU1, d1.2, L1 | 873.51 [872.24, 876.41] | 149.54 [149.35, 151.07] | 13.13 [12.93, 13.44] | 1024.67 [1024.43, 1029.66] | 891.93 [885.33, 893.85] | 1.171 [1.171, 1.175] | 1.154 [1.149, 1.155] | -3.86% |
+| Padded 1080p, Metal, d1.2, L1 | 579.69 [578.75, 580.24] | 216.57 [216.48, 221.53] | 98.26 [98.06, 98.64] | 808.62 [804.87, 809.42] | 687.22 [684.89, 689.60] | 1.369 [1.367, 1.376] | 1.168 [1.158, 1.184] | -5.56% |
+| Padded 1080p, Metal, d1.2, L8 | 582.09 [575.85, 582.44] | 215.40 [214.75, 217.01] | 92.22 [90.21, 92.79] | 802.02 [798.67, 806.41] | 681.19 [680.29, 682.38] | 1.368 [1.362, 1.370] | 1.190 [1.171, 1.190] | -5.56% |
+| Padded 1080p, Metal, d1.0, L1 | 591.46 [585.24, 591.84] | 238.37 [238.28, 240.14] | 102.89 [100.73, 105.34] | 838.37 [835.59, 843.63] | 703.07 [695.89, 703.36] | 1.396 [1.395, 1.403] | 1.201 [1.193, 1.213] | -5.21% |
+| Padded 4K, Metal, d1.2, L1 | 2175.01 [2168.98, 2176.39] | 607.95 [597.80, 615.16] | 317.48 [313.69, 324.26] | 2794.85 [2793.28, 2801.30] | 2511.28 [2510.96, 2514.56] | 1.278 [1.274, 1.281] | 1.114 [1.108, 1.117] | -5.32% |
+| Flower 2268x1512, Metal, d1.2, L1 | 1117.82 [1114.60, 1121.26] | 796.86 [795.45, 801.16] | 117.45 [117.19, 119.28] | 1924.93 [1923.61, 1929.06] | 1248.51 [1240.75, 1251.17] | 1.706 [1.705, 1.715] | 1.552 [1.535, 1.558] | -5.03% |
+| Garden 1600x1200, Metal, d1.2, L1 | 694.83 [688.47, 695.34] | 877.00 [876.28, 881.57] | 88.07 [87.66, 89.65] | 1586.47 [1572.94, 1586.52] | 791.96 [790.67, 805.47] | 2.248 [2.228, 2.254] | 1.983 [1.977, 2.002] | -1.41% |
+
+`L1` and `L8` mean one and eight configured libjxl participants. The CPU row
+uses one GJXL CPU participant; Metal rows do not claim that GPU execution has
+zero host work. Every row passed exact decoded-float equality and stable
+per-backend output hashes in all three processes. Size delta is libjxl minus
+GJXL for the same completed frontend frame. Different tail-only and complete
+workflow scopes may produce different completed frames, so their absolute
+times, bytes, and hashes must not be spliced together.
+
+The direct same-frame controls isolate the serializer and the effort envelope:
+
+| Workload/policy | GJXL tail ms | libjxl tail ms | Adapter ms | libjxl internal ms | Tail speedup | Bytes G/L | Size delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Flower 2268x1512, effort 7 | 156.32 [156.00, 157.34] | 113.74 [113.54, 115.77] | 0.282 [0.272, 0.288] | 109.68 [109.66, 110.32] | 1.374 [1.372, 1.396] | 397386/375539 | -5.50% |
+| Garden 1600x1200, effort 7 | 158.27 [155.09, 158.81] | 87.29 [85.58, 89.65] | 0.276 [0.261, 0.286] | 84.76 [83.60, 86.59] | 1.785 [1.765, 1.855] | 662567/651669 | -1.64% |
+| Padded 1080p, effort 3 | 196.40 [195.70, 197.47] | 92.11 [92.08, 92.39] | 0.373 [0.363, 0.375] | 89.72 [89.14, 90.01] | 2.123 [2.097, 2.133] | 388238/364473 | -6.12% |
+| Padded 1080p, effort 5 | 195.24 [193.21, 196.22] | 97.79 [94.86, 98.62] | 0.360 [0.346, 0.392] | 95.83 [91.96, 96.31] | 2.000 [1.994, 2.039] | 388238/365160 | -5.94% |
+| Padded 1080p, effort 7 | 193.33 [193.21, 193.52] | 96.59 [95.62, 98.37] | 0.362 [0.352, 0.416] | 93.51 [92.67, 96.81] | 2.006 [1.984, 2.024] | 388238/365160 | -5.94% |
+| Padded 1080p, effort 9 | 196.51 [195.32, 196.61] | 754.44 [748.20, 755.36] | 0.368 [0.356, 0.400] | 752.20 [745.51, 753.15] | 0.261 [0.259, 0.262] | 388238/354404 | -8.71% |
+
+The main findings are:
+
+- The attainable gain is strongly image-dependent. The retained effort-7
+  complete hybrid ranges from no repeatable improvement on 128x96 to 1.98x on
+  the garden photograph. Padded 1080p/4K gains are a smaller 1.11-1.20x.
+- The zero-tail Amdahl bound is materially above the measured hybrid result in
+  every nontrivial Metal case. Libjxl captures much, but not all, of the
+  available tail opportunity; the residual gap is the libjxl tail plus normal
+  timing variation, not evidence that the frontend can reach the zero-tail
+  number.
+- Adapter copy is below 0.5 ms in the same-frame retained runs. Libjxl's
+  internal entropy/codestream work, rather than the bridge copy, dominates its
+  tail.
+- Eight libjxl participants improve padded-1080p hybrid time only modestly
+  relative to one participant. This does not justify an equal-core scaling
+  claim because the Metal frontend and libjxl runner have different execution
+  resources and participation semantics.
+- Efforts 3, 5, and 7 occupy a similar speed range for this padded-1080p frame.
+  Effort 9 reduces size further but is about 3.8x slower than GJXL's tail, so a
+  libjxl backend cannot be discussed without its effort and size point.
+- Exact decoded equality makes the two tails reconstruction-equivalent for the
+  measured frames; it does not claim that either lossy result equals the input
+  or that the size relationship generalizes to other images.
+
+One reproducing complete-workflow command shape is:
+
+```sh
+for process in 1 2 3; do
+  ./build/libjxl-tail-m1-on/gjxl_encoding_benchmark \
+    --scope hybrid-workflow --workload padded_1080p \
+    --tail-frontend metal --gpu-aq exact-coefficients \
+    --tail-backends both --frontend-effort 7 --libjxl-effort 7 \
+    --cpu-threads 1 --libjxl-threads 1 --distance 1.2 \
+    --warmups 1 --samples 5 \
+    --raw-samples "build/libjxl-tail-results/run-$process.json"
+done
+```
+
+Summarize saved processes without pooling their samples:
+
+```sh
+python3 tools/libjxl_tail_summary.py \
+  build/libjxl-tail-results/3f178c3 \
+  build/libjxl-tail-results/590f407 \
+  --output build/libjxl-tail-results/summary.md
+```
+
 ### 7. Decide whether to promote the backend
 
 **Estimate:** decision gate; 1-3 additional weeks if promoted
+
+**Decision (2026-09-01): retain as an internal research tool; do not promote
+yet.** The bridge demonstrates material, repeatable opportunity on larger
+photographs and exact reconstruction parity for the retained profile. The
+small-image result is neutral, the attainable speedup is highly
+content-dependent, effort 9 reverses the result, and binary-size,
+cross-platform CI, patch-update ownership, and target-size policy remain
+unqualified. Those are promotion gates rather than blockers for the completed
+experiment.
 
 The experiment may remain an internal research tool. Promote it to a supported
 option only if all of these are true:
@@ -765,6 +898,7 @@ is:
 | Pinned private bridge | `third_party/libjxl/lib/jxl/enc_precomputed_vardct.h`, `enc_frame.cc`, `enc_modular.*` |
 | Correctness tests | `tests/libjxl_tail_test.cpp`, existing codestream/workflow tests |
 | Benchmark CLI tests | `tests/encoding_benchmark_cli_test.py` |
+| Retained-result validation | `tools/libjxl_tail_summary.py` |
 | Result documentation | this file and, after measurement, `metal-encoding-performance.md` |
 
 Keep the libjxl-specific types behind the private adapter so the native GJXL
