@@ -136,7 +136,7 @@ Each artifact contains:
   and SHA-256 hashes of the benchmark, metallib, and symbol companion; and
 - starting worktree/index patches plus an untracked-file hash inventory.
 
-Raw workflow schema 9 keeps the elapsed `codestream_dc_tokenization`,
+Raw workflow schema 14 keeps the elapsed `codestream_dc_tokenization`,
 `codestream_ac_tokenization`, `codestream_entropy_optimization`,
 `codestream_section_writing`, and `codestream_assembly` phases, and adds finer
 codestream counters. Names ending in `_work` are aggregate worker time: work
@@ -159,9 +159,16 @@ The prefix search now retains its exact sorted `(value,count)` populations for
 the selected partition and ANS consumes them directly. Consequently,
 `codestream_entropy_ans_value_collection_work` and
 `codestream_entropy_ans_value_aggregation_work` remain in the schema as zero
-work-elimination sentinels. Schema 9 adds
-`codestream_entropy_ans_prepared_value_validation_work` for the inexpensive
+work-elimination sentinels. The retained field
+`codestream_entropy_ans_prepared_value_validation_work` records the inexpensive
 partition, ordering, and count checks performed before that reuse.
+Schema 14 also records requested `effort`, resolved `entropy_behavior`, the
+automatic/maximum compression request, and ANS HybridUint, histogram, and
+alphabet-width candidate counts. These fields distinguish eliminated search
+work from a merely parallelized implementation. Ordinary direct-ANS paths
+intentionally leave Prefix code-build, ANS Prefix-validation, and cross-coder
+selection work at zero; maximum compression continues to populate the
+exhaustive phases.
 Entropy optimization retains each candidate model's exact per-section token
 bit counts. Candidate measurement reuses those counts to evaluate physical
 section and TOC sizes without traversing or materializing token payloads.

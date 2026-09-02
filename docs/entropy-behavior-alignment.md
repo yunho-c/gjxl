@@ -1,8 +1,9 @@
 # Entropy behavior alignment with libjxl
 
-- Status: proposed refactor plan
+- Status: implemented and qualified
 - Branch: `refactor/maximum-compression`
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
+- Qualification date: 2026-09-01
 
 ## Executive decision
 
@@ -24,7 +25,7 @@ libjxl becomes substantially more thorough at efforts 8-10, but it still
 commits to one block-context map, one derived coefficient-order set, and one
 entropy-coding family before it performs the expensive inner model search.
 
-This refactor will therefore establish three serializer behaviors:
+This refactor therefore establishes three serializer behaviors:
 
 1. **Balanced**, modeled after libjxl effort 7, becomes the default.
 2. **High density**, modeled after libjxl effort 9, is selected by effort 9-10
@@ -54,7 +55,7 @@ The Phase 1 serializer captures predate current main's flattened Prefix values
 and parallel exact-ANS section scoring. The ratios above are therefore the
 recorded comparison result, not a claim about current-main absolute latency.
 Those changes reduce execution overhead without removing the candidate/search
-graph, so a fresh Phase 0 baseline is required before implementation work.
+graph, so the refactor captured a fresh Phase 0 baseline before implementation.
 
 In the representative production 4K capture, GJXL model construction accounted
 for 78.48% of all sampled encoder CPU, versus 0.94% for libjxl. Final entropy
@@ -161,11 +162,11 @@ the extreme slowdown is the GJXL-local guarantee that each optional
 representation and entropy feature is accepted only after an exact
 complete-file comparison.
 
-## Proposed behavior contract
+## Implemented behavior contract
 
 ### Public selection
 
-Add a compression-mode option separate from effort and density:
+The compression-mode option is separate from effort and density:
 
 ```cpp
 enum class VarDctCompressionMode {
@@ -174,9 +175,12 @@ enum class VarDctCompressionMode {
 };
 ```
 
-Add `compression_mode = kAutomatic` to `VarDctEncodingOptions` and report the
-resolved serializer behavior in `VarDctEncodingSummary` and diagnostic profiles.
-The CLI adds `--maximum-compression`.
+`VarDctEncodingOptions` defaults `compression_mode` to `kAutomatic` and reports
+the resolved serializer behavior in `VarDctEncodingSummary` and diagnostic
+profiles.
+The CLI and benchmark expose `--maximum-compression`; the size-versioned C API
+exposes `GJXL_COMPRESSION_MAXIMUM`; and the safe Rust wrapper exposes
+`CompressionMode::Maximum`.
 
 Internally resolve one of:
 
@@ -224,10 +228,10 @@ identical complete encoder policies.
 | Exact rANS traversal | Selected model only | Selected model only | Every surviving representation/width candidate |
 | Complete-codestream comparison | None | None | Current exact tournament and all-Prefix fallback |
 
-The initial high-density implementation should use the pinned libjxl
-28-configuration set so that the reference relationship is explicit. After the
-policy is validated, the retained GJXL eight-configuration subset may replace it
-only through a separate measured change that reports the byte and time delta.
+The high-density implementation uses the pinned libjxl 28-configuration set so
+that the reference relationship is explicit. The retained GJXL
+eight-configuration subset may replace it only through a separate measured
+change that reports the byte and time delta.
 
 LZ77 is not part of GJXL's current VarDCT serializer profile and is not required
 for this alignment. High density is effort-9-like, not a claim of complete
@@ -235,8 +239,8 @@ feature parity with libjxl effort 9.
 
 ## Target dataflow
 
-Balanced and high-density paths should share the same single-representation
-front half:
+Balanced and high-density paths share the same single-representation front
+half:
 
 ```text
 validated VarDCT frame
@@ -261,10 +265,138 @@ validated VarDCT frame
   -> serialize the winning representation
 ```
 
-The two paths should meet again at the existing selected-code section writers.
-The refactor should not duplicate final token writing or frame assembly.
+The two paths meet again at the existing selected-code section writers. The
+refactor does not duplicate final token writing or frame assembly.
 
-## Plan of action
+## Implementation result
+
+The completed implementation follows the behavior matrix above:
+
+- balanced and high-density construct one occurrence-derived block-context map,
+  commit one derived coefficient-order set, and tokenize that representation
+  once;
+- the coder is selected before construction at the pinned 100-token boundary,
+  with Prefix retained for smaller or all-singleton streams;
+- balanced uses direct farthest-first ANS clustering, fixed
+  `HybridUint {4,2,0}`, approximate precision shifts, and the smallest
+  sufficient alphabet width;
+- high density adds ANS-population-cost cluster refinement, the exact 28-entry
+  configuration set from the pinned libjxl revision, all precision shifts, and
+  the smallest sufficient alphabet width; and
+- maximum compression retains the old map/order/coder/width tournaments behind
+  an explicitly named implementation path.
+
+The C++ workflow, direct serializer, CLI, encoding benchmark, size-versioned C
+API, and safe Rust wrapper all expose the policy. A C caller using the former
+12-byte `GJXLEncoderOptions` layout is accepted and defaults to automatic
+behavior; the new 16-byte layout appends `compression_mode`. Unknown values fail
+atomically.
+
+Source-reference tests pin the effort resolver, 99/100-token boundary,
+singleton rule, fast-versus-best cluster fixture, 28 high-density
+configurations, approximate/precise shift schedules, fixed balanced
+configuration, and smallest sufficient alphabet width. The pinned conformance
+target now encodes every prepared fixture twice in each ordinary behavior,
+decodes all three behaviors with pinned `djxl`, and requires exact decoded PFM
+sample equality. All 22 fixtures pass. The maximum-compression fixture hashes
+and the former default CLI SHA-256
+`e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558`
+remain pinned.
+
+## Fresh qualification
+
+The retained Release measurements use an Apple M4 Pro, the same canonical
+linear-sRGB PFM corpus and pinned libjxl revision as
+`gjxl-libjxl-comparison`, and the fully-resident Metal frontend so the remaining
+codestream tail is host work. Each representative timing below is the median
+of three independent processes, each with one warmup and three measured
+samples. Modes alternate within each process round. GJXL always uses requested
+distance 1.0. Libjxl distances are independently calibrated to the unchanged
+decoded GJXL score with the comparison's absolute-or-2%-relative tolerance.
+
+| Input | Encoder/policy | Matched distance | Complete encode | GJXL codestream | GJXL entropy model | Bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 1080p photo | GJXL balanced | 1.0 | 210.082 ms | 95.088 ms | 77.788 ms | 383,391 |
+| 1080p photo | GJXL high density | 1.0 | 269.015 ms | 143.785 ms | 124.734 ms | 385,421 |
+| 1080p photo | GJXL maximum | 1.0 | 316.245 ms | 203.631 ms | 181.073 ms | 393,920 |
+| 1080p photo | libjxl effort 7 | 0.78125 | 104.743 ms | n/a | n/a | 438,488 |
+| 1080p photo | libjxl effort 9 | 0.78125 | 1,962.539 ms | n/a | n/a | 467,882 |
+| 4K photo | GJXL balanced | 1.0 | 579.495 ms | 155.054 ms | 100.263 ms | 1,374,617 |
+| 4K photo | GJXL high density | 1.0 | 668.766 ms | 191.228 ms | 134.840 ms | 1,375,933 |
+| 4K photo | GJXL maximum | 1.0 | 771.285 ms | 334.608 ms | 261.804 ms | 1,388,425 |
+| 4K photo | libjxl effort 7 | 0.821875 | 421.805 ms | n/a | n/a | 1,442,764 |
+| 4K photo | libjxl effort 9 | 1.078711 | 7,477.875 ms | n/a | n/a | 1,298,698 |
+| Kodak | GJXL balanced | 1.0 | 52.236 ms | 24.124 ms | 19.570 ms | 75,601 |
+| Kodak | GJXL high density | 1.0 | 80.166 ms | 48.976 ms | 44.334 ms | 75,642 |
+| Kodak | GJXL maximum | 1.0 | 82.703 ms | 55.135 ms | 49.767 ms | 77,101 |
+| Kodak | libjxl effort 7 | 0.940625 | 25.220 ms | n/a | n/a | 83,120 |
+| Kodak | libjxl effort 9 | 1.116992 | 391.365 ms | n/a | n/a | 70,530 |
+| Padded 1080p | GJXL balanced | 1.0 | 215.693 ms | 94.730 ms | 74.256 ms | 533,877 |
+| Padded 1080p | GJXL high density | 1.0 | 265.476 ms | 133.947 ms | 112.862 ms | 534,432 |
+| Padded 1080p | GJXL maximum | 1.0 | 349.276 ms | 230.111 ms | 196.902 ms | 541,619 |
+| Padded 1080p | libjxl effort 7 | 0.807031 | 104.988 ms | n/a | n/a | 539,977 |
+| Padded 1080p | libjxl effort 9 | 0.933130 | 2,011.444 ms | n/a | n/a | 432,442 |
+| Padded 4K | GJXL balanced | 1.0 | 660.881 ms | 234.816 ms | 167.543 ms | 2,103,921 |
+| Padded 4K | GJXL high density | 1.0 | 756.962 ms | 274.343 ms | 203.595 ms | 2,106,365 |
+| Padded 4K | GJXL maximum | 1.0 | 1,094.219 ms | 673.393 ms | 550.403 ms | 2,132,228 |
+| Padded 4K | libjxl effort 7 | 0.925781 | 422.299 ms | n/a | n/a | 1,788,093 |
+| Padded 4K | libjxl effort 9 | 1.070435 | 7,707.169 ms | n/a | n/a | 1,451,674 |
+
+Effort 9 at the effort-7 distance reconstructed materially better on most
+inputs, so it was recalibrated before timing. All five accepted effort-9 scores
+met the declared absolute-or-2%-relative tolerance; deviations included 0.65%
+for the 4K photo, 1.54% for the 1080p photo, and the largest, 1.60%, for padded
+4K. The very high libjxl effort-9 time is therefore a measured result of the
+pinned high-effort policy, not a same-distance quality mismatch.
+
+On all twelve retained 1080p/4K photographs, one fresh process per mode with
+one warmup and three samples produced:
+
+| Result relative to maximum | Balanced | High density |
+| --- | ---: | ---: |
+| Median codestream speedup | 2.15x | 1.53x |
+| Minimum codestream speedup | 1.90x | 1.20x |
+| Median entropy-phase speedup | 2.59x | 1.59x |
+| Median byte change | -1.16% | -1.09% |
+| Largest byte regression | none (-0.33% best worst case) | +2.55% |
+
+The high-density size outlier is
+`imazen26-1029-planter-1080p`; it is reported rather than hidden in the median.
+The new direct ANS partition can outperform the former Prefix-derived maximum
+path, which explains why the median byte changes are improvements rather than
+regressions. This does not weaken maximum compression's compatibility purpose:
+it preserves the former exhaustive policy and bytes, not a promise that every
+future model family must be larger.
+
+Neutral Samply captures at 1 kHz used one validation encode plus one measured
+encode and achieved 98.6-99.9% resolved leaf CPU. The stage values are sampled
+thread CPU, not wall time:
+
+| Input | Policy | Entropy-model sampled CPU |
+| --- | --- | ---: |
+| 1080p photo | GJXL balanced / high / maximum | 18.207 / 162.188 / 1,543.354 ms |
+| 1080p photo | libjxl effort 7 / effort 9 | 19.055 / 306.007 ms |
+| 4K photo | GJXL balanced / high / maximum | 50.277 / 182.254 / 1,706.761 ms |
+| 4K photo | libjxl effort 7 / effort 9 | 45.499 / 801.002 ms |
+
+Maximum-to-balanced sampled model-construction CPU fell by 84.8x on the 1080p
+photo and 33.9x on the 4K photo. Maximum-to-high fell by 9.52x and 9.36x.
+Balanced GJXL model construction is now within roughly 10% of libjxl effort 7
+in these captures; high-density GJXL is below pinned libjxl effort 9. Final
+model/token emission remains in the same scale, confirming that the refactor
+removed search work rather than moving the bottleneck into emission.
+
+The original aspirational wall target was not universal: one of twelve photos
+measured 1.90x rather than 2x faster in the codestream phase. The sampled-CPU
+target was exceeded by a wide margin, the default no longer spends most encoder
+CPU constructing entropy models, and the re-profiled remaining complete-encode
+gap lies outside the former serializer tournament rather than being inferred
+from the old comparison.
+
+## Completed plan of action
+
+The phase descriptions below are retained as an implementation audit trail.
+Phases 0-7 are complete; their validation evidence is summarized above.
 
 ### Phase 0: freeze the current behavior as the maximum-compression oracle
 
@@ -451,7 +583,7 @@ successful decoding and exact reconstructed pixels, not preservation of a
 particular compressed representation. The opt-in maximum path provides the
 stronger byte-preservation contract for the old serializer policy.
 
-## Suggested implementation slices
+## Implemented slices
 
 Keep changes reviewable and independently testable:
 
@@ -536,7 +668,7 @@ Report at minimum:
   and alphabet width;
 - peak participating CPU threads.
 
-### Initial qualification targets
+### Original qualification targets
 
 These are targets for the refactor, not results:
 
@@ -556,6 +688,13 @@ These are targets for the refactor, not results:
 If a size target fails, first inspect representation selection and the ANS model
 policy. Do not restore the full outer tournament to the ordinary path without a
 separate cost/benefit result.
+
+Qualification met the byte-exact maximum, high-density speed, both median-size,
+pixel-equivalence, sampled-CPU, and matched-quality rerun targets. The one
+missed aspirational target was universal 2x balanced codestream wall speedup:
+the minimum was 1.90x on one of twelve photographs, while the median was 2.15x.
+This exception is retained explicitly rather than weakening or silently
+rewriting the original target.
 
 ## Risks and safeguards
 
@@ -624,3 +763,14 @@ The alignment is complete when:
 6. The default no longer spends most encoder CPU constructing entropy models,
    and the remaining performance gap is re-profiled rather than inferred from
    the pre-refactor comparison.
+
+## Completion audit
+
+| Definition-of-done item | Evidence | Status |
+| --- | --- | --- |
+| Balanced effort 7 and direct calls | Resolver and direct-entry source tests; one committed map/order representation | Complete |
+| High-density effort 9-10 and override | Resolver tests; best-clustering and 28-configuration source fixtures | Complete |
+| Explicit maximum preserves former behavior | Pinned fixture hashes, selected decisions, CLI SHA-256, C/C++ ABI tests, and Rust selection test | Complete |
+| Deterministic decoder/pixel equivalence | Two encodes per ordinary mode and pinned-`djxl` exact PFM comparison across all 22 conformance fixtures | Complete |
+| Fresh matched-quality qualification | Five representative input groups, twelve-photo corpus, all three GJXL policies, and pinned libjxl efforts 7/9 | Complete |
+| Default CPU behavior re-profiled | Neutral 1 kHz captures put balanced model construction near libjxl effort 7 and 33.9-84.8x below maximum | Complete |
