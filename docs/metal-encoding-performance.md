@@ -100,6 +100,46 @@ between every approximately one-second Metal sample. It is the preferred 4K
 regression signal for Metal changes; the alternating multi-process CPU/Metal
 protocol above remains the final speedup gate.
 
+### Same-frame codestream-tail experiment
+
+The optional libjxl-tail build adds a private `codestream-tail` benchmark scope
+owned by [`libjxl-tail.md`](libjxl-tail.md). It runs the chosen CPU or Metal
+frontend once and repeatedly serializes the retained completed frame through
+the selected tail backends. This is a tail comparison, not a complete encoder
+speedup claim.
+
+```sh
+cmake -S . -B build/libjxl-tail -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGJXL_BUILD_BENCHMARKS=ON \
+  -DGJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT=ON
+cmake --build build/libjxl-tail --target gjxl_encoding_benchmark -j
+
+build/libjxl-tail/gjxl_encoding_benchmark \
+  --scope codestream-tail \
+  --workload padded_1080p \
+  --tail-frontend metal \
+  --gpu-aq exact-coefficients \
+  --tail-backends both \
+  --libjxl-effort 7 \
+  --libjxl-threads 8 \
+  --warmups 3 \
+  --samples 5 \
+  --raw-samples tail-samples.json \
+  --artifacts tail-artifacts
+```
+
+Tail raw schema 1 records the source and patch revisions, explicit frontend,
+effort and thread policies, separately timed reusable-context setup, exact
+decoded-pixel validation, output sizes and SHA-256 hashes, size delta, and each
+alternating sample. `wall_nanoseconds` is elapsed outer latency.
+`backend_total_nanoseconds` is the nested backend timer. Libjxl phase fields
+separate adapter copy from internal state/model/section/assembly work; the warm
+per-frame `context_setup` field must be zero. The completed-frame fingerprint
+is recomputed outside every timed call and must match across the entire run.
+Do not add libjxl subphases to the outer total or compare this tail-only scope
+directly with a whole `cjxl` encode.
+
 ### Reproducible Metal profiling
 
 Use the profiling workflow when aggregate phase timings identify a GPU-heavy

@@ -42,10 +42,17 @@ Status EncodeVarDctCodestreamWithBackend(
         .butteraugli_distance = options.butteraugli_distance,
         .thread_count = options.libjxl_thread_count,
       };
-      status = profile == nullptr
-        ? EncodeVarDctCodestreamWithLibjxl(frame, libjxl_options, output)
-        : EncodeVarDctCodestreamWithLibjxlProfiled(
-            frame, libjxl_options, output, &candidate_profile.libjxl);
+      if (options.libjxl_context != nullptr) {
+        LibjxlTailProfile ignored;
+        status = EncodeVarDctCodestreamWithLibjxlContextProfiled(
+          frame, libjxl_options, *options.libjxl_context, output,
+          profile == nullptr ? &ignored : &candidate_profile.libjxl);
+      } else {
+        status = profile == nullptr
+          ? EncodeVarDctCodestreamWithLibjxl(frame, libjxl_options, output)
+          : EncodeVarDctCodestreamWithLibjxlProfiled(
+              frame, libjxl_options, output, &candidate_profile.libjxl);
+      }
       if (status.ok()) {
         candidate_profile.total_nanoseconds =
           candidate_profile.libjxl.total_nanoseconds;

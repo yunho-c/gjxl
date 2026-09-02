@@ -5,8 +5,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
+#include "core/geometry.h"
 #include "core/status.h"
 
 namespace gjxl {
@@ -70,7 +72,37 @@ struct LibjxlTailProfile {
                          const LibjxlTailProfile&) = default;
 };
 
+/// Reusable allocator and thread-runner context for warm tail measurements.
+/// This private type never crosses the installed GJXL API boundary.
+class LibjxlTailContext {
+public:
+  LibjxlTailContext(const LibjxlTailContext&) = delete;
+  LibjxlTailContext& operator=(const LibjxlTailContext&) = delete;
+  ~LibjxlTailContext();
+
+private:
+  LibjxlTailContext() = default;
+
+  void* implementation_ = nullptr;
+
+  friend Status CreateLibjxlTailContext(
+    size_t,
+    std::unique_ptr<LibjxlTailContext>*);
+  friend Status EncodeVarDctCodestreamWithLibjxlContextProfiled(
+    const VarDctEncoderFrame&,
+    LibjxlTailOptions,
+    LibjxlTailContext&,
+    std::vector<uint8_t>*,
+    LibjxlTailProfile*);
+};
+
 [[nodiscard]] bool LibjxlTailExperimentAvailable() noexcept;
+
+/// Creates the reusable warm context for exactly `thread_count` workers.
+/// Failure leaves `context` unchanged.
+[[nodiscard]] Status CreateLibjxlTailContext(
+  size_t thread_count,
+  std::unique_ptr<LibjxlTailContext>* context);
 
 /// Copies a completed frame into libjxl's ordinary encoder structures and
 /// returns field-specific pre/post-copy digests. Failure leaves `audit`
@@ -94,6 +126,22 @@ EncodeVarDctCodestreamWithLibjxl(const VarDctEncoderFrame &frame,
   LibjxlTailOptions options,
   std::vector<uint8_t>* output,
   LibjxlTailProfile* profile);
+
+/// Profiled warm-context variant. Context construction and destruction are
+/// outside `total_nanoseconds`; all frame-dependent adapter work remains in it.
+[[nodiscard]] Status EncodeVarDctCodestreamWithLibjxlContextProfiled(
+  const VarDctEncoderFrame& frame,
+  LibjxlTailOptions options,
+  LibjxlTailContext& context,
+  std::vector<uint8_t>* output,
+  LibjxlTailProfile* profile);
+
+/// Untimed validation helper backed by the pinned libjxl decoder. Decodes a
+/// raw codestream to interleaved RGB float samples and commits atomically.
+[[nodiscard]] Status DecodeCodestreamPixelsWithLibjxl(
+  const std::vector<uint8_t>& codestream,
+  Extent2D expected_extent,
+  std::vector<float>* pixels);
 
 } // namespace codestream_internal
 } // namespace gjxl

@@ -5,13 +5,25 @@
 
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "codec/codestream.h"
 
 namespace gjxl::codestream_internal {
 
+LibjxlTailContext::~LibjxlTailContext() = default;
+
 bool LibjxlTailExperimentAvailable() noexcept { return false; }
+
+Status CreateLibjxlTailContext(
+    size_t thread_count, std::unique_ptr<LibjxlTailContext>* context) {
+  if (context == nullptr || thread_count == 0) {
+    return Status::InvalidArgument("Libjxl tail context request is invalid");
+  }
+  return Status::Unavailable(
+      "GJXL was built without the libjxl tail experiment");
+}
 
 Status AuditVarDctStateWithLibjxl(const VarDctEncoderFrame &frame,
                                   LibjxlTailOptions options,
@@ -59,6 +71,26 @@ Status EncodeVarDctCodestreamWithLibjxlProfiled(
     return Status::InvalidArgument("Libjxl tail profile output is null");
   }
   return EncodeVarDctCodestreamWithLibjxl(frame, options, output);
+}
+
+Status EncodeVarDctCodestreamWithLibjxlContextProfiled(
+    const VarDctEncoderFrame& frame, LibjxlTailOptions options,
+    LibjxlTailContext&, std::vector<uint8_t>* output,
+    LibjxlTailProfile* profile) {
+  if (profile == nullptr) {
+    return Status::InvalidArgument("Libjxl tail profile output is null");
+  }
+  return EncodeVarDctCodestreamWithLibjxl(frame, options, output);
+}
+
+Status DecodeCodestreamPixelsWithLibjxl(
+    const std::vector<uint8_t>& codestream, Extent2D expected_extent,
+    std::vector<float>* pixels) {
+  if (pixels == nullptr || codestream.empty() || expected_extent.empty()) {
+    return Status::InvalidArgument("Libjxl decode request is invalid");
+  }
+  return Status::Unavailable(
+      "GJXL was built without the libjxl tail experiment");
 }
 
 } // namespace gjxl::codestream_internal

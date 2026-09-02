@@ -3,6 +3,7 @@
 
 #include "codestream/libjxl_tail_internal.h"
 
+#include <jxl/decode.h>
 #include <jxl/memory_manager.h>
 #include <jxl/thread_parallel_runner.h>
 
@@ -71,6 +72,25 @@ public:
 
 private:
   void* opaque_ = nullptr;
+};
+
+struct ContextImplementation {
+  Status Initialize(size_t requested_thread_count) {
+    if (!jxl::MemoryManagerInit(&memory_manager, nullptr)) {
+      return Status::OutOfMemory(
+        "Could not initialize the libjxl tail memory manager");
+    }
+    const Status status = runner.Create(memory_manager, requested_thread_count);
+    if (!status.ok()) {
+      return status;
+    }
+    thread_count = requested_thread_count;
+    return Status::Ok();
+  }
+
+  JxlMemoryManager memory_manager{};
+  ThreadRunnerHandle runner;
+  size_t thread_count = 0;
 };
 
 template <typename T>
@@ -217,6 +237,7 @@ Status MapBridgeFailure(jxl::Status status) {
 Status EncodeVarDctCodestreamWithLibjxlImpl(
   const VarDctEncoderFrame& frame,
   LibjxlTailOptions options,
+  ContextImplementation* supplied_context,
   std::vector<uint8_t>* output,
   LibjxlTailProfile* profile) {
 
@@ -242,32 +263,43 @@ Status EncodeVarDctCodestreamWithLibjxlImpl(
     candidate_profile.adapter_validation_and_copy_nanoseconds =
       ElapsedNanoseconds(adapter_begin);
 
-    const TailClock::time_point context_begin = TailClock::now();
-    JxlMemoryManager memory_manager;
-    if (!jxl::MemoryManagerInit(&memory_manager, nullptr)) {
-      return Status::OutOfMemory(
-        "Could not initialize the libjxl tail memory manager");
+    std::unique_ptr<ContextImplementation> owned_context;
+    ContextImplementation* context = nullptr;
+    if (supplied_context == nullptr) {
+      const TailClock::time_point context_begin = TailClock::now();
+      try {
+        owned_context = std::make_unique<ContextImplementation>();
+      } catch (const std::bad_alloc&) {
+        return Status::OutOfMemory(
+          "Could not allocate the libjxl tail context");
+      }
+      const Status context_status =
+        owned_context->Initialize(options.thread_count);
+      if (!context_status.ok()) {
+        return context_status;
+      }
+      context = owned_context.get();
+      candidate_profile.context_setup_nanoseconds =
+        ElapsedNanoseconds(context_begin);
+    } else {
+      context = supplied_context;
+      if (context == nullptr || context->thread_count != options.thread_count) {
+        return Status::InvalidArgument(
+          "Libjxl tail context thread count does not match the request");
+      }
     }
-    ThreadRunnerHandle runner;
-    const Status runner_status =
-      runner.Create(memory_manager, options.thread_count);
-    if (!runner_status.ok()) {
-      return runner_status;
-    }
-    candidate_profile.context_setup_nanoseconds =
-      ElapsedNanoseconds(context_begin);
 
     const jxl::PrecomputedVarDctEncodeOptions bridge_options{
       .effort = options.effort,
       .butteraugli_distance = options.butteraugli_distance,
       .num_threads = options.thread_count,
-      .runner = runner.runner(),
-      .runner_opaque = runner.opaque(),
+      .runner = context->runner.runner(),
+      .runner_opaque = context->runner.opaque(),
     };
-    jxl::PaddedBytes bridge_output(&memory_manager);
+    jxl::PaddedBytes bridge_output(&context->memory_manager);
     jxl::PrecomputedVarDctEncodeProfile bridge_profile;
     const jxl::Status bridge_status = jxl::EncodePrecomputedVarDctFrame(
-      &memory_manager, storage.frame, bridge_options, &bridge_output,
+      &context->memory_manager, storage.frame, bridge_options, &bridge_output,
       &bridge_profile);
     if (!bridge_status) {
       return MapBridgeFailure(bridge_status);
@@ -318,10 +350,118 @@ Status EncodeVarDctCodestreamWithLibjxlImpl(
   return Status::Ok();
 }
 
+Status DecodePixels(
+  const std::vector<uint8_t>& codestream,
+  Extent2D expected_extent,
+  std::vector<float>* pixels) {
+
+  JxlDecoder* decoder = JxlDecoderCreate(nullptr);
+  if (decoder == nullptr) {
+    return Status::OutOfMemory("Could not create the pinned libjxl decoder");
+  }
+  const auto destroy = [&] { JxlDecoderDestroy(decoder); };
+  if (JxlDecoderSubscribeEvents(
+        decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS ||
+      JxlDecoderSetInput(decoder, codestream.data(), codestream.size()) !=
+        JXL_DEC_SUCCESS) {
+    destroy();
+    return Status::Internal("Could not initialize the pinned libjxl decoder");
+  }
+  JxlDecoderCloseInput(decoder);
+  const JxlPixelFormat format{
+    3, JXL_TYPE_FLOAT, JXL_NATIVE_ENDIAN, 0,
+  };
+  bool saw_basic_info = false;
+  bool saw_full_image = false;
+  std::vector<float> candidate;
+  while (true) {
+    const JxlDecoderStatus status = JxlDecoderProcessInput(decoder);
+    if (status == JXL_DEC_BASIC_INFO) {
+      JxlBasicInfo info;
+      if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS ||
+          info.xsize != expected_extent.width ||
+          info.ysize != expected_extent.height) {
+        destroy();
+        return Status::Internal(
+          "Pinned libjxl decoded unexpected image dimensions");
+      }
+      saw_basic_info = true;
+    } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
+      size_t byte_count = 0;
+      if (JxlDecoderImageOutBufferSize(decoder, &format, &byte_count) !=
+            JXL_DEC_SUCCESS ||
+          byte_count % sizeof(float) != 0) {
+        destroy();
+        return Status::Internal(
+          "Pinned libjxl reported an invalid image buffer size");
+      }
+      try {
+        candidate.resize(byte_count / sizeof(float));
+      } catch (const std::bad_alloc&) {
+        destroy();
+        return Status::OutOfMemory(
+          "Could not allocate the pinned decoder output");
+      } catch (const std::length_error&) {
+        destroy();
+        return Status::OutOfMemory(
+          "Pinned decoder output dimensions are too large");
+      }
+      if (JxlDecoderSetImageOutBuffer(
+            decoder, &format, candidate.data(), byte_count) !=
+          JXL_DEC_SUCCESS) {
+        destroy();
+        return Status::Internal(
+          "Could not attach the pinned decoder output buffer");
+      }
+    } else if (status == JXL_DEC_FULL_IMAGE) {
+      saw_full_image = true;
+    } else if (status == JXL_DEC_SUCCESS) {
+      destroy();
+      if (!saw_basic_info || !saw_full_image || candidate.empty()) {
+        return Status::Internal(
+          "Pinned libjxl did not produce a complete decoded image");
+      }
+      *pixels = std::move(candidate);
+      return Status::Ok();
+    } else {
+      destroy();
+      return Status::Internal("Pinned libjxl could not decode the codestream");
+    }
+  }
+}
+
 }  // namespace
+
+LibjxlTailContext::~LibjxlTailContext() {
+  delete static_cast<ContextImplementation*>(implementation_);
+}
 
 bool LibjxlTailExperimentAvailable() noexcept {
   return true;
+}
+
+Status CreateLibjxlTailContext(
+  size_t thread_count,
+  std::unique_ptr<LibjxlTailContext>* context) {
+
+  if (context == nullptr || thread_count == 0) {
+    return Status::InvalidArgument("Libjxl tail context request is invalid");
+  }
+  std::unique_ptr<LibjxlTailContext> candidate;
+  std::unique_ptr<ContextImplementation> implementation;
+  try {
+    candidate = std::unique_ptr<LibjxlTailContext>(new LibjxlTailContext());
+    implementation = std::make_unique<ContextImplementation>();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory("Could not allocate the libjxl tail context");
+  }
+  const Status status = implementation->Initialize(thread_count);
+  if (!status.ok()) {
+    return status;
+  }
+  candidate->implementation_ = implementation.release();
+  *context = std::move(candidate);
+  return Status::Ok();
 }
 
 Status AuditVarDctStateWithLibjxl(
@@ -375,7 +515,7 @@ Status EncodeVarDctCodestreamWithLibjxl(
   std::vector<uint8_t>* output) {
 
   return EncodeVarDctCodestreamWithLibjxlImpl(
-    frame, options, output, nullptr);
+    frame, options, nullptr, output, nullptr);
 }
 
 Status EncodeVarDctCodestreamWithLibjxlProfiled(
@@ -388,7 +528,34 @@ Status EncodeVarDctCodestreamWithLibjxlProfiled(
     return Status::InvalidArgument("Libjxl tail profile output is null");
   }
   return EncodeVarDctCodestreamWithLibjxlImpl(
-    frame, options, output, profile);
+    frame, options, nullptr, output, profile);
+}
+
+Status EncodeVarDctCodestreamWithLibjxlContextProfiled(
+  const VarDctEncoderFrame& frame,
+  LibjxlTailOptions options,
+  LibjxlTailContext& context,
+  std::vector<uint8_t>* output,
+  LibjxlTailProfile* profile) {
+
+  if (profile == nullptr) {
+    return Status::InvalidArgument("Libjxl tail profile output is null");
+  }
+  return EncodeVarDctCodestreamWithLibjxlImpl(
+    frame, options,
+    static_cast<ContextImplementation*>(context.implementation_), output,
+    profile);
+}
+
+Status DecodeCodestreamPixelsWithLibjxl(
+  const std::vector<uint8_t>& codestream,
+  Extent2D expected_extent,
+  std::vector<float>* pixels) {
+
+  if (pixels == nullptr || codestream.empty() || expected_extent.empty()) {
+    return Status::InvalidArgument("Libjxl decode request is invalid");
+  }
+  return DecodePixels(codestream, expected_extent, pixels);
 }
 
 }  // namespace gjxl::codestream_internal

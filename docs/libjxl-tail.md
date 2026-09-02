@@ -52,6 +52,10 @@ bridge seam and a non-installed experimental workflow:
 - libjxl patch `ffd9bb38fd66147f66d9542a91f3e4095a5b4811` adds elapsed,
   non-overlapping phase measurements to the prepared-frame tail without
   changing the ordinary libjxl encoder result;
+- libjxl patch `ee0f86c2d5900159132028d84b490a47fea075af` keeps integer
+  qDC authoritative for modular serialization while preserving GJXL's supplied
+  decoder-equivalent float DC cache for encoder-side AC metadata and exact
+  state auditing;
 - a private backend dispatcher selects GJXL or libjxl explicitly, never falls
   back, and commits output and profile data only after success;
 - an injected serializer seam at the existing post-pipeline boundary keeps
@@ -66,9 +70,10 @@ bridge seam and a non-installed experimental workflow:
 The Milestone 0 results captured so far are provisional. They cover a small
 fixture, pinned-decoder conformance, and initial padded-1080p profiles, but not
 yet the complete independent-process, 4K, real-photograph, target-1.0/1.2
-matrix required by the milestone. The retained same-frame benchmark and final
-multi-process experiment are still pending; production entry points continue
-to use GJXL's native tail exclusively.
+matrix required by the milestone. The retained same-frame benchmark is now
+implemented and passes small CPU/Metal correctness smokes, but the final
+multi-process corpus experiment is still pending; production entry points
+continue to use GJXL's native tail exclusively.
 
 ## Questions the experiment must answer
 
@@ -520,9 +525,11 @@ introduce a numerical tolerance until the semantic mismatch is understood.
 library. Production calls inject a native-only serializer; tests inject the
 explicit dispatcher at the same post-pipeline boundary. Profiled calls report
 the selected backend, complete-call elapsed time, adapter copy, context setup,
-and libjxl's internal non-overlapping phases. A reusable warm context is not
-yet implemented, so current libjxl measurements use the documented
-complete-call boundary and include runner construction and destruction.
+and libjxl's internal non-overlapping phases. The ordinary hybrid workflow uses
+the complete-call boundary. The private adapter also provides a reusable
+allocator/thread-runner context for the tail-only benchmark; its per-frame
+profile reports zero context-setup time and the separately timed setup is kept
+in the raw workload record.
 
 Deliverables:
 
@@ -550,6 +557,26 @@ Exit criteria:
 ### 5. Add the same-frame benchmark
 
 **Estimate:** 1-2 days
+
+**Status (2026-09-01): implemented.** `gjxl_encoding_benchmark` accepts the
+`codestream-tail` scope, CPU or Metal frontend selection, `gjxl`, `libjxl`, or
+`both` timed backends, libjxl effort and worker count, atomic raw JSON output,
+and an optional artifact directory. The frontend runs exactly once. Every
+timed encode receives the retained `const VarDctEncoderFrame&`, recomputes its
+canonical SHA-256 fingerprint outside the timed region, and rejects a changed
+frame or codestream. Paired samples alternate order; every sample contains its
+own output SHA-256, elapsed outer wall time, backend total, and phase profile.
+
+Before timing, the benchmark compares complete-call and warm-context libjxl
+bytes, decodes the native and libjxl codestreams through the pinned libjxl
+decoder, and requires exact equality of interleaved RGB float samples. The raw
+tail schema is version 1 and is separate from the existing public-workflow raw
+schema. Enabled and disabled CLI tests cover backend names, effort bounds,
+unavailability without output replacement, JSON fields, fingerprints, phase
+boundaries, and retained codestream/decoded artifacts. CPU and exact-
+coefficient Metal smokes pass for 128x96 synthetic/gradient frames with one and
+eight-worker libjxl policies; these same-process smokes are correctness checks,
+not retained performance conclusions.
 
 Add a `codestream-tail` scope to `gjxl_encoding_benchmark`. This scope must run
 the selected frontend once, retain the resulting `VarDctEncoderFrame`, and

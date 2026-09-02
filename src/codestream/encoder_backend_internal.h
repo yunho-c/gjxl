@@ -27,6 +27,7 @@ struct VarDctCodestreamBackendOptions {
   int libjxl_effort = 7;
   float butteraugli_distance = 1.0f;
   size_t libjxl_thread_count = 1;
+  LibjxlTailContext* libjxl_context = nullptr;
 };
 
 struct VarDctCodestreamBackendProfile {

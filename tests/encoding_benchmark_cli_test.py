@@ -64,6 +64,7 @@ ELIMINATED_WORK_PHASES = {
 class EncodingBenchmarkCliTest(unittest.TestCase):
     benchmark: Path
     metallib: Path
+    libjxl_tail_enabled: bool
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="gjxl-raw-test-")
@@ -94,6 +95,137 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         return subprocess.run(
             command, check=False, capture_output=True, text=True
         )
+
+    def run_tail_benchmark(
+        self, *arguments: str
+    ) -> subprocess.CompletedProcess[str]:
+        command = [
+            str(self.benchmark),
+            "--scope",
+            "codestream-tail",
+            "--workload",
+            "synthetic_128x96",
+            "--tail-frontend",
+            "cpu",
+            "--warmups",
+            "0",
+            "--samples",
+            "1",
+            *arguments,
+        ]
+        return subprocess.run(
+            command, check=False, capture_output=True, text=True
+        )
+
+    def test_tail_scope_validates_backend_names_and_effort_bounds(self) -> None:
+        invalid_backend = self.run_tail_benchmark(
+            "--tail-backends", "mystery"
+        )
+        self.assertNotEqual(invalid_backend.returncode, 0)
+        self.assertIn("Unknown tail backend selection", invalid_backend.stderr)
+
+        for effort in ("0", "11"):
+            result = self.run_tail_benchmark(
+                "--tail-backends", "gjxl", "--libjxl-effort", effort
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Libjxl", result.stderr)
+
+        native = self.run_tail_benchmark("--tail-backends", "gjxl")
+        self.assertEqual(native.returncode, 0, native.stderr)
+        self.assertIn("timing_ms gjxl_tail", native.stdout)
+
+    def test_tail_scope_raw_samples_artifacts_and_availability(self) -> None:
+        destination = self.directory / "tail.json"
+        artifact_directory = self.directory / "artifacts"
+        if not self.libjxl_tail_enabled:
+            destination.write_text("sentinel", encoding="utf-8")
+            unavailable = self.run_tail_benchmark(
+                "--tail-backends",
+                "both",
+                "--raw-samples",
+                str(destination),
+            )
+            self.assertNotEqual(unavailable.returncode, 0)
+            self.assertIn("libjxl tail is unavailable", unavailable.stderr)
+            self.assertEqual(
+                destination.read_text(encoding="utf-8"), "sentinel"
+            )
+
+            native = self.run_tail_benchmark(
+                "--tail-backends",
+                "gjxl",
+                "--raw-samples",
+                str(destination),
+            )
+            self.assertEqual(native.returncode, 0, native.stderr)
+            document = json.loads(destination.read_text(encoding="utf-8"))
+            workload = document["workloads"][0]
+            self.assertEqual(workload["decoded_validation"], "not-run")
+            self.assertEqual(len(workload["samples"]), 1)
+            self.assertEqual(workload["samples"][0]["backend"], "gjxl")
+            return
+
+        result = self.run_tail_benchmark(
+            "--tail-backends",
+            "both",
+            "--libjxl-effort",
+            "5",
+            "--libjxl-threads",
+            "1",
+            "--raw-samples",
+            str(destination),
+            "--artifacts",
+            str(artifact_directory),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("decoded=exact-float-equal", result.stdout)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["schema_version"], 1)
+        self.assertEqual(document["scope"], "codestream-tail")
+        self.assertEqual(document["timing"], "elapsed-wall-time")
+        self.assertEqual(document["tail_boundary"], "warm-context")
+        self.assertEqual(document["frontend"], "cpu")
+        self.assertEqual(document["backends"], "both")
+        self.assertEqual(document["libjxl_effort"], 5)
+        self.assertEqual(document["libjxl_threads"], 1)
+        self.assertTrue(document["libjxl_calling_thread_participates"])
+        self.assertNotEqual(document["libjxl_base_revision"], "unavailable")
+        self.assertNotEqual(document["libjxl_patch_revision"], "unavailable")
+        workload = document["workloads"][0]
+        fingerprint = workload["frame_fingerprint_sha256"]
+        self.assertEqual(len(fingerprint), 64)
+        self.assertEqual(workload["decoded_validation"], "exact-float-equal")
+        self.assertGreater(workload["libjxl_context_setup_nanoseconds"], 0)
+        self.assertEqual(
+            set(workload["correctness_outputs"]), {"gjxl", "libjxl"}
+        )
+        self.assertIsInstance(workload["size_delta"]["percent"], float)
+        samples = workload["samples"]
+        self.assertEqual(len(samples), 2)
+        self.assertEqual(
+            [(sample["order_index"], sample["backend"]) for sample in samples],
+            [(0, "gjxl"), (1, "libjxl")],
+        )
+        for sample in samples:
+            self.assertEqual(sample["frame_fingerprint_sha256"], fingerprint)
+            self.assertEqual(len(sample["codestream_sha256"]), 64)
+            self.assertGreater(sample["wall_nanoseconds"], 0)
+            self.assertGreater(sample["backend_total_nanoseconds"], 0)
+            self.assertGreater(sample["encoded_bytes"], 2)
+        libjxl = samples[1]
+        self.assertEqual(libjxl["phase_nanoseconds"]["context_setup"], 0)
+        self.assertGreater(
+            libjxl["phase_nanoseconds"]["adapter_validation_and_copy"], 0
+        )
+        self.assertGreater(
+            libjxl["phase_nanoseconds"]["libjxl_internal"], 0
+        )
+        for artifact in workload["artifacts"].values():
+            path = Path(artifact)
+            self.assertTrue(path.is_file(), path)
+            self.assertGreater(path.stat().st_size, 0)
+        self.assertFalse(list(self.directory.glob("tail.json.tmp-*")))
 
     def test_external_metallib_writes_integer_raw_samples_atomically(self) -> None:
         destination = self.directory / "samples.json"
@@ -521,9 +653,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--benchmark", type=Path, required=True)
     parser.add_argument("--metallib", type=Path, required=True)
+    parser.add_argument("--libjxl-tail-enabled", choices=("0", "1"), required=True)
     arguments, remaining = parser.parse_known_args()
     EncodingBenchmarkCliTest.benchmark = arguments.benchmark.resolve()
     EncodingBenchmarkCliTest.metallib = arguments.metallib.resolve()
+    EncodingBenchmarkCliTest.libjxl_tail_enabled = (
+        arguments.libjxl_tail_enabled == "1"
+    )
     unittest.main(argv=[__file__, *remaining])
 
 

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 #if GJXL_TEST_LIBJXL_TAIL_ENABLED
@@ -482,6 +483,40 @@ int main() {
     std::cerr << "Libjxl-tail phase profiling is inconsistent\n";
     return 1;
   }
+  std::unique_ptr<gjxl::codestream_internal::LibjxlTailContext> context;
+  if (!CheckStatus(
+          gjxl::codestream_internal::CreateLibjxlTailContext(1, &context),
+          gjxl::StatusCode::kOk, "Create warm bridge context") ||
+      context == nullptr) {
+    return 1;
+  }
+  std::vector<uint8_t> warm_output;
+  gjxl::codestream_internal::LibjxlTailProfile warm_profile;
+  if (!CheckStatus(
+          gjxl::codestream_internal::
+              EncodeVarDctCodestreamWithLibjxlContextProfiled(
+                  frame, {}, *context, &warm_output, &warm_profile),
+          gjxl::StatusCode::kOk, "Warm-context bridge request") ||
+      warm_output != single_thread_output ||
+      warm_profile.context_setup_nanoseconds != 0 ||
+      warm_profile.worker_count != 1 ||
+      !warm_profile.calling_thread_participates) {
+    std::cerr << "Warm-context tail behavior is inconsistent\n";
+    return 1;
+  }
+  warm_output = sentinel;
+  warm_profile = profile_sentinel;
+  if (!CheckStatus(
+          gjxl::codestream_internal::
+              EncodeVarDctCodestreamWithLibjxlContextProfiled(
+                  frame, {.thread_count = 8}, *context, &warm_output,
+                  &warm_profile),
+          gjxl::StatusCode::kInvalidArgument,
+          "Mismatched warm-context request") ||
+      warm_output != sentinel || warm_profile != profile_sentinel) {
+    std::cerr << "A mismatched context changed caller-visible output\n";
+    return 1;
+  }
   output.clear();
   if (!CheckStatus(gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
                        frame, {}, &output),
@@ -559,6 +594,25 @@ int main() {
                    "Valid bridge request") ||
       output != sentinel) {
     std::cerr << "A failed bridge request changed caller-visible output\n";
+    return 1;
+  }
+  std::unique_ptr<gjxl::codestream_internal::LibjxlTailContext> context;
+  if (!CheckStatus(
+          gjxl::codestream_internal::CreateLibjxlTailContext(1, &context),
+          gjxl::StatusCode::kUnavailable,
+          "Unavailable warm-context request") ||
+      context != nullptr) {
+    std::cerr << "Unavailable context creation changed its output\n";
+    return 1;
+  }
+  std::vector<float> decoded_sentinel{1.0f, 2.0f};
+  if (!CheckStatus(
+          gjxl::codestream_internal::DecodeCodestreamPixelsWithLibjxl(
+              output, frame.geometry().frame(), &decoded_sentinel),
+          gjxl::StatusCode::kUnavailable,
+          "Unavailable pinned-decoder request") ||
+      decoded_sentinel != std::vector<float>({1.0f, 2.0f})) {
+    std::cerr << "Unavailable decode changed caller-visible output\n";
     return 1;
   }
 #endif

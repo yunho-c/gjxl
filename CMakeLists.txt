@@ -2663,15 +2663,50 @@ if(GJXL_BUILD_BENCHMARKS)
   target_link_libraries(
     gjxl_encoding_benchmark
     PRIVATE
-      gjxl_codestream
+      gjxl_libjxl_tail_experiment
       gjxl_metal
       gjxl_pfm_io
   )
+
+  if(NOT Git_FOUND)
+    find_package(Git QUIET)
+  endif()
+  set(GJXL_BENCHMARK_GIT_REVISION "unknown")
+  if(Git_FOUND)
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}"
+        rev-parse HEAD
+      OUTPUT_VARIABLE GJXL_BENCHMARK_GIT_REVISION
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}"
+        status --porcelain
+      OUTPUT_VARIABLE GJXL_BENCHMARK_GIT_DIRTY
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(GJXL_BENCHMARK_GIT_DIRTY)
+      string(APPEND GJXL_BENCHMARK_GIT_REVISION "-dirty")
+    endif()
+  endif()
+  set(GJXL_BENCHMARK_LIBJXL_BASE_REVISION "unavailable")
+  set(GJXL_BENCHMARK_LIBJXL_PATCH_REVISION "unavailable")
+  if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
+    set(GJXL_BENCHMARK_LIBJXL_BASE_REVISION
+      "${GJXL_LIBJXL_TAIL_BASE_REVISION}")
+    set(GJXL_BENCHMARK_LIBJXL_PATCH_REVISION
+      "${GJXL_LIBJXL_TAIL_PATCH_REVISION}")
+  endif()
 
   target_compile_definitions(
     gjxl_encoding_benchmark
     PRIVATE
       GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+      GJXL_BENCHMARK_GIT_REVISION="${GJXL_BENCHMARK_GIT_REVISION}"
+      GJXL_LIBJXL_TAIL_BASE_REVISION="${GJXL_BENCHMARK_LIBJXL_BASE_REVISION}"
+      GJXL_LIBJXL_TAIL_PATCH_REVISION="${GJXL_BENCHMARK_LIBJXL_PATCH_REVISION}"
   )
 
   add_dependencies(
@@ -2687,6 +2722,7 @@ if(GJXL_BUILD_BENCHMARKS)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoding_benchmark_cli_test.py"
         --benchmark $<TARGET_FILE:gjxl_encoding_benchmark>
         --metallib "${GJXL_METALLIB}"
+        --libjxl-tail-enabled $<BOOL:${GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT}>
     )
     set_tests_properties(
       encoding_benchmark_cli
