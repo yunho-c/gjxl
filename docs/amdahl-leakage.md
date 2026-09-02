@@ -2,7 +2,7 @@
 
 - Status: active implementation roadmap
 - Original profile revision: `af3a9e6`
-- Current implementation revision: `5136648` (on top of `3d1b93b`)
+- Current roadmap baseline: `40b6a11`
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
 - Profile date: 2026-09-02
 - Related analysis: [entropy behavior alignment](entropy-behavior-alignment.md)
@@ -37,7 +37,7 @@ The roadmap priorities are:
 
 | Priority | Area | Current signal or status | Next implementation target |
 | ---: | --- | ---: | --- |
-| 2 | Preparation and storage | First slice landed: padded-4K input preparation 97.58 -> 82.20 ms and peak RSS 1.56 -> 1.22 GiB | Remove the remaining duplicate Opsin copy |
+| 2 | Preparation and storage | Borrowed-Opsin slice: padded-4K input preparation 89.96 -> 76.45 ms and peak RSS 1.24 -> 1.17 GiB | Remove padded linear RGB through the priority 3 direct-write path |
 | 3 | Color conversion, validation, and copies | about 10.2 ms GJXL versus 2.2 ms libjxl color-transform attribution | Validate once and transform directly into final storage |
 | 4 | Quantization-matrix chromaticity statistics | about 16.8 ms GJXL versus 5.9 ms libjxl attribution | Apply libjxl's effort gate and vectorize the retained pass |
 | 5 | Metal readback and frame assembly | about 10.2 ms readback plus 12.9 ms assembly | Remove intermediate copies and redundant full-frame scans |
@@ -89,11 +89,11 @@ overlap in wall time, but they identify actual repeated memory passes.
 
 ### Landed first slice: two output contracts
 
-Commits `3d1b93b` and `5136648` made fully resident Metal the default for
-qualified automatic single-target encodes and removed unused host storage from
-that path. The implementation does not carry a six-way execution plan. It uses
-two concrete output contracts, with the existing materialization flags handling
-only optional results inside those contracts:
+Commit `3d1b93b` and the first storage slice recorded in `40b6a11` made fully
+resident Metal the default for qualified automatic single-target encodes and
+removed unused host storage from that path. The implementation does not carry a
+six-way execution plan. It uses two concrete output contracts, with the existing
+materialization flags handling only optional results inside those contracts:
 
 | Caller or mode | Output contract | Host behavior |
 | --- | --- | --- |
@@ -136,10 +136,10 @@ not for arbitrary backend changes between target-size attempts.
 The retained A/B used Release builds and five alternating independent process
 pairs per workload, with two warmups and five measured samples per process. The
 table reports the median of process medians. Measurements were captured on
-patch-equivalent commits `535acfb` and `7732b9f`; their source and test trees are
-identical to the `3d1b93b` and `5136648` cherry-picks named here.
+patch-equivalent commits `535acfb` and `7732b9f`; their changes are recorded in
+the `3d1b93b` and `40b6a11` branch history named here.
 
-| Workload | Stage | Parent | `5136648` | Change |
+| Workload | Stage | Parent | First storage slice | Change |
 | --- | --- | ---: | ---: | ---: |
 | padded 1080p | Input preparation | 23.359 ms | 18.953 ms | -4.406 ms (-18.9%) |
 | padded 1080p | Complete encode | 174.466 ms | 171.169 ms | -3.297 ms (-1.9%) |
@@ -158,16 +158,44 @@ sample under `/usr/bin/time -l`, reduced median maximum resident set size from
 matrix passed 66 of 67 tests; the only failure was the pre-existing CPU
 quantization golden mismatch, reproduced unchanged on the parent.
 
-### Next storage slice: remove duplicate image ownership
+### Implemented second slice: borrow the coding Opsin image
 
-`PrepareQuantizationPipeline()` still copies the workflow-owned immutable Opsin
-image into `PreparedQuantizationPipeline::coding_opsin`. Remove that full
-`opsin -> coding_opsin` copy by borrowing the workflow view for the synchronous
-encode lifetime. The prepared GPU compatibility key must follow the borrowed
-image's lifetime and content generation; pointer identity alone must not make a
-later image look reusable.
+`PreparedQuantizationPipeline::coding_opsin` now borrows the workflow-owned
+immutable Opsin view for the synchronous prepared lifetime. Exact and CPU paths
+still own a separate preprocessed image because Gaborish inversion changes their
+search-domain pixels; resident paths no longer create a duplicate of the
+unfiltered coding image.
 
-A subsequent, separately qualified change can remove `padded_linear`: transform
+Each successful pipeline preparation receives a monotonic source generation.
+`PreparedAdaptiveQuantization` records that generation and discards its
+source-dependent evaluator and resident views when a new preparation is bound,
+even if the caller reused identical host addresses. AC-search scratch is retained
+because it caches capacity rather than source pixels. A focused regression test
+rewrites one image in place, re-prepares through the same views, and verifies the
+reused path against a fresh resident frame and codestream.
+
+Five alternating Release process pairs measured the following preparation-stage
+change relative to `40b6a11`, with two warmups and five samples per process:
+
+| Workload | Parent | Borrowed Opsin | Change |
+| --- | ---: | ---: | ---: |
+| padded 1080p | 19.031 ms | 17.196 ms | -1.835 ms (-9.6%) |
+| padded 4K | 89.961 ms | 76.447 ms | -13.514 ms (-15.0%) |
+
+All five paired 4K preparation results favored the borrowed view. Complete
+encode timing remained GPU-noise-limited: the median paired difference was
+-6.6 ms at 1080p and -1.6 ms at 4K, with wide ranges, so this slice makes no
+standalone end-to-end speed claim. Every sample selected Metal and retained the
+same encoded size as its parent cohort.
+
+Three alternating padded-4K RSS pairs reduced median maximum resident set size
+from 1.24 GiB to 1.17 GiB, approximately 70 MiB or 5.5%. The pinned-libjxl
+Release matrix again passed 66 of 67 tests; the sole failure was the unchanged,
+pre-existing CPU quantization golden mismatch.
+
+### Next storage slice: remove padded linear RGB
+
+A separately qualified change can remove `padded_linear`: transform
 the real source extent directly into a padded Opsin destination, then extend the
 already-transformed right and bottom edges. Because the transform is pointwise,
 that ordering should preserve padded values while eliminating another owned
@@ -201,11 +229,11 @@ device pixels or Butteraugli reference.
 
 ### Remaining gates
 
-The next borrowed-Opsin and direct-transform changes must preserve view lifetime,
-failure atomicity, and prepared-GPU invalidation. Required coverage includes
-automatic CPU fallback, forced CPU and Metal, target-size repeated attempts,
-maximum-error, final-score diagnostics, concurrent C API calls, batch workers,
-allocation failures, and device-error invalidation.
+The direct-transform change must preserve borrowed-view lifetime, failure
+atomicity, and prepared-GPU invalidation. Required coverage includes automatic
+CPU fallback, forced CPU and Metal, target-size repeated attempts, maximum-error,
+final-score diagnostics, concurrent C API calls, batch workers, allocation
+failures, and device-error invalidation.
 
 ## Priority 3: validate and move image pixels once
 
@@ -527,11 +555,12 @@ separates low-risk work elimination from lifetime and layout redesign:
 
 1. **Completed in `3d1b93b`:** make fully resident Metal the ordinary default
    while retaining exact coefficients as an explicit compatibility path.
-2. **Completed in `5136648`:** give encoding and public diagnostics two concrete
+2. **Completed in `40b6a11`:** give encoding and public diagnostics two concrete
    output contracts; remove dead resident host materialization and defer CPU-only
    preparation until CPU is selected.
-3. Remove the duplicate workflow-to-prepared Opsin ownership, with explicit
-   borrowed-view lifetime and prepared-state invalidation.
+3. **Completed in the current slice:** remove duplicate workflow-to-prepared
+   Opsin ownership, with explicit borrowed-view lifetime and prepared-state
+   invalidation.
 4. Implement priority 3's direct-write, single-validation color path, including
    separately qualified removal of padded linear RGB.
 5. Implement priority 4's effort/mode gate and vectorized retained statistics.

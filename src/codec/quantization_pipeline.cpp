@@ -3,6 +3,7 @@
 
 #include "codec/quantization_pipeline.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,11 @@
 
 namespace gjxl {
 namespace {
+
+uint64_t NextPreparedQuantizationPipelineGeneration() noexcept {
+  static std::atomic<uint64_t> next_generation{1};
+  return next_generation.fetch_add(1, std::memory_order_relaxed);
+}
 
 class CpuGaborishInverseProvider final
     : public quantization_pipeline_internal::GaborishInverseProvider {
@@ -153,7 +159,7 @@ Status quantization_pipeline_internal::PrepareQuantizationPreprocessing(
   GaborishInverseProvider& gaborish_inverse,
   bool fast_initial_color_correlation) {
 
-  if (!prepared.coding_opsin.const_view().valid() ||
+  if (!prepared.coding_opsin.valid() ||
       prepared.coding_opsin.extent() != prepared.padded_extent ||
       !prepared.profile.valid()) {
     return Status::InvalidArgument(
@@ -173,12 +179,12 @@ Status quantization_pipeline_internal::PrepareQuantizationPreprocessing(
   Status status = Status::Ok();
   if (prepared.profile.loop_filter.gaborish) {
     status = gaborish_inverse.Apply(
-      prepared.coding_opsin.const_view(),
+      prepared.coding_opsin,
       prepared.profile.gaborish_inverse_multipliers,
       prepared.preprocessed_opsin.view());
   } else {
     CopyImage(
-      prepared.coding_opsin.const_view(), prepared.preprocessed_opsin.view());
+      prepared.coding_opsin, prepared.preprocessed_opsin.view());
   }
   if (!status.ok()) {
     return status;
@@ -222,6 +228,7 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
 
   try {
     PreparedQuantizationPipeline candidate;
+    candidate.generation = NextPreparedQuantizationPipelineGeneration();
     candidate.source_extent = original_linear_rgb.extent();
     candidate.padded_extent = opsin.extent();
     candidate.block_extent =
@@ -235,8 +242,7 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
       return Status::InvalidArgument(
         "Quantization pipeline dimensions are too large");
     }
-    candidate.coding_opsin.resize(candidate.padded_extent);
-    CopyImage(opsin, candidate.coding_opsin.view());
+    candidate.coding_opsin = opsin;
     Status status = Status::Ok();
     if (prepare_cpu_preprocessing) {
       candidate.preprocessed_opsin.resize(candidate.padded_extent);
@@ -292,7 +298,7 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   QuantizationPipelineMaterialization materialization) {
 
   const ConstImage3FView pipeline_opsin = initial_quantization_ready
-    ? prepared.coding_opsin.const_view()
+    ? prepared.coding_opsin
     : prepared.preprocessed_opsin.const_view();
   Extent2D block_extent;
   Status status = ValidatePipelineInputs(
@@ -322,7 +328,7 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     : 0.62f * control_target;
   if (!initial_quantization_ready) {
     status = ComputeInitialQuantField(
-      prepared.coding_opsin.const_view(),
+      prepared.coding_opsin,
       {
         .butteraugli_target = initial_quant_target,
         .rescale = options.initial_quant_rescale,

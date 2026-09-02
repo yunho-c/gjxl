@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -45,15 +46,18 @@ protected:
 };
 
 /// Target-invariant preparation for repeated quantization attempts over one
-/// source/profile pair. Final encoder and diagnostic results are committed
-/// directly by the selected adaptive-quantization provider.
+/// source/profile pair. `coding_opsin` borrows immutable caller storage, which
+/// must remain alive until the last prepared run completes. Final encoder and
+/// diagnostic results are committed directly by the selected adaptive-
+/// quantization provider.
 struct PreparedQuantizationPipeline {
+  uint64_t generation = 0;
   Extent2D source_extent;
   Extent2D padded_extent;
   Extent2D block_extent;
   float initial_quant_rescale = 1.0f;
   SimpleVarDctCodestreamProfile profile;
-  Image3FBuffer coding_opsin;
+  ConstImage3FView coding_opsin;
   Image3FBuffer preprocessed_opsin;
   ColorCorrelationMap initial_color_correlation;
   bool preprocessing_ready = false;

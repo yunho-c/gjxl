@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -173,6 +174,18 @@ bool PlanesEqual(gjxl::PlaneView<const T> left,
   for (size_t y = 0; y < left.extent.height; ++y) {
     if (!std::equal(left.Row(y), left.Row(y) + left.extent.width,
                     right.Row(y))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ImagesShareStorage(gjxl::ConstImage3FView left,
+                        gjxl::ConstImage3FView right) {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (left.plane[channel].data != right.plane[channel].data ||
+        left.plane[channel].extent != right.plane[channel].extent ||
+        left.plane[channel].stride != right.plane[channel].stride) {
       return false;
     }
   }
@@ -1001,6 +1014,11 @@ bool CheckPreparedGpuAttemptReuse() {
               << status.message() << '\n';
     return false;
   }
+  if (host_prepared.generation == 0 ||
+      !ImagesShareStorage(host_prepared.coding_opsin, opsin.ConstView())) {
+    std::cerr << "Prepared GPU pipeline did not borrow its coding image\n";
+    return false;
+  }
   gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
     gpu_prepared;
   constexpr std::array<float, 2> kTargets = {0.8f, 2.0f};
@@ -1080,8 +1098,93 @@ bool CheckPreparedGpuAttemptReuse() {
       return false;
     }
   }
+  if (gpu_prepared.quantization_pipeline_generation !=
+      host_prepared.generation) {
+    std::cerr << "Prepared resident evaluator lost its source generation\n";
+    return false;
+  }
+
+  const uint64_t first_generation = host_prepared.generation;
+  for (size_t y = 0; y < kExtent.height; ++y) {
+    for (size_t x = 0; x < kExtent.width; ++x) {
+      const float fx = static_cast<float>(x) /
+        static_cast<float>(kExtent.width - 1);
+      const float fy = static_cast<float>(y) /
+        static_cast<float>(kExtent.height - 1);
+      const std::array<float, 3> rgb = {
+        0.67f - 0.42f * fx + 0.08f * fy,
+        0.09f + 0.18f * fx + 0.53f * fy,
+        ((x / 5 + y / 3) & 1u) == 0 ? 0.74f : 0.06f,
+      };
+      for (size_t channel = 0; channel < 3; ++channel) {
+        original.plane[channel][y * original.stride + x] = rgb[channel];
+        padded_linear.plane[channel][y * padded_linear.stride + x] =
+          rgb[channel];
+      }
+    }
+  }
+  if (!gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, opsin.View()).ok()) {
+    return false;
+  }
+  status =
+    gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), preparation_options,
+      &host_prepared, false);
+  if (!status.ok() || host_prepared.generation == first_generation ||
+      !ImagesShareStorage(host_prepared.coding_opsin, opsin.ConstView()) ||
+      gpu_prepared.quantization_pipeline_generation != first_generation) {
+    std::cerr << "Re-prepared GPU pipeline did not advance its borrowed "
+                 "source generation: "
+              << status.message() << '\n';
+    return false;
+  }
+
+  gjxl::CpuQuantizationPipelineOptions changed_options = preparation_options;
+  changed_options.butteraugli_target = 1.1f;
+  PipelineStorage changed_one_shot(kExtent, kExtent);
+  PipelineStorage changed_reused(kExtent, kExtent);
+  status = gjxl::RunGpuQuantizationPipeline(
+    *gpu, original.ConstView(), opsin.ConstView(), changed_options,
+    gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+    changed_one_shot.Output());
+  if (status.ok()) {
+    status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipeline(
+        *gpu, original.ConstView(), host_prepared, changed_options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        changed_reused.Output(), nullptr, &gpu_prepared);
+  }
+  std::vector<uint8_t> changed_one_shot_codestream;
+  std::vector<uint8_t> changed_reused_codestream;
+  if (status.ok()) {
+    status = gjxl::EncodeVarDctCodestream(
+      changed_one_shot.frame, &changed_one_shot_codestream);
+  }
+  if (status.ok()) {
+    status = gjxl::EncodeVarDctCodestream(
+      changed_reused.frame, &changed_reused_codestream);
+  }
+  if (!status.ok() ||
+      gpu_prepared.quantization_pipeline_generation !=
+        host_prepared.generation ||
+      changed_one_shot_codestream != changed_reused_codestream ||
+      changed_one_shot.initial_quant != changed_reused.initial_quant ||
+      changed_one_shot.strategy_mask != changed_reused.strategy_mask ||
+      changed_one_shot.pixel_mask != changed_reused.pixel_mask ||
+      changed_one_shot.final_quant != changed_reused.final_quant ||
+      changed_one_shot.block_distance != changed_reused.block_distance ||
+      changed_one_shot.scores != changed_reused.scores ||
+      MaximumImageError(
+        changed_one_shot.reconstructed, changed_reused.reconstructed) !=
+        0.0 ||
+      !FramesEqual(changed_one_shot.frame, changed_reused.frame)) {
+    std::cerr << "Prepared GPU pipeline reused stale borrowed pixels: "
+              << status.message() << '\n';
+    return false;
+  }
   std::cout << "Prepared GPU attempts reuse exact and resident evaluator "
-               "allocations exactly\n";
+               "allocations and invalidate changed source generations\n";
   return true;
 }
 

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -164,11 +165,13 @@ struct AdaptiveQuantizationMaterialization {
 
 /// Reusable frame-level GPU AQ state for repeated rate-control attempts.
 ///
-/// The state remembers the backend, source views, and evaluation options that
-/// define the prepared allocation. Compatible calls only rebind the strategy
-/// and EPF metadata; incompatible calls transparently prepare a new state.
+/// The state remembers the quantization-pipeline generation, backend, source
+/// views, and evaluation options that define the prepared allocation.
+/// Compatible calls only rebind the strategy and EPF metadata; a new borrowed
+/// source generation transparently invalidates source-dependent GPU state.
 struct PreparedAdaptiveQuantization {
   PreparedAcStrategySearch ac_strategy_search;
+  uint64_t quantization_pipeline_generation = 0;
   ConstDeviceImage3View resident_coding_opsin;
   GpuBackend* backend = nullptr;
   ConstImage3FView original_linear_rgb;
