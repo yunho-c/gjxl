@@ -612,6 +612,17 @@ Exit criteria:
 
 **Estimate:** 1-2 days after correctness gates pass
 
+**Measurement support (2026-09-01): implemented.** The separate
+`hybrid-workflow` scope alternates complete native and hybrid workflow calls
+with the same explicit CPU or Metal frontend policy. It reuses the bounded
+libjxl context, performs untimed deterministic-output and exact decoded-float
+checks, and emits paired outer/profile totals, frontend phases, both tail
+profiles, output sizes/hashes, the per-sample zero-native-tail bound, and the
+measured hybrid speedup. Frontend and libjxl efforts and CPU/libjxl thread
+policies are independent raw fields. This scope supplies the end-to-end
+measurement boundary; the retained multi-process corpus results belong below
+after the branch is committed and rebuilt cleanly.
+
 Use fresh Release builds. For each retained configuration:
 
 1. start at least three independent processes;

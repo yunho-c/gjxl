@@ -130,6 +130,11 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Libjxl", result.stderr)
+            frontend = self.run_tail_benchmark(
+                "--tail-backends", "gjxl", "--frontend-effort", effort
+            )
+            self.assertNotEqual(frontend.returncode, 0)
+            self.assertIn("Frontend effort", frontend.stderr)
 
         native = self.run_tail_benchmark("--tail-backends", "gjxl")
         self.assertEqual(native.returncode, 0, native.stderr)
@@ -226,6 +231,79 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             self.assertTrue(path.is_file(), path)
             self.assertGreater(path.stat().st_size, 0)
         self.assertFalse(list(self.directory.glob("tail.json.tmp-*")))
+
+    def test_hybrid_workflow_reports_paired_amdahl_results(self) -> None:
+        destination = self.directory / "hybrid.json"
+        command = [
+            str(self.benchmark),
+            "--scope",
+            "hybrid-workflow",
+            "--workload",
+            "workflow_gradient_128x96",
+            "--tail-frontend",
+            "cpu",
+            "--tail-backends",
+            "both",
+            "--frontend-effort",
+            "6",
+            "--libjxl-effort",
+            "5",
+            "--libjxl-threads",
+            "1",
+            "--warmups",
+            "0",
+            "--samples",
+            "1",
+            "--raw-samples",
+            str(destination),
+        ]
+        if not self.libjxl_tail_enabled:
+            destination.write_text("sentinel", encoding="utf-8")
+            result = subprocess.run(
+                command, check=False, capture_output=True, text=True
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("libjxl tail is unavailable", result.stderr)
+            self.assertEqual(
+                destination.read_text(encoding="utf-8"), "sentinel"
+            )
+            return
+
+        result = subprocess.run(
+            command, check=False, capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ratio perfect_tail_bound", result.stdout)
+        self.assertIn("ratio measured_hybrid_speedup", result.stdout)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["schema_version"], 1)
+        self.assertEqual(document["scope"], "hybrid-workflow")
+        self.assertEqual(document["frontend_effort"], 6)
+        self.assertEqual(document["libjxl_effort"], 5)
+        workload = document["workloads"][0]
+        self.assertEqual(workload["decoded_validation"], "exact-float-equal")
+        self.assertEqual(len(workload["pairs"]), 1)
+        pair = workload["pairs"][0]
+        self.assertEqual(pair["first_backend"], "gjxl")
+        self.assertGreater(pair["perfect_tail_bound"], 1.0)
+        self.assertGreater(pair["measured_outer_speedup"], 0.0)
+        self.assertGreater(pair["measured_profiled_speedup"], 0.0)
+        for backend in ("gjxl", "libjxl"):
+            sample = pair[backend]
+            self.assertEqual(sample["backend"], backend)
+            self.assertGreater(sample["wall_nanoseconds"], 0)
+            self.assertGreater(sample["profile_total_nanoseconds"], 0)
+            self.assertGreater(
+                sample["workflow_phase_nanoseconds"]["quantization_pipeline"],
+                0,
+            )
+            self.assertGreater(
+                sample["workflow_phase_nanoseconds"]["codestream_encoding"],
+                0,
+            )
+        self.assertEqual(
+            pair["libjxl"]["tail_phase_nanoseconds"]["context_setup"], 0
+        )
 
     def test_external_metallib_writes_integer_raw_samples_atomically(self) -> None:
         destination = self.directory / "samples.json"

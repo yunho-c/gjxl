@@ -140,6 +140,31 @@ is recomputed outside every timed call and must match across the entire run.
 Do not add libjxl subphases to the outer total or compare this tail-only scope
 directly with a whole `cjxl` encode.
 
+Use `hybrid-workflow` for the complete Amdahl comparison. Unlike the same-frame
+scope, it reruns the entire selected frontend for each backend and reports a
+paired end-to-end result:
+
+```sh
+build/libjxl-tail/gjxl_encoding_benchmark \
+  --scope hybrid-workflow \
+  --workload padded_1080p \
+  --tail-frontend metal \
+  --gpu-aq exact-coefficients \
+  --frontend-effort 7 \
+  --libjxl-effort 7 \
+  --libjxl-threads 8 \
+  --warmups 1 \
+  --samples 5 \
+  --raw-samples hybrid-samples.json
+```
+
+Hybrid raw schema 1 computes `perfect_tail_bound` as the native outer wall
+time divided by that same sample with its measured native codestream phase
+removed. `measured_outer_speedup` is the paired native/hybrid outer-wall ratio;
+`measured_profiled_speedup` is the corresponding nested workflow-profile
+ratio. These are distinct from the tail-only ratio and must be reported with
+the output-size delta and exact decoded-pixel result.
+
 ### Reproducible Metal profiling
 
 Use the profiling workflow when aggregate phase timings identify a GPU-heavy

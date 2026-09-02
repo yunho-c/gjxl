@@ -81,6 +81,7 @@ enum class BenchmarkScope {
   kMetalPublicWorkflow,
   kCoefficientCoding,
   kCodestreamTail,
+  kHybridWorkflow,
 };
 
 enum class TailFrontend {
@@ -171,6 +172,7 @@ struct CommandLineOptions {
   size_t cpu_thread_count = 0;
   size_t libjxl_thread_count = 1;
   int libjxl_effort = 7;
+  int frontend_effort = 7;
   size_t warmups = kDefaultWarmups;
   size_t samples = kDefaultSamples;
   gjxl::gpu_profile_internal::GpuProfilingMode gpu_profiling_mode =
@@ -692,6 +694,9 @@ ParseGpuProfilingMode(std::string_view text) {
   if (text == "codestream-tail") {
     return BenchmarkScope::kCodestreamTail;
   }
+  if (text == "hybrid-workflow") {
+    return BenchmarkScope::kHybridWorkflow;
+  }
   throw std::runtime_error("Unknown benchmark scope: " + std::string(text));
 }
 
@@ -707,6 +712,8 @@ ParseGpuProfilingMode(std::string_view text) {
       return "coefficient-coding";
     case BenchmarkScope::kCodestreamTail:
       return "codestream-tail";
+    case BenchmarkScope::kHybridWorkflow:
+      return "hybrid-workflow";
   }
   return "invalid";
 }
@@ -793,7 +800,7 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--workload NAME|all] "
                    "[--input IMAGE.ppm|IMAGE.pfm] "
                    "[--scope full|public-workflow|metal-public-workflow|"
-                   "coefficient-coding|codestream-tail] "
+                   "coefficient-coding|codestream-tail|hybrid-workflow] "
                    "[--implementation scalar|simd|factored] "
                    "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                    "maximum-throughput] "
@@ -804,6 +811,7 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--tail-frontend cpu|metal] "
                    "[--tail-backends both|gjxl|libjxl] "
                    "[--libjxl-effort 1..10] [--libjxl-threads N] "
+                   "[--frontend-effort 1..10] "
                    "[--artifacts DIRECTORY] "
                    "[--gpu-profile stage|dispatch] "
                    "[--gpu-profile-output PATH] "
@@ -845,6 +853,12 @@ ParseGpuProfilingMode(std::string_view text) {
         throw std::runtime_error("Libjxl effort must be in 1...10");
       }
       options.libjxl_effort = static_cast<int>(effort);
+    } else if (argument == "--frontend-effort") {
+      const size_t effort = ParseSize(value, true);
+      if (effort < 1 || effort > 10) {
+        throw std::runtime_error("Frontend effort must be in 1...10");
+      }
+      options.frontend_effort = static_cast<int>(effort);
     } else if (argument == "--libjxl-threads") {
       options.libjxl_thread_count = ParseSize(value, false);
       if (options.libjxl_thread_count > gjxl::kMaximumCpuThreadCount) {
@@ -890,14 +904,16 @@ ParseGpuProfilingMode(std::string_view text) {
         gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput &&
       options.scope != BenchmarkScope::kPublicWorkflow &&
       options.scope != BenchmarkScope::kMetalPublicWorkflow &&
-      !(options.scope == BenchmarkScope::kCodestreamTail &&
+      !((options.scope == BenchmarkScope::kCodestreamTail ||
+         options.scope == BenchmarkScope::kHybridWorkflow) &&
         options.tail_frontend == TailFrontend::kMetal)) {
     throw std::runtime_error(
       "Maximum-throughput mode requires a public workflow or Metal tail frontend");
   }
   if (options.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
       (options.scope != BenchmarkScope::kPublicWorkflow &&
-       options.scope != BenchmarkScope::kMetalPublicWorkflow)) {
+       options.scope != BenchmarkScope::kMetalPublicWorkflow &&
+       options.scope != BenchmarkScope::kHybridWorkflow)) {
     throw std::runtime_error(
       "High density requires a public-workflow scope");
   }
@@ -916,24 +932,38 @@ ParseGpuProfilingMode(std::string_view text) {
   }
   if (options.cpu_thread_count != 0 &&
       options.scope != BenchmarkScope::kPublicWorkflow &&
-      options.scope != BenchmarkScope::kMetalPublicWorkflow) {
+      options.scope != BenchmarkScope::kMetalPublicWorkflow &&
+      options.scope != BenchmarkScope::kHybridWorkflow) {
     throw std::runtime_error(
       "CPU thread budgets require a public-workflow scope");
   }
   if (!options.raw_samples_path.empty() &&
       options.scope != BenchmarkScope::kPublicWorkflow &&
       options.scope != BenchmarkScope::kMetalPublicWorkflow &&
-      options.scope != BenchmarkScope::kCodestreamTail) {
+      options.scope != BenchmarkScope::kCodestreamTail &&
+      options.scope != BenchmarkScope::kHybridWorkflow) {
     throw std::runtime_error(
         "Raw samples require a public-workflow or codestream-tail scope");
   }
   if (options.scope != BenchmarkScope::kCodestreamTail &&
+      options.scope != BenchmarkScope::kHybridWorkflow &&
       (!options.artifact_directory.empty() ||
        options.tail_frontend != TailFrontend::kCpu ||
        options.tail_backends != TailBackendSelection::kBoth ||
-       options.libjxl_thread_count != 1 || options.libjxl_effort != 7)) {
+       options.libjxl_thread_count != 1 || options.libjxl_effort != 7 ||
+       options.frontend_effort != 7)) {
     throw std::runtime_error(
-      "Tail options require the codestream-tail scope");
+      "Tail options require the codestream-tail or hybrid-workflow scope");
+  }
+  if (options.scope == BenchmarkScope::kCodestreamTail &&
+      options.frontend_effort != 7) {
+    throw std::runtime_error(
+      "The direct tail frontend currently represents effort 7");
+  }
+  if (options.scope == BenchmarkScope::kHybridWorkflow &&
+      options.tail_backends != TailBackendSelection::kBoth) {
+    throw std::runtime_error(
+      "The hybrid workflow comparison requires both tail backends");
   }
   const bool gpu_profiling = options.gpu_profiling_mode !=
     gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
@@ -1282,6 +1312,38 @@ struct RawTailWorkload {
   std::string gjxl_sha256;
   std::string libjxl_sha256;
   std::vector<RawTailSample> samples;
+};
+
+struct RawHybridBackendSample {
+  std::string_view backend;
+  uint64_t wall_nanoseconds = 0;
+  size_t encoded_bytes = 0;
+  std::string codestream_sha256;
+  gjxl::codestream_internal::VarDctEncodingProfile profile;
+};
+
+struct RawHybridPair {
+  size_t sample_index = 0;
+  std::string_view first_backend;
+  RawHybridBackendSample gjxl;
+  RawHybridBackendSample libjxl;
+  double perfect_tail_bound = 0.0;
+  double measured_outer_speedup = 0.0;
+  double measured_profiled_speedup = 0.0;
+};
+
+struct RawHybridWorkload {
+  std::string workload;
+  gjxl::Extent2D source_extent;
+  std::string decoded_validation;
+  uint64_t libjxl_context_setup_nanoseconds = 0;
+  size_t gjxl_encoded_bytes = 0;
+  size_t libjxl_encoded_bytes = 0;
+  std::string gjxl_sha256;
+  std::string libjxl_sha256;
+  std::string gjxl_artifact;
+  std::string libjxl_artifact;
+  std::vector<RawHybridPair> pairs;
 };
 
 struct RawGpuProfileSample {
@@ -1712,6 +1774,184 @@ void WriteRawTailSamples(
     if (rename_error) {
       throw std::runtime_error(
         "Could not atomically replace tail raw-samples output: " +
+        rename_error.message());
+    }
+  } catch (...) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    throw;
+  }
+}
+
+void WriteHybridBackendSample(
+    std::ostream& output, const RawHybridBackendSample& sample) {
+  const auto& profile = sample.profile;
+  output << "{\"backend\": \"" << sample.backend
+         << "\", \"wall_nanoseconds\": " << sample.wall_nanoseconds
+         << ", \"profile_total_nanoseconds\": "
+         << profile.total_nanoseconds
+         << ", \"peak_cpu_participants\": "
+         << profile.peak_cpu_participants
+         << ", \"encoded_bytes\": " << sample.encoded_bytes
+         << ", \"codestream_sha256\": \"" << sample.codestream_sha256
+         << "\", \"workflow_phase_nanoseconds\": {"
+         << "\"input_preparation\": "
+         << profile.input_preparation_nanoseconds
+         << ", \"backend_selection\": "
+         << profile.backend_selection_nanoseconds
+         << ", \"quantization_pipeline\": "
+         << profile.quantization_pipeline_nanoseconds
+         << ", \"codestream_encoding\": "
+         << profile.codestream_encoding_nanoseconds
+         << ", \"summary_assembly\": "
+         << profile.summary_assembly_nanoseconds << "}, \"tail_phase_nanoseconds\": {";
+  if (sample.backend == "gjxl") {
+    gjxl::codestream_internal::VarDctEncodingProfile native;
+    native.codestream = profile.codestream;
+    const WorkflowProfileNanoseconds values = WorkflowProfileValues(native);
+    for (size_t phase = 6; phase < values.size(); ++phase) {
+      if (phase != 6) output << ", ";
+      std::string_view name = kWorkflowProfileNames[phase];
+      name.remove_prefix(std::string_view("codestream_").size());
+      output << '"' << name << "\": " << values[phase];
+    }
+  } else {
+    const auto& tail = profile.libjxl_tail;
+    output << "\"adapter_validation_and_copy\": "
+           << tail.adapter_validation_and_copy_nanoseconds
+           << ", \"context_setup\": " << tail.context_setup_nanoseconds
+           << ", \"libjxl_validation\": "
+           << tail.libjxl_validation_nanoseconds
+           << ", \"state_initialization\": "
+           << tail.state_initialization_nanoseconds
+           << ", \"dc_metadata\": " << tail.dc_metadata_nanoseconds
+           << ", \"block_context\": " << tail.block_context_nanoseconds
+           << ", \"coefficient_order\": "
+           << tail.coefficient_order_nanoseconds
+           << ", \"coefficient_tokenization\": "
+           << tail.coefficient_tokenization_nanoseconds
+           << ", \"modular_model\": "
+           << tail.modular_model_nanoseconds
+           << ", \"histogram_model\": "
+           << tail.histogram_model_nanoseconds
+           << ", \"section_writing\": "
+           << tail.section_writing_nanoseconds
+           << ", \"assembly\": " << tail.assembly_nanoseconds
+           << ", \"libjxl_internal\": "
+           << tail.libjxl_internal_nanoseconds
+           << ", \"output_copy\": " << tail.output_copy_nanoseconds;
+  }
+  output << "}}";
+}
+
+void WriteRawHybridSamples(
+    const std::filesystem::path& destination,
+    const CommandLineOptions& options,
+    const std::vector<RawHybridWorkload>& workloads) {
+  std::filesystem::path temporary = destination;
+  temporary += ".tmp-" + std::to_string(static_cast<uint64_t>(
+    Clock::now().time_since_epoch().count()));
+  try {
+    if (!destination.parent_path().empty()) {
+      std::filesystem::create_directories(destination.parent_path());
+    }
+    std::ofstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
+    output.open(temporary, std::ios::out | std::ios::trunc);
+    output << "{\n"
+           << "  \"schema_version\": 1,\n"
+           << "  \"scope\": \"hybrid-workflow\",\n"
+           << "  \"timing\": \"elapsed-wall-time\",\n"
+           << "  \"tail_boundary\": \"warm-context\",\n"
+           << "  \"gjxl_revision\": \""
+           << JsonEscape(GJXL_BENCHMARK_GIT_REVISION) << "\",\n"
+           << "  \"libjxl_base_revision\": \""
+           << JsonEscape(GJXL_LIBJXL_TAIL_BASE_REVISION) << "\",\n"
+           << "  \"libjxl_patch_revision\": \""
+           << JsonEscape(GJXL_LIBJXL_TAIL_PATCH_REVISION) << "\",\n"
+           << "  \"frontend\": \""
+           << TailFrontendName(options.tail_frontend) << "\",\n"
+           << "  \"frontend_effort\": " << options.frontend_effort << ",\n"
+           << "  \"libjxl_effort\": " << options.libjxl_effort << ",\n"
+           << "  \"cpu_threads\": " << options.cpu_thread_count << ",\n"
+           << "  \"libjxl_threads\": " << options.libjxl_thread_count
+           << ",\n"
+           << "  \"libjxl_calling_thread_participates\": "
+           << (options.libjxl_thread_count == 1 ? "true" : "false")
+           << ",\n"
+           << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
+           << "\",\n"
+           << "  \"density\": \""
+           << (options.density_mode == gjxl::VarDctDensityMode::kHighDensity
+                 ? "high" : "default") << "\",\n"
+           << "  \"distance\": " << std::setprecision(9)
+           << options.butteraugli_target << ",\n"
+           << "  \"warmups\": " << options.warmups << ",\n"
+           << "  \"paired_sample_count\": " << options.samples << ",\n"
+           << "  \"workloads\": [\n";
+    for (size_t workload_index = 0; workload_index < workloads.size();
+         ++workload_index) {
+      const RawHybridWorkload& workload = workloads[workload_index];
+      output << "    {\n"
+             << "      \"name\": \"" << JsonEscape(workload.workload)
+             << "\",\n"
+             << "      \"source_width\": " << workload.source_extent.width
+             << ",\n"
+             << "      \"source_height\": " << workload.source_extent.height
+             << ",\n"
+             << "      \"decoded_validation\": \""
+             << workload.decoded_validation << "\",\n"
+             << "      \"libjxl_context_setup_nanoseconds\": "
+             << workload.libjxl_context_setup_nanoseconds << ",\n"
+             << "      \"correctness_outputs\": {\"gjxl\": {\"bytes\": "
+             << workload.gjxl_encoded_bytes << ", \"sha256\": \""
+             << workload.gjxl_sha256 << "\"}, \"libjxl\": {\"bytes\": "
+             << workload.libjxl_encoded_bytes << ", \"sha256\": \""
+             << workload.libjxl_sha256 << "\"}},\n"
+             << "      \"size_delta\": {\"libjxl_minus_gjxl_bytes\": "
+             << static_cast<int64_t>(workload.libjxl_encoded_bytes) -
+                  static_cast<int64_t>(workload.gjxl_encoded_bytes)
+             << ", \"percent\": " << std::setprecision(17)
+             << 100.0 * (static_cast<double>(workload.libjxl_encoded_bytes) -
+                         static_cast<double>(workload.gjxl_encoded_bytes)) /
+                  static_cast<double>(workload.gjxl_encoded_bytes)
+             << "},\n"
+             << "      \"artifacts\": {\"gjxl_codestream\": ";
+      if (workload.gjxl_artifact.empty()) output << "null";
+      else output << '"' << JsonEscape(workload.gjxl_artifact) << '"';
+      output << ", \"libjxl_codestream\": ";
+      if (workload.libjxl_artifact.empty()) output << "null";
+      else output << '"' << JsonEscape(workload.libjxl_artifact) << '"';
+      output << "},\n      \"pairs\": [\n";
+      for (size_t pair_index = 0; pair_index < workload.pairs.size();
+           ++pair_index) {
+        const RawHybridPair& pair = workload.pairs[pair_index];
+        output << "        {\"sample_index\": " << pair.sample_index
+               << ", \"first_backend\": \"" << pair.first_backend
+               << "\", \"perfect_tail_bound\": "
+               << pair.perfect_tail_bound
+               << ", \"measured_outer_speedup\": "
+               << pair.measured_outer_speedup
+               << ", \"measured_profiled_speedup\": "
+               << pair.measured_profiled_speedup << ", \"gjxl\": ";
+        WriteHybridBackendSample(output, pair.gjxl);
+        output << ", \"libjxl\": ";
+        WriteHybridBackendSample(output, pair.libjxl);
+        output << '}';
+        if (pair_index + 1 != workload.pairs.size()) output << ',';
+        output << '\n';
+      }
+      output << "      ]\n    }";
+      if (workload_index + 1 != workloads.size()) output << ',';
+      output << '\n';
+    }
+    output << "  ]\n}\n";
+    output.close();
+    std::error_code rename_error;
+    std::filesystem::rename(temporary, destination, rename_error);
+    if (rename_error) {
+      throw std::runtime_error(
+        "Could not atomically replace hybrid raw-samples output: " +
         rename_error.message());
     }
   } catch (...) {
@@ -2321,6 +2561,243 @@ void RunCodestreamTailWorkload(
   if (time_libjxl) sink += static_cast<double>(result.libjxl_encoded_bytes);
   *global_sink += sink;
   if (raw_results != nullptr) raw_results->push_back(std::move(result));
+}
+
+void RunHybridWorkflowWorkload(
+    const WorkloadSpec& spec, const CommandLineOptions& options,
+    std::string_view input_path, gjxl::GpuBackend* gpu,
+    std::vector<RawHybridWorkload>* raw_results, double* global_sink) {
+  if (!gjxl::codestream_internal::LibjxlTailExperimentAvailable()) {
+    throw std::runtime_error(
+      "The requested libjxl tail is unavailable in this build");
+  }
+  if (options.tail_frontend == TailFrontend::kMetal && gpu == nullptr) {
+    throw std::runtime_error("The Metal hybrid frontend has no GPU backend");
+  }
+  ImageStorage original = !input_path.empty()
+      ? LoadBenchmarkImage(input_path)
+      : (spec.flower ? LoadFlower() : ImageStorage(spec.source_extent));
+  if (!spec.flower && input_path.empty()) {
+    if (spec.workflow_gradient) FillWorkflowGradient(&original);
+    else FillSynthetic(&original);
+  }
+
+  RawHybridWorkload result{
+    .workload = std::string(spec.name),
+    .source_extent = original.extent,
+  };
+  std::unique_ptr<gjxl::codestream_internal::LibjxlTailContext> context;
+  const auto context_begin = Clock::now();
+  RequireStatus(
+    "hybrid libjxl warm-context setup",
+    gjxl::codestream_internal::CreateLibjxlTailContext(
+      options.libjxl_thread_count, &context));
+  result.libjxl_context_setup_nanoseconds = static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      Clock::now() - context_begin).count());
+
+  const gjxl::VarDctEncodingOptions workflow_options{
+    .butteraugli_target = options.butteraugli_target,
+    .effort = options.frontend_effort,
+    .cpu_thread_count = options.cpu_thread_count,
+    .density_mode = options.density_mode,
+    .backend = options.tail_frontend == TailFrontend::kCpu
+      ? gjxl::VarDctBackendPreference::kCpu
+      : gjxl::VarDctBackendPreference::kMetal,
+    .metal_aq_mode = options.gpu_aq_mode,
+    .collect_final_butteraugli_score =
+      options.collect_final_butteraugli_score,
+  };
+  const auto encode = [&](std::string_view backend,
+                          std::vector<uint8_t>* bytes,
+                          gjxl::VarDctEncodingSummary* summary,
+                          gjxl::codestream_internal::VarDctEncodingProfile*
+                            profile) {
+    const bool libjxl = backend == "libjxl";
+    return gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamWithCodestreamBackendForTesting(
+        original.ConstView(), workflow_options,
+        {
+          .backend = libjxl
+            ? gjxl::codestream_internal::VarDctCodestreamBackend::kLibjxl
+            : gjxl::codestream_internal::VarDctCodestreamBackend::kGjxl,
+          .libjxl_effort = options.libjxl_effort,
+          .butteraugli_distance = options.butteraugli_target,
+          .libjxl_thread_count = options.libjxl_thread_count,
+          .libjxl_context = libjxl ? context.get() : nullptr,
+        },
+        gpu, true, bytes, summary, profile);
+  };
+
+  std::vector<uint8_t> expected_gjxl;
+  std::vector<uint8_t> expected_libjxl;
+  gjxl::VarDctEncodingSummary expected_gjxl_summary;
+  gjxl::VarDctEncodingSummary expected_libjxl_summary;
+  gjxl::codestream_internal::VarDctEncodingProfile ignored_profile;
+  RequireStatus(
+    "untimed native hybrid correctness encode",
+    encode("gjxl", &expected_gjxl, &expected_gjxl_summary, &ignored_profile));
+  RequireStatus(
+    "untimed libjxl hybrid correctness encode",
+    encode("libjxl", &expected_libjxl, &expected_libjxl_summary,
+           &ignored_profile));
+  if (expected_gjxl_summary.extent != expected_libjxl_summary.extent ||
+      expected_gjxl_summary.execution_backend !=
+        expected_libjxl_summary.execution_backend ||
+      expected_gjxl_summary.strategy_counts !=
+        expected_libjxl_summary.strategy_counts ||
+      expected_gjxl_summary.score_history !=
+        expected_libjxl_summary.score_history) {
+    throw std::runtime_error(
+      "Hybrid correctness encodes changed frontend decisions");
+  }
+  std::vector<float> decoded_gjxl;
+  std::vector<float> decoded_libjxl;
+  RequireStatus(
+    "decode native hybrid correctness output",
+    gjxl::codestream_internal::DecodeCodestreamPixelsWithLibjxl(
+      expected_gjxl, original.extent, &decoded_gjxl));
+  RequireStatus(
+    "decode libjxl hybrid correctness output",
+    gjxl::codestream_internal::DecodeCodestreamPixelsWithLibjxl(
+      expected_libjxl, original.extent, &decoded_libjxl));
+  if (decoded_gjxl != decoded_libjxl) {
+    throw std::runtime_error(
+      "Hybrid workflow outputs decoded to different float pixels");
+  }
+  result.decoded_validation = "exact-float-equal";
+  result.gjxl_encoded_bytes = expected_gjxl.size();
+  result.libjxl_encoded_bytes = expected_libjxl.size();
+  result.gjxl_sha256 = gjxl::benchmark_internal::Sha256Hex(expected_gjxl);
+  result.libjxl_sha256 = gjxl::benchmark_internal::Sha256Hex(expected_libjxl);
+
+  if (!options.artifact_directory.empty()) {
+    const std::filesystem::path directory = options.artifact_directory;
+    const std::string stem = std::string(spec.name) + "-hybrid";
+    const std::filesystem::path gjxl_path = directory / (stem + "-gjxl.jxl");
+    const std::filesystem::path libjxl_path =
+      directory / (stem + "-libjxl.jxl");
+    WriteArtifact(gjxl_path, expected_gjxl);
+    WriteArtifact(libjxl_path, expected_libjxl);
+    result.gjxl_artifact = gjxl_path.string();
+    result.libjxl_artifact = libjxl_path.string();
+  }
+
+  const auto encode_sample = [&](std::string_view backend) {
+    RawHybridBackendSample sample{.backend = backend};
+    std::vector<uint8_t> output;
+    gjxl::VarDctEncodingSummary summary;
+    const auto begin = Clock::now();
+    RequireStatus(
+      std::string("timed ") + std::string(backend) + " hybrid workflow",
+      encode(backend, &output, &summary, &sample.profile));
+    sample.wall_nanoseconds = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+        Clock::now() - begin).count());
+    const bool libjxl = backend == "libjxl";
+    const std::vector<uint8_t>& expected =
+      libjxl ? expected_libjxl : expected_gjxl;
+    const gjxl::VarDctEncodingSummary& expected_summary =
+      libjxl ? expected_libjxl_summary : expected_gjxl_summary;
+    if (output != expected || summary != expected_summary ||
+        sample.profile.total_nanoseconds == 0 ||
+        sample.profile.codestream_backend !=
+          (libjxl
+             ? gjxl::codestream_internal::VarDctCodestreamBackend::kLibjxl
+             : gjxl::codestream_internal::VarDctCodestreamBackend::kGjxl) ||
+        (libjxl &&
+         sample.profile.libjxl_tail.context_setup_nanoseconds != 0)) {
+      throw std::runtime_error(
+        "Timed hybrid workflow changed output, summary, or backend boundary");
+    }
+    sample.encoded_bytes = output.size();
+    sample.codestream_sha256 =
+      gjxl::benchmark_internal::Sha256Hex(output);
+    return sample;
+  };
+
+  for (size_t warmup = 0; warmup < options.warmups; ++warmup) {
+    if ((warmup & 1) == 0) {
+      static_cast<void>(encode_sample("gjxl"));
+      static_cast<void>(encode_sample("libjxl"));
+    } else {
+      static_cast<void>(encode_sample("libjxl"));
+      static_cast<void>(encode_sample("gjxl"));
+    }
+  }
+  result.pairs.reserve(options.samples);
+  for (size_t pair_index = 0; pair_index < options.samples; ++pair_index) {
+    RawHybridPair pair{
+      .sample_index = pair_index,
+      .first_backend = (pair_index & 1) == 0 ? "gjxl" : "libjxl",
+    };
+    if ((pair_index & 1) == 0) {
+      pair.gjxl = encode_sample("gjxl");
+      pair.libjxl = encode_sample("libjxl");
+    } else {
+      pair.libjxl = encode_sample("libjxl");
+      pair.gjxl = encode_sample("gjxl");
+    }
+    const uint64_t native_tail =
+      pair.gjxl.profile.codestream_encoding_nanoseconds;
+    if (native_tail == 0 || pair.gjxl.wall_nanoseconds <= native_tail ||
+        pair.libjxl.wall_nanoseconds == 0 ||
+        pair.gjxl.profile.total_nanoseconds == 0 ||
+        pair.libjxl.profile.total_nanoseconds == 0) {
+      throw std::runtime_error("Hybrid Amdahl timing boundary is invalid");
+    }
+    pair.perfect_tail_bound =
+      static_cast<double>(pair.gjxl.wall_nanoseconds) /
+      static_cast<double>(pair.gjxl.wall_nanoseconds - native_tail);
+    pair.measured_outer_speedup =
+      static_cast<double>(pair.gjxl.wall_nanoseconds) /
+      static_cast<double>(pair.libjxl.wall_nanoseconds);
+    pair.measured_profiled_speedup =
+      static_cast<double>(pair.gjxl.profile.total_nanoseconds) /
+      static_cast<double>(pair.libjxl.profile.total_nanoseconds);
+    result.pairs.push_back(std::move(pair));
+  }
+
+  std::vector<double> native_total;
+  std::vector<double> hybrid_total;
+  std::vector<double> native_tail;
+  std::vector<double> hybrid_tail;
+  std::vector<double> perfect_bounds;
+  std::vector<double> measured_speedups;
+  for (const RawHybridPair& pair : result.pairs) {
+    native_total.push_back(NanosecondsToMilliseconds(
+      pair.gjxl.wall_nanoseconds));
+    hybrid_total.push_back(NanosecondsToMilliseconds(
+      pair.libjxl.wall_nanoseconds));
+    native_tail.push_back(NanosecondsToMilliseconds(
+      pair.gjxl.profile.codestream_encoding_nanoseconds));
+    hybrid_tail.push_back(NanosecondsToMilliseconds(
+      pair.libjxl.profile.codestream_encoding_nanoseconds));
+    perfect_bounds.push_back(pair.perfect_tail_bound);
+    measured_speedups.push_back(pair.measured_outer_speedup);
+  }
+  std::cout << "workload " << spec.name << " source="
+            << original.extent.width << 'x' << original.extent.height
+            << " distance=" << options.butteraugli_target
+            << " scope=hybrid-workflow frontend="
+            << TailFrontendName(options.tail_frontend)
+            << " decoded=" << result.decoded_validation << '\n';
+  PrintStats("gjxl_workflow", native_total);
+  PrintStats("hybrid_workflow", hybrid_total);
+  PrintStats("gjxl_tail_in_workflow", native_tail);
+  PrintStats("libjxl_tail_in_workflow", hybrid_tail);
+  PrintRatioStats("perfect_tail_bound", perfect_bounds);
+  PrintRatioStats("measured_hybrid_speedup", measured_speedups);
+  std::cout << "  output gjxl_bytes=" << result.gjxl_encoded_bytes
+            << " gjxl_sha256=" << result.gjxl_sha256
+            << " libjxl_bytes=" << result.libjxl_encoded_bytes
+            << " libjxl_sha256=" << result.libjxl_sha256
+            << " libjxl_context_setup_ms="
+            << NanosecondsToMilliseconds(
+                 result.libjxl_context_setup_nanoseconds) << '\n';
+  *global_sink += static_cast<double>(result.gjxl_encoded_bytes) +
+                  static_cast<double>(result.libjxl_encoded_bytes);
+  raw_results->push_back(std::move(result));
 }
 
 void RunPublicWorkflowOnlyWorkload(
@@ -3617,7 +4094,8 @@ int main(int argc, char** argv) {
         BackendOptions(options.implementation);
     std::unique_ptr<gjxl::GpuBackend> gpu;
     if (options.scope != BenchmarkScope::kCoefficientCoding &&
-        !(options.scope == BenchmarkScope::kCodestreamTail &&
+        !((options.scope == BenchmarkScope::kCodestreamTail ||
+           options.scope == BenchmarkScope::kHybridWorkflow) &&
           options.tail_frontend == TailFrontend::kCpu)) {
       if (options.metallib_path.empty()) {
         RequireStatus("Create embedded benchmark Metal backend",
@@ -3650,13 +4128,15 @@ int main(int argc, char** argv) {
               << " distance=" << options.butteraugli_target
               << " warmups=" << options.warmups
               << " samples=" << options.samples;
-    if (options.scope == BenchmarkScope::kCodestreamTail) {
+    if (options.scope == BenchmarkScope::kCodestreamTail ||
+        options.scope == BenchmarkScope::kHybridWorkflow) {
       std::cout << " tail_frontend="
                 << TailFrontendName(options.tail_frontend)
                 << " tail_backends="
                 << TailBackendsName(options.tail_backends)
                 << " libjxl_effort=" << options.libjxl_effort
-                << " libjxl_threads=" << options.libjxl_thread_count;
+                << " libjxl_threads=" << options.libjxl_thread_count
+                << " frontend_effort=" << options.frontend_effort;
     }
     if (options.scope == BenchmarkScope::kFull) {
       std::cout << " rotated_phases=" << kPhaseCount;
@@ -3665,6 +4145,7 @@ int main(int argc, char** argv) {
     double sink = 0.0;
     std::vector<RawWorkflowWorkload> raw_results;
     std::vector<RawTailWorkload> raw_tail_results;
+    std::vector<RawHybridWorkload> raw_hybrid_results;
     std::vector<RawGpuProfileWorkload> gpu_profile_results;
     std::vector<RawWorkflowWorkload>* raw_results_pointer =
         options.raw_samples_path.empty() ? nullptr : &raw_results;
@@ -3677,6 +4158,10 @@ int main(int argc, char** argv) {
         RunCodestreamTailWorkload(
           {"external_input", {}, false}, options, options.input_path,
           gpu.get(), &raw_tail_results, &sink);
+      } else if (options.scope == BenchmarkScope::kHybridWorkflow) {
+        RunHybridWorkflowWorkload(
+          {"external_input", {}, false}, options, options.input_path,
+          gpu.get(), &raw_hybrid_results, &sink);
       } else if (options.scope == BenchmarkScope::kPublicWorkflow ||
                  options.scope == BenchmarkScope::kMetalPublicWorkflow) {
         if (!options.gpu_profile_path.empty()) {
@@ -3714,6 +4199,9 @@ int main(int argc, char** argv) {
           } else if (options.scope == BenchmarkScope::kCodestreamTail) {
             RunCodestreamTailWorkload(
               workload, options, {}, gpu.get(), &raw_tail_results, &sink);
+          } else if (options.scope == BenchmarkScope::kHybridWorkflow) {
+            RunHybridWorkflowWorkload(
+              workload, options, {}, gpu.get(), &raw_hybrid_results, &sink);
           } else if (options.scope == BenchmarkScope::kPublicWorkflow ||
                      options.scope ==
                          BenchmarkScope::kMetalPublicWorkflow) {
@@ -3752,6 +4240,9 @@ int main(int argc, char** argv) {
       if (options.scope == BenchmarkScope::kCodestreamTail) {
         WriteRawTailSamples(
           options.raw_samples_path, options, raw_tail_results);
+      } else if (options.scope == BenchmarkScope::kHybridWorkflow) {
+        WriteRawHybridSamples(
+          options.raw_samples_path, options, raw_hybrid_results);
       } else {
         WriteRawWorkflowSamples(options.raw_samples_path, options, raw_results);
       }
