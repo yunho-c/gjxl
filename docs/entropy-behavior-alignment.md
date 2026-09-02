@@ -1,9 +1,10 @@
 # Entropy behavior alignment with libjxl
 
-- Status: implemented and qualified
-- Branch: `refactor/maximum-compression`
+- Status: implemented, optimized, and qualified
+- Behavior branch: `refactor/maximum-compression`
+- Performance follow-up: `perf/codestream`
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
-- Qualification date: 2026-09-01
+- Latest qualification date: 2026-09-02
 
 ## Executive decision
 
@@ -303,7 +304,7 @@ and the former default CLI SHA-256
 `e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558`
 remain pinned.
 
-## Fresh qualification
+## Initial alignment qualification
 
 The retained Release measurements use an Apple M4 Pro, the same canonical
 linear-sRGB PFM corpus and pinned libjxl revision as
@@ -381,10 +382,17 @@ thread CPU, not wall time:
 
 Maximum-to-balanced sampled model-construction CPU fell by 84.8x on the 1080p
 photo and 33.9x on the 4K photo. Maximum-to-high fell by 9.52x and 9.36x.
-Balanced GJXL model construction is now within roughly 10% of libjxl effort 7
-in these captures; high-density GJXL is below pinned libjxl effort 9. Final
-model/token emission remains in the same scale, confirming that the refactor
-removed search work rather than moving the bottleneck into emission.
+The original interpretation that balanced GJXL model construction was within
+roughly 10% of libjxl effort 7 was incorrect. The neutral Samply classifier
+recognized `OptimizeBestEntropyCode`, used by the old exhaustive path, but not
+`OptimizeDirectAnsEntropyCode`, introduced for the ordinary direct-ANS path.
+It therefore left a material share of balanced model construction unattributed.
+The retained sampled values remain useful for comparing the old exhaustive
+path, but they are not evidence of ordinary GJXL/libjxl model-construction
+parity. The direct wall-stage instrumentation in the follow-up below is the
+authoritative comparison. Final model/token emission remains in the same scale,
+confirming that the refactor removed search work rather than moving the old
+tournament into emission.
 
 The original aspirational wall target was not universal: one of twelve photos
 measured 1.90x rather than 2x faster in the codestream phase. The sampled-CPU
@@ -392,6 +400,143 @@ target was exceeded by a wide margin, the default no longer spends most encoder
 CPU constructing entropy models, and the re-profiled remaining complete-encode
 gap lies outside the former serializer tournament rather than being inferred
 from the old comparison.
+
+## Post-alignment profiling and optimization
+
+The 2026-09-02 follow-up profiled the aligned balanced path rather than assuming
+that removing the outer tournament had made its inner implementation equivalent
+to libjxl. It found five independent sources of avoidable work:
+
+1. Balanced ANS already had fixed HybridUint symbol counts and extra-bit totals,
+   but it retained raw values, sorted them, and re-encoded them to recover those
+   same populations.
+2. The one ordinary representation performed an exact pre-emission rANS
+   traversal and candidate-size measurement even though there was no competing
+   candidate. The selected stream was then traversed again during emission.
+3. AC token-template construction and context materialization visited groups
+   sequentially despite having deterministic, independent per-group outputs.
+4. Fast clustering copied 256-bin histograms and scanned the full alphabet for
+   each distance query even when only a small prefix was populated.
+5. The public workflow used scalar `std::cbrt` for every Opsin sample, while the
+   pinned libjxl path uses a vector-friendly reciprocal-cube-root refinement.
+
+The implemented changes address those causes directly:
+
+- an exact count-only bit writer, cached exact-log2 lookup, and stack-backed
+  histogram-header scoring remove temporary bitstreams and repeated logarithms
+  without changing decisions;
+- the fixed balanced partition reuses already known populations, so balanced
+  value collection and aggregation counters are zero;
+- ordinary single-candidate encoding folds the exact selected token-bit count
+  into final emission and reports it from the emitted stream, while maximum
+  compression keeps its exact preselection traversal;
+- AC group template and materialization tasks run through the existing bounded
+  CPU participant budget into fixed output slots, preserving deterministic
+  order and byte output;
+- direct clustering scans the populated alphabet and computes merged Shannon
+  distance in place; and
+- Apple Silicon uses a four-lane NEON implementation of pinned libjxl's
+  `CubeRootAndAdd`, with the same scalar approximation for tails and non-NEON
+  builds.
+
+### Matched before/after result
+
+The following GJXL-only A/B uses Release builds at commits `2a7c41f` and
+`8238f82`, canonical PFM inputs, fully-resident Metal, factored implementation,
+effort 7, and the automatic CPU budget. Three independent process pairs
+alternated baseline and candidate; every process used two warmups and five
+measured samples. Values are the median of the three process medians. The
+tokenization column is native DC plus AC wall time; the work counters nested
+under it remain aggregate worker time and are not added to these wall values.
+
+| Input | Revision | Complete encode | Input preparation | Serializer | DC + AC tokenization | Entropy construction | Model/token emission | Bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1080p photo | Before | 205.443 ms | 17.905 ms | 92.692 ms | 11.211 ms | 75.161 ms | 4.985 ms | 383,421 |
+| 1080p photo | After | 136.450 ms | 16.236 ms | 27.327 ms | 7.330 ms | 14.510 ms | 4.319 ms | 383,409 |
+| 1080p photo | Speedup | 1.51x | 1.10x | 3.39x | 1.53x | 5.18x | 1.15x | 12 bytes smaller |
+| 4K photo | Before | 567.960 ms | 65.453 ms | 148.195 ms | 37.635 ms | 96.229 ms | 9.626 ms | 1,374,599 |
+| 4K photo | After | 480.577 ms | 60.659 ms | 61.610 ms | 22.019 ms | 26.609 ms | 8.877 ms | 1,374,628 |
+| 4K photo | Speedup | 1.18x | 1.08x | 2.41x | 1.71x | 3.62x | 1.08x | 29 bytes larger |
+
+For an identical prepared VarDCT frame, the entropy/codestream changes retain
+balanced, high-density, and maximum-compression bytes. The small public-workflow
+byte differences in this table come from the separately qualified Opsin
+approximation. Its structured-image test observed a maximum Opsin-sample error
+of `2.98023e-7` against the old scalar formula and enforces `1e-6`. On the two
+representative decoded images, scalar and vectorized encodes had identical
+maximum Butteraugli scores at the retained precision. The A/B input-preparation
+times above improve by 9.3% at 1080p and 7.3% at 4K without adding an Accelerate
+dependency.
+
+### Current comparison with libjxl effort 7
+
+The final cross-encoder run uses the established comparison harness and pinned
+libjxl revision. It used the same canonical PFM inputs, production thread
+policies, three alternating independent process pairs, two warmups, and five
+samples per process. Libjxl distances were the existing per-input calibrations;
+all four outputs decoded and both quality pairs passed the declared absolute or
+2.5%-relative tolerance.
+
+The retained comparison runner predates raw schema 14. A temporary copy was
+adapted only to translate `--serializer-workers 0` to `--cpu-threads auto`,
+read `cpu_threads` from schema 14, and invoke `gjxl_encode` for the untimed
+validation codestream because the benchmark no longer writes one. Alternation,
+sample aggregation, libjxl invocation, decoding, and quality validation were
+unchanged.
+
+| Input | Stage | GJXL | libjxl effort 7 | GJXL/libjxl |
+| --- | --- | ---: | ---: | ---: |
+| 1080p photo | Complete encode | 141.610 ms | 103.004 ms | 1.375x |
+| 1080p photo | Complete serializer | 27.209 ms | 13.763 ms | 1.977x |
+| 1080p photo | Coefficient tokenization | 7.207 ms | 0.612 ms | 11.77x |
+| 1080p photo | Entropy construction | 14.314 ms | 6.548 ms | 2.186x |
+| 1080p photo | Model/token emission | 4.674 ms | 6.469 ms | 0.723x |
+| 1080p photo | Framing/assembly | 0.057 ms | 0.152 ms | 0.375x |
+| 4K photo | Complete encode | 494.201 ms | 410.754 ms | 1.203x |
+| 4K photo | Complete serializer | 62.562 ms | 42.318 ms | 1.478x |
+| 4K photo | Coefficient tokenization | 21.931 ms | 2.197 ms | 9.98x |
+| 4K photo | Entropy construction | 26.910 ms | 18.001 ms | 1.495x |
+| 4K photo | Model/token emission | 8.856 ms | 21.275 ms | 0.416x |
+| 4K photo | Framing/assembly | 0.186 ms | 0.996 ms | 0.187x |
+
+At 1080p, GJXL distance 1.0 scored 3.44782 and produced 383,409 bytes;
+libjxl distance 0.78125 scored 3.48154 and produced 438,488 bytes. At 4K,
+GJXL scored 1.41004 and produced 1,374,628 bytes; libjxl distance 0.821875
+scored 1.41652 and produced 1,442,764 bytes. GJXL is therefore still slower,
+but the result is now a 20-38% complete-encode gap on these inputs rather than
+the former 8.6-15.2x production serializer gap.
+
+The residual diagnosis is also different. GJXL is already faster in final
+model/token emission and framing. The serializer gap is coefficient
+tokenization plus a smaller entropy-construction gap. Outside the serializer,
+GJXL spends 114.401 versus 89.241 ms at 1080p and 431.639 versus 368.436 ms at
+4K, accounting for 25.160 and 63.203 ms of the complete-encode gap. Direct
+libjxl stage instrumentation does not subdivide that remainder, so attributing
+it to one frontend algorithm would require a separate matched-boundary profile.
+
+### Residual action plan
+
+Further work should follow the current measurements:
+
+1. Split GJXL coefficient tokenization into wall-clock template construction,
+   coefficient-order tokenization, context materialization, allocation, and
+   scheduling boundaries. Compare actual token counts and bytes written before
+   changing representation logic.
+2. Carry balanced histogram populations out of context materialization so ANS
+   construction does not rescan millions of tokens. Reuse per-group scratch and
+   sparse symbol bounds; the current histogram-build work is the largest
+   remaining model-construction component.
+3. Re-profile the non-serializer remainder with matched GJXL/libjxl frontend
+   boundaries. The current result proves that it is the majority of the total
+   gap, but not whether color conversion, heuristic analysis, quantization, or
+   synchronization is responsible.
+4. Keep rANS emission on the CPU until these passes are exhausted. It is serial
+   within a stream, already faster than libjxl in the direct comparison, and is
+   not the current bottleneck.
+5. Preserve the zero-work counter assertions for ordinary candidate
+   measurement and balanced value collection, all CPU-budget determinism tests,
+   maximum-compression hashes, pinned decoder conformance, and matched-quality
+   gates for every subsequent optimization.
 
 ## Completed plan of action
 

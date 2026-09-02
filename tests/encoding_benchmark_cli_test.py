@@ -58,7 +58,11 @@ PHASES = {
 ELIMINATED_WORK_PHASES = {
     "codestream_entropy_prefix_code_build_work",
     "codestream_entropy_ans_prefix_validation_work",
+    "codestream_entropy_ans_value_collection_work",
+    "codestream_entropy_ans_value_aggregation_work",
+    "codestream_entropy_ans_token_cost_work",
     "codestream_entropy_selection_work",
+    "codestream_section_candidate_measure_work",
 }
 
 

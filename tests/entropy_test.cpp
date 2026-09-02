@@ -970,6 +970,10 @@ bool CheckDirectAnsOptimization() {
         profile.ans_histogram_candidate_count <=
           profile.ans_uint_config_candidate_count ||
         (mode ==
+             gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced &&
+         (profile.ans_value_collection_nanoseconds != 0 ||
+          profile.ans_value_aggregation_nanoseconds != 0)) ||
+        (mode ==
              gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced
            ? profile.ans_uint_config_candidate_count !=
                first.ans_histograms.size()

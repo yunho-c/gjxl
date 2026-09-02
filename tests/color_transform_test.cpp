@@ -19,6 +19,29 @@ namespace {
 
 constexpr gjxl::Extent2D kExtent{9, 7};
 constexpr size_t kStride = 12;
+constexpr float kOpsinBias = 0.0037930732552754493f;
+constexpr std::array<std::array<float, 3>, 3> kOpsinMatrix = {{
+  {{0.30f, 0.622f, 0.078f}},
+  {{0.23f, 0.692f, 0.078f}},
+  {{0.24342268924547819f, 0.20476744424496821f,
+    0.55180986650955360f}},
+}};
+
+std::array<float, 3> ScalarOpsin(float red, float green, float blue) {
+  std::array<float, 3> gamma{};
+  const float bias_cuberoot = std::cbrt(kOpsinBias);
+  for (size_t row = 0; row < 3; ++row) {
+    float mixed = std::fma(kOpsinMatrix[row][2], blue, kOpsinBias);
+    mixed = std::fma(kOpsinMatrix[row][1], green, mixed);
+    mixed = std::fma(kOpsinMatrix[row][0], red, mixed);
+    gamma[row] = std::cbrt(std::max(0.0f, mixed)) - bias_cuberoot;
+  }
+  return {
+    0.5f * (gamma[0] - gamma[1]),
+    0.5f * (gamma[0] + gamma[1]),
+    gamma[2],
+  };
+}
 
 struct ImageStorage {
   std::array<std::vector<float>, 3> plane;
@@ -201,6 +224,24 @@ bool CheckParallelRoundTripAndAtomicity() {
         input_view, 255.0f, opsin_view).ok() ||
       !gjxl::OpsinToLinearRgb(
         const_opsin_view, 255.0f, reconstructed_view).ok()) {
+    return false;
+  }
+  float maximum_opsin_error = 0.0f;
+  for (size_t y = 0; y < extent.height; ++y) {
+    for (size_t x = 0; x < extent.width; ++x) {
+      const size_t index = y * stride + x;
+      const std::array<float, 3> reference = ScalarOpsin(
+        input[0][index], input[1][index], input[2][index]);
+      for (size_t channel = 0; channel < 3; ++channel) {
+        maximum_opsin_error = std::max(
+          maximum_opsin_error,
+          std::abs(opsin[channel][index] - reference[channel]));
+      }
+    }
+  }
+  if (maximum_opsin_error > 1.0e-6f) {
+    std::cerr << "Fast opsin transform differs from scalar reference: "
+              << maximum_opsin_error << '\n';
     return false;
   }
   float maximum_error = 0.0f;
