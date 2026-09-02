@@ -2,7 +2,7 @@
 
 - Status: active implementation roadmap
 - Original profile revision: `af3a9e6`
-- Current roadmap baseline: `3313bbe`
+- Current roadmap baseline: `1e8bb0e`
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
 - Profile date: 2026-09-02
 - Related analysis: [entropy behavior alignment](entropy-behavior-alignment.md)
@@ -39,7 +39,7 @@ The roadmap priorities are:
 | ---: | --- | ---: | --- |
 | 2 | Preparation and storage | Direct padded-Opsin slice: padded-4K input preparation 75.09 -> 54.42 ms and peak RSS 1.161 -> 1.043 GiB | Re-profile before considering persistent workspace leases |
 | 3 | Color conversion, validation, and copies | Direct workflow transform plus identity-bound finite-input provenance implemented; redundant scans cost 4.61 ms at 1080p and 18.49 ms at 4K | Qualified; proceed to priority 4 |
-| 4 | Quantization-matrix chromaticity statistics | about 16.8 ms GJXL versus 5.9 ms libjxl attribution | Apply libjxl's effort gate and vectorize the retained pass |
+| 4 | Quantization-matrix chromaticity statistics | Effort/mode gate implemented; padded effort-6 preparation improved by 6.03 ms at 1080p and 34.32 ms at 4K | Vectorize the retained effort-7/high-density pass |
 | 5 | Metal readback and frame assembly | about 10.2 ms readback plus 12.9 ms assembly | Remove intermediate copies and redundant full-frame scans |
 | 6 | Residual serializer | 62.6 ms GJXL versus 42.3 ms libjxl | Give one-representation encoding a one-pass token path |
 
@@ -368,18 +368,24 @@ Pinned libjxl's
 computes the same maximum X edge, B-minus-Y edge, and exposed-blue statistic and
 uses the same decision thresholds.
 
-The behavioral difference is when and how the pass is run. Libjxl skips the
-pixel scan at tiers faster than effort 7 and returns before it in maximum-error
-mode. GJXL currently computes the statistics during `PrepareWorkflow()` before
-`SelectQuantizationMatrixScales()` returns default scales for maximum-error.
+The behavioral difference was when and how the pass ran. Libjxl skips the pixel
+scan at tiers faster than effort 7 and returns before it in maximum-error mode.
+GJXL previously computed the statistics during `PrepareWorkflow()` even when
+`SelectQuantizationMatrixScales()` would ignore them for maximum-error.
 
 ### Implementation
 
-Match libjxl's control policy:
+The first slice now matches libjxl's control policy:
 
 - efforts 1-6: use the distance/default scale path without pixel statistics;
-- efforts 7-10: retain pixel statistics; and
+- efforts 7-10 and the explicit effort-9-like high-density override: retain
+  pixel statistics;
 - maximum-error: skip the pass entirely.
+
+Maximum compression continues to control only entropy/codestream search, so it
+does not independently enable the pixel pass at low effort. The gate is an
+explicit internal policy queried by `PrepareWorkflow()`; the standalone
+statistics helper retains its complete validation contract.
 
 For the retained effort-7 and effort-9 path:
 
@@ -395,11 +401,36 @@ Do not initially fuse this pass into Opsin conversion. Vertical-neighbor state
 and parallel row scheduling make fusion harder to qualify, while a standalone
 SIMD maximum reduction is comparatively contained.
 
-### Expected result and gates
+### Effort/mode-gate result
+
+Seven alternating independent-process pairs used a Release build, two warmups,
+and five samples per process with fully resident Metal at effort 6. The table
+reports the median of each seven-process cohort:
+
+| Input | Baseline preparation | Gated preparation | Removed wall time |
+| --- | ---: | ---: | ---: |
+| Padded 1080p | 9.28 ms | 3.25 ms | 6.03 ms (64.9%) |
+| Padded 4K | 49.60 ms | 15.29 ms | 34.32 ms (69.2%) |
+
+Every paired preparation comparison favored the gate. Complete-encode timing
+also improved in every pair, but those results combine the eliminated pass with
+the intentional low-effort matrix-scale and codestream change, so they are not
+used as the causal timing claim. On the synthetic benchmark, effort-6 output
+became 10.7% smaller at both resolutions; final Butteraugli changed from 1.597
+to 1.589 at 1080p and from 1.647 to 1.699 at 4K. These are policy-alignment
+observations, not a matched-quality density claim.
+
+Effort 7, explicit high density, and maximum-error smoke encodes remained
+byte-for-byte identical to `1e8bb0e`. The maximum-error result demonstrates
+that the formerly unused scan was removed without changing its fixed 2/2
+matrix scales. Candidate codestreams, including the deliberately changed
+effort-6 output, were accepted by `djxl` 0.12.0.
+
+### Retained-pass expectation and gates
 
 The current sampled attribution is about 16.8 ms for GJXL versus 5.9 ms for
 libjxl at 4K, suggesting roughly 8-11 ms of effort-7 optimization headroom. The
-full pass should disappear at low efforts and in maximum-error mode.
+full pass has now disappeared at low efforts and in maximum-error mode.
 
 The thresholds `0.015`, `0.022`, `0.026`, `0.28`, `0.33`, `0.38`, and `0.13`
 directly affect the frame header. Add scalar-oracle and `nextafter` fixtures
@@ -625,20 +656,22 @@ separates low-risk work elimination from lifetime and layout redesign:
 3. **Completed in `55048f2`:** remove duplicate workflow-to-prepared Opsin
    ownership, with explicit borrowed-view lifetime and prepared-state
    invalidation.
-4. **Completed in the current slice:** remove padded linear RGB and the
+4. **Completed in `3313bbe`:** remove padded linear RGB and the
    workflow's atomic color-transform scratch/copy through a checked direct-write
    path; preserve the public transform contract.
-5. **Completed in the current slice:** bind finite-input provenance to the
+5. **Completed in `1e8bb0e`:** bind finite-input provenance to the
    exact workflow RGB/Opsin views and skip the measured duplicate scans only in
    private fully resident preparation; retain public GPU validation.
-6. Implement priority 4's effort/mode gate and vectorized retained statistics.
-7. Incorporate the independently owned effort-7 zero-update change and capture
+6. **Completed in the current slice:** apply priority 4's effort/mode gate;
+   preserve high-density behavior and keep maximum compression orthogonal.
+7. Vectorize priority 4's retained effort-7/high-density statistics.
+8. Incorporate the independently owned effort-7 zero-update change and capture
    a fresh matched profile.
-8. Implement priority 5's low-risk direct frame copies and scan fusion.
-9. Implement priority 6's one-pass ordinary tokenization and effort-aware
+9. Implement priority 5's low-risk direct frame copies and scan fusion.
+10. Implement priority 6's one-pass ordinary tokenization and effort-aware
    coefficient-order policy.
-10. Add cache-local balanced histogram population reduction.
-11. Re-profile before adding more counters or considering persistent workspace
+11. Add cache-local balanced histogram population reduction.
+12. Re-profile before adding more counters or considering persistent workspace
     pooling, a Metal group-packing kernel, or a mapped zero-copy frame view.
 
 This sequence prevents two common forms of wasted optimization: building a

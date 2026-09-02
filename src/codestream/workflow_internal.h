@@ -29,6 +29,13 @@ struct QuantizationMatrixScales {
   bool operator==(const QuantizationMatrixScales&) const = default;
 };
 
+/// Returns whether this encoding policy uses source-dependent matrix-scale
+/// statistics. High density follows libjxl's effort-9-like behavior even when
+/// its explicit effort value is lower. Maximum-error control never uses the
+/// statistics because its matrix scales are fixed at 2/2.
+[[nodiscard]] bool ShouldComputeQuantizationMatrixScaleStats(
+  const VarDctEncodingOptions& options) noexcept;
+
 /// Resolves the public compression request to one serializer behavior.
 [[nodiscard]] VarDctEntropyBehavior ResolveEntropyBehavior(
   const VarDctEncodingOptions& options) noexcept;

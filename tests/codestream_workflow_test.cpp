@@ -236,6 +236,58 @@ bool CheckQuantizationMatrixScaleSelection() {
   return true;
 }
 
+bool CheckQuantizationMatrixScaleStatsPolicy() {
+  using gjxl::VarDctCompressionMode;
+  using gjxl::VarDctDensityMode;
+  using gjxl::VarDctEncodingOptions;
+  using gjxl::VarDctRateControlMode;
+  using gjxl::codestream_internal::
+    ShouldComputeQuantizationMatrixScaleStats;
+
+  for (int32_t effort = 1; effort <= 6; ++effort) {
+    if (ShouldComputeQuantizationMatrixScaleStats({.effort = effort})) {
+      std::cerr << "Low effort " << effort
+                << " retained matrix-scale pixel statistics\n";
+      return false;
+    }
+  }
+  for (int32_t effort = 7; effort <= 10; ++effort) {
+    if (!ShouldComputeQuantizationMatrixScaleStats({.effort = effort})) {
+      std::cerr << "Effort " << effort
+                << " skipped matrix-scale pixel statistics\n";
+      return false;
+    }
+  }
+
+  const VarDctEncodingOptions high_density{
+    .effort = 1,
+    .density_mode = VarDctDensityMode::kHighDensity,
+  };
+  const VarDctEncodingOptions maximum_error{
+    .effort = 10,
+    .rate_control_mode = VarDctRateControlMode::kMaximumError,
+    .maximum_error = {0.1f, 0.1f, 0.1f},
+  };
+  const VarDctEncodingOptions maximum_compression_low_effort{
+    .effort = 1,
+    .compression_mode = VarDctCompressionMode::kMaximumCompression,
+  };
+  const VarDctEncodingOptions maximum_compression_effort_7{
+    .effort = 7,
+    .compression_mode = VarDctCompressionMode::kMaximumCompression,
+  };
+  if (!ShouldComputeQuantizationMatrixScaleStats(high_density) ||
+      ShouldComputeQuantizationMatrixScaleStats(maximum_error) ||
+      ShouldComputeQuantizationMatrixScaleStats(
+        maximum_compression_low_effort) ||
+      !ShouldComputeQuantizationMatrixScaleStats(
+        maximum_compression_effort_7)) {
+    std::cerr << "Matrix-scale statistics policy overrides are incorrect\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckDeterministicWorkflow() {
   ImageStorage image;
   FillImage(&image);
@@ -1116,6 +1168,7 @@ bool CheckSingleAttemptTiming() {
 int main() {
   if (!CheckQuantizationMatrixScaleStats() ||
       !CheckQuantizationMatrixScaleSelection() ||
+      !CheckQuantizationMatrixScaleStatsPolicy() ||
       !CheckDeterministicWorkflow() ||
       !CheckCpuThreadBudget() ||
       !CheckEffortPolicy() ||

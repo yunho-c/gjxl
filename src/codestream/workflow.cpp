@@ -503,11 +503,14 @@ struct PreparedWorkflow {
     if (!status.ok()) {
       return status;
     }
-    status = codestream_internal::ComputeQuantizationMatrixScaleStats(
-      candidate->opsin.cropped_view(geometry.frame()),
-      &candidate->matrix_scale_stats);
-    if (!status.ok()) {
-      return status;
+    if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+          options)) {
+      status = codestream_internal::ComputeQuantizationMatrixScaleStats(
+        candidate->opsin.cropped_view(geometry.frame()),
+        &candidate->matrix_scale_stats);
+      if (!status.ok()) {
+        return status;
+      }
     }
     CpuQuantizationPipelineOptions preparation_options;
     if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
@@ -1347,6 +1350,14 @@ Status EncodeLinearRgbVarDctCodestreamProfiled(
 }
 
 namespace codestream_internal {
+
+bool ShouldComputeQuantizationMatrixScaleStats(
+  const VarDctEncodingOptions& options) noexcept {
+
+  return options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    (options.effort >= 7 ||
+     options.density_mode == VarDctDensityMode::kHighDensity);
+}
 
 VarDctEntropyBehavior ResolveEntropyBehavior(
   const VarDctEncodingOptions& options) noexcept {
