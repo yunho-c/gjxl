@@ -58,6 +58,12 @@ struct PreparedQuantizationPipeline {
   float initial_quant_rescale = 1.0f;
   SimpleVarDctCodestreamProfile profile;
   ConstImage3FView coding_opsin;
+  /// Exact immutable host views proven finite by the workflow that created
+  /// this preparation. Empty views mean that downstream public validation is
+  /// still required. Identity checks prevent provenance from being reused
+  /// with a different source passed to a prepared run.
+  ConstImage3FView validated_original_linear_rgb;
+  ConstImage3FView validated_coding_opsin;
   Image3FBuffer preprocessed_opsin;
   ColorCorrelationMap initial_color_correlation;
   bool preprocessing_ready = false;
@@ -69,6 +75,11 @@ struct PreparedQuantizationPipeline {
   AcStrategyGrid strategies;
   ButteraugliOptions butteraugli_options;
   std::unique_ptr<PreparedButteraugliReference> butteraugli_reference;
+};
+
+enum class QuantizationPipelineInputProvenance {
+  kUnvalidated,
+  kFiniteLinearRgbAndOpsin,
 };
 
 struct QuantizationPipelineMaterialization {
@@ -88,7 +99,9 @@ struct QuantizationPipelineMaterialization {
   CpuQuantizationPipelineOptions options,
   PreparedQuantizationPipeline* prepared,
   bool prepare_cpu_butteraugli = true,
-  bool prepare_cpu_preprocessing = true);
+  bool prepare_cpu_preprocessing = true,
+  QuantizationPipelineInputProvenance input_provenance =
+    QuantizationPipelineInputProvenance::kUnvalidated);
 
 [[nodiscard]] Status PrepareQuantizationPreprocessing(
   PreparedQuantizationPipeline& prepared,

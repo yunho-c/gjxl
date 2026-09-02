@@ -211,7 +211,8 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
   CpuQuantizationPipelineOptions options,
   PreparedQuantizationPipeline* prepared,
   bool prepare_cpu_butteraugli,
-  bool prepare_cpu_preprocessing) {
+  bool prepare_cpu_preprocessing,
+  QuantizationPipelineInputProvenance input_provenance) {
 
   if (prepared == nullptr || !original_linear_rgb.valid() || !opsin.valid() ||
       !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
@@ -235,6 +236,17 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
       BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
     candidate.initial_quant_rescale = options.initial_quant_rescale;
     candidate.profile = options.adaptive_quantization.profile;
+    switch (input_provenance) {
+      case QuantizationPipelineInputProvenance::kUnvalidated:
+        break;
+      case QuantizationPipelineInputProvenance::kFiniteLinearRgbAndOpsin:
+        candidate.validated_original_linear_rgb = original_linear_rgb;
+        candidate.validated_coding_opsin = opsin;
+        break;
+      default:
+        return Status::InvalidArgument(
+          "Quantization pipeline input provenance is invalid");
+    }
     size_t block_count = 0;
     size_t pixel_count = 0;
     if (!candidate.block_extent.try_area(&block_count) ||

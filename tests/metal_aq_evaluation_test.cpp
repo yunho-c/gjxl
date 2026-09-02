@@ -2355,6 +2355,49 @@ bool CheckInvalidCoefficientDecisionMode(gjxl::GpuBackend& gpu) {
     prepared == nullptr;
 }
 
+bool CheckPublicPreparationRejectsNonFiniteImages(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const std::vector<uint8_t> sharpness(
+    blocks.width * blocks.height, 4);
+  const auto rejected_without_gpu_work = [&](std::string_view operation) {
+    std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+    const gjxl::GpuBackendStats before = gpu.stats();
+    const gjxl::Status status = gjxl::PrepareAqEvaluation(
+      gpu,
+      {
+        .original_linear_rgb = fixture.original.View(),
+        .coding_opsin = fixture.coding.View(),
+        .strategies = &fixture.strategies,
+        .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+        .options = MakeOptions(),
+      },
+      &prepared);
+    const gjxl::GpuBackendStats after = gpu.stats();
+    if (status.code() == gjxl::StatusCode::kInvalidArgument &&
+        prepared == nullptr &&
+        before.successful_allocations == after.successful_allocations &&
+        before.committed_submissions == after.committed_submissions) {
+      return true;
+    }
+    std::cerr << operation
+              << " was not rejected atomically by public AQ preparation: "
+              << status.message() << '\n';
+    return false;
+  };
+
+  fixture.original.plane[1][2 * fixture.original.stride + 3] =
+    std::numeric_limits<float>::quiet_NaN();
+  if (!rejected_without_gpu_work("non-finite original RGB")) {
+    return false;
+  }
+  FillOriginal(&fixture.original);
+  fixture.coding.plane[2][4 * fixture.coding.stride + 5] =
+    std::numeric_limits<float>::infinity();
+  return rejected_without_gpu_work("non-finite coding Opsin");
+}
+
 }  // namespace
 
 int main() {
@@ -2364,6 +2407,7 @@ int main() {
       !CheckProfilingSessionAggregation() ||
       !CheckCapabilityBoundary() ||
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
+      !CheckPublicPreparationRejectsNonFiniteImages(*gpu) ||
       !CheckReductionCorpus(*gpu) ||
       !CheckMaximumErrorReduction(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||

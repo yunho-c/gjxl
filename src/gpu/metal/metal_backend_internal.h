@@ -23,6 +23,7 @@
 #include "gpu/image.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/butteraugli.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/primitives.h"
@@ -235,6 +236,7 @@ class MetalBackend final
     public gpu_profile_internal::GpuImagePrimitivesProfiler,
     public GpuAqEvaluation,
     public gpu_profile_internal::GpuAqEvaluationProfiler,
+    public aq_evaluation_internal::GpuValidatedAqEvaluation,
     public DeviceButteraugliOperation {
 public:
   MetalBackend(
@@ -317,6 +319,16 @@ public:
     std::unique_ptr<PreparedAqEvaluation>* prepared,
     gpu_profile_internal::GpuExecutionProfile* profile) override;
 
+  Status PrepareValidatedAqEvaluation(
+    const AqEvaluationPreparation& preparation,
+    std::unique_ptr<PreparedAqEvaluation>* prepared) override;
+
+  Status PrepareValidatedAqEvaluationProfiled(
+    const AqEvaluationPreparation& preparation,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<PreparedAqEvaluation>* prepared,
+    gpu_profile_internal::GpuExecutionProfile* profile) override;
+
   Status Prepare(
     GpuBackend& backend,
     const DeviceButteraugliPrepareDescriptor& descriptor,
@@ -338,6 +350,7 @@ private:
 
   Status PrepareAqEvaluationImpl(
     const AqEvaluationPreparation& preparation,
+    bool host_images_are_finite,
     gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<PreparedAqEvaluation>* prepared,
     gpu_profile_internal::GpuExecutionProfile* profile);

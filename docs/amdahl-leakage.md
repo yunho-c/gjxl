@@ -2,7 +2,7 @@
 
 - Status: active implementation roadmap
 - Original profile revision: `af3a9e6`
-- Current roadmap baseline: `55048f2`
+- Current roadmap baseline: `3313bbe`
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
 - Profile date: 2026-09-02
 - Related analysis: [entropy behavior alignment](entropy-behavior-alignment.md)
@@ -38,7 +38,7 @@ The roadmap priorities are:
 | Priority | Area | Current signal or status | Next implementation target |
 | ---: | --- | ---: | --- |
 | 2 | Preparation and storage | Direct padded-Opsin slice: padded-4K input preparation 75.09 -> 54.42 ms and peak RSS 1.161 -> 1.043 GiB | Re-profile before considering persistent workspace leases |
-| 3 | Color conversion, validation, and copies | Direct workflow transform implemented; Metal preparation still revalidates the original source | Remove downstream validation only with explicit trusted provenance and profile evidence |
+| 3 | Color conversion, validation, and copies | Direct workflow transform plus identity-bound finite-input provenance implemented; redundant scans cost 4.61 ms at 1080p and 18.49 ms at 4K | Qualified; proceed to priority 4 |
 | 4 | Quantization-matrix chromaticity statistics | about 16.8 ms GJXL versus 5.9 ms libjxl attribution | Apply libjxl's effort gate and vectorize the retained pass |
 | 5 | Metal readback and frame assembly | about 10.2 ms readback plus 12.9 ms assembly | Remove intermediate copies and redundant full-frame scans |
 | 6 | Residual serializer | 62.6 ms GJXL versus 42.3 ms libjxl | Give one-representation encoding a one-pass token path |
@@ -274,7 +274,7 @@ failures, and device-error invalidation.
 
 ## Priority 3: validate and move image pixels once
 
-### State after the direct-write slice
+### State after the direct-write and provenance slices
 
 The workflow previously ran [`EdgeExtend()`](../src/codestream/workflow.cpp)
 over the complete padded destination, then called the atomic public
@@ -291,12 +291,20 @@ The retained internal path:
 - fills only the transformed right edge and duplicates the final transformed
   row into bottom padding.
 
-Quantization-matrix statistics still scan Opsin. Metal evaluator preparation
-also revalidates its original image before upload, and validates coding Opsin
-when no resident coding view is supplied. Removing those checks requires an
-explicit internal provenance token or preparation contract so public GPU APIs
-cannot claim unvalidated input is trusted. That follow-up should be retained
-only if a fresh profile shows material wall time.
+Quantization-matrix statistics still scan Opsin. The ordinary fully resident
+workflow no longer repeats finite-value validation inside Metal evaluator
+preparation. `PreparedQuantizationPipeline` records the exact immutable RGB and
+Opsin views validated by the direct transform, and the backend-neutral resident
+frontend checks both identities before using a private validated-preparation
+capability. A different source view falls back to the public validating entry
+point. Geometry, layout, strategy, EPF, option, and resident-device-view checks
+remain unconditional.
+
+The trust contract is not present on `AqEvaluationPreparation` or the public
+`PrepareAqEvaluation()` API. Direct public GPU calls, exact-coefficient paths,
+and other callers without matching preparation provenance retain their finite
+scans. This keeps an optimization established by one synchronous workflow from
+becoming a caller-controlled validation bypass.
 
 Finite input alone does not prove finite output. The public linear-float API can
 receive very large finite values that overflow during matrix arithmetic, so the
@@ -309,7 +317,7 @@ parallel invocation. That overhead is lower priority. Earlier shared-executor
 experiments were not unconditionally faster, so full-image allocations and
 passes should be removed before scheduling is redesigned.
 
-### Result and remaining gates
+### Result and validation
 
 The direct-write slice exceeded the original 5-8 ms estimate because it removed
 both the persistent padded-linear image and the public transform's padded
@@ -318,6 +326,31 @@ scratch/copy from the workflow. At padded 4K, input preparation improved by
 peak-RSS reduction. The larger end-to-end result includes allocator and memory-
 traffic effects outside the removed loop and must not be interpreted as color-
 transform CPU time alone.
+
+Temporary timers around the production `ValidateFiniteImage()` calls measured
+21 preparations at each resolution across seven independent processes. The
+medians were:
+
+| Finite validation | Padded 1080p | Padded 4K |
+| --- | ---: | ---: |
+| Original linear RGB | 2.29 ms | 9.38 ms |
+| Coding Opsin | 2.33 ms | 9.16 ms |
+| Combined critical-path scan | 4.61 ms | 18.49 ms |
+
+Seven alternating stage-profile pairs compared the retained implementation
+with `3313bbe`. Median `frontend.prepare_evaluator` wall time improved from
+29.89 to 26.39 ms at padded 1080p (11.7%) and from 129.94 to 108.88 ms at
+padded 4K (16.2%). All seven 1080p pairs and six of seven 4K pairs favored the
+provenance path. Complete-encode timing remained noisier than this bounded
+stage, so the scan and evaluator numbers are the causal qualification for the
+slice rather than an inflated end-to-end claim.
+
+Public-preparation tests inject NaN into original RGB and infinity into coding
+Opsin and require rejection before any GPU allocation or submission. A prepared
+pipeline test also substitutes a different non-finite RGB view and verifies
+that provenance does not follow it. Effort-7-like, high-density, and
+maximum-error CLI smoke encodes remained byte-for-byte identical to `3313bbe`
+and were accepted by pinned `djxl` 0.12.0.
 
 Tests must cover NaN, infinity, huge finite values, strided inputs, overlapping
 views where allowed, unchanged public output on failure, scalar/NEON parity, and
@@ -595,9 +628,9 @@ separates low-risk work elimination from lifetime and layout redesign:
 4. **Completed in the current slice:** remove padded linear RGB and the
    workflow's atomic color-transform scratch/copy through a checked direct-write
    path; preserve the public transform contract.
-5. Re-profile before carrying trusted finite-input provenance into Metal
-   preparation; do not weaken public GPU validation to remove an unmeasured
-   scan.
+5. **Completed in the current slice:** bind finite-input provenance to the
+   exact workflow RGB/Opsin views and skip the measured duplicate scans only in
+   private fully resident preparation; retain public GPU validation.
 6. Implement priority 4's effort/mode gate and vectorized retained statistics.
 7. Incorporate the independently owned effort-7 zero-update change and capture
    a fresh matched profile.

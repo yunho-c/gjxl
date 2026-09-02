@@ -522,7 +522,9 @@ struct PreparedWorkflow {
       &candidate->quantization,
       options.backend == VarDctBackendPreference::kCpu,
       options.metal_aq_mode ==
-        GpuAdaptiveQuantizationMode::kExactCoefficients);
+        GpuAdaptiveQuantizationMode::kExactCoefficients,
+      quantization_pipeline_internal::QuantizationPipelineInputProvenance::
+        kFiniteLinearRgbAndOpsin);
     if (!status.ok()) {
       return status;
     }

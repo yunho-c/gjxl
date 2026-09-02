@@ -729,7 +729,9 @@ bool CheckDefaultUpdatePipelineParity() {
   gjxl::Status encoding_status =
     gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
       original.ConstView(), opsin.ConstView(), options, &encoding_prepared,
-      false, false);
+      false, false,
+      gjxl::quantization_pipeline_internal::
+        QuantizationPipelineInputProvenance::kFiniteLinearRgbAndOpsin);
   const bool resident_preprocessing_was_deferred =
     !encoding_prepared.preprocessed_opsin.const_view().valid();
   gjxl::VarDctEncoderFrame encoding_frame;
@@ -752,12 +754,44 @@ bool CheckDefaultUpdatePipelineParity() {
   }
   if (!encoding_status.ok() || !resident_preprocessing_was_deferred ||
       encoding_prepared.preprocessed_opsin.const_view().valid() ||
+      !ImagesShareStorage(
+        encoding_prepared.validated_original_linear_rgb,
+        original.ConstView()) ||
+      !ImagesShareStorage(
+        encoding_prepared.validated_coding_opsin,
+        opsin.ConstView()) ||
       encoding_scores != resident.scores ||
       !FramesEqual(encoding_frame, resident.frame) ||
       encoding_codestream != resident_codestream) {
     std::cerr << "Encoding-only resident pipeline materialized host "
                  "preprocessing or changed frame output: "
               << encoding_status.message() << '\n';
+    return false;
+  }
+
+  ImageStorage mismatched_original = original;
+  mismatched_original.plane[0][7] =
+    std::numeric_limits<float>::quiet_NaN();
+  gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
+    mismatched_aq;
+  gjxl::VarDctEncoderFrame mismatched_frame;
+  std::vector<double> mismatched_scores;
+  const gjxl::Status mismatched_status =
+    gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipelineForEncoding(
+        *gpu, mismatched_original.ConstView(), encoding_prepared, options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        {
+          .frame = &mismatched_frame,
+          .score_history = &mismatched_scores,
+        },
+        nullptr, &mismatched_aq);
+  if (mismatched_status.code() != gjxl::StatusCode::kInvalidArgument ||
+      mismatched_aq.evaluation != nullptr || mismatched_frame.valid() ||
+      !mismatched_scores.empty()) {
+    std::cerr << "Validated preparation provenance escaped its bound source "
+                 "identity: "
+              << mismatched_status.message() << '\n';
     return false;
   }
 

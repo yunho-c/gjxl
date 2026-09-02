@@ -630,6 +630,7 @@ MetalPreparedAqEvaluation::~MetalPreparedAqEvaluation() {
 
 Status MetalPreparedAqEvaluation::Prepare(
   const AqEvaluationPreparation& preparation,
+  bool host_images_are_finite,
   gpu_profile_internal::GpuProfilingMode profiling_mode,
   gpu_profile_internal::GpuExecutionProfile* profile) {
 
@@ -645,7 +646,8 @@ Status MetalPreparedAqEvaluation::Prepare(
       profiling_mode, &candidate_profile);
     if (!profile_status.ok()) return profile_status;
   }
-  Status status = ValidatePreparation(preparation);
+  Status status = ValidatePreparation(
+    preparation, host_images_are_finite);
   if (!status.ok()) {
     return status;
   }
@@ -3321,7 +3323,8 @@ Status MetalPreparedAqEvaluation::GetReadbackStats(
 }
 
 Status MetalPreparedAqEvaluation::ValidatePreparation(
-    const AqEvaluationPreparation &preparation) const {
+    const AqEvaluationPreparation& preparation,
+    bool host_images_are_finite) const {
 
   if (!preparation.original_linear_rgb.valid() ||
       !preparation.coding_opsin.valid() ||
@@ -3432,13 +3435,19 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
       }
     }
   }
-  status = ValidateFiniteImage(preparation.original_linear_rgb,
-                               "Prepared AQ original");
-  if (!status.ok())
-    return status;
-  if (resident_coding_specified) return Status::Ok();
-  return ValidateFiniteImage(preparation.coding_opsin,
-                             "Prepared AQ coding opsin");
+  if (!host_images_are_finite) {
+    status = ValidateFiniteImage(preparation.original_linear_rgb,
+                                 "Prepared AQ original");
+    if (!status.ok())
+      return status;
+    if (!resident_coding_specified) {
+      status = ValidateFiniteImage(preparation.coding_opsin,
+                                   "Prepared AQ coding opsin");
+      if (!status.ok())
+        return status;
+    }
+  }
+  return Status::Ok();
 }
 
 Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
@@ -4355,7 +4364,7 @@ Status MetalBackend::PrepareAqEvaluation(
   std::unique_ptr<PreparedAqEvaluation>* prepared) {
 
   return PrepareAqEvaluationImpl(
-    preparation, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    preparation, false, gpu_profile_internal::GpuProfilingMode::kDisabled,
     prepared, nullptr);
 }
 
@@ -4370,11 +4379,35 @@ Status MetalBackend::PrepareAqEvaluationProfiled(
       "Profiled AQ preparation mode is disabled");
   }
   return PrepareAqEvaluationImpl(
-    preparation, mode, prepared, profile);
+    preparation, false, mode, prepared, profile);
+}
+
+Status MetalBackend::PrepareValidatedAqEvaluation(
+  const AqEvaluationPreparation& preparation,
+  std::unique_ptr<PreparedAqEvaluation>* prepared) {
+
+  return PrepareAqEvaluationImpl(
+    preparation, true, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    prepared, nullptr);
+}
+
+Status MetalBackend::PrepareValidatedAqEvaluationProfiled(
+  const AqEvaluationPreparation& preparation,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<PreparedAqEvaluation>* prepared,
+  gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Profiled validated AQ preparation mode is disabled");
+  }
+  return PrepareAqEvaluationImpl(
+    preparation, true, mode, prepared, profile);
 }
 
 Status MetalBackend::PrepareAqEvaluationImpl(
   const AqEvaluationPreparation& preparation,
+  bool host_images_are_finite,
   gpu_profile_internal::GpuProfilingMode mode,
   std::unique_ptr<PreparedAqEvaluation>* prepared,
   gpu_profile_internal::GpuExecutionProfile* profile) {
@@ -4390,7 +4423,8 @@ Status MetalBackend::PrepareAqEvaluationImpl(
     auto result = std::make_unique<MetalPreparedAqEvaluation>(*this);
     gpu_profile_internal::GpuExecutionProfile candidate_profile;
     Status status = result->Prepare(
-      preparation, mode, profiling ? &candidate_profile : nullptr);
+      preparation, host_images_are_finite, mode,
+      profiling ? &candidate_profile : nullptr);
     if (!status.ok()) {
       return status;
     }

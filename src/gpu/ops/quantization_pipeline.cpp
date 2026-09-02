@@ -17,6 +17,7 @@
 #include "gpu/ops/adaptive_quantization_profile_internal.h"
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/gaborish.h"
 #include "gpu/ops/gaborish_profile_internal.h"
 #include "gpu/ops/quantization_pipeline_profile_internal.h"
@@ -162,6 +163,19 @@ bool SameImageIdentity(ConstImage3FView left, ConstImage3FView right) {
     SamePlaneIdentity(left.plane[2], right.plane[2]);
 }
 
+bool HasValidatedHostImages(
+  const quantization_pipeline_internal::PreparedQuantizationPipeline&
+    prepared,
+  ConstImage3FView original_linear_rgb) {
+
+  return prepared.validated_original_linear_rgb.valid() &&
+    prepared.validated_coding_opsin.valid() &&
+    SameImageIdentity(
+      prepared.validated_original_linear_rgb, original_linear_rgb) &&
+    SameImageIdentity(
+      prepared.validated_coding_opsin, prepared.coding_opsin);
+}
+
 Status PrepareResidentAcStrategyInputs(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
@@ -217,20 +231,33 @@ Status PrepareResidentAcStrategyInputs(
       .coefficient_decision_mode =
         AcCoefficientDecisionMode::kAdjustedSharedQuant,
     };
+    auto* const validated_preparation = HasValidatedHostImages(
+        prepared, original_linear_rgb)
+      ? dynamic_cast<aq_evaluation_internal::GpuValidatedAqEvaluation*>(
+          &gpu)
+      : nullptr;
     if (profiling_session == nullptr) {
-      status = PrepareAqEvaluation(
-        gpu, evaluation_preparation, &state.evaluation);
+      status = validated_preparation == nullptr
+        ? PrepareAqEvaluation(
+            gpu, evaluation_preparation, &state.evaluation)
+        : validated_preparation->PrepareValidatedAqEvaluation(
+            evaluation_preparation, &state.evaluation);
     } else {
-      auto* preparation_profiler = dynamic_cast<
+      auto* const preparation_profiler = dynamic_cast<
         gpu_profile_internal::GpuAqEvaluationProfiler*>(&gpu);
-      if (preparation_profiler == nullptr) {
+      if (validated_preparation == nullptr &&
+          preparation_profiler == nullptr) {
         return Status::Unavailable(
           "Resident evaluator preparation cannot collect GPU diagnostics");
       }
       gpu_profile_internal::GpuExecutionProfile child_profile;
-      status = preparation_profiler->PrepareAqEvaluationProfiled(
-        evaluation_preparation, profiling_session->mode(),
-        &state.evaluation, &child_profile);
+      status = validated_preparation == nullptr
+        ? preparation_profiler->PrepareAqEvaluationProfiled(
+            evaluation_preparation, profiling_session->mode(),
+            &state.evaluation, &child_profile)
+        : validated_preparation->PrepareValidatedAqEvaluationProfiled(
+            evaluation_preparation, profiling_session->mode(),
+            &state.evaluation, &child_profile);
       if (status.ok()) {
         status = profiling_session->Append(std::move(child_profile));
       }

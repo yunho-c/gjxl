@@ -271,6 +271,7 @@ public:
 
   Status Prepare(
     const AqEvaluationPreparation& preparation,
+    bool host_images_are_finite,
     gpu_profile_internal::GpuProfilingMode profiling_mode =
       gpu_profile_internal::GpuProfilingMode::kDisabled,
     gpu_profile_internal::GpuExecutionProfile* profile = nullptr);
@@ -396,7 +397,9 @@ private:
     kInvalid,
   };
 
-  Status ValidatePreparation(const AqEvaluationPreparation &preparation) const;
+  Status ValidatePreparation(
+    const AqEvaluationPreparation& preparation,
+    bool host_images_are_finite) const;
   Status ValidateInput(AqEvaluationInput input) const;
   Status ValidateOutput(AqEvaluationOutput output) const;
   Status InitializeGpuExecutionProfile(
