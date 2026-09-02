@@ -26,6 +26,21 @@
 - Raw workflow benchmark schema 14 records requested effort, compression mode,
   resolved entropy behavior, and HybridUint/histogram/alphabet-width candidate
   counts.
+- The ordinary balanced serializer now reuses fixed ANS populations, skips
+  redundant exact candidate measurement, parallelizes independent AC-group
+  preparation through the bounded CPU budget, and uses sparse clustering
+  distance calculations. In paired Release measurements this reduced
+  serializer wall time from 92.692 to 27.327 ms at 1080p and from 148.195 to
+  61.610 ms at 4K; maximum-compression selection remains exact and unchanged.
+- The Opsin frontend uses pinned libjxl's vector-friendly cube-root refinement,
+  with a four-lane NEON implementation on Apple Silicon and a tested scalar
+  fallback. The transform enforces a `1e-6` scalar-reference error bound and
+  does not add a platform framework dependency.
+- A fresh matched-quality effort-7 comparison puts GJXL at 1.375x libjxl
+  complete-encode time for the representative 1080p photo and 1.203x at 4K.
+  Remaining serializer overhead is concentrated in coefficient tokenization
+  and entropy construction; GJXL model/token emission and framing are already
+  faster on both inputs.
 
 See
 [`entropy-behavior-alignment.md`](entropy-behavior-alignment.md) for source
