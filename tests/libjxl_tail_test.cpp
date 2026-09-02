@@ -576,6 +576,24 @@ int main() {
     std::cerr << "Mixed same-frame tails did not decode to identical pixels\n";
     return 1;
   }
+
+  // Libjxl's ordinary Falcon frontend selects only DCT8 and its coefficient-
+  // order discovery relies on that invariant. The precomputed bridge must
+  // instead preserve this fixture's mixed DCT32/DCT16/DCT8 strategy grid.
+  std::vector<uint8_t> stress_falcon;
+  if (!CheckStatus(
+          gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
+              stress_frame, {.effort = 3}, &stress_falcon),
+          gjxl::StatusCode::kOk, "Mixed-strategy Falcon bridge request")) {
+    return 1;
+  }
+  libjxl_pixels.clear();
+  if (!DecodePixels(stress_falcon, stress_extent.width, stress_extent.height,
+                    &libjxl_pixels) ||
+      libjxl_pixels != native_pixels) {
+    std::cerr << "Falcon mixed-strategy tail changed decoded pixels\n";
+    return 1;
+  }
 #else
   const gjxl::codestream_internal::LibjxlTailProfile profile_sentinel{
       .total_nanoseconds = 0xA5A5A5A5A5A5A5A5u,
