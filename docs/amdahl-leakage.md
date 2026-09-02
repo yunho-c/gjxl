@@ -1,7 +1,8 @@
 # Amdahl leakage after entropy-behavior alignment
 
-- Status: analysis and implementation roadmap
-- GJXL revision: `af3a9e6`
+- Status: active implementation roadmap
+- Original profile revision: `af3a9e6`
+- Current implementation revision: `5136648` (on top of `3d1b93b`)
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
 - Profile date: 2026-09-02
 - Related analysis: [entropy behavior alignment](entropy-behavior-alignment.md)
@@ -32,11 +33,11 @@ are accelerated. The current effort-7 profile also performs two AQ updates,
 unlike libjxl effort 7. Changing effort 7 to a zero-update policy is priority 1,
 but that work is intentionally outside this document's implementation scope.
 
-The remaining priorities are:
+The roadmap priorities are:
 
-| Priority | Area | Current 4K signal | First implementation target |
+| Priority | Area | Current signal or status | Next implementation target |
 | ---: | --- | ---: | --- |
-| 2 | Preparation and storage | 61.5 ms complete input preparation; heavy allocation and clearing | Do not allocate outputs unused by the selected path |
+| 2 | Preparation and storage | First slice landed: padded-4K input preparation 97.58 -> 82.20 ms and peak RSS 1.56 -> 1.22 GiB | Remove the remaining duplicate Opsin copy |
 | 3 | Color conversion, validation, and copies | about 10.2 ms GJXL versus 2.2 ms libjxl color-transform attribution | Validate once and transform directly into final storage |
 | 4 | Quantization-matrix chromaticity statistics | about 16.8 ms GJXL versus 5.9 ms libjxl attribution | Apply libjxl's effort gate and vectorize the retained pass |
 | 5 | Metal readback and frame assembly | about 10.2 ms readback plus 12.9 ms assembly | Remove intermediate copies and redundant full-frame scans |
@@ -86,73 +87,98 @@ overlap in wall time, but they identify actual repeated memory passes.
 
 ## Priority 2: prepare only the selected execution path
 
-### Current structure
+### Landed first slice: two output contracts
 
-[`PreparedWorkflow`](../src/codestream/workflow.cpp) eagerly owns:
+Commits `3d1b93b` and `5136648` made fully resident Metal the default for
+qualified automatic single-target encodes and removed unused host storage from
+that path. The implementation does not carry a six-way execution plan. It uses
+two concrete output contracts, with the existing materialization flags handling
+only optional results inside those contracts:
 
-- padded linear RGB;
-- padded Opsin;
-- a [`PipelineStorage`](../src/codestream/workflow.cpp) containing initial
-  quantization, strategy and pixel masks, final quantization, block distances,
-  reconstructed RGB, and the encoder frame;
-- a [`PreparedQuantizationPipeline`](../src/codec/quantization_pipeline.cpp);
-  and
-- prepared GPU adaptive-quantization state.
+| Caller or mode | Output contract | Host behavior |
+| --- | --- | --- |
+| Metal exact coefficients | Lean encoding | Materializes preprocessed Opsin lazily, then returns the frame, score history, and control result |
+| Metal fully resident or throughput | Lean encoding | Returns the frame, score history, and control result without a host preprocessed-Opsin image |
+| CPU codestream adapter | Complete compatibility | Allocates `PipelineStorage` only if CPU is actually selected |
+| Metal maximum-throughput adapter | Complete compatibility | Allocates `PipelineStorage` only when this explicit frame-only mode is selected |
+| Public AQ and quantization-pipeline APIs | Complete diagnostics | Preserves the promised quant fields, masks, block-distance map, reconstructed RGB, frame, and scores |
+| Maximum-error control or final-score collection | Modifier on either contract | Adds only the required control result or terminal perceptual evaluation; it is not another storage plan |
 
-`PrepareQuantizationPipeline()` then creates another owned coding-Opsin image,
-copies the workflow's Opsin into it, and allocates another collection of initial
-and final quantization outputs, masks, block distances, and reconstructed RGB.
+`PreparedWorkflow` now keeps a small `EncodingArtifacts` result for the normal
+encoding path. Its complete `PipelineStorage` is a lazy compatibility allocation
+used only by the CPU and maximum-throughput adapters. The default resident path
+therefore does not construct host diagnostic quant fields, block distances, or
+reconstructed RGB.
 
-The encoding-only fully-resident call explicitly disables materialization of
-initial quantization, final quantization, block distance, and reconstructed RGB
-through `QuantizationPipelineMaterialization`. By then, however, much of the
-corresponding host storage has already been allocated and value-initialized.
+`PreparedQuantizationPipeline` no longer owns a second set of final quantization,
+block-distance, reconstructed-RGB, frame, or score-history results. Adaptive-
+quantization providers already promise atomic output, so they commit directly
+to the selected caller-owned destination. The host preprocessed-Opsin image is
+also allocated only when the exact or CPU implementation needs it. CPU
+Butteraugli reference preparation is eager only for an explicitly forced CPU
+encode and remains available lazily for automatic fallback.
 
-The production Metal backend is not the missing cache: it is already initialized
-once and reused process-wide by `ResolveProductionMetalBackend()`. Likewise,
-[`DeviceScratchArena`](../src/gpu/scratch.cpp) already reuses an allocation when
-its retained capacity is sufficient. The current lifetime of the prepared
-workflow prevents those evaluator arenas and most host-vector capacities from
-surviving an independent encode.
+Some initial quantization, strategy, and pixel-mask fields remain because the
+resident frontend currently reads them back and uses them for AC search and AQ
+reconfiguration. Their retention follows actual use rather than the final
+diagnostic materialization flags.
 
-### Recommended first slice: lazy materialization
+Automatic backend policy is narrower than the original plan assumed. Qualified
+automatic single Butteraugli-target encoding may select resident Metal and fall
+back to CPU if Metal is unavailable. Automatic target-byte, target-BPP, and
+maximum-error searches stay entirely on CPU so one search never mixes CPU and
+resident rate curves. Forced Metal continues to support resident maximum-error
+control. Lazy compatibility storage is consequently needed for genuine fallback,
+not for arbitrary backend changes between target-size attempts.
 
-Introduce an internal execution/materialization plan after geometry validation
-and per-attempt backend selection. It should distinguish at least:
+### First-slice measurements
 
-- CPU pipeline;
-- Metal exact coefficients;
-- Metal fully resident or throughput;
-- maximum-error control;
-- final Butteraugli diagnostics; and
-- public diagnostic APIs that promise complete output planes.
+The retained A/B used Release builds and five alternating independent process
+pairs per workload, with two warmups and five measured samples per process. The
+table reports the median of process medians. Measurements were captured on
+patch-equivalent commits `535acfb` and `7732b9f`; their source and test trees are
+identical to the `3d1b93b` and `5136648` cherry-picks named here.
 
-Use that plan to allocate only required output storage. For an ordinary
-fully-resident encode, `PipelineStorage` should retain the final frame, score
-history, and control result, but not allocate diagnostic quant fields, a block
-distance map, or reconstructed RGB. `PreparedQuantizationPipeline` should make
-its final-output planes lazy as well. Some initial fields may remain necessary
-for control or reconfiguration; their removal must be driven by actual caller
-use rather than by the final materialization flags alone.
+| Workload | Stage | Parent | `5136648` | Change |
+| --- | --- | ---: | ---: | ---: |
+| padded 1080p | Input preparation | 23.359 ms | 18.953 ms | -4.406 ms (-18.9%) |
+| padded 1080p | Complete encode | 174.466 ms | 171.169 ms | -3.297 ms (-1.9%) |
+| padded 4K | Input preparation | 97.576 ms | 82.201 ms | -15.375 ms (-15.8%) |
+| padded 4K | Complete encode | 699.764 ms | 654.247 ms | -45.517 ms (-6.5%) |
 
-Avoid the complete `opsin -> coding_opsin` copy by letting the internal prepared
-pipeline borrow the workflow-owned immutable Opsin view for the synchronous
-encode lifetime. A more complete version can remove `padded_linear`: transform
-the real source extent into a padded Opsin destination, then extend the
+Complete-encode timing was noisier than the preparation-stage result, so its
+improvement is directional rather than a precise throughput promise. Every
+sample selected Metal and retained its encoded size: 410,072 bytes at 1080p and
+1,606,911 bytes at 4K. The resident encoding test also compares the lean and
+complete-output frame and codestream byte-for-byte.
+
+Three alternating padded-4K process pairs, each with one warmup and one measured
+sample under `/usr/bin/time -l`, reduced median maximum resident set size from
+1.56 GiB to 1.22 GiB: approximately 342 MiB, or 21%. The pinned-libjxl Release
+matrix passed 66 of 67 tests; the only failure was the pre-existing CPU
+quantization golden mismatch, reproduced unchanged on the parent.
+
+### Next storage slice: remove duplicate image ownership
+
+`PrepareQuantizationPipeline()` still copies the workflow-owned immutable Opsin
+image into `PreparedQuantizationPipeline::coding_opsin`. Remove that full
+`opsin -> coding_opsin` copy by borrowing the workflow view for the synchronous
+encode lifetime. The prepared GPU compatibility key must follow the borrowed
+image's lifetime and content generation; pointer identity alone must not make a
+later image look reusable.
+
+A subsequent, separately qualified change can remove `padded_linear`: transform
+the real source extent directly into a padded Opsin destination, then extend the
 already-transformed right and bottom edges. Because the transform is pointwise,
-that ordering should preserve padded values while eliminating one owned
+that ordering should preserve padded values while eliminating another owned
 three-plane float image.
 
-Backend selection is per attempt and automatic target-size searches can vary
-the attempted Butteraugli target, so lazy storage must still support a later CPU
-or Metal choice. The goal is not to assume that one backend applies to every
-attempt; it is to materialize each attempt's actual requirements on demand.
+### Deferred option: persistent workspace leases
 
-### Recommended second slice: persistent workspace leases
-
-After dead allocations are removed, preserve useful capacity across independent
-images with an internal `VarDctEncoderWorkspace` or `MetalEncodingWorkspace`.
-Do not cache an entire `PreparedWorkflow` unchanged.
+Consider preserving useful capacity across independent images with an internal
+`VarDctEncoderWorkspace` or `MetalEncodingWorkspace` only after duplicate image
+ownership and direct-write passes have landed and a fresh profile still
+justifies it. Do not cache an entire `PreparedWorkflow` unchanged.
 
 The C API documents that `gjxl_encode` may run concurrently on one context.
 Consequently, one context-wide mutable workspace would either race or serialize
@@ -173,16 +199,13 @@ persistent workspace therefore requires an explicit image generation/reset
 operation. Pointer identity alone must not allow a new image to reuse the old
 device pixels or Butteraugli reference.
 
-### Expected result and gates
+### Remaining gates
 
-The whole 4K preparation phase is about 61.5 ms, so that is the absolute ceiling,
-not an achievable saving. The allocator profile makes a 15-30 ms first-pass
-engineering target plausible across priorities 2 and 3, but only a measured A/B
-can turn that into a claim.
-
-Required coverage includes automatic CPU fallback, forced CPU and Metal,
-target-size repeated attempts, maximum-error, final-score diagnostics, concurrent
-C API calls, batch workers, allocation failures, and device-error invalidation.
+The next borrowed-Opsin and direct-transform changes must preserve view lifetime,
+failure atomicity, and prepared-GPU invalidation. Required coverage includes
+automatic CPU fallback, forced CPU and Metal, target-size repeated attempts,
+maximum-error, final-score diagnostics, concurrent C API calls, batch workers,
+allocation failures, and device-error invalidation.
 
 ## Priority 3: validate and move image pixels once
 
@@ -499,22 +522,27 @@ changed by a separate proposal.
 
 ## Recommended implementation sequence
 
-The priority numbers describe causal importance, but the safest implementation
-order separates low-risk work elimination from lifetime and layout redesign:
+The priority numbers describe causal importance, but the implementation order
+separates low-risk work elimination from lifetime and layout redesign:
 
-1. Add allocation, zeroed-byte, copied-byte, validation-pass, and frame-handoff
-   counters where the current wall stages do not distinguish them.
-2. Implement priority 2's lazy materialization and duplicate-Opsin removal.
-3. Implement priority 3's internal direct-write, single-validation color path.
-4. Implement priority 4's effort/mode gate and vectorized retained statistics.
-5. Incorporate the independently owned effort-7 zero-update change and capture
+1. **Completed in `3d1b93b`:** make fully resident Metal the ordinary default
+   while retaining exact coefficients as an explicit compatibility path.
+2. **Completed in `5136648`:** give encoding and public diagnostics two concrete
+   output contracts; remove dead resident host materialization and defer CPU-only
+   preparation until CPU is selected.
+3. Remove the duplicate workflow-to-prepared Opsin ownership, with explicit
+   borrowed-view lifetime and prepared-state invalidation.
+4. Implement priority 3's direct-write, single-validation color path, including
+   separately qualified removal of padded linear RGB.
+5. Implement priority 4's effort/mode gate and vectorized retained statistics.
+6. Incorporate the independently owned effort-7 zero-update change and capture
    a fresh matched profile.
-6. Implement priority 5's low-risk direct frame copies and scan fusion.
-7. Implement priority 6's one-pass ordinary tokenization and effort-aware
+7. Implement priority 5's low-risk direct frame copies and scan fusion.
+8. Implement priority 6's one-pass ordinary tokenization and effort-aware
    coefficient-order policy.
-8. Add cache-local balanced histogram population reduction.
-9. Re-profile before considering persistent workspace pooling, a Metal
-   group-packing kernel, or a mapped zero-copy frame view.
+9. Add cache-local balanced histogram population reduction.
+10. Re-profile before adding more counters or considering persistent workspace
+    pooling, a Metal group-packing kernel, or a mapped zero-copy frame view.
 
 This sequence prevents two common forms of wasted optimization: building a
 persistent pool around allocations that should not exist, and redesigning the

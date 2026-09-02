@@ -44,8 +44,9 @@ protected:
   AdaptiveQuantizationProvider() = default;
 };
 
-/// Target-invariant preparation and reusable atomic staging for repeated
-/// complete quantization attempts over one source/profile pair.
+/// Target-invariant preparation for repeated quantization attempts over one
+/// source/profile pair. Final encoder and diagnostic results are committed
+/// directly by the selected adaptive-quantization provider.
 struct PreparedQuantizationPipeline {
   Extent2D source_extent;
   Extent2D padded_extent;
@@ -62,12 +63,6 @@ struct PreparedQuantizationPipeline {
   std::vector<float> strategy_mask;
   std::vector<float> pixel_mask;
   AcStrategyGrid strategies;
-  std::vector<float> final_quant;
-  std::vector<float> block_distance;
-  Image3FBuffer reconstructed_linear;
-  VarDctEncoderFrame frame;
-  std::vector<double> score_history;
-  MaximumErrorResult maximum_error_result;
   ButteraugliOptions butteraugli_options;
   std::unique_ptr<PreparedButteraugliReference> butteraugli_reference;
 };

@@ -717,20 +717,8 @@ bool CheckDefaultUpdatePipelineParity() {
     gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
       original.ConstView(), opsin.ConstView(), options, &encoding_prepared,
       false, false);
-  constexpr float kDiagnosticPoison = -431.25f;
-  std::fill(
-    encoding_prepared.final_quant.begin(),
-    encoding_prepared.final_quant.end(), kDiagnosticPoison);
-  std::fill(
-    encoding_prepared.block_distance.begin(),
-    encoding_prepared.block_distance.end(), kDiagnosticPoison);
-  gjxl::Image3FView encoding_reconstruction =
-    encoding_prepared.reconstructed_linear.view();
-  for (gjxl::PlaneF32View plane : encoding_reconstruction.plane) {
-    for (size_t y = 0; y < plane.extent.height; ++y) {
-      std::fill_n(plane.Row(y), plane.extent.width, kDiagnosticPoison);
-    }
-  }
+  const bool resident_preprocessing_was_deferred =
+    !encoding_prepared.preprocessed_opsin.const_view().valid();
   gjxl::VarDctEncoderFrame encoding_frame;
   std::vector<double> encoding_scores;
   if (encoding_status.ok()) {
@@ -749,75 +737,16 @@ bool CheckDefaultUpdatePipelineParity() {
     encoding_status = gjxl::EncodeVarDctCodestream(
       encoding_frame, &encoding_codestream);
   }
-  const bool reconstruction_untouched = std::ranges::all_of(
-    encoding_reconstruction.plane, [](gjxl::PlaneF32View plane) {
-      for (size_t y = 0; y < plane.extent.height; ++y) {
-        if (!std::ranges::all_of(
-              std::span<const float>(plane.Row(y), plane.extent.width),
-              [](float value) { return value == kDiagnosticPoison; })) {
-          return false;
-        }
-      }
-      return true;
-    });
-  if (!encoding_status.ok() || encoding_scores != resident.scores ||
+  if (!encoding_status.ok() || !resident_preprocessing_was_deferred ||
+      encoding_prepared.preprocessed_opsin.const_view().valid() ||
+      encoding_scores != resident.scores ||
       !FramesEqual(encoding_frame, resident.frame) ||
-      encoding_codestream != resident_codestream ||
-      !std::ranges::all_of(
-        encoding_prepared.final_quant,
-        [](float value) { return value == kDiagnosticPoison; }) ||
-      !std::ranges::all_of(
-        encoding_prepared.block_distance,
-        [](float value) { return value == kDiagnosticPoison; }) ||
-      !reconstruction_untouched) {
-    std::cerr << "Encoding-only resident pipeline changed diagnostics or "
-                 "frame output: " << encoding_status.message() << '\n';
+      encoding_codestream != resident_codestream) {
+    std::cerr << "Encoding-only resident pipeline materialized host "
+                 "preprocessing or changed frame output: "
+              << encoding_status.message() << '\n';
     return false;
   }
-
-  const auto poison_prepared_diagnostics = [kDiagnosticPoison](auto& prepared) {
-    std::fill(
-      prepared.final_quant.begin(), prepared.final_quant.end(),
-      kDiagnosticPoison);
-    std::fill(
-      prepared.block_distance.begin(), prepared.block_distance.end(),
-      kDiagnosticPoison);
-    const gjxl::Image3FView reconstruction =
-      prepared.reconstructed_linear.view();
-    for (gjxl::PlaneF32View plane : reconstruction.plane) {
-      for (size_t y = 0; y < plane.extent.height; ++y) {
-        std::fill_n(plane.Row(y), plane.extent.width, kDiagnosticPoison);
-      }
-    }
-  };
-  const auto diagnostics_untouched = [kDiagnosticPoison](const auto& prepared) {
-    if (!std::ranges::all_of(
-          prepared.final_quant,
-          [kDiagnosticPoison](float value) {
-            return value == kDiagnosticPoison;
-          }) ||
-        !std::ranges::all_of(
-          prepared.block_distance,
-          [kDiagnosticPoison](float value) {
-            return value == kDiagnosticPoison;
-          })) {
-      return false;
-    }
-    return std::ranges::all_of(
-      prepared.reconstructed_linear.const_view().plane,
-      [kDiagnosticPoison](gjxl::ConstPlaneF32View plane) {
-        for (size_t y = 0; y < plane.extent.height; ++y) {
-          if (!std::ranges::all_of(
-                std::span<const float>(plane.Row(y), plane.extent.width),
-                [kDiagnosticPoison](float value) {
-                  return value == kDiagnosticPoison;
-                })) {
-            return false;
-          }
-        }
-        return true;
-      });
-  };
 
   gjxl::quantization_pipeline_internal::PreparedQuantizationPipeline
     exact_encoding_prepared;
@@ -827,7 +756,8 @@ bool CheckDefaultUpdatePipelineParity() {
     gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
       original.ConstView(), opsin.ConstView(), options,
       &exact_encoding_prepared, false, false);
-  poison_prepared_diagnostics(exact_encoding_prepared);
+  const bool exact_preprocessing_was_deferred =
+    !exact_encoding_prepared.preprocessed_opsin.const_view().valid();
   gjxl::VarDctEncoderFrame exact_encoding_frame;
   std::vector<double> exact_encoding_scores;
   if (exact_encoding_status.ok()) {
@@ -854,10 +784,11 @@ bool CheckDefaultUpdatePipelineParity() {
         *exact_encoding_aq.evaluation, &exact_encoding_readback);
   }
   if (!exact_encoding_status.ok() ||
+      !exact_preprocessing_was_deferred ||
+      !exact_encoding_prepared.preprocessed_opsin.const_view().valid() ||
       exact_encoding_scores != accelerated.scores ||
       !FramesEqual(exact_encoding_frame, accelerated.frame) ||
       exact_encoding_codestream != gpu_codestream ||
-      !diagnostics_untouched(exact_encoding_prepared) ||
       exact_encoding_readback.score_history_bytes != sizeof(float) ||
       exact_encoding_readback.block_distance_map_bytes == 0 ||
       exact_encoding_readback.frame_bytes != 0 ||
@@ -893,7 +824,6 @@ bool CheckDefaultUpdatePipelineParity() {
         original.ConstView(), opsin.ConstView(), maximum_error_options,
         &maximum_encoding_prepared, false, false);
   }
-  poison_prepared_diagnostics(maximum_encoding_prepared);
   gjxl::VarDctEncoderFrame maximum_encoding_frame;
   std::vector<double> maximum_encoding_scores;
   gjxl::MaximumErrorResult maximum_encoding_result;
@@ -928,7 +858,6 @@ bool CheckDefaultUpdatePipelineParity() {
       maximum_encoding_result != maximum_error_full.maximum_error_result ||
       !FramesEqual(maximum_encoding_frame, maximum_error_full.frame) ||
       maximum_encoding_codestream != maximum_error_codestream ||
-      !diagnostics_untouched(maximum_encoding_prepared) ||
       maximum_encoding_readback.score_history_bytes != 0 ||
       maximum_encoding_readback.maximum_error_bytes == 0 ||
       maximum_encoding_readback.block_distance_map_bytes == 0 ||

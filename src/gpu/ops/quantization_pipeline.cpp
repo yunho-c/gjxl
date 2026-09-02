@@ -188,7 +188,7 @@ Status PrepareResidentAcStrategyInputs(
     state.backend == &gpu &&
     SameImageIdentity(state.original_linear_rgb, original_linear_rgb) &&
     SameImageIdentity(
-      state.coding_opsin, prepared.preprocessed_opsin.const_view()) &&
+      state.coding_opsin, prepared.coding_opsin.const_view()) &&
     state.evaluation_options == evaluation_options &&
     state.resident_quantization;
   if (!compatible) {
@@ -247,9 +247,9 @@ Status PrepareResidentAcStrategyInputs(
     state.original_linear_rgb = original_linear_rgb;
     // The complete evaluator owns the unfiltered coding image and regenerates
     // the resident search-domain image during initial quantization. Track the
-    // logical preprocessed view used by the downstream AQ provider so the
-    // same allocation is recognized and reconfigured instead of replaced.
-    state.coding_opsin = prepared.preprocessed_opsin.const_view();
+    // immutable coding view used by the downstream AQ provider so the same
+    // allocation is recognized and reconfigured instead of replaced.
+    state.coding_opsin = prepared.coding_opsin.const_view();
     state.evaluation_options = evaluation_options;
     state.resident_quantization = true;
   }
@@ -614,25 +614,7 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
       "Encoding-only GPU pipeline output is invalid");
   }
   const CpuQuantizationPipelineOutput pipeline_output{
-    .initial_quantization = {
-      .quant_field = {
-        prepared.initial_quant.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .strategy_mask = {
-        prepared.strategy_mask.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .pixel_mask = {
-        prepared.pixel_mask.data(), prepared.padded_extent,
-        prepared.padded_extent.width},
-    },
     .adaptive_quantization = {
-      .quant_field = {
-        prepared.final_quant.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .block_distance_map = {
-        prepared.block_distance.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .reconstructed_linear_rgb = prepared.reconstructed_linear.view(),
       .frame = output.frame,
       .score_history = output.score_history,
       .maximum_error_result = output.maximum_error_result,
@@ -693,25 +675,7 @@ Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
   gpu_profile_internal::GpuProfilingSession profiling_session(
     profiling_mode, capabilities);
   const CpuQuantizationPipelineOutput pipeline_output{
-    .initial_quantization = {
-      .quant_field = {
-        prepared.initial_quant.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .strategy_mask = {
-        prepared.strategy_mask.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .pixel_mask = {
-        prepared.pixel_mask.data(), prepared.padded_extent,
-        prepared.padded_extent.width},
-    },
     .adaptive_quantization = {
-      .quant_field = {
-        prepared.final_quant.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .block_distance_map = {
-        prepared.block_distance.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .reconstructed_linear_rgb = prepared.reconstructed_linear.view(),
       .frame = output.frame,
       .score_history = output.score_history,
       .maximum_error_result = output.maximum_error_result,
