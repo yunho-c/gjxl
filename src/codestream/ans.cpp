@@ -52,6 +52,7 @@ static_assert(
   codestream_internal::kAnsHistogramPrecisionShiftCount);
 constexpr uint32_t kAnsSignature = 0x13;
 constexpr size_t kAnsAlphabetWidthCount = 4;
+constexpr size_t kExactLog2TableSize = 1 << 16;
 // Retain the four prefix candidates, then add the four ANS configurations that
 // materially improved the established corpus. The wider 28-choice experiment
 // only saved four additional bytes and added measurable complete-encode cost.
@@ -116,7 +117,47 @@ Status AllocationFailure() {
   return Status::OutOfMemory("ANS entropy allocation failed");
 }
 
-Status StoreVarLenUint8(size_t value, BitWriter* writer) {
+double ExactCountLog2(uint64_t value) {
+  static const std::array<double, kExactLog2TableSize + 1> table = [] {
+    std::array<double, kExactLog2TableSize + 1> values{};
+    for (size_t index = 1; index < values.size(); ++index) {
+      values[index] = std::log2(static_cast<double>(index));
+    }
+    return values;
+  }();
+  return value <= kExactLog2TableSize
+    ? table[static_cast<size_t>(value)]
+    : std::log2(static_cast<double>(value));
+}
+
+class BitCountWriter {
+public:
+  [[nodiscard]] size_t bits_written() const noexcept {
+    return bits_written_;
+  }
+
+  [[nodiscard]] Status WriteBits(size_t bit_count, uint64_t bits) {
+    if (bit_count > BitWriter::kMaxBitsPerWrite) {
+      return Status::InvalidArgument(
+        "A bit-counter call cannot exceed 56 bits");
+    }
+    if ((bits >> bit_count) != 0) {
+      return Status::InvalidArgument(
+        "Bit-counter input has set bits outside the requested width");
+    }
+    if (bits_written_ > std::numeric_limits<size_t>::max() - bit_count) {
+      return Status::OutOfMemory("Bit-counter size overflow");
+    }
+    bits_written_ += bit_count;
+    return Status::Ok();
+  }
+
+private:
+  size_t bits_written_ = 0;
+};
+
+template <typename Writer>
+Status StoreVarLenUint8(size_t value, Writer* writer) {
   if (writer == nullptr || value > std::numeric_limits<uint8_t>::max()) {
     return Status::InvalidArgument("Variable-length uint8 is invalid");
   }
@@ -624,9 +665,10 @@ Status WriteAnsUintConfig(
     std::bit_width(lsb_choices), config.lsb_in_token);
 }
 
-Status WriteAnsHistogram(
+template <typename Writer>
+Status WriteAnsHistogramTo(
   const AnsHistogram& histogram,
-  BitWriter* writer) {
+  Writer* writer) {
 
   if (writer == nullptr) {
     return Status::InvalidArgument("ANS histogram output is null");
@@ -705,8 +747,11 @@ Status WriteAnsHistogram(
   if (omit_position >= histogram.frequencies.size()) {
     return Status::InvalidArgument("ANS omit position is invalid");
   }
-  std::vector<uint8_t> bit_widths(histogram.frequencies.size(), 0);
-  std::vector<uint8_t> same(histogram.frequencies.size(), 0);
+  if (histogram.frequencies.size() > kMaximumAnsAlphabetSize) {
+    return Status::InvalidArgument("ANS histogram alphabet is too large");
+  }
+  std::array<uint8_t, kMaximumAnsAlphabetSize> bit_widths{};
+  std::array<uint8_t, kMaximumAnsAlphabetSize> same{};
   uint8_t omit_width = 10;
   for (size_t symbol = 0; symbol < histogram.frequencies.size(); ++symbol) {
     if (symbol == omit_position || histogram.frequencies[symbol] == 0) {
@@ -728,8 +773,9 @@ Status WriteAnsHistogram(
   };
   constexpr uint8_t kMinimumRepetitions = 5;
   size_t run_start = 0;
-  for (size_t symbol = 1; symbol <= bit_widths.size(); ++symbol) {
-    if (symbol == bit_widths.size() || symbol == omit_position ||
+  for (size_t symbol = 1; symbol <= histogram.frequencies.size(); ++symbol) {
+    if (symbol == histogram.frequencies.size() ||
+        symbol == omit_position ||
         symbol == omit_position + 1 ||
         histogram.frequencies[symbol] !=
           histogram.frequencies[run_start]) {
@@ -738,7 +784,7 @@ Status WriteAnsHistogram(
     }
   }
   constexpr size_t kRepeatWidth = kAnsLogTableSize + 1;
-  for (size_t symbol = 0; symbol < bit_widths.size(); ++symbol) {
+  for (size_t symbol = 0; symbol < histogram.frequencies.size(); ++symbol) {
     const uint8_t width = bit_widths[symbol];
     if (width >= kDepths.size()) {
       return Status::Internal("ANS population width is invalid");
@@ -783,6 +829,13 @@ Status WriteAnsHistogram(
   return Status::Ok();
 }
 
+Status WriteAnsHistogram(
+  const AnsHistogram& histogram,
+  BitWriter* writer) {
+
+  return WriteAnsHistogramTo(histogram, writer);
+}
+
 Status EstimateAnsHistogramCost(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
   const AnsHistogram& histogram,
@@ -791,8 +844,8 @@ Status EstimateAnsHistogramCost(
   if (cost == nullptr) {
     return Status::InvalidArgument("ANS histogram cost is null");
   }
-  BitWriter model;
-  if (Status status = WriteAnsHistogram(histogram, &model); !status.ok()) {
+  BitCountWriter model;
+  if (Status status = WriteAnsHistogramTo(histogram, &model); !status.ok()) {
     return status;
   }
   double candidate_cost = static_cast<double>(model.bits_written());
@@ -805,7 +858,7 @@ Status EstimateAnsHistogramCost(
     }
     candidate_cost += static_cast<double>(raw[symbol]) *
       (kAnsLogTableSize -
-       std::log2(static_cast<double>(histogram.frequencies[symbol])));
+       ExactCountLog2(histogram.frequencies[symbol]));
   }
   *cost = candidate_cost;
   return Status::Ok();
@@ -905,22 +958,31 @@ Status BuildBestAnsHistogram(
 struct DirectAnsHistogram {
   std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
   uint64_t total_count = 0;
+  uint64_t extra_bits = 0;
+  uint32_t maximum_symbol = 0;
   double shannon_bits = 0.0;
 
-  bool Add(size_t symbol) {
+  bool Add(const HybridUintToken& token) {
+    const size_t symbol = token.symbol;
     if (symbol >= counts.size() ||
         counts[symbol] == std::numeric_limits<uint64_t>::max() ||
-        total_count == std::numeric_limits<uint64_t>::max()) {
+        total_count == std::numeric_limits<uint64_t>::max() ||
+        extra_bits > std::numeric_limits<uint64_t>::max() -
+          token.extra_bit_count) {
       return false;
     }
     ++counts[symbol];
     ++total_count;
+    extra_bits += token.extra_bit_count;
+    maximum_symbol = std::max<uint32_t>(maximum_symbol, token.symbol);
     return true;
   }
 
   bool AddHistogram(const DirectAnsHistogram& other) {
     if (total_count >
-        std::numeric_limits<uint64_t>::max() - other.total_count) {
+          std::numeric_limits<uint64_t>::max() - other.total_count ||
+        extra_bits >
+          std::numeric_limits<uint64_t>::max() - other.extra_bits) {
       return false;
     }
     for (size_t symbol = 0; symbol < counts.size(); ++symbol) {
@@ -931,6 +993,8 @@ struct DirectAnsHistogram {
       counts[symbol] += other.counts[symbol];
     }
     total_count += other.total_count;
+    extra_bits += other.extra_bits;
+    maximum_symbol = std::max(maximum_symbol, other.maximum_symbol);
     return true;
   }
 };
@@ -940,11 +1004,11 @@ double DirectHistogramShannonBits(const DirectAnsHistogram& histogram) {
     return 0.0;
   }
   const double total = static_cast<double>(histogram.total_count);
-  double bits = total * std::log2(total);
+  double bits = total * ExactCountLog2(histogram.total_count);
   for (uint64_t count : histogram.counts) {
     if (count != 0) {
       bits -= static_cast<double>(count) *
-        std::log2(static_cast<double>(count));
+        ExactCountLog2(count);
     }
   }
   return bits;
@@ -1270,7 +1334,7 @@ Status PrepareDirectAnsPartition(
         const size_t histogram = options.initial_context_map.empty()
           ? token.context
           : options.initial_context_map[token.context];
-        if (!histograms[histogram].Add(encoded.symbol)) {
+        if (!histograms[histogram].Add(encoded)) {
           return Status::InvalidArgument("ANS histogram count overflow");
         }
       }
@@ -1311,36 +1375,49 @@ Status PrepareDirectAnsPartition(
         static_cast<uint8_t>(histogram_symbols[initial]);
     }
 
-    const ProfileClock::time_point value_begin = ProfileBegin(profile);
-    std::vector<std::vector<uint32_t>> cluster_values(clustered.size());
-    for (const EntropyTokenStreamView section : section_tokens) {
-      for (size_t index = 0; index < section.size(); ++index) {
-        const EntropyToken token = section[index];
-        const size_t cluster = candidate_partition.context_map[token.context];
-        cluster_values[cluster].push_back(token.value);
+    codestream_internal::PreparedEntropyClusters candidate_prepared;
+    candidate_prepared.context_count = candidate_partition.context_count;
+    candidate_prepared.context_map = candidate_partition.context_map;
+    if (mode == codestream_internal::DirectAnsEntropyMode::kBalanced) {
+      candidate_prepared.fixed_uint_config = options.uint_config;
+      candidate_prepared.fixed_ans_clusters.resize(clustered.size());
+      for (size_t cluster = 0; cluster < clustered.size(); ++cluster) {
+        candidate_prepared.fixed_ans_clusters[cluster] = {
+          .counts = clustered[cluster].counts,
+          .token_count = clustered[cluster].total_count,
+          .extra_bits = clustered[cluster].extra_bits,
+          .maximum_symbol = clustered[cluster].maximum_symbol,
+        };
       }
-    }
-    ProfileEnd(
-      profile, value_begin,
-      &EntropyWorkProfile::ans_value_collection_nanoseconds);
-    const ProfileClock::time_point aggregation_begin = ProfileBegin(profile);
-    std::vector<std::vector<codestream_internal::WeightedValue>>
-      aggregated(clustered.size());
-    for (size_t cluster = 0; cluster < clustered.size(); ++cluster) {
-      if (Status aggregate = codestream_internal::AggregateEntropyValues(
-            std::move(cluster_values[cluster]), &aggregated[cluster]);
-          !aggregate.ok()) {
-        return aggregate;
+    } else {
+      const ProfileClock::time_point value_begin = ProfileBegin(profile);
+      std::vector<std::vector<uint32_t>> cluster_values(clustered.size());
+      for (const EntropyTokenStreamView section : section_tokens) {
+        for (size_t index = 0; index < section.size(); ++index) {
+          const EntropyToken token = section[index];
+          const size_t cluster =
+            candidate_partition.context_map[token.context];
+          cluster_values[cluster].push_back(token.value);
+        }
       }
+      ProfileEnd(
+        profile, value_begin,
+        &EntropyWorkProfile::ans_value_collection_nanoseconds);
+      const ProfileClock::time_point aggregation_begin = ProfileBegin(profile);
+      candidate_prepared.values.resize(clustered.size());
+      for (size_t cluster = 0; cluster < clustered.size(); ++cluster) {
+        if (Status aggregate = codestream_internal::AggregateEntropyValues(
+              std::move(cluster_values[cluster]),
+              &candidate_prepared.values[cluster]);
+            !aggregate.ok()) {
+          return aggregate;
+        }
+      }
+      ProfileEnd(
+        profile, aggregation_begin,
+        &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
     }
-    ProfileEnd(
-      profile, aggregation_begin,
-      &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
-    *prepared = {
-      .context_count = candidate_partition.context_count,
-      .context_map = candidate_partition.context_map,
-      .values = std::move(aggregated),
-    };
+    *prepared = std::move(candidate_prepared);
     *partition = std::move(candidate_partition);
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
@@ -1876,29 +1953,67 @@ Status ValidatePreparedEntropyClusters(
   const EntropyCode& prefix_partition,
   const codestream_internal::PreparedEntropyClusters& prepared) {
 
+  const bool has_values = !prepared.values.empty();
+  const bool has_fixed = !prepared.fixed_ans_clusters.empty();
+  const size_t cluster_count = has_values
+    ? prepared.values.size()
+    : prepared.fixed_ans_clusters.size();
   if (prepared.context_count != prefix_partition.context_count ||
       prepared.context_map != prefix_partition.context_map ||
-      prepared.values.empty() ||
+      has_values == has_fixed || cluster_count == 0 ||
       (!prefix_partition.prefix_codes.empty() &&
-       prepared.values.size() != prefix_partition.prefix_codes.size())) {
+       cluster_count != prefix_partition.prefix_codes.size()) ||
+      std::ranges::any_of(
+        prepared.context_map,
+        [cluster_count](uint8_t cluster) {
+          return cluster >= cluster_count;
+        })) {
     return Status::InvalidArgument(
       "Prepared entropy clusters do not match the prefix partition");
   }
   uint64_t prepared_count = 0;
-  for (const auto& cluster : prepared.values) {
-    uint32_t previous = 0;
-    bool first = true;
-    for (const codestream_internal::WeightedValue weighted_value : cluster) {
-      if (weighted_value.count == 0 ||
-          (!first && weighted_value.value <= previous) ||
-          prepared_count > std::numeric_limits<uint64_t>::max() -
-            weighted_value.count) {
-        return Status::InvalidArgument(
-          "Prepared entropy cluster values are invalid");
+  if (has_values) {
+    for (const auto& cluster : prepared.values) {
+      uint32_t previous = 0;
+      bool first = true;
+      for (const codestream_internal::WeightedValue weighted_value : cluster) {
+        if (weighted_value.count == 0 ||
+            (!first && weighted_value.value <= previous) ||
+            prepared_count > std::numeric_limits<uint64_t>::max() -
+              weighted_value.count) {
+          return Status::InvalidArgument(
+            "Prepared entropy cluster values are invalid");
+        }
+        prepared_count += weighted_value.count;
+        previous = weighted_value.value;
+        first = false;
       }
-      prepared_count += weighted_value.count;
-      previous = weighted_value.value;
-      first = false;
+    }
+  } else {
+    if (!prepared.fixed_uint_config.valid()) {
+      return Status::InvalidArgument(
+        "Prepared fixed ANS configuration is invalid");
+    }
+    for (const auto& cluster : prepared.fixed_ans_clusters) {
+      uint64_t count_sum = 0;
+      size_t maximum_symbol = 0;
+      for (size_t symbol = 0; symbol < cluster.counts.size(); ++symbol) {
+        if (cluster.counts[symbol] >
+            std::numeric_limits<uint64_t>::max() - count_sum) {
+          return Status::InvalidArgument(
+            "Prepared fixed ANS population overflowed");
+        }
+        count_sum += cluster.counts[symbol];
+        if (cluster.counts[symbol] != 0) maximum_symbol = symbol;
+      }
+      if (count_sum != cluster.token_count ||
+          maximum_symbol != cluster.maximum_symbol ||
+          prepared_count > std::numeric_limits<uint64_t>::max() -
+            cluster.token_count) {
+        return Status::InvalidArgument(
+          "Prepared fixed ANS population is invalid");
+      }
+      prepared_count += cluster.token_count;
     }
   }
   uint64_t token_count = 0;
@@ -1947,8 +2062,12 @@ Status OptimizeAnsEntropyCodeImpl(
       &EntropyWorkProfile::ans_prefix_validation_nanoseconds);
   }
   try {
+    const bool prepared_fixed = direct_partition &&
+      !prepared->fixed_ans_clusters.empty();
     const size_t cluster_count = direct_partition
-      ? prepared->values.size()
+      ? (prepared_fixed
+          ? prepared->fixed_ans_clusters.size()
+          : prepared->values.size())
       : prefix_partition.prefix_codes.size();
     std::vector<std::vector<uint32_t>> values;
     if (prepared != nullptr) {
@@ -2008,7 +2127,10 @@ Status OptimizeAnsEntropyCodeImpl(
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
       std::vector<codestream_internal::WeightedValue> weighted_values;
       std::span<const codestream_internal::WeightedValue> cluster_values;
-      if (prepared != nullptr) {
+      if (prepared_fixed) {
+        // The balanced partition already retained the fixed-config symbol
+        // population and does not require raw values.
+      } else if (prepared != nullptr) {
         cluster_values = prepared->values[cluster];
       } else {
         const ProfileClock::time_point aggregation_begin =
@@ -2033,28 +2155,41 @@ Status OptimizeAnsEntropyCodeImpl(
         uint64_t extra_bits = 0;
         size_t maximum_symbol = 0;
         bool valid = true;
-        for (const codestream_internal::WeightedValue& weighted_value :
-             cluster_values) {
-          HybridUintToken encoded;
-          if (Status status = EncodeHybridUint(
-                weighted_value.value, config, &encoded);
-              !status.ok()) {
-            return status;
+        if (prepared_fixed) {
+          if (policy.uint_configs.size() != 1 ||
+              config != prepared->fixed_uint_config) {
+            return Status::Internal(
+              "Prepared fixed ANS configuration differs from policy");
           }
-          if (encoded.symbol >= kMaximumAnsAlphabetSize ||
-              counts[encoded.symbol] >
-                std::numeric_limits<uint64_t>::max() -
-                  weighted_value.count ||
-              (encoded.extra_bit_count != 0 &&
-               weighted_value.count >
-                 (std::numeric_limits<uint64_t>::max() - extra_bits) /
-                   encoded.extra_bit_count)) {
-            valid = false;
-            break;
+          const auto& fixed = prepared->fixed_ans_clusters[cluster];
+          counts = fixed.counts;
+          extra_bits = fixed.extra_bits;
+          maximum_symbol = fixed.maximum_symbol;
+        } else {
+          for (const codestream_internal::WeightedValue& weighted_value :
+               cluster_values) {
+            HybridUintToken encoded;
+            if (Status status = EncodeHybridUint(
+                  weighted_value.value, config, &encoded);
+                !status.ok()) {
+              return status;
+            }
+            if (encoded.symbol >= kMaximumAnsAlphabetSize ||
+                counts[encoded.symbol] >
+                  std::numeric_limits<uint64_t>::max() -
+                    weighted_value.count ||
+                (encoded.extra_bit_count != 0 &&
+                 weighted_value.count >
+                   (std::numeric_limits<uint64_t>::max() - extra_bits) /
+                     encoded.extra_bit_count)) {
+              valid = false;
+              break;
+            }
+            counts[encoded.symbol] += weighted_value.count;
+            extra_bits += weighted_value.count * encoded.extra_bit_count;
+            maximum_symbol = std::max<size_t>(
+              maximum_symbol, encoded.symbol);
           }
-          counts[encoded.symbol] += weighted_value.count;
-          extra_bits += weighted_value.count * encoded.extra_bit_count;
-          maximum_symbol = std::max<size_t>(maximum_symbol, encoded.symbol);
         }
         ProfileEnd(
           profile, uint_config_begin,
