@@ -12,12 +12,15 @@
 
 static_assert(std::is_same_v<GJXLResult, int32_t>);
 static_assert(std::is_same_v<GJXLBackend, int32_t>);
+static_assert(std::is_same_v<GJXLCompressionMode, int32_t>);
 static_assert(std::is_same_v<GJXLPixelFormat, int32_t>);
 static_assert(std::is_standard_layout_v<GJXLContextOptions>);
 static_assert(std::is_standard_layout_v<GJXLEncoderOptions>);
 static_assert(std::is_standard_layout_v<GJXLImageView>);
 static_assert(std::is_standard_layout_v<GJXLBuffer>);
 static_assert(GJXL_MAX_CPU_THREADS == 256);
+static_assert(offsetof(GJXLEncoderOptions, compression_mode) == 12);
+static_assert(sizeof(GJXLEncoderOptions) == 16);
 
 static_assert(noexcept(gjxl_context_options_init(nullptr, 0)));
 static_assert(noexcept(gjxl_encoder_options_init(nullptr, 0)));
