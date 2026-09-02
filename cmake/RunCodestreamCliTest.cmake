@@ -191,6 +191,7 @@ set(second "${GJXL_TEST_DIR}/second.jxl")
 set(effort_7 "${GJXL_TEST_DIR}/effort-7.jxl")
 set(effort_10 "${GJXL_TEST_DIR}/effort-10.jxl")
 set(metal "${GJXL_TEST_DIR}/metal.jxl")
+set(exact "${GJXL_TEST_DIR}/exact.jxl")
 set(resident "${GJXL_TEST_DIR}/resident.jxl")
 set(resident_scored "${GJXL_TEST_DIR}/resident-scored.jxl")
 set(throughput "${GJXL_TEST_DIR}/throughput.jxl")
@@ -255,6 +256,18 @@ execute_process(
 )
 if(NOT metal_result EQUAL 0)
   message(FATAL_ERROR "Forced Metal CLI encode failed: ${metal_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend metal
+    --metal-aq exact-coefficients "${GJXL_SAMPLE}" "${exact}"
+  RESULT_VARIABLE exact_result
+  OUTPUT_VARIABLE exact_output
+  ERROR_VARIABLE exact_error
+)
+if(NOT exact_result EQUAL 0)
+  message(FATAL_ERROR
+    "Exact-coefficient CLI encode failed: ${exact_error}")
 endif()
 execute_process(
   COMMAND
@@ -382,6 +395,7 @@ file(SHA256 "${second}" second_hash)
 file(SHA256 "${effort_7}" effort_7_hash)
 file(SHA256 "${effort_10}" effort_10_hash)
 file(SHA256 "${metal}" metal_hash)
+file(SHA256 "${exact}" exact_hash)
 file(SHA256 "${resident}" resident_hash)
 file(SHA256 "${resident_scored}" resident_scored_hash)
 file(SHA256 "${throughput}" throughput_hash)
@@ -399,8 +413,11 @@ endif()
 if(NOT first_hash STREQUAL effort_7_hash)
   message(FATAL_ERROR "Explicit effort 7 changed the default CLI output")
 endif()
-if(NOT first_hash STREQUAL metal_hash)
-  message(FATAL_ERROR "Forced Metal changed the CLI codestream")
+if(NOT first_hash STREQUAL exact_hash)
+  message(FATAL_ERROR "Exact-coefficient Metal changed the CLI codestream")
+endif()
+if(NOT metal_hash STREQUAL resident_hash)
+  message(FATAL_ERROR "Forced Metal did not default to fully resident AQ")
 endif()
 if(NOT resident_hash STREQUAL resident_scored_hash)
   message(FATAL_ERROR
@@ -443,6 +460,14 @@ endforeach()
 string(FIND "${metal_output}" "using Metal" metal_found)
 if(metal_found EQUAL -1)
   message(FATAL_ERROR "Forced Metal CLI report did not identify Metal")
+endif()
+string(FIND "${metal_output}" "Metal fully-resident AQ" metal_mode_found)
+if(metal_mode_found EQUAL -1)
+  message(FATAL_ERROR "Forced Metal CLI report did not identify its default AQ")
+endif()
+string(FIND "${exact_output}" "Metal exact-coefficient AQ" exact_found)
+if(exact_found EQUAL -1)
+  message(FATAL_ERROR "Exact-coefficient CLI report did not identify its policy")
 endif()
 string(FIND "${resident_output}" "Metal fully-resident AQ" resident_found)
 if(resident_found EQUAL -1)

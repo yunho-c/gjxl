@@ -455,8 +455,6 @@ bool CheckEffortPolicy() {
     {9, 4},
     {10, 5},
   }};
-  std::array<std::vector<uint8_t>, kCases.size()> cpu_bytes;
-
   std::vector<uint8_t> default_bytes;
   gjxl::VarDctEncodingSummary default_summary;
   gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
@@ -494,11 +492,13 @@ bool CheckEffortPolicy() {
       std::cerr << "Explicit effort 7 changed the default workflow\n";
       return false;
     }
-    cpu_bytes[index] = std::move(bytes);
   }
 
   for (const int32_t effort : {1, 7, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
+    const size_t expected_score_count = effort <= 3
+      ? 1
+      : kCases[index].expected_score_count - 1;
     std::vector<uint8_t> bytes;
     gjxl::VarDctEncodingSummary summary;
     status = gjxl::EncodeLinearRgbVarDctCodestream(
@@ -506,10 +506,13 @@ bool CheckEffortPolicy() {
       {.effort = effort,
        .backend = gjxl::VarDctBackendPreference::kMetal},
       &bytes, &summary);
-    if (!status.ok() || bytes != cpu_bytes[index] ||
-        summary.score_history.size() != kCases[index].expected_score_count ||
+    if (!status.ok() || bytes.empty() ||
+        summary.score_history.size() != expected_score_count ||
+        summary.final_butteraugli_score_evaluated != (effort <= 3) ||
         summary.execution_backend !=
-          gjxl::VarDctExecutionBackend::kMetal) {
+          gjxl::VarDctExecutionBackend::kMetal ||
+        summary.metal_aq_mode !=
+          gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
       std::cerr << "Metal effort " << effort << " workflow failed: "
                 << status.message() << " history="
                 << summary.score_history.size() << '\n';
@@ -731,18 +734,6 @@ bool CheckInvalidRequestsAreAtomic() {
            .backend = gjxl::VarDctBackendPreference::kMetal,
            .metal_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
-      !rejected_atomically(
-          image.View(),
-          {.butteraugli_target = 1.0f,
-           .backend = gjxl::VarDctBackendPreference::kCpu,
-           .metal_aq_mode =
-               gjxl::GpuAdaptiveQuantizationMode::kFullyResident}) ||
-      !rejected_atomically(
-          image.View(),
-          {.butteraugli_target = 1.0f,
-           .backend = gjxl::VarDctBackendPreference::kAutomatic,
-           .metal_aq_mode =
-               gjxl::GpuAdaptiveQuantizationMode::kFullyResident}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,

@@ -16,10 +16,12 @@ namespace gjxl {
 /// Selects where GPU adaptive-quantization evaluation begins.
 enum class GpuAdaptiveQuantizationMode {
   /// CPU coefficient decisions are authoritative; the GPU starts at inverse
-  /// reconstruction. This is the production and automatic-workflow default.
+  /// reconstruction. Encoding workflows retain this as an explicit reference
+  /// and compatibility mode; source-compatible diagnostic overloads use it by
+  /// default.
   kExactCoefficients,
   /// Forward transforms, coefficient coding, and reconstruction remain on the
-  /// GPU. This is an explicit experimental mode and may change encoder
+  /// GPU. This is the default Metal encoding mode and may change encoder
   /// decisions relative to the CPU reference.
   kFullyResident,
   /// Encoding-only workflows apply both default AQ updates, then quantize the
@@ -100,10 +102,9 @@ struct GpuFrameOnlyQuantizationOutput {
   GpuAdaptiveQuantizationPolicyOutput output);
 
 /// Runs the bounded policy with the explicitly selected GPU evaluation mode.
-/// Resident modes are intended for error measurement and numerical research;
-/// neither promises CPU-identical encoder decisions. `kThroughput` changes the
-/// complete diagnostic pipeline's policy iteration bound, not this direct
-/// operation.
+/// Resident modes do not promise CPU-identical encoder decisions.
+/// `kThroughput` changes the complete diagnostic pipeline's policy iteration
+/// bound, not this direct operation.
 /// `kMaximumThroughput` is unsupported by this direct operation.
 [[nodiscard]] Status RunGpuAdaptiveQuantizationPolicy(
   GpuBackend& gpu,

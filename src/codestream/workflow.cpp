@@ -155,8 +155,8 @@ void AccumulateEncodingProfile(
 // selection begins at 128x96.
 constexpr size_t kAutomaticMetalMinimumCodingPixels = 128 * 96;
 constexpr size_t kAutomaticMetalMinimumCodingDimension = 96;
-// Policy sweeps preserve exact frame decisions in this closed interval;
-// threshold-sensitive fixtures outside it remain on the CPU in auto mode.
+// The resident automatic rollout is limited to this closed quality interval;
+// threshold-sensitive and broader-quality requests remain on the CPU.
 constexpr float kAutomaticMetalMinimumButteraugliTarget = 1.0f;
 constexpr float kAutomaticMetalMaximumButteraugliTarget = 1.2f;
 constexpr std::string_view kQualifiedMetalBackend = "Metal: Apple M4 Pro";
@@ -680,6 +680,7 @@ struct PreparedWorkflow {
       .maximum_error_result = &prepared.pipeline.maximum_error_result,
       .collect_final_butteraugli_score =
         options.collect_final_butteraugli_score ||
+        pipeline_options.adaptive_quantization.iterations == 0 ||
         options.metal_aq_mode ==
           GpuAdaptiveQuantizationMode::kExactCoefficients ||
         options.rate_control_mode == VarDctRateControlMode::kMaximumError,
@@ -779,7 +780,8 @@ struct PreparedWorkflow {
     (!selected_metal ||
      options.metal_aq_mode ==
        GpuAdaptiveQuantizationMode::kExactCoefficients ||
-     options.collect_final_butteraugli_score);
+     options.collect_final_butteraugli_score ||
+     pipeline_options.adaptive_quantization.iterations == 0);
   candidate_summary.execution_backend = selected_metal
     ? VarDctExecutionBackend::kMetal
     : VarDctExecutionBackend::kCpu;
@@ -1035,13 +1037,13 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   }
   switch (options.metal_aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
-      break;
     case GpuAdaptiveQuantizationMode::kFullyResident:
+      break;
     case GpuAdaptiveQuantizationMode::kThroughput:
     case GpuAdaptiveQuantizationMode::kMaximumThroughput:
       if (options.backend != VarDctBackendPreference::kMetal) {
         return Status::InvalidArgument(
-          "Experimental AQ requires an explicitly forced Metal backend");
+          "Throughput AQ requires an explicitly forced Metal backend");
       }
       break;
     default:
@@ -1113,6 +1115,15 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
           attempt_options.butteraugli_target = butteraugli_target;
           attempt_options.rate_control_mode =
             VarDctRateControlMode::kButteraugliTarget;
+          // A resident size search must not switch between CPU and Metal as
+          // its candidate targets cross the automatic quality interval.
+          // Exact coefficients retain their decision-compatible automatic
+          // search behavior.
+          if (options.backend == VarDctBackendPreference::kAutomatic &&
+              options.metal_aq_mode ==
+                GpuAdaptiveQuantizationMode::kFullyResident) {
+            attempt_options.backend = VarDctBackendPreference::kCpu;
+          }
           codestream_internal::VarDctEncodingProfile attempt_profile;
           const Status attempt_status = EncodePreparedAttempt(
             *prepared, attempt_options, 0, 0, supplied_backend,
@@ -1356,7 +1367,7 @@ Status EnsureProductionMetalBackendAvailable() {
     return status;
   }
   if (backend == nullptr || !HasRequiredGpuQuantizationCapabilities(
-        *backend, GpuAdaptiveQuantizationMode::kExactCoefficients)) {
+        *backend, GpuAdaptiveQuantizationMode::kFullyResident)) {
     return Status::Unavailable(
       "Production Metal backend lacks a required GPU capability");
   }

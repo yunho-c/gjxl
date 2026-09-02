@@ -371,17 +371,22 @@ The complete public-boundary profiling contract and `50x` optimization plan are
 maintained in
 [`metal-encoding-performance.md`](metal-encoding-performance.md).
 
-The default `kAutomatic` preference uses the embedded, process-cached Metal
-backend only on the qualified Apple M4 Pro geometry range and Butteraugli
-target interval `[1.0, 1.2]` established in [`metal-aq.md`](metal-aq.md);
-small images, targets outside that interval, unqualified devices, unavailable
-Metal, or missing capabilities use CPU before pipeline execution. Explicit
-`kCpu` and `kMetal` overrides are available. Forced Metal bypasses the
-automatic size, target, and device gates but never falls back; the broader
-quality range is an explicit unqualified override. Operational errors after
-GPU work starts are returned atomically instead of retrying on CPU. The
-default density policy performs two AQ updates; the explicit high-density
-policy performs four on CPU, exact-coefficient Metal, or fully-resident Metal.
+The default `kAutomatic` preference uses the fully resident implementation on
+the embedded, process-cached Metal backend only for ordinary Butteraugli-target
+encoding on the qualified Apple M4 Pro geometry range and target interval
+`[1.0, 1.2]` established in [`metal-aq.md`](metal-aq.md). Small images,
+targets outside that interval, unqualified devices, unavailable Metal, or
+missing capabilities use CPU before pipeline execution. Automatic resident
+target-byte and target-BPP searches remain entirely on CPU so one search never
+mixes CPU and floating-point resident rate curves; automatic maximum-error
+control also remains CPU-only. Explicit exact-coefficient mode retains its
+decision-compatible automatic target-size behavior. Explicit `kCpu` and
+`kMetal` overrides are available. Forced Metal bypasses the automatic size,
+target, and device gates but never falls back; the broader quality range is an
+explicit unqualified override. Operational errors after GPU work starts are
+returned atomically instead of retrying on CPU. The default density policy
+performs two AQ updates; the explicit high-density policy performs four on CPU,
+exact-coefficient Metal, or fully-resident Metal.
 Entropy search is resolved independently: efforts 1-8 use the balanced
 single-representation serializer, efforts 9-10 and `kHighDensity` use the
 effort-9-like high-density serializer, and
@@ -391,21 +396,25 @@ balanced behavior. See
 [`entropy-behavior-alignment.md`](entropy-behavior-alignment.md) for the source
 comparison, behavior matrix, and qualification.
 
-Forced Metal additionally accepts `GpuAdaptiveQuantizationMode::kFullyResident`,
-`kThroughput`, and `kMaximumThroughput` as experimental first-class options.
-The first two keep forward
+Fully resident is the default Metal encoding implementation. Explicit
+`GpuAdaptiveQuantizationMode::kExactCoefficients` remains the
+reference/compatibility implementation, while forced Metal additionally
+accepts `kThroughput` and `kMaximumThroughput` as experimental options. Fully
+resident and throughput keep forward
 transforms and coefficient coding on Metal, apply inverse Gaborish through
 Metal, and use a deterministic tilewise pixel-domain initial-CfL seed. They do
 not promise the CPU reference's quant field, frame, or codestream bytes. Their
 final-CfL map is strategy-aware but fixed from the adjusted initial field
-across AQ evaluations. Automatic and CPU preferences reject those modes rather
-than silently selecting a different implementation; exact coefficients remain
-the default and the only automatically selected Metal AQ mode.
+across AQ evaluations. A CPU-selected workflow ignores the Metal AQ mode.
+Throughput and maximum-throughput require explicitly forced Metal rather than
+silently selecting another implementation.
 Fully resident and throughput encoding apply the configured updates, then
 quantize the resulting field into the final frame without reconstructing and
 scoring that field one more time. Their reported score history therefore
 covers the evaluated update fields, while
-`final_butteraugli_score_evaluated` is false. Setting
+`final_butteraugli_score_evaluated` is false. Efforts 1-3 request zero AQ
+updates, so resident encoding performs and reports the sole terminal evaluation
+needed to materialize the frame. Setting
 `collect_final_butteraugli_score` performs the terminal evaluation without
 changing the configured update count or encoded frame. Complete throughput
 diagnostic API calls retain their separate explicit one-update policy.
@@ -431,9 +440,12 @@ rejected with maximum-error, throughput, and maximum-throughput policies rather
 than being ignored or silently overridden.
 Size searches accept
 `--size-tolerance`, `--max-attempts`, and
-`--size-selection under-budget|closest`. All three experimental modes require
-`--backend metal`; automatic maximum-error control remains CPU-only, and
-maximum-throughput mode does not support maximum-error control. The
+`--size-selection under-budget|closest`. Throughput and maximum-throughput
+require `--backend metal`; fully resident may be automatic and exact
+coefficients may be selected explicitly. Automatic resident size searches and
+automatic maximum-error control remain CPU-only, and maximum-throughput mode
+does not support maximum-error control. When Metal is selected and
+`--metal-aq` is omitted, the CLI uses fully resident AQ. The
 CLI also reports prepared-source, selected-attempt, aggregate size-search, and
 end-to-end timing from the profiled workflow API. The
 frontend writes through a
@@ -478,14 +490,17 @@ just encode testdata/codestream_sample.pfm output.jxl 1.0
 # PNG, JPEG, and other formats supported by the installed ImageMagick build:
 just encode input.png output.jxl 1.0
 # Or call gjxl_encode directly with --backend cpu|metal.
-# Experimental resident path:
+# Default Metal path (equivalent to adding --metal-aq fully-resident):
 build/release/gjxl_encode --distance 1.0 --backend metal \
-  --metal-aq fully-resident testdata/codestream_sample.pfm output.jxl
+  testdata/codestream_sample.pfm output.jxl
 # Add --collect-final-score when the terminal encoded-field diagnostic is
 # required; it does not change the fully resident codestream.
-# Four-update density search on the exact-coefficient path:
+# Four-update density search with automatic backend selection:
 build/release/gjxl_encode --distance 1.0 --high-density \
   testdata/codestream_sample.pfm output.jxl
+# Explicit decision-compatible reference path:
+build/release/gjxl_encode --distance 1.0 --backend metal \
+  --metal-aq exact-coefficients testdata/codestream_sample.pfm output.jxl
 # Preserve the former exhaustive serializer policy without changing AQ:
 build/release/gjxl_encode --distance 1.0 --maximum-compression \
   testdata/codestream_sample.pfm output.jxl
