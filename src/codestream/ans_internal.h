@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -52,6 +53,17 @@ enum class DirectAnsEntropyMode {
   kBalanced,
   kHighDensity,
 };
+
+inline constexpr size_t kAnsHistogramPrecisionShiftCount = 12;
+
+/// Pinned from libjxl enc_ans.cc at the repository's reference revision.
+[[nodiscard]] std::span<const HybridUintConfig>
+HighDensityAnsUintConfigs() noexcept;
+
+/// Population-precision shifts searched by each direct ANS policy. The flat
+/// histogram candidate is evaluated separately.
+[[nodiscard]] std::array<bool, kAnsHistogramPrecisionShiftCount>
+DirectAnsHistogramPrecisionShifts(DirectAnsEntropyMode mode) noexcept;
 
 /// Builds one ANS model directly from the requested contexts. Unlike the
 /// maximum-compression path, this does not derive the partition from an

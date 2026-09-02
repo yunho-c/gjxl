@@ -47,6 +47,9 @@ void ProfileEnd(
 }
 
 constexpr uint32_t kAnsLogTableSize = 12;
+static_assert(
+  kAnsLogTableSize ==
+  codestream_internal::kAnsHistogramPrecisionShiftCount);
 constexpr uint32_t kAnsSignature = 0x13;
 constexpr size_t kAnsAlphabetWidthCount = 4;
 // Retain the four prefix candidates, then add the four ANS configurations that
@@ -811,7 +814,8 @@ Status EstimateAnsHistogramCost(
 Status BuildBestAnsHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
   AnsHistogramSearch search,
-  AnsHistogram* histogram) {
+  AnsHistogram* histogram,
+  size_t* candidate_count = nullptr) {
 
   if (histogram == nullptr) {
     return Status::InvalidArgument("ANS histogram output is null");
@@ -831,12 +835,18 @@ Status BuildBestAnsHistogram(
     }
     histogram->method = kAnsLogTableSize;
     histogram->omit_position = 0;
+    if (candidate_count != nullptr) {
+      *candidate_count = 1;
+    }
     return Status::Ok();
   }
 
   double best_cost = std::numeric_limits<double>::infinity();
   AnsHistogram best;
   auto consider = [&](AnsHistogram candidate) -> Status {
+    if (candidate_count != nullptr) {
+      ++*candidate_count;
+    }
     double candidate_cost = 0.0;
     if (Status status = EstimateAnsHistogramCost(
           raw, candidate, &candidate_cost);
@@ -863,21 +873,15 @@ Status BuildBestAnsHistogram(
     return status;
   }
   std::array<bool, kAnsLogTableSize> shifts{};
-  switch (search) {
-    case AnsHistogramSearch::kFast:
-      shifts[0] = true;
-      shifts[kAnsLogTableSize / 2] = true;
-      shifts[kAnsLogTableSize - 1] = true;
-      break;
-    case AnsHistogramSearch::kApproximate:
-      for (size_t shift = 0; shift < kAnsLogTableSize; shift += 2) {
-        shifts[shift] = true;
-      }
-      shifts[kAnsLogTableSize - 1] = true;
-      break;
-    case AnsHistogramSearch::kPrecise:
-      shifts.fill(true);
-      break;
+  if (search == AnsHistogramSearch::kFast) {
+    shifts[0] = true;
+    shifts[kAnsLogTableSize / 2] = true;
+    shifts[kAnsLogTableSize - 1] = true;
+  } else {
+    shifts = codestream_internal::DirectAnsHistogramPrecisionShifts(
+      search == AnsHistogramSearch::kApproximate
+        ? codestream_internal::DirectAnsEntropyMode::kBalanced
+        : codestream_internal::DirectAnsEntropyMode::kHighDensity);
   }
   for (uint32_t shift = 0; shift < kAnsLogTableSize; ++shift) {
     if (!shifts[shift]) {
@@ -2064,10 +2068,16 @@ Status OptimizeAnsEntropyCodeImpl(
         option.extra_bits = extra_bits;
         const ProfileClock::time_point histogram_begin =
           ProfileBegin(profile);
+        size_t histogram_candidate_count = 0;
         if (Status status = BuildBestAnsHistogram(
-              counts, policy.histogram_search, &option.histogram);
+              counts, policy.histogram_search, &option.histogram,
+              &histogram_candidate_count);
             !status.ok()) {
           return status;
+        }
+        if (profile != nullptr) {
+          profile->ans_histogram_candidate_count +=
+            histogram_candidate_count;
         }
         ProfileEnd(
           profile, histogram_begin,
@@ -2558,13 +2568,33 @@ Status codestream_internal::OptimizeDirectAnsEntropyCode(
         .smallest_alphabet_width = true,
       }
     : AnsOptimizationPolicy{
-        .uint_configs = kHighDensityAnsUintConfigs,
+        .uint_configs = HighDensityAnsUintConfigs(),
         .histogram_search = AnsHistogramSearch::kPrecise,
         .smallest_alphabet_width = true,
       };
   return OptimizeAnsEntropyCodeImpl(
     section_tokens, partition, &prepared, policy,
     code, cost, nullptr, profile);
+}
+
+std::span<const HybridUintConfig>
+codestream_internal::HighDensityAnsUintConfigs() noexcept {
+  return kHighDensityAnsUintConfigs;
+}
+
+std::array<bool, codestream_internal::kAnsHistogramPrecisionShiftCount>
+codestream_internal::DirectAnsHistogramPrecisionShifts(
+  DirectAnsEntropyMode mode) noexcept {
+  std::array<bool, kAnsLogTableSize> shifts{};
+  if (mode == DirectAnsEntropyMode::kBalanced) {
+    for (size_t shift = 0; shift < kAnsLogTableSize; shift += 2) {
+      shifts[shift] = true;
+    }
+    shifts[kAnsLogTableSize - 1] = true;
+  } else if (mode == DirectAnsEntropyMode::kHighDensity) {
+    shifts.fill(true);
+  }
+  return shifts;
 }
 
 Status codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(

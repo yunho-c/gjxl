@@ -32,6 +32,7 @@ struct EntropyWorkProfile {
   uint64_t ans_model_build_nanoseconds = 0;
   uint64_t ans_token_cost_nanoseconds = 0;
   size_t ans_uint_config_candidate_count = 0;
+  size_t ans_histogram_candidate_count = 0;
   size_t ans_alphabet_width_candidate_count = 0;
   uint64_t selection_nanoseconds = 0;
 
@@ -74,6 +75,8 @@ inline void AccumulateEntropyWorkProfile(
   destination->ans_token_cost_nanoseconds += source.ans_token_cost_nanoseconds;
   destination->ans_uint_config_candidate_count +=
     source.ans_uint_config_candidate_count;
+  destination->ans_histogram_candidate_count +=
+    source.ans_histogram_candidate_count;
   destination->ans_alphabet_width_candidate_count +=
     source.ans_alphabet_width_candidate_count;
   destination->selection_nanoseconds += source.selection_nanoseconds;

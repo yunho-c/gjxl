@@ -113,13 +113,14 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 12)
+        self.assertEqual(document["schema_version"], 14)
         self.assertEqual(
             document["substage_work_timing"], "aggregate-worker-time"
         )
         self.assertEqual(document["validation"], "metal-only")
         self.assertEqual(document["density"], "default")
         self.assertEqual(document["compression"], "automatic")
+        self.assertEqual(document["effort"], 7)
         self.assertEqual(document["cpu_threads"], 0)
         self.assertFalse(document["collect_final_score"])
         self.assertEqual(document["sample_count"], 1)
@@ -132,6 +133,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         sample = workload["samples"][0]
         self.assertEqual(sample["entropy_behavior"], "balanced")
         self.assertGreater(sample["entropy_search"]["uint_configs"], 0)
+        self.assertGreater(sample["entropy_search"]["histograms"], 0)
         self.assertGreater(sample["entropy_search"]["alphabet_widths"], 0)
         self.assertEqual(sample["sample_index"], 0)
         self.assertEqual(sample["backend"], "metal")
@@ -241,9 +243,30 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 12)
+        self.assertEqual(document["schema_version"], 14)
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
+
+    def test_effort_nine_selects_high_density_entropy(self) -> None:
+        destination = self.directory / "effort-nine.json"
+        result = self.run_benchmark(
+            "--effort",
+            "9",
+            "--validation",
+            "metal-only",
+            "--raw-samples",
+            str(destination),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        document = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(document["schema_version"], 14)
+        self.assertEqual(document["effort"], 9)
+        self.assertIn("effort=9", result.stdout)
+        self.assertEqual(
+            document["workloads"][0]["samples"][0]["entropy_behavior"],
+            "high-density",
+        )
 
     def test_maximum_compression_is_explicit_in_raw_samples(self) -> None:
         destination = self.directory / "maximum-compression.json"
@@ -257,7 +280,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 12)
+        self.assertEqual(document["schema_version"], 14)
         self.assertEqual(document["compression"], "maximum")
         self.assertIn("compression=maximum", result.stdout)
         self.assertEqual(
@@ -278,7 +301,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 12)
+        self.assertEqual(document["schema_version"], 14)
         self.assertEqual(document["cpu_threads"], 2)
         self.assertIn("cpu_threads=2", result.stdout)
         for sample in document["workloads"][0]["samples"]:

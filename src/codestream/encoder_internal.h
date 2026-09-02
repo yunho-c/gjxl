@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "codestream/encoder.h"
+#include "codestream/entropy.h"
 #include "codestream/profile_internal.h"
 #include "core/status.h"
 
@@ -23,6 +24,13 @@ struct CandidateSelectionKey {
   bool custom_order = false;
   size_t block_context_candidate_index = 0;
 };
+
+/// Selects the ordinary-path coder before model construction, matching the
+/// pinned libjxl tiny-stream and singleton-context policy.
+[[nodiscard]] Status SelectOrdinaryEntropyCodingMode(
+  std::span<const EntropyTokenStreamView> streams,
+  const EntropyCodeOptions& options,
+  EntropyCodingMode* mode);
 
 /// Prefix fallback intentionally wins an equal complete-codestream size.
 [[nodiscard]] constexpr bool PreferAllPrefixCandidate(

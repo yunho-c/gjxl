@@ -860,6 +860,58 @@ bool RunFixture(
     std::cerr << fixture.name << ": " << error << '\n';
     return false;
   }
+
+  const std::array<std::pair<gjxl::VarDctEntropyBehavior, std::string_view>, 2>
+    ordinary_behaviors = {{
+      {gjxl::VarDctEntropyBehavior::kBalanced, "balanced"},
+      {gjxl::VarDctEntropyBehavior::kHighDensity, "high-density"},
+    }};
+  for (const auto& [behavior, name] : ordinary_behaviors) {
+    std::vector<uint8_t> first;
+    std::vector<uint8_t> second;
+    status = gjxl::EncodeVarDctCodestream(
+      prepared.frame, {.entropy_behavior = behavior}, &first);
+    if (!status.ok()) {
+      std::cerr << fixture.name << '/' << name
+                << ": codestream encoding failed: " << status.message()
+                << '\n';
+      return false;
+    }
+    status = gjxl::EncodeVarDctCodestream(
+      prepared.frame, {.entropy_behavior = behavior}, &second);
+    if (!status.ok() || first != second) {
+      std::cerr << fixture.name << '/' << name
+                << ": codestream encoding is not deterministic\n";
+      return false;
+    }
+    const fs::path ordinary_compressed =
+      directory / (std::string(name) + ".jxl");
+    const fs::path ordinary_decoded =
+      directory / (std::string(name) + ".pfm");
+    const fs::path ordinary_log =
+      directory / (std::string(name) + "-djxl.log");
+    if (!WriteBytes(ordinary_compressed, first)) {
+      std::cerr << fixture.name << '/' << name
+                << ": cannot write codestream\n";
+      return false;
+    }
+    const std::array<std::string, 4> ordinary_decode_arguments = {
+      "--quiet", "--num_threads=0", ordinary_compressed.string(),
+      ordinary_decoded.string()};
+    if (RunTool(
+          options.decoder, ordinary_decode_arguments, ordinary_log) != 0) {
+      std::cerr << fixture.name << '/' << name << ": djxl failed\n";
+      return false;
+    }
+    PfmImage ordinary_image;
+    if (!ReadPfm(ordinary_decoded, &ordinary_image, &error) ||
+        ordinary_image.extent != decoded_image.extent ||
+        ordinary_image.plane != decoded_image.plane) {
+      std::cerr << fixture.name << '/' << name
+                << ": decoded pixels differ from maximum compression\n";
+      return false;
+    }
+  }
   std::cout << fixture.name << ": " << codestream.size()
             << " bytes, max_error=" << std::setprecision(6)
             << comparison.maximum_absolute_error

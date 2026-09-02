@@ -301,43 +301,20 @@ Status OptimizeOrdinaryEntropyCode(
       behavior == VarDctEntropyBehavior::kMaximumCompression) {
     return Status::InvalidArgument("Ordinary entropy selection is invalid");
   }
-  size_t token_count = 0;
-  bool all_singleton = true;
-  std::vector<uint32_t> first_symbols(
-    options.context_count, std::numeric_limits<uint32_t>::max());
-  for (const EntropyTokenStreamView stream : streams) {
-    if (!stream.valid() ||
-        stream.size() > std::numeric_limits<size_t>::max() - token_count) {
-      return Status::InvalidArgument("Entropy token stream is invalid");
-    }
-    token_count += stream.size();
-    for (size_t index = 0; index < stream.size(); ++index) {
-      const EntropyToken token = stream[index];
-      if (token.context >= options.context_count) {
-        return Status::InvalidArgument("Entropy token context is out of range");
-      }
-      HybridUintToken encoded;
-      if (Status status = EncodeHybridUint(
-            token.value, options.uint_config, &encoded); !status.ok()) {
-        return status;
-      }
-      uint32_t& first = first_symbols[token.context];
-      if (first == std::numeric_limits<uint32_t>::max()) {
-        first = encoded.symbol;
-      } else if (first != encoded.symbol) {
-        all_singleton = false;
-      }
-    }
+  EntropyCodingMode mode = EntropyCodingMode::kPrefix;
+  if (Status status = codestream_internal::SelectOrdinaryEntropyCodingMode(
+        streams, options, &mode); !status.ok()) {
+    return status;
   }
-  if (token_count < 100 || all_singleton) {
+  if (mode == EntropyCodingMode::kPrefix) {
     return codestream_internal::OptimizeFastPrefixEntropyCode(
       streams, options, code, cost, profile);
   }
-  const auto mode = behavior == VarDctEntropyBehavior::kHighDensity
+  const auto direct_mode = behavior == VarDctEntropyBehavior::kHighDensity
     ? codestream_internal::DirectAnsEntropyMode::kHighDensity
     : codestream_internal::DirectAnsEntropyMode::kBalanced;
   return codestream_internal::OptimizeDirectAnsEntropyCode(
-    streams, options, mode, code, cost, profile);
+    streams, options, direct_mode, code, cost, profile);
 }
 
 Status OptimizeOrdinaryEntropyCode(
@@ -1690,6 +1667,48 @@ Status EncodeVarDctCodestreamImpl(
 }
 
 }  // namespace
+
+Status codestream_internal::SelectOrdinaryEntropyCodingMode(
+  std::span<const EntropyTokenStreamView> streams,
+  const EntropyCodeOptions& options,
+  EntropyCodingMode* mode) {
+
+  if (mode == nullptr || options.context_count == 0) {
+    return Status::InvalidArgument("Ordinary entropy selection is invalid");
+  }
+  size_t token_count = 0;
+  bool all_singleton = true;
+  std::vector<uint32_t> first_symbols(
+    options.context_count, std::numeric_limits<uint32_t>::max());
+  for (const EntropyTokenStreamView stream : streams) {
+    if (!stream.valid() ||
+        stream.size() > std::numeric_limits<size_t>::max() - token_count) {
+      return Status::InvalidArgument("Entropy token stream is invalid");
+    }
+    token_count += stream.size();
+    for (size_t index = 0; index < stream.size(); ++index) {
+      const EntropyToken token = stream[index];
+      if (token.context >= options.context_count) {
+        return Status::InvalidArgument("Entropy token context is out of range");
+      }
+      HybridUintToken encoded;
+      if (Status status = EncodeHybridUint(
+            token.value, options.uint_config, &encoded); !status.ok()) {
+        return status;
+      }
+      uint32_t& first = first_symbols[token.context];
+      if (first == std::numeric_limits<uint32_t>::max()) {
+        first = encoded.symbol;
+      } else if (first != encoded.symbol) {
+        all_singleton = false;
+      }
+    }
+  }
+  *mode = token_count < 100 || all_singleton
+    ? EntropyCodingMode::kPrefix
+    : EntropyCodingMode::kAns;
+  return Status::Ok();
+}
 
 Status codestream_internal::PhysicalSectionSizesFromBitCounts(
   std::span<const uint64_t> common_section_bits,
