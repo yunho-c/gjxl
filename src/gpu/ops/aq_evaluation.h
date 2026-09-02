@@ -71,8 +71,8 @@ struct AqEvaluationPreparation {
   /// EPF input views to be omitted. Requires resident initial quantization.
   bool frame_only_resident_quantizer = false;
   /// Enables strategy-aware quant-field adjustment and per-evaluation
-  /// quantizer/raw-quant construction inside the prepared operation. This is
-  /// an explicit experimental resident path; backends may reject it.
+  /// quantizer/raw-quant construction inside the prepared operation. Backends
+  /// may reject this resident capability.
   bool resident_quantization = false;
   /// Selects whether resident coefficient coding preserves the input raw
   /// quant or applies the encoder's shared AdjustQuantBlockAC decision.

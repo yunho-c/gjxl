@@ -93,12 +93,14 @@ struct VarDctEncodingOptions {
   TargetSizeSelectionPolicy target_size_selection =
     TargetSizeSelectionPolicy::kLargestAtOrBelow;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
-  /// Selects the Metal AQ implementation. Resident modes require an explicitly
-  /// forced Metal backend and may change encoder decisions or policy bounds.
+  /// Selects the Metal AQ implementation. Fully resident is the encoding
+  /// default and may change encoder decisions relative to exact coefficients.
+  /// Throughput policies require an explicitly forced Metal backend.
   /// Maximum-throughput mode omits perceptual diagnostics, so its reported
-  /// score history is empty.
+  /// score history is empty. This field is ignored when CPU execution is
+  /// selected.
   GpuAdaptiveQuantizationMode metal_aq_mode =
-    GpuAdaptiveQuantizationMode::kExactCoefficients;
+    GpuAdaptiveQuantizationMode::kFullyResident;
   /// Requests a perceptual evaluation of the final encoded field. Resident
   /// Metal encoding skips this diagnostic-only pass by default; CPU and exact
   /// coefficient workflows already produce the final score as part of their
@@ -149,7 +151,7 @@ struct VarDctEncodingSummary {
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;
   /// Reports the requested mode when `execution_backend` is Metal.
   GpuAdaptiveQuantizationMode metal_aq_mode =
-    GpuAdaptiveQuantizationMode::kExactCoefficients;
+    GpuAdaptiveQuantizationMode::kFullyResident;
 
   friend bool operator==(
     const VarDctEncodingSummary&,

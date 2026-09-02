@@ -477,15 +477,17 @@ the final field, block map, and score history; `RunGpuAdaptiveQuantization`
 materializes the existing full adaptive-quantization output atomically. Their
 source-compatible default overloads use the exact-coefficient composite
 evaluator. Explicit overloads accept `GpuAdaptiveQuantizationMode`: the
-production `kExactCoefficients` mode preserves CPU coefficient decisions,
-while experimental `kFullyResident` runs forward transforms and coefficient
+reference `kExactCoefficients` mode preserves CPU coefficient decisions, while
+encoding-default `kFullyResident` runs forward transforms and coefficient
 coding on the GPU, uses GPU Gaborish preprocessing and the faster initial-CfL
 seed, and may change the quant field, frame, and codestream. The complete GPU
 pipeline exposes the same explicit mode for both Butteraugli and maximum-error
 control. Automatic maximum-error requests remain on CPU; forced Metal requests
-may select either mode. This two-value public
-contract replaces the temporary generic handoff selector without exposing the
-discarded exact-linear or exact-opsin policy prototypes.
+may select any supported error-evaluating mode. The diagnostic overload default
+intentionally remains exact and is separate from the codestream workflow
+default. This compact public contract replaces the temporary generic handoff
+selector without exposing the discarded exact-linear or exact-opsin policy
+prototypes.
 
 The benchmark accepts `--gpu-aq exact-coefficients|fully-resident`. Exact mode
 retains the fixed rollout gate; fully resident mode completes normally and

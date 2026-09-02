@@ -47,8 +47,8 @@ behavior. The AQ implementation already provides:
 - complete encode/reconstruct/measure evaluations;
 - a per-block distance map and scalar score;
 - final `VarDctEncoderFrame` materialization;
-- a qualified Metal exact-coefficient path; and
-- an experimental fully resident Metal coefficient path.
+- an explicit Metal exact-coefficient compatibility path; and
+- the default fully resident Metal coefficient path.
 
 The remaining rate-control gap is the resampling-specific AQ bypass. The bypass
 policy is small, but the current codestream profile does not support
@@ -92,26 +92,31 @@ The probe emits CSV containing the input and extent, requested target, encoded
 bytes and BPP, final score, actual backend and Metal mode, per-encode and total
 time, size-monotonicity flag, and strategy counts.
 
-Forced Metal exposes four coefficient/AQ execution choices without changing
-the outer rate-control request:
+Metal exposes four coefficient/AQ execution choices without changing the outer
+rate-control request:
 
 - `exact-coefficients` retains authoritative CPU coefficient decisions and is
-  the only Metal mode eligible for automatic selection;
-- `fully-resident` keeps iterative coefficient coding, reconstruction, and
-  scoring on Metal for the requested AQ update count, then omits the terminal
-  encoded-field diagnostic by default;
+  the explicit reference/compatibility mode;
+- `fully-resident` is the encoding default. It keeps iterative coefficient
+  coding, reconstruction, and scoring on Metal for the requested AQ update
+  count, then omits the terminal encoded-field diagnostic by default;
 - `throughput` uses the same resident encoding path and default omission while
   retaining a separate one-update contract for complete diagnostic API calls;
   and
 - `maximum-throughput` fixes DCT8, encodes the adjusted initial field, and
   skips reconstruction and perceptual scoring.
 
-The three experimental modes require an explicitly forced Metal backend.
-Target-byte and target-BPP searches can use all four because they select from
-actual serialized sizes. Maximum-error control can use exact, fully resident,
-or throughput modes, but rejects maximum-throughput because that path does not
-perform the error evaluation. The corpus rate-control probe likewise excludes
-maximum-throughput because its CSV contract requires a score history.
+Automatic Butteraugli-target encoding may select fully resident Metal inside
+the qualified geometry, device, and target interval. Automatic target-byte and
+target-BPP searches with the resident default stay on CPU so one search cannot
+mix CPU and resident rate curves; explicitly selected exact-coefficient mode
+retains automatic target-size eligibility. Forced Metal target-size searches
+can use all four modes because they select from actual serialized sizes.
+Maximum-error control can use exact, fully resident, or throughput modes when
+Metal is forced, but rejects maximum-throughput because that path does not
+perform the error evaluation. Automatic maximum-error remains CPU-only. The
+corpus rate-control probe likewise excludes maximum-throughput because its CSV
+contract requires a score history.
 
 The qualified Metal boundary intentionally retains authoritative coefficient
 decisions on the CPU. CPU coefficient coding now applies the pinned
@@ -756,11 +761,13 @@ distribution, so the timing is a checkpoint rather than a claimed speedup.
 
 **Status:** complete for the five-step sequence.
 
-The final audit preserves the authoritative boundaries: exact-coefficient and
-automatic workflows still use CPU initial quantization and the ordinary GPU
-search upload contract, while maximum-throughput remains explicitly forced,
-DCT8-only, and scoreless. Focused exact/automatic integration retains exact
-frame and codestream bytes. The full-scope diagnostic benchmark was repaired
+At this recorded audit checkpoint, exact-coefficient and automatic workflows
+still used CPU initial quantization and the ordinary GPU search upload contract,
+while maximum-throughput remained explicitly forced, DCT8-only, and scoreless.
+Focused exact/automatic integration retained exact frame and codestream bytes.
+The later codestream policy promotion made fully resident the automatic/default
+Metal encoding path without changing these historical measurements. The
+full-scope diagnostic benchmark was repaired
 to pair an exact coefficient frame with its post-`AdjustQuantBlockAC` raw-quant
 and EPF state; it now exercises the resident, exact-coefficient, and
 perceptual-tail phases instead of failing setup.

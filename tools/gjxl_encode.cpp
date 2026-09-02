@@ -54,7 +54,7 @@ struct Options {
   gjxl::VarDctCompressionMode compression_mode =
     gjxl::VarDctCompressionMode::kAutomatic;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
-    gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+    gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   bool collect_final_butteraugli_score = false;
 };
 
@@ -337,8 +337,10 @@ struct Options {
           gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
         candidate.metal_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput)) ||
-      (candidate.metal_aq_mode !=
-         gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
+      ((candidate.metal_aq_mode ==
+          gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
+        candidate.metal_aq_mode ==
+          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput) &&
        candidate.backend != gjxl::VarDctBackendPreference::kMetal)) {
     return false;
   }

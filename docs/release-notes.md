@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Fully resident Metal encoding default
+
+- Fully resident AQ is now the default Metal computation path for codestream
+  encoding. Qualified automatic Butteraugli-target requests use it; forced
+  Metal also uses it when no AQ mode is specified.
+- Exact coefficients remain available as an explicit C++ and CLI
+  reference/compatibility mode. The source-compatible full diagnostic GPU
+  overloads continue to default to exact coefficients.
+- Resident floating-point decisions may change the quant field, frame, and
+  codestream bytes relative to CPU or exact mode. CPU fallback and operational
+  failure atomicity are unchanged.
+- Automatic resident target-byte and target-BPP searches remain entirely on
+  CPU to avoid mixing CPU and resident rate curves within one search.
+  Automatic maximum-error control also remains CPU-only. Forced Metal retains
+  resident support for both policies.
+- Resident effort levels 1-3 perform the sole terminal evaluation needed for
+  their zero-update policy; higher efforts continue to omit the final
+  diagnostic score unless requested.
+- The C and Rust APIs gain no implementation-mode field and inherit the
+  canonical automatic/default behavior.
+
 ### Entropy behavior alignment
 
 - Balanced, effort-7-like entropy/codestream behavior is now the default for

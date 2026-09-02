@@ -8,12 +8,12 @@ Butteraugli operation remain documented in
 [`butteraugli.md`](butteraugli.md).
 
 The objective is an end-to-end reduction in the time spent by
-`FindBestQuantization`, not isolated kernel speedups. The default AQ policy
-performs two quant-field updates and therefore three complete
-encode/reconstruct/measure evaluations. The experimental resident Butteraugli
-path now keeps the large images, intermediate planes, policy field, and score
-history resident across those evaluations and synchronizes only after the
-final pass.
+`FindBestQuantization`, not isolated kernel speedups. CPU and exact-coefficient
+AQ perform two quant-field updates and three complete
+encode/reconstruct/measure evaluations. The default resident encoding path
+keeps the large images, intermediate planes, policy field, and score history on
+the device, performs the two update evaluations, and omits the terminal
+diagnostic evaluation unless requested.
 The cross-stage plan for reaching the complete encoder's `50x` performance
 target is maintained in
 [`metal-encoding-performance.md`](metal-encoding-performance.md).
@@ -29,13 +29,14 @@ and reduces per-transform maxima in one submission. Reconstructed images and
 pixel-resolution metric inputs remain
 resident, while the bounded GPU policy returns only the final quant field,
 block map, and score history. Reconstructed-image and encoder-frame
-materialization, complete-pipeline switching, and a decision-preserving
-automatic rollout are now available. The qualified rollout keeps exact CPU
+materialization and complete-pipeline switching are now available. Qualified
+automatic Butteraugli-target encoding uses the fully resident float path. It
+keeps coefficient coding, reconstruction, filtering, color conversion,
+Butteraugli, and block reduction on Metal, but does not promise decision or byte
+identity with CPU. The explicit exact-coefficient compatibility path keeps CPU
 coefficient coding, dequantization, inverse CfL, and DC-to-low-frequency
-conversion, then uses Metal inverse transforms, source-domain filtering, color
-conversion, Butteraugli, and block reduction. The fully resident float path
-remains available through the prepared operation but is not selected
-automatically.
+conversion, then uses Metal for inverse transforms and the image/perceptual
+tail.
 
 ## Goals
 
@@ -1200,17 +1201,19 @@ dequantization, CfL, and DC/LLF preparation proved sufficient to retain safe
 float inverse transforms without pretending those coefficient ties are
 interchangeable.
 
-After Milestone 9, the rejected boundary was promoted from a private diagnostic
-to an explicit public experimental mode so its errors and candidate fixes can
-be measured without test-only shims. `GpuAdaptiveQuantizationMode` selects
+After Milestone 9, the non-parity boundary was first promoted from a private
+diagnostic to an explicit mode so its errors and candidate fixes could be
+measured without test-only shims. It is now the codestream workflow's default
+Metal encoding implementation. `GpuAdaptiveQuantizationMode` selects
 `kExactCoefficients`, `kFullyResident`, or `kThroughput` in bounded AQ, full AQ,
 and the complete iterative GPU quantization pipeline. The separate
 `kMaximumThroughput` value selects only the public frame-only workflow.
 `VarDctEncodingOptions::metal_aq_mode` and the CLI's `--metal-aq` option carry
-the same choice through codestream generation. Both resident modes require
-forced Metal, are reported in the workflow summary, and never participate in
-automatic selection. Their output is atomic and structurally valid but is
-intentionally not covered by the CPU decision-parity promise. Both also apply
+the same choice through codestream generation. Fully resident participates in
+qualified automatic Butteraugli-target selection; throughput and
+maximum-throughput still require forced Metal. Resident output is atomic and
+structurally valid but is intentionally not covered by the CPU decision-parity
+promise. Fully resident and throughput also apply
 inverse Gaborish through one three-channel Metal primitive submission and use
 the deterministic tilewise pixel-domain initial-CfL seed. Exact-coefficient
 mode retains the
@@ -1287,11 +1290,12 @@ printing their numerical and codestream deltas.
 Paired cold-public speedups were `2.29–2.59x`, `5.60–5.74x`, `5.47–5.63x`,
 and `5.70–5.87x`, respectively. Complete-pipeline speedup was `5.80–6.00x` at
 720p and `6.08–6.11x` at 1080p; selected-boundary AQ itself reached
-`6.86–7.07x` at 1080p. The non-production fully resident AQ mode reached
-`12.2–12.8x` there, demonstrating that 10x compute throughput is possible but
-not decision-safe. A production-default 10x result would require an exact or
-decision-equivalent GPU coefficient coder; the tested float implementation
-does not meet that prerequisite, so the mode remains explicitly opt-in.
+`6.86–7.07x` at 1080p. At that checkpoint, the non-production fully
+resident AQ mode reached `12.2–12.8x` there, demonstrating that 10x compute
+throughput was possible but not decision-safe. It did not meet the then-current
+exact-decision prerequisite and therefore remained explicitly opt-in. The later
+codestream policy promotion intentionally accepts that observable numerical
+boundary and makes fully resident the automatic/default Metal encoding path.
 
 A selective CPU-repair handoff was also considered. At the default target the
 larger fixtures showed only one to six one-unit quantized-DC mismatches and no
@@ -1370,8 +1374,8 @@ Required workloads are:
   `gpu_iterative_aq_two_updates_e2e` phase only. These high-resolution cases do
   not execute separate CPU AQ baselines, exploratory prepared subphases, the
   complete quantization pipeline, or public codestream workflow phases. The
-  production exact-coefficient Metal mode retains its documented CPU decision
-  boundary inside the GPU AQ operation.
+  then-production exact-coefficient Metal mode retained its documented CPU
+  decision boundary inside the GPU AQ operation.
 
 Report at least:
 
@@ -1399,17 +1403,21 @@ its last evaluation. Milestone 9 supersedes Milestone 8's conservative
 exact-linear rollout with the qualified exact-coefficient boundary: CPU owns
 the coefficient decisions, dequantization, inverse CfL, and DC/LLF conversion,
 while Metal owns inverse transforms and the complete image/perceptual tail.
-The fully resident path is a first-class experimental opt-in because it does
-not satisfy the unchanged decision gate. Exact coefficients remain the default
-and the only automatic mode; automatic selection additionally requires a
-Butteraugli target in `[1.0, 1.2]`.
+The exact-coefficient boundary remains a first-class reference/compatibility
+mode for callers that require CPU-authoritative coefficient decisions. Fully
+resident is now the default Metal encoding path even though it does not satisfy
+that parity gate. Automatic selection requires an ordinary Butteraugli target
+in `[1.0, 1.2]`, qualified geometry, and a qualified backend. Automatic
+resident target-size searches remain CPU-only so attempts cannot switch
+between CPU and resident rate curves; explicitly selected exact-coefficient
+searches retain their decision-compatible automatic behavior.
 
 The rate-control RC2 extension also adds the alternate resident maximum-error
 tail. Its strategy-aware kernel ignores padded pixels and returns only the
 block map and per-transform channel maxima required by the unchanged CPU
 policy. Exact-coefficient Metal preserves CPU frame and codestream decisions;
-fully resident maximum-error remains an explicit experimental mode. Automatic
-maximum-error requests continue to use CPU.
+fully resident maximum-error remains available only when Metal is explicitly
+forced. Automatic maximum-error requests continue to use CPU.
 
 The pre-Milestone-6 2026-08-27 codestream integration made the encoder frame
 profile the single CPU/GPU option contract and added modular DC quantization
