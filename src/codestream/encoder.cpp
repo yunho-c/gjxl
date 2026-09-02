@@ -867,7 +867,7 @@ Status AssembleCandidate(
   return Status::Ok();
 }
 
-Status EncodeVarDctCodestreamImpl(
+Status EncodeVarDctCodestreamMaximumCompression(
   const VarDctEncoderFrame& frame,
   VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
@@ -1528,6 +1528,20 @@ Status EncodeVarDctCodestreamImpl(
   } catch (const std::length_error&) {
     return AllocationFailure();
   }
+}
+
+Status EncodeVarDctCodestreamImpl(
+  const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output,
+  codestream_internal::VarDctCodestreamProfile* profile) {
+
+  // Balanced and high-density deliberately share the historical path until
+  // their single-representation implementation is introduced. Keeping the
+  // exhaustive implementation behind a named boundary makes maximum
+  // compression the byte-exact compatibility oracle during that migration.
+  return EncodeVarDctCodestreamMaximumCompression(
+    frame, options, output, profile);
 }
 
 }  // namespace
