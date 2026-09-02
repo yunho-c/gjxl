@@ -36,6 +36,11 @@ constexpr size_t kContextOptionsV1Size =
   offsetof(GJXLContextOptions, num_cpu_threads);
 constexpr size_t kContextOptionsCpuThreadsSize =
   offsetof(GJXLContextOptions, num_cpu_threads) + sizeof(uint32_t);
+constexpr size_t kEncoderOptionsV1Size =
+  offsetof(GJXLEncoderOptions, compression_mode);
+constexpr size_t kEncoderOptionsCompressionModeSize =
+  offsetof(GJXLEncoderOptions, compression_mode) +
+  sizeof(GJXLCompressionMode);
 static_assert(gjxl::kMaximumCpuThreadCount == GJXL_MAX_CPU_THREADS);
 thread_local std::array<char, kDiagnosticCapacity> last_error{};
 
@@ -184,6 +189,26 @@ GJXLResult ValidateEncoderOptions(
   return GJXL_OK;
 }
 
+GJXLResult ParseCompressionMode(
+  GJXLCompressionMode mode,
+  gjxl::VarDctCompressionMode* compression_mode) noexcept {
+  if (compression_mode == nullptr) {
+    return Fail(GJXL_ERROR_INTERNAL,
+                "Compression-mode destination is null");
+  }
+  switch (mode) {
+    case GJXL_COMPRESSION_AUTOMATIC:
+      *compression_mode = gjxl::VarDctCompressionMode::kAutomatic;
+      return GJXL_OK;
+    case GJXL_COMPRESSION_MAXIMUM:
+      *compression_mode = gjxl::VarDctCompressionMode::kMaximumCompression;
+      return GJXL_OK;
+    default:
+      return Fail(GJXL_ERROR_INVALID_ARGUMENT,
+                  "Compression mode is not recognized");
+  }
+}
+
 }  // namespace
 
 extern "C" {
@@ -204,12 +229,16 @@ GJXLResult gjxl_context_options_init(
 GJXLResult gjxl_encoder_options_init(
   GJXLEncoderOptions* options, size_t caller_size) noexcept {
   return Guard([&]() -> GJXLResult {
-    const GJXLResult result = InitializeOptions(options, caller_size);
+    const GJXLResult result = InitializeOptions(
+      options, caller_size, kEncoderOptionsV1Size);
     if (result != GJXL_OK) {
       return result;
     }
     options->distance = 1.0f;
     options->effort = 7;
+    if (caller_size >= kEncoderOptionsCompressionModeSize) {
+      options->compression_mode = GJXL_COMPRESSION_AUTOMATIC;
+    }
     return GJXL_OK;
   });
 }
@@ -292,10 +321,20 @@ GJXLResult gjxl_encode(
       return result;
     }
     result = ValidateSizedStruct(
-      options->struct_size, sizeof(*options),
+      options->struct_size, kEncoderOptionsV1Size,
       "Encoder options struct is too small");
     if (result != GJXL_OK) {
       return result;
+    }
+
+    gjxl::VarDctCompressionMode compression_mode =
+      gjxl::VarDctCompressionMode::kAutomatic;
+    if (options->struct_size >= kEncoderOptionsCompressionModeSize) {
+      result = ParseCompressionMode(options->compression_mode,
+                                    &compression_mode);
+      if (result != GJXL_OK) {
+        return result;
+      }
     }
     result = ValidateEncoderOptions(*options);
     if (result != GJXL_OK) {
@@ -326,6 +365,7 @@ GJXLResult gjxl_encode(
     gjxl::VarDctEncodingOptions encoding_options;
     encoding_options.butteraugli_target = options->distance;
     encoding_options.effort = options->effort;
+    encoding_options.compression_mode = compression_mode;
     encoding_options.backend = context->backend;
     encoding_options.cpu_thread_count = context->cpu_thread_count;
     std::vector<uint8_t> codestream;

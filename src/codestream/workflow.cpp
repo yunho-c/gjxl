@@ -63,6 +63,7 @@ void AccumulateCodestreamProfile(
   const codestream_internal::VarDctCodestreamProfile& source,
   codestream_internal::VarDctCodestreamProfile* destination) {
 
+  destination->entropy_behavior = source.entropy_behavior;
   destination->validation_nanoseconds += source.validation_nanoseconds;
   destination->dc_tokenization_nanoseconds +=
     source.dc_tokenization_nanoseconds;
@@ -711,10 +712,16 @@ struct PreparedWorkflow {
 
   std::vector<uint8_t> candidate;
   const WorkflowClock::time_point codestream_begin = ProfileBegin(profile);
+  const VarDctCodestreamOptions codestream_options{
+    .entropy_behavior =
+      codestream_internal::ResolveEntropyBehavior(options),
+  };
   status = profile == nullptr
-    ? EncodeVarDctCodestream(prepared.pipeline.frame, &candidate)
+    ? EncodeVarDctCodestream(
+        prepared.pipeline.frame, codestream_options, &candidate)
     : codestream_internal::EncodeVarDctCodestreamProfiled(
-        prepared.pipeline.frame, &candidate, &candidate_profile.codestream);
+        prepared.pipeline.frame, codestream_options, &candidate,
+        &candidate_profile.codestream);
   ProfileEnd(
     profile, codestream_begin,
     &candidate_profile.codestream_encoding_nanoseconds);
@@ -727,6 +734,8 @@ struct PreparedWorkflow {
   candidate_summary.extent = prepared.geometry.frame();
   candidate_summary.encoded_bytes = candidate.size();
   candidate_summary.density_mode = options.density_mode;
+  candidate_summary.compression_mode = options.compression_mode;
+  candidate_summary.entropy_behavior = codestream_options.entropy_behavior;
   candidate_summary.rate_control_mode = options.rate_control_mode;
   candidate_summary.effective_target_bytes = effective_target_bytes;
   candidate_summary.target_size_tolerance_bytes =
@@ -1016,6 +1025,14 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       return Status::InvalidArgument(
         "VarDCT density mode is invalid");
   }
+  switch (options.compression_mode) {
+    case VarDctCompressionMode::kAutomatic:
+    case VarDctCompressionMode::kMaximumCompression:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "VarDCT compression mode is invalid");
+  }
   switch (options.metal_aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
       break;
@@ -1296,6 +1313,20 @@ Status EncodeLinearRgbVarDctCodestreamProfiled(
 }
 
 namespace codestream_internal {
+
+VarDctEntropyBehavior ResolveEntropyBehavior(
+  const VarDctEncodingOptions& options) noexcept {
+
+  if (options.compression_mode ==
+      VarDctCompressionMode::kMaximumCompression) {
+    return VarDctEntropyBehavior::kMaximumCompression;
+  }
+  if (options.effort >= 9 ||
+      options.density_mode == VarDctDensityMode::kHighDensity) {
+    return VarDctEntropyBehavior::kHighDensity;
+  }
+  return VarDctEntropyBehavior::kBalanced;
+}
 
 bool IsAutomaticMetalGeometryEligible(Extent2D padded_extent) noexcept {
   size_t area = 0;

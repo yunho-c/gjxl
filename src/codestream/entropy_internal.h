@@ -54,6 +54,15 @@ struct PreparedEntropyClusters {
   PreparedEntropyClusters* prepared,
   EntropyWorkProfile* profile = nullptr);
 
+/// Builds one fixed-config Prefix model with a single fast clustering pass.
+/// Used only after ordinary serializer policy has selected Prefix coding.
+[[nodiscard]] Status OptimizeFastPrefixEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr,
+  EntropyWorkProfile* profile = nullptr);
+
 /// Counts the exact bits emitted by WriteTokenStream without materializing the
 /// encoded payload. The output remains unchanged on failure.
 [[nodiscard]] Status CountTokenStreamBits(

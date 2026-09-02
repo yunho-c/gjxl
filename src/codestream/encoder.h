@@ -6,15 +6,28 @@
 #include <cstdint>
 #include <vector>
 
+#include "codestream/entropy_behavior.h"
 #include "core/status.h"
 
 namespace gjxl {
 
 class VarDctEncoderFrame;
 
+struct VarDctCodestreamOptions {
+  VarDctEntropyBehavior entropy_behavior =
+    VarDctEntropyBehavior::kBalanced;
+};
+
 /// Serializes one validated initial-profile frame as a raw JPEG XL codestream.
 /// Failure leaves `output` unchanged.
 [[nodiscard]] Status EncodeVarDctCodestream(
   const VarDctEncoderFrame& frame, std::vector<uint8_t>* output);
+
+/// Serializes with an explicitly resolved entropy behavior. Failure leaves
+/// `output` unchanged.
+[[nodiscard]] Status EncodeVarDctCodestream(
+  const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output);
 
 }  // namespace gjxl

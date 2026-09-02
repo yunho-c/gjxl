@@ -78,11 +78,22 @@ pub struct ContextOptions {
     pub cpu_threads: Option<usize>,
 }
 
+/// Entropy/codestream search policy, independent of effort.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CompressionMode {
+    /// Resolve balanced or high-density entropy behavior from effort.
+    #[default]
+    Automatic,
+    /// Preserve the exhaustive entropy/codestream search as an explicit opt-in.
+    Maximum,
+}
+
 /// Canonical compression controls.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EncoderOptions {
     pub distance: f32,
     pub effort: i32,
+    pub compression_mode: CompressionMode,
 }
 
 impl Default for EncoderOptions {
@@ -90,6 +101,7 @@ impl Default for EncoderOptions {
         Self {
             distance: 1.0,
             effort: 7,
+            compression_mode: CompressionMode::Automatic,
         }
     }
 }
@@ -298,6 +310,10 @@ impl Context {
         })?;
         native_options.distance = options.distance;
         native_options.effort = options.effort;
+        native_options.compression_mode = match options.compression_mode {
+            CompressionMode::Automatic => sys::GJXL_COMPRESSION_AUTOMATIC,
+            CompressionMode::Maximum => sys::GJXL_COMPRESSION_MAXIMUM,
+        } as sys::GJXLCompressionMode;
 
         let mut output = NativeBuffer::empty();
         check(unsafe { sys::gjxl_encode(self.raw, &image, &native_options, &mut output.raw) })?;
@@ -403,6 +419,10 @@ mod tests {
         assert_eq!(ContextOptions::default().cpu_threads, None);
         assert_eq!(EncoderOptions::default().distance, 1.0);
         assert_eq!(EncoderOptions::default().effort, 7);
+        assert_eq!(
+            EncoderOptions::default().compression_mode,
+            CompressionMode::Automatic
+        );
         assert_eq!(distance_from_quality(100.0), 0.0);
         assert!((distance_from_quality(80.0) - 1.9).abs() < f32::EPSILON);
     }
@@ -467,6 +487,25 @@ mod tests {
         let padded = ImageView::rgba8(8, 8, 40, &padded).unwrap();
         let encoded = context.encode(&padded, EncoderOptions::default()).unwrap();
         assert!(encoded.starts_with(&[0xff, 0x0a]));
+    }
+
+    #[test]
+    fn maximum_compression_is_explicitly_selectable() {
+        let context = Context::new(Backend::Cpu).expect("CPU context should initialize");
+        let pixels = rgba_fixture(64, 64);
+        let image = ImageView::rgba8(64, 64, 256, &pixels).unwrap();
+        let automatic = context.encode(&image, EncoderOptions::default()).unwrap();
+        let maximum = context
+            .encode(
+                &image,
+                EncoderOptions {
+                    compression_mode: CompressionMode::Maximum,
+                    ..EncoderOptions::default()
+                },
+            )
+            .unwrap();
+        assert!(maximum.starts_with(&[0xff, 0x0a]));
+        assert_ne!(maximum, automatic);
     }
 
     #[test]

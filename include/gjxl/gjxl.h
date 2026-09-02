@@ -60,10 +60,19 @@ typedef struct {
   uint32_t num_cpu_threads;
 } GJXLContextOptions;
 
+typedef int32_t GJXLCompressionMode;
+enum {
+  GJXL_COMPRESSION_AUTOMATIC = 0,
+  GJXL_COMPRESSION_MAXIMUM = 1,
+};
+
 typedef struct {
   uint32_t struct_size;
   float distance;
   int32_t effort;
+  /// Selects the entropy/codestream search policy independently of effort.
+  /// Callers using the previous struct size implicitly select AUTOMATIC.
+  GJXLCompressionMode compression_mode;
 } GJXLEncoderOptions;
 
 typedef int32_t GJXLPixelFormat;
@@ -92,7 +101,8 @@ typedef struct {
 GJXL_API GJXLResult gjxl_context_options_init(
   GJXLContextOptions* options, size_t caller_size) GJXL_NOEXCEPT;
 
-/// Initializes encoder options with distance 1.0 and effort 7.
+/// Initializes encoder options with distance 1.0, effort 7, and automatic
+/// compression behavior.
 /// caller_size must describe the complete caller allocation and fit uint32_t.
 GJXL_API GJXLResult gjxl_encoder_options_init(
   GJXLEncoderOptions* options, size_t caller_size) GJXL_NOEXCEPT;

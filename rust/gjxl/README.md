@@ -15,7 +15,12 @@ let image = gjxl::ImageView::rgba8(width, height, width as usize * 4, &pixels)?;
 let options = gjxl::EncoderOptions {
     distance: gjxl::distance_from_quality(90.0),
     effort: 7,
+    compression_mode: gjxl::CompressionMode::Automatic,
 };
 let codestream = context.encode(&image, options)?;
 # Ok::<(), gjxl::Error>(())
 ```
+
+Set `compression_mode` to `gjxl::CompressionMode::Maximum` to opt into the
+exhaustive entropy/codestream search. Automatic mode uses the ordinary
+effort-aligned behavior.

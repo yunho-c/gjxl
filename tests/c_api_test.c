@@ -49,8 +49,21 @@ static int CheckInitializers(void) {
                                   sizeof(encoder_options)) == GJXL_OK,
         "encoder initializer failed");
   CHECK(encoder_options.struct_size == sizeof(encoder_options) &&
-          encoder_options.distance == 1.0f && encoder_options.effort == 7,
+          encoder_options.distance == 1.0f && encoder_options.effort == 7 &&
+          encoder_options.compression_mode == GJXL_COMPRESSION_AUTOMATIC,
         "encoder defaults are incorrect");
+
+  GJXLEncoderOptions legacy_encoder;
+  memset(&legacy_encoder, 0xa5, sizeof(legacy_encoder));
+  CHECK(gjxl_encoder_options_init(
+          &legacy_encoder,
+          offsetof(GJXLEncoderOptions, compression_mode)) == GJXL_OK,
+        "legacy encoder initializer failed");
+  CHECK(legacy_encoder.struct_size ==
+          offsetof(GJXLEncoderOptions, compression_mode) &&
+          legacy_encoder.distance == 1.0f && legacy_encoder.effort == 7 &&
+          legacy_encoder.compression_mode == (int32_t)0xa5a5a5a5,
+        "legacy encoder defaults or trailing storage are incorrect");
 
   GJXLContextOptions small_context;
   GJXLContextOptions original_context;
@@ -71,7 +84,8 @@ static int CheckInitializers(void) {
   memcpy(&original_encoder, &small_encoder, sizeof(small_encoder));
   CHECK(ExpectError(
           gjxl_encoder_options_init(&small_encoder,
-                                    sizeof(small_encoder) - 1),
+                                    offsetof(GJXLEncoderOptions,
+                                             compression_mode) - 1),
           GJXL_ERROR_INVALID_ARGUMENT, "small encoder initializer"),
         "small encoder initializer result is incorrect");
   CHECK(memcmp(&small_encoder, &original_encoder, sizeof(small_encoder)) == 0,
@@ -102,6 +116,8 @@ static int CheckInitializers(void) {
   CHECK(larger_encoder.options.struct_size == sizeof(larger_encoder) &&
           larger_encoder.options.distance == 1.0f &&
           larger_encoder.options.effort == 7 &&
+          larger_encoder.options.compression_mode ==
+            GJXL_COMPRESSION_AUTOMATIC &&
           larger_encoder.future_field == 0,
         "larger encoder initializer did not zero future storage");
 
@@ -302,6 +318,29 @@ static int CheckEncoding(GJXLContext* context) {
           gjxl_get_last_error()[0] == '\0',
         "RGB encoding returned an invalid codestream");
 
+  GJXLEncoderOptions legacy_options = options;
+  legacy_options.struct_size =
+    offsetof(GJXLEncoderOptions, compression_mode);
+  legacy_options.compression_mode = 99;
+  GJXLBuffer legacy_output = {NULL, 0};
+  CHECK(gjxl_encode(context, &rgb_view, &legacy_options,
+                    &legacy_output) == GJXL_OK,
+        "legacy encoder options were not accepted");
+  CHECK(legacy_output.size == rgb_output.size &&
+          memcmp(legacy_output.data, rgb_output.data, rgb_output.size) == 0,
+        "legacy encoder options did not use automatic compression");
+  gjxl_buffer_free(&legacy_output);
+
+  options.compression_mode = GJXL_COMPRESSION_MAXIMUM;
+  GJXLBuffer maximum_output = {NULL, 0};
+  CHECK(gjxl_encode(context, &rgb_view, &options, &maximum_output) == GJXL_OK,
+        "maximum-compression encoding failed");
+  CHECK(maximum_output.data != NULL && maximum_output.size >= 2 &&
+          maximum_output.data[0] == 0xff && maximum_output.data[1] == 0x0a,
+        "maximum-compression encoding returned an invalid codestream");
+  gjxl_buffer_free(&maximum_output);
+  options.compression_mode = GJXL_COMPRESSION_AUTOMATIC;
+
   struct LargerEncoderOptions {
     GJXLEncoderOptions options;
     uint64_t future_field;
@@ -374,6 +413,12 @@ static int CheckEncoding(GJXLContext* context) {
                           GJXL_ERROR_INVALID_ARGUMENT, "effort eleven"),
         "effort-eleven result is incorrect");
   options.effort = 7;
+  options.compression_mode = 99;
+  CHECK(ExpectEncodeError(context, &rgb_view, &options,
+                          GJXL_ERROR_INVALID_ARGUMENT,
+                          "unknown compression mode"),
+        "unknown-compression-mode result is incorrect");
+  options.compression_mode = GJXL_COMPRESSION_AUTOMATIC;
 
   GJXLImageView invalid_view = rgb_view;
   invalid_view.struct_size = sizeof(invalid_view) - 1;
@@ -417,7 +462,8 @@ static int CheckEncoding(GJXLContext* context) {
         "image-overflow result is incorrect");
 
   GJXLEncoderOptions small_options = options;
-  small_options.struct_size = sizeof(small_options) - 1;
+  small_options.struct_size =
+    offsetof(GJXLEncoderOptions, compression_mode) - 1;
   CHECK(ExpectEncodeError(context, &rgb_view, &small_options,
                           GJXL_ERROR_INVALID_ARGUMENT,
                           "small encoder options"),
