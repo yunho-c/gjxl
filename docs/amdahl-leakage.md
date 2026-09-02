@@ -2,7 +2,7 @@
 
 - Status: active implementation roadmap
 - Original profile revision: `af3a9e6`
-- Current roadmap baseline: `40b6a11`
+- Current roadmap baseline: `55048f2`
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
 - Profile date: 2026-09-02
 - Related analysis: [entropy behavior alignment](entropy-behavior-alignment.md)
@@ -37,8 +37,8 @@ The roadmap priorities are:
 
 | Priority | Area | Current signal or status | Next implementation target |
 | ---: | --- | ---: | --- |
-| 2 | Preparation and storage | Borrowed-Opsin slice: padded-4K input preparation 89.96 -> 76.45 ms and peak RSS 1.24 -> 1.17 GiB | Remove padded linear RGB through the priority 3 direct-write path |
-| 3 | Color conversion, validation, and copies | about 10.2 ms GJXL versus 2.2 ms libjxl color-transform attribution | Validate once and transform directly into final storage |
+| 2 | Preparation and storage | Direct padded-Opsin slice: padded-4K input preparation 75.09 -> 54.42 ms and peak RSS 1.161 -> 1.043 GiB | Re-profile before considering persistent workspace leases |
+| 3 | Color conversion, validation, and copies | Direct workflow transform implemented; Metal preparation still revalidates the original source | Remove downstream validation only with explicit trusted provenance and profile evidence |
 | 4 | Quantization-matrix chromaticity statistics | about 16.8 ms GJXL versus 5.9 ms libjxl attribution | Apply libjxl's effort gate and vectorize the retained pass |
 | 5 | Metal readback and frame assembly | about 10.2 ms readback plus 12.9 ms assembly | Remove intermediate copies and redundant full-frame scans |
 | 6 | Residual serializer | 62.6 ms GJXL versus 42.3 ms libjxl | Give one-representation encoding a one-pass token path |
@@ -158,10 +158,11 @@ sample under `/usr/bin/time -l`, reduced median maximum resident set size from
 matrix passed 66 of 67 tests; the only failure was the pre-existing CPU
 quantization golden mismatch, reproduced unchanged on the parent.
 
-### Implemented second slice: borrow the coding Opsin image
+### Landed second slice: borrow the coding Opsin image
 
-`PreparedQuantizationPipeline::coding_opsin` now borrows the workflow-owned
-immutable Opsin view for the synchronous prepared lifetime. Exact and CPU paths
+Commit `55048f2` makes `PreparedQuantizationPipeline::coding_opsin` borrow the
+workflow-owned immutable Opsin view for the synchronous prepared lifetime.
+Exact and CPU paths
 still own a separate preprocessed image because Gaborish inversion changes their
 search-domain pixels; resident paths no longer create a duplicate of the
 unfiltered coding image.
@@ -193,13 +194,49 @@ from 1.24 GiB to 1.17 GiB, approximately 70 MiB or 5.5%. The pinned-libjxl
 Release matrix again passed 66 of 67 tests; the sole failure was the unchanged,
 pre-existing CPU quantization golden mismatch.
 
-### Next storage slice: remove padded linear RGB
+### Implemented third slice: direct padded Opsin preparation
 
-A separately qualified change can remove `padded_linear`: transform
-the real source extent directly into a padded Opsin destination, then extend the
-already-transformed right and bottom edges. Because the transform is pointwise,
-that ordering should preserve padded values while eliminating another owned
-three-plane float image.
+`PreparedWorkflow` now borrows the caller's immutable linear-RGB view for the
+synchronous encode and all target-size attempts. It no longer owns
+`padded_linear`. The internal `LinearRgbToPaddedOpsin()` preparation primitive
+transforms source rows directly into the workflow-owned padded Opsin image,
+fills each transformed right edge, and duplicates only the final transformed
+row into bottom padding.
+
+Input and transformed-output finite checks are fused into the scalar or NEON
+conversion loop. The internal destination stays private and is discarded after
+failure, so it does not require another full-image staging buffer. The public
+`LinearRgbToOpsin()` entry point still converts through private scratch and
+commits only after success, preserving its in-place support and failure
+atomicity.
+
+Five alternating independent Release process pairs compared this change with
+the `55048f2` baseline. Each process used two warmups and five measured samples;
+the table reports the median of process medians:
+
+| Workload | Stage | `55048f2` | Direct padded Opsin | Change |
+| --- | --- | ---: | ---: | ---: |
+| padded 1080p | Input preparation | 17.240 ms | 9.375 ms | -7.865 ms (-45.6%) |
+| padded 1080p | Complete encode | 175.513 ms | 157.849 ms | -17.664 ms (-10.1%) |
+| padded 4K | Input preparation | 75.088 ms | 54.422 ms | -20.666 ms (-27.5%) |
+| padded 4K | Complete encode | 655.957 ms | 615.225 ms | -40.732 ms (-6.2%) |
+
+All five paired preparation and complete-encode results favored the candidate
+at both sizes. Every sample selected Metal and preserved encoded size: 410,072
+bytes at 1080p and 1,606,911 bytes at 4K. A separate forced exact-coefficient
+Metal smoke retained its 434,392-byte output; its one-sample timing is not a
+performance claim. A cross-binary CLI smoke over the repository fixture was
+byte-identical before and after the slice for CPU, fully resident Metal, and
+exact-coefficient Metal.
+
+Three alternating padded-4K RSS pairs reduced median maximum resident set size
+from 1.161 GiB to 1.043 GiB, approximately 121.5 MiB or 10.2%. A targeted test
+compares strided direct output bit-for-bit with the former pad-then-transform
+result, checks row-stride padding and non-finite rejection, and verifies public
+atomicity when finite input overflows during conversion. It passes in both the
+native NEON build and a forced-scalar build. The Release matrices
+passed 61 of 62 tests without libjxl and 66 of 67 with pinned libjxl; in each,
+the sole failure was the unchanged pre-existing CPU quantization golden.
 
 ### Deferred option: persistent workspace leases
 
@@ -237,38 +274,29 @@ failures, and device-error invalidation.
 
 ## Priority 3: validate and move image pixels once
 
-### Current repeated passes
+### State after the direct-write slice
 
-[`EdgeExtend()`](../src/codestream/workflow.cpp) checks every input sample for
-finiteness while copying it, and performs `min()` coordinate clamping inside the
-entire padded destination loop.
+The workflow previously ran [`EdgeExtend()`](../src/codestream/workflow.cpp)
+over the complete padded destination, then called the atomic public
+[`LinearRgbToOpsin()`](../src/codec/color_transform.cpp), which allocated and
+copied another full padded result. Both workflow-only passes and the owned
+padded-linear image are now gone.
 
-[`LinearRgbToOpsin()`](../src/codec/color_transform.cpp) then:
+The retained internal path:
 
-1. allocates a full three-plane temporary result;
-2. scans each input row for finite samples;
-3. performs the Opsin transform;
-4. scans all transformed samples for finiteness; and
-5. copies the complete temporary result into the destination.
+- validates source values while transforming them;
+- writes transformed values directly into workflow-owned Opsin storage;
+- combines output-finite detection with the transform loop or its vector
+  reduction; and
+- fills only the transformed right edge and duplicates the final transformed
+  row into bottom padding.
 
-Quantization-matrix statistics scan Opsin again. Metal evaluator preparation
-also validates its original image before upload. These checks are individually
-defensible at public API boundaries but redundant inside one already-validated
-synchronous workflow.
-
-### Implementation
-
-Add an internal checked/trusted path rather than weakening the standalone public
-color-transform contract:
-
-- validate source values during their first copy or transform;
-- write transformed values directly into workflow-owned Opsin storage;
-- combine output-finite detection with the transform loop or its vector
-  reduction;
-- bulk-copy the real part of each source row and fill only the padded right
-  edge, then duplicate only the final row into bottom padding; and
-- carry an internal finite-validation precondition into later consumers that
-  would otherwise rescan the same storage.
+Quantization-matrix statistics still scan Opsin. Metal evaluator preparation
+also revalidates its original image before upload, and validates coding Opsin
+when no resident coding view is supplied. Removing those checks requires an
+explicit internal provenance token or preparation contract so public GPU APIs
+cannot claim unvalidated input is trusted. That follow-up should be retained
+only if a fresh profile shows material wall time.
 
 Finite input alone does not prove finite output. The public linear-float API can
 receive very large finite values that overflow during matrix arithmetic, so the
@@ -281,12 +309,15 @@ parallel invocation. That overhead is lower priority. Earlier shared-executor
 experiments were not unconditionally faster, so full-image allocations and
 passes should be removed before scheduling is redesigned.
 
-### Expected result and gates
+### Result and remaining gates
 
-The current cross-profile attributes about 10.2 ms per 4K encode to GJXL's
-color transform versus about 2.2 ms to libjxl's corresponding operation. A
-5-8 ms opportunity is plausible, with additional allocator benefit overlapping
-priority 2.
+The direct-write slice exceeded the original 5-8 ms estimate because it removed
+both the persistent padded-linear image and the public transform's padded
+scratch/copy from the workflow. At padded 4K, input preparation improved by
+20.7 ms in the retained cohort and complete encode by 40.7 ms, with a 121.5 MiB
+peak-RSS reduction. The larger end-to-end result includes allocator and memory-
+traffic effects outside the removed loop and must not be interpreted as color-
+transform CPU time alone.
 
 Tests must cover NaN, infinity, huge finite values, strided inputs, overlapping
 views where allowed, unchanged public output on failure, scalar/NEON parity, and
@@ -558,19 +589,23 @@ separates low-risk work elimination from lifetime and layout redesign:
 2. **Completed in `40b6a11`:** give encoding and public diagnostics two concrete
    output contracts; remove dead resident host materialization and defer CPU-only
    preparation until CPU is selected.
-3. **Completed in the current slice:** remove duplicate workflow-to-prepared
-   Opsin ownership, with explicit borrowed-view lifetime and prepared-state
+3. **Completed in `55048f2`:** remove duplicate workflow-to-prepared Opsin
+   ownership, with explicit borrowed-view lifetime and prepared-state
    invalidation.
-4. Implement priority 3's direct-write, single-validation color path, including
-   separately qualified removal of padded linear RGB.
-5. Implement priority 4's effort/mode gate and vectorized retained statistics.
-6. Incorporate the independently owned effort-7 zero-update change and capture
+4. **Completed in the current slice:** remove padded linear RGB and the
+   workflow's atomic color-transform scratch/copy through a checked direct-write
+   path; preserve the public transform contract.
+5. Re-profile before carrying trusted finite-input provenance into Metal
+   preparation; do not weaken public GPU validation to remove an unmeasured
+   scan.
+6. Implement priority 4's effort/mode gate and vectorized retained statistics.
+7. Incorporate the independently owned effort-7 zero-update change and capture
    a fresh matched profile.
-7. Implement priority 5's low-risk direct frame copies and scan fusion.
-8. Implement priority 6's one-pass ordinary tokenization and effort-aware
+8. Implement priority 5's low-risk direct frame copies and scan fusion.
+9. Implement priority 6's one-pass ordinary tokenization and effort-aware
    coefficient-order policy.
-9. Add cache-local balanced histogram population reduction.
-10. Re-profile before adding more counters or considering persistent workspace
+10. Add cache-local balanced histogram population reduction.
+11. Re-profile before adding more counters or considering persistent workspace
     pooling, a Metal group-packing kernel, or a mapped zero-copy frame view.
 
 This sequence prevents two common forms of wasted optimization: building a

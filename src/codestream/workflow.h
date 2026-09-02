@@ -169,8 +169,8 @@ struct VarDctEncodingAttemptTiming {
 
 /// Non-deterministic timing diagnostics kept separate from the result summary.
 struct VarDctEncodingTiming {
-  /// Post-validation source preparation: geometry, edge extension, color
-  /// conversion, host workspaces, and any CPU perceptual reference.
+  /// Post-validation source preparation: geometry, padded color conversion,
+  /// host workspaces, and any CPU perceptual reference.
   uint64_t preparation_nanoseconds = 0;
   /// Complete target-size search wall time, including all attempted encodes,
   /// serialization, failures, and final candidate selection. Zero for a

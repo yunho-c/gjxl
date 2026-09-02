@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "codec/color_transform.h"
+#include "codec/color_transform_internal.h"
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
 #include "codec/vardct_frame.h"
@@ -429,45 +429,22 @@ struct EncodingArtifacts {
   MaximumErrorResult maximum_error_result;
 };
 
-[[nodiscard]] Status EdgeExtend(
-  ConstImage3FView source,
-  Image3FView destination) {
-
-  if (!source.valid() || !destination.valid() ||
-      source.width() > destination.width() ||
-      source.height() > destination.height()) {
-    return Status::InvalidArgument(
-      "Linear RGB source or padded destination is invalid");
-  }
-  for (size_t y = 0; y < destination.height(); ++y) {
-    const size_t source_y = std::min(y, source.height() - 1);
-    for (size_t x = 0; x < destination.width(); ++x) {
-      const size_t source_x = std::min(x, source.width() - 1);
-      for (size_t channel = 0; channel < 3; ++channel) {
-        const float value = source.plane[channel].Row(source_y)[source_x];
-        if (!std::isfinite(value)) {
-          return Status::InvalidArgument(
-            "Linear RGB input pixels must be finite");
-        }
-        destination.plane[channel].Row(y)[x] = value;
-      }
-    }
-  }
-  return Status::Ok();
-}
-
 struct PreparedWorkflow {
-  explicit PreparedWorkflow(FrameGeometry prepared_geometry)
+  PreparedWorkflow(
+    FrameGeometry prepared_geometry,
+    ConstImage3FView source_linear_rgb)
     : geometry(prepared_geometry),
-      padded_linear(geometry.padded_frame()),
+      linear_rgb(source_linear_rgb),
       opsin(geometry.padded_frame()) {}
 
   [[nodiscard]] ConstImage3FView original_linear_rgb() const noexcept {
-    return padded_linear.cropped_view(geometry.frame());
+    return linear_rgb;
   }
 
   FrameGeometry geometry;
-  Image3FBuffer padded_linear;
+  // Borrows the encode caller's immutable source for this synchronous
+  // prepared workflow and all of its target-size attempts.
+  ConstImage3FView linear_rgb;
   Image3FBuffer opsin;
   codestream_internal::QuantizationMatrixScaleStats matrix_scale_stats;
   // CPU and maximum-throughput adapters retain the public complete-output
@@ -518,13 +495,9 @@ struct PreparedWorkflow {
     if (!status.ok()) {
       return status;
     }
-    auto candidate = std::make_unique<PreparedWorkflow>(geometry);
-    status = EdgeExtend(linear_rgb, candidate->padded_linear.view());
-    if (!status.ok()) {
-      return status;
-    }
-    status = LinearRgbToOpsin(
-      candidate->padded_linear.const_view(),
+    auto candidate = std::make_unique<PreparedWorkflow>(geometry, linear_rgb);
+    status = color_transform_internal::LinearRgbToPaddedOpsin(
+      linear_rgb,
       kInitialProfileIntensityTarget,
       candidate->opsin.view());
     if (!status.ok()) {
