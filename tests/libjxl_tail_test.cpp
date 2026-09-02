@@ -459,6 +459,29 @@ int main() {
     return 1;
   }
   const std::vector<uint8_t> single_thread_output = output;
+  const gjxl::codestream_internal::LibjxlTailProfile profile_sentinel{
+      .total_nanoseconds = 0xA5A5A5A5A5A5A5A5u,
+  };
+  gjxl::codestream_internal::LibjxlTailProfile tail_profile = profile_sentinel;
+  output.clear();
+  if (!CheckStatus(
+          gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxlProfiled(
+              frame, {}, &output, &tail_profile),
+          gjxl::StatusCode::kOk, "Profiled bridge request") ||
+      output != single_thread_output ||
+      tail_profile.adapter_validation_and_copy_nanoseconds == 0 ||
+      tail_profile.libjxl_internal_nanoseconds == 0 ||
+      tail_profile.section_writing_nanoseconds == 0 ||
+      tail_profile.total_nanoseconds <
+          tail_profile.adapter_validation_and_copy_nanoseconds +
+              tail_profile.context_setup_nanoseconds +
+              tail_profile.libjxl_internal_nanoseconds +
+              tail_profile.output_copy_nanoseconds ||
+      tail_profile.worker_count != 1 ||
+      !tail_profile.calling_thread_participates) {
+    std::cerr << "Libjxl-tail phase profiling is inconsistent\n";
+    return 1;
+  }
   output.clear();
   if (!CheckStatus(gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
                        frame, {}, &output),
@@ -519,6 +542,19 @@ int main() {
     return 1;
   }
 #else
+  const gjxl::codestream_internal::LibjxlTailProfile profile_sentinel{
+      .total_nanoseconds = 0xA5A5A5A5A5A5A5A5u,
+  };
+  gjxl::codestream_internal::LibjxlTailProfile tail_profile = profile_sentinel;
+  std::vector<uint8_t> profiled_output = sentinel;
+  if (!CheckStatus(
+          gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxlProfiled(
+              frame, {}, &profiled_output, &tail_profile),
+          gjxl::StatusCode::kUnavailable, "Profiled bridge request") ||
+      profiled_output != sentinel || tail_profile != profile_sentinel) {
+    std::cerr << "Unavailable profiled request changed caller-visible output\n";
+    return 1;
+  }
   if (!CheckStatus(status, gjxl::StatusCode::kUnavailable,
                    "Valid bridge request") ||
       output != sentinel) {
@@ -526,6 +562,14 @@ int main() {
     return 1;
   }
 #endif
+
+  if (!CheckStatus(
+          gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxlProfiled(
+              frame, {}, &output, nullptr),
+          gjxl::StatusCode::kInvalidArgument,
+          "Null-profile bridge request")) {
+    return 1;
+  }
 
   if (!CheckStatus(gjxl::codestream_internal::EncodeVarDctCodestreamWithLibjxl(
                        frame, {}, nullptr),

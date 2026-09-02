@@ -433,6 +433,19 @@ if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
   )
 endif()
 
+add_library(
+  gjxl_libjxl_tail_experiment
+  STATIC
+  src/codestream/encoder_backend.cpp
+)
+
+target_link_libraries(
+  gjxl_libjxl_tail_experiment
+  PUBLIC
+    gjxl_codestream
+    gjxl_libjxl_tail
+)
+
 # Private adapters shared by C API and tests.
 add_library(
   gjxl_c_api_internal
@@ -1446,8 +1459,7 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(
     gjxl_libjxl_tail_test
     PRIVATE
-      gjxl_libjxl_tail
-      gjxl_codestream
+      gjxl_libjxl_tail_experiment
   )
 
   if(GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT)
@@ -1464,10 +1476,16 @@ if(GJXL_BUILD_TESTS)
     tests/codestream_workflow_test.cpp
   )
 
+  target_compile_definitions(
+    gjxl_codestream_workflow_test
+    PRIVATE
+      GJXL_TEST_LIBJXL_TAIL_ENABLED=$<BOOL:${GJXL_ENABLE_LIBJXL_TAIL_EXPERIMENT}>
+  )
+
   target_link_libraries(
     gjxl_codestream_workflow_test
     PRIVATE
-      gjxl_codestream
+      gjxl_libjxl_tail_experiment
   )
 
   add_test(

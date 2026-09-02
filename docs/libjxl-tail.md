@@ -20,8 +20,8 @@ validation required to make its result interpretable.
 
 ## Implementation status
 
-As of 2026-09-01, Milestones 1 through 3 are implemented through the controlled
-bridge seam:
+As of 2026-09-01, Milestones 1 through 4 are implemented through the controlled
+bridge seam and a non-installed experimental workflow:
 
 - the opt-in build verifies the pinned base
   `e8ff09762481785938d8e4e01333ed3917571161` and prints the applied libjxl
@@ -48,14 +48,27 @@ bridge seam:
   helpers shared by the normal encoder and the prepared-frame bridge; and
 - small and mixed multi-group bridge outputs are deterministic across repeated,
   one-thread, and eight-worker calls, are accepted by the pinned libjxl decoder,
-  and decode to the same float pixels as GJXL's native tail from the same frame.
+  and decode to the same float pixels as GJXL's native tail from the same frame;
+- libjxl patch `ffd9bb38fd66147f66d9542a91f3e4095a5b4811` adds elapsed,
+  non-overlapping phase measurements to the prepared-frame tail without
+  changing the ordinary libjxl encoder result;
+- a private backend dispatcher selects GJXL or libjxl explicitly, never falls
+  back, and commits output and profile data only after success;
+- an injected serializer seam at the existing post-pipeline boundary keeps
+  every production entry point fixed to the native GJXL tail while allowing a
+  non-installed testing/benchmark target to exercise the hybrid workflow;
+- libjxl effort and worker count are explicit, target-byte and target-BPP modes
+  are rejected before frontend work, and enabled/disabled tests cover selection,
+  unavailability, option validation, and caller-output atomicity; and
+- the enabled install/export surface remains free of the private experiment
+  target and libjxl implementation details.
 
 The Milestone 0 results captured so far are provisional. They cover a small
 fixture, pinned-decoder conformance, and initial padded-1080p profiles, but not
 yet the complete independent-process, 4K, real-photograph, target-1.0/1.2
-matrix required by the milestone. Internal workflow selection, phase profiles,
-and the retained same-frame benchmark are still pending; production entry
-points therefore continue to use GJXL's native tail exclusively.
+matrix required by the milestone. The retained same-frame benchmark and final
+multi-process experiment are still pending; production entry points continue
+to use GJXL's native tail exclusively.
 
 ## Questions the experiment must answer
 
@@ -501,6 +514,15 @@ introduce a numerical tolerance until the semantic mismatch is understood.
 ### 4. Add internal backend selection and profiles
 
 **Estimate:** 1-2 days
+
+**Status (2026-09-01): implemented.** The selector lives in the private
+`gjxl_libjxl_tail_experiment` target rather than the installed codestream
+library. Production calls inject a native-only serializer; tests inject the
+explicit dispatcher at the same post-pipeline boundary. Profiled calls report
+the selected backend, complete-call elapsed time, adapter copy, context setup,
+and libjxl's internal non-overlapping phases. A reusable warm context is not
+yet implemented, so current libjxl measurements use the documented
+complete-call boundary and include runner construction and destruction.
 
 Deliverables:
 

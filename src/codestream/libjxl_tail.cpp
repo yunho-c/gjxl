@@ -6,6 +6,7 @@
 #include <jxl/memory_manager.h>
 #include <jxl/thread_parallel_runner.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,14 @@
 
 namespace gjxl::codestream_internal {
 namespace {
+
+using TailClock = std::chrono::steady_clock;
+
+uint64_t ElapsedNanoseconds(TailClock::time_point begin) {
+  return static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      TailClock::now() - begin).count());
+}
 
 struct BridgeFrameStorage {
   std::vector<uint8_t> strategies;
@@ -205,6 +214,110 @@ Status MapBridgeFailure(jxl::Status status) {
   return Status::Internal("Pinned libjxl VarDCT tail bridge failed");
 }
 
+Status EncodeVarDctCodestreamWithLibjxlImpl(
+  const VarDctEncoderFrame& frame,
+  LibjxlTailOptions options,
+  std::vector<uint8_t>* output,
+  LibjxlTailProfile* profile) {
+
+  if (output == nullptr) {
+    return Status::InvalidArgument("Libjxl tail output is null");
+  }
+  LibjxlTailProfile candidate_profile;
+  candidate_profile.worker_count = options.thread_count;
+  candidate_profile.calling_thread_participates = options.thread_count == 1;
+  const TailClock::time_point total_begin = TailClock::now();
+  std::vector<uint8_t> candidate_output;
+  {
+    const TailClock::time_point adapter_begin = TailClock::now();
+    const Status validation = ValidateRequest(frame, options);
+    if (!validation.ok()) {
+      return validation;
+    }
+    BridgeFrameStorage storage;
+    const Status adapter = BuildBridgeFrame(frame, &storage);
+    if (!adapter.ok()) {
+      return adapter;
+    }
+    candidate_profile.adapter_validation_and_copy_nanoseconds =
+      ElapsedNanoseconds(adapter_begin);
+
+    const TailClock::time_point context_begin = TailClock::now();
+    JxlMemoryManager memory_manager;
+    if (!jxl::MemoryManagerInit(&memory_manager, nullptr)) {
+      return Status::OutOfMemory(
+        "Could not initialize the libjxl tail memory manager");
+    }
+    ThreadRunnerHandle runner;
+    const Status runner_status =
+      runner.Create(memory_manager, options.thread_count);
+    if (!runner_status.ok()) {
+      return runner_status;
+    }
+    candidate_profile.context_setup_nanoseconds =
+      ElapsedNanoseconds(context_begin);
+
+    const jxl::PrecomputedVarDctEncodeOptions bridge_options{
+      .effort = options.effort,
+      .butteraugli_distance = options.butteraugli_distance,
+      .num_threads = options.thread_count,
+      .runner = runner.runner(),
+      .runner_opaque = runner.opaque(),
+    };
+    jxl::PaddedBytes bridge_output(&memory_manager);
+    jxl::PrecomputedVarDctEncodeProfile bridge_profile;
+    const jxl::Status bridge_status = jxl::EncodePrecomputedVarDctFrame(
+      &memory_manager, storage.frame, bridge_options, &bridge_output,
+      &bridge_profile);
+    if (!bridge_status) {
+      return MapBridgeFailure(bridge_status);
+    }
+    if (bridge_output.empty()) {
+      return Status::Internal(
+        "Pinned libjxl tail produced an empty codestream");
+    }
+    candidate_profile.libjxl_validation_nanoseconds =
+      bridge_profile.validation_nanoseconds;
+    candidate_profile.state_initialization_nanoseconds =
+      bridge_profile.state_initialization_nanoseconds;
+    candidate_profile.dc_metadata_nanoseconds =
+      bridge_profile.dc_metadata_nanoseconds;
+    candidate_profile.block_context_nanoseconds =
+      bridge_profile.block_context_nanoseconds;
+    candidate_profile.coefficient_order_nanoseconds =
+      bridge_profile.coefficient_order_nanoseconds;
+    candidate_profile.coefficient_tokenization_nanoseconds =
+      bridge_profile.coefficient_tokenization_nanoseconds;
+    candidate_profile.modular_model_nanoseconds =
+      bridge_profile.modular_model_nanoseconds;
+    candidate_profile.histogram_model_nanoseconds =
+      bridge_profile.histogram_model_nanoseconds;
+    candidate_profile.section_writing_nanoseconds =
+      bridge_profile.section_writing_nanoseconds;
+    candidate_profile.assembly_nanoseconds =
+      bridge_profile.assembly_nanoseconds;
+    candidate_profile.libjxl_internal_nanoseconds =
+      bridge_profile.total_nanoseconds;
+
+    const TailClock::time_point copy_begin = TailClock::now();
+    try {
+      candidate_output.assign(bridge_output.begin(), bridge_output.end());
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory("Could not copy the libjxl tail output");
+    } catch (const std::length_error&) {
+      return Status::OutOfMemory("Libjxl tail output is too large");
+    }
+    candidate_profile.output_copy_nanoseconds =
+      ElapsedNanoseconds(copy_begin);
+  }
+  candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
+  *output = std::move(candidate_output);
+  if (profile != nullptr) {
+    *profile = candidate_profile;
+  }
+  return Status::Ok();
+}
+
 }  // namespace
 
 bool LibjxlTailExperimentAvailable() noexcept {
@@ -261,56 +374,21 @@ Status EncodeVarDctCodestreamWithLibjxl(
   LibjxlTailOptions options,
   std::vector<uint8_t>* output) {
 
-  if (output == nullptr) {
-    return Status::InvalidArgument("Libjxl tail output is null");
-  }
-  const Status validation = ValidateRequest(frame, options);
-  if (!validation.ok()) {
-    return validation;
-  }
+  return EncodeVarDctCodestreamWithLibjxlImpl(
+    frame, options, output, nullptr);
+}
 
-  BridgeFrameStorage storage;
-  const Status adapter = BuildBridgeFrame(frame, &storage);
-  if (!adapter.ok()) {
-    return adapter;
-  }
-  JxlMemoryManager memory_manager;
-  if (!jxl::MemoryManagerInit(&memory_manager, nullptr)) {
-    return Status::OutOfMemory(
-      "Could not initialize the libjxl tail memory manager");
-  }
-  ThreadRunnerHandle runner;
-  const Status runner_status = runner.Create(memory_manager, options.thread_count);
-  if (!runner_status.ok()) {
-    return runner_status;
-  }
-  const jxl::PrecomputedVarDctEncodeOptions bridge_options{
-    .effort = options.effort,
-    .butteraugli_distance = options.butteraugli_distance,
-    .num_threads = options.thread_count,
-    .runner = runner.runner(),
-    .runner_opaque = runner.opaque(),
-  };
-  jxl::PaddedBytes bridge_output(&memory_manager);
-  const jxl::Status bridge_status = jxl::EncodePrecomputedVarDctFrame(
-    &memory_manager, storage.frame, bridge_options, &bridge_output);
-  if (!bridge_status) {
-    return MapBridgeFailure(bridge_status);
-  }
-  if (bridge_output.empty()) {
-    return Status::Internal("Pinned libjxl tail produced an empty codestream");
-  }
+Status EncodeVarDctCodestreamWithLibjxlProfiled(
+  const VarDctEncoderFrame& frame,
+  LibjxlTailOptions options,
+  std::vector<uint8_t>* output,
+  LibjxlTailProfile* profile) {
 
-  try {
-    std::vector<uint8_t> candidate(
-      bridge_output.begin(), bridge_output.end());
-    *output = std::move(candidate);
-  } catch (const std::bad_alloc&) {
-    return Status::OutOfMemory("Could not copy the libjxl tail output");
-  } catch (const std::length_error&) {
-    return Status::OutOfMemory("Libjxl tail output is too large");
+  if (profile == nullptr) {
+    return Status::InvalidArgument("Libjxl tail profile output is null");
   }
-  return Status::Ok();
+  return EncodeVarDctCodestreamWithLibjxlImpl(
+    frame, options, output, profile);
 }
 
 }  // namespace gjxl::codestream_internal

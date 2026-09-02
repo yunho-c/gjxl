@@ -52,4 +52,13 @@ Status EncodeVarDctCodestreamWithLibjxl(const VarDctEncoderFrame &frame,
       "GJXL was built without the libjxl tail experiment");
 }
 
+Status EncodeVarDctCodestreamWithLibjxlProfiled(
+    const VarDctEncoderFrame &frame, LibjxlTailOptions options,
+    std::vector<uint8_t> *output, LibjxlTailProfile *profile) {
+  if (profile == nullptr) {
+    return Status::InvalidArgument("Libjxl tail profile output is null");
+  }
+  return EncodeVarDctCodestreamWithLibjxl(frame, options, output);
+}
+
 } // namespace gjxl::codestream_internal

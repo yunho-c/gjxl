@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "codestream/encoder_internal.h"
+#include "codestream/encoder_backend_internal.h"
 #include "codestream/workflow.h"
 #include "gpu/backend.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
@@ -54,10 +55,19 @@ struct VarDctEncodingProfile {
   uint64_t summary_assembly_nanoseconds = 0;
   uint64_t total_nanoseconds = 0;
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;
+  VarDctCodestreamBackend codestream_backend =
+    VarDctCodestreamBackend::kGjxl;
   VarDctCodestreamProfile codestream;
+  LibjxlTailProfile libjxl_tail;
 
   bool operator==(const VarDctEncodingProfile&) const = default;
 };
+
+using VarDctCodestreamSerializer = Status (*)(
+  const VarDctEncoderFrame&,
+  VarDctCodestreamBackendOptions,
+  std::vector<uint8_t>*,
+  VarDctCodestreamBackendProfile*);
 
 [[nodiscard]] bool IsAutomaticMetalGeometryEligible(
   Extent2D padded_extent) noexcept;
@@ -106,5 +116,30 @@ EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(
   VarDctEncodingSummary* summary,
   VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuExecutionProfile* gpu_profile);
+
+/// Internal injection seam used by the non-installed tail experiment target.
+[[nodiscard]] Status EncodeLinearRgbVarDctCodestreamWithSerializerForTesting(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  VarDctCodestreamBackendOptions codestream_options,
+  VarDctCodestreamSerializer serializer,
+  GpuBackend* backend,
+  bool backend_is_qualified_for_automatic,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingProfile* profile);
+
+/// Configurable hybrid-workflow entry point implemented by the non-installed
+/// experiment target. Explicit libjxl selection never falls back.
+[[nodiscard]] Status
+EncodeLinearRgbVarDctCodestreamWithCodestreamBackendForTesting(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  VarDctCodestreamBackendOptions codestream_options,
+  GpuBackend* backend,
+  bool backend_is_qualified_for_automatic,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingProfile* profile);
 
 }  // namespace gjxl::codestream_internal

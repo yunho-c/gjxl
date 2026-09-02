@@ -1056,6 +1056,81 @@ bool CheckSingleAttemptTiming() {
   return true;
 }
 
+bool CheckConfigurableCodestreamBackend() {
+  ImageStorage image;
+  FillImage(&image);
+  gjxl::VarDctEncodingOptions encoding_options;
+  encoding_options.backend = gjxl::VarDctBackendPreference::kCpu;
+  const gjxl::codestream_internal::VarDctCodestreamBackendOptions
+    libjxl_options{
+      .backend =
+        gjxl::codestream_internal::VarDctCodestreamBackend::kLibjxl,
+      .libjxl_effort = 7,
+      .libjxl_thread_count = 1,
+    };
+  const std::vector<uint8_t> sentinel{3, 1, 4};
+  std::vector<uint8_t> output = sentinel;
+  gjxl::VarDctEncodingSummary summary{
+    .extent = {7, 5}, .encoded_bytes = 19, .score_history = {2.0}};
+  const gjxl::VarDctEncodingSummary summary_sentinel = summary;
+  gjxl::codestream_internal::VarDctEncodingProfile profile;
+  profile.total_nanoseconds = 0xA5A5A5A5A5A5A5A5u;
+  const gjxl::codestream_internal::VarDctEncodingProfile profile_sentinel =
+    profile;
+  const gjxl::Status status = gjxl::codestream_internal::
+    EncodeLinearRgbVarDctCodestreamWithCodestreamBackendForTesting(
+      image.View(), encoding_options, libjxl_options, nullptr, false, &output,
+      &summary, &profile);
+#if GJXL_TEST_LIBJXL_TAIL_ENABLED
+  if (!status.ok() || output.empty() || output == sentinel ||
+      summary.encoded_bytes != output.size() ||
+      profile.codestream_backend !=
+        gjxl::codestream_internal::VarDctCodestreamBackend::kLibjxl ||
+      profile.libjxl_tail.total_nanoseconds == 0 ||
+      profile.codestream.total_nanoseconds != 0) {
+    std::cerr << "Enabled hybrid workflow did not select the libjxl tail\n";
+    return false;
+  }
+#else
+  if (status.code() != gjxl::StatusCode::kUnavailable ||
+      output != sentinel || summary != summary_sentinel ||
+      profile != profile_sentinel) {
+    std::cerr << "Unavailable hybrid workflow changed caller-visible output\n";
+    return false;
+  }
+#endif
+
+  output = sentinel;
+  summary = summary_sentinel;
+  profile = profile_sentinel;
+  gjxl::VarDctEncodingOptions target_size = encoding_options;
+  target_size.rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes;
+  target_size.target_bytes = 200;
+  if (gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithCodestreamBackendForTesting(
+          image.View(), target_size, libjxl_options, nullptr, false, &output,
+          &summary, &profile).code() != gjxl::StatusCode::kInvalidArgument ||
+      output != sentinel || summary != summary_sentinel ||
+      profile != profile_sentinel) {
+    std::cerr << "Target-size libjxl-tail request was not rejected atomically\n";
+    return false;
+  }
+
+  auto invalid_options = libjxl_options;
+  invalid_options.libjxl_effort = 0;
+  if (gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithCodestreamBackendForTesting(
+          image.View(), encoding_options, invalid_options, nullptr, false,
+          &output, &summary, &profile).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      output != sentinel || summary != summary_sentinel ||
+      profile != profile_sentinel) {
+    std::cerr << "Invalid libjxl-tail options were not rejected atomically\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -1068,7 +1143,8 @@ int main() {
       !CheckInvalidRequestsAreAtomic() ||
       !CheckMaximumErrorControl() ||
       !CheckTargetSizeControl() ||
-      !CheckSingleAttemptTiming()) {
+      !CheckSingleAttemptTiming() ||
+      !CheckConfigurableCodestreamBackend()) {
     return EXIT_FAILURE;
   }
   std::cout << "All public codestream workflow tests passed.\n";
