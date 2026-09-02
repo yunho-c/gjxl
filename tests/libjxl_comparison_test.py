@@ -166,9 +166,7 @@ class CorpusTest(unittest.TestCase):
                 entries[0]["canonical_sha256"],
                 comparison.sha256_file(output / "canonical/fixture.pfm"),
             )
-            with self.assertRaisesRegex(
-                comparison.ComparisonError, "already exists"
-            ):
+            with self.assertRaisesRegex(comparison.ComparisonError, "already exists"):
                 comparison.prepare_corpus(args)
 
     def test_identity_pfm_requires_declared_linear_pixels(self) -> None:
@@ -261,13 +259,9 @@ class CorpusTest(unittest.TestCase):
 
     def test_transform_contract_rejects_implicit_or_invalid_geometry(self) -> None:
         with self.assertRaisesRegex(comparison.ComparisonError, "exactly"):
-            comparison.parse_source_transform(
-                {"crop": {"x": 0, "y": 0, "width": 4}}
-            )
+            comparison.parse_source_transform({"crop": {"x": 0, "y": 0, "width": 4}})
         with self.assertRaisesRegex(comparison.ComparisonError, "positive"):
-            comparison.parse_source_transform(
-                {"resize": {"width": 0, "height": 2}}
-            )
+            comparison.parse_source_transform({"resize": {"width": 0, "height": 2}})
 
     def test_input_filter_preserves_corpus_order_and_rejects_unknowns(self) -> None:
         entries = [{"name": "first"}, {"name": "second"}, {"name": "third"}]
@@ -418,18 +412,14 @@ class RawSummaryTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            gjxl_row = comparison.median_process_row(
-                "gjxl", "serial", entry, gjxl
-            )
+            gjxl_row = comparison.median_process_row("gjxl", "serial", entry, gjxl)
             libjxl_row = comparison.median_process_row(
                 "libjxl", "serial", entry, libjxl
             )
             self.assertEqual(gjxl_row["median_nanoseconds"], 4_000_000)
             self.assertEqual(gjxl_row["milliseconds_per_megapixel"], 800.0)
             self.assertEqual(gjxl_row["nanoseconds_per_pixel"], 800.0)
-            self.assertEqual(
-                gjxl_row["codestream_median_nanoseconds"], 1_500_000
-            )
+            self.assertEqual(gjxl_row["codestream_median_nanoseconds"], 1_500_000)
             self.assertEqual(libjxl_row["median_nanoseconds"], 3_000_000)
             self.assertIsNone(libjxl_row["codestream_median_nanoseconds"])
             self.assertEqual(gjxl_row["requested_distance"], 1.0)
@@ -444,6 +434,118 @@ class RawSummaryTest(unittest.TestCase):
                 aggregate["process_median_range_nanoseconds"],
                 [4_000_000, 6_000_000],
             )
+
+    def test_direct_stage_schema_validates_and_aggregates_wall_phases(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gjxl-stage-test-") as temporary:
+            root = Path(temporary)
+            revision = "f" * 40
+            phase = {
+                "coefficient_tokenization": 100,
+                "entropy_model_construction": 200,
+                "model_and_token_emission": 300,
+                "framing_and_assembly": 400,
+                "complete_serializer": 1000,
+            }
+            work = {
+                "coefficient_tokenization": 101,
+                "histogram_population": 102,
+                "histogram_clustering": 103,
+                "hybrid_uint_selection": 104,
+                "entropy_model_construction": 105,
+                "histogram_serialization": 106,
+                "token_encoding_and_bit_writing": 107,
+                "modular_and_dc_side_data_encoding": 108,
+                "output_assembly_and_copying": 109,
+            }
+            invocations = {
+                "phase": {name: 1 for name in phase},
+                "work": {name: 2 for name in work},
+            }
+            counts = {
+                "token_count": 1000,
+                "histogram_count": 10,
+                "model_bits": 200,
+                "token_bits": 600,
+                "output_bytes": 100,
+            }
+            samples = [
+                {
+                    "elapsed_nanoseconds": elapsed,
+                    "encoded_bytes": 100,
+                    "phase_nanoseconds": {
+                        name: value * scale for name, value in phase.items()
+                    },
+                    "work_nanoseconds": {
+                        name: value * scale for name, value in work.items()
+                    },
+                    "invocation_counts": invocations,
+                    "counts": counts,
+                }
+                for elapsed, scale in ((10_000, 1), (20_000, 2))
+            ]
+            raw = root / "profile.json"
+            raw.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "encoder": "libjxl",
+                        "revision": revision,
+                        "requested_distance": 1.0,
+                        "thread_count": 8,
+                        "stage_profile_enabled": True,
+                        "timing_semantics": {
+                            "elapsed_nanoseconds": "complete-encode-wall-time",
+                            "phase_nanoseconds": "wall-clock-barrier-time",
+                            "work_nanoseconds": "aggregate-worker-time",
+                        },
+                        "samples": samples,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            row = comparison.median_process_row(
+                "libjxl",
+                "production",
+                {"name": "fixture", "width": 10, "height": 10},
+                raw,
+                expected_libjxl_revision=revision,
+            )
+            self.assertEqual(
+                row["stage_profile"]["phase_median_nanoseconds"]["complete_serializer"],
+                1500,
+            )
+            self.assertEqual(
+                row["stage_profile"]["serializer_percent_of_complete_encode"],
+                10.0,
+            )
+            aggregate = comparison.aggregate_rows([row, row])[0]
+            self.assertEqual(
+                aggregate["stage_profile"][
+                    "phase_median_of_process_medians_nanoseconds"
+                ]["entropy_model_construction"],
+                300,
+            )
+
+            samples[0]["phase_nanoseconds"]["complete_serializer"] += 1
+            raw.write_text(
+                raw.read_text(encoding="utf-8").replace(
+                    '"complete_serializer": 1000',
+                    '"complete_serializer": 1001',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                comparison.ComparisonError, "phase union mismatch"
+            ):
+                comparison.median_process_row(
+                    "libjxl",
+                    "production",
+                    {"name": "fixture", "width": 10, "height": 10},
+                    raw,
+                    expected_libjxl_revision=revision,
+                )
 
 
 class QualityCalibrationTest(unittest.TestCase):
@@ -468,9 +570,7 @@ class QualityCalibrationTest(unittest.TestCase):
         self.assertEqual(len(calls), len(set(calls)))
 
     def test_distance_search_rejects_an_unbracketed_target(self) -> None:
-        with self.assertRaisesRegex(
-            comparison.ComparisonError, "did not converge"
-        ):
+        with self.assertRaisesRegex(comparison.ComparisonError, "did not converge"):
             comparison.calibrate_distance(
                 3.0,
                 lambda distance: {"butteraugli": distance},
@@ -484,9 +584,7 @@ class QualityCalibrationTest(unittest.TestCase):
     def test_distance_search_accepts_a_quantized_policy_transition(self) -> None:
         selected, _ = comparison.calibrate_distance(
             1.413,
-            lambda distance: {
-                "butteraugli": 1.401 if distance < 0.999 else 1.446
-            },
+            lambda distance: {"butteraugli": 1.401 if distance < 0.999 else 1.446},
             minimum_distance=0.1,
             maximum_distance=2.0,
             initial_distance=1.0,
@@ -499,9 +597,7 @@ class QualityCalibrationTest(unittest.TestCase):
     def test_distance_search_labels_a_boundary_limited_match(self) -> None:
         selected, _ = comparison.calibrate_distance(
             3.813,
-            lambda distance: {
-                "butteraugli": 3.89 if distance <= 0.05 else 3.95
-            },
+            lambda distance: {"butteraugli": 3.89 if distance <= 0.05 else 3.95},
             minimum_distance=0.05,
             maximum_distance=2.0,
             initial_distance=1.0,
@@ -510,17 +606,13 @@ class QualityCalibrationTest(unittest.TestCase):
             maximum_relative_error=0.025,
         )
         self.assertEqual(selected["distance"], 0.05)
-        self.assertEqual(
-            selected["match_kind"], "boundary-limited-relative-tolerance"
-        )
+        self.assertEqual(selected["match_kind"], "boundary-limited-relative-tolerance")
         self.assertLessEqual(selected["relative_error"], 0.025)
 
     def test_distance_search_finds_a_nonmonotonic_interior_bracket(self) -> None:
         selected, evaluations = comparison.calibrate_distance(
             1.95,
-            lambda distance: {
-                "butteraugli": 1.92 + (distance - 1.25) ** 2
-            },
+            lambda distance: {"butteraugli": 1.92 + (distance - 1.25) ** 2},
             minimum_distance=0.05,
             maximum_distance=2.0,
             initial_distance=1.0,
@@ -625,9 +717,7 @@ class QualityCalibrationTest(unittest.TestCase):
             document["inputs"][0]["achieved_butteraugli"] = 1.23
             document["inputs"][0]["absolute_error"] = 0.02
             document["inputs"][0]["relative_error"] = 0.016
-            document["inputs"][0]["match_kind"] = (
-                "boundary-limited-relative-tolerance"
-            )
+            document["inputs"][0]["match_kind"] = "boundary-limited-relative-tolerance"
             calibration.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(
                 comparison.ComparisonError, "relative match is inconsistent"

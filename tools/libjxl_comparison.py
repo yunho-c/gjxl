@@ -198,9 +198,7 @@ def parse_source_transform(entry: dict[str, Any]) -> dict[str, Any] | None:
     if "resize" in entry:
         resize = entry["resize"]
         if not isinstance(resize, dict) or set(resize) != {"width", "height"}:
-            raise ComparisonError(
-                "Corpus resize must contain exactly width and height"
-            )
+            raise ComparisonError("Corpus resize must contain exactly width and height")
         transform["resize"] = {
             "width": _manifest_dimension(resize["width"], "resize.width"),
             "height": _manifest_dimension(resize["height"], "resize.height"),
@@ -226,9 +224,7 @@ def validated_source_actions(source_manifest: Path) -> list[dict[str, Any]]:
             raise ComparisonError("Corpus input is missing string field path")
         path = Path(path_value)
         if path.is_absolute() or ".." in path.parts:
-            raise ComparisonError(
-                f"Corpus path must be relative and contained: {path}"
-            )
+            raise ComparisonError(f"Corpus path must be relative and contained: {path}")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise ComparisonError(f"Corpus source {path} has an invalid SHA-256")
         generator = entry.get("generator")
@@ -345,9 +341,7 @@ def convert_transformed_source_to_pfm(
     display_command = [magick_command, "INPUT", "-auto-orient"]
     crop = transform.get("crop")
     if crop is not None:
-        geometry = (
-            f"{crop['width']}x{crop['height']}+{crop['x']}+{crop['y']}"
-        )
+        geometry = f"{crop['width']}x{crop['height']}+{crop['x']}+{crop['y']}"
         command.extend(["-crop", geometry, "+repage"])
         display_command.extend(["-crop", geometry, "+repage"])
     command.extend(["-colorspace", "RGB"])
@@ -404,7 +398,9 @@ def prepare_corpus(args: argparse.Namespace) -> None:
                 raise ComparisonError("Each source-manifest input must be an object")
             for field in ("name", "path", "source", "license", "source_color"):
                 if not isinstance(entry.get(field), str) or not entry[field]:
-                    raise ComparisonError(f"Corpus input is missing string field {field}")
+                    raise ComparisonError(
+                        f"Corpus input is missing string field {field}"
+                    )
             name = safe_name(entry["name"])
             if name in names:
                 raise ComparisonError(f"Duplicate corpus input name: {name}")
@@ -418,9 +414,7 @@ def prepare_corpus(args: argparse.Namespace) -> None:
                 if not isinstance(expected_sha256, str) or not re.fullmatch(
                     r"[0-9a-f]{64}", expected_sha256
                 ):
-                    raise ComparisonError(
-                        f"Corpus input {name} has an invalid SHA-256"
-                    )
+                    raise ComparisonError(f"Corpus input {name} has an invalid SHA-256")
                 if source_sha256 != expected_sha256:
                     raise ComparisonError(
                         f"Corpus source SHA-256 differs for {name}: "
@@ -449,9 +443,7 @@ def prepare_corpus(args: argparse.Namespace) -> None:
                         [args.magick, "-version"]
                     ).stdout.splitlines()[0]
                 if source_transform is None:
-                    convert_to_pfm(
-                        args.magick, source, destination, args.background
-                    )
+                    convert_to_pfm(args.magick, source, destination, args.background)
                     conversion = (
                         f"{args.magick} INPUT -auto-orient -colorspace RGB "
                         f"-background {args.background} -alpha remove -alpha off "
@@ -502,7 +494,9 @@ def prepare_corpus(args: argparse.Namespace) -> None:
     print(output / "manifest.json")
 
 
-def configure_libjxl(source: Path, build: Path, generator: str) -> None:
+def configure_libjxl(
+    source: Path, build: Path, generator: str, *, stage_profile: bool
+) -> None:
     command = [
         "cmake",
         "-S",
@@ -517,6 +511,7 @@ def configure_libjxl(source: Path, build: Path, generator: str) -> None:
         "-DJPEGXL_ENABLE_TOOLS=ON",
         "-DJPEGXL_ENABLE_DEVTOOLS=ON",
         "-DJPEGXL_ENABLE_BENCHMARK=OFF",
+        f"-DJPEGXL_ENABLE_STAGE_PROFILER={'ON' if stage_profile else 'OFF'}",
         "-DJPEGXL_ENABLE_EXAMPLES=OFF",
         "-DJPEGXL_ENABLE_JNI=OFF",
         "-DJPEGXL_ENABLE_MANPAGES=OFF",
@@ -533,16 +528,34 @@ def configure_libjxl(source: Path, build: Path, generator: str) -> None:
 
 def build_libjxl(args: argparse.Namespace) -> None:
     repo = args.repo.resolve()
-    source = (repo / "third_party/libjxl").resolve()
+    stage_profile = bool(args.stage_profile)
+    source = (
+        args.libjxl_source.resolve()
+        if args.libjxl_source is not None
+        else (repo / "third_party/libjxl").resolve()
+    )
     actual_revision = git_output(source, "rev-parse", "HEAD")
-    if actual_revision != PINNED_LIBJXL_REVISION:
+    if git_output(source, "status", "--porcelain"):
+        raise ComparisonError(f"libjxl source worktree is dirty: {source}")
+    if stage_profile:
+        base_revision = git_output(
+            source, "merge-base", actual_revision, PINNED_LIBJXL_REVISION
+        )
+        if base_revision != PINNED_LIBJXL_REVISION or (
+            actual_revision == PINNED_LIBJXL_REVISION
+        ):
+            raise ComparisonError(
+                "Profiled libjxl must be an instrumented descendant of "
+                f"{PINNED_LIBJXL_REVISION}"
+            )
+    elif actual_revision != PINNED_LIBJXL_REVISION:
         raise ComparisonError(
             f"Pinned libjxl is {actual_revision}, expected {PINNED_LIBJXL_REVISION}"
         )
     root = args.build_root.resolve()
     libjxl_build = root / "libjxl"
     harness_build = root / "harness"
-    configure_libjxl(source, libjxl_build, args.generator)
+    configure_libjxl(source, libjxl_build, args.generator, stage_profile=stage_profile)
     run_capture(
         [
             "cmake",
@@ -571,7 +584,8 @@ def build_libjxl(args: argparse.Namespace) -> None:
             "-DCMAKE_BUILD_TYPE=Release",
             f"-DGJXL_LIBJXL_SOURCE={source}",
             f"-DGJXL_LIBJXL_BUILD={libjxl_build}",
-            f"-DGJXL_LIBJXL_REVISION={PINNED_LIBJXL_REVISION}",
+            f"-DGJXL_LIBJXL_REVISION={actual_revision}",
+            f"-DGJXL_LIBJXL_STAGE_PROFILE={'ON' if stage_profile else 'OFF'}",
         ]
     )
     run_capture(
@@ -612,11 +626,26 @@ def build_libjxl(args: argparse.Namespace) -> None:
             "CMAKE_SYSTEM_PROCESSOR",
         }:
             cache[key] = value
+    instrumentation_diff = run_capture(
+        [
+            "git",
+            "-C",
+            str(source),
+            "diff",
+            "--binary",
+            f"{PINNED_LIBJXL_REVISION}..{actual_revision}",
+        ]
+    ).stdout.encode("utf-8")
     write_json_atomic(
         root / "build-manifest.json",
         {
-            "schema_version": 1,
+            "schema_version": 2 if stage_profile else 1,
+            "stage_profile_enabled": stage_profile,
+            "libjxl_base_revision": PINNED_LIBJXL_REVISION,
             "libjxl_revision": actual_revision,
+            "instrumentation_diff_sha256": hashlib.sha256(
+                instrumentation_diff
+            ).hexdigest(),
             "source": str(source),
             "build": str(libjxl_build),
             "harness_build": str(harness_build),
@@ -628,6 +657,291 @@ def build_libjxl(args: argparse.Namespace) -> None:
         },
     )
     print(binaries["benchmark"])
+
+
+def validate_libjxl_profile(args: argparse.Namespace) -> None:
+    corpus_manifest = args.corpus_manifest.resolve()
+    entries = validate_corpus(corpus_manifest)
+    profile_build_manifest_path = args.profile_build_manifest.resolve()
+    unprofiled_build_manifest_path = args.unprofiled_build_manifest.resolve()
+    profile_build = load_json(profile_build_manifest_path)
+    unprofiled_build = load_json(unprofiled_build_manifest_path)
+    if (
+        profile_build.get("schema_version") != 2
+        or profile_build.get("stage_profile_enabled") is not True
+        or profile_build.get("libjxl_base_revision") != PINNED_LIBJXL_REVISION
+    ):
+        raise ComparisonError("Invalid profiled libjxl build manifest")
+    if (
+        unprofiled_build.get("schema_version") != 1
+        or unprofiled_build.get("libjxl_revision") != PINNED_LIBJXL_REVISION
+    ):
+        raise ComparisonError("Invalid unprofiled libjxl build manifest")
+
+    binaries = {
+        "unprofiled_benchmark": args.unprofiled_benchmark.resolve(),
+        "profiled_benchmark": args.profiled_benchmark.resolve(),
+        "djxl": args.djxl.resolve(),
+    }
+    for name, path in binaries.items():
+        if not path.is_file():
+            raise ComparisonError(f"Required {name} file does not exist: {path}")
+    expected_hashes = {
+        "unprofiled_benchmark": unprofiled_build["binaries"]["benchmark"]["sha256"],
+        "profiled_benchmark": profile_build["binaries"]["benchmark"]["sha256"],
+        "djxl": profile_build["binaries"]["djxl"]["sha256"],
+    }
+    for name, expected in expected_hashes.items():
+        if sha256_file(binaries[name]) != expected:
+            raise ComparisonError(f"{name} does not match its build manifest")
+
+    profile_revision = profile_build.get("libjxl_revision")
+    if not isinstance(profile_revision, str):
+        raise ComparisonError("Profiled libjxl build has no revision")
+    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+    directory = (args.output_root / f"{timestamp}-{profile_revision[:12]}").resolve()
+    directory.mkdir(parents=True, exist_ok=False)
+    raw_dir = directory / "raw"
+    streams_dir = directory / "codestreams"
+    decoded_dir = directory / "decoded"
+    raw_dir.mkdir()
+    streams_dir.mkdir()
+    decoded_dir.mkdir()
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "libjxl-stage-profile-validation",
+        "created_utc": timestamp,
+        "corpus_manifest": str(corpus_manifest),
+        "corpus_manifest_sha256": sha256_file(corpus_manifest),
+        "libjxl_base_revision": PINNED_LIBJXL_REVISION,
+        "libjxl_profile_revision": profile_revision,
+        "profile_build_manifest": {
+            "path": str(profile_build_manifest_path),
+            "sha256": sha256_file(profile_build_manifest_path),
+        },
+        "unprofiled_build_manifest": {
+            "path": str(unprofiled_build_manifest_path),
+            "sha256": sha256_file(unprofiled_build_manifest_path),
+        },
+        "parameters": {
+            "distance": args.distance,
+            "effort": args.effort,
+            "thread_count": args.num_threads,
+            "profile_samples": args.samples,
+            "perturbation_pairs": args.perturbation_pairs,
+            "perturbation_warmups": args.perturbation_warmups,
+            "perturbation_samples": args.perturbation_samples,
+            "perturbation_inputs": args.perturbation_inputs,
+        },
+        "binaries": {
+            name: {"path": str(path), "sha256": sha256_file(path)}
+            for name, path in binaries.items()
+        },
+        "host": host_manifest(),
+        "argv": sys.argv,
+        "processes": [],
+        "identity_results": [],
+        "perturbation_results": [],
+    }
+    write_json_atomic(directory / "manifest.json", manifest)
+
+    def command(
+        benchmark: Path,
+        image: Path,
+        raw: Path,
+        output: Path | None,
+        *,
+        stage_profile: bool,
+        warmups: int,
+        samples: int,
+    ) -> list[str]:
+        result = [
+            str(benchmark),
+            "--input",
+            str(image),
+            "--raw-samples",
+            str(raw),
+            "--distance",
+            str(args.distance),
+            "--effort",
+            str(args.effort),
+            "--num-threads",
+            str(args.num_threads),
+            "--warmups",
+            str(warmups),
+            "--samples",
+            str(samples),
+        ]
+        if output is not None:
+            result.extend(("--output", str(output)))
+        if stage_profile:
+            result.append("--stage-profile")
+        return result
+
+    variants = (
+        (
+            "unprofiled",
+            binaries["unprofiled_benchmark"],
+            False,
+            PINNED_LIBJXL_REVISION,
+        ),
+        ("profiled_off", binaries["profiled_benchmark"], False, profile_revision),
+        ("profiled_on", binaries["profiled_benchmark"], True, profile_revision),
+    )
+    for entry in entries:
+        image = Path(entry["resolved_path"])
+        slug = safe_name(entry["name"])
+        outputs: dict[str, Path] = {}
+        rows = {}
+        for name, benchmark, stage_profile, revision in variants:
+            raw = raw_dir / f"{slug}-{name}.json"
+            output = streams_dir / f"{slug}-{name}.jxl"
+            record_process(
+                command(
+                    benchmark,
+                    image,
+                    raw,
+                    output,
+                    stage_profile=stage_profile,
+                    warmups=0,
+                    samples=args.samples,
+                ),
+                f"identity-{slug}-{name}",
+                directory,
+                manifest,
+            )
+            outputs[name] = output
+            rows[name] = median_process_row(
+                "libjxl",
+                "validation",
+                entry,
+                raw,
+                expected_libjxl_revision=revision,
+            )
+            if stage_profile and "stage_profile" not in rows[name]:
+                raise ComparisonError(f"Profile schema missing for {entry['name']}")
+        payloads = {name: path.read_bytes() for name, path in outputs.items()}
+        if len(set(payloads.values())) != 1:
+            raise ComparisonError(
+                f"Profiled and unprofiled codestreams differ for {entry['name']}"
+            )
+        decoded = decoded_dir / f"{slug}.pfm"
+        record_process(
+            [str(binaries["djxl"]), str(outputs["profiled_on"]), str(decoded)],
+            f"decode-{slug}",
+            directory,
+            manifest,
+        )
+        if inspect_pfm(decoded) != (entry["width"], entry["height"]):
+            raise ComparisonError(f"Decoded dimensions changed for {entry['name']}")
+        result = {
+            "input": entry["name"],
+            "category": entry.get("category", "unspecified"),
+            "canonical_sha256": entry["canonical_sha256"],
+            "encoded_bytes": len(payloads["profiled_on"]),
+            "codestream_sha256": sha256_file(outputs["profiled_on"]),
+            "decoded_sha256": sha256_file(decoded),
+            "byte_identical": True,
+            "profile_row": rows["profiled_on"],
+        }
+        manifest["identity_results"].append(result)
+        write_json_atomic(directory / "manifest.json", manifest)
+
+    perturbation_entries = select_corpus_entries(entries, args.perturbation_inputs)
+    if args.perturbation_inputs is None:
+        perturbation_entries = []
+    perturbation_rows = []
+    for entry in perturbation_entries:
+        image = Path(entry["resolved_path"])
+        slug = safe_name(entry["name"])
+        for pair in range(args.perturbation_pairs):
+            order = (
+                ("unprofiled", "profiled_on")
+                if pair % 2 == 0
+                else ("profiled_on", "unprofiled")
+            )
+            for name in order:
+                if name == "unprofiled":
+                    benchmark = binaries["unprofiled_benchmark"]
+                    stage_profile = False
+                    revision = PINNED_LIBJXL_REVISION
+                else:
+                    benchmark = binaries["profiled_benchmark"]
+                    stage_profile = True
+                    revision = profile_revision
+                raw = raw_dir / f"perturb-{slug}-pair{pair}-{name}.json"
+                record_process(
+                    command(
+                        benchmark,
+                        image,
+                        raw,
+                        None,
+                        stage_profile=stage_profile,
+                        warmups=args.perturbation_warmups,
+                        samples=args.perturbation_samples,
+                    ),
+                    f"perturb-{slug}-pair{pair}-{name}",
+                    directory,
+                    manifest,
+                )
+                perturbation_rows.append(
+                    median_process_row(
+                        "libjxl",
+                        "perturbation",
+                        entry,
+                        raw,
+                        expected_libjxl_revision=revision,
+                    )
+                    | {"variant": name, "pair": pair}
+                )
+
+    for entry in perturbation_entries:
+        input_rows = [row for row in perturbation_rows if row["input"] == entry["name"]]
+        unprofiled = [
+            row["median_nanoseconds"]
+            for row in input_rows
+            if row["variant"] == "unprofiled"
+        ]
+        profiled = [
+            row["median_nanoseconds"]
+            for row in input_rows
+            if row["variant"] == "profiled_on"
+        ]
+        profile_median = statistics.median(profiled)
+        unprofiled_median = statistics.median(unprofiled)
+        manifest["perturbation_results"].append(
+            {
+                "input": entry["name"],
+                "category": entry.get("category", "unspecified"),
+                "unprofiled_median_of_process_medians_nanoseconds": unprofiled_median,
+                "profiled_median_of_process_medians_nanoseconds": profile_median,
+                "profiled_over_unprofiled_ratio": profile_median / unprofiled_median,
+                "profiled_overhead_percent": 100.0
+                * (profile_median / unprofiled_median - 1.0),
+                "unprofiled_process_median_range_nanoseconds": [
+                    min(unprofiled),
+                    max(unprofiled),
+                ],
+                "profiled_process_median_range_nanoseconds": [
+                    min(profiled),
+                    max(profiled),
+                ],
+            }
+        )
+    summary = {
+        "schema_version": 1,
+        "kind": "libjxl-stage-profile-validation-summary",
+        "identity_input_count": len(manifest["identity_results"]),
+        "all_codestreams_byte_identical": all(
+            result["byte_identical"] for result in manifest["identity_results"]
+        ),
+        "identity_results": manifest["identity_results"],
+        "perturbation_results": manifest["perturbation_results"],
+    }
+    write_json_atomic(directory / "summary.json", summary)
+    manifest["host_end"] = host_manifest()
+    write_json_atomic(directory / "manifest.json", manifest)
+    print(directory)
 
 
 def validate_corpus(manifest_path: Path) -> list[dict[str, Any]]:
@@ -796,6 +1110,8 @@ def libjxl_command(
     ]
     if output is not None:
         command.extend(("--output", str(output)))
+    if getattr(args, "libjxl_stage_profile", False):
+        command.append("--stage-profile")
     return command
 
 
@@ -804,8 +1120,10 @@ def median_process_row(
     configuration: str,
     entry: dict[str, Any],
     raw_path: Path,
+    expected_libjxl_revision: str = PINNED_LIBJXL_REVISION,
 ) -> dict[str, Any]:
     document = load_json(raw_path)
+    stage_profile = None
     if encoder == "gjxl":
         if document.get("schema_version") != 10:
             raise ComparisonError(f"Unexpected GJXL raw schema: {raw_path}")
@@ -817,16 +1135,93 @@ def median_process_row(
         ]
         elapsed = [sample["phase_nanoseconds"]["total"] for sample in samples]
         codestream = [
-            sample["phase_nanoseconds"]["codestream_encoding"]
-            for sample in samples
+            sample["phase_nanoseconds"]["codestream_encoding"] for sample in samples
         ]
         encoded = [sample["encoded_bytes"] for sample in samples]
         requested_distance = document["distance"]
         policy = {"serializer_workers": document["serializer_workers"]}
+        gjxl_phase_fields = {
+            "entropy_model_construction": "codestream_entropy_optimization",
+            "model_and_token_emission": "codestream_section_writing",
+            "framing_and_assembly": "codestream_assembly",
+            "complete_serializer": "codestream_encoding",
+        }
+        if all(
+            "codestream_dc_tokenization" in sample["phase_nanoseconds"]
+            and "codestream_ac_tokenization" in sample["phase_nanoseconds"]
+            and all(
+                native in sample["phase_nanoseconds"]
+                for native in gjxl_phase_fields.values()
+            )
+            for sample in samples
+        ):
+            phase_values = []
+            for sample in samples:
+                native = sample["phase_nanoseconds"]
+                phase_values.append(
+                    {
+                        "coefficient_tokenization": (
+                            native["codestream_dc_tokenization"]
+                            + native["codestream_ac_tokenization"]
+                        ),
+                        **{
+                            neutral: native[field]
+                            for neutral, field in gjxl_phase_fields.items()
+                        },
+                    }
+                )
+            work_names = sorted(
+                {
+                    name
+                    for sample in samples
+                    for name in sample["phase_nanoseconds"]
+                    if name.startswith("codestream_") and name.endswith("_work")
+                }
+            )
+            stage_profile = {
+                "timing_semantics": {
+                    "phase_nanoseconds": "wall-clock-phase-time",
+                    "work_nanoseconds": "aggregate-worker-time",
+                    "complete_serializer": (
+                        "native codestream_encoding; component phases are not "
+                        "asserted to be an exhaustive union"
+                    ),
+                },
+                "phase_median_nanoseconds": {
+                    name: statistics.median(values[name] for values in phase_values)
+                    for name in phase_values[0]
+                },
+                "phase_range_nanoseconds": {
+                    name: [
+                        min(values[name] for values in phase_values),
+                        max(values[name] for values in phase_values),
+                    ]
+                    for name in phase_values[0]
+                },
+                "work_median_nanoseconds": {
+                    name: statistics.median(
+                        sample["phase_nanoseconds"][name] for sample in samples
+                    )
+                    for name in work_names
+                },
+                "counts": {},
+                "invocation_counts": {},
+                "native_phase_fields": {
+                    "coefficient_tokenization": [
+                        "codestream_dc_tokenization",
+                        "codestream_ac_tokenization",
+                    ],
+                    **{
+                        neutral: [native]
+                        for neutral, native in gjxl_phase_fields.items()
+                    },
+                },
+            }
     else:
-        if document.get("schema_version") != 1 or document.get("encoder") != "libjxl":
+        schema_version = document.get("schema_version")
+        if schema_version not in {1, 2} or document.get("encoder") != "libjxl":
             raise ComparisonError(f"Unexpected libjxl raw schema: {raw_path}")
-        if document.get("revision") != PINNED_LIBJXL_REVISION:
+        if document.get("revision") != expected_libjxl_revision:
             raise ComparisonError(f"libjxl benchmark revision mismatch: {raw_path}")
         samples = document["samples"]
         elapsed = [sample["elapsed_nanoseconds"] for sample in samples]
@@ -834,17 +1229,104 @@ def median_process_row(
         encoded = [sample["encoded_bytes"] for sample in samples]
         requested_distance = document["requested_distance"]
         policy = {"thread_count": document["thread_count"]}
+        if schema_version == 2:
+            if document.get("stage_profile_enabled") is not True:
+                raise ComparisonError(f"Disabled libjxl stage schema: {raw_path}")
+            semantics = document.get("timing_semantics", {})
+            if semantics.get("phase_nanoseconds") != "wall-clock-barrier-time":
+                raise ComparisonError(f"Invalid libjxl phase semantics: {raw_path}")
+            if semantics.get("work_nanoseconds") != "aggregate-worker-time":
+                raise ComparisonError(f"Invalid libjxl work semantics: {raw_path}")
+            phase_names = (
+                "coefficient_tokenization",
+                "entropy_model_construction",
+                "model_and_token_emission",
+                "framing_and_assembly",
+                "complete_serializer",
+            )
+            work_names = (
+                "coefficient_tokenization",
+                "histogram_population",
+                "histogram_clustering",
+                "hybrid_uint_selection",
+                "entropy_model_construction",
+                "histogram_serialization",
+                "token_encoding_and_bit_writing",
+                "modular_and_dc_side_data_encoding",
+                "output_assembly_and_copying",
+            )
+            count_names = (
+                "token_count",
+                "histogram_count",
+                "model_bits",
+                "token_bits",
+                "output_bytes",
+            )
+            expected_counts = None
+            expected_invocations = None
+            for sample in samples:
+                phases = sample.get("phase_nanoseconds", {})
+                work = sample.get("work_nanoseconds", {})
+                counts = sample.get("counts", {})
+                invocations = sample.get("invocation_counts", {})
+                if set(phases) != set(phase_names) or set(work) != set(work_names):
+                    raise ComparisonError(
+                        f"Incomplete libjxl stage profile: {raw_path}"
+                    )
+                if set(counts) != set(count_names):
+                    raise ComparisonError(f"Incomplete libjxl stage counts: {raw_path}")
+                if (
+                    sum(phases[name] for name in phase_names[:-1])
+                    != phases["complete_serializer"]
+                ):
+                    raise ComparisonError(
+                        f"libjxl serializer phase union mismatch: {raw_path}"
+                    )
+                if counts["output_bytes"] != sample["encoded_bytes"]:
+                    raise ComparisonError(
+                        f"libjxl stage output byte mismatch: {raw_path}"
+                    )
+                if expected_counts is None:
+                    expected_counts = counts
+                    expected_invocations = invocations
+                elif counts != expected_counts or invocations != expected_invocations:
+                    raise ComparisonError(f"Unstable libjxl stage counts: {raw_path}")
+            stage_profile = {
+                "timing_semantics": semantics,
+                "phase_median_nanoseconds": {
+                    name: statistics.median(
+                        sample["phase_nanoseconds"][name] for sample in samples
+                    )
+                    for name in phase_names
+                },
+                "phase_range_nanoseconds": {
+                    name: [
+                        min(sample["phase_nanoseconds"][name] for sample in samples),
+                        max(sample["phase_nanoseconds"][name] for sample in samples),
+                    ]
+                    for name in phase_names
+                },
+                "work_median_nanoseconds": {
+                    name: statistics.median(
+                        sample["work_nanoseconds"][name] for sample in samples
+                    )
+                    for name in work_names
+                },
+                "counts": expected_counts,
+                "invocation_counts": expected_invocations,
+            }
     if not elapsed or len(set(encoded)) != 1:
         raise ComparisonError(f"Invalid or unstable raw samples: {raw_path}")
     pixels = entry["width"] * entry["height"]
     elapsed_median = statistics.median(elapsed)
-    return {
+    row = {
         "encoder": encoder,
         "configuration": configuration,
         "input": entry["name"],
         "category": entry.get("category", "unspecified"),
         "raw_path": str(raw_path),
         "sample_count": len(elapsed),
+        "source_pixels": pixels,
         "median_nanoseconds": elapsed_median,
         "minimum_nanoseconds": min(elapsed),
         "maximum_nanoseconds": max(elapsed),
@@ -866,6 +1348,14 @@ def median_process_row(
             elapsed_median / 1_000_000.0 / (encoded[0] / 1_000_000.0)
         ),
     }
+    if stage_profile is not None:
+        serializer_ns = stage_profile["phase_median_nanoseconds"]["complete_serializer"]
+        stage_profile["serializer_percent_of_complete_encode"] = (
+            100.0 * serializer_ns / elapsed_median
+        )
+        stage_profile["serializer_nanoseconds_per_pixel"] = serializer_ns / pixels
+        row["stage_profile"] = stage_profile
+    return row
 
 
 def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -892,41 +1382,150 @@ def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for row in group
             if row["codestream_median_nanoseconds"] is not None
         ]
-        result.append(
-            {
-                "input": input_name,
-                "category": group[0]["category"],
-                "configuration": configuration,
-                "encoder": encoder,
-                "process_count": len(group),
-                "median_of_process_medians_nanoseconds": statistics.median(medians),
-                "process_median_range_nanoseconds": [min(medians), max(medians)],
-                "encoded_bytes": group[0]["encoded_bytes"],
-                "requested_distance": requested_distances.pop(),
-                "bits_per_pixel": group[0]["bits_per_pixel"],
-                "median_milliseconds_per_megapixel": statistics.median(
-                    row["milliseconds_per_megapixel"] for row in group
-                ),
-                "median_milliseconds_per_encoded_megabyte": statistics.median(
-                    row["milliseconds_per_encoded_megabyte"] for row in group
-                ),
-                "codestream_median_of_process_medians_nanoseconds": (
-                    statistics.median(codestream_medians)
-                    if codestream_medians
-                    else None
-                ),
-                "codestream_median_nanoseconds_per_pixel": (
-                    statistics.median(
-                        row["codestream_nanoseconds_per_pixel"]
-                        for row in group
-                        if row["codestream_nanoseconds_per_pixel"] is not None
-                    )
-                    if codestream_medians
-                    else None
-                ),
+        stage_profiles = [
+            row.get("stage_profile")
+            for row in group
+            if row.get("stage_profile") is not None
+        ]
+        if stage_profiles and len(stage_profiles) != len(group):
+            raise ComparisonError(
+                f"Mixed profiled and unprofiled rows for {input_name} {encoder}"
+            )
+        aggregate = {
+            "input": input_name,
+            "category": group[0]["category"],
+            "configuration": configuration,
+            "encoder": encoder,
+            "process_count": len(group),
+            "source_pixels": group[0]["source_pixels"],
+            "median_of_process_medians_nanoseconds": statistics.median(medians),
+            "process_median_range_nanoseconds": [min(medians), max(medians)],
+            "encoded_bytes": group[0]["encoded_bytes"],
+            "requested_distance": requested_distances.pop(),
+            "bits_per_pixel": group[0]["bits_per_pixel"],
+            "median_milliseconds_per_megapixel": statistics.median(
+                row["milliseconds_per_megapixel"] for row in group
+            ),
+            "median_milliseconds_per_encoded_megabyte": statistics.median(
+                row["milliseconds_per_encoded_megabyte"] for row in group
+            ),
+            "codestream_median_of_process_medians_nanoseconds": (
+                statistics.median(codestream_medians) if codestream_medians else None
+            ),
+            "codestream_median_nanoseconds_per_pixel": (
+                statistics.median(
+                    row["codestream_nanoseconds_per_pixel"]
+                    for row in group
+                    if row["codestream_nanoseconds_per_pixel"] is not None
+                )
+                if codestream_medians
+                else None
+            ),
+        }
+        if stage_profiles:
+            phase_names = stage_profiles[0]["phase_median_nanoseconds"]
+            work_names = stage_profiles[0]["work_median_nanoseconds"]
+            counts = {
+                json.dumps(profile["counts"], sort_keys=True)
+                for profile in stage_profiles
             }
-        )
+            invocations = {
+                json.dumps(profile["invocation_counts"], sort_keys=True)
+                for profile in stage_profiles
+            }
+            if len(counts) != 1 or len(invocations) != 1:
+                raise ComparisonError(
+                    f"Stage counts changed across processes for {input_name} {encoder}"
+                )
+            aggregate["stage_profile"] = {
+                "timing_semantics": stage_profiles[0]["timing_semantics"],
+                "phase_median_of_process_medians_nanoseconds": {
+                    name: statistics.median(
+                        profile["phase_median_nanoseconds"][name]
+                        for profile in stage_profiles
+                    )
+                    for name in phase_names
+                },
+                "phase_process_median_range_nanoseconds": {
+                    name: [
+                        min(
+                            profile["phase_median_nanoseconds"][name]
+                            for profile in stage_profiles
+                        ),
+                        max(
+                            profile["phase_median_nanoseconds"][name]
+                            for profile in stage_profiles
+                        ),
+                    ]
+                    for name in phase_names
+                },
+                "work_median_of_process_medians_nanoseconds": {
+                    name: statistics.median(
+                        profile["work_median_nanoseconds"][name]
+                        for profile in stage_profiles
+                    )
+                    for name in work_names
+                },
+                "counts": stage_profiles[0]["counts"],
+                "invocation_counts": stage_profiles[0]["invocation_counts"],
+            }
+        result.append(aggregate)
     return result
+
+
+def direct_stage_comparison_rows(
+    aggregates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_group = {
+        (row["input"], row["configuration"], row["encoder"]): row for row in aggregates
+    }
+    stages = (
+        "coefficient_tokenization",
+        "entropy_model_construction",
+        "model_and_token_emission",
+        "framing_and_assembly",
+        "complete_serializer",
+    )
+    results = []
+    groups = sorted({(row["input"], row["configuration"]) for row in aggregates})
+    for input_name, configuration in groups:
+        gjxl = by_group.get((input_name, configuration, "gjxl"))
+        libjxl = by_group.get((input_name, configuration, "libjxl"))
+        if gjxl is None or libjxl is None:
+            continue
+        gjxl_profile = gjxl.get("stage_profile")
+        libjxl_profile = libjxl.get("stage_profile")
+        if gjxl_profile is None or libjxl_profile is None:
+            continue
+        gjxl_phases = gjxl_profile["phase_median_of_process_medians_nanoseconds"]
+        libjxl_phases = libjxl_profile["phase_median_of_process_medians_nanoseconds"]
+        pixels = gjxl["source_pixels"]
+        for stage in stages:
+            gjxl_ns = gjxl_phases[stage]
+            libjxl_ns = libjxl_phases[stage]
+            results.append(
+                {
+                    "input": input_name,
+                    "category": gjxl["category"],
+                    "configuration": configuration,
+                    "stage": stage,
+                    "timing_semantics": "wall-clock-phase-time",
+                    "gjxl_nanoseconds": gjxl_ns,
+                    "libjxl_nanoseconds": libjxl_ns,
+                    "gjxl_over_libjxl_ratio": gjxl_ns / libjxl_ns,
+                    "gjxl_milliseconds_per_megapixel": gjxl_ns / pixels,
+                    "libjxl_milliseconds_per_megapixel": libjxl_ns / pixels,
+                    "gjxl_percent_of_complete_encode": (
+                        100.0 * gjxl_ns / gjxl["median_of_process_medians_nanoseconds"]
+                    ),
+                    "libjxl_percent_of_complete_encode": (
+                        100.0
+                        * libjxl_ns
+                        / libjxl["median_of_process_medians_nanoseconds"]
+                    ),
+                }
+            )
+    return results
 
 
 def encoder_order(pair_index: int) -> tuple[str, str]:
@@ -1098,9 +1697,7 @@ def calibrate_distance(
 
     def select(result: dict[str, Any], match_kind: str) -> dict[str, Any]:
         result["relative_error"] = (
-            result["absolute_error"] / target_score
-            if target_score > 0.0
-            else math.inf
+            result["absolute_error"] / target_score if target_score > 0.0 else math.inf
         )
         result["match_kind"] = match_kind
         return result
@@ -1150,8 +1747,7 @@ def calibrate_distance(
     bracket = find_bracket()
     if bracket is None:
         coarse_candidates = [
-            minimum_distance
-            + index * (maximum_distance - minimum_distance) / 8.0
+            minimum_distance + index * (maximum_distance - minimum_distance) / 8.0
             for index in range(9)
         ]
         coarse_candidates.sort(key=lambda distance: abs(distance - initial_distance))
@@ -1313,10 +1909,7 @@ def load_quality_calibration(
             raise ComparisonError(
                 f"Quality calibration match kind is invalid for {name}"
             )
-        if (
-            match_kind == "within-absolute-tolerance"
-            and error > tolerance
-        ):
+        if match_kind == "within-absolute-tolerance" and error > tolerance:
             raise ComparisonError(
                 f"Quality calibration absolute match is inconsistent for {name}"
             )
@@ -1383,9 +1976,7 @@ def calibrate_quality(args: argparse.Namespace) -> None:
         )
 
     timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-    directory = (
-        args.output_root / f"{timestamp}-{gjxl_revision[:12]}"
-    ).resolve()
+    directory = (args.output_root / f"{timestamp}-{gjxl_revision[:12]}").resolve()
     directory.mkdir(parents=True, exist_ok=False)
     raw_dir = directory / "raw"
     candidates_dir = directory / "candidates"
@@ -1442,8 +2033,7 @@ def calibrate_quality(args: argparse.Namespace) -> None:
 
         def evaluate(distance: float) -> dict[str, Any]:
             candidate_index = sum(
-                item["input"] == entry["name"]
-                for item in manifest["evaluations"]
+                item["input"] == entry["name"] for item in manifest["evaluations"]
             )
             candidate_name = f"candidate{candidate_index:02d}"
             raw = raw_dir / f"{slug}-{candidate_name}-libjxl.json"
@@ -1624,12 +2214,41 @@ def run_comparison(args: argparse.Namespace) -> None:
     entries = select_corpus_entries(entries, args.inputs)
 
     gjxl_revision = git_output(repo, "rev-parse", "HEAD")
-    libjxl_source = repo / "third_party/libjxl"
-    libjxl_revision = git_output(libjxl_source, "rev-parse", "HEAD")
-    if libjxl_revision != PINNED_LIBJXL_REVISION:
-        raise ComparisonError(
-            f"libjxl revision is {libjxl_revision}, expected {PINNED_LIBJXL_REVISION}"
+    libjxl_build_manifest = None
+    if args.libjxl_stage_profile:
+        if args.libjxl_build_manifest is None:
+            raise ComparisonError(
+                "--libjxl-build-manifest is required with --libjxl-stage-profile"
+            )
+        build_manifest_path = args.libjxl_build_manifest.resolve()
+        libjxl_build_manifest = load_json(build_manifest_path)
+        if (
+            libjxl_build_manifest.get("schema_version") != 2
+            or libjxl_build_manifest.get("stage_profile_enabled") is not True
+            or libjxl_build_manifest.get("libjxl_base_revision")
+            != PINNED_LIBJXL_REVISION
+        ):
+            raise ComparisonError(
+                f"Invalid profiled libjxl build manifest: {build_manifest_path}"
+            )
+        benchmark_record = libjxl_build_manifest.get("binaries", {}).get(
+            "benchmark", {}
         )
+        if benchmark_record.get("sha256") != sha256_file(args.libjxl_benchmark):
+            raise ComparisonError(
+                "Profiled libjxl benchmark does not match its build manifest"
+            )
+        libjxl_revision = libjxl_build_manifest.get("libjxl_revision")
+        if not isinstance(libjxl_revision, str):
+            raise ComparisonError("Profiled libjxl build manifest has no revision")
+    else:
+        libjxl_source = repo / "third_party/libjxl"
+        libjxl_revision = git_output(libjxl_source, "rev-parse", "HEAD")
+        if libjxl_revision != PINNED_LIBJXL_REVISION:
+            raise ComparisonError(
+                f"libjxl revision is {libjxl_revision}, "
+                f"expected {PINNED_LIBJXL_REVISION}"
+            )
     timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S.%fZ")
     directory = (args.output_root / f"{timestamp}-{gjxl_revision[:12]}").resolve()
     directory.mkdir(parents=True, exist_ok=False)
@@ -1652,6 +2271,7 @@ def run_comparison(args: argparse.Namespace) -> None:
         "gjxl_dirty": bool(git_output(repo, "status", "--porcelain")),
         "gjxl_worktree_diff_sha256": hashlib.sha256(git_diff).hexdigest(),
         "libjxl_revision": libjxl_revision,
+        "libjxl_base_revision": PINNED_LIBJXL_REVISION,
         "corpus_manifest": str(corpus_manifest),
         "corpus_manifest_sha256": sha256_file(corpus_manifest),
         "inputs": entries,
@@ -1677,6 +2297,7 @@ def run_comparison(args: argparse.Namespace) -> None:
             "gjxl_implementation": args.gjxl_implementation,
             "configurations": args.configuration,
             "input_filter": args.inputs,
+            "libjxl_stage_profile": args.libjxl_stage_profile,
         },
         "binaries": {
             name: {"path": str(path), "sha256": sha256_file(path)}
@@ -1689,11 +2310,18 @@ def run_comparison(args: argparse.Namespace) -> None:
         "quality_matches": [],
         "profiles": [],
     }
+    if libjxl_build_manifest is not None:
+        manifest["libjxl_profile_build"] = {
+            "path": str(args.libjxl_build_manifest.resolve()),
+            "sha256": sha256_file(args.libjxl_build_manifest.resolve()),
+            "instrumentation_diff_sha256": libjxl_build_manifest[
+                "instrumentation_diff_sha256"
+            ],
+        }
     if quality_calibration is not None:
         manifest["quality_calibration"] = quality_calibration
         manifest["libjxl_distances"] = {
-            entry["name"]: quality_distances[entry["name"]]
-            for entry in entries
+            entry["name"]: quality_distances[entry["name"]] for entry in entries
         }
     if args.capture_samply:
         manifest["parameters"]["samply_rate_hz"] = args.samply_rate
@@ -1769,7 +2397,11 @@ def run_comparison(args: argparse.Namespace) -> None:
                     record_process(command, name, directory, manifest)
                     rows.append(
                         median_process_row(
-                            encoder, configuration, entry, raw
+                            encoder,
+                            configuration,
+                            entry,
+                            raw,
+                            expected_libjxl_revision=libjxl_revision,
                         )
                     )
                     rows[-1]["raw_path"] = str(raw.relative_to(directory))
@@ -1800,8 +2432,7 @@ def run_comparison(args: argparse.Namespace) -> None:
                 )
                 within_absolute = score_delta <= quality_calibration["tolerance"]
                 within_relative = (
-                    relative_delta
-                    <= quality_calibration["maximum_relative_error"]
+                    relative_delta <= quality_calibration["maximum_relative_error"]
                 )
                 quality_match = {
                     "input": entry["name"],
@@ -1866,9 +2497,7 @@ def run_comparison(args: argparse.Namespace) -> None:
                         directory,
                         manifest,
                     )
-                    symbols = Path(
-                        str(profile)[: -len(".json.gz")] + ".json.syms.json"
-                    )
+                    symbols = Path(str(profile)[: -len(".json.gz")] + ".json.syms.json")
                     if not profile.is_file() or not symbols.is_file():
                         raise ComparisonError(
                             f"Samply capture or symbol sidecar is missing: {profile}"
@@ -1958,11 +2587,18 @@ def run_comparison(args: argparse.Namespace) -> None:
                                 }
                             )
 
+    aggregates = aggregate_rows(rows)
     summary = {
         "schema_version": RESULT_SCHEMA_VERSION,
-        "timing_claim": "unprofiled complete-encode wall time",
+        "timing_claim": (
+            "diagnostic direct libjxl stage wall time; retain complete-encode "
+            "claims from an unprofiled build"
+            if args.libjxl_stage_profile
+            else "unprofiled complete-encode wall time"
+        ),
         "process_rows": rows,
-        "aggregate_rows": aggregate_rows(rows),
+        "aggregate_rows": aggregates,
+        "direct_stage_comparison_rows": direct_stage_comparison_rows(aggregates),
         "validations": manifest["validations"],
         "quality_matches": manifest["quality_matches"],
         "profile_rows": profile_rows,
@@ -2038,9 +2674,7 @@ def bundle_phase1(args: argparse.Namespace) -> None:
     calibration_path = calibration_root / "calibration.json"
     calibration_manifest_path = calibration_root / "manifest.json"
     if not calibration_path.is_file() or not calibration_manifest_path.is_file():
-        raise ComparisonError(
-            f"Calibration result is incomplete: {calibration_root}"
-        )
+        raise ComparisonError(f"Calibration result is incomplete: {calibration_root}")
     calibration = load_json(calibration_path)
     calibration_manifest = load_json(calibration_manifest_path)
     if (
@@ -2055,15 +2689,12 @@ def bundle_phase1(args: argparse.Namespace) -> None:
         ("profiles", profile_root, profile_manifest, profile_summary),
     )
     corpus_hashes = {
-        manifest.get("corpus_manifest_sha256")
-        for _, _, manifest, _ in results
+        manifest.get("corpus_manifest_sha256") for _, _, manifest, _ in results
     }
     corpus_hashes.add(calibration.get("corpus_manifest_sha256"))
     if len(corpus_hashes) != 1 or None in corpus_hashes:
         raise ComparisonError("Phase 1 artifacts do not share one corpus manifest")
-    revisions = {
-        manifest.get("libjxl_revision") for _, _, manifest, _ in results
-    }
+    revisions = {manifest.get("libjxl_revision") for _, _, manifest, _ in results}
     revisions.add(calibration.get("libjxl_revision"))
     if revisions != {PINNED_LIBJXL_REVISION}:
         raise ComparisonError("Phase 1 artifacts do not share pinned libjxl")
@@ -2105,7 +2736,9 @@ def bundle_phase1(args: argparse.Namespace) -> None:
         "serial",
         "production",
     } or {row.get("encoder") for row in profile_rows} != {"gjxl", "libjxl"}:
-        raise ComparisonError("Profile result does not cover both policies and encoders")
+        raise ComparisonError(
+            "Profile result does not cover both policies and encoders"
+        )
 
     stage_names = {
         "coefficient_and_token_preparation",
@@ -2122,9 +2755,7 @@ def bundle_phase1(args: argparse.Namespace) -> None:
             raise ComparisonError("Profile row has an incomplete neutral-stage map")
         if sum(stage["cpu_delta_us"] for stage in stages) != row["sampled_cpu_us"]:
             raise ComparisonError("Profile neutral stages are not mutually exhaustive")
-        minimum_resolution = min(
-            minimum_resolution, row["resolved_leaf_cpu_percent"]
-        )
+        minimum_resolution = min(minimum_resolution, row["resolved_leaf_cpu_percent"])
     required_resolution = profile_manifest.get("parameters", {}).get(
         "minimum_symbol_resolution_percent"
     )
@@ -2256,6 +2887,196 @@ instrumentation remains optional for that future question.
     print(output)
 
 
+def bundle_phase2(args: argparse.Namespace) -> None:
+    timing_root, timing_manifest, timing_summary = _load_result_directory(
+        args.timing_result
+    )
+    validation_root = args.validation_result.resolve()
+    validation_manifest_path = validation_root / "manifest.json"
+    validation_summary_path = validation_root / "summary.json"
+    if not validation_manifest_path.is_file() or not validation_summary_path.is_file():
+        raise ComparisonError(f"Phase 2 validation is incomplete: {validation_root}")
+    validation_manifest = load_json(validation_manifest_path)
+    validation_summary = load_json(validation_summary_path)
+    if (
+        validation_manifest.get("kind") != "libjxl-stage-profile-validation"
+        or validation_summary.get("kind") != "libjxl-stage-profile-validation-summary"
+        or validation_summary.get("identity_input_count") != 38
+        or validation_summary.get("all_codestreams_byte_identical") is not True
+    ):
+        raise ComparisonError("Phase 2 validation does not satisfy identity checks")
+    if len(validation_summary.get("perturbation_results", [])) < 4:
+        raise ComparisonError("Phase 2 validation lacks perturbation coverage")
+    if (
+        timing_manifest.get("parameters", {}).get("libjxl_stage_profile") is not True
+        or timing_manifest.get("parameters", {}).get("quality_view") != "matched"
+        or timing_summary.get("timing_claim")
+        != (
+            "diagnostic direct libjxl stage wall time; retain complete-encode "
+            "claims from an unprofiled build"
+        )
+    ):
+        raise ComparisonError("Phase 2 timing result is not a matched stage run")
+    profile_revision = timing_manifest.get("libjxl_revision")
+    if (
+        profile_revision != validation_manifest.get("libjxl_profile_revision")
+        or timing_manifest.get("libjxl_base_revision") != PINNED_LIBJXL_REVISION
+    ):
+        raise ComparisonError("Phase 2 artifacts use different libjxl revisions")
+    entries = {entry["name"]: entry for entry in timing_manifest.get("inputs", [])}
+    if len(entries) != 5:
+        raise ComparisonError("Phase 2 timing result must cover five workload groups")
+    expected_categories = {
+        "photographic-1080p",
+        "photographic-4k",
+        "kodak-continuity",
+        "padded-stress-1080p",
+        "padded-stress-4k",
+    }
+    if {entry.get("category") for entry in entries.values()} != expected_categories:
+        raise ComparisonError("Phase 2 timing categories are incomplete")
+
+    rows = []
+    for source_row in timing_summary.get("process_rows", []):
+        input_name = source_row.get("input")
+        encoder = source_row.get("encoder")
+        if input_name not in entries or encoder not in {"gjxl", "libjxl"}:
+            raise ComparisonError("Phase 2 process row is invalid")
+        raw = timing_root / source_row["raw_path"]
+        if not raw.is_file():
+            raise ComparisonError(f"Phase 2 raw sample is missing: {raw}")
+        rows.append(
+            median_process_row(
+                encoder,
+                source_row["configuration"],
+                entries[input_name],
+                raw,
+                expected_libjxl_revision=profile_revision,
+            )
+            | {"raw_path": source_row["raw_path"]}
+        )
+    if len(rows) != 60:
+        raise ComparisonError("Phase 2 timing result must contain 60 process rows")
+    aggregates = aggregate_rows(rows)
+    direct_rows = direct_stage_comparison_rows(aggregates)
+    if len(aggregates) != 20 or len(direct_rows) != 50:
+        raise ComparisonError("Phase 2 stage aggregation is incomplete")
+    if len(timing_manifest.get("quality_matches", [])) != 10 or any(
+        not match.get("within_tolerance")
+        for match in timing_manifest.get("quality_matches", [])
+    ):
+        raise ComparisonError("Phase 2 matched-quality validation is incomplete")
+
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    os.symlink(os.path.relpath(timing_root, output), output / "timing")
+    os.symlink(os.path.relpath(validation_root, output), output / "validation")
+    direct_document = {
+        "schema_version": 1,
+        "kind": "gjxl-libjxl-direct-stage-comparison",
+        "timing_semantics": {
+            "phase_nanoseconds": "wall-clock-phase-time",
+            "work_nanoseconds": "aggregate-worker-time-not-wall-time",
+            "performance_claim": (
+                "direct stage values are diagnostic; retained end-to-end claims "
+                "come from unprofiled Phase 1 timing"
+            ),
+        },
+        "libjxl_base_revision": PINNED_LIBJXL_REVISION,
+        "libjxl_profile_revision": profile_revision,
+        "process_rows": rows,
+        "aggregate_rows": aggregates,
+        "direct_stage_comparison_rows": direct_rows,
+    }
+    write_json_atomic(output / "direct-stage-comparison.json", direct_document)
+
+    phase_rows = {
+        (row["input"], row["configuration"], row["stage"]): row for row in direct_rows
+    }
+    table_lines = [
+        "| Input | Policy | GJXL serializer (ms) | libjxl serializer (ms) | "
+        "GJXL/libjxl | GJXL entropy (ms) | libjxl entropy (ms) | Entropy ratio |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for input_name in sorted(entries):
+        for configuration in ("serial", "production"):
+            serializer = phase_rows[(input_name, configuration, "complete_serializer")]
+            entropy = phase_rows[
+                (input_name, configuration, "entropy_model_construction")
+            ]
+            table_lines.append(
+                f"| {input_name} | {configuration} | "
+                f"{serializer['gjxl_nanoseconds'] / 1e6:.3f} | "
+                f"{serializer['libjxl_nanoseconds'] / 1e6:.3f} | "
+                f"{serializer['gjxl_over_libjxl_ratio']:.2f}x | "
+                f"{entropy['gjxl_nanoseconds'] / 1e6:.3f} | "
+                f"{entropy['libjxl_nanoseconds'] / 1e6:.3f} | "
+                f"{entropy['gjxl_over_libjxl_ratio']:.2f}x |"
+            )
+    overheads = [
+        row["profiled_overhead_percent"]
+        for row in validation_summary["perturbation_results"]
+    ]
+    readme = f"""# GJXL/libjxl Phase 2 direct stage timing
+
+This bundle completes the opt-in libjxl instrumentation phase at profiled
+revision `{profile_revision}`, based on pinned libjxl
+`{PINNED_LIBJXL_REVISION}`. The `timing/` and `validation/` entries are relative
+links to never-overwritten source artifacts. `direct-stage-comparison.json`
+re-parses both native schemas and retains normalized neutral wall-stage rows.
+
+## Validation
+
+- All 38 corpus inputs are byte-identical across ordinary libjxl,
+  instrumented-with-sink-off, and instrumented-with-sink-on builds.
+- All 38 retained outputs decode successfully.
+- Stable counts and exact non-overlapping libjxl serializer unions are enforced
+  by both the harness and comparison parser.
+- Balanced perturbation medians span {min(overheads):.2f}% to
+  {max(overheads):.2f}%; no material profiler overhead was detected.
+- Direct stage timing remains diagnostic. Unprofiled Phase 1 end-to-end timing
+  remains the performance gate.
+
+## Matched-quality direct wall timing
+
+{chr(10).join(table_lines)}
+"""
+    write_text_atomic(output / "README.md", readme)
+    index = {
+        "schema_version": 1,
+        "kind": "gjxl-libjxl-phase2-bundle",
+        "created_utc": dt.datetime.now(dt.UTC).isoformat(),
+        "libjxl_base_revision": PINNED_LIBJXL_REVISION,
+        "libjxl_profile_revision": profile_revision,
+        "artifacts": {
+            "timing": {
+                "path": str(timing_root),
+                "manifest_sha256": sha256_file(timing_root / "manifest.json"),
+                "summary_sha256": sha256_file(timing_root / "summary.json"),
+            },
+            "validation": {
+                "path": str(validation_root),
+                "manifest_sha256": sha256_file(validation_manifest_path),
+                "summary_sha256": sha256_file(validation_summary_path),
+            },
+            "direct_stage_comparison": {
+                "path": "direct-stage-comparison.json",
+                "sha256": sha256_file(output / "direct-stage-comparison.json"),
+            },
+        },
+        "verification": {
+            "identity_input_count": 38,
+            "process_row_count": len(rows),
+            "aggregate_row_count": len(aggregates),
+            "direct_stage_row_count": len(direct_rows),
+            "quality_match_count": len(timing_manifest["quality_matches"]),
+            "perturbation_group_count": len(validation_summary["perturbation_results"]),
+        },
+    }
+    write_json_atomic(output / "phase2-index.json", index)
+    print(output)
+
+
 def positive_int(value: str) -> int:
     parsed = int(value)
     if parsed <= 0:
@@ -2293,6 +3114,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     build = subparsers.add_parser("build-libjxl")
     build.add_argument("--repo", type=Path, default=repo_default)
+    build.add_argument("--libjxl-source", type=Path)
     build.add_argument(
         "--build-root",
         type=Path,
@@ -2300,7 +3122,74 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     build.add_argument("--generator", default="Ninja")
     build.add_argument("--jobs", type=positive_int, default=8)
-    build.set_defaults(function=build_libjxl)
+    build.set_defaults(function=build_libjxl, stage_profile=False)
+
+    build_profile = subparsers.add_parser("build-libjxl-profile")
+    build_profile.add_argument("--repo", type=Path, default=repo_default)
+    build_profile.add_argument("--libjxl-source", type=Path, required=True)
+    build_profile.add_argument(
+        "--build-root",
+        type=Path,
+        default=repo_default / "build/libjxl-stage-profile",
+    )
+    build_profile.add_argument("--generator", default="Ninja")
+    build_profile.add_argument("--jobs", type=positive_int, default=8)
+    build_profile.set_defaults(function=build_libjxl, stage_profile=True)
+
+    validate_profile = subparsers.add_parser("validate-libjxl-profile")
+    validate_profile.add_argument("--corpus-manifest", type=Path, required=True)
+    validate_profile.add_argument(
+        "--profile-build-manifest",
+        type=Path,
+        default=repo_default / "build/libjxl-stage-profile/build-manifest.json",
+    )
+    validate_profile.add_argument(
+        "--unprofiled-build-manifest",
+        type=Path,
+        default=repo_default / "build/libjxl-comparison/build-manifest.json",
+    )
+    validate_profile.add_argument(
+        "--profiled-benchmark",
+        type=Path,
+        default=(
+            repo_default
+            / "build/libjxl-stage-profile/harness/gjxl_libjxl_comparison_benchmark"
+        ),
+    )
+    validate_profile.add_argument(
+        "--unprofiled-benchmark",
+        type=Path,
+        default=(
+            repo_default
+            / "build/libjxl-comparison/harness/gjxl_libjxl_comparison_benchmark"
+        ),
+    )
+    validate_profile.add_argument(
+        "--djxl",
+        type=Path,
+        default=repo_default / "build/libjxl-stage-profile/libjxl/tools/djxl",
+    )
+    validate_profile.add_argument(
+        "--output-root",
+        type=Path,
+        default=repo_default / "logs/libjxl-stage-profile-validation",
+    )
+    validate_profile.add_argument("--distance", type=float, default=1.0)
+    validate_profile.add_argument("--effort", type=int, choices=range(1, 11), default=7)
+    validate_profile.add_argument("--num-threads", type=positive_int, default=8)
+    validate_profile.add_argument("--samples", type=positive_int, default=2)
+    validate_profile.add_argument(
+        "--perturbation-input",
+        dest="perturbation_inputs",
+        action="append",
+        help="input for balanced instrumentation perturbation timing (repeatable)",
+    )
+    validate_profile.add_argument("--perturbation-pairs", type=positive_int, default=3)
+    validate_profile.add_argument("--perturbation-warmups", type=int, default=1)
+    validate_profile.add_argument(
+        "--perturbation-samples", type=positive_int, default=3
+    )
+    validate_profile.set_defaults(function=validate_libjxl_profile)
 
     comparison_build = repo_default / "build/libjxl-comparison"
     calibrate = subparsers.add_parser("calibrate-quality")
@@ -2345,6 +3234,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     bundle.add_argument("--output", type=Path, required=True)
     bundle.set_defaults(function=bundle_phase1)
 
+    bundle2 = subparsers.add_parser("bundle-phase2")
+    bundle2.add_argument("--timing-result", type=Path, required=True)
+    bundle2.add_argument("--validation-result", type=Path, required=True)
+    bundle2.add_argument("--output", type=Path, required=True)
+    bundle2.set_defaults(function=bundle_phase2)
+
     run = subparsers.add_parser("run")
     run.add_argument("--repo", type=Path, default=repo_default)
     run.add_argument("--corpus-manifest", type=Path, required=True)
@@ -2357,6 +3252,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--libjxl-benchmark",
         type=Path,
         default=comparison_build / "harness/gjxl_libjxl_comparison_benchmark",
+    )
+    run.add_argument(
+        "--libjxl-stage-profile",
+        action="store_true",
+        help="request schema 2 direct stage timing from a profiled libjxl build",
+    )
+    run.add_argument(
+        "--libjxl-build-manifest",
+        type=Path,
+        help="build manifest produced by build-libjxl-profile",
     )
     run.add_argument(
         "--djxl", type=Path, default=comparison_build / "libjxl/tools/djxl"
@@ -2412,13 +3317,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if getattr(args, "warmups", 0) < 0:
         parser.error("--warmups must be nonnegative")
+    if getattr(args, "perturbation_warmups", 0) < 0:
+        parser.error("--perturbation-warmups must be nonnegative")
     if not 0.0 < getattr(args, "distance", 1.0) <= 25.0:
         parser.error("--distance must be in (0, 25]")
     if args.command == "calibrate-quality":
         if not 0.0 < args.minimum_distance < args.maximum_distance <= 25.0:
-            parser.error(
-                "calibration bounds must satisfy 0 < minimum < maximum <= 25"
-            )
+            parser.error("calibration bounds must satisfy 0 < minimum < maximum <= 25")
         if not args.minimum_distance <= args.initial_distance <= args.maximum_distance:
             parser.error("--initial-distance must lie within the calibration bounds")
         if not math.isfinite(args.tolerance) or args.tolerance <= 0.0:

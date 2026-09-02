@@ -1,9 +1,10 @@
 # GJXL/libjxl codestream performance comparison plan
 
-Status: Phase 1 complete as of 2026-09-01. The corpus, comparison tooling,
-nominal-distance and matched-quality serial/production timing, independent
-output validation, and representative Samply CPU attribution all satisfy the
-pilot exit criteria. Direct libjxl stage instrumentation is deferred.
+Status: Phase 1 and Phase 2 complete as of 2026-09-02. The no-source-change
+pilot established the broad attribution, and the isolated opt-in libjxl
+profiler now supplies direct matched-quality serializer wall-stage timing.
+Profiled timings remain diagnostic; the unprofiled Phase 1 measurements remain
+the end-to-end performance gate.
 
 ## Purpose
 
@@ -17,8 +18,9 @@ The work is deliberately split into two phases:
 1. Run a no-libjxl-source-change pilot using unprofiled benchmarks and sampled
    CPU attribution. This is sufficient to rank broad opportunities and test
    whether the apparent serializer gap survives matched inputs.
-2. Add opt-in, benchmark-only timing to libjxl only if exact stage latency or a
-   durable cross-encoder ratio is required.
+2. Add opt-in, benchmark-only timing to libjxl for exact stage latency and a
+   durable cross-encoder diagnostic ratio. This phase was subsequently
+   requested and completed without changing ordinary libjxl builds.
 
 The pilot must not be described as exact stage wall-clock timing. Conversely,
 the instrumented phase must not replace unprofiled end-to-end measurements as
@@ -617,10 +619,9 @@ Host load rose from 29.83/26.43/21.80 to 26.49/26.96/24.07. That does not make
 the profiler suitable for latency claims, but sampled thread-CPU attribution
 is used only to identify the responsible operation class. The consistent
 19.7-81.3x sampled serializer-CPU gap and GJXL's 77.0-93.7% sampled-CPU share
-in entropy-model construction are decisive for prioritization: optimize GJXL's
-entropy-model construction before modifying libjxl for direct stage timing.
-Direct libjxl instrumentation remains optional if a future claim requires an
-exact parallel stage wall-time ratio.
+in entropy-model construction were already decisive for prioritization. Phase
+2 subsequently confirmed the ranking with direct wall-stage timing: GJXL's
+entropy-model construction remains the first serializer optimization target.
 
 ### 1. Add a comparison driver — complete
 
@@ -736,21 +737,33 @@ all stage values as sampled thread CPU rather than wall time. The high-load
 caveat still prevents publication-grade absolute latency claims; it does not
 leave a Phase 1 exit criterion open.
 
-## Phase 2: optional libjxl stage instrumentation
+## Phase 2: libjxl stage instrumentation — complete
 
-Proceed with this phase when exact stage latency is required, when the sampled
-result is close enough that profiler uncertainty could change the conclusion,
-or when repeated optimization work needs a stable libjxl baseline.
+Phase 2 adds exact serializer wall-stage boundaries and aggregate worker-time
+substage counters to an isolated libjxl build. It was run after Phase 1 at
+matched decoded quality on representative photographic, Kodak, and padded
+stress inputs under both serial and production policies.
 
 ### Architecture
 
-Implement the profiler in an isolated worktree at the pinned libjxl revision.
-Do not modify the checked-out submodule in place and do not add timing fields to
-libjxl's public C API or `JxlEncoderStats`.
+The profiler is implemented in the isolated
+`/Users/yunhocho/GitHub/libjxl-gjxl-stage-profile` worktree on branch
+`perf/gjxl-stage-profile`. Instrumented revision
+`b1596acff4bd93775e8cf7b42b1fdffa87c555bd` is based on pinned libjxl revision
+`e8ff09762481785938d8e4e01333ed3917571161`. The two focused commits are:
+
+- `0f42cd5f Add opt-in encoder stage profiling`; and
+- `b1596acf Cover streaming frame assembly in stage profiles`.
+
+`JPEGXL_ENABLE_STAGE_PROFILER` defaults to `OFF`. When enabled, it exposes a
+private benchmark hook rather than adding timing fields to libjxl's public C
+API or `JxlEncoderStats`; symbol inspection confirmed that this hook is absent
+from an ordinary build.
 
 Add an internal, opt-in profile sink with these properties:
 
-- a null sink is the default and performs no clock reads or allocations;
+- a null sink is the default and performs no profile clock reads or profile
+  allocations;
 - stable stage IDs are independent of function names;
 - top-level timers surround synchronization/barrier boundaries and report wall
   time;
@@ -758,18 +771,24 @@ Add an internal, opt-in profile sink with these properties:
   shared atomic update for every token or group;
 - aggregate worker time is labeled separately and may exceed enclosing wall
   time;
+- the profile session is active only inside a measured encoder call, so
+  frontend heuristic `BuildAndEncodeHistograms` calls are not misattributed to
+  the final serializer;
 - invocation counts, token counts, histogram counts, model bits, token bits,
-  and output bytes use checked integer accumulation; and
+  and output bytes use checked, saturating integer accumulation with an
+  explicit overflow flag; and
 - the benchmark harness, not the encoder library, serializes the result as
   JSON.
 
-Keep the patch small enough to rebase onto another pinned libjxl revision. A
-compile-time option may expose the internal hooks to the comparison harness,
-but profiling must remain disabled in ordinary cjxl and library builds.
+Worker-local accumulators are merged only after `RunOnPool`; the hot token and
+group paths do not update shared atomics. Both buffered and streaming frame
+output modes are covered. The comparison tool builds the profiler, records the
+pinned base and instrumentation revisions, hashes the source patch and
+binaries, and rejects dirty or unrelated source ancestry.
 
 ### Required stage boundaries
 
-Record wall phases for:
+The implementation records wall phases for:
 
 1. coefficient and Modular side-data tokenization;
 2. entropy histogram/model construction;
@@ -777,33 +796,36 @@ Record wall phases for:
 4. frame header, TOC, section concatenation, and final output copy; and
 5. their complete serializer union.
 
-Record aggregate work counters for at least:
+It records aggregate work counters for:
 
 - histogram population;
 - histogram clustering;
 - HybridUint configuration selection;
-- ANS or prefix/Huffman model construction;
+- entropy-model construction;
 - histogram/context-map serialization;
 - token encoding and bit writing;
 - Modular/DC side-data encoding; and
 - output assembly and copying.
 
-Instrumentation around a leaf such as every `WriteTokens` call is acceptable
-for invocation and aggregate-work accounting, but the direct wall comparison
-must use the enclosing group barrier. Summing overlapping leaf durations is not
-a stage-latency measurement.
+The complete serializer phase is the exact sum of the four non-overlapping wall
+phases. This invariant is enforced per measured sample. Leaf timers contribute
+only aggregate work and invocation accounting; overlapping worker durations
+are never presented as wall-stage latency.
 
-### Proposed raw schema
+### Raw schema
 
-The libjxl record should contain:
+Unprofiled harness output retains schema 1. `--stage-profile` requires an
+instrumented build and emits schema 2:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "timing_semantics": {
+    "elapsed_nanoseconds": "complete-encode-wall-time",
     "phase_nanoseconds": "wall-clock-barrier-time",
     "work_nanoseconds": "aggregate-worker-time"
   },
+  "stage_profile_enabled": true,
   "encoder": "libjxl",
   "revision": "<full commit>",
   "thread_count": 8,
@@ -811,38 +833,82 @@ The libjxl record should contain:
   "effort": 7,
   "samples": [
     {
+      "sample_index": 0,
+      "elapsed_nanoseconds": 0,
       "encoded_bytes": 0,
-      "token_count": 0,
-      "histogram_count": 0,
       "phase_nanoseconds": {},
       "work_nanoseconds": {},
-      "invocation_counts": {}
+      "invocation_counts": {
+        "phase": {},
+        "work": {}
+      },
+      "counts": {
+        "token_count": 0,
+        "histogram_count": 0,
+        "model_bits": 0,
+        "token_bits": 0,
+        "output_bytes": 0
+      }
     }
   ]
 }
 ```
 
-The comparison tool should translate both native schemas into the neutral
-stage table. Do not rename or discard native fields in the retained raw files.
+The comparison tool translates both native schemas into a neutral stage table
+without changing the retained raw records. For GJXL, DC plus AC tokenization
+maps to coefficient tokenization, entropy optimization maps to entropy-model
+construction, section writing maps to model/token emission, assembly maps to
+framing, and `codestream_encoding` maps to the complete serializer. GJXL's
+complete serializer timer is not asserted to equal the sum of its translated
+components because the native schema has different timing boundaries.
 
 ### Instrumentation validation
 
-Before using the profile:
+The profile passed the planned validation:
 
-- verify profiled and unprofiled builds emit byte-identical codestreams for the
-  complete corpus;
-- run focused ANS, histogram, frame-encoding, and decoder tests from the pinned
-  libjxl revision;
-- confirm all outputs decode and match the unprofiled decoded pixels;
-- verify stage and substage counts are stable across repeated encodes;
-- check that wall phases do not overlap unless explicitly documented;
-- confirm aggregate worker time is never interpreted as a wall-time sum; and
-- measure profiling perturbation against the unprofiled build in balanced
-  alternating process pairs.
+- Ordinary, instrumented-with-sink-off, and instrumented-with-sink-on libjxl
+  builds emitted byte-identical codestreams for all 38 corpus inputs.
+- All retained outputs decoded successfully, and the harness enforced stable
+  counts and exact serializer unions across measured samples.
+- Focused libjxl ANS, TOC, frame-encoding, output-mode, parallel-runner,
+  roundtrip, and decoder tests passed.
+- Balanced alternating perturbation runs used three independent process pairs,
+  one warmup, and three measured samples on a 1080p photograph, a 4K
+  photograph, Kodak, and padded 4K stress input. Profiled/unprofiled median
+  ratios ranged from 0.9881 to 0.9997 (-1.19% to -0.03%), so no material
+  profiling overhead was detected.
 
-Use the profiler to explain the result. Retain performance claims only from the
-unprofiled build or explicitly label direct stage timings as diagnostic when
-their perturbation is material.
+The complete validation artifact is retained at
+`logs/libjxl-stage-profile-validation/20260902T003251.087745Z-b1596acff4bd`.
+
+### Direct matched-quality result
+
+The direct timing run uses three balanced independent process pairs, two
+warmups, and five measured samples per process. It covers representative 1080p
+and 4K photographs, Kodak continuity, and padded 1080p/4K stress inputs under
+serial and production policies. Every one of the ten matched-quality records
+passed and every retained output decoded.
+
+| Input | Policy | GJXL serializer (ms) | libjxl serializer (ms) | Ratio | GJXL entropy construction (ms) | libjxl entropy construction (ms) | Ratio |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1080p photograph | Serial | 1076.711 | 25.982 | 41.44x | 1015.696 | 6.938 | 146.39x |
+| 1080p photograph | Production | 218.328 | 14.371 | 15.19x | 191.069 | 6.735 | 28.37x |
+| 4K photograph | Serial | 1883.485 | 85.668 | 21.99x | 1702.309 | 18.465 | 92.19x |
+| 4K photograph | Production | 376.616 | 43.611 | 8.64x | 299.983 | 18.398 | 16.30x |
+| Kodak continuity | Serial | 282.974 | 6.398 | 44.23x | 271.517 | 2.417 | 112.34x |
+| Kodak continuity | Production | 57.608 | 4.595 | 12.54x | 52.011 | 2.336 | 22.27x |
+| Padded 1080p stress | Serial | 1324.505 | 47.127 | 28.11x | 1246.674 | 10.822 | 115.20x |
+| Padded 1080p stress | Production | 259.875 | 21.073 | 12.33x | 224.978 | 10.778 | 20.87x |
+| Padded 4K stress | Serial | 3877.282 | 189.448 | 20.47x | 3593.083 | 40.937 | 87.77x |
+| Padded 4K stress | Production | 793.495 | 77.397 | 10.25x | 656.368 | 40.715 | 16.12x |
+
+For production settings, GJXL's complete serializer is 8.64-15.19x slower and
+its entropy-model-construction wall phase is 16.12-28.37x slower than libjxl's
+on these representative matched-quality inputs. In serial mode, those ranges
+are 20.47-44.23x and 87.77-146.39x respectively. The direct result confirms
+Phase 1's prioritization: GJXL entropy-model construction is the dominant
+serializer optimization target. These profiled ratios are diagnostic; the
+unprofiled Phase 1 runs remain the end-to-end performance evidence.
 
 ## Result artifact
 
@@ -853,6 +919,15 @@ validated and rehashed the four never-overwritten source artifacts, then wrote
 links to the nominal, calibration, matched-quality, and Samply directories. The
 index records 784 successful rehashes, all 76 matched-quality records, all 20
 profiles, and the 99.6107% minimum weighted symbol resolution.
+
+The completed Phase 2 bundle is retained at
+`logs/libjxl-phase2/20260902`. It contains `README.md`,
+`phase2-index.json`, and `direct-stage-comparison.json` beside relative links
+to the never-overwritten timing and validation artifacts. The index verifies
+38 identity inputs, four perturbation groups, 60 timing-process rows, 20
+aggregate rows, 50 neutral direct-stage rows, and ten quality matches. The
+matched-quality source timing artifact is
+`logs/libjxl-comparison/20260902T003438.333660Z-5776d06438c0`.
 
 Recreate the bundle with:
 
@@ -869,6 +944,17 @@ python3 tools/libjxl_comparison.py bundle-phase1 \
   --output logs/libjxl-phase1/20260901
 ```
 
+Recreate the Phase 2 bundle with:
+
+```sh
+python3 tools/libjxl_comparison.py bundle-phase2 \
+  --timing-result \
+    logs/libjxl-comparison/20260902T003438.333660Z-5776d06438c0 \
+  --validation-result \
+    logs/libjxl-stage-profile-validation/20260902T003251.087745Z-b1596acff4bd \
+  --output logs/libjxl-phase2/20260902
+```
+
 The final artifact directory should contain:
 
 - `README.md` with scope, conclusions, caveats, and reproduction commands;
@@ -877,7 +963,7 @@ The final artifact directory should contain:
 - raw unprofiled samples for both encoders;
 - native GJXL schema-10 samples;
 - parsed libjxl and GJXL Samply operation tables;
-- optional native libjxl stage-profile samples;
+- native libjxl stage-profile samples;
 - decoded-quality and encoded-size results;
 - all Samply captures and symbol sidecars; and
 - a machine-readable neutral comparison table.
@@ -919,11 +1005,15 @@ time and normalized cost, together with output size and actual decoded quality.
    publication-grade absolute-time claim.
 6. **Complete.** Calibrate and run the matched-quality view across all 38
    inputs under both policies.
-7. **Complete: defer direct timing.** The matched-quality and sampled-
-   attribution views consistently prioritize GJXL entropy-model construction;
-   profiler uncertainty cannot reverse a 19.7x minimum sampled-CPU gap.
-8. **Not required for Phase 1.** Implement and validate the isolated opt-in
-   libjxl profiler only if a future claim needs exact stage wall time.
+7. **Complete.** The matched-quality and sampled-attribution views consistently
+   prioritized GJXL entropy-model construction; Phase 2 was then requested to
+   replace attribution uncertainty with direct stage boundaries.
+8. **Complete.** Implement and validate the isolated opt-in libjxl profiler.
+   All 38 inputs remain byte-identical across ordinary and profiled builds,
+   focused tests pass, and no material profiling perturbation was detected.
 9. **Complete with host-load caveat.** Retain the full unprofiled runs, sampled
    profiles, symbol sidecars, neutral table, and indexed Phase 1 bundle. Rerun
    absolute production timing on a quieter host before publication.
+10. **Complete.** Run representative matched-quality Phase 2 timing under both
+    policies and retain the indexed Phase 2 bundle. Direct wall timing confirms
+    entropy-model construction as GJXL's first serializer optimization target.

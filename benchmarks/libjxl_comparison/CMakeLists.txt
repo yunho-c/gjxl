@@ -7,6 +7,8 @@ project(gjxl_libjxl_comparison LANGUAGES CXX)
 set(GJXL_LIBJXL_SOURCE "" CACHE PATH "Pinned libjxl source directory")
 set(GJXL_LIBJXL_BUILD "" CACHE PATH "Pinned libjxl build directory")
 set(GJXL_LIBJXL_REVISION "" CACHE STRING "Expected pinned libjxl revision")
+option(GJXL_LIBJXL_STAGE_PROFILE
+       "Enable the private libjxl encoder stage profile hook" OFF)
 
 foreach(required IN ITEMS GJXL_LIBJXL_SOURCE GJXL_LIBJXL_BUILD
                           GJXL_LIBJXL_REVISION)
@@ -62,12 +64,26 @@ target_compile_definitions(
   gjxl_libjxl_comparison_benchmark
   PRIVATE GJXL_LIBJXL_REVISION="${GJXL_LIBJXL_REVISION}"
 )
+if(GJXL_LIBJXL_STAGE_PROFILE)
+  target_compile_definitions(
+    gjxl_libjxl_comparison_benchmark
+    PRIVATE
+      GJXL_LIBJXL_STAGE_PROFILE=1
+      JPEGXL_ENABLE_STAGE_PROFILER=1
+  )
+endif()
 target_include_directories(
   gjxl_libjxl_comparison_benchmark
   PRIVATE
     "${GJXL_LIBJXL_SOURCE}/lib/include"
     "${GJXL_LIBJXL_BUILD}/lib/include"
 )
+if(GJXL_LIBJXL_STAGE_PROFILE)
+  target_include_directories(
+    gjxl_libjxl_comparison_benchmark
+    PRIVATE "${GJXL_LIBJXL_SOURCE}"
+  )
+endif()
 target_link_libraries(
   gjxl_libjxl_comparison_benchmark
   PRIVATE
