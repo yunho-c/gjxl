@@ -199,6 +199,9 @@ set(maximum "${GJXL_TEST_DIR}/maximum-throughput.jxl")
 set(maximum_repeat "${GJXL_TEST_DIR}/maximum-throughput-repeat.jxl")
 set(high_density "${GJXL_TEST_DIR}/high-density.jxl")
 set(high_density_repeat "${GJXL_TEST_DIR}/high-density-repeat.jxl")
+set(maximum_compression "${GJXL_TEST_DIR}/maximum-compression.jxl")
+set(maximum_compression_repeat
+  "${GJXL_TEST_DIR}/maximum-compression-repeat.jxl")
 execute_process(
   COMMAND
     "${GJXL_ENCODER}" --distance 1.0 --backend cpu
@@ -348,6 +351,31 @@ if(NOT high_density_repeat_result EQUAL 0)
   message(FATAL_ERROR
     "Repeated high-density CLI encode failed: ${high_density_repeat_error}")
 endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend cpu --maximum-compression
+    "${GJXL_SAMPLE}" "${maximum_compression}"
+  RESULT_VARIABLE maximum_compression_result
+  OUTPUT_VARIABLE maximum_compression_output
+  ERROR_VARIABLE maximum_compression_error
+)
+if(NOT maximum_compression_result EQUAL 0)
+  message(FATAL_ERROR
+    "Maximum-compression CLI encode failed: ${maximum_compression_error}")
+endif()
+execute_process(
+  COMMAND
+    "${GJXL_ENCODER}" --distance 1.0 --backend cpu --maximum-compression
+    "${GJXL_SAMPLE}" "${maximum_compression_repeat}"
+  RESULT_VARIABLE maximum_compression_repeat_result
+  OUTPUT_QUIET
+  ERROR_VARIABLE maximum_compression_repeat_error
+)
+if(NOT maximum_compression_repeat_result EQUAL 0)
+  message(FATAL_ERROR
+    "Repeated maximum-compression CLI encode failed: "
+    "${maximum_compression_repeat_error}")
+endif()
 
 file(SHA256 "${first}" first_hash)
 file(SHA256 "${second}" second_hash)
@@ -362,6 +390,9 @@ file(SHA256 "${maximum}" maximum_hash)
 file(SHA256 "${maximum_repeat}" maximum_repeat_hash)
 file(SHA256 "${high_density}" high_density_hash)
 file(SHA256 "${high_density_repeat}" high_density_repeat_hash)
+file(SHA256 "${maximum_compression}" maximum_compression_hash)
+file(SHA256 "${maximum_compression_repeat}"
+  maximum_compression_repeat_hash)
 if(NOT first_hash STREQUAL second_hash)
   message(FATAL_ERROR "CLI output is not deterministic")
 endif()
@@ -387,11 +418,20 @@ endif()
 if(NOT effort_10_hash STREQUAL high_density_hash)
   message(FATAL_ERROR "Effort 10 and high-density output diverged")
 endif()
+if(NOT maximum_compression_hash STREQUAL maximum_compression_repeat_hash)
+  message(FATAL_ERROR "Maximum-compression CLI output is not deterministic")
+endif()
 set(expected_hash
-  e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558)
+  e4566239f5e15dd67a4716d26da662728c88ffcae19bdf93ff28c2b8df6c8504)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
+endif()
+set(expected_maximum_compression_hash
+  e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558)
+if(NOT maximum_compression_hash STREQUAL expected_maximum_compression_hash)
+  message(FATAL_ERROR
+    "Maximum-compression sample hash changed: ${maximum_compression_hash}")
 endif()
 foreach(expected "Encoded 17x13" "using CPU" "Strategies:"
                  "Final perceptual score:")
@@ -556,7 +596,7 @@ if(NOT maximum_error_first_hash STREQUAL maximum_error_second_hash)
   message(FATAL_ERROR "Maximum-error CLI output is not deterministic")
 endif()
 set(expected_maximum_error_hash
-  2a9ff2a83842adf78d212dd6d4d68e5cebf6fb2fa5cbe3ad97181849391797ef)
+  a49511547682f801c33f2054e6bd97b990c8f6709f16e1e540c15f2950340f66)
 if(NOT maximum_error_first_hash STREQUAL expected_maximum_error_hash)
   message(FATAL_ERROR
     "Maximum-error sample hash changed: ${maximum_error_first_hash}")

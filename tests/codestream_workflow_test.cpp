@@ -313,7 +313,7 @@ bool CheckDeterministicWorkflow() {
   }
 
   const uint64_t hash = Fnv1a64(first);
-  constexpr uint64_t kExpectedHash = 2798427125534830868ull;
+  constexpr uint64_t kExpectedHash = 6720271014152865219ull;
   if (hash != kExpectedHash) {
     std::cerr << "Public workflow hash changed: " << hash << '\n';
     return false;

@@ -14,8 +14,11 @@
 #include <cstdint>
 #include <limits>
 #include <new>
+#include <numeric>
+#include <queue>
 #include <span>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -59,6 +62,31 @@ constexpr std::array<HybridUintConfig, 8> kAnsUintConfigs = {{
   {4, 1, 0},
   {5, 2, 0},
 }};
+
+constexpr std::array<HybridUintConfig, 28> kHighDensityAnsUintConfigs = {{
+  {4, 2, 0}, {4, 1, 0}, {4, 2, 1}, {4, 2, 2}, {4, 1, 2},
+  {5, 2, 0}, {5, 1, 0}, {5, 2, 1}, {5, 2, 2}, {5, 1, 2},
+  {3, 2, 0}, {3, 1, 0}, {3, 2, 1}, {3, 1, 2},
+  {4, 1, 3}, {5, 1, 4}, {5, 2, 3}, {6, 1, 5}, {6, 2, 4},
+  {6, 0, 0}, {0, 0, 0}, {2, 0, 1}, {7, 0, 0}, {8, 0, 0},
+  {9, 0, 0}, {10, 0, 0}, {11, 0, 0}, {12, 0, 0},
+}};
+
+enum class AnsHistogramSearch {
+  kFast,
+  kApproximate,
+  kPrecise,
+};
+
+struct AnsOptimizationPolicy {
+  std::span<const HybridUintConfig> uint_configs;
+  AnsHistogramSearch histogram_search = AnsHistogramSearch::kPrecise;
+  bool smallest_alphabet_width = false;
+};
+
+constexpr AnsOptimizationPolicy kMaximumCompressionAnsPolicy{
+  .uint_configs = kAnsUintConfigs,
+};
 
 uint32_t PopulationCountPrecision(uint32_t log_count, uint32_t shift) {
   const int32_t precision = std::min<int32_t>(
@@ -782,6 +810,7 @@ Status EstimateAnsHistogramCost(
 
 Status BuildBestAnsHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
+  AnsHistogramSearch search,
   AnsHistogram* histogram) {
 
   if (histogram == nullptr) {
@@ -833,7 +862,27 @@ Status BuildBestAnsHistogram(
   if (Status status = consider(std::move(flat)); !status.ok()) {
     return status;
   }
+  std::array<bool, kAnsLogTableSize> shifts{};
+  switch (search) {
+    case AnsHistogramSearch::kFast:
+      shifts[0] = true;
+      shifts[kAnsLogTableSize / 2] = true;
+      shifts[kAnsLogTableSize - 1] = true;
+      break;
+    case AnsHistogramSearch::kApproximate:
+      for (size_t shift = 0; shift < kAnsLogTableSize; shift += 2) {
+        shifts[shift] = true;
+      }
+      shifts[kAnsLogTableSize - 1] = true;
+      break;
+    case AnsHistogramSearch::kPrecise:
+      shifts.fill(true);
+      break;
+  }
   for (uint32_t shift = 0; shift < kAnsLogTableSize; ++shift) {
+    if (!shifts[shift]) {
+      continue;
+    }
     AnsHistogram candidate;
     candidate.method = static_cast<uint8_t>(shift + 1);
     if (!RebalanceHistogram(
@@ -846,6 +895,454 @@ Status BuildBestAnsHistogram(
     }
   }
   *histogram = std::move(best);
+  return Status::Ok();
+}
+
+struct DirectAnsHistogram {
+  std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
+  uint64_t total_count = 0;
+  double shannon_bits = 0.0;
+
+  bool Add(size_t symbol) {
+    if (symbol >= counts.size() ||
+        counts[symbol] == std::numeric_limits<uint64_t>::max() ||
+        total_count == std::numeric_limits<uint64_t>::max()) {
+      return false;
+    }
+    ++counts[symbol];
+    ++total_count;
+    return true;
+  }
+
+  bool AddHistogram(const DirectAnsHistogram& other) {
+    if (total_count >
+        std::numeric_limits<uint64_t>::max() - other.total_count) {
+      return false;
+    }
+    for (size_t symbol = 0; symbol < counts.size(); ++symbol) {
+      if (counts[symbol] >
+          std::numeric_limits<uint64_t>::max() - other.counts[symbol]) {
+        return false;
+      }
+      counts[symbol] += other.counts[symbol];
+    }
+    total_count += other.total_count;
+    return true;
+  }
+};
+
+double DirectHistogramShannonBits(const DirectAnsHistogram& histogram) {
+  if (histogram.total_count == 0) {
+    return 0.0;
+  }
+  const double total = static_cast<double>(histogram.total_count);
+  double bits = total * std::log2(total);
+  for (uint64_t count : histogram.counts) {
+    if (count != 0) {
+      bits -= static_cast<double>(count) *
+        std::log2(static_cast<double>(count));
+    }
+  }
+  return bits;
+}
+
+Status DirectHistogramDistance(
+  const DirectAnsHistogram& left,
+  const DirectAnsHistogram& right,
+  double* distance) {
+
+  if (distance == nullptr) {
+    return Status::InvalidArgument("Direct ANS distance output is null");
+  }
+  DirectAnsHistogram combined = left;
+  if (!combined.AddHistogram(right)) {
+    return Status::InvalidArgument("Direct ANS histogram count overflow");
+  }
+  *distance = DirectHistogramShannonBits(combined) -
+    left.shannon_bits - right.shannon_bits;
+  return Status::Ok();
+}
+
+Status CanonicalizeDirectClusters(
+  const std::vector<DirectAnsHistogram>& input,
+  std::vector<DirectAnsHistogram>* clustered,
+  std::vector<uint32_t>* symbols) {
+
+  if (clustered == nullptr || symbols == nullptr ||
+      symbols->size() != input.size() || clustered->empty()) {
+    return Status::InvalidArgument("Direct ANS cluster state is invalid");
+  }
+  std::vector<size_t> new_indexes(
+    clustered->size(), std::numeric_limits<size_t>::max());
+  size_t next_index = 0;
+  for (size_t histogram = 0; histogram < input.size(); ++histogram) {
+    if (input[histogram].total_count == 0) {
+      continue;
+    }
+    const size_t cluster = (*symbols)[histogram];
+    if (cluster >= clustered->size()) {
+      return Status::Internal("Direct ANS cluster index is invalid");
+    }
+    if (new_indexes[cluster] == std::numeric_limits<size_t>::max()) {
+      new_indexes[cluster] = next_index++;
+    }
+  }
+  if (next_index == 0) {
+    clustered->assign(1, DirectAnsHistogram{});
+    std::fill(symbols->begin(), symbols->end(), 0);
+    return Status::Ok();
+  }
+  std::vector<DirectAnsHistogram> reordered(next_index);
+  for (size_t histogram = 0; histogram < input.size(); ++histogram) {
+    if (input[histogram].total_count == 0) {
+      (*symbols)[histogram] = 0;
+      continue;
+    }
+    const size_t cluster = (*symbols)[histogram];
+    const size_t new_index = new_indexes[cluster];
+    if (new_index >= reordered.size() ||
+        !reordered[new_index].AddHistogram(input[histogram])) {
+      return Status::InvalidArgument("Direct ANS histogram count overflow");
+    }
+    (*symbols)[histogram] = static_cast<uint32_t>(new_index);
+  }
+  for (DirectAnsHistogram& histogram : reordered) {
+    histogram.shannon_bits = DirectHistogramShannonBits(histogram);
+  }
+  *clustered = std::move(reordered);
+  return Status::Ok();
+}
+
+Status FastClusterDirectAnsHistograms(
+  const std::vector<DirectAnsHistogram>& input,
+  std::vector<DirectAnsHistogram>* clustered,
+  std::vector<uint32_t>* symbols) {
+
+  if (input.empty() || clustered == nullptr || symbols == nullptr) {
+    return Status::InvalidArgument("Direct ANS clustering input is invalid");
+  }
+  constexpr size_t kMaximumClusters = kMaximumPrefixClusters;
+  constexpr double kMinimumDistinctDistance = 48.0;
+  std::vector<DirectAnsHistogram> source = input;
+  for (DirectAnsHistogram& histogram : source) {
+    histogram.shannon_bits = DirectHistogramShannonBits(histogram);
+  }
+  clustered->clear();
+  clustered->reserve(std::min(kMaximumClusters, source.size()));
+  symbols->assign(source.size(), kMaximumClusters);
+  std::vector<double> distances(
+    source.size(), std::numeric_limits<double>::infinity());
+  size_t largest_index = 0;
+  for (size_t index = 0; index < source.size(); ++index) {
+    if (source[index].total_count == 0) {
+      (*symbols)[index] = 0;
+      distances[index] = 0.0;
+    } else if (source[index].total_count > source[largest_index].total_count) {
+      largest_index = index;
+    }
+  }
+  while (clustered->size() < std::min(kMaximumClusters, source.size())) {
+    (*symbols)[largest_index] = static_cast<uint32_t>(clustered->size());
+    clustered->push_back(source[largest_index]);
+    distances[largest_index] = 0.0;
+    largest_index = 0;
+    for (size_t index = 0; index < source.size(); ++index) {
+      if (distances[index] == 0.0) {
+        continue;
+      }
+      double distance = 0.0;
+      if (Status status = DirectHistogramDistance(
+            source[index], clustered->back(), &distance);
+          !status.ok()) {
+        return status;
+      }
+      distances[index] = std::min(distances[index], distance);
+      if (distances[index] > distances[largest_index]) {
+        largest_index = index;
+      }
+    }
+    if (distances[largest_index] < kMinimumDistinctDistance) {
+      break;
+    }
+  }
+  for (size_t index = 0; index < source.size(); ++index) {
+    if ((*symbols)[index] != kMaximumClusters) {
+      continue;
+    }
+    size_t best = 0;
+    double best_distance = std::numeric_limits<double>::infinity();
+    for (size_t cluster = 0; cluster < clustered->size(); ++cluster) {
+      double distance = 0.0;
+      if (Status status = DirectHistogramDistance(
+            source[index], (*clustered)[cluster], &distance);
+          !status.ok()) {
+        return status;
+      }
+      if (distance < best_distance) {
+        best = cluster;
+        best_distance = distance;
+      }
+    }
+    if (!(*clustered)[best].AddHistogram(source[index])) {
+      return Status::InvalidArgument("Direct ANS histogram count overflow");
+    }
+    (*clustered)[best].shannon_bits =
+      DirectHistogramShannonBits((*clustered)[best]);
+    (*symbols)[index] = static_cast<uint32_t>(best);
+  }
+  return CanonicalizeDirectClusters(source, clustered, symbols);
+}
+
+Status DirectAnsPopulationCost(
+  const DirectAnsHistogram& histogram,
+  double* cost) {
+
+  if (cost == nullptr) {
+    return Status::InvalidArgument("Direct ANS population cost is null");
+  }
+  AnsHistogram normalized;
+  if (Status status = BuildBestAnsHistogram(
+        histogram.counts, AnsHistogramSearch::kFast, &normalized);
+      !status.ok()) {
+    return status;
+  }
+  return EstimateAnsHistogramCost(histogram.counts, normalized, cost);
+}
+
+Status RefineBestDirectAnsClusters(
+  const std::vector<DirectAnsHistogram>& input,
+  std::vector<DirectAnsHistogram>* clustered,
+  std::vector<uint32_t>* symbols) {
+
+  if (clustered == nullptr || symbols == nullptr || clustered->empty()) {
+    return Status::InvalidArgument("Direct ANS refinement input is invalid");
+  }
+  struct Pair {
+    double cost = 0.0;
+    uint32_t first = 0;
+    uint32_t second = 0;
+    uint32_t version = 0;
+
+    bool operator<(const Pair& other) const {
+      return std::tie(cost, first, second, version) >
+        std::tie(other.cost, other.first, other.second, other.version);
+    }
+  };
+  std::vector<double> costs(clustered->size());
+  for (size_t index = 0; index < clustered->size(); ++index) {
+    if (Status status = DirectAnsPopulationCost(
+          (*clustered)[index], &costs[index]); !status.ok()) {
+      return status;
+    }
+  }
+  std::vector<uint32_t> versions(clustered->size(), 1);
+  std::vector<uint32_t> renumbering(clustered->size());
+  std::iota(renumbering.begin(), renumbering.end(), uint32_t{0});
+  std::priority_queue<Pair> pairs;
+  const auto enqueue = [&](uint32_t left, uint32_t right,
+                           auto* queue) -> Status {
+    DirectAnsHistogram merged = (*clustered)[left];
+    if (!merged.AddHistogram((*clustered)[right])) {
+      return Status::InvalidArgument("Direct ANS histogram count overflow");
+    }
+    double merged_cost = 0.0;
+    if (Status status = DirectAnsPopulationCost(merged, &merged_cost);
+        !status.ok()) {
+      return status;
+    }
+    const double cost = merged_cost - costs[left] - costs[right];
+    if (cost < 0.0) {
+      queue->push({
+        cost, std::min(left, right), std::max(left, right),
+        std::max(versions[left], versions[right])});
+    }
+    return Status::Ok();
+  };
+  for (uint32_t left = 0; left < clustered->size(); ++left) {
+    for (uint32_t right = left + 1; right < clustered->size(); ++right) {
+      if (Status status = enqueue(left, right, &pairs); !status.ok()) {
+        return status;
+      }
+    }
+  }
+  uint32_t next_version = 2;
+  while (!pairs.empty()) {
+    const Pair pair = pairs.top();
+    pairs.pop();
+    if (pair.version !=
+          std::max(versions[pair.first], versions[pair.second]) ||
+        versions[pair.first] == 0 || versions[pair.second] == 0) {
+      continue;
+    }
+    if (!(*clustered)[pair.first].AddHistogram(
+          (*clustered)[pair.second])) {
+      return Status::InvalidArgument("Direct ANS histogram count overflow");
+    }
+    if (Status status = DirectAnsPopulationCost(
+          (*clustered)[pair.first], &costs[pair.first]); !status.ok()) {
+      return status;
+    }
+    for (uint32_t& cluster : renumbering) {
+      if (cluster == pair.second) {
+        cluster = pair.first;
+      }
+    }
+    versions[pair.second] = 0;
+    versions[pair.first] = next_version++;
+    for (uint32_t other = 0; other < clustered->size(); ++other) {
+      if (other == pair.first || versions[other] == 0) {
+        continue;
+      }
+      if (Status status = enqueue(pair.first, other, &pairs); !status.ok()) {
+        return status;
+      }
+    }
+  }
+  std::vector<uint32_t> reverse(clustered->size(), 0);
+  size_t alive = 0;
+  for (size_t index = 0; index < clustered->size(); ++index) {
+    if (versions[index] == 0) {
+      continue;
+    }
+    (*clustered)[alive] = (*clustered)[index];
+    reverse[index] = static_cast<uint32_t>(alive++);
+  }
+  clustered->resize(alive);
+  for (uint32_t& cluster : *symbols) {
+    cluster = reverse[renumbering[cluster]];
+  }
+  return CanonicalizeDirectClusters(input, clustered, symbols);
+}
+
+Status PrepareDirectAnsPartition(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  codestream_internal::DirectAnsEntropyMode mode,
+  EntropyCode* partition,
+  codestream_internal::PreparedEntropyClusters* prepared,
+  EntropyWorkProfile* profile) {
+
+  if (partition == nullptr || prepared == nullptr ||
+      options.context_count == 0) {
+    return Status::InvalidArgument("Direct ANS partition output is invalid");
+  }
+  size_t histogram_count = options.context_count;
+  if (!options.initial_context_map.empty()) {
+    if (options.initial_context_map.size() != options.context_count ||
+        options.initial_histogram_count == 0 ||
+        options.initial_histogram_count > 256) {
+      return Status::InvalidArgument("Initial entropy context map is invalid");
+    }
+    histogram_count = options.initial_histogram_count;
+    for (uint8_t histogram : options.initial_context_map) {
+      if (histogram >= histogram_count) {
+        return Status::InvalidArgument(
+          "Initial context-map entry is out of range");
+      }
+    }
+  } else if (options.initial_histogram_count != 0) {
+    return Status::InvalidArgument(
+      "Initial histogram count requires an initial context map");
+  }
+
+  try {
+    const ProfileClock::time_point histogram_begin = ProfileBegin(profile);
+    std::vector<DirectAnsHistogram> histograms(histogram_count);
+    for (const EntropyTokenStreamView section : section_tokens) {
+      if (!section.valid()) {
+        return Status::InvalidArgument("ANS token-stream view is invalid");
+      }
+      for (size_t index = 0; index < section.size(); ++index) {
+        const EntropyToken token = section[index];
+        if (token.context >= options.context_count) {
+          return Status::InvalidArgument("ANS token context is out of range");
+        }
+        HybridUintToken encoded;
+        if (Status status = EncodeHybridUint(
+              token.value, options.uint_config, &encoded);
+            !status.ok()) {
+          return status;
+        }
+        const size_t histogram = options.initial_context_map.empty()
+          ? token.context
+          : options.initial_context_map[token.context];
+        if (!histograms[histogram].Add(encoded.symbol)) {
+          return Status::InvalidArgument("ANS histogram count overflow");
+        }
+      }
+    }
+    ProfileEnd(
+      profile, histogram_begin,
+      &EntropyWorkProfile::ans_histogram_build_nanoseconds);
+
+    const ProfileClock::time_point clustering_begin = ProfileBegin(profile);
+    std::vector<DirectAnsHistogram> clustered;
+    std::vector<uint32_t> histogram_symbols;
+    Status status = FastClusterDirectAnsHistograms(
+      histograms, &clustered, &histogram_symbols);
+    if (status.ok() &&
+        mode == codestream_internal::DirectAnsEntropyMode::kHighDensity) {
+      status = RefineBestDirectAnsClusters(
+        histograms, &clustered, &histogram_symbols);
+    }
+    ProfileEnd(
+      profile, clustering_begin,
+      &EntropyWorkProfile::ans_histogram_build_nanoseconds);
+    if (!status.ok()) {
+      return status;
+    }
+
+    EntropyCode candidate_partition;
+    candidate_partition.context_count = options.context_count;
+    candidate_partition.context_map.resize(options.context_count);
+    for (size_t context = 0; context < options.context_count; ++context) {
+      const size_t initial = options.initial_context_map.empty()
+        ? context
+        : options.initial_context_map[context];
+      if (initial >= histogram_symbols.size() ||
+          histogram_symbols[initial] >= clustered.size()) {
+        return Status::Internal("Direct ANS context map is incomplete");
+      }
+      candidate_partition.context_map[context] =
+        static_cast<uint8_t>(histogram_symbols[initial]);
+    }
+
+    const ProfileClock::time_point value_begin = ProfileBegin(profile);
+    std::vector<std::vector<uint32_t>> cluster_values(clustered.size());
+    for (const EntropyTokenStreamView section : section_tokens) {
+      for (size_t index = 0; index < section.size(); ++index) {
+        const EntropyToken token = section[index];
+        const size_t cluster = candidate_partition.context_map[token.context];
+        cluster_values[cluster].push_back(token.value);
+      }
+    }
+    ProfileEnd(
+      profile, value_begin,
+      &EntropyWorkProfile::ans_value_collection_nanoseconds);
+    const ProfileClock::time_point aggregation_begin = ProfileBegin(profile);
+    std::vector<std::vector<codestream_internal::WeightedValue>>
+      aggregated(clustered.size());
+    for (size_t cluster = 0; cluster < clustered.size(); ++cluster) {
+      if (Status aggregate = codestream_internal::AggregateEntropyValues(
+            std::move(cluster_values[cluster]), &aggregated[cluster]);
+          !aggregate.ok()) {
+        return aggregate;
+      }
+    }
+    ProfileEnd(
+      profile, aggregation_begin,
+      &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
+    *prepared = {
+      .context_count = candidate_partition.context_count,
+      .context_map = candidate_partition.context_map,
+      .values = std::move(aggregated),
+    };
+    *partition = std::move(candidate_partition);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
   return Status::Ok();
 }
 
@@ -1377,7 +1874,9 @@ Status ValidatePreparedEntropyClusters(
 
   if (prepared.context_count != prefix_partition.context_count ||
       prepared.context_map != prefix_partition.context_map ||
-      prepared.values.size() != prefix_partition.prefix_codes.size()) {
+      prepared.values.empty() ||
+      (!prefix_partition.prefix_codes.empty() &&
+       prepared.values.size() != prefix_partition.prefix_codes.size())) {
     return Status::InvalidArgument(
       "Prepared entropy clusters do not match the prefix partition");
   }
@@ -1417,29 +1916,36 @@ Status OptimizeAnsEntropyCodeImpl(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& prefix_partition,
   const codestream_internal::PreparedEntropyClusters* prepared,
+  AnsOptimizationPolicy policy,
   EntropyCode* code,
   EntropyCodeCost* cost,
   codestream_internal::PreparedAnsEntropyCode* deferred,
   codestream_internal::EntropyWorkProfile* profile) {
 
+  const bool direct_partition =
+    prepared != nullptr && prefix_partition.prefix_codes.empty();
   if ((code == nullptr) == (deferred == nullptr) ||
       prefix_partition.mode != EntropyCodingMode::kPrefix ||
-      prefix_partition.prefix_codes.empty()) {
+      (!direct_partition && prefix_partition.prefix_codes.empty())) {
     return Status::InvalidArgument("ANS partition input is invalid");
   }
-  const ProfileClock::time_point prefix_validation_begin =
-    ProfileBegin(profile);
-  BitWriter validated_prefix;
-  if (Status status = WriteEntropyCode(
-        prefix_partition, &validated_prefix);
-      !status.ok()) {
-    return status;
+  if (!direct_partition) {
+    const ProfileClock::time_point prefix_validation_begin =
+      ProfileBegin(profile);
+    BitWriter validated_prefix;
+    if (Status status = WriteEntropyCode(
+          prefix_partition, &validated_prefix);
+        !status.ok()) {
+      return status;
+    }
+    ProfileEnd(
+      profile, prefix_validation_begin,
+      &EntropyWorkProfile::ans_prefix_validation_nanoseconds);
   }
-  ProfileEnd(
-    profile, prefix_validation_begin,
-    &EntropyWorkProfile::ans_prefix_validation_nanoseconds);
   try {
-    const size_t cluster_count = prefix_partition.prefix_codes.size();
+    const size_t cluster_count = direct_partition
+      ? prepared->values.size()
+      : prefix_partition.prefix_codes.size();
     std::vector<std::vector<uint32_t>> values;
     if (prepared != nullptr) {
       const ProfileClock::time_point validation_begin =
@@ -1513,7 +2019,10 @@ Status OptimizeAnsEntropyCodeImpl(
           &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
         cluster_values = weighted_values;
       }
-      for (HybridUintConfig config : kAnsUintConfigs) {
+      for (HybridUintConfig config : policy.uint_configs) {
+        if (profile != nullptr) {
+          ++profile->ans_uint_config_candidate_count;
+        }
         const ProfileClock::time_point uint_config_begin =
           ProfileBegin(profile);
         std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
@@ -1556,7 +2065,7 @@ Status OptimizeAnsEntropyCodeImpl(
         const ProfileClock::time_point histogram_begin =
           ProfileBegin(profile);
         if (Status status = BuildBestAnsHistogram(
-              counts, &option.histogram);
+              counts, policy.histogram_search, &option.histogram);
             !status.ok()) {
           return status;
         }
@@ -1666,6 +2175,12 @@ Status OptimizeAnsEntropyCodeImpl(
       }
       width_candidates.push_back({
         std::move(candidate), model.bits_written(), minimum_token_bits, true});
+      if (profile != nullptr) {
+        ++profile->ans_alphabet_width_candidate_count;
+      }
+      if (policy.smallest_alphabet_width) {
+        break;
+      }
     }
 
     for (size_t candidate_index = 0;
@@ -1806,7 +2321,7 @@ Status codestream_internal::PrepareAnsEntropyCodeWithPreparedClusters(
   }
   return OptimizeAnsEntropyCodeImpl(
     section_tokens, prefix_partition, &prepared,
-    nullptr, nullptr, deferred, profile);
+    kMaximumCompressionAnsPolicy, nullptr, nullptr, deferred, profile);
 }
 
 Status codestream_internal::MeasurePreparedAnsEntropyCodeSection(
@@ -2005,7 +2520,51 @@ Status OptimizeAnsEntropyCode(
   EntropyCodeCost* cost,
   codestream_internal::EntropyWorkProfile* profile) {
   return OptimizeAnsEntropyCodeImpl(
-    section_tokens, prefix_partition, nullptr, code, cost, nullptr, profile);
+    section_tokens, prefix_partition, nullptr, kMaximumCompressionAnsPolicy,
+    code, cost, nullptr, profile);
+}
+
+Status codestream_internal::OptimizeDirectAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  DirectAnsEntropyMode mode,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  EntropyWorkProfile* profile) {
+
+  if (code == nullptr) {
+    return Status::InvalidArgument("Direct ANS output is null");
+  }
+  switch (mode) {
+    case DirectAnsEntropyMode::kBalanced:
+    case DirectAnsEntropyMode::kHighDensity:
+      break;
+    default:
+      return Status::InvalidArgument("Direct ANS mode is invalid");
+  }
+  EntropyCode partition;
+  PreparedEntropyClusters prepared;
+  Status status = PrepareDirectAnsPartition(
+    section_tokens, options, mode, &partition, &prepared, profile);
+  if (!status.ok()) {
+    return status;
+  }
+  const std::array<HybridUintConfig, 1> balanced_configs = {
+    options.uint_config};
+  const AnsOptimizationPolicy policy = mode == DirectAnsEntropyMode::kBalanced
+    ? AnsOptimizationPolicy{
+        .uint_configs = balanced_configs,
+        .histogram_search = AnsHistogramSearch::kApproximate,
+        .smallest_alphabet_width = true,
+      }
+    : AnsOptimizationPolicy{
+        .uint_configs = kHighDensityAnsUintConfigs,
+        .histogram_search = AnsHistogramSearch::kPrecise,
+        .smallest_alphabet_width = true,
+      };
+  return OptimizeAnsEntropyCodeImpl(
+    section_tokens, partition, &prepared, policy,
+    code, cost, nullptr, profile);
 }
 
 Status codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
@@ -2016,7 +2575,8 @@ Status codestream_internal::OptimizeAnsEntropyCodeWithPreparedClusters(
   EntropyCodeCost* cost,
   EntropyWorkProfile* profile) {
   return OptimizeAnsEntropyCodeImpl(
-    section_tokens, prefix_partition, &prepared, code, cost, nullptr, profile);
+    section_tokens, prefix_partition, &prepared,
+    kMaximumCompressionAnsPolicy, code, cost, nullptr, profile);
 }
 
 Status OptimizeAnsEntropyCode(

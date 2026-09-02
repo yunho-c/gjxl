@@ -63,6 +63,7 @@ void AccumulateCodestreamProfile(
   const codestream_internal::VarDctCodestreamProfile& source,
   codestream_internal::VarDctCodestreamProfile* destination) {
 
+  destination->entropy_behavior = source.entropy_behavior;
   destination->validation_nanoseconds += source.validation_nanoseconds;
   destination->dc_tokenization_nanoseconds +=
     source.dc_tokenization_nanoseconds;

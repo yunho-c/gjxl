@@ -15,6 +15,7 @@
 #include "codestream/entropy.h"
 #include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
+#include "codestream/profile_internal.h"
 
 namespace {
 
@@ -923,6 +924,79 @@ bool CheckAnsSmallHistograms() {
   return true;
 }
 
+bool CheckDirectAnsOptimization() {
+  std::array<std::vector<gjxl::EntropyToken>, 3> sections;
+  for (size_t section = 0; section < sections.size(); ++section) {
+    for (size_t index = 0; index < 120; ++index) {
+      sections[section].push_back({
+        static_cast<uint32_t>((index + section) % 6),
+        static_cast<uint32_t>((3 * index + 5 * section) % 16),
+      });
+    }
+  }
+  std::array<gjxl::EntropyTokenStreamView, 3> views;
+  for (size_t section = 0; section < sections.size(); ++section) {
+    views[section] =
+      gjxl::EntropyTokenStreamView::Interleaved(sections[section]);
+  }
+
+  for (const auto mode : {
+         gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced,
+         gjxl::codestream_internal::DirectAnsEntropyMode::kHighDensity}) {
+    gjxl::EntropyCode first;
+    gjxl::EntropyCode second;
+    gjxl::EntropyCodeCost first_cost;
+    gjxl::EntropyCodeCost second_cost;
+    gjxl::codestream_internal::EntropyWorkProfile profile;
+    if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+          views, {.context_count = 6}, mode,
+          &first, &first_cost, &profile).ok() ||
+        !gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+          views, {.context_count = 6}, mode,
+          &second, &second_cost).ok() ||
+        first != second || first_cost != second_cost ||
+        first.mode != gjxl::EntropyCodingMode::kAns ||
+        first.ans_log_alpha_size != 5 ||
+        first.ans_histograms.empty() ||
+        first.context_map.size() != first.context_count ||
+        first_cost.section_token_bits.size() != sections.size() ||
+        profile.ans_alphabet_width_candidate_count != 1 ||
+        (mode ==
+             gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced
+           ? profile.ans_uint_config_candidate_count !=
+               first.ans_histograms.size()
+           : profile.ans_uint_config_candidate_count < 28 ||
+             profile.ans_uint_config_candidate_count % 28 != 0) ||
+        profile.prefix_histogram_build_nanoseconds != 0 ||
+        profile.prefix_clustering_nanoseconds != 0 ||
+        profile.prefix_code_build_nanoseconds != 0) {
+      std::cerr << "Direct ANS model construction failed\n";
+      return false;
+    }
+    gjxl::BitWriter model;
+    if (!gjxl::WriteEntropyCode(first, &model).ok() ||
+        model.bits_written() != first_cost.model_bits) {
+      std::cerr << "Direct ANS model cost differs from serialization\n";
+      return false;
+    }
+    uint64_t token_bits = 0;
+    for (size_t section = 0; section < sections.size(); ++section) {
+      gjxl::BitWriter payload;
+      if (!gjxl::WriteTokenStream(sections[section], first, &payload).ok() ||
+          payload.bits_written() != first_cost.section_token_bits[section]) {
+        std::cerr << "Direct ANS token cost differs from serialization\n";
+        return false;
+      }
+      token_bits += payload.bits_written();
+    }
+    if (token_bits != first_cost.token_bits) {
+      std::cerr << "Direct ANS total token cost is incorrect\n";
+      return false;
+    }
+  }
+  return true;
+}
+
 bool CheckSplitTokenStreamParity() {
   const std::vector<std::vector<gjxl::EntropyToken>> sections = {
     {},
@@ -1275,6 +1349,7 @@ int main() {
       !CheckAnsRoundTripContract() ||
       !CheckAnsAdaptiveModelSelection() ||
       !CheckAnsSmallHistograms() ||
+      !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {
     return EXIT_FAILURE;

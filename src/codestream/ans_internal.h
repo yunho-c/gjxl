@@ -48,6 +48,22 @@ struct PreparedAnsEntropyCode {
   size_t section_count = 0;
 };
 
+enum class DirectAnsEntropyMode {
+  kBalanced,
+  kHighDensity,
+};
+
+/// Builds one ANS model directly from the requested contexts. Unlike the
+/// maximum-compression path, this does not derive the partition from an
+/// optimized Prefix model or compete across alphabet widths exactly.
+[[nodiscard]] Status OptimizeDirectAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  DirectAnsEntropyMode mode,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr,
+  EntropyWorkProfile* profile = nullptr);
+
 /// Builds ANS models without traversing the ordered streams for exact cost.
 [[nodiscard]] Status PrepareAnsEntropyCodeWithPreparedClusters(
   std::span<const EntropyTokenStreamView> section_tokens,

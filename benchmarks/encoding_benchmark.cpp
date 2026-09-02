@@ -963,6 +963,10 @@ struct RawWorkflowSample {
   size_t sample_index = 0;
   std::string_view backend;
   size_t peak_cpu_participants = 0;
+  gjxl::VarDctEntropyBehavior entropy_behavior =
+    gjxl::VarDctEntropyBehavior::kBalanced;
+  size_t ans_uint_config_candidate_count = 0;
+  size_t ans_alphabet_width_candidate_count = 0;
   std::array<uint64_t, kWorkflowProfileNames.size()> phase_nanoseconds{};
   size_t encoded_bytes = 0;
   uint64_t entropy_model_bits = 0;
@@ -1120,7 +1124,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 11,\n"
+           << "  \"schema_version\": 12,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
@@ -1170,6 +1174,18 @@ void WriteRawWorkflowSamples(
                << ", \"backend\": \"" << sample.backend
                << "\", \"peak_cpu_participants\": "
                << sample.peak_cpu_participants
+               << ", \"entropy_behavior\": \""
+               << (sample.entropy_behavior ==
+                         gjxl::VarDctEntropyBehavior::kMaximumCompression
+                     ? "maximum"
+                     : sample.entropy_behavior ==
+                           gjxl::VarDctEntropyBehavior::kHighDensity
+                         ? "high-density"
+                         : "balanced")
+               << "\", \"entropy_search\": {\"uint_configs\": "
+               << sample.ans_uint_config_candidate_count
+               << ", \"alphabet_widths\": "
+               << sample.ans_alphabet_width_candidate_count << "}"
                << ", \"encoded_bytes\": " << sample.encoded_bytes
                << ", \"entropy_bits\": {\"model\": "
                << sample.entropy_model_bits << ", \"tokens\": "
@@ -1703,6 +1719,11 @@ void RunPublicWorkflowOnlyWorkload(
     raw_sample.sample_index = sample_index;
     raw_sample.backend = backend;
     raw_sample.peak_cpu_participants = profile.peak_cpu_participants;
+    raw_sample.entropy_behavior = profile.codestream.entropy_behavior;
+    raw_sample.ans_uint_config_candidate_count =
+      profile.codestream.entropy_work.ans_uint_config_candidate_count;
+    raw_sample.ans_alphabet_width_candidate_count =
+      profile.codestream.entropy_work.ans_alphabet_width_candidate_count;
     raw_sample.phase_nanoseconds = WorkflowProfileValues(profile);
     raw_sample.encoded_bytes = bytes.size();
     raw_sample.entropy_model_bits = profile.codestream.entropy_model_bits;
