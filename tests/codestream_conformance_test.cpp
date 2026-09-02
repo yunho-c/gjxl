@@ -798,7 +798,11 @@ bool RunFixture(
   }
 
   std::vector<uint8_t> codestream;
-  status = gjxl::EncodeVarDctCodestream(prepared.frame, &codestream);
+  status = gjxl::EncodeVarDctCodestream(
+    prepared.frame,
+    {.entropy_behavior =
+       gjxl::VarDctEntropyBehavior::kMaximumCompression},
+    &codestream);
   if (!status.ok()) {
     std::cerr << fixture.name << ": codestream encoding failed: "
               << status.message() << '\n';

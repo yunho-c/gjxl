@@ -867,9 +867,10 @@ Status AssembleCandidate(
   return Status::Ok();
 }
 
-Status EncodeVarDctCodestreamMaximumCompression(
+Status EncodeVarDctCodestreamWithRepresentationPolicy(
   const VarDctEncoderFrame& frame,
   VarDctCodestreamOptions options,
+  bool exhaustive_representation_search,
   std::vector<uint8_t>* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
@@ -930,9 +931,20 @@ Status EncodeVarDctCodestreamMaximumCompression(
       [&](size_t index) {
         const ProfileClock::time_point work_begin =
           WorkBegin(profile != nullptr);
-        Status work_status = index == 0
-          ? ComputeSimpleBlockContextMapCandidates(frame, &block_context_maps)
-          : ComputeSimpleCoefficientOrders(frame, &custom_orders);
+        Status work_status;
+        if (index == 0 && exhaustive_representation_search) {
+          work_status = ComputeSimpleBlockContextMapCandidates(
+            frame, &block_context_maps);
+        } else if (index == 0) {
+          SimpleBlockContextMap block_context_map;
+          work_status = ComputeSimpleBlockContextMap(
+            frame, &block_context_map);
+          if (work_status.ok()) {
+            block_context_maps.push_back(std::move(block_context_map));
+          }
+        } else {
+          work_status = ComputeSimpleCoefficientOrders(frame, &custom_orders);
+        }
         WorkEnd(
           profile != nullptr, work_begin, &preparation_work[index]);
         return work_status;
@@ -962,7 +974,8 @@ Status EncodeVarDctCodestreamMaximumCompression(
       }
     }
     const bool has_custom_orders = custom_orders.used_order_mask != 0;
-    const size_t candidates_per_map = has_custom_orders ? 2 : 1;
+    const size_t candidates_per_map =
+      exhaustive_representation_search && has_custom_orders ? 2 : 1;
     if (block_context_maps.size() >
         std::numeric_limits<size_t>::max() / candidates_per_map) {
       return AllocationFailure();
@@ -974,8 +987,10 @@ Status EncodeVarDctCodestreamMaximumCompression(
       candidates.push_back({
         .block_context_candidate_index = map_index,
         .block_context_map = block_context_maps[map_index],
+        .custom_order =
+          !exhaustive_representation_search && has_custom_orders,
       });
-      if (has_custom_orders) {
+      if (exhaustive_representation_search && has_custom_orders) {
         candidates.push_back({
           .block_context_candidate_index = map_index,
           .block_context_map = block_context_maps[map_index],
@@ -984,7 +999,8 @@ Status EncodeVarDctCodestreamMaximumCompression(
       }
     }
     const SimpleCoefficientOrders natural_orders;
-    const size_t order_template_count = has_custom_orders ? 2 : 1;
+    const size_t order_template_count =
+      exhaustive_representation_search && has_custom_orders ? 2 : 1;
     std::array<std::vector<SimpleAcGroupTokenTemplate>, 2> order_templates;
     std::vector<uint64_t> coefficient_tokenization_work(
       profile == nullptr ? 0 : order_template_count);
@@ -994,7 +1010,10 @@ Status EncodeVarDctCodestreamMaximumCompression(
         const ProfileClock::time_point work_begin =
           WorkBegin(profile != nullptr);
         Status token_status = BuildSimpleAcGroupTokenTemplates(
-          frame, index == 0 ? natural_orders : custom_orders,
+          frame,
+          exhaustive_representation_search
+            ? (index == 0 ? natural_orders : custom_orders)
+            : (has_custom_orders ? custom_orders : natural_orders),
           &order_templates[index]);
         WorkEnd(
           profile != nullptr, work_begin,
@@ -1034,7 +1053,8 @@ Status EncodeVarDctCodestreamMaximumCompression(
         const ProfileClock::time_point work_begin =
           WorkBegin(profile != nullptr);
         AcEncodingCandidate& candidate = candidates[index];
-        const size_t order_index = candidate.custom_order ? 1 : 0;
+        const size_t order_index =
+          exhaustive_representation_search && candidate.custom_order ? 1 : 0;
         const auto& token_templates = order_templates[order_index];
         Status token_status = MaterializeSimpleAcGroupContexts(
           token_templates, candidate.block_context_map, &candidate.contexts);
@@ -1449,7 +1469,9 @@ Status EncodeVarDctCodestreamMaximumCompression(
       assembly_write_nanoseconds;
 
     candidate_profile.natural_candidate_bytes =
-      std::numeric_limits<size_t>::max();
+      exhaustive_representation_search
+        ? std::numeric_limits<size_t>::max()
+        : 0;
     for (const AcEncodingCandidate& candidate : candidates) {
       size_t& minimum = candidate.custom_order
         ? candidate_profile.custom_order_candidate_bytes
@@ -1458,7 +1480,8 @@ Status EncodeVarDctCodestreamMaximumCompression(
         minimum = candidate.complete_size;
       }
     }
-    if (candidate_profile.natural_candidate_bytes ==
+    if (exhaustive_representation_search &&
+        candidate_profile.natural_candidate_bytes ==
         std::numeric_limits<size_t>::max()) {
       return Status::Internal("Natural codestream candidate is missing");
     }
@@ -1467,8 +1490,10 @@ Status EncodeVarDctCodestreamMaximumCompression(
     candidate_profile.block_context_candidate_count = candidates_per_map == 0
       ? 0
       : candidates.size() / candidates_per_map;
+    const SimpleBlockContextMap compact_block_context_map =
+      DefaultSimpleBlockContextMap();
     for (const AcEncodingCandidate& candidate : candidates) {
-      if (candidate.block_context_candidate_index == 0 &&
+      if (candidate.block_context_map == compact_block_context_map &&
           (candidate_profile.compact_block_context_candidate_bytes == 0 ||
            candidate.complete_size <
              candidate_profile.compact_block_context_candidate_bytes)) {
@@ -1530,18 +1555,38 @@ Status EncodeVarDctCodestreamMaximumCompression(
   }
 }
 
+Status EncodeVarDctCodestreamMaximumCompression(
+  const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output,
+  codestream_internal::VarDctCodestreamProfile* profile) {
+
+  return EncodeVarDctCodestreamWithRepresentationPolicy(
+    frame, options, true, output, profile);
+}
+
+Status EncodeVarDctCodestreamSingleRepresentation(
+  const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output,
+  codestream_internal::VarDctCodestreamProfile* profile) {
+
+  return EncodeVarDctCodestreamWithRepresentationPolicy(
+    frame, options, false, output, profile);
+}
+
 Status EncodeVarDctCodestreamImpl(
   const VarDctEncoderFrame& frame,
   VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
-  // Balanced and high-density deliberately share the historical path until
-  // their single-representation implementation is introduced. Keeping the
-  // exhaustive implementation behind a named boundary makes maximum
-  // compression the byte-exact compatibility oracle during that migration.
-  return EncodeVarDctCodestreamMaximumCompression(
-    frame, options, output, profile);
+  return options.entropy_behavior ==
+      VarDctEntropyBehavior::kMaximumCompression
+    ? EncodeVarDctCodestreamMaximumCompression(
+        frame, options, output, profile)
+    : EncodeVarDctCodestreamSingleRepresentation(
+        frame, options, output, profile);
 }
 
 }  // namespace

@@ -264,14 +264,25 @@ bool CheckEncodedFrame(
   std::vector<uint8_t> profiled;
   gjxl::codestream_internal::VarDctCodestreamProfile profile;
   if (status.ok()) {
-    status = gjxl::EncodeVarDctCodestream(frame, &first);
+    status = gjxl::EncodeVarDctCodestream(
+      frame,
+      {.entropy_behavior =
+         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+      &first);
   }
   if (status.ok()) {
-    status = gjxl::EncodeVarDctCodestream(frame, &second);
+    status = gjxl::EncodeVarDctCodestream(
+      frame,
+      {.entropy_behavior =
+         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+      &second);
   }
   if (status.ok()) {
     status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
-      frame, &profiled, &profile);
+      frame,
+      {.entropy_behavior =
+         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+      &profiled, &profile);
   }
   const uint64_t profile_stage_total =
     profile.validation_nanoseconds + profile.dc_tokenization_nanoseconds +
@@ -369,7 +380,10 @@ bool CheckAdaptiveBlockContextSelection() {
   gjxl::codestream_internal::VarDctCodestreamProfile profile;
   if (status.ok()) {
     status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
-      frame, &output, &profile);
+      frame,
+      {.entropy_behavior =
+         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+      &output, &profile);
   }
   if (!status.ok() || profile.block_context_candidate_count != 5 ||
       profile.compact_block_context_candidate_bytes == 0 ||
@@ -396,6 +410,26 @@ bool CheckAdaptiveBlockContextSelection() {
               << profile.selected_block_context_candidate_index << '\n';
     return false;
   }
+
+  std::vector<uint8_t> balanced_output;
+  gjxl::codestream_internal::VarDctCodestreamProfile balanced_profile;
+  status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+    frame,
+    {.entropy_behavior = gjxl::VarDctEntropyBehavior::kBalanced},
+    &balanced_output, &balanced_profile);
+  if (!status.ok() || balanced_output.empty() ||
+      balanced_profile.block_context_candidate_count != 1 ||
+      balanced_profile.compact_block_context_candidate_bytes != 0 ||
+      balanced_profile.selected_block_context_candidate_index != 0 ||
+      balanced_profile.selected_block_context_count == 0 ||
+      balanced_profile.coefficient_tokenization_pass_count != 1 ||
+      balanced_profile.coefficient_context_materialization_count != 1) {
+    std::cerr << "Single block-context selection failed: "
+              << status.message() << ", bytes=" << balanced_output.size()
+              << ", contexts="
+              << balanced_profile.selected_block_context_count << '\n';
+    return false;
+  }
   return true;
 }
 
@@ -416,19 +450,6 @@ bool CheckAssemblyAndDeterminism() {
 bool CheckEntropyBehaviorPlumbing() {
   gjxl::VarDctEncoderFrame frame;
   gjxl::Status status = MakeFrame(64, 9, {3541, 10}, {}, &frame);
-  std::vector<uint8_t> reference;
-  if (status.ok()) {
-    status = gjxl::EncodeVarDctCodestream(
-      frame,
-      {.entropy_behavior = gjxl::VarDctEntropyBehavior::kBalanced},
-      &reference);
-  }
-  if (!status.ok() || reference.empty()) {
-    std::cerr << "Balanced entropy behavior failed: "
-              << status.message() << '\n';
-    return false;
-  }
-
   for (const gjxl::VarDctEntropyBehavior behavior : {
          gjxl::VarDctEntropyBehavior::kBalanced,
          gjxl::VarDctEntropyBehavior::kHighDensity,
@@ -437,8 +458,12 @@ bool CheckEntropyBehaviorPlumbing() {
     gjxl::codestream_internal::VarDctCodestreamProfile profile;
     status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
       frame, {.entropy_behavior = behavior}, &output, &profile);
-    if (!status.ok() || output != reference ||
-        profile.entropy_behavior != behavior) {
+    const bool exhaustive =
+      behavior == gjxl::VarDctEntropyBehavior::kMaximumCompression;
+    if (!status.ok() || output.empty() ||
+        profile.entropy_behavior != behavior ||
+        profile.coefficient_context_materialization_count !=
+          (exhaustive ? profile.coefficient_tokenization_pass_count : 1)) {
       std::cerr << "Entropy behavior plumbing failed: "
                 << status.message() << '\n';
       return false;
