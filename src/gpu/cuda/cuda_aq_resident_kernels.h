@@ -33,6 +33,17 @@ struct CudaAqColorTransformRecord {
   uint32_t tile_value_offset = 0;
 };
 
+struct CudaAqResidentPolicyParams {
+  uint32_t block_count = 0;
+  uint32_t score_count = 0;
+  uint32_t score_index = 0;
+  uint32_t iteration = 0;
+  uint32_t apply_update = 0;
+  float butteraugli_target = 0.0f;
+  float lower_bound = 0.0f;
+  float upper_bound = 0.0f;
+};
+
 [[nodiscard]] cudaError_t LaunchCudaAqAdjustQuantField(
     const CudaAqAnchor* anchors, float* quant_field, unsigned int* error,
     uint32_t quant_stride, CudaAqExactBatch batch, float mean_max_mixer,
@@ -65,5 +76,16 @@ struct CudaAqColorTransformRecord {
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqResidentPolicyInitialize(
+    const float* quant_field, float* initial_quant_field, float* scores,
+    unsigned int* error, CudaAqResidentPolicyParams params,
+    cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqResidentPolicyUpdate(
+    float* quant_field, const float* initial_quant_field,
+    const float* block_distance, const float* score, float* scores,
+    const unsigned int* quantizer, unsigned int* error,
+    CudaAqResidentPolicyParams params, cudaStream_t stream);
 
 }  // namespace gjxl::cuda_internal

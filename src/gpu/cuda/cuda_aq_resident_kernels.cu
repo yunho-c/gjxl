@@ -764,6 +764,88 @@ __global__ void EncodeResidentCoefficientsKernel(
   }
 }
 
+__global__ void ResidentPolicyInitializeKernel(
+    const float* quant_field, float* initial_quant_field, float* scores,
+    unsigned int* error, CudaAqResidentPolicyParams params) {
+  const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index < params.block_count) {
+    const float value = quant_field[index];
+    if (!isfinite(value) || value <= 0.0f) {
+      atomicOr(error, 1024u);
+    }
+    initial_quant_field[index] = value;
+  }
+  if (index < params.score_count) {
+    scores[index] = __uint_as_float(0x7fc12345u);
+  }
+}
+
+__global__ void ResidentPolicyUpdateKernel(float* quant_field,
+                                           const float* initial_quant_field,
+                                           const float* block_distance,
+                                           const float* score, float* scores,
+                                           const unsigned int* quantizer,
+                                           unsigned int* error,
+                                           CudaAqResidentPolicyParams params) {
+  const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+  const uint32_t global_scale = quantizer[0];
+  if (index == 0) {
+    const float value = score[0];
+    scores[params.score_index] = value;
+    if (!isfinite(value) || value < 0.0f || global_scale == 0 ||
+        global_scale > 32768 || quantizer[1] == 0 || quantizer[1] > 65536) {
+      atomicOr(error, 1024u);
+    }
+  }
+  if (index >= params.block_count) return;
+
+  float quant = quant_field[index];
+  const float initial = initial_quant_field[index];
+  const float distance = block_distance[index];
+  if (!isfinite(quant) || quant <= 0.0f || !isfinite(initial) ||
+      initial <= 0.0f || !isfinite(distance) || distance < 0.0f ||
+      !isfinite(params.butteraugli_target) ||
+      params.butteraugli_target <= 0.0f || !isfinite(params.lower_bound) ||
+      params.lower_bound <= 0.0f || !isfinite(params.upper_bound) ||
+      params.upper_bound < params.lower_bound || global_scale == 0) {
+    atomicOr(error, 1024u);
+    return;
+  }
+  if (params.apply_update == 0) return;
+
+  if (params.iteration == 1) {
+    const float initial_clamp = 0.4f * quant + 0.6f * initial;
+    if (quant < initial_clamp) {
+      quant =
+          fminf(fmaxf(initial_clamp, params.lower_bound), params.upper_bound);
+    }
+  }
+  const float difference = distance / params.butteraugli_target;
+  if (!isfinite(difference) || difference < 0.0f) {
+    atomicOr(error, 1024u);
+    return;
+  }
+  if (difference <= 1.0f) {
+    if (params.iteration < 2) quant *= powf(difference, 0.2f);
+  } else {
+    const float old = quant;
+    quant *= difference;
+    const float inverse_global_scale =
+        65536.0f / static_cast<float>(global_scale);
+    const float old_raw = floorf(old * inverse_global_scale + 0.5f);
+    const float new_raw = floorf(quant * inverse_global_scale + 0.5f);
+    if (old_raw == new_raw) {
+      quant = old + static_cast<float>(global_scale) / 65536.0f;
+    }
+  }
+  if (!isfinite(quant)) {
+    atomicOr(error, 1024u);
+    return;
+  }
+  quant_field[index] =
+      fminf(fmaxf(quant, params.lower_bound), params.upper_bound);
+}
+
 }  // namespace
 
 cudaError_t LaunchCudaAqAdjustQuantField(
@@ -827,6 +909,29 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficients(
       quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
       inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
       batch, params);
+  return cudaPeekAtLastError();
+}
+
+cudaError_t LaunchCudaAqResidentPolicyInitialize(
+    const float* quant_field, float* initial_quant_field, float* scores,
+    unsigned int* error, CudaAqResidentPolicyParams params,
+    cudaStream_t stream) {
+  const uint32_t count = max(params.block_count, params.score_count);
+  const uint32_t blocks = (count + kThreads - 1) / kThreads;
+  ResidentPolicyInitializeKernel<<<blocks, kThreads, 0, stream>>>(
+      quant_field, initial_quant_field, scores, error, params);
+  return cudaPeekAtLastError();
+}
+
+cudaError_t LaunchCudaAqResidentPolicyUpdate(
+    float* quant_field, const float* initial_quant_field,
+    const float* block_distance, const float* score, float* scores,
+    const unsigned int* quantizer, unsigned int* error,
+    CudaAqResidentPolicyParams params, cudaStream_t stream) {
+  const uint32_t blocks = (params.block_count + kThreads - 1) / kThreads;
+  ResidentPolicyUpdateKernel<<<blocks, kThreads, 0, stream>>>(
+      quant_field, initial_quant_field, block_distance, score, scores,
+      quantizer, error, params);
   return cudaPeekAtLastError();
 }
 

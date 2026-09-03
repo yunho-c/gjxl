@@ -81,6 +81,18 @@ struct CudaAcStrategyBatchParams {
     float butteraugli_target, float rescale, float quant_dc,
     cudaStream_t stream);
 
+[[nodiscard]] cudaError_t LaunchCudaAqInitialField(
+    const float* coding_x, const float* coding_y, const float* coding_b,
+    float* unblurred_pixel_mask, float* pixel_mask, float* pre_erosion,
+    float* quant_field, float* strategy_mask, unsigned int* error,
+    CudaAqGeometry geometry, float butteraugli_target, float rescale,
+    cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqInitialCfl(
+    const float* coding_x, const float* coding_y, const float* coding_b,
+    signed char* y_to_x, signed char* y_to_b, unsigned int* error,
+    CudaAqGeometry geometry, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqSelectResidentQuantizer(
     const float* quant_field, unsigned int block_count,
     unsigned int* selection_state, unsigned int* histogram, float* statistics,

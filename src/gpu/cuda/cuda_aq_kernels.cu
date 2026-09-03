@@ -740,13 +740,11 @@ cudaError_t CheckLaunch() { return cudaPeekAtLastError(); }
 
 }  // namespace
 
-cudaError_t LaunchCudaAqInitialQuantization(
+cudaError_t LaunchCudaAqInitialField(
     const float* coding_x, const float* coding_y, const float* coding_b,
     float* unblurred_pixel_mask, float* pixel_mask, float* pre_erosion,
-    float* quant_field, float* strategy_mask, unsigned int* selection_state,
-    unsigned int* histogram, float* statistics, unsigned int* quantizer_params,
-    int* raw_quant, unsigned int* error, CudaAqGeometry geometry,
-    float butteraugli_target, float rescale, float quant_dc,
+    float* quant_field, float* strategy_mask, unsigned int* error,
+    CudaAqGeometry geometry, float butteraugli_target, float rescale,
     cudaStream_t stream) {
   cudaError_t status = cudaMemsetAsync(error, 0, sizeof(*error), stream);
   if (status != cudaSuccess) return status;
@@ -798,32 +796,38 @@ cudaError_t LaunchCudaAqInitialQuantization(
       geometry.width, geometry.width, kNormalize, kNormalize * kFilter[0],
       kNormalize * kFilter[2], kNormalize * kFilter[1], kNormalize * kFilter[4],
       kNormalize * kFilter[3], stream);
-  if (status != cudaSuccess) return status;
+  return status;
+}
 
-  const unsigned int block_count = geometry.block_width * geometry.block_height;
-  const unsigned int grid = (block_count + kThreads - 1) / kThreads;
-  const unsigned int shifts[4] = {24, 16, 8, 0};
-  for (unsigned int deviation = 0; deviation < 2; ++deviation) {
-    SelectionInitializeKernel<<<1, 256, 0, stream>>>(selection_state, histogram,
-                                                     block_count / 2);
-    if ((status = CheckLaunch()) != cudaSuccess) return status;
-    for (unsigned int shift : shifts) {
-      SelectionHistogramKernel<<<grid, kThreads, 0, stream>>>(
-          quant_field, statistics, histogram, selection_state, block_count,
-          shift, deviation != 0);
-      if ((status = CheckLaunch()) != cudaSuccess) return status;
-      SelectionBucketKernel<<<1, 256, 0, stream>>>(
-          histogram, selection_state, statistics, shift, deviation != 0);
-      if ((status = CheckLaunch()) != cudaSuccess) return status;
-    }
-  }
-  const unsigned int scaled_quant_dc = static_cast<unsigned int>(
-      static_cast<int>(static_cast<double>(quant_dc * 4096.0f) * 1.6));
-  FinalizeQuantizerKernel<<<1, 1, 0, stream>>>(
-      statistics, quantizer_params, error, scaled_quant_dc, quant_dc);
-  if ((status = CheckLaunch()) != cudaSuccess) return status;
-  RawQuantKernel<<<grid, kThreads, 0, stream>>>(quant_field, quantizer_params,
-                                                raw_quant, error, block_count);
+cudaError_t LaunchCudaAqInitialQuantization(
+    const float* coding_x, const float* coding_y, const float* coding_b,
+    float* unblurred_pixel_mask, float* pixel_mask, float* pre_erosion,
+    float* quant_field, float* strategy_mask, unsigned int* selection_state,
+    unsigned int* histogram, float* statistics, unsigned int* quantizer_params,
+    int* raw_quant, unsigned int* error, CudaAqGeometry geometry,
+    float butteraugli_target, float rescale, float quant_dc,
+    cudaStream_t stream) {
+  cudaError_t status = LaunchCudaAqInitialField(
+      coding_x, coding_y, coding_b, unblurred_pixel_mask, pixel_mask,
+      pre_erosion, quant_field, strategy_mask, error, geometry,
+      butteraugli_target, rescale, stream);
+  if (status != cudaSuccess) return status;
+  return LaunchCudaAqSelectResidentQuantizer(
+      quant_field, geometry.block_width * geometry.block_height,
+      selection_state, histogram, statistics, quantizer_params, raw_quant,
+      error, quant_dc, stream);
+}
+
+cudaError_t LaunchCudaAqInitialCfl(const float* coding_x, const float* coding_y,
+                                   const float* coding_b, signed char* y_to_x,
+                                   signed char* y_to_b, unsigned int* error,
+                                   CudaAqGeometry geometry,
+                                   cudaStream_t stream) {
+  constexpr unsigned int kThreads = 256;
+  const unsigned int tile_count = geometry.tile_width * geometry.tile_height;
+  InitialCflKernel<<<(tile_count + kThreads - 1) / kThreads, kThreads, 0,
+                     stream>>>(coding_x, coding_y, coding_b, y_to_x, y_to_b,
+                               error, geometry);
   return CheckLaunch();
 }
 

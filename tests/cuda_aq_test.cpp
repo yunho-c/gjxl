@@ -542,6 +542,7 @@ bool CheckFullyResident(gjxl::GpuBackend& gpu, const ImageStorage& source,
   std::vector<float> bounded_block(block_count);
   std::vector<double> bounded_scores;
   Result full(block_count);
+  const gjxl::GpuBackendStats before_bounded = gpu.stats();
   if (!Check(gjxl::RunGpuAdaptiveQuantizationPolicy(
                  gpu, source.View(), opsin.View(), strategies,
                  {initial.data(), blocks, blocks.width},
@@ -553,13 +554,25 @@ bool CheckFullyResident(gjxl::GpuBackend& gpu, const ImageStorage& source,
                       {bounded_block.data(), blocks, blocks.width},
                   .score_history = &bounded_scores}),
              "CUDA bounded fully resident AQ") ||
-      !Check(gjxl::RunGpuAdaptiveQuantization(
+      gpu.stats().successful_allocations !=
+          before_bounded.successful_allocations + 3 ||
+      gpu.stats().committed_submissions !=
+          before_bounded.committed_submissions + 3) {
+    std::cerr << "CUDA bounded resident resource count differs\n";
+    return false;
+  }
+  const gjxl::GpuBackendStats before_full = gpu.stats();
+  if (!Check(gjxl::RunGpuAdaptiveQuantization(
                  gpu, source.View(), opsin.View(), strategies,
                  {initial.data(), blocks, blocks.width},
                  {sharpness.data(), blocks, blocks.width}, options,
                  gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
                  output(full)),
              "CUDA full fully resident AQ") ||
+      gpu.stats().successful_allocations !=
+          before_full.successful_allocations + 3 ||
+      gpu.stats().committed_submissions !=
+          before_full.committed_submissions + 3 ||
       bounded_quant != full.quant || bounded_block != full.block ||
       bounded_scores != full.scores || full.scores.size() != 4 ||
       !full.frame.valid()) {
@@ -886,6 +899,26 @@ bool CheckPreparedReuseAndFailure(
 bool CheckPublicWorkflow(
   gjxl::GpuBackend& gpu,
   const ImageStorage& source) {
+  std::vector<uint8_t> resident_bytes;
+  gjxl::VarDctEncodingSummary resident_summary;
+  if (!Check(gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+        source.View(),
+        {.butteraugli_target = 1.0f,
+         .backend = gjxl::VarDctBackendPreference::kCuda,
+         .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+         .collect_final_butteraugli_score = true},
+        &gpu, false, &resident_bytes, &resident_summary),
+      "Forced resident CUDA public workflow") || resident_bytes.empty() ||
+      resident_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kCuda ||
+      resident_summary.gpu_aq_mode !=
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
+      resident_summary.score_history.size() != 3 ||
+      !resident_summary.final_butteraugli_score_evaluated) {
+    return false;
+  }
+
   std::vector<uint8_t> bytes;
   gjxl::VarDctEncodingSummary summary;
   const gjxl::VarDctEncodingOptions options{

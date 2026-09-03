@@ -19,7 +19,9 @@
 #include <utility>
 #include <vector>
 
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/codestream.h"
+#include "codec/gaborish_internal.h"
 #include "codec/quantization_tables_generated.h"
 #include "codec/vardct_frame_internal.h"
 #include "core/ac_strategy.h"
@@ -28,6 +30,7 @@
 #include "gpu/cuda/cuda_aq_exact_kernels.h"
 #include "gpu/cuda/cuda_aq_resident_kernels.h"
 #include "gpu/cuda/cuda_backend_internal.h"
+#include "gpu/cuda/cuda_butteraugli_internal.h"
 #include "gpu/cuda/cuda_kernels.h"
 #include "gpu/scratch.h"
 #include "gpu/submission.h"
@@ -49,6 +52,9 @@ static_assert(sizeof(CudaAqResidentParams) == 68);
 static_assert(std::is_standard_layout_v<CudaAqColorTransformRecord>);
 static_assert(std::is_trivially_copyable_v<CudaAqColorTransformRecord>);
 static_assert(sizeof(CudaAqColorTransformRecord) == 24);
+static_assert(std::is_standard_layout_v<CudaAqResidentPolicyParams>);
+static_assert(std::is_trivially_copyable_v<CudaAqResidentPolicyParams>);
+static_assert(sizeof(CudaAqResidentPolicyParams) == 32);
 
 template <typename T>
 bool ValidHostPlaneLayout(PlaneView<T> plane) noexcept {
@@ -211,11 +217,17 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
       : backend_(&backend) {}
 
   Status Prepare(const AqEvaluationPreparation& preparation) {
-    if (preparation.frame_only || !preparation.resident_quantization ||
-        preparation.frame_only_inverse_gaborish ||
+    const bool resident_frontend =
+        preparation.resident_initial_cfl &&
+        preparation.frame_only_resident_initial_quant &&
+        preparation.resident_ac_strategy_inputs;
+    const bool partial_resident_frontend =
         preparation.resident_initial_cfl ||
         preparation.frame_only_resident_initial_quant ||
-        preparation.resident_ac_strategy_inputs ||
+        preparation.resident_ac_strategy_inputs;
+    if (preparation.frame_only || !preparation.resident_quantization ||
+        preparation.frame_only_inverse_gaborish ||
+        (partial_resident_frontend && !resident_frontend) ||
         preparation.frame_only_resident_quantizer ||
         preparation.resident_coding_opsin.plane[0].buffer != nullptr ||
         preparation.resident_coding_opsin.plane[1].buffer != nullptr ||
@@ -274,6 +286,7 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     }
     coefficient_count_ = 3 * coding_count_;
     options_ = preparation.options;
+    resident_frontend_ = resident_frontend;
     filter_stage_count_ =
         (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
         options_.profile.loop_filter.epf_options.iterations;
@@ -319,6 +332,10 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
       y_to_x_readback_.resize(tile_count_);
       y_to_b_readback_.resize(tile_count_);
       quant_field_readback_.resize(block_count_);
+      if (resident_frontend_) {
+        initial_strategy_readback_.resize(block_count_);
+        initial_pixel_readback_.resize(coding_count_);
+      }
       for (std::vector<float>& plane : linear_readback_) {
         plane.resize(source_count_);
       }
@@ -437,6 +454,137 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
       std::copy_n(quant_field_readback_.data() + y * block_extent_.width,
                   block_extent_.width, output.Row(y));
     }
+    return Status::Ok();
+  }
+
+  Status ComputeInitialQuantization(
+      InitialQuantizationOptions options, InitialQuantFieldOutput output,
+      QuantizerParams* quantizer, float quant_dc,
+      ColorCorrelationMap* initial_color_correlation) override {
+    if (!resident_frontend_) {
+      return Status::FailedPrecondition(
+          "CUDA resident initial quantization was not prepared");
+    }
+    if (!FinitePositive(options.butteraugli_target) ||
+        !FinitePositive(options.rescale) ||
+        !ValidHostPlaneLayout(output.quant_field) ||
+        output.quant_field.extent != block_extent_ ||
+        !ValidHostPlaneLayout(output.strategy_mask) ||
+        output.strategy_mask.extent != block_extent_ ||
+        !ValidHostPlaneLayout(output.pixel_mask) ||
+        output.pixel_mask.extent != coding_extent_) {
+      return Status::InvalidArgument(
+          "CUDA resident initial-quantization request is invalid");
+    }
+    (void)quantizer;
+    (void)quant_dc;
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation is already in use");
+    }
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation was invalidated");
+    }
+    resident_initial_ready_ = false;
+    InitialContext context{this, options};
+    std::unique_ptr<GpuSubmission> submission;
+    Status status = backend_->SubmitCompute(
+        &CudaPreparedResidentAqEvaluation::EncodeInitialQuantization, &context,
+        &submission);
+    if (!status.ok() || submission == nullptr) {
+      return Invalidate(
+          status.ok()
+              ? Status::Internal(
+                    "CUDA resident initial quantization returned no submission")
+              : status);
+    }
+    status = submission->Wait();
+    if (!status.ok()) return Invalidate(status);
+    status = ReadAndCheckDeviceError();
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+          *quant_field_device_.buffer, quant_field_readback_.data(),
+          block_count_ * sizeof(float), quant_field_device_.offset_bytes);
+    }
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+          *initial_strategy_device_.buffer, initial_strategy_readback_.data(),
+          block_count_ * sizeof(float), initial_strategy_device_.offset_bytes);
+    }
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+          *initial_pixel_device_.buffer, initial_pixel_readback_.data(),
+          coding_count_ * sizeof(float), initial_pixel_device_.offset_bytes);
+    }
+    if (status.ok() && initial_color_correlation != nullptr) {
+      status = backend_->CopyDeviceToHost(
+          *y_to_x_device_.buffer, y_to_x_readback_.data(),
+          tile_count_ * sizeof(int8_t), y_to_x_device_.offset_bytes);
+    }
+    if (status.ok() && initial_color_correlation != nullptr) {
+      status = backend_->CopyDeviceToHost(
+          *y_to_b_device_.buffer, y_to_b_readback_.data(),
+          tile_count_ * sizeof(int8_t), y_to_b_device_.offset_bytes);
+    }
+    if (!status.ok()) return Invalidate(status);
+    if (!std::ranges::all_of(quant_field_readback_, FinitePositive) ||
+        !std::ranges::all_of(initial_strategy_readback_, FinitePositive) ||
+        !std::ranges::all_of(initial_pixel_readback_, FinitePositive)) {
+      return Invalidate(Status::DeviceError(
+          "CUDA resident initial-quantization readback is invalid"));
+    }
+
+    ColorCorrelationMap candidate_color;
+    if (initial_color_correlation != nullptr) {
+      status = chroma_from_luma_internal::CreateColorCorrelationMap(
+          {y_to_x_readback_.data(), tile_extent_, tile_extent_.width},
+          {y_to_b_readback_.data(), tile_extent_, tile_extent_.width},
+          &candidate_color);
+      if (!status.ok()) return Invalidate(status);
+    }
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      std::copy_n(quant_field_readback_.data() + y * block_extent_.width,
+                  block_extent_.width, output.quant_field.Row(y));
+      std::copy_n(initial_strategy_readback_.data() + y * block_extent_.width,
+                  block_extent_.width, output.strategy_mask.Row(y));
+    }
+    for (size_t y = 0; y < coding_extent_.height; ++y) {
+      std::copy_n(initial_pixel_readback_.data() + y * coding_extent_.width,
+                  coding_extent_.width, output.pixel_mask.Row(y));
+    }
+    if (initial_color_correlation != nullptr) {
+      *initial_color_correlation = std::move(candidate_color);
+    }
+    resident_initial_ready_ = true;
+    return Status::Ok();
+  }
+
+  Status GetResidentAcStrategyInputs(
+      ResidentAcStrategyInputs* inputs) override {
+    if (inputs == nullptr) {
+      return Status::InvalidArgument(
+          "CUDA resident AC-strategy input output is null");
+    }
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation is already in use");
+    }
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation was invalidated");
+    }
+    if (!resident_frontend_ || !resident_initial_ready_) {
+      return Status::FailedPrecondition(
+          "CUDA resident initial quantization is unavailable");
+    }
+    const std::array<DevicePlaneView, 3>& search_opsin =
+        options_.profile.loop_filter.gaborish ? reconstructed_ : coding_;
+    *inputs = {.opsin = ConstImage(search_opsin),
+               .quant_field = quant_field_device_,
+               .pixel_mask = initial_pixel_device_};
     return Status::Ok();
   }
 
@@ -630,6 +778,195 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     return Status::Ok();
   }
 
+  Status EvaluateResidentButteraugliPolicy(
+      AqResidentButteraugliPolicyInput input,
+      AqResidentButteraugliPolicyOutput output) override {
+    if (options_.metric != AqEvaluationMetric::kButteraugli) {
+      return Status::Unavailable(
+          "CUDA resident Butteraugli policy was not prepared");
+    }
+    const bool quant_requested = output.quant_field.data != nullptr ||
+                                 !output.quant_field.extent.empty() ||
+                                 output.quant_field.stride != 0;
+    const bool block_requested = output.block_distance_map.data != nullptr ||
+                                 !output.block_distance_map.extent.empty() ||
+                                 output.block_distance_map.stride != 0;
+    const bool reconstruction_requested =
+        MutableImageSpecified(output.reconstructed_linear_rgb);
+    if (input.iterations > 4 || !FinitePositive(input.butteraugli_target) ||
+        !FinitePositive(input.lower_bound) ||
+        !std::isfinite(input.upper_bound) ||
+        input.upper_bound < input.lower_bound ||
+        input.upper_bound / input.lower_bound >= 253.0f ||
+        (quant_requested && (!ValidHostPlaneLayout(output.quant_field) ||
+                             output.quant_field.extent != block_extent_)) ||
+        (block_requested &&
+         (!ValidHostPlaneLayout(output.block_distance_map) ||
+          output.block_distance_map.extent != block_extent_)) ||
+        output.score_history == nullptr ||
+        (reconstruction_requested &&
+         (!output.reconstructed_linear_rgb.valid() ||
+          output.reconstructed_linear_rgb.extent() != source_extent_ ||
+          !std::ranges::all_of(
+              output.reconstructed_linear_rgb.plane,
+              [](PlaneF32View plane) {
+                return ValidHostPlaneLayout(plane);
+              }))) ||
+        (!input.evaluate_final_field &&
+         (input.iterations == 0 || output.frame == nullptr || block_requested ||
+          reconstruction_requested))) {
+      return Status::InvalidArgument(
+          "CUDA resident Butteraugli policy request is invalid");
+    }
+    Status status =
+        ValidateInput({.quant_field = input.adjusted_initial_quant_field,
+                       .quant_dc = input.quant_dc});
+    if (!status.ok()) return status;
+
+    const size_t score_count =
+        input.iterations + static_cast<size_t>(input.evaluate_final_field);
+    std::vector<double> candidate_scores;
+    try {
+      candidate_scores.resize(score_count);
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+          "Unable to allocate CUDA resident policy score staging");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+          "CUDA resident policy score staging is too large");
+    }
+
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation is already in use");
+    }
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation was invalidated");
+    }
+    if (!invariant_color_correlation_ready_ || butteraugli_ == nullptr) {
+      return Status::FailedPrecondition(
+          "CUDA resident policy invariant state is unavailable");
+    }
+    status = UploadPlane(*backend_, input.adjusted_initial_quant_field,
+                         quant_field_device_);
+    if (!status.ok()) return Invalidate(status);
+
+    PolicyContext context{this, input, score_count,
+                          !forward_coefficients_ready_,
+                          color_correlation_pending_};
+    std::unique_ptr<GpuSubmission> submission;
+    status = backend_->SubmitCompute(
+        &CudaPreparedResidentAqEvaluation::EncodeResidentPolicy, &context,
+        &submission);
+    if (!status.ok() || submission == nullptr) {
+      return Invalidate(
+          status.ok()
+              ? Status::Internal(
+                    "CUDA resident Butteraugli policy returned no submission")
+              : status);
+    }
+    status = submission->Wait();
+    if (!status.ok()) return Invalidate(status);
+    status = ReadAndCheckDeviceError();
+    if (!status.ok()) return Invalidate(status);
+
+    status = backend_->CopyDeviceToHost(
+        *policy_scores_device_.buffer, policy_score_readback_.data(),
+        score_count * sizeof(float), policy_scores_device_.offset_bytes);
+    if (quant_requested && status.ok()) {
+      status = backend_->CopyDeviceToHost(
+          *quant_field_device_.buffer, quant_field_readback_.data(),
+          block_count_ * sizeof(float), quant_field_device_.offset_bytes);
+    }
+    if (block_requested && status.ok()) {
+      status = backend_->CopyDeviceToHost(
+          *block_device_.buffer, block_readback_.data(),
+          block_count_ * sizeof(float), block_device_.offset_bytes);
+    }
+    if (!status.ok()) return Invalidate(status);
+
+    for (size_t index = 0; index < score_count; ++index) {
+      const float score = policy_score_readback_[index];
+      if (!std::isfinite(score) || score < 0.0f) {
+        return Invalidate(Status::DeviceError(
+            "CUDA resident policy score readback is invalid"));
+      }
+      candidate_scores[index] = score;
+    }
+    if (quant_requested &&
+        !std::ranges::all_of(quant_field_readback_, FinitePositive)) {
+      return Invalidate(Status::DeviceError(
+          "CUDA resident policy quant-field readback is invalid"));
+    }
+    if (block_requested &&
+        !std::ranges::all_of(block_readback_, [](float value) {
+          return std::isfinite(value) && value >= 0.0f;
+        })) {
+      return Invalidate(Status::DeviceError(
+          "CUDA resident policy block-map readback is invalid"));
+    }
+
+    VarDctEncoderFrame candidate_frame;
+    if (output.frame != nullptr) {
+      QuantizerParams candidate_params;
+      status = backend_->CopyDeviceToHost(
+          *quantizer_device_.buffer, &candidate_params,
+          sizeof(candidate_params), quantizer_device_.offset_bytes);
+      Quantizer candidate_quantizer;
+      if (status.ok()) {
+        status = Quantizer::Create(candidate_params, &candidate_quantizer);
+      }
+      if (status.ok())
+        status = AssembleFrame(candidate_quantizer, &candidate_frame);
+      if (!status.ok()) return Invalidate(status);
+    }
+    if (reconstruction_requested) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        status = backend_->CopyDeviceToHost(
+            *reconstructed_linear_[channel].buffer,
+            linear_readback_[channel].data(), source_count_ * sizeof(float),
+            reconstructed_linear_[channel].offset_bytes);
+        if (!status.ok()) return Invalidate(status);
+        if (!std::ranges::all_of(linear_readback_[channel], [](float value) {
+              return std::isfinite(value);
+            })) {
+          return Invalidate(Status::DeviceError(
+              "CUDA resident policy reconstruction readback is invalid"));
+        }
+      }
+    }
+
+    if (quant_requested) {
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        std::copy_n(quant_field_readback_.data() + y * block_extent_.width,
+                    block_extent_.width, output.quant_field.Row(y));
+      }
+    }
+    if (block_requested) {
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        std::copy_n(block_readback_.data() + y * block_extent_.width,
+                    block_extent_.width, output.block_distance_map.Row(y));
+      }
+    }
+    *output.score_history = std::move(candidate_scores);
+    if (reconstruction_requested) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        for (size_t y = 0; y < source_extent_.height; ++y) {
+          std::copy_n(
+              linear_readback_[channel].data() + y * source_extent_.width,
+              source_extent_.width,
+              output.reconstructed_linear_rgb.plane[channel].Row(y));
+        }
+      }
+    }
+    if (output.frame != nullptr) *output.frame = std::move(candidate_frame);
+    forward_coefficients_ready_ = true;
+    color_correlation_pending_ = false;
+    return Status::Ok();
+  }
+
   Status Reconfigure(const AcStrategyGrid& strategies,
                      ConstPlaneU8View epf_sharpness) override {
     Metadata metadata;
@@ -682,9 +1019,23 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     float mean_max_mixer = 1.0f;
   };
 
+  struct InitialContext {
+    CudaPreparedResidentAqEvaluation* self = nullptr;
+    InitialQuantizationOptions options;
+  };
+
   struct EvaluationContext {
     CudaPreparedResidentAqEvaluation* self = nullptr;
     float quant_dc = 0.0f;
+    bool compute_forward = false;
+    bool compute_color_correlation = false;
+    bool reset_error = true;
+  };
+
+  struct PolicyContext {
+    CudaPreparedResidentAqEvaluation* self = nullptr;
+    AqResidentButteraugliPolicyInput input;
+    size_t score_count = 0;
     bool compute_forward = false;
     bool compute_color_correlation = false;
   };
@@ -907,6 +1258,31 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     };
     status = plan_staging(DeviceElementType::kF32, block_extent_,
                           block_extent_.width);
+    if (resident_frontend_ && status.ok()) {
+      status = plan_staging(DeviceElementType::kF32, coding_extent_,
+                            coding_extent_.width);
+      if (status.ok()) {
+        status = plan_staging(DeviceElementType::kF32, coding_extent_,
+                              coding_extent_.width);
+      }
+      if (status.ok()) {
+        status =
+            plan_staging(DeviceElementType::kF32,
+                         {coding_extent_.width / 4, coding_extent_.height / 4},
+                         coding_extent_.width / 4);
+      }
+      if (status.ok()) {
+        status = plan_staging(DeviceElementType::kF32, block_extent_,
+                              block_extent_.width);
+      }
+    }
+    if (options_.metric == AqEvaluationMetric::kButteraugli && status.ok()) {
+      status = plan_staging(DeviceElementType::kF32, block_extent_,
+                            block_extent_.width);
+      if (status.ok()) {
+        status = plan_staging(DeviceElementType::kF32, {5, 1}, 5);
+      }
+    }
     if (status.ok()) status = plan_staging(DeviceElementType::kI32, {3, 1}, 3);
     if (status.ok())
       status = plan_staging(DeviceElementType::kI32, {256, 1}, 256);
@@ -1018,6 +1394,33 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     status = AllocatePlane(staging_, DeviceElementType::kF32, block_extent_,
                            block_extent_.width, &quant_field_device_);
     if (!status.ok()) return status;
+    if (resident_frontend_) {
+      status =
+          AllocatePlane(staging_, DeviceElementType::kF32, coding_extent_,
+                        coding_extent_.width, &initial_unblurred_pixel_device_);
+      if (!status.ok()) return status;
+      status = AllocatePlane(staging_, DeviceElementType::kF32, coding_extent_,
+                             coding_extent_.width, &initial_pixel_device_);
+      if (!status.ok()) return status;
+      const Extent2D pre_erosion_extent{coding_extent_.width / 4,
+                                        coding_extent_.height / 4};
+      status =
+          AllocatePlane(staging_, DeviceElementType::kF32, pre_erosion_extent,
+                        pre_erosion_extent.width, &initial_pre_erosion_device_);
+      if (!status.ok()) return status;
+      status = AllocatePlane(staging_, DeviceElementType::kF32, block_extent_,
+                             block_extent_.width, &initial_strategy_device_);
+      if (!status.ok()) return status;
+    }
+    if (options_.metric == AqEvaluationMetric::kButteraugli) {
+      status =
+          AllocatePlane(staging_, DeviceElementType::kF32, block_extent_,
+                        block_extent_.width, &policy_initial_field_device_);
+      if (!status.ok()) return status;
+      status = AllocatePlane(staging_, DeviceElementType::kF32, {5, 1}, 5,
+                             &policy_scores_device_);
+      if (!status.ok()) return status;
+    }
     status = AllocatePlane(staging_, DeviceElementType::kI32, {3, 1}, 3,
                            &selection_state_device_);
     if (!status.ok()) return status;
@@ -1335,14 +1738,64 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     return cudaSuccess;
   }
 
+  static cudaError_t EncodeInitialQuantization(CudaBackend& backend,
+                                               const void* opaque) {
+    const auto& context = *static_cast<const InitialContext*>(opaque);
+    CudaPreparedResidentAqEvaluation& self = *context.self;
+    const CudaAqGeometry geometry{
+        static_cast<uint32_t>(self.coding_extent_.width),
+        static_cast<uint32_t>(self.coding_extent_.height),
+        static_cast<uint32_t>(self.block_extent_.width),
+        static_cast<uint32_t>(self.block_extent_.height),
+        static_cast<uint32_t>(self.tile_extent_.width),
+        static_cast<uint32_t>(self.tile_extent_.height)};
+    cudaError_t status = LaunchCudaAqInitialField(
+        Pointer<const float>(self.coding_[0]),
+        Pointer<const float>(self.coding_[1]),
+        Pointer<const float>(self.coding_[2]),
+        Pointer<float>(self.initial_unblurred_pixel_device_),
+        Pointer<float>(self.initial_pixel_device_),
+        Pointer<float>(self.initial_pre_erosion_device_),
+        Pointer<float>(self.quant_field_device_),
+        Pointer<float>(self.initial_strategy_device_),
+        Pointer<unsigned int>(self.error_device_), geometry,
+        context.options.butteraugli_target, context.options.rescale,
+        backend.state_->stream);
+    if (status != cudaSuccess) return status;
+
+    std::array<const float*, 3> cfl_source = ConstPointers(self.coding_);
+    if (self.options_.profile.loop_filter.gaborish) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        const Symmetric5Weights weights =
+            gaborish_internal::GaborishInverseWeights(
+                self.options_.profile.gaborish_inverse_multipliers[channel]);
+        status = LaunchCudaSymmetric5Convolution(
+            Pointer<const float>(self.coding_[channel]),
+            Pointer<float>(self.reconstructed_[channel]), geometry.width,
+            geometry.height, geometry.width, geometry.width, weights.distance0,
+            weights.distance1, weights.distance2, weights.distance4,
+            weights.distance8, weights.distance5, backend.state_->stream);
+        if (status != cudaSuccess) return status;
+      }
+      cfl_source = ConstPointers(self.reconstructed_);
+    }
+    return LaunchCudaAqInitialCfl(cfl_source[0], cfl_source[1], cfl_source[2],
+                                  Pointer<signed char>(self.y_to_x_device_),
+                                  Pointer<signed char>(self.y_to_b_device_),
+                                  Pointer<unsigned int>(self.error_device_),
+                                  geometry, backend.state_->stream);
+  }
+
   static cudaError_t EncodeReconstruction(CudaBackend& backend,
                                           const void* opaque) {
     const auto& context = *static_cast<const EvaluationContext*>(opaque);
     CudaPreparedResidentAqEvaluation& self = *context.self;
-    cudaError_t status =
-        cudaMemsetAsync(Pointer<unsigned int>(self.error_device_), 0,
-                        sizeof(uint32_t), backend.state_->stream);
-    if (status != cudaSuccess) return status;
+    cudaError_t status = cudaSuccess;
+    if (context.reset_error) {
+      status = cudaMemsetAsync(Pointer<unsigned int>(self.error_device_), 0,
+                               sizeof(uint32_t), backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
     status = LaunchCudaAqSelectResidentQuantizer(
         Pointer<float>(self.quant_field_device_),
         static_cast<uint32_t>(self.block_count_),
@@ -1356,12 +1809,16 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     if (status != cudaSuccess) return status;
 
     if (context.compute_forward) {
+      const std::array<DevicePlaneView, 3>& coding_source =
+          self.resident_frontend_ && self.options_.profile.loop_filter.gaborish
+              ? self.reconstructed_
+              : self.coding_;
       for (const CudaAqExactBatch& batch : self.batches_) {
         if (batch.anchor_count == 0) continue;
         status = LaunchCudaAqGatherTransformPixels(
-            Pointer<const float>(self.coding_[0]),
-            Pointer<const float>(self.coding_[1]),
-            Pointer<const float>(self.coding_[2]),
+            Pointer<const float>(coding_source[0]),
+            Pointer<const float>(coding_source[1]),
+            Pointer<const float>(coding_source[2]),
             Pointer<CudaAqAnchor>(self.anchors_device_),
             Pointer<float>(self.gathered_device_), batch,
             static_cast<uint32_t>(self.coding_extent_.width),
@@ -1497,14 +1954,124 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
                                      color_params_, backend.state_->stream);
   }
 
+  static cudaError_t EncodeResidentPolicy(CudaBackend& backend,
+                                          const void* opaque) {
+    const auto& context = *static_cast<const PolicyContext*>(opaque);
+    CudaPreparedResidentAqEvaluation& self = *context.self;
+    for (size_t iteration = 0; iteration < context.score_count; ++iteration) {
+      EvaluationContext evaluation{
+          &self, context.input.quant_dc,
+          iteration == 0 && context.compute_forward,
+          iteration == 0 && context.compute_color_correlation, iteration == 0};
+      cudaError_t status = EncodeReconstruction(backend, &evaluation);
+      if (status != cudaSuccess) return status;
+
+      CudaAqResidentPolicyParams policy_params{
+          static_cast<uint32_t>(self.block_count_),
+          static_cast<uint32_t>(context.score_count),
+          static_cast<uint32_t>(iteration),
+          static_cast<uint32_t>(iteration),
+          static_cast<uint32_t>(iteration < context.input.iterations),
+          context.input.butteraugli_target,
+          context.input.lower_bound,
+          context.input.upper_bound};
+      if (iteration == 0) {
+        status = LaunchCudaAqResidentPolicyInitialize(
+            Pointer<const float>(self.quant_field_device_),
+            Pointer<float>(self.policy_initial_field_device_),
+            Pointer<float>(self.policy_scores_device_),
+            Pointer<unsigned int>(self.error_device_), policy_params,
+            backend.state_->stream);
+        if (status != cudaSuccess) return status;
+      }
+
+      status = EncodePreparedCudaButteraugli(
+          *self.butteraugli_,
+          {.distorted_linear_rgb = ConstImage(self.reconstructed_linear_),
+           .distance_map = self.distance_device_,
+           .score = self.score_device_},
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      status = EncodeBlockReductionOnStream(backend, self, false);
+      if (status != cudaSuccess) return status;
+      status = LaunchCudaAqResidentPolicyUpdate(
+          Pointer<float>(self.quant_field_device_),
+          Pointer<const float>(self.policy_initial_field_device_),
+          Pointer<const float>(self.block_device_),
+          Pointer<const float>(self.score_device_),
+          Pointer<float>(self.policy_scores_device_),
+          Pointer<const unsigned int>(self.quantizer_device_),
+          Pointer<unsigned int>(self.error_device_), policy_params,
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
+
+    if (!context.input.evaluate_final_field) {
+      cudaError_t status = LaunchCudaAqSelectResidentQuantizer(
+          Pointer<float>(self.quant_field_device_),
+          static_cast<uint32_t>(self.block_count_),
+          Pointer<unsigned int>(self.selection_state_device_),
+          Pointer<unsigned int>(self.histogram_device_),
+          Pointer<float>(self.statistics_device_),
+          Pointer<unsigned int>(self.quantizer_device_),
+          Pointer<int>(self.raw_quant_device_),
+          Pointer<unsigned int>(self.error_device_), context.input.quant_dc,
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      for (size_t batch_index = 0; batch_index < self.batches_.size();
+           ++batch_index) {
+        const CudaAqExactBatch& batch = self.batches_[batch_index];
+        if (batch.anchor_count == 0) continue;
+        const CudaAqResidentParams params = self.ResidentParams(batch_index);
+        status = LaunchCudaAqSelectAdjustedQuantization(
+            Pointer<CudaAqAnchor>(self.anchors_device_),
+            Pointer<const float>(self.quant_tables_device_),
+            Pointer<int>(self.raw_quant_device_),
+            Pointer<const float>(self.forward_device_),
+            Pointer<float>(self.thresholds_device_),
+            Pointer<const unsigned int>(self.quantizer_device_),
+            Pointer<unsigned int>(self.error_device_), batch, params,
+            backend.state_->stream);
+        if (status != cudaSuccess) return status;
+        status = LaunchCudaAqEncodeResidentCoefficients(
+            Pointer<CudaAqAnchor>(self.anchors_device_),
+            Pointer<const float>(self.quant_tables_device_),
+            Pointer<const int>(self.raw_quant_device_),
+            Pointer<const signed char>(self.y_to_x_device_),
+            Pointer<const signed char>(self.y_to_b_device_),
+            Pointer<const float>(self.forward_device_),
+            Pointer<int>(self.quantized_device_),
+            Pointer<float>(self.reconstruction_coefficients_device_),
+            Pointer<float>(self.dc_device_),
+            Pointer<int>(self.quantized_dc_device_),
+            Pointer<float>(self.inverse_sigma_device_),
+            Pointer<const unsigned char>(self.epf_sharpness_device_),
+            Pointer<const unsigned int>(self.quantizer_device_),
+            Pointer<const float>(self.thresholds_device_),
+            Pointer<unsigned int>(self.error_device_), batch, params,
+            backend.state_->stream);
+        if (status != cudaSuccess) return status;
+      }
+    }
+    return cudaSuccess;
+  }
+
   static cudaError_t EncodeBlockReduction(CudaBackend& backend,
                                           const void* opaque) {
     auto& self = *static_cast<CudaPreparedResidentAqEvaluation*>(
         const_cast<void*>(opaque));
-    cudaError_t status =
-        cudaMemsetAsync(Pointer<unsigned int>(self.error_device_), 0,
-                        sizeof(uint32_t), backend.state_->stream);
-    if (status != cudaSuccess) return status;
+    return EncodeBlockReductionOnStream(backend, self, true);
+  }
+
+  static cudaError_t EncodeBlockReductionOnStream(
+      CudaBackend& backend, CudaPreparedResidentAqEvaluation& self,
+      bool reset_error) {
+    cudaError_t status = cudaSuccess;
+    if (reset_error) {
+      status = cudaMemsetAsync(Pointer<unsigned int>(self.error_device_), 0,
+                               sizeof(uint32_t), backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
     for (const CudaAqExactBatch& batch : self.batches_) {
       if (batch.anchor_count == 0) continue;
       status = LaunchCudaAqReduceButteraugli(
@@ -1595,6 +2162,12 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
   DevicePlaneView y_to_x_device_{};
   DevicePlaneView y_to_b_device_{};
   DevicePlaneView quant_field_device_{};
+  DevicePlaneView initial_unblurred_pixel_device_{};
+  DevicePlaneView initial_pixel_device_{};
+  DevicePlaneView initial_pre_erosion_device_{};
+  DevicePlaneView initial_strategy_device_{};
+  DevicePlaneView policy_initial_field_device_{};
+  DevicePlaneView policy_scores_device_{};
   DevicePlaneView selection_state_device_{};
   DevicePlaneView histogram_device_{};
   DevicePlaneView statistics_device_{};
@@ -1641,6 +2214,9 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
   std::vector<int8_t> y_to_x_readback_;
   std::vector<int8_t> y_to_b_readback_;
   std::vector<float> quant_field_readback_;
+  std::vector<float> initial_strategy_readback_;
+  std::vector<float> initial_pixel_readback_;
+  std::array<float, 5> policy_score_readback_{};
   std::array<std::vector<float>, 3> linear_readback_;
   std::unique_ptr<PreparedDeviceButteraugli> butteraugli_;
   CudaAqGaborishParams gaborish_params_{};
@@ -1651,6 +2227,8 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
   bool invariant_color_correlation_ready_ = false;
   bool forward_coefficients_ready_ = false;
   bool color_correlation_pending_ = false;
+  bool resident_frontend_ = false;
+  bool resident_initial_ready_ = false;
   bool invalid_ = false;
 };
 
