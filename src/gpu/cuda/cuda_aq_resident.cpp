@@ -1,0 +1,1681 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+
+#include <cuda_runtime_api.h>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <ranges>
+#include <span>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "codec/codestream.h"
+#include "codec/quantization_tables_generated.h"
+#include "codec/vardct_frame_internal.h"
+#include "core/ac_strategy.h"
+#include "core/frame_geometry.h"
+#include "core/quantizer.h"
+#include "gpu/cuda/cuda_aq_exact_kernels.h"
+#include "gpu/cuda/cuda_aq_resident_kernels.h"
+#include "gpu/cuda/cuda_backend_internal.h"
+#include "gpu/cuda/cuda_kernels.h"
+#include "gpu/scratch.h"
+#include "gpu/submission.h"
+
+namespace gjxl::cuda_internal {
+namespace {
+
+constexpr size_t kArenaAlignment = 256;
+constexpr size_t kQuantTableValueCount = 11904;
+constexpr std::array<AcStrategyType, 7> kSupportedStrategies = {
+    AcStrategyType::kDct8,     AcStrategyType::kDct16x16,
+    AcStrategyType::kDct32x32, AcStrategyType::kDct16x8,
+    AcStrategyType::kDct8x16,  AcStrategyType::kDct32x16,
+    AcStrategyType::kDct16x32};
+
+static_assert(std::is_standard_layout_v<CudaAqResidentParams>);
+static_assert(std::is_trivially_copyable_v<CudaAqResidentParams>);
+static_assert(sizeof(CudaAqResidentParams) == 68);
+static_assert(std::is_standard_layout_v<CudaAqColorTransformRecord>);
+static_assert(std::is_trivially_copyable_v<CudaAqColorTransformRecord>);
+static_assert(sizeof(CudaAqColorTransformRecord) == 24);
+
+template <typename T>
+bool ValidHostPlaneLayout(PlaneView<T> plane) noexcept {
+  if (!plane.valid()) return false;
+  if (plane.extent.height - 1 >
+      (std::numeric_limits<size_t>::max() - plane.extent.width) /
+          plane.stride) {
+    return false;
+  }
+  const size_t elements =
+      (plane.extent.height - 1) * plane.stride + plane.extent.width;
+  return elements <=
+         std::numeric_limits<size_t>::max() / sizeof(std::remove_const_t<T>);
+}
+
+bool FinitePositive(float value) {
+  return std::isfinite(value) && value > 0.0f;
+}
+
+bool HostPlaneSpecified(ConstPlaneF32View plane) noexcept {
+  return plane.data != nullptr || !plane.extent.empty() || plane.stride != 0;
+}
+
+bool HostImageSpecified(ConstImage3FView image) noexcept {
+  return HostPlaneSpecified(image.plane[0]) ||
+         HostPlaneSpecified(image.plane[1]) ||
+         HostPlaneSpecified(image.plane[2]);
+}
+
+bool MutableImageSpecified(Image3FView image) noexcept {
+  return image.plane[0].data != nullptr || image.plane[1].data != nullptr ||
+         image.plane[2].data != nullptr || !image.extent().empty();
+}
+
+Status ValidateFiniteImage(ConstImage3FView image, const char* name) {
+  if (!image.valid() ||
+      !std::ranges::all_of(image.plane, [](ConstPlaneF32View plane) {
+        return ValidHostPlaneLayout(plane);
+      })) {
+    return Status::InvalidArgument(std::string(name) + " image is invalid");
+  }
+  for (ConstPlaneF32View plane : image.plane) {
+    for (size_t y = 0; y < plane.extent.height; ++y) {
+      for (size_t x = 0; x < plane.extent.width; ++x) {
+        if (!std::isfinite(plane.Row(y)[x])) {
+          return Status::InvalidArgument(std::string(name) +
+                                         " image contains a non-finite sample");
+        }
+      }
+    }
+  }
+  return Status::Ok();
+}
+
+Status ValidateOptions(const AqEvaluationOptions& options) {
+  if (!options.profile.valid()) {
+    return Status::InvalidArgument("CUDA resident AQ profile is invalid");
+  }
+  if (options.metric == AqEvaluationMetric::kButteraugli) {
+    if (!FinitePositive(options.butteraugli.hf_asymmetry) ||
+        !FinitePositive(options.butteraugli.x_multiplier) ||
+        !FinitePositive(options.butteraugli.intensity_target)) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ Butteraugli options are invalid");
+    }
+  } else if (options.metric == AqEvaluationMetric::kMaximumError) {
+    if (!std::ranges::all_of(options.maximum_error, FinitePositive)) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ maximum-error limits are invalid");
+    }
+  } else {
+    return Status::InvalidArgument("CUDA resident AQ metric is invalid");
+  }
+  return Status::Ok();
+}
+
+Status PlanPlane(DeviceElementType type, Extent2D extent, size_t row_stride,
+                 size_t* bytes) {
+  if (bytes == nullptr || extent.empty() || row_stride < extent.width) {
+    return Status::InvalidArgument("CUDA resident AQ arena plan is invalid");
+  }
+  if (*bytes > std::numeric_limits<size_t>::max() - (kArenaAlignment - 1)) {
+    return Status::InvalidArgument(
+        "CUDA resident AQ arena alignment overflows");
+  }
+  const size_t aligned =
+      (*bytes + kArenaAlignment - 1) & ~(kArenaAlignment - 1);
+  if (extent.height - 1 >
+      (std::numeric_limits<size_t>::max() - extent.width) / row_stride) {
+    return Status::InvalidArgument("CUDA resident AQ plane geometry overflows");
+  }
+  const size_t elements = (extent.height - 1) * row_stride + extent.width;
+  const size_t element_size = DeviceElementSize(type);
+  if (element_size == 0 ||
+      elements > std::numeric_limits<size_t>::max() / element_size ||
+      aligned > std::numeric_limits<size_t>::max() - elements * element_size) {
+    return Status::InvalidArgument("CUDA resident AQ plane size overflows");
+  }
+  *bytes = aligned + elements * element_size;
+  return Status::Ok();
+}
+
+template <typename T>
+Status UploadPlane(CudaBackend& backend, PlaneView<const T> source,
+                   DevicePlaneView destination) {
+  const size_t row_bytes = source.extent.width * sizeof(T);
+  for (size_t y = 0; y < source.extent.height; ++y) {
+    Status status = backend.CopyHostToDevice(
+        *destination.buffer, source.Row(y), row_bytes,
+        destination.offset_bytes + y * destination.row_stride * sizeof(T));
+    if (!status.ok()) return status;
+  }
+  return Status::Ok();
+}
+
+template <typename Range>
+void AppendQuantTable(const Range& values, std::vector<float>* packed) {
+  packed->insert(packed->end(), values.begin(), values.end());
+}
+
+Status PackQuantTables(std::vector<float>* packed) {
+  try {
+    packed->clear();
+    packed->reserve(kQuantTableValueCount);
+    AppendQuantTable(quantization_internal::kDct8Dequant, packed);
+    AppendQuantTable(quantization_internal::kDct8InverseDequant, packed);
+    AppendQuantTable(quantization_internal::kDct16Dequant, packed);
+    AppendQuantTable(quantization_internal::kDct16InverseDequant, packed);
+    AppendQuantTable(quantization_internal::kDct32Dequant, packed);
+    AppendQuantTable(quantization_internal::kDct32InverseDequant, packed);
+    AppendQuantTable(quantization_internal::kDct8x16Dequant, packed);
+    AppendQuantTable(quantization_internal::kDct8x16InverseDequant, packed);
+    AppendQuantTable(quantization_internal::kDct16x32Dequant, packed);
+    AppendQuantTable(quantization_internal::kDct16x32InverseDequant, packed);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+        "Unable to pack CUDA resident AQ quantization tables");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+        "CUDA resident AQ quantization table pack is too large");
+  }
+  return packed->size() == kQuantTableValueCount
+             ? Status::Ok()
+             : Status::Internal(
+                   "CUDA resident AQ quantization table layout changed");
+}
+
+size_t StrategyBatchIndex(AcStrategyType strategy) noexcept {
+  const auto found = std::ranges::find(kSupportedStrategies, strategy);
+  return found == kSupportedStrategies.end()
+             ? kSupportedStrategies.size()
+             : static_cast<size_t>(found - kSupportedStrategies.begin());
+}
+
+}  // namespace
+
+class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
+ public:
+  explicit CudaPreparedResidentAqEvaluation(CudaBackend& backend)
+      : backend_(&backend) {}
+
+  Status Prepare(const AqEvaluationPreparation& preparation) {
+    if (preparation.frame_only || !preparation.resident_quantization ||
+        preparation.frame_only_inverse_gaborish ||
+        preparation.resident_initial_cfl ||
+        preparation.frame_only_resident_initial_quant ||
+        preparation.resident_ac_strategy_inputs ||
+        preparation.frame_only_resident_quantizer ||
+        preparation.resident_coding_opsin.plane[0].buffer != nullptr ||
+        preparation.resident_coding_opsin.plane[1].buffer != nullptr ||
+        preparation.resident_coding_opsin.plane[2].buffer != nullptr) {
+      return Status::Unavailable(
+          "CUDA resident AQ preparation combination is not supported");
+    }
+    if (preparation.coefficient_decision_mode !=
+        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
+      return Status::Unavailable(
+          "CUDA resident AQ requires adjusted shared quantization");
+    }
+    Status status = ValidateOptions(preparation.options);
+    if (!status.ok()) return status;
+    status = ValidateFiniteImage(preparation.original_linear_rgb,
+                                 "CUDA resident AQ original");
+    if (!status.ok()) return status;
+    status = ValidateFiniteImage(preparation.coding_opsin,
+                                 "CUDA resident AQ coding");
+    if (!status.ok()) return status;
+
+    source_extent_ = preparation.original_linear_rgb.extent();
+    coding_extent_ = preparation.coding_opsin.extent();
+    if (source_extent_.empty() || coding_extent_.empty() ||
+        coding_extent_.width % 8 != 0 || coding_extent_.height % 8 != 0 ||
+        source_extent_.width > coding_extent_.width ||
+        source_extent_.height > coding_extent_.height ||
+        coding_extent_.width - source_extent_.width >= 8 ||
+        coding_extent_.height - source_extent_.height >= 8) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ source and coding geometry are incompatible");
+    }
+    block_extent_ = {coding_extent_.width / 8, coding_extent_.height / 8};
+    tile_extent_ = {(coding_extent_.width + 63) / 64,
+                    (coding_extent_.height + 63) / 64};
+    if (preparation.strategies == nullptr ||
+        !preparation.strategies->complete() ||
+        preparation.strategies->extent() != block_extent_ ||
+        !ValidHostPlaneLayout(preparation.epf_sharpness) ||
+        preparation.epf_sharpness.extent != block_extent_) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ strategy or EPF grid is invalid");
+    }
+    if (!source_extent_.try_area(&source_count_) ||
+        !coding_extent_.try_area(&coding_count_) ||
+        !block_extent_.try_area(&block_count_) ||
+        !tile_extent_.try_area(&tile_count_) ||
+        coding_count_ > std::numeric_limits<size_t>::max() / 3 ||
+        block_count_ > std::numeric_limits<uint32_t>::max() ||
+        tile_count_ > std::numeric_limits<uint32_t>::max() ||
+        coding_extent_.width > std::numeric_limits<uint32_t>::max() ||
+        source_extent_.width > std::numeric_limits<uint32_t>::max() ||
+        source_extent_.height > std::numeric_limits<uint32_t>::max()) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ geometry exceeds backend limits");
+    }
+    coefficient_count_ = 3 * coding_count_;
+    options_ = preparation.options;
+    filter_stage_count_ =
+        (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
+        options_.profile.loop_filter.epf_options.iterations;
+    filter_scratch_count_ = std::min<size_t>(2, filter_stage_count_);
+    final_filter_index_ = filter_stage_count_ == 0
+                              ? -1
+                              : static_cast<int>((filter_stage_count_ - 1) % 2);
+
+    Metadata metadata;
+    status = BuildMetadata(*preparation.strategies, preparation.epf_sharpness,
+                           &metadata);
+    if (!status.ok()) return status;
+    const size_t source_dispatches =
+        source_count_ / 256 + (source_count_ % 256 != 0);
+    const size_t block_dispatches =
+        block_count_ / 256 + (block_count_ % 256 != 0);
+    if (source_dispatches > backend_->state_->maximum_grid_x ||
+        block_dispatches > backend_->state_->maximum_grid_x ||
+        block_count_ > backend_->state_->maximum_grid_x ||
+        tile_count_ > backend_->state_->maximum_grid_x) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ geometry exceeds device launch limits");
+    }
+    for (const CudaAqExactBatch& batch : metadata.batches) {
+      const size_t transforms = 3 * static_cast<size_t>(batch.anchor_count);
+      const size_t values = transforms * batch.coefficient_count;
+      const size_t value_dispatches = values / 256 + (values % 256 != 0);
+      if (transforms > backend_->state_->maximum_grid_x ||
+          value_dispatches > backend_->state_->maximum_grid_x) {
+        return Status::InvalidArgument(
+            "CUDA resident AQ strategy batch exceeds device launch limits");
+      }
+    }
+    std::vector<float> quant_tables;
+    status = PackQuantTables(&quant_tables);
+    if (!status.ok()) return status;
+    try {
+      block_readback_.resize(block_count_);
+      maximum_readback_.resize(3 * block_count_);
+      raw_readback_.resize(block_count_);
+      quantized_readback_.resize(coefficient_count_);
+      quantized_dc_readback_.resize(3 * block_count_);
+      y_to_x_readback_.resize(tile_count_);
+      y_to_b_readback_.resize(tile_count_);
+      quant_field_readback_.resize(block_count_);
+      for (std::vector<float>& plane : linear_readback_) {
+        plane.resize(source_count_);
+      }
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+          "Unable to allocate CUDA resident AQ host staging");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ host staging is too large");
+    }
+
+    status = PlanArenas();
+    if (!status.ok()) return status;
+    status = AllocateArenas();
+    if (!status.ok()) return status;
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status =
+          UploadPlane(*backend_, preparation.original_linear_rgb.plane[channel],
+                      original_[channel]);
+      if (status.ok()) {
+        status = UploadPlane(*backend_, preparation.coding_opsin.plane[channel],
+                             coding_[channel]);
+      }
+      if (!status.ok()) return status;
+    }
+    status = UploadMetadata(metadata);
+    if (status.ok()) {
+      status = backend_->CopyHostToDevice(*quant_tables_device_.buffer,
+                                          quant_tables.data(),
+                                          quant_tables.size() * sizeof(float),
+                                          quant_tables_device_.offset_bytes);
+    }
+    if (!status.ok()) return status;
+    CommitMetadata(std::move(metadata));
+    InitializeKernelParams();
+
+    if (options_.metric == AqEvaluationMetric::kButteraugli) {
+      status = PrepareDeviceButteraugli(
+          *backend_,
+          {.reference_linear_rgb = ConstImage(original_),
+           .options = options_.butteraugli},
+          &butteraugli_);
+      if (!status.ok()) return status;
+    }
+    const DeviceButteraugliMemoryStats butter_memory =
+        butteraugli_ == nullptr ? DeviceButteraugliMemoryStats{}
+                                : butteraugli_->memory_stats();
+    memory_stats_ = {
+        persistent_.capacity_bytes(),
+        staging_.capacity_bytes() + butter_memory.prepared_allocation_bytes,
+        staging_.capacity_bytes() +
+            butter_memory.peak_comparison_scratch_bytes};
+    return Status::Ok();
+  }
+
+  Status AdjustQuantFieldResident(float butteraugli_target,
+                                  ConstPlaneF32View input,
+                                  PlaneF32View output) override {
+    if (!ValidHostPlaneLayout(input) || !ValidHostPlaneLayout(output) ||
+        input.extent != block_extent_ || output.extent != block_extent_ ||
+        !FinitePositive(butteraugli_target)) {
+      return Status::InvalidArgument(
+          "CUDA resident quant-field adjustment input is invalid");
+    }
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        if (!FinitePositive(input.Row(y)[x])) {
+          return Status::InvalidArgument(
+              "CUDA resident quant field must contain positive finite values");
+        }
+      }
+    }
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation is already in use");
+    }
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation was invalidated");
+    }
+    Status status = UploadPlane(*backend_, input, quant_field_device_);
+    if (!status.ok()) return Invalidate(status);
+    float mean_max_mixer = 1.0f;
+    constexpr float kMixerLimit = 1.54138f;
+    constexpr float kMixerSlope = 0.56391f;
+    if (butteraugli_target > kMixerLimit) {
+      mean_max_mixer =
+          std::max(0.0f, mean_max_mixer -
+                             (butteraugli_target - kMixerLimit) * kMixerSlope);
+    }
+    AdjustmentContext context{this, mean_max_mixer};
+    std::unique_ptr<GpuSubmission> submission;
+    status = backend_->SubmitCompute(
+        &CudaPreparedResidentAqEvaluation::EncodeAdjustment, &context,
+        &submission);
+    if (!status.ok() || submission == nullptr) {
+      return Invalidate(
+          status.ok() ? Status::Internal("CUDA resident quant-field adjustment "
+                                         "returned no submission")
+                      : status);
+    }
+    status = submission->Wait();
+    if (!status.ok()) return Invalidate(status);
+    status = ReadAndCheckDeviceError();
+    if (!status.ok()) return Invalidate(status);
+    status = backend_->CopyDeviceToHost(
+        *quant_field_device_.buffer, quant_field_readback_.data(),
+        block_count_ * sizeof(float), quant_field_device_.offset_bytes);
+    if (!status.ok()) return Invalidate(status);
+    if (!std::ranges::all_of(quant_field_readback_, FinitePositive)) {
+      return Invalidate(Status::DeviceError(
+          "CUDA resident quant-field adjustment readback is invalid"));
+    }
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      std::copy_n(quant_field_readback_.data() + y * block_extent_.width,
+                  block_extent_.width, output.Row(y));
+    }
+    return Status::Ok();
+  }
+
+  Status PrepareInvariantColorCorrelationResident(ConstPlaneF32View quant_field,
+                                                  float quant_dc) override {
+    if (!ValidHostPlaneLayout(quant_field) ||
+        quant_field.extent != block_extent_ || !FinitePositive(quant_dc) ||
+        quant_dc > static_cast<float>(kMaxQuantDc)) {
+      return Status::InvalidArgument(
+          "CUDA resident final color-correlation input is invalid");
+    }
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        if (!FinitePositive(quant_field.Row(y)[x])) {
+          return Status::InvalidArgument(
+              "CUDA resident final color-correlation field is invalid");
+        }
+      }
+    }
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation is already in use");
+    }
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation was invalidated");
+    }
+    (void)quant_dc;
+    invariant_color_correlation_ready_ = true;
+    forward_coefficients_ready_ = false;
+    color_correlation_pending_ = true;
+    return Status::Ok();
+  }
+
+  Status Evaluate(AqEvaluationInput input, AqEvaluationOutput output) override {
+    Status status = ValidateInput(input);
+    if (status.ok()) status = ValidateOutput(output);
+    if (!status.ok()) return status;
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation is already in use");
+    }
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation was invalidated");
+    }
+    if (!invariant_color_correlation_ready_) {
+      return Status::FailedPrecondition(
+          "CUDA resident final color correlation was not prepared");
+    }
+    status = UploadPlane(*backend_, input.quant_field, quant_field_device_);
+    if (!status.ok()) return Invalidate(status);
+
+    EvaluationContext context{this, input.quant_dc,
+                              !forward_coefficients_ready_,
+                              color_correlation_pending_};
+    std::unique_ptr<GpuSubmission> submission;
+    status = backend_->SubmitCompute(
+        &CudaPreparedResidentAqEvaluation::EncodeReconstruction, &context,
+        &submission);
+    if (!status.ok() || submission == nullptr) {
+      return Invalidate(
+          status.ok()
+              ? Status::Internal("CUDA resident AQ returned no submission")
+              : status);
+    }
+    status = submission->Wait();
+    if (!status.ok()) return Invalidate(status);
+    status = ReadAndCheckDeviceError();
+    if (!status.ok()) return Invalidate(status);
+
+    QuantizerParams candidate_params;
+    status = backend_->CopyDeviceToHost(
+        *quantizer_device_.buffer, &candidate_params, sizeof(candidate_params),
+        quantizer_device_.offset_bytes);
+    Quantizer candidate_quantizer;
+    if (status.ok())
+      status = Quantizer::Create(candidate_params, &candidate_quantizer);
+    if (!status.ok()) return Invalidate(status);
+
+    double candidate_score = 0.0;
+    MaximumErrorReduction candidate_maximum;
+    if (options_.metric == AqEvaluationMetric::kButteraugli) {
+      status = butteraugli_->Compare(
+          {.distorted_linear_rgb = ConstImage(reconstructed_linear_),
+           .distance_map = distance_device_,
+           .score = score_device_});
+      if (!status.ok()) return Invalidate(status);
+      status = butteraugli_->ReadScore(&candidate_score);
+      if (!status.ok()) return Invalidate(status);
+      submission.reset();
+      status = backend_->SubmitCompute(
+          &CudaPreparedResidentAqEvaluation::EncodeBlockReduction, this,
+          &submission);
+      if (!status.ok() || submission == nullptr) {
+        return Invalidate(
+            status.ok()
+                ? Status::Internal(
+                      "CUDA resident AQ block reduction returned no submission")
+                : status);
+      }
+      status = submission->Wait();
+      if (!status.ok()) return Invalidate(status);
+      status = ReadAndCheckDeviceError();
+      if (!status.ok()) return Invalidate(status);
+    }
+
+    status = backend_->CopyDeviceToHost(
+        *block_device_.buffer, block_readback_.data(),
+        block_count_ * sizeof(float), block_device_.offset_bytes);
+    if (!status.ok()) return Invalidate(status);
+    if (options_.metric == AqEvaluationMetric::kMaximumError) {
+      status = backend_->CopyDeviceToHost(
+          *maximum_device_.buffer, maximum_readback_.data(),
+          3 * anchor_count_ * sizeof(float), maximum_device_.offset_bytes);
+      if (!status.ok()) return Invalidate(status);
+      for (size_t anchor = 0; anchor < anchor_count_; ++anchor) {
+        for (size_t channel = 0; channel < 3; ++channel) {
+          const float value = maximum_readback_[3 * anchor + channel];
+          if (!std::isfinite(value) || value < 0.0f) {
+            return Invalidate(Status::DeviceError(
+                "CUDA resident AQ maximum-error readback is invalid"));
+          }
+          candidate_maximum.channel_maximum[channel] =
+              std::max(candidate_maximum.channel_maximum[channel], value);
+        }
+      }
+      candidate_maximum.normalized_maximum =
+          *std::ranges::max_element(block_readback_);
+      candidate_score = candidate_maximum.normalized_maximum;
+    }
+    if (!std::ranges::all_of(block_readback_,
+                             [](float value) {
+                               return std::isfinite(value) && value >= 0.0f;
+                             }) ||
+        !std::isfinite(candidate_score) || candidate_score < 0.0) {
+      return Invalidate(
+          Status::DeviceError("CUDA resident AQ bounded readback is invalid"));
+    }
+
+    VarDctEncoderFrame candidate_frame;
+    if (output.final != nullptr) {
+      status = AssembleFrame(candidate_quantizer, &candidate_frame);
+      if (!status.ok()) return Invalidate(status);
+    }
+    const bool reconstruction_requested =
+        output.final != nullptr &&
+        MutableImageSpecified(output.final->reconstructed_linear_rgb);
+    if (reconstruction_requested) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        status = backend_->CopyDeviceToHost(
+            *reconstructed_linear_[channel].buffer,
+            linear_readback_[channel].data(), source_count_ * sizeof(float),
+            reconstructed_linear_[channel].offset_bytes);
+        if (!status.ok()) return Invalidate(status);
+        if (!std::ranges::all_of(linear_readback_[channel], [](float value) {
+              return std::isfinite(value);
+            })) {
+          return Invalidate(Status::DeviceError(
+              "CUDA resident AQ reconstruction readback is invalid"));
+        }
+      }
+    }
+
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      std::copy_n(block_readback_.data() + y * block_extent_.width,
+                  block_extent_.width, output.block_distance_map.Row(y));
+    }
+    *output.score = candidate_score;
+    *output.quantizer = candidate_params;
+    if (options_.metric == AqEvaluationMetric::kMaximumError) {
+      *output.maximum_error = candidate_maximum;
+    }
+    if (reconstruction_requested) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        for (size_t y = 0; y < source_extent_.height; ++y) {
+          std::copy_n(
+              linear_readback_[channel].data() + y * source_extent_.width,
+              source_extent_.width,
+              output.final->reconstructed_linear_rgb.plane[channel].Row(y));
+        }
+      }
+    }
+    if (output.final != nullptr) {
+      *output.final->frame = std::move(candidate_frame);
+    }
+    forward_coefficients_ready_ = true;
+    color_correlation_pending_ = false;
+    return Status::Ok();
+  }
+
+  Status Reconfigure(const AcStrategyGrid& strategies,
+                     ConstPlaneU8View epf_sharpness) override {
+    Metadata metadata;
+    Status status = BuildMetadata(strategies, epf_sharpness, &metadata);
+    if (!status.ok()) return status;
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation is already in use");
+    }
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation was invalidated");
+    }
+    status = UploadMetadata(metadata);
+    if (!status.ok()) return Invalidate(status);
+    CommitMetadata(std::move(metadata));
+    invariant_color_correlation_ready_ = false;
+    forward_coefficients_ready_ = false;
+    color_correlation_pending_ = false;
+    return Status::Ok();
+  }
+
+  AqEvaluationMemoryStats memory_stats() const noexcept override {
+    return memory_stats_;
+  }
+
+ private:
+  struct HostAnchor {
+    size_t block_x = 0;
+    size_t block_y = 0;
+    AcStrategyType strategy = AcStrategyType::kDct8;
+    size_t batch_index = 0;
+    size_t index_in_batch = 0;
+  };
+
+  struct Metadata {
+    AcStrategyGrid strategies;
+    std::array<CudaAqExactBatch, 7> batches{};
+    std::vector<CudaAqAnchor> device_anchors;
+    std::vector<HostAnchor> row_major_anchors;
+    std::vector<uint8_t> epf_sharpness;
+    std::vector<CudaAqColorTransformRecord> color_transforms;
+    std::vector<uint32_t> color_tile_offsets;
+    std::vector<vardct_frame_internal::QuantizedAcTransformLayout> layouts;
+  };
+
+  struct AdjustmentContext {
+    CudaPreparedResidentAqEvaluation* self = nullptr;
+    float mean_max_mixer = 1.0f;
+  };
+
+  struct EvaluationContext {
+    CudaPreparedResidentAqEvaluation* self = nullptr;
+    float quant_dc = 0.0f;
+    bool compute_forward = false;
+    bool compute_color_correlation = false;
+  };
+
+  Status BuildMetadata(const AcStrategyGrid& strategies,
+                       ConstPlaneU8View epf_sharpness,
+                       Metadata* metadata) const {
+    if (metadata == nullptr || !strategies.complete() ||
+        strategies.extent() != block_extent_ ||
+        !ValidHostPlaneLayout(epf_sharpness) ||
+        epf_sharpness.extent != block_extent_) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ reconfiguration metadata is invalid");
+    }
+    try {
+      Metadata candidate;
+      candidate.strategies = strategies;
+      std::array<std::vector<CudaAqAnchor>, 7> grouped;
+      candidate.row_major_anchors.reserve(block_count_);
+      candidate.device_anchors.reserve(block_count_);
+      candidate.epf_sharpness.resize(block_count_);
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        std::copy_n(epf_sharpness.Row(y), block_extent_.width,
+                    candidate.epf_sharpness.data() + y * block_extent_.width);
+        for (size_t x = 0; x < block_extent_.width; ++x) {
+          AcStrategyCell cell;
+          Status status = strategies.Get(x, y, &cell);
+          if (!status.ok()) return status;
+          const size_t batch_index = StrategyBatchIndex(cell.strategy);
+          if (batch_index >= grouped.size() || epf_sharpness.Row(y)[x] >= 8) {
+            return Status::InvalidArgument(
+                "CUDA resident AQ strategy or EPF value is unsupported");
+          }
+          if (cell.is_anchor) {
+            const size_t index_in_batch = grouped[batch_index].size();
+            grouped[batch_index].push_back(
+                {static_cast<uint32_t>(x), static_cast<uint32_t>(y)});
+            candidate.row_major_anchors.push_back(
+                {x, y, cell.strategy, batch_index, index_in_batch});
+          }
+        }
+      }
+      size_t anchor_offset = 0;
+      size_t coefficient_offset = 0;
+      for (size_t index = 0; index < grouped.size(); ++index) {
+        const AcStrategyInfo* info =
+            GetAcStrategyInfo(kSupportedStrategies[index]);
+        if (info == nullptr) {
+          return Status::Internal(
+              "CUDA resident AQ strategy metadata disappeared");
+        }
+        const size_t count = grouped[index].size();
+        const size_t coefficient_count = info->coefficient_count();
+        if (anchor_offset > std::numeric_limits<uint32_t>::max() ||
+            count > std::numeric_limits<uint32_t>::max() ||
+            coefficient_offset > std::numeric_limits<uint32_t>::max() ||
+            coefficient_count > std::numeric_limits<uint32_t>::max() ||
+            info->pixel_extent().width > std::numeric_limits<uint32_t>::max() ||
+            info->pixel_extent().height >
+                std::numeric_limits<uint32_t>::max()) {
+          return Status::InvalidArgument(
+              "CUDA resident AQ strategy metadata exceeds kernel limits");
+        }
+        candidate.batches[index] = {
+            static_cast<uint32_t>(anchor_offset),
+            static_cast<uint32_t>(count),
+            static_cast<uint32_t>(coefficient_offset),
+            static_cast<uint32_t>(coefficient_count),
+            static_cast<uint32_t>(info->pixel_extent().width),
+            static_cast<uint32_t>(info->pixel_extent().height),
+            static_cast<uint32_t>(info->covered_blocks.width),
+            static_cast<uint32_t>(info->covered_blocks.height)};
+        candidate.device_anchors.insert(candidate.device_anchors.end(),
+                                        grouped[index].begin(),
+                                        grouped[index].end());
+        anchor_offset += count;
+        if (count != 0 &&
+            coefficient_count >
+                (std::numeric_limits<size_t>::max() - coefficient_offset) /
+                    (3 * count)) {
+          return Status::InvalidArgument(
+              "CUDA resident AQ coefficient metadata overflows");
+        }
+        coefficient_offset += 3 * count * coefficient_count;
+      }
+      if (anchor_offset != candidate.row_major_anchors.size() ||
+          coefficient_offset != coefficient_count_ ||
+          anchor_offset > block_count_) {
+        return Status::Internal(
+            "CUDA resident AQ strategies do not cover the coding image");
+      }
+
+      candidate.layouts.reserve(candidate.row_major_anchors.size());
+      for (const HostAnchor& anchor : candidate.row_major_anchors) {
+        const CudaAqExactBatch& batch = candidate.batches[anchor.batch_index];
+        const size_t channel_stride =
+            static_cast<size_t>(batch.anchor_count) * batch.coefficient_count;
+        vardct_frame_internal::QuantizedAcTransformLayout layout{
+            .block_x = anchor.block_x,
+            .block_y = anchor.block_y,
+            .strategy = anchor.strategy,
+            .coefficient_count = batch.coefficient_count};
+        for (size_t channel = 0; channel < 3; ++channel) {
+          layout.coefficient_offsets[channel] =
+              batch.coefficient_offset + channel * channel_stride +
+              anchor.index_in_batch * batch.coefficient_count;
+        }
+        candidate.layouts.push_back(layout);
+      }
+
+      candidate.color_tile_offsets.assign(tile_count_ + 1, 0);
+      for (const HostAnchor& anchor : candidate.row_major_anchors) {
+        const size_t tile =
+            (anchor.block_y / 8) * tile_extent_.width + anchor.block_x / 8;
+        if (tile >= tile_count_ || candidate.color_tile_offsets[tile + 1] ==
+                                       std::numeric_limits<uint32_t>::max()) {
+          return Status::InvalidArgument(
+              "CUDA resident AQ color transform metadata is too large");
+        }
+        ++candidate.color_tile_offsets[tile + 1];
+      }
+      for (size_t tile = 0; tile < tile_count_; ++tile) {
+        candidate.color_tile_offsets[tile + 1] +=
+            candidate.color_tile_offsets[tile];
+      }
+      candidate.color_transforms.resize(anchor_offset);
+      std::vector<uint32_t> positions = candidate.color_tile_offsets;
+      std::vector<uint32_t> tile_value_offsets(tile_count_, 0);
+      for (const HostAnchor& anchor : candidate.row_major_anchors) {
+        const size_t tile =
+            (anchor.block_y / 8) * tile_extent_.width + anchor.block_x / 8;
+        const CudaAqExactBatch& batch = candidate.batches[anchor.batch_index];
+        const size_t channel_stride =
+            static_cast<size_t>(batch.anchor_count) * batch.coefficient_count;
+        const size_t coefficient_offset =
+            batch.coefficient_offset +
+            anchor.index_in_batch * batch.coefficient_count;
+        const size_t raw_quant_index =
+            anchor.block_y * block_extent_.width + anchor.block_x;
+        if (channel_stride > std::numeric_limits<uint32_t>::max() ||
+            coefficient_offset > std::numeric_limits<uint32_t>::max() ||
+            raw_quant_index > std::numeric_limits<uint32_t>::max()) {
+          return Status::InvalidArgument(
+              "CUDA resident AQ color transform record exceeds limits");
+        }
+        candidate.color_transforms[positions[tile]++] = {
+            static_cast<uint32_t>(coefficient_offset),
+            static_cast<uint32_t>(channel_stride),
+            batch.coefficient_count,
+            static_cast<uint32_t>(anchor.strategy),
+            static_cast<uint32_t>(raw_quant_index),
+            tile_value_offsets[tile]};
+        tile_value_offsets[tile] += batch.coefficient_count;
+      }
+      *metadata = std::move(candidate);
+      return Status::Ok();
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+          "Unable to allocate CUDA resident AQ strategy metadata");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ strategy metadata is too large");
+    }
+  }
+
+  Status PlanArenas() {
+    size_t persistent_bytes = 0;
+    size_t staging_bytes = 0;
+    Status status = Status::Ok();
+    for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
+      status = PlanPlane(DeviceElementType::kF32, source_extent_,
+                         source_extent_.width, &persistent_bytes);
+    }
+    for (size_t image = 0; image < 2 && status.ok(); ++image) {
+      for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
+        status = PlanPlane(DeviceElementType::kF32, coding_extent_,
+                           coding_extent_.width, &persistent_bytes);
+      }
+    }
+    for (size_t image = 0; image < filter_scratch_count_ && status.ok();
+         ++image) {
+      for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
+        status = PlanPlane(DeviceElementType::kF32, coding_extent_,
+                           coding_extent_.width, &persistent_bytes);
+      }
+    }
+    for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
+      status = PlanPlane(DeviceElementType::kF32, source_extent_,
+                         source_extent_.width, &persistent_bytes);
+    }
+    if (status.ok()) {
+      status = PlanPlane(DeviceElementType::kI32, {2 * block_count_, 1},
+                         2 * block_count_, &persistent_bytes);
+    }
+    if (status.ok()) {
+      status = PlanPlane(DeviceElementType::kU8, block_extent_,
+                         block_extent_.width, &persistent_bytes);
+    }
+    if (status.ok()) {
+      status = PlanPlane(DeviceElementType::kF32, {kQuantTableValueCount, 1},
+                         kQuantTableValueCount, &persistent_bytes);
+    }
+    if (status.ok()) {
+      status = PlanPlane(DeviceElementType::kI32, {6 * block_count_, 1},
+                         6 * block_count_, &persistent_bytes);
+    }
+    if (status.ok()) {
+      status = PlanPlane(DeviceElementType::kI32, {tile_count_ + 1, 1},
+                         tile_count_ + 1, &persistent_bytes);
+    }
+    for (size_t map = 0; map < 2 && status.ok(); ++map) {
+      status = PlanPlane(DeviceElementType::kI8, tile_extent_,
+                         tile_extent_.width, &persistent_bytes);
+    }
+    if (!status.ok()) return status;
+
+    const auto plan_staging = [&](DeviceElementType type, Extent2D extent,
+                                  size_t stride) {
+      return PlanPlane(type, extent, stride, &staging_bytes);
+    };
+    status = plan_staging(DeviceElementType::kF32, block_extent_,
+                          block_extent_.width);
+    if (status.ok()) status = plan_staging(DeviceElementType::kI32, {3, 1}, 3);
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kI32, {256, 1}, 256);
+    if (status.ok()) status = plan_staging(DeviceElementType::kF32, {2, 1}, 2);
+    if (status.ok()) status = plan_staging(DeviceElementType::kI32, {2, 1}, 2);
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kI32, block_extent_,
+                            block_extent_.width);
+    for (size_t index = 0; index < 2 && status.ok(); ++index) {
+      status = plan_staging(DeviceElementType::kF32, {coefficient_count_, 1},
+                            coefficient_count_);
+    }
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kF32, {coefficient_count_, 1},
+                            coefficient_count_);
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kI32, {coefficient_count_, 1},
+                            coefficient_count_);
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kF32, {coefficient_count_, 1},
+                            coefficient_count_);
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kF32, {3 * block_count_, 1},
+                            3 * block_count_);
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kI32, {3 * block_count_, 1},
+                            3 * block_count_);
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kF32, {coefficient_count_, 1},
+                            coefficient_count_);
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kF32, block_extent_,
+                            block_extent_.width);
+    if (options_.metric == AqEvaluationMetric::kButteraugli && status.ok()) {
+      status = plan_staging(DeviceElementType::kF32, source_extent_,
+                            source_extent_.width);
+      if (status.ok())
+        status = plan_staging(DeviceElementType::kF32, {1, 1}, 1);
+    }
+    if (status.ok())
+      status = plan_staging(DeviceElementType::kF32, block_extent_,
+                            block_extent_.width);
+    if (options_.metric == AqEvaluationMetric::kMaximumError && status.ok()) {
+      status = plan_staging(DeviceElementType::kF32, {3 * block_count_, 1},
+                            3 * block_count_);
+    }
+    if (status.ok()) status = plan_staging(DeviceElementType::kI32, {1, 1}, 1);
+    if (!status.ok()) return status;
+    status = persistent_.Prepare(*backend_, persistent_bytes);
+    if (!status.ok()) return status;
+    return staging_.Prepare(*backend_, staging_bytes);
+  }
+
+  Status AllocateArenas() {
+    Status status = Status::Ok();
+    for (DevicePlaneView& plane : original_) {
+      status = AllocatePlane(persistent_, DeviceElementType::kF32,
+                             source_extent_, source_extent_.width, &plane);
+      if (!status.ok()) return status;
+    }
+    for (DevicePlaneView& plane : coding_) {
+      status = AllocatePlane(persistent_, DeviceElementType::kF32,
+                             coding_extent_, coding_extent_.width, &plane);
+      if (!status.ok()) return status;
+    }
+    for (DevicePlaneView& plane : reconstructed_) {
+      status = AllocatePlane(persistent_, DeviceElementType::kF32,
+                             coding_extent_, coding_extent_.width, &plane);
+      if (!status.ok()) return status;
+    }
+    for (size_t image = 0; image < filter_scratch_count_; ++image) {
+      for (DevicePlaneView& plane : filter_scratch_[image]) {
+        status = AllocatePlane(persistent_, DeviceElementType::kF32,
+                               coding_extent_, coding_extent_.width, &plane);
+        if (!status.ok()) return status;
+      }
+    }
+    for (DevicePlaneView& plane : reconstructed_linear_) {
+      status = AllocatePlane(persistent_, DeviceElementType::kF32,
+                             source_extent_, source_extent_.width, &plane);
+      if (!status.ok()) return status;
+    }
+    status = AllocatePlane(persistent_, DeviceElementType::kI32,
+                           {2 * block_count_, 1}, 2 * block_count_,
+                           &anchors_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(persistent_, DeviceElementType::kU8, block_extent_,
+                           block_extent_.width, &epf_sharpness_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(persistent_, DeviceElementType::kF32,
+                           {kQuantTableValueCount, 1}, kQuantTableValueCount,
+                           &quant_tables_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(persistent_, DeviceElementType::kI32,
+                           {6 * block_count_, 1}, 6 * block_count_,
+                           &color_transforms_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(persistent_, DeviceElementType::kI32,
+                           {tile_count_ + 1, 1}, tile_count_ + 1,
+                           &color_tile_offsets_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(persistent_, DeviceElementType::kI8, tile_extent_,
+                           tile_extent_.width, &y_to_x_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(persistent_, DeviceElementType::kI8, tile_extent_,
+                           tile_extent_.width, &y_to_b_device_);
+    if (!status.ok()) return status;
+
+    status = AllocatePlane(staging_, DeviceElementType::kF32, block_extent_,
+                           block_extent_.width, &quant_field_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kI32, {3, 1}, 3,
+                           &selection_state_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kI32, {256, 1}, 256,
+                           &histogram_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kF32, {2, 1}, 2,
+                           &statistics_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kI32, {2, 1}, 2,
+                           &quantizer_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kI32, block_extent_,
+                           block_extent_.width, &raw_quant_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kF32,
+                           {coefficient_count_, 1}, coefficient_count_,
+                           &gathered_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kF32,
+                           {coefficient_count_, 1}, coefficient_count_,
+                           &forward_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kF32,
+                           {coefficient_count_, 1}, coefficient_count_,
+                           &thresholds_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kI32,
+                           {coefficient_count_, 1}, coefficient_count_,
+                           &quantized_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kF32,
+                           {coefficient_count_, 1}, coefficient_count_,
+                           &reconstruction_coefficients_device_);
+    if (!status.ok()) return status;
+    status =
+        AllocatePlane(staging_, DeviceElementType::kF32, {3 * block_count_, 1},
+                      3 * block_count_, &dc_device_);
+    if (!status.ok()) return status;
+    status =
+        AllocatePlane(staging_, DeviceElementType::kI32, {3 * block_count_, 1},
+                      3 * block_count_, &quantized_dc_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kF32,
+                           {coefficient_count_, 1}, coefficient_count_,
+                           &inverse_device_);
+    if (!status.ok()) return status;
+    status = AllocatePlane(staging_, DeviceElementType::kF32, block_extent_,
+                           block_extent_.width, &inverse_sigma_device_);
+    if (!status.ok()) return status;
+    if (options_.metric == AqEvaluationMetric::kButteraugli) {
+      status = AllocatePlane(staging_, DeviceElementType::kF32, source_extent_,
+                             source_extent_.width, &distance_device_);
+      if (!status.ok()) return status;
+      status = AllocatePlane(staging_, DeviceElementType::kF32, {1, 1}, 1,
+                             &score_device_);
+      if (!status.ok()) return status;
+    }
+    status = AllocatePlane(staging_, DeviceElementType::kF32, block_extent_,
+                           block_extent_.width, &block_device_);
+    if (!status.ok()) return status;
+    if (options_.metric == AqEvaluationMetric::kMaximumError) {
+      status = AllocatePlane(staging_, DeviceElementType::kF32,
+                             {3 * block_count_, 1}, 3 * block_count_,
+                             &maximum_device_);
+      if (!status.ok()) return status;
+    }
+    return AllocatePlane(staging_, DeviceElementType::kI32, {1, 1}, 1,
+                         &error_device_);
+  }
+
+  Status AllocatePlane(DeviceScratchArena& arena, DeviceElementType type,
+                       Extent2D extent, size_t row_stride,
+                       DevicePlaneView* plane) {
+    return arena.AllocatePlane(type, extent, row_stride, kArenaAlignment,
+                               plane);
+  }
+
+  Status UploadMetadata(const Metadata& metadata) {
+    Status status = backend_->CopyHostToDevice(
+        *anchors_device_.buffer, metadata.device_anchors.data(),
+        metadata.device_anchors.size() * sizeof(CudaAqAnchor),
+        anchors_device_.offset_bytes);
+    if (status.ok()) {
+      status = backend_->CopyHostToDevice(
+          *epf_sharpness_device_.buffer, metadata.epf_sharpness.data(),
+          metadata.epf_sharpness.size(), epf_sharpness_device_.offset_bytes);
+    }
+    if (status.ok()) {
+      status = backend_->CopyHostToDevice(
+          *color_transforms_device_.buffer, metadata.color_transforms.data(),
+          metadata.color_transforms.size() * sizeof(CudaAqColorTransformRecord),
+          color_transforms_device_.offset_bytes);
+    }
+    if (status.ok()) {
+      status = backend_->CopyHostToDevice(
+          *color_tile_offsets_device_.buffer,
+          metadata.color_tile_offsets.data(),
+          metadata.color_tile_offsets.size() * sizeof(uint32_t),
+          color_tile_offsets_device_.offset_bytes);
+    }
+    return status;
+  }
+
+  void CommitMetadata(Metadata metadata) {
+    batches_ = metadata.batches;
+    row_major_anchors_ = std::move(metadata.row_major_anchors);
+    epf_sharpness_ = std::move(metadata.epf_sharpness);
+    layouts_ = std::move(metadata.layouts);
+    strategies_ = std::move(metadata.strategies);
+    anchor_count_ = row_major_anchors_.size();
+  }
+
+  Status ValidateInput(AqEvaluationInput input) const {
+    const auto plane_i32_specified = [](ConstPlaneI32View plane) {
+      return plane.data != nullptr || !plane.extent.empty() ||
+             plane.stride != 0;
+    };
+    const auto plane_i8_specified = [](ConstPlaneI8View plane) {
+      return plane.data != nullptr || !plane.extent.empty() ||
+             plane.stride != 0;
+    };
+    if (!ValidHostPlaneLayout(input.quant_field) ||
+        input.quant_field.extent != block_extent_ ||
+        !FinitePositive(input.quant_dc) ||
+        input.quant_dc > static_cast<float>(kMaxQuantDc) ||
+        plane_i32_specified(input.raw_quant_field) ||
+        plane_i8_specified(input.y_to_x) || plane_i8_specified(input.y_to_b) ||
+        HostPlaneSpecified(input.epf_inverse_sigma) ||
+        input.exact_coefficients != nullptr ||
+        HostImageSpecified(input.exact_reconstructed_linear_rgb)) {
+      return Status::InvalidArgument("CUDA resident AQ input is invalid");
+    }
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        if (!FinitePositive(input.quant_field.Row(y)[x])) {
+          return Status::InvalidArgument(
+              "CUDA resident AQ quant field is invalid");
+        }
+      }
+    }
+    return Status::Ok();
+  }
+
+  Status ValidateOutput(AqEvaluationOutput output) const {
+    if (!ValidHostPlaneLayout(output.block_distance_map) ||
+        output.block_distance_map.extent != block_extent_ ||
+        output.score == nullptr || output.quantizer == nullptr) {
+      return Status::InvalidArgument("CUDA resident AQ output is invalid");
+    }
+    if ((options_.metric == AqEvaluationMetric::kMaximumError) !=
+        (output.maximum_error != nullptr)) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ maximum-error output is inconsistent");
+    }
+    if (output.final == nullptr) return Status::Ok();
+    if (output.final->frame == nullptr) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ final frame output is null");
+    }
+    if (MutableImageSpecified(output.final->reconstructed_linear_rgb) &&
+        (!output.final->reconstructed_linear_rgb.valid() ||
+         output.final->reconstructed_linear_rgb.extent() != source_extent_ ||
+         !std::ranges::all_of(
+             output.final->reconstructed_linear_rgb.plane,
+             [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }))) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ reconstruction output is invalid");
+    }
+    return Status::Ok();
+  }
+
+  Status AssembleFrame(const Quantizer& quantizer, VarDctEncoderFrame* frame) {
+    Status status = backend_->CopyDeviceToHost(
+        *raw_quant_device_.buffer, raw_readback_.data(),
+        block_count_ * sizeof(int32_t), raw_quant_device_.offset_bytes);
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+          *quantized_device_.buffer, quantized_readback_.data(),
+          coefficient_count_ * sizeof(int32_t), quantized_device_.offset_bytes);
+    }
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(*quantized_dc_device_.buffer,
+                                          quantized_dc_readback_.data(),
+                                          3 * block_count_ * sizeof(int32_t),
+                                          quantized_dc_device_.offset_bytes);
+    }
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+          *y_to_x_device_.buffer, y_to_x_readback_.data(),
+          tile_count_ * sizeof(int8_t), y_to_x_device_.offset_bytes);
+    }
+    if (status.ok()) {
+      status = backend_->CopyDeviceToHost(
+          *y_to_b_device_.buffer, y_to_b_readback_.data(),
+          tile_count_ * sizeof(int8_t), y_to_b_device_.offset_bytes);
+    }
+    if (!status.ok()) return status;
+    if (!std::ranges::all_of(raw_readback_, [](int32_t value) {
+          return value >= 1 && value <= kMaxRawQuant;
+        })) {
+      return Status::DeviceError(
+          "CUDA resident AQ raw-quant readback is invalid");
+    }
+    FrameGeometry geometry;
+    status = FrameGeometry::Create(source_extent_, &geometry);
+    if (!status.ok()) return status;
+    ConstImage3I32View quantized_dc;
+    quantized_dc.plane[0] = {quantized_dc_readback_.data(), block_extent_,
+                             block_extent_.width};
+    quantized_dc.plane[1] = {quantized_dc_readback_.data() + block_count_,
+                             block_extent_, block_extent_.width};
+    quantized_dc.plane[2] = {quantized_dc_readback_.data() + 2 * block_count_,
+                             block_extent_, block_extent_.width};
+    return vardct_frame_internal::AssembleVarDctEncoderFrame(
+        {.geometry = geometry,
+         .strategies = &strategies_,
+         .raw_quant_field = {raw_readback_.data(), block_extent_,
+                             block_extent_.width},
+         .quantizer = &quantizer,
+         .y_to_x = {y_to_x_readback_.data(), tile_extent_, tile_extent_.width},
+         .y_to_b = {y_to_b_readback_.data(), tile_extent_, tile_extent_.width},
+         .epf_sharpness = {epf_sharpness_.data(), block_extent_,
+                           block_extent_.width},
+         .profile = options_.profile,
+         .quantized_dc = quantized_dc,
+         .quantized_ac = quantized_readback_,
+         .transforms = layouts_,
+         .reject_unwritten_coefficients = true},
+        frame);
+  }
+
+  void InitializeKernelParams() {
+    gaborish_params_.width = static_cast<uint32_t>(source_extent_.width);
+    gaborish_params_.height = static_cast<uint32_t>(source_extent_.height);
+    gaborish_params_.input_stride = static_cast<uint32_t>(coding_extent_.width);
+    gaborish_params_.output_stride =
+        static_cast<uint32_t>(coding_extent_.width);
+    for (size_t channel = 0; channel < 3; ++channel) {
+      const float weight1 =
+          options_.profile.loop_filter.gaborish_options.weight1[channel];
+      const float weight2 =
+          options_.profile.loop_filter.gaborish_options.weight2[channel];
+      const float divisor = 1.0f + 4.0f * (weight1 + weight2);
+      gaborish_params_.center_weight[channel] = 1.0f / divisor;
+      gaborish_params_.axis_weight[channel] = weight1 / divisor;
+      gaborish_params_.diagonal_weight[channel] = weight2 / divisor;
+    }
+    for (uint32_t pass = 0; pass < 3; ++pass) {
+      const float pass_scale =
+          pass == 0 ? options_.profile.loop_filter.epf_options.pass0_sigma_scale
+          : pass == 2
+              ? options_.profile.loop_filter.epf_options.pass2_sigma_scale
+              : 1.0f;
+      CudaAqEpfParams& params = epf_params_[pass];
+      params.width = static_cast<uint32_t>(source_extent_.width);
+      params.height = static_cast<uint32_t>(source_extent_.height);
+      params.input_stride = static_cast<uint32_t>(coding_extent_.width);
+      params.output_stride = static_cast<uint32_t>(coding_extent_.width);
+      params.inverse_sigma_stride = static_cast<uint32_t>(block_extent_.width);
+      params.pass = pass;
+      params.sigma_scale = 1.65f * pass_scale;
+      params.border_sad_multiplier =
+          options_.profile.loop_filter.epf_options.border_sad_multiplier;
+      for (size_t channel = 0; channel < 3; ++channel) {
+        params.channel_scale[channel] =
+            options_.profile.loop_filter.epf_options.channel_scale[channel];
+      }
+    }
+    color_params_ = {static_cast<uint32_t>(source_extent_.width),
+                     static_cast<uint32_t>(source_extent_.height),
+                     static_cast<uint32_t>(coding_extent_.width),
+                     static_cast<uint32_t>(source_extent_.width),
+                     255.0f / options_.profile.intensity_target};
+  }
+
+  CudaAqResidentParams ResidentParams(size_t batch_index) const {
+    CudaAqResidentParams params;
+    params.coding_stride = static_cast<uint32_t>(coding_extent_.width);
+    params.block_width = static_cast<uint32_t>(block_extent_.width);
+    params.block_height = static_cast<uint32_t>(block_extent_.height);
+    params.color_stride = static_cast<uint32_t>(tile_extent_.width);
+    params.strategy = static_cast<uint32_t>(kSupportedStrategies[batch_index]);
+    params.x_matrix_multiplier =
+        QuantizationMatrixMultiplier(options_.profile.x_qm_scale);
+    params.b_matrix_multiplier =
+        QuantizationMatrixMultiplier(options_.profile.b_qm_scale);
+    params.adjust_ac_quant = 1;
+    params.epf_quant_multiplier = options_.profile.epf_sigma.quant_multiplier;
+    for (size_t index = 0; index < 8; ++index) {
+      params.epf_sharpness_lut[index] =
+          options_.profile.epf_sigma.sharpness_lut[index];
+    }
+    return params;
+  }
+
+  static cudaError_t EncodeAdjustment(CudaBackend& backend,
+                                      const void* opaque) {
+    const auto& context = *static_cast<const AdjustmentContext*>(opaque);
+    CudaPreparedResidentAqEvaluation& self = *context.self;
+    cudaError_t status =
+        cudaMemsetAsync(Pointer<unsigned int>(self.error_device_), 0,
+                        sizeof(uint32_t), backend.state_->stream);
+    if (status != cudaSuccess) return status;
+    for (const CudaAqExactBatch& batch : self.batches_) {
+      if (batch.anchor_count == 0) continue;
+      status = LaunchCudaAqAdjustQuantField(
+          Pointer<CudaAqAnchor>(self.anchors_device_),
+          Pointer<float>(self.quant_field_device_),
+          Pointer<unsigned int>(self.error_device_),
+          static_cast<uint32_t>(self.block_extent_.width), batch,
+          context.mean_max_mixer, backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
+    return cudaSuccess;
+  }
+
+  static cudaError_t EncodeReconstruction(CudaBackend& backend,
+                                          const void* opaque) {
+    const auto& context = *static_cast<const EvaluationContext*>(opaque);
+    CudaPreparedResidentAqEvaluation& self = *context.self;
+    cudaError_t status =
+        cudaMemsetAsync(Pointer<unsigned int>(self.error_device_), 0,
+                        sizeof(uint32_t), backend.state_->stream);
+    if (status != cudaSuccess) return status;
+    status = LaunchCudaAqSelectResidentQuantizer(
+        Pointer<float>(self.quant_field_device_),
+        static_cast<uint32_t>(self.block_count_),
+        Pointer<unsigned int>(self.selection_state_device_),
+        Pointer<unsigned int>(self.histogram_device_),
+        Pointer<float>(self.statistics_device_),
+        Pointer<unsigned int>(self.quantizer_device_),
+        Pointer<int>(self.raw_quant_device_),
+        Pointer<unsigned int>(self.error_device_), context.quant_dc,
+        backend.state_->stream);
+    if (status != cudaSuccess) return status;
+
+    if (context.compute_forward) {
+      for (const CudaAqExactBatch& batch : self.batches_) {
+        if (batch.anchor_count == 0) continue;
+        status = LaunchCudaAqGatherTransformPixels(
+            Pointer<const float>(self.coding_[0]),
+            Pointer<const float>(self.coding_[1]),
+            Pointer<const float>(self.coding_[2]),
+            Pointer<CudaAqAnchor>(self.anchors_device_),
+            Pointer<float>(self.gathered_device_), batch,
+            static_cast<uint32_t>(self.coding_extent_.width),
+            backend.state_->stream);
+        if (status != cudaSuccess) return status;
+        status = LaunchCudaDct(
+            true,
+            Pointer<const float>(self.gathered_device_) +
+                batch.coefficient_offset,
+            Pointer<float>(self.forward_device_) + batch.coefficient_offset,
+            3 * static_cast<size_t>(batch.anchor_count), batch.pixel_width,
+            batch.pixel_height, backend.state_->stream);
+        if (status != cudaSuccess) return status;
+      }
+    }
+    if (context.compute_color_correlation) {
+      status = LaunchCudaAqFinalColorCorrelation(
+          Pointer<CudaAqColorTransformRecord>(self.color_transforms_device_),
+          Pointer<uint32_t>(self.color_tile_offsets_device_),
+          Pointer<const float>(self.quant_tables_device_),
+          Pointer<const float>(self.forward_device_),
+          Pointer<const int>(self.raw_quant_device_),
+          Pointer<const unsigned int>(self.quantizer_device_),
+          Pointer<signed char>(self.y_to_x_device_),
+          Pointer<signed char>(self.y_to_b_device_),
+          Pointer<unsigned int>(self.error_device_),
+          static_cast<uint32_t>(self.tile_count_), backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
+
+    for (size_t batch_index = 0; batch_index < self.batches_.size();
+         ++batch_index) {
+      const CudaAqExactBatch& batch = self.batches_[batch_index];
+      if (batch.anchor_count == 0) continue;
+      const CudaAqResidentParams params = self.ResidentParams(batch_index);
+      status = LaunchCudaAqSelectAdjustedQuantization(
+          Pointer<CudaAqAnchor>(self.anchors_device_),
+          Pointer<const float>(self.quant_tables_device_),
+          Pointer<int>(self.raw_quant_device_),
+          Pointer<const float>(self.forward_device_),
+          Pointer<float>(self.thresholds_device_),
+          Pointer<const unsigned int>(self.quantizer_device_),
+          Pointer<unsigned int>(self.error_device_), batch, params,
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      status = LaunchCudaAqEncodeResidentCoefficients(
+          Pointer<CudaAqAnchor>(self.anchors_device_),
+          Pointer<const float>(self.quant_tables_device_),
+          Pointer<const int>(self.raw_quant_device_),
+          Pointer<const signed char>(self.y_to_x_device_),
+          Pointer<const signed char>(self.y_to_b_device_),
+          Pointer<const float>(self.forward_device_),
+          Pointer<int>(self.quantized_device_),
+          Pointer<float>(self.reconstruction_coefficients_device_),
+          Pointer<float>(self.dc_device_),
+          Pointer<int>(self.quantized_dc_device_),
+          Pointer<float>(self.inverse_sigma_device_),
+          Pointer<const unsigned char>(self.epf_sharpness_device_),
+          Pointer<const unsigned int>(self.quantizer_device_),
+          Pointer<const float>(self.thresholds_device_),
+          Pointer<unsigned int>(self.error_device_), batch, params,
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      status = LaunchCudaDct(
+          false,
+          Pointer<const float>(self.reconstruction_coefficients_device_) +
+              batch.coefficient_offset,
+          Pointer<float>(self.inverse_device_) + batch.coefficient_offset,
+          3 * static_cast<size_t>(batch.anchor_count), batch.pixel_width,
+          batch.pixel_height, backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      status = LaunchCudaAqScatterReconstruction(
+          Pointer<CudaAqAnchor>(self.anchors_device_),
+          Pointer<const float>(self.inverse_device_),
+          MutablePointers(self.reconstructed_),
+          static_cast<uint32_t>(self.coding_extent_.width), batch,
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
+    status = self.EncodePostprocess(backend);
+    if (status != cudaSuccess) return status;
+    if (self.options_.metric == AqEvaluationMetric::kMaximumError) {
+      const std::array<DevicePlaneView, 3> filtered = self.FinalFilteredImage();
+      for (const CudaAqExactBatch& batch : self.batches_) {
+        if (batch.anchor_count == 0) continue;
+        status = LaunchCudaAqReduceMaximumError(
+            ConstPointers(self.coding_), ConstPointers(filtered),
+            static_cast<uint32_t>(self.coding_extent_.width),
+            static_cast<uint32_t>(self.coding_extent_.width),
+            Pointer<CudaAqAnchor>(self.anchors_device_),
+            Pointer<float>(self.block_device_),
+            static_cast<uint32_t>(self.block_extent_.width),
+            Pointer<float>(self.maximum_device_),
+            Pointer<unsigned int>(self.error_device_),
+            static_cast<uint32_t>(self.source_extent_.width),
+            static_cast<uint32_t>(self.source_extent_.height),
+            self.options_.maximum_error, batch, backend.state_->stream);
+        if (status != cudaSuccess) return status;
+      }
+    }
+    return cudaSuccess;
+  }
+
+  cudaError_t EncodePostprocess(CudaBackend& backend) {
+    std::array<DevicePlaneView, 3> current = reconstructed_;
+    size_t stage = 0;
+    cudaError_t status = cudaSuccess;
+    if (options_.profile.loop_filter.gaborish) {
+      status = LaunchCudaAqGaborish(ConstPointers(current),
+                                    MutablePointers(filter_scratch_[0]),
+                                    Pointer<unsigned int>(error_device_),
+                                    gaborish_params_, backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      current = filter_scratch_[0];
+      ++stage;
+    }
+    const uint32_t iterations =
+        options_.profile.loop_filter.epf_options.iterations;
+    const uint32_t first_pass = iterations == 3 ? 0 : 1;
+    for (uint32_t pass = first_pass; pass < first_pass + iterations; ++pass) {
+      std::array<DevicePlaneView, 3>& destination = filter_scratch_[stage % 2];
+      status = LaunchCudaAqEpf(
+          ConstPointers(current), Pointer<const float>(inverse_sigma_device_),
+          MutablePointers(destination), Pointer<unsigned int>(error_device_),
+          epf_params_[pass], backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      current = destination;
+      ++stage;
+    }
+    return LaunchCudaAqOpsinToLinear(ConstPointers(current),
+                                     MutablePointers(reconstructed_linear_),
+                                     Pointer<unsigned int>(error_device_),
+                                     color_params_, backend.state_->stream);
+  }
+
+  static cudaError_t EncodeBlockReduction(CudaBackend& backend,
+                                          const void* opaque) {
+    auto& self = *static_cast<CudaPreparedResidentAqEvaluation*>(
+        const_cast<void*>(opaque));
+    cudaError_t status =
+        cudaMemsetAsync(Pointer<unsigned int>(self.error_device_), 0,
+                        sizeof(uint32_t), backend.state_->stream);
+    if (status != cudaSuccess) return status;
+    for (const CudaAqExactBatch& batch : self.batches_) {
+      if (batch.anchor_count == 0) continue;
+      status = LaunchCudaAqReduceButteraugli(
+          Pointer<const float>(self.distance_device_),
+          static_cast<uint32_t>(self.source_extent_.width),
+          Pointer<CudaAqAnchor>(self.anchors_device_),
+          Pointer<float>(self.block_device_),
+          static_cast<uint32_t>(self.block_extent_.width),
+          Pointer<unsigned int>(self.error_device_),
+          static_cast<uint32_t>(self.source_extent_.width),
+          static_cast<uint32_t>(self.source_extent_.height), batch,
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
+    return cudaSuccess;
+  }
+
+  Status ReadAndCheckDeviceError() {
+    uint32_t error = 0;
+    Status status =
+        backend_->CopyDeviceToHost(*error_device_.buffer, &error, sizeof(error),
+                                   error_device_.offset_bytes);
+    if (!status.ok()) return status;
+    return error == 0 ? Status::Ok()
+                      : Status::DeviceError(
+                            "CUDA resident AQ detected invalid device numerics "
+                            "(flag " +
+                            std::to_string(error) + ")");
+  }
+
+  Status Invalidate(Status status) {
+    invalid_ = true;
+    return status;
+  }
+
+  std::array<DevicePlaneView, 3> FinalFilteredImage() const noexcept {
+    return final_filter_index_ < 0
+               ? reconstructed_
+               : filter_scratch_[static_cast<size_t>(final_filter_index_)];
+  }
+
+  template <typename T>
+  static T* Pointer(DevicePlaneView view) {
+    CudaBuffer* buffer = CudaBackend::AsCudaBuffer(*view.buffer);
+    return reinterpret_cast<T*>(static_cast<std::byte*>(buffer->pointer()) +
+                                view.offset_bytes);
+  }
+
+  template <typename T>
+  static const T* Pointer(ConstDevicePlaneView view) {
+    const CudaBuffer* buffer = CudaBackend::AsCudaBuffer(*view.buffer);
+    return reinterpret_cast<const T*>(
+        static_cast<const std::byte*>(buffer->pointer()) + view.offset_bytes);
+  }
+
+  static std::array<float*, 3> MutablePointers(
+      const std::array<DevicePlaneView, 3>& image) {
+    return {Pointer<float>(image[0]), Pointer<float>(image[1]),
+            Pointer<float>(image[2])};
+  }
+
+  static std::array<const float*, 3> ConstPointers(
+      const std::array<DevicePlaneView, 3>& image) {
+    return {Pointer<const float>(image[0]), Pointer<const float>(image[1]),
+            Pointer<const float>(image[2])};
+  }
+
+  static ConstDeviceImage3View ConstImage(
+      const std::array<DevicePlaneView, 3>& image) {
+    return {{{static_cast<ConstDevicePlaneView>(image[0]),
+              static_cast<ConstDevicePlaneView>(image[1]),
+              static_cast<ConstDevicePlaneView>(image[2])}}};
+  }
+
+  CudaBackend* backend_ = nullptr;
+  DeviceScratchArena persistent_;
+  DeviceScratchArena staging_;
+  std::array<DevicePlaneView, 3> original_{};
+  std::array<DevicePlaneView, 3> coding_{};
+  std::array<DevicePlaneView, 3> reconstructed_{};
+  std::array<std::array<DevicePlaneView, 3>, 2> filter_scratch_{};
+  std::array<DevicePlaneView, 3> reconstructed_linear_{};
+  DevicePlaneView anchors_device_{};
+  DevicePlaneView epf_sharpness_device_{};
+  DevicePlaneView quant_tables_device_{};
+  DevicePlaneView color_transforms_device_{};
+  DevicePlaneView color_tile_offsets_device_{};
+  DevicePlaneView y_to_x_device_{};
+  DevicePlaneView y_to_b_device_{};
+  DevicePlaneView quant_field_device_{};
+  DevicePlaneView selection_state_device_{};
+  DevicePlaneView histogram_device_{};
+  DevicePlaneView statistics_device_{};
+  DevicePlaneView quantizer_device_{};
+  DevicePlaneView raw_quant_device_{};
+  DevicePlaneView gathered_device_{};
+  DevicePlaneView forward_device_{};
+  DevicePlaneView thresholds_device_{};
+  DevicePlaneView quantized_device_{};
+  DevicePlaneView reconstruction_coefficients_device_{};
+  DevicePlaneView dc_device_{};
+  DevicePlaneView quantized_dc_device_{};
+  DevicePlaneView inverse_device_{};
+  DevicePlaneView inverse_sigma_device_{};
+  DevicePlaneView distance_device_{};
+  DevicePlaneView score_device_{};
+  DevicePlaneView block_device_{};
+  DevicePlaneView maximum_device_{};
+  DevicePlaneView error_device_{};
+  Extent2D source_extent_{};
+  Extent2D coding_extent_{};
+  Extent2D block_extent_{};
+  Extent2D tile_extent_{};
+  size_t source_count_ = 0;
+  size_t coding_count_ = 0;
+  size_t block_count_ = 0;
+  size_t tile_count_ = 0;
+  size_t coefficient_count_ = 0;
+  size_t anchor_count_ = 0;
+  size_t filter_stage_count_ = 0;
+  size_t filter_scratch_count_ = 0;
+  int final_filter_index_ = -1;
+  AqEvaluationOptions options_{};
+  AcStrategyGrid strategies_{};
+  std::array<CudaAqExactBatch, 7> batches_{};
+  std::vector<HostAnchor> row_major_anchors_;
+  std::vector<uint8_t> epf_sharpness_;
+  std::vector<vardct_frame_internal::QuantizedAcTransformLayout> layouts_;
+  std::vector<float> block_readback_;
+  std::vector<float> maximum_readback_;
+  std::vector<int32_t> raw_readback_;
+  std::vector<int32_t> quantized_readback_;
+  std::vector<int32_t> quantized_dc_readback_;
+  std::vector<int8_t> y_to_x_readback_;
+  std::vector<int8_t> y_to_b_readback_;
+  std::vector<float> quant_field_readback_;
+  std::array<std::vector<float>, 3> linear_readback_;
+  std::unique_ptr<PreparedDeviceButteraugli> butteraugli_;
+  CudaAqGaborishParams gaborish_params_{};
+  std::array<CudaAqEpfParams, 3> epf_params_{};
+  CudaAqColorParams color_params_{};
+  AqEvaluationMemoryStats memory_stats_{};
+  std::mutex mutex_;
+  bool invariant_color_correlation_ready_ = false;
+  bool forward_coefficients_ready_ = false;
+  bool color_correlation_pending_ = false;
+  bool invalid_ = false;
+};
+
+Status PrepareCudaResidentAqEvaluation(
+    CudaBackend& backend, const AqEvaluationPreparation& preparation,
+    std::unique_ptr<PreparedAqEvaluation>* prepared) {
+  if (prepared == nullptr) {
+    return Status::InvalidArgument(
+        "CUDA resident AQ prepared output pointer is null");
+  }
+  prepared->reset();
+  try {
+    auto candidate =
+        std::make_unique<CudaPreparedResidentAqEvaluation>(backend);
+    Status status = candidate->Prepare(preparation);
+    if (!status.ok()) return status;
+    *prepared = std::move(candidate);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+        "Unable to allocate CUDA resident AQ prepared state");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+        "CUDA resident AQ prepared dimensions are too large");
+  }
+}
+
+}  // namespace gjxl::cuda_internal

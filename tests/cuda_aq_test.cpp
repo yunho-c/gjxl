@@ -440,6 +440,257 @@ bool CheckExactMaximumError(gjxl::GpuBackend& gpu,
   return true;
 }
 
+bool CheckFullyResident(gjxl::GpuBackend& gpu, const ImageStorage& source,
+                        const ImageStorage& opsin) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  const size_t block_count = blocks.width * blocks.height;
+  gjxl::AcStrategyGrid strategies;
+  std::vector<uint8_t> sharpness(block_count);
+  std::vector<float> initial(block_count);
+  if (!MakeExactStrategies(&strategies) ||
+      !Check(gjxl::FillDefaultEpfSharpness(
+                 {sharpness.data(), blocks, blocks.width}),
+             "Fill CUDA resident sharpness")) {
+    return false;
+  }
+  for (size_t index = 0; index < block_count; ++index) {
+    initial[index] = 0.78f + 0.011f * static_cast<float>(index % 23);
+  }
+  struct Result {
+    explicit Result(size_t count)
+        : quant(count), block(count), reconstruction(kSourceExtent) {}
+    std::vector<float> quant;
+    std::vector<float> block;
+    ImageStorage reconstruction;
+    gjxl::VarDctEncoderFrame frame;
+    std::vector<double> scores;
+  };
+  const auto output = [&](Result& result) {
+    return gjxl::AdaptiveQuantizationOutput{
+        .quant_field = {result.quant.data(), blocks, blocks.width},
+        .block_distance_map = {result.block.data(), blocks, blocks.width},
+        .reconstructed_linear_rgb = result.reconstruction.View(),
+        .frame = &result.frame,
+        .score_history = &result.scores};
+  };
+
+  gjxl::AdaptiveQuantizationOptions options;
+  options.butteraugli_target = 1.1f;
+  options.profile.x_qm_scale = 2;
+  options.profile.b_qm_scale = 1;
+
+  // With no policy update, the resident path is a useful exact oracle for the
+  // strategy-aware quantization, coefficient, CfL, and reconstruction kernels.
+  Result cpu(block_count);
+  Result cuda(block_count);
+  options.iterations = 0;
+  if (!Check(gjxl::FindBestQuantization(
+                 source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 output(cpu)),
+             "CPU resident AQ oracle") ||
+      !Check(gjxl::RunGpuAdaptiveQuantization(
+                 gpu, source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+                 output(cuda)),
+             "CUDA fully resident AQ")) {
+    return false;
+  }
+  double difference = std::max(MaximumError(cpu.quant, cuda.quant),
+                               MaximumError(cpu.block, cuda.block));
+  if (cpu.scores.size() != cuda.scores.size()) return false;
+  for (size_t index = 0; index < cpu.scores.size(); ++index) {
+    difference =
+        std::max(difference, std::abs(cpu.scores[index] - cuda.scores[index]));
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kSourceExtent.height; ++y) {
+      for (size_t x = 0; x < kSourceExtent.width; ++x) {
+        difference = std::max(
+            difference,
+            std::abs(static_cast<double>(
+                         cpu.reconstruction.plane[channel]
+                                                 [y * cpu.reconstruction.stride +
+                                                  x]) -
+                     cuda.reconstruction.plane[channel]
+                                                  [y * cuda.reconstruction.stride +
+                                                   x]));
+      }
+    }
+  }
+  std::vector<uint8_t> cpu_bytes;
+  std::vector<uint8_t> cuda_bytes;
+  if (!Check(gjxl::EncodeVarDctCodestream(cpu.frame, &cpu_bytes),
+             "Encode CPU resident frame") ||
+      !Check(gjxl::EncodeVarDctCodestream(cuda.frame, &cuda_bytes),
+             "Encode CUDA resident frame") ||
+      cpu_bytes != cuda_bytes || difference > 2.0e-3) {
+    std::cerr << "CUDA iteration-zero resident AQ differs by " << difference
+              << '\n';
+    return false;
+  }
+
+  // Once policy updates begin, fixed resident CfL deliberately differs from
+  // the ordinary CPU evaluator. The public contract is deterministic bounded
+  // and full materialization of the same resident policy result.
+  options.iterations = 3;
+  std::vector<float> bounded_quant(block_count);
+  std::vector<float> bounded_block(block_count);
+  std::vector<double> bounded_scores;
+  Result full(block_count);
+  if (!Check(gjxl::RunGpuAdaptiveQuantizationPolicy(
+                 gpu, source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+                 {.quant_field =
+                      {bounded_quant.data(), blocks, blocks.width},
+                  .block_distance_map =
+                      {bounded_block.data(), blocks, blocks.width},
+                  .score_history = &bounded_scores}),
+             "CUDA bounded fully resident AQ") ||
+      !Check(gjxl::RunGpuAdaptiveQuantization(
+                 gpu, source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+                 output(full)),
+             "CUDA full fully resident AQ") ||
+      bounded_quant != full.quant || bounded_block != full.block ||
+      bounded_scores != full.scores || full.scores.size() != 4 ||
+      !full.frame.valid()) {
+    std::cerr << "CUDA resident bounded and full results differ\n";
+    return false;
+  }
+  for (double score : full.scores) {
+    if (!std::isfinite(score) || score < 0.0) return false;
+  }
+  for (float value : full.quant) {
+    if (!std::isfinite(value) || value <= 0.0f) return false;
+  }
+  for (float value : full.block) {
+    if (!std::isfinite(value) || value < 0.0f) return false;
+  }
+  for (const std::vector<float>& plane : full.reconstruction.plane) {
+    for (size_t y = 0; y < kSourceExtent.height; ++y) {
+      for (size_t x = 0; x < kSourceExtent.width; ++x) {
+        if (!std::isfinite(plane[y * full.reconstruction.stride + x])) {
+          return false;
+        }
+      }
+    }
+  }
+  std::vector<uint8_t> full_bytes;
+  if (!Check(gjxl::EncodeVarDctCodestream(full.frame, &full_bytes),
+             "Encode fully resident CUDA frame") ||
+      full_bytes.empty()) {
+    return false;
+  }
+
+  constexpr float kPoison = -4321.0f;
+  std::vector<float> failed_quant(block_count, kPoison);
+  std::vector<float> failed_block(block_count, kPoison);
+  std::vector<double> failed_scores{17.0};
+  ImageStorage failed_reconstruction(kSourceExtent, kPoison);
+  gjxl::VarDctEncoderFrame failed_frame;
+  if (!Check(gjxl::ArmNextCudaSubmissionFailureForTest(gpu, false, true),
+             "Arm CUDA resident completion failure")) {
+    return false;
+  }
+  const gjxl::Status failed = gjxl::RunGpuAdaptiveQuantization(
+      gpu, source.View(), opsin.View(), strategies,
+      {initial.data(), blocks, blocks.width},
+      {sharpness.data(), blocks, blocks.width}, options,
+      gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+      {.quant_field = {failed_quant.data(), blocks, blocks.width},
+       .block_distance_map = {failed_block.data(), blocks, blocks.width},
+       .reconstructed_linear_rgb = failed_reconstruction.View(),
+       .frame = &failed_frame,
+       .score_history = &failed_scores});
+  if (failed.ok() ||
+      !std::ranges::all_of(failed_quant,
+                           [](float value) { return value == kPoison; }) ||
+      !std::ranges::all_of(failed_block,
+                           [](float value) { return value == kPoison; }) ||
+      failed_scores != std::vector<double>{17.0} || failed_frame.valid()) {
+    std::cerr << "CUDA resident failure was not atomic\n";
+    return false;
+  }
+  for (const std::vector<float>& plane : failed_reconstruction.plane) {
+    if (!std::ranges::all_of(plane,
+                             [](float value) { return value == kPoison; })) {
+      std::cerr << "CUDA resident failure changed reconstruction output\n";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool CheckResidentMaximumError(gjxl::GpuBackend& gpu,
+                               const ImageStorage& source,
+                               const ImageStorage& opsin) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  const size_t block_count = blocks.width * blocks.height;
+  gjxl::AcStrategyGrid strategies;
+  std::vector<uint8_t> sharpness(block_count);
+  std::vector<float> initial(block_count, 0.91f);
+  if (!MakeExactStrategies(&strategies) ||
+      !Check(gjxl::FillDefaultEpfSharpness(
+                 {sharpness.data(), blocks, blocks.width}),
+             "Fill CUDA resident maximum-error sharpness")) {
+    return false;
+  }
+  gjxl::AdaptiveQuantizationOptions options;
+  options.control_mode =
+      gjxl::AdaptiveQuantizationControlMode::kMaximumError;
+  options.maximum_error = {0.035f, 0.05f, 0.065f};
+  std::vector<float> quant(block_count);
+  std::vector<float> block(block_count);
+  std::vector<double> scores;
+  ImageStorage reconstruction(kSourceExtent);
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::MaximumErrorResult maximum;
+  if (!Check(gjxl::RunGpuAdaptiveQuantization(
+                 gpu, source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+                 {.quant_field = {quant.data(), blocks, blocks.width},
+                  .block_distance_map =
+                      {block.data(), blocks, blocks.width},
+                  .reconstructed_linear_rgb = reconstruction.View(),
+                  .frame = &frame,
+                  .score_history = &scores,
+                  .maximum_error_result = &maximum}),
+             "CUDA resident maximum-error AQ") ||
+      !frame.valid() || scores.size() != maximum.evaluation_count ||
+      scores.size() != 6 ||
+      maximum.outcome == gjxl::MaximumErrorOutcome::kNotApplicable ||
+      !std::isfinite(maximum.normalized_maximum) ||
+      maximum.normalized_maximum < 0.0f) {
+    std::cerr << "CUDA resident maximum-error result is invalid\n";
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (!std::isfinite(maximum.achieved[channel]) ||
+        maximum.achieved[channel] < 0.0f) {
+      return false;
+    }
+  }
+  for (double score : scores) {
+    if (!std::isfinite(score) || score < 0.0) return false;
+  }
+  std::vector<uint8_t> bytes;
+  return Check(gjxl::EncodeVarDctCodestream(frame, &bytes),
+               "Encode resident maximum-error frame") &&
+         !bytes.empty();
+}
+
 bool CheckResidentFrontend(gjxl::GpuBackend& gpu, const ImageStorage& source,
                            const ImageStorage& opsin) {
   const gjxl::Extent2D blocks{kPaddedExtent.width / 8, kPaddedExtent.height / 8};
@@ -694,6 +945,8 @@ int main() {
              "Prepare CUDA AQ opsin") ||
       !CheckExactWorkflow(*gpu, source, opsin) ||
       !CheckExactMaximumError(*gpu, source, opsin) ||
+      !CheckFullyResident(*gpu, source, opsin) ||
+      !CheckResidentMaximumError(*gpu, source, opsin) ||
       !CheckResidentFrontend(*gpu, source, opsin) ||
       !CheckPreparedReuseAndFailure(*gpu, source, opsin) ||
       !CheckPublicWorkflow(*gpu, source)) {

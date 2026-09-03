@@ -41,6 +41,16 @@ Implementation progress as of this revision:
   supports odd padded source geometry and strategy reconfiguration, and
   invalidates atomically after submission, completion, numeric, or readback
   failure; and
+- direct fully resident AQ now supports all seven production strategies,
+  strategy-aware field adjustment, resident quantizer selection, cached
+  forward transforms, final CfL, adjusted coefficient decisions, DC and AC
+  coding, reconstruction, loop filtering, Butteraugli feedback, and resident
+  maximum-error control. The prepared evaluator uses two preplanned arenas,
+  supports metadata reconfiguration, and commits host output atomically;
+- the dependent Butteraugli field-update policy currently uses the shared
+  host-controlled fallback between resident CUDA evaluations. Fusing those
+  updates, and connecting the resident initial-quantization/AC-search handoff,
+  remain the principal functional Phase 4 gaps;
 - public C++, C, Rust, CLI, package-export, and diagnostic vocabulary now
   includes CUDA without changing existing C enum values; and
 - automatic selection deliberately remains Metal-only until CUDA passes the
@@ -593,6 +603,28 @@ Exit criterion: all four GPU modes satisfy their distinct contracts; resident
 results are deterministic for a fixed CUDA backend, independently decodable,
 finite after decoding, and within established size and perceptual-quality
 gates.
+
+Current progress: the direct resident evaluator is implemented for all seven
+production transform strategies. It keeps the adjusted field, selected
+quantizer and raw-quant grid, cached forward coefficients, final CfL, adjusted
+coefficient decisions, inverse reconstruction, loop filters, color conversion,
+and metric inputs in CUDA memory. Both Butteraugli and maximum-error control
+produce valid frames and codestreams; iteration-zero mixed-strategy output is
+byte-identical to the CPU oracle, while later iterations are tested against the
+resident determinism contract because fixed final CfL intentionally differs
+from ordinary CPU evaluation. Bounded and full materialization agree exactly,
+caller output remains unchanged after injected completion failure, all 52
+CUDA-enabled tests pass, and Compute Sanitizer reports zero memory errors on
+compute capability 8.6.
+
+This is not yet the fused end state. The shared AQ frontend falls back to
+host-side dependent field updates between CUDA evaluations because
+`EvaluateResidentButteraugliPolicy` is not implemented by CUDA. The integrated
+encoding pipeline's resident initial quantization and AC-strategy inputs are
+also not yet accepted by this evaluator. Consequently the mode is functionally
+resident for coefficient generation and perceptual evaluation, but it still
+incurs policy readback/upload round trips and cannot yet replace Metal's full
+resident pipeline in automatic selection.
 
 ### Phase 5: production qualification
 

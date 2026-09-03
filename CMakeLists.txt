@@ -570,6 +570,8 @@ if(GJXL_ENABLE_CUDA)
     src/gpu/cuda/cuda_aq_kernels.cu
     src/gpu/cuda/cuda_aq_exact.cpp
     src/gpu/cuda/cuda_aq_exact_kernels.cu
+    src/gpu/cuda/cuda_aq_resident.cpp
+    src/gpu/cuda/cuda_aq_resident_kernels.cu
     src/gpu/cuda/cuda_butteraugli.cpp
     src/gpu/cuda/cuda_butteraugli_kernels.cu
     src/gpu/cuda/cuda_kernels.cu
