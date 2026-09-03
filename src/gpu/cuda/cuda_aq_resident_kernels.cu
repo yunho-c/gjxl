@@ -855,7 +855,7 @@ cudaError_t LaunchCudaAqAdjustQuantField(
   const uint32_t blocks = (batch.anchor_count + kThreads - 1) / kThreads;
   AdjustQuantFieldKernel<<<blocks, kThreads, 0, stream>>>(
       anchors, quant_field, error, quant_stride, batch, mean_max_mixer);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaAqGatherTransformPixels(
@@ -868,7 +868,7 @@ cudaError_t LaunchCudaAqGatherTransformPixels(
       static_cast<uint32_t>((count + kThreads - 1) / kThreads);
   GatherTransformPixelsKernel<<<blocks, kThreads, 0, stream>>>(
       coding_x, coding_y, coding_b, anchors, gathered, batch, coding_stride);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaAqFinalColorCorrelation(
@@ -880,7 +880,7 @@ cudaError_t LaunchCudaAqFinalColorCorrelation(
   FinalColorCorrelationKernel<<<tile_count, 4, 0, stream>>>(
       transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
       quantizer, y_to_x, y_to_b, error, tile_count);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaAqSelectAdjustedQuantization(
@@ -892,7 +892,7 @@ cudaError_t LaunchCudaAqSelectAdjustedQuantization(
   SelectAdjustedQuantizationKernel<<<blocks, kThreads, 0, stream>>>(
       anchors, quant_tables, raw_quant, forward_coefficients,
       adjustment_thresholds, quantizer, error, batch, params);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaAqEncodeResidentCoefficients(
@@ -909,7 +909,7 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficients(
       quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
       inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
       batch, params);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaAqResidentPolicyInitialize(
@@ -920,7 +920,7 @@ cudaError_t LaunchCudaAqResidentPolicyInitialize(
   const uint32_t blocks = (count + kThreads - 1) / kThreads;
   ResidentPolicyInitializeKernel<<<blocks, kThreads, 0, stream>>>(
       quant_field, initial_quant_field, scores, error, params);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaAqResidentPolicyUpdate(
@@ -932,7 +932,7 @@ cudaError_t LaunchCudaAqResidentPolicyUpdate(
   ResidentPolicyUpdateKernel<<<blocks, kThreads, 0, stream>>>(
       quant_field, initial_quant_field, block_distance, score, scores,
       quantizer, error, params);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 }  // namespace gjxl::cuda_internal

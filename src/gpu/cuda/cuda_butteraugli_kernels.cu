@@ -897,7 +897,7 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
   return static_cast<unsigned int>((count + kPlaneThreads - 1) / kPlaneThreads);
 }
 
-[[nodiscard]] cudaError_t CheckLaunch() { return cudaPeekAtLastError(); }
+[[nodiscard]] cudaError_t CheckLaunch() { return cudaGetLastError(); }
 
 [[nodiscard]] cudaError_t LaunchExpand(std::array<const float*, 3> input,
                                        std::array<uint32_t, 3> input_stride,

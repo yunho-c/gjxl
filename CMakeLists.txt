@@ -2256,6 +2256,12 @@ if(GJXL_BUILD_TESTS)
         gjxl_cuda
     )
 
+    target_include_directories(
+      gjxl_cuda_backend_test
+      PRIVATE
+        ${CUDAToolkit_INCLUDE_DIRS}
+    )
+
     add_test(
       NAME cuda_backend
       COMMAND gjxl_cuda_backend_test

@@ -343,7 +343,7 @@ cudaError_t LaunchCudaAcStrategyBatch(
     (packed_element_count + kGatherThreads - 1) / kGatherThreads);
   GatherKernel<<<gather_blocks, kGatherThreads, 0, stream>>>(
     opsin_x, opsin_y, opsin_b, typed_candidates, scratch_a, params);
-  cudaError_t error = cudaPeekAtLastError();
+  cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) return error;
 
   const size_t transform_count =
@@ -363,7 +363,7 @@ cudaError_t LaunchCudaAcStrategyBatch(
     stream>>>(
       scratch_b, matrices, typed_candidates, quant_field, scratch_a,
       static_cast<ChannelRate*>(rate_scratch), params);
-  error = cudaPeekAtLastError();
+  error = cudaGetLastError();
   if (error != cudaSuccess) return error;
 
   error = LaunchCudaDct(
@@ -381,7 +381,7 @@ cudaError_t LaunchCudaAcStrategyBatch(
       scratch_b, pixel_mask, typed_candidates,
       static_cast<const ChannelRate*>(rate_scratch), costs, quant_field,
       params);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 }  // namespace gjxl::cuda_internal

@@ -736,7 +736,7 @@ __global__ void EncodeFrameKernel(
   }
 }
 
-cudaError_t CheckLaunch() { return cudaPeekAtLastError(); }
+cudaError_t CheckLaunch() { return cudaGetLastError(); }
 
 }  // namespace
 

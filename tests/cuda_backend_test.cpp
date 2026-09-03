@@ -19,6 +19,7 @@
 #include "dct_reference.h"
 #include "gpu/backend.h"
 #include "gpu/cuda/cuda_backend.h"
+#include "gpu/cuda/cuda_kernels.h"
 
 namespace {
 
@@ -122,6 +123,48 @@ bool CheckFactoryAndBuffers(gjxl::GpuBackend& backend) {
     return false;
   }
   return backend.stats().successful_allocations == 1;
+}
+
+bool CheckKernelLaunchErrorConsumption() {
+  float* device_value = nullptr;
+  cudaError_t status = cudaMalloc(
+    reinterpret_cast<void**>(&device_value), sizeof(*device_value));
+  if (status != cudaSuccess) {
+    std::cerr << "CUDA launch-error test allocation failed: "
+              << cudaGetErrorString(status) << '\n';
+    return false;
+  }
+  status = cudaMemset(device_value, 0, sizeof(*device_value));
+  if (status != cudaSuccess) {
+    (void)cudaFree(device_value);
+    std::cerr << "CUDA launch-error test initialization failed: "
+              << cudaGetErrorString(status) << '\n';
+    return false;
+  }
+
+  // Start with a clean per-thread launch-error slot, then deliberately create
+  // an invalid zero-grid launch. Its wrapper must report and consume the
+  // error so that the following valid launch is judged independently.
+  (void)cudaGetLastError();
+  const cudaError_t invalid_launch =
+    gjxl::cuda_internal::LaunchCudaPointwiseAffine(
+      nullptr, nullptr, 0, 0, 0, 0, 1.0f, 0.0f, nullptr);
+  const cudaError_t valid_launch =
+    gjxl::cuda_internal::LaunchCudaPointwiseAffine(
+      device_value, device_value, 1, 1, 1, 1, 1.0f, 0.0f, nullptr);
+  const cudaError_t completion = cudaDeviceSynchronize();
+  const cudaError_t release = cudaFree(device_value);
+  if (invalid_launch != cudaErrorInvalidConfiguration ||
+      valid_launch != cudaSuccess || completion != cudaSuccess ||
+      release != cudaSuccess) {
+    std::cerr << "CUDA kernel wrapper preserved a stale launch error: invalid="
+              << cudaGetErrorString(invalid_launch)
+              << " valid=" << cudaGetErrorString(valid_launch)
+              << " completion=" << cudaGetErrorString(completion)
+              << " release=" << cudaGetErrorString(release) << '\n';
+    return false;
+  }
+  return true;
 }
 
 bool CheckTransform(
@@ -308,6 +351,7 @@ int main() {
   if (!CheckStatus(gjxl::CreateCudaBackend(&other), "Create second CUDA backend") ||
       other == nullptr ||
       !CheckFactoryAndBuffers(*backend) ||
+      !CheckKernelLaunchErrorConsumption() ||
       !CheckValidationAndOwnership(*backend, *other)) {
     return EXIT_FAILURE;
   }

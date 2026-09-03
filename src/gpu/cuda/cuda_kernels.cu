@@ -319,7 +319,7 @@ cudaError_t LaunchCudaDct(
     InverseDctKernel<<<grid, block, shared_bytes, stream>>>(
       input, output, width, height);
   }
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaPointwiseAffine(
@@ -337,7 +337,7 @@ cudaError_t LaunchCudaPointwiseAffine(
     (count + kPrimitiveThreads - 1) / kPrimitiveThreads);
   PointwiseAffineKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
     input, output, width, height, input_stride, output_stride, scale, bias);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaSeparableConvolutionPass(
@@ -365,7 +365,7 @@ cudaError_t LaunchCudaSeparableConvolutionPass(
         input, kernel, output, width, height, input_stride, output_stride,
         kernel_size);
   }
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaSymmetric5Convolution(
@@ -388,7 +388,7 @@ cudaError_t LaunchCudaSymmetric5Convolution(
   Symmetric5ConvolutionKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
     input, output, width, height, input_stride, output_stride,
     distance0, distance1, distance2, distance4, distance8, distance5);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaMaximumReduction(
@@ -402,7 +402,7 @@ cudaError_t LaunchCudaMaximumReduction(
     (input_count + kPrimitiveThreads - 1) / kPrimitiveThreads;
   MaximumReductionKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
     input, output, width, input_stride, input_count);
-  return cudaPeekAtLastError();
+  return cudaGetLastError();
 }
 
 }  // namespace gjxl::cuda_internal
