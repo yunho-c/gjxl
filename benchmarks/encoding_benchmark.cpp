@@ -924,9 +924,14 @@ void PrintRatioStats(std::string_view label,
   return static_cast<double>(nanoseconds) / 1.0e6;
 }
 
-constexpr std::array<std::string_view, 40> kWorkflowProfileNames = {
+constexpr std::array<std::string_view, 45> kWorkflowProfileNames = {
     "total",
     "input_preparation",
+    "input_geometry_and_storage",
+    "input_color_transform",
+    "input_matrix_scale_stats",
+    "input_resident_preparation",
+    "input_quantization_preparation",
     "backend_selection",
     "quantization_pipeline",
     "codestream_encoding",
@@ -1030,6 +1035,11 @@ using WorkflowProfileNanoseconds =
   return {
       profile.total_nanoseconds,
       profile.input_preparation_nanoseconds,
+      profile.input_geometry_and_storage_nanoseconds,
+      profile.input_color_transform_nanoseconds,
+      profile.input_matrix_scale_stats_nanoseconds,
+      profile.input_resident_preparation_nanoseconds,
+      profile.input_quantization_preparation_nanoseconds,
       profile.backend_selection_nanoseconds,
       profile.quantization_pipeline_nanoseconds,
       profile.codestream_encoding_nanoseconds,
@@ -1133,7 +1143,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 15,\n"
+           << "  \"schema_version\": 16,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"

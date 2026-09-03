@@ -11,6 +11,7 @@
 #include "codec/chroma_from_luma.h"
 #include "codec/quantization_pipeline.h"
 #include "core/image_buffer.h"
+#include "gpu/image.h"
 
 namespace gjxl::quantization_pipeline_internal {
 
@@ -46,10 +47,11 @@ protected:
 };
 
 /// Target-invariant preparation for repeated quantization attempts over one
-/// source/profile pair. `coding_opsin` borrows immutable caller storage, which
-/// must remain alive until the last prepared run completes. Final encoder and
-/// diagnostic results are committed directly by the selected adaptive-
-/// quantization provider.
+/// source/profile pair. A host preparation borrows immutable `coding_opsin`
+/// storage; a resident preparation instead leaves that view empty and borrows
+/// the device views. Every borrowed owner must remain alive until the last
+/// prepared run completes. Final encoder and diagnostic results are committed
+/// directly by the selected adaptive-quantization provider.
 struct PreparedQuantizationPipeline {
   uint64_t generation = 0;
   Extent2D source_extent;
@@ -58,6 +60,9 @@ struct PreparedQuantizationPipeline {
   float initial_quant_rescale = 1.0f;
   SimpleVarDctCodestreamProfile profile;
   ConstImage3FView coding_opsin;
+  ConstDeviceImage3View resident_original_linear_rgb;
+  ConstDeviceImage3View resident_coding_opsin;
+  bool resident_input_validated = false;
   /// Exact immutable host views proven finite by the workflow that created
   /// this preparation. Empty views mean that downstream public validation is
   /// still required. Identity checks prevent provenance from being reused
@@ -102,6 +107,16 @@ struct QuantizationPipelineMaterialization {
   bool prepare_cpu_preprocessing = true,
   QuantizationPipelineInputProvenance input_provenance =
     QuantizationPipelineInputProvenance::kUnvalidated);
+
+/// Prepares the metadata and host result fields used by a fully resident
+/// pipeline whose validated coding image exists only on the selected backend.
+[[nodiscard]] Status PrepareResidentQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  Extent2D padded_extent,
+  ConstDeviceImage3View resident_original_linear_rgb,
+  ConstDeviceImage3View resident_coding_opsin,
+  CpuQuantizationPipelineOptions options,
+  PreparedQuantizationPipeline* prepared);
 
 [[nodiscard]] Status PrepareQuantizationPreprocessing(
   PreparedQuantizationPipeline& prepared,

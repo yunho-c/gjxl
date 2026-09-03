@@ -198,24 +198,25 @@ bool CheckInvalidDriverArguments() {
   return true;
 }
 
-bool CheckSharedMetalBackendIfAvailable() {
+bool CheckSharedMetalBackendModeIfAvailable(
+    gjxl::GpuAdaptiveQuantizationMode mode, const char* mode_name) {
   ImageStorage image(7);
   const gjxl::VarDctEncodingOptions options = {
     .butteraugli_target = 1.2f,
     .backend = gjxl::VarDctBackendPreference::kMetal,
-    .metal_aq_mode =
-      gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput,
+    .metal_aq_mode = mode,
   };
   std::vector<uint8_t> expected_codestream;
   gjxl::VarDctEncodingSummary expected_summary;
   gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
     image.View(), options, &expected_codestream, &expected_summary);
   if (status.code() == gjxl::StatusCode::kUnavailable) {
-    std::cout << "Metal batch check skipped: " << status.message() << '\n';
+    std::cout << "Metal " << mode_name << " batch check skipped: "
+              << status.message() << '\n';
     return true;
   }
   if (!status.ok()) {
-    std::cerr << "Metal batch reference failed: "
+    std::cerr << "Metal " << mode_name << " batch reference failed: "
               << status.message() << '\n';
     return false;
   }
@@ -231,7 +232,8 @@ bool CheckSharedMetalBackendIfAvailable() {
   std::vector<gjxl::VarDctBatchEncodingResult> results;
   status = encoder->Encode(requests, &results);
   if (!status.ok() || results.size() != kImageCount) {
-    std::cerr << "Concurrent Metal batch scheduling failed\n";
+    std::cerr << "Concurrent Metal " << mode_name
+              << " batch scheduling failed\n";
     return false;
   }
   for (size_t index = 0; index < results.size(); ++index) {
@@ -240,12 +242,21 @@ bool CheckSharedMetalBackendIfAvailable() {
         results[index].summary != expected_summary ||
         results[index].summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal) {
-      std::cerr << "Concurrent Metal result " << index
+      std::cerr << "Concurrent Metal " << mode_name << " result " << index
                 << " changed the single-image output\n";
       return false;
     }
   }
   return true;
+}
+
+bool CheckSharedMetalBackendIfAvailable() {
+  return CheckSharedMetalBackendModeIfAvailable(
+           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput,
+           "maximum-throughput") &&
+    CheckSharedMetalBackendModeIfAvailable(
+      gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+      "fully-resident");
 }
 
 }  // namespace

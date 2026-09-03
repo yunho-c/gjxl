@@ -31,7 +31,9 @@ After that policy change, the recommended GJXL-owned order is:
 3. optimize the existing effort-7 AC-strategy kernels without pruning the
    libjxl-grounded candidate search;
 4. prototype group-major packing in the existing final Metal submission;
-5. address smaller codestream and input-transform costs only after re-profiling.
+5. retain the source-proven ANS validation hoist; and
+6. retain the resident-input owner that moves RGB-to-Opsin and matrix-scale
+   statistics into one Metal submission.
 
 GPU entropy coding is not indicated. The remaining entropy-construction wall
 time is only about `8 ms` at 4K, and the independently parallel section-writing
@@ -698,18 +700,73 @@ outputs. The complete Release suite passes 61 of 62 tests; the only failure is
 the pre-existing pinned CPU `quantization_pipeline` score mismatch
 (`0.24919039011001587` actual versus `0.24914586544036865` expected).
 
-### 6. Combine RGB-to-Opsin with resident input ownership
+### 6. Combine RGB-to-Opsin with resident input ownership (completed)
+
+Status: implemented, bit-exact against the CPU transform and statistics, and
+retained for the fully resident and throughput Metal workflows.
 
 Input preparation is `12.53 ms` at 4K, and the SIMD RGB-to-Opsin loop accounts
 for `3.85%` of sampled aggregate CPU. A standalone GPU color transform would
 add an input upload and dispatch, so moving only the arithmetic is unlikely to
 be compelling.
 
-The stronger design would upload original linear RGB once, retain it for the
-Butteraugli reference, and produce coding Opsin into resident Metal storage.
-That can remove both the CPU transform/write and redundant original-image
-population. Revisit this only after evaluator-preparation substages identify
-the current upload and allocation costs.
+The retained implementation uses the stronger ownership design. The workflow
+selects its backend before input preparation, then a prepared resident-input
+object:
+
+1. uploads the original linear-RGB planes once into its own exact-capacity,
+   purgeable Metal arena;
+2. produces edge-padded coding Opsin with the same pinned matrix, operation
+   order, fused operations, and cube-root approximation as the CPU path;
+3. optionally reduces the three effort-dependent quantization-matrix scale
+   statistics on device;
+4. reads back only one error word and the three maximum-statistic words; and
+5. lends both resident images to AC search, initial quantization, and the
+   Butteraugli evaluator until all borrowing submissions are destroyed.
+
+The transform and reduction share one command-buffer submission. This removes
+the host Opsin allocation, padded-image write, CPU matrix-scale scan, and the
+later evaluator allocation and upload of the original and coding images. A
+distinct resident-input arena class prevents this longer-lived allocation from
+competing with the evaluator's persistent lease. The owner is declared before
+its evaluator borrowers so destruction waits and releases those borrowers
+first.
+
+The path remains intentionally narrow. Fully resident and throughput Metal
+encodes use it. CPU, exact-coefficient, and maximum-throughput workflows retain
+their existing host materialization. Automatic fully resident target-size
+control retains its established CPU selection behavior, while forced-Metal
+target-size attempts can reuse one resident input without reuploading the
+image. Low-level diagnostic APIs continue to promise their complete host
+output planes.
+
+Seven alternating independent-process pairs compared the Priority 5 parent
+`da91518` with the resident-input implementation. Each Release process used one
+warmup and one retained sample. Marginal medians and the median of paired
+complete-encode differences are reported separately because system noise means
+the difference of medians is not the paired estimator:
+
+| Workload | Boundary | Parent | Resident input | Median paired change |
+| --- | --- | ---: | ---: | ---: |
+| padded 1080p | Complete encode | `90.671 ms` | `89.651 ms` | `-1.565 ms` (`-1.7%`) |
+| padded 1080p | Input preparation | `3.263 ms` | `2.206 ms` | not paired separately |
+| padded 4K | Complete encode | `328.285 ms` | `319.712 ms` | `-5.570 ms` (`-1.7%`) |
+| padded 4K | Input preparation | `12.213 ms` | `8.553 ms` | not paired separately |
+
+The candidate won four of seven 1080p pairs and six of seven 4K pairs. The
+1080p complete-encode result is therefore noisy; the retained claim is the
+source-proven materialization removal, the repeatable 4K direction, and the
+measured input boundary reduction. Every sample remained exactly `410,072`
+bytes at 1080p and `1,606,911` bytes at 4K.
+
+Focused Metal coverage compares every padded Opsin pixel from a strided
+19-by-13 input against the CPU oracle bit-for-bit, compares all three reduced
+statistics exactly, and rejects non-finite input atomically. The fully resident
+pipeline preserves its exact frame and codestream oracles, and concurrent
+fully resident batch encodes on one backend match a sequential encode. The
+Release policy matrix preserves the established sizes for efforts 7-10, high
+density, maximum compression, exact coefficients, throughput, maximum
+throughput, and final-score collection.
 
 ## Explicitly rejected or deferred directions
 
@@ -730,6 +787,9 @@ the current upload and allocation costs.
   isolating it from validation; aligned workspaces were still slower.
 - **Retain pre-encoded balanced HybridUint tokens:** rejected because the
   emission saving was smaller than added tokenization and memory-traffic cost.
+- **Run only RGB-to-Opsin as a standalone Metal operation:** superseded by the
+  resident-input owner; the useful saving comes from eliminating downstream
+  host materialization and duplicate uploads as well as moving arithmetic.
 
 ## Qualification gates
 
@@ -754,6 +814,7 @@ Independently decode representative candidate codestreams with pinned `djxl`
 and verify decoded pixels, encoded size, and Butteraugli where a policy or
 ordering change can alter bytes.
 
-The integrated Release suite passed all 61 applicable tests. The separately
-known pinned CPU `quantization_pipeline` golden mismatch remains excluded and
-was not introduced by the integration.
+The Release suite passes 61 of 62 tests. The sole failure is the separately
+known pinned CPU `quantization_pipeline` golden mismatch
+(`0.24919039011001587` actual versus `0.24914586544036865` expected); it was
+not introduced by any last-mile slice.

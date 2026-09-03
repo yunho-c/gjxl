@@ -369,10 +369,17 @@ Status RunGpuAdaptiveQuantizationImpl(
   const bool profiling = profiling_session != nullptr;
 
   Status status = ValidateMode(mode);
+  const bool resident_opsin_only = !opsin.valid() && reusable != nullptr &&
+    reusable->resident_coding_opsin.plane[0].buffer != nullptr;
   if (status.ok()) {
-    status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
-      original_linear_rgb, opsin, strategies, initial_quant_field,
-      epf_sharpness, options);
+    status = resident_opsin_only
+      ? aqi::ValidateResidentAdaptiveQuantizationPolicyInputs(
+          original_linear_rgb,
+          reusable->resident_coding_opsin.plane[0].extent, strategies,
+          initial_quant_field, epf_sharpness, options)
+      : aqi::ValidateAdaptiveQuantizationPolicyInputs(
+          original_linear_rgb, opsin, strategies, initial_quant_field,
+          epf_sharpness, options);
   }
   if (status.ok()) {
     if (full_output == nullptr) {
@@ -412,6 +419,10 @@ Status RunGpuAdaptiveQuantizationImpl(
   const AqEvaluationPreparation evaluation_preparation{
     .original_linear_rgb = original_linear_rgb,
     .coding_opsin = opsin,
+    .resident_original_linear_rgb = reusable == nullptr
+      ? ConstDeviceImage3View{} : reusable->resident_original_linear_rgb,
+    .resident_coding_opsin = reusable == nullptr
+      ? ConstDeviceImage3View{} : reusable->resident_coding_opsin,
     .strategies = &strategies,
     .epf_sharpness = epf_sharpness,
     .options = evaluation_options,

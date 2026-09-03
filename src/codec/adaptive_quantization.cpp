@@ -1273,6 +1273,66 @@ Status ValidateAdaptiveQuantizationPolicyInputs(
   return Status::Ok();
 }
 
+Status ValidateResidentAdaptiveQuantizationPolicyInputs(
+  ConstImage3FView original_linear_rgb,
+  Extent2D opsin_extent,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options) {
+
+  if (!original_linear_rgb.valid() || opsin_extent.empty() ||
+      !strategies.complete() || !initial_quant_field.valid() ||
+      !epf_sharpness.valid()) {
+    return Status::InvalidArgument(
+      "Resident adaptive-quantization inputs are invalid");
+  }
+  const Extent2D block_extent = strategies.extent();
+  Extent2D padded_pixel_extent;
+  if (!BlockGrid{block_extent}.try_padded_pixel_extent(
+        &padded_pixel_extent) ||
+      opsin_extent != padded_pixel_extent ||
+      initial_quant_field.extent != block_extent ||
+      epf_sharpness.extent != block_extent) {
+    return Status::InvalidArgument(
+      "Resident adaptive-quantization geometry does not match");
+  }
+  if (original_linear_rgb.width() > opsin_extent.width ||
+      original_linear_rgb.height() > opsin_extent.height ||
+      original_linear_rgb.width() <=
+        opsin_extent.width - kJxlBlockDimension ||
+      original_linear_rgb.height() <=
+        opsin_extent.height - kJxlBlockDimension) {
+    return Status::InvalidArgument(
+      "Resident adaptive-quantization padding exceeds one partial block");
+  }
+  if (!options.profile.valid()) {
+    return Status::InvalidArgument(
+      "Resident adaptive-quantization profile is invalid");
+  }
+  switch (options.control_mode) {
+    case AdaptiveQuantizationControlMode::kButteraugli:
+      if (!std::isfinite(options.butteraugli_target) ||
+          options.butteraugli_target <= 0.0f || options.iterations > 4) {
+        return Status::InvalidArgument(
+          "Resident Butteraugli adaptive-quantization options are invalid");
+      }
+      break;
+    case AdaptiveQuantizationControlMode::kMaximumError:
+      if (!std::ranges::all_of(options.maximum_error, [](float value) {
+            return std::isfinite(value) && value > 0.0f;
+          })) {
+        return Status::InvalidArgument(
+          "Resident maximum-error limits are invalid");
+      }
+      break;
+    default:
+      return Status::InvalidArgument(
+        "Resident adaptive-quantization control mode is invalid");
+  }
+  return Status::Ok();
+}
+
 namespace {
 
 Status RunAdaptiveQuantizationPolicyImpl(

@@ -106,6 +106,16 @@ struct ButteraugliPolicySetup {
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options);
 
+/// Validates the same policy contract when the coding image is resident and
+/// only its padded geometry is available on the host.
+[[nodiscard]] Status ValidateResidentAdaptiveQuantizationPolicyInputs(
+  ConstImage3FView original_linear_rgb,
+  Extent2D opsin_extent,
+  const AcStrategyGrid& strategies,
+  ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options);
+
 /// Runs initial adjustment, bounds, clamp, power, rounding-progress, and
 /// iteration order identically for every evaluator.
 [[nodiscard]] Status RunAdaptiveQuantizationPolicy(

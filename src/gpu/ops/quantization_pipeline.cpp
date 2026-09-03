@@ -169,11 +169,13 @@ bool HasValidatedHostImages(
   ConstImage3FView original_linear_rgb) {
 
   return prepared.validated_original_linear_rgb.valid() &&
-    prepared.validated_coding_opsin.valid() &&
+    (prepared.validated_coding_opsin.valid() ||
+     prepared.resident_input_validated) &&
     SameImageIdentity(
       prepared.validated_original_linear_rgb, original_linear_rgb) &&
-    SameImageIdentity(
-      prepared.validated_coding_opsin, prepared.coding_opsin);
+    (prepared.resident_input_validated ||
+     SameImageIdentity(
+       prepared.validated_coding_opsin, prepared.coding_opsin));
 }
 
 Status PrepareResidentAcStrategyInputs(
@@ -210,6 +212,7 @@ Status PrepareResidentAcStrategyInputs(
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     state.evaluation.reset();
+    state.resident_original_linear_rgb = {};
     state.resident_coding_opsin = {};
     AcStrategyGrid provisional_strategies;
     Status status = AcStrategyGrid::Create(
@@ -219,6 +222,9 @@ Status PrepareResidentAcStrategyInputs(
     const AqEvaluationPreparation evaluation_preparation{
       .original_linear_rgb = original_linear_rgb,
       .coding_opsin = prepared.coding_opsin,
+      .resident_original_linear_rgb =
+        prepared.resident_original_linear_rgb,
+      .resident_coding_opsin = prepared.resident_coding_opsin,
       .strategies = &provisional_strategies,
       .epf_sharpness = {
         prepared.epf_sharpness.data(), prepared.block_extent,
@@ -278,6 +284,9 @@ Status PrepareResidentAcStrategyInputs(
     // immutable coding view used by the downstream AQ provider so the same
     // allocation is recognized and reconfigured instead of replaced.
     state.coding_opsin = prepared.coding_opsin;
+    state.resident_original_linear_rgb =
+      prepared.resident_original_linear_rgb;
+    state.resident_coding_opsin = prepared.resident_coding_opsin;
     state.evaluation_options = evaluation_options;
     state.resident_quantization = true;
   }
@@ -550,6 +559,7 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     // borrowed source generation must invalidate them even when an allocator
     // reused the same host addresses.
     prepared_aq->resident_coding_opsin = {};
+    prepared_aq->resident_original_linear_rgb = {};
     prepared_aq->backend = nullptr;
     prepared_aq->original_linear_rgb = {};
     prepared_aq->coding_opsin = {};

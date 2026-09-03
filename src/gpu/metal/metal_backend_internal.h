@@ -29,6 +29,7 @@
 #include "gpu/ops/butteraugli.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/primitives.h"
+#include "gpu/ops/resident_input.h"
 #include "gpu/scratch.h"
 
 namespace gjxl::metal_internal {
@@ -105,6 +106,8 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> initial_cfl;
   NS::SharedPtr<MTL::ComputePipelineState> final_cfl;
   NS::SharedPtr<MTL::ComputePipelineState> reset_initial_quant;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_input_transform;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_input_statistics;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_gradient;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_fuzzy_erosion;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_modulation;
@@ -174,6 +177,7 @@ class MetalPreparedAqEvaluation;
 enum class MetalAqScratchArena : uint8_t {
   kPersistent,
   kStaging,
+  kResidentInput,
   kCount,
 };
 
@@ -246,6 +250,7 @@ class MetalBackend final
     public GpuAqEvaluation,
     public gpu_profile_internal::GpuAqEvaluationProfiler,
     public aq_evaluation_internal::GpuValidatedAqEvaluation,
+    public GpuResidentInputPreparation,
     public DeviceButteraugliOperation {
 public:
   MetalBackend(
@@ -347,6 +352,10 @@ public:
     std::unique_ptr<PreparedAqEvaluation>* prepared,
     gpu_profile_internal::GpuExecutionProfile* profile) override;
 
+  Status PrepareResidentInput(
+    const ResidentInputPreparation& preparation,
+    std::unique_ptr<PreparedResidentInput>* prepared) override;
+
   Status Prepare(
     GpuBackend& backend,
     const DeviceButteraugliPrepareDescriptor& descriptor,
@@ -358,6 +367,7 @@ public:
 
 private:
   friend class MetalPreparedAqEvaluation;
+  friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 

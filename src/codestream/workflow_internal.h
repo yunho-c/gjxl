@@ -72,6 +72,11 @@ struct VarDctEncodingProfile {
   /// Maximum CPU threads simultaneously participating in this encode.
   size_t peak_cpu_participants = 0;
   uint64_t input_preparation_nanoseconds = 0;
+  uint64_t input_geometry_and_storage_nanoseconds = 0;
+  uint64_t input_color_transform_nanoseconds = 0;
+  uint64_t input_matrix_scale_stats_nanoseconds = 0;
+  uint64_t input_resident_preparation_nanoseconds = 0;
+  uint64_t input_quantization_preparation_nanoseconds = 0;
   uint64_t backend_selection_nanoseconds = 0;
   uint64_t quantization_pipeline_nanoseconds = 0;
   uint64_t codestream_encoding_nanoseconds = 0;

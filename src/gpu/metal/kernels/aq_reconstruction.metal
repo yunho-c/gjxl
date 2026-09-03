@@ -79,6 +79,137 @@ struct AqInitialCflParams {
   uint color_stride;
 };
 
+struct AqResidentInputParams {
+  uint source_width;
+  uint source_height;
+  uint source_stride;
+  uint coding_width;
+  uint coding_height;
+  uint coding_stride;
+};
+
+static float aq_fast_cube_root_and_add(float value, float add) {
+  constexpr float kOneThird = 1.0f / 3.0f;
+  constexpr float kFourThirds = 4.0f / 3.0f;
+  constexpr uint kExponentBias = 0x54800000u;
+  constexpr uint kExponentMultiplier = 0x002AAAAAu;
+  const uint bits = as_type<uint>(value);
+  const uint estimate_bits = bits == 0u
+    ? 0u : kExponentBias - (bits >> 23) * kExponentMultiplier;
+  float reciprocal = as_type<float>(estimate_bits);
+  const float divided = kOneThird * value;
+  for (uint iteration = 0; iteration < 3; ++iteration) {
+    const float squared = reciprocal * reciprocal;
+    reciprocal = fma(-divided, squared * squared,
+                     kFourThirds * reciprocal);
+  }
+  float squared = reciprocal * reciprocal;
+  reciprocal = fma(
+    kOneThird, fma(-value, squared * squared, reciprocal), reciprocal);
+  squared = reciprocal * reciprocal;
+  return fma(squared, value, add);
+}
+
+static float3 aq_linear_rgb_to_opsin(float3 linear_rgb) {
+  constexpr float kBias = 0.0037930732552754493f;
+  constexpr float kNegativeBiasCubeRoot =
+    -0.15595420241355896f;
+  constexpr float3 kRow0 = float3(0.30f, 0.622f, 0.078f);
+  constexpr float3 kRow1 = float3(0.23f, 0.692f, 0.078f);
+  constexpr float3 kRow2 = float3(
+    0.24342268924547819f, 0.20476744424496821f,
+    0.55180986650955360f);
+  const auto gamma = [&](float3 row) {
+    float value = fma(row.z, linear_rgb.z, kBias);
+    value = fma(row.y, linear_rgb.y, value);
+    value = fma(row.x, linear_rgb.x, value);
+    return aq_fast_cube_root_and_add(
+      max(0.0f, value), kNegativeBiasCubeRoot);
+  };
+  const float gamma0 = gamma(kRow0);
+  const float gamma1 = gamma(kRow1);
+  return float3(
+    0.5f * (gamma0 - gamma1),
+    0.5f * (gamma0 + gamma1),
+    gamma(kRow2));
+}
+
+kernel void gjxl_aq_resident_input_transform(
+  device const float* red [[buffer(0)]],
+  device const float* green [[buffer(1)]],
+  device const float* blue [[buffer(2)]],
+  device float* opsin_x [[buffer(3)]],
+  device float* opsin_y [[buffer(4)]],
+  device float* opsin_b [[buffer(5)]],
+  device atomic_uint* result [[buffer(6)]],
+  constant AqResidentInputParams& params [[buffer(7)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.coding_width ||
+      position.y >= params.coding_height) return;
+  const uint source_x = min(position.x, params.source_width - 1u);
+  const uint source_y = min(position.y, params.source_height - 1u);
+  const uint source_index = source_y * params.source_stride + source_x;
+  const float3 linear = float3(
+    red[source_index], green[source_index], blue[source_index]);
+  if (!all(isfinite(linear))) {
+    atomic_fetch_or_explicit(result, 1u, memory_order_relaxed);
+  }
+  const float3 opsin = aq_linear_rgb_to_opsin(linear);
+  if (!all(isfinite(opsin))) {
+    atomic_fetch_or_explicit(result, 2u, memory_order_relaxed);
+  }
+  const uint coding_index =
+    position.y * params.coding_stride + position.x;
+  opsin_x[coding_index] = opsin.x;
+  opsin_y[coding_index] = opsin.y;
+  opsin_b[coding_index] = opsin.z;
+}
+
+kernel void gjxl_aq_resident_input_statistics(
+  device const float* opsin_x [[buffer(0)]],
+  device const float* opsin_y [[buffer(1)]],
+  device const float* opsin_b [[buffer(2)]],
+  device atomic_uint* result [[buffer(3)]],
+  constant AqResidentInputParams& params [[buffer(4)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x == 0u || position.y == 0u ||
+      position.x >= params.source_width ||
+      position.y >= params.source_height) return;
+  const uint current = position.y * params.coding_stride + position.x;
+  const uint left = current - 1u;
+  const uint above = current - params.coding_stride;
+  const float current_x = opsin_x[current];
+  const float x_edge = max(
+    fabs(current_x - opsin_x[left]),
+    fabs(current_x - opsin_x[above]));
+  const float current_y = opsin_y[current];
+  const float current_b = opsin_b[current];
+  const float current_difference = current_b - current_y;
+  const float b_edge = max(
+    fabs(current_difference - (opsin_b[left] - opsin_y[left])),
+    fabs(current_difference - (opsin_b[above] - opsin_y[above])));
+  float exposed_blue = current_b - 1.2f * current_y;
+  if (exposed_blue >= 0.0f) {
+    exposed_blue *= fabs(current_b - opsin_b[left]) +
+      fabs(current_b - opsin_b[above]);
+  } else {
+    exposed_blue = 0.0f;
+  }
+  if (!isfinite(x_edge) || !isfinite(b_edge) ||
+      !isfinite(exposed_blue)) {
+    atomic_fetch_or_explicit(result, 4u, memory_order_relaxed);
+    return;
+  }
+  atomic_fetch_max_explicit(result + 1, as_type<uint>(x_edge),
+                            memory_order_relaxed);
+  atomic_fetch_max_explicit(result + 2, as_type<uint>(b_edge),
+                            memory_order_relaxed);
+  atomic_fetch_max_explicit(result + 3, as_type<uint>(exposed_blue),
+                            memory_order_relaxed);
+}
+
 struct AqFinalCflParams {
   uint tile_width;
   uint tile_height;
