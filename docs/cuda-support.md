@@ -14,6 +14,13 @@ Implementation progress as of this revision:
 - all nine VarDCT transform shapes and the shared affine, convolution,
   symmetric-convolution, and maximum-reduction primitives pass real-device
   conformance on compute capability 8.6;
+- forced `maximum-throughput` encoding now keeps initial quantization,
+  inverse Gaborish, initial CfL, DCT8 coefficient decisions, and quantized
+  frame state on CUDA. Its odd-size/padded conformance fixture matches CPU
+  initial-field tolerances and produces byte-identical codestreams;
+- the prepared CUDA maximum-throughput operation is deterministic across
+  reuse, performs no steady-state device allocations, and preserves
+  caller-visible outputs across injected submission failure;
 - public C++, C, Rust, CLI, package-export, and diagnostic vocabulary now
   includes CUDA without changing existing C enum values; and
 - automatic selection deliberately remains Metal-only until CUDA passes the
@@ -497,6 +504,14 @@ Port:
 Exit criterion: forced CUDA produces deterministic, independently decodable
 codestreams for odd, padded, small, 1080p, and 4K inputs; no score history is
 reported; repeated warm execution performs no device allocation.
+
+Current progress: the vertical slice is implemented and exposed through an
+explicitly forced CUDA workflow. Real-device tests cover odd padded geometry,
+CPU initial-field tolerances, byte-identical CPU frame serialization,
+deterministic prepared-operation reuse, zero steady-state device allocations,
+and failure-atomic direct and public calls. Small/1080p/4K coverage and an
+independent decoder gate remain before this phase's qualification exit
+criterion is complete.
 
 This is a vertical architecture and transfer proof, not qualification of the
 default quality path.

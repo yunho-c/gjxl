@@ -9,6 +9,15 @@
 
 namespace gjxl::cuda_internal {
 
+struct CudaAqGeometry {
+  unsigned int width = 0;
+  unsigned int height = 0;
+  unsigned int block_width = 0;
+  unsigned int block_height = 0;
+  unsigned int tile_width = 0;
+  unsigned int tile_height = 0;
+};
+
 [[nodiscard]] cudaError_t InitializeCudaDctBasis();
 
 [[nodiscard]] cudaError_t LaunchCudaDct(
@@ -64,6 +73,50 @@ namespace gjxl::cuda_internal {
   unsigned int width,
   unsigned int input_stride,
   unsigned int input_count,
+  cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqInitialQuantization(
+  const float* coding_x,
+  const float* coding_y,
+  const float* coding_b,
+  float* unblurred_pixel_mask,
+  float* pixel_mask,
+  float* pre_erosion,
+  float* quant_field,
+  float* strategy_mask,
+  unsigned int* selection_state,
+  unsigned int* histogram,
+  float* statistics,
+  unsigned int* quantizer_params,
+  int* raw_quant,
+  unsigned int* error,
+  CudaAqGeometry geometry,
+  float butteraugli_target,
+  float rescale,
+  float quant_dc,
+  cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqEncodeFrame(
+  const float* coding_x,
+  const float* coding_y,
+  const float* coding_b,
+  const float* transform_x,
+  const float* transform_y,
+  const float* transform_b,
+  float* gathered,
+  float* forward_coefficients,
+  const float* quant_tables,
+  int* raw_quant,
+  const unsigned int* quantizer_params,
+  signed char* y_to_x,
+  signed char* y_to_b,
+  float* y_thresholds,
+  int* quantized_ac,
+  int* quantized_dc,
+  unsigned int* error,
+  CudaAqGeometry geometry,
+  float x_matrix_multiplier,
+  float b_matrix_multiplier,
   cudaStream_t stream);
 
 }  // namespace gjxl::cuda_internal

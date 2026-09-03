@@ -564,6 +564,8 @@ if(GJXL_ENABLE_CUDA)
     STATIC
 
     src/gpu/cuda/cuda_backend.cpp
+    src/gpu/cuda/cuda_aq.cpp
+    src/gpu/cuda/cuda_aq_kernels.cu
     src/gpu/cuda/cuda_kernels.cu
     src/gpu/cuda/cuda_primitives.cpp
   )
@@ -588,7 +590,7 @@ if(GJXL_ENABLE_CUDA)
   target_link_libraries(
     gjxl_cuda
     PUBLIC
-      gjxl_gpu
+      gjxl_gpu_ops
     PRIVATE
       CUDA::cudart
   )
@@ -2239,6 +2241,24 @@ if(GJXL_BUILD_TESTS)
       COMMAND gjxl_gpu_primitives_cuda_test
     )
     set_tests_properties(cuda_gpu_primitives PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(
+      gjxl_cuda_aq_test
+      tests/cuda_aq_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_cuda_aq_test
+      PRIVATE
+        gjxl_codestream
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_aq
+      COMMAND gjxl_cuda_aq_test
+    )
+    set_tests_properties(cuda_aq PROPERTIES SKIP_RETURN_CODE 77)
   endif()
 
   if(GJXL_ENABLE_METAL)

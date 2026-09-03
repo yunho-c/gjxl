@@ -16,6 +16,7 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/primitives.h"
 
 namespace gjxl::cuda_internal {
@@ -92,7 +93,11 @@ private:
   Status completion_status_;
 };
 
-class CudaBackend final : public GpuBackend, public GpuImagePrimitives {
+class CudaPreparedAqEvaluation;
+
+class CudaBackend final : public GpuBackend,
+                          public GpuImagePrimitives,
+                          public GpuAqEvaluation {
 public:
   using EncodeCallback = cudaError_t (*)(CudaBackend&, const void*);
 
@@ -128,12 +133,17 @@ public:
   Status SubmitImagePrimitiveSequence(
     std::span<const ImagePrimitiveCommand> commands,
     std::unique_ptr<GpuSubmission>* submission) override;
+  Status PrepareAqEvaluation(
+    const AqEvaluationPreparation& preparation,
+    std::unique_ptr<PreparedAqEvaluation>* prepared) override;
 
   void ArmNextSubmissionFailureForTest(
     bool fail_submission,
     bool fail_completion) noexcept;
 
 private:
+  friend class CudaPreparedAqEvaluation;
+
   struct ResolvedConstPlane {
     ConstDevicePlaneView view;
     DeviceMemoryRange range;
