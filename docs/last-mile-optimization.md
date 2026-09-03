@@ -279,6 +279,46 @@ or temporary in-kernel instrumentation before attributing a cause to occupancy,
 bandwidth, or cache behavior. A kernel improvement must reduce the complete AC
 submission and public workflow, not merely an isolated timestamp.
 
+#### Expected payoff from moving hierarchical selection to Metal
+
+The hierarchical decision itself is a much smaller target than the candidate
+evaluation above. The measured CPU/GPU handoff after candidate evaluation is:
+
+| Boundary component | 1080p | padded 4K |
+| --- | ---: | ---: |
+| Candidate-cost readback | `0.125 ms` | `0.509 ms` |
+| CPU hierarchical decision | `0.789 ms` | `3.382 ms` |
+| AQ reconfiguration | `0.235 ms` | `1.085 ms` |
+| Gross handoff boundary | `1.149 ms` | `4.976 ms` |
+
+Moving only `SearchTile`'s decision logic to a GPU kernel, then reading the
+selected strategy grid back, would likely save about `2.5-3.5 ms` at 4K. A
+fully resident continuation that produces the selected strategy records,
+grouped anchors, and metadata in the representation consumed by AQ could save
+about `4-6 ms` at 4K. The corresponding 1080p opportunity is roughly
+`0.7-1.0 ms`; either version is only around a one-percent complete effort-7
+encode improvement. A larger `6-8 ms` 4K result is possible if indirect
+dispatch also removes an otherwise-idle submission gap, but that is speculative
+until dispatch-level tracing exists.
+
+This does **not** eliminate the `73.29 ms` AC wait: `59.01 ms` of that interval
+is candidate-evaluation GPU work required before any winner can be chosen. The
+change removes the post-evaluation readback/CPU-decision/AQ-setup bubble, not
+the underlying search cost.
+
+The computation is GPU-suitable at the outer level: padded 4K has about 2,040
+independent 8-by-8-block search tiles. Within each tile, however, the exact
+hierarchical merge order is serial and its additions, comparisons, and tie
+rules must be preserved if byte-identical output remains a requirement. A
+small decision kernel is therefore expected to cost roughly `0.2-0.8 ms` at
+4K, but that is a projection rather than a measurement.
+
+The decision-only form is a modest optimization and may not justify a new
+materialization path by itself. Prefer combining it with a resident strategy
+representation that AQ and the final group-major packing stage can consume;
+otherwise much of the measured AQ reconfiguration cost is merely moved rather
+than removed.
+
 ### 4. Pack the serializer's group-major frame in the final submission
 
 Mapped-source handoff removed the intermediate coefficient readback, but host
