@@ -403,11 +403,11 @@ const char* gjxl_get_last_error(void) noexcept {
 
 float gjxl_distance_from_quality(float quality) noexcept {
   ClearLastError();
-  return quality >= 100.0 ? 0.0
-       : quality >= 30.0
-         ? 0.1 + (100.0 - quality) * 0.09
-         : 53.0 / 3000.0 * quality * quality -
-           23.0 / 20.0 * quality + 25.0;
+  return quality >= 100.0f ? 0.0f
+       : quality >= 30.0f
+         ? 0.1f + (100.0f - quality) * 0.09f
+         : 53.0f / 3000.0f * quality * quality -
+           23.0f / 20.0f * quality + 25.0f;
 }
 
 }  // extern "C"

@@ -35,16 +35,30 @@ if(EXISTS "${install_prefix}/include/c_api")
   message(FATAL_ERROR "private C adapter headers were installed")
 endif()
 
+if(GJXL_TEST_COMPILER_ID STREQUAL "MSVC")
+  # A VS generator reconstructs the Windows SDK environment even when CTest
+  # itself was launched outside a Developer Command Prompt. The installed
+  # libraries remain ABI-compatible with the parent Ninja+MSVC build.
+  set(consumer_generator_arguments -G "Visual Studio 17 2022" -A x64)
+  set(consumer_compiler_arguments)
+else()
+  set(consumer_generator_arguments -G "${GJXL_TEST_GENERATOR}")
+  set(consumer_compiler_arguments
+    "-DCMAKE_C_COMPILER=${GJXL_TEST_C_COMPILER}"
+    "-DCMAKE_CXX_COMPILER=${GJXL_TEST_CXX_COMPILER}"
+    "-DCMAKE_RC_COMPILER=${GJXL_TEST_RC_COMPILER}"
+    "-DCMAKE_MT=${GJXL_TEST_MT}")
+endif()
+
 execute_process(
   COMMAND
     "${CMAKE_COMMAND}"
-    -G "${GJXL_TEST_GENERATOR}"
+    ${consumer_generator_arguments}
     -S "${GJXL_SOURCE_DIR}/tests/downstream"
     -B "${consumer_build}"
     "-DCMAKE_PREFIX_PATH=${install_prefix}"
     "-DCMAKE_BUILD_TYPE=${GJXL_TEST_CONFIG}"
-    "-DCMAKE_C_COMPILER=${GJXL_TEST_C_COMPILER}"
-    "-DCMAKE_CXX_COMPILER=${GJXL_TEST_CXX_COMPILER}"
+    ${consumer_compiler_arguments}
   RESULT_VARIABLE configure_result
   OUTPUT_VARIABLE configure_output
   ERROR_VARIABLE configure_error

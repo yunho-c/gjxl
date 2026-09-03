@@ -175,6 +175,30 @@ Status StoreVarLenUint8(size_t value, Writer* writer) {
     highest_bit, value - (size_t{1} << highest_bit));
 }
 
+struct ScaledAnsRatio {
+  uint64_t quotient = 0;
+  uint64_t remainder = 0;
+};
+
+// Computes value * kAnsTableSize / denominator exactly without requiring a
+// non-standard 128-bit integer. At each doubling, remainder < denominator;
+// the subtraction form avoids overflowing 2 * remainder.
+ScaledAnsRatio ScaleByAnsTable(uint64_t value, uint64_t denominator) {
+  static_assert(kAnsTableSize != 0 &&
+    (kAnsTableSize & (kAnsTableSize - 1)) == 0);
+  ScaledAnsRatio result{0, value};
+  for (size_t scale = kAnsTableSize; scale > 1; scale >>= 1) {
+    result.quotient *= 2;
+    if (result.remainder >= denominator - result.remainder) {
+      result.remainder -= denominator - result.remainder;
+      ++result.quotient;
+    } else {
+      result.remainder *= 2;
+    }
+  }
+  return result;
+}
+
 Status NormalizeHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
   std::vector<uint16_t>* frequencies) {
@@ -220,10 +244,9 @@ Status NormalizeHistogram(
     if (raw[symbol] == 0) {
       continue;
     }
-    const unsigned __int128 scaled =
-      static_cast<unsigned __int128>(raw[symbol]) * kAnsTableSize;
-    const uint64_t quotient = static_cast<uint64_t>(scaled / total);
-    const uint64_t remainder = static_cast<uint64_t>(scaled % total);
+    const ScaledAnsRatio scaled = ScaleByAnsTable(raw[symbol], total);
+    const uint64_t quotient = scaled.quotient;
+    const uint64_t remainder = scaled.remainder;
     const uint16_t frequency = static_cast<uint16_t>(
       std::max<uint64_t>(quotient, 1));
     (*frequencies)[symbol] = frequency;

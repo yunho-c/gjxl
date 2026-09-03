@@ -58,6 +58,11 @@ elseif(GJXL_ENABLE_METAL_PROFILING)
     "GJXL_ENABLE_METAL_PROFILING requires GJXL_ENABLE_METAL")
 endif()
 
+if(GJXL_ENABLE_CUDA)
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+endif()
+
 if(GJXL_ENABLE_LIBJXL_REFERENCE AND
    (GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS))
   if(NOT EXISTS
@@ -552,6 +557,48 @@ install(
     PATTERN "*_test.h" EXCLUDE
     PATTERN "metal/kernels" EXCLUDE
 )
+
+if(GJXL_ENABLE_CUDA)
+  add_library(
+    gjxl_cuda
+    STATIC
+
+    src/gpu/cuda/cuda_backend.cpp
+    src/gpu/cuda/cuda_kernels.cu
+    src/gpu/cuda/cuda_primitives.cpp
+  )
+
+  add_library(gjxl::cuda ALIAS gjxl_cuda)
+
+  set_target_properties(
+    gjxl_cuda
+    PROPERTIES
+      EXPORT_NAME cuda
+      CUDA_STANDARD 17
+      CUDA_STANDARD_REQUIRED YES
+      CUDA_EXTENSIONS NO
+  )
+
+  target_compile_features(
+    gjxl_cuda
+    PRIVATE
+      cxx_std_20
+  )
+
+  target_link_libraries(
+    gjxl_cuda
+    PUBLIC
+      gjxl_gpu
+    PRIVATE
+      CUDA::cudart
+  )
+
+  install(
+    TARGETS gjxl_cuda
+    EXPORT gjxlTargets
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  )
+endif()
 
 if(GJXL_ENABLE_METAL)
 
@@ -1453,7 +1500,7 @@ if(GJXL_BUILD_TESTS)
   )
 
   if(MSVC)
-    target_compile_options(gjxl_c_api_test PRIVATE /W4 /WX)
+    target_compile_options(gjxl_c_api_test PRIVATE /W4 /WX /wd4127)
   else()
     target_compile_options(
       gjxl_c_api_test
@@ -2138,6 +2185,50 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_gpu_image_test
   )
 
+  if(GJXL_ENABLE_CUDA)
+    add_executable(
+      gjxl_cuda_backend_test
+      tests/cuda_backend_test.cpp
+      tests/dct_reference.cpp
+    )
+
+    target_link_libraries(
+      gjxl_cuda_backend_test
+      PRIVATE
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_backend
+      COMMAND gjxl_cuda_backend_test
+    )
+    set_tests_properties(cuda_backend PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(
+      gjxl_gpu_primitives_cuda_test
+      tests/gpu_primitives_metal_test.cpp
+    )
+
+    target_compile_definitions(
+      gjxl_gpu_primitives_cuda_test
+      PRIVATE
+        GJXL_TEST_CUDA=1
+    )
+
+    target_link_libraries(
+      gjxl_gpu_primitives_cuda_test
+      PRIVATE
+        gjxl_codec
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_gpu_primitives
+      COMMAND gjxl_gpu_primitives_cuda_test
+    )
+    set_tests_properties(cuda_gpu_primitives PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+
   if(GJXL_ENABLE_METAL)
 
   add_executable(
@@ -2470,8 +2561,11 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       "-DGJXL_TEST_CONFIG=$<CONFIG>"
       "-DGJXL_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      "-DGJXL_TEST_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}"
       "-DGJXL_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DGJXL_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DGJXL_TEST_RC_COMPILER=${CMAKE_RC_COMPILER}"
+      "-DGJXL_TEST_MT=${CMAKE_MT}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_consumer.cmake"
   )
 endif()
