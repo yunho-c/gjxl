@@ -20,6 +20,7 @@
 #include "codec/codestream.h"
 #include "codec/vardct_frame.h"
 #include "codestream/ac_group.h"
+#include "codestream/encoder.h"
 #include "core/ac_strategy.h"
 
 namespace gjxl {
@@ -113,7 +114,22 @@ Status CountGroupZeros(
   const AcStrategyGrid& strategies,
   std::array<std::array<std::vector<uint64_t>, 3>,
              codestream_internal::kSimpleCoefficientOrderCount>* zero_counts,
+  bool sample_dct8,
+  std::array<uint64_t, 2>* random_state,
   uint16_t* present_mask) {
+
+  const auto use_sample = [&]() {
+    uint64_t state_1 = (*random_state)[0];
+    const uint64_t state_0 = (*random_state)[1];
+    const uint64_t bits = state_1 + state_0;
+    (*random_state)[0] = state_0;
+    state_1 ^= state_1 << 23;
+    state_1 ^= state_0 ^ (state_1 >> 18) ^ (state_0 >> 5);
+    (*random_state)[1] = state_1;
+    constexpr uint64_t kHalfThreshold =
+      (std::numeric_limits<uint64_t>::max() >> 32) / 2;
+    return (bits >> 32) <= kHalfThreshold;
+  };
 
   size_t source_offset = 0;
   for (size_t y = 0; y < group.block_extent.height; ++y) {
@@ -155,18 +171,24 @@ Status CountGroupZeros(
             return Status::Internal(
               "Coefficient-order family dimensions disagree");
           }
-          const std::span<const int32_t> coefficients =
-            group.coefficients[channel].subspan(
-              source_offset, info->coefficient_count());
-          for (size_t coefficient = 0; coefficient < coefficients.size();
-               ++coefficient) {
-            if (coefficients[coefficient] == 0) {
-              if (counts[coefficient] ==
-                  std::numeric_limits<uint64_t>::max()) {
-                return Status::InvalidArgument(
-                  "Coefficient zero count overflow");
+        }
+        const bool selected = !sample_dct8 || use_sample();
+        if (selected) {
+          for (size_t channel = 0; channel < 3; ++channel) {
+            std::vector<uint64_t>& counts = (*zero_counts)[family][channel];
+            const std::span<const int32_t> coefficients =
+              group.coefficients[channel].subspan(
+                source_offset, info->coefficient_count());
+            for (size_t coefficient = 0; coefficient < coefficients.size();
+                 ++coefficient) {
+              if (coefficients[coefficient] == 0) {
+                if (counts[coefficient] ==
+                    std::numeric_limits<uint64_t>::max()) {
+                  return Status::InvalidArgument(
+                    "Coefficient zero count overflow");
+                }
+                ++counts[coefficient];
               }
-              ++counts[coefficient];
             }
           }
         }
@@ -178,6 +200,37 @@ Status CountGroupZeros(
     return Status::InvalidArgument(
       "Coefficient-order group consumption is incomplete");
   }
+  return Status::Ok();
+}
+
+Status PresentOrderMask(const VarDctEncoderFrame& frame, uint16_t* mask) {
+  uint16_t present = 0;
+  for (size_t group_index = 0; group_index < frame.ac_group_count();
+       ++group_index) {
+    VarDctAcGroupView group;
+    if (Status status = frame.GetAcGroup(group_index, &group); !status.ok()) {
+      return status;
+    }
+    for (size_t y = 0; y < group.block_extent.height; ++y) {
+      for (size_t x = 0; x < group.block_extent.width; ++x) {
+        AcStrategyCell cell;
+        if (Status status = frame.strategies().Get(
+              group.block_x + x, group.block_y + y, &cell); !status.ok()) {
+          return status;
+        }
+        if (!cell.is_anchor) continue;
+        const size_t family = codestream_internal::kSimpleStrategyOrder[
+          static_cast<size_t>(cell.strategy)];
+        if (family >= codestream_internal::kSimpleCoefficientOrderCount ||
+            (kSupportedOrderMask & (uint16_t{1} << family)) == 0) {
+          return Status::InvalidArgument(
+            "Coefficient-order strategy is outside the simple profile");
+        }
+        present |= uint16_t{1} << family;
+      }
+    }
+  }
+  *mask = present;
   return Status::Ok();
 }
 
@@ -290,6 +343,27 @@ Status ComputeSimpleCoefficientOrders(
     return status;
   }
 
+  return codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+    frame, VarDctCoefficientOrderBehavior::kFull, orders);
+}
+
+Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+  const VarDctEncoderFrame& frame,
+  VarDctCoefficientOrderBehavior behavior,
+  SimpleCoefficientOrders* orders) {
+
+  if (orders == nullptr) {
+    return Status::InvalidArgument("Coefficient-order output is null");
+  }
+  switch (behavior) {
+    case VarDctCoefficientOrderBehavior::kFull:
+    case VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled:
+      break;
+    default:
+      return Status::InvalidArgument(
+        "Coefficient-order behavior is invalid");
+  }
+
   try {
     SimpleCoefficientOrders candidate;
     const Extent2D blocks = frame.geometry().block_grid().blocks;
@@ -301,6 +375,19 @@ Status ComputeSimpleCoefficientOrders(
     std::array<std::array<std::vector<uint64_t>, 3>,
                codestream_internal::kSimpleCoefficientOrderCount> zero_counts;
     uint16_t present_mask = 0;
+    Status status;
+    if (behavior ==
+        VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled) {
+      status = PresentOrderMask(frame, &present_mask);
+      if (!status.ok()) return status;
+    }
+    const bool sample_dct8 =
+      behavior == VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled &&
+      present_mask == 1;
+    std::array<uint64_t, 2> random_state = {
+      0x94D049BB133111EBull,
+      0xBF58476D1CE4E5B9ull,
+    };
     for (size_t group_index = 0; group_index < frame.ac_group_count();
          ++group_index) {
       VarDctAcGroupView group;
@@ -309,7 +396,8 @@ Status ComputeSimpleCoefficientOrders(
         return status;
       }
       status = CountGroupZeros(
-        group, frame.strategies(), &zero_counts, &present_mask);
+        group, frame.strategies(), &zero_counts, sample_dct8, &random_state,
+        &present_mask);
       if (!status.ok()) {
         return status;
       }

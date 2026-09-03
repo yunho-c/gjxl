@@ -6,14 +6,17 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <vector>
 
 #include "codec/color_transform.h"
+#include "codec/color_transform_internal.h"
 
 namespace {
 
@@ -176,6 +179,122 @@ bool CheckValidationIsAtomic() {
     std::cerr << "Invalid color transform was not atomic\n";
     return false;
   }
+
+  FillLinear(&input);
+  input.plane[0][0] = std::numeric_limits<float>::max();
+  if (gjxl::LinearRgbToOpsin(
+        input.ConstView(), std::numeric_limits<float>::max(),
+        output.View()).ok() ||
+      output.plane != original) {
+    std::cerr << "Overflowing color transform was not atomic\n";
+    return false;
+  }
+  return true;
+}
+
+struct VariableImageStorage {
+  gjxl::Extent2D extent;
+  size_t stride;
+  std::array<std::vector<float>, 3> plane;
+
+  VariableImageStorage(
+    gjxl::Extent2D image_extent,
+    size_t image_stride,
+    float fill)
+    : extent(image_extent), stride(image_stride) {
+    for (std::vector<float>& values : plane) {
+      values.assign(stride * extent.height, fill);
+    }
+  }
+
+  [[nodiscard]] gjxl::Image3FView View() {
+    return {{
+      gjxl::PlaneF32View{plane[0].data(), extent, stride},
+      gjxl::PlaneF32View{plane[1].data(), extent, stride},
+      gjxl::PlaneF32View{plane[2].data(), extent, stride},
+    }};
+  }
+
+  [[nodiscard]] gjxl::ConstImage3FView ConstView() const {
+    return {{
+      gjxl::ConstPlaneF32View{plane[0].data(), extent, stride},
+      gjxl::ConstPlaneF32View{plane[1].data(), extent, stride},
+      gjxl::ConstPlaneF32View{plane[2].data(), extent, stride},
+    }};
+  }
+};
+
+bool CheckPaddedDirectTransform() {
+  constexpr gjxl::Extent2D source_extent{9, 7};
+  constexpr gjxl::Extent2D padded_extent{16, 8};
+  constexpr size_t source_stride = 12;
+  constexpr size_t reference_stride = 18;
+  constexpr size_t direct_stride = 19;
+  constexpr float kSentinel = -313.0f;
+  VariableImageStorage source(source_extent, source_stride, kSentinel);
+  VariableImageStorage padded_linear(
+    padded_extent, reference_stride, kSentinel);
+  VariableImageStorage reference(
+    padded_extent, reference_stride, kSentinel);
+  VariableImageStorage direct(padded_extent, direct_stride, kSentinel);
+
+  for (size_t y = 0; y < source_extent.height; ++y) {
+    for (size_t x = 0; x < source_extent.width; ++x) {
+      source.plane[0][y * source_stride + x] =
+        static_cast<float>((3 * x + 5 * y) % 37) / 36.0f;
+      source.plane[1][y * source_stride + x] =
+        static_cast<float>((7 * x + 2 * y) % 41) / 40.0f;
+      source.plane[2][y * source_stride + x] =
+        static_cast<float>((11 * x + 13 * y) % 43) / 42.0f;
+    }
+  }
+  for (size_t y = 0; y < padded_extent.height; ++y) {
+    const size_t source_y = std::min(y, source_extent.height - 1);
+    for (size_t x = 0; x < padded_extent.width; ++x) {
+      const size_t source_x = std::min(x, source_extent.width - 1);
+      for (size_t channel = 0; channel < 3; ++channel) {
+        padded_linear.plane[channel][y * reference_stride + x] =
+          source.plane[channel][source_y * source_stride + source_x];
+      }
+    }
+  }
+
+  if (!gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, reference.View()).ok() ||
+      !gjxl::color_transform_internal::LinearRgbToPaddedOpsin(
+        source.ConstView(), 255.0f, direct.View()).ok()) {
+    std::cerr << "Padded direct color transform failed\n";
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < padded_extent.height; ++y) {
+      for (size_t x = 0; x < padded_extent.width; ++x) {
+        const float expected =
+          reference.plane[channel][y * reference_stride + x];
+        const float actual = direct.plane[channel][y * direct_stride + x];
+        if (std::bit_cast<uint32_t>(expected) !=
+            std::bit_cast<uint32_t>(actual)) {
+          std::cerr << "Padded direct transform mismatch at channel "
+                    << channel << ", x=" << x << ", y=" << y << '\n';
+          return false;
+        }
+      }
+      for (size_t x = padded_extent.width; x < direct_stride; ++x) {
+        if (direct.plane[channel][y * direct_stride + x] != kSentinel) {
+          std::cerr << "Padded direct transform changed row-stride padding\n";
+          return false;
+        }
+      }
+    }
+  }
+
+  source.plane[2][3 * source_stride + 4] =
+    std::numeric_limits<float>::infinity();
+  if (gjxl::color_transform_internal::LinearRgbToPaddedOpsin(
+        source.ConstView(), 255.0f, direct.View()).ok()) {
+    std::cerr << "Padded direct transform accepted infinite input\n";
+    return false;
+  }
   return true;
 }
 
@@ -280,6 +399,7 @@ bool CheckParallelRoundTripAndAtomicity() {
 
 int main() {
   if (!CheckRoundTripAndInvariants() || !CheckValidationIsAtomic() ||
+      !CheckPaddedDirectTransform() ||
       !CheckParallelRoundTripAndAtomicity()) {
     return EXIT_FAILURE;
   }

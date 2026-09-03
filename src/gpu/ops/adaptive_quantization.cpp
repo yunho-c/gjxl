@@ -77,21 +77,26 @@ void CopyContiguousPlane(
   Extent2D source_extent,
   Extent2D block_extent,
   AdaptiveQuantizationOptions options,
-  const AdaptiveQuantizationOutput& output) {
+  const AdaptiveQuantizationOutput& output,
+  adaptive_quantization_gpu_internal::AdaptiveQuantizationMaterialization
+    materialization) {
 
-  if (!ValidHostPlaneLayout(output.quant_field) ||
-      !ValidHostPlaneLayout(output.block_distance_map) ||
-      !output.reconstructed_linear_rgb.valid() ||
-      !std::ranges::all_of(
-        output.reconstructed_linear_rgb.plane,
-        [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }) ||
+  if ((materialization.quant_field &&
+       (!ValidHostPlaneLayout(output.quant_field) ||
+        output.quant_field.extent != block_extent)) ||
+      (materialization.block_distance_map &&
+       (!ValidHostPlaneLayout(output.block_distance_map) ||
+        output.block_distance_map.extent != block_extent)) ||
+      (materialization.reconstructed_linear_rgb &&
+       (!output.reconstructed_linear_rgb.valid() ||
+        output.reconstructed_linear_rgb.extent() != source_extent ||
+        !std::ranges::all_of(
+          output.reconstructed_linear_rgb.plane,
+          [](PlaneF32View plane) { return ValidHostPlaneLayout(plane); }))) ||
       output.frame == nullptr || output.score_history == nullptr ||
       (options.control_mode ==
          AdaptiveQuantizationControlMode::kMaximumError &&
-       output.maximum_error_result == nullptr) ||
-      output.quant_field.extent != block_extent ||
-      output.block_distance_map.extent != block_extent ||
-      output.reconstructed_linear_rgb.extent() != source_extent) {
+       output.maximum_error_result == nullptr)) {
     return Status::InvalidArgument(
       "GPU adaptive-quantization output is invalid");
   }
@@ -379,7 +384,7 @@ Status RunGpuAdaptiveQuantizationImpl(
     } else {
       status = ValidateFullOutput(
         original_linear_rgb.extent(), strategies.extent(), options,
-        *full_output);
+        *full_output, materialization);
     }
   }
   if (!status.ok()) {

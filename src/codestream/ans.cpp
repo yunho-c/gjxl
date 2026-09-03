@@ -1310,12 +1310,14 @@ Status PrepareDirectAnsPartition(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
   codestream_internal::DirectAnsEntropyMode mode,
+  std::span<const codestream_internal::PreparedFixedAnsCluster>
+    fixed_context_populations,
   EntropyCode* partition,
   codestream_internal::PreparedEntropyClusters* prepared,
   EntropyWorkProfile* profile) {
 
   if (partition == nullptr || prepared == nullptr ||
-      options.context_count == 0) {
+      options.context_count == 0 || !options.uint_config.valid()) {
     return Status::InvalidArgument("Direct ANS partition output is invalid");
   }
   size_t histogram_count = options.context_count;
@@ -1340,26 +1342,95 @@ Status PrepareDirectAnsPartition(
   try {
     const ProfileClock::time_point histogram_begin = ProfileBegin(profile);
     std::vector<DirectAnsHistogram> histograms(histogram_count);
-    for (const EntropyTokenStreamView section : section_tokens) {
-      if (!section.valid()) {
-        return Status::InvalidArgument("ANS token-stream view is invalid");
+    if (!fixed_context_populations.empty()) {
+      if (mode != codestream_internal::DirectAnsEntropyMode::kBalanced ||
+          fixed_context_populations.size() != options.context_count) {
+        return Status::InvalidArgument(
+          "Prepared direct ANS populations are invalid");
       }
-      for (size_t index = 0; index < section.size(); ++index) {
-        const EntropyToken token = section[index];
-        if (token.context >= options.context_count) {
-          return Status::InvalidArgument("ANS token context is out of range");
+      for (size_t context = 0; context < options.context_count; ++context) {
+        const auto& population = fixed_context_populations[context];
+        if (population.maximum_symbol >= kMaximumAnsAlphabetSize) {
+          return Status::InvalidArgument(
+            "Prepared direct ANS symbol is out of range");
         }
-        HybridUintToken encoded;
-        if (Status status = EncodeHybridUint(
-              token.value, options.uint_config, &encoded);
-            !status.ok()) {
-          return status;
+        uint64_t count_sum = 0;
+        uint64_t extra_bit_sum = 0;
+        uint32_t actual_maximum_symbol = 0;
+        for (size_t symbol = 0; symbol < population.counts.size(); ++symbol) {
+          const uint64_t count = population.counts[symbol];
+          if (count_sum > std::numeric_limits<uint64_t>::max() - count) {
+            return Status::InvalidArgument(
+              "Prepared direct ANS population overflows");
+          }
+          count_sum += count;
+          if (count == 0) continue;
+          actual_maximum_symbol = static_cast<uint32_t>(symbol);
+          const uint32_t split_token =
+            uint32_t{1} << options.uint_config.split_exponent;
+          uint32_t extra_bit_count = 0;
+          if (symbol >= split_token) {
+            const uint32_t in_token =
+              options.uint_config.msb_in_token +
+              options.uint_config.lsb_in_token;
+            const uint32_t exponent = options.uint_config.split_exponent +
+              ((static_cast<uint32_t>(symbol) - split_token) >> in_token);
+            extra_bit_count = exponent -
+              options.uint_config.msb_in_token -
+              options.uint_config.lsb_in_token;
+          }
+          if (count != 0 && extra_bit_count >
+              (std::numeric_limits<uint64_t>::max() - extra_bit_sum) / count) {
+            return Status::InvalidArgument(
+              "Prepared direct ANS extra bits overflow");
+          }
+          extra_bit_sum += count * extra_bit_count;
         }
-        const size_t histogram = options.initial_context_map.empty()
-          ? token.context
-          : options.initial_context_map[token.context];
-        if (!histograms[histogram].Add(encoded)) {
-          return Status::InvalidArgument("ANS histogram count overflow");
+        if (count_sum != population.token_count ||
+            extra_bit_sum != population.extra_bits ||
+            (count_sum != 0 &&
+             actual_maximum_symbol != population.maximum_symbol)) {
+          return Status::InvalidArgument(
+            "Prepared direct ANS population count differs");
+        }
+        DirectAnsHistogram source{
+          .counts = population.counts,
+          .total_count = population.token_count,
+          .extra_bits = population.extra_bits,
+          .maximum_symbol = population.maximum_symbol,
+        };
+        if (options.initial_context_map.empty()) {
+          histograms[context] = std::move(source);
+        } else {
+          const size_t histogram = options.initial_context_map[context];
+          if (!histograms[histogram].AddHistogram(source)) {
+            return Status::InvalidArgument("ANS histogram count overflow");
+          }
+        }
+      }
+    } else {
+      for (const EntropyTokenStreamView section : section_tokens) {
+        if (!section.valid()) {
+          return Status::InvalidArgument("ANS token-stream view is invalid");
+        }
+        for (size_t index = 0; index < section.size(); ++index) {
+          const EntropyToken token = section[index];
+          if (token.context >= options.context_count) {
+            return Status::InvalidArgument(
+              "ANS token context is out of range");
+          }
+          HybridUintToken encoded;
+          if (Status status = EncodeHybridUint(
+                token.value, options.uint_config, &encoded);
+              !status.ok()) {
+            return status;
+          }
+          const size_t histogram = options.initial_context_map.empty()
+            ? token.context
+            : options.initial_context_map[token.context];
+          if (!histograms[histogram].Add(encoded)) {
+            return Status::InvalidArgument("ANS histogram count overflow");
+          }
         }
       }
     }
@@ -2713,6 +2784,11 @@ Status codestream_internal::OptimizeDirectAnsEntropyCode(
   EntropyCodeCost* cost,
   EntropyWorkProfile* profile) {
 
+  if (mode == DirectAnsEntropyMode::kBalanced) {
+    return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+      section_tokens, options, {}, code, cost, profile);
+  }
+
   if (code == nullptr) {
     return Status::InvalidArgument("Direct ANS output is null");
   }
@@ -2726,7 +2802,7 @@ Status codestream_internal::OptimizeDirectAnsEntropyCode(
   EntropyCode partition;
   PreparedEntropyClusters prepared;
   Status status = PrepareDirectAnsPartition(
-    section_tokens, options, mode, &partition, &prepared, profile);
+    section_tokens, options, mode, {}, &partition, &prepared, profile);
   if (!status.ok()) {
     return status;
   }
@@ -2743,6 +2819,35 @@ Status codestream_internal::OptimizeDirectAnsEntropyCode(
         .histogram_search = AnsHistogramSearch::kPrecise,
         .smallest_alphabet_width = true,
       };
+  return OptimizeAnsEntropyCodeImpl(
+    section_tokens, partition, &prepared, policy,
+    code, cost, nullptr, profile);
+}
+
+Status codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  std::span<const PreparedFixedAnsCluster> context_populations,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  EntropyWorkProfile* profile) {
+
+  if (code == nullptr) {
+    return Status::InvalidArgument("Direct ANS output is null");
+  }
+  EntropyCode partition;
+  PreparedEntropyClusters prepared;
+  Status status = PrepareDirectAnsPartition(
+    section_tokens, options, DirectAnsEntropyMode::kBalanced,
+    context_populations, &partition, &prepared, profile);
+  if (!status.ok()) return status;
+  const std::array<HybridUintConfig, 1> balanced_configs = {
+    options.uint_config};
+  const AnsOptimizationPolicy policy{
+    .uint_configs = balanced_configs,
+    .histogram_search = AnsHistogramSearch::kApproximate,
+    .smallest_alphabet_width = true,
+  };
   return OptimizeAnsEntropyCodeImpl(
     section_tokens, partition, &prepared, policy,
     code, cost, nullptr, profile);

@@ -23,6 +23,7 @@
 #include "gpu/image.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/butteraugli.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/primitives.h"
@@ -235,6 +236,7 @@ class MetalBackend final
     public gpu_profile_internal::GpuImagePrimitivesProfiler,
     public GpuAqEvaluation,
     public gpu_profile_internal::GpuAqEvaluationProfiler,
+    public aq_evaluation_internal::GpuValidatedAqEvaluation,
     public DeviceButteraugliOperation {
 public:
   MetalBackend(
@@ -270,6 +272,15 @@ public:
     void* dst,
     size_t size_bytes,
     size_t src_offset_bytes) override;
+
+  /// Borrows completed shared-buffer storage for synchronous host reads.
+  /// The caller must wait for every GPU command that can write the range and
+  /// must not retain the span beyond the buffer's lifetime.
+  Status BorrowCompletedReadOnly(
+    const DeviceBuffer& src,
+    size_t size_bytes,
+    size_t src_offset_bytes,
+    std::span<const std::byte>* out) const;
 
   Status ForwardTransform(
     const TransformBatch& batch,
@@ -317,6 +328,16 @@ public:
     std::unique_ptr<PreparedAqEvaluation>* prepared,
     gpu_profile_internal::GpuExecutionProfile* profile) override;
 
+  Status PrepareValidatedAqEvaluation(
+    const AqEvaluationPreparation& preparation,
+    std::unique_ptr<PreparedAqEvaluation>* prepared) override;
+
+  Status PrepareValidatedAqEvaluationProfiled(
+    const AqEvaluationPreparation& preparation,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<PreparedAqEvaluation>* prepared,
+    gpu_profile_internal::GpuExecutionProfile* profile) override;
+
   Status Prepare(
     GpuBackend& backend,
     const DeviceButteraugliPrepareDescriptor& descriptor,
@@ -338,6 +359,7 @@ private:
 
   Status PrepareAqEvaluationImpl(
     const AqEvaluationPreparation& preparation,
+    bool host_images_are_finite,
     gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<PreparedAqEvaluation>* prepared,
     gpu_profile_internal::GpuExecutionProfile* profile);

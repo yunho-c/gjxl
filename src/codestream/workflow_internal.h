@@ -29,13 +29,33 @@ struct QuantizationMatrixScales {
   bool operator==(const QuantizationMatrixScales&) const = default;
 };
 
+/// Returns whether this encoding policy uses source-dependent matrix-scale
+/// statistics. High density follows libjxl's effort-9-like behavior even when
+/// its explicit effort value is lower. Maximum-error control never uses the
+/// statistics because its matrix scales are fixed at 2/2.
+[[nodiscard]] bool ShouldComputeQuantizationMatrixScaleStats(
+  const VarDctEncodingOptions& options) noexcept;
+
 /// Resolves the public compression request to one serializer behavior.
 [[nodiscard]] VarDctEntropyBehavior ResolveEntropyBehavior(
+  const VarDctEncodingOptions& options) noexcept;
+
+/// Resolves the public effort request independently from entropy intensity.
+[[nodiscard]] VarDctCoefficientOrderBehavior
+ResolveCoefficientOrderBehavior(
   const VarDctEncodingOptions& options) noexcept;
 
 /// Computes libjxl's source-dependent X/B matrix-scale statistics over the
 /// unpadded opsin image. Failure leaves `stats` unchanged.
 [[nodiscard]] Status ComputeQuantizationMatrixScaleStats(
+  ConstImage3FView opsin,
+  QuantizationMatrixScaleStats* stats);
+
+/// Computes matrix-scale statistics without revalidating an Opsin view whose
+/// complete finite-value provenance is owned by the synchronous workflow.
+/// Passing any other view violates this internal contract. Failure leaves
+/// `stats` unchanged.
+[[nodiscard]] Status ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
   ConstImage3FView opsin,
   QuantizationMatrixScaleStats* stats);
 

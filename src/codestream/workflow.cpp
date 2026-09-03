@@ -4,6 +4,7 @@
 #include "codestream/workflow.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -16,7 +17,11 @@
 #include <utility>
 #include <vector>
 
-#include "codec/color_transform.h"
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
+#include "codec/color_transform_internal.h"
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
 #include "codec/vardct_frame.h"
@@ -64,6 +69,8 @@ void AccumulateCodestreamProfile(
   codestream_internal::VarDctCodestreamProfile* destination) {
 
   destination->entropy_behavior = source.entropy_behavior;
+  destination->coefficient_order_behavior =
+    source.coefficient_order_behavior;
   destination->validation_nanoseconds += source.validation_nanoseconds;
   destination->dc_tokenization_nanoseconds +=
     source.dc_tokenization_nanoseconds;
@@ -423,53 +430,61 @@ struct PipelineStorage {
   MaximumErrorResult maximum_error_result;
 };
 
-[[nodiscard]] Status EdgeExtend(
-  ConstImage3FView source,
-  Image3FView destination) {
-
-  if (!source.valid() || !destination.valid() ||
-      source.width() > destination.width() ||
-      source.height() > destination.height()) {
-    return Status::InvalidArgument(
-      "Linear RGB source or padded destination is invalid");
-  }
-  for (size_t y = 0; y < destination.height(); ++y) {
-    const size_t source_y = std::min(y, source.height() - 1);
-    for (size_t x = 0; x < destination.width(); ++x) {
-      const size_t source_x = std::min(x, source.width() - 1);
-      for (size_t channel = 0; channel < 3; ++channel) {
-        const float value = source.plane[channel].Row(source_y)[source_x];
-        if (!std::isfinite(value)) {
-          return Status::InvalidArgument(
-            "Linear RGB input pixels must be finite");
-        }
-        destination.plane[channel].Row(y)[x] = value;
-      }
-    }
-  }
-  return Status::Ok();
-}
+struct EncodingArtifacts {
+  VarDctEncoderFrame frame;
+  std::vector<double> score_history;
+  MaximumErrorResult maximum_error_result;
+};
 
 struct PreparedWorkflow {
-  explicit PreparedWorkflow(FrameGeometry prepared_geometry)
+  PreparedWorkflow(
+    FrameGeometry prepared_geometry,
+    ConstImage3FView source_linear_rgb)
     : geometry(prepared_geometry),
-      padded_linear(geometry.padded_frame()),
-      opsin(geometry.padded_frame()),
-      pipeline(geometry.frame(), geometry.padded_frame()) {}
+      linear_rgb(source_linear_rgb),
+      opsin(geometry.padded_frame()) {}
 
   [[nodiscard]] ConstImage3FView original_linear_rgb() const noexcept {
-    return padded_linear.cropped_view(geometry.frame());
+    return linear_rgb;
   }
 
   FrameGeometry geometry;
-  Image3FBuffer padded_linear;
+  // Borrows the encode caller's immutable source for this synchronous
+  // prepared workflow and all of its target-size attempts.
+  ConstImage3FView linear_rgb;
   Image3FBuffer opsin;
   codestream_internal::QuantizationMatrixScaleStats matrix_scale_stats;
-  PipelineStorage pipeline;
+  // CPU and maximum-throughput adapters retain the public complete-output
+  // shape. The default resident encoder never constructs this storage.
+  std::unique_ptr<PipelineStorage> compatibility_output;
   quantization_pipeline_internal::PreparedQuantizationPipeline quantization;
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
     gpu_adaptive_quantization;
 };
+
+[[nodiscard]] Status EnsureCompatibilityOutput(
+  PreparedWorkflow& prepared,
+  PipelineStorage** output) {
+
+  if (output == nullptr) {
+    return Status::InvalidArgument(
+      "Compatibility pipeline output pointer is null");
+  }
+  try {
+    if (prepared.compatibility_output == nullptr) {
+      prepared.compatibility_output = std::make_unique<PipelineStorage>(
+        prepared.geometry.frame(), prepared.geometry.padded_frame());
+    }
+    *output = prepared.compatibility_output.get();
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate compatibility pipeline output");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Compatibility pipeline output dimensions are too large");
+  }
+}
 
 [[nodiscard]] Status PrepareWorkflow(
   ConstImage3FView linear_rgb,
@@ -487,23 +502,23 @@ struct PreparedWorkflow {
     if (!status.ok()) {
       return status;
     }
-    auto candidate = std::make_unique<PreparedWorkflow>(geometry);
-    status = EdgeExtend(linear_rgb, candidate->padded_linear.view());
-    if (!status.ok()) {
-      return status;
-    }
-    status = LinearRgbToOpsin(
-      candidate->padded_linear.const_view(),
+    auto candidate = std::make_unique<PreparedWorkflow>(geometry, linear_rgb);
+    status = color_transform_internal::LinearRgbToPaddedOpsin(
+      linear_rgb,
       kInitialProfileIntensityTarget,
       candidate->opsin.view());
     if (!status.ok()) {
       return status;
     }
-    status = codestream_internal::ComputeQuantizationMatrixScaleStats(
-      candidate->opsin.cropped_view(geometry.frame()),
-      &candidate->matrix_scale_stats);
-    if (!status.ok()) {
-      return status;
+    if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+          options)) {
+      status = codestream_internal::
+        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+        candidate->opsin.cropped_view(geometry.frame()),
+        &candidate->matrix_scale_stats);
+      if (!status.ok()) {
+        return status;
+      }
     }
     CpuQuantizationPipelineOptions preparation_options;
     if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
@@ -516,9 +531,11 @@ struct PreparedWorkflow {
       candidate->original_linear_rgb(), candidate->opsin.const_view(),
       preparation_options,
       &candidate->quantization,
-      options.backend != VarDctBackendPreference::kMetal,
+      options.backend == VarDctBackendPreference::kCpu,
       options.metal_aq_mode ==
-        GpuAdaptiveQuantizationMode::kExactCoefficients);
+        GpuAdaptiveQuantizationMode::kExactCoefficients,
+      quantization_pipeline_internal::QuantizationPipelineInputProvenance::
+        kFiniteLinearRgbAndOpsin);
     if (!status.ok()) {
       return status;
     }
@@ -656,28 +673,35 @@ struct PreparedWorkflow {
     profile, selection_begin,
     &candidate_profile.backend_selection_nanoseconds);
   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
-  prepared.pipeline.score_history.clear();
-  prepared.pipeline.maximum_error_result = {};
+  EncodingArtifacts encoding;
   if (selected_metal && options.metal_aq_mode ==
         GpuAdaptiveQuantizationMode::kMaximumThroughput) {
-    const CpuQuantizationPipelineOutput pipeline_output =
-      prepared.pipeline.Output();
-    status = RunGpuFrameOnlyQuantizationPipeline(
-      *selected_gpu, prepared.original_linear_rgb(),
-      prepared.opsin.const_view(), pipeline_options,
-      {
-        .initial_quantization = pipeline_output.initial_quantization,
-        .quant_field = {
-          prepared.pipeline.final_quant.data(), prepared.pipeline.block_extent,
-          prepared.pipeline.block_extent.width},
-        .frame = &prepared.pipeline.frame,
-      });
+    PipelineStorage* compatibility_output = nullptr;
+    status = EnsureCompatibilityOutput(prepared, &compatibility_output);
+    if (status.ok()) {
+      const CpuQuantizationPipelineOutput pipeline_output =
+        compatibility_output->Output();
+      status = RunGpuFrameOnlyQuantizationPipeline(
+        *selected_gpu, prepared.original_linear_rgb(),
+        prepared.opsin.const_view(), pipeline_options,
+        {
+          .initial_quantization = pipeline_output.initial_quantization,
+          .quant_field = {
+            compatibility_output->final_quant.data(),
+            compatibility_output->block_extent,
+            compatibility_output->block_extent.width},
+          .frame = &compatibility_output->frame,
+        });
+      if (status.ok()) {
+        encoding.frame = std::move(compatibility_output->frame);
+      }
+    }
   } else if (selected_metal) {
     const quantization_pipeline_internal::GpuEncodingQuantizationPipelineOutput
       encoding_output{
-      .frame = &prepared.pipeline.frame,
-      .score_history = &prepared.pipeline.score_history,
-      .maximum_error_result = &prepared.pipeline.maximum_error_result,
+      .frame = &encoding.frame,
+      .score_history = &encoding.score_history,
+      .maximum_error_result = &encoding.maximum_error_result,
       .collect_final_butteraugli_score =
         options.collect_final_butteraugli_score ||
         pipeline_options.adaptive_quantization.iterations == 0 ||
@@ -699,10 +723,20 @@ struct PreparedWorkflow {
             &prepared.gpu_adaptive_quantization, gpu_profiling_mode,
             &candidate_gpu_profile);
   } else {
-    status = quantization_pipeline_internal::
-      RunPreparedCpuQuantizationPipeline(
-        prepared.original_linear_rgb(), prepared.quantization,
-        pipeline_options, prepared.pipeline.Output());
+    PipelineStorage* compatibility_output = nullptr;
+    status = EnsureCompatibilityOutput(prepared, &compatibility_output);
+    if (status.ok()) {
+      status = quantization_pipeline_internal::
+        RunPreparedCpuQuantizationPipeline(
+          prepared.original_linear_rgb(), prepared.quantization,
+          pipeline_options, compatibility_output->Output());
+    }
+    if (status.ok()) {
+      encoding.frame = std::move(compatibility_output->frame);
+      encoding.score_history = std::move(compatibility_output->score_history);
+      encoding.maximum_error_result =
+        compatibility_output->maximum_error_result;
+    }
   }
   if (!status.ok()) {
     return status;
@@ -716,12 +750,14 @@ struct PreparedWorkflow {
   const VarDctCodestreamOptions codestream_options{
     .entropy_behavior =
       codestream_internal::ResolveEntropyBehavior(options),
+    .coefficient_order_behavior =
+      codestream_internal::ResolveCoefficientOrderBehavior(options),
   };
   status = profile == nullptr
     ? EncodeVarDctCodestream(
-        prepared.pipeline.frame, codestream_options, &candidate)
+        encoding.frame, codestream_options, &candidate)
     : codestream_internal::EncodeVarDctCodestreamProfiled(
-        prepared.pipeline.frame, codestream_options, &candidate,
+        encoding.frame, codestream_options, &candidate,
         &candidate_profile.codestream);
   ProfileEnd(
     profile, codestream_begin,
@@ -764,16 +800,16 @@ struct PreparedWorkflow {
   if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     candidate_summary.requested_maximum_error = options.maximum_error;
     candidate_summary.achieved_maximum_error =
-      prepared.pipeline.maximum_error_result.achieved;
+      encoding.maximum_error_result.achieved;
     candidate_summary.achieved_maximum_error_ratio =
-      prepared.pipeline.maximum_error_result.normalized_maximum;
+      encoding.maximum_error_result.normalized_maximum;
     candidate_summary.maximum_error_evaluation_count =
-      prepared.pipeline.maximum_error_result.evaluation_count;
+      encoding.maximum_error_result.evaluation_count;
     candidate_summary.maximum_error_outcome =
-      prepared.pipeline.maximum_error_result.outcome;
+      encoding.maximum_error_result.outcome;
   }
   candidate_summary.encode_attempt_count = 1;
-  candidate_summary.score_history = prepared.pipeline.score_history;
+  candidate_summary.score_history = encoding.score_history;
   candidate_summary.final_butteraugli_score_evaluated =
     options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
     !candidate_summary.score_history.empty() &&
@@ -786,7 +822,7 @@ struct PreparedWorkflow {
     ? VarDctExecutionBackend::kMetal
     : VarDctExecutionBackend::kCpu;
   candidate_summary.metal_aq_mode = options.metal_aq_mode;
-  status = prepared.pipeline.frame.strategies().ForEachAnchor(
+  status = encoding.frame.strategies().ForEachAnchor(
     [&](size_t, size_t, AcStrategyType strategy) {
       const size_t index = static_cast<size_t>(strategy);
       if (index >= candidate_summary.strategy_counts.size()) {
@@ -835,6 +871,15 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
     const float* row_x = opsin.plane[0].Row(y);
     const float* row_y = opsin.plane[1].Row(y);
     const float* row_b = opsin.plane[2].Row(y);
+    const float* previous_row_x = y == 0
+      ? nullptr
+      : opsin.plane[0].Row(y - 1);
+    const float* previous_row_y = y == 0
+      ? nullptr
+      : opsin.plane[1].Row(y - 1);
+    const float* previous_row_b = y == 0
+      ? nullptr
+      : opsin.plane[2].Row(y - 1);
     for (size_t x = 0; x < opsin.width(); ++x) {
       const float current_x = row_x[x];
       const float current_y = row_y[x];
@@ -849,11 +894,10 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
       }
 
       const float previous_x = row_x[x - 1];
-      const float previous_row_x = opsin.plane[0].Row(y - 1)[x];
       const float horizontal_x_edge =
         std::abs(current_x - previous_x);
       const float vertical_x_edge =
-        std::abs(current_x - previous_row_x);
+        std::abs(current_x - previous_row_x[x]);
       if (!std::isfinite(horizontal_x_edge) ||
           !std::isfinite(vertical_x_edge)) {
         return Status::InvalidArgument(
@@ -865,13 +909,11 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
 
       const float previous_y = row_y[x - 1];
       const float previous_b = row_b[x - 1];
-      const float previous_row_y = opsin.plane[1].Row(y - 1)[x];
-      const float previous_row_b = opsin.plane[2].Row(y - 1)[x];
       const float current_difference = current_b - current_y;
       const float horizontal_b_edge = std::abs(
         current_difference - (previous_b - previous_y));
       const float vertical_b_edge = std::abs(
-        current_difference - (previous_row_b - previous_row_y));
+        current_difference - (previous_row_b[x] - previous_row_y[x]));
       if (!std::isfinite(horizontal_b_edge) ||
           !std::isfinite(vertical_b_edge)) {
         return Status::InvalidArgument(
@@ -884,7 +926,7 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
       float exposed_blue = current_b - 1.2f * current_y;
       if (exposed_blue >= 0.0f) {
         exposed_blue *= std::abs(current_b - previous_b) +
-          std::abs(current_b - previous_row_b);
+          std::abs(current_b - previous_row_b[x]);
         if (!std::isfinite(exposed_blue)) {
           return Status::InvalidArgument(
             "Exposed-blue matrix-scale statistic is not finite");
@@ -900,6 +942,123 @@ Status codestream_internal::ComputeQuantizationMatrixScaleStats(
   if (!ValidQuantizationMatrixScaleStats(candidate)) {
     return Status::InvalidArgument(
       "Quantization-matrix scale statistics are not finite");
+  }
+  *stats = candidate;
+  return Status::Ok();
+}
+
+Status codestream_internal::
+ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+  ConstImage3FView opsin,
+  QuantizationMatrixScaleStats* stats) {
+
+  if (stats == nullptr || !opsin.valid()) {
+    return Status::InvalidArgument(
+      "Finite quantization-matrix statistics input or output is invalid");
+  }
+
+  QuantizationMatrixScaleStats candidate;
+  if (opsin.width() > 1 && opsin.height() > 1) {
+#if defined(__ARM_NEON)
+    float32x4_t vector_x_edge = vdupq_n_f32(0.0f);
+    float32x4_t vector_b_edge = vdupq_n_f32(0.0f);
+    float32x4_t vector_exposed_blue = vdupq_n_f32(0.0f);
+    const float32x4_t zero = vdupq_n_f32(0.0f);
+#endif
+    for (size_t y = 1; y < opsin.height(); ++y) {
+      const float* row_x = opsin.plane[0].Row(y);
+      const float* row_y = opsin.plane[1].Row(y);
+      const float* row_b = opsin.plane[2].Row(y);
+      const float* previous_row_x = opsin.plane[0].Row(y - 1);
+      const float* previous_row_y = opsin.plane[1].Row(y - 1);
+      const float* previous_row_b = opsin.plane[2].Row(y - 1);
+      size_t x = 1;
+#if defined(__ARM_NEON)
+      for (; x + 4 <= opsin.width(); x += 4) {
+        const float32x4_t current_x = vld1q_f32(row_x + x);
+        const float32x4_t current_y = vld1q_f32(row_y + x);
+        const float32x4_t current_b = vld1q_f32(row_b + x);
+        const float32x4_t horizontal_x_edge = vabsq_f32(vsubq_f32(
+          current_x, vld1q_f32(row_x + x - 1)));
+        const float32x4_t vertical_x_edge = vabsq_f32(vsubq_f32(
+          current_x, vld1q_f32(previous_row_x + x)));
+        vector_x_edge = vmaxq_f32(
+          vector_x_edge,
+          vmaxq_f32(horizontal_x_edge, vertical_x_edge));
+
+        const float32x4_t current_difference =
+          vsubq_f32(current_b, current_y);
+        const float32x4_t previous_difference = vsubq_f32(
+          vld1q_f32(row_b + x - 1),
+          vld1q_f32(row_y + x - 1));
+        const float32x4_t previous_row_difference = vsubq_f32(
+          vld1q_f32(previous_row_b + x),
+          vld1q_f32(previous_row_y + x));
+        const float32x4_t horizontal_b_edge = vabsq_f32(vsubq_f32(
+          current_difference, previous_difference));
+        const float32x4_t vertical_b_edge = vabsq_f32(vsubq_f32(
+          current_difference, previous_row_difference));
+        vector_b_edge = vmaxq_f32(
+          vector_b_edge,
+          vmaxq_f32(horizontal_b_edge, vertical_b_edge));
+
+        const float32x4_t exposed_blue = vsubq_f32(
+          current_b, vmulq_n_f32(current_y, 1.2f));
+        const float32x4_t blue_edge = vaddq_f32(
+          vabsq_f32(vsubq_f32(
+            current_b, vld1q_f32(row_b + x - 1))),
+          vabsq_f32(vsubq_f32(
+            current_b, vld1q_f32(previous_row_b + x))));
+        vector_exposed_blue = vmaxq_f32(
+          vector_exposed_blue,
+          vmulq_f32(vmaxq_f32(exposed_blue, zero), blue_edge));
+      }
+#endif
+      for (; x < opsin.width(); ++x) {
+        const float current_x = row_x[x];
+        candidate.x_edge = std::max(
+          candidate.x_edge,
+          std::max(
+            std::abs(current_x - row_x[x - 1]),
+            std::abs(current_x - previous_row_x[x])));
+
+        const float current_y = row_y[x];
+        const float current_b = row_b[x];
+        const float current_difference = current_b - current_y;
+        candidate.b_edge = std::max(
+          candidate.b_edge,
+          std::max(
+            std::abs(
+              current_difference - (row_b[x - 1] - row_y[x - 1])),
+            std::abs(
+              current_difference -
+                (previous_row_b[x] - previous_row_y[x]))));
+
+        float exposed_blue = current_b - 1.2f * current_y;
+        if (exposed_blue >= 0.0f) {
+          exposed_blue *= std::abs(current_b - row_b[x - 1]) +
+            std::abs(current_b - previous_row_b[x]);
+          candidate.exposed_blue = std::max(
+            candidate.exposed_blue, exposed_blue);
+        }
+      }
+    }
+#if defined(__ARM_NEON)
+    std::array<float, 4> lanes{};
+    vst1q_f32(lanes.data(), vector_x_edge);
+    candidate.x_edge = std::max(
+      candidate.x_edge, *std::ranges::max_element(lanes));
+    vst1q_f32(lanes.data(), vector_b_edge);
+    candidate.b_edge = std::max(
+      candidate.b_edge, *std::ranges::max_element(lanes));
+    vst1q_f32(lanes.data(), vector_exposed_blue);
+    candidate.exposed_blue = std::max(
+      candidate.exposed_blue, *std::ranges::max_element(lanes));
+#endif
+  }
+  if (!ValidQuantizationMatrixScaleStats(candidate)) {
+    return Status::InvalidArgument(
+      "Finite quantization-matrix statistics are not finite");
   }
   *stats = candidate;
   return Status::Ok();
@@ -1325,6 +1484,14 @@ Status EncodeLinearRgbVarDctCodestreamProfiled(
 
 namespace codestream_internal {
 
+bool ShouldComputeQuantizationMatrixScaleStats(
+  const VarDctEncodingOptions& options) noexcept {
+
+  return options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    (options.effort >= 7 ||
+     options.density_mode == VarDctDensityMode::kHighDensity);
+}
+
 VarDctEntropyBehavior ResolveEntropyBehavior(
   const VarDctEncodingOptions& options) noexcept {
 
@@ -1337,6 +1504,16 @@ VarDctEntropyBehavior ResolveEntropyBehavior(
     return VarDctEntropyBehavior::kHighDensity;
   }
   return VarDctEntropyBehavior::kBalanced;
+}
+
+VarDctCoefficientOrderBehavior ResolveCoefficientOrderBehavior(
+  const VarDctEncodingOptions& options) noexcept {
+
+  return options.effort == 7 &&
+      options.density_mode == VarDctDensityMode::kDefault &&
+      options.compression_mode == VarDctCompressionMode::kAutomatic
+    ? VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled
+    : VarDctCoefficientOrderBehavior::kFull;
 }
 
 bool IsAutomaticMetalGeometryEligible(Extent2D padded_extent) noexcept {

@@ -299,6 +299,18 @@ Status ComputeSimpleBlockContextMapCandidates(
   if (!status.ok()) {
     return status;
   }
+  return codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
+    frame, maps);
+}
+
+Status codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
+  const VarDctEncoderFrame& frame,
+  std::vector<SimpleBlockContextMap>* maps) {
+
+  if (maps == nullptr) {
+    return Status::InvalidArgument("Block-context candidate output is null");
+  }
+  Status status;
   try {
     std::vector<SimpleBlockContextMap> candidate;
     AddCandidate(DefaultSimpleBlockContextMap(), &candidate);
@@ -353,6 +365,18 @@ Status ComputeSimpleBlockContextMap(
   if (!status.ok()) {
     return status;
   }
+  return codestream_internal::ComputeSimpleBlockContextMapForEncoder(
+    frame, map);
+}
+
+Status codestream_internal::ComputeSimpleBlockContextMapForEncoder(
+  const VarDctEncoderFrame& frame,
+  SimpleBlockContextMap* map) {
+
+  if (map == nullptr) {
+    return Status::InvalidArgument("Block-context map output is null");
+  }
+  Status status;
   try {
     size_t block_count = 0;
     const Extent2D blocks = frame.geometry().block_grid().blocks;

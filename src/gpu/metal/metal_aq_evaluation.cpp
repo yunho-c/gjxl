@@ -47,6 +47,37 @@ uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
       ProfileClock::now() - begin).count());
 }
 
+Status BorrowCompletedContiguousI32(
+  const MetalBackend& backend,
+  ConstDevicePlaneView plane,
+  std::span<const int32_t>* out) {
+
+  if (out == nullptr || plane.buffer == nullptr ||
+      plane.element_type != DeviceElementType::kI32 ||
+      plane.extent.empty() || plane.row_stride != plane.extent.width) {
+    return Status::InvalidArgument(
+      "Completed Metal int32 plane is not contiguous");
+  }
+  size_t element_count = 0;
+  if (!plane.extent.try_area(&element_count) ||
+      element_count > std::numeric_limits<size_t>::max() / sizeof(int32_t)) {
+    return Status::InvalidArgument(
+      "Completed Metal int32 plane is too large");
+  }
+  std::span<const std::byte> bytes;
+  Status status = backend.BorrowCompletedReadOnly(
+    *plane.buffer, element_count * sizeof(int32_t), plane.offset_bytes,
+    &bytes);
+  if (!status.ok()) return status;
+  if (reinterpret_cast<uintptr_t>(bytes.data()) % alignof(int32_t) != 0) {
+    return Status::Internal(
+      "Completed Metal int32 plane is misaligned");
+  }
+  *out = {
+    reinterpret_cast<const int32_t*>(bytes.data()), element_count};
+  return Status::Ok();
+}
+
 inline constexpr size_t kBufferAlignment = 256;
 inline constexpr NS::UInteger kBlockReductionThreadCount = 256;
 inline constexpr NS::UInteger kAqThreadCount = 256;
@@ -630,6 +661,7 @@ MetalPreparedAqEvaluation::~MetalPreparedAqEvaluation() {
 
 Status MetalPreparedAqEvaluation::Prepare(
   const AqEvaluationPreparation& preparation,
+  bool host_images_are_finite,
   gpu_profile_internal::GpuProfilingMode profiling_mode,
   gpu_profile_internal::GpuExecutionProfile* profile) {
 
@@ -645,7 +677,8 @@ Status MetalPreparedAqEvaluation::Prepare(
       profiling_mode, &candidate_profile);
     if (!profile_status.ok()) return profile_status;
   }
-  Status status = ValidatePreparation(preparation);
+  Status status = ValidatePreparation(
+    preparation, host_images_are_finite);
   if (!status.ok()) {
     return status;
   }
@@ -724,7 +757,6 @@ Status MetalPreparedAqEvaluation::Prepare(
     }
     strategies_host_ = *preparation.strategies;
     epf_sharpness_host_.resize(block_count_);
-    last_raw_quant_.resize(block_count_);
     size_t tile_count = 0;
     if (!tile_extent_.try_area(&tile_count)) {
       return Status::InvalidArgument(
@@ -814,27 +846,24 @@ Status MetalPreparedAqEvaluation::Prepare(
         "Prepared AQ anchors do not cover the coding image exactly");
   }
   try {
-    quantized_readback_.resize(coefficient_value_count_);
-    quantized_dc_readback_.resize(3 * block_count_);
-    final_transform_views_.reserve(block_count_);
+    final_transform_layouts_.reserve(block_count_);
     for (const AqAnchor& anchor : row_major_anchors_) {
       const AqStrategyBatch& batch = batches_[anchor.batch_index];
       const size_t channel_stride =
         batch.anchor_count * batch.coefficient_count;
-      vardct_frame_internal::QuantizedAcTransformView transform{
+      vardct_frame_internal::QuantizedAcTransformLayout transform{
         .block_x = anchor.block_x,
         .block_y = anchor.block_y,
         .strategy = anchor.strategy,
+        .coefficient_count = batch.coefficient_count,
       };
       for (size_t channel = 0; channel < 3; ++channel) {
         const size_t offset = batch.coefficient_offset +
           channel * channel_stride +
           anchor.index_in_batch * batch.coefficient_count;
-        transform.coefficients[channel] = std::span<const int32_t>(
-          quantized_readback_.data() + offset,
-          batch.coefficient_count);
+        transform.coefficient_offsets[channel] = offset;
       }
-      final_transform_views_.push_back(transform);
+      final_transform_layouts_.push_back(transform);
     }
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory(
@@ -1826,26 +1855,26 @@ Status MetalPreparedAqEvaluation::Reconfigure(
       }
     }
 
-    std::vector<vardct_frame_internal::QuantizedAcTransformView>
-      transform_views;
-    transform_views.reserve(row_major_anchors.size());
+    std::vector<vardct_frame_internal::QuantizedAcTransformLayout>
+      transform_layouts;
+    transform_layouts.reserve(row_major_anchors.size());
     for (const AqAnchor& anchor : row_major_anchors) {
       const AqStrategyBatch& batch = batches[anchor.batch_index];
       const size_t channel_stride =
         batch.anchor_count * batch.coefficient_count;
-      vardct_frame_internal::QuantizedAcTransformView transform{
+      vardct_frame_internal::QuantizedAcTransformLayout transform{
         .block_x = anchor.block_x,
         .block_y = anchor.block_y,
         .strategy = anchor.strategy,
+        .coefficient_count = batch.coefficient_count,
       };
       for (size_t channel = 0; channel < 3; ++channel) {
         const size_t offset = batch.coefficient_offset +
           channel * channel_stride +
           anchor.index_in_batch * batch.coefficient_count;
-        transform.coefficients[channel] = std::span<const int32_t>(
-          quantized_readback_.data() + offset, batch.coefficient_count);
+        transform.coefficient_offsets[channel] = offset;
       }
-      transform_views.push_back(transform);
+      transform_layouts.push_back(transform);
     }
 
     status = UploadPlane(
@@ -1892,7 +1921,7 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     block_reduction_params_ = block_reduction_params;
     maximum_error_reduction_params_ = maximum_error_reduction_params;
     row_major_anchors_ = std::move(row_major_anchors);
-    final_transform_views_ = std::move(transform_views);
+    final_transform_layouts_ = std::move(transform_layouts);
     anchor_count_ = anchor_offset;
     final_cfl_params_.transform_count =
       static_cast<uint32_t>(anchor_count_);
@@ -2451,24 +2480,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       status = Quantizer::Create(resident_quantizer, &last_quantizer_);
     }
     if (status.ok()) {
-      status = backend_->CopyDeviceToHost(
-        *quantized_coefficients_.buffer, quantized_readback_.data(),
-        quantized_readback_.size() * sizeof(int32_t),
-        quantized_coefficients_.offset_bytes);
-    }
-    if (status.ok()) {
-      status = backend_->CopyDeviceToHost(
-        *quantized_dc_.buffer, quantized_dc_readback_.data(),
-        quantized_dc_readback_.size() * sizeof(int32_t),
-        quantized_dc_.offset_bytes);
-    }
-    if (status.ok()) status = ReadbackRawQuant();
-    if (status.ok()) {
       candidate_readback_stats.quantizer_bytes = sizeof(resident_quantizer);
-      candidate_readback_stats.frame_bytes =
-        quantized_readback_.size() * sizeof(int32_t) +
-        quantized_dc_readback_.size() * sizeof(int32_t) +
-        last_raw_quant_.size() * sizeof(int32_t);
+      candidate_readback_stats.mapped_frame_bytes =
+        (coefficient_value_count_ + 4 * block_count_) * sizeof(int32_t);
     }
   }
   if (reconstruction_requested) {
@@ -2518,17 +2532,6 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     return Status::Internal(
       "Resident Butteraugli block-distance readback is invalid");
   }
-  constexpr int32_t kQuantizedPoison =
-    static_cast<int32_t>(0x81234567u);
-  if (output.frame != nullptr &&
-      (std::ranges::find(quantized_readback_, kQuantizedPoison) !=
-         quantized_readback_.end() ||
-       std::ranges::find(quantized_dc_readback_, kQuantizedPoison) !=
-         quantized_dc_readback_.end())) {
-    Invalidate();
-    return Status::Internal(
-      "Resident Butteraugli frame readback contains poison");
-  }
   if (reconstruction_requested &&
       !std::ranges::all_of(
         linear_readback_, [](const std::vector<float>& plane) {
@@ -2540,10 +2543,37 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       "Resident Butteraugli reconstruction readback is invalid");
   }
   if (output.frame != nullptr) {
-    status = AssembleFrameFromReadback(&candidate_frame);
+    uint64_t mapping_nanoseconds = 0;
+    uint64_t assembly_nanoseconds = 0;
+    status = AssembleFrameFromCompletedDeviceBuffers(
+      true, &candidate_frame,
+      profiling ? &mapping_nanoseconds : nullptr,
+      profiling ? &assembly_nanoseconds : nullptr);
     if (!status.ok()) {
       Invalidate();
       return status;
+    }
+    if (profiling) {
+      try {
+        candidate_profile.wall_stages.push_back({
+          .stage_id = "resident.frame_mapping",
+          .kind = gpu_profile_internal::GpuWallStageKind::kReadback,
+          .wall_nanoseconds = mapping_nanoseconds,
+        });
+        candidate_profile.wall_stages.push_back({
+          .stage_id = "resident.frame_assembly",
+          .kind = gpu_profile_internal::GpuWallStageKind::kHost,
+          .wall_nanoseconds = assembly_nanoseconds,
+        });
+      } catch (const std::bad_alloc&) {
+        Invalidate();
+        return Status::OutOfMemory(
+          "Unable to retain resident frame handoff profile");
+      } catch (const std::length_error&) {
+        Invalidate();
+        return Status::InvalidArgument(
+          "Resident frame handoff profile is too large");
+      }
     }
   }
 
@@ -2717,15 +2747,22 @@ MetalPreparedAqEvaluation::memory_stats() const noexcept {
 }
 
 Status MetalPreparedAqEvaluation::ReadbackRawQuant() {
-  const size_t row_bytes = block_extent_.width * sizeof(int32_t);
-  Status status = Status::Ok();
-  for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
-    status = backend_->CopyDeviceToHost(
-      *raw_quant_.buffer,
-      last_raw_quant_.data() + y * block_extent_.width,
-      row_bytes,
-      raw_quant_.offset_bytes + y * raw_quant_.row_stride * sizeof(int32_t));
+  try {
+    last_raw_quant_.resize(block_count_);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate AQ raw-quant readback");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "AQ raw-quant readback is too large");
   }
+  if (raw_quant_.row_stride != block_extent_.width) {
+    return Status::Internal(
+      "Metal AQ raw-quant plane is not contiguous");
+  }
+  const Status status = backend_->CopyDeviceToHost(
+    *raw_quant_.buffer, last_raw_quant_.data(),
+    block_count_ * sizeof(int32_t), raw_quant_.offset_bytes);
   if (!status.ok()) return status;
   if (!std::ranges::all_of(last_raw_quant_, [](int32_t raw_quant) {
         return raw_quant >= 1 && raw_quant <= kMaxRawQuant;
@@ -2752,7 +2789,10 @@ Status MetalPreparedAqEvaluation::ReadbackColorCorrelation() {
   return status;
 }
 
-Status MetalPreparedAqEvaluation::AssembleFrameFromReadback(
+Status MetalPreparedAqEvaluation::AssembleFrame(
+    ConstPlaneI32View raw_quant,
+    ConstImage3I32View quantized_dc,
+    std::span<const int32_t> quantized_ac,
     VarDctEncoderFrame *frame) const {
 
   if (frame == nullptr) {
@@ -2762,6 +2802,28 @@ Status MetalPreparedAqEvaluation::AssembleFrameFromReadback(
   Status status = FrameGeometry::Create(source_extent_, &geometry);
   if (!status.ok())
     return status;
+  return vardct_frame_internal::AssembleVarDctEncoderFrame(
+      {
+          .geometry = geometry,
+          .strategies = &strategies_host_,
+          .raw_quant_field = raw_quant,
+          .quantizer = &last_quantizer_,
+          .y_to_x = {last_y_to_x_.data(), tile_extent_, tile_extent_.width},
+          .y_to_b = {last_y_to_b_.data(), tile_extent_, tile_extent_.width},
+          .epf_sharpness = {epf_sharpness_host_.data(), block_extent_,
+                            block_extent_.width},
+          .profile = options_.profile,
+          .quantized_dc = quantized_dc,
+          .quantized_ac = quantized_ac,
+          .transforms = final_transform_layouts_,
+          .reject_unwritten_coefficients = true,
+      },
+      frame);
+}
+
+Status MetalPreparedAqEvaluation::AssembleFrameFromReadback(
+    VarDctEncoderFrame *frame) const {
+
   const ConstImage3I32View quantized_dc{{
       ConstPlaneI32View{quantized_dc_readback_.data(), block_extent_,
                         block_extent_.width},
@@ -2770,22 +2832,67 @@ Status MetalPreparedAqEvaluation::AssembleFrameFromReadback(
       ConstPlaneI32View{quantized_dc_readback_.data() + 2 * block_count_,
                         block_extent_, block_extent_.width},
   }};
-  return vardct_frame_internal::AssembleVarDctEncoderFrame(
-      {
-          .geometry = geometry,
-          .strategies = &strategies_host_,
-          .raw_quant_field = {last_raw_quant_.data(), block_extent_,
-                              block_extent_.width},
-          .quantizer = &last_quantizer_,
-          .y_to_x = {last_y_to_x_.data(), tile_extent_, tile_extent_.width},
-          .y_to_b = {last_y_to_b_.data(), tile_extent_, tile_extent_.width},
-          .epf_sharpness = {epf_sharpness_host_.data(), block_extent_,
-                            block_extent_.width},
-          .profile = options_.profile,
-          .quantized_dc = quantized_dc,
-          .transforms = final_transform_views_,
-      },
-      frame);
+  return AssembleFrame(
+    {last_raw_quant_.data(), block_extent_, block_extent_.width},
+    quantized_dc, quantized_readback_, frame);
+}
+
+Status MetalPreparedAqEvaluation::AssembleFrameFromCompletedDeviceBuffers(
+    bool raw_quant_is_device_resident,
+    VarDctEncoderFrame *frame,
+    uint64_t *mapping_nanoseconds,
+    uint64_t *assembly_nanoseconds) const {
+
+  const bool profile = mapping_nanoseconds != nullptr ||
+    assembly_nanoseconds != nullptr;
+  const ProfileClock::time_point mapping_begin = profile
+    ? ProfileClock::now() : ProfileClock::time_point{};
+  std::span<const int32_t> quantized_ac;
+  std::span<const int32_t> quantized_dc_storage;
+  std::span<const int32_t> raw_quant_storage;
+  Status status = BorrowCompletedContiguousI32(
+    *backend_, quantized_coefficients_, &quantized_ac);
+  if (status.ok()) {
+    status = BorrowCompletedContiguousI32(
+      *backend_, quantized_dc_, &quantized_dc_storage);
+  }
+  if (status.ok() && raw_quant_is_device_resident) {
+    status = BorrowCompletedContiguousI32(
+      *backend_, raw_quant_, &raw_quant_storage);
+  }
+  if (!status.ok()) return status;
+  if (quantized_ac.size() != coefficient_value_count_ ||
+      quantized_dc_storage.size() != 3 * block_count_ ||
+      (raw_quant_is_device_resident &&
+       raw_quant_storage.size() != block_count_) ||
+      (!raw_quant_is_device_resident &&
+       last_raw_quant_.size() != block_count_)) {
+    return Status::Internal(
+      "Completed Metal frame buffers changed size");
+  }
+  if (mapping_nanoseconds != nullptr) {
+    *mapping_nanoseconds = ElapsedNanoseconds(mapping_begin);
+  }
+
+  const int32_t* raw_quant_data = raw_quant_is_device_resident
+    ? raw_quant_storage.data() : last_raw_quant_.data();
+  const ConstImage3I32View quantized_dc{{
+      ConstPlaneI32View{quantized_dc_storage.data(), block_extent_,
+                        block_extent_.width},
+      ConstPlaneI32View{quantized_dc_storage.data() + block_count_,
+                        block_extent_, block_extent_.width},
+      ConstPlaneI32View{quantized_dc_storage.data() + 2 * block_count_,
+                        block_extent_, block_extent_.width},
+  }};
+  const ProfileClock::time_point assembly_begin = profile
+    ? ProfileClock::now() : ProfileClock::time_point{};
+  status = AssembleFrame(
+    {raw_quant_data, block_extent_, block_extent_.width},
+    quantized_dc, quantized_ac, frame);
+  if (assembly_nanoseconds != nullptr) {
+    *assembly_nanoseconds = ElapsedNanoseconds(assembly_begin);
+  }
+  return status;
 }
 
 Status MetalPreparedAqEvaluation::SubmitEvaluation(
@@ -3034,34 +3141,12 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   VarDctEncoderFrame final_frame;
   const ProfileClock::time_point final_begin = active_profile_ != nullptr
     ? ProfileClock::now() : ProfileClock::time_point{};
-  if (frame_requested) {
-    if (!exact_coefficients_) {
-      status = backend_->CopyDeviceToHost(
-        *quantized_coefficients_.buffer,
-        quantized_readback_.data(),
-        quantized_readback_.size() * sizeof(int32_t),
-        quantized_coefficients_.offset_bytes);
-      if (status.ok()) {
-        status = backend_->CopyDeviceToHost(
-          *quantized_dc_.buffer,
-          quantized_dc_readback_.data(),
-          quantized_dc_readback_.size() * sizeof(int32_t),
-          quantized_dc_.offset_bytes);
-      }
-      if (status.ok() && coefficient_decision_mode_ ==
-            AcCoefficientDecisionMode::kAdjustedSharedQuant) {
-        status = ReadbackRawQuant();
-      }
-      if (status.ok()) {
-        candidate_readback_stats.frame_bytes =
-          quantized_readback_.size() * sizeof(int32_t) +
-          quantized_dc_readback_.size() * sizeof(int32_t) +
-          (coefficient_decision_mode_ ==
-               AcCoefficientDecisionMode::kAdjustedSharedQuant
-             ? last_raw_quant_.size() * sizeof(int32_t)
-             : 0);
-      }
-    }
+  if (frame_requested && !exact_coefficients_) {
+    candidate_readback_stats.mapped_frame_bytes =
+      (coefficient_value_count_ + 3 * block_count_ +
+       (coefficient_decision_mode_ ==
+          AcCoefficientDecisionMode::kAdjustedSharedQuant
+          ? block_count_ : 0)) * sizeof(int32_t);
   }
   if (reconstruction_requested) {
     const size_t linear_row_bytes = source_extent_.width * sizeof(float);
@@ -3095,17 +3180,14 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   }
 
   if (frame_requested) {
-    constexpr int32_t kQuantizedPoison =
-      static_cast<int32_t>(0x81234567u);
-    if (std::ranges::find(quantized_readback_, kQuantizedPoison) !=
-          quantized_readback_.end() ||
-        std::ranges::find(quantized_dc_readback_, kQuantizedPoison) !=
-          quantized_dc_readback_.end()) {
-      Invalidate();
-      return Status::Internal(
-        "Metal AQ final frame readback contains poison");
+    if (exact_coefficients_) {
+      status = AssembleFrameFromReadback(&final_frame);
+    } else {
+      status = AssembleFrameFromCompletedDeviceBuffers(
+        coefficient_decision_mode_ ==
+          AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        &final_frame);
     }
-    status = AssembleFrameFromReadback(&final_frame);
     if (!status.ok()) {
       Invalidate();
       return status;
@@ -3321,7 +3403,8 @@ Status MetalPreparedAqEvaluation::GetReadbackStats(
 }
 
 Status MetalPreparedAqEvaluation::ValidatePreparation(
-    const AqEvaluationPreparation &preparation) const {
+    const AqEvaluationPreparation& preparation,
+    bool host_images_are_finite) const {
 
   if (!preparation.original_linear_rgb.valid() ||
       !preparation.coding_opsin.valid() ||
@@ -3432,13 +3515,19 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
       }
     }
   }
-  status = ValidateFiniteImage(preparation.original_linear_rgb,
-                               "Prepared AQ original");
-  if (!status.ok())
-    return status;
-  if (resident_coding_specified) return Status::Ok();
-  return ValidateFiniteImage(preparation.coding_opsin,
-                             "Prepared AQ coding opsin");
+  if (!host_images_are_finite) {
+    status = ValidateFiniteImage(preparation.original_linear_rgb,
+                                 "Prepared AQ original");
+    if (!status.ok())
+      return status;
+    if (!resident_coding_specified) {
+      status = ValidateFiniteImage(preparation.coding_opsin,
+                                   "Prepared AQ coding opsin");
+      if (!status.ok())
+        return status;
+    }
+  }
+  return Status::Ok();
 }
 
 Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
@@ -3660,10 +3749,19 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
   }
   if (status.ok() && !frame_only_resident_quantizer_ &&
       !resident_quantization_active_) {
-    for (size_t y = 0; y < block_extent_.height; ++y) {
-      std::copy_n(
-        input.raw_quant_field.Row(y), block_extent_.width,
-        last_raw_quant_.data() + y * block_extent_.width);
+    try {
+      last_raw_quant_.resize(block_count_);
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        std::copy_n(
+          input.raw_quant_field.Row(y), block_extent_.width,
+          last_raw_quant_.data() + y * block_extent_.width);
+      }
+    } catch (const std::bad_alloc&) {
+      status = Status::OutOfMemory(
+        "Unable to allocate AQ raw-quant host staging");
+    } catch (const std::length_error&) {
+      status = Status::InvalidArgument(
+        "AQ raw-quant host staging is too large");
     }
   }
   if (status.ok() && !resident_initial_cfl_ &&
@@ -3847,12 +3945,15 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
 
 Status MetalPreparedAqEvaluation::PrepareExactCoefficientStaging(
     AqEvaluationInput input) {
-  if (input.exact_coefficients == nullptr ||
-      input.exact_reconstructed_linear_rgb.valid()) {
+  if (input.exact_coefficients == nullptr) {
     return Status::Ok();
   }
   try {
-    exact_reconstruction_coefficients_.resize(coefficient_value_count_);
+    quantized_readback_.resize(coefficient_value_count_);
+    quantized_dc_readback_.resize(3 * block_count_);
+    if (!input.exact_reconstructed_linear_rgb.valid()) {
+      exact_reconstruction_coefficients_.resize(coefficient_value_count_);
+    }
     return Status::Ok();
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory(
@@ -4355,7 +4456,7 @@ Status MetalBackend::PrepareAqEvaluation(
   std::unique_ptr<PreparedAqEvaluation>* prepared) {
 
   return PrepareAqEvaluationImpl(
-    preparation, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    preparation, false, gpu_profile_internal::GpuProfilingMode::kDisabled,
     prepared, nullptr);
 }
 
@@ -4370,11 +4471,35 @@ Status MetalBackend::PrepareAqEvaluationProfiled(
       "Profiled AQ preparation mode is disabled");
   }
   return PrepareAqEvaluationImpl(
-    preparation, mode, prepared, profile);
+    preparation, false, mode, prepared, profile);
+}
+
+Status MetalBackend::PrepareValidatedAqEvaluation(
+  const AqEvaluationPreparation& preparation,
+  std::unique_ptr<PreparedAqEvaluation>* prepared) {
+
+  return PrepareAqEvaluationImpl(
+    preparation, true, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    prepared, nullptr);
+}
+
+Status MetalBackend::PrepareValidatedAqEvaluationProfiled(
+  const AqEvaluationPreparation& preparation,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<PreparedAqEvaluation>* prepared,
+  gpu_profile_internal::GpuExecutionProfile* profile) {
+
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    return Status::InvalidArgument(
+      "Profiled validated AQ preparation mode is disabled");
+  }
+  return PrepareAqEvaluationImpl(
+    preparation, true, mode, prepared, profile);
 }
 
 Status MetalBackend::PrepareAqEvaluationImpl(
   const AqEvaluationPreparation& preparation,
+  bool host_images_are_finite,
   gpu_profile_internal::GpuProfilingMode mode,
   std::unique_ptr<PreparedAqEvaluation>* prepared,
   gpu_profile_internal::GpuExecutionProfile* profile) {
@@ -4390,7 +4515,8 @@ Status MetalBackend::PrepareAqEvaluationImpl(
     auto result = std::make_unique<MetalPreparedAqEvaluation>(*this);
     gpu_profile_internal::GpuExecutionProfile candidate_profile;
     Status status = result->Prepare(
-      preparation, mode, profiling ? &candidate_profile : nullptr);
+      preparation, host_images_are_finite, mode,
+      profiling ? &candidate_profile : nullptr);
     if (!status.ok()) {
       return status;
     }

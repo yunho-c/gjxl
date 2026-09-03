@@ -423,7 +423,8 @@ bool CheckAdaptiveBlockContextSelection() {
       balanced_profile.selected_block_context_candidate_index != 0 ||
       balanced_profile.selected_block_context_count == 0 ||
       balanced_profile.coefficient_tokenization_pass_count != 1 ||
-      balanced_profile.coefficient_context_materialization_count != 1) {
+      balanced_profile.coefficient_context_materialization_count != 0 ||
+      balanced_profile.coefficient_materialized_token_count != 0) {
     std::cerr << "Single block-context selection failed: "
               << status.message() << ", bytes=" << balanced_output.size()
               << ", contexts="
@@ -462,11 +463,13 @@ bool CheckEntropyBehaviorPlumbing() {
       behavior == gjxl::VarDctEntropyBehavior::kMaximumCompression;
     if (!status.ok() || output.empty() ||
         profile.entropy_behavior != behavior ||
+        profile.coefficient_order_behavior !=
+          gjxl::VarDctCoefficientOrderBehavior::kFull ||
         profile.entropy_model_bits == 0 || profile.entropy_token_bits == 0 ||
         (!exhaustive &&
          profile.section_writing_work.candidate_measure_nanoseconds != 0) ||
         profile.coefficient_context_materialization_count !=
-          (exhaustive ? profile.coefficient_tokenization_pass_count : 1)) {
+          (exhaustive ? profile.coefficient_tokenization_pass_count : 0)) {
       std::cerr << "Entropy behavior plumbing failed: "
                 << status.message() << '\n';
       return false;
@@ -482,6 +485,61 @@ bool CheckEntropyBehaviorPlumbing() {
         &output).code() != gjxl::StatusCode::kInvalidArgument ||
       output != sentinel) {
     std::cerr << "Invalid entropy behavior was not rejected atomically\n";
+    return false;
+  }
+  if (gjxl::EncodeVarDctCodestream(
+        frame,
+        {.coefficient_order_behavior =
+           static_cast<gjxl::VarDctCoefficientOrderBehavior>(99)},
+        &output).code() != gjxl::StatusCode::kInvalidArgument ||
+      output != sentinel) {
+    std::cerr << "Invalid coefficient-order behavior was not rejected "
+                 "atomically\n";
+    return false;
+  }
+
+  std::vector<uint8_t> full_order;
+  std::vector<uint8_t> sampled_order_first;
+  std::vector<uint8_t> sampled_order_second;
+  gjxl::codestream_internal::VarDctCodestreamProfile sampled_profile;
+  if (!gjxl::EncodeVarDctCodestream(frame, {}, &full_order).ok() ||
+      !gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+        frame,
+        {.coefficient_order_behavior =
+           gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled},
+        &sampled_order_first, &sampled_profile).ok() ||
+      !gjxl::EncodeVarDctCodestream(
+        frame,
+        {.coefficient_order_behavior =
+           gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled},
+        &sampled_order_second).ok() ||
+      sampled_order_first != sampled_order_second ||
+      sampled_order_first == full_order ||
+      sampled_profile.coefficient_order_behavior !=
+        gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled) {
+    std::cerr << "Effort-7 coefficient-order sampling failed\n";
+    return false;
+  }
+
+  std::vector<uint8_t> maximum_full;
+  std::vector<uint8_t> maximum_sampled;
+  gjxl::codestream_internal::VarDctCodestreamProfile maximum_profile;
+  if (!gjxl::EncodeVarDctCodestream(
+        frame,
+        {.entropy_behavior =
+           gjxl::VarDctEntropyBehavior::kMaximumCompression},
+        &maximum_full).ok() ||
+      !gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+        frame,
+        {.entropy_behavior =
+           gjxl::VarDctEntropyBehavior::kMaximumCompression,
+         .coefficient_order_behavior =
+           gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled},
+        &maximum_sampled, &maximum_profile).ok() ||
+      maximum_sampled != maximum_full ||
+      maximum_profile.coefficient_order_behavior !=
+        gjxl::VarDctCoefficientOrderBehavior::kFull) {
+    std::cerr << "Maximum compression did not force full coefficient orders\n";
     return false;
   }
   return true;

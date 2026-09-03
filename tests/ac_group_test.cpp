@@ -21,6 +21,7 @@
 #include "codec/reconstruction.h"
 #include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
+#include "codestream/encoder.h"
 
 namespace {
 
@@ -735,10 +736,22 @@ bool CheckFrameCoefficientOrderSelection() {
   gjxl::SimpleCoefficientOrders small_orders;
   gjxl::SimpleCoefficientOrders first;
   gjxl::SimpleCoefficientOrders second;
+  gjxl::SimpleCoefficientOrders sampled_first;
+  gjxl::SimpleCoefficientOrders sampled_second;
   if (!gjxl::ComputeSimpleCoefficientOrders(small, &small_orders).ok() ||
       !gjxl::ComputeSimpleCoefficientOrders(wide, &first).ok() ||
       !gjxl::ComputeSimpleCoefficientOrders(wide, &second).ok() ||
+      !gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+        wide,
+        gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled,
+        &sampled_first).ok() ||
+      !gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+        wide,
+        gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled,
+        &sampled_second).ok() ||
       small_orders.used_order_mask != 0 || first != second ||
+      sampled_first != sampled_second || sampled_first == first ||
+      sampled_first.used_order_mask != 1 ||
       first.used_order_mask != 1 ||
       !gjxl::ValidateSimpleCoefficientOrders(first).ok()) {
     std::cerr << "Frame coefficient-order derivation failed, mask="
@@ -822,6 +835,11 @@ bool CheckFrameTokenTemplateReuse() {
   };
   const std::array<gjxl::SimpleCoefficientOrders, 2> orders = {
     gjxl::SimpleCoefficientOrders{}, custom_orders};
+  gjxl::codestream_internal::SimpleAcNaturalOrders natural_orders;
+  if (!gjxl::codestream_internal::PrepareSimpleAcNaturalOrders(
+        &natural_orders).ok()) {
+    return false;
+  }
   for (const gjxl::SimpleCoefficientOrders& order : orders) {
     std::vector<gjxl::SimpleAcGroupTokenTemplate> templates;
     if (!gjxl::BuildSimpleAcGroupTokenTemplates(frame, order, &templates).ok() ||
@@ -839,6 +857,29 @@ bool CheckFrameTokenTemplateReuse() {
           materialized != direct) {
         std::cerr << "Reused AC token template differs from direct tokens\n";
         return false;
+      }
+      gjxl::codestream_internal::SimpleAcTokenizationScratch scratch;
+      for (size_t group_index = 0; group_index < direct.size();
+           ++group_index) {
+        gjxl::codestream_internal::SimpleAcGroupTokenData one_pass;
+        if (!gjxl::codestream_internal::TokenizeSimpleAcGroupForEncoder(
+              frame, order, natural_orders, map, group_index, true,
+              &scratch, &one_pass).ok() ||
+            one_pass.values.size() != direct[group_index].tokens.size() ||
+            one_pass.contexts.size() != direct[group_index].tokens.size()) {
+          std::cerr << "One-pass AC token dimensions differ\n";
+          return false;
+        }
+        for (size_t token_index = 0;
+             token_index < direct[group_index].tokens.size(); ++token_index) {
+          const gjxl::EntropyToken expected =
+            direct[group_index].tokens[token_index];
+          if (one_pass.values[token_index] != expected.value ||
+              one_pass.contexts[token_index] != expected.context) {
+            std::cerr << "One-pass AC token differs from template path\n";
+            return false;
+          }
+        }
       }
     }
 

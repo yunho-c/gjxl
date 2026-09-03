@@ -61,6 +61,15 @@ struct SimpleAcMetadataInput {
   const VarDctEncoderFrame& frame,
   std::vector<SimpleDcGroupTokenStreams>* groups);
 
+namespace codestream_internal {
+
+/// Serializer-only entry point for an already validated frame.
+[[nodiscard]] Status TokenizeSimpleDcGroupsForEncoder(
+  const VarDctEncoderFrame& frame,
+  std::vector<SimpleDcGroupTokenStreams>* groups);
+
+}  // namespace codestream_internal
+
 /// Writes extra_dc_precision=0, the global tree, default WP, and no transforms.
 [[nodiscard]] Status WriteSimpleDcGroupModularHeader(BitWriter* writer);
 

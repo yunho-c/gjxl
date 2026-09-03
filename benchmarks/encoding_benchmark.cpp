@@ -1133,7 +1133,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 14,\n"
+           << "  \"schema_version\": 15,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
@@ -1231,9 +1231,13 @@ void WriteRawWorkflowSamples(
                << sample.selected_block_context_count
                << ", \"qf_thresholds\": "
                << sample.selected_block_context_qf_threshold_count << "}"
-               << ", \"ac_tokenization\": {\"template_count\": "
+               << ", \"ac_tokenization\": {\"path\": \""
+               << (sample.entropy_behavior ==
+                     gjxl::VarDctEntropyBehavior::kMaximumCompression
+                     ? "template" : "direct")
+               << "\", \"pass_count\": "
                << sample.coefficient_tokenization_pass_count
-               << ", \"template_tokens\": "
+               << ", \"tokens\": "
                << sample.coefficient_token_count
                << ", \"context_materialization_count\": "
                << sample.coefficient_context_materialization_count

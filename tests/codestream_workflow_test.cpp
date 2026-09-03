@@ -99,6 +99,50 @@ bool CheckQuantizationMatrixScaleStats() {
     std::cerr << "Matrix-scale pixel statistics are incorrect\n";
     return false;
   }
+  gjxl::codestream_internal::QuantizationMatrixScaleStats finite_stats;
+  status = gjxl::codestream_internal::
+    ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+      image.View(), &finite_stats);
+  if (!status.ok() || finite_stats != stats) {
+    std::cerr << "Finite matrix-scale statistics differ from checked path\n";
+    return false;
+  }
+
+  ImageStorage strided;
+  FillImage(&strided);
+  status = gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
+    strided.View(), &stats);
+  if (!status.ok() ||
+      !gjxl::codestream_internal::
+        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+          strided.View(), &finite_stats).ok() ||
+      finite_stats != stats) {
+    std::cerr << "Strided finite matrix-scale statistics differ\n";
+    return false;
+  }
+
+  ArbitraryImageStorage vector_tail({18, 7});
+  for (size_t y = 0; y < vector_tail.extent.height; ++y) {
+    for (size_t x = 0; x < vector_tail.extent.width; ++x) {
+      const size_t index = y * vector_tail.extent.width + x;
+      vector_tail.plane[0][index] = 0.01f * static_cast<float>(
+        static_cast<int>((3 * x + 5 * y) % 19) - 9);
+      vector_tail.plane[1][index] = 0.02f * static_cast<float>(
+        static_cast<int>((7 * x + 2 * y) % 17) - 8);
+      vector_tail.plane[2][index] = 0.03f * static_cast<float>(
+        static_cast<int>((5 * x + 11 * y) % 23) - 11);
+    }
+  }
+  status = gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
+    vector_tail.View(), &stats);
+  if (!status.ok() ||
+      !gjxl::codestream_internal::
+        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+          vector_tail.View(), &finite_stats).ok() ||
+      finite_stats != stats) {
+    std::cerr << "Vector-tail finite matrix-scale statistics differ\n";
+    return false;
+  }
 
   ArbitraryImageStorage single_pixel({1, 1});
   single_pixel.plane[0][0] = 0.2f;
@@ -107,8 +151,12 @@ bool CheckQuantizationMatrixScaleStats() {
   status = gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
     single_pixel.View(), &stats);
   if (!status.ok() ||
+      !gjxl::codestream_internal::
+        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+          single_pixel.View(), &finite_stats).ok() ||
       stats !=
-        gjxl::codestream_internal::QuantizationMatrixScaleStats{}) {
+        gjxl::codestream_internal::QuantizationMatrixScaleStats{} ||
+      finite_stats != stats) {
     std::cerr << "Degenerate matrix-scale statistics are incorrect\n";
     return false;
   }
@@ -116,6 +164,7 @@ bool CheckQuantizationMatrixScaleStats() {
   const gjxl::codestream_internal::QuantizationMatrixScaleStats sentinel{
     .x_edge = 1.0f, .b_edge = 2.0f, .exposed_blue = 3.0f};
   stats = sentinel;
+  finite_stats = sentinel;
   image.plane[1][1] = std::numeric_limits<float>::quiet_NaN();
   ArbitraryImageStorage overflowing({2, 2});
   overflowing.plane[0] = {
@@ -133,6 +182,14 @@ bool CheckQuantizationMatrixScaleStats() {
       stats != sentinel ||
       gjxl::codestream_internal::ComputeQuantizationMatrixScaleStats(
         single_pixel.View(), nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      gjxl::codestream_internal::
+        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+          {}, &finite_stats).code() != gjxl::StatusCode::kInvalidArgument ||
+      finite_stats != sentinel ||
+      gjxl::codestream_internal::
+        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+          single_pixel.View(), nullptr).code() !=
         gjxl::StatusCode::kInvalidArgument) {
     std::cerr << "Invalid matrix-scale statistics changed output\n";
     return false;
@@ -231,6 +288,58 @@ bool CheckQuantizationMatrixScaleSelection() {
         {}, VarDctRateControlMode::kButteraugliTarget, 1.0f, nullptr).code() !=
         gjxl::StatusCode::kInvalidArgument) {
     std::cerr << "Invalid matrix-scale selection changed output\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckQuantizationMatrixScaleStatsPolicy() {
+  using gjxl::VarDctCompressionMode;
+  using gjxl::VarDctDensityMode;
+  using gjxl::VarDctEncodingOptions;
+  using gjxl::VarDctRateControlMode;
+  using gjxl::codestream_internal::
+    ShouldComputeQuantizationMatrixScaleStats;
+
+  for (int32_t effort = 1; effort <= 6; ++effort) {
+    if (ShouldComputeQuantizationMatrixScaleStats({.effort = effort})) {
+      std::cerr << "Low effort " << effort
+                << " retained matrix-scale pixel statistics\n";
+      return false;
+    }
+  }
+  for (int32_t effort = 7; effort <= 10; ++effort) {
+    if (!ShouldComputeQuantizationMatrixScaleStats({.effort = effort})) {
+      std::cerr << "Effort " << effort
+                << " skipped matrix-scale pixel statistics\n";
+      return false;
+    }
+  }
+
+  const VarDctEncodingOptions high_density{
+    .effort = 1,
+    .density_mode = VarDctDensityMode::kHighDensity,
+  };
+  const VarDctEncodingOptions maximum_error{
+    .effort = 10,
+    .rate_control_mode = VarDctRateControlMode::kMaximumError,
+    .maximum_error = {0.1f, 0.1f, 0.1f},
+  };
+  const VarDctEncodingOptions maximum_compression_low_effort{
+    .effort = 1,
+    .compression_mode = VarDctCompressionMode::kMaximumCompression,
+  };
+  const VarDctEncodingOptions maximum_compression_effort_7{
+    .effort = 7,
+    .compression_mode = VarDctCompressionMode::kMaximumCompression,
+  };
+  if (!ShouldComputeQuantizationMatrixScaleStats(high_density) ||
+      ShouldComputeQuantizationMatrixScaleStats(maximum_error) ||
+      ShouldComputeQuantizationMatrixScaleStats(
+        maximum_compression_low_effort) ||
+      !ShouldComputeQuantizationMatrixScaleStats(
+        maximum_compression_effort_7)) {
+    std::cerr << "Matrix-scale statistics policy overrides are incorrect\n";
     return false;
   }
   return true;
@@ -523,10 +632,29 @@ bool CheckEffortPolicy() {
 }
 
 bool CheckCompressionPolicy() {
+  using gjxl::VarDctCoefficientOrderBehavior;
   using gjxl::VarDctCompressionMode;
   using gjxl::VarDctDensityMode;
   using gjxl::VarDctEntropyBehavior;
   using gjxl::codestream_internal::ResolveEntropyBehavior;
+  using gjxl::codestream_internal::ResolveCoefficientOrderBehavior;
+
+  if (ResolveCoefficientOrderBehavior({.effort = 7}) !=
+        VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled ||
+      ResolveCoefficientOrderBehavior({.effort = 8}) !=
+        VarDctCoefficientOrderBehavior::kFull ||
+      ResolveCoefficientOrderBehavior(
+        {.effort = 7,
+         .density_mode = VarDctDensityMode::kHighDensity}) !=
+        VarDctCoefficientOrderBehavior::kFull ||
+      ResolveCoefficientOrderBehavior(
+        {.effort = 7,
+         .compression_mode =
+           VarDctCompressionMode::kMaximumCompression}) !=
+        VarDctCoefficientOrderBehavior::kFull) {
+    std::cerr << "Coefficient-order effort resolution failed\n";
+    return false;
+  }
 
   for (const int32_t effort : {1, 7, 8}) {
     if (ResolveEntropyBehavior({.effort = effort}) !=
@@ -1116,6 +1244,7 @@ bool CheckSingleAttemptTiming() {
 int main() {
   if (!CheckQuantizationMatrixScaleStats() ||
       !CheckQuantizationMatrixScaleSelection() ||
+      !CheckQuantizationMatrixScaleStatsPolicy() ||
       !CheckDeterministicWorkflow() ||
       !CheckCpuThreadBudget() ||
       !CheckEffortPolicy() ||

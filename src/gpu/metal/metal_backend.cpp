@@ -763,6 +763,30 @@ Status MetalBackend::CopyDeviceToHost(
     return Status::InvalidArgument(
       "Host destination pointer is null");
   }
+  std::span<const std::byte> source;
+  Status status = BorrowCompletedReadOnly(
+    src, size_bytes, src_offset_bytes, &source);
+  if (!status.ok()) {
+    return status;
+  }
+  if (source.empty()) {
+    return Status::Ok();
+  }
+  std::memcpy(dst, source.data(), source.size());
+  return Status::Ok();
+}
+
+Status MetalBackend::BorrowCompletedReadOnly(
+  const DeviceBuffer& src,
+  size_t size_bytes,
+  size_t src_offset_bytes,
+  std::span<const std::byte>* out) const {
+
+  if (out == nullptr) {
+    return Status::InvalidArgument(
+      "Mapped Metal range output is null");
+  }
+  *out = {};
   const MetalBuffer* metal_src = AsMetalBuffer(src);
   if (metal_src == nullptr) {
     return Status::InvalidArgument(
@@ -780,7 +804,7 @@ Status MetalBackend::CopyDeviceToHost(
 
   const auto* source =
     static_cast<const std::byte*>(metal_src->contents()) + src_offset_bytes;
-  std::memcpy(dst, source, size_bytes);
+  *out = {source, size_bytes};
   return Status::Ok();
 }
 

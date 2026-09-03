@@ -3,6 +3,7 @@
 
 #include "codec/quantization_pipeline.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,11 @@
 
 namespace gjxl {
 namespace {
+
+uint64_t NextPreparedQuantizationPipelineGeneration() noexcept {
+  static std::atomic<uint64_t> next_generation{1};
+  return next_generation.fetch_add(1, std::memory_order_relaxed);
+}
 
 class CpuGaborishInverseProvider final
     : public quantization_pipeline_internal::GaborishInverseProvider {
@@ -80,6 +86,8 @@ Status ValidatePipelineInputs(
   ConstImage3FView opsin,
   CpuQuantizationPipelineOptions options,
   const CpuQuantizationPipelineOutput& output,
+  quantization_pipeline_internal::QuantizationPipelineMaterialization
+    materialization,
   Extent2D* block_extent) {
 
   if (!original_linear_rgb.valid() ||
@@ -112,22 +120,29 @@ Status ValidatePipelineInputs(
 
   *block_extent =
     BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
-  if (!output.initial_quantization.quant_field.valid() ||
-      !output.initial_quantization.strategy_mask.valid() ||
-      !output.initial_quantization.pixel_mask.valid() ||
-      !output.adaptive_quantization.quant_field.valid() ||
-      !output.adaptive_quantization.block_distance_map.valid() ||
-      !output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
+  if ((materialization.initial_quantization &&
+       (!output.initial_quantization.quant_field.valid() ||
+        !output.initial_quantization.strategy_mask.valid() ||
+        !output.initial_quantization.pixel_mask.valid() ||
+        output.initial_quantization.quant_field.extent != *block_extent ||
+        output.initial_quantization.strategy_mask.extent != *block_extent ||
+        output.initial_quantization.pixel_mask.extent != opsin.extent())) ||
+      (materialization.adaptive_quant_field &&
+       (!output.adaptive_quantization.quant_field.valid() ||
+        output.adaptive_quantization.quant_field.extent != *block_extent)) ||
+      (materialization.block_distance_map &&
+       (!output.adaptive_quantization.block_distance_map.valid() ||
+        output.adaptive_quantization.block_distance_map.extent !=
+          *block_extent)) ||
+      (materialization.reconstructed_linear_rgb &&
+       (!output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
+        output.adaptive_quantization.reconstructed_linear_rgb.extent() !=
+          original_linear_rgb.extent())) ||
       output.adaptive_quantization.frame == nullptr ||
       output.adaptive_quantization.score_history == nullptr ||
       (options.adaptive_quantization.control_mode ==
          AdaptiveQuantizationControlMode::kMaximumError &&
-       output.adaptive_quantization.maximum_error_result == nullptr) ||
-      output.initial_quantization.quant_field.extent != *block_extent ||
-      output.initial_quantization.strategy_mask.extent != *block_extent ||
-      output.initial_quantization.pixel_mask.extent != opsin.extent() ||
-      output.adaptive_quantization.quant_field.extent != *block_extent ||
-      output.adaptive_quantization.block_distance_map.extent != *block_extent) {
+       output.adaptive_quantization.maximum_error_result == nullptr)) {
     return Status::InvalidArgument(
       "Quantization pipeline outputs have invalid geometry");
   }
@@ -144,23 +159,32 @@ Status quantization_pipeline_internal::PrepareQuantizationPreprocessing(
   GaborishInverseProvider& gaborish_inverse,
   bool fast_initial_color_correlation) {
 
-  if (!prepared.coding_opsin.const_view().valid() ||
-      !prepared.preprocessed_opsin.const_view().valid() ||
+  if (!prepared.coding_opsin.valid() ||
       prepared.coding_opsin.extent() != prepared.padded_extent ||
-      prepared.preprocessed_opsin.extent() != prepared.padded_extent ||
       !prepared.profile.valid()) {
     return Status::InvalidArgument(
       "Prepared quantization preprocessing is invalid");
   }
+  try {
+    if (prepared.preprocessed_opsin.extent() != prepared.padded_extent) {
+      prepared.preprocessed_opsin.resize(prepared.padded_extent);
+    }
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate prepared quantization preprocessing");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Prepared quantization preprocessing dimensions are too large");
+  }
   Status status = Status::Ok();
   if (prepared.profile.loop_filter.gaborish) {
     status = gaborish_inverse.Apply(
-      prepared.coding_opsin.const_view(),
+      prepared.coding_opsin,
       prepared.profile.gaborish_inverse_multipliers,
       prepared.preprocessed_opsin.view());
   } else {
     CopyImage(
-      prepared.coding_opsin.const_view(), prepared.preprocessed_opsin.view());
+      prepared.coding_opsin, prepared.preprocessed_opsin.view());
   }
   if (!status.ok()) {
     return status;
@@ -187,7 +211,8 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
   CpuQuantizationPipelineOptions options,
   PreparedQuantizationPipeline* prepared,
   bool prepare_cpu_butteraugli,
-  bool prepare_cpu_preprocessing) {
+  bool prepare_cpu_preprocessing,
+  QuantizationPipelineInputProvenance input_provenance) {
 
   if (prepared == nullptr || !original_linear_rgb.valid() || !opsin.valid() ||
       !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
@@ -204,12 +229,24 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
 
   try {
     PreparedQuantizationPipeline candidate;
+    candidate.generation = NextPreparedQuantizationPipelineGeneration();
     candidate.source_extent = original_linear_rgb.extent();
     candidate.padded_extent = opsin.extent();
     candidate.block_extent =
       BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
     candidate.initial_quant_rescale = options.initial_quant_rescale;
     candidate.profile = options.adaptive_quantization.profile;
+    switch (input_provenance) {
+      case QuantizationPipelineInputProvenance::kUnvalidated:
+        break;
+      case QuantizationPipelineInputProvenance::kFiniteLinearRgbAndOpsin:
+        candidate.validated_original_linear_rgb = original_linear_rgb;
+        candidate.validated_coding_opsin = opsin;
+        break;
+      default:
+        return Status::InvalidArgument(
+          "Quantization pipeline input provenance is invalid");
+    }
     size_t block_count = 0;
     size_t pixel_count = 0;
     if (!candidate.block_extent.try_area(&block_count) ||
@@ -217,11 +254,10 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
       return Status::InvalidArgument(
         "Quantization pipeline dimensions are too large");
     }
-    candidate.coding_opsin.resize(candidate.padded_extent);
-    CopyImage(opsin, candidate.coding_opsin.view());
-    candidate.preprocessed_opsin.resize(candidate.padded_extent);
+    candidate.coding_opsin = opsin;
     Status status = Status::Ok();
     if (prepare_cpu_preprocessing) {
+      candidate.preprocessed_opsin.resize(candidate.padded_extent);
       CpuGaborishInverseProvider gaborish_inverse;
       status = PrepareQuantizationPreprocessing(
         candidate, gaborish_inverse, false);
@@ -239,9 +275,6 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
     candidate.initial_quant.resize(block_count);
     candidate.strategy_mask.resize(block_count);
     candidate.pixel_mask.resize(pixel_count);
-    candidate.final_quant.resize(block_count);
-    candidate.block_distance.resize(block_count);
-    candidate.reconstructed_linear.resize(candidate.source_extent);
     candidate.butteraugli_options = options.adaptive_quantization.butteraugli;
     if (prepare_cpu_butteraugli &&
         options.adaptive_quantization.control_mode ==
@@ -276,16 +309,19 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   bool initial_quantization_ready,
   QuantizationPipelineMaterialization materialization) {
 
+  const ConstImage3FView pipeline_opsin = initial_quantization_ready
+    ? prepared.coding_opsin
+    : prepared.preprocessed_opsin.const_view();
   Extent2D block_extent;
   Status status = ValidatePipelineInputs(
-    original_linear_rgb, prepared.preprocessed_opsin.const_view(), options,
-    output, &block_extent);
+    original_linear_rgb, pipeline_opsin, options, output, materialization,
+    &block_extent);
   if (!status.ok()) {
     return status;
   }
   if (!prepared.preprocessing_ready ||
       prepared.source_extent != original_linear_rgb.extent() ||
-      prepared.padded_extent != prepared.preprocessed_opsin.extent() ||
+      prepared.padded_extent != pipeline_opsin.extent() ||
       prepared.block_extent != block_extent ||
       prepared.profile != options.adaptive_quantization.profile ||
       prepared.initial_quant_rescale != options.initial_quant_rescale) {
@@ -304,7 +340,7 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     : 0.62f * control_target;
   if (!initial_quantization_ready) {
     status = ComputeInitialQuantField(
-      prepared.coding_opsin.const_view(),
+      prepared.coding_opsin,
       {
         .butteraugli_target = initial_quant_target,
         .rescale = options.initial_quant_rescale,
@@ -324,7 +360,7 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   }
 
   status = strategy_search.Find(
-    prepared.preprocessed_opsin.const_view(),
+    pipeline_opsin,
     {prepared.initial_quant.data(), block_extent, block_extent.width},
     {prepared.pixel_mask.data(), prepared.padded_extent,
      prepared.padded_extent.width},
@@ -338,24 +374,17 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   AdaptiveQuantizationOptions adaptive_options =
     options.adaptive_quantization;
   adaptive_options.butteraugli_target = control_target;
+  // Providers commit atomically, so the selected caller-owned output can be
+  // the staging destination without another prepared copy of every result.
   status = adaptive_quantization.Find(
     original_linear_rgb,
-    prepared.preprocessed_opsin.const_view(),
+    pipeline_opsin,
     prepared.strategies,
     {prepared.initial_quant.data(), block_extent, block_extent.width},
     {prepared.epf_sharpness.data(), block_extent, block_extent.width},
     adaptive_options,
     prepared.butteraugli_reference.get(),
-    {
-      .quant_field = {
-        prepared.final_quant.data(), block_extent, block_extent.width},
-      .block_distance_map = {
-        prepared.block_distance.data(), block_extent, block_extent.width},
-      .reconstructed_linear_rgb = prepared.reconstructed_linear.view(),
-      .frame = &prepared.frame,
-      .score_history = &prepared.score_history,
-      .maximum_error_result = &prepared.maximum_error_result,
-    });
+    output.adaptive_quantization);
   if (!status.ok()) {
     return status;
   }
@@ -367,26 +396,6 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
       prepared.strategy_mask, output.initial_quantization.strategy_mask);
     CopyContiguousPlane(
       prepared.pixel_mask, output.initial_quantization.pixel_mask);
-  }
-  if (materialization.adaptive_quant_field) {
-    CopyContiguousPlane(
-      prepared.final_quant, output.adaptive_quantization.quant_field);
-  }
-  if (materialization.block_distance_map) {
-    CopyContiguousPlane(
-      prepared.block_distance,
-      output.adaptive_quantization.block_distance_map);
-  }
-  if (materialization.reconstructed_linear_rgb) {
-    CopyImage(
-      prepared.reconstructed_linear.const_view(),
-      output.adaptive_quantization.reconstructed_linear_rgb);
-  }
-  *output.adaptive_quantization.frame = std::move(prepared.frame);
-  *output.adaptive_quantization.score_history = prepared.score_history;
-  if (output.adaptive_quantization.maximum_error_result != nullptr) {
-    *output.adaptive_quantization.maximum_error_result =
-      prepared.maximum_error_result;
   }
   return Status::Ok();
 }

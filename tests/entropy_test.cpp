@@ -1039,6 +1039,49 @@ bool CheckDirectAnsOptimization() {
       return false;
     }
   }
+  std::vector<gjxl::codestream_internal::PreparedFixedAnsCluster>
+    populations(6);
+  for (const auto& section : sections) {
+    for (const gjxl::EntropyToken token : section) {
+      gjxl::HybridUintToken encoded;
+      if (!gjxl::EncodeHybridUint(
+            token.value, gjxl::kDefaultHybridUintConfig, &encoded).ok()) {
+        return false;
+      }
+      auto& population = populations[token.context];
+      ++population.counts[encoded.symbol];
+      ++population.token_count;
+      population.extra_bits += encoded.extra_bit_count;
+      population.maximum_symbol = std::max(
+        population.maximum_symbol, encoded.symbol);
+    }
+  }
+  gjxl::EntropyCode scanned;
+  gjxl::EntropyCode prepared;
+  gjxl::EntropyCodeCost scanned_cost;
+  gjxl::EntropyCodeCost prepared_cost;
+  if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+        views, {.context_count = 6},
+        gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced,
+        &scanned, &scanned_cost).ok() ||
+      !gjxl::codestream_internal::
+        OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 6}, populations,
+          &prepared, &prepared_cost).ok() ||
+      prepared != scanned || prepared_cost != scanned_cost) {
+    std::cerr << "Prepared direct ANS populations changed the model\n";
+    return false;
+  }
+  const gjxl::EntropyCode sentinel = prepared;
+  ++populations.front().token_count;
+  if (gjxl::codestream_internal::
+        OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 6}, populations,
+          &prepared).code() != gjxl::StatusCode::kInvalidArgument ||
+      prepared != sentinel) {
+    std::cerr << "Malformed direct ANS populations were not atomic\n";
+    return false;
+  }
   if (cluster_counts[1] > cluster_counts[0]) {
     std::cerr << "Best direct ANS clustering expanded the fast result: "
               << cluster_counts[0] << " vs " << cluster_counts[1] << '\n';

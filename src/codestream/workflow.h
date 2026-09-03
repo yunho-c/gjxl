@@ -61,7 +61,8 @@ enum class TargetSizeSelectionPolicy {
 struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
   /// User-facing speed-versus-refinement intent in [1, 10]. Effort 7 preserves
-  /// the established two-update adaptive-quantization policy.
+  /// the established two-update adaptive-quantization policy and uses
+  /// deterministic DCT8-only coefficient-order sampling.
   int32_t effort = 7;
   /// Maximum participating CPU threads per encode. Zero selects the existing
   /// automatic stage-specific worker policy. GPU execution is not constrained.
@@ -169,8 +170,8 @@ struct VarDctEncodingAttemptTiming {
 
 /// Non-deterministic timing diagnostics kept separate from the result summary.
 struct VarDctEncodingTiming {
-  /// Post-validation source preparation: geometry, edge extension, color
-  /// conversion, host workspaces, and any CPU perceptual reference.
+  /// Post-validation source preparation: geometry, padded color conversion,
+  /// host workspaces, and any CPU perceptual reference.
   uint64_t preparation_nanoseconds = 0;
   /// Complete target-size search wall time, including all attempted encodes,
   /// serialization, failures, and final candidate selection. Zero for a

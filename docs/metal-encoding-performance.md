@@ -143,8 +143,8 @@ codestream counters. Names ending in `_work` are aggregate worker time: work
 performed by overlapping DC, coefficient-order, AC-candidate, and section
 tasks is summed, so those counters can exceed their enclosing wall-clock phase
 and must not be added to complete-encode latency. The new breakdown separates
-block-context and coefficient preparation, map-independent coefficient-token
-template construction, candidate-specific context materialization, prefix
+block-context and coefficient preparation, coefficient-token construction,
+candidate-specific context materialization where applicable, prefix
 histogram construction/clustering/code building, prefix value collection,
 HybridUint configuration search, final prefix-model serialization and checked
 cost assembly, ANS value aggregation,
@@ -152,9 +152,10 @@ HybridUint and histogram/model searches, exact ANS token costing, entropy
 selection, model/header and token-stream writing, candidate measurement, and
 the selected candidate's final header/TOC/section/output assembly. The
 `substage_work_timing` field records the `aggregate-worker-time` semantics.
-Each sample's `ac_tokenization` object also records template passes and tokens
-plus context-materialization passes and tokens, so repeated full token scans
-cannot disappear behind a lower wall time.
+Each sample's `ac_tokenization` object records whether the direct or reusable
+template path ran, its passes and tokens, plus context-materialization passes
+and tokens. Repeated full token scans therefore cannot disappear behind a
+lower wall time.
 The prefix search now retains its exact sorted `(value,count)` populations for
 the selected partition and ANS consumes them directly. Consequently,
 `codestream_entropy_ans_value_collection_work` and
@@ -162,7 +163,7 @@ the selected partition and ANS consumes them directly. Consequently,
 work-elimination sentinels. The retained field
 `codestream_entropy_ans_prepared_value_validation_work` records the inexpensive
 partition, ordering, and count checks performed before that reuse.
-Schema 14 also records requested `effort`, resolved `entropy_behavior`, the
+Schema 15 also records requested `effort`, resolved `entropy_behavior`, the
 automatic/maximum compression request, and ANS HybridUint, histogram, and
 alphabet-width candidate counts. These fields distinguish eliminated search
 work from a merely parallelized implementation. Ordinary direct-ANS paths

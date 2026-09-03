@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -173,6 +174,18 @@ bool PlanesEqual(gjxl::PlaneView<const T> left,
   for (size_t y = 0; y < left.extent.height; ++y) {
     if (!std::equal(left.Row(y), left.Row(y) + left.extent.width,
                     right.Row(y))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ImagesShareStorage(gjxl::ConstImage3FView left,
+                        gjxl::ConstImage3FView right) {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (left.plane[channel].data != right.plane[channel].data ||
+        left.plane[channel].extent != right.plane[channel].extent ||
+        left.plane[channel].stride != right.plane[channel].stride) {
       return false;
     }
   }
@@ -716,21 +729,11 @@ bool CheckDefaultUpdatePipelineParity() {
   gjxl::Status encoding_status =
     gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
       original.ConstView(), opsin.ConstView(), options, &encoding_prepared,
-      false, false);
-  constexpr float kDiagnosticPoison = -431.25f;
-  std::fill(
-    encoding_prepared.final_quant.begin(),
-    encoding_prepared.final_quant.end(), kDiagnosticPoison);
-  std::fill(
-    encoding_prepared.block_distance.begin(),
-    encoding_prepared.block_distance.end(), kDiagnosticPoison);
-  gjxl::Image3FView encoding_reconstruction =
-    encoding_prepared.reconstructed_linear.view();
-  for (gjxl::PlaneF32View plane : encoding_reconstruction.plane) {
-    for (size_t y = 0; y < plane.extent.height; ++y) {
-      std::fill_n(plane.Row(y), plane.extent.width, kDiagnosticPoison);
-    }
-  }
+      false, false,
+      gjxl::quantization_pipeline_internal::
+        QuantizationPipelineInputProvenance::kFiniteLinearRgbAndOpsin);
+  const bool resident_preprocessing_was_deferred =
+    !encoding_prepared.preprocessed_opsin.const_view().valid();
   gjxl::VarDctEncoderFrame encoding_frame;
   std::vector<double> encoding_scores;
   if (encoding_status.ok()) {
@@ -749,75 +752,48 @@ bool CheckDefaultUpdatePipelineParity() {
     encoding_status = gjxl::EncodeVarDctCodestream(
       encoding_frame, &encoding_codestream);
   }
-  const bool reconstruction_untouched = std::ranges::all_of(
-    encoding_reconstruction.plane, [](gjxl::PlaneF32View plane) {
-      for (size_t y = 0; y < plane.extent.height; ++y) {
-        if (!std::ranges::all_of(
-              std::span<const float>(plane.Row(y), plane.extent.width),
-              [](float value) { return value == kDiagnosticPoison; })) {
-          return false;
-        }
-      }
-      return true;
-    });
-  if (!encoding_status.ok() || encoding_scores != resident.scores ||
+  if (!encoding_status.ok() || !resident_preprocessing_was_deferred ||
+      encoding_prepared.preprocessed_opsin.const_view().valid() ||
+      !ImagesShareStorage(
+        encoding_prepared.validated_original_linear_rgb,
+        original.ConstView()) ||
+      !ImagesShareStorage(
+        encoding_prepared.validated_coding_opsin,
+        opsin.ConstView()) ||
+      encoding_scores != resident.scores ||
       !FramesEqual(encoding_frame, resident.frame) ||
-      encoding_codestream != resident_codestream ||
-      !std::ranges::all_of(
-        encoding_prepared.final_quant,
-        [](float value) { return value == kDiagnosticPoison; }) ||
-      !std::ranges::all_of(
-        encoding_prepared.block_distance,
-        [](float value) { return value == kDiagnosticPoison; }) ||
-      !reconstruction_untouched) {
-    std::cerr << "Encoding-only resident pipeline changed diagnostics or "
-                 "frame output: " << encoding_status.message() << '\n';
+      encoding_codestream != resident_codestream) {
+    std::cerr << "Encoding-only resident pipeline materialized host "
+                 "preprocessing or changed frame output: "
+              << encoding_status.message() << '\n';
     return false;
   }
 
-  const auto poison_prepared_diagnostics = [kDiagnosticPoison](auto& prepared) {
-    std::fill(
-      prepared.final_quant.begin(), prepared.final_quant.end(),
-      kDiagnosticPoison);
-    std::fill(
-      prepared.block_distance.begin(), prepared.block_distance.end(),
-      kDiagnosticPoison);
-    const gjxl::Image3FView reconstruction =
-      prepared.reconstructed_linear.view();
-    for (gjxl::PlaneF32View plane : reconstruction.plane) {
-      for (size_t y = 0; y < plane.extent.height; ++y) {
-        std::fill_n(plane.Row(y), plane.extent.width, kDiagnosticPoison);
-      }
-    }
-  };
-  const auto diagnostics_untouched = [kDiagnosticPoison](const auto& prepared) {
-    if (!std::ranges::all_of(
-          prepared.final_quant,
-          [kDiagnosticPoison](float value) {
-            return value == kDiagnosticPoison;
-          }) ||
-        !std::ranges::all_of(
-          prepared.block_distance,
-          [kDiagnosticPoison](float value) {
-            return value == kDiagnosticPoison;
-          })) {
-      return false;
-    }
-    return std::ranges::all_of(
-      prepared.reconstructed_linear.const_view().plane,
-      [kDiagnosticPoison](gjxl::ConstPlaneF32View plane) {
-        for (size_t y = 0; y < plane.extent.height; ++y) {
-          if (!std::ranges::all_of(
-                std::span<const float>(plane.Row(y), plane.extent.width),
-                [kDiagnosticPoison](float value) {
-                  return value == kDiagnosticPoison;
-                })) {
-            return false;
-          }
-        }
-        return true;
-      });
-  };
+  ImageStorage mismatched_original = original;
+  mismatched_original.plane[0][7] =
+    std::numeric_limits<float>::quiet_NaN();
+  gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
+    mismatched_aq;
+  gjxl::VarDctEncoderFrame mismatched_frame;
+  std::vector<double> mismatched_scores;
+  const gjxl::Status mismatched_status =
+    gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipelineForEncoding(
+        *gpu, mismatched_original.ConstView(), encoding_prepared, options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        {
+          .frame = &mismatched_frame,
+          .score_history = &mismatched_scores,
+        },
+        nullptr, &mismatched_aq);
+  if (mismatched_status.code() != gjxl::StatusCode::kInvalidArgument ||
+      mismatched_aq.evaluation != nullptr || mismatched_frame.valid() ||
+      !mismatched_scores.empty()) {
+    std::cerr << "Validated preparation provenance escaped its bound source "
+                 "identity: "
+              << mismatched_status.message() << '\n';
+    return false;
+  }
 
   gjxl::quantization_pipeline_internal::PreparedQuantizationPipeline
     exact_encoding_prepared;
@@ -827,7 +803,8 @@ bool CheckDefaultUpdatePipelineParity() {
     gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
       original.ConstView(), opsin.ConstView(), options,
       &exact_encoding_prepared, false, false);
-  poison_prepared_diagnostics(exact_encoding_prepared);
+  const bool exact_preprocessing_was_deferred =
+    !exact_encoding_prepared.preprocessed_opsin.const_view().valid();
   gjxl::VarDctEncoderFrame exact_encoding_frame;
   std::vector<double> exact_encoding_scores;
   if (exact_encoding_status.ok()) {
@@ -854,13 +831,15 @@ bool CheckDefaultUpdatePipelineParity() {
         *exact_encoding_aq.evaluation, &exact_encoding_readback);
   }
   if (!exact_encoding_status.ok() ||
+      !exact_preprocessing_was_deferred ||
+      !exact_encoding_prepared.preprocessed_opsin.const_view().valid() ||
       exact_encoding_scores != accelerated.scores ||
       !FramesEqual(exact_encoding_frame, accelerated.frame) ||
       exact_encoding_codestream != gpu_codestream ||
-      !diagnostics_untouched(exact_encoding_prepared) ||
       exact_encoding_readback.score_history_bytes != sizeof(float) ||
       exact_encoding_readback.block_distance_map_bytes == 0 ||
       exact_encoding_readback.frame_bytes != 0 ||
+      exact_encoding_readback.mapped_frame_bytes != 0 ||
       exact_encoding_readback.reconstructed_rgb_bytes != 0) {
     std::cerr << "Encoding-only exact pipeline changed output or read "
                  "diagnostics: " << exact_encoding_status.message() << '\n';
@@ -893,7 +872,6 @@ bool CheckDefaultUpdatePipelineParity() {
         original.ConstView(), opsin.ConstView(), maximum_error_options,
         &maximum_encoding_prepared, false, false);
   }
-  poison_prepared_diagnostics(maximum_encoding_prepared);
   gjxl::VarDctEncoderFrame maximum_encoding_frame;
   std::vector<double> maximum_encoding_scores;
   gjxl::MaximumErrorResult maximum_encoding_result;
@@ -928,11 +906,11 @@ bool CheckDefaultUpdatePipelineParity() {
       maximum_encoding_result != maximum_error_full.maximum_error_result ||
       !FramesEqual(maximum_encoding_frame, maximum_error_full.frame) ||
       maximum_encoding_codestream != maximum_error_codestream ||
-      !diagnostics_untouched(maximum_encoding_prepared) ||
       maximum_encoding_readback.score_history_bytes != 0 ||
       maximum_encoding_readback.maximum_error_bytes == 0 ||
       maximum_encoding_readback.block_distance_map_bytes == 0 ||
       maximum_encoding_readback.frame_bytes != 0 ||
+      maximum_encoding_readback.mapped_frame_bytes != 0 ||
       maximum_encoding_readback.reconstructed_rgb_bytes != 0) {
     std::cerr << "Encoding-only maximum-error pipeline changed output or "
                  "read diagnostics: " << maximum_error_status.message()
@@ -1072,6 +1050,11 @@ bool CheckPreparedGpuAttemptReuse() {
               << status.message() << '\n';
     return false;
   }
+  if (host_prepared.generation == 0 ||
+      !ImagesShareStorage(host_prepared.coding_opsin, opsin.ConstView())) {
+    std::cerr << "Prepared GPU pipeline did not borrow its coding image\n";
+    return false;
+  }
   gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
     gpu_prepared;
   constexpr std::array<float, 2> kTargets = {0.8f, 2.0f};
@@ -1151,8 +1134,93 @@ bool CheckPreparedGpuAttemptReuse() {
       return false;
     }
   }
+  if (gpu_prepared.quantization_pipeline_generation !=
+      host_prepared.generation) {
+    std::cerr << "Prepared resident evaluator lost its source generation\n";
+    return false;
+  }
+
+  const uint64_t first_generation = host_prepared.generation;
+  for (size_t y = 0; y < kExtent.height; ++y) {
+    for (size_t x = 0; x < kExtent.width; ++x) {
+      const float fx = static_cast<float>(x) /
+        static_cast<float>(kExtent.width - 1);
+      const float fy = static_cast<float>(y) /
+        static_cast<float>(kExtent.height - 1);
+      const std::array<float, 3> rgb = {
+        0.67f - 0.42f * fx + 0.08f * fy,
+        0.09f + 0.18f * fx + 0.53f * fy,
+        ((x / 5 + y / 3) & 1u) == 0 ? 0.74f : 0.06f,
+      };
+      for (size_t channel = 0; channel < 3; ++channel) {
+        original.plane[channel][y * original.stride + x] = rgb[channel];
+        padded_linear.plane[channel][y * padded_linear.stride + x] =
+          rgb[channel];
+      }
+    }
+  }
+  if (!gjxl::LinearRgbToOpsin(
+        padded_linear.ConstView(), 255.0f, opsin.View()).ok()) {
+    return false;
+  }
+  status =
+    gjxl::quantization_pipeline_internal::PrepareQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), preparation_options,
+      &host_prepared, false);
+  if (!status.ok() || host_prepared.generation == first_generation ||
+      !ImagesShareStorage(host_prepared.coding_opsin, opsin.ConstView()) ||
+      gpu_prepared.quantization_pipeline_generation != first_generation) {
+    std::cerr << "Re-prepared GPU pipeline did not advance its borrowed "
+                 "source generation: "
+              << status.message() << '\n';
+    return false;
+  }
+
+  gjxl::CpuQuantizationPipelineOptions changed_options = preparation_options;
+  changed_options.butteraugli_target = 1.1f;
+  PipelineStorage changed_one_shot(kExtent, kExtent);
+  PipelineStorage changed_reused(kExtent, kExtent);
+  status = gjxl::RunGpuQuantizationPipeline(
+    *gpu, original.ConstView(), opsin.ConstView(), changed_options,
+    gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+    changed_one_shot.Output());
+  if (status.ok()) {
+    status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipeline(
+        *gpu, original.ConstView(), host_prepared, changed_options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        changed_reused.Output(), nullptr, &gpu_prepared);
+  }
+  std::vector<uint8_t> changed_one_shot_codestream;
+  std::vector<uint8_t> changed_reused_codestream;
+  if (status.ok()) {
+    status = gjxl::EncodeVarDctCodestream(
+      changed_one_shot.frame, &changed_one_shot_codestream);
+  }
+  if (status.ok()) {
+    status = gjxl::EncodeVarDctCodestream(
+      changed_reused.frame, &changed_reused_codestream);
+  }
+  if (!status.ok() ||
+      gpu_prepared.quantization_pipeline_generation !=
+        host_prepared.generation ||
+      changed_one_shot_codestream != changed_reused_codestream ||
+      changed_one_shot.initial_quant != changed_reused.initial_quant ||
+      changed_one_shot.strategy_mask != changed_reused.strategy_mask ||
+      changed_one_shot.pixel_mask != changed_reused.pixel_mask ||
+      changed_one_shot.final_quant != changed_reused.final_quant ||
+      changed_one_shot.block_distance != changed_reused.block_distance ||
+      changed_one_shot.scores != changed_reused.scores ||
+      MaximumImageError(
+        changed_one_shot.reconstructed, changed_reused.reconstructed) !=
+        0.0 ||
+      !FramesEqual(changed_one_shot.frame, changed_reused.frame)) {
+    std::cerr << "Prepared GPU pipeline reused stale borrowed pixels: "
+              << status.message() << '\n';
+    return false;
+  }
   std::cout << "Prepared GPU attempts reuse exact and resident evaluator "
-               "allocations exactly\n";
+               "allocations and invalidate changed source generations\n";
   return true;
 }
 

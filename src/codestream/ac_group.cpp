@@ -49,12 +49,7 @@ constexpr std::array<uint16_t, 64> kCoefficientNonzeroContext = {
   206,   206, 206, 206, 206, 206, 206, 206, 206, 206, 206, 206,
 };
 
-struct StrategyAnchor {
-  size_t x;
-  size_t y;
-  AcStrategyType strategy;
-  size_t coefficient_count;
-};
+using StrategyAnchor = codestream_internal::SimpleAcStrategyAnchor;
 
 Status AllocationFailure() {
   return Status::OutOfMemory("AC-group token allocation failed");
@@ -125,6 +120,48 @@ uint32_t BlockContextValidated(const SimpleBlockContextMap& map,
      key.order_family) *
       (map.qf_thresholds.size() + 1) +
     qf_segment];
+}
+
+constexpr uint32_t FinalNonzeroContext(uint32_t num_contexts,
+                                       uint32_t block_context,
+                                       uint32_t local_context) {
+  return local_context * num_contexts + block_context;
+}
+
+constexpr uint32_t FinalCoefficientContext(uint32_t num_contexts,
+                                           uint32_t block_context,
+                                           uint32_t local_context) {
+  return num_contexts * kSimpleNonzeroBucketCount +
+    kSimpleZeroDensityContextCount * block_context + local_context;
+}
+
+Status FinalAcContextFromBlockValidated(const SimpleBlockContextMap& map,
+                                        uint32_t block_context,
+                                        uint32_t local_context,
+                                        bool is_coefficient,
+                                        uint16_t* context) {
+  if (block_context >= map.num_contexts) {
+    return Status::InvalidArgument("AC block context is invalid");
+  }
+  uint32_t result = 0;
+  if (is_coefficient) {
+    if (local_context >= kSimpleZeroDensityContextCount) {
+      return Status::InvalidArgument("AC coefficient context is invalid");
+    }
+    result = FinalCoefficientContext(
+      map.num_contexts, block_context, local_context);
+  } else {
+    if (local_context >= kSimpleNonzeroBucketCount) {
+      return Status::InvalidArgument("AC nonzero context is invalid");
+    }
+    result = FinalNonzeroContext(
+      map.num_contexts, block_context, local_context);
+  }
+  if (result > std::numeric_limits<uint16_t>::max()) {
+    return Status::Internal("AC-group context exceeds 16 bits");
+  }
+  *context = static_cast<uint16_t>(result);
+  return Status::Ok();
 }
 
 Status ValidateAndCollectAnchors(const VarDctAcGroupView& group,
@@ -511,6 +548,252 @@ Status BuildSimpleAcGroupTokenTemplateValidated(
   return Status::Ok();
 }
 
+Status AppendDirectAcToken(
+  uint32_t value,
+  uint16_t context,
+  bool collect_fixed_populations,
+  codestream_internal::SimpleAcTokenizationScratch* scratch,
+  codestream_internal::SimpleAcGroupTokenData* group) {
+
+  group->values.push_back(value);
+  group->contexts.push_back(context);
+  if (!collect_fixed_populations) return Status::Ok();
+  if (context >= scratch->population_slots.size()) {
+    return Status::Internal("AC population context is out of range");
+  }
+  uint32_t symbol = value;
+  uint8_t extra_bit_count = 0;
+  if (value >= 16) {
+    const uint32_t exponent =
+      31u - static_cast<uint32_t>(std::countl_zero(value));
+    const uint32_t mantissa = value - (uint32_t{1} << exponent);
+    symbol = 16 + ((exponent - 4) << 2) +
+      (mantissa >> (exponent - 2));
+    extra_bit_count = static_cast<uint8_t>(exponent - 2);
+  }
+  if (symbol >= kPrefixAlphabetSize) {
+    return Status::Internal("AC population symbol is out of range");
+  }
+  constexpr uint16_t kMissing = std::numeric_limits<uint16_t>::max();
+  uint16_t& slot = scratch->population_slots[context];
+  if (slot == kMissing) {
+    if (scratch->populations.size() >= kMissing) {
+      return Status::Internal("AC population slot overflow");
+    }
+    slot = static_cast<uint16_t>(scratch->populations.size());
+    scratch->populations.push_back({.context = context});
+  }
+  auto& population = scratch->populations[slot];
+  uint32_t& count = population.counts[symbol];
+  if (count == std::numeric_limits<uint32_t>::max() ||
+      population.token_count == std::numeric_limits<uint64_t>::max() ||
+      population.extra_bits > std::numeric_limits<uint64_t>::max() -
+        extra_bit_count) {
+    return Status::InvalidArgument("AC population count overflow");
+  }
+  ++count;
+  ++population.token_count;
+  population.extra_bits += extra_bit_count;
+  population.maximum_symbol = std::max(
+    population.maximum_symbol, symbol);
+  return Status::Ok();
+}
+
+Status TokenizeSimpleAcGroupDirectValidated(
+  const VarDctAcGroupView& group,
+  const AcStrategyGrid& strategies,
+  const SimpleCoefficientOrders& coefficient_orders,
+  const codestream_internal::SimpleAcNaturalOrders& natural_orders,
+  const SimpleBlockContextMap& block_context_map,
+  ConstPlaneI32View raw_quant_field,
+  bool collect_fixed_populations,
+  codestream_internal::SimpleAcTokenizationScratch* scratch,
+  codestream_internal::SimpleAcGroupTokenData* output) {
+
+  if (scratch == nullptr || output == nullptr) {
+    return Status::InvalidArgument("AC direct-token output is null");
+  }
+  try {
+    Status status = ValidateAndCollectAnchors(
+      group, strategies, &scratch->anchors);
+    if (!status.ok()) return status;
+    if (group.used_coefficient_count >
+        std::numeric_limits<size_t>::max() / 3 - scratch->anchors.size()) {
+      return Status::OutOfMemory("AC-group token count overflow");
+    }
+    const size_t maximum_token_count =
+      3 * (group.used_coefficient_count + scratch->anchors.size());
+    codestream_internal::SimpleAcGroupTokenData candidate;
+    candidate.values.reserve(maximum_token_count);
+    candidate.contexts.reserve(maximum_token_count);
+
+    size_t block_count = 0;
+    if (!group.block_extent.try_area(&block_count)) {
+      return Status::InvalidArgument("AC-group block count overflow");
+    }
+    for (std::vector<uint8_t>& map : scratch->nonzero_maps) {
+      map.assign(block_count, 0);
+    }
+    if (collect_fixed_populations) {
+      const size_t context_count = block_context_map.ac_context_count();
+      if (context_count == 0 ||
+          context_count >= std::numeric_limits<uint16_t>::max()) {
+        return Status::Internal("AC context count is invalid");
+      }
+      scratch->population_slots.assign(
+        context_count, std::numeric_limits<uint16_t>::max());
+      scratch->populations.clear();
+      scratch->populations.reserve(
+        std::min(context_count, maximum_token_count));
+    }
+
+    size_t source_offset = 0;
+    constexpr std::array<size_t, 3> kChannelOrder = {1, 0, 2};
+    for (const StrategyAnchor& anchor : scratch->anchors) {
+      const AcStrategyInfo* info = GetAcStrategyInfo(anchor.strategy);
+      if (info == nullptr || source_offset > group.used_coefficient_count ||
+          anchor.coefficient_count >
+            group.used_coefficient_count - source_offset) {
+        return Status::InvalidArgument("AC-group ended inside a transform");
+      }
+      const size_t strategy_index = static_cast<size_t>(anchor.strategy);
+      const size_t order_family =
+        codestream_internal::kSimpleStrategyOrder[strategy_index];
+      const bool custom_order =
+        (coefficient_orders.used_order_mask &
+         (uint16_t{1} << order_family)) != 0;
+      const size_t covered_blocks =
+        info->covered_blocks.width * info->covered_blocks.height;
+      if (!std::has_single_bit(covered_blocks)) {
+        return Status::Internal("AC strategy block count is invalid");
+      }
+      const size_t log2_covered_blocks = std::countr_zero(covered_blocks);
+      if (group.block_x + anchor.x >= raw_quant_field.extent.width ||
+          group.block_y + anchor.y >= raw_quant_field.extent.height) {
+        return Status::InvalidArgument(
+          "AC-group raw quantization field is incomplete");
+      }
+      const int32_t raw_quant = raw_quant_field.Row(
+        group.block_y + anchor.y)[group.block_x + anchor.x];
+      if (raw_quant < 1 || raw_quant > 256) {
+        return Status::InvalidArgument(
+          "AC-group raw quantization is out of range");
+      }
+
+      for (const size_t channel : kChannelOrder) {
+        const std::vector<uint32_t>& order = custom_order
+          ? coefficient_orders.orders[order_family][channel]
+          : natural_orders.orders[strategy_index];
+        if (order.size() != anchor.coefficient_count) {
+          return Status::InvalidArgument(
+            "Coefficient order does not match its AC strategy");
+        }
+        const std::span<const int32_t> coefficients =
+          group.coefficients[channel].subspan(
+            source_offset, anchor.coefficient_count);
+        int32_t nonzeros = CountNonzerosExceptLlf(coefficients, *info);
+        const uint8_t scaled_nonzeros = static_cast<uint8_t>(
+          (nonzeros + static_cast<int32_t>(covered_blocks) - 1) /
+          static_cast<int32_t>(covered_blocks));
+        std::vector<uint8_t>& map = scratch->nonzero_maps[channel];
+        for (size_t dy = 0; dy < info->covered_blocks.height; ++dy) {
+          for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
+            map[(anchor.y + dy) * group.block_extent.width + anchor.x + dx] =
+              scaled_nonzeros;
+          }
+        }
+
+        const uint32_t prediction =
+          PredictNonzeros(map, group.block_extent, anchor.x, anchor.y);
+        const SimpleAcBlockContextKey key{
+          .raw_quant = static_cast<uint16_t>(raw_quant),
+          .channel_row = static_cast<uint8_t>(channel < 2 ? channel ^ 1u : 2),
+          .order_family = static_cast<uint8_t>(order_family),
+        };
+        const uint32_t block_context =
+          BlockContextValidated(block_context_map, key);
+        if (block_context >= block_context_map.num_contexts) {
+          return Status::Internal("AC block context is invalid");
+        }
+        uint16_t context = static_cast<uint16_t>(FinalNonzeroContext(
+          block_context_map.num_contexts, block_context,
+          NonzeroBucket(prediction)));
+        status = AppendDirectAcToken(
+          static_cast<uint32_t>(nonzeros), context,
+          collect_fixed_populations, scratch, &candidate);
+        if (!status.ok()) return status;
+
+        int32_t remaining_nonzeros = nonzeros;
+        uint32_t previous_nonzero =
+          nonzeros > static_cast<int32_t>(anchor.coefficient_count / 16) ? 0
+                                                                         : 1;
+        for (size_t scan = covered_blocks;
+             scan < anchor.coefficient_count && remaining_nonzeros != 0;
+             ++scan) {
+          const int32_t coefficient = coefficients[order[scan]];
+          const uint32_t local_context = ZeroDensityContext(
+            remaining_nonzeros, scan, covered_blocks, log2_covered_blocks,
+            previous_nonzero);
+          context = static_cast<uint16_t>(FinalCoefficientContext(
+            block_context_map.num_contexts, block_context, local_context));
+          status = AppendDirectAcToken(
+            PackSigned(coefficient), context, collect_fixed_populations,
+            scratch, &candidate);
+          if (!status.ok()) return status;
+          previous_nonzero = coefficient != 0 ? 1 : 0;
+          remaining_nonzeros -= static_cast<int32_t>(previous_nonzero);
+        }
+        if (remaining_nonzeros != 0) {
+          return Status::Internal("Coefficient scan missed a nonzero value");
+        }
+      }
+      source_offset += anchor.coefficient_count;
+    }
+    if (source_offset != group.used_coefficient_count ||
+        candidate.values.size() != candidate.contexts.size()) {
+      return Status::InvalidArgument(
+        "AC-group coefficient consumption is incomplete");
+    }
+
+    if (collect_fixed_populations) {
+      candidate.context_populations.reserve(scratch->populations.size());
+      for (const auto& population : scratch->populations) {
+        const size_t symbol_offset = candidate.symbol_populations.size();
+        for (size_t symbol = 0; symbol <= population.maximum_symbol;
+             ++symbol) {
+          const uint32_t count = population.counts[symbol];
+          if (count != 0) {
+            candidate.symbol_populations.push_back({
+              .symbol = static_cast<uint8_t>(symbol),
+              .count = count,
+            });
+          }
+        }
+        const size_t symbol_count =
+          candidate.symbol_populations.size() - symbol_offset;
+        if (symbol_offset > std::numeric_limits<uint32_t>::max() ||
+            symbol_count > std::numeric_limits<uint16_t>::max()) {
+          return Status::Internal("AC sparse population overflow");
+        }
+        candidate.context_populations.push_back({
+          .context = population.context,
+          .symbol_offset = static_cast<uint32_t>(symbol_offset),
+          .symbol_count = static_cast<uint16_t>(symbol_count),
+          .token_count = population.token_count,
+          .extra_bits = population.extra_bits,
+          .maximum_symbol = population.maximum_symbol,
+        });
+      }
+    }
+    *output = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
 Status MaterializeSimpleAcGroupContextsValidated(
   const SimpleAcGroupTokenTemplate& token_template,
   const SimpleBlockContextMap& block_context_map,
@@ -551,27 +834,13 @@ Status MaterializeSimpleAcGroupContextsValidated(
       }
       const uint32_t local_context = token.context_without_block();
       const uint32_t block_context = block_contexts[token.block_context_key];
-      uint32_t context = 0;
-      if (token.is_coefficient()) {
-        if (local_context >= kSimpleZeroDensityContextCount) {
-          return Status::InvalidArgument(
-            "AC-group coefficient context is invalid");
-        }
-        context = static_cast<uint32_t>(
-          block_context_map.num_contexts * kSimpleNonzeroBucketCount +
-          kSimpleZeroDensityContextCount * block_context + local_context);
-      } else {
-        if (local_context >= kSimpleNonzeroBucketCount) {
-          return Status::InvalidArgument(
-            "AC-group nonzero context is invalid");
-        }
-        context = static_cast<uint32_t>(
-          local_context * block_context_map.num_contexts + block_context);
+      uint16_t resolved = 0;
+      if (Status status = FinalAcContextFromBlockValidated(
+            block_context_map, block_context, local_context,
+            token.is_coefficient(), &resolved); !status.ok()) {
+        return status;
       }
-      if (context > std::numeric_limits<uint16_t>::max()) {
-        return Status::Internal("AC-group context exceeds 16 bits");
-      }
-      candidate.push_back(static_cast<uint16_t>(context));
+      candidate.push_back(resolved);
     }
     *contexts = std::move(candidate);
   } catch (const std::bad_alloc&) {
@@ -779,6 +1048,56 @@ Status MaterializeSimpleAcGroupContexts(
     return AllocationFailure();
   }
   return Status::Ok();
+}
+
+Status codestream_internal::PrepareSimpleAcNaturalOrders(
+  SimpleAcNaturalOrders* orders) {
+
+  if (orders == nullptr) {
+    return Status::InvalidArgument("Natural-order table output is null");
+  }
+  try {
+    SimpleAcNaturalOrders candidate;
+    for (size_t strategy_index = 0; strategy_index < kAcStrategyCount;
+         ++strategy_index) {
+      const auto strategy = static_cast<AcStrategyType>(strategy_index);
+      if (!IsSimpleStrategy(strategy)) continue;
+      if (Status status = ComputeSimpleNaturalCoefficientOrder(
+            strategy, &candidate.orders[strategy_index]); !status.ok()) {
+        return status;
+      }
+    }
+    *orders = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
+Status codestream_internal::TokenizeSimpleAcGroupForEncoder(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  const SimpleAcNaturalOrders& natural_orders,
+  const SimpleBlockContextMap& block_context_map,
+  size_t group_index,
+  bool collect_fixed_populations,
+  SimpleAcTokenizationScratch* scratch,
+  SimpleAcGroupTokenData* group) {
+
+  if (scratch == nullptr || group == nullptr) {
+    return Status::InvalidArgument("AC direct-token output is null");
+  }
+  VarDctAcGroupView group_view;
+  if (Status status = frame.GetAcGroup(group_index, &group_view);
+      !status.ok()) {
+    return status;
+  }
+  return TokenizeSimpleAcGroupDirectValidated(
+    group_view, frame.strategies(), orders, natural_orders,
+    block_context_map, frame.raw_quant_field(), collect_fixed_populations,
+    scratch, group);
 }
 
 Status codestream_internal::BuildSimpleAcGroupTokenTemplateForEncoder(
