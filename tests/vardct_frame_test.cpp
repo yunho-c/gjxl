@@ -16,6 +16,7 @@
 
 #include "codec/chroma_from_luma.h"
 #include "codec/reconstruction.h"
+#include "codec/vardct_frame_internal.h"
 
 namespace {
 
@@ -252,6 +253,95 @@ bool CheckMatrixScaleBoundsAndAtomicRejection() {
   return true;
 }
 
+bool CheckQuantizedAssemblyValidationAndAtomicity() {
+  gjxl::FrameGeometry geometry;
+  gjxl::AcStrategyGrid strategies;
+  gjxl::Quantizer quantizer;
+  if (!gjxl::FrameGeometry::Create({8, 8}, &geometry).ok() ||
+      !gjxl::AcStrategyGrid::Create({1, 1}, &strategies).ok() ||
+      !gjxl::Quantizer::Create({3541, 10}, &quantizer).ok()) {
+    return false;
+  }
+  strategies.fill_dct8();
+  std::array<int32_t, 1> raw_quant{29};
+  std::array<uint8_t, 1> epf_sharpness{4};
+  std::array<int8_t, 1> y_to_x{0};
+  std::array<int8_t, 1> y_to_b{0};
+  std::array<int32_t, 3> quantized_dc{1, 2, 3};
+  std::vector<int32_t> quantized_ac(3 * 64);
+  for (size_t index = 0; index < quantized_ac.size(); ++index) {
+    quantized_ac[index] = static_cast<int32_t>(index) - 73;
+  }
+  const std::array<
+    gjxl::vardct_frame_internal::QuantizedAcTransformLayout, 1> transforms{{{
+      .block_x = 0,
+      .block_y = 0,
+      .strategy = gjxl::AcStrategyType::kDct8,
+      .coefficient_count = 64,
+      .coefficient_offsets = {0, 64, 128},
+  }}};
+  const auto assemble = [&](gjxl::VarDctEncoderFrame* frame) {
+    return gjxl::vardct_frame_internal::AssembleVarDctEncoderFrame(
+      {
+        .geometry = geometry,
+        .strategies = &strategies,
+        .raw_quant_field = {raw_quant.data(), {1, 1}, 1},
+        .quantizer = &quantizer,
+        .y_to_x = {y_to_x.data(), {1, 1}, 1},
+        .y_to_b = {y_to_b.data(), {1, 1}, 1},
+        .epf_sharpness = {epf_sharpness.data(), {1, 1}, 1},
+        .profile = {},
+        .quantized_dc = {{{
+          {quantized_dc.data(), {1, 1}, 1},
+          {quantized_dc.data() + 1, {1, 1}, 1},
+          {quantized_dc.data() + 2, {1, 1}, 1},
+        }}},
+        .quantized_ac = quantized_ac,
+        .transforms = transforms,
+        .reject_unwritten_coefficients = true,
+      },
+      frame);
+  };
+
+  gjxl::VarDctEncoderFrame frame;
+  if (!assemble(&frame).ok() || !frame.valid()) {
+    std::cerr << "Checked quantized assembly rejected valid input\n";
+    return false;
+  }
+  gjxl::VarDctAcGroupView group;
+  if (!frame.GetAcGroup(0, &group).ok() ||
+      group.coefficients[0][17] != quantized_ac[17]) {
+    std::cerr << "Checked quantized assembly changed coefficient order\n";
+    return false;
+  }
+  const int32_t retained = group.coefficients[0][17];
+
+  quantized_ac[17] =
+    gjxl::vardct_frame_internal::kUnwrittenQuantizedCoefficient;
+  if (assemble(&frame).ok() || !frame.valid() ||
+      !frame.GetAcGroup(0, &group).ok() ||
+      group.coefficients[0][17] != retained) {
+    std::cerr << "Unwritten AC did not preserve the prior frame atomically\n";
+    return false;
+  }
+  quantized_ac[17] = retained;
+  quantized_dc[1] =
+    gjxl::vardct_frame_internal::kUnwrittenQuantizedCoefficient;
+  if (assemble(&frame).ok() || !frame.valid() ||
+      frame.quantized_dc().plane[1].Row(0)[0] != 2) {
+    std::cerr << "Unwritten DC did not preserve the prior frame atomically\n";
+    return false;
+  }
+  quantized_dc[1] = 2;
+  raw_quant[0] = 0;
+  if (assemble(&frame).ok() || !frame.valid() ||
+      frame.raw_quant_field().Row(0)[0] != 29) {
+    std::cerr << "Invalid raw quant changed the prior frame\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -259,7 +349,8 @@ int main() {
       !CheckExactGroup() ||
       !CheckEdgeGroups() ||
       !CheckCrossingStrategyIsRejectedAtomically() ||
-      !CheckMatrixScaleBoundsAndAtomicRejection()) {
+      !CheckMatrixScaleBoundsAndAtomicRejection() ||
+      !CheckQuantizedAssemblyValidationAndAtomicity()) {
     return EXIT_FAILURE;
   }
   std::cout << "All VarDCT encoder-frame tests passed.\n";

@@ -1,23 +1,24 @@
-# Experimental C API and ABI plan
+# Experimental C API and ABI
 
-This document proposes a deliberately small C interface for GJXL. The first
-consumer is expected to be a Rust wrapper in Slimg, with OIMG using that wrapper
-indirectly. The interface is experimental: its layouts are designed for future
-ABI evolution, but compatibility is not promised until the API has been
-implemented, integrated, and versioned as stable.
+This document describes GJXL's implemented C interface, which is deliberately
+small. GJXL owns a safe wrapper in `rust/gjxl`; Slimg is expected to be its first
+downstream consumer, with OIMG using that wrapper indirectly. The interface is
+experimental: its layouts are designed for future ABI evolution, but
+compatibility is not promised until the API has been implemented, integrated,
+and versioned as stable.
 
 The guiding principle is:
 
 > The CLI may expose convenience and diagnostic controls; the C API exposes
 > only canonical encoding concepts.
 
-The first encoder options therefore contain only perceptual distance and
-effort. Execution policy belongs to a reusable context, and pixel memory
-belongs to a separate non-owning image view.
+The encoder options contain perceptual distance, effort, and an independent
+automatic/maximum entropy-search control. Execution policy belongs to a
+reusable context, and pixel memory belongs to a separate non-owning image view.
 
 ## Current implementation boundary
 
-The proposed API must accurately describe the encoder that exists today. The
+The API must accurately describe the encoder that exists today. The
 current public C++ workflow in [`workflow.h`](../src/codestream/workflow.h):
 
 - accepts three planar float32 channels in linear sRGB;
@@ -28,11 +29,13 @@ current public C++ workflow in [`workflow.h`](../src/codestream/workflow.h):
 - has no progressive or multi-pass mode; and
 - performs tokenization, entropy coding, and codestream assembly on the CPU.
 
-The exact-coefficient Metal path accelerates selected frontend work while
-retaining CPU-authoritative coefficient decisions. Fully resident, throughput,
-and maximum-throughput Metal modes are experimental implementation modes and
-must not be exposed through the initial C interface. The full profile boundary
-is documented in [`codestream.md`](codestream.md).
+The canonical workflow now defaults to fully resident Metal when automatic
+selection qualifies, while the exact-coefficient path remains an explicit
+reference/compatibility implementation. Metal AQ implementation selection is
+deliberately not exposed through the initial C interface; C and Rust callers
+inherit the canonical workflow policy without growing their stable compression
+contract. The full profile boundary is documented in
+[`codestream.md`](codestream.md).
 
 The existing workflow already caches the production Metal backend for the
 process lifetime. The C context should reuse that cache rather than creating a
@@ -45,7 +48,8 @@ The first interface should:
 1. be usable from C, Rust, Dart FFI, Python, and other C-compatible runtimes;
 2. accept Slimg's interleaved RGB/RGBA byte representation without requiring
    callers to construct planar float images;
-3. make distance and effort the only stable compression controls;
+3. make distance, effort, and explicit maximum compression the stable
+   compression controls;
 4. keep CPU/Metal execution policy separate from bitstream options;
 5. return one library-owned contiguous output buffer;
 6. report unsupported capabilities distinctly from malformed input;
@@ -62,7 +66,7 @@ The first version does not expose:
 - progressive or responsive coding;
 - faster-decoding controls;
 - target-byte, target-BPP, or maximum-error rate control;
-- fully resident or throughput Metal modes;
+- Metal AQ implementation selection;
 - device indexes;
 - streaming input or output;
 - stage-specific profiling data; or
@@ -70,12 +74,12 @@ The first version does not expose:
   implementations, entropy clusters, or GPU dispatch dimensions.
 
 These can be added later through appended sized structs or separate entry
-points without expanding `GJXLEncoderOptions` prematurely.
+points. The maximum-compression field demonstrates that versioning contract.
 
-## Proposed public header
+## Public header
 
-The installed header should live at `include/gjxl/gjxl.h`. The following is the
-intended shape rather than a complete export-macro definition:
+The installed header lives at `include/gjxl/gjxl.h`. The following is its
+abridged shape rather than a complete export-macro definition:
 
 ```c
 #ifndef GJXL_GJXL_H_
@@ -118,10 +122,17 @@ typedef struct {
     uint32_t num_cpu_threads;
 } GJXLContextOptions;
 
+typedef int32_t GJXLCompressionMode;
+enum {
+    GJXL_COMPRESSION_AUTOMATIC = 0,
+    GJXL_COMPRESSION_MAXIMUM = 1,
+};
+
 typedef struct {
     uint32_t struct_size;
     float distance;
     int32_t effort;
+    GJXLCompressionMode compression_mode;
 } GJXLEncoderOptions;
 
 typedef int32_t GJXLPixelFormat;
@@ -238,6 +249,7 @@ assign an `SOVERSION` and enforce its exported-symbol list.
 ```text
 distance = 1.0
 effort   = 7
+compression_mode = GJXL_COMPRESSION_AUTOMATIC
 ```
 
 ### Distance
@@ -266,31 +278,41 @@ reverse helper is deferred until a concrete consumer requires it.
 
 ### Effort
 
-The current GJXL workflow does not have a canonical effort parameter. It has a
-normal two-update AQ policy and a separate four-update high-density mode. The C
-API must not expose an effort field that is silently ignored.
+Effort controls both the established AQ update policy and the resolved entropy
+behavior:
 
-The smallest initial policy maps effort to the AQ update counts already
-supported by the implementation:
-
-| Effort | AQ updates | Initial intent |
+| Effort | AQ updates | Entropy behavior |
 | ---: | ---: | --- |
-| 1-3 | 0 | Fast tier |
-| 4-6 | 1 | Reduced refinement |
-| 7 | 2 | Current default; preserve existing bytes |
-| 8-9 | 3 | Denser refinement |
-| 10 | 4 | Current high-density behavior |
+| 1-3 | 0 | Balanced |
+| 4-6 | 1 | Balanced |
+| 7 | 2 | Balanced default |
+| 8 | 3 | Balanced |
+| 9 | 3 | High density |
+| 10 | 4 | High density |
 
 The numbers communicate the same user intent as `cjxl`, not identical
-algorithms or identical output. Before documenting all ten values as supported,
-representative measurements must demonstrate a defensible low/default/high
-speed-versus-target-accuracy progression. If they do not, the honest first
-release accepts effort 7 and returns `GJXL_ERROR_UNSUPPORTED` for the remaining
-values until more effort-sensitive search policy exists.
+algorithms or identical output. In particular, effort 10 does not select the
+exhaustive former serializer; that requires the independent compression mode.
+The CLI's `--high-density` compatibility override continues to request four AQ
+updates while resolving to the same high-density entropy behavior as efforts
+9-10.
 
-Effort 7 is a compatibility gate: adding the parameter must not change the
-current default codestream bytes. The existing `--high-density` CLI flag may be
-retained temporarily as an alias for effort 10.
+### Compression mode
+
+`GJXL_COMPRESSION_AUTOMATIC` resolves entropy search from effort. Balanced
+efforts commit one block-context map and coefficient-order representation and
+use effort-7-like direct ANS construction. Efforts 9-10 use the measured
+effort-9-like high-density policy.
+
+`GJXL_COMPRESSION_MAXIMUM` preserves the former exhaustive serializer policy
+as an explicit opt-in. It changes only entropy/codestream search and does not
+silently change distance, AQ updates, backend choice, or CPU thread limits.
+
+`compression_mode` was appended after the original 12-byte encoder-options
+layout. The implementation accepts that V1 size, defaults its absent field to
+automatic, and reads the field only when `struct_size` covers all 16 current
+bytes. Exact-size and larger caller allocations are tested in both C and C++;
+an unknown mode returns `GJXL_ERROR_INVALID_ARGUMENT` without changing output.
 
 ## Context and backend selection
 
@@ -300,13 +322,13 @@ therefore contain one field:
 ```text
 AUTO   use the existing qualified automatic policy
 CPU    require the CPU workflow
-METAL  require the exact-coefficient Metal workflow
+METAL  require the default fully resident Metal workflow
 ```
 
 `AUTO` retains the current source-backed policy, including its device,
-geometry, and distance gates. `METAL` is an explicit experimental override;
+geometry, and distance gates. `METAL` is an explicit unqualified override;
 backend creation or capability failure returns an error rather than silently
-falling back. Resident and throughput modes remain internal.
+falling back. Metal AQ implementation selection remains internal.
 
 `gjxl_context_options_init` defaults to `AUTO`, and passing `NULL` options to
 `gjxl_context_create` has the same meaning. Slimg's default quality 80 maps to
@@ -417,7 +439,7 @@ Internal status translation should preserve these distinctions:
 | `BACKEND` | Submission, completion, or device execution failure |
 | `INTERNAL` | Invariant failure or unexpected exception |
 
-## Implementation plan
+## Completed implementation history
 
 ### 1. Add an internal effort policy
 
@@ -433,9 +455,10 @@ iterations in one helper. Keep the existing density mode temporarily for source
 compatibility, with high density overriding to four updates. Add `--effort` to
 the CLI and reject conflicting explicit `--effort`/`--high-density` requests.
 
-Verify that effort 7 preserves the existing default hash and that each effort
-tier produces the expected score-history length on CPU and supported Metal
-paths.
+Verify the effort resolver and expected score-history length on CPU and
+supported Metal paths. The later entropy-alignment change deliberately replaced
+the effort-7 default hash; maximum compression retains the former serializer
+hash instead.
 
 ### 2. Add the private packed-pixel adapter
 
@@ -511,6 +534,13 @@ Slimg should consume the safe crate and:
 Backend choice and fallback should be observable in tests and diagnostics so a
 benchmark cannot silently mix GJXL and libjxl samples.
 
+### 6. Append maximum compression without breaking V1 callers
+
+Append `GJXLCompressionMode compression_mode` at byte offset 12, retain 12 as
+the V1 minimum size, and default a missing field to automatic behavior. Tests
+cover old, exact 16-byte, and larger allocations, maximum-mode encoding, and
+atomic rejection of unknown constants. This phase is complete.
+
 ## Validation gates
 
 ### ABI and boundary tests
@@ -526,7 +556,8 @@ benchmark cannot silently mix GJXL and libjxl samples.
 
 ### Encoding correctness
 
-- Preserve the effort-7 default codestream golden hash.
+- Pin the balanced effort-7 hash and preserve the former exhaustive hash under
+  `GJXL_COMPRESSION_MAXIMUM`.
 - Encode RGB8 and opaque RGBA8 with padded and tight row strides.
 - Confirm that transparent RGBA and distance zero return `UNSUPPORTED` and do
   not modify output.
@@ -549,9 +580,11 @@ and independent processes. Report:
 - independent decoded Butteraugli or another declared quality measure; and
 - peak memory where practical.
 
-The first effort policy is acceptable only if effort 7 preserves current
-behavior and low/default/high tiers demonstrate a useful, reproducible
-tradeoff. A single fixture or one timing sample is directional evidence only.
+The effort policy is acceptable only if low/default/high tiers demonstrate a
+useful, reproducible tradeoff and maximum compression preserves the former
+serializer behavior. The retained qualification is documented in
+[`entropy-behavior-alignment.md`](entropy-behavior-alignment.md); a single
+fixture or one timing sample remains directional evidence only.
 
 ## Deferred extensions
 

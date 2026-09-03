@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -44,15 +45,25 @@ protected:
   AdaptiveQuantizationProvider() = default;
 };
 
-/// Target-invariant preparation and reusable atomic staging for repeated
-/// complete quantization attempts over one source/profile pair.
+/// Target-invariant preparation for repeated quantization attempts over one
+/// source/profile pair. `coding_opsin` borrows immutable caller storage, which
+/// must remain alive until the last prepared run completes. Final encoder and
+/// diagnostic results are committed directly by the selected adaptive-
+/// quantization provider.
 struct PreparedQuantizationPipeline {
+  uint64_t generation = 0;
   Extent2D source_extent;
   Extent2D padded_extent;
   Extent2D block_extent;
   float initial_quant_rescale = 1.0f;
   SimpleVarDctCodestreamProfile profile;
-  Image3FBuffer coding_opsin;
+  ConstImage3FView coding_opsin;
+  /// Exact immutable host views proven finite by the workflow that created
+  /// this preparation. Empty views mean that downstream public validation is
+  /// still required. Identity checks prevent provenance from being reused
+  /// with a different source passed to a prepared run.
+  ConstImage3FView validated_original_linear_rgb;
+  ConstImage3FView validated_coding_opsin;
   Image3FBuffer preprocessed_opsin;
   ColorCorrelationMap initial_color_correlation;
   bool preprocessing_ready = false;
@@ -62,14 +73,13 @@ struct PreparedQuantizationPipeline {
   std::vector<float> strategy_mask;
   std::vector<float> pixel_mask;
   AcStrategyGrid strategies;
-  std::vector<float> final_quant;
-  std::vector<float> block_distance;
-  Image3FBuffer reconstructed_linear;
-  VarDctEncoderFrame frame;
-  std::vector<double> score_history;
-  MaximumErrorResult maximum_error_result;
   ButteraugliOptions butteraugli_options;
   std::unique_ptr<PreparedButteraugliReference> butteraugli_reference;
+};
+
+enum class QuantizationPipelineInputProvenance {
+  kUnvalidated,
+  kFiniteLinearRgbAndOpsin,
 };
 
 struct QuantizationPipelineMaterialization {
@@ -89,7 +99,9 @@ struct QuantizationPipelineMaterialization {
   CpuQuantizationPipelineOptions options,
   PreparedQuantizationPipeline* prepared,
   bool prepare_cpu_butteraugli = true,
-  bool prepare_cpu_preprocessing = true);
+  bool prepare_cpu_preprocessing = true,
+  QuantizationPipelineInputProvenance input_provenance =
+    QuantizationPipelineInputProvenance::kUnvalidated);
 
 [[nodiscard]] Status PrepareQuantizationPreprocessing(
   PreparedQuantizationPipeline& prepared,

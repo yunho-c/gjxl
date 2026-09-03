@@ -167,8 +167,11 @@ struct CommandLineOptions {
       gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   gjxl::VarDctDensityMode density_mode =
       gjxl::VarDctDensityMode::kDefault;
+  gjxl::VarDctCompressionMode compression_mode =
+      gjxl::VarDctCompressionMode::kAutomatic;
   bool collect_final_butteraugli_score = false;
   float butteraugli_target = kDefaultButteraugliTarget;
+  int32_t effort = 7;
   size_t cpu_thread_count = 0;
   size_t libjxl_thread_count = 1;
   int libjxl_effort = 7;
@@ -805,6 +808,7 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                    "maximum-throughput] "
                    "[--density default|high] "
+                   "[--maximum-compression] "
                    "[--validation cpu-metal|metal-only] "
                    "[--collect-final-score] "
                    "[--metallib PATH] [--raw-samples PATH] "
@@ -815,12 +819,18 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--artifacts DIRECTORY] "
                    "[--gpu-profile stage|dispatch] "
                    "[--gpu-profile-output PATH] "
-                   "[--distance D] [--cpu-threads auto|N] "
+                   "[--distance D] [--effort 1..10] "
+                   "[--cpu-threads auto|N] "
                    "[--warmups N] [--samples N]\n";
       std::exit(EXIT_SUCCESS);
     }
     if (argument == "--collect-final-score") {
       options.collect_final_butteraugli_score = true;
+      continue;
+    }
+    if (argument == "--maximum-compression") {
+      options.compression_mode =
+        gjxl::VarDctCompressionMode::kMaximumCompression;
       continue;
     }
     if (index + 1 >= argc) {
@@ -885,6 +895,12 @@ ParseGpuProfilingMode(std::string_view text) {
       }
     } else if (argument == "--distance") {
       options.butteraugli_target = ParsePositiveFloat(value);
+    } else if (argument == "--effort") {
+      const size_t effort = ParseSize(value, false);
+      if (effort > 10) {
+        throw std::runtime_error("Effort must be in [1, 10]");
+      }
+      options.effort = static_cast<int32_t>(effort);
     } else if (argument == "--cpu-threads") {
       options.cpu_thread_count = value == "auto" ? 0 : ParseSize(value, false);
       if (options.cpu_thread_count > gjxl::kMaximumCpuThreadCount) {
@@ -1253,6 +1269,11 @@ struct RawWorkflowSample {
   size_t sample_index = 0;
   std::string_view backend;
   size_t peak_cpu_participants = 0;
+  gjxl::VarDctEntropyBehavior entropy_behavior =
+    gjxl::VarDctEntropyBehavior::kBalanced;
+  size_t ans_uint_config_candidate_count = 0;
+  size_t ans_histogram_candidate_count = 0;
+  size_t ans_alphabet_width_candidate_count = 0;
   std::array<uint64_t, kWorkflowProfileNames.size()> phase_nanoseconds{};
   size_t encoded_bytes = 0;
   uint64_t entropy_model_bits = 0;
@@ -1471,7 +1492,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 10,\n"
+           << "  \"schema_version\": 15,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
@@ -1489,8 +1510,15 @@ void WriteRawWorkflowSamples(
                  ? "high"
                  : "default")
            << "\",\n"
+           << "  \"compression\": \""
+           << (options.compression_mode ==
+                     gjxl::VarDctCompressionMode::kMaximumCompression
+                 ? "maximum"
+                 : "automatic")
+           << "\",\n"
            << "  \"distance\": " << std::setprecision(9)
            << options.butteraugli_target << ",\n"
+           << "  \"effort\": " << options.effort << ",\n"
            << "  \"cpu_threads\": " << options.cpu_thread_count << ",\n"
            << "  \"warmups\": " << options.warmups << ",\n"
            << "  \"sample_count\": " << options.samples << ",\n"
@@ -1515,6 +1543,20 @@ void WriteRawWorkflowSamples(
                << ", \"backend\": \"" << sample.backend
                << "\", \"peak_cpu_participants\": "
                << sample.peak_cpu_participants
+               << ", \"entropy_behavior\": \""
+               << (sample.entropy_behavior ==
+                         gjxl::VarDctEntropyBehavior::kMaximumCompression
+                     ? "maximum"
+                     : sample.entropy_behavior ==
+                           gjxl::VarDctEntropyBehavior::kHighDensity
+                         ? "high-density"
+                         : "balanced")
+               << "\", \"entropy_search\": {\"uint_configs\": "
+               << sample.ans_uint_config_candidate_count
+               << ", \"histograms\": "
+               << sample.ans_histogram_candidate_count
+               << ", \"alphabet_widths\": "
+               << sample.ans_alphabet_width_candidate_count << "}"
                << ", \"encoded_bytes\": " << sample.encoded_bytes
                << ", \"entropy_bits\": {\"model\": "
                << sample.entropy_model_bits << ", \"tokens\": "
@@ -1548,9 +1590,13 @@ void WriteRawWorkflowSamples(
                << sample.selected_block_context_count
                << ", \"qf_thresholds\": "
                << sample.selected_block_context_qf_threshold_count << "}"
-               << ", \"ac_tokenization\": {\"template_count\": "
+               << ", \"ac_tokenization\": {\"path\": \""
+               << (sample.entropy_behavior ==
+                     gjxl::VarDctEntropyBehavior::kMaximumCompression
+                     ? "template" : "direct")
+               << "\", \"pass_count\": "
                << sample.coefficient_tokenization_pass_count
-               << ", \"template_tokens\": "
+               << ", \"tokens\": "
                << sample.coefficient_token_count
                << ", \"context_materialization_count\": "
                << sample.coefficient_context_materialization_count
@@ -2802,9 +2848,10 @@ void RunHybridWorkflowWorkload(
 
 void RunPublicWorkflowOnlyWorkload(
     const WorkloadSpec& spec, size_t warmups, size_t samples,
-    float butteraugli_target, size_t cpu_thread_count,
+    float butteraugli_target, int32_t effort, size_t cpu_thread_count,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::VarDctDensityMode density_mode,
+    gjxl::VarDctCompressionMode compression_mode,
     bool collect_final_butteraugli_score,
     std::string_view input_path, bool metal_only, ValidationMode validation,
     gjxl::GpuBackend& gpu,
@@ -2830,7 +2877,9 @@ void RunPublicWorkflowOnlyWorkload(
         EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
             original.ConstView(),
             {.butteraugli_target = butteraugli_target,
+             .effort = effort,
              .density_mode = density_mode,
+             .compression_mode = compression_mode,
              .backend = backend,
              .cpu_thread_count = cpu_thread_count,
              .metal_aq_mode = mode,
@@ -2928,6 +2977,13 @@ void RunPublicWorkflowOnlyWorkload(
     raw_sample.sample_index = sample_index;
     raw_sample.backend = backend;
     raw_sample.peak_cpu_participants = profile.peak_cpu_participants;
+    raw_sample.entropy_behavior = profile.codestream.entropy_behavior;
+    raw_sample.ans_uint_config_candidate_count =
+      profile.codestream.entropy_work.ans_uint_config_candidate_count;
+    raw_sample.ans_histogram_candidate_count =
+      profile.codestream.entropy_work.ans_histogram_candidate_count;
+    raw_sample.ans_alphabet_width_candidate_count =
+      profile.codestream.entropy_work.ans_alphabet_width_candidate_count;
     raw_sample.phase_nanoseconds = WorkflowProfileValues(profile);
     raw_sample.encoded_bytes = bytes.size();
     raw_sample.entropy_model_bits = profile.codestream.entropy_model_bits;
@@ -3028,11 +3084,17 @@ void RunPublicWorkflowOnlyWorkload(
   std::cout << "workload " << spec.name << " source="
             << original.extent.width << 'x' << original.extent.height
             << " distance=" << butteraugli_target
+            << " effort=" << effort
             << " gpu_aq=" << GpuAqModeName(gpu_aq_mode)
             << " density="
             << (density_mode == gjxl::VarDctDensityMode::kHighDensity
                   ? "high"
                   : "default")
+            << " compression="
+            << (compression_mode ==
+                      gjxl::VarDctCompressionMode::kMaximumCompression
+                  ? "maximum"
+                  : "automatic")
             << " cpu_threads="
             << (cpu_thread_count == 0
                   ? std::string("auto")
@@ -3064,7 +3126,7 @@ void RunPublicWorkflowOnlyWorkload(
 
 void RunGpuProfileWorkflowWorkload(
     const WorkloadSpec& spec, size_t warmups, size_t samples,
-    float butteraugli_target, size_t cpu_thread_count,
+    float butteraugli_target, int32_t effort, size_t cpu_thread_count,
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::gpu_profile_internal::GpuProfilingMode profiling_mode,
     bool collect_final_butteraugli_score,
@@ -3083,6 +3145,7 @@ void RunGpuProfileWorkflowWorkload(
 
   const gjxl::VarDctEncodingOptions encoding_options{
     .butteraugli_target = butteraugli_target,
+    .effort = effort,
     .backend = gjxl::VarDctBackendPreference::kMetal,
     .cpu_thread_count = cpu_thread_count,
     .metal_aq_mode = gpu_aq_mode,
@@ -4121,11 +4184,17 @@ int main(int argc, char** argv) {
                         gjxl::VarDctDensityMode::kHighDensity
                     ? "high"
                     : "default")
+              << " compression="
+              << (options.compression_mode ==
+                        gjxl::VarDctCompressionMode::kMaximumCompression
+                    ? "maximum"
+                    : "automatic")
               << " cpu_threads="
               << (options.cpu_thread_count == 0
                     ? std::string("auto")
                     : std::to_string(options.cpu_thread_count))
               << " distance=" << options.butteraugli_target
+              << " effort=" << options.effort
               << " warmups=" << options.warmups
               << " samples=" << options.samples;
     if (options.scope == BenchmarkScope::kCodestreamTail ||
@@ -4167,7 +4236,8 @@ int main(int argc, char** argv) {
         if (!options.gpu_profile_path.empty()) {
           RunGpuProfileWorkflowWorkload(
             {"external_input", {}, false}, options.warmups, options.samples,
-            options.butteraugli_target, options.cpu_thread_count,
+            options.butteraugli_target, options.effort,
+            options.cpu_thread_count,
             options.gpu_aq_mode,
             options.gpu_profiling_mode,
             options.collect_final_butteraugli_score, options.input_path, *gpu,
@@ -4175,9 +4245,11 @@ int main(int argc, char** argv) {
         } else {
           RunPublicWorkflowOnlyWorkload(
               {"external_input", {}, false}, options.warmups, options.samples,
-              options.butteraugli_target, options.cpu_thread_count,
+              options.butteraugli_target, options.effort,
+              options.cpu_thread_count,
               options.gpu_aq_mode,
               options.density_mode,
+              options.compression_mode,
               options.collect_final_butteraugli_score,
               options.input_path,
               options.scope == BenchmarkScope::kMetalPublicWorkflow,
@@ -4208,7 +4280,8 @@ int main(int argc, char** argv) {
             if (!options.gpu_profile_path.empty()) {
               RunGpuProfileWorkflowWorkload(
                 workload, options.warmups, options.samples,
-                options.butteraugli_target, options.cpu_thread_count,
+                options.butteraugli_target, options.effort,
+                options.cpu_thread_count,
                 options.gpu_aq_mode,
                 options.gpu_profiling_mode,
                 options.collect_final_butteraugli_score, {}, *gpu,
@@ -4217,9 +4290,11 @@ int main(int argc, char** argv) {
             } else {
               RunPublicWorkflowOnlyWorkload(
                   workload, options.warmups, options.samples,
-                  options.butteraugli_target, options.cpu_thread_count,
+                  options.butteraugli_target, options.effort,
+                  options.cpu_thread_count,
                   options.gpu_aq_mode,
                   options.density_mode,
+                  options.compression_mode,
                   options.collect_final_butteraugli_score, {},
                   options.scope == BenchmarkScope::kMetalPublicWorkflow,
                   options.validation, *gpu, raw_results_pointer, &sink);

@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -138,5 +139,89 @@ struct SimpleAcGroupTokenTemplate {
   std::span<const SimpleAcGroupTokenTemplate> templates,
   const SimpleBlockContextMap& block_context_map,
   std::vector<std::vector<uint16_t>>* contexts);
+
+namespace codestream_internal {
+
+struct SimpleAcStrategyAnchor {
+  size_t x = 0;
+  size_t y = 0;
+  AcStrategyType strategy = AcStrategyType::kDct8;
+  size_t coefficient_count = 0;
+};
+
+struct SimpleAcNaturalOrders {
+  std::array<std::vector<uint32_t>, kAcStrategyCount> orders;
+};
+
+struct SimpleAcSymbolPopulation {
+  uint8_t symbol = 0;
+  uint32_t count = 0;
+};
+
+struct SimpleAcContextPopulation {
+  uint16_t context = 0;
+  uint32_t symbol_offset = 0;
+  uint16_t symbol_count = 0;
+  uint64_t token_count = 0;
+  uint64_t extra_bits = 0;
+  uint32_t maximum_symbol = 0;
+};
+
+/// Final ordinary-path token data plus optional group-local fixed-HybridUint
+/// populations. Population entries are compact and reference contiguous
+/// sparse symbol/count runs.
+struct SimpleAcGroupTokenData {
+  std::vector<uint32_t> values;
+  std::vector<uint16_t> contexts;
+  std::vector<SimpleAcContextPopulation> context_populations;
+  std::vector<SimpleAcSymbolPopulation> symbol_populations;
+};
+
+struct SimpleAcPopulationAccumulator {
+  uint16_t context = 0;
+  std::array<uint32_t, kPrefixAlphabetSize> counts{};
+  uint64_t token_count = 0;
+  uint64_t extra_bits = 0;
+  uint32_t maximum_symbol = 0;
+};
+
+/// Reused by one serializer worker across independent AC groups.
+struct SimpleAcTokenizationScratch {
+  std::vector<SimpleAcStrategyAnchor> anchors;
+  std::array<std::vector<uint8_t>, 3> nonzero_maps;
+  std::vector<uint16_t> population_slots;
+  std::vector<SimpleAcPopulationAccumulator> populations;
+};
+
+[[nodiscard]] Status PrepareSimpleAcNaturalOrders(
+  SimpleAcNaturalOrders* orders);
+
+/// One-pass ordinary serializer primitive for an already validated frame,
+/// coefficient-order set, and block-context map.
+[[nodiscard]] Status TokenizeSimpleAcGroupForEncoder(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  const SimpleAcNaturalOrders& natural_orders,
+  const SimpleBlockContextMap& block_context_map,
+  size_t group_index,
+  bool collect_fixed_populations,
+  SimpleAcTokenizationScratch* scratch,
+  SimpleAcGroupTokenData* group);
+
+/// Encoder-only per-group primitives. The enclosing serializer validates the
+/// frame, coefficient orders, and block-context map once before dispatching
+/// independent group tasks into fixed output slots.
+[[nodiscard]] Status BuildSimpleAcGroupTokenTemplateForEncoder(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  size_t group_index,
+  SimpleAcGroupTokenTemplate* group);
+
+[[nodiscard]] Status MaterializeSimpleAcGroupContextsForEncoder(
+  const SimpleAcGroupTokenTemplate& token_template,
+  const SimpleBlockContextMap& block_context_map,
+  std::vector<uint16_t>* contexts);
+
+}  // namespace codestream_internal
 
 }  // namespace gjxl

@@ -1742,6 +1742,7 @@ Status OptimizeEntropyCodeImpl(
   EntropyCode* code,
   EntropyCodeCost* cost,
   codestream_internal::PreparedEntropyClusters* prepared,
+  bool fast_fixed_partition,
   codestream_internal::EntropyWorkProfile* profile) {
 
   if (code == nullptr || options.context_count == 0) {
@@ -1830,6 +1831,47 @@ Status OptimizeEntropyCodeImpl(
     ProfileEnd(
       profile, histogram_cost_begin,
       &EntropyWorkProfile::prefix_histogram_cost_nanoseconds);
+
+    if (fast_fixed_partition) {
+      std::vector<Histogram> clustered_histograms;
+      std::vector<uint8_t> clustered_map;
+      if (Status status = profile_call(
+            &EntropyWorkProfile::prefix_clustering_nanoseconds,
+            [&] {
+              return ClusterHistograms(
+                histograms,
+                std::min(kMaximumPrefixClusters, histograms.size()),
+                false, 0, &clustered_histograms, &clustered_map);
+            }); !status.ok()) {
+        return status;
+      }
+      EntropyCode candidate;
+      EntropyCodeCost candidate_cost;
+      if (Status status = BuildEntropyCodeForPartition(
+            section_tokens, options, clustered_map, histograms,
+            clustered_histograms.size(), false, &candidate,
+            &candidate_cost, nullptr, profile); !status.ok()) {
+        return status;
+      }
+      if (cost != nullptr) {
+        const ProfileClock::time_point section_bits_begin =
+          ProfileBegin(profile);
+        Status status = MeasureSectionTokenBits(
+          section_tokens, candidate, candidate_cost.token_bits,
+          &candidate_cost.section_token_bits);
+        ProfileEnd(
+          profile, section_bits_begin,
+          &EntropyWorkProfile::prefix_exact_measurement_nanoseconds);
+        if (!status.ok()) {
+          return status;
+        }
+      }
+      *code = std::move(candidate);
+      if (cost != nullptr) {
+        *cost = std::move(candidate_cost);
+      }
+      return Status::Ok();
+    }
 
     std::vector<Histogram> legacy_histograms;
     std::vector<uint8_t> legacy_map;
@@ -2070,7 +2112,7 @@ Status OptimizeEntropyCode(
   EntropyCodeCost* cost,
   codestream_internal::EntropyWorkProfile* profile) {
   return OptimizeEntropyCodeImpl(
-    section_tokens, options, code, cost, nullptr, profile);
+    section_tokens, options, code, cost, nullptr, false, profile);
 }
 
 Status codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
@@ -2084,7 +2126,18 @@ Status codestream_internal::OptimizeEntropyCodeAndPrepareClusters(
     return Status::InvalidArgument("Prepared entropy output is null");
   }
   return OptimizeEntropyCodeImpl(
-    section_tokens, options, code, cost, prepared, profile);
+    section_tokens, options, code, cost, prepared, false, profile);
+}
+
+Status codestream_internal::OptimizeFastPrefixEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost,
+  EntropyWorkProfile* profile) {
+
+  return OptimizeEntropyCodeImpl(
+    section_tokens, options, code, cost, nullptr, true, profile);
 }
 
 Status OptimizeEntropyCode(

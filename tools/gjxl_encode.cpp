@@ -51,8 +51,10 @@ struct Options {
   int32_t effort = 7;
   gjxl::VarDctDensityMode density_mode =
     gjxl::VarDctDensityMode::kDefault;
+  gjxl::VarDctCompressionMode compression_mode =
+    gjxl::VarDctCompressionMode::kAutomatic;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
-    gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+    gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   bool collect_final_butteraugli_score = false;
 };
 
@@ -206,6 +208,7 @@ struct Options {
   bool target_search_option_set = false;
   bool effort_set = false;
   bool high_density_set = false;
+  bool maximum_compression_set = false;
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument = argv[index];
     if (argument == "--distance") {
@@ -293,6 +296,13 @@ struct Options {
       }
       candidate.density_mode = gjxl::VarDctDensityMode::kHighDensity;
       high_density_set = true;
+    } else if (argument == "--maximum-compression") {
+      if (maximum_compression_set) {
+        return false;
+      }
+      candidate.compression_mode =
+        gjxl::VarDctCompressionMode::kMaximumCompression;
+      maximum_compression_set = true;
     } else if (argument == "--metal-aq") {
       if (index + 1 >= argc ||
           !ParseMetalAqMode(argv[++index], &candidate.metal_aq_mode)) {
@@ -327,8 +337,10 @@ struct Options {
           gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
         candidate.metal_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput)) ||
-      (candidate.metal_aq_mode !=
-         gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients &&
+      ((candidate.metal_aq_mode ==
+          gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
+        candidate.metal_aq_mode ==
+          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput) &&
        candidate.backend != gjxl::VarDctBackendPreference::kMetal)) {
     return false;
   }
@@ -437,6 +449,7 @@ void PrintUsage(const char* executable) {
                "[--size-selection under-budget|closest] "
                "[--effort 1..10] "
                "[--high-density] "
+               "[--maximum-compression] "
                "[--backend auto|cpu|metal] "
                "[--metal-aq exact-coefficients|fully-resident|throughput|"
                "maximum-throughput] "
@@ -468,6 +481,7 @@ int main(int argc, char** argv) {
     {.butteraugli_target = options.butteraugli_target,
      .effort = options.effort,
      .density_mode = options.density_mode,
+     .compression_mode = options.compression_mode,
      .rate_control_mode = options.rate_control_mode,
      .maximum_error = options.maximum_error,
      .target_bytes = options.target_bytes,
@@ -553,6 +567,14 @@ int main(int argc, char** argv) {
                       gjxl::VarDctDensityMode::kHighDensity
                   ? " with high-density AQ"
                   : "")
+            << " and "
+            << (summary.entropy_behavior ==
+                      gjxl::VarDctEntropyBehavior::kMaximumCompression
+                  ? "maximum-compression entropy"
+                  : (summary.entropy_behavior ==
+                           gjxl::VarDctEntropyBehavior::kHighDensity
+                       ? "high-density entropy"
+                       : "balanced entropy"))
             << ".\nStrategies:";
   for (size_t index = 0; index < summary.strategy_counts.size(); ++index) {
     if (summary.strategy_counts[index] == 0) {

@@ -271,6 +271,7 @@ public:
 
   Status Prepare(
     const AqEvaluationPreparation& preparation,
+    bool host_images_are_finite,
     gpu_profile_internal::GpuProfilingMode profiling_mode =
       gpu_profile_internal::GpuProfilingMode::kDisabled,
     gpu_profile_internal::GpuExecutionProfile* profile = nullptr);
@@ -396,7 +397,9 @@ private:
     kInvalid,
   };
 
-  Status ValidatePreparation(const AqEvaluationPreparation &preparation) const;
+  Status ValidatePreparation(
+    const AqEvaluationPreparation& preparation,
+    bool host_images_are_finite) const;
   Status ValidateInput(AqEvaluationInput input) const;
   Status ValidateOutput(AqEvaluationOutput output) const;
   Status InitializeGpuExecutionProfile(
@@ -425,7 +428,17 @@ private:
   Status PrepareQuantizationProbeReadback();
   Status ReadbackRawQuant();
   Status ReadbackColorCorrelation();
+  Status AssembleFrame(
+      ConstPlaneI32View raw_quant,
+      ConstImage3I32View quantized_dc,
+      std::span<const int32_t> quantized_ac,
+      VarDctEncoderFrame* frame) const;
   Status AssembleFrameFromReadback(VarDctEncoderFrame *frame) const;
+  Status AssembleFrameFromCompletedDeviceBuffers(
+      bool raw_quant_is_device_resident,
+      VarDctEncoderFrame* frame,
+      uint64_t* mapping_nanoseconds = nullptr,
+      uint64_t* assembly_nanoseconds = nullptr) const;
   Status WaitForOperation(
       gpu_profile_internal::GpuSubmissionProfile* gpu_profile = nullptr);
   void CompleteOperation();
@@ -624,8 +637,8 @@ private:
   std::array<AqStrategyBatch, 7> batches_{};
   std::array<AqReconstructionParams, 7> reconstruction_params_{};
   std::vector<AqAnchor> row_major_anchors_;
-  std::vector<vardct_frame_internal::QuantizedAcTransformView>
-    final_transform_views_;
+  std::vector<vardct_frame_internal::QuantizedAcTransformLayout>
+    final_transform_layouts_;
   std::vector<float> readback_;
   std::vector<float> resident_policy_quant_readback_;
   std::array<float, 5> resident_policy_score_readback_{};

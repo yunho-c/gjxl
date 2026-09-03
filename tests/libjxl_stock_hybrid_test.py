@@ -89,28 +89,57 @@ class ComparisonToolTest(unittest.TestCase):
                             {
                                 "decoded_validation": "exact-float-equal",
                                 "correctness_outputs": {
-                                    "libjxl": {"bytes": 90, "sha256": "b" * 64}
+                                    "gjxl": {"bytes": 91, "sha256": "a" * 64},
+                                    "libjxl": {"bytes": 90, "sha256": "b" * 64},
                                 },
                                 "pairs": [
                                     {
+                                        "gjxl": {
+                                            "backend": "gjxl",
+                                            "wall_nanoseconds": 230,
+                                            "encoded_bytes": 91,
+                                            "codestream_sha256": "a" * 64,
+                                            "workflow_phase_nanoseconds": {
+                                                "input_preparation": 20,
+                                                "quantization_pipeline": 100,
+                                                "codestream_encoding": 80,
+                                            },
+                                        },
                                         "libjxl": {
+                                            "backend": "libjxl",
                                             "wall_nanoseconds": 200,
+                                            "encoded_bytes": 90,
+                                            "codestream_sha256": "b" * 64,
                                             "workflow_phase_nanoseconds": {
                                                 "input_preparation": 20,
                                                 "quantization_pipeline": 100,
                                                 "codestream_encoding": 50,
                                             },
-                                        }
+                                        },
                                     },
                                     {
+                                        "gjxl": {
+                                            "backend": "gjxl",
+                                            "wall_nanoseconds": 250,
+                                            "encoded_bytes": 91,
+                                            "codestream_sha256": "a" * 64,
+                                            "workflow_phase_nanoseconds": {
+                                                "input_preparation": 30,
+                                                "quantization_pipeline": 110,
+                                                "codestream_encoding": 90,
+                                            },
+                                        },
                                         "libjxl": {
+                                            "backend": "libjxl",
                                             "wall_nanoseconds": 220,
+                                            "encoded_bytes": 90,
+                                            "codestream_sha256": "b" * 64,
                                             "workflow_phase_nanoseconds": {
                                                 "input_preparation": 30,
                                                 "quantization_pipeline": 110,
                                                 "codestream_encoding": 70,
                                             },
-                                        }
+                                        },
                                     },
                                 ],
                             }
@@ -120,14 +149,18 @@ class ComparisonToolTest(unittest.TestCase):
                 encoding="utf-8",
             )
             parsed_hybrid = TOOL.parse_hybrid(hybrid, arguments)
-            self.assertEqual(parsed_hybrid["median_nanoseconds"], 210.0)
+            self.assertEqual(parsed_hybrid["gjxl"]["median_nanoseconds"], 240.0)
+            self.assertEqual(parsed_hybrid["hybrid"]["median_nanoseconds"], 210.0)
             self.assertEqual(
-                parsed_hybrid["input_preparation_median_nanoseconds"], 25.0
+                parsed_hybrid["hybrid"]["input_preparation_median_nanoseconds"],
+                25.0,
             )
             self.assertEqual(
-                parsed_hybrid["quantization_pipeline_median_nanoseconds"], 105.0
+                parsed_hybrid["hybrid"]["quantization_pipeline_median_nanoseconds"],
+                105.0,
             )
-            self.assertEqual(parsed_hybrid["tail_median_nanoseconds"], 60.0)
+            self.assertEqual(parsed_hybrid["hybrid"]["tail_median_nanoseconds"], 60.0)
+            self.assertEqual(parsed_hybrid["gjxl"]["tail_median_nanoseconds"], 85.0)
 
             stock = directory / "stock.json"
             stock.write_text(

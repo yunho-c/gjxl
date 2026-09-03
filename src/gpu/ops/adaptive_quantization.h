@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -16,10 +17,12 @@ namespace gjxl {
 /// Selects where GPU adaptive-quantization evaluation begins.
 enum class GpuAdaptiveQuantizationMode {
   /// CPU coefficient decisions are authoritative; the GPU starts at inverse
-  /// reconstruction. This is the production and automatic-workflow default.
+  /// reconstruction. Encoding workflows retain this as an explicit reference
+  /// and compatibility mode; source-compatible diagnostic overloads use it by
+  /// default.
   kExactCoefficients,
   /// Forward transforms, coefficient coding, and reconstruction remain on the
-  /// GPU. This is an explicit experimental mode and may change encoder
+  /// GPU. This is the default Metal encoding mode and may change encoder
   /// decisions relative to the CPU reference.
   kFullyResident,
   /// Encoding-only workflows apply both default AQ updates, then quantize the
@@ -100,10 +103,9 @@ struct GpuFrameOnlyQuantizationOutput {
   GpuAdaptiveQuantizationPolicyOutput output);
 
 /// Runs the bounded policy with the explicitly selected GPU evaluation mode.
-/// Resident modes are intended for error measurement and numerical research;
-/// neither promises CPU-identical encoder decisions. `kThroughput` changes the
-/// complete diagnostic pipeline's policy iteration bound, not this direct
-/// operation.
+/// Resident modes do not promise CPU-identical encoder decisions.
+/// `kThroughput` changes the complete diagnostic pipeline's policy iteration
+/// bound, not this direct operation.
 /// `kMaximumThroughput` is unsupported by this direct operation.
 [[nodiscard]] Status RunGpuAdaptiveQuantizationPolicy(
   GpuBackend& gpu,
@@ -163,11 +165,13 @@ struct AdaptiveQuantizationMaterialization {
 
 /// Reusable frame-level GPU AQ state for repeated rate-control attempts.
 ///
-/// The state remembers the backend, source views, and evaluation options that
-/// define the prepared allocation. Compatible calls only rebind the strategy
-/// and EPF metadata; incompatible calls transparently prepare a new state.
+/// The state remembers the quantization-pipeline generation, backend, source
+/// views, and evaluation options that define the prepared allocation.
+/// Compatible calls only rebind the strategy and EPF metadata; a new borrowed
+/// source generation transparently invalidates source-dependent GPU state.
 struct PreparedAdaptiveQuantization {
   PreparedAcStrategySearch ac_strategy_search;
+  uint64_t quantization_pipeline_generation = 0;
   ConstDeviceImage3View resident_coding_opsin;
   GpuBackend* backend = nullptr;
   ConstImage3FView original_linear_rgb;

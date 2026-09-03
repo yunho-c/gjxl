@@ -17,6 +17,7 @@
 #include "gpu/ops/adaptive_quantization_profile_internal.h"
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/gaborish.h"
 #include "gpu/ops/gaborish_profile_internal.h"
 #include "gpu/ops/quantization_pipeline_profile_internal.h"
@@ -162,6 +163,19 @@ bool SameImageIdentity(ConstImage3FView left, ConstImage3FView right) {
     SamePlaneIdentity(left.plane[2], right.plane[2]);
 }
 
+bool HasValidatedHostImages(
+  const quantization_pipeline_internal::PreparedQuantizationPipeline&
+    prepared,
+  ConstImage3FView original_linear_rgb) {
+
+  return prepared.validated_original_linear_rgb.valid() &&
+    prepared.validated_coding_opsin.valid() &&
+    SameImageIdentity(
+      prepared.validated_original_linear_rgb, original_linear_rgb) &&
+    SameImageIdentity(
+      prepared.validated_coding_opsin, prepared.coding_opsin);
+}
+
 Status PrepareResidentAcStrategyInputs(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
@@ -185,10 +199,10 @@ Status PrepareResidentAcStrategyInputs(
     .maximum_error = options.adaptive_quantization.maximum_error,
   };
   const bool compatible = state.evaluation != nullptr &&
+    state.quantization_pipeline_generation == prepared.generation &&
     state.backend == &gpu &&
     SameImageIdentity(state.original_linear_rgb, original_linear_rgb) &&
-    SameImageIdentity(
-      state.coding_opsin, prepared.preprocessed_opsin.const_view()) &&
+    SameImageIdentity(state.coding_opsin, prepared.coding_opsin) &&
     state.evaluation_options == evaluation_options &&
     state.resident_quantization;
   if (!compatible) {
@@ -204,7 +218,7 @@ Status PrepareResidentAcStrategyInputs(
     provisional_strategies.fill_dct8();
     const AqEvaluationPreparation evaluation_preparation{
       .original_linear_rgb = original_linear_rgb,
-      .coding_opsin = prepared.coding_opsin.const_view(),
+      .coding_opsin = prepared.coding_opsin,
       .strategies = &provisional_strategies,
       .epf_sharpness = {
         prepared.epf_sharpness.data(), prepared.block_extent,
@@ -217,20 +231,33 @@ Status PrepareResidentAcStrategyInputs(
       .coefficient_decision_mode =
         AcCoefficientDecisionMode::kAdjustedSharedQuant,
     };
+    auto* const validated_preparation = HasValidatedHostImages(
+        prepared, original_linear_rgb)
+      ? dynamic_cast<aq_evaluation_internal::GpuValidatedAqEvaluation*>(
+          &gpu)
+      : nullptr;
     if (profiling_session == nullptr) {
-      status = PrepareAqEvaluation(
-        gpu, evaluation_preparation, &state.evaluation);
+      status = validated_preparation == nullptr
+        ? PrepareAqEvaluation(
+            gpu, evaluation_preparation, &state.evaluation)
+        : validated_preparation->PrepareValidatedAqEvaluation(
+            evaluation_preparation, &state.evaluation);
     } else {
-      auto* preparation_profiler = dynamic_cast<
+      auto* const preparation_profiler = dynamic_cast<
         gpu_profile_internal::GpuAqEvaluationProfiler*>(&gpu);
-      if (preparation_profiler == nullptr) {
+      if (validated_preparation == nullptr &&
+          preparation_profiler == nullptr) {
         return Status::Unavailable(
           "Resident evaluator preparation cannot collect GPU diagnostics");
       }
       gpu_profile_internal::GpuExecutionProfile child_profile;
-      status = preparation_profiler->PrepareAqEvaluationProfiled(
-        evaluation_preparation, profiling_session->mode(),
-        &state.evaluation, &child_profile);
+      status = validated_preparation == nullptr
+        ? preparation_profiler->PrepareAqEvaluationProfiled(
+            evaluation_preparation, profiling_session->mode(),
+            &state.evaluation, &child_profile)
+        : validated_preparation->PrepareValidatedAqEvaluationProfiled(
+            evaluation_preparation, profiling_session->mode(),
+            &state.evaluation, &child_profile);
       if (status.ok()) {
         status = profiling_session->Append(std::move(child_profile));
       }
@@ -244,12 +271,13 @@ Status PrepareResidentAcStrategyInputs(
       if (!status.ok()) return status;
     }
     state.backend = &gpu;
+    state.quantization_pipeline_generation = prepared.generation;
     state.original_linear_rgb = original_linear_rgb;
     // The complete evaluator owns the unfiltered coding image and regenerates
     // the resident search-domain image during initial quantization. Track the
-    // logical preprocessed view used by the downstream AQ provider so the
-    // same allocation is recognized and reconfigured instead of replaced.
-    state.coding_opsin = prepared.preprocessed_opsin.const_view();
+    // immutable coding view used by the downstream AQ provider so the same
+    // allocation is recognized and reconfigured instead of replaced.
+    state.coding_opsin = prepared.coding_opsin;
     state.evaluation_options = evaluation_options;
     state.resident_quantization = true;
   }
@@ -510,6 +538,26 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     return Status::Unavailable(
       "GPU quantization pipeline requires prepared AQ support");
   }
+  if (prepared.generation == 0) {
+    return Status::InvalidArgument(
+      "GPU quantization pipeline preparation has no source generation");
+  }
+  if (prepared_aq != nullptr &&
+      prepared_aq->quantization_pipeline_generation !=
+        prepared.generation) {
+    // AC-search scratch contains no image identity and is safe to retain.
+    // The evaluator and its resident views do contain source pixels, so a new
+    // borrowed source generation must invalidate them even when an allocator
+    // reused the same host addresses.
+    prepared_aq->resident_coding_opsin = {};
+    prepared_aq->backend = nullptr;
+    prepared_aq->original_linear_rgb = {};
+    prepared_aq->coding_opsin = {};
+    prepared_aq->evaluation_options = {};
+    prepared_aq->resident_quantization = false;
+    prepared_aq->evaluation.reset();
+    prepared_aq->quantization_pipeline_generation = prepared.generation;
+  }
   const bool resident =
     aq_mode != GpuAdaptiveQuantizationMode::kExactCoefficients;
   if (aq_mode == GpuAdaptiveQuantizationMode::kThroughput &&
@@ -614,25 +662,7 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
       "Encoding-only GPU pipeline output is invalid");
   }
   const CpuQuantizationPipelineOutput pipeline_output{
-    .initial_quantization = {
-      .quant_field = {
-        prepared.initial_quant.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .strategy_mask = {
-        prepared.strategy_mask.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .pixel_mask = {
-        prepared.pixel_mask.data(), prepared.padded_extent,
-        prepared.padded_extent.width},
-    },
     .adaptive_quantization = {
-      .quant_field = {
-        prepared.final_quant.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .block_distance_map = {
-        prepared.block_distance.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .reconstructed_linear_rgb = prepared.reconstructed_linear.view(),
       .frame = output.frame,
       .score_history = output.score_history,
       .maximum_error_result = output.maximum_error_result,
@@ -693,25 +723,7 @@ Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
   gpu_profile_internal::GpuProfilingSession profiling_session(
     profiling_mode, capabilities);
   const CpuQuantizationPipelineOutput pipeline_output{
-    .initial_quantization = {
-      .quant_field = {
-        prepared.initial_quant.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .strategy_mask = {
-        prepared.strategy_mask.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .pixel_mask = {
-        prepared.pixel_mask.data(), prepared.padded_extent,
-        prepared.padded_extent.width},
-    },
     .adaptive_quantization = {
-      .quant_field = {
-        prepared.final_quant.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .block_distance_map = {
-        prepared.block_distance.data(), prepared.block_extent,
-        prepared.block_extent.width},
-      .reconstructed_linear_rgb = prepared.reconstructed_linear.view(),
       .frame = output.frame,
       .score_history = output.score_history,
       .maximum_error_result = output.maximum_error_result,

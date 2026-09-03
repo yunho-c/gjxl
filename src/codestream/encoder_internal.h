@@ -8,6 +8,8 @@
 #include <span>
 #include <vector>
 
+#include "codestream/encoder.h"
+#include "codestream/entropy.h"
 #include "codestream/profile_internal.h"
 #include "core/status.h"
 
@@ -22,6 +24,13 @@ struct CandidateSelectionKey {
   bool custom_order = false;
   size_t block_context_candidate_index = 0;
 };
+
+/// Selects the ordinary-path coder before model construction, matching the
+/// pinned libjxl tiny-stream and singleton-context policy.
+[[nodiscard]] Status SelectOrdinaryEntropyCodingMode(
+  std::span<const EntropyTokenStreamView> streams,
+  const EntropyCodeOptions& options,
+  EntropyCodingMode* mode);
 
 /// Prefix fallback intentionally wins an equal complete-codestream size.
 [[nodiscard]] constexpr bool PreferAllPrefixCandidate(
@@ -53,6 +62,10 @@ struct CandidateSelectionKey {
   std::vector<size_t>* sizes);
 
 struct VarDctCodestreamProfile {
+  VarDctEntropyBehavior entropy_behavior =
+    VarDctEntropyBehavior::kBalanced;
+  VarDctCoefficientOrderBehavior coefficient_order_behavior =
+    VarDctCoefficientOrderBehavior::kFull;
   uint64_t validation_nanoseconds = 0;
   uint64_t dc_tokenization_nanoseconds = 0;
   uint64_t ac_tokenization_nanoseconds = 0;
@@ -99,6 +112,12 @@ struct VarDctCodestreamProfile {
 /// `profile` remain unchanged.
 [[nodiscard]] Status EncodeVarDctCodestreamProfiled(
   const VarDctEncoderFrame& frame,
+  std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile);
+
+[[nodiscard]] Status EncodeVarDctCodestreamProfiled(
+  const VarDctEncoderFrame& frame,
+  VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
   VarDctCodestreamProfile* profile);
 

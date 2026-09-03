@@ -264,14 +264,25 @@ bool CheckEncodedFrame(
   std::vector<uint8_t> profiled;
   gjxl::codestream_internal::VarDctCodestreamProfile profile;
   if (status.ok()) {
-    status = gjxl::EncodeVarDctCodestream(frame, &first);
+    status = gjxl::EncodeVarDctCodestream(
+      frame,
+      {.entropy_behavior =
+         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+      &first);
   }
   if (status.ok()) {
-    status = gjxl::EncodeVarDctCodestream(frame, &second);
+    status = gjxl::EncodeVarDctCodestream(
+      frame,
+      {.entropy_behavior =
+         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+      &second);
   }
   if (status.ok()) {
     status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
-      frame, &profiled, &profile);
+      frame,
+      {.entropy_behavior =
+         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+      &profiled, &profile);
   }
   const uint64_t profile_stage_total =
     profile.validation_nanoseconds + profile.dc_tokenization_nanoseconds +
@@ -369,7 +380,10 @@ bool CheckAdaptiveBlockContextSelection() {
   gjxl::codestream_internal::VarDctCodestreamProfile profile;
   if (status.ok()) {
     status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
-      frame, &output, &profile);
+      frame,
+      {.entropy_behavior =
+         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+      &output, &profile);
   }
   if (!status.ok() || profile.block_context_candidate_count != 5 ||
       profile.compact_block_context_candidate_bytes == 0 ||
@@ -396,6 +410,27 @@ bool CheckAdaptiveBlockContextSelection() {
               << profile.selected_block_context_candidate_index << '\n';
     return false;
   }
+
+  std::vector<uint8_t> balanced_output;
+  gjxl::codestream_internal::VarDctCodestreamProfile balanced_profile;
+  status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+    frame,
+    {.entropy_behavior = gjxl::VarDctEntropyBehavior::kBalanced},
+    &balanced_output, &balanced_profile);
+  if (!status.ok() || balanced_output.empty() ||
+      balanced_profile.block_context_candidate_count != 1 ||
+      balanced_profile.compact_block_context_candidate_bytes != 0 ||
+      balanced_profile.selected_block_context_candidate_index != 0 ||
+      balanced_profile.selected_block_context_count == 0 ||
+      balanced_profile.coefficient_tokenization_pass_count != 1 ||
+      balanced_profile.coefficient_context_materialization_count != 0 ||
+      balanced_profile.coefficient_materialized_token_count != 0) {
+    std::cerr << "Single block-context selection failed: "
+              << status.message() << ", bytes=" << balanced_output.size()
+              << ", contexts="
+              << balanced_profile.selected_block_context_count << '\n';
+    return false;
+  }
   return true;
 }
 
@@ -411,6 +446,103 @@ bool CheckAssemblyAndDeterminism() {
          CheckEncodedFrame(
            257, 9, 3851, 18124942738510227601ull, 1, true,
            false, true, false);
+}
+
+bool CheckEntropyBehaviorPlumbing() {
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::Status status = MakeFrame(64, 9, {3541, 10}, {}, &frame);
+  for (const gjxl::VarDctEntropyBehavior behavior : {
+         gjxl::VarDctEntropyBehavior::kBalanced,
+         gjxl::VarDctEntropyBehavior::kHighDensity,
+         gjxl::VarDctEntropyBehavior::kMaximumCompression}) {
+    std::vector<uint8_t> output;
+    gjxl::codestream_internal::VarDctCodestreamProfile profile;
+    status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+      frame, {.entropy_behavior = behavior}, &output, &profile);
+    const bool exhaustive =
+      behavior == gjxl::VarDctEntropyBehavior::kMaximumCompression;
+    if (!status.ok() || output.empty() ||
+        profile.entropy_behavior != behavior ||
+        profile.coefficient_order_behavior !=
+          gjxl::VarDctCoefficientOrderBehavior::kFull ||
+        profile.entropy_model_bits == 0 || profile.entropy_token_bits == 0 ||
+        (!exhaustive &&
+         profile.section_writing_work.candidate_measure_nanoseconds != 0) ||
+        profile.coefficient_context_materialization_count !=
+          (exhaustive ? profile.coefficient_tokenization_pass_count : 0)) {
+      std::cerr << "Entropy behavior plumbing failed: "
+                << status.message() << '\n';
+      return false;
+    }
+  }
+
+  const std::vector<uint8_t> sentinel = {9, 8, 7};
+  std::vector<uint8_t> output = sentinel;
+  if (gjxl::EncodeVarDctCodestream(
+        frame,
+        {.entropy_behavior =
+           static_cast<gjxl::VarDctEntropyBehavior>(99)},
+        &output).code() != gjxl::StatusCode::kInvalidArgument ||
+      output != sentinel) {
+    std::cerr << "Invalid entropy behavior was not rejected atomically\n";
+    return false;
+  }
+  if (gjxl::EncodeVarDctCodestream(
+        frame,
+        {.coefficient_order_behavior =
+           static_cast<gjxl::VarDctCoefficientOrderBehavior>(99)},
+        &output).code() != gjxl::StatusCode::kInvalidArgument ||
+      output != sentinel) {
+    std::cerr << "Invalid coefficient-order behavior was not rejected "
+                 "atomically\n";
+    return false;
+  }
+
+  std::vector<uint8_t> full_order;
+  std::vector<uint8_t> sampled_order_first;
+  std::vector<uint8_t> sampled_order_second;
+  gjxl::codestream_internal::VarDctCodestreamProfile sampled_profile;
+  if (!gjxl::EncodeVarDctCodestream(frame, {}, &full_order).ok() ||
+      !gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+        frame,
+        {.coefficient_order_behavior =
+           gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled},
+        &sampled_order_first, &sampled_profile).ok() ||
+      !gjxl::EncodeVarDctCodestream(
+        frame,
+        {.coefficient_order_behavior =
+           gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled},
+        &sampled_order_second).ok() ||
+      sampled_order_first != sampled_order_second ||
+      sampled_order_first == full_order ||
+      sampled_profile.coefficient_order_behavior !=
+        gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled) {
+    std::cerr << "Effort-7 coefficient-order sampling failed\n";
+    return false;
+  }
+
+  std::vector<uint8_t> maximum_full;
+  std::vector<uint8_t> maximum_sampled;
+  gjxl::codestream_internal::VarDctCodestreamProfile maximum_profile;
+  if (!gjxl::EncodeVarDctCodestream(
+        frame,
+        {.entropy_behavior =
+           gjxl::VarDctEntropyBehavior::kMaximumCompression},
+        &maximum_full).ok() ||
+      !gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
+        frame,
+        {.entropy_behavior =
+           gjxl::VarDctEntropyBehavior::kMaximumCompression,
+         .coefficient_order_behavior =
+           gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled},
+        &maximum_sampled, &maximum_profile).ok() ||
+      maximum_sampled != maximum_full ||
+      maximum_profile.coefficient_order_behavior !=
+        gjxl::VarDctCoefficientOrderBehavior::kFull) {
+    std::cerr << "Maximum compression did not force full coefficient orders\n";
+    return false;
+  }
+  return true;
 }
 
 bool CheckAtomicRejections() {
@@ -512,7 +644,8 @@ bool CheckDeferredCandidatePrimitives() {
 int main() {
   if (!CheckCodestreamAndFrameHeaders() || !CheckQuantizerSelectors() ||
       !CheckAssemblyAndDeterminism() || !CheckAdaptiveBlockContextSelection() ||
-      !CheckAtomicRejections() || !CheckDeferredCandidatePrimitives()) {
+      !CheckEntropyBehaviorPlumbing() || !CheckAtomicRejections() ||
+      !CheckDeferredCandidatePrimitives()) {
     return EXIT_FAILURE;
   }
   std::cout << "All codestream encoder tests passed.\n";

@@ -1323,34 +1323,8 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
     status = Status::DeviceError(
         "Metal AQ frame encoding detected invalid numeric input");
   }
-  if (status.ok()) {
-    status = CopyReadback(*backend_, quantized_coefficients_,
-                          quantized_readback_.data(),
-                          quantized_readback_.size() * sizeof(int32_t));
-  }
-  if (status.ok()) {
-    status = CopyReadback(*backend_, quantized_dc_,
-                          quantized_dc_readback_.data(),
-                          quantized_dc_readback_.size() * sizeof(int32_t));
-  }
-  if (status.ok() &&
-      (coefficient_decision_mode_ ==
-           AcCoefficientDecisionMode::kAdjustedSharedQuant ||
-       frame_only_resident_quantizer_)) {
-    status = ReadbackRawQuant();
-  }
   if (status.ok() && resident_initial_cfl_) {
     status = ReadbackColorCorrelation();
-  }
-  constexpr int32_t kQuantizedPoison =
-      static_cast<int32_t>(0x81234567u);
-  if (status.ok() &&
-      (std::ranges::find(quantized_readback_, kQuantizedPoison) !=
-           quantized_readback_.end() ||
-       std::ranges::find(quantized_dc_readback_, kQuantizedPoison) !=
-           quantized_dc_readback_.end())) {
-    status = Status::Internal(
-        "Metal AQ frame encoding readback contains poison");
   }
   if (!status.ok()) {
     Invalidate();
@@ -1358,7 +1332,11 @@ Status MetalPreparedAqEvaluation::EncodeFrame(
   }
 
   VarDctEncoderFrame candidate;
-  status = AssembleFrameFromReadback(&candidate);
+  status = AssembleFrameFromCompletedDeviceBuffers(
+    coefficient_decision_mode_ ==
+        AcCoefficientDecisionMode::kAdjustedSharedQuant ||
+      frame_only_resident_quantizer_,
+    &candidate);
   if (!status.ok()) {
     Invalidate();
     return status;
@@ -1524,6 +1502,7 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
 
 Status MetalPreparedAqEvaluation::PrepareReconstructionDiagnosticReadback() {
   try {
+    quantized_readback_.resize(coefficient_value_count_);
     forward_readback_.resize(coefficient_value_count_);
     dc_readback_.resize(3 * block_count_);
     for (std::vector<float> &plane : reconstructed_readback_) {
@@ -1741,6 +1720,17 @@ Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
 
   status = BeginOperation();
   if (!status.ok()) return status;
+  try {
+    quantized_readback_.resize(info->coefficient_count());
+  } catch (const std::bad_alloc&) {
+    CompleteOperation();
+    return Status::OutOfMemory(
+      "Unable to allocate AQ adjustment-probe readback");
+  } catch (const std::length_error&) {
+    CompleteOperation();
+    return Status::InvalidArgument(
+      "AQ adjustment-probe readback is too large");
+  }
   status = UploadContiguous(
       *backend_, std::span<const float>(packed_coefficients),
       forward_coefficients_);

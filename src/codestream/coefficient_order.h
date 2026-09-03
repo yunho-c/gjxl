@@ -17,6 +17,7 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+enum class VarDctCoefficientOrderBehavior : uint8_t;
 
 inline constexpr size_t kSimplePermutationContextCount = 8;
 
@@ -39,6 +40,16 @@ struct SimpleCoefficientOrders {
 [[nodiscard]] Status ComputeSimpleCoefficientOrders(
   const VarDctEncoderFrame& frame,
   SimpleCoefficientOrders* orders);
+
+namespace codestream_internal {
+
+/// Serializer-only entry point for an already validated frame.
+[[nodiscard]] Status ComputeSimpleCoefficientOrdersForEncoder(
+  const VarDctEncoderFrame& frame,
+  VarDctCoefficientOrderBehavior behavior,
+  SimpleCoefficientOrders* orders);
+
+}  // namespace codestream_internal
 
 /// Validates supported family bits, dimensions, permutations, and LLF
 /// prefixes.

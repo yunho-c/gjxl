@@ -27,26 +27,26 @@ The primary throughput gate is:
 - The reported speedup is the range of paired process medians, not a ratio of
   unrelated best cases.
 
-Four accuracy tracks are explicit:
+Four behavior tracks are explicit:
 
-- `exact-coefficients` is the production track. Raw quantization, encoder frame,
-  and codestream bytes remain exact; existing numerical gates are not widened.
-- `fully-resident` is the resident-quality track. Byte identity is not required,
-  but output must be deterministic for a fixed backend, structurally valid,
-  independently accepted by the pinned `djxl`, finite after decoding, and
-  measured for Butteraugli/decoded-pixel drift. Any policy or quality change is
-  reported instead of being hidden behind a tolerance.
-- `throughput` is a more aggressive opt-in policy layered on the resident
-  evaluator. Encoding applies the default two AQ updates but omits the third,
-  diagnostic-only reconstruction and perceptual score; diagnostic APIs retain
-  their earlier one-update tradeoff.
+- `exact-coefficients` is the explicit reference/compatibility track. Raw
+  quantization, encoder frame, and codestream bytes remain exact; existing
+  numerical gates are not widened.
+- `fully-resident` is the production encoding default. Byte identity is not
+  required, but output must be deterministic for a fixed backend, structurally
+  valid, independently accepted by the pinned `djxl`, finite after decoding,
+  and measured for Butteraugli/decoded-pixel drift. Any policy or quality
+  change is reported instead of being hidden behind a tolerance.
+- `throughput` is equivalent to fully resident inside the encoding workflow.
+  Complete diagnostic APIs retain its earlier explicit one-update tradeoff.
 - `maximum-throughput` is the explicit speed-first track. It uses only DCT8,
   quantizes the adjusted initial field directly on Metal, and omits inverse
   reconstruction and perceptual AQ scoring. Its score history is therefore
   empty, and decoded quality must be measured independently.
 
 The `50x` objective may be satisfied first by the maximum-throughput track.
-Production rollout remains separately gated on the exact track.
+Exact-decision compatibility remains separately gated and explicitly
+selectable rather than constraining the default resident path.
 
 ## Current baseline
 
@@ -58,7 +58,7 @@ established the following 1080p public-workflow range:
 | CPU public workflow | 6345.9-6374.5 ms | 1.00x |
 | Exact-coefficient Metal public workflow | 1084.1-1117.8 ms | 5.70-5.87x |
 
-The experimental fully resident AQ operation reached `12.2-12.8x` for AQ
+The then-experimental fully resident AQ operation reached `12.2-12.8x` for AQ
 itself, not for the complete public encoder. A `50x` 1080p result requires a
 complete time no greater than approximately `127 ms` against this CPU baseline.
 
@@ -201,15 +201,15 @@ Each artifact contains:
   and SHA-256 hashes of the benchmark, metallib, and symbol companion; and
 - starting worktree/index patches plus an untracked-file hash inventory.
 
-Raw workflow schema 9 keeps the elapsed `codestream_dc_tokenization`,
+Raw workflow schema 14 keeps the elapsed `codestream_dc_tokenization`,
 `codestream_ac_tokenization`, `codestream_entropy_optimization`,
 `codestream_section_writing`, and `codestream_assembly` phases, and adds finer
 codestream counters. Names ending in `_work` are aggregate worker time: work
 performed by overlapping DC, coefficient-order, AC-candidate, and section
 tasks is summed, so those counters can exceed their enclosing wall-clock phase
 and must not be added to complete-encode latency. The new breakdown separates
-block-context and coefficient preparation, map-independent coefficient-token
-template construction, candidate-specific context materialization, prefix
+block-context and coefficient preparation, coefficient-token construction,
+candidate-specific context materialization where applicable, prefix
 histogram construction/clustering/code building, prefix value collection,
 HybridUint configuration search, final prefix-model serialization and checked
 cost assembly, ANS value aggregation,
@@ -217,16 +217,24 @@ HybridUint and histogram/model searches, exact ANS token costing, entropy
 selection, model/header and token-stream writing, candidate measurement, and
 the selected candidate's final header/TOC/section/output assembly. The
 `substage_work_timing` field records the `aggregate-worker-time` semantics.
-Each sample's `ac_tokenization` object also records template passes and tokens
-plus context-materialization passes and tokens, so repeated full token scans
-cannot disappear behind a lower wall time.
+Each sample's `ac_tokenization` object records whether the direct or reusable
+template path ran, its passes and tokens, plus context-materialization passes
+and tokens. Repeated full token scans therefore cannot disappear behind a
+lower wall time.
 The prefix search now retains its exact sorted `(value,count)` populations for
 the selected partition and ANS consumes them directly. Consequently,
 `codestream_entropy_ans_value_collection_work` and
 `codestream_entropy_ans_value_aggregation_work` remain in the schema as zero
-work-elimination sentinels. Schema 9 adds
-`codestream_entropy_ans_prepared_value_validation_work` for the inexpensive
+work-elimination sentinels. The retained field
+`codestream_entropy_ans_prepared_value_validation_work` records the inexpensive
 partition, ordering, and count checks performed before that reuse.
+Schema 15 also records requested `effort`, resolved `entropy_behavior`, the
+automatic/maximum compression request, and ANS HybridUint, histogram, and
+alphabet-width candidate counts. These fields distinguish eliminated search
+work from a merely parallelized implementation. Ordinary direct-ANS paths
+intentionally leave Prefix code-build, ANS Prefix-validation, and cross-coder
+selection work at zero; maximum compression continues to populate the
+exhaustive phases.
 Entropy optimization retains each candidate model's exact per-section token
 bit counts. Candidate measurement reuses those counts to evaluate physical
 section and TOC sizes without traversing or materializing token payloads.
@@ -843,8 +851,10 @@ the P6 independent-process gate remains open.
   baseline.
 - Investigate decision-equivalent accumulation, selective high-precision repair,
   or a bounded throughput policy instead of assuming float ties are exact.
-- Retain both explicit accuracy tracks; automatic selection remains exact until
-  the production gate passes.
+- Retain both accuracy tracks. At this checkpoint automatic selection remained
+  exact pending the production gate; the later codestream policy promotion made
+  fully resident the automatic/default Metal encoding path while preserving
+  exact mode explicitly.
 
 Exit criterion: the throughput track removes CPU forward transforms and
 coefficient coding from every AQ evaluation and has independent decoder/quality

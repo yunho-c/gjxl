@@ -24,6 +24,10 @@ enum class VarDctCodestreamBackend {
 
 struct VarDctCodestreamBackendOptions {
   VarDctCodestreamBackend backend = VarDctCodestreamBackend::kGjxl;
+  VarDctEntropyBehavior entropy_behavior =
+    VarDctEntropyBehavior::kBalanced;
+  VarDctCoefficientOrderBehavior coefficient_order_behavior =
+    VarDctCoefficientOrderBehavior::kFull;
   int libjxl_effort = 7;
   float butteraugli_distance = 1.0f;
   size_t libjxl_thread_count = 1;

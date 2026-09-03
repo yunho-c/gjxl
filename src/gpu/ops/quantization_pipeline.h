@@ -40,8 +40,8 @@ struct GpuFrameOnlyPipelineOutput {
   AcStrategyGpuSearchStats* stats = nullptr);
 
 /// Runs the complete GPU pipeline with an explicit AQ evaluation mode.
-/// Fully resident mode is experimental and may produce different quantization
-/// decisions and codestream bytes than the CPU reference.
+/// Fully resident mode may produce different quantization decisions and
+/// codestream bytes than the CPU reference.
 [[nodiscard]] Status RunGpuQuantizationPipeline(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,

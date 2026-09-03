@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -47,6 +48,44 @@ struct PreparedAnsEntropyCode {
   std::vector<PreparedAnsEntropyCandidate> candidates;
   size_t section_count = 0;
 };
+
+enum class DirectAnsEntropyMode {
+  kBalanced,
+  kHighDensity,
+};
+
+inline constexpr size_t kAnsHistogramPrecisionShiftCount = 12;
+
+/// Pinned from libjxl enc_ans.cc at the repository's reference revision.
+[[nodiscard]] std::span<const HybridUintConfig>
+HighDensityAnsUintConfigs() noexcept;
+
+/// Population-precision shifts searched by each direct ANS policy. The flat
+/// histogram candidate is evaluated separately.
+[[nodiscard]] std::array<bool, kAnsHistogramPrecisionShiftCount>
+DirectAnsHistogramPrecisionShifts(DirectAnsEntropyMode mode) noexcept;
+
+/// Builds one ANS model directly from the requested contexts. Unlike the
+/// maximum-compression path, this does not derive the partition from an
+/// optimized Prefix model or compete across alphabet widths exactly.
+[[nodiscard]] Status OptimizeDirectAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  DirectAnsEntropyMode mode,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr,
+  EntropyWorkProfile* profile = nullptr);
+
+/// Balanced direct-ANS construction from already encoded per-context symbol
+/// populations. Ordered streams remain authoritative for final token cost and
+/// emission, but are not traversed to rebuild the same histograms.
+[[nodiscard]] Status OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  std::span<const PreparedFixedAnsCluster> context_populations,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr,
+  EntropyWorkProfile* profile = nullptr);
 
 /// Builds ANS models without traversing the ordered streams for exact cost.
 [[nodiscard]] Status PrepareAnsEntropyCodeWithPreparedClusters(

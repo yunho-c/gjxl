@@ -552,7 +552,8 @@ bool CheckMaximumErrorReduction(gjxl::GpuBackend& gpu) {
       frame_only_stats.maximum_error_bytes == 0 ||
       frame_only_stats.block_distance_map_bytes !=
         blocks.width * blocks.height * sizeof(float) ||
-      frame_only_stats.frame_bytes == 0 ||
+      frame_only_stats.frame_bytes != 0 ||
+      frame_only_stats.mapped_frame_bytes == 0 ||
       frame_only_stats.reconstructed_rgb_bytes != 0) {
     std::cerr << "Frame-only maximum-error readback accounting differs\n";
     return false;
@@ -684,7 +685,8 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
       full_stats.maximum_error_bytes != 0 ||
       full_stats.quantizer_bytes != 0 ||
       full_stats.block_distance_map_bytes != block_count * sizeof(float) ||
-      full_stats.frame_bytes == 0 ||
+      full_stats.frame_bytes != 0 ||
+      full_stats.mapped_frame_bytes == 0 ||
       full_stats.reconstructed_rgb_bytes !=
         3 * fixture.original.extent.width * fixture.original.extent.height *
           sizeof(float)) {
@@ -717,7 +719,8 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
       frame_only_stats.maximum_error_bytes != 0 ||
       frame_only_stats.block_distance_map_bytes !=
         block_count * sizeof(float) ||
-      frame_only_stats.frame_bytes == 0 ||
+      frame_only_stats.frame_bytes != 0 ||
+      frame_only_stats.mapped_frame_bytes == 0 ||
       frame_only_stats.reconstructed_rgb_bytes != 0) {
     std::cerr << "Frame-only evaluation readback accounting differs\n";
     return false;
@@ -878,6 +881,7 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
       exact_frame_only_stats.block_distance_map_bytes !=
         block_count * sizeof(float) ||
       exact_frame_only_stats.frame_bytes != 0 ||
+      exact_frame_only_stats.mapped_frame_bytes != 0 ||
       exact_frame_only_stats.reconstructed_rgb_bytes != 0) {
     std::cerr << "Exact frame-only evaluation read extra final data\n";
     return false;
@@ -1656,6 +1660,9 @@ bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
   if (!fixture.Initialize()) return false;
   const gjxl::Extent2D blocks = fixture.strategies.extent();
   const size_t block_count = blocks.width * blocks.height;
+  const size_t expected_mapped_frame_bytes =
+    (3 * fixture.coding.extent.width * fixture.coding.extent.height +
+     4 * block_count) * sizeof(int32_t);
   const std::vector<uint8_t> sharpness(block_count, 4);
   std::vector<float> initial(block_count, 0.75f);
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
@@ -1721,7 +1728,8 @@ bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
         (kIterations + 1) * sizeof(float) ||
       full_stats.quant_field_bytes != block_count * sizeof(float) ||
       full_stats.block_distance_map_bytes != block_count * sizeof(float) ||
-      full_stats.frame_bytes == 0 ||
+      full_stats.frame_bytes != 0 ||
+      full_stats.mapped_frame_bytes != expected_mapped_frame_bytes ||
       full_stats.reconstructed_rgb_bytes !=
         3 * fixture.original.extent.width * fixture.original.extent.height *
           sizeof(float)) {
@@ -1753,6 +1761,7 @@ bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
       map_only_stats.block_distance_map_bytes !=
         block_count * sizeof(float) ||
       map_only_stats.frame_bytes != 0 ||
+      map_only_stats.mapped_frame_bytes != 0 ||
       map_only_stats.reconstructed_rgb_bytes != 0) {
     std::cerr << "Map-only resident readback accounting differs\n";
     return false;
@@ -1777,9 +1786,38 @@ bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
         (kIterations + 1) * sizeof(float) ||
       lean_stats.quant_field_bytes != 0 ||
       lean_stats.block_distance_map_bytes != 0 ||
-      lean_stats.frame_bytes == 0 ||
+      lean_stats.frame_bytes != 0 ||
+      lean_stats.mapped_frame_bytes != expected_mapped_frame_bytes ||
       lean_stats.reconstructed_rgb_bytes != 0) {
     std::cerr << "Lean resident policy changed output or read extra data\n";
+    return false;
+  }
+
+  auto* profiler = dynamic_cast<
+    gjxl::gpu_profile_internal::PreparedAqEvaluationProfiler*>(
+      prepared.get());
+  std::vector<double> profiled_scores;
+  gjxl::VarDctEncoderFrame profiled_frame;
+  gjxl::gpu_profile_internal::GpuExecutionProfile handoff_profile;
+  if (profiler == nullptr ||
+      !CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
+        input,
+        {.score_history = &profiled_scores, .frame = &profiled_frame},
+        gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+        &handoff_profile), "profiled resident frame handoff") ||
+      profiled_scores != lean_scores ||
+      !QuantizedCoefficientsEqual(profiled_frame, lean_frame) ||
+      handoff_profile.wall_stages.size() != 2 ||
+      handoff_profile.wall_stages[0].stage_id !=
+        "resident.frame_mapping" ||
+      handoff_profile.wall_stages[0].kind !=
+        gjxl::gpu_profile_internal::GpuWallStageKind::kReadback ||
+      handoff_profile.wall_stages[1].stage_id !=
+        "resident.frame_assembly" ||
+      handoff_profile.wall_stages[1].kind !=
+        gjxl::gpu_profile_internal::GpuWallStageKind::kHost ||
+      handoff_profile.wall_stages[1].wall_nanoseconds == 0) {
+    std::cerr << "Profiled resident frame handoff differs\n";
     return false;
   }
 
@@ -1833,6 +1871,7 @@ bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
         score_stats.quant_field_bytes != 0 ||
         score_stats.block_distance_map_bytes != 0 ||
         score_stats.frame_bytes != 0 ||
+        score_stats.mapped_frame_bytes != 0 ||
         score_stats.reconstructed_rgb_bytes != 0) {
       std::cerr << "Score-only resident readback accounting differs\n";
       return false;
@@ -2355,6 +2394,49 @@ bool CheckInvalidCoefficientDecisionMode(gjxl::GpuBackend& gpu) {
     prepared == nullptr;
 }
 
+bool CheckPublicPreparationRejectsNonFiniteImages(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const std::vector<uint8_t> sharpness(
+    blocks.width * blocks.height, 4);
+  const auto rejected_without_gpu_work = [&](std::string_view operation) {
+    std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+    const gjxl::GpuBackendStats before = gpu.stats();
+    const gjxl::Status status = gjxl::PrepareAqEvaluation(
+      gpu,
+      {
+        .original_linear_rgb = fixture.original.View(),
+        .coding_opsin = fixture.coding.View(),
+        .strategies = &fixture.strategies,
+        .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+        .options = MakeOptions(),
+      },
+      &prepared);
+    const gjxl::GpuBackendStats after = gpu.stats();
+    if (status.code() == gjxl::StatusCode::kInvalidArgument &&
+        prepared == nullptr &&
+        before.successful_allocations == after.successful_allocations &&
+        before.committed_submissions == after.committed_submissions) {
+      return true;
+    }
+    std::cerr << operation
+              << " was not rejected atomically by public AQ preparation: "
+              << status.message() << '\n';
+    return false;
+  };
+
+  fixture.original.plane[1][2 * fixture.original.stride + 3] =
+    std::numeric_limits<float>::quiet_NaN();
+  if (!rejected_without_gpu_work("non-finite original RGB")) {
+    return false;
+  }
+  FillOriginal(&fixture.original);
+  fixture.coding.plane[2][4 * fixture.coding.stride + 5] =
+    std::numeric_limits<float>::infinity();
+  return rejected_without_gpu_work("non-finite coding Opsin");
+}
+
 }  // namespace
 
 int main() {
@@ -2364,6 +2446,7 @@ int main() {
       !CheckProfilingSessionAggregation() ||
       !CheckCapabilityBoundary() ||
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
+      !CheckPublicPreparationRejectsNonFiniteImages(*gpu) ||
       !CheckReductionCorpus(*gpu) ||
       !CheckMaximumErrorReduction(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||

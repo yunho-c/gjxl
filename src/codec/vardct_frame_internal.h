@@ -12,12 +12,16 @@
 
 namespace gjxl::vardct_frame_internal {
 
-struct QuantizedAcTransformView {
+struct QuantizedAcTransformLayout {
   size_t block_x = 0;
   size_t block_y = 0;
   AcStrategyType strategy = AcStrategyType::kCount;
-  std::array<std::span<const int32_t>, 3> coefficients;
+  size_t coefficient_count = 0;
+  std::array<size_t, 3> coefficient_offsets{};
 };
+
+inline constexpr int32_t kUnwrittenQuantizedCoefficient =
+  static_cast<int32_t>(0x81234567u);
 
 struct QuantizedFrameAssemblyInput {
   FrameGeometry geometry;
@@ -29,7 +33,9 @@ struct QuantizedFrameAssemblyInput {
   ConstPlaneU8View epf_sharpness;
   SimpleVarDctCodestreamProfile profile;
   ConstImage3I32View quantized_dc;
-  std::span<const QuantizedAcTransformView> transforms;
+  std::span<const int32_t> quantized_ac;
+  std::span<const QuantizedAcTransformLayout> transforms;
+  bool reject_unwritten_coefficients = false;
 };
 
 [[nodiscard]] Status AssembleVarDctEncoderFrame(

@@ -25,16 +25,21 @@ Status EncodeVarDctCodestreamWithBackend(
   candidate_profile.backend = options.backend;
   Status status;
   switch (options.backend) {
-    case VarDctCodestreamBackend::kGjxl:
+    case VarDctCodestreamBackend::kGjxl: {
+      const VarDctCodestreamOptions gjxl_options{
+        .entropy_behavior = options.entropy_behavior,
+        .coefficient_order_behavior = options.coefficient_order_behavior,
+      };
       status = profile == nullptr
-        ? EncodeVarDctCodestream(frame, output)
+        ? EncodeVarDctCodestream(frame, gjxl_options, output)
         : EncodeVarDctCodestreamProfiled(
-            frame, output, &candidate_profile.gjxl);
+            frame, gjxl_options, output, &candidate_profile.gjxl);
       if (status.ok()) {
         candidate_profile.total_nanoseconds =
           candidate_profile.gjxl.total_nanoseconds;
       }
       break;
+    }
 
     case VarDctCodestreamBackend::kLibjxl: {
       const LibjxlTailOptions libjxl_options{

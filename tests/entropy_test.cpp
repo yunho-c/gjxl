@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -12,9 +13,11 @@
 #include <vector>
 
 #include "codestream/ans_internal.h"
+#include "codestream/encoder_internal.h"
 #include "codestream/entropy.h"
 #include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
+#include "codestream/profile_internal.h"
 
 namespace {
 
@@ -923,6 +926,283 @@ bool CheckAnsSmallHistograms() {
   return true;
 }
 
+bool CheckDirectAnsOptimization() {
+  std::array<std::vector<gjxl::EntropyToken>, 3> sections;
+  for (size_t section = 0; section < sections.size(); ++section) {
+    for (size_t index = 0; index < 120; ++index) {
+      sections[section].push_back({
+        static_cast<uint32_t>((index + section) % 6),
+        static_cast<uint32_t>((3 * index + 5 * section) % 16),
+      });
+    }
+  }
+  sections[0].push_back({0, UINT32_MAX});
+  std::array<gjxl::EntropyTokenStreamView, 3> views;
+  for (size_t section = 0; section < sections.size(); ++section) {
+    views[section] =
+      gjxl::EntropyTokenStreamView::Interleaved(sections[section]);
+  }
+
+  const std::array modes = {
+    gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced,
+    gjxl::codestream_internal::DirectAnsEntropyMode::kHighDensity,
+  };
+  std::array<size_t, 2> cluster_counts{};
+  for (size_t mode_index = 0; mode_index < modes.size(); ++mode_index) {
+    const auto mode = modes[mode_index];
+    gjxl::EntropyCode first;
+    gjxl::EntropyCode second;
+    gjxl::EntropyCodeCost first_cost;
+    gjxl::EntropyCodeCost second_cost;
+    gjxl::codestream_internal::EntropyWorkProfile profile;
+    if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+          views, {.context_count = 6}, mode,
+          &first, &first_cost, &profile).ok() ||
+        !gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+          views, {.context_count = 6}, mode,
+          &second, &second_cost).ok() ||
+        first != second || first_cost != second_cost ||
+        first.mode != gjxl::EntropyCodingMode::kAns ||
+        first.ans_histograms.empty() ||
+        first.context_map.size() != first.context_count ||
+        first_cost.section_token_bits.size() != sections.size() ||
+        profile.ans_alphabet_width_candidate_count != 1 ||
+        profile.ans_histogram_candidate_count <=
+          profile.ans_uint_config_candidate_count ||
+        (mode ==
+             gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced &&
+         (profile.ans_value_collection_nanoseconds != 0 ||
+          profile.ans_value_aggregation_nanoseconds != 0)) ||
+        (mode ==
+             gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced
+           ? profile.ans_uint_config_candidate_count !=
+               first.ans_histograms.size()
+           : profile.ans_uint_config_candidate_count < 28 ||
+             profile.ans_uint_config_candidate_count % 28 != 0) ||
+        profile.prefix_histogram_build_nanoseconds != 0 ||
+        profile.prefix_clustering_nanoseconds != 0 ||
+        profile.prefix_code_build_nanoseconds != 0) {
+      std::cerr << "Direct ANS model construction failed\n";
+      return false;
+    }
+    cluster_counts[mode_index] = first.ans_histograms.size();
+    const auto high_density_configs =
+      gjxl::codestream_internal::HighDensityAnsUintConfigs();
+    for (const gjxl::HybridUintConfig config : first.uint_configs) {
+      if ((mode ==
+             gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced &&
+           config != gjxl::kDefaultHybridUintConfig) ||
+          (mode ==
+             gjxl::codestream_internal::DirectAnsEntropyMode::kHighDensity &&
+           std::ranges::find(high_density_configs, config) ==
+             high_density_configs.end())) {
+        std::cerr << "Direct ANS selected an unreferenced uint config\n";
+        return false;
+      }
+    }
+    size_t maximum_symbol = 0;
+    for (const auto& section : sections) {
+      for (const gjxl::EntropyToken token : section) {
+        const size_t cluster = first.context_map[token.context];
+        gjxl::HybridUintToken encoded;
+        if (!gjxl::EncodeHybridUint(
+              token.value, first.uint_configs[cluster], &encoded).ok()) {
+          return false;
+        }
+        maximum_symbol = std::max<size_t>(maximum_symbol, encoded.symbol);
+      }
+    }
+    const size_t expected_log_alpha_size = std::max<size_t>(
+      5, std::bit_width(maximum_symbol));
+    if (first.ans_log_alpha_size != expected_log_alpha_size) {
+      std::cerr << "Direct ANS did not select the smallest alphabet width\n";
+      return false;
+    }
+    gjxl::BitWriter model;
+    if (!gjxl::WriteEntropyCode(first, &model).ok() ||
+        model.bits_written() != first_cost.model_bits) {
+      std::cerr << "Direct ANS model cost differs from serialization\n";
+      return false;
+    }
+    uint64_t token_bits = 0;
+    for (size_t section = 0; section < sections.size(); ++section) {
+      gjxl::BitWriter payload;
+      if (!gjxl::WriteTokenStream(sections[section], first, &payload).ok() ||
+          payload.bits_written() != first_cost.section_token_bits[section]) {
+        std::cerr << "Direct ANS token cost differs from serialization\n";
+        return false;
+      }
+      token_bits += payload.bits_written();
+    }
+    if (token_bits != first_cost.token_bits) {
+      std::cerr << "Direct ANS total token cost is incorrect\n";
+      return false;
+    }
+  }
+  std::vector<gjxl::codestream_internal::PreparedFixedAnsCluster>
+    populations(6);
+  for (const auto& section : sections) {
+    for (const gjxl::EntropyToken token : section) {
+      gjxl::HybridUintToken encoded;
+      if (!gjxl::EncodeHybridUint(
+            token.value, gjxl::kDefaultHybridUintConfig, &encoded).ok()) {
+        return false;
+      }
+      auto& population = populations[token.context];
+      ++population.counts[encoded.symbol];
+      ++population.token_count;
+      population.extra_bits += encoded.extra_bit_count;
+      population.maximum_symbol = std::max(
+        population.maximum_symbol, encoded.symbol);
+    }
+  }
+  gjxl::EntropyCode scanned;
+  gjxl::EntropyCode prepared;
+  gjxl::EntropyCodeCost scanned_cost;
+  gjxl::EntropyCodeCost prepared_cost;
+  if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+        views, {.context_count = 6},
+        gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced,
+        &scanned, &scanned_cost).ok() ||
+      !gjxl::codestream_internal::
+        OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 6}, populations,
+          &prepared, &prepared_cost).ok() ||
+      prepared != scanned || prepared_cost != scanned_cost) {
+    std::cerr << "Prepared direct ANS populations changed the model\n";
+    return false;
+  }
+  const gjxl::EntropyCode sentinel = prepared;
+  ++populations.front().token_count;
+  if (gjxl::codestream_internal::
+        OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 6}, populations,
+          &prepared).code() != gjxl::StatusCode::kInvalidArgument ||
+      prepared != sentinel) {
+    std::cerr << "Malformed direct ANS populations were not atomic\n";
+    return false;
+  }
+  if (cluster_counts[1] > cluster_counts[0]) {
+    std::cerr << "Best direct ANS clustering expanded the fast result: "
+              << cluster_counts[0] << " vs " << cluster_counts[1] << '\n';
+    return false;
+  }
+  return true;
+}
+
+bool CheckBestDirectAnsClusteringRefinement() {
+  // This deterministic population fixture yields nine farthest-first
+  // clusters, then one beneficial ANS-population-cost merge, matching the
+  // kBest refinement structure in pinned libjxl enc_cluster.cc.
+  uint32_t state = 13;
+  const auto random = [&]() {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return state;
+  };
+  std::vector<gjxl::EntropyToken> tokens;
+  for (uint32_t context = 0; context < 12; ++context) {
+    const uint32_t modulus = 3 + random() % 30;
+    const uint32_t offset = random() % 24;
+    for (size_t index = 0; index < 160; ++index) {
+      tokens.push_back({context, offset + random() % modulus});
+    }
+  }
+  const std::array views = {
+    gjxl::EntropyTokenStreamView::Interleaved(tokens)};
+  gjxl::EntropyCode balanced;
+  gjxl::EntropyCode high_density;
+  if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+        views, {.context_count = 12},
+        gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced,
+        &balanced).ok() ||
+      !gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+        views, {.context_count = 12},
+        gjxl::codestream_internal::DirectAnsEntropyMode::kHighDensity,
+        &high_density).ok() ||
+      balanced.ans_histograms.size() != 9 ||
+      high_density.ans_histograms.size() != 8) {
+    std::cerr << "Best direct ANS cluster refinement changed\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckDirectAnsSourcePolicies() {
+  // Pinned from libjxl enc_ans.cc at e8ff09762481785938d8e4e01333ed3917571161.
+  const std::array<gjxl::HybridUintConfig, 28> expected_configs = {{
+    {4, 2, 0}, {4, 1, 0}, {4, 2, 1}, {4, 2, 2}, {4, 1, 2},
+    {5, 2, 0}, {5, 1, 0}, {5, 2, 1}, {5, 2, 2}, {5, 1, 2},
+    {3, 2, 0}, {3, 1, 0}, {3, 2, 1}, {3, 1, 2},
+    {4, 1, 3}, {5, 1, 4}, {5, 2, 3}, {6, 1, 5}, {6, 2, 4},
+    {6, 0, 0}, {0, 0, 0}, {2, 0, 1}, {7, 0, 0}, {8, 0, 0},
+    {9, 0, 0}, {10, 0, 0}, {11, 0, 0}, {12, 0, 0},
+  }};
+  if (!std::ranges::equal(
+        gjxl::codestream_internal::HighDensityAnsUintConfigs(),
+        expected_configs)) {
+    std::cerr << "High-density HybridUint reference set changed\n";
+    return false;
+  }
+  const auto balanced =
+    gjxl::codestream_internal::DirectAnsHistogramPrecisionShifts(
+      gjxl::codestream_internal::DirectAnsEntropyMode::kBalanced);
+  const auto precise =
+    gjxl::codestream_internal::DirectAnsHistogramPrecisionShifts(
+      gjxl::codestream_internal::DirectAnsEntropyMode::kHighDensity);
+  for (size_t shift = 0; shift < balanced.size(); ++shift) {
+    const bool expected_balanced =
+      shift % 2 == 0 || shift == balanced.size() - 1;
+    if (balanced[shift] != expected_balanced || !precise[shift]) {
+      std::cerr << "Direct ANS precision schedule changed at " << shift
+                << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
+bool CheckOrdinaryCoderSelectionPolicy() {
+  std::vector<gjxl::EntropyToken> tokens;
+  tokens.reserve(100);
+  for (size_t index = 0; index < 100; ++index) {
+    tokens.push_back({0, static_cast<uint32_t>(index % 2)});
+  }
+  const gjxl::EntropyCodeOptions options{.context_count = 1};
+  gjxl::EntropyCodingMode mode = gjxl::EntropyCodingMode::kAns;
+  const auto select = [&](std::span<const gjxl::EntropyToken> selected) {
+    const std::array views = {
+      gjxl::EntropyTokenStreamView::Interleaved(selected)};
+    return gjxl::codestream_internal::SelectOrdinaryEntropyCodingMode(
+      views, options, &mode);
+  };
+  if (!select(std::span<const gjxl::EntropyToken>(tokens).first(99)).ok() ||
+      mode != gjxl::EntropyCodingMode::kPrefix ||
+      !select(tokens).ok() || mode != gjxl::EntropyCodingMode::kAns) {
+    std::cerr << "Ordinary coder threshold does not switch at 100 tokens\n";
+    return false;
+  }
+  std::ranges::fill(tokens, gjxl::EntropyToken{0, 7});
+  if (!select(tokens).ok() || mode != gjxl::EntropyCodingMode::kPrefix) {
+    std::cerr << "Singleton ordinary stream did not select Prefix\n";
+    return false;
+  }
+  const std::array invalid = {
+    gjxl::EntropyTokenStreamView::Interleaved(
+      std::span<const gjxl::EntropyToken>(tokens).first(1))};
+  const gjxl::EntropyCodeOptions no_contexts{.context_count = 0};
+  mode = gjxl::EntropyCodingMode::kAns;
+  if (gjxl::codestream_internal::SelectOrdinaryEntropyCodingMode(
+        invalid, no_contexts, &mode).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      mode != gjxl::EntropyCodingMode::kAns) {
+    std::cerr << "Rejected ordinary coder selection changed its output\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckSplitTokenStreamParity() {
   const std::vector<std::vector<gjxl::EntropyToken>> sections = {
     {},
@@ -1275,6 +1555,10 @@ int main() {
       !CheckAnsRoundTripContract() ||
       !CheckAnsAdaptiveModelSelection() ||
       !CheckAnsSmallHistograms() ||
+      !CheckDirectAnsSourcePolicies() ||
+      !CheckOrdinaryCoderSelectionPolicy() ||
+      !CheckBestDirectAnsClusteringRefinement() ||
+      !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {
     return EXIT_FAILURE;

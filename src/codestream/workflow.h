@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "codestream/entropy_behavior.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
 #include "core/status.h"
@@ -60,7 +61,8 @@ enum class TargetSizeSelectionPolicy {
 struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
   /// User-facing speed-versus-refinement intent in [1, 10]. Effort 7 preserves
-  /// the established two-update adaptive-quantization policy.
+  /// the established two-update adaptive-quantization policy and uses
+  /// deterministic DCT8-only coefficient-order sampling.
   int32_t effort = 7;
   /// Maximum participating CPU threads per encode. Zero selects the existing
   /// automatic stage-specific worker policy. GPU execution is not constrained.
@@ -69,6 +71,11 @@ struct VarDctEncodingOptions {
   /// effort. It is meaningful only for Butteraugli-target and target-size
   /// control.
   VarDctDensityMode density_mode = VarDctDensityMode::kDefault;
+  /// Controls only entropy-model and codestream search intensity. Automatic
+  /// resolves from effort and density_mode; maximum compression preserves the
+  /// historical exhaustive serializer without changing AQ or rate control.
+  VarDctCompressionMode compression_mode =
+    VarDctCompressionMode::kAutomatic;
   VarDctRateControlMode rate_control_mode =
     VarDctRateControlMode::kButteraugliTarget;
   /// Maximum normalized reconstruction error for X, Y, and B respectively.
@@ -87,12 +94,14 @@ struct VarDctEncodingOptions {
   TargetSizeSelectionPolicy target_size_selection =
     TargetSizeSelectionPolicy::kLargestAtOrBelow;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
-  /// Selects the Metal AQ implementation. Resident modes require an explicitly
-  /// forced Metal backend and may change encoder decisions or policy bounds.
+  /// Selects the Metal AQ implementation. Fully resident is the encoding
+  /// default and may change encoder decisions relative to exact coefficients.
+  /// Throughput policies require an explicitly forced Metal backend.
   /// Maximum-throughput mode omits perceptual diagnostics, so its reported
-  /// score history is empty.
+  /// score history is empty. This field is ignored when CPU execution is
+  /// selected.
   GpuAdaptiveQuantizationMode metal_aq_mode =
-    GpuAdaptiveQuantizationMode::kExactCoefficients;
+    GpuAdaptiveQuantizationMode::kFullyResident;
   /// Requests a perceptual evaluation of the final encoded field. Resident
   /// Metal encoding skips this diagnostic-only pass by default; CPU and exact
   /// coefficient workflows already produce the final score as part of their
@@ -105,6 +114,10 @@ struct VarDctEncodingSummary {
   Extent2D extent;
   size_t encoded_bytes = 0;
   VarDctDensityMode density_mode = VarDctDensityMode::kDefault;
+  VarDctCompressionMode compression_mode =
+    VarDctCompressionMode::kAutomatic;
+  VarDctEntropyBehavior entropy_behavior =
+    VarDctEntropyBehavior::kBalanced;
   VarDctRateControlMode rate_control_mode =
     VarDctRateControlMode::kButteraugliTarget;
   size_t requested_target_bytes = 0;
@@ -139,7 +152,7 @@ struct VarDctEncodingSummary {
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;
   /// Reports the requested mode when `execution_backend` is Metal.
   GpuAdaptiveQuantizationMode metal_aq_mode =
-    GpuAdaptiveQuantizationMode::kExactCoefficients;
+    GpuAdaptiveQuantizationMode::kFullyResident;
 
   friend bool operator==(
     const VarDctEncodingSummary&,
@@ -157,8 +170,8 @@ struct VarDctEncodingAttemptTiming {
 
 /// Non-deterministic timing diagnostics kept separate from the result summary.
 struct VarDctEncodingTiming {
-  /// Post-validation source preparation: geometry, edge extension, color
-  /// conversion, host workspaces, and any CPU perceptual reference.
+  /// Post-validation source preparation: geometry, padded color conversion,
+  /// host workspaces, and any CPU perceptual reference.
   uint64_t preparation_nanoseconds = 0;
   /// Complete target-size search wall time, including all attempted encodes,
   /// serialization, failures, and final candidate selection. Zero for a

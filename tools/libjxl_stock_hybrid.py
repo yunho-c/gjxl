@@ -443,6 +443,44 @@ def numeric_match(value: Any, expected: float) -> bool:
     )
 
 
+def summarize_workflow_backend(
+    pairs: Sequence[dict[str, Any]],
+    outputs: dict[str, Any],
+    backend: str,
+    path: Path,
+) -> dict[str, Any]:
+    try:
+        samples = [pair[backend] for pair in pairs]
+        output = outputs[backend]
+        phases = [item["workflow_phase_nanoseconds"] for item in samples]
+    except (KeyError, TypeError) as error:
+        raise ComparisonError(
+            f"Hybrid result is missing the {backend} backend: {path}"
+        ) from error
+    if any(
+        sample.get("backend") != backend
+        or sample.get("encoded_bytes") != output.get("bytes")
+        or sample.get("codestream_sha256") != output.get("sha256")
+        for sample in samples
+    ):
+        raise ComparisonError(f"Hybrid {backend} output changed across samples: {path}")
+    return {
+        "median_nanoseconds": median([item["wall_nanoseconds"] for item in samples]),
+        "sample_nanoseconds": [item["wall_nanoseconds"] for item in samples],
+        "input_preparation_median_nanoseconds": median(
+            [item["input_preparation"] for item in phases]
+        ),
+        "quantization_pipeline_median_nanoseconds": median(
+            [item["quantization_pipeline"] for item in phases]
+        ),
+        "tail_median_nanoseconds": median(
+            [item["codestream_encoding"] for item in phases]
+        ),
+        "output_bytes": output["bytes"],
+        "output_sha256": output["sha256"],
+    }
+
+
 def parse_hybrid(path: Path, args: argparse.Namespace) -> dict[str, Any]:
     document = load_json(path)
     if (
@@ -470,24 +508,13 @@ def parse_hybrid(path: Path, args: argparse.Namespace) -> dict[str, Any]:
     pairs = workload.get("pairs")
     if not isinstance(pairs, list) or len(pairs) != args.samples:
         raise ComparisonError(f"Hybrid sample count changed: {path}")
-    samples = [pair["libjxl"] for pair in pairs]
-    output = workload["correctness_outputs"]["libjxl"]
-    phases = [item["workflow_phase_nanoseconds"] for item in samples]
+    outputs = workload.get("correctness_outputs")
+    if not isinstance(outputs, dict):
+        raise ComparisonError(f"Hybrid correctness outputs are missing: {path}")
     return {
         "document": document,
-        "median_nanoseconds": median([item["wall_nanoseconds"] for item in samples]),
-        "sample_nanoseconds": [item["wall_nanoseconds"] for item in samples],
-        "input_preparation_median_nanoseconds": median(
-            [item["input_preparation"] for item in phases]
-        ),
-        "quantization_pipeline_median_nanoseconds": median(
-            [item["quantization_pipeline"] for item in phases]
-        ),
-        "tail_median_nanoseconds": median(
-            [item["codestream_encoding"] for item in phases]
-        ),
-        "output_bytes": output["bytes"],
-        "output_sha256": output["sha256"],
+        "gjxl": summarize_workflow_backend(pairs, outputs, "gjxl", path),
+        "hybrid": summarize_workflow_backend(pairs, outputs, "libjxl", path),
     }
 
 
@@ -538,7 +565,7 @@ def run_comparison(args: argparse.Namespace) -> None:
     output.mkdir(parents=True)
     manifest: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "kind": "stock-libjxl-vs-fully-resident-hybrid",
+        "kind": "stock-libjxl-vs-fully-resident-gjxl-and-hybrid",
         "status": "running",
         "inputs": inputs,
         "parameters": {
@@ -593,6 +620,9 @@ def run_comparison(args: argparse.Namespace) -> None:
         hybrid_artifact = pilot_artifacts / "external_input-hybrid-libjxl.jxl"
         hybrid_sha256 = sha256_file(hybrid_artifact)
         hybrid_bytes = hybrid_artifact.stat().st_size
+        gjxl_artifact = pilot_artifacts / "external_input-hybrid-gjxl.jxl"
+        gjxl_sha256 = sha256_file(gjxl_artifact)
+        gjxl_bytes = gjxl_artifact.stat().st_size
         target_score = score_codestream(
             args, image, hybrid_artifact, f"{name}-hybrid-pilot", output, manifest
         )
@@ -690,11 +720,16 @@ def run_comparison(args: argparse.Namespace) -> None:
             stock = parse_stock(stock_raw, args, selected["distance"])
             retained_hybrid = hybrid_artifacts / "external_input-hybrid-libjxl.jxl"
             retained_hybrid_sha256 = sha256_file(retained_hybrid)
+            retained_gjxl = hybrid_artifacts / "external_input-hybrid-gjxl.jxl"
+            retained_gjxl_sha256 = sha256_file(retained_gjxl)
             stock_sha256 = sha256_file(stock_output)
             if (
                 retained_hybrid_sha256 != hybrid_sha256
-                or hybrid["output_sha256"] != hybrid_sha256
-                or hybrid["output_bytes"] != hybrid_bytes
+                or hybrid["hybrid"]["output_sha256"] != hybrid_sha256
+                or hybrid["hybrid"]["output_bytes"] != hybrid_bytes
+                or retained_gjxl_sha256 != gjxl_sha256
+                or hybrid["gjxl"]["output_sha256"] != gjxl_sha256
+                or hybrid["gjxl"]["output_bytes"] != gjxl_bytes
                 or stock_sha256 != selected["codestream_sha256"]
                 or stock["output_bytes"] != selected["encoded_bytes"]
             ):
@@ -703,30 +738,60 @@ def run_comparison(args: argparse.Namespace) -> None:
                 {
                     "pair_index": pair_index,
                     "first_encoder": process_order(pair_index)[0],
-                    "hybrid_median_nanoseconds": hybrid["median_nanoseconds"],
-                    "hybrid_input_preparation_median_nanoseconds": hybrid[
+                    "gjxl_median_nanoseconds": hybrid["gjxl"]["median_nanoseconds"],
+                    "gjxl_input_preparation_median_nanoseconds": hybrid["gjxl"][
                         "input_preparation_median_nanoseconds"
                     ],
-                    "hybrid_quantization_pipeline_median_nanoseconds": hybrid[
+                    "gjxl_quantization_pipeline_median_nanoseconds": hybrid["gjxl"][
                         "quantization_pipeline_median_nanoseconds"
                     ],
-                    "hybrid_tail_median_nanoseconds": hybrid["tail_median_nanoseconds"],
+                    "gjxl_tail_median_nanoseconds": hybrid["gjxl"][
+                        "tail_median_nanoseconds"
+                    ],
+                    "hybrid_median_nanoseconds": hybrid["hybrid"]["median_nanoseconds"],
+                    "hybrid_input_preparation_median_nanoseconds": hybrid["hybrid"][
+                        "input_preparation_median_nanoseconds"
+                    ],
+                    "hybrid_quantization_pipeline_median_nanoseconds": hybrid["hybrid"][
+                        "quantization_pipeline_median_nanoseconds"
+                    ],
+                    "hybrid_tail_median_nanoseconds": hybrid["hybrid"][
+                        "tail_median_nanoseconds"
+                    ],
                     "stock_median_nanoseconds": stock["median_nanoseconds"],
+                    "stock_over_gjxl_speedup": stock["median_nanoseconds"]
+                    / hybrid["gjxl"]["median_nanoseconds"],
                     "stock_over_hybrid_speedup": stock["median_nanoseconds"]
-                    / hybrid["median_nanoseconds"],
+                    / hybrid["hybrid"]["median_nanoseconds"],
+                    "gjxl_over_hybrid_speedup": hybrid["gjxl"]["median_nanoseconds"]
+                    / hybrid["hybrid"]["median_nanoseconds"],
                     "hybrid_raw": str(hybrid_raw.relative_to(output)),
                     "stock_raw": str(stock_raw.relative_to(output)),
                 }
             )
 
+        gjxl_medians = [row["gjxl_median_nanoseconds"] for row in process_rows]
         hybrid_medians = [row["hybrid_median_nanoseconds"] for row in process_rows]
         stock_medians = [row["stock_median_nanoseconds"] for row in process_rows]
-        speedups = [row["stock_over_hybrid_speedup"] for row in process_rows]
-        tail_medians = [row["hybrid_tail_median_nanoseconds"] for row in process_rows]
-        preparation_medians = [
+        stock_over_gjxl = [row["stock_over_gjxl_speedup"] for row in process_rows]
+        stock_over_hybrid = [row["stock_over_hybrid_speedup"] for row in process_rows]
+        gjxl_over_hybrid = [row["gjxl_over_hybrid_speedup"] for row in process_rows]
+        gjxl_tail_medians = [
+            row["gjxl_tail_median_nanoseconds"] for row in process_rows
+        ]
+        hybrid_tail_medians = [
+            row["hybrid_tail_median_nanoseconds"] for row in process_rows
+        ]
+        gjxl_preparation_medians = [
+            row["gjxl_input_preparation_median_nanoseconds"] for row in process_rows
+        ]
+        hybrid_preparation_medians = [
             row["hybrid_input_preparation_median_nanoseconds"] for row in process_rows
         ]
-        quantization_medians = [
+        gjxl_quantization_medians = [
+            row["gjxl_quantization_pipeline_median_nanoseconds"] for row in process_rows
+        ]
+        hybrid_quantization_medians = [
             row["hybrid_quantization_pipeline_median_nanoseconds"]
             for row in process_rows
         ]
@@ -741,39 +806,73 @@ def run_comparison(args: argparse.Namespace) -> None:
                 "stock_distance": selected["distance"],
             },
             "output": {
+                "gjxl_bytes": gjxl_bytes,
+                "gjxl_sha256": gjxl_sha256,
                 "hybrid_bytes": hybrid_bytes,
                 "hybrid_sha256": hybrid_sha256,
                 "stock_bytes": selected["encoded_bytes"],
                 "stock_sha256": selected["codestream_sha256"],
+                "gjxl_size_delta_percent": 100.0
+                * (gjxl_bytes - selected["encoded_bytes"])
+                / selected["encoded_bytes"],
                 "hybrid_size_delta_percent": 100.0
                 * (hybrid_bytes - selected["encoded_bytes"])
                 / selected["encoded_bytes"],
             },
             "timing": {
                 "semantics": "median-of-independent-process-medians",
+                "gjxl_median_nanoseconds": median(gjxl_medians),
+                "gjxl_process_range_nanoseconds": [
+                    min(gjxl_medians),
+                    max(gjxl_medians),
+                ],
+                "gjxl_tail_median_nanoseconds": median(gjxl_tail_medians),
+                "gjxl_tail_process_range_nanoseconds": [
+                    min(gjxl_tail_medians),
+                    max(gjxl_tail_medians),
+                ],
+                "gjxl_input_preparation_median_nanoseconds": median(
+                    gjxl_preparation_medians
+                ),
+                "gjxl_quantization_pipeline_median_nanoseconds": median(
+                    gjxl_quantization_medians
+                ),
                 "hybrid_median_nanoseconds": median(hybrid_medians),
                 "hybrid_process_range_nanoseconds": [
                     min(hybrid_medians),
                     max(hybrid_medians),
                 ],
-                "hybrid_tail_median_nanoseconds": median(tail_medians),
+                "hybrid_tail_median_nanoseconds": median(hybrid_tail_medians),
                 "hybrid_tail_process_range_nanoseconds": [
-                    min(tail_medians),
-                    max(tail_medians),
+                    min(hybrid_tail_medians),
+                    max(hybrid_tail_medians),
                 ],
                 "hybrid_input_preparation_median_nanoseconds": median(
-                    preparation_medians
+                    hybrid_preparation_medians
                 ),
                 "hybrid_quantization_pipeline_median_nanoseconds": median(
-                    quantization_medians
+                    hybrid_quantization_medians
                 ),
                 "stock_median_nanoseconds": median(stock_medians),
                 "stock_process_range_nanoseconds": [
                     min(stock_medians),
                     max(stock_medians),
                 ],
-                "stock_over_hybrid_speedup": median(speedups),
-                "speedup_process_range": [min(speedups), max(speedups)],
+                "stock_over_gjxl_speedup": median(stock_over_gjxl),
+                "stock_over_gjxl_speedup_process_range": [
+                    min(stock_over_gjxl),
+                    max(stock_over_gjxl),
+                ],
+                "stock_over_hybrid_speedup": median(stock_over_hybrid),
+                "stock_over_hybrid_speedup_process_range": [
+                    min(stock_over_hybrid),
+                    max(stock_over_hybrid),
+                ],
+                "gjxl_over_hybrid_speedup": median(gjxl_over_hybrid),
+                "gjxl_over_hybrid_speedup_process_range": [
+                    min(gjxl_over_hybrid),
+                    max(gjxl_over_hybrid),
+                ],
             },
             "process_pairs": process_rows,
             "calibration": evaluations,

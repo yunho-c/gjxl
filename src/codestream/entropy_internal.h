@@ -20,6 +20,20 @@ struct WeightedValue {
   friend bool operator==(const WeightedValue&, const WeightedValue&) = default;
 };
 
+/// Fixed-HybridUint ANS statistics retained by the direct balanced partition.
+/// These are the final clustered populations, so balanced model construction
+/// does not need to collect, sort, and re-encode the original token values.
+struct PreparedFixedAnsCluster {
+  std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
+  uint64_t token_count = 0;
+  uint64_t extra_bits = 0;
+  uint32_t maximum_symbol = 0;
+
+  friend bool operator==(
+    const PreparedFixedAnsCluster&,
+    const PreparedFixedAnsCluster&) = default;
+};
+
 /// Raw values aggregated in ascending order for the exact prefix partition.
 /// The same cluster populations can feed ANS model construction without
 /// collecting and sorting every token a second time.
@@ -27,6 +41,8 @@ struct PreparedEntropyClusters {
   uint32_t context_count = 0;
   std::vector<uint8_t> context_map;
   std::vector<std::vector<WeightedValue>> values;
+  HybridUintConfig fixed_uint_config = kDefaultHybridUintConfig;
+  std::vector<PreparedFixedAnsCluster> fixed_ans_clusters;
 
   friend bool operator==(
     const PreparedEntropyClusters&,
@@ -52,6 +68,15 @@ struct PreparedEntropyClusters {
   EntropyCode* code,
   EntropyCodeCost* cost,
   PreparedEntropyClusters* prepared,
+  EntropyWorkProfile* profile = nullptr);
+
+/// Builds one fixed-config Prefix model with a single fast clustering pass.
+/// Used only after ordinary serializer policy has selected Prefix coding.
+[[nodiscard]] Status OptimizeFastPrefixEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  EntropyCode* code,
+  EntropyCodeCost* cost = nullptr,
   EntropyWorkProfile* profile = nullptr);
 
 /// Counts the exact bits emitted by WriteTokenStream without materializing the

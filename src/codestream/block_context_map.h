@@ -64,4 +64,25 @@ struct SimpleBlockContextMap {
   const VarDctEncoderFrame& frame,
   std::vector<SimpleBlockContextMap>* maps);
 
+/// Derives the one block-context map used by balanced and high-density
+/// serialization. Small frames retain the compact map; eligible frames use
+/// the occurrence-derived adaptive map, including its quantization split only
+/// above the established size threshold.
+[[nodiscard]] Status ComputeSimpleBlockContextMap(
+  const VarDctEncoderFrame& frame,
+  SimpleBlockContextMap* map);
+
+namespace codestream_internal {
+
+/// Serializer-only entry points for an already validated frame.
+[[nodiscard]] Status ComputeSimpleBlockContextMapCandidatesForEncoder(
+  const VarDctEncoderFrame& frame,
+  std::vector<SimpleBlockContextMap>* maps);
+
+[[nodiscard]] Status ComputeSimpleBlockContextMapForEncoder(
+  const VarDctEncoderFrame& frame,
+  SimpleBlockContextMap* map);
+
+}  // namespace codestream_internal
+
 }  // namespace gjxl

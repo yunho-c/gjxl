@@ -299,6 +299,18 @@ Status ComputeSimpleBlockContextMapCandidates(
   if (!status.ok()) {
     return status;
   }
+  return codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
+    frame, maps);
+}
+
+Status codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
+  const VarDctEncoderFrame& frame,
+  std::vector<SimpleBlockContextMap>* maps) {
+
+  if (maps == nullptr) {
+    return Status::InvalidArgument("Block-context candidate output is null");
+  }
+  Status status;
   try {
     std::vector<SimpleBlockContextMap> candidate;
     AddCandidate(DefaultSimpleBlockContextMap(), &candidate);
@@ -334,6 +346,64 @@ Status ComputeSimpleBlockContextMapCandidates(
       }
     }
     *maps = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
+Status ComputeSimpleBlockContextMap(
+  const VarDctEncoderFrame& frame,
+  SimpleBlockContextMap* map) {
+
+  if (map == nullptr) {
+    return Status::InvalidArgument("Block-context map output is null");
+  }
+  Status status = ValidateSimpleCodestreamFrame(frame);
+  if (!status.ok()) {
+    return status;
+  }
+  return codestream_internal::ComputeSimpleBlockContextMapForEncoder(
+    frame, map);
+}
+
+Status codestream_internal::ComputeSimpleBlockContextMapForEncoder(
+  const VarDctEncoderFrame& frame,
+  SimpleBlockContextMap* map) {
+
+  if (map == nullptr) {
+    return Status::InvalidArgument("Block-context map output is null");
+  }
+  Status status;
+  try {
+    size_t block_count = 0;
+    const Extent2D blocks = frame.geometry().block_grid().blocks;
+    if (!blocks.try_area(&block_count)) {
+      return Status::InvalidArgument("Block-context dimensions overflow");
+    }
+    SimpleBlockContextMap candidate;
+    if (block_count < kMinimumAdaptiveBlockCount) {
+      candidate = DefaultSimpleBlockContextMap();
+    } else {
+      std::array<std::array<size_t, 256>,
+                 codestream_internal::kSimpleCoefficientOrderCount> counts{};
+      std::array<size_t, 256> qf_counts{};
+      status = CountRawQuantAndOrders(
+        frame, &counts, &qf_counts, &block_count);
+      if (!status.ok()) {
+        return status;
+      }
+      const std::vector<uint32_t> thresholds =
+        MedianQuantThreshold(qf_counts, block_count);
+      candidate = BuildAdaptiveMap(counts, thresholds, block_count);
+    }
+    status = ValidateSimpleBlockContextMap(candidate);
+    if (!status.ok()) {
+      return status;
+    }
+    *map = std::move(candidate);
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
