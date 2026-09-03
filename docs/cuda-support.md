@@ -24,6 +24,13 @@ Implementation progress as of this revision:
 - the prepared CUDA maximum-throughput operation is deterministic across
   reuse, performs no steady-state device allocations, and preserves
   caller-visible outputs across injected submission failure;
+- prepared Butteraugli now runs the complete reference cache, psychoacoustic
+  decomposition, Malta/L2 difference, masking, multiscale composition, and
+  NaN-aware maximum reduction on CUDA. It uses one prepared allocation and
+  one submission per comparison, is deterministic across reuse, and matches
+  the CPU oracle on expanded, single-scale, multiscale, strided, identity,
+  and non-default-option fixtures (worst observed absolute error
+  `2.06e-5` on compute capability 8.6);
 - public C++, C, Rust, CLI, package-export, and diagnostic vocabulary now
   includes CUDA without changing existing C enum values; and
 - automatic selection deliberately remains Metal-only until CUDA passes the
@@ -534,12 +541,17 @@ Port and validate:
 Exit criterion: the exact track preserves CPU raw quantization, encoder frame,
 codestream bytes, control outcome, and existing numerical tolerances.
 
-Current progress: all production transform shapes and AC-strategy candidate
-evaluation are implemented. The CUDA evaluator validates a complete batch
-sequence before submitting work, returns NaN for invalid device-resident
-candidate descriptors, supports resident quant-field aggregation, and reuses
-caller-owned scratch without allocations. Reconstruction, postprocessing, and
-the Butteraugli tail remain.
+Current progress: all production transform shapes, AC-strategy candidate
+evaluation, and prepared Butteraugli are implemented. The CUDA evaluator
+validates a complete batch sequence before submitting work, returns NaN for
+invalid device-resident candidate descriptors, supports resident quant-field
+aggregation, and reuses caller-owned scratch without allocations. CUDA
+Butteraugli caches the reference psychoacoustic representation, handles the
+codec's small-image expansion and two-scale composition rules, propagates
+invalid values through its final reduction, and invalidates prepared state on
+operational failure. Inverse reconstruction, loop-filter postprocessing,
+opsin-to-linear conversion, and maximum-error reduction still need to be wired
+into the exact workflow.
 
 ### Phase 4: fully resident AQ
 

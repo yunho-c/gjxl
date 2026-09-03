@@ -568,6 +568,8 @@ if(GJXL_ENABLE_CUDA)
     src/gpu/cuda/cuda_ac_strategy_kernels.cu
     src/gpu/cuda/cuda_aq.cpp
     src/gpu/cuda/cuda_aq_kernels.cu
+    src/gpu/cuda/cuda_butteraugli.cpp
+    src/gpu/cuda/cuda_butteraugli_kernels.cu
     src/gpu/cuda/cuda_kernels.cu
     src/gpu/cuda/cuda_primitives.cpp
   )
@@ -592,6 +594,7 @@ if(GJXL_ENABLE_CUDA)
   target_link_libraries(
     gjxl_cuda
     PUBLIC
+      gjxl_gpu_butteraugli
       gjxl_gpu_ops
     PRIVATE
       CUDA::cudart
@@ -2285,6 +2288,24 @@ if(GJXL_BUILD_TESTS)
       COMMAND gjxl_ac_strategy_cuda_test
     )
     set_tests_properties(cuda_ac_strategy PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(
+      gjxl_cuda_butteraugli_test
+      tests/cuda_butteraugli_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_cuda_butteraugli_test
+      PRIVATE
+        gjxl_codec
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_butteraugli
+      COMMAND gjxl_cuda_butteraugli_test
+    )
+    set_tests_properties(cuda_butteraugli PROPERTIES SKIP_RETURN_CODE 77)
   endif()
 
   if(GJXL_ENABLE_METAL)

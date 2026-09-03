@@ -18,6 +18,7 @@
 #include "gpu/backend.h"
 #include "gpu/image.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/butteraugli.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/primitives.h"
 #include "gpu/cuda/cuda_kernels.h"
@@ -98,10 +99,12 @@ private:
 };
 
 class CudaPreparedAqEvaluation;
+class CudaPreparedDeviceButteraugli;
 
 class CudaBackend final : public GpuBackend,
                           public GpuImagePrimitives,
                           public GpuAcStrategyEvaluation,
+                          public DeviceButteraugliOperation,
                           public GpuAqEvaluation {
 public:
   using EncodeCallback = cudaError_t (*)(CudaBackend&, const void*);
@@ -141,6 +144,10 @@ public:
   Status EvaluateAcStrategyCandidateBatches(
     std::span<const AcStrategyCandidateBatch> batches,
     std::unique_ptr<GpuSubmission>* submission) override;
+  Status Prepare(
+    GpuBackend& backend,
+    const DeviceButteraugliPrepareDescriptor& descriptor,
+    std::unique_ptr<PreparedDeviceButteraugli>* prepared) override;
   Status PrepareAqEvaluation(
     const AqEvaluationPreparation& preparation,
     std::unique_ptr<PreparedAqEvaluation>* prepared) override;
@@ -151,6 +158,7 @@ public:
 
 private:
   friend class CudaPreparedAqEvaluation;
+  friend class CudaPreparedDeviceButteraugli;
 
   struct ResolvedConstPlane {
     ConstDevicePlaneView view;

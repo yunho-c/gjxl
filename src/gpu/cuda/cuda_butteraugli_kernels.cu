@@ -1,0 +1,1342 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+// Copyright (c) the JPEG XL Project Authors. All rights reserved.
+//
+// The opsin, frequency, Malta, masking, and multiscale computations are
+// adapted from pinned JPEG XL Butteraugli code distributed under its
+// BSD-style license. See third_party/libjxl/LICENSE.
+
+#include <cstddef>
+#include <cstdint>
+
+#include "gpu/cuda/cuda_butteraugli_kernels.h"
+
+namespace gjxl::cuda_internal {
+namespace {
+
+constexpr unsigned int kPlaneThreads = 256;
+constexpr unsigned int kReductionWidth = 256;
+constexpr unsigned int kImage = 21;
+constexpr unsigned int kAc = kImage;
+constexpr unsigned int kDc = kImage + 3;
+constexpr unsigned int kWork = 27;
+constexpr unsigned int kFinalStaging = 32;
+
+struct PlaneParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride;
+  uint32_t output_stride;
+};
+
+struct ExpandParams {
+  uint32_t input_width;
+  uint32_t input_height;
+  uint32_t output_width;
+  uint32_t output_height;
+  uint32_t input_stride;
+  uint32_t output_stride;
+  uint32_t xborder;
+  uint32_t yborder;
+};
+
+struct SubsampleParams {
+  uint32_t input_width;
+  uint32_t input_height;
+  uint32_t output_width;
+  uint32_t output_height;
+  uint32_t input_stride;
+  uint32_t output_stride;
+};
+
+struct OpsinParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride[3];
+  uint32_t blurred_stride;
+  uint32_t output_stride;
+  float intensity_target;
+};
+
+struct FrequencyParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride;
+  uint32_t low_stride;
+  uint32_t output_stride;
+  uint32_t channel;
+};
+
+struct LowMediumParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t xyb_stride;
+  uint32_t blurred_stride;
+  uint32_t psycho_stride;
+};
+
+struct MaltaScaleParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t reference_stride;
+  uint32_t distorted_stride;
+  uint32_t output_stride;
+  uint32_t low_frequency;
+  float norm2_0_gt_1;
+  float norm2_0_lt_1;
+  float norm;
+};
+
+struct MaltaResponseParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride;
+  uint32_t accumulation_stride;
+  uint32_t low_frequency;
+  uint32_t initialize_accumulation;
+};
+
+struct DifferenceParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t reference_stride;
+  uint32_t distorted_stride;
+  uint32_t work_stride;
+  float asymmetry;
+};
+
+struct DifferencePlan {
+  const float* reference[8];
+  const float* distorted[8];
+  float* ac[3];
+  float* dc[3];
+  DifferenceParams params;
+};
+
+struct FinalParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t stride;
+  uint32_t output_stride;
+  float x_multiplier;
+};
+
+__device__ float UnfusedMultiplyAdd(float multiplier, float value,
+                                    float addend) {
+  return __fadd_rn(__fmul_rn(multiplier, value), addend);
+}
+
+__device__ int MirrorCoordinate(int coordinate, int size) {
+  while (coordinate < 0 || coordinate >= size) {
+    coordinate = coordinate < 0 ? -coordinate - 1 : 2 * size - 1 - coordinate;
+  }
+  return coordinate;
+}
+
+__device__ size_t PlaneIndex(PlaneParams params) {
+  return static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+}
+
+__global__ void ExpandKernel(const float* input, float* output,
+                             ExpandParams params) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count =
+      static_cast<size_t>(params.output_width) * params.output_height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.output_width);
+  const uint32_t x = static_cast<uint32_t>(index - static_cast<size_t>(y) *
+                                                       params.output_width);
+  const uint32_t source_x =
+      min(params.input_width - 1, x > params.xborder ? x - params.xborder : 0u);
+  const uint32_t source_y = min(params.input_height - 1,
+                                y > params.yborder ? y - params.yborder : 0u);
+  output[static_cast<size_t>(y) * params.output_stride + x] =
+      input[static_cast<size_t>(source_y) * params.input_stride + source_x];
+}
+
+__global__ void SubsampleKernel(const float* input, float* output,
+                                SubsampleParams params) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count =
+      static_cast<size_t>(params.output_width) * params.output_height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.output_width);
+  const uint32_t x = static_cast<uint32_t>(index - static_cast<size_t>(y) *
+                                                       params.output_width);
+  const uint32_t source_x = x * 2;
+  const uint32_t source_y = y * 2;
+  float value =
+      0.25f *
+      input[static_cast<size_t>(source_y) * params.input_stride + source_x];
+  if (source_x + 1 < params.input_width) {
+    value += 0.25f * input[static_cast<size_t>(source_y) * params.input_stride +
+                           source_x + 1];
+  }
+  if (source_y + 1 < params.input_height) {
+    value +=
+        0.25f * input[static_cast<size_t>(source_y + 1) * params.input_stride +
+                      source_x];
+    if (source_x + 1 < params.input_width) {
+      value += 0.25f *
+               input[static_cast<size_t>(source_y + 1) * params.input_stride +
+                     source_x + 1];
+    }
+  }
+  if ((params.input_width & 1u) != 0 && x + 1 == params.output_width) {
+    value *= 2.0f;
+  }
+  if ((params.input_height & 1u) != 0 && y + 1 == params.output_height) {
+    value *= 2.0f;
+  }
+  output[static_cast<size_t>(y) * params.output_stride + x] = value;
+}
+
+template <bool Horizontal, bool Mirror>
+__global__ void ConvolutionKernel(const float* input, const float* weights,
+                                  float* output, uint32_t width,
+                                  uint32_t height, uint32_t input_stride,
+                                  uint32_t output_stride,
+                                  uint32_t kernel_size) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(width) * height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * width);
+  const int radius = static_cast<int>(kernel_size / 2);
+  const int center = static_cast<int>(Horizontal ? x : y);
+  const int limit = static_cast<int>(Horizontal ? width : height);
+  float sum = 0.0f;
+  float weight_sum = 0.0f;
+  if constexpr (Mirror) {
+    for (int delta = -radius; delta <= radius; ++delta) {
+      const int coordinate = MirrorCoordinate(center + delta, limit);
+      const float weight = weights[delta + radius];
+      const uint32_t source_x =
+          Horizontal ? static_cast<uint32_t>(coordinate) : x;
+      const uint32_t source_y =
+          Horizontal ? y : static_cast<uint32_t>(coordinate);
+      sum += input[static_cast<size_t>(source_y) * input_stride + source_x] *
+             weight;
+      weight_sum += weight;
+    }
+  } else {
+    const int first = max(0, center - radius);
+    const int last = min(limit - 1, center + radius);
+    for (int coordinate = first; coordinate <= last; ++coordinate) {
+      const float weight = weights[coordinate + radius - center];
+      const uint32_t source_x =
+          Horizontal ? static_cast<uint32_t>(coordinate) : x;
+      const uint32_t source_y =
+          Horizontal ? y : static_cast<uint32_t>(coordinate);
+      sum += input[static_cast<size_t>(source_y) * input_stride + source_x] *
+             weight;
+      weight_sum += weight;
+    }
+  }
+  output[static_cast<size_t>(y) * output_stride + x] = sum / weight_sum;
+}
+
+__device__ float ButteraugliFastLog2(float value) {
+  const uint32_t value_bits = __float_as_uint(value);
+  const int shifted_exponent = static_cast<int>(value_bits - 0x3f2aaaabu) >> 23;
+  const uint32_t mantissa_bits =
+      value_bits - (static_cast<uint32_t>(shifted_exponent) << 23);
+  const float x = __uint_as_float(mantissa_bits) - 1.0f;
+  float numerator =
+      UnfusedMultiplyAdd(0.74245873327820566f, x, 1.4287160470083755f);
+  numerator = UnfusedMultiplyAdd(numerator, x, -1.8503833400518310e-06f);
+  float denominator =
+      UnfusedMultiplyAdd(0.17409343003366853f, x, 1.0096718572241148f);
+  denominator = UnfusedMultiplyAdd(denominator, x, 0.99032814277590719f);
+  return numerator / denominator + static_cast<float>(shifted_exponent);
+}
+
+__device__ float GammaValue(float value) {
+  constexpr float kRetMul = 19.245013259874995f * 0.6931471805599453f;
+  return UnfusedMultiplyAdd(
+      kRetMul, ButteraugliFastLog2(fmaxf(value, 0.0f) + 9.9710635769299145f),
+      -23.16046239805755f);
+}
+
+__device__ float3 OpsinAbsorbance(float red, float green, float blue,
+                                  bool clamp_result) {
+  float3 output;
+  output.x = UnfusedMultiplyAdd(
+      0.29956550340058319f, red,
+      UnfusedMultiplyAdd(0.63373087833825936f, green,
+                         UnfusedMultiplyAdd(0.077705617820981968f, blue,
+                                            1.7557483643287353f)));
+  output.y = UnfusedMultiplyAdd(
+      0.22158691104574774f, red,
+      UnfusedMultiplyAdd(
+          0.69391388044116142f, green,
+          UnfusedMultiplyAdd(0.0987313588422f, blue, 1.7557483643287353f)));
+  output.z = UnfusedMultiplyAdd(
+      0.02f, red,
+      UnfusedMultiplyAdd(
+          0.02f, green,
+          UnfusedMultiplyAdd(0.20480129041026129f, blue, 12.226454707163354f)));
+  if (clamp_result) {
+    output.x = fmaxf(output.x, 1.7557483643287353f);
+    output.y = fmaxf(output.y, 1.7557483643287353f);
+    output.z = fmaxf(output.z, 12.226454707163354f);
+  }
+  return output;
+}
+
+__global__ void OpsinKernel(const float* input0, const float* input1,
+                            const float* input2, const float* blurred0,
+                            const float* blurred1, const float* blurred2,
+                            float* output0, float* output1, float* output2,
+                            OpsinParams params) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  const size_t blurred_index =
+      static_cast<size_t>(y) * params.blurred_stride + x;
+  const float3 blurred_rgb =
+      make_float3(blurred0[blurred_index], blurred1[blurred_index],
+                  blurred2[blurred_index]);
+  const float3 input_rgb =
+      make_float3(input0[static_cast<size_t>(y) * params.input_stride[0] + x],
+                  input1[static_cast<size_t>(y) * params.input_stride[1] + x],
+                  input2[static_cast<size_t>(y) * params.input_stride[2] + x]);
+  if (!isfinite(input_rgb.x) || !isfinite(input_rgb.y) ||
+      !isfinite(input_rgb.z) || !isfinite(blurred_rgb.x) ||
+      !isfinite(blurred_rgb.y) || !isfinite(blurred_rgb.z)) {
+    output0[blurred_index] = NAN;
+    output1[blurred_index] = NAN;
+    output2[blurred_index] = NAN;
+    return;
+  }
+  float3 pre = OpsinAbsorbance(blurred_rgb.x * params.intensity_target,
+                               blurred_rgb.y * params.intensity_target,
+                               blurred_rgb.z * params.intensity_target, true);
+  pre.x = fmaxf(pre.x, 1.0e-4f);
+  pre.y = fmaxf(pre.y, 1.0e-4f);
+  pre.z = fmaxf(pre.z, 1.0e-4f);
+  const float3 sensitivity =
+      make_float3(fmaxf(GammaValue(pre.x) / pre.x, 1.0e-4f),
+                  fmaxf(GammaValue(pre.y) / pre.y, 1.0e-4f),
+                  fmaxf(GammaValue(pre.z) / pre.z, 1.0e-4f));
+  float3 current =
+      OpsinAbsorbance(input_rgb.x * params.intensity_target,
+                      input_rgb.y * params.intensity_target,
+                      input_rgb.z * params.intensity_target, false);
+  current.x = fmaxf(current.x * sensitivity.x, 1.7557483643287353f);
+  current.y = fmaxf(current.y * sensitivity.y, 1.7557483643287353f);
+  current.z = fmaxf(current.z * sensitivity.z, 12.226454707163354f);
+  output0[blurred_index] = current.x - current.y;
+  output1[blurred_index] = current.x + current.y;
+  output2[blurred_index] = current.z;
+}
+
+__global__ void LowMediumKernel(const float* xyb0, const float* xyb1,
+                                const float* xyb2, const float* blurred0,
+                                const float* blurred1, const float* blurred2,
+                                float* low0, float* low1, float* low2,
+                                float* medium0, float* medium1, float* medium2,
+                                LowMediumParams params) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  const size_t source = static_cast<size_t>(y) * params.xyb_stride + x;
+  const size_t blurred = static_cast<size_t>(y) * params.blurred_stride + x;
+  const size_t output = static_cast<size_t>(y) * params.psycho_stride + x;
+  const float bx = blurred0[blurred];
+  const float by = blurred1[blurred];
+  const float bb = blurred2[blurred];
+  medium0[output] = xyb0[source] - bx;
+  medium1[output] = xyb1[source] - by;
+  medium2[output] = xyb2[source] - bb;
+  low0[output] = bx * 33.832837186260f;
+  low1[output] = by * 14.458268100570f;
+  low2[output] = UnfusedMultiplyAdd(-0.362267051518f, by, bb) * 49.87984651440f;
+}
+
+__device__ float MaximumClamp(float value, float maximum) {
+  if (value >= maximum) {
+    return UnfusedMultiplyAdd(value - maximum, 0.724216145665f, maximum);
+  }
+  if (value < -maximum) {
+    return UnfusedMultiplyAdd(value + maximum, 0.724216145665f, -maximum);
+  }
+  return value;
+}
+
+__device__ float RemoveRange(float value, float width) {
+  return value > width ? value - width : value < -width ? value + width : 0.0f;
+}
+
+__device__ float AmplifyRange(float value, float width) {
+  return value > width    ? value + width
+         : value < -width ? value - width
+                          : value + value;
+}
+
+__global__ void FrequencySplitKernel(float* input, const float* blurred,
+                                     float* output, FrequencyParams params) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  const size_t input_index = static_cast<size_t>(y) * params.input_stride + x;
+  const size_t low_index = static_cast<size_t>(y) * params.low_stride + x;
+  const size_t output_index = static_cast<size_t>(y) * params.output_stride + x;
+  float low_pass = blurred[low_index];
+  const float original = input[input_index];
+  if (params.channel < 2) {
+    output[output_index] = original - low_pass;
+    input[input_index] = params.channel == 0 ? RemoveRange(low_pass, 0.29f)
+                                             : AmplifyRange(low_pass, 0.1f);
+  } else if (params.channel == 2) {
+    input[input_index] = low_pass;
+  } else if (params.channel == 3) {
+    output[output_index] = RemoveRange(original - low_pass, 0.04f);
+    input[input_index] = RemoveRange(low_pass, 1.5f);
+  } else {
+    low_pass = MaximumClamp(low_pass, 28.4691806922f);
+    output[output_index] =
+        MaximumClamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
+    input[input_index] = AmplifyRange(low_pass * 2.155f, 0.132f);
+  }
+}
+
+__global__ void SuppressXKernel(float* high_x, const float* high_y,
+                                PlaneParams params) {
+  const size_t index = PlaneIndex(params);
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  const size_t x_index = static_cast<size_t>(y) * params.output_stride + x;
+  const size_t y_index = static_cast<size_t>(y) * params.input_stride + x;
+  const float value = high_y[y_index];
+  const float denominator = UnfusedMultiplyAdd(value, value, 46.0f);
+  const float scaler = UnfusedMultiplyAdd(
+      46.0f / denominator, 1.0f - 0.653020556257f, 0.653020556257f);
+  high_x[x_index] *= scaler;
+}
+
+__device__ float MaltaScaleValue(float value0, float value1,
+                                 MaltaScaleParams params) {
+  const float absolute = 0.5f * (fabsf(value0) + fabsf(value1));
+  const float difference = value0 - value1;
+  const float scaler = params.norm2_0_gt_1 / (params.norm + absolute);
+  float scaled = scaler * difference;
+  const float scaler2 = params.norm2_0_lt_1 / (params.norm + absolute);
+  const float magnitude = fabsf(value0);
+  const float too_small = 0.55f * magnitude;
+  const float too_big = 1.05f * magnitude;
+  if (value0 < 0.0f) {
+    if (value1 > -too_small) {
+      scaled -= scaler2 * (value1 + too_small);
+    } else if (value1 < -too_big) {
+      scaled += scaler2 * (-value1 - too_big);
+    }
+  } else if (value1 < too_small) {
+    scaled += scaler2 * (too_small - value1);
+  } else if (value1 > too_big) {
+    scaled -= scaler2 * (value1 - too_big);
+  }
+  return scaled;
+}
+
+__global__ void MaltaScaleKernel(const float* reference, const float* distorted,
+                                 float* output, MaltaScaleParams params) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  output[static_cast<size_t>(y) * params.output_stride + x] = MaltaScaleValue(
+      reference[static_cast<size_t>(y) * params.reference_stride + x],
+      distorted[static_cast<size_t>(y) * params.distorted_stride + x], params);
+}
+
+__device__ float ReadZero(const float* input, int x, int y,
+                          MaltaResponseParams params) {
+  if (x < 0 || y < 0 || x >= static_cast<int>(params.width) ||
+      y >= static_cast<int>(params.height)) {
+    return 0.0f;
+  }
+  return input[static_cast<size_t>(y) * params.input_stride +
+               static_cast<uint32_t>(x)];
+}
+
+__device__ void AddSquare(float value, float* total) {
+  *total = UnfusedMultiplyAdd(value, value, *total);
+}
+
+__device__ float Sum5(float a, float b, float c, float d, float e) {
+  return (a + b) + (c + (d + e));
+}
+
+__device__ float Sum7(float a, float b, float c, float d, float e, float f,
+                      float g) {
+  return (a + b) + (c + ((d + e) + (f + g)));
+}
+
+__device__ float Sum9(float a, float b, float c, float d, float e, float f,
+                      float g, float h, float i) {
+  return ((a + b) + (c + d)) + ((e + f) + (g + h)) + i;
+}
+
+__device__ float MaltaLf(const float* input, int x, int y,
+                         MaltaResponseParams p) {
+#define GJXL_V(dx, dy) ReadZero(input, x + (dx), y + (dy), p)
+  float sum = Sum5(GJXL_V(-4, 0), GJXL_V(-2, 0), GJXL_V(0, 0), GJXL_V(2, 0),
+                   GJXL_V(4, 0));
+  float result = sum * sum;
+  sum = Sum5(GJXL_V(0, -4), GJXL_V(0, -2), GJXL_V(0, 0), GJXL_V(0, 2),
+             GJXL_V(0, 4));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-3, -3), GJXL_V(-2, -2), GJXL_V(0, 0), GJXL_V(2, 2),
+             GJXL_V(3, 3));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(3, -3), GJXL_V(2, -2), GJXL_V(0, 0), GJXL_V(-2, 2),
+             GJXL_V(-3, 3));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(1, -4), GJXL_V(1, -2), GJXL_V(0, 0), GJXL_V(-1, 2),
+             GJXL_V(-1, 4));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-1, -4), GJXL_V(-1, -2), GJXL_V(0, 0), GJXL_V(1, 2),
+             GJXL_V(1, 4));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-4, -1), GJXL_V(-2, -1), GJXL_V(0, 0), GJXL_V(2, 1),
+             GJXL_V(4, 1));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-4, 1), GJXL_V(-2, 1), GJXL_V(0, 0), GJXL_V(2, -1),
+             GJXL_V(4, -1));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-2, -3), GJXL_V(-1, -2), GJXL_V(0, 0), GJXL_V(1, 2),
+             GJXL_V(2, 3));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(2, -3), GJXL_V(1, -2), GJXL_V(0, 0), GJXL_V(-1, 2),
+             GJXL_V(-2, 3));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-3, -2), GJXL_V(-2, -1), GJXL_V(0, 0), GJXL_V(2, 1),
+             GJXL_V(3, 2));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(3, -2), GJXL_V(2, -1), GJXL_V(0, 0), GJXL_V(-2, 1),
+             GJXL_V(-3, 2));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-4, 2), GJXL_V(-2, 1), GJXL_V(0, 0), GJXL_V(2, -1),
+             GJXL_V(4, -2));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-4, -2), GJXL_V(-2, -1), GJXL_V(0, 0), GJXL_V(2, 1),
+             GJXL_V(4, 2));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(-2, -4), GJXL_V(-1, -2), GJXL_V(0, 0), GJXL_V(1, 2),
+             GJXL_V(2, 4));
+  AddSquare(sum, &result);
+  sum = Sum5(GJXL_V(2, -4), GJXL_V(1, -2), GJXL_V(0, 0), GJXL_V(-1, 2),
+             GJXL_V(-2, 4));
+  AddSquare(sum, &result);
+#undef GJXL_V
+  return result;
+}
+
+__device__ float MaltaFull(const float* input, int x, int y,
+                           MaltaResponseParams p) {
+#define GJXL_V(dx, dy) ReadZero(input, x + (dx), y + (dy), p)
+  float sum = Sum9(GJXL_V(-4, 0), GJXL_V(-3, 0), GJXL_V(-2, 0), GJXL_V(-1, 0),
+                   GJXL_V(0, 0), GJXL_V(1, 0), GJXL_V(2, 0), GJXL_V(3, 0),
+                   GJXL_V(4, 0));
+  float result = sum * sum;
+  sum = Sum9(GJXL_V(0, -4), GJXL_V(0, -3), GJXL_V(0, -2), GJXL_V(0, -1),
+             GJXL_V(0, 0), GJXL_V(0, 1), GJXL_V(0, 2), GJXL_V(0, 3),
+             GJXL_V(0, 4));
+  AddSquare(sum, &result);
+  sum = Sum7(GJXL_V(-3, -3), GJXL_V(-2, -2), GJXL_V(-1, -1), GJXL_V(0, 0),
+             GJXL_V(1, 1), GJXL_V(2, 2), GJXL_V(3, 3));
+  AddSquare(sum, &result);
+  sum = Sum7(GJXL_V(3, -3), GJXL_V(2, -2), GJXL_V(1, -1), GJXL_V(0, 0),
+             GJXL_V(-1, 1), GJXL_V(-2, 2), GJXL_V(-3, 3));
+  AddSquare(sum, &result);
+  sum = Sum9(GJXL_V(1, -4), GJXL_V(1, -3), GJXL_V(1, -2), GJXL_V(0, -1),
+             GJXL_V(0, 0), GJXL_V(0, 1), GJXL_V(-1, 2), GJXL_V(-1, 3),
+             GJXL_V(-1, 4));
+  AddSquare(sum, &result);
+  sum = Sum9(GJXL_V(-1, -4), GJXL_V(-1, -3), GJXL_V(-1, -2), GJXL_V(0, -1),
+             GJXL_V(0, 0), GJXL_V(0, 1), GJXL_V(1, 2), GJXL_V(1, 3),
+             GJXL_V(1, 4));
+  AddSquare(sum, &result);
+  sum = Sum9(GJXL_V(-4, -1), GJXL_V(-3, -1), GJXL_V(-2, -1), GJXL_V(-1, 0),
+             GJXL_V(0, 0), GJXL_V(1, 0), GJXL_V(2, 1), GJXL_V(3, 1),
+             GJXL_V(4, 1));
+  AddSquare(sum, &result);
+  sum = Sum9(GJXL_V(-4, 1), GJXL_V(-3, 1), GJXL_V(-2, 1), GJXL_V(-1, 0),
+             GJXL_V(0, 0), GJXL_V(1, 0), GJXL_V(2, -1), GJXL_V(3, -1),
+             GJXL_V(4, -1));
+  AddSquare(sum, &result);
+  sum = Sum7(GJXL_V(-2, -3), GJXL_V(-1, -2), GJXL_V(-1, -1), GJXL_V(0, 0),
+             GJXL_V(1, 1), GJXL_V(1, 2), GJXL_V(2, 3));
+  AddSquare(sum, &result);
+  sum = Sum7(GJXL_V(2, -3), GJXL_V(1, -2), GJXL_V(1, -1), GJXL_V(0, 0),
+             GJXL_V(-1, 1), GJXL_V(-1, 2), GJXL_V(-2, 3));
+  AddSquare(sum, &result);
+  sum = Sum7(GJXL_V(-3, -2), GJXL_V(-2, -1), GJXL_V(-1, -1), GJXL_V(0, 0),
+             GJXL_V(1, 1), GJXL_V(2, 1), GJXL_V(3, 2));
+  AddSquare(sum, &result);
+  sum = Sum7(GJXL_V(3, -2), GJXL_V(2, -1), GJXL_V(1, -1), GJXL_V(0, 0),
+             GJXL_V(-1, 1), GJXL_V(-2, 1), GJXL_V(-3, 2));
+  AddSquare(sum, &result);
+  sum = Sum9(GJXL_V(-4, 1), GJXL_V(-3, 1), GJXL_V(-2, 1), GJXL_V(-1, 0),
+             GJXL_V(0, 0), GJXL_V(1, 0), GJXL_V(2, -1), GJXL_V(3, -1),
+             GJXL_V(4, -1));
+  AddSquare(sum, &result);
+  sum = Sum9(GJXL_V(-4, -1), GJXL_V(-3, -1), GJXL_V(-2, -1), GJXL_V(-1, 0),
+             GJXL_V(0, 0), GJXL_V(1, 0), GJXL_V(2, 1), GJXL_V(3, 1),
+             GJXL_V(4, 1));
+  AddSquare(sum, &result);
+  sum = Sum9(GJXL_V(-1, -4), GJXL_V(-1, -3), GJXL_V(-1, -2), GJXL_V(0, -1),
+             GJXL_V(0, 0), GJXL_V(0, 1), GJXL_V(1, 2), GJXL_V(1, 3),
+             GJXL_V(1, 4));
+  AddSquare(sum, &result);
+  sum = Sum9(GJXL_V(1, -4), GJXL_V(1, -3), GJXL_V(1, -2), GJXL_V(0, -1),
+             GJXL_V(0, 0), GJXL_V(0, 1), GJXL_V(-1, 2), GJXL_V(-1, 3),
+             GJXL_V(-1, 4));
+  AddSquare(sum, &result);
+#undef GJXL_V
+  return result;
+}
+
+__global__ void MaltaResponseKernel(const float* input, float* accumulation,
+                                    MaltaResponseParams params) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  const float result =
+      params.low_frequency != 0
+          ? MaltaLf(input, static_cast<int>(x), static_cast<int>(y), params)
+          : MaltaFull(input, static_cast<int>(x), static_cast<int>(y), params);
+  const size_t output = static_cast<size_t>(y) * params.accumulation_stride + x;
+  if (params.initialize_accumulation != 0) {
+    accumulation[output] = result;
+  } else {
+    accumulation[output] += result;
+  }
+}
+
+__device__ float L2Asymmetric(float value0, float value1, float weight_up,
+                              float weight_down, float total) {
+  const float difference = value0 - value1;
+  total = UnfusedMultiplyAdd(difference * difference, weight_up * 0.8f, total);
+  const float magnitude = fabsf(value0);
+  const float too_small = 0.4f * magnitude;
+  float secondary = 0.0f;
+  if (value0 < 0.0f) {
+    if (value1 > -too_small)
+      secondary = value1 + too_small;
+    else if (value1 < -magnitude)
+      secondary = -value1 - magnitude;
+  } else if (value1 < too_small) {
+    secondary = too_small - value1;
+  } else if (value1 > magnitude) {
+    secondary = value1 - magnitude;
+  }
+  return UnfusedMultiplyAdd(weight_down * 0.8f, secondary * secondary, total);
+}
+
+__global__ void L2Kernel(DifferencePlan plan) {
+  const DifferenceParams params = plan.params;
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  const size_t r = static_cast<size_t>(y) * params.reference_stride + x;
+  const size_t d = static_cast<size_t>(y) * params.distorted_stride + x;
+  const size_t w = static_cast<size_t>(y) * params.work_stride + x;
+  const float inverse_asymmetry = 1.0f / params.asymmetry;
+  float total0 = L2Asymmetric(plan.reference[6][r], plan.distorted[6][d],
+                              400.0f * params.asymmetry,
+                              400.0f * inverse_asymmetry, plan.ac[0][w]);
+  float total1 =
+      L2Asymmetric(plan.reference[7][r], plan.distorted[7][d],
+                   1.50815703118f * params.asymmetry,
+                   1.50815703118f * inverse_asymmetry, plan.ac[1][w]);
+  const float md0 = plan.reference[3][r] - plan.distorted[3][d];
+  const float md1 = plan.reference[4][r] - plan.distorted[4][d];
+  const float md2 = plan.reference[5][r] - plan.distorted[5][d];
+  plan.ac[0][w] = UnfusedMultiplyAdd(md0 * md0, 2150.0f, total0);
+  plan.ac[1][w] = UnfusedMultiplyAdd(md1 * md1, 10.6195433239f, total1);
+  plan.ac[2][w] = md2 * md2 * 16.2176043152f;
+  const float ld0 = plan.reference[0][r] - plan.distorted[0][d];
+  const float ld1 = plan.reference[1][r] - plan.distorted[1][d];
+  const float ld2 = plan.reference[2][r] - plan.distorted[2][d];
+  plan.dc[0][w] = ld0 * ld0 * 29.2353797994f;
+  plan.dc[1][w] = ld1 * ld1 * 0.844626970982f;
+  plan.dc[2][w] = ld2 * ld2 * 0.703646627719f;
+}
+
+__global__ void MaskPrecomputeKernel(const float* high_x, const float* high_y,
+                                     const float* ultra_x, const float* ultra_y,
+                                     float* output, PlaneParams params) {
+  const size_t index = PlaneIndex(params);
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  const size_t input = static_cast<size_t>(y) * params.input_stride + x;
+  const size_t destination = static_cast<size_t>(y) * params.output_stride + x;
+  const float xdiff = (ultra_x[input] + high_x[input]) * 2.5f;
+  const float ydiff = ultra_y[input] * 0.4f + high_y[input] * 0.4f;
+  const float activity = sqrtf(xdiff * xdiff + ydiff * ydiff);
+  constexpr float kMultiplier = 6.19424080439f;
+  constexpr float kBias = kMultiplier * 12.61050594197f;
+  output[destination] =
+      sqrtf(kMultiplier * fabsf(activity) + kBias) - sqrtf(kBias);
+}
+
+__device__ void StoreMin3(float value, float* minimum0, float* minimum1,
+                          float* minimum2) {
+  if (value < *minimum2) {
+    if (value < *minimum0) {
+      *minimum2 = *minimum1;
+      *minimum1 = *minimum0;
+      *minimum0 = value;
+    } else if (value < *minimum1) {
+      *minimum2 = *minimum1;
+      *minimum1 = value;
+    } else {
+      *minimum2 = value;
+    }
+  }
+}
+
+__global__ void FuzzyErosionKernel(const float* input, float* output,
+                                   PlaneParams params) {
+  const size_t index = PlaneIndex(params);
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (index >= count) return;
+  const uint32_t y0 = static_cast<uint32_t>(index / params.width);
+  const uint32_t x0 =
+      static_cast<uint32_t>(index - static_cast<size_t>(y0) * params.width);
+  constexpr int kStep = 3;
+  const int x = static_cast<int>(x0);
+  const int y = static_cast<int>(y0);
+  float minimum0 = input[static_cast<size_t>(y0) * params.input_stride + x0];
+  float minimum1 = 2.0f * minimum0;
+  float minimum2 = minimum1;
+  for (int dy = -kStep; dy <= kStep; dy += kStep) {
+    for (int dx = -kStep; dx <= kStep; dx += kStep) {
+      if (dx == 0 && dy == 0) continue;
+      const int sx = x + dx;
+      const int sy = y + dy;
+      if (sx >= 0 && sy >= 0 && sx < static_cast<int>(params.width) &&
+          sy < static_cast<int>(params.height)) {
+        StoreMin3(input[static_cast<size_t>(sy) * params.input_stride +
+                        static_cast<uint32_t>(sx)],
+                  &minimum0, &minimum1, &minimum2);
+      }
+    }
+  }
+  output[static_cast<size_t>(y0) * params.output_stride + x0] =
+      0.45f * minimum0 + 0.3f * minimum1 + 0.25f * minimum2;
+}
+
+__device__ float MaskY(float delta) {
+  constexpr float kGlobalScale = 1.0f / (17.83f * 0.79079917404f);
+  const float value =
+      kGlobalScale *
+      (1.0f + 2.5485944793f / (0.451936922203f * delta + 0.829591754942f));
+  return value * value;
+}
+
+__device__ float MaskDcY(float delta) {
+  constexpr float kGlobalScale = 1.0f / (17.83f * 0.79079917404f);
+  const float value =
+      kGlobalScale *
+      (1.0f + 0.505054525019f / (3.87449418804f * delta + 0.20025578522f));
+  return value * value;
+}
+
+struct FinalPlan {
+  const float* dc[3];
+  const float* ac[3];
+  const float* mask;
+  const float* mask_reference;
+  const float* mask_distorted;
+  float* output;
+  FinalParams params;
+};
+
+__global__ void FinalKernel(FinalPlan plan) {
+  const FinalParams params = plan.params;
+  const size_t flat =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (flat >= count) return;
+  const uint32_t y = static_cast<uint32_t>(flat / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(flat - static_cast<size_t>(y) * params.width);
+  const size_t index = static_cast<size_t>(y) * params.stride + x;
+  const float difference =
+      plan.mask_reference[index] - plan.mask_distorted[index];
+  const float ac_y = plan.ac[1][index] + 10.0f * difference * difference;
+  const float mask_value = MaskY(plan.mask[index]);
+  const float dc_mask_value = MaskDcY(plan.mask[index]);
+  const float masked_dc =
+      plan.dc[0][index] * params.x_multiplier * dc_mask_value +
+      plan.dc[1][index] * dc_mask_value + plan.dc[2][index] * dc_mask_value;
+  const float masked_ac = plan.ac[0][index] * params.x_multiplier * mask_value +
+                          ac_y * mask_value + plan.ac[2][index] * mask_value;
+  const float result = sqrtf(masked_dc + masked_ac);
+  plan.output[static_cast<size_t>(y) * params.output_stride + x] =
+      isfinite(result) && result >= 0.0f ? result : NAN;
+}
+
+struct CropParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t input_stride;
+  uint32_t output_stride;
+  uint32_t xborder;
+  uint32_t yborder;
+};
+
+__global__ void CropKernel(const float* input, float* output,
+                           CropParams params) {
+  const size_t flat =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (flat >= count) return;
+  const uint32_t y = static_cast<uint32_t>(flat / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(flat - static_cast<size_t>(y) * params.width);
+  output[static_cast<size_t>(y) * params.output_stride + x] =
+      input[static_cast<size_t>(y + params.yborder) * params.input_stride + x +
+            params.xborder];
+}
+
+struct ComposeParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t main_stride;
+  uint32_t sub_stride;
+  uint32_t output_stride;
+};
+
+__global__ void ComposeKernel(const float* main_map, const float* sub_map,
+                              float* output, ComposeParams params) {
+  const size_t flat =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (flat >= count) return;
+  const uint32_t y = static_cast<uint32_t>(flat / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(flat - static_cast<size_t>(y) * params.width);
+  const float main_value =
+      main_map[static_cast<size_t>(y) * params.main_stride + x];
+  const float sub_value =
+      sub_map[static_cast<size_t>(y / 2) * params.sub_stride + x / 2];
+  output[static_cast<size_t>(y) * params.output_stride + x] =
+      main_value * 0.85f + 0.5f * sub_value;
+}
+
+struct ReductionParams {
+  uint32_t width;
+  uint32_t input_stride;
+  uint32_t input_count;
+};
+
+__global__ void ReduceMaximumKernel(const float* input, float* output,
+                                    ReductionParams params) {
+  __shared__ float values[kReductionWidth];
+  const uint32_t index = blockIdx.x * kReductionWidth + threadIdx.x;
+  float value = -INFINITY;
+  if (index < params.input_count) {
+    const uint32_t y = index / params.width;
+    const uint32_t x = index - y * params.width;
+    value = input[static_cast<size_t>(y) * params.input_stride + x];
+    if (!isfinite(value) || value < 0.0f) value = NAN;
+  }
+  values[threadIdx.x] = value;
+  __syncthreads();
+  for (uint32_t step = kReductionWidth / 2; step != 0; step /= 2) {
+    if (threadIdx.x < step) {
+      const float other = values[threadIdx.x + step];
+      values[threadIdx.x] = isnan(values[threadIdx.x]) || isnan(other)
+                                ? NAN
+                                : fmaxf(values[threadIdx.x], other);
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) output[blockIdx.x] = values[0];
+}
+
+[[nodiscard]] unsigned int PlaneBlocks(uint32_t width, uint32_t height) {
+  const size_t count = static_cast<size_t>(width) * height;
+  return static_cast<unsigned int>((count + kPlaneThreads - 1) / kPlaneThreads);
+}
+
+[[nodiscard]] cudaError_t CheckLaunch() { return cudaPeekAtLastError(); }
+
+[[nodiscard]] cudaError_t LaunchExpand(std::array<const float*, 3> input,
+                                       std::array<uint32_t, 3> input_stride,
+                                       const CudaButteraugliPlan& plan,
+                                       cudaStream_t stream) {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    const ExpandParams params{
+        plan.width,          plan.height,           plan.working_width,
+        plan.working_height, input_stride[channel], plan.working_width,
+        plan.xborder,        plan.yborder};
+    ExpandKernel<<<PlaneBlocks(plan.working_width, plan.working_height),
+                   kPlaneThreads, 0, stream>>>(
+        input[channel], plan.planes[kImage + channel], params);
+    const cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+  }
+  return cudaSuccess;
+}
+
+[[nodiscard]] cudaError_t LaunchSubsample(std::array<const float*, 3> input,
+                                          std::array<uint32_t, 3> input_stride,
+                                          const CudaButteraugliPlan& plan,
+                                          cudaStream_t stream) {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    const SubsampleParams params{
+        plan.width,      plan.height,           plan.sub_width,
+        plan.sub_height, input_stride[channel], plan.working_width};
+    SubsampleKernel<<<PlaneBlocks(plan.sub_width, plan.sub_height),
+                      kPlaneThreads, 0, stream>>>(
+        input[channel], plan.planes[kImage + channel], params);
+    const cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+  }
+  return cudaSuccess;
+}
+
+[[nodiscard]] cudaError_t LaunchBlur(const float* input, uint32_t input_stride,
+                                     const float* weights, uint32_t kernel_size,
+                                     float* intermediate, float* output,
+                                     uint32_t output_stride, uint32_t width,
+                                     uint32_t height, cudaStream_t stream) {
+  const unsigned int blocks = PlaneBlocks(width, height);
+  if (kernel_size == 5) {
+    ConvolutionKernel<true, true><<<blocks, kPlaneThreads, 0, stream>>>(
+        input, weights, intermediate, width, height, input_stride, width,
+        kernel_size);
+    cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+    ConvolutionKernel<false, true><<<blocks, kPlaneThreads, 0, stream>>>(
+        intermediate, weights, output, width, height, width, output_stride,
+        kernel_size);
+    return CheckLaunch();
+  }
+  ConvolutionKernel<true, false><<<blocks, kPlaneThreads, 0, stream>>>(
+      input, weights, intermediate, width, height, input_stride, width,
+      kernel_size);
+  cudaError_t error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+  ConvolutionKernel<false, false><<<blocks, kPlaneThreads, 0, stream>>>(
+      intermediate, weights, output, width, height, width, output_stride,
+      kernel_size);
+  return CheckLaunch();
+}
+
+[[nodiscard]] cudaError_t LaunchPsycho(
+    const CudaButteraugliPlan& plan, std::array<const float*, 3> input,
+    std::array<uint32_t, 3> input_stride,
+    const std::array<float*, kCudaButteraugliPsychoPlaneCount>& psycho,
+    uint32_t psycho_stride, uint32_t width, uint32_t height,
+    cudaStream_t stream) {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    const cudaError_t error =
+        LaunchBlur(input[channel], input_stride[channel], plan.kernels[0], 5,
+                   plan.planes[kWork], plan.planes[kImage + 3 + channel],
+                   plan.working_width, width, height, stream);
+    if (error != cudaSuccess) return error;
+  }
+
+  const OpsinParams opsin{width,
+                          height,
+                          {input_stride[0], input_stride[1], input_stride[2]},
+                          plan.working_width,
+                          plan.working_width,
+                          plan.intensity_target};
+  OpsinKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+      input[0], input[1], input[2], plan.planes[kImage + 3],
+      plan.planes[kImage + 4], plan.planes[kImage + 5], plan.planes[kImage],
+      plan.planes[kImage + 1], plan.planes[kImage + 2], opsin);
+  cudaError_t error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+
+  for (size_t channel = 0; channel < 3; ++channel) {
+    error = LaunchBlur(plan.planes[kImage + channel], plan.working_width,
+                       plan.kernels[1], 33, plan.planes[kWork + 3],
+                       plan.planes[kWork + channel], plan.working_width, width,
+                       height, stream);
+    if (error != cudaSuccess) return error;
+  }
+  const LowMediumParams low_medium{width, height, plan.working_width,
+                                   plan.working_width, psycho_stride};
+  LowMediumKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+      plan.planes[kImage], plan.planes[kImage + 1], plan.planes[kImage + 2],
+      plan.planes[kWork], plan.planes[kWork + 1], plan.planes[kWork + 2],
+      psycho[0], psycho[1], psycho[2], psycho[3], psycho[4], psycho[5],
+      low_medium);
+  error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+
+  for (size_t channel = 0; channel < 2; ++channel) {
+    error = LaunchBlur(psycho[3 + channel], psycho_stride, plan.kernels[2], 15,
+                       plan.planes[kWork + 1], plan.planes[kWork],
+                       plan.working_width, width, height, stream);
+    if (error != cudaSuccess) return error;
+    const FrequencyParams frequency{
+        width,         height,
+        psycho_stride, plan.working_width,
+        psycho_stride, static_cast<uint32_t>(channel)};
+    FrequencySplitKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0,
+                           stream>>>(psycho[3 + channel], plan.planes[kWork],
+                                     psycho[6 + channel], frequency);
+    error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+  }
+  error = LaunchBlur(psycho[5], psycho_stride, plan.kernels[2], 15,
+                     plan.planes[kWork + 1], psycho[5], psycho_stride, width,
+                     height, stream);
+  if (error != cudaSuccess) return error;
+
+  const PlaneParams suppress{width, height, psycho_stride, psycho_stride};
+  SuppressXKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+      psycho[6], psycho[7], suppress);
+  error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+
+  for (size_t channel = 0; channel < 2; ++channel) {
+    error = LaunchBlur(psycho[6 + channel], psycho_stride, plan.kernels[3], 7,
+                       plan.planes[kWork + 1], plan.planes[kWork],
+                       plan.working_width, width, height, stream);
+    if (error != cudaSuccess) return error;
+    const FrequencyParams frequency{
+        width,         height,
+        psycho_stride, plan.working_width,
+        psycho_stride, static_cast<uint32_t>(channel + 3)};
+    FrequencySplitKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0,
+                           stream>>>(psycho[6 + channel], plan.planes[kWork],
+                                     psycho[8 + channel], frequency);
+    error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+  }
+  return cudaSuccess;
+}
+
+[[nodiscard]] cudaError_t LaunchMaskPrecompute(
+    const std::array<const float*, kCudaButteraugliPsychoPlaneCount>& psycho,
+    uint32_t psycho_stride, float* output, uint32_t output_stride,
+    uint32_t width, uint32_t height, cudaStream_t stream) {
+  const PlaneParams params{width, height, psycho_stride, output_stride};
+  MaskPrecomputeKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0,
+                         stream>>>(psycho[6], psycho[7], psycho[8], psycho[9],
+                                   output, params);
+  return CheckLaunch();
+}
+
+template <typename T>
+[[nodiscard]] std::array<const float*, kCudaButteraugliPsychoPlaneCount>
+ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
+  std::array<const float*, kCudaButteraugliPsychoPlaneCount> result{};
+  for (size_t index = 0; index < result.size(); ++index) {
+    result[index] = input[index];
+  }
+  return result;
+}
+
+[[nodiscard]] std::array<float*, kCudaButteraugliPsychoPlaneCount> MainPsycho(
+    const CudaButteraugliPlan& plan, size_t base) {
+  std::array<float*, kCudaButteraugliPsychoPlaneCount> result{};
+  for (size_t index = 0; index < result.size(); ++index) {
+    result[index] = plan.planes[base + index];
+  }
+  return result;
+}
+
+[[nodiscard]] cudaError_t LaunchDifference(
+    const CudaButteraugliPlan& plan,
+    const std::array<const float*, kCudaButteraugliPsychoPlaneCount>& reference,
+    uint32_t reference_stride,
+    const std::array<const float*, kCudaButteraugliPsychoPlaneCount>& distorted,
+    uint32_t distorted_stride, const float* cached_reference_mask,
+    uint32_t cached_mask_stride, float* output, uint32_t output_stride,
+    uint32_t width, uint32_t height, cudaStream_t stream) {
+  constexpr double kWeights[6] = {37.0819870399, 8246.75321353, 18.7237414387,
+                                  6923.99476109, 1.10039032555, 173.5};
+  constexpr double kNorms[6] = {130262059.556, 1009002.70582, 4498534.45232,
+                                8051.15833247, 71.7800275169, 5.0};
+  constexpr size_t kOrder[6] = {4, 5, 2, 3, 0, 1};
+  constexpr size_t kPsychoPlane[6] = {4, 3, 7, 6, 9, 8};
+  const double asymmetry = plan.hf_asymmetry;
+  const double sqrt_asymmetry = sqrt(asymmetry);
+  for (size_t stage : kOrder) {
+    const double weight_up = stage < 2   ? kWeights[stage]
+                             : stage < 4 ? kWeights[stage] * sqrt_asymmetry
+                                         : kWeights[stage] * asymmetry;
+    const double weight_down = stage < 2   ? kWeights[stage]
+                               : stage < 4 ? kWeights[stage] / sqrt_asymmetry
+                                           : kWeights[stage] / asymmetry;
+    const bool low_frequency = stage < 4;
+    const double multiplier = low_frequency ? 0.611612573796 : 0.39905817637;
+    const double pre_up =
+        multiplier * sqrt(0.5 * weight_up) / (3.75 * 2.0 + 1.0);
+    const double pre_down =
+        multiplier * sqrt(0.33 * weight_down) / (3.75 * 2.0 + 1.0);
+    const MaltaScaleParams scale{width,
+                                 height,
+                                 reference_stride,
+                                 distorted_stride,
+                                 plan.working_width,
+                                 static_cast<uint32_t>(low_frequency),
+                                 static_cast<float>(pre_up * kNorms[stage]),
+                                 static_cast<float>(pre_down * kNorms[stage]),
+                                 static_cast<float>(kNorms[stage])};
+    MaltaScaleKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+        reference[kPsychoPlane[stage]], distorted[kPsychoPlane[stage]],
+        plan.planes[kWork], scale);
+    cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+    const size_t channel = stage % 2 == 0 ? 1 : 0;
+    const MaltaResponseParams response{width,
+                                       height,
+                                       plan.working_width,
+                                       plan.working_width,
+                                       static_cast<uint32_t>(low_frequency),
+                                       static_cast<uint32_t>(stage >= 4)};
+    MaltaResponseKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0,
+                          stream>>>(plan.planes[kWork],
+                                    plan.planes[kAc + channel], response);
+    error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+  }
+
+  DifferencePlan difference{};
+  for (size_t index = 0; index < 8; ++index) {
+    difference.reference[index] = reference[index];
+    difference.distorted[index] = distorted[index];
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    difference.ac[channel] = plan.planes[kAc + channel];
+    difference.dc[channel] = plan.planes[kDc + channel];
+  }
+  difference.params = {width,
+                       height,
+                       reference_stride,
+                       distorted_stride,
+                       plan.working_width,
+                       plan.hf_asymmetry};
+  L2Kernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+      difference);
+  cudaError_t error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+
+  const float* reference_mask = cached_reference_mask;
+  uint32_t reference_mask_stride = cached_mask_stride;
+  if (reference_mask == nullptr) {
+    error =
+        LaunchMaskPrecompute(reference, reference_stride, plan.planes[kWork],
+                             plan.working_width, width, height, stream);
+    if (error != cudaSuccess) return error;
+    error = LaunchBlur(plan.planes[kWork], plan.working_width, plan.kernels[4],
+                       13, plan.planes[kWork + 1], plan.planes[kWork + 2],
+                       plan.working_width, width, height, stream);
+    if (error != cudaSuccess) return error;
+    reference_mask = plan.planes[kWork + 2];
+    reference_mask_stride = plan.working_width;
+  }
+
+  const PlaneParams fuzzy{width, height, reference_mask_stride,
+                          plan.working_width};
+  FuzzyErosionKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+      reference_mask, plan.planes[kWork + 3], fuzzy);
+  error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+
+  error = LaunchMaskPrecompute(distorted, distorted_stride, plan.planes[kWork],
+                               plan.working_width, width, height, stream);
+  if (error != cudaSuccess) return error;
+  error = LaunchBlur(plan.planes[kWork], plan.working_width, plan.kernels[4],
+                     13, plan.planes[kWork + 1], plan.planes[kWork + 4],
+                     plan.working_width, width, height, stream);
+  if (error != cudaSuccess) return error;
+
+  FinalPlan final{};
+  for (size_t channel = 0; channel < 3; ++channel) {
+    final.ac[channel] = plan.planes[kAc + channel];
+    final.dc[channel] = plan.planes[kDc + channel];
+  }
+  final.mask = plan.planes[kWork + 3];
+  final.mask_reference = reference_mask;
+  final.mask_distorted = plan.planes[kWork + 4];
+  final.output = output;
+  final.params = {width, height, plan.working_width, output_stride,
+                  plan.x_multiplier};
+  FinalKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(final);
+  return CheckLaunch();
+}
+
+[[nodiscard]] cudaError_t LaunchMaximumReduction(
+    const CudaButteraugliPlan& plan, const float* input, uint32_t input_stride,
+    float* output, cudaStream_t stream) {
+  uint32_t input_count = plan.width * plan.height;
+  uint32_t width = plan.width;
+  bool use_a = true;
+  while (true) {
+    const uint32_t output_count =
+        (input_count + kReductionWidth - 1) / kReductionWidth;
+    float* destination =
+        output_count == 1 ? output : plan.reduction[use_a ? 0 : 1];
+    const ReductionParams params{width, input_stride, input_count};
+    ReduceMaximumKernel<<<output_count, kReductionWidth, 0, stream>>>(
+        input, destination, params);
+    const cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+    if (output_count == 1) return cudaSuccess;
+    input = destination;
+    input_count = output_count;
+    width = output_count;
+    input_stride = output_count;
+    use_a = !use_a;
+  }
+}
+
+}  // namespace
+
+cudaError_t LaunchCudaButteraugliPrepare(const CudaButteraugliPlan& plan,
+                                         cudaStream_t stream) {
+  const auto reference_main = MainPsycho(plan, 0);
+  cudaError_t error = cudaSuccess;
+  if (plan.expanded != 0) {
+    error = LaunchExpand(plan.reference, plan.reference_stride, plan, stream);
+    if (error != cudaSuccess) return error;
+    const std::array<const float*, 3> expanded{
+        plan.planes[kImage], plan.planes[kImage + 1], plan.planes[kImage + 2]};
+    const std::array<uint32_t, 3> stride{plan.working_width, plan.working_width,
+                                         plan.working_width};
+    error =
+        LaunchPsycho(plan, expanded, stride, reference_main, plan.working_width,
+                     plan.working_width, plan.working_height, stream);
+  } else {
+    error = LaunchPsycho(plan, plan.reference, plan.reference_stride,
+                         reference_main, plan.working_width, plan.width,
+                         plan.height, stream);
+  }
+  if (error != cudaSuccess) return error;
+  error = LaunchMaskPrecompute(ConstPsycho(reference_main), plan.working_width,
+                               plan.planes[20], plan.working_width,
+                               plan.working_width, plan.working_height, stream);
+  if (error != cudaSuccess) return error;
+  error = LaunchBlur(plan.planes[20], plan.working_width, plan.kernels[4], 13,
+                     plan.planes[kWork], plan.planes[20], plan.working_width,
+                     plan.working_width, plan.working_height, stream);
+  if (error != cudaSuccess || plan.multiscale == 0) return error;
+
+  error = LaunchSubsample(plan.reference, plan.reference_stride, plan, stream);
+  if (error != cudaSuccess) return error;
+  const std::array<const float*, 3> subsampled{
+      plan.planes[kImage], plan.planes[kImage + 1], plan.planes[kImage + 2]};
+  const std::array<uint32_t, 3> stride{plan.working_width, plan.working_width,
+                                       plan.working_width};
+  return LaunchPsycho(plan, subsampled, stride, plan.reference_sub,
+                      plan.sub_width, plan.sub_width, plan.sub_height, stream);
+}
+
+cudaError_t LaunchCudaButteraugliCompare(
+    const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
+    std::array<uint32_t, 3> distorted_stride, float* distance_map,
+    uint32_t distance_stride, float* score, cudaStream_t stream) {
+  const auto reference_main = ConstPsycho(MainPsycho(plan, 0));
+  const auto distorted_main_mutable = MainPsycho(plan, 10);
+  const auto distorted_main = ConstPsycho(distorted_main_mutable);
+  cudaError_t error = cudaSuccess;
+  if (plan.expanded != 0) {
+    error = LaunchExpand(distorted, distorted_stride, plan, stream);
+    if (error != cudaSuccess) return error;
+    const std::array<const float*, 3> expanded{
+        plan.planes[kImage], plan.planes[kImage + 1], plan.planes[kImage + 2]};
+    const std::array<uint32_t, 3> stride{plan.working_width, plan.working_width,
+                                         plan.working_width};
+    error = LaunchPsycho(plan, expanded, stride, distorted_main_mutable,
+                         plan.working_width, plan.working_width,
+                         plan.working_height, stream);
+    if (error != cudaSuccess) return error;
+    error = LaunchDifference(plan, reference_main, plan.working_width,
+                             distorted_main, plan.working_width,
+                             plan.planes[20], plan.working_width,
+                             plan.planes[kFinalStaging], plan.working_width,
+                             plan.working_width, plan.working_height, stream);
+    if (error != cudaSuccess) return error;
+    const CropParams crop{plan.width,      plan.height,  plan.working_width,
+                          distance_stride, plan.xborder, plan.yborder};
+    CropKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0,
+                 stream>>>(plan.planes[kFinalStaging], distance_map, crop);
+    error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+  } else {
+    error =
+        LaunchPsycho(plan, distorted, distorted_stride, distorted_main_mutable,
+                     plan.working_width, plan.width, plan.height, stream);
+    if (error != cudaSuccess) return error;
+    error = LaunchDifference(plan, reference_main, plan.working_width,
+                             distorted_main, plan.working_width,
+                             plan.planes[20], plan.working_width, distance_map,
+                             distance_stride, plan.width, plan.height, stream);
+    if (error != cudaSuccess) return error;
+    if (plan.multiscale != 0) {
+      error = LaunchSubsample(distorted, distorted_stride, plan, stream);
+      if (error != cudaSuccess) return error;
+      const std::array<const float*, 3> subsampled{plan.planes[kImage],
+                                                   plan.planes[kImage + 1],
+                                                   plan.planes[kImage + 2]};
+      const std::array<uint32_t, 3> stride{
+          plan.working_width, plan.working_width, plan.working_width};
+      error = LaunchPsycho(plan, subsampled, stride, distorted_main_mutable,
+                           plan.working_width, plan.sub_width, plan.sub_height,
+                           stream);
+      if (error != cudaSuccess) return error;
+      error = LaunchDifference(
+          plan, ConstPsycho(plan.reference_sub), plan.sub_width, distorted_main,
+          plan.working_width, nullptr, 0, plan.planes[kFinalStaging],
+          plan.working_width, plan.sub_width, plan.sub_height, stream);
+      if (error != cudaSuccess) return error;
+      const ComposeParams compose{plan.width, plan.height, distance_stride,
+                                  plan.working_width, distance_stride};
+      ComposeKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0,
+                      stream>>>(distance_map, plan.planes[kFinalStaging],
+                                distance_map, compose);
+      error = CheckLaunch();
+      if (error != cudaSuccess) return error;
+    }
+  }
+  return LaunchMaximumReduction(plan, distance_map, distance_stride, score,
+                                stream);
+}
+
+}  // namespace gjxl::cuda_internal
