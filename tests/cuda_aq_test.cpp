@@ -891,9 +891,44 @@ bool CheckPreparedReuseAndFailure(
   }
   std::vector<uint8_t> first_bytes;
   std::vector<uint8_t> second_bytes;
-  return gjxl::EncodeVarDctCodestream(first, &first_bytes).ok() &&
-    gjxl::EncodeVarDctCodestream(second, &second_bytes).ok() &&
-    first_bytes == second_bytes;
+  if (!gjxl::EncodeVarDctCodestream(first, &first_bytes).ok() ||
+      !gjxl::EncodeVarDctCodestream(second, &second_bytes).ok() ||
+      first_bytes != second_bytes) {
+    return false;
+  }
+
+  const std::vector<float> quant_before_failure = quant;
+  const std::vector<float> strategy_before_failure = strategy;
+  const std::vector<float> pixel_before_failure = pixel;
+  gjxl::QuantizerParams failed_params{1234, 5678};
+  float changed_quant_dc = 0.0f;
+  if (!gjxl::ComputeInitialQuantDc(1.25f, &changed_quant_dc).ok() ||
+      !gjxl::ArmNextCudaSubmissionFailureForTest(
+        gpu, false, true).ok()) {
+    return false;
+  }
+  const gjxl::Status completion_failure =
+    prepared->ComputeInitialQuantization(
+      {1.25f, 1.0f}, output, &failed_params, changed_quant_dc);
+  if (completion_failure.code() != gjxl::StatusCode::kDeviceError ||
+      quant != quant_before_failure ||
+      strategy != strategy_before_failure ||
+      pixel != pixel_before_failure ||
+      failed_params.global_scale != 1234 || failed_params.quant_dc != 5678) {
+    std::cerr << "CUDA completion failure was not output-atomic\n";
+    return false;
+  }
+
+  gjxl::VarDctEncoderFrame rejected;
+  if (prepared->EncodeFrame({.quantizer = params}, &rejected).code() !=
+        gjxl::StatusCode::kFailedPrecondition ||
+      prepared->ComputeInitialQuantization(
+        initial_options, output, &failed_params, quant_dc).code() !=
+        gjxl::StatusCode::kFailedPrecondition) {
+    std::cerr << "CUDA completion failure did not invalidate resident state\n";
+    return false;
+  }
+  return true;
 }
 
 bool CheckPublicWorkflow(

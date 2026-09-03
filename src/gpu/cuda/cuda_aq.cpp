@@ -330,9 +330,13 @@ class CudaPreparedAqEvaluation final : public PreparedAqEvaluation {
       return Status::InvalidArgument("CUDA AQ EPF sharpness is invalid");
     }
     std::lock_guard lock(mutex_);
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA maximum-throughput AQ evaluation was invalidated");
+    }
     status = backend_->CopyHostToDevice(*epf_device_, candidate.data(),
                                         candidate.size(), 0);
-    if (!status.ok()) return status;
+    if (!status.ok()) return Invalidate(status);
     strategies_ = strategies;
     epf_sharpness_ = std::move(candidate);
     initial_ready_ = false;
@@ -357,6 +361,15 @@ class CudaPreparedAqEvaluation final : public PreparedAqEvaluation {
           "CUDA initial CfL is materialized by EncodeFrame");
     }
     std::lock_guard lock(mutex_);
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA maximum-throughput AQ evaluation was invalidated");
+    }
+    // A committed initialization writes the resident quantizer and raw-quant
+    // state in place. Do not allow an earlier successful initialization to
+    // remain observable while replacement work is in flight or after it
+    // fails.
+    initial_ready_ = false;
     initial_options_ = options;
     quant_dc_ = quant_dc;
     std::unique_ptr<GpuSubmission> submission;
@@ -364,11 +377,11 @@ class CudaPreparedAqEvaluation final : public PreparedAqEvaluation {
         &CudaPreparedAqEvaluation::EncodeInitial, this, &submission);
     if (!status.ok()) return status;
     if (submission == nullptr) {
-      return Status::Internal(
-          "CUDA initial quantization returned no submission");
+      return Invalidate(Status::Internal(
+          "CUDA initial quantization returned no submission"));
     }
     status = submission->Wait();
-    if (!status.ok()) return status;
+    if (!status.ok()) return Invalidate(status);
 
     unsigned int device_error = 0;
     std::array<unsigned int, 2> params{};
@@ -384,11 +397,10 @@ class CudaPreparedAqEvaluation final : public PreparedAqEvaluation {
     if (status.ok())
       status =
           Read(*pixel_mask_, pixel_mask_host_.data(), pixel_mask_host_.size());
-    if (!status.ok()) return status;
+    if (!status.ok()) return Invalidate(status);
     if (device_error != 0) {
-      initial_ready_ = false;
-      return Status::DeviceError(
-          "CUDA initial quantization detected invalid numeric data");
+      return Invalidate(Status::DeviceError(
+          "CUDA initial quantization detected invalid numeric data"));
     }
     const auto positive = [](const std::vector<float>& values) {
       return std::all_of(values.begin(), values.end(), [](float value) {
@@ -400,9 +412,8 @@ class CudaPreparedAqEvaluation final : public PreparedAqEvaluation {
     status = Quantizer::Create(candidate, &checked);
     if (!status.ok() || !positive(quant_field_host_) ||
         !positive(strategy_mask_host_) || !positive(pixel_mask_host_)) {
-      initial_ready_ = false;
-      return Status::DeviceError(
-          "CUDA initial quantization readback is invalid");
+      return Invalidate(Status::DeviceError(
+          "CUDA initial quantization readback is invalid"));
     }
     CopyContiguousToPlane(quant_field_host_, output.quant_field);
     CopyContiguousToPlane(strategy_mask_host_, output.strategy_mask);
@@ -429,6 +440,10 @@ class CudaPreparedAqEvaluation final : public PreparedAqEvaluation {
     Status status = Quantizer::Create(input.quantizer, &checked);
     if (!status.ok()) return status;
     std::lock_guard lock(mutex_);
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA maximum-throughput AQ evaluation was invalidated");
+    }
     if (!initial_ready_) {
       return Status::FailedPrecondition(
           "CUDA initial quantization must complete before EncodeFrame");
@@ -531,6 +546,12 @@ class CudaPreparedAqEvaluation final : public PreparedAqEvaluation {
     return backend_->CopyDeviceToHost(source, out, count * sizeof(T), 0);
   }
 
+  Status Invalidate(Status status) {
+    initial_ready_ = false;
+    invalid_ = true;
+    return status;
+  }
+
   static CudaBuffer* Buffer(std::unique_ptr<DeviceBuffer>& buffer) {
     return dynamic_cast<CudaBuffer*>(buffer.get());
   }
@@ -627,6 +648,7 @@ class CudaPreparedAqEvaluation final : public PreparedAqEvaluation {
   SimpleVarDctCodestreamProfile profile_;
   bool inverse_gaborish_ = false;
   bool initial_ready_ = false;
+  bool invalid_ = false;
   InitialQuantizationOptions initial_options_;
   float quant_dc_ = 0.0f;
   QuantizerParams quantizer_;
