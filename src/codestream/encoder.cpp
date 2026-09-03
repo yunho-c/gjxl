@@ -79,6 +79,28 @@ Status AllocationFailure() {
   return Status::OutOfMemory("Codestream assembly allocation failed");
 }
 
+Status WriteValidatedTokenStream(
+  EntropyTokenStreamView tokens,
+  const EntropyCode& code,
+  BitWriter* writer) {
+
+  // The global section has already serialized and therefore validated this
+  // model. Avoid repeating that model-wide validation in every ANS section.
+  return code.mode == EntropyCodingMode::kAns
+    ? codestream_internal::WriteAnsTokenStream(
+        tokens, code, writer)
+    : WriteTokenStream(tokens, code, writer);
+}
+
+Status WriteValidatedTokenStream(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  BitWriter* writer) {
+
+  return WriteValidatedTokenStream(
+    EntropyTokenStreamView::Interleaved(tokens), code, writer);
+}
+
 template <typename Function>
 Status RunParallelSections(size_t count, Function&& function) {
   const auto invoke = [&](size_t index, size_t worker_index) -> Status {
@@ -182,7 +204,8 @@ Status WriteDcGroupSection(
   const ProfileClock::time_point dc_tokens_begin =
     WorkBegin(profile != nullptr);
   const size_t dc_tokens_start = writer->bits_written();
-  if (Status status = WriteTokenStream(dc_tokens, code, writer); !status.ok()) {
+  if (Status status = WriteValidatedTokenStream(
+        dc_tokens, code, writer); !status.ok()) {
     return status;
   }
   written_token_bits = writer->bits_written() - dc_tokens_start;
@@ -202,7 +225,8 @@ Status WriteDcGroupSection(
   const ProfileClock::time_point metadata_tokens_begin =
     WorkBegin(profile != nullptr);
   const size_t metadata_tokens_start = writer->bits_written();
-  Status status = WriteTokenStream(metadata_tokens, code, writer);
+  Status status = WriteValidatedTokenStream(
+    metadata_tokens, code, writer);
   WorkEnd(
     profile != nullptr, metadata_tokens_begin,
     profile == nullptr ? nullptr : &profile->token_write_nanoseconds);
@@ -694,7 +718,7 @@ Status WriteAcSections(
           profile == nullptr ? nullptr : &group_profiles[index];
         const ProfileClock::time_point tokens_begin =
           WorkBegin(group_profile != nullptr);
-        Status token_status = WriteTokenStream(
+        Status token_status = WriteValidatedTokenStream(
           ac.streams[index], ac_code, &candidate[1 + index]);
         WorkEnd(
           group_profile != nullptr, tokens_begin,
@@ -1178,34 +1202,34 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
     std::vector<SimpleBlockContextMap> block_context_maps;
     SimpleCoefficientOrders custom_orders;
-    std::array<uint64_t, 2> preparation_work{};
-    status = RunParallelSections(
-      2,
-      [&](size_t index) {
-        const ProfileClock::time_point work_begin =
-          WorkBegin(profile != nullptr);
-        Status work_status;
-        if (index == 0 && exhaustive_representation_search) {
-          work_status = codestream_internal::
-            ComputeSimpleBlockContextMapCandidatesForEncoder(
-            frame, &block_context_maps);
-        } else if (index == 0) {
-          SimpleBlockContextMap block_context_map;
-          work_status = codestream_internal::
-            ComputeSimpleBlockContextMapForEncoder(
-            frame, &block_context_map);
-          if (work_status.ok()) {
-            block_context_maps.push_back(std::move(block_context_map));
-          }
-        } else {
-          work_status = codestream_internal::
-            ComputeSimpleCoefficientOrdersForEncoder(
-              frame, options.coefficient_order_behavior, &custom_orders);
-        }
-        WorkEnd(
-          profile != nullptr, work_begin, &preparation_work[index]);
-        return work_status;
-      });
+    const ProfileClock::time_point block_context_begin =
+      WorkBegin(profile != nullptr);
+    if (exhaustive_representation_search) {
+      status = codestream_internal::
+        ComputeSimpleBlockContextMapCandidatesForEncoder(
+          frame, &block_context_maps);
+    } else {
+      SimpleBlockContextMap block_context_map;
+      status = codestream_internal::ComputeSimpleBlockContextMapForEncoder(
+        frame, &block_context_map);
+      if (status.ok()) {
+        block_context_maps.push_back(std::move(block_context_map));
+      }
+    }
+    WorkEnd(
+      profile != nullptr, block_context_begin,
+      &candidate_profile.block_context_map_work_nanoseconds);
+    if (!status.ok()) {
+      return status;
+    }
+
+    const ProfileClock::time_point coefficient_order_begin =
+      WorkBegin(profile != nullptr);
+    status = codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+      frame, options.coefficient_order_behavior, &custom_orders);
+    WorkEnd(
+      profile != nullptr, coefficient_order_begin,
+      &candidate_profile.coefficient_order_work_nanoseconds);
     if (!status.ok()) {
       return status;
     }
@@ -1213,10 +1237,6 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       return Status::Internal(
         "Validated frame produced no block-context candidates");
     }
-    candidate_profile.block_context_map_work_nanoseconds =
-      preparation_work[0];
-    candidate_profile.coefficient_order_work_nanoseconds =
-      preparation_work[1];
 
     std::vector<EntropyToken> order_tokens;
     if (custom_orders.used_order_mask != 0) {

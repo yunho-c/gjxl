@@ -42,9 +42,13 @@ struct AqEvaluationOptions {
 struct AqEvaluationPreparation {
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
+  /// Optional resident original image owned by a prepared input operation.
+  /// When present, the backend borrows these planes instead of uploading the
+  /// host original. The owner must outlive this evaluation.
+  ConstDeviceImage3View resident_original_linear_rgb;
   /// Optional resident coding image owned by another prepared operation.
-  /// When present, the host coding view supplies geometry and validation only;
-  /// the backend borrows these device planes instead of allocating and
+  /// When present, the host coding view may be omitted; the backend derives
+  /// geometry from and borrows these device planes instead of allocating and
   /// uploading a duplicate image. The owner must outlive this evaluation.
   ConstDeviceImage3View resident_coding_opsin;
   const AcStrategyGrid* strategies = nullptr;

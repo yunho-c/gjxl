@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -14,6 +15,8 @@
 #include <new>
 #include <span>
 #include <stdexcept>
+#include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -22,6 +25,7 @@
 #include "codestream/ac_group.h"
 #include "codestream/encoder.h"
 #include "core/ac_strategy.h"
+#include "core/thread_budget.h"
 
 namespace gjxl {
 namespace {
@@ -30,8 +34,115 @@ constexpr uint16_t kSupportedOrderMask =
   (uint16_t{1} << 0) | (uint16_t{1} << 2) | (uint16_t{1} << 3) |
   (uint16_t{1} << 4) | (uint16_t{1} << 6);
 
+constexpr size_t kMaximumCoefficientOrderWorkers = 8;
+constexpr size_t kMinimumParallelCoefficientCount = 256 * 256;
+
+using ZeroCounts = std::array<
+  std::array<std::vector<uint64_t>, 3>,
+  codestream_internal::kSimpleCoefficientOrderCount>;
+
 Status AllocationFailure() {
   return Status::OutOfMemory("Coefficient-order allocation failed");
+}
+
+size_t CoefficientOrderParticipantCount(
+  size_t count,
+  size_t coefficient_count) {
+
+  if (count == 0) return 0;
+  if (thread_budget_internal::InExplicitParallelScope()) return 1;
+  const size_t hardware_workers = std::max<size_t>(
+    std::thread::hardware_concurrency(), 1);
+  const size_t automatic_worker_count =
+    coefficient_count < kMinimumParallelCoefficientCount
+      ? 1
+      : std::min(
+          count,
+          std::min(kMaximumCoefficientOrderWorkers, hardware_workers));
+  const size_t cpu_thread_count =
+    thread_budget_internal::CpuThreadCount();
+  return cpu_thread_count == 0
+    ? automatic_worker_count
+    : std::min(automatic_worker_count, cpu_thread_count);
+}
+
+template <typename Function>
+Status RunParallelCoefficientGroups(
+  size_t count,
+  size_t coefficient_count,
+  Function&& function) {
+
+  const size_t participant_count =
+    CoefficientOrderParticipantCount(count, coefficient_count);
+  if (participant_count == 0) return Status::Ok();
+  const size_t cpu_thread_count =
+    thread_budget_internal::CpuThreadCount();
+  auto* const participant_tracker =
+    thread_budget_internal::ParticipantTracker();
+  if (participant_count == 1) {
+    thread_budget_internal::ParallelScope scope(
+      cpu_thread_count, participant_tracker);
+    for (size_t index = 0; index < count; ++index) {
+      Status status = function(index, 0);
+      if (!status.ok()) return status;
+    }
+    return Status::Ok();
+  }
+
+  std::vector<Status> statuses(count);
+  std::atomic<size_t> next_index{0};
+  std::vector<std::thread> workers;
+  const size_t spawned_worker_count = cpu_thread_count == 0
+    ? participant_count
+    : participant_count - 1;
+  workers.reserve(spawned_worker_count);
+  const auto run_worker = [&](size_t worker_index) {
+    thread_budget_internal::ParallelScope scope(
+      cpu_thread_count, participant_tracker);
+    while (true) {
+      const size_t index =
+        next_index.fetch_add(1, std::memory_order_relaxed);
+      if (index >= count) break;
+      try {
+        statuses[index] = function(index, worker_index);
+      } catch (const std::bad_alloc&) {
+        statuses[index] = AllocationFailure();
+      } catch (const std::length_error&) {
+        statuses[index] = AllocationFailure();
+      } catch (...) {
+        statuses[index] = Status::Internal(
+          "Coefficient-order worker failed unexpectedly");
+      }
+    }
+  };
+  try {
+    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
+      workers.emplace_back(run_worker, worker);
+    }
+  } catch (const std::system_error&) {
+    next_index.store(count, std::memory_order_relaxed);
+    for (std::thread& worker : workers) worker.join();
+    return Status::Internal("Unable to start coefficient-order workers");
+  }
+  if (cpu_thread_count != 0) run_worker(spawned_worker_count);
+  for (std::thread& worker : workers) worker.join();
+  for (const Status& status : statuses) {
+    if (!status.ok()) return status;
+  }
+  return Status::Ok();
+}
+
+bool UseCoefficientOrderSample(std::array<uint64_t, 2>* random_state) {
+  uint64_t state_1 = (*random_state)[0];
+  const uint64_t state_0 = (*random_state)[1];
+  const uint64_t bits = state_1 + state_0;
+  (*random_state)[0] = state_0;
+  state_1 ^= state_1 << 23;
+  state_1 ^= state_0 ^ (state_1 >> 18) ^ (state_0 >> 5);
+  (*random_state)[1] = state_1;
+  constexpr uint64_t kHalfThreshold =
+    (std::numeric_limits<uint64_t>::max() >> 32) / 2;
+  return (bits >> 32) <= kHalfThreshold;
 }
 
 const AcStrategyInfo* RepresentativeInfo(size_t family) {
@@ -112,26 +223,13 @@ Status ValidateOrder(
 Status CountGroupZeros(
   const VarDctAcGroupView& group,
   const AcStrategyGrid& strategies,
-  std::array<std::array<std::vector<uint64_t>, 3>,
-             codestream_internal::kSimpleCoefficientOrderCount>* zero_counts,
+  ZeroCounts* zero_counts,
   bool sample_dct8,
-  std::array<uint64_t, 2>* random_state,
+  std::span<const uint8_t> sample_decisions,
   uint16_t* present_mask) {
 
-  const auto use_sample = [&]() {
-    uint64_t state_1 = (*random_state)[0];
-    const uint64_t state_0 = (*random_state)[1];
-    const uint64_t bits = state_1 + state_0;
-    (*random_state)[0] = state_0;
-    state_1 ^= state_1 << 23;
-    state_1 ^= state_0 ^ (state_1 >> 18) ^ (state_0 >> 5);
-    (*random_state)[1] = state_1;
-    constexpr uint64_t kHalfThreshold =
-      (std::numeric_limits<uint64_t>::max() >> 32) / 2;
-    return (bits >> 32) <= kHalfThreshold;
-  };
-
   size_t source_offset = 0;
+  size_t sample_index = 0;
   for (size_t y = 0; y < group.block_extent.height; ++y) {
     for (size_t x = 0; x < group.block_extent.width; ++x) {
       AcStrategyCell cell;
@@ -172,7 +270,12 @@ Status CountGroupZeros(
               "Coefficient-order family dimensions disagree");
           }
         }
-        const bool selected = !sample_dct8 || use_sample();
+        if (sample_dct8 && sample_index >= sample_decisions.size()) {
+          return Status::Internal(
+            "Coefficient-order sample decisions are incomplete");
+        }
+        const bool selected =
+          !sample_dct8 || sample_decisions[sample_index++] != 0;
         if (selected) {
           for (size_t channel = 0; channel < 3; ++channel) {
             std::vector<uint64_t>& counts = (*zero_counts)[family][channel];
@@ -200,21 +303,24 @@ Status CountGroupZeros(
     return Status::InvalidArgument(
       "Coefficient-order group consumption is incomplete");
   }
+  if (sample_dct8 && sample_index != sample_decisions.size()) {
+    return Status::Internal(
+      "Coefficient-order sample decisions were not consumed");
+  }
   return Status::Ok();
 }
 
-Status PresentOrderMask(const VarDctEncoderFrame& frame, uint16_t* mask) {
+Status PresentOrderMask(
+  std::span<const VarDctAcGroupView> groups,
+  const AcStrategyGrid& strategies,
+  uint16_t* mask) {
+
   uint16_t present = 0;
-  for (size_t group_index = 0; group_index < frame.ac_group_count();
-       ++group_index) {
-    VarDctAcGroupView group;
-    if (Status status = frame.GetAcGroup(group_index, &group); !status.ok()) {
-      return status;
-    }
+  for (const VarDctAcGroupView& group : groups) {
     for (size_t y = 0; y < group.block_extent.height; ++y) {
       for (size_t x = 0; x < group.block_extent.width; ++x) {
         AcStrategyCell cell;
-        if (Status status = frame.strategies().Get(
+        if (Status status = strategies.Get(
               group.block_x + x, group.block_y + y, &cell); !status.ok()) {
           return status;
         }
@@ -372,34 +478,117 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
       return Status::Ok();
     }
 
-    std::array<std::array<std::vector<uint64_t>, 3>,
-               codestream_internal::kSimpleCoefficientOrderCount> zero_counts;
+    std::vector<VarDctAcGroupView> groups(frame.ac_group_count());
+    size_t coefficient_count = 0;
+    for (size_t group_index = 0; group_index < groups.size(); ++group_index) {
+      Status status = frame.GetAcGroup(group_index, &groups[group_index]);
+      if (!status.ok()) {
+        return status;
+      }
+      if (groups[group_index].used_coefficient_count >
+          std::numeric_limits<size_t>::max() - coefficient_count) {
+        return Status::InvalidArgument(
+          "Coefficient-order value count overflows");
+      }
+      coefficient_count += groups[group_index].used_coefficient_count;
+    }
+
     uint16_t present_mask = 0;
     Status status;
     if (behavior ==
         VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled) {
-      status = PresentOrderMask(frame, &present_mask);
+      status = PresentOrderMask(
+        groups, frame.strategies(), &present_mask);
       if (!status.ok()) return status;
     }
     const bool sample_dct8 =
       behavior == VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled &&
       present_mask == 1;
-    std::array<uint64_t, 2> random_state = {
-      0x94D049BB133111EBull,
-      0xBF58476D1CE4E5B9ull,
-    };
-    for (size_t group_index = 0; group_index < frame.ac_group_count();
-         ++group_index) {
-      VarDctAcGroupView group;
-      status = frame.GetAcGroup(group_index, &group);
+
+    std::vector<std::vector<uint8_t>> sample_decisions;
+    if (sample_dct8) {
+      sample_decisions.resize(groups.size());
+      std::array<uint64_t, 2> random_state = {
+        0x94D049BB133111EBull,
+        0xBF58476D1CE4E5B9ull,
+      };
+      for (size_t group_index = 0; group_index < groups.size();
+           ++group_index) {
+        size_t anchor_count = 0;
+        if (!groups[group_index].block_extent.try_area(&anchor_count)) {
+          return Status::InvalidArgument(
+            "Coefficient-order sample count overflows");
+        }
+        std::vector<uint8_t>& decisions = sample_decisions[group_index];
+        decisions.resize(anchor_count);
+        for (uint8_t& selected : decisions) {
+          selected = static_cast<uint8_t>(
+            UseCoefficientOrderSample(&random_state));
+        }
+      }
+    }
+
+    ZeroCounts zero_counts;
+    const size_t participant_count =
+      CoefficientOrderParticipantCount(groups.size(), coefficient_count);
+    if (participant_count == 1) {
+      for (size_t group_index = 0; group_index < groups.size();
+           ++group_index) {
+        status = CountGroupZeros(
+          groups[group_index], frame.strategies(), &zero_counts, sample_dct8,
+          sample_dct8
+            ? std::span<const uint8_t>(sample_decisions[group_index])
+            : std::span<const uint8_t>{},
+          &present_mask);
+        if (!status.ok()) return status;
+      }
+    } else {
+      std::array<ZeroCounts, kMaximumCoefficientOrderWorkers> worker_counts;
+      std::array<uint16_t, kMaximumCoefficientOrderWorkers> worker_masks{};
+      status = RunParallelCoefficientGroups(
+        groups.size(), coefficient_count,
+        [&](size_t group_index, size_t worker_index) {
+          return CountGroupZeros(
+            groups[group_index], frame.strategies(),
+            &worker_counts[worker_index], sample_dct8,
+            sample_dct8
+              ? std::span<const uint8_t>(sample_decisions[group_index])
+              : std::span<const uint8_t>{},
+            &worker_masks[worker_index]);
+        });
       if (!status.ok()) {
         return status;
       }
-      status = CountGroupZeros(
-        group, frame.strategies(), &zero_counts, sample_dct8, &random_state,
-        &present_mask);
-      if (!status.ok()) {
-        return status;
+
+      for (size_t worker = 0; worker < worker_counts.size(); ++worker) {
+        present_mask |= worker_masks[worker];
+        for (size_t family = 0; family < zero_counts.size(); ++family) {
+          for (size_t channel = 0; channel < 3; ++channel) {
+            const std::vector<uint64_t>& source =
+              worker_counts[worker][family][channel];
+            if (source.empty()) {
+              continue;
+            }
+            std::vector<uint64_t>& destination =
+              zero_counts[family][channel];
+            if (destination.empty()) {
+              destination.assign(source.size(), 0);
+            } else if (destination.size() != source.size()) {
+              return Status::Internal(
+                "Coefficient-order worker dimensions disagree");
+            }
+            for (size_t coefficient = 0; coefficient < source.size();
+                 ++coefficient) {
+              if (source[coefficient] >
+                  std::numeric_limits<uint64_t>::max() -
+                    destination[coefficient]) {
+                return Status::InvalidArgument(
+                  "Coefficient zero count overflow");
+              }
+              destination[coefficient] += source[coefficient];
+            }
+          }
+        }
       }
     }
 

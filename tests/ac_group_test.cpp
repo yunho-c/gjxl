@@ -22,6 +22,7 @@
 #include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
 #include "codestream/encoder.h"
+#include "core/thread_budget.h"
 
 namespace {
 
@@ -610,11 +611,11 @@ struct ImageStorage {
   std::array<std::vector<float>, 3> plane;
 };
 
-gjxl::Status MakeFrame(size_t width,
+gjxl::Status MakeFrame(gjxl::Extent2D extent,
                        gjxl::SimpleVarDctCodestreamProfile profile,
                        gjxl::VarDctEncoderFrame* frame) {
   gjxl::FrameGeometry geometry;
-  gjxl::Status status = gjxl::FrameGeometry::Create(width, 1, &geometry);
+  gjxl::Status status = gjxl::FrameGeometry::Create(extent, &geometry);
   if (!status.ok()) {
     return status;
   }
@@ -663,6 +664,12 @@ gjxl::Status MakeFrame(size_t width,
       .epf_sharpness = View(sharpness, blocks),
     },
     profile, frame);
+}
+
+gjxl::Status MakeFrame(size_t width,
+                       gjxl::SimpleVarDctCodestreamProfile profile,
+                       gjxl::VarDctEncoderFrame* frame) {
+  return MakeFrame({width, 1}, profile, frame);
 }
 
 bool CheckFrameGroups(size_t width, size_t expected_group_count) {
@@ -794,6 +801,70 @@ bool CheckFrameCoefficientOrderSelection() {
   return true;
 }
 
+bool CheckParallelCoefficientOrderSelection() {
+  gjxl::VarDctEncoderFrame frame;
+  if (!MakeFrame({513, 513}, {}, &frame).ok()) {
+    return false;
+  }
+
+  gjxl::SimpleCoefficientOrders full_serial;
+  gjxl::SimpleCoefficientOrders full_parallel;
+  gjxl::SimpleCoefficientOrders sampled_serial;
+  gjxl::SimpleCoefficientOrders sampled_parallel;
+  std::vector<uint8_t> full_serial_bytes;
+  std::vector<uint8_t> full_parallel_bytes;
+  std::vector<uint8_t> sampled_serial_bytes;
+  std::vector<uint8_t> sampled_parallel_bytes;
+  {
+    gjxl::thread_budget_internal::EncodeScope scope(1);
+    if (!gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+          frame, gjxl::VarDctCoefficientOrderBehavior::kFull,
+          &full_serial).ok() ||
+        !gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+          frame,
+          gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled,
+          &sampled_serial).ok() ||
+        !gjxl::EncodeVarDctCodestream(frame, {}, &full_serial_bytes).ok() ||
+        !gjxl::EncodeVarDctCodestream(
+          frame,
+          {.coefficient_order_behavior =
+             gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled},
+          &sampled_serial_bytes).ok()) {
+      return false;
+    }
+  }
+
+  gjxl::thread_budget_internal::CpuParticipantTracker tracker;
+  {
+    gjxl::thread_budget_internal::EncodeScope scope(8, &tracker);
+    if (!gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+          frame, gjxl::VarDctCoefficientOrderBehavior::kFull,
+          &full_parallel).ok() ||
+        !gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+          frame,
+          gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled,
+          &sampled_parallel).ok() ||
+        !gjxl::EncodeVarDctCodestream(frame, {}, &full_parallel_bytes).ok() ||
+        !gjxl::EncodeVarDctCodestream(
+          frame,
+          {.coefficient_order_behavior =
+             gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled},
+          &sampled_parallel_bytes).ok()) {
+      return false;
+    }
+  }
+
+  if (tracker.peak() < 2 || full_parallel != full_serial ||
+      sampled_parallel != sampled_serial ||
+      full_parallel_bytes != full_serial_bytes ||
+      sampled_parallel_bytes != sampled_serial_bytes) {
+    std::cerr << "Parallel coefficient-order reduction is not deterministic, "
+                 "peak participants=" << tracker.peak() << '\n';
+    return false;
+  }
+  return true;
+}
+
 bool CheckFrameTokenTemplateReuse() {
   gjxl::VarDctEncoderFrame frame;
   if (!MakeFrame(257, {}, &frame).ok()) {
@@ -912,6 +983,7 @@ int main() {
       || !CheckMalformedGroupsAreAtomic()
       || !CheckFrameTraversalAndAtomicity()
       || !CheckFrameCoefficientOrderSelection()
+      || !CheckParallelCoefficientOrderSelection()
       || !CheckFrameTokenTemplateReuse()) {
     return EXIT_FAILURE;
   }

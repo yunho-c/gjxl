@@ -28,4 +28,15 @@ struct CandidateCostTableView {
   const CandidateCostTableView& candidate_costs,
   AcStrategyGrid* out);
 
+/// Resident variant whose CPU merge needs only coding geometry because all
+/// leaf costs have already been evaluated from device images.
+[[nodiscard]] Status FindAcStrategyGridFromResidentCandidateCosts(
+  Extent2D opsin_extent,
+  ConstPlaneF32View quant_field,
+  ConstPlaneF32View pixel_mask,
+  const ColorCorrelationMap& color_correlation,
+  AcStrategySearchOptions options,
+  const CandidateCostTableView& candidate_costs,
+  AcStrategyGrid* out);
+
 }  // namespace gjxl::ac_strategy_internal

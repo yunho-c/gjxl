@@ -18,6 +18,7 @@
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/butteraugli.h"
 #include "codec/color_transform.h"
+#include "codec/color_transform_internal.h"
 #include "codec/loop_filter.h"
 #include "codec/maximum_error.h"
 #include "codec/reconstruction.h"
@@ -33,6 +34,7 @@
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/resident_input.h"
 
 namespace {
 
@@ -2250,6 +2252,145 @@ bool CheckUploadOrNumericFailure(bool upload) {
   return true;
 }
 
+bool CheckScratchWorkspaceLeases() {
+  Fixture fixture;
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!fixture.Initialize() ||
+      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "scratch-lease backend")) {
+    return false;
+  }
+
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  const gjxl::GpuBackendStats before_cold = gpu->stats();
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_cold = gpu->stats();
+  if (after_cold.successful_allocations !=
+        before_cold.successful_allocations + 3) {
+    std::cerr << "Cold AQ preparation did not allocate three arenas\n";
+    return false;
+  }
+  EvaluationOutputStorage expected(fixture.strategies.extent());
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), expected.View()),
+                   "cold scratch-lease evaluation")) {
+    return false;
+  }
+  prepared.reset();
+
+  for (HostImage* image : {&fixture.original, &fixture.coding}) {
+    for (std::vector<float>& plane : image->plane) {
+      for (size_t y = 0; y < image->extent.height; ++y) {
+        std::reverse(plane.begin() + y * image->stride,
+                     plane.begin() + y * image->stride +
+                         image->extent.width);
+      }
+    }
+  }
+  std::unique_ptr<gjxl::GpuBackend> oracle_gpu;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> oracle_prepared;
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &oracle_gpu),
+                   "scratch-lease oracle backend") ||
+      !Prepare(*oracle_gpu, fixture.original, fixture.coding,
+               fixture.strategies, &oracle_prepared)) {
+    return false;
+  }
+  EvaluationOutputStorage changed_expected(fixture.strategies.extent());
+  if (!CheckStatus(
+        oracle_prepared->Evaluate(fixture.input.View(),
+                                  changed_expected.View()),
+        "scratch-lease changed-image oracle") ||
+      CompareOutputs(expected, changed_expected)) {
+    std::cerr << "Changed AQ preparation did not produce a distinct oracle\n";
+    return false;
+  }
+
+  const gjxl::GpuBackendStats before_reuse = gpu->stats();
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_reuse = gpu->stats();
+  if (after_reuse.successful_allocations !=
+        before_reuse.successful_allocations + 1) {
+    std::cerr << "Warm AQ preparation did not reuse both scratch arenas\n";
+    return false;
+  }
+  EvaluationOutputStorage reused(fixture.strategies.extent());
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), reused.View()),
+                   "reused scratch-lease evaluation") ||
+      !CompareOutputs(changed_expected, reused)) {
+    return false;
+  }
+  prepared.reset();
+  if (!CheckStatus(
+        gjxl::metal_internal::EmptyMetalAqScratchArenasForTesting(*gpu),
+        "scratch-lease pressure reclamation")) {
+    return false;
+  }
+
+  const gjxl::GpuBackendStats before_reclaimed = gpu->stats();
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_reclaimed = gpu->stats();
+  if (after_reclaimed.successful_allocations !=
+        before_reclaimed.successful_allocations + 3) {
+    std::cerr << "Reclaimed AQ scratch arenas were reused\n";
+    return false;
+  }
+  EvaluationOutputStorage reclaimed(fixture.strategies.extent());
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), reclaimed.View()),
+                   "reclaimed scratch-lease evaluation") ||
+      !CompareOutputs(changed_expected, reclaimed)) {
+    return false;
+  }
+  prepared.reset();
+
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  EvaluationOutputStorage poison_source(fixture.strategies.extent());
+  if (!CheckStatus(
+        prepared->Evaluate(fixture.input.View(), poison_source.View()),
+        "pre-poison scratch-lease evaluation") ||
+      !CompareOutputs(changed_expected, poison_source) ||
+      !CheckStatus(
+        gjxl::metal_internal::FailNextMetalAqUploadForTesting(*prepared),
+        "scratch-lease poison injection")) {
+    return false;
+  }
+  EvaluationOutputStorage failed(fixture.strategies.extent());
+  if (!ExpectCode(prepared->Evaluate(fixture.input.View(), failed.View()),
+                  gjxl::StatusCode::kDeviceError,
+                  "scratch-lease poisoned evaluation") ||
+      !failed.Poisoned()) {
+    return false;
+  }
+  prepared.reset();
+
+  const gjxl::GpuBackendStats before_recovery = gpu->stats();
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_recovery = gpu->stats();
+  if (after_recovery.successful_allocations !=
+        before_recovery.successful_allocations + 3) {
+    std::cerr << "Poisoned AQ scratch arenas were reused\n";
+    return false;
+  }
+  EvaluationOutputStorage recovered(fixture.strategies.extent());
+  return CheckStatus(
+           prepared->Evaluate(fixture.input.View(), recovered.View()),
+           "scratch-lease recovery evaluation") &&
+         CompareOutputs(changed_expected, recovered);
+}
+
 bool CheckIndependentConcurrency(gjxl::GpuBackend& gpu) {
   Fixture fixture;
   std::unique_ptr<gjxl::PreparedAqEvaluation> first;
@@ -2437,6 +2578,115 @@ bool CheckPublicPreparationRejectsNonFiniteImages(gjxl::GpuBackend& gpu) {
   return rejected_without_gpu_work("non-finite coding Opsin");
 }
 
+bool CheckResidentInputPreparation(gjxl::GpuBackend& gpu) {
+  constexpr gjxl::Extent2D kSource{19, 13};
+  constexpr gjxl::Extent2D kCoding{24, 16};
+  HostImage original(kSource, 23);
+  HostImage expected(kCoding, 29);
+  HostImage actual(kCoding, 31);
+  FillOriginal(&original);
+  if (!CheckStatus(
+        gjxl::color_transform_internal::LinearRgbToPaddedOpsin(
+          original.View(), 255.0f, expected.MutableView()),
+        "resident input CPU oracle")) {
+    return false;
+  }
+
+  std::unique_ptr<gjxl::PreparedResidentInput> prepared;
+  if (!CheckStatus(
+        gjxl::PrepareResidentInput(
+          gpu,
+          {
+            .original_linear_rgb = original.View(),
+            .coding_extent = kCoding,
+            .compute_matrix_scale_statistics = true,
+          },
+          &prepared),
+        "resident input preparation") ||
+      prepared == nullptr) {
+    return false;
+  }
+  const gjxl::ConstDeviceImage3View coding = prepared->coding_opsin();
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kCoding.height; ++y) {
+      const gjxl::Status status = gpu.CopyDeviceToHost(
+        *coding.plane[channel].buffer,
+        actual.plane[channel].data() + y * actual.stride,
+        kCoding.width * sizeof(float),
+        coding.plane[channel].offset_bytes +
+          y * coding.plane[channel].row_stride * sizeof(float));
+      if (!CheckStatus(status, "resident coding readback")) return false;
+    }
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kCoding.height; ++y) {
+      for (size_t x = 0; x < kCoding.width; ++x) {
+        const size_t expected_index = y * expected.stride + x;
+        const size_t actual_index = y * actual.stride + x;
+        if (std::bit_cast<uint32_t>(expected.plane[channel][expected_index]) !=
+            std::bit_cast<uint32_t>(actual.plane[channel][actual_index])) {
+          std::cerr << "Resident input Opsin differs at channel " << channel
+                    << " position " << x << ',' << y << '\n';
+          return false;
+        }
+      }
+    }
+  }
+
+  gjxl::ResidentInputStatistics expected_stats;
+  for (size_t y = 1; y < kSource.height; ++y) {
+    for (size_t x = 1; x < kSource.width; ++x) {
+      const size_t current = y * expected.stride + x;
+      const size_t left = current - 1;
+      const size_t above = current - expected.stride;
+      expected_stats.x_edge = std::max(
+        expected_stats.x_edge,
+        std::max(
+          std::abs(expected.plane[0][current] - expected.plane[0][left]),
+          std::abs(expected.plane[0][current] - expected.plane[0][above])));
+      const float current_difference =
+        expected.plane[2][current] - expected.plane[1][current];
+      expected_stats.b_edge = std::max(
+        expected_stats.b_edge,
+        std::max(
+          std::abs(current_difference -
+            (expected.plane[2][left] - expected.plane[1][left])),
+          std::abs(current_difference -
+            (expected.plane[2][above] - expected.plane[1][above]))));
+      float exposed_blue =
+        expected.plane[2][current] - 1.2f * expected.plane[1][current];
+      if (exposed_blue >= 0.0f) {
+        exposed_blue *=
+          std::abs(expected.plane[2][current] - expected.plane[2][left]) +
+          std::abs(expected.plane[2][current] - expected.plane[2][above]);
+        expected_stats.exposed_blue = std::max(
+          expected_stats.exposed_blue, exposed_blue);
+      }
+    }
+  }
+  const gjxl::ResidentInputStatistics actual_stats = prepared->statistics();
+  if (actual_stats.x_edge != expected_stats.x_edge ||
+      actual_stats.b_edge != expected_stats.b_edge ||
+      actual_stats.exposed_blue != expected_stats.exposed_blue) {
+    std::cerr << "Resident input statistics differ from CPU oracle\n";
+    return false;
+  }
+
+  original.plane[1][2 * original.stride + 3] =
+    std::numeric_limits<float>::quiet_NaN();
+  prepared.reset();
+  const gjxl::Status invalid = gjxl::PrepareResidentInput(
+    gpu,
+    {
+      .original_linear_rgb = original.View(),
+      .coding_extent = kCoding,
+      .compute_matrix_scale_statistics = true,
+    },
+    &prepared);
+  return invalid.code() == gjxl::StatusCode::kInvalidArgument &&
+    prepared == nullptr;
+}
+
 }  // namespace
 
 int main() {
@@ -2447,6 +2697,7 @@ int main() {
       !CheckCapabilityBoundary() ||
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
       !CheckPublicPreparationRejectsNonFiniteImages(*gpu) ||
+      !CheckResidentInputPreparation(*gpu) ||
       !CheckReductionCorpus(*gpu) ||
       !CheckMaximumErrorReduction(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||
@@ -2467,6 +2718,7 @@ int main() {
       !CheckUploadOrNumericFailure(false) ||
       !CheckFailure(gjxl::StatusCode::kDeviceError, false, false, true) ||
       !CheckFinalReadbackFailure() ||
+      !CheckScratchWorkspaceLeases() ||
       !CheckIndependentConcurrency(*gpu)) {
     return EXIT_FAILURE;
   }

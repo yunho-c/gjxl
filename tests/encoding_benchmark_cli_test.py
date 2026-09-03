@@ -15,6 +15,11 @@ import unittest
 PHASES = {
     "total",
     "input_preparation",
+    "input_geometry_and_storage",
+    "input_color_transform",
+    "input_matrix_scale_stats",
+    "input_resident_preparation",
+    "input_quantization_preparation",
     "backend_selection",
     "quantization_pipeline",
     "codestream_encoding",
@@ -118,7 +123,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 15)
+        self.assertEqual(document["schema_version"], 16)
         self.assertEqual(
             document["substage_work_timing"], "aggregate-worker-time"
         )
@@ -248,7 +253,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 15)
+        self.assertEqual(document["schema_version"], 16)
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
 
@@ -265,7 +270,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 15)
+        self.assertEqual(document["schema_version"], 16)
         self.assertEqual(document["effort"], 9)
         self.assertIn("effort=9", result.stdout)
         self.assertEqual(
@@ -285,7 +290,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 15)
+        self.assertEqual(document["schema_version"], 16)
         self.assertEqual(document["compression"], "maximum")
         self.assertIn("compression=maximum", result.stdout)
         self.assertEqual(
@@ -306,7 +311,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 15)
+        self.assertEqual(document["schema_version"], 16)
         self.assertEqual(document["cpu_threads"], 2)
         self.assertIn("cpu_threads=2", result.stdout)
         for sample in document["workloads"][0]["samples"]:

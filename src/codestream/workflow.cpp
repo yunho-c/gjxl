@@ -37,6 +37,7 @@
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/quantization_pipeline.h"
 #include "gpu/ops/quantization_pipeline_profile_internal.h"
+#include "gpu/ops/resident_input.h"
 
 namespace gjxl {
 namespace {
@@ -362,7 +363,10 @@ bool HasRequiredGpuQuantizationCapabilities(
 
   return QueryGpuAqEvaluation(backend) != nullptr &&
     (mode == GpuAdaptiveQuantizationMode::kMaximumThroughput ||
-     QueryGpuAcStrategyEvaluation(backend) != nullptr);
+     QueryGpuAcStrategyEvaluation(backend) != nullptr) &&
+    ((mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+      mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+     QueryGpuResidentInputPreparation(backend) != nullptr);
 }
 
 struct PipelineStorage {
@@ -439,10 +443,15 @@ struct EncodingArtifacts {
 struct PreparedWorkflow {
   PreparedWorkflow(
     FrameGeometry prepared_geometry,
-    ConstImage3FView source_linear_rgb)
+    ConstImage3FView source_linear_rgb,
+    GpuBackend* prepared_gpu,
+    bool prepared_metal,
+    bool has_preselected_backend)
     : geometry(prepared_geometry),
       linear_rgb(source_linear_rgb),
-      opsin(geometry.padded_frame()) {}
+      selected_gpu(prepared_gpu),
+      selected_metal(prepared_metal),
+      backend_preselected(has_preselected_backend) {}
 
   [[nodiscard]] ConstImage3FView original_linear_rgb() const noexcept {
     return linear_rgb;
@@ -452,14 +461,20 @@ struct PreparedWorkflow {
   // Borrows the encode caller's immutable source for this synchronous
   // prepared workflow and all of its target-size attempts.
   ConstImage3FView linear_rgb;
-  Image3FBuffer opsin;
+  std::unique_ptr<Image3FBuffer> opsin;
   codestream_internal::QuantizationMatrixScaleStats matrix_scale_stats;
   // CPU and maximum-throughput adapters retain the public complete-output
   // shape. The default resident encoder never constructs this storage.
   std::unique_ptr<PipelineStorage> compatibility_output;
   quantization_pipeline_internal::PreparedQuantizationPipeline quantization;
+  // Declared before its borrowers so it is destroyed after the resident
+  // evaluator and AC-search state.
+  std::unique_ptr<PreparedResidentInput> resident_input;
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
     gpu_adaptive_quantization;
+  GpuBackend* selected_gpu = nullptr;
+  bool selected_metal = false;
+  bool backend_preselected = false;
 };
 
 [[nodiscard]] Status EnsureCompatibilityOutput(
@@ -489,6 +504,10 @@ struct PreparedWorkflow {
 [[nodiscard]] Status PrepareWorkflow(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,
+  GpuBackend* selected_gpu,
+  bool selected_metal,
+  bool backend_preselected,
+  codestream_internal::VarDctEncodingProfile* profile,
   std::unique_ptr<PreparedWorkflow>* prepared) {
 
   if (prepared == nullptr) {
@@ -497,28 +516,18 @@ struct PreparedWorkflow {
   }
   prepared->reset();
   try {
+    const WorkflowClock::time_point geometry_begin = ProfileBegin(profile);
     FrameGeometry geometry;
     Status status = FrameGeometry::Create(linear_rgb.extent(), &geometry);
     if (!status.ok()) {
       return status;
     }
-    auto candidate = std::make_unique<PreparedWorkflow>(geometry, linear_rgb);
-    status = color_transform_internal::LinearRgbToPaddedOpsin(
-      linear_rgb,
-      kInitialProfileIntensityTarget,
-      candidate->opsin.view());
-    if (!status.ok()) {
-      return status;
-    }
-    if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
-          options)) {
-      status = codestream_internal::
-        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
-        candidate->opsin.cropped_view(geometry.frame()),
-        &candidate->matrix_scale_stats);
-      if (!status.ok()) {
-        return status;
-      }
+    auto candidate = std::make_unique<PreparedWorkflow>(
+      geometry, linear_rgb, selected_gpu, selected_metal,
+      backend_preselected);
+    if (profile != nullptr) {
+      profile->input_geometry_and_storage_nanoseconds =
+        ElapsedNanoseconds(geometry_begin);
     }
     CpuQuantizationPipelineOptions preparation_options;
     if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
@@ -527,17 +536,84 @@ struct PreparedWorkflow {
       preparation_options.adaptive_quantization.maximum_error =
         options.maximum_error;
     }
-    status = quantization_pipeline_internal::PrepareQuantizationPipeline(
-      candidate->original_linear_rgb(), candidate->opsin.const_view(),
-      preparation_options,
-      &candidate->quantization,
-      options.backend == VarDctBackendPreference::kCpu,
-      options.metal_aq_mode ==
-        GpuAdaptiveQuantizationMode::kExactCoefficients,
-      quantization_pipeline_internal::QuantizationPipelineInputProvenance::
-        kFiniteLinearRgbAndOpsin);
+    if (backend_preselected && selected_metal) {
+      const WorkflowClock::time_point resident_begin = ProfileBegin(profile);
+      status = PrepareResidentInput(
+        *selected_gpu,
+        {
+          .original_linear_rgb = candidate->original_linear_rgb(),
+          .coding_extent = geometry.padded_frame(),
+          .compute_matrix_scale_statistics =
+            codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+              options),
+        },
+        &candidate->resident_input);
+      if (!status.ok()) return status;
+      if (profile != nullptr) {
+        profile->input_resident_preparation_nanoseconds =
+          ElapsedNanoseconds(resident_begin);
+      }
+      if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+            options)) {
+        const ResidentInputStatistics stats =
+          candidate->resident_input->statistics();
+        candidate->matrix_scale_stats = {
+          stats.x_edge, stats.b_edge, stats.exposed_blue};
+      }
+    } else {
+      const WorkflowClock::time_point storage_begin = ProfileBegin(profile);
+      candidate->opsin = std::make_unique<Image3FBuffer>(
+        geometry.padded_frame());
+      if (profile != nullptr) {
+        profile->input_geometry_and_storage_nanoseconds +=
+          ElapsedNanoseconds(storage_begin);
+      }
+      const WorkflowClock::time_point transform_begin = ProfileBegin(profile);
+      status = color_transform_internal::LinearRgbToPaddedOpsin(
+        linear_rgb, kInitialProfileIntensityTarget, candidate->opsin->view());
+      if (!status.ok()) return status;
+      if (profile != nullptr) {
+        profile->input_color_transform_nanoseconds =
+          ElapsedNanoseconds(transform_begin);
+      }
+      const WorkflowClock::time_point stats_begin = ProfileBegin(profile);
+      if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+            options)) {
+        status = codestream_internal::
+          ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+            candidate->opsin->cropped_view(geometry.frame()),
+            &candidate->matrix_scale_stats);
+        if (!status.ok()) return status;
+      }
+      if (profile != nullptr) {
+        profile->input_matrix_scale_stats_nanoseconds =
+          ElapsedNanoseconds(stats_begin);
+      }
+    }
+    const WorkflowClock::time_point quantization_begin = ProfileBegin(profile);
+    if (candidate->resident_input != nullptr) {
+      status =
+        quantization_pipeline_internal::PrepareResidentQuantizationPipeline(
+          candidate->original_linear_rgb(), geometry.padded_frame(),
+          candidate->resident_input->original_linear_rgb(),
+          candidate->resident_input->coding_opsin(), preparation_options,
+          &candidate->quantization);
+    } else {
+      status = quantization_pipeline_internal::PrepareQuantizationPipeline(
+        candidate->original_linear_rgb(), candidate->opsin->const_view(),
+        preparation_options, &candidate->quantization,
+        options.backend == VarDctBackendPreference::kCpu,
+        options.metal_aq_mode ==
+          GpuAdaptiveQuantizationMode::kExactCoefficients,
+        quantization_pipeline_internal::QuantizationPipelineInputProvenance::
+          kFiniteLinearRgbAndOpsin);
+    }
     if (!status.ok()) {
       return status;
+    }
+    if (profile != nullptr) {
+      profile->input_quantization_preparation_nanoseconds =
+        ElapsedNanoseconds(quantization_begin);
     }
     *prepared = std::move(candidate);
   } catch (const std::bad_alloc&) {
@@ -551,7 +627,7 @@ struct PreparedWorkflow {
 }
 
 [[nodiscard]] Status SelectAttemptBackend(
-  PreparedWorkflow& prepared,
+  const FrameGeometry& geometry,
   VarDctEncodingOptions options,
   GpuBackend* supplied_backend,
   bool supplied_backend_is_qualified,
@@ -575,7 +651,7 @@ struct PreparedWorkflow {
     options.backend == VarDctBackendPreference::kMetal ||
     (options.backend == VarDctBackendPreference::kAutomatic &&
      codestream_internal::IsAutomaticMetalGeometryEligible(
-       prepared.geometry.padded_frame()) &&
+       geometry.padded_frame()) &&
      codestream_internal::IsAutomaticMetalTargetEligible(
        options.butteraugli_target));
   if (!should_resolve) {
@@ -663,9 +739,15 @@ struct PreparedWorkflow {
   GpuBackend* selected_gpu = nullptr;
   bool selected_metal = false;
   const WorkflowClock::time_point selection_begin = ProfileBegin(profile);
-  status = SelectAttemptBackend(
-    prepared, options, supplied_backend, supplied_backend_is_qualified,
-    resolve_production_backend, &selected_gpu, &selected_metal);
+  if (prepared.backend_preselected) {
+    selected_gpu = prepared.selected_gpu;
+    selected_metal = prepared.selected_metal;
+  } else {
+    status = SelectAttemptBackend(
+      prepared.geometry, options, supplied_backend,
+      supplied_backend_is_qualified, resolve_production_backend,
+      &selected_gpu, &selected_metal);
+  }
   if (!status.ok()) {
     return status;
   }
@@ -674,6 +756,39 @@ struct PreparedWorkflow {
     &candidate_profile.backend_selection_nanoseconds);
   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
   EncodingArtifacts encoding;
+  if (!prepared.backend_preselected && selected_metal &&
+      (options.metal_aq_mode ==
+         GpuAdaptiveQuantizationMode::kFullyResident ||
+       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
+      prepared.resident_input == nullptr) {
+    status = PrepareResidentInput(
+      *selected_gpu,
+      {
+        .original_linear_rgb = prepared.original_linear_rgb(),
+        .coding_extent = prepared.geometry.padded_frame(),
+        .compute_matrix_scale_statistics =
+          codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+            options),
+      },
+      &prepared.resident_input);
+    if (!status.ok()) return status;
+    prepared.quantization.resident_original_linear_rgb =
+      prepared.resident_input->original_linear_rgb();
+    prepared.quantization.resident_coding_opsin =
+      prepared.resident_input->coding_opsin();
+    if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+          options)) {
+      const ResidentInputStatistics resident_stats =
+        prepared.resident_input->statistics();
+      if (resident_stats.x_edge != prepared.matrix_scale_stats.x_edge ||
+          resident_stats.b_edge != prepared.matrix_scale_stats.b_edge ||
+          resident_stats.exposed_blue !=
+            prepared.matrix_scale_stats.exposed_blue) {
+        return Status::Internal(
+          "Resident and host matrix-scale statistics differ");
+      }
+    }
+  }
   if (selected_metal && options.metal_aq_mode ==
         GpuAdaptiveQuantizationMode::kMaximumThroughput) {
     PipelineStorage* compatibility_output = nullptr;
@@ -683,7 +798,7 @@ struct PreparedWorkflow {
         compatibility_output->Output();
       status = RunGpuFrameOnlyQuantizationPipeline(
         *selected_gpu, prepared.original_linear_rgb(),
-        prepared.opsin.const_view(), pipeline_options,
+        prepared.opsin->const_view(), pipeline_options,
         {
           .initial_quantization = pipeline_output.initial_quantization,
           .quant_field = {
@@ -1233,6 +1348,34 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     return Status::InvalidArgument(
       "GPU profiling requires a resident Metal Butteraugli-target workflow");
   }
+  const bool target_size_control =
+    options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
+    options.rate_control_mode == VarDctRateControlMode::kTargetBitsPerPixel;
+  const bool resident_input_candidate =
+    (options.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident ||
+     options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
+    !(target_size_control &&
+      options.backend == VarDctBackendPreference::kAutomatic);
+  GpuBackend* workflow_gpu = nullptr;
+  bool workflow_metal = false;
+  bool backend_preselected = false;
+  if (resident_input_candidate) {
+    FrameGeometry selection_geometry;
+    status = FrameGeometry::Create(linear_rgb.extent(), &selection_geometry);
+    if (!status.ok()) return status;
+    const WorkflowClock::time_point selection_begin =
+      ProfileBegin(profile);
+    status = SelectAttemptBackend(
+      selection_geometry, options, supplied_backend,
+      supplied_backend_is_qualified, resolve_production_backend,
+      &workflow_gpu, &workflow_metal);
+    if (!status.ok()) return status;
+    backend_preselected = true;
+    if (profile != nullptr) {
+      local_profile.backend_selection_nanoseconds =
+        ElapsedNanoseconds(selection_begin);
+    }
+  }
   if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
       options.rate_control_mode ==
         VarDctRateControlMode::kTargetBitsPerPixel) {
@@ -1241,7 +1384,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       const auto preparation_begin = !profiling
         ? WorkflowClock::time_point{}
         : WorkflowClock::now();
-      status = PrepareWorkflow(linear_rgb, options, &prepared);
+      status = PrepareWorkflow(
+        linear_rgb, options, workflow_gpu, workflow_metal,
+        backend_preselected,
+        profile == nullptr ? nullptr : &local_profile, &prepared);
       if (!status.ok()) {
         return status;
       }
@@ -1381,7 +1527,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     const auto preparation_begin = !profiling
       ? WorkflowClock::time_point{}
       : WorkflowClock::now();
-    status = PrepareWorkflow(linear_rgb, options, &prepared);
+    status = PrepareWorkflow(
+      linear_rgb, options, workflow_gpu, workflow_metal,
+      backend_preselected,
+      profile == nullptr ? nullptr : &local_profile, &prepared);
     if (!status.ok()) {
       return status;
     }

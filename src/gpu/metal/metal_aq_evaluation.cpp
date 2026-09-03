@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -112,6 +113,9 @@ static_assert(sizeof(AqResidentPolicyUpdateParams) == 44);
 static_assert(std::is_standard_layout_v<AqInitialCflParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialCflParams>);
 static_assert(sizeof(AqInitialCflParams) == 24);
+static_assert(std::is_standard_layout_v<AqResidentInputParams>);
+static_assert(std::is_trivially_copyable_v<AqResidentInputParams>);
+static_assert(sizeof(AqResidentInputParams) == 24);
 static_assert(std::is_standard_layout_v<AqFinalCflParams>);
 static_assert(std::is_trivially_copyable_v<AqFinalCflParams>);
 static_assert(sizeof(AqFinalCflParams) == 16);
@@ -557,6 +561,17 @@ template <typename T>
   DevicePlaneView destination) {
 
   const size_t row_bytes = source.extent.width * sizeof(T);
+  if (source.stride == source.extent.width &&
+      destination.row_stride == destination.extent.width) {
+    size_t element_count = 0;
+    if (!source.extent.try_area(&element_count) ||
+        element_count > std::numeric_limits<size_t>::max() / sizeof(T)) {
+      return Status::InvalidArgument("Prepared AQ upload plane is too large");
+    }
+    return backend.CopyHostToDevice(
+      *destination.buffer, source.data, element_count * sizeof(T),
+      destination.offset_bytes);
+  }
   for (size_t y = 0; y < source.extent.height; ++y) {
     Status status = backend.CopyHostToDevice(
       *destination.buffer,
@@ -640,23 +655,183 @@ void AppendQuantTable(const Range& values, std::vector<float>* packed) {
 
 }  // namespace
 
+MetalPreparedResidentInput::MetalPreparedResidentInput(MetalBackend& backend)
+    : backend_(&backend) {}
+
+MetalPreparedResidentInput::~MetalPreparedResidentInput() {
+  backend_->ReleaseAqScratchArena(
+    MetalAqScratchArena::kResidentInput, std::move(arena_), reusable_);
+}
+
+void MetalPreparedResidentInput::EncodeSubmission(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    const void* context) {
+  const auto& self = *static_cast<const MetalPreparedResidentInput*>(context);
+  encoder->setComputePipelineState(
+    backend.aq_pipelines_.resident_input_transform.get());
+  for (size_t channel = 0; channel < 3; ++channel) {
+    BindPlane(encoder, self.original_[channel], channel);
+    BindPlane(encoder, self.coding_[channel], channel + 3);
+  }
+  BindPlane(encoder, self.result_, 6);
+  encoder->setBytes(&self.params_, sizeof(self.params_), 7);
+  DispatchMetalThreads(
+    encoder,
+    MTL::Size(self.params_.coding_width, self.params_.coding_height, 1),
+    MTL::Size(8, 8, 1));
+
+  if (self.compute_statistics_) {
+    encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_input_statistics.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      BindPlane(encoder, self.coding_[channel], channel);
+    }
+    BindPlane(encoder, self.result_, 3);
+    encoder->setBytes(&self.params_, sizeof(self.params_), 4);
+    DispatchMetalThreads(
+      encoder,
+      MTL::Size(self.params_.source_width, self.params_.source_height, 1),
+      MTL::Size(8, 8, 1));
+  }
+}
+
+Status MetalPreparedResidentInput::Prepare(
+    const ResidentInputPreparation& preparation) {
+  if (!preparation.original_linear_rgb.valid() ||
+      !std::ranges::all_of(
+        preparation.original_linear_rgb.plane,
+        [](ConstPlaneF32View plane) { return ValidHostPlaneLayout(plane); })) {
+    return Status::InvalidArgument(
+      "Resident input linear-RGB view is invalid");
+  }
+  Status status = ValidateAqGeometry(
+    preparation.original_linear_rgb.extent(), preparation.coding_extent);
+  if (!status.ok()) return status;
+
+  size_t capacity_bytes = 0;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    status = AddPlannedPlane(
+      DeviceElementType::kF32, preparation.original_linear_rgb.extent(),
+      preparation.original_linear_rgb.width(), &capacity_bytes);
+    if (!status.ok()) return status;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    status = AddPlannedPlane(
+      DeviceElementType::kF32, preparation.coding_extent,
+      preparation.coding_extent.width, &capacity_bytes);
+    if (!status.ok()) return status;
+  }
+  status = AddPlannedPlane(
+    DeviceElementType::kI32, {4, 1}, 4, &capacity_bytes);
+  if (!status.ok()) return status;
+  status = backend_->AcquireAqScratchArena(
+    MetalAqScratchArena::kResidentInput, capacity_bytes, &arena_);
+  if (!status.ok()) return status;
+
+  for (size_t channel = 0; channel < 3; ++channel) {
+    status = arena_.AllocatePlane(
+      DeviceElementType::kF32, preparation.original_linear_rgb.extent(),
+      preparation.original_linear_rgb.width(), kBufferAlignment,
+      &original_[channel]);
+    if (!status.ok()) return status;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    status = arena_.AllocatePlane(
+      DeviceElementType::kF32, preparation.coding_extent,
+      preparation.coding_extent.width, kBufferAlignment, &coding_[channel]);
+    if (!status.ok()) return status;
+  }
+  status = arena_.AllocatePlane(
+    DeviceElementType::kI32, {4, 1}, 4, kBufferAlignment, &result_);
+  if (!status.ok()) return status;
+
+  for (size_t channel = 0; channel < 3; ++channel) {
+    status = UploadPlane(
+      *backend_, preparation.original_linear_rgb.plane[channel],
+      original_[channel]);
+    if (!status.ok()) return status;
+  }
+  constexpr std::array<uint32_t, 4> kZero{};
+  status = backend_->CopyHostToDevice(
+    *result_.buffer, kZero.data(), sizeof(kZero), result_.offset_bytes);
+  if (!status.ok()) return status;
+
+  params_ = {
+    static_cast<uint32_t>(preparation.original_linear_rgb.width()),
+    static_cast<uint32_t>(preparation.original_linear_rgb.height()),
+    static_cast<uint32_t>(original_[0].row_stride),
+    static_cast<uint32_t>(preparation.coding_extent.width),
+    static_cast<uint32_t>(preparation.coding_extent.height),
+    static_cast<uint32_t>(coding_[0].row_stride),
+  };
+  compute_statistics_ = preparation.compute_matrix_scale_statistics;
+  std::unique_ptr<GpuSubmission> submission;
+  status = backend_->SubmitCompute(
+    "gjxl prepare resident input", &EncodeSubmission, this, &submission);
+  if (!status.ok() || submission == nullptr) {
+    return status.ok()
+      ? Status::Internal("Resident input preparation returned no submission")
+      : status;
+  }
+  status = submission->Wait();
+  if (!status.ok()) return status;
+  std::array<uint32_t, 4> result{};
+  status = backend_->CopyDeviceToHost(
+    *result_.buffer, result.data(), sizeof(result), result_.offset_bytes);
+  if (!status.ok()) return status;
+  if (result[0] != 0) {
+    return Status::InvalidArgument(
+      "Resident input contains or produced non-finite pixels");
+  }
+  statistics_ = {
+    std::bit_cast<float>(result[1]),
+    std::bit_cast<float>(result[2]),
+    std::bit_cast<float>(result[3]),
+  };
+  reusable_ = true;
+  return Status::Ok();
+}
+
+ConstDeviceImage3View MetalPreparedResidentInput::original_linear_rgb() const
+    noexcept {
+  return {{{original_[0], original_[1], original_[2]}}};
+}
+
+ConstDeviceImage3View MetalPreparedResidentInput::coding_opsin() const
+    noexcept {
+  return {{{coding_[0], coding_[1], coding_[2]}}};
+}
+
+ResidentInputStatistics MetalPreparedResidentInput::statistics() const
+    noexcept {
+  return statistics_;
+}
+
 MetalPreparedAqEvaluation::MetalPreparedAqEvaluation(MetalBackend &backend)
     : backend_(&backend) {}
 
 MetalPreparedAqEvaluation::~MetalPreparedAqEvaluation() {
   std::unique_ptr<GpuSubmission> submission;
   bool *observer = nullptr;
+  bool reusable = false;
   {
     std::lock_guard lock(mutex_);
     submission = std::move(submission_);
     observer = wait_observer_;
+    reusable = scratch_lease_reusable_ && state_ != State::kInvalid;
   }
   if (submission != nullptr) {
-    (void)submission->Wait();
+    if (!submission->Wait().ok()) {
+      reusable = false;
+    }
     if (observer != nullptr) {
       *observer = true;
     }
   }
+  backend_->ReleaseAqScratchArena(
+    MetalAqScratchArena::kPersistent, std::move(persistent_), reusable);
+  backend_->ReleaseAqScratchArena(
+    MetalAqScratchArena::kStaging, std::move(staging_), reusable);
 }
 
 Status MetalPreparedAqEvaluation::Prepare(
@@ -684,7 +859,12 @@ Status MetalPreparedAqEvaluation::Prepare(
   }
 
   source_extent_ = preparation.original_linear_rgb.extent();
-  coding_extent_ = preparation.coding_opsin.extent();
+  const bool resident_coding_specified = std::ranges::any_of(
+    preparation.resident_coding_opsin.plane,
+    [](ConstDevicePlaneView plane) { return plane.buffer != nullptr; });
+  coding_extent_ = resident_coding_specified
+    ? preparation.resident_coding_opsin.plane[0].extent
+    : preparation.coding_opsin.extent();
   block_extent_ = {
       coding_extent_.width / kJxlBlockDimension,
       coding_extent_.height / kJxlBlockDimension,
@@ -706,6 +886,8 @@ Status MetalPreparedAqEvaluation::Prepare(
   frame_only_resident_quantizer_ =
       preparation.frame_only_resident_quantizer;
   resident_quantization_ = preparation.resident_quantization;
+  borrowed_original_linear_rgb_ =
+    preparation.resident_original_linear_rgb.plane[0].buffer != nullptr;
   borrowed_coding_opsin_ =
     preparation.resident_coding_opsin.plane[0].buffer != nullptr;
   const size_t filter_stage_count =
@@ -884,7 +1066,7 @@ Status MetalPreparedAqEvaluation::Prepare(
   }
 
   size_t persistent_bytes = 0;
-  if (!frame_only_) {
+  if (!frame_only_ && !borrowed_original_linear_rgb_) {
     for (size_t channel = 0; channel < 3; ++channel) {
       status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
                                source_extent_.width, &persistent_bytes);
@@ -1103,20 +1285,29 @@ Status MetalPreparedAqEvaluation::Prepare(
       return status;
   }
 
-  status = persistent_.Prepare(*backend_, persistent_bytes);
+  status = backend_->AcquireAqScratchArena(
+    MetalAqScratchArena::kPersistent, persistent_bytes, &persistent_);
   if (!status.ok())
     return status;
-  status = staging_.Prepare(*backend_, staging_bytes);
+  status = backend_->AcquireAqScratchArena(
+    MetalAqScratchArena::kStaging, staging_bytes, &staging_);
   if (!status.ok())
     return status;
 
   if (!frame_only_) {
     for (size_t channel = 0; channel < 3; ++channel) {
-      status = persistent_.AllocatePlane(
-          DeviceElementType::kF32, source_extent_, source_extent_.width,
-          kBufferAlignment, &original_[channel]);
-      if (!status.ok())
-        return status;
+      if (borrowed_original_linear_rgb_) {
+        const ConstDevicePlaneView plane =
+          preparation.resident_original_linear_rgb.plane[channel];
+        original_[channel] = {
+          const_cast<DeviceBuffer*>(plane.buffer), plane.offset_bytes,
+          plane.element_type, plane.extent, plane.row_stride};
+      } else {
+        status = persistent_.AllocatePlane(
+            DeviceElementType::kF32, source_extent_, source_extent_.width,
+            kBufferAlignment, &original_[channel]);
+        if (!status.ok()) return status;
+      }
     }
   }
   for (size_t channel = 0; channel < 3; ++channel) {
@@ -1365,7 +1556,7 @@ Status MetalPreparedAqEvaluation::Prepare(
   }
 
   for (size_t channel = 0; channel < 3; ++channel) {
-    if (!frame_only_) {
+    if (!frame_only_ && !borrowed_original_linear_rgb_) {
       status = UploadPlane(
           *backend_, preparation.original_linear_rgb.plane[channel],
           original_[channel]);
@@ -1637,6 +1828,7 @@ Status MetalPreparedAqEvaluation::Prepare(
         staging_.capacity_bytes(),
         staging_.capacity_bytes(),
     };
+    scratch_lease_reusable_ = true;
     if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
   }
@@ -1683,6 +1875,7 @@ Status MetalPreparedAqEvaluation::Prepare(
       staging_.capacity_bytes() +
           butteraugli_memory.peak_comparison_scratch_bytes,
   };
+  scratch_lease_reusable_ = true;
   if (profiling) *profile = std::move(candidate_profile);
   return Status::Ok();
 }
@@ -3406,34 +3599,56 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
     const AqEvaluationPreparation& preparation,
     bool host_images_are_finite) const {
 
+  const bool resident_original_specified = std::ranges::any_of(
+    preparation.resident_original_linear_rgb.plane,
+    [](ConstDevicePlaneView plane) { return plane.buffer != nullptr; });
+  const bool resident_coding_specified = std::ranges::any_of(
+    preparation.resident_coding_opsin.plane,
+    [](ConstDevicePlaneView plane) { return plane.buffer != nullptr; });
   if (!preparation.original_linear_rgb.valid() ||
-      !preparation.coding_opsin.valid() ||
+      (!preparation.coding_opsin.valid() && !resident_coding_specified) ||
       !std::ranges::all_of(preparation.original_linear_rgb.plane,
                            [](ConstPlaneF32View plane) {
                              return ValidHostPlaneLayout(plane);
                            }) ||
-      !std::ranges::all_of(preparation.coding_opsin.plane,
+      (preparation.coding_opsin.valid() &&
+       !std::ranges::all_of(preparation.coding_opsin.plane,
                            [](ConstPlaneF32View plane) {
                              return ValidHostPlaneLayout(plane);
-                           })) {
+                           }))) {
     return Status::InvalidArgument(
         "Prepared AQ source image views are invalid");
   }
-  Status status = ValidateAqGeometry(preparation.original_linear_rgb.extent(),
-                                     preparation.coding_opsin.extent());
+  const Extent2D coding_extent = resident_coding_specified
+    ? preparation.resident_coding_opsin.plane[0].extent
+    : preparation.coding_opsin.extent();
+  Status status = ValidateAqGeometry(
+    preparation.original_linear_rgb.extent(), coding_extent);
   if (!status.ok())
     return status;
-  const bool resident_coding_specified = std::ranges::any_of(
-    preparation.resident_coding_opsin.plane,
-    [](ConstDevicePlaneView plane) { return plane.buffer != nullptr; });
+  if (resident_original_specified) {
+    status = ValidateDeviceImage3View(
+      preparation.resident_original_linear_rgb, backend_->id());
+    if (!status.ok() || std::ranges::any_of(
+          preparation.resident_original_linear_rgb.plane,
+          [&](ConstDevicePlaneView plane) {
+            return plane.element_type != DeviceElementType::kF32 ||
+              plane.extent != preparation.original_linear_rgb.extent();
+          })) {
+      return Status::InvalidArgument(
+        "Prepared AQ resident original image is invalid");
+    }
+  }
   if (resident_coding_specified) {
     status = ValidateDeviceImage3View(
       preparation.resident_coding_opsin, backend_->id());
     if (!status.ok() ||
-        preparation.resident_coding_opsin.plane[0].element_type !=
-          DeviceElementType::kF32 ||
-        preparation.resident_coding_opsin.plane[0].extent !=
-          preparation.coding_opsin.extent()) {
+        std::ranges::any_of(
+          preparation.resident_coding_opsin.plane,
+          [&](ConstDevicePlaneView plane) {
+            return plane.element_type != DeviceElementType::kF32 ||
+              plane.extent != coding_extent;
+          })) {
       return Status::InvalidArgument(
         "Prepared AQ resident coding image is invalid");
     }
@@ -3488,7 +3703,7 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
         "Prepared AQ coefficient decision mode is invalid");
   }
 
-  const Extent2D coding = preparation.coding_opsin.extent();
+  const Extent2D coding = coding_extent;
   const Extent2D blocks{
       coding.width / kJxlBlockDimension,
       coding.height / kJxlBlockDimension,
@@ -4034,6 +4249,7 @@ void MetalPreparedAqEvaluation::Invalidate() {
   std::lock_guard lock(mutex_);
   submission_.reset();
   state_ = State::kInvalid;
+  scratch_lease_reusable_ = false;
 }
 
 void MetalPreparedAqEvaluation::EncodeBlockReduction(
@@ -4351,7 +4567,7 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      30>
+      32>
       reconstruction = {{
           {"gjxl_aq_reset_exact_evaluation",
            &pipelines.reset_exact_evaluation},
@@ -4362,6 +4578,10 @@ Status CreateAqPipelines(
           {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
           {"gjxl_aq_final_cfl", &pipelines.final_cfl},
           {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
+          {"gjxl_aq_resident_input_transform",
+           &pipelines.resident_input_transform},
+          {"gjxl_aq_resident_input_statistics",
+           &pipelines.resident_input_statistics},
           {"gjxl_aq_initial_quant_gradient",
            &pipelines.initial_quant_gradient},
           {"gjxl_aq_initial_quant_fuzzy_erosion",
@@ -4460,6 +4680,29 @@ Status MetalBackend::PrepareAqEvaluation(
     prepared, nullptr);
 }
 
+Status MetalBackend::PrepareResidentInput(
+    const ResidentInputPreparation& preparation,
+    std::unique_ptr<PreparedResidentInput>* prepared) {
+  if (prepared == nullptr) {
+    return Status::InvalidArgument(
+      "Prepared resident input output pointer is null");
+  }
+  prepared->reset();
+  try {
+    auto candidate = std::make_unique<MetalPreparedResidentInput>(*this);
+    Status status = candidate->Prepare(preparation);
+    if (!status.ok()) return status;
+    *prepared = std::move(candidate);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate resident input preparation");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Resident input preparation is too large");
+  }
+}
+
 Status MetalBackend::PrepareAqEvaluationProfiled(
   const AqEvaluationPreparation& preparation,
   gpu_profile_internal::GpuProfilingMode mode,
@@ -4551,6 +4794,15 @@ Status EvaluateMetalAqProfiled(
       "AQ profiling requires a Metal prepared evaluation");
   }
   return metal->EvaluateProfiled(input, output, profile);
+}
+
+Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend) {
+  MetalBackend* metal = dynamic_cast<MetalBackend*>(&backend);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "AQ scratch reclamation requires a Metal backend");
+  }
+  return metal->EmptyAqScratchArenasForTesting();
 }
 
 Status SubmitMetalAqEvaluationForTesting(

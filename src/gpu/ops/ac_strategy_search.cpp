@@ -41,6 +41,7 @@ bool TryMultiply(size_t left, size_t right, size_t* result) {
 
 Status ValidateSearchInputs(
   ConstImage3FView opsin,
+  const ResidentAcStrategySearchInputs* resident,
   ConstPlaneF32View quant_field,
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,
@@ -54,31 +55,35 @@ Status ValidateSearchInputs(
       pixel_count == nullptr || block_count == nullptr) {
     return Status::InvalidArgument("GPU AC-strategy search output is null");
   }
-  if (!opsin.valid() || opsin.width() % kJxlBlockDimension != 0 ||
-      opsin.height() % kJxlBlockDimension != 0) {
+  const Extent2D opsin_extent = opsin.valid()
+    ? opsin.extent()
+    : resident == nullptr ? Extent2D{} : resident->opsin.plane[0].extent;
+  if (opsin_extent.empty() ||
+      opsin_extent.width % kJxlBlockDimension != 0 ||
+      opsin_extent.height % kJxlBlockDimension != 0) {
     return Status::InvalidArgument(
       "GPU AC-strategy search requires a padded opsin image");
   }
   *block_extent = {
-    opsin.width() / kJxlBlockDimension,
-    opsin.height() / kJxlBlockDimension,
+    opsin_extent.width / kJxlBlockDimension,
+    opsin_extent.height / kJxlBlockDimension,
   };
-  if (!opsin.extent().try_area(pixel_count) ||
+  if (!opsin_extent.try_area(pixel_count) ||
       !block_extent->try_area(block_count)) {
     return Status::InvalidArgument(
       "GPU AC-strategy search dimensions are too large");
   }
   if (!quant_field.valid() || quant_field.extent != *block_extent ||
-      !pixel_mask.valid() || pixel_mask.extent != opsin.extent() ||
+      !pixel_mask.valid() || pixel_mask.extent != opsin_extent ||
       !color_correlation.valid()) {
     return Status::InvalidArgument(
       "GPU AC-strategy search fields have invalid geometry");
   }
   *tile_extent = {
-    opsin.width() / kColorTileDimension +
-      static_cast<size_t>(opsin.width() % kColorTileDimension != 0),
-    opsin.height() / kColorTileDimension +
-      static_cast<size_t>(opsin.height() % kColorTileDimension != 0),
+    opsin_extent.width / kColorTileDimension +
+      static_cast<size_t>(opsin_extent.width % kColorTileDimension != 0),
+    opsin_extent.height / kColorTileDimension +
+      static_cast<size_t>(opsin_extent.height % kColorTileDimension != 0),
   };
   if (color_correlation.tile_extent() != *tile_extent ||
       !std::isfinite(options.butteraugli_target) ||
@@ -87,7 +92,8 @@ Status ValidateSearchInputs(
       "GPU AC-strategy search options or color map are invalid");
   }
   constexpr size_t kUint32Maximum = std::numeric_limits<uint32_t>::max();
-  if (opsin.width() > kUint32Maximum || opsin.height() > kUint32Maximum ||
+  if (opsin_extent.width > kUint32Maximum ||
+      opsin_extent.height > kUint32Maximum ||
       *pixel_count > kUint32Maximum || block_extent->width > kUint32Maximum ||
       block_extent->height > kUint32Maximum) {
     return Status::InvalidArgument(
@@ -308,7 +314,7 @@ static Status FindAcStrategyGridGpuImpl(
   Extent2D tile_extent;
   size_t pixel_count = 0;
   size_t block_count = 0;
-  Status status = ValidateSearchInputs(opsin,
+  Status status = ValidateSearchInputs(opsin, resident,
     quant_field,
     pixel_mask,
     color_correlation,
@@ -321,6 +327,8 @@ static Status FindAcStrategyGridGpuImpl(
   if (!status.ok()) {
     return status;
   }
+  const Extent2D opsin_extent = opsin.valid()
+    ? opsin.extent() : resident->opsin.plane[0].extent;
   if (resident != nullptr) {
     status = ValidateDeviceImage3View(resident->opsin, gpu.id());
     if (!status.ok()) return status;
@@ -328,12 +336,12 @@ static Status FindAcStrategyGridGpuImpl(
           resident->opsin.plane,
           [&](ConstDevicePlaneView plane) {
             return plane.element_type != DeviceElementType::kF32 ||
-              plane.extent != opsin.extent();
+              plane.extent != opsin_extent;
           }) ||
         resident->quant_field.element_type != DeviceElementType::kF32 ||
         resident->quant_field.extent != block_extent ||
         resident->pixel_mask.element_type != DeviceElementType::kF32 ||
-        resident->pixel_mask.extent != opsin.extent()) {
+        resident->pixel_mask.extent != opsin_extent) {
       return Status::InvalidArgument(
           "Resident GPU AC-strategy inputs have invalid geometry");
     }
@@ -499,8 +507,9 @@ static Status FindAcStrategyGridGpuImpl(
         .scratch_b = state.scratch_b.get(),
         .rate_scratch = state.rate_scratch.get(),
         .costs = resource.device_costs.get(),
-        .pixel_extent = opsin.extent(),
-        .opsin_row_stride = opsin.width(),
+        .pixel_extent = opsin_extent,
+        .opsin_row_stride = resident == nullptr
+          ? opsin.width() : resident->opsin.plane[0].row_stride,
         .opsin_plane_stride = pixel_count,
         .pixel_mask_row_stride = pixel_mask.extent.width,
         .candidate_count = resource.candidates.size(),
@@ -587,8 +596,13 @@ static Status FindAcStrategyGridGpuImpl(
     const auto merge_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
-    status = ac_strategy_internal::FindAcStrategyGridFromCandidateCosts(
-      opsin, quant_field, pixel_mask, color_correlation, options, table, out);
+    status = opsin.valid()
+      ? ac_strategy_internal::FindAcStrategyGridFromCandidateCosts(
+          opsin, quant_field, pixel_mask, color_correlation, options, table,
+          out)
+      : ac_strategy_internal::FindAcStrategyGridFromResidentCandidateCosts(
+          resident->opsin.plane[0].extent, quant_field, pixel_mask,
+          color_correlation, options, table, out);
     if (!status.ok()) {
       return status;
     }

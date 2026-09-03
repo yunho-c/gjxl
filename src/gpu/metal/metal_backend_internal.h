@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -27,6 +29,8 @@
 #include "gpu/ops/butteraugli.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/primitives.h"
+#include "gpu/ops/resident_input.h"
+#include "gpu/scratch.h"
 
 namespace gjxl::metal_internal {
 
@@ -102,6 +106,8 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> initial_cfl;
   NS::SharedPtr<MTL::ComputePipelineState> final_cfl;
   NS::SharedPtr<MTL::ComputePipelineState> reset_initial_quant;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_input_transform;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_input_statistics;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_gradient;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_fuzzy_erosion;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_modulation;
@@ -157,7 +163,7 @@ struct MetalAcStrategyBatchParams {
   uint32_t covered_block_width;
   uint32_t covered_block_height;
   uint32_t covered_block_count;
-  uint32_t use_device_quant_norm;
+  uint32_t quant_norm_source;
   float info_loss_multiplier;
   float zeros_multiplier;
   float cost_delta;
@@ -167,6 +173,13 @@ static_assert(std::is_standard_layout_v<MetalAcStrategyBatchParams>);
 static_assert(sizeof(MetalAcStrategyBatchParams) == 16 * sizeof(uint32_t));
 
 class MetalPreparedAqEvaluation;
+
+enum class MetalAqScratchArena : uint8_t {
+  kPersistent,
+  kStaging,
+  kResidentInput,
+  kCount,
+};
 
 struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> copy;
@@ -237,6 +250,7 @@ class MetalBackend final
     public GpuAqEvaluation,
     public gpu_profile_internal::GpuAqEvaluationProfiler,
     public aq_evaluation_internal::GpuValidatedAqEvaluation,
+    public GpuResidentInputPreparation,
     public DeviceButteraugliOperation {
 public:
   MetalBackend(
@@ -338,6 +352,10 @@ public:
     std::unique_ptr<PreparedAqEvaluation>* prepared,
     gpu_profile_internal::GpuExecutionProfile* profile) override;
 
+  Status PrepareResidentInput(
+    const ResidentInputPreparation& preparation,
+    std::unique_ptr<PreparedResidentInput>* prepared) override;
+
   Status Prepare(
     GpuBackend& backend,
     const DeviceButteraugliPrepareDescriptor& descriptor,
@@ -349,7 +367,9 @@ public:
 
 private:
   friend class MetalPreparedAqEvaluation;
+  friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
+  friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 
   Status PrepareDeviceButteraugliImpl(
     const DeviceButteraugliPrepareDescriptor& descriptor,
@@ -363,6 +383,18 @@ private:
     gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<PreparedAqEvaluation>* prepared,
     gpu_profile_internal::GpuExecutionProfile* profile);
+
+  Status AcquireAqScratchArena(
+    MetalAqScratchArena kind,
+    size_t required_capacity_bytes,
+    DeviceScratchArena* arena);
+
+  void ReleaseAqScratchArena(
+    MetalAqScratchArena kind,
+    DeviceScratchArena arena,
+    bool reusable) noexcept;
+
+  Status EmptyAqScratchArenasForTesting();
   struct TransformEncodeContext {
     const TransformPipeline* pipeline = nullptr;
     TransformDirection direction = TransformDirection::kForward;
@@ -579,6 +611,10 @@ private:
   bool test_fail_completion_ = false;
   std::atomic<bool> test_fail_next_submission_{false};
   std::atomic<bool> test_fail_next_completion_{false};
+  std::mutex aq_scratch_pool_mutex_;
+  std::array<
+    std::optional<DeviceScratchArena>,
+    static_cast<size_t>(MetalAqScratchArena::kCount)> idle_aq_scratch_;
   std::string name_;
 };
 

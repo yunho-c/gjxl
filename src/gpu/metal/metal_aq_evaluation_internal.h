@@ -246,6 +246,43 @@ struct AqOpsinToLinearParams {
   float scale;
 };
 
+struct AqResidentInputParams {
+  uint32_t source_width;
+  uint32_t source_height;
+  uint32_t source_stride;
+  uint32_t coding_width;
+  uint32_t coding_height;
+  uint32_t coding_stride;
+};
+
+class MetalPreparedResidentInput final : public PreparedResidentInput {
+public:
+  explicit MetalPreparedResidentInput(MetalBackend& backend);
+  ~MetalPreparedResidentInput() override;
+
+  Status Prepare(const ResidentInputPreparation& preparation);
+  [[nodiscard]] ConstDeviceImage3View original_linear_rgb() const
+    noexcept override;
+  [[nodiscard]] ConstDeviceImage3View coding_opsin() const noexcept override;
+  [[nodiscard]] ResidentInputStatistics statistics() const noexcept override;
+
+private:
+  static void EncodeSubmission(
+    MetalBackend& backend,
+    MTL::ComputeCommandEncoder* encoder,
+    const void* context);
+
+  MetalBackend* backend_ = nullptr;
+  DeviceScratchArena arena_;
+  std::array<DevicePlaneView, 3> original_;
+  std::array<DevicePlaneView, 3> coding_;
+  DevicePlaneView result_;
+  AqResidentInputParams params_{};
+  ResidentInputStatistics statistics_{};
+  bool compute_statistics_ = false;
+  bool reusable_ = false;
+};
+
 struct AqStrategyBatch {
   AcStrategyType strategy = AcStrategyType::kCount;
   size_t anchor_offset = 0;
@@ -657,6 +694,7 @@ private:
   mutable std::mutex mutex_;
   State state_ = State::kReady;
   std::unique_ptr<GpuSubmission> submission_;
+  bool scratch_lease_reusable_ = false;
   bool fail_next_readback_ = false;
   bool fail_next_resident_staging_ = false;
   bool fail_next_upload_ = false;
@@ -679,6 +717,7 @@ private:
   bool resident_ac_strategy_inputs_ = false;
   bool frame_only_resident_quantizer_ = false;
   bool resident_quantization_ = false;
+  bool borrowed_original_linear_rgb_ = false;
   bool borrowed_coding_opsin_ = false;
   bool resident_quantization_active_ = false;
   size_t resident_policy_iterations_ = 0;

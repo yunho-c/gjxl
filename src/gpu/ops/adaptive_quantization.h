@@ -172,6 +172,7 @@ struct AdaptiveQuantizationMaterialization {
 struct PreparedAdaptiveQuantization {
   PreparedAcStrategySearch ac_strategy_search;
   uint64_t quantization_pipeline_generation = 0;
+  ConstDeviceImage3View resident_original_linear_rgb;
   ConstDeviceImage3View resident_coding_opsin;
   GpuBackend* backend = nullptr;
   ConstImage3FView original_linear_rgb;
