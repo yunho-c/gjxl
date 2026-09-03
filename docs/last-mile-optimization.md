@@ -502,7 +502,11 @@ representation that AQ and the final group-major packing stage can consume;
 otherwise much of the measured AQ reconfiguration cost is merely moved rather
 than removed.
 
-### 4. Pack the serializer's group-major frame in the final submission
+### 4. Pack the serializer's group-major frame in the final submission (completed)
+
+Status: both bounded experiments were implemented and measured, then rejected.
+The existing owned host assembly remains the faster and substantially simpler
+path.
 
 Mapped-source handoff removed the intermediate coefficient readback, but host
 assembly still takes `16.70 ms` at 4K. It allocates and zero-initializes the
@@ -526,6 +530,59 @@ A mapped zero-copy serializer view remains architectural work. It would retain
 a backend buffer lease through tokenization and section writing and would add
 coherence, cancellation, and concurrent-call lifetime rules. It should follow,
 not precede, the group-packing experiment.
+
+#### Host-only experiment
+
+The narrower prototype reserved the final group-major vector without
+value-initializing it, appended each group channel's live coefficients, and
+then cleared only the padding tails. Although this removed the initial full
+zero fill, the append/regroup traversal and final unwritten-value validation
+made the 4K host assembly slower: `10.937 ms` became `14.663 ms`. The enclosing
+`resident.aq` wall boundary increased from `128.297` to `131.880 ms` in the
+same stage-profile comparison. The prototype was reverted.
+
+#### Metal group-major experiment
+
+The GPU prototype added a fixed group-major output plane to the existing final
+submission. It cleared deterministic group tails on Metal, packed the final
+strategy-batch-major coefficients through a per-anchor destination map, waited
+at the existing completion boundary, and copied the completed mapped plane
+into the public owned frame. Frame construction remained atomic.
+
+AC search changes the strategy grid after evaluator preparation, so a correct
+prototype also had to rebuild and upload the destination map and packing
+parameters in the existing reconfiguration transaction. Focused validation
+then preserved the exact fully resident frame and codestream oracle. This is an
+important constraint for any future resident-layout work; preparation-time
+strategy metadata is not final.
+
+The prototype reduced 4K host assembly from `10.937` to `7.092 ms`, but the
+new reset-and-pack GPU stage itself cost `4.175 ms`. More importantly, the
+profiled `resident.aq` wall boundary increased from `128.297` to `143.566 ms`.
+The extra group plane also enlarged the leased staging arena while the public
+API still required a complete host-owned copy.
+
+Five alternating independent-process pairs compared revision `827832d` with
+the correct prototype. Each process performed one warmup and three retained
+samples; values are medians of the five per-process medians:
+
+| Workload | Stage | Parent | GPU group packing | Change |
+| --- | --- | ---: | ---: | ---: |
+| padded 1080p | Complete encode | `88.251 ms` | `91.740 ms` | `+3.489 ms` (`+4.0%`) |
+| padded 1080p | Quantization pipeline | `68.389 ms` | `72.314 ms` | `+3.925 ms` (`+5.7%`) |
+| padded 4K | Complete encode | `327.904 ms` | `334.851 ms` | `+6.947 ms` (`+2.1%`) |
+| padded 4K | Quantization pipeline | `278.076 ms` | `285.036 ms` | `+6.960 ms` (`+2.5%`) |
+
+All five 1080p pairs and four of five 4K pairs made the complete encode slower.
+Every sample retained the expected `410,072`-byte 1080p and
+`1,606,911`-byte 4K outputs. The result rejects a separate GPU pack followed by
+an owned host copy: it moves work across the boundary without eliminating the
+copy that dominates the remaining cost.
+
+A future group-major design is justified only if the quantization kernels
+write the final layout directly *and* the serializer can safely consume a
+leased mapped view. That is the broader zero-copy lifetime design already
+deferred above, not a last-mile patch to the current owned-frame contract.
 
 ### 5. Re-profile the remaining codestream tail
 
@@ -572,6 +629,9 @@ the current upload and allocation costs.
 - **Introduce a zero-copy frame view before group packing:** deferred because
   its lease lifetime and concurrency contract are substantially broader than
   its current `16.70 ms` target.
+- **Add a separate Metal group-major packing pass:** rejected by matched
+  profiling and public-workflow A/B results; reset, packing, staging capacity,
+  and the mandatory owned copy exceeded the host assembly it replaced.
 
 ## Qualification gates
 
