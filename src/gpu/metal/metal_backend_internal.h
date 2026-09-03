@@ -160,7 +160,7 @@ struct MetalAcStrategyBatchParams {
   uint32_t covered_block_width;
   uint32_t covered_block_height;
   uint32_t covered_block_count;
-  uint32_t use_device_quant_norm;
+  uint32_t quant_norm_source;
   float info_loss_multiplier;
   float zeros_multiplier;
   float cost_delta;

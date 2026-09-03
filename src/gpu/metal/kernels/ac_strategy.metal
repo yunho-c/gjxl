@@ -30,7 +30,7 @@ struct AcStrategyBatchParams {
   uint covered_block_width;
   uint covered_block_height;
   uint covered_block_count;
-  uint use_device_quant_norm;
+  uint quant_norm_source;
   float info_loss_multiplier;
   float zeros_multiplier;
   float cost_delta;
@@ -58,6 +58,9 @@ constant float kForwardDct32x16Scale = 0.0441941738f;
 constant float kInverseDct32x16Scale = 22.6274170f;
 constant float kForwardDct32Scale = 1.0f / 32.0f;
 constant float kInverseDct32Scale = 32.0f;
+
+constant uint kQuantNormFromCandidate = 0u;
+constant uint kQuantNormFromForwardPass = 2u;
 
 inline uint CeilLog2Nonzero(uint value) {
   return value <= 1 ? 0 : 32 - clz(value - 1);
@@ -100,7 +103,9 @@ inline float ComputeQuantNorm(
   AcStrategyCandidate candidate,
   constant AcStrategyBatchParams& params) {
 
-  if (params.use_device_quant_norm == 0u) return candidate.quant_norm;
+  if (params.quant_norm_source == kQuantNormFromCandidate) {
+    return candidate.quant_norm;
+  }
   if (params.covered_block_count == 1u) {
     return quant_field[
       candidate.block_y * params.quant_field_row_stride + candidate.block_x];
@@ -130,6 +135,18 @@ inline float ComputeQuantNorm(
   }
   sum /= float(params.covered_block_count);
   return FastPow2(FastLog2(sum) * (1.0f / 16.0f));
+}
+
+inline float AcStrategyQuantNorm(
+  device const float* quant_field,
+  device const float* precomputed_quant_norm,
+  AcStrategyCandidate candidate,
+  uint candidate_index,
+  constant AcStrategyBatchParams& params) {
+
+  return params.quant_norm_source == kQuantNormFromForwardPass
+    ? precomputed_quant_norm[candidate_index]
+    : ComputeQuantNorm(quant_field, candidate, params);
 }
 
 inline bool AcStrategyCandidateValid(
@@ -231,6 +248,8 @@ __attribute__((always_inline)) inline void AcStrategyForwardSquareDct(
   device const float* opsin_b,
   device const AcStrategyCandidate* candidates,
   device float* coefficients,
+  device const float* quant_field,
+  device float* precomputed_quant_norm,
   constant AcStrategyBatchParams& params,
   constant const float* basis,
   float scale,
@@ -257,6 +276,12 @@ __attribute__((always_inline)) inline void AcStrategyForwardSquareDct(
     simd_width,
     simdgroup_index,
     group_position);
+  if (params.quant_norm_source == kQuantNormFromForwardPass &&
+      group_position.x % 3u == 0u && simdgroup_index == 0u && lane == 0u) {
+    const uint candidate_index = group_position.x / 3u;
+    precomputed_quant_norm[candidate_index] = ComputeQuantNorm(
+      quant_field, candidates[candidate_index], params);
+  }
   for (uint index = simdgroup_index * simd_width + lane;
        index < N * N;
        index += threadgroup_stride) {
@@ -334,6 +359,8 @@ __attribute__((always_inline)) inline void AcStrategyForwardRectangularDct(
   device const float* opsin_b,
   device const AcStrategyCandidate* candidates,
   device float* coefficients,
+  device const float* quant_field,
+  device float* precomputed_quant_norm,
   constant AcStrategyBatchParams& params,
   constant const float* vertical_basis,
   constant const float* horizontal_basis,
@@ -362,6 +389,12 @@ __attribute__((always_inline)) inline void AcStrategyForwardRectangularDct(
     simd_width,
     simdgroup_index,
     group_position);
+  if (params.quant_norm_source == kQuantNormFromForwardPass &&
+      group_position.x % 3u == 0u && simdgroup_index == 0u && lane == 0u) {
+    const uint candidate_index = group_position.x / 3u;
+    precomputed_quant_norm[candidate_index] = ComputeQuantNorm(
+      quant_field, candidates[candidate_index], params);
+  }
   for (uint index = simdgroup_index * simd_width + lane;
        index < Rows * Rows;
        index += threadgroup_stride) {
@@ -453,7 +486,9 @@ kernel void name(                                                           \
   device const float* opsin_b [[buffer(2)]],                                \
   device const AcStrategyCandidate* candidates [[buffer(3)]],               \
   device float* coefficients [[buffer(4)]],                                 \
-  constant AcStrategyBatchParams& params [[buffer(5)]],                     \
+  device const float* quant_field [[buffer(5)]],                            \
+  device float* precomputed_quant_norm [[buffer(6)]],                       \
+  constant AcStrategyBatchParams& params [[buffer(7)]],                     \
   uint lane [[thread_index_in_simdgroup]],                                   \
   uint simd_width [[threads_per_simdgroup]],                                 \
   uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
@@ -461,9 +496,9 @@ kernel void name(                                                           \
   threadgroup float pixels[size * size];                                    \
   threadgroup float shared_basis[size * size];                              \
   AcStrategyForwardSquareDct<size>(                                         \
-    opsin_x, opsin_y, opsin_b, candidates, coefficients, params, basis,     \
-    scale, pixels, shared_basis, lane, simd_width, simdgroup_index,          \
-    group_position);                                                        \
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,       \
+    precomputed_quant_norm, params, basis, scale, pixels, shared_basis,     \
+    lane, simd_width, simdgroup_index, group_position);                     \
 }
 
 #define GJXL_AC_RECTANGULAR_FORWARD_KERNEL(                                 \
@@ -474,7 +509,9 @@ kernel void name(                                                           \
   device const float* opsin_b [[buffer(2)]],                                \
   device const AcStrategyCandidate* candidates [[buffer(3)]],               \
   device float* coefficients [[buffer(4)]],                                 \
-  constant AcStrategyBatchParams& params [[buffer(5)]],                     \
+  device const float* quant_field [[buffer(5)]],                            \
+  device float* precomputed_quant_norm [[buffer(6)]],                       \
+  constant AcStrategyBatchParams& params [[buffer(7)]],                     \
   uint lane [[thread_index_in_simdgroup]],                                   \
   uint simd_width [[threads_per_simdgroup]],                                 \
   uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
@@ -483,8 +520,9 @@ kernel void name(                                                           \
   threadgroup float shared_vertical_basis[rows * rows];                     \
   threadgroup float shared_horizontal_basis[columns * columns];             \
   AcStrategyForwardRectangularDct<rows, columns>(                            \
-    opsin_x, opsin_y, opsin_b, candidates, coefficients, params,            \
-    vertical_basis, horizontal_basis, scale, pixels,                        \
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,       \
+    precomputed_quant_norm, params, vertical_basis, horizontal_basis,       \
+    scale, pixels,                                                          \
     shared_vertical_basis, shared_horizontal_basis, lane, simd_width,        \
     simdgroup_index, group_position);                                       \
 }
@@ -542,6 +580,7 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidual(
   device const float* matrices,
   device const AcStrategyCandidate* candidates,
   device const float* quant_field,
+  device const float* precomputed_quant_norm,
   ResidualPointer residual_coefficients,
   device ChannelRate* channel_rates,
   constant AcStrategyBatchParams& params,
@@ -561,7 +600,8 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidual(
   const uint inverse_matrix_base =
     (3 + channel) * params.coefficient_count;
   const AcStrategyCandidate candidate = candidates[candidate_index];
-  const float quant_norm = ComputeQuantNorm(quant_field, candidate, params);
+  const float quant_norm = AcStrategyQuantNorm(
+    quant_field, precomputed_quant_norm, candidate, candidate_index, params);
   const float cfl_factor =
     channel == 0 ? candidate.cfl_x :
     channel == 2 ? candidate.cfl_b : 0.0f;
@@ -604,6 +644,7 @@ kernel void gjxl_ac_strategy_residual(
   device float* residual_coefficients [[buffer(4)]],
   device ChannelRate* channel_rates [[buffer(5)]],
   constant AcStrategyBatchParams& params [[buffer(6)]],
+  device const float* precomputed_quant_norm [[buffer(7)]],
   threadgroup float* magnitude_reduction [[threadgroup(0)]],
   threadgroup uint* nonzero_reduction [[threadgroup(1)]],
   uint tid [[thread_index_in_threadgroup]],
@@ -614,6 +655,7 @@ kernel void gjxl_ac_strategy_residual(
     matrices,
     candidates,
     quant_field,
+    precomputed_quant_norm,
     residual_coefficients,
     channel_rates,
     params,
@@ -824,6 +866,7 @@ kernel void name(                                                           \
   device float* pixels [[buffer(4)]],                                       \
   device ChannelRate* channel_rates [[buffer(5)]],                          \
   constant AcStrategyBatchParams& params [[buffer(6)]],                     \
+  device const float* precomputed_quant_norm [[buffer(7)]],                 \
   threadgroup float* residual_coefficients [[threadgroup(0)]],              \
   threadgroup float* magnitude_reduction [[threadgroup(1)]],                \
   threadgroup uint* nonzero_reduction [[threadgroup(2)]],                   \
@@ -831,9 +874,9 @@ kernel void name(                                                           \
   uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
   uint3 group_position [[threadgroup_position_in_grid]]) {                   \
   ComputeAcStrategyResidual(                                                \
-    coefficients, matrices, candidates, quant_field, residual_coefficients, \
-    channel_rates, params, magnitude_reduction, nonzero_reduction, 0, tid,  \
-    group_position);                                                        \
+    coefficients, matrices, candidates, quant_field,                       \
+    precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
+    magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
   threadgroup float shared_basis[size * size];                              \
   AcStrategyInverseSquareDct<size>(                                         \
     residual_coefficients, pixels, basis, scale, shared_basis, tid,         \
@@ -850,6 +893,7 @@ kernel void name(                                                           \
   device float* pixels [[buffer(4)]],                                       \
   device ChannelRate* channel_rates [[buffer(5)]],                          \
   constant AcStrategyBatchParams& params [[buffer(6)]],                     \
+  device const float* precomputed_quant_norm [[buffer(7)]],                 \
   threadgroup float* residual_coefficients [[threadgroup(0)]],              \
   threadgroup float* magnitude_reduction [[threadgroup(1)]],                \
   threadgroup uint* nonzero_reduction [[threadgroup(2)]],                   \
@@ -857,9 +901,9 @@ kernel void name(                                                           \
   uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
   uint3 group_position [[threadgroup_position_in_grid]]) {                   \
   ComputeAcStrategyResidual(                                                \
-    coefficients, matrices, candidates, quant_field, residual_coefficients, \
-    channel_rates, params, magnitude_reduction, nonzero_reduction, 0, tid,  \
-    group_position);                                                        \
+    coefficients, matrices, candidates, quant_field,                       \
+    precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
+    magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
   threadgroup float shared_vertical_basis[rows * rows];                     \
   threadgroup float shared_horizontal_basis[columns * columns];             \
   AcStrategyInverseRectangularDct<rows, columns>(                           \
@@ -996,8 +1040,8 @@ kernel void gjxl_ac_strategy_cost(
       }
     }
 
-    const float quant_norm = ComputeQuantNorm(
-      quant_field, candidate, params);
+    const float quant_norm = AcStrategyQuantNorm(
+      quant_field, costs, candidate, candidate_index, params);
     const float normalized_loss = loss / float(params.coefficient_count);
     const float loss_cost =
       powr(normalized_loss, 0.125f) * float(params.coefficient_count) /

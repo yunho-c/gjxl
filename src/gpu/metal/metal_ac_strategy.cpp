@@ -139,6 +139,10 @@ constexpr std::array kFusedStageSpecs = {
   },
 };
 
+constexpr uint32_t kQuantNormFromCandidate = 0;
+constexpr uint32_t kQuantNormFromDeviceField = 1;
+constexpr uint32_t kQuantNormFromForwardPass = 2;
+
 }  // namespace
 
 Status CreateAcStrategyPipelines(
@@ -602,7 +606,15 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
     .covered_block_count = static_cast<uint32_t>(
       strategy_info->covered_blocks.width *
       strategy_info->covered_blocks.height),
-    .use_device_quant_norm = use_device_quant_norm ? 1u : 0u,
+    // Value 2 lets the fused forward pass compute larger block aggregates
+    // once per candidate into the otherwise-unused cost output. The following
+    // residual and cost dispatches consume that value before replacing it.
+    .quant_norm_source = use_device_quant_norm
+      ? (fused.forward && strategy_info->covered_blocks.width *
+             strategy_info->covered_blocks.height >= 4
+           ? kQuantNormFromForwardPass
+           : kQuantNormFromDeviceField)
+      : kQuantNormFromCandidate,
     .info_loss_multiplier = 1.2f * std::pow(
       ratio, 0.33677806662454718f),
     .zeros_multiplier = 9.3089059022677905f * std::pow(
@@ -654,7 +666,10 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     }
     encoder->setBuffer(validated.candidates->handle(), 0, 3);
     encoder->setBuffer(validated.scratch_b->handle(), 0, 4);
-    encoder->setBytes(&validated.params, sizeof(validated.params), 5);
+    encoder->setBuffer(validated.quant_field->handle(),
+                       validated.quant_field_offset_bytes, 5);
+    encoder->setBuffer(validated.costs->handle(), 0, 6);
+    encoder->setBytes(&validated.params, sizeof(validated.params), 7);
     DispatchMetalThreadgroups(
       encoder,
       MTL::Size(
@@ -695,6 +710,7 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
     encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
     encoder->setBytes(&validated.params, sizeof(validated.params), 6);
+    encoder->setBuffer(validated.costs->handle(), 0, 7);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 2);
@@ -714,6 +730,7 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
     encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
     encoder->setBytes(&validated.params, sizeof(validated.params), 6);
+    encoder->setBuffer(validated.costs->handle(), 0, 7);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
     DispatchMetalThreadgroups(

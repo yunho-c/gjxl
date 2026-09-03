@@ -373,7 +373,10 @@ well as identical complete codestream bytes at one and eight participants.
 The effort 7, 8, 9, 10, explicit high-density, and maximum-compression matrix
 also preserved parent sizes and the selected order-family mask.
 
-### 3. Optimize AC-strategy kernels, not the effort-7 search policy
+### 3. Optimize AC-strategy kernels, not the effort-7 search policy (completed)
+
+Status: one source-proven redundancy removed from the resident SIMD path;
+candidate generation, hierarchy, comparisons, and tie behavior are unchanged.
 
 The AC-strategy submission accounts for `59.01 ms` of 4K GPU time and a
 `73.29 ms` host wait. This is genuine accelerated work on the critical path,
@@ -395,6 +398,69 @@ Because dispatch timestamps are unavailable, use Metal System Trace/counters
 or temporary in-kernel instrumentation before attributing a cause to occupancy,
 bandwidth, or cache behavior. A kernel improvement must reduce the complete AC
 submission and public workflow, not merely an isolated timestamp.
+
+#### Retained quant-norm handoff
+
+Source tracing found that the resident path calculated an identical aggregate
+quantization norm four times per candidate: once in each channel's residual
+threadgroup, then once more in the cost kernel. This is cheap for DCT8 and the
+two-block rectangular families, but the larger families evaluate a power mean
+over 4, 8, or 16 block-field values, including the same logarithm and
+exponential approximation each time.
+
+The retained implementation assigns the internal quant-norm source an explicit
+state. For a resident SIMD candidate covering at least four blocks, the first
+lane of the channel-zero forward threadgroup computes the norm once and stores
+it in that candidate's cost slot. The following residual and cost dispatches
+read it before the cost kernel replaces the slot with the final result. This
+uses an existing output buffer and existing serial dispatch boundary: it adds
+no allocation, command, readback, or synchronization. Host-quantized inputs,
+non-fused DCT implementations, DCT8, and the two-block candidates retain the
+direct calculation.
+
+This experiment does not establish an occupancy, register-pressure, cache, or
+bandwidth cause. Stage instrumentation instead provides a narrower causal
+result: families for which the repeated aggregate was removed improve, while
+the deliberately untouched small families remain essentially flat.
+
+| GPU stage | 1080p parent | 1080p retained | 4K parent | 4K retained |
+| --- | ---: | ---: | ---: | ---: |
+| DCT8 | `1.131 ms` | `1.141 ms` | `4.623 ms` | `4.449 ms` |
+| DCT16x8 | `1.955 ms` | `1.958 ms` | `7.716 ms` | `7.739 ms` |
+| DCT8x16 | `1.922 ms` | `1.923 ms` | `7.853 ms` | `7.892 ms` |
+| DCT16 | `3.256 ms` | `3.214 ms` | `13.444 ms` | `12.949 ms` |
+| DCT32x16 | `1.710 ms` | `1.310 ms` | `6.959 ms` | `5.317 ms` |
+| DCT16x32 | `1.739 ms` | `1.410 ms` | `6.882 ms` | `5.633 ms` |
+| DCT32 | `2.794 ms` | `1.902 ms` | `11.366 ms` | `7.837 ms` |
+| Complete AC GPU submission | `14.538 ms` | `13.125 ms` | `58.844 ms` | `52.245 ms` |
+| AC host wait | `17.397 ms` | `16.357 ms` | `70.539 ms` | `63.745 ms` |
+
+The stage values are medians of five samples after one warmup in separate
+profiled processes. They are attribution data, not complete encode latency.
+
+Five alternating independent-process pairs compared the coefficient-order
+parent with the retained kernel. Each process performed one warmup and three
+retained samples; values below are medians of the five per-process medians:
+
+| Workload | Stage | Parent | Quant-norm handoff | Change |
+| --- | --- | ---: | ---: | ---: |
+| padded 1080p | Complete encode | `92.718 ms` | `90.846 ms` | `-1.872 ms` (`-2.0%`) |
+| padded 1080p | Quantization pipeline | `72.269 ms` | `70.075 ms` | `-2.194 ms` (`-3.0%`) |
+| padded 4K | Complete encode | `323.050 ms` | `315.529 ms` | `-7.521 ms` (`-2.3%`) |
+| padded 4K | Quantization pipeline | `271.452 ms` | `263.840 ms` | `-7.612 ms` (`-2.8%`) |
+
+All five 4K pairwise comparisons improved; three of five complete 1080p and
+four of five 1080p quantization comparisons improved. Every retained output
+remained `410,072` bytes at 1080p and `1,606,911` bytes at 4K. A functional
+matrix also preserved size, coefficient-order mask, and diagnostic score where
+applicable for efforts 7-10, high density, maximum compression, exact
+coefficients, throughput, maximum throughput, and final-score collection.
+The focused Metal candidate suite exercises resident quant fields across all
+seven strategies and all three DCT implementations; the fully resident
+pipeline additionally preserves its exact frame and codestream oracle.
+The complete Release suite passes 61 of 62 tests; the sole failure is the
+pre-existing pinned CPU `quantization_pipeline` score mismatch
+(`0.24919039011001587` actual versus `0.24914586544036865` expected).
 
 #### Expected payoff from moving hierarchical selection to Metal
 
