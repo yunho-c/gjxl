@@ -8,6 +8,20 @@ foreach(required IN ITEMS GJXL_LIBJXL_SOURCE GJXL_LIBJXL_BUILD
   endif()
 endforeach()
 
+if(NOT DEFINED GJXL_EXECUTABLE_SUFFIX)
+  set(GJXL_EXECUTABLE_SUFFIX "")
+endif()
+
+set(GJXL_COMPILER_ARGUMENTS)
+if(DEFINED GJXL_C_COMPILER AND NOT "${GJXL_C_COMPILER}" STREQUAL "")
+  list(APPEND GJXL_COMPILER_ARGUMENTS
+    "-DCMAKE_C_COMPILER=${GJXL_C_COMPILER}")
+endif()
+if(DEFINED GJXL_CXX_COMPILER AND NOT "${GJXL_CXX_COMPILER}" STREQUAL "")
+  list(APPEND GJXL_COMPILER_ARGUMENTS
+    "-DCMAKE_CXX_COMPILER=${GJXL_CXX_COMPILER}")
+endif()
+
 find_program(GJXL_GIT_EXECUTABLE git REQUIRED)
 execute_process(
   COMMAND "${GJXL_GIT_EXECUTABLE}" -C "${GJXL_LIBJXL_SOURCE}" rev-parse HEAD
@@ -29,6 +43,7 @@ execute_process(
     -S "${GJXL_LIBJXL_SOURCE}"
     -B "${GJXL_LIBJXL_BUILD}"
     -G "${GJXL_GENERATOR}"
+    ${GJXL_COMPILER_ARGUMENTS}
     -DCMAKE_BUILD_TYPE=Release
     -DBUILD_TESTING=OFF
     -DJPEGXL_ENABLE_TOOLS=ON
@@ -59,8 +74,20 @@ if(NOT build_result EQUAL 0)
   message(FATAL_ERROR "Pinned djxl/jxlinfo build failed")
 endif()
 
+if(WIN32)
+  file(GLOB GJXL_PINNED_RUNTIME_LIBRARIES
+    "${GJXL_LIBJXL_BUILD}/lib/*.dll"
+    "${GJXL_LIBJXL_BUILD}/third_party/brotli/*.dll")
+  if(NOT GJXL_PINNED_RUNTIME_LIBRARIES)
+    message(FATAL_ERROR "Pinned libjxl runtime DLLs were not produced")
+  endif()
+  file(COPY ${GJXL_PINNED_RUNTIME_LIBRARIES}
+    DESTINATION "${GJXL_LIBJXL_BUILD}/tools")
+endif()
+
 foreach(tool IN ITEMS djxl jxlinfo)
-  if(NOT EXISTS "${GJXL_LIBJXL_BUILD}/tools/${tool}")
+  if(NOT EXISTS
+      "${GJXL_LIBJXL_BUILD}/tools/${tool}${GJXL_EXECUTABLE_SUFFIX}")
     message(FATAL_ERROR "Pinned ${tool} was not produced")
   endif()
 endforeach()

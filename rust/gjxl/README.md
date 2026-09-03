@@ -4,7 +4,8 @@ Safe Rust wrapper for GJXL's C interface.
 
 The default `native` feature builds GJXL from the repository containing this
 crate. Packaged consumers must set `GJXL_SOURCE_DIR` to a GJXL source checkout.
-Only native macOS builds are currently supported.
+Native builds support macOS, Linux, and Windows; enable the `cuda` feature to
+compile CUDA support on a non-macOS host with the CUDA toolkit installed.
 
 ```rust
 let context = gjxl::Context::with_options(gjxl::ContextOptions {

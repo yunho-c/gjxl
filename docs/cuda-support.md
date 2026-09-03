@@ -1,8 +1,10 @@
 # CUDA backend support analysis
 
-- Status: implementation in progress on `feat/cuda`
+- Status: functionally complete for explicit CUDA selection; production
+  qualification remains in progress
 - Date: 2026-09-03
-- Initial target: a forced CUDA backend, followed by production qualification
+- Supported target: explicit CUDA encoding on non-macOS hosts with a supported
+  NVIDIA device and CUDA toolkit
 
 Implementation progress as of this revision:
 
@@ -40,21 +42,35 @@ Implementation progress as of this revision:
   steady-state device allocations, preserves final CPU frame/codestream bytes,
   supports odd padded source geometry and strategy reconfiguration, and
   invalidates atomically after submission, completion, numeric, or readback
-  failure; and
-- direct fully resident AQ now supports all seven production strategies,
-  strategy-aware field adjustment, resident quantizer selection, cached
-  forward transforms, final CfL, adjusted coefficient decisions, DC and AC
-  coding, reconstruction, loop filtering, Butteraugli feedback, and resident
-  maximum-error control. The prepared evaluator uses two preplanned arenas,
-  supports metadata reconfiguration, and commits host output atomically;
-- the dependent Butteraugli field-update policy currently uses the shared
-  host-controlled fallback between resident CUDA evaluations. Fusing those
-  updates, and connecting the resident initial-quantization/AC-search handoff,
-  remain the principal functional Phase 4 gaps;
-- public C++, C, Rust, CLI, package-export, and diagnostic vocabulary now
-  includes CUDA without changing existing C enum values; and
+  failure;
+- fully resident AQ supports all seven production strategies, strategy-aware
+  field adjustment, resident quantizer selection, cached forward transforms,
+  final CfL, adjusted coefficient decisions, DC and AC coding,
+  reconstruction, loop filtering, Butteraugli feedback, and resident
+  maximum-error control. Its dependent Butteraugli policy is fused into one
+  stream submission, so the two-evaluation field update stays on the device;
+- the public workflow supplies CUDA with resident source/preprocessing,
+  initial-quantization, initial-CfL, and AC-strategy-search results. It can
+  materialize only the final frame and optional diagnostics rather than
+  reading back and re-uploading the quant field between evaluations;
+- exact-coefficient, fully-resident, throughput, and maximum-throughput CUDA
+  modes work through C++, C, Rust, and the CLI. Distance, maximum-error, and
+  target-size rate control are covered at the public-workflow boundary;
+- forced CUDA was exercised on odd padded 1919x1079 input in all four modes and
+  on odd padded 3839x2159 input in fully-resident mode. Every output was
+  accepted by the pinned independent libjxl decoder and contained only finite
+  decoded RGB samples. At 1919x1079, exact CUDA and CPU emitted the same
+  codestream SHA-256, while requesting the optional final resident score did
+  not change resident codestream bytes;
+- native Rust builds now support macOS, Linux, and Windows, with an explicit
+  `cuda` feature. The Windows CUDA test creates a real CUDA context and encodes
+  through the public C API;
+- the pinned conformance decoder is portable to Windows, including executable
+  suffixes, a `clang-cl` workaround for the pinned revision, and local staging
+  of its runtime DLLs. All 22 codestream fixtures and all 52 CUDA-enabled CTest
+  tests pass in the measured Windows configuration; and
 - automatic selection deliberately remains Metal-only until CUDA passes the
-  full workflow and qualification gates described below.
+  cross-device qualification gates described below.
 
 ## Executive finding
 
@@ -242,12 +258,12 @@ that both backends run.
 
 ### Platform and target coupling
 
-The root [`CMakeLists.txt`](../CMakeLists.txt) currently rejects every non-Apple
-platform, unconditionally enables Objective-C++, and publicly links
-`gjxl_codestream` to `gjxl_metal`. This prevents even the CPU targets from
-serving as a portable foundation.
+Before the CUDA work, the root [`CMakeLists.txt`](../CMakeLists.txt) rejected
+every non-Apple platform, unconditionally enabled Objective-C++, and publicly
+linked `gjxl_codestream` to `gjxl_metal`. This prevented even the CPU targets
+from serving as a portable foundation.
 
-The build should instead provide independently controlled targets:
+The implemented build now provides independently controlled targets:
 
 - `GJXL_ENABLE_METAL`, available only on Apple platforms;
 - `GJXL_ENABLE_CUDA`, available when a supported CUDA toolchain is selected;
@@ -296,11 +312,12 @@ The internal backend descriptor should report at least:
 - supported profiling capabilities; and
 - qualification state for automatic selection.
 
-Forced selection should accept an explicit CUDA device ordinal. Automatic
-selection should initially remain conservative and be enabled per measured
-device class, geometry range, and AQ mode. A failed one-time initialization
-must not permanently poison every later encode unless the device itself is in
-an unrecoverable state.
+The concrete `CreateCudaBackend` factory accepts an explicit CUDA device
+ordinal and validates it before constructing the backend; the higher-level
+production resolver currently selects ordinal zero. Automatic selection should
+remain conservative and be enabled per measured device class, geometry range,
+and AQ mode. A failed one-time initialization must not permanently poison every
+later encode unless the device itself is in an unrecoverable state.
 
 ### Unified-memory assumptions
 
@@ -416,10 +433,12 @@ single CUDA stream is sufficient for the first correct implementation and
 preserves ordering, but it may serialize otherwise independent prepared
 objects.
 
-The initial CUDA backend should own a default stream and let prepared AQ or
-Butteraugli objects own or lease private streams. Independent prepared objects
-must be thread-safe even before true overlap is optimized. A bounded stream
-pool can be introduced after concurrency and memory-pressure profiling.
+The implemented CUDA backend owns one non-blocking stream and serializes stream
+submission with a mutex. Prepared AQ and Butteraugli objects own independent
+arenas, so they are thread-safe even though work submitted through one backend
+is ordered on that stream. A bounded stream pool or per-operation stream lease
+can be introduced after concurrency and memory-pressure profiling demonstrates
+that overlap is worth its extra memory cost.
 
 The resident policy contains many launches with stable allocations and mostly
 stable geometry. Once the ordinary stream implementation is correct, it is a
@@ -437,46 +456,51 @@ The repository currently has Rust workflows but no comprehensive native C++ or
 GPU CI. CUDA support should not be considered production-ready without
 automated CPU-only builds and real-NVIDIA functional testing.
 
-## Recommended CUDA architecture
+## CUDA architecture
 
 ### Backend object
 
-`CudaBackend` should implement the shared `GpuBackend` base plus only the
-optional capabilities that are complete and qualified at each milestone. It
-should own:
+`CudaBackend` implements the shared `GpuBackend` base and exposes the image
+primitive, AC-strategy, prepared Butteraugli, and prepared AQ capabilities. It
+owns:
 
-- CUDA device identity and context policy;
-- one default stream and reusable event resources;
-- allocation and optional memory-pool state;
-- selected DCT/kernel variants;
-- profiling capability information; and
+- explicit CUDA device identity and runtime-device restoration;
+- one private non-blocking stream and event-backed submissions;
+- validated device allocations and launch limits;
+- the correct FP32 DCT and functional-kernel dispatch paths; and
 - deterministic failure-injection state for tests.
 
-`CudaBuffer` should be an RAII `DeviceBuffer` containing an explicit device
-pointer and allocation metadata. It must validate both backend instance and
-device ownership before every operation.
+It deliberately does not yet claim CUDA profiling, a memory pool, multiple
+streams, graph capture, or architecture-specific kernel variants. Those are
+qualification-driven optimizations rather than hidden requirements of the
+functional backend.
 
-`CudaSubmission` should record completion with a CUDA event and cache one
+`CudaBuffer` is an RAII `DeviceBuffer` containing an explicit device pointer
+and allocation metadata. Operations validate both backend instance and device
+ownership before using it.
+
+`CudaSubmission` records completion with a CUDA event and caches one
 translated status with `std::call_once`, preserving the concurrent `Wait()`
-contract. Immediate launch errors should be reported before a successful
+contract. Immediate launch errors are reported before a successful
 submission is returned; asynchronous failures belong to the submission's
 completion status.
 
 ### Prepared operations
 
-Prepared CUDA AQ and Butteraugli operations should consume shared immutable
-plans but own their native streams, events, device allocations, pinned staging,
-and graph instances. Stable pointers should be preferred so graph capture and
-memory reuse remain possible later.
+Prepared CUDA AQ and Butteraugli operations consume the shared descriptors and
+own persistent and staging device arenas. They submit through the backend
+stream and keep stable device pointers across evaluations; that preserves the
+option of later graph capture or pooling without making either part of the
+correctness mechanism.
 
-The operation should expose the same ready, busy, and invalid state semantics
-as Metal. Destruction must wait for outstanding work before releasing device or
-host staging memory.
+The operations expose the same ready, busy, and invalid state semantics as
+Metal. Destruction waits for outstanding work before releasing device or host
+staging memory.
 
 ### Math and kernel strategy
 
-CUDA kernels should initially use ordinary FP32 arithmetic and explicit
-decision-sensitive compile settings. Global fast-math should remain disabled.
+CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
+compile settings. Global fast-math remains disabled.
 Maximum reduction may use a standard CUDA reduction implementation because
 finite maximum is order-independent; sum-, norm-, and threshold-sensitive
 operations require fixed tolerances and CPU differential tests.
@@ -539,9 +563,12 @@ Current progress: the vertical slice is implemented and exposed through an
 explicitly forced CUDA workflow. Real-device tests cover odd padded geometry,
 CPU initial-field tolerances, byte-identical CPU frame serialization,
 deterministic prepared-operation reuse, zero steady-state device allocations,
-and failure-atomic direct and public calls. Small/1080p/4K coverage and an
-independent decoder gate remain before this phase's qualification exit
-criterion is complete.
+and failure-atomic direct and public calls. Pinned libjxl accepts the small and
+odd padded 1919x1079 maximum-throughput outputs, whose decoded samples are all
+finite. Fully-resident 3839x2159 coverage additionally demonstrates that the
+shared allocation and geometry path scales to odd padded 4K on the measured
+6 GB device. Repeating the 4K maximum-throughput case and the full matrix on
+other device classes remains qualification work rather than a functional gap.
 
 This is a vertical architecture and transfer proof, not qualification of the
 default quality path.
@@ -578,8 +605,10 @@ completion failure. The exact Butteraugli workflow stays within the existing
 and below `4e-6` in reconstructed RGB on compute capability 8.6). The
 maximum-error track stays within `2e-4`, preserves the CPU policy outcome, and
 emits byte-identical final codestreams. Compute Sanitizer reports zero memory
-errors. Broader resolution/corpus and independent-decoder gates remain part of
-production qualification rather than functional exact-mode implementation.
+errors. The odd padded 1919x1079 public workflow emits the same SHA-256
+codestream as CPU and passes pinned-libjxl decode with finite output. Broader
+corpus and cross-architecture gates remain part of production qualification
+rather than functional exact-mode implementation.
 
 ### Phase 4: fully resident AQ
 
@@ -617,14 +646,19 @@ caller output remains unchanged after injected completion failure, all 52
 CUDA-enabled tests pass, and Compute Sanitizer reports zero memory errors on
 compute capability 8.6.
 
-This is not yet the fused end state. The shared AQ frontend falls back to
-host-side dependent field updates between CUDA evaluations because
-`EvaluateResidentButteraugliPolicy` is not implemented by CUDA. The integrated
-encoding pipeline's resident initial quantization and AC-strategy inputs are
-also not yet accepted by this evaluator. Consequently the mode is functionally
-resident for coefficient generation and perceptual evaluation, but it still
-incurs policy readback/upload round trips and cannot yet replace Metal's full
-resident pipeline in automatic selection.
+The fused end state is now implemented. CUDA accepts the integrated pipeline's
+resident source, inverse-Gaborish selection, initial quantization, initial CfL,
+and AC-strategy-search handoff. `EvaluateResidentButteraugliPolicy` initializes,
+evaluates, and updates the dependent quant field on the operation stream; the
+ordinary two-evaluation public path no longer reads back and re-uploads the
+field. Optional final scoring adds a diagnostic evaluation without changing
+the frame or codestream.
+
+All four modes pass the public-workflow contract on odd padded 1919x1079 input,
+including independent decode and finite-sample checks. Fully-resident CUDA also
+passes the same gates at odd padded 3839x2159 on a 6 GB compute-capability 8.6
+device. This completes the functional Phase 4 scope. It does not by itself
+qualify automatic selection across the NVIDIA product range.
 
 ### Phase 5: production qualification
 
@@ -643,8 +677,63 @@ Add:
 - pinned `djxl` acceptance and decoded-pixel checks; and
 - named-corpus size and Butteraugli comparisons.
 
+Local qualification in this revision covers a Windows 11 host, CUDA 11.8,
+MSVC 19.37, and an RTX 3060 Laptop GPU (compute capability 8.6, 6 GB). It
+includes the complete CTest suite, CPU-only and CUDA builds, the public Rust
+wrapper in both modes, Compute Sanitizer, deterministic and failure-injection
+tests, all four public CUDA modes at odd padded 1080p, fully-resident CUDA at
+odd padded 4K, pinned-decoder acceptance, finite decoded samples, an exact-mode
+CPU/CUDA hash match, and scored/unscored resident hash stability.
+
+The remaining qualification work is deliberately external to that single-host
+evidence: automated real-GPU CI on at least one second architecture class,
+Linux/toolkit-version coverage, concurrent public-context stress, measured
+peak VRAM and pinned-host memory, explicit transfer accounting, repeatable cold
+and warm performance baselines, and named photographic-corpus quality/size
+comparisons.
+
 Automatic CUDA selection should remain disabled until this phase produces a
 documented device and workload qualification range.
+
+## Build and use
+
+CUDA is independent of Metal and is opt-in at configuration time:
+
+```sh
+cmake -S . -B build-cuda -G Ninja \
+  -DGJXL_ENABLE_CUDA=ON \
+  -DGJXL_ENABLE_METAL=OFF
+cmake --build build-cuda --parallel
+ctest --test-dir build-cuda --output-on-failure
+```
+
+CMake uses its ordinary CUDA compiler and architecture discovery. Toolchain
+files and CI should set `CMAKE_CUDA_ARCHITECTURES` explicitly when producing
+portable artifacts instead of relying on the development machine's native
+architecture.
+
+The CLI requires explicit CUDA selection while qualification is conservative:
+
+```sh
+build-cuda/gjxl_encode input.pfm output.jxl \
+  --backend cuda \
+  --gpu-aq fully-resident \
+  --distance 1.0
+```
+
+`--gpu-aq` also accepts `exact-coefficients`, `throughput`, and
+`maximum-throughput`. The rate-control options are the same as for CPU and
+Metal. The C API selects `GJXL_BACKEND_CUDA`, and Rust consumers enable the
+safe crate's `cuda` feature:
+
+```sh
+cargo test --manifest-path rust/Cargo.toml --workspace --features cuda
+```
+
+On Windows, setting `CUDA_PATH` is the most direct way for the Rust build
+script to find `cudart`; it also recognizes `CUDACXX` and
+`CMAKE_CUDA_COMPILER`. Linux additionally falls back to
+`/usr/local/cuda/lib64`.
 
 ## Major risks
 
@@ -713,18 +802,22 @@ A production CUDA backend should meet all of the following:
 
 ## Recommendation
 
-The first implementation effort should combine Phase 0 and Phase 1: make the
-build and workflow genuinely backend-neutral, factor the conformance tests, and
-land the CUDA runtime substrate with simple correct transforms. That work is
-valuable even if later performance results change the scope.
+The functional implementation has now completed Phases 0 through 4 in the
+order proposed by the initial analysis: portable substrate, reusable
+primitives, maximum-throughput vertical slice, exact coefficients, and finally
+the fused resident pipeline. The next highest-value work is qualification, not
+additional kernel surface.
 
-The forced maximum-throughput path should then serve as the first go/no-go
-milestone. It proves end-to-end CUDA ownership, preprocessing, coefficient
-generation, transfer, frame assembly, and serialization without first
-committing to the much larger Butteraugli and resident reconstruction port.
+Keep CUDA explicitly selected while collecting evidence on a second NVIDIA
+architecture, Linux and newer toolkit combinations, a named photographic
+corpus, concurrent contexts, transfer volume, memory pressure, and complete
+workflow performance. Use exact mode as the byte-level regression oracle and
+resident mode as the deterministic quality/performance track. Enable automatic
+selection only for device, geometry, and mode ranges supported by recorded
+data.
 
-If that slice shows a credible complete-workflow result, proceed through the
-exact-coefficient path before fully resident AQ. This orders the work from the
-strongest correctness oracle to the most backend-specific performance path and
-avoids cloning the current Metal monolith before the common architecture has
-been improved.
+The architectural critique remains relevant after functional completion. In
+particular, a shared immutable `PreparedAqPlan`, generated host/device ABI
+checks, and backend-parameterized conformance tests would reduce long-term
+Metal/CUDA drift. Those should be incremental refactors with unchanged output
+contracts, not prerequisites for using the forced CUDA backend.

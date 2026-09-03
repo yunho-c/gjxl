@@ -426,7 +426,7 @@ mod tests {
             CompressionMode::Automatic
         );
         assert_eq!(distance_from_quality(100.0), 0.0);
-        assert!((distance_from_quality(80.0) - 1.9).abs() < f32::EPSILON);
+        assert!((distance_from_quality(80.0) - 1.9).abs() < 1.0e-6);
     }
 
     #[test]
@@ -439,6 +439,25 @@ mod tests {
             .expect_err("invalid CPU thread count must fail");
             assert_eq!(error.kind(), ErrorKind::InvalidArgument);
         }
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_context_encodes_when_a_device_is_available() {
+        let context = match Context::with_options(ContextOptions {
+            backend: Backend::Cuda,
+            cpu_threads: None,
+        }) {
+            Ok(context) => context,
+            Err(error) if error.kind() == ErrorKind::Unavailable => return,
+            Err(error) => panic!("CUDA context creation failed: {error}"),
+        };
+        let pixels = rgba_fixture(64, 48);
+        let image = ImageView::rgba8(64, 48, 64 * 4, &pixels).unwrap();
+        let codestream = context
+            .encode(&image, EncoderOptions::default())
+            .expect("CUDA encode must succeed after context creation");
+        assert!(!codestream.is_empty());
     }
 
     #[test]

@@ -899,16 +899,24 @@ bool CheckPreparedReuseAndFailure(
 bool CheckPublicWorkflow(
   gjxl::GpuBackend& gpu,
   const ImageStorage& source) {
-  std::vector<uint8_t> resident_bytes;
-  gjxl::VarDctEncodingSummary resident_summary;
-  if (!Check(gjxl::codestream_internal::
+  const auto encode = [&](gjxl::GpuAdaptiveQuantizationMode mode,
+                          bool collect_final_score,
+                          std::vector<uint8_t>* bytes,
+                          gjxl::VarDctEncodingSummary* summary) {
+    return gjxl::codestream_internal::
       EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
         source.View(),
         {.butteraugli_target = 1.0f,
          .backend = gjxl::VarDctBackendPreference::kCuda,
-         .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
-         .collect_final_butteraugli_score = true},
-        &gpu, false, &resident_bytes, &resident_summary),
+         .gpu_aq_mode = mode,
+         .collect_final_butteraugli_score = collect_final_score},
+        &gpu, false, bytes, summary);
+  };
+
+  std::vector<uint8_t> resident_bytes;
+  gjxl::VarDctEncodingSummary resident_summary;
+  if (!Check(encode(gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+                    true, &resident_bytes, &resident_summary),
       "Forced resident CUDA public workflow") || resident_bytes.empty() ||
       resident_summary.execution_backend !=
         gjxl::VarDctExecutionBackend::kCuda ||
@@ -916,6 +924,76 @@ bool CheckPublicWorkflow(
         gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
       resident_summary.score_history.size() != 3 ||
       !resident_summary.final_butteraugli_score_evaluated) {
+    return false;
+  }
+
+  std::vector<uint8_t> resident_default_bytes;
+  gjxl::VarDctEncodingSummary resident_default_summary;
+  std::vector<uint8_t> throughput_bytes;
+  gjxl::VarDctEncodingSummary throughput_summary;
+  std::vector<uint8_t> exact_bytes;
+  gjxl::VarDctEncodingSummary exact_summary;
+  if (!Check(encode(gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+                    false, &resident_default_bytes,
+                    &resident_default_summary),
+             "Forced resident CUDA workflow without final score") ||
+      !Check(encode(gjxl::GpuAdaptiveQuantizationMode::kThroughput,
+                    false, &throughput_bytes, &throughput_summary),
+             "Forced throughput CUDA public workflow") ||
+      !Check(encode(gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                    true, &exact_bytes, &exact_summary),
+             "Forced exact CUDA public workflow") ||
+      resident_default_bytes != resident_bytes ||
+      resident_default_summary.score_history.size() != 2 ||
+      resident_default_summary.final_butteraugli_score_evaluated ||
+      throughput_bytes.empty() || throughput_summary.score_history.size() != 2 ||
+      throughput_summary.final_butteraugli_score_evaluated ||
+      throughput_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kCuda ||
+      throughput_summary.gpu_aq_mode !=
+        gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
+      exact_bytes.empty() || exact_summary.score_history.size() != 3 ||
+      !exact_summary.final_butteraugli_score_evaluated ||
+      exact_summary.execution_backend != gjxl::VarDctExecutionBackend::kCuda ||
+      exact_summary.gpu_aq_mode !=
+        gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients) {
+    std::cerr << "A forced CUDA public mode failed its output contract\n";
+    return false;
+  }
+
+  std::vector<uint8_t> maximum_error_bytes;
+  gjxl::VarDctEncodingSummary maximum_error_summary;
+  if (!Check(gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+        source.View(),
+        {.rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError,
+         .maximum_error = {0.05f, 0.05f, 0.05f},
+         .backend = gjxl::VarDctBackendPreference::kCuda,
+         .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
+        &gpu, false, &maximum_error_bytes, &maximum_error_summary),
+      "Forced resident CUDA maximum-error workflow") ||
+      maximum_error_bytes.empty() ||
+      maximum_error_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kCuda ||
+      maximum_error_summary.maximum_error_evaluation_count != 6 ||
+      !std::isfinite(maximum_error_summary.achieved_maximum_error_ratio)) {
+    return false;
+  }
+
+  std::vector<uint8_t> target_bytes;
+  gjxl::VarDctEncodingSummary target_summary;
+  if (!Check(gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+        source.View(),
+        {.rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+         .target_bytes = 512,
+         .target_size_maximum_attempts = 2,
+         .backend = gjxl::VarDctBackendPreference::kCuda,
+         .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
+        &gpu, false, &target_bytes, &target_summary),
+      "Forced resident CUDA target-size workflow") || target_bytes.empty() ||
+      target_summary.execution_backend != gjxl::VarDctExecutionBackend::kCuda ||
+      target_summary.encode_attempt_count != 2) {
     return false;
   }
 

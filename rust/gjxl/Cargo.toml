@@ -11,6 +11,7 @@ readme = "README.md"
 [features]
 default = ["native"]
 native = ["gjxl-sys/native"]
+cuda = ["native", "gjxl-sys/cuda"]
 
 [dependencies]
 gjxl-sys = { version = "0.0.1", path = "../gjxl-sys", default-features = false }

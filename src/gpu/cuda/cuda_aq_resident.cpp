@@ -225,15 +225,24 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
         preparation.resident_initial_cfl ||
         preparation.frame_only_resident_initial_quant ||
         preparation.resident_ac_strategy_inputs;
-    if (preparation.frame_only || !preparation.resident_quantization ||
-        preparation.frame_only_inverse_gaborish ||
-        (partial_resident_frontend && !resident_frontend) ||
-        preparation.frame_only_resident_quantizer ||
-        preparation.resident_coding_opsin.plane[0].buffer != nullptr ||
+    if (preparation.frame_only || !preparation.resident_quantization) {
+      return Status::Unavailable(
+          "CUDA resident AQ requires complete resident preparation");
+    }
+    if (preparation.frame_only_inverse_gaborish ||
+        preparation.frame_only_resident_quantizer) {
+      return Status::Unavailable(
+          "CUDA resident AQ received frame-only preparation features");
+    }
+    if (partial_resident_frontend && !resident_frontend) {
+      return Status::Unavailable(
+          "CUDA resident AQ requires the complete resident frontend");
+    }
+    if (preparation.resident_coding_opsin.plane[0].buffer != nullptr ||
         preparation.resident_coding_opsin.plane[1].buffer != nullptr ||
         preparation.resident_coding_opsin.plane[2].buffer != nullptr) {
       return Status::Unavailable(
-          "CUDA resident AQ preparation combination is not supported");
+          "CUDA resident AQ does not accept an external coding image");
     }
     if (preparation.coefficient_decision_mode !=
         AcCoefficientDecisionMode::kAdjustedSharedQuant) {

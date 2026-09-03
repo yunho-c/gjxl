@@ -22,8 +22,12 @@ on:
 
 jobs:
   test:
-    name: macOS native wrapper
-    runs-on: macos-latest
+    name: ${{ matrix.os }} native wrapper
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
     defaults:
       run:
         working-directory: rust
@@ -38,7 +42,12 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install build tools
+        if: runner.os == 'macOS'
         run: brew install cmake ninja
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev ninja-build
 
       - name: Check formatting
         run: cargo fmt --all --check

@@ -230,6 +230,17 @@ target_compile_features(
     cxx_std_20
 )
 
+# Some external build drivers replace CMAKE_CXX_FLAGS instead of appending to
+# them. Keep exception unwinding explicit for MSVC because GJXL's public error
+# boundary relies on C++ exceptions being caught before they cross the C API.
+if(MSVC)
+  target_compile_options(
+    gjxl_core
+    INTERFACE
+      $<$<COMPILE_LANGUAGE:CXX>:/EHsc>
+  )
+endif()
+
 target_include_directories(
   gjxl_core
   INTERFACE
@@ -1219,6 +1230,28 @@ if(GJXL_BUILD_TESTS)
     GJXL_PINNED_LIBJXL_BUILD
     "${CMAKE_CURRENT_BINARY_DIR}/pinned-libjxl"
   )
+  set(GJXL_PINNED_DECODER_COMPILER_ARGUMENTS)
+  if(WIN32)
+    # The pinned libjxl revision references an MSVC overflow intrinsic that is
+    # absent from some otherwise supported VS 2022 toolsets. clang-cl uses the
+    # revision's builtin-overflow path and remains ABI-compatible with MSVC.
+    find_program(GJXL_PINNED_CLANG_CL clang-cl)
+    if(GJXL_PINNED_CLANG_CL)
+      set(GJXL_PINNED_LIBJXL_BUILD
+          "${CMAKE_CURRENT_BINARY_DIR}/pinned-libjxl-clang")
+      list(APPEND GJXL_PINNED_DECODER_COMPILER_ARGUMENTS
+        "-DGJXL_C_COMPILER=${GJXL_PINNED_CLANG_CL}"
+        "-DGJXL_CXX_COMPILER=${GJXL_PINNED_CLANG_CL}")
+    endif()
+  endif()
+  set(
+    GJXL_PINNED_DJXL
+    "${GJXL_PINNED_LIBJXL_BUILD}/tools/djxl${CMAKE_EXECUTABLE_SUFFIX}"
+  )
+  set(
+    GJXL_PINNED_JXLINFO
+    "${GJXL_PINNED_LIBJXL_BUILD}/tools/jxlinfo${CMAKE_EXECUTABLE_SUFFIX}"
+  )
 
   add_custom_target(
     gjxl_pinned_decoder
@@ -1228,6 +1261,8 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_LIBJXL_BUILD=${GJXL_PINNED_LIBJXL_BUILD}"
       "-DGJXL_LIBJXL_REVISION=${GJXL_PINNED_LIBJXL_REVISION}"
       "-DGJXL_GENERATOR=${CMAKE_GENERATOR}"
+      "-DGJXL_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+      ${GJXL_PINNED_DECODER_COMPILER_ARGUMENTS}
       -P
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildPinnedDjxl.cmake"
     COMMENT
@@ -1239,8 +1274,8 @@ if(GJXL_BUILD_TESTS)
     codestream-conformance
     COMMAND
       gjxl_codestream_conformance_test
-      --decoder "${GJXL_PINNED_LIBJXL_BUILD}/tools/djxl"
-      --info "${GJXL_PINNED_LIBJXL_BUILD}/tools/jxlinfo"
+      --decoder "${GJXL_PINNED_DJXL}"
+      --info "${GJXL_PINNED_JXLINFO}"
       --encoder $<TARGET_FILE:gjxl_encode>
       --sample "${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
       --artifacts
