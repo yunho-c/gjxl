@@ -40,6 +40,11 @@ struct QuantizationMatrixScales {
 [[nodiscard]] VarDctEntropyBehavior ResolveEntropyBehavior(
   const VarDctEncodingOptions& options) noexcept;
 
+/// Resolves the public effort request independently from entropy intensity.
+[[nodiscard]] VarDctCoefficientOrderBehavior
+ResolveCoefficientOrderBehavior(
+  const VarDctEncodingOptions& options) noexcept;
+
 /// Computes libjxl's source-dependent X/B matrix-scale statistics over the
 /// unpadded opsin image. Failure leaves `stats` unchanged.
 [[nodiscard]] Status ComputeQuantizationMatrixScaleStats(

@@ -64,6 +64,8 @@ struct CandidateSelectionKey {
 struct VarDctCodestreamProfile {
   VarDctEntropyBehavior entropy_behavior =
     VarDctEntropyBehavior::kBalanced;
+  VarDctCoefficientOrderBehavior coefficient_order_behavior =
+    VarDctCoefficientOrderBehavior::kFull;
   uint64_t validation_nanoseconds = 0;
   uint64_t dc_tokenization_nanoseconds = 0;
   uint64_t ac_tokenization_nanoseconds = 0;

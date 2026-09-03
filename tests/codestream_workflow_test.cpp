@@ -632,10 +632,29 @@ bool CheckEffortPolicy() {
 }
 
 bool CheckCompressionPolicy() {
+  using gjxl::VarDctCoefficientOrderBehavior;
   using gjxl::VarDctCompressionMode;
   using gjxl::VarDctDensityMode;
   using gjxl::VarDctEntropyBehavior;
   using gjxl::codestream_internal::ResolveEntropyBehavior;
+  using gjxl::codestream_internal::ResolveCoefficientOrderBehavior;
+
+  if (ResolveCoefficientOrderBehavior({.effort = 7}) !=
+        VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled ||
+      ResolveCoefficientOrderBehavior({.effort = 8}) !=
+        VarDctCoefficientOrderBehavior::kFull ||
+      ResolveCoefficientOrderBehavior(
+        {.effort = 7,
+         .density_mode = VarDctDensityMode::kHighDensity}) !=
+        VarDctCoefficientOrderBehavior::kFull ||
+      ResolveCoefficientOrderBehavior(
+        {.effort = 7,
+         .compression_mode =
+           VarDctCompressionMode::kMaximumCompression}) !=
+        VarDctCoefficientOrderBehavior::kFull) {
+    std::cerr << "Coefficient-order effort resolution failed\n";
+    return false;
+  }
 
   for (const int32_t effort : {1, 7, 8}) {
     if (ResolveEntropyBehavior({.effort = effort}) !=

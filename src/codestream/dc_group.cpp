@@ -367,6 +367,18 @@ Status TokenizeSimpleDcGroups(const VarDctEncoderFrame& frame,
     return status;
   }
 
+  return codestream_internal::TokenizeSimpleDcGroupsForEncoder(
+    frame, groups);
+}
+
+Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
+  const VarDctEncoderFrame& frame,
+  std::vector<SimpleDcGroupTokenStreams>* groups) {
+
+  if (groups == nullptr) {
+    return Status::InvalidArgument("DC-group token output is null");
+  }
+
   const Extent2D blocks = frame.geometry().block_grid().blocks;
   const Extent2D group_extent = blocks.ceil_div(kSimpleDcGroupBlockDimension);
   size_t group_count = 0;
@@ -400,7 +412,7 @@ Status TokenizeSimpleDcGroups(const VarDctEncoderFrame& frame,
             SlicePlane(dc.plane[channel], stream.block_x, stream.block_y,
                        stream.block_extent);
         }
-        status = TokenizeSimpleDcGroup(group_dc, &stream.dc_tokens);
+        Status status = TokenizeSimpleDcGroup(group_dc, &stream.dc_tokens);
         if (!status.ok()) {
           return status;
         }

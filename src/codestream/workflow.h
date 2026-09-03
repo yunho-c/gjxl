@@ -61,7 +61,8 @@ enum class TargetSizeSelectionPolicy {
 struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
   /// User-facing speed-versus-refinement intent in [1, 10]. Effort 7 preserves
-  /// the established two-update adaptive-quantization policy.
+  /// the established two-update adaptive-quantization policy and uses
+  /// deterministic DCT8-only coefficient-order sampling.
   int32_t effort = 7;
   /// Maximum participating CPU threads per encode. Zero selects the existing
   /// automatic stage-specific worker policy. GPU execution is not constrained.

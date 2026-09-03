@@ -13,9 +13,20 @@ namespace gjxl {
 
 class VarDctEncoderFrame;
 
+enum class VarDctCoefficientOrderBehavior : uint8_t {
+  /// Derives coefficient orders from every transform anchor.
+  kFull,
+  /// Matches libjxl's effort-7-like DCT8 policy by deterministically sampling
+  /// approximately half of transform anchors. Other order families remain
+  /// fully sampled.
+  kEffort7Dct8Sampled,
+};
+
 struct VarDctCodestreamOptions {
   VarDctEntropyBehavior entropy_behavior =
     VarDctEntropyBehavior::kBalanced;
+  VarDctCoefficientOrderBehavior coefficient_order_behavior =
+    VarDctCoefficientOrderBehavior::kFull;
 };
 
 /// Serializes one validated initial-profile frame as a raw JPEG XL codestream.

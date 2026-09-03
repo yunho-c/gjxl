@@ -590,7 +590,7 @@ priority 6 before choosing either one.
 
 ## Priority 6: separate ordinary tokenization from maximum compression
 
-### Current residual tournament architecture
+### Previous residual tournament architecture
 
 Balanced and high-density encoding now select one block-context map, one
 coefficient-order representation, and one entropy family. Their AC path still
@@ -707,6 +707,82 @@ repetition rather than old-byte equality. Effort 9 and maximum compression must
 retain their current search intensity and pinned hashes unless explicitly
 changed by a separate proposal.
 
+### Implemented result
+
+Priority 6 now gives the two policies distinct data paths:
+
+- balanced and high-density encoding emit final split values and contexts in
+  one AC traversal, using precomputed natural orders and one reusable anchor,
+  nonzero-map, and population scratch object per participating worker;
+- balanced tokenization also emits compact touched-context/sparse-symbol
+  populations, reduces them in deterministic group order, and passes the
+  resulting fixed-HybridUint populations into direct ANS construction;
+- high density keeps its 28 HybridUint configurations and precise histogram
+  search instead of consuming the effort-7 population shortcut; and
+- maximum compression alone retains reusable token templates and the separate
+  context-materialization pass needed by its representation tournament.
+
+The direct and template paths share the nonzero prediction, zero-density, block
+context, and final context-layout helpers. Serializer-only DC, block-context,
+and coefficient-order entry points now trust the top-level frame audit; their
+public counterparts retain independent validation and atomic output behavior.
+
+Coefficient-order effort is explicit in `VarDctCodestreamOptions`. Automatic
+effort 7 selects the pinned xorshift128+ DCT8-only half-sampling policy. Effort
+8, efforts 9-10, explicit high density, and maximum compression use all order
+statistics. Maximum compression forces the full policy even if a low-level
+caller supplies the sampling value. The standalone serializer defaults to full
+statistics so its existing API remains byte-compatible.
+
+Seven alternating independent-process parent/candidate pairs were measured per
+workload from fresh Release builds. Every process performed one internal warmup
+before its retained sample, and pair order alternated. The padded fixtures use
+multiple order families, so their effort-7 bytes remain identical and isolate
+the direct-token/population change:
+
+| Effort 7, Metal fully resident | Parent median | Priority 6 median | Change |
+| --- | ---: | ---: | ---: |
+| 1080p codestream wall time | 28.702 ms | 21.782 ms | -24.0% median paired ratio |
+| 1080p complete workflow | 117.791 ms | 111.670 ms | -5.2% from cohort medians |
+| 1080p AC-tokenization wall time | 6.351 ms | 7.795 ms | histogram work moved here |
+| 1080p entropy wall time | 15.302 ms | 7.017 ms | -54.1% |
+| 4K codestream wall time | 89.623 ms | 56.670 ms | -36.9% median paired ratio |
+| 4K complete workflow | 426.376 ms | 397.603 ms | -6.7% from cohort medians |
+| 4K AC-tokenization wall time | 23.455 ms | 27.721 ms | histogram work moved here |
+| 4K entropy wall time | 43.575 ms | 8.105 ms | -81.4% |
+
+All fourteen effort-7 codestream pairs favored Priority 6. Encoded sizes were
+unchanged at 533,163 bytes for 1080p and 2,103,900 bytes for 4K. The apparent
+increase in aggregate coefficient-tokenization worker time is intentional:
+balanced symbol populations are now produced while group-local values are hot.
+It replaces the later serialized token scan; aggregate worker time is not added
+to phase wall time.
+
+Five additional alternating padded-4K effort-9 pairs retained the exact
+2,106,485-byte codestream. Median codestream wall time was effectively neutral
+at 160.963 ms versus 160.442 ms, with a 0.994 median paired ratio. This is the
+intended boundary: the direct representation remains, but legitimate
+high-density entropy search still dominates.
+
+The explicit sampling gate was qualified on a deterministic 512x512
+three-channel random fixture containing 4,096 DCT8 transforms and no other
+strategy. Across five alternating CPU pairs, coefficient-order work fell from
+1.449 ms to 0.773 ms; the median paired ratio was 0.537. The sampled codestream
+was 280,663 bytes versus 280,631 bytes for full statistics, an increase of 32
+bytes or 0.0114%. Repeated sampled encodes were byte-identical. `djxl` 0.12.0
+accepted both streams, their decoded PFM files were byte-identical, and their
+independently measured Butteraugli scores were identical (`3.0025761127`, with
+the same `3-norm` of `1.553354`).
+
+The small public-workflow fixture also retained exact parent bytes at efforts
+7, 8, and 9 and maximum compression. Their SHA-256 hashes are respectively
+`56d3b52d1bb80d2b7ea260a4b6cd937d6858e9b3619dcdd35368dad7aa800e5d`,
+`1dfca10baf3f4e33beaaedb5a85feebce463c288e2256a9a0fc7628eb5828f35`,
+`9dd9af4b1d80e3b2376e457c7940fead8a1b4445e31eb521af6adbaff47df3d8`,
+and `31c06d354659a6b79179046850b0182a2dc5344e7a5448cff15d01b0c3f08728`.
+All four were accepted by `djxl` 0.12.0. The diagnostic raw-sample schema is now
+version 15 and names the direct versus template AC-tokenization path explicitly.
+
 ## Recommended implementation sequence
 
 The priority numbers describe causal importance, but the implementation order
@@ -735,10 +811,14 @@ separates low-risk work elimination from lifetime and layout redesign:
 9. **Completed in the current priority-5 slice:** assemble synchronously from
    completed shared Metal buffers, remove intermediate frame readback storage,
    fuse validation into repacking, and retain atomic owned-frame construction.
-10. Implement priority 6's one-pass ordinary tokenization and effort-aware
-   coefficient-order policy.
-11. Add cache-local balanced histogram population reduction.
-12. Re-profile before adding more counters or considering persistent workspace
+10. **Completed in the current priority-6 slice:** add one-pass ordinary
+    tokenization, per-worker scratch, precomputed natural orders, trusted
+    serializer entry points, and effort-aware coefficient-order sampling.
+11. **Completed in the current priority-6 slice:** reduce cache-local balanced
+    populations and reuse them during direct ANS construction without changing
+    high-density or maximum-compression search.
+12. **Completed for priority 6:** re-profile with alternating Release processes;
+    defer more counters, persistent workspace
     pooling, a Metal group-packing kernel, or a mapped zero-copy frame view.
 
 This sequence prevents two common forms of wasted optimization: building a

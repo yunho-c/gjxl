@@ -72,4 +72,17 @@ struct SimpleBlockContextMap {
   const VarDctEncoderFrame& frame,
   SimpleBlockContextMap* map);
 
+namespace codestream_internal {
+
+/// Serializer-only entry points for an already validated frame.
+[[nodiscard]] Status ComputeSimpleBlockContextMapCandidatesForEncoder(
+  const VarDctEncoderFrame& frame,
+  std::vector<SimpleBlockContextMap>* maps);
+
+[[nodiscard]] Status ComputeSimpleBlockContextMapForEncoder(
+  const VarDctEncoderFrame& frame,
+  SimpleBlockContextMap* map);
+
+}  // namespace codestream_internal
+
 }  // namespace gjxl

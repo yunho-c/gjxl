@@ -69,6 +69,8 @@ void AccumulateCodestreamProfile(
   codestream_internal::VarDctCodestreamProfile* destination) {
 
   destination->entropy_behavior = source.entropy_behavior;
+  destination->coefficient_order_behavior =
+    source.coefficient_order_behavior;
   destination->validation_nanoseconds += source.validation_nanoseconds;
   destination->dc_tokenization_nanoseconds +=
     source.dc_tokenization_nanoseconds;
@@ -748,6 +750,8 @@ struct PreparedWorkflow {
   const VarDctCodestreamOptions codestream_options{
     .entropy_behavior =
       codestream_internal::ResolveEntropyBehavior(options),
+    .coefficient_order_behavior =
+      codestream_internal::ResolveCoefficientOrderBehavior(options),
   };
   status = profile == nullptr
     ? EncodeVarDctCodestream(
@@ -1500,6 +1504,16 @@ VarDctEntropyBehavior ResolveEntropyBehavior(
     return VarDctEntropyBehavior::kHighDensity;
   }
   return VarDctEntropyBehavior::kBalanced;
+}
+
+VarDctCoefficientOrderBehavior ResolveCoefficientOrderBehavior(
+  const VarDctEncodingOptions& options) noexcept {
+
+  return options.effort == 7 &&
+      options.density_mode == VarDctDensityMode::kDefault &&
+      options.compression_mode == VarDctCompressionMode::kAutomatic
+    ? VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled
+    : VarDctCoefficientOrderBehavior::kFull;
 }
 
 bool IsAutomaticMetalGeometryEligible(Extent2D padded_extent) noexcept {
