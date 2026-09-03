@@ -359,6 +359,7 @@ public:
 private:
   friend class MetalPreparedAqEvaluation;
   friend class MetalPreparedDeviceButteraugli;
+  friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 
   Status PrepareDeviceButteraugliImpl(
     const DeviceButteraugliPrepareDescriptor& descriptor,
@@ -382,6 +383,8 @@ private:
     MetalAqScratchArena kind,
     DeviceScratchArena arena,
     bool reusable) noexcept;
+
+  Status EmptyAqScratchArenasForTesting();
   struct TransformEncodeContext {
     const TransformPipeline* pipeline = nullptr;
     TransformDirection direction = TransformDirection::kForward;

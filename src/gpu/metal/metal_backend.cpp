@@ -758,6 +758,16 @@ Status MetalBackend::AcquireAqScratchArena(
       candidate.capacity_bytes() != required_capacity_bytes) {
     candidate = DeviceScratchArena{};
   }
+  if (candidate.capacity_bytes() != 0) {
+    MetalBuffer* buffer = AsMetalBuffer(*candidate.backing_buffer());
+    // Lock the purgeable resource before reuse. Empty means Metal discarded
+    // its contents under pressure, so retain neither the bytes nor the object.
+    if (buffer == nullptr ||
+        buffer->handle()->setPurgeableState(
+          MTL::PurgeableStateNonVolatile) == MTL::PurgeableStateEmpty) {
+      candidate = DeviceScratchArena{};
+    }
+  }
   Status status = candidate.Prepare(*this, required_capacity_bytes);
   if (!status.ok()) {
     return status;
@@ -778,6 +788,13 @@ void MetalBackend::ReleaseAqScratchArena(
     return;
   }
   arena.ResetLayout();
+  MetalBuffer* buffer = AsMetalBuffer(*arena.backing_buffer());
+  if (buffer == nullptr) {
+    return;
+  }
+  // Keep the allocation as a latency cache without preventing Metal from
+  // reclaiming its backing storage under memory pressure.
+  (void)buffer->handle()->setPurgeableState(MTL::PurgeableStateVolatile);
   try {
     std::lock_guard lock(aq_scratch_pool_mutex_);
     std::optional<DeviceScratchArena>& idle = idle_aq_scratch_[index];
@@ -789,6 +806,21 @@ void MetalBackend::ReleaseAqScratchArena(
     // Pooling is opportunistic. Destruction must remain noexcept even if the
     // platform mutex reports an exceptional failure.
   }
+}
+
+Status MetalBackend::EmptyAqScratchArenasForTesting() {
+  std::lock_guard lock(aq_scratch_pool_mutex_);
+  for (std::optional<DeviceScratchArena>& arena : idle_aq_scratch_) {
+    if (!arena.has_value()) {
+      continue;
+    }
+    MetalBuffer* buffer = AsMetalBuffer(*arena->backing_buffer());
+    if (buffer == nullptr) {
+      return Status::Internal("Idle AQ scratch is not a Metal buffer");
+    }
+    (void)buffer->handle()->setPurgeableState(MTL::PurgeableStateEmpty);
+  }
+  return Status::Ok();
 }
 
 Status MetalBackend::CopyHostToDevice(

@@ -24,8 +24,9 @@ part of this roadmap's implementation scope.
 
 After that policy change, the recommended GJXL-owned order is:
 
-1. qualify the exact-capacity Metal AQ workspace-lease prototype, then decide
-   whether Butteraugli storage should join it after measuring idle residency;
+1. retain the qualified, purgeable exact-capacity Metal AQ workspace leases;
+   keep Butteraugli storage per-encode because its idle high-water cost is not
+   justified;
 2. parallelize coefficient-order zero statistics;
 3. optimize the existing effort-7 AC-strategy kernels without pruning the
    libjxl-grounded candidate search;
@@ -195,7 +196,10 @@ work. Qualification must cover encoded size, decoded pixels, Butteraugli,
 determinism, target-size search, maximum-error behavior, and normal natural
 images. The result must be measured at the complete public-workflow boundary.
 
-### 1. Lease exact-capacity evaluator arenas
+### 1. Lease exact-capacity evaluator arenas (completed)
+
+Status: implemented, memory-pressure-qualified, and retained. Prepared
+Butteraugli storage remains deliberately per-encode.
 
 `frontend.prepare_evaluator` is the largest non-evaluation wall boundary at
 `80.73 ms` profiled 4K. Only `22.05 ms` is attributed to the submitted
@@ -246,6 +250,15 @@ by an upload, device, numeric, readback, or completion failure discards both
 arenas. Each arena also has a `1 GiB` retention ceiling, and concurrent returns
 retain the smaller arena when only one idle slot is available.
 
+Returned Metal buffers are marked purgeable-volatile. Acquisition first locks
+the resource by restoring the nonvolatile state. If Metal reports that the
+resource became empty under memory pressure, acquisition destroys the stale
+resource and performs a cold allocation; its contents are never consumed.
+Focused coverage forces this transition, checks the cold-allocation count, and
+compares the recovered evaluation with a fresh changed-image oracle. This uses
+Apple's documented
+[`MTLResource::setPurgeableState` contract](https://developer.apple.com/documentation/metal/mtlresource/setpurgeablestate%28_%3A%29).
+
 This is deliberately narrower than caching a complete `PreparedWorkflow`.
 Host metadata, image generations, resident-view identity, AC-search resources,
 and the prepared Butteraugli allocation remain per-image. The latter is
@@ -259,30 +272,42 @@ the table reports the median of the five per-process medians:
 
 | Workload | Stage | Parent | AQ arena leases | Change |
 | --- | --- | ---: | ---: | ---: |
-| padded 1080p | Complete encode | `106.715 ms` | `96.928 ms` | `-9.786 ms` (`-9.2%`) |
-| padded 1080p | Quantization pipeline | `82.181 ms` | `72.593 ms` | `-9.588 ms` (`-11.7%`) |
-| padded 4K | Complete encode | `375.950 ms` | `340.628 ms` | `-35.322 ms` (`-9.4%`) |
-| padded 4K | Quantization pipeline | `311.923 ms` | `275.569 ms` | `-36.355 ms` (`-11.7%`) |
+| padded 1080p | Complete encode | `105.917 ms` | `96.092 ms` | `-9.825 ms` (`-9.3%`) |
+| padded 1080p | Quantization pipeline | `82.100 ms` | `72.690 ms` | `-9.410 ms` (`-11.5%`) |
+| padded 4K | Complete encode | `371.616 ms` | `340.145 ms` | `-31.471 ms` (`-8.5%`) |
+| padded 4K | Quantization pipeline | `309.003 ms` | `274.584 ms` | `-34.419 ms` (`-11.1%`) |
 
 All ten paired complete-encode comparisons favored the prototype. Every sample
 preserved the expected encoded size: `410,072` bytes at 1080p and `1,606,911`
 bytes at 4K.
 
 A separate five-sample stage-profile diagnostic reduced
-`frontend.prepare_evaluator` from `21.466` to `14.841 ms` at 1080p and from
-`78.303` to `58.108 ms` at 4K. The Butteraugli-reference GPU work stayed near
-`5.4 ms` and `22 ms`, so the change is removing host allocation/lifetime cost,
-not GPU perceptual work. The larger quantization-pipeline saving also includes
-avoided arena destruction outside the preparation wall stage and must not be
-subtracted mechanically from the stage-profile result.
+`frontend.prepare_evaluator` from `19.872` to `14.675 ms` at 1080p and from
+`71.750` to `54.586 ms` at 4K. The Butteraugli-reference GPU work remained
+`5.505` versus `5.457 ms` and `22.428` versus `22.094 ms`, respectively, so
+the change is removing host allocation/lifetime cost, not GPU perceptual work.
+The larger quantization-pipeline saving also includes avoided arena destruction
+outside the preparation wall stage and must not be subtracted mechanically
+from the stage-profile result.
 
-Three alternating padded-4K `/usr/bin/time -l` pairs showed no peak-RSS
-regression: the median changed from `975.984 MiB` to `973.656 MiB`. This peak
-measurement does not establish the physical footprint of an idle backend that
-retains its last arenas. Before the prototype becomes a landing recommendation,
-measure post-encode idle residency and memory-pressure behavior, and consider
-marking returned Metal buffers purgeable. Only then should the experiment be
-extended to the substantially larger Butteraugli arena.
+Three alternating live-context measurements paused each process only after all
+encoding had completed, while keeping the same backend alive. Without memory
+pressure, median physical footprint increased from `160` to `425 MiB` at 1080p
+and from `169` to `1,226 MiB` at 4K. This is real idle cache residency which the
+earlier peak-RSS measurement could not expose.
+
+The volatile state makes that memory reclaimable rather than immediately
+discarding it. A controlled `memory_pressure -p 60` run reduced the paused 4K
+candidate from `1,226` to `76 MiB`; the parent moved from `168` to `81 MiB`
+under the same procedure. A second encode on the pressured candidate detected
+the emptied leases, reallocated them, and reproduced the same `1,606,911`-byte
+codestream. It was predictably cold (`379.851 ms` after a `340.156 ms` warm
+sample), so the lease is a latency cache rather than guaranteed residency.
+
+This closes the AQ-arena experiment but rejects adding the much larger prepared
+Butteraugli allocation. Two AQ arenas already produce a substantial no-pressure
+high-water mark. Pooling another 33 working planes is not justified without a
+broader cache budget, eviction policy, and an explicit application trim seam.
 
 ### 2. Parallelize coefficient-order zero statistics
 

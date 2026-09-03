@@ -28,6 +28,10 @@ struct MetalAqReadbackStatsForTesting {
   }
 };
 
+/// Simulates memory-pressure reclamation of every idle AQ scratch lease.
+[[nodiscard]] Status EmptyMetalAqScratchArenasForTesting(
+  GpuBackend& backend);
+
 /// Leaves one production evaluation outstanding so tests can exercise
 /// lifetime and non-reentrancy behavior. Finish must precede ordinary reuse.
 [[nodiscard]] Status SubmitMetalAqEvaluationForTesting(

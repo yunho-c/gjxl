@@ -4566,6 +4566,15 @@ Status EvaluateMetalAqProfiled(
   return metal->EvaluateProfiled(input, output, profile);
 }
 
+Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend) {
+  MetalBackend* metal = dynamic_cast<MetalBackend*>(&backend);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "AQ scratch reclamation requires a Metal backend");
+  }
+  return metal->EmptyAqScratchArenasForTesting();
+}
+
 Status SubmitMetalAqEvaluationForTesting(
   PreparedAqEvaluation& prepared,
   AqEvaluationInput input) {

@@ -2319,7 +2319,44 @@ bool CheckScratchWorkspaceLeases() {
   EvaluationOutputStorage reused(fixture.strategies.extent());
   if (!CheckStatus(prepared->Evaluate(fixture.input.View(), reused.View()),
                    "reused scratch-lease evaluation") ||
-      !CompareOutputs(changed_expected, reused) ||
+      !CompareOutputs(changed_expected, reused)) {
+    return false;
+  }
+  prepared.reset();
+  if (!CheckStatus(
+        gjxl::metal_internal::EmptyMetalAqScratchArenasForTesting(*gpu),
+        "scratch-lease pressure reclamation")) {
+    return false;
+  }
+
+  const gjxl::GpuBackendStats before_reclaimed = gpu->stats();
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_reclaimed = gpu->stats();
+  if (after_reclaimed.successful_allocations !=
+        before_reclaimed.successful_allocations + 3) {
+    std::cerr << "Reclaimed AQ scratch arenas were reused\n";
+    return false;
+  }
+  EvaluationOutputStorage reclaimed(fixture.strategies.extent());
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), reclaimed.View()),
+                   "reclaimed scratch-lease evaluation") ||
+      !CompareOutputs(changed_expected, reclaimed)) {
+    return false;
+  }
+  prepared.reset();
+
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  EvaluationOutputStorage poison_source(fixture.strategies.extent());
+  if (!CheckStatus(
+        prepared->Evaluate(fixture.input.View(), poison_source.View()),
+        "pre-poison scratch-lease evaluation") ||
+      !CompareOutputs(changed_expected, poison_source) ||
       !CheckStatus(
         gjxl::metal_internal::FailNextMetalAqUploadForTesting(*prepared),
         "scratch-lease poison injection")) {

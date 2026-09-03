@@ -37,7 +37,7 @@ The roadmap priorities are:
 
 | Priority | Area | Current signal or status | Next implementation target |
 | ---: | --- | ---: | --- |
-| 2 | Preparation and storage | Exact-capacity AQ arena-lease prototype: warm padded-4K complete encode 375.95 -> 340.63 ms | Measure idle residency and purgeable-buffer behavior before pooling Butteraugli storage |
+| 2 | Preparation and storage | Purgeable exact-capacity AQ leases: warm padded-4K complete encode 371.62 -> 340.15 ms | Complete; keep Butteraugli storage per-encode |
 | 3 | Color conversion, validation, and copies | Direct workflow transform plus identity-bound finite-input provenance implemented; redundant scans cost 4.61 ms at 1080p and 18.49 ms at 4K | Qualified; proceed to priority 4 |
 | 4 | Quantization-matrix chromaticity statistics | Gate plus trusted NEON pass implemented; retained effort-7 preparation improved by 5.39 ms at 1080p and 25.49 ms at 4K | Qualified; incorporate effort-7 update policy and re-profile |
 | 5 | Metal readback and frame assembly | Mapped-source assembly implemented; padded-4K total improved 9.05 ms and peak RSS fell 73.8 MiB | Qualified; defer GPU packing and serializer views until after priority 6 |
@@ -238,7 +238,7 @@ native NEON build and a forced-scalar build. The Release matrices
 passed 61 of 62 tests without libjxl and 66 of 67 with pinned libjxl; in each,
 the sole failure was the unchanged pre-existing CPU quantization golden.
 
-### Current investigation: persistent workspace leases
+### Completed investigation: persistent workspace leases
 
 The direct-write and duplicate-ownership reductions have landed, and the fresh
 profile still shows material allocator/lifetime cost. The first experiment on
@@ -260,12 +260,18 @@ all calls. A safe design is a leaseable pool:
 - enforce a high-water memory policy so a single large image is not retained
   forever by every worker.
 
-The prototype implements those rules with one idle slot per AQ arena class, an
-exact planned-capacity key, failure poisoning, and a `1 GiB` per-arena ceiling.
-The unresolved gate is idle physical memory: peak RSS did not regress, but that
-does not prove that the process promptly relinquishes pages after its final
-encode. Measure that behavior and investigate Metal purgeable state before
-adding the substantially larger prepared Butteraugli arena to the lease.
+The retained implementation follows those rules with one idle slot per AQ
+arena class, an exact planned-capacity key, failure poisoning, and a `1 GiB`
+per-arena ceiling. Returned buffers are purgeable-volatile; an acquire that
+observes an emptied resource discards it and allocates cold storage.
+
+Live-backend measurements found the no-pressure cost that peak RSS concealed:
+the median idle physical footprint rose from `160` to `425 MiB` at 1080p and
+from `169` to `1,226 MiB` at 4K. Controlled pressure reclaimed it: the paused
+4K candidate fell to `76 MiB`, versus `81 MiB` for the parent under the same
+procedure, and the next encode recovered through the cold path with unchanged
+bytes. This qualifies the AQ latency cache, but it also rules out leasing the
+larger prepared Butteraugli arena without a broader cache budget and trim API.
 
 Prepared AQ currently uses backend, view identity, and options to decide whether
 an evaluation is compatible. Reusing the same host allocation for a different

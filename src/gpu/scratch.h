@@ -48,6 +48,12 @@ public:
     return peak_layout_bytes_;
   }
 
+  /// Exposes the allocation for backend-specific lifetime policy. The arena
+  /// retains ownership and no outstanding submission may access it.
+  [[nodiscard]] DeviceBuffer* backing_buffer() noexcept {
+    return buffer_.get();
+  }
+
 private:
   std::unique_ptr<DeviceBuffer> buffer_;
   BackendId backend_id_ = 0;
