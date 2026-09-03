@@ -37,7 +37,7 @@ The roadmap priorities are:
 
 | Priority | Area | Current signal or status | Next implementation target |
 | ---: | --- | ---: | --- |
-| 2 | Preparation and storage | Direct padded-Opsin slice: padded-4K input preparation 75.09 -> 54.42 ms and peak RSS 1.161 -> 1.043 GiB | Re-profile before considering persistent workspace leases |
+| 2 | Preparation and storage | Exact-capacity AQ arena-lease prototype: warm padded-4K complete encode 375.95 -> 340.63 ms | Measure idle residency and purgeable-buffer behavior before pooling Butteraugli storage |
 | 3 | Color conversion, validation, and copies | Direct workflow transform plus identity-bound finite-input provenance implemented; redundant scans cost 4.61 ms at 1080p and 18.49 ms at 4K | Qualified; proceed to priority 4 |
 | 4 | Quantization-matrix chromaticity statistics | Gate plus trusted NEON pass implemented; retained effort-7 preparation improved by 5.39 ms at 1080p and 25.49 ms at 4K | Qualified; incorporate effort-7 update policy and re-profile |
 | 5 | Metal readback and frame assembly | Mapped-source assembly implemented; padded-4K total improved 9.05 ms and peak RSS fell 73.8 MiB | Qualified; defer GPU packing and serializer views until after priority 6 |
@@ -238,12 +238,15 @@ native NEON build and a forced-scalar build. The Release matrices
 passed 61 of 62 tests without libjxl and 66 of 67 with pinned libjxl; in each,
 the sole failure was the unchanged pre-existing CPU quantization golden.
 
-### Deferred option: persistent workspace leases
+### Current investigation: persistent workspace leases
 
-Consider preserving useful capacity across independent images with an internal
-`VarDctEncoderWorkspace` or `MetalEncodingWorkspace` only after duplicate image
-ownership and direct-write passes have landed and a fresh profile still
-justifies it. Do not cache an entire `PreparedWorkflow` unchanged.
+The direct-write and duplicate-ownership reductions have landed, and the fresh
+profile still shows material allocator/lifetime cost. The first experiment on
+`perf/last-mile` therefore preserves only the exact-capacity persistent and
+staging arenas owned by `MetalPreparedAqEvaluation`; it does not cache an
+entire `PreparedWorkflow` unchanged. See
+[the last-mile roadmap](last-mile-optimization.md#first-workspace-lease-experiment)
+for the retained A/B measurements and qualification boundary.
 
 The C API documents that `gjxl_encode` may run concurrently on one context.
 Consequently, one context-wide mutable workspace would either race or serialize
@@ -256,6 +259,13 @@ all calls. A safe design is a leaseable pool:
 - discard poisoned state after a device, upload, or completion error; and
 - enforce a high-water memory policy so a single large image is not retained
   forever by every worker.
+
+The prototype implements those rules with one idle slot per AQ arena class, an
+exact planned-capacity key, failure poisoning, and a `1 GiB` per-arena ceiling.
+The unresolved gate is idle physical memory: peak RSS did not regress, but that
+does not prove that the process promptly relinquishes pages after its final
+encode. Measure that behavior and investigate Metal purgeable state before
+adding the substantially larger prepared Butteraugli arena to the lease.
 
 Prepared AQ currently uses backend, view identity, and options to decide whether
 an evaluation is compatible. Reusing the same host allocation for a different

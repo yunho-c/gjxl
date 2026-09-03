@@ -629,8 +629,10 @@ bool CheckChainedPath(gjxl::GpuBackend &gpu) {
     return false;
   }
   const gjxl::GpuBackendStats after_prepare = gpu.stats();
-  if (after_prepare.successful_allocations !=
-          before_prepare.successful_allocations + 3 ||
+  const uint64_t preparation_allocations =
+    after_prepare.successful_allocations -
+    before_prepare.successful_allocations;
+  if (preparation_allocations < 1 || preparation_allocations > 3 ||
       after_prepare.committed_submissions !=
           before_prepare.committed_submissions + 1) {
     std::cerr << "Prepared AQ Butteraugli resource contract failed\n";

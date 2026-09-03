@@ -657,6 +657,7 @@ private:
   mutable std::mutex mutex_;
   State state_ = State::kReady;
   std::unique_ptr<GpuSubmission> submission_;
+  bool scratch_lease_reusable_ = false;
   bool fail_next_readback_ = false;
   bool fail_next_resident_staging_ = false;
   bool fail_next_upload_ = false;

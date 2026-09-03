@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -27,6 +29,7 @@
 #include "gpu/ops/butteraugli.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/primitives.h"
+#include "gpu/scratch.h"
 
 namespace gjxl::metal_internal {
 
@@ -167,6 +170,12 @@ static_assert(std::is_standard_layout_v<MetalAcStrategyBatchParams>);
 static_assert(sizeof(MetalAcStrategyBatchParams) == 16 * sizeof(uint32_t));
 
 class MetalPreparedAqEvaluation;
+
+enum class MetalAqScratchArena : uint8_t {
+  kPersistent,
+  kStaging,
+  kCount,
+};
 
 struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> copy;
@@ -363,6 +372,16 @@ private:
     gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<PreparedAqEvaluation>* prepared,
     gpu_profile_internal::GpuExecutionProfile* profile);
+
+  Status AcquireAqScratchArena(
+    MetalAqScratchArena kind,
+    size_t required_capacity_bytes,
+    DeviceScratchArena* arena);
+
+  void ReleaseAqScratchArena(
+    MetalAqScratchArena kind,
+    DeviceScratchArena arena,
+    bool reusable) noexcept;
   struct TransformEncodeContext {
     const TransformPipeline* pipeline = nullptr;
     TransformDirection direction = TransformDirection::kForward;
@@ -579,6 +598,10 @@ private:
   bool test_fail_completion_ = false;
   std::atomic<bool> test_fail_next_submission_{false};
   std::atomic<bool> test_fail_next_completion_{false};
+  std::mutex aq_scratch_pool_mutex_;
+  std::array<
+    std::optional<DeviceScratchArena>,
+    static_cast<size_t>(MetalAqScratchArena::kCount)> idle_aq_scratch_;
   std::string name_;
 };
 

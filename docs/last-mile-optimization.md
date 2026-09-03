@@ -24,9 +24,8 @@ part of this roadmap's implementation scope.
 
 After that policy change, the recommended GJXL-owned order is:
 
-1. split and reduce per-encode Metal evaluator preparation, then introduce
-   concurrency-safe workspace leases if allocation and upload substages remain
-   material;
+1. qualify the exact-capacity Metal AQ workspace-lease prototype, then decide
+   whether Butteraugli storage should join it after measuring idle residency;
 2. parallelize coefficient-order zero statistics;
 3. optimize the existing effort-7 AC-strategy kernels without pruning the
    libjxl-grounded candidate search;
@@ -196,7 +195,7 @@ work. Qualification must cover encoded size, decoded pixels, Butteraugli,
 determinism, target-size search, maximum-error behavior, and normal natural
 images. The result must be measured at the complete public-workflow boundary.
 
-### 1. Split evaluator preparation before adding workspace leases
+### 1. Lease exact-capacity evaluator arenas
 
 `frontend.prepare_evaluator` is the largest non-evaluation wall boundary at
 `80.73 ms` profiled 4K. Only `22.05 ms` is attributed to the submitted
@@ -229,6 +228,61 @@ pool described in `amdahl-leakage.md`. Reuse capacity, not image identity:
 The difference between the `80.73 ms` wall boundary and `22.05 ms` of reference
 GPU work is only an upper bound on removable overhead. The substages must prove
 the causal saving before the pool is retained.
+
+#### First workspace-lease experiment
+
+The first prototype leases only the two `DeviceScratchArena`s owned by
+`MetalPreparedAqEvaluation`: its persistent arena and its operation-staging
+arena. The production backend holds at most one idle arena of each class.
+Acquisition and return use a short mutex; preparation, uploads, submissions,
+waits, and host work remain outside it, so concurrent calls still receive
+exclusive storage rather than serializing on the pool.
+
+The lease key is the exact planned capacity as well as the backend and arena
+class. This prevents a full diagnostic evaluator from inflating the memory
+contract of a later frame-only evaluator. Every successful preparation resets
+the slice layout and reuploads image-specific state. An evaluator invalidated
+by an upload, device, numeric, readback, or completion failure discards both
+arenas. Each arena also has a `1 GiB` retention ceiling, and concurrent returns
+retain the smaller arena when only one idle slot is available.
+
+This is deliberately narrower than caching a complete `PreparedWorkflow`.
+Host metadata, image generations, resident-view identity, AC-search resources,
+and the prepared Butteraugli allocation remain per-image. The latter is
+especially important: extending the lease to Butteraugli could remove another
+large allocation, but would also keep its 33-working-plane allocation alive
+while the backend is idle.
+
+Five alternating independent-process pairs compared the parent and prototype
+Release builds. Each process performed one warmup and three retained samples;
+the table reports the median of the five per-process medians:
+
+| Workload | Stage | Parent | AQ arena leases | Change |
+| --- | --- | ---: | ---: | ---: |
+| padded 1080p | Complete encode | `106.715 ms` | `96.928 ms` | `-9.786 ms` (`-9.2%`) |
+| padded 1080p | Quantization pipeline | `82.181 ms` | `72.593 ms` | `-9.588 ms` (`-11.7%`) |
+| padded 4K | Complete encode | `375.950 ms` | `340.628 ms` | `-35.322 ms` (`-9.4%`) |
+| padded 4K | Quantization pipeline | `311.923 ms` | `275.569 ms` | `-36.355 ms` (`-11.7%`) |
+
+All ten paired complete-encode comparisons favored the prototype. Every sample
+preserved the expected encoded size: `410,072` bytes at 1080p and `1,606,911`
+bytes at 4K.
+
+A separate five-sample stage-profile diagnostic reduced
+`frontend.prepare_evaluator` from `21.466` to `14.841 ms` at 1080p and from
+`78.303` to `58.108 ms` at 4K. The Butteraugli-reference GPU work stayed near
+`5.4 ms` and `22 ms`, so the change is removing host allocation/lifetime cost,
+not GPU perceptual work. The larger quantization-pipeline saving also includes
+avoided arena destruction outside the preparation wall stage and must not be
+subtracted mechanically from the stage-profile result.
+
+Three alternating padded-4K `/usr/bin/time -l` pairs showed no peak-RSS
+regression: the median changed from `975.984 MiB` to `973.656 MiB`. This peak
+measurement does not establish the physical footprint of an idle backend that
+retains its last arenas. Before the prototype becomes a landing recommendation,
+measure post-encode idle residency and memory-pressure behavior, and consider
+marking returned Metal buffers purgeable. Only then should the experiment be
+extended to the substantially larger Butteraugli arena.
 
 ### 2. Parallelize coefficient-order zero statistics
 

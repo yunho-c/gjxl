@@ -647,6 +647,17 @@ Status CreateTransformPipeline(
 }  // namespace
 
 namespace metal_internal {
+namespace {
+
+// One idle arena of each class is enough to accelerate sequential encodes
+// without multiplying the retained capacity by the number of concurrent
+// callers. Larger forced-Metal workloads remain supported, but their arenas
+// are released instead of becoming a permanent backend high-water mark.
+constexpr size_t kMaximumRetainedAqScratchArenaBytes =
+  size_t{1024} * 1024 * 1024;
+
+}  // namespace
+
 MetalBackend::MetalBackend(
   NS::SharedPtr<MTL::Device> device,
   NS::SharedPtr<MTL::CommandQueue> command_queue,
@@ -720,6 +731,64 @@ Status MetalBackend::Allocate(
   out->reset(new MetalBuffer(std::move(buffer), id(), size_bytes));
   RecordSuccessfulAllocation();
   return Status::Ok();
+}
+
+Status MetalBackend::AcquireAqScratchArena(
+  MetalAqScratchArena kind,
+  size_t required_capacity_bytes,
+  DeviceScratchArena* arena) {
+
+  const size_t index = static_cast<size_t>(kind);
+  if (arena == nullptr || required_capacity_bytes == 0 ||
+      index >= idle_aq_scratch_.size() || arena->capacity_bytes() != 0) {
+    return Status::InvalidArgument(
+      "Metal AQ scratch lease request is invalid");
+  }
+
+  DeviceScratchArena candidate;
+  {
+    std::lock_guard lock(aq_scratch_pool_mutex_);
+    std::optional<DeviceScratchArena>& idle = idle_aq_scratch_[index];
+    if (idle.has_value()) {
+      candidate = std::move(*idle);
+      idle.reset();
+    }
+  }
+  if (candidate.capacity_bytes() != 0 &&
+      candidate.capacity_bytes() != required_capacity_bytes) {
+    candidate = DeviceScratchArena{};
+  }
+  Status status = candidate.Prepare(*this, required_capacity_bytes);
+  if (!status.ok()) {
+    return status;
+  }
+  *arena = std::move(candidate);
+  return Status::Ok();
+}
+
+void MetalBackend::ReleaseAqScratchArena(
+  MetalAqScratchArena kind,
+  DeviceScratchArena arena,
+  bool reusable) noexcept {
+
+  const size_t index = static_cast<size_t>(kind);
+  if (!reusable || index >= idle_aq_scratch_.size() ||
+      arena.capacity_bytes() == 0 ||
+      arena.capacity_bytes() > kMaximumRetainedAqScratchArenaBytes) {
+    return;
+  }
+  arena.ResetLayout();
+  try {
+    std::lock_guard lock(aq_scratch_pool_mutex_);
+    std::optional<DeviceScratchArena>& idle = idle_aq_scratch_[index];
+    if (!idle.has_value() ||
+        arena.capacity_bytes() < idle->capacity_bytes()) {
+      idle = std::move(arena);
+    }
+  } catch (...) {
+    // Pooling is opportunistic. Destruction must remain noexcept even if the
+    // platform mutex reports an exceptional failure.
+  }
 }
 
 Status MetalBackend::CopyHostToDevice(

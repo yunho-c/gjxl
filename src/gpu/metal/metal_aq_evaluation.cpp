@@ -646,17 +646,25 @@ MetalPreparedAqEvaluation::MetalPreparedAqEvaluation(MetalBackend &backend)
 MetalPreparedAqEvaluation::~MetalPreparedAqEvaluation() {
   std::unique_ptr<GpuSubmission> submission;
   bool *observer = nullptr;
+  bool reusable = false;
   {
     std::lock_guard lock(mutex_);
     submission = std::move(submission_);
     observer = wait_observer_;
+    reusable = scratch_lease_reusable_ && state_ != State::kInvalid;
   }
   if (submission != nullptr) {
-    (void)submission->Wait();
+    if (!submission->Wait().ok()) {
+      reusable = false;
+    }
     if (observer != nullptr) {
       *observer = true;
     }
   }
+  backend_->ReleaseAqScratchArena(
+    MetalAqScratchArena::kPersistent, std::move(persistent_), reusable);
+  backend_->ReleaseAqScratchArena(
+    MetalAqScratchArena::kStaging, std::move(staging_), reusable);
 }
 
 Status MetalPreparedAqEvaluation::Prepare(
@@ -1103,10 +1111,12 @@ Status MetalPreparedAqEvaluation::Prepare(
       return status;
   }
 
-  status = persistent_.Prepare(*backend_, persistent_bytes);
+  status = backend_->AcquireAqScratchArena(
+    MetalAqScratchArena::kPersistent, persistent_bytes, &persistent_);
   if (!status.ok())
     return status;
-  status = staging_.Prepare(*backend_, staging_bytes);
+  status = backend_->AcquireAqScratchArena(
+    MetalAqScratchArena::kStaging, staging_bytes, &staging_);
   if (!status.ok())
     return status;
 
@@ -1637,6 +1647,7 @@ Status MetalPreparedAqEvaluation::Prepare(
         staging_.capacity_bytes(),
         staging_.capacity_bytes(),
     };
+    scratch_lease_reusable_ = true;
     if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
   }
@@ -1683,6 +1694,7 @@ Status MetalPreparedAqEvaluation::Prepare(
       staging_.capacity_bytes() +
           butteraugli_memory.peak_comparison_scratch_bytes,
   };
+  scratch_lease_reusable_ = true;
   if (profiling) *profile = std::move(candidate_profile);
   return Status::Ok();
 }
@@ -4034,6 +4046,7 @@ void MetalPreparedAqEvaluation::Invalidate() {
   std::lock_guard lock(mutex_);
   submission_.reset();
   state_ = State::kInvalid;
+  scratch_lease_reusable_ = false;
 }
 
 void MetalPreparedAqEvaluation::EncodeBlockReduction(

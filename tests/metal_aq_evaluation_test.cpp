@@ -2250,6 +2250,108 @@ bool CheckUploadOrNumericFailure(bool upload) {
   return true;
 }
 
+bool CheckScratchWorkspaceLeases() {
+  Fixture fixture;
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!fixture.Initialize() ||
+      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
+                   "scratch-lease backend")) {
+    return false;
+  }
+
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  const gjxl::GpuBackendStats before_cold = gpu->stats();
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_cold = gpu->stats();
+  if (after_cold.successful_allocations !=
+        before_cold.successful_allocations + 3) {
+    std::cerr << "Cold AQ preparation did not allocate three arenas\n";
+    return false;
+  }
+  EvaluationOutputStorage expected(fixture.strategies.extent());
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), expected.View()),
+                   "cold scratch-lease evaluation")) {
+    return false;
+  }
+  prepared.reset();
+
+  for (HostImage* image : {&fixture.original, &fixture.coding}) {
+    for (std::vector<float>& plane : image->plane) {
+      for (size_t y = 0; y < image->extent.height; ++y) {
+        std::reverse(plane.begin() + y * image->stride,
+                     plane.begin() + y * image->stride +
+                         image->extent.width);
+      }
+    }
+  }
+  std::unique_ptr<gjxl::GpuBackend> oracle_gpu;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> oracle_prepared;
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &oracle_gpu),
+                   "scratch-lease oracle backend") ||
+      !Prepare(*oracle_gpu, fixture.original, fixture.coding,
+               fixture.strategies, &oracle_prepared)) {
+    return false;
+  }
+  EvaluationOutputStorage changed_expected(fixture.strategies.extent());
+  if (!CheckStatus(
+        oracle_prepared->Evaluate(fixture.input.View(),
+                                  changed_expected.View()),
+        "scratch-lease changed-image oracle") ||
+      CompareOutputs(expected, changed_expected)) {
+    std::cerr << "Changed AQ preparation did not produce a distinct oracle\n";
+    return false;
+  }
+
+  const gjxl::GpuBackendStats before_reuse = gpu->stats();
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_reuse = gpu->stats();
+  if (after_reuse.successful_allocations !=
+        before_reuse.successful_allocations + 1) {
+    std::cerr << "Warm AQ preparation did not reuse both scratch arenas\n";
+    return false;
+  }
+  EvaluationOutputStorage reused(fixture.strategies.extent());
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), reused.View()),
+                   "reused scratch-lease evaluation") ||
+      !CompareOutputs(changed_expected, reused) ||
+      !CheckStatus(
+        gjxl::metal_internal::FailNextMetalAqUploadForTesting(*prepared),
+        "scratch-lease poison injection")) {
+    return false;
+  }
+  EvaluationOutputStorage failed(fixture.strategies.extent());
+  if (!ExpectCode(prepared->Evaluate(fixture.input.View(), failed.View()),
+                  gjxl::StatusCode::kDeviceError,
+                  "scratch-lease poisoned evaluation") ||
+      !failed.Poisoned()) {
+    return false;
+  }
+  prepared.reset();
+
+  const gjxl::GpuBackendStats before_recovery = gpu->stats();
+  if (!Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
+               &prepared)) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_recovery = gpu->stats();
+  if (after_recovery.successful_allocations !=
+        before_recovery.successful_allocations + 3) {
+    std::cerr << "Poisoned AQ scratch arenas were reused\n";
+    return false;
+  }
+  EvaluationOutputStorage recovered(fixture.strategies.extent());
+  return CheckStatus(
+           prepared->Evaluate(fixture.input.View(), recovered.View()),
+           "scratch-lease recovery evaluation") &&
+         CompareOutputs(changed_expected, recovered);
+}
+
 bool CheckIndependentConcurrency(gjxl::GpuBackend& gpu) {
   Fixture fixture;
   std::unique_ptr<gjxl::PreparedAqEvaluation> first;
@@ -2467,6 +2569,7 @@ int main() {
       !CheckUploadOrNumericFailure(false) ||
       !CheckFailure(gjxl::StatusCode::kDeviceError, false, false, true) ||
       !CheckFinalReadbackFailure() ||
+      !CheckScratchWorkspaceLeases() ||
       !CheckIndependentConcurrency(*gpu)) {
     return EXIT_FAILURE;
   }
