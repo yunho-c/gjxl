@@ -16,7 +16,11 @@
 #include "codec/ac_strategy.h"
 #include "codec/quantization.h"
 #include "gpu/backend.h"
+#ifdef GJXL_TEST_CUDA
+#include "gpu/cuda/cuda_backend.h"
+#else
 #include "gpu/metal/metal_backend.h"
+#endif
 #include "gpu/ops/ac_strategy.h"
 
 namespace {
@@ -112,7 +116,11 @@ bool CheckStatus(
 class BackendWithoutAc final : public gjxl::GpuBackend {
 public:
   [[nodiscard]] gjxl::BackendKind kind() const noexcept override {
+#ifdef GJXL_TEST_CUDA
+    return gjxl::BackendKind::kCuda;
+#else
     return gjxl::BackendKind::kMetal;
+#endif
   }
 
   [[nodiscard]] std::string_view name() const noexcept override {
@@ -505,6 +513,7 @@ bool RunStrategyCase(
   return true;
 }
 
+#ifndef GJXL_TEST_CUDA
 gjxl::MetalBackendOptions OptionsFor(
   gjxl::MetalDctImplementation implementation) {
 
@@ -547,6 +556,22 @@ bool CheckImplementation(
   }
   return true;
 }
+#else
+bool CheckImplementation(
+  std::string_view name,
+  const Fixture& fixture) {
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  if (!CheckStatus(
+        gjxl::CreateCudaBackend(&gpu),
+        std::string("Create ") + std::string(name) + " backend")) {
+    return false;
+  }
+  for (const gjxl::AcStrategyType strategy : kStrategies) {
+    if (!RunStrategyCase(*gpu, name, strategy, fixture)) return false;
+  }
+  return true;
+}
+#endif
 
 bool CheckValidation() {
   BackendWithoutAc without_ac;
@@ -566,9 +591,15 @@ bool CheckValidation() {
   }
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
+#ifdef GJXL_TEST_CUDA
+  if (!CheckStatus(
+        gjxl::CreateCudaBackend(&gpu),
+        "Create validation backend")) {
+#else
   if (!CheckStatus(
         gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
         "Create validation backend")) {
+#endif
     return false;
   }
 
@@ -591,7 +622,22 @@ bool CheckValidation() {
 }  // namespace
 
 int main() {
+#ifdef GJXL_TEST_CUDA
+  std::unique_ptr<gjxl::GpuBackend> probe;
+  const gjxl::Status create = gjxl::CreateCudaBackend(&probe);
+  if (!create.ok()) {
+    std::cerr << "CUDA backend unavailable: " << create.message() << '\n';
+    return 77;
+  }
+#endif
   const Fixture fixture;
+#ifdef GJXL_TEST_CUDA
+  if (!CheckValidation() ||
+      !CheckImplementation("CUDA", fixture)) {
+    return EXIT_FAILURE;
+  }
+  std::cout << "All CUDA AC-strategy candidate tests passed.\n";
+#else
   if (!CheckValidation() ||
       !CheckImplementation(
         gjxl::MetalDctImplementation::kScalarMatmul,
@@ -609,5 +655,6 @@ int main() {
   }
 
   std::cout << "All Metal AC-strategy candidate tests passed.\n";
+#endif
   return EXIT_SUCCESS;
 }

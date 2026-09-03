@@ -6,6 +6,7 @@
 #include <cuda_runtime_api.h>
 
 #include <atomic>
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <mutex>
@@ -17,7 +18,9 @@
 #include "gpu/backend.h"
 #include "gpu/image.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/primitives.h"
+#include "gpu/cuda/cuda_kernels.h"
 
 namespace gjxl::cuda_internal {
 
@@ -50,6 +53,7 @@ struct CudaDeviceState {
   int ordinal = 0;
   cudaStream_t stream = nullptr;
   size_t maximum_grid_x = 0;
+  size_t maximum_threads_per_block = 0;
   std::mutex submission_mutex;
 
   ~CudaDeviceState();
@@ -97,6 +101,7 @@ class CudaPreparedAqEvaluation;
 
 class CudaBackend final : public GpuBackend,
                           public GpuImagePrimitives,
+                          public GpuAcStrategyEvaluation,
                           public GpuAqEvaluation {
 public:
   using EncodeCallback = cudaError_t (*)(CudaBackend&, const void*);
@@ -133,6 +138,9 @@ public:
   Status SubmitImagePrimitiveSequence(
     std::span<const ImagePrimitiveCommand> commands,
     std::unique_ptr<GpuSubmission>* submission) override;
+  Status EvaluateAcStrategyCandidateBatches(
+    std::span<const AcStrategyCandidateBatch> batches,
+    std::unique_ptr<GpuSubmission>* submission) override;
   Status PrepareAqEvaluation(
     const AqEvaluationPreparation& preparation,
     std::unique_ptr<PreparedAqEvaluation>* prepared) override;
@@ -165,12 +173,35 @@ private:
     unsigned int height = 0;
   };
 
+  struct ValidatedAcStrategyBatch {
+    AcStrategyType strategy = AcStrategyType::kCount;
+    std::array<const float*, 3> opsin{};
+    const float* pixel_mask = nullptr;
+    const float* quant_field = nullptr;
+    const float* matrices = nullptr;
+    const void* candidates = nullptr;
+    float* scratch_a = nullptr;
+    float* scratch_b = nullptr;
+    void* rate_scratch = nullptr;
+    float* costs = nullptr;
+    CudaAcStrategyBatchParams params{};
+  };
+
+  struct AcStrategyEncodeContext {
+    std::span<const ValidatedAcStrategyBatch> batches;
+  };
+
   [[nodiscard]] static CudaBuffer* AsCudaBuffer(DeviceBuffer& buffer);
   [[nodiscard]] static const CudaBuffer* AsCudaBuffer(
     const DeviceBuffer& buffer);
   [[nodiscard]] static bool IsSupportedDct(
     AcStrategyType strategy) noexcept;
   [[nodiscard]] static cudaError_t EncodeTransform(
+    CudaBackend& backend,
+    const void* context);
+  [[nodiscard]] static bool IsSupportedAcStrategy(
+    AcStrategyType strategy) noexcept;
+  [[nodiscard]] static cudaError_t EncodeAcStrategySubmission(
     CudaBackend& backend,
     const void* context);
 
@@ -182,6 +213,19 @@ private:
     bool forward,
     const TransformBatch& batch,
     std::unique_ptr<GpuSubmission>* submission);
+  Status ValidateAcStrategyCandidateBatch(
+    const AcStrategyCandidateBatch& batch,
+    ValidatedAcStrategyBatch* out) const;
+  Status RequireCudaBuffer(
+    const DeviceBuffer* buffer,
+    size_t required_bytes,
+    std::string_view role,
+    const CudaBuffer** out) const;
+  Status RequireCudaBuffer(
+    DeviceBuffer* buffer,
+    size_t required_bytes,
+    std::string_view role,
+    CudaBuffer** out) const;
 
   Status ResolvePlane(
     ConstDevicePlaneView view,

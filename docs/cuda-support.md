@@ -14,6 +14,9 @@ Implementation progress as of this revision:
 - all nine VarDCT transform shapes and the shared affine, convolution,
   symmetric-convolution, and maximum-reduction primitives pass real-device
   conformance on compute capability 8.6;
+- all seven production AC-strategy candidate paths run on CUDA, support both
+  packed and checked resident inputs, retain CPU-owned traversal and merging,
+  and match CPU cost estimates within the existing Metal test tolerance;
 - forced `maximum-throughput` encoding now keeps initial quantization,
   inverse Gaborish, initial CfL, DCT8 coefficient decisions, and quantized
   frame state on CUDA. Its odd-size/padded conformance fixture matches CPU
@@ -530,6 +533,13 @@ Port and validate:
 
 Exit criterion: the exact track preserves CPU raw quantization, encoder frame,
 codestream bytes, control outcome, and existing numerical tolerances.
+
+Current progress: all production transform shapes and AC-strategy candidate
+evaluation are implemented. The CUDA evaluator validates a complete batch
+sequence before submitting work, returns NaN for invalid device-resident
+candidate descriptors, supports resident quant-field aggregation, and reuses
+caller-owned scratch without allocations. Reconstruction, postprocessing, and
+the Butteraugli tail remain.
 
 ### Phase 4: fully resident AQ
 

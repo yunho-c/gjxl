@@ -487,6 +487,8 @@ Status CreateCudaBackend(
     state->ordinal = options.device_ordinal;
     state->stream = stream;
     state->maximum_grid_x = static_cast<size_t>(properties.maxGridSize[0]);
+    state->maximum_threads_per_block =
+      static_cast<size_t>(properties.maxThreadsPerBlock);
     std::string name = "CUDA";
     if (properties.name[0] != '\0') {
       name += ": ";

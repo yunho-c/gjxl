@@ -564,6 +564,8 @@ if(GJXL_ENABLE_CUDA)
     STATIC
 
     src/gpu/cuda/cuda_backend.cpp
+    src/gpu/cuda/cuda_ac_strategy.cpp
+    src/gpu/cuda/cuda_ac_strategy_kernels.cu
     src/gpu/cuda/cuda_aq.cpp
     src/gpu/cuda/cuda_aq_kernels.cu
     src/gpu/cuda/cuda_kernels.cu
@@ -2259,6 +2261,30 @@ if(GJXL_BUILD_TESTS)
       COMMAND gjxl_cuda_aq_test
     )
     set_tests_properties(cuda_aq PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(
+      gjxl_ac_strategy_cuda_test
+      tests/ac_strategy_metal_test.cpp
+    )
+
+    target_compile_definitions(
+      gjxl_ac_strategy_cuda_test
+      PRIVATE
+        GJXL_TEST_CUDA=1
+    )
+
+    target_link_libraries(
+      gjxl_ac_strategy_cuda_test
+      PRIVATE
+        gjxl_codec
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_ac_strategy
+      COMMAND gjxl_ac_strategy_cuda_test
+    )
+    set_tests_properties(cuda_ac_strategy PROPERTIES SKIP_RETURN_CODE 77)
   endif()
 
   if(GJXL_ENABLE_METAL)
