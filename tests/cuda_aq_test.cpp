@@ -99,6 +99,347 @@ double MaximumError(
   return result;
 }
 
+bool MakeExactStrategies(gjxl::AcStrategyGrid* strategies) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  if (!Check(gjxl::AcStrategyGrid::Create(blocks, strategies),
+             "Create CUDA exact strategy grid") ||
+      !Check(strategies->Set(0, 0, gjxl::AcStrategyType::kDct16x16),
+             "Place CUDA exact DCT16x16") ||
+      !Check(strategies->Set(2, 1, gjxl::AcStrategyType::kDct16x8),
+             "Place CUDA exact DCT16x8") ||
+      !Check(strategies->Set(2, 0, gjxl::AcStrategyType::kDct8x16),
+             "Place CUDA exact DCT8x16") ||
+      !Check(strategies->Set(4, 0, gjxl::AcStrategyType::kDct16x32),
+             "Place CUDA exact DCT16x32")) {
+    return false;
+  }
+  strategies->fill_empty_dct8();
+  return strategies->complete();
+}
+
+bool CheckExactWorkflow(gjxl::GpuBackend& gpu, const ImageStorage& source,
+                        const ImageStorage& opsin) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  const size_t block_count = blocks.width * blocks.height;
+  gjxl::AcStrategyGrid strategies;
+  std::vector<uint8_t> sharpness(block_count);
+  std::vector<float> initial(block_count);
+  if (!MakeExactStrategies(&strategies) ||
+      !Check(gjxl::FillDefaultEpfSharpness(
+                 {sharpness.data(), blocks, blocks.width}),
+             "Fill CUDA exact sharpness")) {
+    return false;
+  }
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      initial[y * blocks.width + x] =
+          0.72f + 0.017f * static_cast<float>((5 * x + 3 * y) % 19);
+    }
+  }
+
+  gjxl::AdaptiveQuantizationOptions options;
+  options.butteraugli_target = 1.15f;
+  options.iterations = 1;
+  options.fast_color_correlation = false;
+  options.profile.x_qm_scale = 3;
+  options.profile.b_qm_scale = 1;
+  options.profile.loop_filter.gaborish_options.weight1 =
+      {0.071f, 0.093f, 0.057f};
+  options.profile.loop_filter.gaborish_options.weight2 =
+      {0.039f, 0.027f, 0.045f};
+  options.profile.loop_filter.epf_options.iterations = 3;
+  options.profile.loop_filter.epf_options.channel_scale =
+      {31.0f, 7.0f, 4.25f};
+  options.profile.loop_filter.epf_options.pass0_sigma_scale = 1.17f;
+  options.profile.loop_filter.epf_options.pass2_sigma_scale = 4.75f;
+  options.profile.loop_filter.epf_options.border_sad_multiplier = 0.81f;
+  options.butteraugli = {0.91f, 1.07f, 80.0f};
+
+  std::vector<float> cpu_quant(block_count);
+  std::vector<float> cpu_block(block_count);
+  std::vector<double> cpu_scores;
+  ImageStorage cpu_reconstruction(kSourceExtent);
+  gjxl::VarDctEncoderFrame cpu_frame;
+  gjxl::MaximumErrorResult cpu_maximum;
+  if (!Check(gjxl::FindBestQuantization(
+                 source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 {.quant_field = {cpu_quant.data(), blocks, blocks.width},
+                  .block_distance_map =
+                      {cpu_block.data(), blocks, blocks.width},
+                  .reconstructed_linear_rgb = cpu_reconstruction.View(),
+                  .frame = &cpu_frame,
+                  .score_history = &cpu_scores,
+                  .maximum_error_result = &cpu_maximum}),
+             "CPU exact AQ oracle")) {
+    return false;
+  }
+
+  constexpr float kPoison = -9876.0f;
+  const size_t output_stride = blocks.width + 5;
+  std::vector<float> cuda_quant(output_stride * blocks.height, kPoison);
+  std::vector<float> cuda_block(output_stride * blocks.height, kPoison);
+  std::vector<double> cuda_scores;
+  ImageStorage cuda_reconstruction(kSourceExtent, kPoison);
+  gjxl::VarDctEncoderFrame cuda_frame;
+  gjxl::MaximumErrorResult cuda_maximum;
+  const gjxl::GpuBackendStats before = gpu.stats();
+  if (!Check(gjxl::RunGpuAdaptiveQuantization(
+                 gpu, source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                 {.quant_field = {cuda_quant.data(), blocks, output_stride},
+                  .block_distance_map =
+                      {cuda_block.data(), blocks, output_stride},
+                  .reconstructed_linear_rgb = cuda_reconstruction.View(),
+                  .frame = &cuda_frame,
+                  .score_history = &cuda_scores,
+                  .maximum_error_result = &cuda_maximum}),
+             "CUDA exact AQ workflow")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after = gpu.stats();
+  const size_t evaluation_count = options.iterations + 1;
+  if (after.successful_allocations != before.successful_allocations + 3 ||
+      after.committed_submissions !=
+          before.committed_submissions + 1 + 3 * evaluation_count) {
+    std::cerr << "CUDA exact AQ resource accounting differs\n";
+    return false;
+  }
+
+  double quant_error = 0.0;
+  double block_error = 0.0;
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      quant_error = std::max(
+          quant_error,
+          std::abs(static_cast<double>(cpu_quant[y * blocks.width + x]) -
+                   cuda_quant[y * output_stride + x]));
+      block_error = std::max(
+          block_error,
+          std::abs(static_cast<double>(cpu_block[y * blocks.width + x]) -
+                   cuda_block[y * output_stride + x]));
+    }
+    for (size_t x = blocks.width; x < output_stride; ++x) {
+      if (cuda_quant[y * output_stride + x] != kPoison ||
+          cuda_block[y * output_stride + x] != kPoison) {
+        std::cerr << "CUDA exact AQ changed host row padding\n";
+        return false;
+      }
+    }
+  }
+  double score_error = 0.0;
+  if (cpu_scores.size() != cuda_scores.size()) return false;
+  for (size_t i = 0; i < cpu_scores.size(); ++i) {
+    score_error = std::max(score_error,
+                           std::abs(cpu_scores[i] - cuda_scores[i]));
+  }
+  double image_error = 0.0;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < kSourceExtent.height; ++y) {
+      for (size_t x = 0; x < kSourceExtent.width; ++x) {
+        image_error = std::max(
+            image_error,
+            std::abs(static_cast<double>(
+                         cpu_reconstruction.plane[channel]
+                                           [y * cpu_reconstruction.stride + x]) -
+                     cuda_reconstruction.plane[channel]
+                                                [y * cuda_reconstruction.stride +
+                                                 x]));
+      }
+    }
+  }
+  if (!cpu_frame.valid() || !cuda_frame.valid() || quant_error > 2.0e-3 ||
+      block_error > 2.0e-3 || score_error > 2.0e-3 ||
+      image_error > 2.0e-3) {
+    std::cerr << "CUDA exact AQ differs: quant=" << quant_error
+              << " block=" << block_error << " score=" << score_error
+              << " image=" << image_error << '\n';
+    return false;
+  }
+
+  std::vector<float> inverse_sigma(block_count);
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!Check(gjxl::ComputeEpfInverseSigma(
+                 strategies, cpu_frame.raw_quant_field(),
+                 cpu_frame.quantizer(),
+                 {sharpness.data(), blocks, blocks.width},
+                 options.profile.epf_sigma,
+                 {inverse_sigma.data(), blocks, blocks.width}),
+             "Prepare CUDA exact failure EPF") ||
+      !Check(gjxl::PrepareAqEvaluation(
+                 gpu,
+                 {.original_linear_rgb = source.View(),
+                  .coding_opsin = opsin.View(),
+                  .strategies = &strategies,
+                  .epf_sharpness =
+                      {sharpness.data(), blocks, blocks.width},
+                  .options = {options.profile, options.butteraugli},
+                  .coefficient_decision_mode =
+                      gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant},
+                 &prepared),
+             "Prepare CUDA exact failure operation")) {
+    return false;
+  }
+  std::vector<float> failed_map(block_count, kPoison);
+  double failed_score = -1234.0;
+  const gjxl::AqEvaluationInput failed_input{
+      .raw_quant_field = cpu_frame.raw_quant_field(),
+      .quantizer = cpu_frame.quantizer().params(),
+      .y_to_x = cpu_frame.color_correlation().y_to_x_map(),
+      .y_to_b = cpu_frame.color_correlation().y_to_b_map(),
+      .epf_inverse_sigma =
+          {inverse_sigma.data(), blocks, blocks.width},
+      .exact_coefficients = &cpu_frame,
+  };
+  const gjxl::AqEvaluationOutput failed_output{
+      .block_distance_map =
+          {failed_map.data(), blocks, blocks.width},
+      .score = &failed_score,
+  };
+  if (!Check(gjxl::ArmNextCudaSubmissionFailureForTest(gpu, false, true),
+             "Arm CUDA exact completion failure")) {
+    return false;
+  }
+  const gjxl::Status failed = prepared->Evaluate(failed_input, failed_output);
+  const uint64_t failed_submissions = gpu.stats().committed_submissions;
+  const gjxl::Status invalidated =
+      prepared->Evaluate(failed_input, failed_output);
+  if (failed.ok() ||
+      invalidated.code() != gjxl::StatusCode::kFailedPrecondition ||
+      gpu.stats().committed_submissions != failed_submissions ||
+      failed_score != -1234.0 ||
+      !std::ranges::all_of(failed_map,
+                           [](float value) { return value == kPoison; })) {
+    std::cerr << "CUDA exact completion failure was not atomic\n";
+    return false;
+  }
+  return true;
+}
+
+bool CheckExactMaximumError(gjxl::GpuBackend& gpu,
+                            const ImageStorage& source,
+                            const ImageStorage& opsin) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  const size_t block_count = blocks.width * blocks.height;
+  gjxl::AcStrategyGrid strategies;
+  std::vector<uint8_t> sharpness(block_count);
+  std::vector<float> initial(block_count, 0.9f);
+  if (!MakeExactStrategies(&strategies) ||
+      !Check(gjxl::FillDefaultEpfSharpness(
+                 {sharpness.data(), blocks, blocks.width}),
+             "Fill CUDA maximum-error sharpness")) {
+    return false;
+  }
+  gjxl::AdaptiveQuantizationOptions options;
+  options.control_mode =
+      gjxl::AdaptiveQuantizationControlMode::kMaximumError;
+  options.maximum_error = {0.035f, 0.05f, 0.065f};
+  options.fast_color_correlation = false;
+
+  struct Result {
+    explicit Result(size_t count)
+        : quant(count), block(count), reconstruction(kSourceExtent) {}
+    std::vector<float> quant;
+    std::vector<float> block;
+    ImageStorage reconstruction;
+    gjxl::VarDctEncoderFrame frame;
+    std::vector<double> scores;
+    gjxl::MaximumErrorResult maximum;
+  };
+  Result cpu(block_count);
+  Result cuda(block_count);
+  const auto output = [&](Result& result) {
+    return gjxl::AdaptiveQuantizationOutput{
+        .quant_field = {result.quant.data(), blocks, blocks.width},
+        .block_distance_map = {result.block.data(), blocks, blocks.width},
+        .reconstructed_linear_rgb = result.reconstruction.View(),
+        .frame = &result.frame,
+        .score_history = &result.scores,
+        .maximum_error_result = &result.maximum,
+    };
+  };
+  if (!Check(gjxl::FindBestQuantization(
+                 source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 output(cpu)),
+             "CPU maximum-error AQ oracle")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats before = gpu.stats();
+  if (!Check(gjxl::RunGpuAdaptiveQuantization(
+                 gpu, source.View(), opsin.View(), strategies,
+                 {initial.data(), blocks, blocks.width},
+                 {sharpness.data(), blocks, blocks.width}, options,
+                 gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                 output(cuda)),
+             "CUDA exact maximum-error AQ")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after = gpu.stats();
+  if (after.successful_allocations != before.successful_allocations + 2 ||
+      after.committed_submissions !=
+          before.committed_submissions + cuda.maximum.evaluation_count ||
+      cpu.maximum.evaluation_count != cuda.maximum.evaluation_count ||
+      cpu.maximum.outcome != cuda.maximum.outcome ||
+      cpu.scores.size() != cuda.scores.size()) {
+    std::cerr << "CUDA maximum-error resource or policy result differs\n";
+    return false;
+  }
+
+  double difference =
+      std::abs(static_cast<double>(cpu.maximum.normalized_maximum) -
+               cuda.maximum.normalized_maximum);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    difference = std::max(
+        difference,
+        std::abs(static_cast<double>(cpu.maximum.achieved[channel]) -
+                 cuda.maximum.achieved[channel]));
+    for (size_t y = 0; y < kSourceExtent.height; ++y) {
+      for (size_t x = 0; x < kSourceExtent.width; ++x) {
+        difference = std::max(
+            difference,
+            std::abs(static_cast<double>(
+                         cpu.reconstruction.plane[channel]
+                                                 [y * cpu.reconstruction.stride +
+                                                  x]) -
+                     cuda.reconstruction.plane[channel]
+                                                  [y * cuda.reconstruction.stride +
+                                                   x]));
+      }
+    }
+  }
+  for (size_t index = 0; index < block_count; ++index) {
+    difference = std::max(
+        difference,
+        std::abs(static_cast<double>(cpu.quant[index]) - cuda.quant[index]));
+    difference = std::max(
+        difference,
+        std::abs(static_cast<double>(cpu.block[index]) - cuda.block[index]));
+  }
+  for (size_t index = 0; index < cpu.scores.size(); ++index) {
+    difference =
+        std::max(difference, std::abs(cpu.scores[index] - cuda.scores[index]));
+  }
+  std::vector<uint8_t> cpu_bytes;
+  std::vector<uint8_t> cuda_bytes;
+  if (!Check(gjxl::EncodeVarDctCodestream(cpu.frame, &cpu_bytes),
+             "Encode CPU maximum-error frame") ||
+      !Check(gjxl::EncodeVarDctCodestream(cuda.frame, &cuda_bytes),
+             "Encode CUDA maximum-error frame") ||
+      cpu_bytes != cuda_bytes || difference > 2.0e-4) {
+    std::cerr << "CUDA exact maximum-error differs by " << difference << '\n';
+    return false;
+  }
+  return true;
+}
+
 bool CheckResidentFrontend(gjxl::GpuBackend& gpu, const ImageStorage& source,
                            const ImageStorage& opsin) {
   const gjxl::Extent2D blocks{kPaddedExtent.width / 8, kPaddedExtent.height / 8};
@@ -351,11 +692,13 @@ int main() {
   if (!Check(gjxl::LinearRgbToOpsin(
              std::as_const(padded).View(), 255.0f, opsin.View()),
              "Prepare CUDA AQ opsin") ||
+      !CheckExactWorkflow(*gpu, source, opsin) ||
+      !CheckExactMaximumError(*gpu, source, opsin) ||
       !CheckResidentFrontend(*gpu, source, opsin) ||
       !CheckPreparedReuseAndFailure(*gpu, source, opsin) ||
       !CheckPublicWorkflow(*gpu, source)) {
     return EXIT_FAILURE;
   }
-  std::cout << "CUDA maximum-throughput AQ matches CPU and is reusable.\n";
+  std::cout << "CUDA exact and maximum-throughput AQ match CPU.\n";
   return EXIT_SUCCESS;
 }

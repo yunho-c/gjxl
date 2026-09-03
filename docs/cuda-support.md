@@ -31,6 +31,16 @@ Implementation progress as of this revision:
   the CPU oracle on expanded, single-scale, multiscale, strided, identity,
   and non-default-option fixtures (worst observed absolute error
   `2.06e-5` on compute capability 8.6);
+- exact-coefficient adaptive quantization now keeps CPU coefficient decisions
+  authoritative and hands grouped, dequantized coefficients to CUDA at the
+  inverse-transform boundary. CUDA owns mixed-strategy reconstruction, pixel
+  scatter, Gaborish, all three EPF pass variants, opsin-to-linear conversion,
+  Butteraugli block reduction, and normalized maximum-error reduction;
+- the exact evaluator uses separate persistent and staging arenas, performs no
+  steady-state device allocations, preserves final CPU frame/codestream bytes,
+  supports odd padded source geometry and strategy reconfiguration, and
+  invalidates atomically after submission, completion, numeric, or readback
+  failure; and
 - public C++, C, Rust, CLI, package-export, and diagnostic vocabulary now
   includes CUDA without changing existing C enum values; and
 - automatic selection deliberately remains Metal-only until CUDA passes the
@@ -541,17 +551,25 @@ Port and validate:
 Exit criterion: the exact track preserves CPU raw quantization, encoder frame,
 codestream bytes, control outcome, and existing numerical tolerances.
 
-Current progress: all production transform shapes, AC-strategy candidate
-evaluation, and prepared Butteraugli are implemented. The CUDA evaluator
-validates a complete batch sequence before submitting work, returns NaN for
-invalid device-resident candidate descriptors, supports resident quant-field
-aggregation, and reuses caller-owned scratch without allocations. CUDA
-Butteraugli caches the reference psychoacoustic representation, handles the
-codec's small-image expansion and two-scale composition rules, propagates
-invalid values through its final reduction, and invalidates prepared state on
-operational failure. Inverse reconstruction, loop-filter postprocessing,
-opsin-to-linear conversion, and maximum-error reduction still need to be wired
-into the exact workflow.
+Current progress: this phase is implemented for the forced exact track. The
+CUDA evaluator validates and groups all seven production strategies, stages
+the CPU frame's quantized AC and DC/LLF decisions into dequantized transform
+batches, applies final CfL before upload, and starts device work at inverse
+DCT. Reconstruction, scatter, Gaborish, EPF passes 0/1/2, opsin-to-linear,
+prepared Butteraugli, 16-norm block feedback, and normalized maximum-error
+feedback then remain on CUDA. An optional exact-linear handoff can skip the
+reconstruction tail for Butteraugli-only callers.
+
+Real-device differential coverage uses mixed transforms, an odd 257x17 source
+padded to 264x24, non-default Gaborish/EPF/Butteraugli parameters, strided and
+poisoned host outputs, both adaptive-quantization control modes, and injected
+completion failure. The exact Butteraugli workflow stays within the existing
+`2e-3` numerical contract (observed errors were below `3e-5` in block feedback
+and below `4e-6` in reconstructed RGB on compute capability 8.6). The
+maximum-error track stays within `2e-4`, preserves the CPU policy outcome, and
+emits byte-identical final codestreams. Compute Sanitizer reports zero memory
+errors. Broader resolution/corpus and independent-decoder gates remain part of
+production qualification rather than functional exact-mode implementation.
 
 ### Phase 4: fully resident AQ
 

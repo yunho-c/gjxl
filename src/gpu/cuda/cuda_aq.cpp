@@ -671,6 +671,9 @@ Status CudaBackend::PrepareAqEvaluation(
     return Status::InvalidArgument("CUDA prepared AQ output pointer is null");
   }
   prepared->reset();
+  if (!preparation.frame_only) {
+    return PrepareCudaExactAqEvaluation(*this, preparation, prepared);
+  }
   try {
     auto result = std::make_unique<CudaPreparedAqEvaluation>(*this);
     Status status = result->Prepare(preparation);

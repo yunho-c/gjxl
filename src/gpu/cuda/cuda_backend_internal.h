@@ -99,6 +99,7 @@ private:
 };
 
 class CudaPreparedAqEvaluation;
+class CudaPreparedExactAqEvaluation;
 class CudaPreparedDeviceButteraugli;
 
 class CudaBackend final : public GpuBackend,
@@ -158,6 +159,7 @@ public:
 
 private:
   friend class CudaPreparedAqEvaluation;
+  friend class CudaPreparedExactAqEvaluation;
   friend class CudaPreparedDeviceButteraugli;
 
   struct ResolvedConstPlane {
@@ -272,5 +274,10 @@ private:
   std::atomic<bool> fail_next_submission_{false};
   std::atomic<bool> fail_next_completion_{false};
 };
+
+[[nodiscard]] Status PrepareCudaExactAqEvaluation(
+  CudaBackend& backend,
+  const AqEvaluationPreparation& preparation,
+  std::unique_ptr<PreparedAqEvaluation>* prepared);
 
 }  // namespace gjxl::cuda_internal
