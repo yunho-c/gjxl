@@ -273,6 +273,15 @@ public:
     size_t size_bytes,
     size_t src_offset_bytes) override;
 
+  /// Borrows completed shared-buffer storage for synchronous host reads.
+  /// The caller must wait for every GPU command that can write the range and
+  /// must not retain the span beyond the buffer's lifetime.
+  Status BorrowCompletedReadOnly(
+    const DeviceBuffer& src,
+    size_t size_bytes,
+    size_t src_offset_bytes,
+    std::span<const std::byte>* out) const;
+
   Status ForwardTransform(
     const TransformBatch& batch,
     std::unique_ptr<GpuSubmission>* submission) override;

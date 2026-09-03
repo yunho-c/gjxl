@@ -839,6 +839,7 @@ bool CheckDefaultUpdatePipelineParity() {
       exact_encoding_readback.score_history_bytes != sizeof(float) ||
       exact_encoding_readback.block_distance_map_bytes == 0 ||
       exact_encoding_readback.frame_bytes != 0 ||
+      exact_encoding_readback.mapped_frame_bytes != 0 ||
       exact_encoding_readback.reconstructed_rgb_bytes != 0) {
     std::cerr << "Encoding-only exact pipeline changed output or read "
                  "diagnostics: " << exact_encoding_status.message() << '\n';
@@ -909,6 +910,7 @@ bool CheckDefaultUpdatePipelineParity() {
       maximum_encoding_readback.maximum_error_bytes == 0 ||
       maximum_encoding_readback.block_distance_map_bytes == 0 ||
       maximum_encoding_readback.frame_bytes != 0 ||
+      maximum_encoding_readback.mapped_frame_bytes != 0 ||
       maximum_encoding_readback.reconstructed_rgb_bytes != 0) {
     std::cerr << "Encoding-only maximum-error pipeline changed output or "
                  "read diagnostics: " << maximum_error_status.message()

@@ -254,6 +254,25 @@ bool VarDctEncoderFrame::valid() const {
 namespace vardct_frame_internal {
 namespace {
 
+bool CopyQuantizedCoefficients(
+  std::span<const int32_t> source,
+  bool reject_unwritten,
+  int32_t* destination) {
+
+  if (!reject_unwritten) {
+    std::copy(source.begin(), source.end(), destination);
+    return true;
+  }
+  uint32_t found_unwritten = 0;
+  for (size_t index = 0; index < source.size(); ++index) {
+    const int32_t value = source[index];
+    destination[index] = value;
+    found_unwritten |= static_cast<uint32_t>(
+      value == kUnwrittenQuantizedCoefficient);
+  }
+  return found_unwritten == 0;
+}
+
 Status ValidateAssemblyInput(
   const QuantizedFrameAssemblyInput& input,
   size_t* block_count,
@@ -265,9 +284,9 @@ Status ValidateAssemblyInput(
       !input.strategies->complete() || !input.raw_quant_field.valid() ||
       input.quantizer == nullptr || !input.quantizer->valid() ||
       !input.y_to_x.valid() || !input.y_to_b.valid() ||
-      !input.epf_sharpness.valid() ||
+      !input.epf_sharpness.valid() || input.quantized_ac.empty() ||
       !input.quantized_dc.valid() || !input.profile.valid() ||
-      input.geometry.frame().empty()) {
+      !ValidGeometry(input.geometry)) {
     return Status::InvalidArgument(
       "Quantized VarDCT frame assembly input is invalid");
   }
@@ -359,16 +378,26 @@ Status AssembleVarDctEncoderFrame(
 
     const Extent2D blocks = input.strategies->extent();
     for (size_t y = 0; y < blocks.height; ++y) {
-      std::copy_n(
-        input.raw_quant_field.Row(y), blocks.width,
-        result.raw_quant_field_.data() + y * blocks.width);
-      std::copy_n(
-        input.epf_sharpness.Row(y), blocks.width,
-        result.epf_sharpness_.data() + y * blocks.width);
+      for (size_t x = 0; x < blocks.width; ++x) {
+        const size_t index = y * blocks.width + x;
+        const int32_t raw_quant = input.raw_quant_field.Row(y)[x];
+        const uint8_t epf_sharpness = input.epf_sharpness.Row(y)[x];
+        if (raw_quant < 1 || raw_quant > kMaxRawQuant ||
+            epf_sharpness >= 8) {
+          return Status::InvalidArgument(
+            "Quantized VarDCT raw quantization or EPF sharpness is invalid");
+        }
+        result.raw_quant_field_[index] = raw_quant;
+        result.epf_sharpness_[index] = epf_sharpness;
+      }
       for (size_t channel = 0; channel < 3; ++channel) {
-        std::copy_n(
-          input.quantized_dc.plane[channel].Row(y), blocks.width,
-          result.quantized_dc_[channel].data() + y * blocks.width);
+        if (!CopyQuantizedCoefficients(
+              {input.quantized_dc.plane[channel].Row(y), blocks.width},
+              input.reject_unwritten_coefficients,
+              result.quantized_dc_[channel].data() + y * blocks.width)) {
+          return Status::InvalidArgument(
+            "Quantized VarDCT DC coefficients contain unwritten values");
+        }
       }
     }
 
@@ -397,7 +426,7 @@ Status AssembleVarDctEncoderFrame(
           return Status::Internal(
             "Quantized VarDCT transform list ended early");
         }
-        const QuantizedAcTransformView& transform =
+        const QuantizedAcTransformLayout& transform =
           input.transforms[transform_index++];
         const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
         if (info == nullptr || !SupportsCpuDct(strategy) ||
@@ -408,10 +437,15 @@ Status AssembleVarDctEncoderFrame(
             "Quantized VarDCT transform metadata does not match strategies");
         }
         const size_t coefficient_count = info->coefficient_count();
-        for (std::span<const int32_t> coefficients : transform.coefficients) {
-          if (coefficients.size() != coefficient_count) {
+        if (transform.coefficient_count != coefficient_count) {
+          return Status::InvalidArgument(
+            "Quantized VarDCT transform coefficient count is invalid");
+        }
+        for (size_t offset : transform.coefficient_offsets) {
+          if (offset > input.quantized_ac.size() ||
+              coefficient_count > input.quantized_ac.size() - offset) {
             return Status::InvalidArgument(
-              "Quantized VarDCT transform coefficient count is invalid");
+              "Quantized VarDCT transform coefficient range is invalid");
           }
         }
 
@@ -434,12 +468,16 @@ Status AssembleVarDctEncoderFrame(
             "Quantized VarDCT AC group coefficient capacity overflowed");
         }
         for (size_t channel = 0; channel < 3; ++channel) {
-          std::copy(
-            transform.coefficients[channel].begin(),
-            transform.coefficients[channel].end(),
-            result.ac_coefficients_.begin() +
-              result.AcGroupChannelOffset(group_index, channel) +
-              group_offset);
+          if (!CopyQuantizedCoefficients(
+                input.quantized_ac.subspan(
+                  transform.coefficient_offsets[channel], coefficient_count),
+                input.reject_unwritten_coefficients,
+                result.ac_coefficients_.data() +
+                  result.AcGroupChannelOffset(group_index, channel) +
+                  group_offset)) {
+            return Status::InvalidArgument(
+              "Quantized VarDCT AC coefficients contain unwritten values");
+          }
         }
         result.group_used_coefficient_count_[group_index] += coefficient_count;
         return Status::Ok();
@@ -447,9 +485,24 @@ Status AssembleVarDctEncoderFrame(
     if (!status.ok()) {
       return status;
     }
-    if (transform_index != input.transforms.size() || !result.valid()) {
+    if (transform_index != input.transforms.size()) {
       return Status::Internal(
-        "Quantized data did not assemble a valid VarDCT encoder frame");
+        "Quantized VarDCT transform list contains trailing entries");
+    }
+    for (size_t group_index = 0; group_index < group_count; ++group_index) {
+      size_t block_x = 0;
+      size_t block_y = 0;
+      const Extent2D group_blocks = GroupBlockExtent(
+        blocks, group_extent, group_index, &block_x, &block_y);
+      size_t covered_blocks = 0;
+      if (!group_blocks.try_area(&covered_blocks) ||
+          covered_blocks >
+            kVarDctAcGroupCoefficientCapacity / kJxlBlockArea ||
+          result.group_used_coefficient_count_[group_index] !=
+            covered_blocks * kJxlBlockArea) {
+        return Status::Internal(
+          "Quantized data did not completely fill its VarDCT AC groups");
+      }
     }
     *out = std::move(result);
     return Status::Ok();

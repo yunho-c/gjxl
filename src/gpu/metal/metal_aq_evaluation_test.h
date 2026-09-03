@@ -15,13 +15,16 @@ struct MetalAqReadbackStatsForTesting {
   size_t quantizer_bytes = 0;
   size_t quant_field_bytes = 0;
   size_t block_distance_map_bytes = 0;
+  /// Frame bytes copied into an intermediate host allocation.
   size_t frame_bytes = 0;
+  /// Completed shared-buffer bytes read directly during frame assembly.
+  size_t mapped_frame_bytes = 0;
   size_t reconstructed_rgb_bytes = 0;
 
   [[nodiscard]] size_t total_bytes() const noexcept {
     return control_bytes + score_history_bytes + maximum_error_bytes +
       quantizer_bytes + quant_field_bytes + block_distance_map_bytes +
-      frame_bytes + reconstructed_rgb_bytes;
+      frame_bytes + mapped_frame_bytes + reconstructed_rgb_bytes;
   }
 };
 
@@ -62,8 +65,8 @@ struct MetalAqReadbackStatsForTesting {
   PreparedAqEvaluation& prepared,
   bool* observed);
 
-/// Returns the byte classes transferred by the last successful evaluation or
-/// fused policy.
+/// Returns the copied and synchronously mapped byte classes consumed by the
+/// last successful evaluation or fused policy.
 [[nodiscard]] Status GetMetalAqReadbackStatsForTesting(
   PreparedAqEvaluation& prepared,
   MetalAqReadbackStatsForTesting* stats);

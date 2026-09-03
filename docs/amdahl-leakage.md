@@ -2,7 +2,7 @@
 
 - Status: active implementation roadmap
 - Original profile revision: `af3a9e6`
-- Current roadmap baseline: `c81ff95`
+- Priority-5 qualification baseline: `e34efca`
 - Reference libjxl revision: `e8ff09762481785938d8e4e01333ed3917571161`
 - Profile date: 2026-09-02
 - Related analysis: [entropy behavior alignment](entropy-behavior-alignment.md)
@@ -40,7 +40,7 @@ The roadmap priorities are:
 | 2 | Preparation and storage | Direct padded-Opsin slice: padded-4K input preparation 75.09 -> 54.42 ms and peak RSS 1.161 -> 1.043 GiB | Re-profile before considering persistent workspace leases |
 | 3 | Color conversion, validation, and copies | Direct workflow transform plus identity-bound finite-input provenance implemented; redundant scans cost 4.61 ms at 1080p and 18.49 ms at 4K | Qualified; proceed to priority 4 |
 | 4 | Quantization-matrix chromaticity statistics | Gate plus trusted NEON pass implemented; retained effort-7 preparation improved by 5.39 ms at 1080p and 25.49 ms at 4K | Qualified; incorporate effort-7 update policy and re-profile |
-| 5 | Metal readback and frame assembly | about 10.2 ms readback plus 12.9 ms assembly | Remove intermediate copies and redundant full-frame scans |
+| 5 | Metal readback and frame assembly | Mapped-source assembly implemented; padded-4K total improved 9.05 ms and peak RSS fell 73.8 MiB | Qualified; defer GPU packing and serializer views until after priority 6 |
 | 6 | Residual serializer | 62.6 ms GJXL versus 42.3 ms libjxl | Give one-representation encoding a one-pass token path |
 
 These signals are not additive estimates. The sampled function values include
@@ -467,11 +467,11 @@ codestream qualification.
 
 ## Priority 5: shorten the Metal-to-serializer handoff
 
-### Current boundary
+### Completed mapped-source handoff
 
 Encoding-only fully-resident execution already omits reconstructed-RGB,
 block-distance, and final-quant-field materialization. The remaining final frame
-readback in
+handoff in
 [`MetalPreparedAqEvaluation`](../src/gpu/metal/metal_aq_evaluation.cpp) contains
 primarily:
 
@@ -480,11 +480,11 @@ primarily:
 - raw quantization; and
 - small color-correlation maps.
 
-Metal buffers use `MTL::ResourceStorageModeShared`, and
-[`CopyDeviceToHost()`](../src/gpu/metal/metal_backend.cpp) is a checked
-`memcpy` from the mapped buffer. On Apple Silicon this is not a PCIe transfer;
-the cost is memory bandwidth, cache coherence, and the subsequent duplicate
-host representation.
+Metal buffers use `MTL::ResourceStorageModeShared`. On Apple Silicon the former
+[`CopyDeviceToHost()`](../src/gpu/metal/metal_backend.cpp) calls were therefore
+host `memcpy`s from shared storage rather than PCIe transfers. They nevertheless
+created an entire strategy-batch-major host representation immediately before
+the frame assembler copied the same values into group-major storage.
 
 [`AssembleVarDctEncoderFrame()`](../src/codec/vardct_frame.cpp) then allocates
 and zeros group-major AC storage, copies raw quantization and DC, reconstructs
@@ -494,63 +494,99 @@ readback for poison values before assembly.
 
 The layout conversion is structural: Metal's final coefficient buffer is
 organized by strategy batch, channel, and anchor, while the serializer consumes
-fixed-capacity AC-group-major channel storage.
+fixed-capacity AC-group-major channel storage. That conversion remains
+necessary. Priority 5 removes the redundant representation around it rather
+than changing either layout.
 
-### Low-risk implementation
+The completed implementation:
 
-1. Read raw quantization with one contiguous copy; its current device row stride
-   equals its width.
-2. Give internal frame assembly writable final spans so raw quantization and
-   quantized DC can land directly in owned frame storage rather than temporary
-   vectors.
-3. Fold poison detection into the coefficient repack loop instead of scanning
-   every coefficient immediately before reading it again.
-4. Separate construction invariants from the public deep `valid()` audit. A
-   successfully checked constructor should not rescan all DC values, active
-   coefficients, and zero padding before committing its own result.
-5. Reuse final-frame vector capacity across attempts where the ownership model
-   permits it.
+1. records source-independent transform layouts as checked coefficient offsets;
+2. waits at the existing completion boundary, then borrows read-only AC, DC,
+   and raw-quant ranges directly from completed shared Metal buffers;
+3. consumes those borrowed ranges synchronously while building a local owned
+   `VarDctEncoderFrame`, so no mapped span escapes and output remains atomic;
+4. folds unwritten-value detection into the DC copy and AC repack loops;
+5. replaces the constructor's terminal deep `valid()` self-audit with explicit
+   construction checks for geometry, strategy metadata, coefficient ranges,
+   group capacity and coverage, raw quantization, EPF sharpness, finite DC, and
+   complete transform consumption; zero-initialization still guarantees AC
+   padding; and
+6. allocates exact-coefficient and diagnostic readback vectors lazily. The
+   remaining diagnostic raw-quant readback is one checked contiguous copy rather
+   than one copy per block row.
 
-These changes preserve the existing GPU output layout and serializer input
-contract, so they should precede more architectural work.
+The final owned frame is still required by the current serializer contract, so
+its group-major AC allocation and repack remain. Giving assembly writable final
+spans would only avoid raw-quant and DC temporaries, about 2 MiB at padded 4K,
+while complicating atomic construction. The mapped-source design instead
+eliminates the much larger strategy-batch-major AC staging allocation, about
+95 MiB for the measured padded-4K workload.
 
-### Medium-risk implementation
+Testing-only readback accounting now distinguishes intermediate bytes copied
+to host storage from completed shared-buffer bytes synchronously mapped during
+assembly. A frame-producing resident path reports zero intermediate frame bytes
+and the exact mapped AC+DC+raw footprint. Exact-coefficient paths continue to
+report neither class because their coefficients originate in authoritative host
+storage.
 
-Add a final Metal packing kernel that converts strategy-batch-major output into
-the AC-group-major representation expected by the serializer. The kernel can
-also initialize required padding deterministically. Compare its dispatch,
-completion, and mapped-memory costs against the current approximately 12.9 ms
-host assembly phase; a faster kernel in isolation is insufficient if it adds a
-new synchronization boundary.
+### Measured result
 
-### Architectural implementation
+Five alternating independent-process Release pairs compared this slice with
+`e34efca`. Both sides used the synthetic padded-image effort-7 fully resident
+workflow. The table reports cohort medians:
 
-Let the internal serializer consume a read-only frame view over the completed
-shared Metal buffer. This can eliminate both the explicit readback `memcpy` and
-an owned coefficient copy, but it requires:
+| Input | Metric | `e34efca` | Mapped-source handoff | Change |
+| --- | --- | ---: | ---: | ---: |
+| Padded 1080p | Complete encode | 122.638 ms | 119.273 ms | -3.365 ms (-2.74%) |
+| Padded 1080p | Quantization pipeline | 89.749 ms | 86.298 ms | -3.451 ms (-3.85%) |
+| Padded 4K | Complete encode | 441.600 ms | 432.552 ms | -9.048 ms (-2.05%) |
+| Padded 4K | Quantization pipeline | 336.315 ms | 326.055 ms | -10.260 ms (-3.05%) |
 
-- retaining the evaluator and buffer lease through serialization;
-- a backend-independent read-only frame/view contract;
-- explicit Metal completion and coherence rules;
-- safe error and cancellation lifetimes;
-- alignment and padding guarantees; and
-- concurrency and memory-pressure qualification.
+Every one of the ten matched pairs favored the mapped-source build. Three
+alternating padded-4K `/usr/bin/time -l` pairs measured median peak RSS falling
+from 1,157,054,464 to 1,079,672,832 bytes: 77,381,632 bytes, or 73.8 MiB and
+6.69%.
 
-This is a zero-copy coefficient handoff, not GPU entropy coding. rANS remains on
-the CPU.
+New stage-profile boundaries place pointer/range acquisition at 0.000166 ms
+median on padded 4K. That number is intentionally narrow: shared-memory
+consumption happens in assembly. The remaining assembly median is 4.446 ms at
+1080p and 19.058 ms at 4K. There is no added command-buffer submission or wait.
 
-### Expected result and gates
+Frame parity and atomic rejection tests cover coefficient order, poison values,
+invalid raw quantization, exact versus resident operation, mapped-byte
+accounting, and profiled versus ordinary output. Parent/candidate CLI encodes
+of `testdata/codestream_sample.pfm` were byte-for-byte identical at effort 7,
+effort 9, explicit high density, maximum compression, maximum error, exact
+coefficients, throughput, maximum throughput, and with final-score diagnostics.
+The complete candidate/parent SHA-256 values were:
 
-The approximately 10.2 ms readback and 12.9 ms assembly measurements form a
-23.1 ms gross boundary. Only part is removable without changing the layout.
-Low-risk direct copies and scan fusion should be measured before assigning a
-numerical saving; GPU packing or a mapped frame view is justified only if the
-post-priority-1 profile still exposes this boundary.
+| Mode | SHA-256 |
+| --- | --- |
+| Effort 7, throughput, or final-score diagnostics | `56d3b52d1bb80d2b7ea260a4b6cd937d6858e9b3619dcdd35368dad7aa800e5d` |
+| Effort 9 or explicit high density | `9dd9af4b1d80e3b2376e457c7940fead8a1b4445e31eb521af6adbaff47df3d8` |
+| Maximum compression | `31c06d354659a6b79179046850b0182a2dc5344e7a5448cff15d01b0c3f08728` |
+| Maximum error | `f0c4779e5742db21d436fe19c71989162de0056b003d9469aaf729ac56a3895a` |
+| Exact coefficients | `e4566239f5e15dd67a4716d26da662728c88ffcae19bdf93ff28c2b8df6c8504` |
+| Maximum throughput | `7d33f12ed509dac53d60d438297905adfb01f77bbc0039dca0a16498c9941e12` |
 
-Validation must pin group/channel coefficient order, active counts, zero
-padding, DC reconstruction, raw quantization, CfL maps, deterministic hashes,
-pinned-`djxl` acceptance, evaluator lifetime on failure, and concurrent
-contexts.
+All candidate codestreams were accepted by `djxl` 0.12.0.
+
+### Deferred follow-ups
+
+A Metal group-packing kernel remains a possible optimization for the measured
+19.1 ms 4K assembly. It is not the next step: it must pack into the serializer's
+eventual stable representation, run in the existing final command buffer to
+avoid a new synchronization boundary, and beat the current CPU repack in
+end-to-end wall time rather than kernel time alone.
+
+A serializer view over mapped Metal storage is also deferred. It would require
+retaining a backend buffer lease through serialization, a backend-independent
+read-only frame contract, coherence and alignment rules, cancellation-safe
+lifetimes, and concurrency and memory-pressure qualification. The current
+synchronous borrow deliberately adds none of that lifetime machinery.
+
+Neither design is GPU entropy coding; rANS remains on the CPU. Re-profile after
+priority 6 before choosing either one.
 
 ## Priority 6: separate ordinary tokenization from maximum compression
 
@@ -696,7 +732,9 @@ separates low-risk work elimination from lifetime and layout redesign:
    effort-7/high-density statistics under explicit finite-Opsin provenance.
 8. Incorporate the independently owned effort-7 zero-update change and capture
    a fresh matched profile.
-9. Implement priority 5's low-risk direct frame copies and scan fusion.
+9. **Completed in the current priority-5 slice:** assemble synchronously from
+   completed shared Metal buffers, remove intermediate frame readback storage,
+   fuse validation into repacking, and retain atomic owned-frame construction.
 10. Implement priority 6's one-pass ordinary tokenization and effort-aware
    coefficient-order policy.
 11. Add cache-local balanced histogram population reduction.
