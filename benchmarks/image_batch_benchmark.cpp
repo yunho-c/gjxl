@@ -42,9 +42,9 @@ struct CommandLineOptions {
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kCpu;
 #endif
-  gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
+  gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
-  bool metal_aq_explicit = false;
+  bool gpu_aq_explicit = false;
 };
 
 struct WorkloadSpec {
@@ -173,10 +173,13 @@ struct BenchmarkRow {
   if (text == "metal") {
     return gjxl::VarDctBackendPreference::kMetal;
   }
+  if (text == "cuda") {
+    return gjxl::VarDctBackendPreference::kCuda;
+  }
   throw std::runtime_error("Unknown backend: " + std::string(text));
 }
 
-[[nodiscard]] gjxl::GpuAdaptiveQuantizationMode ParseMetalAqMode(
+[[nodiscard]] gjxl::GpuAdaptiveQuantizationMode ParseGpuAqMode(
   std::string_view text) {
 
   if (text == "exact-coefficients") {
@@ -192,7 +195,7 @@ struct BenchmarkRow {
     return gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
   }
   throw std::runtime_error(
-    "Unknown Metal AQ mode: " + std::string(text));
+    "Unknown GPU AQ mode: " + std::string(text));
 }
 
 [[nodiscard]] std::string_view BackendName(
@@ -205,11 +208,13 @@ struct BenchmarkRow {
       return "cpu";
     case gjxl::VarDctBackendPreference::kMetal:
       return "metal";
+    case gjxl::VarDctBackendPreference::kCuda:
+      return "cuda";
   }
   return "invalid";
 }
 
-[[nodiscard]] std::string_view MetalAqModeName(
+[[nodiscard]] std::string_view GpuAqModeName(
   gjxl::GpuAdaptiveQuantizationMode mode) {
 
   switch (mode) {
@@ -231,8 +236,8 @@ void PrintUsage(std::string_view executable) {
     << " [--workload all|thumbnail_64x64|small_256x192|"
        "medium_512x384|1080p|4k]"
        " [--batch-sizes 1,2,4,8] [--samples N] [--warmups N]"
-       " [--distance VALUE] [--backend auto|cpu|metal]"
-       " [--metal-aq exact-coefficients|fully-resident|throughput|"
+       " [--distance VALUE] [--backend auto|cpu|metal|cuda]"
+       " [--gpu-aq exact-coefficients|fully-resident|throughput|"
        "maximum-throughput]\n";
 }
 
@@ -260,9 +265,9 @@ void PrintUsage(std::string_view executable) {
         ParsePositiveFloat(value(argument), "Distance");
     } else if (argument == "--backend") {
       options.backend = ParseBackend(value(argument));
-    } else if (argument == "--metal-aq") {
-      options.metal_aq_mode = ParseMetalAqMode(value(argument));
-      options.metal_aq_explicit = true;
+    } else if (argument == "--gpu-aq" || argument == "--metal-aq") {
+      options.gpu_aq_mode = ParseGpuAqMode(value(argument));
+      options.gpu_aq_explicit = true;
     } else if (argument == "--help") {
       PrintUsage(argv[0]);
       std::exit(EXIT_SUCCESS);
@@ -270,14 +275,15 @@ void PrintUsage(std::string_view executable) {
       throw std::runtime_error("Unknown argument: " + std::string(argument));
     }
   }
-  if (options.backend != gjxl::VarDctBackendPreference::kMetal) {
-    if (!options.metal_aq_explicit) {
-      options.metal_aq_mode =
+  if (options.backend != gjxl::VarDctBackendPreference::kMetal &&
+      options.backend != gjxl::VarDctBackendPreference::kCuda) {
+    if (!options.gpu_aq_explicit) {
+      options.gpu_aq_mode =
         gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
-    } else if (options.metal_aq_mode !=
+    } else if (options.gpu_aq_mode !=
                gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients) {
       throw std::runtime_error(
-        "Experimental Metal AQ modes require --backend metal");
+        "Experimental GPU AQ modes require a forced GPU backend");
     }
   }
   if (options.workload != "all" &&
@@ -374,7 +380,7 @@ void FillImage(ImageStorage* image) {
       .options = {
         .butteraugli_target = options.butteraugli_target,
         .backend = options.backend,
-        .metal_aq_mode = options.metal_aq_mode,
+        .gpu_aq_mode = options.gpu_aq_mode,
       },
     });
 
@@ -479,7 +485,7 @@ int main(int argc, char** argv) {
     const CommandLineOptions options = ParseCommandLine(argc, argv);
     std::cout << "image batch benchmark backend="
               << BackendName(options.backend)
-              << " metal_aq=" << MetalAqModeName(options.metal_aq_mode)
+              << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
               << " distance=" << options.butteraugli_target
               << " samples=" << options.samples
               << " warmups=" << options.warmups << '\n';
@@ -497,7 +503,7 @@ int main(int argc, char** argv) {
       const gjxl::VarDctEncodingOptions encode_options = {
         .butteraugli_target = options.butteraugli_target,
         .backend = options.backend,
-        .metal_aq_mode = options.metal_aq_mode,
+        .gpu_aq_mode = options.gpu_aq_mode,
       };
       std::vector<uint8_t> reference_codestream;
       gjxl::VarDctEncodingSummary reference_summary;

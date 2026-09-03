@@ -19,19 +19,22 @@ namespace gjxl {
 inline constexpr size_t kMaximumCpuThreadCount = 256;
 
 enum class VarDctBackendPreference {
-  /// Uses qualified Metal only within the validated quality interval and above
-  /// the measured geometry floor. Availability failures before pipeline
-  /// execution fall back to CPU; runtime errors do not.
+  /// Uses a qualified GPU backend only within its validated operating window.
+  /// Availability failures before pipeline execution fall back to CPU;
+  /// runtime errors do not. CUDA remains opt-in until separately qualified.
   kAutomatic,
   /// Always uses the CPU reference pipeline.
   kCpu,
   /// Requires Metal regardless of automatic device, quality, and size gates.
   kMetal,
+  /// Requires CUDA regardless of automatic device, quality, and size gates.
+  kCuda,
 };
 
 enum class VarDctExecutionBackend {
   kCpu,
   kMetal,
+  kCuda,
 };
 
 enum class VarDctRateControlMode {
@@ -94,18 +97,18 @@ struct VarDctEncodingOptions {
   TargetSizeSelectionPolicy target_size_selection =
     TargetSizeSelectionPolicy::kLargestAtOrBelow;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
-  /// Selects the Metal AQ implementation. Fully resident is the encoding
+  /// Selects the GPU AQ implementation. Fully resident is the encoding
   /// default and may change encoder decisions relative to exact coefficients.
-  /// Throughput policies require an explicitly forced Metal backend.
+  /// Throughput policies require an explicitly forced GPU backend.
   /// Maximum-throughput mode omits perceptual diagnostics, so its reported
   /// score history is empty. This field is ignored when CPU execution is
   /// selected.
-  GpuAdaptiveQuantizationMode metal_aq_mode =
+  GpuAdaptiveQuantizationMode gpu_aq_mode =
     GpuAdaptiveQuantizationMode::kFullyResident;
   /// Requests a perceptual evaluation of the final encoded field. Resident
-  /// Metal encoding skips this diagnostic-only pass by default; CPU and exact
-  /// coefficient workflows already produce the final score as part of their
-  /// ordinary policy evaluation.
+  /// Resident GPU encoding skips this diagnostic-only pass by default; CPU
+  /// and exact coefficient workflows already produce the final score as part
+  /// of their ordinary policy evaluation.
   bool collect_final_butteraugli_score = false;
 };
 
@@ -150,8 +153,8 @@ struct VarDctEncodingSummary {
   /// the encoded frame. Earlier entries may still be present when false.
   bool final_butteraugli_score_evaluated = false;
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;
-  /// Reports the requested mode when `execution_backend` is Metal.
-  GpuAdaptiveQuantizationMode metal_aq_mode =
+  /// Reports the requested mode when `execution_backend` is a GPU backend.
+  GpuAdaptiveQuantizationMode gpu_aq_mode =
     GpuAdaptiveQuantizationMode::kFullyResident;
 
   friend bool operator==(

@@ -50,7 +50,7 @@ The first interface should:
    callers to construct planar float images;
 3. make distance, effort, and explicit maximum compression the stable
    compression controls;
-4. keep CPU/Metal execution policy separate from bitstream options;
+4. keep CPU/GPU execution policy separate from bitstream options;
 5. return one library-owned contiguous output buffer;
 6. report unsupported capabilities distinctly from malformed input;
 7. prevent C++ exceptions and types from crossing the ABI; and
@@ -110,6 +110,7 @@ enum {
     GJXL_BACKEND_AUTO = 0,
     GJXL_BACKEND_CPU = 1,
     GJXL_BACKEND_METAL = 2,
+    GJXL_BACKEND_CUDA = 3,
 };
 
 enum {
@@ -323,24 +324,27 @@ therefore contain one field:
 AUTO   use the existing qualified automatic policy
 CPU    require the CPU workflow
 METAL  require the default fully resident Metal workflow
+CUDA   require the default fully resident CUDA workflow
 ```
 
-`AUTO` retains the current source-backed policy, including its device,
-geometry, and distance gates. `METAL` is an explicit unqualified override;
+`AUTO` retains the current source-backed Metal policy, including its device,
+geometry, and distance gates. CUDA remains opt-in until it has its own measured
+qualification envelope. `METAL` and `CUDA` are explicit unqualified overrides;
 backend creation or capability failure returns an error rather than silently
-falling back. Metal AQ implementation selection remains internal.
+falling back. GPU AQ implementation selection remains internal.
 
 `gjxl_context_options_init` defaults to `AUTO`, and passing `NULL` options to
 `gjxl_context_create` has the same meaning. Slimg's default quality 80 maps to
 distance 1.9, outside the current automatic Metal interval of `[1.0, 1.2]`.
-An experiment that specifically intends to exercise Metal must therefore
-request `METAL` explicitly rather than treating `AUTO` as a general GPU mode.
+An experiment that specifically intends to exercise a GPU must therefore
+request `METAL` or `CUDA` explicitly rather than treating `AUTO` as a general
+GPU mode.
 
-The process-cached production Metal backend should be shared by contexts.
-Forced Metal context creation should resolve the backend eagerly so an
-unavailable device is reported before the first encode. Automatic contexts may
-resolve it lazily only when an image is eligible. CPU contexts do not initialize
-Metal.
+Process-cached production GPU backends should be shared by contexts. Forced
+Metal or CUDA context creation resolves the requested backend eagerly so an
+unavailable device or missing workflow capability is reported before the first
+encode. Automatic contexts may resolve Metal lazily only when an image is
+eligible. CPU contexts initialize neither GPU backend.
 
 The wrapper stores immutable execution configuration so `gjxl_encode` can be
 called concurrently on one context. Destroying a context must not overlap an

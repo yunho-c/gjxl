@@ -46,6 +46,7 @@ enum {
   GJXL_BACKEND_AUTO = 0,
   GJXL_BACKEND_CPU = 1,
   GJXL_BACKEND_METAL = 2,
+  GJXL_BACKEND_CUDA = 3,
 };
 
 enum {

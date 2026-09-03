@@ -593,6 +593,18 @@ if(GJXL_ENABLE_CUDA)
       CUDA::cudart
   )
 
+  target_link_libraries(
+    gjxl_codestream
+    PUBLIC
+      gjxl_cuda
+  )
+
+  target_compile_definitions(
+    gjxl_codestream
+    PRIVATE
+      GJXL_ENABLE_CUDA=1
+  )
+
   install(
     TARGETS gjxl_cuda
     EXPORT gjxlTargets

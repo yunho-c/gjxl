@@ -203,7 +203,7 @@ bool CheckSharedMetalBackendIfAvailable() {
   const gjxl::VarDctEncodingOptions options = {
     .butteraugli_target = 1.2f,
     .backend = gjxl::VarDctBackendPreference::kMetal,
-    .metal_aq_mode =
+    .gpu_aq_mode =
       gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput,
   };
   std::vector<uint8_t> expected_codestream;

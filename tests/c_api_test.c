@@ -239,6 +239,19 @@ static int CheckContexts(GJXLContext** cpu_context) {
           "unavailable Metal modified output or omitted a diagnostic");
   }
 
+  options.backend = GJXL_BACKEND_CUDA;
+  GJXLContext* cuda = NULL;
+  const GJXLResult cuda_result = gjxl_context_create(&options, &cuda);
+  CHECK(cuda_result == GJXL_OK || cuda_result == GJXL_ERROR_UNAVAILABLE,
+        "forced CUDA returned the wrong result category");
+  if (cuda_result == GJXL_OK) {
+    CHECK(cuda != NULL, "forced CUDA returned no context");
+    gjxl_context_destroy(cuda);
+  } else {
+    CHECK(cuda == NULL && gjxl_get_last_error()[0] != '\0',
+          "unavailable CUDA modified output or omitted a diagnostic");
+  }
+
   struct LargerContextOptions {
     GJXLContextOptions options;
     uint64_t future_field;

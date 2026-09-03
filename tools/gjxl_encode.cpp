@@ -147,7 +147,7 @@ struct Options {
     gjxl::VarDctDensityMode::kDefault;
   gjxl::VarDctCompressionMode compression_mode =
     gjxl::VarDctCompressionMode::kAutomatic;
-  gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
+  gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   bool collect_final_butteraugli_score = false;
 };
@@ -165,13 +165,15 @@ struct Options {
     *backend = gjxl::VarDctBackendPreference::kCpu;
   } else if (text == "metal") {
     *backend = gjxl::VarDctBackendPreference::kMetal;
+  } else if (text == "cuda") {
+    *backend = gjxl::VarDctBackendPreference::kCuda;
   } else {
     return false;
   }
   return true;
 }
 
-[[nodiscard]] bool ParseMetalAqMode(
+[[nodiscard]] bool ParseGpuAqMode(
   std::string_view text,
   gjxl::GpuAdaptiveQuantizationMode* mode) {
 
@@ -190,6 +192,34 @@ struct Options {
     return false;
   }
   return true;
+}
+
+[[nodiscard]] std::string_view ExecutionBackendName(
+  gjxl::VarDctExecutionBackend backend) {
+  switch (backend) {
+    case gjxl::VarDctExecutionBackend::kCpu:
+      return "CPU";
+    case gjxl::VarDctExecutionBackend::kMetal:
+      return "Metal";
+    case gjxl::VarDctExecutionBackend::kCuda:
+      return "CUDA";
+  }
+  return "unknown backend";
+}
+
+[[nodiscard]] std::string_view GpuAqModeName(
+  gjxl::GpuAdaptiveQuantizationMode mode) {
+  switch (mode) {
+    case gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients:
+      return "exact-coefficient AQ";
+    case gjxl::GpuAdaptiveQuantizationMode::kFullyResident:
+      return "fully-resident AQ";
+    case gjxl::GpuAdaptiveQuantizationMode::kThroughput:
+      return "throughput AQ";
+    case gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput:
+      return "maximum-throughput AQ";
+  }
+  return "unknown AQ mode";
 }
 
 [[nodiscard]] bool ParseTargetSizeSelection(
@@ -397,9 +427,9 @@ struct Options {
       candidate.compression_mode =
         gjxl::VarDctCompressionMode::kMaximumCompression;
       maximum_compression_set = true;
-    } else if (argument == "--metal-aq") {
+    } else if (argument == "--gpu-aq" || argument == "--metal-aq") {
       if (index + 1 >= argc ||
-          !ParseMetalAqMode(argv[++index], &candidate.metal_aq_mode)) {
+          !ParseGpuAqMode(argv[++index], &candidate.gpu_aq_mode)) {
         return false;
       }
     } else if (argument == "--collect-final-score") {
@@ -420,22 +450,23 @@ struct Options {
       (target_search_option_set &&
        candidate.rate_control_mode ==
          gjxl::VarDctRateControlMode::kButteraugliTarget) ||
-      (candidate.metal_aq_mode ==
+      (candidate.gpu_aq_mode ==
          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput &&
        candidate.rate_control_mode ==
          gjxl::VarDctRateControlMode::kMaximumError) ||
       (candidate.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
        (candidate.rate_control_mode ==
           gjxl::VarDctRateControlMode::kMaximumError ||
-        candidate.metal_aq_mode ==
+        candidate.gpu_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
-        candidate.metal_aq_mode ==
+        candidate.gpu_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput)) ||
-      ((candidate.metal_aq_mode ==
+      ((candidate.gpu_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
-        candidate.metal_aq_mode ==
+        candidate.gpu_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput) &&
-       candidate.backend != gjxl::VarDctBackendPreference::kMetal)) {
+       candidate.backend != gjxl::VarDctBackendPreference::kMetal &&
+       candidate.backend != gjxl::VarDctBackendPreference::kCuda)) {
     return false;
   }
   *options = std::move(candidate);
@@ -541,8 +572,8 @@ void PrintUsage(const char* executable) {
                "[--effort 1..10] "
                "[--high-density] "
                "[--maximum-compression] "
-               "[--backend auto|cpu|metal] "
-               "[--metal-aq exact-coefficients|fully-resident|throughput|"
+               "[--backend auto|cpu|metal|cuda] "
+               "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                "maximum-throughput] "
                "[--collect-final-score] "
                "INPUT.pfm OUTPUT.jxl\n";
@@ -582,7 +613,7 @@ int main(int argc, char** argv) {
        options.target_size_maximum_attempts,
      .target_size_selection = options.target_size_selection,
      .backend = options.backend,
-     .metal_aq_mode = options.metal_aq_mode,
+     .gpu_aq_mode = options.gpu_aq_mode,
      .collect_final_butteraugli_score =
        options.collect_final_butteraugli_score},
     &codestream,
@@ -639,21 +670,11 @@ int main(int argc, char** argv) {
                 << " evaluations)";
       break;
   }
-  std::cout << " using "
-            << (summary.execution_backend ==
-                    gjxl::VarDctExecutionBackend::kMetal
-                  ? (summary.metal_aq_mode ==
-                           gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients
-                       ? "Metal exact-coefficient AQ"
-                       : (summary.metal_aq_mode ==
-                                gjxl::GpuAdaptiveQuantizationMode::kThroughput
-                            ? "Metal throughput AQ"
-                            : (summary.metal_aq_mode ==
-                                     gjxl::GpuAdaptiveQuantizationMode::
-                                       kMaximumThroughput
-                                 ? "Metal maximum-throughput AQ"
-                                 : "Metal fully-resident AQ")))
-                  : "CPU")
+  std::cout << " using " << ExecutionBackendName(summary.execution_backend);
+  if (summary.execution_backend != gjxl::VarDctExecutionBackend::kCpu) {
+    std::cout << ' ' << GpuAqModeName(summary.gpu_aq_mode);
+  }
+  std::cout
             << (summary.density_mode ==
                       gjxl::VarDctDensityMode::kHighDensity
                   ? " with high-density AQ"

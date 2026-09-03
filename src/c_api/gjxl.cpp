@@ -144,6 +144,9 @@ GJXLResult ParseBackend(GJXLBackend backend,
     case GJXL_BACKEND_METAL:
       *preference = gjxl::VarDctBackendPreference::kMetal;
       return GJXL_OK;
+    case GJXL_BACKEND_CUDA:
+      *preference = gjxl::VarDctBackendPreference::kCuda;
+      return GJXL_OK;
     default:
       return Fail(GJXL_ERROR_INVALID_ARGUMENT,
                   "Context backend is not recognized");
@@ -281,6 +284,13 @@ GJXLResult gjxl_context_create(
     if (backend == gjxl::VarDctBackendPreference::kMetal) {
       const GJXLResult result = TranslateStatus(
         gjxl::codestream_internal::EnsureProductionMetalBackendAvailable());
+      if (result != GJXL_OK) {
+        return result;
+      }
+    }
+    if (backend == gjxl::VarDctBackendPreference::kCuda) {
+      const GJXLResult result = TranslateStatus(
+        gjxl::codestream_internal::EnsureProductionCudaBackendAvailable());
       if (result != GJXL_OK) {
         return result;
       }

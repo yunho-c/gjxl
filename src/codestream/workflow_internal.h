@@ -97,6 +97,11 @@ struct VarDctEncodingProfile {
 /// Metal execution policy.
 [[nodiscard]] Status EnsureProductionMetalBackendAvailable();
 
+/// Initializes and validates the process-cached production CUDA backend.
+/// Used by frontends that promise eager failure for an explicitly forced
+/// CUDA execution policy.
+[[nodiscard]] Status EnsureProductionCudaBackendAvailable();
+
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,

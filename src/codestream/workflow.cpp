@@ -35,6 +35,9 @@
 #if defined(GJXL_ENABLE_METAL)
 #include "gpu/metal/metal_backend.h"
 #endif
+#if defined(GJXL_ENABLE_CUDA)
+#include "gpu/cuda/cuda_backend.h"
+#endif
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/quantization_pipeline.h"
@@ -373,6 +376,46 @@ Status ResolveProductionMetalBackend(GpuBackend** out) {
 
 #endif
 
+#if defined(GJXL_ENABLE_CUDA)
+
+Status ResolveProductionCudaBackend(GpuBackend** out) {
+  if (out == nullptr) {
+    return Status::InvalidArgument(
+      "Production CUDA backend output pointer is null");
+  }
+  *out = nullptr;
+  struct Cache {
+    std::mutex mutex;
+    std::unique_ptr<GpuBackend> backend;
+  };
+  static Cache cache;
+  std::lock_guard lock(cache.mutex);
+  if (cache.backend == nullptr) {
+    Status status = CreateCudaBackend(&cache.backend);
+    if (!status.ok()) {
+      return status;
+    }
+    if (cache.backend == nullptr) {
+      return Status::Internal("CUDA factory returned no backend");
+    }
+  }
+  *out = cache.backend.get();
+  return Status::Ok();
+}
+
+#else
+
+Status ResolveProductionCudaBackend(GpuBackend** out) {
+  if (out == nullptr) {
+    return Status::InvalidArgument(
+      "Production CUDA backend output pointer is null");
+  }
+  *out = nullptr;
+  return Status::Unavailable("CUDA backend is not built");
+}
+
+#endif
+
 bool HasRequiredGpuQuantizationCapabilities(
   GpuBackend& backend,
   GpuAdaptiveQuantizationMode mode) {
@@ -549,7 +592,7 @@ struct PreparedWorkflow {
       preparation_options,
       &candidate->quantization,
       options.backend == VarDctBackendPreference::kCpu,
-      options.metal_aq_mode ==
+      options.gpu_aq_mode ==
         GpuAdaptiveQuantizationMode::kExactCoefficients,
       quantization_pipeline_internal::QuantizationPipelineInputProvenance::
         kFiniteLinearRgbAndOpsin);
@@ -574,22 +617,23 @@ struct PreparedWorkflow {
   bool supplied_backend_is_qualified,
   bool resolve_production_backend,
   GpuBackend** selected_gpu,
-  bool* selected_metal) {
+  VarDctExecutionBackend* selected_backend) {
 
-  if (selected_gpu == nullptr || selected_metal == nullptr) {
+  if (selected_gpu == nullptr || selected_backend == nullptr) {
     return Status::InvalidArgument(
       "Attempt backend output pointer is null");
   }
   *selected_gpu = nullptr;
-  *selected_metal = false;
+  *selected_backend = VarDctExecutionBackend::kCpu;
   if (options.backend == VarDctBackendPreference::kCpu ||
       (options.rate_control_mode == VarDctRateControlMode::kMaximumError &&
-       options.backend != VarDctBackendPreference::kMetal)) {
+       options.backend == VarDctBackendPreference::kAutomatic)) {
     return Status::Ok();
   }
 
   const bool should_resolve =
     options.backend == VarDctBackendPreference::kMetal ||
+    options.backend == VarDctBackendPreference::kCuda ||
     (options.backend == VarDctBackendPreference::kAutomatic &&
      codestream_internal::IsAutomaticMetalGeometryEligible(
        prepared.geometry.padded_frame()) &&
@@ -603,7 +647,9 @@ struct PreparedWorkflow {
   bool qualified = supplied_backend_is_qualified;
   Status status = Status::Ok();
   if (*selected_gpu == nullptr && resolve_production_backend) {
-    status = ResolveProductionMetalBackend(selected_gpu);
+    status = options.backend == VarDctBackendPreference::kCuda
+      ? ResolveProductionCudaBackend(selected_gpu)
+      : ResolveProductionMetalBackend(selected_gpu);
     if (!status.ok()) {
       if (options.backend == VarDctBackendPreference::kAutomatic &&
           status.code() == StatusCode::kUnavailable) {
@@ -616,22 +662,43 @@ struct PreparedWorkflow {
       codestream_internal::IsAutomaticMetalBackendQualified(**selected_gpu);
   }
   if (*selected_gpu == nullptr) {
-    return options.backend == VarDctBackendPreference::kMetal
-      ? Status::Unavailable(
-          "Forced Metal workflow has no available backend")
-      : Status::Ok();
-  }
-  if (!HasRequiredGpuQuantizationCapabilities(
-        **selected_gpu, options.metal_aq_mode)) {
     if (options.backend == VarDctBackendPreference::kMetal) {
       return Status::Unavailable(
-        "Forced Metal workflow lacks a required GPU capability");
+        "Forced Metal workflow has no available backend");
+    }
+    if (options.backend == VarDctBackendPreference::kCuda) {
+      return Status::Unavailable(
+        "Forced CUDA workflow has no available backend");
+    }
+    return Status::Ok();
+  }
+  const BackendKind required_kind =
+    options.backend == VarDctBackendPreference::kCuda
+      ? BackendKind::kCuda
+      : BackendKind::kMetal;
+  if (options.backend != VarDctBackendPreference::kAutomatic &&
+      (*selected_gpu)->kind() != required_kind) {
+    return Status::Unavailable(
+      options.backend == VarDctBackendPreference::kCuda
+        ? "Forced CUDA workflow received a non-CUDA backend"
+        : "Forced Metal workflow received a non-Metal backend");
+  }
+  if (!HasRequiredGpuQuantizationCapabilities(
+        **selected_gpu, options.gpu_aq_mode)) {
+    if (options.backend == VarDctBackendPreference::kMetal ||
+        options.backend == VarDctBackendPreference::kCuda) {
+      return Status::Unavailable(
+        options.backend == VarDctBackendPreference::kCuda
+          ? "Forced CUDA workflow lacks a required GPU capability"
+          : "Forced Metal workflow lacks a required GPU capability");
     }
     *selected_gpu = nullptr;
     return Status::Ok();
   }
-  if (options.backend == VarDctBackendPreference::kMetal || qualified) {
-    *selected_metal = true;
+  if (options.backend != VarDctBackendPreference::kAutomatic || qualified) {
+    *selected_backend = (*selected_gpu)->kind() == BackendKind::kCuda
+      ? VarDctExecutionBackend::kCuda
+      : VarDctExecutionBackend::kMetal;
   } else {
     *selected_gpu = nullptr;
   }
@@ -678,11 +745,12 @@ struct PreparedWorkflow {
   prepared.quantization.profile.b_qm_scale = matrix_scales.b;
 
   GpuBackend* selected_gpu = nullptr;
-  bool selected_metal = false;
+  VarDctExecutionBackend selected_backend =
+    VarDctExecutionBackend::kCpu;
   const WorkflowClock::time_point selection_begin = ProfileBegin(profile);
   status = SelectAttemptBackend(
     prepared, options, supplied_backend, supplied_backend_is_qualified,
-    resolve_production_backend, &selected_gpu, &selected_metal);
+    resolve_production_backend, &selected_gpu, &selected_backend);
   if (!status.ok()) {
     return status;
   }
@@ -691,7 +759,7 @@ struct PreparedWorkflow {
     &candidate_profile.backend_selection_nanoseconds);
   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
   EncodingArtifacts encoding;
-  if (selected_metal && options.metal_aq_mode ==
+  if (selected_gpu != nullptr && options.gpu_aq_mode ==
         GpuAdaptiveQuantizationMode::kMaximumThroughput) {
     PipelineStorage* compatibility_output = nullptr;
     status = EnsureCompatibilityOutput(prepared, &compatibility_output);
@@ -713,7 +781,7 @@ struct PreparedWorkflow {
         encoding.frame = std::move(compatibility_output->frame);
       }
     }
-  } else if (selected_metal) {
+  } else if (selected_gpu != nullptr) {
     const quantization_pipeline_internal::GpuEncodingQuantizationPipelineOutput
       encoding_output{
       .frame = &encoding.frame,
@@ -722,7 +790,7 @@ struct PreparedWorkflow {
       .collect_final_butteraugli_score =
         options.collect_final_butteraugli_score ||
         pipeline_options.adaptive_quantization.iterations == 0 ||
-        options.metal_aq_mode ==
+        options.gpu_aq_mode ==
           GpuAdaptiveQuantizationMode::kExactCoefficients ||
         options.rate_control_mode == VarDctRateControlMode::kMaximumError,
     };
@@ -730,13 +798,13 @@ struct PreparedWorkflow {
       ? quantization_pipeline_internal::
           RunPreparedGpuQuantizationPipelineForEncoding(
             *selected_gpu, prepared.original_linear_rgb(),
-            prepared.quantization, pipeline_options, options.metal_aq_mode,
+            prepared.quantization, pipeline_options, options.gpu_aq_mode,
             encoding_output, nullptr, &prepared.gpu_adaptive_quantization)
       : quantization_pipeline_internal::
           RunPreparedGpuQuantizationPipelineForEncodingProfiled(
             *selected_gpu, prepared.original_linear_rgb(),
             prepared.quantization,
-            pipeline_options, options.metal_aq_mode, encoding_output,
+            pipeline_options, options.gpu_aq_mode, encoding_output,
             &prepared.gpu_adaptive_quantization, gpu_profiling_mode,
             &candidate_gpu_profile);
   } else {
@@ -830,15 +898,13 @@ struct PreparedWorkflow {
   candidate_summary.final_butteraugli_score_evaluated =
     options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
     !candidate_summary.score_history.empty() &&
-    (!selected_metal ||
-     options.metal_aq_mode ==
+    (selected_gpu == nullptr ||
+     options.gpu_aq_mode ==
        GpuAdaptiveQuantizationMode::kExactCoefficients ||
      options.collect_final_butteraugli_score ||
      pipeline_options.adaptive_quantization.iterations == 0);
-  candidate_summary.execution_backend = selected_metal
-    ? VarDctExecutionBackend::kMetal
-    : VarDctExecutionBackend::kCpu;
-  candidate_summary.metal_aq_mode = options.metal_aq_mode;
+  candidate_summary.execution_backend = selected_backend;
+  candidate_summary.gpu_aq_mode = options.gpu_aq_mode;
   status = encoding.frame.strategies().ForEachAnchor(
     [&](size_t, size_t, AcStrategyType strategy) {
       const size_t index = static_cast<size_t>(strategy);
@@ -855,9 +921,7 @@ struct PreparedWorkflow {
   ProfileEnd(
     profile, summary_begin,
     &candidate_profile.summary_assembly_nanoseconds);
-  candidate_profile.execution_backend = selected_metal
-    ? VarDctExecutionBackend::kMetal
-    : VarDctExecutionBackend::kCpu;
+  candidate_profile.execution_backend = selected_backend;
 
   *codestream = std::move(candidate);
   if (summary != nullptr) {
@@ -1190,6 +1254,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     case VarDctBackendPreference::kAutomatic:
     case VarDctBackendPreference::kCpu:
     case VarDctBackendPreference::kMetal:
+    case VarDctBackendPreference::kCuda:
       break;
     default:
       return Status::InvalidArgument(
@@ -1211,22 +1276,23 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       return Status::InvalidArgument(
         "VarDCT compression mode is invalid");
   }
-  switch (options.metal_aq_mode) {
+  switch (options.gpu_aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
     case GpuAdaptiveQuantizationMode::kFullyResident:
       break;
     case GpuAdaptiveQuantizationMode::kThroughput:
     case GpuAdaptiveQuantizationMode::kMaximumThroughput:
-      if (options.backend != VarDctBackendPreference::kMetal) {
+      if (options.backend != VarDctBackendPreference::kMetal &&
+          options.backend != VarDctBackendPreference::kCuda) {
         return Status::InvalidArgument(
-          "Throughput AQ requires an explicitly forced Metal backend");
+          "Throughput AQ requires an explicitly forced GPU backend");
       }
       break;
     default:
       return Status::InvalidArgument(
-        "VarDCT Metal AQ mode is invalid");
+        "VarDCT GPU AQ mode is invalid");
   }
-  if (options.metal_aq_mode ==
+  if (options.gpu_aq_mode ==
         GpuAdaptiveQuantizationMode::kMaximumThroughput &&
       options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     return Status::InvalidArgument(
@@ -1234,17 +1300,17 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   }
   if (options.density_mode == VarDctDensityMode::kHighDensity &&
       (options.rate_control_mode == VarDctRateControlMode::kMaximumError ||
-       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput ||
-       options.metal_aq_mode ==
+       options.gpu_aq_mode == GpuAdaptiveQuantizationMode::kThroughput ||
+       options.gpu_aq_mode ==
          GpuAdaptiveQuantizationMode::kMaximumThroughput)) {
     return Status::InvalidArgument(
       "High-density AQ requires iterative Butteraugli control");
   }
   if (gpu_profiling &&
       (options.backend != VarDctBackendPreference::kMetal ||
-       (options.metal_aq_mode !=
+       (options.gpu_aq_mode !=
           GpuAdaptiveQuantizationMode::kFullyResident &&
-        options.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+        options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
        options.rate_control_mode !=
           VarDctRateControlMode::kButteraugliTarget)) {
     return Status::InvalidArgument(
@@ -1296,7 +1362,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
           // Exact coefficients retain their decision-compatible automatic
           // search behavior.
           if (options.backend == VarDctBackendPreference::kAutomatic &&
-              options.metal_aq_mode ==
+              options.gpu_aq_mode ==
                 GpuAdaptiveQuantizationMode::kFullyResident) {
             attempt_options.backend = VarDctBackendPreference::kCpu;
           }
@@ -1564,6 +1630,20 @@ Status EnsureProductionMetalBackendAvailable() {
         *backend, GpuAdaptiveQuantizationMode::kFullyResident)) {
     return Status::Unavailable(
       "Production Metal backend lacks a required GPU capability");
+  }
+  return Status::Ok();
+}
+
+Status EnsureProductionCudaBackendAvailable() {
+  GpuBackend* backend = nullptr;
+  Status status = ResolveProductionCudaBackend(&backend);
+  if (!status.ok()) {
+    return status;
+  }
+  if (backend == nullptr || !HasRequiredGpuQuantizationCapabilities(
+        *backend, GpuAdaptiveQuantizationMode::kFullyResident)) {
+    return Status::Unavailable(
+      "Production CUDA backend lacks a required GPU capability");
   }
   return Status::Ok();
 }

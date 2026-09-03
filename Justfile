@@ -91,7 +91,7 @@ metal-profile workload="padded_4k" implementation="simd" samples="7" warmups="2"
 image-batch-benchmark workload="all" batch_sizes="1,2,4,8" samples="3" warmups="1" backend="metal" gpu_aq="maximum-throughput":
     cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
     cmake --build "{{ build_dir }}/release" --target gjxl_image_batch_benchmark -j
-    "{{ build_dir }}/release/gjxl_image_batch_benchmark" --workload "{{ workload }}" --batch-sizes "{{ batch_sizes }}" --samples "{{ samples }}" --warmups "{{ warmups }}" --backend "{{ backend }}" --metal-aq "{{ gpu_aq }}"
+    "{{ build_dir }}/release/gjxl_image_batch_benchmark" --workload "{{ workload }}" --batch-sizes "{{ batch_sizes }}" --samples "{{ samples }}" --warmups "{{ warmups }}" --backend "{{ backend }}" --gpu-aq "{{ gpu_aq }}"
 
 # Measure the CPU coefficient-decision boundary without the complete AQ loop.
 coefficient-benchmark workload="padded_1080p" samples="9" warmups="2":

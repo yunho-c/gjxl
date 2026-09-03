@@ -1,8 +1,23 @@
 # CUDA backend support analysis
 
-- Status: design analysis; implementation has not started
+- Status: implementation in progress on `feat/cuda`
 - Date: 2026-09-03
 - Initial target: a forced CUDA backend, followed by production qualification
+
+Implementation progress as of this revision:
+
+- portable CPU-only, independently selectable Metal, and independently
+  selectable CUDA builds are in place;
+- CUDA owns a non-blocking stream, device-scoped RAII allocations, synchronous
+  checked transfers, event-backed submissions, deterministic failure
+  injection, and backend/device ownership validation;
+- all nine VarDCT transform shapes and the shared affine, convolution,
+  symmetric-convolution, and maximum-reduction primitives pass real-device
+  conformance on compute capability 8.6;
+- public C++, C, Rust, CLI, package-export, and diagnostic vocabulary now
+  includes CUDA without changing existing C enum values; and
+- automatic selection deliberately remains Metal-only until CUDA passes the
+  full workflow and qualification gates described below.
 
 ## Executive finding
 
@@ -208,13 +223,14 @@ embedding must remain inside the conditional Metal branch. CUDA compilation,
 the CUDA runtime, architecture selection, and generated device objects must
 remain inside a separate `gjxl_cuda` target.
 
-### Metal-specific public vocabulary
+### Original Metal-specific public vocabulary
 
-[`VarDctEncodingOptions`](../src/codestream/workflow.h) currently exposes
-`kMetal`, a Metal-only execution summary, and `metal_aq_mode`. The C API and
-Rust wrapper also expose only automatic, CPU, and Metal backend variants.
+At the time of the initial analysis, [`VarDctEncodingOptions`](../src/codestream/workflow.h)
+exposed `kMetal`, a Metal-only execution summary, and a Metal-named AQ field.
+The C API and Rust wrapper likewise exposed only automatic, CPU, and Metal
+backend variants.
 
-CUDA integration requires:
+The first implementation checkpoints completed the required vocabulary work:
 
 - `VarDctBackendPreference::kCuda`;
 - `VarDctExecutionBackend::kCuda`;
@@ -223,9 +239,9 @@ CUDA integration requires:
 - `--backend cuda` in command-line tools; and
 - backend-neutral `gpu_aq_mode` terminology.
 
-At version `0.0.1`, renaming the C++ field may be reasonable. If source
-compatibility is desired, the old Metal-specific field needs a documented
-deprecation and unambiguous precedence rule.
+Because the project is version `0.0.1`, the C++ field was renamed directly
+rather than retaining two independently writable aggregate members. The CLI
+accepts legacy `--metal-aq` as an alias for the canonical `--gpu-aq` spelling.
 
 ### Brittle device qualification and process-global caching
 

@@ -426,8 +426,8 @@ independent decoder and quality metric.
 
 The `gjxl_encode` frontend accepts three-channel linear-RGB PFM input and one
 of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus
-`--effort 1..10`, `--maximum-compression`, `--backend auto|cpu|metal`, and
-`--metal-aq exact-coefficients|fully-resident|throughput|maximum-throughput`.
+`--effort 1..10`, `--maximum-compression`, `--backend auto|cpu|metal|cuda`, and
+`--gpu-aq exact-coefficients|fully-resident|throughput|maximum-throughput`.
 `--collect-final-score` opts resident Metal encoding into the terminal
 diagnostic evaluation; the default report says that the final score was not
 evaluated.
@@ -445,7 +445,7 @@ require `--backend metal`; fully resident may be automatic and exact
 coefficients may be selected explicitly. Automatic resident size searches and
 automatic maximum-error control remain CPU-only, and maximum-throughput mode
 does not support maximum-error control. When Metal is selected and
-`--metal-aq` is omitted, the CLI uses fully resident AQ. The
+`--gpu-aq` is omitted, the CLI uses fully resident AQ. The
 CLI also reports prepared-source, selected-attempt, aggregate size-search, and
 end-to-end timing from the profiled workflow API. The
 frontend writes through a
@@ -490,7 +490,7 @@ just encode testdata/codestream_sample.pfm output.jxl 1.0
 # PNG, JPEG, and other formats supported by the installed ImageMagick build:
 just encode input.png output.jxl 1.0
 # Or call gjxl_encode directly with --backend cpu|metal.
-# Default Metal path (equivalent to adding --metal-aq fully-resident):
+# Default Metal path (equivalent to adding --gpu-aq fully-resident):
 build/release/gjxl_encode --distance 1.0 --backend metal \
   testdata/codestream_sample.pfm output.jxl
 # Add --collect-final-score when the terminal encoded-field diagnostic is
@@ -500,16 +500,16 @@ build/release/gjxl_encode --distance 1.0 --high-density \
   testdata/codestream_sample.pfm output.jxl
 # Explicit decision-compatible reference path:
 build/release/gjxl_encode --distance 1.0 --backend metal \
-  --metal-aq exact-coefficients testdata/codestream_sample.pfm output.jxl
+  --gpu-aq exact-coefficients testdata/codestream_sample.pfm output.jxl
 # Preserve the former exhaustive serializer policy without changing AQ:
 build/release/gjxl_encode --distance 1.0 --maximum-compression \
   testdata/codestream_sample.pfm output.jxl
 # Or the explicitly bounded one-update policy:
 build/release/gjxl_encode --distance 1.0 --backend metal \
-  --metal-aq throughput testdata/codestream_sample.pfm output.jxl
+  --gpu-aq throughput testdata/codestream_sample.pfm output.jxl
 # Or the speed-first frame-only policy:
 build/release/gjxl_encode --distance 1.0 --backend metal \
-  --metal-aq maximum-throughput testdata/codestream_sample.pfm output.jxl
+  --gpu-aq maximum-throughput testdata/codestream_sample.pfm output.jxl
 # Closest absolute serialized size within the bounded attempt budget:
 build/release/gjxl_encode --target-bytes 4096 --size-selection closest \
   testdata/codestream_sample.pfm output.jxl

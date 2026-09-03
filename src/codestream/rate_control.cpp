@@ -44,12 +44,12 @@ struct SearchInterval {
 [[nodiscard]] double FinalScore(
   const VarDctEncodingSummary& summary) noexcept {
 
-  const bool resident_metal =
-    summary.execution_backend == VarDctExecutionBackend::kMetal &&
-    (summary.metal_aq_mode ==
+  const bool resident_gpu =
+    summary.execution_backend != VarDctExecutionBackend::kCpu &&
+    (summary.gpu_aq_mode ==
        GpuAdaptiveQuantizationMode::kFullyResident ||
-     summary.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput);
-  return resident_metal || !summary.final_butteraugli_score_evaluated ||
+     summary.gpu_aq_mode == GpuAdaptiveQuantizationMode::kThroughput);
+  return resident_gpu || !summary.final_butteraugli_score_evaluated ||
       summary.score_history.empty()
     ? std::numeric_limits<double>::infinity()
     : summary.score_history.back();

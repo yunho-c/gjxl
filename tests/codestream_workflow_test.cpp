@@ -621,7 +621,7 @@ bool CheckEffortPolicy() {
         summary.final_butteraugli_score_evaluated != (effort <= 3) ||
         summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
-        summary.metal_aq_mode !=
+        summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
       std::cerr << "Metal effort " << effort << " workflow failed: "
                 << status.message() << " history="
@@ -855,38 +855,38 @@ bool CheckInvalidRequestsAreAtomic() {
           {.butteraugli_target = 1.0f,
            .density_mode = gjxl::VarDctDensityMode::kHighDensity,
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .density_mode = gjxl::VarDctDensityMode::kHighDensity,
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kCpu,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kAutomatic,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kCpu,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kAutomatic,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
@@ -894,13 +894,13 @@ bool CheckInvalidRequestsAreAtomic() {
              gjxl::VarDctRateControlMode::kMaximumError,
            .maximum_error = {0.01f, 0.01f, 0.01f},
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                static_cast<gjxl::GpuAdaptiveQuantizationMode>(99)})) {
     std::cerr << "Invalid workflow request changed output\n";
     return false;

@@ -64,6 +64,7 @@ pub enum Backend {
     Auto,
     Cpu,
     Metal,
+    Cuda,
 }
 
 /// Maximum supported explicit CPU thread count.
@@ -72,7 +73,7 @@ pub const MAX_CPU_THREADS: usize = sys::GJXL_MAX_CPU_THREADS as usize;
 /// Immutable execution policy stored by a reusable [`Context`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ContextOptions {
-    /// CPU/Metal backend preference.
+    /// CPU/Metal/CUDA backend preference.
     pub backend: Backend,
     /// Maximum participating CPU threads per encode. `None` selects automatic.
     pub cpu_threads: Option<usize>,
@@ -261,6 +262,7 @@ impl Context {
             Backend::Auto => sys::GJXL_BACKEND_AUTO,
             Backend::Cpu => sys::GJXL_BACKEND_CPU,
             Backend::Metal => sys::GJXL_BACKEND_METAL,
+            Backend::Cuda => sys::GJXL_BACKEND_CUDA,
         } as sys::GJXLBackend;
         options.num_cpu_threads = match context_options.cpu_threads {
             None => 0,
