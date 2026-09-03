@@ -79,6 +79,28 @@ Status AllocationFailure() {
   return Status::OutOfMemory("Codestream assembly allocation failed");
 }
 
+Status WriteValidatedTokenStream(
+  EntropyTokenStreamView tokens,
+  const EntropyCode& code,
+  BitWriter* writer) {
+
+  // The global section has already serialized and therefore validated this
+  // model. Avoid repeating that model-wide validation in every ANS section.
+  return code.mode == EntropyCodingMode::kAns
+    ? codestream_internal::WriteAnsTokenStream(
+        tokens, code, writer)
+    : WriteTokenStream(tokens, code, writer);
+}
+
+Status WriteValidatedTokenStream(
+  std::span<const EntropyToken> tokens,
+  const EntropyCode& code,
+  BitWriter* writer) {
+
+  return WriteValidatedTokenStream(
+    EntropyTokenStreamView::Interleaved(tokens), code, writer);
+}
+
 template <typename Function>
 Status RunParallelSections(size_t count, Function&& function) {
   const auto invoke = [&](size_t index, size_t worker_index) -> Status {
@@ -182,7 +204,8 @@ Status WriteDcGroupSection(
   const ProfileClock::time_point dc_tokens_begin =
     WorkBegin(profile != nullptr);
   const size_t dc_tokens_start = writer->bits_written();
-  if (Status status = WriteTokenStream(dc_tokens, code, writer); !status.ok()) {
+  if (Status status = WriteValidatedTokenStream(
+        dc_tokens, code, writer); !status.ok()) {
     return status;
   }
   written_token_bits = writer->bits_written() - dc_tokens_start;
@@ -202,7 +225,8 @@ Status WriteDcGroupSection(
   const ProfileClock::time_point metadata_tokens_begin =
     WorkBegin(profile != nullptr);
   const size_t metadata_tokens_start = writer->bits_written();
-  Status status = WriteTokenStream(metadata_tokens, code, writer);
+  Status status = WriteValidatedTokenStream(
+    metadata_tokens, code, writer);
   WorkEnd(
     profile != nullptr, metadata_tokens_begin,
     profile == nullptr ? nullptr : &profile->token_write_nanoseconds);
@@ -694,7 +718,7 @@ Status WriteAcSections(
           profile == nullptr ? nullptr : &group_profiles[index];
         const ProfileClock::time_point tokens_begin =
           WorkBegin(group_profile != nullptr);
-        Status token_status = WriteTokenStream(
+        Status token_status = WriteValidatedTokenStream(
           ac.streams[index], ac_code, &candidate[1 + index]);
         WorkEnd(
           group_profile != nullptr, tokens_begin,

@@ -584,7 +584,11 @@ write the final layout directly *and* the serializer can safely consume a
 leased mapped view. That is the broader zero-copy lifetime design already
 deferred above, not a last-mile patch to the current owned-frame contract.
 
-### 5. Re-profile the remaining codestream tail
+### 5. Re-profile the remaining codestream tail (completed)
+
+Status: re-profiled; repeated per-section ANS model validation was removed.
+Reverse-chunk workspace reuse, retained HybridUint tokens, and direct emission
+into the destination writer were measured and rejected.
 
 After coefficient-order parallelization, the likely residuals are:
 
@@ -603,6 +607,96 @@ Do not redesign rANS for Metal at this stage. It is serial within each stream,
 the encoder already parallelizes independent sections, and a GPU design would
 add transfer, dispatch, and synchronization to a comparatively small wall
 boundary.
+
+#### Refreshed tail budget
+
+After Priorities 1-4, a fresh Release run used two warmups and seven retained
+samples in one process. The ordinary balanced path remained byte-stable at
+`410,072` bytes for 1080p and `1,606,911` bytes for 4K:
+
+| Codestream boundary | Padded 1080p | Padded 4K |
+| --- | ---: | ---: |
+| Complete codestream encoding | `16.720 ms` | `36.593 ms` |
+| Direct AC tokenization | `3.636 ms` | `10.661 ms` |
+| Coefficient-order work | `1.077 ms` | `3.165 ms` |
+| Entropy construction | `6.678 ms` | `7.572 ms` |
+| Section writing | `4.215 ms` | `10.403 ms` |
+| DC tokenization | `0.821 ms` | `3.236 ms` |
+| Final codestream assembly | `0.053 ms` | `0.193 ms` |
+
+The corresponding 4K coefficient-tokenization and section-token-write values
+were `48.257` and `60.746 ms`. Those are sums of concurrent worker time, not
+wall latency; they cannot be added to the table above.
+
+#### Rejected rANS and HybridUint experiments
+
+The first rANS prototype retained each worker's reverse-chunk vector across
+sections. Adjacent mutable vector headers initially caused severe false
+sharing; cache-line alignment removed that artifact. Isolating the corrected
+workspace from model validation then showed that reuse itself was consistently
+`0.2-0.5 ms` slower in the 4K section boundary. Allocator churn was therefore
+not the underlying limit, and the workspace was removed.
+
+The balanced AC tokenizer already derives fixed-config HybridUint symbols for
+its prepared populations. A second prototype retained a compact eight-byte
+symbol, extra-bit-count, and extra-bits record per token for final emission.
+At 4K this reduced section writing from `9.851` to `9.170 ms`, but increased AC
+tokenization from `10.739` to `12.777 ms` and complete codestream encoding from
+`36.259` to `41.511 ms`. Complete encode increased from `323.884` to
+`333.384 ms`; all five paired comparisons regressed. The approximately
+`42.5 MiB` of extra live token data at 5.31 million tokens also increased
+memory traffic, so the representation was removed.
+
+Writing reverse chunks directly into the destination `BitWriter` through its
+rollback-safe bounded-allotment API also produced no repeatable wall-time gain
+over the existing temporary writer and append. That prototype was removed.
+
+#### Retained model-validation invariant
+
+Source tracing instead found that every section called the public token writer,
+which revalidated the same complete ANS context map, HybridUint configuration,
+histograms, reciprocal tables, and reverse maps. The global AC or DC section
+had already serialized that model successfully before any section workers
+started, and serialization performs the complete validation.
+
+The retained change makes this invariant explicit: after the global model
+write succeeds, internal section workers call the existing ANS emission
+primitive directly. Public `WriteTokenStream` validation is unchanged, Prefix
+sections retain their existing path, and each section still owns its reverse
+chunks and output writer. No cache or additional token storage survives the
+encode.
+
+Seven alternating independent-process pairs compared revision `827832d` with
+the retained change. Each process performed one warmup and three retained
+samples; values are medians of the seven per-process medians:
+
+| Workload | Boundary | Parent | Validation hoist | Change |
+| --- | --- | ---: | ---: | ---: |
+| padded 1080p | Complete encode | `91.997 ms` | `92.311 ms` | `+0.314 ms` (`+0.3%`) |
+| padded 1080p | Codestream | `17.195 ms` | `16.931 ms` | `-0.264 ms` (`-1.5%`) |
+| padded 1080p | Section writing | `4.293 ms` | `4.006 ms` | `-0.287 ms` (`-6.7%`) |
+| padded 1080p | Section token worker time | `18.830 ms` | `16.891 ms` | `-1.939 ms` (`-10.3%`) |
+| padded 4K | Complete encode | `330.715 ms` | `329.277 ms` | `-1.438 ms` (`-0.4%`) |
+| padded 4K | Codestream | `36.711 ms` | `36.293 ms` | `-0.418 ms` (`-1.1%`) |
+| padded 4K | Section writing | `10.520 ms` | `9.618 ms` | `-0.902 ms` (`-8.6%`) |
+| padded 4K | Section token worker time | `59.706 ms` | `53.599 ms` | `-6.107 ms` (`-10.2%`) |
+
+The 4K section boundary improved in all seven pairs and aggregate worker time
+improved in all seven. The 1080p section boundary improved in five of seven and
+worker time in six. Complete-encode timing remains dominated by the Metal
+quantization pipeline: it improved in four of seven 4K pairs but only two of
+seven 1080p pairs. The retained claim is therefore the causal section-writing
+gain, not a universal end-to-end speedup. Every sample preserved the expected
+encoded size.
+
+The Release policy matrix also completed for efforts 7-10, explicit high
+density, maximum compression, exact coefficients, throughput, maximum
+throughput, and final-score collection. The resulting 1080p sizes were,
+respectively, `410,072`, `410,194`, `409,743`, `409,673`, `409,673`, `419,441`,
+`434,392`, `410,072`, `714,056`, and `410,072` bytes, matching the established
+outputs. The complete Release suite passes 61 of 62 tests; the only failure is
+the pre-existing pinned CPU `quantization_pipeline` score mismatch
+(`0.24919039011001587` actual versus `0.24914586544036865` expected).
 
 ### 6. Combine RGB-to-Opsin with resident input ownership
 
@@ -632,6 +726,10 @@ the current upload and allocation costs.
 - **Add a separate Metal group-major packing pass:** rejected by matched
   profiling and public-workflow A/B results; reset, packing, staging capacity,
   and the mandatory owned copy exceeded the host assembly it replaced.
+- **Reuse reverse-rANS chunk capacity per section worker:** rejected after
+  isolating it from validation; aligned workspaces were still slower.
+- **Retain pre-encoded balanced HybridUint tokens:** rejected because the
+  emission saving was smaller than added tokenization and memory-traffic cost.
 
 ## Qualification gates
 
