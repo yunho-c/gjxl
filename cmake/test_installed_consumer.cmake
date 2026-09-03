@@ -38,10 +38,13 @@ endif()
 execute_process(
   COMMAND
     "${CMAKE_COMMAND}"
+    -G "${GJXL_TEST_GENERATOR}"
     -S "${GJXL_SOURCE_DIR}/tests/downstream"
     -B "${consumer_build}"
     "-DCMAKE_PREFIX_PATH=${install_prefix}"
     "-DCMAKE_BUILD_TYPE=${GJXL_TEST_CONFIG}"
+    "-DCMAKE_C_COMPILER=${GJXL_TEST_C_COMPILER}"
+    "-DCMAKE_CXX_COMPILER=${GJXL_TEST_CXX_COMPILER}"
   RESULT_VARIABLE configure_result
   OUTPUT_VARIABLE configure_output
   ERROR_VARIABLE configure_error
@@ -69,10 +72,15 @@ foreach(
   gjxl_codec_consumer
   gjxl_codestream_consumer
   gjxl_c_consumer)
-  set(consumer_executable "${consumer_build}/${consumer}")
+  if(WIN32)
+    set(consumer_filename "${consumer}.exe")
+  else()
+    set(consumer_filename "${consumer}")
+  endif()
+  set(consumer_executable "${consumer_build}/${consumer_filename}")
   if(NOT EXISTS "${consumer_executable}")
     set(consumer_executable
-      "${consumer_build}/${GJXL_TEST_CONFIG}/${consumer}")
+      "${consumer_build}/${GJXL_TEST_CONFIG}/${consumer_filename}")
   endif()
 
   execute_process(

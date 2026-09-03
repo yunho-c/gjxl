@@ -42,13 +42,19 @@ struct EntropyTokenStreamView {
 
   [[nodiscard]] static constexpr EntropyTokenStreamView Interleaved(
     std::span<const EntropyToken> source) noexcept {
-    return {.tokens = source};
+    return {
+      .tokens = source,
+      .values = {},
+      .contexts = {},
+      .split = false,
+    };
   }
 
   [[nodiscard]] static constexpr EntropyTokenStreamView Split(
     std::span<const uint32_t> source_values,
     std::span<const uint16_t> source_contexts) noexcept {
     return {
+      .tokens = {},
       .values = source_values,
       .contexts = source_contexts,
       .split = true,

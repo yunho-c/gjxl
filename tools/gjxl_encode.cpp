@@ -16,12 +16,22 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <io.h>
+#include <process.h>
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #include "codestream/workflow.h"
 #include "core/ac_strategy.h"
@@ -32,6 +42,90 @@
 namespace {
 
 namespace fs = std::filesystem;
+
+[[nodiscard]] int ProcessId() noexcept {
+#if defined(_WIN32)
+  return _getpid();
+#else
+  return getpid();
+#endif
+}
+
+[[nodiscard]] int OpenExclusive(const fs::path& path) noexcept {
+#if defined(_WIN32)
+  return _wopen(
+    path.c_str(),
+    _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+    _S_IREAD | _S_IWRITE);
+#else
+  return open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+#endif
+}
+
+[[nodiscard]] size_t MaximumDescriptorWrite() noexcept {
+#if defined(_WIN32)
+  return static_cast<size_t>(std::numeric_limits<unsigned int>::max());
+#else
+  return static_cast<size_t>(std::numeric_limits<ssize_t>::max());
+#endif
+}
+
+[[nodiscard]] std::ptrdiff_t WriteDescriptor(
+  int descriptor,
+  const void* data,
+  size_t size) noexcept {
+
+#if defined(_WIN32)
+  return static_cast<std::ptrdiff_t>(
+    _write(descriptor, data, static_cast<unsigned int>(size)));
+#else
+  return static_cast<std::ptrdiff_t>(write(descriptor, data, size));
+#endif
+}
+
+[[nodiscard]] int SynchronizeDescriptor(int descriptor) noexcept {
+#if defined(_WIN32)
+  return _commit(descriptor);
+#else
+  return fsync(descriptor);
+#endif
+}
+
+[[nodiscard]] int CloseDescriptor(int descriptor) noexcept {
+#if defined(_WIN32)
+  return _close(descriptor);
+#else
+  return close(descriptor);
+#endif
+}
+
+[[nodiscard]] bool CommitTemporaryFile(
+  const fs::path& temporary,
+  const fs::path& destination,
+  std::string* error) {
+
+#if defined(_WIN32)
+  if (MoveFileExW(
+        temporary.c_str(), destination.c_str(),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0) {
+    return true;
+  }
+  const std::error_code code(
+    static_cast<int>(GetLastError()), std::system_category());
+  if (error != nullptr) {
+    *error = code.message();
+  }
+  return false;
+#else
+  if (std::rename(temporary.c_str(), destination.c_str()) == 0) {
+    return true;
+  }
+  if (error != nullptr) {
+    *error = std::strerror(errno);
+  }
+  return false;
+#endif
+}
 
 struct Options {
   fs::path input;
@@ -361,12 +455,9 @@ struct Options {
   int descriptor = -1;
   for (size_t attempt = 0; attempt < 100; ++attempt) {
     temporary = destination;
-    temporary += ".tmp." + std::to_string(getpid()) + "." +
+    temporary += ".tmp." + std::to_string(ProcessId()) + "." +
       std::to_string(attempt);
-    descriptor = open(
-      temporary.c_str(),
-      O_WRONLY | O_CREAT | O_EXCL,
-      S_IRUSR | S_IWUSR);
+    descriptor = OpenExclusive(temporary);
     if (descriptor >= 0) {
       break;
     }
@@ -383,7 +474,7 @@ struct Options {
 
   const auto fail = [&](std::string message) {
     const int saved_errno = errno;
-    close(descriptor);
+    (void)CloseDescriptor(descriptor);
     std::error_code ignored;
     fs::remove(temporary, ignored);
     if (message.empty()) {
@@ -397,8 +488,8 @@ struct Options {
     const size_t remaining = bytes.size() - offset;
     const size_t request = std::min(
       remaining,
-      static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
-    const ssize_t written = write(
+      MaximumDescriptorWrite());
+    const std::ptrdiff_t written = WriteDescriptor(
       descriptor,
       bytes.data() + offset,
       request);
@@ -415,12 +506,12 @@ struct Options {
     }
     offset += static_cast<size_t>(written);
   }
-  if (fsync(descriptor) != 0) {
+  if (SynchronizeDescriptor(descriptor) != 0) {
     return fail(
       "Unable to synchronize temporary output: " +
       std::string(std::strerror(errno)));
   }
-  if (close(descriptor) != 0) {
+  if (CloseDescriptor(descriptor) != 0) {
     descriptor = -1;
     std::error_code ignored;
     fs::remove(temporary, ignored);
@@ -430,12 +521,12 @@ struct Options {
   }
   descriptor = -1;
 
-  if (std::rename(temporary.c_str(), destination.c_str()) != 0) {
-    const std::string message = std::strerror(errno);
+  std::string commit_error;
+  if (!CommitTemporaryFile(temporary, destination, &commit_error)) {
     std::error_code ignored;
     fs::remove(temporary, ignored);
     return gjxl::Status::Internal(
-      "Unable to commit output atomically: " + message);
+      "Unable to commit output atomically: " + commit_error);
   }
   return gjxl::Status::Ok();
 }

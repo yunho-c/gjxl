@@ -35,8 +35,13 @@ struct CommandLineOptions {
   size_t samples = 3;
   size_t warmups = 1;
   float butteraugli_target = 1.2f;
+#if GJXL_BENCHMARK_HAS_METAL
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kMetal;
+#else
+  gjxl::VarDctBackendPreference backend =
+    gjxl::VarDctBackendPreference::kCpu;
+#endif
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
   bool metal_aq_explicit = false;

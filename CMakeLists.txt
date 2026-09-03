@@ -12,14 +12,6 @@ project(
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-# TEMP
-if(NOT APPLE)
-  message(FATAL_ERROR
-    "gjxl currently requires macOS")
-endif()
-
-enable_language(OBJCXX)
-
 option(
   GJXL_BUILD_TESTS
   "Build tests"
@@ -43,6 +35,28 @@ option(
   "Emit line tables, recorded sources, and a flat symbol companion for Metal shaders"
   OFF
 )
+
+option(
+  GJXL_ENABLE_METAL
+  "Build the Metal GPU backend"
+  ${APPLE}
+)
+
+option(
+  GJXL_ENABLE_CUDA
+  "Build the CUDA GPU backend"
+  OFF
+)
+
+if(GJXL_ENABLE_METAL)
+  if(NOT APPLE)
+    message(FATAL_ERROR "GJXL_ENABLE_METAL requires an Apple platform")
+  endif()
+  enable_language(OBJCXX)
+elseif(GJXL_ENABLE_METAL_PROFILING)
+  message(FATAL_ERROR
+    "GJXL_ENABLE_METAL_PROFILING requires GJXL_ENABLE_METAL")
+endif()
 
 if(GJXL_ENABLE_LIBJXL_REFERENCE AND
    (GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS))
@@ -340,14 +354,18 @@ target_include_directories(
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
-target_compile_options(
-  gjxl_c
-  PRIVATE
-    -Wall
-    -Wextra
-    -Wpedantic
-    -Werror
-)
+if(MSVC)
+  target_compile_options(gjxl_c PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    gjxl_c
+    PRIVATE
+      -Wall
+      -Wextra
+      -Wpedantic
+      -Werror
+  )
+endif()
 
 target_link_libraries(
   gjxl_c
@@ -508,6 +526,34 @@ target_link_libraries(
     gjxl_codec
     gjxl_gpu
 )
+
+target_link_libraries(
+  gjxl_codestream
+  PUBLIC
+    gjxl_gpu_ops
+)
+
+install(
+  TARGETS
+    gjxl_gpu
+    gjxl_gpu_butteraugli
+    gjxl_gpu_ops
+  EXPORT gjxlTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
+
+install(
+  DIRECTORY src/gpu
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*_internal.h" EXCLUDE
+    PATTERN "*_profile.h" EXCLUDE
+    PATTERN "*_test.h" EXCLUDE
+    PATTERN "metal/kernels" EXCLUDE
+)
+
+if(GJXL_ENABLE_METAL)
 
 # metal-cpp
 add_library(
@@ -1028,23 +1074,9 @@ target_link_libraries(
 
 install(
   TARGETS
-    gjxl_gpu
-    gjxl_gpu_butteraugli
-    gjxl_gpu_ops
     gjxl_metal
   EXPORT gjxlTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
-
-install(
-  DIRECTORY src/gpu
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  FILES_MATCHING
-    PATTERN "*.h"
-    PATTERN "*_internal.h" EXCLUDE
-    PATTERN "*_profile.h" EXCLUDE
-    PATTERN "*_test.h" EXCLUDE
-    PATTERN "metal/kernels" EXCLUDE
 )
 
 target_compile_features(
@@ -1052,6 +1084,14 @@ target_compile_features(
   PRIVATE
     cxx_std_20
 )
+
+target_compile_definitions(
+  gjxl_codestream
+  PRIVATE
+    GJXL_ENABLE_METAL=1
+)
+
+endif()
 
 if(GJXL_BUILD_TESTS)
 
@@ -1063,13 +1103,15 @@ if(GJXL_BUILD_TESTS)
     REQUIRED
   )
 
-  add_test(
-    NAME metal_profile_driver
-    COMMAND
-      "${Python3_EXECUTABLE}"
-      "${CMAKE_CURRENT_SOURCE_DIR}/tests/metal_profile_test.py"
-  )
-  set_tests_properties(metal_profile_driver PROPERTIES LABELS cli)
+  if(GJXL_ENABLE_METAL)
+    add_test(
+      NAME metal_profile_driver
+      COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/metal_profile_test.py"
+    )
+    set_tests_properties(metal_profile_driver PROPERTIES LABELS cli)
+  endif()
 
   find_program(GJXL_IMAGEMAGICK_EXECUTABLE NAMES magick)
   if(GJXL_IMAGEMAGICK_EXECUTABLE)
@@ -1304,6 +1346,12 @@ if(GJXL_BUILD_TESTS)
       gjxl_codestream
   )
 
+  target_compile_definitions(
+    gjxl_codestream_workflow_test
+    PRIVATE
+      GJXL_TEST_HAS_METAL=$<BOOL:${GJXL_ENABLE_METAL}>
+  )
+
   add_test(
     NAME codestream_workflow
     COMMAND gjxl_codestream_workflow_test
@@ -1357,6 +1405,7 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_ENCODER=$<TARGET_FILE:gjxl_encode>"
       "-DGJXL_SAMPLE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
       "-DGJXL_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/codestream-cli-test"
+      "-DGJXL_HAS_METAL=${GJXL_ENABLE_METAL}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunCodestreamCliTest.cmake"
   )
 
@@ -1403,14 +1452,18 @@ if(GJXL_BUILD_TESTS)
       c_std_11
   )
 
-  target_compile_options(
-    gjxl_c_api_test
-    PRIVATE
-      -Wall
-      -Wextra
-      -Wpedantic
-      -Werror
-  )
+  if(MSVC)
+    target_compile_options(gjxl_c_api_test PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      gjxl_c_api_test
+      PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+    )
+  endif()
 
   target_link_libraries(
     gjxl_c_api_test
@@ -1434,14 +1487,18 @@ if(GJXL_BUILD_TESTS)
       cxx_std_20
   )
 
-  target_compile_options(
-    gjxl_c_api_cpp_test
-    PRIVATE
-      -Wall
-      -Wextra
-      -Wpedantic
-      -Werror
-  )
+  if(MSVC)
+    target_compile_options(gjxl_c_api_cpp_test PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      gjxl_c_api_cpp_test
+      PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+    )
+  endif()
 
   target_link_libraries(
     gjxl_c_api_cpp_test
@@ -2081,6 +2138,8 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_gpu_image_test
   )
 
+  if(GJXL_ENABLE_METAL)
+
   add_executable(
     gjxl_gpu_primitives_metal_test
     tests/gpu_primitives_metal_test.cpp
@@ -2401,6 +2460,8 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_quantization_gpu_pipeline_test
   )
 
+  endif()
+
   add_test(
     NAME codec_install_consumer
     COMMAND
@@ -2408,6 +2469,9 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
       "-DGJXL_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       "-DGJXL_TEST_CONFIG=$<CONFIG>"
+      "-DGJXL_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      "-DGJXL_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
+      "-DGJXL_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_consumer.cmake"
   )
 endif()
@@ -2425,30 +2489,32 @@ if(GJXL_BUILD_BENCHMARKS)
       gjxl_pfm_io
   )
 
-  add_executable(
-    gjxl_metal_butteraugli_benchmark
-    benchmarks/metal_butteraugli_benchmark.cpp
-  )
+  if(GJXL_ENABLE_METAL)
+    add_executable(
+      gjxl_metal_butteraugli_benchmark
+      benchmarks/metal_butteraugli_benchmark.cpp
+    )
 
-  target_link_libraries(
-    gjxl_metal_butteraugli_benchmark
-    PRIVATE
-      gjxl_codec
-      gjxl_butteraugli_fixtures
-      gjxl_metal
-  )
+    target_link_libraries(
+      gjxl_metal_butteraugli_benchmark
+      PRIVATE
+        gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_metal
+    )
 
-  target_compile_definitions(
-    gjxl_metal_butteraugli_benchmark
-    PRIVATE
-      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
-      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
-  )
+    target_compile_definitions(
+      gjxl_metal_butteraugli_benchmark
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
 
-  add_dependencies(
-    gjxl_metal_butteraugli_benchmark
-    gjxl_metal_shaders
-  )
+    add_dependencies(
+      gjxl_metal_butteraugli_benchmark
+      gjxl_metal_shaders
+    )
+  endif()
 
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(
@@ -2471,43 +2537,45 @@ if(GJXL_BUILD_BENCHMARKS)
     )
   endif()
 
-  add_executable(
-    gjxl_encoding_benchmark
-    benchmarks/encoding_benchmark.cpp
-  )
-
-  target_link_libraries(
-    gjxl_encoding_benchmark
-    PRIVATE
-      gjxl_codestream
-      gjxl_metal
-      gjxl_pfm_io
-  )
-
-  target_compile_definitions(
-    gjxl_encoding_benchmark
-    PRIVATE
-      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
-  )
-
-  add_dependencies(
-    gjxl_encoding_benchmark
-    gjxl_embedded_metal_shaders
-  )
-
-  if(GJXL_BUILD_TESTS)
-    add_test(
-      NAME encoding_benchmark_cli
-      COMMAND
-        "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoding_benchmark_cli_test.py"
-        --benchmark $<TARGET_FILE:gjxl_encoding_benchmark>
-        --metallib "${GJXL_METALLIB}"
+  if(GJXL_ENABLE_METAL)
+    add_executable(
+      gjxl_encoding_benchmark
+      benchmarks/encoding_benchmark.cpp
     )
-    set_tests_properties(
-      encoding_benchmark_cli
-      PROPERTIES LABELS "benchmark;cli;metal"
+
+    target_link_libraries(
+      gjxl_encoding_benchmark
+      PRIVATE
+        gjxl_codestream
+        gjxl_metal
+        gjxl_pfm_io
     )
+
+    target_compile_definitions(
+      gjxl_encoding_benchmark
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
+
+    add_dependencies(
+      gjxl_encoding_benchmark
+      gjxl_embedded_metal_shaders
+    )
+
+    if(GJXL_BUILD_TESTS)
+      add_test(
+        NAME encoding_benchmark_cli
+        COMMAND
+          "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoding_benchmark_cli_test.py"
+          --benchmark $<TARGET_FILE:gjxl_encoding_benchmark>
+          --metallib "${GJXL_METALLIB}"
+      )
+      set_tests_properties(
+        encoding_benchmark_cli
+        PROPERTIES LABELS "benchmark;cli;metal"
+      )
+    endif()
   endif()
 
   add_executable(
@@ -2521,77 +2589,85 @@ if(GJXL_BUILD_BENCHMARKS)
       gjxl_codestream
   )
 
-  add_dependencies(
+  target_compile_definitions(
     gjxl_image_batch_benchmark
-    gjxl_embedded_metal_shaders
-  )
-
-  add_executable(
-    gjxl_dct_benchmark
-    benchmarks/dct_benchmark.cpp
-  )
-
-  target_link_libraries(
-    gjxl_dct_benchmark
     PRIVATE
-      gjxl_metal
+      GJXL_BENCHMARK_HAS_METAL=$<BOOL:${GJXL_ENABLE_METAL}>
   )
 
-  target_compile_definitions(
-    gjxl_dct_benchmark
-    PRIVATE
-      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
-  )
+  if(GJXL_ENABLE_METAL)
+    add_dependencies(
+      gjxl_image_batch_benchmark
+      gjxl_embedded_metal_shaders
+    )
 
-  add_dependencies(
-    gjxl_dct_benchmark
-    gjxl_metal_shaders
-  )
+    add_executable(
+      gjxl_dct_benchmark
+      benchmarks/dct_benchmark.cpp
+    )
 
-  add_executable(
-    gjxl_ac_strategy_benchmark
-    benchmarks/ac_strategy_benchmark.cpp
-  )
+    target_link_libraries(
+      gjxl_dct_benchmark
+      PRIVATE
+        gjxl_metal
+    )
 
-  target_link_libraries(
-    gjxl_ac_strategy_benchmark
-    PRIVATE
-      gjxl_codec
-      gjxl_metal
-  )
+    target_compile_definitions(
+      gjxl_dct_benchmark
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+    )
 
-  target_compile_definitions(
-    gjxl_ac_strategy_benchmark
-    PRIVATE
-      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
-  )
+    add_dependencies(
+      gjxl_dct_benchmark
+      gjxl_metal_shaders
+    )
 
-  add_dependencies(
-    gjxl_ac_strategy_benchmark
-    gjxl_metal_shaders
-  )
+    add_executable(
+      gjxl_ac_strategy_benchmark
+      benchmarks/ac_strategy_benchmark.cpp
+    )
 
-  add_executable(
-    gjxl_ac_strategy_search_benchmark
-    benchmarks/ac_strategy_search_benchmark.cpp
-  )
+    target_link_libraries(
+      gjxl_ac_strategy_benchmark
+      PRIVATE
+        gjxl_codec
+        gjxl_metal
+    )
 
-  target_link_libraries(
-    gjxl_ac_strategy_search_benchmark
-    PRIVATE
-      gjxl_gpu_ops
-      gjxl_metal
-  )
+    target_compile_definitions(
+      gjxl_ac_strategy_benchmark
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+    )
 
-  target_compile_definitions(
-    gjxl_ac_strategy_search_benchmark
-    PRIVATE
-      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
-  )
+    add_dependencies(
+      gjxl_ac_strategy_benchmark
+      gjxl_metal_shaders
+    )
 
-  add_dependencies(
-    gjxl_ac_strategy_search_benchmark
-    gjxl_metal_shaders
-  )
+    add_executable(
+      gjxl_ac_strategy_search_benchmark
+      benchmarks/ac_strategy_search_benchmark.cpp
+    )
+
+    target_link_libraries(
+      gjxl_ac_strategy_search_benchmark
+      PRIVATE
+        gjxl_gpu_ops
+        gjxl_metal
+    )
+
+    target_compile_definitions(
+      gjxl_ac_strategy_search_benchmark
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+    )
+
+    add_dependencies(
+      gjxl_ac_strategy_search_benchmark
+      gjxl_metal_shaders
+    )
+  endif()
 
 endif()

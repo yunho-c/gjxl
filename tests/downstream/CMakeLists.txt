@@ -29,6 +29,14 @@ target_link_libraries(
     gjxl::codestream
 )
 
+if(TARGET gjxl::metal)
+  target_compile_definitions(
+    gjxl_codestream_consumer
+    PRIVATE
+      GJXL_DOWNSTREAM_HAS_METAL=1
+  )
+endif()
+
 add_executable(
   gjxl_c_consumer
   c_api_consumer.c
@@ -46,14 +54,18 @@ target_compile_features(
     c_std_11
 )
 
-target_compile_options(
-  gjxl_c_consumer
-  PRIVATE
-    -Wall
-    -Wextra
-    -Wpedantic
-    -Werror
-)
+if(MSVC)
+  target_compile_options(gjxl_c_consumer PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    gjxl_c_consumer
+    PRIVATE
+      -Wall
+      -Wextra
+      -Wpedantic
+      -Werror
+  )
+endif()
 
 target_link_libraries(
   gjxl_c_consumer

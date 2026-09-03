@@ -603,6 +603,7 @@ bool CheckEffortPolicy() {
     }
   }
 
+#if GJXL_TEST_HAS_METAL
   for (const int32_t effort : {1, 7, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
     const size_t expected_score_count = effort <= 3
@@ -628,6 +629,7 @@ bool CheckEffortPolicy() {
       return false;
     }
   }
+#endif
   return true;
 }
 

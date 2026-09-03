@@ -32,7 +32,9 @@
 #include "core/frame_geometry.h"
 #include "core/image_buffer.h"
 #include "core/thread_budget.h"
+#if defined(GJXL_ENABLE_METAL)
 #include "gpu/metal/metal_backend.h"
+#endif
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/quantization_pipeline.h"
@@ -307,6 +309,8 @@ Status ValidateRateControlOptions(
   return Status::Ok();
 }
 
+#if defined(GJXL_ENABLE_METAL)
+
 MetalBackendOptions ProductionMetalBackendOptions() {
   constexpr auto implementation =
     MetalDctImplementation::kSimdgroupMatmul;
@@ -355,6 +359,19 @@ Status ResolveProductionMetalBackend(GpuBackend** out) {
   *out = cache.backend.get();
   return Status::Ok();
 }
+
+#else
+
+Status ResolveProductionMetalBackend(GpuBackend** out) {
+  if (out == nullptr) {
+    return Status::InvalidArgument(
+      "Production Metal backend output pointer is null");
+  }
+  *out = nullptr;
+  return Status::Unavailable("Metal backend is not built");
+}
+
+#endif
 
 bool HasRequiredGpuQuantizationCapabilities(
   GpuBackend& backend,
