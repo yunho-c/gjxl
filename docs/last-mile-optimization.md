@@ -27,7 +27,7 @@ After that policy change, the recommended GJXL-owned order is:
 1. retain the qualified, purgeable exact-capacity Metal AQ workspace leases;
    keep Butteraugli storage per-encode because its idle high-water cost is not
    justified;
-2. parallelize coefficient-order zero statistics;
+2. retain the completed deterministic coefficient-order group reduction;
 3. optimize the existing effort-7 AC-strategy kernels without pruning the
    libjxl-grounded candidate search;
 4. prototype group-major packing in the existing final Metal submission;
@@ -309,31 +309,69 @@ Butteraugli allocation. Two AQ arenas already produce a substantial no-pressure
 high-water mark. Pooling another 33 working planes is not justified without a
 broader cache budget, eviction policy, and an explicit application trim seam.
 
-### 2. Parallelize coefficient-order zero statistics
+### 2. Parallelize coefficient-order zero statistics (completed)
+
+Status: implemented, byte-stable across thread budgets and compression
+policies, and retained.
 
 `ComputeSimpleCoefficientOrdersForEncoder()` scans every AC transform into
 per-family, per-channel zero counts on one thread. It takes `17.28 ms` in the
 independent-process 4K cohort and remains around `15-16 ms` throughout the
 thread sweep.
 
-A bounded design is:
+The implementation uses the bounded design:
 
-1. partition AC groups over the existing CPU budget;
-2. give each worker compact per-family, per-channel integer counts;
-3. reduce counts in deterministic group or worker order;
-4. preserve the current stable tie behavior and emitted order bytes; and
-5. run Lehmer tokenization only after the reduction.
+1. materialize validated, read-only AC-group views on the caller;
+2. partition sufficiently large frames over at most eight participants from the
+   existing CPU budget;
+3. give each worker compact per-family, per-channel `uint64_t` zero counts;
+4. reduce workers in fixed worker, family, channel, and coefficient order with
+   checked addition;
+5. preserve the current stable sort and run Lehmer tokenization only after the
+   reduction.
 
-For effort-7 DCT8-only sampling, precompute sampling decisions in the current
-serial traversal order or otherwise prove identical xorshift consumption.
-Efforts 8-10, high density, and maximum compression must retain their full
-statistics. The integer reduction itself is exact; overflow and allocation
-failures must remain atomic.
+For effort-7 DCT8-only sampling, the caller precomputes one-byte decisions in
+the original group/anchor traversal order before launching workers. The
+xorshift state therefore advances identically. Mixed strategy grids, efforts
+8-10, high density, and maximum compression retain full statistics.
+One-participant and small-image paths use a direct accumulator without
+worker-local reduction. All allocations and intermediate counts remain local
+until the validated result is committed to the caller.
 
-An ideal four-way result would save roughly `13 ms`, but memory bandwidth and
-worker setup will reduce that ceiling. The actual acceptance criterion is a
-repeatable complete-encode improvement with unchanged bytes outside the
-already-qualified effort-7 sampling case.
+Five alternating independent-process pairs compared the purgeable-workspace
+parent with the coefficient-order implementation. Each process performed one
+warmup and three retained samples; values are medians of per-process medians:
+
+| Workload | Stage | Parent | Parallel orders | Change |
+| --- | --- | ---: | ---: | ---: |
+| padded 1080p | Complete encode | `99.712 ms` | `97.163 ms` | `-2.549 ms` (`-2.6%`) |
+| padded 1080p | Codestream | `20.750 ms` | `17.311 ms` | `-3.439 ms` (`-16.6%`) |
+| padded 1080p | Coefficient order | `4.402 ms` | `1.021 ms` | `-3.381 ms` (`-76.8%`) |
+| padded 4K | Complete encode | `342.311 ms` | `329.620 ms` | `-12.691 ms` (`-3.7%`) |
+| padded 4K | Codestream | `53.018 ms` | `39.398 ms` | `-13.621 ms` (`-25.7%`) |
+| padded 4K | Coefficient order | `17.191 ms` | `3.528 ms` | `-13.663 ms` (`-79.5%`) |
+
+All ten paired complete encodes favored the implementation. Every output kept
+the parent size: `410,072` bytes at 1080p and `1,606,911` bytes at 4K.
+
+A five-sample, one-process padded-4K thread sweep confirms that the gain follows
+the requested budget rather than oversubscribing it:
+
+| CPU participants | Parent order | Parallel order |
+| ---: | ---: | ---: |
+| 1 | `15.887 ms` | `16.158 ms` |
+| 2 | `17.416 ms` | `9.445 ms` |
+| 4 | `17.522 ms` | `4.841 ms` |
+| 8 | `15.626 ms` | `3.111 ms` |
+| automatic | `16.320 ms` | `3.192 ms` |
+
+The one-participant complete encode in that diagnostic improved from `454.211`
+to `449.635 ms`; the `0.271 ms` order difference is within the noise and
+bookkeeping cost of the serial view traversal. A dedicated 513-by-513 test
+observed multiple participants and proves identical full and sampled orders as
+well as identical complete codestream bytes at one and eight participants.
+The effort 7, 8, 9, 10, explicit high-density, and maximum-compression matrix
+also preserved parent sizes and the selected order-family mask.
 
 ### 3. Optimize AC-strategy kernels, not the effort-7 search policy
 
