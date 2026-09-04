@@ -1,6 +1,6 @@
 # CUDA optimization study S1
 
-- Status: profiling complete; S1.1-S1.5 implemented
+- Status: profiling complete; S1.1-S1.5 and the packed-DCT follow-up implemented
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -464,6 +464,72 @@ with the double-precision DCT reference, exact-mode CPU/CUDA codestream
 identity, and iteration-zero fully-resident codestream identity. The ignored
 trace artifacts are `s13_fully_resident_1080p.nsys-rep` and its SQLite export
 under `build-cuda-ninja/profiles`.
+
+#### S1.3 follow-up: pack the remaining AC-search DCT shapes (2026-09-04)
+
+The current padded-4K trace exposed a different transform mix after the first
+S1.3 specializations removed the formerly dominant 32-wide cost. The generic
+8x8 kernel assigned one 256-thread block to only 64 coefficients, while 16x8
+and 8x16 used only 128 lanes. The still-generic 16x16 path occupied every lane
+but retained the horizontal pass's divergent constant-memory basis access.
+Together those four shapes consumed `119.601 ms` in AC search, 77.4% of its
+DCT time and 28.4% of all GPU kernel execution.
+
+This follow-up adds compile-time kernels that execute four independent 8x8
+transforms or two independent 128-coefficient transforms in each 256-thread
+block. The 16x16 kernel uses one transform per block. All four variants load a
+single padded horizontal-basis tile into shared memory and give every thread
+one coefficient. A partial final block is explicitly masked. The dense basis,
+coefficient layout, scaling, per-output accumulation order, and public
+standalone transform contract remain unchanged.
+
+Seven alternating independent-process parent/candidate pairs used the
+synthetic odd `3839x2159` workload, distance `1.2`, effort `7`, fully-resident
+AQ, one internal warmup, and one retained GPU-only sample. Times are cohort
+medians in milliseconds; the paired ratio is also reported because host work
+and laptop boost state remained noisy:
+
+| Stage | Parent `39397b7` | Packed DCT | Cohort change | Median paired change |
+|---|---:|---:|---:|---:|
+| Complete workflow | 929.948 | 776.815 | -16.5% | -12.8% |
+| Quantization pipeline | 635.794 | 530.151 | -16.6% | -14.4% |
+
+All seven quantization pairs favored the packed kernels. Parent quantization
+ranged from `613.765-664.463 ms`; the candidate ranged from
+`523.044-590.200 ms`. Complete-workflow ranges were `830.120-1043.372 ms`
+and `763.330-987.404 ms`, respectively. Two complete-workflow pairs regressed
+despite faster quantization because the CPU codestream stage varied
+independently; the quantization and GPU-timeline results are the reliable
+signals for this checkpoint.
+
+Matched warmed padded-4K Nsight Systems captures isolate the intended change:
+
+| GPU scope | Parent | Packed DCT | Change |
+|---|---:|---:|---:|
+| All kernel execution | 420.943 ms | 332.657 ms | -21.0% |
+| AC-strategy search | 210.652 ms | 123.390 ms | -41.4% |
+| AC-search DCT | 154.592 ms | 64.583 ms | -58.2% |
+| Targeted 8x8/16x8/8x16/16x16 DCT | 119.601 ms | 26.521 ms | -77.8% |
+| Resident AQ and reconstruction | 180.324 ms | 179.315 ms | -0.6% |
+
+Kernel launch count remains 516 because packing reduces the grid size of each
+small-shape dispatch rather than its launch count. AC search is no longer the
+largest phase in the candidate trace: resident AQ and reconstruction now lead
+at `179.315 ms`. The unchanged 32-wide DCT families were collectively about
+3 ms slower in the candidate trace, consistent with the session's clock and
+thermal variation; the packed families still saved about 93 ms on their own.
+
+All 53 tests passed in the CUDA build. The CUDA transform test covers every
+supported shape against the double-precision reference, and the CUDA
+AC-strategy test covers CPU cost parity, resident quant-norm evaluation,
+invalid descriptors, and submission failure behavior. Compute Sanitizer
+memcheck reported zero errors for the CUDA AC-strategy suite. Parent and
+candidate effort-7 and effort-9 fully-resident encodes of
+`testdata/codestream_sample.pfm` were byte-identical, with SHA-256 values
+`61be086bab4db87984699245cc0fe2eef107050d667b1070c5d93e3a25a37f5d`
+and `14dfb18d19fd11e590513b3a2188fc97bd2c8402ceaad61a46f3a65cac32eab3`,
+respectively. Ignored trace artifacts use the `s17_ac_packed_4k` prefix under
+`build-cuda-ninja/profiles`.
 
 ### S1.4: move input preparation to CUDA
 
