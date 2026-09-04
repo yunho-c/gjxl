@@ -456,10 +456,27 @@ void ValidateStageProfile(const Sample &sample) {
   }
   const size_t complete =
       static_cast<size_t>(jxl::EncoderProfilePhase::kCompleteSerializer);
-  if (phase_sum != profile.phase_nanoseconds[complete] ||
-      profile.phase_invocations[complete] != 1) {
+  if (phase_sum != profile.phase_nanoseconds[complete]) {
+    std::ostringstream details;
+    details << "libjxl serializer phase union does not match its wall phases: "
+            << "phase_sum=" << phase_sum
+            << " complete=" << profile.phase_nanoseconds[complete]
+            << " complete_invocations="
+            << profile.phase_invocations[complete] << " phases=";
+    for (size_t stage = 0; stage + 1 < kPhaseNames.size(); ++stage) {
+      if (stage != 0) details << ',';
+      details << kPhaseNames[stage] << ':'
+              << profile.phase_nanoseconds[stage] << '/'
+              << profile.phase_invocations[stage];
+    }
+    throw std::runtime_error(details.str());
+  }
+  // An encode can serialize multiple internal frames, each with its own
+  // profiling session. kCompleteSerializer is their accumulated phase union,
+  // so its invocation count is not necessarily one.
+  if (profile.phase_invocations[complete] == 0) {
     throw std::runtime_error(
-        "libjxl serializer phase union does not match its wall phases");
+        "libjxl stage profile has no serializer session");
   }
   for (size_t work = 0; work < kWorkNames.size(); ++work) {
     if (profile.work_nanoseconds[work] == 0 ||

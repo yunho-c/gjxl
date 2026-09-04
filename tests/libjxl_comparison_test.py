@@ -461,6 +461,10 @@ class RawSummaryTest(unittest.TestCase):
                 "phase": {name: 1 for name in phase},
                 "work": {name: 2 for name in work},
             }
+            # Encodes with internal frames legitimately create more than one
+            # serializer profiling session while retaining one additive phase
+            # union for the complete encode.
+            invocations["phase"]["complete_serializer"] = 2
             counts = {
                 "token_count": 1000,
                 "histogram_count": 10,
@@ -518,6 +522,12 @@ class RawSummaryTest(unittest.TestCase):
             self.assertEqual(
                 row["stage_profile"]["serializer_percent_of_complete_encode"],
                 10.0,
+            )
+            self.assertEqual(
+                row["stage_profile"]["invocation_counts"]["phase"][
+                    "complete_serializer"
+                ],
+                2,
             )
             aggregate = comparison.aggregate_rows([row, row])[0]
             self.assertEqual(
