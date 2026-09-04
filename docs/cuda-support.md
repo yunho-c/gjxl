@@ -10,9 +10,9 @@ Implementation progress as of this revision:
 
 - portable CPU-only, independently selectable Metal, and independently
   selectable CUDA builds are in place;
-- CUDA owns a non-blocking stream, device-scoped RAII allocations, synchronous
-  checked transfers, event-backed submissions, deterministic failure
-  injection, and backend/device ownership validation;
+- each CUDA execution lane owns a non-blocking stream, device-scoped RAII
+  allocations, stream-ordered checked transfers, event-backed submissions,
+  deterministic failure injection, and backend/device ownership validation;
 - all nine VarDCT transform shapes and the shared affine, convolution,
   symmetric-convolution, and maximum-reduction primitives pass real-device
   conformance on compute capability 8.6;
@@ -433,12 +433,15 @@ single CUDA stream is sufficient for the first correct implementation and
 preserves ordering, but it may serialize otherwise independent prepared
 objects.
 
-The implemented CUDA backend owns one non-blocking stream and serializes stream
-submission with a mutex. Prepared AQ and Butteraugli objects own independent
-arenas, so they are thread-safe even though work submitted through one backend
-is ordered on that stream. A bounded stream pool or per-operation stream lease
-can be introduced after concurrency and memory-pressure profiling demonstrates
-that overlap is worth its extra memory cost.
+Each implemented CUDA backend owns one non-blocking stream and serializes
+stream submission and host transfers with a mutex. Production worker threads
+are assigned to one of two persistent backend lanes, while explicitly created
+backends retain one private lane. Prepared AQ and Butteraugli objects own
+independent arenas, so work on different production lanes can overlap without
+sharing per-image device buffers. Two lanes bound simultaneous GPU execution
+without creating one stream per context. The cap follows local single-stream
+profiling in which maximum-throughput encoding stopped improving between two
+and four in-flight 1080p requests.
 
 The resident policy contains many launches with stable allocations and mostly
 stable geometry. Once the ordinary stream implementation is correct, it is a

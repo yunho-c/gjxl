@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -384,22 +385,31 @@ Status ResolveProductionCudaBackend(GpuBackend** out) {
       "Production CUDA backend output pointer is null");
   }
   *out = nullptr;
+  constexpr size_t kLaneCount = 2;
   struct Cache {
     std::mutex mutex;
-    std::unique_ptr<GpuBackend> backend;
+    std::array<std::unique_ptr<GpuBackend>, kLaneCount> backends;
+    std::atomic<size_t> next_lane{0};
   };
   static Cache cache;
+  thread_local const size_t lane =
+    cache.next_lane.fetch_add(1, std::memory_order_relaxed) % kLaneCount;
   std::lock_guard lock(cache.mutex);
-  if (cache.backend == nullptr) {
-    Status status = CreateCudaBackend(&cache.backend);
-    if (!status.ok()) {
-      return status;
-    }
-    if (cache.backend == nullptr) {
-      return Status::Internal("CUDA factory returned no backend");
+  // Initialize every lane before publishing the first one. Backend creation
+  // initializes device-global DCT constants and must not race work already
+  // running on another non-blocking lane.
+  for (std::unique_ptr<GpuBackend>& backend : cache.backends) {
+    if (backend == nullptr) {
+      Status status = CreateCudaBackend(&backend);
+      if (!status.ok()) {
+        return status;
+      }
+      if (backend == nullptr) {
+        return Status::Internal("CUDA factory returned no backend");
+      }
     }
   }
-  *out = cache.backend.get();
+  *out = cache.backends[lane].get();
   return Status::Ok();
 }
 

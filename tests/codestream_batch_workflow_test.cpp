@@ -248,13 +248,70 @@ bool CheckSharedMetalBackendIfAvailable() {
   return true;
 }
 
+bool CheckBoundedCudaBackendsIfAvailable() {
+#if !GJXL_TEST_HAS_CUDA
+  return true;
+#else
+  ImageStorage image(8);
+  const gjxl::VarDctEncodingOptions options = {
+    .butteraugli_target = 1.2f,
+    .backend = gjxl::VarDctBackendPreference::kCuda,
+    .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+  };
+  std::vector<uint8_t> expected_codestream;
+  gjxl::VarDctEncodingSummary expected_summary;
+  gjxl::Status status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(), options, &expected_codestream, &expected_summary);
+  if (status.code() == gjxl::StatusCode::kUnavailable) {
+    std::cout << "CUDA batch check skipped: " << status.message() << '\n';
+    return true;
+  }
+  if (!status.ok()) {
+    std::cerr << "CUDA batch reference failed: "
+              << status.message() << '\n';
+    return false;
+  }
+
+  constexpr size_t kImageCount = 8;
+  constexpr size_t kRepetitions = 4;
+  std::vector<gjxl::VarDctBatchEncodingRequest> requests(
+    kImageCount, {.linear_rgb = image.View(), .options = options});
+  std::unique_ptr<gjxl::VarDctBatchEncoder> encoder;
+  status = gjxl::VarDctBatchEncoder::Create(kImageCount, &encoder);
+  if (!status.ok() || encoder == nullptr) {
+    return false;
+  }
+  for (size_t repetition = 0; repetition < kRepetitions; ++repetition) {
+    std::vector<gjxl::VarDctBatchEncodingResult> results;
+    status = encoder->Encode(requests, &results);
+    if (!status.ok() || results.size() != kImageCount) {
+      std::cerr << "Concurrent CUDA batch scheduling failed\n";
+      return false;
+    }
+    for (size_t index = 0; index < results.size(); ++index) {
+      if (!results[index].status.ok() ||
+          results[index].codestream != expected_codestream ||
+          results[index].summary != expected_summary ||
+          results[index].summary.execution_backend !=
+            gjxl::VarDctExecutionBackend::kCuda) {
+        std::cerr << "Concurrent CUDA result " << index
+                  << " changed the single-image output\n";
+        return false;
+      }
+    }
+  }
+  return true;
+#endif
+}
+
 }  // namespace
 
 int main() {
   if (!CheckBatchMatchesSequential() ||
       !CheckPerImageFailureAndEmptyBatch() ||
       !CheckInvalidDriverArguments() ||
-      !CheckSharedMetalBackendIfAvailable()) {
+      !CheckSharedMetalBackendIfAvailable() ||
+      !CheckBoundedCudaBackendsIfAvailable()) {
     return EXIT_FAILURE;
   }
   std::cout << "Codestream batch workflow checks passed\n";

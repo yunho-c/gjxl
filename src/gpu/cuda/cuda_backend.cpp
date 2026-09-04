@@ -224,9 +224,13 @@ Status CudaBackend::CopyHostToDevice(
   }
   auto* pointer = static_cast<std::byte*>(cuda_dst->pointer()) +
     dst_offset_bytes;
-  return CudaRuntimeStatus(
-    cudaMemcpy(pointer, src, size_bytes, cudaMemcpyHostToDevice),
-    "Copy host data to CUDA buffer");
+  std::lock_guard lock(state_->submission_mutex);
+  cudaError_t error = cudaMemcpyAsync(
+    pointer, src, size_bytes, cudaMemcpyHostToDevice, state_->stream);
+  if (error == cudaSuccess) {
+    error = cudaStreamSynchronize(state_->stream);
+  }
+  return CudaRuntimeStatus(error, "Copy host data to CUDA buffer");
 }
 
 Status CudaBackend::CopyHostToDevice2D(
@@ -278,13 +282,18 @@ Status CudaBackend::CopyHostToDevice2D(
   }
   auto* pointer = static_cast<std::byte*>(cuda_dst->pointer()) +
     dst_offset_bytes;
-  const cudaError_t error =
+  std::lock_guard lock(state_->submission_mutex);
+  cudaError_t error =
     src_row_stride_bytes == row_bytes && dst_row_stride_bytes == row_bytes
-      ? cudaMemcpy(pointer, src, row_count * row_bytes,
-                   cudaMemcpyHostToDevice)
-      : cudaMemcpy2D(pointer, dst_row_stride_bytes, src,
-                     src_row_stride_bytes, row_bytes, row_count,
-                     cudaMemcpyHostToDevice);
+      ? cudaMemcpyAsync(
+          pointer, src, row_count * row_bytes, cudaMemcpyHostToDevice,
+          state_->stream)
+      : cudaMemcpy2DAsync(
+          pointer, dst_row_stride_bytes, src, src_row_stride_bytes,
+          row_bytes, row_count, cudaMemcpyHostToDevice, state_->stream);
+  if (error == cudaSuccess) {
+    error = cudaStreamSynchronize(state_->stream);
+  }
   return CudaRuntimeStatus(error, "Copy 2D host data to CUDA buffer");
 }
 
@@ -317,9 +326,13 @@ Status CudaBackend::CopyDeviceToHost(
   }
   const auto* pointer = static_cast<const std::byte*>(cuda_src->pointer()) +
     src_offset_bytes;
-  return CudaRuntimeStatus(
-    cudaMemcpy(dst, pointer, size_bytes, cudaMemcpyDeviceToHost),
-    "Copy CUDA buffer to host");
+  std::lock_guard lock(state_->submission_mutex);
+  cudaError_t error = cudaMemcpyAsync(
+    dst, pointer, size_bytes, cudaMemcpyDeviceToHost, state_->stream);
+  if (error == cudaSuccess) {
+    error = cudaStreamSynchronize(state_->stream);
+  }
+  return CudaRuntimeStatus(error, "Copy CUDA buffer to host");
 }
 
 Status CudaBackend::SubmitCompute(

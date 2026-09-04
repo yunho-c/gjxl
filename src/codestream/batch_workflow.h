@@ -27,11 +27,12 @@ struct VarDctBatchEncodingResult {
 /// Persistent bounded-concurrency driver for independent image encodes.
 ///
 /// Each worker executes the existing single-image public workflow, preserving
-/// its codec decisions and atomic output behavior. Metal requests share the
-/// process-wide production backend while retaining independent per-image
+/// its codec decisions and atomic output behavior. Metal requests share one
+/// process-wide production backend. CUDA worker threads are distributed over
+/// a bounded production-backend lane set. Both retain independent per-image
 /// preparation and scratch. This permits CPU preparation and serialization
 /// for one image to overlap another image's GPU work; it does not fuse images
-/// into one Metal dispatch.
+/// into one GPU dispatch.
 ///
 /// One Encode call runs every request and preserves request order in results.
 /// Individual failures are reported in the matching result. A successful

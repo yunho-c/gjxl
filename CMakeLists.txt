@@ -1473,6 +1473,12 @@ if(GJXL_BUILD_TESTS)
       gjxl_codestream
   )
 
+  target_compile_definitions(
+    gjxl_codestream_batch_workflow_test
+    PRIVATE
+      GJXL_TEST_HAS_CUDA=$<BOOL:${GJXL_ENABLE_CUDA}>
+  )
+
   add_test(
     NAME codestream_batch_workflow
     COMMAND gjxl_codestream_batch_workflow_test

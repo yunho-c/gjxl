@@ -3,12 +3,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1313,6 +1315,72 @@ bool CheckPublicWorkflow(
   return true;
 }
 
+bool CheckConcurrentPublicWorkflow(gjxl::GpuBackend& gpu) {
+  constexpr gjxl::Extent2D kConcurrentExtent{512, 384};
+  ImageStorage source(kConcurrentExtent);
+  for (size_t y = 0; y < kConcurrentExtent.height; ++y) {
+    for (size_t x = 0; x < kConcurrentExtent.width; ++x) {
+      const size_t pixel = y * source.stride + x;
+      const float fx = static_cast<float>(x) /
+        static_cast<float>(kConcurrentExtent.width - 1);
+      const float fy = static_cast<float>(y) /
+        static_cast<float>(kConcurrentExtent.height - 1);
+      source.plane[0][pixel] = 0.04f + 0.72f * fx;
+      source.plane[1][pixel] = 0.03f + 0.65f * fy;
+      source.plane[2][pixel] = 0.05f + 0.31f * fx + 0.37f * fy;
+    }
+  }
+  const gjxl::VarDctEncodingOptions options{
+    .butteraugli_target = 1.0f,
+    .backend = gjxl::VarDctBackendPreference::kCuda,
+    .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+  };
+  std::vector<uint8_t> reference_bytes;
+  gjxl::VarDctEncodingSummary reference_summary;
+  if (!Check(gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+        std::as_const(source).View(), options, &gpu, false,
+        &reference_bytes, &reference_summary),
+      "Concurrent CUDA public-workflow reference")) {
+    return false;
+  }
+
+  constexpr size_t kWorkerCount = 4;
+  constexpr size_t kIterations = 4;
+  std::array<bool, kWorkerCount> succeeded{};
+  std::array<std::thread, kWorkerCount> workers;
+  std::atomic<size_t> ready{0};
+  for (size_t worker = 0; worker < workers.size(); ++worker) {
+    workers[worker] = std::thread([&, worker] {
+      ready.fetch_add(1, std::memory_order_release);
+      while (ready.load(std::memory_order_acquire) != kWorkerCount) {
+        std::this_thread::yield();
+      }
+      for (size_t iteration = 0; iteration < kIterations; ++iteration) {
+        std::vector<uint8_t> bytes;
+        gjxl::VarDctEncodingSummary summary;
+        const gjxl::Status status = gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+            std::as_const(source).View(), options, &gpu, false,
+            &bytes, &summary);
+        if (!status.ok() || bytes != reference_bytes ||
+            summary != reference_summary) {
+          return;
+        }
+      }
+      succeeded[worker] = true;
+    });
+  }
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
+  if (!std::ranges::all_of(succeeded, [](bool value) { return value; })) {
+    std::cerr << "Concurrent CUDA public workflows were not deterministic\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -1341,7 +1409,8 @@ int main() {
       !CheckResidentMaximumError(*gpu, source, opsin) ||
       !CheckResidentFrontend(*gpu, source, opsin) ||
       !CheckPreparedReuseAndFailure(*gpu, source, opsin) ||
-      !CheckPublicWorkflow(*gpu, source)) {
+      !CheckPublicWorkflow(*gpu, source) ||
+      !CheckConcurrentPublicWorkflow(*gpu)) {
     return EXIT_FAILURE;
   }
   std::cout << "CUDA exact and maximum-throughput AQ match CPU.\n";
