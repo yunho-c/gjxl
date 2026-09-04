@@ -595,6 +595,33 @@ channel-fusion candidate, and leaves coupled in-place frequency updates last.
 Do not aggregate all five changes before measuring; resource interactions make
 it necessary to know which kernel actually wins.
 
+#### Phase 2.1 result: three-channel subsample (2026-09-04)
+
+The three per-channel subsample dispatches were replaced experimentally by one
+kernel whose thread processed all three channels. Independent input and output
+strides were preserved, as was the scalar arithmetic order. Strict Metal
+compilation and the full focused Metal Butteraugli stage-capture test passed.
+
+On the five-sample padded-4K stage profile, the experiment reduced reference
+preparation from 44 to 42 dispatches, resident AQ from 316 to 312 dispatches,
+and the two subscale psycho groups from 44 to 40 dispatches. Despite that,
+median subscale psycho time increased from `8.601 ms` to `8.996 ms` (`4.6%`),
+while resident AQ was effectively flat (`117.145 ms` versus `117.360 ms`).
+
+Five alternating independent-process complete-encode pairs were consistent at
+4K: the fused path lost all five, and its median increased from `311.913 ms` to
+`317.442 ms` (`1.77%`). At 1080p it won only three of five pairs and the
+medians were effectively equal (`87.449 ms` versus `87.385 ms`). Codestream
+sizes were identical in every pair.
+
+The slice is rejected and its kernel and build selector have been removed.
+Serializing three independent channel calculations within each thread reduced
+launch count but did not remove arithmetic or source traffic, and exposed less
+independent work to the GPU scheduler. This is further evidence that dispatch
+count alone is a poor proxy for useful cost. Phase 2.2 should test the 5-tap
+horizontal blur separately because it can at least share normalized weights;
+it must not inherit the subsample result by assumption.
+
 ### Phase 3: tile-local convolution
 
 Prototype the 5-tap blur-plus-Opsin kernel first. Continue through 7, 13, and 15
