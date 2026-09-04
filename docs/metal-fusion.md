@@ -853,6 +853,85 @@ taps only after each previous radius demonstrates lower GPU time. Treat the
 accounting. Retain the channel-fused separable implementation whenever it is
 faster than the fully tiled version.
 
+#### Phase 3.1 result: tiled 5-tap blur plus Opsin (2026-09-04)
+
+The first tile-local prototype is retained. One `16 x 8` threadgroup now loads
+a reflected radius-2 RGB tile, materializes the three horizontal convolution
+results in FP32 threadgroup memory, applies the vertical convolution, and
+performs the unchanged Opsin transform. It replaces three full-image
+horizontal grids and the subsequent Opsin grid with one tiled grid. The
+threadgroup uses `5,184` bytes: three `20 x 12` raw tiles and three `16 x 12`
+horizontal tiles. Its raw halo amplification is `1.875x` for a full tile.
+
+The first profiling prototype uncovered an important scheduling correctness
+constraint. Expanded and subsampled RGB initially occupied the same three
+working planes to which the fused kernel wrote Opsin output. That was safe with
+separate whole-image horizontal passes, but not with independent
+threadgroups: one group could overwrite an input pixel before a neighboring
+group loaded it as halo. GPU-profile validation detected this by reporting a
+changed encoded result. Expansion and subsampling now place temporary RGB in
+three already-free psycho work planes, disjoint from the Opsin output until the
+tiled grid completes. The later convolution stages reuse those planes, so the
+fix does not increase scratch capacity. The invalid profile was discarded.
+
+The retained implementation preserves the established convolution weight
+normalization, pair-addition order, explicit unfused multiply-adds, reflected
+edge behavior, and the FP32 horizontal materialization point. Control and
+fused builds reported the same focused Metal Butteraugli maxima:
+`0.000549316` for the map and score and `0.000396729` for captured stages.
+Profiled padded-4K encodes were stable after the scratch remap.
+
+Seven rotated padded-4K stage-profile rounds compared `8 x 8`, `16 x 8`,
+`16 x 16`, and `32 x 8` tiles with the separable control. Every tile improved
+all seven pairs in reference preparation, resident AQ, main psycho, and
+subscale psycho time. The retained `16 x 8` shape produced:
+
+| Scope | Control median | Tiled median | Change | Tiled wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `21.764 ms` | `18.720 ms` | `-13.99%` | 7/7 |
+| resident AQ | `116.741 ms` | `111.527 ms` | `-4.47%` | 7/7 |
+| main-scale psycho construction | `30.680 ms` | `25.948 ms` | `-15.43%` | 7/7 |
+| subscale psycho construction | `8.860 ms` | `7.812 ms` | `-11.83%` | 7/7 |
+
+Reference preparation falls from `40` to `34` dispatches and the
+two-evaluation resident submission from `308` to `296`. On the padded-4K
+geometry, this removes about `93.3 million` launched threads across reference
+preparation and resident AQ. It also eliminates three horizontal intermediate
+writes and fifteen nominal vertical intermediate reads per psycho invocation,
+or about `2.084 GiB` of shader-request traffic over those six psycho images.
+That traffic estimate is not a DRAM-bandwidth measurement.
+
+The other shapes exposed a resolution-dependent tradeoff. `32 x 8` had the
+lowest padded-4K stage time, but `16 x 8` gave the best padded-1080p workflow
+median and uses less threadgroup memory and half as many threads. Seven rotated
+complete-workflow rounds favored the balanced `16 x 8` default:
+
+| Workload | Control median | Tiled median | Change | Tiled wins |
+| --- | ---: | ---: | ---: | ---: |
+| padded 1080p | `90.820 ms` | `86.989 ms` | `-4.22%` | 6/7 |
+| padded 4K | `307.763 ms` | `306.024 ms` | `-0.57%` | 6/7 |
+
+Control and production builds emitted byte-identical codestreams for a small
+odd-sized fixture and representative Kodak, real 1080p, and real 4K images.
+The old Opsin pipeline and private build selectors have been removed. The
+generic 5-tap horizontal and vertical pipelines remain because diagnostic
+sigma-1.2 blur capture still uses them. Pipeline construction validates the
+new kernel's thread-count and dynamic threadgroup-memory requirements.
+
+This is the first fusion in the study to remove large full-image intermediate
+traffic as well as dispatches, and its stage-wide improvement is much larger
+than the rejected launch-only channel fusions. Phase 3.2 should now prototype
+the radius-3 7-tap separable path under the same arithmetic and aliasing rules.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-opsin5-stage-safe.5s7NTW` (five-way stage
+  matrix);
+- `/private/tmp/gjxl-metal-fusion-opsin5-wall.Ks9grt` (four-way workflow
+  matrix); and
+- `/private/tmp/gjxl-metal-fusion-opsin5-codestream.SufU1X` (exact-output
+  comparisons).
+
 ### Phase 4: resident sink fusion
 
 After the perceptual kernels stabilize:

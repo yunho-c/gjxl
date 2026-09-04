@@ -59,7 +59,6 @@ struct OpsinParams {
   uint input_stride0;
   uint input_stride1;
   uint input_stride2;
-  uint blurred_stride;
   uint output_stride;
   float intensity_target;
 };
@@ -286,6 +285,31 @@ inline float blur5_vertical_value(
   return unfused_multiply_add(pair2, weight2, result);
 }
 
+inline float blur5_horizontal_tile_value(
+  threadgroup const float* row, uint center,
+  float weight0, float weight1, float weight2) {
+
+  float result = row[center] * weight0;
+  const float pair1 = row[center - 1] + row[center + 1];
+  result = unfused_multiply_add(pair1, weight1, result);
+  const float pair2 = row[center - 2] + row[center + 2];
+  return unfused_multiply_add(pair2, weight2, result);
+}
+
+inline float blur5_vertical_tile_value(
+  threadgroup const float* input, uint x, uint y, uint stride,
+  float weight0, float weight1, float weight2) {
+
+  const float center = input[(y + 2) * stride + x];
+  const float pair1 = input[(y + 1) * stride + x] +
+                      input[(y + 3) * stride + x];
+  const float pair2 = input[y * stride + x] +
+                      input[(y + 4) * stride + x];
+  float result = center * weight0;
+  result = unfused_multiply_add(pair1, weight1, result);
+  return unfused_multiply_add(pair2, weight2, result);
+}
+
 kernel void gjxl_butteraugli_blur5_vertical_f32(
   device const float* input [[buffer(0)]],
   device const float* weights [[buffer(1)]],
@@ -422,45 +446,89 @@ inline float3 opsin_absorbance(float red, float green, float blue,
   return output;
 }
 
-kernel void gjxl_butteraugli_opsin_blur5_f32(
+kernel void gjxl_butteraugli_opsin_blur5_tiled_f32(
   device const float* input0 [[buffer(0)]],
   device const float* input1 [[buffer(1)]],
   device const float* input2 [[buffer(2)]],
-  device const float* horizontal0 [[buffer(3)]],
-  device const float* horizontal1 [[buffer(4)]],
-  device const float* horizontal2 [[buffer(5)]],
-  device const float* weights [[buffer(6)]],
-  device float* output0 [[buffer(7)]],
-  device float* output1 [[buffer(8)]],
-  device float* output2 [[buffer(9)]],
-  constant OpsinParams& params [[buffer(10)]],
-  uint2 position [[thread_position_in_grid]]) {
+  device const float* weights [[buffer(3)]],
+  device float* output0 [[buffer(4)]],
+  device float* output1 [[buffer(5)]],
+  device float* output2 [[buffer(6)]],
+  constant OpsinParams& params [[buffer(7)]],
+  threadgroup float* scratch [[threadgroup(0)]],
+  uint2 local_position [[thread_position_in_threadgroup]],
+  uint2 group_position [[threadgroup_position_in_grid]],
+  uint2 group_size [[threads_per_threadgroup]]) {
 
-  if (position.x >= params.width || position.y >= params.height) return;
+  constexpr uint kRadius = 2;
+  const uint raw_stride = group_size.x + 2 * kRadius;
+  const uint tile_height = group_size.y + 2 * kRadius;
+  const uint raw_plane_size = raw_stride * tile_height;
+  const uint horizontal_stride = group_size.x;
+  const uint horizontal_plane_size = horizontal_stride * tile_height;
+  threadgroup float* raw0 = scratch;
+  threadgroup float* raw1 = raw0 + raw_plane_size;
+  threadgroup float* raw2 = raw1 + raw_plane_size;
+  threadgroup float* horizontal0 = raw2 + raw_plane_size;
+  threadgroup float* horizontal1 = horizontal0 + horizontal_plane_size;
+  threadgroup float* horizontal2 = horizontal1 + horizontal_plane_size;
+
+  const uint thread_index =
+    local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int origin_x = int(group_position.x * group_size.x) - int(kRadius);
+  const int origin_y = int(group_position.y * group_size.y) - int(kRadius);
+  for (uint index = thread_index; index < raw_plane_size;
+       index += thread_count) {
+    const int source_x = mirror_coordinate(
+      origin_x + int(index % raw_stride), int(params.width));
+    const int source_y = mirror_coordinate(
+      origin_y + int(index / raw_stride), int(params.height));
+    raw0[index] = input0[
+      uint(source_y) * params.input_stride0 + uint(source_x)];
+    raw1[index] = input1[
+      uint(source_y) * params.input_stride1 + uint(source_x)];
+    raw2[index] = input2[
+      uint(source_y) * params.input_stride2 + uint(source_x)];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
   float sum_weights = 0.0f;
   for (uint index = 0; index < 5; ++index) sum_weights += weights[index];
   const float scale = 1.0f / sum_weights;
   const float weight0 = weights[2] * scale;
   const float weight1 = weights[1] * scale;
   const float weight2 = weights[0] * scale;
-  const int y = int(position.y);
-  const int height = int(params.height);
+  for (uint index = thread_index; index < horizontal_plane_size;
+       index += thread_count) {
+    const uint x = index % horizontal_stride;
+    const uint y = index / horizontal_stride;
+    horizontal0[index] = blur5_horizontal_tile_value(
+      raw0 + y * raw_stride, x + kRadius, weight0, weight1, weight2);
+    horizontal1[index] = blur5_horizontal_tile_value(
+      raw1 + y * raw_stride, x + kRadius, weight0, weight1, weight2);
+    horizontal2[index] = blur5_horizontal_tile_value(
+      raw2 + y * raw_stride, x + kRadius, weight0, weight1, weight2);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint2 position = group_position * group_size + local_position;
+  if (position.x >= params.width || position.y >= params.height) return;
   const float3 blurred_rgb(
-    blur5_vertical_value(
-      horizontal0, position.x, y, height, params.blurred_stride,
+    blur5_vertical_tile_value(
+      horizontal0, local_position.x, local_position.y, horizontal_stride,
       weight0, weight1, weight2),
-    blur5_vertical_value(
-      horizontal1, position.x, y, height, params.blurred_stride,
+    blur5_vertical_tile_value(
+      horizontal1, local_position.x, local_position.y, horizontal_stride,
       weight0, weight1, weight2),
-    blur5_vertical_value(
-      horizontal2, position.x, y, height, params.blurred_stride,
+    blur5_vertical_tile_value(
+      horizontal2, local_position.x, local_position.y, horizontal_stride,
       weight0, weight1, weight2));
   const uint index0 = position.y * params.input_stride0 + position.x;
   const uint index1 = position.y * params.input_stride1 + position.x;
   const uint index2 = position.y * params.input_stride2 + position.x;
   const uint output_index = position.y * params.output_stride + position.x;
-  const float3 input_rgb(
-    input0[index0], input1[index1], input2[index2]);
+  const float3 input_rgb(input0[index0], input1[index1], input2[index2]);
   if (!all(isfinite(input_rgb)) || !all(isfinite(blurred_rgb))) {
     output0[output_index] = NAN;
     output1[output_index] = NAN;

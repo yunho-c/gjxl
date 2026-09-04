@@ -61,6 +61,20 @@ constexpr size_t kWorkingPlaneCount = 33;
 constexpr size_t kMaltaTileWidth = 32;
 constexpr size_t kMaltaTileHeight = 8;
 constexpr size_t kMaltaRadius = 4;
+constexpr size_t kOpsinBlur5TileWidth = 16;
+constexpr size_t kOpsinBlur5TileHeight = 8;
+constexpr size_t kOpsinBlur5Radius = 2;
+constexpr size_t kOpsinBlur5RawPlaneElements =
+  (kOpsinBlur5TileWidth + 2 * kOpsinBlur5Radius) *
+  (kOpsinBlur5TileHeight + 2 * kOpsinBlur5Radius);
+constexpr size_t kOpsinBlur5HorizontalPlaneElements =
+  kOpsinBlur5TileWidth *
+  (kOpsinBlur5TileHeight + 2 * kOpsinBlur5Radius);
+constexpr size_t kOpsinBlur5ThreadgroupMemoryBytes =
+  3 * (kOpsinBlur5RawPlaneElements +
+       kOpsinBlur5HorizontalPlaneElements) * sizeof(float);
+static_assert(kOpsinBlur5TileWidth > 0 && kOpsinBlur5TileHeight > 0);
+static_assert(kOpsinBlur5TileWidth * kOpsinBlur5TileHeight <= 1024);
 
 using PsychoPlanes = std::array<DevicePlaneView, kPsychoPlaneCount>;
 
@@ -132,7 +146,6 @@ struct OpsinParams {
   uint32_t input_stride0;
   uint32_t input_stride1;
   uint32_t input_stride2;
-  uint32_t blurred_stride;
   uint32_t output_stride;
   float intensity_target;
 };
@@ -240,7 +253,7 @@ static_assert(sizeof(ExpandParams) == 32);
 static_assert(sizeof(SubsampleParams) == 24);
 static_assert(sizeof(ConvolutionParams) == 20);
 static_assert(sizeof(Convolution3Params) == 36);
-static_assert(sizeof(OpsinParams) == 32);
+static_assert(sizeof(OpsinParams) == 28);
 static_assert(sizeof(FrequencyLowMediumConvolutionParams) == 24);
 static_assert(sizeof(FrequencyConvolutionChannelParams) == 28);
 static_assert(sizeof(MaltaScaleParams) == 36);
@@ -871,26 +884,6 @@ private:
     Extent2D scale_extent,
     bool capture_reference) {
 
-    for (size_t channel = 0; channel < 3; ++channel) {
-      DevicePlaneView horizontal =
-        Plane(kImage + 3 + channel, scale_extent);
-      const ConvolutionParams params{
-        static_cast<uint32_t>(scale_extent.width),
-        static_cast<uint32_t>(scale_extent.height),
-        static_cast<uint32_t>(input.plane[channel].row_stride),
-        static_cast<uint32_t>(horizontal.row_stride),
-        5,
-      };
-      encoder->setComputePipelineState(
-        metal_.butteraugli_pipelines_.blur5_horizontal.get());
-      Bind(encoder, Handle(metal_, input.plane[channel]),
-           input.plane[channel].offset_bytes, 0);
-      Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 1);
-      Bind(encoder, Handle(metal_, horizontal), horizontal.offset_bytes, 2);
-      encoder->setBytes(&params, sizeof(params), 3);
-      metal_.DispatchPlane(encoder, scale_extent);
-    }
-
     const OpsinParams opsin_params{
       static_cast<uint32_t>(scale_extent.width),
       static_cast<uint32_t>(scale_extent.height),
@@ -898,24 +891,29 @@ private:
       static_cast<uint32_t>(input.plane[1].row_stride),
       static_cast<uint32_t>(input.plane[2].row_stride),
       static_cast<uint32_t>(working_extent_.width),
-      static_cast<uint32_t>(working_extent_.width),
       options().intensity_target,
     };
     encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.opsin_blur5.get());
+      metal_.butteraugli_pipelines_.opsin_blur5_tiled.get());
     for (size_t channel = 0; channel < 3; ++channel) {
       Bind(encoder, Handle(metal_, input.plane[channel]),
            input.plane[channel].offset_bytes, channel);
-      DevicePlaneView horizontal =
-        Plane(kImage + 3 + channel, scale_extent);
-      Bind(encoder, Handle(metal_, horizontal),
-           horizontal.offset_bytes, 3 + channel);
       DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
-      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 7 + channel);
+      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 4 + channel);
     }
-    Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 6);
-    encoder->setBytes(&opsin_params, sizeof(opsin_params), 10);
-    metal_.DispatchPlane(encoder, scale_extent);
+    Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 3);
+    encoder->setBytes(&opsin_params, sizeof(opsin_params), 7);
+    encoder->setThreadgroupMemoryLength(
+      kOpsinBlur5ThreadgroupMemoryBytes, 0);
+    DispatchMetalThreadgroups(
+      encoder,
+      MTL::Size(
+        (scale_extent.width + kOpsinBlur5TileWidth - 1) /
+          kOpsinBlur5TileWidth,
+        (scale_extent.height + kOpsinBlur5TileHeight - 1) /
+          kOpsinBlur5TileHeight,
+        1),
+      MTL::Size(kOpsinBlur5TileWidth, kOpsinBlur5TileHeight, 1));
     if (capture_reference) {
       for (size_t channel = 0; channel < 3; ++channel) {
         MaybeCapture(
@@ -1394,7 +1392,7 @@ private:
     Extent2D expanded) {
 
     for (size_t channel = 0; channel < 3; ++channel) {
-      DevicePlaneView output = Plane(kImage + channel, expanded);
+      DevicePlaneView output = Plane(kPsychoWork + channel, expanded);
       const ExpandParams params{
         static_cast<uint32_t>(requested.width),
         static_cast<uint32_t>(requested.height),
@@ -1422,7 +1420,7 @@ private:
     Extent2D subsampled) {
 
     for (size_t channel = 0; channel < 3; ++channel) {
-      DevicePlaneView output = Plane(kImage + channel, subsampled);
+      DevicePlaneView output = Plane(kPsychoWork + channel, subsampled);
       const SubsampleParams params{
         static_cast<uint32_t>(requested.width),
         static_cast<uint32_t>(requested.height),
@@ -1441,13 +1439,16 @@ private:
     }
   }
 
-  [[nodiscard]] ConstDeviceImage3View ImageSlots(
+  [[nodiscard]] ConstDeviceImage3View PsychoInputSlots(
     Extent2D image_extent) const noexcept {
 
+    // Resampled RGB must remain disjoint from kImage: neighboring tiled Opsin
+    // threadgroups can still be loading halo pixels while another group writes
+    // its output.
     return {{{
-      AsConst(Plane(kImage, image_extent)),
-      AsConst(Plane(kImage + 1, image_extent)),
-      AsConst(Plane(kImage + 2, image_extent)),
+      AsConst(Plane(kPsychoWork, image_extent)),
+      AsConst(Plane(kPsychoWork + 1, image_extent)),
+      AsConst(Plane(kPsychoWork + 2, image_extent)),
     }}};
   }
 
@@ -1517,7 +1518,7 @@ private:
       EncodeExpand(
         encoder, reference_linear_rgb(), requested, working_extent_);
       EncodePsychoImage(
-        encoder, ImageSlots(working_extent_), reference_main,
+        encoder, PsychoInputSlots(working_extent_), reference_main,
         working_extent_, false);
       EncodeReferenceMask(
         encoder, reference_main, Plane(kReferenceMask, working_extent_),
@@ -1533,8 +1534,8 @@ private:
       EncodeSubsample(
         encoder, reference_linear_rgb(), requested, sub_extent_);
       EncodePsychoImage(
-        encoder, ImageSlots(sub_extent_), ReferenceSubSlots(), sub_extent_,
-        false);
+        encoder, PsychoInputSlots(sub_extent_), ReferenceSubSlots(),
+        sub_extent_, false);
     }
   }
 
@@ -1565,7 +1566,7 @@ private:
       EncodeExpand(
         encoder, descriptor.distorted_linear_rgb, requested, working_extent_);
       EncodePsychoImage(
-        encoder, ImageSlots(working_extent_), distorted_main,
+        encoder, PsychoInputSlots(working_extent_), distorted_main,
         working_extent_, false);
       DevicePlaneView staging = Plane(kFinalStaging, working_extent_);
       EncodeDifference(
@@ -1600,8 +1601,8 @@ private:
         EncodeSubsample(
           encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
         EncodePsychoImage(
-          encoder, ImageSlots(sub_extent_), distorted_main, sub_extent_,
-          false);
+          encoder, PsychoInputSlots(sub_extent_), distorted_main,
+          sub_extent_, false);
         DevicePlaneView sub_map = Plane(kFinalStaging, sub_extent_);
         EncodeDifference(
           encoder, ReferenceSubSlots(), distorted_main, {}, sub_extent_,
@@ -1645,7 +1646,7 @@ private:
           encoder, descriptor.distorted_linear_rgb, requested,
           working_extent_);
         EncodePsychoImage(
-          encoder, ImageSlots(working_extent_), distorted_main,
+          encoder, PsychoInputSlots(working_extent_), distorted_main,
           working_extent_, false);
       } else {
         EncodePsychoImage(
@@ -1660,8 +1661,8 @@ private:
         EncodeSubsample(
           encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
         EncodePsychoImage(
-          encoder, ImageSlots(sub_extent_), distorted_main, sub_extent_,
-          false);
+          encoder, PsychoInputSlots(sub_extent_), distorted_main,
+          sub_extent_, false);
       }
       return;
     }
@@ -1818,7 +1819,8 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_convolve_transpose_f32", &pipelines.convolution_transpose},
     {"gjxl_butteraugli_convolve_transpose_3_f32",
      &pipelines.convolution_transpose3},
-    {"gjxl_butteraugli_opsin_blur5_f32", &pipelines.opsin_blur5},
+    {"gjxl_butteraugli_opsin_blur5_tiled_f32",
+     &pipelines.opsin_blur5_tiled},
     {"gjxl_butteraugli_frequency_low_medium_convolve_f32",
      &pipelines.frequency_low_medium_convolve},
     {"gjxl_butteraugli_frequency_high_convolve_f32",
@@ -1861,6 +1863,16 @@ Status CreateButteraugliPipelines(
       kReductionWidth) {
     return Status::Unavailable(
       "Metal cannot launch the Butteraugli reduction threadgroup");
+  }
+  if (pipelines.opsin_blur5_tiled->maxTotalThreadsPerThreadgroup() <
+      kOpsinBlur5TileWidth * kOpsinBlur5TileHeight) {
+    return Status::Unavailable(
+      "Metal cannot launch the tiled Butteraugli Opsin threadgroup");
+  }
+  if (device->maxThreadgroupMemoryLength() <
+      kOpsinBlur5ThreadgroupMemoryBytes) {
+    return Status::Unavailable(
+      "Metal lacks memory for the tiled Butteraugli Opsin threadgroup");
   }
   *out = std::move(pipelines);
   return Status::Ok();
