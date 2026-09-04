@@ -1,6 +1,6 @@
 # CUDA optimization study S1
 
-- Status: profiling complete; optimization roadmap proposed
+- Status: profiling complete; S1.1-S1.3 implemented
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -29,7 +29,7 @@ pressure, and establishes stable pointers for later CUDA Graph capture.
 
 After allocation consolidation, the next work should remove encoding-only
 readbacks and host materialization. The main compute optimization should then
-specialize the 32x32 and 8x64/64x8 DCT kernels. Moving linear-RGB-to-Opsin
+specialize the 32x32 and 16x32/32x16 DCT kernels. Moving linear-RGB-to-Opsin
 preparation to CUDA has a larger architectural scope but becomes especially
 valuable at 4K.
 
@@ -154,7 +154,7 @@ shape groups were:
 | Transform group | Combined forward/inverse time |
 |---|---:|
 | 32x32 | approximately 66.1 ms |
-| 8x64 and 64x8 | approximately 38.8 ms |
+| 16x32 and 32x16 | approximately 38.8 ms |
 | Remaining shapes | approximately 28.8 ms |
 
 The first two groups therefore account for approximately `105 ms`, 79% of DCT
@@ -369,7 +369,7 @@ CPU-only build. The ignored trace artifacts are
 
 The current transform kernel performs a generic separable matrix multiply for
 all supported shapes. A shape-specific path should start with 32x32, then
-8x64/64x8. The current implementation is in
+16x32/32x16. The current implementation is in
 `src/gpu/cuda/cuda_kernels.cu`. Useful candidates include:
 
 - tiled shared-memory row and column passes;
@@ -389,8 +389,81 @@ decision-sensitivity and output-quality contract explicitly permits them.
 Before selecting a kernel design, enable NVIDIA GPU performance counters and
 capture achieved occupancy, eligible warps, issue stalls, shared-memory bank
 conflicts, L1/L2 traffic, and arithmetic throughput separately for the 32x32
-and 8x64 groups. Nsight Compute currently reports `ERR_NVGPUCTRPERM`, so those
-counters were unavailable for this study.
+and rectangular groups. Nsight Compute currently reports `ERR_NVGPUCTRPERM`,
+so those counters were unavailable for this study.
+
+#### S1.3 completion snapshot (2026-09-04)
+
+This checkpoint adds compile-time CUDA paths for 32x32, 16x32, and 32x16
+transforms. The arithmetic, basis values, and accumulation order remain the
+same as the generic separable transform. The specialized kernels preload the
+horizontal basis from a coalesced global-memory copy into a shared-memory tile
+with one padding column. This replaces the generic horizontal pass's
+warp-divergent constant-memory accesses and prevents shared-memory bank
+conflicts. The vertical basis continues to use constant-memory broadcasts.
+Fast math, factored transforms, and tensor-core arithmetic remain disabled.
+
+Launch metadata also corrected an ambiguity in the initial profile. A 2,048
+byte intermediate identifies only a 512-coefficient transform; it does not
+identify its dimensions. The production call-site metadata shows that those
+dominant launches are 16x32 and 32x16, not 8x64 and 64x8. The earlier labels
+in this document have been corrected accordingly.
+
+Nsight Compute 2022.3 was retried on the 32x32 forward transform, but the
+driver again returned `ERR_NVGPUCTRPERM`. Kernel selection therefore used
+Nsight Systems launch metadata and matched before/after timing rather than
+hardware counters. In one warmed padded-1080p trace, combined forward and
+inverse times were:
+
+| Transform scope | After S1.2 | After S1.3 | Change |
+|---|---:|---:|---:|
+| Primary 32x32 batch | 53.0 ms | 4.0 ms | -92.5% |
+| Primary 16x32 batch | 12.4 ms | 1.9 ms | -85.1% |
+| Primary 32x16 batch | 40.3 ms | 2.0 ms | -94.9% |
+| All occurrences of the three shapes | 138.9 ms | 10.4 ms | -92.5% |
+| All DCT kernels | 176.4 ms | 39.1 ms | -77.8% |
+
+The public wall comparison uses the same synthetic `1919x1079` workload,
+distance `1.2`, effort `7`, two warmups, seven GPU-only samples, and RTX 3060
+Laptop GPU as the S1.2 snapshot. Times are medians in milliseconds:
+
+| AQ mode and stage | After S1.2 | After S1.3 | Change |
+|---|---:|---:|---:|
+| Fully resident, total | 435.2 | 317.7 | -27.0% |
+| Fully resident, quantization | 303.1 | 208.1 | -31.3% |
+| Maximum throughput, total | 191.0 | 186.5 | -2.4% |
+| Maximum throughput, quantization | 86.5 | 78.8 | -8.9% |
+
+The post-S1.3 fully-resident ranges were `296.9-367.0 ms` total and
+`200.9-215.4 ms` quantization. Maximum-throughput ranges were
+`173.7-256.6 ms` total and `77.3-99.1 ms` quantization. Maximum-throughput is
+a control here: its DCT8-only encoding path does not dispatch any of the new
+kernels, so its difference should be treated as clock and host variance.
+
+The odd `3839x2159` 4K checkpoint measured `1161.3 ms` total and `766.5 ms`
+quantization for fully resident, and `616.1 ms` total and `252.1 ms`
+quantization for maximum throughput. Separate `1919x1079` and `3839x2159`
+fully-resident CLI encodes were decoded successfully by the pinned `djxl`,
+which reported the original dimensions. Paired 1080p batch qualification
+produced these medians:
+
+| AQ mode | Batch | Batch ms | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 354.9 | 2.82 | 0.95x |
+| Fully resident | 2 | 557.7 | 3.59 | 1.19x |
+| Fully resident | 4 | 974.6 | 4.10 | 1.51x |
+| Maximum throughput | 1 | 230.5 | 4.34 | 1.00x |
+| Maximum throughput | 2 | 307.9 | 6.50 | 1.42x |
+| Maximum throughput | 4 | 737.8 | 5.42 | 1.29x |
+
+The batch run began at 63 C, P8, and a 210 MHz SM clock and ended at 68 C,
+P5, and 892 MHz, reinforcing that paired speedups are more reliable than its
+absolute times. The checkpoint passed all 53 tests in the CUDA build and all
+47 tests in the CPU-only build. CUDA coverage includes per-shape comparison
+with the double-precision DCT reference, exact-mode CPU/CUDA codestream
+identity, and iteration-zero fully-resident codestream identity. The ignored
+trace artifacts are `s13_fully_resident_1080p.nsys-rep` and its SQLite export
+under `build-cuda-ninja/profiles`.
 
 ### S1.4: move input preparation to CUDA
 
@@ -482,7 +555,7 @@ contract; they should not silently alter fully-resident behavior.
    1080p Nsight API summary.
 2. **Readback checkpoint:** account for every transfer by semantic payload and
    prove that encoding-only output omits diagnostic maps.
-3. **DCT checkpoint:** enable counters, specialize 32x32, then 8x64/64x8, with
+3. **DCT checkpoint:** enable counters, specialize 32x32, then 16x32/32x16, with
    per-shape differential tests and public-workflow timing.
 4. **Frontend checkpoint:** add resident CUDA Opsin preparation and compare
    both 1080p and 4K wall profiles.

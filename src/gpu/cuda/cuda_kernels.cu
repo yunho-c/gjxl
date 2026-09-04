@@ -16,6 +16,10 @@ constexpr size_t kDctBasisElementCount =
   8 * 8 + 16 * 16 + 32 * 32 + 64 * 64;
 
 __constant__ float kOrthonormalDctBasis[kDctBasisElementCount];
+// The generic kernels benefit from constant-memory broadcasts. Dominant
+// shapes instead preload from this global copy with coalesced reads because
+// their horizontal pass addresses a different basis row in every warp lane.
+__device__ float kGlobalOrthonormalDctBasis[kDctBasisElementCount];
 
 __host__ __device__ constexpr size_t DctBasisOffset(
   unsigned int length) {
@@ -123,6 +127,124 @@ __global__ void InverseDctKernel(
         intermediate[static_cast<size_t>(v) * width + x];
     }
     output[base + static_cast<size_t>(y) * width + x] = value * scale;
+  }
+}
+
+template <unsigned int Width, unsigned int Height>
+__global__ void ForwardDctSpecializedKernel(
+  const float* input,
+  float* output) {
+  static_assert(Width == 16 || Width == 32);
+  static_assert(Height == 16 || Height == 32);
+  constexpr size_t kElementCount = static_cast<size_t>(Width) * Height;
+  constexpr size_t kHorizontalBasisCount =
+    static_cast<size_t>(Width) * (Width + 1);
+  extern __shared__ float shared[];
+  // The extra column keeps a warp's fixed-sample, varying-frequency reads in
+  // distinct shared-memory banks.
+  float* horizontal_basis = shared;
+  float* intermediate = shared + kHorizontalBasisCount;
+  const size_t base = static_cast<size_t>(blockIdx.x) * kElementCount;
+
+  for (size_t index = threadIdx.x;
+       index < static_cast<size_t>(Width) * Width;
+       index += blockDim.x) {
+    const unsigned int u = static_cast<unsigned int>(index / Width);
+    const unsigned int x = static_cast<unsigned int>(index % Width);
+    horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x] =
+      kGlobalOrthonormalDctBasis[DctBasisOffset(Width) + index];
+  }
+  __syncthreads();
+
+  for (size_t index = threadIdx.x; index < kElementCount;
+       index += blockDim.x) {
+    const unsigned int y = static_cast<unsigned int>(index / Width);
+    const unsigned int u = static_cast<unsigned int>(index % Width);
+    float value = 0.0f;
+    for (unsigned int x = 0; x < Width; ++x) {
+      value += input[base + static_cast<size_t>(y) * Width + x] *
+        horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x];
+    }
+    intermediate[index] = value;
+  }
+  __syncthreads();
+
+  const float scale = rsqrtf(static_cast<float>(kElementCount));
+  const float* vertical_basis =
+    kOrthonormalDctBasis + DctBasisOffset(Height);
+  for (size_t index = threadIdx.x; index < kElementCount;
+       index += blockDim.x) {
+    const unsigned int v = static_cast<unsigned int>(index / Width);
+    const unsigned int u = static_cast<unsigned int>(index % Width);
+    float value = 0.0f;
+    for (unsigned int y = 0; y < Height; ++y) {
+      value += vertical_basis[static_cast<size_t>(v) * Height + y] *
+        intermediate[static_cast<size_t>(y) * Width + u];
+    }
+    constexpr bool kRowMajorCoefficients = Height < Width;
+    const size_t coefficient_index = kRowMajorCoefficients
+      ? static_cast<size_t>(v) * Width + u
+      : static_cast<size_t>(u) * Height + v;
+    output[base + coefficient_index] = value * scale;
+  }
+}
+
+template <unsigned int Width, unsigned int Height>
+__global__ void InverseDctSpecializedKernel(
+  const float* input,
+  float* output) {
+  static_assert(Width == 16 || Width == 32);
+  static_assert(Height == 16 || Height == 32);
+  constexpr size_t kElementCount = static_cast<size_t>(Width) * Height;
+  constexpr size_t kHorizontalBasisCount =
+    static_cast<size_t>(Width) * (Width + 1);
+  extern __shared__ float shared[];
+  // Match the forward layout so varying sample indices remain bank-conflict
+  // free in the inverse horizontal pass.
+  float* horizontal_basis = shared;
+  float* intermediate = shared + kHorizontalBasisCount;
+  const size_t base = static_cast<size_t>(blockIdx.x) * kElementCount;
+
+  for (size_t index = threadIdx.x;
+       index < static_cast<size_t>(Width) * Width;
+       index += blockDim.x) {
+    const unsigned int u = static_cast<unsigned int>(index / Width);
+    const unsigned int x = static_cast<unsigned int>(index % Width);
+    horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x] =
+      kGlobalOrthonormalDctBasis[DctBasisOffset(Width) + index];
+  }
+  __syncthreads();
+
+  for (size_t index = threadIdx.x; index < kElementCount;
+       index += blockDim.x) {
+    const unsigned int v = static_cast<unsigned int>(index / Width);
+    const unsigned int x = static_cast<unsigned int>(index % Width);
+    float value = 0.0f;
+    for (unsigned int u = 0; u < Width; ++u) {
+      constexpr bool kRowMajorCoefficients = Height < Width;
+      const size_t coefficient_index = kRowMajorCoefficients
+        ? static_cast<size_t>(v) * Width + u
+        : static_cast<size_t>(u) * Height + v;
+      value += input[base + coefficient_index] *
+        horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x];
+    }
+    intermediate[index] = value;
+  }
+  __syncthreads();
+
+  const float scale = sqrtf(static_cast<float>(kElementCount));
+  const float* vertical_basis =
+    kOrthonormalDctBasis + DctBasisOffset(Height);
+  for (size_t index = threadIdx.x; index < kElementCount;
+       index += blockDim.x) {
+    const unsigned int y = static_cast<unsigned int>(index / Width);
+    const unsigned int x = static_cast<unsigned int>(index % Width);
+    float value = 0.0f;
+    for (unsigned int v = 0; v < Height; ++v) {
+      value += vertical_basis[static_cast<size_t>(v) * Height + y] *
+        intermediate[static_cast<size_t>(v) * Width + x];
+    }
+    output[base + static_cast<size_t>(y) * Width + x] = value * scale;
   }
 }
 
@@ -296,8 +418,11 @@ cudaError_t InitializeCudaDctBasis() {
       }
     }
   }
-  return cudaMemcpyToSymbol(
+  cudaError_t error = cudaMemcpyToSymbol(
     kOrthonormalDctBasis, basis.data(), basis.size() * sizeof(float));
+  if (error != cudaSuccess) return error;
+  return cudaMemcpyToSymbol(
+    kGlobalOrthonormalDctBasis, basis.data(), basis.size() * sizeof(float));
 }
 
 cudaError_t LaunchCudaDct(
@@ -308,16 +433,43 @@ cudaError_t LaunchCudaDct(
   unsigned int width,
   unsigned int height,
   cudaStream_t stream) {
-  const size_t shared_bytes =
-    static_cast<size_t>(width) * height * sizeof(float);
+  const bool specialized =
+    (width == 32 && height == 32) ||
+    (width == 32 && height == 16) ||
+    (width == 16 && height == 32);
+  const size_t shared_floats = static_cast<size_t>(width) * height +
+    (specialized ? static_cast<size_t>(width) * (width + 1) : 0);
+  const size_t shared_bytes = shared_floats * sizeof(float);
   const dim3 grid(static_cast<unsigned int>(transform_count));
   const dim3 block(kThreadsPerTransform);
   if (forward) {
-    ForwardDctKernel<<<grid, block, shared_bytes, stream>>>(
-      input, output, width, height);
+    if (width == 32 && height == 32) {
+      ForwardDctSpecializedKernel<32, 32>
+        <<<grid, block, shared_bytes, stream>>>(input, output);
+    } else if (width == 32 && height == 16) {
+      ForwardDctSpecializedKernel<32, 16>
+        <<<grid, block, shared_bytes, stream>>>(input, output);
+    } else if (width == 16 && height == 32) {
+      ForwardDctSpecializedKernel<16, 32>
+        <<<grid, block, shared_bytes, stream>>>(input, output);
+    } else {
+      ForwardDctKernel<<<grid, block, shared_bytes, stream>>>(
+        input, output, width, height);
+    }
   } else {
-    InverseDctKernel<<<grid, block, shared_bytes, stream>>>(
-      input, output, width, height);
+    if (width == 32 && height == 32) {
+      InverseDctSpecializedKernel<32, 32>
+        <<<grid, block, shared_bytes, stream>>>(input, output);
+    } else if (width == 32 && height == 16) {
+      InverseDctSpecializedKernel<32, 16>
+        <<<grid, block, shared_bytes, stream>>>(input, output);
+    } else if (width == 16 && height == 32) {
+      InverseDctSpecializedKernel<16, 32>
+        <<<grid, block, shared_bytes, stream>>>(input, output);
+    } else {
+      InverseDctKernel<<<grid, block, shared_bytes, stream>>>(
+        input, output, width, height);
+    }
   }
   return cudaGetLastError();
 }
