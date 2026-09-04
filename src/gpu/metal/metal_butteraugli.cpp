@@ -118,6 +118,14 @@ struct ConvolutionParams {
   uint32_t kernel_size;
 };
 
+struct Convolution3Params {
+  uint32_t width;
+  uint32_t height;
+  std::array<uint32_t, 3> input_stride;
+  std::array<uint32_t, 3> output_stride;
+  uint32_t kernel_size;
+};
+
 struct OpsinParams {
   uint32_t width;
   uint32_t height;
@@ -231,6 +239,7 @@ static_assert(sizeof(PlaneParams) == 16);
 static_assert(sizeof(ExpandParams) == 32);
 static_assert(sizeof(SubsampleParams) == 24);
 static_assert(sizeof(ConvolutionParams) == 20);
+static_assert(sizeof(Convolution3Params) == 36);
 static_assert(sizeof(OpsinParams) == 32);
 static_assert(sizeof(FrequencyLowMediumConvolutionParams) == 24);
 static_assert(sizeof(FrequencyConvolutionChannelParams) == 28);
@@ -918,28 +927,35 @@ private:
       }
     }
 
+    std::array<ConstDevicePlaneView, 3> frequency_input;
+    std::array<DevicePlaneView, 3> frequency_intermediate;
+    Convolution3Params frequency_convolution_params{
+      static_cast<uint32_t>(scale_extent.width),
+      static_cast<uint32_t>(scale_extent.height),
+      {},
+      {},
+      static_cast<uint32_t>(kKernelSizes[1]),
+    };
+    encoder->setComputePipelineState(
+      metal_.butteraugli_pipelines_.convolution_transpose3.get());
     for (size_t channel = 0; channel < 3; ++channel) {
-      ConstDevicePlaneView input =
+      frequency_input[channel] =
         AsConst(Plane(kImage + channel, scale_extent));
-      DevicePlaneView intermediate =
+      frequency_intermediate[channel] =
         TransposedPlane(kPsychoWork + channel, scale_extent);
-      const ConvolutionParams params{
-        static_cast<uint32_t>(scale_extent.width),
-        static_cast<uint32_t>(scale_extent.height),
-        static_cast<uint32_t>(input.row_stride),
-        static_cast<uint32_t>(intermediate.row_stride),
-        static_cast<uint32_t>(kKernelSizes[1]),
-      };
-      encoder->setComputePipelineState(
-        metal_.butteraugli_pipelines_.convolution_transpose.get());
-      Bind(encoder, Handle(metal_, input), input.offset_bytes, 0);
-      Bind(encoder, Handle(metal_, kernels_[1]),
-           kernels_[1].offset_bytes, 1);
-      Bind(encoder, Handle(metal_, intermediate),
-           intermediate.offset_bytes, 2);
-      encoder->setBytes(&params, sizeof(params), 3);
-      metal_.DispatchPlane(encoder, scale_extent);
+      frequency_convolution_params.input_stride[channel] =
+        static_cast<uint32_t>(frequency_input[channel].row_stride);
+      frequency_convolution_params.output_stride[channel] =
+        static_cast<uint32_t>(frequency_intermediate[channel].row_stride);
+      Bind(encoder, Handle(metal_, frequency_input[channel]),
+           frequency_input[channel].offset_bytes, channel);
+      Bind(encoder, Handle(metal_, frequency_intermediate[channel]),
+           frequency_intermediate[channel].offset_bytes, 4 + channel);
     }
+    Bind(encoder, Handle(metal_, kernels_[1]), kernels_[1].offset_bytes, 3);
+    encoder->setBytes(
+      &frequency_convolution_params, sizeof(frequency_convolution_params), 7);
+    metal_.DispatchPlane(encoder, scale_extent);
     const FrequencyLowMediumConvolutionParams frequency_params{
       static_cast<uint32_t>(scale_extent.width),
       static_cast<uint32_t>(scale_extent.height),
@@ -1793,13 +1809,15 @@ Status CreateButteraugliPipelines(
   ButteraugliPipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 23> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 24> bindings{{
     {"gjxl_butteraugli_copy_f32", &pipelines.copy},
     {"gjxl_butteraugli_expand_f32", &pipelines.expand},
     {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
     {"gjxl_butteraugli_blur5_horizontal_f32", &pipelines.blur5_horizontal},
     {"gjxl_butteraugli_blur5_vertical_f32", &pipelines.blur5_vertical},
     {"gjxl_butteraugli_convolve_transpose_f32", &pipelines.convolution_transpose},
+    {"gjxl_butteraugli_convolve_transpose_3_f32",
+     &pipelines.convolution_transpose3},
     {"gjxl_butteraugli_opsin_blur5_f32", &pipelines.opsin_blur5},
     {"gjxl_butteraugli_frequency_low_medium_convolve_f32",
      &pipelines.frequency_low_medium_convolve},

@@ -45,6 +45,14 @@ struct ConvolutionParams {
   uint kernel_size;
 };
 
+struct Convolution3Params {
+  uint width;
+  uint height;
+  uint input_stride[3];
+  uint output_stride[3];
+  uint kernel_size;
+};
+
 struct OpsinParams {
   uint width;
   uint height;
@@ -320,6 +328,44 @@ kernel void gjxl_butteraugli_convolve_transpose_f32(
     sum += input[position.y * params.input_stride + uint(source_x)] * weight;
   }
   output[position.x * params.output_stride + position.y] = sum / weight_sum;
+}
+
+kernel void gjxl_butteraugli_convolve_transpose_3_f32(
+  device const float* input0 [[buffer(0)]],
+  device const float* input1 [[buffer(1)]],
+  device const float* input2 [[buffer(2)]],
+  device const float* weights [[buffer(3)]],
+  device float* output0 [[buffer(4)]],
+  device float* output1 [[buffer(5)]],
+  device float* output2 [[buffer(6)]],
+  constant Convolution3Params& params [[buffer(7)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height) return;
+  const int radius = int(params.kernel_size / 2);
+  const int center = int(position.x);
+  const int first = max(0, center - radius);
+  const int last = min(int(params.width) - 1, center + radius);
+  float weight_sum = 0.0f;
+  float sum0 = 0.0f;
+  float sum1 = 0.0f;
+  float sum2 = 0.0f;
+  for (int source_x = first; source_x <= last; ++source_x) {
+    const float weight = weights[source_x + radius - center];
+    weight_sum += weight;
+    sum0 += input0[
+      position.y * params.input_stride[0] + uint(source_x)] * weight;
+    sum1 += input1[
+      position.y * params.input_stride[1] + uint(source_x)] * weight;
+    sum2 += input2[
+      position.y * params.input_stride[2] + uint(source_x)] * weight;
+  }
+  output0[position.x * params.output_stride[0] + position.y] =
+    sum0 / weight_sum;
+  output1[position.x * params.output_stride[1] + position.y] =
+    sum1 / weight_sum;
+  output2[position.x * params.output_stride[2] + position.y] =
+    sum2 / weight_sum;
 }
 
 inline float butteraugli_fast_log2(float value) {

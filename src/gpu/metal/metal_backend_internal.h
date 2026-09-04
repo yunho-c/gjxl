@@ -190,6 +190,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> blur5_horizontal;
   NS::SharedPtr<MTL::ComputePipelineState> blur5_vertical;
   NS::SharedPtr<MTL::ComputePipelineState> convolution_transpose;
+  NS::SharedPtr<MTL::ComputePipelineState> convolution_transpose3;
   NS::SharedPtr<MTL::ComputePipelineState> opsin_blur5;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_convolve;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_high_convolve;

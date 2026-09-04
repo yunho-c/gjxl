@@ -651,6 +651,68 @@ the complete-encode result fails the measurable-improvement gate. The next
 channel experiment targets the 33-tap transpose, where sharing the truncated
 weight-sum loop across channels removes substantially more arithmetic.
 
+#### Phase 2.3 result: three-channel 33-tap transpose (2026-09-04)
+
+This prototype retained three independent convolution accumulators but shared
+the clipped source interval, weight loads, and weight-sum accumulation across
+channels. It preserved independent plane strides and the established
+per-channel summation order. Strict Metal compilation and the complete focused
+Metal Butteraugli stage-capture test passed in both control and fused builds.
+
+Seven alternating independent-process padded-4K stage-profile pairs showed a
+repeatable GPU improvement:
+
+| Scope | Control median | Fused median | Change | Fused wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `22.070 ms` | `21.318 ms` | `-3.40%` | 6/7 |
+| resident AQ | `117.952 ms` | `115.996 ms` | `-1.66%` | 6/7 |
+| main-scale psycho construction | `31.919 ms` | `29.991 ms` | `-6.04%` | 7/7 |
+| subscale psycho construction | `8.813 ms` | `8.410 ms` | `-4.58%` | 7/7 |
+
+The change reduces reference preparation from 44 to 40 dispatches and resident
+AQ from 316 to 308. Unlike the rejected smaller fusions, the speedup is not
+attributed to dispatch count alone: two of the three clipped 33-tap weight-sum
+loops are eliminated for every output while the three channel sums remain
+independent.
+
+Complete padded-workload results also passed the gate. The fused path won all
+seven 4K pairs, with the median moving from `316.119 ms` to `311.340 ms`
+(`-1.51%`), and five of seven 1080p pairs, with the median moving from
+`91.790 ms` to `89.686 ms` (`-2.29%`). Codestream sizes were identical in every
+pair.
+
+The content-diversity run covered all 24 Kodak images plus two real 1080p and
+two real 4K photographs. Five-sample Kodak process medians were mixed, with 13
+faster and 11 slower, because the GPU saving is small relative to process and
+host-tail noise at 512x768. Targeted profiles of two apparent wall-time losers
+resolved that ambiguity: on Kodak 03 the main/subscale psycho medians improved
+from `1.438/0.490 ms` to `1.308/0.449 ms`; on Kodak 12 they improved from
+`1.397/0.486 ms` to `1.275/0.446 ms`. Reference preparation and resident AQ
+also improved on both.
+
+All four real-photo profiles improved their reference, resident-AQ, main
+psycho, and subscale psycho medians. Main psycho improved by `6.3%` to `7.4%`
+and subscale psycho by `7.4%` to `9.5%`. Complete real-photo timing remained
+noisier: each 1080p image won four of five paired processes, while the 4K
+images were neutral-to-mixed despite their consistent GPU-stage wins.
+
+A focused Performance Limiters capture repeatedly exercised the 1919x1079
+Butteraugli path and sampled the new kernel directly. The Shader Timeline
+interval was `92.167 us` and represented `9.0%` of its sampled GPU kick. Across
+the three fully contained `20.792 us` compute-counter samples, mean kernel
+occupancy was `47.0%` against a `50.6%` occupancy-manager target. Mean shader
+launch and instruction-throughput limiters were `87.0%` and `61.7%`; mean L1
+limiter was `33.2%`. Stack L1 reads were effectively zero, stack writes
+averaged `0.002%`, and no ray-tracing scratch activity was present. The counter
+sample is narrow, but it rules out a pathological occupancy collapse or spill
+regression and remains consistent with launch/instruction pressure.
+
+Control and fused CLI builds produced byte-identical codestreams on
+representative Kodak, 1080p, and 4K photographs. The slice is promoted as the
+unconditional three-channel 33-tap path; its private build selector and host
+fallback have been removed. The generic single-channel transpose pipeline
+remains because later high, ultra, and masking passes still use it.
+
 ### Phase 3: tile-local convolution
 
 Prototype the 5-tap blur-plus-Opsin kernel first. Continue through 7, 13, and 15
