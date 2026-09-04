@@ -1,6 +1,6 @@
 # CUDA optimization study S1
 
-- Status: profiling complete; S1.1-S1.4 implemented
+- Status: profiling complete; S1.1-S1.5 implemented
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -590,6 +590,82 @@ The serial-per-thread implementation is in
 The entire current ceiling is only `4.5-6.2 ms` at 1080p, approximately 1% of
 fully-resident wall time and 2% of maximum-throughput wall time. This should
 not displace allocation, transfer, or DCT work.
+
+#### S1.5 completion snapshot (2026-09-04)
+
+`InitialCflKernel` now assigns a four-thread cooperative group to each 64x64
+color tile and packs 32 groups into each 128-thread block. Each thread owns one
+of the CPU-compatible four accumulator lanes and visits that lane's samples in
+the original order. Fixed-width subgroup shuffles then reproduce the original
+`(lane 0 + lane 1) + (lane 2 + lane 3)` horizontal sum for the three means and
+three regression terms. This defines the parallel floating-point order and
+preserves the existing quantized-map contract rather than introducing a new
+reduction approximation.
+
+Paired Nsight Systems captures compare revision `4a29b1d` with the completed
+kernel on the same RTX 3060 Laptop GPU. Each trace contains one warmed sample:
+
+| Workload and AQ mode | Before S1.5 | After S1.5 | Change |
+|---|---:|---:|---:|
+| 1080p fully resident | 4.555 ms | 0.470 ms | -89.7% |
+| 1080p maximum throughput | 6.175 ms | 0.539 ms | -91.3% |
+| 4K maximum throughput | 5.904 ms | 1.190 ms | -79.8% |
+
+The 1080p launch changes from two 256-thread blocks with one serial tile per
+thread to sixteen 128-thread blocks with four cooperating threads per tile.
+At 4K it changes from eight 256-thread blocks to sixty-four 128-thread blocks.
+Register use rises from 40 to 42 per thread, no shared memory is introduced,
+and the total workflow launch counts remain unchanged at 501 for fully
+resident and 34 for maximum throughput.
+
+The paired padded-1080p public wall profile used two warmups, nine samples for
+maximum throughput, and seven samples for fully resident. Times are warmed
+medians in milliseconds:
+
+| AQ mode and stage | Before S1.5 | After S1.5 | Change |
+|---|---:|---:|---:|
+| Fully resident, total | 261.6 | 246.3 | -5.8% |
+| Fully resident, quantization | 171.0 | 161.6 | -5.5% |
+| Maximum throughput, total | 120.2 | 103.2 | -14.1% |
+| Maximum throughput, quantization | 37.2 | 29.8 | -19.8% |
+
+The post-change total ranges were `232.3-291.0 ms` for fully resident and
+`99.9-131.0 ms` for maximum throughput; the corresponding baseline ranges
+were `248.5-342.0 ms` and `109.8-141.0 ms`. The wall-stage changes are larger
+than the isolated 4.1-5.6 ms kernel savings and therefore include clock and
+host-timing variance. The kernel trace is the causal measurement; the wall
+profile demonstrates that the gain survives the public workflow boundary.
+
+The final post-change paired batch qualification was:
+
+| AQ mode | Batch | Batch ms | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 251.1 | 3.98 | 1.06x |
+| Fully resident | 2 | 430.9 | 4.64 | 1.24x |
+| Fully resident | 4 | 790.1 | 5.06 | 1.67x |
+| Maximum throughput | 1 | 110.5 | 9.05 | 0.99x |
+| Maximum throughput | 2 | 170.1 | 11.76 | 1.42x |
+| Maximum throughput | 4 | 281.9 | 14.19 | 1.67x |
+
+The GPU warmed from 65 C/P8 to 74 C/P0 during this sweep. Separate baseline
+and post-change batch sessions moved inconsistently by roughly 0-10% across
+batch sizes, so they do not establish an S1.5 batch-throughput change. They do
+show that batch sizes 1, 2, and 4 remain functional and that the two-lane pool
+continues to overlap work; the isolated kernel traces remain the reliable
+performance comparison for this bounded optimization.
+
+CUDA tests now compare the resulting initial CfL maps directly against the CPU
+four-lane oracle for both structured and deterministic noisy images. The test
+geometry includes a partial right tile and partial bottom rows. Both maps and
+complete maximum-throughput codestreams remain byte-identical, while repeated
+four-worker runs cover fully-resident and maximum-throughput workflows. Odd
+1080p fully-resident and maximum-throughput codestreams, plus the odd 4K
+fully-resident codestream, are SHA-256 identical to their S1.4 outputs. The
+pinned `djxl` decoded all three and reported the original `1919x1079` and
+`3839x2159` dimensions. The checkpoint passed all 53 CUDA tests and all 47
+CPU-only tests; Compute Sanitizer memcheck also reported zero errors for the
+CUDA AQ suite. Ignored trace artifacts use the `s15_*` prefix under
+`build-cuda-ninja/profiles`.
 
 ### S1.6: capture stable resident submissions with CUDA Graphs
 

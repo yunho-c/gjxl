@@ -92,6 +92,30 @@ void FillLinear(ImageStorage* source, ImageStorage* padded) {
   }
 }
 
+void FillNoisyLinear(ImageStorage* source, ImageStorage* padded) {
+  for (size_t y = 0; y < kPaddedExtent.height; ++y) {
+    const size_t sy = std::min(y, kSourceExtent.height - 1);
+    for (size_t x = 0; x < kPaddedExtent.width; ++x) {
+      const size_t sx = std::min(x, kSourceExtent.width - 1);
+      uint32_t state = static_cast<uint32_t>(sx) * 0x9e3779b9u ^
+                       static_cast<uint32_t>(sy) * 0x85ebca6bu;
+      std::array<float, 3> rgb{};
+      for (float& value : rgb) {
+        state ^= state >> 16;
+        state *= 0x7feb352du;
+        state ^= state >> 15;
+        value = static_cast<float>(state & 0xffffu) * (1.0f / 65535.0f);
+      }
+      for (size_t channel = 0; channel < 3; ++channel) {
+        padded->plane[channel][y * padded->stride + x] = rgb[channel];
+        if (x < kSourceExtent.width && y < kSourceExtent.height) {
+          source->plane[channel][y * source->stride + x] = rgb[channel];
+        }
+      }
+    }
+  }
+}
+
 double MaximumError(
   const std::vector<float>& expected,
   const std::vector<float>& actual) {
@@ -101,6 +125,27 @@ double MaximumError(
       static_cast<double>(expected[i]) - static_cast<double>(actual[i])));
   }
   return result;
+}
+
+bool ColorMapsEqual(const gjxl::ColorCorrelationMap& left,
+                    const gjxl::ColorCorrelationMap& right) {
+  if (!left.valid() || !right.valid() ||
+      left.tile_extent() != right.tile_extent()) {
+    return false;
+  }
+  const auto left_x = left.y_to_x_map();
+  const auto right_x = right.y_to_x_map();
+  const auto left_b = left.y_to_b_map();
+  const auto right_b = right.y_to_b_map();
+  for (size_t y = 0; y < left.tile_extent().height; ++y) {
+    if (!std::equal(left_x.Row(y), left_x.Row(y) + left.tile_extent().width,
+                    right_x.Row(y)) ||
+        !std::equal(left_b.Row(y), left_b.Row(y) + left.tile_extent().width,
+                    right_b.Row(y))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool CheckCudaInputPreparation(
@@ -875,29 +920,7 @@ bool CheckResidentInvariantColorCorrelationContract(
              "Build CUDA resident evaluation reference map")) {
     return false;
   }
-  const auto maps_equal = [](const gjxl::ColorCorrelationMap& left,
-                             const gjxl::ColorCorrelationMap& right) {
-    if (!left.valid() || !right.valid() ||
-        left.tile_extent() != right.tile_extent()) {
-      return false;
-    }
-    const auto left_x = left.y_to_x_map();
-    const auto right_x = right.y_to_x_map();
-    const auto left_b = left.y_to_b_map();
-    const auto right_b = right.y_to_b_map();
-    for (size_t y = 0; y < left.tile_extent().height; ++y) {
-      if (!std::equal(left_x.Row(y),
-                      left_x.Row(y) + left.tile_extent().width,
-                      right_x.Row(y)) ||
-          !std::equal(left_b.Row(y),
-                      left_b.Row(y) + left.tile_extent().width,
-                      right_b.Row(y))) {
-        return false;
-      }
-    }
-    return true;
-  };
-  if (maps_equal(prepared_color, evaluation_color)) {
+  if (ColorMapsEqual(prepared_color, evaluation_color)) {
     std::cerr << "CUDA resident invariant-CfL test maps are not distinct\n";
     return false;
   }
@@ -959,8 +982,8 @@ bool CheckResidentInvariantColorCorrelationContract(
       quantizer.global_scale !=
           evaluation_quantizer.params().global_scale ||
       quantizer.quant_dc != evaluation_quantizer.params().quant_dc ||
-      !maps_equal(frame.color_correlation(), prepared_color) ||
-      maps_equal(frame.color_correlation(), evaluation_color) ||
+      !ColorMapsEqual(frame.color_correlation(), prepared_color) ||
+      ColorMapsEqual(frame.color_correlation(), evaluation_color) ||
       !std::isfinite(score) || score < 0.0 ||
       !std::ranges::all_of(block_map, [](float value) {
         return std::isfinite(value) && value >= 0.0f;
@@ -1118,6 +1141,10 @@ bool CheckResidentFrontend(gjxl::GpuBackend& gpu, const ImageStorage& source,
         filtered.View()), "CPU inverse Gaborish reference") ||
       !Check(gjxl::FrameGeometry::Create(kSourceExtent, &geometry),
              "Create CPU frame geometry")) {
+    return false;
+  }
+  if (!ColorMapsEqual(color, cuda_frame.color_correlation())) {
+    std::cerr << "Parallel CUDA initial CfL map differs from CPU\n";
     return false;
   }
   gjxl::VarDctEncoderFrame cpu_frame;
@@ -1472,53 +1499,59 @@ bool CheckConcurrentPublicWorkflow(gjxl::GpuBackend& gpu) {
       source.plane[2][pixel] = 0.05f + 0.31f * fx + 0.37f * fy;
     }
   }
-  const gjxl::VarDctEncodingOptions options{
-    .butteraugli_target = 1.0f,
-    .backend = gjxl::VarDctBackendPreference::kCuda,
-    .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
-  };
-  std::vector<uint8_t> reference_bytes;
-  gjxl::VarDctEncodingSummary reference_summary;
-  if (!Check(gjxl::codestream_internal::
-      EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
-        std::as_const(source).View(), options, &gpu, false,
-        &reference_bytes, &reference_summary),
-      "Concurrent CUDA public-workflow reference")) {
-    return false;
-  }
-
   constexpr size_t kWorkerCount = 4;
   constexpr size_t kIterations = 4;
-  std::array<bool, kWorkerCount> succeeded{};
-  std::array<std::thread, kWorkerCount> workers;
-  std::atomic<size_t> ready{0};
-  for (size_t worker = 0; worker < workers.size(); ++worker) {
-    workers[worker] = std::thread([&, worker] {
-      ready.fetch_add(1, std::memory_order_release);
-      while (ready.load(std::memory_order_acquire) != kWorkerCount) {
-        std::this_thread::yield();
-      }
-      for (size_t iteration = 0; iteration < kIterations; ++iteration) {
-        std::vector<uint8_t> bytes;
-        gjxl::VarDctEncodingSummary summary;
-        const gjxl::Status status = gjxl::codestream_internal::
-          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
-            std::as_const(source).View(), options, &gpu, false,
-            &bytes, &summary);
-        if (!status.ok() || bytes != reference_bytes ||
-            summary != reference_summary) {
-          return;
+  constexpr std::array kModes{
+    gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+    gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput,
+  };
+  for (const gjxl::GpuAdaptiveQuantizationMode mode : kModes) {
+    const gjxl::VarDctEncodingOptions options{
+      .butteraugli_target = 1.0f,
+      .backend = gjxl::VarDctBackendPreference::kCuda,
+      .gpu_aq_mode = mode,
+    };
+    std::vector<uint8_t> reference_bytes;
+    gjxl::VarDctEncodingSummary reference_summary;
+    if (!Check(gjxl::codestream_internal::
+        EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+          std::as_const(source).View(), options, &gpu, false,
+          &reference_bytes, &reference_summary),
+        "Concurrent CUDA public-workflow reference")) {
+      return false;
+    }
+
+    std::array<bool, kWorkerCount> succeeded{};
+    std::array<std::thread, kWorkerCount> workers;
+    std::atomic<size_t> ready{0};
+    for (size_t worker = 0; worker < workers.size(); ++worker) {
+      workers[worker] = std::thread([&, worker] {
+        ready.fetch_add(1, std::memory_order_release);
+        while (ready.load(std::memory_order_acquire) != kWorkerCount) {
+          std::this_thread::yield();
         }
-      }
-      succeeded[worker] = true;
-    });
-  }
-  for (std::thread& worker : workers) {
-    worker.join();
-  }
-  if (!std::ranges::all_of(succeeded, [](bool value) { return value; })) {
-    std::cerr << "Concurrent CUDA public workflows were not deterministic\n";
-    return false;
+        for (size_t iteration = 0; iteration < kIterations; ++iteration) {
+          std::vector<uint8_t> bytes;
+          gjxl::VarDctEncodingSummary summary;
+          const gjxl::Status status = gjxl::codestream_internal::
+            EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+              std::as_const(source).View(), options, &gpu, false,
+              &bytes, &summary);
+          if (!status.ok() || bytes != reference_bytes ||
+              summary != reference_summary) {
+            return;
+          }
+        }
+        succeeded[worker] = true;
+      });
+    }
+    for (std::thread& worker : workers) {
+      worker.join();
+    }
+    if (!std::ranges::all_of(succeeded, [](bool value) { return value; })) {
+      std::cerr << "Concurrent CUDA public workflows were not deterministic\n";
+      return false;
+    }
   }
   return true;
 }
@@ -1539,10 +1572,17 @@ int main() {
   ImageStorage source(kSourceExtent);
   ImageStorage padded(kPaddedExtent);
   ImageStorage opsin(kPaddedExtent);
+  ImageStorage noisy_source(kSourceExtent);
+  ImageStorage noisy_padded(kPaddedExtent);
+  ImageStorage noisy_opsin(kPaddedExtent);
   FillLinear(&source, &padded);
+  FillNoisyLinear(&noisy_source, &noisy_padded);
   if (!Check(gjxl::LinearRgbToOpsin(
                std::as_const(padded).View(), 255.0f, opsin.View()),
         "Prepare CUDA AQ opsin") ||
+      !Check(gjxl::LinearRgbToOpsin(std::as_const(noisy_padded).View(), 255.0f,
+               noisy_opsin.View()),
+        "Prepare noisy CUDA AQ opsin") ||
       !CheckCudaInputPreparation(*gpu, source, opsin) ||
       !CheckExactWorkflow(*gpu, source, opsin) ||
       !CheckExactMaximumError(*gpu, source, opsin) ||
@@ -1551,6 +1591,7 @@ int main() {
       !CheckResidentInvariantColorCorrelationContract(*gpu, source, opsin) ||
       !CheckResidentMaximumError(*gpu, source, opsin) ||
       !CheckResidentFrontend(*gpu, source, opsin) ||
+      !CheckResidentFrontend(*gpu, noisy_source, noisy_opsin) ||
       !CheckPreparedReuseAndFailure(*gpu, source, opsin) ||
       !CheckPublicWorkflow(*gpu, source) ||
       !CheckConcurrentPublicWorkflow(*gpu)) {

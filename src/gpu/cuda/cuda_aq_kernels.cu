@@ -13,6 +13,14 @@ namespace gjxl::cuda_internal {
 namespace {
 
 constexpr unsigned int kThreads = 256;
+// The CPU-compatible fast CfL path accumulates four SIMD-style lanes. Assign
+// one CUDA thread to each lane so all four advance concurrently while retaining
+// the per-lane sample order and the final (0 + 1) + (2 + 3) reduction.
+constexpr unsigned int kCflLanesPerTile = 4;
+constexpr unsigned int kCflThreads = 128;
+constexpr unsigned int kCflTilesPerBlock = kCflThreads / kCflLanesPerTile;
+
+static_assert(kCflThreads % kCflLanesPerTile == 0);
 
 __device__ float GammaRatio(float value, bool invert) {
   constexpr float kEpsilon = 1.0e-2f;
@@ -400,11 +408,27 @@ __device__ signed char QuantizeCfl(float value) {
   return static_cast<signed char>(fminf(fmaxf(roundf(value), -128.0f), 127.0f));
 }
 
+__device__ float HorizontalCflSum(float value) {
+  constexpr unsigned int kFullWarpMask = 0xffffffffu;
+  const float lane_0 =
+      __shfl_sync(kFullWarpMask, value, 0, kCflLanesPerTile);
+  const float lane_1 =
+      __shfl_sync(kFullWarpMask, value, 1, kCflLanesPerTile);
+  const float lane_2 =
+      __shfl_sync(kFullWarpMask, value, 2, kCflLanesPerTile);
+  const float lane_3 =
+      __shfl_sync(kFullWarpMask, value, 3, kCflLanesPerTile);
+  return __fadd_rn(__fadd_rn(lane_0, lane_1),
+                   __fadd_rn(lane_2, lane_3));
+}
+
 __global__ void InitialCflKernel(const float* coding_x, const float* coding_y,
                                  const float* coding_b, signed char* y_to_x,
                                  signed char* y_to_b, unsigned int* error,
                                  CudaAqGeometry geometry) {
-  const unsigned int tile = blockIdx.x * blockDim.x + threadIdx.x;
+  const unsigned int lane = threadIdx.x % kCflLanesPerTile;
+  const unsigned int tile =
+      blockIdx.x * kCflTilesPerBlock + threadIdx.x / kCflLanesPerTile;
   const unsigned int tile_count = geometry.tile_width * geometry.tile_height;
   if (tile >= tile_count) return;
   const unsigned int tile_x = tile % geometry.tile_width;
@@ -413,56 +437,64 @@ __global__ void InitialCflKernel(const float* coding_x, const float* coding_y,
   const unsigned int y_begin = tile_y * 64;
   const unsigned int x_end = min(x_begin + 64, geometry.width);
   const unsigned int y_end = min(y_begin + 64, geometry.height);
-  float sum_y[4] = {};
-  float sum_x[4] = {};
-  float sum_b[4] = {};
-  unsigned int sample = 0;
+  float sum_y = 0.0f;
+  float sum_x = 0.0f;
+  float sum_b = 0.0f;
+  bool finite = true;
+  // Padded image and partial color-tile widths are multiples of eight, so the
+  // x-coordinate modulo four is the CPU sample-index lane on every row.
   for (unsigned int y = y_begin; y < y_end; ++y) {
     const size_t row = static_cast<size_t>(y) * geometry.width;
-    for (unsigned int x = x_begin; x < x_end; ++x, ++sample) {
-      const unsigned int lane = sample & 3u;
+    for (unsigned int x = x_begin + lane; x < x_end;
+         x += kCflLanesPerTile) {
       const float vy = coding_y[row + x];
       const float vx = coding_x[row + x];
       const float vb = coding_b[row + x];
       if (!isfinite(vy) || !isfinite(vx) || !isfinite(vb)) {
-        atomicOr(error, 1u << 5);
-        return;
+        finite = false;
+        continue;
       }
-      sum_y[lane] += vy;
-      sum_x[lane] += vx;
-      sum_b[lane] += vb;
+      sum_y = __fadd_rn(sum_y, vy);
+      sum_x = __fadd_rn(sum_x, vx);
+      sum_b = __fadd_rn(sum_b, vb);
     }
   }
-  if (sample == 0) {
-    atomicOr(error, 1u << 5);
+  const unsigned int finite_lanes =
+      __ballot_sync(0xffffffffu, finite);
+  const unsigned int group_shift = threadIdx.x & 28u;
+  const unsigned int group_mask = 0x0fu << group_shift;
+  if ((finite_lanes & group_mask) != group_mask) {
+    if (lane == 0) atomicOr(error, 1u << 5);
     return;
   }
-  const float count = static_cast<float>(sample);
-  const float mean_y = ((sum_y[0] + sum_y[1]) + (sum_y[2] + sum_y[3])) / count;
-  const float mean_x = ((sum_x[0] + sum_x[1]) + (sum_x[2] + sum_x[3])) / count;
-  const float mean_b = ((sum_b[0] + sum_b[1]) + (sum_b[2] + sum_b[3])) / count;
-  float quadratic[4] = {};
-  float linear_x[4] = {};
-  float linear_b[4] = {};
-  sample = 0;
+  const float count = static_cast<float>((x_end - x_begin) *
+                                         (y_end - y_begin));
+  const float mean_y = HorizontalCflSum(sum_y) / count;
+  const float mean_x = HorizontalCflSum(sum_x) / count;
+  const float mean_b = HorizontalCflSum(sum_b) / count;
+  float quadratic = 0.0f;
+  float linear_x = 0.0f;
+  float linear_b = 0.0f;
   for (unsigned int y = y_begin; y < y_end; ++y) {
     const size_t row = static_cast<size_t>(y) * geometry.width;
-    for (unsigned int x = x_begin; x < x_end; ++x, ++sample) {
-      const unsigned int lane = sample & 3u;
+    for (unsigned int x = x_begin + lane; x < x_end;
+         x += kCflLanesPerTile) {
       const float centered_y = coding_y[row + x] - mean_y;
       const float a = centered_y * (1.0f / 84.0f);
-      quadratic[lane] = fmaf(a, a, quadratic[lane]);
-      linear_x[lane] = fmaf(a, -(coding_x[row + x] - mean_x), linear_x[lane]);
-      linear_b[lane] =
-          fmaf(a, centered_y - (coding_b[row + x] - mean_b), linear_b[lane]);
+      quadratic = fmaf(a, a, quadratic);
+      linear_x = fmaf(a, -(coding_x[row + x] - mean_x), linear_x);
+      linear_b =
+          fmaf(a, centered_y - (coding_b[row + x] - mean_b), linear_b);
     }
   }
-  const float q = (quadratic[0] + quadratic[1]) + (quadratic[2] + quadratic[3]);
-  const float lx = (linear_x[0] + linear_x[1]) + (linear_x[2] + linear_x[3]);
-  const float lb = (linear_b[0] + linear_b[1]) + (linear_b[2] + linear_b[3]);
+  const float q = HorizontalCflSum(quadratic);
+  const float lx = HorizontalCflSum(linear_x);
+  const float lb = HorizontalCflSum(linear_b);
   const float denominator = q + count * 5.0e-10f;
-  y_to_x[tile] = QuantizeCfl(-lx / denominator);
-  y_to_b[tile] = QuantizeCfl(-lb / denominator);
+  if (lane == 0) {
+    y_to_x[tile] = QuantizeCfl(-lx / denominator);
+    y_to_b[tile] = QuantizeCfl(-lb / denominator);
+  }
 }
 
 __global__ void GatherDct8Kernel(const float* x, const float* y, const float* b,
@@ -823,11 +855,11 @@ cudaError_t LaunchCudaAqInitialCfl(const float* coding_x, const float* coding_y,
                                    signed char* y_to_b, unsigned int* error,
                                    CudaAqGeometry geometry,
                                    cudaStream_t stream) {
-  constexpr unsigned int kThreads = 256;
   const unsigned int tile_count = geometry.tile_width * geometry.tile_height;
-  InitialCflKernel<<<(tile_count + kThreads - 1) / kThreads, kThreads, 0,
-                     stream>>>(coding_x, coding_y, coding_b, y_to_x, y_to_b,
-                               error, geometry);
+  InitialCflKernel<<<(tile_count + kCflTilesPerBlock - 1) /
+                         kCflTilesPerBlock,
+                     kCflThreads, 0, stream>>>(coding_x, coding_y, coding_b,
+                                               y_to_x, y_to_b, error, geometry);
   return CheckLaunch();
 }
 
@@ -876,9 +908,10 @@ cudaError_t LaunchCudaAqEncodeFrame(
   cudaError_t status = cudaMemsetAsync(error, 0, sizeof(*error), stream);
   if (status != cudaSuccess) return status;
   const unsigned int tile_count = geometry.tile_width * geometry.tile_height;
-  InitialCflKernel<<<(tile_count + kThreads - 1) / kThreads, kThreads, 0,
-                     stream>>>(coding_x, coding_y, coding_b, y_to_x, y_to_b,
-                               error, geometry);
+  InitialCflKernel<<<(tile_count + kCflTilesPerBlock - 1) /
+                         kCflTilesPerBlock,
+                     kCflThreads, 0, stream>>>(coding_x, coding_y, coding_b,
+                                               y_to_x, y_to_b, error, geometry);
   if ((status = CheckLaunch()) != cudaSuccess) return status;
   const size_t pixel_count =
       static_cast<size_t>(geometry.width) * geometry.height;
