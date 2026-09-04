@@ -505,10 +505,14 @@ bool RunStrategyCase(
   return true;
 }
 
+static_assert(
+  gjxl::MetalBackendOptions{}.ac_residual_inverse ==
+  gjxl::MetalAcResidualInverseMode::kFusedTuned);
+
 gjxl::MetalBackendOptions OptionsFor(
   gjxl::MetalDctImplementation implementation,
   gjxl::MetalAcResidualInverseMode ac_residual_inverse =
-    gjxl::MetalAcResidualInverseMode::kFusedWide) {
+    gjxl::MetalAcResidualInverseMode::kFusedTuned) {
 
   return {
     .forward_dct8 = implementation,
@@ -534,7 +538,7 @@ bool CheckImplementation(
   std::string_view name,
   const Fixture& fixture,
   gjxl::MetalAcResidualInverseMode ac_residual_inverse =
-    gjxl::MetalAcResidualInverseMode::kFusedWide) {
+    gjxl::MetalAcResidualInverseMode::kFusedTuned) {
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!CheckStatus(
@@ -613,9 +617,9 @@ int main() {
         gjxl::MetalAcResidualInverseMode::kFusedCompact) ||
       !CheckImplementation(
         gjxl::MetalDctImplementation::kSimdgroupMatmul,
-        "simdgroup matmul tuned AC residual/inverse",
+        "simdgroup matmul wide AC residual/inverse",
         fixture,
-        gjxl::MetalAcResidualInverseMode::kFusedTuned) ||
+        gjxl::MetalAcResidualInverseMode::kFusedWide) ||
       !CheckImplementation(
         gjxl::MetalDctImplementation::kSimdgroupMatmul,
         "simdgroup matmul split AC residual/inverse",

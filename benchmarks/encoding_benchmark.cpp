@@ -129,7 +129,7 @@ struct CommandLineOptions {
   std::string raw_samples_path;
   std::string gpu_profile_path;
   std::string implementation = "simd";
-  std::string ac_residual_inverse = "fused-wide";
+  std::string ac_residual_inverse = "fused-tuned";
   BenchmarkScope scope = BenchmarkScope::kFull;
   ValidationMode validation = ValidationMode::kCpuMetal;
   gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
@@ -732,11 +732,11 @@ ParseGpuProfilingMode(std::string_view text) {
   } else if (name == "factored") {
     implementation = Implementation::kFactoredRadix2;
   }
-  AcMode ac_mode = AcMode::kFusedWide;
-  if (ac_residual_inverse == "fused-compact") {
+  AcMode ac_mode = AcMode::kFusedTuned;
+  if (ac_residual_inverse == "fused-wide") {
+    ac_mode = AcMode::kFusedWide;
+  } else if (ac_residual_inverse == "fused-compact") {
     ac_mode = AcMode::kFusedCompact;
-  } else if (ac_residual_inverse == "fused-tuned") {
-    ac_mode = AcMode::kFusedTuned;
   } else if (ac_residual_inverse == "split") {
     ac_mode = AcMode::kSplit;
   }

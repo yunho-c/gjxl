@@ -326,6 +326,7 @@ MetalBackendOptions ProductionMetalBackendOptions() {
     .inverse_dct32x16 = implementation,
     .forward_dct16x32 = implementation,
     .inverse_dct16x32 = implementation,
+    .ac_residual_inverse = MetalAcResidualInverseMode::kFusedTuned,
   };
 }
 

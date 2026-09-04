@@ -20,8 +20,9 @@ enum class MetalDctImplementation {
   kFactoredRadix2,
 };
 
-// Diagnostic variants for the AC candidate residual/inverse boundary. The
-// production default retains the existing coefficient-wide fused kernel.
+// Scheduling variants for the AC candidate residual/inverse boundary. The
+// tuned per-strategy widths are the production default; the coefficient-wide,
+// compact, and split modes remain available for diagnostics.
 enum class MetalAcResidualInverseMode {
   kFusedWide,
   kFusedCompact,
@@ -85,7 +86,7 @@ struct MetalBackendOptions {
     MetalDctImplementation::kScalarMatmul;
 
   MetalAcResidualInverseMode ac_residual_inverse =
-    MetalAcResidualInverseMode::kFusedWide;
+    MetalAcResidualInverseMode::kFusedTuned;
 
   // Deterministic failure injection used by real-device backend tests.
   bool test_fail_submission = false;

@@ -128,7 +128,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             document["substage_work_timing"], "aggregate-worker-time"
         )
         self.assertEqual(document["validation"], "metal-only")
-        self.assertEqual(document["ac_residual_inverse"], "fused-wide")
+        self.assertEqual(document["ac_residual_inverse"], "fused-tuned")
         self.assertEqual(document["density"], "default")
         self.assertEqual(document["compression"], "automatic")
         self.assertEqual(document["effort"], 7)
@@ -370,6 +370,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         document = json.loads(destination.read_text(encoding="utf-8"))
         self.assertEqual(document["schema_version"], 4)
         self.assertEqual(document["mode"], "stage")
+        self.assertEqual(document["ac_residual_inverse"], "fused-tuned")
         self.assertFalse(document["collect_final_score"])
         sample = document["workloads"][0]["samples"][0]
         self.assertTrue(sample["capabilities"]["timestamp_counter"])
@@ -493,20 +494,25 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 1,
             )
             self.assertNotIn("gjxl_ac_strategy_residual", kernel_ids)
+            inverse_suffix = (
+                "_residual_inverse_tuned"
+                if stage["stage_id"]
+                in {
+                    "frontend.ac_strategy.dct16x32",
+                    "frontend.ac_strategy.dct32",
+                }
+                else "_residual_inverse_compact"
+            )
             self.assertEqual(
-                sum(
-                    kernel_id.startswith("gjxl_ac_strategy_dct")
-                    and kernel_id.endswith("_residual_inverse_fused")
-                    for kernel_id in kernel_ids
-                ),
-                1,
+                sum(name.endswith(inverse_suffix) for name in kernel_ids), 1
             )
             self.assertIn("gjxl_ac_strategy_cost", kernel_ids)
 
-    def test_ac_residual_inverse_experiment_selects_expected_kernels(
+    def test_ac_residual_inverse_modes_select_expected_kernels(
         self,
     ) -> None:
         expected = {
+            "fused-wide": 3,
             "fused-compact": 3,
             "fused-tuned": 3,
             "split": 4,
@@ -539,7 +545,9 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 )
                 for stage in submission["stages"]:
                     inverse_suffix = "_inverse_simdgroup_2d_matmul"
-                    if mode == "fused-compact":
+                    if mode == "fused-wide":
+                        inverse_suffix = "_residual_inverse_fused"
+                    elif mode == "fused-compact":
                         inverse_suffix = "_residual_inverse_compact"
                     elif mode == "fused-tuned":
                         if stage["stage_id"] == "frontend.ac_strategy.dct32":
