@@ -236,6 +236,13 @@ speedups. They overlap and cannot be summed. Every retained change needs a new
 wall profile because removing one synchronization point can move time into a
 later wait.
 
+Each completed checkpoint should append a performance snapshot to its section.
+The snapshot should identify the commit and workload, compare the same wall
+profile before and after the change, report relevant CUDA timeline counters,
+and call out noise or regressions as explicitly as improvements. Build and
+test qualification belongs in the same snapshot when it materially defines
+the result.
+
 ### S1.1: consolidate and reuse device allocations
 
 **Priority:** highest; applies to both resident policies.
@@ -311,6 +318,50 @@ more important than attempting to tune raw PCIe bandwidth alone.
 Pinned reusable staging can improve the remaining large transfers and allow
 them to overlap across the two production lanes. It should not weaken the
 backend's synchronous host-buffer lifetime contract.
+
+#### S1.2 completion snapshot (2026-09-04)
+
+Commit `f2732d3` keeps initial quantization, masking, and initial CfL data on
+the device for encoding-only operation. Resident AC search consumes those
+device views directly, and fully-resident Butteraugli control reduces and
+adjusts the initial field without a host field handoff. Small immutable
+uploads and related readbacks share one stream synchronization per batch.
+The complete public diagnostic APIs continue to materialize their maps.
+
+The wall comparison uses the same synthetic `1919x1079` padded-1080p workload,
+distance `1.2`, effort `7`, two warmups, seven GPU-only samples, and an RTX
+3060 Laptop GPU. Times are warmed medians in milliseconds:
+
+| AQ mode and stage | Before S1.2 | After S1.2 | Change |
+|---|---:|---:|---:|
+| Maximum throughput, total | 260.3 | 191.0 | -26.6% |
+| Maximum throughput, quantization | 132.5 | 86.5 | -34.7% |
+| Fully resident, total | 430.9 | 435.2 | +1.0% |
+| Fully resident, quantization | 317.9 | 303.1 | -4.7% |
+
+The post-change sample ranges were `178.8-270.3 ms` total and
+`80.2-118.2 ms` quantization for maximum throughput, and `394.9-461.0 ms`
+total and `297.2-317.7 ms` quantization for fully resident. The laptop's clock
+and thermal variance make the fully-resident total effectively unchanged;
+the smaller quantization-stage median is directionally consistent with the
+copy reduction but should not be treated as a stable 4.7% end-to-end gain.
+
+Warmed Nsight Systems captures confirm the intended traffic reduction:
+
+| AQ mode and transfer | Before S1.2 | After S1.2 | Change |
+|---|---:|---:|---:|
+| Maximum throughput, DtoH | 34.0 MB / 11 copies | 25.4 MB / 8 copies | -25.2% bytes |
+| Fully resident, DtoH | 34.6 MB / 23 copies | 25.9 MB / 18 copies | -25.1% bytes |
+| Fully resident, HtoD | 54.6 MB / 37 copies | 54.2 MB / 34 copies | -0.7% bytes |
+
+Maximum throughput benefits directly because the removed 8.55 MB initial-map
+readback was a large share of its short GPU path. Fully resident removes the
+same maps plus three host quant-field handoffs, but generic DCT execution still
+dominates its wall time; this reinforces S1.3 as its next high-impact target.
+The checkpoint passed all 53 tests in the CUDA build and all 47 tests in the
+CPU-only build. The ignored trace artifacts are
+`s12_maximum_throughput_1080p.nsys-rep` and
+`s12_fully_resident_1080p.nsys-rep` under `build-cuda-ninja/profiles`.
 
 ### S1.3: specialize the dominant DCT shapes
 
