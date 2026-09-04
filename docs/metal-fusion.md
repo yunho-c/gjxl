@@ -531,6 +531,55 @@ Gates before retaining the slice:
 
 If successful, commit this slice independently before beginning channel fusion.
 
+#### Phase 0 and Phase 1 result (2026-09-04)
+
+The current-revision Phase 0 baseline was captured from commit `25f3cbd` on an
+Apple M4 Pro with a fresh Release build. Five independent processes, each with
+two discarded warmups and one retained effort-7 fully-resident sample, produced
+these medians:
+
+| Workload | Complete encode | Quantization pipeline | Codestream bytes |
+| --- | ---: | ---: | ---: |
+| padded 1080p | `91.715 ms` | `72.101 ms` | `410072` |
+| padded 4K | `315.240 ms` | `271.036 ms` | `1606911` |
+
+A five-sample padded-4K stage profile measured `22.301 ms` for reference
+preparation and `117.653 ms` for resident AQ. Inside resident AQ, the medians
+were `13.114 ms` for main-scale Malta, `3.246 ms` for subscale Malta,
+`32.012 ms` for main-scale psycho construction, and `8.660 ms` for subscale
+psycho construction. The associated capture retained 44 reference dispatches
+and 316 resident-AQ dispatches. A fresh System Trace and Performance Limiters
+capture were also recorded; their workflow timings remain diagnostic rather
+than public benchmark results.
+
+The Phase 1 prototype fused all six Malta stages at a scale into one kernel,
+preserved the established accumulation order, and reused one haloed
+threadgroup tile. Both `32 x 8` and `16 x 8` variants compiled with strict Metal
+settings and passed the focused Metal Butteraugli test. The `32 x 8` variant
+removed exactly 20 dispatches from the profiled two-evaluation resident AQ
+submission, reducing the resident count from 316 to 296. That structural win
+did not translate into a meaningful timing win:
+
+- the median Malta time changed from `16.259 ms` to `16.167 ms` (`0.6%`);
+- the median resident-AQ time changed from `117.563 ms` to `116.871 ms`
+  (`0.6%`); and
+- the `16 x 8` shape was not materially better.
+
+In five alternating independent-process complete-encode pairs, `32 x 8` won
+three of five padded-1080p pairs, but only two of five padded-4K pairs. The 4K
+median changed from `308.607 ms` to `311.022 ms`, a `0.78%` regression, while
+all output byte counts remained identical. This fails both the majority-pair
+and practical-value promotion gates. The prototype has therefore been removed
+rather than leaving an inactive pipeline or build selector in production.
+
+This rejection narrows the diagnosis: the number of Malta dispatches is not by
+itself the fundamental cost. The fused kernel still performs all six
+neighborhood evaluations and introduces repeated tile loads and barriers, so
+its useful arithmetic dominates the saved inter-dispatch work. Phase 2 should
+proceed as a sequence of independently measured channel-fusion experiments,
+starting with subsampling and the 5-tap horizontal blur, rather than pursuing a
+larger Malta superkernel.
+
 ### Phase 2: channel fusion
 
 Implement and measure in this order:
