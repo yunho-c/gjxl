@@ -43,6 +43,7 @@ bool TryMultiply(size_t left, size_t right, size_t* result) {
 
 Status ValidateSearchInputs(
   ConstImage3FView opsin,
+  Extent2D resident_opsin_extent,
   ConstPlaneF32View quant_field,
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,
@@ -58,32 +59,35 @@ Status ValidateSearchInputs(
       pixel_count == nullptr || block_count == nullptr) {
     return Status::InvalidArgument("GPU AC-strategy search output is null");
   }
-  if (!opsin.valid() || opsin.width() % kJxlBlockDimension != 0 ||
-      opsin.height() % kJxlBlockDimension != 0) {
+  const Extent2D pixel_extent =
+    resident_fields ? resident_opsin_extent : opsin.extent();
+  if ((!resident_fields && !opsin.valid()) || pixel_extent.empty() ||
+      pixel_extent.width % kJxlBlockDimension != 0 ||
+      pixel_extent.height % kJxlBlockDimension != 0) {
     return Status::InvalidArgument(
       "GPU AC-strategy search requires a padded opsin image");
   }
   *block_extent = {
-    opsin.width() / kJxlBlockDimension,
-    opsin.height() / kJxlBlockDimension,
+    pixel_extent.width / kJxlBlockDimension,
+    pixel_extent.height / kJxlBlockDimension,
   };
-  if (!opsin.extent().try_area(pixel_count) ||
+  if (!pixel_extent.try_area(pixel_count) ||
       !block_extent->try_area(block_count)) {
     return Status::InvalidArgument(
       "GPU AC-strategy search dimensions are too large");
   }
   if ((!resident_fields &&
-       (!quant_field.valid() || quant_field.extent != *block_extent ||
-        !pixel_mask.valid() || pixel_mask.extent != opsin.extent())) ||
+        (!quant_field.valid() || quant_field.extent != *block_extent ||
+          !pixel_mask.valid() || pixel_mask.extent != pixel_extent)) ||
       (!resident_cfl && !color_correlation.valid())) {
     return Status::InvalidArgument(
       "GPU AC-strategy search fields have invalid geometry");
   }
   *tile_extent = {
-    opsin.width() / kColorTileDimension +
-      static_cast<size_t>(opsin.width() % kColorTileDimension != 0),
-    opsin.height() / kColorTileDimension +
-      static_cast<size_t>(opsin.height() % kColorTileDimension != 0),
+    pixel_extent.width / kColorTileDimension +
+      static_cast<size_t>(pixel_extent.width % kColorTileDimension != 0),
+    pixel_extent.height / kColorTileDimension +
+      static_cast<size_t>(pixel_extent.height % kColorTileDimension != 0),
   };
   if ((!resident_cfl &&
        color_correlation.tile_extent() != *tile_extent) ||
@@ -93,8 +97,9 @@ Status ValidateSearchInputs(
       "GPU AC-strategy search options or color map are invalid");
   }
   constexpr size_t kUint32Maximum = std::numeric_limits<uint32_t>::max();
-  if (opsin.width() > kUint32Maximum || opsin.height() > kUint32Maximum ||
-      *pixel_count > kUint32Maximum || block_extent->width > kUint32Maximum ||
+  if (pixel_extent.width > kUint32Maximum ||
+      pixel_extent.height > kUint32Maximum || *pixel_count > kUint32Maximum ||
+      block_extent->width > kUint32Maximum ||
       block_extent->height > kUint32Maximum) {
     return Status::InvalidArgument(
       "GPU AC-strategy search exceeds 32-bit indexing limits");
@@ -312,7 +317,10 @@ static Status FindAcStrategyGridGpuImpl(
   size_t block_count = 0;
   const bool resident_cfl = resident != nullptr &&
     resident->y_to_x.buffer != nullptr && resident->y_to_b.buffer != nullptr;
+  const Extent2D resident_opsin_extent =
+    resident == nullptr ? Extent2D{} : resident->opsin.plane[0].extent;
   Status status = ValidateSearchInputs(opsin,
+    resident_opsin_extent,
     quant_field,
     pixel_mask,
     color_correlation,
@@ -330,23 +338,22 @@ static Status FindAcStrategyGridGpuImpl(
   if (resident != nullptr) {
     status = ValidateDeviceImage3View(resident->opsin, gpu.id());
     if (!status.ok()) return status;
-    if (std::ranges::any_of(
-          resident->opsin.plane,
+    if (std::ranges::any_of(resident->opsin.plane,
           [&](ConstDevicePlaneView plane) {
             return plane.element_type != DeviceElementType::kF32 ||
-              plane.extent != opsin.extent();
+                   plane.extent != resident_opsin_extent;
           }) ||
         resident->quant_field.element_type != DeviceElementType::kF32 ||
         resident->quant_field.extent != block_extent ||
         resident->pixel_mask.element_type != DeviceElementType::kF32 ||
-        resident->pixel_mask.extent != opsin.extent() ||
+        resident->pixel_mask.extent != resident_opsin_extent ||
         ((resident->y_to_x.buffer != nullptr) !=
-         (resident->y_to_b.buffer != nullptr)) ||
+          (resident->y_to_b.buffer != nullptr)) ||
         (resident_cfl &&
-         (resident->y_to_x.element_type != DeviceElementType::kI8 ||
-          resident->y_to_b.element_type != DeviceElementType::kI8 ||
-          resident->y_to_x.extent != tile_extent ||
-          resident->y_to_b.extent != tile_extent))) {
+          (resident->y_to_x.element_type != DeviceElementType::kI8 ||
+            resident->y_to_b.element_type != DeviceElementType::kI8 ||
+            resident->y_to_x.extent != tile_extent ||
+            resident->y_to_b.extent != tile_extent))) {
       return Status::InvalidArgument(
           "Resident GPU AC-strategy inputs have invalid geometry");
     }
@@ -557,35 +564,38 @@ static Status FindAcStrategyGridGpuImpl(
         .pixel_mask = resident == nullptr ? state.device_mask.buffer : nullptr,
         .matrices = resource.device_matrices.buffer,
         .candidates = resource.device_candidates.buffer,
-        .resident_opsin = resident == nullptr
-          ? ConstDeviceImage3View{} : resident->opsin,
-        .resident_pixel_mask = resident == nullptr
-          ? ConstDevicePlaneView{} : resident->pixel_mask,
-        .resident_quant_field = resident == nullptr
-          ? ConstDevicePlaneView{} : resident->quant_field,
-        .resident_y_to_x = resident == nullptr
-          ? ConstDevicePlaneView{} : resident->y_to_x,
-        .resident_y_to_b = resident == nullptr
-          ? ConstDevicePlaneView{} : resident->y_to_b,
+        .resident_opsin =
+          resident == nullptr ? ConstDeviceImage3View{} : resident->opsin,
+        .resident_pixel_mask =
+          resident == nullptr ? ConstDevicePlaneView{} : resident->pixel_mask,
+        .resident_quant_field =
+          resident == nullptr ? ConstDevicePlaneView{} : resident->quant_field,
+        .resident_y_to_x =
+          resident == nullptr ? ConstDevicePlaneView{} : resident->y_to_x,
+        .resident_y_to_b =
+          resident == nullptr ? ConstDevicePlaneView{} : resident->y_to_b,
         .scratch_a = state.scratch_a.buffer,
         .scratch_b = state.scratch_b.buffer,
         .rate_scratch = state.rate_scratch.buffer,
         .costs = resource.device_costs.buffer,
-        .opsin_offset_bytes = resident == nullptr
-          ? state.device_opsin.offset_bytes : 0,
-        .pixel_mask_offset_bytes = resident == nullptr
-          ? state.device_mask.offset_bytes : 0,
+        .opsin_offset_bytes =
+          resident == nullptr ? state.device_opsin.offset_bytes : 0,
+        .pixel_mask_offset_bytes =
+          resident == nullptr ? state.device_mask.offset_bytes : 0,
         .matrices_offset_bytes = resource.device_matrices.offset_bytes,
         .candidates_offset_bytes = resource.device_candidates.offset_bytes,
         .scratch_a_offset_bytes = state.scratch_a.offset_bytes,
         .scratch_b_offset_bytes = state.scratch_b.offset_bytes,
         .rate_scratch_offset_bytes = state.rate_scratch.offset_bytes,
         .costs_offset_bytes = resource.device_costs.offset_bytes,
-        .pixel_extent = opsin.extent(),
-        .opsin_row_stride = opsin.width(),
+        .pixel_extent =
+          resident == nullptr ? opsin.extent() : resident_opsin_extent,
+        .opsin_row_stride = resident == nullptr
+                              ? opsin.width()
+                              : resident->opsin.plane[0].row_stride,
         .opsin_plane_stride = pixel_count,
-        .pixel_mask_row_stride = resident == nullptr
-          ? pixel_mask.extent.width : 0,
+        .pixel_mask_row_stride =
+          resident == nullptr ? pixel_mask.extent.width : 0,
         .candidate_count = resource.candidates.size(),
         .butteraugli_target = options.butteraugli_target,
       };
@@ -672,7 +682,13 @@ static Status FindAcStrategyGridGpuImpl(
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
     status = ac_strategy_internal::FindAcStrategyGridFromCandidateCosts(
-      opsin, quant_field, pixel_mask, color_correlation, options, table, out);
+      resident == nullptr ? opsin.extent() : resident_opsin_extent,
+      quant_field,
+      pixel_mask,
+      color_correlation,
+      options,
+      table,
+      out);
     if (!status.ok()) {
       return status;
     }

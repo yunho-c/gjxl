@@ -164,6 +164,11 @@ struct AdaptiveQuantizationMaterialization {
   /// The encoding frontend retained its initial field on the prepared device
   /// operation. Host initial-field inputs are intentionally empty.
   bool resident_initial_quantization = false;
+  /// Backend-owned immutable frontend images. These are populated only by an
+  /// encoding workflow that prepared and validated RGB/XYB on the same GPU.
+  ConstDeviceImage3View resident_original_linear_rgb;
+  ConstDeviceImage3View resident_coding_opsin;
+  Extent2D resident_coding_extent;
 };
 
 /// Reusable frame-level GPU AQ state for repeated rate-control attempts.
@@ -176,6 +181,8 @@ struct PreparedAdaptiveQuantization {
   PreparedAcStrategySearch ac_strategy_search;
   uint64_t quantization_pipeline_generation = 0;
   ConstDeviceImage3View resident_coding_opsin;
+  ConstDeviceImage3View input_resident_original_linear_rgb;
+  ConstDeviceImage3View input_resident_coding_opsin;
   GpuBackend* backend = nullptr;
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;

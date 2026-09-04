@@ -22,14 +22,34 @@
 #include "codec/reconstruction_internal.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
+#include "gpu/ops/adaptive_quantization_profile_internal.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
-#include "gpu/ops/adaptive_quantization_profile_internal.h"
 
 namespace gjxl {
 namespace {
 
 namespace aqi = adaptive_quantization_internal;
+
+bool HasDeviceImage(
+  ConstDeviceImage3View image) noexcept {
+  return image.plane[0].buffer != nullptr || image.plane[1].buffer != nullptr ||
+         image.plane[2].buffer != nullptr;
+}
+
+bool SameDeviceImageIdentity(
+  ConstDeviceImage3View left, ConstDeviceImage3View right) noexcept {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    const ConstDevicePlaneView a = left.plane[channel];
+    const ConstDevicePlaneView b = right.plane[channel];
+    if (a.buffer != b.buffer || a.offset_bytes != b.offset_bytes ||
+        a.element_type != b.element_type || a.extent != b.extent ||
+        a.row_stride != b.row_stride) {
+      return false;
+    }
+  }
+  return true;
+}
 
 template <typename T>
 [[nodiscard]] bool ValidHostPlaneLayout(PlaneView<T> plane) noexcept {
@@ -370,6 +390,9 @@ Status RunGpuAdaptiveQuantizationImpl(
   const bool profiling = profiling_session != nullptr;
   const bool resident_initial =
     materialization.resident_initial_quantization;
+  const bool resident_prepared_input =
+    HasDeviceImage(materialization.resident_original_linear_rgb) &&
+    HasDeviceImage(materialization.resident_coding_opsin);
 
   Status status = ValidateMode(mode);
   if (status.ok()) {
@@ -380,8 +403,28 @@ Status RunGpuAdaptiveQuantizationImpl(
         status = Status::InvalidArgument(
           "Resident initial quantization requires resident Butteraugli AQ");
       } else {
-        status = aqi::ValidateAdaptiveQuantizationPolicyMetadata(
-          original_linear_rgb, opsin, strategies, epf_sharpness, options);
+        status =
+          resident_prepared_input
+            ? aqi::ValidateAdaptiveQuantizationPolicyMetadataForExtent(
+                original_linear_rgb,
+                materialization.resident_coding_extent,
+                strategies,
+                epf_sharpness,
+                options)
+            : aqi::ValidateAdaptiveQuantizationPolicyMetadata(
+                original_linear_rgb, opsin, strategies, epf_sharpness, options);
+      }
+    } else if (resident_prepared_input) {
+      status = aqi::ValidateAdaptiveQuantizationPolicyMetadataForExtent(
+        original_linear_rgb,
+        materialization.resident_coding_extent,
+        strategies,
+        epf_sharpness,
+        options);
+      if (status.ok() && (!initial_quant_field.valid() ||
+                           initial_quant_field.extent != strategies.extent())) {
+        status = Status::InvalidArgument(
+          "Adaptive-quantization initial field is invalid");
       }
     } else {
       status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
@@ -427,6 +470,9 @@ Status RunGpuAdaptiveQuantizationImpl(
   const AqEvaluationPreparation evaluation_preparation{
     .original_linear_rgb = original_linear_rgb,
     .coding_opsin = opsin,
+    .resident_original_linear_rgb =
+      materialization.resident_original_linear_rgb,
+    .resident_coding_opsin = materialization.resident_coding_opsin,
     .strategies = &strategies,
     .epf_sharpness = epf_sharpness,
     .options = evaluation_options,
@@ -475,10 +521,14 @@ Status RunGpuAdaptiveQuantizationImpl(
         same_plane(left.plane[1], right.plane[1]) &&
         same_plane(left.plane[2], right.plane[2]);
     };
-    const bool same_preparation = reusable->evaluation != nullptr &&
-      reusable->backend == &gpu &&
+    const bool same_preparation =
+      reusable->evaluation != nullptr && reusable->backend == &gpu &&
       same_image(reusable->original_linear_rgb, original_linear_rgb) &&
       same_image(reusable->coding_opsin, opsin) &&
+      SameDeviceImageIdentity(reusable->input_resident_original_linear_rgb,
+        materialization.resident_original_linear_rgb) &&
+      SameDeviceImageIdentity(reusable->input_resident_coding_opsin,
+        materialization.resident_coding_opsin) &&
       reusable->resident_quantization == resident_quantization &&
       !reusable->frame_only_resident_frontend;
     bool compatible = same_preparation &&
@@ -524,6 +574,10 @@ Status RunGpuAdaptiveQuantizationImpl(
         reusable->backend = &gpu;
         reusable->original_linear_rgb = original_linear_rgb;
         reusable->coding_opsin = opsin;
+        reusable->input_resident_original_linear_rgb =
+          materialization.resident_original_linear_rgb;
+        reusable->input_resident_coding_opsin =
+          materialization.resident_coding_opsin;
         reusable->evaluation_options = evaluation_options;
         reusable->resident_quantization = resident_quantization;
         reusable->frame_only_resident_frontend = false;
@@ -988,6 +1042,14 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* reusable,
   InitialQuantFieldOutput* initial_output,
   GpuFrameOnlyQuantizationOutput output) {
+  const bool resident_prepared_input =
+    reusable != nullptr &&
+    HasDeviceImage(reusable->input_resident_original_linear_rgb) &&
+    HasDeviceImage(reusable->input_resident_coding_opsin);
+  const Extent2D coding_extent =
+    resident_prepared_input
+      ? reusable->input_resident_coding_opsin.plane[0].extent
+      : opsin.extent();
 
   if (!std::isfinite(initial_options.butteraugli_target) ||
       initial_options.butteraugli_target <= 0.0f ||
@@ -1014,10 +1076,10 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
   if (!strategy_status.ok() ||
       !strategies.extent().try_area(&block_count) ||
       dct8_count != block_count) {
-    return strategy_status.ok()
-      ? Status::InvalidArgument(
-          "Resident frame-only frontend requires a complete DCT8 grid")
-      : strategy_status;
+    return strategy_status.ok() ? Status::InvalidArgument(
+                                    "Resident frame-only frontend "
+                                    "requires a complete DCT8 grid")
+                                : strategy_status;
   }
   try {
     const AqEvaluationOptions evaluation_options{
@@ -1027,6 +1089,12 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
     const AqEvaluationPreparation evaluation_preparation{
       .original_linear_rgb = original_linear_rgb,
       .coding_opsin = opsin,
+      .resident_original_linear_rgb =
+        resident_prepared_input ? reusable->input_resident_original_linear_rgb
+                                : ConstDeviceImage3View{},
+      .resident_coding_opsin = resident_prepared_input
+                                 ? reusable->input_resident_coding_opsin
+                                 : ConstDeviceImage3View{},
       .strategies = &strategies,
       .epf_sharpness = epf_sharpness,
       .options = evaluation_options,
@@ -1057,10 +1125,14 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
         gpu, evaluation_preparation, &local_prepared);
       prepared = local_prepared.get();
     } else {
-      const bool same_preparation = reusable->evaluation != nullptr &&
-        reusable->backend == &gpu &&
+      const bool same_preparation =
+        reusable->evaluation != nullptr && reusable->backend == &gpu &&
         same_image(reusable->original_linear_rgb, original_linear_rgb) &&
         same_image(reusable->coding_opsin, opsin) &&
+        SameDeviceImageIdentity(reusable->input_resident_original_linear_rgb,
+          evaluation_preparation.resident_original_linear_rgb) &&
+        SameDeviceImageIdentity(reusable->input_resident_coding_opsin,
+          evaluation_preparation.resident_coding_opsin) &&
         !reusable->resident_quantization &&
         reusable->frame_only_resident_frontend;
       AqEvaluationOptions normalized_previous = reusable->evaluation_options;
@@ -1161,12 +1233,27 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
           initial_output->quant_field.extent,
           initial_output->quant_field.stride,
         };
-    status = initial_output == nullptr
-      ? aqi::ValidateAdaptiveQuantizationPolicyMetadata(
-          original_linear_rgb, opsin, strategies, epf_sharpness, options)
-      : aqi::ValidateAdaptiveQuantizationPolicyInputs(
-          original_linear_rgb, opsin, strategies, initial_quant,
-          epf_sharpness, options);
+    status =
+      initial_output == nullptr
+        ? (resident_prepared_input
+              ? aqi::ValidateAdaptiveQuantizationPolicyMetadataForExtent(
+                  original_linear_rgb,
+                  coding_extent,
+                  strategies,
+                  epf_sharpness,
+                  options)
+              : aqi::ValidateAdaptiveQuantizationPolicyMetadata(
+                  original_linear_rgb,
+                  opsin,
+                  strategies,
+                  epf_sharpness,
+                  options))
+        : aqi::ValidateAdaptiveQuantizationPolicyInputs(original_linear_rgb,
+            opsin,
+            strategies,
+            initial_quant,
+            epf_sharpness,
+            options);
     if (!status.ok()) {
       if (reusable != nullptr) reusable->evaluation.reset();
       return status;

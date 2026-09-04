@@ -11,6 +11,7 @@
 #include "codec/chroma_from_luma.h"
 #include "codec/quantization_pipeline.h"
 #include "core/image_buffer.h"
+#include "gpu/image.h"
 
 namespace gjxl::quantization_pipeline_internal {
 
@@ -58,6 +59,11 @@ struct PreparedQuantizationPipeline {
   float initial_quant_rescale = 1.0f;
   SimpleVarDctCodestreamProfile profile;
   ConstImage3FView coding_opsin;
+  /// Optional backend-owned source and coding images. When these are valid,
+  /// resident GPU providers use `padded_extent` for geometry and never require
+  /// a host coding image. Their owner must outlive this preparation.
+  ConstDeviceImage3View resident_original_linear_rgb;
+  ConstDeviceImage3View resident_coding_opsin;
   /// Exact immutable host views proven finite by the workflow that created
   /// this preparation. Empty views mean that downstream public validation is
   /// still required. Identity checks prevent provenance from being reused
@@ -103,6 +109,16 @@ struct QuantizationPipelineMaterialization {
   bool prepare_cpu_preprocessing = true,
   QuantizationPipelineInputProvenance input_provenance =
     QuantizationPipelineInputProvenance::kUnvalidated);
+
+/// Target-invariant preparation for a backend-owned RGB/XYB frontend. The
+/// device images have already been validated by their preparing backend.
+[[nodiscard]] Status PrepareResidentQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  Extent2D padded_extent,
+  ConstDeviceImage3View resident_original_linear_rgb,
+  ConstDeviceImage3View resident_coding_opsin,
+  CpuQuantizationPipelineOptions options,
+  PreparedQuantizationPipeline* prepared);
 
 [[nodiscard]] Status PrepareQuantizationPreprocessing(
   PreparedQuantizationPipeline& prepared,

@@ -123,6 +123,15 @@ struct ButteraugliPolicySetup {
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options);
 
+/// Host-coding-free form used after a resident backend has validated and
+/// retained the coding image.
+[[nodiscard]] Status ValidateAdaptiveQuantizationPolicyMetadataForExtent(
+  ConstImage3FView original_linear_rgb,
+  Extent2D opsin_extent,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options);
+
 /// Runs initial adjustment, bounds, clamp, power, rounding-progress, and
 /// iteration order identically for every evaluator.
 [[nodiscard]] Status RunAdaptiveQuantizationPolicy(

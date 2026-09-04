@@ -19,8 +19,7 @@ struct CandidateCostTableView {
 
 /// Runs the normal hierarchical search while sourcing leaf costs from a table.
 /// Merge order, priority checks, and tie-breaking remain CPU-defined.
-[[nodiscard]] Status FindAcStrategyGridFromCandidateCosts(
-  ConstImage3FView opsin,
+[[nodiscard]] Status FindAcStrategyGridFromCandidateCosts(Extent2D opsin_extent,
   ConstPlaneF32View quant_field,
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,

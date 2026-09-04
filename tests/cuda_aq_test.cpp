@@ -17,6 +17,7 @@
 #include "codec/adaptive_quantization.h"
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/color_transform.h"
+#include "codec/color_transform_internal.h"
 #include "codec/epf.h"
 #include "codec/gaborish.h"
 #include "codec/quantization.h"
@@ -27,6 +28,7 @@
 #include "gpu/cuda/cuda_backend.h"
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/input_preparation.h"
 
 namespace {
 
@@ -99,6 +101,87 @@ double MaximumError(
       static_cast<double>(expected[i]) - static_cast<double>(actual[i])));
   }
   return result;
+}
+
+bool CheckCudaInputPreparation(
+  gjxl::GpuBackend& gpu,
+  const ImageStorage& source,
+  const ImageStorage& expected_opsin) {
+  auto* capability = gjxl::QueryGpuLinearRgbOpsinPreparation(gpu);
+  if (capability == nullptr) {
+    std::cerr << "CUDA input-preparation capability is unavailable\n";
+    return false;
+  }
+  std::unique_ptr<gjxl::PreparedGpuLinearRgbOpsin> prepared;
+  if (!Check(capability->PrepareLinearRgbOpsin(source.View(),
+               {.padded_extent = kPaddedExtent,
+                 .intensity_target = 255.0f,
+                 .compute_matrix_scale_stats = true},
+               &prepared),
+        "Prepare CUDA linear RGB and Opsin") ||
+      prepared == nullptr) {
+    return false;
+  }
+  const gjxl::ConstDeviceImage3View resident_original =
+    prepared->original_linear_rgb();
+  const gjxl::ConstDeviceImage3View resident_opsin = prepared->coding_opsin();
+  for (size_t channel = 0; channel < 3; ++channel) {
+    std::vector<float> downloaded_source(
+      kSourceExtent.width * kSourceExtent.height);
+    std::vector<float> downloaded_opsin(
+      kPaddedExtent.width * kPaddedExtent.height);
+    if (!Check(gpu.CopyDeviceToHost(*resident_original.plane[channel].buffer,
+                 downloaded_source.data(),
+                 downloaded_source.size() * sizeof(float),
+                 resident_original.plane[channel].offset_bytes),
+          "Read CUDA prepared linear RGB") ||
+        !Check(gpu.CopyDeviceToHost(*resident_opsin.plane[channel].buffer,
+                 downloaded_opsin.data(),
+                 downloaded_opsin.size() * sizeof(float),
+                 resident_opsin.plane[channel].offset_bytes),
+          "Read CUDA prepared Opsin")) {
+      return false;
+    }
+    for (size_t y = 0; y < kSourceExtent.height; ++y) {
+      for (size_t x = 0; x < kSourceExtent.width; ++x) {
+        if (downloaded_source[y * kSourceExtent.width + x] !=
+            source.plane[channel][y * source.stride + x]) {
+          std::cerr << "CUDA prepared source upload differs\n";
+          return false;
+        }
+      }
+    }
+    for (size_t y = 0; y < kPaddedExtent.height; ++y) {
+      for (size_t x = 0; x < kPaddedExtent.width; ++x) {
+        if (downloaded_opsin[y * kPaddedExtent.width + x] !=
+            expected_opsin.plane[channel][y * expected_opsin.stride + x]) {
+          std::cerr << "CUDA prepared Opsin differs at channel " << channel
+                    << ", pixel " << x << ',' << y << '\n';
+          return false;
+        }
+      }
+    }
+  }
+  const gjxl::ConstImage3FView cropped_opsin{{{
+    {expected_opsin.plane[0].data(), kSourceExtent, expected_opsin.stride},
+    {expected_opsin.plane[1].data(), kSourceExtent, expected_opsin.stride},
+    {expected_opsin.plane[2].data(), kSourceExtent, expected_opsin.stride},
+  }}};
+  gjxl::codestream_internal::QuantizationMatrixScaleStats expected_stats;
+  if (!Check(gjxl::codestream_internal::
+               ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+                 cropped_opsin, &expected_stats),
+        "Compute CUDA input-preparation statistics oracle")) {
+    return false;
+  }
+  const std::array<float, 3> actual_stats = prepared->matrix_scale_stats();
+  if (actual_stats != std::array<float, 3>{expected_stats.x_edge,
+                        expected_stats.b_edge,
+                        expected_stats.exposed_blue}) {
+    std::cerr << "CUDA prepared matrix-scale statistics differ\n";
+    return false;
+  }
+  return true;
 }
 
 bool MakeExactStrategies(gjxl::AcStrategyGrid* strategies) {
@@ -1216,8 +1299,9 @@ bool CheckPublicWorkflow(
   }
   const gjxl::GpuBackendStats after_resident = gpu.stats();
   if (after_resident.successful_allocations !=
-      before_resident.successful_allocations + 4) {
-    std::cerr << "Fresh resident CUDA workflow did not use four arenas\n";
+      before_resident.successful_allocations + 5) {
+    std::cerr << "Fresh resident CUDA workflow did not use its input and "
+                 "four evaluation arenas\n";
     return false;
   }
 
@@ -1277,21 +1361,25 @@ bool CheckPublicWorkflow(
   std::vector<uint8_t> target_bytes;
   gjxl::VarDctEncodingSummary target_summary;
   const gjxl::GpuBackendStats before_resident_target = gpu.stats();
-  if (!Check(gjxl::codestream_internal::
-      EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
-        source.View(),
-        {.rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
-         .target_bytes = 512,
-         .target_size_maximum_attempts = 2,
-         .backend = gjxl::VarDctBackendPreference::kCuda,
-         .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
-        &gpu, false, &target_bytes, &target_summary),
-      "Forced resident CUDA target-size workflow") || target_bytes.empty() ||
+  if (!Check(
+        gjxl::codestream_internal::
+          EncodeLinearRgbVarDctCodestreamWithBackendForTesting(source.View(),
+            {.rate_control_mode = gjxl::VarDctRateControlMode::kTargetBytes,
+              .target_bytes = 512,
+              .target_size_maximum_attempts = 2,
+              .backend = gjxl::VarDctBackendPreference::kCuda,
+              .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
+            &gpu,
+            false,
+            &target_bytes,
+            &target_summary),
+        "Forced resident CUDA target-size workflow") ||
+      target_bytes.empty() ||
       target_summary.execution_backend != gjxl::VarDctExecutionBackend::kCuda ||
       target_summary.encode_attempt_count != 2 ||
       gpu.stats().successful_allocations !=
-        before_resident_target.successful_allocations + 4) {
-    std::cerr << "Resident target attempts did not reuse four arenas\n";
+        before_resident_target.successful_allocations + 5) {
+    std::cerr << "Resident target attempts did not reuse prepared arenas\n";
     return false;
   }
 
@@ -1315,9 +1403,9 @@ bool CheckPublicWorkflow(
   }
   const gjxl::GpuBackendStats after_maximum = gpu.stats();
   if (after_maximum.successful_allocations !=
-      before_maximum.successful_allocations + 2) {
-    std::cerr << "Fresh maximum-throughput CUDA workflow did not use two "
-                 "arenas\n";
+      before_maximum.successful_allocations + 3) {
+    std::cerr << "Fresh maximum-throughput CUDA workflow did not use its "
+                 "input and two evaluation arenas\n";
     return false;
   }
 
@@ -1335,13 +1423,13 @@ bool CheckPublicWorkflow(
         &maximum_target_bytes, &maximum_target_summary);
   const gjxl::GpuBackendStats after_maximum_target = gpu.stats();
   if (!Check(maximum_target_status,
-      "Forced maximum-throughput CUDA target-size workflow") ||
+        "Forced maximum-throughput CUDA target-size workflow") ||
       maximum_target_bytes.empty() ||
       maximum_target_summary.execution_backend !=
         gjxl::VarDctExecutionBackend::kCuda ||
       maximum_target_summary.encode_attempt_count != 2 ||
       after_maximum_target.successful_allocations !=
-        before_maximum_target.successful_allocations + 2) {
+        before_maximum_target.successful_allocations + 3) {
     std::cerr << "Maximum-throughput target attempts did not reuse arenas: "
               << maximum_target_summary.encode_attempt_count << " attempts, "
               << (after_maximum_target.successful_allocations -
@@ -1453,8 +1541,9 @@ int main() {
   ImageStorage opsin(kPaddedExtent);
   FillLinear(&source, &padded);
   if (!Check(gjxl::LinearRgbToOpsin(
-             std::as_const(padded).View(), 255.0f, opsin.View()),
-             "Prepare CUDA AQ opsin") ||
+               std::as_const(padded).View(), 255.0f, opsin.View()),
+        "Prepare CUDA AQ opsin") ||
+      !CheckCudaInputPreparation(*gpu, source, opsin) ||
       !CheckExactWorkflow(*gpu, source, opsin) ||
       !CheckExactMaximumError(*gpu, source, opsin) ||
       !CheckResidentStrategyGridValidation(*gpu, source, opsin) ||

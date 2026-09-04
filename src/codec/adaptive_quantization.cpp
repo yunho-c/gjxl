@@ -1249,8 +1249,20 @@ Status ValidateAdaptiveQuantizationPolicyMetadata(
   const AcStrategyGrid& strategies,
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options) {
+  if (!opsin.valid()) {
+    return Status::InvalidArgument("Adaptive-quantization inputs are invalid");
+  }
+  return ValidateAdaptiveQuantizationPolicyMetadataForExtent(
+    original_linear_rgb, opsin.extent(), strategies, epf_sharpness, options);
+}
 
-  if (!original_linear_rgb.valid() || !opsin.valid() ||
+Status ValidateAdaptiveQuantizationPolicyMetadataForExtent(
+  ConstImage3FView original_linear_rgb,
+  Extent2D opsin_extent,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options) {
+  if (!original_linear_rgb.valid() || opsin_extent.empty() ||
       !strategies.complete() || !epf_sharpness.valid()) {
     return Status::InvalidArgument(
       "Adaptive-quantization inputs are invalid");
@@ -1258,20 +1270,18 @@ Status ValidateAdaptiveQuantizationPolicyMetadata(
 
   const Extent2D block_extent = strategies.extent();
   Extent2D padded_pixel_extent;
-  if (!BlockGrid{block_extent}.try_padded_pixel_extent(
-        &padded_pixel_extent) ||
-      opsin.extent() != padded_pixel_extent ||
+  if (!BlockGrid{block_extent}.try_padded_pixel_extent(&padded_pixel_extent) ||
+      opsin_extent != padded_pixel_extent ||
       epf_sharpness.extent != block_extent) {
     return Status::InvalidArgument(
       "Adaptive-quantization image and block geometry do not match");
   }
 
-  if (original_linear_rgb.width() > opsin.width() ||
-      original_linear_rgb.height() > opsin.height() ||
-      original_linear_rgb.width() <=
-        opsin.width() - kJxlBlockDimension ||
+  if (original_linear_rgb.width() > opsin_extent.width ||
+      original_linear_rgb.height() > opsin_extent.height ||
+      original_linear_rgb.width() <= opsin_extent.width - kJxlBlockDimension ||
       original_linear_rgb.height() <=
-        opsin.height() - kJxlBlockDimension) {
+        opsin_extent.height - kJxlBlockDimension) {
     return Status::InvalidArgument(
       "Adaptive-quantization padding exceeds one partial block");
   }

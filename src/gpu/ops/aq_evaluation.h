@@ -42,10 +42,14 @@ struct AqEvaluationOptions {
 struct AqEvaluationPreparation {
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
+  /// Optional resident source image owned by another prepared operation.
+  /// It must accompany `resident_coding_opsin` and remain alive throughout
+  /// this evaluation.
+  ConstDeviceImage3View resident_original_linear_rgb;
   /// Optional resident coding image owned by another prepared operation.
-  /// When present, the host coding view supplies geometry and validation only;
-  /// the backend borrows these device planes instead of allocating and
-  /// uploading a duplicate image. The owner must outlive this evaluation.
+  /// When accompanied by resident source RGB, the host coding view may be
+  /// empty; the backend derives geometry from these device planes instead of
+  /// allocating and uploading a duplicate image.
   ConstDeviceImage3View resident_coding_opsin;
   const AcStrategyGrid* strategies = nullptr;
   ConstPlaneU8View epf_sharpness;

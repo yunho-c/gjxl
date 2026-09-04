@@ -1,6 +1,6 @@
 # CUDA optimization study S1
 
-- Status: profiling complete; S1.1-S1.3 implemented
+- Status: profiling complete; S1.1-S1.4 implemented
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -490,6 +490,91 @@ loaded GPU. For fully-resident it also removes roughly half of the initial
 full-image H2D payload. The change touches workflow preparation, provenance,
 validation, and matrix-scale statistics, so it should follow the more local
 arena and readback work.
+
+#### S1.4 completion snapshot (2026-09-04)
+
+Forced CUDA workflows now resolve the backend before host Opsin preparation,
+upload the three source RGB planes once, and perform edge padding plus the
+linear-RGB-to-Opsin transform on the selected CUDA lane. The prepared source
+and Opsin views remain resident through initial quantization, AC strategy
+search, and AQ evaluation. Quantization-matrix scale selection downloads only
+three scalar maxima and the device error word. CPU, Metal, and CUDA exact-
+coefficient workflows retain the established host preparation path.
+
+The wall comparison is paired against revision `7d846bb` on the same RTX 3060
+Laptop GPU. It uses the same synthetic odd-sized workloads, distance `1.2`,
+effort `7`, and GPU-only measurement boundary as the earlier snapshots. The
+1080p runs used two warmups and seven samples; 4K used one warmup and three
+samples. Times are warmed medians in milliseconds:
+
+| Workload and stage | Before S1.4 | After S1.4 | Change |
+|---|---:|---:|---:|
+| 1080p fully resident, total | 377.7 | 294.3 | -22.1% |
+| 1080p fully resident, input preparation | 36.8 | 7.7 | -79.1% |
+| 1080p fully resident, quantization | 254.4 | 215.7 | -15.2% |
+| 1080p maximum throughput, total | 183.6 | 106.9 | -41.8% |
+| 1080p maximum throughput, input preparation | 40.0 | 8.2 | -79.6% |
+| 1080p maximum throughput, quantization | 79.8 | 33.3 | -58.3% |
+| 4K fully resident, total | 1469.9 | 1177.2 | -19.9% |
+| 4K fully resident, input preparation | 157.8 | 30.3 | -80.8% |
+| 4K fully resident, quantization | 1110.0 | 950.9 | -14.3% |
+| 4K maximum throughput, total | 629.9 | 303.6 | -51.8% |
+| 4K maximum throughput, input preparation | 175.4 | 30.8 | -82.4% |
+| 4K maximum throughput, quantization | 282.2 | 99.2 | -64.8% |
+
+The post-change 1080p total ranges were `283.8-312.8 ms` for fully resident
+and `96.3-123.9 ms` for maximum throughput. The 4K ranges were
+`1150.2-1208.1 ms` and `293.6-314.9 ms`, respectively. These paired runs are
+the appropriate S1.4 comparison; their absolute values should not be compared
+directly with the earlier S1.3 snapshot because laptop clocks and thermals
+varied between sessions.
+
+Warmed 1080p Nsight Systems captures show the intended transfer change:
+
+| AQ mode and counter | Before S1.4 | After S1.4 |
+|---|---:|---:|
+| Fully resident, HtoD | 54.220 MB / 34 copies | 29.336 MB / 31 copies |
+| Fully resident, DtoH | 25.924 MB / 18 copies | 25.924 MB / 19 copies |
+| Fully resident, kernel launches | 499 | 501 |
+| Fully resident, allocations / frees | 4 / 4 | 5 / 5 |
+| Maximum throughput, HtoD | 24.917 MB / 5 copies | 24.881 MB / 5 copies |
+| Maximum throughput, DtoH | 25.403 MB / 8 copies | 25.403 MB / 9 copies |
+| Maximum throughput, kernel launches | 32 | 34 |
+| Maximum throughput, allocations / frees | 2 / 2 | 3 / 3 |
+
+The extra allocation is the single input arena, replacing evaluator-owned
+source/coding planes. The extra DtoH operation is a 16-byte statistics/error
+result. At 1080p the new conversion and statistics kernels took `0.198 ms` and
+`0.171 ms` in fully-resident mode, and `0.199 ms` and `0.193 ms` in maximum-
+throughput mode. Fully resident therefore removes 45.9% of initial HtoD bytes;
+maximum throughput replaces the former Opsin upload with a same-sized RGB
+upload, but still removes the host transform and duplicate evaluator work.
+
+Post-change paired 1080p batch qualification produced:
+
+| AQ mode | Batch | Batch ms | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 305.9 | 3.27 | 1.03x |
+| Fully resident | 2 | 571.7 | 3.50 | 1.30x |
+| Fully resident | 4 | 1080.0 | 3.70 | 1.24x |
+| Maximum throughput | 1 | 120.3 | 8.31 | 1.07x |
+| Maximum throughput | 2 | 172.1 | 11.62 | 1.53x |
+| Maximum throughput | 4 | 287.6 | 13.91 | 2.14x |
+
+The fully-resident batch-4 absolute result is about 10% slower than the older
+S1.3 session despite the paired single-image improvement, consistent with
+power-state variance and increased contention when preparation moves onto the
+GPU. It should be watched in the next checkpoint rather than attributed to a
+stable regression from these non-paired sessions.
+
+The CUDA input test compares the uploaded source, padded Opsin result, and all
+three matrix statistics exactly with the CPU oracle on a `257x17` source
+padded to `264x24`. Baseline/current codestreams were byte-identical for the
+sample image in both resident policies and for the existing odd 1080p/4K
+qualification outputs. The checkpoint passed all 53 CUDA tests and all 47
+CPU-only tests. The ignored traces are `s14_fully_resident_1080p.nsys-rep`,
+`s14_maximum_throughput_1080p.nsys-rep`, and their paired `s14_baseline_*`
+captures under `build-cuda-ninja/profiles`.
 
 ### S1.5: parallelize initial CfL
 

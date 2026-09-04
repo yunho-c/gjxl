@@ -222,6 +222,15 @@ class CudaPreparedResidentAqEvaluation final
       : backend_(&backend) {}
 
   Status Prepare(const AqEvaluationPreparation& preparation) {
+    const bool has_resident_original =
+      preparation.resident_original_linear_rgb.plane[0].buffer != nullptr ||
+      preparation.resident_original_linear_rgb.plane[1].buffer != nullptr ||
+      preparation.resident_original_linear_rgb.plane[2].buffer != nullptr;
+    const bool has_resident_coding =
+      preparation.resident_coding_opsin.plane[0].buffer != nullptr ||
+      preparation.resident_coding_opsin.plane[1].buffer != nullptr ||
+      preparation.resident_coding_opsin.plane[2].buffer != nullptr;
+    const bool resident_input = has_resident_original && has_resident_coding;
     const bool resident_frontend =
         preparation.resident_initial_cfl &&
         preparation.frame_only_resident_initial_quant &&
@@ -243,11 +252,9 @@ class CudaPreparedResidentAqEvaluation final
       return Status::Unavailable(
           "CUDA resident AQ requires the complete resident frontend");
     }
-    if (preparation.resident_coding_opsin.plane[0].buffer != nullptr ||
-        preparation.resident_coding_opsin.plane[1].buffer != nullptr ||
-        preparation.resident_coding_opsin.plane[2].buffer != nullptr) {
-      return Status::Unavailable(
-          "CUDA resident AQ does not accept an external coding image");
+    if (has_resident_original != has_resident_coding) {
+      return Status::InvalidArgument(
+        "CUDA resident AQ external input is incomplete");
     }
     if (preparation.coefficient_decision_mode !=
         AcCoefficientDecisionMode::kAdjustedSharedQuant) {
@@ -256,15 +263,39 @@ class CudaPreparedResidentAqEvaluation final
     }
     Status status = ValidateOptions(preparation.options);
     if (!status.ok()) return status;
-    status = ValidateFiniteImage(preparation.original_linear_rgb,
-                                 "CUDA resident AQ original");
-    if (!status.ok()) return status;
-    status = ValidateFiniteImage(preparation.coding_opsin,
-                                 "CUDA resident AQ coding");
-    if (!status.ok()) return status;
+    if (resident_input) {
+      status = ValidateDeviceImage3View(
+        preparation.resident_original_linear_rgb, backend_->id());
+      if (status.ok()) {
+        status = ValidateDeviceImage3View(
+          preparation.resident_coding_opsin, backend_->id());
+      }
+      if (!status.ok()) return status;
+      if (std::ranges::any_of(preparation.resident_original_linear_rgb.plane,
+            [](ConstDevicePlaneView plane) {
+              return plane.element_type != DeviceElementType::kF32;
+            }) ||
+          std::ranges::any_of(preparation.resident_coding_opsin.plane,
+            [](ConstDevicePlaneView plane) {
+              return plane.element_type != DeviceElementType::kF32;
+            })) {
+        return Status::InvalidArgument(
+          "CUDA resident AQ external images must contain floats");
+      }
+    } else {
+      status = ValidateFiniteImage(
+        preparation.original_linear_rgb, "CUDA resident AQ original");
+      if (status.ok()) {
+        status = ValidateFiniteImage(
+          preparation.coding_opsin, "CUDA resident AQ coding");
+      }
+      if (!status.ok()) return status;
+    }
 
     source_extent_ = preparation.original_linear_rgb.extent();
-    coding_extent_ = preparation.coding_opsin.extent();
+    coding_extent_ = resident_input
+                       ? preparation.resident_coding_opsin.plane[0].extent
+                       : preparation.coding_opsin.extent();
     if (source_extent_.empty() || coding_extent_.empty() ||
         coding_extent_.width % 8 != 0 || coding_extent_.height % 8 != 0 ||
         source_extent_.width > coding_extent_.width ||
@@ -274,6 +305,17 @@ class CudaPreparedResidentAqEvaluation final
       return Status::InvalidArgument(
           "CUDA resident AQ source and coding geometry are incompatible");
     }
+    if (resident_input &&
+        preparation.resident_original_linear_rgb.plane[0].extent !=
+          source_extent_) {
+      return Status::InvalidArgument(
+        "CUDA resident AQ external source geometry is inconsistent");
+    }
+    borrowed_original_ = resident_input
+                           ? preparation.resident_original_linear_rgb
+                           : ConstDeviceImage3View{};
+    borrowed_coding_ = resident_input ? preparation.resident_coding_opsin
+                                      : ConstDeviceImage3View{};
     block_extent_ = {coding_extent_.width / 8, coding_extent_.height / 8};
     tile_extent_ = {(coding_extent_.width + 63) / 64,
                     (coding_extent_.height + 63) / 64};
@@ -361,15 +403,18 @@ class CudaPreparedResidentAqEvaluation final
     if (!status.ok()) return status;
     status = AllocateArenas();
     if (!status.ok()) return status;
-    for (size_t channel = 0; channel < 3; ++channel) {
-      status =
-          UploadPlane(*backend_, preparation.original_linear_rgb.plane[channel],
-                      original_[channel]);
-      if (status.ok()) {
-        status = UploadPlane(*backend_, preparation.coding_opsin.plane[channel],
-                             coding_[channel]);
+    if (!resident_input) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        status = UploadPlane(*backend_,
+          preparation.original_linear_rgb.plane[channel],
+          original_[channel]);
+        if (status.ok()) {
+          status = UploadPlane(*backend_,
+            preparation.coding_opsin.plane[channel],
+            coding_[channel]);
+        }
+        if (!status.ok()) return status;
       }
-      if (!status.ok()) return status;
     }
     status = UploadMetadata(metadata, quant_tables);
     if (!status.ok()) return status;
@@ -377,11 +422,10 @@ class CudaPreparedResidentAqEvaluation final
     InitializeKernelParams();
 
     if (options_.metric == AqEvaluationMetric::kButteraugli) {
-      status = PrepareDeviceButteraugli(
-          *backend_,
-          {.reference_linear_rgb = ConstImage(original_),
-           .options = options_.butteraugli},
-          &butteraugli_);
+      status = PrepareDeviceButteraugli(*backend_,
+        {.reference_linear_rgb = OriginalImage(),
+          .options = options_.butteraugli},
+        &butteraugli_);
       if (!status.ok()) return status;
     }
     const DeviceButteraugliMemoryStats butter_memory =
@@ -1400,11 +1444,16 @@ class CudaPreparedResidentAqEvaluation final
     size_t persistent_bytes = 0;
     size_t staging_bytes = 0;
     Status status = Status::Ok();
-    for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
-      status = PlanPlane(DeviceElementType::kF32, source_extent_,
-                         source_extent_.width, &persistent_bytes);
+    if (!has_borrowed_input()) {
+      for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
+        status = PlanPlane(DeviceElementType::kF32,
+          source_extent_,
+          source_extent_.width,
+          &persistent_bytes);
+      }
     }
-    for (size_t image = 0; image < 2 && status.ok(); ++image) {
+    const size_t coding_image_count = has_borrowed_input() ? 1 : 2;
+    for (size_t image = 0; image < coding_image_count && status.ok(); ++image) {
       for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
         status = PlanPlane(DeviceElementType::kF32, coding_extent_,
                            coding_extent_.width, &persistent_bytes);
@@ -1533,15 +1582,25 @@ class CudaPreparedResidentAqEvaluation final
 
   Status AllocateArenas() {
     Status status = Status::Ok();
-    for (DevicePlaneView& plane : original_) {
-      status = AllocatePlane(persistent_, DeviceElementType::kF32,
-                             source_extent_, source_extent_.width, &plane);
-      if (!status.ok()) return status;
+    if (!has_borrowed_input()) {
+      for (DevicePlaneView& plane : original_) {
+        status = AllocatePlane(persistent_,
+          DeviceElementType::kF32,
+          source_extent_,
+          source_extent_.width,
+          &plane);
+        if (!status.ok()) return status;
+      }
     }
-    for (DevicePlaneView& plane : coding_) {
-      status = AllocatePlane(persistent_, DeviceElementType::kF32,
-                             coding_extent_, coding_extent_.width, &plane);
-      if (!status.ok()) return status;
+    if (!has_borrowed_input()) {
+      for (DevicePlaneView& plane : coding_) {
+        status = AllocatePlane(persistent_,
+          DeviceElementType::kF32,
+          coding_extent_,
+          coding_extent_.width,
+          &plane);
+        if (!status.ok()) return status;
+      }
     }
     for (DevicePlaneView& plane : reconstructed_) {
       status = AllocatePlane(persistent_, DeviceElementType::kF32,
@@ -1948,32 +2007,40 @@ class CudaPreparedResidentAqEvaluation final
         static_cast<uint32_t>(self.block_extent_.height),
         static_cast<uint32_t>(self.tile_extent_.width),
         static_cast<uint32_t>(self.tile_extent_.height)};
-    cudaError_t status = LaunchCudaAqInitialField(
-        Pointer<const float>(self.coding_[0]),
-        Pointer<const float>(self.coding_[1]),
-        Pointer<const float>(self.coding_[2]),
-        Pointer<float>(self.initial_unblurred_pixel_device_),
-        Pointer<float>(self.initial_pixel_device_),
-        Pointer<float>(self.initial_pre_erosion_device_),
-        Pointer<float>(self.quant_field_device_),
-        Pointer<float>(self.initial_strategy_device_),
-        Pointer<unsigned int>(self.error_device_), geometry,
-        context.options.butteraugli_target, context.options.rescale,
-        backend.state_->stream);
+    cudaError_t status = LaunchCudaAqInitialField(self.CodingPointer(0),
+      self.CodingPointer(1),
+      self.CodingPointer(2),
+      Pointer<float>(self.initial_unblurred_pixel_device_),
+      Pointer<float>(self.initial_pixel_device_),
+      Pointer<float>(self.initial_pre_erosion_device_),
+      Pointer<float>(self.quant_field_device_),
+      Pointer<float>(self.initial_strategy_device_),
+      Pointer<unsigned int>(self.error_device_),
+      geometry,
+      context.options.butteraugli_target,
+      context.options.rescale,
+      backend.state_->stream);
     if (status != cudaSuccess) return status;
 
-    std::array<const float*, 3> cfl_source = ConstPointers(self.coding_);
+    std::array<const float*, 3> cfl_source = self.CodingPointers();
     if (self.options_.profile.loop_filter.gaborish) {
       for (size_t channel = 0; channel < 3; ++channel) {
         const Symmetric5Weights weights =
             gaborish_internal::GaborishInverseWeights(
                 self.options_.profile.gaborish_inverse_multipliers[channel]);
-        status = LaunchCudaSymmetric5Convolution(
-            Pointer<const float>(self.coding_[channel]),
-            Pointer<float>(self.reconstructed_[channel]), geometry.width,
-            geometry.height, geometry.width, geometry.width, weights.distance0,
-            weights.distance1, weights.distance2, weights.distance4,
-            weights.distance8, weights.distance5, backend.state_->stream);
+        status = LaunchCudaSymmetric5Convolution(self.CodingPointer(channel),
+          Pointer<float>(self.reconstructed_[channel]),
+          geometry.width,
+          geometry.height,
+          geometry.width,
+          geometry.width,
+          weights.distance0,
+          weights.distance1,
+          weights.distance2,
+          weights.distance4,
+          weights.distance8,
+          weights.distance5,
+          backend.state_->stream);
         if (status != cudaSuccess) return status;
       }
       cfl_source = ConstPointers(self.reconstructed_);
@@ -2002,20 +2069,20 @@ class CudaPreparedResidentAqEvaluation final
 
   static cudaError_t EncodeForwardCoefficients(
       CudaBackend& backend, CudaPreparedResidentAqEvaluation& self) {
-    const std::array<DevicePlaneView, 3>& coding_source =
-        self.resident_frontend_ && self.options_.profile.loop_filter.gaborish
-            ? self.reconstructed_
-            : self.coding_;
+    std::array<const float*, 3> coding_source = self.CodingPointers();
+    if (self.resident_frontend_ && self.options_.profile.loop_filter.gaborish) {
+      coding_source = ConstPointers(self.reconstructed_);
+    }
     for (const CudaAqExactBatch& batch : self.batches_) {
       if (batch.anchor_count == 0) continue;
-      cudaError_t status = LaunchCudaAqGatherTransformPixels(
-          Pointer<const float>(coding_source[0]),
-          Pointer<const float>(coding_source[1]),
-          Pointer<const float>(coding_source[2]),
-          Pointer<CudaAqAnchor>(self.anchors_device_),
-          Pointer<float>(self.gathered_device_), batch,
-          static_cast<uint32_t>(self.coding_extent_.width),
-          backend.state_->stream);
+      cudaError_t status = LaunchCudaAqGatherTransformPixels(coding_source[0],
+        coding_source[1],
+        coding_source[2],
+        Pointer<CudaAqAnchor>(self.anchors_device_),
+        Pointer<float>(self.gathered_device_),
+        batch,
+        static_cast<uint32_t>(self.coding_extent_.width),
+        backend.state_->stream);
       if (status != cudaSuccess) return status;
       status = LaunchCudaDct(
           true,
@@ -2126,18 +2193,20 @@ class CudaPreparedResidentAqEvaluation final
       const std::array<DevicePlaneView, 3> filtered = self.FinalFilteredImage();
       for (const CudaAqExactBatch& batch : self.batches_) {
         if (batch.anchor_count == 0) continue;
-        status = LaunchCudaAqReduceMaximumError(
-            ConstPointers(self.coding_), ConstPointers(filtered),
-            static_cast<uint32_t>(self.coding_extent_.width),
-            static_cast<uint32_t>(self.coding_extent_.width),
-            Pointer<CudaAqAnchor>(self.anchors_device_),
-            Pointer<float>(self.block_device_),
-            static_cast<uint32_t>(self.block_extent_.width),
-            Pointer<float>(self.maximum_device_),
-            Pointer<unsigned int>(self.error_device_),
-            static_cast<uint32_t>(self.source_extent_.width),
-            static_cast<uint32_t>(self.source_extent_.height),
-            self.options_.maximum_error, batch, backend.state_->stream);
+        status = LaunchCudaAqReduceMaximumError(self.CodingPointers(),
+          ConstPointers(filtered),
+          static_cast<uint32_t>(self.coding_extent_.width),
+          static_cast<uint32_t>(self.coding_extent_.width),
+          Pointer<CudaAqAnchor>(self.anchors_device_),
+          Pointer<float>(self.block_device_),
+          static_cast<uint32_t>(self.block_extent_.width),
+          Pointer<float>(self.maximum_device_),
+          Pointer<unsigned int>(self.error_device_),
+          static_cast<uint32_t>(self.source_extent_.width),
+          static_cast<uint32_t>(self.source_extent_.height),
+          self.options_.maximum_error,
+          batch,
+          backend.state_->stream);
         if (status != cudaSuccess) return status;
       }
     }
@@ -2360,11 +2429,32 @@ class CudaPreparedResidentAqEvaluation final
               static_cast<ConstDevicePlaneView>(image[2])}}};
   }
 
+  bool has_borrowed_input() const noexcept {
+    return borrowed_coding_.plane[0].buffer != nullptr;
+  }
+
+  const float* CodingPointer(
+    size_t channel) const {
+    return has_borrowed_input()
+             ? Pointer<const float>(borrowed_coding_.plane[channel])
+             : Pointer<const float>(coding_[channel]);
+  }
+
+  std::array<const float*, 3> CodingPointers() const {
+    return {CodingPointer(0), CodingPointer(1), CodingPointer(2)};
+  }
+
+  ConstDeviceImage3View OriginalImage() const {
+    return has_borrowed_input() ? borrowed_original_ : ConstImage(original_);
+  }
+
   CudaBackend* backend_ = nullptr;
   DeviceScratchArena persistent_;
   DeviceScratchArena staging_;
   std::array<DevicePlaneView, 3> original_{};
   std::array<DevicePlaneView, 3> coding_{};
+  ConstDeviceImage3View borrowed_original_{};
+  ConstDeviceImage3View borrowed_coding_{};
   std::array<DevicePlaneView, 3> reconstructed_{};
   std::array<std::array<DevicePlaneView, 3>, 2> filter_scratch_{};
   std::array<DevicePlaneView, 3> reconstructed_linear_{};

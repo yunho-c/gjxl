@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -122,15 +123,17 @@ class CudaPreparedAqEvaluation final
       : backend_(&backend) {}
 
   Status Prepare(const AqEvaluationPreparation& preparation) {
+    const bool resident_input =
+      HasResidentImage(preparation.resident_coding_opsin) ||
+      HasResidentImage(preparation.resident_original_linear_rgb);
     if (!preparation.frame_only ||
         !preparation.frame_only_resident_initial_quant ||
         !preparation.frame_only_resident_quantizer ||
         !preparation.resident_initial_cfl ||
         preparation.resident_ac_strategy_inputs ||
         preparation.resident_quantization ||
-        HasResidentImage(preparation.resident_coding_opsin) ||
         preparation.coefficient_decision_mode !=
-            AcCoefficientDecisionMode::kAdjustedSharedQuant) {
+          AcCoefficientDecisionMode::kAdjustedSharedQuant) {
       return Status::Unavailable(
           "CUDA currently supports only the DCT8 maximum-throughput AQ "
           "preparation");
@@ -141,12 +144,32 @@ class CudaPreparedAqEvaluation final
         !preparation.options.profile.valid()) {
       return Status::InvalidArgument("CUDA AQ preparation metadata is invalid");
     }
-    Status status = ValidateFiniteImage(preparation.original_linear_rgb,
-                                        "CUDA AQ original");
-    if (!status.ok()) return status;
-    status = ValidateFiniteImage(preparation.coding_opsin, "CUDA AQ coding");
-    if (!status.ok()) return status;
-    if (!BlockGrid::IsPaddedPixelExtent(preparation.coding_opsin.extent())) {
+    Status status = Status::Ok();
+    if (resident_input) {
+      if (!HasResidentImage(preparation.resident_coding_opsin) ||
+          !HasResidentImage(preparation.resident_original_linear_rgb)) {
+        return Status::InvalidArgument("CUDA AQ resident input is incomplete");
+      }
+      status = ValidateDeviceImage3View(
+        preparation.resident_original_linear_rgb, backend_->id());
+      if (status.ok()) {
+        status = ValidateDeviceImage3View(
+          preparation.resident_coding_opsin, backend_->id());
+      }
+      if (!status.ok()) return status;
+    } else {
+      status = ValidateFiniteImage(
+        preparation.original_linear_rgb, "CUDA AQ original");
+      if (status.ok()) {
+        status =
+          ValidateFiniteImage(preparation.coding_opsin, "CUDA AQ coding");
+      }
+      if (!status.ok()) return status;
+    }
+    const Extent2D pixels =
+      resident_input ? preparation.resident_coding_opsin.plane[0].extent
+                     : preparation.coding_opsin.extent();
+    if (!BlockGrid::IsPaddedPixelExtent(pixels)) {
       return Status::InvalidArgument(
           "CUDA AQ coding image must be padded to complete 8x8 blocks");
     }
@@ -154,13 +177,25 @@ class CudaPreparedAqEvaluation final
     status = FrameGeometry::Create(preparation.original_linear_rgb.extent(),
                                    &geometry);
     if (!status.ok()) return status;
-    const Extent2D pixels = preparation.coding_opsin.extent();
     const Extent2D blocks = geometry.block_grid().blocks;
     if (geometry.padded_frame() != pixels ||
+        (resident_input &&
+          preparation.resident_original_linear_rgb.plane[0].extent !=
+            preparation.original_linear_rgb.extent()) ||
+        (resident_input &&
+          std::ranges::any_of(preparation.resident_original_linear_rgb.plane,
+            [](ConstDevicePlaneView plane) {
+              return plane.element_type != DeviceElementType::kF32;
+            })) ||
+        (resident_input &&
+          std::ranges::any_of(preparation.resident_coding_opsin.plane,
+            [](ConstDevicePlaneView plane) {
+              return plane.element_type != DeviceElementType::kF32;
+            })) ||
         preparation.strategies->extent() != blocks ||
         preparation.epf_sharpness.extent != blocks ||
         preparation.frame_only_inverse_gaborish !=
-            preparation.options.profile.loop_filter.gaborish) {
+          preparation.options.profile.loop_filter.gaborish) {
       return Status::InvalidArgument(
           "CUDA AQ preparation geometry is inconsistent");
     }
@@ -217,6 +252,8 @@ class CudaPreparedAqEvaluation final
     evaluation_options_ = preparation.options;
     profile_ = preparation.options.profile;
     inverse_gaborish_ = preparation.frame_only_inverse_gaborish;
+    borrowed_coding_ = resident_input ? preparation.resident_coding_opsin
+                                      : ConstDeviceImage3View{};
     geometry_ = {
         static_cast<unsigned int>(pixels.width),
         static_cast<unsigned int>(pixels.height),
@@ -226,9 +263,11 @@ class CudaPreparedAqEvaluation final
         static_cast<unsigned int>(tiles.height),
     };
 
-    for (size_t channel = 0; channel < 3; ++channel) {
-      CopyPlaneToContiguous(preparation.coding_opsin.plane[channel],
-                            &coding_host_[channel]);
+    if (!resident_input) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        CopyPlaneToContiguous(
+          preparation.coding_opsin.plane[channel], &coding_host_[channel]);
+      }
     }
     CopyPlaneToContiguous(preparation.epf_sharpness, &epf_sharpness_);
     raw_quant_host_.resize(block_count_);
@@ -261,19 +300,43 @@ class CudaPreparedAqEvaluation final
     status = PlanArenas();
     if (status.ok()) status = AllocateArenas();
     if (!status.ok()) return status;
-    const std::array<CudaHostToDeviceCopy, 5> uploads{{
-        {coding_[0].buffer, coding_host_[0].data(),
-         pixel_count_ * sizeof(float), coding_[0].offset_bytes},
-        {coding_[1].buffer, coding_host_[1].data(),
-         pixel_count_ * sizeof(float), coding_[1].offset_bytes},
-        {coding_[2].buffer, coding_host_[2].data(),
-         pixel_count_ * sizeof(float), coding_[2].offset_bytes},
-        {epf_device_.buffer, epf_sharpness_.data(), block_count_,
-         epf_device_.offset_bytes},
-        {quant_tables_.buffer, quant_tables.data(), sizeof(quant_tables),
-         quant_tables_.offset_bytes},
-    }};
-    status = backend_->CopyHostToDeviceBatch(uploads);
+    if (resident_input) {
+      const std::array<CudaHostToDeviceCopy, 2> uploads{{
+        {epf_device_.buffer,
+          epf_sharpness_.data(),
+          block_count_,
+          epf_device_.offset_bytes},
+        {quant_tables_.buffer,
+          quant_tables.data(),
+          sizeof(quant_tables),
+          quant_tables_.offset_bytes},
+      }};
+      status = backend_->CopyHostToDeviceBatch(uploads);
+    } else {
+      const std::array<CudaHostToDeviceCopy, 5> uploads{{
+        {coding_[0].buffer,
+          coding_host_[0].data(),
+          pixel_count_ * sizeof(float),
+          coding_[0].offset_bytes},
+        {coding_[1].buffer,
+          coding_host_[1].data(),
+          pixel_count_ * sizeof(float),
+          coding_[1].offset_bytes},
+        {coding_[2].buffer,
+          coding_host_[2].data(),
+          pixel_count_ * sizeof(float),
+          coding_[2].offset_bytes},
+        {epf_device_.buffer,
+          epf_sharpness_.data(),
+          block_count_,
+          epf_device_.offset_bytes},
+        {quant_tables_.buffer,
+          quant_tables.data(),
+          sizeof(quant_tables),
+          quant_tables_.offset_bytes},
+      }};
+      status = backend_->CopyHostToDeviceBatch(uploads);
+    }
     if (!status.ok()) return status;
 
     memory_stats_.persistent_bytes = persistent_.capacity_bytes();
@@ -596,9 +659,13 @@ class CudaPreparedAqEvaluation final
     size_t persistent_bytes = 0;
     size_t staging_bytes = 0;
     Status status = Status::Ok();
-    for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
-      status = PlanPlane(DeviceElementType::kF32, pixel_extent_,
-                         pixel_extent_.width, &persistent_bytes);
+    if (!HasResidentImage(borrowed_coding_)) {
+      for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
+        status = PlanPlane(DeviceElementType::kF32,
+          pixel_extent_,
+          pixel_extent_.width,
+          &persistent_bytes);
+      }
     }
     if (status.ok()) {
       status = PlanPlane(DeviceElementType::kU8, block_extent_,
@@ -693,10 +760,15 @@ class CudaPreparedAqEvaluation final
 
   Status AllocateArenas() {
     Status status = Status::Ok();
-    for (DevicePlaneView& plane : coding_) {
-      status = AllocatePlane(persistent_, DeviceElementType::kF32,
-                             pixel_extent_, pixel_extent_.width, &plane);
-      if (!status.ok()) return status;
+    if (!HasResidentImage(borrowed_coding_)) {
+      for (DevicePlaneView& plane : coding_) {
+        status = AllocatePlane(persistent_,
+          DeviceElementType::kF32,
+          pixel_extent_,
+          pixel_extent_.width,
+          &plane);
+        if (!status.ok()) return status;
+      }
     }
     status = AllocatePlane(persistent_, DeviceElementType::kU8, block_extent_,
                            block_extent_.width, &epf_device_);
@@ -809,24 +881,35 @@ class CudaPreparedAqEvaluation final
         static_cast<const std::byte*>(buffer->pointer()) + view.offset_bytes);
   }
 
+  const float* CodingPointer(
+    size_t channel) const {
+    return HasResidentImage(borrowed_coding_)
+             ? Pointer<const float>(borrowed_coding_.plane[channel])
+             : Pointer<const float>(coding_[channel]);
+  }
+
   static cudaError_t EncodeInitial(CudaBackend& backend, const void* context) {
     auto& self =
         *static_cast<CudaPreparedAqEvaluation*>(const_cast<void*>(context));
-    return LaunchCudaAqInitialQuantization(
-        Pointer<const float>(self.coding_[0]),
-        Pointer<const float>(self.coding_[1]),
-        Pointer<const float>(self.coding_[2]),
-        Pointer<float>(self.unblurred_pixel_mask_),
-        Pointer<float>(self.pixel_mask_), Pointer<float>(self.pre_erosion_),
-        Pointer<float>(self.quant_field_), Pointer<float>(self.strategy_mask_),
-        Pointer<unsigned int>(self.selection_state_),
-        Pointer<unsigned int>(self.histogram_),
-        Pointer<float>(self.statistics_),
-        Pointer<unsigned int>(self.quantizer_params_),
-        Pointer<int>(self.raw_quant_initial_),
-        Pointer<unsigned int>(self.error_),
-        self.geometry_, self.initial_options_.butteraugli_target,
-        self.initial_options_.rescale, self.quant_dc_, backend.state_->stream);
+    return LaunchCudaAqInitialQuantization(self.CodingPointer(0),
+      self.CodingPointer(1),
+      self.CodingPointer(2),
+      Pointer<float>(self.unblurred_pixel_mask_),
+      Pointer<float>(self.pixel_mask_),
+      Pointer<float>(self.pre_erosion_),
+      Pointer<float>(self.quant_field_),
+      Pointer<float>(self.strategy_mask_),
+      Pointer<unsigned int>(self.selection_state_),
+      Pointer<unsigned int>(self.histogram_),
+      Pointer<float>(self.statistics_),
+      Pointer<unsigned int>(self.quantizer_params_),
+      Pointer<int>(self.raw_quant_initial_),
+      Pointer<unsigned int>(self.error_),
+      self.geometry_,
+      self.initial_options_.butteraugli_target,
+      self.initial_options_.rescale,
+      self.quant_dc_,
+      backend.state_->stream);
   }
 
   static cudaError_t EncodeFrameSubmission(CudaBackend& backend,
@@ -841,7 +924,7 @@ class CudaPreparedAqEvaluation final
     if (status != cudaSuccess) return status;
     std::array<const float*, 3> transform{};
     for (size_t channel = 0; channel < 3; ++channel) {
-      const auto* coding = Pointer<const float>(self.coding_[channel]);
+      const auto* coding = self.CodingPointer(channel);
       transform[channel] = coding;
       if (self.inverse_gaborish_) {
         const Symmetric5Weights weights =
@@ -857,21 +940,27 @@ class CudaPreparedAqEvaluation final
         transform[channel] = filtered;
       }
     }
-    return LaunchCudaAqEncodeFrame(
-        Pointer<const float>(self.coding_[0]),
-        Pointer<const float>(self.coding_[1]),
-        Pointer<const float>(self.coding_[2]),
-        transform[0], transform[1], transform[2],
-        Pointer<float>(self.gathered_), Pointer<float>(self.forward_),
-        Pointer<const float>(self.quant_tables_),
-        Pointer<int>(self.raw_quant_work_),
-        Pointer<const unsigned int>(self.quantizer_params_),
-        Pointer<signed char>(self.y_to_x_), Pointer<signed char>(self.y_to_b_),
-        Pointer<float>(self.y_thresholds_), Pointer<int>(self.quantized_ac_),
-        Pointer<int>(self.quantized_dc_), Pointer<unsigned int>(self.error_),
-        self.geometry_, QuantizationMatrixMultiplier(self.profile_.x_qm_scale),
-        QuantizationMatrixMultiplier(self.profile_.b_qm_scale),
-        backend.state_->stream);
+    return LaunchCudaAqEncodeFrame(self.CodingPointer(0),
+      self.CodingPointer(1),
+      self.CodingPointer(2),
+      transform[0],
+      transform[1],
+      transform[2],
+      Pointer<float>(self.gathered_),
+      Pointer<float>(self.forward_),
+      Pointer<const float>(self.quant_tables_),
+      Pointer<int>(self.raw_quant_work_),
+      Pointer<const unsigned int>(self.quantizer_params_),
+      Pointer<signed char>(self.y_to_x_),
+      Pointer<signed char>(self.y_to_b_),
+      Pointer<float>(self.y_thresholds_),
+      Pointer<int>(self.quantized_ac_),
+      Pointer<int>(self.quantized_dc_),
+      Pointer<unsigned int>(self.error_),
+      self.geometry_,
+      QuantizationMatrixMultiplier(self.profile_.x_qm_scale),
+      QuantizationMatrixMultiplier(self.profile_.b_qm_scale),
+      backend.state_->stream);
   }
 
   CudaBackend* backend_ = nullptr;
@@ -909,6 +998,7 @@ class CudaPreparedAqEvaluation final
   DeviceScratchArena persistent_;
   DeviceScratchArena staging_;
   std::array<DevicePlaneView, 3> coding_{};
+  ConstDeviceImage3View borrowed_coding_{};
   std::array<DevicePlaneView, 3> filtered_{};
   DevicePlaneView epf_device_{};
   DevicePlaneView quant_tables_{};

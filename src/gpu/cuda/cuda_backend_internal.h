@@ -21,6 +21,7 @@
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/butteraugli.h"
+#include "gpu/ops/input_preparation.h"
 #include "gpu/ops/primitives.h"
 
 namespace gjxl::cuda_internal {
@@ -109,11 +110,14 @@ class CudaPreparedExactAqEvaluation;
 class CudaPreparedResidentAqEvaluation;
 class CudaPreparedDeviceButteraugli;
 
+class CudaPreparedLinearRgbOpsin;
+
 class CudaBackend final : public GpuBackend,
                           public GpuImagePrimitives,
                           public GpuAcStrategyEvaluation,
                           public DeviceButteraugliOperation,
-                          public GpuAqEvaluation {
+                          public GpuAqEvaluation,
+                          public GpuLinearRgbOpsinPreparation {
  public:
   using EncodeCallback = cudaError_t (*)(CudaBackend&, const void*);
 
@@ -154,6 +158,9 @@ class CudaBackend final : public GpuBackend,
   Status PrepareAqEvaluation(
       const AqEvaluationPreparation& preparation,
       std::unique_ptr<PreparedAqEvaluation>* prepared) override;
+  Status PrepareLinearRgbOpsin(ConstImage3FView linear_rgb,
+    LinearRgbOpsinPreparationOptions options,
+    std::unique_ptr<PreparedGpuLinearRgbOpsin>* prepared) override;
 
   void ArmNextSubmissionFailureForTest(bool fail_submission,
                                        bool fail_completion) noexcept;
@@ -163,6 +170,7 @@ class CudaBackend final : public GpuBackend,
   friend class CudaPreparedExactAqEvaluation;
   friend class CudaPreparedResidentAqEvaluation;
   friend class CudaPreparedDeviceButteraugli;
+  friend class CudaPreparedLinearRgbOpsin;
 
   struct ResolvedConstPlane {
     ConstDevicePlaneView view;

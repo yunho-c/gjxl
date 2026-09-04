@@ -41,6 +41,7 @@
 #endif
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/input_preparation.h"
 #include "gpu/ops/quantization_pipeline.h"
 #include "gpu/ops/quantization_pipeline_profile_internal.h"
 
@@ -508,11 +509,8 @@ struct EncodingArtifacts {
 
 struct PreparedWorkflow {
   PreparedWorkflow(
-    FrameGeometry prepared_geometry,
-    ConstImage3FView source_linear_rgb)
-    : geometry(prepared_geometry),
-      linear_rgb(source_linear_rgb),
-      opsin(geometry.padded_frame()) {}
+    FrameGeometry prepared_geometry, ConstImage3FView source_linear_rgb)
+      : geometry(prepared_geometry), linear_rgb(source_linear_rgb) {}
 
   [[nodiscard]] ConstImage3FView original_linear_rgb() const noexcept {
     return linear_rgb;
@@ -523,6 +521,9 @@ struct PreparedWorkflow {
   // prepared workflow and all of its target-size attempts.
   ConstImage3FView linear_rgb;
   Image3FBuffer opsin;
+  std::unique_ptr<PreparedGpuLinearRgbOpsin> resident_input;
+  GpuBackend* prepared_gpu = nullptr;
+  VarDctExecutionBackend prepared_backend = VarDctExecutionBackend::kCpu;
   codestream_internal::QuantizationMatrixScaleStats matrix_scale_stats;
   // CPU and maximum-throughput adapters retain the public complete-output
   // shape. The default resident encoder never constructs this storage.
@@ -531,6 +532,14 @@ struct PreparedWorkflow {
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
     gpu_adaptive_quantization;
 };
+
+[[nodiscard]] Status SelectAttemptBackend(PreparedWorkflow& prepared,
+  VarDctEncodingOptions options,
+  GpuBackend* supplied_backend,
+  bool supplied_backend_is_qualified,
+  bool resolve_production_backend,
+  GpuBackend** selected_gpu,
+  VarDctExecutionBackend* selected_backend);
 
 [[nodiscard]] Status EnsureCompatibilityOutput(
   PreparedWorkflow& prepared,
@@ -559,8 +568,10 @@ struct PreparedWorkflow {
 [[nodiscard]] Status PrepareWorkflow(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,
+  GpuBackend* supplied_backend,
+  bool supplied_backend_is_qualified,
+  bool resolve_production_backend,
   std::unique_ptr<PreparedWorkflow>* prepared) {
-
   if (prepared == nullptr) {
     return Status::InvalidArgument(
       "Prepared workflow output pointer is null");
@@ -573,23 +584,6 @@ struct PreparedWorkflow {
       return status;
     }
     auto candidate = std::make_unique<PreparedWorkflow>(geometry, linear_rgb);
-    status = color_transform_internal::LinearRgbToPaddedOpsin(
-      linear_rgb,
-      kInitialProfileIntensityTarget,
-      candidate->opsin.view());
-    if (!status.ok()) {
-      return status;
-    }
-    if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
-          options)) {
-      status = codestream_internal::
-        ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
-        candidate->opsin.cropped_view(geometry.frame()),
-        &candidate->matrix_scale_stats);
-      if (!status.ok()) {
-        return status;
-      }
-    }
     CpuQuantizationPipelineOptions preparation_options;
     if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
       preparation_options.adaptive_quantization.control_mode =
@@ -597,15 +591,76 @@ struct PreparedWorkflow {
       preparation_options.adaptive_quantization.maximum_error =
         options.maximum_error;
     }
-    status = quantization_pipeline_internal::PrepareQuantizationPipeline(
-      candidate->original_linear_rgb(), candidate->opsin.const_view(),
-      preparation_options,
-      &candidate->quantization,
-      options.backend == VarDctBackendPreference::kCpu,
-      options.gpu_aq_mode ==
-        GpuAdaptiveQuantizationMode::kExactCoefficients,
-      quantization_pipeline_internal::QuantizationPipelineInputProvenance::
-        kFiniteLinearRgbAndOpsin);
+    const bool resident_cuda_frontend =
+      options.backend == VarDctBackendPreference::kCuda &&
+      options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kExactCoefficients;
+    if (resident_cuda_frontend) {
+      GpuBackend* selected_gpu = nullptr;
+      VarDctExecutionBackend selected_backend = VarDctExecutionBackend::kCpu;
+      status = SelectAttemptBackend(*candidate,
+        options,
+        supplied_backend,
+        supplied_backend_is_qualified,
+        resolve_production_backend,
+        &selected_gpu,
+        &selected_backend);
+      if (!status.ok()) return status;
+      auto* input_preparation =
+        selected_gpu == nullptr
+          ? nullptr
+          : QueryGpuLinearRgbOpsinPreparation(*selected_gpu);
+      if (input_preparation == nullptr) {
+        return Status::Unavailable(
+          "Forced CUDA workflow lacks resident input preparation");
+      }
+      status = input_preparation->PrepareLinearRgbOpsin(linear_rgb,
+        {
+          .padded_extent = geometry.padded_frame(),
+          .intensity_target = kInitialProfileIntensityTarget,
+          .compute_matrix_scale_stats =
+            codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+              options),
+        },
+        &candidate->resident_input);
+      if (!status.ok()) return status;
+      const std::array<float, 3> stats =
+        candidate->resident_input->matrix_scale_stats();
+      candidate->matrix_scale_stats = {stats[0], stats[1], stats[2]};
+      status =
+        quantization_pipeline_internal::PrepareResidentQuantizationPipeline(
+          candidate->original_linear_rgb(),
+          geometry.padded_frame(),
+          candidate->resident_input->original_linear_rgb(),
+          candidate->resident_input->coding_opsin(),
+          preparation_options,
+          &candidate->quantization);
+      if (status.ok()) {
+        candidate->prepared_gpu = selected_gpu;
+        candidate->prepared_backend = selected_backend;
+      }
+    } else {
+      candidate->opsin.resize(geometry.padded_frame());
+      status = color_transform_internal::LinearRgbToPaddedOpsin(
+        linear_rgb, kInitialProfileIntensityTarget, candidate->opsin.view());
+      if (!status.ok()) return status;
+      if (codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
+            options)) {
+        status = codestream_internal::
+          ComputeQuantizationMatrixScaleStatsFromFiniteOpsin(
+            candidate->opsin.cropped_view(geometry.frame()),
+            &candidate->matrix_scale_stats);
+        if (!status.ok()) return status;
+      }
+      status = quantization_pipeline_internal::PrepareQuantizationPipeline(
+        candidate->original_linear_rgb(),
+        candidate->opsin.const_view(),
+        preparation_options,
+        &candidate->quantization,
+        options.backend == VarDctBackendPreference::kCpu,
+        options.gpu_aq_mode == GpuAdaptiveQuantizationMode::kExactCoefficients,
+        quantization_pipeline_internal::QuantizationPipelineInputProvenance::
+          kFiniteLinearRgbAndOpsin);
+    }
     if (!status.ok()) {
       return status;
     }
@@ -758,9 +813,18 @@ struct PreparedWorkflow {
   VarDctExecutionBackend selected_backend =
     VarDctExecutionBackend::kCpu;
   const WorkflowClock::time_point selection_begin = ProfileBegin(profile);
-  status = SelectAttemptBackend(
-    prepared, options, supplied_backend, supplied_backend_is_qualified,
-    resolve_production_backend, &selected_gpu, &selected_backend);
+  if (prepared.prepared_gpu != nullptr) {
+    selected_gpu = prepared.prepared_gpu;
+    selected_backend = prepared.prepared_backend;
+  } else {
+    status = SelectAttemptBackend(prepared,
+      options,
+      supplied_backend,
+      supplied_backend_is_qualified,
+      resolve_production_backend,
+      &selected_gpu,
+      &selected_backend);
+  }
   if (!status.ok()) {
     return status;
   }
@@ -1322,7 +1386,12 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       const auto preparation_begin = !profiling
         ? WorkflowClock::time_point{}
         : WorkflowClock::now();
-      status = PrepareWorkflow(linear_rgb, options, &prepared);
+      status = PrepareWorkflow(linear_rgb,
+        options,
+        supplied_backend,
+        supplied_backend_is_qualified,
+        resolve_production_backend,
+        &prepared);
       if (!status.ok()) {
         return status;
       }
@@ -1462,7 +1531,12 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     const auto preparation_begin = !profiling
       ? WorkflowClock::time_point{}
       : WorkflowClock::now();
-    status = PrepareWorkflow(linear_rgb, options, &prepared);
+    status = PrepareWorkflow(linear_rgb,
+      options,
+      supplied_backend,
+      supplied_backend_is_qualified,
+      resolve_production_backend,
+      &prepared);
     if (!status.ok()) {
       return status;
     }

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <ranges>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -84,18 +85,18 @@ public:
 Status ValidatePipelineInputs(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
+  Extent2D opsin_extent,
+  bool resident_opsin,
   CpuQuantizationPipelineOptions options,
   const CpuQuantizationPipelineOutput& output,
   quantization_pipeline_internal::QuantizationPipelineMaterialization
     materialization,
   Extent2D* block_extent) {
-
-  if (!original_linear_rgb.valid() ||
-      !opsin.valid() ||
-      !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
+  if (!original_linear_rgb.valid() || (!resident_opsin && !opsin.valid()) ||
+      (opsin.valid() && opsin.extent() != opsin_extent) ||
+      !BlockGrid::IsPaddedPixelExtent(opsin_extent) ||
       !std::isfinite(options.initial_quant_rescale) ||
-      options.initial_quant_rescale <= 0.0f ||
-      block_extent == nullptr) {
+      options.initial_quant_rescale <= 0.0f || block_extent == nullptr) {
     return Status::InvalidArgument(
       "Quantization pipeline inputs or options are invalid");
   }
@@ -118,31 +119,30 @@ Status ValidatePipelineInputs(
         "Quantization pipeline control mode is invalid");
   }
 
-  *block_extent =
-    BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
+  *block_extent = BlockGrid::FromPaddedPixelExtent(opsin_extent).blocks;
   if ((materialization.initial_quantization &&
-       (!output.initial_quantization.quant_field.valid() ||
-        !output.initial_quantization.strategy_mask.valid() ||
-        !output.initial_quantization.pixel_mask.valid() ||
-        output.initial_quantization.quant_field.extent != *block_extent ||
-        output.initial_quantization.strategy_mask.extent != *block_extent ||
-        output.initial_quantization.pixel_mask.extent != opsin.extent())) ||
+        (!output.initial_quantization.quant_field.valid() ||
+          !output.initial_quantization.strategy_mask.valid() ||
+          !output.initial_quantization.pixel_mask.valid() ||
+          output.initial_quantization.quant_field.extent != *block_extent ||
+          output.initial_quantization.strategy_mask.extent != *block_extent ||
+          output.initial_quantization.pixel_mask.extent != opsin_extent)) ||
       (materialization.adaptive_quant_field &&
-       (!output.adaptive_quantization.quant_field.valid() ||
-        output.adaptive_quantization.quant_field.extent != *block_extent)) ||
+        (!output.adaptive_quantization.quant_field.valid() ||
+          output.adaptive_quantization.quant_field.extent != *block_extent)) ||
       (materialization.block_distance_map &&
-       (!output.adaptive_quantization.block_distance_map.valid() ||
-        output.adaptive_quantization.block_distance_map.extent !=
-          *block_extent)) ||
+        (!output.adaptive_quantization.block_distance_map.valid() ||
+          output.adaptive_quantization.block_distance_map.extent !=
+            *block_extent)) ||
       (materialization.reconstructed_linear_rgb &&
-       (!output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
-        output.adaptive_quantization.reconstructed_linear_rgb.extent() !=
-          original_linear_rgb.extent())) ||
+        (!output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
+          output.adaptive_quantization.reconstructed_linear_rgb.extent() !=
+            original_linear_rgb.extent())) ||
       output.adaptive_quantization.frame == nullptr ||
       output.adaptive_quantization.score_history == nullptr ||
       (options.adaptive_quantization.control_mode ==
-         AdaptiveQuantizationControlMode::kMaximumError &&
-       output.adaptive_quantization.maximum_error_result == nullptr)) {
+          AdaptiveQuantizationControlMode::kMaximumError &&
+        output.adaptive_quantization.maximum_error_result == nullptr)) {
     return Status::InvalidArgument(
       "Quantization pipeline outputs have invalid geometry");
   }
@@ -298,6 +298,79 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
   return Status::Ok();
 }
 
+Status quantization_pipeline_internal::PrepareResidentQuantizationPipeline(
+  ConstImage3FView original_linear_rgb,
+  Extent2D padded_extent,
+  ConstDeviceImage3View resident_original_linear_rgb,
+  ConstDeviceImage3View resident_coding_opsin,
+  CpuQuantizationPipelineOptions options,
+  PreparedQuantizationPipeline* prepared) {
+  const auto valid_resident_image = [](ConstDeviceImage3View image,
+                                      Extent2D extent) {
+    return std::ranges::all_of(image.plane, [&](ConstDevicePlaneView plane) {
+      return plane.buffer != nullptr &&
+             plane.element_type == DeviceElementType::kF32 &&
+             plane.extent == extent && plane.row_stride >= extent.width;
+    });
+  };
+  if (prepared == nullptr || !original_linear_rgb.valid() ||
+      !BlockGrid::IsPaddedPixelExtent(padded_extent) ||
+      !valid_resident_image(
+        resident_original_linear_rgb, original_linear_rgb.extent()) ||
+      !valid_resident_image(resident_coding_opsin, padded_extent) ||
+      !options.adaptive_quantization.profile.valid() ||
+      !std::isfinite(options.initial_quant_rescale) ||
+      options.initial_quant_rescale <= 0.0f ||
+      original_linear_rgb.width() > padded_extent.width ||
+      original_linear_rgb.height() > padded_extent.height ||
+      original_linear_rgb.width() <= padded_extent.width - kJxlBlockDimension ||
+      original_linear_rgb.height() <=
+        padded_extent.height - kJxlBlockDimension) {
+    return Status::InvalidArgument(
+      "Resident quantization pipeline preparation is invalid");
+  }
+
+  try {
+    PreparedQuantizationPipeline candidate;
+    candidate.generation = NextPreparedQuantizationPipelineGeneration();
+    candidate.source_extent = original_linear_rgb.extent();
+    candidate.padded_extent = padded_extent;
+    candidate.block_extent =
+      BlockGrid::FromPaddedPixelExtent(padded_extent).blocks;
+    candidate.initial_quant_rescale = options.initial_quant_rescale;
+    candidate.profile = options.adaptive_quantization.profile;
+    candidate.resident_original_linear_rgb = resident_original_linear_rgb;
+    candidate.resident_coding_opsin = resident_coding_opsin;
+    candidate.validated_original_linear_rgb = original_linear_rgb;
+    candidate.preprocessing_ready = true;
+    candidate.fast_initial_color_correlation = true;
+    size_t block_count = 0;
+    size_t pixel_count = 0;
+    if (!candidate.block_extent.try_area(&block_count) ||
+        !candidate.padded_extent.try_area(&pixel_count)) {
+      return Status::InvalidArgument(
+        "Resident quantization pipeline dimensions are too large");
+    }
+    candidate.epf_sharpness.resize(block_count);
+    Status status = FillDefaultEpfSharpness({candidate.epf_sharpness.data(),
+      candidate.block_extent,
+      candidate.block_extent.width});
+    if (!status.ok()) return status;
+    candidate.initial_quant.resize(block_count);
+    candidate.strategy_mask.resize(block_count);
+    candidate.pixel_mask.resize(pixel_count);
+    candidate.butteraugli_options = options.adaptive_quantization.butteraugli;
+    *prepared = std::move(candidate);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate resident quantization pipeline preparation");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Resident quantization pipeline preparation is too large");
+  }
+  return Status::Ok();
+}
+
 Status
 quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   ConstImage3FView original_linear_rgb,
@@ -312,16 +385,24 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   const ConstImage3FView pipeline_opsin = initial_quantization_ready
     ? prepared.coding_opsin
     : prepared.preprocessed_opsin.const_view();
+  const bool resident_opsin =
+    initial_quantization_ready &&
+    prepared.resident_coding_opsin.plane[0].buffer != nullptr;
   Extent2D block_extent;
-  Status status = ValidatePipelineInputs(
-    original_linear_rgb, pipeline_opsin, options, output, materialization,
+  Status status = ValidatePipelineInputs(original_linear_rgb,
+    pipeline_opsin,
+    prepared.padded_extent,
+    resident_opsin,
+    options,
+    output,
+    materialization,
     &block_extent);
   if (!status.ok()) {
     return status;
   }
   if (!prepared.preprocessing_ready ||
       prepared.source_extent != original_linear_rgb.extent() ||
-      prepared.padded_extent != pipeline_opsin.extent() ||
+      (!resident_opsin && prepared.padded_extent != pipeline_opsin.extent()) ||
       prepared.block_extent != block_extent ||
       prepared.profile != options.adaptive_quantization.profile ||
       prepared.initial_quant_rescale != options.initial_quant_rescale) {

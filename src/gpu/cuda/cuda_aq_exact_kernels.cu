@@ -15,6 +15,135 @@ namespace {
 
 constexpr uint32_t kThreads = 256;
 
+__device__ float FastCubeRootAndAdd(
+  float value, float add) {
+  constexpr float kOneThird = 1.0f / 3.0f;
+  constexpr float kFourThirds = 4.0f / 3.0f;
+  constexpr uint32_t kExponentBias = 0x54800000u;
+  constexpr uint32_t kExponentMultiplier = 0x002AAAAAu;
+  const uint32_t bits = __float_as_uint(value);
+  const uint32_t estimate_bits =
+    bits == 0 ? 0 : kExponentBias - (bits >> 23) * kExponentMultiplier;
+  float reciprocal = __uint_as_float(estimate_bits);
+  const float divided = __fmul_rn(kOneThird, value);
+#pragma unroll
+  for (uint32_t iteration = 0; iteration < 3; ++iteration) {
+    const float squared = __fmul_rn(reciprocal, reciprocal);
+    reciprocal = fmaf(-divided,
+      __fmul_rn(squared, squared),
+      __fmul_rn(kFourThirds, reciprocal));
+  }
+  float squared = __fmul_rn(reciprocal, reciprocal);
+  reciprocal = fmaf(kOneThird,
+    fmaf(-value, __fmul_rn(squared, squared), reciprocal),
+    reciprocal);
+  squared = __fmul_rn(reciprocal, reciprocal);
+  return fmaf(squared, value, add);
+}
+
+__global__ void LinearRgbToOpsinKernel(
+  const float* input_r,
+  const float* input_g,
+  const float* input_b,
+  float* output_x,
+  float* output_y,
+  float* output_b,
+  unsigned int* error,
+  CudaLinearRgbToOpsinParams params) {
+  const size_t index =
+    static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count =
+    static_cast<size_t>(params.padded_width) * params.padded_height;
+  if (index >= count) return;
+  const uint32_t output_y_index =
+    static_cast<uint32_t>(index / params.padded_width);
+  const uint32_t output_x_index = static_cast<uint32_t>(
+    index - static_cast<size_t>(output_y_index) * params.padded_width);
+  const uint32_t source_x = min(output_x_index, params.source_width - 1);
+  const uint32_t source_y = min(output_y_index, params.source_height - 1);
+  const size_t source_index =
+    static_cast<size_t>(source_y) * params.source_stride + source_x;
+  const float red = input_r[source_index];
+  const float green = input_g[source_index];
+  const float blue = input_b[source_index];
+  if (!isfinite(red) || !isfinite(green) || !isfinite(blue)) {
+    atomicOr(error, 1u);
+  }
+  constexpr float kBias = 0.0037930732552754493f;
+  constexpr float kMatrix[3][3] = {{0.30f, 0.622f, 0.078f},
+    {0.23f, 0.692f, 0.078f},
+    {0.24342268924547819f, 0.20476744424496821f, 0.55180986650955360f}};
+  const float scale = params.intensity_target / 255.0f;
+  const float bias_cuberoot = FastCubeRootAndAdd(kBias, 0.0f);
+  float gamma[3];
+#pragma unroll
+  for (uint32_t row = 0; row < 3; ++row) {
+    float value = fmaf(__fmul_rn(scale, kMatrix[row][2]), blue, kBias);
+    value = fmaf(__fmul_rn(scale, kMatrix[row][1]), green, value);
+    value = fmaf(__fmul_rn(scale, kMatrix[row][0]), red, value);
+    gamma[row] = FastCubeRootAndAdd(fmaxf(0.0f, value), -bias_cuberoot);
+  }
+  const float transformed_x = __fmul_rn(0.5f, __fsub_rn(gamma[0], gamma[1]));
+  const float transformed_y = __fmul_rn(0.5f, __fadd_rn(gamma[0], gamma[1]));
+  if (!isfinite(transformed_x) || !isfinite(transformed_y) ||
+      !isfinite(gamma[2])) {
+    atomicOr(error, 2u);
+  }
+  const size_t output_index =
+    static_cast<size_t>(output_y_index) * params.output_stride + output_x_index;
+  output_x[output_index] = transformed_x;
+  output_y[output_index] = transformed_y;
+  output_b[output_index] = gamma[2];
+}
+
+__global__ void OpsinMatrixScaleStatsKernel(
+  const float* opsin_x,
+  const float* opsin_y,
+  const float* opsin_b,
+  unsigned int* stats,
+  unsigned int* error,
+  CudaLinearRgbToOpsinParams params) {
+  const size_t index =
+    static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count =
+    static_cast<size_t>(params.source_width) * params.source_height;
+  if (index >= count) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.source_width);
+  const uint32_t x =
+    static_cast<uint32_t>(index - static_cast<size_t>(y) * params.source_width);
+  if (x == 0 || y == 0) return;
+  const size_t current = static_cast<size_t>(y) * params.output_stride + x;
+  const size_t left = current - 1;
+  const size_t up = current - params.output_stride;
+  const float current_x = opsin_x[current];
+  const float current_y = opsin_y[current];
+  const float current_b = opsin_b[current];
+  const float x_edge = fmaxf(fabsf(__fsub_rn(current_x, opsin_x[left])),
+    fabsf(__fsub_rn(current_x, opsin_x[up])));
+  const float current_difference = __fsub_rn(current_b, current_y);
+  const float left_difference = __fsub_rn(opsin_b[left], opsin_y[left]);
+  const float up_difference = __fsub_rn(opsin_b[up], opsin_y[up]);
+  const float b_edge =
+    fmaxf(fabsf(__fsub_rn(current_difference, left_difference)),
+      fabsf(__fsub_rn(current_difference, up_difference)));
+  float exposed_blue = __fsub_rn(current_b, __fmul_rn(1.2f, current_y));
+  if (exposed_blue >= 0.0f) {
+    const float blue_edge =
+      __fadd_rn(fabsf(__fsub_rn(current_b, opsin_b[left])),
+        fabsf(__fsub_rn(current_b, opsin_b[up])));
+    exposed_blue = __fmul_rn(exposed_blue, blue_edge);
+  } else {
+    exposed_blue = 0.0f;
+  }
+  if (!isfinite(x_edge) || !isfinite(b_edge) || !isfinite(exposed_blue)) {
+    atomicOr(error, 4u);
+    return;
+  }
+  atomicMax(stats, __float_as_uint(x_edge));
+  atomicMax(stats + 1, __float_as_uint(b_edge));
+  atomicMax(stats + 2, __float_as_uint(exposed_blue));
+}
+
 __device__ uint32_t MirrorOffset(uint32_t coordinate, int delta,
                                  uint32_t size) {
   const long long period = 2 * static_cast<long long>(size);
@@ -449,6 +578,39 @@ cudaError_t LaunchCudaAqOpsinToLinear(std::array<const float*, 3> input,
   OpsinToLinearKernel<<<blocks, kThreads, 0, stream>>>(
       input[0], input[1], input[2], output[0], output[1], output[2], error,
       params);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaLinearRgbToOpsin(
+  std::array<const float*, 3> input,
+  std::array<float*, 3> output,
+  unsigned int* matrix_scale_stats,
+  unsigned int* error,
+  CudaLinearRgbToOpsinParams params,
+  cudaStream_t stream) {
+  (void)cudaGetLastError();
+  const size_t padded_count =
+    static_cast<size_t>(params.padded_width) * params.padded_height;
+  const unsigned int padded_blocks =
+    static_cast<unsigned int>((padded_count + kThreads - 1) / kThreads);
+  LinearRgbToOpsinKernel<<<padded_blocks, kThreads, 0, stream>>>(input[0],
+    input[1],
+    input[2],
+    output[0],
+    output[1],
+    output[2],
+    error,
+    params);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess || !params.compute_matrix_scale_stats) {
+    return status;
+  }
+  const size_t source_count =
+    static_cast<size_t>(params.source_width) * params.source_height;
+  const unsigned int source_blocks =
+    static_cast<unsigned int>((source_count + kThreads - 1) / kThreads);
+  OpsinMatrixScaleStatsKernel<<<source_blocks, kThreads, 0, stream>>>(
+    output[0], output[1], output[2], matrix_scale_stats, error, params);
   return cudaGetLastError();
 }
 

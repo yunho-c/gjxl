@@ -56,6 +56,17 @@ struct CudaAqColorParams {
   float scale = 1.0f;
 };
 
+struct CudaLinearRgbToOpsinParams {
+  uint32_t source_width = 0;
+  uint32_t source_height = 0;
+  uint32_t source_stride = 0;
+  uint32_t padded_width = 0;
+  uint32_t padded_height = 0;
+  uint32_t output_stride = 0;
+  float intensity_target = 255.0f;
+  uint32_t compute_matrix_scale_stats = 0;
+};
+
 [[nodiscard]] cudaError_t LaunchCudaAqScatterReconstruction(
     const CudaAqAnchor* anchors, const float* inverse,
     std::array<float*, 3> reconstructed, uint32_t coding_stride,
@@ -75,6 +86,14 @@ struct CudaAqColorParams {
 [[nodiscard]] cudaError_t LaunchCudaAqOpsinToLinear(
     std::array<const float*, 3> input, std::array<float*, 3> output,
     unsigned int* error, CudaAqColorParams params, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaLinearRgbToOpsin(
+  std::array<const float*, 3> input,
+  std::array<float*, 3> output,
+  unsigned int* matrix_scale_stats,
+  unsigned int* error,
+  CudaLinearRgbToOpsinParams params,
+  cudaStream_t stream);
 
 [[nodiscard]] cudaError_t LaunchCudaAqReduceButteraugli(
     const float* distance_map, uint32_t distance_stride,
