@@ -23,6 +23,7 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/metal/metal_backend.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
@@ -141,6 +142,7 @@ struct AcStrategyPipelines {
     NS::SharedPtr<MTL::ComputePipelineState> forward;
     NS::SharedPtr<MTL::ComputePipelineState> residual_inverse;
     NS::UInteger forward_threads_per_threadgroup = 0;
+    NS::UInteger residual_inverse_threads_per_threadgroup = 0;
   };
 
   NS::SharedPtr<MTL::ComputePipelineState> gather;
@@ -623,6 +625,7 @@ Status CreateAcStrategyPipelines(
   MTL::Library* library,
   const std::array<bool, kAcStrategyCount>& fused_forward_enabled,
   const std::array<bool, kAcStrategyCount>& fused_inverse_enabled,
+  MetalAcResidualInverseMode residual_inverse_mode,
   AcStrategyPipelines* out);
 
 Status CreatePrimitivePipelines(

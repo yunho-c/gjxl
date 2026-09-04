@@ -91,51 +91,79 @@ struct FusedStageSpec {
   AcStrategyType strategy;
   std::string_view forward_function_name;
   std::string_view residual_inverse_function_name;
+  std::string_view compact_residual_inverse_function_name;
+  std::string_view tuned_residual_inverse_function_name;
   size_t simdgroups_per_threadgroup;
+  size_t tuned_simdgroups_per_threadgroup;
 };
 
+// Compact launches only the SIMD groups that own inverse-DCT row tiles. The
+// tuned widths leave additional groups available for residual reduction and
+// basis staging where profiling shows that work outweighs the idle inverse
+// lanes.
 constexpr std::array kFusedStageSpecs = {
   FusedStageSpec{
     AcStrategyType::kDct8,
     "gjxl_ac_strategy_dct8_forward_fused",
     "gjxl_ac_strategy_dct8_residual_inverse_fused",
+    "gjxl_ac_strategy_dct8_residual_inverse_compact",
+    "gjxl_ac_strategy_dct8_residual_inverse_compact",
+    1,
     1,
   },
   FusedStageSpec{
     AcStrategyType::kDct16x16,
     "gjxl_ac_strategy_dct16_forward_fused",
     "gjxl_ac_strategy_dct16_residual_inverse_fused",
+    "gjxl_ac_strategy_dct16_residual_inverse_compact",
+    "gjxl_ac_strategy_dct16_residual_inverse_compact",
+    2,
     2,
   },
   FusedStageSpec{
     AcStrategyType::kDct32x32,
     "gjxl_ac_strategy_dct32_forward_fused",
     "gjxl_ac_strategy_dct32_residual_inverse_fused",
+    "gjxl_ac_strategy_dct32_residual_inverse_compact",
+    "gjxl_ac_strategy_dct32_residual_inverse_tuned",
     4,
+    16,
   },
   FusedStageSpec{
     AcStrategyType::kDct16x8,
     "gjxl_ac_strategy_dct16x8_forward_fused",
     "gjxl_ac_strategy_dct16x8_residual_inverse_fused",
+    "gjxl_ac_strategy_dct16x8_residual_inverse_compact",
+    "gjxl_ac_strategy_dct16x8_residual_inverse_compact",
+    2,
     2,
   },
   FusedStageSpec{
     AcStrategyType::kDct8x16,
     "gjxl_ac_strategy_dct8x16_forward_fused",
     "gjxl_ac_strategy_dct8x16_residual_inverse_fused",
+    "gjxl_ac_strategy_dct8x16_residual_inverse_compact",
+    "gjxl_ac_strategy_dct8x16_residual_inverse_compact",
+    1,
     1,
   },
   FusedStageSpec{
     AcStrategyType::kDct32x16,
     "gjxl_ac_strategy_dct32x16_forward_fused",
     "gjxl_ac_strategy_dct32x16_residual_inverse_fused",
+    "gjxl_ac_strategy_dct32x16_residual_inverse_compact",
+    "gjxl_ac_strategy_dct32x16_residual_inverse_compact",
+    4,
     4,
   },
   FusedStageSpec{
     AcStrategyType::kDct16x32,
     "gjxl_ac_strategy_dct16x32_forward_fused",
     "gjxl_ac_strategy_dct16x32_residual_inverse_fused",
+    "gjxl_ac_strategy_dct16x32_residual_inverse_compact",
+    "gjxl_ac_strategy_dct16x32_residual_inverse_tuned",
     2,
+    8,
   },
 };
 
@@ -150,6 +178,7 @@ Status CreateAcStrategyPipelines(
   MTL::Library* library,
   const std::array<bool, kAcStrategyCount>& fused_forward_enabled,
   const std::array<bool, kAcStrategyCount>& fused_inverse_enabled,
+  MetalAcResidualInverseMode residual_inverse_mode,
   AcStrategyPipelines* out) {
 
   if (device == nullptr || library == nullptr || out == nullptr) {
@@ -198,13 +227,59 @@ Status CreateAcStrategyPipelines(
           "Metal cannot launch the fused AC-strategy forward kernel");
       }
     }
-    if (fused_inverse_enabled[strategy_index]) {
+    if (fused_inverse_enabled[strategy_index] &&
+        residual_inverse_mode != MetalAcResidualInverseMode::kSplit) {
+      std::string_view function_name = spec.residual_inverse_function_name;
+      size_t residual_inverse_simdgroups =
+        spec.simdgroups_per_threadgroup;
+      if (residual_inverse_mode ==
+          MetalAcResidualInverseMode::kFusedCompact) {
+        function_name = spec.compact_residual_inverse_function_name;
+      } else if (residual_inverse_mode ==
+                 MetalAcResidualInverseMode::kFusedTuned) {
+        function_name = spec.tuned_residual_inverse_function_name;
+        residual_inverse_simdgroups =
+          spec.tuned_simdgroups_per_threadgroup;
+      }
       status = CreatePipeline(
         device,
         library,
-        spec.residual_inverse_function_name,
+        function_name,
         &fused.residual_inverse);
       if (!status.ok()) return status;
+      const AcStrategyInfo* info = GetAcStrategyInfo(spec.strategy);
+      if (info == nullptr) {
+        return Status::Internal(
+          "Fused AC-strategy residual/inverse has no strategy metadata");
+      }
+      const NS::UInteger simd_width =
+        fused.residual_inverse->threadExecutionWidth();
+      constexpr NS::UInteger kCompactKernelSimdWidth = 32;
+      if ((residual_inverse_mode ==
+             MetalAcResidualInverseMode::kFusedCompact ||
+           residual_inverse_mode ==
+             MetalAcResidualInverseMode::kFusedTuned) &&
+          simd_width != kCompactKernelSimdWidth) {
+        return Status::Unavailable(
+          "Tuned fused AC-strategy kernels require 32-wide SIMD groups");
+      }
+      if (simd_width == 0 ||
+          residual_inverse_simdgroups >
+            std::numeric_limits<NS::UInteger>::max() / simd_width) {
+        return Status::Unavailable(
+          "Metal reported invalid fused AC-strategy inverse dispatch data");
+      }
+      fused.residual_inverse_threads_per_threadgroup =
+        residual_inverse_mode != MetalAcResidualInverseMode::kFusedWide
+          ? simd_width * static_cast<NS::UInteger>(
+              residual_inverse_simdgroups)
+          : static_cast<NS::UInteger>(info->coefficient_count());
+      if (fused.residual_inverse_threads_per_threadgroup == 0 ||
+          fused.residual_inverse->maxTotalThreadsPerThreadgroup() <
+            fused.residual_inverse_threads_per_threadgroup) {
+        return Status::Unavailable(
+          "Metal cannot launch the fused AC-strategy inverse kernel");
+      }
     }
   }
 
@@ -576,7 +651,10 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
     fused.residual_inverse
       ? fused.residual_inverse.get()
       : ac_strategy_pipelines_.residual.get();
-  if (residual_pipeline->maxTotalThreadsPerThreadgroup() < coefficient_count ||
+  const size_t residual_threads = fused.residual_inverse
+    ? static_cast<size_t>(fused.residual_inverse_threads_per_threadgroup)
+    : coefficient_count;
+  if (residual_pipeline->maxTotalThreadsPerThreadgroup() < residual_threads ||
       ac_strategy_pipelines_.cost->maxTotalThreadsPerThreadgroup() <
         coefficient_count) {
     return Status::Unavailable(
@@ -718,7 +796,7 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
       encoder,
       MTL::Size(
         static_cast<NS::UInteger>(validated.transform_count), 1, 1),
-      MTL::Size(validated.params.coefficient_count, 1, 1));
+      MTL::Size(fused.residual_inverse_threads_per_threadgroup, 1, 1));
     residual_pixels = validated.scratch_a;
   } else {
     encoder->setComputePipelineState(ac_strategy_pipelines_.residual.get());

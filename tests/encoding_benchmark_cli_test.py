@@ -123,11 +123,12 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("codestream=not-compared", result.stdout)
         self.assertNotIn("cpu_bytes=", result.stdout)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 16)
+        self.assertEqual(document["schema_version"], 17)
         self.assertEqual(
             document["substage_work_timing"], "aggregate-worker-time"
         )
         self.assertEqual(document["validation"], "metal-only")
+        self.assertEqual(document["ac_residual_inverse"], "fused-wide")
         self.assertEqual(document["density"], "default")
         self.assertEqual(document["compression"], "automatic")
         self.assertEqual(document["effort"], 7)
@@ -253,7 +254,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 16)
+        self.assertEqual(document["schema_version"], 17)
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
 
@@ -270,7 +271,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 16)
+        self.assertEqual(document["schema_version"], 17)
         self.assertEqual(document["effort"], 9)
         self.assertIn("effort=9", result.stdout)
         self.assertEqual(
@@ -290,7 +291,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 16)
+        self.assertEqual(document["schema_version"], 17)
         self.assertEqual(document["compression"], "maximum")
         self.assertIn("compression=maximum", result.stdout)
         self.assertEqual(
@@ -311,7 +312,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 16)
+        self.assertEqual(document["schema_version"], 17)
         self.assertEqual(document["cpu_threads"], 2)
         self.assertIn("cpu_threads=2", result.stdout)
         for sample in document["workloads"][0]["samples"]:
@@ -367,7 +368,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
-        self.assertEqual(document["schema_version"], 3)
+        self.assertEqual(document["schema_version"], 4)
         self.assertEqual(document["mode"], "stage")
         self.assertFalse(document["collect_final_score"])
         sample = document["workloads"][0]["samples"][0]
@@ -501,6 +502,69 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 1,
             )
             self.assertIn("gjxl_ac_strategy_cost", kernel_ids)
+
+    def test_ac_residual_inverse_experiment_selects_expected_kernels(
+        self,
+    ) -> None:
+        expected = {
+            "fused-compact": 3,
+            "fused-tuned": 3,
+            "split": 4,
+        }
+        for mode, dispatch_count in expected.items():
+            with self.subTest(mode=mode):
+                destination = self.directory / f"gpu-stages-{mode}.json"
+                result = self.run_benchmark(
+                    "--validation",
+                    "metal-only",
+                    "--metallib",
+                    str(self.metallib),
+                    "--ac-residual-inverse",
+                    mode,
+                    "--gpu-profile",
+                    "stage",
+                    "--gpu-profile-output",
+                    str(destination),
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                document = json.loads(
+                    destination.read_text(encoding="utf-8")
+                )
+                self.assertEqual(document["ac_residual_inverse"], mode)
+                sample = document["workloads"][0]["samples"][0]
+                submission = next(
+                    item
+                    for item in sample["submissions"]
+                    if item["submission_id"] == "frontend.ac_strategy"
+                )
+                for stage in submission["stages"]:
+                    inverse_suffix = "_inverse_simdgroup_2d_matmul"
+                    if mode == "fused-compact":
+                        inverse_suffix = "_residual_inverse_compact"
+                    elif mode == "fused-tuned":
+                        if stage["stage_id"] == "frontend.ac_strategy.dct32":
+                            inverse_suffix = "_residual_inverse_tuned"
+                        elif stage["stage_id"] == (
+                            "frontend.ac_strategy.dct16x32"
+                        ):
+                            inverse_suffix = "_residual_inverse_tuned"
+                        else:
+                            inverse_suffix = "_residual_inverse_compact"
+                    kernel_ids = {
+                        dispatch["kernel_id"]
+                        for dispatch in stage["dispatches"]
+                    }
+                    self.assertEqual(len(stage["dispatches"]), dispatch_count)
+                    self.assertEqual(
+                        sum(name.endswith(inverse_suffix) for name in kernel_ids),
+                        1,
+                    )
+                    if mode == "split":
+                        self.assertIn("gjxl_ac_strategy_residual", kernel_ids)
+                    else:
+                        self.assertNotIn(
+                            "gjxl_ac_strategy_residual", kernel_ids
+                        )
 
     def test_unsupported_dispatch_profile_preserves_existing_output(self) -> None:
         capability_output = self.directory / "capabilities.json"

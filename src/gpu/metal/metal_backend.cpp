@@ -1377,6 +1377,7 @@ Status CreateMetalBackendImpl(
     library.get(),
     fused_ac_forward_enabled,
     fused_ac_inverse_enabled,
+    options.ac_residual_inverse,
     &ac_strategy_pipelines);
   if (!status.ok()) {
     return {

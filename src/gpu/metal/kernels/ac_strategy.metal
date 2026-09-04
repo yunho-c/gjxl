@@ -636,6 +636,70 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidual(
   }
 }
 
+template <uint CoefficientCount, uint WorkerCount, typename ResidualPointer>
+__attribute__((always_inline)) inline void ComputeAcStrategyResidualCompact(
+  device const float* coefficients,
+  device const float* matrices,
+  device const AcStrategyCandidate* candidates,
+  device const float* quant_field,
+  device const float* precomputed_quant_norm,
+  ResidualPointer residual_coefficients,
+  device ChannelRate* channel_rates,
+  constant AcStrategyBatchParams& params,
+  threadgroup float* magnitude_reduction,
+  threadgroup uint* nonzero_reduction,
+  uint residual_base,
+  uint tid,
+  uint3 group_position) {
+
+  const uint transform_index = group_position.x;
+  const uint candidate_index = transform_index / 3;
+  const uint channel = transform_index % 3;
+  const uint base = transform_index * params.coefficient_count;
+  const uint y_base =
+    (candidate_index * 3 + 1) * params.coefficient_count;
+  const uint matrix_base = channel * params.coefficient_count;
+  const uint inverse_matrix_base =
+    (3 + channel) * params.coefficient_count;
+  const AcStrategyCandidate candidate = candidates[candidate_index];
+  const float quant_norm = AcStrategyQuantNorm(
+    quant_field, precomputed_quant_norm, candidate, candidate_index, params);
+  const float cfl_factor =
+    channel == 0 ? candidate.cfl_x :
+    channel == 2 ? candidate.cfl_b : 0.0f;
+
+  for (uint coefficient = tid;
+       coefficient < CoefficientCount;
+       coefficient += WorkerCount) {
+    const float decorrelated = coefficients[base + coefficient] -
+      coefficients[y_base + coefficient] * cfl_factor;
+    const float scaled = decorrelated *
+      matrices[inverse_matrix_base + coefficient] * quant_norm;
+    const float rounded = RoundAwayFromZero(scaled);
+    residual_coefficients[residual_base + coefficient] =
+      matrices[matrix_base + coefficient] * (scaled - rounded);
+
+    magnitude_reduction[coefficient] = sqrt(abs(rounded));
+    nonzero_reduction[coefficient] = rounded != 0.0f ? 1u : 0u;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint stride = CoefficientCount / 2; stride != 0; stride /= 2) {
+    for (uint index = tid; index < stride; index += WorkerCount) {
+      magnitude_reduction[index] += magnitude_reduction[index + stride];
+      nonzero_reduction[index] += nonzero_reduction[index + stride];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (tid == 0) {
+    channel_rates[transform_index] = {
+      magnitude_reduction[0],
+      nonzero_reduction[0],
+    };
+  }
+}
+
 kernel void gjxl_ac_strategy_residual(
   device const float* coefficients [[buffer(0)]],
   device const float* matrices [[buffer(1)]],
@@ -669,7 +733,7 @@ kernel void gjxl_ac_strategy_residual(
 // The fused inverse consumes the residual coefficients before they leave
 // threadgroup memory. All coefficient threads participate in basis staging;
 // only the row-owning SIMD groups execute the matrix tiles afterward.
-template <uint N>
+template <uint N, uint ThreadgroupWidth>
 __attribute__((always_inline)) inline void AcStrategyInverseSquareDct(
   threadgroup const float* coefficients,
   device float* pixels,
@@ -682,7 +746,7 @@ __attribute__((always_inline)) inline void AcStrategyInverseSquareDct(
 
   constexpr uint kTileSize = 8;
   constexpr uint kTilesPerDimension = N / kTileSize;
-  for (uint index = tid; index < N * N; index += N * N) {
+  for (uint index = tid; index < N * N; index += ThreadgroupWidth) {
     shared_basis[index] = basis[index];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -751,7 +815,7 @@ __attribute__((always_inline)) inline void AcStrategyInverseSquareDct(
   }
 }
 
-template <uint Rows, uint Columns>
+template <uint Rows, uint Columns, uint ThreadgroupWidth>
 __attribute__((always_inline)) inline void AcStrategyInverseRectangularDct(
   threadgroup const float* coefficients,
   device float* pixels,
@@ -767,15 +831,14 @@ __attribute__((always_inline)) inline void AcStrategyInverseRectangularDct(
   constexpr uint kTileSize = 8;
   constexpr uint kRowTiles = Rows / kTileSize;
   constexpr uint kColumnTiles = Columns / kTileSize;
-  constexpr uint kCoefficientCount = Rows * Columns;
   for (uint index = tid;
        index < Rows * Rows;
-       index += kCoefficientCount) {
+       index += ThreadgroupWidth) {
     shared_vertical_basis[index] = vertical_basis[index];
   }
   for (uint index = tid;
        index < Columns * Columns;
-       index += kCoefficientCount) {
+       index += ThreadgroupWidth) {
     shared_horizontal_basis[index] = horizontal_basis[index];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -878,7 +941,7 @@ kernel void name(                                                           \
     precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
     magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
   threadgroup float shared_basis[size * size];                              \
-  AcStrategyInverseSquareDct<size>(                                         \
+  AcStrategyInverseSquareDct<size, size * size>(                            \
     residual_coefficients, pixels, basis, scale, shared_basis, tid,         \
     simdgroup_index, group_position);                                       \
 }
@@ -906,7 +969,64 @@ kernel void name(                                                           \
     magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
   threadgroup float shared_vertical_basis[rows * rows];                     \
   threadgroup float shared_horizontal_basis[columns * columns];             \
-  AcStrategyInverseRectangularDct<rows, columns>(                           \
+  AcStrategyInverseRectangularDct<rows, columns, rows * columns>(           \
+    residual_coefficients, pixels, vertical_basis, horizontal_basis, scale, \
+    shared_vertical_basis, shared_horizontal_basis, tid, simdgroup_index,   \
+    group_position);                                                        \
+}
+
+#define GJXL_AC_SQUARE_COMPACT_RESIDUAL_INVERSE_KERNEL(                    \
+  name, size, basis, scale, worker_count)                                  \
+kernel void name(                                                           \
+  device const float* coefficients [[buffer(0)]],                           \
+  device const float* matrices [[buffer(1)]],                               \
+  device const AcStrategyCandidate* candidates [[buffer(2)]],               \
+  device const float* quant_field [[buffer(3)]],                            \
+  device float* pixels [[buffer(4)]],                                       \
+  device ChannelRate* channel_rates [[buffer(5)]],                          \
+  constant AcStrategyBatchParams& params [[buffer(6)]],                     \
+  device const float* precomputed_quant_norm [[buffer(7)]],                 \
+  threadgroup float* residual_coefficients [[threadgroup(0)]],              \
+  threadgroup float* magnitude_reduction [[threadgroup(1)]],                \
+  threadgroup uint* nonzero_reduction [[threadgroup(2)]],                   \
+  uint tid [[thread_index_in_threadgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
+  uint3 group_position [[threadgroup_position_in_grid]]) {                   \
+  ComputeAcStrategyResidualCompact<size * size, worker_count>(              \
+    coefficients, matrices, candidates, quant_field,                       \
+    precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
+    magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
+  threadgroup float shared_basis[size * size];                              \
+  AcStrategyInverseSquareDct<size, worker_count>(                           \
+    residual_coefficients, pixels, basis, scale, shared_basis, tid,         \
+    simdgroup_index, group_position);                                       \
+}
+
+#define GJXL_AC_RECTANGULAR_COMPACT_RESIDUAL_INVERSE_KERNEL(                \
+  name, rows, columns, vertical_basis, horizontal_basis, scale,             \
+  worker_count)                                                             \
+kernel void name(                                                           \
+  device const float* coefficients [[buffer(0)]],                           \
+  device const float* matrices [[buffer(1)]],                               \
+  device const AcStrategyCandidate* candidates [[buffer(2)]],               \
+  device const float* quant_field [[buffer(3)]],                            \
+  device float* pixels [[buffer(4)]],                                       \
+  device ChannelRate* channel_rates [[buffer(5)]],                          \
+  constant AcStrategyBatchParams& params [[buffer(6)]],                     \
+  device const float* precomputed_quant_norm [[buffer(7)]],                 \
+  threadgroup float* residual_coefficients [[threadgroup(0)]],              \
+  threadgroup float* magnitude_reduction [[threadgroup(1)]],                \
+  threadgroup uint* nonzero_reduction [[threadgroup(2)]],                   \
+  uint tid [[thread_index_in_threadgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
+  uint3 group_position [[threadgroup_position_in_grid]]) {                   \
+  ComputeAcStrategyResidualCompact<rows * columns, worker_count>(           \
+    coefficients, matrices, candidates, quant_field,                       \
+    precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
+    magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
+  threadgroup float shared_vertical_basis[rows * rows];                     \
+  threadgroup float shared_horizontal_basis[columns * columns];             \
+  AcStrategyInverseRectangularDct<rows, columns, worker_count>(             \
     residual_coefficients, pixels, vertical_basis, horizontal_basis, scale, \
     shared_vertical_basis, shared_horizontal_basis, tid, simdgroup_index,   \
     group_position);                                                        \
@@ -956,8 +1076,74 @@ GJXL_AC_RECTANGULAR_RESIDUAL_INVERSE_KERNEL(
   kOrthonormalDct32,
   kInverseDct32x16Scale)
 
+GJXL_AC_SQUARE_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct8_residual_inverse_compact,
+  8,
+  kOrthonormalDct8,
+  kInverseDct8Scale,
+  32)
+GJXL_AC_SQUARE_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct16_residual_inverse_compact,
+  16,
+  kOrthonormalDct16,
+  kInverseDct16Scale,
+  64)
+GJXL_AC_SQUARE_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct32_residual_inverse_compact,
+  32,
+  kOrthonormalDct32,
+  kInverseDct32Scale,
+  128)
+GJXL_AC_SQUARE_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct32_residual_inverse_tuned,
+  32,
+  kOrthonormalDct32,
+  kInverseDct32Scale,
+  512)
+GJXL_AC_RECTANGULAR_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct16x8_residual_inverse_compact,
+  16,
+  8,
+  kOrthonormalDct16,
+  kOrthonormalDct8,
+  kInverseDct16x8Scale,
+  64)
+GJXL_AC_RECTANGULAR_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct8x16_residual_inverse_compact,
+  8,
+  16,
+  kOrthonormalDct8,
+  kOrthonormalDct16,
+  kInverseDct16x8Scale,
+  32)
+GJXL_AC_RECTANGULAR_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct32x16_residual_inverse_compact,
+  32,
+  16,
+  kOrthonormalDct32,
+  kOrthonormalDct16,
+  kInverseDct32x16Scale,
+  128)
+GJXL_AC_RECTANGULAR_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct16x32_residual_inverse_compact,
+  16,
+  32,
+  kOrthonormalDct16,
+  kOrthonormalDct32,
+  kInverseDct32x16Scale,
+  64)
+GJXL_AC_RECTANGULAR_COMPACT_RESIDUAL_INVERSE_KERNEL(
+  gjxl_ac_strategy_dct16x32_residual_inverse_tuned,
+  16,
+  32,
+  kOrthonormalDct16,
+  kOrthonormalDct32,
+  kInverseDct32x16Scale,
+  256)
 #undef GJXL_AC_SQUARE_RESIDUAL_INVERSE_KERNEL
 #undef GJXL_AC_RECTANGULAR_RESIDUAL_INVERSE_KERNEL
+#undef GJXL_AC_SQUARE_COMPACT_RESIDUAL_INVERSE_KERNEL
+#undef GJXL_AC_RECTANGULAR_COMPACT_RESIDUAL_INVERSE_KERNEL
 
 kernel void gjxl_ac_strategy_cost(
   device const float* residual_pixels [[buffer(0)]],

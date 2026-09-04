@@ -129,6 +129,7 @@ struct CommandLineOptions {
   std::string raw_samples_path;
   std::string gpu_profile_path;
   std::string implementation = "simd";
+  std::string ac_residual_inverse = "fused-wide";
   BenchmarkScope scope = BenchmarkScope::kFull;
   ValidationMode validation = ValidationMode::kCpuMetal;
   gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
@@ -562,6 +563,8 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--scope full|public-workflow|metal-public-workflow|"
                    "coefficient-coding] "
                    "[--implementation scalar|simd|factored] "
+                   "[--ac-residual-inverse "
+                   "fused-wide|fused-compact|fused-tuned|split] "
                    "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                    "maximum-throughput] "
                    "[--density default|high] "
@@ -611,6 +614,13 @@ ParseGpuProfilingMode(std::string_view text) {
             "Unknown Metal DCT implementation: " + std::string(value));
       }
       options.implementation = value;
+    } else if (argument == "--ac-residual-inverse") {
+      if (value != "fused-wide" && value != "fused-compact" &&
+          value != "fused-tuned" && value != "split") {
+        throw std::runtime_error(
+          "Unknown AC residual/inverse mode: " + std::string(value));
+      }
+      options.ac_residual_inverse = value;
     } else if (argument == "--gpu-aq") {
       options.gpu_aq_mode = ParseGpuAqMode(value);
     } else if (argument == "--density") {
@@ -712,13 +722,23 @@ ParseGpuProfilingMode(std::string_view text) {
 }
 
 [[nodiscard]] gjxl::MetalBackendOptions BackendOptions(
-    std::string_view name) {
+    std::string_view name,
+    std::string_view ac_residual_inverse) {
   using Implementation = gjxl::MetalDctImplementation;
+  using AcMode = gjxl::MetalAcResidualInverseMode;
   Implementation implementation = Implementation::kSimdgroupMatmul;
   if (name == "scalar") {
     implementation = Implementation::kScalarMatmul;
   } else if (name == "factored") {
     implementation = Implementation::kFactoredRadix2;
+  }
+  AcMode ac_mode = AcMode::kFusedWide;
+  if (ac_residual_inverse == "fused-compact") {
+    ac_mode = AcMode::kFusedCompact;
+  } else if (ac_residual_inverse == "fused-tuned") {
+    ac_mode = AcMode::kFusedTuned;
+  } else if (ac_residual_inverse == "split") {
+    ac_mode = AcMode::kSplit;
   }
   return {
       .forward_dct8 = implementation,
@@ -735,6 +755,7 @@ ParseGpuProfilingMode(std::string_view text) {
       .inverse_dct32x16 = implementation,
       .forward_dct16x32 = implementation,
       .inverse_dct16x32 = implementation,
+      .ac_residual_inverse = ac_mode,
   };
 }
 
@@ -1143,7 +1164,7 @@ void WriteRawWorkflowSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 16,\n"
+           << "  \"schema_version\": 17,\n"
            << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
            << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
            << "\",\n"
@@ -1151,6 +1172,8 @@ void WriteRawWorkflowSamples(
            << ValidationModeName(options.validation) << "\",\n"
            << "  \"implementation\": \""
            << JsonEscape(options.implementation) << "\",\n"
+           << "  \"ac_residual_inverse\": \""
+           << JsonEscape(options.ac_residual_inverse) << "\",\n"
            << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
            << "\",\n"
            << "  \"collect_final_score\": "
@@ -1345,12 +1368,14 @@ void WriteGpuProfileSamples(
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": 3,\n"
+           << "  \"schema_version\": 4,\n"
            << "  \"scope\": \"metal-public-workflow\",\n"
            << "  \"mode\": \""
            << GpuProfilingModeName(options.gpu_profiling_mode) << "\",\n"
            << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
            << "\",\n"
+           << "  \"ac_residual_inverse\": \""
+           << JsonEscape(options.ac_residual_inverse) << "\",\n"
            << "  \"collect_final_score\": "
            << (options.collect_final_butteraugli_score ? "true" : "false")
            << ",\n"
@@ -2923,7 +2948,7 @@ int main(int argc, char** argv) {
                                options.workload);
     }
     const gjxl::MetalBackendOptions backend_options =
-        BackendOptions(options.implementation);
+        BackendOptions(options.implementation, options.ac_residual_inverse);
     std::unique_ptr<gjxl::GpuBackend> gpu;
     if (options.scope != BenchmarkScope::kCoefficientCoding) {
       if (options.metallib_path.empty()) {
@@ -2939,6 +2964,7 @@ int main(int argc, char** argv) {
               << "CPU/Metal encoding benchmark: backend="
               << (gpu == nullptr ? "cpu-only" : gpu->name())
               << " implementation=" << options.implementation
+              << " ac_residual_inverse=" << options.ac_residual_inverse
               << " scope=" << BenchmarkScopeName(options.scope)
               << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
               << " final_score="

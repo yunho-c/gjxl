@@ -506,7 +506,9 @@ bool RunStrategyCase(
 }
 
 gjxl::MetalBackendOptions OptionsFor(
-  gjxl::MetalDctImplementation implementation) {
+  gjxl::MetalDctImplementation implementation,
+  gjxl::MetalAcResidualInverseMode ac_residual_inverse =
+    gjxl::MetalAcResidualInverseMode::kFusedWide) {
 
   return {
     .forward_dct8 = implementation,
@@ -523,19 +525,22 @@ gjxl::MetalBackendOptions OptionsFor(
     .inverse_dct32x16 = implementation,
     .forward_dct16x32 = implementation,
     .inverse_dct16x32 = implementation,
+    .ac_residual_inverse = ac_residual_inverse,
   };
 }
 
 bool CheckImplementation(
   gjxl::MetalDctImplementation implementation,
   std::string_view name,
-  const Fixture& fixture) {
+  const Fixture& fixture,
+  gjxl::MetalAcResidualInverseMode ac_residual_inverse =
+    gjxl::MetalAcResidualInverseMode::kFusedWide) {
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!CheckStatus(
         gjxl::CreateMetalBackend(
           GJXL_METALLIB_PATH,
-          OptionsFor(implementation),
+          OptionsFor(implementation, ac_residual_inverse),
           &gpu),
         std::string("Create ") + std::string(name) + " backend")) {
     return false;
@@ -601,6 +606,21 @@ int main() {
         gjxl::MetalDctImplementation::kSimdgroupMatmul,
         "simdgroup matmul",
         fixture) ||
+      !CheckImplementation(
+        gjxl::MetalDctImplementation::kSimdgroupMatmul,
+        "simdgroup matmul compact AC residual/inverse",
+        fixture,
+        gjxl::MetalAcResidualInverseMode::kFusedCompact) ||
+      !CheckImplementation(
+        gjxl::MetalDctImplementation::kSimdgroupMatmul,
+        "simdgroup matmul tuned AC residual/inverse",
+        fixture,
+        gjxl::MetalAcResidualInverseMode::kFusedTuned) ||
+      !CheckImplementation(
+        gjxl::MetalDctImplementation::kSimdgroupMatmul,
+        "simdgroup matmul split AC residual/inverse",
+        fixture,
+        gjxl::MetalAcResidualInverseMode::kSplit) ||
       !CheckImplementation(
         gjxl::MetalDctImplementation::kFactoredRadix2,
         "factored radix-2",
