@@ -779,6 +779,72 @@ The retained experiment artifacts are:
 - `/private/tmp/gjxl-metal-fusion-high2-wall-pairs.I4yAbI` (public-workflow
   pairs).
 
+#### Phase 2.5 result: paired 7-tap/ultra kernels (2026-09-04)
+
+The final channel-fusion experiment repeated the independent-axis design for
+the 7-tap ultra-frequency passes. The transpose prototype shared the clipped
+interval, weights, and normalization while retaining scalar X/Y accumulators.
+The vertical prototype shared only that convolution setup; it preserved X's
+two `remove_range` operations and Y's clamp, scale, and `amplify_range`
+operations in their established order. As in Phase 2.4, two existing psycho
+work planes held the simultaneous intermediates without increasing arena
+capacity or removing the full-image FP32 materialization boundary.
+
+Control, transpose-only, vertical-only, and combined builds passed strict Metal
+compilation and the complete focused Metal Butteraugli test. All four again
+reported maximum CPU-reference errors of `0.000549316` for the distance map and
+score and `0.000396729` for captured stages.
+
+Seven rotated padded-4K stage-profile rounds produced mixed results rather than
+a stage-wide improvement:
+
+| Variant and scope | Control median | Variant median | Change | Variant wins |
+| --- | ---: | ---: | ---: | ---: |
+| transpose: reference | `21.770 ms` | `21.101 ms` | `-3.07%` | 6/7 |
+| transpose: resident AQ | `116.914 ms` | `117.140 ms` | `+0.19%` | 3/7 |
+| transpose: main psycho | `30.708 ms` | `30.736 ms` | `+0.09%` | 4/7 |
+| transpose: subscale psycho | `8.479 ms` | `8.323 ms` | `-1.85%` | 4/7 |
+| vertical: reference | `21.770 ms` | `21.433 ms` | `-1.54%` | 5/7 |
+| vertical: resident AQ | `116.914 ms` | `116.446 ms` | `-0.40%` | 5/7 |
+| vertical: main psycho | `30.708 ms` | `30.576 ms` | `-0.43%` | 5/7 |
+| vertical: subscale psycho | `8.479 ms` | `8.629 ms` | `+1.77%` | 2/7 |
+| combined: reference | `21.770 ms` | `21.209 ms` | `-2.58%` | 5/7 |
+| combined: resident AQ | `116.914 ms` | `117.669 ms` | `+0.65%` | 3/7 |
+| combined: main psycho | `30.708 ms` | `30.892 ms` | `+0.60%` | 3/7 |
+| combined: subscale psycho | `8.479 ms` | `8.592 ms` | `+1.33%` | 2/7 |
+
+Each individual half reduced reference dispatches from `40` to `38` and
+resident dispatches from `308` to `304`; the combined form reached `36` and
+`300`. The combined form nevertheless regressed the broader resident and
+psycho scopes, showing again that the saved grids are not free throughput when
+independent channel work is serialized within one thread.
+
+Complete public-workflow measurements did not establish an individual winner:
+
+| Workload | Control median | Transpose median | Transpose wins | Vertical median | Vertical wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| padded 1080p | `89.510 ms` | `89.836 ms` (`+0.36%`) | 4/7 | `89.582 ms` (`+0.08%`) | 3/7 |
+| padded 4K | `311.243 ms` | `310.495 ms` (`-0.24%`) | 5/7 | `313.412 ms` (`+0.70%`) | 3/7 |
+
+All variants emitted the same `410072`-byte 1080p and `1606911`-byte 4K
+codestream sizes. The small, contradictory changes are below a credible
+promotion threshold, and neither variant improves both resolutions. Both
+7-tap fusions are rejected; their shaders, pipeline states, scratch scheduling,
+and private selectors have been removed. Counter and full-corpus qualification
+were intentionally skipped after the stage and public-workflow gates failed.
+
+This completes Phase 2. Of its five channel-fusion candidates, only the
+three-channel 33-tap transpose is retained. The result supports a narrower
+principle than "fewer launches": channel fusion pays when it removes enough
+duplicated normalization work to offset the loss of independently schedulable
+channel threads.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-ultra2-stage.EiuKYZ` (four-way stage matrix);
+  and
+- `/private/tmp/gjxl-metal-fusion-ultra2-wall.dNo3zb` (public-workflow pairs).
+
 ### Phase 3: tile-local convolution
 
 Prototype the 5-tap blur-plus-Opsin kernel first. Continue through 7, 13, and 15
