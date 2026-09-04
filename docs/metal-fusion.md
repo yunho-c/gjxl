@@ -932,6 +932,69 @@ The retained experiment artifacts are:
 - `/private/tmp/gjxl-metal-fusion-opsin5-codestream.SufU1X` (exact-output
   comparisons).
 
+#### Phase 3.2 result: tiled 7-tap ultra filtering (2026-09-04)
+
+The radius-3 prototype fused each channel's transposed horizontal pass,
+vertical pass, and ultra-frequency nonlinear update into one tiled dispatch.
+Because the existing path updates its high-frequency input in place, the
+prototype first redirected the pre-ultra X/Y planes into two free image work
+planes and emitted final high and ultra planes disjointly. This avoided the
+cross-threadgroup halo race found during Phase 3.1 without adding a copy,
+allocation, or scratch plane.
+
+The candidate removed two dispatches per psycho image. Reference preparation
+fell from `34` to `30` dispatches and resident AQ from `296` to `288`, removing
+about `62.2 million` launched threads at padded 4K. It also eliminated one
+horizontal intermediate write and seven nominal vertical intermediate reads
+per channel, about `1.853 GiB` of shader-request traffic across both channels
+and all six psycho images. That traffic estimate excludes cache effects and is
+not measured DRAM traffic.
+
+Four tile shapes compiled with strict Metal settings. Their threadgroup memory
+and full-tile raw halo amplification were:
+
+| Tile | Threadgroup memory | Raw halo amplification |
+| --- | ---: | ---: |
+| `8 x 8` | `1,232 B` | `3.0625x` |
+| `16 x 8` | `2,128 B` | `2.40625x` |
+| `16 x 16` | `3,344 B` | `1.890625x` |
+| `32 x 8` | `3,920 B` | `2.078125x` |
+
+Control and tiled builds passed the complete focused Metal Butteraugli test
+with identical maxima: `0.000549316` for map and score and `0.000396729` for
+captured stages. Both profiled workflows retained the same `1606911`-byte
+padded-4K result. Correctness and resource use therefore passed; performance
+did not.
+
+Seven rotated padded-4K stage-profile rounds produced these median changes
+relative to the separable control:
+
+| Tile | Reference | Resident AQ | Main psycho | Subscale psycho |
+| --- | ---: | ---: | ---: | ---: |
+| `8 x 8` | `+8.81%` (1/7) | `+1.95%` (0/7) | `+5.44%` (0/7) | `+9.27%` (0/7) |
+| `16 x 8` | `+8.04%` (1/7) | `+0.99%` (0/7) | `+2.57%` (0/7) | `+6.64%` (0/7) |
+| `16 x 16` | `+15.08%` (1/7) | `+0.04%` (2/7) | `-0.52%` (7/7) | `+4.02%` (0/7) |
+| `32 x 8` | `+1.42%` (2/7) | `+0.90%` (0/7) | `+1.94%` (0/7) | `+6.25%` (0/7) |
+
+Parentheses report tiled wins out of seven paired rounds. The `16 x 16`
+shape's small main-scale improvement did not survive at subscale and did not
+improve the enclosing resident submission. All other shapes regressed every
+resident, main-psycho, and subscale-psycho pair. The short convolution's two
+barriers, cooperative halo work, clipped-boundary control, and partial-tile
+cost outweigh the removed global intermediate on this device.
+
+The slice is rejected and all prototype shaders, pipeline states, scratch
+routing, resource checks, and private selectors have been removed. Complete
+workflow and counter qualification were intentionally skipped after the GPU
+stage gate failed. Under the plan's explicit radius gate, the 13- and 15-tap
+tile-local variants are not pursued: they have larger halos and cannot advance
+after the shorter 7-tap form failed. The independent 33-tap research question
+remains separate because its much greater arithmetic and global traffic could
+change the tradeoff.
+
+The retained experiment artifact is
+`/private/tmp/gjxl-metal-fusion-ultra7-stage.pNIbhE`.
+
 ### Phase 4: resident sink fusion
 
 After the perceptual kernels stabilize:
