@@ -84,6 +84,10 @@ struct ResidentAcStrategyInputs {
   ConstDeviceImage3View opsin;
   ConstDevicePlaneView quant_field;
   ConstDevicePlaneView pixel_mask;
+  /// Optional resident initial CfL maps. When both are present, candidate
+  /// evaluation does not require a host ColorCorrelationMap.
+  ConstDevicePlaneView y_to_x;
+  ConstDevicePlaneView y_to_b;
 };
 
 struct AqEvaluationInput {

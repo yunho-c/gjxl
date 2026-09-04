@@ -15,6 +15,28 @@ namespace {
 constexpr unsigned int kThreads = 256;
 constexpr float kPi = 3.14159265358979323846f;
 
+__global__ void InitializePositiveRangeKernel(float* range) {
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    range[0] = __uint_as_float(0x7f800000u);
+    range[1] = 0.0f;
+  }
+}
+
+__global__ void ReducePositiveRangeKernel(const float* values, uint32_t count,
+                                          float* range,
+                                          unsigned int* error) {
+  const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= count) return;
+  const float value = values[index];
+  if (!isfinite(value) || value <= 0.0f) {
+    atomicOr(error, 2048u);
+    return;
+  }
+  atomicMin(reinterpret_cast<unsigned int*>(range), __float_as_uint(value));
+  atomicMax(reinterpret_cast<unsigned int*>(range + 1),
+            __float_as_uint(value));
+}
+
 struct TableOffsets {
   uint32_t dequant;
   uint32_t inverse_dequant;
@@ -855,6 +877,18 @@ cudaError_t LaunchCudaAqAdjustQuantField(
   const uint32_t blocks = (batch.anchor_count + kThreads - 1) / kThreads;
   AdjustQuantFieldKernel<<<blocks, kThreads, 0, stream>>>(
       anchors, quant_field, error, quant_stride, batch, mean_max_mixer);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqPositiveRange(
+    const float* values, uint32_t count, float* range, unsigned int* error,
+    cudaStream_t stream) {
+  InitializePositiveRangeKernel<<<1, 1, 0, stream>>>(range);
+  cudaError_t status = cudaGetLastError();
+  if (status != cudaSuccess) return status;
+  const uint32_t blocks = (count + kThreads - 1) / kThreads;
+  ReducePositiveRangeKernel<<<blocks, kThreads, 0, stream>>>(
+      values, count, range, error);
   return cudaGetLastError();
 }
 

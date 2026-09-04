@@ -1181,6 +1181,23 @@ Status PrepareButteraugliPolicy(
       initial_maximum = std::max(initial_maximum, value);
     }
   }
+  return PrepareButteraugliPolicyFromRange(
+    initial_minimum, initial_maximum, butteraugli_target, setup);
+}
+
+Status PrepareButteraugliPolicyFromRange(
+  float initial_minimum,
+  float initial_maximum,
+  float butteraugli_target,
+  ButteraugliPolicySetup* setup) {
+
+  if (setup == nullptr || !std::isfinite(initial_minimum) ||
+      initial_minimum <= 0.0f || !std::isfinite(initial_maximum) ||
+      initial_maximum < initial_minimum ||
+      !std::isfinite(butteraugli_target) || butteraugli_target <= 0.0f) {
+    return Status::InvalidArgument(
+      "Butteraugli policy range is invalid");
+  }
   const float initial_ratio = initial_maximum / initial_minimum;
   const float maximum_deviation = std::sqrt(250.0f / initial_ratio);
   const float asymmetry = std::min(2.0f, maximum_deviation);
@@ -1215,11 +1232,26 @@ Status ValidateAdaptiveQuantizationPolicyInputs(
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options) {
 
-  if (!original_linear_rgb.valid() ||
-      !opsin.valid() ||
-      !strategies.complete() ||
-      !initial_quant_field.valid() ||
-      !epf_sharpness.valid()) {
+  Status status = ValidateAdaptiveQuantizationPolicyMetadata(
+    original_linear_rgb, opsin, strategies, epf_sharpness, options);
+  if (!status.ok()) return status;
+  if (!initial_quant_field.valid() ||
+      initial_quant_field.extent != strategies.extent()) {
+    return Status::InvalidArgument(
+      "Adaptive-quantization initial field is invalid");
+  }
+  return Status::Ok();
+}
+
+Status ValidateAdaptiveQuantizationPolicyMetadata(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options) {
+
+  if (!original_linear_rgb.valid() || !opsin.valid() ||
+      !strategies.complete() || !epf_sharpness.valid()) {
     return Status::InvalidArgument(
       "Adaptive-quantization inputs are invalid");
   }
@@ -1229,7 +1261,6 @@ Status ValidateAdaptiveQuantizationPolicyInputs(
   if (!BlockGrid{block_extent}.try_padded_pixel_extent(
         &padded_pixel_extent) ||
       opsin.extent() != padded_pixel_extent ||
-      initial_quant_field.extent != block_extent ||
       epf_sharpness.extent != block_extent) {
     return Status::InvalidArgument(
       "Adaptive-quantization image and block geometry do not match");

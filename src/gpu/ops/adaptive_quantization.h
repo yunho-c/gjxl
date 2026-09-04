@@ -161,6 +161,9 @@ struct AdaptiveQuantizationMaterialization {
   bool block_distance_map = true;
   bool reconstructed_linear_rgb = true;
   bool final_perceptual_evaluation = true;
+  /// The encoding frontend retained its initial field on the prepared device
+  /// operation. Host initial-field inputs are intentionally empty.
+  bool resident_initial_quantization = false;
 };
 
 /// Reusable frame-level GPU AQ state for repeated rate-control attempts.
@@ -194,6 +197,20 @@ struct PreparedAdaptiveQuantization {
   AdaptiveQuantizationOptions options,
   PreparedAdaptiveQuantization* prepared,
   InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output);
+
+/// Encoding-only variant that keeps the initial quantization and masking maps
+/// resident and materializes only the final encoder frame.
+[[nodiscard]] Status
+RunPreparedGpuFrameOnlyQuantizationResidentFrontendForEncoding(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  PreparedAdaptiveQuantization* prepared,
   GpuFrameOnlyQuantizationOutput output);
 
 [[nodiscard]] Status RunPreparedGpuAdaptiveQuantization(

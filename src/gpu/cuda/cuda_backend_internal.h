@@ -25,6 +25,20 @@
 
 namespace gjxl::cuda_internal {
 
+struct CudaHostToDeviceCopy {
+  DeviceBuffer* destination = nullptr;
+  const void* source = nullptr;
+  size_t size_bytes = 0;
+  size_t destination_offset_bytes = 0;
+};
+
+struct CudaDeviceToHostCopy {
+  const DeviceBuffer* source = nullptr;
+  void* destination = nullptr;
+  size_t size_bytes = 0;
+  size_t source_offset_bytes = 0;
+};
+
 [[nodiscard]] Status CudaStatus(cudaError_t error, std::string_view operation,
                                 StatusCode code = StatusCode::kDeviceError);
 
@@ -117,6 +131,10 @@ class CudaBackend final : public GpuBackend,
                             size_t src_row_stride_bytes, size_t row_bytes,
                             size_t row_count, size_t dst_row_stride_bytes,
                             size_t dst_offset_bytes = 0);
+  Status CopyHostToDeviceBatch(
+      std::span<const CudaHostToDeviceCopy> copies);
+  Status CopyDeviceToHostBatch(
+      std::span<const CudaDeviceToHostCopy> copies);
   Status CopyDeviceToHost(const DeviceBuffer& src, void* dst, size_t size_bytes,
                           size_t src_offset_bytes) override;
   Status ForwardTransform(const TransformBatch& batch,
@@ -172,6 +190,8 @@ class CudaBackend final : public GpuBackend,
     std::array<const float*, 3> opsin{};
     const float* pixel_mask = nullptr;
     const float* quant_field = nullptr;
+    const signed char* y_to_x = nullptr;
+    const signed char* y_to_b = nullptr;
     const float* matrices = nullptr;
     const void* candidates = nullptr;
     float* scratch_a = nullptr;

@@ -297,6 +297,54 @@ Status CudaBackend::CopyHostToDevice2D(
   return CudaRuntimeStatus(error, "Copy 2D host data to CUDA buffer");
 }
 
+Status CudaBackend::CopyHostToDeviceBatch(
+    std::span<const CudaHostToDeviceCopy> copies) {
+  for (const CudaHostToDeviceCopy& copy : copies) {
+    if (copy.destination == nullptr ||
+        (copy.source == nullptr && copy.size_bytes != 0)) {
+      return Status::InvalidArgument(
+          "CUDA host-to-device batch contains a null pointer");
+    }
+    CudaBuffer* destination = AsCudaBuffer(*copy.destination);
+    if (destination == nullptr || !owns(*copy.destination) ||
+        destination->state() != state_.get()) {
+      return Status::InvalidArgument(
+          "CUDA host-to-device batch destination is not owned");
+    }
+    if (copy.destination_offset_bytes > copy.destination->size_bytes() ||
+        copy.size_bytes > copy.destination->size_bytes() -
+                            copy.destination_offset_bytes) {
+      return Status::InvalidArgument(
+          "CUDA host-to-device batch exceeds a destination buffer");
+    }
+  }
+  ScopedCudaDevice device(state_->ordinal);
+  if (device.status() != cudaSuccess) {
+    return CudaRuntimeStatus(device.status(), "Select CUDA batch copy device");
+  }
+  std::lock_guard lock(state_->submission_mutex);
+  cudaError_t error = cudaSuccess;
+  bool enqueued = false;
+  for (const CudaHostToDeviceCopy& copy : copies) {
+    if (copy.size_bytes == 0) continue;
+    CudaBuffer* destination = AsCudaBuffer(*copy.destination);
+    auto* pointer = static_cast<std::byte*>(destination->pointer()) +
+                    copy.destination_offset_bytes;
+    error = cudaMemcpyAsync(pointer, copy.source, copy.size_bytes,
+                            cudaMemcpyHostToDevice, state_->stream);
+    if (error != cudaSuccess) break;
+    enqueued = true;
+  }
+  const cudaError_t enqueue_error = error;
+  if (enqueued) {
+    const cudaError_t completion_error = cudaStreamSynchronize(state_->stream);
+    if (error == cudaSuccess) error = completion_error;
+  }
+  return CudaRuntimeStatus(
+      enqueue_error != cudaSuccess ? enqueue_error : error,
+      "Copy host batch to CUDA buffers");
+}
+
 Status CudaBackend::CopyDeviceToHost(
   const DeviceBuffer& src,
   void* dst,
@@ -333,6 +381,54 @@ Status CudaBackend::CopyDeviceToHost(
     error = cudaStreamSynchronize(state_->stream);
   }
   return CudaRuntimeStatus(error, "Copy CUDA buffer to host");
+}
+
+Status CudaBackend::CopyDeviceToHostBatch(
+    std::span<const CudaDeviceToHostCopy> copies) {
+  for (const CudaDeviceToHostCopy& copy : copies) {
+    if (copy.source == nullptr ||
+        (copy.destination == nullptr && copy.size_bytes != 0)) {
+      return Status::InvalidArgument(
+          "CUDA device-to-host batch contains a null pointer");
+    }
+    const CudaBuffer* source = AsCudaBuffer(*copy.source);
+    if (source == nullptr || !owns(*copy.source) ||
+        source->state() != state_.get()) {
+      return Status::InvalidArgument(
+          "CUDA device-to-host batch source is not owned");
+    }
+    if (copy.source_offset_bytes > copy.source->size_bytes() ||
+        copy.size_bytes >
+            copy.source->size_bytes() - copy.source_offset_bytes) {
+      return Status::InvalidArgument(
+          "CUDA device-to-host batch exceeds a source buffer");
+    }
+  }
+  ScopedCudaDevice device(state_->ordinal);
+  if (device.status() != cudaSuccess) {
+    return CudaRuntimeStatus(device.status(), "Select CUDA batch copy device");
+  }
+  std::lock_guard lock(state_->submission_mutex);
+  cudaError_t error = cudaSuccess;
+  bool enqueued = false;
+  for (const CudaDeviceToHostCopy& copy : copies) {
+    if (copy.size_bytes == 0) continue;
+    const CudaBuffer* source = AsCudaBuffer(*copy.source);
+    const auto* pointer = static_cast<const std::byte*>(source->pointer()) +
+                          copy.source_offset_bytes;
+    error = cudaMemcpyAsync(copy.destination, pointer, copy.size_bytes,
+                            cudaMemcpyDeviceToHost, state_->stream);
+    if (error != cudaSuccess) break;
+    enqueued = true;
+  }
+  const cudaError_t enqueue_error = error;
+  if (enqueued) {
+    const cudaError_t completion_error = cudaStreamSynchronize(state_->stream);
+    if (error == cudaSuccess) error = completion_error;
+  }
+  return CudaRuntimeStatus(
+      enqueue_error != cudaSuccess ? enqueue_error : error,
+      "Copy CUDA buffer batch to host");
 }
 
 Status CudaBackend::SubmitCompute(

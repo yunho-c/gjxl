@@ -368,12 +368,26 @@ Status RunGpuAdaptiveQuantizationImpl(
   gpu_profile_internal::GpuProfilingSession* profiling_session) {
 
   const bool profiling = profiling_session != nullptr;
+  const bool resident_initial =
+    materialization.resident_initial_quantization;
 
   Status status = ValidateMode(mode);
   if (status.ok()) {
-    status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
-      original_linear_rgb, opsin, strategies, initial_quant_field,
-      epf_sharpness, options);
+    if (resident_initial) {
+      if (mode == GpuAdaptiveQuantizationMode::kExactCoefficients ||
+          options.control_mode !=
+            AdaptiveQuantizationControlMode::kButteraugli) {
+        status = Status::InvalidArgument(
+          "Resident initial quantization requires resident Butteraugli AQ");
+      } else {
+        status = aqi::ValidateAdaptiveQuantizationPolicyMetadata(
+          original_linear_rgb, opsin, strategies, epf_sharpness, options);
+      }
+    } else {
+      status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
+        original_linear_rgb, opsin, strategies, initial_quant_field,
+        epf_sharpness, options);
+    }
   }
   if (status.ok()) {
     if (full_output == nullptr) {
@@ -539,11 +553,37 @@ Status RunGpuAdaptiveQuantizationImpl(
   try {
     std::vector<float> adjusted_initial;
     ConstPlaneF32View policy_initial = initial_quant_field;
+    aqi::ButteraugliPolicySetup resident_policy_setup;
+    bool resident_policy_prepared = false;
     const float adjustment_target =
       options.control_mode == AdaptiveQuantizationControlMode::kMaximumError
         ? 1.0f
         : options.butteraugli_target;
-    if (resident_quantization) {
+    if (resident_quantization && resident_initial) {
+      auto* encoding_initial = dynamic_cast<
+        aq_evaluation_internal::PreparedAqEncodingInitialQuantization*>(
+          prepared);
+      if (encoding_initial == nullptr) {
+        return Status::Unavailable(
+          "Resident encoding policy preparation is unavailable");
+      }
+      const auto adjustment_begin = profiling
+        ? gpu_profile_internal::GpuProfilingSession::BeginWallStage()
+        : gpu_profile_internal::GpuProfilingSession::TimePoint{};
+      aq_evaluation_internal::ResidentEncodingPolicySetup setup;
+      status = encoding_initial->PrepareResidentEncodingPolicy(
+        options.butteraugli_target, &setup);
+      if (status.ok() && profiling) {
+        status = profiling_session->EndWallStage(
+          "frontend.quant_adjustment",
+          gpu_profile_internal::GpuWallStageKind::kOperation,
+          adjustment_begin);
+      }
+      if (!status.ok()) return status;
+      resident_policy_setup = {
+        setup.quant_dc, setup.lower_bound, setup.upper_bound};
+      resident_policy_prepared = true;
+    } else if (resident_quantization) {
       size_t block_count = 0;
       if (!strategies.extent().try_area(&block_count)) {
         return Status::InvalidArgument(
@@ -586,7 +626,7 @@ Status RunGpuAdaptiveQuantizationImpl(
     const auto cfl_begin = profiling
       ? gpu_profile_internal::GpuProfilingSession::BeginWallStage()
       : gpu_profile_internal::GpuProfilingSession::TimePoint{};
-    if (resident_quantization) {
+    if (resident_quantization && !resident_initial) {
       float invariant_quant_dc = 0.0f;
       status = ComputeInitialQuantDc(
         adjustment_target, &invariant_quant_dc);
@@ -596,8 +636,10 @@ Status RunGpuAdaptiveQuantizationImpl(
       }
       if (!status.ok()) return status;
     } else {
-      status = prepared_coefficients_internal::PrepareForwardDctCoefficients(
-        opsin, strategies, &forward_coefficients);
+      if (!resident_quantization) {
+        status = prepared_coefficients_internal::PrepareForwardDctCoefficients(
+          opsin, strategies, &forward_coefficients);
+      }
     }
     if (status.ok() && profiling) {
       status = profiling_session->EndWallStage(
@@ -610,8 +652,12 @@ Status RunGpuAdaptiveQuantizationImpl(
         options.control_mode ==
           AdaptiveQuantizationControlMode::kButteraugli) {
       aqi::ButteraugliPolicySetup setup;
-      status = aqi::PrepareButteraugliPolicy(
-        policy_initial, options.butteraugli_target, &setup);
+      if (resident_policy_prepared) {
+        setup = resident_policy_setup;
+      } else {
+        status = aqi::PrepareButteraugliPolicy(
+          policy_initial, options.butteraugli_target, &setup);
+      }
       if (!status.ok()) return status;
 
       size_t block_count = 0;
@@ -931,8 +977,7 @@ Status RunGpuFrameOnlyQuantizationResidentInitialCfl(
       epf_sharpness, nullptr, true, options, output);
 }
 
-Status adaptive_quantization_gpu_internal::
-RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
+static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
@@ -941,15 +986,16 @@ RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
   InitialQuantizationOptions initial_options,
   AdaptiveQuantizationOptions options,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* reusable,
-  InitialQuantFieldOutput initial_output,
+  InitialQuantFieldOutput* initial_output,
   GpuFrameOnlyQuantizationOutput output) {
 
   if (!std::isfinite(initial_options.butteraugli_target) ||
       initial_options.butteraugli_target <= 0.0f ||
       !std::isfinite(initial_options.rescale) ||
       initial_options.rescale <= 0.0f ||
-      !output.quant_field.valid() ||
-      output.quant_field.extent != strategies.extent() ||
+      (initial_output != nullptr &&
+       (!output.quant_field.valid() ||
+        output.quant_field.extent != strategies.extent())) ||
       output.frame == nullptr) {
     return Status::InvalidArgument(
       "Resident frame-only frontend inputs or outputs are invalid");
@@ -1090,20 +1136,37 @@ RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
       return status;
     }
     QuantizerParams quantizer;
-    status = prepared->ComputeInitialQuantization(
-      initial_options, initial_output, &quantizer, quant_dc);
+    if (initial_output == nullptr) {
+      auto* encoding_initial = dynamic_cast<
+        aq_evaluation_internal::PreparedAqEncodingInitialQuantization*>(
+          prepared);
+      if (encoding_initial == nullptr) {
+        return Status::Unavailable(
+          "Encoding-only initial quantization is unavailable");
+      }
+      status = encoding_initial->ComputeInitialQuantizationForEncoding(
+        initial_options, &quantizer, quant_dc);
+    } else {
+      status = prepared->ComputeInitialQuantization(
+        initial_options, *initial_output, &quantizer, quant_dc);
+    }
     if (!status.ok()) {
       if (reusable != nullptr) reusable->evaluation.reset();
       return status;
     }
-    const ConstPlaneF32View initial_quant{
-      initial_output.quant_field.data,
-      initial_output.quant_field.extent,
-      initial_output.quant_field.stride,
-    };
-    status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
-      original_linear_rgb, opsin, strategies, initial_quant,
-      epf_sharpness, options);
+    const ConstPlaneF32View initial_quant = initial_output == nullptr
+      ? ConstPlaneF32View{}
+      : ConstPlaneF32View{
+          initial_output->quant_field.data,
+          initial_output->quant_field.extent,
+          initial_output->quant_field.stride,
+        };
+    status = initial_output == nullptr
+      ? aqi::ValidateAdaptiveQuantizationPolicyMetadata(
+          original_linear_rgb, opsin, strategies, epf_sharpness, options)
+      : aqi::ValidateAdaptiveQuantizationPolicyInputs(
+          original_linear_rgb, opsin, strategies, initial_quant,
+          epf_sharpness, options);
     if (!status.ok()) {
       if (reusable != nullptr) reusable->evaluation.reset();
       return status;
@@ -1118,9 +1181,11 @@ RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
       if (reusable != nullptr) reusable->evaluation.reset();
       return status;
     }
-    for (size_t y = 0; y < strategies.extent().height; ++y) {
-      std::copy_n(initial_quant.Row(y), strategies.extent().width,
-                  output.quant_field.Row(y));
+    if (initial_output != nullptr) {
+      for (size_t y = 0; y < strategies.extent().height; ++y) {
+        std::copy_n(initial_quant.Row(y), strategies.extent().width,
+                    output.quant_field.Row(y));
+      }
     }
     *output.frame = std::move(candidate);
     return Status::Ok();
@@ -1133,6 +1198,39 @@ RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
     return Status::InvalidArgument(
       "Resident frame-only frontend dimensions are too large");
   }
+}
+
+Status adaptive_quantization_gpu_internal::
+RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  PreparedAdaptiveQuantization* prepared,
+  InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output) {
+  return RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
+      gpu, original_linear_rgb, opsin, strategies, epf_sharpness,
+      initial_options, options, prepared, &initial_output, output);
+}
+
+Status adaptive_quantization_gpu_internal::
+RunPreparedGpuFrameOnlyQuantizationResidentFrontendForEncoding(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  PreparedAdaptiveQuantization* prepared,
+  GpuFrameOnlyQuantizationOutput output) {
+  return RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
+      gpu, original_linear_rgb, opsin, strategies, epf_sharpness,
+      initial_options, options, prepared, nullptr, output);
 }
 
 Status RunGpuFrameOnlyQuantizationResidentFrontend(

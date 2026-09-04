@@ -82,7 +82,27 @@ __device__ bool CandidateValid(
     isfinite(candidate.quant_norm) && candidate.quant_norm > 0.0f &&
     isfinite(candidate.entropy_multiplier) &&
     candidate.entropy_multiplier > 0.0f &&
-    isfinite(candidate.cfl_x) && isfinite(candidate.cfl_b);
+    (params.use_device_cfl != 0u ||
+     (isfinite(candidate.cfl_x) && isfinite(candidate.cfl_b)));
+}
+
+__device__ float ComputeCflFactor(
+  const signed char* y_to_x,
+  const signed char* y_to_b,
+  AcStrategyCandidateDevice candidate,
+  unsigned int channel,
+  CudaAcStrategyBatchParams params) {
+  if (channel == 1u) return 0.0f;
+  if (params.use_device_cfl == 0u) {
+    return channel == 0u ? candidate.cfl_x : candidate.cfl_b;
+  }
+  constexpr float kCflScale = 1.0f / 84.0f;
+  const size_t tile_index =
+    static_cast<size_t>(candidate.block_y / 8u) *
+      params.color_tile_row_stride + candidate.block_x / 8u;
+  return channel == 0u
+    ? static_cast<float>(y_to_x[tile_index]) * kCflScale
+    : 1.0f + static_cast<float>(y_to_b[tile_index]) * kCflScale;
 }
 
 __device__ float ComputeQuantNorm(
@@ -169,6 +189,8 @@ __global__ void ResidualKernel(
   const float* matrices,
   const AcStrategyCandidateDevice* candidates,
   const float* quant_field,
+  const signed char* y_to_x,
+  const signed char* y_to_b,
   float* residual_coefficients,
   ChannelRate* channel_rates,
   CudaAcStrategyBatchParams params) {
@@ -195,8 +217,8 @@ __global__ void ResidualKernel(
   if (CandidateValid(candidate, params)) {
     const float quant_norm =
       ComputeQuantNorm(quant_field, candidate, params);
-    const float cfl_factor = channel == 0u ? candidate.cfl_x :
-      channel == 2u ? candidate.cfl_b : 0.0f;
+    const float cfl_factor = ComputeCflFactor(
+      y_to_x, y_to_b, candidate, channel, params);
     const float decorrelated =
       coefficients[base + tid] - coefficients[y_base + tid] * cfl_factor;
     const float scaled = decorrelated *
@@ -326,6 +348,8 @@ cudaError_t LaunchCudaAcStrategyBatch(
   const float* opsin_b,
   const float* pixel_mask,
   const float* quant_field,
+  const signed char* y_to_x,
+  const signed char* y_to_b,
   const float* matrices,
   const void* candidates,
   float* scratch_a,
@@ -361,7 +385,8 @@ cudaError_t LaunchCudaAcStrategyBatch(
     params.coefficient_count,
     residual_shared_bytes,
     stream>>>(
-      scratch_b, matrices, typed_candidates, quant_field, scratch_a,
+      scratch_b, matrices, typed_candidates, quant_field, y_to_x, y_to_b,
+      scratch_a,
       static_cast<ChannelRate*>(rate_scratch), params);
   error = cudaGetLastError();
   if (error != cudaSuccess) return error;

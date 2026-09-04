@@ -63,7 +63,8 @@ struct GpuEncodingQuantizationPipelineOutput {
 };
 
 /// Reuses maximum-throughput prepared device storage across compatible
-/// rate-control attempts.
+/// rate-control attempts. This encoding-only entry point ignores diagnostic
+/// plane outputs and commits only the frame.
 [[nodiscard]] Status RunPreparedGpuFrameOnlyQuantizationPipeline(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,

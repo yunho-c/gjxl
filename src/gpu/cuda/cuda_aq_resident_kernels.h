@@ -49,6 +49,10 @@ struct CudaAqResidentPolicyParams {
     uint32_t quant_stride, CudaAqExactBatch batch, float mean_max_mixer,
     cudaStream_t stream);
 
+[[nodiscard]] cudaError_t LaunchCudaAqPositiveRange(
+    const float* values, uint32_t count, float* range, unsigned int* error,
+    cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqGatherTransformPixels(
     const float* coding_x, const float* coding_y, const float* coding_b,
     const CudaAqAnchor* anchors, float* gathered, CudaAqExactBatch batch,

@@ -115,7 +115,8 @@ Status PlanPlane(DeviceElementType type, Extent2D extent, size_t row_stride,
 
 class CudaPreparedAqEvaluation final
     : public PreparedAqEvaluation,
-      public aq_evaluation_internal::PreparedAqScaleReconfiguration {
+      public aq_evaluation_internal::PreparedAqScaleReconfiguration,
+      public aq_evaluation_internal::PreparedAqEncodingInitialQuantization {
  public:
   explicit CudaPreparedAqEvaluation(CudaBackend& backend)
       : backend_(&backend) {}
@@ -230,9 +231,6 @@ class CudaPreparedAqEvaluation final
                             &coding_host_[channel]);
     }
     CopyPlaneToContiguous(preparation.epf_sharpness, &epf_sharpness_);
-    quant_field_host_.resize(block_count_);
-    strategy_mask_host_.resize(block_count_);
-    pixel_mask_host_.resize(pixel_count_);
     raw_quant_host_.resize(block_count_);
     y_to_x_host_.resize(tile_count_);
     y_to_b_host_.resize(tile_count_);
@@ -263,21 +261,19 @@ class CudaPreparedAqEvaluation final
     status = PlanArenas();
     if (status.ok()) status = AllocateArenas();
     if (!status.ok()) return status;
-    for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
-      status = backend_->CopyHostToDevice(
-          *coding_[channel].buffer, coding_host_[channel].data(),
-          pixel_count_ * sizeof(float), coding_[channel].offset_bytes);
-    }
-    if (status.ok()) {
-      status = backend_->CopyHostToDevice(
-          *epf_device_.buffer, epf_sharpness_.data(), block_count_,
-          epf_device_.offset_bytes);
-    }
-    if (status.ok()) {
-      status = backend_->CopyHostToDevice(
-          *quant_tables_.buffer, quant_tables.data(), sizeof(quant_tables),
-          quant_tables_.offset_bytes);
-    }
+    const std::array<CudaHostToDeviceCopy, 5> uploads{{
+        {coding_[0].buffer, coding_host_[0].data(),
+         pixel_count_ * sizeof(float), coding_[0].offset_bytes},
+        {coding_[1].buffer, coding_host_[1].data(),
+         pixel_count_ * sizeof(float), coding_[1].offset_bytes},
+        {coding_[2].buffer, coding_host_[2].data(),
+         pixel_count_ * sizeof(float), coding_[2].offset_bytes},
+        {epf_device_.buffer, epf_sharpness_.data(), block_count_,
+         epf_device_.offset_bytes},
+        {quant_tables_.buffer, quant_tables.data(), sizeof(quant_tables),
+         quant_tables_.offset_bytes},
+    }};
+    status = backend_->CopyHostToDeviceBatch(uploads);
     if (!status.ok()) return status;
 
     memory_stats_.persistent_bytes = persistent_.capacity_bytes();
@@ -375,6 +371,42 @@ class CudaPreparedAqEvaluation final
       return Status::Unavailable(
           "CUDA initial CfL is materialized by EncodeFrame");
     }
+    return ComputeInitialQuantizationImpl(
+        options, quantizer, quant_dc, &output);
+  }
+
+  Status ComputeInitialQuantizationForEncoding(
+      InitialQuantizationOptions options, QuantizerParams* quantizer,
+      float quant_dc) override {
+    if (!std::isfinite(options.butteraugli_target) ||
+        options.butteraugli_target <= 0.0f ||
+        !std::isfinite(options.rescale) || options.rescale <= 0.0f ||
+        quantizer == nullptr || !std::isfinite(quant_dc) ||
+        quant_dc <= 0.0f || quant_dc > static_cast<float>(kMaxQuantDc)) {
+      return Status::InvalidArgument(
+          "CUDA encoding initial-quantization request is invalid");
+    }
+    return ComputeInitialQuantizationImpl(options, quantizer, quant_dc,
+                                          nullptr);
+  }
+
+ private:
+  Status ComputeInitialQuantizationImpl(
+      InitialQuantizationOptions options, QuantizerParams* quantizer,
+      float quant_dc, InitialQuantFieldOutput* output) {
+    if (output != nullptr) {
+      try {
+        quant_field_host_.resize(block_count_);
+        strategy_mask_host_.resize(block_count_);
+        pixel_mask_host_.resize(pixel_count_);
+      } catch (const std::bad_alloc&) {
+        return Status::OutOfMemory(
+            "Unable to allocate CUDA initial-quantization readback");
+      } catch (const std::length_error&) {
+        return Status::InvalidArgument(
+            "CUDA initial-quantization readback is too large");
+      }
+    }
     std::lock_guard lock(mutex_);
     if (invalid_) {
       return Status::FailedPrecondition(
@@ -400,18 +432,28 @@ class CudaPreparedAqEvaluation final
 
     unsigned int device_error = 0;
     std::array<unsigned int, 2> params{};
-    status = Read(error_, &device_error, 1);
-    if (status.ok())
-      status = Read(quantizer_params_, params.data(), params.size());
-    if (status.ok())
-      status = Read(quant_field_, quant_field_host_.data(),
-                    quant_field_host_.size());
-    if (status.ok())
-      status = Read(strategy_mask_, strategy_mask_host_.data(),
-                    strategy_mask_host_.size());
-    if (status.ok())
-      status = Read(
-          pixel_mask_, pixel_mask_host_.data(), pixel_mask_host_.size());
+    std::array<CudaDeviceToHostCopy, 5> readbacks{{
+        {error_.buffer, &device_error, sizeof(device_error),
+         error_.offset_bytes},
+        {quantizer_params_.buffer, params.data(), sizeof(params),
+         quantizer_params_.offset_bytes},
+    }};
+    size_t readback_count = 2;
+    if (output != nullptr) {
+      readbacks[readback_count++] = {
+          quant_field_.buffer, quant_field_host_.data(),
+          quant_field_host_.size() * sizeof(float), quant_field_.offset_bytes};
+      readbacks[readback_count++] = {
+          strategy_mask_.buffer, strategy_mask_host_.data(),
+          strategy_mask_host_.size() * sizeof(float),
+          strategy_mask_.offset_bytes};
+      readbacks[readback_count++] = {
+          pixel_mask_.buffer, pixel_mask_host_.data(),
+          pixel_mask_host_.size() * sizeof(float), pixel_mask_.offset_bytes};
+    }
+    status = backend_->CopyDeviceToHostBatch(
+        std::span<const CudaDeviceToHostCopy>(readbacks).first(
+          readback_count));
     if (!status.ok()) return Invalidate(status);
     if (device_error != 0) {
       return Invalidate(Status::DeviceError(
@@ -425,14 +467,18 @@ class CudaPreparedAqEvaluation final
     Quantizer checked;
     const QuantizerParams candidate{params[0], params[1]};
     status = Quantizer::Create(candidate, &checked);
-    if (!status.ok() || !positive(quant_field_host_) ||
-        !positive(strategy_mask_host_) || !positive(pixel_mask_host_)) {
+    if (!status.ok() ||
+        (output != nullptr &&
+         (!positive(quant_field_host_) || !positive(strategy_mask_host_) ||
+          !positive(pixel_mask_host_)))) {
       return Invalidate(Status::DeviceError(
           "CUDA initial quantization readback is invalid"));
     }
-    CopyContiguousToPlane(quant_field_host_, output.quant_field);
-    CopyContiguousToPlane(strategy_mask_host_, output.strategy_mask);
-    CopyContiguousToPlane(pixel_mask_host_, output.pixel_mask);
+    if (output != nullptr) {
+      CopyContiguousToPlane(quant_field_host_, output->quant_field);
+      CopyContiguousToPlane(strategy_mask_host_, output->strategy_mask);
+      CopyContiguousToPlane(pixel_mask_host_, output->pixel_mask);
+    }
     quantizer_ = candidate;
     *quantizer = candidate;
     initial_ready_ = true;
@@ -480,18 +526,24 @@ class CudaPreparedAqEvaluation final
     status = submission->Wait();
     if (!status.ok()) return status;
     unsigned int device_error = 0;
-    status = Read(error_, &device_error, 1);
-    if (status.ok())
-      status = Read(raw_quant_work_, raw_quant_host_.data(),
-                    raw_quant_host_.size());
-    if (status.ok()) status = Read(y_to_x_, y_to_x_host_.data(), tile_count_);
-    if (status.ok()) status = Read(y_to_b_, y_to_b_host_.data(), tile_count_);
-    if (status.ok())
-      status = Read(quantized_ac_, quantized_ac_host_.data(),
-                    quantized_ac_host_.size());
-    if (status.ok())
-      status = Read(quantized_dc_, quantized_dc_host_.data(),
-                    quantized_dc_host_.size());
+    const std::array<CudaDeviceToHostCopy, 6> readbacks{{
+        {error_.buffer, &device_error, sizeof(device_error),
+         error_.offset_bytes},
+        {raw_quant_work_.buffer, raw_quant_host_.data(),
+         raw_quant_host_.size() * sizeof(int32_t),
+         raw_quant_work_.offset_bytes},
+        {y_to_x_.buffer, y_to_x_host_.data(), tile_count_ * sizeof(int8_t),
+         y_to_x_.offset_bytes},
+        {y_to_b_.buffer, y_to_b_host_.data(), tile_count_ * sizeof(int8_t),
+         y_to_b_.offset_bytes},
+        {quantized_ac_.buffer, quantized_ac_host_.data(),
+         quantized_ac_host_.size() * sizeof(int32_t),
+         quantized_ac_.offset_bytes},
+        {quantized_dc_.buffer, quantized_dc_host_.data(),
+         quantized_dc_host_.size() * sizeof(int32_t),
+         quantized_dc_.offset_bytes},
+    }};
+    status = backend_->CopyDeviceToHostBatch(readbacks);
     if (!status.ok()) return status;
     if (device_error != 0 ||
         std::any_of(
@@ -534,6 +586,7 @@ class CudaPreparedAqEvaluation final
     return Status::Ok();
   }
 
+ public:
   AqEvaluationMemoryStats memory_stats() const noexcept override {
     return memory_stats_;
   }

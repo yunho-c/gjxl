@@ -26,6 +26,8 @@ struct ResidentAcStrategySearchInputs {
   ConstDeviceImage3View opsin;
   ConstDevicePlaneView quant_field;
   ConstDevicePlaneView pixel_mask;
+  ConstDevicePlaneView y_to_x;
+  ConstDevicePlaneView y_to_b;
 };
 
 class PreparedAcStrategySearch;

@@ -1014,14 +1014,16 @@ Status FindAcStrategyGridImpl(
     return Status::InvalidArgument(
       "AC-strategy search dimensions are too large");
   }
-  if (!quant_field.valid() || quant_field.extent != block_extent ||
-      !pixel_mask.valid() || pixel_mask.extent != opsin.extent() ||
-      !color_correlation.valid()) {
+  if (candidate_costs == nullptr &&
+      (!quant_field.valid() || quant_field.extent != block_extent ||
+       !pixel_mask.valid() || pixel_mask.extent != opsin.extent() ||
+       !color_correlation.valid())) {
     return Status::InvalidArgument(
       "AC-strategy search fields have invalid geometry");
   }
   const Extent2D expected_tile_extent = ColorTileExtent(opsin.extent());
-  if (color_correlation.tile_extent() != expected_tile_extent ||
+  if ((candidate_costs == nullptr &&
+       color_correlation.tile_extent() != expected_tile_extent) ||
       !std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f) {
     return Status::InvalidArgument(
@@ -1060,7 +1062,9 @@ Status FindAcStrategyGridImpl(
           .quant_field = quant_field,
           .pixel_mask = pixel_mask,
           .butteraugli_target = options.butteraugli_target,
-          .cfl_factors = color_correlation.AcFactors(tile_x, tile_y),
+          .cfl_factors = candidate_costs == nullptr
+            ? color_correlation.AcFactors(tile_x, tile_y)
+            : std::array<float, 3>{},
           .tile_block_x = block_x,
           .tile_block_y = block_y,
           .tile_block_extent = {tile_width, tile_height},

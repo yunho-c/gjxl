@@ -33,6 +33,8 @@ struct CudaAcStrategyBatchParams {
   uint32_t covered_block_height = 0;
   uint32_t covered_block_count = 0;
   uint32_t use_device_quant_norm = 0;
+  uint32_t color_tile_row_stride = 0;
+  uint32_t use_device_cfl = 0;
   float info_loss_multiplier = 0.0f;
   float zeros_multiplier = 0.0f;
   float cost_delta = 0.0f;
@@ -47,10 +49,11 @@ struct CudaAcStrategyBatchParams {
 
 [[nodiscard]] cudaError_t LaunchCudaAcStrategyBatch(
     const float* opsin_x, const float* opsin_y, const float* opsin_b,
-    const float* pixel_mask, const float* quant_field, const float* matrices,
-    const void* candidates, float* scratch_a, float* scratch_b,
-    void* rate_scratch, float* costs, CudaAcStrategyBatchParams params,
-    cudaStream_t stream);
+    const float* pixel_mask, const float* quant_field,
+    const signed char* y_to_x, const signed char* y_to_b,
+    const float* matrices, const void* candidates, float* scratch_a,
+    float* scratch_b, void* rate_scratch, float* costs,
+    CudaAcStrategyBatchParams params, cudaStream_t stream);
 
 [[nodiscard]] cudaError_t LaunchCudaPointwiseAffine(
     const float* input, float* output, unsigned int width, unsigned int height,

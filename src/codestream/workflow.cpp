@@ -771,28 +771,14 @@ struct PreparedWorkflow {
   EncodingArtifacts encoding;
   if (selected_gpu != nullptr && options.gpu_aq_mode ==
         GpuAdaptiveQuantizationMode::kMaximumThroughput) {
-    PipelineStorage* compatibility_output = nullptr;
-    status = EnsureCompatibilityOutput(prepared, &compatibility_output);
-    if (status.ok()) {
-      const CpuQuantizationPipelineOutput pipeline_output =
-        compatibility_output->Output();
-      status = quantization_pipeline_internal::
-        RunPreparedGpuFrameOnlyQuantizationPipeline(
+    status = quantization_pipeline_internal::
+      RunPreparedGpuFrameOnlyQuantizationPipeline(
         *selected_gpu, prepared.original_linear_rgb(),
         prepared.quantization, pipeline_options,
         {
-          .initial_quantization = pipeline_output.initial_quantization,
-          .quant_field = {
-            compatibility_output->final_quant.data(),
-            compatibility_output->block_extent,
-            compatibility_output->block_extent.width},
-          .frame = &compatibility_output->frame,
+          .frame = &encoding.frame,
         },
         &prepared.gpu_adaptive_quantization);
-      if (status.ok()) {
-        encoding.frame = std::move(compatibility_output->frame);
-      }
-    }
   } else if (selected_gpu != nullptr) {
     const quantization_pipeline_internal::GpuEncodingQuantizationPipelineOutput
       encoding_output{

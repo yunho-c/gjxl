@@ -359,12 +359,27 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     }
   }
 
+  const bool resident_only_initial =
+    initial_quantization_ready &&
+    materialization.resident_initial_quantization;
+  const ConstPlaneF32View initial_quant = resident_only_initial
+    ? ConstPlaneF32View{}
+    : ConstPlaneF32View{
+        prepared.initial_quant.data(), block_extent, block_extent.width};
+  const ConstPlaneF32View pixel_mask = resident_only_initial
+    ? ConstPlaneF32View{}
+    : ConstPlaneF32View{
+        prepared.pixel_mask.data(), prepared.padded_extent,
+        prepared.padded_extent.width};
+  const ColorCorrelationMap empty_color_correlation;
+  const ColorCorrelationMap& initial_color_correlation = resident_only_initial
+    ? empty_color_correlation : prepared.initial_color_correlation;
+
   status = strategy_search.Find(
     pipeline_opsin,
-    {prepared.initial_quant.data(), block_extent, block_extent.width},
-    {prepared.pixel_mask.data(), prepared.padded_extent,
-     prepared.padded_extent.width},
-    prepared.initial_color_correlation,
+    initial_quant,
+    pixel_mask,
+    initial_color_correlation,
     {.butteraugli_target = control_target},
     &prepared.strategies);
   if (!status.ok()) {
@@ -380,7 +395,7 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     original_linear_rgb,
     pipeline_opsin,
     prepared.strategies,
-    {prepared.initial_quant.data(), block_extent, block_extent.width},
+    initial_quant,
     {prepared.epf_sharpness.data(), block_extent, block_extent.width},
     adaptive_options,
     prepared.butteraugli_reference.get(),

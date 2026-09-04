@@ -97,12 +97,29 @@ struct ButteraugliPolicySetup {
   float butteraugli_target,
   ButteraugliPolicySetup* setup);
 
+/// Computes policy bounds from a positive finite range already reduced by a
+/// resident backend.
+[[nodiscard]] Status PrepareButteraugliPolicyFromRange(
+  float initial_minimum,
+  float initial_maximum,
+  float butteraugli_target,
+  ButteraugliPolicySetup* setup);
+
 /// Validates the input and option contract shared by CPU and GPU evaluators.
 [[nodiscard]] Status ValidateAdaptiveQuantizationPolicyInputs(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
   const AcStrategyGrid& strategies,
   ConstPlaneF32View initial_quant_field,
+  ConstPlaneU8View epf_sharpness,
+  AdaptiveQuantizationOptions options);
+
+/// Encoding-only validation for a prepared backend that owns the initial
+/// quantization field.
+[[nodiscard]] Status ValidateAdaptiveQuantizationPolicyMetadata(
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options);
 

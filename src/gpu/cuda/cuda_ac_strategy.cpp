@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "core/ac_strategy.h"
+#include "codec/chroma_from_luma.h"
 #include "gpu/image.h"
 #include "gpu/ops/ac_strategy.h"
 
@@ -143,12 +144,25 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   std::array<ConstDevicePlaneView, 3> opsin_views;
   ConstDevicePlaneView mask_view;
   ConstDevicePlaneView quant_view;
+  ConstDevicePlaneView cfl_x_view;
+  ConstDevicePlaneView cfl_b_view;
   bool use_device_quant_norm = false;
+  bool use_device_cfl = false;
   if (use_resident) {
     opsin_views = batch.resident_opsin.plane;
     mask_view = batch.resident_pixel_mask;
     quant_view = batch.resident_quant_field;
+    cfl_x_view = batch.resident_y_to_x;
+    cfl_b_view = batch.resident_y_to_b;
     use_device_quant_norm = quant_view.buffer != nullptr;
+    const bool has_cfl_x = cfl_x_view.buffer != nullptr;
+    const bool has_cfl_b = cfl_b_view.buffer != nullptr;
+    if (has_cfl_x != has_cfl_b) {
+      return Status::InvalidArgument(
+        "Resident AC-strategy CfL inputs are incomplete");
+    }
+    use_device_cfl = has_cfl_x;
+    const Extent2D tile_extent = ColorTileExtent(batch.pixel_extent);
     if (std::ranges::any_of(
           opsin_views,
           [&](ConstDevicePlaneView view) {
@@ -159,7 +173,14 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
         mask_view.row_stride < batch.pixel_extent.width ||
         (use_device_quant_norm &&
          (quant_view.extent != block_extent ||
-          quant_view.row_stride < block_extent.width))) {
+          quant_view.row_stride < block_extent.width)) ||
+        (use_device_cfl &&
+         (cfl_x_view.element_type != DeviceElementType::kI8 ||
+          cfl_b_view.element_type != DeviceElementType::kI8 ||
+          cfl_x_view.extent != tile_extent ||
+          cfl_b_view.extent != tile_extent ||
+          cfl_x_view.row_stride < tile_extent.width ||
+          cfl_b_view.row_stride != cfl_x_view.row_stride))) {
       return Status::InvalidArgument(
         "Resident AC-strategy input geometry is invalid");
     }
@@ -216,7 +237,7 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   const size_t covered_block_count =
     strategy_info->covered_blocks.width *
     strategy_info->covered_blocks.height;
-  const std::array<size_t, 9> uint32_values = {
+  const std::array<size_t, 10> uint32_values = {
     batch.pixel_extent.width,
     batch.pixel_extent.height,
     opsin_row_stride,
@@ -226,6 +247,7 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
     transform_extent.width,
     transform_extent.height,
     covered_block_count,
+    use_device_cfl ? cfl_x_view.row_stride : size_t{0},
   };
   if (std::ranges::any_of(
         uint32_values,
@@ -325,6 +347,31 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
       resolved_quant.buffer->pointer(), resolved_quant.view.offset_bytes);
   }
 
+  ResolvedConstPlane resolved_cfl_x;
+  ResolvedConstPlane resolved_cfl_b;
+  if (use_device_cfl) {
+    const auto resolve_cfl = [&](ConstDevicePlaneView view,
+                                 ResolvedConstPlane* resolved) {
+      DeviceMemoryRange range;
+      Status resolve_status = ComputeDevicePlaneRange(view, id(), &range);
+      if (!resolve_status.ok()) return resolve_status;
+      const CudaBuffer* buffer = AsCudaBuffer(*view.buffer);
+      if (buffer == nullptr || buffer->state() != state_.get()) {
+        return Status::InvalidArgument(
+          "Resident AC-strategy CfL input is not owned by this CUDA backend");
+      }
+      *resolved = {view, range, buffer};
+      return Status::Ok();
+    };
+    status = resolve_cfl(cfl_x_view, &resolved_cfl_x);
+    if (status.ok()) status = resolve_cfl(cfl_b_view, &resolved_cfl_b);
+    if (!status.ok()) return status;
+    validated.y_to_x = OffsetPointer<signed char>(
+      resolved_cfl_x.buffer->pointer(), resolved_cfl_x.view.offset_bytes);
+    validated.y_to_b = OffsetPointer<signed char>(
+      resolved_cfl_b.buffer->pointer(), resolved_cfl_b.view.offset_bytes);
+  }
+
   const CudaBuffer* matrices = nullptr;
   const CudaBuffer* candidates = nullptr;
   CudaBuffer* scratch_a = nullptr;
@@ -355,12 +402,14 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
     batch.costs_offset_bytes, "Cost", &costs);
   if (!status.ok()) return status;
 
-  const std::array<DeviceMemoryRange, 7> input_ranges = {
+  const std::array<DeviceMemoryRange, 9> input_ranges = {
     resolved_opsin[0].range,
     resolved_opsin[1].range,
     resolved_opsin[2].range,
     resolved_mask.range,
     use_device_quant_norm ? resolved_quant.range : DeviceMemoryRange{},
+    use_device_cfl ? resolved_cfl_x.range : DeviceMemoryRange{},
+    use_device_cfl ? resolved_cfl_b.range : DeviceMemoryRange{},
     BufferRange(batch.matrices, batch.matrices_offset_bytes, matrix_bytes),
     BufferRange(batch.candidates, batch.candidates_offset_bytes,
       candidate_bytes),
@@ -422,6 +471,9 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
       strategy_info->covered_blocks.height),
     .covered_block_count = static_cast<uint32_t>(covered_block_count),
     .use_device_quant_norm = use_device_quant_norm ? 1u : 0u,
+    .color_tile_row_stride = static_cast<uint32_t>(
+      use_device_cfl ? cfl_x_view.row_stride : 0),
+    .use_device_cfl = use_device_cfl ? 1u : 0u,
     .info_loss_multiplier = 1.2f * std::pow(
       ratio, 0.33677806662454718f),
     .zeros_multiplier = 9.3089059022677905f * std::pow(
@@ -440,7 +492,8 @@ cudaError_t CudaBackend::EncodeAcStrategySubmission(
   for (const ValidatedAcStrategyBatch& batch : ac.batches) {
     const cudaError_t error = LaunchCudaAcStrategyBatch(
       batch.opsin[0], batch.opsin[1], batch.opsin[2],
-      batch.pixel_mask, batch.quant_field, batch.matrices,
+      batch.pixel_mask, batch.quant_field, batch.y_to_x, batch.y_to_b,
+      batch.matrices,
       batch.candidates, batch.scratch_a, batch.scratch_b,
       batch.rate_scratch, batch.costs, batch.params,
       backend.state_->stream);

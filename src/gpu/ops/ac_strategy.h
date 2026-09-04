@@ -71,6 +71,8 @@ struct AcStrategyCandidateBatch {
   ConstDeviceImage3View resident_opsin;
   ConstDevicePlaneView resident_pixel_mask;
   ConstDevicePlaneView resident_quant_field;
+  ConstDevicePlaneView resident_y_to_x;
+  ConstDevicePlaneView resident_y_to_b;
 
   DeviceBuffer* scratch_a = nullptr;
   DeviceBuffer* scratch_b = nullptr;

@@ -46,6 +46,8 @@ Status ValidateSearchInputs(
   ConstPlaneF32View quant_field,
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,
+  bool resident_fields,
+  bool resident_cfl,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
   Extent2D* block_extent,
@@ -70,9 +72,10 @@ Status ValidateSearchInputs(
     return Status::InvalidArgument(
       "GPU AC-strategy search dimensions are too large");
   }
-  if (!quant_field.valid() || quant_field.extent != *block_extent ||
-      !pixel_mask.valid() || pixel_mask.extent != opsin.extent() ||
-      !color_correlation.valid()) {
+  if ((!resident_fields &&
+       (!quant_field.valid() || quant_field.extent != *block_extent ||
+        !pixel_mask.valid() || pixel_mask.extent != opsin.extent())) ||
+      (!resident_cfl && !color_correlation.valid())) {
     return Status::InvalidArgument(
       "GPU AC-strategy search fields have invalid geometry");
   }
@@ -82,7 +85,8 @@ Status ValidateSearchInputs(
     opsin.height() / kColorTileDimension +
       static_cast<size_t>(opsin.height() % kColorTileDimension != 0),
   };
-  if (color_correlation.tile_extent() != *tile_extent ||
+  if ((!resident_cfl &&
+       color_correlation.tile_extent() != *tile_extent) ||
       !std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f) {
     return Status::InvalidArgument(
@@ -153,6 +157,7 @@ Status MakeCandidates(
   ConstPlaneF32View quant_field,
   const ColorCorrelationMap& color_correlation,
   bool device_quant_norm,
+  bool device_cfl,
   std::vector<AcStrategyCandidate>* candidates) {
   if (candidates == nullptr) {
     return Status::Internal("GPU AC-strategy candidate output is null");
@@ -199,8 +204,9 @@ Status MakeCandidates(
       const size_t block_x = tile_x * kColorTileBlockDimension;
       const size_t tile_width =
         std::min(kColorTileBlockDimension, block_extent.width - block_x);
-      const std::array<float, 3> cfl =
-        color_correlation.AcFactors(tile_x, tile_y);
+      const std::array<float, 3> cfl = device_cfl
+        ? std::array<float, 3>{}
+        : color_correlation.AcFactors(tile_x, tile_y);
       for (size_t local_y = 0; local_y + covered.height <= tile_height;
         local_y += staged.anchor_step) {
         for (size_t local_x = 0; local_x + covered.width <= tile_width;
@@ -304,10 +310,14 @@ static Status FindAcStrategyGridGpuImpl(
   Extent2D tile_extent;
   size_t pixel_count = 0;
   size_t block_count = 0;
+  const bool resident_cfl = resident != nullptr &&
+    resident->y_to_x.buffer != nullptr && resident->y_to_b.buffer != nullptr;
   Status status = ValidateSearchInputs(opsin,
     quant_field,
     pixel_mask,
     color_correlation,
+    resident != nullptr,
+    resident_cfl,
     options,
     out,
     &block_extent,
@@ -329,7 +339,14 @@ static Status FindAcStrategyGridGpuImpl(
         resident->quant_field.element_type != DeviceElementType::kF32 ||
         resident->quant_field.extent != block_extent ||
         resident->pixel_mask.element_type != DeviceElementType::kF32 ||
-        resident->pixel_mask.extent != opsin.extent()) {
+        resident->pixel_mask.extent != opsin.extent() ||
+        ((resident->y_to_x.buffer != nullptr) !=
+         (resident->y_to_b.buffer != nullptr)) ||
+        (resident_cfl &&
+         (resident->y_to_x.element_type != DeviceElementType::kI8 ||
+          resident->y_to_b.element_type != DeviceElementType::kI8 ||
+          resident->y_to_x.extent != tile_extent ||
+          resident->y_to_b.extent != tile_extent))) {
       return Status::InvalidArgument(
           "Resident GPU AC-strategy inputs have invalid geometry");
     }
@@ -339,6 +356,12 @@ static Status FindAcStrategyGridGpuImpl(
     if (status.ok()) {
       status = ComputeDevicePlaneRange(
           resident->pixel_mask, gpu.id(), &range);
+    }
+    if (status.ok() && resident_cfl) {
+      status = ComputeDevicePlaneRange(resident->y_to_x, gpu.id(), &range);
+    }
+    if (status.ok() && resident_cfl) {
+      status = ComputeDevicePlaneRange(resident->y_to_b, gpu.id(), &range);
     }
     if (!status.ok()) return status;
   }
@@ -399,6 +422,7 @@ static Status FindAcStrategyGridGpuImpl(
         quant_field,
         color_correlation,
         resident != nullptr,
+        resident_cfl,
         &resource.candidates);
       if (!status.ok()) {
         return status;
@@ -539,6 +563,10 @@ static Status FindAcStrategyGridGpuImpl(
           ? ConstDevicePlaneView{} : resident->pixel_mask,
         .resident_quant_field = resident == nullptr
           ? ConstDevicePlaneView{} : resident->quant_field,
+        .resident_y_to_x = resident == nullptr
+          ? ConstDevicePlaneView{} : resident->y_to_x,
+        .resident_y_to_b = resident == nullptr
+          ? ConstDevicePlaneView{} : resident->y_to_b,
         .scratch_a = state.scratch_a.buffer,
         .scratch_b = state.scratch_b.buffer,
         .rate_scratch = state.rate_scratch.buffer,
@@ -556,7 +584,8 @@ static Status FindAcStrategyGridGpuImpl(
         .pixel_extent = opsin.extent(),
         .opsin_row_stride = opsin.width(),
         .opsin_plane_stride = pixel_count,
-        .pixel_mask_row_stride = pixel_mask.extent.width,
+        .pixel_mask_row_stride = resident == nullptr
+          ? pixel_mask.extent.width : 0,
         .candidate_count = resource.candidates.size(),
         .butteraugli_target = options.butteraugli_target,
       };
