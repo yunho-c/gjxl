@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include "codec/chroma_from_luma.h"
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/dc_conversion.h"
 #include "codec/quantization.h"
 #include "codec/quantization_tables_generated.h"
@@ -1709,6 +1709,12 @@ Status MetalPreparedAqEvaluation::Reconfigure(
           epf_sharpness.Row(y)[x] >= 8) {
         return Status::InvalidArgument(
           "Prepared AQ reconfiguration metadata is invalid");
+      }
+      if (cell.is_anchor &&
+          !chroma_from_luma_internal::StrategyFitsColorTile(
+            x, y, cell.strategy)) {
+        return Status::InvalidArgument(
+          "Prepared AQ reconfiguration strategy crosses a color tile");
       }
     }
   }
@@ -3527,6 +3533,12 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
       if (!status.ok() || !SupportedAqStrategy(cell.strategy)) {
         return Status::InvalidArgument(
             "Prepared AQ strategy grid contains an unsupported strategy");
+      }
+      if (cell.is_anchor &&
+          !chroma_from_luma_internal::StrategyFitsColorTile(
+            x, y, cell.strategy)) {
+        return Status::InvalidArgument(
+          "Prepared AQ strategy crosses a color tile");
       }
       if (preparation.epf_sharpness.Row(y)[x] >= 8) {
         return Status::InvalidArgument(

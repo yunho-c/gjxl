@@ -1085,6 +1085,12 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
             return Status::InvalidArgument(
                 "CUDA resident AQ strategy or EPF value is unsupported");
           }
+          if (cell.is_anchor &&
+              !chroma_from_luma_internal::StrategyFitsColorTile(
+                  x, y, cell.strategy)) {
+            return Status::InvalidArgument(
+                "CUDA resident AQ strategy crosses a color tile");
+          }
           if (cell.is_anchor) {
             const size_t index_in_batch = grouped[batch_index].size();
             grouped[batch_index].push_back(

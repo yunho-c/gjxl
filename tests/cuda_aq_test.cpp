@@ -118,6 +118,93 @@ bool MakeExactStrategies(gjxl::AcStrategyGrid* strategies) {
   return strategies->complete();
 }
 
+bool CheckResidentStrategyGridValidation(
+    gjxl::GpuBackend& gpu, const ImageStorage& source,
+    const ImageStorage& opsin) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  const size_t block_count = blocks.width * blocks.height;
+  gjxl::AcStrategyGrid crossing;
+  gjxl::AcStrategyGrid valid;
+  std::vector<uint8_t> sharpness(block_count);
+  if (!Check(gjxl::AcStrategyGrid::Create(blocks, &crossing),
+             "Create crossing CUDA resident strategy grid") ||
+      !Check(crossing.Set(7, 0, gjxl::AcStrategyType::kDct16x16),
+             "Place crossing CUDA resident strategy") ||
+      !Check(gjxl::AcStrategyGrid::Create(blocks, &valid),
+             "Create valid CUDA resident strategy grid") ||
+      !Check(gjxl::FillDefaultEpfSharpness(
+                 {sharpness.data(), blocks, blocks.width}),
+             "Fill CUDA resident strategy-validation sharpness")) {
+    return false;
+  }
+  crossing.fill_empty_dct8();
+  valid.fill_dct8();
+
+  gjxl::prepared_coefficients_internal::PreparedForwardDctCoefficients
+      cpu_prepared;
+  const gjxl::Status cpu_status =
+      gjxl::prepared_coefficients_internal::PrepareForwardDctCoefficients(
+          opsin.View(), crossing, &cpu_prepared);
+  if (cpu_status.code() != gjxl::StatusCode::kInvalidArgument) {
+    std::cerr << "CPU reconstruction accepted a color-tile-crossing strategy\n";
+    return false;
+  }
+
+  gjxl::AdaptiveQuantizationOptions options;
+  const auto preparation = [&](const gjxl::AcStrategyGrid& strategies) {
+    return gjxl::AqEvaluationPreparation{
+        .original_linear_rgb = source.View(),
+        .coding_opsin = opsin.View(),
+        .strategies = &strategies,
+        .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+        .options = {options.profile, options.butteraugli},
+        .resident_quantization = true,
+        .coefficient_decision_mode =
+            gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant};
+  };
+
+  const gjxl::GpuBackendStats before_rejected_prepare = gpu.stats();
+  std::unique_ptr<gjxl::PreparedAqEvaluation> rejected;
+  const gjxl::Status rejected_prepare =
+      gjxl::PrepareAqEvaluation(gpu, preparation(crossing), &rejected);
+  const gjxl::GpuBackendStats after_rejected_prepare = gpu.stats();
+  if (rejected_prepare.code() != gjxl::StatusCode::kInvalidArgument ||
+      rejected != nullptr ||
+      after_rejected_prepare.successful_allocations !=
+          before_rejected_prepare.successful_allocations ||
+      after_rejected_prepare.committed_submissions !=
+          before_rejected_prepare.committed_submissions) {
+    std::cerr << "CUDA resident preparation accepted or processed a "
+                 "color-tile-crossing strategy\n";
+    return false;
+  }
+
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!Check(gjxl::PrepareAqEvaluation(
+                 gpu, preparation(valid), &prepared),
+             "Prepare CUDA resident strategy-validation operation")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats before_reconfigure = gpu.stats();
+  const gjxl::Status rejected_reconfigure = prepared->Reconfigure(
+      crossing, {sharpness.data(), blocks, blocks.width});
+  const gjxl::GpuBackendStats after_reconfigure = gpu.stats();
+  if (rejected_reconfigure.code() != gjxl::StatusCode::kInvalidArgument ||
+      after_reconfigure.successful_allocations !=
+          before_reconfigure.successful_allocations ||
+      after_reconfigure.committed_submissions !=
+          before_reconfigure.committed_submissions ||
+      !Check(prepared->Reconfigure(
+                 valid, {sharpness.data(), blocks, blocks.width}),
+             "Reuse CUDA resident operation after rejected reconfiguration")) {
+    std::cerr << "CUDA resident reconfiguration accepted a "
+                 "color-tile-crossing strategy or damaged prepared state\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckExactWorkflow(gjxl::GpuBackend& gpu, const ImageStorage& source,
                         const ImageStorage& opsin) {
   const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
@@ -1248,6 +1335,7 @@ int main() {
              "Prepare CUDA AQ opsin") ||
       !CheckExactWorkflow(*gpu, source, opsin) ||
       !CheckExactMaximumError(*gpu, source, opsin) ||
+      !CheckResidentStrategyGridValidation(*gpu, source, opsin) ||
       !CheckFullyResident(*gpu, source, opsin) ||
       !CheckResidentInvariantColorCorrelationContract(*gpu, source, opsin) ||
       !CheckResidentMaximumError(*gpu, source, opsin) ||

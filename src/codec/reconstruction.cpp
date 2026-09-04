@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/dc_conversion.h"
 #include "codec/dc_quantization.h"
 #include "codec/dct.h"
@@ -330,14 +331,8 @@ Status PrepareForwardDctCoefficients(
           (kColorTileDimension / kJxlBlockDimension);
         const size_t tile_y = block_y /
           (kColorTileDimension / kJxlBlockDimension);
-        const size_t tile_block_end_x = std::min(
-          (tile_x + 1) * (kColorTileDimension / kJxlBlockDimension),
-          strategies.extent().width);
-        const size_t tile_block_end_y = std::min(
-          (tile_y + 1) * (kColorTileDimension / kJxlBlockDimension),
-          strategies.extent().height);
-        if (block_x + info->covered_blocks.width > tile_block_end_x ||
-            block_y + info->covered_blocks.height > tile_block_end_y) {
+        if (!chroma_from_luma_internal::StrategyFitsColorTile(
+              block_x, block_y, strategy)) {
           return Status::InvalidArgument(
             "Forward-coefficient strategy crosses a color tile");
         }

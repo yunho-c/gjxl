@@ -107,13 +107,13 @@ bool MakeMixedStrategies(gjxl::AcStrategyGrid *strategies) {
                    "DCT32x32 placement") ||
       !CheckStatus(strategies->Set(4, 0, gjxl::AcStrategyType::kDct32x16),
                    "DCT32x16 placement") ||
-      !CheckStatus(strategies->Set(6, 0, gjxl::AcStrategyType::kDct16x32),
+      !CheckStatus(strategies->Set(4, 4, gjxl::AcStrategyType::kDct16x32),
                    "DCT16x32 placement") ||
-      !CheckStatus(strategies->Set(10, 0, gjxl::AcStrategyType::kDct16x16),
+      !CheckStatus(strategies->Set(8, 0, gjxl::AcStrategyType::kDct16x16),
                    "DCT16x16 placement") ||
-      !CheckStatus(strategies->Set(6, 2, gjxl::AcStrategyType::kDct16x8),
+      !CheckStatus(strategies->Set(10, 0, gjxl::AcStrategyType::kDct16x8),
                    "DCT16x8 placement") ||
-      !CheckStatus(strategies->Set(7, 2, gjxl::AcStrategyType::kDct8x16),
+      !CheckStatus(strategies->Set(10, 2, gjxl::AcStrategyType::kDct8x16),
                    "DCT8x16 placement")) {
     return false;
   }
