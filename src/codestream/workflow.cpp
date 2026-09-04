@@ -776,9 +776,10 @@ struct PreparedWorkflow {
     if (status.ok()) {
       const CpuQuantizationPipelineOutput pipeline_output =
         compatibility_output->Output();
-      status = RunGpuFrameOnlyQuantizationPipeline(
+      status = quantization_pipeline_internal::
+        RunPreparedGpuFrameOnlyQuantizationPipeline(
         *selected_gpu, prepared.original_linear_rgb(),
-        prepared.opsin.const_view(), pipeline_options,
+        prepared.quantization, pipeline_options,
         {
           .initial_quantization = pipeline_output.initial_quantization,
           .quant_field = {
@@ -786,7 +787,8 @@ struct PreparedWorkflow {
             compatibility_output->block_extent,
             compatibility_output->block_extent.width},
           .frame = &compatibility_output->frame,
-        });
+        },
+        &prepared.gpu_adaptive_quantization);
       if (status.ok()) {
         encoding.frame = std::move(compatibility_output->frame);
       }

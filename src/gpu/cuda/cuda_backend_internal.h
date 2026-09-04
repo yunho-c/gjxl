@@ -203,9 +203,11 @@ class CudaBackend final : public GpuBackend,
   Status ValidateAcStrategyCandidateBatch(const AcStrategyCandidateBatch& batch,
                                           ValidatedAcStrategyBatch* out) const;
   Status RequireCudaBuffer(const DeviceBuffer* buffer, size_t required_bytes,
-                           std::string_view role, const CudaBuffer** out) const;
+                           size_t offset_bytes, std::string_view role,
+                           const CudaBuffer** out) const;
   Status RequireCudaBuffer(DeviceBuffer* buffer, size_t required_bytes,
-                           std::string_view role, CudaBuffer** out) const;
+                           size_t offset_bytes, std::string_view role,
+                           CudaBuffer** out) const;
 
   Status ResolvePlane(ConstDevicePlaneView view, ResolvedConstPlane* out) const;
   Status ResolvePlane(DevicePlaneView view, ResolvedPlane* out) const;

@@ -394,11 +394,17 @@ private:
     const MetalBuffer* quant_field = nullptr;
     size_t quant_field_offset_bytes = 0;
     const MetalBuffer* matrices = nullptr;
+    size_t matrices_offset_bytes = 0;
     const MetalBuffer* candidates = nullptr;
+    size_t candidates_offset_bytes = 0;
     MetalBuffer* scratch_a = nullptr;
+    size_t scratch_a_offset_bytes = 0;
     MetalBuffer* scratch_b = nullptr;
+    size_t scratch_b_offset_bytes = 0;
     MetalBuffer* rate_scratch = nullptr;
+    size_t rate_scratch_offset_bytes = 0;
     MetalBuffer* costs = nullptr;
+    size_t costs_offset_bytes = 0;
     const TransformPipeline* forward = nullptr;
     const TransformPipeline* inverse = nullptr;
     MetalAcStrategyBatchParams params{};
@@ -427,12 +433,14 @@ private:
   Status RequireMetalBuffer(
     const DeviceBuffer* buffer,
     size_t required_bytes,
+    size_t offset_bytes,
     std::string_view role,
     const MetalBuffer** out) const;
 
   Status RequireMetalBuffer(
     DeviceBuffer* buffer,
     size_t required_bytes,
+    size_t offset_bytes,
     std::string_view role,
     MetalBuffer** out) const;
 

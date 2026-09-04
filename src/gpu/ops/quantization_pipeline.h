@@ -62,6 +62,16 @@ struct GpuEncodingQuantizationPipelineOutput {
   bool collect_final_butteraugli_score = true;
 };
 
+/// Reuses maximum-throughput prepared device storage across compatible
+/// rate-control attempts.
+[[nodiscard]] Status RunPreparedGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared_pipeline,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* prepared);
+
 /// Reuses target-invariant host preparation across complete GPU attempts.
 [[nodiscard]] Status RunPreparedGpuQuantizationPipeline(
   GpuBackend& gpu,

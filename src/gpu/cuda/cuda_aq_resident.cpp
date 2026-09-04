@@ -32,6 +32,7 @@
 #include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/cuda/cuda_butteraugli_internal.h"
 #include "gpu/cuda/cuda_kernels.h"
+#include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/scratch.h"
 #include "gpu/submission.h"
 
@@ -211,7 +212,9 @@ size_t StrategyBatchIndex(AcStrategyType strategy) noexcept {
 
 }  // namespace
 
-class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
+class CudaPreparedResidentAqEvaluation final
+    : public PreparedAqEvaluation,
+      public aq_evaluation_internal::PreparedAqScaleReconfiguration {
  public:
   explicit CudaPreparedResidentAqEvaluation(CudaBackend& backend)
       : backend_(&backend) {}
@@ -1001,6 +1004,34 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     if (!status.ok()) return Invalidate(status);
     CommitMetadata(std::move(metadata));
     invariant_color_correlation_ready_ = false;
+    forward_coefficients_ready_ = false;
+    color_correlation_pending_ = false;
+    return Status::Ok();
+  }
+
+  Status ReconfigureScaleSelectors(AqEvaluationOptions options) override {
+    Status status = ValidateOptions(options);
+    if (!status.ok()) return status;
+    std::unique_lock lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation is already in use");
+    }
+    if (invalid_) {
+      return Status::FailedPrecondition(
+          "CUDA resident AQ evaluation was invalidated");
+    }
+    AqEvaluationOptions normalized_previous = options_;
+    AqEvaluationOptions normalized_current = options;
+    normalized_previous.profile.x_qm_scale = 0;
+    normalized_previous.profile.b_qm_scale = 0;
+    normalized_current.profile.x_qm_scale = 0;
+    normalized_current.profile.b_qm_scale = 0;
+    if (normalized_previous != normalized_current) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ reconfiguration changes non-scale options");
+    }
+    options_ = options;
     forward_coefficients_ready_ = false;
     color_correlation_pending_ = false;
     return Status::Ok();

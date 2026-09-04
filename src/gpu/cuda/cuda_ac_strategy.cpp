@@ -42,8 +42,9 @@ const T* OffsetPointer(const void* pointer, size_t offset_bytes) {
 
 DeviceMemoryRange BufferRange(
   const DeviceBuffer* buffer,
+  size_t offset_bytes,
   size_t size_bytes) noexcept {
-  return {buffer, 0, size_bytes};
+  return {buffer, offset_bytes, size_bytes};
 }
 
 }  // namespace
@@ -67,12 +68,14 @@ bool CudaBackend::IsSupportedAcStrategy(
 Status CudaBackend::RequireCudaBuffer(
   const DeviceBuffer* buffer,
   size_t required_bytes,
+  size_t offset_bytes,
   std::string_view role,
   const CudaBuffer** out) const {
   if (buffer == nullptr || out == nullptr) {
     return Status::InvalidArgument(std::string(role) + " buffer is null");
   }
-  if (buffer->size_bytes() < required_bytes) {
+  if (offset_bytes > buffer->size_bytes() ||
+      required_bytes > buffer->size_bytes() - offset_bytes) {
     return Status::InvalidArgument(
       std::string(role) + " buffer is too small");
   }
@@ -89,11 +92,12 @@ Status CudaBackend::RequireCudaBuffer(
 Status CudaBackend::RequireCudaBuffer(
   DeviceBuffer* buffer,
   size_t required_bytes,
+  size_t offset_bytes,
   std::string_view role,
   CudaBuffer** out) const {
   const CudaBuffer* validated = nullptr;
   Status status = RequireCudaBuffer(
-    static_cast<const DeviceBuffer*>(buffer), required_bytes, role,
+    static_cast<const DeviceBuffer*>(buffer), required_bytes, offset_bytes, role,
     &validated);
   if (!status.ok()) return status;
   *out = const_cast<CudaBuffer*>(validated);
@@ -173,13 +177,15 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
     for (size_t channel = 0; channel < 3; ++channel) {
       size_t offset_elements = 0;
       if (!TryMultiply(channel, batch.opsin_plane_stride, &offset_elements) ||
-          !TryMultiply(offset_elements, sizeof(float), &offset_elements)) {
+          !TryMultiply(offset_elements, sizeof(float), &offset_elements) ||
+          batch.opsin_offset_bytes >
+            std::numeric_limits<size_t>::max() - offset_elements) {
         return Status::InvalidArgument(
           "AC-strategy packed opsin offset overflows");
       }
       opsin_views[channel] = {
         batch.opsin,
-        offset_elements,
+        batch.opsin_offset_bytes + offset_elements,
         DeviceElementType::kF32,
         batch.pixel_extent,
         batch.opsin_row_stride,
@@ -187,7 +193,7 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
     }
     mask_view = {
       batch.pixel_mask,
-      0,
+      batch.pixel_mask_offset_bytes,
       DeviceElementType::kF32,
       batch.pixel_extent,
       batch.pixel_mask_row_stride,
@@ -265,6 +271,25 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   }
   const size_t gather_blocks =
     (packed_element_count + 255) / 256;
+  const std::array<size_t, 6> buffer_offsets = {
+    batch.matrices_offset_bytes,
+    batch.candidates_offset_bytes,
+    batch.scratch_a_offset_bytes,
+    batch.scratch_b_offset_bytes,
+    batch.rate_scratch_offset_bytes,
+    batch.costs_offset_bytes,
+  };
+  if (std::ranges::any_of(buffer_offsets,
+        [](size_t offset) { return offset % alignof(float) != 0; })) {
+    return Status::InvalidArgument(
+      "AC-strategy batch buffer offset alignment is invalid");
+  }
+  if (!use_resident &&
+      (batch.opsin_offset_bytes % alignof(float) != 0 ||
+       batch.pixel_mask_offset_bytes % alignof(float) != 0)) {
+    return Status::InvalidArgument(
+      "AC-strategy packed input offset alignment is invalid");
+  }
   if (coefficient_count > state_->maximum_threads_per_block) {
     return Status::Unavailable(
       "CUDA cannot launch the required AC-strategy thread block");
@@ -307,21 +332,27 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   CudaBuffer* rate_scratch = nullptr;
   CudaBuffer* costs = nullptr;
   status = RequireCudaBuffer(
-    batch.matrices, matrix_bytes, "Quantization matrix", &matrices);
+    batch.matrices, matrix_bytes, batch.matrices_offset_bytes,
+    "Quantization matrix", &matrices);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(
-    batch.candidates, candidate_bytes, "Candidate", &candidates);
+    batch.candidates, candidate_bytes, batch.candidates_offset_bytes,
+    "Candidate", &candidates);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(
-    batch.scratch_a, packed_bytes, "Scratch A", &scratch_a);
+    batch.scratch_a, packed_bytes, batch.scratch_a_offset_bytes,
+    "Scratch A", &scratch_a);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(
-    batch.scratch_b, packed_bytes, "Scratch B", &scratch_b);
+    batch.scratch_b, packed_bytes, batch.scratch_b_offset_bytes,
+    "Scratch B", &scratch_b);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(
-    batch.rate_scratch, rate_bytes, "Rate scratch", &rate_scratch);
+    batch.rate_scratch, rate_bytes, batch.rate_scratch_offset_bytes,
+    "Rate scratch", &rate_scratch);
   if (!status.ok()) return status;
-  status = RequireCudaBuffer(batch.costs, cost_bytes, "Cost", &costs);
+  status = RequireCudaBuffer(batch.costs, cost_bytes,
+    batch.costs_offset_bytes, "Cost", &costs);
   if (!status.ok()) return status;
 
   const std::array<DeviceMemoryRange, 7> input_ranges = {
@@ -330,14 +361,16 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
     resolved_opsin[2].range,
     resolved_mask.range,
     use_device_quant_norm ? resolved_quant.range : DeviceMemoryRange{},
-    BufferRange(batch.matrices, matrix_bytes),
-    BufferRange(batch.candidates, candidate_bytes),
+    BufferRange(batch.matrices, batch.matrices_offset_bytes, matrix_bytes),
+    BufferRange(batch.candidates, batch.candidates_offset_bytes,
+      candidate_bytes),
   };
   const std::array<DeviceMemoryRange, 4> output_ranges = {
-    BufferRange(batch.scratch_a, packed_bytes),
-    BufferRange(batch.scratch_b, packed_bytes),
-    BufferRange(batch.rate_scratch, rate_bytes),
-    BufferRange(batch.costs, cost_bytes),
+    BufferRange(batch.scratch_a, batch.scratch_a_offset_bytes, packed_bytes),
+    BufferRange(batch.scratch_b, batch.scratch_b_offset_bytes, packed_bytes),
+    BufferRange(batch.rate_scratch, batch.rate_scratch_offset_bytes,
+      rate_bytes),
+    BufferRange(batch.costs, batch.costs_offset_bytes, cost_bytes),
   };
   for (size_t index = 0; index < output_ranges.size(); ++index) {
     for (size_t other = index + 1; other < output_ranges.size(); ++other) {
@@ -359,12 +392,18 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   const float ratio =
     (batch.butteraugli_target + kBias) / (1.0f + kBias);
   validated.strategy = batch.strategy;
-  validated.matrices = static_cast<const float*>(matrices->pointer());
-  validated.candidates = candidates->pointer();
-  validated.scratch_a = static_cast<float*>(scratch_a->pointer());
-  validated.scratch_b = static_cast<float*>(scratch_b->pointer());
-  validated.rate_scratch = rate_scratch->pointer();
-  validated.costs = static_cast<float*>(costs->pointer());
+  validated.matrices = OffsetPointer<float>(
+    matrices->pointer(), batch.matrices_offset_bytes);
+  validated.candidates = OffsetPointer<std::byte>(
+    candidates->pointer(), batch.candidates_offset_bytes);
+  validated.scratch_a = const_cast<float*>(OffsetPointer<float>(
+    scratch_a->pointer(), batch.scratch_a_offset_bytes));
+  validated.scratch_b = const_cast<float*>(OffsetPointer<float>(
+    scratch_b->pointer(), batch.scratch_b_offset_bytes));
+  validated.rate_scratch = const_cast<std::byte*>(OffsetPointer<std::byte>(
+    rate_scratch->pointer(), batch.rate_scratch_offset_bytes));
+  validated.costs = const_cast<float*>(OffsetPointer<float>(
+    costs->pointer(), batch.costs_offset_bytes));
   validated.params = {
     .pixel_width = static_cast<uint32_t>(batch.pixel_extent.width),
     .pixel_height = static_cast<uint32_t>(batch.pixel_extent.height),

@@ -77,6 +77,19 @@ struct AcStrategyCandidateBatch {
   DeviceBuffer* rate_scratch = nullptr;
   DeviceBuffer* costs = nullptr;
 
+  // Byte offsets make it possible to suballocate every legacy packed input,
+  // immutable stage table, and mutable output from a small number of owning
+  // buffers. Offsets must satisfy the natural alignment of the referenced
+  // element type and the complete range must remain inside its buffer.
+  size_t opsin_offset_bytes = 0;
+  size_t pixel_mask_offset_bytes = 0;
+  size_t matrices_offset_bytes = 0;
+  size_t candidates_offset_bytes = 0;
+  size_t scratch_a_offset_bytes = 0;
+  size_t scratch_b_offset_bytes = 0;
+  size_t rate_scratch_offset_bytes = 0;
+  size_t costs_offset_bytes = 0;
+
   Extent2D pixel_extent;
   size_t opsin_row_stride = 0;
   size_t opsin_plane_stride = 0;

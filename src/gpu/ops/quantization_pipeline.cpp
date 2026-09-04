@@ -198,13 +198,39 @@ Status PrepareResidentAcStrategyInputs(
       : AqEvaluationMetric::kButteraugli,
     .maximum_error = options.adaptive_quantization.maximum_error,
   };
-  const bool compatible = state.evaluation != nullptr &&
+  const bool same_preparation = state.evaluation != nullptr &&
     state.quantization_pipeline_generation == prepared.generation &&
     state.backend == &gpu &&
     SameImageIdentity(state.original_linear_rgb, original_linear_rgb) &&
     SameImageIdentity(state.coding_opsin, prepared.coding_opsin) &&
-    state.evaluation_options == evaluation_options &&
-    state.resident_quantization;
+    state.resident_quantization && !state.frame_only_resident_frontend;
+  bool compatible = same_preparation &&
+    state.evaluation_options == evaluation_options;
+  Status status = Status::Ok();
+  if (same_preparation && !compatible) {
+    AqEvaluationOptions normalized_previous = state.evaluation_options;
+    AqEvaluationOptions normalized_current = evaluation_options;
+    normalized_previous.profile.x_qm_scale = 0;
+    normalized_previous.profile.b_qm_scale = 0;
+    normalized_current.profile.x_qm_scale = 0;
+    normalized_current.profile.b_qm_scale = 0;
+    if (normalized_previous == normalized_current) {
+      auto* reconfiguration = dynamic_cast<
+        aq_evaluation_internal::PreparedAqScaleReconfiguration*>(
+          state.evaluation.get());
+      if (reconfiguration != nullptr) {
+        status = reconfiguration->ReconfigureScaleSelectors(
+          evaluation_options);
+        compatible = status.ok();
+        if (compatible) state.evaluation_options = evaluation_options;
+      }
+    }
+  }
+  if (!status.ok()) {
+    state.evaluation.reset();
+    state.resident_coding_opsin = {};
+    return status;
+  }
   if (!compatible) {
     const auto preparation_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
@@ -212,7 +238,7 @@ Status PrepareResidentAcStrategyInputs(
     state.evaluation.reset();
     state.resident_coding_opsin = {};
     AcStrategyGrid provisional_strategies;
-    Status status = AcStrategyGrid::Create(
+    status = AcStrategyGrid::Create(
         prepared.block_extent, &provisional_strategies);
     if (!status.ok()) return status;
     provisional_strategies.fill_dct8();
@@ -280,6 +306,7 @@ Status PrepareResidentAcStrategyInputs(
     state.coding_opsin = prepared.coding_opsin;
     state.evaluation_options = evaluation_options;
     state.resident_quantization = true;
+    state.frame_only_resident_frontend = false;
   }
 
   constexpr float kMaximumErrorInitializationTarget = 1.0f;
@@ -309,7 +336,6 @@ Status PrepareResidentAcStrategyInputs(
   const auto initial_begin = profiling_session == nullptr
     ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
     : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
-  Status status;
   if (profiling_session == nullptr) {
     status = state.evaluation->ComputeInitialQuantization(
       initial_options, initial_output, nullptr, 0.0f,
@@ -362,12 +388,13 @@ Status PrepareResidentAcStrategyInputs(
 
 }  // namespace
 
-Status RunGpuFrameOnlyQuantizationPipeline(
+static Status RunGpuFrameOnlyQuantizationPipelineImpl(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
   CpuQuantizationPipelineOptions options,
-  GpuFrameOnlyPipelineOutput output) {
+  GpuFrameOnlyPipelineOutput output,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* prepared) {
 
   if (!original_linear_rgb.valid() || !opsin.valid() ||
       !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
@@ -421,14 +448,15 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
     adaptive_options.butteraugli_target = options.butteraugli_target;
-    status = RunGpuFrameOnlyQuantizationResidentFrontend(
+    status = adaptive_quantization_gpu_internal::
+      RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
       gpu, original_linear_rgb, opsin, strategies,
       {sharpness.data(), block_extent, block_extent.width},
       {
         .butteraugli_target = initial_quant_target,
         .rescale = options.initial_quant_rescale,
       },
-      adaptive_options,
+      adaptive_options, prepared,
       {
         .quant_field = {
           initial_quant.data(), block_extent, block_extent.width},
@@ -459,6 +487,51 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     return Status::InvalidArgument(
       "GPU frame-only pipeline dimensions are too large");
   }
+}
+
+Status RunGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output) {
+
+  return RunGpuFrameOnlyQuantizationPipelineImpl(
+    gpu, original_linear_rgb, opsin, options, output, nullptr);
+}
+
+Status quantization_pipeline_internal::
+RunPreparedGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared_pipeline,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* prepared) {
+
+  if (prepared == nullptr) {
+    return Status::InvalidArgument(
+      "Prepared GPU frame-only pipeline state is null");
+  }
+  if (prepared_pipeline.generation == 0) {
+    return Status::InvalidArgument(
+      "GPU frame-only pipeline preparation has no source generation");
+  }
+  if (prepared->quantization_pipeline_generation !=
+      prepared_pipeline.generation) {
+    prepared->resident_coding_opsin = {};
+    prepared->backend = nullptr;
+    prepared->original_linear_rgb = {};
+    prepared->coding_opsin = {};
+    prepared->evaluation_options = {};
+    prepared->resident_quantization = false;
+    prepared->frame_only_resident_frontend = false;
+    prepared->evaluation.reset();
+    prepared->quantization_pipeline_generation = prepared_pipeline.generation;
+  }
+  return RunGpuFrameOnlyQuantizationPipelineImpl(
+    gpu, original_linear_rgb, prepared_pipeline.coding_opsin, options, output,
+    prepared);
 }
 
 Status RunGpuQuantizationPipeline(
@@ -555,6 +628,7 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     prepared_aq->coding_opsin = {};
     prepared_aq->evaluation_options = {};
     prepared_aq->resident_quantization = false;
+    prepared_aq->frame_only_resident_frontend = false;
     prepared_aq->evaluation.reset();
     prepared_aq->quantization_pipeline_generation = prepared.generation;
   }

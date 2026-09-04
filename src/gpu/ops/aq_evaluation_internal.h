@@ -28,4 +28,15 @@ public:
     gpu_profile_internal::GpuExecutionProfile* profile) = 0;
 };
 
+/// Optional prepared-operation capability for target-size retries whose only
+/// evaluation-profile changes are the quantization-matrix scale selectors.
+/// The operation retains its device allocations and all source data.
+class PreparedAqScaleReconfiguration {
+public:
+  virtual ~PreparedAqScaleReconfiguration() = default;
+
+  [[nodiscard]] virtual Status ReconfigureScaleSelectors(
+    AqEvaluationOptions options) = 0;
+};
+
 }  // namespace gjxl::aq_evaluation_internal

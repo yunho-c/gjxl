@@ -23,6 +23,7 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/adaptive_quantization_profile_internal.h"
 
 namespace gjxl {
@@ -460,13 +461,36 @@ Status RunGpuAdaptiveQuantizationImpl(
         same_plane(left.plane[1], right.plane[1]) &&
         same_plane(left.plane[2], right.plane[2]);
     };
-    const bool compatible = reusable->evaluation != nullptr &&
+    const bool same_preparation = reusable->evaluation != nullptr &&
       reusable->backend == &gpu &&
       same_image(reusable->original_linear_rgb, original_linear_rgb) &&
       same_image(reusable->coding_opsin, opsin) &&
-      reusable->evaluation_options == evaluation_options &&
-      reusable->resident_quantization == resident_quantization;
-    if (compatible) {
+      reusable->resident_quantization == resident_quantization &&
+      !reusable->frame_only_resident_frontend;
+    bool compatible = same_preparation &&
+      reusable->evaluation_options == evaluation_options;
+    if (same_preparation && !compatible) {
+      AqEvaluationOptions normalized_previous = reusable->evaluation_options;
+      AqEvaluationOptions normalized_current = evaluation_options;
+      normalized_previous.profile.x_qm_scale = 0;
+      normalized_previous.profile.b_qm_scale = 0;
+      normalized_current.profile.x_qm_scale = 0;
+      normalized_current.profile.b_qm_scale = 0;
+      if (normalized_previous == normalized_current) {
+        auto* reconfiguration = dynamic_cast<
+          aq_evaluation_internal::PreparedAqScaleReconfiguration*>(
+            reusable->evaluation.get());
+        if (reconfiguration != nullptr) {
+          status = reconfiguration->ReconfigureScaleSelectors(
+            evaluation_options);
+          compatible = status.ok();
+          if (compatible) {
+            reusable->evaluation_options = evaluation_options;
+          }
+        }
+      }
+    }
+    if (status.ok() && compatible) {
       const auto reconfigure_begin = profiling
         ? gpu_profile_internal::GpuProfilingSession::BeginWallStage()
         : gpu_profile_internal::GpuProfilingSession::TimePoint{};
@@ -478,7 +502,7 @@ Status RunGpuAdaptiveQuantizationImpl(
           gpu_profile_internal::GpuWallStageKind::kPreparation,
           reconfigure_begin);
       }
-    } else {
+    } else if (status.ok()) {
       reusable->resident_coding_opsin = {};
       reusable->evaluation.reset();
       status = prepare_evaluation(&reusable->evaluation);
@@ -488,6 +512,7 @@ Status RunGpuAdaptiveQuantizationImpl(
         reusable->coding_opsin = opsin;
         reusable->evaluation_options = evaluation_options;
         reusable->resident_quantization = resident_quantization;
+        reusable->frame_only_resident_frontend = false;
       }
     }
     prepared = reusable->evaluation.get();
@@ -906,7 +931,8 @@ Status RunGpuFrameOnlyQuantizationResidentInitialCfl(
       epf_sharpness, nullptr, true, options, output);
 }
 
-Status RunGpuFrameOnlyQuantizationResidentFrontend(
+Status adaptive_quantization_gpu_internal::
+RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
@@ -914,6 +940,7 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
   ConstPlaneU8View epf_sharpness,
   InitialQuantizationOptions initial_options,
   AdaptiveQuantizationOptions options,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* reusable,
   InitialQuantFieldOutput initial_output,
   GpuFrameOnlyQuantizationOutput output) {
 
@@ -947,32 +974,128 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
       : strategy_status;
   }
   try {
-    std::unique_ptr<PreparedAqEvaluation> prepared;
-    Status status = PrepareAqEvaluation(
-      gpu,
-      {
-        .original_linear_rgb = original_linear_rgb,
-        .coding_opsin = opsin,
-        .strategies = &strategies,
-        .epf_sharpness = epf_sharpness,
-        .options = {options.profile, options.butteraugli},
-        .frame_only = true,
-        .frame_only_inverse_gaborish = options.profile.loop_filter.gaborish,
-        .resident_initial_cfl = true,
-        .frame_only_resident_initial_quant = true,
-        .frame_only_resident_quantizer = true,
-        .coefficient_decision_mode =
-          AcCoefficientDecisionMode::kAdjustedSharedQuant,
-      },
-      &prepared);
-    if (!status.ok()) return status;
+    const AqEvaluationOptions evaluation_options{
+      .profile = options.profile,
+      .butteraugli = options.butteraugli,
+    };
+    const AqEvaluationPreparation evaluation_preparation{
+      .original_linear_rgb = original_linear_rgb,
+      .coding_opsin = opsin,
+      .strategies = &strategies,
+      .epf_sharpness = epf_sharpness,
+      .options = evaluation_options,
+      .frame_only = true,
+      .frame_only_inverse_gaborish = options.profile.loop_filter.gaborish,
+      .resident_initial_cfl = true,
+      .frame_only_resident_initial_quant = true,
+      .frame_only_resident_quantizer = true,
+      .coefficient_decision_mode =
+        AcCoefficientDecisionMode::kAdjustedSharedQuant,
+    };
+    const auto same_plane = [](ConstPlaneF32View left,
+                               ConstPlaneF32View right) {
+      return left.data == right.data && left.extent == right.extent &&
+        left.stride == right.stride;
+    };
+    const auto same_image = [&](ConstImage3FView left,
+                                ConstImage3FView right) {
+      return same_plane(left.plane[0], right.plane[0]) &&
+        same_plane(left.plane[1], right.plane[1]) &&
+        same_plane(left.plane[2], right.plane[2]);
+    };
+    std::unique_ptr<PreparedAqEvaluation> local_prepared;
+    PreparedAqEvaluation* prepared = nullptr;
+    Status status = Status::Ok();
+    if (reusable == nullptr) {
+      status = PrepareAqEvaluation(
+        gpu, evaluation_preparation, &local_prepared);
+      prepared = local_prepared.get();
+    } else {
+      const bool same_preparation = reusable->evaluation != nullptr &&
+        reusable->backend == &gpu &&
+        same_image(reusable->original_linear_rgb, original_linear_rgb) &&
+        same_image(reusable->coding_opsin, opsin) &&
+        !reusable->resident_quantization &&
+        reusable->frame_only_resident_frontend;
+      AqEvaluationOptions normalized_previous = reusable->evaluation_options;
+      AqEvaluationOptions normalized_current = evaluation_options;
+      normalized_previous.profile.x_qm_scale = 0;
+      normalized_previous.profile.b_qm_scale = 0;
+      normalized_current.profile.x_qm_scale = 0;
+      normalized_current.profile.b_qm_scale = 0;
+      const bool scale_only_change = same_preparation &&
+        normalized_previous == normalized_current;
+      if (same_preparation &&
+          reusable->evaluation_options == evaluation_options) {
+        status = reusable->evaluation->Reconfigure(
+          strategies, epf_sharpness);
+      } else if (scale_only_change) {
+        auto* reconfiguration = dynamic_cast<
+          aq_evaluation_internal::PreparedAqScaleReconfiguration*>(
+            reusable->evaluation.get());
+        if (reconfiguration != nullptr) {
+          status = reconfiguration->ReconfigureScaleSelectors(
+            evaluation_options);
+          if (status.ok()) {
+            status = reusable->evaluation->Reconfigure(
+              strategies, epf_sharpness);
+          }
+        } else {
+          status = Status::Unavailable(
+            "Prepared frame-only profile reconfiguration is unavailable");
+        }
+        if (status.ok()) {
+          reusable->evaluation_options = evaluation_options;
+        }
+      } else {
+        reusable->resident_coding_opsin = {};
+        reusable->evaluation.reset();
+        status = PrepareAqEvaluation(
+          gpu, evaluation_preparation, &reusable->evaluation);
+        if (status.ok()) {
+          reusable->backend = &gpu;
+          reusable->original_linear_rgb = original_linear_rgb;
+          reusable->coding_opsin = opsin;
+          reusable->evaluation_options = evaluation_options;
+          reusable->resident_quantization = false;
+          reusable->frame_only_resident_frontend = true;
+        }
+      }
+      if (status.code() == StatusCode::kUnavailable && scale_only_change) {
+        reusable->evaluation.reset();
+        status = PrepareAqEvaluation(
+          gpu, evaluation_preparation, &reusable->evaluation);
+        if (status.ok()) {
+          reusable->backend = &gpu;
+          reusable->original_linear_rgb = original_linear_rgb;
+          reusable->coding_opsin = opsin;
+          reusable->evaluation_options = evaluation_options;
+          reusable->resident_quantization = false;
+          reusable->frame_only_resident_frontend = true;
+        }
+      }
+      prepared = reusable->evaluation.get();
+    }
+    if (!status.ok() || prepared == nullptr) {
+      if (reusable != nullptr) reusable->evaluation.reset();
+      return status.ok()
+        ? Status::Internal(
+            "Resident frame-only preparation produced no evaluator")
+        : status;
+    }
     float quant_dc = 0.0f;
     status = ComputeInitialQuantDc(options.butteraugli_target, &quant_dc);
-    if (!status.ok()) return status;
+    if (!status.ok()) {
+      if (reusable != nullptr) reusable->evaluation.reset();
+      return status;
+    }
     QuantizerParams quantizer;
     status = prepared->ComputeInitialQuantization(
       initial_options, initial_output, &quantizer, quant_dc);
-    if (!status.ok()) return status;
+    if (!status.ok()) {
+      if (reusable != nullptr) reusable->evaluation.reset();
+      return status;
+    }
     const ConstPlaneF32View initial_quant{
       initial_output.quant_field.data,
       initial_output.quant_field.extent,
@@ -981,14 +1104,20 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
     status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
       original_linear_rgb, opsin, strategies, initial_quant,
       epf_sharpness, options);
-    if (!status.ok()) return status;
+    if (!status.ok()) {
+      if (reusable != nullptr) reusable->evaluation.reset();
+      return status;
+    }
     VarDctEncoderFrame candidate;
     status = prepared->EncodeFrame(
       {
         .quantizer = quantizer,
       },
       &candidate);
-    if (!status.ok()) return status;
+    if (!status.ok()) {
+      if (reusable != nullptr) reusable->evaluation.reset();
+      return status;
+    }
     for (size_t y = 0; y < strategies.extent().height; ++y) {
       std::copy_n(initial_quant.Row(y), strategies.extent().width,
                   output.quant_field.Row(y));
@@ -996,12 +1125,31 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
     *output.frame = std::move(candidate);
     return Status::Ok();
   } catch (const std::bad_alloc&) {
+    if (reusable != nullptr) reusable->evaluation.reset();
     return Status::OutOfMemory(
       "Unable to allocate resident frame-only frontend storage");
   } catch (const std::length_error&) {
+    if (reusable != nullptr) reusable->evaluation.reset();
     return Status::InvalidArgument(
       "Resident frame-only frontend dimensions are too large");
   }
+}
+
+Status RunGpuFrameOnlyQuantizationResidentFrontend(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output) {
+
+  return adaptive_quantization_gpu_internal::
+    RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
+      gpu, original_linear_rgb, opsin, strategies, epf_sharpness,
+      initial_options, options, nullptr, initial_output, output);
 }
 
 Status RunGpuAdaptiveQuantizationPolicy(

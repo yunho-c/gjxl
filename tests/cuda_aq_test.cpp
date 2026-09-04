@@ -1079,6 +1079,7 @@ bool CheckPreparedReuseAndFailure(
   gjxl::AdaptiveQuantizationOptions aq_options;
   const gjxl::InitialQuantizationOptions initial_options{1.0f, 1.0f};
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  const gjxl::GpuBackendStats before_prepare = gpu.stats();
   if (!Check(gjxl::PrepareAqEvaluation(
       gpu,
       {
@@ -1098,6 +1099,11 @@ bool CheckPreparedReuseAndFailure(
     return false;
   }
   const gjxl::GpuBackendStats prepared_stats = gpu.stats();
+  if (prepared_stats.successful_allocations !=
+      before_prepare.successful_allocations + 2) {
+    std::cerr << "CUDA maximum-throughput preparation did not use two arenas\n";
+    return false;
+  }
   std::vector<float> quant(block_count, 19.0f);
   std::vector<float> strategy(block_count, 19.0f);
   std::vector<float> pixel(pixel_count, 19.0f);
@@ -1196,6 +1202,7 @@ bool CheckPublicWorkflow(
 
   std::vector<uint8_t> resident_bytes;
   gjxl::VarDctEncodingSummary resident_summary;
+  const gjxl::GpuBackendStats before_resident = gpu.stats();
   if (!Check(encode(gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
                     true, &resident_bytes, &resident_summary),
       "Forced resident CUDA public workflow") || resident_bytes.empty() ||
@@ -1205,6 +1212,12 @@ bool CheckPublicWorkflow(
         gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
       resident_summary.score_history.size() != 3 ||
       !resident_summary.final_butteraugli_score_evaluated) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_resident = gpu.stats();
+  if (after_resident.successful_allocations !=
+      before_resident.successful_allocations + 4) {
+    std::cerr << "Fresh resident CUDA workflow did not use four arenas\n";
     return false;
   }
 
@@ -1263,6 +1276,7 @@ bool CheckPublicWorkflow(
 
   std::vector<uint8_t> target_bytes;
   gjxl::VarDctEncodingSummary target_summary;
+  const gjxl::GpuBackendStats before_resident_target = gpu.stats();
   if (!Check(gjxl::codestream_internal::
       EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
         source.View(),
@@ -1274,7 +1288,10 @@ bool CheckPublicWorkflow(
         &gpu, false, &target_bytes, &target_summary),
       "Forced resident CUDA target-size workflow") || target_bytes.empty() ||
       target_summary.execution_backend != gjxl::VarDctExecutionBackend::kCuda ||
-      target_summary.encode_attempt_count != 2) {
+      target_summary.encode_attempt_count != 2 ||
+      gpu.stats().successful_allocations !=
+        before_resident_target.successful_allocations + 4) {
+    std::cerr << "Resident target attempts did not reuse four arenas\n";
     return false;
   }
 
@@ -1285,6 +1302,7 @@ bool CheckPublicWorkflow(
     .backend = gjxl::VarDctBackendPreference::kCuda,
     .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput,
   };
+  const gjxl::GpuBackendStats before_maximum = gpu.stats();
   if (!Check(gjxl::codestream_internal::
       EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
         source.View(), options, &gpu, false, &bytes, &summary),
@@ -1293,6 +1311,42 @@ bool CheckPublicWorkflow(
       summary.gpu_aq_mode !=
         gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput ||
       !summary.score_history.empty()) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_maximum = gpu.stats();
+  if (after_maximum.successful_allocations !=
+      before_maximum.successful_allocations + 2) {
+    std::cerr << "Fresh maximum-throughput CUDA workflow did not use two "
+                 "arenas\n";
+    return false;
+  }
+
+  std::vector<uint8_t> maximum_target_bytes;
+  gjxl::VarDctEncodingSummary maximum_target_summary;
+  gjxl::VarDctEncodingOptions maximum_target_options = options;
+  maximum_target_options.rate_control_mode =
+      gjxl::VarDctRateControlMode::kTargetBytes;
+  maximum_target_options.target_bytes = 512;
+  maximum_target_options.target_size_maximum_attempts = 2;
+  const gjxl::GpuBackendStats before_maximum_target = gpu.stats();
+  const gjxl::Status maximum_target_status = gjxl::codestream_internal::
+      EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+        source.View(), maximum_target_options, &gpu, false,
+        &maximum_target_bytes, &maximum_target_summary);
+  const gjxl::GpuBackendStats after_maximum_target = gpu.stats();
+  if (!Check(maximum_target_status,
+      "Forced maximum-throughput CUDA target-size workflow") ||
+      maximum_target_bytes.empty() ||
+      maximum_target_summary.execution_backend !=
+        gjxl::VarDctExecutionBackend::kCuda ||
+      maximum_target_summary.encode_attempt_count != 2 ||
+      after_maximum_target.successful_allocations !=
+        before_maximum_target.successful_allocations + 2) {
+    std::cerr << "Maximum-throughput target attempts did not reuse arenas: "
+              << maximum_target_summary.encode_attempt_count << " attempts, "
+              << (after_maximum_target.successful_allocations -
+                  before_maximum_target.successful_allocations)
+              << " allocations\n";
     return false;
   }
 

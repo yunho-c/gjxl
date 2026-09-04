@@ -178,8 +178,23 @@ struct PreparedAdaptiveQuantization {
   ConstImage3FView coding_opsin;
   AqEvaluationOptions evaluation_options;
   bool resident_quantization = false;
+  bool frame_only_resident_frontend = false;
   std::unique_ptr<PreparedAqEvaluation> evaluation;
 };
+
+/// Reuses a compatible maximum-throughput evaluator across rate-control
+/// attempts. A failed prepared operation is discarded before returning.
+[[nodiscard]] Status RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  PreparedAdaptiveQuantization* prepared,
+  InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output);
 
 [[nodiscard]] Status RunPreparedGpuAdaptiveQuantization(
   GpuBackend& gpu,
