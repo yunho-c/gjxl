@@ -2183,6 +2183,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       epf_iterations;
     const size_t stage_count =
       score_count * stages_per_iteration +
+      static_cast<size_t>(profile_final_color_correlation) +
       static_cast<size_t>(!resident_evaluate_final_field_) *
         (1 + kSupportedAqStrategies.size()) + 1;
     try {
@@ -2265,6 +2266,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           append_reconstruction_stage(
             "aq.reconstruction.final_cfl",
             ReconstructionProfileStage::kFinalColorCorrelation, iteration);
+          append_reconstruction_stage(
+            "aq.reconstruction.evaluation_quantizer",
+            ReconstructionProfileStage::kQuantizer, iteration);
         }
         for (size_t batch_index = 0; batch_index < batches_.size();
              ++batch_index) {
@@ -2697,14 +2701,29 @@ Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
     return Status::FailedPrecondition(
       "Prepared resident color correlation requires ready state");
   }
-  // The next resident evaluation already uploads this field and selects its
-  // quantizer. Schedule final CfL in that same command buffer so no additional
-  // submission or host synchronization is introduced.
-  (void)quant_dc;
-  invariant_color_correlation_ready_ = true;
+  invariant_color_correlation_ready_ = false;
   resident_forward_coefficients_ready_ = false;
-  resident_color_correlation_pending_ = true;
+  resident_color_correlation_pending_ = false;
   resident_color_correlation_readback_needed_ = false;
+  // Inverse-sigma scratch is untouched until coefficient reconstruction.
+  // Retain the preparation field there so the first evaluation can derive
+  // invariant CfL before reusing the same storage.
+  Status status = UploadPlane(*backend_, quant_field, inverse_sigma_);
+  if (!status.ok()) {
+    submission_.reset();
+    state_ = State::kInvalid;
+    return status;
+  }
+  resident_invariant_quant_selection_params_ =
+    resident_quant_selection_params_;
+  resident_invariant_quant_selection_params_.quant_stride =
+    static_cast<uint32_t>(inverse_sigma_.row_stride);
+  resident_invariant_quant_selection_params_.quant_dc = quant_dc;
+  resident_invariant_quant_selection_params_.scaled_quant_dc =
+    static_cast<uint32_t>(static_cast<int32_t>(
+      static_cast<double>(quant_dc * 4096.0f) * 1.6));
+  invariant_color_correlation_ready_ = true;
+  resident_color_correlation_pending_ = true;
   return Status::Ok();
 }
 
@@ -4209,7 +4228,9 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) {
   reset_params_.preserve_error = 1u;
   reset_params_.preserve_forward_coefficients = 1u;
-  EncodeResidentQuantizer(backend, encoder);
+  EncodeResidentQuantizer(
+    backend, encoder, resident_quant_field_,
+    resident_quant_selection_params_);
   for (size_t batch_index = 0; batch_index < batches_.size();
        ++batch_index) {
     EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);

@@ -532,8 +532,10 @@ private:
       gpu_profile_internal::GpuExecutionProfile* profile);
   void EncodeBlockReduction(MetalBackend &backend,
                             MTL::ComputeCommandEncoder *encoder) const;
-  void EncodeResidentQuantizer(MetalBackend& backend,
-                               MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeResidentQuantizer(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      DevicePlaneView quant_field,
+      const AqInitialQuantSelectionParams& selection_params) const;
   void EncodeForwardCoefficients(MetalBackend& backend,
                                  MTL::ComputeCommandEncoder* encoder) const;
   void EncodeFinalColorCorrelation(
@@ -624,6 +626,7 @@ private:
   AqInitialQuantModulationParams initial_quant_modulation_params_{};
   AqInitialQuantSelectionParams initial_quant_selection_params_{};
   AqInitialQuantSelectionParams resident_quant_selection_params_{};
+  AqInitialQuantSelectionParams resident_invariant_quant_selection_params_{};
   std::array<AqQuantFieldAdjustmentParams, 7>
     quant_field_adjustment_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};

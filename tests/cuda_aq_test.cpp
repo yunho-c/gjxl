@@ -643,6 +643,163 @@ bool CheckFullyResident(gjxl::GpuBackend& gpu, const ImageStorage& source,
   return true;
 }
 
+bool CheckResidentInvariantColorCorrelationContract(
+    gjxl::GpuBackend& gpu, const ImageStorage& source,
+    const ImageStorage& opsin) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  const size_t block_count = blocks.width * blocks.height;
+  gjxl::AcStrategyGrid strategies;
+  std::vector<uint8_t> sharpness(block_count);
+  std::vector<float> prepared_field(block_count);
+  std::vector<float> evaluation_field(block_count);
+  if (!MakeExactStrategies(&strategies) ||
+      !Check(gjxl::FillDefaultEpfSharpness(
+                 {sharpness.data(), blocks, blocks.width}),
+             "Fill CUDA resident invariant-CfL sharpness")) {
+    return false;
+  }
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      const size_t index = y * blocks.width + x;
+      prepared_field[index] = ((x + 3 * y) % 8) < 4 ? 0.24f : 3.4f;
+      evaluation_field[index] = ((x + 5 * y) % 8) < 4 ? 3.1f : 0.31f;
+    }
+  }
+  float prepared_quant_dc = 0.0f;
+  if (!Check(gjxl::ComputeInitialQuantDc(1.0f, &prepared_quant_dc),
+             "Prepare CUDA resident invariant-CfL DC")) {
+    return false;
+  }
+  const float evaluation_quant_dc = prepared_quant_dc * 0.875f;
+
+  std::vector<int32_t> prepared_raw(block_count);
+  std::vector<int32_t> evaluation_raw(block_count);
+  gjxl::Quantizer prepared_quantizer;
+  gjxl::Quantizer evaluation_quantizer;
+  gjxl::ColorCorrelationMap prepared_color;
+  gjxl::ColorCorrelationMap evaluation_color;
+  if (!Check(gjxl::CreateQuantizerFromField(
+                 prepared_quant_dc,
+                 {prepared_field.data(), blocks, blocks.width},
+                 {prepared_raw.data(), blocks, blocks.width},
+                 &prepared_quantizer),
+             "Build CUDA resident invariant-CfL reference quantizer") ||
+      !Check(gjxl::ComputeFinalColorCorrelationMap(
+                 opsin.View(), strategies,
+                 {prepared_raw.data(), blocks, blocks.width},
+                 prepared_quantizer, true, &prepared_color),
+             "Build CUDA resident invariant-CfL reference map") ||
+      !Check(gjxl::CreateQuantizerFromField(
+                 evaluation_quant_dc,
+                 {evaluation_field.data(), blocks, blocks.width},
+                 {evaluation_raw.data(), blocks, blocks.width},
+                 &evaluation_quantizer),
+             "Build CUDA resident evaluation reference quantizer") ||
+      !Check(gjxl::ComputeFinalColorCorrelationMap(
+                 opsin.View(), strategies,
+                 {evaluation_raw.data(), blocks, blocks.width},
+                 evaluation_quantizer, true, &evaluation_color),
+             "Build CUDA resident evaluation reference map")) {
+    return false;
+  }
+  const auto maps_equal = [](const gjxl::ColorCorrelationMap& left,
+                             const gjxl::ColorCorrelationMap& right) {
+    if (!left.valid() || !right.valid() ||
+        left.tile_extent() != right.tile_extent()) {
+      return false;
+    }
+    const auto left_x = left.y_to_x_map();
+    const auto right_x = right.y_to_x_map();
+    const auto left_b = left.y_to_b_map();
+    const auto right_b = right.y_to_b_map();
+    for (size_t y = 0; y < left.tile_extent().height; ++y) {
+      if (!std::equal(left_x.Row(y),
+                      left_x.Row(y) + left.tile_extent().width,
+                      right_x.Row(y)) ||
+          !std::equal(left_b.Row(y),
+                      left_b.Row(y) + left.tile_extent().width,
+                      right_b.Row(y))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (maps_equal(prepared_color, evaluation_color)) {
+    std::cerr << "CUDA resident invariant-CfL test maps are not distinct\n";
+    return false;
+  }
+
+  gjxl::AdaptiveQuantizationOptions options;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!Check(gjxl::PrepareAqEvaluation(
+                 gpu,
+                 {.original_linear_rgb = source.View(),
+                  .coding_opsin = opsin.View(),
+                  .strategies = &strategies,
+                  .epf_sharpness =
+                      {sharpness.data(), blocks, blocks.width},
+                  .options = {options.profile, options.butteraugli},
+                  .resident_quantization = true,
+                  .coefficient_decision_mode =
+                      gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant},
+                 &prepared),
+             "Prepare CUDA resident invariant-CfL operation")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats before_invariant = gpu.stats();
+  if (!Check(prepared->PrepareInvariantColorCorrelationResident(
+                 {prepared_field.data(), blocks, blocks.width},
+                 prepared_quant_dc),
+             "Prepare CUDA resident invariant CfL")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_invariant = gpu.stats();
+  if (after_invariant.successful_allocations !=
+          before_invariant.successful_allocations ||
+      after_invariant.committed_submissions !=
+          before_invariant.committed_submissions) {
+    std::cerr << "CUDA resident invariant CfL was not retained without a "
+                 "submission or allocation\n";
+    return false;
+  }
+
+  constexpr float kPoison = -7654.0f;
+  std::vector<float> block_map(block_count, kPoison);
+  double score = -1234.0;
+  gjxl::QuantizerParams quantizer{1234, 5678};
+  gjxl::VarDctEncoderFrame frame;
+  gjxl::AqEvaluationOutput::Final final{.frame = &frame};
+  const gjxl::AqEvaluationOutput output{
+      .block_distance_map = {block_map.data(), blocks, blocks.width},
+      .score = &score,
+      .quantizer = &quantizer,
+      .final = &final};
+  if (!Check(prepared->Evaluate(
+                 {.quant_field =
+                      {evaluation_field.data(), blocks, blocks.width},
+                  .quant_dc = evaluation_quant_dc},
+                 output),
+             "Evaluate CUDA resident invariant CfL with a changed field")) {
+    return false;
+  }
+  if (!frame.valid() ||
+      quantizer.global_scale !=
+          evaluation_quantizer.params().global_scale ||
+      quantizer.quant_dc != evaluation_quantizer.params().quant_dc ||
+      !maps_equal(frame.color_correlation(), prepared_color) ||
+      maps_equal(frame.color_correlation(), evaluation_color) ||
+      !std::isfinite(score) || score < 0.0 ||
+      !std::ranges::all_of(block_map, [](float value) {
+        return std::isfinite(value) && value >= 0.0f;
+      })) {
+    std::cerr << "CUDA resident evaluation did not retain prepared invariant "
+                 "CfL state\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckResidentMaximumError(gjxl::GpuBackend& gpu,
                                const ImageStorage& source,
                                const ImageStorage& opsin) {
@@ -1092,6 +1249,7 @@ int main() {
       !CheckExactWorkflow(*gpu, source, opsin) ||
       !CheckExactMaximumError(*gpu, source, opsin) ||
       !CheckFullyResident(*gpu, source, opsin) ||
+      !CheckResidentInvariantColorCorrelationContract(*gpu, source, opsin) ||
       !CheckResidentMaximumError(*gpu, source, opsin) ||
       !CheckResidentFrontend(*gpu, source, opsin) ||
       !CheckPreparedReuseAndFailure(*gpu, source, opsin) ||

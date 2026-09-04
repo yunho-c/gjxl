@@ -1708,10 +1708,84 @@ bool CheckResidentQuantizationPreparation(
         "resident quantizer CPU oracle")) {
     return false;
   }
-  gjxl::ColorCorrelationMap color;
-  if (!CheckStatus(gjxl::ComputeInitialColorCorrelationMap(
-                     image.View(), &color),
-                   "resident quantizer color map")) {
+
+  std::vector<float> invariant_field(block_count);
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      invariant_field[y * kBlockExtent.width + x] =
+        ((x + 3 * y) % 8) < 4 ? 0.24f : 3.4f;
+    }
+  }
+  float invariant_quant_dc = 0.0f;
+  std::vector<int32_t> invariant_raw(block_count);
+  gjxl::Quantizer invariant_quantizer;
+  gjxl::ColorCorrelationMap invariant_color;
+  gjxl::ColorCorrelationMap evaluation_color;
+  if (!CheckStatus(gjxl::ComputeInitialQuantDc(
+                     1.0f, &invariant_quant_dc),
+                   "resident invariant-CfL DC oracle") ||
+      !CheckStatus(gjxl::CreateQuantizerFromField(
+                     invariant_quant_dc,
+                     {invariant_field.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     {invariant_raw.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     &invariant_quantizer),
+                   "resident invariant-CfL quantizer oracle") ||
+      !CheckStatus(gjxl::ComputeFinalColorCorrelationMap(
+                     image.View(), strategies,
+                     {invariant_raw.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     invariant_quantizer, true, &invariant_color),
+                   "resident invariant-CfL map oracle") ||
+      !CheckStatus(gjxl::ComputeFinalColorCorrelationMap(
+                     image.View(), strategies,
+                     {expected_raw.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     expected_quantizer, true, &evaluation_color),
+                   "resident evaluation CfL map oracle")) {
+    return false;
+  }
+  const auto maps_equal = [](const gjxl::ColorCorrelationMap& left,
+                             const gjxl::ColorCorrelationMap& right) {
+    if (!left.valid() || !right.valid() ||
+        left.tile_extent() != right.tile_extent()) {
+      return false;
+    }
+    const auto left_x = left.y_to_x_map();
+    const auto right_x = right.y_to_x_map();
+    const auto left_b = left.y_to_b_map();
+    const auto right_b = right.y_to_b_map();
+    for (size_t y = 0; y < left.tile_extent().height; ++y) {
+      if (!std::equal(left_x.Row(y),
+                      left_x.Row(y) + left.tile_extent().width,
+                      right_x.Row(y)) ||
+          !std::equal(left_b.Row(y),
+                      left_b.Row(y) + left.tile_extent().width,
+                      right_b.Row(y))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (maps_equal(invariant_color, evaluation_color)) {
+    std::cerr << "Resident invariant-CfL test maps are not distinct\n";
+    return false;
+  }
+  const gjxl::GpuBackendStats before_invariant = gpu->stats();
+  if (!CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+                     {invariant_field.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     invariant_quant_dc),
+                   "resident invariant-CfL preparation")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_invariant = gpu->stats();
+  if (after_invariant.successful_allocations !=
+        before_invariant.successful_allocations ||
+      after_invariant.committed_submissions !=
+        before_invariant.committed_submissions) {
+    std::cerr << "Resident invariant CfL preparation allocated or submitted\n";
     return false;
   }
   std::vector<float> block_distance(block_count, -1.0f);
@@ -1728,8 +1802,6 @@ bool CheckResidentQuantizationPreparation(
   if (!CheckStatus(
         prepared->Evaluate(
           {
-            .y_to_x = color.y_to_x_map(),
-            .y_to_b = color.y_to_b_map(),
             .quant_field = {actual.data(), kBlockExtent, kOutputStride},
             .quant_dc = quant_dc,
           },
@@ -1751,12 +1823,15 @@ bool CheckResidentQuantizationPreparation(
       frame.quantizer().params().global_scale !=
         actual_quantizer.global_scale ||
       frame.quantizer().params().quant_dc != actual_quantizer.quant_dc ||
+      !maps_equal(frame.color_correlation(), invariant_color) ||
+      maps_equal(frame.color_correlation(), evaluation_color) ||
       !frame.valid() || !std::isfinite(score) || score < 0.0 ||
       after_evaluation.successful_allocations !=
         before_evaluation.successful_allocations ||
       after_evaluation.committed_submissions !=
         before_evaluation.committed_submissions + 1) {
-    std::cerr << "Resident device quantizer or resource contract differs\n";
+    std::cerr << "Resident device quantizer, invariant CfL, or resource "
+                 "contract differs\n";
     return false;
   }
 

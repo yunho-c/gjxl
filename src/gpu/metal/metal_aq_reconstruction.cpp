@@ -150,17 +150,21 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     return;
   }
 
-  if (self.resident_quantization_active_) {
-    self.EncodeResidentQuantizer(backend, encoder);
-  }
-
   if (!self.exact_coefficient_reconstruction_) {
     if (self.resident_color_correlation_pending_) {
       self.EncodeForwardCoefficients(backend, encoder);
+      self.EncodeResidentQuantizer(
+        backend, encoder, self.inverse_sigma_,
+        self.resident_invariant_quant_selection_params_);
       self.EncodeFinalColorCorrelation(backend, encoder);
     } else if (self.reset_params_.preserve_forward_coefficients == 0u) {
       self.EncodeForwardCoefficients(backend, encoder);
     }
+  }
+  if (self.resident_quantization_active_) {
+    self.EncodeResidentQuantizer(
+      backend, encoder, self.resident_quant_field_,
+      self.resident_quant_selection_params_);
   }
 
   for (size_t batch_index = 0; batch_index < self.batches_.size();
@@ -223,7 +227,15 @@ void MetalPreparedAqEvaluation::EncodeReconstructionProfileStage(
   }
   if (stage == ReconstructionProfileStage::kQuantizer) {
     if (resident_quantization_active_) {
-      EncodeResidentQuantizer(backend, encoder);
+      if (resident_color_correlation_pending_) {
+        EncodeResidentQuantizer(
+          backend, encoder, inverse_sigma_,
+          resident_invariant_quant_selection_params_);
+      } else {
+        EncodeResidentQuantizer(
+          backend, encoder, resident_quant_field_,
+          resident_quant_selection_params_);
+      }
     }
     return;
   }
@@ -381,14 +393,15 @@ void MetalPreparedAqEvaluation::EncodeReconstructionScatterBatch(
 }
 
 void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
-    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    DevicePlaneView quant_field,
+    const AqInitialQuantSelectionParams& selection_params) const {
 
   encoder->setComputePipelineState(
       backend.aq_pipelines_.resident_quant_select_initialize.get());
   BindPlane(encoder, resident_quant_selection_state_, 0);
   BindPlane(encoder, resident_quant_histogram_, 1);
-  encoder->setBytes(&resident_quant_selection_params_,
-                    sizeof(resident_quant_selection_params_), 2);
+  encoder->setBytes(&selection_params, sizeof(selection_params), 2);
   DispatchThreads1d(encoder, 256);
 
   const auto encode_selection = [&](bool deviation) {
@@ -397,8 +410,7 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
           backend.aq_pipelines_.resident_quant_select_initialize.get());
       BindPlane(encoder, resident_quant_selection_state_, 0);
       BindPlane(encoder, resident_quant_histogram_, 1);
-      encoder->setBytes(&resident_quant_selection_params_,
-                        sizeof(resident_quant_selection_params_), 2);
+      encoder->setBytes(&selection_params, sizeof(selection_params), 2);
       DispatchThreads1d(encoder, 256);
     }
     constexpr std::array<uint32_t, 4> kShifts = {24, 16, 8, 0};
@@ -407,12 +419,11 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
           shift, deviation ? 1u : 0u};
       encoder->setComputePipelineState(
           backend.aq_pipelines_.resident_quant_histogram.get());
-      BindPlane(encoder, resident_quant_field_, 0);
+      BindPlane(encoder, quant_field, 0);
       BindPlane(encoder, resident_quant_statistics_, 1);
       BindPlane(encoder, resident_quant_histogram_, 2);
       BindPlane(encoder, resident_quant_selection_state_, 3);
-      encoder->setBytes(&resident_quant_selection_params_,
-                        sizeof(resident_quant_selection_params_), 4);
+      encoder->setBytes(&selection_params, sizeof(selection_params), 4);
       encoder->setBytes(&pass, sizeof(pass), 5);
       DispatchThreads1d(encoder, block_count_);
 
@@ -433,18 +444,16 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
   BindPlane(encoder, resident_quant_statistics_, 0);
   BindPlane(encoder, resident_quantizer_params_, 1);
   BindPlane(encoder, reconstruction_error_, 2);
-  encoder->setBytes(&resident_quant_selection_params_,
-                    sizeof(resident_quant_selection_params_), 3);
+  encoder->setBytes(&selection_params, sizeof(selection_params), 3);
   DispatchThreads1d(encoder, 1);
 
   encoder->setComputePipelineState(
       backend.aq_pipelines_.initial_quant_raw_quant.get());
-  BindPlane(encoder, resident_quant_field_, 0);
+  BindPlane(encoder, quant_field, 0);
   BindPlane(encoder, resident_quantizer_params_, 1);
   BindPlane(encoder, raw_quant_, 2);
   BindPlane(encoder, reconstruction_error_, 3);
-  encoder->setBytes(&resident_quant_selection_params_,
-                    sizeof(resident_quant_selection_params_), 4);
+  encoder->setBytes(&selection_params, sizeof(selection_params), 4);
   DispatchThreads2d(encoder, block_extent_);
 }
 

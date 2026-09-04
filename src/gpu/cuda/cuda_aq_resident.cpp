@@ -622,9 +622,16 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
       return Status::FailedPrecondition(
           "CUDA resident AQ evaluation was invalidated");
     }
-    (void)quant_dc;
-    invariant_color_correlation_ready_ = true;
+    invariant_color_correlation_ready_ = false;
     forward_coefficients_ready_ = false;
+    color_correlation_pending_ = false;
+    // The block-distance scratch is unused until evaluation. Retain the
+    // preparation field there so the first evaluation can derive invariant
+    // CfL before reusing the same storage for its output.
+    Status status = UploadPlane(*backend_, quant_field, block_device_);
+    if (!status.ok()) return Invalidate(status);
+    invariant_quant_dc_ = quant_dc;
+    invariant_color_correlation_ready_ = true;
     color_correlation_pending_ = true;
     return Status::Ok();
   }
@@ -1795,6 +1802,65 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
                                   geometry, backend.state_->stream);
   }
 
+  static cudaError_t EncodeResidentQuantizer(
+      CudaBackend& backend, CudaPreparedResidentAqEvaluation& self,
+      const DevicePlaneView& quant_field, float quant_dc) {
+    return LaunchCudaAqSelectResidentQuantizer(
+        Pointer<const float>(quant_field),
+        static_cast<uint32_t>(self.block_count_),
+        Pointer<unsigned int>(self.selection_state_device_),
+        Pointer<unsigned int>(self.histogram_device_),
+        Pointer<float>(self.statistics_device_),
+        Pointer<unsigned int>(self.quantizer_device_),
+        Pointer<int>(self.raw_quant_device_),
+        Pointer<unsigned int>(self.error_device_), quant_dc,
+        backend.state_->stream);
+  }
+
+  static cudaError_t EncodeForwardCoefficients(
+      CudaBackend& backend, CudaPreparedResidentAqEvaluation& self) {
+    const std::array<DevicePlaneView, 3>& coding_source =
+        self.resident_frontend_ && self.options_.profile.loop_filter.gaborish
+            ? self.reconstructed_
+            : self.coding_;
+    for (const CudaAqExactBatch& batch : self.batches_) {
+      if (batch.anchor_count == 0) continue;
+      cudaError_t status = LaunchCudaAqGatherTransformPixels(
+          Pointer<const float>(coding_source[0]),
+          Pointer<const float>(coding_source[1]),
+          Pointer<const float>(coding_source[2]),
+          Pointer<CudaAqAnchor>(self.anchors_device_),
+          Pointer<float>(self.gathered_device_), batch,
+          static_cast<uint32_t>(self.coding_extent_.width),
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      status = LaunchCudaDct(
+          true,
+          Pointer<const float>(self.gathered_device_) +
+              batch.coefficient_offset,
+          Pointer<float>(self.forward_device_) + batch.coefficient_offset,
+          3 * static_cast<size_t>(batch.anchor_count), batch.pixel_width,
+          batch.pixel_height, backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
+    return cudaSuccess;
+  }
+
+  static cudaError_t EncodeFinalColorCorrelation(
+      CudaBackend& backend, CudaPreparedResidentAqEvaluation& self) {
+    return LaunchCudaAqFinalColorCorrelation(
+        Pointer<CudaAqColorTransformRecord>(self.color_transforms_device_),
+        Pointer<uint32_t>(self.color_tile_offsets_device_),
+        Pointer<const float>(self.quant_tables_device_),
+        Pointer<const float>(self.forward_device_),
+        Pointer<const int>(self.raw_quant_device_),
+        Pointer<const unsigned int>(self.quantizer_device_),
+        Pointer<signed char>(self.y_to_x_device_),
+        Pointer<signed char>(self.y_to_b_device_),
+        Pointer<unsigned int>(self.error_device_),
+        static_cast<uint32_t>(self.tile_count_), backend.state_->stream);
+  }
+
   static cudaError_t EncodeReconstruction(CudaBackend& backend,
                                           const void* opaque) {
     const auto& context = *static_cast<const EvaluationContext*>(opaque);
@@ -1805,58 +1871,22 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
                                sizeof(uint32_t), backend.state_->stream);
       if (status != cudaSuccess) return status;
     }
-    status = LaunchCudaAqSelectResidentQuantizer(
-        Pointer<float>(self.quant_field_device_),
-        static_cast<uint32_t>(self.block_count_),
-        Pointer<unsigned int>(self.selection_state_device_),
-        Pointer<unsigned int>(self.histogram_device_),
-        Pointer<float>(self.statistics_device_),
-        Pointer<unsigned int>(self.quantizer_device_),
-        Pointer<int>(self.raw_quant_device_),
-        Pointer<unsigned int>(self.error_device_), context.quant_dc,
-        backend.state_->stream);
-    if (status != cudaSuccess) return status;
-
     if (context.compute_forward) {
-      const std::array<DevicePlaneView, 3>& coding_source =
-          self.resident_frontend_ && self.options_.profile.loop_filter.gaborish
-              ? self.reconstructed_
-              : self.coding_;
-      for (const CudaAqExactBatch& batch : self.batches_) {
-        if (batch.anchor_count == 0) continue;
-        status = LaunchCudaAqGatherTransformPixels(
-            Pointer<const float>(coding_source[0]),
-            Pointer<const float>(coding_source[1]),
-            Pointer<const float>(coding_source[2]),
-            Pointer<CudaAqAnchor>(self.anchors_device_),
-            Pointer<float>(self.gathered_device_), batch,
-            static_cast<uint32_t>(self.coding_extent_.width),
-            backend.state_->stream);
-        if (status != cudaSuccess) return status;
-        status = LaunchCudaDct(
-            true,
-            Pointer<const float>(self.gathered_device_) +
-                batch.coefficient_offset,
-            Pointer<float>(self.forward_device_) + batch.coefficient_offset,
-            3 * static_cast<size_t>(batch.anchor_count), batch.pixel_width,
-            batch.pixel_height, backend.state_->stream);
-        if (status != cudaSuccess) return status;
-      }
-    }
-    if (context.compute_color_correlation) {
-      status = LaunchCudaAqFinalColorCorrelation(
-          Pointer<CudaAqColorTransformRecord>(self.color_transforms_device_),
-          Pointer<uint32_t>(self.color_tile_offsets_device_),
-          Pointer<const float>(self.quant_tables_device_),
-          Pointer<const float>(self.forward_device_),
-          Pointer<const int>(self.raw_quant_device_),
-          Pointer<const unsigned int>(self.quantizer_device_),
-          Pointer<signed char>(self.y_to_x_device_),
-          Pointer<signed char>(self.y_to_b_device_),
-          Pointer<unsigned int>(self.error_device_),
-          static_cast<uint32_t>(self.tile_count_), backend.state_->stream);
+      status = EncodeForwardCoefficients(backend, self);
       if (status != cudaSuccess) return status;
     }
+    if (context.compute_color_correlation) {
+      // block_device_ still contains the field retained by preparation. The
+      // reconstruction below is the first operation that may overwrite it.
+      status = EncodeResidentQuantizer(backend, self, self.block_device_,
+                                       self.invariant_quant_dc_);
+      if (status != cudaSuccess) return status;
+      status = EncodeFinalColorCorrelation(backend, self);
+      if (status != cudaSuccess) return status;
+    }
+    status = EncodeResidentQuantizer(backend, self, self.quant_field_device_,
+                                     context.quant_dc);
+    if (status != cudaSuccess) return status;
 
     for (size_t batch_index = 0; batch_index < self.batches_.size();
          ++batch_index) {
@@ -2016,16 +2046,8 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
     }
 
     if (!context.input.evaluate_final_field) {
-      cudaError_t status = LaunchCudaAqSelectResidentQuantizer(
-          Pointer<float>(self.quant_field_device_),
-          static_cast<uint32_t>(self.block_count_),
-          Pointer<unsigned int>(self.selection_state_device_),
-          Pointer<unsigned int>(self.histogram_device_),
-          Pointer<float>(self.statistics_device_),
-          Pointer<unsigned int>(self.quantizer_device_),
-          Pointer<int>(self.raw_quant_device_),
-          Pointer<unsigned int>(self.error_device_), context.input.quant_dc,
-          backend.state_->stream);
+      cudaError_t status = EncodeResidentQuantizer(
+          backend, self, self.quant_field_device_, context.input.quant_dc);
       if (status != cudaSuccess) return status;
       for (size_t batch_index = 0; batch_index < self.batches_.size();
            ++batch_index) {
@@ -2238,6 +2260,7 @@ class CudaPreparedResidentAqEvaluation final : public PreparedAqEvaluation {
   bool color_correlation_pending_ = false;
   bool resident_frontend_ = false;
   bool resident_initial_ready_ = false;
+  float invariant_quant_dc_ = 0.0f;
   bool invalid_ = false;
 };
 

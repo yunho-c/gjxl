@@ -1547,6 +1547,9 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
   }
   std::vector<double> final_cfl_scores;
   gjxl::gpu_profile_internal::GpuExecutionProfile final_cfl_profile;
+  // One final-CfL dispatch plus the 20-dispatch evaluation quantizer that
+  // follows the invariant quantizer on first use.
+  constexpr size_t kFinalCflPreparationDispatches = 21;
   if (!CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
           {
             .adjusted_initial_quant_field = {
@@ -1564,7 +1567,7 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
       !CheckResidentForwardDispatches(
           final_cfl_profile, kIterations + 1,
           ResidentForwardDispatchPattern::kFirstIterationOnly,
-          "resident final CfL profile", 1)) {
+          "resident final CfL profile", kFinalCflPreparationDispatches)) {
     return false;
   }
   size_t final_cfl_dispatches = 0;

@@ -202,7 +202,9 @@ public:
 
   /// Derives and retains the fixed final color-correlation map from resident
   /// coding pixels and the supplied initial quantization field. Backends may
-  /// also retain invariant forward coefficients for later evaluations.
+  /// also retain invariant forward coefficients for later evaluations. The
+  /// derivation may be fused into the next evaluation, but must still consume
+  /// these supplied values independently of that evaluation's quantization.
   [[nodiscard]] virtual Status PrepareInvariantColorCorrelationResident(
     ConstPlaneF32View quant_field,
     float quant_dc) {
