@@ -2707,6 +2707,41 @@ if(GJXL_BUILD_BENCHMARKS)
       gjxl_pfm_io
   )
 
+  if(GJXL_ENABLE_CUDA)
+    add_executable(
+      gjxl_cuda_encoding_benchmark
+      benchmarks/cuda_encoding_benchmark.cpp
+    )
+
+    target_link_libraries(
+      gjxl_cuda_encoding_benchmark
+      PRIVATE
+        gjxl_codestream
+        gjxl_cuda
+        gjxl_pfm_io
+        CUDA::cudart
+    )
+
+    if(GJXL_BUILD_TESTS)
+      add_test(
+        NAME cuda_encoding_benchmark_cli
+        COMMAND
+          gjxl_cuda_encoding_benchmark
+          --workload synthetic_128x96
+          --gpu-aq maximum-throughput
+          --gpu-only
+          --warmups 0
+          --samples 1
+      )
+      set_tests_properties(
+        cuda_encoding_benchmark_cli
+        PROPERTIES
+          LABELS "benchmark;cli;cuda"
+          SKIP_RETURN_CODE 77
+      )
+    endif()
+  endif()
+
   if(GJXL_ENABLE_METAL)
     add_executable(
       gjxl_metal_butteraugli_benchmark
