@@ -19,6 +19,7 @@
 #include "dct_reference.h"
 #include "gpu/backend.h"
 #include "gpu/cuda/cuda_backend.h"
+#include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/cuda/cuda_kernels.h"
 
 namespace {
@@ -123,6 +124,81 @@ bool CheckFactoryAndBuffers(gjxl::GpuBackend& backend) {
     return false;
   }
   return backend.stats().successful_allocations == 1;
+}
+
+bool CheckTwoDimensionalCopy(
+  gjxl::GpuBackend& backend,
+  gjxl::GpuBackend& other) {
+  auto* cuda = dynamic_cast<gjxl::cuda_internal::CudaBackend*>(&backend);
+  if (cuda == nullptr) {
+    std::cerr << "CUDA backend implementation is unavailable\n";
+    return false;
+  }
+  constexpr uint32_t kSentinel = 0xdeadbeefu;
+  constexpr std::array<uint32_t, 8> source = {
+    11, 12, 13, 101, 21, 22, 23, 102};
+  std::array<uint32_t, 12> destination;
+  destination.fill(kSentinel);
+  std::unique_ptr<gjxl::DeviceBuffer> buffer;
+  std::unique_ptr<gjxl::DeviceBuffer> foreign;
+  if (!CheckStatus(
+        backend.Allocate(sizeof(destination), &buffer),
+        "Allocate CUDA 2D destination") ||
+      !CheckStatus(
+        other.Allocate(sizeof(destination), &foreign),
+        "Allocate foreign CUDA 2D destination") ||
+      !CheckStatus(
+        backend.CopyHostToDevice(
+          *buffer, destination.data(), sizeof(destination)),
+        "Initialize CUDA 2D destination") ||
+      !CheckStatus(
+        cuda->CopyHostToDevice2D(
+          *buffer, source.data(), 4 * sizeof(uint32_t),
+          3 * sizeof(uint32_t), 2, 5 * sizeof(uint32_t),
+          sizeof(uint32_t)),
+        "Strided CUDA 2D copy") ||
+      !CheckStatus(
+        backend.CopyDeviceToHost(
+          *buffer, destination.data(), sizeof(destination)),
+        "Download CUDA 2D destination")) {
+    return false;
+  }
+  constexpr std::array<uint32_t, 12> expected = {
+    kSentinel, 11, 12, 13, kSentinel, kSentinel,
+    21, 22, 23, kSentinel, kSentinel, kSentinel};
+  if (destination != expected) {
+    std::cerr << "Strided CUDA 2D copy changed padding or copied wrong rows\n";
+    return false;
+  }
+  if (cuda->CopyHostToDevice2D(
+        *buffer, nullptr, sizeof(uint32_t), sizeof(uint32_t), 1,
+        sizeof(uint32_t)).code() != gjxl::StatusCode::kInvalidArgument ||
+      cuda->CopyHostToDevice2D(
+        *buffer, source.data(), 2 * sizeof(uint32_t),
+        3 * sizeof(uint32_t), 2, 3 * sizeof(uint32_t)).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+      cuda->CopyHostToDevice2D(
+        *buffer, source.data(), 4 * sizeof(uint32_t),
+        3 * sizeof(uint32_t), 2, 2 * sizeof(uint32_t)).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+      cuda->CopyHostToDevice2D(
+        *buffer, source.data(), 4 * sizeof(uint32_t),
+        3 * sizeof(uint32_t), 2, 5 * sizeof(uint32_t),
+        8 * sizeof(uint32_t)).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+      cuda->CopyHostToDevice2D(
+        *buffer, source.data(), sizeof(uint32_t), sizeof(uint32_t),
+        std::numeric_limits<size_t>::max(), sizeof(uint32_t)).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+      cuda->CopyHostToDevice2D(
+        *foreign, source.data(), sizeof(uint32_t), sizeof(uint32_t), 1,
+        sizeof(uint32_t)).code() != gjxl::StatusCode::kInvalidArgument ||
+      !cuda->CopyHostToDevice2D(
+        *buffer, nullptr, 0, 0, 0, 0, buffer->size_bytes()).ok()) {
+    std::cerr << "CUDA 2D copy validation accepted an invalid request\n";
+    return false;
+  }
+  return true;
 }
 
 bool CheckKernelLaunchErrorConsumption() {
@@ -351,6 +427,7 @@ int main() {
   if (!CheckStatus(gjxl::CreateCudaBackend(&other), "Create second CUDA backend") ||
       other == nullptr ||
       !CheckFactoryAndBuffers(*backend) ||
+      !CheckTwoDimensionalCopy(*backend, *other) ||
       !CheckKernelLaunchErrorConsumption() ||
       !CheckValidationAndOwnership(*backend, *other)) {
     return EXIT_FAILURE;

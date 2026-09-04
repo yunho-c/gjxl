@@ -229,6 +229,65 @@ Status CudaBackend::CopyHostToDevice(
     "Copy host data to CUDA buffer");
 }
 
+Status CudaBackend::CopyHostToDevice2D(
+  DeviceBuffer& dst,
+  const void* src,
+  size_t src_row_stride_bytes,
+  size_t row_bytes,
+  size_t row_count,
+  size_t dst_row_stride_bytes,
+  size_t dst_offset_bytes) {
+  const bool empty = row_bytes == 0 || row_count == 0;
+  if (src == nullptr && !empty) {
+    return Status::InvalidArgument("Host 2D source pointer is null");
+  }
+  CudaBuffer* cuda_dst = AsCudaBuffer(dst);
+  if (cuda_dst == nullptr) {
+    return Status::InvalidArgument("2D destination is not a CUDA buffer");
+  }
+  if (!owns(dst) || cuda_dst->state() != state_.get()) {
+    return Status::InvalidArgument(
+      "2D destination belongs to another CUDA backend");
+  }
+  if (dst_offset_bytes > dst.size_bytes()) {
+    return Status::InvalidArgument(
+      "Host 2D copy exceeds destination buffer");
+  }
+  if (empty) {
+    return Status::Ok();
+  }
+  if (src_row_stride_bytes < row_bytes ||
+      dst_row_stride_bytes < row_bytes) {
+    return Status::InvalidArgument("CUDA 2D copy row stride is too small");
+  }
+  if (row_count - 1 >
+      (std::numeric_limits<size_t>::max() - row_bytes) /
+        src_row_stride_bytes) {
+    return Status::InvalidArgument("Host 2D copy geometry overflows");
+  }
+  if (row_bytes > dst.size_bytes() - dst_offset_bytes ||
+      row_count - 1 >
+        (dst.size_bytes() - dst_offset_bytes - row_bytes) /
+          dst_row_stride_bytes) {
+    return Status::InvalidArgument(
+      "Host 2D copy exceeds destination buffer");
+  }
+  ScopedCudaDevice device(state_->ordinal);
+  if (device.status() != cudaSuccess) {
+    return CudaRuntimeStatus(device.status(), "Select CUDA 2D copy device");
+  }
+  auto* pointer = static_cast<std::byte*>(cuda_dst->pointer()) +
+    dst_offset_bytes;
+  const cudaError_t error =
+    src_row_stride_bytes == row_bytes && dst_row_stride_bytes == row_bytes
+      ? cudaMemcpy(pointer, src, row_count * row_bytes,
+                   cudaMemcpyHostToDevice)
+      : cudaMemcpy2D(pointer, dst_row_stride_bytes, src,
+                     src_row_stride_bytes, row_bytes, row_count,
+                     cudaMemcpyHostToDevice);
+  return CudaRuntimeStatus(error, "Copy 2D host data to CUDA buffer");
+}
+
 Status CudaBackend::CopyDeviceToHost(
   const DeviceBuffer& src,
   void* dst,

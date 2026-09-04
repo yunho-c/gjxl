@@ -197,13 +197,13 @@ template <typename T>
 Status UploadPlane(CudaBackend& backend, PlaneView<const T> source,
                    DevicePlaneView destination) {
   const size_t row_bytes = source.extent.width * sizeof(T);
-  for (size_t y = 0; y < source.extent.height; ++y) {
-    Status status = backend.CopyHostToDevice(
-        *destination.buffer, source.Row(y), row_bytes,
-        destination.offset_bytes + y * destination.row_stride * sizeof(T));
-    if (!status.ok()) return status;
-  }
-  return Status::Ok();
+  const size_t source_stride_bytes = source.extent.height == 1
+    ? row_bytes
+    : source.stride * sizeof(T);
+  return backend.CopyHostToDevice2D(
+    *destination.buffer, source.data, source_stride_bytes, row_bytes,
+    source.extent.height, destination.row_stride * sizeof(T),
+    destination.offset_bytes);
 }
 
 }  // namespace

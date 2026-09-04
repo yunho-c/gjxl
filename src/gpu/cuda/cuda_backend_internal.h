@@ -113,6 +113,10 @@ class CudaBackend final : public GpuBackend,
                   std::unique_ptr<DeviceBuffer>* out) override;
   Status CopyHostToDevice(DeviceBuffer& dst, const void* src, size_t size_bytes,
                           size_t dst_offset_bytes) override;
+  Status CopyHostToDevice2D(DeviceBuffer& dst, const void* src,
+                            size_t src_row_stride_bytes, size_t row_bytes,
+                            size_t row_count, size_t dst_row_stride_bytes,
+                            size_t dst_offset_bytes = 0);
   Status CopyDeviceToHost(const DeviceBuffer& src, void* dst, size_t size_bytes,
                           size_t src_offset_bytes) override;
   Status ForwardTransform(const TransformBatch& batch,
