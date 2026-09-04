@@ -713,6 +713,72 @@ unconditional three-channel 33-tap path; its private build selector and host
 fallback have been removed. The generic single-channel transpose pipeline
 remains because later high, ultra, and masking passes still use it.
 
+#### Phase 2.4 result: paired 15-tap/high kernels (2026-09-04)
+
+The 15-tap experiment evaluated its two axes independently. The transpose
+prototype processed X and Y with separate scalar accumulators while sharing the
+clipped interval, weight loads, and weight-sum loop. The vertical prototype did
+the same before applying the existing channel-specific high-frequency updates.
+Both retained the full-image transposed intermediate, including its FP32
+materialization point. Two already-provisioned psycho work planes held the
+simultaneous X/Y intermediates, so the experiment did not increase scratch
+capacity.
+
+Control, transpose-only, vertical-only, and combined Release builds all passed
+strict Metal compilation and the complete focused Metal Butteraugli test. Each
+reported the same maximum CPU-reference errors: `0.000549316` for the distance
+map and score and `0.000396729` for captured stages.
+
+The first four-way padded-4K stage matrix showed that the vertical-only variant
+lost most reference, resident, main-psycho, and subscale-psycho pairs. Two
+direct seven-pair experiments then isolated each decision. Relative to the
+unfused control, transpose-only produced:
+
+| Scope | Control median | Transpose median | Change | Transpose wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `20.940 ms` | `21.326 ms` | `+1.84%` | 1/7 |
+| resident AQ | `117.094 ms` | `116.538 ms` | `-0.47%` | 4/7 |
+| main-scale psycho construction | `30.703 ms` | `30.474 ms` | `-0.75%` | 5/7 |
+| subscale psycho construction | `8.505 ms` | `8.635 ms` | `+1.54%` | 3/7 |
+
+This removed two reference dispatches (`40` to `38`) and four resident
+dispatches (`308` to `304`), but the small main-scale saving did not overcome
+the reference and subscale regressions. Adding the paired vertical kernel to
+the transpose prototype removed the same counts again (`38` to `36` and `304`
+to `300`) but also failed its incremental gate:
+
+| Scope | Transpose median | Combined median | Change | Combined wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `20.926 ms` | `21.188 ms` | `+1.25%` | 2/7 |
+| resident AQ | `116.254 ms` | `117.349 ms` | `+0.94%` | 3/7 |
+| main-scale psycho construction | `30.474 ms` | `30.599 ms` | `+0.41%` | 2/7 |
+| subscale psycho construction | `8.661 ms` | `8.514 ms` | `-1.70%` | 5/7 |
+
+Complete public-workflow timing resolved the marginal transpose result against
+retention. Transpose-only won three of seven padded-1080p pairs and one of
+seven padded-4K pairs. Its median changed from `88.370` to `88.782 ms`
+(`+0.47%`) at 1080p and from `305.054` to `307.175 ms` (`+0.70%`) at 4K.
+Codestream sizes remained identical at `410072` and `1606911` bytes,
+respectively.
+
+Both 15-tap fusions are therefore rejected and their shaders, pipeline states,
+scratch scheduling, and private build selectors have been removed. As with the
+5-tap result, sharing one short normalization loop does not compensate for
+serializing X/Y work within a thread on this device. Phase 2.5 should still
+measure the 7-tap/ultra pair independently: its arithmetic is shorter, but its
+different nonlinear output work and lower per-pass cost make the launch versus
+parallelism tradeoff a separate empirical question.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-high2-stage.kE1WDB` (four-way stage matrix);
+- `/private/tmp/gjxl-metal-fusion-high2-transpose-pairs.zvVMew` (transpose
+  isolation);
+- `/private/tmp/gjxl-metal-fusion-high2-vertical-pairs.E8WN2y` (vertical
+  incremental isolation); and
+- `/private/tmp/gjxl-metal-fusion-high2-wall-pairs.I4yAbI` (public-workflow
+  pairs).
+
 ### Phase 3: tile-local convolution
 
 Prototype the 5-tap blur-plus-Opsin kernel first. Continue through 7, 13, and 15
