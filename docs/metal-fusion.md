@@ -622,6 +622,35 @@ count alone is a poor proxy for useful cost. Phase 2.2 should test the 5-tap
 horizontal blur separately because it can at least share normalized weights;
 it must not inherit the subsample result by assumption.
 
+#### Phase 2.2 result: three-channel 5-tap horizontal blur (2026-09-04)
+
+The second prototype shared 5-tap weight loading and normalization across all
+three channels while preserving each channel's input and output stride and
+convolution operation order. Strict Metal compilation and both control and
+fused focused Butteraugli tests passed.
+
+In seven alternating independent-process padded-4K stage-profile pairs, the
+fused path reduced reference preparation from 44 to 40 dispatches and resident
+AQ from 316 to 308. Main-scale psycho construction improved in six of seven
+pairs, with its median moving from `32.284 ms` to `32.158 ms` (`0.39%`). The
+subscale median moved from `8.904 ms` to `8.870 ms` (`0.38%`) but improved in
+only three of seven pairs. Resident AQ improved in five of seven pairs and its
+median moved from `117.736 ms` to `117.515 ms` (`0.19%`). Reference preparation
+instead regressed from `22.329 ms` to `22.541 ms` (`0.95%`) and improved in
+only three of seven pairs.
+
+Complete-encode evidence did not establish a user-visible win. At 4K the fused
+path won four of seven pairs, but the medians were effectively equal
+(`312.551 ms` control and `312.015 ms` fused). At 1080p it lost five of seven
+pairs and the medians were indistinguishable (`90.109 ms` and `90.106 ms`).
+Codestream sizes remained identical.
+
+The slice is rejected and removed. Its small per-pixel weight reuse is not
+enough to make the total reference-plus-resident GPU path reliably faster, and
+the complete-encode result fails the measurable-improvement gate. The next
+channel experiment targets the 33-tap transpose, where sharing the truncated
+weight-sum loop across channels removes substantially more arithmetic.
+
 ### Phase 3: tile-local convolution
 
 Prototype the 5-tap blur-plus-Opsin kernel first. Continue through 7, 13, and 15
