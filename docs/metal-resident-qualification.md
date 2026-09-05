@@ -1,10 +1,12 @@
 # Metal resident quality regression and rollout qualification
 
-The runner compares independently decoded fully resident output with CPU GJXL,
-pinned libjxl, and an explicitly accepted baseline. It does not require equal
+The runner compares independently decoded fully resident GJXL output with
+pinned libjxl and an explicitly accepted Metal baseline. Libjxl is the sole
+reference encoder in this end-to-end suite; no GJXL CPU encodes are requested. It does not require equal
 encoder decisions or codestreams between implementations. A failed or incomplete
 qualification never expands automatic backend selection and cannot be recorded
-as an accepted baseline.
+as an accepted baseline. An initial run without a reviewed libjxl size limit
+collects observations and cannot pass qualification.
 
 ## Run
 
@@ -21,7 +23,8 @@ just metal-resident-qualify full
 Both Just recipes use an isolated Release build under `build/release`. Their
 CMake targets build statically linked, pinned `cjxl`, `djxl`, and
 `butteraugli_main`; record their binary hashes; prepare the corpus; and run the
-suite. These targets are opt-in and are not build dependencies of ordinary tests.
+suite. With no baseline or size limit, these collect observations and return a
+nonzero exit status. These targets are opt-in and are not build dependencies of ordinary tests.
 Full preparation downloads the hash-pinned photographic sources unless an
 existing canonical pilot manifest is supplied:
 
@@ -40,7 +43,8 @@ conversion results require an explicit review of the pinned input hashes.
 stress sources before creating a Metal backend or running measurements.
 
 Set `GJXL_ENABLE_METAL_QUALIFICATION_TEST=ON` to register the prepared compact
-integration with CTest. Build `gjxl_pinned_quality_tools` and
+integration with CTest. This requires an accepted compact baseline or an explicit
+`GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO`; configuration fails otherwise. Build `gjxl_pinned_quality_tools` and
 `metal-resident-prepare-compact` first; CTest does not build or download its
 dependencies. The regular `metal_resident_qualification_driver` unit test is
 always registered when project tests are enabled.
@@ -68,8 +72,8 @@ not a mathematical guarantee for every real-valued distance.
 The eleven policies are ordinary efforts 1, 4, 7, 8, 9, 10 and
 maximum-compression efforts 1, 4, 7, 8, 10. Efforts 2/3, 5/6, high-density mode,
 and the corresponding maximum-compression aliases are checked against their
-representative policy on compact inputs at distance 1.2. CPU and Metal outputs
-must agree within each alias group. Libjxl effort 7 is a fixed comparison policy;
+representative policy on compact inputs at distance 1.2. Metal outputs must be
+byte-identical within each alias group. Libjxl effort 7 is a fixed comparison policy;
 equal effort numbers are not asserted to represent equal search effort.
 
 ## Acceptance contract
@@ -84,35 +88,63 @@ All encoders receive the same canonical linear-sRGB PFM. Scoring uses pinned
 libjxl Butteraugli, `RGB_D65_SRG_Rel_Lin`, and intensity target 255. GJXL's
 internal AQ score is not a quality oracle. Encoders retain their own policies.
 
-For each image, policy, and requested distance:
+For each image, GJXL policy, and requested distance, encode the resident output
+and find a libjxl effort-7 distance matching its independently measured quality.
+Equal nominal distance and effort numbers are not treated as equivalent quality
+or search policies. The runner reports Metal bytes divided by matched-quality
+libjxl bytes, along with both scores and the matched libjxl distance.
 
-- Resident Butteraugli must be no worse than CPU plus `max(0.10, 10% of CPU)`.
-- Resident bytes must be at most 110% of CPU bytes at matched decoded quality.
-- Initial libjxl size ratios are reported without a requirement that GJXL win.
+Matching searches distances 0.03–15 with at most 24 distinct evaluations. It stops
+immediately at the first candidate with an absolute Butteraugli difference of
+0.015 **or** a relative difference of 2%, including initial guesses, endpoints,
+and interior candidates. Previously successful distances are hints that must be
+verified. Discrete quality gaps and bounded-search exhaustion are **incomplete**.
 
-CPU and libjxl matching search distances 0.03–15 with at most 24 distinct
-evaluations, accepting an absolute Butteraugli difference of 0.015 or a relative
-difference of 2%. A previously matched distance is a hint that must be re-encoded
-and verified for the requested policy. Discrete quality gaps and bounded-search
-exhaustion are **incomplete**, not successful matches. CPU and libjxl matching
-are attempted independently, so one failure does not erase the other evidence.
+Without an accepted baseline or `--max-libjxl-size-ratio`, cases are **observed**,
+not passed. No size threshold is inferred from the observed output. The report
+records `mode: observation`, `passed: false`, and `qualification_complete: false`;
+`measurement_complete` separately describes whether every case was measured and
+matched. This prevents removal of the former CPU gates from silently qualifying
+an encoder.
 
-With an accepted baseline, additional per-case checks limit fixed-distance
-Butteraugli worsening to `max(0.10, 10% of baseline)`, fixed-distance byte growth
-to 10%, and deterioration of the matched-quality GJXL/libjxl size ratio to 10%.
-The fixed-distance checks prevent recalibration from hiding a change in GJXL's
+After reviewing the observations, explicitly set the maximum acceptable
+Metal/libjxl byte ratio for every case. For example, `--max-libjxl-size-ratio 1.10`
+requires at most 10% size overhead at matched quality. This is an example, **not
+an approved default**. The equivalent CMake setting is
+`GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO`. The limit is part of the contract;
+changing it invalidates an existing baseline or resume directory.
+
+An accepted Metal baseline adds independent per-case checks:
+
+- Fixed-distance Butteraugli may worsen by at most `max(0.10, 10% of baseline)`.
+- Fixed-distance bytes may increase by at most 10%.
+- The matched-quality Metal/libjxl size ratio may worsen by at most 10%, while
+  also remaining within the initial explicit size limit.
+
+The fixed-distance checks prevent recalibration from hiding changes in GJXL's
 distance behavior. Aggregate improvements cannot compensate for failing cases.
+Initial qualification still requires reviewing whether the observed quality
+versus requested distance is suitable before accepting a baseline or expanding
+the resident range; a size-ratio threshold alone is not that review.
 
-`--record-baseline NEW.json` writes a separate baseline only when every required
-case passes. Existing baseline files are never overwritten. Use `--baseline`
-for subsequent runs, or configure `GJXL_METAL_QUALIFICATION_BASELINE` and
-`GJXL_METAL_QUALIFICATION_FULL_BASELINE` for the CMake targets. Suites have separate
-baselines. Input, metric, policy, hardware, and reference-tool mismatches are
-errors; a changed GJXL binary is expected and triggers fresh evaluations.
+`--record-baseline NEW.json` writes a separate baseline only when an explicit
+size limit exists and every required case passes. Observation-only, failed, or
+incomplete runs cannot be recorded. Existing baseline files are never overwritten.
+Use `--baseline` for subsequent runs; its size limit is inherited unless explicitly
+supplied (and must match). CMake provides separate
+`GJXL_METAL_QUALIFICATION_BASELINE` and `GJXL_METAL_QUALIFICATION_FULL_BASELINE`
+paths. Inputs, metrics, policies, hardware, reference tools, and acceptance
+contracts must match. Changed GJXL binaries trigger fresh evaluations.
+
+Report/baseline schema 2 identifies the libjxl-only contract and updated
+calibration stopping rule. Schema-1 CPU-based baselines and reports are not
+accepted as new baselines or resumed as new cases. Existing independent Metal
+and libjxl evaluation caches remain reusable when their binary/input/metric
+identities match. Existing CPU-versus-Metal component tests are unchanged.
 
 ## Artifacts and long runs
 
-The complete suite is expensive: it includes bounded CPU and libjxl searches
+The complete suite includes bounded libjxl searches
 for thousands of image/policy/distance combinations, including maximum
 compression. Use the compact target during ordinary development. The full
 target is intended for release qualification and dedicated scheduled machines.
@@ -133,8 +165,10 @@ require a new output directory. `Ctrl-C` finishes active cases, records a partia
 report, and exits 130. Missing cases and interrupted runs cannot pass. Individual
 subprocesses have a 15-minute timeout.
 
-`report.json` and `report.csv` contain all case outcomes, scalar quality and
-size measurements, and explicit failure reasons. Evaluation directories retain
+`report.json` and `report.csv` contain all case outcomes, Metal and matched
+libjxl scores/bytes, matched libjxl distances, size ratios, and failure reasons.
+Exit codes are 0 for passing qualification, 1 for failure/incomplete measurement,
+2 for completed observations without a size limit, and 130 for interruption. Evaluation directories retain
 encode/decode commands and diagnostics. Failed compressed and decoded samples
 are retained under a shared **2 GiB** budget by default; change
 `--artifact-budget-mib` for larger storage. Cases outside the budget retain the
@@ -142,14 +176,17 @@ exact commands, input hashes, and output hashes needed to reproduce their pixels
 This bounded retention is necessary on the current workspace's limited disk.
 
 Automatic resident selection may expand to `[0.5, 3.0]` only after every full
-case passes. Exact-coefficient selection, device/geometry qualification, and
+case passes the reviewed libjxl-only contract and the initial distance behavior
+has been reviewed. Exact-coefficient selection, device/geometry qualification, and
 automatic target-size and maximum-error policies are separate and unchanged.
 Until qualification passes, retain `[1.0, 1.2]` and investigate the recorded
 regressions without silently widening tolerances or accepting a smaller sample.
 
-## Initial compact results (2026-09-05)
+## Historical CPU-based compact results (2026-09-05)
 
-The Release encoder at `4eda200` completed all 1,056 compact cases on Apple M4
+The original schema-1 suite compared against GJXL CPU as well as libjxl. Its
+results below are preserved as historical observations, not evidence that the
+new contract passes. The Release encoder at `4eda200` completed all 1,056 compact cases on Apple M4
 Pro: **735 passed, 22 failed, and 299 were incomplete because CPU and/or libjxl
 quality matching did not converge within the declared limits**. Individual
 fixed-distance quality failures can also occur in incomplete cases. These are
@@ -171,3 +208,20 @@ Portable runner tests pass, as do the focused Metal/CLI/rate-control tests and
 all 22 pinned-decoder conformance fixtures. The ordinary full CTest run passed
 68/69; its sole `quantization_pipeline` score mismatch was reproduced using the
 original main checkout's test binary with the same actual and expected scores.
+
+## Libjxl-only compact observations (2026-09-05)
+
+The schema-2 runner completed all 1,056 compact cases using the same encoder
+binary and compatible existing evaluation caches. **777 cases matched libjxl;
+279 remain incomplete because libjxl quality matching did not converge.** No
+GJXL CPU encoding, matching, or alias evaluation is requested by this suite.
+No initial libjxl size limit has been approved, so the 777 matched cases are
+`observed`, not `pass`; this is not an accepted baseline. Fixed-distance Metal
+baseline gates remain available for subsequent qualified regression runs.
+
+Portable observations are `tests/metal_qualification/libjxl-only-compact.csv`
+and `libjxl-only-compact.json`. The original CPU-based artifacts above remain
+unchanged. The previous full sweep was stopped gracefully with its partial
+report intact, and a new full observation sweep reuses compatible Metal/libjxl
+evaluations under the new contract. Automatic resident selection remains
+`[1.0, 1.2]`.

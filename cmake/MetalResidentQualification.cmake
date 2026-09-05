@@ -9,6 +9,14 @@ set(GJXL_METAL_QUALIFICATION_FULL_BASELINE "" CACHE FILEPATH
   "Accepted full baseline (empty performs initial qualification)")
 set(GJXL_METAL_QUALIFICATION_PILOT_MANIFEST "" CACHE FILEPATH
   "Existing hash-verified canonical 38-image pilot corpus to reuse")
+set(GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO "" CACHE STRING
+  "Reviewed maximum Metal/libjxl byte ratio; empty collects observations or inherits the baseline limit")
+if(GJXL_ENABLE_METAL_QUALIFICATION_TEST AND
+   NOT GJXL_METAL_QUALIFICATION_BASELINE AND
+   NOT GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO)
+  message(FATAL_ERROR
+    "Metal qualification CTest needs an accepted baseline or an explicit libjxl size ratio limit")
+endif()
 
 set(qualification_root "${CMAKE_CURRENT_BINARY_DIR}/metal-qualification")
 set(qualification_runner "${CMAKE_CURRENT_SOURCE_DIR}/tools/metal_resident_qualification.py")
@@ -35,6 +43,10 @@ set(qualification_common
   --butteraugli "${GJXL_PINNED_LIBJXL_BUILD}/tools/butteraugli_main"
   --reference-manifest "${GJXL_PINNED_LIBJXL_BUILD}/quality-reference.json"
   --cache "${qualification_root}/cache")
+if(NOT GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO STREQUAL "")
+  list(APPEND qualification_common --max-libjxl-size-ratio
+    "${GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO}")
+endif()
 
 foreach(suite IN ITEMS compact full)
   if(suite STREQUAL "full" AND NOT GJXL_BUILD_BENCHMARKS)
@@ -60,7 +72,7 @@ foreach(suite IN ITEMS compact full)
     VERBATIM)
   add_custom_target(metal-resident-prepare-${suite} DEPENDS "${corpus}")
   set(run_args run --suite "${suite}" --corpus "${corpus}"
-    --output "${qualification_root}/${suite}-run" ${qualification_common})
+    --output "${qualification_root}/${suite}-libjxl-run" ${qualification_common})
   if(baseline)
     list(APPEND run_args --baseline "${baseline}")
   endif()

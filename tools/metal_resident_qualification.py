@@ -45,6 +45,7 @@ from encode_image import WrapperError, convert_to_pfm
 ROOT = Path(__file__).resolve().parents[1]
 PINNED_REVISION = "e8ff09762481785938d8e4e01333ed3917571161"
 SCHEMA = 1
+REPORT_SCHEMA = 2
 COMPACT_DISTANCES = (0.5, 0.8, 1.0, 1.1, 1.2, 1.3, 1.4, 2.0, 2.499, 2.5, 2.501, 3.0)
 FULL_DISTANCES = tuple(
     sorted({i / 10 for i in range(5, 31)} | {0.999, 1.001, 1.199, 1.201, 2.499, 2.501})
@@ -296,10 +297,20 @@ def parse_score(stdout):
     return value
 
 
-def check_backend(stdout, backend):
-    expected = " using Metal fully-resident AQ" if backend == "metal" else " using CPU"
-    if expected not in stdout:
-        raise ComparisonError(f"Encoder did not report requested {backend} backend")
+def check_backend(stdout):
+    if " using Metal fully-resident AQ" not in stdout:
+        raise ComparisonError("Encoder did not report requested metal backend")
+
+
+def validate_ratio_limit(value):
+    if value is not None and (
+        isinstance(value, bool)
+        or not isinstance(value, (float, int))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
+        raise ComparisonError("Maximum libjxl size ratio must be finite and positive")
+    return value
 
 
 def quality_limit(reference):
@@ -308,16 +319,15 @@ def quality_limit(reference):
     )
 
 
-def acceptance(row, baseline=None):
+def acceptance(row, baseline=None, maximum_libjxl_size_ratio=None):
     failures = []
-    metal, cpu = row["metal"], row["cpu"]
-    if metal["butteraugli"] > quality_limit(cpu["butteraugli"]):
-        failures.append("resident quality exceeds CPU allowance")
+    metal = row["metal"]
     if (
-        row.get("cpu_size_ratio") is not None
-        and row["cpu_size_ratio"] > 1 + LIMITS["relative_size"]
+        maximum_libjxl_size_ratio is not None
+        and row.get("libjxl_size_ratio") is not None
+        and row["libjxl_size_ratio"] > maximum_libjxl_size_ratio
     ):
-        failures.append("resident matched-quality size exceeds CPU allowance")
+        failures.append("resident matched-quality size exceeds libjxl allowance")
     if baseline:
         if metal["butteraugli"] > quality_limit(baseline["metal"]["butteraugli"]):
             failures.append("fixed-distance quality regressed from baseline")
@@ -337,13 +347,15 @@ def case_id(name, policy, distance):
 def validate_baseline(baseline, contract, expected):
     if (
         baseline.get("kind") != "metal-resident-baseline"
-        or baseline.get("schema_version") != SCHEMA
+        or baseline.get("schema_version") != REPORT_SCHEMA
         or baseline.get("contract") != contract
         or not baseline.get("passed")
     ):
         raise ComparisonError(
             "Baseline configuration differs or baseline was not accepted"
         )
+    if validate_ratio_limit(contract.get("maximum_libjxl_size_ratio")) is None:
+        raise ComparisonError("Baseline requires an explicit libjxl size allowance")
     rows = baseline.get("rows", [])
     by_id = {row["id"]: row for row in rows}
     if len(by_id) != len(rows) or set(by_id) != set(expected):
@@ -351,9 +363,9 @@ def validate_baseline(baseline, contract, expected):
     if any(row.get("failures") or row.get("status") != "pass" for row in rows):
         raise ComparisonError("Baseline contains failing/incomplete cases")
     for row in rows:
-        for name in ("cpu", "metal"):
+        for name in ("metal", "libjxl_matched"):
             validate_measurement(row[name])
-        for name in ("cpu_size_ratio", "libjxl_size_ratio"):
+        for name in ("libjxl_size_ratio",):
             value = row[name]
             if (
                 isinstance(value, bool)
@@ -411,6 +423,10 @@ class Evaluator:
         return result.stdout
 
     def evaluate(self, entry, backend, policy, distance, extra=None):
+        if backend not in ("metal", "libjxl"):
+            raise ComparisonError(
+                "Qualification supports only Metal and libjxl encoding"
+            )
         flags = POLICIES[policy] if extra is None else extra
         key = {
             "input": entry["sha256"],
@@ -459,14 +475,14 @@ class Evaluator:
             ]
         stdout = self.command(command, directory, "encode")
         if backend != "libjxl":
-            check_backend(stdout, backend)
+            check_backend(stdout)
         if not output.exists() or output.stat().st_size == 0:
             raise ComparisonError("Encoder produced no codestream")
         sha = sha256_file(output)
         if backend == "metal":
             repeat = directory / "repeat.jxl"
             stdout = self.command([*command[:-1], str(repeat)], directory, "repeat")
-            check_backend(stdout, backend)
+            check_backend(stdout)
             if sha256_file(repeat) != sha:
                 raise ComparisonError("Resident output is not repeatable")
             repeat.unlink()
@@ -572,7 +588,7 @@ class Evaluator:
     def retain_failure(self, row, destination):
         """Keep bounded failed pixels; every remaining case retains replay argv."""
         retained = []
-        for name in ("cpu", "metal", "cpu_matched", "libjxl_matched"):
+        for name in ("metal", "libjxl_matched"):
             result = row.get(name)
             if not result:
                 continue
@@ -628,17 +644,64 @@ class Evaluator:
         )
 
 
-def check_aliases(evaluator, entry, policy, distance, metal, cpu):
+def check_aliases(evaluator, entry, policy, distance, metal):
     for flags in ALIASES.get(policy, []):
-        for backend, reference in (("metal", metal), ("cpu", cpu)):
-            alias = evaluator.evaluate(entry, backend, policy, distance, extra=flags)
-            if alias["sha256"] != reference["sha256"]:
-                raise ComparisonError(f"Policy alias differs: {backend} {flags}")
+        alias = evaluator.evaluate(entry, "metal", policy, distance, extra=flags)
+        if alias["sha256"] != metal["sha256"]:
+            raise ComparisonError(f"Policy alias differs: metal {flags}")
+
+
+def evaluate_case(evaluator, entry, policy, distance, aliases, baseline, ratio_limit):
+    row = {
+        "id": case_id(entry["name"], policy, distance),
+        "input": entry["name"],
+        "policy": policy,
+        "distance": distance,
+        "failures": [],
+    }
+    try:
+        row["metal"] = evaluator.evaluate(entry, "metal", policy, distance)
+        if aliases:
+            check_aliases(evaluator, entry, policy, distance, row["metal"])
+        try:
+            match, history = evaluator.match(
+                entry, "libjxl", policy, distance, row["metal"]["butteraugli"]
+            )
+            row["libjxl_matched"] = match
+            row["libjxl_calibration"] = history
+            row["libjxl_size_ratio"] = row["metal"]["bytes"] / match["bytes"]
+        except ComparisonError as exc:
+            row["libjxl_calibration"] = getattr(exc, "calibration_history", [])
+            row["failures"].append(f"libjxl calibration: {exc}")
+        row["failures"].extend(acceptance(row, baseline, ratio_limit))
+        row["status"] = (
+            "incomplete"
+            if "libjxl_matched" not in row
+            else "fail"
+            if row["failures"]
+            else "observed"
+            if ratio_limit is None
+            else "pass"
+        )
+    except (ComparisonError, OSError, ValueError) as exc:
+        row["status"] = "incomplete"
+        row["failures"].append(str(exc))
+    return row
 
 
 def run(args):
     if args.baseline and args.baseline.resolve().is_relative_to(args.output.resolve()):
         raise ComparisonError("Baseline must be outside the report output directory")
+    baseline_report = load_json(args.baseline) if args.baseline else None
+    ratio_limit = validate_ratio_limit(args.max_libjxl_size_ratio)
+    if baseline_report and ratio_limit is None:
+        ratio_limit = validate_ratio_limit(
+            baseline_report.get("contract", {}).get("maximum_libjxl_size_ratio")
+        )
+    if args.record_baseline and ratio_limit is None:
+        raise ComparisonError(
+            "Observation runs cannot become baselines; set --max-libjxl-size-ratio after review"
+        )
     manifest = load_json(args.corpus)
     if (
         manifest.get("kind") != "metal-resident-corpus"
@@ -687,6 +750,10 @@ def run(args):
         )
     contract = {
         "suite": args.suite,
+        "reference_backend": "libjxl",
+        "reference_effort": 7,
+        "calibration_version": 2,
+        "maximum_libjxl_size_ratio": ratio_limit,
         "metric": METRIC,
         "limits": LIMITS,
         "reference_revision": PINNED_REVISION,
@@ -715,9 +782,7 @@ def run(args):
         case_id(e["name"], p, d) for e in entries for d in distances for p in POLICIES
     ]
     baseline = (
-        validate_baseline(load_json(args.baseline), contract, expected)
-        if args.baseline
-        else {}
+        validate_baseline(baseline_report, contract, expected) if args.baseline else {}
     )
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -737,7 +802,7 @@ def run(args):
     write_json_atomic(
         manifest_path,
         {
-            "schema_version": SCHEMA,
+            "schema_version": REPORT_SCHEMA,
             "identity": run_identity,
             "gjxl_revision": git_output(ROOT, "rev-parse", "HEAD"),
             "encoder_source_diff_sha256": hashlib.sha256(
@@ -768,62 +833,21 @@ def run(args):
                     row = load_json(path)
                     if row.get("id") != cid or row.get("status") not in (
                         "pass",
+                        "observed",
                         "fail",
                         "incomplete",
                     ):
                         raise ComparisonError(f"Invalid resumed case: {path}")
                 else:
-                    row = {
-                        "id": cid,
-                        "input": entry["name"],
-                        "policy": policy,
-                        "distance": distance,
-                        "failures": [],
-                    }
-                    try:
-                        row["cpu"] = evaluator.evaluate(entry, "cpu", policy, distance)
-                        row["metal"] = evaluator.evaluate(
-                            entry, "metal", policy, distance
-                        )
-                        if entry["name"] in manifest["compact"] and distance == 1.2:
-                            check_aliases(
-                                evaluator,
-                                entry,
-                                policy,
-                                distance,
-                                row["metal"],
-                                row["cpu"],
-                            )
-                        score = row["metal"]["butteraugli"]
-                        for reference_backend in ("cpu", "libjxl"):
-                            try:
-                                match, history = evaluator.match(
-                                    entry, reference_backend, policy, distance, score
-                                )
-                                row[f"{reference_backend}_matched"] = match
-                                row[f"{reference_backend}_calibration"] = history
-                                row[f"{reference_backend}_size_ratio"] = (
-                                    row["metal"]["bytes"] / match["bytes"]
-                                )
-                            except ComparisonError as exc:
-                                row[f"{reference_backend}_calibration"] = getattr(
-                                    exc, "calibration_history", []
-                                )
-                                row["failures"].append(
-                                    f"{reference_backend} calibration: {exc}"
-                                )
-                        row["failures"].extend(acceptance(row, baseline.get(cid)))
-                        incomplete = any(
-                            f"{b}_matched" not in row for b in ("cpu", "libjxl")
-                        )
-                        row["status"] = (
-                            "incomplete"
-                            if incomplete
-                            else ("fail" if row["failures"] else "pass")
-                        )
-                    except (ComparisonError, OSError, ValueError) as exc:
-                        row["status"] = "incomplete"
-                        row["failures"].append(str(exc))
+                    row = evaluate_case(
+                        evaluator,
+                        entry,
+                        policy,
+                        distance,
+                        entry["name"] in manifest["compact"] and distance == 1.2,
+                        baseline.get(cid),
+                        ratio_limit,
+                    )
                     if row["failures"]:
                         try:
                             evaluator.retain_failure(row, artifacts)
@@ -833,7 +857,7 @@ def run(args):
                 with progress_lock:
                     rows.append(row)
                     if len(rows) % 10 == 0 or len(rows) == len(expected):
-                        count = sum(r["status"] != "pass" for r in rows)
+                        count = sum(r["status"] in ("fail", "incomplete") for r in rows)
                         print(
                             f"{len(rows)}/{len(expected)} cases; {count} failing/incomplete; "
                             f"{time.monotonic() - started:.0f}s; {cid}",
@@ -850,17 +874,25 @@ def run(args):
         signal.signal(signal.SIGINT, previous_handler)
     order = {cid: index for index, cid in enumerate(expected)}
     rows.sort(key=lambda row: order[row["id"]])
-    passed = all(row["status"] == "pass" for row in rows) and len(rows) == len(expected)
+    passed = (
+        ratio_limit is not None
+        and all(row["status"] == "pass" for row in rows)
+        and len(rows) == len(expected)
+    )
     report = {
-        "schema_version": SCHEMA,
+        "schema_version": REPORT_SCHEMA,
         "kind": "metal-resident-qualification",
+        "mode": "qualification" if ratio_limit is not None else "observation",
         "contract": contract,
         "passed": passed,
         "expected_cases": len(expected),
         "rows": rows,
         "baseline_used": str(args.baseline) if args.baseline else None,
         "cancelled": cancelled.is_set(),
-        "qualification_complete": len(rows) == len(expected)
+        "measurement_complete": len(rows) == len(expected)
+        and not any(r["status"] == "incomplete" for r in rows),
+        "qualification_complete": ratio_limit is not None
+        and len(rows) == len(expected)
         and not any(r["status"] == "incomplete" for r in rows),
     }
     write_json_atomic(out / "report.json", report)
@@ -868,10 +900,11 @@ def run(args):
         fields = [
             "id",
             "status",
-            "cpu_score",
             "metal_score",
             "metal_bytes",
-            "cpu_size_ratio",
+            "libjxl_score",
+            "libjxl_bytes",
+            "libjxl_distance",
             "libjxl_size_ratio",
             "failures",
         ]
@@ -882,10 +915,11 @@ def run(args):
                 {
                     "id": row["id"],
                     "status": row["status"],
-                    "cpu_score": row.get("cpu", {}).get("butteraugli"),
                     "metal_score": row.get("metal", {}).get("butteraugli"),
                     "metal_bytes": row.get("metal", {}).get("bytes"),
-                    "cpu_size_ratio": row.get("cpu_size_ratio"),
+                    "libjxl_score": row.get("libjxl_matched", {}).get("butteraugli"),
+                    "libjxl_bytes": row.get("libjxl_matched", {}).get("bytes"),
+                    "libjxl_distance": row.get("libjxl_matched", {}).get("distance"),
                     "libjxl_size_ratio": row.get("libjxl_size_ratio"),
                     "failures": "; ".join(row["failures"]),
                 }
@@ -900,8 +934,14 @@ def run(args):
         write_json_atomic(
             args.record_baseline, {**report, "kind": "metal-resident-baseline"}
         )
-    print(f"{'PASS' if passed else 'FAIL'}: {out / 'report.json'}", flush=True)
-    return 130 if cancelled.is_set() else (0 if passed else 1)
+    observation = (
+        ratio_limit is None
+        and report["measurement_complete"]
+        and not any(row["failures"] for row in rows)
+    )
+    outcome = "PASS" if passed else "OBSERVATION" if observation else "FAIL/INCOMPLETE"
+    print(f"{outcome}: {out / 'report.json'}", flush=True)
+    return 130 if cancelled.is_set() else (0 if passed else 2 if observation else 1)
 
 
 def main():
@@ -950,6 +990,12 @@ def main():
         type=int,
         default=2048,
         help="Maximum retained decoded failure samples; all replay commands remain",
+    )
+    execute.add_argument(
+        "--max-libjxl-size-ratio",
+        type=float,
+        help="Reviewed maximum Metal/libjxl byte ratio at matched quality (e.g. 1.10); "
+        "unset collects observations, or inherits the supplied baseline's limit",
     )
     execute.add_argument("--baseline", type=Path)
     execute.add_argument("--record-baseline", type=Path)
