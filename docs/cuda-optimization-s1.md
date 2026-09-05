@@ -14,10 +14,11 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest EPF checkpoint against `6e4925f` reduces
-EPF execution by 81.2% at 4K and paired total encoding time by 5.2%.
-A longer-warmed 1080p comparison improves total time by 3.6%, while its
-initial single-sample comparison regresses; both are documented below.
+below supersede them. The latest small-DCT checkpoint against `49d6707`
+reduces packed-DCT execution by 41.3% and all DCT execution by 15.1% at 4K.
+Warmed paired 4K total time improves 2.6%; smaller-workload total-time
+measurements do not establish a win, despite lower packed-DCT kernel times.
+The preceding EPF checkpoint reduces EPF execution by 81.2% at 4K.
 Remaining AC gather/cost evaluation, DCT, reconstruction
 filtering, host work, and transfers are material targets; the resident path
 has not reached its performance limit.
@@ -1437,6 +1438,195 @@ coefficient encoding, `20.788 ms` of AC gather, and `19.476 ms` of AC cost.
 EPF is now `6.253 ms`, rather than a leading hotspot. DCT, AC gather/cost,
 coefficient work, other neighborhood filters, host serialization, and transfer
 boundaries remain open targets. The resident path is not yet maxed out.
+
+### Follow-up: register-tile packed small DCTs (2026-09-05)
+
+The fresh parent is `49d6707`, including the EPF optimization. Small packed
+DCT shapes still consume `48.082 ms` in the odd-4K trace; 16x16 alone costs
+`29.386 ms` across forward and inverse calls. Those kernels compute one
+output per thread, repeating basis and sample loads across threads and
+launching one block per 16x16 transform. The large-DCT register tiling from
+the earlier checkpoint does not cover these shapes.
+
+The retained small kernels accumulate eight independent outputs per thread
+without changing any output's sequence of multiply-adds. A 256-thread block
+now packs 32 DCT8, 16 DCT16x8, 16 DCT8x16, or 8 DCT16x16 transforms, versus
+4/2/2/1 previously. Each horizontal basis load feeds eight accumulators;
+each vertical intermediate sample feeds eight accumulators. Input and
+coefficient-layout conversion use a padded shared tile with coalesced global
+I/O. The forward kernel reuses the input tile for output conversion.
+
+Sub-warp transforms receive padding between their intermediate arrays so
+neighboring transforms do not map their same-index samples to the same
+shared-memory banks. The 16-high shapes stage their vertical basis because
+each warp addresses multiple basis entries. The 8-high shapes retain
+constant-memory broadcasts: with eight accumulators, each warp now uses one
+vertical basis address at a time. Inactive tail transforms initialize shared
+cells and participate in the required barriers without accessing global
+input/output. The inverse kernel can return inactive lanes after its second
+barrier; forward lanes remain through the output-conversion barrier.
+
+The dense basis, coefficient layout, scaling, and arithmetic order remain
+unchanged. No factored transform, fast-math option, quality-policy change,
+device allocation, transfer, or extra kernel launch is introduced. Large
+specialized and generic DCT kernels are unchanged. Shared-memory use is
+18,720 bytes for DCT8, 19,008 for DCT16x8, 19,808 for DCT8x16, and 19,072
+for DCT16x16. Compiler-reported registers/thread are respectively 48/48,
+48/56, 40/40, and 39/40 for forward/inverse, with zero local or stack bytes.
+The changed block/resource balance is not a hardware-counter occupancy claim.
+
+Exploratory odd-4K profiles use two warmups, one captured fully-resident
+encode, distance 1.2, effort 7, and no final-score collection:
+
+| Variant | Packed DCT | Unchanged large DCT | All kernels |
+|---|---:|---:|---:|
+| Parent, one accumulator | 48.082 ms | 75.021 ms | 401.359 ms |
+| Two accumulators, original global I/O | 36.341 ms | 80.551 ms | 398.331 ms |
+| Two accumulators, shared I/O | 35.094 ms | 73.872 ms | 395.022 ms |
+| Four accumulators, shared I/O | 30.114 ms | 75.784 ms | 386.447 ms |
+| Four accumulators, all vertical bases shared | 34.623 ms | 72.798 ms | 382.522 ms |
+| Eight accumulators, sub-warp padding, all vertical bases shared | 26.226 ms | 72.279 ms | 367.628 ms |
+| Eight accumulators, selective vertical bases, forced dot-loop unrolling | 30.414 ms | 73.957 ms | 379.043 ms |
+| Retained, selective vertical bases, compiler-chosen dot-loop unrolling | 28.220 ms | 76.317 ms | 391.223 ms |
+
+Sharing every vertical basis with four accumulators helps 8x16 inverse but
+regresses the aggregate result, so it is not selected. Forced unrolling of
+the dot-product loops also loses; only the independent-accumulator loops
+are explicitly unrolled in the retained kernel. Individual captures are
+noisy, so these trials select candidates rather than prove additive gains
+for every sub-change.
+
+The final packed-DCT reduction is `19.862 ms` (41.3%). All DCT falls from
+`123.103` to `104.538 ms` (15.1%); unchanged large DCT rises 1.7%, while
+non-DCT execution rises from `278.256` to `286.685 ms`. All-kernel time falls
+2.5%, not 41.3%. Both traces contain 523 kernel launches, 117,079,320 HtoD
+bytes, 103,699,012 DtoH bytes, and 518,400 device-to-device bytes. These
+controls limit attribution of total-workflow variation to the changed code.
+
+An initial 65,536-transform event probe shows large relative timing swings
+for short kernels. The final probe instead uses 67,108,864 elements for every
+shape: 1,048,576 DCT8 transforms, 524,288 8x16/16x8 transforms, and 262,144
+16x16 transforms. It performs three warmup dispatches, then seven samples
+of three dispatches each. Parent/candidate processes run in
+parent-candidate-candidate-parent order. The following ranges span the two
+process medians, not individual sample ranges or confidence intervals:
+
+| Shape/direction | Parent median range | Retained median range |
+|---|---:|---:|
+| 8x8 forward | 7.438-7.767 ms | 2.160-2.165 ms |
+| 8x8 inverse | 8.669-8.941 ms | 5.388-5.539 ms |
+| 16x8 forward | 9.789-10.209 ms | 5.854-5.919 ms |
+| 16x8 inverse | 10.129-10.620 ms | 5.508-5.575 ms |
+| 8x16 forward | 8.970-9.142 ms | 6.152-6.260 ms |
+| 8x16 inverse | 10.367-10.488 ms | 6.348-6.415 ms |
+| 16x16 forward | 10.993-11.242 ms | 7.929-8.264 ms |
+| 16x16 inverse | 13.094-16.615 ms | 7.468-7.542 ms |
+
+The unchanged large-shape controls still vary; 32x32 inverse, for example,
+has parent process medians of `11.715-12.889 ms` and candidate medians of
+`13.485-14.348 ms`. The packed-shape gains survive that unfavorable control,
+but absolute probe and workflow times should not be interchanged. The
+retained workflow's 16x16 inverse improvement is also smaller than the
+isolated-probe improvement (`16.480` to `12.723 ms`).
+
+Public wall measurements use seven alternating independent-process pairs
+per workload, three warmups and five measured encodes per process, comparing
+each process's median. Fully-resident GPU-only mode, distance 1.2, effort 7,
+and skipped final-score collection match the profile boundary. Cohort
+medians and median within-pair changes are distinct statistics:
+
+| Workload/stage | Parent median | Candidate median | Median paired change |
+|---|---:|---:|---:|
+| Odd 4K total | 990.519 ms | 943.740 ms | -2.6% |
+| Odd 4K quantization pipeline | 694.657 ms | 653.460 ms | -4.4% |
+| Odd 1080p total | 230.694 ms | 248.354 ms | +2.3% |
+| Odd 1080p quantization pipeline | 147.469 ms | 144.065 ms | -1.2% |
+| Flower total | 46.465 ms | 47.426 ms | +3.2% |
+| Flower quantization pipeline | 28.823 ms | 28.824 ms | +0.1% |
+
+All seven 4K quantization pairs and six total-time pairs improve. Parent
+and candidate total process-median ranges are `917.113-1045.410 ms` and
+`907.796-970.551 ms`. At 1080p, five quantization pairs improve but only
+three total-time pairs do; total ranges are `225.565-256.775 ms` and
+`221.650-260.331 ms`. Flower total ranges are `45.601-55.813 ms` and
+`47.016-53.850 ms`; only two total-time pairs improve. Thus this checkpoint
+establishes a 4K wall-time gain, not a universal encoding-time improvement.
+The smaller-workload wall regressions are retained in the record.
+
+Additional three-warmup, one-sample traces investigate those smaller
+workloads. At 1080p, packed DCT falls from `8.135` to `4.710 ms`; unchanged
+large DCT moves from `10.017` to `9.507 ms` and all kernels from `81.087`
+to `71.388 ms`. For Flower, packed DCT falls from `1.204` to `0.752 ms`,
+unchanged large DCT stays near `1.21 ms`, and all kernels fall from `17.880`
+to `17.416 ms`. These fresh traces support retaining the small-shape kernel
+change, but do not explain away total-time regressions measured in different
+runs. Host/driver work and scheduling variance remain material, especially
+when the absolute kernel saving is below one millisecond. GPU state moves
+from 65 C/P8/210 MHz before the wall pairs to 75 C/P3/1575 MHz afterward.
+
+All 54 CUDA-build tests and 47 CPU-only tests pass. The standalone CUDA DCT
+test now covers 14 batch counts per supported shape: 1/2/3/4, 7/8/9,
+15/16/17/19, and 31/32/33. That exercises full and partial blocks around all
+packing sizes, including the 32-transform DCT8 block. Across nine shapes,
+126 configurations check forward output, round trips, independent inverse
+output, and concurrent/repeated submission waits. Random inputs and the
+existing impulse, constant, checkerboard, and unequal-ramp fixtures remain.
+The double-precision reference tolerances are unchanged: forward
+`3e-5 + 3e-4 * abs(reference)` and inverse/round-trip
+`5e-4 + 5e-4 * abs(reference)`.
+
+Compute Sanitizer memcheck, racecheck, synccheck, and initcheck each complete
+the expanded backend test with zero errors/hazards. As before,
+`--report-api-errors no` suppresses reporting of the separate, deliberately
+invalid zero-grid launch used to test stale-error consumption; memory and
+synchronization checking remain enabled. Existing suite checks retain
+exact-mode differentials, allocation, failure-atomicity, and concurrent
+fully-resident/maximum-throughput workflow coverage.
+
+Six parent/candidate codestreams, selected strategies, and reported final
+perceptual scores remain identical: the small sample at efforts 7/9,
+odd 1080p/4K at effort 7, and Flower at efforts 7/9. All collect the final
+score, and the pinned `djxl` decodes each candidate at its source dimensions.
+Hashes remain those of the preceding checkpoints; Flower still exercises
+all seven production strategies.
+
+Post-change 1080p batch qualification uses one warmup and three paired
+serial/batch samples and preserves identical output at sizes 1, 2, and 4:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 251.674 ms | 3.973 | 0.958x |
+| Fully resident | 2 | 430.302 ms | 4.648 | 1.066x |
+| Fully resident | 4 | 746.158 ms | 5.361 | 1.404x |
+| Maximum throughput | 1 | 121.540 ms | 8.228 | 1.068x |
+| Maximum throughput | 2 | 157.160 ms | 12.726 | 1.524x |
+| Maximum throughput | 4 | 285.467 ms | 14.012 | 1.749x |
+
+These are correctness and overlap checks, not before/after batch speedup
+claims. Fully-resident batch-1 remains slower than serial. GPU state after
+batch qualification is 70 C/P3/1282 MHz.
+
+Ignored study artifacts use `build-cuda-ninja/profiles/s23_` prefixes.
+The eight 4K trace names are `parent`, `register2`, `staged2`, `staged4`,
+`vertical4`, `vertical8`, `unrolled8`, and `retained`; parent/retained traces
+also cover `1080p` and `flower`. Each has `.nsys-rep` and `.sqlite` files.
+Saved kernel sources and benchmark executables retain the explored variants.
+`s23_dct_probe.cu` is the final equal-element probe, with final comparison
+executables `s23_probe_parent_full.exe` and `s23_probe_retained.exe`, and
+four `s23_probe_{1,2,3,4}_*.txt` logs. Earlier probe executables predate the
+equal-element protocol and should not be used for that comparison.
+`s23_compare_warmed.py` produces `s23_paired_{4k,1080p,flower}.json`;
+`s23_verify.ps1` and `s23_identity.txt` record codestream/score/decode checks.
+Sanitizer logs are `s23_dct_*.txt`; batch logs are
+`s23_batch_{resident,maximum}.txt`.
+
+The retained 4K profile still spends `76.317 ms` in large DCT,
+`49.196 ms` in tiled Butteraugli convolution, `40.399 ms` in Malta response,
+`25.818 ms` in resident coefficient encoding, `20.563 ms` in adjusted
+quantization, `19.575 ms` in AC gather, and `19.553 ms` in AC cost. Larger
+transforms, coefficient work, remaining filters, host work, and transfer
+boundaries remain material targets. This is not a demonstrated performance
+ceiling for the resident path.
 
 ## Work that should not lead the next cycle
 

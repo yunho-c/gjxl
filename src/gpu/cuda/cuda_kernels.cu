@@ -132,6 +132,23 @@ __global__ void InverseDctKernel(
   }
 }
 
+// Small transforms use eight independent accumulators per lane. Pack enough
+// transforms into each block to retain 256 threads and share basis loading.
+constexpr unsigned int kPackedDctOutputsPerThread = 8;
+
+constexpr size_t PackedDctSharedFloats(unsigned int width, unsigned int height) {
+  const size_t element_count = static_cast<size_t>(width) * height;
+  const size_t local_threads = element_count / kPackedDctOutputsPerThread;
+  const size_t transforms = kThreadsPerTransform / local_threads;
+  const size_t intermediate_stride = element_count +
+    (local_threads < 32 ? local_threads : 0);
+  const size_t io_elements = static_cast<size_t>(height) * (width + 1);
+  return static_cast<size_t>(width) * (width + 1) +
+    transforms * (intermediate_stride + io_elements) +
+    (height > kPackedDctOutputsPerThread
+      ? static_cast<size_t>(height) * (height + 1) : 0);
+}
+
 template <unsigned int Width, unsigned int Height,
           unsigned int TransformsPerBlock>
 __global__ void ForwardDctPackedKernel(
@@ -141,12 +158,43 @@ __global__ void ForwardDctPackedKernel(
   static_assert(Width == 8 || Width == 16);
   static_assert(Height == 8 || Height == 16);
   constexpr size_t kElementCount = static_cast<size_t>(Width) * Height;
-  static_assert(kElementCount * TransformsPerBlock == kThreadsPerTransform);
+  constexpr unsigned int kLocalThreads =
+    kThreadsPerTransform / TransformsPerBlock;
+  constexpr unsigned int kOutputsPerThread = kElementCount / kLocalThreads;
+  constexpr unsigned int kRowStep = kLocalThreads / Width;
+  // Separate sub-warp transforms' shared banks while retaining dense rows.
+  constexpr size_t kIntermediateStride = kElementCount +
+    (kLocalThreads < 32 ? kLocalThreads : 0);
+  static_assert(kLocalThreads % Width == 0);
+  static_assert(kElementCount * TransformsPerBlock ==
+    kThreadsPerTransform * kPackedDctOutputsPerThread);
   constexpr size_t kHorizontalBasisCount =
     static_cast<size_t>(Width) * (Width + 1);
   extern __shared__ float shared[];
   float* horizontal_basis = shared;
   float* intermediate = shared + kHorizontalBasisCount;
+  constexpr size_t kPaddedElements = Height * (Width + 1);
+  float* io_tile = intermediate + kIntermediateStride * TransformsPerBlock;
+  float* vertical_basis_tile = io_tile + kPaddedElements * TransformsPerBlock;
+  const float* vertical_basis = kOrthonormalDctBasis + DctBasisOffset(Height);
+  const unsigned int local_transform = threadIdx.x / kLocalThreads;
+  const unsigned int local_index = threadIdx.x % kLocalThreads;
+  const size_t transform_index =
+    static_cast<size_t>(blockIdx.x) * TransformsPerBlock + local_transform;
+  const bool active = transform_index < transform_count;
+  const size_t base = transform_index * kElementCount;
+  const size_t intermediate_base = local_transform * kIntermediateStride;
+  const size_t tile_base = local_transform * kPaddedElements;
+
+  // Multiple vertical basis addresses within a warp serialize constant
+  // memory. Stage only those shapes; single-address warps keep broadcasts.
+  if constexpr (kRowStep > 1) {
+    for (size_t index = threadIdx.x; index < Height * Height;
+         index += blockDim.x) {
+      vertical_basis_tile[(index / Height) * (Height + 1) + index % Height] =
+        kGlobalOrthonormalDctBasis[DctBasisOffset(Height) + index];
+    }
+  }
 
   for (size_t index = threadIdx.x;
        index < static_cast<size_t>(Width) * Width;
@@ -156,46 +204,67 @@ __global__ void ForwardDctPackedKernel(
     horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x] =
       kGlobalOrthonormalDctBasis[DctBasisOffset(Width) + index];
   }
+  // Stage complete, coalesced input rows. Inactive transforms initialize
+  // their shared cells and participate in every barrier without global I/O.
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    const unsigned int index = local_index + value * kLocalThreads;
+    io_tile[tile_base + (index / Width) * (Width + 1) + index % Width] =
+      active ? input[base + index] : 0.0f;
+  }
   __syncthreads();
 
-  const unsigned int local_transform =
-    static_cast<unsigned int>(threadIdx.x / kElementCount);
-  const unsigned int local_index =
-    static_cast<unsigned int>(threadIdx.x % kElementCount);
-  const size_t transform_index =
-    static_cast<size_t>(blockIdx.x) * TransformsPerBlock + local_transform;
-  const bool active = transform_index < transform_count;
-  const size_t base = transform_index * kElementCount;
-  const unsigned int y = local_index / Width;
+  const unsigned int first_row = local_index / Width;
   const unsigned int u = local_index % Width;
-  float value = 0.0f;
+  float values[kOutputsPerThread] = {};
   if (active) {
     for (unsigned int x = 0; x < Width; ++x) {
-      value += input[base + static_cast<size_t>(y) * Width + x] *
+      const float basis =
         horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x];
+#pragma unroll
+      for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+        const unsigned int y = first_row + value * kRowStep;
+        values[value] +=
+          io_tile[tile_base + static_cast<size_t>(y) * (Width + 1) + x] * basis;
+      }
     }
   }
-  intermediate[threadIdx.x] = value;
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    intermediate[intermediate_base + local_index + value * kLocalThreads] =
+      values[value];
+    values[value] = 0.0f;
+  }
   __syncthreads();
 
-  if (!active) return;
-  const unsigned int v = local_index / Width;
-  value = 0.0f;
-  const float* vertical_basis =
-    kOrthonormalDctBasis + DctBasisOffset(Height);
-  const size_t intermediate_base =
-    static_cast<size_t>(local_transform) * kElementCount;
   for (unsigned int source_y = 0; source_y < Height; ++source_y) {
-    value += vertical_basis[static_cast<size_t>(v) * Height + source_y] *
-      intermediate[intermediate_base +
-        static_cast<size_t>(source_y) * Width + u];
+    const float sample = intermediate[intermediate_base +
+      static_cast<size_t>(source_y) * Width + u];
+#pragma unroll
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int v = first_row + value * kRowStep;
+      const float basis = kRowStep > 1
+        ? vertical_basis_tile[static_cast<size_t>(v) * (Height + 1) + source_y]
+        : vertical_basis[static_cast<size_t>(v) * Height + source_y];
+      values[value] += basis * sample;
+    }
   }
-  constexpr bool kRowMajorCoefficients = Height < Width;
-  const size_t coefficient_index = kRowMajorCoefficients
-    ? static_cast<size_t>(v) * Width + u
-    : static_cast<size_t>(u) * Height + v;
-  output[base + coefficient_index] =
-    value * rsqrtf(static_cast<float>(kElementCount));
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    const unsigned int v = first_row + value * kRowStep;
+    io_tile[tile_base + static_cast<size_t>(v) * (Width + 1) + u] =
+      values[value] * rsqrtf(static_cast<float>(kElementCount));
+  }
+  // Reuse the input tile to coalesce the native coefficient-layout stores.
+  __syncthreads();
+  if (!active) return;
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    const unsigned int index = local_index + value * kLocalThreads;
+    constexpr bool kRowMajorCoefficients = Height < Width;
+    const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
+    const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
+    output[base + index] = io_tile[tile_base + v * (Width + 1) + u];
+  }
 }
 
 template <unsigned int Width, unsigned int Height,
@@ -207,12 +276,40 @@ __global__ void InverseDctPackedKernel(
   static_assert(Width == 8 || Width == 16);
   static_assert(Height == 8 || Height == 16);
   constexpr size_t kElementCount = static_cast<size_t>(Width) * Height;
-  static_assert(kElementCount * TransformsPerBlock == kThreadsPerTransform);
+  constexpr unsigned int kLocalThreads =
+    kThreadsPerTransform / TransformsPerBlock;
+  constexpr unsigned int kOutputsPerThread = kElementCount / kLocalThreads;
+  constexpr unsigned int kRowStep = kLocalThreads / Width;
+  constexpr size_t kIntermediateStride = kElementCount +
+    (kLocalThreads < 32 ? kLocalThreads : 0);
+  static_assert(kLocalThreads % Width == 0);
+  static_assert(kElementCount * TransformsPerBlock ==
+    kThreadsPerTransform * kPackedDctOutputsPerThread);
   constexpr size_t kHorizontalBasisCount =
     static_cast<size_t>(Width) * (Width + 1);
   extern __shared__ float shared[];
   float* horizontal_basis = shared;
   float* intermediate = shared + kHorizontalBasisCount;
+  constexpr size_t kPaddedElements = Height * (Width + 1);
+  float* io_tile = intermediate + kIntermediateStride * TransformsPerBlock;
+  float* vertical_basis_tile = io_tile + kPaddedElements * TransformsPerBlock;
+  const float* vertical_basis = kOrthonormalDctBasis + DctBasisOffset(Height);
+  const unsigned int local_transform = threadIdx.x / kLocalThreads;
+  const unsigned int local_index = threadIdx.x % kLocalThreads;
+  const size_t transform_index =
+    static_cast<size_t>(blockIdx.x) * TransformsPerBlock + local_transform;
+  const bool active = transform_index < transform_count;
+  const size_t base = transform_index * kElementCount;
+  const size_t intermediate_base = local_transform * kIntermediateStride;
+  const size_t tile_base = local_transform * kPaddedElements;
+
+  if constexpr (kRowStep > 1) {
+    for (size_t index = threadIdx.x; index < Height * Height;
+         index += blockDim.x) {
+      vertical_basis_tile[(index / Height) * (Height + 1) + index % Height] =
+        kGlobalOrthonormalDctBasis[DctBasisOffset(Height) + index];
+    }
+  }
 
   for (size_t index = threadIdx.x;
        index < static_cast<size_t>(Width) * Width;
@@ -222,46 +319,58 @@ __global__ void InverseDctPackedKernel(
     horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x] =
       kGlobalOrthonormalDctBasis[DctBasisOffset(Width) + index];
   }
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    const unsigned int index = local_index + value * kLocalThreads;
+    constexpr bool kRowMajorCoefficients = Height < Width;
+    const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
+    const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
+    io_tile[tile_base + v * (Width + 1) + u] =
+      active ? input[base + index] : 0.0f;
+  }
   __syncthreads();
 
-  const unsigned int local_transform =
-    static_cast<unsigned int>(threadIdx.x / kElementCount);
-  const unsigned int local_index =
-    static_cast<unsigned int>(threadIdx.x % kElementCount);
-  const size_t transform_index =
-    static_cast<size_t>(blockIdx.x) * TransformsPerBlock + local_transform;
-  const bool active = transform_index < transform_count;
-  const size_t base = transform_index * kElementCount;
-  const unsigned int v = local_index / Width;
+  const unsigned int first_row = local_index / Width;
   const unsigned int x = local_index % Width;
-  float value = 0.0f;
+  float values[kOutputsPerThread] = {};
   if (active) {
     for (unsigned int u = 0; u < Width; ++u) {
-      constexpr bool kRowMajorCoefficients = Height < Width;
-      const size_t coefficient_index = kRowMajorCoefficients
-        ? static_cast<size_t>(v) * Width + u
-        : static_cast<size_t>(u) * Height + v;
-      value += input[base + coefficient_index] *
+      const float basis =
         horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x];
+#pragma unroll
+      for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+        const unsigned int v = first_row + value * kRowStep;
+        values[value] +=
+          io_tile[tile_base + static_cast<size_t>(v) * (Width + 1) + u] * basis;
+      }
     }
   }
-  intermediate[threadIdx.x] = value;
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    intermediate[intermediate_base + local_index + value * kLocalThreads] =
+      values[value];
+    values[value] = 0.0f;
+  }
   __syncthreads();
 
   if (!active) return;
-  const unsigned int y = local_index / Width;
-  value = 0.0f;
-  const float* vertical_basis =
-    kOrthonormalDctBasis + DctBasisOffset(Height);
-  const size_t intermediate_base =
-    static_cast<size_t>(local_transform) * kElementCount;
   for (unsigned int frequency = 0; frequency < Height; ++frequency) {
-    value += vertical_basis[static_cast<size_t>(frequency) * Height + y] *
-      intermediate[intermediate_base +
-        static_cast<size_t>(frequency) * Width + x];
+    const float sample = intermediate[intermediate_base +
+      static_cast<size_t>(frequency) * Width + x];
+#pragma unroll
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int y = first_row + value * kRowStep;
+      const float basis = kRowStep > 1
+        ? vertical_basis_tile[static_cast<size_t>(frequency) * (Height + 1) + y]
+        : vertical_basis[static_cast<size_t>(frequency) * Height + y];
+      values[value] += basis * sample;
+    }
   }
-  output[base + static_cast<size_t>(y) * Width + x] =
-    value * sqrtf(static_cast<float>(kElementCount));
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    const unsigned int y = first_row + value * kRowStep;
+    output[base + static_cast<size_t>(y) * Width + x] =
+      values[value] * sqrtf(static_cast<float>(kElementCount));
+  }
 }
 
 template <unsigned int Width, unsigned int Height>
@@ -645,7 +754,7 @@ cudaError_t LaunchCudaDct(
     (width == 32 && height == 16) ||
     (width == 16 && height == 32);
   const size_t shared_floats = packed
-    ? kThreadsPerTransform + static_cast<size_t>(width) * (width + 1)
+    ? PackedDctSharedFloats(width, height)
     : static_cast<size_t>(width) * height +
         (large_specialized
           ? static_cast<size_t>(width + height) * (width + 1) +
@@ -654,28 +763,26 @@ cudaError_t LaunchCudaDct(
   const dim3 grid(static_cast<unsigned int>(transform_count));
   const dim3 block(
     large_specialized ? kSpecializedDctThreads : kThreadsPerTransform);
+  const unsigned int packed_transforms = packed
+    ? kThreadsPerTransform * kPackedDctOutputsPerThread / (width * height) : 1;
+  const dim3 packed_grid(static_cast<unsigned int>(
+    (transform_count + packed_transforms - 1) / packed_transforms));
   if (forward) {
     if (width == 8 && height == 8) {
-      const dim3 packed_grid(static_cast<unsigned int>(
-        (transform_count + 3) / 4));
-      ForwardDctPackedKernel<8, 8, 4>
+      ForwardDctPackedKernel<8, 8, 4 * kPackedDctOutputsPerThread>
         <<<packed_grid, block, shared_bytes, stream>>>(
           input, output, transform_count);
     } else if (width == 16 && height == 8) {
-      const dim3 packed_grid(static_cast<unsigned int>(
-        (transform_count + 1) / 2));
-      ForwardDctPackedKernel<16, 8, 2>
+      ForwardDctPackedKernel<16, 8, 2 * kPackedDctOutputsPerThread>
         <<<packed_grid, block, shared_bytes, stream>>>(
           input, output, transform_count);
     } else if (width == 8 && height == 16) {
-      const dim3 packed_grid(static_cast<unsigned int>(
-        (transform_count + 1) / 2));
-      ForwardDctPackedKernel<8, 16, 2>
+      ForwardDctPackedKernel<8, 16, 2 * kPackedDctOutputsPerThread>
         <<<packed_grid, block, shared_bytes, stream>>>(
           input, output, transform_count);
     } else if (width == 16 && height == 16) {
-      ForwardDctPackedKernel<16, 16, 1>
-        <<<grid, block, shared_bytes, stream>>>(
+      ForwardDctPackedKernel<16, 16, kPackedDctOutputsPerThread>
+        <<<packed_grid, block, shared_bytes, stream>>>(
           input, output, transform_count);
     } else if (width == 32 && height == 32) {
       ForwardDctSpecializedKernel<32, 32>
@@ -692,26 +799,20 @@ cudaError_t LaunchCudaDct(
     }
   } else {
     if (width == 8 && height == 8) {
-      const dim3 packed_grid(static_cast<unsigned int>(
-        (transform_count + 3) / 4));
-      InverseDctPackedKernel<8, 8, 4>
+      InverseDctPackedKernel<8, 8, 4 * kPackedDctOutputsPerThread>
         <<<packed_grid, block, shared_bytes, stream>>>(
           input, output, transform_count);
     } else if (width == 16 && height == 8) {
-      const dim3 packed_grid(static_cast<unsigned int>(
-        (transform_count + 1) / 2));
-      InverseDctPackedKernel<16, 8, 2>
+      InverseDctPackedKernel<16, 8, 2 * kPackedDctOutputsPerThread>
         <<<packed_grid, block, shared_bytes, stream>>>(
           input, output, transform_count);
     } else if (width == 8 && height == 16) {
-      const dim3 packed_grid(static_cast<unsigned int>(
-        (transform_count + 1) / 2));
-      InverseDctPackedKernel<8, 16, 2>
+      InverseDctPackedKernel<8, 16, 2 * kPackedDctOutputsPerThread>
         <<<packed_grid, block, shared_bytes, stream>>>(
           input, output, transform_count);
     } else if (width == 16 && height == 16) {
-      InverseDctPackedKernel<16, 16, 1>
-        <<<grid, block, shared_bytes, stream>>>(
+      InverseDctPackedKernel<16, 16, kPackedDctOutputsPerThread>
+        <<<packed_grid, block, shared_bytes, stream>>>(
           input, output, transform_count);
     } else if (width == 32 && height == 32) {
       InverseDctSpecializedKernel<32, 32>

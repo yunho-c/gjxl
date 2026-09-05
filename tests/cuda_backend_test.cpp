@@ -246,35 +246,37 @@ bool CheckKernelLaunchErrorConsumption() {
 bool CheckTransform(
   gjxl::GpuBackend& backend,
   gjxl::AcStrategyType strategy,
-  std::mt19937* random) {
+  std::mt19937* random,
+  size_t transform_count) {
   const gjxl::AcStrategyInfo* info = gjxl::GetAcStrategyInfo(strategy);
-  constexpr size_t kTransformCount = 19;
   const size_t element_count = info->coefficient_count();
-  const size_t total_elements = kTransformCount * element_count;
+  const size_t total_elements = transform_count * element_count;
   const size_t bytes = total_elements * sizeof(float);
   std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
   std::vector<float> pixels(total_elements);
   std::generate(pixels.begin(), pixels.end(), [&] { return distribution(*random); });
   // Exercise coefficient layout and shared-tile boundaries with impulses,
   // a constant, and unequal horizontal/vertical structure as well as noise.
-  std::fill_n(pixels.begin(), 3 * element_count, 0.0f);
-  pixels[0] = 1.0f;
-  pixels[element_count + element_count / 2 + info->pixel_extent().width - 1] = -0.5f;
-  pixels[3 * element_count - 1] = 0.75f;
-  std::fill_n(pixels.begin() + 3 * element_count, element_count, 0.375f);
-  for (size_t index = 0; index < element_count; ++index) {
-    const size_t x = index % info->pixel_extent().width;
-    const size_t y = index / info->pixel_extent().width;
-    pixels[4 * element_count + index] = (x + y) % 2 == 0 ? 0.75f : -0.75f;
-    pixels[5 * element_count + index] =
-      0.5f * static_cast<float>(x) / info->pixel_extent().width -
-      0.25f * static_cast<float>(y) / info->pixel_extent().height;
+  if (transform_count >= 6) {
+    std::fill_n(pixels.begin(), 3 * element_count, 0.0f);
+    pixels[0] = 1.0f;
+    pixels[element_count + element_count / 2 + info->pixel_extent().width - 1] = -0.5f;
+    pixels[3 * element_count - 1] = 0.75f;
+    std::fill_n(pixels.begin() + 3 * element_count, element_count, 0.375f);
+    for (size_t index = 0; index < element_count; ++index) {
+      const size_t x = index % info->pixel_extent().width;
+      const size_t y = index / info->pixel_extent().width;
+      pixels[4 * element_count + index] = (x + y) % 2 == 0 ? 0.75f : -0.75f;
+      pixels[5 * element_count + index] =
+        0.5f * static_cast<float>(x) / info->pixel_extent().width -
+        0.25f * static_cast<float>(y) / info->pixel_extent().height;
+    }
   }
 
   std::vector<double> expected_forward(total_elements);
   gjxl::test::ReferenceForwardDct(
     info->pixel_extent(), pixels.data(), expected_forward.data(),
-    kTransformCount);
+    transform_count);
 
   std::unique_ptr<gjxl::DeviceBuffer> input;
   std::unique_ptr<gjxl::DeviceBuffer> coefficients;
@@ -294,13 +296,13 @@ bool CheckTransform(
     .strategy = strategy,
     .input = input.get(),
     .output = coefficients.get(),
-    .transform_count = kTransformCount,
+    .transform_count = transform_count,
   };
   const gjxl::TransformBatch inverse{
     .strategy = strategy,
     .input = coefficients.get(),
     .output = reconstructed.get(),
-    .transform_count = kTransformCount,
+    .transform_count = transform_count,
   };
   std::unique_ptr<gjxl::GpuSubmission> forward_submission;
   std::unique_ptr<gjxl::GpuSubmission> inverse_submission;
@@ -363,7 +365,7 @@ bool CheckTransform(
   // compensating layout mistakes in the forward and inverse implementations.
   gjxl::test::ReferenceInverseDct(
     info->pixel_extent(), pixels.data(), expected_pixels.data(),
-    kTransformCount);
+    transform_count);
   if (!CheckStatus(
         backend.CopyHostToDevice(*coefficients, pixels.data(), bytes),
         "Upload independent inverse CUDA DCT input") ||
@@ -480,8 +482,13 @@ int main() {
 
   std::mt19937 random(12345);
   for (gjxl::AcStrategyType strategy : kStrategies) {
-    if (!CheckTransform(*backend, strategy, &random)) {
-      return EXIT_FAILURE;
+    // Include full and partial blocks around every packed-transform size.
+    for (const size_t count :
+         {1u, 2u, 3u, 4u, 7u, 8u, 9u, 15u, 16u, 17u, 19u, 31u, 32u, 33u}) {
+      if (!CheckTransform(*backend, strategy, &random, count)) {
+        std::cerr << "CUDA DCT batch size: " << count << '\n';
+        return EXIT_FAILURE;
+      }
     }
   }
   std::cout << "All CUDA backend tests passed on " << backend->name() << ".\n";
