@@ -47,6 +47,13 @@ struct CudaAcStrategyBatchParams {
                                         unsigned int width, unsigned int height,
                                         cudaStream_t stream);
 
+// Gather candidate rectangles into forward-DCT shared memory, without a
+// materialized packed-pixel buffer. Shapes/strides are validated by the batch.
+[[nodiscard]] cudaError_t LaunchCudaAcStrategyForward(
+    const float* opsin_x, const float* opsin_y, const float* opsin_b,
+    const void* candidates, float* output, CudaAcStrategyBatchParams params,
+    cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAcStrategyBatch(
     const float* opsin_x, const float* opsin_y, const float* opsin_b,
     const float* pixel_mask, const float* quant_field,

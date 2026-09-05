@@ -1,8 +1,8 @@
 # CUDA optimization study S1
 
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
-  specialized/tiled blurs, packed AC-search residuals, and tiled EPF implemented;
-  optimization ongoing
+  specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
+  AC gather/DCT implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -14,12 +14,14 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest small-DCT checkpoint against `49d6707`
-reduces packed-DCT execution by 41.3% and all DCT execution by 15.1% at 4K.
-Warmed paired 4K total time improves 2.6%; smaller-workload total-time
-measurements do not establish a win, despite lower packed-DCT kernel times.
-The preceding EPF checkpoint reduces EPF execution by 81.2% at 4K.
-Remaining AC gather/cost evaluation, DCT, reconstruction
+below supersede them. The latest AC gather/DCT fusion against `1d72c2b`
+removes seven launches and roughly 2.55 GB of logical packed-buffer traffic
+per 4K encode. Warmed paired total time improves 3.7% at 4K and 1.1% at
+1080p, but increases 2.6% on Flower; this is not a universal latency win.
+Same-process probes favor fusion in all seven shapes at three batch sizes.
+The preceding small-DCT and EPF checkpoints reduce packed-DCT and EPF
+execution by 41.3% and 81.2%, respectively, in their 4K comparisons.
+Remaining AC cost evaluation, DCT, reconstruction
 filtering, host work, and transfers are material targets; the resident path
 has not reached its performance limit.
 
@@ -1627,6 +1629,185 @@ quantization, `19.575 ms` in AC gather, and `19.553 ms` in AC cost. Larger
 transforms, coefficient work, remaining filters, host work, and transfer
 boundaries remain material targets. This is not a demonstrated performance
 ceiling for the resident path.
+
+### Follow-up: fuse AC candidate gathering into forward DCT (2026-09-05)
+
+The parent is `1d72c2b`. AC search materializes each candidate's three
+image rectangles in `scratch_a`, then immediately reads that buffer into
+forward-DCT shared memory. The subsequent residual kernel overwrites all
+active `scratch_a` elements, and cost evaluation consumes reconstructed
+residual pixels, not the original packed pixels. The gathered intermediate
+is therefore unnecessary. The seven 4K gather launches represent roughly
+1.274 GB of packed pixels, or 2.55 GB of logical writes plus rereads. This
+is an address-volume estimate, not a measured DRAM-counter result.
+
+The retained forward kernels accept either a contiguous pointer or an
+AC-candidate image source. The latter resolves the descriptor and channel
+once per participating thread, then reads its strided rectangle directly
+into the existing padded shared input tile. Packed/specialized geometry,
+basis staging, output layout, and each output's multiply-add sequence are
+unchanged. No lower-precision arithmetic or factored transform is introduced.
+Candidate layout and validation now live in a shared CUDA-only header.
+Invalid descriptors yield NaN without reading pixels; inactive packed
+transforms do not fetch descriptors and still participate in barriers.
+
+Both scratch allocations remain necessary for residual coefficients and
+inverse reconstruction. Allocation sizes and host/device transfers do not
+change. The optimization removes a buffer pass, not the scratch allocation.
+
+One intermediate loader precomputed an offset contiguous pointer. NVCC
+raised the ordinary forward 16x8 register count from 48 to 54 and 16x16
+from 39 to 40. Retaining the original `input[base + index]` expression
+restores all ordinary forward register counts. Fused forward counts are
+48/48/40/40 for 8x8/16x8/8x16/16x16, and 40/39/40 for
+32x16/16x32/32x32. All have zero local memory and stack; shared-memory
+sizes are unchanged. Only fused 16x16 adds one register versus its parent.
+
+#### GPU evidence and controls
+
+Clock variation is large enough to invalidate isolated absolute comparisons.
+The first saved parent trace totals 374.932 ms, whereas the first fused trace
+totals 198.485 ms; that apparent near-halving is **not** attributed to fusion.
+A fresh parent captured adjacent to the fused run provides a much closer
+unchanged-kernel control. A later final-source pair provides a second check:
+
+| 4K capture pair | Metric | Parent | Fused |
+|---|---|---:|---:|
+| Adjacent initial pair | Gather | 12.685 ms | 0 |
+| Adjacent initial pair | All forward DCT | 24.365 ms | 25.964 ms |
+| Adjacent initial pair | All inverse DCT | 25.181 ms | 25.117 ms |
+| Adjacent initial pair | Gather + all DCT | 62.230 ms | 51.082 ms |
+| Adjacent initial pair | Other kernels | 146.988 ms | 147.404 ms |
+| Adjacent initial pair | All kernels | 209.218 ms | 198.485 ms |
+| Final-source pair | Gather + all DCT | 130.173 ms | 103.036 ms |
+| Final-source pair | Other kernels | 267.850 ms | 275.755 ms |
+| Final-source pair | All kernels | 398.023 ms | 378.791 ms |
+
+The initial pair reduces gather plus DCT by 17.9% and all kernels by 5.1%,
+with other kernels within 0.3%. The final pair reduces those totals by
+20.8% and 4.8%, respectively, but its other kernels increase 3.0%.
+The initial fused trace predates the ordinary-pointer expression cleanup;
+the final-source pair includes it. Both pairs eliminate exactly seven
+launches, from 523 to 516, and retain 117,079,320 HtoD bytes,
+103,699,012 DtoH bytes, and 518,400 D2D bytes.
+
+Final-source diagnostic pairs also reduce gather plus DCT from 18.580 to
+13.444 ms at 1080p and 2.431 to 1.879 ms on Flower. However, their other
+kernels decrease 23.8% and 5.5%, respectively. Those are not controlled
+estimates of an end-to-end gain, nor evidence that fusion explains every
+observed DCT reduction.
+
+A separate same-process CUDA-event probe compares the parent's gather body
+plus the ordinary forward DCT against fused forward DCT. It uses deterministic
+image data, legal synthetic candidate positions, seven alternating-order
+pairs after three warmups, and three dispatch repetitions per measurement
+(64 for 33-candidate batches). Events measure the device timeline, including
+launch gaps, rather than host workflow latency. Counts are 33, 4096, and the
+large per-shape counts inferred from the 4K trace. Every coefficient is checked
+bitwise before timing. Two independent processes each pass all 21 checks and
+favor fusion in every configuration's median paired ratio.
+
+| Shape | Large candidate count | Paired gather + forward time reduction, two runs |
+|---|---:|---:|
+| 8x8 | 129600 | 51.6-52.8% |
+| 16x8 | 113280 | 57.8-58.4% |
+| 8x16 | 113400 | 31.9-32.1% |
+| 16x16 | 99120 | 31.1-32.1% |
+| 32x16 | 24240 | 18.2-19.0% |
+| 16x32 | 24300 | 6.2-11.9% |
+| 32x32 | 18180 | 29.9-30.2% |
+
+The 33-candidate reductions range from 14.8% to 50.1%, and the 4096-candidate
+reductions from 21.8% to 48.9%. Individual event samples still vary substantially;
+these synthetic timings isolate the two implementations, not production
+search locality. They support retaining fusion for every shape without a
+small-batch fallback, but do not establish a Flower workflow latency win.
+
+#### Warmed public workflow
+
+Seven alternating parent/candidate process pairs use three warmups and five
+samples per process, effort 7, distance 1.2, fully resident, no final score.
+Each process contributes its median. All pairs, including outliers, are kept.
+Negative paired changes mean faster:
+
+| Workload | Total median, parent / fused | Median paired total change | Quantization median, parent / fused | Median paired quantization change |
+|---|---:|---:|---:|---:|
+| Odd 4K | 639.041 / 653.210 ms | -3.7% | 407.479 / 396.414 ms | -3.4% |
+| Odd 1080p | 203.917 / 198.267 ms | -1.1% | 115.748 / 111.874 ms | -3.9% |
+| Flower | 44.179 / 44.806 ms | +2.6% | 27.770 / 27.605 ms | +0.5% |
+
+Medians of cohorts and medians of paired ratios are different statistics;
+the 4K total medians move in the opposite direction to the paired ratio.
+4K improves in five of seven total-time pairs and six quantization pairs;
+1080p improves in six pairs for both metrics. Flower improves in only one
+total-time pair and three quantization pairs. Its measured total-time
+regression remains part of the result, not a discarded inconvenient sample.
+4K parent/fused total ranges are 618.465-714.695 / 593.595-821.915 ms;
+quantization ranges are 405.481-423.054 / 389.839-449.741 ms. GPU state during
+the 4K sweep reached 78 C/P0/1395 MHz graphics/6000 MHz memory. Clocks were
+not locked; absolute times must not be compared to preceding checkpoints.
+
+#### Qualification and artifacts
+
+The final build passes all 54 CUDA tests and the CPU-only build passes all
+47 tests. AC coverage now checks 231 CPU-referenced candidate costs, including
+both image corners, twelve prefix lengths crossing packed-DCT boundaries,
+and exact per-candidate/output-guard identity. Padded rows, plane gaps,
+nonzero offsets, reordered resident planes, and NaN input guards are tested
+against contiguous costs. Ten invalid descriptor cases cover coordinate
+overflow/footprint bounds, quant norm, entropy multiplier, and CfL factors;
+unrelated candidates must remain valid. Resident CfL maps must supersede
+non-finite descriptor factors. Resident quant norms, scratch alias rejection,
+and independent submission waits remain covered.
+
+Both AC-strategy and general CUDA-backend tests pass memcheck, racecheck,
+synccheck, and initcheck with zero errors/hazards. Only the general backend
+test uses `--report-api-errors no`, for its intentional invalid zero-grid
+launch; memory/synchronization checking remains active. Its 126 ordinary
+DCT configurations still check CPU-reference forward, roundtrip, and
+independent inverse results.
+
+Six parent/fused codestreams, strategy summaries, and final perceptual scores
+remain identical: sample efforts 7/9, odd 1080p/4K effort 7, and Flower efforts
+7/9. The pinned decoder reads every candidate at its original dimensions;
+hashes remain those of prior checkpoints. Flower covers all seven strategies.
+
+Post-change 1080p batch qualification uses one warmup and three paired
+serial/batch samples, preserving identical output at sizes 1/2/4:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 222.608 ms | 4.492 | 0.980x |
+| Fully resident | 2 | 382.894 ms | 5.223 | 1.265x |
+| Fully resident | 4 | 777.363 ms | 5.146 | 1.333x |
+| Maximum throughput | 1 | 112.129 ms | 8.918 | 1.028x |
+| Maximum throughput | 2 | 165.620 ms | 12.076 | 1.468x |
+| Maximum throughput | 4 | 300.619 ms | 13.306 | 1.719x |
+
+These qualify correctness and overlap, not before/after batch performance.
+Fully-resident batch-1 remains slower than serial. Ending GPU state is
+70 C/P3/1282 MHz graphics/5500 MHz memory.
+
+Ignored artifacts use `build-cuda-ninja/profiles/s24_` prefixes. Initial
+traces are `parent_4k` (unmatched control), `parent_now_4k`, and `fused_4k`;
+final traces are `final_{parent,retained}_{4k,1080p,flower}`, each with
+`.nsys-rep` and `.sqlite` files. `profile_final.ps1` and
+`profile_summary.py` reproduce capture and analysis. `compare_warmed.py`
+produces `warmed_{4k,1080p,flower}.json` with raw process output.
+`gather_dct_probe.cu` and `gather_probe_{1,2}.txt` retain the event comparison.
+Compile the probe against `gjxl_cuda.lib` with NVCC CUDA 11.8,
+`-std=c++17 -O3 -arch=sm_86 -Xcompiler=/MD --cudart=shared -I src`,
+under the MSVC 14.37 developer environment. `verify.ps1`/`identity.txt`,
+`{ac,dct}_{memcheck,racecheck,synccheck,initcheck}.txt`, and
+`batch_{fully-resident,maximum-throughput}.txt` retain qualification results.
+All artifact names in this paragraph include the `s24_` prefix.
+
+The final 4K trace still spends 78.452 ms in large DCTs, 49.604 ms in tiled
+convolution, 43.977 ms in Malta, 27.463 ms in resident coefficient encoding,
+22.037 ms in adjusted quantization, and 19.121 ms in AC cost. Cost reduction
+and remaining coefficient/filter work, plus host work and transfer boundaries,
+remain substantial targets. This checkpoint does not demonstrate that the
+fully-resident path is maxed out.
 
 ## Work that should not lead the next cycle
 

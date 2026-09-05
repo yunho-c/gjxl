@@ -7,10 +7,12 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "gpu/cuda/cuda_ac_strategy_device.cuh"
+
 namespace gjxl::cuda_internal {
 namespace {
 
-constexpr unsigned int kGatherThreads = 256;
+constexpr unsigned int kQuantNormThreads = 256;
 constexpr unsigned int kResidualThreads = 256;
 
 template <unsigned int CoefficientCount>
@@ -26,17 +28,6 @@ struct ResidualLayout {
   static constexpr unsigned int kValuesPerThread =
     CoefficientCount / kThreadsPerTransform;
 };
-
-struct AcStrategyCandidateDevice {
-  uint32_t block_x;
-  uint32_t block_y;
-  float quant_norm;
-  float entropy_multiplier;
-  float cfl_x;
-  float cfl_b;
-};
-
-static_assert(sizeof(AcStrategyCandidateDevice) == 6 * sizeof(uint32_t));
 
 struct ChannelRate {
   float magnitude;
@@ -84,22 +75,6 @@ __device__ float FastPow2(float value) {
   denominator = fmaf(denominator, fraction, -1.94414990e+01f);
   denominator = fmaf(denominator, fraction, 9.85506633e+01f);
   return numerator / denominator;
-}
-
-__device__ bool CandidateValid(
-  AcStrategyCandidateDevice candidate,
-  CudaAcStrategyBatchParams params) {
-  return params.transform_width <= params.pixel_width &&
-    params.transform_height <= params.pixel_height &&
-    candidate.block_x <=
-      (params.pixel_width - params.transform_width) / 8 &&
-    candidate.block_y <=
-      (params.pixel_height - params.transform_height) / 8 &&
-    isfinite(candidate.quant_norm) && candidate.quant_norm > 0.0f &&
-    isfinite(candidate.entropy_multiplier) &&
-    candidate.entropy_multiplier > 0.0f &&
-    (params.use_device_cfl != 0u ||
-     (isfinite(candidate.cfl_x) && isfinite(candidate.cfl_b)));
 }
 
 __device__ float ComputeCflFactor(
@@ -173,43 +148,6 @@ __global__ void PrepareQuantNormsKernel(
   const AcStrategyCandidateDevice candidate = candidates[index];
   quant_norms[index] = CandidateValid(candidate, params)
     ? ComputeQuantNorm(quant_field, candidate, params) : NAN;
-}
-
-__global__ void GatherKernel(
-  const float* opsin_x,
-  const float* opsin_y,
-  const float* opsin_b,
-  const AcStrategyCandidateDevice* candidates,
-  float* packed_pixels,
-  CudaAcStrategyBatchParams params) {
-  const size_t index = static_cast<size_t>(blockIdx.x) * blockDim.x +
-    threadIdx.x;
-  const size_t candidate_stride = 3u * params.coefficient_count;
-  const size_t element_count =
-    static_cast<size_t>(params.candidate_count) * candidate_stride;
-  if (index >= element_count) return;
-
-  const unsigned int candidate_index = static_cast<unsigned int>(
-    index / candidate_stride);
-  const unsigned int candidate_element = static_cast<unsigned int>(
-    index % candidate_stride);
-  const unsigned int channel =
-    candidate_element / params.coefficient_count;
-  const unsigned int element =
-    candidate_element % params.coefficient_count;
-  const AcStrategyCandidateDevice candidate = candidates[candidate_index];
-  if (!CandidateValid(candidate, params)) {
-    packed_pixels[index] = NAN;
-    return;
-  }
-  const unsigned int row = element / params.transform_width;
-  const unsigned int column = element % params.transform_width;
-  const unsigned int pixel_x = candidate.block_x * 8 + column;
-  const unsigned int pixel_y = candidate.block_y * 8 + row;
-  const size_t source_index =
-    static_cast<size_t>(pixel_y) * params.opsin_row_stride + pixel_x;
-  packed_pixels[index] = channel == 0u ? opsin_x[source_index] :
-    channel == 1u ? opsin_y[source_index] : opsin_b[source_index];
 }
 
 template <unsigned int CoefficientCount>
@@ -446,31 +384,20 @@ cudaError_t LaunchCudaAcStrategyBatch(
   cudaStream_t stream) {
   const auto* typed_candidates =
     static_cast<const AcStrategyCandidateDevice*>(candidates);
-  const size_t packed_element_count =
-    static_cast<size_t>(params.candidate_count) * 3 *
-    params.coefficient_count;
-  const unsigned int gather_blocks = static_cast<unsigned int>(
-    (packed_element_count + kGatherThreads - 1) / kGatherThreads);
   // Costs are not consumed until this ordered batch completes. Reuse that
   // storage for one quant norm per candidate through residual evaluation;
   // CostKernel reads the norm before writing its final result.
   const unsigned int norm_blocks =
-    (params.candidate_count + kGatherThreads - 1) / kGatherThreads;
-  PrepareQuantNormsKernel<<<norm_blocks, kGatherThreads, 0, stream>>>(
+    (params.candidate_count + kQuantNormThreads - 1) / kQuantNormThreads;
+  PrepareQuantNormsKernel<<<norm_blocks, kQuantNormThreads, 0, stream>>>(
     typed_candidates, quant_field, costs, params);
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) return error;
 
-  GatherKernel<<<gather_blocks, kGatherThreads, 0, stream>>>(
-    opsin_x, opsin_y, opsin_b, typed_candidates, scratch_a, params);
-  error = cudaGetLastError();
-  if (error != cudaSuccess) return error;
-
   const size_t transform_count =
     static_cast<size_t>(params.candidate_count) * 3;
-  error = LaunchCudaDct(
-    true, scratch_a, scratch_b, transform_count,
-    params.transform_width, params.transform_height, stream);
+  error = LaunchCudaAcStrategyForward(
+    opsin_x, opsin_y, opsin_b, candidates, scratch_b, params, stream);
   if (error != cudaSuccess) return error;
 
   const auto launch_residual = [&](auto count) {

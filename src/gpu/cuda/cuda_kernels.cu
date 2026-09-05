@@ -6,6 +6,9 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <type_traits>
+
+#include "gpu/cuda/cuda_ac_strategy_device.cuh"
 
 namespace gjxl::cuda_internal {
 namespace {
@@ -132,6 +135,59 @@ __global__ void InverseDctKernel(
   }
 }
 
+// AC search reads image rectangles directly into the DCT input tile. The
+// contiguous transform API uses the same arithmetic with a plain pointer, so
+// fusing the old gather pass changes neither the coefficient order nor sums.
+template <unsigned int Width, unsigned int Height>
+struct AcStrategyDctSource {
+  const float* opsin_x;
+  const float* opsin_y;
+  const float* opsin_b;
+  const AcStrategyCandidateDevice* candidates;
+  CudaAcStrategyBatchParams params;
+
+  struct Tile {
+    const float* pixels;
+    unsigned int row_stride;
+
+    __device__ float operator[](size_t index) const {
+      return pixels == nullptr ? NAN :
+        pixels[(index / Width) * row_stride + index % Width];
+    }
+  };
+
+  __device__ Tile ForTransform(size_t transform_index, bool active) const {
+    // Inactive packed transforms must not fetch a descriptor. Invalid active
+    // candidates still run through the barriers and propagate NaN to the cost.
+    if (!active) return {nullptr, 0};
+    const AcStrategyCandidateDevice candidate = candidates[transform_index / 3];
+    if (!CandidateValid(candidate, params)) return {nullptr, 0};
+    const unsigned int channel = static_cast<unsigned int>(transform_index % 3);
+    const float* plane = channel == 0 ? opsin_x :
+      (channel == 1 ? opsin_y : opsin_b);
+    return {plane + static_cast<size_t>(candidate.block_y * 8) *
+      params.opsin_row_stride + candidate.block_x * 8, params.opsin_row_stride};
+  }
+};
+
+template <unsigned int Width, unsigned int Height, typename Input>
+__device__ auto DctInputTile(Input input, size_t transform_index, bool active) {
+  if constexpr (std::is_pointer_v<Input>) {
+    return input;
+  } else {
+    return input.ForTransform(transform_index, active);
+  }
+}
+
+template <typename Tile>
+__device__ float DctInputElement(Tile input, size_t base, size_t index) {
+  if constexpr (std::is_pointer_v<Tile>) {
+    return input[base + index];
+  } else {
+    return input[index];
+  }
+}
+
 // Small transforms use eight independent accumulators per lane. Pack enough
 // transforms into each block to retain 256 threads and share basis loading.
 constexpr unsigned int kPackedDctOutputsPerThread = 8;
@@ -150,9 +206,9 @@ constexpr size_t PackedDctSharedFloats(unsigned int width, unsigned int height) 
 }
 
 template <unsigned int Width, unsigned int Height,
-          unsigned int TransformsPerBlock>
+          unsigned int TransformsPerBlock, typename Input>
 __global__ void ForwardDctPackedKernel(
-  const float* input,
+  Input input,
   float* output,
   size_t transform_count) {
   static_assert(Width == 8 || Width == 16);
@@ -182,6 +238,8 @@ __global__ void ForwardDctPackedKernel(
   const size_t transform_index =
     static_cast<size_t>(blockIdx.x) * TransformsPerBlock + local_transform;
   const bool active = transform_index < transform_count;
+  const auto input_tile =
+    DctInputTile<Width, Height>(input, transform_index, active);
   const size_t base = transform_index * kElementCount;
   const size_t intermediate_base = local_transform * kIntermediateStride;
   const size_t tile_base = local_transform * kPaddedElements;
@@ -209,7 +267,7 @@ __global__ void ForwardDctPackedKernel(
   for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
     const unsigned int index = local_index + value * kLocalThreads;
     io_tile[tile_base + (index / Width) * (Width + 1) + index % Width] =
-      active ? input[base + index] : 0.0f;
+      active ? DctInputElement(input_tile, base, index) : 0.0f;
   }
   __syncthreads();
 
@@ -373,9 +431,9 @@ __global__ void InverseDctPackedKernel(
   }
 }
 
-template <unsigned int Width, unsigned int Height>
+template <unsigned int Width, unsigned int Height, typename Input>
 __global__ void ForwardDctSpecializedKernel(
-  const float* input,
+  Input input,
   float* output) {
   static_assert(Width == 16 || Width == 32);
   static_assert(Height == 16 || Height == 32);
@@ -392,6 +450,7 @@ __global__ void ForwardDctSpecializedKernel(
   float* io_tile = intermediate + kElementCount;
   float* vertical_basis_tile = io_tile + Height * (Width + 1);
   const size_t base = static_cast<size_t>(blockIdx.x) * kElementCount;
+  const auto input_tile = DctInputTile<Width, Height>(input, blockIdx.x, true);
 
   for (size_t index = threadIdx.x;
        index < static_cast<size_t>(Width) * Width;
@@ -404,7 +463,7 @@ __global__ void ForwardDctSpecializedKernel(
   for (size_t index = threadIdx.x; index < kElementCount;
        index += blockDim.x) {
     io_tile[(index / Width) * (Width + 1) + index % Width] =
-      input[base + index];
+      DctInputElement(input_tile, base, index);
   }
   if constexpr (Width < 32) {
     // A 16-wide transform has two vertical basis addresses per warp. Stage
@@ -827,6 +886,58 @@ cudaError_t LaunchCudaDct(
       InverseDctKernel<<<grid, block, shared_bytes, stream>>>(
         input, output, width, height);
     }
+  }
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAcStrategyForward(
+  const float* opsin_x, const float* opsin_y, const float* opsin_b,
+  const void* candidates, float* output, CudaAcStrategyBatchParams params,
+  cudaStream_t stream) {
+  const size_t transform_count = static_cast<size_t>(params.candidate_count) * 3;
+  const auto launch = [&](auto width, auto height) {
+    constexpr unsigned int kWidth = decltype(width)::value;
+    constexpr unsigned int kHeight = decltype(height)::value;
+    const AcStrategyDctSource<kWidth, kHeight> input{
+      opsin_x, opsin_y, opsin_b,
+      static_cast<const AcStrategyCandidateDevice*>(candidates), params};
+    if constexpr (kWidth <= 16 && kHeight <= 16) {
+      constexpr unsigned int kTransformsPerBlock =
+        kThreadsPerTransform * kPackedDctOutputsPerThread / (kWidth * kHeight);
+      const unsigned int blocks = static_cast<unsigned int>(
+        (transform_count + kTransformsPerBlock - 1) / kTransformsPerBlock);
+      ForwardDctPackedKernel<kWidth, kHeight, kTransformsPerBlock>
+        <<<blocks, kThreadsPerTransform,
+           PackedDctSharedFloats(kWidth, kHeight) * sizeof(float), stream>>>(
+          input, output, transform_count);
+    } else {
+      constexpr size_t kSharedFloats = kWidth * kHeight +
+        (kWidth + kHeight) * (kWidth + 1) +
+        (kWidth < 32 ? kHeight * (kHeight + 1) : 0);
+      ForwardDctSpecializedKernel<kWidth, kHeight>
+        <<<static_cast<unsigned int>(transform_count), kSpecializedDctThreads,
+           kSharedFloats * sizeof(float), stream>>>(input, output);
+    }
+  };
+  using N8 = std::integral_constant<unsigned int, 8>;
+  using N16 = std::integral_constant<unsigned int, 16>;
+  using N32 = std::integral_constant<unsigned int, 32>;
+  if (params.transform_width == 8 && params.transform_height == 8) {
+    launch(N8{}, N8{});
+  } else if (params.transform_width == 16 && params.transform_height == 8) {
+    launch(N16{}, N8{});
+  } else if (params.transform_width == 8 && params.transform_height == 16) {
+    launch(N8{}, N16{});
+  } else if (params.transform_width == 16 && params.transform_height == 16) {
+    launch(N16{}, N16{});
+  } else if (params.transform_width == 32 && params.transform_height == 16) {
+    launch(N32{}, N16{});
+  } else if (params.transform_width == 16 && params.transform_height == 32) {
+    launch(N16{}, N32{});
+  } else if (params.transform_width == 32 && params.transform_height == 32) {
+    launch(N32{}, N32{});
+  } else {
+    return cudaErrorInvalidValue;
   }
   return cudaGetLastError();
 }

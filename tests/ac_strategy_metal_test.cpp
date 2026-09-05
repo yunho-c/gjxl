@@ -27,7 +27,11 @@ namespace {
 
 constexpr gjxl::Extent2D kPixelExtent{64, 64};
 constexpr gjxl::Extent2D kBlockExtent{8, 8};
+#ifdef GJXL_TEST_CUDA
+constexpr size_t kCandidateCount = 33;
+#else
 constexpr size_t kCandidateCount = 7;
+#endif
 
 constexpr std::array kStrategies = {
   gjxl::AcStrategyType::kDct8,
@@ -181,8 +185,10 @@ std::vector<gjxl::AcStrategyCandidate> MakeCandidates(
   const size_t position_count_y = kBlockExtent.height - covered.height + 1;
   std::vector<gjxl::AcStrategyCandidate> candidates(kCandidateCount);
   for (size_t i = 0; i < candidates.size(); ++i) {
-    const size_t block_x = (3 * i + 1) % position_count_x;
-    const size_t block_y = (5 * i + 2) % position_count_y;
+    const size_t block_x = i == 0 ? 0 : i == 1 ? position_count_x - 1 :
+      (3 * i + 1) % position_count_x;
+    const size_t block_y = i == 0 ? 0 : i == 1 ? position_count_y - 1 :
+      (5 * i + 2) % position_count_y;
     float quant_norm = 0.0f;
     if (!CheckStatus(
           gjxl::ComputeAcStrategyQuantNorm(
@@ -402,9 +408,10 @@ bool RunStrategyCase(
 
 #ifdef GJXL_TEST_CUDA
   // Changing batch length must not change an individual candidate's result.
-  // These prefixes also exercise partially occupied packed residual blocks.
+  // Cross the 8/16/32-transform packed DCT boundaries (three transforms per
+  // candidate), as well as partially occupied packed residual blocks.
   const std::vector<float> complete_costs = poisoned_costs;
-  for (const size_t count : {size_t{1}, size_t{2}, kCandidateCount - 1}) {
+  for (const size_t count : {1, 2, 3, 5, 6, 10, 11, 16, 17, 21, 22, 32}) {
     gjxl::AcStrategyCandidateBatch prefix = batch;
     prefix.candidate_count = count;
     std::ranges::fill(poisoned_costs, -1.0f);
@@ -422,6 +429,76 @@ bool RunStrategyCase(
       if (poisoned_costs[i] != (i < count ? complete_costs[i] : -1.0f)) {
         std::cerr << implementation << ' ' << info->name
                   << " candidate prefix changed a cost or its output guard\n";
+        return false;
+      }
+    }
+  }
+#endif
+
+#ifdef GJXL_TEST_CUDA
+  // Fused gathering must honor padded rows, plane gaps, nonzero base offsets,
+  // and independent resident plane offsets. NaN padding catches misplaced
+  // input reads; exact comparison isolates addressing from CPU/GPU rounding.
+  constexpr size_t kOpsinOffset = 13;
+  constexpr size_t kOpsinStride = kPixelExtent.width + 11;
+  constexpr size_t kPlaneStride = kOpsinStride * kPixelExtent.height + 19;
+  std::vector<float> strided_opsin(kOpsinOffset + 3 * kPlaneStride + 7,
+    std::numeric_limits<float>::quiet_NaN());
+  std::unique_ptr<gjxl::DeviceBuffer> device_strided_opsin;
+  const size_t strided_bytes = strided_opsin.size() * sizeof(float);
+  if (!Allocate(gpu, strided_bytes, "Allocate strided opsin",
+        &device_strided_opsin)) {
+    return false;
+  }
+  for (const bool resident : {false, true}) {
+    gjxl::AcStrategyCandidateBatch strided_batch = batch;
+    strided_batch.opsin = device_strided_opsin.get();
+    strided_batch.opsin_offset_bytes = kOpsinOffset * sizeof(float);
+    strided_batch.opsin_row_stride = kOpsinStride;
+    strided_batch.opsin_plane_stride = kPlaneStride;
+    for (size_t channel = 0; channel < 3; ++channel) {
+      const size_t physical_channel = resident ? (channel + 2) % 3 : channel;
+      const size_t offset = kOpsinOffset + physical_channel * kPlaneStride;
+      for (size_t y = 0; y < kPixelExtent.height; ++y) {
+        std::copy_n(fixture.plane[channel].data() + y * kPixelExtent.width,
+          kPixelExtent.width, strided_opsin.data() + offset + y * kOpsinStride);
+      }
+      if (resident) {
+        strided_batch.resident_opsin.plane[channel] = {
+          device_strided_opsin.get(), offset * sizeof(float),
+          gjxl::DeviceElementType::kF32, kPixelExtent, kOpsinStride};
+      }
+    }
+    if (resident) {
+      strided_batch.resident_pixel_mask = {
+        device_mask.get(), 0, gjxl::DeviceElementType::kF32,
+        kPixelExtent, kPixelExtent.width};
+    }
+    if (!CheckStatus(gpu.CopyHostToDevice(*device_strided_opsin,
+          strided_opsin.data(), strided_bytes), "Upload strided opsin") ||
+        !CheckStatus(gjxl::EvaluateAcStrategyCandidates(
+          gpu, strided_batch, &submission), "Submit strided candidate batch") ||
+        submission == nullptr ||
+        !CheckStatus(submission->Wait(), "Wait for strided candidate batch") ||
+        !CheckStatus(gpu.CopyDeviceToHost(*device_costs,
+          poisoned_costs.data(), cost_bytes), "Download strided costs")) {
+      return false;
+    }
+    if (poisoned_costs != complete_costs) {
+      std::cerr << implementation << ' ' << info->name
+                << " strided candidate cost changed (resident=" << resident
+                << ")\n";
+      return false;
+    }
+    std::vector<float> readback(strided_opsin.size());
+    if (!CheckStatus(gpu.CopyDeviceToHost(*device_strided_opsin,
+          readback.data(), strided_bytes), "Check strided input guards")) {
+      return false;
+    }
+    for (size_t i = 0; i < readback.size(); ++i) {
+      if (!(readback[i] == strided_opsin[i] ||
+            (std::isnan(readback[i]) && std::isnan(strided_opsin[i])))) {
+        std::cerr << "Candidate evaluation modified strided input\n";
         return false;
       }
     }
@@ -483,6 +560,58 @@ bool RunStrategyCase(
     }
   }
 
+#ifdef GJXL_TEST_CUDA
+  // A device CfL map supersedes descriptor factors, even non-finite ones.
+  // All candidates in this fixture share one 64x64 color tile.
+  const std::array<signed char, 2> cfl_map{-7, 0};
+  std::unique_ptr<gjxl::DeviceBuffer> device_cfl;
+  if (!Allocate(gpu, cfl_map.size(), "Allocate CfL map", &device_cfl) ||
+      !CheckStatus(gpu.CopyHostToDevice(*device_cfl, cfl_map.data(),
+        cfl_map.size()), "Upload CfL map")) {
+    return false;
+  }
+  std::vector<float> host_cfl_costs;
+  for (const bool device_factors : {false, true}) {
+    auto cfl_candidates = resident_candidates;
+    for (auto& candidate : cfl_candidates) {
+      candidate.cfl_x = device_factors
+        ? std::numeric_limits<float>::quiet_NaN()
+        : static_cast<float>(cfl_map[0]) * (1.0f / 84.0f);
+      candidate.cfl_b = device_factors
+        ? std::numeric_limits<float>::infinity()
+        : 1.0f + static_cast<float>(cfl_map[1]) * (1.0f / 84.0f);
+    }
+    auto cfl_batch = resident_batch;
+    if (device_factors) {
+      cfl_batch.resident_y_to_x = {
+        device_cfl.get(), 0, gjxl::DeviceElementType::kI8, {1, 1}, 1};
+      cfl_batch.resident_y_to_b = {
+        device_cfl.get(), 1, gjxl::DeviceElementType::kI8, {1, 1}, 1};
+    }
+    if (!CheckStatus(gpu.CopyHostToDevice(*device_candidates,
+          cfl_candidates.data(), candidate_bytes), "Upload CfL candidates") ||
+        !CheckStatus(gjxl::EvaluateAcStrategyCandidates(
+          gpu, cfl_batch, &submission), "Submit CfL candidate batch") ||
+        submission == nullptr ||
+        !CheckStatus(submission->Wait(), "Wait for CfL candidate batch") ||
+        !CheckStatus(gpu.CopyDeviceToHost(*device_costs,
+          poisoned_costs.data(), cost_bytes), "Download CfL costs")) {
+      return false;
+    }
+    if (!device_factors) {
+      host_cfl_costs = poisoned_costs;
+    } else if (poisoned_costs != host_cfl_costs) {
+      std::cerr << implementation << ' ' << info->name
+                << " device CfL map did not supersede descriptor factors\n";
+      return false;
+    }
+  }
+  if (!CheckStatus(gpu.CopyHostToDevice(*device_candidates, candidates.data(),
+        candidate_bytes), "Restore candidates")) {
+    return false;
+  }
+#endif
+
   const gjxl::GpuBackendStats before_submissions = gpu.stats();
   std::unique_ptr<gjxl::GpuSubmission> first_submission;
   std::unique_ptr<gjxl::GpuSubmission> second_submission;
@@ -510,6 +639,20 @@ bool RunStrategyCase(
 
   candidates[0].block_x = std::numeric_limits<uint32_t>::max();
   candidates[1].quant_norm = std::numeric_limits<float>::quiet_NaN();
+  size_t invalid_count = 2;
+#ifdef GJXL_TEST_CUDA
+  candidates[2].block_y = std::numeric_limits<uint32_t>::max();
+  candidates[3].quant_norm = 0.0f;
+  candidates[4].entropy_multiplier = std::numeric_limits<float>::infinity();
+  candidates[5].entropy_multiplier = -1.0f;
+  candidates[6].cfl_x = std::numeric_limits<float>::quiet_NaN();
+  candidates[7].cfl_b = std::numeric_limits<float>::infinity();
+  candidates[8].block_x = static_cast<uint32_t>(
+    kBlockExtent.width - info->covered_blocks.width + 1);
+  candidates[9].block_y = static_cast<uint32_t>(
+    kBlockExtent.height - info->covered_blocks.height + 1);
+  invalid_count = 10;
+#endif
   if (!CheckStatus(
         gpu.CopyHostToDevice(
           *device_candidates, candidates.data(), candidate_bytes),
@@ -522,15 +665,20 @@ bool RunStrategyCase(
       !CheckStatus(
         gpu.CopyDeviceToHost(
           *device_costs, poisoned_costs.data(), cost_bytes),
-        "Download invalid candidate costs") ||
-      !std::isnan(poisoned_costs[0]) ||
-      !std::isnan(poisoned_costs[1])) {
+        "Download invalid candidate costs")) {
     std::cerr << implementation << ' ' << info->name
               << " invalid device descriptor did not produce NaN\n";
     return false;
   }
 
-  for (size_t i = 2; i < candidates.size(); ++i) {
+  for (size_t i = 0; i < invalid_count; ++i) {
+    if (!std::isnan(poisoned_costs[i])) {
+      std::cerr << implementation << ' ' << info->name
+                << " invalid device descriptor " << i << " did not produce NaN\n";
+      return false;
+    }
+  }
+  for (size_t i = invalid_count; i < candidates.size(); ++i) {
     const double error =
       std::abs(static_cast<double>(poisoned_costs[i]) - expected[i]);
     if (!std::isfinite(poisoned_costs[i]) ||
