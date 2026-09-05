@@ -4,7 +4,8 @@
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
   AC gather/DCT plus residual/inverse/loss fusion, compact AC-search scratch,
   factorized resident DCT, cooperative quantization adjustment, fused Malta,
-  and bounded-retention stream-ordered allocation implemented;
+  bounded-retention stream-ordered allocation, and on-demand reconstruction
+  host staging implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -17,7 +18,18 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest private-memory-pool checkpoint against
+below supersede them. The latest host-staging checkpoint against `83200fb`
+removes 99.46 MB of unused host RGB staging from a 3839x2159 encode, with no
+change in device allocations, transfers, or kernels. A same-executable probe
+reduces the host staging allocation/initialization phase from 31.0 to 13.2 ms
+at 4K. Warm paired total time improves 4.5% at 4K, while smaller-input total
+results are mixed; quantization improves 4.7% / 6.5% / 2.9% at 4K / 1080p /
+Flower. All 59 CUDA and 47 CPU tests, three scoped sanitizer runs, batch
+checks, and 23 byte-identical decoded image pairs pass. Diagnostic
+reconstruction remains supported and allocates its host staging on first use.
+Optimization remains ongoing, not demonstrated maxed out.
+
+The preceding private-memory-pool checkpoint against
 `f1f9fe6` reduces warmed fully-resident total time by paired medians of 16.1%
 at odd 4K, 16.5% at odd 1080p, and 9.8% on Flower. Kernel counts, transfers,
 and live requested allocation sizes are unchanged; warmed 4K allocation/free
@@ -3419,6 +3431,165 @@ The next investigation should account for remaining transfer/staging and
 host work alongside resident coefficient encoding and filtering. Allocation
 reuse is a warmed-latency improvement with an explicit memory tradeoff,
 not proof that the resident path has reached its ceiling.
+
+## On-demand reconstruction host staging follow-up (S33)
+
+### Cause and retained implementation
+
+The parent is `83200fb`, the private stream-ordered memory-pool checkpoint.
+Accounting for its 4K transfers shows approximately 5.1-5.3 ms of GPU copy
+time for each 33,153,604-byte input RGB plane and 16.9 ms for the final
+99,532,800-byte AC coefficient readback. These bulk transfers run at
+roughly 6 GB/s in that trace. The input copy is followed by a substantial
+host-preparation gap; transfer API counts alone do not explain it.
+`s33_transfers.{py,json}` retain the ordered GPU/API copy spans from S32.
+
+Code inspection finds that `CudaPreparedResidentAqEvaluation::Prepare`
+unconditionally allocates and value-initializes three full-resolution host
+RGB vectors. Ordinary fully-resident encoding requests no reconstructed
+host image, so it never reads or writes those vectors again. The required
+reconstruction remains on the GPU for Butteraugli evaluation. Skipping the
+already-optional readback was not enough: host allocation and zero-filling
+still occurred on every encode.
+
+The retained change leaves these vectors empty at preparation. Both ordinary
+evaluation and the fused resident policy call a common helper on the first
+diagnostic reconstruction request, while holding the prepared-object
+mutex and before submitting the requested work. The helper constructs all
+three vectors transactionally, then retains them for that object's later
+evaluations. Allocation failure is reported before submitting new work;
+existing output validation, finite-value checks, and atomic publication stay
+in place. No caller-visible output or numerical contract is weakened, and
+no production environment variable or mode switch is added.
+
+For an encoding-only prepared object, omitted host payload is exactly
+`3 * source_width * source_height * sizeof(float)`:
+99,460,812 bytes at 3839x2159, 24,847,212 bytes at 1919x1079, and
+3,255,840 bytes on 510x532 Flower. This is host staging, not VRAM or a
+measurement of process-wide peak working set. Two simultaneous 4K encodes
+omit two such host payloads. Diagnostic requests still incur and retain the
+staging, and mandatory quantized-frame readback storage is unchanged.
+
+An isolated same-executable probe restores eager RGB allocation with an
+experiment-only switch and records host preparation stages. Three
+alternating eager/lazy process pairs per input each use three warmups and
+three samples; warmups are excluded from the stage summary. Median
+per-process staging allocation/initialization time falls from 30.970 to
+13.228 ms at 4K, 11.440 to 5.573 ms at 1080p, and 1.338 to 0.646 ms on
+Flower. Every pair favors lazy allocation in this phase. The measured
+RGB-vector capacities change from exactly the three payloads above to zero.
+Metadata/setup medians are 11.065 / 11.023 ms, 3.609 / 3.088 ms, and
+0.451 / 0.465 ms respectively. Staging timers end before logging and before
+device arena preparation; they include the other unchanged host readback
+vectors, and do not include vector destruction. This probe corroborates
+the allocation/initialization cause, not a second independent whole-encode
+speedup. It is run separately from qualification and ordinary timing.
+
+### Public wall time
+
+Seven alternating independent-process pairs use the unchanged public
+in-memory fully-resident boundary at distance 1.2/effort 7. Warm measurements
+use three warmups and five samples per process; each process contributes its
+median. Percentages are medians of paired candidate/parent ratios, not ratios
+of the displayed marginal medians. All observations are retained.
+
+| Input | Warm total ms, parent / retained | Paired total change | Warm quantization ms, parent / retained | Paired quantization change |
+| --- | ---: | ---: | ---: | ---: |
+| 3839x2159 | 657.991 / 621.763 | -4.5% | 397.302 / 383.002 | -4.7% |
+| 1919x1079 | 158.299 / 162.892 | -2.8% | 78.781 / 74.910 | -6.5% |
+| Flower | 34.026 / 32.709 | +4.0% | 16.076 / 15.163 | -2.9% |
+
+Every 4K and 1080p pair favors the candidate in quantization time. Total
+time is noisier: its process-median ranges are 609.038-705.596 /
+590.157-662.277 ms at 4K, 154.574-173.014 / 151.010-176.448 ms at 1080p,
+and 31.381-37.938 / 31.083-60.404 ms on Flower. The 1080p marginal
+total median worsens despite its favorable median paired ratio. Flower's
+paired total result regresses despite its lower marginal median. Neither
+inconsistency is hidden by selectively reporting only the favorable statistic.
+The evidence supports reduced host preparation, not a uniform whole-encode
+speedup on every input.
+
+Separate first-encode measurements use seven pairs, zero warmups, and one
+sample per process; backend construction remains outside the boundary.
+Parent/candidate total medians are 688.119 / 674.670 ms at 4K,
+192.578 / 187.323 ms at 1080p, and 50.709 / 49.617 ms on Flower.
+Paired total changes are -2.1%, -2.9%, and -3.5%; quantization changes are
+-1.4%, -3.4%, and -1.6%. First-encode total ranges are
+676.794-771.083 / 659.683-881.879 ms, 188.831-200.277 /
+182.574-229.108 ms, and 48.248-71.489 / 48.588-51.868 ms respectively.
+Outliers and laptop variance remain material; these are not full CLI startup
+measurements. Warm-cohort GPU samples span 66-73 C, P3, and 1282-1297 MHz
+SM clocks. Power/clock settings and OS services are unchanged. No build,
+sanitizer, profiler, or other GPU probe overlaps ordinary wall measurements.
+
+### GPU accounting and qualification
+
+Separate Nsight captures use three warmups and one captured encode with
+memory tracking enabled. Both versions still issue five allocations/frees,
+485 / 470 / 485 kernel launches, 31 H2D copies, 19 D2H copies, and one
+D2D copy for 4K / 1080p / Flower. Exact transfer totals remain
+117,079,320 / 103,699,012 / 518,400 bytes at 4K;
+29,336,392 / 25,924,192 / 129,600 at 1080p; and
+3,980,492 / 3,430,532 / 17,152 on Flower. Device allocation sizes,
+peak logical live requests, and retained pool reservations match S32.
+
+GPU kernel totals in the new parent/candidate captures are 265.977 /
+276.857 ms at 4K, 41.430 / 43.044 ms at 1080p, and 7.810 / 7.813 ms on
+Flower. No kernel-level improvement is claimed: device code is untouched,
+and the instrumented timings themselves are variable. These captures
+establish unchanged GPU work and transfer/memory accounting, not ordinary
+wall-time speedups.
+
+The expanded AQ test uses an internal, quiescent-object staging-capacity
+query to prove zero host RGB staging after preparation and frame-only
+evaluation. It then requests a strided diagnostic reconstruction, returns
+to encoding-only use, and requests reconstruction again after poisoning the
+caller buffer. Staging capacity is retained, pixels and padding match,
+scores/block maps remain exact, and final codestreams remain byte-identical.
+A submission failure after reuse leaves reconstruction, frame, quantizer,
+score, and block map untouched. Existing full/bounded resident-policy and
+maximum-error tests cover first-use materialization through both evaluation
+entry points. Host allocation failure itself is not injected by these tests.
+
+Both complete builds pass: 59 CUDA tests and 47 CPU-only tests. All 23
+parent/candidate image pairs match SHA-256, encoded size, strategy counts,
+encoder score, and independently decoded Butteraugli score. The corpus,
+distances, efforts, pinned libjxl revision, explicit linear-sRGB decoding,
+and 80-nit metric setup are unchanged from S32. These are output-identity
+checks, not quality tolerance exceptions.
+
+Serial/batch output identity passes at 1080p batch sizes 1/2/4 for both
+fully-resident and maximum-throughput modes and at 4K sizes 1/2 for
+fully-resident mode. These current-policy checks do not establish a
+before/after batch-throughput improvement. `s33_validate_evidence.py`
+additionally compares exact ordered kernel names, grid/block dimensions,
+register counts, static/dynamic shared memory, local-memory use, transfers,
+allocation sizes, and pool reservations in the paired captures.
+
+The expanded full AQ test passes Compute Sanitizer memcheck, initcheck,
+and synccheck with zero errors. Memcheck also enables
+`--track-stream-ordered-races all --leak-check full` and reports zero leaked
+bytes. There are no kernel filters or suppressed API errors. These three
+runs take approximately 39, 27, and 24 seconds. Full shared-memory racecheck
+is not claimed in this host-only change. No sanitizer is aborted or left
+running, and no permission/admin prompt or unexplained stall is observed.
+
+Ignored `build-cuda-ninja/profiles/s33_*` artifacts retain transfer accounting,
+all warm/cold pairs, GPU samples, paired Nsight captures and summaries,
+decoded qualification, serial/batch results, exact sanitizer commands/logs,
+the same-executable host-stage probe and its raw observations, and the
+evidence assertions. The isolated source/build/measurement files are
+`s33_host_probe.cpp`, `s33_build_host_probe.ps1`, and
+`s33_host_probe_measure.py`. `s32_retained_{encode,benchmark,batch}.exe`
+preserve the parent and `s33_retained_{encode,benchmark,batch}.exe` preserve
+the qualified candidate.
+
+Remaining host readback staging still takes about 13 ms of allocation/
+initialization in the isolated 4K probe, alongside roughly 11 ms of
+metadata/setup. These are investigation targets, not proven removable costs:
+deferring initialization may simply move page-fault costs into readback.
+Coefficient handoff/assembly, metadata construction, remaining filters, and
+codestream host work remain material. The resident path is not maxed out.
 
 ## Work that should not lead the next cycle
 

@@ -296,4 +296,8 @@ class CudaBackend final : public GpuBackend,
     CudaBackend& backend, const AqEvaluationPreparation& preparation,
     std::unique_ptr<PreparedAqEvaluation>* prepared);
 
+// Internal qualification hook. The caller must quiesce the prepared object.
+[[nodiscard]] Status GetCudaResidentReconstructionStagingBytesForTest(
+    const PreparedAqEvaluation& prepared, size_t* bytes);
+
 }  // namespace gjxl::cuda_internal

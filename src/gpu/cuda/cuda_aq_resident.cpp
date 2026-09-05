@@ -221,6 +221,13 @@ class CudaPreparedResidentAqEvaluation final
   explicit CudaPreparedResidentAqEvaluation(CudaBackend& backend)
       : backend_(&backend) {}
 
+  size_t reconstruction_staging_bytes_for_test() const noexcept {
+    size_t bytes = 0;
+    for (const auto& plane : linear_readback_)
+      bytes += plane.capacity() * sizeof(float);
+    return bytes;
+  }
+
   Status Prepare(const AqEvaluationPreparation& preparation) {
     const bool has_resident_original =
       preparation.resident_original_linear_rgb.plane[0].buffer != nullptr ||
@@ -388,9 +395,6 @@ class CudaPreparedResidentAqEvaluation final
       y_to_x_readback_.resize(tile_count_);
       y_to_b_readback_.resize(tile_count_);
       quant_field_readback_.resize(block_count_);
-      for (std::vector<float>& plane : linear_readback_) {
-        plane.resize(source_count_);
-      }
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
           "Unable to allocate CUDA resident AQ host staging");
@@ -705,6 +709,13 @@ class CudaPreparedResidentAqEvaluation final
       return Status::FailedPrecondition(
           "CUDA resident final color correlation was not prepared");
     }
+    const bool reconstruction_requested =
+        output.final != nullptr &&
+        MutableImageSpecified(output.final->reconstructed_linear_rgb);
+    if (reconstruction_requested) {
+      status = PrepareReconstructionReadback();
+      if (!status.ok()) return status;
+    }
     status = UploadPlane(*backend_, input.quant_field, quant_field_device_);
     if (!status.ok()) return Invalidate(status);
 
@@ -800,9 +811,6 @@ class CudaPreparedResidentAqEvaluation final
       status = AssembleFrame(candidate_quantizer, &candidate_frame);
       if (!status.ok()) return Invalidate(status);
     }
-    const bool reconstruction_requested =
-        output.final != nullptr &&
-        MutableImageSpecified(output.final->reconstructed_linear_rgb);
     if (reconstruction_requested) {
       const std::array<CudaDeviceToHostCopy, 3> readbacks{{
           {reconstructed_linear_[0].buffer, linear_readback_[0].data(),
@@ -928,6 +936,10 @@ class CudaPreparedResidentAqEvaluation final
     if (!invariant_color_correlation_ready_ || butteraugli_ == nullptr) {
       return Status::FailedPrecondition(
           "CUDA resident policy invariant state is unavailable");
+    }
+    if (reconstruction_requested) {
+      status = PrepareReconstructionReadback();
+      if (!status.ok()) return status;
     }
     if (resident_policy_input) {
       if (!resident_encoding_policy_ready_ ||
@@ -1847,6 +1859,25 @@ class CudaPreparedResidentAqEvaluation final
     return Status::Ok();
   }
 
+  Status PrepareReconstructionReadback() {
+    // Encoding-only requests never read reconstructed RGB back to the host.
+    // Keep transactional staging for diagnostic outputs, but allocate it only
+    // on first use and retain it for subsequent evaluations of this object.
+    if (linear_readback_[0].size() == source_count_) return Status::Ok();
+    try {
+      std::array<std::vector<float>, 3> candidate;
+      for (auto& plane : candidate) plane.resize(source_count_);
+      linear_readback_ = std::move(candidate);
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+          "Unable to allocate CUDA resident reconstruction host staging");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+          "CUDA resident reconstruction host staging is too large");
+    }
+    return Status::Ok();
+  }
+
   Status AssembleFrame(const Quantizer& quantizer, VarDctEncoderFrame* frame) {
     const std::array<CudaDeviceToHostCopy, 5> readbacks{{
         {raw_quant_device_.buffer, raw_readback_.data(),
@@ -2538,6 +2569,18 @@ class CudaPreparedResidentAqEvaluation final
   float invariant_quant_dc_ = 0.0f;
   bool invalid_ = false;
 };
+
+Status GetCudaResidentReconstructionStagingBytesForTest(
+    const PreparedAqEvaluation& prepared, size_t* bytes) {
+  const auto* resident =
+      dynamic_cast<const CudaPreparedResidentAqEvaluation*>(&prepared);
+  if (resident == nullptr || bytes == nullptr) {
+    return Status::InvalidArgument(
+        "CUDA resident reconstruction staging query is invalid");
+  }
+  *bytes = resident->reconstruction_staging_bytes_for_test();
+  return Status::Ok();
+}
 
 Status PrepareCudaResidentAqEvaluation(
     CudaBackend& backend, const AqEvaluationPreparation& preparation,

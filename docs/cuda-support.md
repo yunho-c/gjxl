@@ -554,6 +554,16 @@ The operations expose the same ready, busy, and invalid state semantics as
 Metal. Destruction waits for outstanding work before releasing device or host
 staging memory.
 
+Fully-resident AQ allocates host RGB reconstruction staging only when a
+caller requests that diagnostic image. Encoding-only requests leave these
+three host planes unallocated, saving `3 * source_width * source_height *
+sizeof(float)` bytes of host storage (99.46 MB at 3839x2159). The GPU still
+reconstructs RGB for perceptual evaluation; device arenas and required frame
+readbacks are unchanged. The first diagnostic request allocates all three
+staging planes before submitting work, and later requests reuse them.
+Readback validation still precedes publication to the caller's image, so
+failure does not expose a partial reconstruction.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

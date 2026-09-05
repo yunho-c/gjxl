@@ -26,6 +26,7 @@
 #include "codestream/workflow_internal.h"
 #include "core/frame_geometry.h"
 #include "gpu/cuda/cuda_backend.h"
+#include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/input_preparation.h"
@@ -942,6 +943,18 @@ bool CheckResidentInvariantColorCorrelationContract(
              "Prepare CUDA resident invariant-CfL operation")) {
     return false;
   }
+  size_t reconstruction_staging = 1;
+  const auto check_staging = [&](size_t expected) {
+    return Check(
+        gjxl::cuda_internal::GetCudaResidentReconstructionStagingBytesForTest(
+            *prepared, &reconstruction_staging),
+        "Query CUDA reconstruction staging") &&
+        reconstruction_staging == expected;
+  };
+  if (!check_staging(0)) {
+    std::cerr << "Resident preparation eagerly allocated RGB readback\n";
+    return false;
+  }
   const gjxl::GpuBackendStats before_invariant = gpu.stats();
   if (!Check(prepared->PrepareInvariantColorCorrelationResident(
                  {prepared_field.data(), blocks, blocks.width},
@@ -990,6 +1003,82 @@ bool CheckResidentInvariantColorCorrelationContract(
       })) {
     std::cerr << "CUDA resident evaluation did not retain prepared invariant "
                  "CfL state\n";
+    return false;
+  }
+  if (!check_staging(0)) {
+    std::cerr << "Frame-only evaluation allocated RGB readback\n";
+    return false;
+  }
+  std::vector<uint8_t> reference_bytes;
+  if (!Check(gjxl::EncodeVarDctCodestream(frame, &reference_bytes),
+             "Encode frame-only reconstruction oracle")) return false;
+  const double reference_score = score;
+  const auto reference_blocks = block_map;
+  ImageStorage reconstructed(kSourceExtent);
+  final.reconstructed_linear_rgb = reconstructed.View();
+  if (!Check(prepared->Evaluate(
+                 {.quant_field =
+                      {evaluation_field.data(), blocks, blocks.width},
+                  .quant_dc = evaluation_quant_dc},
+                 output),
+             "Materialize CUDA reconstruction after frame-only evaluation")) {
+    return false;
+  }
+  if (!Check(
+          gjxl::cuda_internal::GetCudaResidentReconstructionStagingBytesForTest(
+              *prepared, &reconstruction_staging),
+          "Query materialized CUDA reconstruction staging") ||
+      reconstruction_staging <
+          3 * kSourceExtent.width * kSourceExtent.height * sizeof(float)) {
+    std::cerr << "Diagnostic reconstruction has no host staging\n";
+    return false;
+  }
+  const size_t retained_staging = reconstruction_staging;
+  const auto reference_reconstruction = reconstructed.plane;
+  for (bool materialize : {false, true}) {
+    if (materialize) {
+      for (auto& plane : reconstructed.plane)
+        std::fill(plane.begin(), plane.end(), -991.0f);
+    }
+    final.reconstructed_linear_rgb =
+        materialize ? reconstructed.View() : gjxl::Image3FView{};
+    if (!Check(prepared->Evaluate(
+                   {.quant_field =
+                        {evaluation_field.data(), blocks, blocks.width},
+                    .quant_dc = evaluation_quant_dc},
+                   output),
+               "Reuse CUDA optional reconstruction staging") ||
+        !check_staging(retained_staging) || score != reference_score ||
+        block_map != reference_blocks ||
+        reconstructed.plane != reference_reconstruction) {
+      std::cerr << "Optional reconstruction changed cached evaluation\n";
+      return false;
+    }
+    std::vector<uint8_t> bytes;
+    if (!Check(gjxl::EncodeVarDctCodestream(frame, &bytes),
+               "Encode reused reconstruction result") ||
+        bytes != reference_bytes) return false;
+  }
+  for (auto& plane : reconstructed.plane)
+    std::fill(plane.begin(), plane.end(), kPoison);
+  const auto untouched_reconstruction = reconstructed.plane;
+  const auto untouched_quantizer = quantizer;
+  if (!Check(gjxl::ArmNextCudaSubmissionFailureForTest(gpu, true, false),
+             "Arm lazy reconstruction submission failure")) return false;
+  const auto failed = prepared->Evaluate(
+      {.quant_field = {evaluation_field.data(), blocks, blocks.width},
+       .quant_dc = evaluation_quant_dc}, output);
+  std::vector<uint8_t> after_failure;
+  if (failed.code() != gjxl::StatusCode::kSubmissionFailed ||
+      reconstructed.plane != untouched_reconstruction ||
+      score != reference_score || block_map != reference_blocks ||
+      quantizer.global_scale != untouched_quantizer.global_scale ||
+      quantizer.quant_dc != untouched_quantizer.quant_dc ||
+      !check_staging(retained_staging) ||
+      !Check(gjxl::EncodeVarDctCodestream(frame, &after_failure),
+             "Encode frame after lazy reconstruction failure") ||
+      after_failure != reference_bytes) {
+    std::cerr << "Lazy reconstruction failure changed caller outputs\n";
     return false;
   }
   return true;

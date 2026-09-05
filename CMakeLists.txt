@@ -2315,6 +2315,7 @@ if(GJXL_BUILD_TESTS)
       NAME cuda_aq
       COMMAND gjxl_cuda_aq_test
     )
+    target_include_directories(gjxl_cuda_aq_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     set_tests_properties(cuda_aq PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_quantization_adjustment_test
