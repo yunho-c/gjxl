@@ -473,10 +473,10 @@ owns:
 - the correct FP32 DCT and functional-kernel dispatch paths; and
 - deterministic failure-injection state for tests.
 
-It deliberately does not yet claim CUDA profiling, a memory pool, multiple
-streams, graph capture, or architecture-specific kernel variants. Those are
-qualification-driven optimizations rather than hidden requirements of the
-functional backend.
+The functional backend has since gained shared private memory pools,
+two production execution lanes, and profiled kernel specializations; see the
+[optimization study](cuda-optimization-s1.md). Graph capture remains an
+unimplemented optimization, not a correctness requirement.
 
 `CudaBuffer` is an RAII `DeviceBuffer` containing an explicit device pointer
 and allocation metadata. Operations validate both backend instance and device
@@ -487,6 +487,60 @@ translated status with `std::call_once`, preserving the concurrent `Wait()`
 contract. Immediate launch errors are reported before a successful
 submission is returned; asynchronous failures belong to the submission's
 completion status.
+
+### Device allocation policy
+
+On devices with stream-ordered allocation support, CUDA backends use
+`cudaMallocFromPoolAsync` and `cudaFreeAsync` on their existing streams.
+Backends with the same device ordinal and retention policy share one
+gjxl-private pool, including the two persistent production lanes. This does
+not share per-image buffers or weaken backend-ownership validation, and
+does not modify the application's default/current CUDA memory pool.
+
+The default release threshold is `min(totalGlobalMem / 2, 4 GiB)`. It retains
+unused memory for repeated encoding and is not a cap on live allocations.
+Separate custom thresholds create separate pools; their retention can add
+up. Zero requests release of unused storage at synchronization points.
+Callers creating explicit C++ backends can choose a policy:
+
+```cpp
+gjxl::CudaBackendOptions options;
+options.memory_pool_release_threshold_bytes = uint64_t{1} << 30;  // 1 GiB
+// Alternatively, options.use_stream_ordered_allocation = false selects
+// the legacy cudaMalloc/cudaFree policy instead of any memory pool.
+std::unique_ptr<gjxl::GpuBackend> backend;
+gjxl::Status status = gjxl::CreateCudaBackend(options, &backend);
+if (!status.ok()) return status;
+```
+
+The public `gpu/cuda/cuda_backend.h` declares these options and a cache
+release function. After quiescing encodes and releasing unneeded prepared
+objects/buffers, a C++ caller can release unused memory while retaining
+the backend lanes:
+
+```cpp
+gjxl::Status status = gjxl::TrimCudaDeviceMemory(0);
+if (!status.ok()) return status;
+```
+
+Trimming synchronizes CUDA work on the selected device in the current
+context, so it may wait for other users of that context. It leaves live
+allocations valid and trims only gjxl pools. Concurrent encoding can
+immediately grow the cache again. Pool ownership ends after the final
+backend/buffer/submission state releases it; the registry holds only weak
+references. Applications sharing a memory-constrained GPU can lower the
+threshold, explicitly trim, or select the legacy allocator. There is no
+automatic cross-pool out-of-memory recovery.
+
+The feature is guarded for CUDA 11.2+, with a runtime capability check;
+unsupported devices and older-toolkit builds use the legacy allocator.
+Other pool setup errors are returned to the caller. Qualification currently
+covers CUDA 11.8 on the RTX 3060 Laptop GPU, including forced legacy behavior,
+not an older toolkit or an unsupported physical device. Retained cache use
+and cold/warm timing are reported separately in the
+[S32 study](cuda-optimization-s1.md#stream-ordered-allocation-follow-up-s32).
+Release behavior follows NVIDIA's
+[stream-ordered allocator documentation](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-c-programming-guide/index.html#stream-ordered-memory-allocator).
 
 ### Prepared operations
 

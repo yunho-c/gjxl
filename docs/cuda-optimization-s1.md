@@ -3,8 +3,9 @@
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
   AC gather/DCT plus residual/inverse/loss fusion, compact AC-search scratch,
-  factorized resident DCT, cooperative quantization adjustment, and fused Malta
-  implemented; optimization ongoing
+  factorized resident DCT, cooperative quantization adjustment, fused Malta,
+  and bounded-retention stream-ordered allocation implemented;
+  optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -16,7 +17,19 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest fused-Malta checkpoint against `eb1b624`
+below supersede them. The latest private-memory-pool checkpoint against
+`f1f9fe6` reduces warmed fully-resident total time by paired medians of 16.1%
+at odd 4K, 16.5% at odd 1080p, and 9.8% on Flower. Kernel counts, transfers,
+and live requested allocation sizes are unchanged; warmed 4K allocation/free
+API time falls from 61.0 to 0.31 ms. This trades retained GPU memory for reuse:
+the default release target is half the device's memory, capped at 4 GiB,
+shared across matching backend lanes, with an explicit cache-trim API.
+Cold first-encode time is mixed or worse, so no cold-start gain is claimed.
+All 59 CUDA and 47 CPU tests, ten explicitly scoped sanitizer runs, batch
+checks, 36 same-executable policy outputs, and 23 byte-identical decoded
+image pairs pass. The resident path is not demonstrated maxed out.
+
+The preceding fused-Malta checkpoint against `eb1b624`
 removes 24 launches per encode without changing transfers or scratch capacity.
 An extended-warmup production-kernel probe improves 6.9-11.1%; whole-encoder
 Malta profiles improve 22.4% at 1080p and 13.4% on Flower. Four 4K profile
@@ -3202,6 +3215,210 @@ to kernel time or a proven removable-overhead budget. Allocation lifetime,
 host staging, and transfer/synchronization boundaries deserve investigation
 alongside the remaining kernels. `cudaProfilerStart` is excluded from this
 analysis; `s31_api_totals.*` retain the raw API breakdown.
+
+## Stream-ordered allocation follow-up (S32)
+
+### Cause, experiment, and retained policy
+
+The parent is `f1f9fe6`, the retained fused-Malta implementation. Its five
+per-encode arenas still use `cudaMalloc` and `cudaFree`; consolidating arenas
+did not remove the driver's repeated allocation and global synchronization
+costs. The S31 4K trace records 16.2 ms in allocation and 51.4 ms in frees.
+These host API spans may include GPU waits and are not additive to kernel
+time. A new paired trace below isolates the allocation API change while
+confirming unchanged kernels and transfers.
+
+A same-executable 4K prototype compares the legacy allocator with
+stream-ordered allocation using release thresholds of zero, 1 GiB, and
+3 GiB. Three alternating rounds use three warmups and three measured
+encodes per process. Median paired total-time changes versus legacy are
++2.9%, +0.01%, and -7.4%; quantization changes are +1.0%, -6.4%, and
+-18.4%. The allocator change alone with no retained working set is not
+enough. The 3 GiB policy keeps 2,818,572,288 reserved bytes for a
+2,807,513,664-byte live requested working set. This prototype changes the
+default pool only inside its isolated experiment process; production does
+not change the application's default or current CUDA pool.
+
+Production uses a gjxl-private `cudaMemPool_t`, `cudaMallocFromPoolAsync`,
+and `cudaFreeAsync` ordered on each backend's existing non-blocking stream.
+Matching device ordinals and release thresholds share one pool, including
+the two production lanes. A mutex protects the weak-reference registry;
+backend/buffer/submission state owns the pool lifetime. The registry cannot
+keep unused pools alive. Internal dependency insertion for memory reuse is
+disabled so the shared allocator does not introduce cross-lane dependencies
+solely to reuse storage whose free has not completed.
+
+`CudaBackendOptions` defaults the release threshold to
+`min(totalGlobalMem / 2, 4 GiB)`. This is a cache-retention target, not a
+hard allocation cap, and live working sets can exceed it. Callers can
+override the threshold, use zero to release unused storage at synchronization
+points, or disable stream-ordered allocation entirely. CUDA builds older
+than 11.2 and devices reporting no pool support retain `cudaMalloc`/`cudaFree`.
+Other pool-creation/configuration failures are reported, not hidden by an
+unqualified fallback. The current toolkit/device and forced legacy path
+are tested; older-toolkit and unsupported-device branches are not claimed
+as real-hardware qualification.
+
+`TrimCudaDeviceMemory(ordinal)` synchronizes work on the selected device in
+the current context and trims all gjxl-private pools for that device. It
+preserves live buffers and does not change other libraries' pools, although
+the synchronization can wait for their CUDA work. Applications should
+quiesce encoding first for full cache release. Concurrent encodes can grow
+the pools again. Different custom thresholds create separate pools and can
+increase retained memory; there is no automatic cross-pool OOM recovery.
+See the [configuration and trimming example](cuda-support.md#device-allocation-policy).
+
+Pool/free ordering and release semantics follow the
+[CUDA 11.8 runtime pool API](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-runtime-api/group__CUDART__MEMORY__POOLS.html)
+and [stream-ordered allocator guide](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-c-programming-guide/index.html#stream-ordered-memory-allocator).
+The private-pool choice also follows NVIDIA's
+[library integration guidance](https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-2/).
+In particular, synchronous `cudaFree` does not itself wait for a pooled
+allocation's users. The exceptional free-enqueue cleanup path first drains
+the owning stream. Final device-state destruction similarly completes queued
+frees before destroying the stream. Factory stream ownership is transferred
+explicitly so a host allocation failure cannot destroy the stream twice.
+
+### Warm and first-encode wall time
+
+The ordinary public in-memory boundary is unchanged: caller-owned linear
+RGB through the finished codestream, at distance 1.2 and effort 7. Seven
+alternating independent-process parent/candidate pairs each use three
+warmups and five samples; each process contributes its median. The paired
+percentage is the median of candidate/parent ratios, not the ratio of the
+two displayed marginal medians. No observation is discarded.
+
+| Fully-resident input | Warm total ms, parent / retained | Paired total change | Warm quantization ms, parent / retained | Paired quantization change |
+| --- | ---: | ---: | ---: | ---: |
+| 3839x2159 | 719.916 / 602.002 | -16.1% | 482.433 / 384.860 | -19.2% |
+| 1919x1079 | 175.378 / 146.393 | -16.5% | 97.894 / 69.481 | -26.7% |
+| Flower 510x532 | 37.692 / 34.410 | -9.8% | 20.461 / 16.508 | -21.8% |
+
+Total-time process-median ranges are 698.069-1019.053 / 480.952-646.886 ms
+at 4K, 165.343-188.849 / 140.875-159.823 ms at 1080p, and
+36.585-60.228 / 31.570-50.514 ms on Flower. The seventh 4K pair is a large
+outlier (1019.053 / 480.952 ms); it remains included. The preceding six
+4K pairs all favor the candidate by approximately 10-16% in total time.
+
+A separate seven-pair first-encode cohort uses zero warmups and one sample
+per process. Backend construction is outside this boundary, so these are
+not complete CLI startup measurements. Parent/candidate total medians are
+629.453 / 713.460 ms at 4K, 209.022 / 209.460 ms at 1080p, and
+50.044 / 59.941 ms on Flower. Paired total changes are respectively
++16.2%, +0.4%, and +9.4%; quantization changes are +1.8%, -2.1%, and -4.4%.
+First-encode total ranges are 583.439-896.518 / 593.170-968.451 ms at 4K,
+201.391-396.236 / 198.849-409.822 ms at 1080p, and
+48.754-70.611 / 54.035-116.855 ms on Flower. The cold observations are
+unfavorable or mixed and highly variable: no cold-start improvement is
+claimed. The retained policy targets repeated use of the persistent backend.
+
+GPU samples span 64-79 C. The initial state is P3/1282 MHz graphics;
+post-warm cohorts include P0/1762 MHz at 4K and P0/1282 MHz at 1080p.
+Clocks, power policy, OS services, and firewall settings are not changed.
+Laptop variation remains a limitation; no cause is inferred from clock
+samples alone. No build, sanitizer, profiler, or other GPU probe overlaps
+these ordinary wall-time runs.
+
+### API, transfer, and memory evidence
+
+Separate Nsight captures use three warmups and one profiled encode with
+CUDA memory tracking enabled. Instrumented wall times are not used as
+ordinary performance measurements. Allocation/free API totals are:
+
+| Input | Parent `cudaMalloc` + `cudaFree`, ms | Retained pool allocation + async free, ms | GPU kernels, parent / retained, ms |
+| --- | ---: | ---: | ---: |
+| 3839x2159 | 13.115 + 47.893 | 0.157 + 0.148 | 135.378 / 135.844 |
+| 1919x1079 | 3.398 + 19.636 | 0.113 + 0.118 | 37.967 / 37.955 |
+| Flower | 3.173 + 1.709 | 0.187 + 0.147 | 7.566 / 7.596 |
+
+Both versions make five allocations and five frees per encode. Kernel
+counts are unchanged at 485 / 470 / 485. Every trace retains 31 H2D,
+19 D2H, and one D2D copy. Their exact byte totals are unchanged:
+117,079,320 / 103,699,012 / 518,400 at 4K;
+29,336,392 / 25,924,192 / 129,600 at 1080p; and
+3,980,492 / 3,430,532 / 17,152 on Flower. Kernel arithmetic is untouched.
+The 99.5% reduction in 4K allocation/free API time is not a 99.5%
+whole-encode speedup, nor may its old synchronization spans be added to
+GPU work as an independent cost.
+
+The exact five allocation sizes and peak logical live requests match the
+parent: 2,807,513,664 bytes at odd 4K, 701,724,038 at odd 1080p, and
+92,405,776 on Flower. Pool reservation after warming is respectively
+2,818,572,288, 704,643,072, and 100,663,296 bytes. The actual default
+threshold on this device is 3,220,963,328 bytes. This is retained pool
+storage, not a reduction in live requested memory or a measurement of
+total board/driver usage. The legacy allocator releases its arenas instead
+of keeping this idle cache.
+
+A full-process even-4K batch-size-two memory capture (one warmup and one
+paired serial/batch sample, nine encodes per version) records the same 45
+allocation requests and a 5,616,940,672-byte peak live requested set for
+both versions. All candidate allocations use one private pool, not one
+cache per lane. Its reserved high-water mark is 5,637,144,576 bytes during
+concurrent work, falling to 3,187,671,040 bytes with zero utilized bytes
+before destruction. Thus the release target is visibly not a live-memory
+cap. No allocation remains unmatched at the end of either trace. The
+explicit-trim test separately verifies zero reserved and utilized bytes
+when all buffers have been released.
+
+### Qualification and reproduction artifacts
+
+The CUDA build passes all 59 tests; the CPU-only build passes all 47.
+The new memory-pool test covers shared versus distinct policies, the forced
+legacy path, unchanged default-pool settings, foreign-backend rejection,
+failed allocation preserving the caller's existing buffer and statistics,
+offset round trips, replacement of existing owners, queued release/reuse
+without intermediate synchronization, four host threads sharing two
+backends, pending work surviving backend destruction, explicit trimming
+with live buffers, full cache reclamation, and weak registry lifetime.
+
+Ten Compute Sanitizer invocations pass: memory-pool memcheck/racecheck/
+synccheck/initcheck, plus backend, full AQ, and Butteraugli memcheck and
+initcheck. Every memcheck uses `--track-stream-ordered-races all` and
+`--leak-check full`; all report zero errors and zero leaked bytes. The
+focused racecheck reports zero hazards. There are no kernel filters.
+`--report-api-errors no` is used only for the pool test's deliberate
+impossible allocation and the backend test's deliberate invalid launch;
+their tests still validate runtime status, and memory instrumentation stays
+enabled. Full-AQ shared-memory racecheck is not claimed in this cycle.
+All ten runs complete in roughly 90 seconds combined; none is aborted,
+left running, or observed blocked by a permission/admin prompt.
+
+A same-executable policy probe switches only `CudaBackendOptions` between
+legacy and the production pool. It writes three outputs outside the timing
+boundary at both zero and three warmups. All 36 codestreams are exact
+across cold allocation, repeated reuse, and allocator policy on the actual
+odd-4K, odd-1080p, and Flower benchmark inputs (1,048,983, 265,570, and
+37,018 bytes respectively).
+
+All 23 parent/candidate qualification pairs have identical SHA-256,
+codestream size, strategy counts, final encoder score, and independently
+decoded Butteraugli score. The seven-input corpus is the 17x13 sample,
+odd padded 1080p/4K, Flower, and the three provenance-pinned CC0 Wesaturate
+photographs from S29, at distances 0.5/1.2/3 and effort 7, plus sample and
+Flower at distance 1.2/effort 9. Decoder and metric remain pinned to libjxl
+`e8ff09762481785938d8e4e01333ed3917571161`, Clang 22.1.8, with explicit
+linear-sRGB decoding (`RGB_D65_SRG_Rel_Lin`) and 80-nit SDR metric input.
+
+Exact serial/batch checks pass for 1080p batch sizes 1/2/4 in fully-resident
+and maximum-throughput modes and 4K batch sizes 1/2 in fully-resident mode.
+These current-policy checks establish concurrency/output behavior, not a
+before/after batch-throughput gain.
+
+Ignored `build-cuda-ninja/profiles/s32_*` artifacts retain the support
+probe, isolated allocator prototype, threshold sweep, all warm/cold raw
+pairs, GPU state, six single-encode Nsight captures and their API/transfer/
+allocation summaries, both whole-process batch-memory captures, policy
+identity probe, decoded qualification, batch logs, and exact sanitizer
+commands/results. `s31_retained_{encode,benchmark,batch}.exe` preserve the
+parent; `s32_retained_{encode,benchmark,batch}.exe` preserve the qualified
+candidate. `s32_batch_memory_summary.py` also asserts byte-exactness and
+matching strategy/score reports for all 23 qualification pairs.
+
+The next investigation should account for remaining transfer/staging and
+host work alongside resident coefficient encoding and filtering. Allocation
+reuse is a warmed-latency improvement with an explicit memory tradeoff,
+not proof that the resident path has reached its ceiling.
 
 ## Work that should not lead the next cycle
 

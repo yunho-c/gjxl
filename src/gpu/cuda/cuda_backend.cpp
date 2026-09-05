@@ -5,7 +5,9 @@
 
 #include <cuda_runtime_api.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -13,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "core/ac_strategy.h"
 #include "gpu/buffer.h"
@@ -22,6 +25,152 @@
 #include "gpu/submission.h"
 
 namespace gjxl::cuda_internal {
+
+namespace {
+
+struct PoolRegistry {
+  std::mutex mutex;
+  // Weak ownership prevents the registry from extending backend lifetimes.
+  std::vector<std::weak_ptr<CudaMemoryPoolState>> pools;
+};
+
+PoolRegistry& MemoryPools() {
+  static PoolRegistry registry;
+  return registry;
+}
+
+cudaError_t AllocateDeviceMemory(CudaDeviceState& state, size_t size_bytes,
+                                 void** pointer) {
+#if CUDART_VERSION >= 11020
+  if (state.memory_pool != nullptr) {
+    std::lock_guard lock(state.submission_mutex);
+    return cudaMallocFromPoolAsync(pointer, size_bytes, state.memory_pool->pool,
+                                   state.stream);
+  }
+#endif
+  return cudaMalloc(pointer, size_bytes);
+}
+
+void FreeDeviceMemory(CudaDeviceState& state, void* pointer) {
+#if CUDART_VERSION >= 11020
+  if (state.memory_pool != nullptr) {
+    std::lock_guard lock(state.submission_mutex);
+    if (cudaFreeAsync(pointer, state.stream) == cudaSuccess) return;
+    // cudaFree does not synchronize pool allocations. If enqueueing the free
+    // fails, drain our stream before attempting synchronous cleanup.
+    (void)cudaStreamSynchronize(state.stream);
+  }
+#endif
+  (void)cudaFree(pointer);
+}
+
+}  // namespace
+
+Status AcquireMemoryPool(int ordinal, uint64_t release_threshold_bytes,
+                         std::shared_ptr<CudaMemoryPoolState>* out) {
+#if CUDART_VERSION >= 11020
+  int supported = 0;
+  cudaError_t error = cudaDeviceGetAttribute(
+      &supported, cudaDevAttrMemoryPoolsSupported, ordinal);
+  if (error == cudaErrorInvalidValue || error == cudaErrorNotSupported) {
+    // Older drivers may not recognize this attribute. Pooling is optional.
+    (void)cudaGetLastError();
+    return Status::Ok();
+  }
+  if (error != cudaSuccess)
+    return CudaRuntimeStatus(error, "Query CUDA memory-pool support");
+  if (supported == 0) return Status::Ok();
+
+  PoolRegistry& registry = MemoryPools();
+  std::lock_guard lock(registry.mutex);
+  for (auto it = registry.pools.begin(); it != registry.pools.end();) {
+    auto existing = it->lock();
+    if (existing == nullptr) {
+      it = registry.pools.erase(it);
+    } else {
+      if (existing->ordinal == ordinal &&
+          existing->release_threshold_bytes == release_threshold_bytes) {
+        *out = std::move(existing);
+        return Status::Ok();
+      }
+      ++it;
+    }
+  }
+  auto pool = std::make_shared<CudaMemoryPoolState>();
+  pool->ordinal = ordinal;
+  pool->release_threshold_bytes = release_threshold_bytes;
+  cudaMemPoolProps properties{};
+  properties.allocType = cudaMemAllocationTypePinned;
+  properties.location.type = cudaMemLocationTypeDevice;
+  properties.location.id = ordinal;
+  cudaMemPool_t handle = nullptr;
+  error = cudaMemPoolCreate(&handle, &properties);
+  if (error == cudaErrorNotSupported) {
+    (void)cudaGetLastError();
+    return Status::Ok();
+  }
+  if (error != cudaSuccess)
+    return CudaRuntimeStatus(error, "Create private CUDA memory pool");
+  pool->pool = handle;
+  error = cudaMemPoolSetAttribute(pool->pool, cudaMemPoolAttrReleaseThreshold,
+                                  &release_threshold_bytes);
+  if (error != cudaSuccess)
+    return CudaRuntimeStatus(error, "Configure CUDA memory-pool retention");
+  // Sharing the pool must not inject dependencies between independent lanes
+  // just to reuse memory whose free has not completed yet.
+  int allow_internal_dependencies = 0;
+  error = cudaMemPoolSetAttribute(
+      pool->pool, cudaMemPoolReuseAllowInternalDependencies,
+      &allow_internal_dependencies);
+  if (error != cudaSuccess)
+    return CudaRuntimeStatus(error, "Configure CUDA memory-pool ordering");
+  registry.pools.push_back(pool);
+  *out = std::move(pool);
+#else
+  (void)ordinal;
+  (void)release_threshold_bytes;
+  (void)out;
+#endif
+  return Status::Ok();
+}
+
+Status TrimMemoryPools(int ordinal) {
+  std::vector<std::shared_ptr<CudaMemoryPoolState>> pools;
+  try {
+    PoolRegistry& registry = MemoryPools();
+    std::lock_guard lock(registry.mutex);
+    for (auto it = registry.pools.begin(); it != registry.pools.end();) {
+      auto pool = it->lock();
+      if (pool == nullptr) {
+        it = registry.pools.erase(it);
+      } else {
+        if (pool->ordinal == ordinal) pools.push_back(std::move(pool));
+        ++it;
+      }
+    }
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory("Snapshot CUDA memory pools for trimming");
+  }
+  cudaError_t error = cudaDeviceSynchronize();
+  if (error != cudaSuccess)
+    return CudaRuntimeStatus(error, "Wait before trimming CUDA memory pools");
+#if CUDART_VERSION >= 11020
+  for (const auto& pool : pools) {
+    error = cudaMemPoolTrimTo(pool->pool, 0);
+    if (error != cudaSuccess)
+      return CudaRuntimeStatus(error, "Trim private CUDA memory pool");
+  }
+#endif
+  return Status::Ok();
+}
+
+CudaMemoryPoolState::~CudaMemoryPoolState() {
+#if CUDART_VERSION >= 11020
+  ScopedCudaDevice device(ordinal);
+  if (device.status() == cudaSuccess && pool != nullptr)
+    (void)cudaMemPoolDestroy(pool);
+#endif
+}
 
 Status CudaStatus(
   cudaError_t error,
@@ -84,6 +233,9 @@ ScopedCudaDevice::~ScopedCudaDevice() {
 CudaDeviceState::~CudaDeviceState() {
   ScopedCudaDevice device(ordinal);
   if (device.status() == cudaSuccess && stream != nullptr) {
+    // Buffers and submissions share this state. At its final release all
+    // pooled frees have been queued; complete them before destroying the lane.
+    if (memory_pool != nullptr) (void)cudaStreamSynchronize(stream);
     (void)cudaStreamDestroy(stream);
   }
 }
@@ -99,7 +251,7 @@ CudaBuffer::CudaBuffer(
 CudaBuffer::~CudaBuffer() {
   ScopedCudaDevice device(state_->ordinal);
   if (device.status() == cudaSuccess && pointer_ != nullptr) {
-    (void)cudaFree(pointer_);
+    FreeDeviceMemory(*state_, pointer_);
   }
 }
 
@@ -168,14 +320,14 @@ Status CudaBackend::Allocate(
     return CudaRuntimeStatus(device.status(), "Select CUDA allocation device");
   }
   void* pointer = nullptr;
-  const cudaError_t error = cudaMalloc(&pointer, size_bytes);
+  const cudaError_t error = AllocateDeviceMemory(*state_, size_bytes, &pointer);
   if (error != cudaSuccess) {
     return CudaRuntimeStatus(error, "Allocate CUDA device buffer");
   }
   try {
     out->reset(new CudaBuffer(state_, id(), size_bytes, pointer));
   } catch (const std::bad_alloc&) {
-    (void)cudaFree(pointer);
+    FreeDeviceMemory(*state_, pointer);
     return Status::OutOfMemory("Allocate CUDA buffer owner");
   }
   RecordSuccessfulAllocation();
@@ -653,10 +805,19 @@ Status CreateCudaBackend(
   try {
     auto state = std::make_shared<cuda_internal::CudaDeviceState>();
     state->ordinal = options.device_ordinal;
-    state->stream = stream;
+    state->stream = std::exchange(stream, nullptr);
     state->maximum_grid_x = static_cast<size_t>(properties.maxGridSize[0]);
     state->maximum_threads_per_block =
       static_cast<size_t>(properties.maxThreadsPerBlock);
+    if (options.use_stream_ordered_allocation) {
+      const uint64_t threshold =
+          options.memory_pool_release_threshold_bytes.value_or(
+              std::min<uint64_t>(properties.totalGlobalMem / 2,
+                                 uint64_t{4} << 30));
+      const Status status = cuda_internal::AcquireMemoryPool(
+          options.device_ordinal, threshold, &state->memory_pool);
+      if (!status.ok()) return status;
+    }
     std::string name = "CUDA";
     if (properties.name[0] != '\0') {
       name += ": ";
@@ -666,10 +827,26 @@ Status CreateCudaBackend(
       std::move(state), std::move(name),
       options.test_fail_submission, options.test_fail_completion));
   } catch (const std::bad_alloc&) {
-    (void)cudaStreamDestroy(stream);
+    if (stream != nullptr) (void)cudaStreamDestroy(stream);
     return Status::OutOfMemory("Allocate CUDA backend");
   }
   return Status::Ok();
+}
+
+Status TrimCudaDeviceMemory(int device_ordinal) {
+  if (device_ordinal < 0)
+    return Status::InvalidArgument("CUDA trim device ordinal is negative");
+  int count = 0;
+  const cudaError_t error = cudaGetDeviceCount(&count);
+  if (error != cudaSuccess)
+    return cuda_internal::CudaRuntimeStatus(error, "Enumerate CUDA trim devices");
+  if (device_ordinal >= count)
+    return Status::InvalidArgument("CUDA trim device ordinal is out of range");
+  cuda_internal::ScopedCudaDevice selected(device_ordinal);
+  if (selected.status() != cudaSuccess)
+    return cuda_internal::CudaRuntimeStatus(selected.status(),
+                                            "Select CUDA trim device");
+  return cuda_internal::TrimMemoryPools(device_ordinal);
 }
 
 Status ArmNextCudaSubmissionFailureForTest(

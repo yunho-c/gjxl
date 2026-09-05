@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -62,12 +63,26 @@ class ScopedCudaDevice {
   bool changed_ = false;
 };
 
+struct CudaMemoryPoolState {
+  CudaMemoryPoolState() = default;
+  CudaMemoryPoolState(const CudaMemoryPoolState&) = delete;
+  CudaMemoryPoolState& operator=(const CudaMemoryPoolState&) = delete;
+
+  int ordinal = 0;
+  uint64_t release_threshold_bytes = 0;
+#if CUDART_VERSION >= 11020
+  cudaMemPool_t pool = nullptr;
+#endif
+  ~CudaMemoryPoolState();
+};
+
 struct CudaDeviceState {
   int ordinal = 0;
   cudaStream_t stream = nullptr;
   size_t maximum_grid_x = 0;
   size_t maximum_threads_per_block = 0;
   std::mutex submission_mutex;
+  std::shared_ptr<CudaMemoryPoolState> memory_pool;
 
   ~CudaDeviceState();
 };
