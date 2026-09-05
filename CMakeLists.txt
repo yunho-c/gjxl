@@ -2363,6 +2363,13 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_ac_strategy_search COMMAND gjxl_ac_strategy_cuda_search_test)
     set_tests_properties(cuda_ac_strategy_search PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_cuda_malta_test tests/cuda_malta_test.cpp)
+    target_link_libraries(gjxl_cuda_malta_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_malta_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_malta COMMAND gjxl_cuda_malta_test)
+    add_test(NAME cuda_malta_tall COMMAND gjxl_cuda_malta_test --tall-only)
+    set_tests_properties(cuda_malta cuda_malta_tall PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(
       gjxl_cuda_butteraugli_test
       tests/cuda_butteraugli_test.cpp

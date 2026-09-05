@@ -37,6 +37,30 @@ struct CudaButteraugliPlan {
   float intensity_target = 255.0f;
 };
 
+// One scaled Malta response, including the caller's initialization/addition
+// policy. The separate-pass entry point is retained as a test oracle.
+struct CudaButteraugliMaltaParams {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t reference_stride = 0;
+  uint32_t distorted_stride = 0;
+  uint32_t accumulation_stride = 0;
+  uint32_t low_frequency = 0;
+  uint32_t initialize_accumulation = 0;
+  float norm2_0_gt_1 = 0.0f;
+  float norm2_0_lt_1 = 0.0f;
+  float norm = 0.0f;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMalta(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaReference(
+    const float* reference, const float* distorted, float* scaled,
+    uint32_t scaled_stride, float* accumulation,
+    CudaButteraugliMaltaParams params, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaButteraugliPrepare(
     const CudaButteraugliPlan& plan, cudaStream_t stream);
 

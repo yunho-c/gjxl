@@ -3,7 +3,7 @@
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
   AC gather/DCT plus residual/inverse/loss fusion, compact AC-search scratch,
-  factorized resident DCT, and cooperative quantization adjustment
+  factorized resident DCT, cooperative quantization adjustment, and fused Malta
   implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -16,7 +16,17 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest cooperative-adjustment checkpoint against
+below supersede them. The latest fused-Malta checkpoint against `eb1b624`
+removes 24 launches per encode without changing transfers or scratch capacity.
+An extended-warmup production-kernel probe improves 6.9-11.1%; whole-encoder
+Malta profiles improve 22.4% at 1080p and 13.4% on Flower. Four 4K profile
+pairs give a 5.6% median Malta improvement but mixed total-GPU results.
+Wall-time changes are small and noisy, so no stable end-to-end gain is claimed.
+All 58 CUDA and 47 CPU tests, ten explicitly scoped sanitizer runs, batch
+checks, and 23 byte-identical decoded image pairs pass qualification.
+Optimization remains ongoing, not demonstrated maxed out.
+
+The preceding cooperative-adjustment checkpoint against
 `f26e2ef` reduces its targeted kernel time by 84.4% at 4K, 92.4% at 1080p,
 and 96.7% on Flower, with unchanged launches/transfers. All 56 CUDA and 47
 CPU tests pass, as do eight sanitizer runs (full-AQ race instrumentation is
@@ -3012,6 +3022,186 @@ retain the decoded comparisons, reusing the provenance-pinned `s29_corpus`.
 `kernel_totals.*`, and `batch_*.txt` retain the profiles and batch checks.
 `switch_probe.cu`, `switch_benchmark.cpp`, `switch_measure.py`, and
 `switch_*` preserve the same-executable diagnostic and exact outputs.
+
+### Follow-up: fuse Malta scaling into response tiles (2026-09-05)
+
+Parent: `eb1b624` (cooperative quantization adjustment). Its retained 4K
+profile spent 54.798 ms in Malta response and 13.637 ms in Malta scaling,
+versus 33.347 ms in resident coefficient encoding. Scaling wrote a full
+temporary plane; the response kernel then reloaded overlapping 40x16 halos
+for 32x8 output tiles. The response already had no local/stack storage and
+reused repeated directional sums. Merely removing source-level duplicate
+sums would not remove additional executed arithmetic.
+
+#### Experiments and retained implementation
+
+Nine ignored-build variants compare the original separate passes, frequency
+specialization with a 2D grid, larger tiles, direct scale/response fusion,
+and warp-shuffle sharing. They all pass 120 guarded bitwise cases against
+the frozen parent source. Three input patterns cover signed zeros,
+near-identical values, and large independent values; ten shapes include
+partial tiles, independent padded strides, and offset pointers. Both
+frequency modes and initialization/addition policies are exercised.
+
+The initial CUDA-event screen uses three warmups, seven alternating-order
+rounds, and three repeats per event interval. Four image sizes range from
+512x536 to 3840x2160. The 4K median pair/stage times are:
+
+| Variant | Full response (ms) | Low-frequency response (ms) |
+|---|---:|---:|
+| Original separate passes, 32x8 | 2.483 | 2.553 |
+| Specialized separate passes, 32x8 | 2.574 | 2.626 |
+| Specialized separate passes, 32x16 | 2.623 | 2.457 |
+| Fused, 32x8 | 2.102 | 2.220 |
+| Fused, 32x16 | 2.501 | 2.932 |
+| Fused, 32x32 | 2.884 | 3.558 |
+| Fused, 64x8 | 2.574 | 2.997 |
+| Separate passes with warp sharing, 32x8 | 6.459 | 5.278 |
+| Fused with warp sharing, 32x8 | 5.346 | 4.677 |
+
+The retained 32x8 fusion improves this isolated screen by approximately
+13-20%, depending on size and frequency mode. Larger tiles and warp sharing
+are rejected. None of the variants spills; the slow shuffle variants do
+not support an occupancy/spill explanation. Hardware-counter evidence for
+their precise bottleneck remains unavailable.
+
+The production kernel scales reference/distorted values directly into the
+shared tile, then evaluates the unchanged `MaltaLf` or `MaltaFull` expression.
+Frequency selection is specialized at launch. The 2D grid avoids repeated
+dynamic tile-column division. A flattened-grid specialization preserves the
+previous geometry when the tile-row count exceeds CUDA's 65535 grid.y limit.
+All threads load and synchronize before partial-edge threads return.
+
+Halo scaling is deliberately repeated: an interior tile has 640 scaled
+values for 256 outputs. The change removes the temporary-plane write/read
+and one launch, not all duplicate input traffic. It does not remove the
+working-plane allocation, which later mask/blur stages still use. Stage
+weights, normalization, ordering, response sum trees, zero boundary policy,
+and output accumulation order are unchanged. The original two-pass kernels
+remain available through an internal test-oracle entry point.
+
+The production binary uses 40 registers/thread for full response and 34
+for low-frequency response, 2560 shared bytes/block, and zero stack/local
+storage for both normal and flattened grids. These are production counts;
+the generic-reader prototype used 38/35 registers. The parent response used
+40 registers and 2560 shared bytes, plus a separate 21-register scale kernel.
+
+#### Whole-encoder profiles and timing limits
+
+All fresh profiles use three warmups and one captured public encode with
+the same linear-RGB-to-codestream boundary as the preceding checkpoint.
+The three ordinary traces remove exactly 24 launches: 509 to 485 at 4K
+and on Flower, and 494 to 470 at 1080p. Malta changes from 24 scale plus
+24 response launches to 24 fused launches. Copies remain 31 H2D, 19 D2H,
+and one D2D, with identical byte totals:
+
+| Workload | H2D bytes | D2H bytes | D2D bytes |
+|---|---:|---:|---:|
+| Odd 4K | 117,079,320 | 103,699,012 | 518,400 |
+| Odd 1080p | 29,336,392 | 25,924,192 | 129,600 |
+| Flower | 3,980,492 | 3,430,532 | 17,152 |
+
+At 1080p, Malta falls from 5.820 to 4.518 ms (-22.4%) and all kernels
+from 42.139 to 40.007 ms (-5.1%); non-Malta kernels change -2.3%.
+On Flower, Malta falls from 0.767 to 0.664 ms (-13.4%), while other kernels
+are essentially unchanged (+0.04%); all kernels change -1.3%.
+
+The first 4K capture is unfavorable, so three additional pairs reverse and
+alternate execution order. All four pairs, including the first, are retained:
+
+| 4K pair (order) | Parent Malta (ms) | Fused Malta (ms) | Malta change | Other kernels change | All kernels change |
+|---|---:|---:|---:|---:|---:|
+| Original (parent first) | 44.799 | 49.949 | +11.5% | +8.0% | +8.7% |
+| Repeat 0 (fused first) | 54.188 | 42.352 | -21.8% | -4.3% | -8.0% |
+| Repeat 1 (parent first) | 52.359 | 46.763 | -10.7% | +0.03% | -2.2% |
+| Repeat 2 (fused first) | 49.725 | 49.439 | -0.6% | +4.6% | +3.6% |
+
+Across all four pairs, median paired changes are -5.6% for Malta, +2.3%
+for other kernels, and +0.7% for all kernels. These traces support fewer
+launches but not a stable 4K total-GPU-time improvement. The first capture's
+regression is concentrated in early full-resolution Malta calls; it is not
+silently discarded or explained away by an unmeasured clock assumption.
+
+A follow-up event probe calls the actual production and reference wrappers
+from one executable at 3840x2160. It covers all six production weight/norm
+sets and three input patterns: identical nonzero values, all zeros, and
+near-identical nonzero values. Short-warmup raw times drift sharply within
+bursts. Extending warmup to 64 old/new pairs before seven alternating timed
+rounds yields median paired improvements of 6.9-11.1% across all 18 cases.
+Some individual intervals still vary. This supports an isolated production
+kernel improvement without establishing the cause of every whole-encode
+profile fluctuation. No clock, power, firewall, or background-service setting
+was changed for these measurements.
+
+The ordinary public-workflow wall measurement has seven alternating pairs,
+three warmups and five timed samples per process. Each process contributes
+its median, and the reported percentage is the median paired change:
+
+| Workload | Parent total median (ms) | Fused total median (ms) | Paired total change | Paired quantization change |
+|---|---:|---:|---:|---:|
+| Odd 4K | 736.370 | 737.455 | -0.3% | -0.9% |
+| Odd 1080p | 183.238 | 181.374 | -0.8% | -0.8% |
+| Flower | 36.724 | 36.483 | -1.4% | -2.4% |
+
+The median of paired ratios need not equal the ratio of marginal medians.
+Observed total-time ranges are 676.5-813.3/674.7-779.4 ms for parent/fused
+4K, 179.8-197.8/176.4-194.9 ms for 1080p, and 35.7-52.2/35.6-50.6 ms
+for Flower. Given that variation and the mixed 4K profiles, this checkpoint
+does not claim a stable end-to-end gain. Its retention case is the isolated
+kernel improvement, reduced launch count, and correctness qualification.
+
+#### Qualification and remaining scope
+
+The full Release suites pass 58 CUDA and 47 CPU-only tests. New focused
+tests check 160 ordinary cases and eight tall-grid cases, each with three
+consecutive stages and bitwise comparisons to the retained separate passes.
+They cover both frequency and initialization modes, signed zeros, near and
+large differences, values at/adjacent to asymmetric thresholds, poisoned
+input padding, independent row strides, guard prefixes/suffixes, and input
+immutability. Heights 524280 and 524281 exercise the last 2D tile row and
+the first flattened-grid fallback. Existing CPU-reference Butteraugli tests
+cover the complete multiscale pipeline and non-default perceptual options.
+
+All 23 before/after image pairs are byte-identical, with identical strategy
+counts, final reported scores, and independently decoded Butteraugli metrics.
+The seven-input corpus covers distances 0.5/1.2/3 at effort 7, with two
+additional effort-9 cases. It reuses the preceding checkpoint's pinned
+libjxl decoder/metric (`e8ff09762481785938d8e4e01333ed3917571161`,
+Clang 22.1.8), explicit linear-sRGB interpretation, and provenance-pinned
+natural images.
+
+Ten sanitizer invocations complete successfully: memcheck, racecheck,
+synccheck, and initcheck on each of the ordinary Malta differential test
+and complete Butteraugli test, plus memcheck and synccheck on the tall-grid
+test. The first eight runs are unfiltered. All report zero errors; both
+racechecks report zero hazards/warnings. Tall-grid racecheck/initcheck are
+not claimed. The ordinary and full-pipeline racechecks take 32.3 and 67.2
+seconds respectively; tall-grid memory and synchronization checks take
+15.6 and 7.1 seconds. No sanitizer is left running or aborted in this cycle.
+
+Batch qualification passes at 1080p sizes 1/2/4 in fully-resident and
+maximum-throughput modes, and at 4K sizes 1/2 in fully-resident mode. The
+benchmark checks exact serial/batch identity. These are current-policy
+concurrency checks, not a before/after batch-throughput improvement claim.
+
+Ignored `build-cuda-ninja/profiles/s31_*` artifacts retain the frozen parent
+source, nine-variant event probe, raw timings, production resource report,
+ordinary and tall input tests, extended-warmup production probe, four-pair
+4K profile diagnosis, all wall observations, batch logs, image qualification,
+and exact sanitizer scopes. `s30_retained_{encode,benchmark,batch}.exe` are
+the preserved parent binaries. Working-plane storage remains allocated and
+resident coefficient encoding, convolutions, host work, and remaining
+allocation/transfer boundaries remain material targets. The fully-resident
+path is not demonstrated maxed out.
+
+The fresh retained 4K API trace also records five `cudaMalloc` calls taking
+16.2 ms, five `cudaFree` calls taking 51.4 ms, 48 `cudaMemcpyAsync` calls
+taking 76.3 ms, and three `cudaMemcpy2DAsync` calls taking 22.8 ms. These
+host API durations can include waits for device work; they are not additive
+to kernel time or a proven removable-overhead budget. Allocation lifetime,
+host staging, and transfer/synchronization boundaries deserve investigation
+alongside the remaining kernels. `cudaProfilerStart` is excluded from this
+analysis; `s31_api_totals.*` retain the raw API breakdown.
 
 ## Work that should not lead the next cycle
 

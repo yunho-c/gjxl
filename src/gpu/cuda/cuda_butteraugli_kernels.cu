@@ -735,6 +735,83 @@ __global__ void MaltaResponseKernel(const float* input, float* accumulation,
   }
 }
 
+template <bool LowFrequency, bool FlatGrid>
+__global__ void MaltaScaleResponseKernel(const float* reference,
+                                         const float* distorted,
+                                         float* accumulation,
+                                         CudaButteraugliMaltaParams params) {
+  constexpr unsigned int kTileValues =
+      kMaltaTileStride * (kMaltaTileHeight + 2 * kMaltaRadius);
+  __shared__ float tile[kTileValues];
+  uint32_t origin_x = blockIdx.x * kMaltaTileWidth;
+  uint32_t origin_y = blockIdx.y * kMaltaTileHeight;
+  if constexpr (FlatGrid) {
+    const uint32_t tile_columns =
+        (params.width + kMaltaTileWidth - 1) / kMaltaTileWidth;
+    origin_x = (blockIdx.x % tile_columns) * kMaltaTileWidth;
+    origin_y = (blockIdx.x / tile_columns) * kMaltaTileHeight;
+  }
+  const MaltaScaleParams scale{params.width,
+                               params.height,
+                               params.reference_stride,
+                               params.distorted_stride,
+                               0,
+                               static_cast<uint32_t>(LowFrequency),
+                               params.norm2_0_gt_1,
+                               params.norm2_0_lt_1,
+                               params.norm};
+  // Scale directly into the shared response tile, including its halo. This
+  // repeats halo arithmetic but avoids an intermediate plane and a launch.
+  // Every thread participates in the load/barrier, even in a partial tile.
+  for (unsigned int index = threadIdx.x; index < kTileValues;
+       index += blockDim.x) {
+    const int x = static_cast<int>(origin_x + index % kMaltaTileStride) -
+                  static_cast<int>(kMaltaRadius);
+    const int y = static_cast<int>(origin_y + index / kMaltaTileStride) -
+                  static_cast<int>(kMaltaRadius);
+    float value = 0.0f;
+    if (x >= 0 && y >= 0 && x < static_cast<int>(params.width) &&
+        y < static_cast<int>(params.height)) {
+      value = MaltaScaleValue(
+          reference[static_cast<size_t>(y) * params.reference_stride + x],
+          distorted[static_cast<size_t>(y) * params.distorted_stride + x],
+          scale);
+    }
+    tile[index] = value;
+  }
+  __syncthreads();
+  const uint32_t local_x = threadIdx.x % kMaltaTileWidth;
+  const uint32_t local_y = threadIdx.x / kMaltaTileWidth;
+  const uint32_t x = origin_x + local_x;
+  const uint32_t y = origin_y + local_y;
+  if (x >= params.width || y >= params.height) return;
+  const float* center = tile + (local_y + kMaltaRadius) * kMaltaTileStride +
+                        local_x + kMaltaRadius;
+  const float result = LowFrequency ? MaltaLf(center) : MaltaFull(center);
+  const size_t output = static_cast<size_t>(y) * params.accumulation_stride + x;
+  if (params.initialize_accumulation != 0) {
+    accumulation[output] = result;
+  } else {
+    accumulation[output] += result;
+  }
+}
+
+template <bool FlatGrid>
+cudaError_t LaunchFusedMalta(const float* reference, const float* distorted,
+                             float* accumulation,
+                             CudaButteraugliMaltaParams params, dim3 grid,
+                             cudaStream_t stream) {
+  constexpr unsigned int kThreads = kMaltaTileWidth * kMaltaTileHeight;
+  if (params.low_frequency != 0) {
+    MaltaScaleResponseKernel<true, FlatGrid><<<grid, kThreads, 0, stream>>>(
+        reference, distorted, accumulation, params);
+  } else {
+    MaltaScaleResponseKernel<false, FlatGrid><<<grid, kThreads, 0, stream>>>(
+        reference, distorted, accumulation, params);
+  }
+  return cudaGetLastError();
+}
+
 __device__ float L2Asymmetric(float value0, float value1, float weight_up,
                               float weight_down, float total) {
   const float difference = value0 - value1;
@@ -1207,34 +1284,16 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
         multiplier * sqrt(0.5 * weight_up) / (3.75 * 2.0 + 1.0);
     const double pre_down =
         multiplier * sqrt(0.33 * weight_down) / (3.75 * 2.0 + 1.0);
-    const MaltaScaleParams scale{width,
-                                 height,
-                                 reference_stride,
-                                 distorted_stride,
-                                 plan.working_width,
-                                 static_cast<uint32_t>(low_frequency),
-                                 static_cast<float>(pre_up * kNorms[stage]),
-                                 static_cast<float>(pre_down * kNorms[stage]),
-                                 static_cast<float>(kNorms[stage])};
-    MaltaScaleKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
-        reference[kPsychoPlane[stage]], distorted[kPsychoPlane[stage]],
-        plan.planes[kWork], scale);
-    cudaError_t error = CheckLaunch();
-    if (error != cudaSuccess) return error;
     const size_t channel = stage % 2 == 0 ? 1 : 0;
-    const MaltaResponseParams response{width,
-                                       height,
-                                       plan.working_width,
-                                       plan.working_width,
-                                       static_cast<uint32_t>(low_frequency),
-                                       static_cast<uint32_t>(stage >= 4)};
-    const unsigned int malta_blocks =
-        ((width + kMaltaTileWidth - 1) / kMaltaTileWidth) *
-        ((height + kMaltaTileHeight - 1) / kMaltaTileHeight);
-    MaltaResponseKernel<<<malta_blocks, kMaltaTileWidth * kMaltaTileHeight, 0,
-                          stream>>>(plan.planes[kWork],
-                                    plan.planes[kAc + channel], response);
-    error = CheckLaunch();
+    const CudaButteraugliMaltaParams malta{
+        width, height, reference_stride, distorted_stride, plan.working_width,
+        static_cast<uint32_t>(low_frequency), static_cast<uint32_t>(stage >= 4),
+        static_cast<float>(pre_up * kNorms[stage]),
+        static_cast<float>(pre_down * kNorms[stage]),
+        static_cast<float>(kNorms[stage])};
+    const cudaError_t error = LaunchCudaButteraugliMalta(
+        reference[kPsychoPlane[stage]], distorted[kPsychoPlane[stage]],
+        plan.planes[kAc + channel], malta, stream);
     if (error != cudaSuccess) return error;
   }
 
@@ -1331,6 +1390,54 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
 }
 
 }  // namespace
+
+cudaError_t LaunchCudaButteraugliMalta(const float* reference,
+                                       const float* distorted,
+                                       float* accumulation,
+                                       CudaButteraugliMaltaParams params,
+                                       cudaStream_t stream) {
+  const uint32_t tile_columns =
+      (params.width + kMaltaTileWidth - 1) / kMaltaTileWidth;
+  const uint32_t tile_rows =
+      (params.height + kMaltaTileHeight - 1) / kMaltaTileHeight;
+  // Avoid per-thread grid division for normal images without introducing a
+  // new height limit: CUDA's grid.y is limited to 65535 blocks.
+  if (tile_rows > 65535) {
+    return LaunchFusedMalta<true>(reference, distorted, accumulation, params,
+                                  dim3(tile_columns * tile_rows), stream);
+  }
+  return LaunchFusedMalta<false>(reference, distorted, accumulation, params,
+                                 dim3(tile_columns, tile_rows), stream);
+}
+
+cudaError_t LaunchCudaButteraugliMaltaReference(
+    const float* reference, const float* distorted, float* scaled,
+    uint32_t scaled_stride, float* accumulation,
+    CudaButteraugliMaltaParams params, cudaStream_t stream) {
+  const MaltaScaleParams scale{params.width,
+                               params.height,
+                               params.reference_stride,
+                               params.distorted_stride,
+                               scaled_stride,
+                               params.low_frequency,
+                               params.norm2_0_gt_1,
+                               params.norm2_0_lt_1,
+                               params.norm};
+  MaltaScaleKernel<<<PlaneBlocks(params.width, params.height), kPlaneThreads, 0,
+                     stream>>>(reference, distorted, scaled, scale);
+  cudaError_t error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+  const MaltaResponseParams response{
+      params.width,         params.height,
+      scaled_stride,        params.accumulation_stride,
+      params.low_frequency, params.initialize_accumulation};
+  const uint32_t blocks =
+      ((params.width + kMaltaTileWidth - 1) / kMaltaTileWidth) *
+      ((params.height + kMaltaTileHeight - 1) / kMaltaTileHeight);
+  MaltaResponseKernel<<<blocks, kMaltaTileWidth * kMaltaTileHeight, 0,
+                        stream>>>(scaled, accumulation, response);
+  return CheckLaunch();
+}
 
 cudaError_t LaunchCudaButteraugliPrepare(const CudaButteraugliPlan& plan,
                                          cudaStream_t stream) {
