@@ -2,8 +2,8 @@
 
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
-  AC gather/DCT plus residual/inverse/loss fusion and compact AC-search scratch
-  implemented; optimization ongoing
+  AC gather/DCT plus residual/inverse/loss fusion, compact AC-search scratch,
+  and factorized resident DCT implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -15,7 +15,17 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest compact-scratch checkpoint against `5ba4d86`
+below supersede them. The latest factorized-DCT checkpoint against `c1a75bb`
+reduces 4K DCT kernel time from 107.9 to 23.1 ms (78.6%), without adding launches
+or transfers. Paired fully-resident total time improves 5.1% at 4K, 7.2% at
+1080p, and 7.8% on Flower; quantization improves 10.6%, 8.9%, and 5.9%.
+All 55 CUDA and 47 CPU tests, 13 sanitizer runs, batch checks, and 23 decoded
+before/after image pairs pass qualification. Rounding changes: only ten image
+pairs are byte-identical, while independently decoded Butteraugli scores are
+unchanged in 22 pairs and improve slightly in one. The largest size increase
+is 0.028%. Laptop timing variance and corpus/device limits remain explicit.
+
+The preceding compact-scratch checkpoint against `5ba4d86`
 reduces the padded-4K AC-search arena from 626.8 to 323.8 MB (48.3%), saving
 288.9 MiB per search. Nsight confirms that peak tracked device allocations fall
 from 3.110 to 2.808 GB, with identical launches and transfer volumes. Paired total
@@ -26,8 +36,8 @@ byte-identical.
 
 The preceding residual/inverse/loss fusion reduced targeted AC stages by 23.3%
 at 4K, removing seven launches and a 2.55 GB coefficient-buffer round trip.
-These are incremental gains, not a demonstrated performance ceiling. DCT,
-reconstruction filtering, the remaining resident allocations, host work, and
+These are incremental gains, not a demonstrated performance ceiling.
+Quantization adjustment, filtering, remaining resident allocations, host work, and
 transfers remain material targets; the resident path has not reached its
 performance limit.
 
@@ -2545,6 +2555,237 @@ input/output paths and qualifying perceptual/size behavior. Byte identity is
 not assumed to be the acceptance ceiling for that arithmetic experiment.
 The fully-resident backend is not demonstrated maxed out.
 
+### Follow-up: factorize resident CUDA DCT arithmetic (2026-09-05)
+
+Parent: `c1a75bb` (compact AC-search scratch). This experiment replaces direct
+basis-matrix arithmetic for the seven resident transform shapes through 32x32
+with the radix-2 DCT-II/III factorization already used by the Metal backend.
+It applies to ordinary forward/inverse transforms, descriptor-gathered AC
+forward transforms, and fused residual/inverse/loss evaluation. The 64x32 and
+32x64 ordinary transforms retain their matrix implementations. The internal
+`LaunchCudaDctMatrix` entry point preserves the old arithmetic as a numerical
+and performance oracle, including all smaller shapes.
+
+#### Arithmetic and scheduling
+
+The direct separable transform performs work proportional to
+`W*H*(W+H)`. Factorization reduces that to `W*H*(log2(W)+log2(H))`, using
+compile-time butterflies and constants instead of basis loads and long dot
+products. Each lane owns a full one-dimensional register vector; recursion
+and loops are forcibly inlined/unrolled. Forward output is normalized by
+`1/(W*H)`, and inverse output is already in pixel units. The fused loss adapter
+therefore omits the matrix inverse's orthonormal-to-pixel rescaling, while
+retaining its eighth-power arithmetic and FP32 halving reduction.
+
+Blocks contain 64 threads, packing `64/max(W,H)` transforms, each with a
+`H*(W+1)` padded shared tile. Tall/square forward transforms process columns
+first so input and coefficient transactions coalesce. Wide forward transforms
+stage coalesced input reads, then process rows first to retain coalesced native
+row-major coefficient stores. Inverse transforms use the same native
+coefficient layout and coalesced pixel stores. Tall fused inverse outputs
+are redistributed through the existing tile before loss reduction to preserve
+the established row-major mask addressing and summation order. Inactive tail
+groups participate in block barriers without reading or writing global data.
+No new global intermediate, allocation, or submission boundary is introduced.
+
+Standalone prototypes tested 64/128/256-thread blocks over 16,777,216 floats,
+with three warmups and seven alternating rounds of three launches. The first
+wide-forward variant had scattered stores; merely moving the scattered side
+to input reads was insufficient. Coalesced staging fixed that issue. Selected
+64-thread prototype medians (matrix to factorized) were 4.298 to 0.549 ms for
+32x16 forward, 5.150 to 0.552 ms for 16x32 inverse, and 4.265 to 0.553 ms for
+32x32 inverse. These are raw-kernel observations, not whole-encoder speedups;
+clock variance was especially large in early small-transform rounds.
+
+The initial integrated 32x32 residual/inverse/loss kernel compiled to a
+384-byte stack frame, despite the standalone transform being spill-free.
+SASS showed 32 square-root helper call sites and local array traffic.
+Forcing the input/output adapters inline, spelling the root `__fsqrt_rn`, and
+using a narrowly scoped FTZ square-root instruction did not remove that frame;
+none of those changes is retained. Instead, coefficient rates now perform the
+first FP32 halving step as each lower/upper pair arrives, retaining only half
+the magnitude array. Exact integer nonzero counts accumulate immediately.
+This preserves the magnitude tree and count semantics, uses ordinary `sqrtf`,
+and reduces the 32x32 kernel to zero stack/local bytes (89 registers per
+thread, 8,448 shared bytes per block). The helper call sites remain, but the
+local loads/stores disappear. The same change reduces 16x16 residual/inverse
+registers from 76 to 43 and both 512-coefficient shapes from 80 to 64.
+No global fast-math option is enabled.
+
+#### Numerical and quality qualification
+
+All 55 CUDA CTests and all 47 CPU-only CTests pass. Existing transform
+tolerances are unchanged: forward absolute/relative `3e-5/3e-4`, inverse and
+round-trip `5e-4/5e-4`. The backend test now additionally runs both raw launch
+paths against the independent double reference with seven leading and eleven
+trailing sentinels, offset pointers, and an unchanged-input check. Coverage is
+nine shapes times fourteen batch counts (1/2/3/4/7/8/9/15/16/17/19/31/32/33),
+with independent forward/inverse inputs, impulses, constants, checkerboards,
+unequal horizontal/vertical structure, and noise. Both raw paths and both
+directions are checked in each configuration (504 guarded launches).
+
+The existing fused oracles also pass: 420 inverse/loss batches (12,810 channel
+loss comparisons), and 84 residual/inverse batches (4,242 channel comparisons)
+with exact FP32 loss/rate reduction checks, exact nonzero counts, non-finite
+handling, mask and descriptor boundaries, host/device CfL, output guards,
+and partial blocks. Full AC-cost CPU-reference and ordered-search tests pass
+without loosening their tolerances. The standalone double-reference probe's
+largest 32x32 inverse absolute error was `1.2445e-4` (matrix `4.7849e-5`), with
+factorized RMS error `5.25e-6`; factorization changes rounding and is not
+claimed byte-identical to the matrix path.
+
+Compute Sanitizer memcheck/racecheck/synccheck/initcheck all pass for the
+expanded CUDA backend test, AC-candidate test, and AC-search test (12 runs).
+The large `--memory-4k` search also passes memcheck. No errors or race hazards
+are reported. Only the backend test suppresses CUDA API-error reporting,
+because it intentionally launches a zero-sized grid to verify stale-error
+consumption; memory/race/synchronization/uninitialized-access detection remains
+enabled. Runs are serialized, with no overlapping build or benchmark.
+
+The decoded-image comparison uses the pinned libjxl `djxl` and
+`butteraugli_main` tools. Decoder output and metric input are explicitly
+linear sRGB (`RGB_D65_SRG_Rel_Lin`), with default SDR metric intensity 80 nits.
+Seven inputs comprise the 17x13 sample, odd-source synthetic 1080p/4K,
+510x532 Flower, and three 500x500 color photographs from libjxl testdata's
+[Wesaturate corpus](https://github.com/libjxl/testdata/tree/73695d303670c90e4d506ea89d9901b081385089/external/wesaturate/500px).
+The latter's pinned README/license identify the originals as CC0. The exact
+files are `cvo9xd_keong_macan_srgb8.png`,
+`tmshre_riaphotographs_srgb8.png`, and `u76c0g_bliznaca_srgb8.png`;
+source hashes, linear-PFM hashes, and license copies accompany the artifacts.
+Every input is encoded at effort 7 and distances 0.5/1.2/3.0; sample and Flower
+also run effort 9 at distance 1.2 (23 before/after pairs). A greater-than-0.5%
+increase in either bytes or independently decoded Butteraugli score was
+declared an investigation threshold before collecting results, not an assumed
+acceptance result. All cases, including any outliers, are retained.
+
+All 46 codestreams decode with the expected dimensions, and no pair exceeds
+either investigation threshold. The independently decoded Butteraugli score
+is identical to the tool's printed precision in 22 pairs; Bliznaca at distance
+3 improves from 3.2424831390 to 3.2351341248 (-0.227%). File-size ratios range
+from 0.9998273 to 1.0002802. The only size changes are:
+
+| Input / distance / effort | Parent bytes | Factorized bytes | Change |
+|---|---:|---:|---:|
+| Synthetic 1080p / 0.5 / 7 | 207,139 | 207,173 | +0.0164% |
+| Synthetic 1080p / 1.2 / 7 | 46,952 | 46,959 | +0.0149% |
+| Synthetic 4K / 0.5 / 7 | 798,858 | 798,720 | -0.0173% |
+| Bliznaca / 3.0 / 7 | 17,846 | 17,851 | +0.0280% |
+
+Strategy histograms match in every pair. Ten codestream pairs are byte-identical;
+the other thirteen are not, including some with identical length and metric.
+Equal metric scores are not a claim of pixel identity. These results qualify
+this SDR corpus and the tested device/toolchain, not arbitrary image content,
+HDR inputs, or other GPU architectures. The decoder/metric libjxl revision is
+`e8ff09762481785938d8e4e01333ed3917571161` (Clang 22.1.8).
+
+#### Final warmed wall measurements
+
+Seven alternating parent/candidate process pairs per workload, each with three
+warmups and five measured samples. Each process contributes its sample median;
+the reported percentage is the median of the seven paired candidate/parent
+ratios, not the ratio of independently pooled medians. No build, sanitizer,
+second GPU workload, or profiling overlaps these runs. Every sample is kept.
+
+| Workload / stage | Parent median [range], ms | Factorized median [range], ms | Paired change | Winning pairs |
+|---|---:|---:|---:|---:|
+| Padded 4K / total | 838.434 [799.568-875.159] | 782.615 [736.428-822.077] | -5.1% | 7/7 |
+| Padded 4K / quantization | 577.619 [555.050-584.848] | 511.189 [495.734-522.603] | -10.6% | 7/7 |
+| Padded 1080p / total | 214.800 [210.419-220.980] | 199.259 [195.440-238.996] | -7.2% | 5/7 |
+| Padded 1080p / quantization | 129.420 [126.951-134.078] | 116.943 [115.522-132.189] | -8.9% | 6/7 |
+| Flower / total | 49.989 [45.986-68.615] | 44.917 [42.227-53.744] | -7.8% | 5/7 |
+| Flower / quantization | 29.749 [27.704-35.669] | 27.309 [25.423-31.164] | -5.9% | 6/7 |
+
+The large 1080p candidate and Flower parent/candidate outliers are not removed.
+An earlier 4K cohort of the initial integrated factorization, before the
+rate-storage fix, measured -5.8% total and -9.6% quantization. It is retained
+as an experiment record, not pooled with the final implementation. Laptop
+clock/host variability prevents interpreting these sequential cohorts as a
+precise isolated end-to-end benefit of the stack fix.
+
+#### Final kernel traces and batch checks
+
+Nsight captures one fully-resident encode after three warmups, without memory
+tracking. The unchanged-kernel column excludes all ordinary and AC DCT kernels,
+so it does not accidentally count another improved transform as a control.
+Static and dynamic shared memory are both accounted for.
+
+| Workload | All DCT, parent -> factorized | Other kernels, parent -> factorized | Total kernel time, parent -> factorized |
+|---|---:|---:|---:|
+| Padded 4K | 107.922 -> 23.051 ms (-78.6%) | 258.020 -> 262.462 ms | 365.941 -> 285.514 ms |
+| Padded 1080p | 16.145 -> 5.345 ms (-66.9%) | 47.084 -> 43.816 ms | 63.229 -> 49.160 ms |
+| Flower | 2.185 -> 0.771 ms (-64.7%) | 14.125 -> 14.153 ms | 16.310 -> 14.924 ms |
+
+The 4K DCT split is AC forward 46.182 -> 8.793 ms, fused residual/inverse/loss
+48.255 -> 11.737 ms, and ordinary transforms 13.485 -> 2.522 ms. Other kernels
+are 1.7% slower in that trace, effectively unchanged on Flower (+0.2%), and
+6.9% faster at 1080p. The latter control movement means that not all of the
+1080p total-kernel reduction can be attributed to this change. Kernel duration
+is not end-to-end latency; the separately warmed wall results above govern
+that claim.
+
+The seven 4K fused inverse kernels show:
+
+| W x H | Matrix, ms | Factorized, ms | Factorized registers/thread | Factorized static shared bytes/block |
+|---|---:|---:|---:|---:|
+| 8x8 | 1.228 | 1.257 | 40 | 2,304 |
+| 8x16 | 3.855 | 1.632 | 46 | 2,304 |
+| 16x8 | 2.034 | 1.512 | 40 | 2,176 |
+| 16x16 | 7.484 | 2.307 | 43 | 4,352 |
+| 16x32 | 12.893 | 1.289 | 64 | 4,352 |
+| 32x16 | 9.494 | 1.236 | 64 | 4,224 |
+| 32x32 | 11.266 | 2.505 | 89 | 8,448 |
+
+All factorized instantiations have zero stack/local bytes in `cuobjdump`.
+The 8x8 fused inverse is essentially flat, including a small regression in
+this particular 4K trace; the retained improvement is primarily in larger
+shapes. The initial integrated 32x32 trace was 8.356 ms with stack traffic,
+versus 2.505 ms after the pairwise rate-storage change. These are separate
+captures, but the resource and SASS changes independently explain the removed
+local traffic.
+
+Launch counts are unchanged: 509 at 4K and Flower, 494 at 1080p. All transfer
+counts and byte totals match each parent. The 4K trace retains 31 HtoD copies
+(117,079,320 bytes), 19 DtoH copies (103,699,012 bytes), and one DtoD copy
+(518,400 bytes). This checkpoint changes arithmetic and on-chip scheduling,
+not the compact search arena or global transfer boundaries.
+
+Batch sizes 1/2/4 pass at 1080p in both modes, and fully-resident sizes 1/2
+pass at aligned 3840x2160. Every batch codestream matches its serial reference.
+Fully-resident 1080p batch medians are 220.137/362.894/859.030 ms;
+maximum-throughput medians are 117.586/246.722/332.225 ms. Fully-resident 4K
+medians are 815.233/1622.771 ms. These are qualification runs with substantial
+host/clock variance, not an isolated before/after batch-throughput measurement.
+
+#### Artifacts and next bottlenecks
+
+Ignored artifacts are under `build-cuda-ninja/profiles/s29_*`:
+`parent_{benchmark,encode}.exe` preserve the parent; `factored_probe*` retain
+the standalone layout/block-size experiments; `initial_*` retain the first
+integration; `final_{parent,retained}_{4k,1080p,flower}.{nsys-rep,sqlite}` and
+`profile_summary.{py,json}` retain the final launch/shape accounting.
+`warmed_{4k,1080p,flower}.{json,txt}` preserve every timing sample.
+`final_resources.txt` and `final_32_spills.txt` retain resource/call-site
+inspection (the latter contains calls but no local loads/stores).
+`quality.py`, `quality.json`, `quality_*.{jxl,pfm}`, and `corpus/` retain all
+decoded-image comparisons and provenance. `sanitize.ps1`, `*check.txt`
+(filenames end in the individual `memcheck`/`racecheck`/`synccheck`/`initcheck`
+mode), `memory_4k.txt`, `measure.ps1`, and `batch_*.txt` retain qualification
+scripts and results.
+
+DCT is now only 8.1% of kernel time in the retained 4K trace. Convolutions
+consume 73.862 ms and Malta 58.477 ms, with coefficient encoding at 29.477 ms
+and quantization adjustment at 23.010 ms. The adjustment stage also consumes
+8.480 ms at 1080p and 7.280 ms (48.8% of kernels) on Flower. Its current
+`SelectAdjustedQuantizationKernel` assigns one thread to an entire transform
+and scans all three channels serially through `AdjustQuantForChannel`;
+cooperative coefficient processing is a concrete next experiment, subject to
+its floating-point reduction/threshold decisions and decoded-quality gates.
+Filtering locality/fusion, remaining resident allocations, host work, and
+transfers also remain material. Further AC fusion could remove the retained
+forward-coefficient buffer, but requires a new cross-channel schedule, not
+another scratch-size adjustment. This is a verified checkpoint, not evidence
+that fully-resident encoding is maxed out.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
@@ -2571,9 +2812,11 @@ for one image with GPU work for another.
 
 ### Tensor cores or global fast math
 
-The DCT, quantization, and selection paths are decision-sensitive. Throughput
-gains that change threshold decisions need an explicit mode and quality
-contract; they should not silently alter fully-resident behavior.
+The DCT, quantization, and selection paths are decision-sensitive. Reduced
+precision or globally relaxed math needs an explicit mode and quality
+contract; it should not silently alter fully-resident behavior. The retained
+FP32 radix-2 factorization uses ordinary math, preserves existing numerical
+tolerances, and separately qualifies rounding changes against decoded images.
 
 ## Suggested implementation checkpoints
 

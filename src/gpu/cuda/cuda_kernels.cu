@@ -9,6 +9,7 @@
 #include <type_traits>
 
 #include "gpu/cuda/cuda_ac_strategy_device.cuh"
+#include "gpu/cuda/cuda_dct_factored.cuh"
 
 namespace gjxl::cuda_internal {
 namespace {
@@ -224,49 +225,58 @@ struct AcStrategyResidualDctSource {
         factor = ComputeCflFactor(y_to_x, y_to_b, candidate, channel, params);
       }
     }
-    float magnitude[Values];
-    unsigned int nonzero[Values];
+    static_assert(Values >= 2);
+    float magnitude[Values / 2];
+    unsigned int nonzero = 0;
 #pragma unroll
-    for (unsigned int value = 0; value < Values; ++value) {
-      const unsigned int index = tid + value * LocalThreads;
-      float rounded = NAN;
-      float residual = NAN;
-      if (valid) {
-        const float decorrelated = coefficients[base + index] -
-          coefficients[y_base + index] * factor;
-        const float scaled = decorrelated *
-          matrices[inverse_matrix_base + index] * norm;
-        rounded = copysignf(floorf(fabsf(scaled) + 0.5f), scaled);
-        residual = matrices[matrix_base + index] * (scaled - rounded);
+    for (unsigned int pair = 0; pair < Values / 2; ++pair) {
+#pragma unroll
+      for (unsigned int half = 0; half < 2; ++half) {
+        const unsigned int value = pair + half * (Values / 2);
+        const unsigned int index = tid + value * LocalThreads;
+        float rounded = NAN;
+        float residual = NAN;
+        if (valid) {
+          const float decorrelated = coefficients[base + index] -
+            coefficients[y_base + index] * factor;
+          const float scaled = decorrelated *
+            matrices[inverse_matrix_base + index] * norm;
+          rounded = copysignf(floorf(fabsf(scaled) + 0.5f), scaled);
+          residual = matrices[matrix_base + index] * (scaled - rounded);
+        }
+        constexpr bool kRowMajorCoefficients = Height < Width;
+        const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
+        const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
+        tile[v * (Width + 1) + u] = active ? residual : 0.0f;
+        // Compute the first halving step as each pair arrives. Counts are exact
+        // integers and can accumulate immediately; magnitudes retain the original
+        // FP32 halving tree without keeping every coefficient's rate live.
+        const float rate = sqrtf(fabsf(rounded));
+        if (half == 0) magnitude[pair] = rate;
+        else magnitude[pair] += rate;
+        nonzero += rounded != 0.0f ? 1u : 0u;
       }
-      constexpr bool kRowMajorCoefficients = Height < Width;
-      const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
-      const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
-      tile[v * (Width + 1) + u] = active ? residual : 0.0f;
-      magnitude[value] = sqrtf(fabsf(rounded));
-      nonzero[value] = rounded != 0.0f ? 1u : 0u;
     }
     // Match the separate residual kernel's halving order, even though the
     // inverse transform uses a different number of lanes per transform.
 #pragma unroll
-    for (unsigned int stride = Values / 2; stride != 0; stride /= 2) {
+    for (unsigned int stride = Values / 4; stride != 0; stride /= 2) {
 #pragma unroll
       for (unsigned int value = 0; value < stride; ++value) {
         magnitude[value] += magnitude[value + stride];
-        nonzero[value] += nonzero[value + stride];
       }
     }
     if constexpr (LocalThreads > 32) {
       static_assert(LocalThreads == kSpecializedDctThreads);
       static_assert(kCount >= 2 * LocalThreads);
       reduction[tid] = magnitude[0];
-      reinterpret_cast<unsigned int*>(reduction + LocalThreads)[tid] = nonzero[0];
+      reinterpret_cast<unsigned int*>(reduction + LocalThreads)[tid] = nonzero;
       __syncthreads();
     }
     constexpr unsigned int kWarpWidth = LocalThreads < 32 ? LocalThreads : 32;
     if (tid < kWarpWidth) {
       float total_magnitude = magnitude[0];
-      unsigned int total_nonzero = nonzero[0];
+      unsigned int total_nonzero = nonzero;
       if constexpr (LocalThreads > 32) {
         const auto* counts =
           reinterpret_cast<const unsigned int*>(reduction + LocalThreads);
@@ -307,7 +317,8 @@ struct AcStrategyDctLossOutput {
   float* losses;
   CudaAcStrategyBatchParams params;
 
-  template <unsigned int LocalThreads, unsigned int Values>
+  template <unsigned int LocalThreads, unsigned int Values,
+            bool OrthonormalPixels = true>
   __device__ void Store(float (&values)[Values], size_t transform_index,
                         unsigned int tid, float* reduction) const {
     const auto candidate = candidates[transform_index / 3];
@@ -325,7 +336,8 @@ struct AcStrategyDctLossOutput {
       const float mask = fits ? pixel_mask[mask_base +
         (index / Width) * params.pixel_mask_row_stride + index % Width] : NAN;
       // Match the ordinary inverse's separately rounded FP32 pixel store.
-      const float pixel = __fmul_rn(values[value], scale);
+      const float pixel = OrthonormalPixels
+        ? __fmul_rn(values[value], scale) : values[value];
       float weighted = (mask + offset) * pixel;
       weighted *= weighted;
       weighted *= weighted;
@@ -372,6 +384,152 @@ struct AcStrategyDctLossOutput {
     }
   }
 };
+
+constexpr unsigned int kFactoredDctThreads = 64;
+
+template <unsigned int Width, unsigned int Height, typename Input>
+__global__ void ForwardDctFactoredKernel(
+  Input input, float* output, size_t transform_count) {
+  constexpr unsigned int kLocal = Width > Height ? Width : Height;
+  constexpr unsigned int kTransforms = kFactoredDctThreads / kLocal;
+  constexpr unsigned int kTileSize = Height * (Width + 1);
+  __shared__ float tiles[kTransforms * kTileSize];
+  const unsigned int group = threadIdx.x / kLocal;
+  const unsigned int tid = threadIdx.x % kLocal;
+  const size_t transform = static_cast<size_t>(blockIdx.x) * kTransforms + group;
+  const bool active = transform < transform_count;
+  const size_t base = transform * Width * Height;
+  float* tile = tiles + group * kTileSize;
+  float values[kLocal], scratch[2 * kLocal];
+  const auto source = DctInputTile<Width, Height>(input, transform, active);
+
+  if constexpr (Width > Height) {
+    // Wide transforms have row-major coefficients. Stage coalesced pixel
+    // reads, then transform rows first so coefficient stores also coalesce.
+    if (active) {
+#pragma unroll
+      for (unsigned int i = tid; i < Width * Height; i += kLocal) {
+        tile[(i / Width) * (Width + 1) + i % Width] =
+          DctInputElement(source, base, i);
+      }
+    }
+    __syncthreads();
+    if (active && tid < Height) {
+#pragma unroll
+      for (unsigned int x = 0; x < Width; ++x) values[x] = tile[tid * (Width + 1) + x];
+      FactoredDct1D<Width, true>(values, scratch);
+#pragma unroll
+      for (unsigned int u = 0; u < Width; ++u) tile[tid * (Width + 1) + u] = values[u];
+    }
+    __syncthreads();
+    if (active && tid < Width) {
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y) values[y] = tile[y * (Width + 1) + tid];
+      FactoredDct1D<Height, true>(values, scratch);
+#pragma unroll
+      for (unsigned int v = 0; v < Height; ++v)
+        output[base + v * Width + tid] = values[v] * (1.0f / (Width * Height));
+    }
+  } else {
+    // Tall/square transforms use column-major coefficients. Columns first
+    // coalesces both the global input and final coefficient output.
+    if (active && tid < Width) {
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y)
+        values[y] = DctInputElement(source, base, y * Width + tid);
+      FactoredDct1D<Height, true>(values, scratch);
+#pragma unroll
+      for (unsigned int v = 0; v < Height; ++v) tile[v * (Width + 1) + tid] = values[v];
+    }
+    __syncthreads();
+    if (active && tid < Height) {
+#pragma unroll
+      for (unsigned int u = 0; u < Width; ++u) values[u] = tile[tid * (Width + 1) + u];
+      FactoredDct1D<Width, true>(values, scratch);
+#pragma unroll
+      for (unsigned int u = 0; u < Width; ++u)
+        output[base + u * Height + tid] = values[u] * (1.0f / (Width * Height));
+    }
+  }
+}
+
+template <unsigned int Width, unsigned int Height, typename Input, typename Output>
+__global__ void InverseDctFactoredKernel(
+  Input input, Output output, size_t transform_count) {
+  constexpr unsigned int kLocal = Width > Height ? Width : Height;
+  [[maybe_unused]] constexpr unsigned int kValues = Width * Height / kLocal;
+  constexpr unsigned int kTransforms = kFactoredDctThreads / kLocal;
+  constexpr unsigned int kTileSize = Height * (Width + 1);
+  __shared__ float tiles[kTransforms * kTileSize];
+  const unsigned int group = threadIdx.x / kLocal;
+  const unsigned int tid = threadIdx.x % kLocal;
+  const size_t transform = static_cast<size_t>(blockIdx.x) * kTransforms + group;
+  const bool active = transform < transform_count;
+  [[maybe_unused]] const size_t base = transform * Width * Height;
+  float* tile = tiles + group * kTileSize;
+  float values[kLocal], scratch[2 * kLocal];
+  if constexpr (!std::is_pointer_v<Input>) {
+    // The residual source writes natural [v][u] coefficients and channel
+    // rates. Subwarp reduction needs no separate shared scratch here.
+    input.template Load<Width, Height, kLocal, kValues>(
+      tile, tile, transform, tid, active);
+    __syncthreads();
+  } else if constexpr (Width > Height) {
+    if (active) {
+#pragma unroll
+      for (unsigned int i = tid; i < Width * Height; i += kLocal)
+        tile[(i / Width) * (Width + 1) + i % Width] = input[base + i];
+    }
+    __syncthreads();
+  }
+  if (active && tid < Height) {
+#pragma unroll
+    for (unsigned int u = 0; u < Width; ++u) {
+      if constexpr (!std::is_pointer_v<Input> || Width > Height)
+        values[u] = tile[tid * (Width + 1) + u];
+      else
+        values[u] = input[base + u * Height + tid];
+    }
+    FactoredDct1D<Width, false>(values, scratch);
+    // Each lane has finished reading its own row before replacing it.
+#pragma unroll
+    for (unsigned int x = 0; x < Width; ++x) tile[tid * (Width + 1) + x] = values[x];
+  }
+  __syncthreads();
+  if (active && tid < Width) {
+#pragma unroll
+    for (unsigned int v = 0; v < Height; ++v) values[v] = tile[v * (Width + 1) + tid];
+    FactoredDct1D<Height, false>(values, scratch);
+    if constexpr (std::is_pointer_v<Output>) {
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y) output[base + y * Width + tid] = values[y];
+    } else if constexpr (Width >= Height) {
+      float pixels[kValues];
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y) pixels[y] = values[y];
+      output.template Store<kLocal, kValues, false>(pixels, transform, tid, tile);
+    }
+  }
+  if constexpr (!std::is_pointer_v<Output> && Height > Width) {
+    // Redistribute tall output columns to row-major strided lane vectors.
+    // This preserves the existing loss reduction tree and mask addressing.
+    __syncthreads();
+    if (active && tid < Width) {
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y) tile[y * (Width + 1) + tid] = values[y];
+    }
+    __syncthreads();
+    if (active) {
+      float pixels[kValues];
+#pragma unroll
+      for (unsigned int value = 0; value < kValues; ++value) {
+        const unsigned int index = tid + value * kLocal;
+        pixels[value] = tile[(index / Width) * (Width + 1) + index % Width];
+      }
+      output.template Store<kLocal, kValues, false>(pixels, transform, tid, tile);
+    }
+  }
+}
 
 // Small transforms use eight independent accumulators per lane. Pack enough
 // transforms into each block to retain 256 threads and share basis loading.
@@ -1003,6 +1161,39 @@ cudaError_t InitializeCudaDctBasis() {
 }
 
 cudaError_t LaunchCudaDct(
+  bool forward, const float* input, float* output, size_t transform_count,
+  unsigned int width, unsigned int height, cudaStream_t stream) {
+  const auto launch = [&](auto w, auto h) {
+    constexpr unsigned int kWidth = decltype(w)::value;
+    constexpr unsigned int kHeight = decltype(h)::value;
+    constexpr unsigned int kLocal = kWidth > kHeight ? kWidth : kHeight;
+    constexpr unsigned int kTransforms = kFactoredDctThreads / kLocal;
+    const unsigned int blocks = static_cast<unsigned int>(
+      (transform_count + kTransforms - 1) / kTransforms);
+    if (forward) {
+      ForwardDctFactoredKernel<kWidth, kHeight>
+        <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+    } else {
+      InverseDctFactoredKernel<kWidth, kHeight>
+        <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+    }
+  };
+  using N8 = std::integral_constant<unsigned int, 8>;
+  using N16 = std::integral_constant<unsigned int, 16>;
+  using N32 = std::integral_constant<unsigned int, 32>;
+  if (width == 8 && height == 8) launch(N8{}, N8{});
+  else if (width == 16 && height == 8) launch(N16{}, N8{});
+  else if (width == 8 && height == 16) launch(N8{}, N16{});
+  else if (width == 16 && height == 16) launch(N16{}, N16{});
+  else if (width == 32 && height == 16) launch(N32{}, N16{});
+  else if (width == 16 && height == 32) launch(N16{}, N32{});
+  else if (width == 32 && height == 32) launch(N32{}, N32{});
+  else return LaunchCudaDctMatrix(forward, input, output, transform_count,
+    width, height, stream);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaDctMatrix(
   bool forward,
   const float* input,
   float* output,
@@ -1108,23 +1299,12 @@ cudaError_t LaunchCudaAcStrategyForward(
     const AcStrategyDctSource<kWidth, kHeight> input{
       opsin_x, opsin_y, opsin_b,
       static_cast<const AcStrategyCandidateDevice*>(candidates), params};
-    if constexpr (kWidth <= 16 && kHeight <= 16) {
-      constexpr unsigned int kTransformsPerBlock =
-        kThreadsPerTransform * kPackedDctOutputsPerThread / (kWidth * kHeight);
-      const unsigned int blocks = static_cast<unsigned int>(
-        (transform_count + kTransformsPerBlock - 1) / kTransformsPerBlock);
-      ForwardDctPackedKernel<kWidth, kHeight, kTransformsPerBlock>
-        <<<blocks, kThreadsPerTransform,
-           PackedDctSharedFloats(kWidth, kHeight) * sizeof(float), stream>>>(
-          input, output, transform_count);
-    } else {
-      constexpr size_t kSharedFloats = kWidth * kHeight +
-        (kWidth + kHeight) * (kWidth + 1) +
-        (kWidth < 32 ? kHeight * (kHeight + 1) : 0);
-      ForwardDctSpecializedKernel<kWidth, kHeight>
-        <<<static_cast<unsigned int>(transform_count), kSpecializedDctThreads,
-           kSharedFloats * sizeof(float), stream>>>(input, output);
-    }
+    constexpr unsigned int kLocal = kWidth > kHeight ? kWidth : kHeight;
+    constexpr unsigned int kTransforms = kFactoredDctThreads / kLocal;
+    const unsigned int blocks = static_cast<unsigned int>(
+      (transform_count + kTransforms - 1) / kTransforms);
+    ForwardDctFactoredKernel<kWidth, kHeight>
+      <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
   };
   using N8 = std::integral_constant<unsigned int, 8>;
   using N16 = std::integral_constant<unsigned int, 16>;
@@ -1161,23 +1341,12 @@ cudaError_t LaunchAcStrategyInverseLossImpl(
     const AcStrategyDctLossOutput<kWidth, kHeight> output{
       pixel_mask, static_cast<const AcStrategyCandidateDevice*>(candidates),
       losses, params};
-    if constexpr (kWidth <= 16 && kHeight <= 16) {
-      constexpr unsigned int kTransformsPerBlock =
-        kThreadsPerTransform * kPackedDctOutputsPerThread / (kWidth * kHeight);
-      const unsigned int blocks = static_cast<unsigned int>(
-        (transform_count + kTransformsPerBlock - 1) / kTransformsPerBlock);
-      InverseDctPackedKernel<kWidth, kHeight, kTransformsPerBlock>
-        <<<blocks, kThreadsPerTransform,
-           PackedDctSharedFloats(kWidth, kHeight) * sizeof(float), stream>>>(
-          input, output, transform_count);
-    } else {
-      constexpr size_t kSharedFloats = kWidth * kHeight +
-        (kWidth + kHeight) * (kWidth + 1) +
-        (kWidth < 32 ? kHeight * (kHeight + 1) : 0);
-      InverseDctSpecializedKernel<kWidth, kHeight>
-        <<<static_cast<unsigned int>(transform_count), kSpecializedDctThreads,
-           kSharedFloats * sizeof(float), stream>>>(input, output);
-    }
+    constexpr unsigned int kLocal = kWidth > kHeight ? kWidth : kHeight;
+    constexpr unsigned int kTransforms = kFactoredDctThreads / kLocal;
+    const unsigned int blocks = static_cast<unsigned int>(
+      (transform_count + kTransforms - 1) / kTransforms);
+    InverseDctFactoredKernel<kWidth, kHeight>
+      <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
   };
   using N8 = std::integral_constant<unsigned int, 8>;
   using N16 = std::integral_constant<unsigned int, 16>;

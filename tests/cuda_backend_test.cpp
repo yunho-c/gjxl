@@ -244,6 +244,65 @@ bool CheckKernelLaunchErrorConsumption() {
   return true;
 }
 
+// Exercise both implementations through guarded, deliberately non-aligned
+// pointers. The matrix path remains an independent arithmetic/layout oracle;
+// both must satisfy the existing double-precision reference tolerances.
+bool CheckGuardedDctKernels(
+  gjxl::GpuBackend& backend, gjxl::Extent2D extent, size_t transform_count,
+  const std::vector<float>& source, const std::vector<double>& forward,
+  const std::vector<double>& inverse) {
+  using gjxl::cuda_internal::CudaBuffer;
+  using gjxl::cuda_internal::CudaRuntimeStatus;
+  constexpr size_t kPrefix = 7, kSuffix = 11;
+  constexpr float kGuard = -12345.0f;
+  std::vector<float> input(kPrefix + source.size() + kSuffix, kGuard);
+  std::copy(source.begin(), source.end(), input.begin() + kPrefix);
+  std::vector<float> output(input.size(), kGuard);
+  const size_t bytes = input.size() * sizeof(float);
+  std::unique_ptr<gjxl::DeviceBuffer> device_input, device_output;
+  if (!CheckStatus(backend.Allocate(bytes, &device_input), "Allocate guarded DCT input") ||
+      !CheckStatus(backend.Allocate(bytes, &device_output), "Allocate guarded DCT output") ||
+      !CheckStatus(backend.CopyHostToDevice(*device_input, input.data(), bytes),
+        "Upload guarded DCT input")) return false;
+  auto* in = dynamic_cast<CudaBuffer*>(device_input.get());
+  auto* out = dynamic_cast<CudaBuffer*>(device_output.get());
+  const auto* state = in->state();
+  gjxl::cuda_internal::ScopedCudaDevice device(state->ordinal);
+  if (!CheckStatus(CudaRuntimeStatus(device.status(), "Select guarded DCT device"),
+        "Select guarded DCT device")) return false;
+  for (const auto launch : {gjxl::cuda_internal::LaunchCudaDct,
+                            gjxl::cuda_internal::LaunchCudaDctMatrix}) {
+    for (bool is_forward : {true, false}) {
+      std::fill(output.begin(), output.end(), kGuard);
+      if (!CheckStatus(backend.CopyHostToDevice(*device_output, output.data(), bytes),
+            "Initialize DCT guards") ||
+          !CheckStatus(CudaRuntimeStatus(launch(is_forward,
+            static_cast<const float*>(in->pointer()) + kPrefix,
+            static_cast<float*>(out->pointer()) + kPrefix, transform_count,
+            static_cast<unsigned int>(extent.width),
+            static_cast<unsigned int>(extent.height), state->stream), "Launch guarded DCT"),
+            "Launch guarded DCT") ||
+          !CheckStatus(CudaRuntimeStatus(cudaStreamSynchronize(state->stream),
+            "Wait for guarded DCT"), "Wait for guarded DCT") ||
+          !CheckStatus(backend.CopyDeviceToHost(*device_output, output.data(), bytes),
+            "Download guarded DCT")) return false;
+      for (size_t i = 0; i < output.size(); ++i) {
+        if ((i < kPrefix || i >= kPrefix + source.size()) && output[i] != kGuard) {
+          std::cerr << "DCT overwrote output guard at " << i << '\n';
+          return false;
+        }
+      }
+      const std::vector<float> actual(output.begin() + kPrefix, output.end() - kSuffix);
+      if (!CloseEnough(actual, is_forward ? forward : inverse,
+            is_forward ? 3.0e-5 : 5.0e-4, is_forward ? 3.0e-4 : 5.0e-4,
+            "Guarded matrix/factorized DCT")) return false;
+    }
+  }
+  std::vector<float> unchanged(input.size());
+  return CheckStatus(backend.CopyDeviceToHost(*device_input, unchanged.data(), bytes),
+    "Download guarded DCT source") && input == unchanged;
+}
+
 bool CheckTransform(
   gjxl::GpuBackend& backend,
   gjxl::AcStrategyType strategy,
@@ -381,7 +440,9 @@ bool CheckTransform(
     return false;
   }
   return CloseEnough(actual_inverse, expected_pixels, 5.0e-4, 5.0e-4,
-    "CUDA independent inverse DCT");
+    "CUDA independent inverse DCT") &&
+    CheckGuardedDctKernels(backend, info->pixel_extent(), transform_count,
+      pixels, expected_forward, expected_pixels);
 }
 
 bool CheckAcStrategyInverseLoss(

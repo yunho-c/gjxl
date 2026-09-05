@@ -47,6 +47,11 @@ struct CudaAcStrategyBatchParams {
                                         unsigned int width, unsigned int height,
                                         cudaStream_t stream);
 
+// Internal matrix-based numerical/performance oracle for the factorized path.
+[[nodiscard]] cudaError_t LaunchCudaDctMatrix(bool forward, const float* input,
+    float* output, size_t transform_count, unsigned int width,
+    unsigned int height, cudaStream_t stream);
+
 // Gather candidate rectangles into forward-DCT shared memory, without a
 // materialized packed-pixel buffer. Shapes/strides are validated by the batch.
 [[nodiscard]] cudaError_t LaunchCudaAcStrategyForward(
