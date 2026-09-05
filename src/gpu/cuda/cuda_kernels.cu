@@ -188,6 +188,115 @@ __device__ float DctInputElement(Tile input, size_t base, size_t index) {
   }
 }
 
+// Quantize AC residual coefficients directly into the inverse input tile.
+// Channel rates are reduced before the horizontal pass reuses intermediate
+// storage; no global residual-coefficient buffer is materialized.
+struct AcStrategyResidualDctSource {
+  const float* coefficients;
+  const float* matrices;
+  const float* quant_norms;
+  const AcStrategyCandidateDevice* candidates;
+  const signed char* y_to_x;
+  const signed char* y_to_b;
+  AcStrategyChannelRateDevice* channel_rates;
+  CudaAcStrategyBatchParams params;
+
+  template <unsigned int Width, unsigned int Height,
+            unsigned int LocalThreads, unsigned int Values>
+  __device__ void Load(float* tile, float* reduction, size_t transform_index,
+                       unsigned int tid, bool active) const {
+    constexpr unsigned int kCount = Width * Height;
+    static_assert(LocalThreads * Values == kCount);
+    const size_t candidate_index = transform_index / 3;
+    const unsigned int channel = static_cast<unsigned int>(transform_index % 3);
+    const size_t base = transform_index * kCount;
+    const size_t y_base = (candidate_index * 3 + 1) * kCount;
+    const unsigned int matrix_base = channel * kCount;
+    const unsigned int inverse_matrix_base = (3 + channel) * kCount;
+    bool valid = false;
+    float norm = NAN;
+    float factor = NAN;
+    if (active) {
+      const auto candidate = candidates[candidate_index];
+      valid = CandidateValid(candidate, params);
+      if (valid) {
+        norm = quant_norms[candidate_index];
+        factor = ComputeCflFactor(y_to_x, y_to_b, candidate, channel, params);
+      }
+    }
+    float magnitude[Values];
+    unsigned int nonzero[Values];
+#pragma unroll
+    for (unsigned int value = 0; value < Values; ++value) {
+      const unsigned int index = tid + value * LocalThreads;
+      float rounded = NAN;
+      float residual = NAN;
+      if (valid) {
+        const float decorrelated = coefficients[base + index] -
+          coefficients[y_base + index] * factor;
+        const float scaled = decorrelated *
+          matrices[inverse_matrix_base + index] * norm;
+        rounded = copysignf(floorf(fabsf(scaled) + 0.5f), scaled);
+        residual = matrices[matrix_base + index] * (scaled - rounded);
+      }
+      constexpr bool kRowMajorCoefficients = Height < Width;
+      const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
+      const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
+      tile[v * (Width + 1) + u] = active ? residual : 0.0f;
+      magnitude[value] = sqrtf(fabsf(rounded));
+      nonzero[value] = rounded != 0.0f ? 1u : 0u;
+    }
+    // Match the separate residual kernel's halving order, even though the
+    // inverse transform uses a different number of lanes per transform.
+#pragma unroll
+    for (unsigned int stride = Values / 2; stride != 0; stride /= 2) {
+#pragma unroll
+      for (unsigned int value = 0; value < stride; ++value) {
+        magnitude[value] += magnitude[value + stride];
+        nonzero[value] += nonzero[value + stride];
+      }
+    }
+    if constexpr (LocalThreads > 32) {
+      static_assert(LocalThreads == kSpecializedDctThreads);
+      static_assert(kCount >= 2 * LocalThreads);
+      reduction[tid] = magnitude[0];
+      reinterpret_cast<unsigned int*>(reduction + LocalThreads)[tid] = nonzero[0];
+      __syncthreads();
+    }
+    constexpr unsigned int kWarpWidth = LocalThreads < 32 ? LocalThreads : 32;
+    if (tid < kWarpWidth) {
+      float total_magnitude = magnitude[0];
+      unsigned int total_nonzero = nonzero[0];
+      if constexpr (LocalThreads > 32) {
+        const auto* counts =
+          reinterpret_cast<const unsigned int*>(reduction + LocalThreads);
+        total_magnitude = reduction[tid] + reduction[tid + 128];
+        total_magnitude += reduction[tid + 64] + reduction[tid + 192];
+        float upper = reduction[tid + 32] + reduction[tid + 160];
+        upper += reduction[tid + 96] + reduction[tid + 224];
+        total_magnitude += upper;
+        total_nonzero = counts[tid] + counts[tid + 128];
+        total_nonzero += counts[tid + 64] + counts[tid + 192];
+        unsigned int upper_nonzero = counts[tid + 32] + counts[tid + 160];
+        upper_nonzero += counts[tid + 96] + counts[tid + 224];
+        total_nonzero += upper_nonzero;
+      }
+      const unsigned int group_start = (threadIdx.x % 32) & ~(kWarpWidth - 1);
+      const unsigned int mask = (0xffffffffu >> (32 - kWarpWidth)) << group_start;
+#pragma unroll
+      for (unsigned int stride = kWarpWidth / 2; stride != 0; stride /= 2) {
+        total_magnitude += __shfl_down_sync(mask, total_magnitude, stride, kWarpWidth);
+        total_nonzero += __shfl_down_sync(mask, total_nonzero, stride, kWarpWidth);
+      }
+      if (tid == 0 && active) {
+        channel_rates[transform_index] = {total_magnitude, total_nonzero};
+      }
+    }
+    // The caller's existing input-tile barrier protects these rate reads
+    // before any thread overwrites intermediate storage with DCT outputs.
+  }
+};
+
 // AC search consumes only a weighted eighth-power loss per channel, not
 // reconstructed residual pixels. Reduce the inverse outputs in registers
 // and reuse the now-dead horizontal basis storage for cross-warp reduction.
@@ -402,9 +511,9 @@ __global__ void ForwardDctPackedKernel(
 }
 
 template <unsigned int Width, unsigned int Height,
-          unsigned int TransformsPerBlock, typename Output>
+          unsigned int TransformsPerBlock, typename Input, typename Output>
 __global__ void InverseDctPackedKernel(
-  const float* input,
+  Input input,
   Output output,
   size_t transform_count) {
   static_assert(Width == 8 || Width == 16);
@@ -433,7 +542,7 @@ __global__ void InverseDctPackedKernel(
   const size_t transform_index =
     static_cast<size_t>(blockIdx.x) * TransformsPerBlock + local_transform;
   const bool active = transform_index < transform_count;
-  const size_t base = transform_index * kElementCount;
+  [[maybe_unused]] const size_t base = transform_index * kElementCount;
   const size_t intermediate_base = local_transform * kIntermediateStride;
   const size_t tile_base = local_transform * kPaddedElements;
 
@@ -453,13 +562,19 @@ __global__ void InverseDctPackedKernel(
     horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x] =
       kGlobalOrthonormalDctBasis[DctBasisOffset(Width) + index];
   }
-  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
-    const unsigned int index = local_index + value * kLocalThreads;
-    constexpr bool kRowMajorCoefficients = Height < Width;
-    const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
-    const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
-    io_tile[tile_base + v * (Width + 1) + u] =
-      active ? input[base + index] : 0.0f;
+  if constexpr (std::is_pointer_v<Input>) {
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int index = local_index + value * kLocalThreads;
+      constexpr bool kRowMajorCoefficients = Height < Width;
+      const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
+      const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
+      io_tile[tile_base + v * (Width + 1) + u] =
+        active ? input[base + index] : 0.0f;
+    }
+  } else {
+    input.template Load<Width, Height, kLocalThreads, kOutputsPerThread>(
+      io_tile + tile_base, intermediate + intermediate_base,
+      transform_index, local_index, active);
   }
   __syncthreads();
 
@@ -611,9 +726,9 @@ __global__ void ForwardDctSpecializedKernel(
   }
 }
 
-template <unsigned int Width, unsigned int Height, typename Output>
+template <unsigned int Width, unsigned int Height, typename Input, typename Output>
 __global__ void InverseDctSpecializedKernel(
-  const float* input,
+  Input input,
   Output output) {
   static_assert(Width == 16 || Width == 32);
   static_assert(Height == 16 || Height == 32);
@@ -629,7 +744,7 @@ __global__ void InverseDctSpecializedKernel(
   // horizontal pass's samples from the padded shared tile.
   float* input_tile = intermediate + kElementCount;
   float* vertical_basis_tile = input_tile + Height * (Width + 1);
-  const size_t base = static_cast<size_t>(blockIdx.x) * kElementCount;
+  [[maybe_unused]] const size_t base = static_cast<size_t>(blockIdx.x) * kElementCount;
 
   for (size_t index = threadIdx.x;
        index < static_cast<size_t>(Width) * Width;
@@ -639,12 +754,18 @@ __global__ void InverseDctSpecializedKernel(
     horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x] =
       kGlobalOrthonormalDctBasis[DctBasisOffset(Width) + index];
   }
-  for (size_t index = threadIdx.x; index < kElementCount;
-       index += blockDim.x) {
-    constexpr bool kRowMajorCoefficients = Height < Width;
-    const size_t v = kRowMajorCoefficients ? index / Width : index % Height;
-    const size_t u = kRowMajorCoefficients ? index % Width : index / Height;
-    input_tile[v * (Width + 1) + u] = input[base + index];
+  if constexpr (std::is_pointer_v<Input>) {
+    for (size_t index = threadIdx.x; index < kElementCount;
+         index += blockDim.x) {
+      constexpr bool kRowMajorCoefficients = Height < Width;
+      const size_t v = kRowMajorCoefficients ? index / Width : index % Height;
+      const size_t u = kRowMajorCoefficients ? index % Width : index / Height;
+      input_tile[v * (Width + 1) + u] = input[base + index];
+    }
+  } else {
+    input.template Load<Width, Height, kSpecializedDctThreads,
+                        kElementCount / kSpecializedDctThreads>(
+      input_tile, intermediate, blockIdx.x, threadIdx.x, true);
   }
   if constexpr (Width < 32) {
     for (size_t index = threadIdx.x; index < Height * Height;
@@ -1028,8 +1149,9 @@ cudaError_t LaunchCudaAcStrategyForward(
   return cudaGetLastError();
 }
 
-cudaError_t LaunchCudaAcStrategyInverseLoss(
-  const float* input, const float* pixel_mask,
+template <typename Input>
+cudaError_t LaunchAcStrategyInverseLossImpl(
+  Input input, const float* pixel_mask,
   const void* candidates, float* losses, CudaAcStrategyBatchParams params,
   cudaStream_t stream) {
   const size_t transform_count = static_cast<size_t>(params.candidate_count) * 3;
@@ -1078,6 +1200,27 @@ cudaError_t LaunchCudaAcStrategyInverseLoss(
     return cudaErrorInvalidValue;
   }
   return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAcStrategyInverseLoss(
+  const float* input, const float* pixel_mask,
+  const void* candidates, float* losses, CudaAcStrategyBatchParams params,
+  cudaStream_t stream) {
+  return LaunchAcStrategyInverseLossImpl(
+    input, pixel_mask, candidates, losses, params, stream);
+}
+
+cudaError_t LaunchCudaAcStrategyResidualInverseLoss(
+  const float* coefficients, const float* matrices, const float* quant_norms,
+  const signed char* y_to_x, const signed char* y_to_b, const float* pixel_mask,
+  const void* candidates, void* channel_rates, float* losses,
+  CudaAcStrategyBatchParams params, cudaStream_t stream) {
+  const AcStrategyResidualDctSource input{
+    coefficients, matrices, quant_norms,
+    static_cast<const AcStrategyCandidateDevice*>(candidates), y_to_x, y_to_b,
+    static_cast<AcStrategyChannelRateDevice*>(channel_rates), params};
+  return LaunchAcStrategyInverseLossImpl(
+    input, pixel_mask, candidates, losses, params, stream);
 }
 
 cudaError_t LaunchCudaPointwiseAffine(

@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 
 #include "gpu/cuda/cuda_ac_strategy_device.cuh"
 
@@ -13,36 +12,12 @@ namespace gjxl::cuda_internal {
 namespace {
 
 constexpr unsigned int kQuantNormThreads = 256;
-constexpr unsigned int kResidualThreads = 256;
 constexpr unsigned int kCostThreads = 256;
 
-template <unsigned int CoefficientCount>
-struct ResidualLayout {
-  static_assert(CoefficientCount >= 64 && CoefficientCount <= 1024 &&
-    (CoefficientCount & (CoefficientCount - 1)) == 0);
-  // Pack whole warps, but cap each lane's register-held reduction at eight
-  // coefficients. The 32-element per-lane arrays spill in the 32x32 case.
-  static constexpr unsigned int kThreadsPerTransform =
-    CoefficientCount <= 256 ? 32 : CoefficientCount / 8;
-  static constexpr unsigned int kTransformsPerBlock =
-    kResidualThreads / kThreadsPerTransform;
-  static constexpr unsigned int kValuesPerThread =
-    CoefficientCount / kThreadsPerTransform;
-};
-
-struct ChannelRate {
-  float magnitude;
-  uint32_t nonzero_count;
-};
-
-static_assert(sizeof(ChannelRate) == 2 * sizeof(float));
+using ChannelRate = AcStrategyChannelRateDevice;
 
 __device__ unsigned int CeilLog2Nonzero(unsigned int value) {
   return value <= 1 ? 0 : 32 - __clz(value - 1);
-}
-
-__device__ float RoundAwayFromZero(float value) {
-  return copysignf(floorf(fabsf(value) + 0.5f), value);
 }
 
 __device__ float FastLog2(float value) {
@@ -76,25 +51,6 @@ __device__ float FastPow2(float value) {
   denominator = fmaf(denominator, fraction, -1.94414990e+01f);
   denominator = fmaf(denominator, fraction, 9.85506633e+01f);
   return numerator / denominator;
-}
-
-__device__ float ComputeCflFactor(
-  const signed char* y_to_x,
-  const signed char* y_to_b,
-  AcStrategyCandidateDevice candidate,
-  unsigned int channel,
-  CudaAcStrategyBatchParams params) {
-  if (channel == 1u) return 0.0f;
-  if (params.use_device_cfl == 0u) {
-    return channel == 0u ? candidate.cfl_x : candidate.cfl_b;
-  }
-  constexpr float kCflScale = 1.0f / 84.0f;
-  const size_t tile_index =
-    static_cast<size_t>(candidate.block_y / 8u) *
-      params.color_tile_row_stride + candidate.block_x / 8u;
-  return channel == 0u
-    ? static_cast<float>(y_to_x[tile_index]) * kCflScale
-    : 1.0f + static_cast<float>(y_to_b[tile_index]) * kCflScale;
 }
 
 __device__ float ComputeQuantNorm(
@@ -149,129 +105,6 @@ __global__ void PrepareQuantNormsKernel(
   const AcStrategyCandidateDevice candidate = candidates[index];
   quant_norms[index] = CandidateValid(candidate, params)
     ? ComputeQuantNorm(quant_field, candidate, params) : NAN;
-}
-
-template <unsigned int CoefficientCount>
-__global__ void ResidualPackedKernel(
-  const float* coefficients,
-  const float* matrices,
-  const AcStrategyCandidateDevice* candidates,
-  const float* quant_norms,
-  const signed char* y_to_x,
-  const signed char* y_to_b,
-  float* residual_coefficients,
-  ChannelRate* channel_rates,
-  CudaAcStrategyBatchParams params) {
-  using Layout = ResidualLayout<CoefficientCount>;
-  constexpr unsigned int kThreadsPerTransform =
-    Layout::kThreadsPerTransform;
-  constexpr unsigned int kTransformsPerBlock =
-    Layout::kTransformsPerBlock;
-  constexpr unsigned int kValuesPerThread =
-    Layout::kValuesPerThread;
-  __shared__ float magnitude_reduction[kResidualThreads];
-  __shared__ unsigned int nonzero_reduction[kResidualThreads];
-  __shared__ unsigned int candidate_valid[kTransformsPerBlock];
-  __shared__ float quant_norm[kTransformsPerBlock];
-  __shared__ float cfl_factor[kTransformsPerBlock];
-  const unsigned int local_transform = threadIdx.x / kThreadsPerTransform;
-  const unsigned int tid = threadIdx.x % kThreadsPerTransform;
-  const unsigned int transform_index =
-    blockIdx.x * kTransformsPerBlock + local_transform;
-  // Tail transforms still participate in every block barrier, but never
-  // access candidate, coefficient, or output storage.
-  const bool active = transform_index < params.candidate_count * 3u;
-  const unsigned int candidate_index = transform_index / 3;
-  const unsigned int channel = transform_index % 3;
-  const size_t base =
-    static_cast<size_t>(transform_index) * CoefficientCount;
-  const size_t y_base =
-    static_cast<size_t>(candidate_index * 3 + 1) * CoefficientCount;
-  const size_t matrix_base =
-    static_cast<size_t>(channel) * CoefficientCount;
-  const size_t inverse_matrix_base =
-    static_cast<size_t>(3 + channel) * CoefficientCount;
-
-  if (tid == 0) {
-    unsigned int valid = 0;
-    float norm = NAN;
-    float factor = NAN;
-    if (active) {
-      const AcStrategyCandidateDevice candidate = candidates[candidate_index];
-      valid = CandidateValid(candidate, params);
-      if (valid) {
-        norm = quant_norms[candidate_index];
-        factor = ComputeCflFactor(y_to_x, y_to_b, candidate, channel, params);
-      }
-    }
-    candidate_valid[local_transform] = valid;
-    quant_norm[local_transform] = norm;
-    cfl_factor[local_transform] = factor;
-  }
-  __syncthreads();
-  float magnitude[kValuesPerThread];
-  unsigned int nonzero[kValuesPerThread];
-#pragma unroll
-  for (unsigned int value = 0; value < kValuesPerThread; ++value) {
-    const unsigned int coefficient = tid + value * kThreadsPerTransform;
-    float rounded = NAN;
-    if (candidate_valid[local_transform]) {
-      const float decorrelated = coefficients[base + coefficient] -
-        coefficients[y_base + coefficient] * cfl_factor[local_transform];
-      const float scaled = decorrelated *
-        matrices[inverse_matrix_base + coefficient] * quant_norm[local_transform];
-      rounded = RoundAwayFromZero(scaled);
-      residual_coefficients[base + coefficient] =
-        matrices[matrix_base + coefficient] * (scaled - rounded);
-    } else if (active) {
-      residual_coefficients[base + coefficient] = NAN;
-    }
-    magnitude[value] = sqrtf(fabsf(rounded));
-    nonzero[value] = rounded != 0.0f ? 1u : 0u;
-  }
-
-  // Preserve the original halving tree. The high-stride levels combine a
-  // lane's registers, the middle levels use shared memory, and the final
-  // five levels use shuffles within each transform's first full warp.
-#pragma unroll
-  for (unsigned int stride = kValuesPerThread / 2; stride != 0; stride /= 2) {
-#pragma unroll
-    for (unsigned int value = 0; value < stride; ++value) {
-      magnitude[value] += magnitude[value + stride];
-      nonzero[value] += nonzero[value + stride];
-    }
-  }
-  if constexpr (kThreadsPerTransform > 32) {
-    magnitude_reduction[threadIdx.x] = magnitude[0];
-    nonzero_reduction[threadIdx.x] = nonzero[0];
-    __syncthreads();
-
-#pragma unroll
-    for (unsigned int stride = kThreadsPerTransform / 2;
-         stride >= 32; stride /= 2) {
-      if (tid < stride) {
-        magnitude_reduction[threadIdx.x] +=
-          magnitude_reduction[threadIdx.x + stride];
-        nonzero_reduction[threadIdx.x] +=
-          nonzero_reduction[threadIdx.x + stride];
-      }
-      __syncthreads();
-    }
-  }
-  if (tid < 32) {
-    float total_magnitude = kThreadsPerTransform > 32
-      ? magnitude_reduction[threadIdx.x] : magnitude[0];
-    unsigned int total_nonzero = kThreadsPerTransform > 32
-      ? nonzero_reduction[threadIdx.x] : nonzero[0];
-#pragma unroll
-    for (unsigned int stride = 16; stride != 0; stride /= 2) {
-      total_magnitude += __shfl_down_sync(0xffffffffu, total_magnitude, stride);
-      total_nonzero += __shfl_down_sync(0xffffffffu, total_nonzero, stride);
-    }
-    if (tid == 0 && active) {
-      channel_rates[transform_index] = {total_magnitude, total_nonzero};
-    }
-  }
 }
 
 __global__ void FinalizeCostKernel(
@@ -349,51 +182,21 @@ cudaError_t LaunchCudaAcStrategyBatch(
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) return error;
 
-  const size_t transform_count =
-    static_cast<size_t>(params.candidate_count) * 3;
   error = LaunchCudaAcStrategyForward(
     opsin_x, opsin_y, opsin_b, candidates, scratch_b, params, stream);
   if (error != cudaSuccess) return error;
 
-  const auto launch_residual = [&](auto count) {
-    constexpr unsigned int kCount = decltype(count)::value;
-    constexpr unsigned int kTransformsPerBlock =
-      ResidualLayout<kCount>::kTransformsPerBlock;
-    const unsigned int blocks = static_cast<unsigned int>(
-      (transform_count + kTransformsPerBlock - 1) / kTransformsPerBlock);
-    ResidualPackedKernel<kCount><<<blocks, kResidualThreads, 0, stream>>>(
-      scratch_b, matrices, typed_candidates, costs, y_to_x, y_to_b,
-      scratch_a, static_cast<ChannelRate*>(rate_scratch), params);
-  };
-  switch (params.coefficient_count) {
-    case 64:
-      launch_residual(std::integral_constant<unsigned int, 64>{});
-      break;
-    case 128:
-      launch_residual(std::integral_constant<unsigned int, 128>{});
-      break;
-    case 256:
-      launch_residual(std::integral_constant<unsigned int, 256>{});
-      break;
-    case 512:
-      launch_residual(std::integral_constant<unsigned int, 512>{});
-      break;
-    case 1024:
-      launch_residual(std::integral_constant<unsigned int, 1024>{});
-      break;
-    default: return cudaErrorInvalidValue;
-  }
-  error = cudaGetLastError();
-  if (error != cudaSuccess) return error;
-
-  error = LaunchCudaAcStrategyInverseLoss(
-    scratch_a, pixel_mask, candidates, scratch_b, params, stream);
+  // The inverse consumes forward coefficients in scratch B while writing
+  // compact loss sums to scratch A; those ranges must remain disjoint.
+  error = LaunchCudaAcStrategyResidualInverseLoss(
+    scratch_b, matrices, costs, y_to_x, y_to_b, pixel_mask, candidates,
+    rate_scratch, scratch_a, params, stream);
   if (error != cudaSuccess) return error;
 
   const unsigned int cost_blocks =
     (params.candidate_count + kCostThreads - 1) / kCostThreads;
   FinalizeCostKernel<<<cost_blocks, kCostThreads, 0, stream>>>(
-    scratch_b, typed_candidates, static_cast<const ChannelRate*>(rate_scratch),
+    scratch_a, typed_candidates, static_cast<const ChannelRate*>(rate_scratch),
     costs, params);
   return cudaGetLastError();
 }

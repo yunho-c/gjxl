@@ -2,7 +2,7 @@
 
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
-  AC gather/DCT plus inverse/loss fusion implemented; optimization ongoing
+  AC gather/DCT plus residual/inverse/loss fusion implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -14,16 +14,16 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest AC inverse/loss fusion against `85d7f42`
-reduces the targeted inverse/cost stages by 10.7% at 4K and 16.5% at 1080p;
-the 4K kernel total improves 1.1%, with other kernels nearly unchanged.
-The net logical device-traffic reduction is about 1.69 GB per 4K encode,
-after accounting for additional mask reads and the new per-channel sums.
-Uncontended paired total time improves 2.6% at 4K and 3.2% at 1080p, with
-substantial run-to-run variation. The qualified codestreams remain byte-identical.
-These are incremental gains, not a demonstrated performance ceiling. Earlier
-packed-cost, gather/DCT, small-DCT, and EPF improvements remain documented below.
-Remaining AC residual evaluation, DCT, reconstruction
+below supersede them. The latest residual/inverse/loss fusion against `b46bea9`
+reduces the targeted AC stages by 23.3% at 4K in the final trace. A separate
+initial trace with unchanged-kernel time nearly constant shows a 3.8% kernel-total
+improvement. Seven launches and a 2.55 GB residual-coefficient buffer round trip
+disappear per 4K encode; scratch allocation sizes are not yet reduced.
+Paired total time improves 6.1% at 4K and 0.9% at 1080p, while Flower is 2.0%
+slower. Both large-image quantization comparisons improve in all seven pairs.
+Qualified codestreams remain byte-identical. These are incremental gains,
+not a demonstrated performance ceiling; prior checkpoints remain documented below.
+Remaining scratch allocation, DCT, reconstruction
 filtering, host work, and transfers are material targets; the resident path
 has not reached its performance limit.
 
@@ -2189,6 +2189,179 @@ Final one-barrier artifacts use `s26_v2_`: `qualify.ps1` runs warmed pairs,
 eight sanitizer passes, encode/decode identity, final profiles, and both batch
 modes sequentially. `s26_profile_summary.py` extracts the first seven AC
 inverse/cost pairs separately from later ordinary reconstruction inverses.
+
+### Follow-up: fuse AC residual evaluation into inverse loading (2026-09-05)
+
+Parent: `b46bea9` (inverse/loss fusion). AC search still materialized the
+quantized residual coefficients between its standalone residual/rate kernel
+and inverse transform. The fresh parent 4K trace spends 12.070 ms in that
+residual kernel and 53.862 ms across residual, inverse, and final cost stages.
+Removing only the residual launch would miscount any work moved into inverse
+loading, so the comparisons below measure the complete affected sequence.
+
+`AcStrategyResidualDctSource` now computes color decorrelation, quantization,
+round-away-from-zero, and residual dequantization while loading the inverse
+shared tile. It reduces magnitude and nonzero rates before the DCT starts.
+The inverse transform and the preceding checkpoint's weighted loss sink are
+shared with the ordinary pointer-input path; that path retains its original
+load loop and transform arithmetic. Device candidate validation and the
+host/device CfL rules are unchanged. The device channel-rate layout and CfL
+helper move to the shared CUDA AC header.
+
+Small transforms keep their rate arrays in registers and use exact subwarp
+shuffle masks. Large transforms borrow the not-yet-populated intermediate
+tile for float magnitude and integer count partials. One extra barrier makes
+those writes visible; the first warp evaluates the original high-stride
+halving tree and shuffles the final levels. The existing input-tile barrier
+ensures rate reads have ended before horizontal DCT output can overwrite that
+storage. No extra dynamic shared-memory allocation is required.
+
+The batch now runs quant-norm preparation, forward DCT, fused residual/inverse/
+loss, and final cost. Forward coefficients stay in scratch B; compact loss
+sums go to scratch A. Writing them to B would alias coefficients that other
+inverse blocks might still read. Existing public range/overlap validation is
+unchanged. Seven standalone residual launches disappear, along with
+2,547,671,040 bytes of full residual-coefficient writes/reads at padded 4K.
+Scalar metadata loads are now per inverse lane instead of one leader per
+old residual group, with same-address coalescing/cache reuse; the removed
+buffer-byte count is not a net DRAM-traffic or bandwidth-ceiling measurement.
+
+Resource usage for fused inverse input/output, in width-by-height order:
+
+| Shape | Parent registers | Fused registers | Stack/local spill bytes |
+|---|---:|---:|---:|
+| 8x8 | 48 | 48 | 0 / 0 |
+| 16x8 | 56 | 52 | 0 / 0 |
+| 8x16 | 40 | 47 | 0 / 0 |
+| 16x16 | 40 | 47 | 0 / 0 |
+| 32x16 | 40 | 40 | 0 / 0 |
+| 16x32 | 40 | 39 | 0 / 0 |
+| 32x32 | 40 | 39 | 0 / 0 |
+
+The first fused 4K trace measures 53.862 to 40.989 ms for the affected stages
+(-23.9%), with other kernels essentially unchanged (283.662 to 283.832 ms).
+The kernel total falls from 337.524 to 324.822 ms (-3.8%), and launches fall
+from 516 to 509. This is an initial trace, not the final wall-time result.
+
+#### Direct numerical checks
+
+`CheckResidualInverseLoss` extends the CUDA backend test with an independent
+host FP32 residual/rate oracle. The host forms residual coefficients, then
+the existing pointer-input inverse/loss path supplies reference loss sums;
+the new fused path receives the original coefficients. Magnitude sums and
+nonzero counts are checked independently of the final scalar cost.
+
+Seven shapes, candidate counts 1/8/11/16/32/33, and both host/device CfL modes
+cover 84 fused batches and 4,242 channel comparisons each for loss, magnitude,
+and nonzero count. Inputs include random coefficients, exact positive/negative
+half-way values, signed zero, varying matrices/norms, invalid footprints,
+strided/offset masks and device CfL planes, and prefix/suffix output guards.
+Device CfL must supersede deliberately NaN host factors. Finite float results
+must match bitwise, invalid results must be NaN, and counts must match exactly.
+The earlier 420 direct inverse/loss batches, 126 ordinary DCT configurations,
+and expanded AC-cost validation tests also remain active.
+
+The initial oracle used separately rounded multiply/add for the device B
+factor and failed an exact loss comparison. The existing CUDA factor expression
+contracts that operation; using `std::fma` in the host oracle fixes the test
+without changing the kernel formula. All direct comparisons then pass.
+
+#### Paired public-workflow timing
+
+Seven alternating parent/final process pairs, three warmups and five measured
+samples per process, fully resident, effort 7/distance 1.2, no final-score
+diagnostic. Each process contributes its sample median; all outliers are
+retained. No GPU tests, builds, or disassembly checks overlap these runs.
+
+| Workload | Total median parent/final | Paired total change | Quantization median parent/final | Paired quantization change | Faster total/quantization pairs |
+|---|---:|---:|---:|---:|---:|
+| Odd padded 4K | 863.886 / 810.982 ms | -6.1% | 582.479 / 557.841 ms | -4.2% | 7/7, 7/7 |
+| Odd padded 1080p | 212.853 / 207.994 ms | -0.9% | 130.792 / 127.351 ms | -3.9% | 6/7, 7/7 |
+| Flower | 44.449 / 44.299 ms | +2.0% | 27.030 / 26.719 ms | -0.3% | 2/7, 4/7 |
+
+Paired percentages are medians of per-pair ratios, not ratios of cohort medians.
+Total-time ranges are 818.522-893.568 / 793.445-833.494 ms at 4K,
+206.170-227.782 / 202.230-225.643 ms at 1080p, and 43.024-45.073 /
+43.890-54.217 ms for Flower (parent/final). The large-image quantization
+improvement is consistent across every pair, but the natural-image total
+regression remains in the report. This is not a universal latency win.
+
+#### Final profiles and qualification
+
+Each final profile captures one effort-7, distance-1.2 fully-resident encode
+after three warmups, without the optional final-score pass. GPU times are
+milliseconds and include the entire affected residual/inverse/cost sequence.
+
+| Workload | AC stages parent/final | Change | Other kernels parent/final | Kernel total parent/final | Launches parent/final |
+|---|---:|---:|---:|---:|---:|
+| Odd padded 4K | 56.439 / 43.304 | -23.3% | 319.454 / 297.916 | 375.893 / 341.220 | 516 / 509 |
+| Odd padded 1080p | 8.829 / 7.054 | -20.1% | 59.129 / 56.244 | 67.958 / 63.298 | 501 / 494 |
+| Flower | 1.276 / 1.025 | -19.6% | 15.232 / 15.285 | 16.508 / 16.310 | 516 / 509 |
+
+All seven 4K shape pairs improve in the final trace. Its 9.2% kernel-total
+reduction is not solely caused by this patch: other kernels also run 6.7%
+faster. The initial 4K trace with nearly stable other kernels is a better
+controlled observation of the aggregate saving. Other-kernel time also
+improves 4.9% in the final 1080p trace, but is nearly stable for Flower (+0.3%).
+Host/device transfer payloads and copy counts do not change: 4K still has
+117,079,320 HtoD bytes/31 copies, 103,699,012 DtoH bytes/19 copies, and
+518,400 D2D bytes/one copy.
+
+The final build passes all 54 CUDA tests and the CPU-only build passes all 47.
+Both the AC-strategy and expanded CUDA backend tests pass memcheck, racecheck,
+synccheck, and initcheck with zero errors/hazards. Only the backend test
+suppresses API-error reporting for its deliberately invalid zero-grid launch;
+the AC test uses no API-error suppression. Six parent/final codestreams,
+selected-strategy summaries, and final perceptual scores match exactly:
+sample efforts 7/9, odd 1080p/4K effort 7, and Flower efforts 7/9. The pinned
+decoder reads all six outputs at their original dimensions. Their hashes
+remain those of the preceding checkpoints.
+
+Final 1080p batch qualification uses one warmup and three alternating paired
+serial/batch samples per size, with identical output required throughout:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 223.724 ms | 4.470 | 1.155x |
+| Fully resident | 2 | 416.248 ms | 4.805 | 1.177x |
+| Fully resident | 4 | 890.944 ms | 4.490 | 1.382x |
+| Maximum throughput | 1 | 158.049 ms | 6.327 | 1.005x |
+| Maximum throughput | 2 | 303.406 ms | 6.592 | 1.399x |
+| Maximum throughput | 4 | 400.195 ms | 9.995 | 1.667x |
+
+These are correctness/overlap qualifications, not before/after batch claims.
+Ending GPU state is 74 C/P5/697 MHz graphics/810 MHz memory. Power-state and
+host timing variation remain important; no clock or power policy was changed.
+
+Ignored artifacts under `build-cuda-ninja/profiles/` use the `s27_` prefix:
+`parent_4k`/`fused_4k` hold the initial `.nsys-rep`/`.sqlite` traces;
+`final_{parent,retained}_{4k,1080p,flower}` hold final traces.
+`compare_warmed.py` and `warmed_{4k,1080p,flower}.{json,txt}` retain paired
+results and raw benchmark stdout. `verify.ps1`/`identity.txt`,
+`{ac,backend}_final_{memcheck,racecheck,synccheck,initcheck}.txt`, and
+`batch_{fully-resident,maximum-throughput}.txt` retain qualification results.
+`qualify.ps1` runs GPU benchmarks and checks sequentially;
+`profile_final.ps1`/`profile_summary.py` capture and extract measurements.
+The profile extractor counts the first seven complete AC groups, recognizing
+that parent groups have a residual launch and fused groups do not.
+
+#### Remaining opportunities
+
+The shared search planner still reserves two `maximum_packed_bytes` ranges,
+and public CUDA batch validation still requires those full ranges. After this
+fusion, A only needs three floats per candidate. At padded 4K, its maximum
+could fall from 304,496,640 to 1,555,200 bytes, saving about 303 MB per search
+instance before alignment. That reduction is not implemented here: it needs
+an explicit scratch-size contract/query, corresponding arena planning and
+range/alias validation, and coverage of the other backends and batch lifetimes.
+
+The final 4K trace still contains 70.292 ms of large DCT (now including residual
+and loss work), 23.203 ms of packed DCT, 64.880 ms of convolution, 54.398 ms of
+Malta, 29.158 ms of coefficient encoding, and 23.708 ms of adjusted quantization.
+The transforms still use direct basis-matrix dot products; a factorized-DCT
+experiment would need numerical and perceptual qualification. Host work and
+transfer boundaries also remain material. The fully-resident path is not
+demonstrated maxed out.
 
 ## Work that should not lead the next cycle
 

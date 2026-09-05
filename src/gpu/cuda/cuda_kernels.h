@@ -60,6 +60,14 @@ struct CudaAcStrategyBatchParams {
     const float* input, const float* pixel_mask, const void* candidates,
     float* losses, CudaAcStrategyBatchParams params, cudaStream_t stream);
 
+// Quantize residual coefficients into the inverse tile and emit channel rates
+// plus loss sums. The loss output must not alias the coefficient input.
+[[nodiscard]] cudaError_t LaunchCudaAcStrategyResidualInverseLoss(
+    const float* coefficients, const float* matrices, const float* quant_norms,
+    const signed char* y_to_x, const signed char* y_to_b, const float* pixel_mask,
+    const void* candidates, void* channel_rates, float* losses,
+    CudaAcStrategyBatchParams params, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAcStrategyBatch(
     const float* opsin_x, const float* opsin_y, const float* opsin_b,
     const float* pixel_mask, const float* quant_field,

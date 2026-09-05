@@ -36,4 +36,30 @@ __device__ inline bool CandidateValid(
      (isfinite(candidate.cfl_x) && isfinite(candidate.cfl_b)));
 }
 
+struct AcStrategyChannelRateDevice {
+  float magnitude;
+  uint32_t nonzero_count;
+};
+
+static_assert(sizeof(AcStrategyChannelRateDevice) == 2 * sizeof(float));
+
+__device__ inline float ComputeCflFactor(
+  const signed char* y_to_x,
+  const signed char* y_to_b,
+  AcStrategyCandidateDevice candidate,
+  unsigned int channel,
+  CudaAcStrategyBatchParams params) {
+  if (channel == 1u) return 0.0f;
+  if (params.use_device_cfl == 0u) {
+    return channel == 0u ? candidate.cfl_x : candidate.cfl_b;
+  }
+  constexpr float kCflScale = 1.0f / 84.0f;
+  const size_t tile_index =
+    static_cast<size_t>(candidate.block_y / 8u) *
+      params.color_tile_row_stride + candidate.block_x / 8u;
+  return channel == 0u
+    ? static_cast<float>(y_to_x[tile_index]) * kCflScale
+    : 1.0f + static_cast<float>(y_to_b[tile_index]) * kCflScale;
+}
+
 }  // namespace gjxl::cuda_internal

@@ -553,6 +553,187 @@ bool CheckAcStrategyInverseLoss(
   return true;
 }
 
+bool CheckResidualInverseLoss(
+  gjxl::GpuBackend& backend, gjxl::AcStrategyType strategy,
+  std::mt19937* random, uint32_t candidate_count, bool device_cfl) {
+  using gjxl::cuda_internal::CudaBuffer;
+  using gjxl::cuda_internal::CudaRuntimeStatus;
+  struct Rate {
+    float magnitude;
+    uint32_t nonzero_count;
+  };
+  static_assert(sizeof(Rate) == gjxl::kAcStrategyRateScratchBytesPerChannel);
+  const auto extent = gjxl::GetAcStrategyInfo(strategy)->pixel_extent();
+  const size_t count = extent.width * extent.height;
+  const size_t transforms = candidate_count * 3;
+  constexpr uint32_t kWidth = 136, kHeight = 128, kStride = 147;
+  constexpr uint32_t kColorStride = 5;
+  constexpr size_t kMaskOffset = 13, kCflOffset = 3;
+  constexpr size_t kLossOffset = 7, kRateOffset = 2;
+  constexpr float kGuard = -12345.0f;
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  std::vector<float> mask(kMaskOffset + kStride * kHeight + 17, nan);
+  for (size_t y = 0; y < kHeight; ++y) {
+    for (size_t x = 0; x < kWidth; ++x) {
+      mask[kMaskOffset + y * kStride + x] =
+        0.125f + static_cast<float>((x * 13 + y * 19) % 127) / 64.0f;
+    }
+  }
+  std::vector<signed char> y_to_x(kCflOffset + 2 * kColorStride + 5);
+  std::vector<signed char> y_to_b(y_to_x.size());
+  for (size_t i = 0; i < y_to_x.size(); ++i) {
+    y_to_x[i] = static_cast<signed char>(static_cast<int>(i * 29 % 255) - 128);
+    y_to_b[i] = static_cast<signed char>(static_cast<int>(i * 43 % 255) - 128);
+  }
+  std::vector<gjxl::AcStrategyCandidate> candidates(candidate_count);
+  std::vector<float> norms(candidate_count);
+  for (size_t i = 0; i < candidate_count; ++i) {
+    candidates[i].block_x = static_cast<uint32_t>(i % 2 * ((kWidth - extent.width) / 8));
+    candidates[i].block_y = static_cast<uint32_t>((i / 2) % 2 * ((kHeight - extent.height) / 8));
+    candidates[i].cfl_x = 0.125f + static_cast<float>(i % 7) * 0.03125f;
+    candidates[i].cfl_b = -0.375f + static_cast<float>(i % 11) * 0.0625f;
+    norms[i] = i == 0 ? 1.0f : 0.31f + 0.019f * static_cast<float>(i % 13);
+    // Device CfL must supersede these non-finite host factors.
+    if (device_cfl) candidates[i].cfl_x = candidates[i].cfl_b = nan;
+    if (i % 17 == 16) candidates[i].block_y = std::numeric_limits<uint32_t>::max();
+  }
+  std::vector<float> matrices(6 * count);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t i = 0; i < count; ++i) {
+      matrices[channel * count + i] = 0.002f + 0.0001f * static_cast<float>((i + channel) % 19);
+      matrices[(3 + channel) * count + i] =
+        i < 5 ? 1.0f : 0.75f + 0.125f * static_cast<float>((i + channel) % 11);
+    }
+  }
+  std::uniform_real_distribution<float> distribution(-8.0f, 8.0f);
+  std::vector<float> coefficients(transforms * count);
+  std::generate(coefficients.begin(), coefficients.end(),
+    [&] { return distribution(*random); });
+  // Y has no CfL subtraction: these values exercise exact half-way rounding,
+  // signed zero, and the zero/nonzero rate boundary with a unit quant norm.
+  constexpr std::array boundaries = {-0.5f, 0.5f, -1.5f, 1.5f, -0.0f};
+  std::copy(boundaries.begin(), boundaries.end(), coefficients.begin() + count);
+  std::vector<float> residuals(coefficients.size(), nan);
+  std::vector<Rate> expected_rates(transforms);
+  for (size_t t = 0; t < transforms; ++t) {
+    const size_t c = t / 3, channel = t % 3;
+    const auto candidate = candidates[c];
+    const bool fits = candidate.block_x <= (kWidth - extent.width) / 8 &&
+      candidate.block_y <= (kHeight - extent.height) / 8;
+    float factor = channel == 0 ? candidate.cfl_x : channel == 1 ? 0.0f : candidate.cfl_b;
+    if (fits && device_cfl && channel != 1) {
+      const size_t tile = kCflOffset + candidate.block_y / 8 * kColorStride +
+        candidate.block_x / 8;
+      // The existing CUDA B-factor multiply/add contracts to an FMA.
+      factor = channel == 0 ? static_cast<float>(y_to_x[tile]) * (1.0f / 84.0f) :
+        std::fma(static_cast<float>(y_to_b[tile]), 1.0f / 84.0f, 1.0f);
+    }
+    std::vector<float> magnitude(count, nan);
+    uint32_t nonzero = 0;
+    for (size_t i = 0; i < count; ++i) {
+      float rounded = nan;
+      if (fits) {
+        const float decorrelated = std::fma(-coefficients[(c * 3 + 1) * count + i],
+          factor, coefficients[t * count + i]);
+        const float scaled = decorrelated * matrices[(3 + channel) * count + i] * norms[c];
+        rounded = std::copysign(std::floor(std::abs(scaled) + 0.5f), scaled);
+        residuals[t * count + i] = matrices[channel * count + i] * (scaled - rounded);
+      }
+      magnitude[i] = std::sqrt(std::abs(rounded));
+      nonzero += rounded != 0.0f ? 1u : 0u;
+    }
+    for (size_t stride = count / 2; stride != 0; stride /= 2) {
+      for (size_t i = 0; i < stride; ++i) magnitude[i] += magnitude[i + stride];
+    }
+    expected_rates[t] = {magnitude[0], nonzero};
+  }
+
+  std::unique_ptr<gjxl::DeviceBuffer> input, reference_input, device_mask;
+  std::unique_ptr<gjxl::DeviceBuffer> descriptors, device_norms, device_matrices;
+  std::unique_ptr<gjxl::DeviceBuffer> device_x, device_b, rates, losses, reference_losses;
+  const auto upload = [&](const void* data, size_t bytes,
+                          std::unique_ptr<gjxl::DeviceBuffer>* buffer) {
+    return CheckStatus(backend.Allocate(bytes, buffer), "Allocate residual/loss input") &&
+      CheckStatus(backend.CopyHostToDevice(**buffer, data, bytes), "Upload residual/loss input");
+  };
+  std::vector<float> actual(kLossOffset + transforms + 11, kGuard), reference = actual;
+  std::vector<Rate> actual_rates(kRateOffset + transforms + 3, {kGuard, 0xdeadbeefu});
+  if (!upload(coefficients.data(), coefficients.size() * sizeof(float), &input) ||
+      !upload(residuals.data(), residuals.size() * sizeof(float), &reference_input) ||
+      !upload(mask.data(), mask.size() * sizeof(float), &device_mask) ||
+      !upload(candidates.data(), candidates.size() * sizeof(candidates[0]), &descriptors) ||
+      !upload(norms.data(), norms.size() * sizeof(float), &device_norms) ||
+      !upload(matrices.data(), matrices.size() * sizeof(float), &device_matrices) ||
+      !upload(y_to_x.data(), y_to_x.size(), &device_x) ||
+      !upload(y_to_b.data(), y_to_b.size(), &device_b) ||
+      !upload(actual.data(), actual.size() * sizeof(float), &losses) ||
+      !upload(reference.data(), reference.size() * sizeof(float), &reference_losses) ||
+      !upload(actual_rates.data(), actual_rates.size() * sizeof(Rate), &rates)) return false;
+  const auto pointer = [](const std::unique_ptr<gjxl::DeviceBuffer>& buffer) {
+    return dynamic_cast<CudaBuffer*>(buffer.get())->pointer();
+  };
+  const auto* state = dynamic_cast<CudaBuffer*>(input.get())->state();
+  gjxl::cuda_internal::ScopedCudaDevice device(state->ordinal);
+  if (!CheckStatus(CudaRuntimeStatus(device.status(), "Select residual-test device"),
+        "Select residual-test device")) return false;
+  const gjxl::cuda_internal::CudaAcStrategyBatchParams params{
+    .pixel_width = kWidth, .pixel_height = kHeight,
+    .pixel_mask_row_stride = kStride, .candidate_count = candidate_count,
+    .coefficient_count = static_cast<uint32_t>(count),
+    .transform_width = static_cast<uint32_t>(extent.width),
+    .transform_height = static_cast<uint32_t>(extent.height),
+    .color_tile_row_stride = kColorStride, .use_device_cfl = device_cfl ? 1u : 0u};
+  const auto check_cuda = [](cudaError_t error, const char* operation) {
+    return CheckStatus(CudaRuntimeStatus(error, operation), operation);
+  };
+  if (!check_cuda(gjxl::cuda_internal::LaunchCudaAcStrategyResidualInverseLoss(
+        static_cast<const float*>(pointer(input)), static_cast<const float*>(pointer(device_matrices)),
+        static_cast<const float*>(pointer(device_norms)),
+        device_cfl ? static_cast<const signed char*>(pointer(device_x)) + kCflOffset : nullptr,
+        device_cfl ? static_cast<const signed char*>(pointer(device_b)) + kCflOffset : nullptr,
+        static_cast<const float*>(pointer(device_mask)) + kMaskOffset, pointer(descriptors),
+        static_cast<Rate*>(pointer(rates)) + kRateOffset,
+        static_cast<float*>(pointer(losses)) + kLossOffset, params, state->stream),
+        "Launch residual/inverse/loss fusion") ||
+      !check_cuda(gjxl::cuda_internal::LaunchCudaAcStrategyInverseLoss(
+        static_cast<const float*>(pointer(reference_input)),
+        static_cast<const float*>(pointer(device_mask)) + kMaskOffset, pointer(descriptors),
+        static_cast<float*>(pointer(reference_losses)) + kLossOffset, params, state->stream),
+        "Launch independent residual loss reference") ||
+      !check_cuda(cudaStreamSynchronize(state->stream), "Wait for residual/loss checks") ||
+      !CheckStatus(backend.CopyDeviceToHost(*losses, actual.data(), actual.size() * sizeof(float)),
+        "Download fused residual losses") ||
+      !CheckStatus(backend.CopyDeviceToHost(*reference_losses, reference.data(),
+        reference.size() * sizeof(float)), "Download reference residual losses") ||
+      !CheckStatus(backend.CopyDeviceToHost(*rates, actual_rates.data(),
+        actual_rates.size() * sizeof(Rate)), "Download fused channel rates")) return false;
+  const auto identical = [](float a, float b) {
+    return (std::isnan(a) && std::isnan(b)) ||
+      std::bit_cast<uint32_t>(a) == std::bit_cast<uint32_t>(b);
+  };
+  for (size_t i = 0; i < actual.size(); ++i) {
+    if (!identical(actual[i], reference[i])) {
+      std::cerr << "Residual/inverse loss differs: " << extent.width << 'x' << extent.height
+                << " candidates=" << candidate_count << " device_cfl=" << device_cfl
+                << " index=" << i << " actual=" << actual[i] << " expected=" << reference[i] << '\n';
+      return false;
+    }
+  }
+  for (size_t i = 0; i < actual_rates.size(); ++i) {
+    const Rate expected = i < kRateOffset || i >= kRateOffset + transforms
+      ? Rate{kGuard, 0xdeadbeefu} : expected_rates[i - kRateOffset];
+    if (!identical(actual_rates[i].magnitude, expected.magnitude) ||
+        actual_rates[i].nonzero_count != expected.nonzero_count) {
+      std::cerr << "Residual rate differs: " << extent.width << 'x' << extent.height
+                << " candidates=" << candidate_count << " device_cfl=" << device_cfl
+                << " index=" << i << " actual=" << actual_rates[i].magnitude
+                << " expected=" << expected.magnitude << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
 bool CheckValidationAndOwnership(
   gjxl::GpuBackend& backend,
   gjxl::GpuBackend& other) {
@@ -667,6 +848,17 @@ int main() {
     for (const uint32_t count : {1u, 2u, 3u, 5u, 7u, 8u, 9u, 10u, 11u, 16u, 17u, 33u}) {
       if (!CheckAcStrategyInverseLoss(*backend, strategy, &random, count)) {
         return EXIT_FAILURE;
+      }
+    }
+  }
+  for (gjxl::AcStrategyType strategy : kStrategies) {
+    const auto extent = gjxl::GetAcStrategyInfo(strategy)->pixel_extent();
+    if (extent.width > 32 || extent.height > 32) continue;
+    for (const uint32_t count : {1u, 8u, 11u, 16u, 32u, 33u}) {
+      for (const bool device_cfl : {false, true}) {
+        if (!CheckResidualInverseLoss(*backend, strategy, &random, count, device_cfl)) {
+          return EXIT_FAILURE;
+        }
       }
     }
   }
