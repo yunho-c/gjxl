@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -54,6 +55,23 @@ template <typename T>
 bool Equal(const std::vector<T>& a, const std::vector<T>& b) {
   return a.size() == b.size() &&
          std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0;
+}
+
+template <typename T>
+void CheckEqual(const char* name, const std::vector<T>& expected,
+                const std::vector<T>& actual) {
+  if (expected.size() != actual.size())
+    throw std::runtime_error("Coefficient output extent differs");
+  if (Equal(expected, actual)) return;
+  for (size_t i = 0; i < expected.size(); ++i) {
+    if (std::memcmp(&expected[i], &actual[i], sizeof(T)) != 0) {
+      std::cerr << name << " mismatch at " << i << ": expected 0x" << std::hex
+                << std::bit_cast<unsigned>(expected[i]) << ", actual 0x"
+                << std::bit_cast<unsigned>(actual[i]) << std::dec << '\n';
+      break;
+    }
+  }
+  throw std::runtime_error("Resident coefficient fusion is not bitwise identical");
 }
 
 constexpr std::array kStrategies = {
@@ -207,6 +225,15 @@ struct DeviceCase {
     const auto launch = cached ?
       gjxl::cuda_internal::LaunchCudaAqEncodeResidentCoefficients :
       gjxl::cuda_internal::LaunchCudaAqEncodeResidentCoefficientsReference;
+    LaunchWith(c, launch, stream);
+  }
+  void LaunchUnfused(const Case& c, cudaStream_t stream = nullptr) {
+    LaunchWith(c, gjxl::cuda_internal::LaunchCudaAqEncodeResidentCoefficientsUnfused,
+               stream);
+  }
+  using Launcher = decltype(
+      &gjxl::cuda_internal::LaunchCudaAqEncodeResidentCoefficients);
+  void LaunchWith(const Case& c, Launcher launch, cudaStream_t stream) {
     CheckCuda(launch(anchors.data, tables.data, raw.data + kBlockOffset,
       cfl_x.data, cfl_b.data, forward.data, ac.data, reconstruction.data,
       dc.data + kBlockOffset, quantized_dc.data + kBlockOffset,
@@ -236,7 +263,7 @@ void CheckGuards(const std::vector<T>& actual, const std::vector<T>& initial,
 void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
             bool adjust, unsigned invalid = 0) {
   Case c(strategy, count, pattern, adjust, invalid);
-  DeviceCase reference(c), cached(c);
+  DeviceCase reference(c), unfused(c), cached(c);
   for (unsigned reuse = 0; reuse < 2; ++reuse) {
     if (reuse != 0) {
       // Reuse the same allocations with changed inputs, not only an identical
@@ -244,20 +271,32 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
       for (size_t i = 0; i < c.forward.size(); ++i)
         if (c.active_coefficients[i] && std::isfinite(c.forward[i]))
           c.forward[i] = -0.75f * c.forward[i] + (i % 11) * 0.00003f;
-      for (auto* device : {&reference, &cached})
+      for (auto* device : {&reference, &unfused, &cached})
         CheckCuda(cudaMemcpy(device->forward.data, c.forward.data(),
           c.forward.size() * sizeof(float), cudaMemcpyHostToDevice));
     }
     reference.Launch(c, false);
+    unfused.LaunchUnfused(c);
     cached.Launch(c, true);
     CheckCuda(cudaDeviceSynchronize());
-    if (!Equal(reference.ac.Read(), cached.ac.Read()) ||
-        !Equal(reference.reconstruction.Read(), cached.reconstruction.Read()) ||
-        !Equal(reference.dc.Read(), cached.dc.Read()) ||
-        !Equal(reference.quantized_dc.Read(), cached.quantized_dc.Read()) ||
-        !Equal(reference.sigma.Read(), cached.sigma.Read()) ||
-        !Equal(reference.error.Read(), cached.error.Read()))
-      throw std::runtime_error("Cached DC basis is not bitwise identical");
+    for (const auto* expected : {&unfused, &reference}) {
+      try {
+        CheckEqual("AC", expected->ac.Read(), cached.ac.Read());
+        CheckEqual("reconstruction", expected->reconstruction.Read(),
+                   cached.reconstruction.Read());
+        CheckEqual("DC", expected->dc.Read(), cached.dc.Read());
+        CheckEqual("DC integer", expected->quantized_dc.Read(),
+                   cached.quantized_dc.Read());
+        CheckEqual("inverse sigma", expected->sigma.Read(), cached.sigma.Read());
+        CheckEqual("error", expected->error.Read(), cached.error.Read());
+      } catch (...) {
+        std::cerr << "strategy=" << static_cast<unsigned>(strategy)
+                  << " count=" << count << " pattern=" << pattern
+                  << " adjust=" << adjust << " invalid=" << invalid
+                  << " reuse=" << reuse << '\n';
+        throw;
+      }
+    }
     const unsigned error = cached.error.Read()[0];
     const unsigned required = invalid == 1 ? 1u : invalid == 2 ? 257u :
                               invalid == 3 ? 128u : invalid == 4 ? 8u : 0u;
@@ -280,7 +319,7 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
       active_sigma[i] = active_sigma[i] && adjust && c.sharpness[i] < 8;
     CheckGuards(cached.sigma.Read(), c.sigma, active_sigma, "inverse sigma");
   }
-  for (const auto* device : {&reference, &cached}) {
+  for (const auto* device : {&reference, &unfused, &cached}) {
     if (!Equal(device->anchors.Read(), c.anchors) ||
         !Equal(device->tables.Read(), c.tables) ||
         !Equal(device->forward.Read(), c.forward) ||
@@ -315,7 +354,8 @@ int main() {
       }
     }
     std::cout << "Verified " << cases
-              << " guarded resident coefficient cases, including reuse\n";
+              << " guarded resident coefficient cases against original and "
+                 "unfused kernels, including reuse\n";
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;

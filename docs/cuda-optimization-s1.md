@@ -6,8 +6,8 @@
   factorized resident DCT, cooperative quantization adjustment, fused Malta,
   bounded-retention stream-ordered allocation, on-demand reconstruction
   host staging, overwrite-only coefficient staging, and direct resident
-  transform image I/O, reused resident coefficient bases, and direct local
-  value access implemented;
+  transform image I/O, reused resident coefficient bases, direct local
+  value access, and fused resident coefficient passes implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -21,6 +21,19 @@
 
 The opening measurements describe revision `a474937`; the completion snapshots
 below supersede them. The latest coefficient-kernel checkpoint against
+`fbbe265` fuses Y quantization, X/B prediction, and color restoration,
+removing three block barriers and intermediate reconstruction accesses.
+A separately bounded entry uses 64 registers to preserve four feasible
+256-thread blocks per SM on the qualified SM86 device. All fourteen
+isolated shape/extent median pairs improve. Four production 4K profile pairs
+reduce the coefficient subset by a median paired 17.8%; total GPU time
+changes -0.8% with one regression, and whole-encoder wall results are mixed.
+No stable end-to-end speedup is claimed. All 61 CUDA / 47 CPU tests, seven
+scoped sanitizer runs, serial/batch checks, and 23 byte-identical codestream
+pairs with matching decoded scores pass. Optimization remains ongoing,
+not maxed out.
+
+The preceding coefficient-kernel checkpoint against
 `5ecb5f8` reuses tiny DC bases and eliminates mandatory thread-local parameter
 and lookup-array copies. Its stack frame shrinks from 112 to 32 bytes, with
 unchanged register count and 256 bytes of shared storage per block. Final
@@ -4373,6 +4386,205 @@ global reads and barriers; dependency-preserving fusion is a concrete next
 experiment. CPU coefficient handoff/assembly, perceptual filtering, and
 codestream work also remain substantial. This checkpoint is not evidence
 that the resident encoder is maxed out.
+
+## Resident coefficient pass fusion follow-up (S37)
+
+Baseline: `fbbe265` (S36), on the same CUDA 11.8 / MSVC 19.37 / SM86
+configuration. This follow-up keeps the resident coefficient kernel's
+input/output layout and arithmetic policy while fusing its Y AC pass,
+X/B prediction/quantization pass, and color-restoration pass.
+
+### Dependencies, rounding, and resource control
+
+A thread owns the same coefficient index in all three channels. X/B
+prediction depends on that thread's reconstructed Y value, not another
+thread's output. Keeping Y in a register and completing X/B restoration
+before their stores removes two Y reconstruction reads and the X/B
+intermediate store/read round trips: 24 bytes of global accesses per
+three-channel coefficient index. For one fully covered padded 4K pass this
+is 199,065,600 bytes, or 597,196,800 across three passes. This is source-level
+global-access accounting, **not** a measured DRAM or PCIe byte reduction;
+the former accesses may have hit GPU caches. Explicit arena sizes and
+required host/device transfers do not change.
+
+Three of six block-wide barriers are removed. The fused AC work never reads
+DC, so DC quantization publication can wait until the existing pre-LLF
+barrier. Shared-basis publication, DC extraction before cross-channel DC
+quantization, and the pre-LLF barrier remain. The last barrier is essential:
+LLF reconstruction can overwrite coefficients owned by other threads during
+the AC pass. Native code confirms six barriers in both reference kernels
+and three in the fused kernel.
+
+The first fusion expression fails a guarded bitwise test despite passing
+the AQ integration test. For DCT8, count 1, pattern 3, unadjusted quantization,
+the first reconstructed X mismatch is at index 21: expected `0xc181e8e7`,
+actual `0xc181e8e8`. Inlining allows the compiler to contract a different
+dequantization multiplication into the color-restoration addition. Explicit
+`fmaf(factor, reconstructed_y, reconstructed)` preserves the unfused
+restoration's final FMA with the previously rounded dequantized addend.
+All 280 guarded cases then agree bitwise with both the original pre-S36
+kernel and the S36 unfused kernel, including changed-input reuse and error
+paths. The initial failure and correction are retained in the local study
+artifacts; approximate agreement is not substituted for the failed gate.
+
+Unrestricted fusion increases register use from 50 to 66. On the qualified
+device, that reduces feasible simultaneous 256-thread blocks from four to
+three. Large homogeneous 8x8/16x8/8x16 probes regress about 13-14%, although
+larger transforms improve. A four-block launch bound reduces the fused
+kernel to 64 registers, but initially applying it to all template variants
+also changes the unfused control to 64 registers. That confounded setup is
+not used for timing comparisons.
+
+Instead, the common body is forced inline into separate bounded-production
+and unbounded-reference entries. The S36 control remains at 50 registers,
+32-byte stack, and 256-byte shared basis table; the fused entry uses 64
+registers with the same stack/shared sizes and `LOCAL:0`. The original
+pre-S36 reference still uses 50 registers and a 112-byte stack. The remaining
+32-byte production stack is the existing cosine large-argument path, not a
+new spill allocation. Native body comparison, ignoring only the kernel-name
+line, proves that the unfused control matches the frozen S36 implementation.
+The measured probe and final build also have identical native coefficient
+kernel code.
+
+### Isolated measurements
+
+The probe uses the S36 unfused control and S37 fused candidate in one
+executable, all seven shapes, default quantization matrices, deterministic
+inputs, valid disjoint anchors, and the same 512x536 / 3840x2160 requested
+tile coverage as S36. Allocation, initialization, and six-output verification
+are outside CUDA event timing. Each shape/extent has five alternating-order
+pairs, ten warmups, eleven samples, and three launches per sample.
+
+| Transform | Unrestricted large paired ratio | Bounded small paired ratio | Bounded large paired ratio |
+|---|---:|---:|---:|
+| 8x8 | 1.1252 | 0.9118 | 0.9362 |
+| 16x8 | 1.1417 | 0.8871 | 0.9803 |
+| 8x16 | 1.1444 | 0.8955 | 0.9800 |
+| 16x16 | 0.8885 | 0.9076 | 0.9044 |
+| 32x16 | 0.9537 | 0.9044 | 0.9758 |
+| 16x32 | 0.9538 | 0.9087 | 0.9735 |
+| 32x32 | 0.8446 | 0.8821 | 0.9025 |
+
+The bounded candidate improves all fourteen shape/extent median paired
+observations: 8.8-11.8% for the smaller requested extent and 2.0-9.8% for
+the larger one. These are per-column paired cohorts, not comparisons of
+candidate absolute times across changing laptop operating states. The
+unrestricted candidate is not retained.
+
+### Whole-encoder measurements and qualification
+
+Seven alternating-order warm pairs use three warmups and five measured
+in-memory fully-resident encodes. Seven cold pairs use zero warmups and one
+sample. Percentages are medians of paired ratios, not ratios of the
+displayed marginal medians.
+
+| Cohort/input | Total parent/new (ms) | Paired total change | Quantization parent/new (ms) | Paired quantization change |
+|---|---:|---:|---:|---:|
+| Warm 4K | 592.029 / 591.471 | +1.2% | 350.725 / 349.152 | -0.01% |
+| Warm 1080p | 149.220 / 144.794 | -5.8% | 67.029 / 67.305 | +0.4% |
+| Warm Flower | 30.699 / 30.274 | +1.8% | 13.770 / 13.775 | +0.2% |
+| Cold 4K | 692.730 / 672.636 | -2.7% | 435.839 / 435.660 | -0.5% |
+| Cold 1080p | 194.671 / 185.635 | -0.06% | 102.333 / 98.734 | -0.3% |
+| Cold Flower | 49.804 / 49.525 | -3.0% | 26.434 / 26.435 | -2.1% |
+
+Whole-encode and quantization changes are small or mixed; no stable
+end-to-end speedup is claimed. Warm 4K total ranges are 555.188-625.816 /
+558.662-610.461 ms; 1080p ranges are 142.036-175.434 / 140.512-163.803 ms.
+Between-workload GPU snapshots span 66-74 C, P3, and 292-1282 MHz; these
+snapshots are not asserted to be the clocks during every timed kernel.
+No power, clock, process-priority, or OS setting is changed.
+
+Initial final-build profiles use three warmups and one captured encode:
+
+| Input | Coefficient parent/new (ms) | Change | All-kernel parent/new (ms) |
+|---|---:|---:|---:|
+| Odd 4K | 16.743435 / 16.627786 | -0.7% | 241.631942 / 261.957807 |
+| Odd 1080p | 2.271932 / 1.825868 | -19.6% | 39.988563 / 37.826668 |
+| Flower | 0.584431 / 0.524942 | -10.2% | 7.245813 / 7.188145 |
+
+The initial 4K total GPU result regresses 8.4% even though its coefficient
+subset is nearly flat. Three additional 4K pairs run after sanitizer
+qualification, with the candidate first in repeats 1/3 and the parent first
+in repeat 2, again using three warmups and one captured encode:
+
+| 4K pair | Coefficient parent/new (ms) | All-kernel parent/new (ms) |
+|---|---:|---:|
+| Initial | 16.743435 / 16.627786 | 241.631942 / 261.957807 |
+| Repeat 1 | 7.187412 / 5.593385 | 130.321417 / 127.239212 |
+| Repeat 2 | 6.875377 / 5.617874 | 128.379705 / 126.743728 |
+| Repeat 3 | 6.977140 / 5.775153 | 128.648472 / 128.192776 |
+
+All four coefficient subsets improve, with a median paired reduction of
+17.8%. All-kernel time improves in three pairs and regresses in the initial
+pair: its median paired change is -0.8%, while the non-coefficient subset
+changes +0.2%. Absolute GPU times vary substantially between the initial
+and repeat captures; no cause is established and all observations are
+retained. The repeats preserve each version's ordered kernel identities,
+geometry, resources, and transfer accounting. The 1080p and Flower
+coefficient subsets also improve, but a single capture per smaller input
+is not treated as a stable whole-workflow measurement. This supports a
+targeted kernel improvement, not a stable total-encode gain.
+
+Total launches stay 464/452/464, including 21/18/21 coefficient launches.
+All non-coefficient kernels retain their ordered names, geometry, register/
+shared resources, and per-thread local fields. The five explicit allocation
+sizes per encode, peak requested bytes (2,608,448,064 / 651,957,638 /
+85,819,408), and pool thresholds are unchanged. All 31 H2D, 19 D2H, and one
+D2D transfer keep their byte totals. The extra internal reference entry and
+different kernel code are not claimed to have zero module-code footprint.
+
+The final build passes 61 CUDA and 47 CPU tests. The existing 280-case
+coefficient test now compares both original and S36-unfused controls with
+the fused candidate, for all six outputs/error arrays, output guards,
+input immutability, and changed-input reuse. It additionally reports the
+first differing float/integer bit pattern and its complete case context.
+All 23 image pairs match bytes, SHA-256, chosen strategies, final encoder
+score, and decoded Butteraugli using the same named S36 quality matrix,
+pinned libjxl revision, linear-sRGB interpretation, and 80-nit metric default.
+
+Serial/batch checks pass at even 1080p in fully-resident and
+maximum-throughput modes, batches 1/2/4, and even 4K fully-resident batches
+1/2. Paired serial/batch median speedups are 1.102/1.159/1.197,
+1.005/1.514/2.033, and 0.980/1.057 respectively. These qualify batch behavior
+in the current build, not S36-vs-S37 throughput.
+
+All seven scoped sanitizer checks pass: full-AQ memcheck/initcheck/
+synccheck and focused coefficient memcheck/initcheck/synccheck/racecheck.
+Both memory checks report zero leaked bytes, and all error/hazard summaries
+are zero. Full-AQ runs take approximately 39/28/20 seconds; focused runs
+8/7/5/20 seconds. Full-AQ memcheck includes stream-ordered race tracking
+and full leak checking; focused memcheck includes full leak checking.
+No kernel filter or API-error suppression is used. No full-AQ racecheck
+is started. Builds, tests, sanitizers, wall timing, isolated probes, and
+production profiling run sequentially without competing GPU experiments.
+
+`s37_final_validate.py` checks profile accounting, all 23 image/score
+identities, individual CTest passes, all sanitizer/leak summaries, native
+resource tuples, the measured-vs-final kernel identity, the S36 control's
+native identity, and the six-to-three barrier reduction.
+`s37_final_profile_repeat.py` checks the four 4K captures' structure and
+derives their paired timing summaries. Ignored
+`build-cuda-ninja/profiles/s37_*` artifacts retain the failed rounding
+experiment, unbounded and bounded probes, compiler resources, native
+disassembly, and exact probe build commands. The `s37_final_*` files hold
+warm/cold observations, profiles, repeated profiles, decoded qualification,
+batch checks, CTest archives, sanitizer commands/logs, and evidence
+assertions. Baselines remain `s36_retained_*`; final encode, benchmark,
+batch, and coefficient-test executables are frozen as `s37_retained_*`,
+with SHA-256 values in `s37_final_binary_hashes.json`.
+
+All execution jobs have completed normally; no sanitizer is aborted or
+left running. No permission error, admin prompt, or unexplained execution
+stall is encountered. The earlier long full-AQ racecheck does not establish
+a firewall cause. No firewall, OS-service, power, or clock setting is changed.
+
+The resident path is not demonstrated maxed out. Per-anchor quantization
+arithmetic still warrants an invariant-hoisting experiment with exact
+rounding and register-pressure gates. A separate dataflow audit can test
+whether final coefficient-only materialization needs every reconstruction
+write; diagnostic and error-reporting contracts must be traced first.
+CPU coefficient handoff/assembly, perceptual filtering, and codestream
+work also remain substantial targets.
 
 ## Work that should not lead the next cycle
 

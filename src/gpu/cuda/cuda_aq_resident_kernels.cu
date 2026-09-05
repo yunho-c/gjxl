@@ -807,8 +807,8 @@ __global__ void SelectAdjustedQuantizationKernel(
   }
 }
 
-template <bool CacheDcBasis, bool DirectTables>
-__global__ void EncodeResidentCoefficientsKernel(
+template <bool CacheDcBasis, bool DirectTables, bool FuseCoefficients>
+__device__ __forceinline__ void EncodeResidentCoefficientsBody(
     const CudaAqAnchor* anchors, const float* quant_tables,
     const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
     const float* forward_coefficients, int* quantized_coefficients,
@@ -975,74 +975,130 @@ __global__ void EncodeResidentCoefficientsKernel(
     dc[2 * block_count + block_index] =
         quantized_b / inverse_b + reconstructed_y;
   }
-  __syncthreads();
+  if constexpr (FuseCoefficients) {
+    // A thread owns all three channels of each coefficient. Y reconstruction,
+    // X/B prediction, and color restoration therefore need no inter-thread
+    // communication or intermediate X/B reconstruction round trip.
+    // AC does not read DC: the common pre-LLF barrier below also publishes
+    // the DC quantization writes before other threads reconstruct LLF values.
+    for (uint32_t coefficient = thread_index;
+         coefficient < batch.coefficient_count; coefficient += blockDim.x) {
+      const size_t y_offset = transform_offset + channel_stride + coefficient;
+      const uint32_t x = coefficient % coefficient_width;
+      const uint32_t y = coefficient / coefficient_width;
+      const uint32_t quadrant = (y >= coefficient_height / 2 ? 2u : 0u) +
+                                (x >= coefficient_width / 2 ? 1u : 0u);
+      const float y_threshold = params.adjust_ac_quant != 0
+        ? (DirectTables ? adjustment_thresholds[batch.coefficient_offset +
+              4 * static_cast<size_t>(anchor_index) + quadrant] :
+            selected_y[quadrant])
+        : QuantizationThreshold(1, covered_count, coefficient,
+                                coefficient_width, coefficient_height);
+      const uint32_t y_table = batch.coefficient_count + coefficient;
+      const int quantized_y = QuantizeCoefficient(forward_coefficients[y_offset],
+          quant_tables[table_offsets.inverse_dequant + y_table], quantizer[0],
+          raw, 1.0f, y_threshold, error);
+      const float reconstructed_y = DequantizeCoefficient<DirectTables>(
+          quantized_y, quant_tables[table_offsets.dequant + y_table],
+          quantizer[0], raw, 1.0f, 1, error);
+      quantized_coefficients[y_offset] = quantized_y;
+      reconstruction_coefficients[y_offset] = reconstructed_y;
+      for (uint32_t channel_pass = 0; channel_pass < 2; ++channel_pass) {
+        const uint32_t channel = channel_pass == 0 ? 0 : 2;
+        const size_t offset =
+            transform_offset + channel * channel_stride + coefficient;
+        const float factor = channel == 0 ? cfl_x : cfl_b;
+        const float multiplier = channel == 0 ? params.x_matrix_multiplier
+                                              : params.b_matrix_multiplier;
+        const float predicted =
+            forward_coefficients[offset] - factor * reconstructed_y;
+        const float threshold = QuantizationThreshold(channel, covered_count,
+            coefficient, coefficient_width, coefficient_height);
+        const uint32_t table = channel * batch.coefficient_count + coefficient;
+        const int quantized = QuantizeCoefficient(predicted,
+            quant_tables[table_offsets.inverse_dequant + table], quantizer[0],
+            raw, multiplier, threshold, error);
+        const float reconstructed = DequantizeCoefficient<DirectTables>(
+            quantized, quant_tables[table_offsets.dequant + table], quantizer[0],
+            raw, multiplier, channel, error);
+        quantized_coefficients[offset] = quantized;
+        // Match the unfused restoration's FMA after dequantization has
+        // rounded to float. Otherwise inlining can contract a different
+        // multiplication from DequantizeCoefficient into this addition.
+        reconstruction_coefficients[offset] =
+            fmaf(factor, reconstructed_y, reconstructed);
+      }
+    }
+  } else {
+    __syncthreads();
 
-  for (uint32_t coefficient = thread_index;
-       coefficient < batch.coefficient_count; coefficient += blockDim.x) {
-    const uint32_t channel = 1;
-    const size_t offset =
-        transform_offset + channel * channel_stride + coefficient;
-    const uint32_t x = coefficient % coefficient_width;
-    const uint32_t y = coefficient / coefficient_width;
-    const uint32_t quadrant = (y >= coefficient_height / 2 ? 2u : 0u) +
-                              (x >= coefficient_width / 2 ? 1u : 0u);
-    const float threshold =
-        params.adjust_ac_quant != 0
-            ? (DirectTables ? adjustment_thresholds[batch.coefficient_offset +
-                  4 * static_cast<size_t>(anchor_index) + quadrant] :
-                selected_y[quadrant])
-            : QuantizationThreshold(channel, covered_count, coefficient,
-                                    coefficient_width, coefficient_height);
-    const uint32_t table = channel * batch.coefficient_count + coefficient;
-    const int quantized =
-        QuantizeCoefficient(forward_coefficients[offset],
-                            quant_tables[table_offsets.inverse_dequant + table],
-                            quantizer[0], raw, 1.0f, threshold, error);
-    quantized_coefficients[offset] = quantized;
-    reconstruction_coefficients[offset] = DequantizeCoefficient<DirectTables>(
-        quantized, quant_tables[table_offsets.dequant + table], quantizer[0],
-        raw, 1.0f, channel, error);
-  }
-  __syncthreads();
-
-  for (uint32_t coefficient = thread_index;
-       coefficient < batch.coefficient_count; coefficient += blockDim.x) {
-    const float reconstructed_y =
-        reconstruction_coefficients[transform_offset + channel_stride +
-                                    coefficient];
-    for (uint32_t channel_pass = 0; channel_pass < 2; ++channel_pass) {
-      const uint32_t channel = channel_pass == 0 ? 0 : 2;
+    for (uint32_t coefficient = thread_index;
+         coefficient < batch.coefficient_count; coefficient += blockDim.x) {
+      const uint32_t channel = 1;
       const size_t offset =
           transform_offset + channel * channel_stride + coefficient;
-      const float factor = channel == 0 ? cfl_x : cfl_b;
-      const float multiplier = channel == 0 ? params.x_matrix_multiplier
-                                            : params.b_matrix_multiplier;
-      const float predicted =
-          forward_coefficients[offset] - factor * reconstructed_y;
+      const uint32_t x = coefficient % coefficient_width;
+      const uint32_t y = coefficient / coefficient_width;
+      const uint32_t quadrant = (y >= coefficient_height / 2 ? 2u : 0u) +
+                                (x >= coefficient_width / 2 ? 1u : 0u);
       const float threshold =
-          QuantizationThreshold(channel, covered_count, coefficient,
-                                coefficient_width, coefficient_height);
+          params.adjust_ac_quant != 0
+              ? (DirectTables ? adjustment_thresholds[batch.coefficient_offset +
+                    4 * static_cast<size_t>(anchor_index) + quadrant] :
+                  selected_y[quadrant])
+              : QuantizationThreshold(channel, covered_count, coefficient,
+                                      coefficient_width, coefficient_height);
       const uint32_t table = channel * batch.coefficient_count + coefficient;
-      const int quantized = QuantizeCoefficient(
-          predicted, quant_tables[table_offsets.inverse_dequant + table],
-          quantizer[0], raw, multiplier, threshold, error);
+      const int quantized =
+          QuantizeCoefficient(forward_coefficients[offset],
+                              quant_tables[table_offsets.inverse_dequant + table],
+                              quantizer[0], raw, 1.0f, threshold, error);
       quantized_coefficients[offset] = quantized;
       reconstruction_coefficients[offset] = DequantizeCoefficient<DirectTables>(
           quantized, quant_tables[table_offsets.dequant + table], quantizer[0],
-          raw, multiplier, channel, error);
+          raw, 1.0f, channel, error);
     }
-  }
-  __syncthreads();
+    __syncthreads();
 
-  for (uint32_t coefficient = thread_index;
-       coefficient < batch.coefficient_count; coefficient += blockDim.x) {
-    const float reconstructed_y =
-        reconstruction_coefficients[transform_offset + channel_stride +
-                                    coefficient];
-    reconstruction_coefficients[transform_offset + coefficient] +=
-        cfl_x * reconstructed_y;
-    reconstruction_coefficients[transform_offset + 2 * channel_stride +
-                                coefficient] += cfl_b * reconstructed_y;
+    for (uint32_t coefficient = thread_index;
+         coefficient < batch.coefficient_count; coefficient += blockDim.x) {
+      const float reconstructed_y =
+          reconstruction_coefficients[transform_offset + channel_stride +
+                                      coefficient];
+      for (uint32_t channel_pass = 0; channel_pass < 2; ++channel_pass) {
+        const uint32_t channel = channel_pass == 0 ? 0 : 2;
+        const size_t offset =
+            transform_offset + channel * channel_stride + coefficient;
+        const float factor = channel == 0 ? cfl_x : cfl_b;
+        const float multiplier = channel == 0 ? params.x_matrix_multiplier
+                                              : params.b_matrix_multiplier;
+        const float predicted =
+            forward_coefficients[offset] - factor * reconstructed_y;
+        const float threshold =
+            QuantizationThreshold(channel, covered_count, coefficient,
+                                  coefficient_width, coefficient_height);
+        const uint32_t table = channel * batch.coefficient_count + coefficient;
+        const int quantized = QuantizeCoefficient(
+            predicted, quant_tables[table_offsets.inverse_dequant + table],
+            quantizer[0], raw, multiplier, threshold, error);
+        quantized_coefficients[offset] = quantized;
+        reconstruction_coefficients[offset] = DequantizeCoefficient<DirectTables>(
+            quantized, quant_tables[table_offsets.dequant + table], quantizer[0],
+            raw, multiplier, channel, error);
+      }
+    }
+    __syncthreads();
+
+    for (uint32_t coefficient = thread_index;
+         coefficient < batch.coefficient_count; coefficient += blockDim.x) {
+      const float reconstructed_y =
+          reconstruction_coefficients[transform_offset + channel_stride +
+                                      coefficient];
+      reconstruction_coefficients[transform_offset + coefficient] +=
+          cfl_x * reconstructed_y;
+      reconstruction_coefficients[transform_offset + 2 * channel_stride +
+                                  coefficient] += cfl_b * reconstructed_y;
+    }
   }
   __syncthreads();
 
@@ -1070,6 +1126,42 @@ __global__ void EncodeResidentCoefficientsKernel(
     reconstruction_coefficients[transform_offset + channel * channel_stride +
                                 CoefficientIndex(batch, v, u)] = value;
   }
+}
+
+template <bool CacheDcBasis, bool DirectTables, bool FuseCoefficients>
+__global__ void EncodeResidentCoefficientsKernel(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params) {
+  EncodeResidentCoefficientsBody<CacheDcBasis, DirectTables, FuseCoefficients>(
+      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+      batch, params);
+}
+
+template <bool CacheDcBasis, bool DirectTables, bool FuseCoefficients>
+// Keep four 256-thread blocks feasible on the qualified SM86 device. Without
+// this bound fusion uses 66 registers and reduces active blocks from four to
+// three. Leave the arithmetic/performance oracles independently unbounded.
+__global__ __launch_bounds__(kThreads, 4) void
+EncodeResidentCoefficientsKernelBounded(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params) {
+  EncodeResidentCoefficientsBody<CacheDcBasis, DirectTables, FuseCoefficients>(
+      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+      batch, params);
 }
 
 __global__ void ResidentPolicyInitializeKernel(
@@ -1275,7 +1367,7 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficients(
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
-  EncodeResidentCoefficientsKernel<true, true>
+  EncodeResidentCoefficientsKernelBounded<true, true, true>
       <<<batch.anchor_count, kThreads, 0, stream>>>(
       anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
       quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
@@ -1293,7 +1385,25 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficientsReference(
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
-  EncodeResidentCoefficientsKernel<false, false>
+  EncodeResidentCoefficientsKernel<false, false, false>
+      <<<batch.anchor_count, kThreads, 0, stream>>>(
+      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+      batch, params);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqEncodeResidentCoefficientsUnfused(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
+    cudaStream_t stream) {
+  EncodeResidentCoefficientsKernel<true, true, false>
       <<<batch.anchor_count, kThreads, 0, stream>>>(
       anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
       quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,

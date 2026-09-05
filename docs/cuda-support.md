@@ -592,6 +592,15 @@ This changes neither launch counts nor requested device allocation sizes or
 host/device transfers. A guarded original-kernel oracle covers all seven
 shapes, both quantization modes, changed-input reuse, and error paths.
 
+Resident AC quantization, X/B prediction, and color restoration now share
+one per-coefficient pass. Each thread keeps its reconstructed Y value and
+completes X/B restoration before storing those channels. An explicit final
+FMA preserves the unfused kernel's rounding boundary. The shared-basis,
+DC-extraction, and pre-LLF barriers remain; three other block barriers and
+intermediate reconstruction accesses are removed. A separate bounded entry
+keeps four 256-thread blocks feasible on the qualified SM86 device without
+changing the unbounded arithmetic/performance reference kernels.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
