@@ -51,18 +51,15 @@ struct OpsinParams {
   uint input_stride0;
   uint input_stride1;
   uint input_stride2;
-  uint blurred_stride;
   uint output_stride;
   float intensity_target;
 };
 
-struct FrequencyLowMediumConvolutionParams {
+struct FrequencyLowMediumTiledParams {
   uint width;
   uint height;
-  uint intermediate_stride;
-  uint xyb_stride;
-  uint psycho_stride;
-  uint kernel_size;
+  uint input_stride;
+  uint output_stride;
 };
 
 struct FrequencyConvolutionChannelParams {
@@ -127,6 +124,21 @@ struct FinalParams {
   uint height;
   uint stride;
   uint output_stride;
+  uint reference_mask_stride;
+  uint mask_stride;
+  float x_multiplier;
+};
+
+struct FinalL2Params {
+  uint width;
+  uint height;
+  uint reference_stride;
+  uint distorted_stride;
+  uint work_stride;
+  uint output_stride;
+  uint reference_mask_stride;
+  uint mask_stride;
+  float asymmetry;
   float x_multiplier;
 };
 
@@ -151,6 +163,22 @@ struct ReductionParams {
   uint width;
   uint input_stride;
   uint input_count;
+};
+
+struct ResidentReductionParams {
+  uint source_width;
+  uint source_height;
+  uint work_stride;
+  uint sub_stride;
+  uint block_stride;
+  uint anchor_offset;
+  uint anchor_count;
+  uint pixel_width;
+  uint pixel_height;
+  uint covered_width;
+  uint covered_height;
+  float x_multiplier;
+  float asymmetry;
 };
 
 inline float unfused_multiply_add(float multiplier, float value, float addend) {
@@ -278,6 +306,31 @@ inline float blur5_vertical_value(
   return unfused_multiply_add(pair2, weight2, result);
 }
 
+inline float blur5_horizontal_tile_value(
+  threadgroup const float* row, uint center,
+  float weight0, float weight1, float weight2) {
+
+  float result = row[center] * weight0;
+  const float pair1 = row[center - 1] + row[center + 1];
+  result = unfused_multiply_add(pair1, weight1, result);
+  const float pair2 = row[center - 2] + row[center + 2];
+  return unfused_multiply_add(pair2, weight2, result);
+}
+
+inline float blur5_vertical_tile_value(
+  threadgroup const float* input, uint x, uint y, uint stride,
+  float weight0, float weight1, float weight2) {
+
+  const float center = input[(y + 2) * stride + x];
+  const float pair1 = input[(y + 1) * stride + x] +
+                      input[(y + 3) * stride + x];
+  const float pair2 = input[y * stride + x] +
+                      input[(y + 4) * stride + x];
+  float result = center * weight0;
+  result = unfused_multiply_add(pair1, weight1, result);
+  return unfused_multiply_add(pair2, weight2, result);
+}
+
 kernel void gjxl_butteraugli_blur5_vertical_f32(
   device const float* input [[buffer(0)]],
   device const float* weights [[buffer(1)]],
@@ -376,45 +429,89 @@ inline float3 opsin_absorbance(float red, float green, float blue,
   return output;
 }
 
-kernel void gjxl_butteraugli_opsin_blur5_f32(
+kernel void gjxl_butteraugli_opsin_blur5_tiled_f32(
   device const float* input0 [[buffer(0)]],
   device const float* input1 [[buffer(1)]],
   device const float* input2 [[buffer(2)]],
-  device const float* horizontal0 [[buffer(3)]],
-  device const float* horizontal1 [[buffer(4)]],
-  device const float* horizontal2 [[buffer(5)]],
-  device const float* weights [[buffer(6)]],
-  device float* output0 [[buffer(7)]],
-  device float* output1 [[buffer(8)]],
-  device float* output2 [[buffer(9)]],
-  constant OpsinParams& params [[buffer(10)]],
-  uint2 position [[thread_position_in_grid]]) {
+  device const float* weights [[buffer(3)]],
+  device float* output0 [[buffer(4)]],
+  device float* output1 [[buffer(5)]],
+  device float* output2 [[buffer(6)]],
+  constant OpsinParams& params [[buffer(7)]],
+  threadgroup float* scratch [[threadgroup(0)]],
+  uint2 local_position [[thread_position_in_threadgroup]],
+  uint2 group_position [[threadgroup_position_in_grid]],
+  uint2 group_size [[threads_per_threadgroup]]) {
 
-  if (position.x >= params.width || position.y >= params.height) return;
+  constexpr uint kRadius = 2;
+  const uint raw_stride = group_size.x + 2 * kRadius;
+  const uint tile_height = group_size.y + 2 * kRadius;
+  const uint raw_plane_size = raw_stride * tile_height;
+  const uint horizontal_stride = group_size.x;
+  const uint horizontal_plane_size = horizontal_stride * tile_height;
+  threadgroup float* raw0 = scratch;
+  threadgroup float* raw1 = raw0 + raw_plane_size;
+  threadgroup float* raw2 = raw1 + raw_plane_size;
+  threadgroup float* horizontal0 = raw2 + raw_plane_size;
+  threadgroup float* horizontal1 = horizontal0 + horizontal_plane_size;
+  threadgroup float* horizontal2 = horizontal1 + horizontal_plane_size;
+
+  const uint thread_index =
+    local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int origin_x = int(group_position.x * group_size.x) - int(kRadius);
+  const int origin_y = int(group_position.y * group_size.y) - int(kRadius);
+  for (uint index = thread_index; index < raw_plane_size;
+       index += thread_count) {
+    const int source_x = mirror_coordinate(
+      origin_x + int(index % raw_stride), int(params.width));
+    const int source_y = mirror_coordinate(
+      origin_y + int(index / raw_stride), int(params.height));
+    raw0[index] = input0[
+      uint(source_y) * params.input_stride0 + uint(source_x)];
+    raw1[index] = input1[
+      uint(source_y) * params.input_stride1 + uint(source_x)];
+    raw2[index] = input2[
+      uint(source_y) * params.input_stride2 + uint(source_x)];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
   float sum_weights = 0.0f;
   for (uint index = 0; index < 5; ++index) sum_weights += weights[index];
   const float scale = 1.0f / sum_weights;
   const float weight0 = weights[2] * scale;
   const float weight1 = weights[1] * scale;
   const float weight2 = weights[0] * scale;
-  const int y = int(position.y);
-  const int height = int(params.height);
+  for (uint index = thread_index; index < horizontal_plane_size;
+       index += thread_count) {
+    const uint x = index % horizontal_stride;
+    const uint y = index / horizontal_stride;
+    horizontal0[index] = blur5_horizontal_tile_value(
+      raw0 + y * raw_stride, x + kRadius, weight0, weight1, weight2);
+    horizontal1[index] = blur5_horizontal_tile_value(
+      raw1 + y * raw_stride, x + kRadius, weight0, weight1, weight2);
+    horizontal2[index] = blur5_horizontal_tile_value(
+      raw2 + y * raw_stride, x + kRadius, weight0, weight1, weight2);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint2 position = group_position * group_size + local_position;
+  if (position.x >= params.width || position.y >= params.height) return;
   const float3 blurred_rgb(
-    blur5_vertical_value(
-      horizontal0, position.x, y, height, params.blurred_stride,
+    blur5_vertical_tile_value(
+      horizontal0, local_position.x, local_position.y, horizontal_stride,
       weight0, weight1, weight2),
-    blur5_vertical_value(
-      horizontal1, position.x, y, height, params.blurred_stride,
+    blur5_vertical_tile_value(
+      horizontal1, local_position.x, local_position.y, horizontal_stride,
       weight0, weight1, weight2),
-    blur5_vertical_value(
-      horizontal2, position.x, y, height, params.blurred_stride,
+    blur5_vertical_tile_value(
+      horizontal2, local_position.x, local_position.y, horizontal_stride,
       weight0, weight1, weight2));
   const uint index0 = position.y * params.input_stride0 + position.x;
   const uint index1 = position.y * params.input_stride1 + position.x;
   const uint index2 = position.y * params.input_stride2 + position.x;
   const uint output_index = position.y * params.output_stride + position.x;
-  const float3 input_rgb(
-    input0[index0], input1[index1], input2[index2]);
+  const float3 input_rgb(input0[index0], input1[index1], input2[index2]);
   if (!all(isfinite(input_rgb)) || !all(isfinite(blurred_rgb))) {
     output0[output_index] = NAN;
     output1[output_index] = NAN;
@@ -458,44 +555,98 @@ inline float convolve_transposed_vertical_value(
   return sum / weight_sum;
 }
 
-kernel void gjxl_butteraugli_frequency_low_medium_convolve_f32(
-  device const float* intermediate0 [[buffer(0)]],
-  device const float* intermediate1 [[buffer(1)]],
-  device const float* intermediate2 [[buffer(2)]],
+kernel void gjxl_butteraugli_frequency_low_medium_tiled_f32(
+  device const float* input0 [[buffer(0)]],
+  device const float* input1 [[buffer(1)]],
+  device const float* input2 [[buffer(2)]],
   device const float* weights [[buffer(3)]],
-  device const float* xyb0 [[buffer(4)]],
-  device const float* xyb1 [[buffer(5)]],
-  device const float* xyb2 [[buffer(6)]],
-  device float* low0 [[buffer(7)]],
-  device float* low1 [[buffer(8)]],
-  device float* low2 [[buffer(9)]],
-  device float* medium0 [[buffer(10)]],
-  device float* medium1 [[buffer(11)]],
-  device float* medium2 [[buffer(12)]],
-  constant FrequencyLowMediumConvolutionParams& params [[buffer(13)]],
-  uint2 position [[thread_position_in_grid]]) {
+  device float* low0 [[buffer(4)]],
+  device float* low1 [[buffer(5)]],
+  device float* low2 [[buffer(6)]],
+  device float* medium0 [[buffer(7)]],
+  device float* medium1 [[buffer(8)]],
+  device float* medium2 [[buffer(9)]],
+  constant FrequencyLowMediumTiledParams& params [[buffer(10)]],
+  threadgroup float* scratch [[threadgroup(0)]],
+  uint2 local_position [[thread_position_in_threadgroup]],
+  uint2 group_position [[threadgroup_position_in_grid]],
+  uint2 group_size [[threads_per_threadgroup]]) {
 
+  constexpr int kRadius = 16;
+  const uint tile_height = group_size.y + 2 * uint(kRadius);
+  const uint horizontal_stride = group_size.x;
+  const uint horizontal_plane_size = horizontal_stride * tile_height;
+  threadgroup float* horizontal0 = scratch;
+  threadgroup float* horizontal1 = horizontal0 + horizontal_plane_size;
+  threadgroup float* horizontal2 = horizontal1 + horizontal_plane_size;
+
+  const uint thread_index =
+    local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int group_x = int(group_position.x * group_size.x);
+  const int group_y = int(group_position.y * group_size.y);
+  const int horizontal_origin_y = group_y - kRadius;
+  for (uint index = thread_index; index < horizontal_plane_size;
+       index += thread_count) {
+    const uint local_x = index % horizontal_stride;
+    const uint tile_y = index / horizontal_stride;
+    const int x = group_x + int(local_x);
+    const int y = horizontal_origin_y + int(tile_y);
+    float weight_sum = 0.0f;
+    float sum0 = 0.0f;
+    float sum1 = 0.0f;
+    float sum2 = 0.0f;
+    if (x < int(params.width) && y >= 0 && y < int(params.height)) {
+      const int first = max(0, x - kRadius);
+      const int last = min(int(params.width) - 1, x + kRadius);
+      for (int source_x = first; source_x <= last; ++source_x) {
+        const float weight = weights[source_x + kRadius - x];
+        const uint input_index =
+          uint(y) * params.input_stride + uint(source_x);
+        weight_sum += weight;
+        sum0 += input0[input_index] * weight;
+        sum1 += input1[input_index] * weight;
+        sum2 += input2[input_index] * weight;
+      }
+    }
+    horizontal0[index] = weight_sum == 0.0f ? 0.0f : sum0 / weight_sum;
+    horizontal1[index] = weight_sum == 0.0f ? 0.0f : sum1 / weight_sum;
+    horizontal2[index] = weight_sum == 0.0f ? 0.0f : sum2 / weight_sum;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint2 position = group_position * group_size + local_position;
   if (position.x >= params.width || position.y >= params.height) return;
-  const int radius = int(params.kernel_size / 2);
   const int y = int(position.y);
-  const int height = int(params.height);
-  const float low_x = convolve_transposed_vertical_value(
-    intermediate0, weights, position.x, y, height,
-    params.intermediate_stride, radius);
-  const float low_y = convolve_transposed_vertical_value(
-    intermediate1, weights, position.x, y, height,
-    params.intermediate_stride, radius);
-  const float low_b = convolve_transposed_vertical_value(
-    intermediate2, weights, position.x, y, height,
-    params.intermediate_stride, radius);
-  const uint xyb_index = position.y * params.xyb_stride + position.x;
-  const uint psycho_index = position.y * params.psycho_stride + position.x;
-  medium0[psycho_index] = xyb0[xyb_index] - low_x;
-  medium1[psycho_index] = xyb1[xyb_index] - low_y;
-  medium2[psycho_index] = xyb2[xyb_index] - low_b;
-  low0[psycho_index] = low_x * 33.832837186260f;
-  low1[psycho_index] = low_y * 14.458268100570f;
-  low2[psycho_index] =
+  const int first = max(0, y - kRadius);
+  const int last = min(int(params.height) - 1, y + kRadius);
+  float weight_sum = 0.0f;
+  float sum0 = 0.0f;
+  float sum1 = 0.0f;
+  float sum2 = 0.0f;
+  for (int source_y = first; source_y <= last; ++source_y) {
+    const float weight = weights[source_y + kRadius - y];
+    const uint horizontal_index =
+      uint(source_y - horizontal_origin_y) * horizontal_stride +
+      local_position.x;
+    weight_sum += weight;
+    sum0 += horizontal0[horizontal_index] * weight;
+    sum1 += horizontal1[horizontal_index] * weight;
+    sum2 += horizontal2[horizontal_index] * weight;
+  }
+  const float low_x = sum0 / weight_sum;
+  const float low_y = sum1 / weight_sum;
+  const float low_b = sum2 / weight_sum;
+  const uint input_index =
+    position.y * params.input_stride + position.x;
+  const uint output_index =
+    position.y * params.output_stride + position.x;
+  medium0[output_index] = input0[input_index] - low_x;
+  medium1[output_index] = input1[input_index] - low_y;
+  medium2[output_index] = input2[input_index] - low_b;
+  low0[output_index] = low_x * 33.832837186260f;
+  low1[output_index] = low_y * 14.458268100570f;
+  low2[output_index] =
     unfused_multiply_add(-0.362267051518f, low_y, low_b) *
     49.87984651440f;
 }
@@ -559,6 +710,16 @@ kernel void gjxl_butteraugli_frequency_suppress_x_f32(
   high_x[x_index] *= scaler;
 }
 
+inline float mask_precompute_value(float high_x, float high_y,
+                                   float ultra_x, float ultra_y) {
+  const float xdiff = (ultra_x + high_x) * 2.5f;
+  const float ydiff = ultra_y * 0.4f + high_y * 0.4f;
+  const float activity = sqrt(xdiff * xdiff + ydiff * ydiff);
+  constexpr float kMultiplier = 6.19424080439f;
+  constexpr float kBias = kMultiplier * 12.61050594197f;
+  return sqrt(kMultiplier * abs(activity) + kBias) - sqrt(kBias);
+}
+
 kernel void gjxl_butteraugli_frequency_ultra_convolve_f32(
   device const float* intermediate [[buffer(0)]],
   device const float* weights [[buffer(1)]],
@@ -583,6 +744,35 @@ kernel void gjxl_butteraugli_frequency_ultra_convolve_f32(
       maximum_clamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
     high[high_index] = amplify_range(low_pass * 2.155f, 0.132f);
   }
+}
+
+kernel void gjxl_butteraugli_frequency_ultra_mask_convolve_f32(
+  device const float* intermediate [[buffer(0)]],
+  device const float* weights [[buffer(1)]],
+  device float* high_y [[buffer(2)]],
+  device float* ultra_y [[buffer(3)]],
+  constant FrequencyConvolutionChannelParams& params [[buffer(4)]],
+  device const float* high_x [[buffer(5)]],
+  device const float* ultra_x [[buffer(6)]],
+  device float* mask [[buffer(7)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height) return;
+  float low_pass = convolve_transposed_vertical_value(
+    intermediate, weights, position.x, int(position.y), int(params.height),
+    params.intermediate_stride, int(params.kernel_size / 2));
+  const uint high_index = position.y * params.input_stride + position.x;
+  const uint output_index = position.y * params.output_stride + position.x;
+  const float original = high_y[high_index];
+  low_pass = maximum_clamp(low_pass, 28.4691806922f);
+  const float ultra_value =
+    maximum_clamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
+  const float high_value = amplify_range(low_pass * 2.155f, 0.132f);
+  ultra_y[output_index] = ultra_value;
+  high_y[high_index] = high_value;
+  // X has completed; all psycho outputs and this scratch plane share a stride.
+  mask[output_index] = mask_precompute_value(
+    high_x[output_index], high_value, ultra_x[output_index], ultra_value);
 }
 
 inline float malta_scale_value(float value0, float value1,
@@ -849,6 +1039,59 @@ inline float l2_asymmetric(float value0, float value1, float weight_up,
                               secondary * secondary, total);
 }
 
+struct L2Contributions {
+  float ac0, ac1, ac2;
+  float dc0, dc1, dc2;
+};
+
+inline L2Contributions l2_contributions(
+  device const float* rlow0,
+  device const float* rlow1,
+  device const float* rlow2,
+  device const float* rmed0,
+  device const float* rmed1,
+  device const float* rmed2,
+  device const float* rhigh0,
+  device const float* rhigh1,
+  device const float* dlow0,
+  device const float* dlow1,
+  device const float* dlow2,
+  device const float* dmed0,
+  device const float* dmed1,
+  device const float* dmed2,
+  device const float* dhigh0,
+  device const float* dhigh1,
+  device const float* malta_ac0,
+  device const float* malta_ac1,
+  uint reference_index, uint distorted_index, uint work_index,
+  float asymmetry) {
+
+  L2Contributions values;
+  const float inv_asymmetry = 1.0f / asymmetry;
+  float total0 = l2_asymmetric(rhigh0[reference_index],
+                               dhigh0[distorted_index],
+                               400.0f * asymmetry,
+                               400.0f * inv_asymmetry, malta_ac0[work_index]);
+  float total1 = l2_asymmetric(rhigh1[reference_index],
+                               dhigh1[distorted_index],
+                               1.50815703118f * asymmetry,
+                               1.50815703118f * inv_asymmetry,
+                               malta_ac1[work_index]);
+  const float md0 = rmed0[reference_index] - dmed0[distorted_index];
+  const float md1 = rmed1[reference_index] - dmed1[distorted_index];
+  const float md2 = rmed2[reference_index] - dmed2[distorted_index];
+  values.ac0 = unfused_multiply_add(md0 * md0, 2150.0f, total0);
+  values.ac1 = unfused_multiply_add(md1 * md1, 10.6195433239f, total1);
+  values.ac2 = md2 * md2 * 16.2176043152f;
+  const float ld0 = rlow0[reference_index] - dlow0[distorted_index];
+  const float ld1 = rlow1[reference_index] - dlow1[distorted_index];
+  const float ld2 = rlow2[reference_index] - dlow2[distorted_index];
+  values.dc0 = ld0 * ld0 * 29.2353797994f;
+  values.dc1 = ld1 * ld1 * 0.844626970982f;
+  values.dc2 = ld2 * ld2 * 0.703646627719f;
+  return values;
+}
+
 kernel void gjxl_butteraugli_l2_f32(
   device const float* rlow0 [[buffer(0)]], device const float* rlow1 [[buffer(1)]],
   device const float* rlow2 [[buffer(2)]], device const float* rmed0 [[buffer(3)]],
@@ -906,13 +1149,9 @@ kernel void gjxl_butteraugli_mask_precompute_f32(
   if (position.x >= params.width || position.y >= params.height) return;
   const uint input_index = position.y * params.input_stride + position.x;
   const uint output_index = position.y * params.output_stride + position.x;
-  const float xdiff = (ultra_x[input_index] + high_x[input_index]) * 2.5f;
-  const float ydiff = ultra_y[input_index] * 0.4f + high_y[input_index] * 0.4f;
-  const float activity = sqrt(xdiff * xdiff + ydiff * ydiff);
-  constexpr float kMultiplier = 6.19424080439f;
-  constexpr float kBias = kMultiplier * 12.61050594197f;
-  output[output_index] =
-    sqrt(kMultiplier * abs(activity) + kBias) - sqrt(kBias);
+  output[output_index] = mask_precompute_value(
+    high_x[input_index], high_y[input_index],
+    ultra_x[input_index], ultra_y[input_index]);
 }
 
 inline void store_min3(float value, thread float& minimum0,
@@ -990,8 +1229,9 @@ kernel void gjxl_butteraugli_final_f32(
 
   if (position.x >= params.width || position.y >= params.height) return;
   const uint index = position.y * params.stride + position.x;
-  const float mask_value = mask_y(mask[index]);
-  const float dc_mask_value = mask_dc_y(mask[index]);
+  const uint mask_index = position.y * params.mask_stride + position.x;
+  const float mask_value = mask_y(mask[mask_index]);
+  const float dc_mask_value = mask_dc_y(mask[mask_index]);
   const float masked_dc = dc0[index] * params.x_multiplier * dc_mask_value +
                           dc1[index] * dc_mask_value + dc2[index] * dc_mask_value;
   const float masked_ac = ac0[index] * params.x_multiplier * mask_value +
@@ -1015,15 +1255,73 @@ kernel void gjxl_butteraugli_final_masked_ac_f32(
   if (position.x >= params.width || position.y >= params.height) return;
   const uint index = position.y * params.stride + position.x;
   const float difference =
-    mask_blurred_reference[index] - mask_blurred_distorted[index];
+    mask_blurred_reference[
+      position.y * params.reference_mask_stride + position.x] -
+    mask_blurred_distorted[index];
   const float masked_ac_y =
     ac1[index] + 10.0f * difference * difference;
-  const float mask_value = mask_y(mask[index]);
-  const float dc_mask_value = mask_dc_y(mask[index]);
+  const uint mask_index = position.y * params.mask_stride + position.x;
+  const float mask_value = mask_y(mask[mask_index]);
+  const float dc_mask_value = mask_dc_y(mask[mask_index]);
   const float masked_dc = dc0[index] * params.x_multiplier * dc_mask_value +
                           dc1[index] * dc_mask_value + dc2[index] * dc_mask_value;
   const float masked_ac = ac0[index] * params.x_multiplier * mask_value +
                           masked_ac_y * mask_value + ac2[index] * mask_value;
+  const float result = sqrt(masked_dc + masked_ac);
+  output[position.y * params.output_stride + position.x] =
+    isfinite(result) && result >= 0.0f ? result : NAN;
+}
+
+kernel void gjxl_butteraugli_final_l2_masked_ac_f32(
+  device const float* rlow0 [[buffer(0)]],
+  device const float* rlow1 [[buffer(1)]],
+  device const float* rlow2 [[buffer(2)]],
+  device const float* rmed0 [[buffer(3)]],
+  device const float* rmed1 [[buffer(4)]],
+  device const float* rmed2 [[buffer(5)]],
+  device const float* rhigh0 [[buffer(6)]],
+  device const float* rhigh1 [[buffer(7)]],
+  device const float* dlow0 [[buffer(8)]],
+  device const float* dlow1 [[buffer(9)]],
+  device const float* dlow2 [[buffer(10)]],
+  device const float* dmed0 [[buffer(11)]],
+  device const float* dmed1 [[buffer(12)]],
+  device const float* dmed2 [[buffer(13)]],
+  device const float* dhigh0 [[buffer(14)]],
+  device const float* dhigh1 [[buffer(15)]],
+  device const float* malta_ac0 [[buffer(16)]],
+  device const float* malta_ac1 [[buffer(17)]],
+  device const float* mask [[buffer(18)]],
+  device const float* mask_blurred_reference [[buffer(19)]],
+  device const float* mask_blurred_distorted [[buffer(20)]],
+  device float* output [[buffer(21)]],
+  constant FinalL2Params& params [[buffer(22)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height) return;
+  const uint reference_index =
+    position.y * params.reference_stride + position.x;
+  const uint distorted_index =
+    position.y * params.distorted_stride + position.x;
+  const uint index = position.y * params.work_stride + position.x;
+  const L2Contributions l2 = l2_contributions(
+    rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1,
+    dlow0, dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1,
+    malta_ac0, malta_ac1, reference_index, distorted_index, index,
+    params.asymmetry);
+  const float difference =
+    mask_blurred_reference[
+      position.y * params.reference_mask_stride + position.x] -
+    mask_blurred_distorted[index];
+  const float masked_ac_y =
+    l2.ac1 + 10.0f * difference * difference;
+  const uint mask_index = position.y * params.mask_stride + position.x;
+  const float mask_value = mask_y(mask[mask_index]);
+  const float dc_mask_value = mask_dc_y(mask[mask_index]);
+  const float masked_dc = l2.dc0 * params.x_multiplier * dc_mask_value +
+                          l2.dc1 * dc_mask_value + l2.dc2 * dc_mask_value;
+  const float masked_ac = l2.ac0 * params.x_multiplier * mask_value +
+                          masked_ac_y * mask_value + l2.ac2 * mask_value;
   const float result = sqrt(masked_dc + masked_ac);
   output[position.y * params.output_stride + position.x] =
     isfinite(result) && result >= 0.0f ? result : NAN;
@@ -1050,6 +1348,128 @@ kernel void gjxl_butteraugli_compose_f32(
   const float sub_value = sub_map[(position.y / 2) * params.sub_stride + position.x / 2];
   output[position.y * params.output_stride + position.x] =
     main_value * 0.85f + 0.5f * sub_value;
+}
+
+kernel void gjxl_butteraugli_resident_l2_reduce_f32(
+  device const float* rlow0 [[buffer(0)]],
+  device const float* rlow1 [[buffer(1)]],
+  device const float* rlow2 [[buffer(2)]],
+  device const float* rmed0 [[buffer(3)]],
+  device const float* rmed1 [[buffer(4)]],
+  device const float* rmed2 [[buffer(5)]],
+  device const float* rhigh0 [[buffer(6)]],
+  device const float* rhigh1 [[buffer(7)]],
+  device const float* dlow0 [[buffer(8)]],
+  device const float* dlow1 [[buffer(9)]],
+  device const float* dlow2 [[buffer(10)]],
+  device const float* dmed0 [[buffer(11)]],
+  device const float* dmed1 [[buffer(12)]],
+  device const float* dmed2 [[buffer(13)]],
+  device const float* dhigh0 [[buffer(14)]],
+  device const float* dhigh1 [[buffer(15)]],
+  device const float* malta_ac0 [[buffer(16)]],
+  device const float* malta_ac1 [[buffer(17)]],
+  device const float* mask [[buffer(18)]],
+  device const float* mask_blurred_reference [[buffer(19)]],
+  device const float* mask_blurred_distorted [[buffer(20)]],
+  device const float* sub_map [[buffer(21)]],
+  device const uint2* anchors [[buffer(22)]],
+  device float* block_distance [[buffer(23)]],
+  device float* score_partials [[buffer(24)]],
+  device atomic_uint* error [[buffer(25)]],
+  constant ResidentReductionParams& params [[buffer(26)]],
+  uint anchor_index [[threadgroup_position_in_grid]],
+  uint thread_index [[thread_index_in_threadgroup]]) {
+
+  threadgroup float partial_sum[256];
+  threadgroup float partial_maximum[256];
+  if (anchor_index >= params.anchor_count) return;
+
+  const uint partial_index = params.anchor_offset + anchor_index;
+  const uint2 anchor = anchors[partial_index];
+  const uint x_begin = anchor.x * 8u;
+  const uint y_begin = anchor.y * 8u;
+  if (x_begin >= params.source_width || y_begin >= params.source_height) {
+    if (thread_index == 0u) {
+      atomic_fetch_or_explicit(error, 64u, memory_order_relaxed);
+      score_partials[partial_index] = 0.0f;
+    }
+    return;
+  }
+  const uint valid_width =
+    min(params.pixel_width, params.source_width - x_begin);
+  const uint valid_height =
+    min(params.pixel_height, params.source_height - y_begin);
+  const uint pixel_count = valid_width * valid_height;
+
+  float sum = 0.0f;
+  float maximum = -INFINITY;
+  for (uint local_index = thread_index; local_index < pixel_count;
+       local_index += 256u) {
+    const uint x = x_begin + local_index % valid_width;
+    const uint y = y_begin + local_index / valid_width;
+    const uint index = y * params.work_stride + x;
+    // Internal main-scale psycho and accumulation planes share work_stride.
+    const L2Contributions l2 = l2_contributions(
+      rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1,
+      dlow0, dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1,
+      malta_ac0, malta_ac1, index, index, index, params.asymmetry);
+    const float difference =
+      mask_blurred_reference[index] - mask_blurred_distorted[index];
+    const float masked_ac_y =
+      l2.ac1 + 10.0f * difference * difference;
+    const float mask_value = mask_y(mask[index]);
+    const float dc_mask_value = mask_dc_y(mask[index]);
+    const float masked_dc =
+      l2.dc0 * params.x_multiplier * dc_mask_value +
+      l2.dc1 * dc_mask_value + l2.dc2 * dc_mask_value;
+    const float masked_ac =
+      l2.ac0 * params.x_multiplier * mask_value +
+      masked_ac_y * mask_value + l2.ac2 * mask_value;
+    const float main_value = sqrt(masked_dc + masked_ac);
+    const float sub_value =
+      sub_map[(y / 2u) * params.sub_stride + x / 2u];
+    float value = main_value * 0.85f + 0.5f * sub_value;
+    if (!isfinite(value) || value < 0.0f) {
+      atomic_fetch_or_explicit(error, 128u, memory_order_relaxed);
+      value = 0.0f;
+    }
+    maximum = max(maximum, value);
+    value *= value;
+    value *= value;
+    value *= value;
+    value *= value;
+    sum += value;
+  }
+  partial_sum[thread_index] = sum;
+  partial_maximum[thread_index] = maximum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint width = 128u; width != 0u; width >>= 1u) {
+    if (thread_index < width) {
+      partial_sum[thread_index] += partial_sum[thread_index + width];
+      partial_maximum[thread_index] = max(
+        partial_maximum[thread_index], partial_maximum[thread_index + width]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (thread_index == 0u) {
+    const float mean = partial_sum[0] / float(pixel_count);
+    const float reduced = 1.2f * pow(mean, 1.0f / 16.0f);
+    if (!isfinite(reduced) || reduced < 0.0f) {
+      atomic_fetch_or_explicit(error, 256u, memory_order_relaxed);
+      score_partials[partial_index] = 0.0f;
+      return;
+    }
+    for (uint dy = 0u; dy < params.covered_height; ++dy) {
+      for (uint dx = 0u; dx < params.covered_width; ++dx) {
+        block_distance[
+          (anchor.y + dy) * params.block_stride + anchor.x + dx] = reduced;
+      }
+    }
+    score_partials[partial_index] = partial_maximum[0];
+  }
 }
 
 kernel void gjxl_butteraugli_reduce_max_f32(

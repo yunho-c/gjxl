@@ -90,6 +90,42 @@ inline constexpr std::array<AcStrategyType, 7> kSupportedAqStrategies = {
     AcStrategyType::kDct16x32,
 };
 
+[[nodiscard]] std::array<MetalButteraugliResidentBatch, 7>
+MakeResidentButteraugliBatches(
+  const std::array<AqBlockReductionParams, 7>& source) noexcept {
+
+  std::array<MetalButteraugliResidentBatch, 7> result;
+  for (size_t index = 0; index < result.size(); ++index) {
+    result[index] = {
+      source[index].anchor_offset,
+      source[index].anchor_count,
+      source[index].pixel_width,
+      source[index].pixel_height,
+      source[index].covered_width,
+      source[index].covered_height,
+    };
+  }
+  return result;
+}
+
+[[nodiscard]] DevicePlaneView MakeResidentScorePartials(
+  DevicePlaneView storage,
+  size_t anchor_count) noexcept {
+
+  storage.extent = {anchor_count, 1};
+  storage.row_stride = anchor_count;
+  return storage;
+}
+
+[[nodiscard]] ConstDevicePlaneView MakeResidentAnchors(
+  ConstDevicePlaneView storage,
+  size_t anchor_count) noexcept {
+
+  storage.extent = {2 * anchor_count, 1};
+  storage.row_stride = 2 * anchor_count;
+  return storage;
+}
+
 void BindPlane(MTL::ComputeCommandEncoder* encoder, DevicePlaneView plane,
                NS::UInteger index) {
   MetalBuffer* buffer = dynamic_cast<MetalBuffer*>(plane.buffer);
@@ -890,6 +926,9 @@ Status MetalPreparedAqEvaluation::Prepare(
     preparation.resident_original_linear_rgb.plane[0].buffer != nullptr;
   borrowed_coding_opsin_ =
     preparation.resident_coding_opsin.plane[0].buffer != nullptr;
+  uses_butteraugli_sinks_ =
+    !frame_only_ && options_.metric == AqEvaluationMetric::kButteraugli &&
+    source_extent_.width >= 15 && source_extent_.height >= 15;
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
@@ -1219,19 +1258,22 @@ Status MetalPreparedAqEvaluation::Prepare(
                              block_extent_.width, &staging_bytes);
     if (!status.ok())
       return status;
-    status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
-                             source_extent_.width, &staging_bytes);
-    if (!status.ok())
-      return status;
-    status =
-        AddPlannedPlane(DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
-    if (!status.ok())
-      return status;
-    status = AddPlannedPlane(
+    if (options_.metric == AqEvaluationMetric::kButteraugli) {
+      if (uses_butteraugli_sinks_) {
+        status = AddPlannedPlane(
+          DeviceElementType::kF32, {anchor_capacity_count, 1},
+          anchor_capacity_count, &staging_bytes);
+        if (!status.ok()) return status;
+      }
+      status = AddPlannedPlane(
+        DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
+      if (!status.ok()) return status;
+    } else {
+      status = AddPlannedPlane(
         DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
         &staging_bytes);
-    if (!status.ok())
-      return status;
+      if (!status.ok()) return status;
+    }
   }
   status =
       AddPlannedPlane(DeviceElementType::kF32, {coefficient_value_count_, 1},
@@ -1484,20 +1526,22 @@ Status MetalPreparedAqEvaluation::Prepare(
                                     &block_distance_);
     if (!status.ok())
       return status;
-    status = staging_.AllocatePlane(DeviceElementType::kF32, source_extent_,
-                                    source_extent_.width, kBufferAlignment,
-                                    &distance_map_);
-    if (!status.ok())
-      return status;
-    status = staging_.AllocatePlane(DeviceElementType::kF32, {1, 1}, 1,
-                                    kBufferAlignment, &score_);
-    if (!status.ok())
-      return status;
-    status = staging_.AllocatePlane(
+    if (options_.metric == AqEvaluationMetric::kButteraugli) {
+      if (uses_butteraugli_sinks_) {
+        status = staging_.AllocatePlane(
+          DeviceElementType::kF32, {anchor_capacity_count, 1},
+          anchor_capacity_count, kBufferAlignment, &score_partials_);
+        if (!status.ok()) return status;
+      }
+      status = staging_.AllocatePlane(
+        DeviceElementType::kF32, {1, 1}, 1, kBufferAlignment, &score_);
+      if (!status.ok()) return status;
+    } else {
+      status = staging_.AllocatePlane(
         DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
         kBufferAlignment, &transform_maximum_error_);
-    if (!status.ok())
-      return status;
+      if (!status.ok()) return status;
+    }
   }
   status = staging_.AllocatePlane(
       DeviceElementType::kF32, {coefficient_value_count_, 1},
@@ -1655,7 +1699,7 @@ Status MetalPreparedAqEvaluation::Prepare(
       block_reduction_params_[batch_index] = {
           static_cast<uint32_t>(source_extent_.width),
           static_cast<uint32_t>(source_extent_.height),
-          static_cast<uint32_t>(distance_map_.row_stride),
+          static_cast<uint32_t>(source_extent_.width),
           static_cast<uint32_t>(block_distance_.row_stride),
           static_cast<uint32_t>(batch.anchor_offset),
           static_cast<uint32_t>(batch.anchor_count),
@@ -2001,7 +2045,7 @@ Status MetalPreparedAqEvaluation::Reconfigure(
       block_reduction_params[batch_index] = {
         static_cast<uint32_t>(source_extent_.width),
         static_cast<uint32_t>(source_extent_.height),
-        static_cast<uint32_t>(distance_map_.row_stride),
+        static_cast<uint32_t>(source_extent_.width),
         static_cast<uint32_t>(block_distance_.row_stride),
         static_cast<uint32_t>(anchor_offset),
         static_cast<uint32_t>(count),
@@ -2271,15 +2315,34 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     return Status::FailedPrecondition(
       "Prepared AQ Butteraugli state is missing");
   }
-  status = ValidatePreparedMetalButteraugliEncoding(
-    *butteraugli_,
-    {
-      .distorted_linear_rgb = {{{reconstructed_linear_[0],
-                                 reconstructed_linear_[1],
-                                 reconstructed_linear_[2]}}},
-      .distance_map = distance_map_,
-      .score = score_,
-    });
+  if (uses_butteraugli_sinks_) {
+    const auto batches =
+      MakeResidentButteraugliBatches(block_reduction_params_);
+    status = ValidatePreparedMetalButteraugliResidentEncoding(
+      *butteraugli_,
+      {
+        .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                   reconstructed_linear_[1],
+                                   reconstructed_linear_[2]}}},
+        .anchors = MakeResidentAnchors(anchors_, anchor_count_),
+        .block_distance = block_distance_,
+        .score_partials =
+          MakeResidentScorePartials(score_partials_, anchor_count_),
+        .score = score_,
+        .error = reconstruction_error_,
+        .batches = batches,
+      });
+  } else {
+    status = ValidatePreparedMetalButteraugliEncoding(
+      *butteraugli_,
+      {
+        .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                   reconstructed_linear_[1],
+                                   reconstructed_linear_[2]}}},
+        .distance_map = CompleteDistanceMapScratch(),
+        .score = score_,
+      });
+  }
   if (!status.ok()) return status;
 
   status = BeginOperation();
@@ -2361,8 +2424,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     std::vector<MetalProfiledComputeStage> stages;
     const uint32_t epf_iterations =
       options_.profile.loop_filter.epf_options.iterations;
-    const bool butteraugli_multiscale =
-      source_extent_.width >= 15 && source_extent_.height >= 15;
+    const bool butteraugli_multiscale = uses_butteraugli_sinks_;
     const bool profile_forward_coefficients =
       !exact_coefficient_reconstruction_ &&
       !resident_forward_coefficients_ready_;
@@ -2495,43 +2557,61 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         append_stage(
           "aq.opsin_to_linear", ResidentProfileStage::kOpsinToLinear,
           iteration);
-        append_stage(
-          "butteraugli.psycho.main", ResidentProfileStage::kButteraugli,
-          iteration, 0,
-          MetalButteraugliProfileStage::kDistortedPsychoMain);
-        append_stage(
-          "butteraugli.malta.main", ResidentProfileStage::kButteraugli,
-          iteration, 0, MetalButteraugliProfileStage::kMaltaMain);
-        append_stage(
-          "butteraugli.l2.main", ResidentProfileStage::kButteraugli,
-          iteration, 0, MetalButteraugliProfileStage::kL2Main);
-        append_stage(
-          "butteraugli.mask_final.main",
-          ResidentProfileStage::kButteraugli, iteration, 0,
-          MetalButteraugliProfileStage::kMaskAndFinalMain);
         if (butteraugli_multiscale) {
           append_stage(
-            "butteraugli.psycho.sub", ResidentProfileStage::kButteraugli,
+            "butteraugli.psycho.sub",
+            ResidentProfileStage::kButteraugliResident,
             iteration, 0,
             MetalButteraugliProfileStage::kDistortedPsychoSub);
           append_stage(
-            "butteraugli.malta.sub", ResidentProfileStage::kButteraugli,
-            iteration, 0, MetalButteraugliProfileStage::kMaltaSub);
-          append_stage(
-            "butteraugli.l2.sub", ResidentProfileStage::kButteraugli,
-            iteration, 0, MetalButteraugliProfileStage::kL2Sub);
+            "butteraugli.malta.sub",
+            ResidentProfileStage::kButteraugliResident, iteration, 0,
+            MetalButteraugliProfileStage::kMaltaSub);
+          // Subscale L2 is evaluated inside the final-map producer.
           append_stage(
             "butteraugli.mask_final.sub",
-            ResidentProfileStage::kButteraugli, iteration, 0,
+            ResidentProfileStage::kButteraugliResident, iteration, 0,
             MetalButteraugliProfileStage::kMaskAndFinalSub);
+          append_stage(
+            "butteraugli.psycho.main",
+            ResidentProfileStage::kButteraugliResident, iteration, 0,
+            MetalButteraugliProfileStage::kDistortedPsychoMain);
+          append_stage(
+            "butteraugli.malta.main",
+            ResidentProfileStage::kButteraugliResident, iteration, 0,
+            MetalButteraugliProfileStage::kMaltaMain);
+          // Main-scale L2 is evaluated inside the resident reduction.
+          append_stage(
+            "butteraugli.mask.main",
+            ResidentProfileStage::kButteraugliResident, iteration, 0,
+            MetalButteraugliProfileStage::kMaskAndFinalMain);
+          append_stage(
+            "butteraugli.resident_reduction",
+            ResidentProfileStage::kButteraugliResident, iteration, 0,
+            MetalButteraugliProfileStage::kResidentReduction);
+        } else {
+          append_stage(
+            "butteraugli.psycho.main", ResidentProfileStage::kButteraugli,
+            iteration, 0,
+            MetalButteraugliProfileStage::kDistortedPsychoMain);
+          append_stage(
+            "butteraugli.malta.main", ResidentProfileStage::kButteraugli,
+            iteration, 0, MetalButteraugliProfileStage::kMaltaMain);
+          append_stage(
+            "butteraugli.l2.main", ResidentProfileStage::kButteraugli,
+            iteration, 0, MetalButteraugliProfileStage::kL2Main);
+          append_stage(
+            "butteraugli.mask_final.main",
+            ResidentProfileStage::kButteraugli, iteration, 0,
+            MetalButteraugliProfileStage::kMaskAndFinalMain);
+          append_stage(
+            "butteraugli.score_reduction",
+            ResidentProfileStage::kButteraugli, iteration, 0,
+            MetalButteraugliProfileStage::kScoreReduction);
+          append_stage(
+            "aq.block_reduction", ResidentProfileStage::kBlockReduction,
+            iteration);
         }
-        append_stage(
-          "butteraugli.score_reduction",
-          ResidentProfileStage::kButteraugli, iteration, 0,
-          MetalButteraugliProfileStage::kScoreReduction);
-        append_stage(
-          "aq.block_reduction", ResidentProfileStage::kBlockReduction,
-          iteration);
         append_stage(
           "aq.policy_update", ResidentProfileStage::kPolicyUpdate,
           iteration);
@@ -3101,14 +3181,33 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(
     return Status::FailedPrecondition(
       "Prepared AQ Butteraugli state is missing");
   }
-  if (options_.metric == AqEvaluationMetric::kButteraugli) {
+  if (options_.metric == AqEvaluationMetric::kButteraugli &&
+      uses_butteraugli_sinks_) {
+    const auto batches =
+      MakeResidentButteraugliBatches(block_reduction_params_);
+    status = ValidatePreparedMetalButteraugliResidentEncoding(
+      *butteraugli_,
+      {
+        .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                   reconstructed_linear_[1],
+                                   reconstructed_linear_[2]}}},
+        .anchors = MakeResidentAnchors(anchors_, anchor_count_),
+        .block_distance = block_distance_,
+        .score_partials =
+          MakeResidentScorePartials(score_partials_, anchor_count_),
+        .score = score_,
+        .error = reconstruction_error_,
+        .batches = batches,
+      });
+    if (!status.ok()) return status;
+  } else if (options_.metric == AqEvaluationMetric::kButteraugli) {
     status = ValidatePreparedMetalButteraugliEncoding(
       *butteraugli_,
       {
         .distorted_linear_rgb = {{{reconstructed_linear_[0],
                                    reconstructed_linear_[1],
                                    reconstructed_linear_[2]}}},
-        .distance_map = distance_map_,
+        .distance_map = CompleteDistanceMapScratch(),
         .score = score_,
       });
     if (!status.ok()) {
@@ -3428,6 +3527,19 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   return Status::Ok();
 }
 
+DevicePlaneView
+MetalPreparedAqEvaluation::CompleteDistanceMapScratch() const noexcept {
+  // Reconstruction owns three coefficients per coding pixel, so its
+  // contiguous staging is larger than one unpadded source plane. Complete-map
+  // diagnostics upload before reconstruction or run after it has completed;
+  // the small-image production fallback is encoded after reconstruction in
+  // the same command encoder, whose dispatch order prevents overlap.
+  DevicePlaneView distance_map = reconstruction_coefficients_;
+  distance_map.extent = source_extent_;
+  distance_map.row_stride = source_extent_.width;
+  return distance_map;
+}
+
 Status MetalPreparedAqEvaluation::RunBlockReduction(
     ConstPlaneF32View distance_map, PlaneF32View block_distance_map) {
 
@@ -3452,7 +3564,9 @@ Status MetalPreparedAqEvaluation::RunBlockReduction(
   if (!status.ok()) {
     return status;
   }
-  status = UploadPlane(*backend_, distance_map, distance_map_);
+  const DevicePlaneView diagnostic_distance_map =
+    CompleteDistanceMapScratch();
+  status = UploadPlane(*backend_, distance_map, diagnostic_distance_map);
   std::fill(
     readback_.begin(), readback_.end(),
     std::numeric_limits<float>::quiet_NaN());
@@ -3474,11 +3588,15 @@ Status MetalPreparedAqEvaluation::RunBlockReduction(
     return status;
   }
 
+  const BlockReductionSubmissionContext context{
+    .self = this,
+    .distance_map = diagnostic_distance_map,
+  };
   std::unique_ptr<GpuSubmission> submission;
   status = backend_->SubmitCompute(
     "gjxl AQ block-reduction diagnostic",
     &MetalPreparedAqEvaluation::EncodeBlockReductionSubmission,
-    this, &submission);
+    &context, &submission);
   if (!status.ok() || submission == nullptr) {
     Invalidate();
     return status.ok()
@@ -4253,11 +4371,12 @@ void MetalPreparedAqEvaluation::Invalidate() {
 }
 
 void MetalPreparedAqEvaluation::EncodeBlockReduction(
-    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    ConstDevicePlaneView distance_map) const {
 
   encoder->setComputePipelineState(backend.aq_pipelines_.block_reduction.get());
   const MetalBuffer* distance =
-    MetalBackend::AsMetalBuffer(*distance_map_.buffer);
+    MetalBackend::AsMetalBuffer(*distance_map.buffer);
   const MetalBuffer* anchors = MetalBackend::AsMetalBuffer(*anchors_.buffer);
   MetalBuffer* block = MetalBackend::AsMetalBuffer(*block_distance_.buffer);
   MetalBuffer* error =
@@ -4267,7 +4386,7 @@ void MetalPreparedAqEvaluation::EncodeBlockReduction(
     if (batch.anchor_count == 0) {
       continue;
     }
-    encoder->setBuffer(distance->handle(), distance_map_.offset_bytes, 0);
+    encoder->setBuffer(distance->handle(), distance_map.offset_bytes, 0);
     encoder->setBuffer(anchors->handle(), anchors_.offset_bytes, 1);
     encoder->setBuffer(block->handle(), block_distance_.offset_bytes, 2);
     encoder->setBuffer(
@@ -4330,8 +4449,10 @@ void MetalPreparedAqEvaluation::EncodeBlockReductionSubmission(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
     const void* context) {
 
-  const auto& self = *static_cast<const MetalPreparedAqEvaluation*>(context);
-  self.EncodeBlockReduction(backend, encoder);
+  const auto& submission =
+    *static_cast<const BlockReductionSubmissionContext*>(context);
+  submission.self->EncodeBlockReduction(
+    backend, encoder, submission.distance_map);
 }
 
 void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
@@ -4352,16 +4473,37 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
     self.EncodePostprocess(backend, encoder);
   }
   if (self.options_.metric == AqEvaluationMetric::kButteraugli) {
-    EncodePreparedMetalButteraugli(
-      *self.butteraugli_, encoder,
-      {
-        .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                   self.reconstructed_linear_[1],
-                                   self.reconstructed_linear_[2]}}},
-        .distance_map = self.distance_map_,
-        .score = self.score_,
-      });
-    self.EncodeBlockReduction(backend, encoder);
+    if (self.uses_butteraugli_sinks_) {
+      const auto batches =
+        MakeResidentButteraugliBatches(self.block_reduction_params_);
+      EncodePreparedMetalButteraugliResident(
+        *self.butteraugli_, encoder,
+        {
+          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                     self.reconstructed_linear_[1],
+                                     self.reconstructed_linear_[2]}}},
+          .anchors = MakeResidentAnchors(
+            self.anchors_, self.anchor_count_),
+          .block_distance = self.block_distance_,
+          .score_partials = MakeResidentScorePartials(
+            self.score_partials_, self.anchor_count_),
+          .score = self.score_,
+          .error = self.reconstruction_error_,
+          .batches = batches,
+        });
+    } else {
+      EncodePreparedMetalButteraugli(
+        *self.butteraugli_, encoder,
+        {
+          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                     self.reconstructed_linear_[1],
+                                     self.reconstructed_linear_[2]}}},
+          .distance_map = self.CompleteDistanceMapScratch(),
+          .score = self.score_,
+        });
+      self.EncodeBlockReduction(
+        backend, encoder, self.CompleteDistanceMapScratch());
+    }
   } else {
     self.EncodeMaximumErrorReduction(backend, encoder);
   }
@@ -4384,16 +4526,37 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     }
 
     self.EncodePostprocess(backend, encoder);
-    EncodePreparedMetalButteraugli(
-      *self.butteraugli_, encoder,
-      {
-        .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                   self.reconstructed_linear_[1],
-                                   self.reconstructed_linear_[2]}}},
-        .distance_map = self.distance_map_,
-        .score = self.score_,
-      });
-    self.EncodeBlockReduction(backend, encoder);
+    if (self.uses_butteraugli_sinks_) {
+      const auto batches =
+        MakeResidentButteraugliBatches(self.block_reduction_params_);
+      EncodePreparedMetalButteraugliResident(
+        *self.butteraugli_, encoder,
+        {
+          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                     self.reconstructed_linear_[1],
+                                     self.reconstructed_linear_[2]}}},
+          .anchors = MakeResidentAnchors(
+            self.anchors_, self.anchor_count_),
+          .block_distance = self.block_distance_,
+          .score_partials = MakeResidentScorePartials(
+            self.score_partials_, self.anchor_count_),
+          .score = self.score_,
+          .error = self.reconstruction_error_,
+          .batches = batches,
+        });
+    } else {
+      EncodePreparedMetalButteraugli(
+        *self.butteraugli_, encoder,
+        {
+          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                     self.reconstructed_linear_[1],
+                                     self.reconstructed_linear_[2]}}},
+          .distance_map = self.CompleteDistanceMapScratch(),
+          .score = self.score_,
+        });
+      self.EncodeBlockReduction(
+        backend, encoder, self.CompleteDistanceMapScratch());
+    }
 
     self.EncodeResidentPolicyUpdate(
       backend, encoder, static_cast<uint32_t>(iteration));
@@ -4511,13 +4674,35 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
           .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
                                      self.reconstructed_linear_[1],
                                      self.reconstructed_linear_[2]}}},
-          .distance_map = self.distance_map_,
+          .distance_map = self.CompleteDistanceMapScratch(),
           .score = self.score_,
         },
         stage.butteraugli_stage);
       break;
+    case ResidentProfileStage::kButteraugliResident: {
+      const auto batches =
+        MakeResidentButteraugliBatches(self.block_reduction_params_);
+      EncodePreparedMetalButteraugliResidentProfileStage(
+        *self.butteraugli_, encoder,
+        {
+          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                     self.reconstructed_linear_[1],
+                                     self.reconstructed_linear_[2]}}},
+          .anchors = MakeResidentAnchors(
+            self.anchors_, self.anchor_count_),
+          .block_distance = self.block_distance_,
+          .score_partials = MakeResidentScorePartials(
+            self.score_partials_, self.anchor_count_),
+          .score = self.score_,
+          .error = self.reconstruction_error_,
+          .batches = batches,
+        },
+        stage.butteraugli_stage);
+      break;
+    }
     case ResidentProfileStage::kBlockReduction:
-      self.EncodeBlockReduction(backend, encoder);
+      self.EncodeBlockReduction(
+        backend, encoder, self.CompleteDistanceMapScratch());
       break;
     case ResidentProfileStage::kPolicyUpdate:
       self.EncodeResidentPolicyUpdate(backend, encoder, stage.iteration);

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "butteraugli_fixtures.h"
@@ -379,9 +380,9 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   const size_t working_width = std::max<size_t>(8, extent.width);
   const size_t working_height = std::max<size_t>(8, extent.height);
   const size_t main_cache =
-    11 * working_width * working_height * sizeof(float);
+    12 * working_width * working_height * sizeof(float);
   const size_t sub_cache = extent.width >= 15 && extent.height >= 15
-    ? 10 * ((extent.width + 1) / 2) * ((extent.height + 1) / 2) *
+    ? 12 * ((extent.width + 1) / 2) * ((extent.height + 1) / 2) *
         sizeof(float)
     : 0;
   if (!gjxl::QueryMetalButteraugliResourceUsageForTest(
@@ -452,6 +453,97 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
     std::cerr << "Fresh Metal preparation ignored mutated reference for "
               << extent.width << 'x' << extent.height << '\n';
     return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool CheckIndependentReferenceCaches() {
+  struct Case {
+    explicit Case(gjxl::Extent2D size) : reference(size), distorted(size) {}
+    HostImage reference;
+    HostImage distorted;
+    DeviceImage device_reference;
+    DeviceImage device_distorted;
+    gjxl::test::GuardedDevicePlane device_map;
+    gjxl::test::GuardedDevicePlane device_score;
+    std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
+    std::vector<float> expected_map;
+    double expected_score = 0.0;
+  };
+  std::unique_ptr<gjxl::GpuBackend> backend;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backend).ok()) {
+    return false;
+  }
+  const auto compare = [](Case& item, std::vector<float>* map, double* score) {
+    const auto extent = item.reference.extent;
+    map->resize(extent.width * extent.height);
+    return item.prepared->Compare({item.device_distorted.View(),
+                                   item.device_map.View(),
+                                   item.device_score.View()}).ok() &&
+           item.prepared->ReadDistanceMap(
+             {map->data(), extent, extent.width}).ok() &&
+           item.prepared->ReadScore(score).ok();
+  };
+  const auto prepare = [&](gjxl::Extent2D extent, float offset) {
+    auto item = std::make_unique<Case>(extent);
+    FillFixture(&item->reference, &item->distorted, false);
+    for (auto& plane : item->reference.values) {
+      for (size_t y = 0; y < extent.height; ++y) {
+        for (size_t x = 0; x < extent.width; ++x) {
+          plane[y * item->reference.stride + x] += offset;
+        }
+      }
+    }
+    if (!item->device_reference.Prepare(*backend, extent, 3) ||
+        !item->device_distorted.Prepare(*backend, extent, 7) ||
+        !item->device_reference.Upload(item->reference) ||
+        !item->device_distorted.Upload(item->distorted) ||
+        !item->device_map.Prepare(*backend, extent, extent.width + 9).ok() ||
+        !item->device_score.Prepare(*backend, {1, 1}, 3).ok() ||
+        !gjxl::PrepareDeviceButteraugli(
+          *backend, {item->device_reference.View(), {}},
+          &item->prepared).ok() ||
+        !compare(*item, &item->expected_map, &item->expected_score)) {
+      return std::unique_ptr<Case>{};
+    }
+    std::vector<float> oracle(extent.width * extent.height);
+    double oracle_score = 0.0;
+    if (!gjxl::ComputeButteraugliDistance(
+          item->reference.ConstView(), item->distorted.ConstView(), {},
+          {oracle.data(), extent, extent.width}, &oracle_score).ok() ||
+        std::abs(oracle_score - item->expected_score) > kMetalTolerance) {
+      return std::unique_ptr<Case>{};
+    }
+    for (size_t index = 0; index < oracle.size(); ++index) {
+      if (std::abs(oracle[index] - item->expected_map[index]) > kMetalTolerance) {
+        return std::unique_ptr<Case>{};
+      }
+    }
+    return item;
+  };
+  auto first = prepare({31, 19}, 0.0f);
+  auto second = prepare({47, 33}, 0.13f);
+  const auto repeat = [&](Case& item) {
+    std::vector<float> map;
+    double score = 0.0;
+    return compare(item, &map, &score) && SameBits(map, item.expected_map) &&
+           std::bit_cast<uint64_t>(score) ==
+             std::bit_cast<uint64_t>(item.expected_score);
+  };
+  for (size_t iteration = 0; iteration < 4; ++iteration) {
+    if (!first || !second) return false;
+    bool first_ok = false;
+    bool second_ok = false;
+    std::thread a([&] { first_ok = repeat(*first); });
+    std::thread b([&] { second_ok = repeat(*second); });
+    a.join();
+    b.join();
+    if (!first_ok || !second_ok) return false;
+    if (iteration == 1) {
+      // Replace one cache with different geometry while its neighbor stays live.
+      first.reset();
+      first = prepare({15, 17}, 0.07f);
+    }
   }
   return true;
 }
@@ -601,6 +693,11 @@ int main() {
     }
   }
 #endif
+  if (!CheckIndependentReferenceCaches()) {
+    std::cerr << "Independent Metal reference caches changed across reuse\n";
+    return EXIT_FAILURE;
+  }
+
   if (!CheckIntermediateStageGoldens(&maximum_stage_error)) {
     return EXIT_FAILURE;
   }

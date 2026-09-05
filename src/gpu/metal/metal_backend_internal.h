@@ -190,11 +190,12 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> blur5_horizontal;
   NS::SharedPtr<MTL::ComputePipelineState> blur5_vertical;
   NS::SharedPtr<MTL::ComputePipelineState> convolution_transpose;
-  NS::SharedPtr<MTL::ComputePipelineState> opsin_blur5;
-  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_convolve;
+  NS::SharedPtr<MTL::ComputePipelineState> opsin_blur5_tiled;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_tiled;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_high_convolve;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_suppress_x;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_ultra_convolve;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_ultra_mask_convolve;
   NS::SharedPtr<MTL::ComputePipelineState> malta_scale;
   NS::SharedPtr<MTL::ComputePipelineState> malta_response;
   NS::SharedPtr<MTL::ComputePipelineState> malta_fused;
@@ -204,8 +205,10 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> masked_ac;
   NS::SharedPtr<MTL::ComputePipelineState> final;
   NS::SharedPtr<MTL::ComputePipelineState> final_masked_ac;
+  NS::SharedPtr<MTL::ComputePipelineState> final_l2_masked_ac;
   NS::SharedPtr<MTL::ComputePipelineState> crop;
   NS::SharedPtr<MTL::ComputePipelineState> compose;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
 };
 

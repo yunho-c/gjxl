@@ -1,0 +1,2185 @@
+# Metal Butteraugli fusion investigation
+
+Date: 2026-09-04; updated 2026-09-05
+
+- Planning branch: `perf/metal-fusion`
+- Baseline commit: `4eda200f8cf62db6f2544f47f504bc4c3b4131cf`
+- Primary target: ordinary effort 7, fully resident Metal, multiscale
+  Butteraugli, final diagnostic score disabled
+- Initial qualification device: Apple M4 Pro
+- Status: Phases 0--7 complete
+- Completed work: Phases 0--7, with the combined Phase 7 cache layout retained
+
+## Executive outcome
+
+The completed experiments support a small set of selective Butteraugli
+**superkernels**, not one monolithic kernel and not indiscriminate launch
+fusion. The retained path combines 5-tap blur with Opsin conversion, computes
+33-tap low/medium filtering through a direct-load tile, writes the final
+metric directly into resident block and score sinks, computes raw mask
+activity in the final ultra-Y pass, and evaluates L2 contributions inside the
+main-scale and subscale final-distance sinks. Launch-only Malta and
+channel fusions were neutral or slower and were removed.
+
+Slice F / Phase 6.3 retains L2 accumulation in both final-distance sinks.
+The combined L2/sink GPU budget improved 34.91%, resident AQ improved 6.18%,
+and complete encodes improved 2.42% on padded 4K against its Phase 6.2 control.
+Slice G / Phase 7 retains cached subscale blur and both reference erosion
+results, using an existing slot for main erosion. It adds 15.8 MiB of prepared
+allocation at 4K. Its confirmation improved complete padded-4K encoding 1.09%,
+with mixed initial results and measured low-reuse regressions documented below.
+The completed Phase 6 qualifications remain unchanged.
+
+The fully resident AQ path already records reconstruction, filtering,
+Butteraugli, block reduction, and policy updates into one ordered compute
+encoder and waits once. Its remaining Butteraugli cost comes from a deep serial
+graph of full-image kernels. The pre-fusion baseline recorded:
+
+- 44 Butteraugli dispatches to prepare the invariant reference;
+- about 72 dispatches for each distorted-image comparison; and
+- 144 comparison dispatches at ordinary effort 7, whose current policy performs
+  two scored evaluations when no final diagnostic evaluation is requested.
+
+The investigated fusion work was therefore inside the command buffer: launch
+fewer thread grids, keep short-lived values in registers or threadgroup memory,
+and avoid writing and rereading full-image intermediates. The investigation
+order was:
+
+1. fuse all six Malta stages for one scale into one tiled dispatch;
+2. fuse independent channel work in psycho-image construction and subsampling;
+3. test tile-local separable convolution only where saved global traffic exceeds
+   halo duplication and resource pressure;
+4. add a resident-only final-distance and reduction path that need not
+   materialize a public diagnostic map; and
+5. tune each resulting kernel's threadgroup shape from counter evidence.
+
+This began as an investigation plan, not a forecast. Its working target was to reduce a
+comparison from about 72 dispatches to 25--35 and its approximate launched
+thread count from about 350 million to 150--200 million at padded 4K. Those
+numbers are design goals to falsify, not measured results. A 1.5--2x speedup of
+Butteraugli evaluation is plausible only if the fused kernels retain healthy
+occupancy and do not replace device-memory traffic with excessive halo work,
+register pressure, or threadgroup barriers.
+
+## What the counter result does and does not mean
+
+The earlier phrase "launch-dominated" needs a precise interpretation. Apple's
+Compute Shader Launch limiter includes both useful work that launches threads
+and stalls caused by launch backpressure. A high value can mean that enough
+threads are being launched, or that resource pressure prevents more threads
+from launching. It is not a direct measurement of CPU API calls, command-buffer
+submission latency, or a fixed cost per dispatch. Apple explicitly recommends
+checking threadgroup-memory use, occupancy-manager targets, cache behavior, and
+other resource pressure after observing a high launch limiter.
+
+This distinction is important here:
+
+- the resident AQ loop already uses one command buffer, one compute encoder,
+  and one final wait in
+  [`metal_aq_evaluation.cpp`](../src/gpu/metal/metal_aq_evaluation.cpp);
+- each comparison still launches hundreds of millions of shader threads over
+  dozens of dependent passes; and
+- the generic plane helper currently chooses an `8 x 8` threadgroup for nearly
+  every Butteraugli plane kernel in
+  [`metal_primitives.cpp`](../src/gpu/metal/metal_primitives.cpp).
+
+The counters therefore justify investigating fusion, but they do not prove
+that merely turning six dispatch API calls into one will recover a large fixed
+overhead. A successful superkernel must reduce at least one of:
+
+- launched thread volume;
+- global intermediate reads and writes;
+- redundant address, bounds, and per-thread setup work;
+- launch backpressure caused by the old kernels' resource profiles; or
+- the number of unavoidable serial full-frame passes.
+
+The interpretation follows Apple's descriptions of the
+[Shader Launch limiter](https://developer.apple.com/videos/play/tech-talks/111374/?time=332),
+[GPU occupancy](https://developer.apple.com/documentation/xcode/finding-your-metal-apps-gpu-occupancy),
+and
+[threadgroup/grid sizing](https://developer.apple.com/documentation/metal/calculating-threadgroup-and-grid-sizes).
+Apple's
+[visual-timeline guidance](https://developer.apple.com/documentation/xcode/analyzing-apple-gpu-performance-using-a-visual-timeline)
+also recommends avoiding unnecessarily small passes because work exists
+between passes, but the GJXL capture must determine how much that consideration
+matters relative to actual Butteraugli arithmetic.
+
+## Evidence and its limits
+
+### Valid System Trace capture
+
+The retained clean Performance Limiters capture attributed the following GPU
+activity on Apple M4 Pro:
+
+| Stage | GPU activity | Mean occupancy | Mean bandwidth | Main signals |
+| --- | ---: | ---: | ---: | --- |
+| Butteraugli reference preparation | `22.017 ms` | `80.5%` | `160.1 GB/s` | shader launch, instruction throughput |
+| Resident AQ command buffer | `120.225 ms` | `66.3%` | `148.4 GB/s` | shader launch, instruction throughput |
+
+The resident number includes reconstruction, filters, Butteraugli, reductions,
+policy work, and final-frame work. It is not a Butteraugli-only timing. About
+`17.4 ms` of counter intervals overlapping other processes' GPU activity was
+conservatively excluded from that capture. The trace predates this planning
+branch, so it supports the architectural diagnosis but must be repeated on the
+current revision before promotion.
+
+### Intrusive stage profile
+
+A retained padded-4K stage profile at `3839 x 2159` recorded this sample:
+
+| Submission or group | GPU timestamp time | Dispatches |
+| --- | ---: | ---: |
+| Reference preparation | `29.665 ms` | `44` |
+| Resident AQ command buffer | `179.813 ms` | `316` |
+| Butteraugli groups inside resident AQ | `127.788 ms` | `144` |
+| Resident reconstruction | `26.277 ms` | `113` |
+| Final frame | `6.379 ms` | `34` |
+| Resident block reduction | `1.704 ms` | `14` |
+| Resident quantizer work | about `2.17 ms` | `60` |
+
+The stage instrumentation inflates execution and its absolute times must not be
+substituted for complete-encode or System Trace timings. Its dispatch list and
+relative composition are still useful. Across two resident comparisons it
+attributed:
+
+| Butteraugli group | GPU timestamp time | Dispatches |
+| --- | ---: | ---: |
+| Main-scale psycho construction | `49.590 ms` | `38` |
+| Main-scale Malta | `24.792 ms` | `12` |
+| Subscale psycho construction, including subsampling | `14.611 ms` | `44` |
+| Main-scale mask and final metric | `11.262 ms` | `10` |
+| Main-scale L2 | `10.726 ms` | `2` |
+| Subscale Malta | `6.929 ms` | `12` |
+| Subscale mask and final metric | `4.869 ms` | `18` |
+| Subscale L2 | `2.782 ms` | `2` |
+| Scalar score reduction | `2.228 ms` | `6` |
+
+These values make psycho construction and Malta the best first fusion targets.
+They do not predict the speedup of a fused implementation.
+
+The local evidence retained when this plan was written is:
+
+- `/private/tmp/gjxl-metal-trace.SFPRQe/gjxl-effort7-4k-performance-limiters.trace`;
+- `/private/tmp/gjxl-metal-trace.SFPRQe/gjxl-metal-performance-limiters.tracetemplate`;
+  and
+- `/private/tmp/gjxl-metal-trace.SFPRQe/handoff-stage-profile.json`.
+
+These temporary paths are provenance, not durable repository fixtures. Phase 0
+must produce a fresh current-revision capture rather than depending on them.
+
+### Amdahl bound from the earlier public-workflow baseline
+
+The earlier complete padded-4K effort-7 baseline was `390.358 ms`, with about
+`82.032 ms` of timestamped resident Butteraugli stages and `22.054 ms` of
+reference preparation. If a hypothetical implementation halved exactly that
+`104.086 ms` and changed nothing else, the arithmetic upper estimate would be a
+`52.043 ms`, or `13.3%`, complete-workflow saving:
+
+```text
+T_new = T_total - T_target + T_target / speedup
+```
+
+That is an illustration of scale, not a current benchmark. Subsequent changes,
+queue overlap, instrumentation, and any change to the effort-7 evaluation
+policy all alter the real bound. Every slice below must be judged at the current
+complete public-workflow boundary as well as inside the GPU stage.
+
+## Current Butteraugli topology
+
+The implementation in
+[`metal_butteraugli.cpp`](../src/gpu/metal/metal_butteraugli.cpp) uses 33
+reusable working planes, five blur kernels with lengths `5`, `33`, `15`, `7`,
+and `13`, a `32 x 8` Malta output tile with radius 4, and a 256-thread scalar
+maximum reduction. The shaders in
+[`butteraugli.metal`](../src/gpu/metal/kernels/butteraugli.metal) are compiled
+with safe math, precise FP32 functions, and contraction disabled by
+[`CMakeLists.txt`](../CMakeLists.txt). The shader also uses explicit
+`unfused_multiply_add` expressions where evaluation order matters.
+
+### Reference preparation
+
+For a normal multiscale image without expansion:
+
+```text
+main psycho image                              19 dispatches
+main reference-mask precompute and blur         3
+three-channel 2x subsample                       3
+subscale psycho image                           19
+                                                --
+reference preparation                           44
+```
+
+The subscale reference psycho planes are cached. Its blurred mask is not; the
+current comparison reconstructs that mask at subscale.
+
+### One distorted-image comparison
+
+```text
+main psycho image                              19
+main difference: Malta 6 + L2 1 + mask/final 5 12
+three-channel 2x subsample                       3
+subscale psycho image                           19
+subscale difference                              15
+main/sub composition                              1
+maximum reduction                                ~3
+                                                 --
+one comparison                                  ~72
+```
+
+The 19 psycho-image dispatches per scale are:
+
+```text
+three 5-tap horizontal channel blurs              3
+fused vertical blur and Opsin conversion           1
+three 33-tap transposed channel convolutions       3
+fused low/medium-frequency output                  1
+two high-frequency channels, two passes each       4
+medium-B separable blur                            2
+X suppression                                      1
+two ultra-frequency channels, two passes each      4
+                                                  --
+                                                  19
+```
+
+The six Malta stages already fuse scale calculation and neighborhood response
+within each stage. Each stage nevertheless traverses its scale independently
+and reads and updates one full accumulation plane. The strict accumulation
+order is `4, 5, 2, 3, 0, 1`; stages 4 and 5 initialize the two accumulation
+channels before the remaining four additions.
+
+### Approximate launched-thread volume
+
+Let `N = 8,288,401` main-scale pixels and `M = 2,073,600` subscale pixels for
+the retained padded-4K image. Ignoring edge rounding and counting reduction
+threads approximately:
+
+```text
+reference preparation     = 22N + 22M  = 227,964,022 threads
+one comparison            ~ 33N + 37M  = 350,240,433 threads
+reference + two compares                 928,444,888 threads
+```
+
+This is why launch machinery can be a strong limiter even though the work is
+recorded in one command buffer: the GPU is launching close to a billion
+Butteraugli threads through a serial pass graph. Many of those threads do only
+one channel or one small transform stage, then commit an intermediate that a
+later grid reads back.
+
+## Design rules
+
+1. **Fuse semantic neighborhoods, not the entire metric.** Use several
+   independently measurable superkernels. A single megakernel would accumulate
+   too much live state, threadgroup memory, control flow, and compile-time
+   complexity.
+2. **Preserve strict arithmetic order.** Fusion may change rounding even with
+   strict compiler flags. Malta accumulation, convolution sum order, nonlinear
+   transforms, and final powers must retain their existing expression order.
+3. **Optimize the ordinary resident path first.** Public distance-map and
+   intermediate-stage diagnostics have different materialization requirements.
+   They must remain correct, but they should not force the encoder to write
+   planes it does not consume.
+4. **Keep A/B machinery temporary and internal.** Use two Release build
+   directories selected by a private compile definition during an experiment.
+   Do not add a public execution-plan API. After qualification, retain one
+   normal implementation and remove the experiment switch.
+5. **Do not infer a win from dispatch count.** Record elapsed GPU time,
+   complete encode time, occupancy, launch limiter, instruction limiter,
+   threadgroup-memory use, register pressure indicators, bandwidth, and output
+   correctness for every slice.
+6. **Promote slices independently.** A failed tiled 33-tap convolution must not
+   block a successful six-way Malta or three-channel subsample fusion.
+
+## Proposed superkernels
+
+### Slice A: six-way Malta fusion
+
+This is the recommended first experiment. It is bounded, the existing tile
+implementation is already available, and Malta represented `31.72 ms` across
+main and sub scales in the intrusive two-evaluation sample.
+
+Add `gjxl_butteraugli_malta_sixway_f32`. One `32 x 8` threadgroup owns one
+output tile. It processes the six psycho-plane pairs serially in the existing
+order and retains the two output-pixel accumulators in FP32 registers:
+
+```text
+ac[0] = 0
+ac[1] = 0
+for stage in [4, 5, 2, 3, 0, 1]:
+    cooperatively load and scale this stage's haloed tile
+    threadgroup barrier
+    response = existing LF or full Malta neighborhood expression
+    channel = (stage is even) ? 1 : 0
+    if stage >= 4: ac[channel] = response
+    else:          ac[channel] = ac[channel] + response
+    threadgroup barrier before reusing tile storage
+store ac[0] and ac[1] once
+```
+
+The kernel should use one `(32 + 8) x (8 + 8)` FP32 threadgroup tile, or 2,560
+bytes, exactly as one current stage does. It does **not** need six tiles live at
+once. The second barrier is necessary so early threads cannot overwrite the
+shared tile while late threads still read it.
+
+Expected structural change per comparison:
+
+- main Malta: 6 dispatches to 1;
+- subscale Malta: 6 dispatches to 1;
+- six accumulation-plane writes/read-modify-writes to two final writes per
+  scale, or 12 to four across both scales; and
+- no change to Malta neighborhood arithmetic or source-plane reads.
+
+Across the current two effort-7 comparisons, this removes 20 dispatches. It
+does not reduce the six sets of input samples or the dominant neighborhood
+math, so a large speedup is not guaranteed.
+
+Implementation notes:
+
+- add a parameter block containing six reference/distorted strides, weights,
+  norms, low/full selectors, and offsets, or bind the twelve plane views
+  directly for the first experiment;
+- preserve `kMaltaAccumulationOrder` on the host and duplicate it in a tested
+  shader constant only if avoiding dynamic indexing is measurably better;
+- when a Malta response stage is being captured for diagnostics, either write
+  that selected response from the fused loop or temporarily use the baseline
+  implementation; and
+- compare both `32 x 8` and `16 x 8` tiles if counters show the six-stage live
+  range reducing occupancy. Do not assume the current shape remains optimal.
+
+Primary failure modes are instruction-cache growth, register spills, lower
+occupancy, and barrier cost. Stop this slice if GPU time fails to improve
+reliably even after trying the two bounded tile shapes; do not keep it merely
+because it lowers the dispatch count.
+
+### Slice B: channel-fused psycho construction
+
+Several current grids differ only by channel. One thread can compute all
+independent channels at a pixel and write planar outputs. This reduces grid
+launches and thread setup while preserving the same loads, stores, and
+arithmetic.
+
+Implement these kernels separately so each can be accepted or rejected:
+
+1. three-channel 5-tap horizontal blur: 3 dispatches to 1;
+2. three-channel 33-tap transposed convolution: 3 to 1;
+3. X/Y 15-tap transpose pass: 2 to 1;
+4. X/Y high-frequency vertical pass: 2 to 1;
+5. X/Y 7-tap transpose pass: 2 to 1;
+6. X/Y ultra-frequency vertical pass: 2 to 1; and
+7. three-channel 2x subsample: 3 to 1.
+
+Without changing the separable-convolution topology, items 1--6 can reduce
+`EncodePsychoImage` from 19 to about 11 dispatches. Item 7 removes two more
+dispatches wherever subsampling occurs. The rough Butteraugli graph would move
+from 44 to about 26 dispatches for reference preparation and from 72 to about
+54 for one comparison.
+
+Use explicit scalar channel accumulators initially. A `float3` spelling is
+acceptable only if generated code and strict results match; planar buffers do
+not guarantee beneficial vector loads. Every variant needs a Shader Cost Graph
+or counter comparison because tripling per-thread live values can reduce
+occupancy enough to offset the lower thread count.
+
+The 33-tap pass is the most likely channel-fusion winner because it amortizes
+address/bounds setup over substantial arithmetic. The 5-tap and subsample
+kernels are lower-risk implementation probes but may have a smaller GPU-time
+effect.
+
+### Slice C: tile-local separable convolutions
+
+The current generic convolution writes a transposed full-image intermediate
+and a later kernel reads it to complete the other axis. A true convolution
+superkernel can stage a haloed tile in threadgroup memory, perform both axes,
+and emit only the semantic output planes.
+
+Investigate by radius, not with one generic kernel:
+
+| Kernel length | Radius | Candidate | Risk |
+| ---: | ---: | --- | --- |
+| 5 | 2 | fuse input blur and Opsin conversion | low-to-medium |
+| 7 | 3 | fuse high-to-ultra separable filtering | medium |
+| 13 | 6 | fuse mask blur | medium |
+| 15 | 7 | fuse medium-to-high filtering | medium-to-high |
+| 33 | 16 | fuse low/medium filtering | high |
+
+The 5-tap path is attractive: a three-channel halo tile can remove all three
+horizontal intermediate writes and reads before the existing Opsin transform.
+The 7- and 13-tap paths may also fit comfortably.
+
+The 33-tap path must be treated skeptically. For an `8 x 8` output tile, three
+FP32 input-channel tiles with a 16-pixel halo require roughly 19.2 KiB before
+any additional shared state, and adjacent threadgroups redundantly load large
+halos. Larger output tiles reduce halo duplication but raise thread count and
+working-set pressure. Alternatives to test are:
+
+- channel fusion while retaining the global transpose intermediate;
+- a two-superkernel strip design rather than a one-dispatch 2D blur;
+- one channel per dispatch with a larger reusable tile; and
+- a sliding-window implementation that trades registers for fewer loads.
+
+For each radius, calculate and record:
+
+```text
+global bytes avoided
+halo-load amplification
+threadgroup bytes per group
+estimated registers or compiler occupancy report
+measured occupancy and occupancy-manager target
+measured GPU stage time
+```
+
+Reject any variant that wins only on dispatch count while increasing the
+complete psycho stage.
+
+### Slice D: resident final metric and reductions
+
+The ordinary encoder consumes block distances and a scalar score. It does not
+need the complete per-pixel distance map unless a final diagnostic is requested.
+The public Butteraugli API and stage-capture tests do need materialized planes,
+so this slice must be a narrow resident-only entry point rather than a public
+mode switch.
+
+The candidate dataflow is:
+
+```text
+subscale final map + main-scale difference intermediates
+                         |
+                         v
+strategy-aware anchor threadgroups
+  - evaluate the main-scale final masked distance
+  - compose it with the cached subscale value on demand
+  - accumulate distance^16 for the transform footprint
+  - emit one block distance
+  - emit one partial scalar maximum
+                         |
+                         v
+small final maximum reduction
+```
+
+Each pixel belongs to one non-overlapping selected transform footprint, so the
+block-reduction grid can become the consumer of the final metric instead of
+rereading a stored distance map. The transform reduction must remain:
+
+```text
+1.2 * pow(mean(pow(distance, 16)), 1.0 / 16.0)
+```
+
+The first implementation should retain the quarter-area subscale final map so
+that its expensive final expression is evaluated once per subscale pixel, not
+four times while processing main-scale pixels. It can potentially remove:
+
+- the final full-resolution distance-map store and reread;
+- the separate compose pass;
+- the first full-image scalar-maximum pass; and
+- some or all of the seven per-strategy block-reduction dispatch boundaries.
+
+Do not start here. It couples Butteraugli to the strategy-anchor layout, has a
+larger correctness surface, and risks divergent work if all transform shapes
+share one kernel. First establish whether Malta and channel fusion move the
+measured budget as predicted.
+
+A clean interface is a new internal function in
+`metal_butteraugli_encoding.h` that accepts the resident reduction sinks and
+anchor metadata. The existing public comparison descriptor remains unchanged.
+If `collect_final_butteraugli_score`, map capture, or a public diagnostic plane
+is requested, use the complete-map implementation. Once qualified, this is a
+single semantic split—materialized diagnostics versus encoder sinks—not a
+general execution-plan framework.
+
+### Slice E: threadgroup specialization
+
+Threadgroup tuning is a follow-up to each fusion, not a substitute for it. The
+current `8 x 8` generic plane shape should be compared with `16 x 8`, `16 x 16`,
+and any algorithm-native tile only when supported by the pipeline's
+`threadExecutionWidth` and `maxTotalThreadsPerThreadgroup`.
+
+For each fused kernel, capture:
+
+- achieved occupancy and occupancy-manager target;
+- compute shader launch limiter;
+- FP32, instruction-throughput, texture/buffer, L1, LLC, and MMU limiters;
+- threadgroup-memory allocation;
+- compiler-reported register or spill evidence where available; and
+- edge inefficiency for Kodak, 1080p, and odd padded dimensions.
+
+Reduced occupancy is not automatically a regression. A more productive kernel
+can be faster with fewer resident SIMD groups if its limiting execution unit is
+already busy. Judge the shape by elapsed stage and workflow time, using counters
+to explain the result.
+
+### Slice F: pointwise producer/consumer fusion
+
+The remaining pointwise passes offer three bounded experiments that do not need
+larger convolution halos or additional threadgroup barriers:
+
+1. compute high Y before high X and apply X suppression while producing high X;
+2. compute raw mask activity while producing the final ultra-frequency Y
+   output, reusing the already completed high/ultra X values; and
+3. compute L2 contributions while evaluating final distances, first in the
+   resident main-scale sink and then in the subscale final-map producer.
+
+Preserve the FP32 operation order and all diagnostic outputs. In the second
+experiment, the raw mask must occupy a plane disjoint from the live transposed
+convolution input and survive Malta, L2, and uncached reference-mask work until
+its blur consumes it. Do not add persistent reference-mask caching to this
+slice: that changes storage and preparation costs independently of fusion.
+
+The third experiment extends Slice D's sinks with pointwise arithmetic from
+`gjxl_butteraugli_l2_f32`. Preserve the incoming Malta accumulation and the
+exact L2, masking, and reduction order. Additional psycho-plane bindings and
+longer register lifetimes make this a larger resource-pressure experiment than
+the first two. Retain a materialized path for diagnostic consumers.
+
+Phases 6.1 and 6.2 used the retained Phase 5 control. Phase 6.3 used the
+immutable `dd19246` control, containing the retained mask-fusion implementation
+at `10c5531`. Mask fusion moves arithmetic into psycho construction, and L2
+fusion moves it into final-distance consumers, so
+compare combined producer/consumer GPU time as well as the resident submission.
+Retain a change only when its gain survives paired complete-encode measurements
+and the existing correctness gates.
+
+### Slice G: invariant reference preparation and caching
+
+Phase 7 moves reference-only work into evaluator preparation and retains its
+outputs. Preparation cost, reuse, and storage were measured separately from
+pointwise fusion. In `EncodePreparation` and `EncodeDifference` in
+[`metal_butteraugli.cpp`](../src/gpu/metal/metal_butteraugli.cpp), the retained
+reference state is:
+
+| Reference result | Lifetime | Storage |
+| --- | --- | --- |
+| Main-scale blurred mask | Cached during reference preparation | Existing full-size slot 20 |
+| Subscale blurred mask | Cached during reference preparation | Added packed subscale plane |
+| Main-scale fuzzy-eroded mask | Cached during reference preparation | Existing full-size slot 30, reclassified from scratch |
+| Subscale fuzzy-eroded mask | Cached during reference preparation | Added packed subscale plane |
+
+Blurred masks remain available for the reference/distorted activity correction;
+eroded values cannot replace them. Distorted activity and mask generation still
+run per comparison. Logical cached-reference storage grows by `4 * (N + 2 * M)`
+bytes for main area `N` and subscale area `M`: 47.4 MiB at padded 4K. Reusing the
+main mask slot reduces added allocation to `8 * M` bytes, measured as 15.8 MiB.
+
+All cache views belong to the existing prepared-reference arena and follow its
+invalidation and destruction rules. Lease count and lifetime limits are
+unchanged. Phase 7 below records the independent increments, the final combined
+qualification, and the low-reuse tradeoffs.
+
+## Implementation sequence
+
+### Phase 0: refresh and freeze the baseline
+
+1. Build the current branch in a fresh Release directory.
+2. Record commit, tree hash, compiler/Xcode version, macOS version, device, GPU
+   family, command line, input hashes, output hashes, and thermal state.
+3. Capture ordinary effort-7 padded 1080p and padded 4K public-workflow
+   baselines with the final diagnostic score disabled.
+4. Capture one stage profile to verify that the current source still records
+   44 reference and about 72 per-comparison Butteraugli dispatches.
+5. Capture a clean Metal System Trace with the same Performance Limiters
+   counter set used previously.
+
+Use two build directories for temporary A/B selection, for example
+`build/release-metal-baseline` and `build/release-metal-fused`. A private CMake
+compile definition may select the experiment. It must not enter the public C,
+C++, or benchmark behavior contract, and it should be deleted after promotion.
+
+### Phase 1: six-way Malta
+
+Files expected to change:
+
+- `src/gpu/metal/kernels/butteraugli.metal`: parameter layout and kernel;
+- `src/gpu/metal/metal_backend_internal.h`: temporary pipeline state;
+- `src/gpu/metal/metal_butteraugli.cpp`: pipeline creation, binding, dispatch,
+  capture fallback, and resource checks;
+- `tests/metal_butteraugli_test.cpp`: stage and end-result comparisons; and
+- profiling/benchmark code only as needed to expose the private build identity.
+
+Gates before retaining the slice:
+
+- exact or existing-tolerance agreement for all six captured Malta responses;
+- complete Metal-vs-CPU distance map and score tests without wider tolerance;
+- no NaN, bounds, odd-size, or small-image failures;
+- deterministic repeated output;
+- lower Malta GPU time in at least four of five alternating independent-process
+  pairs at padded 4K; and
+- no statistically credible regression on Kodak or padded 1080p.
+
+If successful, commit this slice independently before beginning channel fusion.
+
+#### Phase 0 and Phase 1 result (2026-09-04)
+
+The current-revision Phase 0 baseline was captured from commit `25f3cbd` on an
+Apple M4 Pro with a fresh Release build. Five independent processes, each with
+two discarded warmups and one retained effort-7 fully-resident sample, produced
+these medians:
+
+| Workload | Complete encode | Quantization pipeline | Codestream bytes |
+| --- | ---: | ---: | ---: |
+| padded 1080p | `91.715 ms` | `72.101 ms` | `410072` |
+| padded 4K | `315.240 ms` | `271.036 ms` | `1606911` |
+
+A five-sample padded-4K stage profile measured `22.301 ms` for reference
+preparation and `117.653 ms` for resident AQ. Inside resident AQ, the medians
+were `13.114 ms` for main-scale Malta, `3.246 ms` for subscale Malta,
+`32.012 ms` for main-scale psycho construction, and `8.660 ms` for subscale
+psycho construction. The associated capture retained 44 reference dispatches
+and 316 resident-AQ dispatches. A fresh System Trace and Performance Limiters
+capture were also recorded; their workflow timings remain diagnostic rather
+than public benchmark results.
+
+The Phase 1 prototype fused all six Malta stages at a scale into one kernel,
+preserved the established accumulation order, and reused one haloed
+threadgroup tile. Both `32 x 8` and `16 x 8` variants compiled with strict Metal
+settings and passed the focused Metal Butteraugli test. The `32 x 8` variant
+removed exactly 20 dispatches from the profiled two-evaluation resident AQ
+submission, reducing the resident count from 316 to 296. That structural win
+did not translate into a meaningful timing win:
+
+- the median Malta time changed from `16.259 ms` to `16.167 ms` (`0.6%`);
+- the median resident-AQ time changed from `117.563 ms` to `116.871 ms`
+  (`0.6%`); and
+- the `16 x 8` shape was not materially better.
+
+In five alternating independent-process complete-encode pairs, `32 x 8` won
+three of five padded-1080p pairs, but only two of five padded-4K pairs. The 4K
+median changed from `308.607 ms` to `311.022 ms`, a `0.78%` regression, while
+all output byte counts remained identical. This fails both the majority-pair
+and practical-value promotion gates. The prototype has therefore been removed
+rather than leaving an inactive pipeline or build selector in production.
+
+This rejection narrows the diagnosis: the number of Malta dispatches is not by
+itself the fundamental cost. The fused kernel still performs all six
+neighborhood evaluations and introduces repeated tile loads and barriers, so
+its useful arithmetic dominates the saved inter-dispatch work. Phase 2 should
+proceed as a sequence of independently measured channel-fusion experiments,
+starting with subsampling and the 5-tap horizontal blur, rather than pursuing a
+larger Malta superkernel.
+
+### Phase 2: channel fusion
+
+Implement and measure in this order:
+
+1. three-channel subsample;
+2. three-channel 5-tap horizontal blur;
+3. three-channel 33-tap transpose;
+4. paired 15-tap/high kernels; and
+5. paired 7-tap/ultra kernels.
+
+The order starts with simple correctness probes, then reaches the highest-work
+channel-fusion candidate, and leaves coupled in-place frequency updates last.
+Do not aggregate all five changes before measuring; resource interactions make
+it necessary to know which kernel actually wins.
+
+#### Phase 2.1 result: three-channel subsample (2026-09-04)
+
+The three per-channel subsample dispatches were replaced experimentally by one
+kernel whose thread processed all three channels. Independent input and output
+strides were preserved, as was the scalar arithmetic order. Strict Metal
+compilation and the full focused Metal Butteraugli stage-capture test passed.
+
+On the five-sample padded-4K stage profile, the experiment reduced reference
+preparation from 44 to 42 dispatches, resident AQ from 316 to 312 dispatches,
+and the two subscale psycho groups from 44 to 40 dispatches. Despite that,
+median subscale psycho time increased from `8.601 ms` to `8.996 ms` (`4.6%`),
+while resident AQ was effectively flat (`117.145 ms` versus `117.360 ms`).
+
+Five alternating independent-process complete-encode pairs were consistent at
+4K: the fused path lost all five, and its median increased from `311.913 ms` to
+`317.442 ms` (`1.77%`). At 1080p it won only three of five pairs and the
+medians were effectively equal (`87.449 ms` versus `87.385 ms`). Codestream
+sizes were identical in every pair.
+
+The slice is rejected and its kernel and build selector have been removed.
+Serializing three independent channel calculations within each thread reduced
+launch count but did not remove arithmetic or source traffic, and exposed less
+independent work to the GPU scheduler. This is further evidence that dispatch
+count alone is a poor proxy for useful cost. Phase 2.2 should test the 5-tap
+horizontal blur separately because it can at least share normalized weights;
+it must not inherit the subsample result by assumption.
+
+#### Phase 2.2 result: three-channel 5-tap horizontal blur (2026-09-04)
+
+The second prototype shared 5-tap weight loading and normalization across all
+three channels while preserving each channel's input and output stride and
+convolution operation order. Strict Metal compilation and both control and
+fused focused Butteraugli tests passed.
+
+In seven alternating independent-process padded-4K stage-profile pairs, the
+fused path reduced reference preparation from 44 to 40 dispatches and resident
+AQ from 316 to 308. Main-scale psycho construction improved in six of seven
+pairs, with its median moving from `32.284 ms` to `32.158 ms` (`0.39%`). The
+subscale median moved from `8.904 ms` to `8.870 ms` (`0.38%`) but improved in
+only three of seven pairs. Resident AQ improved in five of seven pairs and its
+median moved from `117.736 ms` to `117.515 ms` (`0.19%`). Reference preparation
+instead regressed from `22.329 ms` to `22.541 ms` (`0.95%`) and improved in
+only three of seven pairs.
+
+Complete-encode evidence did not establish a user-visible win. At 4K the fused
+path won four of seven pairs, but the medians were effectively equal
+(`312.551 ms` control and `312.015 ms` fused). At 1080p it lost five of seven
+pairs and the medians were indistinguishable (`90.109 ms` and `90.106 ms`).
+Codestream sizes remained identical.
+
+The slice is rejected and removed. Its small per-pixel weight reuse is not
+enough to make the total reference-plus-resident GPU path reliably faster, and
+the complete-encode result fails the measurable-improvement gate. The next
+channel experiment targets the 33-tap transpose, where sharing the truncated
+weight-sum loop across channels removes substantially more arithmetic.
+
+#### Phase 2.3 result: three-channel 33-tap transpose (2026-09-04)
+
+This prototype retained three independent convolution accumulators but shared
+the clipped source interval, weight loads, and weight-sum accumulation across
+channels. It preserved independent plane strides and the established
+per-channel summation order. Strict Metal compilation and the complete focused
+Metal Butteraugli stage-capture test passed in both control and fused builds.
+
+Seven alternating independent-process padded-4K stage-profile pairs showed a
+repeatable GPU improvement:
+
+| Scope | Control median | Fused median | Change | Fused wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `22.070 ms` | `21.318 ms` | `-3.40%` | 6/7 |
+| resident AQ | `117.952 ms` | `115.996 ms` | `-1.66%` | 6/7 |
+| main-scale psycho construction | `31.919 ms` | `29.991 ms` | `-6.04%` | 7/7 |
+| subscale psycho construction | `8.813 ms` | `8.410 ms` | `-4.58%` | 7/7 |
+
+The change reduces reference preparation from 44 to 40 dispatches and resident
+AQ from 316 to 308. Unlike the rejected smaller fusions, the speedup is not
+attributed to dispatch count alone: two of the three clipped 33-tap weight-sum
+loops are eliminated for every output while the three channel sums remain
+independent.
+
+Complete padded-workload results also passed the gate. The fused path won all
+seven 4K pairs, with the median moving from `316.119 ms` to `311.340 ms`
+(`-1.51%`), and five of seven 1080p pairs, with the median moving from
+`91.790 ms` to `89.686 ms` (`-2.29%`). Codestream sizes were identical in every
+pair.
+
+The content-diversity run covered all 24 Kodak images plus two real 1080p and
+two real 4K photographs. Five-sample Kodak process medians were mixed, with 13
+faster and 11 slower, because the GPU saving is small relative to process and
+host-tail noise at 512x768. Targeted profiles of two apparent wall-time losers
+resolved that ambiguity: on Kodak 03 the main/subscale psycho medians improved
+from `1.438/0.490 ms` to `1.308/0.449 ms`; on Kodak 12 they improved from
+`1.397/0.486 ms` to `1.275/0.446 ms`. Reference preparation and resident AQ
+also improved on both.
+
+All four real-photo profiles improved their reference, resident-AQ, main
+psycho, and subscale psycho medians. Main psycho improved by `6.3%` to `7.4%`
+and subscale psycho by `7.4%` to `9.5%`. Complete real-photo timing remained
+noisier: each 1080p image won four of five paired processes, while the 4K
+images were neutral-to-mixed despite their consistent GPU-stage wins.
+
+A focused Performance Limiters capture repeatedly exercised the 1919x1079
+Butteraugli path and sampled the new kernel directly. The Shader Timeline
+interval was `92.167 us` and represented `9.0%` of its sampled GPU kick. Across
+the three fully contained `20.792 us` compute-counter samples, mean kernel
+occupancy was `47.0%` against a `50.6%` occupancy-manager target. Mean shader
+launch and instruction-throughput limiters were `87.0%` and `61.7%`; mean L1
+limiter was `33.2%`. Stack L1 reads were effectively zero, stack writes
+averaged `0.002%`, and no ray-tracing scratch activity was present. The counter
+sample is narrow, but it rules out a pathological occupancy collapse or spill
+regression and remains consistent with launch/instruction pressure.
+
+Control and fused CLI builds produced byte-identical codestreams on
+representative Kodak, 1080p, and 4K photographs. The slice is promoted as the
+unconditional three-channel 33-tap path; its private build selector and host
+fallback have been removed. The generic single-channel transpose pipeline
+remains because later high, ultra, and masking passes still use it.
+
+#### Phase 2.4 result: paired 15-tap/high kernels (2026-09-04)
+
+The 15-tap experiment evaluated its two axes independently. The transpose
+prototype processed X and Y with separate scalar accumulators while sharing the
+clipped interval, weight loads, and weight-sum loop. The vertical prototype did
+the same before applying the existing channel-specific high-frequency updates.
+Both retained the full-image transposed intermediate, including its FP32
+materialization point. Two already-provisioned psycho work planes held the
+simultaneous X/Y intermediates, so the experiment did not increase scratch
+capacity.
+
+Control, transpose-only, vertical-only, and combined Release builds all passed
+strict Metal compilation and the complete focused Metal Butteraugli test. Each
+reported the same maximum CPU-reference errors: `0.000549316` for the distance
+map and score and `0.000396729` for captured stages.
+
+The first four-way padded-4K stage matrix showed that the vertical-only variant
+lost most reference, resident, main-psycho, and subscale-psycho pairs. Two
+direct seven-pair experiments then isolated each decision. Relative to the
+unfused control, transpose-only produced:
+
+| Scope | Control median | Transpose median | Change | Transpose wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `20.940 ms` | `21.326 ms` | `+1.84%` | 1/7 |
+| resident AQ | `117.094 ms` | `116.538 ms` | `-0.47%` | 4/7 |
+| main-scale psycho construction | `30.703 ms` | `30.474 ms` | `-0.75%` | 5/7 |
+| subscale psycho construction | `8.505 ms` | `8.635 ms` | `+1.54%` | 3/7 |
+
+This removed two reference dispatches (`40` to `38`) and four resident
+dispatches (`308` to `304`), but the small main-scale saving did not overcome
+the reference and subscale regressions. Adding the paired vertical kernel to
+the transpose prototype removed the same counts again (`38` to `36` and `304`
+to `300`) but also failed its incremental gate:
+
+| Scope | Transpose median | Combined median | Change | Combined wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `20.926 ms` | `21.188 ms` | `+1.25%` | 2/7 |
+| resident AQ | `116.254 ms` | `117.349 ms` | `+0.94%` | 3/7 |
+| main-scale psycho construction | `30.474 ms` | `30.599 ms` | `+0.41%` | 2/7 |
+| subscale psycho construction | `8.661 ms` | `8.514 ms` | `-1.70%` | 5/7 |
+
+Complete public-workflow timing resolved the marginal transpose result against
+retention. Transpose-only won three of seven padded-1080p pairs and one of
+seven padded-4K pairs. Its median changed from `88.370` to `88.782 ms`
+(`+0.47%`) at 1080p and from `305.054` to `307.175 ms` (`+0.70%`) at 4K.
+Codestream sizes remained identical at `410072` and `1606911` bytes,
+respectively.
+
+Both 15-tap fusions are therefore rejected and their shaders, pipeline states,
+scratch scheduling, and private build selectors have been removed. As with the
+5-tap result, sharing one short normalization loop does not compensate for
+serializing X/Y work within a thread on this device. Phase 2.5 should still
+measure the 7-tap/ultra pair independently: its arithmetic is shorter, but its
+different nonlinear output work and lower per-pass cost make the launch versus
+parallelism tradeoff a separate empirical question.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-high2-stage.kE1WDB` (four-way stage matrix);
+- `/private/tmp/gjxl-metal-fusion-high2-transpose-pairs.zvVMew` (transpose
+  isolation);
+- `/private/tmp/gjxl-metal-fusion-high2-vertical-pairs.E8WN2y` (vertical
+  incremental isolation); and
+- `/private/tmp/gjxl-metal-fusion-high2-wall-pairs.I4yAbI` (public-workflow
+  pairs).
+
+#### Phase 2.5 result: paired 7-tap/ultra kernels (2026-09-04)
+
+The final channel-fusion experiment repeated the independent-axis design for
+the 7-tap ultra-frequency passes. The transpose prototype shared the clipped
+interval, weights, and normalization while retaining scalar X/Y accumulators.
+The vertical prototype shared only that convolution setup; it preserved X's
+two `remove_range` operations and Y's clamp, scale, and `amplify_range`
+operations in their established order. As in Phase 2.4, two existing psycho
+work planes held the simultaneous intermediates without increasing arena
+capacity or removing the full-image FP32 materialization boundary.
+
+Control, transpose-only, vertical-only, and combined builds passed strict Metal
+compilation and the complete focused Metal Butteraugli test. All four again
+reported maximum CPU-reference errors of `0.000549316` for the distance map and
+score and `0.000396729` for captured stages.
+
+Seven rotated padded-4K stage-profile rounds produced mixed results rather than
+a stage-wide improvement:
+
+| Variant and scope | Control median | Variant median | Change | Variant wins |
+| --- | ---: | ---: | ---: | ---: |
+| transpose: reference | `21.770 ms` | `21.101 ms` | `-3.07%` | 6/7 |
+| transpose: resident AQ | `116.914 ms` | `117.140 ms` | `+0.19%` | 3/7 |
+| transpose: main psycho | `30.708 ms` | `30.736 ms` | `+0.09%` | 4/7 |
+| transpose: subscale psycho | `8.479 ms` | `8.323 ms` | `-1.85%` | 4/7 |
+| vertical: reference | `21.770 ms` | `21.433 ms` | `-1.54%` | 5/7 |
+| vertical: resident AQ | `116.914 ms` | `116.446 ms` | `-0.40%` | 5/7 |
+| vertical: main psycho | `30.708 ms` | `30.576 ms` | `-0.43%` | 5/7 |
+| vertical: subscale psycho | `8.479 ms` | `8.629 ms` | `+1.77%` | 2/7 |
+| combined: reference | `21.770 ms` | `21.209 ms` | `-2.58%` | 5/7 |
+| combined: resident AQ | `116.914 ms` | `117.669 ms` | `+0.65%` | 3/7 |
+| combined: main psycho | `30.708 ms` | `30.892 ms` | `+0.60%` | 3/7 |
+| combined: subscale psycho | `8.479 ms` | `8.592 ms` | `+1.33%` | 2/7 |
+
+Each individual half reduced reference dispatches from `40` to `38` and
+resident dispatches from `308` to `304`; the combined form reached `36` and
+`300`. The combined form nevertheless regressed the broader resident and
+psycho scopes, showing again that the saved grids are not free throughput when
+independent channel work is serialized within one thread.
+
+Complete public-workflow measurements did not establish an individual winner:
+
+| Workload | Control median | Transpose median | Transpose wins | Vertical median | Vertical wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| padded 1080p | `89.510 ms` | `89.836 ms` (`+0.36%`) | 4/7 | `89.582 ms` (`+0.08%`) | 3/7 |
+| padded 4K | `311.243 ms` | `310.495 ms` (`-0.24%`) | 5/7 | `313.412 ms` (`+0.70%`) | 3/7 |
+
+All variants emitted the same `410072`-byte 1080p and `1606911`-byte 4K
+codestream sizes. The small, contradictory changes are below a credible
+promotion threshold, and neither variant improves both resolutions. Both
+7-tap fusions are rejected; their shaders, pipeline states, scratch scheduling,
+and private selectors have been removed. Counter and full-corpus qualification
+were intentionally skipped after the stage and public-workflow gates failed.
+
+This completes Phase 2. Of its five channel-fusion candidates, only the
+three-channel 33-tap transpose is retained. The result supports a narrower
+principle than "fewer launches": channel fusion pays when it removes enough
+duplicated normalization work to offset the loss of independently schedulable
+channel threads.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-ultra2-stage.EiuKYZ` (four-way stage matrix);
+  and
+- `/private/tmp/gjxl-metal-fusion-ultra2-wall.dNo3zb` (public-workflow pairs).
+
+### Phase 3: tile-local convolution
+
+Prototype the 5-tap blur-plus-Opsin kernel first. Continue through 7, 13, and 15
+taps only after each previous radius demonstrates lower GPU time. Treat the
+33-tap path as an independent research experiment with explicit memory/halo
+accounting. Retain the channel-fused separable implementation whenever it is
+faster than the fully tiled version.
+
+#### Phase 3.1 result: tiled 5-tap blur plus Opsin (2026-09-04)
+
+The first tile-local prototype is retained. One `16 x 8` threadgroup now loads
+a reflected radius-2 RGB tile, materializes the three horizontal convolution
+results in FP32 threadgroup memory, applies the vertical convolution, and
+performs the unchanged Opsin transform. It replaces three full-image
+horizontal grids and the subsequent Opsin grid with one tiled grid. The
+threadgroup uses `5,184` bytes: three `20 x 12` raw tiles and three `16 x 12`
+horizontal tiles. Its raw halo amplification is `1.875x` for a full tile.
+
+The first profiling prototype uncovered an important scheduling correctness
+constraint. Expanded and subsampled RGB initially occupied the same three
+working planes to which the fused kernel wrote Opsin output. That was safe with
+separate whole-image horizontal passes, but not with independent
+threadgroups: one group could overwrite an input pixel before a neighboring
+group loaded it as halo. GPU-profile validation detected this by reporting a
+changed encoded result. Expansion and subsampling now place temporary RGB in
+three already-free psycho work planes, disjoint from the Opsin output until the
+tiled grid completes. The later convolution stages reuse those planes, so the
+fix does not increase scratch capacity. The invalid profile was discarded.
+
+The retained implementation preserves the established convolution weight
+normalization, pair-addition order, explicit unfused multiply-adds, reflected
+edge behavior, and the FP32 horizontal materialization point. Control and
+fused builds reported the same focused Metal Butteraugli maxima:
+`0.000549316` for the map and score and `0.000396729` for captured stages.
+Profiled padded-4K encodes were stable after the scratch remap.
+
+Seven rotated padded-4K stage-profile rounds compared `8 x 8`, `16 x 8`,
+`16 x 16`, and `32 x 8` tiles with the separable control. Every tile improved
+all seven pairs in reference preparation, resident AQ, main psycho, and
+subscale psycho time. The retained `16 x 8` shape produced:
+
+| Scope | Control median | Tiled median | Change | Tiled wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `21.764 ms` | `18.720 ms` | `-13.99%` | 7/7 |
+| resident AQ | `116.741 ms` | `111.527 ms` | `-4.47%` | 7/7 |
+| main-scale psycho construction | `30.680 ms` | `25.948 ms` | `-15.43%` | 7/7 |
+| subscale psycho construction | `8.860 ms` | `7.812 ms` | `-11.83%` | 7/7 |
+
+Reference preparation falls from `40` to `34` dispatches and the
+two-evaluation resident submission from `308` to `296`. On the padded-4K
+geometry, this removes about `93.3 million` launched threads across reference
+preparation and resident AQ. It also eliminates three horizontal intermediate
+writes and fifteen nominal vertical intermediate reads per psycho invocation,
+or about `2.084 GiB` of shader-request traffic over those six psycho images.
+That traffic estimate is not a DRAM-bandwidth measurement.
+
+The other shapes exposed a resolution-dependent tradeoff. `32 x 8` had the
+lowest padded-4K stage time, but `16 x 8` gave the best padded-1080p workflow
+median and uses less threadgroup memory and half as many threads. Seven rotated
+complete-workflow rounds favored the balanced `16 x 8` default:
+
+| Workload | Control median | Tiled median | Change | Tiled wins |
+| --- | ---: | ---: | ---: | ---: |
+| padded 1080p | `90.820 ms` | `86.989 ms` | `-4.22%` | 6/7 |
+| padded 4K | `307.763 ms` | `306.024 ms` | `-0.57%` | 6/7 |
+
+Control and production builds emitted byte-identical codestreams for a small
+odd-sized fixture and representative Kodak, real 1080p, and real 4K images.
+The old Opsin pipeline and private build selectors have been removed. The
+generic 5-tap horizontal and vertical pipelines remain because diagnostic
+sigma-1.2 blur capture still uses them. Pipeline construction validates the
+new kernel's thread-count and dynamic threadgroup-memory requirements.
+
+This is the first fusion in the study to remove large full-image intermediate
+traffic as well as dispatches, and its stage-wide improvement is much larger
+than the rejected launch-only channel fusions. Phase 3.2 should now prototype
+the radius-3 7-tap separable path under the same arithmetic and aliasing rules.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-opsin5-stage-safe.5s7NTW` (five-way stage
+  matrix);
+- `/private/tmp/gjxl-metal-fusion-opsin5-wall.Ks9grt` (four-way workflow
+  matrix); and
+- `/private/tmp/gjxl-metal-fusion-opsin5-codestream.SufU1X` (exact-output
+  comparisons).
+
+#### Phase 3.2 result: tiled 7-tap ultra filtering (2026-09-04)
+
+The radius-3 prototype fused each channel's transposed horizontal pass,
+vertical pass, and ultra-frequency nonlinear update into one tiled dispatch.
+Because the existing path updates its high-frequency input in place, the
+prototype first redirected the pre-ultra X/Y planes into two free image work
+planes and emitted final high and ultra planes disjointly. This avoided the
+cross-threadgroup halo race found during Phase 3.1 without adding a copy,
+allocation, or scratch plane.
+
+The candidate removed two dispatches per psycho image. Reference preparation
+fell from `34` to `30` dispatches and resident AQ from `296` to `288`, removing
+about `62.2 million` launched threads at padded 4K. It also eliminated one
+horizontal intermediate write and seven nominal vertical intermediate reads
+per channel, about `1.853 GiB` of shader-request traffic across both channels
+and all six psycho images. That traffic estimate excludes cache effects and is
+not measured DRAM traffic.
+
+Four tile shapes compiled with strict Metal settings. Their threadgroup memory
+and full-tile raw halo amplification were:
+
+| Tile | Threadgroup memory | Raw halo amplification |
+| --- | ---: | ---: |
+| `8 x 8` | `1,232 B` | `3.0625x` |
+| `16 x 8` | `2,128 B` | `2.40625x` |
+| `16 x 16` | `3,344 B` | `1.890625x` |
+| `32 x 8` | `3,920 B` | `2.078125x` |
+
+Control and tiled builds passed the complete focused Metal Butteraugli test
+with identical maxima: `0.000549316` for map and score and `0.000396729` for
+captured stages. Both profiled workflows retained the same `1606911`-byte
+padded-4K result. Correctness and resource use therefore passed; performance
+did not.
+
+Seven rotated padded-4K stage-profile rounds produced these median changes
+relative to the separable control:
+
+| Tile | Reference | Resident AQ | Main psycho | Subscale psycho |
+| --- | ---: | ---: | ---: | ---: |
+| `8 x 8` | `+8.81%` (1/7) | `+1.95%` (0/7) | `+5.44%` (0/7) | `+9.27%` (0/7) |
+| `16 x 8` | `+8.04%` (1/7) | `+0.99%` (0/7) | `+2.57%` (0/7) | `+6.64%` (0/7) |
+| `16 x 16` | `+15.08%` (1/7) | `+0.04%` (2/7) | `-0.52%` (7/7) | `+4.02%` (0/7) |
+| `32 x 8` | `+1.42%` (2/7) | `+0.90%` (0/7) | `+1.94%` (0/7) | `+6.25%` (0/7) |
+
+Parentheses report tiled wins out of seven paired rounds. The `16 x 16`
+shape's small main-scale improvement did not survive at subscale and did not
+improve the enclosing resident submission. All other shapes regressed every
+resident, main-psycho, and subscale-psycho pair. The short convolution's two
+barriers, cooperative halo work, clipped-boundary control, and partial-tile
+cost outweigh the removed global intermediate on this device.
+
+The slice is rejected and all prototype shaders, pipeline states, scratch
+routing, resource checks, and private selectors have been removed. Complete
+workflow and counter qualification were intentionally skipped after the GPU
+stage gate failed. Under the plan's explicit radius gate, the 13- and 15-tap
+tile-local variants are not pursued: they have larger halos and cannot advance
+after the shorter 7-tap form failed. The independent 33-tap research question
+remains separate because its much greater arithmetic and global traffic could
+change the tradeoff.
+
+The retained experiment artifact is
+`/private/tmp/gjxl-metal-fusion-ultra7-stage.pNIbhE`.
+
+#### Phase 3.3 result: direct-load tiled 33-tap low/medium filtering (2026-09-04)
+
+The independent radius-16 experiment is retained. It replaces the
+channel-fused horizontal transpose and the vertical low/medium pass with one
+`16 x 64` tiled kernel. Threads cooperatively compute the three horizontal
+planes directly from the planar XYB inputs, store only those FP32 results in
+threadgroup memory, synchronize once, and then apply the vertical convolution
+and the existing low/medium transforms. The horizontal materialization point
+therefore remains FP32, but it no longer occupies three full-image scratch
+planes or crosses device memory.
+
+The production threadgroup uses 1,024 threads and `18,432 B` of memory for
+three `16 x 96` horizontal planes. Its interior vertical-halo amplification is
+`1.5x`: each 64-row output tile computes 32 extra horizontal rows. Pipeline
+creation validates both the 1,024-thread limit and the dynamic memory
+requirement before the Metal backend becomes available.
+
+The first family of prototypes cached the complete three-channel input halo as
+well as the horizontal results. Even its least redundant tested geometry had
+an `11.67x` raw-halo amplification, and all four shapes regressed every one of
+seven padded-4K stage pairs:
+
+| Raw tile | Threadgroup memory | Raw-halo amplification | Reference mean | Resident mean | Main psycho mean | Subscale psycho mean |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `8 x 16` | `27,648 B` | `15.0x` | `+63.56%` | `+38.00%` | `+130.84%` | `+112.76%` |
+| `16 x 8` | `30,720 B` | `15.0x` | `+98.83%` | `+55.11%` | `+189.13%` | `+161.73%` |
+| `8 x 24` | `32,256 B` | `11.67x` | `+39.21%` | `+20.76%` | `+72.26%` | `+61.44%` |
+| `4 x 32` | `30,720 B` | `18.0x` | `+64.22%` | `+32.57%` | `+112.57%` | `+96.81%` |
+
+The direct-load design avoids that raw-tile replication. Four geometries then
+improved every resident, main-psycho, and subscale-psycho pair. The `16 x 64`
+shape was the clear psycho-stage winner:
+
+| Direct tile | Threadgroup memory | Reference median | Resident median | Main psycho median | Subscale psycho median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| control | n/a | `29.929 ms` | `107.360 ms` | `25.024 ms` | `7.330 ms` |
+| `8 x 64` | `9,216 B` | `29.009 ms` (`-3.07%`, 4/7) | `105.908 ms` (`-1.35%`, 7/7) | `23.763 ms` (`-5.04%`, 7/7) | `6.982 ms` (`-4.75%`, 7/7) |
+| `16 x 32` | `12,288 B` | `28.952 ms` (`-3.27%`, 5/7) | `105.992 ms` (`-1.27%`, 7/7) | `23.975 ms` (`-4.19%`, 7/7) | `7.052 ms` (`-3.79%`, 7/7) |
+| `16 x 64` | `18,432 B` | `28.294 ms` (`-5.46%`, 6/7) | `104.419 ms` (`-2.74%`, 7/7) | `22.576 ms` (`-9.78%`, 7/7) | `6.709 ms` (`-8.48%`, 7/7) |
+| `32 x 32` | `24,576 B` | `27.956 ms` (`-6.59%`, 5/7) | `106.175 ms` (`-1.10%`, 7/7) | `23.928 ms` (`-4.38%`, 7/7) | `7.059 ms` (`-3.70%`, 7/7) |
+
+Parentheses report change from the separable control and tiled wins out of
+seven rotated rounds. The retained path reduces reference preparation from 34
+to 32 dispatches and the two-evaluation resident submission from 296 to 292.
+At padded 4K it removes about `30.8 million` launched threads across reference
+preparation and resident AQ. A nominal shader-request accounting also removes
+about `6.08 GiB` across the six psycho images after charging the direct path
+for its `1.5x` duplicated horizontal input work. This estimate is not measured
+DRAM traffic and excludes edge rounding and cache effects.
+
+Seven alternating independent-process complete-workflow pairs confirmed a
+smaller but consistent end-to-end benefit:
+
+| Workload | Control median | Tiled median | Change | Tiled wins |
+| --- | ---: | ---: | ---: | ---: |
+| padded 1080p | `85.118 ms` | `84.387 ms` | `-0.86%` | 7/7 |
+| padded 4K | `303.917 ms` | `302.157 ms` | `-0.58%` | 5/7 |
+
+The complete focused Metal Butteraugli test passed with the same established
+maxima as the control: `0.000549316` for map and score and `0.000396729` for
+captured stages. Control and tiled builds emitted byte-identical codestreams
+for a small odd-sized fixture and representative Kodak, real-1080p, and
+real-4K inputs.
+
+A focused Performance Limiters micro-capture repeated the new subscale grid to
+obtain clean counter intervals between the preceding subsample shader and the
+following high-frequency shader. Across seven trimmed intervals, mean kernel
+occupancy was `56.7%` against a `64.6%` occupancy-manager target. Mean compute
+shader launch, instruction-throughput, F32, and L1 limiters were `86.8%`,
+`73.3%`, `59.0%`, and `19.8%`; buffer L1 miss rate was `8.6%`. Stack L1 reads
+and writes each averaged `0.0001%`. This intrusive counter workload is not an
+elapsed-time benchmark, but it rules out stack spilling and a pathological
+occupancy collapse in the 1,024-thread production shape.
+
+The direct kernel supersedes the Phase 2.3 transpose implementation, so the
+old three-channel transpose, vertical low/medium pipeline, full-image
+intermediate routing, raw-tile prototype, and private build selectors have all
+been removed. The retained source is smaller than the separable implementation
+it replaces. The slice therefore qualifies under the plan's exception for a
+simple, independently measured change even though Amdahl dilution keeps its
+complete-workflow improvement below 5%.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-low33-stage.0hLOxo` (raw-tile stage matrix);
+- `/private/tmp/gjxl-metal-fusion-low33-direct-stage.IIZY7x` (direct-tile stage
+  matrix);
+- `/private/tmp/gjxl-metal-fusion-low33-direct-wall.M0dWmH` (complete-workflow
+  pairs);
+- `/private/tmp/gjxl-metal-fusion-low33-codestream.7b1EAN` (exact-output
+  comparisons); and
+- `/private/tmp/gjxl-metal-fusion-low33-counters.xXqOdz` (focused counter
+  micro-capture).
+
+### Phase 4: resident sink fusion
+
+After the perceptual kernels stabilize:
+
+1. define a resident-only descriptor containing block-distance and score sinks;
+2. implement composed-distance evaluation inside one strategy-family reducer;
+3. emit scalar-max partials from the same threadgroups;
+4. compare seven family-specialized dispatches with one metadata-driven anchor
+   dispatch; and
+5. retain the least divergent measured implementation.
+
+The public complete-map path remains the correctness oracle during this phase.
+
+#### Phase 4 result: resident final metric and reductions (2026-09-04)
+
+The retained implementation adds one Metal-internal resident comparison
+descriptor with exactly the outputs consumed by the encoder: strategy anchors,
+block distances, scalar-score partials, the scalar score, and the shared
+numeric-error word. The public `DeviceButteraugliComparisonDescriptor` and its
+complete distance map are unchanged.
+
+For a multiscale resident comparison, distorted subscale processing now runs
+first and retains its quarter-area final map in the existing final-staging
+plane. Main-scale processing then reuses the ordinary psycho scratch but stops
+before storing the final full-resolution metric. Seven family-specialized
+anchor dispatches evaluate that final expression, compose the subscale value,
+accumulate the established `distance^16` transform norm, fill the covered
+block distances, and emit one scalar maximum per anchor. The existing maximum
+reducer scans only those anchor partials. Small and single-scale comparisons
+continue to use the complete-map path.
+
+This removes, per comparison:
+
+- the full-resolution final-metric store;
+- the separate full-resolution compose pass;
+- the full-resolution first maximum-reduction pass; and
+- the later full-resolution reread by the AQ block reducer.
+
+The profiled path follows the same resident graph and exposes a single
+`butteraugli.resident_reduction` stage, while the public map and capture APIs
+remain the materialized correctness oracle. At padded 4K, five stage samples
+measured the affected final/reduction region as follows. The control sum is
+main mask/final, sub mask/final plus compose, scalar reduction, and block
+reduction; the resident sum is sub mask/final, main mask preparation, and the
+resident reduction.
+
+| Scope | Complete-map median | Resident-sink median | Change |
+| --- | ---: | ---: | ---: |
+| affected final/reduction region | `14.300 ms` | `11.124 ms` | `-3.176 ms` (`-22.2%`) |
+| resident-AQ command-buffer GPU time | `103.950 ms` | `100.712 ms` | `-3.238 ms` (`-3.12%`) |
+| resident-AQ dispatches, two evaluations | `292` | `286` | `-6` |
+
+Seven alternating independent-process public-workflow pairs, each with two
+discarded warmups, confirmed that the GPU-stage gain survives the complete
+encoder boundary:
+
+| Workload | Complete-map median | Resident-sink median | Change | Resident wins |
+| --- | ---: | ---: | ---: | ---: |
+| padded 1080p, complete encode | `82.852 ms` | `81.597 ms` | `-1.255 ms` (`-1.51%`) | 6/7 |
+| padded 1080p, quantization | `64.000 ms` | `63.165 ms` | `-0.835 ms` (`-1.30%`) | 6/7 |
+| padded 4K, complete encode | `297.625 ms` | `292.323 ms` | `-5.302 ms` (`-1.78%`) | 6/7 |
+| padded 4K, quantization | `252.135 ms` | `246.809 ms` | `-5.326 ms` (`-2.11%`) | 5/7 |
+
+All compared codestream sizes were identical. The focused Metal AQ test also
+compared the resident policy with its serial complete-map oracle, including
+profiled and unprofiled execution. Its maximum block-distance discrepancy was
+`2.38419e-07`, versus the existing `5e-4` gate; score, quantization, failure
+injection, and readback-contract checks passed without changing tolerances.
+
+A second implementation dispatched every anchor through one metadata-driven
+kernel. It removed six family dispatches per comparison, but every threadgroup
+had to find its batch and dynamically index five geometry arrays. In the first
+seven-pair padded-4K run it regressed quantization by `1.70%` and complete
+encoding by `0.91%`, losing 5/7 pairs at both boundaries. A repeat was noisier:
+quantization still regressed by `0.29%` and lost 4/7, while complete encoding
+was statistically neutral (`-0.17%`, 4/7 wins). Across both runs, the unified
+variant's quantization median was `0.77%` slower and the complete boundary was
+flat. It was removed along with its private selector and pipeline. The retained
+family form has uniform compile-time-like geometry within each dispatch and is
+the less divergent implementation.
+
+The first Phase 4 slice deliberately reuses the prefix of the already
+allocated full-resolution distance-map plane for score partials. Phase 5 can
+replace that allocation with an anchor-sized plane once every non-diagnostic
+caller has moved to the sink path; doing so is a memory consolidation, not
+part of the measured compute win above.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-resident-wall.I3IvRD` (complete-workflow and
+  repeated metadata-dispatch comparisons);
+- `/private/tmp/gjxl-metal-fusion-resident-control-stage.json` (complete-map
+  stage profile); and
+- `/private/tmp/gjxl-metal-fusion-resident-stage.json` (resident-sink stage
+  profile).
+
+### Phase 5: consolidate
+
+Status: completed and retained.
+
+All private baseline selectors and rejected experimental pipelines had already
+been removed at their phase boundaries. The final consolidation removes the
+remaining unconditional full-resolution distance-map allocation from prepared
+AQ evaluation and makes its storage metric-specific:
+
+- multiscale Butteraugli production owns only one score partial per strategy
+  anchor plus the scalar score;
+- the small-image Butteraugli fallback owns only the scalar score;
+- maximum-error evaluation owns only its transform-maximum plane; and
+- frame-only evaluation owns none of those sinks.
+
+The ordinary fully resident path already used the Phase 4 sink. Phase 5 also
+migrates the generic, exact-coefficient production path to it, so no production
+multiscale caller materializes the complete distance map. Public diagnostics
+still return that map. They alias the prefix of the coefficient-reconstruction
+staging plane, which owns three values per coding pixel and is therefore larger
+than one unpadded source plane. Diagnostic uploads happen before reconstruction
+or after it has completed. The expanded-small-image production fallback records
+the map-writing dispatch after reconstruction in the same command encoder, so
+Metal dispatch ordering prevents the two lifetimes from overlapping. No lazy
+allocation, additional arena, or new lease class is required.
+
+The block reducer now receives its input view explicitly. This avoids retaining
+a false object-wide distance-map identity and lets both the diagnostic alias and
+the small production fallback reuse the same encoder without changing the
+public API. A dedicated `score_partials_` member replaces the earlier practice
+of treating the prefix of the complete-map plane as reduction storage.
+
+#### Memory result
+
+The exact Phase 4 parent and Phase 5 candidate reported the following prepared
+AQ storage for the existing 1920-by-1080 test fixture:
+
+| Storage | Phase 4 | Phase 5 | Change |
+| --- | ---: | ---: | ---: |
+| staging capacity | `453,679,924 B` | `445,126,452 B` | `-8,553,472 B` (`-8.16 MiB`, `-1.89%`) |
+| peak scratch | `341,704,992 B` | `333,151,520 B` | `-8,553,472 B` (`-8.16 MiB`, `-2.50%`) |
+
+For padded 4K, the structural lower bound is `34,190,592 B` (`32.61 MiB`):
+the aligned 3839-by-2159 map and the unused three-values-per-block
+maximum-error plane disappear, while at most one aligned partial per 8-by-8
+block is added. Larger transforms produce fewer anchors and therefore save
+slightly more. This is a capacity reduction, not a claim that every byte was
+physically resident at the same instant.
+
+#### Timing and counter result
+
+Because Phase 5 changes storage selection rather than the fully resident
+compute graph, its ordinary-path timing gate is non-regression. Seven
+alternating independent-process pairs used two warmups and the median of three
+retained Release samples per process:
+
+| Workload | Boundary | Phase 4 | Phase 5 | Change | Phase 5 wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| padded 1080p | complete encode | `83.119 ms` | `82.746 ms` | `-0.373 ms` (`-0.45%`) | 4/7 |
+| padded 1080p | quantization | `63.931 ms` | `63.962 ms` | `+0.031 ms` (`+0.05%`) | 3/7 |
+| padded 4K | complete encode | `299.907 ms` | `297.430 ms` | `-2.477 ms` (`-0.83%`) | 6/7 |
+| padded 4K | quantization | `251.797 ms` | `251.528 ms` | `-0.269 ms` (`-0.11%`) | 4/7 |
+
+The quantization boundary is effectively neutral, as expected. The complete
+boundary has a favorable but modest noisy direction and is not attributed to
+removed GPU arithmetic.
+
+The generic exact-coefficient path does remove complete-map computation. Seven
+alternating independent-process pairs, each with two warmups and one retained
+sample, measured:
+
+| Workload | Boundary | Complete map | Resident sink | Change | Sink wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| padded 1080p | complete encode | `562.244 ms` | `550.879 ms` | `-11.365 ms` (`-2.02%`) | 6/7 |
+| padded 1080p | quantization | `323.684 ms` | `320.046 ms` | `-3.638 ms` (`-1.12%`) | 5/7 |
+| padded 4K | complete encode | `2149.946 ms` | `2119.598 ms` | `-30.348 ms` (`-1.41%`) | 4/7 |
+| padded 4K | quantization | `1221.040 ms` | `1193.319 ms` | `-27.721 ms` (`-2.27%`) | 5/7 |
+
+The exact-coefficient mode remains a compatibility path with a large host tail;
+these numbers establish a local improvement, not a reason to optimize that mode
+ahead of the default.
+
+A matched Performance Limiters capture compared the exact Phase 4 parent with
+the candidate using the same symbolized Release configuration and custom
+counter template. The two resident-policy command buffers averaged
+`101.030 ms` in the parent and `101.092 ms` in the candidate, a `0.062 ms`
+(`0.06%`) difference. Mean occupancy was `61.9%` and `60.8%`, mean instruction
+limiters were `63.2%` and `62.2%`, and mean L1 limiters were `10.4%` and
+`10.3%`, respectively. This rules out a new occupancy, instruction, or cache
+regression and confirms that the resident dispatch graph is unchanged within
+measurement noise. Thermal state remained nominal. The final candidate trace
+still classified reference preparation as launch-limited in `83.0%` of clean
+limiter samples, but resident AQ was now instruction-throughput-limited in
+`70.9%`; the retained earlier fusions changed the optimization balance inside
+the larger submission.
+
+#### Correctness and pressure qualification
+
+The candidate produced byte-identical codestreams to the exact Phase 4 parent
+for all 38 canonical images: 24 Kodak images, six photographic scenes at both
+1080p and 4K, and the padded 1080p/4K fixtures. Pinned libjxl `djxl` 0.13.0
+decoded padded 4K, Kodak 17, and a photographic 4K representative. Their
+external linear-RGB Butteraugli scores were `0.683604`, `0.729423`, and
+`0.718311`, respectively.
+
+Efforts 1 through 10, high density, maximum compression, target-size search,
+maximum-error control, final-score collection, exact coefficients, throughput,
+and maximum throughput all remained byte-identical to the parent. The focused
+AQ test compares generic sink scores and block maps with the public complete-map
+oracle, compares profiled and unprofiled outputs exactly, and adds a 7-by-5
+expanded-source test for the aliased small-image fallback. The existing
+`5e-4` block-map gate was not widened; the measured maximum reduction error
+remains `2.38419e-07`.
+
+Failure and lease coverage passed allocation, upload, device, completion,
+readback, poisoning, forced-purge, and recovery cases. A real pressure run
+paused one process between two padded-4K encodes on the same backend, applied
+`memory_pressure -p 60`, and then resumed it. RSS fell from `794,576 KiB` to
+`517,232 KiB`, while `footprint`-reported reclaimable storage fell from
+`1,462 MiB` to `1,248 MiB`. The recovery encode took the expected cold path and
+reproduced the exact `1,606,911`-byte codestream.
+
+The complete Release suite passes 61 of 62 tests. The only failure is the
+pre-existing pinned CPU `quantization_pipeline` score mismatch
+(`0.24919039011001587` actual versus `0.24914586544036865` expected), reproduced
+on the parent before attribution.
+
+The retained Phase 5 artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-phase5-corpus.8EN01s` (corpus, policy,
+  decoder, and external-quality validation);
+- `/private/tmp/gjxl-metal-fusion-phase5-profile/20260905T004944Z-padded_4k-fully-resident-4a75008a735b`
+  (candidate stage profile and Performance Limiters trace);
+- `/private/tmp/gjxl-metal-fusion-phase5-control-limiters.B713sy` (matched
+  Phase 4 Performance Limiters control); and
+- `/private/tmp/gjxl-metal-fusion-phase5-pressure-recovery.json` (same-process
+  pressure recovery samples).
+
+### Phase 6: pointwise producer/consumer fusion
+
+This phase implements Slice F as independently qualified experiments. Phase 6.1
+rejects high-X suppression fusion; Phase 6.2 retains mask precomputation at the
+ultra-frequency producer; Phase 6.3 retains main-scale and subscale L2-to-sink
+fusion. Phase 6 is complete. Rejected variants remain documented rather than
+retained as private production selectors.
+
+#### Phase 6.1 result: high-X suppression fusion (2026-09-05)
+
+Status: rejected; both prototypes removed.
+
+This experiment used `558aa83` as its immutable control. The existing
+high-frequency X pass writes an unsuppressed value that a later pointwise
+kernel reads, scales using high Y, and writes again. Both prototypes computed
+high Y first and applied the unchanged suppression expression while producing
+high X. The subtraction and multiplication remained FP32, with the existing
+strict math and explicit unfused multiply-adds. Ultra filtering still followed
+both high-frequency outputs.
+
+Two implementations were tested:
+
+- a shared high-frequency kernel with a uniform channel branch and an extra
+  high-Y binding; and
+- a dedicated fused X kernel, leaving the original Y kernel unchanged, to
+  avoid carrying the extra input and suppression branch through Y execution.
+
+Each reduced psycho construction from 13 dispatches to 12. Reference
+preparation fell from 32 to 30 dispatches, and the ordinary two-evaluation
+resident-AQ submission from 286 to 282. At padded 4K, this removes about
+31.1 million logical shader threads and 237.2 MiB of nominal high-X store/read
+traffic across reference preparation and the two comparisons. This is shader
+request accounting, not measured DRAM traffic. No scratch planes were added.
+
+Fresh Ninja Release builds on Apple M4 Pro used effort 7, distance 1.2, fully
+resident Metal, automatic CPU threads, and no final diagnostic score. Each
+stage and workflow comparison used seven alternating independent-process
+pairs, two discarded warmups, and three retained samples per process. Values
+below are medians of process medians. Thermal probes reported no thermal or
+performance warnings.
+
+Both implementations improved the targeted padded-4K GPU stages:
+
+| Variant | GPU scope | Control | Fused | Change | Fused wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| shared | reference preparation | `16.978 ms` | `16.670 ms` | `-1.82%` | 6/7 |
+| shared | resident AQ | `105.419 ms` | `104.028 ms` | `-1.32%` | 4/7 |
+| shared | main psycho, two evaluations | `23.368 ms` | `22.828 ms` | `-2.31%` | 7/7 |
+| shared | subscale psycho, two evaluations | `6.991 ms` | `6.725 ms` | `-3.80%` | 6/7 |
+| dedicated X | reference preparation | `16.940 ms` | `16.512 ms` | `-2.53%` | 7/7 |
+| dedicated X | resident AQ | `104.012 ms` | `103.392 ms` | `-0.60%` | 5/7 |
+| dedicated X | main psycho, two evaluations | `23.156 ms` | `22.735 ms` | `-1.82%` | 7/7 |
+| dedicated X | subscale psycho, two evaluations | `6.922 ms` | `6.757 ms` | `-2.39%` | 6/7 |
+
+These are instrumented stage budgets. The separate unprofiled public-workflow
+measurements did not establish a complete-encode improvement:
+
+| Variant | Workload | Boundary | Control | Fused | Change | Fused wins |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| shared | padded 1080p | complete encode | `85.278 ms` | `85.040 ms` | `-0.28%` | 5/7 |
+| shared | padded 1080p | quantization | `65.848 ms` | `65.532 ms` | `-0.48%` | 5/7 |
+| shared | padded 4K | complete encode | `289.799 ms` | `290.415 ms` | `+0.21%` | 2/7 |
+| shared | padded 4K | quantization | `245.680 ms` | `244.856 ms` | `-0.34%` | 4/7 |
+| dedicated X | padded 1080p | complete encode | `83.730 ms` | `84.291 ms` | `+0.67%` | 1/7 |
+| dedicated X | padded 1080p | quantization | `65.748 ms` | `65.179 ms` | `-0.87%` | 5/7 |
+| dedicated X | padded 4K | complete encode | `290.287 ms` | `291.041 ms` | `+0.26%` | 3/7 |
+| dedicated X | padded 4K | quantization | `246.246 ms` | `248.563 ms` | `+0.94%` | 3/7 |
+
+An experiment-only harness recorded the logical distance maps and scalar
+scores from the Metal Butteraugli test's CPU-differential cases, plus every
+captured intermediate-stage sample. Control and both variants produced
+identical 56,104-byte captures, including small/expanded, odd-sized, identity,
+synthetic differential, and guarded-stride cases. Their SHA-256 was
+`c98003b3e3efab9fddb737082e884d317dc27161275a49dc214215ae64373ee0`.
+The CPU/golden comparison maxima also remained unchanged: `0.000549316` for
+map and score, and `0.000396729` for intermediate stages. No tolerances changed.
+
+The shared variant passed 61 of 62 full Release tests; the sole failure was the
+previously reproduced CPU `quantization_pipeline` golden mismatch. After
+specialization, the Metal Butteraugli, AQ evaluation, and complete quantization
+pipeline tests passed again, along with the exact capture comparison.
+Benchmark codestream sizes matched in every pair. Cross-revision corpus hash,
+pinned-decoder, and counter qualification were intentionally not pursued after
+both variants failed the complete-workflow promotion gate.
+
+The smaller GPU-stage cost is real in these comparisons, but neither
+implementation demonstrated a repeatable user-visible gain. Both production
+prototypes have therefore been removed, preserving the previously retained
+fusion path. The result does not support another variant aimed only at
+removing this one pointwise pass.
+
+Artifacts are retained under
+`/private/tmp/gjxl-fusion-suppress-x-sj4e10op`: `manifest.json` records revision,
+build configuration, binary hashes, and the decision; `stage`/`wall` and
+`specialized-stage`/`specialized-wall` contain all paired samples;
+`shared-kernel.patch` and `specialized-kernel.patch` preserve the implementations;
+and the snapshot harness, exact captures, frozen binaries, and focused test logs
+remain alongside them. The full Release test log is
+`/private/tmp/gjxl-suppress-x-candidate-tests.log`.
+
+#### Phase 6.2 result: ultra-frequency mask fusion (2026-09-05)
+
+Status: retained.
+
+This experiment also used the immutable `558aa83` Phase 5 control, with the
+rejected X-suppression prototypes absent. A dedicated final ultra-Y kernel
+computes the unchanged raw mask expression from its register-resident high-Y
+and ultra-Y outputs and the completed high-X and ultra-X planes. The original
+ultra kernel remains available for X and for reference-subscale preparation,
+whose raw mask is not cached. A shared inline mask expression keeps the fused
+and remaining standalone paths in step; strict FP32 settings and diagnostic
+high/ultra outputs are preserved.
+
+The producer writes raw mask activity to existing scratch `kWork + 4`.
+Malta uses `kWork`/`kWork + 1`, L2 uses the AC/DC planes, and uncached
+reference-mask work uses `kWork` through `kWork + 3`, so the raw distorted mask
+survives until its blur reads it. That blur transposes through `kWork + 1` and
+writes its final result back into `kWork + 4`. Reference-main preparation
+consumes the same producer output immediately. No scratch planes, persistent
+cache, threadgroup storage, barriers, or public selectors were added.
+
+Reference preparation falls from 32 to 31 dispatches, and the ordinary
+resident-AQ submission from 286 to 282. One reference-main and four distorted
+mask-precompute dispatches disappear; the two reference-subscale mask passes
+remain. At `3839 x 2159`, with `1920 x 1080` subscales, this removes
+29,012,403 logical shader threads and two Y-plane reads per removed thread:
+221.3 MiB of nominal shader-request traffic per ordinary encode. This is not
+a measurement of DRAM traffic.
+
+Fresh Ninja Release builds on Apple M4 Pro used the same effort-7, distance-1.2,
+fully resident, automatic-thread, final-score-disabled protocol as Phase 6.1.
+Every matrix used seven alternating independent-process pairs, two discarded
+warmups, and three retained samples per process. Thermal probes reported no
+thermal or performance warnings.
+
+Mask arithmetic moves into psycho construction: main psycho time rises
+5.44%, while main mask time falls 40.31%. The meaningful comparison combines
+both stages within each sample before taking medians. The instrumented
+padded-4K results were:
+
+| GPU scope | Control | Fused | Change | Fused wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `17.086 ms` | `16.745 ms` | `-1.99%` | 7/7 |
+| resident AQ | `104.107 ms` | `103.336 ms` | `-0.74%` | 7/7 |
+| main psycho + mask, two evaluations | `28.309 ms` | `27.594 ms` | `-2.52%` | 7/7 |
+| subscale psycho + mask/final, two evaluations | `10.006 ms` | `9.888 ms` | `-1.18%` | 5/7 |
+| both scales combined | `38.175 ms` | `37.481 ms` | `-1.82%` | 7/7 |
+
+Separate unprofiled complete-encode measurements initially favored the padded
+fixtures, while photographs were mixed. A confirmation matrix repeated all six
+workloads together. Both matrices are retained; neither result is discarded:
+
+| Matrix | Workload | Control | Fused | Change | Fused wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| initial | padded 1080p | `86.411 ms` | `84.541 ms` | `-2.16%` | 5/7 |
+| initial | padded 4K | `297.535 ms` | `292.309 ms` | `-1.76%` | 5/7 |
+| initial | planter 1080p | `92.185 ms` | `92.275 ms` | `+0.10%` | 2/7 |
+| initial | planter 4K | `301.955 ms` | `302.219 ms` | `+0.09%` | 5/7 |
+| initial | noisy bedroom 1080p | `86.802 ms` | `88.174 ms` | `+1.58%` | 2/7 |
+| initial | noisy bedroom 4K | `286.648 ms` | `285.902 ms` | `-0.26%` | 4/7 |
+| confirmation | padded 1080p | `84.133 ms` | `84.426 ms` | `+0.35%` | 2/7 |
+| confirmation | padded 4K | `293.222 ms` | `290.112 ms` | `-1.06%` | 5/7 |
+| confirmation | planter 1080p | `92.652 ms` | `91.839 ms` | `-0.88%` | 6/7 |
+| confirmation | planter 4K | `301.503 ms` | `297.933 ms` | `-1.18%` | 5/7 |
+| confirmation | noisy bedroom 1080p | `87.694 ms` | `86.759 ms` | `-1.07%` | 6/7 |
+| confirmation | noisy bedroom 4K | `291.486 ms` | `285.680 ms` | `-1.99%` | 6/7 |
+
+These tables compare medians of process medians. The median of the actual
+paired candidate/control ratios across all 14 pairs is more conservative:
+`-0.30%` for padded 4K, `-0.33%` for planter 4K, and `-1.35%` for noisy-bedroom
+4K, with 10/14 wins for each. The three 1080p workloads range from `-0.10%` to
+`-0.30%` by that paired measure, with 7--8/14 wins. Treat 1080p as essentially
+neutral and the 4K improvement as small, rather than expecting a fixed 1--2%
+workflow speedup.
+
+All 24 Kodak images received an independent seven-pair matrix. Their
+per-image median workflow ratios have a `-0.41%` geometric-mean change;
+15/24 image medians improve, and 99/168 individual pairs favor fusion.
+Per-image changes range from `-2.01%` to `+1.44%`. No new tolerance or
+quality policy was used to obtain any timing result.
+
+Matched Performance Limiters traces used the same Release binaries, one
+captured process per build, and no stage timestamp instrumentation. Counter
+intervals overlapping unrelated GPU processes were excluded conservatively:
+`23.51 ms` of counter-interval coverage for control and
+`22.48 ms` for fusion (interval unions, not sums across counters).
+The remaining duration-weighted command-buffer counters were:
+
+| Scope | Variant | Occupancy | Occupancy target | Launch limiter | Instruction limiter | L1 limiter | Bandwidth |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| reference | control | `63.9%` | `72.6%` | `88.5%` | `62.4%` | `16.0%` | `121.1 GB/s` |
+| reference | candidate | `63.1%` | `70.7%` | `89.0%` | `63.0%` | `16.8%` | `116.7 GB/s` |
+| resident AQ | control | `61.9%` | `78.2%` | `61.7%` | `61.4%` | `10.0%` | `145.3 GB/s` |
+| resident AQ | candidate | `61.3%` | `77.6%` | `63.4%` | `61.1%` | `10.2%` | `146.8 GB/s` |
+
+These samples show no large command-buffer occupancy or L1-pressure change.
+The observed fused-Y intervals had `55.6%` occupancy, a `57.7%` occupancy target,
+and a `98.8%` launch limiter. The shader timeline covers only part of the
+recorded dispatch list, so its interval sums are not a complete per-kernel
+budget. No direct compiler register/spill or LLC/MMU evidence was collected.
+This is a bounded resource check; it does not establish a DRAM-traffic saving
+or replace the repeated stage and complete-workflow measurements.
+
+The exact stage/map/score harness again produced the identical 56,104-byte
+snapshot and SHA-256 recorded in Phase 6.1. All 38 canonical images produced
+byte-identical codestreams. Eighteen policy cases on Kodak 17 also remained
+byte-identical: efforts 1--10, high density, maximum compression, final-score
+collection, exact coefficients, throughput, maximum throughput, target-byte
+search, and maximum-error control. High density uses its own policy selector,
+without an explicit effort override.
+
+Pinned `djxl` 0.13.0 (`e8ff0976`) decoded padded 4K, Kodak 17, and planter 4K
+from both builds to byte-identical linear-RGB PFMs. External linear-RGB
+Butteraugli 3-norm scores were respectively `0.683604`, `0.729423`, and
+`0.718311`, also unchanged. The full Release suite passes 61/62 tests; its sole
+failure remains the previously reproduced CPU `quantization_pipeline` golden
+mismatch. Metal Butteraugli, AQ, reconstruction, postprocessing, complete
+quantization, API/failure coverage, and installed-consumer checks passed.
+
+Retain this small producer/consumer fusion: it removes a measured amount of
+GPU work, preserves exact output in the qualification set, and gives a modest
+4K workflow gain without a repeatable 1080p or Kodak regression. The scope of
+that conclusion is this M4 Pro and these inputs. X suppression remains
+unfused, and invariant subscale-reference-mask caching remains separate work.
+
+Artifacts are retained under `/private/tmp/gjxl-fusion-mask-hlkbaj0a`:
+`manifest.json` records the control, configuration, binary hashes, and decision;
+`mask-fusion.patch` and `frozen/` preserve the candidate; `stage/`, `wall/`,
+`photo-wall/`, `confirm-wall/`, and `kodak-wall/` contain every raw timing;
+`paired-results.json` records every paired ratio; `corpus/`, `policy/`, and
+`decoded/` retain correctness evidence; and `traces/` contains both Performance
+Limiters captures, exports, and the overlap-filtering analysis. The exact
+capture harness and full Release log are alongside them. These temporary
+artifacts are provenance rather than durable repository fixtures.
+
+#### Phase 6.3 result: L2 accumulation into final-distance sinks (2026-09-05)
+
+Status: retained, both main-scale and subscale increments.
+
+The immutable control is `dd19246`, whose production code is the retained
+Phase 6.2 implementation at `10c5531`. The main-scale prototype was measured
+first, then frozen as a separate executable and metallib for the subscale
+increment. Final combined measurements compare directly with `dd19246`.
+
+`gjxl_butteraugli_resident_l2_reduce_f32` computes the six L2 contributions
+inside the existing per-pixel main-distance loop. It reads the same sixteen
+reference/distorted psycho planes and two incoming Malta AC planes as the old
+L2 pass. The subsequent masking, multiscale composition, transform footprint,
+256-thread reduction tree, maximum-score partials, and error handling are
+unchanged. `gjxl_butteraugli_final_l2_masked_ac_f32` performs the same arithmetic
+once per subscale pixel and emits the existing quarter-area map. Its reference,
+distorted, working, and output strides remain independent.
+
+Both sinks use the same inline L2 expression. The original standalone L2 and
+final-map kernels remain the materialized oracle for public diagnostics and
+fallbacks; stage captures, expanded small images, and nonmultiscale comparisons
+do not enter the fused resident path. The resident profiler omits the two
+standalone L2 stage records, charging their arithmetic to the actual consumers.
+Strict FP32 compilation and the existing tolerances are unchanged.
+
+The main sink binds buffers/parameters through index 26; the subscale sink
+through index 22. Neither adds threadgroup storage or barriers. Reference and
+distorted psycho planes survive Malta and mask preparation; those passes use
+disjoint scratch. The two Malta AC inputs remain live until their sink. All
+workspace allocations remain because AC/DC slots alias earlier psycho work;
+no reference cache or allocation reduction is included.
+
+Padded-4K dispatch metadata confirms 31 reference-preparation dispatches and
+278 resident-AQ dispatches, versus 31 and 282 in the control. Four standalone
+L2 passes disappear across the two scored evaluations. At `3839 x 2159`, with
+`1920 x 1080` subscales, that removes 20,724,002 logical shader threads and
+six FP32 stores plus six reads per removed thread: 948.7 MiB of nominal
+shader-request traffic per ordinary encode. This is not measured DRAM traffic.
+
+Fresh Ninja Release builds on Apple M4 Pro/macOS 15.6 used distance 1.2,
+effort 7, fully resident Metal, automatic CPU threads, and final diagnostics off.
+Every timing matrix used seven alternating independent-process pairs, two
+warmups, and three retained samples per process. GPU stage captures and
+unprofiled complete encodes were separate. Combined family time is summed
+inside each sample before computing process medians and their median.
+
+The main-only prototype improved main L2-plus-sink GPU time from 12.867 to
+8.118 ms (-36.91%, 7/7 wins), and resident AQ from 101.618 to 96.824 ms
+(-4.72%, 7/7). Complete encodes improved 1.48% at padded 1080p (7/7) and
+1.18% at padded 4K (6/7). Against that frozen main-only prototype, adding
+subscale fusion improved subscale L2-plus-mask/final from 4.688 to 3.409 ms
+(-27.29%, 7/7), resident AQ by 1.62% (7/7), and complete encodes by 0.58%
+at 1080p and 1.31% at 4K (both 6/7). The 1080p quantization-pipeline median
+in that increment was 0.37% slower (3/7 wins); its complete workflow still
+improved. These independent increments do not substitute for the direct
+combined comparison below.
+
+Instrumented padded-4K results for the combined implementation:
+
+| Scope | Control | Fused | Change | Fused wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `16.528 ms` | `16.527 ms` | `-0.01%` | 3/7 |
+| resident AQ | `101.752 ms` | `95.461 ms` | `-6.18%` | 7/7 |
+| main L2 + sink, two evaluations | `12.890 ms` | `8.112 ms` | `-37.07%` | 7/7 |
+| subscale L2 + mask/final, two evaluations | `4.680 ms` | `3.362 ms` | `-28.16%` | 7/7 |
+| both L2 + sink families | `17.612 ms` | `11.463 ms` | `-34.91%` | 7/7 |
+
+Separate unprofiled complete-encode results:
+
+| Scope | Control | Fused | Change | Fused wins |
+| --- | ---: | ---: | ---: | ---: |
+| padded 1080p | `84.530 ms` | `83.426 ms` | `-1.31%` | 5/7 |
+| padded 4K | `288.481 ms` | `281.490 ms` | `-2.42%` | 7/7 |
+| planter 1080p | `91.898 ms` | `90.098 ms` | `-1.96%` | 6/7 |
+| planter 4K | `300.666 ms` | `289.488 ms` | `-3.72%` | 7/7 |
+| noisy bedroom 1080p | `87.077 ms` | `86.106 ms` | `-1.12%` | 6/7 |
+| noisy bedroom 4K | `285.158 ms` | `279.229 ms` | `-2.08%` | 6/7 |
+
+Across all 24 Kodak images, the geometric mean of candidate/control
+complete-encode median ratios improved 0.73%; 19 image medians improved. Per-image
+changes ranged from -2.73% to +0.84%. Five medians were slightly slower
+(kodim06 +0.41%, kodim07 +0.03%, kodim15 +0.17%, kodim19 +0.72%,
+and kodim21 +0.84%); none was a consistent large regression. Quantization
+pipeline medians improved 0.82% geometrically, with 22/24 image medians lower.
+
+Matched Performance Limiters captures used the same padded-4K workflow with
+zero warmups and one retained sample, separately from timing qualification.
+Each process exercised two workflow sequences including setup validation.
+Counter attribution required containment within the benchmark's active GPU
+intervals and excluded every interval overlapping another active GPU process.
+This removed 13.10 ms of unique counter coverage in the control and 12.29 ms
+in the candidate; retained coverage was 334.58 and 321.58 ms. These coverage
+unions are not encode latency.
+
+| Counter scope / metric | Control | Fused |
+| --- | ---: | ---: |
+| resident AQ / occupancy | 61.46% | 61.22% |
+| resident AQ / occupancy target | 77.48% | 77.19% |
+| resident AQ / shader-launch limiter | 49.72% | 39.77% |
+| resident AQ / instruction limiter | 61.29% | 59.98% |
+| resident AQ / L1 limiter | 10.07% | 10.70% |
+| resident AQ / read bandwidth | 79.44 GB/s | 83.26 GB/s |
+| resident AQ / write bandwidth | 66.78 GB/s | 63.37 GB/s |
+| sampled main sink / occupancy | 86.02% | 79.77% |
+| sampled main sink / occupancy target | 91.20% | 85.29% |
+| sampled main sink / instruction limiter | 74.15% | 78.00% |
+| sampled main sink / L1 limiter | 2.17% | 2.04% |
+
+The larger main sink has a modest occupancy reduction while aggregate resident
+occupancy remains similar. Lower aggregate write bandwidth is consistent with
+removing intermediate stores, but bandwidth rates do not measure saved bytes.
+Shader-profiler coverage is sparse: it identified three old main-sink intervals
+and two fused main-sink intervals, and no attributable subscale final-kernel
+interval. Those samples inspect resources; their durations are not a complete
+family budget or an equivalent-work timing comparison. Subscale resource
+behavior is observed only within the aggregate resident submission. No direct
+register/spill or LLC/MMU evidence was collected, so this does not prove zero
+spills or establish a cache-level explanation. Stage timestamps establish the
+combined-family gain; separate unprofiled measurements establish workflow
+benefit. The measured occupancy and L1 behavior show no broad resource collapse.
+
+Both increments are retained: they preserve exact outputs and improve the
+complete workflow without added scratch, persistent state, or a changed
+reduction topology. Reference-mask caching was evaluated separately in Phase 7
+below.
+
+Correctness qualification used the unchanged test tolerances and an additional
+temporary exact-capture harness compiled against both builds:
+
+- AQ quant fields, block maps, score histories, reconstructed planes, and final
+  DC/AC coefficient snapshots matched exactly: 4,007,824 bytes, SHA-256
+  `a08c0d5413058f93d51e6dec4b6c50ba1b62539417c1663e54e622daf8f8db2d`.
+  Coverage includes mixed transform sizes, repeated and profiled resident
+  policies, guarded output strides, full/lean materialization, reconfiguration,
+  and nondefault `hf_asymmetry = 0.91`, `x_multiplier = 1.07`.
+- Public full-map/scalar/stage captures matched exactly: 56,104 bytes, SHA-256
+  `c98003b3e3efab9fddb737082e884d317dc27161275a49dc214215ae64373ee0`.
+  Existing CPU-oracle tests retain odd/minimum sizes, expanded fallbacks,
+  identity, impulse, edge, gradient, noise, and intermediate-stage goldens.
+- All 38 canonical corpus images produced byte-identical control/candidate
+  codestreams. All 18 Kodak17 policy configurations also matched: efforts
+  1--10, high density, maximum compression, final score, exact coefficients,
+  throughput, maximum throughput, target bytes, and maximum error.
+- Pinned `djxl` 0.13.0 (`e8ff0976`) accepted padded 4K, Kodak17, and planter
+  4K outputs; each control/candidate pair decoded to identical linear-RGB PFM
+  bytes. External Butteraugli 3-norm scores remained `0.683604`, `0.729423`,
+  and `0.718311`, respectively. All three control and candidate codestreams
+  also matched a second independent encode byte for byte.
+- Focused Metal tests passed 3/3. The final full Release suite passed 61/62;
+  the sole failure was the inherited CPU `quantization_pipeline` golden
+  (`0.24919039011001587` actual versus `0.24914586544036865` expected),
+  reproduced with the same values on the fresh `dd19246` control. No tolerance
+  was widened. Optional libjxl-reference fixtures were disabled in these
+  builds; pinned-decoder/quality checks ran separately.
+
+Artifacts are retained under `/private/tmp/gjxl-fusion-l2-v32brjc0`: the immutable
+control, frozen main-only and combined binaries/metallibs, variant patches and
+hashes, raw timing samples, thermal probes, exact capture harnesses, corpus and
+policy codestreams, decoder outputs, full Release logs, and Performance Limiters
+traces/exports. `manifest.json` records build/configuration/source identity;
+`paired-results.json` preserves every paired ratio. These temporary files are
+provenance, not durable repository fixtures.
+
+### Phase 7 result: invariant reference preparation and caching (2026-09-05)
+
+Status: retained as the combined layout with slot 30 reused. The separately
+allocated main-cache prototype was replaced before final qualification.
+
+The confirmation matrix improved padded-4K complete encoding by 1.09% (7/7
+pairs) and planter 4K by 1.12% (6/7). Initial results were mixed, 1080p gains
+were small or inconsistent, and the effort-4 probe regressed 3.13%. Retention
+is based on the combined layout's measured 4K benefit and bounded allocation
+cost; low-reuse workflows can be slower. The individual caches were provisional
+until the combined layout completed qualification.
+
+The immutable control was `580cb47`, the retained Phase 6.3 implementation.
+Experiments followed Slice G in three increments: cache the subscale blurred
+reference mask, add main-scale fuzzy erosion, then add subscale fuzzy erosion.
+Each increment used its predecessor's frozen executable and metallib as its
+control. A fourth layout reused the existing main mask slot, and the final
+combined candidate was qualified directly against `580cb47`.
+
+The subscale blurred mask was produced during reference preparation using the
+existing fused ultra-Y raw-mask expression followed by the unchanged blur.
+The raw scratch view and owned subscale cache used the packed reference stride;
+comparison scratch retained the main-image stride. Final-distance parameters
+carried independent blurred-reference and erosion-mask strides so public and
+resident sinks could read the packed caches without copies or altered math.
+Both erosion kernels ran during preparation. Mask-stage capture copied the
+cached value and retained its existing meaning.
+
+The first main-erosion prototype allocated a separate full-size plane. Once
+both subscale masks were cached, comparison work no longer wrote `kWork + 3`
+(slot 30). The final prototype reused this slot for main reference erosion:
+psycho construction uses slots 27--29, raw distorted masks use slot 31, and
+the subscale distance map uses slot 32. Removing the comparison-time erosion
+writer made slot 30 invariant after preparation, including expanded fallbacks
+and diagnostic comparisons. Both packed subscale caches remained separately
+owned views in the same `DeviceScratchArena` allocation.
+
+| Result | Extent / stride | Owner and lifetime |
+| --- | --- | --- |
+| Main blurred reference mask | main / main width, slot 20 | existing prepared arena; immutable after preparation |
+| Main eroded reference mask | main / main width, slot 30 | reclassified comparison scratch; immutable after preparation |
+| Subscale blurred reference mask | subscale / subscale width | added packed plane in prepared arena |
+| Subscale eroded reference mask | subscale / subscale width | added packed plane in prepared arena |
+
+The standalone prototypes added one subscale plane, then one main plane, then
+another subscale plane. At `3839 x 2159`, with a `1920 x 1080` subscale, the
+allocated increase was initially 7.9, 39.5, and 47.4 MiB. Reusing slot 30 reduced
+the final allocation increase to 15.8 MiB. Logical cached-reference bytes still
+grew by 47.4 MiB; comparison scratch fell by 31.6 MiB. Arena ownership, allocation
+count, non-reentrancy, lease limits, and invalidation boundaries did not change.
+Active caches were not made purgeable; destruction released their prepared
+arena ownership. The existing idle AQ scratch-arena purge/recovery contract
+stayed intact.
+
+Fresh Ninja Release builds on Apple M4 Pro (48 GiB)/macOS 15.6 used distance 1.2,
+automatic CPU threads, fully resident Metal, and final diagnostics off unless
+specified. Timing matrices used seven alternating independent-process pairs,
+two discarded warmups, and three retained samples per process. Stage timestamps
+were collected separately from unprofiled complete encodes. Combined preparation
+plus AQ time was summed per sample before taking medians. No kernel math or
+test tolerance was relaxed.
+
+The independent development increments produced the following changes. Values
+compare medians of process medians; parentheses count faster candidate pairs.
+These intermediate allocations were superseded by the compact combined layout.
+
+| Increment / control | Preparation GPU | Resident AQ GPU | Preparation + AQ GPU | Complete padded 4K |
+| --- | ---: | ---: | ---: | ---: |
+| Subscale blur / 580cb47 | +3.47% (0/7) | -1.29% (6/7) | -0.38% (5/7) | -0.10% (4/7) |
+| Main erosion / frozen blur | +2.16% (0/7) | -1.07% (7/7) | -0.49% (6/7) | -0.44% (3/7) |
+| Subscale erosion / frozen main erosion | +0.88% (1/7) | -0.49% (7/7) | -0.32% (6/7) | -0.63% (3/7) |
+
+For the final combined layout, dispatch metadata recorded 31 -> 35 reference
+preparation dispatches and 278 -> 268 resident-AQ dispatches. At ordinary effort 7,
+this is four added preparation passes and ten removed comparison passes across
+two scored evaluations. The logical launched-thread total across those two
+submissions fell from 824,375,633 to 805,719,232. These are grid counts, not a
+measurement of GPU utilization or DRAM traffic.
+
+| Final combined GPU scope | Control | Candidate | Change | Faster pairs |
+| --- | ---: | ---: | ---: | ---: |
+| Reference preparation | 16.682 ms | 17.689 ms | +6.04% | 0/7 |
+| Resident AQ | 96.569 ms | 94.298 ms | -2.35% | 7/7 |
+| Preparation + resident AQ | 113.356 ms | 112.200 ms | -1.02% | 7/7 |
+| Main mask, two evaluations | 2.875 ms | 1.895 ms | -34.07% | 7/7 |
+| Subscale mask/final, two evaluations | 3.456 ms | 2.257 ms | -34.68% | 7/7 |
+
+Separate unprofiled complete-encode results follow. The confirmation repeated
+all six workloads together because the initial complete-workflow changes were
+small and inconsistent. Median paired change is computed from each matched
+process pair; it can differ in sign from the ratio of separate variant medians.
+Both matrices and every paired ratio are retained.
+
+| Matrix / workload | Control | Candidate | Median change | Median paired change | Faster pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Initial: padded 1080p | 83.576 ms | 83.429 ms | -0.18% | -0.17% | 5/7 |
+| Initial: padded 4K | 284.577 ms | 283.606 ms | -0.34% | +0.37% | 3/7 |
+| Initial: planter 1080p | 89.537 ms | 90.006 ms | +0.52% | +1.03% | 1/7 |
+| Initial: planter 4K | 291.863 ms | 293.632 ms | +0.61% | +0.34% | 2/7 |
+| Initial: noisy bedroom 1080p | 86.160 ms | 85.492 ms | -0.77% | +0.26% | 3/7 |
+| Initial: noisy bedroom 4K | 280.267 ms | 281.069 ms | +0.29% | -1.05% | 4/7 |
+| Confirmation: padded 1080p | 84.446 ms | 83.771 ms | -0.80% | -0.06% | 4/7 |
+| Confirmation: padded 4K | 288.239 ms | 285.096 ms | -1.09% | -1.43% | 7/7 |
+| Confirmation: planter 1080p | 92.632 ms | 91.437 ms | -1.29% | -0.46% | 4/7 |
+| Confirmation: planter 4K | 299.859 ms | 296.486 ms | -1.12% | -0.97% | 6/7 |
+| Confirmation: noisy bedroom 1080p | 86.384 ms | 86.584 ms | +0.23% | -0.07% | 4/7 |
+| Confirmation: noisy bedroom 4K | 285.295 ms | 282.510 ms | -0.98% | +0.58% | 3/7 |
+
+Kodak's geometric mean of per-image complete-encode median ratios improved
+0.34%; 16/24 image medians improved. Per-image changes ranged
+from -2.28% to +1.16%. This was a small aggregate gain, not a uniform win.
+
+The confirmation's padded-4K paired median improved 1.43%, while the initial
+matrix's paired median was 0.37% slower. Across both matrices padded 4K won
+10/14 pairs. Planter 4K improved in the confirmation, while noisy-bedroom 4K
+remained inconclusive by paired results. The data supports a modest 4K
+optimization with workload-dependent complete-encode effects.
+
+A separate prepared-Butteraugli probe measured fresh arena allocation plus
+reference preparation, then nine synchronous comparisons of a fixed distorted
+image. It uses the public materialized-map API, not the resident AQ sink API.
+Backend creation and input uploads were outside the timed boundary; score
+readback followed the timed comparisons. Two complete preparation/reuse episodes
+were discarded before three retained episodes in each independent process.
+Prefixes of one, two, three, five, and nine comparisons were retained.
+
+| Prepared API probe | Control | Candidate | Median change | Median paired change | Faster pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| padded 1080p: preparation | 14.766 ms | 15.490 ms | +4.90% | +3.35% | 3/7 |
+| padded 1080p: comparison | 11.082 ms | 11.259 ms | +1.60% | +1.37% | 3/7 |
+| padded 1080p: prepare + 1 comparison | 26.332 ms | 26.136 ms | -0.75% | +4.92% | 3/7 |
+| padded 1080p: prepare + 2 comparisons | 38.018 ms | 37.257 ms | -2.00% | +4.10% | 3/7 |
+| padded 1080p: prepare + 9 comparisons | 115.526 ms | 116.478 ms | +0.82% | +3.15% | 3/7 |
+| padded 4K: preparation | 59.788 ms | 61.466 ms | +2.81% | +0.10% | 3/7 |
+| padded 4K: comparison | 47.727 ms | 46.436 ms | -2.70% | -0.51% | 5/7 |
+| padded 4K: prepare + 1 comparison | 110.918 ms | 106.922 ms | -3.60% | -2.59% | 5/7 |
+| padded 4K: prepare + 2 comparisons | 158.126 ms | 152.797 ms | -3.37% | -3.37% | 5/7 |
+| padded 4K: prepare + 9 comparisons | 491.943 ms | 478.982 ms | -2.63% | -0.54% | 4/7 |
+
+At 4K, the separate steady-state medians imply about two comparisons to repay
+added preparation: 1.678 ms extra preparation / 1.291 ms saved per comparison.
+The directly measured one-comparison prefix already favored the candidate in
+5/7 pairs, showing that this slope estimate is not an exact crossover. At 1080p
+there was no consistent paired break-even through nine comparisons. A universal
+reuse threshold is therefore not established. First preparation after backend
+creation was also recorded separately: medians were 15.696 -> 16.393 ms at
+1080p and 57.404 -> 57.398 ms at 4K. These first-use samples had no preceding
+probe warmup and are not substitutes for the warmed qualification.
+
+Stage captures confirmed one scored evaluation at efforts 1--6, two at effort
+7, three at efforts 8--9, and four at effort 10. Enabling the final score at
+effort 7 adds a third evaluation. Counts matched the control in all cases.
+Separate unprofiled policy timing on Kodak17 showed:
+
+| Kodak17 policy | Scored evaluations | Control | Candidate | Change | Faster pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| effort-1 | 1 | 19.868 ms | 19.951 ms | +0.42% | 3/7 |
+| effort-4 | 1 | 20.972 ms | 21.627 ms | +3.13% | 1/7 |
+| effort-8 | 3 | 28.063 ms | 28.034 ms | -0.11% | 2/7 |
+| effort-10 | 4 | 50.002 ms | 49.703 ms | -0.60% | 5/7 |
+| effort-7-final-score | 3 | 26.534 ms | 26.810 ms | +1.04% | 3/7 |
+
+The effort-4 slowdown is a measured tradeoff: its quantization-pipeline median
+rose 1.75%, and its complete-encode paired median rose 2.67%. Extra reuse does
+not guarantee a complete-encode win when other stages dominate. The default
+performance target remains ordinary effort 7; correctness gates cover all
+policies below.
+
+| Prepared API memory at padded 4K | Control | Candidate |
+| --- | ---: | ---: |
+| Prepared arena allocation | 1122.74 MiB | 1138.56 MiB |
+| Logical cached reference | 426.90 MiB | 474.33 MiB |
+| Logical comparison scratch | 695.84 MiB | 664.22 MiB |
+| Process physical footprint after preparation | 1885.77 MiB | 1901.72 MiB |
+| Peak process RSS | 680.33 MiB | 680.48 MiB |
+
+Arena allocation grew by exactly 16,588,800 bytes at 4K and 4,147,200 bytes at
+1080p (1.41% in this prepared operation). The public API probe's median physical
+footprint rose about 16.0 MiB at 4K and 4.2 MiB at 1080p. `TASK_VM_INFO` physical
+footprint and `getrusage` peak RSS measure different things and are not additive.
+The immediate post-destruction footprint stayed near its prepared value; arena
+ownership release does not imply immediate return of driver-managed physical
+pages to the OS. These process measurements describe the prepared API probe,
+not total encoder memory or a redesigned AQ scratch pool.
+
+Correctness and lifecycle qualification:
+
+- Exact AQ snapshots matched the control: 4,007,824 bytes, SHA-256
+  `a08c0d5413058f93d51e6dec4b6c50ba1b62539417c1663e54e622daf8f8db2d`.
+  They cover quant fields, block maps, score histories, reconstruction, and
+  DC/AC coefficient state, including profiled/unprofiled and nondefault options.
+- Public full-map, scalar, and intermediate-stage snapshots matched exactly:
+  56,104 bytes, SHA-256
+  `c98003b3e3efab9fddb737082e884d317dc27161275a49dc214215ae64373ee0`.
+  The temporary capture harness allowed different cache-byte counts; permanent
+  tests check the candidate's exact resource accounting separately.
+- All 38 canonical images and all 18 Kodak17 policy configurations produced
+  byte-identical control/candidate codestreams. Policies include efforts 1--10,
+  high density, maximum compression, final diagnostics, exact coefficients,
+  throughput modes, target bytes, and maximum error.
+- Pinned `djxl` 0.13.0 (`e8ff0976`) accepted padded 4K, Kodak17, and planter
+  4K pairs; decoded linear-RGB PFM bytes matched. External Butteraugli 3-norms
+  remained 0.683604, 0.729423, and 0.718311. Independent repeat encodes of all
+  three inputs matched byte for byte on both builds.
+- New real-device tests compare independent caches with different references
+  and odd dimensions against the CPU oracle, run them concurrently, and replace
+  one with a different extent while the other remains live. Existing tests cover
+  original-reference mutation, repeat comparisons, capture semantics, guarded
+  strides, nonmultiscale and expanded fallbacks, allocation-failure contracts,
+  invalidation, forced idle-arena purge, and pressure recovery. Preparation
+  submission/completion failure tests now include a multiscale image.
+- Focused tests passed 4/4. The final full Release suite passed 61/62; the only
+  failure was the inherited CPU `quantization_pipeline` golden
+  (`0.24919039011001587` actual, `0.24914586544036865` expected), reproduced
+  on the fresh `580cb47` control. Optional libjxl-reference fixtures were disabled;
+  pinned decoder and external-quality validation ran separately.
+- Final code-review cleanup rebuilt to byte-identical encode/benchmark binaries
+  and metallib, preserving the measured implementation. No runtime selector for
+  an intermediate prototype was retained.
+
+Matched Performance Limiters captures used padded 4K with zero warmups and one
+sample, separately from timing qualification. Both processes included two
+workflow sequences. Counter intervals had to lie within the benchmark's active
+GPU intervals; any overlap with another active GPU process was excluded. Unique
+excluded coverage was 32.34 ms for the control and 10.05 ms for the candidate;
+retained coverage was 331.47 and 327.20 ms. These are coverage unions, not encode
+latencies.
+
+| Resident AQ counter | Control | Candidate |
+| --- | ---: | ---: |
+| Kernel Occupancy | 61.99% | 61.43% |
+| Occupancy Manager Target | 77.95% | 77.44% |
+| Compute Shader Launch Limiter | 39.95% | 53.49% |
+| Instruction Throughput Limiter | 59.70% | 59.87% |
+| L1 Cache Limiter | 10.39% | 10.52% |
+| GPU Bandwidth | 145.49 GB/s | 145.25 GB/s |
+
+Aggregate occupancy and L1 behavior remained similar. The launch limiter rose;
+these captures do not isolate the reason, and it is not a direct measure of
+dispatch-call overhead. The compared submissions contain different work.
+Shader sampling identified four control transpose-convolution intervals but no
+attributable candidate mask-family interval, so it does not support an
+individual-kernel counter comparison. No direct register/spill or LLC/MMU data
+was collected. The dispatch graph and combined stage timings establish the
+saved computation; the separate wall-time and memory probes establish the
+measured benefit and storage cost.
+
+Artifacts are retained under `/private/tmp/gjxl-reference-mask-sy1kysjf`: immutable
+control source/build, frozen prototype executables and metallibs, patches and
+hashes, raw paired samples and ratios, thermal probes, reuse/memory probes,
+policy evaluation counts, exact snapshots, corpus/policy codestreams, decoder
+outputs, test logs, and Performance Limiters traces/exports. These temporary
+artifacts are provenance rather than durable repository fixtures.
+
+## Correctness contract
+
+Fusion is not purely a scheduling transformation. Removing a device-memory
+round trip can remove an FP32 rounding point; combining loops can permit
+reassociation; and changing a reduction tree necessarily changes evaluation
+order. The following gates are mandatory.
+
+### Kernel and metric parity
+
+- Compare every capturable Butteraugli stage against the baseline Metal path.
+- Compare full distance maps and scalar scores against the native CPU
+  implementation using the existing tolerances.
+- Do not widen tolerances to make fusion pass. Investigate the first differing
+  expression and restore its operation order.
+- Cover constant, impulse, edge, gradient, noise, odd-size, minimum-size,
+  expanded-small-image, and multiscale fixtures.
+
+### Encoder behavior
+
+- Compare raw quant fields and quantizer parameters.
+- Compare AC strategy grids and color-correlation state.
+- Compare final coefficient planes and owned frame state.
+- Require deterministic codestream bytes across repeated encodes where the
+  baseline is deterministic.
+- Decode with the pinned `djxl`, compare decoded pixels, and calculate external
+  Butteraugli on a representative corpus.
+- Exercise effort 1--10, high density, maximum compression, target-size search,
+  maximum-error control, and final diagnostics even though effort 7 is the
+  performance target.
+
+### API and failure behavior
+
+- Public diagnostic APIs must still return every promised plane.
+- Stage capture must not expose stale scratch after a fused submission.
+- Allocation, pipeline-creation, command encoding, completion, and readback
+  failures must preserve current invalidation and atomic-output behavior.
+- Concurrent encodes sharing a Metal backend must not share mutable
+  threadgroup parameters or capture state.
+
+## Measurement protocol
+
+### Wall time
+
+- fresh Release builds with no profiler attached;
+- at least two discarded warmups;
+- alternating baseline/fused order in independent processes;
+- at least five retained pairs for development and seven for promotion;
+- identical already-generated linear-RGB inputs and timed boundaries;
+- nominal thermal state and no overlapping foreground GPU workload; and
+- report median, every paired ratio, output bytes, and output hash.
+
+Primary workloads:
+
+- padded 1080p and padded 4K synthetic photographic workloads for controlled
+  scaling;
+- all Kodak images for edges, small dimensions, and content variation; and
+- at least two real photographic 1080p images and two real photographic 4K
+  images.
+
+### GPU attribution
+
+Use stage timestamps to identify the affected family, but do not treat the
+instrumented workflow time as the public benchmark. Use Metal System Trace and
+Performance Limiters for causal claims. For each candidate record:
+
+| Metric | Why it matters |
+| --- | --- |
+| target-stage GPU time | proves the intended family improved |
+| resident command-buffer GPU time | catches downstream resource regressions |
+| reference-preparation GPU time | separates invariant and per-evaluation wins |
+| dispatch count and grid sizes | verifies the structural change |
+| approximate launched threads | distinguishes launch-volume from call count |
+| occupancy and occupancy target | identifies register/threadgroup pressure |
+| launch and instruction limiters | separates backpressure from arithmetic |
+| buffer bandwidth, L1, LLC, and MMU | checks whether intermediates were removed beneficially |
+| complete encode wall time | establishes user-visible value through Amdahl's law |
+
+Counter intervals overlapping unrelated GPU processes must be excluded by the
+same conservative rule used in the earlier capture.
+
+## Promotion and rollback criteria
+
+A slice is eligible for the default path only when:
+
+- all focused and full Release tests pass without a new or widened tolerance;
+- output determinism and pinned-decoder acceptance pass;
+- no tested corpus image has a material decoded-quality regression;
+- padded 4K target-stage GPU time improves in a majority of independent pairs;
+- complete encoding improves measurably at 4K and does not regress materially
+  on Kodak or photographic 1080p; and
+- the counter capture explains the result without new spills, pathological
+  occupancy collapse, or severe LLC/MMU pressure.
+
+As a practical review threshold, a complex slice should target at least a 10%
+resident-AQ improvement or a 5% complete-encode improvement. A smaller change
+can be retained when it is simple, clearly measured, and composes with later
+fusion. Dispatch reduction alone is not a promotion criterion.
+
+Rollback remains straightforward because each superkernel is introduced and
+qualified separately. If a slice fails, remove its pipeline state and host
+branch while leaving successful earlier slices intact.
+
+## Work deliberately excluded from this branch
+
+- changing the number of effort-7 AQ evaluations;
+- relaxed or fast Metal math;
+- overlapping reference preparation with AC on another queue;
+- AC strategy search, coefficient tokenization, entropy coding, or codestream
+  serialization;
+- expanding workspace leasing to new callers or changing lease-count and
+  lifetime limits (Slice G's bounded reference-buffer storage is evaluated
+  within those limits); and
+- adding a general public execution/materialization-plan API.
+
+Those can change the Amdahl budget, but they answer different questions. In
+particular, relaxed math must be evaluated as a quality/correctness policy, not
+smuggled into a scheduling optimization.
+
+## Historical first implementation checkpoint
+
+The first checkpoint deliberately contained only:
+
+1. a refreshed current-revision baseline and counter capture;
+2. `gjxl_butteraugli_malta_sixway_f32` behind a temporary private build
+   selector;
+3. exact stage-capture and full-map differential tests;
+4. `32 x 8` and `16 x 8` counter-qualified variants; and
+5. an alternating Release benchmark on padded 4K, padded 1080p, and Kodak.
+
+That experiment directly tests the central hypothesis: whether keeping the
+six-stage accumulation resident within one threadgroup materially reduces
+launch pressure and global accumulation traffic without creating a worse
+resource bottleneck. Its result determines whether to proceed to broader
+channel and convolution fusion or redirect attention to arithmetic itself.

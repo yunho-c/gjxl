@@ -768,6 +768,70 @@ Release policy matrix preserves the established sizes for efforts 7-10, high
 density, maximum compression, exact coefficients, throughput, maximum
 throughput, and final-score collection.
 
+### 7. Fuse launch-heavy Butteraugli work selectively (completed)
+
+Status: investigated through a five-phase superkernel program. Three
+production changes are retained; launch-only and overly divergent fusions are
+removed. The complete design, rejected experiments, counter evidence, and
+qualification are recorded in
+[`metal-fusion.md`](metal-fusion.md).
+
+The study falsified the broad hypothesis that fewer dispatches are inherently
+faster. Six-way Malta, three-channel subsampling, three-channel 5-tap blur, and
+paired high/ultra kernels reduced launches but were neutral or slower. The
+retained kernels remove material arithmetic or global intermediates as well:
+
+1. a tiled 5-tap blur-plus-Opsin kernel removes three horizontal full-image
+   intermediates and their rereads;
+2. a direct-load tiled 33-tap low/medium kernel preserves the FP32 horizontal
+   rounding point in threadgroup memory while eliminating three full-image
+   scratch planes; and
+3. strategy-family resident sinks evaluate final distance, block distance, and
+   scalar partials without a full-resolution final map.
+
+Reference preparation now records 32 dispatches rather than the initial 44.
+The ordinary effort-7 two-evaluation resident submission records 286 rather
+than 316. The 30-dispatch reduction is useful, but the measured gains came from
+less redundant normalization, fewer launched threads, and less global
+intermediate traffic--not from API-call count alone.
+
+The isolated retained workflow measurements were:
+
+| Retained slice | padded 1080p complete encode | padded 4K complete encode |
+| --- | ---: | ---: |
+| tiled 5-tap blur plus Opsin | `-4.22%` (6/7 wins) | `-0.57%` (6/7 wins) |
+| direct-load tiled 33-tap low/medium | `-0.86%` (7/7 wins) | `-0.58%` (5/7 wins) |
+| resident final metric and reductions | `-1.51%` (6/7 wins) | `-1.78%` (6/7 wins) |
+
+Those isolated percentages are not additive. A directional comparison between
+the Phase 0 and final Release process medians moved padded 1080p from
+`91.715 ms` to `82.746 ms` and padded 4K from `315.240 ms` to `297.430 ms`.
+Because those endpoints were captured on different days rather than as one
+alternating pair, they describe the scale and direction of the completed
+program, not a causal estimator.
+
+Final consolidation also removes the unconditional complete-distance-map and
+unused maximum-error scratch planes. The existing 1920-by-1080 AQ fixture saves
+`8.16 MiB` of staging and peak scratch; padded 4K saves at least `32.61 MiB`.
+The ordinary fully resident compute graph remains timing-neutral, while the
+generic exact-coefficient path improves its quantization median by `1.12%` at
+1080p and `2.27%` at 4K because it now uses the resident sink too.
+
+A final matched Performance Limiters capture measured the Phase 4 and Phase 5
+resident-policy command buffers at `101.030 ms` and `101.092 ms`, confirming no
+compute regression from storage consolidation. In the final candidate,
+Butteraugli reference preparation still had Shader Launch as the top limiter in
+`83.0%` of clean classified samples. The larger resident submission had shifted
+to Instruction Throughput as its top limiter in `70.9%` of samples. Further
+work should therefore target a specific remaining arithmetic or intermediate,
+not pursue another undifferentiated launch-count reduction.
+
+All 38 corpus codestreams were byte-identical to the Phase 4 parent. The full
+effort and policy matrix, pinned-decoder representatives, external Butteraugli,
+failure injection, real and forced memory-pressure recovery, and the complete
+Release suite passed within their established contracts. The only suite failure
+remains the unrelated pinned CPU quantization golden described below.
+
 ## Explicitly rejected or deferred directions
 
 - **Cap automatic CPU scheduling at eight workers:** rejected by seven
