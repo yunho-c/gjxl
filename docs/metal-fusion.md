@@ -7,17 +7,23 @@ Date: 2026-09-04; updated 2026-09-05
 - Primary target: ordinary effort 7, fully resident Metal, multiscale
   Butteraugli, final diagnostic score disabled
 - Initial qualification device: Apple M4 Pro
-- Status: Phases 0--6 complete
+- Status: Phase 6 reopened for planned Phase 6.3; Phase 7 planned
+- Completed work: Phases 0--5, 6.1, and 6.2
 
 ## Executive outcome
 
-The completed study supports a small set of selective Butteraugli
+The completed experiments support a small set of selective Butteraugli
 **superkernels**, not one monolithic kernel and not indiscriminate launch
 fusion. The retained path combines 5-tap blur with Opsin conversion, computes
 33-tap low/medium filtering through a direct-load tile, writes the final
 metric directly into resident block and score sinks, and computes raw mask
 activity in the final ultra-Y pass. Launch-only Malta and
 channel fusions were neutral or slower and were removed.
+
+Two follow-ups are now documented: L2 accumulation into final-distance sinks
+in Slice F / Phase 6.3, and invariant reference-mask caching in Slice G /
+Phase 7. Both are planned experiments without implementation or measured
+results. The completed Phase 6.1 and 6.2 qualifications remain unchanged.
 
 The fully resident AQ path already records reconstruction, filtering,
 Butteraugli, block reduction, and policy updates into one ordered compute
@@ -497,12 +503,14 @@ to explain the result.
 
 ### Slice F: pointwise producer/consumer fusion
 
-The remaining pointwise passes offer two bounded experiments that do not need
+The remaining pointwise passes offer three bounded experiments that do not need
 larger convolution halos or additional threadgroup barriers:
 
 1. compute high Y before high X and apply X suppression while producing high X;
 2. compute raw mask activity while producing the final ultra-frequency Y
-   output, reusing the already completed high/ultra X values.
+   output, reusing the already completed high/ultra X values; and
+3. compute L2 contributions while evaluating final distances, first in the
+   resident main-scale sink and then in the subscale final-map producer.
 
 Preserve the FP32 operation order and all diagnostic outputs. In the second
 experiment, the raw mask must occupy a plane disjoint from the live transposed
@@ -510,11 +518,49 @@ convolution input and survive Malta, L2, and uncached reference-mask work until
 its blur consumes it. Do not add persistent reference-mask caching to this
 slice: that changes storage and preparation costs independently of fusion.
 
-Measure each experiment independently against the retained Phase 5 path.
-Mask fusion moves arithmetic from the mask stage into psycho construction, so
-compare their combined GPU time as well as reference preparation and the
-resident submission. Retain a change only when its gain survives paired
-complete-encode measurements and the existing correctness gates.
+The third experiment extends Slice D's sinks with pointwise arithmetic from
+`gjxl_butteraugli_l2_f32`. Preserve the incoming Malta accumulation and the
+exact L2, masking, and reduction order. Additional psycho-plane bindings and
+longer register lifetimes make this a larger resource-pressure experiment than
+the first two. Retain a materialized path for diagnostic consumers.
+
+Phases 6.1 and 6.2 used the retained Phase 5 control. Phase 6.3 starts from the
+retained mask-fusion implementation at `10c5531`; freeze the exact control
+again when experimentation begins. Mask fusion moves arithmetic into psycho
+construction, and L2 fusion would move it into final-distance consumers, so
+compare combined producer/consumer GPU time as well as the resident submission.
+Retain a change only when its gain survives paired complete-encode measurements
+and the existing correctness gates.
+
+### Slice G: invariant reference preparation and caching
+
+Reference-mask caching moves repeated work into evaluator preparation and
+extends the lifetime of its outputs. Evaluate its preparation cost and retained
+storage separately from pointwise fusion.
+
+In `EncodePreparation` and `EncodeDifference` in
+[`metal_butteraugli.cpp`](../src/gpu/metal/metal_butteraugli.cpp), the current
+reference state is:
+
+| Reference result | Current lifetime | Planned treatment |
+| --- | --- | --- |
+| Main-scale blurred mask | Cached during reference preparation | Keep the existing cache |
+| Subscale blurred mask | Recomputed for every subscale comparison | Test caching during reference preparation |
+| Main-scale fuzzy-eroded mask | Recomputed for every main-scale comparison | Test a persistent reference result |
+| Subscale fuzzy-eroded mask | Recomputed for every subscale comparison | Test a persistent reference result |
+
+The blurred masks must remain available for the reference/distorted activity
+correction; their eroded forms cannot replace them. Keep distorted activity and
+mask generation per comparison. If all three missing results are retained,
+their nominal additional FP32 storage is `4 * (N + 2 * M)` bytes for main-scale
+area `N` and subscale area `M`. At the padded-4K dimensions used in Phase 6.2,
+that is about `47.4 MiB` before stride padding and allocator overhead. This is
+a planning estimate, not a measured allocation or required layout.
+
+Any additional buffers must follow the existing prepared-reference ownership,
+workspace accounting, invalidation, purge, and recovery rules. Preserve lease
+count and lifetime limits. Phase 7 must measure the actual byte increase and
+whether reduced comparison work repays the added preparation and storage cost.
 
 ## Implementation sequence
 
@@ -1352,10 +1398,11 @@ The retained Phase 5 artifacts are:
 
 ### Phase 6: pointwise producer/consumer fusion
 
-This phase implements Slice F as two independent experiments. Phase 6.1
+This phase implements Slice F as independently qualified experiments. Phase 6.1
 rejects high-X suppression fusion; Phase 6.2 retains mask precomputation at the
-ultra-frequency producer. Rejected variants remain documented rather than
-retained as private production selectors.
+ultra-frequency producer. Phase 6 is reopened to plan L2-to-sink fusion in
+Phase 6.3; that experiment has not started. Rejected variants remain documented
+rather than retained as private production selectors.
 
 #### Phase 6.1 result: high-X suppression fusion (2026-09-05)
 
@@ -1584,6 +1631,86 @@ Limiters captures, exports, and the overlap-filtering analysis. The exact
 capture harness and full Release log are alongside them. These temporary
 artifacts are provenance rather than durable repository fixtures.
 
+#### Phase 6.3 plan: L2 accumulation into final-distance sinks
+
+Status: planned; no prototype or candidate measurements yet.
+
+The current `gjxl_butteraugli_l2_f32` kernel reads reference/distorted psycho
+planes, incorporates Malta's AC accumulation, and writes three AC and three DC
+planes. `gjxl_butteraugli_final_masked_ac_f32` and
+`gjxl_butteraugli_resident_reduce_f32` subsequently read those values to compute
+final distances. All three kernels are in
+[`butteraugli.metal`](../src/gpu/metal/kernels/butteraugli.metal).
+
+1. Freeze the retained Phase 6.2 control and refresh its L2, mask/final, and
+   resident-reduction budgets. Audit psycho-plane lifetimes through the later
+   consumers, buffer-binding limits, and diagnostic capture requirements.
+2. Prototype main-scale L2 arithmetic in the resident reduction's per-pixel
+   distance calculation. Preserve the existing transform footprint, multiscale
+   composition, reduction tree, and FP32 operation order; remove the separate
+   main-scale L2 dispatch only for this qualified path.
+3. Test the subscale final-map producer as a separate increment. Compute each
+   subscale L2 contribution once per subscale pixel, preserving the quarter-area
+   map consumed by the main sink. Keep the public/materialized diagnostic path
+   as an oracle until any extension to it is independently qualified.
+4. Compare exact stage captures, maps, scalar scores, block maps, coefficient
+   state, and codestream bytes under the existing correctness contract. Exercise
+   profiled and unprofiled paths, final diagnostics, odd dimensions, and expanded
+   small-image fallbacks without widening tolerances.
+5. Measure combined L2 plus affected final-distance/reduction GPU time, complete
+   resident-AQ time, and unprofiled complete encodes using the established paired
+   corpus protocol. Use counters to inspect the larger consumers' occupancy and
+   resource pressure; a missing L2 dispatch alone is not a promotion result.
+
+The opportunity is reduced intermediate traffic and fewer full-image passes.
+The AC/DC slots currently alias earlier psycho-image work planes, so eliminating
+their L2 stores does not by itself permit removing those allocations. Defer any
+workspace-layout consolidation until fusion is qualified. Keep reference-mask
+caching out of this experiment so its effect can be measured independently.
+
+### Phase 7: invariant reference preparation and caching
+
+Status: planned; no prototype or candidate measurements yet. This phase implements
+Slice G and does not change the completed Phase 6.1/6.2 results.
+
+Freeze a control containing the retained Phase 6.2 code. Evaluate caching
+independently of the Phase 6.3 prototype; if both are retained, qualify their
+combination against the actual retained parent and record both control
+revisions. No complete-workflow or memory benefit is established yet.
+
+#### Phase 7.1: cache the subscale blurred reference mask
+
+Prepare the subscale blurred mask alongside its reference psycho planes and
+retain it for comparisons. Reuse the existing fused ultra-Y raw-mask producer
+where its scratch lifetime permits, then run the blur into owned reference
+storage. Supply that result to the comparison path in place of repeated
+reference precompute/blur work. Leave the main-scale blurred-mask cache intact.
+
+Measure extra preparation work separately from the saved work per comparison.
+Include the ordinary two-evaluation effort-7 encode, actual evaluation counts
+at other efforts, final-score collection, and repeated use of a prepared
+evaluator. Establish the break-even reuse count from measurements.
+
+#### Phase 7.2: cache reference-only erosion results
+
+Test main-scale and subscale fuzzy-erosion caching as separate increments on
+the qualified blurred-mask control. Retain both blurred and eroded reference
+values, and preserve the existing mask-stage capture semantics. Document each
+additional plane's extent, stride, owner, and lifetime before changing storage.
+
+Apply the existing exact-output, policy, decoder, and paired-workflow gates to
+each increment. Also compare cold preparation, warm reuse, retained/peak device
+bytes, and process memory. Exercise reference replacement, extent changes,
+concurrent evaluations, allocation failure, forced purge, and pressure recovery
+to catch stale or shared cache state. Preserve atomic failure behavior and the
+existing lease limits.
+
+Retain caching only when its measured complete-workflow benefit justifies its
+preparation and storage costs on the representative corpus. Dispatch savings
+and repeated-evaluator microbenchmarks alone are insufficient. Record rejected
+variants and remove their production state, following the same rollback rule
+as the fusion phases.
+
 ## Correctness contract
 
 Fusion is not purely a scheduling transformation. Removing a device-memory
@@ -1693,7 +1820,9 @@ branch while leaving successful earlier slices intact.
 - overlapping reference preparation with AC on another queue;
 - AC strategy search, coefficient tokenization, entropy coding, or codestream
   serialization;
-- expanding the persistent-workspace lease; and
+- expanding workspace leasing to new callers or changing lease-count and
+  lifetime limits (Slice G's bounded reference-buffer storage is evaluated
+  within those limits); and
 - adding a general public execution/materialization-plan API.
 
 Those can change the Amdahl budget, but they answer different questions. In
