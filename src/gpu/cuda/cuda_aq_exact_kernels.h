@@ -72,6 +72,20 @@ struct CudaLinearRgbToOpsinParams {
     std::array<float*, 3> reconstructed, uint32_t coding_stride,
     CudaAqExactBatch batch, cudaStream_t stream);
 
+// Fused resident transforms. The caller validates nonoverlapping anchor
+// rectangles, plane extents/strides and coefficient ranges. Coefficients use
+// batch channel-major order and native DCT layout; image and coefficient
+// storage must not alias. Empty supported batches are no-ops.
+[[nodiscard]] cudaError_t LaunchCudaAqForwardDct(
+    std::array<const float*, 3> coding, const CudaAqAnchor* anchors,
+    float* coefficients, uint32_t coding_stride, CudaAqExactBatch batch,
+    cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqInverseDct(
+    const float* coefficients, const CudaAqAnchor* anchors,
+    std::array<float*, 3> reconstructed, uint32_t coding_stride,
+    CudaAqExactBatch batch, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqGaborish(
     std::array<const float*, 3> input, std::array<float*, 3> output,
     unsigned int* error, CudaAqGaborishParams params, cudaStream_t stream);

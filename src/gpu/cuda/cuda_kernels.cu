@@ -9,6 +9,7 @@
 #include <type_traits>
 
 #include "gpu/cuda/cuda_ac_strategy_device.cuh"
+#include "gpu/cuda/cuda_aq_exact_kernels.h"
 #include "gpu/cuda/cuda_dct_factored.cuh"
 
 namespace gjxl::cuda_internal {
@@ -168,6 +169,62 @@ struct AcStrategyDctSource {
       (channel == 1 ? opsin_y : opsin_b);
     return {plane + static_cast<size_t>(candidate.block_y * 8) *
       params.opsin_row_stride + candidate.block_x * 8, params.opsin_row_stride};
+  }
+};
+
+// Resident batches are channel-major, unlike the interleaved AC-search
+// candidates. Read the validated anchor rectangle without a packed copy.
+template <unsigned int Width>
+struct AqDctImageSource {
+  const float* planes[3];
+  const CudaAqAnchor* anchors;
+  CudaAqExactBatch batch;
+  uint32_t stride;
+
+  struct Tile {
+    const float* pixels;
+    uint32_t stride;
+    __device__ float operator[](size_t index) const {
+      return pixels[(index / Width) * stride + index % Width];
+    }
+  };
+
+  __device__ Tile ForTransform(size_t transform, bool active) const {
+    if (!active) return {nullptr, 0};
+    const size_t channel = transform / batch.anchor_count;
+    const size_t index = transform - channel * batch.anchor_count;
+    const CudaAqAnchor anchor = anchors[batch.anchor_offset + index];
+    // A dynamic planes[channel] subscript makes nvcc materialize this
+    // by-value kernel argument in a local stack frame. Select fixed fields.
+    const float* plane = channel == 0 ? planes[0] :
+      (channel == 1 ? planes[1] : planes[2]);
+    return {plane + static_cast<size_t>(anchor.y) * 8 * stride +
+              anchor.x * 8, stride};
+  }
+};
+
+// The factorized inverse already holds full pixel columns in registers.
+// Store them directly in the reconstruction image, without a packed output
+// or the tall-transform redistribution needed by AC-search loss reduction.
+struct AqDctImageOutput {
+  float* planes[3];
+  const CudaAqAnchor* anchors;
+  CudaAqExactBatch batch;
+  uint32_t stride;
+
+  template <unsigned int Height>
+  __device__ void StoreColumns(const float* values, size_t transform,
+                               unsigned int x) const {
+    const size_t channel = transform / batch.anchor_count;
+    const size_t index = transform - channel * batch.anchor_count;
+    const CudaAqAnchor anchor = anchors[batch.anchor_offset + index];
+    float* plane = channel == 0 ? planes[0] :
+      (channel == 1 ? planes[1] : planes[2]);
+    float* destination = plane +
+      static_cast<size_t>(anchor.y) * 8 * stride + anchor.x * 8 + x;
+#pragma unroll
+    for (unsigned int y = 0; y < Height; ++y)
+      destination[static_cast<size_t>(y) * stride] = values[y];
   }
 };
 
@@ -503,6 +560,8 @@ __global__ void InverseDctFactoredKernel(
     if constexpr (std::is_pointer_v<Output>) {
 #pragma unroll
       for (unsigned int y = 0; y < Height; ++y) output[base + y * Width + tid] = values[y];
+    } else if constexpr (std::is_same_v<Output, AqDctImageOutput>) {
+      output.template StoreColumns<Height>(values, transform, tid);
     } else if constexpr (Width >= Height) {
       float pixels[kValues];
 #pragma unroll
@@ -510,7 +569,8 @@ __global__ void InverseDctFactoredKernel(
       output.template Store<kLocal, kValues, false>(pixels, transform, tid, tile);
     }
   }
-  if constexpr (!std::is_pointer_v<Output> && Height > Width) {
+  if constexpr (!std::is_pointer_v<Output> &&
+                !std::is_same_v<Output, AqDctImageOutput> && Height > Width) {
     // Redistribute tall output columns to row-major strided lane vectors.
     // This preserves the existing loss reduction tree and mask addressing.
     __syncthreads();
@@ -1191,6 +1251,66 @@ cudaError_t LaunchCudaDct(
   else return LaunchCudaDctMatrix(forward, input, output, transform_count,
     width, height, stream);
   return cudaGetLastError();
+}
+
+template <bool Forward>
+cudaError_t LaunchAqImageDct(
+  std::array<const float*, 3> coding, const float* input,
+  std::array<float*, 3> reconstructed, float* output,
+  const CudaAqAnchor* anchors, uint32_t stride, CudaAqExactBatch batch,
+  cudaStream_t stream) {
+  const size_t count = 3 * static_cast<size_t>(batch.anchor_count);
+  const auto launch = [&](auto w, auto h) {
+    if (count == 0) return;
+    constexpr unsigned int kWidth = decltype(w)::value;
+    constexpr unsigned int kHeight = decltype(h)::value;
+    constexpr unsigned int kLocal = kWidth > kHeight ? kWidth : kHeight;
+    constexpr unsigned int kTransforms = kFactoredDctThreads / kLocal;
+    const unsigned int blocks = static_cast<unsigned int>(
+      (count + kTransforms - 1) / kTransforms);
+    if constexpr (Forward) {
+      const AqDctImageSource<kWidth> source{
+        {coding[0], coding[1], coding[2]}, anchors, batch, stride};
+      ForwardDctFactoredKernel<kWidth, kHeight>
+        <<<blocks, kFactoredDctThreads, 0, stream>>>(
+          source, output + batch.coefficient_offset, count);
+    } else {
+      const AqDctImageOutput destination{
+        {reconstructed[0], reconstructed[1], reconstructed[2]}, anchors,
+        batch, stride};
+      InverseDctFactoredKernel<kWidth, kHeight>
+        <<<blocks, kFactoredDctThreads, 0, stream>>>(
+          input + batch.coefficient_offset, destination, count);
+    }
+  };
+  using N8 = std::integral_constant<unsigned int, 8>;
+  using N16 = std::integral_constant<unsigned int, 16>;
+  using N32 = std::integral_constant<unsigned int, 32>;
+  if (batch.pixel_width == 8 && batch.pixel_height == 8) launch(N8{}, N8{});
+  else if (batch.pixel_width == 16 && batch.pixel_height == 8) launch(N16{}, N8{});
+  else if (batch.pixel_width == 8 && batch.pixel_height == 16) launch(N8{}, N16{});
+  else if (batch.pixel_width == 16 && batch.pixel_height == 16) launch(N16{}, N16{});
+  else if (batch.pixel_width == 32 && batch.pixel_height == 16) launch(N32{}, N16{});
+  else if (batch.pixel_width == 16 && batch.pixel_height == 32) launch(N16{}, N32{});
+  else if (batch.pixel_width == 32 && batch.pixel_height == 32) launch(N32{}, N32{});
+  else return cudaErrorInvalidValue;
+  return count == 0 ? cudaSuccess : cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqForwardDct(
+  std::array<const float*, 3> coding, const CudaAqAnchor* anchors,
+  float* coefficients, uint32_t coding_stride, CudaAqExactBatch batch,
+  cudaStream_t stream) {
+  return LaunchAqImageDct<true>(coding, nullptr, {}, coefficients, anchors,
+    coding_stride, batch, stream);
+}
+
+cudaError_t LaunchCudaAqInverseDct(
+  const float* coefficients, const CudaAqAnchor* anchors,
+  std::array<float*, 3> reconstructed, uint32_t coding_stride,
+  CudaAqExactBatch batch, cudaStream_t stream) {
+  return LaunchAqImageDct<false>({}, coefficients, reconstructed, nullptr,
+    anchors, coding_stride, batch, stream);
 }
 
 cudaError_t LaunchCudaDctMatrix(

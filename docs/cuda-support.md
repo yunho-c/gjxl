@@ -571,6 +571,16 @@ extra full-image host clear, but does not reduce its capacity or readback
 volume. Final frame coefficients retain the same group/channel order and
 zero-filled unused edge tails.
 
+The fully-resident mixed-strategy forward DCT reads coding-image rectangles
+directly, and its inverse DCT writes reconstruction-image rectangles directly.
+Both use the existing factorized FP32 arithmetic and validated channel-major
+anchor batches. The separate gathered-pixel and inverse-pixel arrays are no
+longer allocated: this removes `2 * 3 * padded_width * padded_height *
+sizeof(float)` bytes of device staging (199.07 MB at padded 4K), plus the
+associated gather/scatter launches and device-memory round trips. Cached
+forward coefficients remain available for repeated AQ evaluations. Exact
+coefficient mode and the DCT8-only maximum-throughput path are unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

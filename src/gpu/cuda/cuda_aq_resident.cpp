@@ -1554,7 +1554,7 @@ class CudaPreparedResidentAqEvaluation final
     if (status.ok())
       status = plan_staging(DeviceElementType::kI32, block_extent_,
                             block_extent_.width);
-    for (size_t index = 0; index < 2 && status.ok(); ++index) {
+    if (status.ok()) {
       status = plan_staging(DeviceElementType::kF32, {coefficient_count_, 1},
                             coefficient_count_);
     }
@@ -1573,9 +1573,6 @@ class CudaPreparedResidentAqEvaluation final
     if (status.ok())
       status = plan_staging(DeviceElementType::kI32, {3 * block_count_, 1},
                             3 * block_count_);
-    if (status.ok())
-      status = plan_staging(DeviceElementType::kF32, {coefficient_count_, 1},
-                            coefficient_count_);
     if (status.ok())
       status = plan_staging(DeviceElementType::kF32, block_extent_,
                             block_extent_.width);
@@ -1711,10 +1708,6 @@ class CudaPreparedResidentAqEvaluation final
     if (!status.ok()) return status;
     status = AllocatePlane(staging_, DeviceElementType::kF32,
                            {coefficient_count_, 1}, coefficient_count_,
-                           &gathered_device_);
-    if (!status.ok()) return status;
-    status = AllocatePlane(staging_, DeviceElementType::kF32,
-                           {coefficient_count_, 1}, coefficient_count_,
                            &forward_device_);
     if (!status.ok()) return status;
     status = AllocatePlane(staging_, DeviceElementType::kF32,
@@ -1736,10 +1729,6 @@ class CudaPreparedResidentAqEvaluation final
     status =
         AllocatePlane(staging_, DeviceElementType::kI32, {3 * block_count_, 1},
                       3 * block_count_, &quantized_dc_device_);
-    if (!status.ok()) return status;
-    status = AllocatePlane(staging_, DeviceElementType::kF32,
-                           {coefficient_count_, 1}, coefficient_count_,
-                           &inverse_device_);
     if (!status.ok()) return status;
     status = AllocatePlane(staging_, DeviceElementType::kF32, block_extent_,
                            block_extent_.width, &inverse_sigma_device_);
@@ -2113,22 +2102,11 @@ class CudaPreparedResidentAqEvaluation final
     }
     for (const CudaAqExactBatch& batch : self.batches_) {
       if (batch.anchor_count == 0) continue;
-      cudaError_t status = LaunchCudaAqGatherTransformPixels(coding_source[0],
-        coding_source[1],
-        coding_source[2],
-        Pointer<CudaAqAnchor>(self.anchors_device_),
-        Pointer<float>(self.gathered_device_),
-        batch,
-        static_cast<uint32_t>(self.coding_extent_.width),
-        backend.state_->stream);
-      if (status != cudaSuccess) return status;
-      status = LaunchCudaDct(
-          true,
-          Pointer<const float>(self.gathered_device_) +
-              batch.coefficient_offset,
-          Pointer<float>(self.forward_device_) + batch.coefficient_offset,
-          3 * static_cast<size_t>(batch.anchor_count), batch.pixel_width,
-          batch.pixel_height, backend.state_->stream);
+      const cudaError_t status = LaunchCudaAqForwardDct(
+          coding_source, Pointer<CudaAqAnchor>(self.anchors_device_),
+          Pointer<float>(self.forward_device_),
+          static_cast<uint32_t>(self.coding_extent_.width), batch,
+          backend.state_->stream);
       if (status != cudaSuccess) return status;
     }
     return cudaSuccess;
@@ -2209,17 +2187,9 @@ class CudaPreparedResidentAqEvaluation final
           Pointer<unsigned int>(self.error_device_), batch, params,
           backend.state_->stream);
       if (status != cudaSuccess) return status;
-      status = LaunchCudaDct(
-          false,
-          Pointer<const float>(self.reconstruction_coefficients_device_) +
-              batch.coefficient_offset,
-          Pointer<float>(self.inverse_device_) + batch.coefficient_offset,
-          3 * static_cast<size_t>(batch.anchor_count), batch.pixel_width,
-          batch.pixel_height, backend.state_->stream);
-      if (status != cudaSuccess) return status;
-      status = LaunchCudaAqScatterReconstruction(
+      status = LaunchCudaAqInverseDct(
+          Pointer<const float>(self.reconstruction_coefficients_device_),
           Pointer<CudaAqAnchor>(self.anchors_device_),
-          Pointer<const float>(self.inverse_device_),
           MutablePointers(self.reconstructed_),
           static_cast<uint32_t>(self.coding_extent_.width), batch,
           backend.state_->stream);
@@ -2515,14 +2485,12 @@ class CudaPreparedResidentAqEvaluation final
   DevicePlaneView statistics_device_{};
   DevicePlaneView quantizer_device_{};
   DevicePlaneView raw_quant_device_{};
-  DevicePlaneView gathered_device_{};
   DevicePlaneView forward_device_{};
   DevicePlaneView thresholds_device_{};
   DevicePlaneView quantized_device_{};
   DevicePlaneView reconstruction_coefficients_device_{};
   DevicePlaneView dc_device_{};
   DevicePlaneView quantized_dc_device_{};
-  DevicePlaneView inverse_device_{};
   DevicePlaneView inverse_sigma_device_{};
   DevicePlaneView distance_device_{};
   DevicePlaneView score_device_{};

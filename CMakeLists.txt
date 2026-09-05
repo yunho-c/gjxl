@@ -2325,6 +2325,12 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_quantization_adjustment COMMAND gjxl_cuda_quantization_adjustment_test)
     set_tests_properties(cuda_quantization_adjustment PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_cuda_resident_dct_test tests/cuda_resident_dct_test.cpp)
+    target_link_libraries(gjxl_cuda_resident_dct_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_resident_dct_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_resident_dct COMMAND gjxl_cuda_resident_dct_test)
+    set_tests_properties(cuda_resident_dct PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(gjxl_cuda_epf_test tests/cuda_epf_test.cpp)
     target_link_libraries(gjxl_cuda_epf_test PRIVATE gjxl_codec gjxl_cuda)
     target_include_directories(gjxl_cuda_epf_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
