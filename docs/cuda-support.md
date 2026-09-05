@@ -651,6 +651,15 @@ decoded-image matrix cover the change. The
 records the section-writing gain and the smaller, variable whole-workflow
 results. CUDA kernels and system settings are unchanged.
 
+Direct AC token accumulation likewise uses a small private error enum, with
+public status construction confined to failure paths. Its original
+validation, error codes, token order, fixed-HybridUint populations, and
+output atomicity are preserved. A 3,072-case differential fixture checks
+all production transform shapes and mixed layouts, patterns, orders,
+context maps, scratch reuse, and both collection modes. See the
+[S43 study](cuda-optimization-s1.md#lightweight-direct-ac-token-accumulation-s43)
+for isolated and full-workflow qualification.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

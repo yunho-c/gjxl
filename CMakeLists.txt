@@ -1413,6 +1413,10 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_coefficient_order_test PRIVATE gjxl_codestream)
   add_test(NAME coefficient_order COMMAND gjxl_coefficient_order_test)
 
+  add_executable(gjxl_ac_direct_tokenization_test tests/ac_direct_tokenization_test.cpp)
+  target_link_libraries(gjxl_ac_direct_tokenization_test PRIVATE gjxl_codestream)
+  add_test(NAME ac_direct_tokenization COMMAND gjxl_ac_direct_tokenization_test)
+
   add_executable(
     gjxl_block_context_map_test
     tests/block_context_map_test.cpp

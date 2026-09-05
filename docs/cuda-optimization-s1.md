@@ -10,7 +10,8 @@
   value access, fused resident coefficient passes, and encoding-only
   coefficient materialization, shape-specialized coefficient blocks, and
   fused blur/frequency splitting, and branch-free host coefficient-order
-  counting and lightweight ANS token emission implemented;
+  counting, lightweight ANS token emission, and direct AC token accumulation
+  implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -23,7 +24,20 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `2260047` inlines
+below supersede them. The latest checkpoint against `0f5a7a7` replaces
+per-token string-owning success results in direct AC accumulation with a
+private enum, preserving the original checks and error codes. Coefficient
+tokenization worker time improves by median paired 25.4% / 27.8% / 21.5%
+at 4K / 1080p / Flower; warm whole-encode changes are
+-5.4% / -3.6% / -3.8%. Cold results are mixed and near-neutral on the
+smaller inputs. All 64 CUDA / 49 CPU tests, the expanded fully instrumented
+host ASan fixtures, batch checks, and 46 byte-identical decoded image pairs
+pass. The new 3,072-case differential test checks exact tokens and sparse
+populations across transform layouts, patterns, orders, context maps, and
+collection modes. No CUDA source or system setting changes. Optimization
+remains ongoing, not maxed out.
+
+The preceding checkpoint against `2260047` inlines
 validated HybridUint conversion and removes string-owning success results
 from the private ANS recurrence. Section-writing wall time improves by
 median paired 42.0% / 34.3% / 16.0% at 4K / 1080p / Flower. Warm
@@ -5727,6 +5741,205 @@ histogram/model construction remain substantial, as does GPU perceptual
 work. The remaining byte-packing/append costs are smaller measured leads;
 the unexplained change in unchanged order-phase timing also warrants
 separate attribution before drawing broader CPU conclusions.
+
+## Lightweight direct AC token accumulation (S43)
+
+Date: 2026-09-05. Baseline: `0f5a7a7` (S42).
+
+### Bottleneck and implementation
+
+After ANS emission improves, the retained S42 4K cohort reports 70.259 ms
+of AC tokenization wall time, including order/context preparation, and
+325.961 ms of coefficient-tokenization aggregate worker time. The latter
+is work across parallel groups, not additional wall time. The equivalent
+1080p figures are 17.252 / 54.456 ms and Flower 4.237 / 4.968 ms.
+
+The direct AC path appends token values and contexts and, in balanced mode,
+accumulates fixed-HybridUint symbol populations in the same pass. Its
+`AppendDirectAcToken` helper returns a string-owning `Status` for every
+token, which the enclosing loop assigns and checks, even on success.
+This is the next concrete success-path cost, not a reason to change
+coefficient decisions or entropy policy.
+
+The helper now returns a private `AcTokenError` enum. The two callers
+construct public `Status` objects only after a non-success result. A
+separate mapping preserves all four original error messages and their
+codes: three internal consistency errors and one invalid-argument count
+overflow. Value/context append order, disabled-collection behavior,
+HybridUint arithmetic, sparse-slot allocation, overflow guards, histogram
+increments, maximum symbol, exception handling, and caller-visible output
+atomicity are unchanged. An empty success string is not alleged to have
+allocated heap storage; the target is repeated object/call/assignment
+handling. No CUDA code, kernel dispatch, device-memory contract, or
+system setting changes.
+
+### Differential coverage
+
+A new backend-independent `ac_direct_tokenization` fixture covers 3,072
+group cases: seven physical transform shapes plus mixed layouts, six
+coefficient patterns, natural/derived custom orders, four block-context
+maps, both population-collection modes, and four groups per frame. The
+36x36-block frames have odd 285x281 active extents and narrow right/bottom
+groups. Patterns include all zero, all nonzero, sparse, dense, tied, and
+signed extrema. Context maps include the compact, JPEG XL default,
+two-channel, and quantization-threshold variants.
+
+The checked public token-template path provides independent token values
+and contexts. Separately accumulated 64-bit reference populations verify
+every sparse symbol/count, ordering and offset, token total, extra-bit
+total, and maximum symbol. One scratch object is reused across groups,
+layouts, maps, and enabled/disabled collection; disabled output must not
+retain old populations. Invalid group indexes preserve all destination
+vectors. The deterministic completed-frame builder is extracted unchanged
+from the S41 order fixture into `tests/quantized_frame_fixture.h`; the
+original 96-case order differential test remains active.
+
+The preliminary three-pair cohort uses the same 41-field reporting object
+and frozen S42 baseline, with three warmups and five samples per process.
+Median paired coefficient-tokenization-work ratios are
+0.605 / 0.575 / 0.730 at 4K / 1080p / Flower. AC wall ratios are
+0.710 / 0.762 / 0.843 and whole-encode ratios 0.922 / 0.927 / 0.945.
+The 1080p pair 1 whole encode nevertheless regresses from 138.075 to
+147.249 ms; Flower parent 39.746 ms is an outlier. These are retained,
+and a larger cohort and isolated check are required for interpretation.
+
+### Native and isolated checks
+
+MSVC 14.37 Release COFF inspection shows that the append helper remains
+out of line: both versions of the enclosing tokenizer have two append-call
+sites. Its static
+body shrinks from 272 to 180 instructions and returns the enum in a
+register. The enclosing tokenizer changes from 1,703 to 1,664 instructions;
+the 113-instruction error conversion is separate. At both sites, a zero
+enum result branches over that conversion. This is not claimed as call
+elimination or a dynamic instruction-count measurement. The unrelated
+`CountGroupZeros` body remains identical to S42 at 526 instructions.
+
+The new 3,072-case fixture also passes when linked against the original
+S42 `ac_group.cpp`. A separate single-threaded CPU probe uses completed
+frames with the JPEG XL default block-context map, not GPU/image-analysis
+work. Eight layouts, six patterns, two order
+policies, and two population modes give 192 cases. Three alternating
+process pairs each use three warmups and nine samples. Timing includes
+all four groups' direct tokenization and output allocation, but excludes
+frame construction, order derivation, hashing, and final output destruction.
+The same scratch object is reused within a case.
+
+Complete token/population FNV-1a hashes match in all 576 before/after case
+pairs. All 160 nonzero-pattern case medians improve; 476/480 individual
+nonzero comparisons improve. All-zero cases are mixed: only 20/32 medians
+improve. Overall, 180/192 medians and 534/576 individual comparisons
+improve. Ratios below are final/S42 median paired ratios; each range spans
+the sixteen layout/order combinations:
+
+| Pattern | No populations: median [range] | Collect populations: median [range] |
+| --- | ---: | ---: |
+| All zero | 0.958 [0.834, 1.161] | 0.978 [0.814, 1.302] |
+| All nonzero | 0.401 [0.334, 0.474] | 0.576 [0.522, 0.705] |
+| Sparse | 0.401 [0.332, 0.493] | 0.660 [0.514, 0.759] |
+| Dense | 0.406 [0.300, 0.509] | 0.652 [0.462, 0.731] |
+| Tied | 0.410 [0.327, 0.483] | 0.586 [0.382, 0.673] |
+| Signed extrema | 0.397 [0.344, 0.451] | 0.685 [0.618, 0.809] |
+
+All-zero frames append only the per-transform/channel nonzero-count token,
+so this edit addresses little of their work. Their adverse observations
+are nevertheless retained: the worst median-paired case with populations
+has separately aggregated medians 0.3690 to 0.4673 ms. The benefit on
+token-heavy inputs is supported independently of the GPU timing noise;
+no all-input improvement is asserted.
+
+### Warm and cold workflow results
+
+Final warm comparisons use seven alternating process pairs per input,
+three warmups, five samples, explicit CUDA/fully-resident encoding, and
+the same 41-field reporting object. The frozen S42 baseline is compared
+with the final library. Independent cold comparisons use the unmodified
+production benchmark with seven fresh-process pairs, zero warmups, and
+one sample. No builds, tests, sanitizers, or other benchmarks overlap.
+The paired change is the median of within-pair ratios, not the ratio of
+the two independently listed medians:
+
+| Warm input / stage | S42 median ms | S43 median ms | Paired change |
+| --- | ---: | ---: | ---: |
+| 4K coefficient-tokenization work | 308.661 | 230.236 | -25.4% |
+| 4K AC-tokenization wall | 70.921 | 58.286 | -17.8% |
+| 4K codestream encoding | 165.329 | 146.595 | -12.2% |
+| 4K complete encode | 536.807 | 508.005 | -5.4% |
+| 1080p coefficient-tokenization work | 55.487 | 38.447 | -27.8% |
+| 1080p AC-tokenization wall | 17.657 | 14.341 | -17.4% |
+| 1080p codestream encoding | 62.048 | 57.600 | -5.9% |
+| 1080p complete encode | 133.797 | 129.105 | -3.6% |
+| Flower coefficient-tokenization work | 4.878 | 3.809 | -21.5% |
+| Flower AC-tokenization wall | 4.050 | 3.690 | -10.5% |
+| Flower codestream encoding | 13.692 | 12.985 | -2.8% |
+| Flower complete encode | 28.334 | 27.185 | -3.8% |
+
+Coefficient work and AC wall improve in 7/7, 7/7, and 6/7 pairs; complete
+encoding improves in 5/7 for each input. The unchanged order phase also
+gets faster by paired 19.6% / 14.4% / 12.7%, unlike its S42 regression.
+That observation is retained but not attributed to the append-helper edit.
+Warm adverse cases include 4K 534.606 to 557.012 ms and 1080p 141.486 to
+158.921 ms; Flower parent 52.366 ms is an outlier. None is removed.
+
+| Cold input / complete encode | S42 median ms | S43 median ms | Paired change |
+| --- | ---: | ---: | ---: |
+| 4K | 632.287 | 614.581 | -4.2% |
+| 1080p | 185.611 | 182.217 | -0.2% |
+| Flower | 52.184 | 52.466 | -0.3% |
+
+Cold complete encodes improve in 5/7, 4/7, and 4/7 pairs. Flower's ratio
+of medians is slightly adverse despite its near-neutral paired median.
+The unchanged quantization stage has cold paired changes of -2.0% /
++0.8% / +0.2%. Large observations include 4K parent 756.964 ms,
+1080p parent/candidate 291.805/258.106 ms (different pairs), and Flower
+candidate 78.997 ms. Thus the isolated target needs separate evidence;
+the warm cohort is not a claim of a uniform whole-encoder speedup.
+
+Boundary telemetry is 64 C / 210 MHz with inactive software thermal/power
+limit flags before the warm cohort, and 73 C / 1,282 MHz with both flags
+active after the cold cohort. These are not per-kernel clock measurements.
+No elevation/firewall block is reported, and no system setting is changed.
+
+### Workflow and sanitizer qualification
+
+All 64 CUDA-enabled MSVC and 49 CPU-only GNU tests pass. A fully instrumented
+clang-cl host AddressSanitizer build passes the new 3,072-case fixture,
+existing AC-group tests, the shared-builder 96-case order test, and
+codestream-encoder tests, with `halt_on_error=1:alloc_dealloc_mismatch=1`.
+No annotations or allocator checks are suppressed. This host-only edit
+does not claim new GPU sanitizer or Nsight captures.
+
+The same seven-input, three-distance, two-score-policy matrix as S42,
+including the two effort-9 cases, passes all 46 before/after comparisons
+with identical byte counts, codestream SHA-256, and independently decoded
+Butteraugli scores. The pinned libjxl revision remains
+`e8ff09762481785938d8e4e01333ed3917571161`, with linear-sRGB decoding/scoring
+and the default 80-nit metric setting. The synthetic timing images remain
+distinct from the qualification PFMs.
+
+Even-size batch checks cover 1080p fully resident and maximum throughput
+at sizes 1/2/4, and 4K fully resident at sizes 1/2. Median paired
+serial/batch speedups are 1.038/1.332/1.369, 1.054/1.453/2.140, and
+1.066/1.053 respectively. These compare current-build concurrency modes,
+not S42 versus S43; every batch result must match its serial reference.
+
+Ignored artifacts include `s43_enum_phases.json`, `s43_final_phases.json`,
+`s43_final_cold_*.json`, `s43_final_quality.json`, full-suite logs,
+`s43_final_batch_*.txt`, `s43_asan.txt`, `s43_ac_compare.json`,
+`s43_native_summary.json`, and their source/build scripts and native dumps.
+`s43_final_validate.py` checks parent source identity, unchanged extracted
+fixture content, native return/call facts, all 46 image/strategy/score pairs,
+cross-score-policy identity, suite counts, host ASan completion, paired
+cohort coverage, and isolated hashes. Qualified binaries are frozen as
+`s43_retained_*`; source/copy and original S42 hashes are checked through
+`s43_final_binary_hashes.json`. All qualification jobs finish normally.
+
+Optimization remains ongoing. The append call, per-token population
+metadata updates, and coefficient nonzero-count scan remain concrete host
+leads, while GPU perceptual work still dominates much of the workflow.
+None of these is assumed improved without a separate experiment; the
+unexplained variation of unchanged order work also remains an attribution
+limit rather than a claimed optimization.
 
 ## Work that should not lead the next cycle
 

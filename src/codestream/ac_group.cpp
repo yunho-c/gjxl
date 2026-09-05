@@ -548,7 +548,33 @@ Status BuildSimpleAcGroupTokenTemplateValidated(
   return Status::Ok();
 }
 
-Status AppendDirectAcToken(
+// A small private result keeps success handling out of the per-token path.
+// Convert to the public, string-owning Status only when an error occurs.
+enum class AcTokenError {
+  kNone,
+  kContextOutOfRange,
+  kSymbolOutOfRange,
+  kSlotOverflow,
+  kCountOverflow,
+};
+
+Status AcTokenErrorStatus(AcTokenError error) {
+  switch (error) {
+    case AcTokenError::kNone:
+      return Status::Ok();
+    case AcTokenError::kContextOutOfRange:
+      return Status::Internal("AC population context is out of range");
+    case AcTokenError::kSymbolOutOfRange:
+      return Status::Internal("AC population symbol is out of range");
+    case AcTokenError::kSlotOverflow:
+      return Status::Internal("AC population slot overflow");
+    case AcTokenError::kCountOverflow:
+      return Status::InvalidArgument("AC population count overflow");
+  }
+  return Status::Internal("Unknown AC population error");
+}
+
+AcTokenError AppendDirectAcToken(
   uint32_t value,
   uint16_t context,
   bool collect_fixed_populations,
@@ -557,9 +583,9 @@ Status AppendDirectAcToken(
 
   group->values.push_back(value);
   group->contexts.push_back(context);
-  if (!collect_fixed_populations) return Status::Ok();
+  if (!collect_fixed_populations) return AcTokenError::kNone;
   if (context >= scratch->population_slots.size()) {
-    return Status::Internal("AC population context is out of range");
+    return AcTokenError::kContextOutOfRange;
   }
   uint32_t symbol = value;
   uint8_t extra_bit_count = 0;
@@ -572,13 +598,13 @@ Status AppendDirectAcToken(
     extra_bit_count = static_cast<uint8_t>(exponent - 2);
   }
   if (symbol >= kPrefixAlphabetSize) {
-    return Status::Internal("AC population symbol is out of range");
+    return AcTokenError::kSymbolOutOfRange;
   }
   constexpr uint16_t kMissing = std::numeric_limits<uint16_t>::max();
   uint16_t& slot = scratch->population_slots[context];
   if (slot == kMissing) {
     if (scratch->populations.size() >= kMissing) {
-      return Status::Internal("AC population slot overflow");
+      return AcTokenError::kSlotOverflow;
     }
     slot = static_cast<uint16_t>(scratch->populations.size());
     scratch->populations.push_back({.context = context});
@@ -589,14 +615,14 @@ Status AppendDirectAcToken(
       population.token_count == std::numeric_limits<uint64_t>::max() ||
       population.extra_bits > std::numeric_limits<uint64_t>::max() -
         extra_bit_count) {
-    return Status::InvalidArgument("AC population count overflow");
+    return AcTokenError::kCountOverflow;
   }
   ++count;
   ++population.token_count;
   population.extra_bits += extra_bit_count;
   population.maximum_symbol = std::max(
     population.maximum_symbol, symbol);
-  return Status::Ok();
+  return AcTokenError::kNone;
 }
 
 Status TokenizeSimpleAcGroupDirectValidated(
@@ -718,10 +744,12 @@ Status TokenizeSimpleAcGroupDirectValidated(
         uint16_t context = static_cast<uint16_t>(FinalNonzeroContext(
           block_context_map.num_contexts, block_context,
           NonzeroBucket(prediction)));
-        status = AppendDirectAcToken(
-          static_cast<uint32_t>(nonzeros), context,
-          collect_fixed_populations, scratch, &candidate);
-        if (!status.ok()) return status;
+        if (const AcTokenError error = AppendDirectAcToken(
+              static_cast<uint32_t>(nonzeros), context,
+              collect_fixed_populations, scratch, &candidate);
+            error != AcTokenError::kNone) {
+          return AcTokenErrorStatus(error);
+        }
 
         int32_t remaining_nonzeros = nonzeros;
         uint32_t previous_nonzero =
@@ -736,10 +764,12 @@ Status TokenizeSimpleAcGroupDirectValidated(
             previous_nonzero);
           context = static_cast<uint16_t>(FinalCoefficientContext(
             block_context_map.num_contexts, block_context, local_context));
-          status = AppendDirectAcToken(
-            PackSigned(coefficient), context, collect_fixed_populations,
-            scratch, &candidate);
-          if (!status.ok()) return status;
+          if (const AcTokenError error = AppendDirectAcToken(
+                PackSigned(coefficient), context, collect_fixed_populations,
+                scratch, &candidate);
+              error != AcTokenError::kNone) {
+            return AcTokenErrorStatus(error);
+          }
           previous_nonzero = coefficient != 0 ? 1 : 0;
           remaining_nonzeros -= static_cast<int32_t>(previous_nonzero);
         }
