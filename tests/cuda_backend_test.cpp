@@ -248,13 +248,28 @@ bool CheckTransform(
   gjxl::AcStrategyType strategy,
   std::mt19937* random) {
   const gjxl::AcStrategyInfo* info = gjxl::GetAcStrategyInfo(strategy);
-  constexpr size_t kTransformCount = 3;
+  constexpr size_t kTransformCount = 19;
   const size_t element_count = info->coefficient_count();
   const size_t total_elements = kTransformCount * element_count;
   const size_t bytes = total_elements * sizeof(float);
   std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
   std::vector<float> pixels(total_elements);
   std::generate(pixels.begin(), pixels.end(), [&] { return distribution(*random); });
+  // Exercise coefficient layout and shared-tile boundaries with impulses,
+  // a constant, and unequal horizontal/vertical structure as well as noise.
+  std::fill_n(pixels.begin(), 3 * element_count, 0.0f);
+  pixels[0] = 1.0f;
+  pixels[element_count + element_count / 2 + info->pixel_extent().width - 1] = -0.5f;
+  pixels[3 * element_count - 1] = 0.75f;
+  std::fill_n(pixels.begin() + 3 * element_count, element_count, 0.375f);
+  for (size_t index = 0; index < element_count; ++index) {
+    const size_t x = index % info->pixel_extent().width;
+    const size_t y = index / info->pixel_extent().width;
+    pixels[4 * element_count + index] = (x + y) % 2 == 0 ? 0.75f : -0.75f;
+    pixels[5 * element_count + index] =
+      0.5f * static_cast<float>(x) / info->pixel_extent().width -
+      0.25f * static_cast<float>(y) / info->pixel_extent().height;
+  }
 
   std::vector<double> expected_forward(total_elements);
   gjxl::test::ReferenceForwardDct(
@@ -338,9 +353,32 @@ bool CheckTransform(
   }
   std::vector<double> expected_pixels(
     pixels.begin(), pixels.end());
-  return CloseEnough(
-    actual_inverse, expected_pixels, 5.0e-4, 5.0e-4,
-    "CUDA DCT round trip");
+  if (!CloseEnough(
+        actual_inverse, expected_pixels, 5.0e-4, 5.0e-4,
+        "CUDA DCT round trip")) {
+    return false;
+  }
+
+  // Also test inverse transforms independently: a round trip alone can hide
+  // compensating layout mistakes in the forward and inverse implementations.
+  gjxl::test::ReferenceInverseDct(
+    info->pixel_extent(), pixels.data(), expected_pixels.data(),
+    kTransformCount);
+  if (!CheckStatus(
+        backend.CopyHostToDevice(*coefficients, pixels.data(), bytes),
+        "Upload independent inverse CUDA DCT input") ||
+      !CheckStatus(
+        backend.InverseTransform(inverse, &inverse_submission),
+        "Submit independent inverse CUDA DCT") ||
+      inverse_submission == nullptr ||
+      !CheckStatus(inverse_submission->Wait(), "Wait for independent inverse DCT") ||
+      !CheckStatus(
+        backend.CopyDeviceToHost(*reconstructed, actual_inverse.data(), bytes),
+        "Download independent inverse CUDA DCT")) {
+    return false;
+  }
+  return CloseEnough(actual_inverse, expected_pixels, 5.0e-4, 5.0e-4,
+    "CUDA independent inverse DCT");
 }
 
 bool CheckValidationAndOwnership(
@@ -353,6 +391,13 @@ bool CheckValidationAndOwnership(
   if (!backend.Allocate(kBytes, &input).ok() ||
       !backend.Allocate(kBytes, &output).ok() ||
       !other.Allocate(kBytes, &foreign).ok()) {
+    return false;
+  }
+  // Injecting a completion error still launches a real transform. Its input
+  // must be initialized even though this test discards the numerical result.
+  constexpr std::array<float, 64> pixels{};
+  if (!CheckStatus(backend.CopyHostToDevice(*input, pixels.data(), kBytes),
+        "Initialize CUDA failure-injection input")) {
     return false;
   }
   const gjxl::TransformBatch valid{

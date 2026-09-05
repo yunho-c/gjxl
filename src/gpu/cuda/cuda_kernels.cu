@@ -11,6 +11,8 @@ namespace gjxl::cuda_internal {
 namespace {
 
 constexpr unsigned int kThreadsPerTransform = 256;
+// Each large-transform lane accumulates two or four independent outputs.
+constexpr unsigned int kSpecializedDctThreads = 256;
 constexpr unsigned int kPrimitiveThreads = 256;
 constexpr size_t kDctBasisElementCount =
   8 * 8 + 16 * 16 + 32 * 32 + 64 * 64;
@@ -276,6 +278,10 @@ __global__ void ForwardDctSpecializedKernel(
   // distinct shared-memory banks.
   float* horizontal_basis = shared;
   float* intermediate = shared + kHorizontalBasisCount;
+  // Reuse this padded tile for coalesced input and transposed output. All
+  // horizontal input reads finish before the second block barrier.
+  float* io_tile = intermediate + kElementCount;
+  float* vertical_basis_tile = io_tile + Height * (Width + 1);
   const size_t base = static_cast<size_t>(blockIdx.x) * kElementCount;
 
   for (size_t index = threadIdx.x;
@@ -286,38 +292,73 @@ __global__ void ForwardDctSpecializedKernel(
     horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x] =
       kGlobalOrthonormalDctBasis[DctBasisOffset(Width) + index];
   }
-  __syncthreads();
-
   for (size_t index = threadIdx.x; index < kElementCount;
        index += blockDim.x) {
-    const unsigned int y = static_cast<unsigned int>(index / Width);
-    const unsigned int u = static_cast<unsigned int>(index % Width);
-    float value = 0.0f;
-    for (unsigned int x = 0; x < Width; ++x) {
-      value += input[base + static_cast<size_t>(y) * Width + x] *
-        horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x];
+    io_tile[(index / Width) * (Width + 1) + index % Width] =
+      input[base + index];
+  }
+  if constexpr (Width < 32) {
+    // A 16-wide transform has two vertical basis addresses per warp. Stage
+    // that basis too; the 32-wide shapes retain constant-memory broadcasts.
+    for (size_t index = threadIdx.x; index < Height * Height;
+         index += blockDim.x) {
+      vertical_basis_tile[(index / Height) * (Height + 1) + index % Height] =
+        kGlobalOrthonormalDctBasis[DctBasisOffset(Height) + index];
     }
-    intermediate[index] = value;
+  }
+  __syncthreads();
+
+  constexpr unsigned int kOutputsPerThread =
+    kElementCount / kSpecializedDctThreads;
+  constexpr unsigned int kRowStep = kSpecializedDctThreads / Width;
+  const unsigned int first_row = threadIdx.x / Width;
+  const unsigned int u = threadIdx.x % Width;
+  // Share basis/sample loads across independent accumulators without
+  // reassociating any output's sequence of multiply-adds.
+  float values[kOutputsPerThread] = {};
+  for (unsigned int x = 0; x < Width; ++x) {
+    const float basis =
+      horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x];
+#pragma unroll
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int y = first_row + value * kRowStep;
+      values[value] +=
+        io_tile[static_cast<size_t>(y) * (Width + 1) + x] * basis;
+    }
+  }
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    intermediate[threadIdx.x + value * kSpecializedDctThreads] = values[value];
+    values[value] = 0.0f;
   }
   __syncthreads();
 
   const float scale = rsqrtf(static_cast<float>(kElementCount));
   const float* vertical_basis =
     kOrthonormalDctBasis + DctBasisOffset(Height);
+  for (unsigned int y = 0; y < Height; ++y) {
+    const float sample = intermediate[static_cast<size_t>(y) * Width + u];
+#pragma unroll
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int v = first_row + value * kRowStep;
+      const float basis = Width < 32
+        ? vertical_basis_tile[static_cast<size_t>(v) * (Height + 1) + y]
+        : vertical_basis[static_cast<size_t>(v) * Height + y];
+      values[value] += basis * sample;
+    }
+  }
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    const unsigned int v = first_row + value * kRowStep;
+    io_tile[static_cast<size_t>(v) * (Width + 1) + u] = values[value] * scale;
+  }
+  __syncthreads();
   for (size_t index = threadIdx.x; index < kElementCount;
        index += blockDim.x) {
-    const unsigned int v = static_cast<unsigned int>(index / Width);
-    const unsigned int u = static_cast<unsigned int>(index % Width);
-    float value = 0.0f;
-    for (unsigned int y = 0; y < Height; ++y) {
-      value += vertical_basis[static_cast<size_t>(v) * Height + y] *
-        intermediate[static_cast<size_t>(y) * Width + u];
-    }
     constexpr bool kRowMajorCoefficients = Height < Width;
-    const size_t coefficient_index = kRowMajorCoefficients
-      ? static_cast<size_t>(v) * Width + u
-      : static_cast<size_t>(u) * Height + v;
-    output[base + coefficient_index] = value * scale;
+    const size_t v = kRowMajorCoefficients ? index / Width : index % Height;
+    const size_t u = kRowMajorCoefficients ? index % Width : index / Height;
+    output[base + index] = io_tile[v * (Width + 1) + u];
   }
 }
 
@@ -335,6 +376,10 @@ __global__ void InverseDctSpecializedKernel(
   // free in the inverse horizontal pass.
   float* horizontal_basis = shared;
   float* intermediate = shared + kHorizontalBasisCount;
+  // Load the native coefficient layout contiguously, then broadcast the
+  // horizontal pass's samples from the padded shared tile.
+  float* input_tile = intermediate + kElementCount;
+  float* vertical_basis_tile = input_tile + Height * (Width + 1);
   const size_t base = static_cast<size_t>(blockIdx.x) * kElementCount;
 
   for (size_t index = threadIdx.x;
@@ -345,38 +390,63 @@ __global__ void InverseDctSpecializedKernel(
     horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x] =
       kGlobalOrthonormalDctBasis[DctBasisOffset(Width) + index];
   }
-  __syncthreads();
-
   for (size_t index = threadIdx.x; index < kElementCount;
        index += blockDim.x) {
-    const unsigned int v = static_cast<unsigned int>(index / Width);
-    const unsigned int x = static_cast<unsigned int>(index % Width);
-    float value = 0.0f;
-    for (unsigned int u = 0; u < Width; ++u) {
-      constexpr bool kRowMajorCoefficients = Height < Width;
-      const size_t coefficient_index = kRowMajorCoefficients
-        ? static_cast<size_t>(v) * Width + u
-        : static_cast<size_t>(u) * Height + v;
-      value += input[base + coefficient_index] *
-        horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x];
+    constexpr bool kRowMajorCoefficients = Height < Width;
+    const size_t v = kRowMajorCoefficients ? index / Width : index % Height;
+    const size_t u = kRowMajorCoefficients ? index % Width : index / Height;
+    input_tile[v * (Width + 1) + u] = input[base + index];
+  }
+  if constexpr (Width < 32) {
+    for (size_t index = threadIdx.x; index < Height * Height;
+         index += blockDim.x) {
+      vertical_basis_tile[(index / Height) * (Height + 1) + index % Height] =
+        kGlobalOrthonormalDctBasis[DctBasisOffset(Height) + index];
     }
-    intermediate[index] = value;
+  }
+  __syncthreads();
+
+  constexpr unsigned int kOutputsPerThread =
+    kElementCount / kSpecializedDctThreads;
+  constexpr unsigned int kRowStep = kSpecializedDctThreads / Width;
+  const unsigned int first_row = threadIdx.x / Width;
+  const unsigned int x = threadIdx.x % Width;
+  float values[kOutputsPerThread] = {};
+  for (unsigned int u = 0; u < Width; ++u) {
+    const float basis =
+      horizontal_basis[static_cast<size_t>(u) * (Width + 1) + x];
+#pragma unroll
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int v = first_row + value * kRowStep;
+      values[value] +=
+        input_tile[static_cast<size_t>(v) * (Width + 1) + u] * basis;
+    }
+  }
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    intermediate[threadIdx.x + value * kSpecializedDctThreads] = values[value];
+    values[value] = 0.0f;
   }
   __syncthreads();
 
   const float scale = sqrtf(static_cast<float>(kElementCount));
   const float* vertical_basis =
     kOrthonormalDctBasis + DctBasisOffset(Height);
-  for (size_t index = threadIdx.x; index < kElementCount;
-       index += blockDim.x) {
-    const unsigned int y = static_cast<unsigned int>(index / Width);
-    const unsigned int x = static_cast<unsigned int>(index % Width);
-    float value = 0.0f;
-    for (unsigned int v = 0; v < Height; ++v) {
-      value += vertical_basis[static_cast<size_t>(v) * Height + y] *
-        intermediate[static_cast<size_t>(v) * Width + x];
+  for (unsigned int v = 0; v < Height; ++v) {
+    const float sample = intermediate[static_cast<size_t>(v) * Width + x];
+#pragma unroll
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int y = first_row + value * kRowStep;
+      const float basis = Width < 32
+        ? vertical_basis_tile[static_cast<size_t>(v) * (Height + 1) + y]
+        : vertical_basis[static_cast<size_t>(v) * Height + y];
+      values[value] += basis * sample;
     }
-    output[base + static_cast<size_t>(y) * Width + x] = value * scale;
+  }
+#pragma unroll
+  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+    const unsigned int y = first_row + value * kRowStep;
+    output[base + static_cast<size_t>(y) * Width + x] = values[value] * scale;
   }
 }
 
@@ -577,10 +647,13 @@ cudaError_t LaunchCudaDct(
   const size_t shared_floats = packed
     ? kThreadsPerTransform + static_cast<size_t>(width) * (width + 1)
     : static_cast<size_t>(width) * height +
-        (large_specialized ? static_cast<size_t>(width) * (width + 1) : 0);
+        (large_specialized
+          ? static_cast<size_t>(width + height) * (width + 1) +
+            (width < 32 ? static_cast<size_t>(height) * (height + 1) : 0) : 0);
   const size_t shared_bytes = shared_floats * sizeof(float);
   const dim3 grid(static_cast<unsigned int>(transform_count));
-  const dim3 block(kThreadsPerTransform);
+  const dim3 block(
+    large_specialized ? kSpecializedDctThreads : kThreadsPerTransform);
   if (forward) {
     if (width == 8 && height == 8) {
       const dim3 packed_grid(static_cast<unsigned int>(

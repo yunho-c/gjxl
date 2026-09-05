@@ -1,7 +1,8 @@
 # CUDA optimization study S1
 
-- Status: S1.1-S1.5, packed DCT, tiled Malta, specialized/tiled blurs, and
-  packed AC-search residuals implemented; optimization ongoing
+- Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
+  specialized/tiled blurs, and packed AC-search residuals implemented;
+  optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -13,11 +14,11 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest AC-search checkpoint against `5513704`
-reduces residual-kernel execution by 77.8% and paired 4K total encoding time
-by 3.8%. Remaining AC gather/cost evaluation, DCT, reconstruction filtering,
-host work, and transfers are material targets; the resident path has not
-reached its performance limit.
+below supersede them. The latest DCT checkpoint against `3c08276` reduces
+total DCT execution by 19.8% and paired total encoding time by 4.5% at 4K
+and 11.2% at 1080p. Remaining AC gather/cost evaluation, DCT, reconstruction
+filtering, host work, and transfers are material targets; the resident path
+has not reached its performance limit.
 
 The initial measurements showed two different performance profiles.
 
@@ -1122,6 +1123,164 @@ cost still has one coefficient-sized block per candidate and shared-memory
 reductions. These are concrete follow-up targets alongside host assembly,
 serialization, and transfer boundaries. This checkpoint does not establish
 that fully-resident encoding is maxed out.
+
+### Follow-up: stage and register-tile large DCTs (2026-09-05)
+
+At parent revision `3c08276`, DCT again leads the fresh odd-4K profile:
+`158.311 ms` across all shapes, including `111.060 ms` in 16x32, 32x16,
+and 32x32 transforms. Their 256-thread blocks compute two or four outputs
+per thread in separate dot-product loops. That reloads the same horizontal
+basis for each output, then reloads the same intermediate samples for each
+vertical output. Horizontal passes repeatedly read global input, and forward
+column-major coefficient stores are strided across lanes.
+
+The retained kernels cooperatively load input into a padded shared tile,
+then accumulate independent outputs simultaneously in two or four registers
+per thread. Each horizontal basis value and each vertical intermediate
+sample is shared by those accumulators. The forward kernel reuses its input
+tile for the final layout conversion and coalesced global stores, with one
+additional barrier after the vertical pass. The inverse kernel loads native
+coefficient order contiguously before broadcasting horizontal-pass samples.
+Neither direction changes the dense basis, scaling, coefficient layout, or
+any output's multiply-add order. No fast-math or factored-transform policy
+is introduced.
+
+For 16x32, two vertical basis addresses occur per warp, so that basis is also
+staged in padded shared memory. The 32-wide transforms keep their vertical
+constant-memory broadcasts. The final kernels retain 256 threads/block,
+use 39-40 registers/thread and zero stack bytes, and require 9,536 shared
+bytes for 16x32, 8,384 for 32x16, and 12,544 for 32x32. There are no new
+device allocations, transfers, or kernel launches.
+
+Experiments use two warmups and one profiled odd-4K sample, distance `1.2`,
+effort `7`, fully-resident AQ, and no final-score diagnostic:
+
+| Experiment | Large-shape DCT | All GPU kernels |
+|---|---:|---:|
+| Parent | 111.060 ms | 469.739 ms |
+| Staged input/output, separate accumulators | 102.629 ms | 472.340 ms |
+| Staging plus simultaneous accumulators, 256 threads | 70.447 ms | 417.325 ms |
+| Same approach, 128 threads | 74.341 ms | 441.793 ms |
+| 256 threads plus shared vertical basis for 16x32 | 69.993 ms | 420.766 ms |
+| Also share vertical bases in smaller packed shapes | 71.169 ms | 429.120 ms |
+| Retained large-only change, post-validation capture | 75.345 ms | 438.921 ms |
+
+The small-shape extension raises packed-DCT time from `47.888 ms` to
+`57.628 ms` in those trial captures and is not retained. Reducing the large
+block size to 128 also fails to establish a win over 256. Staging alone has
+limited benefit; sharing loads across independent accumulators supplies the
+larger gain. These timings do not establish a hardware-counter diagnosis of
+occupancy, bandwidth, or issue stalls.
+
+A separate CUDA-event probe controls for noisy individual workflow calls.
+It runs 65,536 transforms per dispatch, three warmup dispatches, then seven
+samples of three dispatches each. Parent/candidate processes run in
+parent-candidate-candidate-parent order. Ranges below span the two process
+medians, not individual samples:
+
+| Shape/direction | Parent median range | Retained median range |
+|---|---:|---:|
+| 16x32 forward | 6.551-6.745 ms | 5.956-6.024 ms |
+| 16x32 inverse | 7.311-7.522 ms | 5.781-5.841 ms |
+| 32x16 forward | 8.227-8.394 ms | 5.370-5.452 ms |
+| 32x16 inverse | 8.401-8.488 ms | 5.440-5.491 ms |
+| 32x32 forward | 23.507-24.166 ms | 12.321-13.190 ms |
+| 32x32 inverse | 18.580-18.813 ms | 11.469-12.196 ms |
+
+The post-validation workflow capture is less favorable for 16x32: its
+combined forward/inverse time rises from `23.136 ms` to `24.109 ms`.
+The event probe supports retaining that shape, but its workflow gain is
+not established by a single trace. Combined 32x16 time falls from
+`24.674 ms` to `17.538 ms`, and 32x32 from `63.250 ms` to `33.699 ms`.
+Large-shape DCT falls 32.2%; all DCT falls from `158.311 ms` to
+`126.923 ms` (-19.8%). Unchanged packed shapes rise from `47.251 ms` to
+`51.577 ms`, while non-DCT execution is nearly unchanged at
+`311.428 ms` versus `311.999 ms`. All kernel time falls 6.6%.
+Both captures contain 523 launches, 117,079,320 HtoD bytes,
+103,699,012 DtoH bytes, and 518,400 device-to-device bytes.
+
+Public workflow measurements use seven alternating independent-process
+pairs per workload, one warmup and one retained sample per process, with
+the same distance/effort/AQ settings:
+
+| Workload and stage | Parent median | Candidate median | Median paired change |
+|---|---:|---:|---:|
+| Odd 4K, total | 915.952 ms | 874.546 ms | -4.5% |
+| Odd 4K, quantization | 709.443 ms | 670.049 ms | -6.1% |
+| Odd 1080p, total | 245.894 ms | 214.149 ms | -11.2% |
+| Odd 1080p, quantization | 162.712 ms | 142.060 ms | -11.5% |
+| Flower 510x532, total | 46.744 ms | 42.446 ms | -7.3% |
+| Flower 510x532, quantization | 32.041 ms | 27.749 ms | -4.7% |
+
+All seven 4K quantization pairs improve; five total-time pairs improve.
+The 4K total ranges are `895.220-1053.213 ms` and `839.043-948.671 ms`.
+All seven 1080p pairs improve both stages, with total ranges of
+`220.312-272.967 ms` and `211.792-232.445 ms`. Six of seven Flower pairs
+improve both stages. GPU state moves from 63 C/P0/1282 MHz before the
+wall pairs to 66 C/P3/1282 MHz afterward. Host serialization and execution
+state still contribute to the wall-time changes; do not equate those
+percentages with isolated kernel savings or compare absolute times across
+earlier sessions.
+
+All 53 CUDA-build tests and 47 CPU-only tests pass. The standalone CUDA DCT
+test now uses 19 transforms per supported shape: impulses at distinct tile
+positions, a constant, a checkerboard, unequal horizontal/vertical ramps,
+and deterministic noise. It checks forward output and round trips, then
+independent inverse output against the double-precision reference. Existing
+tolerances remain `3e-5 + 3e-4 * abs(reference)` for forward output and
+`5e-4 + 5e-4 * abs(reference)` for inverse/round-trip output. All nine
+supported DCT shapes are covered, including the unchanged generic shapes.
+AC-strategy cost errors remain unchanged.
+
+Compute Sanitizer memcheck, racecheck, synccheck, and initcheck on the CUDA
+backend test report zero errors or hazards. Initial initcheck found that
+the pre-existing completion-failure fixture submitted uninitialized DCT8
+input; the fixture now initializes that input without changing its failure
+assertions. Runs use `--report-api-errors no` because a separate existing
+test deliberately issues an invalid zero-grid launch and verifies error
+consumption; memory and synchronization checking remain enabled.
+
+Parent/candidate codestreams and reported final perceptual scores are
+identical for the small sample at efforts 7 and 9, odd 1080p/4K at effort 7,
+and Flower at efforts 7 and 9, with final-score collection enabled. The
+pinned `djxl` decodes all six at their original dimensions. Hashes remain
+those recorded by the preceding checkpoints; Flower still selects all seven
+production strategies. Existing full-suite checks retain exact-mode
+CPU/CUDA identity, allocation, failure-atomicity, and concurrent workflow
+coverage.
+
+Post-change 1080p batch qualification uses one warmup and three paired
+serial/batch samples:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 233.947 ms | 4.274 | 0.944x |
+| Fully resident | 2 | 425.952 ms | 4.695 | 1.183x |
+| Fully resident | 4 | 802.579 ms | 4.984 | 1.193x |
+| Maximum throughput | 1 | 97.867 ms | 10.218 | 0.998x |
+| Maximum throughput | 2 | 146.258 ms | 13.674 | 1.417x |
+| Maximum throughput | 4 | 284.660 ms | 14.052 | 1.757x |
+
+These are output-stability and overlap checks, not a before/after batch
+performance claim. Fully-resident batch-1 remains slower than serial.
+The final GPU state is 66 C/P3/1282 MHz.
+
+Ignored artifacts under `build-cuda-ninja/profiles` use `s21_` prefixes.
+Trace names are `s21_{parent,staged_large,register_large,register128,
+shared_vertical,small_shared,retained}_4k`, with `.nsys-rep` and `.sqlite`
+files. The `small_shared` trace was initially captured as `s21_final_4k`
+before that experiment was rejected and renamed; `s21_retained_4k` is the
+final comparison. Paired wall data are `s21_paired_{4k,1080p,flower}.json`.
+The saved parent executables and `s21_verify.ps1` reproduce identity/decode
+qualification. `s21_dct_probe.cu`, `s21_parent_kernels.cu`, and the
+`s21_probe_{parent,shared}` executables retain the independent event probe.
+
+The retained profile still spends `126.923 ms` in DCT, `48.853 ms` in tiled
+Butteraugli blurs, `42.133 ms` in Malta response, `32.227 ms` in EPF,
+`20.024 ms` in AC gather, and `18.927 ms` in AC cost. Remaining DCT packing
+and load-sharing opportunities, AC gather/cost reductions, neighborhood
+filtering, host serialization, and transfer boundaries remain open. The
+resident path is not yet at a demonstrated performance ceiling.
 
 ## Work that should not lead the next cycle
 
