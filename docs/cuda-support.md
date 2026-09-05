@@ -622,6 +622,16 @@ tests. See the [S39 study](cuda-optimization-s1.md#shape-specialized-resident-co
 for measured results and operating-state limitations; these resources do not
 by themselves establish an end-to-end speedup or cross-device qualification.
 
+Butteraugli frequency decomposition now fuses the vertical 15/7-tap blur
+with its in-place low/high split. The completed horizontal intermediate is
+the convolution input, so updating the original low-frequency plane has no
+cross-pixel read/write dependency. Each pixel retains the existing blur
+normalization, rounding, range decisions, and two output stores. The separate
+blurred-plane write/read and split launch disappear; working-plane capacity
+remains necessary for later masking/blur stages. A retained separate-pass
+entry and guarded differential test cover all four production channels.
+See the [S40 study](cuda-optimization-s1.md#fused-blur-and-frequency-split-s40).
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

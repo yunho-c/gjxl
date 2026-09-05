@@ -240,11 +240,10 @@ struct ConvolutionTile {
   }
 };
 
-template <bool Horizontal, unsigned int KernelSize>
-__global__ void ConvolutionTiledKernel(const float* input, const float* weights,
-                                       float* output, uint32_t width,
-                                       uint32_t height, uint32_t input_stride,
-                                       uint32_t output_stride) {
+template <bool Horizontal, unsigned int KernelSize, typename Store>
+__device__ __forceinline__ void ConvolutionTiledBody(
+    const float* input, const float* weights, uint32_t width, uint32_t height,
+    uint32_t input_stride, Store store) {
   static_assert(KernelSize == 7 || KernelSize == 13 || KernelSize == 15 ||
                 KernelSize == 33);
   constexpr unsigned int kTileWidth = ConvolutionTile<Horizontal>::kWidth;
@@ -315,8 +314,26 @@ __global__ void ConvolutionTiledKernel(const float* input, const float* weights,
         }
       }
     }
-    output[static_cast<size_t>(y) * output_stride + x] = sum / weight_sum;
+    store(x, y, sum / weight_sum);
   }
+}
+
+struct StoreConvolution {
+  float* output;
+  uint32_t stride;
+  __device__ void operator()(uint32_t x, uint32_t y, float value) const {
+    output[static_cast<size_t>(y) * stride + x] = value;
+  }
+};
+
+template <bool Horizontal, unsigned int KernelSize>
+__global__ void ConvolutionTiledKernel(const float* input, const float* weights,
+                                       float* output, uint32_t width,
+                                       uint32_t height, uint32_t input_stride,
+                                       uint32_t output_stride) {
+  ConvolutionTiledBody<Horizontal, KernelSize>(
+      input, weights, width, height, input_stride,
+      StoreConvolution{output, output_stride});
 }
 
 __device__ float ButteraugliFastLog2(float value) {
@@ -494,6 +511,65 @@ __global__ void FrequencySplitKernel(float* input, const float* blurred,
         MaximumClamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
     input[input_index] = AmplifyRange(low_pass * 2.155f, 0.132f);
   }
+}
+
+template <uint32_t Channel>
+struct StoreFrequencySplit {
+  float* input;
+  float* output;
+  CudaButteraugliFrequencyParams params;
+
+  __device__ void operator()(uint32_t x, uint32_t y, float low_pass) const {
+    const size_t input_index = static_cast<size_t>(y) * params.input_stride + x;
+    const size_t output_index = static_cast<size_t>(y) * params.output_stride + x;
+    const float original = input[input_index];
+    // Keep the separate FrequencySplitKernel's rounding and range decisions.
+    // Each thread owns these two outputs; convolution reads only the completed
+    // horizontal intermediate, never neighboring values of the in-place input.
+    if constexpr (Channel < 2) {
+      output[output_index] = original - low_pass;
+      input[input_index] = Channel == 0 ? RemoveRange(low_pass, 0.29f)
+                                       : AmplifyRange(low_pass, 0.1f);
+    } else if constexpr (Channel == 3) {
+      output[output_index] = RemoveRange(original - low_pass, 0.04f);
+      input[input_index] = RemoveRange(low_pass, 1.5f);
+    } else {
+      low_pass = MaximumClamp(low_pass, 28.4691806922f);
+      output[output_index] =
+          MaximumClamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
+      input[input_index] = AmplifyRange(low_pass * 2.155f, 0.132f);
+    }
+  }
+};
+
+template <uint32_t Channel>
+__global__ void ConvolutionFrequencyKernel(
+    const float* horizontal, const float* weights, float* input, float* output,
+    CudaButteraugliFrequencyParams params) {
+  constexpr unsigned int kKernelSize = Channel < 2 ? 15 : 7;
+  ConvolutionTiledBody<false, kKernelSize>(
+      horizontal, weights, params.width, params.height, params.width,
+      StoreFrequencySplit<Channel>{input, output, params});
+}
+
+template <uint32_t Channel>
+cudaError_t LaunchBlurAndSplit(float* input, const float* weights,
+                               float* intermediate, float* output,
+                               CudaButteraugliFrequencyParams params,
+                               cudaStream_t stream) {
+  constexpr unsigned int kKernelSize = Channel < 2 ? 15 : 7;
+  ConvolutionTiledKernel<true, kKernelSize>
+      <<<ConvolutionTile<true>::Blocks(params.width, params.height),
+         kPlaneThreads, 0, stream>>>(
+          input, weights, intermediate, params.width, params.height,
+          params.input_stride, params.width);
+  const cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) return error;
+  ConvolutionFrequencyKernel<Channel>
+      <<<ConvolutionTile<false>::Blocks(params.width, params.height),
+         kPlaneThreads, 0, stream>>>(
+          intermediate, weights, input, output, params);
+  return cudaGetLastError();
 }
 
 __global__ void SuppressXKernel(float* high_x, const float* high_y,
@@ -1182,18 +1258,12 @@ template <unsigned int KernelSize>
   if (error != cudaSuccess) return error;
 
   for (size_t channel = 0; channel < 2; ++channel) {
-    error = LaunchBlur<15>(psycho[3 + channel], psycho_stride, plan.kernels[2],
-                           plan.planes[kWork + 1], plan.planes[kWork],
-                           plan.working_width, width, height, stream);
-    if (error != cudaSuccess) return error;
-    const FrequencyParams frequency{
-        width,         height,
-        psycho_stride, plan.working_width,
-        psycho_stride, static_cast<uint32_t>(channel)};
-    FrequencySplitKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0,
-                           stream>>>(psycho[3 + channel], plan.planes[kWork],
-                                     psycho[6 + channel], frequency);
-    error = CheckLaunch();
+    const CudaButteraugliFrequencyParams frequency{
+        width, height, psycho_stride, psycho_stride,
+        static_cast<uint32_t>(channel)};
+    error = LaunchCudaButteraugliBlurAndSplit(
+        psycho[3 + channel], plan.kernels[2], plan.planes[kWork + 1],
+        psycho[6 + channel], frequency, stream);
     if (error != cudaSuccess) return error;
   }
   error = LaunchBlur<15>(psycho[5], psycho_stride, plan.kernels[2],
@@ -1208,18 +1278,12 @@ template <unsigned int KernelSize>
   if (error != cudaSuccess) return error;
 
   for (size_t channel = 0; channel < 2; ++channel) {
-    error = LaunchBlur<7>(psycho[6 + channel], psycho_stride, plan.kernels[3],
-                          plan.planes[kWork + 1], plan.planes[kWork],
-                          plan.working_width, width, height, stream);
-    if (error != cudaSuccess) return error;
-    const FrequencyParams frequency{
-        width,         height,
-        psycho_stride, plan.working_width,
-        psycho_stride, static_cast<uint32_t>(channel + 3)};
-    FrequencySplitKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0,
-                           stream>>>(psycho[6 + channel], plan.planes[kWork],
-                                     psycho[8 + channel], frequency);
-    error = CheckLaunch();
+    const CudaButteraugliFrequencyParams frequency{
+        width, height, psycho_stride, psycho_stride,
+        static_cast<uint32_t>(channel + 3)};
+    error = LaunchCudaButteraugliBlurAndSplit(
+        psycho[6 + channel], plan.kernels[3], plan.planes[kWork + 1],
+        psycho[8 + channel], frequency, stream);
     if (error != cudaSuccess) return error;
   }
   return cudaSuccess;
@@ -1390,6 +1454,40 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
 }
 
 }  // namespace
+
+cudaError_t LaunchCudaButteraugliBlurAndSplit(
+    float* input, const float* weights, float* intermediate, float* output,
+    CudaButteraugliFrequencyParams params, cudaStream_t stream) {
+  if (params.channel != 0 && params.channel != 1 && params.channel != 3 &&
+      params.channel != 4) return cudaErrorInvalidValue;
+  if (params.width == 0 || params.height == 0) return cudaSuccess;
+  switch (params.channel) {
+    case 0: return LaunchBlurAndSplit<0>(input, weights, intermediate, output, params, stream);
+    case 1: return LaunchBlurAndSplit<1>(input, weights, intermediate, output, params, stream);
+    case 3: return LaunchBlurAndSplit<3>(input, weights, intermediate, output, params, stream);
+    default: return LaunchBlurAndSplit<4>(input, weights, intermediate, output, params, stream);
+  }
+}
+
+cudaError_t LaunchCudaButteraugliBlurAndSplitReference(
+    float* input, const float* weights, float* intermediate, float* blurred,
+    uint32_t blurred_stride, float* output,
+    CudaButteraugliFrequencyParams params, cudaStream_t stream) {
+  if (params.channel != 0 && params.channel != 1 && params.channel != 3 &&
+      params.channel != 4) return cudaErrorInvalidValue;
+  if (params.width == 0 || params.height == 0) return cudaSuccess;
+  const cudaError_t error = params.channel < 2
+      ? LaunchBlur<15>(input, params.input_stride, weights, intermediate,
+                       blurred, blurred_stride, params.width, params.height, stream)
+      : LaunchBlur<7>(input, params.input_stride, weights, intermediate,
+                      blurred, blurred_stride, params.width, params.height, stream);
+  if (error != cudaSuccess) return error;
+  const FrequencyParams frequency{params.width, params.height, params.input_stride,
+                                   blurred_stride, params.output_stride, params.channel};
+  FrequencySplitKernel<<<PlaneBlocks(params.width, params.height), kPlaneThreads,
+                         0, stream>>>(input, blurred, output, frequency);
+  return cudaGetLastError();
+}
 
 cudaError_t LaunchCudaButteraugliMalta(const float* reference,
                                        const float* distorted,

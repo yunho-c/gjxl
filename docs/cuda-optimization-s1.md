@@ -8,7 +8,8 @@
   host staging, overwrite-only coefficient staging, and direct resident
   transform image I/O, reused resident coefficient bases, direct local
   value access, fused resident coefficient passes, and encoding-only
-  coefficient materialization and shape-specialized coefficient blocks implemented;
+  coefficient materialization, shape-specialized coefficient blocks, and
+  fused blur/frequency splitting implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -21,7 +22,21 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `6fa9132` specializes
+below supersede them. The latest checkpoint against `fe13a54` fuses vertical
+Butteraugli blur with in-place frequency splitting, removing 24 launches and
+the intermediate blurred-plane write/read. Three production profile pairs
+reduce the targeted vertical/split subset by median paired 26.6% / 22.6%
+at 4K / 1080p; including unchanged horizontal blur, the bundles improve
+15.3% / 13.7%. Total GPU changes are -0.9% / +2.4%, and wall timings remain
+mixed; no stable whole-encoder gain is claimed. All 62 CUDA / 47 CPU tests,
+seven scoped sanitizer checks, serial/batch checks, and 46 byte-identical
+decoded image pairs pass. Allocations and transfers are unchanged. Every
+preexisting Butteraugli native body is preserved, and the measured fused
+entries have no additional register/shared or stack/local allocation.
+Operating-state limitations remain recorded, with no system-setting changes.
+Optimization remains ongoing, not maxed out.
+
+The preceding checkpoint against `6fa9132` specializes
 the seven physical resident coefficient shapes for both scored and
 encoding-only passes, using smaller blocks for 64/128-coefficient transforms.
 All fourteen native entries have zero stack/local allocation and retain the
@@ -5045,6 +5060,224 @@ invariant hoisting, each requiring separate numerical and sanitizer gates.
 CPU coefficient handoff/assembly, perceptual filtering, and codestream work
 also remain material. The observed operating-state limitation should be
 recorded in further experiments without silently changing system settings.
+
+## Fused blur and frequency split (S40)
+
+### Bottleneck and implementation
+
+Baseline: `fe13a54` (S39). Re-reading its three retained production profiles
+puts Malta at 49.8-58.1 ms of 247.2-263.6 ms GPU time at 4K. Prior larger-tile
+and warp-sharing Malta experiments are already unfavorable. Source inspection
+identifies another concrete dataflow cost: 24 frequency-split kernels read a
+blurred plane immediately after a vertical convolution writes it. The split
+alone costs about 9.6-9.7 ms at 4K, in addition to its producer. This follow-up
+targets that redundant intermediate boundary, not another coefficient tweak.
+
+The tiled convolution body now accepts a compile-time output writer. Existing
+plain convolution entries retain their signatures and native instructions.
+Four new vertical entries feed their rounded blur value directly to the
+channel-specific low/high split: channels 0/1 use 15 taps and channels 3/4
+use 7 taps. Horizontal convolution is unchanged. The unmodified separate
+frequency kernel and plain blur entries remain the differential oracle.
+
+The vertical convolution reads only the completed, tightly packed horizontal
+intermediate. Each output owner reads and updates its own original input
+pixel and writes its corresponding high-frequency output. No neighboring
+in-place input value is consumed by convolution. Halo loading, synchronization,
+partial-edge handling, tap accumulation order, included-weight normalization,
+division, and range/clamp formulas are preserved. No global fast math or
+precision change is introduced. Unsupported internal channels are rejected
+without work; empty extents are no-ops for supported channels.
+
+Each fused call removes one launch and one float store plus one float load
+per active pixel of the intermediate blurred image. That is eight bytes of
+source-level global accesses, not measured DRAM or PCIe traffic. The working
+plane is still used by later mask/blur stages, so this does not remove an
+arena or reduce allocation capacity. Low/medium decomposition, the B-channel
+blur, X suppression, Malta, masking, and multiscale composition are unchanged.
+
+Native comparison against the frozen S39 encoder covers all 29 preexisting
+Butteraugli kernels, including both directions of all four tiled blur sizes.
+Their complete instruction dumps are identical after normalizing only the
+compiler-generated private-namespace hash. The four new entries match the
+isolated measured binary after production integration:
+
+| Channels | Taps | Threads | Registers | Shared bytes | Stack/local bytes |
+|---|---:|---:|---:|---:|---:|
+| 0 / 1 | 15 | 256 | 39 | 10,048 | 0 / 0 |
+| 3 / 4 | 7 | 256 | 31 | 8,992 | 0 / 0 |
+
+Register/shared usage matches the corresponding plain vertical kernel.
+Added entry points have a module-code footprint; no zero-footprint claim is
+made. The initial native-check script mistakenly compared against S39's
+resident-only dump and then used new private-symbol hashes to select old
+functions. Those evidence-selection errors were corrected by extracting all
+29 names from the frozen encoder's own symbol table. They were not numerical
+test failures and are not used as passing evidence.
+
+### Guarded test and isolated experiment
+
+A new CUDA-only CTest fixture runs 320 cases: sixteen geometries, four
+channels, and five patterns. It includes one-pixel dimensions, partial
+horizontal/vertical tiles, boundaries around 32/64 and 256, independently
+padded strides, offset pointers, signed zeros, small/wide random values,
+impulse weights at range/clamp thresholds and adjacent floats, and very
+small/large finite inputs. Each case has three stages: initial evaluation,
+in-place reuse, and changed-input reuse. Low/high outputs and the horizontal
+intermediate must be bit-identical; guards and weights must be unchanged.
+The candidate does not receive or write a blurred-plane pointer. Separate
+empty-extent and unsupported-channel cases exercise early exits.
+
+The isolated executable compares old and fused complete blur/split bundles,
+including the unchanged horizontal pass. Both variants use the same input,
+intermediate, output, and weight allocations. A device-to-device restore
+from a seed buffer precedes each event interval but is outside timing; three
+successive transformations are timed per interval. Initial low/high outputs
+are compared bitwise before measurement. Five alternating-order pairs use
+ten warmups and eleven event samples per variant. Initialization, resets,
+allocation, verification, and file I/O are excluded.
+
+| Channel | 512x536 paired ratio | 1919x1079 paired ratio | 3839x2159 paired ratio |
+|---|---:|---:|---:|
+| 0 | 0.812121 | 0.816092 | 0.854834 |
+| 1 | 0.761905 | 0.816117 | 0.856834 |
+| 3 | 0.698529 | 0.874568 | 0.822601 |
+| 4 | 0.617834 | 0.837494 | 0.830205 |
+
+All twelve median paired ratios favor fusion, including 14.3-17.7% at odd
+4K. These are isolated bundles with patterned inputs and padded strides,
+not whole encodes. Read-only before/after snapshots span 63-67 C and
+210-1305 MHz, with thermal/power flags mostly active. The post-process
+snapshots are not claimed to be clocks during timed kernels. No system,
+power, cooling, firewall, priority, or clock setting is changed.
+
+### Public workflow qualification
+
+The integrated focused test, prepared Butteraugli test, and full-AQ test
+pass, followed by all 62 CUDA and 47 CPU tests. Seven alternating-order
+warm pairs use three warmups/five samples; seven cold pairs use zero
+warmups/one sample. Changes are medians of paired ratios, not ratios of
+the displayed marginal medians:
+
+| Cohort/input | Total parent/new (ms) | Paired total change | Quantization parent/new (ms) | Paired quantization change |
+|---|---:|---:|---:|---:|
+| Warm 4K | 538.428 / 547.524 | +1.2% | 338.442 / 327.024 | -2.3% |
+| Warm 1080p | 137.638 / 141.079 | -0.5% | 64.519 / 63.581 | -2.7% |
+| Warm Flower | 27.073 / 27.283 | +0.8% | 12.812 / 12.706 | -1.0% |
+| Cold 4K | 629.828 / 614.183 | -2.2% | 428.686 / 413.066 | -3.6% |
+| Cold 1080p | 178.205 / 180.217 | +1.1% | 98.107 / 97.928 | +0.2% |
+| Cold Flower | 49.886 / 49.156 | -3.3% | 27.521 / 27.199 | -1.7% |
+
+Warm quantization improves on all three inputs, but total wall and cold-start
+results are mixed. No stable whole-encoder gain is established. Warm 4K
+parent/new total ranges are 505.784-566.208 / 514.918-572.790 ms; cold 1080p
+ranges are 171.509-197.023 / 171.422-229.262 ms. Between-workload snapshots
+remain observations of a variable operating state, not locked timed clocks.
+
+The first production profile pair uses three warmups and one captured encode
+with CUDA memory tracing. The targeted subset is the old vertical blur plus
+separate split versus the new fused vertical entry. The complete bundle also
+includes the unchanged horizontal blur:
+
+| Input | Target parent/new (ms) | Complete bundle parent/new (ms) | All kernels parent/new (ms) |
+|---|---:|---:|---:|
+| Odd 4K | 18.096654 / 13.317013 | 27.588990 / 23.848608 | 244.326355 / 267.357309 |
+| Odd 1080p | 3.357204 / 2.548418 | 4.812986 / 4.049287 | 38.294058 / 37.405818 |
+| Flower | 0.431688 / 0.301576 | 0.695342 / 0.561361 | 6.891470 / 6.757611 |
+
+The target improves 26.4% / 24.1% / 30.1%, but initial 4K total GPU time
+regresses 9.4%, including slower unchanged kernels. That observation is
+retained and triggers alternating-order repeat profiles after sanitizers.
+
+All 24 separate frequency-split launches disappear, reducing total launch
+counts from 464/452/464 to 440/428/440. The 24 replacement entries use the
+expected channel/tap sequence and preserve their predecessor's grid, block,
+register, shared, and local-memory geometry. All ordered non-target kernel
+identities/geometry/resources match. Five arena sizes, peak requested device
+bytes (2,608,448,064 / 651,957,638 / 85,819,408), pool thresholds, and all
+31 H2D / 19 D2H / one D2D transfer counts and byte totals are unchanged.
+
+All 46 before/after image pairs match codestream bytes, SHA-256, selected
+strategies, decoded Butteraugli, and requested final encoder scores.
+Encoding-only and scored policies agree within each build as well. The
+seven-input, distances 0.5/1.2/3, effort-7 matrix plus two effort-9 cases
+retains the pinned libjxl revision, linear-sRGB interpretation, and default
+80-nit metric from S39. Benchmark-generated synthetic images are separate
+from the quality PFMs.
+
+Serial/batch checks pass at even 1080p in fully-resident and
+maximum-throughput modes, batches 1/2/4, and even 4K fully-resident batches
+1/2. Paired batch-vs-serial speedups are 1.165/1.146/1.328,
+1.006/1.524/1.947, and 0.910/0.984 respectively. These are current-build
+concurrency comparisons, not before/after optimization gains; the 4K batch
+results do not support adding execution lanes.
+
+All seven scoped sanitizer checks finish normally with zero errors/hazards:
+full-AQ memcheck/initcheck/synccheck, and focused blur/frequency
+memcheck/initcheck/synccheck/racecheck. Both memchecks report zero leaked
+bytes. Full-AQ memcheck enables stream-ordered race tracking and full leak
+checking; focused memcheck enables full leak checking. All four focused
+runs cover the entire 320-case, three-stage fixture; none uses a kernel
+filter or API-error suppression. Full-AQ checks take about 34/23/17 seconds;
+focused checks take about 5/5/7/118 seconds. No full-AQ racecheck is started,
+and no sanitizer is aborted or left running. Progress output confirms that
+the longer focused racecheck continues advancing through the fixture.
+
+Two more pairs per larger input use the same three warmups/one capture,
+CUDA memory tracing, and frozen parent. Repeat 1 starts with the candidate;
+repeat 2 starts with the parent:
+
+| Input/pair | Target parent/new (ms) | Complete bundle parent/new (ms) | All kernels parent/new (ms) |
+|---|---:|---:|---:|
+| 4K repeat 1 | 18.136366 / 13.319575 | 27.741733 / 23.502079 | 259.012609 / 256.805127 |
+| 4K repeat 2 | 18.288593 / 12.750881 | 27.818821 / 22.023949 | 249.354622 / 240.892142 |
+| 1080p repeat 1 | 3.284693 / 2.594884 | 4.661272 / 4.156555 | 36.407171 / 39.050532 |
+| 1080p repeat 2 | 3.310132 / 2.561314 | 4.717557 / 4.069802 | 37.178868 / 38.070696 |
+
+Every target and complete-bundle observation improves. Across all three
+pairs per input, median paired target reductions are 26.6% / 22.6% at
+4K / 1080p; complete-bundle reductions are 15.3% / 13.7%. All-kernel changes
+are -0.9% / +2.4%, with median non-target changes +1.1% / +4.8%.
+The initial unfavorable 4K capture and both unfavorable 1080p total repeats
+remain included. The evidence supports the targeted reduction, not a stable
+whole-encoder improvement. Flower has one capture pair, not a repeated cohort.
+Per-version ordered kernel geometry/resources, explicit allocations, and
+transfers match the initial capture throughout the repeats. Before/after
+snapshots span 72-74 C, with thermal/power flags alternating between active
+and inactive; they are not measurements of every kernel's operating clock.
+
+All jobs finish normally. Builds, tests, sanitizers, disassembly, and GPU
+measurements do not overlap GPU work. No permission error, admin prompt,
+or unexplained stall is encountered. No firewall or other system setting
+is changed; the earlier long full-AQ racecheck does not establish a firewall
+cause.
+
+Ignored `build-cuda-ninja/profiles/s40_*` artifacts preserve the baseline
+source, bottleneck scan, native dumps/resources, same-buffer probe and its
+build/measurement scripts, every paired observation, and GPU snapshots.
+`s40_final_*` preserves warm/cold cohorts, profiles, CTest logs, decoded image
+outputs, batch observations, sanitizer commands/logs, and evidence assertions.
+The native checker normalizes only private symbol hashes; the profile
+validator verifies every removed/replaced launch and every retained ordered
+kernel, resource, allocation, and transfer record. The baseline is the frozen
+S39 build, not a rebuilt or retimed substitute for recorded S39 observations.
+
+`s40_probe_verify.ps1` extracts native code from the actual timed executable;
+`s40_probe_identity.py` proves all 33 Butteraugli bodies match the integrated
+encoder. `s40_final_validate.py` also requires that identity, all 320 cases
+in every focused sanitizer log, and all image/test/accounting assertions.
+`s40_final_profile_repeat.py` validates repeated structure and derives the
+paired summaries. Qualified encode, benchmark, batch, frequency-test,
+AQ-test, and Butteraugli-test binaries are frozen as `s40_retained_*`, with
+source/copy SHA-256 checks in `s40_final_binary_hashes.json`.
+
+The encoder is not demonstrated maxed out. Malta, large-radius convolution,
+remaining perceptual passes, CPU coefficient handoff, and CPU codestream
+generation still matter. S39's first warm candidate report alone spends
+about 212 ms / 72 ms in codestream encoding at 4K / 1080p, respectively;
+further work should measure that host stage's internal costs as well as
+remaining GPU work. No expanded math/quality contract or system-setting
+change is implied by this next investigation.
 
 ## Work that should not lead the next cycle
 

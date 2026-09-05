@@ -61,6 +61,27 @@ struct CudaButteraugliMaltaParams {
     uint32_t scaled_stride, float* accumulation,
     CudaButteraugliMaltaParams params, cudaStream_t stream);
 
+// Blur followed by the in-place low/high frequency split. Channels 0/1 use
+// 15 taps; 3/4 use 7 taps. Intermediate storage is tightly packed width*height.
+// Input and high output must not overlap it or each other. The reference
+// additionally materializes the blurred plane for differential qualification.
+struct CudaButteraugliFrequencyParams {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t input_stride = 0;
+  uint32_t output_stride = 0;
+  uint32_t channel = 0;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliBlurAndSplit(
+    float* input, const float* weights, float* intermediate, float* output,
+    CudaButteraugliFrequencyParams params, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliBlurAndSplitReference(
+    float* input, const float* weights, float* intermediate, float* blurred,
+    uint32_t blurred_stride, float* output,
+    CudaButteraugliFrequencyParams params, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaButteraugliPrepare(
     const CudaButteraugliPlan& plan, cudaStream_t stream);
 

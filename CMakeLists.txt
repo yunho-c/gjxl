@@ -2383,6 +2383,12 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_memory_pool COMMAND gjxl_cuda_memory_pool_test)
     set_tests_properties(cuda_memory_pool PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_cuda_frequency_split_test tests/cuda_frequency_split_test.cpp)
+    target_link_libraries(gjxl_cuda_frequency_split_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_frequency_split_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_frequency_split COMMAND gjxl_cuda_frequency_split_test)
+    set_tests_properties(cuda_frequency_split PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(gjxl_cuda_malta_test tests/cuda_malta_test.cpp)
     target_link_libraries(gjxl_cuda_malta_test PRIVATE gjxl_cuda)
     target_include_directories(gjxl_cuda_malta_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
