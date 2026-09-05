@@ -45,7 +45,7 @@ from encode_image import WrapperError, convert_to_pfm
 ROOT = Path(__file__).resolve().parents[1]
 PINNED_REVISION = "e8ff09762481785938d8e4e01333ed3917571161"
 SCHEMA = 1
-REPORT_SCHEMA = 2
+REPORT_SCHEMA = 3
 COMPACT_DISTANCES = (0.5, 0.8, 1.0, 1.1, 1.2, 1.3, 1.4, 2.0, 2.499, 2.5, 2.501, 3.0)
 FULL_DISTANCES = tuple(
     sorted({i / 10 for i in range(5, 31)} | {0.999, 1.001, 1.199, 1.201, 2.499, 2.501})
@@ -319,11 +319,14 @@ def quality_limit(reference):
     )
 
 
-def acceptance(row, baseline=None, maximum_libjxl_size_ratio=None):
+def acceptance(
+    row, baseline=None, maximum_libjxl_size_ratio=None, comparison_mode="same-distance"
+):
     failures = []
     metal = row["metal"]
     if (
-        maximum_libjxl_size_ratio is not None
+        comparison_mode == "matched-quality"
+        and maximum_libjxl_size_ratio is not None
         and row.get("libjxl_size_ratio") is not None
         and row["libjxl_size_ratio"] > maximum_libjxl_size_ratio
     ):
@@ -333,9 +336,12 @@ def acceptance(row, baseline=None, maximum_libjxl_size_ratio=None):
             failures.append("fixed-distance quality regressed from baseline")
         if metal["bytes"] > baseline["metal"]["bytes"] * (1 + LIMITS["relative_size"]):
             failures.append("fixed-distance bytes regressed from baseline")
-        if row.get("libjxl_size_ratio") is not None and row[
-            "libjxl_size_ratio"
-        ] > baseline["libjxl_size_ratio"] * (1 + LIMITS["relative_size"]):
+        if (
+            comparison_mode == "matched-quality"
+            and row.get("libjxl_size_ratio") is not None
+            and row["libjxl_size_ratio"]
+            > baseline["libjxl_size_ratio"] * (1 + LIMITS["relative_size"])
+        ):
             failures.append("matched-quality libjxl size ratio regressed from baseline")
     return failures
 
@@ -354,8 +360,19 @@ def validate_baseline(baseline, contract, expected):
         raise ComparisonError(
             "Baseline configuration differs or baseline was not accepted"
         )
-    if validate_ratio_limit(contract.get("maximum_libjxl_size_ratio")) is None:
+    if contract.get("comparison_mode") not in ("same-distance", "matched-quality"):
+        raise ComparisonError("Baseline comparison mode is missing or invalid")
+    ratio_limit = validate_ratio_limit(contract.get("maximum_libjxl_size_ratio"))
+    if contract["comparison_mode"] == "matched-quality" and ratio_limit is None:
         raise ComparisonError("Baseline requires an explicit libjxl size allowance")
+    if contract["comparison_mode"] == "same-distance" and ratio_limit is not None:
+        raise ComparisonError(
+            "Same-distance baselines cannot use a matched-quality size allowance"
+        )
+    if contract["comparison_mode"] == "same-distance" and baseline.get(
+        "baseline_acceptance"
+    ) not in ("explicit-observation-review", "passing-regression"):
+        raise ComparisonError("Same-distance baseline has not been explicitly accepted")
     rows = baseline.get("rows", [])
     by_id = {row["id"]: row for row in rows}
     if len(by_id) != len(rows) or set(by_id) != set(expected):
@@ -363,8 +380,15 @@ def validate_baseline(baseline, contract, expected):
     if any(row.get("failures") or row.get("status") != "pass" for row in rows):
         raise ComparisonError("Baseline contains failing/incomplete cases")
     for row in rows:
-        for name in ("metal", "libjxl_matched"):
+        for name in ("metal", "libjxl"):
             validate_measurement(row[name])
+        if row.get("comparison_mode") != contract["comparison_mode"]:
+            raise ComparisonError("Baseline row comparison mode differs")
+        if contract["comparison_mode"] == "same-distance" and (
+            row["metal"].get("distance") != row["distance"]
+            or row["libjxl"].get("distance") != row["distance"]
+        ):
+            raise ComparisonError("Baseline reference did not use the same distance")
         for name in ("libjxl_size_ratio",):
             value = row[name]
             if (
@@ -375,6 +399,53 @@ def validate_baseline(baseline, contract, expected):
             ):
                 raise ComparisonError("Baseline contains invalid size ratios")
     return by_id
+
+
+def accept_baseline(args):
+    """Explicitly accept an already reviewed same-distance observation report."""
+    report = load_json(args.report)
+    contract = report.get("contract", {})
+    if (
+        report.get("schema_version") != REPORT_SCHEMA
+        or report.get("kind") != "metal-resident-qualification"
+        or report.get("mode") != "observation"
+        or contract.get("comparison_mode") != "same-distance"
+        or not report.get("measurement_complete")
+        or report.get("cancelled")
+        or any(
+            r.get("failures") or r.get("status") != "observed"
+            for r in report.get("rows", [])
+        )
+    ):
+        raise ComparisonError(
+            "Only complete same-distance observation reports can be accepted"
+        )
+    expected = [
+        case_id(e["name"], policy, distance)
+        for e in contract["inputs"]
+        for distance in contract["distances"]
+        for policy in contract["policies"]
+    ]
+    if not expected or report.get("expected_cases") != len(expected):
+        raise ComparisonError("Observation report has an invalid case count")
+    baseline = {
+        **report,
+        "kind": "metal-resident-baseline",
+        "mode": "baseline",
+        "passed": True,
+        "qualification_complete": False,
+        "baseline_acceptance": "explicit-observation-review",
+        "accepted_report_sha256": sha256_file(args.report),
+        "rows": [{**row, "status": "pass"} for row in report["rows"]],
+    }
+    validate_baseline(baseline, contract, expected)
+    if args.output.resolve().is_relative_to(args.report.resolve().parent):
+        raise ComparisonError("Baseline must be outside the report output directory")
+    if args.output.exists():
+        raise ComparisonError("Baseline destination exists; never overwrite it")
+    write_json_atomic(args.output, baseline)
+    print(f"Accepted regression baseline: {args.output}", flush=True)
+    return 0
 
 
 def validate_measurement(result):
@@ -588,7 +659,7 @@ class Evaluator:
     def retain_failure(self, row, destination):
         """Keep bounded failed pixels; every remaining case retains replay argv."""
         retained = []
-        for name in ("metal", "libjxl_matched"):
+        for name in ("metal", "libjxl"):
             result = row.get(name)
             if not result:
                 continue
@@ -602,9 +673,7 @@ class Evaluator:
                 # launching replay. Avoid overshooting on parallel inputs.
                 decode_argv = load_json(directory / "decode.command.json")["argv"]
                 encode_argv = load_json(directory / "encode.command.json")["argv"]
-                source = Path(
-                    encode_argv[-2] if name != "libjxl_matched" else encode_argv[1]
-                )
+                source = Path(encode_argv[-2] if name == "metal" else encode_argv[1])
                 required = source.stat().st_size + result["bytes"]
                 if (
                     self.artifact_bytes + required
@@ -651,9 +720,19 @@ def check_aliases(evaluator, entry, policy, distance, metal):
             raise ComparisonError(f"Policy alias differs: metal {flags}")
 
 
-def evaluate_case(evaluator, entry, policy, distance, aliases, baseline, ratio_limit):
+def evaluate_case(
+    evaluator,
+    entry,
+    policy,
+    distance,
+    aliases,
+    baseline,
+    ratio_limit,
+    comparison_mode="same-distance",
+):
     row = {
         "id": case_id(entry["name"], policy, distance),
+        "comparison_mode": comparison_mode,
         "input": entry["name"],
         "policy": policy,
         "distance": distance,
@@ -663,25 +742,35 @@ def evaluate_case(evaluator, entry, policy, distance, aliases, baseline, ratio_l
         row["metal"] = evaluator.evaluate(entry, "metal", policy, distance)
         if aliases:
             check_aliases(evaluator, entry, policy, distance, row["metal"])
-        try:
-            match, history = evaluator.match(
-                entry, "libjxl", policy, distance, row["metal"]["butteraugli"]
+        if comparison_mode == "same-distance":
+            row["libjxl"] = evaluator.evaluate(entry, "libjxl", policy, distance)
+        else:
+            try:
+                match, history = evaluator.match(
+                    entry, "libjxl", policy, distance, row["metal"]["butteraugli"]
+                )
+                row["libjxl"] = match
+                row["libjxl_calibration"] = history
+            except ComparisonError as exc:
+                row["libjxl_calibration"] = getattr(exc, "calibration_history", [])
+                row["failures"].append(f"libjxl calibration: {exc}")
+        if "libjxl" in row:
+            row["libjxl_size_ratio"] = row["metal"]["bytes"] / row["libjxl"]["bytes"]
+            row["libjxl_score_delta"] = (
+                row["metal"]["butteraugli"] - row["libjxl"]["butteraugli"]
             )
-            row["libjxl_matched"] = match
-            row["libjxl_calibration"] = history
-            row["libjxl_size_ratio"] = row["metal"]["bytes"] / match["bytes"]
-        except ComparisonError as exc:
-            row["libjxl_calibration"] = getattr(exc, "calibration_history", [])
-            row["failures"].append(f"libjxl calibration: {exc}")
-        row["failures"].extend(acceptance(row, baseline, ratio_limit))
+        row["failures"].extend(acceptance(row, baseline, ratio_limit, comparison_mode))
+        has_acceptance = baseline is not None or (
+            comparison_mode == "matched-quality" and ratio_limit is not None
+        )
         row["status"] = (
             "incomplete"
-            if "libjxl_matched" not in row
+            if "libjxl" not in row
             else "fail"
             if row["failures"]
-            else "observed"
-            if ratio_limit is None
             else "pass"
+            if has_acceptance
+            else "observed"
         )
     except (ComparisonError, OSError, ValueError) as exc:
         row["status"] = "incomplete"
@@ -698,9 +787,16 @@ def run(args):
         ratio_limit = validate_ratio_limit(
             baseline_report.get("contract", {}).get("maximum_libjxl_size_ratio")
         )
-    if args.record_baseline and ratio_limit is None:
+    if args.comparison == "same-distance" and ratio_limit is not None:
         raise ComparisonError(
-            "Observation runs cannot become baselines; set --max-libjxl-size-ratio after review"
+            "--max-libjxl-size-ratio requires --comparison matched-quality"
+        )
+    has_acceptance = bool(args.baseline) or (
+        args.comparison == "matched-quality" and ratio_limit is not None
+    )
+    if args.record_baseline and not has_acceptance:
+        raise ComparisonError(
+            "Observation runs cannot become baselines automatically; review a completed same-distance report and use accept-baseline, or configure a matched-quality allowance"
         )
     manifest = load_json(args.corpus)
     if (
@@ -752,7 +848,8 @@ def run(args):
         "suite": args.suite,
         "reference_backend": "libjxl",
         "reference_effort": 7,
-        "calibration_version": 2,
+        "comparison_mode": args.comparison,
+        "calibration_version": 2 if args.comparison == "matched-quality" else None,
         "maximum_libjxl_size_ratio": ratio_limit,
         "metric": METRIC,
         "limits": LIMITS,
@@ -847,6 +944,7 @@ def run(args):
                         entry["name"] in manifest["compact"] and distance == 1.2,
                         baseline.get(cid),
                         ratio_limit,
+                        args.comparison,
                     )
                     if row["failures"]:
                         try:
@@ -875,14 +973,18 @@ def run(args):
     order = {cid: index for index, cid in enumerate(expected)}
     rows.sort(key=lambda row: order[row["id"]])
     passed = (
-        ratio_limit is not None
+        has_acceptance
         and all(row["status"] == "pass" for row in rows)
         and len(rows) == len(expected)
     )
     report = {
         "schema_version": REPORT_SCHEMA,
         "kind": "metal-resident-qualification",
-        "mode": "qualification" if ratio_limit is not None else "observation",
+        "mode": "regression"
+        if args.baseline
+        else "qualification"
+        if has_acceptance
+        else "observation",
         "contract": contract,
         "passed": passed,
         "expected_cases": len(expected),
@@ -891,7 +993,11 @@ def run(args):
         "cancelled": cancelled.is_set(),
         "measurement_complete": len(rows) == len(expected)
         and not any(r["status"] == "incomplete" for r in rows),
-        "qualification_complete": ratio_limit is not None
+        "regression_complete": bool(args.baseline)
+        and len(rows) == len(expected)
+        and not any(r["status"] == "incomplete" for r in rows),
+        "qualification_complete": args.comparison == "matched-quality"
+        and has_acceptance
         and len(rows) == len(expected)
         and not any(r["status"] == "incomplete" for r in rows),
     }
@@ -899,13 +1005,16 @@ def run(args):
     with (out / "report.csv").open("w", newline="") as stream:
         fields = [
             "id",
+            "comparison_mode",
             "status",
+            "metal_distance",
             "metal_score",
             "metal_bytes",
             "libjxl_score",
             "libjxl_bytes",
             "libjxl_distance",
             "libjxl_size_ratio",
+            "libjxl_score_delta",
             "failures",
         ]
         writer = csv.DictWriter(stream, fieldnames=fields)
@@ -914,13 +1023,16 @@ def run(args):
             writer.writerow(
                 {
                     "id": row["id"],
+                    "comparison_mode": args.comparison,
                     "status": row["status"],
+                    "metal_distance": row.get("metal", {}).get("distance"),
                     "metal_score": row.get("metal", {}).get("butteraugli"),
                     "metal_bytes": row.get("metal", {}).get("bytes"),
-                    "libjxl_score": row.get("libjxl_matched", {}).get("butteraugli"),
-                    "libjxl_bytes": row.get("libjxl_matched", {}).get("bytes"),
-                    "libjxl_distance": row.get("libjxl_matched", {}).get("distance"),
+                    "libjxl_score": row.get("libjxl", {}).get("butteraugli"),
+                    "libjxl_bytes": row.get("libjxl", {}).get("bytes"),
+                    "libjxl_distance": row.get("libjxl", {}).get("distance"),
                     "libjxl_size_ratio": row.get("libjxl_size_ratio"),
+                    "libjxl_score_delta": row.get("libjxl_score_delta"),
                     "failures": "; ".join(row["failures"]),
                 }
             )
@@ -932,10 +1044,17 @@ def run(args):
         if args.record_baseline.exists():
             raise ComparisonError("Baseline destination exists; never overwrite it")
         write_json_atomic(
-            args.record_baseline, {**report, "kind": "metal-resident-baseline"}
+            args.record_baseline,
+            {
+                **report,
+                "kind": "metal-resident-baseline",
+                "baseline_acceptance": "passing-regression"
+                if args.baseline
+                else "matched-quality-allowance",
+            },
         )
     observation = (
-        ratio_limit is None
+        not has_acceptance
         and report["measurement_complete"]
         and not any(row["failures"] for row in rows)
     )
@@ -967,6 +1086,13 @@ def main():
         "run", help="Run or resume qualification; no baseline is rewritten"
     )
     execute.add_argument("--suite", choices=("compact", "full"), default="compact")
+    execute.add_argument(
+        "--comparison",
+        choices=("same-distance", "matched-quality"),
+        default="same-distance",
+        help="Default: encode both at the requested distance, without calibration; "
+        "matched-quality enables the slower bounded reference search",
+    )
     for name in (
         "corpus",
         "output",
@@ -999,6 +1125,12 @@ def main():
     )
     execute.add_argument("--baseline", type=Path)
     execute.add_argument("--record-baseline", type=Path)
+    accept = sub.add_parser(
+        "accept-baseline",
+        help="Explicitly accept a reviewed, complete same-distance observation report",
+    )
+    accept.add_argument("--report", type=Path, required=True)
+    accept.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "run" and args.artifact_budget_mib < 0:
         parser.error("Artifact budget must be nonnegative")
@@ -1006,6 +1138,8 @@ def main():
         if args.command == "prepare":
             prepare(args)
             return 0
+        if args.command == "accept-baseline":
+            return accept_baseline(args)
         return run(args)
     except (ComparisonError, WrapperError, OSError, ValueError, KeyError) as exc:
         print(f"Qualification error: {exc}", file=sys.stderr)

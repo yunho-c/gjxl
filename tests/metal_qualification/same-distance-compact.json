@@ -1,0 +1,55 @@
+{
+  "schema_version": 3,
+  "kind": "metal-resident-qualification-observation",
+  "accepted_baseline": false,
+  "date": "2026-09-05",
+  "gjxl_revision": "d11de9a326aaee02a5be8314d26b68656d12b2da",
+  "tools": {
+    "butteraugli": "79e278f8cde2d4e580922aed86f1125694ccbe10f2f5bb1f9417486754700210",
+    "cjxl": "993df773ffa696c42b0866bb748fd7560e26debaadaf5f551f2a38d51d0b33c5",
+    "djxl": "710d6e03829381448fb0f0f90c1318a387a87e8d7cb2f1bce45dc049d3523e08",
+    "encoder": "512bd5d4ba366602080ddec39b96e44e49d29941ead6a5dc60a71e281875594b"
+  },
+  "runner_sha256": "322e4a24aa78a90c5735f726b9e8d3e82c57e53559593e2f090cbf97507cd2f1",
+  "support_sha256": "a72b470207c5d1dc22eb2690770c7ed20ada5408ebd96e55d01b38a3f8b23606",
+  "hardware": "Apple M4 Pro",
+  "os": "macOS-15.6-arm64-arm-64bit-Mach-O",
+  "suite": "compact",
+  "comparison_mode": "same-distance",
+  "cases": 1056,
+  "distinct_libjxl_evaluations": 96,
+  "statuses": {
+    "observed": 1056
+  },
+  "mode": "observation",
+  "passed": false,
+  "measurement_complete": true,
+  "regression_complete": false,
+  "qualification_complete": false,
+  "contract_sha256": "c09158e6c9853aa20f970563ec89e243a68ff7fa5a49f869de590364c5e5a74d",
+  "reference_backend": "libjxl",
+  "reference_effort": 7,
+  "calibration_version": null,
+  "metric": {
+    "absolute_match": 0.015,
+    "calibration_bounds": [
+      0.03,
+      15.0
+    ],
+    "colorspace": "RGB_D65_SRG_Rel_Lin",
+    "intensity_target": 255,
+    "maximum_evaluations": 24,
+    "name": "libjxl-butteraugli",
+    "relative_match": 0.02
+  },
+  "limits": {
+    "absolute_quality": 0.1,
+    "relative_quality": 0.1,
+    "relative_size": 0.1
+  },
+  "maximum_libjxl_size_ratio": null,
+  "decision": "Keep automatic resident interval [1.0, 1.2]. Review initial same-distance quality and size observations before accepting a Metal regression baseline.",
+  "data": "same-distance-compact.csv",
+  "historical_matched_quality_observation": "libjxl-only-compact.json",
+  "full_sweep": "Running separately in same-distance observation mode; no expanded-range qualification claim."
+}

@@ -26,10 +26,12 @@ from metal_qualification_support import calibrate_distance, ComparisonError
 def row():
     return {
         "id": "image/e7/1",
+        "distance": 1.0,
+        "comparison_mode": "matched-quality",
         "status": "pass",
         "failures": [],
-        "libjxl_matched": {"butteraugli": 1.0, "bytes": 1000, "distance": 1.0},
-        "metal": {"butteraugli": 1.0, "bytes": 1000},
+        "libjxl": {"butteraugli": 1.0, "bytes": 1000, "distance": 1.0},
+        "metal": {"butteraugli": 1.0, "bytes": 1000, "distance": 1.0},
         "libjxl_size_ratio": 1.0,
     }
 
@@ -57,9 +59,21 @@ class QualificationTests(unittest.TestCase):
     def test_initial_libjxl_limit_is_per_case_and_inclusive(self):
         r = row()
         r["libjxl_size_ratio"] = 1.1
-        self.assertEqual(q.acceptance(r, maximum_libjxl_size_ratio=1.1), [])
+        self.assertEqual(
+            q.acceptance(
+                r, maximum_libjxl_size_ratio=1.1, comparison_mode="matched-quality"
+            ),
+            [],
+        )
         r["libjxl_size_ratio"] = math.nextafter(1.1, math.inf)
-        self.assertEqual(len(q.acceptance(r, maximum_libjxl_size_ratio=1.1)), 1)
+        self.assertEqual(
+            len(
+                q.acceptance(
+                    r, maximum_libjxl_size_ratio=1.1, comparison_mode="matched-quality"
+                )
+            ),
+            1,
+        )
 
     def test_invalid_initial_limits_are_rejected(self):
         for value in (0, -1, math.nan, math.inf, True):
@@ -90,10 +104,13 @@ class QualificationTests(unittest.TestCase):
         r = row()
         r["metal"]["bytes"] = 1101
         r["libjxl_size_ratio"] = 1.101
-        self.assertEqual(len(q.acceptance(r, row())), 2)
+        self.assertEqual(
+            len(q.acceptance(r, row(), comparison_mode="matched-quality")), 2
+        )
 
     def test_baseline_requires_exact_configuration_and_complete_cases(self):
         contract = {
+            "comparison_mode": "matched-quality",
             "maximum_libjxl_size_ratio": 1.1,
             "metric": q.METRIC,
             "inputs": ["input-hash"],
@@ -139,11 +156,17 @@ class QualificationTests(unittest.TestCase):
                     {
                         "kind": kind,
                         "schema_version": q.REPORT_SCHEMA,
-                        "contract": {"maximum_libjxl_size_ratio": 1.1},
+                        "contract": {
+                            "comparison_mode": "matched-quality",
+                            "maximum_libjxl_size_ratio": 1.1,
+                        },
                         "passed": passed,
                         "rows": [],
                     },
-                    {"maximum_libjxl_size_ratio": 1.1},
+                    {
+                        "comparison_mode": "matched-quality",
+                        "maximum_libjxl_size_ratio": 1.1,
+                    },
                     [],
                 )
 
@@ -163,11 +186,17 @@ class QualificationTests(unittest.TestCase):
                     {
                         "kind": "metal-resident-baseline",
                         "schema_version": q.REPORT_SCHEMA,
-                        "contract": {"maximum_libjxl_size_ratio": 1.1},
+                        "contract": {
+                            "comparison_mode": "matched-quality",
+                            "maximum_libjxl_size_ratio": 1.1,
+                        },
                         "passed": True,
                         "rows": [r],
                     },
-                    {"maximum_libjxl_size_ratio": 1.1},
+                    {
+                        "comparison_mode": "matched-quality",
+                        "maximum_libjxl_size_ratio": 1.1,
+                    },
                     [r["id"]],
                 )
 
@@ -297,7 +326,10 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(len(history), 1 if first else 2)
 
     def test_old_cpu_baseline_schema_is_rejected(self):
-        contract = {"maximum_libjxl_size_ratio": 1.1}
+        contract = {
+            "comparison_mode": "matched-quality",
+            "maximum_libjxl_size_ratio": 1.1,
+        }
         with self.assertRaisesRegex(ComparisonError, "configuration differs"):
             q.validate_baseline(
                 {
@@ -317,6 +349,7 @@ class QualificationTests(unittest.TestCase):
                 baseline=None,
                 output=Path(directory) / "run",
                 max_libjxl_size_ratio=None,
+                comparison="same-distance",
                 record_baseline=Path(directory) / "baseline.json",
             )
             with self.assertRaisesRegex(ComparisonError, "Observation runs"):
@@ -344,7 +377,14 @@ class CaseTests(unittest.TestCase):
                 return {"butteraugli": 1.0, "bytes": 1000, "distance": 0.8}, []
 
         result = q.evaluate_case(
-            Fake(), {"name": "image"}, "e10", 1.2, True, baseline, limit
+            Fake(),
+            {"name": "image"},
+            "e10",
+            1.2,
+            True,
+            baseline,
+            limit,
+            "matched-quality",
         )
         self.assertEqual(
             calls,
@@ -375,6 +415,31 @@ class CaseTests(unittest.TestCase):
         self.assertIn(
             "fixed-distance bytes regressed from baseline", result["failures"]
         )
+
+    def test_same_distance_never_searches_or_assumes_equal_quality(self):
+        calls = []
+
+        class Fake:
+            def evaluate(self, entry, backend, policy, distance, extra=None):
+                calls.append((backend, distance))
+                return {
+                    "butteraugli": 3 if backend == "metal" else 1,
+                    "bytes": 1000 if backend == "metal" else 2000,
+                    "distance": distance,
+                }
+
+            def match(self, *args):
+                raise AssertionError("Same-distance comparison attempted calibration")
+
+        result = q.evaluate_case(
+            Fake(), {"name": "image"}, "e7", 1.2, False, None, None
+        )
+        self.assertEqual(calls, [("metal", 1.2), ("libjxl", 1.2)])
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(result["comparison_mode"], "same-distance")
+        self.assertEqual(result["libjxl_size_ratio"], 0.5)
+        self.assertEqual(result["libjxl_score_delta"], 2)
+        self.assertNotIn("libjxl_calibration", result)
 
 
 class RunTests(unittest.TestCase):
@@ -430,9 +495,13 @@ class RunTests(unittest.TestCase):
             baseline=None,
             record_baseline=None,
             max_libjxl_size_ratio=None,
+            comparison="matched-quality",
             **paths,
         )
         self.fail_match = False
+        self.fail_reference = False
+        self.metal_score = 1.0
+        self.metal_bytes = 1000
         owner = self
 
         class FakeEvaluator:
@@ -440,11 +509,18 @@ class RunTests(unittest.TestCase):
                 pass
 
             def evaluate(self, entry, backend, policy, distance, extra=None):
-                owner.assertEqual(backend, "metal")
-                return {"butteraugli": 1.0, "bytes": 1000, "distance": distance}
+                owner.assertIn(backend, ("metal", "libjxl"))
+                if backend == "libjxl" and owner.fail_reference:
+                    raise ComparisonError("reference encode failed")
+                return {
+                    "butteraugli": owner.metal_score if backend == "metal" else 0.5,
+                    "bytes": owner.metal_bytes if backend == "metal" else 2000,
+                    "distance": distance,
+                }
 
             def match(self, entry, backend, policy, distance, score):
                 owner.assertEqual(backend, "libjxl")
+                owner.assertEqual(owner.args.comparison, "matched-quality")
                 if owner.fail_match:
                     raise ComparisonError("unmatchable")
                 return {"butteraugli": 1.0, "bytes": 1000, "distance": distance}, []
@@ -527,6 +603,111 @@ class RunTests(unittest.TestCase):
         self.assertFalse(report["measurement_complete"])
         self.assertFalse(report["passed"])
 
+    def accept_report(self):
+        args = argparse.Namespace(
+            report=self.args.output / "report.json",
+            output=self.root / "same-distance-baseline.json",
+        )
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(q.accept_baseline(args), 0)
+        return args.output
+
+    def test_same_distance_observations_and_explicit_baseline_regression(self):
+        self.args.comparison = "same-distance"
+        status, report = self.run_report()
+        self.assertEqual(status, 2)
+        self.assertTrue(report["measurement_complete"])
+        self.assertFalse(report["qualification_complete"])
+        self.assertEqual(report["contract"]["comparison_mode"], "same-distance")
+        self.assertTrue(all(r["libjxl_score_delta"] == 0.5 for r in report["rows"]))
+        self.assertTrue(all(r["libjxl_size_ratio"] == 0.5 for r in report["rows"]))
+        self.assertTrue(all("libjxl_calibration" not in r for r in report["rows"]))
+        self.args.baseline = self.accept_report()
+        # Explicit baseline acceptance does not rewrite the observation report.
+        self.assertEqual(
+            json.loads((self.args.output / "report.json").read_text()), report
+        )
+        self.args.output = self.root / "regression"
+        status, report = self.run_report()
+        self.assertEqual(status, 0)
+        self.assertEqual(report["mode"], "regression")
+        self.assertTrue(report["regression_complete"])
+        self.assertFalse(report["qualification_complete"])
+        # Quality and size regressions are both caught, despite the continuing
+        # apparent byte advantage over libjxl at the same distance.
+        self.metal_score = 1.2
+        self.metal_bytes = 1101
+        self.args.output = self.root / "regressed"
+        status, report = self.run_report()
+        self.assertEqual(status, 1)
+        self.assertTrue(all(len(r["failures"]) == 2 for r in report["rows"]))
+
+    def test_same_distance_rejects_matched_quality_allowance(self):
+        self.args.comparison = "same-distance"
+        self.args.max_libjxl_size_ratio = 1.1
+        with self.assertRaisesRegex(
+            ComparisonError, "requires --comparison matched-quality"
+        ):
+            self.run_report()
+
+    def test_comparison_modes_cannot_share_baselines_or_resume_directories(self):
+        self.args.comparison = "same-distance"
+        self.run_report()
+        baseline = self.accept_report()
+        self.args.comparison = "matched-quality"
+        with self.assertRaisesRegex(ComparisonError, "different run configuration"):
+            self.run_report()
+        self.args.output = self.root / "matched"
+        self.args.baseline = baseline
+        with self.assertRaisesRegex(ComparisonError, "Baseline configuration differs"):
+            self.run_report()
+
+    def test_incomplete_and_tampered_observations_cannot_be_accepted(self):
+        self.args.comparison = "same-distance"
+        _, report = self.run_report()
+        variants = []
+        for field, value in (
+            ("measurement_complete", False),
+            ("cancelled", True),
+            ("schema_version", 2),
+        ):
+            variants.append({**report, field: value})
+        truncated = copy.deepcopy(report)
+        truncated["rows"].pop()
+        variants.append(truncated)
+        mismatch = copy.deepcopy(report)
+        mismatch["rows"][0]["libjxl"]["distance"] = 1.5
+        variants.append(mismatch)
+        for changed in variants:
+            (self.args.output / "report.json").write_text(json.dumps(changed))
+            with self.assertRaises(ComparisonError):
+                self.accept_report()
+        self.assertFalse((self.root / "same-distance-baseline.json").exists())
+        self.args.output = self.root / "reference-failure"
+        self.fail_reference = True
+        status, report = self.run_report()
+        self.assertEqual(status, 1)
+        self.assertFalse(report["measurement_complete"])
+        self.assertTrue(all(r["status"] == "incomplete" for r in report["rows"]))
+        with self.assertRaisesRegex(ComparisonError, "Only complete"):
+            self.accept_report()
+
+    def test_accept_baseline_never_overwrites_or_writes_inside_report(self):
+        self.args.comparison = "same-distance"
+        self.run_report()
+        destination = self.accept_report()
+        original = destination.read_bytes()
+        with self.assertRaisesRegex(ComparisonError, "never overwrite"):
+            self.accept_report()
+        self.assertEqual(destination.read_bytes(), original)
+        with self.assertRaisesRegex(ComparisonError, "outside the report"):
+            q.accept_baseline(
+                argparse.Namespace(
+                    report=self.args.output / "report.json",
+                    output=self.args.output / "baseline.json",
+                )
+            )
+
 
 class EvaluationTests(unittest.TestCase):
     def setUp(self):
@@ -608,6 +789,19 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(self.argv[0][0], "cjxl")
         self.assertEqual(self.argv[0][self.argv[0].index("-e") + 1], "7")
         self.assertNotIn("--backend", self.argv[0])
+
+    def test_same_distance_reference_is_encoded_once_for_all_eleven_policies(self):
+        entry = {**self.entry, "name": "image"}
+        with patch.object(
+            self.evaluator, "match", side_effect=AssertionError("Calibration requested")
+        ):
+            for policy in q.POLICIES:
+                result = q.evaluate_case(
+                    self.evaluator, entry, policy, 1, False, None, None
+                )
+                self.assertEqual(result["status"], "observed")
+        self.assertEqual(sum(argv[0] == "cjxl" for argv in self.argv), 1)
+        self.assertEqual(sum(argv[0] == "gjxl" for argv in self.argv), 22)
 
     def test_cpu_evaluation_is_rejected_before_any_command(self):
         with self.assertRaisesRegex(ComparisonError, "only Metal and libjxl"):

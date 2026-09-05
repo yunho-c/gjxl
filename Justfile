@@ -3,8 +3,8 @@ set shell := ["zsh", "-cu"]
 build_dir := "build"
 
 # Independent decoded-quality checks. Full preparation may download pinned inputs.
-metal-resident-qualify suite="compact":
-    cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
+metal-resident-qualify suite="compact" comparison="same-distance":
+    cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF -DGJXL_METAL_QUALIFICATION_COMPARISON={{ comparison }}
     cmake --build build/release --target metal-resident-qualify-{{ suite }}
 
 # Configure and build all project targets.

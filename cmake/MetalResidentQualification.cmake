@@ -3,6 +3,14 @@
 # Included only with GJXL_BUILD_TESTS. These targets are deliberately opt-in.
 option(GJXL_ENABLE_METAL_QUALIFICATION_TEST
   "Register the prepared compact Metal qualification with CTest" OFF)
+set(GJXL_METAL_QUALIFICATION_COMPARISON "same-distance" CACHE STRING
+  "Reference comparison: same-distance (no search) or matched-quality")
+set_property(CACHE GJXL_METAL_QUALIFICATION_COMPARISON PROPERTY STRINGS
+  same-distance matched-quality)
+if(NOT GJXL_METAL_QUALIFICATION_COMPARISON STREQUAL "same-distance" AND
+   NOT GJXL_METAL_QUALIFICATION_COMPARISON STREQUAL "matched-quality")
+  message(FATAL_ERROR "Invalid Metal qualification comparison mode")
+endif()
 set(GJXL_METAL_QUALIFICATION_BASELINE "" CACHE FILEPATH
   "Accepted compact baseline (empty performs initial qualification)")
 set(GJXL_METAL_QUALIFICATION_FULL_BASELINE "" CACHE FILEPATH
@@ -10,12 +18,17 @@ set(GJXL_METAL_QUALIFICATION_FULL_BASELINE "" CACHE FILEPATH
 set(GJXL_METAL_QUALIFICATION_PILOT_MANIFEST "" CACHE FILEPATH
   "Existing hash-verified canonical 38-image pilot corpus to reuse")
 set(GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO "" CACHE STRING
-  "Reviewed maximum Metal/libjxl byte ratio; empty collects observations or inherits the baseline limit")
+  "Matched-quality only: reviewed maximum Metal/libjxl byte ratio")
+if(GJXL_METAL_QUALIFICATION_COMPARISON STREQUAL "same-distance" AND
+   NOT GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO STREQUAL "")
+  message(FATAL_ERROR "A libjxl size allowance requires matched-quality comparison")
+endif()
 if(GJXL_ENABLE_METAL_QUALIFICATION_TEST AND
    NOT GJXL_METAL_QUALIFICATION_BASELINE AND
-   NOT GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO)
+   (GJXL_METAL_QUALIFICATION_COMPARISON STREQUAL "same-distance" OR
+    NOT GJXL_METAL_QUALIFICATION_MAX_LIBJXL_SIZE_RATIO))
   message(FATAL_ERROR
-    "Metal qualification CTest needs an accepted baseline or an explicit libjxl size ratio limit")
+    "Metal CTest needs an accepted baseline (or a matched-quality size allowance)")
 endif()
 
 set(qualification_root "${CMAKE_CURRENT_BINARY_DIR}/metal-qualification")
@@ -37,6 +50,7 @@ add_custom_target(gjxl_pinned_quality_tools
   USES_TERMINAL VERBATIM)
 
 set(qualification_common
+  --comparison "${GJXL_METAL_QUALIFICATION_COMPARISON}"
   --encoder $<TARGET_FILE:gjxl_encode>
   --cjxl "${GJXL_PINNED_LIBJXL_BUILD}/tools/cjxl"
   --djxl "${GJXL_PINNED_LIBJXL_BUILD}/tools/djxl"
@@ -72,7 +86,8 @@ foreach(suite IN ITEMS compact full)
     VERBATIM)
   add_custom_target(metal-resident-prepare-${suite} DEPENDS "${corpus}")
   set(run_args run --suite "${suite}" --corpus "${corpus}"
-    --output "${qualification_root}/${suite}-libjxl-run" ${qualification_common})
+    --output "${qualification_root}/${suite}-${GJXL_METAL_QUALIFICATION_COMPARISON}-run"
+    ${qualification_common})
   if(baseline)
     list(APPEND run_args --baseline "${baseline}")
   endif()
