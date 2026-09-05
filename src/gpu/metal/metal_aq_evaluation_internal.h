@@ -401,6 +401,7 @@ private:
     kEpf,
     kOpsinToLinear,
     kButteraugli,
+    kButteraugliResident,
     kBlockReduction,
     kPolicyUpdate,
   };

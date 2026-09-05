@@ -247,6 +247,21 @@ struct ReductionParams {
   uint32_t input_count;
 };
 
+struct ResidentReductionParams {
+  uint32_t source_width;
+  uint32_t source_height;
+  uint32_t work_stride;
+  uint32_t sub_stride;
+  uint32_t block_stride;
+  uint32_t anchor_offset;
+  uint32_t anchor_count;
+  uint32_t pixel_width;
+  uint32_t pixel_height;
+  uint32_t covered_width;
+  uint32_t covered_height;
+  float x_multiplier;
+};
+
 static_assert(std::is_trivially_copyable_v<PlaneParams>);
 static_assert(sizeof(PlaneParams) == 16);
 static_assert(sizeof(ExpandParams) == 32);
@@ -260,6 +275,9 @@ static_assert(sizeof(MaltaResponseParams) == 32);
 static_assert(sizeof(MaltaFusedParams) == 48);
 static_assert(sizeof(DifferenceParams) == 24);
 static_assert(sizeof(FinalParams) == 20);
+static_assert(std::is_standard_layout_v<ResidentReductionParams>);
+static_assert(std::is_trivially_copyable_v<ResidentReductionParams>);
+static_assert(sizeof(ResidentReductionParams) == 48);
 static_assert(sizeof(CropParams) == 24);
 static_assert(sizeof(ComposeParams) == 20);
 static_assert(sizeof(ReductionParams) == 12);
@@ -601,12 +619,135 @@ public:
       metal_, reference_linear_rgb(), extent(), descriptor);
   }
 
+  [[nodiscard]] Status ValidateResidentEncodingDescriptor(
+    const MetalButteraugliResidentComparisonDescriptor& descriptor) const {
+
+    if (!valid()) {
+      return Status::FailedPrecondition(
+        "Prepared Metal Butteraugli state is invalid");
+    }
+    if (!multiscale_ || expanded_ || capture_stage_.has_value()) {
+      return Status::Unavailable(
+        "Resident Metal Butteraugli sinks require an uncaptured multiscale "
+        "comparison");
+    }
+    Status status = ValidateDeviceImage3View(
+      descriptor.distorted_linear_rgb, metal_.id());
+    if (!status.ok()) return status;
+    if (descriptor.distorted_linear_rgb.plane[0].element_type !=
+          DeviceElementType::kF32 ||
+        descriptor.distorted_linear_rgb.plane[0].extent != extent()) {
+      return Status::InvalidArgument(
+        "Resident Metal Butteraugli image geometry or type is invalid");
+    }
+
+    if (descriptor.batches.size() != 7) {
+      return Status::InvalidArgument(
+        "Resident Metal Butteraugli requires seven strategy batches");
+    }
+    size_t anchor_count = 0;
+    for (const MetalButteraugliResidentBatch& batch : descriptor.batches) {
+      if (batch.anchor_offset != anchor_count ||
+          batch.pixel_width == 0 || batch.pixel_height == 0 ||
+          batch.covered_width == 0 || batch.covered_height == 0 ||
+          batch.pixel_width != 8u * batch.covered_width ||
+          batch.pixel_height != 8u * batch.covered_height ||
+          batch.anchor_count >
+            std::numeric_limits<uint32_t>::max() - batch.anchor_offset) {
+        return Status::InvalidArgument(
+          "Resident Metal Butteraugli batch metadata is invalid");
+      }
+      anchor_count += batch.anchor_count;
+    }
+    if (anchor_count == 0 ||
+        anchor_count > std::numeric_limits<size_t>::max() / 2) {
+      return Status::InvalidArgument(
+        "Resident Metal Butteraugli anchor count is invalid");
+    }
+    const Extent2D block_extent{
+      (extent().width + 7) / 8, (extent().height + 7) / 8};
+    if (descriptor.anchors.element_type != DeviceElementType::kI32 ||
+        descriptor.anchors.extent != Extent2D{2 * anchor_count, 1} ||
+        descriptor.block_distance.element_type != DeviceElementType::kF32 ||
+        descriptor.block_distance.extent != block_extent ||
+        descriptor.score_partials.element_type != DeviceElementType::kF32 ||
+        descriptor.score_partials.extent != Extent2D{anchor_count, 1} ||
+        descriptor.score.element_type != DeviceElementType::kF32 ||
+        descriptor.score.extent != Extent2D{1, 1} ||
+        descriptor.error.element_type != DeviceElementType::kI32 ||
+        descriptor.error.extent != Extent2D{1, 1}) {
+      return Status::InvalidArgument(
+        "Resident Metal Butteraugli sink geometry or type is invalid");
+    }
+
+    DeviceMemoryRange anchors_range;
+    status = ComputeDevicePlaneRange(
+      descriptor.anchors, metal_.id(), &anchors_range);
+    if (!status.ok()) return status;
+    std::array<DeviceMemoryRange, 4> output_ranges;
+    const std::array<DevicePlaneView, 4> outputs{
+      descriptor.block_distance,
+      descriptor.score_partials,
+      descriptor.score,
+      descriptor.error,
+    };
+    for (size_t index = 0; index < outputs.size(); ++index) {
+      status = ComputeDevicePlaneRange(
+        outputs[index], metal_.id(), &output_ranges[index]);
+      if (!status.ok()) return status;
+      if (DeviceRangesOverlap(anchors_range, output_ranges[index])) {
+        return Status::InvalidArgument(
+          "Resident Metal Butteraugli sink overlaps anchor metadata");
+      }
+      for (size_t previous = 0; previous < index; ++previous) {
+        if (DeviceRangesOverlap(
+              output_ranges[previous], output_ranges[index])) {
+          return Status::InvalidArgument(
+            "Resident Metal Butteraugli sinks overlap");
+        }
+      }
+    }
+    const std::array<ConstDeviceImage3View, 2> images{
+      reference_linear_rgb(), descriptor.distorted_linear_rgb};
+    for (ConstDeviceImage3View image : images) {
+      for (ConstDevicePlaneView plane : image.plane) {
+        DeviceMemoryRange input_range;
+        status = ComputeDevicePlaneRange(
+          plane, metal_.id(), &input_range);
+        if (!status.ok()) return status;
+        for (DeviceMemoryRange output_range : output_ranges) {
+          if (DeviceRangesOverlap(input_range, output_range)) {
+            return Status::InvalidArgument(
+              "Resident Metal Butteraugli sink overlaps an input image");
+          }
+        }
+      }
+    }
+    return Status::Ok();
+  }
+
   void EncodeValidatedComparison(
     MTL::ComputeCommandEncoder* encoder,
     const DeviceButteraugliComparisonDescriptor& descriptor) {
 
     capture_ready_ = false;
     EncodeComparison(encoder, descriptor);
+  }
+
+  void EncodeValidatedResidentComparison(
+    MTL::ComputeCommandEncoder* encoder,
+    const MetalButteraugliResidentComparisonDescriptor& descriptor) {
+
+    capture_ready_ = false;
+    EncodeResidentComparison(encoder, descriptor);
+  }
+
+  void EncodeValidatedResidentComparisonProfileStage(
+    MTL::ComputeCommandEncoder* encoder,
+    const MetalButteraugliResidentComparisonDescriptor& descriptor,
+    MetalButteraugliProfileStage stage) {
+
+    EncodeResidentComparisonProfileStage(encoder, descriptor, stage);
   }
 
   void EncodeValidatedComparisonProfileStage(
@@ -1107,7 +1248,8 @@ private:
     ConstDevicePlaneView mask_blurred_reference,
     Extent2D scale_extent,
     DevicePlaneView output,
-    DifferenceProfileStage profile_stage = DifferenceProfileStage::kAll) {
+    DifferenceProfileStage profile_stage = DifferenceProfileStage::kAll,
+    bool emit_final = true) {
 
     const float asymmetry = options().hf_asymmetry;
     const float sqrt_asymmetry = std::sqrt(asymmetry);
@@ -1319,6 +1461,7 @@ private:
         encoder, MetalButteraugliStage::kMaskedAcY, AsConst(ac_y),
         scale_extent);
     }
+    if (!emit_final) return;
 
     const FinalParams final_params{
       static_cast<uint32_t>(scale_extent.width),
@@ -1470,6 +1613,149 @@ private:
       input_count = output_count;
       use_a = !use_a;
     }
+  }
+
+  void EncodeResidentReduction(
+    MTL::ComputeCommandEncoder* encoder,
+    ConstDevicePlaneView sub_map,
+    const MetalButteraugliResidentComparisonDescriptor& descriptor) {
+
+    encoder->setComputePipelineState(
+      metal_.butteraugli_pipelines_.resident_reduction.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      const DevicePlaneView dc = Plane(kDc + channel, extent());
+      const DevicePlaneView ac = Plane(kAc + channel, extent());
+      Bind(encoder, Handle(metal_, dc), dc.offset_bytes, channel);
+      Bind(encoder, Handle(metal_, ac), ac.offset_bytes, 3 + channel);
+    }
+    const DevicePlaneView mask = Plane(kWork + 3, extent());
+    const DevicePlaneView mask_blurred_distorted =
+      Plane(kWork + 4, extent());
+    const DevicePlaneView mask_blurred_reference =
+      Plane(kReferenceMask, extent());
+    Bind(encoder, Handle(metal_, mask), mask.offset_bytes, 6);
+    Bind(encoder, Handle(metal_, mask_blurred_reference),
+         mask_blurred_reference.offset_bytes, 7);
+    Bind(encoder, Handle(metal_, mask_blurred_distorted),
+         mask_blurred_distorted.offset_bytes, 8);
+    Bind(encoder, Handle(metal_, sub_map), sub_map.offset_bytes, 9);
+    Bind(encoder, Handle(metal_, descriptor.anchors),
+         descriptor.anchors.offset_bytes, 10);
+    Bind(encoder, Handle(metal_, descriptor.block_distance),
+         descriptor.block_distance.offset_bytes, 11);
+    Bind(encoder, Handle(metal_, descriptor.score_partials),
+         descriptor.score_partials.offset_bytes, 12);
+    Bind(encoder, Handle(metal_, descriptor.error),
+         descriptor.error.offset_bytes, 13);
+
+    for (const MetalButteraugliResidentBatch& batch : descriptor.batches) {
+      if (batch.anchor_count == 0) continue;
+      const ResidentReductionParams params{
+        static_cast<uint32_t>(extent().width),
+        static_cast<uint32_t>(extent().height),
+        static_cast<uint32_t>(working_extent_.width),
+        static_cast<uint32_t>(sub_map.row_stride),
+        static_cast<uint32_t>(descriptor.block_distance.row_stride),
+        batch.anchor_offset,
+        batch.anchor_count,
+        batch.pixel_width,
+        batch.pixel_height,
+        batch.covered_width,
+        batch.covered_height,
+        options().x_multiplier,
+      };
+      encoder->setBytes(&params, sizeof(params), 14);
+      DispatchMetalThreadgroups(
+        encoder,
+        MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
+        MTL::Size(kReductionWidth, 1, 1));
+    }
+    EncodeMaximumReduction(
+      encoder, descriptor.score_partials, descriptor.score);
+  }
+
+  void EncodeResidentComparison(
+    MTL::ComputeCommandEncoder* encoder,
+    const MetalButteraugliResidentComparisonDescriptor& descriptor) {
+
+    const Extent2D requested = extent();
+    const PsychoPlanes reference_main =
+      PsychoSlots(kPsychoReference, working_extent_);
+    const PsychoPlanes distorted =
+      PsychoSlots(kPsychoDistorted, working_extent_);
+
+    // Produce the quarter-area map first. The main-scale psycho and difference
+    // preparation then reuse all ordinary working planes while kFinalStaging
+    // keeps this subscale result live for the resident reducer.
+    EncodeSubsample(
+      encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+    EncodePsychoImage(
+      encoder, PsychoInputSlots(sub_extent_), distorted, sub_extent_, false);
+    const DevicePlaneView sub_map = Plane(kFinalStaging, sub_extent_);
+    EncodeDifference(
+      encoder, ReferenceSubSlots(), distorted, {}, sub_extent_, sub_map);
+
+    EncodePsychoImage(
+      encoder, descriptor.distorted_linear_rgb, distorted, requested, false);
+    EncodeDifference(
+      encoder, reference_main, distorted,
+      AsConst(Plane(kReferenceMask, requested)), requested, {},
+      DifferenceProfileStage::kAll, false);
+    EncodeResidentReduction(encoder, AsConst(sub_map), descriptor);
+  }
+
+  void EncodeResidentComparisonProfileStage(
+    MTL::ComputeCommandEncoder* encoder,
+    const MetalButteraugliResidentComparisonDescriptor& descriptor,
+    MetalButteraugliProfileStage stage) {
+
+    const Extent2D requested = extent();
+    const PsychoPlanes reference_main =
+      PsychoSlots(kPsychoReference, working_extent_);
+    const PsychoPlanes distorted =
+      PsychoSlots(kPsychoDistorted, working_extent_);
+    if (stage == MetalButteraugliProfileStage::kDistortedPsychoSub) {
+      EncodeSubsample(
+        encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+      EncodePsychoImage(
+        encoder, PsychoInputSlots(sub_extent_), distorted, sub_extent_, false);
+      return;
+    }
+    if (stage == MetalButteraugliProfileStage::kDistortedPsychoMain) {
+      EncodePsychoImage(
+        encoder, descriptor.distorted_linear_rgb, distorted, requested,
+        false);
+      return;
+    }
+    if (stage == MetalButteraugliProfileStage::kResidentReduction) {
+      EncodeResidentReduction(
+        encoder, AsConst(Plane(kFinalStaging, sub_extent_)), descriptor);
+      return;
+    }
+
+    const bool sub_stage =
+      stage == MetalButteraugliProfileStage::kMaltaSub ||
+      stage == MetalButteraugliProfileStage::kL2Sub ||
+      stage == MetalButteraugliProfileStage::kMaskAndFinalSub;
+    const DifferenceProfileStage difference_stage =
+      stage == MetalButteraugliProfileStage::kMaltaMain ||
+          stage == MetalButteraugliProfileStage::kMaltaSub
+        ? DifferenceProfileStage::kMalta
+        : stage == MetalButteraugliProfileStage::kL2Main ||
+              stage == MetalButteraugliProfileStage::kL2Sub
+          ? DifferenceProfileStage::kL2
+          : DifferenceProfileStage::kMaskAndFinal;
+    if (sub_stage) {
+      EncodeDifference(
+        encoder, ReferenceSubSlots(), distorted, {}, sub_extent_,
+        Plane(kFinalStaging, sub_extent_), difference_stage);
+      return;
+    }
+    EncodeDifference(
+      encoder, reference_main, distorted,
+      AsConst(Plane(kReferenceMask, requested)), requested, {},
+      difference_stage,
+      stage != MetalButteraugliProfileStage::kMaskAndFinalMain);
   }
 
   [[nodiscard]] bool NeedsReferencePsychoCapture() const noexcept {
@@ -1745,6 +2031,18 @@ Status ValidatePreparedMetalButteraugliEncoding(
   return metal->ValidateEncodingDescriptor(descriptor);
 }
 
+Status ValidatePreparedMetalButteraugliResidentEncoding(
+  PreparedDeviceButteraugli& prepared,
+  const MetalButteraugliResidentComparisonDescriptor& descriptor) {
+
+  auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
+  if (metal == nullptr) {
+    return Status::InvalidArgument(
+      "Prepared Butteraugli state is not a Metal implementation");
+  }
+  return metal->ValidateResidentEncodingDescriptor(descriptor);
+}
+
 void EncodePreparedMetalButteraugli(
   PreparedDeviceButteraugli& prepared,
   MTL::ComputeCommandEncoder* encoder,
@@ -1753,6 +2051,30 @@ void EncodePreparedMetalButteraugli(
   auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
   if (metal != nullptr && encoder != nullptr) {
     metal->EncodeValidatedComparison(encoder, descriptor);
+  }
+}
+
+void EncodePreparedMetalButteraugliResident(
+  PreparedDeviceButteraugli& prepared,
+  MTL::ComputeCommandEncoder* encoder,
+  const MetalButteraugliResidentComparisonDescriptor& descriptor) {
+
+  auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
+  if (metal != nullptr && encoder != nullptr) {
+    metal->EncodeValidatedResidentComparison(encoder, descriptor);
+  }
+}
+
+void EncodePreparedMetalButteraugliResidentProfileStage(
+  PreparedDeviceButteraugli& prepared,
+  MTL::ComputeCommandEncoder* encoder,
+  const MetalButteraugliResidentComparisonDescriptor& descriptor,
+  MetalButteraugliProfileStage stage) {
+
+  auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
+  if (metal != nullptr && encoder != nullptr) {
+    metal->EncodeValidatedResidentComparisonProfileStage(
+      encoder, descriptor, stage);
   }
 }
 
@@ -1780,7 +2102,7 @@ Status CreateButteraugliPipelines(
   ButteraugliPipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 23> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 24> bindings{{
     {"gjxl_butteraugli_copy_f32", &pipelines.copy},
     {"gjxl_butteraugli_expand_f32", &pipelines.expand},
     {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
@@ -1807,6 +2129,8 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_final_masked_ac_f32", &pipelines.final_masked_ac},
     {"gjxl_butteraugli_crop_f32", &pipelines.crop},
     {"gjxl_butteraugli_compose_f32", &pipelines.compose},
+    {"gjxl_butteraugli_resident_reduce_f32",
+     &pipelines.resident_reduction},
     {"gjxl_butteraugli_reduce_max_f32", &pipelines.maximum_reduction},
   }};
   for (const auto& [name, pipeline] : bindings) {
@@ -1831,6 +2155,11 @@ Status CreateButteraugliPipelines(
       kReductionWidth) {
     return Status::Unavailable(
       "Metal cannot launch the Butteraugli reduction threadgroup");
+  }
+  if (pipelines.resident_reduction->maxTotalThreadsPerThreadgroup() <
+      kReductionWidth) {
+    return Status::Unavailable(
+      "Metal cannot launch the resident Butteraugli reduction threadgroup");
   }
   if (pipelines.opsin_blur5_tiled->maxTotalThreadsPerThreadgroup() <
       kOpsinBlur5TileWidth * kOpsinBlur5TileHeight) {

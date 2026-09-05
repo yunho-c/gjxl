@@ -1102,6 +1102,89 @@ After the perceptual kernels stabilize:
 
 The public complete-map path remains the correctness oracle during this phase.
 
+#### Phase 4 result: resident final metric and reductions (2026-09-04)
+
+The retained implementation adds one Metal-internal resident comparison
+descriptor with exactly the outputs consumed by the encoder: strategy anchors,
+block distances, scalar-score partials, the scalar score, and the shared
+numeric-error word. The public `DeviceButteraugliComparisonDescriptor` and its
+complete distance map are unchanged.
+
+For a multiscale resident comparison, distorted subscale processing now runs
+first and retains its quarter-area final map in the existing final-staging
+plane. Main-scale processing then reuses the ordinary psycho scratch but stops
+before storing the final full-resolution metric. Seven family-specialized
+anchor dispatches evaluate that final expression, compose the subscale value,
+accumulate the established `distance^16` transform norm, fill the covered
+block distances, and emit one scalar maximum per anchor. The existing maximum
+reducer scans only those anchor partials. Small and single-scale comparisons
+continue to use the complete-map path.
+
+This removes, per comparison:
+
+- the full-resolution final-metric store;
+- the separate full-resolution compose pass;
+- the full-resolution first maximum-reduction pass; and
+- the later full-resolution reread by the AQ block reducer.
+
+The profiled path follows the same resident graph and exposes a single
+`butteraugli.resident_reduction` stage, while the public map and capture APIs
+remain the materialized correctness oracle. At padded 4K, five stage samples
+measured the affected final/reduction region as follows. The control sum is
+main mask/final, sub mask/final plus compose, scalar reduction, and block
+reduction; the resident sum is sub mask/final, main mask preparation, and the
+resident reduction.
+
+| Scope | Complete-map median | Resident-sink median | Change |
+| --- | ---: | ---: | ---: |
+| affected final/reduction region | `14.300 ms` | `11.124 ms` | `-3.176 ms` (`-22.2%`) |
+| resident-AQ command-buffer GPU time | `103.950 ms` | `100.712 ms` | `-3.238 ms` (`-3.12%`) |
+| resident-AQ dispatches, two evaluations | `292` | `286` | `-6` |
+
+Seven alternating independent-process public-workflow pairs, each with two
+discarded warmups, confirmed that the GPU-stage gain survives the complete
+encoder boundary:
+
+| Workload | Complete-map median | Resident-sink median | Change | Resident wins |
+| --- | ---: | ---: | ---: | ---: |
+| padded 1080p, complete encode | `82.852 ms` | `81.597 ms` | `-1.255 ms` (`-1.51%`) | 6/7 |
+| padded 1080p, quantization | `64.000 ms` | `63.165 ms` | `-0.835 ms` (`-1.30%`) | 6/7 |
+| padded 4K, complete encode | `297.625 ms` | `292.323 ms` | `-5.302 ms` (`-1.78%`) | 6/7 |
+| padded 4K, quantization | `252.135 ms` | `246.809 ms` | `-5.326 ms` (`-2.11%`) | 5/7 |
+
+All compared codestream sizes were identical. The focused Metal AQ test also
+compared the resident policy with its serial complete-map oracle, including
+profiled and unprofiled execution. Its maximum block-distance discrepancy was
+`2.38419e-07`, versus the existing `5e-4` gate; score, quantization, failure
+injection, and readback-contract checks passed without changing tolerances.
+
+A second implementation dispatched every anchor through one metadata-driven
+kernel. It removed six family dispatches per comparison, but every threadgroup
+had to find its batch and dynamically index five geometry arrays. In the first
+seven-pair padded-4K run it regressed quantization by `1.70%` and complete
+encoding by `0.91%`, losing 5/7 pairs at both boundaries. A repeat was noisier:
+quantization still regressed by `0.29%` and lost 4/7, while complete encoding
+was statistically neutral (`-0.17%`, 4/7 wins). Across both runs, the unified
+variant's quantization median was `0.77%` slower and the complete boundary was
+flat. It was removed along with its private selector and pipeline. The retained
+family form has uniform compile-time-like geometry within each dispatch and is
+the less divergent implementation.
+
+The first Phase 4 slice deliberately reuses the prefix of the already
+allocated full-resolution distance-map plane for score partials. Phase 5 can
+replace that allocation with an anchor-sized plane once every non-diagnostic
+caller has moved to the sink path; doing so is a memory consolidation, not
+part of the measured compute win above.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-resident-wall.I3IvRD` (complete-workflow and
+  repeated metadata-dispatch comparisons);
+- `/private/tmp/gjxl-metal-fusion-resident-control-stage.json` (complete-map
+  stage profile); and
+- `/private/tmp/gjxl-metal-fusion-resident-stage.json` (resident-sink stage
+  profile).
+
 ### Phase 5: consolidate
 
 1. Remove the private baseline/fused build selector.

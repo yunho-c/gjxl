@@ -150,6 +150,21 @@ struct ReductionParams {
   uint input_count;
 };
 
+struct ResidentReductionParams {
+  uint source_width;
+  uint source_height;
+  uint work_stride;
+  uint sub_stride;
+  uint block_stride;
+  uint anchor_offset;
+  uint anchor_count;
+  uint pixel_width;
+  uint pixel_height;
+  uint covered_width;
+  uint covered_height;
+  float x_multiplier;
+};
+
 inline float unfused_multiply_add(float multiplier, float value, float addend) {
   const float product = multiplier * value;
   return product + addend;
@@ -1170,6 +1185,108 @@ kernel void gjxl_butteraugli_compose_f32(
   const float sub_value = sub_map[(position.y / 2) * params.sub_stride + position.x / 2];
   output[position.y * params.output_stride + position.x] =
     main_value * 0.85f + 0.5f * sub_value;
+}
+
+kernel void gjxl_butteraugli_resident_reduce_f32(
+  device const float* dc0 [[buffer(0)]], device const float* dc1 [[buffer(1)]],
+  device const float* dc2 [[buffer(2)]], device const float* ac0 [[buffer(3)]],
+  device const float* ac1 [[buffer(4)]], device const float* ac2 [[buffer(5)]],
+  device const float* mask [[buffer(6)]],
+  device const float* mask_blurred_reference [[buffer(7)]],
+  device const float* mask_blurred_distorted [[buffer(8)]],
+  device const float* sub_map [[buffer(9)]],
+  device const uint2* anchors [[buffer(10)]],
+  device float* block_distance [[buffer(11)]],
+  device float* score_partials [[buffer(12)]],
+  device atomic_uint* error [[buffer(13)]],
+  constant ResidentReductionParams& params [[buffer(14)]],
+  uint anchor_index [[threadgroup_position_in_grid]],
+  uint thread_index [[thread_index_in_threadgroup]]) {
+
+  threadgroup float partial_sum[256];
+  threadgroup float partial_maximum[256];
+  if (anchor_index >= params.anchor_count) return;
+
+  const uint partial_index = params.anchor_offset + anchor_index;
+  const uint2 anchor = anchors[partial_index];
+  const uint x_begin = anchor.x * 8u;
+  const uint y_begin = anchor.y * 8u;
+  if (x_begin >= params.source_width || y_begin >= params.source_height) {
+    if (thread_index == 0u) {
+      atomic_fetch_or_explicit(error, 64u, memory_order_relaxed);
+      score_partials[partial_index] = 0.0f;
+    }
+    return;
+  }
+  const uint valid_width =
+    min(params.pixel_width, params.source_width - x_begin);
+  const uint valid_height =
+    min(params.pixel_height, params.source_height - y_begin);
+  const uint pixel_count = valid_width * valid_height;
+
+  float sum = 0.0f;
+  float maximum = -INFINITY;
+  for (uint local_index = thread_index; local_index < pixel_count;
+       local_index += 256u) {
+    const uint x = x_begin + local_index % valid_width;
+    const uint y = y_begin + local_index / valid_width;
+    const uint index = y * params.work_stride + x;
+    const float difference =
+      mask_blurred_reference[index] - mask_blurred_distorted[index];
+    const float masked_ac_y =
+      ac1[index] + 10.0f * difference * difference;
+    const float mask_value = mask_y(mask[index]);
+    const float dc_mask_value = mask_dc_y(mask[index]);
+    const float masked_dc =
+      dc0[index] * params.x_multiplier * dc_mask_value +
+      dc1[index] * dc_mask_value + dc2[index] * dc_mask_value;
+    const float masked_ac =
+      ac0[index] * params.x_multiplier * mask_value +
+      masked_ac_y * mask_value + ac2[index] * mask_value;
+    const float main_value = sqrt(masked_dc + masked_ac);
+    const float sub_value =
+      sub_map[(y / 2u) * params.sub_stride + x / 2u];
+    float value = main_value * 0.85f + 0.5f * sub_value;
+    if (!isfinite(value) || value < 0.0f) {
+      atomic_fetch_or_explicit(error, 128u, memory_order_relaxed);
+      value = 0.0f;
+    }
+    maximum = max(maximum, value);
+    value *= value;
+    value *= value;
+    value *= value;
+    value *= value;
+    sum += value;
+  }
+  partial_sum[thread_index] = sum;
+  partial_maximum[thread_index] = maximum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint width = 128u; width != 0u; width >>= 1u) {
+    if (thread_index < width) {
+      partial_sum[thread_index] += partial_sum[thread_index + width];
+      partial_maximum[thread_index] = max(
+        partial_maximum[thread_index], partial_maximum[thread_index + width]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  if (thread_index == 0u) {
+    const float mean = partial_sum[0] / float(pixel_count);
+    const float reduced = 1.2f * pow(mean, 1.0f / 16.0f);
+    if (!isfinite(reduced) || reduced < 0.0f) {
+      atomic_fetch_or_explicit(error, 256u, memory_order_relaxed);
+      score_partials[partial_index] = 0.0f;
+      return;
+    }
+    for (uint dy = 0u; dy < params.covered_height; ++dy) {
+      for (uint dx = 0u; dx < params.covered_width; ++dx) {
+        block_distance[
+          (anchor.y + dy) * params.block_stride + anchor.x + dx] = reduced;
+      }
+    }
+    score_partials[partial_index] = partial_maximum[0];
+  }
 }
 
 kernel void gjxl_butteraugli_reduce_max_f32(
