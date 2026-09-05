@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -12,6 +13,34 @@
 namespace gjxl::codestream_internal {
 
 struct EntropyWorkProfile;
+
+/// Converts a value after the caller has established config.valid(). The
+/// value itself is unrestricted: every uint32_t has a HybridUint encoding.
+[[nodiscard]] constexpr HybridUintToken EncodeHybridUintValidated(
+  uint32_t value, HybridUintConfig config) noexcept {
+  HybridUintToken result;
+  const uint32_t split_token = uint32_t{1} << config.split_exponent;
+  if (value < split_token) {
+    result.symbol = value;
+  } else {
+    const uint32_t exponent =
+      31u - static_cast<uint32_t>(std::countl_zero(value));
+    const uint32_t mantissa = value - (uint32_t{1} << exponent);
+    result.symbol = split_token +
+      ((exponent - config.split_exponent) <<
+       (config.msb_in_token + config.lsb_in_token)) +
+      ((mantissa >> (exponent - config.msb_in_token)) <<
+       config.lsb_in_token) +
+      (mantissa & ((uint32_t{1} << config.lsb_in_token) - 1));
+    result.extra_bit_count = static_cast<uint8_t>(
+      exponent - config.msb_in_token - config.lsb_in_token);
+    const uint64_t mask =
+      (uint64_t{1} << result.extra_bit_count) - 1;
+    result.extra_bits = static_cast<uint32_t>(
+      (value >> config.lsb_in_token) & mask);
+  }
+  return result;
+}
 
 struct WeightedValue {
   uint32_t value = 0;

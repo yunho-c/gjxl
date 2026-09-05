@@ -1545,8 +1545,10 @@ Status PrepareDirectAnsPartition(
   return Status::Ok();
 }
 
+// nullptr denotes success; failures return a static message. Materialize a
+// public Status only on failure, not once per token in the ANS recurrence.
 template <typename EmitChunk>
-Status AdvanceAnsState(
+const char* AdvanceAnsState(
   const HybridUintToken& encoded,
   const AnsHistogram& histogram,
   EmitChunk&& emit_chunk,
@@ -1556,7 +1558,7 @@ Status AdvanceAnsState(
       encoded.symbol >= histogram.reciprocal_frequencies.size() ||
       histogram.frequencies[encoded.symbol] == 0 ||
       histogram.reciprocal_frequencies[encoded.symbol] == 0) {
-    return Status::InvalidArgument("ANS token symbol is absent");
+    return "ANS token symbol is absent";
   }
   if (encoded.extra_bit_count != 0) {
     emit_chunk(encoded.extra_bits, encoded.extra_bit_count);
@@ -1576,10 +1578,10 @@ Status AdvanceAnsState(
   const std::vector<uint16_t>& reverse =
     histogram.reverse_maps[encoded.symbol];
   if (remainder >= reverse.size() || reverse[remainder] >= kAnsTableSize) {
-    return Status::InvalidArgument("ANS reverse-map entry is invalid");
+    return "ANS reverse-map entry is invalid";
   }
   *state = (quotient << kAnsLogTableSize) + reverse[remainder];
-  return Status::Ok();
+  return nullptr;
 }
 
 template <typename EmitChunk>
@@ -1589,6 +1591,14 @@ Status ProcessAnsTokenStream(
   EmitChunk&& emit_chunk,
   uint32_t* final_state) {
 
+  // Configurations are immutable for the entire stream. Validate each once
+  // so the per-token conversion can inline without constructing a Status or
+  // repeating the same checks for every coefficient value.
+  for (const HybridUintConfig config : code.uint_configs) {
+    if (!config.valid()) {
+      return Status::InvalidArgument("Invalid HybridUint configuration");
+    }
+  }
   uint32_t state = kAnsSignature << 16;
   for (size_t index = tokens.size(); index != 0; --index) {
     const EntropyToken token = tokens[index - 1];
@@ -1596,16 +1606,13 @@ Status ProcessAnsTokenStream(
       return Status::InvalidArgument("ANS token context is out of range");
     }
     const size_t cluster = code.context_map[token.context];
-    HybridUintToken encoded;
-    if (Status status = EncodeHybridUint(
-          token.value, code.uint_configs[cluster], &encoded);
-        !status.ok()) {
-      return status;
-    }
-    if (Status status = AdvanceAnsState(
+    const HybridUintToken encoded =
+      codestream_internal::EncodeHybridUintValidated(
+        token.value, code.uint_configs[cluster]);
+    if (const char* error = AdvanceAnsState(
           encoded, code.ans_histograms[cluster], emit_chunk, &state);
-        !status.ok()) {
-      return status;
+        error != nullptr) {
+      return Status::InvalidArgument(error);
     }
   }
   *final_state = state;
@@ -1777,11 +1784,11 @@ Status MeasureAnsCodes(
                                    uint32_t, uint8_t chunk_bits) {
           section_bits[candidate] += chunk_bits;
         };
-        if (Status status = AdvanceAnsState(
+        if (const char* error = AdvanceAnsState(
               encoded, codes[candidate]->ans_histograms[cluster],
               count_chunk, &states[candidate]);
-            !status.ok()) {
-          return status;
+            error != nullptr) {
+          return Status::InvalidArgument(error);
         }
       }
     }
@@ -2696,11 +2703,11 @@ Status codestream_internal::MeasurePreparedAnsEntropyCodeSection(
                                    uint32_t, uint8_t chunk_bits) {
           group.bits[lane] += chunk_bits;
         };
-        if (Status status = AdvanceAnsState(
+        if (const char* error = AdvanceAnsState(
               encoded, candidate.ans_histograms[cluster], count_chunk,
               &group.states[lane]);
-            !status.ok()) {
-          return status;
+            error != nullptr) {
+          return Status::InvalidArgument(error);
         }
       }
     }

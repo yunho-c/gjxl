@@ -594,6 +594,90 @@ bool CheckInitialContextPreclustering() {
   return true;
 }
 
+bool CheckValidatedHybridUintEncoding() {
+  using gjxl::codestream_internal::EncodeHybridUintValidated;
+  static_assert(EncodeHybridUintValidated(0, {4, 2, 0}) ==
+                gjxl::HybridUintToken{0, 0, 0});
+  static_assert(EncodeHybridUintValidated(65535, {4, 2, 0}) ==
+                gjxl::HybridUintToken{63, 13, 8191});
+  static_assert(EncodeHybridUintValidated(0xFFFFFFFFu, {4, 2, 0}) ==
+                gjxl::HybridUintToken{127, 29, 0x1FFFFFFFu});
+  size_t configurations = 0;
+  size_t values_checked = 0;
+  uint32_t random = 0x7f4a7c15u;
+  for (uint8_t split = 0; split <= 16; ++split) {
+    for (uint8_t msb = 0; msb <= 16; ++msb) {
+      for (uint8_t lsb = 0; lsb <= 16; ++lsb) {
+        const gjxl::HybridUintConfig config{split, msb, lsb};
+        if (!config.valid()) {
+          const gjxl::HybridUintToken sentinel{7, 3, 5};
+          gjxl::HybridUintToken output = sentinel;
+          if (gjxl::EncodeHybridUint(0xFFFFFFFFu, config, &output).code() !=
+                gjxl::StatusCode::kInvalidArgument || output != sentinel) {
+            std::cerr << "Invalid HybridUint configuration changed its output\n";
+            return false;
+          }
+          continue;
+        }
+        ++configurations;
+        const auto verify = [&](uint32_t value) {
+          const auto encoded = EncodeHybridUintValidated(value, config);
+          gjxl::HybridUintToken checked;
+          if (!gjxl::EncodeHybridUint(value, config, &checked).ok() ||
+              encoded != checked) return false;
+          const uint32_t split_token = uint32_t{1} << split;
+          if (encoded.symbol < split_token) {
+            if (encoded.symbol != value || encoded.extra_bit_count != 0 ||
+                encoded.extra_bits != 0) return false;
+          } else {
+            // Independently invert the format's exponent, high/low mantissa,
+            // and extra-bit fields instead of repeating the encoder formula.
+            const uint32_t packed = encoded.symbol - split_token;
+            const uint32_t exponent = (packed >> (msb + lsb)) + split;
+            if (exponent > 31 ||
+                encoded.extra_bit_count != exponent - msb - lsb ||
+                encoded.extra_bits >= (uint64_t{1} << encoded.extra_bit_count))
+              return false;
+            const uint64_t low = packed & ((uint64_t{1} << lsb) - 1);
+            const uint64_t high =
+              (packed >> lsb) & ((uint64_t{1} << msb) - 1);
+            const uint64_t reconstructed = (uint64_t{1} << exponent) |
+              (high << (exponent - msb)) |
+              (uint64_t{encoded.extra_bits} << lsb) | low;
+            if (reconstructed != value) return false;
+          }
+          ++values_checked;
+          return true;
+        };
+        for (uint32_t value = 0; value < 256; ++value) {
+          if (!verify(value)) return false;
+        }
+        for (uint32_t exponent = 0; exponent < 32; ++exponent) {
+          for (int32_t delta = -2; delta <= 2; ++delta) {
+            const int64_t value = (int64_t{1} << exponent) + delta;
+            if (value >= 0 && value <= 0xFFFFFFFFll &&
+                !verify(static_cast<uint32_t>(value))) return false;
+          }
+        }
+        for (size_t sample = 0; sample < 128; ++sample) {
+          random ^= random << 13;
+          random ^= random >> 17;
+          random ^= random << 5;
+          if (!verify(random)) return false;
+        }
+        if (!verify(0xFFFFFFFFu)) return false;
+      }
+    }
+  }
+  if (configurations != 816 || values_checked != 443904) {
+    std::cerr << "HybridUint configuration/value coverage is incomplete\n";
+    return false;
+  }
+  std::cout << "Verified " << configurations << " HybridUint configurations and "
+            << values_checked << " value encodings.\n";
+  return true;
+}
+
 bool CheckAnsFrequencyReciprocalDivision() {
   if (gjxl::codestream_internal::AnsFrequencyReciprocal(0) != 0) {
     std::cerr << "Absent ANS symbol has a nonzero reciprocal\n";
@@ -668,6 +752,41 @@ bool CheckAnsFrequencyReciprocalDivision() {
   return true;
 }
 
+bool WriteReferenceAnsTokens(
+  std::span<const gjxl::EntropyToken> tokens,
+  const gjxl::EntropyCode& code,
+  gjxl::BitWriter* writer) {
+  // Independent recurrence: ordinary division/modulo, not the encoder's
+  // reciprocal helper. Retain the format's extra-bit/renormalization order.
+  struct Chunk { uint32_t bits; uint8_t count; };
+  std::vector<Chunk> chunks;
+  uint32_t state = 0x13u << 16;
+  for (size_t index = tokens.size(); index != 0; --index) {
+    const auto token = tokens[index - 1];
+    const size_t cluster = code.context_map[token.context];
+    gjxl::HybridUintToken encoded;
+    if (!gjxl::EncodeHybridUint(
+          token.value, code.uint_configs[cluster], &encoded).ok()) return false;
+    const auto& histogram = code.ans_histograms[cluster];
+    const uint32_t frequency = histogram.frequencies[encoded.symbol];
+    if (frequency == 0) return false;
+    if (encoded.extra_bit_count != 0) {
+      chunks.push_back({encoded.extra_bits, encoded.extra_bit_count});
+    }
+    if (uint64_t{state} >= uint64_t{frequency} * (uint64_t{1} << 20)) {
+      chunks.push_back({state & 65535u, 16});
+      state /= 65536u;
+    }
+    state = (state / frequency) * 4096u +
+      histogram.reverse_maps[encoded.symbol][state % frequency];
+  }
+  if (!writer->WriteBits(32, state).ok()) return false;
+  for (auto it = chunks.rbegin(); it != chunks.rend(); ++it) {
+    if (!writer->WriteBits(it->count, it->bits).ok()) return false;
+  }
+  return true;
+}
+
 bool CheckAnsRoundTripContract() {
   std::array<std::vector<gjxl::EntropyToken>, 4> sections;
   for (uint32_t context = 0; context < 4; ++context) {
@@ -709,8 +828,27 @@ bool CheckAnsRoundTripContract() {
   for (const std::vector<gjxl::EntropyToken>& section : sections) {
     gjxl::BitWriter payload;
     gjxl::BitWriter repeat_payload;
+    gjxl::BitWriter reference;
+    gjxl::BitWriter split_payload;
+    std::vector<uint32_t> values;
+    std::vector<uint16_t> contexts;
+    for (const auto token : section) {
+      values.push_back(token.value);
+      contexts.push_back(static_cast<uint16_t>(token.context));
+    }
+    const auto split = gjxl::EntropyTokenStreamView::Split(values, contexts);
+    uint64_t split_bits = 0;
     if (!gjxl::WriteTokenStream(section, ans, &payload).ok() ||
         !gjxl::WriteTokenStream(section, ans, &repeat_payload).ok() ||
+        !gjxl::WriteTokenStream(split, ans, &split_payload).ok() ||
+        !gjxl::codestream_internal::CountTokenStreamBits(
+          split, ans, &split_bits).ok() ||
+        !WriteReferenceAnsTokens(section, ans, &reference) ||
+        payload.bits_written() != reference.bits_written() ||
+        payload.bits_written() != split_bits ||
+        payload.bits_written() != split_payload.bits_written() ||
+        !std::ranges::equal(payload.padded_bytes(), reference.padded_bytes()) ||
+        !std::ranges::equal(payload.padded_bytes(), split_payload.padded_bytes()) ||
         payload.bits_written() != repeat_payload.bits_written() ||
         !std::ranges::equal(
           payload.padded_bytes(), repeat_payload.padded_bytes()) ||
@@ -782,6 +920,39 @@ bool CheckAnsRoundTripContract() {
   if (!rejects_reciprocals(false) || !rejects_reciprocals(true)) {
     std::cerr << "Malformed ANS reciprocal changed its destination\n";
     return false;
+  }
+  for (size_t fault = 0; fault < 3; ++fault) {
+    auto invalid_tokens = sections[1];
+    auto invalid_code = ans;
+    if (fault == 0) {
+      invalid_tokens.front().context = ans.context_count;
+    } else if (fault == 1) {
+      invalid_tokens.front().value = UINT32_MAX;
+      const size_t cluster = ans.context_map[invalid_tokens.front().context];
+      gjxl::HybridUintToken encoded;
+      if (!gjxl::EncodeHybridUint(
+            UINT32_MAX, ans.uint_configs[cluster], &encoded).ok() ||
+          (encoded.symbol < ans.ans_histograms[cluster].frequencies.size() &&
+           ans.ans_histograms[cluster].frequencies[encoded.symbol] != 0)) {
+        std::cerr << "ANS absent-symbol fixture is not absent\n";
+        return false;
+      }
+    } else {
+      invalid_code.uint_configs.front().split_exponent = 16;
+    }
+    gjxl::BitWriter destination;
+    uint64_t bit_count = 123;
+    if (!destination.WriteBits(3, 5).ok() ||
+        gjxl::WriteTokenStream(invalid_tokens, invalid_code, &destination).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+        gjxl::codestream_internal::CountTokenStreamBits(
+          invalid_tokens, invalid_code, &bit_count).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+        destination.bits_written() != 3 || bit_count != 123 ||
+        !HasBytes(destination, std::array<uint8_t, 1>{5})) {
+      std::cerr << "Invalid ANS token/configuration changed its destination\n";
+      return false;
+    }
   }
   return true;
 }
@@ -1543,6 +1714,7 @@ int main() {
   }
   if (!CheckMutableValueAggregation() ||
       !CheckHybridUintBoundaries() ||
+      !CheckValidatedHybridUintEncoding() ||
       !CheckDeterministicHuffmanScratch() ||
       !CheckUintConfigSerialization() ||
       !CheckDegeneratePrefixPayload() ||

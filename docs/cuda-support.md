@@ -641,6 +641,16 @@ fully instrumented host ASan build cover the change. See the
 [S41 study](cuda-optimization-s1.md#branch-free-coefficient-order-zero-counting-s41)
 for isolated and complete-workflow results, including mixed cold timings.
 
+ANS token emission now inlines HybridUint conversion after validating each
+immutable configuration once per stream. Its private state recurrence uses
+a lightweight success return, constructing public status messages only on
+failure. All guards, arithmetic, model policy, and emitted bytes are retained.
+Backend-independent conversion/recurrence fixtures, host ASan, and the full
+decoded-image matrix cover the change. The
+[S42 study](cuda-optimization-s1.md#lightweight-ans-token-emission-s42)
+records the section-writing gain and the smaller, variable whole-workflow
+results. CUDA kernels and system settings are unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

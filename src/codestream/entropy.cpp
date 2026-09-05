@@ -1676,28 +1676,7 @@ Status EncodeHybridUint(
     return Status::InvalidArgument("Invalid HybridUint configuration");
   }
 
-  HybridUintToken result;
-  const uint32_t split_token = uint32_t{1} << config.split_exponent;
-  if (value < split_token) {
-    result.symbol = value;
-  } else {
-    const uint32_t exponent =
-      31u - static_cast<uint32_t>(std::countl_zero(value));
-    const uint32_t mantissa = value - (uint32_t{1} << exponent);
-    result.symbol = split_token +
-      ((exponent - config.split_exponent) <<
-       (config.msb_in_token + config.lsb_in_token)) +
-      ((mantissa >> (exponent - config.msb_in_token)) <<
-       config.lsb_in_token) +
-      (mantissa & ((uint32_t{1} << config.lsb_in_token) - 1));
-    result.extra_bit_count = static_cast<uint8_t>(
-      exponent - config.msb_in_token - config.lsb_in_token);
-    const uint64_t mask =
-      (uint64_t{1} << result.extra_bit_count) - 1;
-    result.extra_bits = static_cast<uint32_t>(
-      (value >> config.lsb_in_token) & mask);
-  }
-  *token = result;
+  *token = codestream_internal::EncodeHybridUintValidated(value, config);
   return Status::Ok();
 }
 

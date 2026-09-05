@@ -10,7 +10,7 @@
   value access, fused resident coefficient passes, and encoding-only
   coefficient materialization, shape-specialized coefficient blocks, and
   fused blur/frequency splitting, and branch-free host coefficient-order
-  counting implemented;
+  counting and lightweight ANS token emission implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -23,7 +23,19 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `8f832d1` removes
+below supersede them. The latest checkpoint against `2260047` inlines
+validated HybridUint conversion and removes string-owning success results
+from the private ANS recurrence. Section-writing wall time improves by
+median paired 42.0% / 34.3% / 16.0% at 4K / 1080p / Flower. Warm
+whole-encode changes are -3.3% / -4.4% / -2.6%; cold paired medians also
+favor the change, but individual runs and some unchanged phases regress.
+All 63 CUDA / 48 CPU tests, fully instrumented host ASan checks, batch
+checks, and 46 byte-identical decoded image pairs pass. Entropy policy,
+arithmetic, failure contracts, and bytes are preserved. No CUDA source or
+system setting changes; thermal/power limiting remains a measurement
+caveat. Optimization remains ongoing, not maxed out.
+
+The preceding checkpoint against `8f832d1` removes
 per-coefficient branches and repeated pointer loads from host scan-order
 zero counting without changing sampling, entropy policy, or bytes. Order
 work improves by median paired 50.3% / 47.8% / 31.4% at 4K / 1080p / Flower;
@@ -5485,6 +5497,236 @@ histogram/model construction, and token emission remain substantial, along
 with GPU perceptual work. The section writer's per-chunk bit preparation and
 bytewise append are concrete next inspection targets; they require their
 own measurements and atomicity/byte-equivalence tests before any change.
+
+## Lightweight ANS token emission (S42)
+
+Date: 2026-09-05. Baseline: `2260047` (S41).
+
+### Bottleneck and scope
+
+After the scan-order improvement, section writing remains a substantial
+shared-host cost in the fully resident workflow. A diagnostic copy of the
+S41 serializer times model validation, reverse-chunk reservation, ANS token
+processing, bit packing, and append separately. Timers surround each stream
+stage, not each token; atomic totals are accumulated once per stage and
+printed after encoding. These are aggregate worker durations over three
+warmups plus five samples, **not** stage wall medians:
+
+| Input / CPU workers | Model validation ms | Reserve ms | ANS processing ms | Bit packing ms | Append ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Odd padded 4K / auto | 234.620 | 7.765 | 2,096.835 | 149.969 | 44.376 |
+| Odd padded 1080p / auto | 42.280 | 5.577 | 389.438 | 24.338 | 8.378 |
+| Flower / auto | 4.311 | 0.292 | 28.850 | 4.387 | 0.855 |
+| Odd padded 4K / one | 129.546 | 3.563 | 1,495.301 | 87.821 | 21.515 |
+
+The 4K run processes 61,906,776 ANS tokens and 4,353,144 reverse chunks
+over eight encodes. ANS processing accounts for about 83% of the measured
+auto-worker components and 86% with one worker. This points first to the
+per-token conversion/recurrence, not model validation or byte packing.
+The diagnostic 4K section-wall median is 51.305 ms; aggregate token-write
+work is 319.808 ms and must not be added to wall time. Instrumented runs
+are diagnosis, not optimization qualification.
+
+Two success-path costs are removed:
+
+- The original HybridUint conversion formula moves to a private constexpr
+  helper with the explicit precondition `config.valid()`. The public API
+  retains null-output/configuration validation and unchanged failure
+  behavior. ANS stream processing validates immutable configurations once,
+  then inlines that conversion instead of making one checked out-of-line
+  call returning a string-owning `Status` per token.
+- The private `AdvanceAnsState` recurrence returns a null pointer on success
+  or a static error message on failure. Its three callers materialize a
+  public `Status` only on failure. This removes per-token success-object
+  construction without removing context, symbol, frequency, reciprocal,
+  reverse-map, or allocation checks. It does not change the public API or
+  claim that an empty success string previously allocated heap storage.
+
+ANS state arithmetic, reciprocal precision, extra-bit and renormalization
+ordering, model selection, partitioning, output layout, and entropy policy
+remain unchanged. The two multi-candidate measurement loops retain their
+checked HybridUint calls; only their shared recurrence return is changed.
+No CUDA source, device allocation, transfer, or kernel dispatch is changed.
+
+### Preliminary comparisons and correctness
+
+The first prototype changes only HybridUint conversion/config validation.
+Three alternating warm pairs reduce section-writing time by median paired
+17.0% / 7.3% / 4.2% at 4K / 1080p / Flower, but whole-encode ratios are
+0.964 / 1.042 / 1.002. All three preliminary 1080p whole-encode pairs
+regress; these observations are retained, not discarded.
+
+Adding the lightweight recurrence return gives preliminary section-writing
+ratios of 0.602 / 0.692 / 0.851 and aggregate token-write-work ratios of
+0.562 / 0.618 / 0.634 against S41. Whole-encode ratios are
+0.978 / 0.998 / 1.028. These small cohorts establish a target-stage lead,
+not a uniform end-to-end improvement.
+
+The backend-independent entropy fixture now checks all 816 valid HybridUint
+configurations over 443,904 value encodings: small values, power-of-two
+boundaries, deterministic random values, and `UINT32_MAX`. An independent
+inverse reconstructs the original integer from symbol and extra-bit fields;
+three constexpr goldens pin key results. Another 4,097 invalid configuration
+combinations must leave the public output unchanged. The ANS fixture also
+compares payloads to a separate ordinary-division/modulo recurrence, covers
+empty and nonempty split/interleaved streams and count/write parity, and
+verifies destination atomicity for invalid contexts, absent symbols, and
+invalid configurations. Existing malformed lookup/reciprocal, model golden,
+direct-policy, and deferred-width tests remain active.
+
+### Native-code check
+
+MSVC 14.37 Release COFF inspection confirms the two stream-processing
+instantiations (write and count) have one HybridUint call relocation and
+one state-advance call relocation in S41. The conversion-only prototype
+removes the former but retains the latter. The final build has neither:
+both conversion and recurrence inline in each token loop. The standalone
+instantiations can still be emitted in the object; their presence alone
+does not imply a loop call.
+
+Inlining grows the enclosing function from 176 instructions in S41 to
+278/299 for count/write, while eliminating the repeated calls and
+success-result handling. This is not described as a reduction in that
+function's static instruction count. The unchanged `CountGroupZeros`
+native body remains identical to the S41 snapshot at 526 instructions,
+which rules out a change to that body but does not explain its wall-time
+variation. The new entropy fixtures also pass when linked against the
+original S41 ANS and entropy sources.
+
+### Isolated CPU token comparison
+
+A separate MSVC probe compares S41, the conversion-only prototype, and the
+final build using the same ordered tokens and prepared models. Four
+deterministic distributions (single value, mostly zero with full-width
+outliers, dense 8-bit, and full-width random integers), two storage layouts,
+and write/count operations give 16 cases. Each invocation processes 262,144
+tokens; each sample contains four invocations. There are three warmups,
+nine measured samples, and three triplets rotating executable order so
+each version occupies each position once. Model construction and output
+hashing are outside the measured interval. No GPU workflow is invoked.
+
+All 16 final median paired ratios favor S42; 47/48 individual comparisons
+favor it. Model/payload FNV-1a hashes and exact bit counts agree across all
+three versions in every triplet. Ranges below span interleaved and split
+storage, and are final/S41 median paired ratios:
+
+| Distribution | Write ratio | Count ratio |
+| --- | ---: | ---: |
+| Single value | 0.479-0.489 | 0.460-0.476 |
+| Mostly zero with outliers | 0.517-0.582 | 0.461-0.524 |
+| Dense 8-bit | 0.738-0.742 | 0.480-0.488 |
+| Full-width integers | 0.845-0.902 | 0.445-0.483 |
+
+The one adverse observation, split full-width writing in triplet 1,
+is 20.121275 to 21.935125 ms and remains included. All 16 conversion-only
+medians also improve versus S41; adding the lightweight recurrence return
+improves each further. This isolates a host token-processing gain without
+claiming that these ratios apply to complete image encoding.
+
+### Complete-workflow timing
+
+Seven alternating before/after pairs per input use three warmups and five
+samples per process, explicit CUDA, fully resident AQ, and no requested
+final score. The reporting probe reuses the same compiled S41 benchmark
+object and exposes the existing 41 serializer/workflow fields. Each pair
+compares against the frozen S41 executable. The final cold cohort uses the
+unmodified production benchmark, seven fresh-process pairs, zero warmups,
+and one sample. No build, test, sanitizer, or other benchmark overlaps these
+runs. Percentages below are **median paired changes**, not ratios of the
+two separately listed medians:
+
+| Warm input / stage | S41 median ms | S42 median ms | Paired change |
+| --- | ---: | ---: | ---: |
+| 4K section writing | 54.256 | 30.893 | -42.0% |
+| 4K token-write aggregate work | 341.417 | 182.436 | -46.6% |
+| 4K codestream encoding | 184.616 | 166.727 | -9.7% |
+| 4K complete encode | 548.102 | 530.225 | -3.3% |
+| 1080p section writing | 15.798 | 10.516 | -34.3% |
+| 1080p token-write aggregate work | 72.753 | 40.624 | -44.4% |
+| 1080p codestream encoding | 66.068 | 63.233 | -5.3% |
+| 1080p complete encode | 140.623 | 135.446 | -4.4% |
+| Flower section writing | 3.636 | 2.732 | -16.0% |
+| Flower token-write aggregate work | 5.544 | 3.434 | -33.7% |
+| Flower codestream encoding | 15.028 | 14.091 | -3.6% |
+| Flower complete encode | 30.605 | 28.762 | -2.6% |
+
+All 21 section-writing and token-work pairs improve. Complete-encode pairs
+improve in 6/7, 5/7, and 5/7 cases. The unrelated coefficient-order phase
+gets slower in all seven 4K and 1080p pairs (paired +25.3% and +15.3%) despite
+unchanged source; Flower is +7.2%. Those adverse observations are retained.
+This study does not establish their cause or assign them to firewall,
+clock, or compiler behavior.
+
+| Cold input / complete encode | S41 median ms | S42 median ms | Paired change |
+| --- | ---: | ---: | ---: |
+| 4K | 670.090 | 657.900 | -3.1% |
+| 1080p | 179.639 | 180.758 | -4.6% |
+| Flower | 55.392 | 50.494 | -3.4% |
+
+Cold complete-encode pairs improve in 5/7, 4/7, and 6/7 cases. The 1080p
+ratio of medians is slightly adverse even though the paired median favors
+S42. Cold outliers, including 4K candidate 803.622 ms, 1080p candidate
+212.744 ms, and Flower parent 84.977 ms, remain in the data. The unchanged
+quantization stage has cold paired changes of +0.8% / -0.3% / -2.1%.
+The target-stage gain is consistent; a uniform whole-encoder gain across
+runs, devices, or operating states is not claimed.
+
+Telemetry sampled before the warm cohort reports 65 C, 210 MHz, and inactive
+software thermal/power limit flags; after the cold cohort it reports 73 C,
+1,282 MHz, and both flags active. These are boundary observations, not
+per-kernel clocks. No firewall, power, cooling, clock, priority, or service
+settings were changed. The older long sanitizer run remains an aborted run,
+not a pass or a confirmed firewall diagnosis.
+
+### Qualification and retained evidence
+
+Both complete suites pass: 63 CUDA-enabled MSVC tests and 48 CPU-only GNU
+tests. A fully instrumented clang-cl host AddressSanitizer build also passes
+the expanded entropy and codestream-encoder fixtures with
+`halt_on_error=1:alloc_dealloc_mismatch=1`; no annotations or allocator checks
+are suppressed. No new GPU sanitizer or Nsight run is claimed for this
+host-only change, and older device checks are not relabeled as S42 evidence.
+
+The image matrix contains seven inputs (17x13 repository sample, the two
+odd padded qualification PFMs, Flower, and three CC0 corpus photographs),
+three distances (0.5, 1.2, 3.0) at effort 7, plus sample/Flower effort 9 at
+distance 1.2. Both encoding-only and requested-final-score policies give
+46 before/after pairs. Every pair has identical codestream SHA-256, byte
+count, and independent decoded Butteraugli score. Decoding and scoring use
+the pinned libjxl revision `e8ff09762481785938d8e4e01333ed3917571161`,
+linear-sRGB interpretation, and the default 80-nit metric setting. The
+qualification PFMs differ from the synthetic benchmark images.
+
+Even-size batch checks cover 1080p fully resident and maximum throughput
+at batch sizes 1/2/4, and 4K fully resident at sizes 1/2. Median paired
+serial/batch speedups are 0.979/1.333/1.341, 1.001/1.613/2.302, and
+1.033/1.037 respectively. These compare current-build concurrency modes,
+not S41 versus S42; each batch output must match its serial reference.
+
+Ignored local artifacts include `s42_emit_final_*.txt` and the associated
+instrumented source copies, `s42_generic_phases.json`,
+`s42_success_phases.json`, `s42_final_phases.json`,
+`s42_final_cold_*.json`, `s42_final_quality.json`,
+`s42_final_{cpu,cuda}_ctest.log`, `s42_final_batch_*.txt`, and
+`s42_asan.txt`, `s42_token_compare.json`, the token probe sources/build
+scripts, `s42_native_summary.json`, and the associated COFF disassemblies.
+The first diagnostic-print attempt produced no counters;
+only the corrected explicit-print runs support the component table.
+
+`s42_final_validate.py` verifies the baseline source identity, original S41
+binary hashes, final source/copy hashes, both eliminated loop calls,
+46 image pairs including strategy and requested encoder-score equality,
+cross-policy output identity, full-suite counts, host ASan completion,
+warm/cold cohort sizes, isolated hashes, and batch coverage. Qualified
+executables are frozen as `s42_retained_*` with
+`s42_final_binary_hashes.json`. All builds, tests, benchmarks, and sanitizer
+jobs complete normally; no elevation/firewall blocker is reported.
+
+The encoder is not demonstrated maxed out. CPU AC tokenization and ANS
+histogram/model construction remain substantial, as does GPU perceptual
+work. The remaining byte-packing/append costs are smaller measured leads;
+the unexplained change in unchanged order-phase timing also warrants
+separate attribution before drawing broader CPU conclusions.
 
 ## Work that should not lead the next cycle
 
