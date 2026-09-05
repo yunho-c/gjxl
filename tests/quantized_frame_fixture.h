@@ -75,6 +75,15 @@ inline gjxl::VarDctEncoderFrame MakeFrame(size_t strategy_index, size_t pattern,
           case 2: value = (random & 7) == 0 ? -17 : 0; break;
           case 3: value = (random & 7) == 0 ? 0 : 29; break;
           case 4: value = ((index + channel + x + y) % 5) == 0 ? 0 : -3; break;
+          case 6: {
+            const auto* info = gjxl::GetAcStrategyInfo(type);
+            const auto extent = info->coefficient_extent();
+            const auto llf = info->low_frequency_extent();
+            value = index % extent.width < llf.width &&
+                    index / extent.width < llf.height ? -7 : 0;
+            break;  // LLF-only coefficients must yield no AC nonzeros.
+          }
+          case 7: value = index + 1 == count ? -17 : 0; break;
           default:
             value = (random & 3) == 0 ? 0 : (random & 1)
               ? std::numeric_limits<int32_t>::min()

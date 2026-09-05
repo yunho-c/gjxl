@@ -10,7 +10,8 @@
   value access, fused resident coefficient passes, and encoding-only
   coefficient materialization, shape-specialized coefficient blocks, and
   fused blur/frequency splitting, and branch-free host coefficient-order
-  counting, lightweight ANS token emission, and direct AC token accumulation
+  counting, lightweight ANS token emission, direct AC token accumulation,
+  and contiguous AC nonzero reduction
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -24,7 +25,21 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `0f5a7a7` replaces
+below supersede them. The latest checkpoint against `efda0a0` makes AC
+nonzero counting a contiguous integer reduction followed by LLF subtraction.
+The qualified MSVC build vectorizes the plane scan using baseline x64
+operations. Primary warm coefficient-tokenization work improves by median
+paired 14.7% / 13.9% / 5.5% at 4K / 1080p / Flower; whole-encode changes
+are -2.3% / -1.6% / +9.9%. The Flower regression remains adverse in
+same-path and single-executable controls, although smaller; its cause is
+unresolved and no stable small-image or cold whole-encode gain is claimed.
+All 64 CUDA / 49 CPU tests, 4,096-case independent count/token/population
+checks, fully instrumented host ASan, batch checks, and 46 byte-identical
+decoded image pairs pass. All-zero and LLF-only isolated cases consistently
+improve, while some other cases regress. CUDA and system settings remain
+unchanged. Optimization is ongoing, not maxed out.
+
+The preceding checkpoint against `0f5a7a7` replaces
 per-token string-owning success results in direct AC accumulation with a
 private enum, preserving the original checks and error codes. Coefficient
 tokenization worker time improves by median paired 25.4% / 27.8% / 21.5%
@@ -5940,6 +5955,240 @@ leads, while GPU perceptual work still dominates much of the workflow.
 None of these is assumed improved without a separate experiment; the
 unexplained variation of unchanged order work also remains an attribution
 limit rather than a claimed optimization.
+
+## Contiguous AC nonzero reduction (S44)
+
+Date: 2026-09-05. Baseline: `efda0a0` (S43).
+
+### Motivation and arithmetic
+
+S43 improves token-heavy inputs, but its all-zero isolated cases remain
+mixed: almost no coefficient tokens are appended, while every coefficient
+is still examined to count nonzeros. Both the public/template and direct
+paths use `CountNonzerosExceptLlf`, whose nested coordinate loops test the
+low-frequency rectangle for every coefficient.
+
+The replacement counts the contiguous coefficient plane, then subtracts
+nonzeros in the small LLF rectangle. The validated production strategies
+contain at most 1,024 coefficients and at most 16 LLF entries, so the
+integer sum and every subtraction fit `int32_t`. LLF subtraction cannot
+make the result negative because it removes a subset already counted.
+Only zero/nonzero predicates are used, including for signed extrema.
+Completed encoder frames initialize their owned coefficient storage and
+copy full transform planes, including LLF entries; this is not a read of
+unmaterialized float reconstruction scratch.
+The plane length remains `info.coefficient_count()` rather than an
+arbitrary longer input span. Existing strategy/span validation and both
+callers remain intact. This exposes a contiguous reduction to the compiler
+without enabling a new CPU ISA, changing scan order, or altering tokens,
+contexts, population policy, or CUDA code.
+
+### Independent count validation
+
+The prior direct/template comparison is insufficient by itself here:
+both routes share the changed counter. The expanded fixture therefore
+uses a separate coordinate-wise scalar oracle that skips LLF positions,
+checks every emitted nonzero-count token, and walks the original scan to
+check coefficient values and exact token consumption. Direct/template
+context equality and independent 64-bit sparse-population checks remain.
+
+Two new patterns isolate the boundary conditions: LLF-only nonzeros must
+produce zero AC counts; a single last coefficient tests scan termination.
+Together with the original six patterns, eight layouts, two order policies,
+four context maps, two population modes, and four groups, the fixture now
+covers 4,096 group cases. Existing poisoned-LLF/signed-extreme token goldens,
+malformed-span rejection, the 96-case order test, and encoder tests remain
+active. The original six completed-frame patterns are unchanged.
+
+### Native mechanism
+
+The same MSVC 14.37 Release options produce a scalar, 74-instruction
+counter in S43 and a 171-instruction counter here. The new plane loop
+processes eight coefficients per iteration through two unaligned 128-bit
+loads, integer equality comparisons, predicate masking, and independent
+packed 32-bit accumulators, followed by a horizontal integer reduction.
+These are baseline x64 SSE2 operations, not a new AVX requirement. The
+coefficient loads use `movdqu`; no stronger input alignment is assumed.
+The compiled plane length is a multiple of 64, so its eight-entry loop
+does not read beyond the validated coefficient plane.
+
+The larger static body also contains a generic vector LLF-correction path
+for widths of at least eight; production LLF widths are at most four and
+take the scalar correction. Static instruction count is not dynamic work.
+The separate direct-token accumulator remains 180 instructions and out of
+line; its caller remains 1,664 instructions with the same two append and
+two error-conversion relocations. Error conversion remains 113 instructions.
+The unchanged coefficient-order counting body still matches S43's 526
+instructions. No claim is made that the whole linked executable has
+identical code addresses or cache behavior.
+
+### Complete-workflow measurements
+
+The preliminary three alternating pairs (three warmups, five samples)
+give coefficient-tokenization-work ratios of 0.884 / 0.836 / 0.785 at
+4K / 1080p / Flower. AC-wall ratios are 0.907 / 0.942 / 0.916, and
+whole-encode ratios 0.962 / 0.979 / 0.965. Individual regressions include
+4K 510.703 to 516.634 ms and 1080p 125.264 to 135.278 ms; Flower parent
+37.989 ms is an outlier. These remain in the data and are not replaced
+by the later cohort.
+
+The primary qualification uses seven alternating process pairs per input,
+three warmups and five samples, with the same 41-field phase-probe object
+as S43. Worker time is accumulated work, not serial wall latency. Percent
+changes below are medians of paired ratios, not ratios of column medians.
+
+| Warm input / stage | S43 median ms | S44 median ms | Paired change |
+| --- | ---: | ---: | ---: |
+| 4K coefficient-tokenization work | 211.499 | 179.996 | -14.7% |
+| 4K AC-group wall | 53.615 | 47.165 | -9.5% |
+| 4K codestream wall | 148.259 | 137.076 | -8.3% |
+| 4K complete encode | 518.527 | 507.904 | -2.3% |
+| 1080p coefficient-tokenization work | 39.569 | 34.085 | -13.9% |
+| 1080p AC-group wall | 14.510 | 13.653 | -6.4% |
+| 1080p codestream wall | 59.240 | 56.441 | -3.1% |
+| 1080p complete encode | 131.046 | 128.517 | -1.6% |
+| Flower coefficient-tokenization work | 4.028 | 3.577 | -5.5% |
+| Flower AC-group wall | 3.830 | 3.963 | +3.5% |
+| Flower codestream wall | 14.006 | 15.569 | +10.8% |
+| Flower complete encode | 28.961 | 31.959 | +9.9% |
+
+Target worker time improves in 7/7, 6/7, and 5/7 pairs. Whole encode
+improves in only 5/7, 4/7, and 1/7. Flower's regression also spans
+unchanged quantization (+8.8%), entropy optimization (+13.1%), and section
+writing (+10.1%). Its only whole-encode win includes a 42.380 ms parent
+outlier. The adverse result is retained, not explained away by the faster
+counter or removed as noise.
+
+Seven zero-warmup, one-sample production-benchmark pairs give:
+
+| Cold input / complete encode | S43 median ms | S44 median ms | Paired change |
+| --- | ---: | ---: | ---: |
+| 4K | 631.444 | 607.753 | -0.8% |
+| 1080p | 172.971 | 173.367 | -1.0% |
+| Flower | 49.959 | 50.433 | +0.9% |
+
+Whole-encode wins are 4/7, 4/7, and 3/7. Quantization paired changes
+are +1.7%, -2.1%, and +1.5%, respectively. Parent/candidate total ranges
+are 602.336-725.354 / 597.584-678.448 ms at 4K,
+164.967-230.012 / 166.803-207.819 ms at 1080p, and
+46.108-52.439 / 47.896-74.466 ms for Flower. These mixed cold results
+do not establish a stable cold whole-encoder gain.
+
+### Small-image replication
+
+The primary Flower regression triggers an additional seven-pair comparison
+in each of two regimes. Before each process, its source binary is copied
+to one dedicated executable path and verified by SHA-256; the preceding
+process has exited before replacement. The retained binaries are untouched.
+This controls the executable path, but not internal code layout or operating
+state. All 41 timing fields and raw output remain recorded.
+
+With three warmups/five samples, coefficient-tokenization work changes
+-18.2% and complete encode +0.2% (26.289 / 26.479 ms column medians;
+3/7 whole-encode wins). With 40 warmups/15 samples, target work changes
+-18.3% and complete encode +1.7% (26.912 / 28.055 ms; 2/7 wins).
+Quantization changes +0.4% / +2.0%, and codestream wall +3.4% / +3.2%.
+The original +9.9% cohort is not replaced by these smaller regressions.
+No stable small-image whole-encode speedup is claimed.
+
+A further diagnostic links both original counter bodies into one
+executable. Only a process-local environment flag, read once at startup,
+selects the counter; it does not change any system setting. Both bodies
+remain out of line and match their 74/171 native instruction counts, and
+both branches pass the 4,096-case fixture. The same executable hash is
+verified before/after the experiment. This controls executable layout
+between the two selections through a shared dispatcher; it is not
+the unmodified production binary.
+
+Seven Flower pairs with 40 warmups/15 samples give target-work -18.8%
+(3.749 / 2.917 ms column medians), quantization +1.6%, codestream +0.4%,
+and complete encode +2.1% (26.934 / 26.978 ms). All seven target-work
+pairs improve, but only two whole-encode pairs do. Three additional pairs
+per large input, with three warmups/five samples, give target-work
+-15.5% / -16.4% and whole-encode -0.4% / -4.3% at 4K / 1080p;
+each has two of three target and whole-encode wins. 4K codestream wall
+regresses +4.2%; 1080p changes -1.1%. These diagnostic results do not
+erase the production regressions. Executable path/layout alone does not
+explain the Flower observation; operating-state interactions remain a
+hypothesis, not a demonstrated cause. The change is retained for its
+verified counting mechanism and larger-input target gains, with small-image
+whole-workflow behavior still an open measurement/performance issue.
+
+### Isolated completed-frame tokenization
+
+The same completed-frame probe as S43 now covers eight layouts, eight
+patterns, two order policies, and two population modes: 256 cases. Each
+case uses three warmups and nine samples; three alternating process pairs
+yield 768 paired cases. The timed region includes direct tokenization of
+all four groups and its output allocations, but excludes frame/order
+construction, hashing, and output destruction. The 15-context default map
+and one reusable scratch per case are fixed. No CUDA workflow is invoked.
+
+Every paired FNV-1a digest matches across token values, contexts, population
+metadata, and sparse symbols/counts. There are 230/256 improving case
+medians and 641/768 improving individual pairs. All 64 all-zero or LLF-only
+case medians improve, as do all 192 of their individual pairs. Dense and
+sparse cases are less uniform; the full ranges below retain regressions.
+
+| Pattern | No populations: median ratio (range) | With populations: median ratio (range) |
+| --- | ---: | ---: |
+| All zero | 0.355 (0.265-0.432) | 0.379 (0.233-0.461) |
+| Dense alternating signs | 0.868 (0.684-1.151) | 0.919 (0.694-1.083) |
+| Sparse random | 0.904 (0.810-0.995) | 0.921 (0.806-1.083) |
+| Dense random | 0.861 (0.810-1.032) | 0.945 (0.763-1.193) |
+| Periodic negatives/zeros | 0.876 (0.667-1.152) | 0.891 (0.736-1.105) |
+| Signed extrema | 0.873 (0.724-1.024) | 0.894 (0.689-1.123) |
+| LLF only | 0.311 (0.260-0.570) | 0.350 (0.267-0.603) |
+| Single last coefficient | 0.744 (0.273-1.073) | 0.773 (0.291-1.099) |
+
+Each table cell summarizes 16 layout/order case ratios. The largest case
+regression is dense-random DCT16x32/custom-order/population collection:
+3.0018 / 3.5135 ms column medians, paired ratio 1.193. This is not hidden
+by the particularly large all-zero gains.
+
+### Qualification and boundaries
+
+All 64 CUDA and 49 CPU tests pass. The expanded 4,096-case fixture also
+passes when linked against the frozen S43 AC implementation. Fully
+instrumented host AddressSanitizer builds pass direct tokenization, AC
+groups, coefficient ordering, and codestream encoder fixtures; no annotation
+suppression or partial-library instrumentation is used. This host-only
+change does not trigger another full CUDA AQ racecheck.
+
+The 46 independently decoded image pairs retain identical codestream
+bytes and decoded Butteraugli scores. They cover seven inputs at distances
+0.5/1.2/3, effort 7, plus sample/Flower at effort 9/distance 1.2, each in
+encoding-only and final-score collection modes. Strategy selection,
+requested encoder scores, and cross-policy byte/score identity are checked
+separately. The pinned decoder and linear-sRGB metric policy are unchanged.
+
+Serial/batch identity checks pass. Current-build serial/batch speedups,
+not S43/S44 ratios, are 1.003/1.170/1.307 for fully-resident 1080p batch
+sizes 1/2/4, 1.004/1.555/1.756 for maximum-throughput 1080p, and
+1.048/1.056 for fully-resident 4K batch sizes 1/2.
+
+Boundary telemetry moves from 64 C, 210 MHz, P8, with both software
+thermal/power flags inactive, to 72 C, 1282 MHz, P3, with both active.
+These are boundary observations, not per-kernel clocks or proof of the
+cause of every timing change. No power, cooling, clocks, services, priority,
+firewall, or security setting is changed. No privilege/firewall error is
+observed in these completed jobs; the earlier reported prompt remains an
+unconfirmed explanation for the historical long run. CUDA kernels,
+allocation requests, and transfer paths are unchanged; their traces are
+not recaptured for this host-only edit.
+
+Evidence is retained under ignored `build-cuda-ninja/profiles/`:
+`s44_contiguous_phases.json`, `s44_final_phases.json`, the three
+`s44_final_cold_*.json` files, `s44_flower_same_path.json`,
+`s44_dispatch_compare.json`, `s44_ac_compare.json`,
+`s44_native_summary.json` and native listings, `s44_final_quality.json`,
+both CTest logs, `s44_asan.txt`, the parent/dispatch fixture logs,
+three batch logs, and boundary telemetry. The source/copy SHA-256 manifest
+`s44_final_binary_hashes.json` freezes eleven qualified executables;
+`s44_final_validate.py` checks the baseline, artifacts, and result matrices.
+Probe source, build/run scripts, and raw per-run output are retained beside
+the summaries. None of the diagnostic dispatch code is linked into the
+retained production binaries.
 
 ## Work that should not lead the next cycle
 

@@ -251,13 +251,18 @@ int32_t CountNonzerosExceptLlf(std::span<const int32_t> coefficients,
                                const AcStrategyInfo& info) {
   const Extent2D coefficient_extent = info.coefficient_extent();
   const Extent2D llf_extent = info.low_frequency_extent();
+  // Validated production transforms have at most 1024 coefficients. Count
+  // the contiguous plane first so the reduction can vectorize, then remove
+  // the small LLF rectangle (at most 16 entries). All sums fit int32_t.
+  const int32_t* const data = coefficients.data();
+  const size_t count = info.coefficient_count();
   int32_t nonzeros = 0;
-  for (size_t y = 0; y < coefficient_extent.height; ++y) {
-    for (size_t x = 0; x < coefficient_extent.width; ++x) {
-      if (x < llf_extent.width && y < llf_extent.height) {
-        continue;
-      }
-      nonzeros += coefficients[y * coefficient_extent.width + x] != 0;
+  for (size_t index = 0; index < count; ++index) {
+    nonzeros += data[index] != 0;
+  }
+  for (size_t y = 0; y < llf_extent.height; ++y) {
+    for (size_t x = 0; x < llf_extent.width; ++x) {
+      nonzeros -= data[y * coefficient_extent.width + x] != 0;
     }
   }
   return nonzeros;

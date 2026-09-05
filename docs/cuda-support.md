@@ -654,11 +654,22 @@ results. CUDA kernels and system settings are unchanged.
 Direct AC token accumulation likewise uses a small private error enum, with
 public status construction confined to failure paths. Its original
 validation, error codes, token order, fixed-HybridUint populations, and
-output atomicity are preserved. A 3,072-case differential fixture checks
-all production transform shapes and mixed layouts, patterns, orders,
+output atomicity are preserved. The expanded 4,096-case differential fixture
+checks all production transform shapes and mixed layouts, patterns, orders,
 context maps, scratch reuse, and both collection modes. See the
 [S43 study](cuda-optimization-s1.md#lightweight-direct-ac-token-accumulation-s43)
 for isolated and full-workflow qualification.
+
+AC nonzero counting now scans the contiguous coefficient plane and
+subtracts the small LLF rectangle, preserving the original exclusion rule.
+The qualified MSVC build uses baseline x64 vector operations. An independent
+coordinate-wise oracle checks counts and coefficient values, including
+LLF-only and single-last-coefficient patterns; both tokenizer paths still
+match exactly. The [S44 study](cuda-optimization-s1.md#contiguous-ac-nonzero-reduction-s44)
+records the larger-input target gains and the unresolved small-image
+whole-encode regression, including same-path and same-executable controls.
+No universal whole-workflow speedup is claimed. CUDA and system settings
+are unchanged.
 
 ### Math and kernel strategy
 
