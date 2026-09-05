@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <span>
 #include <type_traits>
@@ -44,6 +45,13 @@ struct AcStrategyCandidate {
 static_assert(std::is_standard_layout_v<AcStrategyCandidate>);
 static_assert(sizeof(AcStrategyCandidate) == 6 * sizeof(uint32_t));
 
+/// Minimum byte ranges required by one backend's candidate evaluator.
+struct AcStrategyScratchRequirements {
+  size_t scratch_a_bytes = 0;
+  size_t scratch_b_bytes = 0;
+  size_t rate_scratch_bytes = 0;
+};
+
 /// Device-resident inputs and scratch for batched AC candidate evaluation.
 ///
 /// `opsin` stores three planar float images. Strides are expressed in floats;
@@ -51,9 +59,11 @@ static_assert(sizeof(AcStrategyCandidate) == 6 * sizeof(uint32_t));
 /// single float plane. `matrices` contains dequant X/Y/B followed by inverse-
 /// dequant X/Y/B, with one complete strategy-sized matrix per entry.
 ///
-/// `scratch_a` and `scratch_b` each require
-/// `candidate_count * 3 * coefficient_count` floats. `rate_scratch` requires
-/// `candidate_count * 3 * kAcStrategyRateScratchBytesPerChannel` bytes.
+/// Use GetAcStrategyScratchRequirements to size the three scratch ranges.
+/// The default requires `candidate_count * 3 * coefficient_count` floats in
+/// each of `scratch_a` and `scratch_b`, and `candidate_count * 3 *
+/// kAcStrategyRateScratchBytesPerChannel` bytes in `rate_scratch`. Backends
+/// may require less; allocating these conservative sizes remains valid.
 /// Inputs are expected to remain resident across batches; only candidate
 /// descriptors and scalar costs need to cross the CPU/GPU boundary.
 struct AcStrategyCandidateBatch {
@@ -106,6 +116,40 @@ class GpuAcStrategyEvaluation {
 public:
   virtual ~GpuAcStrategyEvaluation() = default;
 
+  /// Computes scratch sizes without allocation or submission. Zero candidates
+  /// require zero bytes. Unknown strategies and size overflow are errors; on
+  /// error, requirements is unchanged. The conservative default does not
+  /// certify strategy support or device indexing/launch limits. Backends may
+  /// override it to report smaller ranges and additional restrictions.
+  virtual Status GetAcStrategyScratchRequirements(
+    AcStrategyType strategy,
+    size_t candidate_count,
+    AcStrategyScratchRequirements* requirements) const {
+    if (requirements == nullptr) {
+      return Status::InvalidArgument("AC-strategy scratch output is null");
+    }
+    const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
+    if (info == nullptr) {
+      return Status::InvalidArgument("Unknown JPEG XL AC strategy");
+    }
+    const size_t packed_bytes_per_candidate =
+      kAcStrategyCandidateChannelCount * info->coefficient_count() *
+      sizeof(float);
+    const size_t rate_bytes_per_candidate =
+      kAcStrategyCandidateChannelCount * kAcStrategyRateScratchBytesPerChannel;
+    constexpr size_t kMaximum = std::numeric_limits<size_t>::max();
+    if (candidate_count > kMaximum / packed_bytes_per_candidate ||
+        candidate_count > kMaximum / rate_bytes_per_candidate) {
+      return Status::InvalidArgument("AC-strategy scratch size overflows");
+    }
+    *requirements = {
+      candidate_count * packed_bytes_per_candidate,
+      candidate_count * packed_bytes_per_candidate,
+      candidate_count * rate_bytes_per_candidate,
+    };
+    return Status::Ok();
+  }
+
   /// Enqueues several candidate batches in one submission. Each batch is
   /// internally same-strategy; batches may select different strategies,
   /// execute in span order, and reuse scratch buffers. A successful non-empty
@@ -120,6 +164,24 @@ public:
   GpuBackend& backend) noexcept {
 
   return dynamic_cast<GpuAcStrategyEvaluation*>(&backend);
+}
+
+[[nodiscard]] inline Status GetAcStrategyScratchRequirements(
+  GpuBackend& backend,
+  AcStrategyType strategy,
+  size_t candidate_count,
+  AcStrategyScratchRequirements* requirements) {
+  if (requirements == nullptr) {
+    return Status::InvalidArgument("AC-strategy scratch output is null");
+  }
+  const GpuAcStrategyEvaluation* capability =
+    QueryGpuAcStrategyEvaluation(backend);
+  if (capability == nullptr) {
+    return Status::Unavailable(
+      "GPU backend does not provide AC-strategy evaluation");
+  }
+  return capability->GetAcStrategyScratchRequirements(
+    strategy, candidate_count, requirements);
 }
 
 [[nodiscard]] inline Status EvaluateAcStrategyCandidateBatches(

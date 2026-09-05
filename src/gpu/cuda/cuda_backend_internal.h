@@ -149,6 +149,9 @@ class CudaBackend final : public GpuBackend,
   Status SubmitImagePrimitiveSequence(
       std::span<const ImagePrimitiveCommand> commands,
       std::unique_ptr<GpuSubmission>* submission) override;
+  Status GetAcStrategyScratchRequirements(
+      AcStrategyType strategy, size_t candidate_count,
+      AcStrategyScratchRequirements* requirements) const override;
   Status EvaluateAcStrategyCandidateBatches(
       std::span<const AcStrategyCandidateBatch> batches,
       std::unique_ptr<GpuSubmission>* submission) override;

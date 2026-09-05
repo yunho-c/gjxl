@@ -2,7 +2,8 @@
 
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
-  AC gather/DCT plus residual/inverse/loss fusion implemented; optimization ongoing
+  AC gather/DCT plus residual/inverse/loss fusion and compact AC-search scratch
+  implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -14,18 +15,21 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest residual/inverse/loss fusion against `b46bea9`
-reduces the targeted AC stages by 23.3% at 4K in the final trace. A separate
-initial trace with unchanged-kernel time nearly constant shows a 3.8% kernel-total
-improvement. Seven launches and a 2.55 GB residual-coefficient buffer round trip
-disappear per 4K encode; scratch allocation sizes are not yet reduced.
-Paired total time improves 6.1% at 4K and 0.9% at 1080p, while Flower is 2.0%
-slower. Both large-image quantization comparisons improve in all seven pairs.
-Qualified codestreams remain byte-identical. These are incremental gains,
-not a demonstrated performance ceiling; prior checkpoints remain documented below.
-Remaining scratch allocation, DCT, reconstruction
-filtering, host work, and transfers are material targets; the resident path
-has not reached its performance limit.
+below supersede them. The latest compact-scratch checkpoint against `5ba4d86`
+reduces the padded-4K AC-search arena from 626.8 to 323.8 MB (48.3%), saving
+288.9 MiB per search. Nsight confirms that peak tracked device allocations fall
+from 3.110 to 2.808 GB, with identical launches and transfer volumes. Paired total
+time improves 3.2% at 4K, is effectively unchanged at 1080p (-0.2%), and improves
+5.0% on Flower; substantial laptop timing variance remains. Batch checks pass,
+but do not establish a batch-throughput gain. Qualified codestreams remain
+byte-identical.
+
+The preceding residual/inverse/loss fusion reduced targeted AC stages by 23.3%
+at 4K, removing seven launches and a 2.55 GB coefficient-buffer round trip.
+These are incremental gains, not a demonstrated performance ceiling. DCT,
+reconstruction filtering, the remaining resident allocations, host work, and
+transfers remain material targets; the resident path has not reached its
+performance limit.
 
 The initial measurements showed two different performance profiles.
 
@@ -2362,6 +2366,184 @@ The transforms still use direct basis-matrix dot products; a factorized-DCT
 experiment would need numerical and perceptual qualification. Host work and
 transfer boundaries also remain material. The fully-resident path is not
 demonstrated maxed out.
+
+### Follow-up: compact CUDA AC-search scratch allocation (2026-09-05)
+
+Parent: `5ba4d86` (residual/inverse/loss fusion). This checkpoint completes the
+allocation follow-up described above; it changes no device arithmetic or kernel
+launches.
+
+#### Allocation contract and implementation
+
+The fused inverse evaluator only writes one loss sum per candidate channel to
+scratch A. The shared frontend nevertheless reserved two complete packed
+coefficient ranges, and CUDA validation enforced both obsolete ranges, including
+in its alias checks. Reducing only the frontend allocation would therefore be
+rejected (or leave misleading overlap checks when suballocating a larger arena).
+
+`GpuAcStrategyEvaluation::GetAcStrategyScratchRequirements` now supplies the
+per-strategy/per-count contract without allocating or submitting work. Its
+checked conservative default retains the original A/B/rate sizes for Metal and
+other implementations. CUDA overrides A to `candidate_count * 3 * sizeof(float)`;
+B and rate scratch are unchanged. Unknown strategies, null outputs, overflow,
+and unsupported CUDA strategies are rejected without changing the output.
+Sizing alone does not certify device indexing or launch limits; submission
+validation still checks those limits and buffer ownership.
+
+The shared planner takes three independent maxima across stages and uses them
+for both capacity planning and suballocation. CUDA uses the same query for
+minimum buffer ranges and overlap validation. Old full-size allocations remain
+valid, but adjacent compact suballocations no longer appear to overlap. The
+existing ordered submission, scratch reuse, completion waits, and ownership
+lifetimes are unchanged. Search statistics expose the three logical scratch
+ranges and the actual retained owning arena capacity, excluding external
+resident inputs and legacy input staging. Prepared searches retain capacity
+when their logical geometry shrinks.
+
+At padded 4K (3840x2160), the maximum coefficient range comes from the 99,120
+16x16 candidates, while maximum loss storage comes from 129,600 DCT8 candidates:
+
+| Range | Parent bytes | Compact bytes |
+|---|---:|---:|
+| Scratch A | 304,496,640 | 1,555,200 |
+| Scratch B | 304,496,640 | 304,496,640 |
+| Rate scratch | 3,110,400 | 3,110,400 |
+| Complete search arena, including tables/costs/alignment | 626,787,328 | 323,845,888 |
+
+The complete arena saves 302,941,440 bytes (288.9 MiB), or 48.3%. This is an
+allocation-capacity reduction, not another reduction in device memory traffic:
+the preceding fusion had already eliminated the unused intermediate writes.
+The rest of the encoder's resident state is outside these arena totals.
+
+#### Contract and regression coverage
+
+CPU-only tests exercise the conservative default across all strategy metadata,
+zero and ordinary counts, the largest non-overflowing count and its successor,
+unknown strategies, null outputs, and missing capabilities. CUDA tests check
+compact query results for all seven supported shapes and allocation/submission-
+free error handling. Candidate tests now allocate exact-size A buffers, retain
+the existing strided/resident/tail coverage, and also compare conservative A
+buffers against compact results exactly.
+
+For each supported shape, counts 1/8/11/16/32/33 exercise adjacent A/B/rate/cost
+ranges with nonzero offsets, outer guards, and repeated ordered submissions.
+Every output range is tested one float short and misaligned; all six output
+pairs are tested for partial overlap, with input alias and foreign-backend A
+rejected as well. Invalid range requests must not commit a submission.
+
+The existing CPU/GPU search-parity test is now also built for CUDA. It covers
+small and non-full-tile geometries, dependency-minimal candidate counts, atomic
+failure, repeated prepared searches, and shrink/restore reuse. It reconstructs
+the arena capacity independently from the candidate counts and checks it against
+the actual retained capacity. Its optional `--memory-4k` mode runs the same
+allocation and reuse checks at padded 4K. All 55 CUDA-enabled and 47 CPU-only
+CTest tests pass, including install consumers. Metal runtime testing is not
+available on this Windows host; its conservative sizing default is exercised
+by the portable contract test.
+
+#### Warmed public-workflow timing
+
+Seven alternating parent/candidate process pairs each ran three warmups and
+five measured fully-resident samples, without optional final-score diagnostics.
+No builds, other GPU work, or heavy disassembly overlapped these runs. All
+samples and outliers are retained. Medians below are medians of the seven
+process medians; paired changes are independently computed from each pair's
+ratio (not from the ratio of the two cohort medians).
+
+| Input | Parent total ms | Compact total ms | Median paired total change | Parent quantization ms | Compact quantization ms | Median paired quantization change |
+|---|---:|---:|---:|---:|---:|---:|
+| Padded 4K | 837.477 | 811.058 | -3.2% | 570.773 | 562.826 | -1.7% |
+| Padded 1080p | 209.757 | 211.064 | -0.2% | 129.130 | 126.483 | -1.7% |
+| Flower, 510x532 | 47.045 | 46.153 | -5.0% | 29.025 | 27.848 | -3.0% |
+
+Compact allocation wins 7/7 total and quantization pairs at 4K, 4/7 total and
+6/7 quantization pairs at 1080p, and 6/7 total and quantization pairs for Flower.
+Total-time ranges are 807.969–906.389 versus 778.103–842.434 ms at 4K,
+204.266–234.241 versus 200.953–226.513 ms at 1080p, and 45.482–75.145 versus
+42.603–49.127 ms for Flower. In particular, the long Flower parent process is
+not discarded. These are observed wall-time changes on a clock-variable laptop,
+not faster-transform claims; 1080p total time is effectively unchanged. The
+allocation saving is the stronger deterministic result.
+
+#### Allocation traces and final qualification
+
+Separate Nsight captures enable `--cuda-memory-usage=true`. These are used for
+allocation and launch accounting, not latency claims: the profiler documents
+potentially significant overhead for memory tracking. The export also includes
+warmup allocation/free events at timestamp zero, so the single-encode extractor
+only counts positive-timestamp device-memory events. It verifies matched
+allocation/free addresses and sizes, and an empty live-allocation set at the end.
+
+| Input | Parent search arena bytes | Compact search arena bytes | Parent peak tracked device bytes | Compact peak tracked device bytes |
+|---|---:|---:|---:|---:|
+| Padded 4K | 626,787,328 | 323,845,888 | 3,110,455,104 | 2,807,513,664 |
+| Padded 1080p | 156,741,248 | 81,005,952 | 777,459,334 | 701,724,038 |
+| Flower | 20,602,112 | 10,675,712 | 102,332,176 | 92,405,776 |
+
+Each encode still makes five device allocations and frees. Only the search
+arena size changes; the other four allocations match exactly. The 4K peak of
+tracked device allocations falls 9.7%. This is requested CUDA allocation memory,
+not total board/driver memory or a direct measurement of physical VRAM residency.
+Kernel counts, ordered launch geometry, registers, dynamic shared memory, and
+transfer counts/bytes match exactly for each input. At 4K this remains 509 kernels,
+31 HtoD copies (117,079,320 bytes), 19 DtoH copies (103,699,012 bytes), and one
+518,400-byte D2D copy. Memory-tracked kernel totals are 356.652/364.086 ms for
+parent/compact 4K, 61.595/60.618 ms at 1080p, and 16.333/16.308 ms for Flower;
+no compute-speed improvement is inferred from these traces.
+
+Both candidate and prepared-search executables pass memcheck, racecheck,
+synccheck, and initcheck, with zero errors or race warnings. The complete 4K
+prepared-search reuse check also passes memcheck. Six scored parent/compact
+encodes (sample and Flower at efforts 7/9; odd padded 1080p/4K at effort 7)
+retain identical SHA-256, strategy summaries, and final scores. All six compact
+outputs decode with the pinned independent decoder at the expected dimensions.
+
+Batch sizes 1/2/4 pass at 1080p in both fully-resident and maximum-throughput
+modes. Compact fully-resident batch medians are 281.150/493.102/923.458 ms
+(3.557/4.056/4.332 images/s); maximum-throughput medians are
+118.138/289.011/583.037 ms (8.465/6.920/6.861 images/s). Fully-resident 4K
+batch sizes 1/2 pass for both builds: parent medians 1128.849/2046.184 ms,
+compact 1139.528/2134.260 ms. Those sequential cohorts are qualification runs,
+not a controlled before/after batch speedup result. They follow instrumented
+checks and show substantial clock/host variance. All batch outputs match their
+serial references. End-of-sweep telemetry is 77 C, P3, 1282 MHz graphics,
+5500 MHz memory.
+
+A full-process memory trace of batch size 2 (one warmup and one paired serial/
+batch sample) confirms both lanes' search arenas are live together. Peak tracked
+device allocations fall from 6,222,823,552 to 5,616,940,672 bytes, saving
+605,882,880 bytes (577.8 MiB). Both peaks contain ten allocations: two copies
+of each of the five per-image allocations. All nine encodes in each captured
+process have matching allocation-size counts, except for the smaller search
+arena. These aligned 3840x2160 batch inputs have slightly different non-search
+allocation sizes from the odd-source single-image workload above. Memory
+tracking confirms the capacity benefit under concurrency without establishing
+a batch latency improvement.
+
+#### Artifacts and remaining work
+
+Ignored artifacts are under `build-cuda-ninja/profiles/s28_*`. Saved
+`parent_{benchmark,encode,batch}.exe` binaries precede the change. The
+`warmed_{4k,1080p,flower}.{json,txt}` files retain every process/sample;
+`final_{parent,retained}_{4k,1080p,flower}.{nsys-rep,sqlite}` and
+`memory_summary.{py,json}` retain the launch/allocation accounting. Full-process
+batch captures are `memory_batch2_{parent,retained}.{nsys-rep,sqlite}`, with
+`batch_memory_summary.{py,json}`. The `ac_strategy_cuda{,_search}_*check.txt`,
+`memory_4k.txt`, `identity.txt`, and `batch_*.txt` files retain sanitizer,
+codestream, and batch qualification. `qualify.ps1` sequences the checks, and
+`profile_batch_memory.ps1` records the separate concurrent-allocation traces.
+
+No further full-sized dead AC-search intermediate remains in this allocation
+layout. The retained forward coefficients in B are still required by the fused
+inverse, including cross-channel CfL. Reducing B needs a different execution
+schedule or more fusion, not merely a smaller range. Other resident arenas,
+direct basis-matrix DCT arithmetic, reconstruction filters, host work, and
+transfers remain material. A bounded factorized-DCT experiment can start from
+the existing Metal radix-2 implementation, first checking CUDA register/spill
+behavior and standalone transform accuracy, then integrating with fused AC
+input/output paths and qualifying perceptual/size behavior. Byte identity is
+not assumed to be the acceptance ceiling for that arithmetic experiment.
+The fully-resident backend is not demonstrated maxed out.
 
 ## Work that should not lead the next cycle
 

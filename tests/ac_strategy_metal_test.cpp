@@ -251,6 +251,122 @@ bool Allocate(
   return CheckStatus(gpu.Allocate(bytes, buffer), role);
 }
 
+#ifdef GJXL_TEST_CUDA
+bool CheckCompactScratchRanges(gjxl::GpuBackend& gpu,
+  const gjxl::AcStrategyCandidateBatch& batch,
+  const std::vector<float>& expected) {
+  constexpr float kGuard = -123456.0f;
+  std::unique_ptr<gjxl::GpuSubmission> submission;
+  for (const size_t count : {1, 8, 11, 16, 32, 33}) {
+    gjxl::AcStrategyScratchRequirements scratch;
+    if (!CheckStatus(gjxl::GetAcStrategyScratchRequirements(
+          gpu, batch.strategy, count, &scratch), "Query compact scratch")) {
+      return false;
+    }
+    // Pack all four live output ranges back-to-back, with guards only outside
+    // the complete allocation. No obsolete coefficient-sized A gap is left.
+    const std::array<size_t, 4> sizes = {scratch.scratch_a_bytes,
+      scratch.scratch_b_bytes, scratch.rate_scratch_bytes, count * sizeof(float)};
+    std::array<size_t, 4> offsets{7 * sizeof(float)};
+    for (size_t i = 1; i < offsets.size(); ++i) {
+      offsets[i] = offsets[i - 1] + sizes[i - 1];
+    }
+    const size_t live_end = offsets.back() + sizes.back();
+    const size_t arena_bytes = live_end + 11 * sizeof(float);
+    std::vector<float> words(arena_bytes / sizeof(float), kGuard);
+    std::unique_ptr<gjxl::DeviceBuffer> arena;
+    if (!Allocate(gpu, arena_bytes, "Allocate compact arena", &arena) ||
+        !CheckStatus(gpu.CopyHostToDevice(*arena, words.data(), arena_bytes),
+          "Initialize compact guards")) return false;
+    auto compact = batch;
+    compact.candidate_count = count;
+    compact.scratch_a = compact.scratch_b = compact.rate_scratch =
+      compact.costs = arena.get();
+    compact.scratch_a_offset_bytes = offsets[0];
+    compact.scratch_b_offset_bytes = offsets[1];
+    compact.rate_scratch_offset_bytes = offsets[2];
+    compact.costs_offset_bytes = offsets[3];
+    // Ordered batches are allowed to share exactly the same scratch ranges.
+    const std::array batches{compact, compact};
+    if (!CheckStatus(gjxl::EvaluateAcStrategyCandidateBatches(
+          gpu, batches, &submission), "Submit compact arena") ||
+        submission == nullptr || !CheckStatus(submission->Wait(), "Wait compact") ||
+        !CheckStatus(gpu.CopyDeviceToHost(*arena, words.data(), arena_bytes),
+          "Read compact arena")) return false;
+    for (size_t i = 0; i < words.size(); ++i) {
+      if (((i < 7 || i >= live_end / sizeof(float)) && words[i] != kGuard) ||
+          (i >= offsets[3] / sizeof(float) && i < live_end / sizeof(float) &&
+           words[i] != expected[i - offsets[3] / sizeof(float)])) {
+        std::cerr << "Compact scratch changed a cost or guard\n";
+        return false;
+      }
+    }
+    const std::array offset_members = {
+      &gjxl::AcStrategyCandidateBatch::scratch_a_offset_bytes,
+      &gjxl::AcStrategyCandidateBatch::scratch_b_offset_bytes,
+      &gjxl::AcStrategyCandidateBatch::rate_scratch_offset_bytes,
+      &gjxl::AcStrategyCandidateBatch::costs_offset_bytes,
+    };
+    const auto committed = gpu.stats().committed_submissions;
+    const auto Rejected = [&](const auto& invalid) {
+      return gjxl::EvaluateAcStrategyCandidates(gpu, invalid, &submission).code() ==
+          gjxl::StatusCode::kInvalidArgument && submission == nullptr &&
+          gpu.stats().committed_submissions == committed;
+    };
+    for (size_t i = 0; i < sizes.size(); ++i) {
+      auto invalid = compact;
+      invalid.*offset_members[i] = arena_bytes - sizes[i] + sizeof(float);
+      if (!Rejected(invalid)) {
+        std::cerr << "One-float-short scratch range was accepted\n";
+        return false;
+      }
+      invalid = compact;
+      invalid.*offset_members[i] += 1;
+      if (!Rejected(invalid)) return false;
+      for (size_t j = i + 1; j < sizes.size(); ++j) {
+        invalid = compact;
+        invalid.*offset_members[j] = offsets[i] + sizes[i] - sizeof(float);
+        if (!Rejected(invalid)) {
+          std::cerr << "Partially overlapping scratch ranges were accepted\n";
+          return false;
+        }
+      }
+    }
+    auto input_alias = compact;
+    input_alias.scratch_a = const_cast<gjxl::DeviceBuffer*>(batch.opsin);
+    input_alias.scratch_a_offset_bytes = batch.opsin_offset_bytes;
+    if (!Rejected(input_alias)) return false;
+  }
+  std::unique_ptr<gjxl::GpuBackend> foreign_gpu;
+  std::unique_ptr<gjxl::DeviceBuffer> foreign_a;
+  if (!CheckStatus(gjxl::CreateCudaBackend(&foreign_gpu), "Create foreign backend") ||
+      !Allocate(*foreign_gpu, batch.candidate_count * 3 * sizeof(float),
+        "Allocate foreign compact scratch", &foreign_a)) return false;
+  auto foreign = batch;
+  foreign.scratch_a = foreign_a.get();
+  if (gjxl::EvaluateAcStrategyCandidates(gpu, foreign, &submission).code() !=
+        gjxl::StatusCode::kInvalidArgument || submission != nullptr) {
+    std::cerr << "Foreign compact scratch was accepted\n";
+    return false;
+  }
+  // Old callers may continue allocating full coefficient storage for A.
+  std::unique_ptr<gjxl::DeviceBuffer> full_a;
+  const size_t full_bytes = batch.candidate_count * 3 * sizeof(float) *
+    gjxl::GetAcStrategyInfo(batch.strategy)->coefficient_count();
+  if (!Allocate(gpu, full_bytes, "Allocate conservative scratch", &full_a)) {
+    return false;
+  }
+  auto conservative = batch;
+  conservative.scratch_a = full_a.get();
+  if (!CheckStatus(gjxl::EvaluateAcStrategyCandidates(gpu, conservative,
+        &submission), "Submit conservative scratch") || submission == nullptr ||
+      !CheckStatus(submission->Wait(), "Wait conservative scratch")) return false;
+  std::vector<float> costs(expected.size());
+  return CheckStatus(gpu.CopyDeviceToHost(*batch.costs, costs.data(),
+           costs.size() * sizeof(float)), "Read conservative costs") && costs == expected;
+}
+#endif
+
 bool RunStrategyCase(
   gjxl::GpuBackend& gpu,
   std::string_view implementation,
@@ -300,6 +416,19 @@ bool RunStrategyCase(
   const size_t rate_bytes = candidates.size() * 3 *
     gjxl::kAcStrategyRateScratchBytesPerChannel;
   const size_t cost_bytes = candidates.size() * sizeof(float);
+  gjxl::AcStrategyScratchRequirements scratch;
+  if (!CheckStatus(gjxl::GetAcStrategyScratchRequirements(
+        gpu, strategy, candidates.size(), &scratch), "Query scratch sizes") ||
+      scratch.scratch_b_bytes != packed_bytes ||
+      scratch.rate_scratch_bytes != rate_bytes ||
+#ifdef GJXL_TEST_CUDA
+      scratch.scratch_a_bytes != candidates.size() * 3 * sizeof(float)) {
+#else
+      scratch.scratch_a_bytes != packed_bytes) {
+#endif
+    std::cerr << "Unexpected AC scratch requirements\n";
+    return false;
+  }
 
   std::unique_ptr<gjxl::DeviceBuffer> device_opsin;
   std::unique_ptr<gjxl::DeviceBuffer> device_mask;
@@ -316,7 +445,7 @@ bool RunStrategyCase(
       !Allocate(gpu, matrix_bytes, "Allocate matrices", &device_matrices) ||
       !Allocate(
         gpu, candidate_bytes, "Allocate candidates", &device_candidates) ||
-      !Allocate(gpu, packed_bytes, "Allocate scratch A", &scratch_a) ||
+      !Allocate(gpu, scratch.scratch_a_bytes, "Allocate scratch A", &scratch_a) ||
       !Allocate(gpu, packed_bytes, "Allocate scratch B", &scratch_b) ||
       !Allocate(gpu, rate_bytes, "Allocate rate scratch", &rate_scratch) ||
       !Allocate(gpu, cost_bytes, "Allocate costs", &device_costs) ||
@@ -411,6 +540,7 @@ bool RunStrategyCase(
   // Cross the 8/16/32-transform packed DCT boundaries (three transforms per
   // candidate), as well as partially occupied packed residual blocks.
   const std::vector<float> complete_costs = poisoned_costs;
+  if (!CheckCompactScratchRanges(gpu, batch, complete_costs)) return false;
   for (const size_t count : {1, 2, 3, 5, 6, 10, 11, 16, 17, 21, 22, 32}) {
     gjxl::AcStrategyCandidateBatch prefix = batch;
     prefix.candidate_count = count;
@@ -865,6 +995,39 @@ bool CheckValidation() {
     std::cerr << "Zero-sized candidate batch was rejected\n";
     return false;
   }
+#ifdef GJXL_TEST_CUDA
+  const auto before_query = gpu->stats();
+  for (const auto strategy : kStrategies) {
+    gjxl::AcStrategyScratchRequirements scratch{1, 2, 3};
+    if (!CheckStatus(gjxl::GetAcStrategyScratchRequirements(
+          *gpu, strategy, 0, &scratch), "Query empty scratch") ||
+        scratch.scratch_a_bytes != 0 || scratch.scratch_b_bytes != 0 ||
+        scratch.rate_scratch_bytes != 0) return false;
+    scratch = {1, 2, 3};
+    if (gjxl::GetAcStrategyScratchRequirements(*gpu, strategy,
+          std::numeric_limits<size_t>::max(), &scratch).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+        scratch.scratch_a_bytes != 1 || scratch.scratch_b_bytes != 2 ||
+        scratch.rate_scratch_bytes != 3) return false;
+  }
+  gjxl::AcStrategyScratchRequirements untouched{1, 2, 3};
+  if (gjxl::GetAcStrategyScratchRequirements(*gpu,
+        gjxl::AcStrategyType::kDct64x64, 0, &untouched).code() !=
+        gjxl::StatusCode::kUnavailable ||
+      gjxl::GetAcStrategyScratchRequirements(*gpu,
+        gjxl::AcStrategyType::kCount, 0, &untouched).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      gjxl::GetAcStrategyScratchRequirements(*gpu,
+        gjxl::AcStrategyType::kDct8, 1, nullptr).code() !=
+        gjxl::StatusCode::kInvalidArgument ||
+      untouched.scratch_a_bytes != 1 || untouched.scratch_b_bytes != 2 ||
+      untouched.rate_scratch_bytes != 3 ||
+      gpu->stats().successful_allocations != before_query.successful_allocations ||
+      gpu->stats().committed_submissions != before_query.committed_submissions) {
+    std::cerr << "CUDA scratch query contract failed\n";
+    return false;
+  }
+#endif
   gjxl::AcStrategyCandidateBatch invalid;
   invalid.candidate_count = 1;
   if (gjxl::EvaluateAcStrategyCandidates(

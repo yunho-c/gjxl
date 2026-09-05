@@ -66,6 +66,29 @@ bool CudaBackend::IsSupportedAcStrategy(
   }
 }
 
+Status CudaBackend::GetAcStrategyScratchRequirements(
+  AcStrategyType strategy,
+  size_t candidate_count,
+  AcStrategyScratchRequirements* requirements) const {
+  if (requirements == nullptr) {
+    return Status::InvalidArgument("AC-strategy scratch output is null");
+  }
+  AcStrategyScratchRequirements result;
+  Status status = GpuAcStrategyEvaluation::GetAcStrategyScratchRequirements(
+    strategy, candidate_count, &result);
+  if (!status.ok()) return status;
+  if (!IsSupportedAcStrategy(strategy)) {
+    return Status::Unavailable(
+      "CUDA candidate evaluation does not support this AC strategy");
+  }
+  // Forward coefficients occupy B. The fused residual/inverse evaluator
+  // writes only one loss sum per candidate channel into A.
+  result.scratch_a_bytes =
+    candidate_count * kAcStrategyCandidateChannelCount * sizeof(float);
+  *requirements = result;
+  return Status::Ok();
+}
+
 Status CudaBackend::RequireCudaBuffer(
   const DeviceBuffer* buffer,
   size_t required_bytes,
@@ -259,19 +282,15 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   const size_t coefficient_count = strategy_info->coefficient_count();
   size_t transform_count = 0;
   size_t packed_element_count = 0;
-  size_t packed_bytes = 0;
   size_t matrix_floats = 0;
   size_t matrix_bytes = 0;
   size_t candidate_bytes = 0;
-  size_t rate_channels = 0;
-  size_t rate_bytes = 0;
   size_t cost_bytes = 0;
   if (!TryMultiply(
         batch.candidate_count, kAcStrategyCandidateChannelCount,
         &transform_count) ||
       !TryMultiply(
         transform_count, coefficient_count, &packed_element_count) ||
-      !TryMultiply(packed_element_count, sizeof(float), &packed_bytes) ||
       !TryMultiply(
         coefficient_count, kAcStrategyCostMatrixCount,
         &matrix_floats) ||
@@ -279,12 +298,6 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
       !TryMultiply(
         batch.candidate_count, sizeof(AcStrategyCandidate),
         &candidate_bytes) ||
-      !TryMultiply(
-        batch.candidate_count, kAcStrategyCandidateChannelCount,
-        &rate_channels) ||
-      !TryMultiply(
-        rate_channels, kAcStrategyRateScratchBytesPerChannel,
-        &rate_bytes) ||
       !TryMultiply(batch.candidate_count, sizeof(float), &cost_bytes) ||
       transform_count > kUint32Maximum ||
       packed_element_count > kUint32Maximum) {
@@ -324,6 +337,10 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   }
 
   ValidatedAcStrategyBatch validated;
+  AcStrategyScratchRequirements scratch;
+  Status status = GetAcStrategyScratchRequirements(
+    batch.strategy, batch.candidate_count, &scratch);
+  if (!status.ok()) return status;
   std::array<ResolvedConstPlane, 3> resolved_opsin;
   for (size_t channel = 0; channel < 3; ++channel) {
     Status status = ResolvePlane(
@@ -334,7 +351,7 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
       resolved_opsin[channel].view.offset_bytes);
   }
   ResolvedConstPlane resolved_mask;
-  Status status = ResolvePlane(mask_view, &resolved_mask);
+  status = ResolvePlane(mask_view, &resolved_mask);
   if (!status.ok()) return status;
   validated.pixel_mask = OffsetPointer<float>(
     resolved_mask.buffer->pointer(), resolved_mask.view.offset_bytes);
@@ -387,15 +404,15 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
     "Candidate", &candidates);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(
-    batch.scratch_a, packed_bytes, batch.scratch_a_offset_bytes,
+    batch.scratch_a, scratch.scratch_a_bytes, batch.scratch_a_offset_bytes,
     "Scratch A", &scratch_a);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(
-    batch.scratch_b, packed_bytes, batch.scratch_b_offset_bytes,
+    batch.scratch_b, scratch.scratch_b_bytes, batch.scratch_b_offset_bytes,
     "Scratch B", &scratch_b);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(
-    batch.rate_scratch, rate_bytes, batch.rate_scratch_offset_bytes,
+    batch.rate_scratch, scratch.rate_scratch_bytes, batch.rate_scratch_offset_bytes,
     "Rate scratch", &rate_scratch);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(batch.costs, cost_bytes,
@@ -415,10 +432,12 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
       candidate_bytes),
   };
   const std::array<DeviceMemoryRange, 4> output_ranges = {
-    BufferRange(batch.scratch_a, batch.scratch_a_offset_bytes, packed_bytes),
-    BufferRange(batch.scratch_b, batch.scratch_b_offset_bytes, packed_bytes),
+    BufferRange(batch.scratch_a, batch.scratch_a_offset_bytes,
+      scratch.scratch_a_bytes),
+    BufferRange(batch.scratch_b, batch.scratch_b_offset_bytes,
+      scratch.scratch_b_bytes),
     BufferRange(batch.rate_scratch, batch.rate_scratch_offset_bytes,
-      rate_bytes),
+      scratch.rate_scratch_bytes),
     BufferRange(batch.costs, batch.costs_offset_bytes, cost_bytes),
   };
   for (size_t index = 0; index < output_ranges.size(); ++index) {

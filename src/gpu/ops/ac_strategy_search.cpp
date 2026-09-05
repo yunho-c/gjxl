@@ -417,7 +417,8 @@ static Status FindAcStrategyGridGpuImpl(
     auto& resources = state.resources;
     auto& cost_storage = state.cost_storage;
     AcStrategyGpuSearchStats result_stats;
-    size_t maximum_packed_bytes = 0;
+    size_t maximum_scratch_a_bytes = 0;
+    size_t maximum_scratch_b_bytes = 0;
     size_t maximum_rate_bytes = 0;
     size_t resource_capacity = 0;
     for (size_t i = 0; i < kStages.size(); ++i) {
@@ -463,27 +464,21 @@ static Status FindAcStrategyGridGpuImpl(
       }
       if (!status.ok()) return status;
 
-      const size_t coefficient_count =
-        GetAcStrategyInfo(resource.staged.strategy)->coefficient_count();
-      size_t packed_elements = 0;
-      size_t packed_bytes = 0;
-      size_t rate_bytes = 0;
-      if (!TryMultiply(resource.candidates.size(), 3, &packed_elements) ||
-          !TryMultiply(packed_elements, coefficient_count, &packed_elements) ||
-          !TryMultiply(packed_elements, sizeof(float), &packed_bytes) ||
-          !TryMultiply(resource.candidates.size(),
-            3 * kAcStrategyRateScratchBytesPerChannel,
-            &rate_bytes)) {
-        return Status::InvalidArgument(
-          "GPU AC-strategy search scratch size overflows");
-      }
-      maximum_packed_bytes = std::max(maximum_packed_bytes, packed_bytes);
-      maximum_rate_bytes = std::max(maximum_rate_bytes, rate_bytes);
+      AcStrategyScratchRequirements scratch;
+      status = GetAcStrategyScratchRequirements(gpu, resource.staged.strategy,
+        resource.candidates.size(), &scratch);
+      if (!status.ok()) return status;
+      maximum_scratch_a_bytes =
+        std::max(maximum_scratch_a_bytes, scratch.scratch_a_bytes);
+      maximum_scratch_b_bytes =
+        std::max(maximum_scratch_b_bytes, scratch.scratch_b_bytes);
+      maximum_rate_bytes =
+        std::max(maximum_rate_bytes, scratch.rate_scratch_bytes);
     }
 
-    status = PlanArenaBytes(maximum_packed_bytes, &resource_capacity);
+    status = PlanArenaBytes(maximum_scratch_a_bytes, &resource_capacity);
     if (status.ok()) {
-      status = PlanArenaBytes(maximum_packed_bytes, &resource_capacity);
+      status = PlanArenaBytes(maximum_scratch_b_bytes, &resource_capacity);
     }
     if (status.ok()) {
       status = PlanArenaBytes(maximum_rate_bytes, &resource_capacity);
@@ -515,6 +510,9 @@ static Status FindAcStrategyGridGpuImpl(
 
     status = state.resource_arena.Prepare(gpu, resource_capacity);
     if (!status.ok()) return status;
+    result_stats.scratch = {
+      maximum_scratch_a_bytes, maximum_scratch_b_bytes, maximum_rate_bytes};
+    result_stats.resource_capacity_bytes = state.resource_arena.capacity_bytes();
     for (StrategyResources& resource : resources) {
       if (resource.candidates.empty()) continue;
       status = AllocateArenaBytes(state.resource_arena,
@@ -544,10 +542,10 @@ static Status FindAcStrategyGridGpuImpl(
       if (!status.ok()) return status;
     }
     status = AllocateArenaBytes(
-      state.resource_arena, maximum_packed_bytes, &state.scratch_a);
+      state.resource_arena, maximum_scratch_a_bytes, &state.scratch_a);
     if (status.ok()) {
       status = AllocateArenaBytes(
-        state.resource_arena, maximum_packed_bytes, &state.scratch_b);
+        state.resource_arena, maximum_scratch_b_bytes, &state.scratch_b);
     }
     if (status.ok()) {
       status = AllocateArenaBytes(

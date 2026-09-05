@@ -2347,6 +2347,15 @@ if(GJXL_BUILD_TESTS)
     )
     set_tests_properties(cuda_ac_strategy PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_ac_strategy_cuda_search_test
+      tests/ac_strategy_gpu_search_test.cpp)
+    target_compile_definitions(gjxl_ac_strategy_cuda_search_test PRIVATE
+      GJXL_TEST_CUDA=1)
+    target_link_libraries(gjxl_ac_strategy_cuda_search_test PRIVATE
+      gjxl_gpu_ops gjxl_cuda)
+    add_test(NAME cuda_ac_strategy_search COMMAND gjxl_ac_strategy_cuda_search_test)
+    set_tests_properties(cuda_ac_strategy_search PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(
       gjxl_cuda_butteraugli_test
       tests/cuda_butteraugli_test.cpp
