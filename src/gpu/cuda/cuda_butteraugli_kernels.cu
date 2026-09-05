@@ -16,6 +16,10 @@ namespace {
 
 constexpr unsigned int kPlaneThreads = 256;
 constexpr unsigned int kReductionWidth = 256;
+constexpr unsigned int kMaltaTileWidth = 32;
+constexpr unsigned int kMaltaTileHeight = 8;
+constexpr unsigned int kMaltaRadius = 4;
+constexpr unsigned int kMaltaTileStride = kMaltaTileWidth + 2 * kMaltaRadius;
 constexpr unsigned int kImage = 21;
 constexpr unsigned int kAc = kImage;
 constexpr unsigned int kDc = kImage + 3;
@@ -500,9 +504,8 @@ __device__ float Sum9(float a, float b, float c, float d, float e, float f,
   return ((a + b) + (c + d)) + ((e + f) + (g + h)) + i;
 }
 
-__device__ float MaltaLf(const float* input, int x, int y,
-                         MaltaResponseParams p) {
-#define GJXL_V(dx, dy) ReadZero(input, x + (dx), y + (dy), p)
+__device__ float MaltaLf(const float* center) {
+#define GJXL_V(dx, dy) center[(dy) * static_cast<int>(kMaltaTileStride) + (dx)]
   float sum = Sum5(GJXL_V(-4, 0), GJXL_V(-2, 0), GJXL_V(0, 0), GJXL_V(2, 0),
                    GJXL_V(4, 0));
   float result = sum * sum;
@@ -555,9 +558,8 @@ __device__ float MaltaLf(const float* input, int x, int y,
   return result;
 }
 
-__device__ float MaltaFull(const float* input, int x, int y,
-                           MaltaResponseParams p) {
-#define GJXL_V(dx, dy) ReadZero(input, x + (dx), y + (dy), p)
+__device__ float MaltaFull(const float* center) {
+#define GJXL_V(dx, dy) center[(dy) * static_cast<int>(kMaltaTileStride) + (dx)]
   float sum = Sum9(GJXL_V(-4, 0), GJXL_V(-3, 0), GJXL_V(-2, 0), GJXL_V(-1, 0),
                    GJXL_V(0, 0), GJXL_V(1, 0), GJXL_V(2, 0), GJXL_V(3, 0),
                    GJXL_V(4, 0));
@@ -622,17 +624,34 @@ __device__ float MaltaFull(const float* input, int x, int y,
 
 __global__ void MaltaResponseKernel(const float* input, float* accumulation,
                                     MaltaResponseParams params) {
-  const size_t index =
-      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  const size_t count = static_cast<size_t>(params.width) * params.height;
-  if (index >= count) return;
-  const uint32_t y = static_cast<uint32_t>(index / params.width);
-  const uint32_t x =
-      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  constexpr unsigned int kTileValues =
+      kMaltaTileStride * (kMaltaTileHeight + 2 * kMaltaRadius);
+  __shared__ float tile[kTileValues];
+  const uint32_t tile_columns =
+      (params.width + kMaltaTileWidth - 1) / kMaltaTileWidth;
+  const uint32_t origin_x = (blockIdx.x % tile_columns) * kMaltaTileWidth;
+  const uint32_t origin_y = (blockIdx.x / tile_columns) * kMaltaTileHeight;
+  // Include a zero-filled halo so each response can use fixed shared-memory
+  // offsets without repeating image-boundary checks for every sample. All
+  // threads load and synchronize, including those in a partial edge tile.
+  for (unsigned int index = threadIdx.x; index < kTileValues;
+       index += blockDim.x) {
+    const int x = static_cast<int>(origin_x + index % kMaltaTileStride) -
+                  static_cast<int>(kMaltaRadius);
+    const int y = static_cast<int>(origin_y + index / kMaltaTileStride) -
+                  static_cast<int>(kMaltaRadius);
+    tile[index] = ReadZero(input, x, y, params);
+  }
+  __syncthreads();
+  const uint32_t local_x = threadIdx.x % kMaltaTileWidth;
+  const uint32_t local_y = threadIdx.x / kMaltaTileWidth;
+  const uint32_t x = origin_x + local_x;
+  const uint32_t y = origin_y + local_y;
+  if (x >= params.width || y >= params.height) return;
+  const float* center = tile +
+      (local_y + kMaltaRadius) * kMaltaTileStride + local_x + kMaltaRadius;
   const float result =
-      params.low_frequency != 0
-          ? MaltaLf(input, static_cast<int>(x), static_cast<int>(y), params)
-          : MaltaFull(input, static_cast<int>(x), static_cast<int>(y), params);
+      params.low_frequency != 0 ? MaltaLf(center) : MaltaFull(center);
   const size_t output = static_cast<size_t>(y) * params.accumulation_stride + x;
   if (params.initialize_accumulation != 0) {
     accumulation[output] = result;
@@ -1130,7 +1149,10 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
                                        plan.working_width,
                                        static_cast<uint32_t>(low_frequency),
                                        static_cast<uint32_t>(stage >= 4)};
-    MaltaResponseKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0,
+    const unsigned int malta_blocks =
+        ((width + kMaltaTileWidth - 1) / kMaltaTileWidth) *
+        ((height + kMaltaTileHeight - 1) / kMaltaTileHeight);
+    MaltaResponseKernel<<<malta_blocks, kMaltaTileWidth * kMaltaTileHeight, 0,
                           stream>>>(plan.planes[kWork],
                                     plan.planes[kAc + channel], response);
     error = CheckLaunch();

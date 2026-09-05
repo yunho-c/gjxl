@@ -1,6 +1,6 @@
 # CUDA optimization study S1
 
-- Status: profiling complete; S1.1-S1.5 and the packed-DCT follow-up implemented
+- Status: S1.1-S1.5, packed DCT, and tiled Malta implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -11,7 +11,13 @@
 
 ## Executive finding
 
-The current CUDA backend has two different performance profiles.
+The opening measurements describe revision `a474937`; the completion snapshots
+below supersede them. The latest Malta checkpoint against `2b91775` reduces
+4K GPU kernel time from `336.7 ms` to `307.2 ms`. Convolution, AC-search
+residual evaluation, and reconstruction filtering remain material targets;
+the resident path has not reached its performance limit.
+
+The initial measurements showed two different performance profiles.
 
 - Fully-resident encoding is compute-bound. Forward and inverse DCT kernels
   consume `133.7 ms`, or about 67% of measured GPU kernel time, in the warmed
@@ -745,6 +751,106 @@ require a small graph cache keyed by geometry and policy shape.
 
 Maximum-throughput has only 32 launches and `0.8 ms` of launch API time, so it
 does not justify a graph-specific implementation by itself.
+
+### Follow-up: tile Butteraugli Malta response (2026-09-05)
+
+After packed DCT, resident AQ and reconstruction became the largest GPU phase.
+A fresh warmed odd-4K trace at revision `2b91775` attributes `46.621 ms` to
+24 `MaltaResponseKernel` launches. Each output reads an overlapping radius-4
+neighborhood from global memory and repeats bounds handling for its samples.
+The compiled kernel uses 105 registers per thread.
+
+The retained implementation cooperatively loads a 32x8 output tile and its
+four-pixel halo into a 40x16 shared-memory array. Out-of-image halo entries
+are zero, and partial-tile threads participate in loading and synchronization
+before exiting. Each warp evaluates one row using fixed shared-memory offsets.
+The response formulas, addition trees, explicit unfused square accumulation,
+and stage ordering are unchanged. The kernel uses 40 registers per thread and
+2,560 bytes of shared memory. It adds no device allocations or launches.
+
+Matched warmed Nsight Systems captures on the RTX 3060 Laptop GPU show:
+
+| GPU scope | Parent `2b91775` | Tiled Malta | Change |
+|---|---:|---:|---:|
+| Malta response, main scale | 37.332 ms | 12.181 ms | -67.4% |
+| Malta response, subscale | 9.289 ms | 3.186 ms | -65.7% |
+| All Malta response | 46.621 ms | 15.367 ms | -67.0% |
+| All kernel execution | 336.691 ms | 307.198 ms | -8.8% |
+
+Both traces contain 516 launches, 117,079,320 HtoD bytes, and 103,699,012
+DtoH bytes. A 32x16 alternative was also measured: it uses 512 threads and
+3,840 shared bytes per block but takes `16.365 ms` for Malta response, 6.5%
+longer than 32x8 in these captures. The 32x8 shape was retained. These timings
+and compiler resource counts establish the improvement without attributing
+it to unmeasured occupancy or cache-hit counters.
+
+Public workflow measurements use seven alternating parent/candidate process
+pairs per workload, each with one warmup and one retained sample, distance
+`1.2`, effort `7`, fully-resident AQ, automatic CPU threads, and no final-score
+diagnostic. Cohort medians and median paired changes are:
+
+| Workload and stage | Parent | Tiled Malta | Median paired change |
+|---|---:|---:|---:|
+| Odd 4K, total | 752.910 ms | 716.324 ms | -4.9% |
+| Odd 4K, quantization | 526.240 ms | 498.863 ms | -7.0% |
+| Odd 1080p, total | 224.350 ms | 240.598 ms | +1.9% |
+| Odd 1080p, quantization | 140.054 ms | 137.667 ms | -5.3% |
+
+Five of seven 4K pairs improved both total and quantization time. Parent 4K
+totals ranged from `718.114-805.252 ms`, versus `686.161-765.478 ms` for the
+candidate. At 1080p, six of seven quantization pairs improved, but only three
+total-time pairs improved. CPU codestream serialization ranged from
+`64.589-82.083 ms` in the parent and `63.538-135.582 ms` in the candidate,
+despite unchanged output bytes. This session does not establish an end-to-end
+1080p improvement; the 4K paired result and isolated kernel savings support
+retaining the change. GPU state moved from 61 C/P8/210 MHz before the paired
+runs to 71 C/P0/1762 MHz afterward.
+
+Post-change 1080p batch checks used one warmup and three alternating
+serial/batch samples:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 219.364 ms | 4.559 | 1.005x |
+| Fully resident | 2 | 348.133 ms | 5.745 | 1.331x |
+| Fully resident | 4 | 649.428 ms | 6.159 | 1.412x |
+| Maximum throughput | 1 | 108.430 ms | 9.223 | 0.995x |
+| Maximum throughput | 2 | 161.797 ms | 12.361 | 1.280x |
+| Maximum throughput | 4 | 312.849 ms | 12.786 | 1.482x |
+
+These qualify batch behavior, not a before/after batch-performance claim.
+Maximum-throughput does not run Malta response. GPU state at the end of batch
+qualification was 66 C/P0/1282 MHz.
+
+All 53 CUDA-build tests and all 47 CPU-only tests pass. Butteraugli coverage
+now includes `31x8`, `32x9`, `65x33`, and `127x65` inputs to exercise tile
+boundaries, multiple interior tiles, and odd multiscale geometry with poisoned
+host/device padding. The worst CPU-reference distance-map error is
+`2.0504e-5`, below the existing `1.5e-3` tolerance. Compute Sanitizer memcheck,
+racecheck, synccheck, and initcheck report zero errors or hazards on this
+suite. Existing CUDA AQ tests cover exact CPU codestream identity, failure
+atomicity, and repeated four-worker resident/maximum-throughput encoding.
+
+Parent and candidate fully-resident codestreams are byte-identical for the
+sample image at efforts 7 and 9 and the odd 1080p/4K qualification images at
+effort 7, all with final-score collection enabled. Reported final scores also
+match. The pinned `djxl` independently decodes all four at the original
+dimensions. The odd 1080p SHA-256 is
+`454cd84cc7ee6e915075ab741e7eec4bcc04a250c5f82d238c8ec4979f9f45f3`;
+the odd 4K SHA-256 is
+`86be75ba11d76a780edc6dea4b80daec848ddddfcf9452fe60f29f77afac0bc9`.
+
+Ignored artifacts under `build-cuda-ninja/profiles` use the `s18_` prefix:
+`s18_parent_4k`, `s18_malta_4k`, and `s18_tile32x16_4k` traces/SQLite exports,
+`s18_paired_4k.json`, `s18_paired_1080p.json`, and qualification codestreams.
+
+The next measured targets in the candidate 4K trace are Butteraugli
+convolutions (`55.071 ms`), AC-search residual evaluation (`34.214 ms`), and
+EPF (`20.597 ms`). CUDA launch API time is only `6.525 ms` for 516 launches,
+so graph work should be compared against these larger compute opportunities.
+CPU serialization and the remaining synchronous transfers also need attention
+as GPU execution shrinks. This checkpoint does not establish a performance
+ceiling or qualify other GPU generations and a natural-image corpus.
 
 ## Work that should not lead the next cycle
 
