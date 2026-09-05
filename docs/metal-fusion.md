@@ -995,6 +995,100 @@ change the tradeoff.
 The retained experiment artifact is
 `/private/tmp/gjxl-metal-fusion-ultra7-stage.pNIbhE`.
 
+#### Phase 3.3 result: direct-load tiled 33-tap low/medium filtering (2026-09-04)
+
+The independent radius-16 experiment is retained. It replaces the
+channel-fused horizontal transpose and the vertical low/medium pass with one
+`16 x 64` tiled kernel. Threads cooperatively compute the three horizontal
+planes directly from the planar XYB inputs, store only those FP32 results in
+threadgroup memory, synchronize once, and then apply the vertical convolution
+and the existing low/medium transforms. The horizontal materialization point
+therefore remains FP32, but it no longer occupies three full-image scratch
+planes or crosses device memory.
+
+The production threadgroup uses 1,024 threads and `18,432 B` of memory for
+three `16 x 96` horizontal planes. Its interior vertical-halo amplification is
+`1.5x`: each 64-row output tile computes 32 extra horizontal rows. Pipeline
+creation validates both the 1,024-thread limit and the dynamic memory
+requirement before the Metal backend becomes available.
+
+The first family of prototypes cached the complete three-channel input halo as
+well as the horizontal results. Even its least redundant tested geometry had
+an `11.67x` raw-halo amplification, and all four shapes regressed every one of
+seven padded-4K stage pairs:
+
+| Raw tile | Threadgroup memory | Raw-halo amplification | Reference mean | Resident mean | Main psycho mean | Subscale psycho mean |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `8 x 16` | `27,648 B` | `15.0x` | `+63.56%` | `+38.00%` | `+130.84%` | `+112.76%` |
+| `16 x 8` | `30,720 B` | `15.0x` | `+98.83%` | `+55.11%` | `+189.13%` | `+161.73%` |
+| `8 x 24` | `32,256 B` | `11.67x` | `+39.21%` | `+20.76%` | `+72.26%` | `+61.44%` |
+| `4 x 32` | `30,720 B` | `18.0x` | `+64.22%` | `+32.57%` | `+112.57%` | `+96.81%` |
+
+The direct-load design avoids that raw-tile replication. Four geometries then
+improved every resident, main-psycho, and subscale-psycho pair. The `16 x 64`
+shape was the clear psycho-stage winner:
+
+| Direct tile | Threadgroup memory | Reference median | Resident median | Main psycho median | Subscale psycho median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| control | n/a | `29.929 ms` | `107.360 ms` | `25.024 ms` | `7.330 ms` |
+| `8 x 64` | `9,216 B` | `29.009 ms` (`-3.07%`, 4/7) | `105.908 ms` (`-1.35%`, 7/7) | `23.763 ms` (`-5.04%`, 7/7) | `6.982 ms` (`-4.75%`, 7/7) |
+| `16 x 32` | `12,288 B` | `28.952 ms` (`-3.27%`, 5/7) | `105.992 ms` (`-1.27%`, 7/7) | `23.975 ms` (`-4.19%`, 7/7) | `7.052 ms` (`-3.79%`, 7/7) |
+| `16 x 64` | `18,432 B` | `28.294 ms` (`-5.46%`, 6/7) | `104.419 ms` (`-2.74%`, 7/7) | `22.576 ms` (`-9.78%`, 7/7) | `6.709 ms` (`-8.48%`, 7/7) |
+| `32 x 32` | `24,576 B` | `27.956 ms` (`-6.59%`, 5/7) | `106.175 ms` (`-1.10%`, 7/7) | `23.928 ms` (`-4.38%`, 7/7) | `7.059 ms` (`-3.70%`, 7/7) |
+
+Parentheses report change from the separable control and tiled wins out of
+seven rotated rounds. The retained path reduces reference preparation from 34
+to 32 dispatches and the two-evaluation resident submission from 296 to 292.
+At padded 4K it removes about `30.8 million` launched threads across reference
+preparation and resident AQ. A nominal shader-request accounting also removes
+about `6.08 GiB` across the six psycho images after charging the direct path
+for its `1.5x` duplicated horizontal input work. This estimate is not measured
+DRAM traffic and excludes edge rounding and cache effects.
+
+Seven alternating independent-process complete-workflow pairs confirmed a
+smaller but consistent end-to-end benefit:
+
+| Workload | Control median | Tiled median | Change | Tiled wins |
+| --- | ---: | ---: | ---: | ---: |
+| padded 1080p | `85.118 ms` | `84.387 ms` | `-0.86%` | 7/7 |
+| padded 4K | `303.917 ms` | `302.157 ms` | `-0.58%` | 5/7 |
+
+The complete focused Metal Butteraugli test passed with the same established
+maxima as the control: `0.000549316` for map and score and `0.000396729` for
+captured stages. Control and tiled builds emitted byte-identical codestreams
+for a small odd-sized fixture and representative Kodak, real-1080p, and
+real-4K inputs.
+
+A focused Performance Limiters micro-capture repeated the new subscale grid to
+obtain clean counter intervals between the preceding subsample shader and the
+following high-frequency shader. Across seven trimmed intervals, mean kernel
+occupancy was `56.7%` against a `64.6%` occupancy-manager target. Mean compute
+shader launch, instruction-throughput, F32, and L1 limiters were `86.8%`,
+`73.3%`, `59.0%`, and `19.8%`; buffer L1 miss rate was `8.6%`. Stack L1 reads
+and writes each averaged `0.0001%`. This intrusive counter workload is not an
+elapsed-time benchmark, but it rules out stack spilling and a pathological
+occupancy collapse in the 1,024-thread production shape.
+
+The direct kernel supersedes the Phase 2.3 transpose implementation, so the
+old three-channel transpose, vertical low/medium pipeline, full-image
+intermediate routing, raw-tile prototype, and private build selectors have all
+been removed. The retained source is smaller than the separable implementation
+it replaces. The slice therefore qualifies under the plan's exception for a
+simple, independently measured change even though Amdahl dilution keeps its
+complete-workflow improvement below 5%.
+
+The retained experiment artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-low33-stage.0hLOxo` (raw-tile stage matrix);
+- `/private/tmp/gjxl-metal-fusion-low33-direct-stage.IIZY7x` (direct-tile stage
+  matrix);
+- `/private/tmp/gjxl-metal-fusion-low33-direct-wall.M0dWmH` (complete-workflow
+  pairs);
+- `/private/tmp/gjxl-metal-fusion-low33-codestream.7b1EAN` (exact-output
+  comparisons); and
+- `/private/tmp/gjxl-metal-fusion-low33-counters.xXqOdz` (focused counter
+  micro-capture).
+
 ### Phase 4: resident sink fusion
 
 After the perceptual kernels stabilize:

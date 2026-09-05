@@ -45,14 +45,6 @@ struct ConvolutionParams {
   uint kernel_size;
 };
 
-struct Convolution3Params {
-  uint width;
-  uint height;
-  uint input_stride[3];
-  uint output_stride[3];
-  uint kernel_size;
-};
-
 struct OpsinParams {
   uint width;
   uint height;
@@ -63,13 +55,11 @@ struct OpsinParams {
   float intensity_target;
 };
 
-struct FrequencyLowMediumConvolutionParams {
+struct FrequencyLowMediumTiledParams {
   uint width;
   uint height;
-  uint intermediate_stride;
-  uint xyb_stride;
-  uint psycho_stride;
-  uint kernel_size;
+  uint input_stride;
+  uint output_stride;
 };
 
 struct FrequencyConvolutionChannelParams {
@@ -354,44 +344,6 @@ kernel void gjxl_butteraugli_convolve_transpose_f32(
   output[position.x * params.output_stride + position.y] = sum / weight_sum;
 }
 
-kernel void gjxl_butteraugli_convolve_transpose_3_f32(
-  device const float* input0 [[buffer(0)]],
-  device const float* input1 [[buffer(1)]],
-  device const float* input2 [[buffer(2)]],
-  device const float* weights [[buffer(3)]],
-  device float* output0 [[buffer(4)]],
-  device float* output1 [[buffer(5)]],
-  device float* output2 [[buffer(6)]],
-  constant Convolution3Params& params [[buffer(7)]],
-  uint2 position [[thread_position_in_grid]]) {
-
-  if (position.x >= params.width || position.y >= params.height) return;
-  const int radius = int(params.kernel_size / 2);
-  const int center = int(position.x);
-  const int first = max(0, center - radius);
-  const int last = min(int(params.width) - 1, center + radius);
-  float weight_sum = 0.0f;
-  float sum0 = 0.0f;
-  float sum1 = 0.0f;
-  float sum2 = 0.0f;
-  for (int source_x = first; source_x <= last; ++source_x) {
-    const float weight = weights[source_x + radius - center];
-    weight_sum += weight;
-    sum0 += input0[
-      position.y * params.input_stride[0] + uint(source_x)] * weight;
-    sum1 += input1[
-      position.y * params.input_stride[1] + uint(source_x)] * weight;
-    sum2 += input2[
-      position.y * params.input_stride[2] + uint(source_x)] * weight;
-  }
-  output0[position.x * params.output_stride[0] + position.y] =
-    sum0 / weight_sum;
-  output1[position.x * params.output_stride[1] + position.y] =
-    sum1 / weight_sum;
-  output2[position.x * params.output_stride[2] + position.y] =
-    sum2 / weight_sum;
-}
-
 inline float butteraugli_fast_log2(float value) {
   constexpr float kP0 = -1.8503833400518310e-06f;
   constexpr float kP1 = 1.4287160470083755f;
@@ -572,44 +524,98 @@ inline float convolve_transposed_vertical_value(
   return sum / weight_sum;
 }
 
-kernel void gjxl_butteraugli_frequency_low_medium_convolve_f32(
-  device const float* intermediate0 [[buffer(0)]],
-  device const float* intermediate1 [[buffer(1)]],
-  device const float* intermediate2 [[buffer(2)]],
+kernel void gjxl_butteraugli_frequency_low_medium_tiled_f32(
+  device const float* input0 [[buffer(0)]],
+  device const float* input1 [[buffer(1)]],
+  device const float* input2 [[buffer(2)]],
   device const float* weights [[buffer(3)]],
-  device const float* xyb0 [[buffer(4)]],
-  device const float* xyb1 [[buffer(5)]],
-  device const float* xyb2 [[buffer(6)]],
-  device float* low0 [[buffer(7)]],
-  device float* low1 [[buffer(8)]],
-  device float* low2 [[buffer(9)]],
-  device float* medium0 [[buffer(10)]],
-  device float* medium1 [[buffer(11)]],
-  device float* medium2 [[buffer(12)]],
-  constant FrequencyLowMediumConvolutionParams& params [[buffer(13)]],
-  uint2 position [[thread_position_in_grid]]) {
+  device float* low0 [[buffer(4)]],
+  device float* low1 [[buffer(5)]],
+  device float* low2 [[buffer(6)]],
+  device float* medium0 [[buffer(7)]],
+  device float* medium1 [[buffer(8)]],
+  device float* medium2 [[buffer(9)]],
+  constant FrequencyLowMediumTiledParams& params [[buffer(10)]],
+  threadgroup float* scratch [[threadgroup(0)]],
+  uint2 local_position [[thread_position_in_threadgroup]],
+  uint2 group_position [[threadgroup_position_in_grid]],
+  uint2 group_size [[threads_per_threadgroup]]) {
 
+  constexpr int kRadius = 16;
+  const uint tile_height = group_size.y + 2 * uint(kRadius);
+  const uint horizontal_stride = group_size.x;
+  const uint horizontal_plane_size = horizontal_stride * tile_height;
+  threadgroup float* horizontal0 = scratch;
+  threadgroup float* horizontal1 = horizontal0 + horizontal_plane_size;
+  threadgroup float* horizontal2 = horizontal1 + horizontal_plane_size;
+
+  const uint thread_index =
+    local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int group_x = int(group_position.x * group_size.x);
+  const int group_y = int(group_position.y * group_size.y);
+  const int horizontal_origin_y = group_y - kRadius;
+  for (uint index = thread_index; index < horizontal_plane_size;
+       index += thread_count) {
+    const uint local_x = index % horizontal_stride;
+    const uint tile_y = index / horizontal_stride;
+    const int x = group_x + int(local_x);
+    const int y = horizontal_origin_y + int(tile_y);
+    float weight_sum = 0.0f;
+    float sum0 = 0.0f;
+    float sum1 = 0.0f;
+    float sum2 = 0.0f;
+    if (x < int(params.width) && y >= 0 && y < int(params.height)) {
+      const int first = max(0, x - kRadius);
+      const int last = min(int(params.width) - 1, x + kRadius);
+      for (int source_x = first; source_x <= last; ++source_x) {
+        const float weight = weights[source_x + kRadius - x];
+        const uint input_index =
+          uint(y) * params.input_stride + uint(source_x);
+        weight_sum += weight;
+        sum0 += input0[input_index] * weight;
+        sum1 += input1[input_index] * weight;
+        sum2 += input2[input_index] * weight;
+      }
+    }
+    horizontal0[index] = weight_sum == 0.0f ? 0.0f : sum0 / weight_sum;
+    horizontal1[index] = weight_sum == 0.0f ? 0.0f : sum1 / weight_sum;
+    horizontal2[index] = weight_sum == 0.0f ? 0.0f : sum2 / weight_sum;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint2 position = group_position * group_size + local_position;
   if (position.x >= params.width || position.y >= params.height) return;
-  const int radius = int(params.kernel_size / 2);
   const int y = int(position.y);
-  const int height = int(params.height);
-  const float low_x = convolve_transposed_vertical_value(
-    intermediate0, weights, position.x, y, height,
-    params.intermediate_stride, radius);
-  const float low_y = convolve_transposed_vertical_value(
-    intermediate1, weights, position.x, y, height,
-    params.intermediate_stride, radius);
-  const float low_b = convolve_transposed_vertical_value(
-    intermediate2, weights, position.x, y, height,
-    params.intermediate_stride, radius);
-  const uint xyb_index = position.y * params.xyb_stride + position.x;
-  const uint psycho_index = position.y * params.psycho_stride + position.x;
-  medium0[psycho_index] = xyb0[xyb_index] - low_x;
-  medium1[psycho_index] = xyb1[xyb_index] - low_y;
-  medium2[psycho_index] = xyb2[xyb_index] - low_b;
-  low0[psycho_index] = low_x * 33.832837186260f;
-  low1[psycho_index] = low_y * 14.458268100570f;
-  low2[psycho_index] =
+  const int first = max(0, y - kRadius);
+  const int last = min(int(params.height) - 1, y + kRadius);
+  float weight_sum = 0.0f;
+  float sum0 = 0.0f;
+  float sum1 = 0.0f;
+  float sum2 = 0.0f;
+  for (int source_y = first; source_y <= last; ++source_y) {
+    const float weight = weights[source_y + kRadius - y];
+    const uint horizontal_index =
+      uint(source_y - horizontal_origin_y) * horizontal_stride +
+      local_position.x;
+    weight_sum += weight;
+    sum0 += horizontal0[horizontal_index] * weight;
+    sum1 += horizontal1[horizontal_index] * weight;
+    sum2 += horizontal2[horizontal_index] * weight;
+  }
+  const float low_x = sum0 / weight_sum;
+  const float low_y = sum1 / weight_sum;
+  const float low_b = sum2 / weight_sum;
+  const uint input_index =
+    position.y * params.input_stride + position.x;
+  const uint output_index =
+    position.y * params.output_stride + position.x;
+  medium0[output_index] = input0[input_index] - low_x;
+  medium1[output_index] = input1[input_index] - low_y;
+  medium2[output_index] = input2[input_index] - low_b;
+  low0[output_index] = low_x * 33.832837186260f;
+  low1[output_index] = low_y * 14.458268100570f;
+  low2[output_index] =
     unfused_multiply_add(-0.362267051518f, low_y, low_b) *
     49.87984651440f;
 }

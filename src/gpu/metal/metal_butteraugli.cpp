@@ -75,6 +75,16 @@ constexpr size_t kOpsinBlur5ThreadgroupMemoryBytes =
        kOpsinBlur5HorizontalPlaneElements) * sizeof(float);
 static_assert(kOpsinBlur5TileWidth > 0 && kOpsinBlur5TileHeight > 0);
 static_assert(kOpsinBlur5TileWidth * kOpsinBlur5TileHeight <= 1024);
+constexpr size_t kLowMediumTileWidth = 16;
+constexpr size_t kLowMediumTileHeight = 64;
+constexpr size_t kLowMediumRadius = 16;
+constexpr size_t kLowMediumHorizontalPlaneElements =
+  kLowMediumTileWidth *
+  (kLowMediumTileHeight + 2 * kLowMediumRadius);
+constexpr size_t kLowMediumThreadgroupMemoryBytes =
+  3 * kLowMediumHorizontalPlaneElements * sizeof(float);
+static_assert(kLowMediumTileWidth > 0 && kLowMediumTileHeight > 0);
+static_assert(kLowMediumTileWidth * kLowMediumTileHeight <= 1024);
 
 using PsychoPlanes = std::array<DevicePlaneView, kPsychoPlaneCount>;
 
@@ -132,14 +142,6 @@ struct ConvolutionParams {
   uint32_t kernel_size;
 };
 
-struct Convolution3Params {
-  uint32_t width;
-  uint32_t height;
-  std::array<uint32_t, 3> input_stride;
-  std::array<uint32_t, 3> output_stride;
-  uint32_t kernel_size;
-};
-
 struct OpsinParams {
   uint32_t width;
   uint32_t height;
@@ -150,13 +152,11 @@ struct OpsinParams {
   float intensity_target;
 };
 
-struct FrequencyLowMediumConvolutionParams {
+struct FrequencyLowMediumTiledParams {
   uint32_t width;
   uint32_t height;
-  uint32_t intermediate_stride;
-  uint32_t xyb_stride;
-  uint32_t psycho_stride;
-  uint32_t kernel_size;
+  uint32_t input_stride;
+  uint32_t output_stride;
 };
 
 struct FrequencyConvolutionChannelParams {
@@ -252,9 +252,8 @@ static_assert(sizeof(PlaneParams) == 16);
 static_assert(sizeof(ExpandParams) == 32);
 static_assert(sizeof(SubsampleParams) == 24);
 static_assert(sizeof(ConvolutionParams) == 20);
-static_assert(sizeof(Convolution3Params) == 36);
 static_assert(sizeof(OpsinParams) == 28);
-static_assert(sizeof(FrequencyLowMediumConvolutionParams) == 24);
+static_assert(sizeof(FrequencyLowMediumTiledParams) == 16);
 static_assert(sizeof(FrequencyConvolutionChannelParams) == 28);
 static_assert(sizeof(MaltaScaleParams) == 36);
 static_assert(sizeof(MaltaResponseParams) == 32);
@@ -925,65 +924,36 @@ private:
       }
     }
 
-    std::array<ConstDevicePlaneView, 3> frequency_input;
-    std::array<DevicePlaneView, 3> frequency_intermediate;
-    Convolution3Params frequency_convolution_params{
+    const FrequencyLowMediumTiledParams frequency_params{
       static_cast<uint32_t>(scale_extent.width),
       static_cast<uint32_t>(scale_extent.height),
-      {},
-      {},
-      static_cast<uint32_t>(kKernelSizes[1]),
-    };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.convolution_transpose3.get());
-    for (size_t channel = 0; channel < 3; ++channel) {
-      frequency_input[channel] =
-        AsConst(Plane(kImage + channel, scale_extent));
-      frequency_intermediate[channel] =
-        TransposedPlane(kPsychoWork + channel, scale_extent);
-      frequency_convolution_params.input_stride[channel] =
-        static_cast<uint32_t>(frequency_input[channel].row_stride);
-      frequency_convolution_params.output_stride[channel] =
-        static_cast<uint32_t>(frequency_intermediate[channel].row_stride);
-      Bind(encoder, Handle(metal_, frequency_input[channel]),
-           frequency_input[channel].offset_bytes, channel);
-      Bind(encoder, Handle(metal_, frequency_intermediate[channel]),
-           frequency_intermediate[channel].offset_bytes, 4 + channel);
-    }
-    Bind(encoder, Handle(metal_, kernels_[1]), kernels_[1].offset_bytes, 3);
-    encoder->setBytes(
-      &frequency_convolution_params, sizeof(frequency_convolution_params), 7);
-    metal_.DispatchPlane(encoder, scale_extent);
-    const FrequencyLowMediumConvolutionParams frequency_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(
-        TransposedPlane(kPsychoWork, scale_extent).row_stride),
       static_cast<uint32_t>(working_extent_.width),
       static_cast<uint32_t>(psycho[0].row_stride),
-      static_cast<uint32_t>(kKernelSizes[1]),
     };
     encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.frequency_low_medium_convolve.get());
-    for (size_t channel = 0; channel < 3; ++channel) {
-      DevicePlaneView intermediate =
-        TransposedPlane(kPsychoWork + channel, scale_extent);
-      Bind(encoder, Handle(metal_, intermediate),
-           intermediate.offset_bytes, channel);
-    }
-    Bind(encoder, Handle(metal_, kernels_[1]),
-         kernels_[1].offset_bytes, 3);
+      metal_.butteraugli_pipelines_.frequency_low_medium_tiled.get());
     for (size_t channel = 0; channel < 3; ++channel) {
       DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
       DevicePlaneView low = psycho[channel];
       DevicePlaneView medium = psycho[3 + channel];
-      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 4 + channel);
-      Bind(encoder, Handle(metal_, low), low.offset_bytes, 7 + channel);
+      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, channel);
+      Bind(encoder, Handle(metal_, low), low.offset_bytes, 4 + channel);
       Bind(encoder, Handle(metal_, medium),
-           medium.offset_bytes, 10 + channel);
+           medium.offset_bytes, 7 + channel);
     }
-    encoder->setBytes(&frequency_params, sizeof(frequency_params), 13);
-    metal_.DispatchPlane(encoder, scale_extent);
+    Bind(encoder, Handle(metal_, kernels_[1]), kernels_[1].offset_bytes, 3);
+    encoder->setBytes(&frequency_params, sizeof(frequency_params), 10);
+    encoder->setThreadgroupMemoryLength(
+      kLowMediumThreadgroupMemoryBytes, 0);
+    DispatchMetalThreadgroups(
+      encoder,
+      MTL::Size(
+        (scale_extent.width + kLowMediumTileWidth - 1) /
+          kLowMediumTileWidth,
+        (scale_extent.height + kLowMediumTileHeight - 1) /
+          kLowMediumTileHeight,
+        1),
+      MTL::Size(kLowMediumTileWidth, kLowMediumTileHeight, 1));
     if (capture_reference) {
       for (size_t channel = 0; channel < 3; ++channel) {
         MaybeCapture(
@@ -1810,19 +1780,17 @@ Status CreateButteraugliPipelines(
   ButteraugliPipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 24> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 23> bindings{{
     {"gjxl_butteraugli_copy_f32", &pipelines.copy},
     {"gjxl_butteraugli_expand_f32", &pipelines.expand},
     {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
     {"gjxl_butteraugli_blur5_horizontal_f32", &pipelines.blur5_horizontal},
     {"gjxl_butteraugli_blur5_vertical_f32", &pipelines.blur5_vertical},
     {"gjxl_butteraugli_convolve_transpose_f32", &pipelines.convolution_transpose},
-    {"gjxl_butteraugli_convolve_transpose_3_f32",
-     &pipelines.convolution_transpose3},
     {"gjxl_butteraugli_opsin_blur5_tiled_f32",
      &pipelines.opsin_blur5_tiled},
-    {"gjxl_butteraugli_frequency_low_medium_convolve_f32",
-     &pipelines.frequency_low_medium_convolve},
+    {"gjxl_butteraugli_frequency_low_medium_tiled_f32",
+     &pipelines.frequency_low_medium_tiled},
     {"gjxl_butteraugli_frequency_high_convolve_f32",
      &pipelines.frequency_high_convolve},
     {"gjxl_butteraugli_frequency_suppress_x_f32", &pipelines.frequency_suppress_x},
@@ -1873,6 +1841,18 @@ Status CreateButteraugliPipelines(
       kOpsinBlur5ThreadgroupMemoryBytes) {
     return Status::Unavailable(
       "Metal lacks memory for the tiled Butteraugli Opsin threadgroup");
+  }
+  MTL::ComputePipelineState* low_medium_tiled =
+    pipelines.frequency_low_medium_tiled.get();
+  if (low_medium_tiled->maxTotalThreadsPerThreadgroup() <
+      kLowMediumTileWidth * kLowMediumTileHeight) {
+    return Status::Unavailable(
+      "Metal cannot launch the tiled Butteraugli low/medium threadgroup");
+  }
+  if (device->maxThreadgroupMemoryLength() <
+      kLowMediumThreadgroupMemoryBytes) {
+    return Status::Unavailable(
+      "Metal lacks memory for the tiled Butteraugli low/medium threadgroup");
   }
   *out = std::move(pipelines);
   return Status::Ok();
