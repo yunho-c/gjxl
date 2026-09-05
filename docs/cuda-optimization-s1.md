@@ -1,7 +1,7 @@
 # CUDA optimization study S1
 
-- Status: S1.1-S1.5, packed DCT, tiled Malta, and specialized/tiled blurs
-  implemented; optimization ongoing
+- Status: S1.1-S1.5, packed DCT, tiled Malta, specialized/tiled blurs, and
+  packed AC-search residuals implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -13,10 +13,10 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest convolution checkpoint against `736dbd5`
-halves Butteraugli blur execution and reduces paired 4K total encoding time
-by 5.4%. AC-search residual evaluation, DCT, reconstruction filtering, host
-work, and transfers remain material targets; the resident path has not
+below supersede them. The latest AC-search checkpoint against `5513704`
+reduces residual-kernel execution by 77.8% and paired 4K total encoding time
+by 3.8%. Remaining AC gather/cost evaluation, DCT, reconstruction filtering,
+host work, and transfers are material targets; the resident path has not
 reached its performance limit.
 
 The initial measurements showed two different performance profiles.
@@ -978,6 +978,150 @@ work out of individual coefficient lanes, and reducing the 1024-thread
 launches, merits a measured experiment. Remaining DCT, EPF, host preparation,
 serialization, and synchronous transfer costs also prevent a performance-
 ceiling claim. Launch API time is only `6.572 ms` in the retained trace.
+
+### Follow-up: pack AC-search residual evaluation (2026-09-05)
+
+At parent revision `5513704`, a fresh odd-4K trace spends `61.815 ms` in
+`ResidualKernel`. Each coefficient thread independently validates the same
+candidate, computes the same strategy-aware quant norm, and loads the same
+CfL factor. The norm includes a field reduction and logarithm/power
+approximation for larger transforms. A 32x32 candidate repeats this work
+3,072 times across its three channels, then computes the norm again in the
+cost kernel. The residual reduction also uses a block-wide barrier at every
+halving step, with one 64-1,024-thread block per channel transform.
+
+The retained implementation:
+
+- prepares one quant norm per candidate in a small separate kernel;
+- temporarily stores those norms in the existing cost output, reads them
+  during residual evaluation, then replaces each norm with its final cost;
+- evaluates candidate validity and CfL once per channel transform;
+- packs independent transforms into 256-thread blocks; and
+- preserves the original halving addition tree across registers, shared
+  memory where needed, and full-warp shuffles.
+
+Cost storage is already disjoint from inputs and other scratch. Preparation,
+residual evaluation, and final cost writes execute on the same ordered
+stream; batch outputs are only valid after their submission completes.
+This needs no new allocation, transfer, or public API. Invalid
+descriptors still produce non-finite costs. Inactive tail transforms join
+all required barriers but do not read candidates or touch outputs.
+
+The selected geometry bounds register-held work to eight coefficients per
+lane:
+
+| Coefficients | Threads/transform | Transforms/block | Coefficients/thread |
+|---|---:|---:|---:|
+| 64 | 32 | 8 | 2 |
+| 128 | 32 | 8 | 4 |
+| 256 | 32 | 8 | 8 |
+| 512 | 64 | 4 | 8 |
+| 1,024 | 128 | 2 | 8 |
+
+All experiments use two warmups and one profiled odd-4K sample, distance
+`1.2`, effort `7`, fully-resident AQ, and no final-score diagnostic. The
+AC total below includes gather, norm preparation when present, residual,
+and cost kernels, but not DCT:
+
+| Experiment | Residual | AC total |
+|---|---:|---:|
+| Parent: uniform work per coefficient | 61.815 ms | 102.775 ms |
+| Uniform work once/block; original geometry | 53.141 ms | 92.601 ms |
+| Packed residuals; at most 256 threads/transform | 30.990 ms | 73.591 ms |
+| Cache norms in gather; same packed layout | 25.550 ms | 65.171 ms |
+| Separate norm preparation; same packed layout | 26.286 ms | 64.558 ms |
+| Separate preparation; 64 threads/transform | 16.693 ms | 58.538 ms |
+| Separate preparation; 32 threads/transform | 19.503 ms | 61.280 ms |
+| Retained shape-dependent layout | 13.705 ms | 54.443 ms |
+
+Moving norm preparation out of gather keeps gather at 16 registers/thread
+instead of 40. Seven preparation launches cost `0.104 ms` in the retained
+trace. The all-32-thread experiment improves smaller transforms, but its
+32x32 kernel takes `7.196 ms`; `cuobjdump` reports a 256-byte stack frame.
+The retained 128-thread 32x32 group takes `2.317 ms` with no stack frame.
+All retained residual variants use 26-33 registers/thread, 96-2,096 shared
+bytes/block, and zero stack bytes. These observations support the work
+sharing and register-footprint choices without claiming hardware-counter
+proof of an occupancy or bandwidth bottleneck.
+
+Residual execution falls 77.8%, and the four-stage AC total falls 47.0%.
+All GPU kernels fall from `502.994 ms` to `471.199 ms` (-6.3%); unrelated
+kernel time rises from `400.219 ms` to `416.756 ms` (+4.1%), so the complete
+kernel total is affected by execution-state variation. Kernel launches
+increase from 516 to 523. Transfers remain 117,079,320 HtoD bytes,
+103,699,012 DtoH bytes, and 518,400 device-to-device bytes in both traces.
+
+Public workflow measurements use seven alternating independent-process
+pairs per workload, one warmup and one retained sample per process, with
+the same distance/effort/AQ settings:
+
+| Workload and stage | Parent median | Candidate median | Median paired change |
+|---|---:|---:|---:|
+| Odd 4K, total | 946.004 ms | 909.196 ms | -3.8% |
+| Odd 4K, quantization | 738.959 ms | 715.452 ms | -3.7% |
+| Odd 1080p, total | 232.420 ms | 228.542 ms | +0.2% |
+| Odd 1080p, quantization | 159.536 ms | 156.485 ms | -3.4% |
+| Flower 510x532, total | 50.418 ms | 49.974 ms | -3.5% |
+| Flower 510x532, quantization | 33.167 ms | 32.382 ms | -1.3% |
+
+All seven 4K quantization pairs and six total-time pairs improve. Parent
+4K totals range from `910.241-964.777 ms`, versus `875.354-945.962 ms` for
+the candidate. Four of seven 1080p quantization pairs improve, but there is
+no reliable total-time improvement at 1080p. Flower's small differences
+are also noisy: total-time ranges are `43.910-59.409 ms` and
+`43.288-65.436 ms`. GPU state moves from 61 C/P8/210 MHz before the pairs
+to 66 C/P3/1282 MHz afterward. Absolute measurements from the preceding
+convolution session should not be used as this checkpoint's baseline.
+
+All 53 CUDA-build tests and 47 CPU-only tests pass. New candidate-prefix
+tests cover partial packed blocks, exact result independence from batch
+length, and untouched output guards. Invalid-descriptor tests now also
+check that neighboring valid candidates remain correct. Existing host-norm
+and device-norm CPU-reference cost checks retain their tolerances; the
+largest absolute/relative errors remain `0.00585938` / `4.03204e-7` for
+32x32. Compute Sanitizer memcheck, racecheck, synccheck, and initcheck on
+the AC-strategy test report zero errors or hazards.
+
+Parent/candidate codestreams and reported final perceptual scores are
+identical for the small sample at efforts 7 and 9, odd 1080p/4K at effort 7,
+and Flower at efforts 7 and 9, with final-score collection enabled. The
+pinned `djxl` decodes all six at their original dimensions. The six hashes
+remain those recorded by the Malta/convolution checkpoints. Flower still
+selects all seven production AC strategies. Full suites retain exact-mode
+CPU/CUDA identity, failure-atomicity, allocation, and concurrent workflow
+coverage.
+
+Post-change 1080p batch qualification uses one warmup and three paired
+serial/batch samples:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 243.159 ms | 4.113 | 0.981x |
+| Fully resident | 2 | 500.675 ms | 3.995 | 1.098x |
+| Fully resident | 4 | 869.448 ms | 4.601 | 1.172x |
+| Maximum throughput | 1 | 102.415 ms | 9.764 | 1.000x |
+| Maximum throughput | 2 | 175.958 ms | 11.366 | 1.448x |
+| Maximum throughput | 4 | 259.002 ms | 15.444 | 1.781x |
+
+These validate output stability and overlap, not a before/after batch
+performance improvement. Resident batch-1 is slightly slower than serial,
+and batch-2 does not improve images/s over batch-1 in this run. The final
+GPU state is 67 C/P3/1282 MHz.
+
+Ignored artifacts under `build-cuda-ninja/profiles` use `s20_` prefixes.
+Trace names are `s20_{parent,hoisted,packed,cached_norm,separate_norm,
+packed64,packed32,final}_4k`; each has an `.nsys-rep` and exported `.sqlite`.
+Paired wall results are `s20_paired_{4k,1080p,flower}.json`. The saved parent
+benchmark/encoder and `s20_verify.ps1` reproduce the measured comparison
+and six-file identity/decode checks against the retained executables.
+
+The retained profile still spends `161.739 ms` in forward/inverse DCT,
+`31.603 ms` in EPF, `21.193 ms` in AC gather, and `19.441 ms` in AC cost.
+Gather repeats runtime index division and candidate validation per pixel;
+cost still has one coefficient-sized block per candidate and shared-memory
+reductions. These are concrete follow-up targets alongside host assembly,
+serialization, and transfer boundaries. This checkpoint does not establish
+that fully-resident encoding is maxed out.
 
 ## Work that should not lead the next cycle
 

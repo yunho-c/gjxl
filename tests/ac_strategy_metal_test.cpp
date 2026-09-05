@@ -400,6 +400,34 @@ bool RunStrategyCase(
             << " max absolute cost error " << max_absolute_error
             << ", max relative error " << max_relative_error << '\n';
 
+#ifdef GJXL_TEST_CUDA
+  // Changing batch length must not change an individual candidate's result.
+  // These prefixes also exercise partially occupied packed residual blocks.
+  const std::vector<float> complete_costs = poisoned_costs;
+  for (const size_t count : {size_t{1}, size_t{2}, kCandidateCount - 1}) {
+    gjxl::AcStrategyCandidateBatch prefix = batch;
+    prefix.candidate_count = count;
+    std::ranges::fill(poisoned_costs, -1.0f);
+    if (!CheckStatus(gpu.CopyHostToDevice(
+          *device_costs, poisoned_costs.data(), cost_bytes), "Poison prefix costs") ||
+        !CheckStatus(gjxl::EvaluateAcStrategyCandidates(gpu, prefix, &submission),
+          "Submit candidate prefix") ||
+        submission == nullptr ||
+        !CheckStatus(submission->Wait(), "Wait for candidate prefix") ||
+        !CheckStatus(gpu.CopyDeviceToHost(
+          *device_costs, poisoned_costs.data(), cost_bytes), "Download prefix costs")) {
+      return false;
+    }
+    for (size_t i = 0; i < poisoned_costs.size(); ++i) {
+      if (poisoned_costs[i] != (i < count ? complete_costs[i] : -1.0f)) {
+        std::cerr << implementation << ' ' << info->name
+                  << " candidate prefix changed a cost or its output guard\n";
+        return false;
+      }
+    }
+  }
+#endif
+
   std::vector<gjxl::AcStrategyCandidate> resident_candidates = candidates;
   for (gjxl::AcStrategyCandidate& candidate : resident_candidates) {
     candidate.quant_norm = 1.0f;
@@ -500,6 +528,17 @@ bool RunStrategyCase(
     std::cerr << implementation << ' ' << info->name
               << " invalid device descriptor did not produce NaN\n";
     return false;
+  }
+
+  for (size_t i = 2; i < candidates.size(); ++i) {
+    const double error =
+      std::abs(static_cast<double>(poisoned_costs[i]) - expected[i]);
+    if (!std::isfinite(poisoned_costs[i]) ||
+        error > 0.005 + 1.0e-6 * std::abs(expected[i])) {
+      std::cerr << implementation << ' ' << info->name
+                << " invalid descriptor contaminated another candidate\n";
+      return false;
+    }
   }
 
   gjxl::AcStrategyCandidateBatch aliased_batch = batch;
