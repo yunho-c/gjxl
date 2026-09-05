@@ -82,6 +82,12 @@ struct AqEvaluationPreparation {
   /// quant or applies the encoder's shared AdjustQuantBlockAC decision.
   AcCoefficientDecisionMode coefficient_decision_mode =
     AcCoefficientDecisionMode::kFixedRawQuant;
+  /// Prepare initial fields and reference data for the resident AC search,
+  /// postponing final transform layouts/CfL metadata until Reconfigure.
+  /// Requires resident_ac_strategy_inputs and resident_quantization. Evaluation
+  /// and final CfL preparation fail until a successful Reconfigure supplies
+  /// final strategy.
+  bool defer_final_transform_metadata = false;
 };
 
 struct ResidentAcStrategyInputs {
@@ -252,6 +258,9 @@ public:
 
   /// Computes initial quantization from the prepared coding image. Backends
   /// may expose this only for an explicitly enabled frame-only preparation.
+  /// With resident_ac_strategy_inputs, an entirely empty pixel_mask output
+  /// retains the validated mask on device. A later call may request a host
+  /// mask normally; quant_field and strategy_mask remain required outputs.
   [[nodiscard]] virtual Status ComputeInitialQuantization(
     InitialQuantizationOptions options,
     InitialQuantFieldOutput output,

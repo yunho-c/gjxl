@@ -36,6 +36,7 @@
 namespace gjxl::metal_internal {
 
 class MetalBackend;
+struct MetalButteraugliScratch;
 
 using MetalComputeEncodeCallback = void (*)(
   MetalBackend&,
@@ -112,6 +113,7 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_gradient;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_fuzzy_erosion;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_modulation;
+  NS::SharedPtr<MTL::ComputePipelineState> validate_initial_mask;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_sort_prepare;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_sort_step;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_capture_median;
@@ -377,10 +379,11 @@ private:
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 
   Status PrepareDeviceButteraugliImpl(
-    const DeviceButteraugliPrepareDescriptor& descriptor,
+    const DeviceButteraugliPrepareDescriptor &descriptor,
     gpu_profile_internal::GpuProfilingMode mode,
-    std::unique_ptr<PreparedDeviceButteraugli>* prepared,
-    gpu_profile_internal::GpuExecutionProfile* profile);
+    std::unique_ptr<PreparedDeviceButteraugli> *prepared,
+    gpu_profile_internal::GpuExecutionProfile *profile,
+    const MetalButteraugliScratch *borrowed_scratch = nullptr);
 
   Status PrepareAqEvaluationImpl(
     const AqEvaluationPreparation& preparation,

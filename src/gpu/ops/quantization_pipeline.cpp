@@ -222,13 +222,11 @@ Status PrepareResidentAcStrategyInputs(
     const AqEvaluationPreparation evaluation_preparation{
       .original_linear_rgb = original_linear_rgb,
       .coding_opsin = prepared.coding_opsin,
-      .resident_original_linear_rgb =
-        prepared.resident_original_linear_rgb,
+      .resident_original_linear_rgb = prepared.resident_original_linear_rgb,
       .resident_coding_opsin = prepared.resident_coding_opsin,
       .strategies = &provisional_strategies,
-      .epf_sharpness = {
-        prepared.epf_sharpness.data(), prepared.block_extent,
-        prepared.block_extent.width},
+      .epf_sharpness = {prepared.epf_sharpness.data(), prepared.block_extent,
+                        prepared.block_extent.width},
       .options = evaluation_options,
       .resident_initial_cfl = true,
       .frame_only_resident_initial_quant = true,
@@ -236,6 +234,7 @@ Status PrepareResidentAcStrategyInputs(
       .resident_quantization = true,
       .coefficient_decision_mode =
         AcCoefficientDecisionMode::kAdjustedSharedQuant,
+      .defer_final_transform_metadata = true,
     };
     auto* const validated_preparation = HasValidatedHostImages(
         prepared, original_linear_rgb)
@@ -305,15 +304,15 @@ Status PrepareResidentAcStrategyInputs(
     .rescale = options.initial_quant_rescale,
   };
   const InitialQuantFieldOutput initial_output{
-    .quant_field = {
-      prepared.initial_quant.data(), prepared.block_extent,
-      prepared.block_extent.width},
-    .strategy_mask = {
-      prepared.strategy_mask.data(), prepared.block_extent,
-      prepared.block_extent.width},
-    .pixel_mask = {
-      prepared.pixel_mask.data(), prepared.padded_extent,
-      prepared.padded_extent.width},
+    .quant_field = {prepared.initial_quant.data(), prepared.block_extent,
+                    prepared.block_extent.width},
+    .strategy_mask = {prepared.strategy_mask.data(), prepared.block_extent,
+                      prepared.block_extent.width},
+    .pixel_mask =
+      prepared.pixel_mask.empty()
+        ? PlaneF32View{}
+        : PlaneF32View{prepared.pixel_mask.data(), prepared.padded_extent,
+                       prepared.padded_extent.width},
   };
   const auto initial_begin = profiling_session == nullptr
     ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
@@ -600,6 +599,16 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     aq_state = prepared_aq;
   ResidentAcStrategySearchInputs resident_inputs;
   if (resident) {
+    if (materialization.initial_quantization && prepared.pixel_mask.empty()) {
+      try {
+        prepared.pixel_mask.resize(prepared.padded_extent.width *
+                                   prepared.padded_extent.height);
+      } catch (const std::bad_alloc &) {
+        return Status::OutOfMemory("Unable to allocate resident mask output");
+      } catch (const std::length_error &) {
+        return Status::InvalidArgument("Resident mask output is too large");
+      }
+    }
     if (aq_state == nullptr) aq_state = &local_prepared_aq;
     Status status = PrepareResidentAcStrategyInputs(
         gpu, original_linear_rgb, prepared, options, *aq_state,

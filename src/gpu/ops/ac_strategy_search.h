@@ -81,9 +81,10 @@ private:
 
 /// Runs the same CPU merge policy while candidate evaluation consumes the
 /// prepared opsin, quant field, and pixel mask directly from device memory.
-/// The host quant field and pixel mask remain the search-policy inputs. The
-/// host Opsin view may be empty when only its resident geometry is needed and
-/// is never uploaded by this operation.
+/// The host quant field remains a search-policy input. The host pixel mask may
+/// be entirely empty: candidate costs already consumed the resident mask and
+/// the CPU merge does not use its pixels. The host Opsin view may also be empty
+/// when only resident geometry is needed; it is never uploaded here.
 [[nodiscard]] Status FindAcStrategyGridGpuResident(
   GpuBackend& gpu,
   ConstImage3FView opsin,

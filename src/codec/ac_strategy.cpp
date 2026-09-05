@@ -1018,7 +1018,10 @@ Status FindAcStrategyGridImpl(
       "AC-strategy search dimensions are too large");
   }
   if (!quant_field.valid() || quant_field.extent != block_extent ||
-      !pixel_mask.valid() || pixel_mask.extent != opsin_extent ||
+      (!(candidate_costs != nullptr && !resident_opsin_extent.empty() &&
+         pixel_mask.data == nullptr && pixel_mask.extent == Extent2D{} &&
+         pixel_mask.stride == 0) &&
+       (!pixel_mask.valid() || pixel_mask.extent != opsin_extent)) ||
       !color_correlation.valid()) {
     return Status::InvalidArgument(
       "AC-strategy search fields have invalid geometry");

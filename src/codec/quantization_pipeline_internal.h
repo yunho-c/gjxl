@@ -110,6 +110,8 @@ struct QuantizationPipelineMaterialization {
 
 /// Prepares the metadata and host result fields used by a fully resident
 /// pipeline whose validated coding image exists only on the selected backend.
+/// Leaves the host pixel mask empty until diagnostic materialization requests
+/// it; ordinary resident AC scoring consumes the device mask directly.
 [[nodiscard]] Status PrepareResidentQuantizationPipeline(
   ConstImage3FView original_linear_rgb,
   Extent2D padded_extent,

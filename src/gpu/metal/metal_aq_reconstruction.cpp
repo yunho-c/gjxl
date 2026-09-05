@@ -713,6 +713,15 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
           },
       });
 
+  if (self.resident_ac_strategy_inputs_) {
+    encoder->setComputePipelineState(
+      backend.aq_pipelines_.validate_initial_mask.get());
+    BindPlane(encoder, self.initial_quant_pixel_mask_, 0);
+    BindPlane(encoder, self.reconstruction_error_, 1);
+    const uint32_t count = static_cast<uint32_t>(self.pixel_count_);
+    encoder->setBytes(&count, sizeof(count), 2);
+    DispatchThreads1d(encoder, self.pixel_count_);
+  }
   if (!self.frame_only_resident_quantizer_) return;
   encoder->setComputePipelineState(
       backend.aq_pipelines_.initial_quant_sort_prepare.get());
@@ -1032,8 +1041,11 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
       output.quant_field.extent != block_extent_ ||
       !output.strategy_mask.valid() ||
       output.strategy_mask.extent != block_extent_ ||
-      !output.pixel_mask.valid() ||
-      output.pixel_mask.extent != coding_extent_) {
+      (!(resident_ac_strategy_inputs_ && output.pixel_mask.data == nullptr &&
+         output.pixel_mask.extent == Extent2D{} &&
+         output.pixel_mask.stride == 0) &&
+       (!output.pixel_mask.valid() ||
+        output.pixel_mask.extent != coding_extent_))) {
     return Status::InvalidArgument(
         "Resident initial quantization inputs or outputs are invalid");
   }
@@ -1151,7 +1163,20 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
         last_initial_strategy_mask_.data(),
         last_initial_strategy_mask_.size() * sizeof(float));
   }
-  if (status.ok()) {
+  const bool materialize_pixel_mask = output.pixel_mask.valid();
+  if (status.ok() && materialize_pixel_mask &&
+      last_initial_pixel_mask_.empty()) {
+    try {
+      last_initial_pixel_mask_.resize(pixel_count_);
+    } catch (const std::bad_alloc &) {
+      Invalidate();
+      return Status::OutOfMemory("Unable to allocate initial mask readback");
+    } catch (const std::length_error &) {
+      Invalidate();
+      return Status::InvalidArgument("Initial mask readback is too large");
+    }
+  }
+  if (status.ok() && materialize_pixel_mask) {
     status = CopyReadback(
         *backend_, initial_quant_pixel_mask_, last_initial_pixel_mask_.data(),
         last_initial_pixel_mask_.size() * sizeof(float));
@@ -1182,7 +1207,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
   if (status.ok() &&
       (!valid_values(last_initial_quant_field_) ||
        !valid_values(last_initial_strategy_mask_) ||
-       !valid_values(last_initial_pixel_mask_))) {
+       (materialize_pixel_mask && !valid_values(last_initial_pixel_mask_)))) {
     status = Status::DeviceError(
         "Metal initial quantization readback is invalid");
   }
@@ -1206,7 +1231,8 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
   }
   CopyContiguousPlane(last_initial_quant_field_, output.quant_field);
   CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
-  CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
+  if (materialize_pixel_mask)
+    CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
   resident_initial_quant_ready_ = true;
   if (frame_only_resident_quantizer_) {
     resident_quantizer_ready_ = true;

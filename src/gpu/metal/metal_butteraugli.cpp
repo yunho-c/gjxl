@@ -371,10 +371,12 @@ class MetalPreparedDeviceButteraugli final
     : public PreparedDeviceButteraugli {
 public:
   MetalPreparedDeviceButteraugli(
-    MetalBackend& backend,
-    DeviceButteraugliPrepareDescriptor descriptor)
-    : PreparedDeviceButteraugli(backend, descriptor),
-      metal_(backend) {}
+    MetalBackend &backend, DeviceButteraugliPrepareDescriptor descriptor,
+    const MetalButteraugliScratch *borrowed_scratch)
+      : PreparedDeviceButteraugli(backend, descriptor), metal_(backend) {
+    if (borrowed_scratch != nullptr)
+      borrowed_scratch_ = *borrowed_scratch;
+  }
 
   [[nodiscard]] Status PrepareStorage() {
     const Extent2D requested = extent();
@@ -427,9 +429,61 @@ public:
         "Device Butteraugli reduction scratch overflows");
     }
 
+    const bool borrowing = borrowed_scratch_.has_value();
+    if (borrowing) {
+      if (!multiscale_) {
+        return Status::InvalidArgument("Borrowed Butteraugli scratch requires "
+                                       "an unexpanded multiscale image");
+      }
+      std::array<DeviceMemoryRange, 9> ranges;
+      for (size_t index = 0; index < borrowed_scratch_->planes.size();
+           ++index) {
+        DevicePlaneView &plane = borrowed_scratch_->planes[index];
+        DeviceMemoryRange available;
+        Status status = ComputeDevicePlaneRange(plane, metal_.id(), &available);
+        if (!status.ok())
+          return status;
+        if (plane.element_type != DeviceElementType::kF32 ||
+            plane_bytes > available.size_bytes) {
+          return Status::InvalidArgument(
+            "Borrowed Butteraugli plane is too small");
+        }
+        // Use packed unpadded rows within the caller's padded plane capacity.
+        plane.extent = working_extent_;
+        plane.row_stride = working_extent_.width;
+        status = ComputeDevicePlaneRange(plane, metal_.id(), &ranges[index]);
+        if (!status.ok())
+          return status;
+        for (size_t prior = 0; prior < index; ++prior) {
+          if (DeviceRangesOverlap(ranges[index], ranges[prior])) {
+            return Status::InvalidArgument(
+              "Borrowed Butteraugli planes overlap");
+          }
+        }
+        for (ConstDevicePlaneView reference : reference_linear_rgb().plane) {
+          DeviceMemoryRange reference_range;
+          status =
+            ComputeDevicePlaneRange(reference, metal_.id(), &reference_range);
+          if (!status.ok())
+            return status;
+          if (DeviceRangesOverlap(ranges[index], reference_range)) {
+            return Status::InvalidArgument(
+              "Borrowed scratch overlaps reference");
+          }
+        }
+      }
+    }
+    const auto is_borrowed = [borrowing](size_t slot) {
+      return borrowing && slot >= kImage && slot < kImage + 9;
+    };
     size_t capacity = 0;
     for (size_t index = 0; index < kWorkingPlaneCount; ++index) {
-      if (!AddAlignedAllocation(plane_bytes, &capacity)) {
+      if (is_borrowed(index))
+        continue;
+      // Multiscale composition only uses final staging for the half-size map.
+      const size_t bytes =
+        multiscale_ && index == kFinalStaging ? sub_plane_bytes : plane_bytes;
+      if (!AddAlignedAllocation(bytes, &capacity)) {
         return Status::InvalidArgument(
           "Device Butteraugli scratch capacity overflows");
       }
@@ -466,15 +520,24 @@ public:
       (kWorkingPlaneCount - (kPsychoPlaneCount + 2)) * plane_bytes +
       2 * partial_count * sizeof(float);
 
+    if (borrowing)
+      peak_comparison_scratch_bytes_ -= 9 * plane_bytes;
+    if (multiscale_) {
+      peak_comparison_scratch_bytes_ -= plane_bytes - sub_plane_bytes;
+    }
     Status status = scratch_.Prepare(metal_, capacity);
     if (!status.ok()) return status;
-    for (DevicePlaneView& plane : planes_) {
-      status = scratch_.AllocatePlane(
-        DeviceElementType::kF32,
-        working_extent_,
-        working_extent_.width,
-        kPlaneAlignment,
-        &plane);
+    for (size_t index = 0; index < planes_.size(); ++index) {
+      DevicePlaneView &plane = planes_[index];
+      if (is_borrowed(index)) {
+        plane = borrowed_scratch_->planes[index - kImage];
+        continue;
+      }
+      const Extent2D plane_extent =
+        multiscale_ && index == kFinalStaging ? sub_extent_ : working_extent_;
+      status =
+        scratch_.AllocatePlane(DeviceElementType::kF32, plane_extent,
+                               plane_extent.width, kPlaneAlignment, &plane);
       if (!status.ok()) return status;
     }
     reference_eroded_mask_ = Plane(kReferenceErodedMask, working_extent_);
@@ -2127,6 +2190,7 @@ private:
 
   MetalBackend& metal_;
   DeviceScratchArena scratch_;
+  std::optional<MetalButteraugliScratch> borrowed_scratch_;
   std::array<DevicePlaneView, kWorkingPlaneCount> planes_;
   PsychoPlanes reference_sub_;
   DevicePlaneView reference_sub_mask_;
@@ -2340,10 +2404,11 @@ Status MetalBackend::Prepare(
 }
 
 Status MetalBackend::PrepareDeviceButteraugliImpl(
-  const DeviceButteraugliPrepareDescriptor& descriptor,
+  const DeviceButteraugliPrepareDescriptor &descriptor,
   gpu_profile_internal::GpuProfilingMode mode,
-  std::unique_ptr<PreparedDeviceButteraugli>* prepared,
-  gpu_profile_internal::GpuExecutionProfile* profile) {
+  std::unique_ptr<PreparedDeviceButteraugli> *prepared,
+  gpu_profile_internal::GpuExecutionProfile *profile,
+  const MetalButteraugliScratch *borrowed_scratch) {
 
   if (prepared == nullptr) {
     return Status::InvalidArgument(
@@ -2361,7 +2426,7 @@ Status MetalBackend::PrepareDeviceButteraugliImpl(
   if (!status.ok()) return status;
   try {
     auto candidate = std::make_unique<MetalPreparedDeviceButteraugli>(
-      *this, descriptor);
+      *this, descriptor, borrowed_scratch);
     status = candidate->PrepareStorage();
     if (!status.ok()) return status;
     gpu_profile_internal::GpuExecutionProfile candidate_profile;
