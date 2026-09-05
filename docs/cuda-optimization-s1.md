@@ -3,7 +3,8 @@
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
   AC gather/DCT plus residual/inverse/loss fusion, compact AC-search scratch,
-  and factorized resident DCT implemented; optimization ongoing
+  factorized resident DCT, and cooperative quantization adjustment
+  implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -15,7 +16,18 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest factorized-DCT checkpoint against `c1a75bb`
+below supersede them. The latest cooperative-adjustment checkpoint against
+`f26e2ef` reduces its targeted kernel time by 84.4% at 4K, 92.4% at 1080p,
+and 96.7% on Flower, with unchanged launches/transfers. All 56 CUDA and 47
+CPU tests pass, as do eight sanitizer runs (full-AQ race instrumentation is
+kernel-filtered). All 23 decoded image pairs remain byte-identical. Separate
+parent/candidate cohorts, an identical-binary control, and a same-executable
+policy probe show substantial wall-time variability: no stable end-to-end
+gain is claimed. The same-executable probe also verifies exact output on the
+three actual benchmark inputs. This is a kernel-level improvement, not a
+demonstrated overall speedup or performance ceiling.
+
+The preceding factorized-DCT checkpoint against `c1a75bb`
 reduces 4K DCT kernel time from 107.9 to 23.1 ms (78.6%), without adding launches
 or transfers. Paired fully-resident total time improves 5.1% at 4K, 7.2% at
 1080p, and 7.8% on Flower; quantization improves 10.6%, 8.9%, and 5.9%.
@@ -37,7 +49,7 @@ byte-identical.
 The preceding residual/inverse/loss fusion reduced targeted AC stages by 23.3%
 at 4K, removing seven launches and a 2.55 GB coefficient-buffer round trip.
 These are incremental gains, not a demonstrated performance ceiling.
-Quantization adjustment, filtering, remaining resident allocations, host work, and
+Filtering, resident coefficient encoding, remaining resident allocations, host work, and
 transfers remain material targets; the resident path has not reached its
 performance limit.
 
@@ -2785,6 +2797,221 @@ transfers also remain material. Further AC fusion could remove the retained
 forward-coefficient buffer, but requires a new cross-channel schedule, not
 another scratch-size adjustment. This is a verified checkpoint, not evidence
 that fully-resident encoding is maxed out.
+
+### Follow-up: cooperate across quantization-adjustment coefficients (2026-09-05)
+
+Parent: `f26e2ef` (factorized resident DCT). The next profile identified
+`SelectAdjustedQuantizationKernel` at 23.010 ms for 4K, 8.480 ms for 1080p,
+and 7.280 ms on Flower. The latter was 48.8% of all GPU kernel duration.
+The old kernel assigns one thread to each transform anchor, serially scans
+all coefficients in each of three channels, and dynamically indexes quadrant
+arrays. For Flower, six of seven shape batches launched just one 256-thread
+block. The 32x32 batch took about 0.96 ms per invocation. Resource/SASS
+inspection found a 144-byte thread stack and repeated local loads/stores.
+This combines underfilled grids, scattered coefficient reads across threads,
+long serial scans, and local-array traffic.
+
+#### Cooperative implementation and experiments
+
+Each anchor now launches one 96-thread block: one complete warp per channel,
+with eight lanes assigned to each canonical coefficient quadrant. Lanes read
+and quantize separate coefficients, accumulate scalar statistics, then reduce
+within quadrants and across quadrant leaders. The warp leader applies the
+existing raw-quant and Y-threshold policy. Three warp decisions pass through
+12 bytes of shared memory and one block barrier before publishing their
+maximum. This barrier also ensures that every channel has read the initial
+raw quant before it is overwritten. No global partial buffer, new allocation,
+extra launch, or host synchronization is introduced.
+
+Width/height and channel are compile-time parameters. Seven physical strategy
+orientations share five canonical coefficient shapes: 8x8, 16x8, 16x16,
+32x16, and 32x32. Fixing the strategy class also resolves the policy tables to
+constants. An initial cooperative prototype still used dynamic class indexing
+and allocated 96 local bytes for the two multiplier tables on larger shapes;
+specialization removed them. Final registers per thread for those five shapes
+are 39/41/38/40/40, with zero stack/local bytes and 12 shared bytes per block.
+The serial implementation remains available through the internal
+`LaunchCudaAqSelectAdjustedQuantizationScalar` oracle, and is the fallback for
+internal batches outside the specialized shape/strategy combinations.
+
+The prototype compared one/two/four anchors per block (96/192/384 threads),
+with three warmups and seven alternating rounds of three event-timed launches.
+Initial raw-quant arrays were reset outside the timed interval. Small batches
+had 129 anchors; large cases used 8,388,608 coefficients per channel. The
+96-thread schedule consistently helped small grids and was competitive on
+large grids, so it is the retained launch policy. For 129 32x32 anchors,
+the final prototype measured 1.082 ms scalar versus about 0.022 ms cooperative;
+for 8,192 such anchors, 2.781 versus 0.744 ms. These are raw-kernel observations
+with broad clock/event variance, not public-workflow speedups.
+
+Each prototype version checked 63 batches spanning all seven strategies,
+counts 1/2/3/7/17/129/259 plus shape-dependent large counts, offset buffers,
+guards, and AC non-finites. Across 338,917 anchor decisions per version,
+all three cooperative launch geometries matched scalar raw quants and Y
+threshold bits. This is measured fixture parity, not a universal bit-identity
+claim: error, border, and magnitude sums use a fixed parallel FP32 tree instead
+of serial row-major addition. No global fast math or reduced precision is used.
+
+#### Direct and integrated correctness checks
+
+All 56 CUDA CTests and 47 CPU-only CTests pass. The new
+`cuda_quantization_adjustment` test checks 182 batches (9,667 anchors) against
+the retained scalar CUDA implementation. Raw quant values and threshold bits
+match exactly in these fixtures. Its 9,429 finite-input anchors also compare
+against the independent CPU policy: exact raw quant, Y thresholds within
+`2e-6` absolute. The latter permits the pre-existing CUDA float versus CPU
+double policy constants; the existing test tolerances are not relaxed.
+
+Coverage includes seven strategies, counts 1/2/3/7/17/33/129/257, global scales
+1/3541/32768, unequal channel multipliers, raw values through 255/256, flat,
+sparse, active, high-frequency-border, threshold-tie, half-integer, signed-zero,
+and quantizer-limit patterns. Inputs use the real default quantization matrices;
+unused table entries are NaNs. Anchor/coefficient/raw pointers are offset,
+raw fields are strided and guarded, threshold output has prefix/suffix guards,
+and coefficients must remain bitwise unchanged. AC NaN/infinity inputs set
+error bit 16 without clearing a pre-existing bit; low-frequency non-finites
+are skipped as in the scalar kernel. The public AQ tests retain their
+bounded/full, maximum-error, repeatability, arena-reuse, and frame checks.
+
+Eight sanitizer runs complete with zero errors/hazards: all four modes on
+the focused adjustment test, plus full-AQ memcheck, synccheck, initcheck,
+and kernel-filtered racecheck. The latter executes the entire existing AQ
+test, including four-worker public encodes in both policies, while
+`--kernel-regex kns=SelectAdjustedQuantization` instruments the changed
+cooperative instantiations and retained scalar kernel. All other listed
+runs are unfiltered; no CUDA API errors are suppressed.
+
+The initial unfiltered full-AQ racecheck was deliberately aborted after
+approximately 52 minutes without a final summary. It is incomplete, not a
+pass or a detected-race result. Its original log is preserved. A Windows
+firewall/elevation prompt was subsequently reported, but its role in the
+delay was not established. The kernel-filtered full-workflow racecheck
+completed in approximately 27 seconds. This qualification does not claim
+an unfiltered full-AQ racecheck pass.
+
+All 23 before/after image pairs are byte-identical to parent `f26e2ef`;
+encoded sizes, independently decoded Butteraugli scores, selected-strategy
+summaries, and reported final scores match. The corpus and explicit linear
+color protocol are the same as the preceding DCT checkpoint: seven inputs
+at distances 0.5/1.2/3.0 and effort 7, plus sample/Flower effort-9 checks at
+distance 1.2. Pinned libjxl revision
+`e8ff09762481785938d8e4e01333ed3917571161` decodes all outputs at their source
+dimensions and measures them with `RGB_D65_SRG_Rel_Lin`, SDR 80 nits.
+No case crosses the predeclared 0.5% size/score investigation threshold;
+every measured change is zero. This corpus result is not a universal
+bit-identity guarantee for the reordered floating-point reductions.
+
+Final parent/retained Nsight captures use three warmups and one captured
+fully-resident encode, with no overlapping GPU test or benchmark work:
+
+| Workload | Adjustment parent | Cooperative | Change | Other kernels parent / cooperative | All kernels parent / cooperative |
+|---|---:|---:|---:|---:|---:|
+| Odd 4K | 25.507 ms | 3.969 ms | -84.4% | 275.729 / 297.507 ms | 301.236 / 301.476 ms |
+| Odd 1080p | 8.818 ms | 0.668 ms | -92.4% | 41.897 / 41.716 ms | 50.715 / 42.384 ms |
+| Flower | 7.272 ms | 0.242 ms | -96.7% | 7.634 / 7.644 ms | 14.905 / 7.886 ms |
+
+The 4K unchanged-kernel control grows 7.9%, offsetting the 21.538 ms
+adjustment reduction; no total-GPU-time gain is claimed from that capture.
+At 1080p and Flower, unchanged work is within 0.5% and total kernel time
+falls 16.4% and 47.1%. Launch counts remain 509/494/509 respectively.
+Each before/after pair has identical HtoD, DtoH, and D2D transfer volumes
+and counts (31/19/1 copies); the optimization adds no transfers or launches.
+
+All batch runs complete with codestream and full-summary identity against
+their serial references. Current-build batch results below qualify behavior,
+not an improvement over the parent:
+
+| Workload / policy | Batch size | Batch median | Images/s | Median serial/batch speedup |
+|---|---:|---:|---:|---:|
+| 1080p / fully resident | 1 | 249.021 ms | 4.016 | 0.917x |
+| 1080p / fully resident | 2 | 449.865 ms | 4.446 | 1.223x |
+| 1080p / fully resident | 4 | 979.541 ms | 4.084 | 1.515x |
+| 1080p / maximum throughput | 1 | 196.711 ms | 5.084 | 1.185x |
+| 1080p / maximum throughput | 2 | 390.839 ms | 5.117 | 1.542x |
+| 1080p / maximum throughput | 4 | 481.612 ms | 8.305 | 2.053x |
+| 4K / fully resident | 1 | 1071.586 ms | 0.933 | 0.877x |
+| 4K / fully resident | 2 | 1956.245 ms | 1.022 | 1.164x |
+
+These batch checks use one warmup and three alternating serial/batch samples.
+The GPU-state snapshots around the first timing cohort span 73-80 C,
+P8/P3, and 210-1282 MHz; clocks were not locked. A post-measurement snapshot
+reports AC power, the Windows Balanced scheme, and concurrent CPU activity
+from Windows security, Office, and editor processes. This is evidence of
+background activity, not proof that it caused every timing difference.
+
+Wall-time qualification uses seven alternating independent-process pairs,
+three warmups and five retained samples per process, distance 1.2, effort 7,
+automatic CPU threads, and no final-score diagnostic. A second complete
+cohort was run because the initial parent itself varied substantially.
+All samples and both cohorts are retained; none are dropped as outliers.
+Percentages below are medians of paired candidate/parent ratios, not ratios
+of cohort medians. The pooled column contains all fourteen pairs:
+
+| Workload / stage | Initial paired change | Repeat paired change | All 14 pairs |
+|---|---:|---:|---:|
+| Odd 4K / total | +20.8% | +3.7% | +7.6% |
+| Odd 4K / quantization | -7.4% | +0.5% | -0.4% |
+| Odd 1080p / total | +8.8% | -1.4% | -1.3% |
+| Odd 1080p / quantization | -1.3% | -11.4% | -10.5% |
+| Flower / total | -5.3% | -10.1% | -7.7% |
+| Flower / quantization | -19.8% | -19.5% | -19.6% |
+
+For context, initial 4K process medians span 755.503-2304.972 ms in the
+parent and 1039.518-2202.232 ms in the candidate. A seven-pair control using
+the identical parent executable in both positions reports a +2.2% median
+paired total difference, with individual pairs from -4.4% to +28.4%.
+Its quantization difference is +0.9%, ranging from -2.8% to +20.0%.
+The unchanged CPU codestream stage is 8.7% slower in the pooled 4K pairs;
+input preparation is +0.2%. These controls demonstrate measurement
+variability, not that the measured 4K regression can be ignored or that a
+particular background process caused it.
+
+A further diagnostic compiles the retained scalar and cooperative policies
+into one executable and chooses between them at process initialization.
+Both modes use the same host code, libraries, binary layout, executable
+path, and timing boundary. This ignored-build probe adds no production
+environment switch. It confirms exact codestream identity on the actual
+benchmark inputs: 1,048,983 bytes for odd 4K, 265,570 for odd 1080p, and
+37,018 for Flower. The first-sample output dump is enabled only during
+identity qualification and is outside the timed encode; timing runs do
+not write codestream files. The same seven-pair protocol produces:
+
+| Same-executable workload | Median paired total change | Median paired quantization change |
+|---|---:|---:|
+| Odd 4K | -0.2% | -0.5% |
+| Odd 1080p | -0.1% | -5.5% |
+| Flower | +2.6% | -15.8% |
+
+This removes binary/path differences from that diagnostic but not host
+contention, timing variation, or automatic GPU power-state changes. The
+retention claim is therefore limited to the large, directly measured
+adjustment-kernel reduction and qualified correctness. Stable whole-encode
+latency or throughput gains are not established by this checkpoint.
+
+The fresh retained 4K trace spends 54.798 ms in Malta response, 13.637 ms
+in Malta scaling, and 33.347 ms in resident coefficient encoding. Tiled
+convolutions and host serialization/launch boundaries remain substantial.
+Read-only inspection confirms Malta has no local/stack storage and already
+reuses repeated response sums; scale/response fusion would duplicate scale
+arithmetic in tile halos and needs measurement, not an assumed win. The
+fully-resident path is not demonstrated maxed out.
+
+Ignored artifacts under `build-cuda-ninja/profiles` use the `s30_` prefix.
+`parent_{encode,benchmark,batch}.exe` are hash-verified copies of the preceding
+retained executables; `retained_{encode,benchmark,batch}.exe` preserve the
+qualified current build. `quant_probe{,_v1}.exe`, `quant_probe{,_v2}.txt`,
+`cooperative_quant{,_v1}.cuh`, and `parent_resident_kernels.cu` preserve the
+event-probe variants and frozen baseline; `final_resources.txt` records
+production resource usage. `quality.py`/`quality.json` and `quality_*`
+retain the decoded comparisons, reusing the provenance-pinned `s29_corpus`.
+`sanitize{,_remaining}.ps1`, individual `*check.txt` files, and
+`sanitizer_abort.txt` preserve the exact sanitizer scopes and aborted run.
+`measure.ps1`, `warmed_*`, `recheck.ps1`, `repeat_*`, `control_aa_4k.*`,
+`wall_summary.*`, and GPU-state logs retain all wall-time observations.
+`profile_final.ps1`, `profile_summary.*`, `final_{parent,retained}_*`,
+`kernel_totals.*`, and `batch_*.txt` retain the profiles and batch checks.
+`switch_probe.cu`, `switch_benchmark.cpp`, `switch_measure.py`, and
+`switch_*` preserve the same-executable diagnostic and exact outputs.
 
 ## Work that should not lead the next cycle
 

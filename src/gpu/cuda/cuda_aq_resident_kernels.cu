@@ -337,6 +337,220 @@ __device__ int AdjustQuantForChannel(
   return adjusted;
 }
 
+// Warp-per-channel adjustment. Quadrant statistics stay in registers; the
+// scalar implementation above remains a differential oracle. Floating-point
+// sums use a fixed parallel tree, so validate policy decisions and image
+// quality.
+template <unsigned Width, unsigned Height, unsigned Channel>
+__device__ __forceinline__ int CooperativeAdjustQuantChannel(
+    const float* coefficients, const float* quant_tables,
+    unsigned channel_stride, unsigned global_scale, int initial_raw,
+    float matrix_multiplier, float thresholds[4], unsigned* error) {
+  constexpr unsigned xsize = Width / 8, ysize = Height / 8;
+  constexpr unsigned channel = Channel;
+  const unsigned lane = threadIdx.x % 32, quadrant = lane / 8;
+  const unsigned local = lane % 8;
+  constexpr unsigned canonical_strategy = Width * Height == 64    ? 0
+                                          : Width * Height == 128 ? 6
+                                          : Width * Height == 256 ? 4
+                                          : Width * Height == 512 ? 10
+                                                                  : 5;
+  const auto table_offsets = QuantTableOffsets(canonical_strategy);
+  const float qac = static_cast<float>(global_scale) * (1.0f / 65536.0f) *
+                    static_cast<float>(initial_raw);
+  constexpr float reduction =
+      xsize * ysize > 1
+          ? (0.003f * xsize * ysize < 0.08f ? 0.003f * xsize * ysize : 0.08f)
+          : 0.0f;
+#pragma unroll
+  for (unsigned q = 0; q < 4; ++q)
+    thresholds[q] = fmaxf(0.54f, (q == 0 ? 0.58f : 0.64f) - reduction);
+  const float threshold =
+      fmaxf(0.54f, (quadrant == 0 ? 0.58f : 0.64f) - reduction);
+  float border_sum = 0, error_sum = 0, value_sum = 0, nz = 0, me = 0;
+  // Eight lanes own each quadrant, keeping its statistics scalar registers.
+#pragma unroll
+  for (unsigned value_index = local; value_index < Width * Height / 4;
+       value_index += 8) {
+    const unsigned x = (quadrant % 2) * (Width / 2) + value_index % (Width / 2);
+    const unsigned y =
+        (quadrant / 2) * (Height / 2) + value_index / (Width / 2);
+    const unsigned index = y * Width + x;
+    if (x < xsize && y < ysize) continue;
+    const float coefficient = coefficients[Channel * channel_stride + index];
+    const float value =
+        coefficient * (quant_tables[table_offsets.inverse_dequant +
+                                    Channel * Width * Height + index] *
+                       qac * matrix_multiplier);
+    if (!isfinite(coefficient) || !isfinite(value)) {
+      atomicOr(error, 16u);
+      continue;
+    }
+    const float quantized = fabsf(value) < threshold ? 0.0f : rintf(value);
+    const float qe = fabsf(value - quantized);
+    error_sum += qe;
+    value_sum += fabsf(quantized);
+    if (Channel == 1 && quantized == 0) me = fmaxf(me, qe);
+    if (quantized != 0) {
+      nz += fabsf(quantized);
+      if ((y >= 7 * ysize && x >= 7 * xsize) ||
+          ((y + 1 == Height || x + 1 == Width) && x >= 4 * xsize &&
+           y >= 4 * ysize))
+        border_sum += fabsf(value);
+    }
+  }
+#pragma unroll
+  for (unsigned stride = 4; stride; stride /= 2) {
+    border_sum += __shfl_down_sync(0xffffffffu, border_sum, stride, 8);
+    error_sum += __shfl_down_sync(0xffffffffu, error_sum, stride, 8);
+    value_sum += __shfl_down_sync(0xffffffffu, value_sum, stride, 8);
+    nz += __shfl_down_sync(0xffffffffu, nz, stride, 8);
+    me = fmaxf(me, __shfl_down_sync(0xffffffffu, me, stride, 8));
+  }
+  float nonzeros[4], max_error[4];
+#pragma unroll
+  for (unsigned q = 0; q < 4; ++q) {
+    nonzeros[q] = __shfl_sync(0xffffffffu, nz, q * 8);
+    max_error[q] = __shfl_sync(0xffffffffu, me, q * 8);
+  }
+#pragma unroll
+  for (unsigned stride = 16; stride >= 8; stride /= 2) {
+    border_sum += __shfl_down_sync(0xffffffffu, border_sum, stride);
+    error_sum += __shfl_down_sync(0xffffffffu, error_sum, stride);
+    value_sum += __shfl_down_sync(0xffffffffu, value_sum, stride);
+  }
+  if (lane != 0) return 0;
+  int raw = initial_raw;
+  if (channel == 1 && value_sum * 8.0f < static_cast<float>(xsize * ysize)) {
+    constexpr float kLimit = 0.46f;
+    int candidate = initial_raw;
+    for (uint32_t quadrant = 1; quadrant < 4; ++quadrant) {
+      if (nonzeros[quadrant] == 0.0f && max_error[quadrant] > kLimit) {
+        candidate = initial_raw + 1;
+        break;
+      }
+    }
+    raw = candidate;
+    if (nonzeros[3] == 0.0f && max_error[3] > kLimit) {
+      thresholds[3] = 0.9999f * max_error[3] * candidate / initial_raw;
+    } else if ((nonzeros[1] == 0.0f && max_error[1] > kLimit) ||
+               (nonzeros[2] == 0.0f && max_error[2] > kLimit)) {
+      thresholds[1] =
+          0.9999f * fmaxf(max_error[1], max_error[2]) * candidate / initial_raw;
+      thresholds[2] = thresholds[1];
+    } else if (nonzeros[0] == 0.0f && max_error[0] > kLimit) {
+      thresholds[0] = 0.9999f * max_error[0] * candidate / initial_raw;
+    }
+  }
+
+  const float all_nonzeros =
+      nonzeros[0] + nonzeros[1] + nonzeros[2] + nonzeros[3] + 1.0f;
+  constexpr float kBorderMultiplier[3] = {70.0f, 30.0f, 60.0f};
+  if (kBorderMultiplier[channel] * border_sum >= all_nonzeros) {
+    raw = static_cast<int>(raw + kBorderMultiplier[channel] * border_sum /
+                                     all_nonzeros);
+    if (raw >= 256) raw = 255;
+  }
+  if (Width * Height == 64 &&
+      nonzeros[0] + nonzeros[1] + nonzeros[2] + nonzeros[3] < 11.0f) {
+    if (++raw >= 256) raw = 255;
+  }
+
+  constexpr float kFirstMultiplier[4][3] = {
+      {0.22080615753848404f, 0.45797479824262011f, 0.29859235095977965f},
+      {0.70109486510286834f, 0.16185281305512639f, 0.14387691730035473f},
+      {0.114985964456218638f, 0.44656840441027695f, 0.10587658215149048f},
+      {0.46849665264409396f, 0.41239077937781954f, 0.088667407767185444f}};
+  constexpr float kSecondMultiplier[4][3] = {
+      {0.27450281941822197f, 1.1255766549984996f, 0.98950459134128388f},
+      {0.4652168675598285f, 0.40945807983455818f, 0.36581899811751367f},
+      {0.28034972424715715f, 0.9182653201929738f, 1.5581531543057416f},
+      {0.26873118114033728f, 0.68863712390392484f, 1.2082185408666786f}};
+  error_sum *= 2.2942708343284721f;
+  value_sum *= 2.2942708343284721f;
+  if (Width * Height > 64) {
+    constexpr unsigned strategy_class = Width * Height == 128   ? 3
+                                        : Width * Height == 256 ? 0
+                                        : Width * Height == 512 ? 1
+                                                                : 2;
+    const float threshold =
+        kFirstMultiplier[strategy_class][channel] *
+            static_cast<float>(xsize * ysize * 64) +
+        kSecondMultiplier[strategy_class][channel] * value_sum;
+    const int step = max(0, min(2, static_cast<int>(error_sum / threshold)));
+    if (error_sum > threshold) {
+      raw += step;
+      if (raw >= 256) raw = 255;
+    }
+  }
+
+  const int divisor = static_cast<int>(xsize * ysize);
+  const float minimum =
+      fminf(fminf(nonzeros[0], nonzeros[1]), fminf(nonzeros[2], nonzeros[3]));
+  int activity = 15;
+  if (minimum < static_cast<float>(15 * divisor)) {
+    activity = (static_cast<int>(minimum) + divisor / 2) / divisor;
+  }
+  int adjusted = raw - activity;
+  if (channel == 1) {
+    for (uint32_t quadrant = 1; quadrant < 4; ++quadrant) {
+      thresholds[quadrant] += 0.01f * activity;
+    }
+  }
+  const int limit = max(4, raw / 2);
+  if (adjusted < limit) adjusted = limit;
+  return adjusted;
+}
+
+template <unsigned Width, unsigned Height, unsigned AnchorsPerBlock>
+__global__ void SelectAdjustedQuantizationCooperativeKernel(
+    const CudaAqAnchor* anchors, const float* quant_tables, int* raw_quant,
+    const float* coefficients, float* adjustment_thresholds,
+    const unsigned* quantizer, unsigned* error, CudaAqExactBatch batch,
+    CudaAqResidentParams params) {
+  const unsigned group = threadIdx.x / 96;
+  const unsigned channel = (threadIdx.x % 96) / 32;
+  const unsigned lane = threadIdx.x % 32;
+  const unsigned anchor_index = blockIdx.x * AnchorsPerBlock + group;
+  __shared__ int decisions[AnchorsPerBlock * 3];
+  const bool active = anchor_index < batch.anchor_count;
+  size_t raw_index = 0;
+  int decision = 0;
+  if (active) {
+    const auto anchor = anchors[batch.anchor_offset + anchor_index];
+    raw_index = static_cast<size_t>(anchor.y) * params.block_width + anchor.x;
+    const size_t offset = batch.coefficient_offset +
+                          static_cast<size_t>(anchor_index) * Width * Height;
+    const unsigned channel_stride = batch.anchor_count * Width * Height;
+    float thresholds[4];
+    if (channel == 0)
+      decision = CooperativeAdjustQuantChannel<Width, Height, 0>(
+          coefficients + offset, quant_tables, channel_stride, quantizer[0],
+          raw_quant[raw_index], params.x_matrix_multiplier, thresholds, error);
+    else if (channel == 1)
+      decision = CooperativeAdjustQuantChannel<Width, Height, 1>(
+          coefficients + offset, quant_tables, channel_stride, quantizer[0],
+          raw_quant[raw_index], 1.0f, thresholds, error);
+    else
+      decision = CooperativeAdjustQuantChannel<Width, Height, 2>(
+          coefficients + offset, quant_tables, channel_stride, quantizer[0],
+          raw_quant[raw_index], params.b_matrix_multiplier, thresholds, error);
+    if (channel == 1 && lane == 0) {
+#pragma unroll
+      for (unsigned q = 0; q < 4; ++q)
+        adjustment_thresholds[batch.coefficient_offset +
+                              4 * static_cast<size_t>(anchor_index) + q] =
+            thresholds[q];
+    }
+  }
+  if (lane == 0) decisions[group * 3 + channel] = decision;
+  __syncthreads();
+  if (active && channel == 0 && lane == 0)
+    raw_quant[raw_index] =
+        max(0, max(decisions[group * 3],
+                   max(decisions[group * 3 + 1], decisions[group * 3 + 2])));
+}
+
 __global__ void AdjustQuantFieldKernel(const CudaAqAnchor* anchors,
                                        float* quant_field, unsigned int* error,
                                        uint32_t quant_stride,
@@ -917,7 +1131,7 @@ cudaError_t LaunchCudaAqFinalColorCorrelation(
   return cudaGetLastError();
 }
 
-cudaError_t LaunchCudaAqSelectAdjustedQuantization(
+cudaError_t LaunchCudaAqSelectAdjustedQuantizationScalar(
     const CudaAqAnchor* anchors, const float* quant_tables, int* raw_quant,
     const float* forward_coefficients, float* adjustment_thresholds,
     const unsigned int* quantizer, unsigned int* error, CudaAqExactBatch batch,
@@ -926,6 +1140,57 @@ cudaError_t LaunchCudaAqSelectAdjustedQuantization(
   SelectAdjustedQuantizationKernel<<<blocks, kThreads, 0, stream>>>(
       anchors, quant_tables, raw_quant, forward_coefficients,
       adjustment_thresholds, quantizer, error, batch, params);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqSelectAdjustedQuantization(
+    const CudaAqAnchor* anchors, const float* quant_tables, int* raw_quant,
+    const float* forward_coefficients, float* adjustment_thresholds,
+    const unsigned int* quantizer, unsigned int* error, CudaAqExactBatch batch,
+    CudaAqResidentParams params, cudaStream_t stream) {
+  const unsigned int width = batch.pixel_width > batch.pixel_height
+                                 ? batch.pixel_width
+                                 : batch.pixel_height;
+  const unsigned int height = batch.pixel_width < batch.pixel_height
+                                  ? batch.pixel_width
+                                  : batch.pixel_height;
+  // Only canonical, validated resident shapes use the specialized policy.
+  // Keep the old wrapper's behavior for other internal batch configurations.
+  if (width == 8 && height == 8 && batch.coefficient_count == 64 &&
+      params.strategy == 0) {
+    SelectAdjustedQuantizationCooperativeKernel<8, 8, 1>
+        <<<batch.anchor_count, 96, 0, stream>>>(
+            anchors, quant_tables, raw_quant, forward_coefficients,
+            adjustment_thresholds, quantizer, error, batch, params);
+  } else if (width == 16 && height == 8 && batch.coefficient_count == 128 &&
+             (params.strategy == 6 || params.strategy == 7)) {
+    SelectAdjustedQuantizationCooperativeKernel<16, 8, 1>
+        <<<batch.anchor_count, 96, 0, stream>>>(
+            anchors, quant_tables, raw_quant, forward_coefficients,
+            adjustment_thresholds, quantizer, error, batch, params);
+  } else if (width == 16 && height == 16 && batch.coefficient_count == 256 &&
+             params.strategy == 4) {
+    SelectAdjustedQuantizationCooperativeKernel<16, 16, 1>
+        <<<batch.anchor_count, 96, 0, stream>>>(
+            anchors, quant_tables, raw_quant, forward_coefficients,
+            adjustment_thresholds, quantizer, error, batch, params);
+  } else if (width == 32 && height == 16 && batch.coefficient_count == 512 &&
+             (params.strategy == 10 || params.strategy == 11)) {
+    SelectAdjustedQuantizationCooperativeKernel<32, 16, 1>
+        <<<batch.anchor_count, 96, 0, stream>>>(
+            anchors, quant_tables, raw_quant, forward_coefficients,
+            adjustment_thresholds, quantizer, error, batch, params);
+  } else if (width == 32 && height == 32 && batch.coefficient_count == 1024 &&
+             params.strategy == 5) {
+    SelectAdjustedQuantizationCooperativeKernel<32, 32, 1>
+        <<<batch.anchor_count, 96, 0, stream>>>(
+            anchors, quant_tables, raw_quant, forward_coefficients,
+            adjustment_thresholds, quantizer, error, batch, params);
+  } else {
+    return LaunchCudaAqSelectAdjustedQuantizationScalar(
+        anchors, quant_tables, raw_quant, forward_coefficients,
+        adjustment_thresholds, quantizer, error, batch, params, stream);
+  }
   return cudaGetLastError();
 }
 

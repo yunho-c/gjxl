@@ -71,6 +71,13 @@ struct CudaAqResidentPolicyParams {
     const unsigned int* quantizer, unsigned int* error, CudaAqExactBatch batch,
     CudaAqResidentParams params, cudaStream_t stream);
 
+// Retained serial arithmetic/layout oracle for cooperative quantization tests.
+[[nodiscard]] cudaError_t LaunchCudaAqSelectAdjustedQuantizationScalar(
+    const CudaAqAnchor* anchors, const float* quant_tables, int* raw_quant,
+    const float* forward_coefficients, float* adjustment_thresholds,
+    const unsigned int* quantizer, unsigned int* error, CudaAqExactBatch batch,
+    CudaAqResidentParams params, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqEncodeResidentCoefficients(
     const CudaAqAnchor* anchors, const float* quant_tables,
     const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
