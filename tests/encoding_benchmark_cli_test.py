@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import struct
@@ -82,6 +83,33 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_pinned_source_export_does_not_create_a_metal_backend(self) -> None:
+        expected = {
+            "padded_1080p": "b7f50697fb32748f738c01c6401c2d5a27bb48c391e5f88615f36c154fe1bdee",
+            "padded_4k": "ce5060c810e28db55cbc9319a35ab54de6ec41c08733c8f7beb5224f9de4b4a2",
+        }
+        for workload, digest in expected.items():
+            with self.subTest(workload=workload):
+                destination = self.directory / (workload + ".pfm")
+                result = subprocess.run(
+                    [str(self.benchmark), "--workload", workload,
+                     "--metallib", str(self.directory / "missing.metallib"),
+                     "--source-output", str(destination)],
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(hashlib.sha256(destination.read_bytes()).hexdigest(), digest)
+
+    def test_invalid_source_export_preserves_existing_file(self) -> None:
+        destination = self.directory / "source.pfm"
+        destination.write_bytes(b"sentinel")
+        result = subprocess.run(
+            [str(self.benchmark), "--workload", "all", "--source-output", str(destination)],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(destination.read_bytes(), b"sentinel")
 
     def run_benchmark(
         self, *arguments: str

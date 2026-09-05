@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "compact": [
+    "flat",
+    "gradient",
+    "edge",
+    "saturated",
+    "texture",
+    "noise",
+    "flower",
+    "grayscale"
+  ],
+  "inputs": [
+    {
+      "name": "flat",
+      "sha256": "aba959737eeee2f172659fcae81d10f1d8035db1f8e7a072b3bca12a6dc9496f",
+      "width": 128,
+      "height": 96,
+      "category": "synthetic"
+    },
+    {
+      "name": "gradient",
+      "sha256": "1e2d8d0a2e0de50259367b8a02517633d98dbc71927644bc51270499002f4ba0",
+      "width": 129,
+      "height": 97,
+      "category": "synthetic"
+    },
+    {
+      "name": "edge",
+      "sha256": "3a761665e5e8f441894ef06eb8fc1e40e56debbc5d88618173f844aeee42d13d",
+      "width": 257,
+      "height": 193,
+      "category": "synthetic"
+    },
+    {
+      "name": "saturated",
+      "sha256": "7c1cb4bc0f8b6b4d20108381045c23f877e7370b5ce299b0b69024ea1fd707c5",
+      "width": 128,
+      "height": 96,
+      "category": "synthetic"
+    },
+    {
+      "name": "texture",
+      "sha256": "dc69c2d27804e9e8eb40e7c12437cee2b157161181e8f2b2fe7f52aa151ac8f4",
+      "width": 129,
+      "height": 97,
+      "category": "synthetic"
+    },
+    {
+      "name": "noise",
+      "sha256": "62d95cae02c7132a8a4ddfa77e49d510f29e8b36712b9c5dcaf242a05a5a11a0",
+      "width": 257,
+      "height": 193,
+      "category": "synthetic"
+    },
+    {
+      "name": "flower",
+      "sha256": "7bc29025c1b946a7959df1a3b52dda5da0efbcbda34a481a1e9a44e8d15cbedd",
+      "width": 128,
+      "height": 96,
+      "category": "pinned-crop"
+    },
+    {
+      "name": "grayscale",
+      "sha256": "5ddf4bc38f821612c38925d0adea4b8820eb033bc1182ab8baab503ebfc5e1d4",
+      "width": 128,
+      "height": 96,
+      "category": "pinned-crop"
+    },
+    {
+      "name": "imazen26-1029-planter-4k",
+      "sha256": "1209669f6b5a1e7d8fcf5e471dbf6ebf9d17e05f8a4670544527bb63e7145f01",
+      "width": 3840,
+      "height": 2160,
+      "category": "photographic-4k"
+    },
+    {
+      "name": "imazen26-1029-planter-1080p",
+      "sha256": "6c6a53b5ccfac857493ffe770d3b86541b4cc4e92d88115f8710db12536158ba",
+      "width": 1920,
+      "height": 1080,
+      "category": "photographic-1080p"
+    },
+    {
+      "name": "imazen26-1039-sun-forest-4k",
+      "sha256": "1ed80259e986c7be7d28ac9fb6ad61e9c3cab2dbb23a95a9f67892e41ff531e7",
+      "width": 3840,
+      "height": 2160,
+      "category": "photographic-4k"
+    },
+    {
+      "name": "imazen26-1039-sun-forest-1080p",
+      "sha256": "423703c61bcecdd605f9aa9a7f0ad8c37a6717f90e515fdcb9e4b6d9e1c76b16",
+      "width": 1920,
+      "height": 1080,
+      "category": "photographic-1080p"
+    },
+    {
+      "name": "imazen26-1049-river-city-4k",
+      "sha256": "44abbdb95c37fdd7447f9c6b5dde9a57220d752c9d046ef90f1c3cfbe5a1a152",
+      "width": 3840,
+      "height": 2160,
+      "category": "photographic-4k"
+    },
+    {
+      "name": "imazen26-1049-river-city-1080p",
+      "sha256": "39eb093bff4cb253d1ffd2f226b126828d89c16d94680fb29b4af951ab20a9ad",
+      "width": 1920,
+      "height": 1080,
+      "category": "photographic-1080p"
+    },
+    {
+      "name": "imazen26-1207-bedroom-noise-4k",
+      "sha256": "42362e21907fb1610d29abcf83da174f6da7a716e6bfdaeceaa2a6cbb047ca42",
+      "width": 3840,
+      "height": 2160,
+      "category": "photographic-4k"
+    },
+    {
+      "name": "imazen26-1207-bedroom-noise-1080p",
+      "sha256": "629f061bd091a2fd628369e9fcc75b4bd79d9ad2b309f03e9bc913fdaa45196b",
+      "width": 1920,
+      "height": 1080,
+      "category": "photographic-1080p"
+    },
+    {
+      "name": "imazen26-1409-rainbow-4k",
+      "sha256": "2d4285b3d375fc1b4d23e9aaa58614cd7ab37d7b478bb6e67dbc611f00e04490",
+      "width": 3840,
+      "height": 2160,
+      "category": "photographic-4k"
+    },
+    {
+      "name": "imazen26-1409-rainbow-1080p",
+      "sha256": "d55442724673aaa2bf319627fe08c6a439d0c94994d569ad5f43a17c19a169cd",
+      "width": 1920,
+      "height": 1080,
+      "category": "photographic-1080p"
+    },
+    {
+      "name": "imazen26-1609-food-detail-4k",
+      "sha256": "73b0f8ab65b82da2a78bc25c9b745c61fe0600ac71fbc0ebe35414459f1e9fbf",
+      "width": 3840,
+      "height": 2160,
+      "category": "photographic-4k"
+    },
+    {
+      "name": "imazen26-1609-food-detail-1080p",
+      "sha256": "36b9536fb544cde0c3ff3ecd9385031595a613f6dc9a951beae6bf80bbfbd38e",
+      "width": 1920,
+      "height": 1080,
+      "category": "photographic-1080p"
+    },
+    {
+      "name": "kodak-kodim01",
+      "sha256": "85de56c3dbb999e135db21f4944a7d1e9ba0307d0499946721aa021fc0bfeb96",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim02",
+      "sha256": "52bd319d11fb19d8e55cae9f5ca2c67cf24b0c5c62bdc1866ad7e3d202b261c5",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim03",
+      "sha256": "cc0b9291dc364835e4301afc0b5b2bfc9178f0d57edf3a44f3b0c350a4fe4bd0",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim04",
+      "sha256": "a53431ec60f00dd2d6d3baf6e49e8a78beda7c71d9f040d6182b4661e37bb97d",
+      "width": 512,
+      "height": 768,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim05",
+      "sha256": "bfc75bb1f6d1472fb7110a9dc7f6636e84ee0dc95e270847151982228350e4da",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim06",
+      "sha256": "f6abe8f35571f44f9479fcfa21e560f81b9316be908cf63597964c7d7e6bb308",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim07",
+      "sha256": "1c93ea5f46ba77733dac06173c566023b2a4dc72e2739d858dd0184a47f97f43",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim08",
+      "sha256": "42750b69906c52e3f8a286cff78dc066e246a960861859452583fc62f8978d66",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim09",
+      "sha256": "449041f5eecb303c6a2e3d0ed2c7bfa6370902d184312a9eedadf8164fea3c00",
+      "width": 512,
+      "height": 768,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim10",
+      "sha256": "39eef10bdf6fa51eba5d1577999977453ae3ed5f5b61fc80135ac9fd7bdd462c",
+      "width": 512,
+      "height": 768,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim11",
+      "sha256": "270fada05a8717afb103079dc3e3a194dee8f6302c7216b212a75add27512ba3",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim12",
+      "sha256": "690cfe2d630ba858269a36f28085d6810c9fa507f3325c88a74295fa1c65b793",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim13",
+      "sha256": "90034e4a5ada79fc75f1eebd6d0caee467e8f8014d2861d7d7564098a8c03ec9",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim14",
+      "sha256": "e1afc2ed5cf8834c079e04aa5c488e17eab41091ca0ee172176cfd4aa531289b",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim15",
+      "sha256": "0717c8d6ca5e9783e6e8d894e3c58517adfb9121fa32adfc38de8814473d09eb",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim16",
+      "sha256": "284f3e193f6681a0ad513cae1234528bf69ad19022876ee684038d3f2bf75652",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim17",
+      "sha256": "82aee270c7082db68f4dd7672562d3b75078d06c13b1bcddaeaa1d74b1e2d821",
+      "width": 512,
+      "height": 768,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim18",
+      "sha256": "8d2c18a9b8d8b2c530ce0f9beffc096b8989393d59302cee67765346d27250dd",
+      "width": 512,
+      "height": 768,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim19",
+      "sha256": "c1023621155cbf85b8d425a1d18b7790b6abd0ea6973d5f20625742ddd8b063b",
+      "width": 512,
+      "height": 768,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim20",
+      "sha256": "2922061fee57cc74e7c7a3d8a8d2ec24408b056c3befd6bf20140e54e3e424ad",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim21",
+      "sha256": "c3ea1c712928ce6e6cb82fc38f03ec809823f8660883af260a475f99622e4839",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim22",
+      "sha256": "1d96e8ed8d474120cb987ae48a9be79d0baa8f92a8f63d4824a5fe35c2500e3a",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim23",
+      "sha256": "bce6c36374bb7061fb2788efc7b694ba193049587dc3097d31b98c54e04f1f99",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "kodak-kodim24",
+      "sha256": "ce0776b0b54649604611645a26cef19899e83856cfd72b3808c80a75adcb958a",
+      "width": 768,
+      "height": 512,
+      "category": "kodak-continuity"
+    },
+    {
+      "name": "padded-stress-1080p",
+      "sha256": "b7f50697fb32748f738c01c6401c2d5a27bb48c391e5f88615f36c154fe1bdee",
+      "width": 1919,
+      "height": 1079,
+      "category": "padded-stress-1080p"
+    },
+    {
+      "name": "padded-stress-4k",
+      "sha256": "ce5060c810e28db55cbc9319a35ab54de6ec41c08733c8f7beb5224f9de4b4a2",
+      "width": 3839,
+      "height": 2159,
+      "category": "padded-stress-4k"
+    }
+  ]
+}

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cctype>
 #include <cmath>
@@ -125,6 +126,7 @@ constexpr std::array<std::string_view, aqi::kEvaluationStageCount>
 struct CommandLineOptions {
   std::string workload = "all";
   std::string input_path;
+  std::string source_output_path;
   std::string metallib_path;
   std::string raw_samples_path;
   std::string gpu_profile_path;
@@ -560,6 +562,7 @@ ParseGpuProfilingMode(std::string_view text) {
       std::cout << "usage: gjxl_encoding_benchmark "
                    "[--workload NAME|all] "
                    "[--input IMAGE.ppm|IMAGE.pfm] "
+                   "[--source-output PATH] "
                    "[--scope full|public-workflow|metal-public-workflow|"
                    "coefficient-coding] "
                    "[--implementation scalar|simd|factored] "
@@ -596,6 +599,8 @@ ParseGpuProfilingMode(std::string_view text) {
       options.workload = value;
     } else if (argument == "--input") {
       options.input_path = value;
+    } else if (argument == "--source-output") {
+      options.source_output_path = value;
     } else if (argument == "--metallib") {
       options.metallib_path = value;
     } else if (argument == "--raw-samples") {
@@ -2931,6 +2936,56 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
   *global_sink += sink;
 }
 
+void WriteLittleEndianFloat(std::ofstream* output, float value) {
+  uint32_t bits = std::bit_cast<uint32_t>(value);
+  const std::array<char, 4> bytes = {
+      static_cast<char>(bits),
+      static_cast<char>(bits >> 8),
+      static_cast<char>(bits >> 16),
+      static_cast<char>(bits >> 24),
+  };
+  output->write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+void WritePfm(
+    const std::filesystem::path& destination,
+    const ImageStorage& image) {
+  if (!destination.parent_path().empty()) {
+    std::filesystem::create_directories(destination.parent_path());
+  }
+  std::filesystem::path temporary = destination;
+  temporary += ".tmp-" + std::to_string(static_cast<uint64_t>(
+    Clock::now().time_since_epoch().count()));
+  try {
+    std::ofstream output;
+    output.exceptions(std::ios::badbit | std::ios::failbit);
+    output.open(temporary, std::ios::binary | std::ios::trunc);
+    output << "PF\n" << image.extent.width << ' ' << image.extent.height
+           << "\n-1.0\n";
+    for (size_t reverse_y = 0; reverse_y < image.extent.height; ++reverse_y) {
+      const size_t y = image.extent.height - 1 - reverse_y;
+      for (size_t x = 0; x < image.extent.width; ++x) {
+        const size_t index = y * image.extent.width + x;
+        for (size_t channel = 0; channel < image.plane.size(); ++channel) {
+          WriteLittleEndianFloat(&output, image.plane[channel][index]);
+        }
+      }
+    }
+    output.close();
+    std::error_code error;
+    std::filesystem::rename(temporary, destination, error);
+    if (error) {
+      throw std::runtime_error(
+        "Could not atomically replace source output: " + error.message());
+    }
+  } catch (...) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    throw;
+  }
+}
+
+
 [[nodiscard]] bool IsKnownWorkload(std::string_view name) {
   return std::any_of(
       kWorkloads.begin(), kWorkloads.end(),
@@ -2946,6 +3001,25 @@ int main(int argc, char** argv) {
         !IsKnownWorkload(options.workload)) {
       throw std::runtime_error("Unknown quantization workload: " +
                                options.workload);
+    }
+    if (!options.source_output_path.empty()) {
+      if (!options.input_path.empty() || options.workload == "all") {
+        throw std::runtime_error("Source export requires one named built-in workload");
+      }
+      const auto found = std::find_if(kWorkloads.begin(), kWorkloads.end(),
+        [&](const WorkloadSpec& spec) { return spec.name == options.workload; });
+      ImageStorage source = found->flower
+          ? LoadFlower()
+          : ImageStorage(found->source_extent);
+      if (!found->flower) {
+        if (found->workflow_gradient) {
+          FillWorkflowGradient(&source);
+        } else {
+          FillSynthetic(&source);
+        }
+      }
+      WritePfm(options.source_output_path, source);
+      return EXIT_SUCCESS;
     }
     const gjxl::MetalBackendOptions backend_options =
         BackendOptions(options.implementation, options.ac_residual_inverse);

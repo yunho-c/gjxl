@@ -1,0 +1,1057 @@
+id,status,cpu_score,metal_score,metal_bytes,cpu_size_ratio,libjxl_size_ratio,failures
+flat/e1/0.5,incomplete,0.0159051549,0.0159051549,158,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.0159051549, best=0.0403812714, error=0.0244761165, tolerance=0.015"
+flat/e4/0.5,incomplete,0.1313997805,0.1404161751,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.140416175, best=0.160526246, error=0.0201100707, tolerance=0.015"
+flat/e7/0.5,incomplete,0.259662807,0.2830415666,162,,,"cpu calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.299156189, error=0.0161146224, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.264577031, error=0.0184645355, tolerance=0.015"
+flat/e8/0.5,incomplete,0.259662807,0.2830415666,162,,,"cpu calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.299156189, error=0.0161146224, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.264577031, error=0.0184645355, tolerance=0.015"
+flat/e9/0.5,incomplete,0.259662807,0.2830415666,160,,,"cpu calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.299156189, error=0.0161146224, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.264577031, error=0.0184645355, tolerance=0.015"
+flat/e10/0.5,incomplete,0.259662807,0.2830415666,160,,,"cpu calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.299156189, error=0.0161146224, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.264577031, error=0.0184645355, tolerance=0.015"
+flat/e1-max/0.5,incomplete,0.0159051549,0.0159051549,156,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.0159051549, best=0.0403812714, error=0.0244761165, tolerance=0.015"
+flat/e4-max/0.5,incomplete,0.1313997805,0.1404161751,172,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.140416175, best=0.160526246, error=0.0201100707, tolerance=0.015"
+flat/e7-max/0.5,incomplete,0.259662807,0.2830415666,172,,,"cpu calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.299156189, error=0.0161146224, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.264577031, error=0.0184645355, tolerance=0.015"
+flat/e8-max/0.5,incomplete,0.259662807,0.2830415666,172,,,"cpu calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.299156189, error=0.0161146224, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.264577031, error=0.0184645355, tolerance=0.015"
+flat/e10-max/0.5,incomplete,0.259662807,0.2830415666,172,,,"cpu calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.299156189, error=0.0161146224, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.283041567, best=0.264577031, error=0.0184645355, tolerance=0.015"
+flat/e1/0.8,pass,0.1166542396,0.1166542396,162,1.0,1.975609756097561,
+flat/e4/0.8,incomplete,0.0355115607,0.0095174471,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.0095174471, best=0.0403812714, error=0.0308638243, tolerance=0.015"
+flat/e7/0.8,incomplete,0.0822733119,0.1729489565,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.172948957, best=0.108887717, error=0.0640612394, tolerance=0.015"
+flat/e8/0.8,incomplete,0.0822733119,0.1729489565,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.172948957, best=0.108887717, error=0.0640612394, tolerance=0.015"
+flat/e9/0.8,incomplete,0.0822733119,0.1729489565,159,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.172948957, best=0.108887717, error=0.0640612394, tolerance=0.015"
+flat/e10/0.8,incomplete,0.0822733119,0.1729489565,159,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.172948957, best=0.108887717, error=0.0640612394, tolerance=0.015"
+flat/e1-max/0.8,pass,0.1166542396,0.1166542396,172,1.0,2.097560975609756,
+flat/e4-max/0.8,incomplete,0.0355115607,0.0095174471,171,0.9715909090909091,,"libjxl calibration: Calibration did not converge within tolerance: target=0.0095174471, best=0.0403812714, error=0.0308638243, tolerance=0.015"
+flat/e7-max/0.8,incomplete,0.0822733119,0.1729489565,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.172948957, best=0.108887717, error=0.0640612394, tolerance=0.015"
+flat/e8-max/0.8,incomplete,0.0822733119,0.1729489565,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.172948957, best=0.108887717, error=0.0640612394, tolerance=0.015"
+flat/e10-max/0.8,incomplete,0.0822733119,0.1729489565,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.172948957, best=0.108887717, error=0.0640612394, tolerance=0.015"
+flat/e1/1,pass,0.1025503427,0.1025503427,162,1.0,1.975609756097561,
+flat/e4/1,incomplete,0.542409122,0.542409122,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.542409122, best=0.586637259, error=0.0442281365, tolerance=0.015"
+flat/e7/1,incomplete,0.5107065439,0.5107065439,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.510706544, best=0.494217992, error=0.0164885521, tolerance=0.015"
+flat/e8/1,incomplete,0.5107065439,0.5107065439,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.510706544, best=0.494217992, error=0.0164885521, tolerance=0.015"
+flat/e9/1,incomplete,0.5107065439,0.5107065439,159,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.510706544, best=0.494217992, error=0.0164885521, tolerance=0.015"
+flat/e10/1,incomplete,0.5107065439,0.5107065439,159,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.510706544, best=0.494217992, error=0.0164885521, tolerance=0.015"
+flat/e1-max/1,pass,0.1025503427,0.1025503427,172,1.0,2.097560975609756,
+flat/e4-max/1,incomplete,0.542409122,0.542409122,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.542409122, best=0.586637259, error=0.0442281365, tolerance=0.015"
+flat/e7-max/1,incomplete,0.5107065439,0.5107065439,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.510706544, best=0.494217992, error=0.0164885521, tolerance=0.015"
+flat/e8-max/1,incomplete,0.5107065439,0.5107065439,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.510706544, best=0.494217992, error=0.0164885521, tolerance=0.015"
+flat/e10-max/1,incomplete,0.5107065439,0.5107065439,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.510706544, best=0.494217992, error=0.0164885521, tolerance=0.015"
+flat/e1/1.1,incomplete,0.6318742037,0.6318742037,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.631874204, best=0.61304611, error=0.018828094, tolerance=0.015"
+flat/e4/1.1,incomplete,0.5407410264,0.5873675942,162,,,"cpu calibration: Calibration did not converge within tolerance: target=0.587367594, best=0.540741026, error=0.0466265678, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.587367594, best=0.608013034, error=0.0206454397, tolerance=0.015"
+flat/e7/1.1,pass,0.5121892691,0.0306207333,162,1.0253164556962024,2.219178082191781,
+flat/e8/1.1,pass,0.5121892691,0.0306207333,162,1.0253164556962024,2.219178082191781,
+flat/e9/1.1,pass,0.5121892691,0.0306207333,159,1.0192307692307692,2.1780821917808217,
+flat/e10/1.1,pass,0.5121892691,0.0306207333,159,1.0192307692307692,2.1780821917808217,
+flat/e1-max/1.1,incomplete,0.6318742037,0.6318742037,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.631874204, best=0.61304611, error=0.018828094, tolerance=0.015"
+flat/e4-max/1.1,incomplete,0.5407410264,0.5873675942,171,,,"cpu calibration: Calibration did not converge within tolerance: target=0.587367594, best=0.540741026, error=0.0466265678, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.587367594, best=0.608013034, error=0.0206454397, tolerance=0.015"
+flat/e7-max/1.1,pass,0.5121892691,0.0306207333,171,1.0961538461538463,2.3424657534246576,
+flat/e8-max/1.1,pass,0.5121892691,0.0306207333,171,1.0961538461538463,2.3424657534246576,
+flat/e10-max/1.1,pass,0.5121892691,0.0306207333,171,1.0961538461538463,2.3424657534246576,
+flat/e1/1.2,incomplete,0.2490137666,0.2490137666,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.249013767, best=0.226423562, error=0.022590205, tolerance=0.015"
+flat/e4/1.2,pass,0.1382714808,0.1382714808,162,1.0,2.0,
+flat/e7/1.2,incomplete,0.3843156099,0.5414785743,162,,,"cpu calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.614113867, error=0.072635293, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.584947825, error=0.0434692502, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e8/1.2,incomplete,0.3843156099,0.5414785743,162,,,"cpu calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.614113867, error=0.072635293, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.584947825, error=0.0434692502, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e9/1.2,incomplete,0.3843156099,0.5414785743,159,,,"cpu calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.614113867, error=0.072635293, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.584947825, error=0.0434692502, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e10/1.2,incomplete,0.3843156099,0.5414785743,159,,,"cpu calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.614113867, error=0.072635293, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.584947825, error=0.0434692502, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e1-max/1.2,incomplete,0.2490137666,0.2490137666,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.249013767, best=0.226423562, error=0.022590205, tolerance=0.015"
+flat/e4-max/1.2,pass,0.1382714808,0.1382714808,171,1.0,2.111111111111111,
+flat/e7-max/1.2,incomplete,0.3843156099,0.5414785743,171,,,"cpu calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.614113867, error=0.072635293, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.584947825, error=0.0434692502, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e8-max/1.2,incomplete,0.3843156099,0.5414785743,171,,,"cpu calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.614113867, error=0.072635293, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.584947825, error=0.0434692502, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e10-max/1.2,incomplete,0.3843156099,0.5414785743,171,,,"cpu calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.614113867, error=0.072635293, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.541478574, best=0.584947825, error=0.0434692502, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e1/1.3,pass,0.2929509878,0.2929509878,162,1.0,1.975609756097561,
+flat/e4/1.3,incomplete,0.3861749172,0.3861749172,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.386174917, best=0.413066208, error=0.0268912912, tolerance=0.015"
+flat/e7/1.3,incomplete,0.5966625214,0.5966625214,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.596662521, best=0.56846565, error=0.0281968713, tolerance=0.015"
+flat/e8/1.3,incomplete,0.5966625214,0.5966625214,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.596662521, best=0.56846565, error=0.0281968713, tolerance=0.015"
+flat/e9/1.3,incomplete,0.5966625214,0.5966625214,159,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.596662521, best=0.56846565, error=0.0281968713, tolerance=0.015"
+flat/e10/1.3,incomplete,0.5966625214,0.5966625214,159,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.596662521, best=0.56846565, error=0.0281968713, tolerance=0.015"
+flat/e1-max/1.3,pass,0.2929509878,0.2929509878,171,1.0,2.0853658536585367,
+flat/e4-max/1.3,incomplete,0.3861749172,0.3861749172,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.386174917, best=0.413066208, error=0.0268912912, tolerance=0.015"
+flat/e7-max/1.3,incomplete,0.5966625214,0.5966625214,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.596662521, best=0.56846565, error=0.0281968713, tolerance=0.015"
+flat/e8-max/1.3,incomplete,0.5966625214,0.5966625214,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.596662521, best=0.56846565, error=0.0281968713, tolerance=0.015"
+flat/e10-max/1.3,incomplete,0.5966625214,0.5966625214,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.596662521, best=0.56846565, error=0.0281968713, tolerance=0.015"
+flat/e1/1.4,incomplete,0.5575674176,0.5575674176,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.557567418, best=0.494217992, error=0.0633494258, tolerance=0.015"
+flat/e4/1.4,incomplete,0.4667680264,0.4667680264,162,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.466768026, best=0.492658138, error=0.0258901119, tolerance=0.015"
+flat/e7/1.4,incomplete,0.1913386881,0.2620559931,162,,1.975609756097561,"cpu calibration: Calibration did not converge within tolerance: target=0.262055993, best=0.244878888, error=0.017177105, tolerance=0.015"
+flat/e8/1.4,incomplete,0.1913386881,0.2620559931,162,,1.975609756097561,"cpu calibration: Calibration did not converge within tolerance: target=0.262055993, best=0.244878888, error=0.017177105, tolerance=0.015"
+flat/e9/1.4,incomplete,0.1913386881,0.2620559931,159,,1.9390243902439024,"cpu calibration: Calibration did not converge within tolerance: target=0.262055993, best=0.244878888, error=0.017177105, tolerance=0.015"
+flat/e10/1.4,incomplete,0.1913386881,0.2620559931,159,,1.9390243902439024,"cpu calibration: Calibration did not converge within tolerance: target=0.262055993, best=0.244878888, error=0.017177105, tolerance=0.015"
+flat/e1-max/1.4,incomplete,0.5575674176,0.5575674176,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.557567418, best=0.494217992, error=0.0633494258, tolerance=0.015"
+flat/e4-max/1.4,incomplete,0.4667680264,0.4667680264,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.466768026, best=0.492658138, error=0.0258901119, tolerance=0.015"
+flat/e7-max/1.4,incomplete,0.1913386881,0.2620559931,171,,2.0853658536585367,"cpu calibration: Calibration did not converge within tolerance: target=0.262055993, best=0.244878888, error=0.017177105, tolerance=0.015"
+flat/e8-max/1.4,incomplete,0.1913386881,0.2620559931,171,,2.0853658536585367,"cpu calibration: Calibration did not converge within tolerance: target=0.262055993, best=0.244878888, error=0.017177105, tolerance=0.015"
+flat/e10-max/1.4,incomplete,0.1913386881,0.2620559931,171,,2.0853658536585367,"cpu calibration: Calibration did not converge within tolerance: target=0.262055993, best=0.244878888, error=0.017177105, tolerance=0.015"
+flat/e1/2,pass,0.9293588996,0.9293588996,161,1.0,1.8941176470588235,
+flat/e4/2,incomplete,0.7792716026,0.7792716026,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.779271603, best=0.81968832, error=0.0404167176, tolerance=0.015"
+flat/e7/2,pass,0.3972197771,0.3972197771,161,1.0,1.9634146341463414,
+flat/e8/2,pass,0.3972197771,0.3972197771,161,1.0,1.9634146341463414,
+flat/e9/2,pass,0.3972197771,0.3972197771,159,1.0,1.9390243902439024,
+flat/e10/2,pass,0.3972197771,0.3972197771,159,1.0,1.9390243902439024,
+flat/e1-max/2,pass,0.9293588996,0.9293588996,171,1.0,2.011764705882353,
+flat/e4-max/2,incomplete,0.7792716026,0.7792716026,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.779271603, best=0.81968832, error=0.0404167176, tolerance=0.015"
+flat/e7-max/2,pass,0.3972197771,0.3972197771,171,1.0,2.0853658536585367,
+flat/e8-max/2,pass,0.3972197771,0.3972197771,171,1.0,2.0853658536585367,
+flat/e10-max/2,pass,0.3972197771,0.3972197771,171,1.0,2.0853658536585367,
+flat/e1/2.499,pass,0.4213274717,0.4213274717,161,1.0,2.0641025641025643,
+flat/e4/2.499,incomplete,1.0258641243,1.0258641243,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.02586412, best=1.24214506, error=0.216280937, tolerance=0.015"
+flat/e7/2.499,incomplete,1.2167617083,1.2167617083,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.21676171, best=1.24214506, error=0.0253833532, tolerance=0.015"
+flat/e8/2.499,incomplete,1.2167617083,1.2167617083,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.21676171, best=1.24214506, error=0.0253833532, tolerance=0.015"
+flat/e9/2.499,incomplete,1.2167617083,1.2167617083,158,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.21676171, best=1.24214506, error=0.0253833532, tolerance=0.015"
+flat/e10/2.499,incomplete,1.2167617083,1.2167617083,158,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.21676171, best=1.24214506, error=0.0253833532, tolerance=0.015"
+flat/e1-max/2.499,pass,0.4213274717,0.4213274717,171,1.0,2.1923076923076925,
+flat/e4-max/2.499,incomplete,1.0258641243,1.0258641243,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.02586412, best=1.24214506, error=0.216280937, tolerance=0.015"
+flat/e7-max/2.499,incomplete,1.2167617083,1.2167617083,170,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.21676171, best=1.24214506, error=0.0253833532, tolerance=0.015"
+flat/e8-max/2.499,incomplete,1.2167617083,1.2167617083,170,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.21676171, best=1.24214506, error=0.0253833532, tolerance=0.015"
+flat/e10-max/2.499,incomplete,1.2167617083,1.2167617083,170,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.21676171, best=1.24214506, error=0.0253833532, tolerance=0.015"
+flat/e1/2.5,pass,0.326308012,0.326308012,161,1.0,1.9634146341463414,
+flat/e4/2.5,incomplete,0.3026410937,0.447126925,161,,,"cpu calibration: Calibration did not converge within tolerance: target=0.447126925, best=0.409857571, error=0.0372693539, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.447126925, best=0.40106675, error=0.0460601747, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e7/2.5,incomplete,0.0501610227,0.1204355657,161,,1.9876543209876543,"cpu calibration: Calibration did not converge within tolerance: target=0.120435566, best=0.178261176, error=0.0578256101, tolerance=0.015"
+flat/e8/2.5,incomplete,0.0501610227,0.1204355657,161,,1.9876543209876543,"cpu calibration: Calibration did not converge within tolerance: target=0.120435566, best=0.178261176, error=0.0578256101, tolerance=0.015"
+flat/e9/2.5,incomplete,0.0501610227,0.1204355657,159,,1.962962962962963,"cpu calibration: Calibration did not converge within tolerance: target=0.120435566, best=0.178261176, error=0.0578256101, tolerance=0.015"
+flat/e10/2.5,incomplete,0.0501610227,0.1204355657,159,,1.962962962962963,"cpu calibration: Calibration did not converge within tolerance: target=0.120435566, best=0.178261176, error=0.0578256101, tolerance=0.015"
+flat/e1-max/2.5,pass,0.326308012,0.326308012,171,1.0,2.0853658536585367,
+flat/e4-max/2.5,incomplete,0.3026410937,0.447126925,171,,,"cpu calibration: Calibration did not converge within tolerance: target=0.447126925, best=0.409857571, error=0.0372693539, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.447126925, best=0.40106675, error=0.0460601747, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e7-max/2.5,incomplete,0.0501610227,0.1204355657,171,,2.111111111111111,"cpu calibration: Calibration did not converge within tolerance: target=0.120435566, best=0.178261176, error=0.0578256101, tolerance=0.015"
+flat/e8-max/2.5,incomplete,0.0501610227,0.1204355657,171,,2.111111111111111,"cpu calibration: Calibration did not converge within tolerance: target=0.120435566, best=0.178261176, error=0.0578256101, tolerance=0.015"
+flat/e10-max/2.5,incomplete,0.0501610227,0.1204355657,171,,2.111111111111111,"cpu calibration: Calibration did not converge within tolerance: target=0.120435566, best=0.178261176, error=0.0578256101, tolerance=0.015"
+flat/e1/2.501,incomplete,0.1362963915,0.1362963915,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.136296392, best=0.153676927, error=0.0173805356, tolerance=0.015"
+flat/e4/2.501,incomplete,0.7333909273,0.9056801796,161,,,"cpu calibration: Calibration did not converge within tolerance: target=0.90568018, best=0.957184374, error=0.0515041947, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.90568018, best=0.742821634, error=0.162858546, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e7/2.501,incomplete,0.7900465131,1.0005085468,161,,,"cpu calibration: Calibration did not converge within tolerance: target=1.00050855, best=0.790046513, error=0.210462034, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=1.00050855, best=1.24214506, error=0.241636515, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e8/2.501,incomplete,0.7900465131,1.0005085468,161,,,"cpu calibration: Calibration did not converge within tolerance: target=1.00050855, best=0.790046513, error=0.210462034, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=1.00050855, best=1.24214506, error=0.241636515, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e9/2.501,incomplete,0.7900465131,1.0005085468,159,,,"cpu calibration: Calibration did not converge within tolerance: target=1.00050855, best=0.790046513, error=0.210462034, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=1.00050855, best=1.24214506, error=0.241636515, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e10/2.501,incomplete,0.7900465131,1.0005085468,159,,,"cpu calibration: Calibration did not converge within tolerance: target=1.00050855, best=0.790046513, error=0.210462034, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=1.00050855, best=1.24214506, error=0.241636515, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e1-max/2.501,incomplete,0.1362963915,0.1362963915,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.136296392, best=0.153676927, error=0.0173805356, tolerance=0.015"
+flat/e4-max/2.501,incomplete,0.7333909273,0.9056801796,171,,,"cpu calibration: Calibration did not converge within tolerance: target=0.90568018, best=0.957184374, error=0.0515041947, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.90568018, best=0.742821634, error=0.162858546, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e7-max/2.501,incomplete,0.7900465131,1.0005085468,171,,,"cpu calibration: Calibration did not converge within tolerance: target=1.00050855, best=0.790046513, error=0.210462034, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=1.00050855, best=1.24214506, error=0.241636515, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e8-max/2.501,incomplete,0.7900465131,1.0005085468,171,,,"cpu calibration: Calibration did not converge within tolerance: target=1.00050855, best=0.790046513, error=0.210462034, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=1.00050855, best=1.24214506, error=0.241636515, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e10-max/2.501,incomplete,0.7900465131,1.0005085468,171,,,"cpu calibration: Calibration did not converge within tolerance: target=1.00050855, best=0.790046513, error=0.210462034, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=1.00050855, best=1.24214506, error=0.241636515, tolerance=0.015; resident quality exceeds CPU allowance"
+flat/e1/3,incomplete,0.6130055785,0.6130055785,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.613005579, best=0.721573353, error=0.108567774, tolerance=0.015"
+flat/e4/3,incomplete,0.4159694016,0.4159694016,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.415969402, best=0.47999084, error=0.0640214384, tolerance=0.015"
+flat/e7/3,incomplete,1.257579565,1.257579565,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.25757956, best=1.12231159, error=0.135267973, tolerance=0.015"
+flat/e8/3,incomplete,1.257579565,1.257579565,161,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.25757956, best=1.12231159, error=0.135267973, tolerance=0.015"
+flat/e9/3,incomplete,1.257579565,1.257579565,159,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.25757956, best=1.12231159, error=0.135267973, tolerance=0.015"
+flat/e10/3,incomplete,1.257579565,1.257579565,159,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.25757956, best=1.12231159, error=0.135267973, tolerance=0.015"
+flat/e1-max/3,incomplete,0.6130055785,0.6130055785,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.613005579, best=0.721573353, error=0.108567774, tolerance=0.015"
+flat/e4-max/3,incomplete,0.4159694016,0.4159694016,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.415969402, best=0.47999084, error=0.0640214384, tolerance=0.015"
+flat/e7-max/3,incomplete,1.257579565,1.257579565,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.25757956, best=1.12231159, error=0.135267973, tolerance=0.015"
+flat/e8-max/3,incomplete,1.257579565,1.257579565,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.25757956, best=1.12231159, error=0.135267973, tolerance=0.015"
+flat/e10-max/3,incomplete,1.257579565,1.257579565,171,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.25757956, best=1.12231159, error=0.135267973, tolerance=0.015"
+gradient/e1/0.5,pass,0.558373332,0.558373332,1072,1.0,1.0850202429149798,
+gradient/e4/0.5,incomplete,0.6794052124,0.695443511,1041,,,"cpu calibration: Calibration did not converge within tolerance: target=0.695443511, best=0.710767865, error=0.0153243542, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.695443511, best=0.665926874, error=0.0295166373, tolerance=0.015"
+gradient/e7/0.5,pass,0.9575551748,0.9575551748,1032,0.9980657640232108,1.3945945945945946,
+gradient/e8/0.5,pass,0.6567681432,0.6690975428,1034,0.9980694980694981,1.3105196451204055,
+gradient/e9/0.5,pass,0.6567681432,0.6690975428,994,1.0,1.2598225602027884,
+gradient/e10/0.5,pass,0.6567681432,0.6690975428,994,1.0,1.2598225602027884,
+gradient/e1-max/0.5,pass,0.558373332,0.558373332,813,1.0,0.8228744939271255,
+gradient/e4-max/0.5,incomplete,0.6794052124,0.695443511,774,,,"cpu calibration: Calibration did not converge within tolerance: target=0.695443511, best=0.710767865, error=0.0153243542, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.695443511, best=0.665926874, error=0.0295166373, tolerance=0.015"
+gradient/e7-max/0.5,pass,0.9575551748,0.9575551748,758,0.9973684210526316,1.0243243243243243,
+gradient/e8-max/0.5,pass,0.6567681432,0.6690975428,763,0.9986910994764397,0.9670468948035488,
+gradient/e10-max/0.5,pass,0.6567681432,0.6690975428,763,0.9986910994764397,0.9670468948035488,
+gradient/e1/0.8,pass,1.2781449556,1.2781449556,702,1.0,1.1838111298482294,
+gradient/e4/0.8,pass,0.8862865567,0.8861575127,692,1.0,0.8963730569948186,
+gradient/e7/0.8,pass,0.9915729761,0.9901686311,681,1.0,0.9354395604395604,
+gradient/e8/0.8,pass,0.9915729761,0.9901686311,681,1.0,0.9354395604395604,
+gradient/e9/0.8,pass,0.9915729761,0.9901686311,657,1.0,0.9024725274725275,
+gradient/e10/0.8,pass,0.9915729761,0.9901686311,657,1.0,0.9024725274725275,
+gradient/e1-max/0.8,pass,1.2781449556,1.2781449556,666,1.0,1.1231028667790894,
+gradient/e4-max/0.8,pass,0.8862865567,0.8861575127,655,1.0,0.8484455958549223,
+gradient/e7-max/0.8,pass,0.9915729761,0.9901686311,644,1.0,0.8846153846153846,
+gradient/e8-max/0.8,pass,0.9915729761,0.9901686311,644,1.0,0.8846153846153846,
+gradient/e10-max/0.8,pass,0.9915729761,0.9901686311,644,1.0,0.8846153846153846,
+gradient/e1/1,incomplete,0.9750573635,1.0487313271,630,,0.9936908517350158,"cpu calibration: Calibration did not converge within tolerance: target=1.04873133, best=1.07190228, error=0.023170948, tolerance=0.015"
+gradient/e4/1,pass,1.0439140797,0.9671838284,623,0.6019323671497585,0.9511450381679389,
+gradient/e7/1,fail,1.0364149809,1.2753965855,845,1.456896551724138,1.4249578414839799,resident quality exceeds CPU allowance; resident matched-quality size exceeds CPU allowance
+gradient/e8/1,fail,1.0364149809,1.2753965855,845,1.456896551724138,1.4249578414839799,resident quality exceeds CPU allowance; resident matched-quality size exceeds CPU allowance
+gradient/e9/1,fail,1.0364149809,1.2753965855,818,1.4659498207885304,1.3794266441821248,resident quality exceeds CPU allowance; resident matched-quality size exceeds CPU allowance
+gradient/e10/1,fail,1.0364149809,1.2753965855,818,1.4659498207885304,1.3794266441821248,resident quality exceeds CPU allowance; resident matched-quality size exceeds CPU allowance
+gradient/e1-max/1,incomplete,0.9750573635,1.0487313271,590,,0.9305993690851735,"cpu calibration: Calibration did not converge within tolerance: target=1.04873133, best=1.07190228, error=0.023170948, tolerance=0.015"
+gradient/e4-max/1,pass,1.0439140797,0.9671838284,586,0.7640156453715776,0.8946564885496183,
+gradient/e7-max/1,fail,1.0364149809,1.2753965855,564,1.0483271375464684,0.9510961214165261,resident quality exceeds CPU allowance
+gradient/e8-max/1,fail,1.0364149809,1.2753965855,564,1.0483271375464684,0.9510961214165261,resident quality exceeds CPU allowance
+gradient/e10-max/1,fail,1.0364149809,1.2753965855,564,1.0483271375464684,0.9510961214165261,resident quality exceeds CPU allowance
+gradient/e1/1.1,pass,1.2241277695,1.2241277695,611,1.0,1.0049342105263157,
+gradient/e4/1.1,pass,1.051646471,1.0516989231,603,1.0,0.8375,
+gradient/e7/1.1,pass,1.1855735779,1.1855735779,601,1.0,0.9917491749174917,
+gradient/e8/1.1,pass,1.1855735779,1.1855735779,601,1.0,0.9917491749174917,
+gradient/e9/1.1,pass,1.1855735779,1.1855735779,574,1.0,0.9471947194719472,
+gradient/e10/1.1,pass,1.1855735779,1.1855735779,574,1.0,0.9471947194719472,
+gradient/e1-max/1.1,pass,1.2241277695,1.2241277695,572,1.0,0.9407894736842105,
+gradient/e4-max/1.1,pass,1.051646471,1.0516989231,567,1.0,0.7875,
+gradient/e7-max/1.1,pass,1.1855735779,1.1855735779,563,1.0,0.929042904290429,
+gradient/e8-max/1.1,pass,1.1855735779,1.1855735779,563,1.0,0.929042904290429,
+gradient/e10-max/1.1,pass,1.1855735779,1.1855735779,563,1.0,0.929042904290429,
+gradient/e1/1.2,pass,1.0975203514,1.0975203514,834,1.0,1.3517017828200972,
+gradient/e4/1.2,pass,1.3004177809,1.3004177809,578,1.0,0.9730639730639731,
+gradient/e7/1.2,pass,1.3290467262,1.3300474882,571,0.9930434782608696,0.9677966101694915,
+gradient/e8/1.2,pass,1.3290467262,1.3300474882,571,0.9930434782608696,0.9677966101694915,
+gradient/e9/1.2,pass,1.3290467262,1.3300474882,553,0.9963963963963964,0.9372881355932203,
+gradient/e10/1.2,pass,1.3290467262,1.3300474882,553,0.9963963963963964,0.9372881355932203,
+gradient/e1-max/1.2,pass,1.0975203514,1.0975203514,567,1.0,0.9189627228525121,
+gradient/e4-max/1.2,pass,1.3004177809,1.3004177809,545,1.0,0.9175084175084175,
+gradient/e7-max/1.2,pass,1.3290467262,1.3300474882,539,0.9963031423290203,0.9135593220338983,
+gradient/e8-max/1.2,pass,1.3290467262,1.3300474882,539,0.9963031423290203,0.9135593220338983,
+gradient/e10-max/1.2,pass,1.3290467262,1.3300474882,539,0.9963031423290203,0.9135593220338983,
+gradient/e1/1.3,pass,1.1988910437,1.1988910437,823,1.0,1.3902027027027026,
+gradient/e4/1.3,pass,1.4337701797,1.4337701797,553,1.0,0.9534482758620689,
+gradient/e7/1.3,pass,1.4496951103,1.4496951103,551,1.0,0.95,
+gradient/e8/1.3,pass,1.4496951103,1.4496951103,551,1.0,0.95,
+gradient/e9/1.3,pass,1.4496951103,1.4496951103,532,1.0,0.9172413793103448,
+gradient/e10/1.3,pass,1.4496951103,1.4496951103,532,1.0,0.9172413793103448,
+gradient/e1-max/1.3,pass,1.1988910437,1.1988910437,548,1.0,0.9256756756756757,
+gradient/e4-max/1.3,pass,1.4337701797,1.4337701797,524,1.0,0.903448275862069,
+gradient/e7-max/1.3,pass,1.4496951103,1.4496951103,520,0.9961685823754789,0.896551724137931,
+gradient/e8-max/1.3,pass,1.4496951103,1.4496951103,520,0.9961685823754789,0.896551724137931,
+gradient/e10-max/1.3,pass,1.4496951103,1.4496951103,520,0.9961685823754789,0.896551724137931,
+gradient/e1/1.4,pass,1.3128266335,1.3128266335,574,1.0,0.9761904761904762,
+gradient/e4/1.4,pass,1.4552856684,1.4552856684,548,1.0,0.9981785063752276,
+gradient/e7/1.4,pass,1.545544982,1.545544982,533,1.0,1.0113851992409868,
+gradient/e8/1.4,pass,1.545544982,1.545544982,533,1.0,1.0113851992409868,
+gradient/e9/1.4,pass,1.545544982,1.545544982,515,1.0,0.9772296015180265,
+gradient/e10/1.4,pass,1.545544982,1.545544982,515,1.0,0.9772296015180265,
+gradient/e1-max/1.4,pass,1.3128266335,1.3128266335,544,1.0,0.9251700680272109,
+gradient/e4-max/1.4,pass,1.4552856684,1.4552856684,523,1.0,0.9526411657559198,
+gradient/e7-max/1.4,pass,1.545544982,1.545544982,509,1.0,0.9658444022770398,
+gradient/e8-max/1.4,pass,1.545544982,1.545544982,509,1.0,0.9658444022770398,
+gradient/e10-max/1.4,pass,1.545544982,1.545544982,509,1.0,0.9658444022770398,
+gradient/e1/2,pass,1.7886228561,1.7886228561,514,1.0,1.0259481037924152,
+gradient/e4/2,pass,1.8951478004,1.8951478004,491,1.0040899795501022,1.029350104821803,
+gradient/e7/2,incomplete,1.9690073729,1.9690073729,481,0.9979253112033195,,"libjxl calibration: Calibration did not converge within tolerance: target=1.96900737, best=2.01473498, error=0.0457276105, tolerance=0.015"
+gradient/e8/2,incomplete,1.9690073729,1.9690073729,481,0.9979253112033195,,"libjxl calibration: Calibration did not converge within tolerance: target=1.96900737, best=2.01473498, error=0.0457276105, tolerance=0.015"
+gradient/e9/2,incomplete,1.9690073729,1.9690073729,462,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.96900737, best=2.01473498, error=0.0457276105, tolerance=0.015"
+gradient/e10/2,incomplete,1.9690073729,1.9690073729,462,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.96900737, best=2.01473498, error=0.0457276105, tolerance=0.015"
+gradient/e1-max/2,pass,1.7886228561,1.7886228561,483,1.0,0.9640718562874252,
+gradient/e4-max/2,pass,1.8951478004,1.8951478004,465,1.0,0.9748427672955975,
+gradient/e7-max/2,incomplete,1.9690073729,1.9690073729,454,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.96900737, best=2.01473498, error=0.0457276105, tolerance=0.015"
+gradient/e8-max/2,incomplete,1.9690073729,1.9690073729,454,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.96900737, best=2.01473498, error=0.0457276105, tolerance=0.015"
+gradient/e10-max/2,incomplete,1.9690073729,1.9690073729,454,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.96900737, best=2.01473498, error=0.0457276105, tolerance=0.015"
+gradient/e1/2.499,pass,1.9203817844,1.9203817844,463,1.0,0.9625779625779626,
+gradient/e4/2.499,pass,2.0382635593,2.0382606983,459,1.0,0.972457627118644,
+gradient/e7/2.499,pass,1.9126088619,1.8931789398,453,0.9556962025316456,0.9417879417879418,
+gradient/e8/2.499,pass,1.9126088619,1.8931789398,453,0.9556962025316456,0.9417879417879418,
+gradient/e9/2.499,pass,1.9126088619,1.8931789398,426,0.9362637362637363,0.8856548856548857,
+gradient/e10/2.499,pass,1.9126088619,1.8931789398,426,0.9362637362637363,0.8856548856548857,
+gradient/e1-max/2.499,pass,1.9203817844,1.9203817844,444,1.0,0.9230769230769231,
+gradient/e4-max/2.499,pass,2.0382635593,2.0382606983,436,1.0,0.923728813559322,
+gradient/e7-max/2.499,pass,1.9126088619,1.8931789398,427,0.9426048565121413,0.8877338877338877,
+gradient/e8-max/2.499,pass,1.9126088619,1.8931789398,427,0.9426048565121413,0.8877338877338877,
+gradient/e10-max/2.499,pass,1.9126088619,1.8931789398,427,0.9426048565121413,0.8877338877338877,
+gradient/e1/2.5,pass,2.0241947174,2.0241947174,461,1.0,0.9684873949579832,
+gradient/e4/2.5,pass,2.0739955902,2.0741300583,463,1.0043383947939262,0.9830148619957537,
+gradient/e7/2.5,pass,2.0012814999,2.0012814999,457,1.0043956043956044,0.9520833333333333,
+gradient/e8/2.5,pass,2.0012814999,2.0012814999,457,1.0043956043956044,0.9520833333333333,
+gradient/e9/2.5,pass,2.0012814999,2.0012814999,434,1.0,0.9041666666666667,
+gradient/e10/2.5,pass,2.0012814999,2.0012814999,434,1.0,0.9041666666666667,
+gradient/e1-max/2.5,pass,2.0241947174,2.0241947174,444,1.0,0.9327731092436975,
+gradient/e4-max/2.5,pass,2.0739955902,2.0741300583,439,1.0,0.9320594479830149,
+gradient/e7-max/2.5,pass,2.0012814999,2.0012814999,435,1.0,0.90625,
+gradient/e8-max/2.5,pass,2.0012814999,2.0012814999,435,1.0,0.90625,
+gradient/e10-max/2.5,pass,2.0012814999,2.0012814999,435,1.0,0.90625,
+gradient/e1/2.501,pass,1.9534624815,1.9534624815,463,1.0,0.9468302658486708,
+gradient/e4/2.501,pass,2.308018446,2.308018446,460,1.0,1.0087719298245614,
+gradient/e7/2.501,pass,2.7160315514,2.7160315514,462,1.0,1.0335570469798658,
+gradient/e8/2.501,pass,2.7160315514,2.7160315514,462,1.0,1.0335570469798658,
+gradient/e9/2.501,pass,2.7160315514,2.7160315514,438,1.0,0.9798657718120806,
+gradient/e10/2.501,pass,2.7160315514,2.7160315514,438,1.0,0.9798657718120806,
+gradient/e1-max/2.501,pass,1.9534624815,1.9534624815,446,1.0,0.9120654396728016,
+gradient/e4-max/2.501,pass,2.308018446,2.308018446,439,1.0,0.9627192982456141,
+gradient/e7-max/2.501,pass,2.7160315514,2.7160315514,439,1.0045766590389016,0.9821029082774049,
+gradient/e8-max/2.501,pass,2.7160315514,2.7160315514,439,1.0045766590389016,0.9821029082774049,
+gradient/e10-max/2.501,pass,2.7160315514,2.7160315514,439,1.0045766590389016,0.9821029082774049,
+gradient/e1/3,pass,3.1376464367,3.1376464367,446,1.0,1.129113924050633,
+gradient/e4/3,incomplete,3.0298080444,3.0292999744,432,1.0023201856148491,,"libjxl calibration: Calibration did not converge within tolerance: target=3.02929997, best=3.15147924, error=0.12217927, tolerance=0.015"
+gradient/e7/3,pass,3.2372195721,3.2372195721,431,1.0023255813953489,1.0775,
+gradient/e8/3,pass,3.2372195721,3.2372195721,431,1.0023255813953489,1.0775,
+gradient/e9/3,pass,3.2372195721,3.2372195721,412,1.0,1.03,
+gradient/e10/3,pass,3.2372195721,3.2372195721,412,1.0,1.03,
+gradient/e1-max/3,pass,3.1376464367,3.1376464367,429,1.0,1.0860759493670886,
+gradient/e4-max/3,incomplete,3.0298080444,3.0292999744,417,0.9928571428571429,,"libjxl calibration: Calibration did not converge within tolerance: target=3.02929997, best=3.15147924, error=0.12217927, tolerance=0.015"
+gradient/e7-max/3,pass,3.2372195721,3.2372195721,421,1.0,1.0525,
+gradient/e8-max/3,pass,3.2372195721,3.2372195721,421,1.0,1.0525,
+gradient/e10-max/3,pass,3.2372195721,3.2372195721,421,1.0,1.0525,
+edge/e1/0.5,incomplete,0.3433435857,0.3433435857,735,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.343343586, best=0.122119397, error=0.221224189, tolerance=0.015"
+edge/e4/0.5,incomplete,0.4537033439,0.4525737464,750,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.452573746, best=0.708845794, error=0.256272048, tolerance=0.015"
+edge/e7/0.5,incomplete,0.3713934422,0.3979009986,757,1.0528511821974966,,"libjxl calibration: Calibration did not converge within tolerance: target=0.397900999, best=0.122119397, error=0.275781602, tolerance=0.015"
+edge/e8/0.5,incomplete,0.3713934422,0.3979009986,757,1.0528511821974966,,"libjxl calibration: Calibration did not converge within tolerance: target=0.397900999, best=0.122119397, error=0.275781602, tolerance=0.015"
+edge/e9/0.5,incomplete,0.3713934422,0.3979009986,736,1.0544412607449856,,"libjxl calibration: Calibration did not converge within tolerance: target=0.397900999, best=0.122119397, error=0.275781602, tolerance=0.015"
+edge/e10/0.5,incomplete,0.3713934422,0.3979009986,736,1.0544412607449856,,"libjxl calibration: Calibration did not converge within tolerance: target=0.397900999, best=0.122119397, error=0.275781602, tolerance=0.015"
+edge/e1-max/0.5,incomplete,0.3433435857,0.3433435857,519,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.343343586, best=0.122119397, error=0.221224189, tolerance=0.015"
+edge/e4-max/0.5,incomplete,0.4537033439,0.4525737464,542,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.452573746, best=0.708845794, error=0.256272048, tolerance=0.015"
+edge/e7-max/0.5,incomplete,0.3713934422,0.3979009986,572,1.1485943775100402,,"libjxl calibration: Calibration did not converge within tolerance: target=0.397900999, best=0.122119397, error=0.275781602, tolerance=0.015; resident matched-quality size exceeds CPU allowance"
+edge/e8-max/0.5,incomplete,0.3713934422,0.3979009986,572,1.1485943775100402,,"libjxl calibration: Calibration did not converge within tolerance: target=0.397900999, best=0.122119397, error=0.275781602, tolerance=0.015; resident matched-quality size exceeds CPU allowance"
+edge/e10-max/0.5,incomplete,0.3713934422,0.3979009986,572,1.1485943775100402,,"libjxl calibration: Calibration did not converge within tolerance: target=0.397900999, best=0.122119397, error=0.275781602, tolerance=0.015; resident matched-quality size exceeds CPU allowance"
+edge/e1/0.8,incomplete,0.4773599207,0.4773599207,685,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477359921, best=0.277912587, error=0.199447334, tolerance=0.015"
+edge/e4/0.8,incomplete,0.5073746443,0.5072766542,697,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.507276654, best=0.277912587, error=0.229364067, tolerance=0.015"
+edge/e7/0.8,incomplete,0.4516609609,0.5241924524,680,,,"cpu calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.497986019, error=0.0262064337, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.277912587, error=0.246279866, tolerance=0.015"
+edge/e8/0.8,incomplete,0.4516609609,0.5241924524,680,,,"cpu calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.497986019, error=0.0262064337, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.277912587, error=0.246279866, tolerance=0.015"
+edge/e9/0.8,incomplete,0.4516609609,0.5241924524,662,,,"cpu calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.497986019, error=0.0262064337, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.277912587, error=0.246279866, tolerance=0.015"
+edge/e10/0.8,incomplete,0.4516609609,0.5241924524,662,,,"cpu calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.497986019, error=0.0262064337, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.277912587, error=0.246279866, tolerance=0.015"
+edge/e1-max/0.8,incomplete,0.4773599207,0.4773599207,467,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477359921, best=0.277912587, error=0.199447334, tolerance=0.015"
+edge/e4-max/0.8,incomplete,0.5073746443,0.5072766542,487,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.507276654, best=0.277912587, error=0.229364067, tolerance=0.015"
+edge/e7-max/0.8,incomplete,0.4516609609,0.5241924524,466,,,"cpu calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.497986019, error=0.0262064337, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.277912587, error=0.246279866, tolerance=0.015"
+edge/e8-max/0.8,incomplete,0.4516609609,0.5241924524,466,,,"cpu calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.497986019, error=0.0262064337, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.277912587, error=0.246279866, tolerance=0.015"
+edge/e10-max/0.8,incomplete,0.4516609609,0.5241924524,466,,,"cpu calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.497986019, error=0.0262064337, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.524192452, best=0.277912587, error=0.246279866, tolerance=0.015"
+edge/e1/1,incomplete,0.370647341,0.370647341,675,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.370647341, best=0.221025824, error=0.149621517, tolerance=0.015"
+edge/e4/1,incomplete,0.5125757456,0.5125757456,675,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.512575746, best=0.221025824, error=0.291549921, tolerance=0.015"
+edge/e7/1,incomplete,0.5422039628,0.5473034382,668,0.9985052316890882,,"libjxl calibration: Calibration did not converge within tolerance: target=0.547303438, best=0.83334583, error=0.286042392, tolerance=0.015"
+edge/e8/1,incomplete,0.5422039628,0.5473034382,668,0.9985052316890882,,"libjxl calibration: Calibration did not converge within tolerance: target=0.547303438, best=0.83334583, error=0.286042392, tolerance=0.015"
+edge/e9/1,incomplete,0.5422039628,0.5473034382,644,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.547303438, best=0.83334583, error=0.286042392, tolerance=0.015"
+edge/e10/1,incomplete,0.5422039628,0.5473034382,644,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.547303438, best=0.83334583, error=0.286042392, tolerance=0.015"
+edge/e1-max/1,incomplete,0.370647341,0.370647341,451,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.370647341, best=0.221025824, error=0.149621517, tolerance=0.015"
+edge/e4-max/1,incomplete,0.5125757456,0.5125757456,449,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.512575746, best=0.221025824, error=0.291549921, tolerance=0.015"
+edge/e7-max/1,incomplete,0.5422039628,0.5473034382,444,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.547303438, best=0.83334583, error=0.286042392, tolerance=0.015"
+edge/e8-max/1,incomplete,0.5422039628,0.5473034382,444,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.547303438, best=0.83334583, error=0.286042392, tolerance=0.015"
+edge/e10-max/1,incomplete,0.5422039628,0.5473034382,444,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.547303438, best=0.83334583, error=0.286042392, tolerance=0.015"
+edge/e1/1.1,incomplete,0.4274428189,0.4274428189,671,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.427442819, best=0.35550645, error=0.071936369, tolerance=0.015"
+edge/e4/1.1,incomplete,0.4928861558,0.49793607,673,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.49793607, best=0.35550645, error=0.14242962, tolerance=0.015"
+edge/e7/1.1,incomplete,0.6594294906,0.4775912464,674,0.983941605839416,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477591246, best=0.35550645, error=0.122084796, tolerance=0.015"
+edge/e8/1.1,incomplete,0.6594294906,0.4775912464,674,0.983941605839416,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477591246, best=0.35550645, error=0.122084796, tolerance=0.015"
+edge/e9/1.1,incomplete,0.6594294906,0.4775912464,653,0.9819548872180451,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477591246, best=0.35550645, error=0.122084796, tolerance=0.015"
+edge/e10/1.1,incomplete,0.6594294906,0.4775912464,653,0.9819548872180451,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477591246, best=0.35550645, error=0.122084796, tolerance=0.015"
+edge/e1-max/1.1,incomplete,0.4274428189,0.4274428189,450,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.427442819, best=0.35550645, error=0.071936369, tolerance=0.015"
+edge/e4-max/1.1,incomplete,0.4928861558,0.49793607,448,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.49793607, best=0.35550645, error=0.14242962, tolerance=0.015"
+edge/e7-max/1.1,incomplete,0.6594294906,0.4775912464,464,1.0021598272138228,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477591246, best=0.35550645, error=0.122084796, tolerance=0.015"
+edge/e8-max/1.1,incomplete,0.6594294906,0.4775912464,464,1.0021598272138228,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477591246, best=0.35550645, error=0.122084796, tolerance=0.015"
+edge/e10-max/1.1,incomplete,0.6594294906,0.4775912464,464,1.0021598272138228,,"libjxl calibration: Calibration did not converge within tolerance: target=0.477591246, best=0.35550645, error=0.122084796, tolerance=0.015"
+edge/e1/1.2,incomplete,0.4154079556,0.4154079556,676,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.415407956, best=0.35170269, error=0.0637052655, tolerance=0.015"
+edge/e4/1.2,incomplete,0.477922529,0.4979637563,681,1.0287009063444108,,"libjxl calibration: Calibration did not converge within tolerance: target=0.497963756, best=0.35170269, error=0.146261066, tolerance=0.015"
+edge/e7/1.2,incomplete,0.6001585126,0.4697517753,672,,,"cpu calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.48509258, error=0.015340805, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.35170269, error=0.118049085, tolerance=0.015"
+edge/e8/1.2,incomplete,0.6001585126,0.4697517753,672,,,"cpu calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.48509258, error=0.015340805, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.35170269, error=0.118049085, tolerance=0.015"
+edge/e9/1.2,incomplete,0.6001585126,0.4697517753,648,,,"cpu calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.48509258, error=0.015340805, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.35170269, error=0.118049085, tolerance=0.015"
+edge/e10/1.2,incomplete,0.6001585126,0.4697517753,648,,,"cpu calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.48509258, error=0.015340805, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.35170269, error=0.118049085, tolerance=0.015"
+edge/e1-max/1.2,incomplete,0.4154079556,0.4154079556,451,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.415407956, best=0.35170269, error=0.0637052655, tolerance=0.015"
+edge/e4-max/1.2,incomplete,0.477922529,0.4979637563,456,1.0316742081447965,,"libjxl calibration: Calibration did not converge within tolerance: target=0.497963756, best=0.35170269, error=0.146261066, tolerance=0.015"
+edge/e7-max/1.2,incomplete,0.6001585126,0.4697517753,458,,,"cpu calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.48509258, error=0.015340805, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.35170269, error=0.118049085, tolerance=0.015"
+edge/e8-max/1.2,incomplete,0.6001585126,0.4697517753,458,,,"cpu calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.48509258, error=0.015340805, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.35170269, error=0.118049085, tolerance=0.015"
+edge/e10-max/1.2,incomplete,0.6001585126,0.4697517753,458,,,"cpu calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.48509258, error=0.015340805, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.469751775, best=0.35170269, error=0.118049085, tolerance=0.015"
+edge/e1/1.3,incomplete,0.4845493734,0.4845493734,665,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.484549373, best=0.357872188, error=0.126677185, tolerance=0.015"
+edge/e4/1.3,incomplete,0.6319942474,0.6291956902,657,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.62919569, best=0.870270312, error=0.241074622, tolerance=0.015"
+edge/e7/1.3,incomplete,0.6585498452,0.6860355139,655,0.9954407294832827,,"libjxl calibration: Calibration did not converge within tolerance: target=0.686035514, best=0.870270312, error=0.184234798, tolerance=0.015"
+edge/e8/1.3,incomplete,0.6585498452,0.6860355139,655,0.9954407294832827,,"libjxl calibration: Calibration did not converge within tolerance: target=0.686035514, best=0.870270312, error=0.184234798, tolerance=0.015"
+edge/e9/1.3,incomplete,0.6585498452,0.6860355139,630,0.989010989010989,,"libjxl calibration: Calibration did not converge within tolerance: target=0.686035514, best=0.870270312, error=0.184234798, tolerance=0.015"
+edge/e10/1.3,incomplete,0.6585498452,0.6860355139,630,0.989010989010989,,"libjxl calibration: Calibration did not converge within tolerance: target=0.686035514, best=0.870270312, error=0.184234798, tolerance=0.015"
+edge/e1-max/1.3,incomplete,0.4845493734,0.4845493734,440,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.484549373, best=0.357872188, error=0.126677185, tolerance=0.015"
+edge/e4-max/1.3,incomplete,0.6319942474,0.6291956902,428,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.62919569, best=0.870270312, error=0.241074622, tolerance=0.015"
+edge/e7-max/1.3,incomplete,0.6585498452,0.6860355139,433,0.9885844748858448,,"libjxl calibration: Calibration did not converge within tolerance: target=0.686035514, best=0.870270312, error=0.184234798, tolerance=0.015"
+edge/e8-max/1.3,incomplete,0.6585498452,0.6860355139,433,0.9885844748858448,,"libjxl calibration: Calibration did not converge within tolerance: target=0.686035514, best=0.870270312, error=0.184234798, tolerance=0.015"
+edge/e10-max/1.3,incomplete,0.6585498452,0.6860355139,433,0.9885844748858448,,"libjxl calibration: Calibration did not converge within tolerance: target=0.686035514, best=0.870270312, error=0.184234798, tolerance=0.015"
+edge/e1/1.4,incomplete,0.4570371807,0.4570371807,663,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.457037181, best=0.35170269, error=0.105334491, tolerance=0.015"
+edge/e4/1.4,incomplete,0.6109753847,0.6076691151,652,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.607669115, best=0.726655662, error=0.118986547, tolerance=0.015"
+edge/e7/1.4,incomplete,0.6132434011,0.7046403885,657,1.012326656394453,,"libjxl calibration: Calibration did not converge within tolerance: target=0.704640388, best=0.726655662, error=0.0220152736, tolerance=0.015"
+edge/e8/1.4,incomplete,0.6132434011,0.7046403885,657,1.012326656394453,,"libjxl calibration: Calibration did not converge within tolerance: target=0.704640388, best=0.726655662, error=0.0220152736, tolerance=0.015"
+edge/e9/1.4,incomplete,0.6132434011,0.7046403885,634,1.0095541401273886,,"libjxl calibration: Calibration did not converge within tolerance: target=0.704640388, best=0.726655662, error=0.0220152736, tolerance=0.015"
+edge/e10/1.4,incomplete,0.6132434011,0.7046403885,634,1.0095541401273886,,"libjxl calibration: Calibration did not converge within tolerance: target=0.704640388, best=0.726655662, error=0.0220152736, tolerance=0.015"
+edge/e1-max/1.4,incomplete,0.4570371807,0.4570371807,439,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.457037181, best=0.35170269, error=0.105334491, tolerance=0.015"
+edge/e4-max/1.4,incomplete,0.6109753847,0.6076691151,428,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.607669115, best=0.726655662, error=0.118986547, tolerance=0.015"
+edge/e7-max/1.4,incomplete,0.6132434011,0.7046403885,441,1.0208333333333333,,"libjxl calibration: Calibration did not converge within tolerance: target=0.704640388, best=0.726655662, error=0.0220152736, tolerance=0.015"
+edge/e8-max/1.4,incomplete,0.6132434011,0.7046403885,441,1.0208333333333333,,"libjxl calibration: Calibration did not converge within tolerance: target=0.704640388, best=0.726655662, error=0.0220152736, tolerance=0.015"
+edge/e10-max/1.4,incomplete,0.6132434011,0.7046403885,441,1.0208333333333333,,"libjxl calibration: Calibration did not converge within tolerance: target=0.704640388, best=0.726655662, error=0.0220152736, tolerance=0.015"
+edge/e1/2,incomplete,0.6814211607,0.6814211607,641,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.681421161, best=0.797293901, error=0.115872741, tolerance=0.015"
+edge/e4/2,incomplete,0.6024821401,0.6024821401,639,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.60248214, best=0.797293901, error=0.194811761, tolerance=0.015"
+edge/e7/2,incomplete,0.6968263388,0.7020412683,638,0.996875,,"libjxl calibration: Calibration did not converge within tolerance: target=0.702041268, best=0.797293901, error=0.0952526331, tolerance=0.015"
+edge/e8/2,incomplete,0.6968263388,0.7020412683,638,0.996875,,"libjxl calibration: Calibration did not converge within tolerance: target=0.702041268, best=0.797293901, error=0.0952526331, tolerance=0.015"
+edge/e9/2,incomplete,0.6968263388,0.7020412683,608,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.702041268, best=0.797293901, error=0.0952526331, tolerance=0.015"
+edge/e10/2,incomplete,0.6968263388,0.7020412683,608,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.702041268, best=0.797293901, error=0.0952526331, tolerance=0.015"
+edge/e1-max/2,incomplete,0.6814211607,0.6814211607,420,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.681421161, best=0.797293901, error=0.115872741, tolerance=0.015"
+edge/e4-max/2,incomplete,0.6024821401,0.6024821401,425,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.60248214, best=0.797293901, error=0.194811761, tolerance=0.015"
+edge/e7-max/2,incomplete,0.6968263388,0.7020412683,416,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.702041268, best=0.797293901, error=0.0952526331, tolerance=0.015"
+edge/e8-max/2,incomplete,0.6968263388,0.7020412683,416,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.702041268, best=0.797293901, error=0.0952526331, tolerance=0.015"
+edge/e10-max/2,incomplete,0.6968263388,0.7020412683,416,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.702041268, best=0.797293901, error=0.0952526331, tolerance=0.015"
+edge/e1/2.499,incomplete,0.643786788,0.643786788,635,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.643786788, best=0.840429187, error=0.196642399, tolerance=0.015"
+edge/e4/2.499,incomplete,0.6977737546,0.6977737546,630,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.697773755, best=0.840429187, error=0.142655432, tolerance=0.015"
+edge/e7/2.499,incomplete,0.5711678863,0.5711678863,626,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.571167886, best=0.340967447, error=0.23020044, tolerance=0.015"
+edge/e8/2.499,incomplete,0.5711678863,0.5711678863,626,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.571167886, best=0.340967447, error=0.23020044, tolerance=0.015"
+edge/e9/2.499,incomplete,0.5711678863,0.5711678863,599,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.571167886, best=0.340967447, error=0.23020044, tolerance=0.015"
+edge/e10/2.499,incomplete,0.5711678863,0.5711678863,599,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.571167886, best=0.340967447, error=0.23020044, tolerance=0.015"
+edge/e1-max/2.499,incomplete,0.643786788,0.643786788,415,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.643786788, best=0.840429187, error=0.196642399, tolerance=0.015"
+edge/e4-max/2.499,incomplete,0.6977737546,0.6977737546,411,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.697773755, best=0.840429187, error=0.142655432, tolerance=0.015"
+edge/e7-max/2.499,incomplete,0.5711678863,0.5711678863,416,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.571167886, best=0.340967447, error=0.23020044, tolerance=0.015"
+edge/e8-max/2.499,incomplete,0.5711678863,0.5711678863,416,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.571167886, best=0.340967447, error=0.23020044, tolerance=0.015"
+edge/e10-max/2.499,incomplete,0.5711678863,0.5711678863,416,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.571167886, best=0.340967447, error=0.23020044, tolerance=0.015"
+edge/e1/2.5,incomplete,0.7606122494,0.7606122494,635,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.760612249, best=0.815068006, error=0.0544557571, tolerance=0.015"
+edge/e4/2.5,incomplete,0.5753041506,0.5753041506,637,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.575304151, best=0.357872188, error=0.217431962, tolerance=0.015"
+edge/e7/2.5,incomplete,0.754273355,0.754273355,632,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.754273355, best=0.815068006, error=0.0607946515, tolerance=0.015"
+edge/e8/2.5,incomplete,0.754273355,0.754273355,632,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.754273355, best=0.815068006, error=0.0607946515, tolerance=0.015"
+edge/e9/2.5,incomplete,0.754273355,0.754273355,609,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.754273355, best=0.815068006, error=0.0607946515, tolerance=0.015"
+edge/e10/2.5,incomplete,0.754273355,0.754273355,609,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.754273355, best=0.815068006, error=0.0607946515, tolerance=0.015"
+edge/e1-max/2.5,incomplete,0.7606122494,0.7606122494,416,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.760612249, best=0.815068006, error=0.0544557571, tolerance=0.015"
+edge/e4-max/2.5,incomplete,0.5753041506,0.5753041506,425,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.575304151, best=0.357872188, error=0.217431962, tolerance=0.015"
+edge/e7-max/2.5,incomplete,0.754273355,0.754273355,406,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.754273355, best=0.815068006, error=0.0607946515, tolerance=0.015"
+edge/e8-max/2.5,incomplete,0.754273355,0.754273355,406,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.754273355, best=0.815068006, error=0.0607946515, tolerance=0.015"
+edge/e10-max/2.5,incomplete,0.754273355,0.754273355,406,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.754273355, best=0.815068006, error=0.0607946515, tolerance=0.015"
+edge/e1/2.501,incomplete,0.6351076365,0.6351076365,635,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.635107637, best=0.841029406, error=0.205921769, tolerance=0.015"
+edge/e4/2.501,incomplete,0.61834234,0.61834234,629,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.61834234, best=0.841029406, error=0.222687066, tolerance=0.015"
+edge/e7/2.501,incomplete,0.8982092738,0.8982092738,635,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.898209274, best=0.924883604, error=0.0266743302, tolerance=0.015"
+edge/e8/2.501,incomplete,0.8982092738,0.8982092738,635,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.898209274, best=0.924883604, error=0.0266743302, tolerance=0.015"
+edge/e9/2.501,incomplete,0.8982092738,0.8982092738,614,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.898209274, best=0.924883604, error=0.0266743302, tolerance=0.015"
+edge/e10/2.501,incomplete,0.8982092738,0.8982092738,614,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.898209274, best=0.924883604, error=0.0266743302, tolerance=0.015"
+edge/e1-max/2.501,incomplete,0.6351076365,0.6351076365,416,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.635107637, best=0.841029406, error=0.205921769, tolerance=0.015"
+edge/e4-max/2.501,incomplete,0.61834234,0.61834234,407,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.61834234, best=0.841029406, error=0.222687066, tolerance=0.015"
+edge/e7-max/2.501,incomplete,0.8982092738,0.8982092738,410,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.898209274, best=0.924883604, error=0.0266743302, tolerance=0.015"
+edge/e8-max/2.501,incomplete,0.8982092738,0.8982092738,410,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.898209274, best=0.924883604, error=0.0266743302, tolerance=0.015"
+edge/e10-max/2.501,incomplete,0.8982092738,0.8982092738,410,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=0.898209274, best=0.924883604, error=0.0266743302, tolerance=0.015"
+edge/e1/3,pass,0.7969453931,0.7969453931,626,1.0,1.2646464646464646,
+edge/e4/3,pass,0.9653119445,0.9653119445,624,1.0,1.56,
+edge/e7/3,pass,1.3061288595,1.2827095985,620,1.0,1.6445623342175066,
+edge/e8/3,pass,1.3061288595,1.2827095985,620,1.0,1.6445623342175066,
+edge/e9/3,pass,1.3061288595,1.2827095985,602,1.0033333333333334,1.596816976127321,
+edge/e10/3,pass,1.3061288595,1.2827095985,602,1.0033333333333334,1.596816976127321,
+edge/e1-max/3,pass,0.7969453931,0.7969453931,405,1.0,0.8181818181818182,
+edge/e4-max/3,pass,0.9653119445,0.9653119445,397,1.0,0.9925,
+edge/e7-max/3,pass,1.3061288595,1.2827095985,416,1.0,1.103448275862069,
+edge/e8-max/3,pass,1.3061288595,1.2827095985,416,1.0,1.103448275862069,
+edge/e10-max/3,pass,1.3061288595,1.2827095985,416,1.0,1.103448275862069,
+saturated/e1/0.5,pass,0.687277317,0.687277317,8619,1.0,1.1403810531886742,
+saturated/e4/0.5,pass,0.6627503633,0.6624276638,8238,1.0,1.0754569190600523,
+saturated/e7/0.5,pass,0.6842874289,0.6842874289,8858,1.0,1.1526350032530905,
+saturated/e8/0.5,pass,0.6842874289,0.6842874289,8891,1.0,1.156929082628497,
+saturated/e9/0.5,pass,0.6842874289,0.6842874289,8857,1.0,1.1525048796356538,
+saturated/e10/0.5,pass,0.6842874289,0.6842874289,8857,1.0,1.1525048796356538,
+saturated/e1-max/0.5,pass,0.687277317,0.687277317,8588,1.0,1.1362794390050277,
+saturated/e4-max/0.5,pass,0.6627503633,0.6624276638,8223,1.0,1.0734986945169713,
+saturated/e7-max/0.5,pass,0.6842874289,0.6842874289,8866,1.0,1.153675992192583,
+saturated/e8-max/0.5,pass,0.6842874289,0.6842874289,8866,1.0,1.153675992192583,
+saturated/e10-max/0.5,pass,0.6842874289,0.6842874289,8866,1.0,1.153675992192583,
+saturated/e1/0.8,incomplete,1.0558376312,1.0558376312,7401,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.05583763, best=1.0338639, error=0.0219737291, tolerance=0.015"
+saturated/e4/0.8,pass,0.8813703656,0.8817465305,7103,1.0001408054069276,1.0481038807732035,
+saturated/e7/0.8,pass,1.1740595102,1.116137743,7621,1.0,1.30787712373434,
+saturated/e8/0.8,incomplete,1.071477294,1.1793408394,7610,1.0960679821402852,,"libjxl calibration: Calibration did not converge within tolerance: target=1.17934084, best=1.22105074, error=0.0417098999, tolerance=0.015; resident quality exceeds CPU allowance"
+saturated/e9/0.8,incomplete,1.071477294,1.1793408394,7588,1.0968488002312806,,"libjxl calibration: Calibration did not converge within tolerance: target=1.17934084, best=1.22105074, error=0.0417098999, tolerance=0.015; resident quality exceeds CPU allowance"
+saturated/e10/0.8,incomplete,0.9062145352,0.9275201559,7596,,,"cpu calibration: Calibration did not converge within tolerance: target=0.927520156, best=0.906214535, error=0.0213056207, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.927520156, best=0.906213641, error=0.0213065147, tolerance=0.015"
+saturated/e1-max/0.8,incomplete,1.0558376312,1.0558376312,7407,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.05583763, best=1.0338639, error=0.0219737291, tolerance=0.015"
+saturated/e4-max/0.8,pass,0.8813703656,0.8817465305,7095,1.0012701100762067,1.0469234174413458,
+saturated/e7-max/0.8,pass,1.1740595102,1.116137743,7583,0.9941006816990037,1.3013557576797665,
+saturated/e8-max/0.8,incomplete,1.071477294,1.1793408394,7579,1.1093384074941453,,"libjxl calibration: Calibration did not converge within tolerance: target=1.17934084, best=1.22105074, error=0.0417098999, tolerance=0.015; resident quality exceeds CPU allowance; resident matched-quality size exceeds CPU allowance"
+saturated/e10-max/0.8,incomplete,0.9062145352,0.9275201559,7618,,,"cpu calibration: Calibration did not converge within tolerance: target=0.927520156, best=0.906214535, error=0.0213056207, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=0.927520156, best=0.906213641, error=0.0213065147, tolerance=0.015"
+saturated/e1/1,pass,0.9562780857,0.9562780857,6746,1.0,1.1275279959886344,
+saturated/e4/1,pass,1.1551164389,1.1551930904,6472,1.007001711529485,1.1201107649705782,
+saturated/e7/1,pass,1.0680249929,1.1733754873,7011,1.0796119494918386,1.2133956386292835,
+saturated/e8/1,pass,1.0680249929,1.1733754873,7056,1.0953120149022042,1.2211838006230529,
+saturated/e9/1,pass,1.0680249929,1.1733754873,7020,1.0924369747899159,1.2149532710280373,
+saturated/e10/1,pass,1.0680249929,1.1733754873,7020,1.0924369747899159,1.2149532710280373,
+saturated/e1-max/1,pass,0.9562780857,0.9562780857,6735,1.0,1.1256894534514457,
+saturated/e4-max/1,pass,1.1551164389,1.1551930904,6421,1.0051659361302443,1.1112841813776393,
+saturated/e7-max/1,pass,1.0680249929,1.1733754873,6990,1.0840570719602978,1.2097611630321912,
+saturated/e8-max/1,pass,1.0680249929,1.1733754873,6990,1.0840570719602978,1.2097611630321912,
+saturated/e10-max/1,pass,1.0680249929,1.1733754873,6990,1.0840570719602978,1.2097611630321912,
+saturated/e1/1.1,pass,1.2654271126,1.2654271126,6462,1.0,1.128930817610063,
+saturated/e4/1.1,pass,1.4040403366,1.4040403366,6157,1.0,1.1184377838328792,
+saturated/e7/1.1,pass,1.0808805227,1.0808805227,6798,1.0,1.171664943123061,
+saturated/e8/1.1,pass,1.0808805227,1.0808805227,6804,1.0,1.172699069286453,
+saturated/e9/1.1,pass,1.0808805227,1.0808805227,6765,1.0,1.1659772492244054,
+saturated/e10/1.1,pass,1.0808805227,1.0808805227,6765,1.0,1.1659772492244054,
+saturated/e1-max/1.1,pass,1.2654271126,1.2654271126,6446,1.0,1.126135569531796,
+saturated/e4-max/1.1,pass,1.4040403366,1.4040403366,6144,1.0,1.1160762942779292,
+saturated/e7-max/1.1,pass,1.0808805227,1.0808805227,6750,1.0,1.1633919338159255,
+saturated/e8-max/1.1,pass,1.0808805227,1.0808805227,6750,1.0,1.1633919338159255,
+saturated/e10-max/1.1,pass,1.0808805227,1.0808805227,6750,1.0,1.1633919338159255,
+saturated/e1/1.2,pass,1.2427127361,1.2427127361,6293,1.0,1.0891311872620284,
+saturated/e4/1.2,incomplete,1.3311141729,1.3311141729,5900,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.33111417, best=1.3027643, error=0.0283498764, tolerance=0.015"
+saturated/e7/1.2,pass,1.2443840504,1.2443840504,6525,1.0,1.1292834890965733,
+saturated/e8/1.2,pass,1.2443840504,1.2443840504,6517,1.0,1.1278989269643476,
+saturated/e9/1.2,pass,1.2443840504,1.2443840504,6500,1.0,1.124956732433368,
+saturated/e10/1.2,pass,1.2443840504,1.2443840504,6500,1.0,1.124956732433368,
+saturated/e1-max/1.2,pass,1.2427127361,1.2427127361,6276,1.0,1.0861889927310489,
+saturated/e4-max/1.2,incomplete,1.3311141729,1.3311141729,5884,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.33111417, best=1.3027643, error=0.0283498764, tolerance=0.015"
+saturated/e7-max/1.2,pass,1.2443840504,1.2443840504,6525,1.0,1.1292834890965733,
+saturated/e8-max/1.2,pass,1.2443840504,1.2443840504,6525,1.0,1.1292834890965733,
+saturated/e10-max/1.2,pass,1.2443840504,1.2443840504,6525,1.0,1.1292834890965733,
+saturated/e1/1.3,pass,1.3947484493,1.3947484493,6083,1.0,1.1743243243243244,
+saturated/e4/1.3,pass,1.3880164623,1.3918079138,5752,1.0057702395523693,1.1104247104247105,
+saturated/e7/1.3,pass,1.3179436922,1.3179436922,6284,1.0,1.2147689928474772,
+saturated/e8/1.3,pass,1.3179436922,1.3179436922,6350,1.0,1.2275275468780205,
+saturated/e9/1.3,pass,1.3179436922,1.3179436922,6332,1.0,1.224047941233327,
+saturated/e10/1.3,pass,1.3179436922,1.3179436922,6332,1.0,1.224047941233327,
+saturated/e1-max/1.3,pass,1.3947484493,1.3947484493,6018,1.0,1.1617760617760617,
+saturated/e4-max/1.3,pass,1.3880164623,1.3918079138,5637,1.001599147121535,1.0882239382239383,
+saturated/e7-max/1.3,pass,1.3179436922,1.3179436922,6292,1.0,1.216315484245119,
+saturated/e8-max/1.3,pass,1.3179436922,1.3179436922,6292,1.0,1.216315484245119,
+saturated/e10-max/1.3,pass,1.3179436922,1.3179436922,6292,1.0,1.216315484245119,
+saturated/e1/1.4,pass,1.3680784702,1.3680784702,5853,1.0,1.1165585654330408,
+saturated/e4/1.4,pass,1.4422810078,1.4398760796,5537,1.0070934885412877,1.070158484731349,
+saturated/e7/1.4,incomplete,1.2656755447,1.2656755447,6111,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.26567554, best=1.3085624, error=0.0428868533, tolerance=0.015"
+saturated/e8/1.4,incomplete,1.2656755447,1.2656755447,6136,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.26567554, best=1.3085624, error=0.0428868533, tolerance=0.015"
+saturated/e9/1.4,incomplete,1.2656755447,1.2656755447,6117,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.26567554, best=1.3085624, error=0.0428868533, tolerance=0.015"
+saturated/e10/1.4,incomplete,1.2656755447,1.2656755447,6117,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.26567554, best=1.3085624, error=0.0428868533, tolerance=0.015"
+saturated/e1-max/1.4,pass,1.3680784702,1.3680784702,5861,1.0,1.118084700495994,
+saturated/e4-max/1.4,pass,1.4422810078,1.4398760796,5449,0.9941616493340631,1.053150367220719,
+saturated/e7-max/1.4,incomplete,1.2656755447,1.2656755447,6087,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.26567554, best=1.3085624, error=0.0428868533, tolerance=0.015"
+saturated/e8-max/1.4,incomplete,1.2656755447,1.2656755447,6087,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.26567554, best=1.3085624, error=0.0428868533, tolerance=0.015"
+saturated/e10-max/1.4,incomplete,1.2656755447,1.2656755447,6087,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.26567554, best=1.3085624, error=0.0428868533, tolerance=0.015"
+saturated/e1/2,incomplete,1.7888509035,1.7888509035,5094,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.7888509, best=1.7266959, error=0.0621550083, tolerance=0.015"
+saturated/e4/2,pass,2.0091524124,2.0213866234,4693,1.0004263483265827,1.0373563218390804,
+saturated/e7/2,incomplete,1.8306148052,1.8687747717,5154,1.0273071556707196,,"libjxl calibration: Calibration did not converge within tolerance: target=1.86877477, best=1.7266959, error=0.142078877, tolerance=0.015"
+saturated/e8/2,incomplete,1.8306148052,1.8687747717,5200,1.0379241516966067,,"libjxl calibration: Calibration did not converge within tolerance: target=1.86877477, best=1.7266959, error=0.142078877, tolerance=0.015"
+saturated/e9/2,incomplete,1.8306148052,1.8687747717,5191,1.0377848860455818,,"libjxl calibration: Calibration did not converge within tolerance: target=1.86877477, best=1.7266959, error=0.142078877, tolerance=0.015"
+saturated/e10/2,incomplete,1.8306148052,1.8687747717,5191,1.0377848860455818,,"libjxl calibration: Calibration did not converge within tolerance: target=1.86877477, best=1.7266959, error=0.142078877, tolerance=0.015"
+saturated/e1-max/2,incomplete,1.7888509035,1.7888509035,5026,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.7888509, best=1.7266959, error=0.0621550083, tolerance=0.015"
+saturated/e4-max/2,pass,2.0091524124,2.0213866234,4675,0.9985049124305853,1.0333775419982316,
+saturated/e7-max/2,incomplete,1.8306148052,1.8687747717,5148,1.0318701142513529,,"libjxl calibration: Calibration did not converge within tolerance: target=1.86877477, best=1.7266959, error=0.142078877, tolerance=0.015"
+saturated/e8-max/2,incomplete,1.8306148052,1.8687747717,5148,1.0318701142513529,,"libjxl calibration: Calibration did not converge within tolerance: target=1.86877477, best=1.7266959, error=0.142078877, tolerance=0.015"
+saturated/e10-max/2,incomplete,1.8306148052,1.8687747717,5148,1.0318701142513529,,"libjxl calibration: Calibration did not converge within tolerance: target=1.86877477, best=1.7266959, error=0.142078877, tolerance=0.015"
+saturated/e1/2.499,pass,2.3311018944,2.3311018944,4586,1.0,1.1642548870271643,
+saturated/e4/2.499,incomplete,2.4969058037,2.4557664394,4357,0.9628729281767956,,"libjxl calibration: Calibration did not converge within tolerance: target=2.45576644, best=2.35117483, error=0.104591608, tolerance=0.015"
+saturated/e7/2.499,pass,2.0030481815,2.0030481815,4682,1.0,0.9852693602693603,
+saturated/e8/2.499,pass,2.0030481815,2.0030481815,4658,1.0,0.9802188552188552,
+saturated/e9/2.499,pass,2.0030481815,2.0030481815,4632,1.0,0.9747474747474747,
+saturated/e10/2.499,pass,2.0030481815,2.0030481815,4632,1.0,0.9747474747474747,
+saturated/e1-max/2.499,pass,2.3311018944,2.3311018944,4574,1.0,1.1612084285351612,
+saturated/e4-max/2.499,incomplete,2.4969058037,2.4557664394,4250,0.9499329459097005,,"libjxl calibration: Calibration did not converge within tolerance: target=2.45576644, best=2.35117483, error=0.104591608, tolerance=0.015"
+saturated/e7-max/2.499,pass,2.0030481815,2.0030481815,4625,1.0,0.9732744107744108,
+saturated/e8-max/2.499,pass,2.0030481815,2.0030481815,4625,1.0,0.9732744107744108,
+saturated/e10-max/2.499,pass,2.0030481815,2.0030481815,4625,1.0,0.9732744107744108,
+saturated/e1/2.5,incomplete,2.3900771141,2.3900771141,4603,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.39007711, best=2.48797989, error=0.0979027748, tolerance=0.015"
+saturated/e4/2.5,incomplete,2.4176414013,2.4176392555,4342,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.41763926, best=2.48797989, error=0.0703406334, tolerance=0.015"
+saturated/e7/2.5,incomplete,1.9667750597,2.0735366344,4631,,,"cpu calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.16053367, error=0.0869970322, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.01350975, error=0.060026884, tolerance=0.015"
+saturated/e8/2.5,incomplete,1.9667750597,2.0735366344,4663,,,"cpu calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.16053367, error=0.0869970322, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.01350975, error=0.060026884, tolerance=0.015"
+saturated/e9/2.5,incomplete,1.9667750597,2.0735366344,4646,,,"cpu calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.16053367, error=0.0869970322, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.01350975, error=0.060026884, tolerance=0.015"
+saturated/e10/2.5,incomplete,1.9667750597,2.0735366344,4646,,,"cpu calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.16053367, error=0.0869970322, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.01350975, error=0.060026884, tolerance=0.015"
+saturated/e1-max/2.5,incomplete,2.3900771141,2.3900771141,4548,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.39007711, best=2.48797989, error=0.0979027748, tolerance=0.015"
+saturated/e4-max/2.5,incomplete,2.4176414013,2.4176392555,4268,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.41763926, best=2.48797989, error=0.0703406334, tolerance=0.015"
+saturated/e7-max/2.5,incomplete,1.9667750597,2.0735366344,4606,,,"cpu calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.16053367, error=0.0869970322, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.01350975, error=0.060026884, tolerance=0.015"
+saturated/e8-max/2.5,incomplete,1.9667750597,2.0735366344,4606,,,"cpu calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.16053367, error=0.0869970322, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.01350975, error=0.060026884, tolerance=0.015"
+saturated/e10-max/2.5,incomplete,1.9667750597,2.0735366344,4606,,,"cpu calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.16053367, error=0.0869970322, tolerance=0.015; libjxl calibration: Calibration did not converge within tolerance: target=2.07353663, best=2.01350975, error=0.060026884, tolerance=0.015"
+saturated/e1/2.501,incomplete,2.0969400406,2.0969400406,4782,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.09694004, best=2.20061493, error=0.103674889, tolerance=0.015"
+saturated/e4/2.501,incomplete,2.5437617302,2.5437617302,4504,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.54376173, best=2.48797989, error=0.0557818413, tolerance=0.015"
+saturated/e7/2.501,pass,2.2219495773,2.2219495773,4619,1.0,0.9738562091503268,
+saturated/e8/2.501,pass,2.2219495773,2.2219495773,4582,1.0,0.9660552393000211,
+saturated/e9/2.501,pass,2.2219495773,2.2219495773,4570,1.0,0.9635251950242463,
+saturated/e10/2.501,pass,2.2219495773,2.2219495773,4570,1.0,0.9635251950242463,
+saturated/e1-max/2.501,incomplete,2.0969400406,2.0969400406,4703,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.09694004, best=2.20061493, error=0.103674889, tolerance=0.015"
+saturated/e4-max/2.501,incomplete,2.5437617302,2.5437617302,4457,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.54376173, best=2.48797989, error=0.0557818413, tolerance=0.015"
+saturated/e7-max/2.501,pass,2.2219495773,2.2219495773,4582,1.0,0.9660552393000211,
+saturated/e8-max/2.501,pass,2.2219495773,2.2219495773,4582,1.0,0.9660552393000211,
+saturated/e10-max/2.501,pass,2.2219495773,2.2219495773,4582,1.0,0.9660552393000211,
+saturated/e1/3,pass,2.7126762867,2.6355998516,4489,0.9393178489223687,1.1376077040040546,
+saturated/e4/3,pass,2.7660601139,2.670113802,4209,0.9992877492877493,1.0666497719209327,
+saturated/e7/3,pass,2.5759613514,2.5065615177,4153,0.9600092464170135,0.9928281137939278,
+saturated/e8/3,pass,2.5759613514,2.5065615177,4153,0.9600092464170135,0.9928281137939278,
+saturated/e9/3,pass,2.5759613514,2.5065615177,4140,0.9594438006952491,0.9897202964379632,
+saturated/e10/3,pass,2.5759613514,2.5065615177,4140,0.9594438006952491,0.9897202964379632,
+saturated/e1-max/3,pass,2.7126762867,2.6355998516,4493,0.9449001051524711,1.1386213887480994,
+saturated/e4-max/3,pass,2.7660601139,2.670113802,4179,0.9802955665024631,1.059047136340598,
+saturated/e7-max/3,pass,2.5759613514,2.5065615177,4183,0.9700834879406308,1.0,
+saturated/e8-max/3,pass,2.5759613514,2.5065615177,4183,0.9700834879406308,1.0,
+saturated/e10-max/3,pass,2.5759613514,2.5065615177,4183,0.9700834879406308,1.0,
+texture/e1/0.5,pass,1.5801876783,1.5801876783,13168,1.0,1.022360248447205,
+texture/e4/0.5,incomplete,1.0664395094,1.0716016293,16275,1.0001229029681067,,"libjxl calibration: Calibration did not converge within tolerance: target=1.07160163, best=1.00517189, error=0.0664297343, tolerance=0.015"
+texture/e7/0.5,pass,0.8845052719,0.8349895477,17924,0.9560996426094842,0.9640705679862306,
+texture/e8/0.5,pass,0.8126753569,0.8227751255,18275,0.9992345125485265,0.9829496557659209,
+texture/e9/0.5,pass,0.8126753569,0.8227751255,18228,0.9990682378733899,0.9804216867469879,
+texture/e10/0.5,pass,0.7199623585,0.7125350833,18346,0.9995096703895396,0.9207528230865747,
+texture/e1-max/0.5,pass,1.5801876783,1.5801876783,13386,1.0,1.0392857142857144,
+texture/e4-max/0.5,incomplete,1.0664395094,1.0716016293,16293,1.0002455644913746,,"libjxl calibration: Calibration did not converge within tolerance: target=1.07160163, best=1.00517189, error=0.0664297343, tolerance=0.015"
+texture/e7-max/0.5,pass,0.8845052719,0.8349895477,17973,0.9541834784455299,0.9667061101549054,
+texture/e8-max/0.5,pass,0.8126753569,0.8227751255,18333,0.9989102599030132,0.9860692771084337,
+texture/e10-max/0.5,pass,0.7199623585,0.7125350833,18479,0.9978400561585399,0.9274278544542033,
+texture/e1/0.8,pass,2.4258394241,2.4258394241,7026,1.0,1.2103359173126615,
+texture/e4/0.8,pass,1.6240904331,1.6240777969,8791,1.0,0.9777555333110889,
+texture/e7/0.8,pass,1.406224966,1.4342250824,9694,1.0588749317312944,0.7391536408692337,
+texture/e8/0.8,pass,1.1959600449,1.1904225349,10442,0.9962789810132621,0.6436540713801393,
+texture/e9/0.8,pass,1.1959600449,1.1904225349,10406,0.9959800918836141,0.6414349996917956,
+texture/e10/0.8,pass,1.1647645235,1.1772671938,10809,0.9987064584680773,0.6662762744251988,
+texture/e1-max/0.8,pass,2.4258394241,2.4258394241,7292,1.0,1.2561584840654607,
+texture/e4-max/0.8,pass,1.6240904331,1.6240777969,8916,0.9998878546596389,0.9916583249916583,
+texture/e7-max/0.8,pass,1.406224966,1.4342250824,9866,1.0564300246279046,0.7522683949675943,
+texture/e8-max/0.8,pass,1.1959600449,1.1904225349,10706,0.9951663878044246,0.6599272637613265,
+texture/e10-max/0.8,pass,1.1647645235,1.1772671938,11126,0.9975791266923698,0.6858164334586698,
+texture/e1/1,pass,2.8597640991,2.8597640991,6147,1.0,1.4170124481327802,
+texture/e4/1,pass,2.1999430656,2.1999342442,7546,0.9992055084745762,1.203125,
+texture/e7/1,pass,1.5982606411,1.5313037634,8637,0.9512114537444933,0.8220234129627867,
+texture/e8/1,pass,1.579002142,1.502967,9004,0.8820532915360502,0.8572788727030373,
+texture/e9/1,pass,1.579002142,1.502967,8980,0.8825552825552826,0.8549938112920118,
+texture/e10/1,pass,1.4871897697,1.5384202003,8903,1.0157444381061038,0.8473398686589892,
+texture/e1-max/1,pass,2.8597640991,2.8597640991,6492,1.0,1.4965421853388658,
+texture/e4-max/1,pass,2.1999430656,2.1999342442,8223,1.0001216249087814,1.3110650510204083,
+texture/e7-max/1,pass,1.5982606411,1.5313037634,8858,0.9462664245272941,0.8430570096126392,
+texture/e8-max/1,pass,1.579002142,1.502967,9264,0.8870164687859058,0.8820337046558127,
+texture/e10-max/1,pass,1.4871897697,1.5384202003,9199,1.0181516325401216,0.8755115637194252,
+texture/e1/1.1,pass,2.741925478,2.741925478,5743,1.0,1.1256370050960407,
+texture/e4/1.1,pass,2.0876858234,2.0876898766,7554,0.9990741965348499,1.1511734227369705,
+texture/e7/1.1,pass,1.7740309238,1.7966560125,7878,1.0204663212435232,0.8597620866528429,
+texture/e8/1.1,pass,1.5561034679,1.6003608704,8410,1.0296278158667973,0.9321658168920417,
+texture/e9/1.1,pass,1.5561034679,1.6003608704,8382,1.029097605893186,0.9290622921746841,
+texture/e10/1.1,pass,1.4516708851,1.4785746336,8814,1.0213209733487834,0.688486174035307,
+texture/e1-max/1.1,pass,2.741925478,2.741925478,6059,1.0,1.1875735005880046,
+texture/e4-max/1.1,pass,2.0876858234,2.0876898766,8333,0.9991606714628297,1.2698872295032002,
+texture/e7-max/1.1,pass,1.7740309238,1.7966560125,8207,1.0329767149150408,0.8956673578522318,
+texture/e8-max/1.1,pass,1.5561034679,1.6003608704,8644,1.0296605122096485,0.9581024163156728,
+texture/e10-max/1.1,pass,1.4516708851,1.4785746336,9267,1.0107984293193717,0.7238712701140447,
+texture/e1/1.2,pass,2.8810999393,2.8810999393,5417,1.0,1.2821301775147929,
+texture/e4/1.2,pass,2.2064318657,2.2233407497,7029,1.0025673940949935,1.123920690757915,
+texture/e7/1.2,fail,1.9495339394,2.0084161758,7279,1.1063991488068095,1.0934354814480998,resident matched-quality size exceeds CPU allowance
+texture/e8/1.2,pass,1.7308917046,1.7464091778,7961,1.0197258870244652,0.8981272563176895,
+texture/e9/1.2,pass,1.7308917046,1.7464091778,7939,1.0192579278469636,0.8956453068592057,
+texture/e10/1.2,pass,1.614320755,1.5941525698,8107,0.9794611574241875,0.8988801419226078,
+texture/e1-max/1.2,pass,2.8810999393,2.8810999393,5676,1.0,1.3434319526627219,
+texture/e4-max/1.2,pass,2.2064318657,2.2233407497,7809,1.0017960230917256,1.2486408698433002,
+texture/e7-max/1.2,fail,1.9495339394,2.0084161758,7847,1.1027262507026419,1.1787592008412198,resident matched-quality size exceeds CPU allowance
+texture/e8-max/1.2,pass,1.7308917046,1.7464091778,8174,1.0131383242439267,0.9221570397111913,
+texture/e10-max/1.2,pass,1.614320755,1.5941525698,8722,1.0160764212488351,0.9670695199024282,
+texture/e1/1.3,pass,3.1263961792,3.1263961792,5179,1.0,1.2473506743737957,
+texture/e4/1.3,pass,2.4683904648,2.451949358,6627,1.0001509206157562,1.1203719357565511,
+texture/e7/1.3,pass,2.1017181873,2.1017181873,6646,0.9975983188231762,1.0158972791195353,
+texture/e8/1.3,pass,1.8446371555,1.8446371555,7151,1.0023829548640315,0.849994056816831,
+texture/e9/1.3,pass,1.8446371555,1.8446371555,7128,1.0018271257905833,0.8472601925591347,
+texture/e10/1.3,pass,1.8470129967,1.8470227718,7622,0.998951507208388,0.9059788422679187,
+texture/e1-max/1.3,pass,3.1263961792,3.1263961792,5478,1.0,1.319364161849711,
+texture/e4-max/1.3,pass,2.4683904648,2.451949358,7316,0.9993170331921869,1.2368554522400677,
+texture/e7-max/1.3,pass,2.1017181873,2.1017181873,7265,1.013390988980332,1.1105166615713848,
+texture/e8-max/1.3,pass,1.8446371555,1.8446371555,7765,1.000515397500322,0.9229763461309878,
+texture/e10-max/1.3,pass,1.8470129967,1.8470227718,8151,0.9984076433121019,0.9688577201949364,
+texture/e1/1.4,pass,3.2875857353,3.2875857353,4933,1.0,1.2382028112449799,
+texture/e4/1.4,pass,2.6365385056,2.6365385056,6145,1.002283477409884,1.154424196881458,
+texture/e7/1.4,pass,2.2228746414,2.2015762329,6344,0.9784083898827884,0.9756997846816364,
+texture/e8/1.4,pass,2.0556199551,2.0712502003,6571,0.9890126429861529,0.9978739559605163,
+texture/e9/1.4,pass,2.0556199551,2.0712502003,6547,0.9882264150943396,0.9942293090356872,
+texture/e10/1.4,pass,2.0321485996,1.9206360579,7036,0.9429107477887966,1.023567064300262,
+texture/e1-max/1.4,pass,3.2875857353,3.2875857353,5237,1.0,1.314508032128514,
+texture/e4-max/1.4,pass,2.6365385056,2.6365385056,6402,0.9982847341337907,1.2027052414052226,
+texture/e7-max/1.4,pass,2.2228746414,2.2015762329,7039,0.9905713481564875,1.0825899723162105,
+texture/e8-max/1.4,pass,2.0556199551,2.0712502003,7189,0.9896751101321586,1.0917236142748672,
+texture/e10-max/1.4,pass,2.0321485996,1.9206360579,7620,0.989738927133394,1.1085248763456503,
+texture/e1/2,pass,3.8822572231,3.8773486614,4065,1.0211002260738509,1.1738377129656368,
+texture/e4/2,fail,3.3911499977,3.4865012169,4555,1.1221975856122197,1.3823975720789075,resident matched-quality size exceeds CPU allowance
+texture/e7/2,fail,2.8882155418,3.0315990448,5497,1.1190960912052117,1.3188579654510557,resident matched-quality size exceeds CPU allowance
+texture/e8/2,fail,2.8882155418,3.0315990448,5497,1.1190960912052117,1.3188579654510557,resident matched-quality size exceeds CPU allowance
+texture/e9/2,fail,2.8882155418,3.0315990448,5478,1.1209330877839165,1.314299424184261,resident matched-quality size exceeds CPU allowance
+texture/e10/2,fail,2.8882155418,3.0315990448,5478,1.1209330877839165,1.314299424184261,resident matched-quality size exceeds CPU allowance
+texture/e1-max/2,pass,3.8822572231,3.8773486614,4347,0.962577502214349,1.2552699971123304,
+texture/e4-max/2,pass,3.3911499977,3.4865012169,4880,1.0782147591692444,1.4810318664643398,
+texture/e7-max/2,fail,2.8882155418,3.0315990448,6099,1.1710829493087558,1.4632917466410749,resident matched-quality size exceeds CPU allowance
+texture/e8-max/2,fail,2.8882155418,3.0315990448,6099,1.1710829493087558,1.4632917466410749,resident matched-quality size exceeds CPU allowance
+texture/e10-max/2,fail,2.8882155418,3.0315990448,6099,1.1710829493087558,1.4632917466410749,resident matched-quality size exceeds CPU allowance
+texture/e1/2.499,pass,4.4465427399,4.4465398788,3356,1.0035885167464116,1.3119624706802189,
+texture/e4/2.499,pass,3.7318491936,3.7326683998,3819,0.987842731505432,1.0905197030268419,
+texture/e7/2.499,pass,3.4891626835,3.5745241642,4091,1.0462915601023017,1.173214797820476,
+texture/e8/2.499,pass,3.4100522995,3.2219603062,4348,0.9779577147998201,1.0664704439538877,
+texture/e9/2.499,pass,3.4100522995,3.2219603062,4322,0.9778280542986425,1.0600932057885701,
+texture/e10/2.499,pass,3.4100522995,3.2219603062,4322,0.9778280542986425,1.0600932057885701,
+texture/e1-max/2.499,pass,4.4465427399,4.4465398788,3609,1.0022216051096917,1.4108678655199374,
+texture/e4-max/2.499,pass,3.7318491936,3.7326683998,4260,1.004953998584572,1.2164477441462023,
+texture/e7-max/2.499,pass,3.4891626835,3.5745241642,4316,1.0208136234626302,1.2377401778032693,
+texture/e8-max/2.499,pass,3.4100522995,3.2219603062,4647,0.9927365947447127,1.1398086828550404,
+texture/e10-max/2.499,pass,3.4100522995,3.2219603062,4647,0.9927365947447127,1.1398086828550404,
+texture/e1/2.5,pass,4.390499115,4.3904943466,3271,0.9996943765281173,1.2306245297215952,
+texture/e4/2.5,pass,3.7638792992,3.7639100552,3700,0.9943563558183284,1.0635240011497558,
+texture/e7/2.5,pass,3.5802311897,3.5689880848,4097,0.9992682926829268,1.2506105006105006,
+texture/e8/2.5,pass,3.4831528664,3.4829416275,4194,0.9990471653168176,1.2802197802197801,
+texture/e9/2.5,pass,3.4831528664,3.4829416275,4174,0.999281781182667,1.274114774114774,
+texture/e10/2.5,pass,3.4831528664,3.4829416275,4174,0.999281781182667,1.274114774114774,
+texture/e1-max/2.5,pass,4.390499115,4.3904943466,3551,1.0033907883582933,1.335966892400301,
+texture/e4-max/2.5,pass,3.7638792992,3.7639100552,4150,0.9975961538461539,1.1928715148031044,
+texture/e7-max/2.5,pass,3.5802311897,3.5689880848,4560,0.9965034965034965,1.3919413919413919,
+texture/e8-max/2.5,pass,3.4831528664,3.4829416275,4679,0.9987193169690501,1.4282661782661783,
+texture/e10-max/2.5,pass,3.4831528664,3.4829416275,4679,0.9987193169690501,1.4282661782661783,
+texture/e1/2.501,pass,3.8453316689,3.8453295231,3604,1.0019460661662496,1.0374208405296488,
+texture/e4/2.501,pass,3.5422959328,3.5422234535,3936,0.9926860025220681,1.2025664527956004,
+texture/e7/2.501,pass,3.5802311897,3.5689880848,4097,0.9992682926829268,1.2506105006105006,
+texture/e8/2.501,pass,3.6919314861,3.691716671,4198,1.0028666985188723,1.205282802182027,
+texture/e9/2.501,pass,3.6919314861,3.691716671,4176,1.0021598272138228,1.198966408268734,
+texture/e10/2.501,pass,3.6919314861,3.6922454834,4224,1.013678905687545,1.2127476313522825,
+texture/e1-max/2.501,pass,3.8453316689,3.8453295231,3761,1.0156629759654334,1.0826137017846862,
+texture/e4-max/2.501,pass,3.5422959328,3.5422234535,4471,0.9984368021438143,1.3660250534677665,
+texture/e7-max/2.501,pass,3.5802311897,3.5689880848,4560,0.9965034965034965,1.3919413919413919,
+texture/e8-max/2.501,pass,3.6919314861,3.691716671,4674,0.9995722840034217,1.3419465977605511,
+texture/e10-max/2.501,pass,3.6919314861,3.6922454834,4729,1.0113344739093242,1.357737582543784,
+texture/e1/3,pass,4.1820011139,4.247197628,3138,1.0204878048780488,1.108833922261484,
+texture/e4/3,pass,4.2036170959,4.3937597275,3275,1.0282574568288854,1.2321294206170053,
+texture/e7/3,pass,4.1958808899,4.0875277519,3421,0.979387346120813,0.8955497382198953,
+texture/e8/3,pass,4.1958808899,4.0875277519,3421,0.9799484388427385,0.8955497382198953,
+texture/e9/3,pass,4.1958808899,4.0875277519,3401,0.9801152737752161,0.8903141361256545,
+texture/e10/3,pass,4.1958808899,4.0875277519,3401,0.9801152737752161,0.8903141361256545,
+texture/e1-max/3,pass,4.1820011139,4.247197628,3400,1.0185739964050329,1.2014134275618376,
+texture/e4-max/3,pass,4.2036170959,4.3937597275,3564,1.051948051948052,1.3408577878103838,
+texture/e7-max/3,pass,4.1958808899,4.0875277519,3739,0.9587179487179487,0.9787958115183246,
+texture/e8-max/3,pass,4.1958808899,4.0875277519,3739,0.9579810402254676,0.9787958115183246,
+texture/e10-max/3,pass,4.1958808899,4.0875277519,3739,0.9579810402254676,0.9787958115183246,
+noise/e1/0.5,pass,1.4357427359,1.4357427359,39011,1.0,1.0055418084338592,
+noise/e4/0.5,pass,1.0219768286,1.0219768286,44331,1.0002256266780984,0.9612098872506505,
+noise/e7/0.5,pass,0.8227475286,0.8361501098,48481,1.007313677824181,0.9309662800522314,
+noise/e8/0.5,pass,0.8067395687,0.8070162535,50373,1.0035261773846522,0.9561891383990433,
+noise/e9/0.5,pass,0.8067395687,0.8070162535,50319,1.0034099066762383,0.9551641009092462,
+noise/e10/0.5,pass,0.777571857,0.8032044172,51200,1.0304713601416897,0.9718873977335282,
+noise/e1-max/0.5,pass,1.4357427359,1.4357427359,39204,1.0,1.010516548097742,
+noise/e4-max/0.5,pass,1.0219768286,1.0219768286,44539,1.00015719033504,0.9657198612315698,
+noise/e7-max/0.5,pass,0.8227475286,0.8361501098,48829,1.0068042640054433,0.9376488209539903,
+noise/e8-max/0.5,pass,0.8067395687,0.8070162535,50805,1.0034366297327724,0.96438943831742,
+noise/e10-max/0.5,pass,0.777571857,0.8032044172,51798,1.0315860750418226,0.9832387388242441,
+noise/e1/0.8,pass,1.8946374655,1.8946374655,30885,1.0,1.021802421756104,
+noise/e4/0.8,pass,1.5279482603,1.5298439264,38744,1.0000258111142657,1.104698905109489,
+noise/e7/0.8,incomplete,1.3555675745,1.3507573605,39880,1.0026902672667388,,"libjxl calibration: Calibration did not converge within tolerance: target=1.35075736, best=1.32328057, error=0.0274767876, tolerance=0.015"
+noise/e8/0.8,pass,1.3701205254,1.3712902069,41165,1.0004860857941427,1.0361709625453082,
+noise/e9/0.8,pass,1.3701205254,1.3712902069,41121,1.0002919068817047,1.0350634313330649,
+noise/e10/0.8,pass,1.2159874439,1.1851203442,41916,1.000811804593859,0.9801931576362743,
+noise/e1-max/0.8,pass,1.8946374655,1.8946374655,30986,1.0,1.02514391583405,
+noise/e4-max/0.8,pass,1.5279482603,1.5298439264,38960,1.0,1.1108576642335766,
+noise/e7-max/0.8,incomplete,1.3555675745,1.3507573605,40099,1.0014985389245485,,"libjxl calibration: Calibration did not converge within tolerance: target=1.35075736, best=1.32328057, error=0.0274767876, tolerance=0.015"
+noise/e8-max/0.8,pass,1.3701205254,1.3712902069,41378,1.0003626429417596,1.041532420459122,
+noise/e10-max/0.8,pass,1.2159874439,1.1851203442,42103,0.9975359537517473,0.9845660968594345,
+noise/e1/1,pass,2.273058176,2.273058176,27374,1.0,0.991165182127598,
+noise/e4/1,pass,1.5512032509,1.5740277767,35041,1.0,1.011693036147361,
+noise/e7/1,pass,1.5752673149,1.6340923309,37243,1.0997490033958364,1.082613877503561,
+noise/e8/1,pass,1.5810074806,1.5459575653,37571,0.9971072186836518,1.0808377204338195,
+noise/e9/1,pass,1.5810074806,1.5459575653,37531,0.9967863592903431,1.0796870055521992,
+noise/e10/1,pass,1.439198494,1.3869011402,38128,0.9601611684714177,1.0263257065948856,
+noise/e1-max/1,pass,2.273058176,2.273058176,27465,1.0,0.9944601346947642,
+noise/e4-max/1,pass,1.5512032509,1.5740277767,35221,1.0001419809177647,1.0168899411017438,
+noise/e7-max/1,fail,1.5752673149,1.6340923309,37478,1.1014842027920646,1.0894450742710968,resident matched-quality size exceeds CPU allowance
+noise/e8-max/1,pass,1.5810074806,1.5459575653,37782,0.9990744903085914,1.0869077414343662,
+noise/e10-max/1,pass,1.439198494,1.3869011402,38330,0.9592572200810852,1.0317631224764467,
+noise/e1/1.1,pass,2.464366436,2.464366436,26076,1.0,0.9610083290336847,
+noise/e4/1.1,pass,1.7907240391,1.7907240391,32925,1.0,1.0289705606600412,
+noise/e7/1.1,pass,1.518140316,1.5350804329,35294,0.9969493248968985,1.0063298357664234,
+noise/e8/1.1,pass,1.5871293545,1.6701927185,36422,1.0911324146195327,1.093655226255893,
+noise/e9/1.1,pass,1.5871293545,1.6701927185,36384,1.0912690081281304,1.092514187910999,
+noise/e10/1.1,pass,1.526704669,1.5283198357,36583,1.0027684885697057,1.0430828010948905,
+noise/e1-max/1.1,pass,2.464366436,2.464366436,26065,1.0,0.9606029335888553,
+noise/e4-max/1.1,pass,1.7907240391,1.7907240391,32933,0.999726792544472,1.0292205762860178,
+noise/e7-max/1.1,pass,1.518140316,1.5350804329,35471,0.9974971878515185,1.0113765967153285,
+noise/e8-max/1.1,pass,1.5871293545,1.6701927185,36635,1.0923430138946866,1.1000510464522715,
+noise/e10-max/1.1,pass,1.526704669,1.5283198357,36741,1.0005718954248366,1.0475878193430657,
+noise/e1/1.2,pass,2.57097435,2.57097435,25031,1.0,1.0131136924758166,
+noise/e4/1.2,pass,1.8871331215,1.8871331215,30511,0.9998689169261019,0.9782615665779602,
+noise/e7/1.2,pass,1.6627044678,1.6255589724,33225,0.9649173757732408,0.9667704483952629,
+noise/e8/1.2,pass,1.6334210634,1.6465518475,34761,1.0126431089230052,1.0189359519273047,
+noise/e9/1.2,pass,1.6334210634,1.6465518475,34711,1.0121300481119697,1.017470320973179,
+noise/e10/1.2,pass,1.6038689613,1.5697864294,34938,0.9706887450337566,1.0099439209111407,
+noise/e1-max/1.2,pass,2.57097435,2.57097435,25035,1.0,1.0132755899137895,
+noise/e4-max/1.2,pass,1.8871331215,1.8871331215,30527,0.9999017359973796,0.9787745679566514,
+noise/e7-max/1.2,pass,1.6627044678,1.6255589724,33261,0.9614117238987167,0.9678179649081968,
+noise/e8-max/1.2,pass,1.6334210634,1.6465518475,34878,1.0114842526535583,1.0223655283599589,
+noise/e10-max/1.2,pass,1.6038689613,1.5697864294,35146,0.9693041727571086,1.0159565242527606,
+noise/e1/1.3,pass,2.6876583099,2.6876583099,24071,1.0,0.9951628906895982,
+noise/e4/1.3,pass,2.1488318443,2.1521174908,28685,0.9998257232485186,1.0019910577057427,
+noise/e7/1.3,pass,1.8295706511,1.833136797,31471,1.0001906880661051,1.0025804396304556,
+noise/e8/1.3,pass,1.7111406326,1.6551346779,32845,0.9634790261073629,0.9812092967676406,
+noise/e9/1.3,pass,1.7111406326,1.6551346779,32811,0.9636406355546419,0.980193583079405,
+noise/e10/1.3,pass,1.6625783443,1.6481628418,33181,1.0045411885804245,0.9713407494145199,
+noise/e1-max/1.3,pass,2.6876583099,2.6876583099,24084,1.0,0.9957003472796429,
+noise/e4-max/1.3,pass,2.1488318443,2.1521174908,28877,1.000069264069264,1.0086977783987705,
+noise/e7-max/1.3,pass,1.8295706511,1.833136797,31633,1.0035531867643792,1.0077413188913666,
+noise/e8-max/1.3,pass,1.7111406326,1.6551346779,32883,0.9593873085339168,0.9823445061839039,
+noise/e10-max/1.3,pass,1.6625783443,1.6481628418,33266,1.001686239084613,0.9738290398126463,
+noise/e1/1.4,pass,2.8919072151,2.8919072151,23230,1.0,1.0077653897878618,
+noise/e4/1.4,pass,2.4994292259,2.4994292259,27115,1.0000737653524139,1.0841663334666134,
+noise/e7/1.4,pass,1.9203865528,1.9062795639,29710,1.0013144147484074,0.9530072173215718,
+noise/e8/1.4,pass,1.8421623707,1.915938735,31034,1.0283650341308237,0.9960202837152577,
+noise/e9/1.4,pass,1.8421623707,1.915938735,31014,1.0289638698118841,0.9953783939919122,
+noise/e10/1.4,pass,1.8950663805,1.8688666821,31605,1.0044174664717473,1.0130132376037693,
+noise/e1-max/1.4,pass,2.8919072151,2.8919072151,23338,1.0,1.0124506529000912,
+noise/e4-max/1.4,pass,2.4994292259,2.4994292259,27185,1.0001471616202495,1.0869652139144341,
+noise/e7-max/1.4,pass,1.9203865528,1.9062795639,29695,1.0017880035085351,0.9525260625501203,
+noise/e8-max/1.4,pass,1.8421623707,1.915938735,31102,1.0319177173191771,0.9982027087746325,
+noise/e10-max/1.4,pass,1.8950663805,1.8688666821,31667,1.0004106905920263,1.0150004807846404,
+noise/e1/2,pass,3.307929039,3.3079366684,19522,0.9996927488734125,0.944643375592761,
+noise/e4/2,pass,3.1910429001,3.2992992401,21048,1.0620647895852255,1.0184844672408788,
+noise/e7/2,pass,2.8546888828,2.8997142315,22433,1.0105865393278675,0.9782400139542997,
+noise/e8/2,pass,2.7756333351,2.6845412254,23348,0.9453779811313114,0.9361668003207698,
+noise/e9/2,pass,2.7756333351,2.6845412254,23311,0.945181040424928,0.9346832397754611,
+noise/e10/2,pass,2.6841175556,2.7313995361,23697,1.0314703577957691,0.9694006954387401,
+noise/e1-max/2,pass,3.307929039,3.3079366684,19721,0.9997465274257326,0.9542727184747896,
+noise/e4-max/2,pass,3.1910429001,3.2992992401,21246,1.0598623166716552,1.0280654214652085,
+noise/e7-max/2,pass,2.8546888828,2.8997142315,22511,1.0094166180888748,0.9816413744985174,
+noise/e8-max/2,pass,2.7756333351,2.6845412254,23416,0.9482849390515531,0.9388933440256616,
+noise/e10-max/2,pass,2.6841175556,2.7313995361,23826,1.0301798685575925,0.974677848230722,
+noise/e1/2.499,pass,4.1516151428,4.1516151428,17592,0.9988644106291165,1.0147669589293955,
+noise/e4/2.499,pass,3.5866878033,3.5874252319,18443,1.0003796919071382,0.9474468303709032,
+noise/e7/2.499,incomplete,3.5364561081,3.4650371075,19212,,0.9617059618561346,"cpu calibration: Calibration did not converge within tolerance: target=3.46503711, best=3.53645611, error=0.0714190006, tolerance=0.015"
+noise/e8/2.499,pass,3.5608758926,3.5517594814,19445,1.0011326777531793,0.9977423161783571,
+noise/e9/2.499,pass,3.5608758926,3.5517594814,19425,1.00139189607176,0.9967160962594284,
+noise/e10/2.499,pass,3.1384539604,3.3347685337,19472,1.0133222314737718,0.9695762585271125,
+noise/e1-max/2.499,pass,4.1516151428,4.1516151428,17861,1.007957110609481,1.0302838024919243,
+noise/e4-max/2.499,pass,3.5866878033,3.5874252319,18651,0.9998927786415054,0.9581321278125963,
+noise/e7-max/2.499,incomplete,3.5364561081,3.4650371075,19353,,0.9687640786904941,"cpu calibration: Calibration did not converge within tolerance: target=3.46503711, best=3.53645611, error=0.0714190006, tolerance=0.015"
+noise/e8-max/2.499,pass,3.5608758926,3.5517594814,19626,1.0004587857470562,1.007029606444661,
+noise/e10-max/2.499,pass,3.1384539604,3.3347685337,19700,1.0145748570839985,0.9809291440521835,
+noise/e1/2.5,pass,4.1627259254,4.1627259254,17587,0.9994885201182087,1.0145955924772123,
+noise/e4/2.5,pass,3.7569584846,3.8434956074,18467,0.9893919099919636,0.9850117345850224,
+noise/e7/2.5,pass,3.4260072708,3.5729484558,19059,1.052343879410303,0.979091749717456,
+noise/e8/2.5,pass,3.2976279259,3.2819771767,19377,1.0026908150064684,0.9668196786747829,
+noise/e9/2.5,pass,3.2976279259,3.2819771767,19353,1.003109936246307,0.9656221933938729,
+noise/e10/2.5,pass,3.2034699917,3.3035538197,19461,1.0225409836065573,0.967390764030422,
+noise/e1-max/2.5,pass,4.1627259254,4.1627259254,17856,1.0001680389850445,1.0301142263759087,
+noise/e4-max/2.5,pass,3.7569584846,3.8434956074,18673,0.9885647731483932,0.9959995732878174,
+noise/e7-max/2.5,pass,3.4260072708,3.5729484558,19254,1.0504091653027823,0.9891092160690435,
+noise/e8-max/2.5,pass,3.2976279259,3.2819771767,19570,1.0029725297252972,0.9764494561421015,
+noise/e10-max/2.5,pass,3.2034699917,3.3035538197,19689,1.030729766516595,0.9787244618978973,
+noise/e1/2.501,pass,4.1626667976,4.1626667976,17615,0.9994326241134752,1.0025611838360842,
+noise/e4/2.501,pass,3.7808141708,3.7814443111,18477,1.0013548666811185,0.9769470734415482,
+noise/e7/2.501,pass,3.5823681355,3.4597883224,19189,0.9619028522732969,0.9679681194511703,
+noise/e8/2.501,pass,3.273699522,3.2480344772,19430,0.950401095675993,0.9360246651893246,
+noise/e9/2.501,pass,3.273699522,3.2480344772,19410,0.950724921630094,0.9350611812313325,
+noise/e10/2.501,pass,3.1223266125,3.2756838799,19473,1.0053694047188806,0.965348007138608,
+noise/e1-max/2.501,pass,4.1626667976,4.1626667976,17904,1.0005029337803857,1.0190096755833808,
+noise/e4-max/2.501,pass,3.7808141708,3.7814443111,18694,1.0001069976460517,0.988420663036007,
+noise/e7-max/2.501,pass,3.5823681355,3.4597883224,19415,0.9625204501512071,0.9793684422921711,
+noise/e8-max/2.501,pass,3.273699522,3.2480344772,19660,0.954368932038835,0.9471047307062337,
+noise/e10-max/2.501,pass,3.1223266125,3.2756838799,19734,1.0081741085112905,0.9782867340868531,
+noise/e1/3,pass,4.6935768127,4.6935768127,16087,0.9997514138338202,0.9624865382314227,
+noise/e4/3,pass,4.4577665329,4.5021014214,16350,1.0568159782819468,0.9595633546569634,
+noise/e7/3,pass,4.1813211441,4.1797275543,16405,1.00201563645248,0.921370401572592,
+noise/e8/3,pass,4.2297906876,3.9724941254,16515,0.9603419201023434,0.8929923218341084,
+noise/e9/3,pass,4.2297906876,3.9724941254,16503,0.960649630362652,0.8923434627446739,
+noise/e10/3,pass,3.9528799057,3.8978583813,16522,0.9832767958102719,0.8843806872925811,
+noise/e1-max/3,pass,4.6935768127,4.6935768127,16189,0.9999382334774553,0.9685892066531052,
+noise/e4-max/3,pass,4.4577665329,4.5021014214,16505,1.0571318772817524,0.9686601326368919,
+noise/e7-max/3,pass,4.1813211441,4.1797275543,16590,1.0037512100677637,0.9317607413647851,
+noise/e8-max/3,pass,4.2297906876,3.9724941254,16706,0.965664739884393,0.9033199956742728,
+noise/e10-max/3,pass,3.9528799057,3.8978583813,16675,0.9841822581597119,0.8925703886093566,
+flower/e1/0.5,pass,0.8708581328,0.8708702922,4124,0.9997575757575757,1.1103931071620894,
+flower/e4/0.5,incomplete,0.8380729556,0.7300121784,4082,,0.8850823937554206,"cpu calibration: Calibration did not converge within tolerance: target=0.730012178, best=0.709064066, error=0.020948112, tolerance=0.015"
+flower/e7/0.5,pass,0.7209551334,0.7339070439,4081,1.0004903162539838,0.8848655680832611,
+flower/e8/0.5,pass,0.7099430561,0.6794158816,4091,0.9485277069325295,0.8177093743753747,
+flower/e9/0.5,pass,0.7099430561,0.6794158816,4059,0.9470368642090528,0.8113132120727563,
+flower/e10/0.5,pass,0.7099430561,0.6947184801,4094,0.965793819297004,0.8591815320041972,
+flower/e1-max/0.5,pass,0.8708581328,0.8708702922,4089,0.9987787005373717,1.1009693053311793,
+flower/e4-max/0.5,incomplete,0.8380729556,0.7300121784,4086,,0.885949696444059,"cpu calibration: Calibration did not converge within tolerance: target=0.730012178, best=0.709064066, error=0.020948112, tolerance=0.015"
+flower/e7-max/0.5,pass,0.7209551334,0.7339070439,4089,1.0026974006866112,0.8866001734605378,
+flower/e8-max/0.5,pass,0.7099430561,0.6794158816,4106,0.9591217005372576,0.8207075754547272,
+flower/e10-max/0.5,pass,0.7099430561,0.6947184801,4113,0.9695898161244696,0.8631689401888772,
+flower/e1/0.8,pass,1.1970870495,1.1445521116,3102,0.9292989814260036,0.909410729991205,
+flower/e4/0.8,pass,1.1371635199,1.0988701582,3022,0.9679692504804612,0.885178676039836,
+flower/e7/0.8,pass,1.2610758543,1.150940299,3007,0.9888194672804999,0.881559659923776,
+flower/e8/0.8,incomplete,1.143654108,1.0627584457,3031,0.9866536458333334,,"libjxl calibration: Calibration did not converge within tolerance: target=1.06275845, best=1.0964849, error=0.0337264538, tolerance=0.015"
+flower/e9/0.8,incomplete,1.143654108,1.0627584457,3018,0.9885358663609565,,"libjxl calibration: Calibration did not converge within tolerance: target=1.06275845, best=1.0964849, error=0.0337264538, tolerance=0.015"
+flower/e10/0.8,incomplete,1.1467193365,1.0483700037,3021,0.9895185063871602,,"libjxl calibration: Calibration did not converge within tolerance: target=1.04837, best=1.0050143, error=0.0433557034, tolerance=0.015"
+flower/e1-max/0.8,pass,1.1970870495,1.1445521116,3062,0.9148491186136839,0.8976839636470243,
+flower/e4-max/0.8,pass,1.1371635199,1.0988701582,3038,0.9790525298098615,0.8898652606912713,
+flower/e7-max/0.8,pass,1.2610758543,1.150940299,3002,0.9980053191489362,0.8800938141307535,
+flower/e8-max/0.8,incomplete,1.143654108,1.0627584457,3085,1.0088293001962068,,"libjxl calibration: Calibration did not converge within tolerance: target=1.06275845, best=1.0964849, error=0.0337264538, tolerance=0.015"
+flower/e10-max/0.8,incomplete,1.1467193365,1.0483700037,3044,0.9954218443427076,,"libjxl calibration: Calibration did not converge within tolerance: target=1.04837, best=1.0050143, error=0.0433557034, tolerance=0.015"
+flower/e1/1,pass,1.2773872614,1.3570482731,2648,1.03075126508369,0.9966127211140384,
+flower/e4/1,pass,1.40408957,1.3065501451,2571,0.9396929824561403,0.917558886509636,
+flower/e7/1,pass,1.3047297001,1.3775023222,2566,1.0074597565763643,0.9712339137017411,
+flower/e8/1,pass,1.3047297001,1.3775023222,2566,1.0074597565763643,0.9712339137017411,
+flower/e9/1,pass,1.3047297001,1.3775023222,2544,1.0079239302694136,0.9629068887206662,
+flower/e10/1,pass,1.3047297001,1.3775023222,2544,1.0079239302694136,0.9629068887206662,
+flower/e1-max/1,pass,1.2773872614,1.3570482731,2633,1.0469184890656065,0.9909672563041023,
+flower/e4-max/1,pass,1.40408957,1.3065501451,2550,0.9392265193370166,0.9100642398286938,
+flower/e7-max/1,pass,1.3047297001,1.3775023222,2555,1.0142913854704247,0.9670704012112036,
+flower/e8-max/1,pass,1.3047297001,1.3775023222,2555,1.0142913854704247,0.9670704012112036,
+flower/e10-max/1,pass,1.3047297001,1.3775023222,2555,1.0142913854704247,0.9670704012112036,
+flower/e1/1.1,pass,1.4350295067,1.4366141558,2504,0.9976095617529881,0.9731830547998446,
+flower/e4/1.1,pass,1.4780503511,1.4668936729,2455,1.0157219693835333,0.9843624699278268,
+flower/e7/1.1,pass,1.4508467913,1.4657398462,2438,1.0145651269246776,0.9775461106655974,
+flower/e8/1.1,pass,1.4508467913,1.4657398462,2438,1.0145651269246776,0.9775461106655974,
+flower/e9/1.1,pass,1.4508467913,1.4657398462,2419,1.0138306789606035,0.9699278267842822,
+flower/e10/1.1,pass,1.4508467913,1.4657398462,2419,1.0138306789606035,0.9699278267842822,
+flower/e1-max/1.1,pass,1.4350295067,1.4366141558,2467,0.9995948136142626,0.9588029537504859,
+flower/e4-max/1.1,pass,1.4780503511,1.4668936729,2363,0.9949473684210526,0.9474739374498797,
+flower/e7-max/1.1,pass,1.4508467913,1.4657398462,2348,0.9966044142614601,0.9414595028067362,
+flower/e8-max/1.1,pass,1.4508467913,1.4657398462,2348,0.9966044142614601,0.9414595028067362,
+flower/e10-max/1.1,pass,1.4508467913,1.4657398462,2348,0.9966044142614601,0.9414595028067362,
+flower/e1/1.2,pass,1.6357859373,1.6357859373,2378,1.0,1.2833243389098759,
+flower/e4/1.2,pass,1.4934493303,1.4795144796,2292,1.0026246719160106,0.9687235841081995,
+flower/e7/1.2,pass,1.4612576962,1.450180769,2273,1.0,0.9598817567567568,
+flower/e8/1.2,pass,1.4612576962,1.450180769,2273,1.0,0.9598817567567568,
+flower/e9/1.2,pass,1.4612576962,1.450180769,2250,0.9995557529986673,0.950168918918919,
+flower/e10/1.2,pass,1.4612576962,1.450180769,2250,0.9995557529986673,0.950168918918919,
+flower/e1-max/1.2,pass,1.6357859373,1.6357859373,2328,1.001290322580645,1.2563410685375067,
+flower/e4-max/1.2,pass,1.4934493303,1.4795144796,2224,1.0018018018018018,0.9399830938292477,
+flower/e7-max/1.2,pass,1.4612576962,1.450180769,2195,0.9963685882886972,0.9269425675675675,
+flower/e8-max/1.2,pass,1.4612576962,1.450180769,2195,0.9963685882886972,0.9269425675675675,
+flower/e10-max/1.2,pass,1.4612576962,1.450180769,2195,0.9963685882886972,0.9269425675675675,
+flower/e1/1.3,pass,1.6899636984,1.6899973154,2296,1.0043744531933507,1.1508771929824562,
+flower/e4/1.3,fail,1.755431056,1.8042728901,2194,1.1391484942886811,1.1989071038251367,resident matched-quality size exceeds CPU allowance
+flower/e7/1.3,pass,1.6268714666,1.5769064426,2179,0.9620309050772627,1.0501204819277108,
+flower/e8/1.3,pass,1.6268714666,1.5769064426,2179,0.9620309050772627,1.0501204819277108,
+flower/e9/1.3,pass,1.6268714666,1.5769064426,2156,0.962070504239179,1.0390361445783132,
+flower/e10/1.3,pass,1.6268714666,1.5769064426,2156,0.962070504239179,1.0390361445783132,
+flower/e1-max/1.3,pass,1.6899636984,1.6899973154,2177,0.9963386727688787,1.0912280701754387,
+flower/e4-max/1.3,fail,1.755431056,1.8042728901,2066,1.1600224592925323,1.1289617486338799,resident matched-quality size exceeds CPU allowance
+flower/e7-max/1.3,pass,1.6268714666,1.5769064426,2047,0.9334245326037391,0.9865060240963855,
+flower/e8-max/1.3,pass,1.6268714666,1.5769064426,2047,0.9334245326037391,0.9865060240963855,
+flower/e10-max/1.3,pass,1.6268714666,1.5769064426,2047,0.9334245326037391,0.9865060240963855,
+flower/e1/1.4,pass,1.6946555376,1.7054382563,2137,0.9976657329598506,0.9544439481911567,
+flower/e4/1.4,fail,1.5266143084,1.7664663792,2058,1.033132530120482,1.0009727626459144,resident quality exceeds CPU allowance
+flower/e7/1.4,pass,1.8435126543,1.6140663624,2073,0.9092105263157895,0.9112087912087912,
+flower/e8/1.4,pass,1.8435126543,1.6140663624,2073,0.9092105263157895,0.9112087912087912,
+flower/e9/1.4,pass,1.8435126543,1.6140663624,2059,0.912677304964539,0.9050549450549451,
+flower/e10/1.4,pass,1.8435126543,1.6140663624,2059,0.912677304964539,0.9050549450549451,
+flower/e1-max/1.4,pass,1.6946555376,1.7054382563,2069,1.0053449951409135,0.9240732469852613,
+flower/e4-max/1.4,fail,1.5266143084,1.7664663792,1982,1.0615961435457955,0.9640077821011673,resident quality exceeds CPU allowance
+flower/e7-max/1.4,pass,1.8435126543,1.6140663624,1954,0.8841628959276018,0.8589010989010989,
+flower/e8-max/1.4,pass,1.8435126543,1.6140663624,1954,0.8841628959276018,0.8589010989010989,
+flower/e10-max/1.4,pass,1.8435126543,1.6140663624,1954,0.8841628959276018,0.8589010989010989,
+flower/e1/2,pass,2.5901348591,2.5901346207,1799,1.0016703786191536,1.505439330543933,
+flower/e4/2,pass,1.9358445406,2.0078725815,1732,1.0206246317030052,1.054169202678028,
+flower/e7/2,pass,2.2751939297,2.3339390755,1704,1.0358662613981764,1.298780487804878,
+flower/e8/2,pass,2.2751939297,2.3339390755,1704,1.0358662613981764,1.298780487804878,
+flower/e9/2,pass,2.2751939297,2.3339390755,1689,1.0349264705882353,1.2873475609756098,
+flower/e10/2,pass,2.2751939297,2.3339390755,1689,1.0349264705882353,1.2873475609756098,
+flower/e1-max/2,pass,2.5901348591,2.5901346207,1660,0.9946075494307969,1.389121338912134,
+flower/e4-max/2,pass,1.9358445406,2.0078725815,1558,1.0064599483204135,0.9482653682288497,
+flower/e7-max/2,pass,2.2751939297,2.3339390755,1537,1.0315436241610738,1.1714939024390243,
+flower/e8-max/2,pass,2.2751939297,2.3339390755,1537,1.0315436241610738,1.1714939024390243,
+flower/e10-max/2,pass,2.2751939297,2.3339390755,1537,1.0315436241610738,1.1714939024390243,
+flower/e1/2.499,pass,2.2464385033,2.2464385033,1566,1.0,1.159141376757957,
+flower/e4/2.499,pass,2.4397089481,2.4397089481,1483,1.0,1.1604068857589984,
+flower/e7/2.499,pass,2.6809985638,2.6681778431,1474,0.9993220338983051,1.238655462184874,
+flower/e8/2.499,pass,2.6809985638,2.6681778431,1474,0.9993220338983051,1.238655462184874,
+flower/e9/2.499,pass,2.6809985638,2.6681778431,1464,1.0,1.2302521008403362,
+flower/e10/2.499,pass,2.6809985638,2.6681778431,1464,1.0,1.2302521008403362,
+flower/e1-max/2.499,pass,2.2464385033,2.2464385033,1406,1.0,1.0407105847520355,
+flower/e4-max/2.499,pass,2.4397089481,2.4397089481,1301,1.0,1.017996870109546,
+flower/e7-max/2.499,pass,2.6809985638,2.6681778431,1305,1.0015349194167307,1.096638655462185,
+flower/e8-max/2.499,pass,2.6809985638,2.6681778431,1305,1.0015349194167307,1.096638655462185,
+flower/e10-max/2.499,pass,2.6809985638,2.6681778431,1305,1.0015349194167307,1.096638655462185,
+flower/e1/2.5,pass,2.2295506001,2.2295506001,1567,1.0,1.1074204946996467,
+flower/e4/2.5,pass,2.4385461807,2.4385461807,1509,0.99867637326274,1.1545524100994644,
+flower/e7/2.5,pass,2.3988111019,2.3988111019,1471,1.0006802721088435,1.1211890243902438,
+flower/e8/2.5,pass,2.3988111019,2.3988111019,1471,1.0006802721088435,1.1211890243902438,
+flower/e9/2.5,pass,2.3988111019,2.3988111019,1460,1.0013717421124828,1.1128048780487805,
+flower/e10/2.5,pass,2.3988111019,2.3988111019,1460,1.0013717421124828,1.1128048780487805,
+flower/e1-max/2.5,pass,2.2295506001,2.2295506001,1415,1.0,1.0,
+flower/e4-max/2.5,pass,2.4385461807,2.4385461807,1343,1.0,1.0275439938791124,
+flower/e7-max/2.5,pass,2.3988111019,2.3988111019,1296,1.0007722007722009,0.9878048780487805,
+flower/e8-max/2.5,pass,2.3988111019,2.3988111019,1296,1.0007722007722009,0.9878048780487805,
+flower/e10-max/2.5,pass,2.3988111019,2.3988111019,1296,1.0007722007722009,0.9878048780487805,
+flower/e1/2.501,pass,2.3079726696,2.3079726696,1573,1.0,1.1791604197901049,
+flower/e4/2.501,pass,2.2959425449,2.2971019745,1499,1.0,1.083875632682574,
+flower/e7/2.501,pass,2.5020575523,2.4751348495,1488,0.9335006273525721,1.161592505854801,
+flower/e8/2.501,pass,2.5020575523,2.4751348495,1488,0.9335006273525721,1.161592505854801,
+flower/e9/2.501,pass,2.5020575523,2.4751348495,1478,0.9360354654844838,1.1537861046057767,
+flower/e10/2.501,pass,2.5020575523,2.4751348495,1478,0.9360354654844838,1.1537861046057767,
+flower/e1-max/2.501,pass,2.3079726696,2.3079726696,1426,1.0,1.0689655172413792,
+flower/e4-max/2.501,pass,2.2959425449,2.2971019745,1329,1.0,0.9609544468546638,
+flower/e7-max/2.501,pass,2.5020575523,2.4751348495,1321,0.932909604519774,1.0312256049960968,
+flower/e8-max/2.501,pass,2.5020575523,2.4751348495,1321,0.932909604519774,1.0312256049960968,
+flower/e10-max/2.501,pass,2.5020575523,2.4751348495,1321,0.932909604519774,1.0312256049960968,
+flower/e1/3,incomplete,2.5914902687,2.5914902687,1460,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.59149027, best=2.53226686, error=0.0592234135, tolerance=0.015"
+flower/e4/3,pass,3.019087553,3.0403318405,1359,1.0089086859688197,1.1942003514938488,
+flower/e7/3,pass,2.9956583977,2.9979789257,1347,1.00074294205052,1.154241645244216,
+flower/e8/3,pass,2.9956583977,2.9979789257,1347,1.00074294205052,1.154241645244216,
+flower/e9/3,pass,2.9956583977,2.9979789257,1338,1.0,1.1465295629820051,
+flower/e10/3,pass,2.9956583977,2.9979789257,1338,1.0,1.1465295629820051,
+flower/e1-max/3,incomplete,2.5914902687,2.5914902687,1277,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.59149027, best=2.53226686, error=0.0592234135, tolerance=0.015"
+flower/e4-max/3,pass,3.019087553,3.0403318405,1174,1.0226480836236933,1.031634446397188,
+flower/e7-max/3,pass,2.9956583977,2.9979789257,1157,1.0,0.9914310197086547,
+flower/e8-max/3,pass,2.9956583977,2.9979789257,1157,1.0,0.9914310197086547,
+flower/e10-max/3,pass,2.9956583977,2.9979789257,1157,1.0,0.9914310197086547,
+grayscale/e1/0.5,pass,0.7084720135,0.7084720135,4409,1.0,1.790820471161657,
+grayscale/e4/0.5,pass,0.6688766479,0.6688766479,4285,1.0,1.6595662277304415,
+grayscale/e7/0.5,pass,0.7157373428,0.7157373428,4240,1.0,1.7221770917952883,
+grayscale/e8/0.5,pass,0.7157373428,0.7157373428,4240,1.0,1.7221770917952883,
+grayscale/e9/0.5,pass,0.7157373428,0.7157373428,4218,1.0,1.7132412672623882,
+grayscale/e10/0.5,pass,0.7157373428,0.7157373428,4218,1.0,1.7132412672623882,
+grayscale/e1-max/0.5,pass,0.7084720135,0.7084720135,4300,1.0,1.7465475223395612,
+grayscale/e4-max/0.5,pass,0.6688766479,0.6688766479,4172,1.0,1.6158017041053447,
+grayscale/e7-max/0.5,pass,0.7157373428,0.7157373428,4168,1.0,1.692932575142161,
+grayscale/e8-max/0.5,pass,0.7157373428,0.7157373428,4171,1.0,1.6941510966693745,
+grayscale/e10-max/0.5,pass,0.7157373428,0.7157373428,4171,1.0,1.6941510966693745,
+grayscale/e1/0.8,pass,1.2107139826,1.2107139826,3742,1.0,1.7584586466165413,
+grayscale/e4/0.8,pass,1.2089284658,1.2089284658,3597,1.0,1.6903195488721805,
+grayscale/e7/0.8,pass,1.0209732056,1.0209732056,3574,1.0,1.583517944173682,
+grayscale/e8/0.8,pass,1.0209732056,1.0209732056,3574,1.0,1.583517944173682,
+grayscale/e9/0.8,pass,1.0209732056,1.0209732056,3550,1.0,1.5728843597696056,
+grayscale/e10/0.8,pass,1.0209732056,1.0209732056,3550,1.0,1.5728843597696056,
+grayscale/e1-max/0.8,pass,1.2107139826,1.2107139826,3717,1.0,1.7467105263157894,
+grayscale/e4-max/0.8,pass,1.2089284658,1.2089284658,3562,1.0,1.6738721804511278,
+grayscale/e7-max/0.8,pass,1.0209732056,1.0209732056,3530,1.0,1.5640230394328756,
+grayscale/e8-max/0.8,pass,1.0209732056,1.0209732056,3530,1.0,1.5640230394328756,
+grayscale/e10-max/0.8,pass,1.0209732056,1.0209732056,3530,1.0,1.5640230394328756,
+grayscale/e1/1,pass,1.2276866436,1.2276866436,3511,1.0,1.6391223155929038,
+grayscale/e4/1,pass,1.3383352757,1.3383352757,3291,1.0,1.5701335877862594,
+grayscale/e7/1,pass,1.4873185158,1.4873185158,3283,1.0,1.5700621712099474,
+grayscale/e8/1,pass,1.4873185158,1.4873185158,3283,1.0,1.5700621712099474,
+grayscale/e9/1,pass,1.4873185158,1.4873185158,3259,1.0,1.5585844093735055,
+grayscale/e10/1,pass,1.4873185158,1.4873185158,3259,1.0,1.5585844093735055,
+grayscale/e1-max/1,pass,1.2276866436,1.2276866436,3477,1.0,1.623249299719888,
+grayscale/e4-max/1,pass,1.3383352757,1.3383352757,3253,1.0,1.5520038167938932,
+grayscale/e7-max/1,pass,1.4873185158,1.4873185158,3243,1.0,1.550932568149211,
+grayscale/e8-max/1,pass,1.4873185158,1.4873185158,3243,1.0,1.550932568149211,
+grayscale/e10-max/1,pass,1.4873185158,1.4873185158,3243,1.0,1.550932568149211,
+grayscale/e1/1.1,pass,1.4699293375,1.4699293375,3412,1.0,1.6232159847764034,
+grayscale/e4/1.1,pass,1.6337378025,1.6337378025,3206,1.0,1.5998003992015968,
+grayscale/e7/1.1,pass,1.3127793074,1.3127793074,3195,1.0,1.5353195579048535,
+grayscale/e8/1.1,pass,1.3127793074,1.3127793074,3195,1.0,1.5353195579048535,
+grayscale/e9/1.1,pass,1.3127793074,1.3127793074,3171,1.0,1.5237866410379626,
+grayscale/e10/1.1,pass,1.3127793074,1.3127793074,3171,1.0,1.5237866410379626,
+grayscale/e1-max/1.1,pass,1.4699293375,1.4699293375,3360,1.0,1.598477640342531,
+grayscale/e4-max/1.1,pass,1.6337378025,1.6337378025,3159,1.0,1.5763473053892216,
+grayscale/e7-max/1.1,pass,1.3127793074,1.3127793074,3144,1.0,1.5108121095627103,
+grayscale/e8-max/1.1,pass,1.3127793074,1.3127793074,3144,1.0,1.5108121095627103,
+grayscale/e10-max/1.1,pass,1.3127793074,1.3127793074,3144,1.0,1.5108121095627103,
+grayscale/e1/1.2,incomplete,1.3242349625,1.3242349625,3311,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.32423496, best=1.29289103, error=0.031343937, tolerance=0.015"
+grayscale/e4/1.2,pass,1.730974555,1.730974555,3076,1.0,1.538,
+grayscale/e7/1.2,pass,1.5327430964,1.5327430964,3060,1.0,1.523145843703335,
+grayscale/e8/1.2,pass,1.5327430964,1.5327430964,3060,1.0,1.523145843703335,
+grayscale/e9/1.2,pass,1.5327430964,1.5327430964,3035,1.0,1.5107018417122946,
+grayscale/e10/1.2,pass,1.5327430964,1.5327430964,3035,1.0,1.5107018417122946,
+grayscale/e1-max/1.2,incomplete,1.3242349625,1.3242349625,3267,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=1.32423496, best=1.29289103, error=0.031343937, tolerance=0.015"
+grayscale/e4-max/1.2,pass,1.730974555,1.730974555,3057,1.0,1.5285,
+grayscale/e7-max/1.2,pass,1.5327430964,1.5327430964,3047,1.0,1.516674962667994,
+grayscale/e8-max/1.2,pass,1.5327430964,1.5327430964,3047,1.0,1.516674962667994,
+grayscale/e10-max/1.2,pass,1.5327430964,1.5327430964,3047,1.0,1.516674962667994,
+grayscale/e1/1.3,pass,1.5467934608,1.5467934608,3204,1.0,1.552325581395349,
+grayscale/e4/1.3,pass,1.8591285944,1.8591285944,3005,1.0,1.675962074735081,
+grayscale/e7/1.3,pass,1.6319125891,1.6319125891,2955,1.0,1.4738154613466334,
+grayscale/e8/1.3,pass,1.6319125891,1.6319125891,2955,1.0,1.4738154613466334,
+grayscale/e9/1.3,pass,1.6319125891,1.6319125891,2927,1.0,1.4598503740648379,
+grayscale/e10/1.3,pass,1.6319125891,1.6319125891,2927,1.0,1.4598503740648379,
+grayscale/e1-max/1.3,pass,1.5467934608,1.5467934608,3166,1.0,1.5339147286821706,
+grayscale/e4-max/1.3,pass,1.8591285944,1.8591285944,2967,1.0,1.6547685443390965,
+grayscale/e7-max/1.3,pass,1.6319125891,1.6319125891,2941,1.0,1.4668329177057358,
+grayscale/e8-max/1.3,pass,1.6319125891,1.6319125891,2941,1.0,1.4668329177057358,
+grayscale/e10-max/1.3,pass,1.6319125891,1.6319125891,2941,1.0,1.4668329177057358,
+grayscale/e1/1.4,pass,1.8382896185,1.8382896185,3123,1.0,1.7263681592039801,
+grayscale/e4/1.4,pass,1.7393485308,1.7393485308,2884,1.0,1.5447241564006426,
+grayscale/e7/1.4,pass,1.7969944477,1.7969944477,2878,1.0,1.5658324265505985,
+grayscale/e8/1.4,pass,1.7969944477,1.7969944477,2878,1.0,1.5658324265505985,
+grayscale/e9/1.4,pass,1.7969944477,1.7969944477,2858,1.0,1.5549510337323178,
+grayscale/e10/1.4,pass,1.7969944477,1.7969944477,2858,1.0,1.5549510337323178,
+grayscale/e1-max/1.4,pass,1.8382896185,1.8382896185,3080,1.0,1.7025981205085683,
+grayscale/e4-max/1.4,pass,1.7393485308,1.7393485308,2884,1.0,1.5447241564006426,
+grayscale/e7-max/1.4,pass,1.7969944477,1.7969944477,2854,1.0,1.5527747551686615,
+grayscale/e8-max/1.4,pass,1.7969944477,1.7969944477,2854,1.0,1.5527747551686615,
+grayscale/e10-max/1.4,pass,1.7969944477,1.7969944477,2854,1.0,1.5527747551686615,
+grayscale/e1/2,incomplete,2.3431739807,2.3431739807,2690,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.34317398, best=2.43122506, error=0.0880510807, tolerance=0.015"
+grayscale/e4/2,pass,2.4357898235,2.4357898235,2453,1.0,1.3492849284928492,
+grayscale/e7/2,pass,2.5154428482,2.5154428482,2381,1.0,1.4317498496692724,
+grayscale/e8/2,pass,2.5154428482,2.5154428482,2381,1.0,1.4317498496692724,
+grayscale/e9/2,pass,2.5154428482,2.5154428482,2368,1.0,1.423932651834035,
+grayscale/e10/2,pass,2.5154428482,2.5154428482,2368,1.0,1.423932651834035,
+grayscale/e1-max/2,incomplete,2.3431739807,2.3431739807,2684,1.0,,"libjxl calibration: Calibration did not converge within tolerance: target=2.34317398, best=2.43122506, error=0.0880510807, tolerance=0.015"
+grayscale/e4-max/2,pass,2.4357898235,2.4357898235,2401,1.0,1.3206820682068208,
+grayscale/e7-max/2,pass,2.5154428482,2.5154428482,2343,1.0,1.4088995790739627,
+grayscale/e8-max/2,pass,2.5154428482,2.5154428482,2343,1.0,1.4088995790739627,
+grayscale/e10-max/2,pass,2.5154428482,2.5154428482,2343,1.0,1.4088995790739627,
+grayscale/e1/2.499,pass,2.4242634773,2.4242634773,2384,1.0,1.3077345035655512,
+grayscale/e4/2.499,pass,3.0057973862,3.0057973862,2150,1.0,1.4172709294660515,
+grayscale/e7/2.499,pass,2.7650995255,2.7650995255,2108,1.0,1.2525252525252526,
+grayscale/e8/2.499,pass,2.7650995255,2.7650995255,2108,1.0,1.2525252525252526,
+grayscale/e9/2.499,pass,2.7650995255,2.7650995255,2094,1.0,1.2442067736185383,
+grayscale/e10/2.499,pass,2.7650995255,2.7650995255,2094,1.0,1.2442067736185383,
+grayscale/e1-max/2.499,pass,2.4242634773,2.4242634773,2289,1.0,1.2556226001097093,
+grayscale/e4-max/2.499,pass,3.0057973862,3.0057973862,2047,1.0,1.3493737640079104,
+grayscale/e7-max/2.499,pass,2.7650995255,2.7650995255,1998,1.0,1.1871657754010696,
+grayscale/e8-max/2.499,pass,2.7650995255,2.7650995255,1998,1.0,1.1871657754010696,
+grayscale/e10-max/2.499,pass,2.7650995255,2.7650995255,1998,1.0,1.1871657754010696,
+grayscale/e1/2.5,pass,2.4204316139,2.4204316139,2378,1.0,1.3101928374655647,
+grayscale/e4/2.5,pass,2.797991991,2.797991991,2143,1.0,1.2940821256038648,
+grayscale/e7/2.5,pass,2.9521400928,2.9521400928,2130,1.0,1.4237967914438503,
+grayscale/e8/2.5,pass,2.9521400928,2.9521400928,2130,1.0,1.4237967914438503,
+grayscale/e9/2.5,pass,2.9521400928,2.9521400928,2118,1.0,1.4157754010695187,
+grayscale/e10/2.5,pass,2.9521400928,2.9521400928,2118,1.0,1.4157754010695187,
+grayscale/e1-max/2.5,pass,2.4204316139,2.4204316139,2285,1.0,1.258953168044077,
+grayscale/e4-max/2.5,pass,2.797991991,2.797991991,2051,1.0,1.2385265700483092,
+grayscale/e7-max/2.5,pass,2.9521400928,2.9521400928,2017,1.0,1.3482620320855614,
+grayscale/e8-max/2.5,pass,2.9521400928,2.9521400928,2017,1.0,1.3482620320855614,
+grayscale/e10-max/2.5,pass,2.9521400928,2.9521400928,2017,1.0,1.3482620320855614,
+grayscale/e1/2.501,pass,2.4182629585,2.4182629585,2380,1.0,1.309851403412218,
+grayscale/e4/2.501,pass,2.7840240002,2.7840240002,2134,1.0,1.288647342995169,
+grayscale/e7/2.501,pass,3.0751924515,3.0751924515,2123,1.0,1.4022457067371201,
+grayscale/e8/2.501,pass,3.0751924515,3.0751924515,2123,1.0,1.4022457067371201,
+grayscale/e9/2.501,pass,3.0751924515,3.0751924515,2109,1.0,1.392998678996037,
+grayscale/e10/2.501,pass,3.0751924515,3.0751924515,2109,1.0,1.392998678996037,
+grayscale/e1-max/2.501,pass,2.4182629585,2.4182629585,2285,1.0,1.2575674188222346,
+grayscale/e4-max/2.501,pass,2.7840240002,2.7840240002,2028,1.0,1.2246376811594204,
+grayscale/e7-max/2.501,pass,3.0751924515,3.0751924515,2024,1.0,1.3368560105680316,
+grayscale/e8-max/2.501,pass,3.0751924515,3.0751924515,2024,1.0,1.3368560105680316,
+grayscale/e10-max/2.501,pass,3.0751924515,3.0751924515,2024,1.0,1.3368560105680316,
+grayscale/e1/3,pass,3.2079205513,3.2079205513,2183,1.0,1.4779959377115774,
+grayscale/e4/3,pass,3.1675207615,3.1675207615,1971,1.0,1.336271186440678,
+grayscale/e7/3,pass,3.3053436279,3.3053436279,1949,1.0,1.4205539358600583,
+grayscale/e8/3,pass,3.3053436279,3.3053436279,1949,1.0,1.4205539358600583,
+grayscale/e9/3,pass,3.3053436279,3.3053436279,1934,1.0,1.4096209912536444,
+grayscale/e10/3,pass,3.3053436279,3.3053436279,1934,1.0,1.4096209912536444,
+grayscale/e1-max/3,pass,3.2079205513,3.2079205513,2055,1.0,1.3913337846987137,
+grayscale/e4-max/3,pass,3.1675207615,3.1675207615,1838,1.0,1.2461016949152541,
+grayscale/e7-max/3,pass,3.3053436279,3.3053436279,1805,1.0,1.315597667638484,
+grayscale/e8-max/3,pass,3.3053436279,3.3053436279,1805,1.0,1.315597667638484,
+grayscale/e10-max/3,pass,3.3053436279,3.3053436279,1805,1.0,1.315597667638484,

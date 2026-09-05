@@ -1108,6 +1108,8 @@ if(GJXL_BUILD_TESTS)
     "${CMAKE_CURRENT_BINARY_DIR}/pinned-libjxl"
   )
 
+  include(cmake/MetalResidentQualification.cmake)
+
   add_custom_target(
     gjxl_pinned_decoder
     COMMAND
