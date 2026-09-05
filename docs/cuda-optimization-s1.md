@@ -2,7 +2,7 @@
 
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
-  AC gather/DCT implemented; optimization ongoing
+  AC gather/DCT plus packed AC costs implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -14,13 +14,13 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest AC gather/DCT fusion against `1d72c2b`
+below supersede them. The latest packed AC-cost checkpoint against `255a706`
+reduces 4K cost-kernel time by 68.3%. Paired quantization time improves 0.9%
+at 4K and 2.0% at 1080p, but total time increases 1.5% and 0.6%; this is not
+an established large-image end-to-end win. Flower's paired total improves
+5.9%, with substantial timing variation. The preceding gather/DCT fusion
 removes seven launches and roughly 2.55 GB of logical packed-buffer traffic
-per 4K encode. Warmed paired total time improves 3.7% at 4K and 1.1% at
-1080p, but increases 2.6% on Flower; this is not a universal latency win.
-Same-process probes favor fusion in all seven shapes at three batch sizes.
-The preceding small-DCT and EPF checkpoints reduce packed-DCT and EPF
-execution by 41.3% and 81.2%, respectively, in their 4K comparisons.
+per 4K encode. Earlier small-DCT and EPF improvements remain documented below.
 Remaining AC cost evaluation, DCT, reconstruction
 filtering, host work, and transfers are material targets; the resident path
 has not reached its performance limit.
@@ -1808,6 +1808,187 @@ convolution, 43.977 ms in Malta, 27.463 ms in resident coefficient encoding,
 and remaining coefficient/filter work, plus host work and transfer boundaries,
 remain substantial targets. This checkpoint does not demonstrate that the
 fully-resident path is maxed out.
+
+### Follow-up: pack and register-reduce AC costs (2026-09-05)
+
+The parent is `255a706`. After gather fusion, AC cost still reads every
+inverse-transformed residual pixel. Its original kernel launches one block
+per candidate with 64/128/256/512/1024 threads, stages all three channels in
+shared memory, and executes a block-wide barrier after every halving level.
+Increasingly few threads participate as the reduction shrinks. At 32x32,
+the kernel uses 1024 threads, 12 KiB of shared memory, and eleven barriers
+for one cost. Runtime transform dimensions also require general integer
+division/remainder for mask addressing.
+
+The retained kernel specializes width/height and packs candidates into
+256-thread blocks. Candidate groups have 32 threads through 16x16, 64 for
+the 512-pixel shapes, and 128 for 32x32; each lane holds two, four, or eight
+pixels for all three channels. The original halving order first combines
+register-held values, then uses shared memory between warps where needed,
+and finishes with five shuffle levels. Small shapes need no shared memory
+or block barrier; 512/1024-pixel shapes use 3 KiB and two/three barriers.
+Inactive tail candidates and invalid footprints participate safely without
+reading pixels or writing outside the cost range. The allocation, transfer,
+launch-count, and arithmetic-precision contracts do not change.
+
+An initial eight-value tile reduces 4K cost execution from 17.074 to
+6.089 ms, with other kernels moving from 344.337 to 339.071 ms. A sixteen-value
+tile takes 6.601 ms despite lower other-kernel time (330.242 ms). Its large
+shapes consume 84-86 registers instead of 40. A same-process comparison also
+tests four-value tiles: they do not offer a consistent advantage over eight,
+while sixteen is consistently worse on the large shapes. The retained final
+register counts are 24/30/30/40/40/40/40 for physical widths/heights
+8x8/16x8/8x16/16x16/32x16/16x32/32x32, with no stack or local-memory use.
+
+#### Numerical pitfall caught by the direct comparison
+
+The first packed version passes CPU-tolerance and batch-consistency tests,
+but a direct parent-kernel comparison finds occasional one-ULP cost differences
+(first observed at 16x8 with 4096 candidates). Reverting constant-count
+normalization to the parent's runtime-count expression does not fix them.
+PTX identifies the difference in channel combination, not the halving tree:
+the parent contracts X weighting with the following Y addition into one
+FMA, whereas register-resident channel totals cause NVCC to emit a multiply
+and a separately rounded addition across the branch. The same source-level
+summation order alone is insufficient to preserve the parent's result.
+
+The final channel combination explicitly uses the parent's FMA sequence,
+including weighted X entropy plus Y magnitude. A fresh direct probe compares
+the original cost body with four/eight/sixteen-value variants across all seven
+shapes and counts 33, 4096, and the production-size counts from the 4K trace.
+All 63 variant/configuration comparisons pass bitwise in each of two
+independent processes, including output tail guards. The probe uses strided
+mask input, deterministic residuals and rates, and varying positive quant
+norms/entropy multipliers. Its timing phase gives every implementation the
+same warmup and repetition counts; each has independent in/out cost storage.
+During timing, each cost becomes the following dispatch's norm. That feedback
+is identical across implementations and keeps the timing loop focused on
+the cost kernel; it does not model an AQ iteration.
+
+Seven within-process forward/reverse-order sweeps follow three warmups,
+using five repetitions per measurement (64 for 33-candidate batches).
+Events measure the device timeline, including dispatch gaps. The retained
+eight-value variant wins every configuration's median paired comparison in
+both processes. Large-count reductions range from 62.9% to 83.4%, while
+4096-candidate reductions range from 34.6% to 75.1%. The small 33-candidate
+results range from 2.1% to 40.5% and are more sensitive to dispatch/clock
+variation. Absolute timings and variant-order differences remain noisy;
+these are isolated cost comparisons, not complete workflow speedups.
+
+#### Warmed public workflow
+
+Seven alternating parent/candidate process pairs use three warmups and five
+samples per process, effort 7, distance 1.2, fully resident, no final score.
+Each process contributes its median; all pairs and outliers are retained.
+Negative paired changes mean faster:
+
+| Workload | Total median, parent / packed | Median paired total change | Quantization median, parent / packed | Median paired quantization change |
+|---|---:|---:|---:|---:|
+| Odd 4K | 876.867 / 856.186 ms | +1.5% | 611.071 / 596.081 ms | -0.9% |
+| Odd 1080p | 210.995 / 213.637 ms | +0.6% | 131.949 / 131.110 ms | -2.0% |
+| Flower | 54.761 / 46.620 ms | -5.9% | 32.898 / 28.287 ms | -5.1% |
+
+There is no demonstrated total-latency win on the large synthetic workloads:
+only two of seven 4K total-time pairs and three 1080p pairs improve. Their
+quantization stages improve in six and five pairs, respectively. Flower
+improves in five total-time pairs and all seven quantization pairs, but its
+parent total range is particularly broad (43.597-78.558 ms versus
+44.508-55.674 ms). Its larger percentage must not be attributed entirely to
+the cost kernel without an unchanged-work control.
+
+The 4K total cohorts range from 826.371-916.619 / 839.592-948.853 ms;
+quantization ranges are 579.212-625.331 / 586.411-614.051 ms. The cohort
+medians and median paired ratios are different statistics: the former move
+in the opposite direction to the 4K total paired ratio. During the 4K sweep
+a device-state sample reads 71 C/P3/667 MHz graphics/5500 MHz memory.
+Clocks are not locked, and preceding checkpoints' absolute times are not a
+valid control. The isolated kernel improvement is retained, but this is not
+claimed as an established 4K end-to-end speedup.
+
+#### Final-source profiles and qualification
+
+Adjacent parent/final-source traces use three warmups and one profiled sample:
+
+| Workload | Cost, parent / packed | Other kernels, parent / packed | All kernels, parent / packed |
+|---|---:|---:|---:|
+| Odd 4K | 19.609 / 6.220 ms | 391.858 / 384.748 ms | 411.467 / 390.968 ms |
+| Odd 1080p | 2.955 / 1.571 ms | 67.746 / 71.878 ms | 70.700 / 73.449 ms |
+| Flower | 0.440 / 0.268 ms | 16.542 / 16.545 ms | 16.982 / 16.813 ms |
+
+Cost execution decreases 68.3%, 46.8%, and 39.1%, respectively. At 4K, all
+kernels decrease 5.0%, but other kernels also decrease 1.8%; the full change
+is not attributed solely to cost packing. At 1080p, other kernels increase
+6.1% and total kernel time increases 3.9% despite the cheaper cost stage.
+Flower's other kernels are nearly level, with total kernel time decreasing
+1.0%, much less than its paired workflow change. These controls reinforce
+the distinction between a kernel gain and a universal latency gain.
+
+The seven 4K cost launches now issue 78,150 blocks instead of 522,120.
+Both complete traces still have 516 launches and transfer 117,079,320 bytes
+HtoD, 103,699,012 bytes DtoH, and 518,400 bytes D2D. 1080p remains at 501
+launches and Flower at 516. No scratch allocation or residency policy changes.
+
+The final CUDA build passes all 54 tests; the CPU-only build passes all 47.
+The AC fixture now checks independent padded mask rows and nonzero mask
+offsets in legacy and resident modes, exact cost equality with contiguous
+inputs, and untouched input/guard storage. Eighty-four bad-mask batches
+cover zero, negative, NaN, and infinity values at the first, last, and an
+interior pixel across all seven strategies. Each candidate must return NaN
+iff it covers that pixel, otherwise retain its original cost. Existing
+231 CPU-referenced costs, twelve prefix lengths, invalid descriptors,
+resident quant norms/CfL, and independent-submission checks remain active.
+
+After the FMA correction, the expanded AC test passes memcheck, racecheck,
+synccheck, and initcheck with zero errors or hazards, without suppressing
+API errors. Six parent/final codestreams, selected-strategy summaries, and
+final perceptual scores remain identical: sample efforts 7/9, odd 1080p/4K
+effort 7, and Flower efforts 7/9. The pinned decoder reads every output at
+its original dimensions. Hashes remain those of the preceding checkpoints.
+
+Post-change batch qualification at 1080p uses one warmup and three paired
+serial/batch samples and preserves identical output at sizes 1/2/4:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 254.816 ms | 3.924 | 0.993x |
+| Fully resident | 2 | 403.184 ms | 4.961 | 1.204x |
+| Fully resident | 4 | 818.508 ms | 4.887 | 1.163x |
+| Maximum throughput | 1 | 110.644 ms | 9.038 | 1.025x |
+| Maximum throughput | 2 | 155.350 ms | 12.874 | 1.459x |
+| Maximum throughput | 4 | 343.143 ms | 11.657 | 1.673x |
+
+These qualify correctness and overlap, not before/after batch performance.
+Ending GPU state is 74 C/P3/1282 MHz graphics/5500 MHz memory.
+
+Ignored artifacts under `build-cuda-ninja/profiles/` use the `s25_` prefix:
+`parent_4k`, `packed8_4k`, and `packed16_4k` retain the initial traces;
+`final_{parent,retained}_{4k,1080p,flower}` retain the final traces, all as
+`.nsys-rep`/`.sqlite`. `packed{8,16}_source.cu` are **pre-FMA-correction**
+experiments, not the retained source. `cost_probe.cu` is the corrected
+four/eight/sixteen-value probe, with `cost_probe_fma_{1,2}.txt` results.
+`cost_probe_constant_count.txt`, `cost_probe_runtime_count.txt`, and
+`cost_probe_before_fma.ptx` retain the failed numerical investigation.
+The probe compiles with NVCC 11.8 under MSVC 14.37 using
+`-std=c++17 -O3 -arch=sm_86 -Xcompiler=/MD --cudart=shared -I src`.
+`compare_warmed.py` produces `warmed_{4k,1080p,flower}.json` with raw output;
+`verify.ps1`/`identity.txt`, `ac_final_{memcheck,racecheck,synccheck,initcheck}.txt`,
+and `batch_{fully-resident,maximum-throughput}.txt` retain final qualification.
+`qualify.ps1` runs the benchmarks and GPU checks sequentially;
+`profile_final.ps1`/`profile_summary.py` reproduce capture and extraction.
+Every artifact name in this paragraph includes the `s25_` prefix.
+
+The cost stage still logically reads 1.274 GB of residual pixels plus
+0.425 GB of masks per 4K encode; overlapping mask reads can hit cache, so
+this is not a DRAM-counter measurement or proof of a bandwidth ceiling.
+Further packing has diminishing returns. A next dataflow experiment should
+reduce weighted residual loss directly from inverse-DCT outputs and retain
+only per-channel sums, removing the full residual-pixel buffer round trip.
+It must measure any added inverse-kernel register/barrier cost and preserve
+the now-explicit final FMA behavior. The final trace also retains 82.046 ms
+of large DCT, 26.048 ms of packed DCT, 55.177 ms of convolution, 48.878 ms
+of Malta, 29.036 ms of coefficient encoding, and 23.318 ms of adjusted
+quantization. Host work and transfer boundaries remain important given the
+mixed wall-time results. The fully-resident path is not demonstrated maxed out.
 
 ## Work that should not lead the next cycle
 

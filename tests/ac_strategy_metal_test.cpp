@@ -436,9 +436,9 @@ bool RunStrategyCase(
 #endif
 
 #ifdef GJXL_TEST_CUDA
-  // Fused gathering must honor padded rows, plane gaps, nonzero base offsets,
-  // and independent resident plane offsets. NaN padding catches misplaced
-  // input reads; exact comparison isolates addressing from CPU/GPU rounding.
+  // Fused gathering and cost reduction must honor independent padded rows,
+  // plane gaps, nonzero base offsets, and resident plane offsets. NaN padding
+  // catches misplaced reads; exact costs isolate addressing from rounding.
   constexpr size_t kOpsinOffset = 13;
   constexpr size_t kOpsinStride = kPixelExtent.width + 11;
   constexpr size_t kPlaneStride = kOpsinStride * kPixelExtent.height + 19;
@@ -446,8 +446,22 @@ bool RunStrategyCase(
     std::numeric_limits<float>::quiet_NaN());
   std::unique_ptr<gjxl::DeviceBuffer> device_strided_opsin;
   const size_t strided_bytes = strided_opsin.size() * sizeof(float);
+  constexpr size_t kMaskOffset = 7;
+  constexpr size_t kMaskStride = kPixelExtent.width + 5;
+  std::vector<float> strided_mask(kMaskOffset + kMaskStride * kPixelExtent.height + 9,
+    std::numeric_limits<float>::quiet_NaN());
+  for (size_t y = 0; y < kPixelExtent.height; ++y) {
+    std::copy_n(fixture.pixel_mask.data() + y * kPixelExtent.width,
+      kPixelExtent.width, strided_mask.data() + kMaskOffset + y * kMaskStride);
+  }
+  const size_t strided_mask_bytes = strided_mask.size() * sizeof(float);
+  std::unique_ptr<gjxl::DeviceBuffer> device_strided_mask;
   if (!Allocate(gpu, strided_bytes, "Allocate strided opsin",
-        &device_strided_opsin)) {
+        &device_strided_opsin) ||
+      !Allocate(gpu, strided_mask_bytes, "Allocate strided mask",
+        &device_strided_mask) ||
+      !CheckStatus(gpu.CopyHostToDevice(*device_strided_mask,
+        strided_mask.data(), strided_mask_bytes), "Upload strided mask")) {
     return false;
   }
   for (const bool resident : {false, true}) {
@@ -456,6 +470,9 @@ bool RunStrategyCase(
     strided_batch.opsin_offset_bytes = kOpsinOffset * sizeof(float);
     strided_batch.opsin_row_stride = kOpsinStride;
     strided_batch.opsin_plane_stride = kPlaneStride;
+    strided_batch.pixel_mask = device_strided_mask.get();
+    strided_batch.pixel_mask_offset_bytes = kMaskOffset * sizeof(float);
+    strided_batch.pixel_mask_row_stride = kMaskStride;
     for (size_t channel = 0; channel < 3; ++channel) {
       const size_t physical_channel = resident ? (channel + 2) % 3 : channel;
       const size_t offset = kOpsinOffset + physical_channel * kPlaneStride;
@@ -471,8 +488,8 @@ bool RunStrategyCase(
     }
     if (resident) {
       strided_batch.resident_pixel_mask = {
-        device_mask.get(), 0, gjxl::DeviceElementType::kF32,
-        kPixelExtent, kPixelExtent.width};
+        device_strided_mask.get(), kMaskOffset * sizeof(float),
+        gjxl::DeviceElementType::kF32, kPixelExtent, kMaskStride};
     }
     if (!CheckStatus(gpu.CopyHostToDevice(*device_strided_opsin,
           strided_opsin.data(), strided_bytes), "Upload strided opsin") ||
@@ -502,6 +519,58 @@ bool RunStrategyCase(
         return false;
       }
     }
+    std::vector<float> mask_readback(strided_mask.size());
+    if (!CheckStatus(gpu.CopyDeviceToHost(*device_strided_mask,
+          mask_readback.data(), strided_mask_bytes), "Check strided mask guards")) {
+      return false;
+    }
+    for (size_t i = 0; i < mask_readback.size(); ++i) {
+      if (!(mask_readback[i] == strided_mask[i] ||
+            (std::isnan(mask_readback[i]) && std::isnan(strided_mask[i])))) {
+        std::cerr << "Candidate evaluation modified strided mask\n";
+        return false;
+      }
+    }
+  }
+
+  // A bad mask pixel must poison every candidate covering it, but no others.
+  // Exercise the first/last pixels and an interior pixel across every shape.
+  constexpr std::array<std::array<size_t, 2>, 3> bad_positions{{
+    {0, 0}, {kPixelExtent.width - 1, kPixelExtent.height - 1}, {31, 27}}};
+  for (const auto position : bad_positions) {
+    for (const float bad : {0.0f, -1.0f,
+         std::numeric_limits<float>::quiet_NaN(),
+         std::numeric_limits<float>::infinity()}) {
+      std::vector<float> invalid_mask = fixture.pixel_mask;
+      invalid_mask[position[1] * kPixelExtent.width + position[0]] = bad;
+      if (!CheckStatus(gpu.CopyHostToDevice(*device_mask,
+            invalid_mask.data(), mask_bytes), "Upload invalid mask") ||
+          !CheckStatus(gjxl::EvaluateAcStrategyCandidates(gpu, batch, &submission),
+            "Submit invalid mask batch") ||
+          submission == nullptr ||
+          !CheckStatus(submission->Wait(), "Wait for invalid mask batch") ||
+          !CheckStatus(gpu.CopyDeviceToHost(*device_costs,
+            poisoned_costs.data(), cost_bytes), "Download invalid mask costs")) {
+        return false;
+      }
+      for (size_t i = 0; i < candidates.size(); ++i) {
+        const size_t x = candidates[i].block_x * 8;
+        const size_t y = candidates[i].block_y * 8;
+        const bool covers = position[0] >= x && position[1] >= y &&
+          position[0] < x + info->pixel_extent().width &&
+          position[1] < y + info->pixel_extent().height;
+        if (covers ? !std::isnan(poisoned_costs[i])
+                   : poisoned_costs[i] != complete_costs[i]) {
+          std::cerr << implementation << ' ' << info->name
+                    << " invalid mask affected the wrong candidate " << i << '\n';
+          return false;
+        }
+      }
+    }
+  }
+  if (!CheckStatus(gpu.CopyHostToDevice(*device_mask,
+        fixture.pixel_mask.data(), mask_bytes), "Restore valid mask")) {
+    return false;
   }
 #endif
 
