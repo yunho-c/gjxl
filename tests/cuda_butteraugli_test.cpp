@@ -286,7 +286,7 @@ int main() {
 
   float worst_map = 0.0f;
   double worst_score = 0.0;
-  const std::array<gjxl::Extent2D, 12> extents{{
+  const std::array<gjxl::Extent2D, 15> extents{{
       {1, 1},
       {3, 7},
       {7, 3},
@@ -299,6 +299,9 @@ int main() {
       {32, 9},
       {65, 33},
       {127, 65},
+      {255, 63},
+      {257, 67},
+      {33, 129},
   }};
   for (size_t index = 0; index < extents.size(); ++index) {
     gjxl::ButteraugliOptions options;

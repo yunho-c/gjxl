@@ -197,12 +197,12 @@ __global__ void SubsampleKernel(const float* input, float* output,
   output[static_cast<size_t>(y) * params.output_stride + x] = value;
 }
 
-template <bool Horizontal, bool Mirror>
-__global__ void ConvolutionKernel(const float* input, const float* weights,
-                                  float* output, uint32_t width,
-                                  uint32_t height, uint32_t input_stride,
-                                  uint32_t output_stride,
-                                  uint32_t kernel_size) {
+template <bool Horizontal>
+__global__ void MirroredConvolution5Kernel(const float* input,
+                                           const float* weights, float* output,
+                                           uint32_t width, uint32_t height,
+                                           uint32_t input_stride,
+                                           uint32_t output_stride) {
   const size_t index =
       static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   const size_t count = static_cast<size_t>(width) * height;
@@ -210,38 +210,113 @@ __global__ void ConvolutionKernel(const float* input, const float* weights,
   const uint32_t y = static_cast<uint32_t>(index / width);
   const uint32_t x =
       static_cast<uint32_t>(index - static_cast<size_t>(y) * width);
-  const int radius = static_cast<int>(kernel_size / 2);
+  constexpr int radius = 2;
   const int center = static_cast<int>(Horizontal ? x : y);
   const int limit = static_cast<int>(Horizontal ? width : height);
   float sum = 0.0f;
   float weight_sum = 0.0f;
-  if constexpr (Mirror) {
-    for (int delta = -radius; delta <= radius; ++delta) {
-      const int coordinate = MirrorCoordinate(center + delta, limit);
-      const float weight = weights[delta + radius];
-      const uint32_t source_x =
-          Horizontal ? static_cast<uint32_t>(coordinate) : x;
-      const uint32_t source_y =
-          Horizontal ? y : static_cast<uint32_t>(coordinate);
-      sum += input[static_cast<size_t>(source_y) * input_stride + source_x] *
-             weight;
-      weight_sum += weight;
-    }
-  } else {
-    const int first = max(0, center - radius);
-    const int last = min(limit - 1, center + radius);
-    for (int coordinate = first; coordinate <= last; ++coordinate) {
-      const float weight = weights[coordinate + radius - center];
-      const uint32_t source_x =
-          Horizontal ? static_cast<uint32_t>(coordinate) : x;
-      const uint32_t source_y =
-          Horizontal ? y : static_cast<uint32_t>(coordinate);
-      sum += input[static_cast<size_t>(source_y) * input_stride + source_x] *
-             weight;
-      weight_sum += weight;
-    }
+#pragma unroll
+  for (int delta = -radius; delta <= radius; ++delta) {
+    const int coordinate = MirrorCoordinate(center + delta, limit);
+    const float weight = weights[delta + radius];
+    const uint32_t source_x =
+        Horizontal ? static_cast<uint32_t>(coordinate) : x;
+    const uint32_t source_y =
+        Horizontal ? y : static_cast<uint32_t>(coordinate);
+    sum +=
+        input[static_cast<size_t>(source_y) * input_stride + source_x] * weight;
+    weight_sum += weight;
   }
   output[static_cast<size_t>(y) * output_stride + x] = sum / weight_sum;
+}
+
+template <bool Horizontal>
+struct ConvolutionTile {
+  static constexpr unsigned int kWidth = Horizontal ? 256 : 32;
+  static constexpr unsigned int kHeight = Horizontal ? 4 : 64;
+
+  static unsigned int Blocks(uint32_t width, uint32_t height) {
+    return ((width + kWidth - 1) / kWidth) * ((height + kHeight - 1) / kHeight);
+  }
+};
+
+template <bool Horizontal, unsigned int KernelSize>
+__global__ void ConvolutionTiledKernel(const float* input, const float* weights,
+                                       float* output, uint32_t width,
+                                       uint32_t height, uint32_t input_stride,
+                                       uint32_t output_stride) {
+  static_assert(KernelSize == 7 || KernelSize == 13 || KernelSize == 15 ||
+                KernelSize == 33);
+  constexpr unsigned int kTileWidth = ConvolutionTile<Horizontal>::kWidth;
+  constexpr unsigned int kTileHeight = ConvolutionTile<Horizontal>::kHeight;
+  constexpr unsigned int kRadius = KernelSize / 2;
+  constexpr unsigned int kInputWidth =
+      kTileWidth + (Horizontal ? 2 * kRadius : 0);
+  constexpr unsigned int kInputHeight =
+      kTileHeight + (Horizontal ? 0 : 2 * kRadius);
+  __shared__ float tile[kInputWidth * kInputHeight];
+  __shared__ float kernel[KernelSize];
+  __shared__ float normalization;
+  const uint32_t tile_columns = (width + kTileWidth - 1) / kTileWidth;
+  const uint32_t origin_x = (blockIdx.x % tile_columns) * kTileWidth;
+  const uint32_t origin_y = (blockIdx.x / tile_columns) * kTileHeight;
+  if (threadIdx.x < KernelSize) kernel[threadIdx.x] = weights[threadIdx.x];
+  // Interior pixels share the same normalization. Sum it in the original
+  // order once per block; edge pixels still sum only the included weights.
+  if (threadIdx.x == 0) {
+    float weight_sum = 0.0f;
+    for (unsigned int tap = 0; tap < KernelSize; ++tap) {
+      weight_sum += weights[tap];
+    }
+    normalization = weight_sum;
+  }
+  // Load the directional halo cooperatively. Partial-tile threads must reach
+  // the barrier before each lane evaluates its four or eight output pixels.
+  for (unsigned int index = threadIdx.x; index < kInputWidth * kInputHeight;
+       index += blockDim.x) {
+    const int x = static_cast<int>(origin_x + index % kInputWidth) -
+                  static_cast<int>(Horizontal ? kRadius : 0);
+    const int y = static_cast<int>(origin_y + index / kInputWidth) -
+                  static_cast<int>(Horizontal ? 0 : kRadius);
+    const bool valid = x >= 0 && y >= 0 && x < static_cast<int>(width) &&
+                       y < static_cast<int>(height);
+    tile[index] =
+        valid ? input[static_cast<size_t>(y) * input_stride + x] : 0.0f;
+  }
+  __syncthreads();
+  for (unsigned int index = threadIdx.x; index < kTileWidth * kTileHeight;
+       index += blockDim.x) {
+    const uint32_t local_x = index % kTileWidth;
+    const uint32_t local_y = index / kTileWidth;
+    const uint32_t x = origin_x + local_x;
+    const uint32_t y = origin_y + local_y;
+    if (x >= width || y >= height) continue;
+    const int center = static_cast<int>(Horizontal ? x : y);
+    const int limit = static_cast<int>(Horizontal ? width : height);
+    const float* first = tile + local_y * kInputWidth + local_x;
+    constexpr unsigned int kStep = Horizontal ? 1 : kInputWidth;
+    float sum = 0.0f;
+    float weight_sum = normalization;
+    if (center >= static_cast<int>(kRadius) &&
+        center + static_cast<int>(kRadius) < limit) {
+#pragma unroll
+      for (unsigned int tap = 0; tap < KernelSize; ++tap) {
+        sum += first[tap * kStep] * kernel[tap];
+      }
+    } else {
+      weight_sum = 0.0f;
+#pragma unroll
+      for (unsigned int tap = 0; tap < KernelSize; ++tap) {
+        const int coordinate =
+            center + static_cast<int>(tap) - static_cast<int>(kRadius);
+        if (coordinate >= 0 && coordinate < limit) {
+          sum += first[tap * kStep] * kernel[tap];
+          weight_sum += kernel[tap];
+        }
+      }
+    }
+    output[static_cast<size_t>(y) * output_stride + x] = sum / weight_sum;
+  }
 }
 
 __device__ float ButteraugliFastLog2(float value) {
@@ -953,32 +1028,36 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
   return cudaSuccess;
 }
 
+template <unsigned int KernelSize>
 [[nodiscard]] cudaError_t LaunchBlur(const float* input, uint32_t input_stride,
-                                     const float* weights, uint32_t kernel_size,
-                                     float* intermediate, float* output,
-                                     uint32_t output_stride, uint32_t width,
-                                     uint32_t height, cudaStream_t stream) {
-  const unsigned int blocks = PlaneBlocks(width, height);
-  if (kernel_size == 5) {
-    ConvolutionKernel<true, true><<<blocks, kPlaneThreads, 0, stream>>>(
-        input, weights, intermediate, width, height, input_stride, width,
-        kernel_size);
+                                     const float* weights, float* intermediate,
+                                     float* output, uint32_t output_stride,
+                                     uint32_t width, uint32_t height,
+                                     cudaStream_t stream) {
+  if constexpr (KernelSize == 5) {
+    const unsigned int blocks = PlaneBlocks(width, height);
+    MirroredConvolution5Kernel<true><<<blocks, kPlaneThreads, 0, stream>>>(
+        input, weights, intermediate, width, height, input_stride, width);
     cudaError_t error = CheckLaunch();
     if (error != cudaSuccess) return error;
-    ConvolutionKernel<false, true><<<blocks, kPlaneThreads, 0, stream>>>(
-        intermediate, weights, output, width, height, width, output_stride,
-        kernel_size);
+    MirroredConvolution5Kernel<false><<<blocks, kPlaneThreads, 0, stream>>>(
+        intermediate, weights, output, width, height, width, output_stride);
+    return CheckLaunch();
+  } else {
+    const unsigned int horizontal_blocks =
+        ConvolutionTile<true>::Blocks(width, height);
+    const unsigned int vertical_blocks =
+        ConvolutionTile<false>::Blocks(width, height);
+    ConvolutionTiledKernel<true, KernelSize>
+        <<<horizontal_blocks, kPlaneThreads, 0, stream>>>(
+            input, weights, intermediate, width, height, input_stride, width);
+    cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+    ConvolutionTiledKernel<false, KernelSize>
+        <<<vertical_blocks, kPlaneThreads, 0, stream>>>(
+            intermediate, weights, output, width, height, width, output_stride);
     return CheckLaunch();
   }
-  ConvolutionKernel<true, false><<<blocks, kPlaneThreads, 0, stream>>>(
-      input, weights, intermediate, width, height, input_stride, width,
-      kernel_size);
-  cudaError_t error = CheckLaunch();
-  if (error != cudaSuccess) return error;
-  ConvolutionKernel<false, false><<<blocks, kPlaneThreads, 0, stream>>>(
-      intermediate, weights, output, width, height, width, output_stride,
-      kernel_size);
-  return CheckLaunch();
 }
 
 [[nodiscard]] cudaError_t LaunchPsycho(
@@ -989,9 +1068,9 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
     cudaStream_t stream) {
   for (size_t channel = 0; channel < 3; ++channel) {
     const cudaError_t error =
-        LaunchBlur(input[channel], input_stride[channel], plan.kernels[0], 5,
-                   plan.planes[kWork], plan.planes[kImage + 3 + channel],
-                   plan.working_width, width, height, stream);
+        LaunchBlur<5>(input[channel], input_stride[channel], plan.kernels[0],
+                      plan.planes[kWork], plan.planes[kImage + 3 + channel],
+                      plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
   }
 
@@ -1009,10 +1088,10 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
   if (error != cudaSuccess) return error;
 
   for (size_t channel = 0; channel < 3; ++channel) {
-    error = LaunchBlur(plan.planes[kImage + channel], plan.working_width,
-                       plan.kernels[1], 33, plan.planes[kWork + 3],
-                       plan.planes[kWork + channel], plan.working_width, width,
-                       height, stream);
+    error = LaunchBlur<33>(plan.planes[kImage + channel], plan.working_width,
+                           plan.kernels[1], plan.planes[kWork + 3],
+                           plan.planes[kWork + channel], plan.working_width,
+                           width, height, stream);
     if (error != cudaSuccess) return error;
   }
   const LowMediumParams low_medium{width, height, plan.working_width,
@@ -1026,9 +1105,9 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
   if (error != cudaSuccess) return error;
 
   for (size_t channel = 0; channel < 2; ++channel) {
-    error = LaunchBlur(psycho[3 + channel], psycho_stride, plan.kernels[2], 15,
-                       plan.planes[kWork + 1], plan.planes[kWork],
-                       plan.working_width, width, height, stream);
+    error = LaunchBlur<15>(psycho[3 + channel], psycho_stride, plan.kernels[2],
+                           plan.planes[kWork + 1], plan.planes[kWork],
+                           plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
     const FrequencyParams frequency{
         width,         height,
@@ -1040,9 +1119,9 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
     error = CheckLaunch();
     if (error != cudaSuccess) return error;
   }
-  error = LaunchBlur(psycho[5], psycho_stride, plan.kernels[2], 15,
-                     plan.planes[kWork + 1], psycho[5], psycho_stride, width,
-                     height, stream);
+  error = LaunchBlur<15>(psycho[5], psycho_stride, plan.kernels[2],
+                         plan.planes[kWork + 1], psycho[5], psycho_stride,
+                         width, height, stream);
   if (error != cudaSuccess) return error;
 
   const PlaneParams suppress{width, height, psycho_stride, psycho_stride};
@@ -1052,9 +1131,9 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
   if (error != cudaSuccess) return error;
 
   for (size_t channel = 0; channel < 2; ++channel) {
-    error = LaunchBlur(psycho[6 + channel], psycho_stride, plan.kernels[3], 7,
-                       plan.planes[kWork + 1], plan.planes[kWork],
-                       plan.working_width, width, height, stream);
+    error = LaunchBlur<7>(psycho[6 + channel], psycho_stride, plan.kernels[3],
+                          plan.planes[kWork + 1], plan.planes[kWork],
+                          plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
     const FrequencyParams frequency{
         width,         height,
@@ -1186,8 +1265,9 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
         LaunchMaskPrecompute(reference, reference_stride, plan.planes[kWork],
                              plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
-    error = LaunchBlur(plan.planes[kWork], plan.working_width, plan.kernels[4],
-                       13, plan.planes[kWork + 1], plan.planes[kWork + 2],
+    error =
+        LaunchBlur<13>(plan.planes[kWork], plan.working_width, plan.kernels[4],
+                       plan.planes[kWork + 1], plan.planes[kWork + 2],
                        plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
     reference_mask = plan.planes[kWork + 2];
@@ -1204,8 +1284,9 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
   error = LaunchMaskPrecompute(distorted, distorted_stride, plan.planes[kWork],
                                plan.working_width, width, height, stream);
   if (error != cudaSuccess) return error;
-  error = LaunchBlur(plan.planes[kWork], plan.working_width, plan.kernels[4],
-                     13, plan.planes[kWork + 1], plan.planes[kWork + 4],
+  error =
+      LaunchBlur<13>(plan.planes[kWork], plan.working_width, plan.kernels[4],
+                     plan.planes[kWork + 1], plan.planes[kWork + 4],
                      plan.working_width, width, height, stream);
   if (error != cudaSuccess) return error;
 
@@ -1275,7 +1356,8 @@ cudaError_t LaunchCudaButteraugliPrepare(const CudaButteraugliPlan& plan,
                                plan.planes[20], plan.working_width,
                                plan.working_width, plan.working_height, stream);
   if (error != cudaSuccess) return error;
-  error = LaunchBlur(plan.planes[20], plan.working_width, plan.kernels[4], 13,
+  error =
+      LaunchBlur<13>(plan.planes[20], plan.working_width, plan.kernels[4],
                      plan.planes[kWork], plan.planes[20], plan.working_width,
                      plan.working_width, plan.working_height, stream);
   if (error != cudaSuccess || plan.multiscale == 0) return error;

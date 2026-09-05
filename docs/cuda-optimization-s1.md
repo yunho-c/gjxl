@@ -1,6 +1,7 @@
 # CUDA optimization study S1
 
-- Status: S1.1-S1.5, packed DCT, and tiled Malta implemented; optimization ongoing
+- Status: S1.1-S1.5, packed DCT, tiled Malta, and specialized/tiled blurs
+  implemented; optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
 - Build: Release, CUDA 11.8, `CMAKE_CUDA_ARCHITECTURES=86`
@@ -12,10 +13,11 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest Malta checkpoint against `2b91775` reduces
-4K GPU kernel time from `336.7 ms` to `307.2 ms`. Convolution, AC-search
-residual evaluation, and reconstruction filtering remain material targets;
-the resident path has not reached its performance limit.
+below supersede them. The latest convolution checkpoint against `736dbd5`
+halves Butteraugli blur execution and reduces paired 4K total encoding time
+by 5.4%. AC-search residual evaluation, DCT, reconstruction filtering, host
+work, and transfers remain material targets; the resident path has not
+reached its performance limit.
 
 The initial measurements showed two different performance profiles.
 
@@ -851,6 +853,131 @@ so graph work should be compared against these larger compute opportunities.
 CPU serialization and the remaining synchronous transfers also need attention
 as GPU execution shrinks. This checkpoint does not establish a performance
 ceiling or qualify other GPU generations and a natural-image corpus.
+
+### Follow-up: specialize and tile Butteraugli blurs (2026-09-05)
+
+At parent revision `736dbd5`, Butteraugli blur is the largest named kernel
+family in a fresh odd-4K capture: `115.886 ms` over 146 launches. The 7-, 13-,
+15-, and 33-tap filters use runtime loop bounds and repeatedly address
+overlapping global-memory samples. The same weight sum is recomputed for
+every interior pixel.
+
+The retained implementation makes filter sizes compile-time parameters and
+uses 256-thread blocks to evaluate 256x4 horizontal or 32x64 vertical output
+tiles. Each block cooperatively loads its directional halo and weights into
+shared memory. Four horizontal or eight vertical outputs per thread amortize
+loading and synchronization. The complete weight sum is calculated once per
+block in the original addition order; edge pixels still accumulate only
+included weights in their original order. Padding does not contribute to
+edge normalization. The separate mirrored 5-tap filter is unrolled without
+tiling and preserves its reflection behavior. No approximate arithmetic or
+new allocations are introduced.
+
+The experiment compared fixed-size direct reads with two tiled layouts before
+selecting the final kernels. All captures below use two warmups and one
+profiled odd-4K sample, distance `1.2`, effort `7`, fully-resident AQ, and no
+final-score diagnostic:
+
+| Implementation | 7/13/15/33-tap blurs | All Butteraugli blurs |
+|---|---:|---:|
+| Parent, runtime bounds/direct reads | 100.142 ms | 115.886 ms |
+| Fixed sizes/unrolled direct reads | 78.057 ms | 93.285 ms |
+| Tiled 128x8 horizontal / 32x32 vertical | 49.854 ms | 65.447 ms |
+| Tiled 256x4 horizontal / 32x64 vertical | 46.928 ms | 61.652 ms |
+| Retained tiles plus unrolled mirrored 5-tap | 46.702 ms | 58.149 ms |
+
+Specialization alone removes 22.1% of targeted time; tiling gives a further
+substantial improvement. This supports reducing repeated sample access,
+address calculation, and normalization work rather than attributing the
+entire result to loop unrolling. It does not establish a DRAM-bandwidth or
+occupancy bottleneck without hardware counters. The retained tiled kernels
+use 31-55 registers per thread and at most 12,424 shared bytes per block.
+
+Total blur time falls 49.8%. All GPU kernel execution falls from `565.944 ms`
+to `487.564 ms` (-13.8%), but non-blur kernels also change from `450.058 ms`
+to `429.415 ms` (-4.6%), so the entire total-kernel reduction should not be
+attributed to this edit. Laptop execution state differs substantially from
+the preceding Malta session; absolute times across those sessions are not
+comparable. Both current parent/candidate traces still contain 516 launches,
+117,079,320 HtoD bytes, and 103,699,012 DtoH bytes.
+
+Public workflow measurements use seven alternating independent-process pairs
+per workload, one warmup and one retained sample per process, and the same
+distance/effort/AQ settings. Cohort medians and median paired changes are:
+
+| Workload and stage | Parent | Retained blurs | Median paired change |
+|---|---:|---:|---:|
+| Odd 4K, total | 1045.051 ms | 976.917 ms | -5.4% |
+| Odd 4K, quantization | 839.785 ms | 771.840 ms | -7.5% |
+| Odd 1080p, total | 254.085 ms | 254.615 ms | +0.3% |
+| Odd 1080p, quantization | 178.039 ms | 161.209 ms | -10.9% |
+| Flower 510x532, total | 49.864 ms | 49.461 ms | -1.6% |
+| Flower 510x532, quantization | 33.739 ms | 33.641 ms | -1.0% |
+
+All seven 4K pairs improve both total and quantization time. Parent totals
+range from `1010.224-1077.771 ms`, versus `948.344-1062.143 ms` for the
+candidate. Five of seven 1080p quantization pairs improve, while total time
+remains effectively unchanged. CPU serialization ranges from
+`59.513-95.637 ms` in the parent and `60.977-105.995 ms` in the candidate.
+The small Flower differences are not a reliable performance gain. GPU state
+moves from 65 C/P8/210 MHz before these runs to 69 C/P3/825 MHz after the
+4K/1080p pairs.
+
+Flower uses the pinned `flower_small.rgb.depth8.ppm`, converted once outside
+measurement to linear sRGB float32 PFM with the standard sRGB transfer
+function. That PFM's SHA-256 is
+`2ad3bf99e39d8b2d5e18130e8ab51dfb9b1ff360627a414a49646904ca3ee9cd`.
+Its fully-resident frame selects all seven production AC strategies. Parent
+and candidate codestreams are byte-identical for Flower at efforts 7 and 9,
+the small sample at efforts 7 and 9, and the odd 1080p/4K fixtures at effort 7,
+all with final-score collection enabled. Reported final scores match, and
+the pinned `djxl` decodes all six at their original dimensions. Flower
+codestream SHA-256 values are
+`41c30c28169e09ff763cc242cce9e9b5b50db8841f2e44185bc91acc864c3b57` (effort 7)
+and `e20404ed5eda52afc59cf1ab75d54d48433abcd31243e84266b04e28afd65978`
+(effort 9). Synthetic fixture hashes remain those of the Malta checkpoint.
+
+All 53 CUDA-build tests and all 47 CPU-only tests pass. Added `255x63`,
+`257x67`, and `33x129` Butteraugli cases exercise complete and partial tiles,
+vertical tile boundaries, wide filter clipping on small images, multiscale
+evaluation, and poisoned strides. The worst CPU-reference map error is
+`2.35289e-5`, within the unchanged `1.5e-3` tolerance. Compute Sanitizer
+memcheck, racecheck, synccheck, and initcheck report zero errors or hazards.
+Existing tests also verify exact CPU/CUDA codestream identity, failure
+atomicity, allocation invariants, and repeated four-worker resident and
+maximum-throughput workflows.
+
+Post-change 1080p batch qualification uses one warmup and three paired
+serial/batch samples:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 268.952 ms | 3.718 | 0.898x |
+| Fully resident | 2 | 498.002 ms | 4.016 | 1.078x |
+| Fully resident | 4 | 866.495 ms | 4.616 | 1.245x |
+| Maximum throughput | 1 | 119.275 ms | 8.384 | 1.008x |
+| Maximum throughput | 2 | 158.959 ms | 12.582 | 1.540x |
+| Maximum throughput | 4 | 266.801 ms | 14.992 | 1.957x |
+
+These are functional/overlap checks, not a before/after batch-performance
+claim. In particular, resident batch-1 is slower than serial in this session.
+The final GPU state is 65 C/P3/1282 MHz. Maximum-throughput without final-score
+collection does not execute the changed blurs.
+
+Ignored artifacts under `build-cuda-ninja/profiles` use `s19_` prefixes. The
+paired trace baseline is `s19_parent_warm2_4k`; the earlier one-warmup
+`s19_parent_4k` capture is not the comparison used above. Alternative traces
+are `s19_specialized_4k`, `s19_tiled_4k`, and `s19_large_tiles_4k`; the retained
+trace is `s19_final_4k`. Paired wall results are in
+`s19_paired_{4k,1080p,flower}.json`.
+
+The next trace target is AC-search `ResidualKernel` at `60.879 ms`. Source
+inspection shows that every coefficient thread repeats the same candidate
+validation, quant-norm field reduction, and CfL lookup. Moving this uniform
+work out of individual coefficient lanes, and reducing the 1024-thread
+launches, merits a measured experiment. Remaining DCT, EPF, host preparation,
+serialization, and synchronous transfer costs also prevent a performance-
+ceiling claim. Launch API time is only `6.572 ms` in the retained trace.
 
 ## Work that should not lead the next cycle
 
