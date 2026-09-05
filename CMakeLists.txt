@@ -2317,6 +2317,12 @@ if(GJXL_BUILD_TESTS)
     )
     set_tests_properties(cuda_aq PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_cuda_epf_test tests/cuda_epf_test.cpp)
+    target_link_libraries(gjxl_cuda_epf_test PRIVATE gjxl_codec gjxl_cuda)
+    target_include_directories(gjxl_cuda_epf_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_epf COMMAND gjxl_cuda_epf_test)
+    set_tests_properties(cuda_epf PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(
       gjxl_ac_strategy_cuda_test
       tests/ac_strategy_metal_test.cpp

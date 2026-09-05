@@ -1,7 +1,7 @@
 # CUDA optimization study S1
 
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
-  specialized/tiled blurs, and packed AC-search residuals implemented;
+  specialized/tiled blurs, packed AC-search residuals, and tiled EPF implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -14,9 +14,11 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest DCT checkpoint against `3c08276` reduces
-total DCT execution by 19.8% and paired total encoding time by 4.5% at 4K
-and 11.2% at 1080p. Remaining AC gather/cost evaluation, DCT, reconstruction
+below supersede them. The latest EPF checkpoint against `6e4925f` reduces
+EPF execution by 81.2% at 4K and paired total encoding time by 5.2%.
+A longer-warmed 1080p comparison improves total time by 3.6%, while its
+initial single-sample comparison regresses; both are documented below.
+Remaining AC gather/cost evaluation, DCT, reconstruction
 filtering, host work, and transfers are material targets; the resident path
 has not reached its performance limit.
 
@@ -1281,6 +1283,160 @@ Butteraugli blurs, `42.133 ms` in Malta response, `32.227 ms` in EPF,
 and load-sharing opportunities, AC gather/cost reductions, neighborhood
 filtering, host serialization, and transfer boundaries remain open. The
 resident path is not yet at a demonstrated performance ceiling.
+
+### Follow-up: specialize and tile EPF neighborhoods (2026-09-05)
+
+The fresh parent is `6e4925f`, including the preceding large-DCT changes.
+At odd 4K, four edge-preserving-filter (EPF) calls cost `33.330 ms`, behind
+tiled Butteraugli convolution, Malta response, and the largest DCT families.
+The old kernel chooses the pass at runtime and repeatedly samples mirrored
+global coordinates inside the candidate, channel, and plus-patch loops.
+This duplicates both neighborhood loads and coordinate work across pixels.
+
+The retained implementation specializes all three passes and cooperatively
+loads three channel planes into a shared-memory tile. A 256-thread block
+produces a 32x32 output tile, with each warp processing one row at a time
+and each thread processing four pixels in a non-unrolled outer loop. This
+amortizes the halo without keeping four pixels' accumulators live. Halo
+radii are 3, 2, and 1 for passes 0, 1, and 2. A flattened block grid avoids
+introducing the CUDA grid-Y limit for tall images. No new device allocation,
+transfer, or synchronization between kernels is needed.
+
+The complete tile is loaded before any thread takes an out-of-image or
+sigma-bypass branch. Bypass continues the per-thread pixel loop rather than
+discarding later rows. Halo coordinates are mirrored from the original
+patch coordinates: mirroring a candidate center first and then its patch
+would differ at boundaries. The existing general modulo reflection remains
+unchanged, including repeated reflection for one- and two-pixel dimensions.
+Candidate/channel/patch accumulation order, explicit FMAs, division, sigma
+threshold, border weighting, and non-finite error handling remain unchanged.
+There is no fast-math or quality-policy change. Exact mode uses this shared
+kernel too, but fully-resident performance is the optimization target.
+
+Exploratory 4K traces use two warmups and one captured effort-7/distance-1.2
+encode. They contain two calls each of passes 1 and 2, not pass 0:
+
+| Variant | EPF total | Gaborish total |
+|---|---:|---:|
+| Parent, runtime pass | 33.330 ms | 3.032 ms |
+| Pass specialization only | 10.880 ms | 3.531 ms |
+| Specialized, branch-based mirror shortcut (rejected) | 39.809 ms | 5.565 ms |
+| Shared 32x8 output tile | 6.611 ms | 3.036 ms |
+| Shared 32x16 output tile | 5.792 ms | 3.488 ms |
+| Shared 32x32 output tile | 5.673 ms | 3.519 ms |
+| Retained 32x32, fresh capture after cleanup | 6.253 ms | 3.479 ms |
+
+The mirror shortcut tried an interior fast return and one reflection before
+falling back to modulo. It increased register use and slowed EPF as well
+as Gaborish, which shares that helper; it is not retained. Gaborish is
+otherwise unchanged and is an execution-state control. The small difference
+between 16- and 32-row tiles is not a robust standalone speedup claim;
+32 rows is the lowest exploratory total and avoids more duplicate halo loads.
+
+The final EPF reduction is `27.077 ms` (81.2%). All-kernel time moves from
+`435.721` to `418.439 ms` (4.0%), while unchanged DCT work moves from
+`123.636` to `128.497 ms` and tiled blurs from `49.899` to `47.046 ms`.
+These controls demonstrate the continuing clock/scheduling noise: do not
+attribute the entire GPU-time difference to EPF. The retained compiler
+reports 56/40/38 registers per thread and 17,328/15,552/13,872 shared bytes
+for passes 0/1/2, with zero local bytes or stack. The parent's runtime kernel
+uses 78 registers. Pass 0 has functional and sanitizer coverage but is not
+timed by this default-profile comparison.
+
+Initial public-workflow measurements use seven alternating independent
+parent/candidate process pairs, one warmup and one measured encode per
+process, GPU-only fully-resident mode, no final-score collection. Cohort
+medians and median within-pair changes are separate statistics:
+
+| Workload/stage | Parent median | Candidate median | Median paired change |
+|---|---:|---:|---:|
+| Odd 4K total | 894.389 ms | 849.697 ms | -5.2% |
+| Odd 4K quantization pipeline | 686.358 ms | 644.961 ms | -6.3% |
+| Odd 1080p total, initial | 217.774 ms | 228.658 ms | +6.2% |
+| Odd 1080p quantization pipeline, initial | 143.347 ms | 149.054 ms | +4.8% |
+| Flower total | 52.578 ms | 47.331 ms | -1.6% |
+| Flower quantization pipeline | 33.572 ms | 31.560 ms | -2.3% |
+
+Six of seven 4K total-time pairs and all seven quantization pairs improve;
+total ranges are `866.884-972.024 ms` and `821.979-910.112 ms`. Flower's
+small paired result is not strong evidence of a consistent wall-time gain.
+The initial 1080p regression is retained in the record, not discarded:
+candidate total times span `206.979-297.130 ms` versus `211.716-240.062 ms`
+for the parent, and one candidate's unchanged CPU serialization takes
+`125.373 ms` versus its paired parent's `66.116 ms`. Both host and
+quantization-stage variation require further qualification.
+
+A fresh three-warmup 1080p trace reduces EPF from `7.600` to `1.323 ms`
+(82.6%) and all kernels from `88.353` to `80.271 ms`, while unchanged DCT
+totals are `16.777` and `16.684 ms`. The follow-up wall comparison keeps
+seven alternating process pairs but uses three warmups and five measured
+encodes per process, comparing each process's median. All seven pairs
+improve both stages. Total cohort medians are `230.794` and `222.892 ms`,
+with a median paired reduction of 3.6%; quantization medians are `151.872`
+and `142.812 ms`, with a paired reduction of 5.3%. The respective total
+process-median ranges are `224.082-260.724` and `214.478-236.515 ms`.
+This supports retaining the kernel change, not treating the initial wall
+regression as a reproducible EPF regression. GPU state moves from
+63 C/P8/210 MHz before the initial pairs to 67 C/P3/1282 MHz afterward.
+Absolute timings should not be compared across checkpoints.
+
+All 54 CUDA-build tests and 47 CPU-only tests pass. The new standalone
+`cuda_epf` test compares 114 sequences with the independent CPU EPF
+implementation: 19 image shapes, one/two/three iterations, and default/custom
+weights. Shapes cover 1x1, single rows/columns, repeated mirror reflection,
+8-pixel sigma boundaries, 32-pixel tile boundaries, and partial tiles.
+Every observed reference error is zero, within the test tolerance
+`2e-6 + 2e-6 * abs(reference)`. Input, both scratch images, and the sigma
+field have distinct padded strides and guarded offsets; guards and read-only
+inputs must remain intact. Sigma values include mixed active/bypass blocks
+and the exact bypass threshold.
+
+Additional cases cover NaN payloads, positive/negative infinity, all-bypass
+and mixed-bypass rows, preservation of existing error bits, and invalid
+pass rejection without output writes. Compute Sanitizer memcheck, racecheck,
+synccheck, and initcheck each complete this test with zero errors/hazards.
+The full suite retains exact-mode differential, allocation, failure-atomicity,
+and concurrent-workflow checks.
+
+Parent/candidate codestreams and reported final perceptual scores remain
+identical for the small sample at efforts 7/9, odd 1080p/4K at effort 7,
+and Flower at efforts 7/9, with final-score collection enabled. The pinned
+`djxl` decodes all six at their source dimensions. Hashes remain those
+recorded at the preceding checkpoints, and Flower selects all seven
+production strategies.
+
+Ignored artifacts under `build-cuda-ninja/profiles` use the `s22_` prefix.
+They include parent and exploratory benchmark executables, parent encoder,
+4K traces named `parent`, `specialized`, `fast_mirror`, `tiled`, `medium_tile`,
+`large_tile`, and `retained`, plus parent/retained 1080p traces. Each trace
+has `.nsys-rep` and `.sqlite` files. Paired results are
+`s22_paired_{4k,1080p,flower}.json` and `s22_paired_1080p_warmed.json`;
+`s22_compare_warmed.py` retains the longer-warmed protocol. Verification
+uses `s22_verify.ps1`; sanitizer logs are `s22_epf_*.txt`.
+
+Post-change 1080p batch qualification uses one warmup and three paired
+serial/batch samples, with identical outputs at batch sizes 1, 2, and 4:
+
+| AQ mode | Batch | Batch median | Images/s | Paired speedup |
+|---|---:|---:|---:|---:|
+| Fully resident | 1 | 226.141 ms | 4.422 | 0.980x |
+| Fully resident | 2 | 426.733 ms | 4.687 | 1.131x |
+| Fully resident | 4 | 831.689 ms | 4.809 | 1.275x |
+| Maximum throughput | 1 | 101.691 ms | 9.834 | 1.038x |
+| Maximum throughput | 2 | 147.719 ms | 13.539 | 1.472x |
+| Maximum throughput | 4 | 287.812 ms | 13.898 | 1.689x |
+
+These are output-stability and overlap checks, not before/after batch
+performance claims. Fully-resident batch-1 is still slower than serial.
+Logs are `s22_batch_{resident,maximum}.txt`; the final GPU state is
+69 C/P3/1282 MHz.
+
+The retained 4K profile still has `128.497 ms` of DCT, `47.046 ms` of tiled
+Butteraugli convolution, `42.634 ms` of Malta response, `26.186 ms` of resident
+coefficient encoding, `20.788 ms` of AC gather, and `19.476 ms` of AC cost.
+EPF is now `6.253 ms`, rather than a leading hotspot. DCT, AC gather/cost,
+coefficient work, other neighborhood filters, host serialization, and transfer
+boundaries remain open targets. The resident path is not yet maxed out.
 
 ## Work that should not lead the next cycle
 
