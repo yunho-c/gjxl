@@ -175,20 +175,20 @@ Status CountGroupZeros(
         const bool selected = !sample_dct8 || use_sample();
         if (selected) {
           for (size_t channel = 0; channel < 3; ++channel) {
-            std::vector<uint64_t>& counts = (*zero_counts)[family][channel];
+            uint64_t* const counts = (*zero_counts)[family][channel].data();
             const std::span<const int32_t> coefficients =
               group.coefficients[channel].subspan(
                 source_offset, info->coefficient_count());
+            // The validated frame has a size_t-representable block area.
+            // Each zero-initialized counter is incremented at most once per
+            // anchor, and anchors partition that area. A uint64_t count
+            // therefore cannot overflow: update it without data-dependent
+            // branches or repeatedly loading the vector's data pointer.
+            static_assert(std::numeric_limits<size_t>::digits <=
+                          std::numeric_limits<uint64_t>::digits);
             for (size_t coefficient = 0; coefficient < coefficients.size();
                  ++coefficient) {
-              if (coefficients[coefficient] == 0) {
-                if (counts[coefficient] ==
-                    std::numeric_limits<uint64_t>::max()) {
-                  return Status::InvalidArgument(
-                    "Coefficient zero count overflow");
-                }
-                ++counts[coefficient];
-              }
+              counts[coefficient] += coefficients[coefficient] == 0;
             }
           }
         }

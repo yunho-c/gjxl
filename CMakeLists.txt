@@ -1409,6 +1409,10 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_ac_group_test
   )
 
+  add_executable(gjxl_coefficient_order_test tests/coefficient_order_test.cpp)
+  target_link_libraries(gjxl_coefficient_order_test PRIVATE gjxl_codestream)
+  add_test(NAME coefficient_order COMMAND gjxl_coefficient_order_test)
+
   add_executable(
     gjxl_block_context_map_test
     tests/block_context_map_test.cpp

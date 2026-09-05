@@ -9,7 +9,8 @@
   transform image I/O, reused resident coefficient bases, direct local
   value access, fused resident coefficient passes, and encoding-only
   coefficient materialization, shape-specialized coefficient blocks, and
-  fused blur/frequency splitting implemented;
+  fused blur/frequency splitting, and branch-free host coefficient-order
+  counting implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -22,7 +23,18 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `fe13a54` fuses vertical
+below supersede them. The latest checkpoint against `8f832d1` removes
+per-coefficient branches and repeated pointer loads from host scan-order
+zero counting without changing sampling, entropy policy, or bytes. Order
+work improves by median paired 50.3% / 47.8% / 31.4% at 4K / 1080p / Flower;
+whole-workflow warm medians improve 3.9% / 2.3% / 5.3%, while cold results
+remain mixed. All 96 isolated order-case medians improve. All 63 CUDA / 48
+CPU tests, the fully instrumented host ASan fixture, serial/batch checks,
+and 46 byte-identical decoded image pairs pass. No CUDA kernel, allocation,
+transfer, or system-setting change is made. Optimization remains ongoing,
+not maxed out.
+
+The preceding checkpoint against `fe13a54` fuses vertical
 Butteraugli blur with in-place frequency splitting, removing 24 launches and
 the intermediate blurred-plane write/read. Three production profile pairs
 reduce the targeted vertical/split subset by median paired 26.6% / 22.6%
@@ -5278,6 +5290,201 @@ about 212 ms / 72 ms in codestream encoding at 4K / 1080p, respectively;
 further work should measure that host stage's internal costs as well as
 remaining GPU work. No expanded math/quality contract or system-setting
 change is implied by this next investigation.
+
+## Branch-free coefficient-order zero counting (S41)
+
+### Host bottleneck and bounded change
+
+Baseline: `8f832d1` (S40). The resident workflow already collects detailed
+`VarDctCodestreamProfile` counters, although the CUDA benchmark prints only
+its outer stages. An ignored diagnostic copy prints the existing counters;
+it adds no instrumentation inside the encoder. Three warmups/five samples
+on the S40 library identify the following medians:
+
+| Stage (ms) | Odd 4K | Odd 1080p | Flower |
+|---|---:|---:|---:|
+| Entire codestream wall | 179.389 | 72.049 | 14.201 |
+| AC tokenization wall | 76.186 | 21.875 | 4.461 |
+| Coefficient-order work | 34.307 | 9.223 | 1.477 |
+| Entropy optimization wall | 29.794 | 25.262 | 5.419 |
+| Section-writing wall | 51.373 | 16.851 | 3.151 |
+
+These nested stages are not additive. In particular, aggregate coefficient
+tokenization work (302.735 / 60.411 / 4.621 ms) and section-token writing
+work (321.154 / 80.330 / 5.054 ms) sum time across workers, not elapsed wall
+time. Scan-order preparation is serial within its task and gates subsequent
+AC tokenization. The existing balanced/direct-ANS policy is retained; S41
+does not repeat the earlier removal of exhaustive entropy candidate searches.
+
+`CountGroupZeros` previously branches on every coefficient, then checks a
+64-bit counter for overflow before incrementing it. All counters start at
+zero. A validated frame has a size_t-representable block area; each visited
+anchor occupies at least one distinct block and adds at most one to any
+counter. Thus no count can exceed that area or overflow uint64_t on the
+supported 32/64-bit hosts. A static assertion makes the integer-width premise
+explicit. The update becomes `counts[i] += coefficients[i] == 0`, with the
+vector's stable data pointer acquired before scanning each channel.
+
+Frame validation, family/shape checks, group consumption checks, 64-bit
+counter storage, selected transforms, RNG sequence, float-scaled sorting
+keys, stable tie ordering, LLF prefixes, and output atomicity are unchanged.
+There is no entropy-policy, floating-point, CUDA-kernel, allocation-capacity,
+or transfer change. This shared host-stage optimization also applies to
+non-CUDA encodes; fully-resident CUDA remains the measured public workflow.
+
+MSVC 14.37 native inspection finds scalar compare/set/add loops, not SIMD.
+The first prototype removes branches but still reloads the vector data
+pointer within each iteration. Acquiring that pointer explicitly removes
+the repeated load and address calculation. A separate helper-function
+experiment also remains scalar and is not retained. No vectorization claim
+is made, and no architecture flag or compiler-wide option is changed.
+
+### Differential fixture and measurement design
+
+The new backend-independent `coefficient_order` CTest contains 96 cases:
+seven supported transform shapes plus a mixed layout, six coefficient
+patterns, and both full and effort-7 sampled order policies. Its 36x36-block
+frames have odd pixel dimensions and four groups, including narrow right and
+bottom groups. Mixed tiles exercise both orientations of rectangular shapes
+sharing an order family. Patterns include all zeros, no zeros, sparse/dense
+zeros, deterministic tied populations, and signed int32 extremes. A separate
+coefficient-major scalar reference counts each coefficient across selected
+transform spans and sorts precomputed integer keys. It compares complete
+orders and their Lehmer token streams. Small-frame cutoff and invalid-input
+atomicity are checked separately. The frozen original implementation passes
+the same fixture, so the reference is not validated only against the change.
+
+The final workflow cohort uses seven alternating-order pairs per input,
+three warmups and five samples, with the detailed diagnostic probe linked to
+the respective production library. Its profiling counters already existed
+in the original benchmark. Seven zero-warmup/one-sample cold pairs use the
+unmodified production benchmark and the frozen S40 binary. The image matrix
+retains seven inputs at distances 0.5/1.2/3, effort 7, plus sample/Flower at
+effort 9 and distance 1.2; both scored and encoding-only policies are checked.
+The independent decoder/metric remain pinned libjxl
+`e8ff09762481785938d8e4e01333ed3917571161`, linear sRGB, default 80 nits.
+Benchmark-generated odd synthetic images are distinct from the quality PFMs.
+
+### Public workflow observations
+
+The initial branch-removal prototype (before explicit data-pointer caching)
+reduces coefficient-order work in all nine preliminary pairs, including
+36.081/43.406/46.425 to 22.495/22.697/24.877 ms at 4K. It is preserved as
+`s41_scalar_phase_probe.exe`; the subsequent pointer-cached implementation
+is the qualified candidate. The preliminary 1080p pair 0 has slower total
+and codestream time and is retained in `s41_prototype_phases.json`.
+
+Final warm changes are medians of per-pair ratios, not ratios of the
+displayed marginal medians:
+
+| Input | Order parent/new (ms) | Paired order change | Codestream parent/new (ms) | Paired codestream change | Total parent/new (ms) | Paired total change |
+|---|---:|---:|---:|---:|---:|---:|
+| Odd 4K | 38.447 / 18.670 | -50.3% | 221.893 / 195.921 | -7.2% | 606.673 / 556.484 | -3.9% |
+| Odd 1080p | 9.723 / 5.077 | -47.8% | 73.277 / 66.515 | -7.2% | 147.112 / 139.435 | -2.3% |
+| Flower | 1.592 / 1.077 | -31.4% | 15.405 / 14.118 | -8.8% | 30.438 / 28.804 | -5.3% |
+
+All 21 order-work pairs improve; AC-tokenization wall medians improve
+20.9% / 18.6% / 15.7%. Codestream wall improves in 6/7, 5/7, and 6/7 pairs;
+total improves in 5/7, 5/7, and 6/7. All observations remain included, notably
+Flower pair 0's total regression from 29.722 to 42.188 ms even though its
+order work improves. Unchanged quantization-pipeline median paired changes
+are +1.1% / -0.3% / -2.8%, illustrating variability outside the changed loop.
+
+| Cold input | Total parent/new (ms) | Paired total change | Quantization parent/new (ms) | Paired quantization change |
+|---|---:|---:|---:|---:|
+| Odd 4K | 686.312 / 678.586 | -0.4% | 437.592 / 442.423 | +1.6% |
+| Odd 1080p | 187.120 / 181.303 | -4.4% | 100.791 / 100.138 | +0.1% |
+| Flower | 51.268 / 52.490 | +1.8% | 28.159 / 28.872 | -0.2% |
+
+Cold results are mixed, with large unfavorable observations retained:
+candidate 4K reaches 889.364 ms and candidate Flower 75.594 ms. The result
+supports reduced order work and this cohort's favorable warm medians, not a
+uniform or platform-independent whole-encoder speedup. Read-only snapshots
+before/after the timing cohorts show 64/72 C, 210/1282 MHz, and software
+thermal/power flags inactive/active. These are boundary snapshots, not timed
+CPU/GPU clocks and not a causal diagnosis of each outlier. No power, cooling,
+clock, priority, firewall, or service setting changes are made.
+
+### Correctness and safety qualification
+
+All 63 CUDA-build and 48 CPU-build tests pass, including the new 96-case
+fixture under MSVC and GNU, the existing pinned order/token goldens, and
+public workflow/conformance tests. All 46 image pairs are byte-identical
+and have matching SHA-256, decoded Butteraugli, selected strategies, and
+requested encoder scores. Scored and encoding-only outputs agree within
+each build. Serial/batch identity checks pass for even 1080p in resident and
+maximum-throughput modes at batches 1/2/4 and even 4K resident at batches 1/2.
+Current-build batch-vs-serial paired speedups are 1.003/1.362/1.261,
+0.988/1.530/1.910, and 0.969/1.137 respectively; these are concurrency
+observations, not before/after gains from this host-loop change.
+
+A separate Clang 22.1.8 Release CPU build instruments all linked GJXL host
+code with AddressSanitizer. The complete 96-case fixture, small-frame cutoff,
+and invalid-input checks pass with allocation/deallocation mismatch checking
+enabled and no sanitizer suppression. Initial harness attempts fail before
+execution: a combined compile/link output argument, mixed instrumented/plain
+standard-library annotations, a debug-runtime compiler probe, and missing
+explicit runtime libraries in CMake's direct-link command. These setup
+failures are retained, not counted as sanitizer passes. A complete standalone
+instrumented build, Release compiler probes, and the compiler driver's
+observed runtime-link arguments resolve them without changing production
+flags or disabling annotations. No memory-error failure is observed.
+
+### CPU-only pattern sweep and retained evidence
+
+A separate MSVC probe invokes only coefficient-order derivation on completed
+132x132-block frames (1053x1049 active pixels, 1056x1056 padded). It excludes
+frame construction/validation, hashing, and destruction from the timed call.
+The same eight layouts, six patterns, and two policies produce 96 cases;
+three alternating-order process pairs use three warmups/nine timed samples
+per case. The original source is linked ahead of the production library for
+the parent, while the candidate links the production library directly.
+All 288 corresponding output hashes match, and all 96 median paired ratios
+favor the candidate:
+
+| Coefficient pattern | Median ratio across 16 cases | Minimum / maximum case ratio |
+|---|---:|---:|
+| All zero | 0.744 | 0.674 / 0.910 |
+| No zeros | 0.812 | 0.589 / 0.912 |
+| Sparse nonzeros | 0.378 | 0.325 / 0.459 |
+| Dense nonzeros | 0.383 | 0.317 / 0.551 |
+| Deterministic tied populations | 0.791 | 0.684 / 0.909 |
+| Signed extremes with zeros | 0.275 | 0.205 / 0.334 |
+
+These are synthetic, warm, CPU-only order calls, not complete encodes or
+GPU timings. The all-nonzero cases explicitly exercise the new add-zero
+stores that the original loop skipped; they do not regress in this cohort.
+This does not guarantee every coefficient distribution or host improves.
+MSVC production-object disassembly matches the pointer-cached prototype's
+complete 526-instruction `CountGroupZeros` body. All three channel counting
+loops contain seven scalar instructions, including only the loop-control
+branch; there is no per-iteration vector-data pointer reload or SIMD claim.
+
+No CUDA source, device-memory contract, or launch dispatch changes in S41.
+The existing GPU fixtures run in the full suite; GPU sanitizer/profile traces
+are not recaptured for this host-only change, and prior traces are not relabeled
+as new measurements. All measured workflows and build/test/sanitizer jobs run
+sequentially, with no competing benchmark or build. No permission error or
+admin/firewall prompt is observed, and the earlier long sanitizer run still
+does not establish a firewall cause.
+
+Ignored `build-cuda-ninja/profiles/s41_*` artifacts preserve the original
+source, phase-reporting probe, initial/scalar and final candidates, all
+paired observations, independent image outputs, batch results, CTest logs,
+compiler/native evidence, and standalone ASan build instructions. The
+corrected isolated-probe include-path error is also a setup issue, not a
+numerical failure. `s41_final_validate.py` checks the complete image/policy,
+test, sanitizer, timing-count, and order-hash evidence;
+`s41_native_validate.py` checks production-object identity and the three
+scalar loops. Qualified executables are frozen as `s41_retained_*`, with
+source/copy SHA-256 checks in `s41_final_binary_hashes.json`; the S40 baseline
+hashes are rechecked against their original manifest.
+
+The encoder is not demonstrated maxed out. CPU AC tokenization, ANS
+histogram/model construction, and token emission remain substantial, along
+with GPU perceptual work. The section writer's per-chunk bit preparation and
+bytewise append are concrete next inspection targets; they require their
+own measurements and atomicity/byte-equivalence tests before any change.
 
 ## Work that should not lead the next cycle
 

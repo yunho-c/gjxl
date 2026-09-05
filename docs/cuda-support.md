@@ -632,6 +632,15 @@ remains necessary for later masking/blur stages. A retained separate-pass
 entry and guarded differential test cover all four production channels.
 See the [S40 study](cuda-optimization-s1.md#fused-blur-and-frequency-split-s40).
 
+The shared CPU serializer's coefficient-order zero scan now uses branch-free
+64-bit updates and a stable count-buffer pointer. Frame validation bounds
+every counter by the representable block area; sampling, stable sorting,
+LLF prefixes, entropy policy, and bytes remain unchanged. The qualified
+MSVC build remains scalar. A backend-independent differential fixture and
+fully instrumented host ASan build cover the change. See the
+[S41 study](cuda-optimization-s1.md#branch-free-coefficient-order-zero-counting-s41)
+for isolated and complete-workflow results, including mixed cold timings.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
