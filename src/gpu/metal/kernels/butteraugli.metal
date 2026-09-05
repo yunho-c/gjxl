@@ -124,6 +124,8 @@ struct FinalParams {
   uint height;
   uint stride;
   uint output_stride;
+  uint reference_mask_stride;
+  uint mask_stride;
   float x_multiplier;
 };
 
@@ -134,6 +136,8 @@ struct FinalL2Params {
   uint distorted_stride;
   uint work_stride;
   uint output_stride;
+  uint reference_mask_stride;
+  uint mask_stride;
   float asymmetry;
   float x_multiplier;
 };
@@ -1225,8 +1229,9 @@ kernel void gjxl_butteraugli_final_f32(
 
   if (position.x >= params.width || position.y >= params.height) return;
   const uint index = position.y * params.stride + position.x;
-  const float mask_value = mask_y(mask[index]);
-  const float dc_mask_value = mask_dc_y(mask[index]);
+  const uint mask_index = position.y * params.mask_stride + position.x;
+  const float mask_value = mask_y(mask[mask_index]);
+  const float dc_mask_value = mask_dc_y(mask[mask_index]);
   const float masked_dc = dc0[index] * params.x_multiplier * dc_mask_value +
                           dc1[index] * dc_mask_value + dc2[index] * dc_mask_value;
   const float masked_ac = ac0[index] * params.x_multiplier * mask_value +
@@ -1250,11 +1255,14 @@ kernel void gjxl_butteraugli_final_masked_ac_f32(
   if (position.x >= params.width || position.y >= params.height) return;
   const uint index = position.y * params.stride + position.x;
   const float difference =
-    mask_blurred_reference[index] - mask_blurred_distorted[index];
+    mask_blurred_reference[
+      position.y * params.reference_mask_stride + position.x] -
+    mask_blurred_distorted[index];
   const float masked_ac_y =
     ac1[index] + 10.0f * difference * difference;
-  const float mask_value = mask_y(mask[index]);
-  const float dc_mask_value = mask_dc_y(mask[index]);
+  const uint mask_index = position.y * params.mask_stride + position.x;
+  const float mask_value = mask_y(mask[mask_index]);
+  const float dc_mask_value = mask_dc_y(mask[mask_index]);
   const float masked_dc = dc0[index] * params.x_multiplier * dc_mask_value +
                           dc1[index] * dc_mask_value + dc2[index] * dc_mask_value;
   const float masked_ac = ac0[index] * params.x_multiplier * mask_value +
@@ -1302,11 +1310,14 @@ kernel void gjxl_butteraugli_final_l2_masked_ac_f32(
     malta_ac0, malta_ac1, reference_index, distorted_index, index,
     params.asymmetry);
   const float difference =
-    mask_blurred_reference[index] - mask_blurred_distorted[index];
+    mask_blurred_reference[
+      position.y * params.reference_mask_stride + position.x] -
+    mask_blurred_distorted[index];
   const float masked_ac_y =
     l2.ac1 + 10.0f * difference * difference;
-  const float mask_value = mask_y(mask[index]);
-  const float dc_mask_value = mask_dc_y(mask[index]);
+  const uint mask_index = position.y * params.mask_stride + position.x;
+  const float mask_value = mask_y(mask[mask_index]);
+  const float dc_mask_value = mask_dc_y(mask[mask_index]);
   const float masked_dc = l2.dc0 * params.x_multiplier * dc_mask_value +
                           l2.dc1 * dc_mask_value + l2.dc2 * dc_mask_value;
   const float masked_ac = l2.ac0 * params.x_multiplier * mask_value +

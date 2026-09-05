@@ -7,8 +7,8 @@ Date: 2026-09-04; updated 2026-09-05
 - Primary target: ordinary effort 7, fully resident Metal, multiscale
   Butteraugli, final diagnostic score disabled
 - Initial qualification device: Apple M4 Pro
-- Status: Phase 6 complete; Phase 7 planned
-- Completed work: Phases 0--6
+- Status: Phases 0--7 complete
+- Completed work: Phases 0--7, with the combined Phase 7 cache layout retained
 
 ## Executive outcome
 
@@ -24,8 +24,11 @@ channel fusions were neutral or slower and were removed.
 Slice F / Phase 6.3 retains L2 accumulation in both final-distance sinks.
 The combined L2/sink GPU budget improved 34.91%, resident AQ improved 6.18%,
 and complete encodes improved 2.42% on padded 4K against its Phase 6.2 control.
-Invariant reference-mask caching in Slice G / Phase 7 remains planned. The
-completed Phase 6.1 and 6.2 qualifications remain unchanged.
+Slice G / Phase 7 retains cached subscale blur and both reference erosion
+results, using an existing slot for main erosion. It adds 15.8 MiB of prepared
+allocation at 4K. Its confirmation improved complete padded-4K encoding 1.09%,
+with mixed initial results and measured low-reuse regressions documented below.
+The completed Phase 6 qualifications remain unchanged.
 
 The fully resident AQ path already records reconstruction, filtering,
 Butteraugli, block reduction, and policy updates into one ordered compute
@@ -536,33 +539,29 @@ and the existing correctness gates.
 
 ### Slice G: invariant reference preparation and caching
 
-Reference-mask caching moves repeated work into evaluator preparation and
-extends the lifetime of its outputs. Evaluate its preparation cost and retained
-storage separately from pointwise fusion.
-
-In `EncodePreparation` and `EncodeDifference` in
-[`metal_butteraugli.cpp`](../src/gpu/metal/metal_butteraugli.cpp), the current
+Phase 7 moves reference-only work into evaluator preparation and retains its
+outputs. Preparation cost, reuse, and storage were measured separately from
+pointwise fusion. In `EncodePreparation` and `EncodeDifference` in
+[`metal_butteraugli.cpp`](../src/gpu/metal/metal_butteraugli.cpp), the retained
 reference state is:
 
-| Reference result | Current lifetime | Planned treatment |
+| Reference result | Lifetime | Storage |
 | --- | --- | --- |
-| Main-scale blurred mask | Cached during reference preparation | Keep the existing cache |
-| Subscale blurred mask | Recomputed for every subscale comparison | Test caching during reference preparation |
-| Main-scale fuzzy-eroded mask | Recomputed for every main-scale comparison | Test a persistent reference result |
-| Subscale fuzzy-eroded mask | Recomputed for every subscale comparison | Test a persistent reference result |
+| Main-scale blurred mask | Cached during reference preparation | Existing full-size slot 20 |
+| Subscale blurred mask | Cached during reference preparation | Added packed subscale plane |
+| Main-scale fuzzy-eroded mask | Cached during reference preparation | Existing full-size slot 30, reclassified from scratch |
+| Subscale fuzzy-eroded mask | Cached during reference preparation | Added packed subscale plane |
 
-The blurred masks must remain available for the reference/distorted activity
-correction; their eroded forms cannot replace them. Keep distorted activity and
-mask generation per comparison. If all three missing results are retained,
-their nominal additional FP32 storage is `4 * (N + 2 * M)` bytes for main-scale
-area `N` and subscale area `M`. At the padded-4K dimensions used in Phase 6.2,
-that is about `47.4 MiB` before stride padding and allocator overhead. This is
-a planning estimate, not a measured allocation or required layout.
+Blurred masks remain available for the reference/distorted activity correction;
+eroded values cannot replace them. Distorted activity and mask generation still
+run per comparison. Logical cached-reference storage grows by `4 * (N + 2 * M)`
+bytes for main area `N` and subscale area `M`: 47.4 MiB at padded 4K. Reusing the
+main mask slot reduces added allocation to `8 * M` bytes, measured as 15.8 MiB.
 
-Any additional buffers must follow the existing prepared-reference ownership,
-workspace accounting, invalidation, purge, and recovery rules. Preserve lease
-count and lifetime limits. Phase 7 must measure the actual byte increase and
-whether reduced comparison work repays the added preparation and storage cost.
+All cache views belong to the existing prepared-reference arena and follow its
+invalidation and destruction rules. Lease count and lifetime limits are
+unchanged. Phase 7 below records the independent increments, the final combined
+qualification, and the low-reuse tradeoffs.
 
 ## Implementation sequence
 
@@ -1756,7 +1755,8 @@ benefit. The measured occupancy and L1 behavior show no broad resource collapse.
 
 Both increments are retained: they preserve exact outputs and improve the
 complete workflow without added scratch, persistent state, or a changed
-reduction topology. Reference-mask caching remains a separate Phase 7 task.
+reduction topology. Reference-mask caching was evaluated separately in Phase 7
+below.
 
 Correctness qualification used the unchanged test tolerances and an additional
 temporary exact-capture harness compiled against both builds:
@@ -1795,48 +1795,259 @@ traces/exports. `manifest.json` records build/configuration/source identity;
 `paired-results.json` preserves every paired ratio. These temporary files are
 provenance, not durable repository fixtures.
 
-### Phase 7: invariant reference preparation and caching
+### Phase 7 result: invariant reference preparation and caching (2026-09-05)
 
-Status: planned; no prototype or candidate measurements yet. This phase implements
-Slice G and does not change the completed Phase 6 results.
+Status: retained as the combined layout with slot 30 reused. The separately
+allocated main-cache prototype was replaced before final qualification.
 
-Freeze the actual retained Phase 6.3 parent and evaluate caching as an isolated
-increment on that implementation. Record the exact control revision and
-qualify each caching increment against its retained parent. No complete-workflow
-or memory benefit from caching is established yet.
+The confirmation matrix improved padded-4K complete encoding by 1.09% (7/7
+pairs) and planter 4K by 1.12% (6/7). Initial results were mixed, 1080p gains
+were small or inconsistent, and the effort-4 probe regressed 3.13%. Retention
+is based on the combined layout's measured 4K benefit and bounded allocation
+cost; low-reuse workflows can be slower. The individual caches were provisional
+until the combined layout completed qualification.
 
-#### Phase 7.1: cache the subscale blurred reference mask
+The immutable control was `580cb47`, the retained Phase 6.3 implementation.
+Experiments followed Slice G in three increments: cache the subscale blurred
+reference mask, add main-scale fuzzy erosion, then add subscale fuzzy erosion.
+Each increment used its predecessor's frozen executable and metallib as its
+control. A fourth layout reused the existing main mask slot, and the final
+combined candidate was qualified directly against `580cb47`.
 
-Prepare the subscale blurred mask alongside its reference psycho planes and
-retain it for comparisons. Reuse the existing fused ultra-Y raw-mask producer
-where its scratch lifetime permits, then run the blur into owned reference
-storage. Supply that result to the comparison path in place of repeated
-reference precompute/blur work. Leave the main-scale blurred-mask cache intact.
+The subscale blurred mask was produced during reference preparation using the
+existing fused ultra-Y raw-mask expression followed by the unchanged blur.
+The raw scratch view and owned subscale cache used the packed reference stride;
+comparison scratch retained the main-image stride. Final-distance parameters
+carried independent blurred-reference and erosion-mask strides so public and
+resident sinks could read the packed caches without copies or altered math.
+Both erosion kernels ran during preparation. Mask-stage capture copied the
+cached value and retained its existing meaning.
 
-Measure extra preparation work separately from the saved work per comparison.
-Include the ordinary two-evaluation effort-7 encode, actual evaluation counts
-at other efforts, final-score collection, and repeated use of a prepared
-evaluator. Establish the break-even reuse count from measurements.
+The first main-erosion prototype allocated a separate full-size plane. Once
+both subscale masks were cached, comparison work no longer wrote `kWork + 3`
+(slot 30). The final prototype reused this slot for main reference erosion:
+psycho construction uses slots 27--29, raw distorted masks use slot 31, and
+the subscale distance map uses slot 32. Removing the comparison-time erosion
+writer made slot 30 invariant after preparation, including expanded fallbacks
+and diagnostic comparisons. Both packed subscale caches remained separately
+owned views in the same `DeviceScratchArena` allocation.
 
-#### Phase 7.2: cache reference-only erosion results
+| Result | Extent / stride | Owner and lifetime |
+| --- | --- | --- |
+| Main blurred reference mask | main / main width, slot 20 | existing prepared arena; immutable after preparation |
+| Main eroded reference mask | main / main width, slot 30 | reclassified comparison scratch; immutable after preparation |
+| Subscale blurred reference mask | subscale / subscale width | added packed plane in prepared arena |
+| Subscale eroded reference mask | subscale / subscale width | added packed plane in prepared arena |
 
-Test main-scale and subscale fuzzy-erosion caching as separate increments on
-the qualified blurred-mask control. Retain both blurred and eroded reference
-values, and preserve the existing mask-stage capture semantics. Document each
-additional plane's extent, stride, owner, and lifetime before changing storage.
+The standalone prototypes added one subscale plane, then one main plane, then
+another subscale plane. At `3839 x 2159`, with a `1920 x 1080` subscale, the
+allocated increase was initially 7.9, 39.5, and 47.4 MiB. Reusing slot 30 reduced
+the final allocation increase to 15.8 MiB. Logical cached-reference bytes still
+grew by 47.4 MiB; comparison scratch fell by 31.6 MiB. Arena ownership, allocation
+count, non-reentrancy, lease limits, and invalidation boundaries did not change.
+Active caches were not made purgeable; destruction released their prepared
+arena ownership. The existing idle AQ scratch-arena purge/recovery contract
+stayed intact.
 
-Apply the existing exact-output, policy, decoder, and paired-workflow gates to
-each increment. Also compare cold preparation, warm reuse, retained/peak device
-bytes, and process memory. Exercise reference replacement, extent changes,
-concurrent evaluations, allocation failure, forced purge, and pressure recovery
-to catch stale or shared cache state. Preserve atomic failure behavior and the
-existing lease limits.
+Fresh Ninja Release builds on Apple M4 Pro (48 GiB)/macOS 15.6 used distance 1.2,
+automatic CPU threads, fully resident Metal, and final diagnostics off unless
+specified. Timing matrices used seven alternating independent-process pairs,
+two discarded warmups, and three retained samples per process. Stage timestamps
+were collected separately from unprofiled complete encodes. Combined preparation
+plus AQ time was summed per sample before taking medians. No kernel math or
+test tolerance was relaxed.
 
-Retain caching only when its measured complete-workflow benefit justifies its
-preparation and storage costs on the representative corpus. Dispatch savings
-and repeated-evaluator microbenchmarks alone are insufficient. Record rejected
-variants and remove their production state, following the same rollback rule
-as the fusion phases.
+The independent development increments produced the following changes. Values
+compare medians of process medians; parentheses count faster candidate pairs.
+These intermediate allocations were superseded by the compact combined layout.
+
+| Increment / control | Preparation GPU | Resident AQ GPU | Preparation + AQ GPU | Complete padded 4K |
+| --- | ---: | ---: | ---: | ---: |
+| Subscale blur / 580cb47 | +3.47% (0/7) | -1.29% (6/7) | -0.38% (5/7) | -0.10% (4/7) |
+| Main erosion / frozen blur | +2.16% (0/7) | -1.07% (7/7) | -0.49% (6/7) | -0.44% (3/7) |
+| Subscale erosion / frozen main erosion | +0.88% (1/7) | -0.49% (7/7) | -0.32% (6/7) | -0.63% (3/7) |
+
+For the final combined layout, dispatch metadata recorded 31 -> 35 reference
+preparation dispatches and 278 -> 268 resident-AQ dispatches. At ordinary effort 7,
+this is four added preparation passes and ten removed comparison passes across
+two scored evaluations. The logical launched-thread total across those two
+submissions fell from 824,375,633 to 805,719,232. These are grid counts, not a
+measurement of GPU utilization or DRAM traffic.
+
+| Final combined GPU scope | Control | Candidate | Change | Faster pairs |
+| --- | ---: | ---: | ---: | ---: |
+| Reference preparation | 16.682 ms | 17.689 ms | +6.04% | 0/7 |
+| Resident AQ | 96.569 ms | 94.298 ms | -2.35% | 7/7 |
+| Preparation + resident AQ | 113.356 ms | 112.200 ms | -1.02% | 7/7 |
+| Main mask, two evaluations | 2.875 ms | 1.895 ms | -34.07% | 7/7 |
+| Subscale mask/final, two evaluations | 3.456 ms | 2.257 ms | -34.68% | 7/7 |
+
+Separate unprofiled complete-encode results follow. The confirmation repeated
+all six workloads together because the initial complete-workflow changes were
+small and inconsistent. Median paired change is computed from each matched
+process pair; it can differ in sign from the ratio of separate variant medians.
+Both matrices and every paired ratio are retained.
+
+| Matrix / workload | Control | Candidate | Median change | Median paired change | Faster pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Initial: padded 1080p | 83.576 ms | 83.429 ms | -0.18% | -0.17% | 5/7 |
+| Initial: padded 4K | 284.577 ms | 283.606 ms | -0.34% | +0.37% | 3/7 |
+| Initial: planter 1080p | 89.537 ms | 90.006 ms | +0.52% | +1.03% | 1/7 |
+| Initial: planter 4K | 291.863 ms | 293.632 ms | +0.61% | +0.34% | 2/7 |
+| Initial: noisy bedroom 1080p | 86.160 ms | 85.492 ms | -0.77% | +0.26% | 3/7 |
+| Initial: noisy bedroom 4K | 280.267 ms | 281.069 ms | +0.29% | -1.05% | 4/7 |
+| Confirmation: padded 1080p | 84.446 ms | 83.771 ms | -0.80% | -0.06% | 4/7 |
+| Confirmation: padded 4K | 288.239 ms | 285.096 ms | -1.09% | -1.43% | 7/7 |
+| Confirmation: planter 1080p | 92.632 ms | 91.437 ms | -1.29% | -0.46% | 4/7 |
+| Confirmation: planter 4K | 299.859 ms | 296.486 ms | -1.12% | -0.97% | 6/7 |
+| Confirmation: noisy bedroom 1080p | 86.384 ms | 86.584 ms | +0.23% | -0.07% | 4/7 |
+| Confirmation: noisy bedroom 4K | 285.295 ms | 282.510 ms | -0.98% | +0.58% | 3/7 |
+
+Kodak's geometric mean of per-image complete-encode median ratios improved
+0.34%; 16/24 image medians improved. Per-image changes ranged
+from -2.28% to +1.16%. This was a small aggregate gain, not a uniform win.
+
+The confirmation's padded-4K paired median improved 1.43%, while the initial
+matrix's paired median was 0.37% slower. Across both matrices padded 4K won
+10/14 pairs. Planter 4K improved in the confirmation, while noisy-bedroom 4K
+remained inconclusive by paired results. The data supports a modest 4K
+optimization with workload-dependent complete-encode effects.
+
+A separate prepared-Butteraugli probe measured fresh arena allocation plus
+reference preparation, then nine synchronous comparisons of a fixed distorted
+image. It uses the public materialized-map API, not the resident AQ sink API.
+Backend creation and input uploads were outside the timed boundary; score
+readback followed the timed comparisons. Two complete preparation/reuse episodes
+were discarded before three retained episodes in each independent process.
+Prefixes of one, two, three, five, and nine comparisons were retained.
+
+| Prepared API probe | Control | Candidate | Median change | Median paired change | Faster pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| padded 1080p: preparation | 14.766 ms | 15.490 ms | +4.90% | +3.35% | 3/7 |
+| padded 1080p: comparison | 11.082 ms | 11.259 ms | +1.60% | +1.37% | 3/7 |
+| padded 1080p: prepare + 1 comparison | 26.332 ms | 26.136 ms | -0.75% | +4.92% | 3/7 |
+| padded 1080p: prepare + 2 comparisons | 38.018 ms | 37.257 ms | -2.00% | +4.10% | 3/7 |
+| padded 1080p: prepare + 9 comparisons | 115.526 ms | 116.478 ms | +0.82% | +3.15% | 3/7 |
+| padded 4K: preparation | 59.788 ms | 61.466 ms | +2.81% | +0.10% | 3/7 |
+| padded 4K: comparison | 47.727 ms | 46.436 ms | -2.70% | -0.51% | 5/7 |
+| padded 4K: prepare + 1 comparison | 110.918 ms | 106.922 ms | -3.60% | -2.59% | 5/7 |
+| padded 4K: prepare + 2 comparisons | 158.126 ms | 152.797 ms | -3.37% | -3.37% | 5/7 |
+| padded 4K: prepare + 9 comparisons | 491.943 ms | 478.982 ms | -2.63% | -0.54% | 4/7 |
+
+At 4K, the separate steady-state medians imply about two comparisons to repay
+added preparation: 1.678 ms extra preparation / 1.291 ms saved per comparison.
+The directly measured one-comparison prefix already favored the candidate in
+5/7 pairs, showing that this slope estimate is not an exact crossover. At 1080p
+there was no consistent paired break-even through nine comparisons. A universal
+reuse threshold is therefore not established. First preparation after backend
+creation was also recorded separately: medians were 15.696 -> 16.393 ms at
+1080p and 57.404 -> 57.398 ms at 4K. These first-use samples had no preceding
+probe warmup and are not substitutes for the warmed qualification.
+
+Stage captures confirmed one scored evaluation at efforts 1--6, two at effort
+7, three at efforts 8--9, and four at effort 10. Enabling the final score at
+effort 7 adds a third evaluation. Counts matched the control in all cases.
+Separate unprofiled policy timing on Kodak17 showed:
+
+| Kodak17 policy | Scored evaluations | Control | Candidate | Change | Faster pairs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| effort-1 | 1 | 19.868 ms | 19.951 ms | +0.42% | 3/7 |
+| effort-4 | 1 | 20.972 ms | 21.627 ms | +3.13% | 1/7 |
+| effort-8 | 3 | 28.063 ms | 28.034 ms | -0.11% | 2/7 |
+| effort-10 | 4 | 50.002 ms | 49.703 ms | -0.60% | 5/7 |
+| effort-7-final-score | 3 | 26.534 ms | 26.810 ms | +1.04% | 3/7 |
+
+The effort-4 slowdown is a measured tradeoff: its quantization-pipeline median
+rose 1.75%, and its complete-encode paired median rose 2.67%. Extra reuse does
+not guarantee a complete-encode win when other stages dominate. The default
+performance target remains ordinary effort 7; correctness gates cover all
+policies below.
+
+| Prepared API memory at padded 4K | Control | Candidate |
+| --- | ---: | ---: |
+| Prepared arena allocation | 1122.74 MiB | 1138.56 MiB |
+| Logical cached reference | 426.90 MiB | 474.33 MiB |
+| Logical comparison scratch | 695.84 MiB | 664.22 MiB |
+| Process physical footprint after preparation | 1885.77 MiB | 1901.72 MiB |
+| Peak process RSS | 680.33 MiB | 680.48 MiB |
+
+Arena allocation grew by exactly 16,588,800 bytes at 4K and 4,147,200 bytes at
+1080p (1.41% in this prepared operation). The public API probe's median physical
+footprint rose about 16.0 MiB at 4K and 4.2 MiB at 1080p. `TASK_VM_INFO` physical
+footprint and `getrusage` peak RSS measure different things and are not additive.
+The immediate post-destruction footprint stayed near its prepared value; arena
+ownership release does not imply immediate return of driver-managed physical
+pages to the OS. These process measurements describe the prepared API probe,
+not total encoder memory or a redesigned AQ scratch pool.
+
+Correctness and lifecycle qualification:
+
+- Exact AQ snapshots matched the control: 4,007,824 bytes, SHA-256
+  `a08c0d5413058f93d51e6dec4b6c50ba1b62539417c1663e54e622daf8f8db2d`.
+  They cover quant fields, block maps, score histories, reconstruction, and
+  DC/AC coefficient state, including profiled/unprofiled and nondefault options.
+- Public full-map, scalar, and intermediate-stage snapshots matched exactly:
+  56,104 bytes, SHA-256
+  `c98003b3e3efab9fddb737082e884d317dc27161275a49dc214215ae64373ee0`.
+  The temporary capture harness allowed different cache-byte counts; permanent
+  tests check the candidate's exact resource accounting separately.
+- All 38 canonical images and all 18 Kodak17 policy configurations produced
+  byte-identical control/candidate codestreams. Policies include efforts 1--10,
+  high density, maximum compression, final diagnostics, exact coefficients,
+  throughput modes, target bytes, and maximum error.
+- Pinned `djxl` 0.13.0 (`e8ff0976`) accepted padded 4K, Kodak17, and planter
+  4K pairs; decoded linear-RGB PFM bytes matched. External Butteraugli 3-norms
+  remained 0.683604, 0.729423, and 0.718311. Independent repeat encodes of all
+  three inputs matched byte for byte on both builds.
+- New real-device tests compare independent caches with different references
+  and odd dimensions against the CPU oracle, run them concurrently, and replace
+  one with a different extent while the other remains live. Existing tests cover
+  original-reference mutation, repeat comparisons, capture semantics, guarded
+  strides, nonmultiscale and expanded fallbacks, allocation-failure contracts,
+  invalidation, forced idle-arena purge, and pressure recovery. Preparation
+  submission/completion failure tests now include a multiscale image.
+- Focused tests passed 4/4. The final full Release suite passed 61/62; the only
+  failure was the inherited CPU `quantization_pipeline` golden
+  (`0.24919039011001587` actual, `0.24914586544036865` expected), reproduced
+  on the fresh `580cb47` control. Optional libjxl-reference fixtures were disabled;
+  pinned decoder and external-quality validation ran separately.
+- Final code-review cleanup rebuilt to byte-identical encode/benchmark binaries
+  and metallib, preserving the measured implementation. No runtime selector for
+  an intermediate prototype was retained.
+
+Matched Performance Limiters captures used padded 4K with zero warmups and one
+sample, separately from timing qualification. Both processes included two
+workflow sequences. Counter intervals had to lie within the benchmark's active
+GPU intervals; any overlap with another active GPU process was excluded. Unique
+excluded coverage was 32.34 ms for the control and 10.05 ms for the candidate;
+retained coverage was 331.47 and 327.20 ms. These are coverage unions, not encode
+latencies.
+
+| Resident AQ counter | Control | Candidate |
+| --- | ---: | ---: |
+| Kernel Occupancy | 61.99% | 61.43% |
+| Occupancy Manager Target | 77.95% | 77.44% |
+| Compute Shader Launch Limiter | 39.95% | 53.49% |
+| Instruction Throughput Limiter | 59.70% | 59.87% |
+| L1 Cache Limiter | 10.39% | 10.52% |
+| GPU Bandwidth | 145.49 GB/s | 145.25 GB/s |
+
+Aggregate occupancy and L1 behavior remained similar. The launch limiter rose;
+these captures do not isolate the reason, and it is not a direct measure of
+dispatch-call overhead. The compared submissions contain different work.
+Shader sampling identified four control transpose-convolution intervals but no
+attributable candidate mask-family interval, so it does not support an
+individual-kernel counter comparison. No direct register/spill or LLC/MMU data
+was collected. The dispatch graph and combined stage timings establish the
+saved computation; the separate wall-time and memory probes establish the
+measured benefit and storage cost.
+
+Artifacts are retained under `/private/tmp/gjxl-reference-mask-sy1kysjf`: immutable
+control source/build, frozen prototype executables and metallibs, patches and
+hashes, raw paired samples and ratios, thermal probes, reuse/memory probes,
+policy evaluation counts, exact snapshots, corpus/policy codestreams, decoder
+outputs, test logs, and Performance Limiters traces/exports. These temporary
+artifacts are provenance rather than durable repository fixtures.
 
 ## Correctness contract
 

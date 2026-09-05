@@ -56,6 +56,9 @@ constexpr size_t kAc = kImage;
 constexpr size_t kDc = kImage + 3;
 constexpr size_t kPsychoWork = 27;
 constexpr size_t kWork = kPsychoWork;
+// Psycho construction uses kWork through kWork + 2 and raw masks use + 4.
+// Packed subscale caches leave this full-size mask slot invariant after prep.
+constexpr size_t kReferenceErodedMask = kWork + 3;
 constexpr size_t kFinalStaging = 32;
 constexpr size_t kWorkingPlaneCount = 33;
 constexpr size_t kMaltaTileWidth = 32;
@@ -221,6 +224,8 @@ struct FinalParams {
   uint32_t height;
   uint32_t stride;
   uint32_t output_stride;
+  uint32_t reference_mask_stride;
+  uint32_t mask_stride;
   float x_multiplier;
 };
 
@@ -231,6 +236,8 @@ struct FinalL2Params {
   uint32_t distorted_stride;
   uint32_t work_stride;
   uint32_t output_stride;
+  uint32_t reference_mask_stride;
+  uint32_t mask_stride;
   float asymmetry;
   float x_multiplier;
 };
@@ -286,8 +293,8 @@ static_assert(sizeof(MaltaScaleParams) == 36);
 static_assert(sizeof(MaltaResponseParams) == 32);
 static_assert(sizeof(MaltaFusedParams) == 48);
 static_assert(sizeof(DifferenceParams) == 24);
-static_assert(sizeof(FinalParams) == 20);
-static_assert(sizeof(FinalL2Params) == 32);
+static_assert(sizeof(FinalParams) == 28);
+static_assert(sizeof(FinalL2Params) == 40);
 static_assert(std::is_standard_layout_v<ResidentReductionParams>);
 static_assert(std::is_trivially_copyable_v<ResidentReductionParams>);
 static_assert(sizeof(ResidentReductionParams) == 52);
@@ -428,7 +435,7 @@ public:
       }
     }
     if (multiscale_) {
-      for (size_t index = 0; index < reference_sub_.size(); ++index) {
+      for (size_t index = 0; index < reference_sub_.size() + 2; ++index) {
         if (!AddAlignedAllocation(sub_plane_bytes, &capacity)) {
           return Status::InvalidArgument(
             "Device Butteraugli cached-reference capacity overflows");
@@ -449,14 +456,14 @@ public:
     }
 
     cached_reference_bytes_ =
-      (kPsychoPlaneCount + 1) * plane_bytes +
-      (multiscale_ ? kPsychoPlaneCount * sub_plane_bytes : 0);
+      (kPsychoPlaneCount + 2) * plane_bytes +
+      (multiscale_ ? (kPsychoPlaneCount + 2) * sub_plane_bytes : 0);
     gaussian_kernel_bytes_ = 0;
     for (size_t kernel_size : kKernelSizes) {
       gaussian_kernel_bytes_ += kernel_size * sizeof(float);
     }
     peak_comparison_scratch_bytes_ =
-      (kWorkingPlaneCount - (kPsychoPlaneCount + 1)) * plane_bytes +
+      (kWorkingPlaneCount - (kPsychoPlaneCount + 2)) * plane_bytes +
       2 * partial_count * sizeof(float);
 
     Status status = scratch_.Prepare(metal_, capacity);
@@ -470,6 +477,7 @@ public:
         &plane);
       if (!status.ok()) return status;
     }
+    reference_eroded_mask_ = Plane(kReferenceErodedMask, working_extent_);
     if (multiscale_) {
       for (DevicePlaneView& plane : reference_sub_) {
         status = scratch_.AllocatePlane(
@@ -480,6 +488,14 @@ public:
           &plane);
         if (!status.ok()) return status;
       }
+      status = scratch_.AllocatePlane(
+        DeviceElementType::kF32, sub_extent_, sub_extent_.width,
+        kPlaneAlignment, &reference_sub_mask_);
+      if (!status.ok()) return status;
+      status = scratch_.AllocatePlane(
+        DeviceElementType::kF32, sub_extent_, sub_extent_.width,
+        kPlaneAlignment, &reference_sub_eroded_mask_);
+      if (!status.ok()) return status;
     }
     const Extent2D reduction_extent{partial_count, 1};
     status = scratch_.AllocatePlane(
@@ -1023,9 +1039,33 @@ private:
     Extent2D scale_extent) {
 
     DevicePlaneView precomputed = Plane(kWork + 4, scale_extent);
+    // The fused ultra-Y producer uses the psycho output stride. Reference
+    // caches use that same stride, including the packed subscale planes.
+    precomputed.row_stride = destination.row_stride;
     EncodeBlur(
       encoder, AsConst(precomputed), 4, kWork + 1, destination,
       scale_extent);
+  }
+
+  void EncodeReferenceErosion(
+    MTL::ComputeCommandEncoder* encoder,
+    ConstDevicePlaneView source,
+    DevicePlaneView destination,
+    Extent2D scale_extent) {
+
+    const PlaneParams fuzzy_params{
+      static_cast<uint32_t>(scale_extent.width),
+      static_cast<uint32_t>(scale_extent.height),
+      static_cast<uint32_t>(source.row_stride),
+      static_cast<uint32_t>(destination.row_stride),
+    };
+    encoder->setComputePipelineState(
+      metal_.butteraugli_pipelines_.fuzzy_erosion.get());
+    Bind(encoder, Handle(metal_, source),
+         source.offset_bytes, 0);
+    Bind(encoder, Handle(metal_, destination), destination.offset_bytes, 1);
+    encoder->setBytes(&fuzzy_params, sizeof(fuzzy_params), 2);
+    metal_.DispatchPlane(encoder, scale_extent);
   }
 
   void EncodePsychoImage(
@@ -1228,7 +1268,8 @@ private:
       if (fuse_mask) {
         const DevicePlaneView high_x = psycho[6];
         const DevicePlaneView ultra_x = psycho[8];
-        const DevicePlaneView mask = Plane(kWork + 4, scale_extent);
+        DevicePlaneView mask = Plane(kWork + 4, scale_extent);
+        mask.row_stride = ultra.row_stride;
         Bind(encoder, Handle(metal_, high_x), high_x.offset_bytes, 5);
         Bind(encoder, Handle(metal_, ultra_x), ultra_x.offset_bytes, 6);
         Bind(encoder, Handle(metal_, mask), mask.offset_bytes, 7);
@@ -1269,6 +1310,7 @@ private:
     const PsychoPlanes& reference,
     const PsychoPlanes& distorted,
     ConstDevicePlaneView mask_blurred_reference,
+    ConstDevicePlaneView mask,
     Extent2D scale_extent,
     DevicePlaneView output,
     DifferenceProfileStage profile_stage = DifferenceProfileStage::kAll,
@@ -1431,7 +1473,6 @@ private:
     if (profile_stage == DifferenceProfileStage::kL2) return;
 
     DevicePlaneView precomputed = Plane(kWork, scale_extent);
-    DevicePlaneView mask = Plane(kWork + 3, scale_extent);
     DevicePlaneView mask_blurred_distorted = Plane(kWork + 4, scale_extent);
     DevicePlaneView uncached_reference_mask =
       Plane(kWork + 2, scale_extent);
@@ -1443,21 +1484,8 @@ private:
       mask_blurred_reference = AsConst(uncached_reference_mask);
     }
 
-    const PlaneParams fuzzy_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(mask_blurred_reference.row_stride),
-      static_cast<uint32_t>(mask.row_stride),
-    };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.fuzzy_erosion.get());
-    Bind(encoder, Handle(metal_, mask_blurred_reference),
-         mask_blurred_reference.offset_bytes, 0);
-    Bind(encoder, Handle(metal_, mask), mask.offset_bytes, 1);
-    encoder->setBytes(&fuzzy_params, sizeof(fuzzy_params), 2);
-    metal_.DispatchPlane(encoder, scale_extent);
     MaybeCapture(
-      encoder, MetalButteraugliStage::kMask, AsConst(mask), scale_extent);
+      encoder, MetalButteraugliStage::kMask, mask, scale_extent);
 
     // Ultra Y emitted raw activity here. Malta/L2 and reference-mask work use
     // other planes. The first blur pass consumes it before the second pass
@@ -1498,6 +1526,8 @@ private:
         static_cast<uint32_t>(distorted[0].row_stride),
         static_cast<uint32_t>(working_extent_.width),
         static_cast<uint32_t>(output.row_stride),
+        static_cast<uint32_t>(mask_blurred_reference.row_stride),
+        static_cast<uint32_t>(mask.row_stride),
         asymmetry,
         options().x_multiplier,
       };
@@ -1529,6 +1559,8 @@ private:
       static_cast<uint32_t>(scale_extent.height),
       static_cast<uint32_t>(working_extent_.width),
       static_cast<uint32_t>(output.row_stride),
+      static_cast<uint32_t>(mask_blurred_reference.row_stride),
+      static_cast<uint32_t>(mask.row_stride),
       options().x_multiplier,
     };
     encoder->setComputePipelineState(
@@ -1695,7 +1727,7 @@ private:
       const DevicePlaneView ac = Plane(kAc + channel, extent());
       Bind(encoder, Handle(metal_, ac), ac.offset_bytes, 16 + channel);
     }
-    const DevicePlaneView mask = Plane(kWork + 3, extent());
+    const DevicePlaneView mask = reference_eroded_mask_;
     const DevicePlaneView mask_blurred_distorted =
       Plane(kWork + 4, extent());
     const DevicePlaneView mask_blurred_reference =
@@ -1761,14 +1793,17 @@ private:
       encoder, PsychoInputSlots(sub_extent_), distorted, sub_extent_, false);
     const DevicePlaneView sub_map = Plane(kFinalStaging, sub_extent_);
     EncodeDifference(
-      encoder, ReferenceSubSlots(), distorted, {}, sub_extent_, sub_map,
+      encoder, ReferenceSubSlots(), distorted,
+      AsConst(reference_sub_mask_), reference_sub_eroded_mask_,
+      sub_extent_, sub_map,
       DifferenceProfileStage::kAll, true, true);
 
     EncodePsychoImage(
       encoder, descriptor.distorted_linear_rgb, distorted, requested, false);
     EncodeDifference(
       encoder, reference_main, distorted,
-      AsConst(Plane(kReferenceMask, requested)), requested, {},
+      AsConst(Plane(kReferenceMask, requested)), reference_eroded_mask_,
+      requested, {},
       DifferenceProfileStage::kAll, false, true);
     EncodeResidentReduction(encoder, AsConst(sub_map), descriptor);
   }
@@ -1816,13 +1851,16 @@ private:
           : DifferenceProfileStage::kMaskAndFinal;
     if (sub_stage) {
       EncodeDifference(
-        encoder, ReferenceSubSlots(), distorted, {}, sub_extent_,
+        encoder, ReferenceSubSlots(), distorted,
+        AsConst(reference_sub_mask_), reference_sub_eroded_mask_,
+        sub_extent_,
         Plane(kFinalStaging, sub_extent_), difference_stage, true, true);
       return;
     }
     EncodeDifference(
       encoder, reference_main, distorted,
-      AsConst(Plane(kReferenceMask, requested)), requested, {},
+      AsConst(Plane(kReferenceMask, requested)), reference_eroded_mask_,
+      requested, {},
       difference_stage,
       stage != MetalButteraugliProfileStage::kMaskAndFinalMain, true);
   }
@@ -1848,6 +1886,9 @@ private:
       EncodeReferenceMask(
         encoder, Plane(kReferenceMask, working_extent_),
         working_extent_);
+      EncodeReferenceErosion(
+        encoder, AsConst(Plane(kReferenceMask, working_extent_)),
+        reference_eroded_mask_, working_extent_);
       return;
     }
 
@@ -1855,12 +1896,19 @@ private:
       encoder, reference_linear_rgb(), reference_main, requested, false);
     EncodeReferenceMask(
       encoder, Plane(kReferenceMask, requested), requested);
+    EncodeReferenceErosion(
+      encoder, AsConst(Plane(kReferenceMask, requested)),
+      reference_eroded_mask_, requested);
     if (multiscale_) {
       EncodeSubsample(
         encoder, reference_linear_rgb(), requested, sub_extent_);
       EncodePsychoImage(
         encoder, PsychoInputSlots(sub_extent_), ReferenceSubSlots(),
-        sub_extent_, false, false);
+        sub_extent_, false);
+      EncodeReferenceMask(encoder, reference_sub_mask_, sub_extent_);
+      EncodeReferenceErosion(
+        encoder, AsConst(reference_sub_mask_), reference_sub_eroded_mask_,
+        sub_extent_);
     }
   }
 
@@ -1897,7 +1945,8 @@ private:
       DevicePlaneView staging = Plane(kFinalStaging, working_extent_);
       EncodeDifference(
         encoder, reference_main, distorted_main,
-        AsConst(Plane(kReferenceMask, working_extent_)), working_extent_,
+        AsConst(Plane(kReferenceMask, working_extent_)), reference_eroded_mask_,
+        working_extent_,
         staging);
       const CropParams params{
         static_cast<uint32_t>(requested.width),
@@ -1920,7 +1969,8 @@ private:
         false);
       EncodeDifference(
         encoder, reference_main, distorted_main,
-        AsConst(Plane(kReferenceMask, requested)), requested,
+        AsConst(Plane(kReferenceMask, requested)), reference_eroded_mask_,
+        requested,
         descriptor.distance_map);
 
       if (multiscale_) {
@@ -1931,7 +1981,9 @@ private:
           sub_extent_, false);
         DevicePlaneView sub_map = Plane(kFinalStaging, sub_extent_);
         EncodeDifference(
-          encoder, ReferenceSubSlots(), distorted_main, {}, sub_extent_,
+          encoder, ReferenceSubSlots(), distorted_main,
+          AsConst(reference_sub_mask_), reference_sub_eroded_mask_,
+          sub_extent_,
           sub_map);
         const ComposeParams params{
           static_cast<uint32_t>(requested.width),
@@ -2015,7 +2067,9 @@ private:
       if (!multiscale_) return;
       DevicePlaneView sub_map = Plane(kFinalStaging, sub_extent_);
       EncodeDifference(
-        encoder, ReferenceSubSlots(), distorted_main, {}, sub_extent_, sub_map,
+        encoder, ReferenceSubSlots(), distorted_main,
+        AsConst(reference_sub_mask_), reference_sub_eroded_mask_,
+        sub_extent_, sub_map,
         difference_stage);
       if (stage == MetalButteraugliProfileStage::kMaskAndFinalSub) {
         const ComposeParams params{
@@ -2041,7 +2095,8 @@ private:
       DevicePlaneView staging = Plane(kFinalStaging, working_extent_);
       EncodeDifference(
         encoder, reference_main, distorted_main,
-        AsConst(Plane(kReferenceMask, working_extent_)), working_extent_,
+        AsConst(Plane(kReferenceMask, working_extent_)), reference_eroded_mask_,
+        working_extent_,
         staging, difference_stage);
       if (stage == MetalButteraugliProfileStage::kMaskAndFinalMain) {
         const CropParams params{
@@ -2065,7 +2120,8 @@ private:
 
     EncodeDifference(
       encoder, reference_main, distorted_main,
-      AsConst(Plane(kReferenceMask, requested)), requested,
+      AsConst(Plane(kReferenceMask, requested)), reference_eroded_mask_,
+      requested,
       descriptor.distance_map, difference_stage);
   }
 
@@ -2073,6 +2129,9 @@ private:
   DeviceScratchArena scratch_;
   std::array<DevicePlaneView, kWorkingPlaneCount> planes_;
   PsychoPlanes reference_sub_;
+  DevicePlaneView reference_sub_mask_;
+  DevicePlaneView reference_eroded_mask_;
+  DevicePlaneView reference_sub_eroded_mask_;
   std::array<DevicePlaneView, kBlurSigmas.size()> kernels_;
   DevicePlaneView reduction_a_;
   DevicePlaneView reduction_b_;

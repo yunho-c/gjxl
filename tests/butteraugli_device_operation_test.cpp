@@ -289,14 +289,13 @@ private:
   GuardedImage3* reference,
   GuardedImage3* distorted,
   gjxl::test::GuardedDevicePlane* distance_map,
-  gjxl::test::GuardedDevicePlane* score) {
-
-  constexpr gjxl::Extent2D kExtent{17, 11};
+  gjxl::test::GuardedDevicePlane* score,
+  gjxl::Extent2D extent = {17, 11}) {
   if (!gjxl::CreateMetalBackend(
         GJXL_METALLIB_PATH, options, backend).ok() ||
-      !reference->Prepare(**backend, kExtent, 23) ||
-      !distorted->Prepare(**backend, kExtent, 25) ||
-      !distance_map->Prepare(**backend, kExtent, 27).ok() ||
+      !reference->Prepare(**backend, extent, extent.width + 6) ||
+      !distorted->Prepare(**backend, extent, extent.width + 8) ||
+      !distance_map->Prepare(**backend, extent, extent.width + 10).ok() ||
       !score->Prepare(**backend, {1, 1}, 3).ok()) {
     return false;
   }
@@ -658,14 +657,15 @@ private:
 [[nodiscard]] bool CheckPreparationFailures() {
   const auto check = [](gjxl::MetalBackendOptions options,
                         gjxl::StatusCode expected,
-                        uint64_t expected_submissions) {
+                        uint64_t expected_submissions,
+                        gjxl::Extent2D extent) {
     std::unique_ptr<gjxl::GpuBackend> backend;
     GuardedImage3 reference;
     GuardedImage3 distorted;
     gjxl::test::GuardedDevicePlane distance_map;
     gjxl::test::GuardedDevicePlane score;
     if (!PrepareMetalCase(options, &backend, &reference, &distorted,
-                          &distance_map, &score)) {
+                          &distance_map, &score, extent)) {
       return false;
     }
     std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
@@ -683,8 +683,15 @@ private:
   submission_failure.test_fail_submission = true;
   gjxl::MetalBackendOptions completion_failure;
   completion_failure.test_fail_completion = true;
-  return check(submission_failure, gjxl::StatusCode::kSubmissionFailed, 0) &&
-         check(completion_failure, gjxl::StatusCode::kDeviceError, 1);
+  for (const gjxl::Extent2D extent : {gjxl::Extent2D{17, 11}, {31, 19}}) {
+    if (!check(submission_failure, gjxl::StatusCode::kSubmissionFailed, 0,
+               extent) ||
+        !check(completion_failure, gjxl::StatusCode::kDeviceError, 1,
+               extent)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 [[nodiscard]] bool CheckComparisonFailures() {
