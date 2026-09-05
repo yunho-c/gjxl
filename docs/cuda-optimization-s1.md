@@ -6,7 +6,8 @@
   factorized resident DCT, cooperative quantization adjustment, fused Malta,
   bounded-retention stream-ordered allocation, on-demand reconstruction
   host staging, overwrite-only coefficient staging, and direct resident
-  transform image I/O implemented;
+  transform image I/O, reused resident coefficient bases, and direct local
+  value access implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -19,7 +20,20 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest resident-transform checkpoint against
+below supersede them. The latest coefficient-kernel checkpoint against
+`5ecb5f8` reuses tiny DC bases and eliminates mandatory thread-local parameter
+and lookup-array copies. Its stack frame shrinks from 112 to 32 bytes, with
+unchanged register count and 256 bytes of shared storage per block. Final
+isolated large-shape probes improve 38.9-47.6%; the production coefficient
+subset improves 45.0% / 40.9% / 43.7% at 4K / 1080p / Flower, with unchanged
+launch counts, arena allocation sizes, and transfers. Whole-encoder timing
+is highly variable: both warm cohorts are nearly flat at 4K, while the first
+cohort's smaller-input regressions reverse in the second cohort.
+No stable total-encode speedup is claimed. All 61 CUDA / 47 CPU tests,
+seven scoped sanitizer runs, serial/batch checks, and 23 byte-identical
+decoded image pairs pass. Optimization remains ongoing, not maxed out.
+
+The preceding resident-transform checkpoint against
 `5aefb93` removes packed gather/inverse pixel buffers, saving 199.07 MB of
 live device allocation requests at padded 4K. It eliminates 21 launches and
 reduces the targeted production transform/copy subset by a median paired
@@ -4138,6 +4152,227 @@ isolated caching/specialization experiment rather than assuming the whole
 cost is removable. Host coefficient handoff/assembly, perceptual filtering,
 metadata and codestream work also remain substantial. The resident path is
 not demonstrated maxed out.
+
+## Resident coefficient basis/local-access follow-up (S36)
+
+Baseline: `5ecb5f8` (S35). This experiment targets
+`EncodeResidentCoefficientsKernel`, not the exact-coefficient evaluator or
+the DCT8-only maximum-throughput path. The initial S36 parent 4K capture
+spends 28.94 ms in its 21 launches. Each anchor block performs DC extraction,
+DC quantization, Y and X/B AC quantization/reconstruction, color-correlation
+restoration, and low-low-frequency reconstruction.
+
+### Cause, candidates, and retained mechanism
+
+DC conversion only uses dimensions 1, 2, and 4, but the original kernel
+re-evaluates the same forward/inverse cosine bases for different channels
+and samples. The retained implementation cooperatively constructs four
+padded 4x4 shared tables (256 bytes per block), using the **original** basis
+functions. The existing pre-DC barrier publishes the tables; no barrier or
+launch is added. The original scale multiplications and nested reduction
+orders are unchanged. In particular, no idealized identity/rational basis,
+host-computed cosine table, fast cosine intrinsic, or global fast-math flag
+replaces the original FP32 arithmetic.
+
+Caching alone is insufficient. The first candidate passes all 280 guarded
+cases and reduces the production coefficient subset by 22.8% / 20.9% /
+15.8% in the initial 4K / 1080p / Flower captures, but regresses every large
+homogeneous probe by paired medians of 3.9-26.9%. These observations are
+retained, not discarded in favor of the smaller tests that improve.
+
+Native code inspection identifies a second cost: dynamic access to local
+scale/bias arrays, the four copied Y thresholds, and the by-value parameter
+object's eight-entry sharpness array. The original kernel reports 50
+registers, a 112-byte stack frame, and no static shared memory. Caching alone
+uses 52 registers and the same 112-byte frame. Direct scale/bias selection
+and reading the chosen threshold from its original device slot reduce the
+frame to 96 bytes, but still leave large rectangular probe regressions.
+Selecting the original sharpness parameter slots directly prevents a
+per-thread copy of the by-value parameter object and reduces the frame to
+32 bytes. This is the retained combined candidate: 50 registers and 256
+bytes of static shared memory.
+
+The final disassembly removes the unconditional parameter/threshold array
+stores. Remaining local loads/stores occur in cosine range-reduction paths
+guarded by `abs(angle) >= 105615`; valid 1/2/4-element basis arguments are
+below 9. This supports attributing the residual 32-byte frame to the
+unreachable-for-valid-bases large-argument path, not claiming that the
+compiler reports zero stack. Both original and retained kernels report
+`LOCAL:0`, so that field alone would have missed the original local-array
+problem.
+
+The internal reference launcher preserves the original uncached bases and
+dynamic indexing. A temporary direct-access-only variant, without shared
+basis caching, is also measured: it improves all large probe medians by
+15.6-58.2%, confirming that removal of local copies is independently useful.
+The experimental launcher is not retained in production source; its probe
+binary and source snapshot remain under the ignored profiles directory.
+
+### Isolated kernel evidence
+
+The same-executable probe compares the original and optimized coefficient
+kernels using default quantization matrices, deterministic nonzero inputs,
+valid nonoverlapping anchors with gaps, and all six output/error arrays.
+Allocation, initialization, and readback verification are outside CUDA event
+timing. Each shape/extent uses five alternating-order pairs, ten warmups,
+eleven timed samples, and three launches per sample. Requested extents are
+512x536 and 3840x2160; only complete homogeneous transform tiles are used,
+so these are kernel probes, not whole-image encoder measurements.
+
+Large-probe median paired candidate/reference ratios across successive
+experiments are:
+
+| Transform | Basis cache only | Cache + partial direct access | Direct access only | Final combined |
+|---|---:|---:|---:|---:|
+| 8x8 | 1.0540 | 0.8518 | 0.4178 | 0.5442 |
+| 16x8 | 1.0636 | 0.9032 | 0.4727 | 0.5483 |
+| 8x16 | 1.0388 | 0.9284 | 0.4749 | 0.5535 |
+| 16x16 | 1.0564 | 0.8674 | 0.5828 | 0.5669 |
+| 32x16 | 1.2687 | 1.3136 | 0.8431 | 0.5510 |
+| 16x32 | 1.2018 | 1.2505 | 0.8339 | 0.5236 |
+| 32x32 | 1.1654 | 1.0291 | 0.7782 | 0.6115 |
+
+Each column has its **own paired reference cohort**; ratios from different
+columns are not a direct comparison of candidate variants at equal clocks.
+The earlier fully direct combined cohort also improves every large-shape
+median, by 17.2-55.9%. The final relinked probe improves large-shape medians
+38.9-47.6% and small-shape medians 36.1-48.4%. Raw observations and marginal
+medians are preserved because laptop operating state varies substantially.
+
+### Qualification and whole-encoder measurements
+
+The first warm cohort uses seven alternating-order pairs, three warmups,
+five samples, and the complete in-memory fully-resident encode boundary.
+The cold cohort uses seven pairs, zero warmups, and one sample. Parent and
+candidate are separate executable runs; percentages below are medians of
+paired ratios, not ratios of the displayed marginal medians.
+
+| Cohort/input | Total parent/new (ms) | Paired total change | Quantization parent/new (ms) | Paired quantization change |
+|---|---:|---:|---:|---:|
+| First warm 4K | 733.373 / 726.928 | -0.9% | 264.791 / 244.718 | -3.0% |
+| First warm 1080p | 346.758 / 395.579 | +14.8% | 106.883 / 115.069 | -0.3% |
+| First warm Flower | 40.910 / 60.583 | +39.5% | 17.556 / 20.527 | +15.9% |
+| Repeat warm 4K | 712.525 / 749.250 | -0.6% | 397.053 / 387.154 | -1.7% |
+| Repeat warm 1080p | 213.790 / 166.238 | -17.6% | 78.355 / 72.352 | -7.2% |
+| Repeat warm Flower | 35.124 / 38.622 | -5.3% | 15.524 / 16.541 | -6.0% |
+| Cold 4K | 819.283 / 780.561 | -1.1% | 479.950 / 483.147 | -0.03% |
+| Cold 1080p | 382.702 / 400.067 | +4.5% | 144.770 / 160.981 | -8.2% |
+| Cold Flower | 73.334 / 64.626 | -9.5% | 38.126 / 31.974 | -11.0% |
+
+The first warm cohort contains substantial regressions at the smaller
+inputs. An additional seven-pair cohort with reversed starting order uses
+the same binaries, settings, three warmups, and five samples. It reverses
+the smaller-input regressions while 4K total time stays nearly flat. Both
+cohorts are retained; neither the first regressions nor the later gains
+alone establish stable end-to-end behavior. Marginal and paired medians
+even disagree in sign for repeat 4K and Flower, as shown above.
+Timing spread is unusually large in **both** versions: first-warm 4K
+total ranges are 432.036-1370.424 / 430.164-1078.381 ms, and 1080p ranges
+227.662-522.655 / 194.621-551.277 ms. GPU snapshots span 79-82 C, P0, and
+1282-1755 MHz. A read-only host snapshot finds about 21 GiB of free physical
+memory; it does not establish the cause of the timing variation. No clocks,
+power policy, firewall, process priorities, or other OS settings are changed.
+Repeat snapshots span 71-77 C, P3, and 1282-1477 MHz; repeat 4K total ranges
+are 688.425-814.923 / 689.047-783.388 ms. No stable end-to-end or cold-start
+gain is claimed.
+
+Stage reports help localize, but do not establish the cause of, the wall
+variation. First-warm 1080p CPU codestream generation has paired median
+regression 21.7% (marginal medians 224.545 / 259.826 ms), while quantization
+is nearly flat by paired median. Flower CPU codestream generation regresses
+44.6% in that cohort. For example, 1080p pair 4 changes total time from
+286.703 to 395.579 ms, CPU codestream generation from 175.619 to 259.826 ms,
+and quantization from 97.739 to 102.143 ms. CPU codestream code, output bytes,
+and work are unchanged. This is evidence of a large non-target timing
+component, not permission to subtract that time or hide the total result.
+
+Final production profiles use three warmups and one captured encode:
+
+| Input | Coefficient launches, unchanged | Coefficient parent/new (ms) | Change | All-kernel parent/new (ms) |
+|---|---:|---:|---:|---:|
+| Odd 4K | 21 | 31.116535 / 17.106612 | -45.0% | 277.767619 / 253.533016 |
+| Odd 1080p | 18 | 3.738464 / 2.208346 | -40.9% | 40.320190 / 40.164420 |
+| Flower | 21 | 1.033908 / 0.582127 | -43.7% | 7.697213 / 7.250231 |
+
+Total launch counts stay 464 / 452 / 464. The five allocation sizes per
+encode, peak requested device bytes (2,608,448,064 / 651,957,638 /
+85,819,408), pool release thresholds, and all 31 H2D / 19 D2H / one D2D
+transfers remain unchanged. Byte totals are identical to S35. Every
+non-coefficient kernel retains its ordered name, geometry, register/shared
+resources, and per-thread local field. Coefficient launch order and geometry
+also match. Module code and per-block shared storage are not claimed to be
+unchanged merely because explicit arena allocations are unchanged.
+
+The final builds pass all 61 CUDA and 47 CPU tests. The new coefficient test
+covers 280 guarded cases: all seven shapes, counts 1/3/17, six input
+patterns, both quantization modes, scales 1/3541/32768, raw quantization
+extremes, varied X/B multipliers and color correlation, and nonzero
+anchor/coefficient/block offsets with padded, permuted spatial layouts.
+It checks bitwise AC, reconstructed coefficients, DC, quantized DC,
+inverse sigma, and error flags, plus output guards and input immutability.
+The same device allocations are reused with changed coefficient inputs.
+NaN/infinite AC and DC inputs, DC overflow, and invalid EPF sharpness
+exercise the original error behavior. The full AQ integration suite remains
+an independent workflow gate.
+
+All 23 parent/candidate image pairs match SHA-256, byte count, decoded
+Butteraugli, chosen strategies, and encoder final score. The matrix uses
+the existing sample, odd padded 1080p/4K PFMs, Flower, and the three CC0
+photographs from S29 at distances 0.5/1.2/3, effort 7, plus sample/Flower
+at distance 1.2, effort 9. Decode/metric use the pinned libjxl
+`e8ff09762481785938d8e4e01333ed3917571161`, Clang 22.1.8,
+`RGB_D65_SRG_Rel_Lin`, and the metric's 80-nit default. The benchmark's
+synthetic odd inputs and quality PFMs are not asserted to have identical
+floating-point pixels.
+
+Serial/batch checks pass at even 1920x1080 with fully-resident and
+maximum-throughput batches 1/2/4, and even 3840x2160 with fully-resident
+batches 1/2. Median serial/batch speedups are 1.018/1.120/1.286,
+1.001/1.524/1.748, and 1.061/1.019 respectively. These are current-build
+batch-vs-serial comparisons, not S35-vs-S36 throughput claims.
+
+All seven scoped sanitizer checks pass: full AQ memcheck/initcheck/synccheck
+and focused coefficient memcheck/initcheck/synccheck/racecheck. Both memory
+checks report zero leaked bytes; all error/hazard summaries are zero.
+Full-AQ runs take approximately 39/26/20 seconds; focused runs 6/5/5/11
+seconds. Full-AQ memcheck includes stream-ordered race tracking and full
+leak checking, and focused memcheck includes full leak checking. There are
+no kernel filters or API-error suppressions. No full-AQ racecheck is started.
+
+The evidence script initially rejects CTest's successful `100% tests passed
+out of N` wording because it expects the alternate `0 tests failed` wording.
+The reporting parser is corrected to accept either form and additionally
+count every individual passing test. Revalidation of the unchanged logs
+passes; no completed test or sanitizer is repeated or reclassified.
+
+`s36_final_validate.py` checks ordered non-coefficient kernel identities and
+resources, all launch geometries, transfer counts/bytes, explicit allocation
+sizes, all 23 image/score identities, 61/47 individual test results, all seven
+sanitizer summaries, leak checks, and the native resource report. Ignored
+`build-cuda-ninja/profiles/s36_*` files preserve the initial cache-only,
+partial-direct, direct-only, and combined experiments; `s36_final_*` holds
+the qualified final build's probes, warm/cold observations, captures, image
+qualification, batch results, CTest archives, sanitizer logs, native
+disassembly/resources, and evidence assertions. The probe build scripts
+record the exact MSVC compiler/link commands and include the guarded test
+fixture. Baseline executables remain `s35_retained_*`; final encode,
+benchmark, batch, and coefficient-test executables are frozen as
+`s36_retained_*`, with SHA-256 values in `s36_final_binary_hashes.json`.
+`s36_repeat_*` preserves the reversed-start warm cohort, and
+`s36_wall_summary.py` derives the per-stage summaries from both cohorts'
+original benchmark stdout.
+
+No permission error, admin prompt, or unexplained execution stall is
+encountered. The previous long full-AQ racecheck is not evidence of a
+confirmed firewall cause. No firewall, OS-service, or power/clock setting
+is changed.
+
+All execution jobs have completed. The coefficient kernel still has
+separate Y, X/B, and color-restoration loops with repeated same-coefficient
+global reads and barriers; dependency-preserving fusion is a concrete next
+experiment. CPU coefficient handoff/assembly, perceptual filtering, and
+codestream work also remain substantial. This checkpoint is not evidence
+that the resident encoder is maxed out.
 
 ## Work that should not lead the next cycle
 

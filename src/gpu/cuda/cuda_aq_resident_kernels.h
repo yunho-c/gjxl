@@ -88,6 +88,17 @@ struct CudaAqResidentPolicyParams {
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream);
 
+// Internal arithmetic/layout oracle with uncached bases and original indexing.
+[[nodiscard]] cudaError_t LaunchCudaAqEncodeResidentCoefficientsReference(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
+    cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqResidentPolicyInitialize(
     const float* quant_field, float* initial_quant_field, float* scores,
     unsigned int* error, CudaAqResidentPolicyParams params,

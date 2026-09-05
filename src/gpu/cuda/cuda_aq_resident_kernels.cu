@@ -67,20 +67,34 @@ __device__ uint32_t CoefficientIndex(CudaAqExactBatch batch, uint32_t v,
                                                 : u * batch.pixel_height + v;
 }
 
+// Preserve the original constants, but avoid dynamically indexed automatic
+// arrays in the optimized kernel. Keep the original path as a bitwise oracle.
+template <bool DirectTables>
 __device__ float DownsampleScale(uint32_t length, uint32_t frequency) {
   if (length == 1) return 1.0f;
   if (length == 2) return frequency == 0 ? 1.0f : 0.901764195028874394f;
   constexpr float kScale[4] = {1.0f, 0.974886821136879522f,
                                0.901764195028874394f, 0.787054918159101335f};
-  return kScale[frequency];
+  if constexpr (DirectTables) {
+    return frequency == 0 ? kScale[0] : frequency == 1 ? kScale[1] :
+           frequency == 2 ? kScale[2] : kScale[3];
+  } else {
+    return kScale[frequency];
+  }
 }
 
+template <bool DirectTables>
 __device__ float UpsampleScale(uint32_t length, uint32_t frequency) {
   if (length == 1) return 1.0f;
   if (length == 2) return frequency == 0 ? 1.0f : 1.108937353592731823f;
   constexpr float kScale[4] = {1.0f, 1.025760096781116015f,
                                1.108937353592731823f, 1.270559368765487251f};
-  return kScale[frequency];
+  if constexpr (DirectTables) {
+    return frequency == 0 ? kScale[0] : frequency == 1 ? kScale[1] :
+           frequency == 2 ? kScale[2] : kScale[3];
+  } else {
+    return kScale[frequency];
+  }
 }
 
 __device__ float ForwardBasis(uint32_t length, uint32_t frequency,
@@ -155,6 +169,7 @@ __device__ int QuantizeCoefficient(float coefficient, float inverse_dequant,
   return static_cast<int>(rounded);
 }
 
+template <bool DirectTables>
 __device__ float AdjustQuantizationBias(int quantized, uint32_t channel) {
   constexpr float kBias[3] = {1.0f - 0.05465007330715401f,
                               1.0f - 0.07005449891748593f,
@@ -162,10 +177,18 @@ __device__ float AdjustQuantizationBias(int quantized, uint32_t channel) {
   const float value = static_cast<float>(quantized);
   const float absolute = fabsf(value);
   if (absolute < 0.125f) return 0.0f;
-  if (absolute < 1.125f) return copysignf(kBias[channel], value);
+  if (absolute < 1.125f) {
+    if constexpr (DirectTables) {
+      return copysignf(channel == 0 ? kBias[0] :
+                      channel == 1 ? kBias[1] : kBias[2], value);
+    } else {
+      return copysignf(kBias[channel], value);
+    }
+  }
   return value - 0.145f / value;
 }
 
+template <bool DirectTables>
 __device__ float DequantizeCoefficient(int quantized, float dequant,
                                        uint32_t global_scale, int raw_quant,
                                        float matrix_multiplier,
@@ -173,7 +196,7 @@ __device__ float DequantizeCoefficient(int quantized, float dequant,
   const float scale = (65536.0f / static_cast<float>(global_scale)) /
                       (static_cast<float>(raw_quant) * matrix_multiplier);
   const float coefficient =
-      AdjustQuantizationBias(quantized, channel) * dequant * scale;
+      AdjustQuantizationBias<DirectTables>(quantized, channel) * dequant * scale;
   if (!isfinite(coefficient)) {
     atomicOr(error, 4u);
     return 0.0f;
@@ -784,6 +807,7 @@ __global__ void SelectAdjustedQuantizationKernel(
   }
 }
 
+template <bool CacheDcBasis, bool DirectTables>
 __global__ void EncodeResidentCoefficientsKernel(
     const CudaAqAnchor* anchors, const float* quant_tables,
     const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
@@ -798,6 +822,28 @@ __global__ void EncodeResidentCoefficientsKernel(
   const CudaAqAnchor anchor = anchors[batch.anchor_offset + anchor_index];
   const uint32_t block_count = params.block_width * params.block_height;
   const uint32_t covered_count = batch.covered_width * batch.covered_height;
+  // Only 1/2/4-element DC transforms occur. Reuse each original basis value
+  // across channels and output samples without changing the reduction order.
+  // The existing pre-DC barrier also publishes these tables.
+  [[maybe_unused]] __shared__ float basis[CacheDcBasis ? 64 : 1];
+  if constexpr (CacheDcBasis) {
+    if (thread_index < batch.covered_width * batch.covered_width) {
+      const uint32_t frequency = thread_index / batch.covered_width;
+      const uint32_t sample = thread_index % batch.covered_width;
+      basis[frequency * 4 + sample] =
+        InverseBasis(batch.covered_width, frequency, sample);
+      basis[32 + frequency * 4 + sample] =
+        ForwardBasis(batch.covered_width, frequency, sample);
+    }
+    if (thread_index < batch.covered_height * batch.covered_height) {
+      const uint32_t frequency = thread_index / batch.covered_height;
+      const uint32_t sample = thread_index % batch.covered_height;
+      basis[16 + frequency * 4 + sample] =
+        InverseBasis(batch.covered_height, frequency, sample);
+      basis[48 + frequency * 4 + sample] =
+        ForwardBasis(batch.covered_height, frequency, sample);
+    }
+  }
   const uint32_t channel_stride = batch.anchor_count * batch.coefficient_count;
   const size_t transform_offset =
       batch.coefficient_offset +
@@ -814,12 +860,14 @@ __global__ void EncodeResidentCoefficientsKernel(
   const float cfl_x = static_cast<float>(y_to_x[color_index]) * (1.0f / 84.0f);
   const float cfl_b =
       1.0f + static_cast<float>(y_to_b[color_index]) * (1.0f / 84.0f);
-  float selected_y[4] = {0.58f, 0.64f, 0.64f, 0.64f};
-  if (params.adjust_ac_quant != 0) {
-    const size_t threshold_offset =
-        batch.coefficient_offset + 4 * static_cast<size_t>(anchor_index);
-    for (uint32_t quadrant = 0; quadrant < 4; ++quadrant) {
-      selected_y[quadrant] = adjustment_thresholds[threshold_offset + quadrant];
+  [[maybe_unused]] float selected_y[4] = {0.58f, 0.64f, 0.64f, 0.64f};
+  if constexpr (!DirectTables) {
+    if (params.adjust_ac_quant != 0) {
+      const size_t threshold_offset =
+          batch.coefficient_offset + 4 * static_cast<size_t>(anchor_index);
+      for (uint32_t quadrant = 0; quadrant < 4; ++quadrant) {
+        selected_y[quadrant] = adjustment_thresholds[threshold_offset + quadrant];
+      }
     }
   }
 
@@ -841,7 +889,22 @@ __global__ void EncodeResidentCoefficientsKernel(
         atomicOr(error, 128u);
         continue;
       }
-      float sigma = sigma_quant * params.epf_sharpness_lut[sharpness];
+      float sharpness_scale;
+      if constexpr (DirectTables) {
+        // Dynamic indexing makes nvcc copy the whole by-value params object
+        // into each thread's local stack. Read the original parameter slots.
+        sharpness_scale = sharpness == 0 ? params.epf_sharpness_lut[0] :
+                          sharpness == 1 ? params.epf_sharpness_lut[1] :
+                          sharpness == 2 ? params.epf_sharpness_lut[2] :
+                          sharpness == 3 ? params.epf_sharpness_lut[3] :
+                          sharpness == 4 ? params.epf_sharpness_lut[4] :
+                          sharpness == 5 ? params.epf_sharpness_lut[5] :
+                          sharpness == 6 ? params.epf_sharpness_lut[6] :
+                                           params.epf_sharpness_lut[7];
+      } else {
+        sharpness_scale = params.epf_sharpness_lut[sharpness];
+      }
+      float sigma = sigma_quant * sharpness_scale;
       sigma = fminf(-1.0e-4f, sigma);
       const float value = 1.0f / sigma;
       if (!isfinite(value) || value >= 0.0f) {
@@ -866,10 +929,14 @@ __global__ void EncodeResidentCoefficientsKernel(
         const float scaled =
             forward_coefficients[transform_offset + channel * channel_stride +
                                  coefficient] *
-            DownsampleScale(batch.covered_height, v) *
-            DownsampleScale(batch.covered_width, u);
-        value += scaled * InverseBasis(batch.covered_height, v, y) *
-                 InverseBasis(batch.covered_width, u, x);
+            DownsampleScale<DirectTables>(batch.covered_height, v) *
+            DownsampleScale<DirectTables>(batch.covered_width, u);
+        if constexpr (CacheDcBasis) {
+          value += scaled * basis[16 + v * 4 + y] * basis[u * 4 + x];
+        } else {
+          value += scaled * InverseBasis(batch.covered_height, v, y) *
+                   InverseBasis(batch.covered_width, u, x);
+        }
       }
     }
     if (!isfinite(value)) {
@@ -921,7 +988,9 @@ __global__ void EncodeResidentCoefficientsKernel(
                               (x >= coefficient_width / 2 ? 1u : 0u);
     const float threshold =
         params.adjust_ac_quant != 0
-            ? selected_y[quadrant]
+            ? (DirectTables ? adjustment_thresholds[batch.coefficient_offset +
+                  4 * static_cast<size_t>(anchor_index) + quadrant] :
+                selected_y[quadrant])
             : QuantizationThreshold(channel, covered_count, coefficient,
                                     coefficient_width, coefficient_height);
     const uint32_t table = channel * batch.coefficient_count + coefficient;
@@ -930,7 +999,7 @@ __global__ void EncodeResidentCoefficientsKernel(
                             quant_tables[table_offsets.inverse_dequant + table],
                             quantizer[0], raw, 1.0f, threshold, error);
     quantized_coefficients[offset] = quantized;
-    reconstruction_coefficients[offset] = DequantizeCoefficient(
+    reconstruction_coefficients[offset] = DequantizeCoefficient<DirectTables>(
         quantized, quant_tables[table_offsets.dequant + table], quantizer[0],
         raw, 1.0f, channel, error);
   }
@@ -958,7 +1027,7 @@ __global__ void EncodeResidentCoefficientsKernel(
           predicted, quant_tables[table_offsets.inverse_dequant + table],
           quantizer[0], raw, multiplier, threshold, error);
       quantized_coefficients[offset] = quantized;
-      reconstruction_coefficients[offset] = DequantizeCoefficient(
+      reconstruction_coefficients[offset] = DequantizeCoefficient<DirectTables>(
           quantized, quant_tables[table_offsets.dequant + table], quantizer[0],
           raw, multiplier, channel, error);
     }
@@ -986,15 +1055,18 @@ __global__ void EncodeResidentCoefficientsKernel(
     float value = 0.0f;
     for (uint32_t y = 0; y < batch.covered_height; ++y) {
       for (uint32_t x = 0; x < batch.covered_width; ++x) {
-        value += dc[static_cast<size_t>(channel) * block_count +
-                    static_cast<size_t>(anchor.y + y) * params.block_width +
-                    anchor.x + x] *
-                 ForwardBasis(batch.covered_height, v, y) *
-                 ForwardBasis(batch.covered_width, u, x);
+        const float sample = dc[static_cast<size_t>(channel) * block_count +
+          static_cast<size_t>(anchor.y + y) * params.block_width + anchor.x + x];
+        if constexpr (CacheDcBasis) {
+          value += sample * basis[48 + v * 4 + y] * basis[32 + u * 4 + x];
+        } else {
+          value += sample * ForwardBasis(batch.covered_height, v, y) *
+                   ForwardBasis(batch.covered_width, u, x);
+        }
       }
     }
-    value *= UpsampleScale(batch.covered_height, v) *
-             UpsampleScale(batch.covered_width, u);
+    value *= UpsampleScale<DirectTables>(batch.covered_height, v) *
+             UpsampleScale<DirectTables>(batch.covered_width, u);
     reconstruction_coefficients[transform_offset + channel * channel_stride +
                                 CoefficientIndex(batch, v, u)] = value;
   }
@@ -1203,7 +1275,26 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficients(
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
-  EncodeResidentCoefficientsKernel<<<batch.anchor_count, kThreads, 0, stream>>>(
+  EncodeResidentCoefficientsKernel<true, true>
+      <<<batch.anchor_count, kThreads, 0, stream>>>(
+      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+      batch, params);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqEncodeResidentCoefficientsReference(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
+    cudaStream_t stream) {
+  EncodeResidentCoefficientsKernel<false, false>
+      <<<batch.anchor_count, kThreads, 0, stream>>>(
       anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
       quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
       inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,

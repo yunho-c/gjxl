@@ -581,6 +581,17 @@ associated gather/scatter launches and device-memory round trips. Cached
 forward coefficients remain available for repeated AQ evaluations. Exact
 coefficient mode and the DCT8-only maximum-throughput path are unchanged.
 
+The resident coefficient kernel computes its small forward/inverse DC bases
+once per anchor block and reuses them across channels and samples. It retains
+the original FP32 formulas, constants, and accumulation order. Direct access
+to scale, bias, threshold, and sharpness values avoids dynamically indexed
+thread-local array copies; CUDA 11.8 reports a 32-byte rather than 112-byte
+stack frame, with 256 bytes of shared basis storage per block. The remaining
+stack belongs to the cosine large-argument path, not a zero-stack claim.
+This changes neither launch counts nor requested device allocation sizes or
+host/device transfers. A guarded original-kernel oracle covers all seven
+shapes, both quantization modes, changed-input reuse, and error paths.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
