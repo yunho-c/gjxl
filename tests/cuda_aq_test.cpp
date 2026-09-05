@@ -22,6 +22,7 @@
 #include "codec/gaborish.h"
 #include "codec/quantization.h"
 #include "codec/reconstruction.h"
+#include "codec/vardct_frame_internal.h"
 #include "codestream/encoder.h"
 #include "codestream/workflow_internal.h"
 #include "core/frame_geometry.h"
@@ -944,6 +945,13 @@ bool CheckResidentInvariantColorCorrelationContract(
     return false;
   }
   size_t reconstruction_staging = 1;
+  const auto poison_coefficients = [&] {
+    return Check(
+        gjxl::cuda_internal::PoisonCudaResidentCoefficientReadbackForTest(
+            *prepared,
+            gjxl::vardct_frame_internal::kUnwrittenQuantizedCoefficient),
+        "Poison CUDA host coefficient readback");
+  };
   const auto check_staging = [&](size_t expected) {
     return Check(
         gjxl::cuda_internal::GetCudaResidentReconstructionStagingBytesForTest(
@@ -983,7 +991,7 @@ bool CheckResidentInvariantColorCorrelationContract(
       .score = &score,
       .quantizer = &quantizer,
       .final = &final};
-  if (!Check(prepared->Evaluate(
+  if (!poison_coefficients() || !Check(prepared->Evaluate(
                  {.quant_field =
                       {evaluation_field.data(), blocks, blocks.width},
                   .quant_dc = evaluation_quant_dc},
@@ -1016,7 +1024,7 @@ bool CheckResidentInvariantColorCorrelationContract(
   const auto reference_blocks = block_map;
   ImageStorage reconstructed(kSourceExtent);
   final.reconstructed_linear_rgb = reconstructed.View();
-  if (!Check(prepared->Evaluate(
+  if (!poison_coefficients() || !Check(prepared->Evaluate(
                  {.quant_field =
                       {evaluation_field.data(), blocks, blocks.width},
                   .quant_dc = evaluation_quant_dc},
@@ -1042,7 +1050,7 @@ bool CheckResidentInvariantColorCorrelationContract(
     }
     final.reconstructed_linear_rgb =
         materialize ? reconstructed.View() : gjxl::Image3FView{};
-    if (!Check(prepared->Evaluate(
+    if (!poison_coefficients() || !Check(prepared->Evaluate(
                    {.quant_field =
                         {evaluation_field.data(), blocks, blocks.width},
                     .quant_dc = evaluation_quant_dc},

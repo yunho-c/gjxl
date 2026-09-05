@@ -564,6 +564,13 @@ staging planes before submitting work, and later requests reuse them.
 Readback validation still precedes publication to the caller's image, so
 failure does not expose a partial reconstruction.
 
+Required fully-resident AC-coefficient host staging is allocated without
+initial value initialization. The synchronous readback overwrites its full
+extent before validation or frame assembly can access it. This avoids an
+extra full-image host clear, but does not reduce its capacity or readback
+volume. Final frame coefficients retain the same group/channel order and
+zero-filled unused edge tails.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

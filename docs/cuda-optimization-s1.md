@@ -4,8 +4,8 @@
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
   AC gather/DCT plus residual/inverse/loss fusion, compact AC-search scratch,
   factorized resident DCT, cooperative quantization adjustment, fused Malta,
-  bounded-retention stream-ordered allocation, and on-demand reconstruction
-  host staging implemented;
+  bounded-retention stream-ordered allocation, on-demand reconstruction
+  host staging, and overwrite-only coefficient staging implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -18,7 +18,19 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest host-staging checkpoint against `83200fb`
+below supersede them. The latest coefficient-staging checkpoint against
+`b84ae35` removes a redundant 99.53 MB host clear at padded 4K without
+changing allocation capacity, transfers, kernels, or frame layout. A
+same-executable probe reduces combined staging/readback/assembly time from
+62.1 to 50.5 ms at 4K, with all nine paired host-stage observations favorable.
+Production warmed quantization improves 2.2% / 5.0% at 4K / 1080p, but total
+changes are small and mixed, and Flower regresses. No stable whole-encode
+speedup is claimed. A separate group-ordered assembly prototype is rejected
+after broader 4K regressions. All 59 CUDA / 47 CPU tests, three scoped
+sanitizer runs, serial/batch checks, and 23 byte-identical decoded image
+pairs pass. Optimization remains ongoing, not maxed out.
+
+The preceding host-staging checkpoint against `83200fb`
 removes 99.46 MB of unused host RGB staging from a 3839x2159 encode, with no
 change in device allocations, transfers, or kernels. A same-executable probe
 reduces the host staging allocation/initialization phase from 31.0 to 13.2 ms
@@ -3590,6 +3602,193 @@ metadata/setup. These are investigation targets, not proven removable costs:
 deferring initialization may simply move page-fault costs into readback.
 Coefficient handoff/assembly, metadata construction, remaining filters, and
 codestream host work remain material. The resident path is not maxed out.
+
+## Overwrite-only coefficient host staging follow-up (S34)
+
+### Cause and retained implementation
+
+The parent is `b84ae35`. After eliminating unused reconstructed-RGB host
+staging in S33, the required coefficient staging still initializes a full
+`3 * padded_width * padded_height` array of 32-bit coefficients to zero.
+Frame materialization then overwrites the entire array with a synchronous
+device-to-host batch before any host consumer can read it. This clears
+99,532,800 bytes at padded 4K, 24,883,200 bytes at padded 1080p, and
+3,293,184 bytes for Flower's 512x536 coding image, despite all those values
+being replaced by readback.
+
+The retained implementation uses an owning
+`std::make_unique_for_overwrite<int32_t[]>` array and an explicit span at
+frame assembly. The allocation still occurs during preparation and remains
+available for repeated materialization. Only value initialization is omitted:
+buffer size, ownership, readback byte count, synchronous completion checking,
+unwritten-coefficient validation, and final frame assembly remain unchanged.
+Failure returns before reading the staging or publishing a new frame.
+This removes a host write pass, not the staging allocation, required PCIe
+transfer, or final frame-layout copy. It is not a 99.5 MB memory saving.
+
+An internal test hook poisons every host coefficient with the unwritten
+sentinel before first materialization and repeated frame-only/diagnostic
+evaluations. Successful assembly and exact output comparisons require that
+readback replace the poison. Existing failure-atomicity, resident policy,
+maximum-error, and concurrent workflow tests remain applicable. The poison
+hook requires a quiescent prepared object and is not a public encoder mode.
+
+### Isolated experiments and rejected assembly change
+
+A same-executable prototype changes only initialized-vector versus
+overwrite-only coefficient staging. Three alternating process pairs per
+input use three warmups and three samples, with host staging, synchronous
+readback, and frame assembly measured separately. The combined metric sums
+those three stages per encode before taking a process median, so shifting
+cost between stages cannot masquerade as a saving.
+
+| Input | Staging ms, initialized / overwrite | Readback ms | Assembly ms | Combined ms |
+| --- | ---: | ---: | ---: | ---: |
+| 3839x2159 | 13.219 / 0.936 | 16.145 / 19.401 | 32.716 / 30.309 | 62.090 / 50.544 |
+| 1919x1079 | 5.037 / 0.319 | 4.145 / 5.433 | 10.328 / 10.513 | 19.432 / 16.393 |
+| Flower | 0.654 / 0.071 | 0.684 / 0.911 | 1.350 / 1.326 | 2.782 / 2.493 |
+
+These are marginal medians of the per-process observations; displayed stage
+medians need not sum to the displayed combined median. Readback becomes
+slower, so the staging-only reduction is not the net gain. Nevertheless,
+every one of the nine pairs improves the combined host-stage metric. Probe
+timers exclude logging; its broader wall observations remain in the raw
+artifact but are not substituted for ordinary production measurements.
+
+A separate prototype removes the final frame's initial full-array zeroing
+without changing its fixed-capacity group/channel format. It buckets
+validated transform references by AC group, appends coefficients in final
+group/channel order, and zeros only unused edge-group tails. This retains
+standard vector ownership and avoids changing the frame ABI. The existing
+frame unit tests pass in a separately linked probe, and natural-image
+pipeline observations initially look favorable at 1080p. The 4K host-stage
+result is mixed, prompting a wider assembly-only check before retention.
+
+The assembly-only benchmark compares three alternating process pairs,
+three warmups and five samples, for all-DCT8, DCT32-tiled with DCT8 edge
+remainder, and mixed layouts. Mixed tiles cycle through seven supported
+strategy shapes and fill the remaining blocks with DCT8. It verifies frame
+validity and matching whole-coefficient 64-bit checksums, including zero
+tails. Median paired assembly-time changes for the proposed append policy:
+
+| Source extent | All DCT8 | DCT32-tiled | Mixed |
+| --- | ---: | ---: | ---: |
+| 510x532 | +15.0% | -12.5% | -10.1% |
+| 1919x1079 | -4.8% | -20.6% | -4.2% |
+| 3839x2159 | +14.8% | +1.5% | +18.9% |
+
+The new grouping/append path is not retained. Its wider 4K regressions
+outweigh the narrow favorable observations. No common frame-assembly or
+frame-layout source changes are included in this checkpoint. A future
+direct readback into the final layout may avoid the intermediate copy, but
+must account for group tails, transfer count, GPU packing work, and atomic
+failure handling; the rejected append experiment does not establish that
+such a design wins.
+
+### Production wall measurements
+
+The retained binary and the frozen S33 parent run seven alternating process
+pairs per input, with three warmups and five samples in each process. The
+public fully-resident boundary remains linear RGB through an in-memory
+codestream at distance 1.2 / effort 7, excluding backend construction,
+input/file I/O, and optional final-score diagnostics. Negative paired change
+is faster. Paired changes are medians of per-pair ratios, not ratios of the
+displayed marginal medians.
+
+| Input | Total ms, parent / retained | Paired total change | Quantization ms | Paired quantization change |
+| --- | ---: | ---: | ---: | ---: |
+| 3839x2159 | 645.112 / 632.266 | -0.8% | 381.775 / 372.292 | -2.2% |
+| 1919x1079 | 156.539 / 152.713 | -0.5% | 74.476 / 70.396 | -5.0% |
+| Flower | 34.723 / 36.041 | +4.8% | 16.005 / 16.221 | +2.2% |
+
+Six of seven 4K quantization pairs improve, as do all seven 1080p pairs.
+Whole-encode results are less consistent: parent/retained process-median
+total ranges are 601.423-682.121 / 603.355-654.731 ms at 4K,
+153.180-170.467 / 149.260-159.676 ms at 1080p, and 30.767-38.426 /
+30.264-46.341 ms on Flower. The Flower regression is not omitted or used
+to select an input-size threshold. The same-executable host-stage probe
+supports removing the redundant clear; these ordinary production cohorts
+do not establish a stable whole-encode speedup.
+
+Separate first-encode measurements use seven pairs with zero warmups and
+one sample per process; backend construction is still excluded. Total
+parent/retained medians are 699.431 / 680.891 ms at 4K, 191.775 / 188.822 ms
+at 1080p, and 48.633 / 52.557 ms on Flower. Paired total changes are -2.7%,
+-1.5%, and +6.8%; paired quantization changes are -1.9%, -4.0%, and +4.6%.
+Total ranges are 691.137-761.165 / 646.591-784.791 ms,
+187.170-218.447 / 181.668-197.474 ms, and 46.205-52.225 /
+49.137-60.822 ms respectively. These are not full CLI startup measurements.
+
+Warm-cohort GPU samples span 66-73 C, P3, and 1282 MHz SM clocks. No clock,
+power, firewall, or OS-service settings are changed. No builds, tests,
+profilers, sanitizers, or other GPU experiments overlap ordinary timing.
+
+### GPU accounting and qualification
+
+Separate parent/retained Nsight captures use three warmups, one captured
+encode, and memory tracking. Exact ordered kernel names, launch geometry,
+register/shared/local-memory use, allocation sizes, transfer counts/bytes,
+peak logical requested memory, and retained pool reservations match. There
+are still five allocations/frees and 485 / 470 / 485 launches for 4K /
+1080p / Flower. Every encode has 31 H2D, 19 D2H, and one D2D copy. Byte
+totals remain 117,079,320 / 103,699,012 / 518,400 at 4K;
+29,336,392 / 25,924,192 / 129,600 at 1080p; and
+3,980,492 / 3,430,532 / 17,152 on Flower. Live requests and pool
+reservations remain the values documented in S32.
+
+Captured GPU kernel totals are 262.270 / 277.941 ms at 4K,
+42.965 / 41.645 ms at 1080p, and 7.808 / 7.818 ms on Flower. Device code
+is unchanged, and these variable instrumented observations are not evidence
+of a kernel-level gain. They verify unchanged GPU work and memory/transfer
+accounting.
+
+The CUDA build and expanded poisoned-readback AQ test pass. All 59 CUDA
+tests and all 47 CPU-only tests pass; common CPU sources are unchanged.
+The poison test covers first materialization and reuse, both frame-only and
+diagnostic reconstruction, with exact codestream/score/map comparisons.
+Existing reconstruction padding, transactional failure, resident-policy,
+maximum-error, and concurrent public-workflow checks also pass. Host
+allocation failure itself is not injected.
+
+All 23 parent/retained image pairs match SHA-256, encoded bytes, strategy
+counts, final encoder score, and independently decoded Butteraugli score.
+The seven-image corpus, distances 0.5 / 1.2 / 3 at effort 7, additional
+sample/Flower distance-1.2 effort-9 cases, pinned libjxl revision, explicit
+linear-sRGB decoding, and 80-nit metric setup remain unchanged from S32.
+The actual odd synthetic benchmark inputs differ slightly from the quality
+PFMs; the quality corpus is not presented as a byte comparison of those
+benchmark inputs.
+
+Serial/batch exact-output checks pass for 1080p sizes 1/2/4 in both
+fully-resident and maximum-throughput modes, and for 4K sizes 1/2 in
+fully-resident mode. Their median paired speedups are 0.958x / 1.268x /
+1.437x, 0.976x / 1.501x / 1.672x, and 1.047x / 1.091x respectively.
+These compare serial and batch operation of the current implementation,
+not before/after batch throughput. `s34_validate_evidence.py` verifies the
+exact paired profile structure and all 23 output/score identities.
+
+The complete expanded AQ test passes Compute Sanitizer memcheck, initcheck,
+and synccheck with zero errors. Memcheck enables
+`--track-stream-ordered-races all --leak-check full` and reports zero leaked
+bytes. No kernel filter or API-error suppression is used. The three runs
+take approximately 36, 24, and 19 seconds; full shared-memory racecheck is
+not claimed for this host-only change. All qualification jobs exit normally,
+with no permission/admin prompt, unexplained stall, or aborted sanitizer.
+
+Ignored `build-cuda-ninja/profiles/s34_*` artifacts retain the paired
+warm/cold measurements, GPU samples, Nsight captures and accounting,
+decoded qualification, serial/batch results, CTest archives, exact
+sanitizer commands/logs, and evidence assertions. The isolated experiments
+retain `s34_readback_probe.cpp`, `s34_frame_probe.cpp`,
+`s34_assembly_benchmark.cpp`, `s34_build_probes.ps1`, and the corresponding
+readback/frame/assembly measurement scripts and JSON results.
+`s33_retained_{encode,benchmark,batch}.exe` preserve the parent;
+`s34_retained_{encode,benchmark,batch}.exe` preserve the qualified candidate.
+
+The required coefficient readback, CPU frame-layout copy/validation,
+metadata setup, remaining filtering, and codestream host work remain
+material. Neither a uniform whole-encode gain nor a performance ceiling is
+demonstrated by this checkpoint.
 
 ## Work that should not lead the next cycle
 

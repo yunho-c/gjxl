@@ -228,6 +228,10 @@ class CudaPreparedResidentAqEvaluation final
     return bytes;
   }
 
+  void PoisonCoefficientReadbackForTest(int32_t value) {
+    std::fill_n(quantized_readback_.get(), coefficient_count_, value);
+  }
+
   Status Prepare(const AqEvaluationPreparation& preparation) {
     const bool has_resident_original =
       preparation.resident_original_linear_rgb.plane[0].buffer != nullptr ||
@@ -390,7 +394,10 @@ class CudaPreparedResidentAqEvaluation final
       block_readback_.resize(block_count_);
       maximum_readback_.resize(3 * block_count_);
       raw_readback_.resize(block_count_);
-      quantized_readback_.resize(coefficient_count_);
+      // The synchronous readback overwrites every coefficient before any host
+      // consumer can observe it. Avoid clearing this full-image array first.
+      quantized_readback_ =
+          std::make_unique_for_overwrite<int32_t[]>(coefficient_count_);
       quantized_dc_readback_.resize(3 * block_count_);
       y_to_x_readback_.resize(tile_count_);
       y_to_b_readback_.resize(tile_count_);
@@ -1882,7 +1889,7 @@ class CudaPreparedResidentAqEvaluation final
     const std::array<CudaDeviceToHostCopy, 5> readbacks{{
         {raw_quant_device_.buffer, raw_readback_.data(),
          block_count_ * sizeof(int32_t), raw_quant_device_.offset_bytes},
-        {quantized_device_.buffer, quantized_readback_.data(),
+        {quantized_device_.buffer, quantized_readback_.get(),
          coefficient_count_ * sizeof(int32_t), quantized_device_.offset_bytes},
         {quantized_dc_device_.buffer, quantized_dc_readback_.data(),
          3 * block_count_ * sizeof(int32_t),
@@ -1922,7 +1929,7 @@ class CudaPreparedResidentAqEvaluation final
                            block_extent_.width},
          .profile = options_.profile,
          .quantized_dc = quantized_dc,
-         .quantized_ac = quantized_readback_,
+         .quantized_ac = {quantized_readback_.get(), coefficient_count_},
          .transforms = layouts_,
          .reject_unwritten_coefficients = true},
         frame);
@@ -2544,7 +2551,7 @@ class CudaPreparedResidentAqEvaluation final
   std::vector<float> block_readback_;
   std::vector<float> maximum_readback_;
   std::vector<int32_t> raw_readback_;
-  std::vector<int32_t> quantized_readback_;
+  std::unique_ptr<int32_t[]> quantized_readback_;
   std::vector<int32_t> quantized_dc_readback_;
   std::vector<int8_t> y_to_x_readback_;
   std::vector<int8_t> y_to_b_readback_;
@@ -2579,6 +2586,17 @@ Status GetCudaResidentReconstructionStagingBytesForTest(
         "CUDA resident reconstruction staging query is invalid");
   }
   *bytes = resident->reconstruction_staging_bytes_for_test();
+  return Status::Ok();
+}
+
+Status PoisonCudaResidentCoefficientReadbackForTest(
+    PreparedAqEvaluation& prepared, int32_t value) {
+  auto* resident = dynamic_cast<CudaPreparedResidentAqEvaluation*>(&prepared);
+  if (resident == nullptr) {
+    return Status::InvalidArgument(
+        "CUDA resident coefficient readback poison target is invalid");
+  }
+  resident->PoisonCoefficientReadbackForTest(value);
   return Status::Ok();
 }
 

@@ -300,4 +300,8 @@ class CudaBackend final : public GpuBackend,
 [[nodiscard]] Status GetCudaResidentReconstructionStagingBytesForTest(
     const PreparedAqEvaluation& prepared, size_t* bytes);
 
+// Internal overwrite-coverage hook. The caller must quiesce the object.
+[[nodiscard]] Status PoisonCudaResidentCoefficientReadbackForTest(
+    PreparedAqEvaluation& prepared, int32_t value);
+
 }  // namespace gjxl::cuda_internal
