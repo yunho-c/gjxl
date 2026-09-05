@@ -211,6 +211,13 @@ struct Case {
       sharpness[kBlockOffset + anchor.y * params.block_width + anchor.x] = 8;
     }
     if (invalid == 4) forward[batch.coefficient_offset] = 1.0e15f;
+    if (invalid >= 5 && invalid <= 7) {
+      // X/B dequantization must retain its error checks even when its float
+      // output is omitted. Cover Y too, since prediction still consumes it.
+      const unsigned channel = invalid == 5 ? 0 : invalid == 6 ? 2 : 1;
+      tables[dequant + channel * n + n - 1] =
+          std::numeric_limits<float>::infinity();
+    }
   }
 };
 
@@ -231,11 +238,18 @@ struct DeviceCase {
     LaunchWith(c, gjxl::cuda_internal::LaunchCudaAqEncodeResidentCoefficientsUnfused,
                stream);
   }
+  void LaunchMaterialize(const Case& c, cudaStream_t stream = nullptr,
+                         bool null_reconstruction = false) {
+    LaunchWith(c, gjxl::cuda_internal::LaunchCudaAqMaterializeResidentCoefficients,
+               stream, null_reconstruction);
+  }
   using Launcher = decltype(
       &gjxl::cuda_internal::LaunchCudaAqEncodeResidentCoefficients);
-  void LaunchWith(const Case& c, Launcher launch, cudaStream_t stream) {
+  void LaunchWith(const Case& c, Launcher launch, cudaStream_t stream,
+                  bool null_reconstruction = false) {
     CheckCuda(launch(anchors.data, tables.data, raw.data + kBlockOffset,
-      cfl_x.data, cfl_b.data, forward.data, ac.data, reconstruction.data,
+      cfl_x.data, cfl_b.data, forward.data, ac.data,
+      null_reconstruction ? nullptr : reconstruction.data,
       dc.data + kBlockOffset, quantized_dc.data + kBlockOffset,
       sigma.data + kBlockOffset, sharpness.data + kBlockOffset, quantizer.data,
       thresholds.data, error.data, c.batch, c.params, stream));
@@ -263,7 +277,7 @@ void CheckGuards(const std::vector<T>& actual, const std::vector<T>& initial,
 void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
             bool adjust, unsigned invalid = 0) {
   Case c(strategy, count, pattern, adjust, invalid);
-  DeviceCase reference(c), unfused(c), cached(c);
+  DeviceCase reference(c), unfused(c), cached(c), materialized(c);
   for (unsigned reuse = 0; reuse < 2; ++reuse) {
     if (reuse != 0) {
       // Reuse the same allocations with changed inputs, not only an identical
@@ -271,13 +285,15 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
       for (size_t i = 0; i < c.forward.size(); ++i)
         if (c.active_coefficients[i] && std::isfinite(c.forward[i]))
           c.forward[i] = -0.75f * c.forward[i] + (i % 11) * 0.00003f;
-      for (auto* device : {&reference, &unfused, &cached})
+      for (auto* device : {&reference, &unfused, &cached, &materialized})
         CheckCuda(cudaMemcpy(device->forward.data, c.forward.data(),
           c.forward.size() * sizeof(float), cudaMemcpyHostToDevice));
     }
     reference.Launch(c, false);
     unfused.LaunchUnfused(c);
     cached.Launch(c, true);
+    // First prove no writes to a guarded output, then use a null pointer.
+    materialized.LaunchMaterialize(c, nullptr, reuse != 0);
     CheckCuda(cudaDeviceSynchronize());
     for (const auto* expected : {&unfused, &reference}) {
       try {
@@ -297,9 +313,28 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
         throw;
       }
     }
+    try {
+      CheckEqual("materialized AC", cached.ac.Read(), materialized.ac.Read());
+      CheckEqual("materialized DC", cached.dc.Read(), materialized.dc.Read());
+      CheckEqual("materialized DC integer", cached.quantized_dc.Read(),
+                 materialized.quantized_dc.Read());
+      CheckEqual("materialized inverse sigma", cached.sigma.Read(),
+                 materialized.sigma.Read());
+      CheckEqual("materialized error", cached.error.Read(),
+                 materialized.error.Read());
+      CheckEqual("untouched reconstruction", c.reconstruction,
+                 materialized.reconstruction.Read());
+    } catch (...) {
+      std::cerr << "materialization strategy=" << static_cast<unsigned>(strategy)
+                << " count=" << count << " pattern=" << pattern
+                << " adjust=" << adjust << " invalid=" << invalid
+                << " reuse=" << reuse << '\n';
+      throw;
+    }
     const unsigned error = cached.error.Read()[0];
     const unsigned required = invalid == 1 ? 1u : invalid == 2 ? 257u :
-                              invalid == 3 ? 128u : invalid == 4 ? 8u : 0u;
+                              invalid == 3 ? 128u : invalid == 4 ? 8u :
+                              invalid >= 5 ? 4u : 0u;
     if ((error & (kInitialError | required)) != (kInitialError | required) ||
         (invalid == 0 && error != kInitialError))
       throw std::runtime_error("Coefficient error flags incorrect");
@@ -319,7 +354,13 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
       active_sigma[i] = active_sigma[i] && adjust && c.sharpness[i] < 8;
     CheckGuards(cached.sigma.Read(), c.sigma, active_sigma, "inverse sigma");
   }
-  for (const auto* device : {&reference, &unfused, &cached}) {
+  // A full evaluation after materialization must overwrite every active
+  // reconstruction entry, without depending on the skipped float output.
+  materialized.Launch(c, true);
+  CheckCuda(cudaDeviceSynchronize());
+  CheckEqual("reconstruction after materialization", cached.reconstruction.Read(),
+             materialized.reconstruction.Read());
+  for (const auto* device : {&reference, &unfused, &cached, &materialized}) {
     if (!Equal(device->anchors.Read(), c.anchors) ||
         !Equal(device->tables.Read(), c.tables) ||
         !Equal(device->forward.Read(), c.forward) ||
@@ -348,14 +389,14 @@ int main() {
             Verify(strategy, count, pattern, adjust);
             ++cases;
           }
-      for (unsigned invalid = 1; invalid <= 4; ++invalid) {
+      for (unsigned invalid = 1; invalid <= 7; ++invalid) {
         Verify(strategy, 3, 5, true, invalid);
         ++cases;
       }
     }
     std::cout << "Verified " << cases
               << " guarded resident coefficient cases against original and "
-                 "unfused kernels, including reuse\n";
+                 "unfused kernels, including materialization and reuse\n";
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;

@@ -807,7 +807,8 @@ __global__ void SelectAdjustedQuantizationKernel(
   }
 }
 
-template <bool CacheDcBasis, bool DirectTables, bool FuseCoefficients>
+template <bool CacheDcBasis, bool DirectTables, bool FuseCoefficients,
+          bool MaterializeOnly = false>
 __device__ __forceinline__ void EncodeResidentCoefficientsBody(
     const CudaAqAnchor* anchors, const float* quant_tables,
     const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
@@ -825,23 +826,28 @@ __device__ __forceinline__ void EncodeResidentCoefficientsBody(
   // Only 1/2/4-element DC transforms occur. Reuse each original basis value
   // across channels and output samples without changing the reduction order.
   // The existing pre-DC barrier also publishes these tables.
-  [[maybe_unused]] __shared__ float basis[CacheDcBasis ? 64 : 1];
+  [[maybe_unused]] __shared__ float
+      basis[CacheDcBasis ? (MaterializeOnly ? 32 : 64) : 1];
   if constexpr (CacheDcBasis) {
     if (thread_index < batch.covered_width * batch.covered_width) {
       const uint32_t frequency = thread_index / batch.covered_width;
       const uint32_t sample = thread_index % batch.covered_width;
       basis[frequency * 4 + sample] =
         InverseBasis(batch.covered_width, frequency, sample);
-      basis[32 + frequency * 4 + sample] =
-        ForwardBasis(batch.covered_width, frequency, sample);
+      if constexpr (!MaterializeOnly) {
+        basis[32 + frequency * 4 + sample] =
+          ForwardBasis(batch.covered_width, frequency, sample);
+      }
     }
     if (thread_index < batch.covered_height * batch.covered_height) {
       const uint32_t frequency = thread_index / batch.covered_height;
       const uint32_t sample = thread_index % batch.covered_height;
       basis[16 + frequency * 4 + sample] =
         InverseBasis(batch.covered_height, frequency, sample);
-      basis[48 + frequency * 4 + sample] =
-        ForwardBasis(batch.covered_height, frequency, sample);
+      if constexpr (!MaterializeOnly) {
+        basis[48 + frequency * 4 + sample] =
+          ForwardBasis(batch.covered_height, frequency, sample);
+      }
     }
   }
   const uint32_t channel_stride = batch.anchor_count * batch.coefficient_count;
@@ -1002,7 +1008,8 @@ __device__ __forceinline__ void EncodeResidentCoefficientsBody(
           quantized_y, quant_tables[table_offsets.dequant + y_table],
           quantizer[0], raw, 1.0f, 1, error);
       quantized_coefficients[y_offset] = quantized_y;
-      reconstruction_coefficients[y_offset] = reconstructed_y;
+      if constexpr (!MaterializeOnly)
+        reconstruction_coefficients[y_offset] = reconstructed_y;
       for (uint32_t channel_pass = 0; channel_pass < 2; ++channel_pass) {
         const uint32_t channel = channel_pass == 0 ? 0 : 2;
         const size_t offset =
@@ -1025,8 +1032,12 @@ __device__ __forceinline__ void EncodeResidentCoefficientsBody(
         // Match the unfused restoration's FMA after dequantization has
         // rounded to float. Otherwise inlining can contract a different
         // multiplication from DequantizeCoefficient into this addition.
-        reconstruction_coefficients[offset] =
-            fmaf(factor, reconstructed_y, reconstructed);
+        // Materialization still dequantizes X/B above: its finite-value
+        // checks are part of the error contract even without float output.
+        if constexpr (!MaterializeOnly) {
+          reconstruction_coefficients[offset] =
+              fmaf(factor, reconstructed_y, reconstructed);
+        }
       }
     }
   } else {
@@ -1100,6 +1111,10 @@ __device__ __forceinline__ void EncodeResidentCoefficientsBody(
                                   coefficient] += cfl_b * reconstructed_y;
     }
   }
+  // Encoding-only finalization has no inverse transform or diagnostic
+  // reconstruction consumer. All threads skip LLF restoration together;
+  // DC extraction/quantization and every error check above remain intact.
+  if constexpr (MaterializeOnly) return;
   __syncthreads();
 
   for (uint32_t llf_task = thread_index; llf_task < 3 * covered_count;
@@ -1144,7 +1159,8 @@ __global__ void EncodeResidentCoefficientsKernel(
       batch, params);
 }
 
-template <bool CacheDcBasis, bool DirectTables, bool FuseCoefficients>
+template <bool CacheDcBasis, bool DirectTables, bool FuseCoefficients,
+          bool MaterializeOnly = false>
 // Keep four 256-thread blocks feasible on the qualified SM86 device. Without
 // this bound fusion uses 66 registers and reduces active blocks from four to
 // three. Leave the arithmetic/performance oracles independently unbounded.
@@ -1157,7 +1173,8 @@ EncodeResidentCoefficientsKernelBounded(
     float* inverse_sigma, const unsigned char* epf_sharpness,
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params) {
-  EncodeResidentCoefficientsBody<CacheDcBasis, DirectTables, FuseCoefficients>(
+  EncodeResidentCoefficientsBody<CacheDcBasis, DirectTables, FuseCoefficients,
+                                MaterializeOnly>(
       anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
       quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
       inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
@@ -1368,6 +1385,24 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficients(
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
   EncodeResidentCoefficientsKernelBounded<true, true, true>
+      <<<batch.anchor_count, kThreads, 0, stream>>>(
+      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+      batch, params);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqMaterializeResidentCoefficients(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
+    cudaStream_t stream) {
+  EncodeResidentCoefficientsKernelBounded<true, true, true, true>
       <<<batch.anchor_count, kThreads, 0, stream>>>(
       anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
       quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,

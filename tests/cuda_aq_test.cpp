@@ -1067,6 +1067,77 @@ bool CheckResidentInvariantColorCorrelationContract(
                "Encode reused reconstruction result") ||
         bytes != reference_bytes) return false;
   }
+  // Exercise the actual coefficient-only policy branch, then request a
+  // complete reconstruction from the same prepared object and final field.
+  // A second policy run with final evaluation enabled is an independent
+  // full-path oracle for the final frame, field, score, and diagnostic RGB.
+  for (size_t iterations : {size_t{1}, size_t{2}}) {
+    std::vector<float> policy_field(block_count);
+    std::vector<float> policy_blocks(block_count);
+    std::vector<double> policy_scores;
+    gjxl::VarDctEncoderFrame policy_frame, evaluated_frame;
+    ImageStorage policy_rgb(kSourceExtent, kPoison);
+    ImageStorage evaluated_rgb(kSourceExtent, kPoison);
+    gjxl::AqResidentButteraugliPolicyInput policy_input{
+        .adjusted_initial_quant_field = {
+            iterations == 1 ? evaluation_field.data() : prepared_field.data(),
+            blocks, blocks.width},
+        .quant_dc = evaluation_quant_dc,
+        .butteraugli_target = 1.0f,
+        .lower_bound = 0.2f,
+        .upper_bound = 4.0f,
+        .iterations = iterations,
+        .evaluate_final_field = false};
+    gjxl::AqResidentButteraugliPolicyOutput policy_output{
+        .quant_field = {policy_field.data(), blocks, blocks.width},
+        .score_history = &policy_scores,
+        .frame = &policy_frame};
+    if (!poison_coefficients() ||
+        !Check(prepared->EvaluateResidentButteraugliPolicy(
+                   policy_input, policy_output),
+               "Materialize coefficient-only resident policy") ||
+        policy_scores.size() != iterations || !policy_frame.valid()) return false;
+    const auto materialized_field = policy_field;
+    const auto materialized_scores = policy_scores;
+    std::vector<uint8_t> materialized_bytes, evaluated_bytes, policy_bytes;
+    gjxl::QuantizerParams evaluated_quantizer;
+    double evaluated_score = 0.0;
+    gjxl::AqEvaluationOutput::Final evaluated_final{
+        .reconstructed_linear_rgb = evaluated_rgb.View(),
+        .frame = &evaluated_frame};
+    if (!Check(gjxl::EncodeVarDctCodestream(policy_frame, &materialized_bytes),
+               "Encode materialized resident policy") ||
+        !Check(prepared->Evaluate(
+                   {.quant_field = {policy_field.data(), blocks, blocks.width},
+                    .quant_dc = evaluation_quant_dc},
+                   {.block_distance_map = {
+                        policy_blocks.data(), blocks, blocks.width},
+                    .score = &evaluated_score,
+                    .quantizer = &evaluated_quantizer,
+                    .final = &evaluated_final}),
+               "Reconstruct after coefficient-only resident policy") ||
+        !Check(gjxl::EncodeVarDctCodestream(evaluated_frame, &evaluated_bytes),
+               "Encode reconstructed resident policy") ||
+        evaluated_bytes != materialized_bytes) return false;
+    const auto evaluated_blocks = policy_blocks;
+    policy_input.evaluate_final_field = true;
+    policy_output.block_distance_map = {
+        policy_blocks.data(), blocks, blocks.width};
+    policy_output.reconstructed_linear_rgb = policy_rgb.View();
+    if (!Check(prepared->EvaluateResidentButteraugliPolicy(
+                   policy_input, policy_output),
+               "Evaluate final resident policy oracle") ||
+        !Check(gjxl::EncodeVarDctCodestream(policy_frame, &policy_bytes),
+               "Encode final resident policy oracle") ||
+        policy_bytes != materialized_bytes || policy_field != materialized_field ||
+        policy_scores.size() != iterations + 1 ||
+        !std::equal(materialized_scores.begin(), materialized_scores.end(),
+                    policy_scores.begin()) || policy_scores.back() != evaluated_score ||
+        policy_blocks != evaluated_blocks || policy_rgb.plane != evaluated_rgb.plane) {
+      std::cerr << "Coefficient-only policy changed final evaluation or reuse\n";
+      return false;
+    }
+  }
   for (auto& plane : reconstructed.plane)
     std::fill(plane.begin(), plane.end(), kPoison);
   const auto untouched_reconstruction = reconstructed.plane;

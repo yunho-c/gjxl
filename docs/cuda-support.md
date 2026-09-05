@@ -601,6 +601,14 @@ intermediate reconstruction accesses are removed. A separate bounded entry
 keeps four 256-thread blocks feasible on the qualified SM86 device without
 changing the unbounded arithmetic/performance reference kernels.
 
+Encoding-only resident policy finalization has a specialized coefficient
+entry that omits unused float reconstruction stores and LLF restoration.
+It retains reconstructed Y for prediction and all dequantization/error
+checks. Scored iterations and diagnostic reconstruction use the full entry;
+the encoding-only branch rejects diagnostic outputs and passes a null float
+reconstruction pointer. The existing arena remains necessary for preceding
+scored iterations, so this does not reduce allocation capacity or transfers.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

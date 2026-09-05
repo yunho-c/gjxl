@@ -99,6 +99,19 @@ struct CudaAqResidentPolicyParams {
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream);
 
+// Encoding-only final pass: all integer/DC/sigma/error outputs match the full
+// path, but reconstruction_coefficients is neither read nor written and may
+// be null. Never use when an inverse transform or diagnostic image follows.
+[[nodiscard]] cudaError_t LaunchCudaAqMaterializeResidentCoefficients(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
+    cudaStream_t stream);
+
 // Retained S36 implementation for isolated coefficient-fusion comparisons.
 [[nodiscard]] cudaError_t LaunchCudaAqEncodeResidentCoefficientsUnfused(
     const CudaAqAnchor* anchors, const float* quant_tables,

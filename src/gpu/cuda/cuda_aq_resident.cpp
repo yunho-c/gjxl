@@ -2324,7 +2324,10 @@ class CudaPreparedResidentAqEvaluation final
             Pointer<unsigned int>(self.error_device_), batch, params,
             backend.state_->stream);
         if (status != cudaSuccess) return status;
-        status = LaunchCudaAqEncodeResidentCoefficients(
+        // This branch rejects diagnostic reconstruction and only assembles
+        // integer coefficients. A later evaluation rewrites the complete
+        // reconstruction before running any inverse transform or filter.
+        status = LaunchCudaAqMaterializeResidentCoefficients(
             Pointer<CudaAqAnchor>(self.anchors_device_),
             Pointer<const float>(self.quant_tables_device_),
             Pointer<const int>(self.raw_quant_device_),
@@ -2332,7 +2335,7 @@ class CudaPreparedResidentAqEvaluation final
             Pointer<const signed char>(self.y_to_b_device_),
             Pointer<const float>(self.forward_device_),
             Pointer<int>(self.quantized_device_),
-            Pointer<float>(self.reconstruction_coefficients_device_),
+            nullptr,
             Pointer<float>(self.dc_device_),
             Pointer<int>(self.quantized_dc_device_),
             Pointer<float>(self.inverse_sigma_device_),
