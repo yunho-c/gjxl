@@ -1181,6 +1181,87 @@ EncodeResidentCoefficientsKernelBounded(
       batch, params);
 }
 
+template <unsigned Width, unsigned Height, unsigned Threads,
+          bool MaterializeOnly>
+__global__ __launch_bounds__(Threads, 1024 / Threads) void
+EncodeResidentCoefficientsShapeKernel(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params) {
+  // Dispatch verifies these fields before selecting a constant-shape entry.
+  // Anchor counts/offsets, channel stride, and all image pitches stay dynamic.
+  batch.pixel_width = Width;
+  batch.pixel_height = Height;
+  batch.coefficient_count = Width * Height;
+  batch.covered_width = Width / 8;
+  batch.covered_height = Height / 8;
+  params.strategy = Width * Height == 64 ? 0 : Width * Height == 128 ? 6 :
+                    Width * Height == 256 ? 4 : Width * Height == 512 ? 10 : 5;
+  EncodeResidentCoefficientsBody<true, true, true, MaterializeOnly>(
+      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+      batch, params);
+}
+
+template <unsigned Width, unsigned Height>
+struct ResidentCoefficientShape {
+  static constexpr unsigned width = Width, height = Height;
+};
+
+template <bool MaterializeOnly>
+cudaError_t LaunchResidentCoefficientShapes(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
+    cudaStream_t stream) {
+  const auto generic = [&] {
+    EncodeResidentCoefficientsKernelBounded<true, true, true, MaterializeOnly>
+        <<<batch.anchor_count, kThreads, 0, stream>>>(
+        anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+        quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+        inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+        batch, params);
+    return cudaGetLastError();
+  };
+  const auto launch = [&](auto shape) {
+    constexpr unsigned width = decltype(shape)::width;
+    constexpr unsigned height = decltype(shape)::height;
+    constexpr unsigned threads =
+        width * height < kThreads ? width * height : kThreads;
+    if (batch.pixel_width != width || batch.pixel_height != height ||
+        batch.coefficient_count != width * height ||
+        batch.covered_width != width / 8 || batch.covered_height != height / 8)
+      return generic();
+    EncodeResidentCoefficientsShapeKernel<width, height, threads, MaterializeOnly>
+        <<<batch.anchor_count, threads, 0, stream>>>(
+        anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+        quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+        inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+        batch, params);
+    return cudaGetLastError();
+  };
+  switch (params.strategy) {
+    case 0: return launch(ResidentCoefficientShape<8, 8>{});
+    case 4: return launch(ResidentCoefficientShape<16, 16>{});
+    case 5: return launch(ResidentCoefficientShape<32, 32>{});
+    // Format names use rows x columns; kernel tags use physical width/height.
+    case 6: return launch(ResidentCoefficientShape<8, 16>{});
+    case 7: return launch(ResidentCoefficientShape<16, 8>{});
+    case 10: return launch(ResidentCoefficientShape<16, 32>{});
+    case 11: return launch(ResidentCoefficientShape<32, 16>{});
+    default: return generic();
+  }
+}
+
 __global__ void ResidentPolicyInitializeKernel(
     const float* quant_field, float* initial_quant_field, float* scores,
     unsigned int* error, CudaAqResidentPolicyParams params) {
@@ -1384,6 +1465,38 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficients(
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
+  return LaunchResidentCoefficientShapes<false>(
+      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+      batch, params, stream);
+}
+
+cudaError_t LaunchCudaAqMaterializeResidentCoefficients(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
+    cudaStream_t stream) {
+  return LaunchResidentCoefficientShapes<true>(
+      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+      batch, params, stream);
+}
+
+cudaError_t LaunchCudaAqEncodeResidentCoefficientsGeneric(
+    const CudaAqAnchor* anchors, const float* quant_tables,
+    const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
+    const float* forward_coefficients, int* quantized_coefficients,
+    float* reconstruction_coefficients, float* dc, int* quantized_dc,
+    float* inverse_sigma, const unsigned char* epf_sharpness,
+    const unsigned int* quantizer, const float* adjustment_thresholds,
+    unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
+    cudaStream_t stream) {
   EncodeResidentCoefficientsKernelBounded<true, true, true>
       <<<batch.anchor_count, kThreads, 0, stream>>>(
       anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
@@ -1393,7 +1506,7 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficients(
   return cudaGetLastError();
 }
 
-cudaError_t LaunchCudaAqMaterializeResidentCoefficients(
+cudaError_t LaunchCudaAqMaterializeResidentCoefficientsGeneric(
     const CudaAqAnchor* anchors, const float* quant_tables,
     const int* raw_quant, const signed char* y_to_x, const signed char* y_to_b,
     const float* forward_coefficients, int* quantized_coefficients,

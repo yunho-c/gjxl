@@ -585,9 +585,9 @@ The resident coefficient kernel computes its small forward/inverse DC bases
 once per anchor block and reuses them across channels and samples. It retains
 the original FP32 formulas, constants, and accumulation order. Direct access
 to scale, bias, threshold, and sharpness values avoids dynamically indexed
-thread-local array copies; CUDA 11.8 reports a 32-byte rather than 112-byte
-stack frame, with 256 bytes of shared basis storage per block. The remaining
-stack belongs to the cosine large-argument path, not a zero-stack claim.
+thread-local array copies; the generic CUDA 11.8 entry reports a 32-byte
+rather than 112-byte stack frame, with 256 bytes of shared basis storage per
+block. Its remaining stack belongs to the cosine large-argument path.
 This changes neither launch counts nor requested device allocation sizes or
 host/device transfers. A guarded original-kernel oracle covers all seven
 shapes, both quantization modes, changed-input reuse, and error paths.
@@ -608,6 +608,19 @@ checks. Scored iterations and diagnostic reconstruction use the full entry;
 the encoding-only branch rejects diagnostic outputs and passes a null float
 reconstruction pointer. The existing arena remains necessary for preceding
 scored iterations, so this does not reduce allocation capacity or transfers.
+
+Both full and encoding-only coefficient entries now specialize all seven
+production physical transform shapes. Checked dispatch supplies compile-time
+dimensions while preserving dynamic anchors, offsets, pitches, quantization
+values, arithmetic order, and error checks. Noncanonical internal batches
+retain the generic entry's behavior. Blocks use 64 threads for 8x8, 128 for
+8x16/16x8, and 256 for larger shapes. On the qualified CUDA 11.8/SM86 build,
+all fourteen specialized entries have zero stack/local allocation and use
+40-48 registers; full/materialization shared storage remains 256/128 bytes.
+Original, unfused, and generic controls remain available to differential
+tests. See the [S39 study](cuda-optimization-s1.md#shape-specialized-resident-coefficients-s39)
+for measured results and operating-state limitations; these resources do not
+by themselves establish an end-to-end speedup or cross-device qualification.
 
 ### Math and kernel strategy
 

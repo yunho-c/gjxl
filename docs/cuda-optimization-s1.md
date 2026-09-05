@@ -8,7 +8,7 @@
   host staging, overwrite-only coefficient staging, and direct resident
   transform image I/O, reused resident coefficient bases, direct local
   value access, fused resident coefficient passes, and encoding-only
-  coefficient materialization implemented;
+  coefficient materialization and shape-specialized coefficient blocks implemented;
   optimization ongoing
 - Profile revision: `a474937`
 - Profile date: 2026-09-04
@@ -21,7 +21,21 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `e968baa` omits unused
+below supersede them. The latest checkpoint against `6fa9132` specializes
+the seven physical resident coefficient shapes for both scored and
+encoding-only passes, using smaller blocks for 64/128-coefficient transforms.
+All fourteen native entries have zero stack/local allocation and retain the
+existing arithmetic and error contracts. Three production profile pairs
+reduce the coefficient subset by median paired 42.8% / 36.5% at 4K / 1080p.
+Total GPU changes are -0.5% / -1.4%, but whole-encoder wall timing remains
+mixed; no stable end-to-end gain is established. All 61 CUDA / 47 CPU tests,
+seven scoped sanitizer checks, serial/batch checks, and 46 byte-identical
+decoded image pairs pass. Explicit allocations and transfers are unchanged.
+A sustained isolated probe directly observes software thermal/power limiting;
+this limits performance interpretation, not correctness qualification. No
+system settings are changed. Optimization remains ongoing, not maxed out.
+
+The preceding checkpoint against `e968baa` omits unused
 float reconstruction and LLF restoration in the encoding-only final
 coefficient pass, preserving all validation and diagnostic paths. Three
 production profile pairs reduce that final pass by median paired 33.0% /
@@ -4805,6 +4819,232 @@ anchor, even for 64/128-coefficient transforms, and retain runtime shape
 arithmetic. Shape specialization and block-size experiments are concrete
 next candidates, alongside quantization-invariant hoisting. CPU coefficient
 handoff/assembly, perceptual filtering, and codestream work remain material.
+
+## Shape-specialized resident coefficients (S39)
+
+### Cause and retained implementation
+
+S38 (`6fa9132`) still launches a generic 256-thread block per anchor for
+every physical shape. Small 64/128-coefficient transforms cannot use every
+thread for their main coefficient work, and runtime dimensions survive into
+basis construction and indexing. The follow-up specializes seven physical
+width/height pairs for both full reconstruction and final materialization.
+It reuses the unchanged coefficient body, preserving FP32 operation order,
+the explicit rounding-preserving FMA, quantization decisions, and error
+checks. Anchors, offsets, channel stride, pitches, and matrix/scalar values
+remain dynamic.
+
+Dispatch checks pixel dimensions, coefficient count, and covered dimensions
+before selecting a specialization. Unknown strategies or noncanonical
+internal batches retain the S38 generic behavior. Format strategy names use
+rows x columns, whereas kernel tags use physical width x height: strategy 6
+(`DCT16x8`) selects physical 8x16, and strategy 7 selects 16x8; strategies
+10/11 similarly select 16x32/32x16. Both rectangular orientations use the
+same corresponding quantization-table offset. An initial prototype reversed
+those tags and therefore fell back to generic entries for rectangles; it
+passed numerical tests but was corrected before timing. Production profile
+validation now asserts that every coefficient launch actually specializes.
+
+Blocks use `min(width * height, 256)` threads, with a launch bound targeting
+1024 threads across resident blocks. This is a compiler resource constraint,
+not a claim of measured occupancy. On the qualified CUDA 11.8/SM86 build:
+
+| Physical width x height | Threads | Registers full/materialize | Stack/local bytes | Shared bytes full/materialize |
+|---|---:|---:|---:|---:|
+| 8x8 | 64 | 46 / 40 | 0 / 0 | 256 / 128 |
+| 8x16 | 128 | 47 / 42 | 0 / 0 | 256 / 128 |
+| 16x8 | 128 | 44 / 40 | 0 / 0 | 256 / 128 |
+| 16x16 | 256 | 47 / 42 | 0 / 0 | 256 / 128 |
+| 16x32 | 256 | 47 / 42 | 0 / 0 | 256 / 128 |
+| 32x16 | 256 | 47 / 42 | 0 / 0 | 256 / 128 |
+| 32x32 | 256 | 48 / 45 | 0 / 0 | 256 / 128 |
+
+All fourteen specialized kernels have zero stack/local allocation, versus
+32-byte stack frames in S38's bounded full/materialization entries. Full
+and materialization barrier counts remain three and two. Four retained
+generic/reference native bodies match S38 exactly. Final specialized native
+bodies match the measured sized-block executable exactly; temporary
+fixed-block comparison entry points are removed from production source.
+Added specializations are not claimed to have zero module-code footprint.
+
+The guarded fixture still runs 301 cases across all seven strategies,
+both quantization modes, changed-input reuse, finite and invalid inputs,
+dequantization overflow in each channel, offsets, gaps, and immutable
+inputs. It now compares the new full entry with S38 generic, S36 unfused,
+and original controls, and materialization with both generic materialization
+and the full result. Guarded/no-write then null reconstruction pointers and
+later reconstruction rebuilding remain covered. Four additional bounded
+noncanonical cases exercise unknown strategy, aliased opposite orientation,
+coefficient-count mismatch, and covered-dimension mismatch under both
+policies. Existing prepared-AQ scored/unscored policy-reuse tests also pass.
+
+### Experiments and operating-state limitation
+
+Three same-executable studies retain all observations. Each uses default
+matrices, deterministic pattern-5 inputs, valid gapped anchors, separate
+buffers per variant, both full/materialization policies, all seven shapes,
+and complete homogeneous tiles within requested 512x536 and 3840x2160
+extents. Allocation, initialization, and output verification are outside
+CUDA-event timing. These are not end-to-end encodes.
+
+The first study specializes shapes but keeps 256 threads for every shape.
+Five alternating-order pairs, ten warmups, and eleven samples of three
+launches per sample favor specialization in all 28 shape/extent/policy
+median pairs: ratios range 0.602-0.852 for the smaller extent and
+0.633-0.844 for the larger extent. The second study adds 64/128-thread
+blocks and uses the same protocol. It favors the candidate in 27 of 28
+median pairs, but large `DCT32x16` materialization regresses 8.6%, despite
+retaining the same 256-thread native body as the first study. Absolute
+timings also vary substantially; that unfavorable observation is retained.
+
+A third study compares generic, specialized/fixed-256, and specialized/sized
+entries in all six order permutations. Each variant receives at least
+200 ms of warmup before eleven three-launch event samples. It verifies all
+six outputs before timing and records GPU state around each shape case.
+Native comparison proves that the changed 64/128-thread entries have the
+same instruction bodies as their fixed-256 controls; launch configuration
+is the difference. Larger shapes call the same 256-thread kernel through
+both specialized wrappers, but still use separate buffer allocations.
+
+Across this sustained study, sized/generic median ratios favor specialization
+in 24 of 28 cases. Regressions are small-extent full `DCT16x32` (+0.1%)
+and `DCT32x32` (+15.8%), and large-extent full `DCT32x16` (+2.2%) and
+`DCT16x32` (+2.4%). For the twelve comparisons where launch size actually
+changes (three small shapes, two extents, two policies), sized/fixed ratios
+range 0.819-1.000, all favorable or nearly flat. This supports retaining
+the smaller blocks; it does not establish a uniform generic-to-specialized
+speedup. Even unchanged larger-shape kernels show substantial timing
+variation, with buffer placement and operating state not fully controlled.
+
+At 2026-09-05 21:46:00 UTC during the sustained probe, a read-only GPU
+query reports 100% utilization, 79 C, 262 MHz, and active software thermal
+slowdown and software power-cap flags. Hardware thermal slowdown and
+hardware power-brake flags are inactive in that sample. A subsequent
+read-only detailed report shows a current/requested 40 W power limit,
+versus a reported 60 W default. The GPU later cools to 68 C before final
+qualification, but flags can still appear in between-workload snapshots;
+the final measurements are not claimed to be uniformly unthrottled.
+
+This directly establishes a performance constraint during this probe, not
+the cause of every timing difference or of the earlier long full-AQ
+racecheck. No firewall cause is established. The user is notified of the
+observed limitation; no power, cooling, clock, priority, service, or firewall
+setting is changed. The instantaneous sample and post-probe detailed report
+are preserved as `s39_observed_gpu_limit_sample.txt` and
+`s39_post_probe_gpu_limits.txt` under the ignored profiles directory.
+
+### Public workflow timing and qualification
+
+Seven alternating-order warm pairs use three warmups and five samples;
+seven cold pairs use zero warmups and one sample. Changes are medians of
+paired ratios, not ratios of displayed marginal medians.
+
+| Cohort/input | Total parent/new (ms) | Paired total change | Quantization parent/new (ms) | Paired quantization change |
+|---|---:|---:|---:|---:|
+| Warm 4K | 631.129 / 621.108 | +0.4% | 362.980 / 353.615 | -0.3% |
+| Warm 1080p | 150.316 / 162.614 | -0.1% | 67.650 / 70.315 | +3.6% |
+| Warm Flower | 31.520 / 31.302 | +0.7% | 14.159 / 14.142 | +1.6% |
+| Cold 4K | 683.534 / 679.137 | +2.2% | 435.174 / 444.968 | +1.6% |
+| Cold 1080p | 188.661 / 188.250 | -2.7% | 100.569 / 99.952 | -0.1% |
+| Cold Flower | 52.198 / 52.017 | +1.8% | 27.660 / 28.482 | +1.7% |
+
+No stable whole-encoder or cold-start speedup is established. Warm 4K
+parent/new ranges are 597.718-707.979 / 587.826-668.096 ms; warm 1080p
+ranges are 147.121-168.046 / 146.683-170.428 ms. Public profile captures
+use three warmups and one captured encode with CUDA memory tracing:
+
+| Input | Final coefficient pass parent/new (ms) | All coefficient passes parent/new (ms) | All kernels parent/new (ms) |
+|---|---:|---:|---:|
+| Odd 4K | 4.721433 / 2.983469 | 12.997230 / 7.449501 | 248.445778 / 247.207837 |
+| Odd 1080p | 0.594318 / 0.284102 | 1.819311 / 1.036377 | 40.648403 / 37.177459 |
+| Flower | 0.122627 / 0.070307 | 0.473709 / 0.233099 | 7.145048 / 6.901906 |
+
+Two further pairs per larger input run after sanitizer qualification with
+identical capture flags and three warmups/one capture. Repeat 1 runs the
+candidate first; repeat 2 runs the parent first. All observations are kept:
+
+| Input/pair | Final coefficient pass parent/new (ms) | All coefficient passes parent/new (ms) | All kernels parent/new (ms) |
+|---|---:|---:|---:|
+| 4K repeat 1 | 5.207173 / 3.254228 | 14.749144 / 8.437081 | 265.002833 / 263.643993 |
+| 4K repeat 2 | 5.143620 / 3.019150 | 14.695448 / 7.624898 | 282.835632 / 254.545008 |
+| 1080p repeat 1 | 0.463916 / 0.394601 | 1.627179 / 1.159774 | 39.078626 / 38.835617 |
+| 1080p repeat 2 | 0.440716 / 0.342634 | 1.777804 / 1.129213 | 40.522473 / 39.968048 |
+
+Across three pairs per input, coefficient time improves in every observation,
+with median paired reductions of 42.8% / 36.5% at 4K / 1080p. The final-only
+subset improves 37.5% / 22.3%, and total GPU time improves 0.5% / 1.4%.
+Median non-coefficient timing changes are +1.8% / +0.2%; the large total
+improvement in 4K repeat 2 also includes faster unchanged kernels. These
+captures support a targeted improvement, not a stable whole-encoder gain.
+Flower has one capture pair, not a repeated cohort. Read-only snapshots
+around the repeats span 73-74 C with thermal/power flags sometimes active
+and sometimes inactive; they do not measure every timed kernel's clock.
+
+Launch counts remain 464/452/464, including 21/18/21 coefficient launches.
+All production coefficient launches select the expected specialized
+physical shape, block size, resource signature, and full/final policy.
+Grid dimensions, ordered non-coefficient identities/geometry/resources,
+five arena allocation sizes, peak requested bytes (2,608,448,064 /
+651,957,638 / 85,819,408), pool thresholds, and all transfer counts and
+byte totals match S38. This optimization changes no explicit allocation
+or host/device transfer requirements.
+
+All 61 CUDA and 47 CPU tests pass. All 46 image pairs match codestream
+bytes, SHA-256, selected strategies, decoded Butteraugli, and requested
+encoder final scores. Encoding-only and scored outputs also match within
+each build. The same seven inputs at distances 0.5/1.2/3, effort 7, plus
+sample/Flower effort-9 cases use the previously pinned libjxl revision
+`e8ff09762481785938d8e4e01333ed3917571161`, linear-sRGB interpretation,
+and default 80-nit metric. Synthetic benchmark inputs are generated
+separately from the qualification PFMs.
+
+Serial/batch checks pass at even 1080p for fully-resident and
+maximum-throughput batches 1/2/4, and even 4K fully-resident batches 1/2.
+Median paired batch-vs-serial speedups are 1.022/1.371/1.457,
+0.972/1.449/2.040, and 0.967/1.104 respectively. These measure concurrency
+within this build, not S38-to-S39 throughput gains. They do not justify
+adding execution lanes.
+
+All seven scoped sanitizer runs finish normally with zero errors/hazards:
+full-AQ memcheck/initcheck/synccheck and focused coefficient
+memcheck/initcheck/synccheck/racecheck. Both memchecks report zero leaked
+bytes. Full-AQ memcheck includes stream-ordered race tracking and full leak
+checking; focused memcheck includes full leak checking. No kernel filter,
+API-error suppression, or full-AQ racecheck is used. The checks take about
+37/25/19 seconds for full AQ and 16/11/10/50 seconds for the focused fixture.
+Builds, tests, sanitizers, disassembly, and GPU measurements are serialized.
+
+Repeated-profile validation confirms each version's ordered kernel
+geometry/resources, allocations, and transfers match its initial capture.
+No sanitizer is aborted or left running, and every job finishes normally.
+No permission error, admin prompt, or unexplained execution stall is
+encountered. The earlier long full-AQ racecheck still does not establish
+a firewall cause.
+
+Ignored `build-cuda-ninja/profiles/s39_shape_*`, `s39_sized_*`, and
+`s39_triple_*` preserve probe sources, build/measurement scripts, binaries,
+native code/resources, and all per-case event observations. The three-way
+study additionally retains its temporary kernel/header/fixture sources.
+`s39_final_*` preserves the final native code, warm/cold cohorts, production
+profiles, CTest logs, quality/decode outputs, batch observations, sanitizer
+commands/logs, and evidence validation. `s39_native_check.py` and
+`s39_final_validate.py` assert native identities, resource/barrier counts,
+actual specialized dispatch, ordered production structure, allocation and
+transfer accounting, per-image and cross-policy identity, and individual
+test/sanitizer results. `s39_final_profile_repeat.py` checks repeated
+per-version accounting and derives paired timing summaries;
+`s39_final_repeat_gpu_state.txt` records the added telemetry. The baseline
+remains the frozen `s38_retained_*` executables. Qualified encode, benchmark,
+batch, coefficient-test, and AQ-test binaries are frozen as `s39_retained_*`,
+with verified source/copy SHA-256 values in `s39_final_binary_hashes.json`.
+
+This checkpoint does not establish that the resident encoder is maxed out.
+Potential next investigations include narrower synchronization scopes for
+the small DC work, compile-time coefficient-loop strides, and quantization
+invariant hoisting, each requiring separate numerical and sanitizer gates.
+CPU coefficient handoff/assembly, perceptual filtering, and codestream work
+also remain material. The observed operating-state limitation should be
+recorded in further experiments without silently changing system settings.
 
 ## Work that should not lead the next cycle
 

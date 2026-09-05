@@ -243,6 +243,13 @@ struct DeviceCase {
     LaunchWith(c, gjxl::cuda_internal::LaunchCudaAqMaterializeResidentCoefficients,
                stream, null_reconstruction);
   }
+  void LaunchGeneric(const Case& c, bool materialize = false,
+                     cudaStream_t stream = nullptr) {
+    LaunchWith(c, materialize ?
+      gjxl::cuda_internal::LaunchCudaAqMaterializeResidentCoefficientsGeneric :
+      gjxl::cuda_internal::LaunchCudaAqEncodeResidentCoefficientsGeneric,
+      stream, materialize);
+  }
   using Launcher = decltype(
       &gjxl::cuda_internal::LaunchCudaAqEncodeResidentCoefficients);
   void LaunchWith(const Case& c, Launcher launch, cudaStream_t stream,
@@ -278,6 +285,7 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
             bool adjust, unsigned invalid = 0) {
   Case c(strategy, count, pattern, adjust, invalid);
   DeviceCase reference(c), unfused(c), cached(c), materialized(c);
+  DeviceCase generic(c), generic_materialized(c);
   for (unsigned reuse = 0; reuse < 2; ++reuse) {
     if (reuse != 0) {
       // Reuse the same allocations with changed inputs, not only an identical
@@ -285,7 +293,8 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
       for (size_t i = 0; i < c.forward.size(); ++i)
         if (c.active_coefficients[i] && std::isfinite(c.forward[i]))
           c.forward[i] = -0.75f * c.forward[i] + (i % 11) * 0.00003f;
-      for (auto* device : {&reference, &unfused, &cached, &materialized})
+      for (auto* device : {&reference, &unfused, &cached, &materialized,
+                           &generic, &generic_materialized})
         CheckCuda(cudaMemcpy(device->forward.data, c.forward.data(),
           c.forward.size() * sizeof(float), cudaMemcpyHostToDevice));
     }
@@ -294,8 +303,10 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
     cached.Launch(c, true);
     // First prove no writes to a guarded output, then use a null pointer.
     materialized.LaunchMaterialize(c, nullptr, reuse != 0);
+    generic.LaunchGeneric(c);
+    generic_materialized.LaunchGeneric(c, true);
     CheckCuda(cudaDeviceSynchronize());
-    for (const auto* expected : {&unfused, &reference}) {
+    for (const auto* expected : {&generic, &unfused, &reference}) {
       try {
         CheckEqual("AC", expected->ac.Read(), cached.ac.Read());
         CheckEqual("reconstruction", expected->reconstruction.Read(),
@@ -314,6 +325,17 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
       }
     }
     try {
+      CheckEqual("generic materialized AC", generic_materialized.ac.Read(),
+                 materialized.ac.Read());
+      CheckEqual("generic materialized DC", generic_materialized.dc.Read(),
+                 materialized.dc.Read());
+      CheckEqual("generic materialized DC integer",
+                 generic_materialized.quantized_dc.Read(),
+                 materialized.quantized_dc.Read());
+      CheckEqual("generic materialized inverse sigma",
+                 generic_materialized.sigma.Read(), materialized.sigma.Read());
+      CheckEqual("generic materialized error", generic_materialized.error.Read(),
+                 materialized.error.Read());
       CheckEqual("materialized AC", cached.ac.Read(), materialized.ac.Read());
       CheckEqual("materialized DC", cached.dc.Read(), materialized.dc.Read());
       CheckEqual("materialized DC integer", cached.quantized_dc.Read(),
@@ -360,7 +382,8 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
   CheckCuda(cudaDeviceSynchronize());
   CheckEqual("reconstruction after materialization", cached.reconstruction.Read(),
              materialized.reconstruction.Read());
-  for (const auto* device : {&reference, &unfused, &cached, &materialized}) {
+  for (const auto* device : {&reference, &unfused, &cached, &materialized,
+                             &generic, &generic_materialized}) {
     if (!Equal(device->anchors.Read(), c.anchors) ||
         !Equal(device->tables.Read(), c.tables) ||
         !Equal(device->forward.Read(), c.forward) ||
@@ -371,6 +394,35 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
         !Equal(device->sharpness.Read(), c.sharpness) ||
         !Equal(device->quantizer.Read(), c.quantizer))
       throw std::runtime_error("Coefficient input overwritten");
+  }
+}
+
+void VerifyGenericFallback(unsigned mode) {
+  Case c(mode == 1 ? gjxl::AcStrategyType::kDct16x8 :
+         mode == 3 ? gjxl::AcStrategyType::kDct16x16 :
+                     gjxl::AcStrategyType::kDct8, 3, 5, true);
+  // All accesses remain inside the fixture allocations. These internal
+  // noncanonical configurations must keep the old generic entry's behavior.
+  if (mode == 0) c.params.strategy = 99;
+  if (mode == 1) c.params.strategy = 7;  // Alias table, opposite physical shape.
+  if (mode == 2) --c.batch.coefficient_count;
+  if (mode == 3) c.batch.covered_width = 1;
+  for (bool materialize : {false, true}) {
+    DeviceCase generic(c), candidate(c);
+    generic.LaunchGeneric(c, materialize);
+    if (materialize) candidate.LaunchMaterialize(c, nullptr, true);
+    else candidate.Launch(c, true);
+    CheckCuda(cudaDeviceSynchronize());
+    CheckEqual("fallback AC", generic.ac.Read(), candidate.ac.Read());
+    CheckEqual("fallback reconstruction", generic.reconstruction.Read(),
+               candidate.reconstruction.Read());
+    CheckEqual("fallback DC", generic.dc.Read(), candidate.dc.Read());
+    CheckEqual("fallback DC integer", generic.quantized_dc.Read(),
+               candidate.quantized_dc.Read());
+    CheckEqual("fallback sigma", generic.sigma.Read(), candidate.sigma.Read());
+    CheckEqual("fallback error", generic.error.Read(), candidate.error.Read());
+    if (candidate.error.Read()[0] != kInitialError)
+      throw std::runtime_error("Fallback fixture reported a numeric error");
   }
 }
 
@@ -394,9 +446,11 @@ int main() {
         ++cases;
       }
     }
+    for (unsigned mode = 0; mode < 4; ++mode) VerifyGenericFallback(mode);
     std::cout << "Verified " << cases
               << " guarded resident coefficient cases against original and "
-                 "unfused kernels, including materialization and reuse\n";
+                 "unfused kernels, including materialization, reuse, and "
+                 "four generic-dispatch fallbacks\n";
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;
