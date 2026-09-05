@@ -195,6 +195,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> frequency_high_convolve;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_suppress_x;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_ultra_convolve;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_ultra_mask_convolve;
   NS::SharedPtr<MTL::ComputePipelineState> malta_scale;
   NS::SharedPtr<MTL::ComputePipelineState> malta_response;
   NS::SharedPtr<MTL::ComputePipelineState> malta_fused;

@@ -1,27 +1,28 @@
 # Metal Butteraugli fusion investigation
 
-Date: 2026-09-04
+Date: 2026-09-04; updated 2026-09-05
 
 - Planning branch: `perf/metal-fusion`
 - Baseline commit: `4eda200f8cf62db6f2544f47f504bc4c3b4131cf`
 - Primary target: ordinary effort 7, fully resident Metal, multiscale
   Butteraugli, final diagnostic score disabled
 - Initial qualification device: Apple M4 Pro
-- Status: completed through Phase 5
+- Status: Phases 0--6 complete
 
 ## Executive outcome
 
 The completed study supports a small set of selective Butteraugli
 **superkernels**, not one monolithic kernel and not indiscriminate launch
 fusion. The retained path combines 5-tap blur with Opsin conversion, computes
-33-tap low/medium filtering through a direct-load tile, and writes the final
-metric directly into resident block and score sinks. Launch-only Malta and
+33-tap low/medium filtering through a direct-load tile, writes the final
+metric directly into resident block and score sinks, and computes raw mask
+activity in the final ultra-Y pass. Launch-only Malta and
 channel fusions were neutral or slower and were removed.
 
 The fully resident AQ path already records reconstruction, filtering,
 Butteraugli, block reduction, and policy updates into one ordered compute
 encoder and waits once. Its remaining Butteraugli cost comes from a deep serial
-graph of full-image kernels. The current multiscale implementation records:
+graph of full-image kernels. The pre-fusion baseline recorded:
 
 - 44 Butteraugli dispatches to prepare the invariant reference;
 - about 72 dispatches for each distorted-image comparison; and
@@ -493,6 +494,27 @@ Reduced occupancy is not automatically a regression. A more productive kernel
 can be faster with fewer resident SIMD groups if its limiting execution unit is
 already busy. Judge the shape by elapsed stage and workflow time, using counters
 to explain the result.
+
+### Slice F: pointwise producer/consumer fusion
+
+The remaining pointwise passes offer two bounded experiments that do not need
+larger convolution halos or additional threadgroup barriers:
+
+1. compute high Y before high X and apply X suppression while producing high X;
+2. compute raw mask activity while producing the final ultra-frequency Y
+   output, reusing the already completed high/ultra X values.
+
+Preserve the FP32 operation order and all diagnostic outputs. In the second
+experiment, the raw mask must occupy a plane disjoint from the live transposed
+convolution input and survive Malta, L2, and uncached reference-mask work until
+its blur consumes it. Do not add persistent reference-mask caching to this
+slice: that changes storage and preparation costs independently of fusion.
+
+Measure each experiment independently against the retained Phase 5 path.
+Mask fusion moves arithmetic from the mask stage into psycho construction, so
+compare their combined GPU time as well as reference preparation and the
+resident submission. Retain a change only when its gain survives paired
+complete-encode measurements and the existing correctness gates.
 
 ## Implementation sequence
 
@@ -1327,6 +1349,240 @@ The retained Phase 5 artifacts are:
   Phase 4 Performance Limiters control); and
 - `/private/tmp/gjxl-metal-fusion-phase5-pressure-recovery.json` (same-process
   pressure recovery samples).
+
+### Phase 6: pointwise producer/consumer fusion
+
+This phase implements Slice F as two independent experiments. Phase 6.1
+rejects high-X suppression fusion; Phase 6.2 retains mask precomputation at the
+ultra-frequency producer. Rejected variants remain documented rather than
+retained as private production selectors.
+
+#### Phase 6.1 result: high-X suppression fusion (2026-09-05)
+
+Status: rejected; both prototypes removed.
+
+This experiment used `558aa83` as its immutable control. The existing
+high-frequency X pass writes an unsuppressed value that a later pointwise
+kernel reads, scales using high Y, and writes again. Both prototypes computed
+high Y first and applied the unchanged suppression expression while producing
+high X. The subtraction and multiplication remained FP32, with the existing
+strict math and explicit unfused multiply-adds. Ultra filtering still followed
+both high-frequency outputs.
+
+Two implementations were tested:
+
+- a shared high-frequency kernel with a uniform channel branch and an extra
+  high-Y binding; and
+- a dedicated fused X kernel, leaving the original Y kernel unchanged, to
+  avoid carrying the extra input and suppression branch through Y execution.
+
+Each reduced psycho construction from 13 dispatches to 12. Reference
+preparation fell from 32 to 30 dispatches, and the ordinary two-evaluation
+resident-AQ submission from 286 to 282. At padded 4K, this removes about
+31.1 million logical shader threads and 237.2 MiB of nominal high-X store/read
+traffic across reference preparation and the two comparisons. This is shader
+request accounting, not measured DRAM traffic. No scratch planes were added.
+
+Fresh Ninja Release builds on Apple M4 Pro used effort 7, distance 1.2, fully
+resident Metal, automatic CPU threads, and no final diagnostic score. Each
+stage and workflow comparison used seven alternating independent-process
+pairs, two discarded warmups, and three retained samples per process. Values
+below are medians of process medians. Thermal probes reported no thermal or
+performance warnings.
+
+Both implementations improved the targeted padded-4K GPU stages:
+
+| Variant | GPU scope | Control | Fused | Change | Fused wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| shared | reference preparation | `16.978 ms` | `16.670 ms` | `-1.82%` | 6/7 |
+| shared | resident AQ | `105.419 ms` | `104.028 ms` | `-1.32%` | 4/7 |
+| shared | main psycho, two evaluations | `23.368 ms` | `22.828 ms` | `-2.31%` | 7/7 |
+| shared | subscale psycho, two evaluations | `6.991 ms` | `6.725 ms` | `-3.80%` | 6/7 |
+| dedicated X | reference preparation | `16.940 ms` | `16.512 ms` | `-2.53%` | 7/7 |
+| dedicated X | resident AQ | `104.012 ms` | `103.392 ms` | `-0.60%` | 5/7 |
+| dedicated X | main psycho, two evaluations | `23.156 ms` | `22.735 ms` | `-1.82%` | 7/7 |
+| dedicated X | subscale psycho, two evaluations | `6.922 ms` | `6.757 ms` | `-2.39%` | 6/7 |
+
+These are instrumented stage budgets. The separate unprofiled public-workflow
+measurements did not establish a complete-encode improvement:
+
+| Variant | Workload | Boundary | Control | Fused | Change | Fused wins |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| shared | padded 1080p | complete encode | `85.278 ms` | `85.040 ms` | `-0.28%` | 5/7 |
+| shared | padded 1080p | quantization | `65.848 ms` | `65.532 ms` | `-0.48%` | 5/7 |
+| shared | padded 4K | complete encode | `289.799 ms` | `290.415 ms` | `+0.21%` | 2/7 |
+| shared | padded 4K | quantization | `245.680 ms` | `244.856 ms` | `-0.34%` | 4/7 |
+| dedicated X | padded 1080p | complete encode | `83.730 ms` | `84.291 ms` | `+0.67%` | 1/7 |
+| dedicated X | padded 1080p | quantization | `65.748 ms` | `65.179 ms` | `-0.87%` | 5/7 |
+| dedicated X | padded 4K | complete encode | `290.287 ms` | `291.041 ms` | `+0.26%` | 3/7 |
+| dedicated X | padded 4K | quantization | `246.246 ms` | `248.563 ms` | `+0.94%` | 3/7 |
+
+An experiment-only harness recorded the logical distance maps and scalar
+scores from the Metal Butteraugli test's CPU-differential cases, plus every
+captured intermediate-stage sample. Control and both variants produced
+identical 56,104-byte captures, including small/expanded, odd-sized, identity,
+synthetic differential, and guarded-stride cases. Their SHA-256 was
+`c98003b3e3efab9fddb737082e884d317dc27161275a49dc214215ae64373ee0`.
+The CPU/golden comparison maxima also remained unchanged: `0.000549316` for
+map and score, and `0.000396729` for intermediate stages. No tolerances changed.
+
+The shared variant passed 61 of 62 full Release tests; the sole failure was the
+previously reproduced CPU `quantization_pipeline` golden mismatch. After
+specialization, the Metal Butteraugli, AQ evaluation, and complete quantization
+pipeline tests passed again, along with the exact capture comparison.
+Benchmark codestream sizes matched in every pair. Cross-revision corpus hash,
+pinned-decoder, and counter qualification were intentionally not pursued after
+both variants failed the complete-workflow promotion gate.
+
+The smaller GPU-stage cost is real in these comparisons, but neither
+implementation demonstrated a repeatable user-visible gain. Both production
+prototypes have therefore been removed, preserving the previously retained
+fusion path. The result does not support another variant aimed only at
+removing this one pointwise pass.
+
+Artifacts are retained under
+`/private/tmp/gjxl-fusion-suppress-x-sj4e10op`: `manifest.json` records revision,
+build configuration, binary hashes, and the decision; `stage`/`wall` and
+`specialized-stage`/`specialized-wall` contain all paired samples;
+`shared-kernel.patch` and `specialized-kernel.patch` preserve the implementations;
+and the snapshot harness, exact captures, frozen binaries, and focused test logs
+remain alongside them. The full Release test log is
+`/private/tmp/gjxl-suppress-x-candidate-tests.log`.
+
+#### Phase 6.2 result: ultra-frequency mask fusion (2026-09-05)
+
+Status: retained.
+
+This experiment also used the immutable `558aa83` Phase 5 control, with the
+rejected X-suppression prototypes absent. A dedicated final ultra-Y kernel
+computes the unchanged raw mask expression from its register-resident high-Y
+and ultra-Y outputs and the completed high-X and ultra-X planes. The original
+ultra kernel remains available for X and for reference-subscale preparation,
+whose raw mask is not cached. A shared inline mask expression keeps the fused
+and remaining standalone paths in step; strict FP32 settings and diagnostic
+high/ultra outputs are preserved.
+
+The producer writes raw mask activity to existing scratch `kWork + 4`.
+Malta uses `kWork`/`kWork + 1`, L2 uses the AC/DC planes, and uncached
+reference-mask work uses `kWork` through `kWork + 3`, so the raw distorted mask
+survives until its blur reads it. That blur transposes through `kWork + 1` and
+writes its final result back into `kWork + 4`. Reference-main preparation
+consumes the same producer output immediately. No scratch planes, persistent
+cache, threadgroup storage, barriers, or public selectors were added.
+
+Reference preparation falls from 32 to 31 dispatches, and the ordinary
+resident-AQ submission from 286 to 282. One reference-main and four distorted
+mask-precompute dispatches disappear; the two reference-subscale mask passes
+remain. At `3839 x 2159`, with `1920 x 1080` subscales, this removes
+29,012,403 logical shader threads and two Y-plane reads per removed thread:
+221.3 MiB of nominal shader-request traffic per ordinary encode. This is not
+a measurement of DRAM traffic.
+
+Fresh Ninja Release builds on Apple M4 Pro used the same effort-7, distance-1.2,
+fully resident, automatic-thread, final-score-disabled protocol as Phase 6.1.
+Every matrix used seven alternating independent-process pairs, two discarded
+warmups, and three retained samples per process. Thermal probes reported no
+thermal or performance warnings.
+
+Mask arithmetic moves into psycho construction: main psycho time rises
+5.44%, while main mask time falls 40.31%. The meaningful comparison combines
+both stages within each sample before taking medians. The instrumented
+padded-4K results were:
+
+| GPU scope | Control | Fused | Change | Fused wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `17.086 ms` | `16.745 ms` | `-1.99%` | 7/7 |
+| resident AQ | `104.107 ms` | `103.336 ms` | `-0.74%` | 7/7 |
+| main psycho + mask, two evaluations | `28.309 ms` | `27.594 ms` | `-2.52%` | 7/7 |
+| subscale psycho + mask/final, two evaluations | `10.006 ms` | `9.888 ms` | `-1.18%` | 5/7 |
+| both scales combined | `38.175 ms` | `37.481 ms` | `-1.82%` | 7/7 |
+
+Separate unprofiled complete-encode measurements initially favored the padded
+fixtures, while photographs were mixed. A confirmation matrix repeated all six
+workloads together. Both matrices are retained; neither result is discarded:
+
+| Matrix | Workload | Control | Fused | Change | Fused wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| initial | padded 1080p | `86.411 ms` | `84.541 ms` | `-2.16%` | 5/7 |
+| initial | padded 4K | `297.535 ms` | `292.309 ms` | `-1.76%` | 5/7 |
+| initial | planter 1080p | `92.185 ms` | `92.275 ms` | `+0.10%` | 2/7 |
+| initial | planter 4K | `301.955 ms` | `302.219 ms` | `+0.09%` | 5/7 |
+| initial | noisy bedroom 1080p | `86.802 ms` | `88.174 ms` | `+1.58%` | 2/7 |
+| initial | noisy bedroom 4K | `286.648 ms` | `285.902 ms` | `-0.26%` | 4/7 |
+| confirmation | padded 1080p | `84.133 ms` | `84.426 ms` | `+0.35%` | 2/7 |
+| confirmation | padded 4K | `293.222 ms` | `290.112 ms` | `-1.06%` | 5/7 |
+| confirmation | planter 1080p | `92.652 ms` | `91.839 ms` | `-0.88%` | 6/7 |
+| confirmation | planter 4K | `301.503 ms` | `297.933 ms` | `-1.18%` | 5/7 |
+| confirmation | noisy bedroom 1080p | `87.694 ms` | `86.759 ms` | `-1.07%` | 6/7 |
+| confirmation | noisy bedroom 4K | `291.486 ms` | `285.680 ms` | `-1.99%` | 6/7 |
+
+These tables compare medians of process medians. The median of the actual
+paired candidate/control ratios across all 14 pairs is more conservative:
+`-0.30%` for padded 4K, `-0.33%` for planter 4K, and `-1.35%` for noisy-bedroom
+4K, with 10/14 wins for each. The three 1080p workloads range from `-0.10%` to
+`-0.30%` by that paired measure, with 7--8/14 wins. Treat 1080p as essentially
+neutral and the 4K improvement as small, rather than expecting a fixed 1--2%
+workflow speedup.
+
+All 24 Kodak images received an independent seven-pair matrix. Their
+per-image median workflow ratios have a `-0.41%` geometric-mean change;
+15/24 image medians improve, and 99/168 individual pairs favor fusion.
+Per-image changes range from `-2.01%` to `+1.44%`. No new tolerance or
+quality policy was used to obtain any timing result.
+
+Matched Performance Limiters traces used the same Release binaries, one
+captured process per build, and no stage timestamp instrumentation. Counter
+intervals overlapping unrelated GPU processes were excluded conservatively:
+`23.51 ms` of counter-interval coverage for control and
+`22.48 ms` for fusion (interval unions, not sums across counters).
+The remaining duration-weighted command-buffer counters were:
+
+| Scope | Variant | Occupancy | Occupancy target | Launch limiter | Instruction limiter | L1 limiter | Bandwidth |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| reference | control | `63.9%` | `72.6%` | `88.5%` | `62.4%` | `16.0%` | `121.1 GB/s` |
+| reference | candidate | `63.1%` | `70.7%` | `89.0%` | `63.0%` | `16.8%` | `116.7 GB/s` |
+| resident AQ | control | `61.9%` | `78.2%` | `61.7%` | `61.4%` | `10.0%` | `145.3 GB/s` |
+| resident AQ | candidate | `61.3%` | `77.6%` | `63.4%` | `61.1%` | `10.2%` | `146.8 GB/s` |
+
+These samples show no large command-buffer occupancy or L1-pressure change.
+The observed fused-Y intervals had `55.6%` occupancy, a `57.7%` occupancy target,
+and a `98.8%` launch limiter. The shader timeline covers only part of the
+recorded dispatch list, so its interval sums are not a complete per-kernel
+budget. No direct compiler register/spill or LLC/MMU evidence was collected.
+This is a bounded resource check; it does not establish a DRAM-traffic saving
+or replace the repeated stage and complete-workflow measurements.
+
+The exact stage/map/score harness again produced the identical 56,104-byte
+snapshot and SHA-256 recorded in Phase 6.1. All 38 canonical images produced
+byte-identical codestreams. Eighteen policy cases on Kodak 17 also remained
+byte-identical: efforts 1--10, high density, maximum compression, final-score
+collection, exact coefficients, throughput, maximum throughput, target-byte
+search, and maximum-error control. High density uses its own policy selector,
+without an explicit effort override.
+
+Pinned `djxl` 0.13.0 (`e8ff0976`) decoded padded 4K, Kodak 17, and planter 4K
+from both builds to byte-identical linear-RGB PFMs. External linear-RGB
+Butteraugli 3-norm scores were respectively `0.683604`, `0.729423`, and
+`0.718311`, also unchanged. The full Release suite passes 61/62 tests; its sole
+failure remains the previously reproduced CPU `quantization_pipeline` golden
+mismatch. Metal Butteraugli, AQ, reconstruction, postprocessing, complete
+quantization, API/failure coverage, and installed-consumer checks passed.
+
+Retain this small producer/consumer fusion: it removes a measured amount of
+GPU work, preserves exact output in the qualification set, and gives a modest
+4K workflow gain without a repeatable 1080p or Kodak regression. The scope of
+that conclusion is this M4 Pro and these inputs. X suppression remains
+unfused, and invariant subscale-reference-mask caching remains separate work.
+
+Artifacts are retained under `/private/tmp/gjxl-fusion-mask-hlkbaj0a`:
+`manifest.json` records the control, configuration, binary hashes, and decision;
+`mask-fusion.patch` and `frozen/` preserve the candidate; `stage/`, `wall/`,
+`photo-wall/`, `confirm-wall/`, and `kodak-wall/` contain every raw timing;
+`paired-results.json` records every paired ratio; `corpus/`, `policy/`, and
+`decoded/` retain correctness evidence; and `traces/` contains both Performance
+Limiters captures, exports, and the overlap-filtering analysis. The exact
+capture harness and full Release log are alongside them. These temporary
+artifacts are provenance rather than durable repository fixtures.
 
 ## Correctness contract
 

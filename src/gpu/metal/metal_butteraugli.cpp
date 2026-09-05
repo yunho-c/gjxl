@@ -1006,12 +1006,10 @@ private:
 
   void EncodeReferenceMask(
     MTL::ComputeCommandEncoder* encoder,
-    const PsychoPlanes& reference,
     DevicePlaneView destination,
     Extent2D scale_extent) {
 
-    DevicePlaneView precomputed = Plane(kWork, scale_extent);
-    EncodeMaskPrecompute(encoder, reference, precomputed, scale_extent);
+    DevicePlaneView precomputed = Plane(kWork + 4, scale_extent);
     EncodeBlur(
       encoder, AsConst(precomputed), 4, kWork + 1, destination,
       scale_extent);
@@ -1022,7 +1020,8 @@ private:
     ConstDeviceImage3View input,
     const PsychoPlanes& psycho,
     Extent2D scale_extent,
-    bool capture_reference) {
+    bool capture_reference,
+    bool prepare_mask = true) {
 
     const OpsinParams opsin_params{
       static_cast<uint32_t>(scale_extent.width),
@@ -1201,8 +1200,11 @@ private:
         static_cast<uint32_t>(channel),
         static_cast<uint32_t>(kKernelSizes[3]),
       };
+      const bool fuse_mask = channel == 1 && prepare_mask;
       encoder->setComputePipelineState(
-        metal_.butteraugli_pipelines_.frequency_ultra_convolve.get());
+        fuse_mask
+          ? metal_.butteraugli_pipelines_.frequency_ultra_mask_convolve.get()
+          : metal_.butteraugli_pipelines_.frequency_ultra_convolve.get());
       Bind(encoder, Handle(metal_, intermediate),
            intermediate.offset_bytes, 0);
       Bind(encoder, Handle(metal_, kernels_[3]),
@@ -1210,6 +1212,14 @@ private:
       Bind(encoder, Handle(metal_, high), high.offset_bytes, 2);
       Bind(encoder, Handle(metal_, ultra), ultra.offset_bytes, 3);
       encoder->setBytes(&channel_params, sizeof(channel_params), 4);
+      if (fuse_mask) {
+        const DevicePlaneView high_x = psycho[6];
+        const DevicePlaneView ultra_x = psycho[8];
+        const DevicePlaneView mask = Plane(kWork + 4, scale_extent);
+        Bind(encoder, Handle(metal_, high_x), high_x.offset_bytes, 5);
+        Bind(encoder, Handle(metal_, ultra_x), ultra_x.offset_bytes, 6);
+        Bind(encoder, Handle(metal_, mask), mask.offset_bytes, 7);
+      }
       metal_.DispatchPlane(encoder, scale_extent);
     }
     if (capture_reference) {
@@ -1434,9 +1444,11 @@ private:
     MaybeCapture(
       encoder, MetalButteraugliStage::kMask, AsConst(mask), scale_extent);
 
-    EncodeMaskPrecompute(encoder, distorted, precomputed, scale_extent);
+    // Ultra Y emitted raw activity here. Malta/L2 and reference-mask work use
+    // other planes. The first blur pass consumes it before the second pass
+    // overwrites this same plane with the completed distorted mask.
     EncodeBlur(
-      encoder, AsConst(precomputed), 4, kWork + 1,
+      encoder, AsConst(mask_blurred_distorted), 4, kWork + 1,
       mask_blurred_distorted, scale_extent);
     DevicePlaneView ac_y = Plane(kAc + 1, scale_extent);
     const bool capture_masked_ac =
@@ -1777,7 +1789,7 @@ private:
         encoder, PsychoInputSlots(working_extent_), reference_main,
         working_extent_, false);
       EncodeReferenceMask(
-        encoder, reference_main, Plane(kReferenceMask, working_extent_),
+        encoder, Plane(kReferenceMask, working_extent_),
         working_extent_);
       return;
     }
@@ -1785,13 +1797,13 @@ private:
     EncodePsychoImage(
       encoder, reference_linear_rgb(), reference_main, requested, false);
     EncodeReferenceMask(
-      encoder, reference_main, Plane(kReferenceMask, requested), requested);
+      encoder, Plane(kReferenceMask, requested), requested);
     if (multiscale_) {
       EncodeSubsample(
         encoder, reference_linear_rgb(), requested, sub_extent_);
       EncodePsychoImage(
         encoder, PsychoInputSlots(sub_extent_), ReferenceSubSlots(),
-        sub_extent_, false);
+        sub_extent_, false, false);
     }
   }
 
@@ -1816,7 +1828,8 @@ private:
     }
     if (NeedsReferencePsychoCapture()) {
       EncodePsychoImage(
-        encoder, reference_linear_rgb(), distorted_main, requested, true);
+        encoder, reference_linear_rgb(), distorted_main, requested, true,
+        false);
     }
     if (expanded_) {
       EncodeExpand(
@@ -2102,7 +2115,7 @@ Status CreateButteraugliPipelines(
   ButteraugliPipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 24> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 25> bindings{{
     {"gjxl_butteraugli_copy_f32", &pipelines.copy},
     {"gjxl_butteraugli_expand_f32", &pipelines.expand},
     {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
@@ -2118,6 +2131,8 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_frequency_suppress_x_f32", &pipelines.frequency_suppress_x},
     {"gjxl_butteraugli_frequency_ultra_convolve_f32",
      &pipelines.frequency_ultra_convolve},
+    {"gjxl_butteraugli_frequency_ultra_mask_convolve_f32",
+     &pipelines.frequency_ultra_mask_convolve},
     {"gjxl_butteraugli_malta_scale_f32", &pipelines.malta_scale},
     {"gjxl_butteraugli_malta_response_f32", &pipelines.malta_response},
     {"gjxl_butteraugli_malta_fused_f32", &pipelines.malta_fused},

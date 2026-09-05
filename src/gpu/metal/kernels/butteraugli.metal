@@ -694,6 +694,16 @@ kernel void gjxl_butteraugli_frequency_suppress_x_f32(
   high_x[x_index] *= scaler;
 }
 
+inline float mask_precompute_value(float high_x, float high_y,
+                                   float ultra_x, float ultra_y) {
+  const float xdiff = (ultra_x + high_x) * 2.5f;
+  const float ydiff = ultra_y * 0.4f + high_y * 0.4f;
+  const float activity = sqrt(xdiff * xdiff + ydiff * ydiff);
+  constexpr float kMultiplier = 6.19424080439f;
+  constexpr float kBias = kMultiplier * 12.61050594197f;
+  return sqrt(kMultiplier * abs(activity) + kBias) - sqrt(kBias);
+}
+
 kernel void gjxl_butteraugli_frequency_ultra_convolve_f32(
   device const float* intermediate [[buffer(0)]],
   device const float* weights [[buffer(1)]],
@@ -718,6 +728,35 @@ kernel void gjxl_butteraugli_frequency_ultra_convolve_f32(
       maximum_clamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
     high[high_index] = amplify_range(low_pass * 2.155f, 0.132f);
   }
+}
+
+kernel void gjxl_butteraugli_frequency_ultra_mask_convolve_f32(
+  device const float* intermediate [[buffer(0)]],
+  device const float* weights [[buffer(1)]],
+  device float* high_y [[buffer(2)]],
+  device float* ultra_y [[buffer(3)]],
+  constant FrequencyConvolutionChannelParams& params [[buffer(4)]],
+  device const float* high_x [[buffer(5)]],
+  device const float* ultra_x [[buffer(6)]],
+  device float* mask [[buffer(7)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height) return;
+  float low_pass = convolve_transposed_vertical_value(
+    intermediate, weights, position.x, int(position.y), int(params.height),
+    params.intermediate_stride, int(params.kernel_size / 2));
+  const uint high_index = position.y * params.input_stride + position.x;
+  const uint output_index = position.y * params.output_stride + position.x;
+  const float original = high_y[high_index];
+  low_pass = maximum_clamp(low_pass, 28.4691806922f);
+  const float ultra_value =
+    maximum_clamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
+  const float high_value = amplify_range(low_pass * 2.155f, 0.132f);
+  ultra_y[output_index] = ultra_value;
+  high_y[high_index] = high_value;
+  // X has completed; all psycho outputs and this scratch plane share a stride.
+  mask[output_index] = mask_precompute_value(
+    high_x[output_index], high_value, ultra_x[output_index], ultra_value);
 }
 
 inline float malta_scale_value(float value0, float value1,
@@ -1041,13 +1080,9 @@ kernel void gjxl_butteraugli_mask_precompute_f32(
   if (position.x >= params.width || position.y >= params.height) return;
   const uint input_index = position.y * params.input_stride + position.x;
   const uint output_index = position.y * params.output_stride + position.x;
-  const float xdiff = (ultra_x[input_index] + high_x[input_index]) * 2.5f;
-  const float ydiff = ultra_y[input_index] * 0.4f + high_y[input_index] * 0.4f;
-  const float activity = sqrt(xdiff * xdiff + ydiff * ydiff);
-  constexpr float kMultiplier = 6.19424080439f;
-  constexpr float kBias = kMultiplier * 12.61050594197f;
-  output[output_index] =
-    sqrt(kMultiplier * abs(activity) + kBias) - sqrt(kBias);
+  output[output_index] = mask_precompute_value(
+    high_x[input_index], high_y[input_index],
+    ultra_x[input_index], ultra_y[input_index]);
 }
 
 inline void store_min3(float value, thread float& minimum0,
