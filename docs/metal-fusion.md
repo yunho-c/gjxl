@@ -7,12 +7,16 @@ Date: 2026-09-04
 - Primary target: ordinary effort 7, fully resident Metal, multiscale
   Butteraugli, final diagnostic score disabled
 - Initial qualification device: Apple M4 Pro
+- Status: completed through Phase 5
 
-## Executive decision
+## Executive outcome
 
-The next architectural Metal experiment should be a small set of
-Butteraugli **superkernels**, not one monolithic kernel and not another
-command-buffer or allocation optimization.
+The completed study supports a small set of selective Butteraugli
+**superkernels**, not one monolithic kernel and not indiscriminate launch
+fusion. The retained path combines 5-tap blur with Opsin conversion, computes
+33-tap low/medium filtering through a direct-load tile, and writes the final
+metric directly into resident block and score sinks. Launch-only Malta and
+channel fusions were neutral or slower and were removed.
 
 The fully resident AQ path already records reconstruction, filtering,
 Butteraugli, block reduction, and policy updates into one ordered compute
@@ -24,9 +28,10 @@ graph of full-image kernels. The current multiscale implementation records:
 - 144 comparison dispatches at ordinary effort 7, whose current policy performs
   two scored evaluations when no final diagnostic evaluation is requested.
 
-The promising fusion work is therefore inside the command buffer: launch fewer
-thread grids, keep short-lived values in registers or threadgroup memory, and
-avoid writing and rereading full-image intermediates. The recommended order is:
+The investigated fusion work was therefore inside the command buffer: launch
+fewer thread grids, keep short-lived values in registers or threadgroup memory,
+and avoid writing and rereading full-image intermediates. The investigation
+order was:
 
 1. fuse all six Malta stages for one scale into one tiled dispatch;
 2. fuse independent channel work in psycho-image construction and subsampling;
@@ -36,7 +41,7 @@ avoid writing and rereading full-image intermediates. The recommended order is:
    materialize a public diagnostic map; and
 5. tune each resulting kernel's threadgroup shape from counter evidence.
 
-This is an investigation plan, not a forecast. A working target is to reduce a
+This began as an investigation plan, not a forecast. Its working target was to reduce a
 comparison from about 72 dispatches to 25--35 and its approximate launched
 thread count from about 350 million to 150--200 million at padded 4K. Those
 numbers are design goals to falsify, not measured results. A 1.5--2x speedup of
@@ -1187,15 +1192,141 @@ The retained experiment artifacts are:
 
 ### Phase 5: consolidate
 
-1. Remove the private baseline/fused build selector.
-2. Remove superseded pipeline states and scratch planes that are no longer
-   required by either production or diagnostic capture.
-3. Keep a separate diagnostic implementation only where the API truly promises
-   an intermediate plane that the fused graph cannot expose cheaply.
-4. Repeat the full corpus, System Trace, failure-injection, and memory-pressure
-   qualification.
-5. Update `docs/last-mile-optimization.md` with measured results rather than
-   design targets.
+Status: completed and retained.
+
+All private baseline selectors and rejected experimental pipelines had already
+been removed at their phase boundaries. The final consolidation removes the
+remaining unconditional full-resolution distance-map allocation from prepared
+AQ evaluation and makes its storage metric-specific:
+
+- multiscale Butteraugli production owns only one score partial per strategy
+  anchor plus the scalar score;
+- the small-image Butteraugli fallback owns only the scalar score;
+- maximum-error evaluation owns only its transform-maximum plane; and
+- frame-only evaluation owns none of those sinks.
+
+The ordinary fully resident path already used the Phase 4 sink. Phase 5 also
+migrates the generic, exact-coefficient production path to it, so no production
+multiscale caller materializes the complete distance map. Public diagnostics
+still return that map. They alias the prefix of the coefficient-reconstruction
+staging plane, which owns three values per coding pixel and is therefore larger
+than one unpadded source plane. Diagnostic uploads happen before reconstruction
+or after it has completed. The expanded-small-image production fallback records
+the map-writing dispatch after reconstruction in the same command encoder, so
+Metal dispatch ordering prevents the two lifetimes from overlapping. No lazy
+allocation, additional arena, or new lease class is required.
+
+The block reducer now receives its input view explicitly. This avoids retaining
+a false object-wide distance-map identity and lets both the diagnostic alias and
+the small production fallback reuse the same encoder without changing the
+public API. A dedicated `score_partials_` member replaces the earlier practice
+of treating the prefix of the complete-map plane as reduction storage.
+
+#### Memory result
+
+The exact Phase 4 parent and Phase 5 candidate reported the following prepared
+AQ storage for the existing 1920-by-1080 test fixture:
+
+| Storage | Phase 4 | Phase 5 | Change |
+| --- | ---: | ---: | ---: |
+| staging capacity | `453,679,924 B` | `445,126,452 B` | `-8,553,472 B` (`-8.16 MiB`, `-1.89%`) |
+| peak scratch | `341,704,992 B` | `333,151,520 B` | `-8,553,472 B` (`-8.16 MiB`, `-2.50%`) |
+
+For padded 4K, the structural lower bound is `34,190,592 B` (`32.61 MiB`):
+the aligned 3839-by-2159 map and the unused three-values-per-block
+maximum-error plane disappear, while at most one aligned partial per 8-by-8
+block is added. Larger transforms produce fewer anchors and therefore save
+slightly more. This is a capacity reduction, not a claim that every byte was
+physically resident at the same instant.
+
+#### Timing and counter result
+
+Because Phase 5 changes storage selection rather than the fully resident
+compute graph, its ordinary-path timing gate is non-regression. Seven
+alternating independent-process pairs used two warmups and the median of three
+retained Release samples per process:
+
+| Workload | Boundary | Phase 4 | Phase 5 | Change | Phase 5 wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| padded 1080p | complete encode | `83.119 ms` | `82.746 ms` | `-0.373 ms` (`-0.45%`) | 4/7 |
+| padded 1080p | quantization | `63.931 ms` | `63.962 ms` | `+0.031 ms` (`+0.05%`) | 3/7 |
+| padded 4K | complete encode | `299.907 ms` | `297.430 ms` | `-2.477 ms` (`-0.83%`) | 6/7 |
+| padded 4K | quantization | `251.797 ms` | `251.528 ms` | `-0.269 ms` (`-0.11%`) | 4/7 |
+
+The quantization boundary is effectively neutral, as expected. The complete
+boundary has a favorable but modest noisy direction and is not attributed to
+removed GPU arithmetic.
+
+The generic exact-coefficient path does remove complete-map computation. Seven
+alternating independent-process pairs, each with two warmups and one retained
+sample, measured:
+
+| Workload | Boundary | Complete map | Resident sink | Change | Sink wins |
+| --- | --- | ---: | ---: | ---: | ---: |
+| padded 1080p | complete encode | `562.244 ms` | `550.879 ms` | `-11.365 ms` (`-2.02%`) | 6/7 |
+| padded 1080p | quantization | `323.684 ms` | `320.046 ms` | `-3.638 ms` (`-1.12%`) | 5/7 |
+| padded 4K | complete encode | `2149.946 ms` | `2119.598 ms` | `-30.348 ms` (`-1.41%`) | 4/7 |
+| padded 4K | quantization | `1221.040 ms` | `1193.319 ms` | `-27.721 ms` (`-2.27%`) | 5/7 |
+
+The exact-coefficient mode remains a compatibility path with a large host tail;
+these numbers establish a local improvement, not a reason to optimize that mode
+ahead of the default.
+
+A matched Performance Limiters capture compared the exact Phase 4 parent with
+the candidate using the same symbolized Release configuration and custom
+counter template. The two resident-policy command buffers averaged
+`101.030 ms` in the parent and `101.092 ms` in the candidate, a `0.062 ms`
+(`0.06%`) difference. Mean occupancy was `61.9%` and `60.8%`, mean instruction
+limiters were `63.2%` and `62.2%`, and mean L1 limiters were `10.4%` and
+`10.3%`, respectively. This rules out a new occupancy, instruction, or cache
+regression and confirms that the resident dispatch graph is unchanged within
+measurement noise. Thermal state remained nominal. The final candidate trace
+still classified reference preparation as launch-limited in `83.0%` of clean
+limiter samples, but resident AQ was now instruction-throughput-limited in
+`70.9%`; the retained earlier fusions changed the optimization balance inside
+the larger submission.
+
+#### Correctness and pressure qualification
+
+The candidate produced byte-identical codestreams to the exact Phase 4 parent
+for all 38 canonical images: 24 Kodak images, six photographic scenes at both
+1080p and 4K, and the padded 1080p/4K fixtures. Pinned libjxl `djxl` 0.13.0
+decoded padded 4K, Kodak 17, and a photographic 4K representative. Their
+external linear-RGB Butteraugli scores were `0.683604`, `0.729423`, and
+`0.718311`, respectively.
+
+Efforts 1 through 10, high density, maximum compression, target-size search,
+maximum-error control, final-score collection, exact coefficients, throughput,
+and maximum throughput all remained byte-identical to the parent. The focused
+AQ test compares generic sink scores and block maps with the public complete-map
+oracle, compares profiled and unprofiled outputs exactly, and adds a 7-by-5
+expanded-source test for the aliased small-image fallback. The existing
+`5e-4` block-map gate was not widened; the measured maximum reduction error
+remains `2.38419e-07`.
+
+Failure and lease coverage passed allocation, upload, device, completion,
+readback, poisoning, forced-purge, and recovery cases. A real pressure run
+paused one process between two padded-4K encodes on the same backend, applied
+`memory_pressure -p 60`, and then resumed it. RSS fell from `794,576 KiB` to
+`517,232 KiB`, while `footprint`-reported reclaimable storage fell from
+`1,462 MiB` to `1,248 MiB`. The recovery encode took the expected cold path and
+reproduced the exact `1,606,911`-byte codestream.
+
+The complete Release suite passes 61 of 62 tests. The only failure is the
+pre-existing pinned CPU `quantization_pipeline` score mismatch
+(`0.24919039011001587` actual versus `0.24914586544036865` expected), reproduced
+on the parent before attribution.
+
+The retained Phase 5 artifacts are:
+
+- `/private/tmp/gjxl-metal-fusion-phase5-corpus.8EN01s` (corpus, policy,
+  decoder, and external-quality validation);
+- `/private/tmp/gjxl-metal-fusion-phase5-profile/20260905T004944Z-padded_4k-fully-resident-4a75008a735b`
+  (candidate stage profile and Performance Limiters trace);
+- `/private/tmp/gjxl-metal-fusion-phase5-control-limiters.B713sy` (matched
+  Phase 4 Performance Limiters control); and
+- `/private/tmp/gjxl-metal-fusion-phase5-pressure-recovery.json` (same-process
+  pressure recovery samples).
 
 ## Correctness contract
 
@@ -1313,9 +1444,9 @@ Those can change the Amdahl budget, but they answer different questions. In
 particular, relaxed math must be evaluated as a quality/correctness policy, not
 smuggled into a scheduling optimization.
 
-## Recommended first implementation checkpoint
+## Historical first implementation checkpoint
 
-The first checkpoint should contain only:
+The first checkpoint deliberately contained only:
 
 1. a refreshed current-revision baseline and counter capture;
 2. `gjxl_butteraugli_malta_sixway_f32` behind a temporary private build

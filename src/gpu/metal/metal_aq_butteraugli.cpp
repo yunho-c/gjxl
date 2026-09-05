@@ -112,7 +112,7 @@ Status MetalPreparedAqEvaluation::RunButteraugli(
       {.distorted_linear_rgb = {{{reconstructed_linear_[0],
                                   reconstructed_linear_[1],
                                   reconstructed_linear_[2]}}},
-       .distance_map = distance_map_,
+       .distance_map = CompleteDistanceMapScratch(),
        .score = score_});
   if (!status.ok()) {
     Invalidate();

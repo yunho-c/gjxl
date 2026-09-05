@@ -574,6 +574,54 @@ bool CheckMaximumErrorReduction(gjxl::GpuBackend& gpu) {
   return true;
 }
 
+bool CheckSmallButteraugliFallback(gjxl::GpuBackend& gpu) {
+  constexpr gjxl::Extent2D kSource{7, 5};
+  constexpr gjxl::Extent2D kCoding{8, 8};
+  constexpr gjxl::Extent2D kBlocks{1, 1};
+  HostImage original(kSource, kSource.width + 3);
+  HostImage coding(kCoding, kCoding.width + 5);
+  FillOriginal(&original);
+  FillOpsin(&coding);
+  gjxl::AcStrategyGrid strategies;
+  if (!CheckStatus(gjxl::AcStrategyGrid::Create(kBlocks, &strategies),
+                   "small fallback strategy creation")) {
+    return false;
+  }
+  strategies.fill_dct8();
+  EvaluationInputStorage input(kCoding);
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!Prepare(gpu, original, coding, strategies, &prepared)) return false;
+
+  EvaluationOutputStorage actual(kBlocks);
+  if (!CheckStatus(prepared->Evaluate(input.View(), actual.View()),
+                   "small complete-map AQ fallback") ||
+      !actual.ValidAndPadded()) {
+    return false;
+  }
+  gjxl::metal_internal::MetalAqButteraugliSnapshotForTesting snapshot;
+  if (!CheckStatus(gjxl::metal_internal::RunMetalAqButteraugliForTesting(
+                       *prepared, input.View(), &snapshot),
+                   "small complete-map AQ diagnostic")) {
+    return false;
+  }
+  float expected_block = -1.0f;
+  if (!CheckStatus(gjxl::metal_internal::RunMetalAqBlockReductionForTesting(
+                       *prepared,
+                       {snapshot.distance_map.data(), kSource, kSource.width},
+                       {&expected_block, kBlocks, 1}),
+                   "small complete-map block diagnostic")) {
+    return false;
+  }
+  const float block_error = std::abs(actual.map[0] - expected_block);
+  const double score_error = std::abs(actual.score - snapshot.score);
+  if (block_error > kReductionTolerance || score_error > 1.0e-6) {
+    std::cerr << "Small complete-map AQ fallback differs: block="
+              << block_error << " score=" << score_error << '\n';
+    return false;
+  }
+  return true;
+}
+
 bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
   Fixture fixture;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
@@ -614,6 +662,7 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
               &profile),
           "profiled AQ evaluation") ||
       !profiled_output.ValidAndPadded() ||
+      !CompareOutputs(output, profiled_output) ||
       profile.input_upload_bytes !=
           2 * fixture.input.blocks.width * fixture.input.blocks.height *
               sizeof(float) +
@@ -969,6 +1018,29 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
       std::abs(staged.score - output.score) > 1.0e-6) {
     std::cerr << "Fused/staged AQ score mismatch: fused " << output.score
               << ", staged " << staged.score << '\n';
+    return false;
+  }
+  std::vector<float> staged_blocks(block_count);
+  if (!CheckStatus(gjxl::ReduceButteraugliDistanceMap(
+        {staged.distance_map.data(), staged.source_extent,
+         staged.source_extent.width}, fixture.strategies,
+        {staged_blocks.data(), fixture.strategies.extent(),
+         fixture.strategies.extent().width}),
+        "staged AQ block-map oracle")) {
+    return false;
+  }
+  float staged_block_error = 0.0f;
+  for (size_t y = 0; y < fixture.strategies.extent().height; ++y) {
+    for (size_t x = 0; x < fixture.strategies.extent().width; ++x) {
+      staged_block_error = std::max(
+        staged_block_error,
+        std::abs(output.map[y * output.stride + x] -
+                 staged_blocks[y * fixture.strategies.extent().width + x]));
+    }
+  }
+  if (staged_block_error > 5.0e-4f) {
+    std::cerr << "Fused/staged AQ block-map mismatch: "
+              << staged_block_error << '\n';
     return false;
   }
 
@@ -2700,6 +2772,7 @@ int main() {
       !CheckResidentInputPreparation(*gpu) ||
       !CheckReductionCorpus(*gpu) ||
       !CheckMaximumErrorReduction(*gpu) ||
+      !CheckSmallButteraugliFallback(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||
       !CheckInvariantColorCorrelation(*gpu) ||
       !CheckResidentButteraugliPolicy(*gpu) ||

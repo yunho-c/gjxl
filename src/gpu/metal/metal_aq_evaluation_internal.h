@@ -429,6 +429,11 @@ private:
       MetalButteraugliProfileStage::kDistortedPsychoMain;
   };
 
+  struct BlockReductionSubmissionContext {
+    const MetalPreparedAqEvaluation* self = nullptr;
+    ConstDevicePlaneView distance_map;
+  };
+
   enum class State {
     kReady,
     kBusy,
@@ -460,6 +465,7 @@ private:
   Status BeginOperation(bool profiling_reserved = false);
   Status UploadInput(AqEvaluationInput input);
   Status PrepareExactCoefficientStaging(AqEvaluationInput input);
+  [[nodiscard]] DevicePlaneView CompleteDistanceMapScratch() const noexcept;
   Status PrepareLinearReadback();
   Status PrepareReconstructionDiagnosticReadback();
   Status PreparePostprocessDiagnosticReadback();
@@ -568,8 +574,9 @@ private:
       AqResidentButteraugliPolicyOutput output,
       gpu_profile_internal::GpuProfilingMode mode,
       gpu_profile_internal::GpuExecutionProfile* profile);
-  void EncodeBlockReduction(MetalBackend &backend,
-                            MTL::ComputeCommandEncoder *encoder) const;
+  void EncodeBlockReduction(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      ConstDevicePlaneView distance_map) const;
   void EncodeResidentQuantizer(MetalBackend& backend,
                                MTL::ComputeCommandEncoder* encoder) const;
   void EncodeForwardCoefficients(MetalBackend& backend,
@@ -616,7 +623,7 @@ private:
   DevicePlaneView resident_quant_statistics_;
   DevicePlaneView resident_quantizer_params_;
   DevicePlaneView block_distance_;
-  DevicePlaneView distance_map_;
+  DevicePlaneView score_partials_;
   DevicePlaneView score_;
   DevicePlaneView transform_maximum_error_;
   DevicePlaneView gathered_pixels_;
@@ -720,6 +727,7 @@ private:
   bool resident_quantization_ = false;
   bool borrowed_original_linear_rgb_ = false;
   bool borrowed_coding_opsin_ = false;
+  bool uses_butteraugli_sinks_ = false;
   bool resident_quantization_active_ = false;
   size_t resident_policy_iterations_ = 0;
   bool resident_evaluate_final_field_ = true;
