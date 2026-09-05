@@ -54,6 +54,12 @@ struct CudaAcStrategyBatchParams {
     const void* candidates, float* output, CudaAcStrategyBatchParams params,
     cudaStream_t stream);
 
+// One weighted residual-loss sum per candidate/channel, without materializing
+// inverse-transform pixels. Shape and input ranges are validated by the batch.
+[[nodiscard]] cudaError_t LaunchCudaAcStrategyInverseLoss(
+    const float* input, const float* pixel_mask, const void* candidates,
+    float* losses, CudaAcStrategyBatchParams params, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAcStrategyBatch(
     const float* opsin_x, const float* opsin_y, const float* opsin_b,
     const float* pixel_mask, const float* quant_field,

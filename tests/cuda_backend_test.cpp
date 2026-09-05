@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -383,6 +384,175 @@ bool CheckTransform(
     "CUDA independent inverse DCT");
 }
 
+bool CheckAcStrategyInverseLoss(
+  gjxl::GpuBackend& backend, gjxl::AcStrategyType strategy,
+  std::mt19937* random, uint32_t candidate_count) {
+  using gjxl::cuda_internal::CudaBuffer;
+  using gjxl::cuda_internal::CudaRuntimeStatus;
+  const auto extent = gjxl::GetAcStrategyInfo(strategy)->pixel_extent();
+  const size_t count = static_cast<size_t>(extent.width) * extent.height;
+  const size_t transform_count = static_cast<size_t>(candidate_count) * 3;
+  constexpr uint32_t kWidth = 72;
+  constexpr uint32_t kHeight = 64;
+  constexpr uint32_t kStride = kWidth + 11;
+  constexpr size_t kMaskOffset = 13;
+  constexpr size_t kLossOffset = 7;
+  constexpr float kGuard = -12345.0f;
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  std::vector<float> mask(kMaskOffset + kStride * kHeight + 17, nan);
+  for (size_t y = 0; y < kHeight; ++y) {
+    for (size_t x = 0; x < kWidth; ++x) {
+      mask[kMaskOffset + y * kStride + x] =
+        0.125f + static_cast<float>((x * 13 + y * 19) % 127) / 64.0f;
+    }
+  }
+  const auto valid_mask = mask;
+  std::vector<gjxl::AcStrategyCandidate> candidates(candidate_count);
+  for (size_t i = 0; i < candidate_count; ++i) {
+    // Include all image corners, overlapping rectangles, and bad footprints.
+    candidates[i].block_x = static_cast<uint32_t>(i % 2) *
+      ((kWidth - extent.width) / 8);
+    candidates[i].block_y = static_cast<uint32_t>((i / 2) % 2) *
+      ((kHeight - extent.height) / 8);
+    if (i % 11 == 9) candidates[i].block_x = kWidth / 8;
+    if (i % 11 == 10) {
+      candidates[i].block_y = std::numeric_limits<uint32_t>::max();
+    }
+  }
+  std::uniform_real_distribution<float> distribution(-0.005f, 0.005f);
+  std::vector<float> coefficients(transform_count * count);
+  std::generate(coefficients.begin(), coefficients.end(),
+    [&] { return distribution(*random); });
+  // Zero and differently positioned impulses accompany the random channels.
+  for (size_t t = 0; t < transform_count; ++t) {
+    if (t % 6 < 3) {
+      std::fill_n(coefficients.begin() + t * count, count, 0.0f);
+      if (t % 6 != 0) {
+        coefficients[t * count + (t % 6 == 1 ? 0 : count - 1)] = 0.002f;
+      }
+    }
+  }
+  std::unique_ptr<gjxl::DeviceBuffer> input, pixels, device_mask;
+  std::unique_ptr<gjxl::DeviceBuffer> descriptors, losses;
+  const auto upload = [&](const void* data, size_t bytes,
+                          std::unique_ptr<gjxl::DeviceBuffer>* buffer) {
+    return CheckStatus(backend.Allocate(bytes, buffer), "Allocate loss input") &&
+      CheckStatus(backend.CopyHostToDevice(**buffer, data, bytes),
+        "Upload loss input");
+  };
+  std::vector<float> actual(kLossOffset + transform_count + 11, kGuard);
+  if (!upload(coefficients.data(), coefficients.size() * sizeof(float), &input) ||
+      !upload(mask.data(), mask.size() * sizeof(float), &device_mask) ||
+      !upload(candidates.data(), candidates.size() * sizeof(candidates[0]),
+        &descriptors) ||
+      !upload(actual.data(), actual.size() * sizeof(float), &losses) ||
+      !CheckStatus(backend.Allocate(coefficients.size() * sizeof(float), &pixels),
+        "Allocate independent inverse pixels")) {
+    return false;
+  }
+  const auto inverse = gjxl::TransformBatch{
+    .strategy = strategy, .input = input.get(), .output = pixels.get(),
+    .transform_count = transform_count};
+  std::unique_ptr<gjxl::GpuSubmission> submission;
+  std::vector<float> reconstructed(coefficients.size());
+  if (!CheckStatus(backend.InverseTransform(inverse, &submission),
+        "Submit independent inverse for loss") || submission == nullptr ||
+      !CheckStatus(submission->Wait(), "Wait for loss reference inverse") ||
+      !CheckStatus(backend.CopyDeviceToHost(*pixels, reconstructed.data(),
+        reconstructed.size() * sizeof(float)), "Download loss reference pixels")) {
+    return false;
+  }
+  auto* cuda_input = dynamic_cast<CudaBuffer*>(input.get());
+  auto* cuda_mask = dynamic_cast<CudaBuffer*>(device_mask.get());
+  auto* cuda_descriptors = dynamic_cast<CudaBuffer*>(descriptors.get());
+  auto* cuda_losses = dynamic_cast<CudaBuffer*>(losses.get());
+  if (!cuda_input || !cuda_mask || !cuda_descriptors || !cuda_losses) return false;
+  gjxl::cuda_internal::ScopedCudaDevice device(cuda_input->state()->ordinal);
+  if (!CheckStatus(CudaRuntimeStatus(device.status(), "Select loss-test device"),
+        "Select loss-test device")) return false;
+  const gjxl::cuda_internal::CudaAcStrategyBatchParams params{
+    .pixel_width = kWidth, .pixel_height = kHeight,
+    .pixel_mask_row_stride = kStride, .candidate_count = candidate_count,
+    .coefficient_count = static_cast<uint32_t>(count),
+    .transform_width = static_cast<uint32_t>(extent.width),
+    .transform_height = static_cast<uint32_t>(extent.height)};
+  const auto stream = cuda_input->state()->stream;
+  constexpr float kOffsets[3] = {12.0f, 0.0f, 4.0f};
+  // One valid batch and four invalid-mask batches. The bad values occupy
+  // different reduction lanes, including the final pixel of corner tiles.
+  const std::array bad_masks = {0.0f, -1.0f, nan,
+    std::numeric_limits<float>::infinity()};
+  for (size_t mode = 0; mode <= bad_masks.size(); ++mode) {
+    mask = valid_mask;
+    if (mode != 0) {
+      const size_t x = mode == 1 ? 0 : mode == 2 ? kWidth - 1 :
+        mode == 3 ? extent.width / 2 : extent.width - 1;
+      const size_t y = mode == 1 || mode == 4 ? 0 : mode == 2 ? kHeight - 1 :
+        extent.height / 2;
+      mask[kMaskOffset + y * kStride + x] = bad_masks[mode - 1];
+    }
+    std::fill(actual.begin(), actual.end(), kGuard);
+    if (!CheckStatus(backend.CopyHostToDevice(*device_mask, mask.data(),
+          mask.size() * sizeof(float)), "Upload loss mask variant") ||
+        !CheckStatus(backend.CopyHostToDevice(*losses, actual.data(),
+          actual.size() * sizeof(float)), "Reset loss output guards") ||
+        !CheckStatus(CudaRuntimeStatus(
+          gjxl::cuda_internal::LaunchCudaAcStrategyInverseLoss(
+            static_cast<const float*>(cuda_input->pointer()),
+            static_cast<const float*>(cuda_mask->pointer()) + kMaskOffset,
+            cuda_descriptors->pointer(),
+            static_cast<float*>(cuda_losses->pointer()) + kLossOffset,
+            params, stream), "Launch fused inverse loss"),
+          "Launch fused inverse loss") ||
+        !CheckStatus(CudaRuntimeStatus(cudaStreamSynchronize(stream),
+          "Wait for fused inverse loss"), "Wait for fused inverse loss") ||
+        !CheckStatus(backend.CopyDeviceToHost(*losses, actual.data(),
+          actual.size() * sizeof(float)), "Download fused inverse loss")) {
+      return false;
+    }
+    for (size_t i = 0; i < actual.size(); ++i) {
+      if ((i < kLossOffset || i >= kLossOffset + transform_count) &&
+          actual[i] != kGuard) {
+        std::cerr << "Fused inverse loss overwrote an output guard\n";
+        return false;
+      }
+    }
+    for (size_t t = 0; t < transform_count; ++t) {
+      const auto candidate = candidates[t / 3];
+      const bool fits = candidate.block_x <= (kWidth - extent.width) / 8 &&
+        candidate.block_y <= (kHeight - extent.height) / 8;
+      std::vector<float> reference(count, nan);
+      if (fits) {
+        for (size_t i = 0; i < count; ++i) {
+          const float value = mask[kMaskOffset +
+            (candidate.block_y * 8 + i / extent.width) * kStride +
+            candidate.block_x * 8 + i % extent.width];
+          float weighted = (value + kOffsets[t % 3]) * reconstructed[t * count + i];
+          weighted *= weighted;
+          weighted *= weighted;
+          weighted *= weighted;
+          reference[i] = std::isfinite(value) && value > 0.0f ? weighted : nan;
+        }
+      }
+      // Independent FP32 halving tree over materialized inverse pixels.
+      // Require exact sums; a final cost/quality tolerance could hide errors.
+      for (size_t stride = count / 2; stride != 0; stride /= 2) {
+        for (size_t i = 0; i < stride; ++i) reference[i] += reference[i + stride];
+      }
+      const float result = actual[kLossOffset + t];
+      if (!(std::isnan(reference[0]) && std::isnan(result)) &&
+          std::bit_cast<uint32_t>(reference[0]) != std::bit_cast<uint32_t>(result)) {
+        std::cerr << "Fused inverse loss differs: " << extent.width << 'x'
+                  << extent.height << " candidates=" << candidate_count
+                  << " mask=" << mode << " transform=" << t
+                  << " actual=" << result << " expected=" << reference[0] << '\n';
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckValidationAndOwnership(
   gjxl::GpuBackend& backend,
   gjxl::GpuBackend& other) {
@@ -487,6 +657,15 @@ int main() {
          {1u, 2u, 3u, 4u, 7u, 8u, 9u, 15u, 16u, 17u, 19u, 31u, 32u, 33u}) {
       if (!CheckTransform(*backend, strategy, &random, count)) {
         std::cerr << "CUDA DCT batch size: " << count << '\n';
+        return EXIT_FAILURE;
+      }
+    }
+  }
+  for (gjxl::AcStrategyType strategy : kStrategies) {
+    const auto extent = gjxl::GetAcStrategyInfo(strategy)->pixel_extent();
+    if (extent.width > 32 || extent.height > 32) continue;
+    for (const uint32_t count : {1u, 2u, 3u, 5u, 7u, 8u, 9u, 10u, 11u, 16u, 17u, 33u}) {
+      if (!CheckAcStrategyInverseLoss(*backend, strategy, &random, count)) {
         return EXIT_FAILURE;
       }
     }

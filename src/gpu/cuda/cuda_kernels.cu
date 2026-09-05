@@ -188,6 +188,82 @@ __device__ float DctInputElement(Tile input, size_t base, size_t index) {
   }
 }
 
+// AC search consumes only a weighted eighth-power loss per channel, not
+// reconstructed residual pixels. Reduce the inverse outputs in registers
+// and reuse the now-dead horizontal basis storage for cross-warp reduction.
+template <unsigned int Width, unsigned int Height>
+struct AcStrategyDctLossOutput {
+  const float* pixel_mask;
+  const AcStrategyCandidateDevice* candidates;
+  float* losses;
+  CudaAcStrategyBatchParams params;
+
+  template <unsigned int LocalThreads, unsigned int Values>
+  __device__ void Store(float (&values)[Values], size_t transform_index,
+                        unsigned int tid, float* reduction) const {
+    const auto candidate = candidates[transform_index / 3];
+    const unsigned int channel = static_cast<unsigned int>(transform_index % 3);
+    const bool fits = Width <= params.pixel_width && Height <= params.pixel_height &&
+      candidate.block_x <= (params.pixel_width - Width) / 8 &&
+      candidate.block_y <= (params.pixel_height - Height) / 8;
+    const size_t mask_base = static_cast<size_t>(candidate.block_y * 8) *
+      params.pixel_mask_row_stride + candidate.block_x * 8;
+    const float offset = channel == 0 ? 12.0f : channel == 1 ? 0.0f : 4.0f;
+    const float scale = sqrtf(static_cast<float>(Width * Height));
+#pragma unroll
+    for (unsigned int value = 0; value < Values; ++value) {
+      const unsigned int index = tid + value * LocalThreads;
+      const float mask = fits ? pixel_mask[mask_base +
+        (index / Width) * params.pixel_mask_row_stride + index % Width] : NAN;
+      // Match the ordinary inverse's separately rounded FP32 pixel store.
+      const float pixel = __fmul_rn(values[value], scale);
+      float weighted = (mask + offset) * pixel;
+      weighted *= weighted;
+      weighted *= weighted;
+      weighted *= weighted;
+      values[value] = isfinite(mask) && mask > 0.0f ? weighted : NAN;
+    }
+    // Match the halving tree of the separate cost kernel.
+#pragma unroll
+    for (unsigned int stride = Values / 2; stride != 0; stride /= 2) {
+#pragma unroll
+      for (unsigned int value = 0; value < stride; ++value) {
+        values[value] += values[value + stride];
+      }
+    }
+    if constexpr (LocalThreads > 32) {
+      // Only the large, single-transform blocks enter this path. Other lanes
+      // can still read the intermediate/vertical basis, but not this storage.
+      static_assert(LocalThreads == kSpecializedDctThreads);
+      static_assert(Width * (Width + 1) >= LocalThreads);
+      reduction[tid] = values[0];
+      __syncthreads();
+    }
+    constexpr unsigned int kWarpWidth = LocalThreads < 32 ? LocalThreads : 32;
+    if (tid < kWarpWidth) {
+      float sum = values[0];
+      if constexpr (LocalThreads > 32) {
+        // One warp reads all eight warp-partials after a single barrier.
+        // Keep the same 128/64/32 halving tree in registers.
+        sum = reduction[tid] + reduction[tid + 128];
+        sum += reduction[tid + 64] + reduction[tid + 192];
+        float upper = reduction[tid + 32] + reduction[tid + 160];
+        upper += reduction[tid + 96] + reduction[tid + 224];
+        sum += upper;
+      }
+      // Each transform is a whole 8/16/32-lane group. Name that group exactly,
+      // even when other tail groups have returned or progress independently.
+      const unsigned int group_start = (threadIdx.x % 32) & ~(kWarpWidth - 1);
+      const unsigned int mask = (0xffffffffu >> (32 - kWarpWidth)) << group_start;
+#pragma unroll
+      for (unsigned int stride = kWarpWidth / 2; stride != 0; stride /= 2) {
+        sum += __shfl_down_sync(mask, sum, stride, kWarpWidth);
+      }
+      if (tid == 0) losses[transform_index] = sum;
+    }
+  }
+};
+
 // Small transforms use eight independent accumulators per lane. Pack enough
 // transforms into each block to retain 256 threads and share basis loading.
 constexpr unsigned int kPackedDctOutputsPerThread = 8;
@@ -326,10 +402,10 @@ __global__ void ForwardDctPackedKernel(
 }
 
 template <unsigned int Width, unsigned int Height,
-          unsigned int TransformsPerBlock>
+          unsigned int TransformsPerBlock, typename Output>
 __global__ void InverseDctPackedKernel(
   const float* input,
-  float* output,
+  Output output,
   size_t transform_count) {
   static_assert(Width == 8 || Width == 16);
   static_assert(Height == 8 || Height == 16);
@@ -423,11 +499,16 @@ __global__ void InverseDctPackedKernel(
       values[value] += basis * sample;
     }
   }
+  if constexpr (std::is_pointer_v<Output>) {
 #pragma unroll
-  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
-    const unsigned int y = first_row + value * kRowStep;
-    output[base + static_cast<size_t>(y) * Width + x] =
-      values[value] * sqrtf(static_cast<float>(kElementCount));
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int y = first_row + value * kRowStep;
+      output[base + static_cast<size_t>(y) * Width + x] =
+        values[value] * sqrtf(static_cast<float>(kElementCount));
+    }
+  } else {
+    output.template Store<kLocalThreads, kOutputsPerThread>(
+      values, transform_index, local_index, horizontal_basis);
   }
 }
 
@@ -530,10 +611,10 @@ __global__ void ForwardDctSpecializedKernel(
   }
 }
 
-template <unsigned int Width, unsigned int Height>
+template <unsigned int Width, unsigned int Height, typename Output>
 __global__ void InverseDctSpecializedKernel(
   const float* input,
-  float* output) {
+  Output output) {
   static_assert(Width == 16 || Width == 32);
   static_assert(Height == 16 || Height == 32);
   constexpr size_t kElementCount = static_cast<size_t>(Width) * Height;
@@ -611,10 +692,15 @@ __global__ void InverseDctSpecializedKernel(
       values[value] += basis * sample;
     }
   }
+  if constexpr (std::is_pointer_v<Output>) {
 #pragma unroll
-  for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
-    const unsigned int y = first_row + value * kRowStep;
-    output[base + static_cast<size_t>(y) * Width + x] = values[value] * scale;
+    for (unsigned int value = 0; value < kOutputsPerThread; ++value) {
+      const unsigned int y = first_row + value * kRowStep;
+      output[base + static_cast<size_t>(y) * Width + x] = values[value] * scale;
+    }
+  } else {
+    output.template Store<kSpecializedDctThreads, kOutputsPerThread>(
+      values, blockIdx.x, threadIdx.x, horizontal_basis);
   }
 }
 
@@ -915,6 +1001,58 @@ cudaError_t LaunchCudaAcStrategyForward(
         (kWidth + kHeight) * (kWidth + 1) +
         (kWidth < 32 ? kHeight * (kHeight + 1) : 0);
       ForwardDctSpecializedKernel<kWidth, kHeight>
+        <<<static_cast<unsigned int>(transform_count), kSpecializedDctThreads,
+           kSharedFloats * sizeof(float), stream>>>(input, output);
+    }
+  };
+  using N8 = std::integral_constant<unsigned int, 8>;
+  using N16 = std::integral_constant<unsigned int, 16>;
+  using N32 = std::integral_constant<unsigned int, 32>;
+  if (params.transform_width == 8 && params.transform_height == 8) {
+    launch(N8{}, N8{});
+  } else if (params.transform_width == 16 && params.transform_height == 8) {
+    launch(N16{}, N8{});
+  } else if (params.transform_width == 8 && params.transform_height == 16) {
+    launch(N8{}, N16{});
+  } else if (params.transform_width == 16 && params.transform_height == 16) {
+    launch(N16{}, N16{});
+  } else if (params.transform_width == 32 && params.transform_height == 16) {
+    launch(N32{}, N16{});
+  } else if (params.transform_width == 16 && params.transform_height == 32) {
+    launch(N16{}, N32{});
+  } else if (params.transform_width == 32 && params.transform_height == 32) {
+    launch(N32{}, N32{});
+  } else {
+    return cudaErrorInvalidValue;
+  }
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAcStrategyInverseLoss(
+  const float* input, const float* pixel_mask,
+  const void* candidates, float* losses, CudaAcStrategyBatchParams params,
+  cudaStream_t stream) {
+  const size_t transform_count = static_cast<size_t>(params.candidate_count) * 3;
+  const auto launch = [&](auto width, auto height) {
+    constexpr unsigned int kWidth = decltype(width)::value;
+    constexpr unsigned int kHeight = decltype(height)::value;
+    const AcStrategyDctLossOutput<kWidth, kHeight> output{
+      pixel_mask, static_cast<const AcStrategyCandidateDevice*>(candidates),
+      losses, params};
+    if constexpr (kWidth <= 16 && kHeight <= 16) {
+      constexpr unsigned int kTransformsPerBlock =
+        kThreadsPerTransform * kPackedDctOutputsPerThread / (kWidth * kHeight);
+      const unsigned int blocks = static_cast<unsigned int>(
+        (transform_count + kTransformsPerBlock - 1) / kTransformsPerBlock);
+      InverseDctPackedKernel<kWidth, kHeight, kTransformsPerBlock>
+        <<<blocks, kThreadsPerTransform,
+           PackedDctSharedFloats(kWidth, kHeight) * sizeof(float), stream>>>(
+          input, output, transform_count);
+    } else {
+      constexpr size_t kSharedFloats = kWidth * kHeight +
+        (kWidth + kHeight) * (kWidth + 1) +
+        (kWidth < 32 ? kHeight * (kHeight + 1) : 0);
+      InverseDctSpecializedKernel<kWidth, kHeight>
         <<<static_cast<unsigned int>(transform_count), kSpecializedDctThreads,
            kSharedFloats * sizeof(float), stream>>>(input, output);
     }

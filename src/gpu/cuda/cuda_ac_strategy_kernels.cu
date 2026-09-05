@@ -274,157 +274,49 @@ __global__ void ResidualPackedKernel(
   }
 }
 
-template <unsigned int CoefficientCount>
-struct CostLayout {
-  static_assert(CoefficientCount >= 64 && CoefficientCount <= 1024 &&
-    (CoefficientCount & (CoefficientCount - 1)) == 0);
-  // Each lane holds all three channels. Sixteen pixels per lane raises the
-  // register footprint enough to slow the large, bandwidth-bound shapes.
-  static constexpr unsigned int kThreadsPerCandidate =
-    CoefficientCount <= 256 ? 32 : CoefficientCount / 8;
-  static constexpr unsigned int kCandidatesPerBlock =
-    kCostThreads / kThreadsPerCandidate;
-  static constexpr unsigned int kValuesPerThread =
-    CoefficientCount / kThreadsPerCandidate;
-};
-
-template <unsigned int Width, unsigned int Height>
-__global__ void CostPackedKernel(
-  const float* residual_pixels,
-  const float* pixel_mask,
+__global__ void FinalizeCostKernel(
+  const float* channel_losses,
   const AcStrategyCandidateDevice* candidates,
   const ChannelRate* channel_rates,
   float* costs,
   CudaAcStrategyBatchParams params) {
-  constexpr unsigned int kCount = Width * Height;
-  using Layout = CostLayout<kCount>;
-  constexpr unsigned int kLocalThreads = Layout::kThreadsPerCandidate;
-  constexpr unsigned int kValues = Layout::kValuesPerThread;
-  __shared__ float loss_reduction[3][kCostThreads];
-  constexpr float kMaskOffset[3] = {12.0f, 0.0f, 4.0f};
+  const unsigned int candidate_index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (candidate_index >= params.candidate_count) return;
   constexpr float kChannelMultiplier[3] = {
     2.0441408586549744e7f, 1.0f, 1.266770081387616f};
-  const unsigned int local_candidate = threadIdx.x / kLocalThreads;
-  const unsigned int tid = threadIdx.x % kLocalThreads;
-  const unsigned int candidate_index =
-    blockIdx.x * Layout::kCandidatesPerBlock + local_candidate;
-  // Inactive tail candidates and invalid footprints still reach block/warp
-  // reductions, but never read pixel storage or write outside the cost range.
-  const bool active = candidate_index < params.candidate_count;
-  const AcStrategyCandidateDevice candidate =
-    active ? candidates[candidate_index] : AcStrategyCandidateDevice{};
-  const bool candidate_fits = active &&
-    Width <= params.pixel_width && Height <= params.pixel_height &&
-    candidate.block_x <= (params.pixel_width - Width) / 8 &&
-    candidate.block_y <= (params.pixel_height - Height) / 8;
-  const size_t pixel_base =
-    static_cast<size_t>(candidate.block_y * 8) * params.pixel_mask_row_stride +
-    candidate.block_x * 8;
-  const size_t residual_base = static_cast<size_t>(candidate_index) * 3 * kCount;
-  float values[3][kValues];
-#pragma unroll
-  for (unsigned int value = 0; value < kValues; ++value) {
-    const unsigned int index = tid + value * kLocalThreads;
-    float mask = 0.0f;
-    if (candidate_fits) {
-      mask = pixel_mask[pixel_base +
-        (index / Width) * params.pixel_mask_row_stride + index % Width];
+  const auto candidate = candidates[candidate_index];
+  const unsigned int coefficient_count = params.coefficient_count;
+  const float totals[3] = {channel_losses[candidate_index * 3],
+    channel_losses[candidate_index * 3 + 1], channel_losses[candidate_index * 3 + 2]};
+  float entropy = 0.0f;
+  float loss = 0.0f;
+  for (unsigned int channel = 0; channel < 3; ++channel) {
+    const ChannelRate rate = channel_rates[candidate_index * 3 + channel];
+    // The parent contracts X weighting with the following Y addition.
+    // Preserve that FMA explicitly; register totals otherwise cause NVCC
+    // to emit a separately rounded multiply and add across this branch.
+    if (channel == 1 && params.covered_block_count >= 2) {
+      const float weight = 1.0f + fminf(
+        3.0f, static_cast<float>(params.covered_block_count) / 8.0f);
+      entropy = fmaf(entropy, weight, params.cost_delta * rate.magnitude);
+      loss = fmaf(loss, weight, totals[channel]);
+    } else {
+      entropy = fmaf(params.cost_delta, rate.magnitude, entropy);
+      loss = fmaf(totals[channel], kChannelMultiplier[channel], loss);
     }
-#pragma unroll
-    for (unsigned int channel = 0; channel < 3; ++channel) {
-      float weighted = 0.0f;
-      if (candidate_fits) {
-        weighted = (mask + kMaskOffset[channel]) *
-          residual_pixels[residual_base + channel * kCount + index];
-        weighted *= weighted;
-        weighted *= weighted;
-        weighted *= weighted;
-      }
-      values[channel][value] =
-        isfinite(mask) && mask > 0.0f ? weighted : NAN;
-    }
+    const unsigned int nonzero_bits =
+      CeilLog2Nonzero(rate.nonzero_count + 1) + 1;
+    entropy = fmaf(params.zeros_multiplier, static_cast<float>(
+      CeilLog2Nonzero(nonzero_bits + 17) + nonzero_bits), entropy);
   }
-
-  // Keep the original halving tree: first registers, then shared memory
-  // between warps, and finally shuffles in each candidate's first warp.
-#pragma unroll
-  for (unsigned int stride = kValues / 2; stride != 0; stride /= 2) {
-#pragma unroll
-    for (unsigned int value = 0; value < stride; ++value) {
-#pragma unroll
-      for (unsigned int channel = 0; channel < 3; ++channel) {
-        values[channel][value] += values[channel][value + stride];
-      }
-    }
-  }
-  if constexpr (kLocalThreads > 32) {
-#pragma unroll
-    for (unsigned int channel = 0; channel < 3; ++channel) {
-      loss_reduction[channel][threadIdx.x] = values[channel][0];
-    }
-    __syncthreads();
-#pragma unroll
-    for (unsigned int stride = kLocalThreads / 2; stride >= 32; stride /= 2) {
-      if (tid < stride) {
-#pragma unroll
-        for (unsigned int channel = 0; channel < 3; ++channel) {
-          loss_reduction[channel][threadIdx.x] +=
-            loss_reduction[channel][threadIdx.x + stride];
-        }
-      }
-      __syncthreads();
-    }
-  }
-  if (tid < 32) {
-    float totals[3];
-#pragma unroll
-    for (unsigned int channel = 0; channel < 3; ++channel) {
-      totals[channel] = kLocalThreads > 32
-        ? loss_reduction[channel][threadIdx.x] : values[channel][0];
-    }
-#pragma unroll
-    for (unsigned int stride = 16; stride != 0; stride /= 2) {
-#pragma unroll
-      for (unsigned int channel = 0; channel < 3; ++channel) {
-        totals[channel] += __shfl_down_sync(0xffffffffu, totals[channel], stride);
-      }
-    }
-    if (tid == 0 && active) {
-      if (!candidate_fits) {
-        costs[candidate_index] = NAN;
-        return;
-      }
-      float entropy = 0.0f;
-      float loss = 0.0f;
-      for (unsigned int channel = 0; channel < 3; ++channel) {
-        const ChannelRate rate = channel_rates[candidate_index * 3 + channel];
-        // The parent contracts X weighting with the following Y addition.
-        // Preserve that FMA explicitly; register totals otherwise cause NVCC
-        // to emit a separately rounded multiply and add across this branch.
-        if (channel == 1 && params.covered_block_count >= 2) {
-          const float weight = 1.0f + fminf(
-            3.0f, static_cast<float>(params.covered_block_count) / 8.0f);
-          entropy = fmaf(entropy, weight, params.cost_delta * rate.magnitude);
-          loss = fmaf(loss, weight, totals[channel]);
-        } else {
-          entropy = fmaf(params.cost_delta, rate.magnitude, entropy);
-          loss = fmaf(totals[channel], kChannelMultiplier[channel], loss);
-        }
-        const unsigned int nonzero_bits =
-          CeilLog2Nonzero(rate.nonzero_count + 1) + 1;
-        entropy = fmaf(params.zeros_multiplier, static_cast<float>(
-          CeilLog2Nonzero(nonzero_bits + 17) + nonzero_bits), entropy);
-      }
-      const float quant_norm = costs[candidate_index];
-      const float normalized_loss = loss / static_cast<float>(kCount);
-      const float loss_cost = powf(normalized_loss, 0.125f) *
-        static_cast<float>(kCount) / quant_norm;
-      const float result = entropy * candidate.entropy_multiplier +
-        params.info_loss_multiplier * loss_cost;
-      costs[candidate_index] =
-        isfinite(result) && result >= 0.0f ? result : NAN;
-    }
-  }
+  const float quant_norm = costs[candidate_index];
+  const float normalized_loss = loss / static_cast<float>(coefficient_count);
+  const float loss_cost = powf(normalized_loss, 0.125f) *
+    static_cast<float>(coefficient_count) / quant_norm;
+  const float result = entropy * candidate.entropy_multiplier +
+    params.info_loss_multiplier * loss_cost;
+  costs[candidate_index] =
+    isfinite(result) && result >= 0.0f ? result : NAN;
 }
 
 }  // namespace
@@ -449,7 +341,7 @@ cudaError_t LaunchCudaAcStrategyBatch(
     static_cast<const AcStrategyCandidateDevice*>(candidates);
   // Costs are not consumed until this ordered batch completes. Reuse that
   // storage for one quant norm per candidate through residual evaluation;
-  // CostKernel reads the norm before writing its final result.
+  // FinalizeCostKernel reads the norm before writing its final result.
   const unsigned int norm_blocks =
     (params.candidate_count + kQuantNormThreads - 1) / kQuantNormThreads;
   PrepareQuantNormsKernel<<<norm_blocks, kQuantNormThreads, 0, stream>>>(
@@ -494,42 +386,15 @@ cudaError_t LaunchCudaAcStrategyBatch(
   error = cudaGetLastError();
   if (error != cudaSuccess) return error;
 
-  error = LaunchCudaDct(
-    false, scratch_a, scratch_b, transform_count,
-    params.transform_width, params.transform_height, stream);
+  error = LaunchCudaAcStrategyInverseLoss(
+    scratch_a, pixel_mask, candidates, scratch_b, params, stream);
   if (error != cudaSuccess) return error;
 
-  const auto launch_cost = [&](auto width, auto height) {
-    constexpr unsigned int kWidth = decltype(width)::value;
-    constexpr unsigned int kHeight = decltype(height)::value;
-    constexpr unsigned int kCandidatesPerBlock =
-      CostLayout<kWidth * kHeight>::kCandidatesPerBlock;
-    const unsigned int blocks =
-      (params.candidate_count + kCandidatesPerBlock - 1) / kCandidatesPerBlock;
-    CostPackedKernel<kWidth, kHeight><<<blocks, kCostThreads, 0, stream>>>(
-      scratch_b, pixel_mask, typed_candidates,
-      static_cast<const ChannelRate*>(rate_scratch), costs, params);
-  };
-  using N8 = std::integral_constant<unsigned int, 8>;
-  using N16 = std::integral_constant<unsigned int, 16>;
-  using N32 = std::integral_constant<unsigned int, 32>;
-  if (params.transform_width == 8 && params.transform_height == 8) {
-    launch_cost(N8{}, N8{});
-  } else if (params.transform_width == 16 && params.transform_height == 8) {
-    launch_cost(N16{}, N8{});
-  } else if (params.transform_width == 8 && params.transform_height == 16) {
-    launch_cost(N8{}, N16{});
-  } else if (params.transform_width == 16 && params.transform_height == 16) {
-    launch_cost(N16{}, N16{});
-  } else if (params.transform_width == 32 && params.transform_height == 16) {
-    launch_cost(N32{}, N16{});
-  } else if (params.transform_width == 16 && params.transform_height == 32) {
-    launch_cost(N16{}, N32{});
-  } else if (params.transform_width == 32 && params.transform_height == 32) {
-    launch_cost(N32{}, N32{});
-  } else {
-    return cudaErrorInvalidValue;
-  }
+  const unsigned int cost_blocks =
+    (params.candidate_count + kCostThreads - 1) / kCostThreads;
+  FinalizeCostKernel<<<cost_blocks, kCostThreads, 0, stream>>>(
+    scratch_b, typed_candidates, static_cast<const ChannelRate*>(rate_scratch),
+    costs, params);
   return cudaGetLastError();
 }
 
