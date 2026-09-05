@@ -7,8 +7,8 @@ Date: 2026-09-04; updated 2026-09-05
 - Primary target: ordinary effort 7, fully resident Metal, multiscale
   Butteraugli, final diagnostic score disabled
 - Initial qualification device: Apple M4 Pro
-- Status: Phase 6 reopened for planned Phase 6.3; Phase 7 planned
-- Completed work: Phases 0--5, 6.1, and 6.2
+- Status: Phase 6 complete; Phase 7 planned
+- Completed work: Phases 0--6
 
 ## Executive outcome
 
@@ -16,14 +16,16 @@ The completed experiments support a small set of selective Butteraugli
 **superkernels**, not one monolithic kernel and not indiscriminate launch
 fusion. The retained path combines 5-tap blur with Opsin conversion, computes
 33-tap low/medium filtering through a direct-load tile, writes the final
-metric directly into resident block and score sinks, and computes raw mask
-activity in the final ultra-Y pass. Launch-only Malta and
+metric directly into resident block and score sinks, computes raw mask
+activity in the final ultra-Y pass, and evaluates L2 contributions inside the
+main-scale and subscale final-distance sinks. Launch-only Malta and
 channel fusions were neutral or slower and were removed.
 
-Two follow-ups are now documented: L2 accumulation into final-distance sinks
-in Slice F / Phase 6.3, and invariant reference-mask caching in Slice G /
-Phase 7. Both are planned experiments without implementation or measured
-results. The completed Phase 6.1 and 6.2 qualifications remain unchanged.
+Slice F / Phase 6.3 retains L2 accumulation in both final-distance sinks.
+The combined L2/sink GPU budget improved 34.91%, resident AQ improved 6.18%,
+and complete encodes improved 2.42% on padded 4K against its Phase 6.2 control.
+Invariant reference-mask caching in Slice G / Phase 7 remains planned. The
+completed Phase 6.1 and 6.2 qualifications remain unchanged.
 
 The fully resident AQ path already records reconstruction, filtering,
 Butteraugli, block reduction, and policy updates into one ordered compute
@@ -524,10 +526,10 @@ exact L2, masking, and reduction order. Additional psycho-plane bindings and
 longer register lifetimes make this a larger resource-pressure experiment than
 the first two. Retain a materialized path for diagnostic consumers.
 
-Phases 6.1 and 6.2 used the retained Phase 5 control. Phase 6.3 starts from the
-retained mask-fusion implementation at `10c5531`; freeze the exact control
-again when experimentation begins. Mask fusion moves arithmetic into psycho
-construction, and L2 fusion would move it into final-distance consumers, so
+Phases 6.1 and 6.2 used the retained Phase 5 control. Phase 6.3 used the
+immutable `dd19246` control, containing the retained mask-fusion implementation
+at `10c5531`. Mask fusion moves arithmetic into psycho construction, and L2
+fusion moves it into final-distance consumers, so
 compare combined producer/consumer GPU time as well as the resident submission.
 Retain a change only when its gain survives paired complete-encode measurements
 and the existing correctness gates.
@@ -1400,9 +1402,9 @@ The retained Phase 5 artifacts are:
 
 This phase implements Slice F as independently qualified experiments. Phase 6.1
 rejects high-X suppression fusion; Phase 6.2 retains mask precomputation at the
-ultra-frequency producer. Phase 6 is reopened to plan L2-to-sink fusion in
-Phase 6.3; that experiment has not started. Rejected variants remain documented
-rather than retained as private production selectors.
+ultra-frequency producer; Phase 6.3 retains main-scale and subscale L2-to-sink
+fusion. Phase 6 is complete. Rejected variants remain documented rather than
+retained as private production selectors.
 
 #### Phase 6.1 result: high-X suppression fusion (2026-09-05)
 
@@ -1631,52 +1633,177 @@ Limiters captures, exports, and the overlap-filtering analysis. The exact
 capture harness and full Release log are alongside them. These temporary
 artifacts are provenance rather than durable repository fixtures.
 
-#### Phase 6.3 plan: L2 accumulation into final-distance sinks
+#### Phase 6.3 result: L2 accumulation into final-distance sinks (2026-09-05)
 
-Status: planned; no prototype or candidate measurements yet.
+Status: retained, both main-scale and subscale increments.
 
-The current `gjxl_butteraugli_l2_f32` kernel reads reference/distorted psycho
-planes, incorporates Malta's AC accumulation, and writes three AC and three DC
-planes. `gjxl_butteraugli_final_masked_ac_f32` and
-`gjxl_butteraugli_resident_reduce_f32` subsequently read those values to compute
-final distances. All three kernels are in
-[`butteraugli.metal`](../src/gpu/metal/kernels/butteraugli.metal).
+The immutable control is `dd19246`, whose production code is the retained
+Phase 6.2 implementation at `10c5531`. The main-scale prototype was measured
+first, then frozen as a separate executable and metallib for the subscale
+increment. Final combined measurements compare directly with `dd19246`.
 
-1. Freeze the retained Phase 6.2 control and refresh its L2, mask/final, and
-   resident-reduction budgets. Audit psycho-plane lifetimes through the later
-   consumers, buffer-binding limits, and diagnostic capture requirements.
-2. Prototype main-scale L2 arithmetic in the resident reduction's per-pixel
-   distance calculation. Preserve the existing transform footprint, multiscale
-   composition, reduction tree, and FP32 operation order; remove the separate
-   main-scale L2 dispatch only for this qualified path.
-3. Test the subscale final-map producer as a separate increment. Compute each
-   subscale L2 contribution once per subscale pixel, preserving the quarter-area
-   map consumed by the main sink. Keep the public/materialized diagnostic path
-   as an oracle until any extension to it is independently qualified.
-4. Compare exact stage captures, maps, scalar scores, block maps, coefficient
-   state, and codestream bytes under the existing correctness contract. Exercise
-   profiled and unprofiled paths, final diagnostics, odd dimensions, and expanded
-   small-image fallbacks without widening tolerances.
-5. Measure combined L2 plus affected final-distance/reduction GPU time, complete
-   resident-AQ time, and unprofiled complete encodes using the established paired
-   corpus protocol. Use counters to inspect the larger consumers' occupancy and
-   resource pressure; a missing L2 dispatch alone is not a promotion result.
+`gjxl_butteraugli_resident_l2_reduce_f32` computes the six L2 contributions
+inside the existing per-pixel main-distance loop. It reads the same sixteen
+reference/distorted psycho planes and two incoming Malta AC planes as the old
+L2 pass. The subsequent masking, multiscale composition, transform footprint,
+256-thread reduction tree, maximum-score partials, and error handling are
+unchanged. `gjxl_butteraugli_final_l2_masked_ac_f32` performs the same arithmetic
+once per subscale pixel and emits the existing quarter-area map. Its reference,
+distorted, working, and output strides remain independent.
 
-The opportunity is reduced intermediate traffic and fewer full-image passes.
-The AC/DC slots currently alias earlier psycho-image work planes, so eliminating
-their L2 stores does not by itself permit removing those allocations. Defer any
-workspace-layout consolidation until fusion is qualified. Keep reference-mask
-caching out of this experiment so its effect can be measured independently.
+Both sinks use the same inline L2 expression. The original standalone L2 and
+final-map kernels remain the materialized oracle for public diagnostics and
+fallbacks; stage captures, expanded small images, and nonmultiscale comparisons
+do not enter the fused resident path. The resident profiler omits the two
+standalone L2 stage records, charging their arithmetic to the actual consumers.
+Strict FP32 compilation and the existing tolerances are unchanged.
+
+The main sink binds buffers/parameters through index 26; the subscale sink
+through index 22. Neither adds threadgroup storage or barriers. Reference and
+distorted psycho planes survive Malta and mask preparation; those passes use
+disjoint scratch. The two Malta AC inputs remain live until their sink. All
+workspace allocations remain because AC/DC slots alias earlier psycho work;
+no reference cache or allocation reduction is included.
+
+Padded-4K dispatch metadata confirms 31 reference-preparation dispatches and
+278 resident-AQ dispatches, versus 31 and 282 in the control. Four standalone
+L2 passes disappear across the two scored evaluations. At `3839 x 2159`, with
+`1920 x 1080` subscales, that removes 20,724,002 logical shader threads and
+six FP32 stores plus six reads per removed thread: 948.7 MiB of nominal
+shader-request traffic per ordinary encode. This is not measured DRAM traffic.
+
+Fresh Ninja Release builds on Apple M4 Pro/macOS 15.6 used distance 1.2,
+effort 7, fully resident Metal, automatic CPU threads, and final diagnostics off.
+Every timing matrix used seven alternating independent-process pairs, two
+warmups, and three retained samples per process. GPU stage captures and
+unprofiled complete encodes were separate. Combined family time is summed
+inside each sample before computing process medians and their median.
+
+The main-only prototype improved main L2-plus-sink GPU time from 12.867 to
+8.118 ms (-36.91%, 7/7 wins), and resident AQ from 101.618 to 96.824 ms
+(-4.72%, 7/7). Complete encodes improved 1.48% at padded 1080p (7/7) and
+1.18% at padded 4K (6/7). Against that frozen main-only prototype, adding
+subscale fusion improved subscale L2-plus-mask/final from 4.688 to 3.409 ms
+(-27.29%, 7/7), resident AQ by 1.62% (7/7), and complete encodes by 0.58%
+at 1080p and 1.31% at 4K (both 6/7). The 1080p quantization-pipeline median
+in that increment was 0.37% slower (3/7 wins); its complete workflow still
+improved. These independent increments do not substitute for the direct
+combined comparison below.
+
+Instrumented padded-4K results for the combined implementation:
+
+| Scope | Control | Fused | Change | Fused wins |
+| --- | ---: | ---: | ---: | ---: |
+| reference preparation | `16.528 ms` | `16.527 ms` | `-0.01%` | 3/7 |
+| resident AQ | `101.752 ms` | `95.461 ms` | `-6.18%` | 7/7 |
+| main L2 + sink, two evaluations | `12.890 ms` | `8.112 ms` | `-37.07%` | 7/7 |
+| subscale L2 + mask/final, two evaluations | `4.680 ms` | `3.362 ms` | `-28.16%` | 7/7 |
+| both L2 + sink families | `17.612 ms` | `11.463 ms` | `-34.91%` | 7/7 |
+
+Separate unprofiled complete-encode results:
+
+| Scope | Control | Fused | Change | Fused wins |
+| --- | ---: | ---: | ---: | ---: |
+| padded 1080p | `84.530 ms` | `83.426 ms` | `-1.31%` | 5/7 |
+| padded 4K | `288.481 ms` | `281.490 ms` | `-2.42%` | 7/7 |
+| planter 1080p | `91.898 ms` | `90.098 ms` | `-1.96%` | 6/7 |
+| planter 4K | `300.666 ms` | `289.488 ms` | `-3.72%` | 7/7 |
+| noisy bedroom 1080p | `87.077 ms` | `86.106 ms` | `-1.12%` | 6/7 |
+| noisy bedroom 4K | `285.158 ms` | `279.229 ms` | `-2.08%` | 6/7 |
+
+Across all 24 Kodak images, the geometric mean of candidate/control
+complete-encode median ratios improved 0.73%; 19 image medians improved. Per-image
+changes ranged from -2.73% to +0.84%. Five medians were slightly slower
+(kodim06 +0.41%, kodim07 +0.03%, kodim15 +0.17%, kodim19 +0.72%,
+and kodim21 +0.84%); none was a consistent large regression. Quantization
+pipeline medians improved 0.82% geometrically, with 22/24 image medians lower.
+
+Matched Performance Limiters captures used the same padded-4K workflow with
+zero warmups and one retained sample, separately from timing qualification.
+Each process exercised two workflow sequences including setup validation.
+Counter attribution required containment within the benchmark's active GPU
+intervals and excluded every interval overlapping another active GPU process.
+This removed 13.10 ms of unique counter coverage in the control and 12.29 ms
+in the candidate; retained coverage was 334.58 and 321.58 ms. These coverage
+unions are not encode latency.
+
+| Counter scope / metric | Control | Fused |
+| --- | ---: | ---: |
+| resident AQ / occupancy | 61.46% | 61.22% |
+| resident AQ / occupancy target | 77.48% | 77.19% |
+| resident AQ / shader-launch limiter | 49.72% | 39.77% |
+| resident AQ / instruction limiter | 61.29% | 59.98% |
+| resident AQ / L1 limiter | 10.07% | 10.70% |
+| resident AQ / read bandwidth | 79.44 GB/s | 83.26 GB/s |
+| resident AQ / write bandwidth | 66.78 GB/s | 63.37 GB/s |
+| sampled main sink / occupancy | 86.02% | 79.77% |
+| sampled main sink / occupancy target | 91.20% | 85.29% |
+| sampled main sink / instruction limiter | 74.15% | 78.00% |
+| sampled main sink / L1 limiter | 2.17% | 2.04% |
+
+The larger main sink has a modest occupancy reduction while aggregate resident
+occupancy remains similar. Lower aggregate write bandwidth is consistent with
+removing intermediate stores, but bandwidth rates do not measure saved bytes.
+Shader-profiler coverage is sparse: it identified three old main-sink intervals
+and two fused main-sink intervals, and no attributable subscale final-kernel
+interval. Those samples inspect resources; their durations are not a complete
+family budget or an equivalent-work timing comparison. Subscale resource
+behavior is observed only within the aggregate resident submission. No direct
+register/spill or LLC/MMU evidence was collected, so this does not prove zero
+spills or establish a cache-level explanation. Stage timestamps establish the
+combined-family gain; separate unprofiled measurements establish workflow
+benefit. The measured occupancy and L1 behavior show no broad resource collapse.
+
+Both increments are retained: they preserve exact outputs and improve the
+complete workflow without added scratch, persistent state, or a changed
+reduction topology. Reference-mask caching remains a separate Phase 7 task.
+
+Correctness qualification used the unchanged test tolerances and an additional
+temporary exact-capture harness compiled against both builds:
+
+- AQ quant fields, block maps, score histories, reconstructed planes, and final
+  DC/AC coefficient snapshots matched exactly: 4,007,824 bytes, SHA-256
+  `a08c0d5413058f93d51e6dec4b6c50ba1b62539417c1663e54e622daf8f8db2d`.
+  Coverage includes mixed transform sizes, repeated and profiled resident
+  policies, guarded output strides, full/lean materialization, reconfiguration,
+  and nondefault `hf_asymmetry = 0.91`, `x_multiplier = 1.07`.
+- Public full-map/scalar/stage captures matched exactly: 56,104 bytes, SHA-256
+  `c98003b3e3efab9fddb737082e884d317dc27161275a49dc214215ae64373ee0`.
+  Existing CPU-oracle tests retain odd/minimum sizes, expanded fallbacks,
+  identity, impulse, edge, gradient, noise, and intermediate-stage goldens.
+- All 38 canonical corpus images produced byte-identical control/candidate
+  codestreams. All 18 Kodak17 policy configurations also matched: efforts
+  1--10, high density, maximum compression, final score, exact coefficients,
+  throughput, maximum throughput, target bytes, and maximum error.
+- Pinned `djxl` 0.13.0 (`e8ff0976`) accepted padded 4K, Kodak17, and planter
+  4K outputs; each control/candidate pair decoded to identical linear-RGB PFM
+  bytes. External Butteraugli 3-norm scores remained `0.683604`, `0.729423`,
+  and `0.718311`, respectively. All three control and candidate codestreams
+  also matched a second independent encode byte for byte.
+- Focused Metal tests passed 3/3. The final full Release suite passed 61/62;
+  the sole failure was the inherited CPU `quantization_pipeline` golden
+  (`0.24919039011001587` actual versus `0.24914586544036865` expected),
+  reproduced with the same values on the fresh `dd19246` control. No tolerance
+  was widened. Optional libjxl-reference fixtures were disabled in these
+  builds; pinned-decoder/quality checks ran separately.
+
+Artifacts are retained under `/private/tmp/gjxl-fusion-l2-v32brjc0`: the immutable
+control, frozen main-only and combined binaries/metallibs, variant patches and
+hashes, raw timing samples, thermal probes, exact capture harnesses, corpus and
+policy codestreams, decoder outputs, full Release logs, and Performance Limiters
+traces/exports. `manifest.json` records build/configuration/source identity;
+`paired-results.json` preserves every paired ratio. These temporary files are
+provenance, not durable repository fixtures.
 
 ### Phase 7: invariant reference preparation and caching
 
 Status: planned; no prototype or candidate measurements yet. This phase implements
-Slice G and does not change the completed Phase 6.1/6.2 results.
+Slice G and does not change the completed Phase 6 results.
 
-Freeze a control containing the retained Phase 6.2 code. Evaluate caching
-independently of the Phase 6.3 prototype; if both are retained, qualify their
-combination against the actual retained parent and record both control
-revisions. No complete-workflow or memory benefit is established yet.
+Freeze the actual retained Phase 6.3 parent and evaluate caching as an isolated
+increment on that implementation. Record the exact control revision and
+qualify each caching increment against its retained parent. No complete-workflow
+or memory benefit from caching is established yet.
 
 #### Phase 7.1: cache the subscale blurred reference mask
 

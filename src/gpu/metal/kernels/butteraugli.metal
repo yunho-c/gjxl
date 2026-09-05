@@ -127,6 +127,17 @@ struct FinalParams {
   float x_multiplier;
 };
 
+struct FinalL2Params {
+  uint width;
+  uint height;
+  uint reference_stride;
+  uint distorted_stride;
+  uint work_stride;
+  uint output_stride;
+  float asymmetry;
+  float x_multiplier;
+};
+
 struct CropParams {
   uint width;
   uint height;
@@ -163,6 +174,7 @@ struct ResidentReductionParams {
   uint covered_width;
   uint covered_height;
   float x_multiplier;
+  float asymmetry;
 };
 
 inline float unfused_multiply_add(float multiplier, float value, float addend) {
@@ -1023,6 +1035,59 @@ inline float l2_asymmetric(float value0, float value1, float weight_up,
                               secondary * secondary, total);
 }
 
+struct L2Contributions {
+  float ac0, ac1, ac2;
+  float dc0, dc1, dc2;
+};
+
+inline L2Contributions l2_contributions(
+  device const float* rlow0,
+  device const float* rlow1,
+  device const float* rlow2,
+  device const float* rmed0,
+  device const float* rmed1,
+  device const float* rmed2,
+  device const float* rhigh0,
+  device const float* rhigh1,
+  device const float* dlow0,
+  device const float* dlow1,
+  device const float* dlow2,
+  device const float* dmed0,
+  device const float* dmed1,
+  device const float* dmed2,
+  device const float* dhigh0,
+  device const float* dhigh1,
+  device const float* malta_ac0,
+  device const float* malta_ac1,
+  uint reference_index, uint distorted_index, uint work_index,
+  float asymmetry) {
+
+  L2Contributions values;
+  const float inv_asymmetry = 1.0f / asymmetry;
+  float total0 = l2_asymmetric(rhigh0[reference_index],
+                               dhigh0[distorted_index],
+                               400.0f * asymmetry,
+                               400.0f * inv_asymmetry, malta_ac0[work_index]);
+  float total1 = l2_asymmetric(rhigh1[reference_index],
+                               dhigh1[distorted_index],
+                               1.50815703118f * asymmetry,
+                               1.50815703118f * inv_asymmetry,
+                               malta_ac1[work_index]);
+  const float md0 = rmed0[reference_index] - dmed0[distorted_index];
+  const float md1 = rmed1[reference_index] - dmed1[distorted_index];
+  const float md2 = rmed2[reference_index] - dmed2[distorted_index];
+  values.ac0 = unfused_multiply_add(md0 * md0, 2150.0f, total0);
+  values.ac1 = unfused_multiply_add(md1 * md1, 10.6195433239f, total1);
+  values.ac2 = md2 * md2 * 16.2176043152f;
+  const float ld0 = rlow0[reference_index] - dlow0[distorted_index];
+  const float ld1 = rlow1[reference_index] - dlow1[distorted_index];
+  const float ld2 = rlow2[reference_index] - dlow2[distorted_index];
+  values.dc0 = ld0 * ld0 * 29.2353797994f;
+  values.dc1 = ld1 * ld1 * 0.844626970982f;
+  values.dc2 = ld2 * ld2 * 0.703646627719f;
+  return values;
+}
+
 kernel void gjxl_butteraugli_l2_f32(
   device const float* rlow0 [[buffer(0)]], device const float* rlow1 [[buffer(1)]],
   device const float* rlow2 [[buffer(2)]], device const float* rmed0 [[buffer(3)]],
@@ -1199,6 +1264,58 @@ kernel void gjxl_butteraugli_final_masked_ac_f32(
     isfinite(result) && result >= 0.0f ? result : NAN;
 }
 
+kernel void gjxl_butteraugli_final_l2_masked_ac_f32(
+  device const float* rlow0 [[buffer(0)]],
+  device const float* rlow1 [[buffer(1)]],
+  device const float* rlow2 [[buffer(2)]],
+  device const float* rmed0 [[buffer(3)]],
+  device const float* rmed1 [[buffer(4)]],
+  device const float* rmed2 [[buffer(5)]],
+  device const float* rhigh0 [[buffer(6)]],
+  device const float* rhigh1 [[buffer(7)]],
+  device const float* dlow0 [[buffer(8)]],
+  device const float* dlow1 [[buffer(9)]],
+  device const float* dlow2 [[buffer(10)]],
+  device const float* dmed0 [[buffer(11)]],
+  device const float* dmed1 [[buffer(12)]],
+  device const float* dmed2 [[buffer(13)]],
+  device const float* dhigh0 [[buffer(14)]],
+  device const float* dhigh1 [[buffer(15)]],
+  device const float* malta_ac0 [[buffer(16)]],
+  device const float* malta_ac1 [[buffer(17)]],
+  device const float* mask [[buffer(18)]],
+  device const float* mask_blurred_reference [[buffer(19)]],
+  device const float* mask_blurred_distorted [[buffer(20)]],
+  device float* output [[buffer(21)]],
+  constant FinalL2Params& params [[buffer(22)]],
+  uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height) return;
+  const uint reference_index =
+    position.y * params.reference_stride + position.x;
+  const uint distorted_index =
+    position.y * params.distorted_stride + position.x;
+  const uint index = position.y * params.work_stride + position.x;
+  const L2Contributions l2 = l2_contributions(
+    rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1,
+    dlow0, dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1,
+    malta_ac0, malta_ac1, reference_index, distorted_index, index,
+    params.asymmetry);
+  const float difference =
+    mask_blurred_reference[index] - mask_blurred_distorted[index];
+  const float masked_ac_y =
+    l2.ac1 + 10.0f * difference * difference;
+  const float mask_value = mask_y(mask[index]);
+  const float dc_mask_value = mask_dc_y(mask[index]);
+  const float masked_dc = l2.dc0 * params.x_multiplier * dc_mask_value +
+                          l2.dc1 * dc_mask_value + l2.dc2 * dc_mask_value;
+  const float masked_ac = l2.ac0 * params.x_multiplier * mask_value +
+                          masked_ac_y * mask_value + l2.ac2 * mask_value;
+  const float result = sqrt(masked_dc + masked_ac);
+  output[position.y * params.output_stride + position.x] =
+    isfinite(result) && result >= 0.0f ? result : NAN;
+}
+
 kernel void gjxl_butteraugli_crop_f32(
   device const float* input [[buffer(0)]], device float* output [[buffer(1)]],
   constant CropParams& params [[buffer(2)]],
@@ -1222,19 +1339,34 @@ kernel void gjxl_butteraugli_compose_f32(
     main_value * 0.85f + 0.5f * sub_value;
 }
 
-kernel void gjxl_butteraugli_resident_reduce_f32(
-  device const float* dc0 [[buffer(0)]], device const float* dc1 [[buffer(1)]],
-  device const float* dc2 [[buffer(2)]], device const float* ac0 [[buffer(3)]],
-  device const float* ac1 [[buffer(4)]], device const float* ac2 [[buffer(5)]],
-  device const float* mask [[buffer(6)]],
-  device const float* mask_blurred_reference [[buffer(7)]],
-  device const float* mask_blurred_distorted [[buffer(8)]],
-  device const float* sub_map [[buffer(9)]],
-  device const uint2* anchors [[buffer(10)]],
-  device float* block_distance [[buffer(11)]],
-  device float* score_partials [[buffer(12)]],
-  device atomic_uint* error [[buffer(13)]],
-  constant ResidentReductionParams& params [[buffer(14)]],
+kernel void gjxl_butteraugli_resident_l2_reduce_f32(
+  device const float* rlow0 [[buffer(0)]],
+  device const float* rlow1 [[buffer(1)]],
+  device const float* rlow2 [[buffer(2)]],
+  device const float* rmed0 [[buffer(3)]],
+  device const float* rmed1 [[buffer(4)]],
+  device const float* rmed2 [[buffer(5)]],
+  device const float* rhigh0 [[buffer(6)]],
+  device const float* rhigh1 [[buffer(7)]],
+  device const float* dlow0 [[buffer(8)]],
+  device const float* dlow1 [[buffer(9)]],
+  device const float* dlow2 [[buffer(10)]],
+  device const float* dmed0 [[buffer(11)]],
+  device const float* dmed1 [[buffer(12)]],
+  device const float* dmed2 [[buffer(13)]],
+  device const float* dhigh0 [[buffer(14)]],
+  device const float* dhigh1 [[buffer(15)]],
+  device const float* malta_ac0 [[buffer(16)]],
+  device const float* malta_ac1 [[buffer(17)]],
+  device const float* mask [[buffer(18)]],
+  device const float* mask_blurred_reference [[buffer(19)]],
+  device const float* mask_blurred_distorted [[buffer(20)]],
+  device const float* sub_map [[buffer(21)]],
+  device const uint2* anchors [[buffer(22)]],
+  device float* block_distance [[buffer(23)]],
+  device float* score_partials [[buffer(24)]],
+  device atomic_uint* error [[buffer(25)]],
+  constant ResidentReductionParams& params [[buffer(26)]],
   uint anchor_index [[threadgroup_position_in_grid]],
   uint thread_index [[thread_index_in_threadgroup]]) {
 
@@ -1266,18 +1398,23 @@ kernel void gjxl_butteraugli_resident_reduce_f32(
     const uint x = x_begin + local_index % valid_width;
     const uint y = y_begin + local_index / valid_width;
     const uint index = y * params.work_stride + x;
+    // Internal main-scale psycho and accumulation planes share work_stride.
+    const L2Contributions l2 = l2_contributions(
+      rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1,
+      dlow0, dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1,
+      malta_ac0, malta_ac1, index, index, index, params.asymmetry);
     const float difference =
       mask_blurred_reference[index] - mask_blurred_distorted[index];
     const float masked_ac_y =
-      ac1[index] + 10.0f * difference * difference;
+      l2.ac1 + 10.0f * difference * difference;
     const float mask_value = mask_y(mask[index]);
     const float dc_mask_value = mask_dc_y(mask[index]);
     const float masked_dc =
-      dc0[index] * params.x_multiplier * dc_mask_value +
-      dc1[index] * dc_mask_value + dc2[index] * dc_mask_value;
+      l2.dc0 * params.x_multiplier * dc_mask_value +
+      l2.dc1 * dc_mask_value + l2.dc2 * dc_mask_value;
     const float masked_ac =
-      ac0[index] * params.x_multiplier * mask_value +
-      masked_ac_y * mask_value + ac2[index] * mask_value;
+      l2.ac0 * params.x_multiplier * mask_value +
+      masked_ac_y * mask_value + l2.ac2 * mask_value;
     const float main_value = sqrt(masked_dc + masked_ac);
     const float sub_value =
       sub_map[(y / 2u) * params.sub_stride + x / 2u];

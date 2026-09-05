@@ -2567,10 +2567,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             "butteraugli.malta.sub",
             ResidentProfileStage::kButteraugliResident, iteration, 0,
             MetalButteraugliProfileStage::kMaltaSub);
-          append_stage(
-            "butteraugli.l2.sub",
-            ResidentProfileStage::kButteraugliResident, iteration, 0,
-            MetalButteraugliProfileStage::kL2Sub);
+          // Subscale L2 is evaluated inside the final-map producer.
           append_stage(
             "butteraugli.mask_final.sub",
             ResidentProfileStage::kButteraugliResident, iteration, 0,
@@ -2583,10 +2580,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             "butteraugli.malta.main",
             ResidentProfileStage::kButteraugliResident, iteration, 0,
             MetalButteraugliProfileStage::kMaltaMain);
-          append_stage(
-            "butteraugli.l2.main",
-            ResidentProfileStage::kButteraugliResident, iteration, 0,
-            MetalButteraugliProfileStage::kL2Main);
+          // Main-scale L2 is evaluated inside the resident reduction.
           append_stage(
             "butteraugli.mask.main",
             ResidentProfileStage::kButteraugliResident, iteration, 0,

@@ -224,6 +224,17 @@ struct FinalParams {
   float x_multiplier;
 };
 
+struct FinalL2Params {
+  uint32_t width;
+  uint32_t height;
+  uint32_t reference_stride;
+  uint32_t distorted_stride;
+  uint32_t work_stride;
+  uint32_t output_stride;
+  float asymmetry;
+  float x_multiplier;
+};
+
 struct CropParams {
   uint32_t width;
   uint32_t height;
@@ -260,6 +271,7 @@ struct ResidentReductionParams {
   uint32_t covered_width;
   uint32_t covered_height;
   float x_multiplier;
+  float asymmetry;
 };
 
 static_assert(std::is_trivially_copyable_v<PlaneParams>);
@@ -275,9 +287,10 @@ static_assert(sizeof(MaltaResponseParams) == 32);
 static_assert(sizeof(MaltaFusedParams) == 48);
 static_assert(sizeof(DifferenceParams) == 24);
 static_assert(sizeof(FinalParams) == 20);
+static_assert(sizeof(FinalL2Params) == 32);
 static_assert(std::is_standard_layout_v<ResidentReductionParams>);
 static_assert(std::is_trivially_copyable_v<ResidentReductionParams>);
-static_assert(sizeof(ResidentReductionParams) == 48);
+static_assert(sizeof(ResidentReductionParams) == 52);
 static_assert(sizeof(CropParams) == 24);
 static_assert(sizeof(ComposeParams) == 20);
 static_assert(sizeof(ReductionParams) == 12);
@@ -1259,7 +1272,8 @@ private:
     Extent2D scale_extent,
     DevicePlaneView output,
     DifferenceProfileStage profile_stage = DifferenceProfileStage::kAll,
-    bool emit_final = true) {
+    bool emit_final = true,
+    bool defer_l2 = false) {
 
     const float asymmetry = options().hf_asymmetry;
     const float sqrt_asymmetry = std::sqrt(asymmetry);
@@ -1385,8 +1399,9 @@ private:
     }
     if (profile_stage == DifferenceProfileStage::kMalta) return;
 
-    if (profile_stage == DifferenceProfileStage::kAll ||
-        profile_stage == DifferenceProfileStage::kL2) {
+    if (!defer_l2 &&
+        (profile_stage == DifferenceProfileStage::kAll ||
+         profile_stage == DifferenceProfileStage::kL2)) {
       const DifferenceParams difference_params{
       static_cast<uint32_t>(scale_extent.width),
       static_cast<uint32_t>(scale_extent.height),
@@ -1474,6 +1489,40 @@ private:
         scale_extent);
     }
     if (!emit_final) return;
+
+    if (defer_l2) {
+      const FinalL2Params params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(reference[0].row_stride),
+        static_cast<uint32_t>(distorted[0].row_stride),
+        static_cast<uint32_t>(working_extent_.width),
+        static_cast<uint32_t>(output.row_stride),
+        asymmetry,
+        options().x_multiplier,
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.final_l2_masked_ac.get());
+      for (size_t index = 0; index < 8; ++index) {
+        Bind(encoder, Handle(metal_, reference[index]),
+             reference[index].offset_bytes, index);
+        Bind(encoder, Handle(metal_, distorted[index]),
+             distorted[index].offset_bytes, 8 + index);
+      }
+      for (size_t channel = 0; channel < 2; ++channel) {
+        const DevicePlaneView ac = Plane(kAc + channel, scale_extent);
+        Bind(encoder, Handle(metal_, ac), ac.offset_bytes, 16 + channel);
+      }
+      Bind(encoder, Handle(metal_, mask), mask.offset_bytes, 18);
+      Bind(encoder, Handle(metal_, mask_blurred_reference),
+           mask_blurred_reference.offset_bytes, 19);
+      Bind(encoder, Handle(metal_, mask_blurred_distorted),
+           mask_blurred_distorted.offset_bytes, 20);
+      Bind(encoder, Handle(metal_, output), output.offset_bytes, 21);
+      encoder->setBytes(&params, sizeof(params), 22);
+      metal_.DispatchPlane(encoder, scale_extent);
+      return;
+    }
 
     const FinalParams final_params{
       static_cast<uint32_t>(scale_extent.width),
@@ -1634,31 +1683,37 @@ private:
 
     encoder->setComputePipelineState(
       metal_.butteraugli_pipelines_.resident_reduction.get());
-    for (size_t channel = 0; channel < 3; ++channel) {
-      const DevicePlaneView dc = Plane(kDc + channel, extent());
+    const PsychoPlanes reference = PsychoSlots(kPsychoReference, working_extent_);
+    const PsychoPlanes distorted = PsychoSlots(kPsychoDistorted, working_extent_);
+    for (size_t index = 0; index < 8; ++index) {
+      Bind(encoder, Handle(metal_, reference[index]),
+           reference[index].offset_bytes, index);
+      Bind(encoder, Handle(metal_, distorted[index]),
+           distorted[index].offset_bytes, 8 + index);
+    }
+    for (size_t channel = 0; channel < 2; ++channel) {
       const DevicePlaneView ac = Plane(kAc + channel, extent());
-      Bind(encoder, Handle(metal_, dc), dc.offset_bytes, channel);
-      Bind(encoder, Handle(metal_, ac), ac.offset_bytes, 3 + channel);
+      Bind(encoder, Handle(metal_, ac), ac.offset_bytes, 16 + channel);
     }
     const DevicePlaneView mask = Plane(kWork + 3, extent());
     const DevicePlaneView mask_blurred_distorted =
       Plane(kWork + 4, extent());
     const DevicePlaneView mask_blurred_reference =
       Plane(kReferenceMask, extent());
-    Bind(encoder, Handle(metal_, mask), mask.offset_bytes, 6);
+    Bind(encoder, Handle(metal_, mask), mask.offset_bytes, 18);
     Bind(encoder, Handle(metal_, mask_blurred_reference),
-         mask_blurred_reference.offset_bytes, 7);
+         mask_blurred_reference.offset_bytes, 19);
     Bind(encoder, Handle(metal_, mask_blurred_distorted),
-         mask_blurred_distorted.offset_bytes, 8);
-    Bind(encoder, Handle(metal_, sub_map), sub_map.offset_bytes, 9);
+         mask_blurred_distorted.offset_bytes, 20);
+    Bind(encoder, Handle(metal_, sub_map), sub_map.offset_bytes, 21);
     Bind(encoder, Handle(metal_, descriptor.anchors),
-         descriptor.anchors.offset_bytes, 10);
+         descriptor.anchors.offset_bytes, 22);
     Bind(encoder, Handle(metal_, descriptor.block_distance),
-         descriptor.block_distance.offset_bytes, 11);
+         descriptor.block_distance.offset_bytes, 23);
     Bind(encoder, Handle(metal_, descriptor.score_partials),
-         descriptor.score_partials.offset_bytes, 12);
+         descriptor.score_partials.offset_bytes, 24);
     Bind(encoder, Handle(metal_, descriptor.error),
-         descriptor.error.offset_bytes, 13);
+         descriptor.error.offset_bytes, 25);
 
     for (const MetalButteraugliResidentBatch& batch : descriptor.batches) {
       if (batch.anchor_count == 0) continue;
@@ -1675,8 +1730,9 @@ private:
         batch.covered_width,
         batch.covered_height,
         options().x_multiplier,
+        options().hf_asymmetry,
       };
-      encoder->setBytes(&params, sizeof(params), 14);
+      encoder->setBytes(&params, sizeof(params), 26);
       DispatchMetalThreadgroups(
         encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
@@ -1705,14 +1761,15 @@ private:
       encoder, PsychoInputSlots(sub_extent_), distorted, sub_extent_, false);
     const DevicePlaneView sub_map = Plane(kFinalStaging, sub_extent_);
     EncodeDifference(
-      encoder, ReferenceSubSlots(), distorted, {}, sub_extent_, sub_map);
+      encoder, ReferenceSubSlots(), distorted, {}, sub_extent_, sub_map,
+      DifferenceProfileStage::kAll, true, true);
 
     EncodePsychoImage(
       encoder, descriptor.distorted_linear_rgb, distorted, requested, false);
     EncodeDifference(
       encoder, reference_main, distorted,
       AsConst(Plane(kReferenceMask, requested)), requested, {},
-      DifferenceProfileStage::kAll, false);
+      DifferenceProfileStage::kAll, false, true);
     EncodeResidentReduction(encoder, AsConst(sub_map), descriptor);
   }
 
@@ -1760,14 +1817,14 @@ private:
     if (sub_stage) {
       EncodeDifference(
         encoder, ReferenceSubSlots(), distorted, {}, sub_extent_,
-        Plane(kFinalStaging, sub_extent_), difference_stage);
+        Plane(kFinalStaging, sub_extent_), difference_stage, true, true);
       return;
     }
     EncodeDifference(
       encoder, reference_main, distorted,
       AsConst(Plane(kReferenceMask, requested)), requested, {},
       difference_stage,
-      stage != MetalButteraugliProfileStage::kMaskAndFinalMain);
+      stage != MetalButteraugliProfileStage::kMaskAndFinalMain, true);
   }
 
   [[nodiscard]] bool NeedsReferencePsychoCapture() const noexcept {
@@ -2115,7 +2172,7 @@ Status CreateButteraugliPipelines(
   ButteraugliPipelines pipelines;
   const std::array<std::pair<
     std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 25> bindings{{
+    NS::SharedPtr<MTL::ComputePipelineState>*>, 26> bindings{{
     {"gjxl_butteraugli_copy_f32", &pipelines.copy},
     {"gjxl_butteraugli_expand_f32", &pipelines.expand},
     {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
@@ -2142,9 +2199,11 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_masked_ac_f32", &pipelines.masked_ac},
     {"gjxl_butteraugli_final_f32", &pipelines.final},
     {"gjxl_butteraugli_final_masked_ac_f32", &pipelines.final_masked_ac},
+    {"gjxl_butteraugli_final_l2_masked_ac_f32",
+     &pipelines.final_l2_masked_ac},
     {"gjxl_butteraugli_crop_f32", &pipelines.crop},
     {"gjxl_butteraugli_compose_f32", &pipelines.compose},
-    {"gjxl_butteraugli_resident_reduce_f32",
+    {"gjxl_butteraugli_resident_l2_reduce_f32",
      &pipelines.resident_reduction},
     {"gjxl_butteraugli_reduce_max_f32", &pipelines.maximum_reduction},
   }};
