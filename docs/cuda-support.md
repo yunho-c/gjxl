@@ -998,6 +998,18 @@ No system settings change. Harness failures and slow diagnostics are retained;
 no firewall or permission block is confirmed. This remains a local exact
 optimization, not a universal speedup or a maxed-out backend.
 
+[S66](cuda-optimization-s1.md#shared-malta-reciprocal-investigation-s66-not-retained)
+investigates sharing Malta's two reciprocal calculations, but retains neither
+candidate. The arithmetic probe passes 2,785,017,856 full-run bitwise
+comparisons; the Malta probe passes 2,880 three-stage fixtures and 36 captured
+stages pass all 1,152 timing windows. Native-identical duplicate kernels expose
+timing scatter. The correctly rounded reciprocal variant is neutral at 4K;
+the refined approximate variant has only a small local benefit and no general
+rounding proof. No complete-workflow speedup or new release qualification is
+claimed. Production remains S65, with unchanged source/tests and all 39
+retained binaries/libraries. The next candidate is repeated immutable
+reference-mask work, including its preparation and storage tradeoffs.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

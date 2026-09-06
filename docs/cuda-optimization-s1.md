@@ -56,6 +56,14 @@ See [S65](#exact-zero-tile-malta-responses-s65) for competing layouts,
 25,800 timing windows, causal controls, diagnostic failures, and slower
 observations. Optimization remains ongoing, not maxed out.
 
+The subsequent [S66 division-sharing investigation](#shared-malta-reciprocal-investigation-s66-not-retained)
+does not change production. Both guarded recipes pass arithmetic and captured
+stage comparisons, but the correctly rounded reciprocal variant is neutral
+at 4K and the other variant has only a small local gain without a general
+rounding proof. A native-identical duplicate control exposes timing scatter.
+The next candidate is immutable reference-mask work still repeated during
+comparison, with preparation cost and additional storage treated explicitly.
+
 The preceding implemented checkpoint, S60 against S58
 production (`bf4968b`; S59 is investigation-only), fuses reference-mask erosion
 with L2/final masking. It removes four launches per profiled encode and one
@@ -11193,6 +11201,151 @@ executes the original divisions and directional response; reconstruction,
 quantization, other psycho stages, and host serialization remain material.
 The rejected wider/raw-zero schedules constrain the next investigation.
 Neither more streams nor approximate zero thresholds follow from this result.
+
+
+## Shared Malta reciprocal investigation (S66, not retained)
+
+S66 investigates S65 `7160cc4` on the same RTX 3060 Laptop, CUDA 11.8,
+sm_86, and MSVC 14.37. Production source, tests, and all 39 retained release
+binaries/libraries remain unchanged. This is a closed experiment, not a
+released optimization or evidence that the backend is maxed out.
+
+### Confirm the repeated division work
+
+The identified S65 selected-mode traces still put Malta first at 4K:
+the medians across two captures total 21.52 ms for low-frequency and
+15.53 ms for full response. Vertical low-medium construction follows at
+11.55 ms and erosion/L2/final masking at 10.08 ms. These are retained
+instrumented S65 captures, not newly acquired S66 baseline traces.
+
+Native instructions confirm that the two divisions in `MaltaScaleValue`
+independently compute and refine a reciprocal of the same denominator.
+The compiler has not already shared that work. The candidate changes only
+this two-quotient calculation inside the S65 zero-aware kernel; halo loads,
+the exact-zero vote, response arithmetic, tile policy, and accumulation stay
+the same. The original helper and production dispatch are untouched.
+
+Mode 1 shares an approximate reciprocal followed by Newton refinement,
+mirroring the observed sm_86 fast path. Mode 2 shares `__frcp_rn`, then
+uses one rounded multiplication and two explicit fused multiply-adds per
+quotient. Mode 3 is a separately named copy of the unchanged kernel.
+Mode 0 calls current production. Native inspection proves all twelve mode-3
+tile/frequency/grid bodies instruction-identical to production. Both
+guarded and replay executables contain the same 36 added bodies and all
+60 original Butteraugli bodies unchanged. These diagnostic executables do
+not contain the entire 188-body release program.
+
+Both candidate recipes require positive numerators in [2^-30, 2^30] and
+a positive denominator in [2^-60, 2^60], inclusive. All other cases execute
+the two original rounded divisions, including zero, negative, subnormal,
+nonfinite, and out-of-range operands. A range audit of all 36 retained
+captures proves that all 68,281,932 in-bounds input pixels take the candidate
+range, so this screen is not merely timing the fallback.
+
+Correctly rounding the reciprocal alone does not make multiplication an
+exact replacement for division. The mode-2 multiply/residual/correction
+sequence is Algorithm 1 of Brisebarre, Muller, and Raina, whose Theorem 1
+covers round-to-nearest when overflow and underflow do not occur. The broad
+normal-range guard is intended to keep those intermediate results in range;
+it is not a substitute for the theorem. That result is not asserted for
+mode 1's approximate reciprocal. Billions of passing samples are useful
+evidence, not a general proof for that recipe or a second GPU architecture.
+See the authors' [division paper](https://perso.ens-lyon.fr/jean-michel.muller/DivIEEETC-aug04.pdf)
+and NVIDIA's [CUDA 11.8 arithmetic intrinsic contracts](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-math-api/group__CUDA__MATH__INTRINSIC__SINGLE.html).
+
+### Arithmetic and captured-input evidence
+
+The independent arithmetic probe compares both quotients from both recipes
+bit-for-bit against `__fdiv_rn`. The quick run completes 21,757,952 comparisons;
+the full run completes 2,785,017,856, with zero mismatches in either recipe.
+Full coverage includes eight seeds each of bounded positive triples,
+arbitrary FP32 patterns, and binade-adjacent values, plus every 23-bit divisor
+mantissa at seven exponents for five fixed numerator pairs. These counts are
+comparisons, not unique triples or exhaustive coverage of the entire guarded
+domain. Arbitrary patterns also exercise the fallback.
+
+The Malta probe passes 2,880 guarded fixtures and 8,640 three-stage output
+comparisons across the three diagnostic modes, ten geometries, both grid
+forms, frequency modes, initialization modes, and twelve input patterns.
+The source-level reference is the original separate scaling/response path;
+guards, padded strides, input immutability, signed zeros, exceptional values,
+sparse tiles, and zero normalization remain checked bit-for-bit.
+
+The replay uses the unchanged S65 first full-resolution six-stage captures
+for 4K, HD, Flower, Keong macan, Riaphotographs, and Bliznaca. It does not
+recapture S66 inputs or cover every iteration and subscale. Each of 36 stages
+has eight balanced forward/reverse four-mode orders, three launches per event
+window, explicit output resets and stream ordering, and exact output checks
+after every window. All 1,152 event windows pass. There are no omitted rounds.
+
+The following values compare sums of six independently measured stage
+medians, not paired whole-workflow durations. Negative means less time.
+These descriptive aggregates must not be interpreted as encode speedups.
+
+| S66 captured stage aggregate | Mode 1, refined approximate | Mode 2, rounded reciprocal | Mode 3, identical control |
+| --- | ---: | ---: | ---: |
+| 4K | -0.42% | +0.01% | -0.09% |
+| 1080p | -0.98% | -0.21% | +0.03% |
+| Flower | -1.53% | -1.05% | +0.85% |
+| Keong macan | -2.19% | -0.31% | +0.21% |
+| Riaphotographs | -3.36% | +0.57% | -1.72% |
+| Bliznaca | +0.33% | +0.17% | -0.33% |
+
+Against production, mode 1's six 4K stage paired medians improve only
+0.32-0.76%; the identical control itself ranges from -0.50% to +0.05%.
+Against that duplicate, mode 2 is slower in all six 4K stage paired medians,
+by 0.19-0.67%. At smaller sizes the scatter grows: Flower's identical-control
+stage medians range from -0.53% to +7.65%, and the Riaphotographs mode-2
+last stage regresses 17.35%. These adverse results are retained.
+
+For height 64, all three compiled forms use 39 registers for full response
+and 36 for low frequency, with 11,520 shared bytes and no local/stack storage.
+Full-response static instruction counts are 424 / 536 / 600 for unchanged /
+mode 1 / mode 2; low-frequency counts are 400 / 520 / 584. These include
+fallbacks, helper code and padding, not dynamically executed instruction
+counts. The candidates reduce reciprocal setup on the guarded path but add
+range checks and compiled exceptional paths; no occupancy reduction or
+specific timing attribution follows from static counts alone.
+
+### Disposition and next work
+
+Neither variant clears the local cost/benefit gate. Mode 2 has no useful 4K
+gain; mode 1 adds numerical proof obligations for a small and inconsistent
+benefit. Neither enters a whole-workflow control, production dispatch, or
+release build. No fresh release tests, decoded-quality campaign, sanitizer
+campaign, batch cohort, or whole-encode speedup is claimed for S66. The
+unchanged S65 implementation retains its previously recorded qualification.
+
+Replay endpoints are 57 C and 59 C, both P3, 1,282 MHz SM, 5,500 MHz memory,
+21.73 W and 23.06 W, with thermal and power limiting reported at both ends.
+These are snapshots, not continuous clocks or an explanation for individual
+outliers. No OS, security, power, clock, or lane-count settings change.
+Native extraction completes; no firewall or permission block is confirmed.
+An initial orchestration string interpolation failed before compilation;
+the corrected harness subsequently built and ran successfully. No GPU test
+failure is suppressed or relabeled.
+
+The first evidence validator used Python's compensated `sum` for baseline
+totals originally accumulated with ordered `+=`, producing a 3.6e-15 ms
+last-bit difference. Its failed source and log remain; the corrected check
+reproduces the original accumulation order without changing raw timings or
+relaxing equality. No GPU test is rerun or reclassified for this parser fix.
+
+Ignored `build-cuda-ninja/profiles/s66_*` retains the arithmetic and Malta
+sources/binaries, build logs, native dumps/resources, all replay records,
+range audit, summary scripts, and a recomputing validator. A frozen manifest
+covers these artifacts and five source/document snapshots. The validator
+also checks all 39 S65 release binaries and the S59-S65 archived manifests.
+The division build runner is a clean-directory reproduction recipe added
+after the measured builds; it is not a second recorded build or rerun.
+
+The next investigation is reference-only work: `LaunchDifference` reuses the
+main blurred reference mask but recomputes its erosion and both nonlinear
+mask values for every comparison. Half-scale comparisons also rebuild their
+reference mask. Caching could remove repeated work, but must count extra
+device storage, first-encode preparation, reuse count, multiscale layout, and
+failure-atomic resource planning before retention. This is a measured next
+target, not an implemented or qualified cache.
 
 
 ## Work that should not lead the next cycle
