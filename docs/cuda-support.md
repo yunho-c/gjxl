@@ -907,6 +907,27 @@ Those regressions and slower total-GPU traces remain recorded: this is a
 targeted kernel improvement, not a universal encoder speedup or a maxed-out
 implementation.
 
+[S62](cuda-optimization-s1.md#vertical-low-medium-row-reuse-s62) reuses vertical
+convolution inputs across three adjacent low/medium output rows while keeping
+each output's original FMA and edge-weight order. The tile remains 32x48 with
+256 threads and 30,856 shared bytes; the new body uses 54 registers with zero
+stack/local storage. All 173 previous GPU bodies remain unchanged, and the
+new release body exactly matches both stage screens and the complete-workflow
+control. Launches, allocations, transfers, metadata/frame ABI, public API,
+and quality policy are unchanged; no size/content heuristic is added.
+
+Packed vertical-stage screens improve roughly 8-16%; eight complete-workflow
+trace pairs also improve the targeted GPU duration. A timing audit links 384
+event windows to 1,152 GPU kernels and locates large spikes inside kernel
+intervals, without claiming a causal clock/OS explanation. All 72 CUDA / 50
+CPU tests, five host ASan targets, scoped GPU sanitizers with explicit leak
+and stream-order checks, and 58 fresh byte-identical decoded-image pairs pass.
+The expanded low/medium test uses 380 fixtures and both prior resident and
+separate-pass oracles. Warm public whole changes are -1.6% / +1.0% / +5.0%
+at 4K / 1080p / Flower; cold changes are -2.2% / +1.2% / +1.9%. The ending
+performance snapshot reports thermal and power throttling. Regressions and
+measurement limitations remain documented; the backend is not maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

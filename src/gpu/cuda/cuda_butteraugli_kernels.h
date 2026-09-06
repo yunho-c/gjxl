@@ -117,8 +117,8 @@ struct CudaButteraugliOpsinPlan {
 
 // 33-tap separable blur followed by low/medium-frequency construction.
 // Each horizontal intermediate is tightly packed width*height. Inputs,
-// intermediates, and outputs must be mutually disjoint. Only the reference
-// entry writes blurred planes; those pointers may be null for the fused path.
+// intermediates, and outputs must be mutually disjoint. Only the separate-pass
+// reference writes blurred planes; both resident entries ignore those pointers.
 struct CudaButteraugliLowMediumPlan {
   std::array<const float*, 3> input{};
   std::array<float*, 3> intermediate{};
@@ -137,6 +137,10 @@ struct CudaButteraugliLowMediumPlan {
     const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
 
 [[nodiscard]] cudaError_t LaunchCudaButteraugliLowMediumReference(
+    const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
+
+// Prior resident computation, which accumulates one output row at a time.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliLowMediumSequentialReference(
     const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
 
 // Pointwise L2 difference followed by final masking. The fused entry reads

@@ -114,7 +114,7 @@ struct DeviceCase {
 };
 void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern) {
   Case c(width, height, padded, pattern);
-  DeviceCase reference(c), candidate(c);
+  DeviceCase reference(c), sequential(c), candidate(c);
   for (unsigned reuse = 0; reuse < 3; ++reuse) {
     if (reuse == 2) {
       for (size_t p = 0; p < 3; ++p)
@@ -125,19 +125,30 @@ void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern) {
           }
       candidate.plan.blurred.fill(nullptr);
       candidate.plan.blurred_stride = 0;
+      sequential.plan.blurred.fill(nullptr);
+      sequential.plan.blurred_stride = 0;
     }
     for (size_t p = 0; p < 16; ++p) {
       reference.planes[p]->Write(c.planes[p]);
+      sequential.planes[p]->Write(c.planes[p]);
       candidate.planes[p]->Write(c.planes[p]);
     }
     reference.Launch(true);
+    CheckCuda(gjxl::cuda_internal::LaunchCudaButteraugliLowMediumSequentialReference(
+        sequential.plan, nullptr));
     candidate.Launch(false);
     CheckCuda(cudaDeviceSynchronize());
     for (size_t p = 0; p < 16; ++p) {
       const auto a = reference.planes[p]->Read();
       const auto b = candidate.planes[p]->Read();
-      if (p >= 6 && p < 9) Equal(c.planes[p], b);
-      else Equal(a, b);
+      const auto s = sequential.planes[p]->Read();
+      if (p >= 6 && p < 9) {
+        Equal(c.planes[p], b);
+        Equal(c.planes[p], s);
+      } else {
+        Equal(a, b);
+        Equal(a, s);
+      }
       if (p < 3 || p == 15) Equal(c.planes[p], a);
       if (p == 15) continue;
       for (size_t i = 0; i < a.size(); ++i) {
@@ -166,6 +177,7 @@ int main(int argc, char** argv) {
       empty.height = zero_width ? 17 : 0;
       CheckCuda(LaunchCudaButteraugliLowMedium(empty, nullptr));
       CheckCuda(LaunchCudaButteraugliLowMediumReference(empty, nullptr));
+      CheckCuda(LaunchCudaButteraugliLowMediumSequentialReference(empty, nullptr));
     }
     for (unsigned invalid = 0; invalid < 3; ++invalid) {
       CudaButteraugliLowMediumPlan bad;
@@ -174,7 +186,8 @@ int main(int argc, char** argv) {
       uint32_t* const strides[] = {&bad.input_stride, &bad.blurred_stride, &bad.output_stride};
       *strides[invalid] = 0;
       if (LaunchCudaButteraugliLowMediumReference(bad, nullptr) != cudaErrorInvalidValue ||
-          (invalid != 1 && LaunchCudaButteraugliLowMedium(bad, nullptr) != cudaErrorInvalidValue))
+          (invalid != 1 && LaunchCudaButteraugliLowMedium(bad, nullptr) != cudaErrorInvalidValue) ||
+          (invalid != 1 && LaunchCudaButteraugliLowMediumSequentialReference(bad, nullptr) != cudaErrorInvalidValue))
         throw std::runtime_error("Invalid low/medium stride not rejected");
     }
     if (mode == "--tall-only") {
@@ -182,12 +195,13 @@ int main(int argc, char** argv) {
       std::cout << "Verified tall low/medium case above 65535 tile rows\n" << std::flush;
       return 0;
     }
-    constexpr std::array<std::array<uint32_t, 2>, 32> shapes{{
+    constexpr std::array<std::array<uint32_t, 2>, 38> shapes{{
         {1,1}, {1,19}, {19,1}, {7,11}, {15,15}, {31,31}, {32,32}, {33,33},
         {47,47}, {48,48}, {49,49}, {63,63}, {64,64}, {65,65}, {95,95},
         {96,96}, {97,97}, {127,65}, {255,3}, {256,4}, {257,67}, {511,129},
         {1,3}, {1,4}, {1,5}, {255,5}, {256,3}, {256,5}, {257,3},
-        {257,4}, {257,5}, {513,9}}};
+        {257,4}, {257,5}, {513,9}, {1,2}, {1,6}, {1,7},
+        {33,16}, {33,17}, {33,18}}};
     size_t cases = 0;
     for (const auto& shape : shapes) {
       // Include tiny, all-border, and horizontal-tile-boundary cases without
