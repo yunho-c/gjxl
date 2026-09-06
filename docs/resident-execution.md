@@ -158,6 +158,9 @@ they also close the missed high-density clustering-queue accounting attachment.
 The [representation bounds](resident-representation-storage-planning.md) cover
 coefficient-order counts, sampling, permutations, worker reduction and retained
 cleared scans, plus ordinary/exhaustive context-map selection and replacement.
+The [whole-serializer plan](resident-serializer-storage-planning.md) composes
+these bounds with candidate/dispatcher storage, current automatic nesting,
+header and section writers, assembly and retained output publication.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

@@ -279,6 +279,7 @@ add_library(
   src/codestream/sections.cpp
   src/codestream/token_storage_plan.cpp
   src/codestream/entropy_storage_plan.cpp
+  src/codestream/serializer_storage_plan.cpp
   src/codestream/workflow.cpp
 )
 
@@ -1278,6 +1279,11 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_representation_storage_plan_test PRIVATE gjxl_codestream)
   add_test(NAME representation_storage_plan COMMAND gjxl_representation_storage_plan_test)
   set_tests_properties(representation_storage_plan PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_serializer_storage_plan_test tests/serializer_storage_plan_test.cpp)
+  target_link_libraries(gjxl_serializer_storage_plan_test PRIVATE gjxl_codestream)
+  add_test(NAME serializer_storage_plan COMMAND gjxl_serializer_storage_plan_test)
+  set_tests_properties(serializer_storage_plan PROPERTIES TIMEOUT 300)
 
   add_executable(
     gjxl_block_context_map_test

@@ -16,6 +16,7 @@
 namespace gjxl::codestream_internal {
 
 inline constexpr uint32_t kAnsReciprocalPrecision = 44;
+inline constexpr size_t kAnsAlphabetWidthCount = 4;
 
 /// Returns ceil(2^44 / frequency), or zero for an absent symbol.
 [[nodiscard]] constexpr uint64_t AnsFrequencyReciprocal(

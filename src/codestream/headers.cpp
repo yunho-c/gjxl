@@ -6,6 +6,7 @@
 
 #include "codestream/headers.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -15,7 +16,10 @@
 #include <stdexcept>
 
 #include "codestream/block_context_map.h"
+#include "codestream/coefficient_order.h"
+#include "codestream/dc_group.h"
 #include "codestream/simple_ac_context.h"
+#include "codestream/serializer_storage_plan.h"
 
 namespace gjxl {
 namespace {
@@ -273,6 +277,115 @@ Status AllocationFailure(const char* operation) {
 }
 
 }  // namespace
+
+Status codestream_internal::ComputeSerializerHeaderStoragePlan(
+  size_t ac_groups, size_t dc_groups, const BlockContextMapStoragePlan& maps,
+  size_t order_tokens, SerializerHeaderStoragePlan* out) {
+  if (out == nullptr || ac_groups == 0 || dc_groups == 0 ||
+      dc_groups >= static_cast<size_t>(std::numeric_limits<int32_t>::max()) ||
+      maps.maximum_map_entries == 0 || maps.maximum_block_contexts == 0 ||
+      maps.maximum_block_contexts > 16 || maps.maximum_thresholds > 1) {
+    return Status::InvalidArgument("Serializer header storage inputs are invalid");
+  }
+  const auto overflow = [] {
+    return Status::OutOfMemory("Serializer header storage overflows");
+  };
+  const auto add_bits = [](size_t n, size_t* total) {
+    if (n > std::numeric_limits<size_t>::max() - *total) return false;
+    *total += n;
+    return true;
+  };
+  const auto writer = [](size_t bits, HostStorageBound* bound) {
+    HostStorageBound scratch;
+    const Status status = ComputeEntropyWriterStorageBound(bits, &scratch);
+    return status.ok() && bound->Add(scratch);
+  };
+  const auto either_model = [](size_t contexts, EntropyModelStoragePlan* model) {
+    EntropyModelStoragePlan prefix, ans;
+    const size_t clusters = std::min(contexts, kMaximumPrefixClusters);
+    Status status = ComputeEntropyModelStoragePlan(
+      EntropyCodingMode::kPrefix, contexts, clusters, &prefix);
+    if (!status.ok()) return status;
+    status = ComputeEntropyModelStoragePlan(
+      EntropyCodingMode::kAns, contexts, clusters, &ans);
+    if (!status.ok()) return status;
+    *model = {
+      .maximum_bits = std::max(prefix.maximum_bits, ans.maximum_bits),
+      .owned = {std::max(prefix.owned.retained_bytes, ans.owned.retained_bytes),
+                std::max(prefix.owned.peak_bytes, ans.owned.peak_bytes)},
+      .write_scratch = {
+        std::max(prefix.write_scratch.retained_bytes, ans.write_scratch.retained_bytes),
+        std::max(prefix.write_scratch.peak_bytes, ans.write_scratch.peak_bytes)},
+    };
+    return Status::Ok();
+  };
+  SerializerHeaderStoragePlan plan;
+  // Maximum file header: 17 prefix + 32 height + 3 ratio + 32 width +
+  // 33 metadata = 117 bits, padded to 120. The frame header is 33 bits.
+  plan.frame_prefix_bits = 120 + 33;
+  if (!writer(120, &plan.frame_scratch) ||
+      !writer(33, &plan.frame_scratch)) return overflow();
+  Status status = either_model(kSimpleDcContextCount, &plan.dc_model);
+  if (!status.ok()) return status;
+  status = either_model(maps.maximum_ac_contexts, &plan.ac_model);
+  if (!status.ok()) return status;
+  status = either_model(kSimplePermutationContextCount, &plan.order_model);
+  if (!status.ok()) return status;
+
+  EntropyModelStoragePlan map_model, tree_model;
+  status = ComputeEntropyModelStoragePlan(
+    EntropyCodingMode::kPrefix, maps.maximum_map_entries,
+    maps.maximum_block_contexts, &map_model);
+  if (!status.ok()) return status;
+  status = ComputeEntropyModelStoragePlan(
+    EntropyCodingMode::kPrefix, kContextTreeContextCount,
+    kContextTreeContextCount, &tree_model);
+  if (!status.ok()) return status;
+  EntropyOptimizationStoragePlan tree_search;
+  status = ComputeEntropyOptimizationStoragePlan(
+    {.policy = EntropyStoragePolicy::kPrefix,
+     .tokens = std::size(kContextTreeTokens), .contexts = kContextTreeContextCount,
+     .sections = 1, .return_cost = false}, &tree_search);
+  if (!status.ok()) return status;
+  EntropyTokenEmissionStoragePlan tree_tokens, order_emission;
+  status = ComputeEntropyTokenEmissionStoragePlan(
+    EntropyCodingMode::kPrefix, std::size(kContextTreeTokens), &tree_tokens);
+  if (!status.ok()) return status;
+  status = ComputeEntropyTokenEmissionStoragePlan(
+    EntropyCodingMode::kAns, order_tokens, &order_emission);
+  if (!status.ok()) return status;
+  // Quantizer <=36 bits; general block map <=17 flags/count bits plus 10 per
+  // threshold. The full map-model bound safely includes its context-map part.
+  plan.dc_global_bits = 1 + 36 + 17 + 10 * maps.maximum_thresholds + 1 + 2 + 1;
+  for (size_t bits : {map_model.maximum_bits, tree_model.maximum_bits,
+                      tree_tokens.maximum_bits, plan.dc_model.maximum_bits}) {
+    if (!add_bits(bits, &plan.dc_global_bits)) return overflow();
+  }
+  if (!plan.dc_global_scratch.Add(map_model.owned) ||
+      !plan.dc_global_scratch.Add(map_model.write_scratch) ||
+      !plan.dc_global_scratch.Add(tree_search.working) ||
+      !plan.dc_global_scratch.Add(tree_model.write_scratch) ||
+      !plan.dc_global_scratch.Add(tree_tokens.scratch) ||
+      !plan.dc_global_scratch.Add(plan.dc_model.write_scratch) ||
+      !writer(plan.dc_global_bits, &plan.dc_global_scratch)) return overflow();
+
+  const size_t histogram_bits = std::bit_width(ac_groups - 1);
+  if (histogram_bits > BitWriter::kMaxBitsPerWrite) {
+    return Status::InvalidArgument("AC histogram count cannot be serialized");
+  }
+  plan.ac_global_bits = 1 + histogram_bits + 15 + 1;
+  if (!add_bits(plan.ac_model.maximum_bits, &plan.ac_global_bits) ||
+      !plan.ac_global_scratch.Add(plan.ac_model.write_scratch)) return overflow();
+  if (order_tokens != 0 &&
+      (!add_bits(1, &plan.ac_global_bits) ||
+       !add_bits(plan.order_model.maximum_bits, &plan.ac_global_bits) ||
+       !add_bits(order_emission.maximum_bits, &plan.ac_global_bits) ||
+       !plan.ac_global_scratch.Add(plan.order_model.write_scratch) ||
+       !plan.ac_global_scratch.Add(order_emission.scratch))) return overflow();
+  if (!writer(plan.ac_global_bits, &plan.ac_global_scratch)) return overflow();
+  *out = plan;
+  return Status::Ok();
+}
 
 Status WriteSimpleCodestreamHeader(Extent2D frame_extent, BitWriter* writer) {
   if (writer == nullptr) {

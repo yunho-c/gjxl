@@ -53,7 +53,7 @@ static_assert(
   kAnsLogTableSize ==
   codestream_internal::kAnsHistogramPrecisionShiftCount);
 constexpr uint32_t kAnsSignature = 0x13;
-constexpr size_t kAnsAlphabetWidthCount = 4;
+using codestream_internal::kAnsAlphabetWidthCount;
 constexpr size_t kExactLog2TableSize = 1 << 16;
 // Retain the four prefix candidates, then add the four ANS configurations that
 // materially improved the established corpus. The wider 28-choice experiment
@@ -2963,8 +2963,10 @@ Status codestream_internal::ComputeEntropyTokenEmissionStoragePlan(
       (mode != EntropyCodingMode::kPrefix && mode != EntropyCodingMode::kAns))
     return Status::InvalidArgument("Entropy emission plan is invalid");
   EntropyTokenEmissionStoragePlan plan;
-  const size_t fixed = mode == EntropyCodingMode::kAns ? 32 : 0;
-  const size_t per_token = mode == EntropyCodingMode::kAns ? 31 + 16 : 31 + 15;
+  const size_t fixed = mode == EntropyCodingMode::kAns ? kAnsStreamStateBits : 0;
+  const size_t per_token = mode == EntropyCodingMode::kAns
+    ? kAnsMaximumTokenBits
+    : kPrefixMaximumTokenBits;
   if (tokens > (std::numeric_limits<size_t>::max() - fixed) / per_token)
     return Status::OutOfMemory("Entropy emission bits overflow");
   plan.maximum_bits = fixed + per_token * tokens;

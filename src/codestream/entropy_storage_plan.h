@@ -13,6 +13,9 @@ using resource_budget_internal::HostStorageBound;
 // Shared with aggregation, rather than duplicated policy thresholds.
 inline constexpr size_t kEntropyDenseValueCount = size_t{1} << 16;
 inline constexpr size_t kEntropyMinimumCountingInput = size_t{1} << 12;
+inline constexpr size_t kPrefixMaximumTokenBits = 31 + 15;
+inline constexpr size_t kAnsMaximumTokenBits = 31 + 16;
+inline constexpr size_t kAnsStreamStateBits = 32;
 
 struct EntropyAggregationStoragePlan {
   HostStorageBound output;

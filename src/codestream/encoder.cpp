@@ -33,6 +33,7 @@
 #include "codestream/entropy_internal.h"
 #include "codestream/headers.h"
 #include "codestream/sections.h"
+#include "codestream/serializer_storage_plan.h"
 #include "core/thread_budget.h"
 
 namespace gjxl {
@@ -41,7 +42,8 @@ using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 using ProfileClock = std::chrono::steady_clock;
-inline constexpr size_t kMaximumSectionWorkers = 8;
+inline constexpr size_t kMaximumSectionWorkers =
+  codestream_internal::kSerializerMaximumSectionWorkers;
 
 uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
   return static_cast<uint64_t>(
@@ -270,6 +272,11 @@ struct AcEncodingCandidate {
   Storage<uint64_t> ans_section_candidate_bits;
   size_t complete_size = 0;
   bool all_prefix_entropy = false;
+};
+
+struct AnsSectionTask {
+  size_t candidate_index = 0;
+  size_t section_index = 0;
 };
 
 Status ReduceFixedAcPopulations(
@@ -1587,10 +1594,6 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     }
 
     if (exhaustive_representation_search) {
-      struct AnsSectionTask {
-        size_t candidate_index = 0;
-        size_t section_index = 0;
-      };
       size_t ans_task_count = 0;
       for (const AcEncodingCandidate& candidate : candidates) {
         const size_t candidate_count = candidate.prepared_ans.candidates.size();
@@ -2037,6 +2040,87 @@ Status EncodeVarDctCodestreamImpl(
 }
 
 }  // namespace
+
+Status codestream_internal::ComputeSerializerControlStorageBound(
+  const SerializerStoragePlan& c, const SerializerStorageOptions& options,
+  size_t maximum_maps, bool has_orders, HostStorageBound* out) {
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  const size_t g = c.ac_group_count, d = c.dc_group_count;
+  const size_t candidates = c.maximum_ac_candidates;
+  const size_t orders = c.maximum_order_variants;
+  constexpr size_t max = std::numeric_limits<size_t>::max();
+  if (out == nullptr || g == 0 || d == 0 || maximum_maps == 0 ||
+      maximum_maps > 6 || orders == 0 || orders > 2 ||
+      candidates != maximum_maps * orders || d > (max - 2) / 2 ||
+      g > max - d - 2 || g > max / candidates ||
+      g > max / (candidates * kAnsAlphabetWidthCount)) {
+    return Status::InvalidArgument("Serializer control storage counts are invalid");
+  }
+  const bool exhaustive = options.coding.entropy_behavior ==
+    VarDctEntropyBehavior::kMaximumCompression;
+  const size_t workers = options.cpu_thread_count == 0
+    ? kMaximumSectionWorkers : std::min(options.cpu_thread_count, kMaximumSectionWorkers);
+  const size_t sections = g == 1 ? 1 : g + d + 2;
+  const size_t entropy_tasks = 1 + static_cast<size_t>(has_orders) + candidates;
+  const size_t group_tasks = candidates * g;
+  const size_t maximum_tasks = std::max({group_tasks, entropy_tasks, d,
+                                        2 * maximum_maps});
+  const size_t measuring_workers = std::min(workers, candidates);
+  HostStorageBound work;
+  if (!work.AddVector<AcEncodingCandidate>(candidates, kFreshExact) ||
+      !work.AddVector<Storage<EntropyToken>>(2 * d, kFreshExact) ||
+      !work.AddVector<EntropyTokenStreamView>(2 * d, kFreshExact) ||
+      (has_orders && !work.AddVector<EntropyTokenStreamView>(1, kFreshExact)) ||
+      !work.AddVector<EntropyTokenStreamView>(g, kFreshExact, candidates) ||
+      (!exhaustive && !work.AddVector<SimpleBlockContextMap>(1, kGrowing)) ||
+      !work.AddVector<BitWriter>(d + g + 2, kFreshExact) ||
+      !work.AddVector<size_t>(sections, kFreshExact) ||
+      (g == 1 && !work.AddVector<size_t>(1, kFreshExact)) ||
+      !work.AddVector<uint8_t>(kSimpleBlockContextMap.size(), kFreshExact) ||
+      (!exhaustive && !work.AddVector<uint64_t>(d, kFreshExact))) {
+    return Status::OutOfMemory("Serializer control backing overflows");
+  }
+  // One top-level dispatcher exists at a time; maximum count covers every
+  // tokenization/entropy/measurement/write phase. Auto spawns all participants.
+  if (workers > 1 &&
+      (!work.AddVector<Status>(maximum_tasks, kFreshExact) ||
+       !work.AddVector<std::thread>(std::min(workers, maximum_tasks), kFreshExact))) {
+    return Status::OutOfMemory("Serializer dispatch backing overflows");
+  }
+  if (options.collect_profile &&
+      (!work.AddVector<uint64_t>(orders * g, kFreshExact) ||
+       (exhaustive && !work.AddVector<uint64_t>(group_tasks, kFreshExact)) ||
+       !work.AddVector<EntropyWorkProfile>(entropy_tasks, kFreshExact) ||
+       !work.AddVector<SectionWritingWorkProfile>(d + g, kFreshExact))) {
+    return Status::OutOfMemory("Serializer profiling backing overflows");
+  }
+  if (exhaustive) {
+    if (!work.AddVector<AnsSectionTask>(group_tasks, kFreshExact) ||
+        // clear() after finalization does not free these per-candidate arrays.
+        !work.AddVector<uint64_t>(g * kAnsAlphabetWidthCount, kFreshExact, candidates) ||
+        (options.collect_profile &&
+         (!work.AddVector<uint64_t>(group_tasks, kFreshExact) ||
+          !work.AddVector<uint64_t>(d, kFreshExact, 2))) ||
+        !work.AddVector<uint64_t>(d, kFreshExact, 2) ||
+        !work.AddVector<std::array<Storage<uint64_t>, 2>>(maximum_maps, kFreshExact) ||
+        !work.AddVector<uint64_t>(d + 1, kFreshExact, 2 * maximum_maps) ||
+        !work.AddVector<uint64_t>(2 * maximum_maps, kFreshExact) ||
+        !work.AddVector<uint64_t>(candidates, kFreshExact) ||
+        !work.AddVector<uint64_t>(g + 1, kFreshExact, measuring_workers) ||
+        !work.AddVector<size_t>(sections, kFreshExact, measuring_workers)) {
+      return Status::OutOfMemory("Serializer measurement backing overflows");
+    }
+    // InExplicitParallelScope only suppresses nesting for a nonzero CPU limit.
+    // The two auto-mode DC-cost tasks can each spawn a group dispatcher.
+    if (options.cpu_thread_count == 0 && d > 1 &&
+        (!work.AddVector<Status>(d, kFreshExact, 2) ||
+         !work.AddVector<std::thread>(std::min(workers, d), kFreshExact, 2))) {
+      return Status::OutOfMemory("Nested serializer dispatch backing overflows");
+    }
+  }
+  *out = work;
+  return Status::Ok();
+}
 
 Status codestream_internal::SelectOrdinaryEntropyCodingMode(
   std::span<const EntropyTokenStreamView> streams,

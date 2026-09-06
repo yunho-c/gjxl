@@ -20,14 +20,18 @@ checked AQ/input/Butteraugli/completed-output layouts and AC-search capacity
 recipes to planning and allocation.
 The [host/token bounds](resident-token-storage-planning.md) add checked vector
 capacity/replacement sums, shared AC/DC reservations and aggregate token-owner
-bounds; the remaining serializer/frontend estimates are not yet complete.
+bounds.
 The [entropy bounds](resident-entropy-storage-planning.md) add policy-specific
 aggregation, model/candidate, lookup-table and emission envelopes and account the
-previously missed high-density clustering queue. Whole-serializer assembly,
-frontend/retry and retained-result envelopes still need their combined plan.
+previously missed high-density clustering queue.
 The [representation bounds](resident-representation-storage-planning.md) add
 coefficient-order selection/tokenization and context-map candidate envelopes,
 including cleared-vector capacity and worker-reduction overlap.
+The [whole-serializer plan](resident-serializer-storage-planning.md) composes
+these with candidate and dispatcher arrays, current nested automatic workers,
+header/section writing, assembly and the fresh retained codestream copy.
+Frontend/device/attempt/diagnostic and aggregate retained-batch-result lifetimes
+still need their combined workflow envelope and public domain integration.
 Whole-workflow planning and admission remain pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
@@ -106,10 +110,10 @@ allocation adapters are not wired by the foundation commit.
   or new streaming-output API. Transfer results out of managed accounting only
   at the existing public ownership handoff.
 
-The device recipes are now shared with actual allocation. Conservative host,
-token/model/writer bounds, their simultaneous-work envelope, the API adapters,
-and final allocation coverage still require implementation and tests before
-workflow enforcement can land.
+The device recipes are now shared with actual allocation, and the CPU serializer
+has a complete conservative storage plan. Frontend host bounds and their combined
+device/attempt/result envelope, the API adapters, and final allocation coverage
+still require implementation and tests before workflow enforcement can land.
 In particular, excluding all CPU allocations or retained batch results to make
 a GPU-only limiter pass would not satisfy this design or the parent roadmap.
 
