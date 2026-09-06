@@ -82,6 +82,36 @@ struct CudaButteraugliFrequencyParams {
     uint32_t blurred_stride, float* output,
     CudaButteraugliFrequencyParams params, cudaStream_t stream);
 
+// Pointwise L2 difference followed by final masking. The fused entry reads
+// only the first two Malta AC accumulations and leaves all AC/DC planes
+// unchanged. The separate-pass oracle overwrites all six scratch planes.
+// Output must not overlap any input or scratch plane; inputs must not overlap
+// scratch. The unused fused ac[2] and dc pointers may be null.
+struct CudaButteraugliL2FinalPlan {
+  std::array<const float*, 8> reference{};
+  std::array<const float*, 8> distorted{};
+  std::array<float*, 3> ac{};
+  std::array<float*, 3> dc{};
+  const float* mask = nullptr;
+  const float* mask_reference = nullptr;
+  const float* mask_distorted = nullptr;
+  float* output = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t reference_stride = 0;
+  uint32_t distorted_stride = 0;
+  uint32_t work_stride = 0;
+  uint32_t output_stride = 0;
+  float asymmetry = 1.0f;
+  float x_multiplier = 1.0f;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliL2Final(
+    const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliL2FinalReference(
+    const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaButteraugliPrepare(
     const CudaButteraugliPlan& plan, cudaStream_t stream);
 

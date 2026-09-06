@@ -671,6 +671,18 @@ whole-encode regression, including same-path and same-executable controls.
 No universal whole-workflow speedup is claimed. CUDA and system settings
 are unchanged.
 
+Butteraugli L2 differences are now evaluated inside final masking. The
+intervening mask preparation does not consume the L2 values or overwrite
+their inputs, so six temporary plane writes/reads and four launches are
+removed without reordering the arithmetic. Earlier psycho-image stages
+still need the aliased scratch allocation. The retained separate-pass
+kernels and a 360-case guarded fixture verify exact results, strides,
+non-finite handling, and reuse; seven scoped sanitizer checks and the full
+decoded-image matrix pass. See the
+[S45 study](cuda-optimization-s1.md#fused-l2-difference-and-final-masking-s45)
+for the approximately 35% target-kernel gain, smaller variable whole-encode
+results, native resource checks, and unchanged allocation/copy totals.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

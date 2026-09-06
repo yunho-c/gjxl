@@ -1060,6 +1060,56 @@ __global__ void FinalKernel(FinalPlan plan) {
       isfinite(result) && result >= 0.0f ? result : NAN;
 }
 
+// L2's six intermediate values have no consumer before final masking.
+// Keep the original kernels above as the independent separate-pass oracle.
+__global__ void L2FinalKernel(DifferencePlan difference_plan, FinalPlan plan) {
+  const FinalParams params = plan.params;
+  const DifferenceParams difference_params = difference_plan.params;
+  const size_t flat =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (flat >= count) return;
+  const uint32_t y = static_cast<uint32_t>(flat / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(flat - static_cast<size_t>(y) * params.width);
+  const size_t r = static_cast<size_t>(y) * difference_params.reference_stride + x;
+  const size_t d = static_cast<size_t>(y) * difference_params.distorted_stride + x;
+  const size_t index = static_cast<size_t>(y) * params.stride + x;
+  const float inverse_asymmetry = 1.0f / difference_params.asymmetry;
+  const float total0 = L2Asymmetric(
+      difference_plan.reference[6][r], difference_plan.distorted[6][d],
+      400.0f * difference_params.asymmetry, 400.0f * inverse_asymmetry,
+      difference_plan.ac[0][index]);
+  const float total1 = L2Asymmetric(
+      difference_plan.reference[7][r], difference_plan.distorted[7][d],
+      1.50815703118f * difference_params.asymmetry,
+      1.50815703118f * inverse_asymmetry, difference_plan.ac[1][index]);
+  const float md0 = difference_plan.reference[3][r] - difference_plan.distorted[3][d];
+  const float md1 = difference_plan.reference[4][r] - difference_plan.distorted[4][d];
+  const float md2 = difference_plan.reference[5][r] - difference_plan.distorted[5][d];
+  const float ac0 = UnfusedMultiplyAdd(md0 * md0, 2150.0f, total0);
+  const float ac1 = UnfusedMultiplyAdd(md1 * md1, 10.6195433239f, total1);
+  const float ac2 = md2 * md2 * 16.2176043152f;
+  const float ld0 = difference_plan.reference[0][r] - difference_plan.distorted[0][d];
+  const float ld1 = difference_plan.reference[1][r] - difference_plan.distorted[1][d];
+  const float ld2 = difference_plan.reference[2][r] - difference_plan.distorted[2][d];
+  const float dc0 = ld0 * ld0 * 29.2353797994f;
+  const float dc1 = ld1 * ld1 * 0.844626970982f;
+  const float dc2 = ld2 * ld2 * 0.703646627719f;
+  const float difference =
+      plan.mask_reference[index] - plan.mask_distorted[index];
+  const float ac_y = ac1 + 10.0f * difference * difference;
+  const float mask_value = MaskY(plan.mask[index]);
+  const float dc_mask_value = MaskDcY(plan.mask[index]);
+  const float masked_dc = dc0 * params.x_multiplier * dc_mask_value +
+                          dc1 * dc_mask_value + dc2 * dc_mask_value;
+  const float masked_ac = ac0 * params.x_multiplier * mask_value +
+                          ac_y * mask_value + ac2 * mask_value;
+  const float result = sqrtf(masked_dc + masked_ac);
+  plan.output[static_cast<size_t>(y) * params.output_stride + x] =
+      isfinite(result) && result >= 0.0f ? result : NAN;
+}
+
 struct CropParams {
   uint32_t width;
   uint32_t height;
@@ -1376,11 +1426,7 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
                        distorted_stride,
                        plan.working_width,
                        plan.hf_asymmetry};
-  L2Kernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
-      difference);
-  cudaError_t error = CheckLaunch();
-  if (error != cudaSuccess) return error;
-
+  cudaError_t error = cudaSuccess;
   const float* reference_mask = cached_reference_mask;
   uint32_t reference_mask_stride = cached_mask_stride;
   if (reference_mask == nullptr) {
@@ -1424,7 +1470,11 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
   final.output = output;
   final.params = {width, height, plan.working_width, output_stride,
                   plan.x_multiplier};
-  FinalKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(final);
+  // Mask preparation touches only kWork..kWork+4, not psycho or Malta AC
+  // planes. Defer pointwise L2 until here and never materialize its six
+  // temporary AC/DC outputs, retaining each original arithmetic expression.
+  L2FinalKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+      difference, final);
   return CheckLaunch();
 }
 
@@ -1454,6 +1504,58 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
 }
 
 }  // namespace
+
+namespace {
+cudaError_t LaunchL2FinalForTest(const CudaButteraugliL2FinalPlan& plan,
+                               bool reference, cudaStream_t stream) {
+  if (plan.width == 0 || plan.height == 0) return cudaSuccess;
+  if (plan.reference_stride < plan.width || plan.distorted_stride < plan.width ||
+      plan.work_stride < plan.width || plan.output_stride < plan.width)
+    return cudaErrorInvalidValue;
+  DifferencePlan difference{};
+  for (size_t i = 0; i < 8; ++i) {
+    difference.reference[i] = plan.reference[i];
+    difference.distorted[i] = plan.distorted[i];
+  }
+  FinalPlan final{};
+  for (size_t i = 0; i < 3; ++i) {
+    difference.ac[i] = plan.ac[i];
+    difference.dc[i] = plan.dc[i];
+    final.ac[i] = plan.ac[i];
+    final.dc[i] = plan.dc[i];
+  }
+  difference.params = {plan.width, plan.height, plan.reference_stride,
+                        plan.distorted_stride, plan.work_stride, plan.asymmetry};
+  final.mask = plan.mask;
+  final.mask_reference = plan.mask_reference;
+  final.mask_distorted = plan.mask_distorted;
+  final.output = plan.output;
+  final.params = {plan.width, plan.height, plan.work_stride,
+                   plan.output_stride, plan.x_multiplier};
+  if (reference) {
+    L2Kernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
+        difference);
+    const cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+    FinalKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
+        final);
+  } else {
+    L2FinalKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
+        difference, final);
+  }
+  return CheckLaunch();
+}
+}  // namespace
+
+cudaError_t LaunchCudaButteraugliL2Final(
+    const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream) {
+  return LaunchL2FinalForTest(plan, false, stream);
+}
+
+cudaError_t LaunchCudaButteraugliL2FinalReference(
+    const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream) {
+  return LaunchL2FinalForTest(plan, true, stream);
+}
 
 cudaError_t LaunchCudaButteraugliBlurAndSplit(
     float* input, const float* weights, float* intermediate, float* output,
