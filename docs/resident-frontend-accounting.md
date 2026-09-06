@@ -81,6 +81,13 @@ allocates only device storage.
 
 ## Qualification
 
+Follow-up: the [Metal AQ host-bound checkpoint](resident-aq-host-storage-planning.md)
+later found an uncovered allocation in exact-prefix `UploadInput`: its temporary
+group-offset vector could throw through the Status API. That checkpoint adds a
+narrow handler and parent/candidate regression checks for physical OOM and typed
+underplans. The resident-only failure sweep above did not cover this optional
+exact-input boundary; its historical result is not an all-policy guarantee.
+
 The frozen parent is `build/resident-serializer-storage`; the fresh Release
 candidate is `build/resident-frontend-storage`. Tests and benchmarks are enabled;
 libjxl-reference fixtures and compile-time Metal profiling are disabled. The

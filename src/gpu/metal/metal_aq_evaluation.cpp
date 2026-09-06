@@ -4062,7 +4062,18 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
       }
     }
 
-    ManagedVector<size_t> group_offsets(frame.ac_group_count(), 0);
+    ManagedVector<size_t> group_offsets;
+    try {
+      group_offsets.resize(frame.ac_group_count(), 0);
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory(
+        "Unable to allocate exact AQ group-offset staging");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument(
+        "Exact AQ group-offset staging is too large");
+    }
     for (const AqAnchor& anchor : row_major_anchors_) {
       const AcStrategyInfo* info = GetAcStrategyInfo(anchor.strategy);
       if (info == nullptr) {

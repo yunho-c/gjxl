@@ -46,6 +46,10 @@ cost tables and input staging; backend submission/profile metadata is separate.
 The [profile-graph bounds](resident-profile-storage-planning.md) cover string
 backing, nested diagnostic graphs and Metal profile snapshot overlap. They do
 not yet derive workflow stage/dispatch counts or bound backend context arrays.
+The [Metal AQ host bounds](resident-aq-host-storage-planning.md) cover fixed-geometry
+evaluator metadata/reconfiguration, optional readbacks and exact-prefix staging,
+plus the independently owned completed-frame host snapshot. The exact group-offset
+allocation now also preserves the Status/typed-underplan boundary on failure.
 Remaining frontend/search/evaluation-state bounds and their combined
 device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
 workflow envelope and public domain integration.

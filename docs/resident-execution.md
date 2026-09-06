@@ -179,6 +179,10 @@ The [profile-graph bounds](resident-profile-storage-planning.md) add char-string
 growth and nested diagnostics, including original/snapshot overlap during Metal
 profile resolution. Backend stage/context arrays and policy-to-count planning
 remain separate.
+The [Metal AQ host bounds](resident-aq-host-storage-planning.md) add prepared and
+reconfigured metadata, lazy diagnostics, exact-input staging, and the independent
+completed-frame host snapshot. Failure injection also closes an exact-input
+group-offset exception escape while preserving typed underplans.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 
