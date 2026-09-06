@@ -25,6 +25,7 @@
 #include "gpu/backend.h"
 #include "gpu/image.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/metal/metal_submission_storage_plan.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
@@ -52,6 +53,26 @@ struct MetalProfiledComputeStage {
   MetalComputeEncodeCallback encode = nullptr;
   const void* context = nullptr;
 };
+
+// Stage contexts are borrowed until synchronous command recording returns.
+// Never let an append reallocate their array and invalidate earlier pointers.
+// Reserve both fresh arrays from the shared plan before using this helper.
+template <typename Context>
+void AppendMetalProfileStage(
+    resource_budget_internal::ManagedVector<Context>& contexts,
+    resource_budget_internal::ManagedVector<MetalProfiledComputeStage>& stages,
+    const Context& context, MetalProfiledComputeStage stage) {
+  static_assert(std::is_nothrow_copy_constructible_v<Context>);
+  if (contexts.size() != stages.size() ||
+      contexts.size() == contexts.capacity() ||
+      stages.size() == stages.capacity()) {
+    throw resource_budget_internal::ManagedAllocationFailure(
+      Status::ResourcePlanExceeded("Metal profile stage capacity exhausted"));
+  }
+  contexts.push_back(context);
+  stage.context = &contexts.back();
+  stages.push_back(stage);
+}
 
 void DispatchMetalThreads(
   MTL::ComputeCommandEncoder* encoder,
@@ -395,6 +416,8 @@ public:
   }
 
 private:
+  friend Status ComputeAcSubmissionStoragePlan(
+    const AcSubmissionStorageOptions&, AcSubmissionStoragePlan*);
   friend class MetalPreparedAqEvaluation;
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;

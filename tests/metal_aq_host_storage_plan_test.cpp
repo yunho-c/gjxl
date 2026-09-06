@@ -18,6 +18,8 @@
 #include "gpu/metal/metal_aq_host_storage_plan.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_storage_plan.h"
+#include "gpu/metal/metal_submission_storage_plan.h"
+#include "gpu/ops/gpu_execution_profile_internal.h"
 
 namespace {
 using namespace gjxl;
@@ -376,6 +378,193 @@ struct Envelope {
     return true;
   }
 };
+
+bool CheckProfileInputs(GpuBackend &gpu) {
+  using namespace gpu_profile_internal;
+  auto *resolver = dynamic_cast<GpuSubmissionProfiler *>(&gpu);
+  if (!resolver) return false;
+  const auto capabilities = resolver->QueryGpuProfilingCapabilities();
+  if (!capabilities.timestamp_counter || !capabilities.stage_boundary) {
+    std::cout << "AQ profile input checks skipped: timestamps unavailable\n";
+    return true;
+  }
+  size_t cases = 0;
+  for (const Extent2D extent : {Extent2D{8, 8}, {89, 57}}) {
+    Fixture f(extent);
+    if (!f.Init()) return false;
+    for (bool gaborish : {false, true})
+      for (size_t epf = 0; epf <= 3; ++epf)
+        for (size_t iterations = 0; iterations <= 4; ++iterations)
+          for (bool final : {false, true}) {
+            if (iterations == 0 && !final) continue;
+            auto preparation = f.Preparation(1);
+            preparation.strategies = &f.mixed;
+            preparation.options.profile.loop_filter.gaborish = gaborish;
+            preparation.options.profile.loop_filter.epf_options.iterations = epf;
+            std::unique_ptr<PreparedAqEvaluation> reference, measured;
+            adaptive_quantization_internal::ButteraugliPolicySetup setup;
+            const auto prepare = [&](auto &owner) {
+              return Ok(PrepareAqEvaluation(gpu, preparation, &owner)) &&
+                     Ok(owner->AdjustQuantFieldResident(
+                         1.0f, {f.field.data(), f.blocks, f.blocks.width},
+                         {f.adjusted.data(), f.blocks, f.blocks.width})) &&
+                     Ok(adaptive_quantization_internal::PrepareButteraugliPolicy(
+                         {f.adjusted.data(), f.blocks, f.blocks.width}, 1.0f,
+                         &setup)) &&
+                     Ok(owner->PrepareInvariantColorCorrelationResident(
+                         {f.adjusted.data(), f.blocks, f.blocks.width},
+                         setup.quant_dc));
+            };
+            if (!prepare(reference) || !prepare(measured)) return false;
+            const AqResidentButteraugliPolicyInput input{
+                .adjusted_initial_quant_field =
+                    {f.adjusted.data(), f.blocks, f.blocks.width},
+                .quant_dc = setup.quant_dc,
+                .butteraugli_target = 1.0f,
+                .lower_bound = setup.lower_bound,
+                .upper_bound = setup.upper_bound,
+                .iterations = iterations,
+                .evaluate_final_field = final};
+            ResidentAqProfileInputStoragePlan metadata;
+            if (!Ok(ComputeResidentAqProfileInputStoragePlan(
+                    {iterations, final, extent.width >= 15 && extent.height >= 15,
+                     gaborish, epf}, &metadata))) return false;
+            std::vector<double> expected_scores, scores;
+            VarDctEncoderFrame expected, actual;
+            GpuExecutionProfile observed, result;
+            auto *reference_profiler =
+                dynamic_cast<PreparedAqEvaluationProfiler *>(reference.get());
+            auto *measured_profiler =
+                dynamic_cast<PreparedAqEvaluationProfiler *>(measured.get());
+            if (!reference_profiler || !measured_profiler ||
+                !Ok(reference_profiler->EvaluateResidentButteraugliPolicyProfiled(
+                    input, {.score_history = &expected_scores, .frame = &expected},
+                    GpuProfilingMode::kStage, &observed)) ||
+                !Check(observed.submissions.size() == 1 &&
+                           observed.submissions[0].stages.size() <=
+                               metadata.stage_capacity,
+                       "AQ recording exceeded the shared stage capacity"))
+              return false;
+            // Only the input-array plan is policy-derived here. Bound this
+            // fixture's OTHER diagnostic owners from its first actual graph;
+            // this is deliberately not a workflow dispatch-count estimator.
+            SubmissionProfileStorageOptions shape;
+            shape.stages = observed.submissions[0].stages.size();
+            shape.maximum_submission_id_length =
+                observed.submissions[0].submission_id.size();
+            for (const auto &stage : observed.submissions[0].stages) {
+              shape.dispatches += stage.dispatches.size();
+              shape.maximum_stage_id_length =
+                  std::max(shape.maximum_stage_id_length, stage.stage_id.size());
+              shape.maximum_group_id_length =
+                  std::max(shape.maximum_group_id_length, stage.group_id.size());
+              for (const auto &dispatch : stage.dispatches)
+                shape.maximum_kernel_id_length = std::max(
+                    shape.maximum_kernel_id_length, dispatch.kernel_id.size());
+            }
+            size_t wall_id_length = 0;
+            for (const auto &wall : observed.wall_stages)
+              wall_id_length = std::max(wall_id_length, wall.stage_id.size());
+            SubmissionProfileStoragePlan graph;
+            HostStorageBound wall;
+            Envelope other;
+            if (!Ok(ComputeSubmissionProfileStoragePlan(shape, &graph)) ||
+                !Ok(ComputeProfileStorageBound(
+                    {observed.wall_stages.size(), 0, 0, 0, wall_id_length}, &wall)) ||
+                !other.Init(f, 1)) return false;
+            const size_t capacity =
+                metadata.input.peak_bytes + other.host.working.peak_bytes +
+                other.owned.output.peak_bytes + 5 * sizeof(double) +
+                std::max(graph.recorded.peak_bytes, graph.resolution.peak_bytes) +
+                wall.peak_bytes;
+            ResourceBudget budget(capacity);
+            ResourceReservation job;
+            if (!Ok(budget.TryReserve(capacity, &job))) return false;
+            {
+              ResourceContextScope scope({&job, ResourceClass::kPreparation});
+              if (!Ok(measured_profiler->EvaluateResidentButteraugliPolicyProfiled(
+                      input, {.score_history = &scores, .frame = &actual},
+                      GpuProfilingMode::kStage, &result)) ||
+                  !Check(scores == expected_scores &&
+                             Equal(BorrowFrame(expected), BorrowFrame(actual)) &&
+                             result.submissions.size() == 1 &&
+                             result.submissions[0].stages.size() == shape.stages &&
+                             budget.snapshot().peak_backing_bytes <= capacity,
+                         "Bounded AQ recording changed output or exceeded plan"))
+                return false;
+            }
+            actual = {};
+            measured.reset();
+            result = {};
+            job.Reset();
+            if (!Empty(budget)) return false;
+            // Ordinary execution with the cached forward coefficients must
+            // still make exactly the same decisions as the profiled first use.
+            if (!Ok(reference->EvaluateResidentButteraugliPolicy(
+                    input, {.score_history = &scores, .frame = &actual})) ||
+                !Check(scores == expected_scores &&
+                           Equal(BorrowFrame(expected), BorrowFrame(actual)),
+                       "Profile recording changed resident policy decisions"))
+              return false;
+            if (extent.width == 89 && gaborish && epf == 3 &&
+                iterations == 4 && final) {
+              for (size_t failure_case = 0; failure_case < 3; ++failure_case) {
+                if (!prepare(measured)) return false;
+                measured_profiler =
+                    dynamic_cast<PreparedAqEvaluationProfiler *>(measured.get());
+                // The score vector is allocated before the context arrays.
+                // In the underplan case it fits, but neither context array can.
+                const size_t credit = failure_case == 2 ? 5 * sizeof(double)
+                                                         : capacity;
+                ResourceBudget failure_budget(credit);
+                ResourceReservation failure_job;
+                if (!Ok(failure_budget.TryReserve(credit, &failure_job)))
+                  return false;
+                scores = {-1};
+                actual = {};
+                const auto before = gpu.stats().committed_submissions;
+                {
+                  ResourceContextScope scope(
+                      {&failure_job, ResourceClass::kPreparation});
+                  if (failure_case < 2)
+                    ArmManagedHostClassAllocationFailureAfterForTest(
+                        ResourceClass::kPreparation, failure_case);
+                  const auto status =
+                      measured_profiler->EvaluateResidentButteraugliPolicyProfiled(
+                          input, {.score_history = &scores, .frame = &actual},
+                          GpuProfilingMode::kStage, &result);
+                  const bool pending = ManagedHostAllocationFailurePendingForTest();
+                  DisarmManagedHostAllocationFailureForTest();
+                  if (!Check(status.code() == StatusCode::kOutOfMemory &&
+                                 status.resource_plan_exceeded() == (failure_case == 2) &&
+                                 !pending && scores == std::vector<double>{-1} &&
+                                 !BorrowFrame(actual).valid() &&
+                                 result == GpuExecutionProfile{} &&
+                                 gpu.stats().committed_submissions == before,
+                             "AQ input failure escaped or committed output/work"))
+                    return false;
+                }
+                measured.reset();
+                failure_job.Reset();
+                if (!Empty(failure_budget) || !prepare(measured) ||
+                    !Ok(measured->EvaluateResidentButteraugliPolicy(
+                        input, {.score_history = &scores, .frame = &actual})) ||
+                    !Check(scores == expected_scores &&
+                               Equal(BorrowFrame(expected), BorrowFrame(actual)),
+                           "AQ failed-context preparation did not recover"))
+                  return false;
+              }
+              std::cout << "AQ callback inputs: two physical failures and one "
+                           "typed underplan, with recovery\n";
+            }
+            ++cases;
+          }
+  }
+  std::cout << "Resident AQ profile input/first-use/exact cases: " << cases << '\n';
+  if (!capabilities.dispatch_boundary)
+    std::cout << "Dispatch-boundary timestamps unavailable; stage mode qualified\n";
+  return true;
+}
 
 bool RunOperations(GpuBackend &gpu, Fixture &f, size_t mode,
                    ResourceBudget &budget, const Envelope &envelope,
@@ -961,7 +1150,7 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   std::unique_ptr<GpuBackend> gpu;
   if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu)) ||
-      !CheckRuntime(*gpu) || !CheckPrepareFailures(*gpu) ||
+      !CheckProfileInputs(*gpu) || !CheckRuntime(*gpu) || !CheckPrepareFailures(*gpu) ||
       !CheckOperationFailures(*gpu) || !CheckExactGroupBoundary(*gpu))
     return EXIT_FAILURE;
   gpu.reset();

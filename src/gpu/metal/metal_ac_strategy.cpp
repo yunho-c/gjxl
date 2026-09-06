@@ -69,27 +69,6 @@ Status CreatePipeline(
   return Status::Ok();
 }
 
-const char* AcStrategyProfileStageId(AcStrategyType strategy) {
-  switch (strategy) {
-    case AcStrategyType::kDct8:
-      return "frontend.ac_strategy.dct8";
-    case AcStrategyType::kDct16x8:
-      return "frontend.ac_strategy.dct16x8";
-    case AcStrategyType::kDct8x16:
-      return "frontend.ac_strategy.dct8x16";
-    case AcStrategyType::kDct16x16:
-      return "frontend.ac_strategy.dct16";
-    case AcStrategyType::kDct32x16:
-      return "frontend.ac_strategy.dct32x16";
-    case AcStrategyType::kDct16x32:
-      return "frontend.ac_strategy.dct16x32";
-    case AcStrategyType::kDct32x32:
-      return "frontend.ac_strategy.dct32";
-    default:
-      return "frontend.ac_strategy.unsupported";
-  }
-}
-
 struct FusedStageSpec {
   AcStrategyType strategy;
   std::string_view forward_function_name;
@@ -856,9 +835,13 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
   }
   submission->reset();
 
+  AcSubmissionStoragePlan storage;
+  Status planning = ComputeAcSubmissionStoragePlan(
+    {.batches = batches.size()}, &storage);
+  if (!planning.ok()) return planning;
   ManagedVector<ValidatedAcStrategyBatch> validated_batches;
   try {
-    validated_batches.reserve(batches.size());
+    validated_batches.reserve(storage.batch_capacity);
     for (const AcStrategyCandidateBatch& batch : batches) {
       ValidatedAcStrategyBatch validated;
       Status status = ValidateAcStrategyCandidateBatch(batch, &validated);
@@ -893,9 +876,14 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
   }
   ManagedVector<AcStrategyProfileContext> contexts;
   ManagedVector<MetalProfiledComputeStage> stages;
+  planning = ComputeAcSubmissionStoragePlan(
+    {.batches = batches.size(),
+     .nonempty_batches = validated_batches.size(),
+     .profiling = true}, &storage);
+  if (!planning.ok()) return planning;
   try {
-    contexts.resize(validated_batches.size());
-    stages.resize(validated_batches.size());
+    contexts.resize(storage.stage_capacity);
+    stages.resize(storage.stage_capacity);
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
     return failure.status();
   } catch (const std::bad_alloc&) {
@@ -909,7 +897,7 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
     contexts[index] = {&validated_batches[index]};
     stages[index] = {
       .stage_id = AcStrategyProfileStageId(validated_batches[index].strategy),
-      .group_id = "frontend.ac_strategy",
+      .group_id = kAcStrategyProfileGroupId,
       .encode = &MetalBackend::EncodeAcStrategyProfileStage,
       .context = &contexts[index],
     };

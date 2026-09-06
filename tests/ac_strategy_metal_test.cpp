@@ -17,7 +17,9 @@
 #include "codec/quantization.h"
 #include "gpu/backend.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/metal/metal_submission_storage_plan.h"
 #include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/gpu_execution_profile_internal.h"
 
 namespace {
 
@@ -237,6 +239,122 @@ bool Allocate(
   return CheckStatus(gpu.Allocate(bytes, buffer), role);
 }
 
+bool CheckSubmissionStorage(gjxl::GpuBackend& gpu,
+  const gjxl::AcStrategyCandidateBatch& batch,
+  const std::vector<float>& expected) {
+  using namespace gjxl;
+  using namespace gjxl::metal_internal;
+  using namespace gjxl::gpu_profile_internal;
+  using namespace gjxl::resource_budget_internal;
+  auto* profiler = dynamic_cast<GpuAcStrategyEvaluationProfiler*>(&gpu);
+  auto* resolver = dynamic_cast<GpuSubmissionProfiler*>(&gpu);
+  if (!profiler || !resolver) return false;
+  const auto capabilities = resolver->QueryGpuProfilingCapabilities();
+  if (!capabilities.timestamp_counter || !capabilities.stage_boundary) {
+    std::cout << "AC submission profile bounds skipped: timestamps unavailable\n";
+    return true;
+  }
+  const std::array batches{batch, AcStrategyCandidateBatch{}, batch};
+  AcSubmissionStoragePlan plan;
+  if (!CheckStatus(ComputeAcSubmissionStoragePlan({3, 2, true}, &plan),
+                   "Plan AC submission")) return false;
+  for (const auto mode : {GpuProfilingMode::kStage, GpuProfilingMode::kDispatch}) {
+    if (mode == GpuProfilingMode::kDispatch && !capabilities.dispatch_boundary)
+      continue;
+    ResourceBudget budget(plan.working.peak_bytes);
+    ResourceReservation job;
+    GpuExecutionProfile result;
+    if (!budget.TryReserve(plan.working.peak_bytes, &job).ok()) return false;
+    {
+      ResourceContextScope scope({&job, ResourceClass::kPreparation});
+      std::unique_ptr<GpuSubmission> submission;
+      if (!CheckStatus(profiler->EvaluateAcStrategyCandidateBatchesProfiled(
+                         batches, mode, &submission), "Profile AC batches") ||
+          !submission || !CheckStatus(submission->Wait(), "Wait AC profile") ||
+          !CheckStatus(resolver->ResolveGpuSubmissionProfile(*submission,
+                         kAcStrategyProfileGroupId, mode, &result),
+                       "Resolve AC profile")) return false;
+    }
+    if (result.submissions.size() != 1 ||
+        result.submissions[0].stages.size() != 2 ||
+        budget.snapshot().peak_backing_bytes > plan.working.peak_bytes ||
+        budget.snapshot().total.live_capacity_bytes >
+          plan.profile.resolved_output.retained_bytes) return false;
+    size_t dispatches = 0;
+    for (const auto& stage : result.submissions[0].stages) {
+      if (stage.stage_id != AcStrategyProfileStageId(batch.strategy) ||
+          stage.group_id != kAcStrategyProfileGroupId ||
+          stage.dispatches.size() < 3 || stage.dispatches.size() > 5)
+        return false;
+      dispatches += stage.dispatches.size();
+    }
+    if (dispatches > plan.maximum_dispatches) return false;
+    std::vector<float> actual(expected.size());
+    if (!CheckStatus(gpu.CopyDeviceToHost(*batch.costs, actual.data(),
+                        actual.size() * sizeof(float)), "Read profiled costs") ||
+        actual != expected) {
+      std::cerr << "Profiling changed exact AC costs\n";
+      return false;
+    }
+    job.Reset();
+    result.ReleaseResourceChargesAfterPublication();
+    if (budget.snapshot().committed_bytes() != 0) return false;
+  }
+  if (batch.strategy == AcStrategyType::kDct8) {
+    // All three callback-input allocations precede command recording. A
+    // physical failure must leave device work uncommitted and permit recovery.
+    for (size_t position = 0; position < 3; ++position) {
+      ResourceBudget budget(plan.working.peak_bytes);
+      ResourceReservation job;
+      if (!budget.TryReserve(plan.working.peak_bytes, &job).ok()) return false;
+      {
+        ResourceContextScope scope({&job, ResourceClass::kPreparation});
+        std::unique_ptr<GpuSubmission> submission;
+        const auto before = gpu.stats().committed_submissions;
+        ArmManagedHostClassAllocationFailureAfterForTest(
+          ResourceClass::kPreparation, position);
+        const auto status = profiler->EvaluateAcStrategyCandidateBatchesProfiled(
+          batches, GpuProfilingMode::kStage, &submission);
+        const bool pending = ManagedHostAllocationFailurePendingForTest();
+        DisarmManagedHostAllocationFailureForTest();
+        if (status.code() != StatusCode::kOutOfMemory ||
+            status.resource_plan_exceeded() || pending || submission ||
+            gpu.stats().committed_submissions != before ||
+            !profiler->EvaluateAcStrategyCandidateBatchesProfiled(
+              batches, GpuProfilingMode::kStage, &submission).ok() ||
+            !submission || !submission->Wait().ok()) return false;
+      }
+      job.Reset();
+      if (budget.snapshot().committed_bytes() != 0) return false;
+    }
+    AcSubmissionStoragePlan validation;
+    if (!ComputeAcSubmissionStoragePlan({3}, &validation).ok()) return false;
+    for (size_t capacity : {size_t{0}, validation.input.peak_bytes,
+                            plan.input.peak_bytes - 1}) {
+      ResourceBudget budget(std::max(size_t{1}, capacity));
+      ResourceReservation job;
+      if (!budget.TryReserve(std::max(size_t{1}, capacity), &job).ok() ||
+          (capacity == 0 && !job.ReduceCapacity(0).ok())) return false;
+      {
+        ResourceContextScope scope({&job, ResourceClass::kPreparation});
+        std::unique_ptr<GpuSubmission> submission;
+        const auto before = gpu.stats().committed_submissions;
+        const auto status = profiler->EvaluateAcStrategyCandidateBatchesProfiled(
+          batches, GpuProfilingMode::kStage, &submission);
+        if (!status.resource_plan_exceeded() || submission ||
+            gpu.stats().committed_submissions != before) return false;
+      }
+      job.Reset();
+      if (budget.snapshot().committed_bytes() != 0) return false;
+    }
+    std::cout << "AC callback inputs: three physical failures/recoveries and "
+                 "three terminal underplans checked\n";
+    if (!capabilities.dispatch_boundary)
+      std::cout << "Dispatch-boundary timestamps unavailable; stage mode qualified\n";
+  }
+  return true;
+}
+
 bool RunStrategyCase(
   gjxl::GpuBackend& gpu,
   std::string_view implementation,
@@ -368,6 +486,8 @@ bool RunStrategyCase(
         "Download candidate costs")) {
     return false;
   }
+
+  if (!CheckSubmissionStorage(gpu, batch, poisoned_costs)) return false;
 
   double max_absolute_error = 0.0;
   double max_relative_error = 0.0;

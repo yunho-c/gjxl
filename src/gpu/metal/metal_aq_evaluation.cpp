@@ -139,12 +139,6 @@ Status BorrowCompletedContiguousI32(
 inline constexpr NS::UInteger kBlockReductionThreadCount = 256;
 inline constexpr NS::UInteger kAqThreadCount = 256;
 inline constexpr size_t kQuantTableValueCount = kAqQuantTableValueCount;
-inline constexpr std::array<AcStrategyType, 7> kSupportedAqStrategies = {
-    AcStrategyType::kDct8,     AcStrategyType::kDct16x16,
-    AcStrategyType::kDct32x32, AcStrategyType::kDct16x8,
-    AcStrategyType::kDct8x16,  AcStrategyType::kDct32x16,
-    AcStrategyType::kDct16x32,
-};
 
 [[nodiscard]] std::array<MetalButteraugliResidentBatch, 7>
 MakeResidentButteraugliBatches(
@@ -2199,18 +2193,20 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     const bool profile_final_color_correlation =
       !exact_coefficient_reconstruction_ &&
       resident_color_correlation_pending_;
-    const size_t stages_per_iteration =
-      12 + 4 * kSupportedAqStrategies.size() +
-      static_cast<size_t>(butteraugli_multiscale) * 4 +
-      static_cast<size_t>(options_.profile.loop_filter.gaborish) +
-      epf_iterations;
-    const size_t stage_count =
-      score_count * stages_per_iteration +
-      static_cast<size_t>(!resident_evaluate_final_field_) *
-        (1 + kSupportedAqStrategies.size()) + 1;
+    ResidentAqProfileInputStoragePlan storage;
+    status = ComputeResidentAqProfileInputStoragePlan(
+      {.iterations = resident_policy_iterations_,
+       .evaluate_final_field = resident_evaluate_final_field_,
+       .butteraugli_sinks = butteraugli_multiscale,
+       .gaborish = options_.profile.loop_filter.gaborish,
+       .epf_iterations = epf_iterations}, &storage);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
     try {
-      contexts.reserve(stage_count);
-      stages.reserve(stage_count);
+      contexts.reserve(storage.stage_capacity);
+      stages.reserve(storage.stage_capacity);
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
       Invalidate();
       return failure.status();
@@ -2230,40 +2226,36 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
                                   MetalButteraugliProfileStage butter_stage =
                                     MetalButteraugliProfileStage::
                                       kDistortedPsychoMain) {
-      contexts.push_back({
+      AppendMetalProfileStage(contexts, stages, ResidentProfileStageContext{
         .self = this,
         .stage = stage,
         .iteration = iteration,
         .epf_pass = epf_pass,
         .butteraugli_stage = butter_stage,
-      });
-      stages.push_back({
+      }, {
         .stage_id = stage_id,
         .group_id = stage_id,
         .iteration = iteration,
         .invocation = iteration,
         .encode = &MetalPreparedAqEvaluation::EncodeResidentProfileStage,
-        .context = &contexts.back(),
       });
     };
     const auto append_reconstruction_stage = [&](const char* stage_id,
           ReconstructionProfileStage reconstruction_stage,
           uint32_t iteration, size_t batch_index = 0,
           const char* group_id = "aq.reconstruction") {
-      contexts.push_back({
+      AppendMetalProfileStage(contexts, stages, ResidentProfileStageContext{
         .self = this,
         .stage = ResidentProfileStage::kReconstruction,
         .iteration = iteration,
         .reconstruction_stage = reconstruction_stage,
         .reconstruction_batch_index = batch_index,
-      });
-      stages.push_back({
+      }, {
         .stage_id = stage_id,
         .group_id = group_id,
         .iteration = iteration,
         .invocation = iteration,
         .encode = &MetalPreparedAqEvaluation::EncodeResidentProfileStage,
-        .context = &contexts.back(),
       });
     };
     try {

@@ -398,6 +398,9 @@ public:
                             bool fail_readback);
 
 private:
+  friend Status ComputeResidentAqProfileInputStoragePlan(
+      const ResidentAqProfileInputOptions&,
+      ResidentAqProfileInputStoragePlan*);
   enum class ResidentProfileStage : uint8_t {
     kReconstruction,
     kPolicyInitialize,

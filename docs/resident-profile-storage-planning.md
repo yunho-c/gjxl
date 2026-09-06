@@ -126,8 +126,11 @@ covered by this targeted run and is not reported fixed.
 
 ## Remaining composition
 
-The next required bounds are backend validated-batch and stage/context metadata,
-remaining AQ/evaluator host owners, and policy-to-stage/dispatch/attempt counts.
+The later [AQ host checkpoint](resident-aq-host-storage-planning.md) covers
+production AQ/evaluator host owners. The [submission checkpoint](resident-submission-storage-planning.md)
+adds AC validated-batch/stage/context metadata and dispatch counts, and shares
+the resident AQ callback-input reserve recipe with execution. AQ/Butteraugli
+dispatch counts and complete workflow/attempt counts remain to be implemented.
 Those counts must include failure paths and timestamp-capacity overflow paths;
 the 4096-sample dispatch limit alone is not a graph-allocation bound because
 recording continues within the callback before overflow is reported. Stage mode

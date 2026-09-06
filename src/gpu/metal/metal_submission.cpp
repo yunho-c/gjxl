@@ -31,7 +31,6 @@ using gpu_profile_internal::ProfileString;
 
 constexpr size_t kMaximumDispatchTimestampSamples = 4096;
 constexpr size_t kMaximumRegisteredPipelines = 512;
-constexpr size_t kMaximumKernelIdBytes = 128;
 
 struct PipelineRegistryEntry {
   MTL::ComputePipelineState* pipeline = nullptr;

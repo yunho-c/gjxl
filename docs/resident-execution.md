@@ -183,6 +183,11 @@ The [Metal AQ host bounds](resident-aq-host-storage-planning.md) add prepared an
 reconfigured metadata, lazy diagnostics, exact-input staging, and the independent
 completed-frame host snapshot. Failure injection also closes an exact-input
 group-offset exception escape while preserving typed underplans.
+The [submission metadata bounds](resident-submission-storage-planning.md) share
+AC validated-batch/profile-input and resident AQ context-array reserves with
+execution. They compose AC recording/resolution with a five-dispatch-per-batch
+bound and prevent context-array growth from invalidating recorded pointers.
+AQ/Butteraugli dispatch counts and complete workflow composition remain separate.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

@@ -50,6 +50,11 @@ The [Metal AQ host bounds](resident-aq-host-storage-planning.md) cover fixed-geo
 evaluator metadata/reconfiguration, optional readbacks and exact-prefix staging,
 plus the independently owned completed-frame host snapshot. The exact group-offset
 allocation now also preserves the Status/typed-underplan boundary on failure.
+The [submission metadata bounds](resident-submission-storage-planning.md) share
+AC validation/context/stage and resident AQ callback-input reserves with execution.
+AC recording and resolution use a five-dispatch-per-nonempty-batch bound;
+resident AQ still needs its separate policy/geometry-to-dispatch audit. An
+explicit capacity guard prevents context growth from invalidating stage pointers.
 Remaining frontend/search/evaluation-state bounds and their combined
 device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
 workflow envelope and public domain integration.
