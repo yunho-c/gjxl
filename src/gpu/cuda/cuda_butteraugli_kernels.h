@@ -83,6 +83,31 @@ struct CudaButteraugliFrequencyParams {
     uint32_t blurred_stride, float* output,
     CudaButteraugliFrequencyParams params, cudaStream_t stream);
 
+// Mirrored five-tap RGB blur followed by pointwise Opsin conversion.
+// Fused intermediates are three disjoint packed width*height planes. RGB
+// inputs, intermediates and XYB outputs must be mutually disjoint. The
+// separate-pass oracle may reuse one horizontal intermediate and may alias
+// each blurred plane with its output. Blurred/output strides are identical;
+// fused blurred pointers are ignored and may be null.
+struct CudaButteraugliOpsinPlan {
+  std::array<const float*, 3> input{};
+  std::array<uint32_t, 3> input_stride{};
+  std::array<float*, 3> intermediate{};
+  std::array<float*, 3> blurred{};
+  std::array<float*, 3> output{};
+  const float* weights = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t output_stride = 0;
+  float intensity_target = 255.0f;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliOpsin(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliOpsinReference(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream);
+
 // 33-tap separable blur followed by low/medium-frequency construction.
 // Each horizontal intermediate is tightly packed width*height. Inputs,
 // intermediates, and outputs must be mutually disjoint. Only the reference

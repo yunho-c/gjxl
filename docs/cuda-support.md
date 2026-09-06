@@ -710,6 +710,19 @@ for the lifetime map, exact allocation accounting, and mixed timing
 results. This is a requested-memory improvement, not a stable encoder
 speedup or a promise of an equal reduction in pool-retained VRAM.
 
+The next checkpoint fuses the three mirrored five-tap vertical RGB blurs
+with pointwise Opsin conversion. Three packed horizontal RGB planes reuse
+the existing six-plane work set, then become horizontal XYB scratch.
+The measured 32x16 tile removes 18 launches per encode and three
+intermediate plane writes/reads per psycho pass, with unchanged allocations
+and transfers. The original kernels remain independent oracles. All
+69 CUDA / 49 CPU tests, 240 guarded cases plus a tall case, seven scoped
+sanitizers, 261 byte-exact prepared-map pairs, 46 decoded-image pairs,
+and batch checks pass. The
+[S48 study](cuda-optimization-s1.md#fused-mirrored-rgb-blur-and-opsin-conversion-s48)
+records the roughly 49% / 47% targeted GPU gain at 4K / 1080p and the
+mixed whole-encode results; no universal encoder speedup is claimed.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -2391,6 +2391,13 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_memory_pool COMMAND gjxl_cuda_memory_pool_test)
     set_tests_properties(cuda_memory_pool PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_cuda_opsin_test tests/cuda_opsin_test.cpp)
+    target_link_libraries(gjxl_cuda_opsin_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_opsin_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_opsin COMMAND gjxl_cuda_opsin_test)
+    add_test(NAME cuda_opsin_tall COMMAND gjxl_cuda_opsin_test --tall-only)
+    set_tests_properties(cuda_opsin cuda_opsin_tall PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(gjxl_cuda_low_medium_test tests/cuda_low_medium_test.cpp)
     target_link_libraries(gjxl_cuda_low_medium_test PRIVATE gjxl_cuda)
     target_include_directories(gjxl_cuda_low_medium_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})

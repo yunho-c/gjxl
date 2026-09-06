@@ -70,6 +70,18 @@ struct OpsinParams {
   float intensity_target;
 };
 
+struct OpsinConvolutionPlan {
+  const float* input[3];
+  const float* intermediate[3];
+  float* output[3];
+  const float* weights;
+  uint32_t input_stride[3];
+  uint32_t width;
+  uint32_t height;
+  uint32_t output_stride;
+  float intensity_target;
+};
+
 struct FrequencyParams {
   uint32_t width;
   uint32_t height;
@@ -441,6 +453,90 @@ __global__ void OpsinKernel(const float* input0, const float* input1,
   output0[blurred_index] = current.x - current.y;
   output1[blurred_index] = current.x + current.y;
   output2[blurred_index] = current.z;
+}
+
+// Keep OpsinKernel unchanged as the separate-pass arithmetic oracle.
+__device__ float3 OpsinFromBlurredRgb(float3 input_rgb, float3 blurred_rgb,
+                                     float intensity_target) {
+  if (!isfinite(input_rgb.x) || !isfinite(input_rgb.y) ||
+      !isfinite(input_rgb.z) || !isfinite(blurred_rgb.x) ||
+      !isfinite(blurred_rgb.y) || !isfinite(blurred_rgb.z)) {
+    return make_float3(NAN, NAN, NAN);
+  }
+  float3 pre = OpsinAbsorbance(blurred_rgb.x * intensity_target,
+                               blurred_rgb.y * intensity_target,
+                               blurred_rgb.z * intensity_target, true);
+  pre.x = fmaxf(pre.x, 1.0e-4f);
+  pre.y = fmaxf(pre.y, 1.0e-4f);
+  pre.z = fmaxf(pre.z, 1.0e-4f);
+  const float3 sensitivity =
+      make_float3(fmaxf(GammaValue(pre.x) / pre.x, 1.0e-4f),
+                  fmaxf(GammaValue(pre.y) / pre.y, 1.0e-4f),
+                  fmaxf(GammaValue(pre.z) / pre.z, 1.0e-4f));
+  float3 current =
+      OpsinAbsorbance(input_rgb.x * intensity_target,
+                      input_rgb.y * intensity_target,
+                      input_rgb.z * intensity_target, false);
+  current.x = fmaxf(current.x * sensitivity.x, 1.7557483643287353f);
+  current.y = fmaxf(current.y * sensitivity.y, 1.7557483643287353f);
+  current.z = fmaxf(current.z * sensitivity.z, 12.226454707163354f);
+  return make_float3(current.x - current.y, current.x + current.y, current.z);
+}
+
+template <unsigned int TileHeight>
+__global__ void ConvolutionOpsinKernel(OpsinConvolutionPlan plan) {
+  constexpr unsigned int kWidth = 32;
+  constexpr unsigned int kInputHeight = TileHeight + 4;
+  __shared__ float tile[3][kWidth * kInputHeight];
+  __shared__ float weights[5];
+  __shared__ float normalization;
+  const uint32_t columns = (plan.width + kWidth - 1) / kWidth;
+  const uint32_t origin_x = (blockIdx.x % columns) * kWidth;
+  const uint32_t origin_y = (blockIdx.x / columns) * TileHeight;
+  if (threadIdx.x < 5) weights[threadIdx.x] = plan.weights[threadIdx.x];
+  if (threadIdx.x == 0) {
+    float sum = 0.0f;
+    for (unsigned int tap = 0; tap < 5; ++tap) sum += plan.weights[tap];
+    normalization = sum;
+  }
+  // Reflect the halo, including repeated reflection for one-pixel extents.
+  // Partial-tile lanes must participate in loading and reach the barrier.
+  for (unsigned int index = threadIdx.x; index < kWidth * kInputHeight;
+       index += blockDim.x) {
+    const uint32_t x = origin_x + index % kWidth;
+    const int y = MirrorCoordinate(static_cast<int>(origin_y + index / kWidth) - 2,
+                                    static_cast<int>(plan.height));
+    for (unsigned int channel = 0; channel < 3; ++channel) {
+      tile[channel][index] = x < plan.width
+          ? plan.intermediate[channel][static_cast<size_t>(y) * plan.width + x]
+          : 0.0f;
+    }
+  }
+  __syncthreads();
+  for (unsigned int index = threadIdx.x; index < kWidth * TileHeight;
+       index += blockDim.x) {
+    const uint32_t x = origin_x + index % kWidth;
+    const uint32_t y = origin_y + index / kWidth;
+    if (x >= plan.width || y >= plan.height) continue;
+    float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f;
+#pragma unroll
+    for (unsigned int tap = 0; tap < 5; ++tap) {
+      sum0 += tile[0][index + tap * kWidth] * weights[tap];
+      sum1 += tile[1][index + tap * kWidth] * weights[tap];
+      sum2 += tile[2][index + tap * kWidth] * weights[tap];
+    }
+    const float3 blurred = make_float3(sum0 / normalization, sum1 / normalization,
+                                       sum2 / normalization);
+    const float3 input = make_float3(
+        plan.input[0][static_cast<size_t>(y) * plan.input_stride[0] + x],
+        plan.input[1][static_cast<size_t>(y) * plan.input_stride[1] + x],
+        plan.input[2][static_cast<size_t>(y) * plan.input_stride[2] + x]);
+    const float3 output = OpsinFromBlurredRgb(input, blurred, plan.intensity_target);
+    const size_t destination = static_cast<size_t>(y) * plan.output_stride + x;
+    plan.output[0][destination] = output.x;
+    plan.output[1][destination] = output.y;
+    plan.output[2][destination] = output.z;
+  }
 }
 
 __global__ void LowMediumKernel(const float* xyb0, const float* xyb1,
@@ -1358,34 +1454,28 @@ template <unsigned int KernelSize>
     const std::array<float*, kCudaButteraugliPsychoPlaneCount>& psycho,
     uint32_t psycho_stride, uint32_t width, uint32_t height,
     cudaStream_t stream) {
+  CudaButteraugliOpsinPlan opsin;
+  opsin.input = input;
+  opsin.input_stride = input_stride;
+  opsin.weights = plan.kernels[0];
+  opsin.width = width;
+  opsin.height = height;
+  opsin.output_stride = plan.working_width;
+  opsin.intensity_target = plan.intensity_target;
   for (size_t channel = 0; channel < 3; ++channel) {
-    const cudaError_t error =
-        LaunchBlur<5>(input[channel], input_stride[channel], plan.kernels[0],
-                      plan.planes[kPsychoWork], plan.planes[kImage + channel],
-                      plan.working_width, width, height, stream);
-    if (error != cudaSuccess) return error;
+    opsin.intermediate[channel] = plan.planes[kPsychoWork + channel];
+    opsin.output[channel] = plan.planes[kImage + channel];
   }
-
-  const OpsinParams opsin{width,
-                          height,
-                          {input_stride[0], input_stride[1], input_stride[2]},
-                          plan.working_width,
-                          plan.working_width,
-                          plan.intensity_target};
-  // Opsin loads all six values for one pixel before storing its three XYB
-  // results, so the blurred RGB and XYB planes may coincide. RGB inputs are
-  // external or staged in the not-yet-produced low-frequency outputs.
-  OpsinKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
-      input[0], input[1], input[2], plan.planes[kImage],
-      plan.planes[kImage + 1], plan.planes[kImage + 2], plan.planes[kImage],
-      plan.planes[kImage + 1], plan.planes[kImage + 2], opsin);
-  cudaError_t error = CheckLaunch();
+  // Original RGB is external or staged in the not-yet-produced low outputs.
+  // Keep three packed horizontal RGB planes until joint vertical/Opsin; their
+  // storage can then be reused immediately by the horizontal XYB blurs.
+  cudaError_t error = LaunchCudaButteraugliOpsin(opsin, stream);
   if (error != cudaSuccess) return error;
 
   CudaButteraugliLowMediumPlan low_medium;
   for (size_t channel = 0; channel < 3; ++channel) {
     low_medium.input[channel] = plan.planes[kImage + channel];
-    // The earlier blur intermediate is dead; retain three distinct packed
+    // The earlier RGB intermediates are dead; retain three distinct packed
     // horizontal XYB planes until the joint vertical/low-medium pass.
     low_medium.intermediate[channel] = plan.planes[kImage + 3 + channel];
     low_medium.low[channel] = psycho[channel];
@@ -1596,6 +1686,57 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
 }  // namespace
 
 namespace {
+cudaError_t LaunchOpsinImpl(const CudaButteraugliOpsinPlan& plan,
+                           bool reference, cudaStream_t stream) {
+  if (plan.width == 0 || plan.height == 0) return cudaSuccess;
+  if (plan.output_stride < plan.width) return cudaErrorInvalidValue;
+  for (uint32_t stride : plan.input_stride)
+    if (stride < plan.width) return cudaErrorInvalidValue;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    cudaError_t error;
+    if (reference) {
+      error = LaunchBlur<5>(plan.input[channel], plan.input_stride[channel],
+          plan.weights, plan.intermediate[channel], plan.blurred[channel],
+          plan.output_stride, plan.width, plan.height, stream);
+    } else {
+      MirroredConvolution5Kernel<true>
+          <<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
+              plan.input[channel], plan.weights, plan.intermediate[channel],
+              plan.width, plan.height, plan.input_stride[channel], plan.width);
+      error = CheckLaunch();
+    }
+    if (error != cudaSuccess) return error;
+  }
+  if (reference) {
+    const OpsinParams params{plan.width, plan.height,
+        {plan.input_stride[0], plan.input_stride[1], plan.input_stride[2]},
+        plan.output_stride, plan.output_stride, plan.intensity_target};
+    OpsinKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
+        plan.input[0], plan.input[1], plan.input[2],
+        plan.blurred[0], plan.blurred[1], plan.blurred[2],
+        plan.output[0], plan.output[1], plan.output[2], params);
+  } else {
+    // 16 rows balances directional halo reuse and shared-memory residency.
+    constexpr unsigned int kOpsinTileHeight = 16;
+    const unsigned int blocks = ((plan.width + 31) / 32) *
+        ((plan.height + kOpsinTileHeight - 1) / kOpsinTileHeight);
+    OpsinConvolutionPlan fused{};
+    for (size_t channel = 0; channel < 3; ++channel) {
+      fused.input[channel] = plan.input[channel];
+      fused.intermediate[channel] = plan.intermediate[channel];
+      fused.output[channel] = plan.output[channel];
+      fused.input_stride[channel] = plan.input_stride[channel];
+    }
+    fused.weights = plan.weights;
+    fused.width = plan.width;
+    fused.height = plan.height;
+    fused.output_stride = plan.output_stride;
+    fused.intensity_target = plan.intensity_target;
+    ConvolutionOpsinKernel<kOpsinTileHeight><<<blocks, kPlaneThreads, 0, stream>>>(fused);
+  }
+  return CheckLaunch();
+}
+
 cudaError_t LaunchLowMediumImpl(const CudaButteraugliLowMediumPlan& plan,
                                bool reference, cudaStream_t stream) {
   if (plan.width == 0 || plan.height == 0) return cudaSuccess;
@@ -1678,6 +1819,16 @@ cudaError_t LaunchL2FinalForTest(const CudaButteraugliL2FinalPlan& plan,
   return CheckLaunch();
 }
 }  // namespace
+
+cudaError_t LaunchCudaButteraugliOpsin(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream) {
+  return LaunchOpsinImpl(plan, false, stream);
+}
+
+cudaError_t LaunchCudaButteraugliOpsinReference(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream) {
+  return LaunchOpsinImpl(plan, true, stream);
+}
 
 cudaError_t LaunchCudaButteraugliLowMedium(
     const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream) {
