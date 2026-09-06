@@ -17,6 +17,7 @@
 #include "codec/chroma_from_luma.h"
 #include "codec/codestream.h"
 #include "codec/vardct_frame_view_internal.h"
+#include "codestream/token_storage_plan.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -229,6 +230,40 @@ Status AppendCflTokens(ConstPlaneI8View map, uint32_t context,
 
 }  // namespace
 
+Status codestream_internal::ComputeDcGroupTokenCounts(
+  Extent2D blocks, size_t anchors, DcGroupTokenCounts* out) {
+  DcGroupTokenCounts counts;
+  if (out == nullptr || !IsValidGroupExtent(blocks, &counts.block_count) ||
+      anchors == 0 || anchors > counts.block_count ||
+      !blocks.ceil_div(kColorTileDimension / kJxlBlockDimension)
+         .try_area(&counts.color_tile_count)) {
+    return Status::InvalidArgument("DC token plan geometry or anchors are invalid");
+  }
+  // At most 256x256 blocks and 32x32 color tiles, checked above.
+  counts.dc_tokens = 3 * counts.block_count;
+  counts.metadata_tokens =
+    2 * counts.color_tile_count + 2 * anchors + counts.block_count;
+  *out = counts;
+  return Status::Ok();
+}
+
+Status codestream_internal::ComputeDcGroupTokenStoragePlan(
+  Extent2D blocks, size_t anchors, DcGroupTokenStoragePlan* out) {
+  if (out == nullptr) return Status::InvalidArgument("DC token storage plan is null");
+  DcGroupTokenStoragePlan plan;
+  Status status = ComputeDcGroupTokenCounts(blocks, anchors, &plan.counts);
+  if (!status.ok()) return status;
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  if (!plan.output.AddVector<EntropyToken>(plan.counts.dc_tokens, kFreshExact) ||
+      !plan.output.AddVector<EntropyToken>(plan.counts.metadata_tokens, kFreshExact) ||
+      !plan.scratch.AddVector<StrategyAnchor>(plan.counts.block_count, kFreshExact) ||
+      !plan.scratch.AddVector<uint8_t>(plan.counts.block_count, kFreshExact)) {
+    return Status::OutOfMemory("DC token storage bound overflows");
+  }
+  *out = plan;
+  return Status::Ok();
+}
+
 Status TokenizeSimpleDcGroup(ConstImage3I32View quantized_dc,
                              Storage<EntropyToken>* tokens) {
   if (tokens == nullptr) {
@@ -241,9 +276,13 @@ Status TokenizeSimpleDcGroup(ConstImage3I32View quantized_dc,
     return Status::InvalidArgument("Quantized DC group view is invalid");
   }
 
+  codestream_internal::DcGroupTokenCounts counts;
+  Status count_status = codestream_internal::ComputeDcGroupTokenCounts(
+    quantized_dc.extent(), block_count, &counts);
+  if (!count_status.ok()) return count_status;
   try {
     Storage<EntropyToken> candidate;
-    candidate.reserve(block_count * 3);
+    candidate.reserve(counts.dc_tokens);
     constexpr std::array<size_t, 3> kChannelOrder = {1, 0, 2};
     for (const size_t channel : kChannelOrder) {
       const ConstPlaneI32View plane = quantized_dc.plane[channel];
@@ -291,19 +330,13 @@ Status TokenizeSimpleAcMetadata(const SimpleAcMetadataInput& input,
       return status;
     }
 
-    size_t block_count = 0;
-    size_t map_count = 0;
-    if (!input.raw_quant_field.extent.try_area(&block_count)
-        || !input.y_to_x_map.extent.try_area(&map_count)
-        || map_count > (std::numeric_limits<size_t>::max() - block_count) / 2
-        || anchors.size() > (std::numeric_limits<size_t>::max() - block_count
-                             - 2 * map_count)
-                              / 2) {
-      return Status::OutOfMemory("AC-metadata token count overflow");
-    }
+    codestream_internal::DcGroupTokenCounts counts;
+    status = codestream_internal::ComputeDcGroupTokenCounts(
+      input.raw_quant_field.extent, anchors.size(), &counts);
+    if (!status.ok()) return status;
 
     Storage<EntropyToken> candidate;
-    candidate.reserve(2 * map_count + 2 * anchors.size() + block_count);
+    candidate.reserve(counts.metadata_tokens);
     status = AppendCflTokens(input.y_to_x_map, 2, &candidate);
     if (!status.ok()) {
       return status;

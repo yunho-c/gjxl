@@ -149,6 +149,9 @@ retained codestream-byte ownership through C/C++ and batch publication. The
 ownership to score histories, summaries, attempt timings and GPU profile graphs.
 The [shared device plans](resident-storage-planning.md) extract checked layouts
 and AC-search capacities for reuse by upfront planning and actual allocation.
+The [host/token bounds](resident-token-storage-planning.md) add reviewed vector
+growth/replacement bounds, shared AC/DC token reservations, and aggregate token
+owners plus worker scratch across order/context-map candidates.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

@@ -23,6 +23,7 @@
 #include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
 #include "codestream/simple_ac_context.h"
+#include "codestream/token_storage_plan.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -267,6 +268,95 @@ int32_t CountNonzerosExceptLlf(std::span<const int32_t> coefficients,
 
 }  // namespace
 
+Status codestream_internal::ComputeAcGroupTokenCounts(
+  Extent2D blocks, size_t anchors, AcGroupTokenCounts* out) {
+  AcGroupTokenCounts counts;
+  if (out == nullptr || !IsValidGroupExtent(blocks, &counts.block_count) ||
+      anchors == 0 || anchors > counts.block_count) {
+    return Status::InvalidArgument("AC token plan geometry or anchors are invalid");
+  }
+  // A validated group covers each block once. Each covered block contributes
+  // 64 coefficients/channel, regardless of the selected transform partition.
+  // Geometry is bounded to 32x32 blocks before these products.
+  counts.coefficient_count = 64 * counts.block_count;
+  counts.block_context_keys = 3 * anchors;
+  counts.token_capacity = 3 * (counts.coefficient_count + anchors);
+  *out = counts;
+  return Status::Ok();
+}
+
+Status codestream_internal::ComputeAcNaturalOrderStorageBound(
+  HostStorageBound* out) {
+  if (out == nullptr) return Status::InvalidArgument("Natural-order bound is null");
+  HostStorageBound bound;
+  size_t maximum_seen_bytes = 0;
+  for (size_t i = 0; i < kAcStrategyCount; ++i) {
+    const auto strategy = static_cast<AcStrategyType>(i);
+    if (!IsSimpleStrategy(strategy)) continue;
+    const auto* info = GetAcStrategyInfo(strategy);
+    if (info == nullptr || !bound.AddVector<uint32_t>(
+          info->coefficient_count(),
+          resource_budget_internal::VectorCapacityPolicy::kFreshExact)) {
+      return Status::Internal("Natural-order storage bound is invalid");
+    }
+    maximum_seen_bytes = std::max(maximum_seen_bytes, info->coefficient_count());
+  }
+  // Only one order's permutation-validation bitmap exists at a time.
+  if (!bound.Add({0, maximum_seen_bytes}))
+    return Status::OutOfMemory("Natural-order storage bound overflows");
+  *out = bound;
+  return Status::Ok();
+}
+
+Status codestream_internal::ComputeAcGroupTokenStoragePlan(
+  Extent2D blocks, size_t anchors, size_t context_count,
+  bool collect_fixed_populations, AcGroupTokenStoragePlan* out) {
+  if (out == nullptr || context_count == 0 ||
+      context_count >= std::numeric_limits<uint16_t>::max()) {
+    return Status::InvalidArgument("AC token storage plan arguments are invalid");
+  }
+  AcGroupTokenStoragePlan plan;
+  Status status = ComputeAcGroupTokenCounts(blocks, anchors, &plan.counts);
+  if (!status.ok()) return status;
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  const size_t b = plan.counts.block_count;
+  const size_t n = plan.counts.token_capacity;
+  HostStorageBound natural_orders;
+  status = ComputeAcNaturalOrderStorageBound(&natural_orders);
+  if (!status.ok()) return status;
+  if (!plan.direct_output.AddVector<uint32_t>(n, kFreshExact) ||
+      !plan.direct_output.AddVector<uint16_t>(n, kFreshExact) ||
+      !plan.direct_scratch.AddVector<StrategyAnchor>(b, kReusedExact) ||
+      !plan.direct_scratch.AddVector<uint8_t>(b, kFreshExact) || // Coverage.
+      !plan.direct_scratch.AddVector<uint8_t>(b, kReusedExact, 3) ||
+      !plan.template_output.AddVector<uint32_t>(n, kFreshExact) ||
+      !plan.template_output.AddVector<SimpleAcTokenTemplate>(n, kFreshExact) ||
+      !plan.template_output.AddVector<SimpleAcBlockContextKey>(
+        plan.counts.block_context_keys, kFreshExact) ||
+      !plan.template_scratch.AddVector<StrategyAnchor>(b, kFreshExact) ||
+      !plan.template_scratch.AddVector<uint8_t>(b, kFreshExact, 4) ||
+      !plan.template_scratch.Add(natural_orders) ||
+      !plan.context_output.AddVector<uint16_t>(n, kFreshExact) ||
+      !plan.context_scratch.AddVector<uint8_t>(
+        plan.counts.block_context_keys, kFreshExact)) {
+    return Status::OutOfMemory("AC token storage bound overflows");
+  }
+  if (collect_fixed_populations) {
+    const size_t populations = std::min(context_count, n);
+    const size_t symbols = std::min(n, context_count * kPrefixAlphabetSize);
+    if (!plan.direct_scratch.AddVector<uint16_t>(context_count, kReusedExact) ||
+        !plan.direct_scratch.AddVector<SimpleAcPopulationAccumulator>(
+          populations, kReusedExact) ||
+        !plan.direct_output.AddVector<SimpleAcContextPopulation>(
+          populations, kFreshExact) ||
+        !plan.direct_output.AddVector<SimpleAcSymbolPopulation>(symbols, kGrowing)) {
+      return Status::OutOfMemory("AC population storage bound overflows");
+    }
+  }
+  *out = plan;
+  return Status::Ok();
+}
+
 Status ComputeSimpleNaturalCoefficientOrder(AcStrategyType strategy,
                                             Storage<uint32_t>* order) {
   if (order == nullptr) {
@@ -395,25 +485,20 @@ Status BuildSimpleAcGroupTokenTemplateValidated(
       return status;
     }
 
-    if (group.used_coefficient_count
-        > std::numeric_limits<size_t>::max() / 3 - anchors.size()) {
-      return Status::OutOfMemory("AC-group token count overflow");
-    }
+    codestream_internal::AcGroupTokenCounts counts;
+    status = codestream_internal::ComputeAcGroupTokenCounts(
+      group.block_extent, anchors.size(), &counts);
+    if (!status.ok()) return status;
     SimpleAcGroupTokenTemplate candidate{
       .block_x = group.block_x,
       .block_y = group.block_y,
       .block_extent = group.block_extent,
     };
-    candidate.block_context_keys.reserve(3 * anchors.size());
-    candidate.values.reserve(
-      3 * (group.used_coefficient_count + anchors.size()));
-    candidate.tokens.reserve(
-      3 * (group.used_coefficient_count + anchors.size()));
+    candidate.block_context_keys.reserve(counts.block_context_keys);
+    candidate.values.reserve(counts.token_capacity);
+    candidate.tokens.reserve(counts.token_capacity);
 
-    size_t block_count = 0;
-    if (!group.block_extent.try_area(&block_count)) {
-      return Status::InvalidArgument("AC-group block count overflow");
-    }
+    const size_t block_count = counts.block_count;
     std::array<Storage<uint8_t>, 3> nonzero_maps;
     for (Storage<uint8_t>& map : nonzero_maps) {
       map.assign(block_count, 0);
@@ -623,20 +708,16 @@ Status TokenizeSimpleAcGroupDirectValidated(
     Status status = ValidateAndCollectAnchors(
       group, strategies, &scratch->anchors);
     if (!status.ok()) return status;
-    if (group.used_coefficient_count >
-        std::numeric_limits<size_t>::max() / 3 - scratch->anchors.size()) {
-      return Status::OutOfMemory("AC-group token count overflow");
-    }
-    const size_t maximum_token_count =
-      3 * (group.used_coefficient_count + scratch->anchors.size());
+    codestream_internal::AcGroupTokenCounts counts;
+    status = codestream_internal::ComputeAcGroupTokenCounts(
+      group.block_extent, scratch->anchors.size(), &counts);
+    if (!status.ok()) return status;
+    const size_t maximum_token_count = counts.token_capacity;
     codestream_internal::SimpleAcGroupTokenData candidate;
     candidate.values.reserve(maximum_token_count);
     candidate.contexts.reserve(maximum_token_count);
 
-    size_t block_count = 0;
-    if (!group.block_extent.try_area(&block_count)) {
-      return Status::InvalidArgument("AC-group block count overflow");
-    }
+    const size_t block_count = counts.block_count;
     for (Storage<uint8_t>& map : scratch->nonzero_maps) {
       map.assign(block_count, 0);
     }

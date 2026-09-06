@@ -18,6 +18,9 @@ summary/timing records and nested GPU-profile storage through publication.
 The [shared device plans](resident-storage-planning.md) now supply the same
 checked AQ/input/Butteraugli/completed-output layouts and AC-search capacity
 recipes to planning and allocation.
+The [host/token bounds](resident-token-storage-planning.md) add checked vector
+capacity/replacement sums, shared AC/DC reservations and aggregate token-owner
+bounds; the remaining serializer/frontend estimates are not yet complete.
 Whole-workflow planning and admission remain pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
@@ -194,8 +197,8 @@ attachment has its own [qualification record](resident-metal-accounting.md).
 Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
-Milestone 4 still requires a final allocation-coverage audit, host/serializer
-bounds and their combination with the shared device plans,
+Milestone 4 still requires a final allocation-coverage audit, remaining
+host/serializer bounds and their combination with the shared token/device plans,
 public domain configuration/propagation, automatic cache eviction,
 retry and aggregate batch-result admission, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited

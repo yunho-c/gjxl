@@ -277,6 +277,7 @@ add_library(
   src/codestream/huffman.cpp
   src/codestream/rate_control.cpp
   src/codestream/sections.cpp
+  src/codestream/token_storage_plan.cpp
   src/codestream/workflow.cpp
 )
 
@@ -1262,6 +1263,10 @@ if(GJXL_BUILD_TESTS)
     NAME ac_group
     COMMAND gjxl_ac_group_test
   )
+
+  add_executable(gjxl_token_storage_plan_test tests/token_storage_plan_test.cpp)
+  target_link_libraries(gjxl_token_storage_plan_test PRIVATE gjxl_codestream)
+  add_test(NAME token_storage_plan COMMAND gjxl_token_storage_plan_test)
 
   add_executable(
     gjxl_block_context_map_test
