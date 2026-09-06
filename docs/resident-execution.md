@@ -155,6 +155,9 @@ owners plus worker scratch across order/context-map candidates.
 The [entropy bounds](resident-entropy-storage-planning.md) cover aggregation,
 Prefix/ANS model search and retained candidates, and model/token writer scratch;
 they also close the missed high-density clustering-queue accounting attachment.
+The [representation bounds](resident-representation-storage-planning.md) cover
+coefficient-order counts, sampling, permutations, worker reduction and retained
+cleared scans, plus ordinary/exhaustive context-map selection and replacement.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

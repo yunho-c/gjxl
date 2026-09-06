@@ -25,6 +25,9 @@ The [entropy bounds](resident-entropy-storage-planning.md) add policy-specific
 aggregation, model/candidate, lookup-table and emission envelopes and account the
 previously missed high-density clustering queue. Whole-serializer assembly,
 frontend/retry and retained-result envelopes still need their combined plan.
+The [representation bounds](resident-representation-storage-planning.md) add
+coefficient-order selection/tokenization and context-map candidate envelopes,
+including cleared-vector capacity and worker-reduction overlap.
 Whole-workflow planning and admission remain pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 

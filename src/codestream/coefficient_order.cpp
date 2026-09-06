@@ -24,6 +24,7 @@
 #include "codec/vardct_frame_view_internal.h"
 #include "codestream/ac_group.h"
 #include "codestream/encoder.h"
+#include "codestream/representation_storage_plan.h"
 #include "core/ac_strategy.h"
 #include "core/thread_budget.h"
 
@@ -445,6 +446,82 @@ Status TokenizePermutation(
 }
 
 }  // namespace
+
+Status codestream_internal::ComputeCoefficientOrderStoragePlan(
+  Extent2D blocks, VarDctCoefficientOrderBehavior behavior, size_t workers,
+  CoefficientOrderStoragePlan* out) {
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  size_t block_count = 0;
+  if (out == nullptr || blocks.empty() || !blocks.try_area(&block_count) ||
+      workers == 0 || workers > kMaximumCoefficientOrderWorkers ||
+      (behavior != VarDctCoefficientOrderBehavior::kFull &&
+       behavior != VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled)) {
+    return Status::InvalidArgument("Coefficient-order storage plan is invalid");
+  }
+  if (block_count > std::numeric_limits<size_t>::max() / 64) {
+    return Status::OutOfMemory("Coefficient-order storage count overflow");
+  }
+  CoefficientOrderStoragePlan plan;
+  const Extent2D groups = blocks.ceil_div(32);
+  if (!groups.try_area(&plan.ac_group_count)) {
+    return Status::OutOfMemory("Coefficient-order group count overflow");
+  }
+  // Match the runtime's early return, including the absence of group views.
+  if (blocks.width < 5 && blocks.height < 5) {
+    *out = plan;
+    return Status::Ok();
+  }
+  plan.maximum_participants = block_count * 64 < kMinimumParallelCoefficientCount
+    ? 1 : std::min(workers, plan.ac_group_count);
+
+  size_t maximum_order_size = 0;
+  for (size_t family = 0; family < kSimpleCoefficientOrderCount; ++family) {
+    const AcStrategyInfo* info = RepresentativeInfo(family);
+    if (info == nullptr) continue;
+    const Extent2D covered = info->covered_blocks;
+    // Rectangular strategies share a family with their transpose.
+    if (!((covered.width <= blocks.width && covered.height <= blocks.height) ||
+          (covered.height <= blocks.width && covered.width <= blocks.height)))
+      continue;
+    const size_t n = info->coefficient_count();
+    maximum_order_size = std::max(maximum_order_size, n);
+    plan.maximum_order_elements += 3 * n;
+    // One end token, then at most one Lehmer token per non-LLF coefficient.
+    plan.maximum_tokens += 3 * (1 + n - covered.width * covered.height);
+  }
+  if (!plan.orders.AddVector<uint32_t>(plan.maximum_order_elements,
+                                        kFreshExact) ||
+      !plan.tokens.AddVector<EntropyToken>(plan.maximum_tokens, kGrowing) ||
+      !plan.working.Add(plan.orders) || !plan.working.Add(plan.tokens) ||
+      !plan.working.AddVector<VarDctAcGroupView>(plan.ac_group_count,
+                                               kFreshExact) ||
+      // Global reduction plus worker arrays overlap until reduction finishes.
+      !plan.working.AddVector<uint64_t>(
+        plan.maximum_order_elements, kFreshExact,
+        plan.maximum_participants == 1 ? 1 : 1 + plan.maximum_participants) ||
+      // Tokenization: natural, inverse, permutation, Lehmer, Fenwick n+1.
+      // This also covers selection's natural/rank and validation's natural.
+      !plan.working.AddVector<uint32_t>(5 * maximum_order_size + 1,
+                                        kFreshExact) ||
+      // ValidateOrder's seen overlaps natural-order generation's seen array.
+      !plan.working.AddVector<uint8_t>(maximum_order_size, kFreshExact, 2)) {
+    return Status::OutOfMemory("Coefficient-order storage bound overflow");
+  }
+  if (behavior == VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled &&
+      (!plan.working.AddVector<Storage<uint8_t>>(plan.ac_group_count,
+                                                kFreshExact) ||
+       !plan.working.AddVector<uint8_t>(block_count, kFreshExact))) {
+    return Status::OutOfMemory("Coefficient-order sample storage overflow");
+  }
+  if (plan.maximum_participants > 1 &&
+      (!plan.working.AddVector<Status>(plan.ac_group_count, kFreshExact) ||
+       !plan.working.AddVector<std::thread>(plan.maximum_participants,
+                                            kFreshExact))) {
+    return Status::OutOfMemory("Coefficient-order dispatch storage overflow");
+  }
+  *out = plan;
+  return Status::Ok();
+}
 
 Status ComputeSimpleCoefficientOrders(
   const VarDctEncoderFrame& frame,

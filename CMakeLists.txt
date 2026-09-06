@@ -1274,6 +1274,11 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME entropy_storage_plan COMMAND gjxl_entropy_storage_plan_test)
   set_tests_properties(entropy_storage_plan PROPERTIES TIMEOUT 180)
 
+  add_executable(gjxl_representation_storage_plan_test tests/representation_storage_plan_test.cpp)
+  target_link_libraries(gjxl_representation_storage_plan_test PRIVATE gjxl_codestream)
+  add_test(NAME representation_storage_plan COMMAND gjxl_representation_storage_plan_test)
+  set_tests_properties(representation_storage_plan PROPERTIES TIMEOUT 180)
+
   add_executable(
     gjxl_block_context_map_test
     tests/block_context_map_test.cpp
