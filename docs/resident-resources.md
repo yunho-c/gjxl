@@ -43,6 +43,9 @@ color/filter boundaries now preserve typed underplan reasons.
 The [AC-search host bounds](resident-ac-search-storage-planning.md) add CPU
 placement/export and backend-independent fresh/reused candidates, matrices,
 cost tables and input staging; backend submission/profile metadata is separate.
+The [profile-graph bounds](resident-profile-storage-planning.md) cover string
+backing, nested diagnostic graphs and Metal profile snapshot overlap. They do
+not yet derive workflow stage/dispatch counts or bound backend context arrays.
 Remaining frontend/search/evaluation-state bounds and their combined
 device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
 workflow envelope and public domain integration.

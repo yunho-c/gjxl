@@ -175,6 +175,10 @@ The [AC-search host bounds](resident-ac-search-storage-planning.md) cover CPU
 placement/export and fresh/reused candidate, matrix, cost-table and staging
 owners. Their isolated host and mixed-library Metal checks do not replace
 whole-workflow qualification or include backend submission/profile metadata.
+The [profile-graph bounds](resident-profile-storage-planning.md) add char-string
+growth and nested diagnostics, including original/snapshot overlap during Metal
+profile resolution. Backend stage/context arrays and policy-to-count planning
+remain separate.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

@@ -25,6 +25,11 @@ enum class VectorCapacityPolicy {
   kGrowing,     // May also push/resize/insert forward ranges/shrink_to_fit.
 };
 
+enum class StringCapacityPolicy {
+  kFresh,   // Count/pointer/forward-range construction or copy construction.
+  kGrowing, // May assign, append, insert, resize, reserve or shrink_to_fit.
+};
+
 /// Conservative sum of vector backing capacities and replacement peaks. Counts
 /// bound ALL sizes and reserve requests since each owner was initially empty,
 /// not just its current logical size. Moves/swaps from larger owners,
@@ -72,6 +77,39 @@ struct HostStorageBound {
     if (bytes > std::numeric_limits<size_t>::max() / peak_factor)
       return false;
     return Add({bytes * retained_factor, bytes * peak_factor}, instances);
+  }
+
+  /// Character backing for ManagedString, including its terminator.
+  /// Counts bound every size/reserve request since the owner was empty, also
+  /// when it is now cleared. Moves from larger owners, nontrivial/input ranges,
+  /// and other character types need separate bounds. Inline storage is already
+  /// counted in the containing record, not a second backing allocation.
+  [[nodiscard]] bool AddString(size_t maximum_length,
+                                StringCapacityPolicy policy,
+                                size_t instances = 1) {
+    const ManagedString<> empty;
+    if (maximum_length > empty.max_size() ||
+        (policy != StringCapacityPolicy::kFresh &&
+         policy != StringCapacityPolicy::kGrowing))
+      return false;
+    if (maximum_length <= empty.capacity())
+      return Add({}, instances);
+    // Reviewed libc++ char-string __recommend rounds length+1 to an 8-byte
+    // boundary, with a special inline/long boundary adjustment. 32 bytes of
+    // slack covers both without coupling this bound to the short-string ABI.
+    // Growth occurs only when old capacity < the new requested size, doubles
+    // old capacity, and rounds again. Near max_size its saturation branch is
+    // also bounded by twice the request plus this slack. During shrink_to_fit
+    // a formerly doubled owner can coexist with one fresh replacement.
+    constexpr size_t max = std::numeric_limits<size_t>::max();
+    if (maximum_length > max - 32)
+      return false;
+    const size_t fresh = maximum_length + 32;
+    if (policy == StringCapacityPolicy::kFresh)
+      return Add({fresh, fresh}, instances);
+    if (fresh > max / 3)
+      return false;
+    return Add({2 * fresh, 3 * fresh}, instances);
   }
 
   bool operator==(const HostStorageBound &) const = default;

@@ -504,6 +504,7 @@ add_library(
 
   src/gpu/ops/ac_strategy_search.cpp
   src/gpu/ops/ac_strategy_storage_plan.cpp
+  src/gpu/ops/profile_storage_plan.cpp
   src/gpu/ops/adaptive_quantization.cpp
   src/gpu/ops/gaborish.cpp
   src/gpu/ops/quantization_pipeline.cpp
@@ -1620,7 +1621,7 @@ if(GJXL_BUILD_TESTS)
   set_tests_properties(workflow_publication PROPERTIES TIMEOUT 180)
 
   add_executable(gjxl_diagnostic_storage_test tests/diagnostic_storage_test.cpp)
-  target_link_libraries(gjxl_diagnostic_storage_test PRIVATE gjxl_codestream)
+  target_link_libraries(gjxl_diagnostic_storage_test PRIVATE gjxl_core)
   add_test(NAME diagnostic_storage COMMAND gjxl_diagnostic_storage_test)
   set_tests_properties(diagnostic_storage PROPERTIES TIMEOUT 60)
 
@@ -2184,6 +2185,19 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_ac_strategy_host_storage_plan_test PRIVATE gjxl_gpu_ops)
   add_test(NAME ac_strategy_host_storage_plan COMMAND gjxl_ac_strategy_host_storage_plan_test)
   set_tests_properties(ac_strategy_host_storage_plan PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_profile_storage_plan_test tests/profile_storage_plan_test.cpp)
+  target_link_libraries(gjxl_profile_storage_plan_test PRIVATE gjxl_gpu_ops)
+  add_test(NAME profile_storage_plan COMMAND gjxl_profile_storage_plan_test)
+  set_tests_properties(profile_storage_plan PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_profile_storage_plan_metal_test tests/profile_storage_plan_test.cpp)
+  target_link_libraries(gjxl_profile_storage_plan_metal_test PRIVATE gjxl_gpu_ops gjxl_metal)
+  target_compile_definitions(gjxl_profile_storage_plan_metal_test PRIVATE
+    GJXL_PROFILE_PLAN_METAL=1 GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_profile_storage_plan_metal_test gjxl_metal_shaders)
+  add_test(NAME metal_profile_storage_plan COMMAND gjxl_profile_storage_plan_metal_test)
+  set_tests_properties(metal_profile_storage_plan PROPERTIES TIMEOUT 180)
 
   add_executable(
     gjxl_gpu_primitives_metal_test

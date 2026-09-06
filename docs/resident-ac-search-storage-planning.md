@@ -130,8 +130,11 @@ work; these functional tests make no quiet-machine timing claim.
 
 The AC host and device bounds are not yet a complete AC/encode reservation.
 Metal's validated-batch vector, profiled stage/context arrays, submission and
-profile-result backing need their own checked metadata bounds. So do the
-remaining frontend/evaluator wrappers and attempt/diagnostic/batch-result
-envelopes. Whole-workflow composition must account old/new owners, cache capacity
-and retry lifetimes before public admission can promise a hard managed limit.
+profile-result backing need their own checked metadata bounds. The later
+[profile-graph checkpoint](resident-profile-storage-planning.md) covers graph
+and snapshot storage, but not those input context arrays or policy counts.
+Remaining frontend/evaluator wrappers and attempt/diagnostic/batch-result
+envelopes also need bounds. Whole-workflow composition must account old/new
+owners, cache capacity and retry lifetimes before public admission can promise
+a hard managed limit.
 The roadmap's resource, lifetime-disposition and scheduling gates remain intact.
