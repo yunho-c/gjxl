@@ -928,6 +928,28 @@ at 4K / 1080p / Flower; cold changes are -2.2% / +1.2% / +1.9%. The ending
 performance snapshot reports thermal and power throttling. Regressions and
 measurement limitations remain documented; the backend is not maxed out.
 
+[S63](cuda-optimization-s1.md#horizontal-input-reuse-s63) reuses horizontal33
+inputs across two adjacent outputs, preserving each output's original FMA,
+edge-weight, and division order. The fixed 256x4 tile and 256-thread block
+retain 13,960 shared bytes; the new body uses 48 registers with no stack/local
+storage. An explicit logical-width dispatch keeps the original body at
+widths up to 32, where unconditional pairing regresses. All 174 old GPU
+bodies remain unchanged, and the new release body matches four stage-screen
+binaries and the complete-workflow control exactly. Launches, allocations,
+transfers, metadata/frame ABI, public API, and quality policy stay fixed.
+
+Six full-workflow trace pairs improve targeted horizontal GPU duration by
+roughly 40-55%. Competing tap-major, row-interleaved, volatile, and invalid-
+halo-write controls constrain the explanation; input-load forwarding alone
+does not explain all of the gain. All 72 CUDA / 50 CPU tests, five host ASan
+targets, seven scoped GPU sanitizer checks, and 58 freshly decoded
+byte-identical image pairs pass. The permanent low/medium suite now has
+460 fixtures and a paired-output tall-grid test. Warm public whole changes
+are +0.3% / -0.3% / -3.1% at 4K / 1080p / Flower; cold changes are
+-0.4% / +0.5% / -7.3%. Phase/control regressions and thermal/power throttling
+remain documented. This is a targeted GPU improvement, not a universal
+whole-encoder speedup or a maxed-out backend.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

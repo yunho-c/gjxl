@@ -403,6 +403,103 @@ __global__ void ConvolutionHorizontal3Kernel(
   }
 }
 
+// Adjacent outputs share inputs without changing either tap/FMA order.
+template <unsigned Width, unsigned Height>
+__global__ void ConvolutionHorizontalPairsKernel(
+    const float* input0, const float* input1, const float* input2,
+    const float* weights, float* output0, float* output1, float* output2,
+    uint32_t width, uint32_t height, uint32_t input_stride) {
+  constexpr unsigned Outputs = 2;
+  constexpr unsigned Threads = 256;
+  static_assert(Width % Outputs == 0);
+  constexpr unsigned InputWidth = Width + 32;
+  constexpr unsigned InputSize = InputWidth * Height;
+  constexpr unsigned Groups = Width / Outputs;
+  __shared__ float tile0[InputSize], tile1[InputSize], tile2[InputSize];
+  __shared__ float kernel[33];
+  __shared__ float normalization;
+  const uint32_t columns = (width + Width - 1) / Width;
+  const uint32_t origin_x = (blockIdx.x % columns) * Width;
+  const uint32_t origin_y = (blockIdx.x / columns) * Height;
+  if (threadIdx.x < 33) kernel[threadIdx.x] = weights[threadIdx.x];
+  if (threadIdx.x == 0) {
+    float weight_sum = 0.0f;
+    for (unsigned tap = 0; tap < 33; ++tap) weight_sum += weights[tap];
+    normalization = weight_sum;
+  }
+  for (unsigned index = threadIdx.x; index < InputSize; index += blockDim.x) {
+    const int x = static_cast<int>(origin_x + index % InputWidth) - 16;
+    const uint32_t y = origin_y + index / InputWidth;
+    const bool valid = x >= 0 && x < static_cast<int>(width) && y < height;
+    const size_t source = static_cast<size_t>(y) * input_stride + x;
+    tile0[index] = valid ? input0[source] : 0.0f;
+    tile1[index] = valid ? input1[source] : 0.0f;
+    tile2[index] = valid ? input2[source] : 0.0f;
+  }
+  __syncthreads();
+  for (unsigned group = threadIdx.x; group < Groups * Height;
+       group += Threads) {
+    const unsigned local_x = (group % Groups) * Outputs;
+    const unsigned local_y = group / Groups;
+    const uint32_t x = origin_x + local_x, y = origin_y + local_y;
+    if (x >= width || y >= height) continue;
+    const unsigned first = local_y * InputWidth + local_x;
+    float sum0[Outputs] = {}, sum1[Outputs] = {}, sum2[Outputs] = {};
+    float weight_sum[Outputs];
+    const bool interior =
+        x >= 16 && static_cast<size_t>(x) + Outputs - 1 + 16 < width;
+#pragma unroll
+    for (unsigned col = 0; col < Outputs; ++col)
+      weight_sum[col] = interior ? normalization : 0.0f;
+    if (interior) {
+#pragma unroll
+      for (unsigned input_col = 0; input_col < 32 + Outputs; ++input_col) {
+        const float value0 = tile0[first + input_col];
+        const float value1 = tile1[first + input_col];
+        const float value2 = tile2[first + input_col];
+#pragma unroll
+        for (unsigned col = 0; col < Outputs; ++col) {
+          if (input_col >= col && input_col < col + 33) {
+            const float weight = kernel[input_col - col];
+            sum0[col] += value0 * weight;
+            sum1[col] += value1 * weight;
+            sum2[col] += value2 * weight;
+          }
+        }
+      }
+    } else {
+#pragma unroll
+      for (unsigned input_col = 0; input_col < 32 + Outputs; ++input_col) {
+        const int coordinate =
+            static_cast<int>(x) + static_cast<int>(input_col) - 16;
+        if (coordinate >= 0 && coordinate < static_cast<int>(width)) {
+          const float value0 = tile0[first + input_col];
+          const float value1 = tile1[first + input_col];
+          const float value2 = tile2[first + input_col];
+#pragma unroll
+          for (unsigned col = 0; col < Outputs; ++col) {
+            if (input_col >= col && input_col < col + 33) {
+              const float weight = kernel[input_col - col];
+              sum0[col] += value0 * weight;
+              sum1[col] += value1 * weight;
+              sum2[col] += value2 * weight;
+              weight_sum[col] += weight;
+            }
+          }
+        }
+      }
+    }
+#pragma unroll
+    for (unsigned col = 0; col < Outputs; ++col) {
+      if (x + col >= width) continue;
+      const size_t destination = static_cast<size_t>(y) * width + x + col;
+      output0[destination] = sum0[col] / weight_sum[col];
+      output1[destination] = sum1[col] / weight_sum[col];
+      output2[destination] = sum2[col] / weight_sum[col];
+    }
+  }
+}
+
 struct StoreConvolution {
   float* output;
   uint32_t stride;
@@ -2068,11 +2165,21 @@ cudaError_t LaunchLowMediumImpl(const CudaButteraugliLowMediumPlan& plan,
     const unsigned int blocks =
         ((plan.width + kHorizontalWidth - 1) / kHorizontalWidth) *
         ((plan.height + kHorizontalHeight - 1) / kHorizontalHeight);
-    ConvolutionHorizontal3Kernel<kHorizontalWidth, kHorizontalHeight>
-        <<<blocks, kPlaneThreads, 0, stream>>>(
-            plan.input[0], plan.input[1], plan.input[2], plan.weights,
-            plan.intermediate[0], plan.intermediate[1], plan.intermediate[2],
-            plan.width, plan.height, plan.input_stride);
+    // At most one warp of columns cannot fill the paired-output lanes.
+    // Keep the prior horizontal body there and in the sequential oracle.
+    if (sequential || plan.width <= 32) {
+      ConvolutionHorizontal3Kernel<kHorizontalWidth, kHorizontalHeight>
+          <<<blocks, kPlaneThreads, 0, stream>>>(
+              plan.input[0], plan.input[1], plan.input[2], plan.weights,
+              plan.intermediate[0], plan.intermediate[1], plan.intermediate[2],
+              plan.width, plan.height, plan.input_stride);
+    } else {
+      ConvolutionHorizontalPairsKernel<kHorizontalWidth, kHorizontalHeight>
+          <<<blocks, kPlaneThreads, 0, stream>>>(
+              plan.input[0], plan.input[1], plan.input[2], plan.weights,
+              plan.intermediate[0], plan.intermediate[1], plan.intermediate[2],
+              plan.width, plan.height, plan.input_stride);
+    }
     const cudaError_t error = CheckLaunch();
     if (error != cudaSuccess) return error;
   }

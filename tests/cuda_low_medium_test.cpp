@@ -193,20 +193,24 @@ int main(int argc, char** argv) {
     if (mode == "--tall-only") {
       Verify(1, 4194305, false, 1);
       std::cout << "Verified tall low/medium case above 65535 tile rows\n" << std::flush;
+      Verify(33, 262145, true, 1);
+      std::cout << "Verified paired horizontal case above 65535 tile rows\n" << std::flush;
       return 0;
     }
-    constexpr std::array<std::array<uint32_t, 2>, 38> shapes{{
+    constexpr std::array<std::array<uint32_t, 2>, 46> shapes{{
         {1,1}, {1,19}, {19,1}, {7,11}, {15,15}, {31,31}, {32,32}, {33,33},
         {47,47}, {48,48}, {49,49}, {63,63}, {64,64}, {65,65}, {95,95},
         {96,96}, {97,97}, {127,65}, {255,3}, {256,4}, {257,67}, {511,129},
         {1,3}, {1,4}, {1,5}, {255,5}, {256,3}, {256,5}, {257,3},
         {257,4}, {257,5}, {513,9}, {1,2}, {1,6}, {1,7},
-        {33,16}, {33,17}, {33,18}}};
+        {33,16}, {33,17}, {33,18}, {2,3}, {3,4}, {4,5},
+        {16,3}, {17,4}, {18,5}, {34,3}, {35,5}}};
     size_t cases = 0;
     for (const auto& shape : shapes) {
       // Include tiny, all-border, and horizontal-tile-boundary cases without
       // paying for the tall fixture under race instrumentation.
       if (mode == "--sanitizer" && shape[0] != 33 &&
+          shape[0] != 34 && shape[0] != 35 &&
           !(shape[0] == 1 && shape[1] == 5) &&
           !(shape[0] == 257 && shape[1] == 5)) continue;
       for (bool padded : {false,true})
