@@ -1052,6 +1052,18 @@ limits and all adverse samples remain documented. No new permission or
 firewall block occurred; no system security or performance settings changed.
 The backend is not considered maxed out.
 
+[S69](cuda-optimization-s1.md#finer-zero-region-malta-investigation-s69-not-retained)
+rejects finer 4/8/16/32-row zero-region classification for Malta. All
+23,040 guarded comparisons, 3,528 captured-stage timing windows and four
+prototype GPU sanitizer campaigns pass, with native-identical controls.
+The sparse 4K stage improves, but the other stages pay classification costs
+without gaining additional zero regions. Every six-stage 4K candidate
+aggregate is neutral or slower (+0.10% to +0.80%); these are diagnostic
+stage aggregates, not whole-encode measurements. Production source/tests
+and all 39 S68 binaries/libraries remain unchanged. No new release
+qualification or speedup is claimed, and no permission/firewall block
+occurred. Dense Malta response work remains an open optimization target.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

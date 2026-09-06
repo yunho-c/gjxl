@@ -11856,6 +11856,167 @@ S67's optional `ERR_NVGPUCTRPERM` hardware-counter restriction was not
 retried; no security settings or privileges changed. Ordinary CUDA tests,
 sanitizers and Nsight Systems completed normally.
 
+## Finer zero-region Malta investigation (S69, not retained)
+
+S69 investigates S68 `6b91212` on the same RTX 3060 Laptop, CUDA 11.8,
+sm_86 and MSVC 14.37. It retains no runtime change: production source,
+tests, all 39 S68 binaries/libraries, allocation layout, numerical policy
+and ABI are unchanged. This is a completed negative experiment, not a new
+release optimization or evidence that the backend is maxed out.
+
+### Hypothesis and exact band classification
+
+Identified retained S68 release traces still put the two 64-row Malta
+specializations at independent 4K candidate medians of 17.00 ms for LF and
+12.68 ms for full response. `s69_baseline.json` records the source hash and
+individual samples; these are not newly captured S69 baseline timings.
+
+The S65 shortcut classifies a whole scaled tile and halo. A single nonzero
+region therefore makes every output row execute all directional responses.
+The S69 candidates instead classify 4-, 8-, 16- or 32-row output bands while
+keeping the original 32-column tiles, adaptive heights 8/24/64, 256 threads,
+and 2D/flattened grid policy. They reuse the values already produced by the
+unchanged `MaltaScaleValue`, including both rounded divisions.
+
+An input at shared row `r`, including the four-row halo, can affect output
+rows `r-8..r`. Intersect that interval with the tile and mark every touched
+band. Each thread ORs those bits across its scaled loads; the block combines
+eight warp masks through 32 additional shared bytes and its barrier. All
+lanes participate before any partial-tile exit. The validator exhaustively
+compares this bit formula with direct interval membership for all input rows,
+three tile heights and four band sizes, including the partial final bands
+of a 24-row tile.
+
+Only an entirely signed-zero rectangle skips the original directional sums.
+NaNs and infinities mark their bands nonzero. A skipped response is still
+positive zero, and initialization or the original accumulation addition
+still executes. No approximate threshold or input-channel assumption
+substitutes for the actual scaled-zero test.
+
+| Mode | Operation |
+| ---: | --- |
+| 0 | Unchanged production |
+| 1 | Eight-row bands, five warp-shuffle OR steps |
+| 2 | Sixteen-row bands, five warp-shuffle OR steps |
+| 3 | Thirty-two-row bands, five warp-shuffle OR steps |
+| 4 | Separately named unchanged-kernel control |
+| 5 | Four-row bands, five warp-shuffle OR steps |
+| 6 | Eight-row bands, sm80+ hardware warp OR, shuffle fallback |
+
+### Correctness, instructions and replay scope
+
+All six diagnostic modes pass 7,680 guarded fixtures / 23,040 three-stage
+bitwise comparisons: ten geometries, both grid forms, full/LF and
+initialize/add flags, and sixteen patterns. The extended patterns place
+nonzero values, infinities and NaNs around band and halo boundaries.
+Existing signed-zero, denormal, threshold, exceptional-accumulator and
+zero-normalization patterns remain. Input immutability, padding and output/
+scratch guards are checked against the original separate scale/response
+oracle. Flattening is forced on small cases; this is not a new tall-grid
+limit qualification.
+
+Each of memcheck, initcheck, synccheck and racecheck passes 576 scoped
+fixtures / 1,728 three-stage comparisons, forcing all three heights on
+65x65 inputs with both grid/frequency/initialization forms and four patterns.
+Memcheck explicitly checks leaks and stream-ordered races. Errors, leaked
+bytes, and race warnings are zero. Racecheck finishes in approximately
+234 seconds on its original process, with progress markers preserved.
+No full-AQ or release sanitizer campaign is claimed.
+
+Both guarded and replay executables contain 135 GPU bodies: all 63 original
+Butteraugli bodies unchanged and 72 experimental additions. All twelve
+mode-4 specializations are instruction-identical to production, and the two
+executables contain identical GPU bodies. Every addition has zero stack/
+local storage. The additional shared requirement is exactly 32 bytes for
+the mask modes: 2,592 / 5,152 / 11,552 bytes at heights 8/24/64, while the
+duplicate retains 2,560 / 5,120 / 11,520. Native mode 6 uses `REDUX.OR` in
+each specialization. These facts do not establish achieved occupancy or
+dynamic instruction counts. Harmless unused-variable warnings in the
+duplicate template are retained; native extraction confirms the unused
+mask storage is eliminated.
+
+Replay uses all 36 retained S65 first full-resolution stage captures for
+4K, 1080p, Flower and three 500x500 corpus photographs. It does not recapture
+S69 inputs or cover all iterations/subscales. Fourteen balanced forward/
+reverse orders of seven modes, three launches per window, explicit resets
+and stream synchronization produce 3,528 exact-output windows. Every window
+checks the full guarded output after the original three-stage accumulation;
+input arrays remain unchanged. No round or outlier is removed.
+
+An untimed separate GPU scaling pass, followed by host integer/zero tests,
+records 144 population rows across the four band sizes. These classify
+active valid output pixels under the conservative rectangle test, not actual
+nonzero responses, dynamic instructions or measured time saved. They are
+not a CPU FP32 output oracle.
+
+### Savings in one stage do not pay for classification everywhere
+
+In 4K stage 1, 3,941,338 of 8,288,401 scaled values are nonzero. Whole-tile
+classification makes 7,170,144 output pixels active; four-/eight-/sixteen-/
+thirty-two-row bands reduce that to 6,622,824 / 6,661,600 / 6,779,600 /
+6,965,408. Mode 6 improves this stage's paired median by 3.63%, winning all
+fourteen pairs (3.39% faster against the duplicate control).
+
+However, stages 0, 2 and 4 retain all 8,288,401 active pixels under every
+band size, and stages 3 and 5 are already entirely zero under production.
+For mode 6 the other five stage paired medians regress by 0.77%, 1.18%,
+0.27%, 1.25% and 0.05%, respectively. Fine classification buys nothing there.
+This coverage/overhead tradeoff explains why a sparse-stage win does not
+establish a useful complete Malta replacement.
+
+The following descriptive aggregates compare sums of six independently
+measured stage medians. They are not paired whole-workflow durations or
+encode speedups; negative means less stage time.
+
+| Captured stage aggregate | Mode 1 | Mode 2 | Mode 3 | Identical mode 4 | Mode 5 | Mode 6 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4K | +0.40% | +0.53% | +0.80% | -0.02% | +0.36% | +0.10% |
+| 1080p | -0.53% | -0.15% | +0.11% | +0.24% | -0.52% | -0.45% |
+| Flower | +0.94% | +1.02% | +3.11% | +0.26% | +0.27% | +1.49% |
+| Keong macan | +2.03% | +3.04% | +3.78% | +0.00% | +2.95% | +0.18% |
+| Riaphotographs | +3.46% | +5.07% | +3.89% | -0.01% | +3.20% | +1.01% |
+| Bliznaca | +3.63% | +3.70% | +2.19% | +1.74% | +2.87% | +2.64% |
+
+At 4K, every candidate aggregate is neutral or slower, from +0.10% for the
+hardware eight-row variant to +0.80% for thirty-two rows; the identical
+control is -0.03%. All candidates also have adverse stage medians.
+Small-case scatter remains visible: Bliznaca's identical control is +1.74%
+in aggregate and ranges from -3.83% to +7.03% across its stage paired medians.
+Some corpus sparse stages improve, but none of the candidate aggregates
+establishes a general benefit. Selecting only those stage wins would discard
+the measured classification costs.
+
+Replay endpoints are 56 C/P0/1,282 MHz SM/6,000 MHz memory/22.41 W without
+reported limits and 61 C/P3/1,282 MHz SM/5,500 MHz memory/26.59 W with thermal
+and power limits active. These snapshots do not explain each sample.
+No clock, cooling, security, power or privilege settings change. No new
+firewall or permission block occurs; the previous optional hardware-counter
+restriction is not retried.
+
+### Disposition and evidence
+
+Reject all five finer-band candidates. Their correctness passes, but their
+local cost/benefit does not justify a production policy or full-workflow
+control. No fresh release build, CPU/CUDA suite, ASan, decoded-quality,
+batch or whole-encode improvement is claimed. The unchanged S68 release
+retains its prior qualification and all 39 binary/library hashes.
+
+The ignored `build-cuda-ninja/profiles/s69_*` bundle retains sources,
+executables, complete build/guard/sanitizer logs, native instructions,
+original capture attribution, all windows and classification counts.
+`s69_validate.py` reconstructs the recorded evidence and paired tables,
+checks the mask intervals, verifies unchanged S68 production and hashes
+the S59-S68 archives. The freeze includes five source/document snapshots
+and the diagnostic artifact manifest.
+
+Dense response work still dominates several stages, while the coarse
+shortcut already eliminates the all-zero ones. The next investigation
+should address shared-load reuse or the directional response calculation
+itself, preserving the established sum trees; more zero-classification
+machinery is not the leading option. The broader optimization goal remains
+open.
+
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
