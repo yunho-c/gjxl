@@ -7,6 +7,7 @@
 #include <cstddef>
 
 #include "codec/ac_strategy_search_policy.h"
+#include "codec/ac_strategy_storage_plan.h"
 #include "core/geometry.h"
 #include "core/status.h"
 
@@ -45,5 +46,28 @@ struct StoragePlan {
 /// unchanged.
 [[nodiscard]] Status ComputeStoragePlan(Extent2D coding, bool resident,
                                         StoragePlan *out);
+
+struct HostStoragePlan {
+  // Candidates, quantization matrices, readback costs and dense cost tables.
+  resource_budget_internal::HostStorageBound prepared;
+  // Packed Opsin/mask survive through merge in the nonresident path only.
+  resource_budget_internal::HostStorageBound staging;
+  ac_strategy_internal::SearchStoragePlan merge;
+  // Complete host owner inventory, including prepared/staging/merge output.
+  resource_budget_internal::HostStorageBound working;
+  bool operator==(const HostStoragePlan &) const = default;
+};
+
+/// Backend-independent search host backing. Device buffers, backend submission
+/// metadata/profiles, borrowed inputs and old output grids are separate. With
+/// reuse_prepared=false, state must start empty. With true, coding must bound
+/// BOTH dimensions of EVERY search since state was empty; a bound on pixel area
+/// alone is insufficient. Costs resize with geometric growth; candidates use
+/// explicit reserve and dense tables use assign. This does not transfer an old
+/// prepared owner's charges to a new reservation. No backing allocation on
+/// success; failure leaves output unchanged.
+[[nodiscard]] Status ComputeHostStoragePlan(Extent2D coding, bool resident,
+                                            bool reuse_prepared,
+                                            HostStoragePlan *out);
 
 } // namespace gjxl::ac_strategy_search_internal

@@ -242,6 +242,7 @@ add_library(
   src/codec/quantization_pipeline.cpp
   src/codec/reconstruction.cpp
   src/codec/frontend_storage_plan.cpp
+  src/codec/ac_strategy_storage_plan.cpp
   src/codec/perceptual_storage_plan.cpp
   src/codec/codestream.cpp
   src/codec/vardct_frame.cpp
@@ -2178,6 +2179,11 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_ac_strategy_storage_plan_test PRIVATE gjxl_gpu_ops)
   add_test(NAME ac_strategy_storage_plan COMMAND gjxl_ac_strategy_storage_plan_test)
   set_tests_properties(ac_strategy_storage_plan PROPERTIES TIMEOUT 30)
+
+  add_executable(gjxl_ac_strategy_host_storage_plan_test tests/ac_strategy_host_storage_plan_test.cpp)
+  target_link_libraries(gjxl_ac_strategy_host_storage_plan_test PRIVATE gjxl_gpu_ops)
+  add_test(NAME ac_strategy_host_storage_plan COMMAND gjxl_ac_strategy_host_storage_plan_test)
+  set_tests_properties(ac_strategy_host_storage_plan PROPERTIES TIMEOUT 180)
 
   add_executable(
     gjxl_gpu_primitives_metal_test

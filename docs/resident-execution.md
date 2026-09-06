@@ -171,6 +171,10 @@ The [preprocessing/perceptual bounds](resident-perceptual-storage-planning.md)
 cover color dispatch/atomic images, nested filter scratch, block reductions and
 native Butteraugli prepared/one-shot ownership and multiscale replacement. They
 also preserve typed underplan errors across six previously generic wrappers.
+The [AC-search host bounds](resident-ac-search-storage-planning.md) cover CPU
+placement/export and fresh/reused candidate, matrix, cost-table and staging
+owners. Their isolated host and mixed-library Metal checks do not replace
+whole-workflow qualification or include backend submission/profile metadata.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

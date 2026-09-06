@@ -69,6 +69,11 @@ particular, summing AC `device_bytes` with arena requests is **not** a complete
 encode envelope. Pre-search AQ/output planning can bound anchor count by block
 count; actual allocation continues to use the existing resolved counts.
 
+The later [AC-search host plan](resident-ac-search-storage-planning.md) adds
+candidate/matrix/readback/dense-table owners, nonresident packing and CPU
+placement/export, including vector-growth bounds for prepared reuse. Backend
+submission/profile metadata and whole-workflow composition remain separate.
+
 ## Correctness qualification
 
 The frozen parent is `build/resident-diagnostics` at `dd5cd54`; the fresh Release

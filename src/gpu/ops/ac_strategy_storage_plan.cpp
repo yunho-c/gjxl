@@ -115,4 +115,42 @@ Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out) {
   *out = plan;
   return Status::Ok();
 }
+
+Status ComputeHostStoragePlan(Extent2D coding, bool resident,
+                              bool reuse_prepared, HostStoragePlan *out) {
+  if (out == nullptr)
+    return Status::InvalidArgument("AC-search host plan output is null");
+  StoragePlan device;
+  Status status = ComputeStoragePlan(coding, resident, &device);
+  if (!status.ok())
+    return status;
+  HostStoragePlan plan;
+  status = ac_strategy_internal::ComputeSearchStoragePlan(coding, &plan.merge);
+  if (!status.ok())
+    return status;
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  const auto reserved = reuse_prepared ? kReusedExact : kFreshExact;
+  const auto resized = reuse_prepared ? kGrowing : kFreshExact;
+  for (const auto &stage : device.stages) {
+    // Matrices exist even for empty families. Their size is constant across
+    // searches, so resize never grows an already initialized matrix owner.
+    if (!plan.prepared.AddVector<AcStrategyCandidate>(stage.candidate_count,
+                                                      reserved) ||
+        !plan.prepared.AddVector<float>(stage.matrix_bytes / sizeof(float),
+                                        kFreshExact) ||
+        !plan.prepared.AddVector<float>(stage.candidate_count, resized) ||
+        !plan.prepared.AddVector<float>(device.block_count, reserved))
+      return Status::OutOfMemory("AC-search host storage bound overflows");
+  }
+  // PackOpsin is one contiguous three-channel vector, not three vectors.
+  if ((!resident &&
+       (!plan.staging.AddVector<float>(device.opsin_bytes / sizeof(float),
+                                       kFreshExact) ||
+        !plan.staging.AddVector<float>(device.pixel_count, kFreshExact))) ||
+      !plan.working.Add(plan.prepared) || !plan.working.Add(plan.staging) ||
+      !plan.working.Add(plan.merge.working))
+    return Status::OutOfMemory("AC-search host storage bound overflows");
+  *out = plan;
+  return Status::Ok();
+}
 } // namespace gjxl::ac_strategy_search_internal

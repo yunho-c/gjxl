@@ -40,6 +40,9 @@ The [preprocessing/perceptual bounds](resident-perceptual-storage-planning.md)
 add color conversion, nested loop filters, block reductions and native Butteraugli
 prepared/one-shot scratch, including real old/new replacement overlap. Six
 color/filter boundaries now preserve typed underplan reasons.
+The [AC-search host bounds](resident-ac-search-storage-planning.md) add CPU
+placement/export and backend-independent fresh/reused candidates, matrices,
+cost tables and input staging; backend submission/profile metadata is separate.
 Remaining frontend/search/evaluation-state bounds and their combined
 device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
 workflow envelope and public domain integration.
