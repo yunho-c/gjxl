@@ -19,7 +19,8 @@
   bounded narrow coefficient-order counters with portable SIMD counting,
   multi-row Malta halo reuse, joint-channel horizontal33 convolution,
   direct DC context lookup, success-path DC residual emission,
-  inline validated ANS token scanning, and fused erosion/L2/final masking
+  inline validated ANS token scanning, fused erosion/L2/final masking,
+  and cooperative final color correlation
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -33,7 +34,20 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S60 against S58
+below supersede them. The latest implemented checkpoint, S61 against S60
+(`ea8ce7a`), uses a full warp to load and scale final color-correlation
+coefficients, while preserving the original four accumulation chains exactly.
+It keeps two independent tile warps per block, without an image-size heuristic.
+The new release body matches the measured 40-register prototype; all 172
+existing GPU bodies remain unchanged. Warm public whole encodes improve
+2.1% / 1.4% / 2.8% at 4K / 1080p / Flower; cold changes are -3.3% / +2.6% /
++5.3%, with regressions retained. All 72 CUDA / 50 CPU tests, five host
+ASan targets, scoped GPU sanitizers, and 58 byte-identical decoded-image pairs
+pass. Complete-workflow measurements and their slower observations are
+recorded in [S61](#cooperative-final-color-correlation-s61). Optimization remains
+ongoing, not maxed out.
+
+The preceding implemented checkpoint, S60 against S58
 production (`bf4968b`; S59 is investigation-only), fuses reference-mask erosion
 with L2/final masking. It removes four launches per profiled encode and one
 intermediate plane write/read per difference evaluation. Isolated combined
@@ -9799,6 +9813,266 @@ frozen. S58/S59 evidence remains immutable and revalidates. Reproduction must
 use new output prefixes, strict argument parsing, and the actual commands
 inside JSON; do not rerun frozen producers in place. Larger convolution work
 and complete-workflow variability remain open. The optimization goal is active.
+
+## Cooperative final color correlation (S61)
+
+Date: 2026-09-06. Parent: S60 `ea8ce7a`, on the same RTX 3060 Laptop /
+CUDA 11.8 / sm86 Release configuration. This checkpoint changes final
+color correlation in the fully-resident path, not initial CfL or exact-mode
+coefficient policy. The preceding turn made verified implementation progress;
+the broader optimization goal remains active.
+
+### Keep the accumulator order, parallelize its inputs
+
+The latest S60 trace spends 5.46 / 0.77 / 0.40 ms in final color correlation
+at 4K / 1080p / Flower. Its original kernel launches one four-thread block
+per color tile. Each thread follows one of four CPU-compatible accumulation
+chains through every transform and coefficient. Most warp lanes are idle,
+and a short serial coefficient loop repeatedly performs address, validity,
+scaling, and regression work. Simply widening the final reduction would
+change decision-sensitive floating-point order.
+
+The retained kernel instead gives each tile a full 32-thread warp. Lanes
+load and scale 32 contiguous coefficient positions together. Each lane keeps
+a duplicate of one of the original four accumulation chains; shuffles feed
+that chain eight groups of four values in the original order. The four FMA
+chains, low-frequency exclusions, transform traversal, quantization scaling,
+sample count, final pairwise sums, regularization, and signed-byte decisions
+are unchanged. Low-frequency values may be loaded/scaled but never enter an
+accumulator. Validated coefficient counts are multiples of 32. Invalid
+records retain the error-bit and output-write behavior; only disjoint input
+and output buffers are supported, as before.
+
+Two full tile warps share each 64-thread block. Different tile loops never
+share a warp, and there is no block-wide barrier or shared-memory exchange.
+An out-of-range tail warp exits as a whole; every participating tile warp
+executes its shuffles with all 32 lanes present. This is one fixed launch
+configuration, not an image-size, content, or strategy-dependent fallback.
+
+The original `FinalColorCorrelationKernel` remains unchanged behind a private
+reference entry. No diagnostic environment switch enters production.
+Transform-record layout, prepared-frame ABI, device allocations, transfers,
+launch count, scheduler, public API, and quality policy remain unchanged.
+The new kernel uses 40 registers and no stack, local, or shared storage.
+All 172 prior GPU bodies remain instruction-identical; the release's sole
+new body matches the measured `<32,2>` cooperative prototype exactly.
+
+### Real inputs and competing explanations
+
+Twelve captures come from complete baseline encodes, each matching frozen
+S60 codestream bytes. They cover the tiny sample, 1080p, 4K, Flower, and
+three CC0 photographs at distance 1.2/effort 7; 4K and Flower additionally
+use distances 0.5 and 3.0, and Flower uses effort 9. Captures retain all
+transform records, tile offsets, tables, forward coefficients, raw quantizers,
+and global scale. Tile counts are 1, 510, 2,040, 72, and 64 for the respective
+image groups. No random surrogate replaces these inputs in the timing gate.
+
+Four diagnostic generations test 27 candidates:
+
+- Seven original-arithmetic packing variants use 1/2/4/8/16/32/64 tiles
+  per block, replacing shared reduction with four-lane shuffles.
+- Eight variants split independent X/B or quadratic/linear terms across
+  more lanes, with different numbers of tiles per block.
+- Ten variants cooperatively load 8/16/32 coefficients while preserving
+  the four accumulation chains, with different tile/block layouts.
+- Two variants replace division/remainder by valid power-of-two widths
+  with exact shifts/masks: one original kernel and one cooperative kernel.
+
+Packing helps the large synthetic images but can badly hurt photographs:
+the initial screen has 46-356% photographic regressions across packing
+choices. It combines differing transform loops within warps and reduces
+independently schedulable tiles on smaller frames. Splitting regression
+terms alone is approximately flat when a block still owns one tile;
+packing those variants again trades large-image gains for photographic
+regressions. These results reject idle-lane count alone as an adequate
+performance model.
+
+Cooperative loading improves both regimes. Two separate screens of the
+selected 32-lane/two-tile configuration give the following median paired
+target-stage changes. Ranges below span image cases within a group, not
+pooled absolute times; negative means faster.
+
+| Captured input group | V3 screen | Independent V4 screen |
+| --- | ---: | ---: |
+| 1080p | -77.78% | -76.81% |
+| 4K, three distances | -66.64% to -67.67% | -65.47% to -65.86% |
+| Flower, three distances and effort 9 | -63.34% to -67.99% | -63.86% to -68.43% |
+| Three CC0 photographs | -63.68% to -65.88% | -62.28% to -65.33% |
+
+V3 uses 26 balanced orders over 13 selected modes; V4 uses all 24
+permutations of four modes. The selected kernel wins every paired
+observation for all 11 non-tiny captures in both screens. The tiny sample
+also improves by approximately half, but not every tiny observation wins.
+V1/V2/V3/V4 retain 1,536 / 6,144 / 4,056 / 1,152 exact-output timing rows:
+12,888 total, each with output/error checks outside the event interval.
+Each event contains three kernel calls. Absolute 4K baseline times vary
+materially between cohorts, so they are not pooled or used to normalize one
+another. All outliers and slower candidates remain in the record.
+
+Native inspection confirms a general integer-division sequence despite
+widths being limited to 8/16/32. The indexing-only variant improves the
+non-tiny original kernel by 12-20%, but does not consistently improve the
+cooperative kernel. It is not retained. Native reciprocal counts fall from
+four to three; total static instruction counts are 560 / 896 for original /
+cooperative versus 848 / 904 for their indexed variants. Static instruction
+count is not an executed-work estimate. All 197 V3 GPU bodies remain
+unchanged in V4, which adds only those two variants. An overescaped audit
+regex initially records zero instruction counts; the failed count metadata
+and script are preserved. A corrected parser reuses the same dumps and
+validates positive counts without rebuilding or changing kernels.
+
+### Arithmetic and workflow qualification
+
+The four prototype generations pass 4,032 / 8,640 / 14,400 / 15,552 guarded
+map/error comparisons. These are repeated comparisons across overlapping
+fixtures, not that many unique images. Cases exercise every supported
+strategy, nontrivial channel spacing, all four tile-value-offset residues,
+partial groups, empty tiles, invalid strategies/counts/quantizers, signed
+zero, overflow-scale inputs, NaNs, infinities, and subnormals. Inputs and
+both output guards are checked after nonblocking-stream execution.
+
+A separate instrumented oracle exposes all 16 floating-point partial sums
+per tile before final reduction. It passes 3,240 synthetic and 360 real-capture
+comparisons, including three reuse stages and changed quantizer scales.
+Every partial sum, map byte, error word, and guard matches bit-for-bit.
+These checks prevent matching rounded map bytes from concealing a changed
+accumulation order. The instrumented audit is not the performance binary.
+
+All 72 CUDA tests and 50 CPU-only tests pass. The new permanent final-CfL
+test adds 192 fixtures with three reuse stages (576 map/error comparisons),
+including valid global-scale boundaries 1 and 32,768. Pageable fixture
+copies are explicitly completed before the nonblocking work stream.
+Five host ASan targets pass: DC group, entropy, coefficient order, codestream
+encoder, and public codestream workflow.
+
+Four diagnostic GPU sanitizer tools pass 600 comparisons each. Four release
+tools exercise the 24-comparison small CfL subset, and memcheck, initcheck,
+and synccheck exercise full AQ. The first release wrapper accidentally
+retains an undefined old variable in its optional-argument splat: basic
+memcheck passes, but the leak/stream-order options do not run. The final
+validator catches the absent leak summary. An explicit-argument rerun
+passes with zero leaks and errors and stream-ordered race tracking enabled.
+Both runs, the faulty wrapper, and the failed validation log are retained;
+the basic run is not mislabeled as extended coverage. All scoped racecheck
+reports have zero hazards. Full-AQ racecheck is not repeated.
+
+Forty-six control codestream pairs match S60 hashes. Release qualification
+then freshly encodes, independently decodes, and measures 58 image pairs:
+46 primary, six high-density, and six maximum-compression, including
+encoding-only and final-score paths. Pinned libjxl
+`e8ff09762481785938d8e4e01333ed3917571161` accepts every output; bytes,
+dimensions, and decoded Butteraugli scores match exactly. All size/score
+ratios are 1.0. Timing runs check encoded size only; their byte/quality
+evidence comes from these separate gates.
+
+### Complete-workflow traces and limits
+
+Sixteen same-executable traces contain two AB/BA pairs per warm workload
+and two cold Flower pairs. The target remains one launch; total launch
+counts remain 391 at 4K/Flower and 378 at 1080p.
+
+| Instrumented cohort | Target GPU, pair 1 / pair 2 | Total GPU, pair 1 / pair 2 |
+| --- | ---: | ---: |
+| Warm 4K | -61.16% / -55.42% | +1.31% / +3.79% |
+| Warm 1080p | -76.96% / -77.14% | +1.67% / -2.50% |
+| Warm Flower | -65.62% / -65.68% | -4.15% / -4.15% |
+| Cold Flower | -65.95% / -65.81% | -4.24% / -4.42% |
+
+The targeted gain survives instrumented complete-workflow execution, but
+slower total-GPU traces remain. The first 1080p pair also has a +1,124.61%
+target launch-API outlier. No profiler time is substituted for public wall
+time, and no unrelated phase improvement is attributed to this kernel.
+
+Same-executable wall controls use seven alternating pairs, three warmups /
+seven samples when warm and zero warmups / one sample when cold. These are
+fresh-process zero-warmup measurements, not a guarantee of a physically cold
+GPU. Every raw phase and observation is retained.
+
+| Control cohort | Size | Quantization | Codestream | Whole encode (wins/7) |
+| --- | --- | ---: | ---: | ---: |
+| Warm | 4K | +0.98% | -1.37% | +1.08% (2) |
+| Warm | 1080p | -1.15% | +1.57% | -0.69% (4) |
+| Warm | Flower | -3.73% | -0.33% | -2.66% (6) |
+| Cold | 4K | -2.09% | +4.57% | -1.30% (5) |
+| Cold | 1080p | -2.98% | -5.66% | -2.48% (5) |
+| Cold | Flower | -2.09% | +11.82% | -2.93% (4) |
+
+Warm-control 4K quantization loses all seven pairs despite the targeted
+GPU reduction. Cold gains do not erase that observation. Unchanged CPU
+codestream work also varies; the full-workflow cause is not established.
+The change is retained for its substantial, exact, independently repeated
+target-stage gain, not as evidence of a universal encoder speedup.
+
+### Final release measurements and evidence retention
+
+Release comparisons use frozen S60 binaries against the final S61 build.
+The phase probe is freshly rebuilt with current headers and exposes all
+41 fields; the public benchmark exposes seven. Each cohort has seven
+alternating pairs, with three warmups/five samples for warm measurements
+and zero/one for cold. Argument parsing is strict, and the driver builds
+a multi-item argument array before adding `cold`; the S60 scalar-splat
+labeling problem does not recur. JSON metadata and actual commands verify
+every warm/cold label.
+
+All changes below are medians of paired percentages, not ratios of separate
+medians. Pair distributions and unchanged-phase observations remain available.
+
+| Release cohort | Size | Quantization | Codestream | Whole encode (wins/7) |
+| --- | --- | ---: | ---: | ---: |
+| Phase warm | 4K | -0.35% | +5.29% | +1.17% (2) |
+| Phase warm | 1080p | -1.68% | +1.07% | -0.53% (5) |
+| Phase warm | Flower | -4.19% | -4.52% | -5.01% (7) |
+| Public warm | 4K | -2.34% | -3.71% | -2.12% (5) |
+| Public warm | 1080p | -2.55% | -1.44% | -1.42% (5) |
+| Public warm | Flower | -3.89% | -4.83% | -2.77% (6) |
+| Phase cold | 4K | -1.94% | +0.28% | -0.56% (4) |
+| Phase cold | 1080p | -5.22% | -7.24% | -6.51% (7) |
+| Phase cold | Flower | -1.57% | +7.11% | +2.99% (3) |
+| Public cold | 4K | -4.65% | -1.95% | -3.27% (5) |
+| Public cold | 1080p | +3.28% | +5.87% | +2.64% (1) |
+| Public cold | Flower | +0.67% | +9.61% | +5.28% (2) |
+
+The warm public gains do not erase warm phase/control 4K regressions or
+cold public 1080p/Flower regressions. Public warm Flower whole-encode
+pairs range -26.95% to +19.46%; public cold 1080p ranges -0.49% to +41.56%.
+The favorable separate cold phase cohort does not replace the slower cold
+public cohort. Kernel gains are much larger percentages than complete
+encode gains because the target is only one part of the pipeline; changing
+timing in unchanged work also prevents assigning the entire wall change
+to this kernel.
+
+Batch qualification compares the new release against its own sequential
+path, not against S60. At batch sizes 1/2/4, median paired speedups are
+0.970x / 1.232x / 1.285x for 1080p fully-resident and
+0.942x / 1.524x / 1.864x for maximum-throughput. At 4K, fully-resident
+sizes 1/2 give 1.068x / 0.961x. Each has one warmup and three samples and
+retains its byte checks. This validates the existing concurrency path;
+it is not a cross-version throughput claim.
+
+The first replay screen starts at 55 C / P8 / 210 MHz / 15.59 W with
+limiting flags inactive and ends at 60 C / P3 / 1777 MHz / 28.60 W with
+thermal-slowdown and power-cap flags active. Same-executable wall controls
+start at 60 C / P3 / 1282 MHz / 24.17 W and end at 64 C / P3 / 1282 MHz /
+25.17 W, both flags active. Final release measurements start at
+61 C / P3 / 1777 MHz / 28.41 W and end at 68 C / P3 / 322 MHz / 24.46 W,
+both flags active. These boundary snapshots are not continuous clock
+measurements, normalization factors, or a causal explanation for regressions.
+Builds, profiling, sanitizers, native dumps, and performance runs are serial.
+No clock, power, cooling, priority, security, or service settings change.
+No admin/firewall prompt or permission failure is reported by these runs;
+the earlier suspected firewall cause remains unconfirmed.
+
+The ignored `build-cuda-ninja/profiles/s61_*` bundle retains every generation,
+12 real-input captures and hashes, all 12,888 timing rows, floating-partial
+audits, 16 traces, six whole-workflow cohorts, quality/native/sanitizer logs,
+and the two validation-script issues. Thirty-eight release binaries/libraries
+and six source/doc snapshots are frozen. `s61_validate.py --frozen` checks
+source scope and ABI, native findings, capture sizes/hashes, exact coverage,
+paired arithmetic, SQL correlations, test/quality evidence, and manifests.
+S59/S60 evidence remains immutable and revalidates. Reproduction requires
+fresh output prefixes; do not rerun frozen producers in place, and use the
+explicit extended-memcheck script for the omitted optional flags. Larger
+convolutions and remaining complete-workflow variability are still open.
 
 ## Work that should not lead the next cycle
 

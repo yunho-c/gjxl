@@ -65,6 +65,15 @@ struct CudaAqResidentPolicyParams {
     signed char* y_to_b, unsigned int* error, uint32_t tile_count,
     cudaStream_t stream);
 
+// Original four-thread/shared-memory implementation, retained as a conformance
+// oracle. Both entries require validated metadata and disjoint map outputs.
+[[nodiscard]] cudaError_t LaunchCudaAqFinalColorCorrelationReference(
+    const CudaAqColorTransformRecord* transforms, const uint32_t* tile_offsets,
+    const float* quant_tables, const float* forward_coefficients,
+    const int* raw_quant, const unsigned int* quantizer, signed char* y_to_x,
+    signed char* y_to_b, unsigned int* error, uint32_t tile_count,
+    cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqSelectAdjustedQuantization(
     const CudaAqAnchor* anchors, const float* quant_tables, int* raw_quant,
     const float* forward_coefficients, float* adjustment_thresholds,

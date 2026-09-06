@@ -761,6 +761,149 @@ __global__ void FinalColorCorrelationKernel(
   y_to_b[tile] = QuantizeCfl(result_b);
 }
 
+__device__ float FinalCflSum4(float value, unsigned mask) {
+  const float adjacent = __shfl_down_sync(mask, value, 1, 4);
+  const float pairs = __fadd_rn(value, adjacent);
+  return __fadd_rn(pairs, __shfl_down_sync(mask, pairs, 2, 4));
+}
+
+template <unsigned TilesPerBlock>
+__global__ void CooperativeFinalCflKernel(
+    const CudaAqColorTransformRecord* transforms, const uint32_t* tile_offsets,
+    const float* quant_tables, const float* forward_coefficients,
+    const int* raw_quant, const unsigned int* quantizer, signed char* y_to_x,
+    signed char* y_to_b, unsigned int* error, uint32_t tile_count) {
+  constexpr unsigned LanesPerTile = 32;
+  const uint32_t tile = blockIdx.x * TilesPerBlock + threadIdx.x / LanesPerTile;
+  const uint32_t subgroup_lane = threadIdx.x % LanesPerTile;
+  const uint32_t subgroup_origin = threadIdx.x & (32 - LanesPerTile);
+  const uint32_t lane = subgroup_lane & 3u;
+  constexpr unsigned TileBits = 0xffffffffu >> (32 - LanesPerTile);
+  const unsigned tile_mask = TileBits << subgroup_origin;
+  if (tile >= tile_count) return;
+  const uint32_t begin = tile_offsets[tile];
+  const uint32_t end = tile_offsets[tile + 1];
+  if (begin >= end) {
+    if (lane == 0) atomicOr(error, 64u);
+    return;
+  }
+  const uint32_t global_scale = quantizer[0];
+  float quadratic_x = 0.0f;
+  float linear_x = 0.0f;
+  float quadratic_b = 0.0f;
+  float linear_b = 0.0f;
+  for (uint32_t transform_index = begin; transform_index < end;
+       ++transform_index) {
+    const CudaAqColorTransformRecord transform = transforms[transform_index];
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t low_width = 0;
+    uint32_t low_height = 0;
+    switch (transform.strategy) {
+      case 0:
+        width = height = 8;
+        low_width = low_height = 1;
+        break;
+      case 4:
+        width = height = 16;
+        low_width = low_height = 2;
+        break;
+      case 5:
+        width = height = 32;
+        low_width = low_height = 4;
+        break;
+      case 6:
+      case 7:
+        width = 16;
+        height = 8;
+        low_width = 2;
+        low_height = 1;
+        break;
+      case 10:
+      case 11:
+        width = 32;
+        height = 16;
+        low_width = 4;
+        low_height = 2;
+        break;
+      default:
+        atomicOr(error, 64u);
+        continue;
+    }
+    const int raw = raw_quant[transform.raw_quant_index];
+    if (width * height != transform.coefficient_count || raw < 1 || raw > 256 ||
+        global_scale == 0 || global_scale > 32768) {
+      atomicOr(error, 64u);
+      continue;
+    }
+    const float quant_scale =
+        static_cast<float>(global_scale) * (1.0f / 65536.0f) * 128.0f * raw;
+    const TableOffsets table_offsets = QuantTableOffsets(transform.strategy);
+    const uint32_t first = (lane + 4 - (transform.tile_value_offset & 3u)) & 3u;
+    // Load and scale a whole coefficient chunk cooperatively. All lanes keep
+    // duplicate copies of one original four-lane accumulator chain; shuffles
+    // feed that chain in its original coefficient order, without reassociation.
+    // Valid strategies have a coefficient count divisible by 32.
+    constexpr unsigned Steps = LanesPerTile / 4;
+    for (uint32_t base_coefficient = 0; base_coefficient < transform.coefficient_count;
+         base_coefficient += LanesPerTile) {
+      const uint32_t coefficient = base_coefficient + subgroup_lane;
+      const uint32_t x = coefficient % width;
+      const uint32_t y = coefficient / width;
+      const bool active = !(x < low_width && y < low_height);
+      const size_t base = transform.coefficient_offset + coefficient;
+      const float coefficient_y = forward_coefficients[base + transform.channel_stride];
+      const float coefficient_x = forward_coefficients[base];
+      const float coefficient_b = forward_coefficients[base + 2 * transform.channel_stride];
+      const float value_y_x = coefficient_y *
+          quant_tables[table_offsets.inverse_dequant + coefficient] * quant_scale;
+      const float value_x = coefficient_x *
+          quant_tables[table_offsets.inverse_dequant + coefficient] * quant_scale;
+      const uint32_t b_table = 2 * transform.coefficient_count + coefficient;
+      const float value_y_b = coefficient_y *
+          quant_tables[table_offsets.inverse_dequant + b_table] * quant_scale;
+      const float value_b = coefficient_b *
+          quant_tables[table_offsets.inverse_dequant + b_table] * quant_scale;
+      const float a_x = value_y_x * (1.0f / 84.0f);
+      const float a_b = value_y_b * (1.0f / 84.0f);
+      const float minus_x = -value_x;
+      const float difference_b = value_y_b - value_b;
+      const unsigned included = __ballot_sync(tile_mask, active) >> subgroup_origin;
+#pragma unroll
+      for (unsigned step = 0; step < Steps; ++step) {
+        const unsigned source_lane = 4 * step + first;
+        const float ax = __shfl_sync(tile_mask, a_x, source_lane, LanesPerTile);
+        const float vx = __shfl_sync(tile_mask, minus_x, source_lane, LanesPerTile);
+        const float ab = __shfl_sync(tile_mask, a_b, source_lane, LanesPerTile);
+        const float vb = __shfl_sync(tile_mask, difference_b, source_lane, LanesPerTile);
+        if ((included & (1u << source_lane)) != 0) {
+          quadratic_x = fmaf(ax, ax, quadratic_x);
+          linear_x = fmaf(ax, vx, linear_x);
+          quadratic_b = fmaf(ab, ab, quadratic_b);
+          linear_b = fmaf(ab, vb, linear_b);
+        }
+      }
+    }
+  }
+  const unsigned mask = 0xfu << (threadIdx.x & 28u);
+  const float qx = FinalCflSum4(quadratic_x, mask);
+  const float lx = FinalCflSum4(linear_x, mask);
+  const float qb = FinalCflSum4(quadratic_b, mask);
+  const float lb = FinalCflSum4(linear_b, mask);
+  if (subgroup_lane != 0) return;
+  const CudaAqColorTransformRecord last = transforms[end - 1];
+  const float sample_count =
+      static_cast<float>(last.tile_value_offset + last.coefficient_count);
+  const float result_x = -lx / (qx + sample_count * 5.0e-10f);
+  const float result_b = -lb / (qb + sample_count * 5.0e-10f);
+  if (!isfinite(result_x) || !isfinite(result_b)) {
+    atomicOr(error, 64u);
+    return;
+  }
+  y_to_x[tile] = QuantizeCfl(result_x);
+  y_to_b[tile] = QuantizeCfl(result_b);
+}
+
 __global__ void SelectAdjustedQuantizationKernel(
     const CudaAqAnchor* anchors, const float* quant_tables, int* raw_quant,
     const float* forward_coefficients, float* adjustment_thresholds,
@@ -1381,13 +1524,29 @@ cudaError_t LaunchCudaAqGatherTransformPixels(
   return cudaGetLastError();
 }
 
-cudaError_t LaunchCudaAqFinalColorCorrelation(
+cudaError_t LaunchCudaAqFinalColorCorrelationReference(
     const CudaAqColorTransformRecord* transforms, const uint32_t* tile_offsets,
     const float* quant_tables, const float* forward_coefficients,
     const int* raw_quant, const unsigned int* quantizer, signed char* y_to_x,
     signed char* y_to_b, unsigned int* error, uint32_t tile_count,
     cudaStream_t stream) {
   FinalColorCorrelationKernel<<<tile_count, 4, 0, stream>>>(
+      transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
+      quantizer, y_to_x, y_to_b, error, tile_count);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqFinalColorCorrelation(
+    const CudaAqColorTransformRecord* transforms, const uint32_t* tile_offsets,
+    const float* quant_tables, const float* forward_coefficients,
+    const int* raw_quant, const unsigned int* quantizer, signed char* y_to_x,
+    signed char* y_to_b, unsigned int* error, uint32_t tile_count,
+    cudaStream_t stream) {
+  // Each full warp owns one tile. Two independent warps per block improve
+  // occupancy without packing divergent tile loops into one warp.
+  constexpr unsigned kTilesPerBlock = 2;
+  const uint32_t blocks = (tile_count + kTilesPerBlock - 1) / kTilesPerBlock;
+  CooperativeFinalCflKernel<kTilesPerBlock><<<blocks, 32 * kTilesPerBlock, 0, stream>>>(
       transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
       quantizer, y_to_x, y_to_b, error, tile_count);
   return cudaGetLastError();

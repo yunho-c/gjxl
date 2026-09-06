@@ -885,6 +885,28 @@ warm repeats, and corrected cold runs are separate. S60 is retained for its
 consistent targeted GPU gain, not as a universal encoder speedup. Remaining
 workflow variability and cross-device qualification are still open.
 
+[S61](cuda-optimization-s1.md#cooperative-final-color-correlation-s61) uses
+one full warp per final color-correlation tile to load and scale coefficient
+chunks cooperatively, while preserving the original four FMA accumulation
+chains and reduction order. Two tile warps share each block; there is no
+size/content heuristic. All 16 floating partial sums per tile match the
+original oracle in 3,600 synthetic/real-capture comparisons. The release
+kernel matches the measured 40-register body with no stack, local, or shared
+storage; all 172 existing GPU bodies remain unchanged. Metadata/frame ABI,
+launch count, allocations, transfers, public API, and quality policy stay fixed.
+
+The targeted stage improves roughly 62-78% on non-tiny captured inputs across
+two screens. Simple tile packing can instead severely regress photographs;
+term splitting and indexing-only alternatives remain documented. All 72 CUDA /
+50 CPU tests, five host ASan targets, scoped GPU sanitizers, and 58 freshly
+decoded byte-identical image pairs pass. A wrapper omitted optional leak and
+stream-order flags on the initial basic memcheck; an explicit rerun passes
+with zero leaks/errors. Warm public whole encodes improve 2.1% / 1.4% / 2.8%
+at 4K / 1080p / Flower, while cold changes are -3.3% / +2.6% / +5.3%.
+Those regressions and slower total-GPU traces remain recorded: this is a
+targeted kernel improvement, not a universal encoder speedup or a maxed-out
+implementation.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

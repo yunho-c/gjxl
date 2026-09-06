@@ -2422,6 +2422,12 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_l2_final COMMAND gjxl_cuda_l2_final_test)
     set_tests_properties(cuda_l2_final PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_cuda_final_cfl_test tests/cuda_final_cfl_test.cpp)
+    target_link_libraries(gjxl_cuda_final_cfl_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_final_cfl_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_final_cfl COMMAND gjxl_cuda_final_cfl_test)
+    set_tests_properties(cuda_final_cfl PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(gjxl_cuda_frequency_split_test tests/cuda_frequency_split_test.cpp)
     target_link_libraries(gjxl_cuda_frequency_split_test PRIVATE gjxl_cuda)
     target_include_directories(gjxl_cuda_frequency_split_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
