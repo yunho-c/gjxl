@@ -723,6 +723,15 @@ and batch checks pass. The
 records the roughly 49% / 47% targeted GPU gain at 4K / 1080p and the
 mixed whole-encode results; no universal encoder speedup is claimed.
 
+The subsequent [S49 handoff investigation](cuda-optimization-s1.md#coefficient-handoff-measurement-and-packing-prototype-s49)
+measures the remaining coefficient readback and frame assembly. An isolated
+GPU-packing/ownership-transfer prototype improves the measured large-image
+handoff but retains host clearing, transfers padded edge tails, and regresses
+on the small-photo cohort. Its 46 image pairs are byte-identical, but an extra
+submission violates the existing AQ resource-count assertion. It is not adopted;
+production remains S48, with overwrite-only final storage and tighter transfer
+layout left as separate design leads. No stable whole-encode gain is claimed.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

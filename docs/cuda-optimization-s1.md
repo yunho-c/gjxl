@@ -27,7 +27,15 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `bf458d6` fuses
+below supersede them. The latest investigation at `f22c2f8` measures coefficient
+readback/frame assembly and tests an isolated GPU-packing/ownership-transfer
+prototype. It is **not adopted**: the fixed-capacity transfer adds padding and
+metadata overhead, small-image results regress, and its additional submission
+fails an existing conformance assertion. The production implementation remains
+S48. See [S49](#coefficient-handoff-measurement-and-packing-prototype-s49) for the
+retained measurements, qualification limits, and next architectural options.
+
+The latest implemented checkpoint against `bf458d6` fuses
 the three vertical five-tap RGB blurs with Opsin conversion. It removes
 18 launches per normal encode and three intermediate plane writes/reads
 per psycho pass without increasing scratch or transfers. The targeted
@@ -7248,6 +7256,165 @@ group-ordered host-append experiment was rejected and must not be treated
 as an already successful layout change. Likewise, S31 established that
 the compiler already reuses repeated Malta directional sums; removing
 those source duplicates is not a new arithmetic-saving opportunity.
+
+## Coefficient handoff measurement and packing prototype (S49)
+
+Baseline: `f22c2f8`, after S48. This is a measurement/design checkpoint, not a
+production optimization. No tracked codec, CUDA, test, or build source is changed.
+Diagnostic clones of the current resident evaluator and frame assembler are
+linked before the unchanged production archives. This is distinct from S34's
+rejected group-ordered host-append experiment.
+
+### Baseline attribution
+
+Seven independent processes per workload, each with three warmups and five
+measured encodes, time the current preparation and finalization stages. Entries
+below are medians of per-process sample medians in milliseconds. The odd-sized
+benchmark images are 3839x2159 and 1919x1079; Flower is 510x532.
+
+| Stage | 4K | 1080p | Flower |
+| --- | ---: | ---: | ---: |
+| Host metadata preparation | 9.570 | 2.468 | 0.330 |
+| Host staging allocation | 0.845 | 0.243 | 0.043 |
+| Final five-copy readback | 16.870 | 4.513 | 0.822 |
+| Whole frame assembly | 27.166 | 9.298 | 1.184 |
+| AC allocation/zeroing, within assembly | 10.856 | 4.969 | 0.691 |
+| DC/raw-quant/EPF setup, within assembly | 1.150 | 0.283 | 0.041 |
+| Transform validation/copy and group completion | 14.222 | 3.733 | 0.366 |
+| Staging + readback + intervening setup + assembly | 44.953 | 14.076 | 2.052 |
+| Whole public encode | 454.906 | 118.653 | 25.719 |
+
+Component medians are not additive. The AC copy already uses an OR-reduction
+for the unwritten-value check, not a per-element early-return branch. The new
+opportunity is the full intermediate host allocation and layout conversion,
+not simply removing a branch that was eliminated in an earlier checkpoint.
+
+### Isolated packing prototype
+
+An environment switch in one diagnostic executable selects either the current
+path or the following experiment. Neither the switch nor its thread-local
+ownership hook is proposed as a production API.
+
+1. During existing metadata construction, build one 24-byte source/destination
+   record per transform and final group/channel offsets for frame assembly.
+2. Extend the reconstruction-coefficient scratch allocation to fixed AC-group
+   capacity. Its float contents are dead after reconstruction/inverse-transform
+   consumers finish, and a subsequent evaluation rewrites them before reuse.
+3. At finalization, allocate the ordinary zero-initialized final host vector,
+   submit a device clear and packing kernel into the reused scratch, then wait.
+4. Download that final-layout array and the four existing small readbacks.
+   Validate metadata, coefficient sentinels, and zero edge tails, then move the
+   vector into the private candidate frame. Publish only on successful assembly.
+
+All existing coefficient/quantization kernels come from the unchanged S48 CUDA
+archive. The prototype adds a data-movement kernel, not a new arithmetic path.
+It avoids the original full host coefficient staging array and host AC copy,
+but **does not remove host clearing**: that cost moves before readback.
+
+Fixed group capacity also transfers unused zero-filled edge tails. The following
+are layout/request arithmetic, not captured transfer or retained-VRAM claims:
+
+| Quantity, bytes | 4K | 1080p | Flower |
+| --- | ---: | ---: | ---: |
+| Original coefficient readback/staging | 99,532,800 | 24,883,200 | 3,293,184 |
+| Fixed-capacity packed coefficient readback | 106,168,320 | 31,457,280 | 4,718,592 |
+| Extra scratch capacity for edge padding | 6,635,520 | 6,574,080 | 1,425,408 |
+| Additional record-arena capacity, 24 bytes per block | 3,110,400 | 777,600 | 102,912 |
+
+The actual record upload contains only anchors, not all blocks. Padding alone
+increases coefficient transfer size by about 6.7%, 26.4%, and 43.3%, respectively.
+The separate packing submission is also a correctness-contract concern below.
+
+### Same-executable paired observations
+
+Seven alternating pairs per workload use three warmups and five samples per
+process. Both branches are linked into the same executable. All 21 pairs and
+their 336 warmup/measured finalizations are retained; no outliers are dropped.
+The pairs are a different cohort from the baseline-attribution table above.
+
+| Timed region | 4K baseline / packed | 1080p baseline / packed | Flower baseline / packed |
+| --- | ---: | ---: | ---: |
+| Metadata preparation | 10.067 / 11.524 | 3.629 / 3.391 | 0.428 / 0.471 |
+| Host clear moved before readback | 0.000 / 11.440 | 0.000 / 5.762 | 0.000 / 0.893 |
+| Added packing submission/wait | 0.000 / 1.657 | 0.000 / 0.455 | 0.000 / 0.112 |
+| Readback | 17.500 / 17.069 | 6.141 / 5.229 | 0.887 / 0.957 |
+| Frame assembly after readback | 28.271 / 8.289 | 11.458 / 2.596 | 1.473 / 0.506 |
+| Staging + clear + packing + readback + setup + assembly | 47.309 / 39.902 | 17.844 / 14.483 | 2.381 / 2.533 |
+| Above total plus metadata preparation | 58.537 / 51.693 | 21.621 / 17.792 | 2.795 / 3.098 |
+| Whole public encode | 469.126 / 462.698 | 148.725 / 130.573 | 28.918 / 30.118 |
+
+The median **paired** change in the handoff total including metadata is -9.4% /
+-2.6% / +7.5%; without metadata it is -15.0% / -6.2% / +2.5%. Totals are summed
+within each sample before process medians and paired ratios are calculated.
+Reporting only post-readback assembly would overstate the benefit by hiding the relocated
+host clear, packing submission, and additional preparation. Whole-encode paired
+changes are -1.7% / +0.3% / +3.0%, with 5/7, 3/7, and 1/7 wins. Quantization-
+pipeline paired changes are -0.1% / -0.4% / +5.2%; unchanged codestream work
+changes by -5.2% / +0.6% / +4.2%. Ratios of aggregate medians are not paired ratios.
+
+The 1080p cohort varies particularly sharply: baseline process medians span
+119.736-291.342 ms and packed medians 121.589-222.885 ms. Retained pair 3 is
+291.342 -> 130.573 ms, while pair 5 is 149.146 -> 207.364 ms. In pair 3,
+unchanged codestream work alone changes from 179.070 to 60.914 ms. These changes
+cannot be attributed to packing. 4K ranges are 436.705-484.087 /
+442.769-484.368 ms; Flower ranges are 27.981-43.828 / 28.559-40.608 ms.
+No operating-state trace was captured for these timing cohorts, so their
+variation is not assigned a thermal, power, firewall, or other specific cause.
+This experiment does not establish a stable complete-encoder speedup.
+
+### Qualification limits and disposition
+
+The unmodified CUDA AQ fixture fails with the packed branch enabled at its
+combined bounded/full check. A separate diagnostic preserves the failing
+assertion and reports: three allocations, **four submissions instead of three**,
+equal quant fields, equal block maps, equal score histories containing four
+scores, and a valid final frame. Thus the observed assertion failure is the
+additional submission, not an output mismatch. Full-suite or sanitizer success
+is **not claimed** for this prototype. The production S48 qualification remains
+separate; no test assertion is weakened in tracked code.
+
+Separately, all 46 production-versus-prototype image pairs are byte-identical
+and have identical independently decoded Butteraugli scores. The matrix retains
+the seven inputs at distances 0.5/1.2/3.0 and effort 7, plus sample and Flower at
+distance 1.2/effort 9, each with encoding-only and final-score collection.
+The pinned decoder/metric revision is `e8ff09762481785938d8e4e01333ed3917571161`,
+with `RGB_D65_SRG_Rel_Lin` decode/metric settings. Encoding-only/scored byte
+identity is checked as well. These image checks do not make the failed
+conformance fixture a pass or qualify unchecked failure/reuse paths.
+
+Source inspection also finds that the existing coefficient-poison test hook
+expects the old staging allocation. The prototype skips that allocation, so
+the hook must be redesigned to poison the actual future readback destination
+before extending conformance coverage. Do not run it against the null pointer
+or treat image-byte agreement as a substitute for this overwrite test.
+
+The fixed-capacity packing prototype is not adopted. The useful next design
+directions are ownership-backed overwrite-only final storage, clearing only
+unused tails, packing into an existing final GPU submission, and avoiding
+transfers of padded tails. Packed active-group rows with pitched readback, or
+direct integer output offsets independent of the forward-float batch layout,
+deserve separate measurements; neither is implemented here. Preserve output
+atomicity, failure invalidation, prepared reuse, complete overwrite checks,
+exact/scored behavior, and the existing immutable frame contract. Do not infer
+that a new container or shared-ownership refactor is already justified.
+Final color correlation consumes the forward **float** coefficients, not this
+integer output, so an integer-layout experiment need not change its float
+source layout or metadata.
+
+Reproduction artifacts under the ignored `build-cuda-ninja/profiles` directory:
+`s49_{readback,frame}_probe.cpp`, `s49_build_probes.ps1`,
+`s49_readback_measure.py`, `s49_readback_baseline.json`,
+`s49_packed_{resident,frame}.cpp`, `s49_pack.{h,cu}`,
+`s49_build_packed.ps1`, `s49_pack_measure.py`, `s49_pack_comparison.json`,
+`s49_link_checks.ps1`, `s49_check_packed.ps1`, `s49_packed_quality.py`,
+and `s49_contract_diagnostic.{cpp,ps1}`. `s49_validate.py` checks the retained
+experiment identities, the unchanged S48 production binaries, timing records,
+46 image/policy pairs, and the explicitly failed conformance diagnostic.
+`s49_artifact_hashes.json` records diagnostic source/object/executable identity.
+Per-process stdout/stderr, diagnostic executables/objects, image outputs/reports,
+and the failed conformance result
+are retained. No system settings were changed, and no admin/firewall failure
+was reported by these runs. Optimization remains ongoing, not maxed out.
 
 ## Work that should not lead the next cycle
 
