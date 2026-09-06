@@ -26,6 +26,7 @@
 #include "codestream/profile_internal.h"
 
 namespace gjxl {
+using codestream_internal::Storage;
 namespace {
 
 using ProfileClock = std::chrono::steady_clock;
@@ -177,7 +178,7 @@ Status StoreVarLenUint8(size_t value, Writer* writer) {
 
 Status NormalizeHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
-  std::vector<uint16_t>* frequencies) {
+  Storage<uint16_t>* frequencies) {
 
   if (frequencies == nullptr) {
     return Status::InvalidArgument("ANS histogram output is null");
@@ -213,7 +214,7 @@ Status NormalizeHistogram(
     size_t symbol = 0;
     uint64_t remainder = 0;
   };
-  std::vector<Remainder> remainders;
+  Storage<Remainder> remainders;
   remainders.reserve(populated);
   size_t normalized_total = 0;
   for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
@@ -231,10 +232,13 @@ Status NormalizeHistogram(
     remainders.push_back({symbol, remainder});
   }
   if (normalized_total < kAnsTableSize) {
-    std::stable_sort(
+    // Input symbols are ascending; make the stable tie order explicit without
+    // an unaccounted standard-library temporary allocation.
+    std::sort(
       remainders.begin(), remainders.end(),
       [](const Remainder& left, const Remainder& right) {
-        return left.remainder > right.remainder;
+        return left.remainder != right.remainder
+          ? left.remainder > right.remainder : left.symbol < right.symbol;
       });
     size_t missing = kAnsTableSize - normalized_total;
     for (size_t index = 0; missing != 0; ++index, --missing) {
@@ -342,7 +346,7 @@ bool RebalanceHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
   size_t alphabet_size,
   uint32_t shift,
-  std::vector<uint16_t>* frequencies,
+  Storage<uint16_t>* frequencies,
   uint16_t* omit_position) {
 
   if (frequencies == nullptr || omit_position == nullptr ||
@@ -374,8 +378,8 @@ bool RebalanceHistogram(
   const auto& log2_table = PopulationLog2Table();
   const auto& allowed = GetAllowedPopulations().values[shift];
   const auto& allowed_index = GetAllowedPopulations().indexes[shift];
-  std::vector<int32_t> counts(alphabet_size, 0);
-  std::vector<EntropyDelta> bins;
+  Storage<int32_t> counts(alphabet_size, 0);
+  Storage<EntropyDelta> bins;
   bins.reserve(alphabet_size);
   const double scale = static_cast<double>(kAnsTableSize) /
     static_cast<double>(total);
@@ -495,7 +499,7 @@ bool RebalanceHistogram(
 Status InitializeAliasTable(
   std::span<const uint16_t> frequencies,
   size_t log_alpha_size,
-  std::vector<AliasEntry>* table) {
+  Storage<AliasEntry>* table) {
 
   if (table == nullptr || log_alpha_size < 5 || log_alpha_size > 8 ||
       frequencies.size() > (size_t{1} << log_alpha_size)) {
@@ -504,7 +508,7 @@ Status InitializeAliasTable(
   const size_t table_size = size_t{1} << log_alpha_size;
   const uint32_t entry_size = kAnsTableSize >> log_alpha_size;
   table->assign(table_size, AliasEntry{});
-  std::vector<uint32_t> distribution(frequencies.begin(), frequencies.end());
+  Storage<uint32_t> distribution(frequencies.begin(), frequencies.end());
   while (!distribution.empty() && distribution.back() == 0) {
     distribution.pop_back();
   }
@@ -532,9 +536,9 @@ Status InitializeAliasTable(
     return Status::Ok();
   }
 
-  std::vector<uint32_t> underfull;
-  std::vector<uint32_t> overfull;
-  std::vector<uint32_t> cutoffs(table_size, 0);
+  Storage<uint32_t> underfull;
+  Storage<uint32_t> overfull;
+  Storage<uint32_t> cutoffs(table_size, 0);
   for (size_t index = 0; index < distribution.size(); ++index) {
     cutoffs[index] = distribution[index];
     if (cutoffs[index] < entry_size) {
@@ -589,15 +593,15 @@ Status InitializeAliasTable(
 Status BuildAnsEncoderTables(
   std::span<const uint16_t> frequencies,
   size_t log_alpha_size,
-  std::vector<std::vector<uint16_t>>* reverse_maps,
-  std::vector<uint64_t>* reciprocal_frequencies) {
+  Storage<Storage<uint16_t>>* reverse_maps,
+  Storage<uint64_t>* reciprocal_frequencies) {
 
   if (reverse_maps == nullptr || reciprocal_frequencies == nullptr) {
     return Status::InvalidArgument("ANS encoder-table output is null");
   }
-  std::vector<std::vector<uint16_t>> candidate_reverse_maps(
+  Storage<Storage<uint16_t>> candidate_reverse_maps(
     frequencies.size());
-  std::vector<uint64_t> candidate_reciprocals(frequencies.size());
+  Storage<uint64_t> candidate_reciprocals(frequencies.size());
   for (size_t symbol = 0; symbol < frequencies.size(); ++symbol) {
     candidate_reverse_maps[symbol].resize(frequencies[symbol]);
     candidate_reciprocals[symbol] =
@@ -608,7 +612,7 @@ Status BuildAnsEncoderTables(
     *reciprocal_frequencies = std::move(candidate_reciprocals);
     return Status::Ok();
   }
-  std::vector<AliasEntry> table;
+  Storage<AliasEntry> table;
   if (Status status = InitializeAliasTable(
         frequencies, log_alpha_size, &table);
       !status.ok()) {
@@ -1056,15 +1060,15 @@ Status DirectHistogramDistance(
 }
 
 Status CanonicalizeDirectClusters(
-  const std::vector<DirectAnsHistogram>& input,
-  std::vector<DirectAnsHistogram>* clustered,
-  std::vector<uint32_t>* symbols) {
+  const Storage<DirectAnsHistogram>& input,
+  Storage<DirectAnsHistogram>* clustered,
+  Storage<uint32_t>* symbols) {
 
   if (clustered == nullptr || symbols == nullptr ||
       symbols->size() != input.size() || clustered->empty()) {
     return Status::InvalidArgument("Direct ANS cluster state is invalid");
   }
-  std::vector<size_t> new_indexes(
+  Storage<size_t> new_indexes(
     clustered->size(), std::numeric_limits<size_t>::max());
   size_t next_index = 0;
   for (size_t histogram = 0; histogram < input.size(); ++histogram) {
@@ -1084,7 +1088,7 @@ Status CanonicalizeDirectClusters(
     std::fill(symbols->begin(), symbols->end(), 0);
     return Status::Ok();
   }
-  std::vector<DirectAnsHistogram> reordered(next_index);
+  Storage<DirectAnsHistogram> reordered(next_index);
   for (size_t histogram = 0; histogram < input.size(); ++histogram) {
     if (input[histogram].total_count == 0) {
       (*symbols)[histogram] = 0;
@@ -1106,23 +1110,23 @@ Status CanonicalizeDirectClusters(
 }
 
 Status FastClusterDirectAnsHistograms(
-  const std::vector<DirectAnsHistogram>& input,
-  std::vector<DirectAnsHistogram>* clustered,
-  std::vector<uint32_t>* symbols) {
+  const Storage<DirectAnsHistogram>& input,
+  Storage<DirectAnsHistogram>* clustered,
+  Storage<uint32_t>* symbols) {
 
   if (input.empty() || clustered == nullptr || symbols == nullptr) {
     return Status::InvalidArgument("Direct ANS clustering input is invalid");
   }
   constexpr size_t kMaximumClusters = kMaximumPrefixClusters;
   constexpr double kMinimumDistinctDistance = 48.0;
-  std::vector<DirectAnsHistogram> source = input;
+  Storage<DirectAnsHistogram> source = input;
   for (DirectAnsHistogram& histogram : source) {
     histogram.shannon_bits = DirectHistogramShannonBits(histogram);
   }
   clustered->clear();
   clustered->reserve(std::min(kMaximumClusters, source.size()));
   symbols->assign(source.size(), kMaximumClusters);
-  std::vector<double> distances(
+  Storage<double> distances(
     source.size(), std::numeric_limits<double>::infinity());
   size_t largest_index = 0;
   for (size_t index = 0; index < source.size(); ++index) {
@@ -1202,9 +1206,9 @@ Status DirectAnsPopulationCost(
 }
 
 Status RefineBestDirectAnsClusters(
-  const std::vector<DirectAnsHistogram>& input,
-  std::vector<DirectAnsHistogram>* clustered,
-  std::vector<uint32_t>* symbols) {
+  const Storage<DirectAnsHistogram>& input,
+  Storage<DirectAnsHistogram>* clustered,
+  Storage<uint32_t>* symbols) {
 
   if (clustered == nullptr || symbols == nullptr || clustered->empty()) {
     return Status::InvalidArgument("Direct ANS refinement input is invalid");
@@ -1220,15 +1224,15 @@ Status RefineBestDirectAnsClusters(
         std::tie(other.cost, other.first, other.second, other.version);
     }
   };
-  std::vector<double> costs(clustered->size());
+  Storage<double> costs(clustered->size());
   for (size_t index = 0; index < clustered->size(); ++index) {
     if (Status status = DirectAnsPopulationCost(
           (*clustered)[index], &costs[index]); !status.ok()) {
       return status;
     }
   }
-  std::vector<uint32_t> versions(clustered->size(), 1);
-  std::vector<uint32_t> renumbering(clustered->size());
+  Storage<uint32_t> versions(clustered->size(), 1);
+  Storage<uint32_t> renumbering(clustered->size());
   std::iota(renumbering.begin(), renumbering.end(), uint32_t{0});
   std::priority_queue<Pair> pairs;
   const auto enqueue = [&](uint32_t left, uint32_t right,
@@ -1290,7 +1294,7 @@ Status RefineBestDirectAnsClusters(
       }
     }
   }
-  std::vector<uint32_t> reverse(clustered->size(), 0);
+  Storage<uint32_t> reverse(clustered->size(), 0);
   size_t alive = 0;
   for (size_t index = 0; index < clustered->size(); ++index) {
     if (versions[index] == 0) {
@@ -1341,7 +1345,7 @@ Status PrepareDirectAnsPartition(
 
   try {
     const ProfileClock::time_point histogram_begin = ProfileBegin(profile);
-    std::vector<DirectAnsHistogram> histograms(histogram_count);
+    Storage<DirectAnsHistogram> histograms(histogram_count);
     if (!fixed_context_populations.empty()) {
       if (mode != codestream_internal::DirectAnsEntropyMode::kBalanced ||
           fixed_context_populations.size() != options.context_count) {
@@ -1439,8 +1443,8 @@ Status PrepareDirectAnsPartition(
       &EntropyWorkProfile::ans_histogram_build_nanoseconds);
 
     const ProfileClock::time_point clustering_begin = ProfileBegin(profile);
-    std::vector<DirectAnsHistogram> clustered;
-    std::vector<uint32_t> histogram_symbols;
+    Storage<DirectAnsHistogram> clustered;
+    Storage<uint32_t> histogram_symbols;
     Status status = FastClusterDirectAnsHistograms(
       histograms, &clustered, &histogram_symbols);
     if (status.ok() &&
@@ -1486,7 +1490,7 @@ Status PrepareDirectAnsPartition(
       }
     } else {
       const ProfileClock::time_point value_begin = ProfileBegin(profile);
-      std::vector<std::vector<uint32_t>> cluster_values(clustered.size());
+      Storage<Storage<uint32_t>> cluster_values(clustered.size());
       for (const EntropyTokenStreamView section : section_tokens) {
         for (size_t index = 0; index < section.size(); ++index) {
           const EntropyToken token = section[index];
@@ -1514,6 +1518,8 @@ Status PrepareDirectAnsPartition(
     }
     *prepared = std::move(candidate_prepared);
     *partition = std::move(candidate_partition);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -1550,7 +1556,7 @@ Status AdvanceAnsState(
     codestream_internal::DivideAnsStateByReciprocal(
       *state, histogram.reciprocal_frequencies[encoded.symbol]);
   const uint32_t remainder = *state - quotient * frequency;
-  const std::vector<uint16_t>& reverse =
+  const Storage<uint16_t>& reverse =
     histogram.reverse_maps[encoded.symbol];
   if (remainder >= reverse.size() || reverse[remainder] >= kAnsTableSize) {
     return Status::InvalidArgument("ANS reverse-map entry is invalid");
@@ -1711,7 +1717,7 @@ Status MeasureAnsCodes(
       .model_bits = model_bits[candidate],
       .token_bits = 0,
       .cluster_count = codes[candidate]->ans_histograms.size(),
-      .section_token_bits = std::vector<uint64_t>(section_tokens.size()),
+      .section_token_bits = Storage<uint64_t>(section_tokens.size()),
     };
   }
   if (codes.size() == 1) {
@@ -1795,70 +1801,81 @@ Status codestream_internal::CountAnsTokenStreamBits(
 
 Status codestream_internal::AggregateEntropyValues(
   std::span<uint32_t> values,
-  std::vector<WeightedValue>* aggregated) {
+  Storage<WeightedValue>* aggregated) {
+  try {
 
-  if (aggregated == nullptr) {
-    return Status::InvalidArgument("Aggregated entropy values are null");
-  }
-  // Large coefficient-token arrays contain many duplicate small values. Avoid
-  // sorting every occurrence, while retaining the cheaper sort for inputs too
-  // small to amortize zeroing and scanning the dense table.
-  constexpr size_t kDenseValueCount = 1 << 16;
-  constexpr size_t kMinimumCountingInput = 1 << 12;
-  std::vector<WeightedValue> candidate;
-  if (values.size() < kMinimumCountingInput) {
-    std::ranges::sort(values);
-    candidate.reserve(std::min(values.size(), kMaximumAnsAlphabetSize));
+    if (aggregated == nullptr) {
+      return Status::InvalidArgument("Aggregated entropy values are null");
+    }
+    // Large coefficient-token arrays contain many duplicate small values. Avoid
+    // sorting every occurrence, while retaining the cheaper sort for inputs too
+    // small to amortize zeroing and scanning the dense table.
+    constexpr size_t kDenseValueCount = 1 << 16;
+    constexpr size_t kMinimumCountingInput = 1 << 12;
+    Storage<WeightedValue> candidate;
+    if (values.size() < kMinimumCountingInput) {
+      std::ranges::sort(values);
+      candidate.reserve(std::min(values.size(), kMaximumAnsAlphabetSize));
+      for (uint32_t value : values) {
+        if (candidate.empty() || candidate.back().value != value) {
+          candidate.push_back({value, 1});
+        } else if (candidate.back().count ==
+                   std::numeric_limits<uint64_t>::max()) {
+          return Status::InvalidArgument("Entropy value count overflow");
+        } else {
+          ++candidate.back().count;
+        }
+      }
+      *aggregated = std::move(candidate);
+      return Status::Ok();
+    }
+
+    Storage<uint64_t> dense_counts(kDenseValueCount);
+    // Keep uncommon larger raw values sparse so the dense allocation remains
+    // bounded for arbitrary uint32_t inputs.
+    std::unordered_map<uint32_t, uint64_t, std::hash<uint32_t>,
+      std::equal_to<uint32_t>, resource_budget_internal::ManagedAllocator<
+        std::pair<const uint32_t, uint64_t>,
+        resource_budget_internal::ResourceClass::kSerializer>> sparse_counts;
     for (uint32_t value : values) {
-      if (candidate.empty() || candidate.back().value != value) {
-        candidate.push_back({value, 1});
-      } else if (candidate.back().count ==
-                 std::numeric_limits<uint64_t>::max()) {
+      uint64_t& count = value < dense_counts.size()
+        ? dense_counts[value]
+        : sparse_counts[value];
+      if (count == std::numeric_limits<uint64_t>::max()) {
         return Status::InvalidArgument("Entropy value count overflow");
-      } else {
-        ++candidate.back().count;
+      }
+      ++count;
+    }
+
+    candidate.reserve(
+      std::min(values.size(), dense_counts.size() + sparse_counts.size()));
+    for (size_t value = 0; value < dense_counts.size(); ++value) {
+      if (dense_counts[value] != 0) {
+        candidate.push_back(
+          {static_cast<uint32_t>(value), dense_counts[value]});
       }
     }
+    const size_t dense_value_count = candidate.size();
+    for (const auto& [value, count] : sparse_counts) {
+      candidate.push_back({value, count});
+    }
+    std::ranges::sort(
+      candidate.begin() + dense_value_count, candidate.end(), {},
+      &WeightedValue::value);
     *aggregated = std::move(candidate);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
   }
-
-  std::vector<uint64_t> dense_counts(kDenseValueCount);
-  // Keep uncommon larger raw values sparse so the dense allocation remains
-  // bounded for arbitrary uint32_t inputs.
-  std::unordered_map<uint32_t, uint64_t> sparse_counts;
-  for (uint32_t value : values) {
-    uint64_t& count = value < dense_counts.size()
-      ? dense_counts[value]
-      : sparse_counts[value];
-    if (count == std::numeric_limits<uint64_t>::max()) {
-      return Status::InvalidArgument("Entropy value count overflow");
-    }
-    ++count;
-  }
-
-  candidate.reserve(
-    std::min(values.size(), dense_counts.size() + sparse_counts.size()));
-  for (size_t value = 0; value < dense_counts.size(); ++value) {
-    if (dense_counts[value] != 0) {
-      candidate.push_back(
-        {static_cast<uint32_t>(value), dense_counts[value]});
-    }
-  }
-  const size_t dense_value_count = candidate.size();
-  for (const auto& [value, count] : sparse_counts) {
-    candidate.push_back({value, count});
-  }
-  std::ranges::sort(
-    candidate.begin() + dense_value_count, candidate.end(), {},
-    &WeightedValue::value);
-  *aggregated = std::move(candidate);
-  return Status::Ok();
 }
 
 Status codestream_internal::AggregateEntropyValues(
-  std::vector<uint32_t> values,
-  std::vector<WeightedValue>* aggregated) {
+  Storage<uint32_t> values,
+  Storage<WeightedValue>* aggregated) {
 
   return AggregateEntropyValues(std::span<uint32_t>(values), aggregated);
 }
@@ -2003,7 +2020,7 @@ Status codestream_internal::WriteAnsTokenStream(
     return Status::InvalidArgument("ANS token-stream output is null");
   }
   try {
-    std::vector<ReverseBitChunk> reverse_chunks;
+    Storage<ReverseBitChunk> reverse_chunks;
     reverse_chunks.reserve(2 * tokens.size());
     const auto append_chunk = [&reverse_chunks](
                                 uint32_t bits, uint8_t bit_count) {
@@ -2028,6 +2045,8 @@ Status codestream_internal::WriteAnsTokenStream(
       }
     }
     return writer->Append(temporary);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -2164,7 +2183,7 @@ Status OptimizeAnsEntropyCodeImpl(
           ? prepared->fixed_ans_clusters.size()
           : prepared->values.size())
       : prefix_partition.prefix_codes.size();
-    std::vector<std::vector<uint32_t>> values;
+    Storage<Storage<uint32_t>> values;
     if (prepared != nullptr) {
       const ProfileClock::time_point validation_begin =
         ProfileBegin(profile);
@@ -2218,9 +2237,9 @@ Status OptimizeAnsEntropyCodeImpl(
       double estimated_bits = 0.0;
       std::array<ConfigWidthStats, kLogAlphaSizeCount> width_stats;
     };
-    std::vector<std::vector<ConfigCandidate>> options(cluster_count);
+    Storage<Storage<ConfigCandidate>> options(cluster_count);
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
-      std::vector<codestream_internal::WeightedValue> weighted_values;
+      Storage<codestream_internal::WeightedValue> weighted_values;
       std::span<const codestream_internal::WeightedValue> cluster_values;
       if (prepared_fixed) {
         // The balanced partition already retained the fixed-config symbol
@@ -2356,7 +2375,7 @@ Status OptimizeAnsEntropyCodeImpl(
     }
     const uint64_t minimum_section_bits =
       uint64_t{32} * section_tokens.size();
-    std::vector<codestream_internal::PreparedAnsEntropyCandidate>
+    Storage<codestream_internal::PreparedAnsEntropyCandidate>
       width_candidates;
     width_candidates.reserve(kLogAlphaSizeCount);
     const ProfileClock::time_point model_build_begin =
@@ -2554,6 +2573,8 @@ Status OptimizeAnsEntropyCodeImpl(
       *cost = std::move(best_cost);
     }
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -2699,70 +2720,78 @@ Status codestream_internal::FinalizePreparedAnsEntropyCode(
   std::span<const uint64_t> section_candidate_bits,
   EntropyCode* code,
   EntropyCodeCost* cost) {
+  try {
 
-  if (prepared == nullptr || code == nullptr || prepared->candidates.empty() ||
-      prepared->candidates.size() > kAnsAlphabetWidthCount) {
-    return Status::InvalidArgument("Prepared ANS finalization is invalid");
-  }
-  const size_t candidate_count = prepared->candidates.size();
-  if (prepared->section_count >
-        std::numeric_limits<size_t>::max() / candidate_count ||
-      section_candidate_bits.size() !=
-        prepared->section_count * candidate_count) {
-    return Status::InvalidArgument(
-      "Prepared ANS section measurement is incomplete");
-  }
-  const size_t section_count = prepared->section_count;
-
-  EntropyCodeCost best_cost;
-  uint64_t best_total = std::numeric_limits<uint64_t>::max();
-  size_t best_candidate = std::numeric_limits<size_t>::max();
-  for (size_t candidate_index = 0; candidate_index < candidate_count;
-       ++candidate_index) {
-    const PreparedAnsEntropyCandidate& candidate =
-      prepared->candidates[candidate_index];
-    if (!candidate.survives) {
-      continue;
+    if (prepared == nullptr || code == nullptr || prepared->candidates.empty() ||
+        prepared->candidates.size() > kAnsAlphabetWidthCount) {
+      return Status::InvalidArgument("Prepared ANS finalization is invalid");
     }
-    EntropyCodeCost candidate_cost;
-    candidate_cost.model_bits = candidate.model_bits;
-    candidate_cost.cluster_count = candidate.code.ans_histograms.size();
-    candidate_cost.section_token_bits.reserve(section_count);
-    for (size_t section_index = 0; section_index < section_count;
-         ++section_index) {
-      const uint64_t section_bits =
-        section_candidate_bits[section_index * candidate_count +
-          candidate_index];
-      if (candidate_cost.token_bits >
-          std::numeric_limits<uint64_t>::max() - section_bits) {
-        return Status::InvalidArgument("ANS token cost overflow");
+    const size_t candidate_count = prepared->candidates.size();
+    if (prepared->section_count >
+          std::numeric_limits<size_t>::max() / candidate_count ||
+        section_candidate_bits.size() !=
+          prepared->section_count * candidate_count) {
+      return Status::InvalidArgument(
+        "Prepared ANS section measurement is incomplete");
+    }
+    const size_t section_count = prepared->section_count;
+
+    EntropyCodeCost best_cost;
+    uint64_t best_total = std::numeric_limits<uint64_t>::max();
+    size_t best_candidate = std::numeric_limits<size_t>::max();
+    for (size_t candidate_index = 0; candidate_index < candidate_count;
+         ++candidate_index) {
+      const PreparedAnsEntropyCandidate& candidate =
+        prepared->candidates[candidate_index];
+      if (!candidate.survives) {
+        continue;
       }
-      candidate_cost.token_bits += section_bits;
-      candidate_cost.section_token_bits.push_back(section_bits);
+      EntropyCodeCost candidate_cost;
+      candidate_cost.model_bits = candidate.model_bits;
+      candidate_cost.cluster_count = candidate.code.ans_histograms.size();
+      candidate_cost.section_token_bits.reserve(section_count);
+      for (size_t section_index = 0; section_index < section_count;
+           ++section_index) {
+        const uint64_t section_bits =
+          section_candidate_bits[section_index * candidate_count +
+            candidate_index];
+        if (candidate_cost.token_bits >
+            std::numeric_limits<uint64_t>::max() - section_bits) {
+          return Status::InvalidArgument("ANS token cost overflow");
+        }
+        candidate_cost.token_bits += section_bits;
+        candidate_cost.section_token_bits.push_back(section_bits);
+      }
+      const uint64_t candidate_total = candidate.model_bits >
+          std::numeric_limits<uint64_t>::max() - candidate_cost.token_bits
+        ? std::numeric_limits<uint64_t>::max()
+        : candidate.model_bits + candidate_cost.token_bits;
+      if (candidate_total < best_total ||
+          (candidate_total == best_total && candidate_index < best_candidate)) {
+        best_total = candidate_total;
+        best_candidate = candidate_index;
+        best_cost = std::move(candidate_cost);
+      }
     }
-    const uint64_t candidate_total = candidate.model_bits >
-        std::numeric_limits<uint64_t>::max() - candidate_cost.token_bits
-      ? std::numeric_limits<uint64_t>::max()
-      : candidate.model_bits + candidate_cost.token_bits;
-    if (candidate_total < best_total ||
-        (candidate_total == best_total && candidate_index < best_candidate)) {
-      best_total = candidate_total;
-      best_candidate = candidate_index;
-      best_cost = std::move(candidate_cost);
+    if (best_total == std::numeric_limits<uint64_t>::max() ||
+        best_candidate >= candidate_count) {
+      return Status::InvalidArgument("No valid ANS alphabet size");
     }
+    EntropyCode selected =
+      std::move(prepared->candidates[best_candidate].code);
+    *prepared = {};
+    *code = std::move(selected);
+    if (cost != nullptr) {
+      *cost = std::move(best_cost);
+    }
+    return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
   }
-  if (best_total == std::numeric_limits<uint64_t>::max() ||
-      best_candidate >= candidate_count) {
-    return Status::InvalidArgument("No valid ANS alphabet size");
-  }
-  EntropyCode selected =
-    std::move(prepared->candidates[best_candidate].code);
-  *prepared = {};
-  *code = std::move(selected);
-  if (cost != nullptr) {
-    *cost = std::move(best_cost);
-  }
-  return Status::Ok();
 }
 
 Status OptimizeAnsEntropyCode(
@@ -2892,13 +2921,15 @@ Status OptimizeAnsEntropyCode(
   EntropyCodeCost* cost,
   codestream_internal::EntropyWorkProfile* profile) {
   try {
-    std::vector<EntropyTokenStreamView> views;
+    Storage<EntropyTokenStreamView> views;
     views.reserve(section_tokens.size());
     for (const std::vector<EntropyToken>& section : section_tokens) {
       views.push_back(EntropyTokenStreamView::Interleaved(section));
     }
     return OptimizeAnsEntropyCode(
       views, prefix_partition, code, cost, profile);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {

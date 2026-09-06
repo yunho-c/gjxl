@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "core/ac_strategy.h"
 #include "core/status.h"
 
@@ -26,8 +28,8 @@ inline constexpr size_t kSimpleZeroDensityContextCount = 458;
 /// stored in decoder order (Y, X, B), with coefficient-order family and raw
 /// quantization segments nested inside each row.
 struct SimpleBlockContextMap {
-  std::vector<uint32_t> qf_thresholds;
-  std::vector<uint8_t> context_map;
+  codestream_internal::Storage<uint32_t> qf_thresholds;
+  codestream_internal::Storage<uint8_t> context_map;
   uint8_t num_contexts = 0;
 
   [[nodiscard]] size_t ac_context_count() const noexcept {
@@ -65,7 +67,16 @@ struct SimpleBlockContextMap {
 /// first; additional maps are emitted only for sufficiently large frames.
 [[nodiscard]] Status ComputeSimpleBlockContextMapCandidates(
   const VarDctEncoderFrame& frame,
-  std::vector<SimpleBlockContextMap>* maps);
+  codestream_internal::Storage<SimpleBlockContextMap>* maps);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status ComputeSimpleBlockContextMapCandidates(
+  const VarDctEncoderFrame& frame,
+  std::vector<SimpleBlockContextMap, Allocator>* maps) {
+  return codestream_internal::LegacyStorageOutput(
+    maps, [&](auto* storage) { return ComputeSimpleBlockContextMapCandidates(frame, storage); });
+}
 
 /// Derives the one block-context map used by balanced and high-density
 /// serialization. Small frames retain the compact map; eligible frames use
@@ -77,10 +88,23 @@ struct SimpleBlockContextMap {
 
 namespace codestream_internal {
 
+/// Compares with the immutable format default without constructing an owner.
+[[nodiscard]] bool IsJxlDefaultBlockContextMap(
+  const SimpleBlockContextMap& map) noexcept;
+
 /// Serializer-only entry points for an already validated frame.
 [[nodiscard]] Status ComputeSimpleBlockContextMapCandidatesForEncoder(
   const vardct_frame_internal::VarDctFrameView& frame,
-  std::vector<SimpleBlockContextMap>* maps);
+  codestream_internal::Storage<SimpleBlockContextMap>* maps);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status ComputeSimpleBlockContextMapCandidatesForEncoder(
+  const vardct_frame_internal::VarDctFrameView& frame,
+  std::vector<SimpleBlockContextMap, Allocator>* maps) {
+  return codestream_internal::LegacyStorageOutput(
+    maps, [&](auto* storage) { return ComputeSimpleBlockContextMapCandidatesForEncoder(frame, storage); });
+}
 
 [[nodiscard]] Status ComputeSimpleBlockContextMapForEncoder(
   const vardct_frame_internal::VarDctFrameView& frame,

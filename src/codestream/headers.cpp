@@ -13,7 +13,6 @@
 #include <new>
 #include <span>
 #include <stdexcept>
-#include <vector>
 
 #include "codestream/block_context_map.h"
 #include "codestream/simple_ac_context.h"
@@ -209,9 +208,7 @@ Status WriteBlockContextMap(
   }
   // The JPEG XL default map has a dedicated one-bit representation. The
   // simple four-context map and adaptive maps use the general representation.
-  static const SimpleBlockContextMap kJxlDefault =
-    JxlDefaultSimpleBlockContextMap();
-  if (block_context_map == kJxlDefault) {
+  if (codestream_internal::IsJxlDefaultBlockContextMap(block_context_map)) {
     return writer->WriteBits(1, 1);
   }
   if (Status write = writer->WriteBits(1, 0); !write.ok()) {
@@ -252,10 +249,9 @@ Status WriteContextTree(size_t dc_group_count, BitWriter* writer) {
     return Status::InvalidArgument("DC-group count cannot be encoded");
   }
 
-  std::vector<EntropyToken> tokens(
-    std::begin(kContextTreeTokens), std::end(kContextTreeTokens));
+  auto tokens = std::to_array(kContextTreeTokens);
   tokens[1].value = PackSigned(static_cast<int32_t>(1 + dc_group_count));
-  const std::array<std::vector<EntropyToken>, 1> streams = {tokens};
+  const std::array streams = {EntropyTokenStreamView::Interleaved(tokens)};
   EntropyCode code;
   if (Status status = OptimizeEntropyCode(
         streams, {.context_count = kContextTreeContextCount}, &code);
@@ -408,6 +404,8 @@ Status WriteSimpleDcGlobal(
       return status;
     }
     return AppendTemporary(writer, temporary);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure("DC-global allocation failed");
   } catch (const std::length_error&) {

@@ -656,7 +656,8 @@ bool CheckManagedSerializerStorage() {
         return false;
     }
     const auto fallback_peak = DefaultResourceBudget().snapshot().peak_backing_bytes;
-    // This is a writer-attachment test, not a complete serializer memory plan.
+    // This exercises writers, token/model storage, and joined worker context.
+    // The generous test envelope is not a complete serializer memory plan.
     ResourceBudget budget(64 * 1024 * 1024);
     ResourceReservation job;
     if (!budget.Reserve(64 * 1024 * 1024, &job).ok()) return false;

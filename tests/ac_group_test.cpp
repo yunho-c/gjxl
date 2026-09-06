@@ -278,8 +278,8 @@ bool CheckCoefficientOrderPermutationTokens() {
   }
   gjxl::SimpleCoefficientOrders orders;
   orders.used_order_mask = 1;
-  for (std::vector<uint32_t>& channel : orders.orders[0]) {
-    channel = natural;
+  for (auto& channel : orders.orders[0]) {
+    channel.assign(natural.begin(), natural.end());
     std::swap(channel[1], channel[2]);
   }
   const std::array<gjxl::EntropyToken, 6> expected = {{
@@ -366,8 +366,8 @@ bool CheckCustomOrderStrategyFamilies() {
 
     gjxl::SimpleCoefficientOrders orders;
     orders.used_order_mask = uint16_t{1} << fixture.family;
-    for (std::vector<uint32_t>& channel : orders.orders[fixture.family]) {
-      channel = natural;
+    for (auto& channel : orders.orders[fixture.family]) {
+      channel.assign(natural.begin(), natural.end());
       std::swap(channel[llf], channel[llf + 1]);
     }
     std::array<std::vector<int32_t>, 3> storage;
@@ -696,7 +696,7 @@ bool CheckFrameGroups(size_t width, size_t expected_group_count) {
         || groups[index].block_x != group.block_x
         || groups[index].block_y != group.block_y
         || groups[index].block_extent != group.block_extent
-        || groups[index].tokens != isolated) {
+        || !std::ranges::equal(groups[index].tokens, isolated)) {
       std::cerr << "Frame and isolated AC-group tokenization differ\n";
       return false;
     }

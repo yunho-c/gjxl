@@ -11,6 +11,8 @@
 #include <span>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "codestream/entropy.h"
 #include "core/ac_strategy.h"
 #include "core/geometry.h"
@@ -33,7 +35,7 @@ struct SimpleAcGroupTokenStream {
   size_t block_x = 0;
   size_t block_y = 0;
   Extent2D block_extent;
-  std::vector<EntropyToken> tokens;
+  codestream_internal::Storage<EntropyToken> tokens;
 
   friend bool operator==(const SimpleAcGroupTokenStream&,
                          const SimpleAcGroupTokenStream&) = default;
@@ -80,9 +82,9 @@ struct SimpleAcGroupTokenTemplate {
   size_t block_x = 0;
   size_t block_y = 0;
   Extent2D block_extent;
-  std::vector<SimpleAcBlockContextKey> block_context_keys;
-  std::vector<uint32_t> values;
-  std::vector<SimpleAcTokenTemplate> tokens;
+  codestream_internal::Storage<SimpleAcBlockContextKey> block_context_keys;
+  codestream_internal::Storage<uint32_t> values;
+  codestream_internal::Storage<SimpleAcTokenTemplate> tokens;
 
   friend bool operator==(const SimpleAcGroupTokenTemplate&,
                          const SimpleAcGroupTokenTemplate&) = default;
@@ -90,58 +92,148 @@ struct SimpleAcGroupTokenTemplate {
 
 /// Computes the default JPEG XL scan order as physical coefficient offsets.
 [[nodiscard]] Status ComputeSimpleNaturalCoefficientOrder(
-  AcStrategyType strategy, std::vector<uint32_t>* order);
+  AcStrategyType strategy, codestream_internal::Storage<uint32_t>* order);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status ComputeSimpleNaturalCoefficientOrder(
+  AcStrategyType strategy,
+  std::vector<uint32_t, Allocator>* order) {
+  return codestream_internal::LegacyStorageOutput(
+    order, [&](auto* storage) { return ComputeSimpleNaturalCoefficientOrder(strategy, storage); });
+}
 
 /// Tokenizes one isolated AC group without entropy coding.
 [[nodiscard]] Status TokenizeSimpleAcGroup(const VarDctAcGroupView& group,
                                            const AcStrategyGrid& strategies,
-                                           std::vector<EntropyToken>* tokens);
+                                           codestream_internal::Storage<EntropyToken>* tokens);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status TokenizeSimpleAcGroup(
+  const VarDctAcGroupView& group,
+  const AcStrategyGrid& strategies,
+  std::vector<EntropyToken, Allocator>* tokens) {
+  return codestream_internal::LegacyStorageOutput(
+    tokens, [&](auto* storage) { return TokenizeSimpleAcGroup(group, strategies, storage); });
+}
 
 /// Tokenizes one isolated AC group with the supplied custom order families.
 [[nodiscard]] Status TokenizeSimpleAcGroup(
   const VarDctAcGroupView& group,
   const AcStrategyGrid& strategies,
   const SimpleCoefficientOrders& orders,
-  std::vector<EntropyToken>* tokens);
+  codestream_internal::Storage<EntropyToken>* tokens);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status TokenizeSimpleAcGroup(
+  const VarDctAcGroupView& group,
+  const AcStrategyGrid& strategies,
+  const SimpleCoefficientOrders& orders,
+  std::vector<EntropyToken, Allocator>* tokens) {
+  return codestream_internal::LegacyStorageOutput(
+    tokens, [&](auto* storage) { return TokenizeSimpleAcGroup(group, strategies, orders, storage); });
+}
 
 /// Tokenizes every retained AC group in row-major order, atomically.
 [[nodiscard]] Status TokenizeSimpleAcGroups(
   const VarDctEncoderFrame& frame,
-  std::vector<SimpleAcGroupTokenStream>* groups);
+  codestream_internal::Storage<SimpleAcGroupTokenStream>* groups);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status TokenizeSimpleAcGroups(
+  const VarDctEncoderFrame& frame,
+  std::vector<SimpleAcGroupTokenStream, Allocator>* groups) {
+  return codestream_internal::LegacyStorageOutput(
+    groups, [&](auto* storage) { return TokenizeSimpleAcGroups(frame, storage); });
+}
 
 /// Tokenizes every retained AC group with the supplied custom orders.
 [[nodiscard]] Status TokenizeSimpleAcGroups(
   const VarDctEncoderFrame& frame,
   const SimpleCoefficientOrders& orders,
-  std::vector<SimpleAcGroupTokenStream>* groups);
+  codestream_internal::Storage<SimpleAcGroupTokenStream>* groups);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status TokenizeSimpleAcGroups(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  std::vector<SimpleAcGroupTokenStream, Allocator>* groups) {
+  return codestream_internal::LegacyStorageOutput(
+    groups, [&](auto* storage) { return TokenizeSimpleAcGroups(frame, orders, storage); });
+}
 
 /// Tokenizes every retained AC group with custom orders and block contexts.
 [[nodiscard]] Status TokenizeSimpleAcGroups(
   const VarDctEncoderFrame& frame,
   const SimpleCoefficientOrders& orders,
   const SimpleBlockContextMap& block_context_map,
-  std::vector<SimpleAcGroupTokenStream>* groups);
+  codestream_internal::Storage<SimpleAcGroupTokenStream>* groups);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status TokenizeSimpleAcGroups(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  const SimpleBlockContextMap& block_context_map,
+  std::vector<SimpleAcGroupTokenStream, Allocator>* groups) {
+  return codestream_internal::LegacyStorageOutput(
+    groups, [&](auto* storage) { return TokenizeSimpleAcGroups(frame, orders, block_context_map, storage); });
+}
 
 /// Builds every retained AC group once for one coefficient-order selection.
 /// The resulting values and local contexts can be reused by all block maps.
 [[nodiscard]] Status BuildSimpleAcGroupTokenTemplates(
   const VarDctEncoderFrame& frame,
   const SimpleCoefficientOrders& orders,
-  std::vector<SimpleAcGroupTokenTemplate>* groups);
+  codestream_internal::Storage<SimpleAcGroupTokenTemplate>* groups);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status BuildSimpleAcGroupTokenTemplates(
+  const VarDctEncoderFrame& frame,
+  const SimpleCoefficientOrders& orders,
+  std::vector<SimpleAcGroupTokenTemplate, Allocator>* groups) {
+  return codestream_internal::LegacyStorageOutput(
+    groups, [&](auto* storage) { return BuildSimpleAcGroupTokenTemplates(frame, orders, storage); });
+}
 
 /// Resolves one order template into the exact entropy-token streams for a
 /// selected block-context map. The output remains unchanged on failure.
 [[nodiscard]] Status MaterializeSimpleAcGroupTokenStreams(
   std::span<const SimpleAcGroupTokenTemplate> templates,
   const SimpleBlockContextMap& block_context_map,
-  std::vector<SimpleAcGroupTokenStream>* groups);
+  codestream_internal::Storage<SimpleAcGroupTokenStream>* groups);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status MaterializeSimpleAcGroupTokenStreams(
+  std::span<const SimpleAcGroupTokenTemplate> templates,
+  const SimpleBlockContextMap& block_context_map,
+  std::vector<SimpleAcGroupTokenStream, Allocator>* groups) {
+  return codestream_internal::LegacyStorageOutput(
+    groups, [&](auto* storage) { return MaterializeSimpleAcGroupTokenStreams(templates, block_context_map, storage); });
+}
 
 /// Resolves only the candidate-specific contexts. Each output vector has the
 /// same length and indexing as its template's shared values array.
 [[nodiscard]] Status MaterializeSimpleAcGroupContexts(
   std::span<const SimpleAcGroupTokenTemplate> templates,
   const SimpleBlockContextMap& block_context_map,
-  std::vector<std::vector<uint16_t>>* contexts);
+  codestream_internal::Storage<codestream_internal::Storage<uint16_t>>* contexts);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status MaterializeSimpleAcGroupContexts(
+  std::span<const SimpleAcGroupTokenTemplate> templates,
+  const SimpleBlockContextMap& block_context_map,
+  std::vector<std::vector<uint16_t>, Allocator>* contexts) {
+  return codestream_internal::LegacyNestedStorageOutput(
+    contexts, [&](auto* storage) { return MaterializeSimpleAcGroupContexts(templates, block_context_map, storage); });
+}
 
 namespace codestream_internal {
 
@@ -149,7 +241,17 @@ namespace codestream_internal {
 [[nodiscard]] Status BuildSimpleAcGroupTokenTemplatesForEncoder(
   const vardct_frame_internal::VarDctFrameView& frame,
   const SimpleCoefficientOrders& orders,
-  std::vector<SimpleAcGroupTokenTemplate>* groups);
+  codestream_internal::Storage<SimpleAcGroupTokenTemplate>* groups);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status BuildSimpleAcGroupTokenTemplatesForEncoder(
+  const vardct_frame_internal::VarDctFrameView& frame,
+  const SimpleCoefficientOrders& orders,
+  std::vector<SimpleAcGroupTokenTemplate, Allocator>* groups) {
+  return codestream_internal::LegacyStorageOutput(
+    groups, [&](auto* storage) { return BuildSimpleAcGroupTokenTemplatesForEncoder(frame, orders, storage); });
+}
 
 struct SimpleAcStrategyAnchor {
   size_t x = 0;
@@ -159,7 +261,7 @@ struct SimpleAcStrategyAnchor {
 };
 
 struct SimpleAcNaturalOrders {
-  std::array<std::vector<uint32_t>, kAcStrategyCount> orders;
+  std::array<codestream_internal::Storage<uint32_t>, kAcStrategyCount> orders;
 };
 
 struct SimpleAcSymbolPopulation {
@@ -180,10 +282,10 @@ struct SimpleAcContextPopulation {
 /// populations. Population entries are compact and reference contiguous
 /// sparse symbol/count runs.
 struct SimpleAcGroupTokenData {
-  std::vector<uint32_t> values;
-  std::vector<uint16_t> contexts;
-  std::vector<SimpleAcContextPopulation> context_populations;
-  std::vector<SimpleAcSymbolPopulation> symbol_populations;
+  codestream_internal::Storage<uint32_t> values;
+  codestream_internal::Storage<uint16_t> contexts;
+  codestream_internal::Storage<SimpleAcContextPopulation> context_populations;
+  codestream_internal::Storage<SimpleAcSymbolPopulation> symbol_populations;
 };
 
 struct SimpleAcPopulationAccumulator {
@@ -196,10 +298,10 @@ struct SimpleAcPopulationAccumulator {
 
 /// Reused by one serializer worker across independent AC groups.
 struct SimpleAcTokenizationScratch {
-  std::vector<SimpleAcStrategyAnchor> anchors;
-  std::array<std::vector<uint8_t>, 3> nonzero_maps;
-  std::vector<uint16_t> population_slots;
-  std::vector<SimpleAcPopulationAccumulator> populations;
+  codestream_internal::Storage<SimpleAcStrategyAnchor> anchors;
+  std::array<codestream_internal::Storage<uint8_t>, 3> nonzero_maps;
+  codestream_internal::Storage<uint16_t> population_slots;
+  codestream_internal::Storage<SimpleAcPopulationAccumulator> populations;
 };
 
 [[nodiscard]] Status PrepareSimpleAcNaturalOrders(
@@ -229,7 +331,17 @@ struct SimpleAcTokenizationScratch {
 [[nodiscard]] Status MaterializeSimpleAcGroupContextsForEncoder(
   const SimpleAcGroupTokenTemplate& token_template,
   const SimpleBlockContextMap& block_context_map,
-  std::vector<uint16_t>* contexts);
+  codestream_internal::Storage<uint16_t>* contexts);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status MaterializeSimpleAcGroupContextsForEncoder(
+  const SimpleAcGroupTokenTemplate& token_template,
+  const SimpleBlockContextMap& block_context_map,
+  std::vector<uint16_t, Allocator>* contexts) {
+  return codestream_internal::LegacyStorageOutput(
+    contexts, [&](auto* storage) { return MaterializeSimpleAcGroupContextsForEncoder(token_template, block_context_map, storage); });
+}
 
 }  // namespace codestream_internal
 

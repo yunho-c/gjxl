@@ -28,6 +28,7 @@
 #include "core/thread_budget.h"
 
 namespace gjxl {
+using codestream_internal::Storage;
 using vardct_frame_internal::VarDctFrameView;
 namespace {
 
@@ -39,7 +40,7 @@ constexpr size_t kMaximumCoefficientOrderWorkers = 8;
 constexpr size_t kMinimumParallelCoefficientCount = 256 * 256;
 
 using ZeroCounts = std::array<
-  std::array<std::vector<uint64_t>, 3>,
+  std::array<Storage<uint64_t>, 3>,
   codestream_internal::kSimpleCoefficientOrderCount>;
 
 Status AllocationFailure() {
@@ -91,9 +92,9 @@ Status RunParallelCoefficientGroups(
     return Status::Ok();
   }
 
-  std::vector<Status> statuses(count);
+  Storage<Status> statuses(count);
   std::atomic<size_t> next_index{0};
-  std::vector<std::thread> workers;
+  Storage<std::thread> workers;
   const size_t spawned_worker_count = cpu_thread_count == 0
     ? participant_count
     : participant_count - 1;
@@ -107,6 +108,8 @@ Status RunParallelCoefficientGroups(
       if (index >= count) break;
       try {
         statuses[index] = function(index, worker_index);
+      } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+        statuses[index] = error.status();
       } catch (const std::bad_alloc&) {
         statuses[index] = AllocationFailure();
       } catch (const std::length_error&) {
@@ -125,6 +128,10 @@ Status RunParallelCoefficientGroups(
     next_index.store(count, std::memory_order_relaxed);
     for (std::thread& worker : workers) worker.join();
     return Status::Internal("Unable to start coefficient-order workers");
+  } catch (const std::bad_alloc&) {
+    next_index.store(count, std::memory_order_relaxed);
+    for (std::thread& worker : workers) worker.join();
+    return AllocationFailure();
   }
   if (cpu_thread_count != 0) run_worker(spawned_worker_count);
   for (std::thread& worker : workers) worker.join();
@@ -196,7 +203,7 @@ Status ValidateOrder(
   if (order.size() != size) {
     return Status::InvalidArgument("Coefficient-order size is invalid");
   }
-  std::vector<uint8_t> seen(size, 0);
+  Storage<uint8_t> seen(size, 0);
   for (uint32_t coefficient : order) {
     if (coefficient >= size || seen[coefficient] != 0) {
       return Status::InvalidArgument(
@@ -207,7 +214,7 @@ Status ValidateOrder(
 
   const size_t llf_size =
     info.covered_blocks.width * info.covered_blocks.height;
-  std::vector<uint32_t> natural;
+  Storage<uint32_t> natural;
   Status status =
     ComputeSimpleNaturalCoefficientOrder(info.type, &natural);
   if (!status.ok()) {
@@ -264,7 +271,7 @@ Status CountGroupZeros(
         }
         *present_mask |= family_bit;
         for (size_t channel = 0; channel < 3; ++channel) {
-          std::vector<uint64_t>& counts = (*zero_counts)[family][channel];
+          Storage<uint64_t>& counts = (*zero_counts)[family][channel];
           if (counts.empty()) {
             counts.assign(info->coefficient_count(), 0);
           } else if (counts.size() != info->coefficient_count()) {
@@ -280,7 +287,7 @@ Status CountGroupZeros(
           !sample_dct8 || sample_decisions[sample_index++] != 0;
         if (selected) {
           for (size_t channel = 0; channel < 3; ++channel) {
-            std::vector<uint64_t>& counts = (*zero_counts)[family][channel];
+            Storage<uint64_t>& counts = (*zero_counts)[family][channel];
             const std::span<const int32_t> coefficients =
               group.coefficients[channel].subspan(
                 source_offset, info->coefficient_count());
@@ -344,11 +351,11 @@ Status PresentOrderMask(
 
 Status ComputeLehmerCode(
   std::span<const uint32_t> permutation,
-  std::vector<uint32_t>* code) {
+  Storage<uint32_t>* code) {
 
   const size_t size = permutation.size();
-  std::vector<uint32_t> tree(size + 1, 0);
-  std::vector<uint32_t> candidate(size, 0);
+  Storage<uint32_t> tree(size + 1, 0);
+  Storage<uint32_t> candidate(size, 0);
   for (size_t index = 0; index < size; ++index) {
     const uint32_t value = permutation[index];
     if (value >= size) {
@@ -391,23 +398,23 @@ Status CoefficientOrderContext(uint32_t value, uint32_t* context) {
 Status TokenizePermutation(
   std::span<const uint32_t> order,
   const AcStrategyInfo& info,
-  std::vector<EntropyToken>* tokens) {
+  Storage<EntropyToken>* tokens) {
 
-  std::vector<uint32_t> natural;
+  Storage<uint32_t> natural;
   Status status =
     ComputeSimpleNaturalCoefficientOrder(info.type, &natural);
   if (!status.ok()) {
     return status;
   }
-  std::vector<uint32_t> natural_lut(natural.size());
+  Storage<uint32_t> natural_lut(natural.size());
   for (size_t index = 0; index < natural.size(); ++index) {
     natural_lut[natural[index]] = static_cast<uint32_t>(index);
   }
-  std::vector<uint32_t> permutation(order.size());
+  Storage<uint32_t> permutation(order.size());
   for (size_t index = 0; index < order.size(); ++index) {
     permutation[index] = natural_lut[order[index]];
   }
-  std::vector<uint32_t> lehmer;
+  Storage<uint32_t> lehmer;
   status = ComputeLehmerCode(permutation, &lehmer);
   if (!status.ok()) {
     return status;
@@ -481,7 +488,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
       return Status::Ok();
     }
 
-    std::vector<VarDctAcGroupView> groups(frame.ac_group_count());
+    Storage<VarDctAcGroupView> groups(frame.ac_group_count());
     size_t coefficient_count = 0;
     for (size_t group_index = 0; group_index < groups.size(); ++group_index) {
       Status status = frame.GetAcGroup(group_index, &groups[group_index]);
@@ -508,7 +515,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
       behavior == VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled &&
       present_mask == 1;
 
-    std::vector<std::vector<uint8_t>> sample_decisions;
+    Storage<Storage<uint8_t>> sample_decisions;
     if (sample_dct8) {
       sample_decisions.resize(groups.size());
       std::array<uint64_t, 2> random_state = {
@@ -522,7 +529,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
           return Status::InvalidArgument(
             "Coefficient-order sample count overflows");
         }
-        std::vector<uint8_t>& decisions = sample_decisions[group_index];
+        Storage<uint8_t>& decisions = sample_decisions[group_index];
         decisions.resize(anchor_count);
         for (uint8_t& selected : decisions) {
           selected = static_cast<uint8_t>(
@@ -567,12 +574,12 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
         present_mask |= worker_masks[worker];
         for (size_t family = 0; family < zero_counts.size(); ++family) {
           for (size_t channel = 0; channel < 3; ++channel) {
-            const std::vector<uint64_t>& source =
+            const Storage<uint64_t>& source =
               worker_counts[worker][family][channel];
             if (source.empty()) {
               continue;
             }
-            std::vector<uint64_t>& destination =
+            Storage<uint64_t>& destination =
               zero_counts[family][channel];
             if (destination.empty()) {
               destination.assign(source.size(), 0);
@@ -607,7 +614,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
         return Status::Internal(
           "Present coefficient-order family has no representative");
       }
-      std::vector<uint32_t> natural;
+      Storage<uint32_t> natural;
       status = ComputeSimpleNaturalCoefficientOrder(
         RepresentativeStrategy(family), &natural);
       if (!status.ok()) {
@@ -617,22 +624,30 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
         info->covered_blocks.width * info->covered_blocks.height;
       const float inverse_sqrt_size =
         1.0f / std::sqrt(static_cast<float>(natural.size()));
+      // Ties preserve natural scan order, not numeric coefficient order. Share
+      // its inverse across channels instead of stable_sort's hidden buffers.
+      Storage<uint32_t> natural_rank(natural.size());
+      for (size_t index = 0; index < natural.size(); ++index) {
+        natural_rank[natural[index]] = static_cast<uint32_t>(index);
+      }
       bool nondefault = false;
       for (size_t channel = 0; channel < 3; ++channel) {
-        const std::vector<uint64_t>& counts = zero_counts[family][channel];
+        const Storage<uint64_t>& counts = zero_counts[family][channel];
         if (counts.size() != natural.size()) {
           return Status::Internal(
             "Coefficient-order zero counts are incomplete");
         }
-        std::vector<uint32_t> custom = natural;
-        std::stable_sort(
+        Storage<uint32_t> custom = natural;
+        std::sort(
           custom.begin() + static_cast<ptrdiff_t>(llf_size), custom.end(),
           [&](uint32_t left, uint32_t right) {
             const uint64_t left_count = static_cast<uint64_t>(
               static_cast<float>(counts[left]) * inverse_sqrt_size + 0.1f);
             const uint64_t right_count = static_cast<uint64_t>(
               static_cast<float>(counts[right]) * inverse_sqrt_size + 0.1f);
-            return left_count < right_count;
+            return left_count != right_count
+              ? left_count < right_count
+              : natural_rank[left] < natural_rank[right];
           });
         nondefault |= custom != natural;
         candidate.orders[family][channel] = std::move(custom);
@@ -640,7 +655,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
       if (nondefault) {
         candidate.used_order_mask |= family_bit;
       } else {
-        for (std::vector<uint32_t>& channel : candidate.orders[family]) {
+        for (Storage<uint32_t>& channel : candidate.orders[family]) {
           channel.clear();
         }
       }
@@ -650,6 +665,8 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
       return status;
     }
     *orders = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -671,7 +688,7 @@ Status ValidateSimpleCoefficientOrders(const SimpleCoefficientOrders& orders) {
         (orders.used_order_mask & (uint16_t{1} << family)) != 0;
       const AcStrategyInfo* info = RepresentativeInfo(family);
       for (size_t channel = 0; channel < 3; ++channel) {
-        const std::vector<uint32_t>& order = orders.orders[family][channel];
+        const Storage<uint32_t>& order = orders.orders[family][channel];
         if (!used) {
           if (!order.empty()) {
             return Status::InvalidArgument(
@@ -689,6 +706,8 @@ Status ValidateSimpleCoefficientOrders(const SimpleCoefficientOrders& orders) {
         }
       }
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -699,7 +718,7 @@ Status ValidateSimpleCoefficientOrders(const SimpleCoefficientOrders& orders) {
 
 Status TokenizeSimpleCoefficientOrders(
   const SimpleCoefficientOrders& orders,
-  std::vector<EntropyToken>* tokens) {
+  Storage<EntropyToken>* tokens) {
 
   if (tokens == nullptr) {
     return Status::InvalidArgument("Coefficient-order token output is null");
@@ -709,7 +728,7 @@ Status TokenizeSimpleCoefficientOrders(
     return status;
   }
   try {
-    std::vector<EntropyToken> candidate;
+    Storage<EntropyToken> candidate;
     for (size_t family = 0;
          family < codestream_internal::kSimpleCoefficientOrderCount;
          ++family) {
@@ -730,6 +749,8 @@ Status TokenizeSimpleCoefficientOrders(
       }
     }
     *tokens = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {

@@ -11,6 +11,8 @@
 #include <span>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "codestream/bit_writer.h"
 #include "core/status.h"
 
@@ -124,10 +126,10 @@ enum class EntropyCodingMode : uint8_t {
 
 /// One normalized 12-bit ANS population and its encoder lookup tables.
 struct AnsHistogram {
-  std::vector<uint16_t> frequencies;
-  std::vector<std::vector<uint16_t>> reverse_maps;
+  codestream_internal::Storage<uint16_t> frequencies;
+  codestream_internal::Storage<codestream_internal::Storage<uint16_t>> reverse_maps;
   /// Exact ceil(2^44 / frequency) encoder divisors; zero for absent symbols.
-  std::vector<uint64_t> reciprocal_frequencies;
+  codestream_internal::Storage<uint64_t> reciprocal_frequencies;
 
   /// Zero selects the flat representation; 1 through 12 encode shift + 1.
   /// Small one- and two-symbol populations ignore both representation fields.
@@ -140,11 +142,11 @@ struct AnsHistogram {
 struct EntropyCode {
   EntropyCodingMode mode = EntropyCodingMode::kPrefix;
   uint32_t context_count = 0;
-  std::vector<uint8_t> context_map;
-  std::vector<HybridUintConfig> uint_configs;
-  std::vector<PrefixCode> prefix_codes;
+  codestream_internal::Storage<uint8_t> context_map;
+  codestream_internal::Storage<HybridUintConfig> uint_configs;
+  codestream_internal::Storage<PrefixCode> prefix_codes;
   uint8_t ans_log_alpha_size = 0;
-  std::vector<AnsHistogram> ans_histograms;
+  codestream_internal::Storage<AnsHistogram> ans_histograms;
 
   friend bool operator==(const EntropyCode&, const EntropyCode&) = default;
 };
@@ -164,7 +166,7 @@ struct EntropyCodeCost {
   size_t cluster_count = 0;
   /// Exact token bits for each input section, in input order. Their sum is
   /// token_bits whenever a cost was requested from an optimizer.
-  std::vector<uint64_t> section_token_bits;
+  codestream_internal::Storage<uint64_t> section_token_bits;
 
   friend bool operator==(
     const EntropyCodeCost&,

@@ -325,8 +325,16 @@ bool CheckWorkflowAccountingAndFailure() {
       Usage(budget, ResourceClass::kAqScratch).idle_capacity_bytes != 0 &&
       Usage(budget, ResourceClass::kButteraugli).idle_capacity_bytes != 0 &&
       Usage(budget, ResourceClass::kUnclassified).backing_count == 0,
-      "Resident workflow left unclassified/live GPU backing after serialization"))
+      "Resident workflow left unclassified/live backing after serialization")) {
+    for (size_t i = 0; i < s.classes.size(); ++i) {
+      const auto& usage = s.classes[i];
+      std::cerr << "Resource class " << i << ": live=" << usage.live_capacity_bytes
+                << " idle=" << usage.idle_capacity_bytes
+                << " pending=" << usage.pending_capacity_bytes
+                << " backings=" << usage.backing_count << '\n';
+    }
     return false;
+  }
   if (!Ok(gpu->TrimPreparationCache()) || !Empty(budget) ||
       !Ok(ArmNextMetalAllocationFailureForTest(*gpu))) return false;
   std::vector<uint8_t> output{1, 2, 3};

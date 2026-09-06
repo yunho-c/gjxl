@@ -8,6 +8,8 @@
 #include <span>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "codestream/encoder.h"
 #include "codestream/entropy.h"
 #include "codestream/profile_internal.h"
@@ -62,7 +64,20 @@ struct CandidateSelectionKey {
   std::span<const uint64_t> common_section_bits,
   std::span<const uint64_t> ac_section_bits,
   size_t ac_group_count,
-  std::vector<size_t>* sizes);
+  codestream_internal::Storage<size_t>* sizes);
+
+/// Compatibility adapter for caller-owned section-size vectors.
+template <typename Allocator>
+[[nodiscard]] Status PhysicalSectionSizesFromBitCounts(
+  std::span<const uint64_t> common_section_bits,
+  std::span<const uint64_t> ac_section_bits,
+  size_t ac_group_count,
+  std::vector<size_t, Allocator>* sizes) {
+  return LegacyStorageOutput(sizes, [&](auto* storage) {
+    return PhysicalSectionSizesFromBitCounts(
+      common_section_bits, ac_section_bits, ac_group_count, storage);
+  });
+}
 
 struct VarDctCodestreamProfile {
   VarDctEntropyBehavior entropy_behavior =

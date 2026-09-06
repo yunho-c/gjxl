@@ -30,11 +30,25 @@ private:
 };
 
 namespace detail {
-inline thread_local bool fail_next_managed_host_backing = false;
+inline thread_local size_t managed_host_backings_before_failure =
+  std::numeric_limits<size_t>::max();
 }
 
 inline void ArmNextManagedHostAllocationFailureForTest() noexcept {
-  detail::fail_next_managed_host_backing = true;
+  detail::managed_host_backings_before_failure = 0;
+}
+
+inline void ArmManagedHostAllocationFailureAfterForTest(size_t count) noexcept {
+  detail::managed_host_backings_before_failure = count;
+}
+
+[[nodiscard]] inline bool ManagedHostAllocationFailurePendingForTest() noexcept {
+  return detail::managed_host_backings_before_failure !=
+    std::numeric_limits<size_t>::max();
+}
+
+inline void DisarmManagedHostAllocationFailureForTest() noexcept {
+  detail::managed_host_backings_before_failure = std::numeric_limits<size_t>::max();
 }
 
 /// Stateless allocation-time domain selection, with an allocation-owned ticket.
@@ -82,8 +96,13 @@ public:
       Status status = PrepareResourceAllocation(bytes, bytes, &allocation);
       if (!status.ok()) throw ManagedAllocationFailure(std::move(status));
     }
-    if (std::exchange(detail::fail_next_managed_host_backing, false))
-      throw std::bad_alloc();
+    if (ManagedHostAllocationFailurePendingForTest()) {
+      if (detail::managed_host_backings_before_failure == 0) {
+        DisarmManagedHostAllocationFailureForTest();
+        throw std::bad_alloc();
+      }
+      --detail::managed_host_backings_before_failure;
+    }
     auto* backing = static_cast<std::byte*>(::operator new(
       sizeof(Header) + bytes, std::align_val_t{kAlignment}));
     if (allocation.valid()) {

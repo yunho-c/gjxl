@@ -6,8 +6,9 @@ This is the implementation record for milestone 4 of
 [capacity-domain primitive](../src/core/resource_budget.h) now has
 [real Metal allocation attachments and all-pool trim](resident-metal-accounting.md).
 The [host attachment checkpoint](resident-host-accounting.md) adds writer/image-plane
-backing and joined-worker propagation; host coverage is still partial and
-whole-workflow admission is not implemented yet.
+backing and joined-worker propagation. The [serializer attachment](resident-serializer-accounting.md)
+adds qualified token/model/search-container backing with measured overhead; host
+coverage is still partial and whole-workflow admission is not implemented yet.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
 ## Source-backed ownership inventory
@@ -139,7 +140,7 @@ whole-workflow limits until its integration coverage is complete.
 | Intermediate AQ coefficients versus serializer layout | Keep distinct where reconstruction/AQ consumers require their current layout. The final-output destination optimization is already implemented; another layout change needs measured end-to-end benefit. |
 | Small copied completed-frame metadata | Intentionally retained: separates output from much larger evaluator lifetimes. Do not make metadata zero-copy by keeping the evaluator alive. |
 | Exact shared candidate calculations / further kernel fusion | Inventory against the integrated profile. No unqualified arithmetic reordering or candidate pruning. A documented measured rejection or reasoned deferral is valid; this row is not yet a completed audit. |
-| CPU token/model/writer overlap and storage growth | Inventory by balanced/high-density/exhaustive policy while adding allocation coverage. Preserve model search, tie rules, and exact output; resource pressure cannot silently reduce search. |
+| CPU token/model/writer overlap and storage growth | Serializer containers now have qualified allocation-owned backing tickets, with measured overhead. Fixed context-tree heap copies and a static owning default-map copy were removed. Policy-dependent simultaneous capacities and final candidate/result publication still need explicit planning. Preserve model search, tie rules, and exact output; resource pressure cannot silently reduce search. |
 
 ## Foundation validation and remaining gates
 
@@ -182,7 +183,7 @@ Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
 Milestone 4 still requires the remaining host allocation attachments and shared planners,
-CPU serializer coverage, public domain configuration/propagation, automatic cache eviction,
+CPU result-publication coverage, public domain configuration/propagation, automatic cache eviction,
 retry and batch-result integration, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited
 opportunities' final dispositions and measured gates. Milestone 6 still requires

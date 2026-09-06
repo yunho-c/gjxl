@@ -7,6 +7,8 @@
 #include <span>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "codestream/entropy.h"
 
 namespace gjxl::codestream_internal {
@@ -39,10 +41,10 @@ struct PreparedFixedAnsCluster {
 /// collecting and sorting every token a second time.
 struct PreparedEntropyClusters {
   uint32_t context_count = 0;
-  std::vector<uint8_t> context_map;
-  std::vector<std::vector<WeightedValue>> values;
+  codestream_internal::Storage<uint8_t> context_map;
+  codestream_internal::Storage<codestream_internal::Storage<WeightedValue>> values;
   HybridUintConfig fixed_uint_config = kDefaultHybridUintConfig;
-  std::vector<PreparedFixedAnsCluster> fixed_ans_clusters;
+  codestream_internal::Storage<PreparedFixedAnsCluster> fixed_ans_clusters;
 
   friend bool operator==(
     const PreparedEntropyClusters&,
@@ -53,12 +55,30 @@ struct PreparedEntropyClusters {
 /// large inputs count the bounded dense prefix and sort only sparse values.
 [[nodiscard]] Status AggregateEntropyValues(
   std::span<uint32_t> values,
-  std::vector<WeightedValue>* aggregated);
+  codestream_internal::Storage<WeightedValue>* aggregated);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status AggregateEntropyValues(
+  std::span<uint32_t> values,
+  std::vector<WeightedValue, Allocator>* aggregated) {
+  return codestream_internal::LegacyStorageOutput(
+    aggregated, [&](auto* storage) { return AggregateEntropyValues(values, storage); });
+}
 
 /// Owning convenience overload that releases the raw values after aggregation.
 [[nodiscard]] Status AggregateEntropyValues(
+  codestream_internal::Storage<uint32_t> values,
+  codestream_internal::Storage<WeightedValue>* aggregated);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status AggregateEntropyValues(
   std::vector<uint32_t> values,
-  std::vector<WeightedValue>* aggregated);
+  std::vector<WeightedValue, Allocator>* aggregated) {
+  return codestream_internal::LegacyStorageOutput(
+    aggregated, [&](auto* storage) { return AggregateEntropyValues(std::span<uint32_t>(values), storage); });
+}
 
 /// Builds the prefix model and retains its exact aggregated cluster values.
 /// All outputs remain unchanged on failure.

@@ -138,9 +138,11 @@ for reservation/allocation lifetimes and FIFO admission. The
 [Metal attachment checkpoint](resident-metal-accounting.md) adds real backing
 charges, domain-aware cache transitions, and all-pool trim with physical-memory
 and complete-call measurements. The [host attachment checkpoint](resident-host-accounting.md)
-adds writer/image-plane backing and joined CPU worker propagation. Token/model
-coverage and whole-workflow admission are still pending; these partial attachments
-do not satisfy the milestone.
+adds writer/image-plane backing and joined CPU worker propagation. The
+[serializer attachment](resident-serializer-accounting.md) extends this to owned
+token/model/candidate containers, with exact parity and measured overhead. Remaining host
+coverage, result publication and whole-workflow admission are still pending; these
+partial attachments do not satisfy the milestone.
 
 Deliverables:
 

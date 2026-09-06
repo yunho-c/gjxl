@@ -9,6 +9,8 @@
 #include <span>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "codestream/entropy_internal.h"
 
 namespace gjxl::codestream_internal {
@@ -45,7 +47,7 @@ struct PreparedAnsEntropyCandidate {
 
 /// ANS alphabet-width candidates whose exact ordered recurrence is deferred.
 struct PreparedAnsEntropyCode {
-  std::vector<PreparedAnsEntropyCandidate> candidates;
+  codestream_internal::Storage<PreparedAnsEntropyCandidate> candidates;
   size_t section_count = 0;
 };
 

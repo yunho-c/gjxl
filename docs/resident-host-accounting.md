@@ -7,6 +7,10 @@ propagation through the existing joined CPU workers. Its comparison parent is
 candidate codestreams, batch retention and complete-work admission are not covered
 merely by introducing an allocator.
 
+The subsequent [serializer attachment](resident-serializer-accounting.md) addresses
+token/model/search-container backing. The coverage and measurements below describe
+this earlier writer/image-plane checkpoint, not that later implementation.
+
 ## Allocation-owned tickets
 
 `ManagedAllocator<T>` selects a domain at allocation time, not at construction of

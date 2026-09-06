@@ -215,7 +215,7 @@ bool CheckDeterministicEntropyFixtures() {
   if (!gjxl::OptimizeEntropyCode(
         context_sections, {.context_count = 4}, &context_code,
         &context_cost).ok() ||
-      context_code.context_map != std::vector<uint8_t>({0, 1, 2, 3}) ||
+      !std::ranges::equal(context_code.context_map, std::array{0, 1, 2, 3}) ||
       !gjxl::WriteContextMap(context_code, &map_writer).ok() ||
       !gjxl::WriteEntropyCode(context_code, &entropy_writer).ok() ||
       context_cost.model_bits != entropy_writer.bits_written() ||
@@ -466,8 +466,9 @@ bool CheckCountedPrefixOptimization() {
   };
   const std::vector<gjxl::HybridUintConfig> expected_configs = {
     {0, 0, 0}, {4, 2, 0}, {4, 1, 2}, {4, 2, 0}};
-  if (code.context_map != std::vector<uint8_t>({0, 1, 2, 3}) ||
-      code.uint_configs != expected_configs || model.bits_written() != 144 ||
+  if (!std::ranges::equal(code.context_map, std::array{0, 1, 2, 3}) ||
+      !std::ranges::equal(code.uint_configs, expected_configs) ||
+      model.bits_written() != 144 ||
       payload.bits_written() != 166464 ||
       hash(model.padded_bytes()) != 5815996224897546142ull ||
       hash(payload.padded_bytes()) != 6576315826512740406ull) {
@@ -549,7 +550,7 @@ bool CheckFullWidthMultiSectionOptimization() {
   gjxl::BitWriter empty_writer;
   if (!gjxl::OptimizeEntropyCode(
         empty_sections, {.context_count = 3}, &empty_code).ok() ||
-      empty_code.context_map != std::vector<uint8_t>({0, 0, 0}) ||
+      !std::ranges::equal(empty_code.context_map, std::array{0, 0, 0}) ||
       empty_code.prefix_codes.size() != 1 ||
       !gjxl::WriteEntropyCode(empty_code, &empty_writer).ok()) {
     std::cerr << "Empty entropy streams are not deterministic\n";
@@ -571,7 +572,7 @@ bool CheckInitialContextPreclustering() {
           .initial_histogram_count = 2,
         },
         &code).ok() ||
-      code.context_map != std::vector<uint8_t>({0, 0, 1, 1}) ||
+      !std::ranges::equal(code.context_map, std::array{0, 0, 1, 1}) ||
       code.prefix_codes.size() != 2) {
     std::cerr << "Initial entropy context map was not composed correctly\n";
     return false;
@@ -739,7 +740,7 @@ bool CheckAnsRoundTripContract() {
   gjxl::EntropyCode malformed = ans;
   bool damaged = false;
   for (gjxl::AnsHistogram& histogram : malformed.ans_histograms) {
-    for (std::vector<uint16_t>& reverse : histogram.reverse_maps) {
+    for (auto& reverse : histogram.reverse_maps) {
       if (!reverse.empty()) {
         reverse[0] = gjxl::kAnsTableSize;
         damaged = true;
@@ -802,14 +803,14 @@ bool CheckAnsAdaptiveModelSelection() {
         skewed_sections, {.context_count = 1}, &skewed_prefix).ok() ||
       !gjxl::OptimizeAnsEntropyCode(
         skewed_sections, skewed_prefix, &skewed_ans).ok() ||
-      skewed_ans.uint_configs !=
-        std::vector<gjxl::HybridUintConfig>{{3, 1, 0}} ||
+      !std::ranges::equal(skewed_ans.uint_configs,
+        std::array{gjxl::HybridUintConfig{3, 1, 0}}) ||
       skewed_ans.ans_log_alpha_size != 5 ||
       skewed_ans.ans_histograms.size() != 1 ||
       skewed_ans.ans_histograms[0].method != 1 ||
-      skewed_ans.ans_histograms[0].frequencies != std::vector<uint16_t>{
+      !std::ranges::equal(skewed_ans.ans_histograms[0].frequencies, std::array{
         2008, 1024, 512, 256, 128, 64, 32, 16, 16, 8, 16, 16,
-      }) {
+      })) {
     std::cerr << "ANS precision/config selection fixture failed\n";
     return false;
   }
@@ -827,8 +828,8 @@ bool CheckAnsAdaptiveModelSelection() {
         sparse_sections, {.context_count = 1}, &sparse_prefix).ok() ||
       !gjxl::OptimizeAnsEntropyCode(
         sparse_sections, sparse_prefix, &sparse_ans).ok() ||
-      sparse_ans.uint_configs !=
-        std::vector<gjxl::HybridUintConfig>{{0, 0, 0}} ||
+      !std::ranges::equal(sparse_ans.uint_configs,
+        std::array{gjxl::HybridUintConfig{0, 0, 0}}) ||
       sparse_ans.ans_log_alpha_size != 6 ||
       sparse_ans.ans_histograms.size() != 1 ||
       sparse_ans.ans_histograms[0].method != 3 ||
