@@ -47,6 +47,11 @@ public:
   PreparedAcStrategySearch();
   ~PreparedAcStrategySearch();
 
+  /// Releases cached host/device storage after a synchronous search has
+  /// finished. Borrowed inputs and returned grids are unaffected. The empty
+  /// owner can be used again; do not call concurrently with a search.
+  void Reset() noexcept;
+
   PreparedAcStrategySearch(const PreparedAcStrategySearch&) = delete;
   PreparedAcStrategySearch& operator=(const PreparedAcStrategySearch&) =
     delete;

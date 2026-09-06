@@ -365,6 +365,17 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu) {
     std::cerr << "Malformed optional host mask was not rejected atomically\n";
     return false;
   }
+  prepared.Reset();
+  prepared.Reset();  // Empty/reset owners remain reusable; output is independent.
+  if (!first.complete() || !GridsEqual(second, omitted) ||
+      !gjxl::FindAcStrategyGridGpuResident(
+        gpu, {}, fixture.QuantField(), {}, color_map, resident,
+        {.butteraugli_target = 0.9f}, &omitted, nullptr, &prepared).ok() ||
+      !GridsEqual(second, omitted) ||
+      gpu.stats().successful_allocations <= before_rejection.successful_allocations) {
+    std::cerr << "Reset AC owner lost output or could not prepare again\n";
+    return false;
+  }
   return true;
 }
 

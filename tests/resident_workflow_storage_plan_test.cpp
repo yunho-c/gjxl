@@ -11,6 +11,7 @@
 #include "codestream/rate_control_internal.h"
 #include "codestream/resident_workflow_storage_plan.h"
 #include "codestream/workflow_internal.h"
+#include "codestream/workflow_lifetime_test.h"
 #include "core/image_buffer.h"
 #include "gpu/metal/metal_backend.h"
 
@@ -75,7 +76,10 @@ bool CheckPlans() {
             !Check(pending && p.maximum_attempts == 1 &&
                        p.score_count == iterations + size_t(iterations == 0 ||
                                                             bool(flags & 2)) &&
-                       p.working.peak_bytes >=
+                       p.working.peak_bytes ==
+                           std::max(p.search_phase.peak_bytes,
+                                    p.completion_phase.peak_bytes) &&
+                       p.working.peak_bytes <
                            p.device_bytes + p.frontend.peak_bytes +
                                p.serializer.working.peak_bytes +
                                p.diagnostics.peak_bytes &&
@@ -247,6 +251,85 @@ bool Trim(GpuBackend &gpu) {
   return Ok(gpu.TrimPreparationCache()) && Ok(TrimVarDctPreparationCache());
 }
 
+struct LifetimeTrace {
+  ResourceBudget &budget;
+  struct Entry {
+    bool completed = false;
+    bool may_retry = false;
+    ResourceBudgetSnapshot snapshot;
+  };
+  std::array<Entry, 64> entries;
+  size_t count = 0;
+
+  static void Observe(bool completed, bool may_retry, void *context) noexcept {
+    auto &trace = *static_cast<LifetimeTrace *>(context);
+    if (trace.count < trace.entries.size())
+      trace.entries[trace.count] = {completed, may_retry,
+                                    trace.budget.snapshot()};
+    ++trace.count;
+  }
+
+  bool CheckBoundary(const ResidentWorkflowStoragePlan &plan,
+                     size_t attempts) const {
+    if (!Check(count == attempts && count <= entries.size(),
+               "Missing serializer lifetime boundary"))
+      return false;
+    for (size_t i = 0; i < count; ++i) {
+      const auto &entry = entries[i];
+      const auto live = [&](ResourceClass c) {
+        return entry.snapshot.classes[static_cast<size_t>(c)]
+            .live_capacity_bytes;
+      };
+      if (!Check(entry.completed &&
+                     entry.may_retry == (i + 1 < plan.maximum_attempts) &&
+                     live(ResourceClass::kCompletedFrame) > 0,
+                 "Completed output or retry lifetime decision is incorrect"))
+        return false;
+      if (entry.may_retry) {
+        if (!Check(live(ResourceClass::kAcSearch) > 0 &&
+                       live(ResourceClass::kInput) > 0 &&
+                       live(ResourceClass::kAqScratch) >
+                           plan.score_count * sizeof(double),
+                   "Retry lost reusable preparation"))
+          return false;
+      } else {
+        if (!Check(live(ResourceClass::kAcSearch) == 0 &&
+                       live(ResourceClass::kInput) == 0 &&
+                       live(ResourceClass::kPreparation) == 0 &&
+                       live(ResourceClass::kButteraugli) == 0 &&
+                       live(ResourceClass::kAqScratch) <=
+                           2 * plan.score_count * sizeof(double),
+                   "Final completed attempt retained frontend backing"))
+          return false;
+        // AQ/input/metric buffers may now be idle but remain charged until
+        // eviction/trim. AC has no idle pool and must be truly released.
+        if (!Check(
+                entry.snapshot
+                        .classes[static_cast<size_t>(ResourceClass::kAcSearch)]
+                        .idle_capacity_bytes == 0,
+                "Released AC search moved to an unplanned idle pool"))
+          return false;
+      }
+    }
+    return true;
+  }
+};
+
+class ScopedLifetimeTrace {
+public:
+  explicit ScopedLifetimeTrace(LifetimeTrace &trace)
+      : previous_(SetWorkflowLifetimeObserverForTest(
+            {&LifetimeTrace::Observe, &trace})) {}
+  ~ScopedLifetimeTrace() {
+    (void)SetWorkflowLifetimeObserverForTest(previous_);
+  }
+  ScopedLifetimeTrace(const ScopedLifetimeTrace &) = delete;
+  ScopedLifetimeTrace &operator=(const ScopedLifetimeTrace &) = delete;
+
+private:
+  WorkflowLifetimeObserverForTest previous_;
+};
+
 bool RunCase(GpuBackend &gpu, ConstImage3FView image,
              const ResidentWorkflowStorageOptions &o) {
   ResidentWorkflowStoragePlan plan;
@@ -278,6 +361,8 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
   Result measured;
   for (size_t pass = 0; pass < 2; ++pass) {
     ResourceContextScope context({&job, ResourceClass::kPreparation});
+    LifetimeTrace trace{budget, {}};
+    ScopedLifetimeTrace observe(trace);
     const Status status = Encode(gpu, image, o, &measured);
     if (!Ok(status)) {
       std::cerr << "Shape " << image.width() << 'x' << image.height()
@@ -286,6 +371,8 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
                 << budget.snapshot().peak_backing_bytes << '\n';
       return false;
     }
+    if (!trace.CheckBoundary(plan, measured.summary.encode_attempt_count))
+      return false;
     if (!Check(measured.bytes == oracle.bytes &&
                    measured.summary == oracle.summary &&
                    budget.snapshot().peak_backing_bytes <=
@@ -386,6 +473,24 @@ bool CheckRuntime(GpuBackend &gpu) {
     if (!RunCase(gpu, image.const_view(), o))
       return false;
     ++cases;
+  }
+  // One-attempt searches must release before their only serializer call. An
+  // early tolerance success cannot be predicted until serialization, so with
+  // spare attempts its preparation remains reusable through that boundary.
+  for (size_t maximum_attempts : {size_t{1}, size_t{4}}) {
+    for (bool early_success : {false, true}) {
+      ResidentWorkflowStorageOptions o;
+      o.encoding.backend = VarDctBackendPreference::kMetal;
+      o.encoding.cpu_thread_count = 1;
+      o.encoding.rate_control_mode = VarDctRateControlMode::kTargetBytes;
+      o.encoding.target_bytes = early_success ? 1000000 : 1;
+      o.encoding.target_size_tolerance = early_success ? 1.0 : 0.0;
+      o.encoding.target_size_maximum_attempts = maximum_attempts;
+      o.collect_timing = true;
+      if (!RunCase(gpu, image.const_view(), o))
+        return false;
+      ++cases;
+    }
   }
   {
     auto large = MakeImage({3839, 2159});

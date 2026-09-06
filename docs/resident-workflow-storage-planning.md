@@ -6,11 +6,18 @@ retained codestream output. It also covers forced-Metal target-byte and
 target-bpp searches. It is an internal estimator and qualification checkpoint,
 **not public admission or completion of milestone 4**.
 
-The parent is `b67b45e`. Implementation is in
+The original checkpoint is `f33fe0b`, with parent `b67b45e`. Implementation is in
 [`resident_workflow_storage_plan.h`](../src/codestream/resident_workflow_storage_plan.h)
 and its companion source. Effort-to-AQ-iteration resolution is shared with the
 executing workflow; the policy itself is unchanged. Search-interval bounds use
 the actual private `SearchInterval` type beside the search implementation.
+
+The subsequent [last-use release checkpoint](resident-last-use.md) changes
+`working` from a conservative sum to the maximum of AC-search and
+completion/serialization envelopes. It retains AC in earlier retryable attempts
+and continues charging idle AQ/input/metric buffers. The qualification and
+numerical bounds below remain the original `f33fe0b` record; current measurements
+and phase semantics are in the linked checkpoint.
 
 ## Supported boundary
 
@@ -18,8 +25,8 @@ The plan starts with a fresh `PreparedWorkflow`, at fixed source/padded geometry
 and spans every attempt until outer publication. It includes resident input
 backing, AC search, prepared AQ/Butteraugli, orchestration fields, completed-frame
 backing, CPU serialization, selected-result retention and requested diagnostics.
-The prepared evaluator and AC scratch still survive into the CPU tail; this
-checkpoint accounts for that lifetime rather than claiming to shorten it.
+At the original checkpoint the prepared evaluator and AC scratch survived into
+the CPU tail; its bounds accounted for that lifetime without shortening it.
 
 Fully-resident and throughput Butteraugli policies, all current efforts, high
 density where supported, and both serializer compression modes are covered.
@@ -66,7 +73,7 @@ Host composition adds:
   upload temporary, and the complete serializer working envelope.
 - The fresh score history, optional attempt-timing array, and GPU diagnostics.
 
-`working` conservatively sums these phase peaks, including the serializer's own
+The original `working` conservatively sums these phase peaks, including the serializer's own
 output bound. `output` separately exposes codestream, score, timing and diagnostic
 backing before publication; it must not be added to `working` again. The
 `retained_bytes` fields are owner-capacity bounds, not a claim that all listed

@@ -81,6 +81,9 @@ struct GpuEncodingQuantizationPipelineOutput {
 
 /// Runs a Metal pipeline for codestream encoding without materializing
 /// diagnostic quant fields, block maps, or reconstructed RGB.
+/// Set retain_ac_search_storage=false only when no later search needs the
+/// cached capacity. The final search still reuses existing backing, then
+/// releases it after placement and before adaptive quantization.
 [[nodiscard]] Status RunPreparedGpuQuantizationPipelineForEncoding(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
@@ -90,7 +93,8 @@ struct GpuEncodingQuantizationPipelineOutput {
   GpuEncodingQuantizationPipelineOutput output,
   AcStrategyGpuSearchStats* stats = nullptr,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
-    prepared_aq = nullptr);
+    prepared_aq = nullptr,
+  bool retain_ac_search_storage = true);
 
 }  // namespace quantization_pipeline_internal
 

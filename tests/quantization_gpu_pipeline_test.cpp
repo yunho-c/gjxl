@@ -783,7 +783,7 @@ bool CheckDefaultUpdatePipelineParity() {
         .frame = &leased_fallback,
         .score_history = &leased_scores,
         .completed_frame = &encoding_lease,
-      }, nullptr, &encoding_aq);
+      }, nullptr, &encoding_aq, false);
   std::vector<uint8_t> leased_bytes;
   if (encoding_status.ok() && encoding_lease != nullptr) {
     // The public-workflow handoff must also survive releasing its reusable
@@ -796,6 +796,21 @@ bool CheckDefaultUpdatePipelineParity() {
       leased_fallback.valid() || leased_scores != resident.scores ||
       leased_bytes != resident_codestream) {
     std::cerr << "Encoding-only completed frame handoff failed: "
+              << encoding_status.message() << '\n';
+    return false;
+  }
+
+  // Last-use release only resets the AC owner. An explicit prepared API caller
+  // can run again, reacquiring AC capacity without changing its decisions.
+  encoding_status = gjxl::quantization_pipeline_internal::
+    RunPreparedGpuQuantizationPipelineForEncoding(
+      *gpu, original.ConstView(), encoding_prepared, options,
+      gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+      {.frame = &encoding_frame, .score_history = &encoding_scores},
+      nullptr, &encoding_aq);
+  if (!encoding_status.ok() || encoding_scores != resident.scores ||
+      !FramesEqual(encoding_frame, resident.frame)) {
+    std::cerr << "Prepared encoding could not resume after last-use release: "
               << encoding_status.message() << '\n';
     return false;
   }

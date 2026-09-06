@@ -242,6 +242,7 @@ struct Prepared {
 
 PreparedAcStrategySearch::PreparedAcStrategySearch() = default;
 PreparedAcStrategySearch::~PreparedAcStrategySearch() = default;
+void PreparedAcStrategySearch::Reset() noexcept { impl_.reset(); }
 
 static Status FindAcStrategyGridGpuImpl(
   GpuBackend& gpu,
@@ -467,7 +468,13 @@ static Status FindAcStrategyGridGpuImpl(
         "frontend.ac_strategy.prepare",
         gpu_profile_internal::GpuWallStageKind::kPreparation,
         preparation_begin);
-      if (!status.ok()) return status;
+      if (!status.ok()) {
+        // The submission is already committed. Drain it before a caller can
+        // reset/reuse prepared buffers or their borrowed inputs, including on
+        // a diagnostic allocation failure. Preserve the original typed error.
+        (void)submission->Wait();
+        return status;
+      }
     }
     const auto wait_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}

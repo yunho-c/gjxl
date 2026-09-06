@@ -13,8 +13,10 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -32,6 +34,7 @@
 #include "codestream/encoder_internal.h"
 #include "codestream/rate_control_internal.h"
 #include "codestream/workflow_internal.h"
+#include "codestream/workflow_lifetime_test.h"
 #include "core/frame_geometry.h"
 #include "core/image_buffer.h"
 #include "core/thread_budget.h"
@@ -46,6 +49,9 @@ namespace gjxl {
 using resource_budget_internal::ManagedVector;
 
 namespace {
+
+thread_local codestream_internal::WorkflowLifetimeObserverForTest
+  workflow_lifetime_observer;
 
 constexpr float kInitialProfileIntensityTarget = 255.0f;
 using WorkflowClock = std::chrono::steady_clock;
@@ -466,11 +472,23 @@ struct PreparedWorkflow {
   // Declared before its borrowers so it is destroyed after the resident
   // evaluator and AC-search state.
   std::unique_ptr<PreparedResidentInput> resident_input;
-  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
-    gpu_adaptive_quantization;
+  std::optional<adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization>
+    gpu_adaptive_quantization{std::in_place};
   GpuBackend* selected_gpu = nullptr;
   bool selected_metal = false;
   bool backend_preselected = false;
+
+  // Only after a completed output has detached all serializer consumers and
+  // no further attempt can run. Destroy borrowers before their input owners.
+  void ReleaseBeforeSerialization() noexcept {
+    static_assert(std::is_nothrow_move_assignable_v<
+      quantization_pipeline_internal::PreparedQuantizationPipeline>);
+    gpu_adaptive_quantization.reset();
+    quantization = {};
+    resident_input.reset();
+    opsin.reset();
+    compatibility_output.reset();
+  }
 };
 
 [[nodiscard]] Status EnsureCompatibilityOutput(
@@ -709,7 +727,12 @@ struct PreparedWorkflow {
   codestream_internal::OwnedEncodingSummary* summary,
   codestream_internal::VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
-  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile,
+  bool retain_preparation_for_retry) {
+
+  if (!prepared.gpu_adaptive_quantization.has_value()) {
+    return Status::FailedPrecondition("Encoding attempt uses released preparation");
+  }
 
   codestream_internal::VarDctEncodingProfile candidate_profile;
   gpu_profile_internal::GpuExecutionProfile candidate_gpu_profile;
@@ -830,14 +853,15 @@ struct PreparedWorkflow {
           RunPreparedGpuQuantizationPipelineForEncoding(
             *selected_gpu, prepared.original_linear_rgb(),
             prepared.quantization, pipeline_options, options.metal_aq_mode,
-            encoding_output, nullptr, &prepared.gpu_adaptive_quantization)
+            encoding_output, nullptr, &*prepared.gpu_adaptive_quantization,
+            retain_preparation_for_retry)
       : quantization_pipeline_internal::
           RunPreparedGpuQuantizationPipelineForEncodingProfiled(
             *selected_gpu, prepared.original_linear_rgb(),
             prepared.quantization,
             pipeline_options, options.metal_aq_mode, encoding_output,
-            &prepared.gpu_adaptive_quantization, gpu_profiling_mode,
-            &candidate_gpu_profile);
+            &*prepared.gpu_adaptive_quantization, gpu_profiling_mode,
+            &candidate_gpu_profile, retain_preparation_for_retry);
   } else {
     PipelineStorage* compatibility_output = nullptr;
     status = EnsureCompatibilityOutput(prepared, &compatibility_output);
@@ -857,9 +881,18 @@ struct PreparedWorkflow {
   if (!status.ok()) {
     return status;
   }
+  if (!retain_preparation_for_retry && encoding.completed_frame != nullptr) {
+    prepared.ReleaseBeforeSerialization();
+  }
   ProfileEnd(
     profile, pipeline_begin,
     &candidate_profile.quantization_pipeline_nanoseconds);
+
+  if (workflow_lifetime_observer.before_serialization != nullptr) {
+    workflow_lifetime_observer.before_serialization(
+      encoding.completed_frame != nullptr, retain_preparation_for_retry,
+      workflow_lifetime_observer.context);
+  }
 
   codestream_internal::CodestreamBuffer candidate;
   const WorkflowClock::time_point codestream_begin = ProfileBegin(profile);
@@ -973,6 +1006,12 @@ struct PreparedWorkflow {
 }
 
 }  // namespace
+
+codestream_internal::WorkflowLifetimeObserverForTest
+codestream_internal::SetWorkflowLifetimeObserverForTest(
+  WorkflowLifetimeObserverForTest observer) noexcept {
+  return std::exchange(workflow_lifetime_observer, observer);
+}
 
 Status codestream_internal::ComputeQuantizationMatrixScaleStats(
   ConstImage3FView opsin,
@@ -1414,6 +1453,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       const auto search_begin = timing == nullptr
         ? WorkflowClock::time_point{}
         : WorkflowClock::now();
+      size_t attempted_encodes = 0;
       status = codestream_internal::SearchTargetSize(
         {
           .target_bytes = effective_target_bytes,
@@ -1446,7 +1486,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
             supplied_backend_is_qualified, resolve_production_backend,
             attempt_codestream, attempt_summary,
             profile == nullptr ? nullptr : &attempt_profile,
-            gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
+            gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr,
+            ++attempted_encodes < options.target_size_maximum_attempts);
           if (profile != nullptr && attempt_status.ok()) {
             AccumulateEncodingProfile(attempt_profile, &local_profile);
           }
@@ -1569,7 +1610,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       supplied_backend_is_qualified, resolve_production_backend,
       &candidate, &candidate_summary,
       profile == nullptr ? nullptr : &attempt_profile,
-      gpu_profiling_mode, gpu_profiling ? &local_gpu_profile : nullptr);
+      gpu_profiling_mode, gpu_profiling ? &local_gpu_profile : nullptr, false);
     if (timing != nullptr) {
       const Status timing_status = attempt_timings.Append({
         .butteraugli_target =

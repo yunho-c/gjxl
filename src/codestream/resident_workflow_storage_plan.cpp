@@ -201,28 +201,34 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
             coding, true, search, &ac_host))
            .ok())
     return status;
-  HostStorageBound device;
-  for (size_t bytes :
-       {input.capacity_bytes, aq.persistent_bytes, aq.staging_bytes,
-        butter.capacity_bytes, completed.capacity_bytes, ac.device_bytes})
-    if (!device.Add({bytes, bytes}))
+  HostStorageBound common_device;
+  for (size_t bytes : {input.capacity_bytes, aq.persistent_bytes,
+                       aq.staging_bytes, butter.capacity_bytes})
+    if (!common_device.Add({bytes, bytes}))
       return Overflow();
-  p.device_bytes = device.peak_bytes;
+  HostStorageBound device_inventory = common_device;
+  if (!device_inventory.Add(
+          {completed.capacity_bytes, completed.capacity_bytes}) ||
+      !device_inventory.Add({ac.device_bytes, ac.device_bytes}))
+    return Overflow();
+  p.device_bytes = device_inventory.peak_bytes;
   frontend_storage_internal::ColorCorrelationStoragePlan cfl;
   status = frontend_storage_internal::ComputeColorCorrelationStoragePlan(
       coding, frontend_storage_internal::ColorCorrelationStorageMode::kCopy,
       &cfl);
   if (!status.ok())
     return status;
-  p.frontend = host.working;
+  HostStorageBound common_frontend = host.working;
   // Prepared sharpness, selected/provisional grids; initial/strategy fields
   // and adjusted policy input. Count both CfL generations over retry
   // replacement. AC merge separately bounds its new output and export
   // temporary.
-  if (!p.frontend.AddVector<uint8_t>(p.blocks, kFreshExact, 3) ||
-      !p.frontend.AddVector<float>(p.blocks, kFreshExact, 3) ||
-      !p.frontend.Add(cfl.working, search ? 2 : 1) ||
-      !p.frontend.Add(ac_host.working) ||
+  if (!common_frontend.AddVector<uint8_t>(p.blocks, kFreshExact, 3) ||
+      !common_frontend.AddVector<float>(p.blocks, kFreshExact, 3) ||
+      !common_frontend.Add(cfl.working, search ? 2 : 1))
+    return Overflow();
+  p.frontend = common_frontend;
+  if (!p.frontend.Add(ac_host.working) ||
       !p.frontend.Add(completed_host.working))
     return Overflow();
   AcSubmissionStoragePlan submission;
@@ -274,11 +280,28 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
   if (!p.output.Add(scores) || !p.output.Add(timing) ||
       !p.output.Add(profile_output))
     return Overflow();
-  p.working = device;
-  for (const auto part : {p.frontend, p.diagnostics, p.serializer.working,
-                          scores, timing, p.search_control, p.retained_best})
-    if (!p.working.Add(part))
+  HostStorageBound common = common_device;
+  for (const auto part : {common_frontend, p.diagnostics, scores, timing,
+                          p.search_control, p.retained_best})
+    if (!common.Add(part))
       return Overflow();
+  HostStorageBound ac_work = ac_host.working;
+  if (!ac_work.Add({ac.device_bytes, ac.device_bytes}) ||
+      (!o.collect_gpu_profile && !ac_work.Add(submission.working)))
+    return Overflow();
+  p.search_phase = common;
+  p.completion_phase = common;
+  if (!p.search_phase.Add(ac_work) ||
+      !p.completion_phase.Add(
+          {completed.capacity_bytes, completed.capacity_bytes}) ||
+      !p.completion_phase.Add(completed_host.working) ||
+      !p.completion_phase.Add(p.serializer.working) ||
+      (p.maximum_attempts > 1 && !p.completion_phase.Add(ac_work)))
+    return Overflow();
+  // AQ/input buffers may enter idle pools before serialization, so retain
+  // their charge in common. AC storage has no pool and really ends after the
+  // final placement; it does not overlap that attempt's completed frame/tail.
+  p.working = Either(p.search_phase, p.completion_phase);
   *out = p;
   return Status::Ok();
 }

@@ -23,6 +23,7 @@ struct ResidentWorkflowStoragePlan {
   size_t blocks = 0;
   size_t maximum_attempts = 0;
   size_t score_count = 0;
+  // Device owner inventory; AC and completed owners need not overlap.
   size_t device_bytes = 0;
   // Host preparation/evaluator/AC/policy and independent completed snapshot.
   HostStorageBound frontend;
@@ -35,6 +36,11 @@ struct ResidentWorkflowStoragePlan {
   // Returned bytes, summary scores and requested diagnostics before outer
   // publication. COMPLETE working already includes output, not an extra charge.
   HostStorageBound output;
+  // Complete phase envelopes including common preparation/diagnostics and
+  // retained search results. A one-attempt job releases AC before completion;
+  // multi-attempt searches can retain AC through earlier serializer calls.
+  HostStorageBound search_phase;
+  HostStorageBound completion_phase;
   HostStorageBound working;
   bool operator==(const ResidentWorkflowStoragePlan &) const = default;
 };
@@ -53,10 +59,10 @@ struct ResidentWorkflowStoragePlan {
 /// per-attempt reservation replacement is NOT supported. Existing cache rules
 /// discard incompatible/oversized capacity before reuse.
 ///
-/// Conservative sum of reviewed phase peaks, not expected usage or RSS. It
-/// does not reserve, initialize a backend, or replace request validation. CPU,
-/// exact-coefficient, maximum-error and maximum-throughput plans, caller input
-/// adapters, retained batch results and public-domain admission remain
+/// Conservative maximum of reviewed phase envelopes, not expected usage or RSS.
+/// It does not reserve, initialize a backend, or replace request validation.
+/// CPU, exact-coefficient, maximum-error and maximum-throughput plans, caller
+/// input adapters, retained batch results and public-domain admission remain
 /// separate. Successful planning allocates no backing and is O(1) in image
 /// size. Failure preserves output, including unsupported workflow shapes.
 [[nodiscard]] Status ComputeResidentWorkflowStoragePlan(

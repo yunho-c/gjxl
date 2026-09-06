@@ -245,6 +245,13 @@ Acceptance:
 The inventory from milestone 4 defines the opportunities. Individual #4A changes
 can proceed alongside its accounting implementation, after milestone 3.
 
+The [last-use release checkpoint](resident-last-use.md) implements source-aware
+AC release after final placement and prepared-evaluator/input release before the
+CPU tail of a final completed-frame attempt. Earlier size-search attempts retain
+reuse, and phase planning continues charging idle caches. Its qualification and
+measured disposition are recorded separately; the remaining audit and admission
+and scheduling milestones are not completed by these boundaries.
+
 Deliverables:
 
 - For each material temporary or repeated calculation, identify producer,
