@@ -1064,6 +1064,26 @@ and all 39 S68 binaries/libraries remain unchanged. No new release
 qualification or speedup is claimed, and no permission/firewall block
 occurred. Dense Malta response work remains an open optimization target.
 
+[S70](cuda-optimization-s1.md#reuse-neighboring-malta-response-inputs-s70)
+reuses shared inputs across two adjacent Malta output rows. Full responses
+interleave directions; LF keeps row-major arithmetic. Tiny grids and images
+under four rows retain the previous schedule. Sum trees, scaling, zero-tile
+semantics, launches, transfers and the 25-plane arena are unchanged. All
+twelve new release kernels match the timed prototypes instruction-for-
+instruction, with all 191 previous bodies unchanged.
+
+Qualification passes 73 CUDA / 50 CPU tests, five host ASan checks,
+2,944 guarded Malta cases against two oracles, tall-grid boundaries, eleven
+release GPU sanitizer checks, 261 exact maps/scores and 58 freshly decoded
+quality pairs. Two release traces reduce 4K Malta time 18.84% / 23.11%.
+Warm whole-encode paired medians improve 2.85% in the phase probe and 2.01%
+in the public benchmark. This is not universal: phase cold 1080p regresses
+3.94%, public cold Flower 1.98%, and the same-binary controls show substantial
+noise. All adverse results and thermal/power limits remain documented.
+No new firewall/permission block occurred and no system settings changed.
+LF Malta and convolution work remain open targets; the backend is not
+considered maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

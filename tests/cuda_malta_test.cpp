@@ -124,6 +124,16 @@ void Verify(uint32_t width, uint32_t height, bool lf, bool initialize,
         if (pattern == 8 && x % 64 == 63 && y % 64 == 63) d = 1.0f;
         if (pattern == 9 && x == width / 2 && y == height / 2)
           r = std::numeric_limits<float>::quiet_NaN();
+        // Isolate values across paired-row boundaries and tile halos. A
+        // nonzero or exceptional value may affect either row of a pair.
+        if (pattern == 12 && (x % 32 == 31 || x == width - 1) && y % 2 == 1)
+          d = 1.0f;
+        if (pattern >= 13 && (x % 32 == 0 || x == width - 1) &&
+            (y % 8 == 0 || y % 8 == 7)) {
+          d = pattern == 13 ? 1.0f
+              : pattern == 14 ? std::numeric_limits<float>::infinity()
+                              : std::numeric_limits<float>::quiet_NaN();
+        }
       }
       reference[kReferenceOffset + static_cast<size_t>(y) * rs + x] = r;
       distorted[kDistortedOffset + static_cast<size_t>(y) * ds + x] = d;
@@ -156,12 +166,18 @@ void Verify(uint32_t width, uint32_t height, bool lf, bool initialize,
                                     norm * 0.45f,
                                     norm};
   DeviceArray dr(reference), dd(distorted), dw(work);
-  DeviceArray expected_output(output), actual_output(output);
+  DeviceArray expected_output(output), prior_output(output), actual_output(output);
+  const unsigned int prior_height = tile_height == 0 ? 8 : tile_height;
+  const bool prior_flat = flat_grid || (height + prior_height - 1) / prior_height > 65535;
   // Keep the same storage across three stages to catch lost accumulation.
   for (unsigned stage = 0; stage < 3; ++stage) {
     CheckCuda(LaunchCudaButteraugliMaltaReference(
         dr.data + kReferenceOffset, dd.data + kDistortedOffset,
         dw.data + kWorkOffset, ws, expected_output.data + kOutputOffset, params,
+        nullptr));
+    CheckCuda(LaunchCudaButteraugliMaltaZeroAwareForTesting(
+        dr.data + kReferenceOffset, dd.data + kDistortedOffset,
+        prior_output.data + kOutputOffset, params, prior_height, prior_flat,
         nullptr));
     if (tile_height == 0) {
       CheckCuda(LaunchCudaButteraugliMalta(
@@ -170,7 +186,7 @@ void Verify(uint32_t width, uint32_t height, bool lf, bool initialize,
     } else {
       const auto launch = original_tiles
                               ? LaunchCudaButteraugliMaltaForTesting
-                              : LaunchCudaButteraugliMaltaZeroAwareForTesting;
+                              : LaunchCudaButteraugliMaltaRowPairForTesting;
       CheckCuda(launch(
           dr.data + kReferenceOffset, dd.data + kDistortedOffset,
           actual_output.data + kOutputOffset, params, tile_height, flat_grid,
@@ -178,13 +194,14 @@ void Verify(uint32_t width, uint32_t height, bool lf, bool initialize,
     }
     CheckCuda(cudaDeviceSynchronize());
     const auto expected = expected_output.Read();
+    const auto prior = prior_output.Read();
     const auto actual = actual_output.Read();
-    if (!Equal(actual, expected)) {
+    if (!Equal(actual, expected) || !Equal(actual, prior)) {
       std::cerr << "Mismatch " << width << 'x' << height << " lf=" << lf
                 << " init=" << initialize << " pattern=" << pattern
                 << " stage=" << stage << '\n';
       std::cerr << "tile_height=" << tile_height << " flat=" << flat_grid << '\n';
-      throw std::runtime_error("Bitwise Malta response mismatch");
+      throw std::runtime_error("Bitwise Malta response mismatch against separate or prior zero-aware oracle");
     }
     if (!Guards(actual, output, kOutputOffset, os, width, height) ||
         !Guards(dw.Read(), work, kWorkOffset, ws, width, height))
@@ -217,7 +234,7 @@ int main(int argc, char** argv) {
         for (bool flat : {false, true})
           for (bool lf : {false, true})
             for (bool initialize : {false, true})
-              for (unsigned pattern : {1u, 4u, 6u, 8u, 9u, 10u, 11u}) {
+              for (unsigned pattern : {1u, 4u, 6u, 8u, 9u, 10u, 11u, 12u, 13u, 14u, 15u}) {
                 Verify(65, 65, lf, initialize, pattern, false, tile_height, flat);
                 ++cases;
               }
@@ -252,20 +269,22 @@ int main(int argc, char** argv) {
       for (const auto& shape : kShapes)
         for (bool lf : {false, true})
           for (bool initialize : {false, true})
-            for (unsigned pattern = 0; pattern < 12; ++pattern) {
+            for (unsigned pattern = 0; pattern < 16; ++pattern) {
               Verify(shape[0], shape[1], lf, initialize, pattern, false);
               ++cases;
             }
       // Normal-policy row/tile boundaries, including both dispatch cutoffs.
-      constexpr std::array<std::array<uint32_t, 2>, 16> kPolicyShapes{{
+      constexpr std::array<std::array<uint32_t, 2>, 26> kPolicyShapes{{
           {2048, 23}, {2048, 24}, {2048, 25}, {2048, 47}, {2048, 48},
           {2048, 49}, {2048, 63}, {2048, 64}, {2048, 65},
           {32, 1016}, {32, 1017}, {1024, 1472}, {1024, 1473},
-          {1, 65535}, {1, 65536}, {1, 65537}}};
+          {1, 65535}, {1, 65536}, {1, 65537},
+          {4096, 1}, {4096, 2}, {4096, 3}, {4096, 4}, {4096, 5},
+          {32, 248}, {32, 249}, {992, 8}, {1024, 8}, {65, 65}}};
       for (const auto& shape : kPolicyShapes)
         for (bool lf : {false, true})
           for (bool initialize : {false, true})
-            for (unsigned pattern : {1u, 4u, 6u, 7u, 8u, 9u, 10u, 11u}) {
+            for (unsigned pattern : {1u, 4u, 6u, 7u, 8u, 9u, 10u, 11u, 12u, 13u, 14u, 15u}) {
               Verify(shape[0], shape[1], lf, initialize, pattern, false);
               ++cases;
             }
@@ -275,7 +294,7 @@ int main(int argc, char** argv) {
                                    std::array<uint32_t, 2>{65, 63}})
             for (bool lf : {false, true})
               for (bool initialize : {false, true})
-                for (unsigned pattern = 0; pattern < 12; ++pattern) {
+                for (unsigned pattern = 0; pattern < 16; ++pattern) {
                   Verify(shape[0], shape[1], lf, initialize, pattern, false,
                          tile_height, flat);
                   ++cases;

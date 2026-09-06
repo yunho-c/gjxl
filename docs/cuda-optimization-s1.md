@@ -12017,6 +12017,222 @@ machinery is not the leading option. The broader optimization goal remains
 open.
 
 
+## Reuse neighboring Malta response inputs (S70)
+
+S70 starts at S69 `cbeab54`, whose runtime is S68 `6b91212`, on the same
+RTX 3060 Laptop / CUDA 11.8 / MSVC 14.37 / `sm_86` configuration. S69 left
+dense directional response work as the next Malta target. S70 retains a
+two-row response schedule: adjacent outputs share overlapping shared-memory
+loads within the existing scaled tile. It does not relax arithmetic, change
+the resident contract, or alter CPU serialization.
+
+### Response reuse and geometry policy
+
+`MaltaResponsePair` interleaves each full-response direction across two
+adjacent output rows. LF instead calls the original response helper once
+per row, keeping register liveness lower. Every output preserves the
+original `Sum5`/`Sum7`/`Sum9` tree and directional `AddSquare` order. The
+original scaling, both divisions, signed-zero handling and
+`__syncthreads_or` shortcut remain. NaN/Inf do not qualify for a zero shortcut;
+zero responses still initialize or add to the destination.
+
+Blocks still contain 256 threads, use a 32-wide tile plus a four-pixel halo,
+and select heights 8/24/64 with the S65 policy. The group loop is rolled;
+the two output rows are unrolled. Invalid columns exit only after the
+collective. An unused final paired row stays inside the shared halo and
+never writes outside the image. Shared storage, launches and allocation
+layout are unchanged; the arena still has 25 physical planes.
+
+The original zero-aware schedule remains the production fallback when
+`height < 4` or `ceil(width/32) * ceil(height/8) < 32`. This conservative
+measured guard avoids tiny-grid and very-short-image setup costs without
+discarding gains at the 81/127-block examples that still use eight-row
+tiles. It is not a claim of an exact crossover for every GPU or input.
+Compile-time assertions and permanent tests cover both sides of the new
+31/32-tile and height-3/4 boundaries. The existing 2D/flat-grid policy and
+tall-image limits are retained.
+
+The experiment compared seven additions against production: direction-major
+pairs at row spacing 1/2; four rows at spacing 1/2; row-major pairs at
+spacing 1/2; and a separately named unchanged kernel. Full mode 1 and LF
+mode 6 are selected. All twelve unchanged-control bodies are instruction
+identical to production. The two standalone probes preserve 63 existing
+device bodies and add 84; each whole-encoder control preserves 191 and
+adds those same 84. Release keeps just twelve new specializations, for 203
+bodies, with all 191 previous bodies unchanged. Every release addition is
+instruction-identical to its tested/timed selected prototype.
+
+At height 64 with ordinary grids, the native static shared-load counts
+and register allocation are:
+
+| Response schedule | Full registers | LF registers | Full shared floats/output | LF shared floats/output |
+| --- | ---: | ---: | ---: | ---: |
+| Original | 39 | 36 | 61 | 49 |
+| Selected adjacent pair | 48 | 40 | 35 | 35 |
+| Direction-major adjacent four rows | 96 | 78 | 22 | 24 |
+
+These are complete-body static instruction counts divided by group outputs,
+not dynamically executed loads or DRAM traffic. All added bodies have zero
+stack/local storage. The occupancy API reports ordinary-grid resident-block
+limits of six to five for full responses and six to six for LF; this is
+theoretical occupancy, not a hardware-counter measurement. Flat height-24/64
+pairs use 56/47 registers and permit four/five blocks respectively. Four-row
+candidates reduce loads further but lose on large inputs: their independent
+six-stage 4K sums regress 15.74% (adjacent) and 17.93% (spacing two).
+
+### Prototype and release qualification
+
+The standalone probe passes 8,960 guarded fixtures / 26,880 three-stage
+comparisons, including forced tile/grid forms, exceptional values, sparse
+halos and signed accumulation. Four prototype sanitizer campaigns each pass
+672 fixtures / 2,016 comparisons with zero diagnostics. Racecheck takes
+214.8 seconds; this is instrumented validation, not performance timing.
+
+The replay uses the 36 retained S65 first full-resolution stage captures
+from 4K, 1080p, Flower, Keong, Ria and Bliznaca. These are identified older
+captures, not newly recorded S70 inputs or all iterations/subscales. Sixteen
+balanced forward/reverse orders cover eight modes in 4,608 exact-output
+windows, each timing a three-launch accumulation burst. Full mode 1 improves
+the two 4K full-response paired medians 25.75% / 23.73%, with 16/16 wins
+each. LF mode 6 improves the dense stages 4.30% / 4.41%; the zero stages
+are effectively neutral. The selected independent six-stage median sums
+improve 10.01% 4K, 11.93% 1080p, 13.57% Flower, 21.60% Keong, 16.43% Ria
+and 12.66% Bliznaca. These sums are not complete-encode measurements.
+
+Two synthetic geometry cohorts each pass 48 cases / 6,144 exact-output
+windows. A final boundary cohort adds 32 cases / 4,096 windows. They cover
+narrow/tall inputs, eight/24/64-row dispatch cutoffs, varying aspect ratios
+at 32/64 eight-row tiles, and heights 1/3/4/5/6/7/8/9. The final height-4/5/6/7
+full-response dense comparisons improve about 5-11%; LF is mostly neutral
+or favorable relative to the duplicate control. The 31/32-tile boundary
+remains noisy, consistent with a conservative guard, not a universal
+threshold. Generated packed scalar planes are not real encoder captures.
+Across all replay/geometry cohorts, 20,992 guarded timing windows and 1,148
+paired summaries are retained, including unfavorable results.
+
+The same-binary policy control passes both modes' 31 prepared fixtures,
+261 complete map/score comparisons with unchanged memory statistics, and
+92 encodes matching 46 retained S68 codestream hashes. That control gate
+does not claim new decoded-quality measurements.
+
+Release qualification is separate:
+
+- 73/73 CUDA tests pass in 125.82 seconds; 50/50 CPU tests in 17.90 seconds,
+  plus five host AddressSanitizer checks.
+- The permanent Malta test passes 2,944 guarded cases with three-stage reuse
+  against two oracles (17,664 stage comparisons). The retained tall suite
+  adds 32 cases at the old and current 64-row 2D/flat boundaries, including
+  height 4,194,241. The scoped sanitizer fixture has 264 cases.
+- All four release Malta and four prepared-Butteraugli sanitizer checks
+  pass, plus AQ memcheck/initcheck/synccheck: eleven checks, zero errors,
+  leaks or race hazards. There is no full-AQ racecheck claim.
+- All 261 release maps/scores match S68 bit-for-bit. Independent accounting
+  checks 29 extents and the unchanged 25-plane arena; odd 4K allocation
+  remains 912,045,108 bytes.
+- All 58 freshly encoded, decoded and metric-compared parent/candidate
+  pairs have identical codestreams, decoded pixels, size and Butteraugli
+  score, including final-score collection and both extra entropy modes.
+
+### Whole-workflow controls and release timing
+
+The same-binary mode-10 policy comparison uses seven alternating process
+pairs per case, three warmups/seven measured samples when warm and zero
+warmups/one sample when cold. Core warm/cold, corpus warm and mode-4
+duplicate-control cohorts retain 84 pairs / 168 processes / 924 measured
+encodes. All 41 phase fields and raw samples are retained; timing checks
+encoded size, while the separate quality gates establish byte identity.
+
+These controls are deliberately not presented as a clean wall-time win.
+Mode-10 warm totals change +0.30% 4K, +1.77% 1080p and +13.47% Flower;
+cold totals -0.53%, +1.77%, -3.63%. Corpus warm totals are -2.31% Keong,
+-4.50% Ria, -2.89% Bliznaca. The unchanged-kernel control itself reports
+-3.67% 4K total with 7/7 wins, +0.62% 1080p and -0.32% Flower, with wide
+serializer variation. Its different-time cohort is not a correction factor
+to subtract from the candidate. Twelve control traces independently confirm
+Malta reductions in every pair with unchanged non-target launch structure.
+
+The release comparison instead uses retained S68 and newly linked S70
+binaries: seven alternating pairs, three warmups/five samples when warm,
+zero warmups/one sample when cold. The phase probe retains 41 fields and
+the ordinary public benchmark seven. These four cohorts contain 84 pairs,
+168 processes and 504 measured encodes. Percentages below are medians of
+paired candidate/parent ratios, not ratios of independent medians; negative
+means faster. Whole-encode wins are out of seven.
+
+| Release cohort | Quantization pipeline | Serialization | Whole encode | Wins |
+| --- | ---: | ---: | ---: | ---: |
+| Phase warm 4K | -2.32% | -2.81% | -2.85% | 7 |
+| Phase warm 1080p | -1.75% | -0.59% | -4.40% | 5 |
+| Phase warm Flower | -1.62% | +0.76% | +0.70% | 3 |
+| Phase cold 4K | -5.20% | -2.16% | -4.53% | 5 |
+| Phase cold 1080p | +3.58% | +8.78% | +3.94% | 0 |
+| Phase cold Flower | -7.22% | -10.23% | -7.23% | 6 |
+| Public warm 4K | -3.55% | -3.55% | -2.01% | 5 |
+| Public warm 1080p | -0.83% | -4.03% | -1.93% | 4 |
+| Public warm Flower | -2.01% | -2.45% | -4.81% | 5 |
+| Public cold 4K | -2.37% | -2.55% | -2.66% | 6 |
+| Public cold 1080p | -1.01% | -6.57% | -4.77% | 4 |
+| Public cold Flower | +1.42% | +3.93% | +1.98% | 2 |
+
+The 4K warm phase whole-ratio range is -7.94% to -0.53%; public warm is
+-5.58% to +6.76%. Phase cold 1080p loses every pair (+3.28% to +35.27%),
+and public cold Flower loses five of seven. Their contradictory companion
+cohorts and sizeable unchanged-code/control variation limit causal claims;
+they do not erase the regressions. CPU serialization is unchanged, so its
+observed changes must not be attributed to the Malta implementation.
+
+The release GPU-state samples move from 62C/P3/1282 MHz to 69C/P3/802 MHz,
+with thermal and power-limit flags active. Control samples also retain
+active limits. No clock, power, cooling, firewall or privilege setting was
+changed. No new permission/firewall prompt blocked the work; the earlier
+optional hardware-counter restriction was not retried. These laptop
+measurements do not establish a universal speedup or sustained server rate.
+
+### Release traces, batches and remaining work
+
+Two alternating CUDA-profiler-API capture pairs per core workload produce
+twelve release traces. Raw SQLite checks prove identical launch counts,
+grids/blocks, shared/local memory, allocations and copies. Only the Malta
+kernel identities/register allocation change. These are sums of instrumented
+kernel durations, not release wall times:
+
+| Workload | Malta time, pairs 0 / 1 | All kernel time, pairs 0 / 1 | Launches |
+| --- | ---: | ---: | ---: |
+| 4K | -18.84% / -23.11% | +3.79% / -2.88% | 373 -> 373 |
+| 1080p | -17.92% / -14.35% | -1.91% / +0.48% | 360 -> 360 |
+| Flower | -13.12% / -13.17% | -1.46% / -1.34% | 373 -> 373 |
+
+Full and LF groups improve in every pair; 4K full responses improve
+27.64% / 30.73%, LF 12.06% / 17.02%. Other-kernel timing variation again
+precludes treating the target reduction as an equal total-GPU speedup.
+
+Current-S70 batch checks use one warmup and three alternating serial/batch
+samples. Their paired speedup medians compare serial and batch execution
+within S70, **not** S68 with S70:
+
+| Current S70 batch workload | Batch 1 | Batch 2 | Batch 4 |
+| --- | ---: | ---: | ---: |
+| 1080p fully-resident | 0.987x | 1.232x | 1.319x |
+| 1080p maximum-throughput | 1.099x | 1.497x | 1.880x |
+| 4K fully-resident | 1.063x | 1.076x | not run |
+
+The ignored `build-cuda-ninja/profiles/s70_*` evidence retains prototypes,
+controls, sources, all timing windows, complete logs, native instructions,
+traces, quality outputs and read-only reconstruction scripts. The checkpoint
+retains 39 binaries/libraries and five source/document snapshots; the
+artifact manifest includes this whole S70 bundle. `s70_validate.py --frozen`
+reconstructs native, replay, quality, timing and trace evidence, checks the
+document tables and frozen files, and hashes every S59-S69 archive.
+
+This is a retained kernel improvement with a modest measured 4K whole-encode
+benefit, not a claim that fully-resident encoding is maxed out. The two
+release traces' independent 4K per-kernel medians still put LF Malta at
+15.54 ms, low/medium vertical convolution at 10.80 ms, full Malta at
+10.12 ms, Opsin at 9.76 ms and erosion/L2/final at 9.64 ms. Those medians
+are not a single common sample. Further work should investigate the LF
+response/scaling split or another measured convolution bottleneck; larger
+row groups and finer zero classification are not justified by this evidence.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

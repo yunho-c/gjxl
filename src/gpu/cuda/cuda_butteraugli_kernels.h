@@ -65,7 +65,7 @@ struct CudaButteraugliMaltaParams {
     CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
     cudaStream_t stream);
 
-// Exercise every production zero-aware specialization on small guarded inputs.
+// Exercise the prior zero-aware schedule, also retained for tiny/short images.
 [[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaZeroAwareForTesting(
     const float* reference, const float* distorted, float* accumulation,
     CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
@@ -75,6 +75,12 @@ struct CudaButteraugliMaltaParams {
     const float* reference, const float* distorted, float* scaled,
     uint32_t scaled_stride, float* accumulation,
     CudaButteraugliMaltaParams params, cudaStream_t stream);
+
+// Force every paired-response specialization independently of image size.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaRowPairForTesting(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
+    cudaStream_t stream);
 
 // Blur followed by the in-place low/high frequency split. Channels 0/1 use
 // 15 taps; 3/4 use 7 taps. Intermediate storage is tightly packed width*height.
