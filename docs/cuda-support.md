@@ -683,6 +683,18 @@ decoded-image matrix pass. See the
 for the approximately 35% target-kernel gain, smaller variable whole-encode
 results, native resource checks, and unchanged allocation/copy totals.
 
+The next checkpoint jointly fuses the three 33-tap vertical blurs with
+low/medium-frequency construction, preserving the Y/B dependency and
+original tap/division order. Packed horizontal intermediates reuse the
+already consumed Opsin RGB scratch. A measured 32x48 tile removes 18
+launches per encode and three blurred-plane writes/reads per psycho pass without
+changing arena sizes or transfers. All 67 CUDA / 49 CPU tests, 220 guarded
+cases plus a tall-grid fixture, seven scoped sanitizers, batch checks, and
+46 decoded-image pairs pass. The [S46 study](cuda-optimization-s1.md#fused-vertical-blur-and-lowmedium-construction-s46)
+records the 16.5% / 24.3% target-bundle gains at 4K / 1080p, adverse
+primary wall observations, same-executable control, and unchanged native
+oracles. No stable whole-encoder speedup is claimed.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

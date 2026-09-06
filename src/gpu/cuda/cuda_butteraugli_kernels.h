@@ -82,6 +82,30 @@ struct CudaButteraugliFrequencyParams {
     uint32_t blurred_stride, float* output,
     CudaButteraugliFrequencyParams params, cudaStream_t stream);
 
+// 33-tap separable blur followed by low/medium-frequency construction.
+// Each horizontal intermediate is tightly packed width*height. Inputs,
+// intermediates, and outputs must be mutually disjoint. Only the reference
+// entry writes blurred planes; those pointers may be null for the fused path.
+struct CudaButteraugliLowMediumPlan {
+  std::array<const float*, 3> input{};
+  std::array<float*, 3> intermediate{};
+  std::array<float*, 3> blurred{};
+  std::array<float*, 3> low{};
+  std::array<float*, 3> medium{};
+  const float* weights = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t input_stride = 0;
+  uint32_t blurred_stride = 0;
+  uint32_t output_stride = 0;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliLowMedium(
+    const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliLowMediumReference(
+    const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
+
 // Pointwise L2 difference followed by final masking. The fused entry reads
 // only the first two Malta AC accumulations and leaves all AC/DC planes
 // unchanged. The separate-pass oracle overwrites all six scratch planes.

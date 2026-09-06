@@ -11,7 +11,8 @@
   coefficient materialization, shape-specialized coefficient blocks, and
   fused blur/frequency splitting, and branch-free host coefficient-order
   counting, lightweight ANS token emission, direct AC token accumulation,
-  contiguous AC nonzero reduction, and fused L2/final masking
+  contiguous AC nonzero reduction, fused L2/final masking, and fused
+  vertical blur/low-medium construction
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -25,7 +26,22 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `51790b8` fuses
+below supersede them. The latest checkpoint against `089fce9` fuses
+three vertical Butteraugli blurs with low/medium construction, removing
+18 launches per encode and three intermediate plane writes/reads per
+psycho pass.
+The target GPU bundle improves by median paired 16.5% / 24.3% at
+4K / 1080p; total GPU changes are -0.2% / -4.1%. Primary warm
+whole-encode changes are +4.0% / +11.6% / -7.3% at 4K / 1080p /
+Flower. A same-executable control favors the fusion, but substantial
+changes in unchanged CPU work and operating state prevent a stable
+whole-encoder speedup claim. All 67 CUDA / 49 CPU tests, 220 guarded
+cases plus a tall-image case, seven scoped sanitizers, batch checks,
+and 46 byte-identical decoded image pairs pass. All 34 existing
+Butteraugli native bodies are unchanged; allocations, transfers, and
+system settings are unchanged. Optimization remains ongoing, not maxed out.
+
+The preceding checkpoint against `51790b8` fuses
 Butteraugli's L2 difference and final masking, avoiding six intermediate
 plane writes/reads and four launches. The target GPU work improves by
 median paired 34.6% / 34.7% at 4K / 1080p; total GPU kernel time improves
@@ -6416,6 +6432,274 @@ requires all three explicitly flushed geometry-completion records ending
 at exactly 90 cases, plus the zero-error/hazard summary; each sanitizer
 command also returned success. This was a log-validation mismatch, not a
 test failure, and no production code or test result was changed to pass it.
+
+## Fused vertical blur and low/medium construction (S46)
+
+Baseline: `089fce9` (the S45 implementation plus its logical-traffic
+documentation correction). The retained S45 executables are the unchanged
+before-version. This checkpoint targets fully-resident Butteraugli's
+33-tap low-frequency preparation, not exact-coefficient mode.
+
+### Dependency and storage change
+
+Previously each of three XYB channels ran a horizontal and vertical blur,
+then `LowMediumKernel` read all three blurred planes and the original XYB
+planes to construct six outputs. The low-B output depends on both blurred
+Y and blurred B, so blindly fusing independent channel kernels would not
+preserve that dependency.
+
+The new `ConvolutionLowMediumKernel<48>` jointly loads three vertical
+halos into shared storage, accumulates each channel in the original
+33-tap order, performs the original separately rounded divisions, and
+evaluates the unchanged six output expressions. Edge normalization keeps
+the original valid-tap order. All partial-tile lanes participate in the
+cooperative loads and barrier before inactive output lanes skip work.
+A flattened one-dimensional tile grid avoids a 65,535-row grid.y limit.
+
+Three horizontal kernels remain unchanged. Their packed intermediates
+reuse planes 24-26, whose blurred RGB values have already been consumed by
+Opsin; XYB occupies separate planes 21-23. This is safe for both full and
+subsampled extents and does not enlarge an arena. The original vertical
+and low/medium kernels remain available through a CUDA-internal reference
+entry, independently exercising the old seven-launch computation.
+
+Each psycho-image pass drops from seven launches to four and avoids
+three blurred-plane writes plus three reads: 24 logical bytes per active
+pixel. The profiled encode has three full-resolution and three half-scale
+psycho passes, removing 18 launches and 72*(full pixels + half pixels)
+logical bytes. That is 746,064,072 bytes for the actual 3839x2159 benchmark
+with 1920x1080 half scale, and 186,408,072 bytes for 1919x1079 with 960x540
+half scale. These are eliminated program-level accesses, not measured
+DRAM traffic. No allocation-capacity reduction is claimed.
+
+### Tile investigation and native code
+
+Four fixed heights were evaluated at width 32 with 256 threads. Every
+variant passed the original 160 guarded differential cases and the
+1x2,097,153 image. The latter exceeds 65,535 tile rows for heights 16/32,
+but not 48/64; the final fixture therefore raises its height to 4,194,305
+and adds the 47/48/49 and 95/96/97 boundaries, for 220 normal cases.
+The isolated probe uses one executable containing both reference and
+candidate, three alternating-order pairs per packed/padded geometry,
+ten warmups and fifteen CUDA-event samples per version. Launch-window
+times include inter-kernel gaps; host setup and nine-plane output hashing
+are outside the windows. All compared intermediate/output hashes match.
+
+| Tile height | Shared bytes | Packed 1080p paired ratio | Packed 4K paired ratio | Padded 4K paired ratio |
+| --- | ---: | ---: | ---: | ---: |
+| 16 | 18,568 | 0.744 | 1.025 | 1.037 |
+| 32 | 24,712 | 0.765 | 0.961 | 0.956 |
+| 48, retained | 30,856 | 0.743 | 0.942 | 0.932 |
+| 64 | 37,000 | 0.720 | 0.915 | 0.928 |
+
+These are separate cohorts, each normalized to its own original-path
+measurements; they are not a direct inter-tile paired tournament. At
+1080p the candidate medians themselves are 1.020/1.060/1.041/1.103 ms for
+16/32/48/64 rows. Reference outliers make some ratios look better than
+that ordering. The 16-row candidate regresses in all six 4K observations;
+64 rows helps 4K but is slower on the smaller images. Height 48 is retained
+as a balanced fixed policy, not a demonstrated universal optimum. Halo
+traffic versus shared-memory residency explains the structural tradeoff;
+achieved occupancy and cache transactions have not been measured.
+
+All four variants use 46 registers and zero stack/local allocation.
+The retained 48-row shared footprint is 30,856 bytes. Original vertical33
+uses 55 registers / 12,424 shared bytes; horizontal33 uses 55 / 4,744;
+the separate low/medium body uses 22 registers and no shared storage.
+All 34 preexisting Butteraugli native bodies are identical to S45 after
+normalizing only the translation-unit symbol hash. There is one new body.
+The final comment/fixture rebuild also retains the profiled native code.
+
+### Production GPU traces
+
+Three alternating-order pairs per workload use three warmups and one
+captured fully-resident sample. The bundle includes all horizontal33,
+vertical33, and low/medium work: 42 original launches versus 24 fused
+launches. All six target-bundle observations improve.
+
+| Workload | Parent target ms, three runs | Candidate target ms | Median paired target change | Total GPU change |
+| --- | --- | --- | ---: | ---: |
+| Odd padded 4K | 35.458 / 34.023 / 37.236 | 28.706 / 28.404 / 32.286 | -16.5% | -0.2% |
+| Odd padded 1080p | 5.389 / 5.332 / 5.479 | 4.079 / 4.119 / 3.980 | -24.3% | -4.1% |
+
+Total launches are 436->418 at 4K and 424->406 at 1080p. Five allocation
+requests and all copies match pairwise, including counts and byte totals.
+Other-kernel time changes +2.4% / -0.6%. One 4K total-GPU observation
+regresses 2.3%; the unchanged work absorbs much of the target gain.
+No uniform 4K whole-encoder improvement follows from these traces.
+Boundary samples span 65-67 C and 262-1282 MHz, with software thermal/power
+flags often active. These are boundary observations, not per-kernel state.
+
+All twelve captures/export operations completed normally. The first
+summary attempt rejected Nsight's explicit template-argument formatting;
+correcting the name predicate made the saved captures pass the expected
+42->24 target and 18-launch total-delta checks. No capture was replaced or
+discarded for this reporting-script error.
+
+### Final qualification and wall timings
+
+The final Release builds pass all 67 CUDA and 49 CPU CTests. The expanded
+220-case fixture passes bit-for-bit across 22 geometries, packed/padded
+strides, misaligned offsets, Gaussian/impulse/irregular weights, signed
+zeros, random values, extreme magnitudes, cancellation boundaries, and
+NaN/Inf inputs. Three reuse iterations check guards and immutable inputs;
+the last changes the input values and leaves unused blurred pointers null
+with zero blurred stride. Empty extents and invalid required strides are
+also covered. The separate 1x4,194,305 test passes.
+
+The repeated final isolated probe also has eight favorable case medians
+and 24/24 favorable individual pairs, with all nine-plane hashes matching.
+Packed/padded median paired ratios are 0.793/0.516 at 31x63,
+0.733/0.736 at 512x512, 0.770/0.771 at 1920x1080, and
+0.792/0.794 at 3840x2160. The final 4K candidate medians are
+3.944/3.891 ms versus 5.003/4.900 ms for the original path, much faster
+absolute timings than the earlier tile cohorts for both paths. Native
+code is unchanged. A boundary sample now records 1770 MHz with software
+limits inactive, rather than the earlier lower clocks/active flags;
+this illustrates operating-state variability without proving its share
+of the timing difference.
+
+Primary warm timing uses seven alternating-order pairs per input, three
+warmups and five samples per executable, retaining all 41 phase fields.
+Entries below report marginal medians and the median of within-pair
+ratios, which need not equal their quotient.
+
+| Workload | Phase | Parent / candidate median ms | Median paired change | Candidate wins |
+| --- | --- | ---: | ---: | ---: |
+| Odd 4K | Quantization | 205.972 / 204.486 | +0.3% | 3/7 |
+| Odd 4K | Codestream | 142.198 / 151.641 | +10.1% | 2/7 |
+| Odd 4K | Total | 383.214 / 385.129 | +4.0% | 2/7 |
+| Odd 1080p | Quantization | 62.658 / 68.830 | +9.9% | 3/7 |
+| Odd 1080p | Codestream | 65.587 / 78.166 | +19.2% | 2/7 |
+| Odd 1080p | Total | 135.982 / 151.814 | +11.6% | 3/7 |
+| Flower | Quantization | 14.059 / 13.244 | -6.5% | 6/7 |
+| Flower | Codestream | 16.255 / 14.647 | -9.9% | 4/7 |
+| Flower | Total | 31.716 / 29.415 | -7.3% | 5/7 |
+
+These adverse large-image results are not discarded. For example, a 4K
+pair is 386.741->494.689 ms overall with codestream time
+139.646->237.526 ms; a 1080p pair is 142.965->252.505 ms.
+Flower also has a 30.065->47.125 ms regression. Large changes in
+unchanged CPU work motivate the same-executable control below, rather
+than an unsupported attribution to CUDA, file layout, or thermal state.
+
+Seven cold pairs per input use zero warmups and one measured sample.
+
+| Workload | Parent / candidate total median ms | Total paired change | Quantization paired change | Total wins |
+| --- | ---: | ---: | ---: | ---: |
+| Odd 4K | 517.852 / 576.718 | +6.6% | -1.0% | 2/7 |
+| Odd 1080p | 200.597 / 202.857 | -7.1% | -5.1% | 4/7 |
+| Flower | 57.057 / 56.873 | -2.9% | -0.8% | 4/7 |
+
+Cold total ranges are 480.854-762.469 / 492.643-683.227 ms at 4K,
+176.247-388.938 / 180.407-323.682 ms at 1080p, and
+53.737-110.335 / 52.335-66.084 ms for Flower. Warm/cold boundary samples
+span 70-76 C, P0, 1770->1282 MHz, with both software flags inactive at
+the sampled boundaries. No clocks, cooling, power, priority, services,
+security settings, or firewall rules were changed.
+
+The 46 decoded-image pairs all pass with identical codestream bytes,
+decoded Butteraugli scores, strategy reports, and requested final scores.
+Encoding-only and score-collecting policies also match within each version.
+The matrix retains the seven S45 inputs, distances 0.5/1.2/3 at effort 7,
+plus sample/Flower effort-9 cases, using the same pinned libjxl decoder and
+linear-RGB metric procedure.
+
+All seven scoped Compute Sanitizer runs terminate successfully: the new
+40-case / three-reuse fixture under memcheck, initcheck, synccheck, and
+racecheck, then the complete AQ fixture under memcheck, initcheck, and
+synccheck. Every error/hazard summary is zero; AQ memcheck additionally
+checks stream-ordered races and leaks and reports zero leaked bytes.
+The new scoped racecheck takes about 62 seconds; AQ memory/init/sync
+checks take about 49/31/30 seconds. Full-AQ racecheck was not repeated.
+The earlier S30 roughly 52-minute aborted run remains an abort, not a pass
+and not a proven firewall failure.
+
+Current-version batch checks retain serial/batch byte identity. Paired
+batch-versus-serial median speedups for batch sizes 1/2/4 are
+0.988/1.481/2.035 at fully-resident 1080p and 0.950/1.841/2.108 at
+maximum-throughput 1080p; fully-resident 4K is 1.012/1.601 for sizes 1/2.
+These compare batch scheduling against serial work in the same version,
+not S46 against S45. Individual size-1 observations regress as far as
+0.822x at 4K.
+
+The final artifact validator verifies the frozen S45 baseline and thirteen
+S46 executables, unchanged oracle sources and 34 preexisting native bodies,
+profiled/final native identity, complete test/sanitizer logs, all image
+policy checks, 21 warm + 21 cold pairs, six GPU profile pairs, 24 isolated
+pairs, and the three batch cohorts.
+
+### Same-executable control
+
+The diagnostic was built separately under the ignored profile directory
+without modifying production libraries or introducing a supported runtime
+option. It embeds the exact original per-channel horizontal/vertical/
+low-medium sequence, including its reused horizontal scratch, alongside
+the new sequence. A process-local environment flag selects the path once
+and emits a checked marker. Both modes pass the full AQ fixture, and
+all 35 native Butteraugli bodies match production after normalizing the
+translation-unit symbol prefix. No second archived Butteraugli object is
+linked. Both choices therefore run from the same executable, with the
+same CPU serialization code and file layout.
+
+Seven alternating-order warm pairs per input retain the same three
+warmups, five samples, 41 fields, and output-size checks as the primary
+cohort. Every process contains exactly one expected path marker.
+
+| Workload | Parent / candidate total median ms | Total paired change | Quantization paired change | Codestream paired change | Total wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Odd 4K | 595.905 / 538.349 | -2.1% | -7.3% | -12.8% | 5/7 |
+| Odd 1080p | 236.270 / 182.968 | -20.3% | -7.9% | -20.5% | 6/7 |
+| Flower | 33.914 / 31.759 | -2.7% | -5.0% | -2.2% | 5/7 |
+
+This control does not reproduce the primary large-image median
+regressions, but the large gains in unchanged CPU work must not be
+attributed to this GPU fusion. It is a later cohort with changing
+operating state, not proof that executable layout caused the initial
+regressions. At 4K, total ranges are 424.352-955.907 /
+396.248-993.326 ms, including a 678.995->916.501 ms adverse pair.
+Flower includes 87.681->31.759 ms and 32.479->40.357 ms pairs.
+Boundary state moves from 75 C / P0 / 1762 MHz with software flags
+inactive to 78 C / P3 / 1282 MHz with both active. The sources of the
+wall-time variation remain unresolved. A short read-only post-run CPU
+activity sample also cannot establish what happened during those runs.
+
+### Retention and evidence
+
+Retain the 48-row fusion for its proven dependency-preserving elimination
+of three intermediate writes/reads and 18 launches, consistent isolated
+and production target-kernel gains, and complete correctness qualification.
+Do not advertise the same-executable cohort's large wall improvements as
+a stable encoder speedup or hide the adverse primary warm/cold results.
+The fully-resident backend is still not demonstrated maxed out.
+
+Thirteen qualified production executables remain under
+`build-cuda-ninja/profiles/s46_retained_*.exe`, with exact source/copy
+SHA-256 checks in `s46_final_binary_hashes.json`. The two control executables
+have their own `s46_control_hashes.json`. The final validator additionally
+checks both control AQ paths, all 21 marked control pairs, output sizes,
+and native identity; production source contains no diagnostic switch.
+
+Reproduction/evidence scripts are `s46_native.py`,
+`s46_low_medium_probe{.cpp,_run.ps1}`, `s46_low_medium_summary.py`,
+`s46_profile_pairs.ps1`, `s46_profile_summary.py`,
+`s46_phase_build.ps1`, `s46_phase_compare.py`,
+`s46_final_run.ps1`, `s46_final_quality.py`, `s46_sanitizers.ps1`,
+`s46_control_{build.ps1,native.py,aq.py,compare.py,run.ps1}`,
+`s46_freeze.ps1`, and `s46_final_validate.py` in the ignored profile
+directory. Individual tile source/binary/native/timing snapshots,
+all traces and SQLite exports, untrimmed wall observations, sanitizer
+logs, and decoded-image reports are retained. There was no observed
+administrator/firewall block in this checkpoint and no security-setting
+change.
+
+A next bounded lead is to re-audit scratch lifetimes now that the
+pointwise L2 intermediates and low/medium blurred outputs are gone.
+For example, image temporaries are dead during difference/mask work,
+while only two Malta accumulations remain live; the full-scale final
+map must still survive subsequent half-scale psycho construction.
+This is an opportunity to investigate, not an allocation saving already
+implemented by S46.
 
 ## Work that should not lead the next cycle
 

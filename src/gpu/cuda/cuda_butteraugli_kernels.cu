@@ -462,6 +462,84 @@ __global__ void LowMediumKernel(const float* xyb0, const float* xyb1,
   low2[output] = UnfusedMultiplyAdd(-0.362267051518f, by, bb) * 49.87984651440f;
 }
 
+template <unsigned int TileHeight>
+__global__ void ConvolutionLowMediumKernel(
+    const float* xyb0, const float* xyb1, const float* xyb2,
+    const float* horizontal0, const float* horizontal1, const float* horizontal2,
+    const float* weights, float* low0, float* low1, float* low2,
+    float* medium0, float* medium1, float* medium2, LowMediumParams params) {
+  constexpr unsigned int kWidth = 32;
+  constexpr unsigned int kRadius = 16;
+  constexpr unsigned int kInputSize = kWidth * (TileHeight + 2 * kRadius);
+  __shared__ float tile0[kInputSize];
+  __shared__ float tile1[kInputSize];
+  __shared__ float tile2[kInputSize];
+  __shared__ float kernel[33];
+  __shared__ float normalization;
+  const uint32_t columns = (params.width + kWidth - 1) / kWidth;
+  const uint32_t origin_x = (blockIdx.x % columns) * kWidth;
+  const uint32_t origin_y = (blockIdx.x / columns) * TileHeight;
+  if (threadIdx.x < 33) kernel[threadIdx.x] = weights[threadIdx.x];
+  if (threadIdx.x == 0) {
+    float weight_sum = 0.0f;
+    for (unsigned int tap = 0; tap < 33; ++tap) weight_sum += weights[tap];
+    normalization = weight_sum;
+  }
+  for (unsigned int index = threadIdx.x; index < kInputSize; index += blockDim.x) {
+    const uint32_t x = origin_x + index % kWidth;
+    const int y = static_cast<int>(origin_y + index / kWidth) - static_cast<int>(kRadius);
+    const bool valid = x < params.width && y >= 0 && y < static_cast<int>(params.height);
+    const size_t source = static_cast<size_t>(y) * params.blurred_stride + x;
+    tile0[index] = valid ? horizontal0[source] : 0.0f;
+    tile1[index] = valid ? horizontal1[source] : 0.0f;
+    tile2[index] = valid ? horizontal2[source] : 0.0f;
+  }
+  // Partial-tile lanes participate in every cooperative load and barrier.
+  __syncthreads();
+  for (unsigned int index = threadIdx.x; index < kWidth * TileHeight; index += blockDim.x) {
+    const uint32_t local_x = index % kWidth;
+    const uint32_t local_y = index / kWidth;
+    const uint32_t x = origin_x + local_x;
+    const uint32_t y = origin_y + local_y;
+    if (x >= params.width || y >= params.height) continue;
+    const size_t first = local_y * kWidth + local_x;
+    float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f;
+    float weight_sum = normalization;
+    if (y >= kRadius && static_cast<size_t>(y) + kRadius < params.height) {
+#pragma unroll
+      for (unsigned int tap = 0; tap < 33; ++tap) {
+        sum0 += tile0[first + tap * kWidth] * kernel[tap];
+        sum1 += tile1[first + tap * kWidth] * kernel[tap];
+        sum2 += tile2[first + tap * kWidth] * kernel[tap];
+      }
+    } else {
+      weight_sum = 0.0f;
+#pragma unroll
+      for (unsigned int tap = 0; tap < 33; ++tap) {
+        const int coordinate = static_cast<int>(y) + static_cast<int>(tap) - static_cast<int>(kRadius);
+        if (coordinate >= 0 && coordinate < static_cast<int>(params.height)) {
+          sum0 += tile0[first + tap * kWidth] * kernel[tap];
+          sum1 += tile1[first + tap * kWidth] * kernel[tap];
+          sum2 += tile2[first + tap * kWidth] * kernel[tap];
+          weight_sum += kernel[tap];
+        }
+      }
+    }
+    // Each channel retains its original tap order and rounded division.
+    const float bx = sum0 / weight_sum;
+    const float by = sum1 / weight_sum;
+    const float bb = sum2 / weight_sum;
+    const size_t source = static_cast<size_t>(y) * params.xyb_stride + x;
+    const size_t output = static_cast<size_t>(y) * params.psycho_stride + x;
+    medium0[output] = xyb0[source] - bx;
+    medium1[output] = xyb1[source] - by;
+    medium2[output] = xyb2[source] - bb;
+    low0[output] = bx * 33.832837186260f;
+    low1[output] = by * 14.458268100570f;
+    low2[output] = UnfusedMultiplyAdd(-0.362267051518f, by, bb) * 49.87984651440f;
+  }
+}
+
 __device__ float MaximumClamp(float value, float maximum) {
   if (value >= maximum) {
     return UnfusedMultiplyAdd(value - maximum, 0.724216145665f, maximum);
@@ -1290,21 +1368,21 @@ template <unsigned int KernelSize>
   cudaError_t error = CheckLaunch();
   if (error != cudaSuccess) return error;
 
+  CudaButteraugliLowMediumPlan low_medium;
   for (size_t channel = 0; channel < 3; ++channel) {
-    error = LaunchBlur<33>(plan.planes[kImage + channel], plan.working_width,
-                           plan.kernels[1], plan.planes[kWork + 3],
-                           plan.planes[kWork + channel], plan.working_width,
-                           width, height, stream);
-    if (error != cudaSuccess) return error;
+    low_medium.input[channel] = plan.planes[kImage + channel];
+    // Opsin has consumed these three blurred RGB planes. Reuse them for
+    // distinct packed horizontal XYB intermediates, without another arena.
+    low_medium.intermediate[channel] = plan.planes[kImage + 3 + channel];
+    low_medium.low[channel] = psycho[channel];
+    low_medium.medium[channel] = psycho[3 + channel];
   }
-  const LowMediumParams low_medium{width, height, plan.working_width,
-                                   plan.working_width, psycho_stride};
-  LowMediumKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
-      plan.planes[kImage], plan.planes[kImage + 1], plan.planes[kImage + 2],
-      plan.planes[kWork], plan.planes[kWork + 1], plan.planes[kWork + 2],
-      psycho[0], psycho[1], psycho[2], psycho[3], psycho[4], psycho[5],
-      low_medium);
-  error = CheckLaunch();
+  low_medium.weights = plan.kernels[1];
+  low_medium.width = width;
+  low_medium.height = height;
+  low_medium.input_stride = plan.working_width;
+  low_medium.output_stride = psycho_stride;
+  error = LaunchCudaButteraugliLowMedium(low_medium, stream);
   if (error != cudaSuccess) return error;
 
   for (size_t channel = 0; channel < 2; ++channel) {
@@ -1506,6 +1584,48 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
 }  // namespace
 
 namespace {
+cudaError_t LaunchLowMediumImpl(const CudaButteraugliLowMediumPlan& plan,
+                               bool reference, cudaStream_t stream) {
+  if (plan.width == 0 || plan.height == 0) return cudaSuccess;
+  if (plan.input_stride < plan.width || plan.output_stride < plan.width ||
+      (reference && plan.blurred_stride < plan.width)) return cudaErrorInvalidValue;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    cudaError_t error;
+    if (reference) {
+      error = LaunchBlur<33>(plan.input[channel], plan.input_stride, plan.weights,
+          plan.intermediate[channel], plan.blurred[channel], plan.blurred_stride,
+          plan.width, plan.height, stream);
+    } else {
+      ConvolutionTiledKernel<true, 33>
+          <<<ConvolutionTile<true>::Blocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
+              plan.input[channel], plan.weights, plan.intermediate[channel],
+              plan.width, plan.height, plan.input_stride, plan.width);
+      error = CheckLaunch();
+    }
+    if (error != cudaSuccess) return error;
+  }
+  const LowMediumParams params{plan.width, plan.height, plan.input_stride,
+      reference ? plan.blurred_stride : plan.width, plan.output_stride};
+  if (reference) {
+    LowMediumKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
+        plan.input[0], plan.input[1], plan.input[2],
+        plan.blurred[0], plan.blurred[1], plan.blurred[2],
+        plan.low[0], plan.low[1], plan.low[2],
+        plan.medium[0], plan.medium[1], plan.medium[2], params);
+  } else {
+    // Balance three-channel halo reuse against shared-memory residency.
+    constexpr unsigned int kLowMediumHeight = 48;
+    const unsigned int blocks = ((plan.width + 31) / 32) *
+        ((plan.height + kLowMediumHeight - 1) / kLowMediumHeight);
+    ConvolutionLowMediumKernel<kLowMediumHeight><<<blocks, kPlaneThreads, 0, stream>>>(
+        plan.input[0], plan.input[1], plan.input[2],
+        plan.intermediate[0], plan.intermediate[1], plan.intermediate[2], plan.weights,
+        plan.low[0], plan.low[1], plan.low[2],
+        plan.medium[0], plan.medium[1], plan.medium[2], params);
+  }
+  return CheckLaunch();
+}
+
 cudaError_t LaunchL2FinalForTest(const CudaButteraugliL2FinalPlan& plan,
                                bool reference, cudaStream_t stream) {
   if (plan.width == 0 || plan.height == 0) return cudaSuccess;
@@ -1546,6 +1666,16 @@ cudaError_t LaunchL2FinalForTest(const CudaButteraugliL2FinalPlan& plan,
   return CheckLaunch();
 }
 }  // namespace
+
+cudaError_t LaunchCudaButteraugliLowMedium(
+    const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream) {
+  return LaunchLowMediumImpl(plan, false, stream);
+}
+
+cudaError_t LaunchCudaButteraugliLowMediumReference(
+    const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream) {
+  return LaunchLowMediumImpl(plan, true, stream);
+}
 
 cudaError_t LaunchCudaButteraugliL2Final(
     const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream) {
