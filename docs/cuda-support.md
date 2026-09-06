@@ -695,6 +695,21 @@ records the 16.5% / 24.3% target-bundle gains at 4K / 1080p, adverse
 primary wall observations, same-executable control, and unchanged native
 oracles. No stable whole-encoder speedup is claimed.
 
+Prepared Butteraugli now reuses scratch after each phase's last read,
+reducing its allocation from 33 to 27 full working planes. Expanded and
+subsampled RGB temporarily use not-yet-produced low-frequency outputs;
+blurred RGB and XYB share pointwise storage; mask and pre-crop/half-scale
+output work reuse dead horizontal intermediates. The main result remains
+in the external distance map while half-scale construction runs.
+Captured requests shrink by 198,921,984 bytes at odd 4K and 49,694,592
+bytes at odd 1080p, with unchanged kernels, launches, and copies. All
+67 CUDA / 49 CPU tests, seven scoped sanitizers, 261 byte-exact prepared
+map pairs, 46 decoded-image pairs, and batch checks pass. See the
+[S47 study](cuda-optimization-s1.md#compact-prepared-butteraugli-scratch-s47)
+for the lifetime map, exact allocation accounting, and mixed timing
+results. This is a requested-memory improvement, not a stable encoder
+speedup or a promise of an equal reduction in pool-retained VRAM.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

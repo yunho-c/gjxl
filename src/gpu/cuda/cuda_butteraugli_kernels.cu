@@ -22,9 +22,17 @@ constexpr unsigned int kMaltaRadius = 4;
 constexpr unsigned int kMaltaTileStride = kMaltaTileWidth + 2 * kMaltaRadius;
 constexpr unsigned int kImage = 21;
 constexpr unsigned int kAc = kImage;
-constexpr unsigned int kDc = kImage + 3;
-constexpr unsigned int kWork = 27;
-constexpr unsigned int kFinalStaging = 32;
+constexpr unsigned int kPsychoWork = 24;
+// After psycho construction only Malta AC[0:2] remains live in image work.
+constexpr unsigned int kMaskInput = 23;
+constexpr unsigned int kMaskIntermediate = 24;
+constexpr unsigned int kReferenceMask = 25;
+constexpr unsigned int kFuzzyMask = 26;
+// The separable distorted-mask blur may overwrite its own input. Its
+// horizontal intermediate is dead before the cropped/subscale map is written.
+constexpr unsigned int kDistortedMask = kMaskInput;
+constexpr unsigned int kFinalStaging = kMaskIntermediate;
+static_assert(kFuzzyMask + 1 == kCudaButteraugliWorkingPlaneCount);
 
 struct PlaneParams {
   uint32_t width;
@@ -1276,6 +1284,7 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
 
 [[nodiscard]] cudaError_t LaunchExpand(std::array<const float*, 3> input,
                                        std::array<uint32_t, 3> input_stride,
+                                       std::array<float*, 3> output,
                                        const CudaButteraugliPlan& plan,
                                        cudaStream_t stream) {
   for (size_t channel = 0; channel < 3; ++channel) {
@@ -1285,7 +1294,7 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
         plan.xborder,        plan.yborder};
     ExpandKernel<<<PlaneBlocks(plan.working_width, plan.working_height),
                    kPlaneThreads, 0, stream>>>(
-        input[channel], plan.planes[kImage + channel], params);
+        input[channel], output[channel], params);
     const cudaError_t error = CheckLaunch();
     if (error != cudaSuccess) return error;
   }
@@ -1294,15 +1303,17 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
 
 [[nodiscard]] cudaError_t LaunchSubsample(std::array<const float*, 3> input,
                                           std::array<uint32_t, 3> input_stride,
+                                          std::array<float*, 3> output,
+                                          uint32_t output_stride,
                                           const CudaButteraugliPlan& plan,
                                           cudaStream_t stream) {
   for (size_t channel = 0; channel < 3; ++channel) {
     const SubsampleParams params{
         plan.width,      plan.height,           plan.sub_width,
-        plan.sub_height, input_stride[channel], plan.working_width};
+        plan.sub_height, input_stride[channel], output_stride};
     SubsampleKernel<<<PlaneBlocks(plan.sub_width, plan.sub_height),
                       kPlaneThreads, 0, stream>>>(
-        input[channel], plan.planes[kImage + channel], params);
+        input[channel], output[channel], params);
     const cudaError_t error = CheckLaunch();
     if (error != cudaSuccess) return error;
   }
@@ -1350,7 +1361,7 @@ template <unsigned int KernelSize>
   for (size_t channel = 0; channel < 3; ++channel) {
     const cudaError_t error =
         LaunchBlur<5>(input[channel], input_stride[channel], plan.kernels[0],
-                      plan.planes[kWork], plan.planes[kImage + 3 + channel],
+                      plan.planes[kPsychoWork], plan.planes[kImage + channel],
                       plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
   }
@@ -1361,9 +1372,12 @@ template <unsigned int KernelSize>
                           plan.working_width,
                           plan.working_width,
                           plan.intensity_target};
+  // Opsin loads all six values for one pixel before storing its three XYB
+  // results, so the blurred RGB and XYB planes may coincide. RGB inputs are
+  // external or staged in the not-yet-produced low-frequency outputs.
   OpsinKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
-      input[0], input[1], input[2], plan.planes[kImage + 3],
-      plan.planes[kImage + 4], plan.planes[kImage + 5], plan.planes[kImage],
+      input[0], input[1], input[2], plan.planes[kImage],
+      plan.planes[kImage + 1], plan.planes[kImage + 2], plan.planes[kImage],
       plan.planes[kImage + 1], plan.planes[kImage + 2], opsin);
   cudaError_t error = CheckLaunch();
   if (error != cudaSuccess) return error;
@@ -1371,8 +1385,8 @@ template <unsigned int KernelSize>
   CudaButteraugliLowMediumPlan low_medium;
   for (size_t channel = 0; channel < 3; ++channel) {
     low_medium.input[channel] = plan.planes[kImage + channel];
-    // Opsin has consumed these three blurred RGB planes. Reuse them for
-    // distinct packed horizontal XYB intermediates, without another arena.
+    // The earlier blur intermediate is dead; retain three distinct packed
+    // horizontal XYB planes until the joint vertical/low-medium pass.
     low_medium.intermediate[channel] = plan.planes[kImage + 3 + channel];
     low_medium.low[channel] = psycho[channel];
     low_medium.medium[channel] = psycho[3 + channel];
@@ -1390,12 +1404,12 @@ template <unsigned int KernelSize>
         width, height, psycho_stride, psycho_stride,
         static_cast<uint32_t>(channel)};
     error = LaunchCudaButteraugliBlurAndSplit(
-        psycho[3 + channel], plan.kernels[2], plan.planes[kWork + 1],
+        psycho[3 + channel], plan.kernels[2], plan.planes[kPsychoWork],
         psycho[6 + channel], frequency, stream);
     if (error != cudaSuccess) return error;
   }
   error = LaunchBlur<15>(psycho[5], psycho_stride, plan.kernels[2],
-                         plan.planes[kWork + 1], psycho[5], psycho_stride,
+                         plan.planes[kPsychoWork], psycho[5], psycho_stride,
                          width, height, stream);
   if (error != cudaSuccess) return error;
 
@@ -1410,7 +1424,7 @@ template <unsigned int KernelSize>
         width, height, psycho_stride, psycho_stride,
         static_cast<uint32_t>(channel + 3)};
     error = LaunchCudaButteraugliBlurAndSplit(
-        psycho[6 + channel], plan.kernels[3], plan.planes[kWork + 1],
+        psycho[6 + channel], plan.kernels[3], plan.planes[kPsychoWork],
         psycho[8 + channel], frequency, stream);
     if (error != cudaSuccess) return error;
   }
@@ -1494,9 +1508,8 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
     difference.reference[index] = reference[index];
     difference.distorted[index] = distorted[index];
   }
-  for (size_t channel = 0; channel < 3; ++channel) {
+  for (size_t channel = 0; channel < 2; ++channel) {
     difference.ac[channel] = plan.planes[kAc + channel];
-    difference.dc[channel] = plan.planes[kDc + channel];
   }
   difference.params = {width,
                        height,
@@ -1509,48 +1522,47 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
   uint32_t reference_mask_stride = cached_mask_stride;
   if (reference_mask == nullptr) {
     error =
-        LaunchMaskPrecompute(reference, reference_stride, plan.planes[kWork],
+        LaunchMaskPrecompute(reference, reference_stride, plan.planes[kMaskInput],
                              plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
     error =
-        LaunchBlur<13>(plan.planes[kWork], plan.working_width, plan.kernels[4],
-                       plan.planes[kWork + 1], plan.planes[kWork + 2],
+        LaunchBlur<13>(plan.planes[kMaskInput], plan.working_width, plan.kernels[4],
+                       plan.planes[kMaskIntermediate], plan.planes[kReferenceMask],
                        plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
-    reference_mask = plan.planes[kWork + 2];
+    reference_mask = plan.planes[kReferenceMask];
     reference_mask_stride = plan.working_width;
   }
 
   const PlaneParams fuzzy{width, height, reference_mask_stride,
                           plan.working_width};
   FuzzyErosionKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
-      reference_mask, plan.planes[kWork + 3], fuzzy);
+      reference_mask, plan.planes[kFuzzyMask], fuzzy);
   error = CheckLaunch();
   if (error != cudaSuccess) return error;
 
-  error = LaunchMaskPrecompute(distorted, distorted_stride, plan.planes[kWork],
+  error = LaunchMaskPrecompute(distorted, distorted_stride, plan.planes[kMaskInput],
                                plan.working_width, width, height, stream);
   if (error != cudaSuccess) return error;
   error =
-      LaunchBlur<13>(plan.planes[kWork], plan.working_width, plan.kernels[4],
-                     plan.planes[kWork + 1], plan.planes[kWork + 4],
+      LaunchBlur<13>(plan.planes[kMaskInput], plan.working_width, plan.kernels[4],
+                     plan.planes[kMaskIntermediate], plan.planes[kDistortedMask],
                      plan.working_width, width, height, stream);
   if (error != cudaSuccess) return error;
 
   FinalPlan final{};
-  for (size_t channel = 0; channel < 3; ++channel) {
+  for (size_t channel = 0; channel < 2; ++channel) {
     final.ac[channel] = plan.planes[kAc + channel];
-    final.dc[channel] = plan.planes[kDc + channel];
   }
-  final.mask = plan.planes[kWork + 3];
+  final.mask = plan.planes[kFuzzyMask];
   final.mask_reference = reference_mask;
-  final.mask_distorted = plan.planes[kWork + 4];
+  final.mask_distorted = plan.planes[kDistortedMask];
   final.output = output;
   final.params = {width, height, plan.working_width, output_stride,
                   plan.x_multiplier};
-  // Mask preparation touches only kWork..kWork+4, not psycho or Malta AC
-  // planes. Defer pointwise L2 until here and never materialize its six
-  // temporary AC/DC outputs, retaining each original arithmetic expression.
+  // Only AC[0:2] is consumed by the fused pass. Leave unused AC/DC pointers
+  // null: their former slots now hold masks. The horizontal mask intermediate
+  // is no longer read, so it can also hold the cropped/subscale output map.
   L2FinalKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
       difference, final);
   return CheckLaunch();
@@ -1774,10 +1786,12 @@ cudaError_t LaunchCudaButteraugliPrepare(const CudaButteraugliPlan& plan,
   const auto reference_main = MainPsycho(plan, 0);
   cudaError_t error = cudaSuccess;
   if (plan.expanded != 0) {
-    error = LaunchExpand(plan.reference, plan.reference_stride, plan, stream);
+    error = LaunchExpand(plan.reference, plan.reference_stride,
+                         {reference_main[0], reference_main[1], reference_main[2]},
+                         plan, stream);
     if (error != cudaSuccess) return error;
     const std::array<const float*, 3> expanded{
-        plan.planes[kImage], plan.planes[kImage + 1], plan.planes[kImage + 2]};
+        reference_main[0], reference_main[1], reference_main[2]};
     const std::array<uint32_t, 3> stride{plan.working_width, plan.working_width,
                                          plan.working_width};
     error =
@@ -1795,16 +1809,18 @@ cudaError_t LaunchCudaButteraugliPrepare(const CudaButteraugliPlan& plan,
   if (error != cudaSuccess) return error;
   error =
       LaunchBlur<13>(plan.planes[20], plan.working_width, plan.kernels[4],
-                     plan.planes[kWork], plan.planes[20], plan.working_width,
+                     plan.planes[kPsychoWork], plan.planes[20], plan.working_width,
                      plan.working_width, plan.working_height, stream);
   if (error != cudaSuccess || plan.multiscale == 0) return error;
 
-  error = LaunchSubsample(plan.reference, plan.reference_stride, plan, stream);
+  error = LaunchSubsample(plan.reference, plan.reference_stride,
+                          {plan.reference_sub[0], plan.reference_sub[1],
+                           plan.reference_sub[2]}, plan.sub_width, plan, stream);
   if (error != cudaSuccess) return error;
   const std::array<const float*, 3> subsampled{
-      plan.planes[kImage], plan.planes[kImage + 1], plan.planes[kImage + 2]};
-  const std::array<uint32_t, 3> stride{plan.working_width, plan.working_width,
-                                       plan.working_width};
+      plan.reference_sub[0], plan.reference_sub[1], plan.reference_sub[2]};
+  const std::array<uint32_t, 3> stride{plan.sub_width, plan.sub_width,
+                                       plan.sub_width};
   return LaunchPsycho(plan, subsampled, stride, plan.reference_sub,
                       plan.sub_width, plan.sub_width, plan.sub_height, stream);
 }
@@ -1818,10 +1834,13 @@ cudaError_t LaunchCudaButteraugliCompare(
   const auto distorted_main = ConstPsycho(distorted_main_mutable);
   cudaError_t error = cudaSuccess;
   if (plan.expanded != 0) {
-    error = LaunchExpand(distorted, distorted_stride, plan, stream);
+    error = LaunchExpand(distorted, distorted_stride,
+                         {distorted_main_mutable[0], distorted_main_mutable[1],
+                          distorted_main_mutable[2]}, plan, stream);
     if (error != cudaSuccess) return error;
     const std::array<const float*, 3> expanded{
-        plan.planes[kImage], plan.planes[kImage + 1], plan.planes[kImage + 2]};
+        distorted_main_mutable[0], distorted_main_mutable[1],
+        distorted_main_mutable[2]};
     const std::array<uint32_t, 3> stride{plan.working_width, plan.working_width,
                                          plan.working_width};
     error = LaunchPsycho(plan, expanded, stride, distorted_main_mutable,
@@ -1851,11 +1870,14 @@ cudaError_t LaunchCudaButteraugliCompare(
                              distance_stride, plan.width, plan.height, stream);
     if (error != cudaSuccess) return error;
     if (plan.multiscale != 0) {
-      error = LaunchSubsample(distorted, distorted_stride, plan, stream);
+      error = LaunchSubsample(distorted, distorted_stride,
+                              {distorted_main_mutable[0], distorted_main_mutable[1],
+                               distorted_main_mutable[2]}, plan.working_width,
+                              plan, stream);
       if (error != cudaSuccess) return error;
-      const std::array<const float*, 3> subsampled{plan.planes[kImage],
-                                                   plan.planes[kImage + 1],
-                                                   plan.planes[kImage + 2]};
+      const std::array<const float*, 3> subsampled{distorted_main_mutable[0],
+                                                   distorted_main_mutable[1],
+                                                   distorted_main_mutable[2]};
       const std::array<uint32_t, 3> stride{
           plan.working_width, plan.working_width, plan.working_width};
       error = LaunchPsycho(plan, subsampled, stride, distorted_main_mutable,

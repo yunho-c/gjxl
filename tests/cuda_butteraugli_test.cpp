@@ -8,9 +8,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include "codec/butteraugli.h"
@@ -23,6 +25,12 @@ namespace {
 constexpr float kTolerance = 1.5e-3f;
 constexpr float kIdentityTolerance = 1.0e-7f;
 constexpr float kHostPoison = -12345.0f;
+
+[[nodiscard]] bool SameBits(const std::vector<float>& a,
+                              const std::vector<float>& b) {
+  return a.size() == b.size() &&
+         std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+}
 
 struct HostImage {
   explicit HostImage(gjxl::Extent2D image_extent)
@@ -100,6 +108,46 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   }
 }
 
+[[nodiscard]] bool CheckInputUnchanged(DeviceImage& device,
+                                        const HostImage& host) {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (!device.plane[channel].Download().ok() ||
+        !device.plane[channel].GuardsIntact()) return false;
+    const std::vector<float> actual = device.plane[channel].Logical();
+    for (size_t y = 0; y < host.extent.height; ++y)
+      for (size_t x = 0; x < host.extent.width; ++x)
+        if (std::bit_cast<uint32_t>(actual[y * host.extent.width + x]) !=
+            std::bit_cast<uint32_t>(host.plane[channel][y * host.stride + x]))
+          return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool CheckMemory(gjxl::Extent2D extent,
+                                 const gjxl::DeviceButteraugliMemoryStats& memory) {
+  // Independent physical-layout oracle: 20 psycho + one cached mask + six
+  // work planes, plus the optional ten-plane reference subscale cache.
+  const size_t plane_bytes = std::max<size_t>(8, extent.width) *
+                             std::max<size_t>(8, extent.height) * sizeof(float);
+  const bool multiscale = extent.width >= 15 && extent.height >= 15;
+  const size_t sub_bytes = multiscale
+      ? ((extent.width + 1) / 2) * ((extent.height + 1) / 2) * sizeof(float) : 0;
+  const size_t reduction_bytes = ((extent.width * extent.height + 255) / 256) * sizeof(float);
+  size_t capacity = 0;
+  const auto append = [&](size_t bytes) {
+    capacity = ((capacity + 63) / 64) * 64 + bytes;
+  };
+  for (size_t i = 0; i < 27; ++i) append(plane_bytes);
+  if (multiscale) for (size_t i = 0; i < 10; ++i) append(sub_bytes);
+  append(reduction_bytes);
+  append(reduction_bytes);
+  for (size_t size : {5, 33, 15, 7, 13}) append(size * sizeof(float));
+  return memory.prepared_allocation_bytes == capacity &&
+         memory.cached_reference_bytes == 11 * plane_bytes + 10 * sub_bytes &&
+         memory.peak_comparison_scratch_bytes == 16 * plane_bytes + 2 * reduction_bytes &&
+         memory.gaussian_kernel_bytes == 73 * sizeof(float);
+}
+
 [[nodiscard]] bool CheckCase(gjxl::GpuBackend& backend, gjxl::Extent2D extent,
                              gjxl::ButteraugliOptions options, bool identity,
                              float* worst_map, double* worst_score) {
@@ -151,12 +199,7 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
     return false;
   }
   const gjxl::DeviceButteraugliMemoryStats memory = prepared->memory_stats();
-  if (memory.cached_reference_bytes == 0 ||
-      memory.gaussian_kernel_bytes != 73 * sizeof(float) ||
-      memory.peak_comparison_scratch_bytes == 0 ||
-      memory.prepared_allocation_bytes <
-          memory.cached_reference_bytes + memory.gaussian_kernel_bytes +
-              memory.peak_comparison_scratch_bytes) {
+  if (!CheckMemory(extent, memory)) {
     std::cerr << "CUDA Butteraugli memory accounting is inconsistent\n";
     return false;
   }
@@ -225,9 +268,40 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   }
   std::fill(actual.begin(), actual.end(), kHostPoison);
   if (!prepared->ReadDistanceMap({actual.data(), extent, actual_stride}).ok() ||
-      !prepared->ReadScore(&actual_score).ok() || actual != first ||
+      !prepared->ReadScore(&actual_score).ok() || !SameBits(actual, first) ||
       std::bit_cast<uint64_t>(actual_score) != first_score) {
     std::cerr << "CUDA Butteraugli comparison is not deterministic\n";
+    return false;
+  }
+  if (!identity) {
+    // Consume the same prepared reference with a different image, then
+    // restore the original distortion. Cached main/subscale data must survive.
+    FillFixture(&reference, &distorted, true);
+    if (!device_distorted.Upload(distorted) ||
+        !prepared->Compare({device_distorted.View(), map.View(), score.View()}).ok() ||
+        !prepared->ReadDistanceMap({actual.data(), extent, actual_stride}).ok() ||
+        !prepared->ReadScore(&actual_score).ok()) return false;
+    if (!std::isfinite(actual_score) || std::abs(actual_score) > kIdentityTolerance) return false;
+    for (size_t y = 0; y < extent.height; ++y)
+      for (size_t x = 0; x < extent.width; ++x)
+        if (!std::isfinite(actual[y * actual_stride + x]) ||
+            std::abs(actual[y * actual_stride + x]) > kIdentityTolerance) return false;
+    FillFixture(&reference, &distorted, false);
+    if (!device_distorted.Upload(distorted) ||
+        !prepared->Compare({device_distorted.View(), map.View(), score.View()}).ok() ||
+        !prepared->ReadDistanceMap({actual.data(), extent, actual_stride}).ok() ||
+        !prepared->ReadScore(&actual_score).ok() || !SameBits(actual, first) ||
+        std::bit_cast<uint64_t>(actual_score) != first_score) {
+      std::cerr << "CUDA Butteraugli cached reference changed during reuse\n";
+      return false;
+    }
+  }
+  if (!CheckInputUnchanged(device_reference, reference) ||
+      !CheckInputUnchanged(device_distorted, distorted) ||
+      !map.Download().ok() || !score.Download().ok() ||
+      !map.GuardsIntact() || !score.GuardsIntact() ||
+      backend.stats().successful_allocations != before_compare.successful_allocations) {
+    std::cerr << "CUDA Butteraugli reuse input/guard/allocation invariant failed\n";
     return false;
   }
   return true;
@@ -272,7 +346,8 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  const bool scoped = argc > 1 && std::string_view(argv[1]) == "--sanitizer";
   std::unique_ptr<gjxl::GpuBackend> backend;
   const gjxl::Status create = gjxl::CreateCudaBackend(&backend);
   if (create.code() == gjxl::StatusCode::kUnavailable) {
@@ -286,7 +361,7 @@ int main() {
 
   float worst_map = 0.0f;
   double worst_score = 0.0;
-  const std::array<gjxl::Extent2D, 15> extents{{
+  const std::array<gjxl::Extent2D, 26> extents{{
       {1, 1},
       {3, 7},
       {7, 3},
@@ -302,10 +377,14 @@ int main() {
       {255, 63},
       {257, 67},
       {33, 129},
+      {1, 17}, {17, 1}, {7, 17}, {17, 7}, {14, 17}, {17, 14},
+      {15, 16}, {16, 15}, {48, 49}, {49, 48}, {511, 257},
   }};
+  size_t cases = 0;
   for (size_t index = 0; index < extents.size(); ++index) {
+    if (scoped && index != 1 && index != 3 && index != 6) continue;
     gjxl::ButteraugliOptions options;
-    if (index + 1 == extents.size()) {
+    if (extents[index].width == 33 && extents[index].height == 129) {
       options = {
           .hf_asymmetry = 1.6f,
           .x_multiplier = 0.75f,
@@ -316,13 +395,18 @@ int main() {
                    &worst_score)) {
       return EXIT_FAILURE;
     }
+    ++cases;
+    std::cout << "Verified prepared scratch " << extents[index].width << 'x'
+              << extents[index].height << '\n' << std::flush;
   }
-  if (!CheckCase(*backend, {32, 24}, {}, true, &worst_map, &worst_score) ||
-      !CheckFailureInvalidation(*backend)) {
-    return EXIT_FAILURE;
+  if (!scoped) {
+    if (!CheckCase(*backend, {32, 24}, {}, true, &worst_map, &worst_score) ||
+        !CheckFailureInvalidation(*backend)) return EXIT_FAILURE;
+    ++cases;
   }
+  std::cout << "Verified " << cases << " prepared Butteraugli cases and compact memory accounting\n" << std::flush;
   std::cout << "CUDA Butteraugli passed on " << backend->name()
             << "; worst map error=" << worst_map
-            << ", worst score error=" << worst_score << ".\n";
+            << ", worst score error=" << worst_score << ".\n" << std::flush;
   return EXIT_SUCCESS;
 }

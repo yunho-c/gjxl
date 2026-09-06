@@ -12,7 +12,7 @@
   fused blur/frequency splitting, and branch-free host coefficient-order
   counting, lightweight ANS token emission, direct AC token accumulation,
   contiguous AC nonzero reduction, fused L2/final masking, and fused
-  vertical blur/low-medium construction
+  vertical blur/low-medium construction, and compact prepared Butteraugli scratch
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -26,7 +26,20 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest checkpoint against `089fce9` fuses
+below supersede them. The latest checkpoint against `e7f0bcb` reduces
+prepared Butteraugli storage from 33 to 27 full working planes through
+lifetime reuse. Captured arena requests drop by 198,921,984 bytes at
+odd 4K and 49,694,592 bytes at odd 1080p, with unchanged kernels,
+launches, transfers, and cached-reference storage. All 67 CUDA / 49 CPU
+tests, seven scoped sanitizers, 261 byte-exact full prepared-map pairs,
+46 byte-identical decoded-image pairs, and batch checks pass. Timings
+remain mixed, including +4.9% / -1.9% total GPU changes at 4K / 1080p
+and +0.2% / +0.8% / -4.0% warm whole-encode changes at 4K / 1080p /
+Flower. This establishes lower requested memory, not a stable encoder
+speedup or an equal reduction in retained VRAM. No system setting changes.
+Optimization remains ongoing, not maxed out.
+
+The preceding checkpoint against `089fce9` fuses
 three vertical Butteraugli blurs with low/medium construction, removing
 18 launches per encode and three intermediate plane writes/reads per
 psycho pass.
@@ -6700,6 +6713,264 @@ while only two Malta accumulations remain live; the full-scale final
 map must still survive subsequent half-scale psycho construction.
 This is an opportunity to investigate, not an allocation saving already
 implemented by S46.
+
+## Compact prepared Butteraugli scratch (S47)
+
+Baseline: retained S46 executables at `e7f0bcb`. This checkpoint reuses
+storage whose values are already dead; it does not change device arithmetic,
+kernel bodies, launch count, or transfers. The prepared allocation changes
+from 33 full working planes to 27: twenty psycho-image planes, one cached
+reference mask, and six reusable work planes. The optional ten-plane
+half-scale reference cache and two reduction buffers are unchanged.
+
+### Lifetime audit and implementation
+
+S45 removed the materialized L2 values, and S46 removed three intermediate
+vertical-blur outputs, but their old scratch layout still reserved twelve
+work planes. The remaining live sets fit into six. In particular, the
+full-scale comparison result survives half-scale psycho construction in the
+caller's distance map, not in the internal pre-crop/half-scale staging plane.
+That internal staging plane is written only after its other work is dead.
+
+| Working planes | Psycho construction | Difference and mask work |
+| --- | --- | --- |
+| 0-9 | Persistent main reference psycho image | Read-only reference |
+| 10-19 | Distorted psycho image | Read-only distortion until the next scale |
+| 20 | Cached main reference mask | Read-only cached mask |
+| 21-22 | Blurred RGB, then pointwise XYB | Two Malta AC accumulations |
+| 23 | Third blurred RGB / XYB plane | Mask input, then blurred distorted mask |
+| 24 | Five-tap horizontal scratch; then first 33-tap horizontal plane; then frequency scratch | Mask horizontal scratch; then pre-crop/half-scale output |
+| 25 | Second 33-tap horizontal plane | Uncached half-scale reference mask |
+| 26 | Third 33-tap horizontal plane | Fuzzy reference mask |
+
+Expanded or subsampled original RGB is staged in the first three
+not-yet-produced low-frequency output planes. Expanded reference uses
+main-reference outputs; expanded/subsampled distortion uses distorted
+outputs. Subsampled reference uses its own packed half-scale outputs,
+including their smaller row stride. These input values are dead after
+Opsin, before low/medium construction overwrites those output planes.
+
+The five-tap RGB blur writes planes 21-23. Opsin loads all six original
+and blurred RGB values for one pixel before writing its three XYB values,
+so blurred RGB and XYB may coincide pointwise. No cross-pixel dependency
+or `restrict` contract is introduced. Three distinct horizontal 33-tap
+results then occupy 24-26 until the joint vertical/low-medium pass finishes.
+Subsequent frequency passes reuse plane 24 serially.
+
+During mask work only the two Malta accumulations remain live in 21-23.
+The distorted mask's separable blur uses 23 -> 24 -> 23, with ordered
+horizontal and vertical launches, not an in-place neighborhood kernel.
+The horizontal intermediate is dead before the fused L2/final kernel
+writes plane 24. Production plans leave the unused third AC and three
+DC pointers null; the fused final kernel does not read them. The retained
+separate L2 oracle still receives all its original pointers.
+
+### Exact resource result
+
+Each removed plane saves `align_up(working_width * working_height * 4, 64)`
+requested arena bytes. Six are removed without another allocation or copy.
+Three alternating-order production profile pairs per workload directly
+confirm five allocation requests, with only the Butteraugli request changing:
+
+| Workload | Parent / candidate Butteraugli arena bytes | Saving bytes | Parent / candidate sum of five requests |
+| --- | ---: | ---: | ---: |
+| Odd 4K, 3839x2159 | 1,177,274,420 / 978,352,436 | 198,921,984 | 2,608,448,064 / 2,409,526,080 |
+| Odd 1080p, 1919x1079 | 294,121,460 / 244,426,868 | 49,694,592 | 651,957,638 / 602,263,046 |
+
+The Flower 510x532 layout formula gives 38,537,908 -> 32,026,036 arena
+bytes, saving 6,511,872 bytes; it is not a third captured allocation trace.
+Cached-reference and Gaussian-weight bytes are unchanged. The separately
+reported comparison-scratch statistic drops by six unaligned logical
+plane sizes. A permanent independent layout oracle checks all four public
+memory statistics, including every 64-byte aligned allocation boundary.
+
+These are exact requested-allocation reductions, not a promise of the same
+drop in driver-reported dedicated VRAM. Pool allocation granularity and
+retention still apply. The existing 3,220,963,328-byte pool retention
+threshold is unchanged; no memory-pool or system setting is adjusted.
+
+All 35 native Butteraugli bodies match S46 after normalizing only the
+translation-unit hash in symbol names; none is added or removed. The
+profile pairs preserve the full launch structure, including grids, blocks,
+registers, shared/local allocation, and all transfers: 418 launches at
+4K and 406 at 1080p. This is a storage-lifetime optimization, not a
+kernel-fusion or logical-traffic reduction claim.
+
+### Prepared-map differential and permanent regression coverage
+
+A retained S46 CUDA archive and the current archive are linked separately
+against the same probe object and unchanged supporting libraries. The
+probe covers 29 geometries from 1x1 through odd 4K, including skinny,
+expanded, multiscale-boundary, tile-edge, and padded-stride cases. Three
+option policies and three reuse passes produce 261 before/after pairs.
+Each case prepares its reference once, compares a distortion, compares
+identity, then restores the original distortion. Device inputs and guards
+remain intact; comparison adds no allocation; restored maps and score
+bits match their first result.
+
+The probe writes the complete padded map and double score for every pass.
+The two 399,602,628-byte files match byte for byte, not merely by a sampled
+map, aggregate score, or hash. Every row also checks unchanged cached bytes,
+the exact aligned arena saving, and the logical comparison-scratch saving.
+
+The permanent prepared-Butteraugli fixture grows to 26 geometry/option
+cases plus one identity case. It checks the independent 27-plane allocation
+formula, guarded inputs/outputs, bitwise determinism, changed-distortion
+reuse and restoration, and no extra comparison allocations. CPU map/score
+tolerances remain 1.5e-3 and identity tolerance 1e-7; observed worst errors
+are 0.000219455 / 0.000020504. Existing failure invalidation checks remain.
+The sanitizer subset explicitly exercises 3x7 expansion/crop, 8x8
+single-scale, and 17x29 multiscale, each with four comparison passes.
+
+### Timing observations, including regressions
+
+Three alternating-order GPU profile pairs use three warmups and one
+captured encode each. Total GPU kernel times in pair order are:
+
+| Workload | Parent GPU ms | Candidate GPU ms | Median paired change | Wins |
+| --- | --- | --- | ---: | ---: |
+| Odd 4K | 210.845887 / 220.239876 / 236.616386 | 221.165184 / 234.523247 / 225.129117 | +4.9% | 1/3 |
+| Odd 1080p | 34.327186 / 35.398416 / 33.953660 | 33.670398 / 34.509891 / 36.175839 | -1.9% | 2/3 |
+
+The 4K regression is retained, not discarded because the code is smaller.
+Boundary observations span 64-68 C and 262-1282 MHz, with software thermal
+and power flags sometimes active. That state limits interpretation but
+does not establish the cause of any individual timing difference.
+
+Seven alternating-order warm pairs per input use three warmups, five
+samples, all 41 phase fields, and matching output sizes. Changes below
+are medians of candidate/parent ratios within pairs, not ratios of the
+two marginal medians. Negative means faster.
+
+| Workload | Parent / candidate total median ms | Total paired change | Quantization paired change | Codestream paired change | Total wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Odd 4K | 486.394 / 491.609 | +0.2% | +0.3% | -6.7% | 2/7 |
+| Odd 1080p | 122.444 / 123.419 | +0.8% | +1.0% | +1.5% | 2/7 |
+| Flower | 27.842 / 28.775 | -4.0% | -1.6% | -3.7% | 4/7 |
+
+All observations remain in the evidence. Warm Flower includes an adverse
+27.839 -> 43.878 ms pair; the unchanged codestream phase changes
+13.155 -> 23.352 ms in that pair. The code change cannot by itself
+justify attributing unchanged host-work variation to memory reuse.
+
+Seven fresh-process cold pairs per input give:
+
+| Workload | Parent / candidate total median ms | Total paired change | Quantization paired change |
+| --- | ---: | ---: | ---: |
+| Odd 4K | 588.955 / 576.347 | +0.1% | -1.4% |
+| Odd 1080p | 169.872 / 167.766 | -1.5% | -2.9% |
+| Flower | 50.254 / 51.577 | +5.9% | +6.1% |
+
+Cold total ranges are 574.015-625.469 / 570.962-613.883 ms at 4K,
+163.441-204.461 / 159.084-226.110 ms at 1080p, and
+46.234-51.715 / 46.663-70.959 ms for Flower. The adverse cold Flower
+result remains a limitation. Warm/cold boundary state is 66 -> 72 C,
+P3 / 1282 MHz, with both software flags active. No stable whole-encoder
+speedup is demonstrated by this checkpoint.
+
+### Isolated prepared-comparison follow-up
+
+To investigate the adverse 4K trace, a short additional probe links the
+same host object separately against the frozen old/new CUDA archives.
+It prepares once, performs five warmups and eleven measured comparisons,
+and times the synchronous public `Compare` call, including its submission
+wait but excluding allocation, preparation, transfers, and readback.
+It uses bounded synthetic RGB at each extent; the 510x532 case is not
+the Flower photograph. Inputs/output guards, unchanged input values,
+no comparison allocations, full-map checksums, score bits, and the
+exact arena saving are checked for every process.
+
+Seven alternating-order pairs per extent give:
+
+| Extent | Parent / candidate median ms | Median paired change | Wins |
+| --- | ---: | ---: | ---: |
+| 3839x2159 | 88.0575 / 87.4383 | +0.25% | 3/7 |
+| 1919x1079 | 20.6830 / 20.6517 | -0.36% | 5/7 |
+| 510x532 | 1.5706 / 1.5582 | -2.00% | 5/7 |
+
+The compact layout does not reproduce the trace cohort's +4.9% 4K
+regression in this comparison-only cohort. This is not proof of the
+trace regression's cause, a same-executable control, or an end-to-end
+speedup. All observations remain, including small-case pairs
+3.3341 -> 1.5967 ms and 1.4955 -> 1.5681 ms. Boundary state is
+67 -> 72 C, P3 / 1282 MHz, with both software flags active.
+The production sources, libraries, and thirteen frozen executables are
+not rebuilt or modified for this follow-up.
+
+The source and scripts are `s47_prepared_timing.cpp`,
+`s47_prepared_timing.py`, and `s47_prepared_timing_run.ps1`; the
+two executables have `s47_prepared_timing_hashes.json`. All 21 pairs,
+eleven raw samples per process, outputs, summaries, and boundary
+observations are retained and checked by the final validator.
+
+### Final qualification and retention
+
+Both complete suites pass: 67 CUDA and 49 CPU tests. The 46-pair decoded
+image matrix covers the established seven inputs at distances 0.5/1.2/3.0
+and effort 7, plus sample/Flower at effort 9, under encoding-only and
+requested-final-score policies. Encoded bytes, decoded Butteraugli scores,
+strategy reports, and requested score reports match S46, and collecting
+the final score does not change encoded output. The pinned decoder/metric,
+linear-RGB interpretation, and quality tolerances are unchanged.
+
+Current-version batch checks preserve serial/batch bytes. Median paired
+batch-versus-serial speedups for sizes 1/2/4 are 0.952/1.214/1.420 at
+fully-resident 1080p and 0.955/1.538/1.994 at maximum-throughput 1080p.
+Fully-resident 4K gives 1.116/1.071 for sizes 1/2. These are within-version
+scheduling comparisons, not S47-versus-S46 improvements. Individual size-1
+observations regress to 0.693x at maximum-throughput 1080p.
+
+All seven scoped CUDA sanitizer checks pass: prepared Butteraugli
+memcheck/initcheck/synccheck/racecheck, and full AQ
+memcheck/initcheck/synccheck. Prepared racecheck completes in about
+14 seconds, with zero errors or hazards. AQ memcheck additionally checks
+stream-ordered races and full leaks, reporting zero leaked bytes; AQ
+memory/init/sync checks take about 35/23/17 seconds. Full-AQ racecheck
+is not repeated. The earlier S30 approximately 52-minute aborted run
+remains an abort, not a pass or a confirmed firewall failure. The entire
+serial final build/test/benchmark/quality/batch/sanitizer workflow takes
+about seven minutes and encounters no observed administrator/firewall block.
+
+Thirteen qualified production executables are frozen as
+`build-cuda-ninja/profiles/s47_retained_*.exe`, with source/copy SHA-256
+checks in `s47_final_binary_hashes.json`. The prepared differential's
+two executables, common object/source, old/new CUDA archives, and original
+CUDA source/header snapshots have a separate `s47_prepared_hashes.json`.
+The fixture helpers included by the probe are verified unchanged from
+S46; the CUDA library is unchanged between the original map probe and
+final qualification (the final build only rebuilds the strengthened test).
+
+The final validator checks both production binary manifests, probe
+artifacts/archives, unchanged oracle sources and all 35 native bodies,
+67/49 test logs, seven sanitizer summaries and scoped completion markers,
+the permanent 27-case completion marker, all 46 image/policy checks,
+21 warm + 21 cold pairs, six identical-structure profile pairs, complete
+261-pair map bytes and memory deltas, and all three batch cohorts.
+
+Retain the compact layout for its proven six-plane storage reduction,
+explicit non-overlapping lifetime argument, and complete correctness
+qualification. Keep the adverse timing observations visible; neither
+GPU execution nor whole-encoder speed has a stable universal improvement.
+This resource improvement does not establish that CUDA is maxed out.
+
+Reproduction/evidence scripts under the ignored profile directory include
+`s47_prepared_probe{.cpp,_run.ps1}`, `s47_prepared_compare.py`,
+`s47_native.py`, `s47_profile_pairs.ps1`, `s47_profile_summary.py`,
+`s47_phase_build.ps1`, `s47_phase_compare.py`, `s47_report.py`,
+`s47_final_run.ps1`, `s47_final_quality.py`, `s47_sanitizers.ps1`,
+`s47_freeze.ps1`, and `s47_final_validate.py`. Raw maps, all traces and
+SQLite exports, untrimmed timing observations, decoded-image reports,
+and terminal sanitizer logs are retained. No security, cooling, power,
+clock, service, or priority settings are changed.
+
+A next bounded lead is the three five-tap vertical RGB blurs immediately
+followed by pointwise Opsin. In the current candidate traces that bundle
+has 24 launches and median 13.229 / 2.195 ms at odd 4K / 1080p.
+Keeping three horizontal RGB intermediates in the six-plane work set
+could permit one joint vertical/pointwise kernel, subject to exact
+mirroring, tap order, non-finite handling, register pressure, and guarded
+differential checks. This is an investigation lead, not an implemented
+fusion or a measured speedup.
 
 ## Work that should not lead the next cycle
 
