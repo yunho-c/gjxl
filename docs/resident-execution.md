@@ -161,6 +161,9 @@ cleared scans, plus ordinary/exhaustive context-map selection and replacement.
 The [whole-serializer plan](resident-serializer-storage-planning.md) composes
 these bounds with candidate/dispatcher storage, current automatic nesting,
 header and section writers, assembly and retained output publication.
+The [frontend representation bounds](resident-frontend-storage-planning.md)
+cover image planes, owned CPU frames, packed prepared forward coefficients and
+atomic reconstruction scratch, including tile lists and dispatch backing.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 
@@ -190,9 +193,9 @@ Deliverables:
   capacity. Any staged reservation growth needs a demonstrated progress rule.
 
 The resource record specifies the configuration surface, defaults, domain
-ownership, reservation strategy and treatment of retained batch results. Concrete
-whole-workflow estimators (including host/serializer bounds) and API integration
-remain to be implemented; those recorded decisions are not existing API promises.
+ownership, reservation strategy and treatment of retained batch results. Remaining
+frontend bounds, combined whole-workflow estimators and API integration remain
+to be implemented; those recorded decisions are not existing API promises.
 
 Acceptance:
 

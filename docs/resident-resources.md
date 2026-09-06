@@ -30,8 +30,12 @@ including cleared-vector capacity and worker-reduction overlap.
 The [whole-serializer plan](resident-serializer-storage-planning.md) composes
 these with candidate and dispatcher arrays, current nested automatic workers,
 header/section writing, assembly and the fresh retained codestream copy.
-Frontend/device/attempt/diagnostic and aggregate retained-batch-result lifetimes
-still need their combined workflow envelope and public domain integration.
+The [frontend representation bounds](resident-frontend-storage-planning.md)
+cover image planes, owned CPU frames, packed prepared forward coefficients,
+tile lists/dispatch and the full atomic reconstruction scratch image.
+Remaining frontend fields/search/perceptual-state bounds and their combined
+device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
+workflow envelope and public domain integration.
 Whole-workflow planning and admission remain pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
@@ -110,10 +114,11 @@ allocation adapters are not wired by the foundation commit.
   or new streaming-output API. Transfer results out of managed accounting only
   at the existing public ownership handoff.
 
-The device recipes are now shared with actual allocation, and the CPU serializer
-has a complete conservative storage plan. Frontend host bounds and their combined
-device/attempt/result envelope, the API adapters, and final allocation coverage
-still require implementation and tests before workflow enforcement can land.
+The device recipes are now shared with actual allocation, the CPU serializer
+has a complete conservative storage plan, and frontend representation bounds
+are tested. Remaining host bounds and their combined device/attempt/result
+envelope, the API adapters, and final allocation coverage still require
+implementation and tests before workflow enforcement can land.
 In particular, excluding all CPU allocations or retained batch results to make
 a GPU-only limiter pass would not satisfy this design or the parent roadmap.
 

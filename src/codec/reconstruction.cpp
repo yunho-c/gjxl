@@ -19,6 +19,7 @@
 #include "codec/dc_conversion.h"
 #include "codec/dc_quantization.h"
 #include "codec/dct.h"
+#include "codec/frontend_storage_plan.h"
 #include "codec/quantization.h"
 #include "codec/reconstruction_internal.h"
 #include "core/block_grid.h"
@@ -45,8 +46,10 @@ Status RunParallelForwardTransforms(
   Function&& function) {
 
   if (count == 0) return Status::Ok();
-  constexpr size_t kMinimumParallelCoefficients = 256 * 256;
-  constexpr size_t kMaximumWorkers = 8;
+  constexpr size_t kMinimumParallelCoefficients =
+    frontend_storage_internal::kMinimumParallelForwardCoefficients;
+  constexpr size_t kMaximumWorkers =
+    frontend_storage_internal::kMaximumForwardWorkers;
   const size_t hardware_workers = std::max<size_t>(
     std::thread::hardware_concurrency(), 1);
   const size_t automatic_worker_count =
