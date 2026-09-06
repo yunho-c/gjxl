@@ -12974,6 +12974,122 @@ failed sanitizer evidence. Frozen hashes cover dependencies, retained runtime
 and source/document snapshots; `s74_validate.py --frozen` checks the bundle,
 with `--current` additionally checking the current source/runtime snapshots.
 
+## Defer provisional DCT8 metadata (S75)
+
+S75 retains an API-preserving implementation of the S74 finding. Only a
+complete resident frontend with an all-DCT8 grid can defer metadata. The
+backend checks active EPF values and conservatively bounds batch launches and
+record offsets before device allocation. Mixed grids and large geometries use
+the original eager builder and its validation. No public option or signature
+changes, and exact/frame-only preparation is unaffected.
+
+The prepared object owns copies of the initial strategy grid and active EPF
+values. It reserves the same device arenas and uploads quantization tables,
+but postpones construction and upload of the transform plan. Initial field
+generation and strategy-input views do not require that plan. `Reconfigure`
+can replace pending state directly; if a caller instead uses the initial grid,
+`EnsureMetadata` builds/uploads/commits it under the existing operation mutex
+before adjustment, resident policy setup, evaluation or host-input policy.
+Host build failure leaves pending state retryable; transfer failure invalidates
+the object, as in existing reconfiguration. There is no steady-state device
+allocation. Direct first use still performs the necessary plan construction;
+this change saves discarded frontend work, not all metadata work.
+
+### Qualification and the S74 logging issue
+
+The new CUDA AQ fixture checks invalid EPF, incomplete grids and color-tile
+crossing before any allocation/submission. It exercises seven first-use cases
+against explicitly reconfigured frontend objects: direct evaluation,
+adjustment, resident policy setup, host-input policy, replacement while
+pending, submission failure and completion failure. Caller strategy/EPF
+storage is overwritten and destroyed before use, and invalid reconfiguration
+must preserve pending state. Successful cases compare fields, masks, block
+maps, scores, quantizers and encoded frames across eager/lazy and repeated
+calls. Failure cases check unchanged caller outputs and invalidation. Internal
+state queries are quiescent test hooks, not new public capabilities.
+
+The rebuilt release passes all 73 CUDA-enabled tests and all 50 CPU-only
+tests. The initial CPU command selected a benchmark-only build with zero
+tests; that log is preserved and is not counted as a pass. The corrected
+50-test run is separate. Full AQ memcheck, initcheck and synccheck include the
+new lifecycle fixtures and pass with zero reported errors/leaks. No new host
+ASan or GPU racecheck run is claimed for this host-only change.
+
+All 58 fresh candidate encodes, independent decodes and perceptual-metric
+runs match the frozen S70 bitstreams, decoded pixels, strategy/score reports
+and metric values. The matrix retains the three distances, effort-9 cases,
+high-density and maximum-compression variants of that corpus. Another 18
+same-binary control encodes match retained outputs. These checks supplement,
+rather than replace, the invalid-input and lifecycle tests.
+
+The missing S74 sanitizer application output is resolved by explicit flushing
+in ignored copies of the diagnostic evaluator and encoder. Those are the only
+source differences: flush the mode marker and the final console report. All
+six planned full scored memcheck/initcheck encodes then capture the expected
+markers, report zero errors/leaks and produce exact retained bitstreams.
+The two failed S74 wrappers remain unchanged; they are not retrospectively
+counted. Production console behavior is not changed by this investigation.
+
+Five executable native audits preserve all 203 retained S70 GPU bodies,
+including the flush-only diagnostic, same-binary controls and production
+encoder. Removing the diagnostic include/helper call exactly reconstructs
+the production resident source. The full release rebuild also refreshes the
+previously restored kernel/test objects; stale S72 objects are not relied on.
+No permission/firewall block occurs and no security, counter-access, clock,
+power or cooling setting is changed.
+
+### Complete-workflow measurements
+
+All builds, native audits and correctness jobs finish before timing starts.
+The same-binary comparison selects eager modes 0/2 or production lazy mode 1;
+mode 2 is a duplicate eager control. Warm/cold cohorts have 54 process windows
+each, with every ordering of three modes for each input. Warm windows use
+three warmups/seven samples; cold windows use zero/one. Separately built
+public benchmarks compare retained S70 and production with eight alternating
+pairs per input, three warmups/five samples or zero/one: another 96 windows.
+All 204 windows, raw fields, encoded-size checks, adverse ranges and duplicate
+results are retained. Encoded sizes alone are not the correctness gate.
+
+| Input | Same-binary warm quantization / total | Public warm quantization / total | Same-binary cold total | Public cold total |
+| --- | ---: | ---: | ---: | ---: |
+| Padded 4K | -4.22% / -3.12% | -3.66% / -1.77% | +5.63% | -6.03% |
+| Padded 1080p | -5.93% / -2.73% | -5.07% / -3.46% | -1.09% | -0.81% |
+| Flower | -2.78% / -1.79% | -1.19% / +3.57% | +5.87% | +2.57% |
+
+Entries are medians of paired ratios. Same-binary warm 4K quantization saves
+10.30 ms and total saves 11.04 ms, both winning all six pairs; the phase gain
+against duplicate mode 2 is 3.55%. Warm 1080p phase and total also win all six
+pairs. Public warm 4K total wins all eight pairs; 1080p wins six. This supports
+retaining the large-image warm improvement, not a universal speedup claim.
+Cold total results are mixed, and the small-image public totals regress while
+same-binary warm total improves. CPU serialization variation remains large.
+No cold or small-image net benefit is asserted, and those cases remain open
+for investigation rather than excluded from the evidence.
+
+### Transfer and critical-path evidence
+
+Four reverse-order warm 4K captures preserve all 373 kernel launches and
+their dimensions/register/shared-memory fingerprints. Allocation API counts
+and four memsets are unchanged. Copy count drops from 54 to 49, removing only
+the provisional anchors (1,036,800 bytes), EPF (129,600), color records
+(3,110,400), color-tile offsets (8,164) and packing offsets (1,036,800):
+5,321,764 host-to-device bytes per encode. The entire remaining ordered copy
+sequence is identical in both paired comparisons.
+
+The frontend GPU gap changes from 26.01 to 10.20 ms in one pair and from
+30.20 to 18.53 ms in the other. These instrumented intervals support the host
+attribution; they are not added to unprofiled encoding savings. GPU arithmetic
+has not been accelerated or changed. Remaining host strategy preparation,
+readback/frame assembly, serialization and kernel costs are still relevant;
+the backend is not considered maxed out.
+
+The ignored `s75_*` bundle preserves sources, binaries, all passing and failed
+diagnostics, raw measurements, decoded outputs and traces. Reconstruction and
+frozen artifact/dependency/runtime/source hashes are checked by
+`s75_validate.py --frozen`; `--current` additionally checks the current
+retained source/runtime snapshots. S70 remains preserved as the parent
+runtime, while the S75 candidate is now retained.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

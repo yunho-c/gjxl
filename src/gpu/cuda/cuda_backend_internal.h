@@ -304,6 +304,10 @@ class CudaBackend final : public GpuBackend,
 [[nodiscard]] Status GetCudaResidentReconstructionStagingBytesForTest(
     const PreparedAqEvaluation& prepared, size_t* bytes);
 
+// Internal lifecycle qualification hook. The caller must quiesce the object.
+[[nodiscard]] Status GetCudaResidentMetadataPendingForTest(
+    const PreparedAqEvaluation& prepared, bool* pending);
+
 // Internal overwrite-coverage hook. The caller must quiesce the object.
 [[nodiscard]] Status PoisonCudaResidentCoefficientReadbackForTest(
     PreparedAqEvaluation& prepared, int32_t value);

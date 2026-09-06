@@ -1139,6 +1139,20 @@ remains unresolved. No production change is retained. An API-preserving
 lazy metadata implementation and its lifecycle/error tests remain open.
 No firewall cause is established or security setting changed.
 
+[S75](cuda-optimization-s1.md#defer-provisional-dct8-metadata-s75) retains
+owned, validated pending DCT8 metadata for the fully resident frontend.
+Reconfiguration replaces it without constructing the discarded plan; direct
+use realizes it under the existing lock. At 4K this removes five uploads
+(5.32 MB), preserving all 373 launches and every other copy. Warm public total
+time improves 1.77% at 4K and 3.46% at 1080p; cold and small-image results
+remain mixed, with small-image public regressions preserved. Qualification
+passes 73 CUDA-enabled/50 CPU-only tests, three full AQ sanitizer checks,
+58 exact fresh decoded-quality cases and all 203 unchanged native GPU bodies.
+Explicit flushing in diagnostic copies resolves S74's missing sanitizer
+output, with six full encode checks passing. No security settings change.
+Remaining host and GPU bottlenecks are still open; this is not a maxed-out
+claim.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

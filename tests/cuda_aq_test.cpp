@@ -30,6 +30,7 @@
 #include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/input_preparation.h"
 
 namespace {
@@ -1461,6 +1462,276 @@ bool CheckPreparedReuseAndFailure(
   return true;
 }
 
+bool CheckDeferredResidentMetadata(gjxl::GpuBackend &gpu,
+                                   const ImageStorage &source,
+                                   const ImageStorage &opsin) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  const size_t count = blocks.width * blocks.height;
+  const size_t sharpness_stride = blocks.width + 5;
+  gjxl::AdaptiveQuantizationOptions options;
+  const auto preparation = [&](const gjxl::AcStrategyGrid &grid,
+                               const std::vector<uint8_t> &sharpness) {
+    return gjxl::AqEvaluationPreparation{
+        .original_linear_rgb = source.View(),
+        .coding_opsin = opsin.View(),
+        .strategies = &grid,
+        .epf_sharpness = {sharpness.data(), blocks, sharpness_stride},
+        .options = {options.profile, options.butteraugli},
+        .resident_initial_cfl = true,
+        .frame_only_resident_initial_quant = true,
+        .resident_ac_strategy_inputs = true,
+        .resident_quantization = true,
+        .coefficient_decision_mode =
+            gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant};
+  };
+  const auto pending = [&](const gjxl::PreparedAqEvaluation &prepared,
+                           bool expected) {
+    bool value = !expected;
+    return Check(gjxl::cuda_internal::GetCudaResidentMetadataPendingForTest(
+                     prepared, &value),
+                 "Query pending CUDA metadata") &&
+           value == expected;
+  };
+  const auto create_grid = [&](gjxl::AcStrategyGrid *grid,
+                               std::vector<uint8_t> *sharpness) {
+    if (!Check(gjxl::AcStrategyGrid::Create(blocks, grid),
+               "Create pending CUDA strategy grid"))
+      return false;
+    grid->fill_dct8();
+    // Padding is intentionally invalid; only active values may be examined.
+    sharpness->assign(sharpness_stride * blocks.height, 255);
+    for (size_t y = 0; y < blocks.height; ++y)
+      for (size_t x = 0; x < blocks.width; ++x)
+        (*sharpness)[y * sharpness_stride + x] = (x + 3 * y) % 8;
+    return true;
+  };
+  for (int invalid = 0; invalid < 3; ++invalid) {
+    gjxl::AcStrategyGrid grid;
+    std::vector<uint8_t> sharpness;
+    if (!create_grid(&grid, &sharpness))
+      return false;
+    if (invalid == 0)
+      sharpness[(blocks.height - 1) * sharpness_stride + blocks.width - 1] = 8;
+    if (invalid == 1)
+      grid.clear();
+    if (invalid == 2) {
+      grid.clear();
+      if (!Check(grid.Set(7, 0, gjxl::AcStrategyType::kDct16x16),
+                 "Create crossing pending CUDA strategy"))
+        return false;
+      grid.fill_empty_dct8();
+    }
+    const auto before = gpu.stats();
+    std::unique_ptr<gjxl::PreparedAqEvaluation> rejected;
+    const auto status =
+        gjxl::PrepareAqEvaluation(gpu, preparation(grid, sharpness), &rejected);
+    if (status.code() != gjxl::StatusCode::kInvalidArgument ||
+        rejected != nullptr ||
+        gpu.stats().successful_allocations != before.successful_allocations ||
+        gpu.stats().committed_submissions != before.committed_submissions) {
+      std::cerr << "Pending CUDA metadata accepted or processed invalid "
+                   "preparation\n";
+      return false;
+    }
+  }
+
+  // Each lazy object is compared with a full frontend whose DCT8 metadata was
+  // explicitly realized by Reconfigure. Source/EPF owners die before use.
+  struct Result {
+    std::vector<float> quant, strategy, pixel, blocks;
+    std::vector<double> scores;
+    std::vector<uint8_t> bytes;
+    double score = 0.0;
+    gjxl::QuantizerParams quantizer;
+  };
+  float quant_dc = 0.0f;
+  if (!Check(gjxl::ComputeInitialQuantDc(1.0f, &quant_dc),
+             "Create pending CUDA DC quantization"))
+    return false;
+  // Evaluate, adjustment, resident policy setup, host-input policy, replacing
+  // the pending plan, submission failure and completion failure respectively.
+  for (int first_use = 0; first_use < 7; ++first_use) {
+    Result reference;
+    for (bool eager : {true, false}) {
+      std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+      {
+        gjxl::AcStrategyGrid grid;
+        std::vector<uint8_t> sharpness;
+        if (!create_grid(&grid, &sharpness) ||
+            !Check(gjxl::PrepareAqEvaluation(gpu, preparation(grid, sharpness),
+                                             &prepared),
+                   "Prepare pending CUDA metadata") ||
+            !pending(*prepared, true))
+          return false;
+        if (eager &&
+            !Check(prepared->Reconfigure(
+                       grid, preparation(grid, sharpness).epf_sharpness),
+                   "Realize eager CUDA metadata oracle"))
+          return false;
+        gjxl::AcStrategyGrid invalid;
+        if (!Check(gjxl::AcStrategyGrid::Create(blocks, &invalid),
+                   "Create invalid pending reconfiguration"))
+          return false;
+        const auto before = gpu.stats();
+        if (prepared->Reconfigure(invalid,
+                                  preparation(grid, sharpness).epf_sharpness)
+                    .code() != gjxl::StatusCode::kInvalidArgument ||
+            gpu.stats().successful_allocations !=
+                before.successful_allocations ||
+            gpu.stats().committed_submissions != before.committed_submissions ||
+            !pending(*prepared, !eager))
+          return false;
+        if (first_use == 4) {
+          grid.clear();
+          if (!Check(grid.Set(0, 0, gjxl::AcStrategyType::kDct16x16),
+                     "Create replacement pending CUDA strategy"))
+            return false;
+          grid.fill_empty_dct8();
+          if (!Check(prepared->Reconfigure(
+                         grid, preparation(grid, sharpness).epf_sharpness),
+                     "Replace pending CUDA metadata") ||
+              !pending(*prepared, false))
+            return false;
+        }
+        grid.clear();
+        std::fill(sharpness.begin(), sharpness.end(), 255);
+      }
+      const auto allocations = gpu.stats().successful_allocations;
+      Result result;
+      result.quant.resize(count);
+      result.strategy.resize(count);
+      result.pixel.resize(kPaddedExtent.width * kPaddedExtent.height);
+      result.blocks.assign(count, -991.0f);
+      result.score = -1234.0;
+      result.quantizer = {1234, 5678};
+      if (!Check(
+              prepared->ComputeInitialQuantization(
+                  {1.0f, 1.0f},
+                  {.quant_field = {result.quant.data(), blocks, blocks.width},
+                   .strategy_mask = {result.strategy.data(), blocks,
+                                     blocks.width},
+                   .pixel_mask = {result.pixel.data(), kPaddedExtent,
+                                  kPaddedExtent.width}}),
+              "Compute initial field with pending CUDA metadata") ||
+          !pending(*prepared, !eager && first_use != 4))
+        return false;
+      gjxl::ResidentAcStrategyInputs strategy_inputs;
+      if (!Check(prepared->GetResidentAcStrategyInputs(&strategy_inputs),
+                 "Get strategy inputs with pending CUDA metadata") ||
+          strategy_inputs.quant_field.buffer == nullptr ||
+          !pending(*prepared, !eager && first_use != 4))
+        return false;
+      if (first_use == 1) {
+        std::vector<float> adjusted(count);
+        if (!Check(prepared->AdjustQuantFieldResident(
+                       1.0f, {result.quant.data(), blocks, blocks.width},
+                       {adjusted.data(), blocks, blocks.width}),
+                   "Adjust field with pending CUDA metadata") ||
+            !pending(*prepared, false))
+          return false;
+        result.quant = std::move(adjusted);
+      }
+      if (first_use == 2) {
+        auto *encoding = dynamic_cast<
+            gjxl::aq_evaluation_internal::PreparedAqEncodingInitialQuantization
+                *>(prepared.get());
+        gjxl::aq_evaluation_internal::ResidentEncodingPolicySetup setup;
+        if (encoding == nullptr ||
+            !Check(encoding->PrepareResidentEncodingPolicy(1.0f, &setup),
+                   "Prepare policy with pending CUDA metadata") ||
+            !pending(*prepared, false))
+          return false;
+        result.scores = {setup.quant_dc, setup.lower_bound, setup.upper_bound};
+      }
+      if (!Check(prepared->PrepareInvariantColorCorrelationResident(
+                     {result.quant.data(), blocks, blocks.width}, quant_dc),
+                 "Retain invariant field with pending CUDA metadata") ||
+          !pending(*prepared, !eager && first_use != 1 && first_use != 2 &&
+                                  first_use != 4))
+        return false;
+      gjxl::VarDctEncoderFrame frame;
+      gjxl::AqEvaluationOutput::Final final{.frame = &frame};
+      const gjxl::AqEvaluationInput input{
+          .quant_field = {result.quant.data(), blocks, blocks.width},
+          .quant_dc = quant_dc};
+      const gjxl::AqEvaluationOutput output{
+          .block_distance_map = {result.blocks.data(), blocks, blocks.width},
+          .score = &result.score,
+          .quantizer = &result.quantizer,
+          .final = &final};
+      if (first_use >= 5) {
+        if (!Check(gjxl::ArmNextCudaSubmissionFailureForTest(
+                       gpu, first_use == 5, first_use == 6),
+                   "Arm first-use CUDA metadata failure"))
+          return false;
+        if (prepared->Evaluate(input, output).ok() || frame.valid() ||
+            result.score != -1234.0 || result.quantizer.global_scale != 1234 ||
+            result.quantizer.quant_dc != 5678 ||
+            !std::ranges::all_of(result.blocks,
+                                 [](float v) { return v == -991.0f; }) ||
+            prepared->Evaluate(input, output).code() !=
+                gjxl::StatusCode::kFailedPrecondition ||
+            gpu.stats().successful_allocations != allocations) {
+          std::cerr << "First-use CUDA metadata failure was not "
+                       "atomic/invalidating\n";
+          return false;
+        }
+        continue;
+      }
+      const auto equal = [](const Result &a, const Result &b) {
+        return a.quant == b.quant && a.strategy == b.strategy &&
+               a.pixel == b.pixel && a.blocks == b.blocks &&
+               a.scores == b.scores && a.bytes == b.bytes &&
+               a.score == b.score &&
+               a.quantizer.global_scale == b.quantizer.global_scale &&
+               a.quantizer.quant_dc == b.quantizer.quant_dc;
+      };
+      Result first_result;
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        if (first_use == 3) {
+          if (!Check(prepared->EvaluateResidentButteraugliPolicy(
+                         {.adjusted_initial_quant_field = input.quant_field,
+                          .quant_dc = quant_dc,
+                          .butteraugli_target = 1.0f,
+                          .lower_bound = 0.1f,
+                          .upper_bound = 10.0f,
+                          .iterations = 1},
+                         {.block_distance_map = output.block_distance_map,
+                          .score_history = &result.scores,
+                          .frame = &frame}),
+                     "Evaluate host policy with pending CUDA metadata"))
+            return false;
+        } else if (!Check(prepared->Evaluate(input, output),
+                          "Evaluate with pending CUDA metadata"))
+          return false;
+        if (!frame.valid() || !pending(*prepared, false) ||
+            !Check(gjxl::EncodeVarDctCodestream(frame, &result.bytes),
+                   "Serialize pending CUDA metadata result") ||
+            gpu.stats().successful_allocations != allocations)
+          return false;
+        if (repeat == 0)
+          first_result = result;
+        else if (!equal(first_result, result)) {
+          std::cerr << "Repeated CUDA metadata use changed its result\n";
+          return false;
+        }
+      }
+      if (eager)
+        reference = result;
+      else if (!equal(reference, result)) {
+        std::cerr
+            << "Lazy CUDA metadata differs from explicit reconfiguration\n";
+        return false;
+      }
+    }
+  }
+  std::cout
+      << "Verified deferred CUDA metadata lifecycle and failure contracts.\n"
+      << std::flush;
+  return true;
+}
+
 bool CheckPublicWorkflow(
   gjxl::GpuBackend& gpu,
   const ImageStorage& source) {
@@ -1761,6 +2032,7 @@ int main() {
       !CheckResidentFrontend(*gpu, source, opsin) ||
       !CheckResidentFrontend(*gpu, noisy_source, noisy_opsin) ||
       !CheckPreparedReuseAndFailure(*gpu, source, opsin) ||
+      !CheckDeferredResidentMetadata(*gpu, source, opsin) ||
       !CheckPublicWorkflow(*gpu, source) ||
       !CheckConcurrentPublicWorkflow(*gpu)) {
     return EXIT_FAILURE;

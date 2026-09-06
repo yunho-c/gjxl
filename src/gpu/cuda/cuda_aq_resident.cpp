@@ -237,6 +237,8 @@ class CudaPreparedResidentAqEvaluation final
     return Status::Ok();
   }
 
+  bool metadata_pending_for_test() const noexcept { return metadata_pending_; }
+
   Status Prepare(const AqEvaluationPreparation& preparation) {
     const bool has_resident_original =
       preparation.resident_original_linear_rgb.plane[0].buffer != nullptr ||
@@ -370,9 +372,14 @@ class CudaPreparedResidentAqEvaluation final
                               : static_cast<int>((filter_stage_count_ - 1) % 2);
 
     Metadata metadata;
-    status = BuildMetadata(*preparation.strategies, preparation.epf_sharpness,
-                           &metadata);
+    status = DeferInitialDct8Metadata(*preparation.strategies,
+                                     preparation.epf_sharpness);
     if (!status.ok()) return status;
+    if (!metadata_pending_) {
+      status = BuildMetadata(*preparation.strategies, preparation.epf_sharpness,
+                             &metadata);
+      if (!status.ok()) return status;
+    }
     const size_t source_dispatches =
         source_count_ / 256 + (source_count_ % 256 != 0);
     const size_t block_dispatches =
@@ -433,9 +440,17 @@ class CudaPreparedResidentAqEvaluation final
         if (!status.ok()) return status;
       }
     }
-    status = UploadMetadata(metadata, quant_tables);
-    if (!status.ok()) return status;
-    CommitMetadata(std::move(metadata));
+    if (metadata_pending_) {
+      const CudaHostToDeviceCopy tables{
+          quant_tables_device_.buffer, quant_tables.data(),
+          quant_tables.size() * sizeof(float), quant_tables_device_.offset_bytes};
+      status = backend_->CopyHostToDeviceBatch(std::span(&tables, 1));
+      if (!status.ok()) return status;
+    } else {
+      status = UploadMetadata(metadata, quant_tables);
+      if (!status.ok()) return status;
+      CommitMetadata(std::move(metadata));
+    }
     InitializeKernelParams();
 
     if (options_.metric == AqEvaluationMetric::kButteraugli) {
@@ -482,7 +497,9 @@ class CudaPreparedResidentAqEvaluation final
       return Status::FailedPrecondition(
           "CUDA resident AQ evaluation was invalidated");
     }
-    Status status = UploadPlane(*backend_, input, quant_field_device_);
+    Status status = EnsureMetadata();
+    if (!status.ok()) return status;
+    status = UploadPlane(*backend_, input, quant_field_device_);
     if (!status.ok()) return Invalidate(status);
     float mean_max_mixer = 1.0f;
     constexpr float kMixerLimit = 1.54138f;
@@ -581,6 +598,8 @@ class CudaPreparedResidentAqEvaluation final
       return Status::FailedPrecondition(
           "CUDA resident initial quantization is unavailable");
     }
+    Status status = EnsureMetadata();
+    if (!status.ok()) return status;
     resident_encoding_policy_ready_ = false;
     invariant_color_correlation_ready_ = false;
     forward_coefficients_ready_ = false;
@@ -595,7 +614,7 @@ class CudaPreparedResidentAqEvaluation final
     }
     AdjustmentContext context{this, mean_max_mixer, true};
     std::unique_ptr<GpuSubmission> submission;
-    Status status = backend_->SubmitCompute(
+    status = backend_->SubmitCompute(
         &CudaPreparedResidentAqEvaluation::EncodeAdjustment, &context,
         &submission);
     if (!status.ok() || submission == nullptr) {
@@ -722,6 +741,8 @@ class CudaPreparedResidentAqEvaluation final
       return Status::FailedPrecondition(
           "CUDA resident final color correlation was not prepared");
     }
+    status = EnsureMetadata();
+    if (!status.ok()) return status;
     const bool reconstruction_requested =
         output.final != nullptr &&
         MutableImageSpecified(output.final->reconstructed_linear_rgb);
@@ -963,7 +984,10 @@ class CudaPreparedResidentAqEvaluation final
         return Status::FailedPrecondition(
             "CUDA resident encoding policy setup does not match");
       }
-    } else {
+    }
+    status = EnsureMetadata();
+    if (!status.ok()) return status;
+    if (!resident_policy_input) {
       status = UploadPlane(*backend_, input.adjusted_initial_quant_field,
                            quant_field_device_);
       if (!status.ok()) return Invalidate(status);
@@ -1358,6 +1382,78 @@ class CudaPreparedResidentAqEvaluation final
       *initial_color_correlation = std::move(candidate_color);
     }
     resident_initial_ready_ = true;
+    return Status::Ok();
+  }
+
+  Status DeferInitialDct8Metadata(const AcStrategyGrid &strategies,
+                                  ConstPlaneU8View epf_sharpness) {
+    // The resident frontend normally replaces this provisional grid after
+    // selecting strategies. Initial quantization uses only pixel/field data.
+    // Keep owned, validated state so direct prepared use still works, without
+    // constructing/uploading a transform plan that Reconfigure discards.
+    // Other grids and large geometries retain the full eager validation path.
+    if (!resident_frontend_ ||
+        coefficient_count_ > std::numeric_limits<uint32_t>::max() ||
+        3 * block_count_ > backend_->state_->maximum_grid_x ||
+        coefficient_count_ / 256 + (coefficient_count_ % 256 != 0) >
+            backend_->state_->maximum_grid_x) {
+      return Status::Ok();
+    }
+    bool all_dct8 = true;
+    size_t anchors = 0;
+    Status status =
+        strategies.ForEachAnchor([&](size_t, size_t, AcStrategyType strategy) {
+          all_dct8 &= strategy == AcStrategyType::kDct8;
+          ++anchors;
+          return Status::Ok();
+        });
+    if (!status.ok())
+      return status;
+    if (!all_dct8 || anchors != block_count_)
+      return Status::Ok();
+    // Every DCT8 anchor fits its color tile and AC group; the geometry checks
+    // above also bound all batch/record offsets and launch sizes. EPF values
+    // must still be rejected now, before any device allocation or submission.
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      if (std::ranges::any_of(
+              std::span(epf_sharpness.Row(y), block_extent_.width),
+              [](uint8_t value) { return value >= 8; })) {
+        return Status::InvalidArgument(
+            "CUDA resident AQ strategy or EPF value is unsupported");
+      }
+    }
+    try {
+      strategies_ = strategies;
+      epf_sharpness_.resize(block_count_);
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        std::copy_n(epf_sharpness.Row(y), block_extent_.width,
+                    epf_sharpness_.data() + y * block_extent_.width);
+      }
+    } catch (const std::bad_alloc &) {
+      return Status::OutOfMemory(
+          "Unable to retain CUDA resident AQ strategy metadata");
+    } catch (const std::length_error &) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ strategy metadata is too large");
+    }
+    metadata_pending_ = true;
+    return Status::Ok();
+  }
+
+  // Called with mutex_ held, only after the public request is validated.
+  Status EnsureMetadata() {
+    if (!metadata_pending_)
+      return Status::Ok();
+    Metadata metadata;
+    Status status = BuildMetadata(
+        strategies_,
+        {epf_sharpness_.data(), block_extent_, block_extent_.width}, &metadata);
+    if (!status.ok())
+      return status;
+    status = UploadMetadata(metadata);
+    if (!status.ok())
+      return Invalidate(status);
+    CommitMetadata(std::move(metadata));
     return Status::Ok();
   }
 
@@ -1884,6 +1980,7 @@ class CudaPreparedResidentAqEvaluation final
     layouts_ = std::move(metadata.layouts);
     strategies_ = std::move(metadata.strategies);
     anchor_count_ = row_major_anchors_.size();
+    metadata_pending_ = false;
   }
 
   Status ValidateInput(AqEvaluationInput input) const {
@@ -2673,6 +2770,7 @@ class CudaPreparedResidentAqEvaluation final
   CudaAqColorParams color_params_{};
   AqEvaluationMemoryStats memory_stats_{};
   std::mutex mutex_;
+  bool metadata_pending_ = false;
   bool invariant_color_correlation_ready_ = false;
   bool forward_coefficients_ready_ = false;
   bool color_correlation_pending_ = false;
@@ -2693,6 +2791,17 @@ Status GetCudaResidentReconstructionStagingBytesForTest(
         "CUDA resident reconstruction staging query is invalid");
   }
   *bytes = resident->reconstruction_staging_bytes_for_test();
+  return Status::Ok();
+}
+
+Status GetCudaResidentMetadataPendingForTest(
+    const PreparedAqEvaluation& prepared, bool* pending) {
+  const auto* resident =
+      dynamic_cast<const CudaPreparedResidentAqEvaluation*>(&prepared);
+  if (resident == nullptr || pending == nullptr) {
+    return Status::InvalidArgument("CUDA resident metadata query is invalid");
+  }
+  *pending = resident->metadata_pending_for_test();
   return Status::Ok();
 }
 
