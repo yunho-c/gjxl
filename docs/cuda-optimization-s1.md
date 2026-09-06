@@ -11348,6 +11348,245 @@ failure-atomic resource planning before retention. This is a measured next
 target, not an implemented or qualified cache.
 
 
+## Reuse dead prepared Butteraugli planes (S67)
+
+S67 starts from S66 `1e3944b`, whose production implementation and retained
+binaries are S65 `7160cc4`. This is the same RTX 3060 Laptop, CUDA 11.8,
+MSVC 14.37 configuration. The retained improvement is a smaller prepared
+allocation, not new arithmetic or a general wall-time speedup.
+
+### Reject immutable reference-mask caches
+
+The first experiment caches either one eroded reference-mask float per pixel
+or two nonlinear reference-mask floats. Mode 0 is the existing fused
+erosion/L2/final pass; mode 3 is a native-identical duplicate control. Two
+preparation kernels reuse the existing ordered erosion and mask functions.
+All 432 guarded fixtures pass 5,184 exact comparisons across three modes
+and four reuse scenarios: initial use, unchanged reuse, changed distorted
+input without rebuilding the cache, and changed reference mask with rebuild.
+Padding, input immutability, exceptional values, and an independent old
+erosion-kernel oracle are checked. This is not a sanitizer qualification of
+the rejected caches.
+
+The screen records 768 exact-output synthetic event windows across odd 4K,
+odd 1080p, and Flower dimensions, two input patterns, four preparation/reuse
+policies, and eight balanced forward/reverse four-mode orders. Pattern 1 is
+random finite data; pattern 2 combines tiny/large psycho values and a ramp
+reference mask. These are not captured encoder inputs. Cache allocations and
+original reference-mask construction are excluded throughout. The steady
+window runs three final passes without preparation; other windows include
+one cache preparation plus the stated number of final passes.
+
+| 4K random finite window | One-float cache | Two-float cache | Identical control |
+| --- | ---: | ---: | ---: |
+| Steady state, preparation excluded | +4.77% | +9.49% | -0.02% |
+| Preparation + one comparison | +23.77% | +30.59% | -0.24% |
+| Preparation + two comparisons | +14.54% | +20.04% | -0.06% |
+| Preparation + four comparisons | +10.21% | +15.18% | -0.07% |
+
+Both caches regress at every size/pattern/reuse paired median. The existing
+final pass streams eight reference planes, eight distorted planes, two AC
+planes, two raw masks, and an output: a nominal 21 plane-equivalents. Neighbor
+erosion reads can hit cache; adding one or two streaming input planes raises
+that nominal footprint by 4.76% or 9.52%, close to the measured 4K losses.
+This is evidence consistent with bandwidth limitation, not a measurement of
+DRAM traffic. Reusing free storage would not remove the extra reads.
+
+All 60 parent Butteraugli native bodies remain identical in the 65-body
+probe. The five additions are two final kernels, two preparation kernels,
+and the identical duplicate; final kernels use 40 registers, preparations
+23, with no local/stack/shared allocation. Endpoint state changed from
+53 C/P0/1,282 MHz SM/6,000 MHz memory/22.12 W with neither limit active to
+58 C/P3/1,335 MHz/5,500 MHz/32.29 W with thermal/power limits active.
+
+One unelevated Nsight Compute 2022.3 probe, with clock/cache control disabled,
+returned `ERR_NVGPUCTRPERM`. No counters or profiled kernels were obtained;
+its ordinary eight-fixture test passed 96 comparisons. The user was promptly
+notified. No elevation, firewall change, driver setting, or clock change was
+attempted. This optional counter-access limit does not block ordinary CUDA
+tests or Nsight Systems tracing and does not establish a firewall failure.
+
+### Retained lifetime changes
+
+The horizontal RGB intermediates and later horizontal XYB intermediates are
+dead before psycho outputs 7-9 are produced. Both groups can use those future
+outputs. RGB inputs are external or staged in psycho outputs 0-2, so they
+remain disjoint; packed temporary indexing also fits the packed reference
+subscale planes. XYB outputs remain in working planes 21-23, and frequency
+scratch remains in 24.
+
+After Malta and distorted-mask precompute, distorted psycho output 9 is
+dead. Finish its mask blur first, then reuse that plane for the uncached
+half-scale reference mask and its in-place vertical blur. The distorted mask
+remains in plane 23; horizontal scratch is 24. Final L2 reads psycho outputs
+0-7 only. The cached full-resolution reference mask in plane 20 is unchanged.
+All operations remain ordered on the same stream; no synchronization or
+kernel arithmetic changes are introduced.
+
+| Working planes | Psycho construction | Difference phase |
+| --- | --- | --- |
+| 0-9 | Reference outputs; future 7-9 temporarily hold horizontal blurs | Cached reference psycho |
+| 10-19 | Distorted outputs; future 17-19 temporarily hold horizontal blurs | Distorted psycho; 19 later holds uncached half-scale reference mask |
+| 20 | Cached full-resolution reference mask | Same cached mask |
+| 21-22 | XYB outputs | Malta AC accumulations |
+| 23 | Third XYB output | Distorted-mask input and blurred result |
+| 24 | Frequency scratch | Horizontal mask scratch, then crop/subscale result |
+
+The private plan's working-plane array shrinks from 27 to 25. The allocator
+and memory statistics already derive their counts from that constant; the
+independent test oracle is updated separately. Cached-reference bytes remain
+11 full planes plus ten optional subscale planes. Logical comparison scratch
+drops from 16 to 14 full planes plus two reductions. One prepared allocation
+and zero allocations on comparison reuse are preserved. The public ABI and
+prepared-operation ownership/failure contracts do not change.
+
+For full-plane bytes `P = 4 * max(8,width) * max(8,height)`, the physical arena
+saves exactly `2 * align_up(P,64)` bytes. The two reductions, Gaussian kernels,
+and optional ten-plane reference subscale cache are unchanged.
+
+| Prepared arena | Parent bytes | S67 bytes | Saved bytes |
+| --- | ---: | ---: | ---: |
+| 3839 x 2159 | 978,352,436 | 912,045,108 | 66,307,328 |
+| 1919 x 1079 | 244,426,868 | 227,862,004 | 16,564,864 |
+| 510 x 532 | 32,026,036 | 29,855,412 | 2,170,624 |
+
+### Isolate layout before shrinking the allocation
+
+A four-mode diagnostic keeps the physical 27-plane arena: original layout,
+psycho-temporary reuse only, half-scale-mask reuse only, and both changes.
+The newly unused plane 26 pointer is null for psycho reuse; both 25 and 26
+are null for the combined mode. All four modes pass the original 27-case
+prepared suite. Across 29 extents, three policies, and three reuse cases,
+all 261 full maps and double scores are bit-identical, including host-row
+padding. All 46 encode cases in all four modes match frozen S65 codestream
+hashes (184 encodes); this control gate does not claim fresh decoding.
+All 188 GPU bodies in the combined diagnostic are instruction-identical.
+
+The first link runner failed after successful compilation because a
+PowerShell array misparsed concatenated object paths. Its script/log are
+retained; a corrected runner linked the existing objects. This was a harness
+failure, not a GPU failure. These diagnostic objects/executables were built
+against the retained parent 27-plane header and libraries before production
+edits. Rebuilding them against the new private 25-plane plan ABI without
+restoring those dependencies is invalid.
+
+Seven alternating same-binary pairs compare combined layout against mode 0.
+Warm processes use three warmups/seven samples; cold processes zero/one.
+All 41 phase fields and size checks are retained. Separate hash qualification
+establishes bytes; timing output alone only checks size. These controls still
+allocate 27 planes and are not pooled with release measurements below.
+
+| Layout-only control | Quantization pipeline | Codestream encoding | Whole encode | Whole wins / 7 |
+| --- | ---: | ---: | ---: | ---: |
+| Warm 4K | +1.18% | +1.78% | +1.00% | 3 |
+| Warm 1080p | +0.56% | -0.21% | +0.70% | 3 |
+| Warm Flower | +1.34% | -1.51% | +0.42% | 3 |
+| Cold 4K | +0.23% | -0.29% | +2.96% | 3 |
+| Cold 1080p | -0.82% | -3.87% | -2.18% | 5 |
+| Cold Flower | -1.61% | -4.84% | -3.91% | 4 |
+
+These small mixed effects do not establish an intrinsic layout speedup.
+Whole-encode ranges are retained, including warm Flower -29.72% to +7.11%
+and cold 4K -5.39% to +19.49%. Control endpoints were 55 C/P3/1,282 MHz SM/
+5,500 MHz memory/21.86 W and 63 C/P3/1,282 MHz/5,500 MHz/24.90 W, both limited.
+
+### Fresh release qualification and timing
+
+All 73 CUDA tests, all 50 CPU-only tests, and five host ASan targets pass.
+The prepared test now has 31 cases, adding 15x1025, 1025x15, 513x257, and
+257x513 to exercise packed subscale aliasing and partial tiles. Its sanitizer
+subset grows to seven cases. Worst observed prepared map/score errors versus
+CPU are 0.000231382 / 0.000020504, within the existing tolerances.
+The release passes prepared memcheck/initcheck/synccheck/racecheck and AQ
+memcheck/initcheck/synccheck; no full-AQ racecheck is claimed. The prepared
+racecheck completed in about 67 seconds, not an hour-long blocked run.
+
+The smaller release independently matches all 261 parent maps/scores and
+all 29 physical memory-statistic fixtures. Flower's resource value in the
+table is additionally confirmed by the complete-workflow allocation trace,
+not one of those 29 map-probe extents. All 58 fresh parent/candidate pairs
+(46 main, six high-density, six maximum-compression) are byte-identical,
+decode to the expected dimensions with pinned libjxl, and have identical
+independent Butteraugli scores. All 188 release native GPU bodies match S65.
+
+Four separate seven-pair release cohorts compare retained S65 with S67:
+phase-probe/public benchmark, each warm/cold. Warm uses three warmups/five
+samples per process; cold uses zero/one. All 41 phase or seven public raw
+fields are retained. Percentages are medians of paired candidate/parent
+ratios, not ratios of independently selected medians.
+
+| Release comparison | Quantization pipeline | Codestream encoding | Whole encode | Whole wins / 7 |
+| --- | ---: | ---: | ---: | ---: |
+| Phase warm 4K | -1.37% | -1.69% | -0.40% | 5 |
+| Phase warm 1080p | -0.73% | -1.09% | -0.78% | 5 |
+| Phase warm Flower | -2.23% | -1.78% | -1.20% | 5 |
+| Phase cold 4K | +0.17% | -2.55% | -0.05% | 4 |
+| Phase cold 1080p | -1.75% | -9.01% | -2.61% | 4 |
+| Phase cold Flower | +3.17% | -4.62% | +5.88% | 3 |
+| Public warm 4K | +0.50% | -0.20% | +2.59% | 1 |
+| Public warm 1080p | +1.31% | +1.25% | +1.12% | 3 |
+| Public warm Flower | -0.96% | -0.97% | +0.41% | 3 |
+| Public cold 4K | -1.78% | +1.77% | -1.93% | 4 |
+| Public cold 1080p | -3.07% | -6.98% | -4.05% | 7 |
+| Public cold Flower | -2.76% | +1.27% | -0.52% | 4 |
+
+Public warm 4K loses six of seven pairs; it must not be presented as a win.
+Whole ranges include -6.26% to +9.10% there, -8.01% to +32.44% for phase cold
+Flower, and -41.11% to +7.52% for public cold Flower. Endpoints are
+67 C/P3/1,702 MHz SM/36.48 W and 69 C/P3/915 MHz/32.97 W with thermal and power
+limits active at both. These snapshots do not explain each sample, but the
+scatter and disagreement rule out a universal speed claim. The retained
+benefit is exactly two fewer allocated full planes.
+
+Twelve fresh Nsight Systems traces cover two alternating parent/candidate
+pairs per workload, three warmups and one captured encode each. All launch
+names/order/grid/block/register/shared/local metadata and copy counts/bytes
+match. There are 391 / 378 / 391 launches at 4K / 1080p / Flower. Each trace
+records five device allocation requests; only request four changes, by the
+exact arena savings above. Copies remain H2D 118,254,624 / 29,631,464 /
+4,028,828 bytes, D2H 103,699,012 / 25,924,192 / 3,430,532 bytes, and D2D
+518,400 / 129,600 / 17,152 bytes, respectively.
+
+Instrumented total-GPU pair changes are +2.57% / -13.13% at 4K,
+-0.61% / +0.67% at 1080p, and +0.10% / +0.09% at Flower. They are diagnostics,
+not release wall times. Fresh 4K candidate medians still put the two 64-row
+Malta response specializations at 18.90 and 13.53 ms, joint low-medium rows
+at 10.60 ms, and fused erosion/L2/final at 9.45 ms. The next speed-focused
+investigation should target remaining input traffic/reuse in these measured
+stages, without assuming that an added immutable cache is free.
+
+Current-policy batch checks use one warmup and three alternating pairs and
+verify serial/batch codestream identity. These are not S65-to-S67 speedups:
+
+| S67 batch policy | Batch 1 | Batch 2 | Batch 4 |
+| --- | ---: | ---: | ---: |
+| 1080p fully resident | 0.966x | 1.156x | 1.132x |
+| 1080p maximum throughput | 0.969x | 1.588x | 2.139x |
+| 4K fully resident | 0.990x | 1.025x | Not run |
+
+4K batch two spans 0.919x-1.085x; no reliable batching gain follows. Batch
+four at 4K is intentionally untested on this memory-constrained device.
+
+### Evidence and disposition
+
+The ignored `build-cuda-ninja/profiles/s67_*` artifacts retain cache sources,
+guards and all event windows; four-mode diagnostic sources, objects, full-map
+dumps and encodes; failed and corrected link scripts; release build/test,
+quality, sanitizer, phase/public/batch and trace records; native instructions;
+and the denied optional counter probe. `s67_validate.py` recomputes evidence
+and paired statistics. The freeze retains 39 release binaries/libraries,
+five source/document snapshots, and a hash manifest while checking earlier
+S59-S66 archives. No evidence from a rejected mode replaces production.
+The first evidence validator expected the older CTest summary text including
+`0 tests failed`; these logs say `100% tests passed out of N`. Its source/log
+are preserved. The corrected parser accepts either form and still verifies
+every individual passed record (73 CUDA and 50 CPU); no test result changed.
+
+Keep the 25-plane allocation for its verified resource reduction, with the
+mixed/adverse timings visible. Do not retain either reference-mask cache,
+claim changed numerical behavior, or treat this checkpoint as a maxed-out
+backend. Further speed-focused work remains open.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

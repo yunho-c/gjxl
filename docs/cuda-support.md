@@ -1006,9 +1006,30 @@ stages pass all 1,152 timing windows. Native-identical duplicate kernels expose
 timing scatter. The correctly rounded reciprocal variant is neutral at 4K;
 the refined approximate variant has only a small local benefit and no general
 rounding proof. No complete-workflow speedup or new release qualification is
-claimed. Production remains S65, with unchanged source/tests and all 39
-retained binaries/libraries. The next candidate is repeated immutable
-reference-mask work, including its preparation and storage tradeoffs.
+claimed. That checkpoint kept S65 production unchanged, including all 39
+retained binaries/libraries.
+
+[S67](cuda-optimization-s1.md#reuse-dead-prepared-butteraugli-planes-s67)
+rejects both immutable reference-mask caches: extra reads outweigh the saved
+arithmetic even when preparation is excluded. A separate scratch-lifetime
+audit reduces the prepared Butteraugli arena from 27 to 25 full working
+planes. Future psycho outputs hold temporary horizontal blur values, and a
+dead distorted psycho plane holds the uncached half-scale reference mask.
+The odd 4K arena saves 66,307,328 bytes; odd 1080p saves 16,564,864 bytes.
+All 188 GPU bodies remain instruction-identical, with unchanged launch
+structure and transfer counts/bytes in 12 fresh complete-workflow traces.
+All 73 CUDA tests, 50 CPU tests, five host ASan targets, seven GPU sanitizer
+checks, 261 bit-identical prepared maps/scores, and 58 freshly decoded,
+byte-identical release pairs pass. The prepared suite adds thin/odd multiscale
+alias cases and independently checks the smaller physical allocation.
+This is a verified memory reduction, not a demonstrated general speedup:
+public warm whole-encode paired medians are +2.59% / +1.12% / +0.41% for
+4K / 1080p / Flower, while cold results are -1.93% / -4.05% / -0.52%.
+Thermal and power limits were active. An optional unelevated Nsight Compute
+check returned `ERR_NVGPUCTRPERM`; the user was notified, no counters were
+collected, and no security or clock settings were changed. Ordinary CUDA
+and Nsight Systems runs completed. No firewall block is established, and
+the backend is not considered maxed out.
 
 ### Math and kernel strategy
 

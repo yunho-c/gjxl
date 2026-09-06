@@ -11,8 +11,9 @@
 
 namespace gjxl::cuda_internal {
 
-// 20 psycho planes, one cached reference mask, and six reusable work planes.
-inline constexpr size_t kCudaButteraugliWorkingPlaneCount = 27;
+// 20 psycho planes, one cached reference mask, and four reusable work planes.
+// Future high-frequency outputs also hold temporary horizontal blur values.
+inline constexpr size_t kCudaButteraugliWorkingPlaneCount = 25;
 inline constexpr size_t kCudaButteraugliPsychoPlaneCount = 10;
 inline constexpr size_t kCudaButteraugliKernelCount = 5;
 

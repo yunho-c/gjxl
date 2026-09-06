@@ -125,7 +125,7 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
 
 [[nodiscard]] bool CheckMemory(gjxl::Extent2D extent,
                                  const gjxl::DeviceButteraugliMemoryStats& memory) {
-  // Independent physical-layout oracle: 20 psycho + one cached mask + six
+  // Independent physical-layout oracle: 20 psycho + one cached mask + four
   // work planes, plus the optional ten-plane reference subscale cache.
   const size_t plane_bytes = std::max<size_t>(8, extent.width) *
                              std::max<size_t>(8, extent.height) * sizeof(float);
@@ -137,14 +137,14 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   const auto append = [&](size_t bytes) {
     capacity = ((capacity + 63) / 64) * 64 + bytes;
   };
-  for (size_t i = 0; i < 27; ++i) append(plane_bytes);
+  for (size_t i = 0; i < 25; ++i) append(plane_bytes);
   if (multiscale) for (size_t i = 0; i < 10; ++i) append(sub_bytes);
   append(reduction_bytes);
   append(reduction_bytes);
   for (size_t size : {5, 33, 15, 7, 13}) append(size * sizeof(float));
   return memory.prepared_allocation_bytes == capacity &&
          memory.cached_reference_bytes == 11 * plane_bytes + 10 * sub_bytes &&
-         memory.peak_comparison_scratch_bytes == 16 * plane_bytes + 2 * reduction_bytes &&
+         memory.peak_comparison_scratch_bytes == 14 * plane_bytes + 2 * reduction_bytes &&
          memory.gaussian_kernel_bytes == 73 * sizeof(float);
 }
 
@@ -361,7 +361,7 @@ int main(int argc, char** argv) {
 
   float worst_map = 0.0f;
   double worst_score = 0.0;
-  const std::array<gjxl::Extent2D, 26> extents{{
+  const std::array<gjxl::Extent2D, 30> extents{{
       {1, 1},
       {3, 7},
       {7, 3},
@@ -379,10 +379,13 @@ int main(int argc, char** argv) {
       {33, 129},
       {1, 17}, {17, 1}, {7, 17}, {17, 7}, {14, 17}, {17, 14},
       {15, 16}, {16, 15}, {48, 49}, {49, 48}, {511, 257},
+      // Packed subscale blur scratch reuses future psycho outputs. Exercise
+      // both thin multiscale orientations and partial wide/tall output tiles.
+      {15, 1025}, {1025, 15}, {513, 257}, {257, 513},
   }};
   size_t cases = 0;
   for (size_t index = 0; index < extents.size(); ++index) {
-    if (scoped && index != 1 && index != 3 && index != 6) continue;
+    if (scoped && index != 1 && index != 3 && index != 6 && index < 26) continue;
     gjxl::ButteraugliOptions options;
     if (extents[index].width == 33 && extents[index].height == 129) {
       options = {

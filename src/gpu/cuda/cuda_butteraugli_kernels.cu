@@ -26,12 +26,14 @@ constexpr unsigned int kPsychoWork = 24;
 // After psycho construction only Malta AC[0:2] remains live in image work.
 constexpr unsigned int kMaskInput = 23;
 constexpr unsigned int kMaskIntermediate = 24;
-constexpr unsigned int kReferenceMask = 25;
+// Distorted psycho output 9 is dead after Malta and distorted-mask precompute.
+// Reuse its full working plane for the uncached half-scale reference mask.
+constexpr unsigned int kReferenceMask = 19;
 // The separable distorted-mask blur may overwrite its own input. Its
 // horizontal intermediate is dead before the cropped/subscale map is written.
 constexpr unsigned int kDistortedMask = kMaskInput;
 constexpr unsigned int kFinalStaging = kMaskIntermediate;
-static_assert(kPsychoWork + 3 == kCudaButteraugliWorkingPlaneCount);
+static_assert(kPsychoWork + 1 == kCudaButteraugliWorkingPlaneCount);
 
 struct PlaneParams {
   uint32_t width;
@@ -1983,12 +1985,13 @@ template <unsigned int KernelSize>
   opsin.output_stride = plan.working_width;
   opsin.intensity_target = plan.intensity_target;
   for (size_t channel = 0; channel < 3; ++channel) {
-    opsin.intermediate[channel] = plan.planes[kPsychoWork + channel];
+    opsin.intermediate[channel] = psycho[7 + channel];
     opsin.output[channel] = plan.planes[kImage + channel];
   }
   // Original RGB is external or staged in the not-yet-produced low outputs.
-  // Keep three packed horizontal RGB planes until joint vertical/Opsin; their
-  // storage can then be reused immediately by the horizontal XYB blurs.
+  // High-frequency outputs 7-9 are not produced until the later split passes.
+  // Use their storage for three packed horizontal RGB planes, then XYB planes.
+  // Even a packed reference subscale has width*height elements per plane.
   cudaError_t error = LaunchCudaButteraugliOpsin(opsin, stream);
   if (error != cudaSuccess) return error;
 
@@ -1997,7 +2000,7 @@ template <unsigned int KernelSize>
     low_medium.input[channel] = plan.planes[kImage + channel];
     // The earlier RGB intermediates are dead; retain three distinct packed
     // horizontal XYB planes until the joint vertical/low-medium pass.
-    low_medium.intermediate[channel] = plan.planes[kImage + 3 + channel];
+    low_medium.intermediate[channel] = psycho[7 + channel];
     low_medium.low[channel] = psycho[channel];
     low_medium.medium[channel] = psycho[3 + channel];
   }
@@ -2128,20 +2131,8 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
                        plan.working_width,
                        plan.hf_asymmetry};
   cudaError_t error = cudaSuccess;
-  const float* reference_mask = cached_reference_mask;
-  if (reference_mask == nullptr) {
-    error =
-        LaunchMaskPrecompute(reference, reference_stride, plan.planes[kMaskInput],
-                             plan.working_width, width, height, stream);
-    if (error != cudaSuccess) return error;
-    error =
-        LaunchBlur<13>(plan.planes[kMaskInput], plan.working_width, plan.kernels[4],
-                       plan.planes[kMaskIntermediate], plan.planes[kReferenceMask],
-                       plan.working_width, width, height, stream);
-    if (error != cudaSuccess) return error;
-    reference_mask = plan.planes[kReferenceMask];
-  }
-
+  // Finish the distorted mask before reusing psycho output 9. Its precompute
+  // still reads both high-frequency outputs; final L2 only reads outputs 0-7.
   error = LaunchMaskPrecompute(distorted, distorted_stride, plan.planes[kMaskInput],
                                plan.working_width, width, height, stream);
   if (error != cudaSuccess) return error;
@@ -2150,6 +2141,22 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
                      plan.planes[kMaskIntermediate], plan.planes[kDistortedMask],
                      plan.working_width, width, height, stream);
   if (error != cudaSuccess) return error;
+
+  const float* reference_mask = cached_reference_mask;
+  if (reference_mask == nullptr) {
+    // The distorted mask remains live in kMaskInput. The reference mask's
+    // separable blur may overwrite its own input in the dead psycho plane.
+    error =
+        LaunchMaskPrecompute(reference, reference_stride, plan.planes[kReferenceMask],
+                             plan.working_width, width, height, stream);
+    if (error != cudaSuccess) return error;
+    error =
+        LaunchBlur<13>(plan.planes[kReferenceMask], plan.working_width, plan.kernels[4],
+                       plan.planes[kMaskIntermediate], plan.planes[kReferenceMask],
+                       plan.working_width, width, height, stream);
+    if (error != cudaSuccess) return error;
+    reference_mask = plan.planes[kReferenceMask];
+  }
 
   FinalPlan final{};
   for (size_t channel = 0; channel < 2; ++channel) {
