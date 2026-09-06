@@ -137,6 +137,56 @@ bool CheckPinnedTinyFixture() {
   return true;
 }
 
+bool CheckGradientContextBoundaries() {
+  // Independent linear oracle retains the pre-optimization run representation.
+  constexpr std::array<std::array<uint16_t, 2>, 34> runs{{
+    {12,44}, {120,43}, {257,40}, {321,39}, {385,38}, {417,37}, {449,36},
+    {465,35}, {481,34}, {489,33}, {497,32}, {501,31}, {505,30}, {508,29},
+    {509,28}, {511,27}, {512,26}, {513,42}, {515,41}, {517,25}, {519,24},
+    {523,23}, {527,22}, {535,21}, {543,20}, {559,19}, {575,18}, {607,17},
+    {639,16}, {703,15}, {767,14}, {904,13}, {1012,12}, {1023,11},
+  }};
+  size_t cases = 0;
+  const auto check = [&](int32_t previous) {
+    const int64_t property = std::clamp<int64_t>(int64_t{512} + previous, 0, 1023);
+    uint32_t context = 11;
+    for (const auto run : runs) {
+      if (property <= run[0]) {
+        context = run[1];
+        break;
+      }
+    }
+    for (size_t stride : {size_t{2}, size_t{7}}) {
+      std::array<std::vector<int32_t>, 3> planes;
+      gjxl::ConstImage3I32View view;
+      for (size_t channel = 0; channel < 3; ++channel) {
+        const size_t offset = 3 + channel;
+        planes[channel].assign(offset + stride + 9, 123456);
+        planes[channel][offset] = planes[channel][offset + 1] = previous;
+        view.plane[channel] = {planes[channel].data() + offset, {2,1}, stride};
+      }
+      const auto saved = planes;
+      std::vector<gjxl::EntropyToken> tokens{{99,77}};
+      const gjxl::Status status = gjxl::TokenizeSimpleDcGroup(view, &tokens);
+      if (!status.ok() || tokens.size() != 6 || planes != saved) return false;
+      for (size_t channel = 0; channel < 3; ++channel) {
+        if (tokens[2 * channel] != gjxl::EntropyToken{26, gjxl::PackSigned(previous)} ||
+            tokens[2 * channel + 1] != gjxl::EntropyToken{context, 0}) return false;
+      }
+      ++cases;
+    }
+    return true;
+  };
+  for (int32_t property = -1024; property <= 2047; ++property) {
+    if (!check(property - 512)) return false;
+  }
+  if (!check(std::numeric_limits<int32_t>::min()) ||
+      !check(std::numeric_limits<int32_t>::max())) return false;
+  std::cout << "Verified " << cases
+            << " DC gradient-context cases with clamping and guarded layouts.\n";
+  return true;
+}
+
 bool CheckDcSignedExtremesAndAtomicOverflow() {
   constexpr gjxl::Extent2D kOne{1, 1};
   const std::array<std::vector<int32_t>, 3> extremes{{
@@ -166,8 +216,18 @@ bool CheckDcSignedExtremesAndAtomicOverflow() {
   tokens = sentinel;
   status = gjxl::TokenizeSimpleDcGroup(DcView(overflow, kTwo), &tokens);
   if (status.code() != gjxl::StatusCode::kInvalidArgument
+      || status.message() != "Modular predictor residual exceeds int32_t"
       || tokens != sentinel) {
     std::cerr << "Overflowing DC residual changed its output\n";
+    return false;
+  }
+  auto negative_overflow = overflow;
+  std::reverse(negative_overflow[1].begin(), negative_overflow[1].end());
+  status = gjxl::TokenizeSimpleDcGroup(DcView(negative_overflow, kTwo), &tokens);
+  if (status.code() != gjxl::StatusCode::kInvalidArgument ||
+      status.message() != "Modular predictor residual exceeds int32_t" ||
+      tokens != sentinel) {
+    std::cerr << "Negative overflowing DC residual changed its output\n";
     return false;
   }
   return true;
@@ -543,7 +603,8 @@ bool CheckModularHeaders() {
 }  // namespace
 
 int main() {
-  if (!CheckPinnedTinyFixture() || !CheckDcSignedExtremesAndAtomicOverflow()
+  if (!CheckPinnedTinyFixture() || !CheckGradientContextBoundaries()
+      || !CheckDcSignedExtremesAndAtomicOverflow()
       || !CheckAllStrategiesAndActualMetadata()
       || !CheckMetadataRejectionsAreAtomic()
       || !CheckDimensionsAndFrameAtomicity() || !CheckModularHeaders()) {

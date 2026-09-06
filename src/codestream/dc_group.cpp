@@ -82,15 +82,24 @@ int32_t ClampedGradient(int32_t top, int32_t left, int32_t top_left) {
   return static_cast<int32_t>(static_cast<int64_t>(top) + left - top_left);
 }
 
-uint32_t GradientContext(int64_t gradient_property) {
-  const uint16_t clamped =
-    static_cast<uint16_t>(std::clamp<int64_t>(gradient_property, 0, 1023));
+// Expand the pinned runs at compile time. Per-value context selection then
+// needs one clamped byte lookup instead of a linear run search.
+constexpr std::array<uint8_t, 1024> kGradientContexts = [] {
+  std::array<uint8_t, 1024> result{};
+  size_t begin = 0;
   for (const GradientContextRun run : kGradientContextRuns) {
-    if (clamped <= run.inclusive_end) {
-      return run.context;
+    for (; begin <= run.inclusive_end; ++begin) {
+      result[begin] = run.context;
     }
   }
-  return kGradientContextRuns.back().context;
+  return result;
+}();
+static_assert(kGradientContextRuns.back().inclusive_end + 1 ==
+              kGradientContexts.size());
+
+uint32_t GradientContext(int64_t gradient_property) {
+  return kGradientContexts[static_cast<size_t>(
+    std::clamp<int64_t>(gradient_property, 0, 1023))];
 }
 
 Status AppendResidual(uint32_t context, int32_t value, int32_t prediction,
@@ -256,11 +265,17 @@ Status TokenizeSimpleDcGroup(ConstImage3I32View quantized_dc,
           const int32_t prediction = ClampedGradient(top, left, top_left);
           const uint32_t context =
             GradientContext(int64_t{512} + top + left - top_left);
-          const Status status =
-            AppendResidual(context, plane.Row(y)[x], prediction, &candidate);
-          if (!status.ok()) {
-            return status;
+          // Construct Status only on failure, not once per successful value.
+          const int64_t residual =
+            static_cast<int64_t>(plane.Row(y)[x]) - prediction;
+          if (residual < std::numeric_limits<int32_t>::min() ||
+              residual > std::numeric_limits<int32_t>::max()) {
+            return Status::InvalidArgument(
+              "Modular predictor residual exceeds int32_t");
           }
+          candidate.push_back({
+            context, PackSigned(static_cast<int32_t>(residual)),
+          });
         }
       }
     }

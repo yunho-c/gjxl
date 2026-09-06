@@ -813,6 +813,20 @@ existing GPU bodies are unchanged and the new body matches the measured
 control, with no spills. No public API/ABI or quality-policy changes;
 optimization remains ongoing.
 
+[S56](cuda-optimization-s1.md#direct-dc-context-lookup-and-success-path-residual-emission-s56)
+uses an exact compile-time DC-context lookup and avoids constructing a
+successful status per DC residual. Predictor arithmetic, overflow errors,
+token order, API/ABI, and all GPU code remain unchanged. Final warm release
+DC tokenization improves 34.4% / 31.5% / 42.1% at 4K / 1080p / Flower,
+winning all 21 pairs; whole-encode gains are 4.0% / 0.4% / 4.0%.
+Cold Flower regresses in release and control cohorts, and all slower
+observations remain documented. All 71 CUDA / 50 CPU tests, five host ASan
+targets, 6,148 guarded context cases, and 58 decoded-image pairs pass.
+The CUDA archive is byte-identical; host diagnostic and release bodies
+are not instruction-identical, a stated limitation of those controls.
+Token-scanned ANS histogram preparation and remaining GPU work are still
+open leads; the fully-resident path is not demonstrated maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

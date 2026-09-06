@@ -17,7 +17,8 @@
   readback into ownership-backed final frame storage, in-place ANS clustering,
   hoisted histogram log-table access, borrowed prepared ANS populations,
   bounded narrow coefficient-order counters with portable SIMD counting,
-  multi-row Malta halo reuse, and joint-channel horizontal33 convolution
+  multi-row Malta halo reuse, joint-channel horizontal33 convolution,
+  direct DC context lookup, and success-path DC residual emission
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -31,7 +32,20 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S55 against S54
+below supersede them. The latest implemented checkpoint, S56 against S55
+(`81266d7`), replaces a 34-run DC context search with an exact compile-time
+lookup and removes per-value success-status construction. Final warm release
+DC tokenization improves 34.4% / 31.5% / 42.1% at 4K / 1080p / Flower,
+winning all 21 pairs; whole encode improves 4.0% / 0.4% / 4.0%.
+Cold Flower regresses in both release and control cohorts, and controls
+do not give uniform whole-path gains. All 71 CUDA / 50 CPU tests, five host
+ASan targets, 6,148 guarded public context cases, and 58 byte-identical
+decoded-image pairs pass. The CUDA library remains byte-identical.
+Diagnostic host bodies differ in native layout from release, so their
+timings are separate evidence, not an exact-native match. See
+[S56](#direct-dc-context-lookup-and-success-path-residual-emission-s56).
+
+The preceding implemented checkpoint, S55 against S54
 (`058b2df`), computes horizontal33 for all three channels in one kernel,
 removing 12 launches per profiled encode without changing image-plane
 traffic or arithmetic. Controlled horizontal-stage paired gains are
@@ -8733,6 +8747,218 @@ with unchanged results. It does not establish a uniform whole-encode gain
 or demonstrate that the fully-resident path is maxed out. Remaining
 vertical blur, Malta, other horizontal filters, token-scanned DC population
 construction, and workflow variability remain concrete investigation leads.
+
+## Direct DC context lookup and success-path residual emission (S56)
+
+S56 compares against S55 `81266d7`. This is host serialization work on
+the fully-resident path, not an exact-coefficient GPU optimization.
+Inspection of DC preparation finds a per-value linear search over 34
+gradient-context runs. The search input always lies in a fixed
+1,024-entry domain after the existing signed 64-bit clamp. DC tokenization
+also constructs and inspects a successful `Status` for each residual.
+
+### Remove repeated work without changing the tokens
+
+The pinned run representation now expands into a 1,024-byte
+`constexpr std::array<uint8_t, 1024>`. Context selection uses the original
+`int64_t` clamp followed by one indexed byte load. A compile-time extent
+assertion ties the table to the final run boundary. There is no dynamic
+initialization or heap allocation for the lookup.
+
+The DC loop also computes the original 64-bit residual directly, applies
+the same signed-32-bit range checks, returns the same error message on
+failure, and appends the original `PackSigned` value. Only the failure path
+constructs a status inside that per-value loop. Metadata's existing
+`AppendResidual` helper is unchanged. Predictor equations, Y/X/B token
+order, row/group boundary behavior, vector reserve policy, output-on-failure
+atomicity, and exception handling remain unchanged.
+
+No API, ABI, public header, GPU code, image quality policy, or
+coefficient/transfer layout changes. `gjxl_cuda.lib` is byte-identical
+to S55, establishing preservation of its 171 GPU bodies by library identity;
+this is not a fresh S56 GPU trace or native dump. Repeated HybridUint
+validation in token-scanned ANS histogram construction was also identified,
+but remains unchanged and is a separate next lead.
+
+### Captured-input and four-way investigation
+
+A diagnostic-only `S56_DC_CAPTURE` records the actual quantized DC inputs
+from one fully-resident encode each of odd 4K, odd 1080p, and Flower.
+There are six group-local captures: four 4K rectangles, one 240x135
+1080p rectangle, and one Flower rectangle. Each stores two little-endian
+32-bit dimensions followed by three packed signed-32-bit planes.
+These capture-run timings include file I/O and are **not** performance
+evidence.
+
+One diagnostic executable retains the complete S55 implementation and
+three independently selectable variants: lookup only, direct residual
+emission only, and both. All four run the frozen original DC/metadata
+fixtures successfully. A direct context oracle compares 16,387 properties
+(including signed-64-bit endpoints) to the original run search. Another
+72 synthetic cases span six geometries, packed/padded and offset planes,
+zero/random/extreme values, and both overflow directions. All candidates
+match tokens, status codes/messages, immutable inputs, and atomic failures.
+
+The replay measures 20 cases: the six captures in packed/padded layouts
+plus four 256x256 synthetic patterns in both layouts. Twelve warmups per
+mode precede every one of the 24 permutations of four modes. Each recorded
+time averages three calls, including allocation/token construction but
+excluding output comparison and destruction. All 1,920 timings and
+absolute-time drift remain. Every case median favors every candidate,
+although individual slower samples remain.
+
+| Replay case | Lookup-only paired change | Residual-only change | Combined change |
+| --- | ---: | ---: | ---: |
+| Captured 1080p, packed / padded | -55.7% / -56.0% | -9.1% / -6.0% | -60.8% / -61.3% |
+| Captured 4K first group, packed / padded | -49.4% / -50.3% | -8.3% / -9.5% | -55.1% / -56.3% |
+| Captured Flower, packed / padded | -61.0% / -59.2% | -8.6% / -5.9% | -66.9% / -67.0% |
+| Near INT32_MIN, packed / padded | -2.7% / -2.0% | -16.0% / -14.8% | -20.7% / -17.7% |
+
+The last pattern mostly selects the first run, so removing the run search
+has little benefit there; the residual change remains useful. This is an
+inference consistent with the source and measurements, not a hardware
+branch-counter result.
+
+### Workflow controls and native-code limitation
+
+The first workflow screen uses four balanced orders of all four modes,
+three warmups and five samples per process, on 4K / 1080p / Flower. Lookup
+alone improves the DC stage by paired 35.9% / 31.3% / 33.3%, while direct
+residual emission alone gives 7.9% / 12.1% / 5.4%. The combination gives
+35.1% / 38.2% / 32.6%, but whole encode changes +0.63% / +1.59% / +9.41%.
+In particular, **all four combined Flower whole-encode observations are
+slower**, and its codestream phase regresses 7.62%. Those results remain.
+
+A follow-up keeps the same executable and tests baseline, lookup, and
+combined modes in all six permutations, with three warmups and seven
+samples. Combined DC work improves 40.2% / 37.3% / 39.2%, winning all six
+rounds per workload; whole encode changes -2.68% / -1.81% / -0.23%, with
+4/6, 5/6, and 3/6 wins. Lookup alone gives whole changes
++0.48% / -1.38% / -0.79%. The follow-up does not reproduce the first
+cohort's all-slowness Flower result, but it does not erase or explain it.
+Both cohorts retain every process output, encoded-size check, and phase.
+
+The combined change is retained on the strength of the isolated result,
+the consistent DC-stage reductions, and final production qualification,
+not by discarding the unfavorable first cohort. Diagnostic selectors and
+capture I/O are absent from production.
+
+Native inspection finds 430 instructions in the retained production DC
+tokenizer versus 325 in the new production body. The two run-table
+relocations disappear and one lookup-table relocation remains. These are
+static instruction counts, not runtime retired-instruction measurements.
+The diagnostic bodies are **not instruction-identical** to the corresponding
+release bodies: its baseline has 362 instructions and its combined body 293,
+including different validation inlining, register allocation, and layout.
+Therefore no exact-native bridge is claimed from the diagnostic timings to
+release. Source-equivalent controls and final release timing are independent
+evidence; native inspection separately confirms the intended production
+search removal. The native report preserves both failed identity comparisons.
+
+### Final qualification and wall measurements
+
+The final Release configuration passes all 71 CUDA CTests (69.81 seconds)
+and 50 CPU-only GCC CTests (17.77 seconds), including installed consumers.
+Five Clang 22 CPU-only host ASan targets pass: DC group, entropy,
+coefficient order, codestream encoder, and public workflow. The tracked
+DC fixture checks 6,148 public-entry context cases across all 1,024 lookup
+positions, below/above-range properties, signed-32-bit endpoints, misaligned
+offsets, and two guarded layouts. Both overflow directions retain the
+exact status message and leave output unchanged. Existing pinned tokens,
+metadata, predictor resets, invalid-input, and modular-header tests remain.
+
+All 58 release comparisons against S55 produce identical codestream bytes
+and independently decoded Butteraugli scores. The primary 46 pairs cover
+seven inputs, distances 0.5/1.2/3.0 at effort 7, sample/Flower effort 9, and
+scoring on/off. Six legacy high-density and six effort-7 maximum-compression
+pairs also agree. The pinned libjxl
+`e8ff09762481785938d8e4e01333ed3917571161` Clang 22 decoder/metric uses
+linear sRGB/D65. All 46 baseline/combined/production control triples match.
+No fresh CUDA-sanitizer run is claimed for this host-only change; CUDA
+functional tests are rerun and the CUDA archive is byte-identical.
+
+Final warm release and same-executable controls each have seven alternating
+pairs per workload, three warmups and five samples per process, with all
+41 phase fields retained. Cold runs use seven pairs, zero warmups, and one
+sample. Reported times are marginal medians of process medians; percentages
+are medians of paired ratios, which can differ in sign from their ratio.
+
+| Warm release phase | 4K S55 -> S56 ms; paired change | 1080p S55 -> S56 ms; paired change | Flower S55 -> S56 ms; paired change |
+| --- | --- | --- | --- |
+| DC tokenization | 13.437 -> 8.822; -34.35%, 7/7 wins | 3.263 -> 2.239; -31.54%, 7/7 | 0.560 -> 0.334; -42.06%, 7/7 |
+| Codestream encoding | 103.041 -> 90.494; -14.96%, 5/7 | 39.021 -> 38.067; -1.86%, 5/7 | 9.735 -> 9.259; -6.80%, 6/7 |
+| Whole encode | 400.375 -> 383.334; -3.99%, 5/7 | 98.797 -> 98.086; -0.40%, 5/7 | 22.706 -> 22.186; -3.98%, 5/7 |
+
+All 21 final release DC-stage pairs improve. Their ranges are
+-42.04..-27.51%, -36.03..-23.55%, and -59.22..-33.86%. Whole-encode
+ranges are -8.07..+2.96%, -11.74..+3.85%, and -25.70..+3.55%.
+The larger codestream/whole changes include variation in unchanged work:
+4K AC tokenization is -12.48% and histogram work -3.58%; 1080p section
+writing regresses 2.61%, and Flower coefficient-order work regresses 1.30%.
+The DC change alone is not credited with those non-target movements.
+
+Final same-executable warm DC reductions are 38.00% / 38.27% / 42.15%,
+again 7/7 wins each. Whole changes are -0.17% / -2.71% / -1.20%, with
+4/7, 6/7, and 6/7 wins. The 4K codestream phase regresses **7.18%**,
+alongside +9.41% histogram work, +11.50% AC tokenization, and +11.78%
+section writing. One 1080p whole-path pair regresses 14.65% and one
+Flower pair 6.13%. These observations are not dropped or explained away
+by the consistent DC-stage improvement.
+
+| Cold whole encode | 4K baseline -> candidate ms; paired change | 1080p baseline -> candidate ms; paired change | Flower baseline -> candidate ms; paired change |
+| --- | --- | --- | --- |
+| Release S55 -> S56 | 500.512 -> 498.749; +0.11%, 3/7 wins | 142.922 -> 139.570; -1.98%, 5/7 | 45.355 -> 45.842; +5.28%, 3/7 |
+| Same-executable control | 512.713 -> 509.951; +0.22%, 3/7 | 157.667 -> 150.743; -4.39%, 5/7 | 48.429 -> 49.994; +3.73%, 1/7 |
+
+Cold 4K is effectively flat, and both cold Flower cohorts regress.
+The control DC phase still improves 35.99% / 44.70% / 32.13%, winning
+all 21 pairs. Flower's control quantization and codestream phases regress
+4.50% and 6.39%, each faster only once; its worst whole-path observation
+is +30.95%, and the release cohort reaches +35.56%. These are retained
+limits, not evidence that every workload is faster. No S56 A/A/B cohort
+or causal explanation for non-target variability is claimed.
+
+Batch checks use one warmup and three alternating serial/batch samples,
+with every output codestream and summary checked against the single-image
+reference. At even 1080p, fully-resident sizes 1/2/4 give paired speedups
+1.019/1.275/1.271x and batch medians 116.764/179.448/367.900 ms.
+Maximum-throughput gives 1.002/1.717/2.208x and
+80.959/100.480/175.407 ms; one size-1 sample is slower (0.978x).
+Even 4K fully-resident sizes 1/2 give 1.059/1.060x and
+408.530/889.276 ms. These measure same-version scheduling, not cross-version
+S56 gains; especially, no 2.208x optimizer speedup is implied.
+
+Performance-sequence boundary readings span 58 C / P8 / 210 MHz / 11.12 W
+to 67 C / P3 / 1282 MHz / 30.50 W, with software thermal/power flags
+inactive initially and active at the latter reading. The latter precedes
+the short cold-control follow-up. These are boundary observations, not
+per-operation state, normalization, or causal thermal diagnosis. No power,
+clock, cooling, priority, security, or service settings were changed.
+
+### Evidence retention and remaining work
+
+The ignored `build-cuda-ninja/profiles/s56_*` bundle retains frozen S55
+DC/ANS source and DC fixtures, six input captures, the four-mode diagnostic,
+all 1,920 replay records, both exploratory workflow cohorts, final release
+and same-executable warm/cold records, 58 quality pairs, 46 control triples,
+test/ASan logs, native object dumps, source-scope and arithmetic validators,
+and batch observations. The freeze retains 37 executables/libraries and
+four tracked source/doc snapshots. Reruns should use fresh output prefixes,
+not overwrite the frozen evidence.
+
+`s56_validate.py --frozen` rechecks source scope against S55, exact capture
+dimensions, raw replay rows/permutations and summary arithmetic, test
+markers, image hashes and metric reports, workflow fields and paired
+statistics, native findings including the **non-identical** control layout,
+unchanged CUDA archive identity, and both artifact manifests.
+The source and native distinction is explicit; no failing identity test
+is presented as an exact-native match.
+
+All runs completed without an observed admin/firewall failure. The cause
+of the earlier long S30 wait remains unconfirmed. The optimization goal
+remains active: DC lookup work is removed, but token-scanned ANS histogram
+construction, metadata validation/tokenization, major perceptual GPU
+passes, and whole-workflow variability remain concrete leads.
 
 ## Work that should not lead the next cycle
 
