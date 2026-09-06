@@ -1597,6 +1597,11 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME frontend_storage_plan COMMAND gjxl_frontend_storage_plan_test)
   set_tests_properties(frontend_storage_plan PROPERTIES TIMEOUT 180)
 
+  add_executable(gjxl_frontend_field_storage_plan_test tests/frontend_field_storage_plan_test.cpp)
+  target_link_libraries(gjxl_frontend_field_storage_plan_test PRIVATE gjxl_codec)
+  add_test(NAME frontend_field_storage_plan COMMAND gjxl_frontend_field_storage_plan_test)
+  set_tests_properties(frontend_field_storage_plan PROPERTIES TIMEOUT 180)
+
   add_executable(gjxl_publication_storage_test tests/publication_storage_test.cpp)
   target_link_libraries(gjxl_publication_storage_test PRIVATE gjxl_codestream)
   add_test(NAME publication_storage COMMAND gjxl_publication_storage_test)

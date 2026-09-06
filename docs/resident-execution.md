@@ -164,6 +164,9 @@ header and section writers, assembly and retained output publication.
 The [frontend representation bounds](resident-frontend-storage-planning.md)
 cover image planes, owned CPU frames, packed prepared forward coefficients and
 atomic reconstruction scratch, including tile lists and dispatch backing.
+The [field and color-correlation bounds](resident-field-storage-planning.md)
+cover initial-quantization row workers/atomic fields, adjustment, quantizer
+selection and per-tile CfL scratch with independently retained map output.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

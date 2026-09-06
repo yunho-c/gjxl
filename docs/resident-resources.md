@@ -33,7 +33,10 @@ header/section writing, assembly and the fresh retained codestream copy.
 The [frontend representation bounds](resident-frontend-storage-planning.md)
 cover image planes, owned CPU frames, packed prepared forward coefficients,
 tile lists/dispatch and the full atomic reconstruction scratch image.
-Remaining frontend fields/search/perceptual-state bounds and their combined
+The [field and color-correlation bounds](resident-field-storage-planning.md)
+add initial-quantization worker and atomic-field scratch, adjustment, quantizer
+selection and per-tile CfL working/output ownership.
+Remaining frontend/search/perceptual-state bounds and their combined
 device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
 workflow envelope and public domain integration.
 Whole-workflow planning and admission remain pending.

@@ -7,6 +7,9 @@ forward transforms and coefficient reconstruction. **It is not the complete
 frontend or whole-workflow plan.** AC search, quantization fields, preprocessing,
 perceptual evaluation, device/host coexistence, retries, diagnostics and retained
 batch outputs still need their remaining bounds and composition before admission.
+The subsequent [field/CfL checkpoint](resident-field-storage-planning.md) supplies
+the initial quantization, field adjustment, quantizer selection and color-map
+bounds; it does not complete the other remaining frontend/workflow work.
 
 The interfaces are in
 [`frontend_storage_plan.h`](../src/codec/frontend_storage_plan.h). Each successful

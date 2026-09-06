@@ -35,7 +35,108 @@ Status Geometry(Extent2D pixels, FrameGeometry *geometry, size_t *blocks,
     return Overflow();
   return Status::Ok();
 }
+
+Status FieldScratch(Extent2D blocks, size_t planes, HostStorageBound *out) {
+  size_t count = 0;
+  if (out == nullptr || blocks.empty() || !blocks.try_area(&count))
+    return Status::InvalidArgument("Quantization field extent is invalid");
+  HostStorageBound bound;
+  if (!bound.AddVector<float>(count, kFreshExact, planes))
+    return Overflow();
+  *out = bound;
+  return Status::Ok();
+}
 } // namespace
+
+Status ComputeInitialQuantStoragePlan(Extent2D padded_extent,
+                                      size_t cpu_thread_count,
+                                      InitialQuantStoragePlan *out) {
+  if (out == nullptr || !BlockGrid::IsPaddedPixelExtent(padded_extent))
+    return Status::InvalidArgument("Initial quantization extent is invalid");
+  size_t pixels = 0;
+  if (!padded_extent.try_area(&pixels))
+    return Overflow();
+  const size_t row_groups = padded_extent.height / 4;
+  const size_t workers =
+      cpu_thread_count == 0
+          ? kMaximumInitialQuantWorkers
+          : std::min(cpu_thread_count, kMaximumInitialQuantWorkers);
+  InitialQuantStoragePlan plan;
+  plan.maximum_participants = pixels < kMinimumParallelInitialQuantValues
+                                  ? 1
+                                  : std::min(workers, row_groups);
+  // The pixel mask and quarter-resolution erosion input survive both phases.
+  HostStorageBound common;
+  if (!common.AddVector<float>(pixels, kFreshExact) ||
+      !common.AddVector<float>(pixels / 16, kFreshExact))
+    return Overflow();
+  auto rows = common;
+  if (!rows.AddVector<float>(padded_extent.width, kFreshExact,
+                             plan.maximum_participants) ||
+      (plan.maximum_participants > 1 &&
+       (!rows.AddVector<Status>(row_groups, kFreshExact) ||
+        !rows.AddVector<std::thread>(plan.maximum_participants, kFreshExact))))
+    return Overflow();
+  // Workers (including their row arrays, statuses and thread vector) have
+  // joined and returned before the quant/strategy fields and blurred mask.
+  // Erosion, modulations and convolution have no other heap scratch.
+  auto finish = common;
+  if (!finish.AddVector<float>(pixels / 64, kFreshExact, 2) ||
+      !finish.AddVector<float>(pixels, kFreshExact))
+    return Overflow();
+  plan.working = {std::max(rows.retained_bytes, finish.retained_bytes),
+                  std::max(rows.peak_bytes, finish.peak_bytes)};
+  *out = plan;
+  return Status::Ok();
+}
+
+Status ComputeQuantFieldAdjustmentStorageBound(Extent2D block_extent,
+                                               HostStorageBound *out) {
+  return FieldScratch(block_extent, 1, out);
+}
+
+Status ComputeQuantizerSelectionStorageBound(Extent2D block_extent,
+                                             HostStorageBound *out) {
+  return FieldScratch(block_extent, 2, out);
+}
+
+Status ComputeColorCorrelationStoragePlan(Extent2D padded_extent,
+                                          ColorCorrelationStorageMode mode,
+                                          ColorCorrelationStoragePlan *out) {
+  if (out == nullptr || !BlockGrid::IsPaddedPixelExtent(padded_extent))
+    return Status::InvalidArgument("Color-correlation extent is invalid");
+  ColorCorrelationStoragePlan plan;
+  size_t pixels = 0;
+  if (!padded_extent.try_area(&pixels) ||
+      !ColorTileExtent(padded_extent).try_area(&plan.color_tiles))
+    return Overflow();
+  if (!plan.output.AddVector<int8_t>(plan.color_tiles, kFreshExact, 2))
+    return Overflow();
+  plan.working = plan.output;
+  switch (mode) {
+  case ColorCorrelationStorageMode::kCopy:
+    break;
+  case ColorCorrelationStorageMode::kInitialPixel:
+    if (!plan.working.Add(plan.output))
+      return Overflow();
+    break;
+  case ColorCorrelationStorageMode::kTransform: {
+    // All four vectors reserve exactly the tile's coefficient count. Anchors
+    // partition the tile, so pushes never exceed that reserve. Tile processing
+    // is serial; DCT/multiplier-search scratch is entirely on stacks.
+    const size_t coefficients =
+        std::min(padded_extent.width, kColorTileDimension) *
+        std::min(padded_extent.height, kColorTileDimension);
+    if (!plan.working.AddVector<float>(coefficients, kFreshExact, 4))
+      return Overflow();
+    break;
+  }
+  default:
+    return Status::InvalidArgument("Color-correlation storage mode is invalid");
+  }
+  *out = plan;
+  return Status::Ok();
+}
 
 Status ComputeImage3FStorageBound(Extent2D extent, HostStorageBound *out) {
   size_t pixels = 0;

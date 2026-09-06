@@ -21,6 +21,7 @@
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/color_transform.h"
 #include "codec/convolution.h"
+#include "codec/frontend_storage_plan.h"
 #include "codec/maximum_error.h"
 #include "codec/quantization.h"
 #include "core/block_grid.h"
@@ -51,13 +52,14 @@ Status RunParallelInitialQuantWork(
   Function&& function) {
 
   if (count == 0) return Status::Ok();
-  constexpr size_t kMinimumParallelValues = 256 * 256;
-  constexpr size_t kMaximumWorkers = 12;
+  using frontend_storage_internal::kMaximumInitialQuantWorkers;
+  using frontend_storage_internal::kMinimumParallelInitialQuantValues;
   const size_t hardware_workers = std::max<size_t>(
     std::thread::hardware_concurrency(), 1);
-  const size_t automatic_worker_count = value_count < kMinimumParallelValues
-    ? 1
-    : std::min(count, std::min(kMaximumWorkers, hardware_workers));
+  const size_t automatic_worker_count =
+    value_count < kMinimumParallelInitialQuantValues
+      ? 1
+      : std::min(count, std::min(kMaximumInitialQuantWorkers, hardware_workers));
   const size_t cpu_thread_count =
     thread_budget_internal::CpuThreadCount();
   auto* const participant_tracker =
