@@ -16,7 +16,8 @@
   fused mirrored RGB blur/Opsin conversion, and packed active-coefficient
   readback into ownership-backed final frame storage, in-place ANS clustering,
   hoisted histogram log-table access, borrowed prepared ANS populations,
-  and bounded narrow coefficient-order counters with portable SIMD counting
+  bounded narrow coefficient-order counters with portable SIMD counting,
+  and multi-row Malta halo reuse
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -30,7 +31,20 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S53 against S52
+below supersede them. The latest implemented checkpoint, S54 against S53
+(`7e5be16`), retains 256-thread Malta blocks while reusing each loaded halo
+across multiple output rows per lane. Controlled GPU traces show median
+paired Malta improvements of 18.7% / 7.6% / 7.9% at 4K / 1080p / Flower.
+Final warm release whole-encode changes are -3.1% / -2.0% / -0.2%, but cold
+4K and 1080p regress; unchanged host work and all slower observations remain
+documented. All 71 CUDA / 50 CPU tests, four host ASan targets, seven scoped
+CUDA sanitizer runs, and 58 byte-identical decoded-image pairs pass. The
+original math and tiny-image instructions are retained. See
+[S54](#multi-row-malta-halo-reuse-s54) for the policy, controls, and limits.
+This is a targeted GPU improvement, not a universal speedup or a maxed-out
+implementation.
+
+The preceding checkpoint, S53 against S52
 (`5ea11e6`), uses proven-safe 32-bit coefficient zero populations on ordinary
 frames and retains the 64-bit fallback. A small portable helper enables
 packed counting in the production MSVC object, without intrinsics, aliasing
@@ -8246,6 +8260,239 @@ Malta/wide-blur GPU work. Accumulating coefficient-order populations on the
 GPU is a possible later experiment, not a measured or implemented gain.
 Earlier cross-executable and cold-run variability remain unresolved.
 Optimization stays active; this checkpoint does not establish "maxed out."
+
+## Multi-row Malta halo reuse (S54)
+
+S54 compares against S53 `7e5be16` on the RTX 3060 Laptop, MSVC 14.37 /
+CUDA 11.8 Release configuration, on 2026-09-06 America/New_York. It targets
+the largest remaining Butteraugli GPU component in fully-resident encoding.
+
+### Refresh the profile and reject conditional division
+
+Fresh baseline traces, three warmups and one captured encode, spend
+**42.865 of 200.831 ms** in Malta at odd 4K and **4.673 of 33.266 ms** at
+odd 1080p. Horizontal33 plus joint vertical33/low-medium work is next at
+25.722 / 3.978 ms. These are individual traces, not pooled timing estimates.
+The capture has 407 / 394 total launches, including S50's packing kernels.
+
+Native Malta scaling computes two correctly rounded divisions per loaded
+halo value, even when the asymmetric correction is unused. A guarded
+secondary-division prototype passes all 160 existing guarded cases and
+36 timed exact-output cases. It helps identical/zero inputs roughly 2-5%
+at 1080p/4K, but mixed inputs regress roughly 1-2%. That branch-based change
+is **not adopted**; production retains both original divisions and the
+original correction expression. Earlier S31 larger-thread-block and
+warp-shuffle experiments also remain rejected.
+
+### Reuse more halo values without enlarging the thread block
+
+The retained approach keeps a 32-column tile and **256 threads**, while
+allowing each thread to compute multiple output rows after one shared load
+and barrier. It tests heights 16/24/32/64, with 2/3/4/8 outputs per thread.
+This is different from S31's larger blocks with one output per thread.
+The response loop stays rolled to avoid making multiple responses live
+in registers at once. Each output keeps the original response tree and
+initialization/addition expression; output pixels remain independent.
+
+The interior logical work per tile is:
+
+| Tile height | Outputs | Loaded/scaled halo values | Values per output | Reduction versus 8 rows |
+| ---: | ---: | ---: | ---: | ---: |
+| 8 | 256 | 640 | 2.500 | baseline |
+| 24 | 768 | 1,280 | 1.667 | 33.3% |
+| 64 | 2,048 | 2,880 | 1.406 | 43.75% |
+
+These are program-level load/scale counts for interior tiles, not measured
+DRAM traffic. There is no approximate reciprocal, fast-math change, new
+intermediate, extra submission, allocation, transfer, or image-plane capacity.
+All lanes load and synchronize before skipping invalid outputs; partial
+rows cannot bypass the shared-memory barrier. No barrier or shared overwrite
+occurs between a lane's independent output rows.
+
+The first five-mode screen uses 18 cases (three sizes, three input patterns,
+and full/low-frequency response), sixteen warmups per mode and ten cyclic
+mode-order rotations, with three launches per CUDA-event interval. All
+outputs match the original fused kernel exactly; all four candidate heights
+also pass the 160 guarded cases. The 64-row variant improves the six 4K case
+medians by paired 19.3-22.0%, but regresses the 512x536 cases by 3.6-9.3%.
+Height 24 improves all eighteen case medians, with smaller large-image gains.
+All intervals and burst-wide drift remain in the report.
+
+A second, 16-case crossover screen uses five forward and five reverse
+rotations, intermediate square sizes, and wide/narrow aspect ratios. At
+768x768, 64 rows regresses 1.6-2.6%; at 1024x1024 it improves only 1.5-4.1%,
+versus about 12.6% for 24 rows. At 1536x1536, 64 rows improves 15.2-17.7%.
+The narrow 31x32767 and wide 16384x64 cases also favor 24/32 over 64 rows.
+This supports a size-dependent policy, not a single universally best tile.
+
+The production policy uses 64-bit arithmetic for its tile-count comparisons:
+retain the original 8-row computation below 128 original tiles; otherwise
+use 24 rows until at least 768 64-row tiles are available, then use 64.
+The cutoffs are empirically screened on this GPU, not an achieved-occupancy
+measurement or a universal device optimum. Checked boundary examples are
+32x1016/1017 and 1024x1472/1473. The flattened-grid fallback uses the
+selected height, preserving images beyond 65,535 tile rows. Its current
+64-row boundary is height 4,194,240/4,194,241.
+
+### Native identity and controlled whole-workflow evidence
+
+All **158 non-target GPU bodies** match S53. The four 8-row native bodies
+match the original after removing only the renamed function header. All
+eight 24/64-row bodies match the same-executable diagnostic kernels that
+were profiled. There are 170 GPU bodies in total versus 162 before; no
+stack/local allocation is introduced. The standard-grid 24/64-row kernels
+use 37 registers for full response and 38 for low-frequency; flattened-grid
+versions use 39/37. Shared storage is 5,120 / 11,520 bytes, versus the
+original 2,560. The 8-row path retains 40/34 registers and its original code.
+
+The first production template revision unnecessarily retained a loop even
+for eight rows. Native comparison exposed that difference. A compile-time
+single-output branch restores the original instructions before final
+qualification; the first revision's native evidence is kept separately.
+The scaling function, sum helpers, response expressions, and separate-pass
+oracle are also checked against frozen S53 source.
+
+A diagnostic-only `S54_MALTA_MODE` selects baseline, fixed 24, fixed 64,
+or adaptive inside one executable. A balanced four-order whole-encode screen
+uses three warmups and five samples per process for 4K, 1080p, and Flower.
+Adaptive quantization changes -3.3% / -3.4% / +2.0%; whole encode changes
+-2.6% / -4.3% / +1.6%. Flower quantization is slower in all four adaptive
+observations, and that result is retained. Matching encoded sizes in this
+screen alone are not a byte-identity claim. Separately, all **46 diagnostic
+baseline/adaptive/S53-production image triples** match bytes.
+
+Three alternating-order profile pairs per workload then isolate Malta using
+that same executable. Each capture has three warmups and one measured encode.
+All 24 Malta launches remain; other-kernel structure, allocation requests,
+and copy counts/bytes match pairwise. Full/half-scale 4K uses 64 rows; 1080p
+uses 64 for full scale and 24 for half scale; Flower uses 24 for both.
+
+| Controlled GPU traces | 4K | 1080p | Flower |
+| --- | ---: | ---: | ---: |
+| Baseline Malta ms, three runs | 44.912 / 48.634 / 48.236 | 4.579 / 4.122 / 4.448 | 0.661 / 0.662 / 0.664 |
+| Adaptive Malta ms | 37.389 / 38.171 / 39.229 | 3.934 / 4.062 / 4.109 | 0.612 / 0.610 / 0.610 |
+| Median paired Malta change | -18.7% | -7.6% | -7.9% |
+| Other GPU work change | -4.1% | +2.7% | -0.08% |
+| Total GPU change | -7.9% | +1.3% | -0.9% |
+
+Malta improves in all nine pairs, but two 1080p total-GPU observations
+regress, including +6.8%. The Flower target improves while its earlier wall
+screen was adverse; neither cohort replaces the other or establishes the
+cause of that discrepancy. No universal full-encode gain follows from the
+targeted reduction, and unchanged GPU/CPU timing changes are not credited
+to it. No clock, cooling, power, security, priority, or service settings change.
+
+### Final qualification
+
+Final warm release and same-executable comparisons each use seven alternating
+process pairs per input, three warmups, five samples, and all 41 timing
+fields. Inputs are odd 3839x2159 / 1919x1079 and linear Flower 510x532,
+distance 1.2, effort 7, fully resident, encoding-only. Times are medians of
+process medians; changes are medians of paired ratios, not ratios of those
+medians. No samples are discarded.
+
+| Final warm release | 4K S53 -> S54 ms; paired change | 1080p S53 -> S54 ms; paired change | Flower S53 -> S54 ms; paired change |
+| --- | ---: | ---: | ---: |
+| Quantization pipeline | 279.704 -> 273.689; -1.1% | 54.605 -> 53.700; -2.1% | 11.768 -> 11.966; -1.3% |
+| Codestream wall time | 99.944 -> 100.503; +8.2% | 39.893 -> 40.262; -2.5% | 9.877 -> 9.892; -3.2% |
+| Whole encode | 409.357 -> 398.021; -3.1% | 102.123 -> 101.624; -2.0% | 23.082 -> 23.485; -0.2% |
+
+Quantization improves in 7/7, 5/7, and 4/7 pairs; whole encode in 4/7, 5/7,
+and 4/7. Whole-encode ranges are [-5.0%, +3.4%], [-10.8%, +4.4%], and
+[-27.2%, +30.2%]. Unchanged 4K host codestream work is slower in 5/7 pairs,
+including paired +6.9% in coefficient-order work. That slowdown is retained
+and is not attributed to changed host instructions: `gjxl_codestream.lib`
+is byte-identical to S53.
+
+The final same-executable cohort gives quantization changes **-3.5% / -2.9%
+/ -1.0%**, with 6/7, 6/7, and 4/7 wins. Whole-encode medians are
+420.123 -> 408.606, 109.734 -> 106.592, and 23.777 -> 23.812 ms; paired
+changes are **-3.7% / -1.9% / -2.9%**, with 4/7, 5/7, and 4/7 wins.
+Ranges are [-6.5%, +5.4%], [-6.0%, +21.6%], and [-10.4%, +27.5%].
+The 1080p 103.302 -> 125.621-ms pair and Flower 23.522 -> 30.001-ms pair
+remain, alongside the earlier adverse Flower screen. Codestream wall-time
+changes are +0.5% / -2.4% / -2.7%, not assumed to be GPU savings.
+
+Seven cold pairs per input use zero warmups and one measured sample:
+
+| Cold whole encode | 4K ms; paired change | 1080p ms; paired change | Flower ms; paired change |
+| --- | ---: | ---: | ---: |
+| Release S53 -> S54 | 504.066 -> 531.290; +2.8% | 141.210 -> 145.820; +3.3% | 47.974 -> 46.582; -3.1% |
+| Same-executable baseline -> adaptive | 514.395 -> 517.763; -1.2% | 146.674 -> 144.508; -2.2% | 45.953 -> 45.413; -2.2% |
+
+Cold release wins are only 1/7, 3/7, and 5/7; quantization changes
++1.0% / +2.9% / -3.3%. The separate cold control wins 4/7, 5/7, and 4/7,
+with quantization changes -2.0% / -1.3% / -1.9%. Release ranges are
+[-8.3%, +8.5%], [-9.0%, +12.3%], and [-16.0%, +16.9%]; control ranges
+are [-12.6%, +9.3%], [-2.9%, +5.5%], and [-7.9%, +8.0%]. The favorable
+controls do not erase the cold release regressions or establish their cause.
+No new A/A/B cohort is claimed.
+
+Main timing-sequence boundary readings are 59 -> 68 C, P8 -> P3, and
+210 -> 337 MHz; software thermal/power flags change from inactive to active.
+These are boundary readings, not per-kernel measurements. Cohorts are not
+pooled or clock-normalized. No causal thermal diagnosis is claimed.
+
+- All **71 CUDA-enabled CTests** pass in 67.35 s and all **50 CPU-only GCC
+  CTests** in 17.32 s, including installed consumers. The expanded Malta
+  fixture passes **656 guarded cases** and **16 tall cases**, three stages
+  each, with bitwise output/guard comparisons and input immutability.
+  Coverage includes partial rows, both policy cutoffs, all three tile
+  heights, both grid layouts, initialization/addition, threshold neighbors,
+  signed zeros, subnormals, extremes, NaN/Inf, and identical inputs.
+- An internal CUDA-only testing entry launches the actual production
+  specializations on small inputs independently of size policy. Its
+  **48-case** fixture passes memcheck, initcheck, synccheck, and racecheck;
+  all error/hazard/warning counts are zero. The racecheck completes in
+  about 23 s. The complete AQ fixture also passes memory, initialization,
+  and synchronization checks; memory checking includes stream-ordered
+  races and leak checking, with zero leaked bytes. No full-AQ racecheck
+  or tall-image sanitizer run is claimed for S54.
+- Four host-instrumented Clang 22 ASan targets pass: entropy, coefficient
+  order, codestream encoder, and public workflow. Their CPU-only build has
+  no changed implementation and requires no rebuild work.
+- All **58 image pairs** match encoded bytes and independently decoded
+  Butteraugli scores using pinned libjxl
+  `e8ff09762481785938d8e4e01333ed3917571161` and linear RGB
+  `RGB_D65_SRG_Rel_Lin`. The primary 46 cases cover seven inputs at distances
+  0.5/1.2/3, effort 7, plus sample/Flower effort 9. Twelve additional cases
+  cover legacy high-density without explicit effort and maximum-compression
+  at effort 7. Encoding-only and scored outputs agree.
+- Batch byte checks pass with one warmup and three samples. Even 1080p
+  fully-resident batch 1/2/4 gives same-version paired speedups
+  1.007x / 1.331x / 1.386x; maximum-throughput gives
+  0.882x / 1.454x / 1.804x. Even 4K fully-resident batch 1/2 gives
+  1.026x / 0.978x. The slower throughput batch-one and 4K batch-two
+  observations remain; these compare scheduling within S54, not versions.
+
+Ignored `build-cuda-ninja/profiles/s54_*` evidence retains fresh baseline
+and controlled Nsight captures/SQLite exports, original CUDA/fixture
+snapshots, division and multi-row/crossover probes, resource/native output,
+the four-mode diagnostic control, all image reports, CTest/ASan/sanitizer
+logs, all final timing pairs, batch results, and GPU boundaries.
+Historical probe sources retain their original fixture include; the
+`*_repro.cu` companions change only that include to the frozen S53 fixture
+for rebuilding after the tracked fixture expanded. These companions were
+not substituted for the executables that produced the recorded timings.
+`s54_report.py` derives paired summaries; `s54_validate.py` checks source
+provenance, native identities, raw timing arithmetic/order, captured profile
+structures, image hashes, sanitizer completion, and checkpoint identities.
+The final binary/artifact manifests freeze binaries, libraries, all five
+changed source/document files, experiment evidence, and profile exports.
+All 34 retained S53 binary/library identities remain unchanged.
+
+Two diagnostic setup issues preceded testing: a nested initializer list
+needed an explicit array type, and the first standalone probe reported a
+static/dynamic CUDA runtime link warning. Subsequent standalone probes use
+the same shared runtime as production. A native-source verifier endpoint
+was corrected to extract complete functions; saved native output was reused,
+not recaptured to replace an adverse result. No admin/firewall or permission
+error was reported, and every run reached a terminal state.
+
+Public API/ABI and arithmetic remain unchanged; the new entry is confined
+to internal CUDA testing. Wide blurs, remaining Malta work, token-scanned DC
+population construction, and full-workflow variability remain live leads.
+The optimization goal remains active, not demonstrated maxed out.
 
 ## Work that should not lead the next cycle
 

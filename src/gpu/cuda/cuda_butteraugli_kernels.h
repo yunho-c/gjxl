@@ -57,6 +57,13 @@ struct CudaButteraugliMaltaParams {
     const float* reference, const float* distorted, float* accumulation,
     CudaButteraugliMaltaParams params, cudaStream_t stream);
 
+// Internal differential/sanitizer entry: exercise each production specialization
+// on small guarded inputs, independently of the size-based launch policy.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaForTesting(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
+    cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaReference(
     const float* reference, const float* distorted, float* scaled,
     uint32_t scaled_stride, float* accumulation,

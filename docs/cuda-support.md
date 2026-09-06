@@ -785,6 +785,20 @@ and batch checks pass. S52's earlier cross-executable order-stage anomaly
 is not explained by a source/object change and remains unresolved.
 Optimization remains ongoing.
 
+[S54](cuda-optimization-s1.md#multi-row-malta-halo-reuse-s54) reuses Malta
+halos across multiple output rows per thread while retaining 256-thread
+blocks. A size-based 8/24/64-row policy preserves the original tiny-image
+instructions and reduces interior halo load/scale work by 33.3% or 43.75%
+on the larger tiles. Scaling divisions, response trees, and accumulation
+order remain unchanged. Controlled GPU traces improve Malta by paired
+18.7% / 7.6% / 7.9% at 4K / 1080p / Flower. Warm release whole-encode
+changes are -3.1% / -2.0% / -0.2%, but cold 4K/1080p regress; controls,
+outliers, and slower batch observations remain documented. All 71 CUDA /
+50 CPU tests, four host ASan targets, seven scoped CUDA sanitizers,
+58 decoded-image pairs, 656 guarded and 16 tall Malta cases pass.
+Public API/ABI is unchanged; a CUDA-internal testing entry permits bounded
+sanitizer coverage of every tile/grid specialization. Optimization continues.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

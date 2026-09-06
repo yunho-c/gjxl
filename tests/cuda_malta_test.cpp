@@ -62,7 +62,8 @@ bool Guards(const std::vector<float>& actual, const std::vector<float>& initial,
 }
 
 void Verify(uint32_t width, uint32_t height, bool lf, bool initialize,
-            unsigned pattern, bool tall) {
+            unsigned pattern, bool tall, unsigned tile_height = 0,
+            bool flat_grid = false) {
   using namespace gjxl::cuda_internal;
   constexpr uint32_t kReferenceOffset = 5, kDistortedOffset = 7;
   constexpr uint32_t kWorkOffset = 13, kOutputOffset = 19;
@@ -96,6 +97,21 @@ void Verify(uint32_t width, uint32_t height, bool lf, bool initialize,
         d = r * ((x + y) % 3 == 0 ? 0.55f : 1.05f);
         if (x % 3 != 0) d = std::nextafter(d, x % 3 == 1 ? -2.0f : 2.0f);
       }
+      if (pattern == 4) {
+        constexpr std::array<float, 11> values{
+            0.0f, -0.0f, std::numeric_limits<float>::min(),
+            -std::numeric_limits<float>::min(),
+            std::numeric_limits<float>::denorm_min(),
+            -std::numeric_limits<float>::denorm_min(),
+            std::numeric_limits<float>::max(),
+            -std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::infinity(),
+            -std::numeric_limits<float>::infinity(),
+            std::numeric_limits<float>::quiet_NaN()};
+        r = values[(x + y) % values.size()];
+        d = values[(x * 7 + y + 3) % values.size()];
+      }
+      if (pattern == 5) d = r;
       reference[kReferenceOffset + static_cast<size_t>(y) * rs + x] = r;
       distorted[kDistortedOffset + static_cast<size_t>(y) * ds + x] = d;
       output[kOutputOffset + static_cast<size_t>(y) * os + x] =
@@ -123,9 +139,16 @@ void Verify(uint32_t width, uint32_t height, bool lf, bool initialize,
         dr.data + kReferenceOffset, dd.data + kDistortedOffset,
         dw.data + kWorkOffset, ws, expected_output.data + kOutputOffset, params,
         nullptr));
-    CheckCuda(LaunchCudaButteraugliMalta(
-        dr.data + kReferenceOffset, dd.data + kDistortedOffset,
-        actual_output.data + kOutputOffset, params, nullptr));
+    if (tile_height == 0) {
+      CheckCuda(LaunchCudaButteraugliMalta(
+          dr.data + kReferenceOffset, dd.data + kDistortedOffset,
+          actual_output.data + kOutputOffset, params, nullptr));
+    } else {
+      CheckCuda(LaunchCudaButteraugliMaltaForTesting(
+          dr.data + kReferenceOffset, dd.data + kDistortedOffset,
+          actual_output.data + kOutputOffset, params, tile_height, flat_grid,
+          nullptr));
+    }
     CheckCuda(cudaDeviceSynchronize());
     const auto expected = expected_output.Read();
     const auto actual = actual_output.Read();
@@ -133,6 +156,7 @@ void Verify(uint32_t width, uint32_t height, bool lf, bool initialize,
       std::cerr << "Mismatch " << width << 'x' << height << " lf=" << lf
                 << " init=" << initialize << " pattern=" << pattern
                 << " stage=" << stage << '\n';
+      std::cerr << "tile_height=" << tile_height << " flat=" << flat_grid << '\n';
       throw std::runtime_error("Bitwise Malta response mismatch");
     }
     if (!Guards(actual, output, kOutputOffset, os, width, height) ||
@@ -153,13 +177,29 @@ int main(int argc, char** argv) {
     return 77;
   }
   const bool tall = argc == 2 && std::string_view(argv[1]) == "--tall-only";
-  if (argc > 1 && !tall) return 1;
+  const bool sanitizer =
+      argc == 2 && std::string_view(argv[1]) == "--sanitizer-only";
+  if (argc > 1 && !tall && !sanitizer) return 1;
   try {
     CheckCuda(cudaSetDevice(0));
     size_t cases = 0;
-    if (tall) {
-      // Last legal 2D grid row count, then the first flattened-grid fallback.
-      for (uint32_t height : {524280u, 524281u}) {
+    if (sanitizer) {
+      // Exercise the actual compiled kernels without allocating a huge image
+      // solely to trigger the production tile/grid policy.
+      for (unsigned tile_height : {8u, 24u, 64u}) {
+        for (bool flat : {false, true})
+          for (bool lf : {false, true})
+            for (bool initialize : {false, true})
+              for (unsigned pattern : {1u, 4u}) {
+                Verify(65, 65, lf, initialize, pattern, false, tile_height, flat);
+                ++cases;
+              }
+        std::cout << "Verified sanitizer tile_height=" << tile_height
+                  << " cases=" << cases << '\n' << std::flush;
+      }
+    } else if (tall) {
+      // Retain the old boundary and test the current 64-row 2D/flat boundary.
+      for (uint32_t height : {524280u, 524281u, 4194240u, 4194241u}) {
         for (bool lf : {false, true}) {
           for (bool initialize : {false, true}) {
             Verify(1, height, lf, initialize, 1, true);
@@ -183,10 +223,34 @@ int main(int argc, char** argv) {
       for (const auto& shape : kShapes)
         for (bool lf : {false, true})
           for (bool initialize : {false, true})
-            for (unsigned pattern = 0; pattern < 4; ++pattern) {
+            for (unsigned pattern = 0; pattern < 6; ++pattern) {
               Verify(shape[0], shape[1], lf, initialize, pattern, false);
               ++cases;
             }
+      // Normal-policy row/tile boundaries, including both dispatch cutoffs.
+      constexpr std::array<std::array<uint32_t, 2>, 16> kPolicyShapes{{
+          {2048, 23}, {2048, 24}, {2048, 25}, {2048, 47}, {2048, 48},
+          {2048, 49}, {2048, 63}, {2048, 64}, {2048, 65},
+          {32, 1016}, {32, 1017}, {1024, 1472}, {1024, 1473},
+          {1, 65535}, {1, 65536}, {1, 65537}}};
+      for (const auto& shape : kPolicyShapes)
+        for (bool lf : {false, true})
+          for (bool initialize : {false, true})
+            for (unsigned pattern : {1u, 4u}) {
+              Verify(shape[0], shape[1], lf, initialize, pattern, false);
+              ++cases;
+            }
+      for (unsigned tile_height : {8u, 24u, 64u})
+        for (bool flat : {false, true})
+          for (const auto& shape : {std::array<uint32_t, 2>{31, 65},
+                                   std::array<uint32_t, 2>{65, 63}})
+            for (bool lf : {false, true})
+              for (bool initialize : {false, true})
+                for (unsigned pattern = 0; pattern < 6; ++pattern) {
+                  Verify(shape[0], shape[1], lf, initialize, pattern, false,
+                         tile_height, flat);
+                  ++cases;
+                }
     }
     std::cout << "Verified " << cases
               << " guarded Malta cases, three stages each\n";
