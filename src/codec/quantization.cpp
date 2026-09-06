@@ -12,9 +12,12 @@
 #include <span>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/quantization_tables_generated.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr float kQuantFieldTarget = 5.0f;
@@ -560,71 +563,79 @@ Status CreateQuantizerFromField(
       "Quantization field dimensions are too large");
   }
 
-  std::vector<float> values;
-  values.reserve(value_count);
+  try {
+    ManagedVector<float> values;
+    values.reserve(value_count);
 
-  for (size_t y = 0; y < quant_field.extent.height; ++y) {
-    const float* row = quant_field.Row(y);
-    for (size_t x = 0; x < quant_field.extent.width; ++x) {
-      if (!std::isfinite(row[x]) || row[x] <= 0.0f) {
-        return Status::InvalidArgument(
-          "Quantization field values must be finite and positive");
+    for (size_t y = 0; y < quant_field.extent.height; ++y) {
+      const float* row = quant_field.Row(y);
+      for (size_t x = 0; x < quant_field.extent.width; ++x) {
+        if (!std::isfinite(row[x]) || row[x] <= 0.0f) {
+          return Status::InvalidArgument(
+            "Quantization field values must be finite and positive");
+        }
+        values.push_back(row[x]);
       }
-      values.push_back(row[x]);
     }
-  }
 
-  const size_t median_index = values.size() / 2;
-  std::nth_element(
-    values.begin(),
-    values.begin() + median_index,
-    values.end());
-  const float median = values[median_index];
+    const size_t median_index = values.size() / 2;
+    std::nth_element(
+      values.begin(),
+      values.begin() + median_index,
+      values.end());
+    const float median = values[median_index];
 
-  std::vector<float> deviations(values.size());
-  std::transform(
-    values.begin(),
-    values.end(),
-    deviations.begin(),
-    [median](float value) {
-      return std::abs(value - median);
-    });
+    ManagedVector<float> deviations(values.size());
+    std::transform(
+      values.begin(),
+      values.end(),
+      deviations.begin(),
+      [median](float value) {
+        return std::abs(value - median);
+      });
 
-  std::nth_element(
-    deviations.begin(),
-    deviations.begin() + median_index,
-    deviations.end());
-  const float median_absolute_deviation = deviations[median_index];
+    std::nth_element(
+      deviations.begin(),
+      deviations.begin() + median_index,
+      deviations.end());
+    const float median_absolute_deviation = deviations[median_index];
 
-  QuantizerParams params;
-  status = ComputeQuantizerParams(
-    quant_dc,
-    median,
-    median_absolute_deviation,
-    &params);
+    QuantizerParams params;
+    status = ComputeQuantizerParams(
+      quant_dc,
+      median,
+      median_absolute_deviation,
+      &params);
 
-  if (!status.ok()) {
-    return status;
-  }
-
-  Quantizer result;
-  status = Quantizer::Create(params, &result);
-  if (!status.ok()) {
-    return status;
-  }
-
-  for (size_t y = 0; y < quant_field.extent.height; ++y) {
-    const float* source = quant_field.Row(y);
-    int32_t* destination = raw_quant_field.Row(y);
-
-    for (size_t x = 0; x < quant_field.extent.width; ++x) {
-      destination[x] = ClampRawQuant(
-        source[x] * result.inverse_global_scale() + 0.5f);
+    if (!status.ok()) {
+      return status;
     }
-  }
 
-  *out = result;
-  return Status::Ok();
+    Quantizer result;
+    status = Quantizer::Create(params, &result);
+    if (!status.ok()) {
+      return status;
+    }
+
+    for (size_t y = 0; y < quant_field.extent.height; ++y) {
+      const float* source = quant_field.Row(y);
+      int32_t* destination = raw_quant_field.Row(y);
+
+      for (size_t x = 0; x < quant_field.extent.width; ++x) {
+        destination[x] = ClampRawQuant(
+          source[x] * result.inverse_global_scale() + 0.5f);
+      }
+    }
+
+    *out = result;
+    return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory("Unable to allocate quantizer selection storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument("Quantizer selection storage is too large");
+  }
 }
 
 Status GetDefaultQuantizationMatrix(

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/ac_strategy.h"
 #include "core/geometry.h"
 #include "core/image.h"
@@ -83,8 +84,8 @@ private:
       ColorCorrelationMap*);
 
   Extent2D tile_extent_;
-  std::vector<int8_t> y_to_x_;
-  std::vector<int8_t> y_to_b_;
+  resource_budget_internal::ManagedVector<int8_t> y_to_x_;
+  resource_budget_internal::ManagedVector<int8_t> y_to_b_;
 };
 
 /// Computes libjxl's first-pass DCT8-only chroma-from-luma AC map.

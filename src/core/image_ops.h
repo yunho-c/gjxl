@@ -68,9 +68,9 @@ void CopyPlane(
   }
 }
 
-template <typename T>
+template <typename T, typename Allocator>
 void CopyContiguousPlane(
-  const std::vector<T>& source,
+  const std::vector<T, Allocator>& source,
   PlaneView<T> destination) {
 
   [[maybe_unused]] size_t value_count = 0;

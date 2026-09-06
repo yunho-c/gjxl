@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/color_transform.h"
 #include "codec/convolution.h"
@@ -30,6 +31,8 @@
 #include "util/fast_math.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 namespace aqi = adaptive_quantization_internal;
@@ -80,9 +83,9 @@ Status RunParallelInitialQuantWork(
     return Status::Ok();
   }
 
-  std::vector<Status> statuses(count);
+  ManagedVector<Status> statuses(count);
   std::atomic<size_t> next_index{0};
-  std::vector<std::thread> workers;
+  ManagedVector<std::thread> workers;
   const size_t spawned_worker_count = cpu_thread_count == 0
     ? participant_count
     : participant_count - 1;
@@ -96,6 +99,8 @@ Status RunParallelInitialQuantWork(
       if (index >= count) break;
       try {
         statuses[index] = function(index);
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        statuses[index] = failure.status();
       } catch (const std::bad_alloc&) {
         statuses[index] = Status::OutOfMemory(
           "Unable to allocate initial-quantization worker storage");
@@ -109,6 +114,10 @@ Status RunParallelInitialQuantWork(
     for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
       workers.emplace_back(run_worker);
     }
+  } catch (const std::bad_alloc&) {
+    next_index.store(count, std::memory_order_relaxed);
+    for (std::thread& worker : workers) worker.join();
+    return Status::OutOfMemory("Unable to allocate CPU worker state");
   } catch (const std::system_error&) {
     next_index.store(count, std::memory_order_relaxed);
     for (std::thread& worker : workers) worker.join();
@@ -254,9 +263,9 @@ void Sort4(std::array<float, 4>* values) {
 void FuzzyErosion(
   float butteraugli_target,
   Extent2D source_extent,
-  const std::vector<float>& source,
+  const ManagedVector<float>& source,
   Extent2D destination_extent,
-  std::vector<float>* destination) {
+  ManagedVector<float>* destination) {
 
   constexpr std::array<float, 4> kMulBase = {
     0.125f,
@@ -334,8 +343,8 @@ void FuzzyErosion(
 
 Status BlurPixelMask(
   Extent2D extent,
-  const std::vector<float>& input,
-  std::vector<float>* output) {
+  const ManagedVector<float>& input,
+  ManagedVector<float>* output) {
 
   constexpr std::array<float, 5> kFilter = {
     0.364911248f,
@@ -478,7 +487,7 @@ void PerBlockModulations(
   ConstImage3FView opsin,
   InitialQuantizationOptions options,
   Extent2D block_extent,
-  std::vector<float>* quant_field) {
+  ManagedVector<float>* quant_field) {
 
   const float scale = kAcQuant / options.butteraugli_target * options.rescale;
   const float base_level = 0.48f * scale;
@@ -635,12 +644,12 @@ Status ComputeInitialQuantField(
   }
 
   try {
-    std::vector<float> pixel_mask(pixel_count);
+    ManagedVector<float> pixel_mask(pixel_count);
     const Extent2D pre_erosion_extent{
       .width = opsin.width() / 4,
       .height = opsin.height() / 4,
     };
-    std::vector<float> pre_erosion(
+    ManagedVector<float> pre_erosion(
       pre_erosion_extent.width * pre_erosion_extent.height);
 
     constexpr float kMatchGammaOffset = 0.019f;
@@ -648,7 +657,7 @@ Status ComputeInitialQuantField(
     status = RunParallelInitialQuantWork(
       pre_erosion_extent.height, pixel_count,
       [&](size_t group_y) {
-        std::vector<float> row_differences(opsin.width());
+        ManagedVector<float> row_differences(opsin.width());
         const size_t y_begin = group_y * 4;
         for (size_t row_index = 0; row_index < 4; ++row_index) {
           const size_t y = y_begin + row_index;
@@ -696,7 +705,7 @@ Status ComputeInitialQuantField(
       });
     if (!status.ok()) return status;
 
-    std::vector<float> quant_field;
+    ManagedVector<float> quant_field;
     FuzzyErosion(
       options.butteraugli_target,
       pre_erosion_extent,
@@ -704,7 +713,7 @@ Status ComputeInitialQuantField(
       block_extent,
       &quant_field);
 
-    std::vector<float> strategy_mask(block_count);
+    ManagedVector<float> strategy_mask(block_count);
     for (size_t i = 0; i < block_count; ++i) {
       strategy_mask[i] = 1.0f / (quant_field[i] + 0.001f);
     }
@@ -715,7 +724,7 @@ Status ComputeInitialQuantField(
       block_extent,
       &quant_field);
 
-    std::vector<float> blurred_pixel_mask;
+    ManagedVector<float> blurred_pixel_mask;
     status = BlurPixelMask(
       opsin.extent(),
       pixel_mask,
@@ -724,7 +733,7 @@ Status ComputeInitialQuantField(
       return status;
     }
 
-    const auto valid_values = [](const std::vector<float>& values) {
+    const auto valid_values = [](const ManagedVector<float>& values) {
       return std::ranges::all_of(
         values,
         [](float value) {
@@ -741,6 +750,8 @@ Status ComputeInitialQuantField(
     CopyContiguousPlane(quant_field, output.quant_field);
     CopyContiguousPlane(strategy_mask, output.strategy_mask);
     CopyContiguousPlane(blurred_pixel_mask, output.pixel_mask);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate initial quantization scratch storage");
@@ -773,7 +784,7 @@ Status AdjustQuantField(
   }
 
   try {
-    std::vector<float> adjusted(value_count);
+    ManagedVector<float> adjusted(value_count);
     for (size_t y = 0; y < input.extent.height; ++y) {
       for (size_t x = 0; x < input.extent.width; ++x) {
         const float value = input.Row(y)[x];
@@ -830,6 +841,8 @@ Status AdjustQuantField(
     }
 
     CopyContiguousPlane(adjusted, output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate adjusted quant field storage");
@@ -843,7 +856,7 @@ Status AdjustQuantField(
 namespace {
 
 struct QuantizationEvaluation {
-  std::vector<float> block_distance;
+  ManagedVector<float> block_distance;
   Image3FBuffer reconstructed_linear;
   VarDctEncoderFrame frame;
   double score = 0.0;
@@ -877,10 +890,10 @@ Status EvaluateQuantization(
     ? nullptr
     : &local_profile;
   QuantizationEvaluation result;
-  std::vector<int32_t> raw_quant(block_count);
+  ManagedVector<int32_t> raw_quant(block_count);
   Quantizer quantizer;
   ColorCorrelationMap color_correlation;
-  std::vector<float> inverse_sigma(block_count);
+  ManagedVector<float> inverse_sigma(block_count);
   Status status = MeasureEvaluationStage(
     measured,
     aqi::EvaluationStage::kFieldConstruction,
@@ -1020,7 +1033,7 @@ Status EvaluateQuantization(
       return Status::InvalidArgument(
         "Adaptive-quantization reference extent is too large");
     }
-    std::vector<float> distance_map(pixel_count);
+    ManagedVector<float> distance_map(pixel_count);
     status = MeasureEvaluationStage(
       measured,
       aqi::EvaluationStage::kButteraugli,
@@ -1368,7 +1381,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
       const auto setup_begin = profile == nullptr
         ? ProfileClock::time_point{}
         : ProfileClock::now();
-      std::vector<float> quant_field(block_count);
+      ManagedVector<float> quant_field(block_count);
       Status status = Status::Ok();
       if (input_adjusted) {
         for (size_t y = 0; y < block_extent.height; ++y) {
@@ -1400,7 +1413,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
       score_history.reserve(kEvaluationCount);
       AdaptiveQuantizationEvaluation evaluation;
       bool upper_bound_limited = false;
-      std::vector<float> best_feasible_field;
+      ManagedVector<float> best_feasible_field;
       float best_feasible_error = -1.0f;
       const auto evaluate = [&](bool is_final) -> Status {
         EvaluationProfile evaluation_profile;
@@ -1457,7 +1470,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
         const auto update_begin = profile == nullptr
           ? ProfileClock::time_point{}
           : ProfileClock::now();
-        std::vector<float> updated(block_count);
+        ManagedVector<float> updated(block_count);
         bool iteration_limited = false;
         status = UpdateMaximumErrorQuantField(
           strategies,
@@ -1513,7 +1526,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
     const auto setup_begin = profile == nullptr
       ? ProfileClock::time_point{}
       : ProfileClock::now();
-    std::vector<float> quant_field(block_count);
+    ManagedVector<float> quant_field(block_count);
     Status status = Status::Ok();
     if (input_adjusted) {
       for (size_t y = 0; y < block_extent.height; ++y) {
@@ -1536,7 +1549,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
     if (!status.ok()) {
       return status;
     }
-    const std::vector<float> adjusted_initial = quant_field;
+    const ManagedVector<float> adjusted_initial = quant_field;
 
     ButteraugliPolicySetup setup;
     status = PrepareButteraugliPolicy(
@@ -1643,6 +1656,8 @@ Status RunAdaptiveQuantizationPolicyImpl(
     if (profile != nullptr) {
       *profile = std::move(local_profile);
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate adaptive-quantization scratch storage");

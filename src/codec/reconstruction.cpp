@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/dc_conversion.h"
 #include "codec/dc_quantization.h"
 #include "codec/dct.h"
@@ -27,6 +28,8 @@
 #include "core/thread_budget.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr std::array<XybChannel, 3> kChannels = {
@@ -75,9 +78,9 @@ Status RunParallelForwardTransforms(
     return Status::Ok();
   }
 
-  std::vector<Status> statuses(count);
+  ManagedVector<Status> statuses(count);
   std::atomic<size_t> next_index{0};
-  std::vector<std::thread> workers;
+  ManagedVector<std::thread> workers;
   const size_t spawned_worker_count = cpu_thread_count == 0
     ? participant_count
     : participant_count - 1;
@@ -91,6 +94,8 @@ Status RunParallelForwardTransforms(
       if (index >= count) break;
       try {
         statuses[index] = function(index);
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        statuses[index] = failure.status();
       } catch (const std::bad_alloc&) {
         statuses[index] = Status::OutOfMemory(
           "Unable to allocate forward-transform worker storage");
@@ -107,6 +112,10 @@ Status RunParallelForwardTransforms(
     for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
       workers.emplace_back(run_worker);
     }
+  } catch (const std::bad_alloc&) {
+    next_index.store(count, std::memory_order_relaxed);
+    for (std::thread& worker : workers) worker.join();
+    return Status::OutOfMemory("Unable to allocate CPU worker state");
   } catch (const std::system_error&) {
     next_index.store(count, std::memory_order_relaxed);
     for (std::thread& worker : workers) worker.join();
@@ -312,7 +321,7 @@ Status PrepareForwardDctCoefficients(
     for (auto& channel : candidate.coefficients) {
       channel.resize(pixel_count);
     }
-    std::vector<std::vector<size_t>> tile_transforms(tile_count);
+    ManagedVector<ManagedVector<size_t>> tile_transforms(tile_count);
     size_t coefficient_offset = 0;
     Status status = strategies.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
@@ -409,6 +418,8 @@ Status PrepareForwardDctCoefficients(
     }
     *out = std::move(candidate);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate prepared forward coefficients");
@@ -464,6 +475,9 @@ Status ComputeQuantizedCoefficientsImpl(
         "Coefficient coding block grid is too large");
     }
 
+
+    const resource_budget_internal::ResourceClassScope resource_class(
+      resource_budget_internal::ResourceClass::kCompletedFrame);
     VarDctEncoderFrame result;
     result.geometry_ = input.geometry;
     result.strategies_ = *input.strategies;
@@ -764,6 +778,8 @@ Status ComputeQuantizedCoefficientsImpl(
     }
 
     *out = std::move(result);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate coefficient coding scratch storage");
@@ -818,7 +834,7 @@ Status ReconstructQuantizedCoefficients(
     Image3FBuffer result(output.extent());
     const Image3FView result_view = result.view();
 
-    std::vector<size_t> group_offsets(frame.ac_group_count(), 0);
+    ManagedVector<size_t> group_offsets(frame.ac_group_count(), 0);
     const ConstImage3FView frame_dc = frame.dc();
     const Status reconstruct_status = frame.strategies_.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
@@ -844,7 +860,7 @@ Status ReconstructQuantizedCoefficients(
 
         const int32_t raw_quant = frame.raw_quant_field_[
           block_y * block_extent.width + block_x];
-        std::array<std::vector<float>, 3> coefficients;
+        std::array<ManagedVector<float>, 3> coefficients;
         for (size_t channel = 0; channel < coefficients.size(); ++channel) {
           coefficients[channel].resize(coefficient_count);
           const size_t source =
@@ -876,7 +892,7 @@ Status ReconstructQuantizedCoefficients(
         }
 
         for (size_t channel = 0; channel < coefficients.size(); ++channel) {
-          std::vector<float> dc(
+          ManagedVector<float> dc(
             info->covered_blocks.width * info->covered_blocks.height);
           for (size_t dy = 0; dy < info->covered_blocks.height; ++dy) {
             for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
@@ -897,7 +913,7 @@ Status ReconstructQuantizedCoefficients(
             return status;
           }
 
-          std::vector<float> pixels(coefficient_count);
+          ManagedVector<float> pixels(coefficient_count);
           status = InverseDctCpu(strategy, coefficients[channel], pixels);
           if (!status.ok()) {
             return status;
@@ -922,6 +938,8 @@ Status ReconstructQuantizedCoefficients(
     }
 
     CopyImage(result.const_view(), output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate coefficient reconstruction scratch storage");

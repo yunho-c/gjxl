@@ -7,8 +7,11 @@ This is the implementation record for milestone 4 of
 [real Metal allocation attachments and all-pool trim](resident-metal-accounting.md).
 The [host attachment checkpoint](resident-host-accounting.md) adds writer/image-plane
 backing and joined-worker propagation. The [serializer attachment](resident-serializer-accounting.md)
-adds qualified token/model/search-container backing with measured overhead; host
-coverage is still partial and whole-workflow admission is not implemented yet.
+adds qualified token/model/search-container backing with measured overhead. The
+[frontend attachment](resident-frontend-accounting.md) extends backing coverage to
+preparation/evaluation arrays and completed-frame metadata, with exact parity,
+failure/lifetime checks and measured costs. Result publication and whole-workflow
+admission are not implemented yet.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
 ## Source-backed ownership inventory

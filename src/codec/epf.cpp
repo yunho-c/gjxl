@@ -12,10 +12,13 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr float kInvSigmaNumerator = -1.1715728752538099024f;
@@ -247,7 +250,7 @@ Status ComputeEpfInverseSigma(
       }
     }
 
-    std::vector<float> result(value_count);
+    ManagedVector<float> result(value_count);
     const Status status = strategies.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
         const Extent2D covered =
@@ -279,6 +282,8 @@ Status ComputeEpfInverseSigma(
         inverse_sigma.extent.width,
         inverse_sigma.Row(y));
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate EPF sigma storage");
@@ -399,6 +404,8 @@ Status ApplyEpf(
         EpfPass::kPass2,
         output);
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate EPF scratch storage");

@@ -15,12 +15,15 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include "core/managed_allocator.h"
 
 #define setComputePipelineState(state)                                    \
   setComputePipelineState(state);                                         \
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 template <typename T> bool ValidHostPlaneLayout(PlaneView<T> plane) noexcept {
@@ -103,7 +106,7 @@ void BindPlane(MTL::ComputeCommandEncoder *encoder, DevicePlaneView plane,
 }
 
 Status CopyPlane(MetalBackend &backend, DevicePlaneView source,
-                 std::vector<float> *destination) {
+                 ManagedVector<float> *destination) {
   return backend.CopyDeviceToHost(*source.buffer, destination->data(),
                                   destination->size() * sizeof(float),
                                   source.offset_bytes);
@@ -244,12 +247,15 @@ Status MetalPreparedAqEvaluation::FinishPostprocess(
     result.coding_extent = coding_extent_;
     result.source_extent = source_extent_;
     for (size_t channel = 0; channel < 3; ++channel) {
-      result.reconstructed_opsin[channel] = reconstructed_readback_[channel];
-      result.filtered_opsin[channel] = filtered_readback_[channel];
-      result.reconstructed_linear[channel] = linear_readback_[channel];
+      result.reconstructed_opsin[channel].assign(reconstructed_readback_[channel].begin(), reconstructed_readback_[channel].end());
+      result.filtered_opsin[channel].assign(filtered_readback_[channel].begin(), filtered_readback_[channel].end());
+      result.reconstructed_linear[channel].assign(linear_readback_[channel].begin(), linear_readback_[channel].end());
     }
     *snapshot = std::move(result);
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
         "Unable to allocate AQ postprocess diagnostic snapshot");
@@ -374,14 +380,16 @@ Status MetalPreparedAqEvaluation::PreparePostprocessDiagnosticReadback() {
   Status status = PrepareLinearReadback();
   if (!status.ok()) return status;
   try {
-    for (std::vector<float> &plane : reconstructed_readback_) {
+    for (ManagedVector<float> &plane : reconstructed_readback_) {
       plane.resize(pixel_count_);
     }
-    for (std::vector<float> &plane : filtered_readback_) {
+    for (ManagedVector<float> &plane : filtered_readback_) {
       plane.resize(pixel_count_);
     }
     return Status::Ok();
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate AQ postprocess diagnostic readback");
   } catch (const std::length_error &) {

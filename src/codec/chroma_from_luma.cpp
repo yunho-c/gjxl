@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codec/chroma_from_luma.h"
+
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/prepared_coefficients_internal.h"
 
@@ -21,6 +23,8 @@
 #include "core/ac_strategy.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr float kBaseCorrelationX = 0.0f;
@@ -170,8 +174,8 @@ Status ComputeInitialPixelColorCorrelationMap(
       "Chroma-from-luma map dimensions are too large");
   }
   try {
-    std::vector<int8_t> y_to_x(tile_count);
-    std::vector<int8_t> y_to_b(tile_count);
+    ManagedVector<int8_t> y_to_x(tile_count);
+    ManagedVector<int8_t> y_to_b(tile_count);
     for (size_t tile_y = 0; tile_y < tile_extent.height; ++tile_y) {
       const size_t y_begin = tile_y * kColorTileDimension;
       const size_t y_end = std::min(
@@ -239,6 +243,8 @@ Status ComputeInitialPixelColorCorrelationMap(
       {y_to_x.data(), tile_extent, tile_extent.width},
       {y_to_b.data(), tile_extent, tile_extent.width},
       out);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate pixel-domain chroma-from-luma storage");
@@ -254,7 +260,7 @@ Status AppendStrategyCoefficients(
   size_t block_y,
   AcStrategyType strategy,
   float quant_scale,
-  std::array<std::vector<float>, 4>* values) {
+  std::array<ManagedVector<float>, 4>* values) {
 
   constexpr size_t kMaxCoefficientCount = 32 * 32;
   const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
@@ -361,6 +367,8 @@ Status CreateColorCorrelationMap(
     }
     *out = std::move(result);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate color-correlation map storage");
@@ -464,11 +472,11 @@ Status ComputeInitialColorCorrelationMap(
           block_x_begin + kColorTileDimension / kJxlBlockDimension,
           opsin.width() / kJxlBlockDimension);
 
-        std::array<std::vector<float>, 4> values;
+        std::array<ManagedVector<float>, 4> values;
         const size_t coefficient_count =
           (block_x_end - block_x_begin) *
           (block_y_end - block_y_begin) * 64;
-        for (std::vector<float>& channel_values : values) {
+        for (ManagedVector<float>& channel_values : values) {
           channel_values.reserve(coefficient_count);
         }
 
@@ -506,6 +514,8 @@ Status ComputeInitialColorCorrelationMap(
     }
 
     *out = std::move(result);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate chroma-from-luma working storage");
@@ -587,11 +597,11 @@ Status ComputeFinalColorCorrelationMap(
         const size_t block_x_end = std::min(
           block_x_begin + 8,
           block_extent.width);
-        std::array<std::vector<float>, 4> values;
+        std::array<ManagedVector<float>, 4> values;
         const size_t coefficient_count =
           (block_x_end - block_x_begin) *
           (block_y_end - block_y_begin) * 64;
-        for (std::vector<float>& channel_values : values) {
+        for (ManagedVector<float>& channel_values : values) {
           channel_values.reserve(coefficient_count);
         }
 
@@ -640,6 +650,8 @@ Status ComputeFinalColorCorrelationMap(
       }
     }
     *out = std::move(result);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate final chroma-from-luma working storage");
@@ -695,7 +707,7 @@ Status chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
         coefficient_count +=
           prepared.transforms[transform_index].coefficient_count;
       }
-      std::array<std::vector<float>, 4> values;
+      std::array<ManagedVector<float>, 4> values;
       for (auto& channel_values : values) {
         channel_values.reserve(coefficient_count);
       }
@@ -759,6 +771,8 @@ Status chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
     }
     *out = std::move(result);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate prepared final chroma-from-luma storage");

@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/gaborish_internal.h"
 #include "core/image_ops.h"
@@ -27,6 +28,8 @@
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 inline constexpr NS::UInteger kAqThreadCount = 256;
@@ -944,7 +947,7 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
       : status;
   }
   try {
-    std::vector<float> adjusted(block_count_);
+    ManagedVector<float> adjusted(block_count_);
     const size_t row_bytes = block_extent_.width * sizeof(float);
     for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
       status = backend_->CopyDeviceToHost(
@@ -968,6 +971,9 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
         submission_profile.submission_id = "frontend.quant_adjustment";
         candidate_profile.submissions.push_back(
           std::move(submission_profile));
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        Invalidate();
+        return failure.status();
       } catch (const std::bad_alloc&) {
         Invalidate();
         return Status::OutOfMemory(
@@ -979,6 +985,9 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
       }
     }
     CopyContiguousPlane(adjusted, output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    Invalidate();
+    return failure.status();
   } catch (const std::bad_alloc&) {
     Invalidate();
     return Status::OutOfMemory(
@@ -1173,7 +1182,10 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
       last_initial_pixel_mask_.empty()) {
     try {
       last_initial_pixel_mask_.resize(pixel_count_);
-    } catch (const std::bad_alloc &) {
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      Invalidate();
+      return failure.status();
+    } catch (const std::bad_alloc&) {
       Invalidate();
       return Status::OutOfMemory("Unable to allocate initial mask readback");
     } catch (const std::length_error &) {
@@ -1204,7 +1216,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
         &device_color_correlation);
     }
   }
-  const auto valid_values = [](const std::vector<float>& values) {
+  const auto valid_values = [](const ManagedVector<float>& values) {
     return std::ranges::all_of(values, [](float value) {
       return std::isfinite(value) && value > 0.0f;
     });
@@ -1224,6 +1236,9 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
     try {
       submission_profile.submission_id = "frontend.initial_quantization";
       candidate_profile.submissions.push_back(std::move(submission_profile));
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      Invalidate();
+      return failure.status();
     } catch (const std::bad_alloc&) {
       Invalidate();
       return Status::OutOfMemory(
@@ -1481,8 +1496,8 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
     MetalAqReconstructionSnapshotForTesting result;
     result.block_extent = block_extent_;
     result.pixel_extent = coding_extent_;
-    result.raw_quant = last_raw_quant_;
-    result.epf_inverse_sigma = readback_;
+    result.raw_quant.assign(last_raw_quant_.begin(), last_raw_quant_.end());
+    result.epf_inverse_sigma.assign(readback_.begin(), readback_.end());
     result.transforms.reserve(row_major_anchors_.size());
     for (const AqAnchor &anchor : row_major_anchors_) {
       const AqStrategyBatch &batch = batches_[anchor.batch_index];
@@ -1514,10 +1529,13 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
               static_cast<std::ptrdiff_t>(channel * block_count_),
           dc_readback_.begin() +
               static_cast<std::ptrdiff_t>((channel + 1) * block_count_));
-      result.reconstructed_opsin[channel] = reconstructed_readback_[channel];
+      result.reconstructed_opsin[channel].assign(reconstructed_readback_[channel].begin(), reconstructed_readback_[channel].end());
     }
     *snapshot = std::move(result);
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
         "Unable to allocate AQ reconstruction diagnostic snapshot");
@@ -1536,11 +1554,13 @@ Status MetalPreparedAqEvaluation::PrepareReconstructionDiagnosticReadback() {
     quantized_readback_.resize(coefficient_value_count_);
     forward_readback_.resize(coefficient_value_count_);
     dc_readback_.resize(3 * block_count_);
-    for (std::vector<float> &plane : reconstructed_readback_) {
+    for (ManagedVector<float> &plane : reconstructed_readback_) {
       plane.resize(pixel_count_);
     }
     return Status::Ok();
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate AQ reconstruction diagnostic readback");
   } catch (const std::length_error &) {
@@ -1675,7 +1695,10 @@ Status MetalPreparedAqEvaluation::RunQuantizationProbe(
             static_cast<std::ptrdiff_t>(count));
     *quantized = std::move(quantized_result);
     *dequantized = std::move(dequantized_result);
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
         "Unable to allocate AQ quantization probe output");
@@ -1735,13 +1758,15 @@ Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
   Status status = Quantizer::Create(probe.quantizer, &quantizer);
   if (!status.ok()) return status;
 
-  std::vector<float> packed_coefficients;
+  ManagedVector<float> packed_coefficients;
   try {
     packed_coefficients.reserve(3 * info->coefficient_count());
     for (std::span<const float> channel : probe.coefficients) {
       packed_coefficients.insert(
           packed_coefficients.end(), channel.begin(), channel.end());
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate AQ adjustment probe input");
@@ -1753,6 +1778,9 @@ Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
   if (!status.ok()) return status;
   try {
     quantized_readback_.resize(info->coefficient_count());
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
   } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
@@ -1850,6 +1878,9 @@ Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
                 static_cast<std::ptrdiff_t>(coefficient_count)),
     };
     *result = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
   } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
@@ -1867,6 +1898,8 @@ Status MetalPreparedAqEvaluation::PrepareQuantizationProbeReadback() {
     quant_probe_quantized_readback_.resize(maximum_coefficient_count_);
     quant_probe_dequantized_readback_.resize(maximum_coefficient_count_);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate AQ quantization-probe readback");

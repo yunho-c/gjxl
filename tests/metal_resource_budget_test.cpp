@@ -265,16 +265,19 @@ bool CheckButteraugliDomains() {
   const size_t capacity = prepared->memory_stats().prepared_allocation_bytes;
   prepared.reset();
   ResourceBudget a(3 * capacity), b(3 * capacity);
+  // The reference upload constructs one Gaussian kernel at a time, up to
+  // 33 floats. This fixture's device-only allowance now needs that host peak.
+  constexpr size_t kernel_scratch = 33 * sizeof(float);
   const auto run = [&](ResourceBudget& budget, size_t fresh, bool trim = false) {
     ResourceReservation job;
-    if (!Ok(budget.Reserve(capacity, &job))) return false;
+    if (!Ok(budget.Reserve(capacity + kernel_scratch, &job))) return false;
     const auto before = gpu->stats().successful_allocations;
     {
       ResourceContextScope context({&job, ResourceClass::kUnclassified});
       if (!Ok(PrepareDeviceButteraugli(*gpu, descriptor, &prepared))) return false;
       if (!Check(gpu->stats().successful_allocations == before + fresh &&
           Usage(budget, ResourceClass::kButteraugli).live_capacity_bytes == capacity &&
-          budget.snapshot().committed_bytes() == capacity,
+          budget.snapshot().committed_bytes() == capacity + kernel_scratch,
           "Butteraugli cache did not transfer its backing charge")) return false;
       if (trim && !Ok(gpu->TrimPreparationCache())) return false;
       prepared.reset();
@@ -354,10 +357,67 @@ bool CheckWorkflowAccountingAndFailure() {
   gpu.reset();
   return Empty(budget);
 }
+bool CheckWorkflowHostFailures() {
+  std::unique_ptr<GpuBackend> gpu;
+  const auto image = Image({17, 9});
+  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu))) return false;
+  VarDctEncodingOptions options;
+  options.backend = VarDctBackendPreference::kMetal;
+  options.butteraugli_target = 1.2f;
+  options.effort = 1;
+  options.cpu_thread_count = 1;
+  std::vector<uint8_t> oracle;
+  const auto encode = [&](auto* output) {
+    return codestream_internal::EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+      image.const_view(), options, gpu.get(), true, output);
+  };
+  if (!Ok(encode(&oracle)) || !Ok(gpu->TrimPreparationCache()) ||
+      !Empty(DefaultResourceBudget())) return false;
+  const auto default_peak = DefaultResourceBudget().snapshot().peak_backing_bytes;
+  for (size_t fail_at = 0; fail_at < 2048; ++fail_at) {
+    // Ample test envelope, not a production working-set estimate.
+    ResourceBudget budget(64 * 1024 * 1024);
+    ResourceReservation job;
+    if (!Ok(budget.Reserve(64 * 1024 * 1024, &job))) return false;
+    bool injected;
+    {
+      ResourceContextScope context({&job, ResourceClass::kPreparation});
+      std::vector<uint8_t> output{1, 2, 3};
+      ArmManagedHostAllocationFailureAfterForTest(fail_at);
+      const Status status = encode(&output);
+      injected = !ManagedHostAllocationFailurePendingForTest();
+      DisarmManagedHostAllocationFailureForTest();
+      if (injected) {
+        if (!Check(status.code() == StatusCode::kOutOfMemory &&
+            output == std::vector<uint8_t>({1, 2, 3}),
+            "Workflow host failure did not preserve caller output")) {
+          std::cerr << "Host failure position " << fail_at << ": " << status.message() << '\n';
+          return false;
+        }
+        // Recovery uses the same backend immediately, before trimming caches.
+        if (!Ok(encode(&output)) || !Check(output == oracle,
+            "Workflow host failure poisoned subsequent encoding")) return false;
+      } else if (!Ok(status) || !Check(output == oracle, "Managed workflow bytes changed")) {
+        return false;
+      }
+    }
+    if (!Ok(gpu->TrimPreparationCache())) return false;
+    job.Reset();
+    if (!Empty(budget) || !Empty(DefaultResourceBudget()) ||
+        !Check(DefaultResourceBudget().snapshot().peak_backing_bytes == default_peak,
+               "Explicit workflow domain escaped to default")) return false;
+    if (!injected) {
+      std::cout << "Resident workflow host failure positions: " << fail_at << '\n';
+      return Check(fail_at > 0, "Workflow failure sweep covered no backing");
+    }
+  }
+  return Check(false, "Workflow failure sweep did not finish");
+}
 }  // namespace
 
 int main() {
   return CheckDirectOwnership() && CheckReservedAllocationFailure() &&
     CheckCacheDomainsAndReclamation() && CheckConcurrentDomains() && CheckButteraugliDomains() &&
-    CheckWorkflowAccountingAndFailure() ? EXIT_SUCCESS : EXIT_FAILURE;
+    CheckWorkflowAccountingAndFailure() && CheckWorkflowHostFailures()
+      ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -87,10 +87,13 @@ bool SerializeEqual(const Retained &retained) {
 bool RunCase(Extent2D extent, bool deferred_frontend = false,
              GpuBackend* shared_gpu = nullptr,
              std::vector<Retained>* exported = nullptr, size_t image_seed = 0) {
+  const resource_budget_internal::ManagedHostScope managed_host(
+    resource_budget_internal::ResourceClass::kPreparation);
   const size_t completed_class = static_cast<size_t>(
     resource_budget_internal::ResourceClass::kCompletedFrame);
   auto& budget = resource_budget_internal::DefaultResourceBudget();
   const size_t earlier_backings = budget.snapshot().classes[completed_class].backing_count;
+  const size_t earlier_bytes = budget.snapshot().classes[completed_class].live_capacity_bytes;
   std::vector<Retained> retained;
   {
     FrameGeometry geometry;
@@ -260,10 +263,28 @@ bool RunCase(Extent2D extent, bool deferred_frontend = false,
         return false;
   }
   // No source, strategy grid, evaluator, or locally owned backend survives.
-  // At this GPU-accounting checkpoint each completed frame has one independent
-  // device backing; CPU metadata is not yet attached to the ledger.
-  if (budget.snapshot().classes[completed_class].backing_count !=
-      earlier_backings + retained.size()) return false;
+  // Each completed frame has one device backing plus eight host metadata
+  // backings. Borrowing/serializing it must not retain any evaluator storage.
+  size_t expected_bytes = earlier_bytes;
+  for (const auto& result : retained) {
+    const auto view = result.frame->view();
+    const auto blocks = view.strategies().extent();
+    const auto tiles = ColorTileExtent(view.geometry().padded_frame());
+    size_t anchors = 0;
+    if (!Check(view.strategies().ForEachAnchor([&](size_t, size_t, AcStrategyType) {
+          ++anchors;
+          return Status::Ok();
+        }))) return false;
+    expected_bytes += blocks.width * blocks.height * (1 + 1 + 4 + 3 * (4 + 4)) +
+      tiles.width * tiles.height * 2 + view.ac_group_count() * sizeof(size_t) +
+      (3 * view.ac_group_count() * kVarDctAcGroupCoefficientCapacity + anchors) * sizeof(int32_t);
+  }
+  const auto usage = budget.snapshot().classes[completed_class];
+  if (usage.backing_count != earlier_backings + 9 * retained.size() ||
+      usage.live_capacity_bytes != expected_bytes) {
+    std::cerr << "Completed-frame device/metadata capacity differs\n";
+    return false;
+  }
   for (const auto &result : retained)
     if (!SerializeEqual(result))
       return false;

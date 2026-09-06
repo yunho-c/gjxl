@@ -9,6 +9,7 @@
 #include <span>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/codestream.h"
 #include "core/ac_strategy.h"
@@ -162,16 +163,16 @@ private:
 
   FrameGeometry geometry_;
   AcStrategyGrid strategies_;
-  std::vector<int32_t> raw_quant_field_;
+  resource_budget_internal::ManagedVector<int32_t> raw_quant_field_;
   Quantizer quantizer_;
   ColorCorrelationMap color_correlation_;
-  std::vector<uint8_t> epf_sharpness_;
+  resource_budget_internal::ManagedVector<uint8_t> epf_sharpness_;
   SimpleVarDctCodestreamProfile profile_;
-  std::array<std::vector<int32_t>, 3> quantized_dc_;
-  std::array<std::vector<float>, 3> dc_;
+  std::array<resource_budget_internal::ManagedVector<int32_t>, 3> quantized_dc_;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> dc_;
   Extent2D ac_group_extent_;
-  std::vector<size_t> group_used_coefficient_count_;
-  std::vector<int32_t> ac_coefficients_;
+  resource_budget_internal::ManagedVector<size_t> group_used_coefficient_count_;
+  resource_budget_internal::ManagedVector<int32_t> ac_coefficients_;
 };
 
 }  // namespace gjxl

@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline_internal.h"
@@ -24,6 +25,8 @@
 #include "gpu/ops/quantization_pipeline_profile_internal.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 class GpuPipelineGaborishProvider final
@@ -410,9 +413,9 @@ Status RunGpuFrameOnlyQuantizationPipeline(
       "GPU frame-only pipeline dimensions are too large");
   }
   try {
-    std::vector<float> initial_quant(block_count);
-    std::vector<float> strategy_mask(block_count);
-    std::vector<float> pixel_mask(pixel_count);
+    ManagedVector<float> initial_quant(block_count);
+    ManagedVector<float> strategy_mask(block_count);
+    ManagedVector<float> pixel_mask(pixel_count);
     const float initial_quant_target =
       options.adaptive_quantization.profile.loop_filter.gaborish
         ? options.butteraugli_target
@@ -421,11 +424,11 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     Status status = AcStrategyGrid::Create(block_extent, &strategies);
     if (!status.ok()) return status;
     strategies.fill_dct8();
-    std::vector<uint8_t> sharpness(block_count);
+    ManagedVector<uint8_t> sharpness(block_count);
     status = FillDefaultEpfSharpness(
       {sharpness.data(), block_extent, block_extent.width});
     if (!status.ok()) return status;
-    std::vector<float> final_quant(block_count);
+    ManagedVector<float> final_quant(block_count);
     VarDctEncoderFrame frame;
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
@@ -461,6 +464,8 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     CopyContiguousPlane(final_quant, output.quant_field);
     *output.frame = std::move(frame);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU frame-only pipeline storage");
@@ -606,7 +611,9 @@ Status RunPreparedGpuQuantizationPipelineImpl(
       try {
         prepared.pixel_mask.resize(prepared.padded_extent.width *
                                    prepared.padded_extent.height);
-      } catch (const std::bad_alloc &) {
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        return failure.status();
+      } catch (const std::bad_alloc&) {
         return Status::OutOfMemory("Unable to allocate resident mask output");
       } catch (const std::length_error &) {
         return Status::InvalidArgument("Resident mask output is too large");

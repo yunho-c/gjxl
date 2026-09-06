@@ -18,8 +18,11 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include "core/managed_allocator.h"
 
 namespace gjxl::butteraugli_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 [[nodiscard]] bool ValidExtent(Extent2D extent, size_t *area) {
@@ -183,7 +186,7 @@ void OpsinAbsorbance(float red, float green, float blue, float *out0,
 [[nodiscard]] Status ResizeStorage(Extent2D extent, size_t channel_count,
                                    Extent2D *stored_extent,
                                    size_t *stored_plane_size,
-                                   std::vector<float> *values) {
+                                   ManagedVector<float> *values) {
 
   size_t area = 0;
   if (!ValidExtent(extent, &area) || channel_count == 0 ||
@@ -201,7 +204,7 @@ void OpsinAbsorbance(float red, float green, float blue, float *out0,
   }
 
   try {
-    std::vector<float> replacement(value_count);
+    ManagedVector<float> replacement(value_count);
     values->swap(replacement);
     *stored_extent = extent;
     if (stored_plane_size != nullptr) {
@@ -211,7 +214,9 @@ void OpsinAbsorbance(float red, float green, float blue, float *out0,
   } catch (const std::length_error &) {
     return Status::InvalidArgument(
         "Butteraugli storage extent exceeds the container limit");
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Unable to allocate Butteraugli image storage");
   }
 }
@@ -239,7 +244,7 @@ void OpsinAbsorbance(float red, float green, float blue, float *out0,
   return result;
 }
 
-void Separable5(ConstPlaneF32View input, const std::vector<float> &kernel,
+void Separable5(ConstPlaneF32View input, const ManagedVector<float> &kernel,
                 PlaneF32View output) {
 
   float sum_weights = 0.0f;
@@ -280,7 +285,7 @@ void Separable5(ConstPlaneF32View input, const std::vector<float> &kernel,
 }
 
 void ConvolveBorderColumn(ConstPlaneF32View input,
-                          const std::vector<float> &kernel, size_t x,
+                          const ManagedVector<float> &kernel, size_t x,
                           float *destination) {
 
   const size_t radius = kernel.size() / 2;
@@ -389,7 +394,7 @@ void ConvolveInterior33(ConstPlaneF32View input, size_t first_x, size_t last_x,
 }
 
 void ConvolutionWithTranspose(ConstPlaneF32View input,
-                              const std::vector<float> &kernel,
+                              const ManagedVector<float> &kernel,
                               PlaneF32View output) {
 
   const size_t radius = kernel.size() / 2;
@@ -485,7 +490,9 @@ Status BlurScratch::Prepare(Extent2D input_extent, size_t kernel_size,
   } catch (const std::length_error &) {
     return Status::InvalidArgument(
         "Butteraugli Gaussian kernel exceeds the container limit");
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate the Butteraugli Gaussian kernel");
   }

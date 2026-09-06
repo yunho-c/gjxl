@@ -14,11 +14,14 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/gaborish_internal.h"
 #include "gpu/ops/gaborish_profile_internal.h"
 #include "gpu/ops/primitives.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 
 static Status ApplyGaborishInverseGpuImpl(
   GpuBackend& gpu,
@@ -70,7 +73,7 @@ static Status ApplyGaborishInverseGpuImpl(
     const auto preparation_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
-    std::vector<float> packed_input(image_values);
+    ManagedVector<float> packed_input(image_values);
     for (size_t channel = 0; channel < 3; ++channel) {
       for (size_t y = 0; y < input.height(); ++y) {
         const float* source = input.plane[channel].Row(y);
@@ -160,7 +163,7 @@ static Status ApplyGaborishInverseGpuImpl(
     const auto readback_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
-    std::vector<float> filtered(image_values);
+    ManagedVector<float> filtered(image_values);
     status = gpu.CopyDeviceToHost(
       *storage, filtered.data(), 3 * plane_bytes, 3 * plane_bytes);
     if (!status.ok()) return status;
@@ -185,6 +188,8 @@ static Status ApplyGaborishInverseGpuImpl(
         readback_begin);
       if (!status.ok()) return status;
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU Gaborish storage");

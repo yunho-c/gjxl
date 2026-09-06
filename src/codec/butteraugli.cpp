@@ -10,9 +10,12 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/butteraugli_distance_internal.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 
 struct PreparedButteraugliReference::Impl {
   butteraugli_internal::NativePreparedButteraugliReference native;
@@ -42,6 +45,8 @@ Status PreparedButteraugliReference::Prepare(
       return status;
     }
     impl_ = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate prepared Butteraugli reference");
@@ -145,7 +150,7 @@ Status ReduceButteraugliDistanceMap(
       return Status::InvalidArgument(
         "Butteraugli block map dimensions are too large");
     }
-    std::vector<float> result(block_count);
+    ManagedVector<float> result(block_count);
     Status status = strategies.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
         const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
@@ -201,6 +206,8 @@ Status ReduceButteraugliDistanceMap(
         block_distance_map.extent.width,
         block_distance_map.Row(y));
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Butteraugli block map");

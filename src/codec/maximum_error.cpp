@@ -12,11 +12,14 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/block_grid.h"
 #include "core/image_ops.h"
 #include "core/quantizer.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr float kMinimumRepresentableQuantField =
@@ -69,7 +72,7 @@ Status ReduceMaximumError(
   }
 
   try {
-    std::vector<float> candidate(block_count, 0.0f);
+    ManagedVector<float> candidate(block_count, 0.0f);
     MaximumErrorReduction candidate_reduction;
     const Status status = strategies.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
@@ -124,6 +127,8 @@ Status ReduceMaximumError(
     CopyContiguousPlane(candidate, block_error);
     *reduction = candidate_reduction;
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate maximum-error reduction storage");
@@ -166,7 +171,7 @@ Status UpdateMaximumErrorQuantField(
   }
 
   try {
-    std::vector<float> candidate(block_count);
+    ManagedVector<float> candidate(block_count);
     for (size_t y = 0; y < input.extent.height; ++y) {
       for (size_t x = 0; x < input.extent.width; ++x) {
         const float value = input.Row(y)[x];
@@ -222,6 +227,8 @@ Status UpdateMaximumErrorQuantField(
       *upper_bound_limited = limited;
     }
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate maximum-error quant-field storage");

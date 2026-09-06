@@ -27,6 +27,8 @@
 #include "core/thread_budget.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr float kOpsinBias = 0.0037930732552754493f;
@@ -157,9 +159,9 @@ Status RunParallelRows(
     return Status::Ok();
   }
 
-  std::vector<Status> statuses(extent.height);
+  ManagedVector<Status> statuses(extent.height);
   std::atomic<size_t> next_row{0};
-  std::vector<std::thread> workers;
+  ManagedVector<std::thread> workers;
   const size_t spawned_worker_count = cpu_thread_count == 0
     ? participant_count
     : participant_count - 1;
@@ -172,6 +174,10 @@ Status RunParallelRows(
       if (y >= extent.height) break;
       try {
         statuses[y] = function(y);
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        statuses[y] = failure.status();
+      } catch (const std::bad_alloc&) {
+        statuses[y] = Status::OutOfMemory("Unable to allocate color-transform worker storage");
       } catch (...) {
         statuses[y] = Status::Internal(
           "Color-transform worker failed unexpectedly");
@@ -182,6 +188,10 @@ Status RunParallelRows(
     for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
       workers.emplace_back(run_worker);
     }
+  } catch (const std::bad_alloc&) {
+    next_row.store(extent.height, std::memory_order_relaxed);
+    for (std::thread& worker : workers) worker.join();
+    return Status::OutOfMemory("Unable to allocate CPU worker state");
   } catch (const std::system_error&) {
     next_row.store(extent.height, std::memory_order_relaxed);
     for (std::thread& worker : workers) worker.join();

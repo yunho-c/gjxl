@@ -1562,6 +1562,11 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME serializer_storage COMMAND gjxl_serializer_storage_test)
   set_tests_properties(serializer_storage PROPERTIES TIMEOUT 60)
 
+  add_executable(gjxl_frontend_storage_test tests/frontend_storage_test.cpp)
+  target_link_libraries(gjxl_frontend_storage_test PRIVATE gjxl_codec)
+  add_test(NAME frontend_storage COMMAND gjxl_frontend_storage_test)
+  set_tests_properties(frontend_storage PROPERTIES TIMEOUT 60)
+
   add_executable(
     gjxl_ac_strategy_grid_test
     tests/ac_strategy_grid_test.cpp

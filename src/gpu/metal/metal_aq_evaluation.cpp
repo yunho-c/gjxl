@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/dc_conversion.h"
@@ -40,6 +41,8 @@
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 
 // The only device allocation retained by a completed frame is its final AC
 // output (plus a small destination table). No AQ arena, backend, or submission
@@ -84,11 +87,11 @@ class MetalCompletedVarDctFrame final
   ColorCorrelationMap color_correlation;
   SimpleVarDctCodestreamProfile profile;
   Extent2D group_extent;
-  std::vector<size_t> group_used;
-  std::vector<uint8_t> sharpness;
-  std::vector<int32_t> raw_quant;
-  std::vector<int32_t> quantized_dc;
-  std::vector<float> dc;
+  ManagedVector<size_t> group_used;
+  ManagedVector<uint8_t> sharpness;
+  ManagedVector<int32_t> raw_quant;
+  ManagedVector<int32_t> quantized_dc;
+  ManagedVector<float> dc;
 };
 
 namespace {
@@ -271,12 +274,12 @@ static_assert(sizeof(AqOpsinToLinearParams) == 20);
 }
 
 [[nodiscard]] Status BuildColorTransformMetadata(
-  const std::vector<AqAnchor>& row_major_anchors,
+  const ManagedVector<AqAnchor>& row_major_anchors,
   const std::array<AqStrategyBatch, 7>& batches,
   Extent2D block_extent,
   Extent2D tile_extent,
-  std::vector<int32_t>* records,
-  std::vector<int32_t>* tile_offsets) {
+  ManagedVector<int32_t>* records,
+  ManagedVector<int32_t>* tile_offsets) {
 
   if (records == nullptr || tile_offsets == nullptr) {
     return Status::Internal(
@@ -306,8 +309,8 @@ static_assert(sizeof(AqOpsinToLinearParams) == 20);
     for (size_t tile_index = 0; tile_index < tile_count; ++tile_index) {
       (*tile_offsets)[tile_index + 1] += (*tile_offsets)[tile_index];
     }
-    std::vector<int32_t> positions = *tile_offsets;
-    std::vector<size_t> tile_value_offsets(tile_count, 0);
+    ManagedVector<int32_t> positions = *tile_offsets;
+    ManagedVector<size_t> tile_value_offsets(tile_count, 0);
     for (const AqAnchor& anchor : row_major_anchors) {
       const size_t tile_index =
         (anchor.block_y / 8) * tile_extent.width + anchor.block_x / 8;
@@ -343,6 +346,8 @@ static_assert(sizeof(AqOpsinToLinearParams) == 20);
       }
       tile_value_offsets[tile_index] += batch.coefficient_count;
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate prepared AQ color-transform metadata");
@@ -675,11 +680,11 @@ template <typename T>
 }
 
 template <typename Range>
-void AppendQuantTable(const Range& values, std::vector<float>* packed) {
+void AppendQuantTable(const Range& values, ManagedVector<float>* packed) {
   packed->insert(packed->end(), values.begin(), values.end());
 }
 
-[[nodiscard]] Status PackQuantTables(std::vector<float>* packed) {
+[[nodiscard]] Status PackQuantTables(ManagedVector<float>* packed) {
   if (packed == nullptr) {
     return Status::Internal("Prepared AQ quantization table output is null");
   }
@@ -696,6 +701,8 @@ void AppendQuantTable(const Range& values, std::vector<float>* packed) {
     AppendQuantTable(quantization_internal::kDct8x16InverseDequant, packed);
     AppendQuantTable(quantization_internal::kDct16x32Dequant, packed);
     AppendQuantTable(quantization_internal::kDct16x32InverseDequant, packed);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to pack prepared AQ quantization tables");
@@ -1022,12 +1029,12 @@ Status MetalPreparedAqEvaluation::Prepare(
   }
   coefficient_value_count_ = 3 * pixel_count_;
 
-  std::vector<int32_t> strategy_records;
-  std::vector<int32_t> anchor_records;
-  std::vector<int32_t> color_transform_records;
-  std::vector<int32_t> color_tile_offsets;
-  std::vector<float> quant_tables;
-  std::array<std::vector<std::array<int32_t, 2>>, 7> grouped_anchors;
+  ManagedVector<int32_t> strategy_records;
+  ManagedVector<int32_t> anchor_records;
+  ManagedVector<int32_t> color_transform_records;
+  ManagedVector<int32_t> color_tile_offsets;
+  ManagedVector<float> quant_tables;
+  std::array<ManagedVector<std::array<int32_t, 2>>, 7> grouped_anchors;
   try {
     if (block_count_ > std::numeric_limits<size_t>::max() / 2) {
       return Status::InvalidArgument(
@@ -1052,7 +1059,9 @@ Status MetalPreparedAqEvaluation::Prepare(
       if (!resident_ac_strategy_inputs_)
         last_initial_pixel_mask_.resize(pixel_count_);
     }
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Unable to allocate prepared AQ host staging");
   } catch (const std::length_error &) {
     return Status::InvalidArgument("Prepared AQ host staging is too large");
@@ -1094,6 +1103,8 @@ Status MetalPreparedAqEvaluation::Prepare(
   if (!frame_only_) {
     try {
       transform_maximum_error_readback_.resize(3 * block_count_);
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate maximum-error readback storage");
@@ -1150,7 +1161,9 @@ Status MetalPreparedAqEvaluation::Prepare(
         final_transform_layouts_.push_back(transform);
       }
     }
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate AQ reconstruction host readback");
   } catch (const std::length_error &) {
@@ -2047,13 +2060,13 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     return status;
   }
   try {
-    std::vector<int32_t> strategy_records(2 * block_count_);
-    std::vector<int32_t> anchor_records;
+    ManagedVector<int32_t> strategy_records(2 * block_count_);
+    ManagedVector<int32_t> anchor_records;
     anchor_records.reserve(2 * block_count_);
-    std::array<std::vector<std::array<int32_t, 2>>, 7> grouped_anchors;
-    std::vector<AqAnchor> row_major_anchors;
+    std::array<ManagedVector<std::array<int32_t, 2>>, 7> grouped_anchors;
+    ManagedVector<AqAnchor> row_major_anchors;
     row_major_anchors.reserve(block_count_);
-    std::vector<uint8_t> sharpness(block_count_);
+    ManagedVector<uint8_t> sharpness(block_count_);
     for (size_t y = 0; y < block_extent_.height; ++y) {
       std::copy_n(
         epf_sharpness.Row(y), block_extent_.width,
@@ -2172,8 +2185,8 @@ Status MetalPreparedAqEvaluation::Reconfigure(
         "Reconfigured AQ anchors do not cover the coding image exactly");
     }
 
-    std::vector<int32_t> color_transform_records;
-    std::vector<int32_t> color_tile_offsets;
+    ManagedVector<int32_t> color_transform_records;
+    ManagedVector<int32_t> color_tile_offsets;
     if (resident_quantization_) {
       status = BuildColorTransformMetadata(
         row_major_anchors, batches, block_extent_, tile_extent_,
@@ -2184,7 +2197,7 @@ Status MetalPreparedAqEvaluation::Reconfigure(
       }
     }
 
-    std::vector<vardct_frame_internal::QuantizedAcTransformLayout>
+    ManagedVector<vardct_frame_internal::QuantizedAcTransformLayout>
       transform_layouts;
     transform_layouts.reserve(row_major_anchors.size());
     for (const AqAnchor& anchor : row_major_anchors) {
@@ -2261,6 +2274,9 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     resident_color_correlation_readback_needed_ = false;
     CompleteOperation();
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    Invalidate();
+    return failure.status();
   } catch (const std::bad_alloc&) {
     Invalidate();
     return Status::OutOfMemory(
@@ -2477,6 +2493,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     if (quant_field_requested) {
       resident_policy_quant_readback_.resize(block_count_);
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
   } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
@@ -2529,8 +2548,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
 
   std::unique_ptr<GpuSubmission> submission;
   if (profiling) {
-    std::vector<ResidentProfileStageContext> contexts;
-    std::vector<MetalProfiledComputeStage> stages;
+    ManagedVector<ResidentProfileStageContext> contexts;
+    ManagedVector<MetalProfiledComputeStage> stages;
     const uint32_t epf_iterations =
       options_.profile.loop_filter.epf_options.iterations;
     const bool butteraugli_multiscale = uses_butteraugli_sinks_;
@@ -2552,6 +2571,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     try {
       contexts.reserve(stage_count);
       stages.reserve(stage_count);
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      Invalidate();
+      return failure.status();
     } catch (const std::bad_alloc&) {
       Invalidate();
       return Status::OutOfMemory(
@@ -2741,6 +2763,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             "aq.final_frame");
         }
       }
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      Invalidate();
+      return failure.status();
     } catch (const std::bad_alloc&) {
       Invalidate();
       return Status::OutOfMemory(
@@ -2780,6 +2805,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     try {
       submission_profile.submission_id = "resident.aq";
       candidate_profile.submissions.push_back(std::move(submission_profile));
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      Invalidate();
+      return failure.status();
     } catch (const std::bad_alloc&) {
       Invalidate();
       return Status::OutOfMemory(
@@ -2917,7 +2945,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   }
   if (reconstruction_requested &&
       !std::ranges::all_of(
-        linear_readback_, [](const std::vector<float>& plane) {
+        linear_readback_, [](const ManagedVector<float>& plane) {
           return std::ranges::all_of(
             plane, [](float value) { return std::isfinite(value); });
         })) {
@@ -2961,6 +2989,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           .kind = gpu_profile_internal::GpuWallStageKind::kHost,
           .wall_nanoseconds = assembly_nanoseconds,
         });
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        Invalidate();
+        return failure.status();
       } catch (const std::bad_alloc&) {
         Invalidate();
         return Status::OutOfMemory(
@@ -3019,8 +3050,8 @@ Status MetalPreparedAqEvaluation::SetInvariantColorCorrelation(
         "Prepared invariant color-correlation geometry is invalid");
   }
 
-  std::vector<int8_t> host_y_to_x;
-  std::vector<int8_t> host_y_to_b;
+  ManagedVector<int8_t> host_y_to_x;
+  ManagedVector<int8_t> host_y_to_b;
   try {
     size_t tile_count = 0;
     if (!tile_extent_.try_area(&tile_count)) {
@@ -3035,6 +3066,8 @@ Status MetalPreparedAqEvaluation::SetInvariantColorCorrelation(
       std::copy_n(y_to_b.Row(y), tile_extent_.width,
                   host_y_to_b.data() + y * tile_extent_.width);
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate invariant color-correlation staging");
@@ -3149,6 +3182,8 @@ MetalPreparedAqEvaluation::memory_stats() const noexcept {
 Status MetalPreparedAqEvaluation::ReadbackRawQuant() {
   try {
     last_raw_quant_.resize(block_count_);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate AQ raw-quant readback");
@@ -3247,7 +3282,7 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     }
     const size_t coefficient_count = group_count * 3 * cap;
     frame->group_used.assign(group_count, 0);
-    std::vector<uint32_t> destinations(anchor_count_);
+    ManagedVector<uint32_t> destinations(anchor_count_);
     // Build from the authoritative post-search anchors on every output
     // request, not from the provisional preparation's strategy grid.
     for (const AqAnchor& anchor : row_major_anchors_) {
@@ -3301,6 +3336,8 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
       DeviceElementType::kI32, {anchor_count_, 1}, anchor_count_};
     *out = std::move(frame);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Unable to allocate completed Metal frame");
   } catch (const std::length_error&) {
@@ -3310,6 +3347,8 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
 
 Status MetalPreparedAqEvaluation::FinishCompletedFrame(
     MetalCompletedVarDctFrame& frame) const {
+  const resource_budget_internal::ResourceClassScope resource_class(
+    resource_budget_internal::ResourceClass::kCompletedFrame);
   std::span<const int32_t> raw_quant;
   std::span<const int32_t> quantized_dc;
   Status status = BorrowCompletedContiguousI32(
@@ -3713,7 +3752,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
 
     if (!std::ranges::all_of(
           linear_readback_,
-          [](const std::vector<float>& plane) {
+          [](const ManagedVector<float>& plane) {
             return std::ranges::all_of(
               plane, [](float value) { return std::isfinite(value); });
           })) {
@@ -4350,6 +4389,8 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
           input.raw_quant_field.Row(y), block_extent_.width,
           last_raw_quant_.data() + y * block_extent_.width);
       }
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      status = failure.status();
     } catch (const std::bad_alloc&) {
       status = Status::OutOfMemory(
         "Unable to allocate AQ raw-quant host staging");
@@ -4386,7 +4427,7 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
       }
     }
 
-    std::vector<size_t> group_offsets(frame.ac_group_count(), 0);
+    ManagedVector<size_t> group_offsets(frame.ac_group_count(), 0);
     for (const AqAnchor& anchor : row_major_anchors_) {
       const AcStrategyInfo* info = GetAcStrategyInfo(anchor.strategy);
       if (info == nullptr) {
@@ -4549,7 +4590,9 @@ Status MetalPreparedAqEvaluation::PrepareExactCoefficientStaging(
       exact_reconstruction_coefficients_.resize(coefficient_value_count_);
     }
     return Status::Ok();
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate exact AQ coefficient staging");
   } catch (const std::length_error &) {
@@ -4565,10 +4608,12 @@ Status MetalPreparedAqEvaluation::PrepareLinearReadback() {
       "Prepared AQ source image dimensions are too large");
   }
   try {
-    for (std::vector<float>& plane : linear_readback_) {
+    for (ManagedVector<float>& plane : linear_readback_) {
       plane.resize(source_pixel_count);
     }
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate AQ reconstruction host readback");
@@ -5142,6 +5187,8 @@ Status MetalBackend::PrepareResidentInput(
     if (!status.ok()) return status;
     *prepared = std::move(candidate);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate resident input preparation");
@@ -5214,6 +5261,8 @@ Status MetalBackend::PrepareAqEvaluationImpl(
     *prepared = std::move(result);
     if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Metal prepared AQ evaluation");

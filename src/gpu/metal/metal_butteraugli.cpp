@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "gpu/metal/metal_backend_internal.h"
+
+#include "core/managed_allocator.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
 
 #include <algorithm>
@@ -28,6 +30,8 @@
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr size_t kPlaneAlignment = 64;
@@ -349,10 +353,10 @@ static_assert(sizeof(ReductionParams) == 12);
   return Status::Ok();
 }
 
-[[nodiscard]] std::vector<float> MakeGaussianKernel(float sigma) {
+[[nodiscard]] ManagedVector<float> MakeGaussianKernel(float sigma) {
   const int radius = std::max(1, static_cast<int>(2.25f * std::abs(sigma)));
   const size_t size = 2 * static_cast<size_t>(radius) + 1;
-  std::vector<float> result(size);
+  ManagedVector<float> result(size);
   const double exponent_scale = -1.0 / (2.0 * sigma * sigma);
   for (int index = -radius; index <= radius; ++index) {
     result[static_cast<size_t>(index + radius)] =
@@ -586,7 +590,7 @@ public:
         kPlaneAlignment,
         &kernels_[index]);
       if (!status.ok()) return status;
-      const std::vector<float> kernel = MakeGaussianKernel(kBlurSigmas[index]);
+      const ManagedVector<float> kernel = MakeGaussianKernel(kBlurSigmas[index]);
       if (kernel.size() != kKernelSizes[index]) {
         return Status::Internal(
           "Device Butteraugli Gaussian kernel size is inconsistent");
@@ -681,7 +685,7 @@ public:
         "Metal Butteraugli stage capture extent overflows");
     }
     try {
-      std::vector<float> candidate(area);
+      ManagedVector<float> candidate(area);
       const DevicePlaneView capture = Plane(kFinalStaging, extent());
       const size_t row_bytes = extent().width * sizeof(float);
       for (size_t y = 0; y < extent().height; ++y) {
@@ -705,6 +709,8 @@ public:
           output.Row(y));
       }
       return Status::Ok();
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate Metal Butteraugli stage readback");
@@ -2455,6 +2461,8 @@ Status MetalBackend::PrepareDeviceButteraugliImpl(
     *prepared = std::move(candidate);
     if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Metal Butteraugli prepared state");

@@ -10,8 +10,11 @@
 #include <new>
 #include <stdexcept>
 #include <vector>
+#include "core/managed_allocator.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 [[nodiscard]] bool ValidOptions(ButteraugliOptions options) noexcept {
@@ -102,7 +105,7 @@ namespace {
   }
 
   try {
-    std::vector<float> candidate(pixel_count);
+    ManagedVector<float> candidate(pixel_count);
     const size_t row_bytes = device_map.extent.width * sizeof(float);
     for (size_t y = 0; y < device_map.extent.height; ++y) {
       const size_t device_offset = device_map.offset_bytes +
@@ -128,6 +131,8 @@ namespace {
         host_map.extent.width,
         host_map.Row(y));
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Device Butteraugli diagnostic readback");

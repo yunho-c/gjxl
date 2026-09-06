@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/block_grid.h"
 #include "core/geometry.h"
 #include "core/status.h"
@@ -207,6 +208,8 @@ public:
       result.extent_ = extent;
       result.cells_.assign(cell_count, kInvalidCell);
       *out = std::move(result);
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate AC-strategy grid");
@@ -369,7 +372,7 @@ private:
   }
 
   Extent2D extent_;
-  std::vector<uint8_t> cells_;
+  resource_budget_internal::ManagedVector<uint8_t> cells_;
 };
 
 }  // namespace gjxl

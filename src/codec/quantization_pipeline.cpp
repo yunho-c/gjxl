@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/ac_strategy.h"
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/chroma_from_luma.h"
@@ -173,6 +174,8 @@ Status quantization_pipeline_internal::PrepareQuantizationPreprocessing(
     if (prepared.preprocessed_opsin.extent() != prepared.padded_extent) {
       prepared.preprocessed_opsin.resize(prepared.padded_extent);
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate prepared quantization preprocessing");
@@ -292,6 +295,8 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
       candidate.butteraugli_reference = std::move(reference);
     }
     *prepared = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate quantization pipeline preparation");
@@ -356,6 +361,8 @@ Status quantization_pipeline_internal::PrepareResidentQuantizationPipeline(
     candidate.butteraugli_options = options.adaptive_quantization.butteraugli;
     *prepared = std::move(candidate);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate resident quantization pipeline preparation");
@@ -522,6 +529,8 @@ Status quantization_pipeline_internal::RunPreparedCpuQuantizationPipeline(
       prepared.butteraugli_options =
         options.adaptive_quantization.butteraugli;
       prepared.butteraugli_reference = std::move(reference);
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate the prepared CPU Butteraugli reference");

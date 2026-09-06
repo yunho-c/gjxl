@@ -16,51 +16,8 @@
 #include <vector>
 
 #include "codec/butteraugli.h"
+#include "core/managed_allocator.h"
 
-namespace allocation_failure {
-
-thread_local bool enabled = false;
-thread_local size_t attempts = 0;
-thread_local size_t fail_at = std::numeric_limits<size_t>::max();
-
-[[nodiscard]] bool ShouldFail() noexcept {
-  if (!enabled) {
-    return false;
-  }
-  return attempts++ == fail_at;
-}
-
-} // namespace allocation_failure
-
-void *operator new(size_t size) {
-  if (allocation_failure::ShouldFail()) {
-    throw std::bad_alloc();
-  }
-  if (void *address = std::malloc(std::max<size_t>(size, 1))) {
-    return address;
-  }
-  throw std::bad_alloc();
-}
-
-void *operator new[](size_t size) {
-  return ::operator new(size);
-}
-
-void operator delete(void *address) noexcept {
-  std::free(address);
-}
-
-void operator delete[](void *address) noexcept {
-  ::operator delete(address);
-}
-
-void operator delete(void *address, size_t) noexcept {
-  ::operator delete(address);
-}
-
-void operator delete[](void *address, size_t) noexcept {
-  ::operator delete(address);
-}
 
 namespace {
 
@@ -366,36 +323,44 @@ void FillImage(ImageStorage *image, float distortion = 0.0f) {
   FillImage(&reference);
   FillImage(&distorted, 0.003f);
 
-  size_t successful_allocations = 0;
-  {
-    MapStorage map(kExtent);
-    double score = kScorePoison;
-    allocation_failure::attempts = 0;
-    allocation_failure::fail_at = std::numeric_limits<size_t>::max();
-    allocation_failure::enabled = true;
-    const gjxl::Status status = Compute(reference, distorted, {}, &map, &score);
-    allocation_failure::enabled = false;
-    successful_allocations = allocation_failure::attempts;
-    if (!status.ok() || successful_allocations == 0) {
-      return false;
-    }
-  }
-
-  for (size_t fail_at = 0; fail_at < successful_allocations; ++fail_at) {
+  using namespace gjxl::resource_budget_internal;
+  // Sweep real image/kernel backings, including their prepared ledger tickets.
+  // The previous global unaligned-new override did not intercept these owners.
+  for (size_t fail_at = 0; fail_at < 4096; ++fail_at) {
+    ResourceBudget budget(16 * 1024 * 1024);
+    ResourceReservation job;
+    if (!budget.Reserve(16 * 1024 * 1024, &job).ok()) return false;
     MapStorage map(kExtent);
     const std::vector<float> original = map.values;
     double score = kScorePoison;
-    allocation_failure::attempts = 0;
-    allocation_failure::fail_at = fail_at;
-    allocation_failure::enabled = true;
-    const gjxl::Status status = Compute(reference, distorted, {}, &map, &score);
-    allocation_failure::enabled = false;
+    gjxl::Status status;
+    bool injected;
+    {
+      ResourceContextScope context({&job, ResourceClass::kButteraugli});
+      ArmManagedHostAllocationFailureAfterForTest(fail_at);
+      status = Compute(reference, distorted, {}, &map, &score);
+      injected = !ManagedHostAllocationFailurePendingForTest();
+      DisarmManagedHostAllocationFailureForTest();
+    }
+    job.Reset();
+    const auto snapshot = budget.snapshot();
+    if (snapshot.committed_bytes() != 0 || snapshot.total.backing_count != 0 ||
+        snapshot.total.pending_count != 0 || snapshot.open_reservations != 0) {
+      std::cerr << "Butteraugli backing leaked at " << fail_at << '\n';
+      return false;
+    }
+    if (!injected) {
+      if (!status.ok() || fail_at == 0) return false;
+      std::cout << "Butteraugli backing failure positions: " << fail_at << '\n';
+      return true;
+    }
     if (status.code() != gjxl::StatusCode::kOutOfMemory ||
         map.values != original || score != kScorePoison) {
+      std::cerr << "Butteraugli failure was not atomic at " << fail_at << '\n';
       return false;
     }
   }
-  return true;
+  return false;
 }
 
 } // namespace

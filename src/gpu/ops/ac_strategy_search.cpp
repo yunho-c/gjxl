@@ -3,6 +3,8 @@
 
 #include "gpu/ops/ac_strategy_search.h"
 
+#include "core/managed_allocator.h"
+
 #include "core/resource_context.h"
 
 #include <algorithm>
@@ -26,6 +28,8 @@
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr size_t kColorTileBlockDimension =
@@ -106,8 +110,8 @@ Status ValidateSearchInputs(
   return Status::Ok();
 }
 
-std::vector<float> PackOpsin(ConstImage3FView opsin, size_t pixel_count) {
-  std::vector<float> packed(3 * pixel_count);
+ManagedVector<float> PackOpsin(ConstImage3FView opsin, size_t pixel_count) {
+  ManagedVector<float> packed(3 * pixel_count);
   for (size_t channel = 0; channel < 3; ++channel) {
     for (size_t y = 0; y < opsin.height(); ++y) {
       std::copy_n(opsin.plane[channel].Row(y),
@@ -118,10 +122,10 @@ std::vector<float> PackOpsin(ConstImage3FView opsin, size_t pixel_count) {
   return packed;
 }
 
-std::vector<float> PackPlane(ConstPlaneF32View plane) {
+ManagedVector<float> PackPlane(ConstPlaneF32View plane) {
   size_t pixel_count = 0;
   (void)plane.extent.try_area(&pixel_count);
-  std::vector<float> packed(pixel_count);
+  ManagedVector<float> packed(pixel_count);
   for (size_t y = 0; y < plane.extent.height; ++y) {
     std::copy_n(plane.Row(y),
       plane.extent.width,
@@ -130,7 +134,7 @@ std::vector<float> PackPlane(ConstPlaneF32View plane) {
   return packed;
 }
 
-Status PackMatrices(AcStrategyType strategy, std::vector<float>* matrices) {
+Status PackMatrices(AcStrategyType strategy, ManagedVector<float>* matrices) {
   if (matrices == nullptr) {
     return Status::Internal("GPU AC-strategy matrix output is null");
   }
@@ -161,7 +165,7 @@ Status MakeCandidates(
   ConstPlaneF32View quant_field,
   const ColorCorrelationMap& color_correlation,
   bool device_quant_norm,
-  std::vector<AcStrategyCandidate>* candidates) {
+  ManagedVector<AcStrategyCandidate>* candidates) {
   if (candidates == nullptr) {
     return Status::Internal("GPU AC-strategy candidate output is null");
   }
@@ -273,9 +277,9 @@ Status EnsureAndUpload(
 
 struct StrategyResources {
   ac_strategy_internal::CandidateStage staged;
-  std::vector<AcStrategyCandidate> candidates;
-  std::vector<float> matrices;
-  std::vector<float> costs;
+  ManagedVector<AcStrategyCandidate> candidates;
+  ManagedVector<float> matrices;
+  ManagedVector<float> costs;
   std::unique_ptr<DeviceBuffer> device_candidates;
   std::unique_ptr<DeviceBuffer> device_matrices;
   std::unique_ptr<DeviceBuffer> device_costs;
@@ -289,7 +293,7 @@ struct Prepared {
   GpuBackend* backend = nullptr;
   std::array<StrategyResources,
              ac_strategy_internal::kCandidateStages.size()> resources;
-  std::array<std::vector<float>, kAcStrategyCount> cost_storage;
+  std::array<ManagedVector<float>, kAcStrategyCount> cost_storage;
   std::unique_ptr<DeviceBuffer> device_opsin;
   std::unique_ptr<DeviceBuffer> device_mask;
   std::unique_ptr<DeviceBuffer> scratch_a;
@@ -385,10 +389,10 @@ static Status FindAcStrategyGridGpuImpl(
       state = ac_strategy_search_internal::Prepared{};
     }
     state.backend = &gpu;
-    const std::vector<float> packed_opsin = resident == nullptr
-      ? PackOpsin(opsin, pixel_count) : std::vector<float>{};
-    const std::vector<float> packed_mask = resident == nullptr
-      ? PackPlane(pixel_mask) : std::vector<float>{};
+    const ManagedVector<float> packed_opsin = resident == nullptr
+      ? PackOpsin(opsin, pixel_count) : ManagedVector<float>{};
+    const ManagedVector<float> packed_mask = resident == nullptr
+      ? PackPlane(pixel_mask) : ManagedVector<float>{};
     if (resident == nullptr) {
       status = EnsureAndUpload(gpu,
         packed_opsin.data(),
@@ -622,6 +626,8 @@ static Status FindAcStrategyGridGpuImpl(
       *stats = result_stats;
     }
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU AC-strategy search state");
@@ -662,6 +668,8 @@ Status FindAcStrategyGridGpuResident(
     try {
       prepared->impl_ =
         std::make_unique<ac_strategy_search_internal::Prepared>();
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate prepared GPU AC-strategy search state");
@@ -695,6 +703,8 @@ Status gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
     try {
       prepared->impl_ =
         std::make_unique<ac_strategy_search_internal::Prepared>();
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate prepared GPU AC-strategy search state");

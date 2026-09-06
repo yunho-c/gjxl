@@ -22,6 +22,7 @@
 #include <arm_neon.h>
 #endif
 
+#include "core/managed_allocator.h"
 #include "codec/color_transform_internal.h"
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
@@ -42,6 +43,8 @@
 #include "gpu/ops/resident_input.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr float kInitialProfileIntensityTarget = 255.0f;
@@ -436,11 +439,11 @@ struct PipelineStorage {
 
   Extent2D block_extent;
   Extent2D padded_extent;
-  std::vector<float> initial_quant;
-  std::vector<float> strategy_mask;
-  std::vector<float> pixel_mask;
-  std::vector<float> final_quant;
-  std::vector<float> block_distance;
+  ManagedVector<float> initial_quant;
+  ManagedVector<float> strategy_mask;
+  ManagedVector<float> pixel_mask;
+  ManagedVector<float> final_quant;
+  ManagedVector<float> block_distance;
   Image3FBuffer reconstructed;
   VarDctEncoderFrame frame;
   std::vector<double> score_history;
@@ -506,6 +509,8 @@ struct PreparedWorkflow {
     }
     *output = prepared.compatibility_output.get();
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate compatibility pipeline output");
@@ -630,6 +635,8 @@ struct PreparedWorkflow {
         ElapsedNanoseconds(quantization_begin);
     }
     *prepared = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate prepared VarDCT workflow");
@@ -1529,6 +1536,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         local_profile.peak_cpu_participants = participant_tracker.peak();
         *profile = local_profile;
       }
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate target-size workflow storage");
@@ -1611,6 +1620,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       *profile = local_profile;
     }
     if (gpu_profiling) *gpu_profile = std::move(local_gpu_profile);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate public VarDCT encoding storage");

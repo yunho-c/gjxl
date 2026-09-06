@@ -12,6 +12,7 @@
 #include <mutex>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/ac_strategy.h"
 #include "codec/vardct_frame_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
@@ -661,13 +662,13 @@ private:
   int final_filter_scratch_index_ = -1;
   AqEvaluationOptions options_;
   AcStrategyGrid strategies_host_;
-  std::vector<uint8_t> epf_sharpness_host_;
-  std::vector<int32_t> last_raw_quant_;
-  std::vector<int8_t> last_y_to_x_;
-  std::vector<int8_t> last_y_to_b_;
-  std::vector<float> last_initial_quant_field_;
-  std::vector<float> last_initial_strategy_mask_;
-  std::vector<float> last_initial_pixel_mask_;
+  resource_budget_internal::ManagedVector<uint8_t> epf_sharpness_host_;
+  resource_budget_internal::ManagedVector<int32_t> last_raw_quant_;
+  resource_budget_internal::ManagedVector<int8_t> last_y_to_x_;
+  resource_budget_internal::ManagedVector<int8_t> last_y_to_b_;
+  resource_budget_internal::ManagedVector<float> last_initial_quant_field_;
+  resource_budget_internal::ManagedVector<float> last_initial_strategy_mask_;
+  resource_budget_internal::ManagedVector<float> last_initial_pixel_mask_;
   Quantizer last_quantizer_;
   AqEvaluationMemoryStats memory_stats_;
   AqResetParams reset_params_{};
@@ -692,24 +693,24 @@ private:
   AqOpsinToLinearParams opsin_to_linear_params_{};
   std::array<AqStrategyBatch, 7> batches_{};
   std::array<AqReconstructionParams, 7> reconstruction_params_{};
-  std::vector<AqAnchor> row_major_anchors_;
-  std::vector<vardct_frame_internal::QuantizedAcTransformLayout>
+  resource_budget_internal::ManagedVector<AqAnchor> row_major_anchors_;
+  resource_budget_internal::ManagedVector<vardct_frame_internal::QuantizedAcTransformLayout>
     final_transform_layouts_;
-  std::vector<float> readback_;
-  std::vector<float> resident_policy_quant_readback_;
+  resource_budget_internal::ManagedVector<float> readback_;
+  resource_budget_internal::ManagedVector<float> resident_policy_quant_readback_;
   std::array<float, 5> resident_policy_score_readback_{};
-  std::vector<float> transform_maximum_error_readback_;
-  std::vector<float> forward_readback_;
-  std::vector<float> exact_reconstruction_coefficients_;
-  std::vector<int32_t> quantized_readback_;
-  std::vector<float> dc_readback_;
-  std::vector<int32_t> quantized_dc_readback_;
-  std::array<std::vector<float>, 3> reconstructed_readback_;
-  std::array<std::vector<float>, 3> filtered_readback_;
-  std::array<std::vector<float>, 3> linear_readback_;
+  resource_budget_internal::ManagedVector<float> transform_maximum_error_readback_;
+  resource_budget_internal::ManagedVector<float> forward_readback_;
+  resource_budget_internal::ManagedVector<float> exact_reconstruction_coefficients_;
+  resource_budget_internal::ManagedVector<int32_t> quantized_readback_;
+  resource_budget_internal::ManagedVector<float> dc_readback_;
+  resource_budget_internal::ManagedVector<int32_t> quantized_dc_readback_;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> reconstructed_readback_;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> filtered_readback_;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> linear_readback_;
   std::unique_ptr<PreparedDeviceButteraugli> butteraugli_;
-  std::vector<int32_t> quant_probe_quantized_readback_;
-  std::vector<float> quant_probe_dequantized_readback_;
+  resource_budget_internal::ManagedVector<int32_t> quant_probe_quantized_readback_;
+  resource_budget_internal::ManagedVector<float> quant_probe_dequantized_readback_;
   mutable std::mutex mutex_;
   State state_ = State::kReady;
   std::unique_ptr<GpuSubmission> submission_;

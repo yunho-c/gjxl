@@ -11,6 +11,7 @@
 #include <new>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/ac_strategy_search_internal.h"
 #include "codec/ac_strategy_search_policy.h"
 #include "codec/dct.h"
@@ -19,6 +20,8 @@
 #include "util/fast_math.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr size_t kMaxCoefficientCount = 32 * 32;
@@ -260,7 +263,7 @@ private:
   }
 
   Extent2D extent_;
-  std::vector<uint8_t> cells_;
+  ManagedVector<uint8_t> cells_;
 };
 
 struct SearchContext {
@@ -1080,6 +1083,8 @@ Status FindAcStrategyGridImpl(
       }
     }
     return search_grid.Export(out);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate AC-strategy search state");

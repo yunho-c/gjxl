@@ -9,6 +9,7 @@
 #include <new>
 #include <stdexcept>
 
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/dct.h"
 #include "codec/vardct_frame_internal.h"
@@ -415,6 +416,9 @@ Status AssembleVarDctEncoderFrame(
   }
 
   try {
+
+    const resource_budget_internal::ResourceClassScope resource_class(
+      resource_budget_internal::ResourceClass::kCompletedFrame);
     VarDctEncoderFrame result;
     result.geometry_ = input.geometry;
     result.strategies_ = *input.strategies;
@@ -566,6 +570,8 @@ Status AssembleVarDctEncoderFrame(
     }
     *out = std::move(result);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate quantized VarDCT frame assembly storage");

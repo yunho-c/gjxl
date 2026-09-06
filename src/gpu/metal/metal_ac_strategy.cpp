@@ -17,6 +17,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/ac_strategy.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/submission.h"
@@ -27,6 +28,8 @@
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 Status CreatePipeline(
@@ -853,7 +856,7 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
   }
   submission->reset();
 
-  std::vector<ValidatedAcStrategyBatch> validated_batches;
+  ManagedVector<ValidatedAcStrategyBatch> validated_batches;
   try {
     validated_batches.reserve(batches.size());
     for (const AcStrategyCandidateBatch& batch : batches) {
@@ -866,6 +869,8 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
         validated_batches.push_back(validated);
       }
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to validate AC-strategy candidate batches");
@@ -886,11 +891,13 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
       &context,
       submission);
   }
-  std::vector<AcStrategyProfileContext> contexts;
-  std::vector<MetalProfiledComputeStage> stages;
+  ManagedVector<AcStrategyProfileContext> contexts;
+  ManagedVector<MetalProfiledComputeStage> stages;
   try {
     contexts.resize(validated_batches.size());
     stages.resize(validated_batches.size());
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate AC-strategy GPU stage metadata");
