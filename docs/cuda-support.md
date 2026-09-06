@@ -1113,6 +1113,20 @@ results preserved. No permission/firewall block or system-setting change
 occurs. Integrated layout and convolution costs remain open targets;
 the backend is not considered maxed out.
 
+[S73](cuda-optimization-s1.md#phase-convolution-channel-halos-s73-not-retained)
+tests two-phase channel staging for vertical low/medium convolution. A taller
+tile improves isolated 4K vertical work about 7-8% and captured two-pass work
+about 5%; reducing shared storage without changing residency is largely flat.
+All eight modes pass guarded/tall tests and four scoped GPU sanitizers. The
+selected integrated modes pass 31 prepared cases each and 24 exact retained
+bitstream comparisons. Nevertheless, 192 complete-workflow timing windows
+and eight 4K traces show mixed net results, with small-image regressions.
+Neither fixed dispatch is retained; production and all 39 S70 artifacts are
+unchanged. A stale diagnostic test object is rebuilt from current source;
+the failed evidence remains. No firewall/permission block or system-setting
+change occurs. A size-dependent policy remains untested, and the backend is
+not considered maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -12635,6 +12635,230 @@ retried. No security, clock, cooling or power setting changes. The restored
 runtime passes all 73 CUDA tests again in 117.66 seconds. Final evidence
 hashes and seven current source/document snapshots accompany the checkpoint.
 
+## Phase convolution channel halos (S73, not retained)
+
+S73 starts from S72 documentation commit `b73ac42`, with the S70 runtime
+unchanged. It investigates the retained 33-tap vertical low/medium pass,
+not another Malta layout. The RTX 3060 Laptop / CUDA 11.8 / sm86 / MSVC
+14.37 configuration is unchanged. No production source or library is
+modified during this investigation.
+
+### Channel lifetime and resource counterfactuals
+
+The retained kernel stages three 32-column, 80-row halos for a 48-output-row
+tile. It uses 30,856 shared bytes, 54 registers and three theoretical
+256-thread blocks per SM. Three adjacent output rows share inputs while
+retaining nine independent FMA chains. S62 already tested row counts,
+tile sizes, thread counts and tap-major controls; shared-load count alone
+did not explain its results.
+
+X's low/medium outputs are independent of the joint Y/B outputs. The new
+diagnostic computes them in two phases and reuses two shared halos. Both
+channel orders are tested, at 48 and 96 output rows. Every output retains
+the original tap order, included-weight sum, rounded division and final
+expression. Cooperative-load and inter-phase barriers remain reachable by
+threads in partial columns; normalization is read only after initialization.
+
+| Mode | Vertical body | Registers | Shared bytes | Stack bytes | Theoretical blocks/SM |
+|---|---|---:|---:|---:|---:|
+| 0 | Retained 48-row joint body | 54 | 30,856 | 0 | 3 |
+| 1 | 48 rows, X then Y/B | 73 | 20,616 | 0 | 3 |
+| 2 | 48 rows, Y/B then X | 73 | 20,616 | 0 | 3 |
+| 3 | 96 rows, X then Y/B | 73 | 32,904 | 0 | 3 |
+| 4 | 96 rows, Y/B then X | 73 | 32,904 | 0 | 3 |
+| 5 | Renamed, native-identical retained control | 54 | 30,856 | 0 | 3 |
+| 6 | Mode 1 with four-block launch bounds | 63 | 20,616 | 0 | 4 |
+| 7 | Mode 2 with four-block launch bounds | 64 | 20,616 | 16 | 4 |
+
+The uncapped 48-row versions reduce shared storage but increase register
+pressure enough to leave theoretical residency unchanged. This motivates
+modes 6/7 rather than assuming the shared-memory reduction is sufficient.
+Mode 7 has four static local loads and stores; the CUDA attribute API reports
+16 local bytes while cuobjdump reports a 16-byte stack and zero LOCAL bytes.
+Mode 6 has no stack/local traffic. These are compiler/API resource results,
+not measured achieved occupancy.
+
+The original/control body has 1,736 static instructions, 219 LDS instructions
+and one barrier. Mode 4 has 2,312 / 228 / three, and mode 6 has 2,352 / 228 /
+three. All contain 651 static FFMA instructions. Counts include interior and
+edge paths, not executed instructions per pixel. Ideal interior logical
+plane traffic, excluding weights and partial tiles, changes from 56 bytes
+per output pixel at 48 rows to 52 at 96 rows. This is a reuse calculation,
+not measured transactions or a bandwidth roof.
+
+### Qualification and isolated measurements
+
+The six-mode V1 contains 80 GPU bodies: 75 unchanged production bodies,
+four new phase variants and the native-identical control. The eight-mode
+V2 contains 82, with all 80 V1 bodies instruction-identical. Each mode
+passes the permanent 460-fixture suite with three-stage reuse and two
+bitwise oracles. That is 2,760 fixture executions / 16,560 two-oracle stage
+comparisons in V1 and 3,680 / 22,080 in V2, not thousands of distinct images.
+All 16 allocations, guards, inputs, weights and unused blurred planes are
+checked. Every mode also passes both flattened-grid tall cases.
+
+Memcheck, initcheck, synccheck and racecheck pass for both builds. Each V1
+tool covers 96 fixtures / 576 two-oracle comparisons; each V2 tool covers
+128 / 768. Memcheck explicitly enables stream-ordered race tracking and
+full leak checking. The longest racecheck is 209.13 seconds with per-mode
+progress, not a permission stall.
+
+The focused V2 screen uses packed/padded 510x532, 1919x1079 and 3839x2159
+synthetic inputs. Thirty-two balanced rotating/reverse rounds measure all
+eight modes in one executable, three vertical kernels per graph window.
+Every window is followed by exact comparison of all 16 allocations outside
+the event interval: 1,536 windows and 42 paired summaries. The original
+larger V1 screen scripts were prepared but never run.
+
+| Mode | Packed 510x532 | Packed HD | Packed 4K | Padded 4K |
+|---|---:|---:|---:|---:|
+| 1 | -1.01% | +0.17% | -0.88% | -1.06% |
+| 2 | 0.00% | +0.03% | -1.47% | -1.51% |
+| 3 | +12.56% | -5.46% | -7.12% | -7.38% |
+| 4 | +17.09% | -5.23% | -7.91% | -7.87% |
+| 5, unchanged control | -0.25% | +0.14% | -0.14% | +0.04% |
+| 6 | -2.51% | -5.53% | -6.04% | -5.85% |
+| 7 | +3.02% | +0.14% | +0.60% | +0.46% |
+
+Negative is faster. All individual samples remain, including paired
+outliers above +700%; none are filtered or clock-normalized. The uncapped
+48-row result is largely flat, while a larger tile or changed register
+limit improves large-image stage measurements. Neither is yet an encoder
+speedup claim.
+
+### Captured inputs and integrated correctness
+
+A diagnostic copy changes only the public low/medium host forwarding
+function and appends the candidates plus an environment-controlled selector.
+The phase probe, encoder and prepared test each contain 210 GPU bodies:
+all 203 retained bodies are unchanged, and all 82 standalone probe bodies
+match. This preserves the unrelated GPU work in the same executable.
+
+Mode 0 captures the first six actual low/medium input sets from each of
+the 4K, HD and Flower workflows: three packed XYB channels and 33 weights,
+with original input/output strides recorded. These calls alternate full
+and half resolution; they are not six Malta stages or three pyramid levels.
+The half-size reference output is packed, while subsequent half-size outputs
+use the full working-width stride. Synchronized capture runtimes are not
+performance evidence.
+
+A separate replay restores those 18 input sets and original strides, while
+retaining diagnostic guard offsets and separate allocations rather than the
+integrated arena's exact base addresses. Modes 0/4/6/5 use 24 balanced rounds
+and three horizontal-plus-vertical repetitions per event window. All 1,728
+windows match all 16 allocations exactly; 54 paired summaries retain every
+outlier. All 82 GPU bodies equal V2. Only its `--replay` path is used: copied,
+unused `--scope`/`--timing` labels still describe the earlier eight-mode
+probe and are not qualification claims for this binary.
+
+Mode 4 improves the three full-resolution 4K two-pass captures by
+5.41% / 5.44% / 5.23%; mode 6 improves them by 3.64% / 3.73% / 3.49%.
+Both improve all six HD captures. On Flower, mode 4 regresses full-size
+work 4.05-6.70% and half-size work 17.13-18.72%. Mode 6 modestly improves
+full-size work but is mixed/slower at half size. Those small-image results
+preclude treating either fixed dispatch as a universal improvement.
+
+The first integrated prepared test fails its memory-accounting assertion
+even in mode 0. The diagnostic link reused a build-tree test object from
+S72's aligned-layout candidate, written before source restoration. The
+retained libraries/binaries and current source were correct; the stale host
+fixture expected different storage. That object and failed test remain.
+Rebuilding a current-source snapshot initially misses the relative test
+helper include directory; the failed build and script also remain. The
+corrected build supplies `-I tests` and passes. Its 210 GPU bodies and
+resource dump are byte-identical to the first diagnostic test executable.
+
+All four selected modes then pass 31 prepared-workflow cases each. At
+distance 1.2 / effort 7, with and without final-score collection, 24 fresh
+encodes across 4K/HD/Flower exactly match the retained S70 bitstream hashes,
+strategy text and final-score text. These are not fresh decoder/metric
+runs or the full release qualification matrix. No permanent fixture or
+production assertion is weakened to obtain a pass.
+
+### Complete-workflow timings and traces
+
+Warm runs use three warmups/seven samples; cold runs use zero/one. Eight
+balanced rotating/reverse rounds compare modes 0/4/6/5 serially per workload
+and cohort. All 41 phase fields and raw reports remain: 192 process windows
+and 54 paired summaries. Size equality is checked in timing runs; bitstream
+equality comes from the separate preflight. The table reports median paired
+percent changes relative to mode 0, not differences of aggregate medians.
+
+| Workload / mode | Warm quantization | Warm whole encode | Cold quantization | Cold whole encode |
+|---|---:|---:|---:|---:|
+| 4K / 4 | +0.02% | +0.48% | -2.50% | -3.19% |
+| 4K / 6 | -0.12% | -2.38% | +0.43% | -2.44% |
+| 4K / unchanged control | -0.25% | -0.90% | +0.42% | +1.93% |
+| HD / 4 | -1.15% | -1.16% | -2.87% | -2.09% |
+| HD / 6 | -0.11% | +0.60% | -0.84% | -0.67% |
+| HD / unchanged control | +0.05% | +0.62% | -3.20% | -3.15% |
+| Flower / 4 | +0.33% | -2.67% | +0.86% | -0.14% |
+| Flower / 6 | +1.60% | +1.89% | +12.32% | +10.63% |
+| Flower / unchanged control | -1.67% | -2.59% | +1.05% | +0.89% |
+
+Mode 6's warm 4K whole reduction is not attributable entirely to the target:
+quantization is essentially flat and unchanged codestream work also moves.
+Mode 4's cold HD whole reduction is smaller than the unchanged control's.
+Raw ranges, win counts and direct comparisons with mode 5 are preserved;
+no slow samples or adverse workloads are removed. The cohorts are not
+pooled or normalized using endpoint device clocks.
+
+Eight integrated warm 4K traces repeat the four modes in forward/reverse
+order. All contain 373 launches, including six target vertical calls.
+Allocation sizes, copy totals/counts and every non-target launch's ordered
+grid/block/register/shared/local structure match. Only the expected target
+name, grid and resources differ. The 96-row target has grids 2,760/720
+instead of 5,400/1,380; mode 6 keeps the original grid. These are instrumented
+diagnostics, not unprofiled wall-clock measurements.
+
+| Mode | Target GPU change, pairs 1 / 2 | Total GPU change, pairs 1 / 2 |
+|---|---:|---:|
+| 4 | -6.28% / -2.93% | +2.55% / +5.14% |
+| 6 | +8.37% / -3.00% | +11.71% / +6.78% |
+| 5, unchanged control | +2.59% / +3.24% | +4.57% / +1.36% |
+
+The taller variant's target gain survives integration in both pairs, but
+non-target GPU work also moves substantially. Mode 6 reverses at the target
+and has a visible cold small-image regression. This evidence does not
+establish a consistent net benefit for either tested fixed dispatch.
+
+### Disposition and preservation
+
+Neither fixed-dispatch candidate is retained. Production sources, tests and
+all 39 retained S70 binaries/libraries remain unchanged; no restoration is
+needed for this checkpoint. The shared-storage reduction alone is not a
+speedup: the useful counterfactuals also change tile reuse or register-limited
+residency. The taller version has a repeatable large-image stage gain, but
+small-image regressions and mixed complete-workflow results remain.
+
+A size-dependent policy combining the retained small-image body with a
+large-image phase body is an open experiment, not an inferred production
+policy. It would need its own same-binary controls, integrated measurements
+and release qualification. Exact arena placement and other integrated
+convolution costs remain potential hypotheses. The backend is not considered
+maxed out; this checkpoint closes the tested fixed-dispatch variants only.
+
+The ignored `s73_*` bundle preserves both prototype versions, resource and
+native audits, eight sanitizer runs, all guarded/tall results, synthetic and
+captured-input timing windows, 24 encoded outputs, 192 complete-workflow
+windows, eight traces, and all failed diagnostic build/test evidence.
+Five retained source/header snapshots and two current document snapshots
+accompany final artifact, binary and dependency hashes. The unused proposed
+V1 screens are marked unexecuted, not included in completed timing counts.
+
+`s73_qualification_audit.py` and `s73_integrated_audit.py` validate fixture,
+sanitizer, native/source identity, capture, bitstream, raw timing-order/median
+and trace evidence. `s73_validate.py --frozen` verifies the preserved bundle;
+adding `--current` also rechecks the source snapshots, retained runtime and
+reconstruction against the current worktree. This checkpoint changes docs
+only and does not claim a fresh full CUDA/CPU/ASan release suite.
+
+No firewall, admin or permission block is observed. The baseline memory
+assertion and missing test include are reported and corrected in diagnostic
+builds, not hidden behind a passing summary. Slow sanitizer runs make
+progress and terminate. Restricted hardware counters are not retried; no
+security, clock, power or cooling settings are changed.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
