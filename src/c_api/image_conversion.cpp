@@ -128,6 +128,8 @@ Status ConvertPackedSrgbToLinearRgb(PackedSrgbImageView image,
     }
     *linear_rgb = std::move(candidate);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Unable to allocate converted image");
   } catch (const std::length_error&) {

@@ -135,6 +135,14 @@ struct VarDctCodestreamProfile {
   std::vector<uint8_t>* output,
   VarDctCodestreamProfile* profile = nullptr);
 
+/// Internal handoff retains the backing charge through workflow/retry/batch
+/// ownership. Only the public adapter publishes an ordinary vector.
+[[nodiscard]] Status EncodeVarDctCodestreamToBuffer(
+  const vardct_frame_internal::VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  CodestreamBuffer* output,
+  VarDctCodestreamProfile* profile = nullptr);
+
 /// Diagnostic-only serializer entry point. On failure, both `output` and
 /// `profile` remain unchanged.
 [[nodiscard]] Status EncodeVarDctCodestreamProfiled(

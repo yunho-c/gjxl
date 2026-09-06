@@ -3,6 +3,9 @@
 
 #include "codestream/batch_workflow.h"
 
+#include "codestream/workflow_internal.h"
+#include "codestream/batch_workflow_test.h"
+
 #include <atomic>
 #include <condition_variable>
 #include <exception>
@@ -14,20 +17,30 @@
 #include <utility>
 
 namespace gjxl {
+using codestream_internal::CodestreamBuffer;
+using resource_budget_internal::PublicationVector;
+using resource_budget_internal::ManagedVector;
+using resource_budget_internal::ResourceAllocation;
 namespace {
 
 void EncodeOne(
   const VarDctBatchEncodingRequest& request,
-  VarDctBatchEncodingResult* result) noexcept {
+  VarDctBatchEncodingResult* result,
+  CodestreamBuffer* bytes) noexcept {
 
   VarDctBatchEncodingResult candidate;
+  CodestreamBuffer candidate_bytes;
   try {
-    candidate.status = EncodeLinearRgbVarDctCodestreamProfiled(
+    candidate.status = codestream_internal::EncodeLinearRgbVarDctCodestreamOwned(
       request.linear_rgb,
       request.options,
-      &candidate.codestream,
+      &candidate_bytes,
       &candidate.summary,
       &candidate.timing);
+    if (candidate.status.ok()) candidate.status = candidate_bytes.Reclassify(
+      resource_budget_internal::ResourceClass::kRetainedResult);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    candidate.status = failure.status();
   } catch (const std::bad_alloc&) {
     candidate.status = Status::OutOfMemory(
       "Unable to allocate batch image encoding storage");
@@ -41,6 +54,8 @@ void EncodeOne(
     candidate.status = Status::Internal(
       "Batch image encoding failed with an unknown exception");
   }
+  if (!candidate.status.ok()) candidate_bytes.Reset();
+  *bytes = std::move(candidate_bytes);
   *result = std::move(candidate);
 }
 
@@ -61,6 +76,9 @@ public:
       for (size_t index = 0; index < max_in_flight_; ++index) {
         workers_.emplace_back([this] { WorkerLoop(); });
       }
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      Stop();
+      return failure.status();
     } catch (const std::bad_alloc&) {
       Stop();
       return Status::OutOfMemory(
@@ -90,9 +108,19 @@ public:
         "Image batch result output is null");
     }
 
-    std::vector<VarDctBatchEncodingResult> candidate;
+    const resource_budget_internal::ManagedHostScope managed_host(
+      resource_budget_internal::ResourceClass::kRetainedResult);
+    // Declare escrow before the candidate: rollback frees backing first.
+    ManagedVector<ResourceAllocation> publication_charges;
+    PublicationVector<VarDctBatchEncodingResult> candidate;
+    ManagedVector<CodestreamBuffer> candidate_bytes;
     try {
-      candidate.resize(requests.size());
+      publication_charges.resize(requests.size());
+      candidate_bytes.resize(requests.size());
+      Status status = PublicationVector<VarDctBatchEncodingResult>::Create(requests.size(), &candidate);
+      if (!status.ok()) return status;
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate image batch results");
@@ -103,14 +131,16 @@ public:
 
     std::unique_lock encode_lock(encode_mutex_);
     if (requests.empty()) {
-      *results = std::move(candidate);
+      candidate.PublishTo(results);
       return Status::Ok();
     }
 
     {
       std::lock_guard work_lock(work_mutex_);
       requests_ = requests;
-      results_ = &candidate;
+      results_ = candidate.mutable_view();
+      codestreams_ = candidate_bytes;
+      resource_context_ = resource_budget_internal::CurrentResourceContext();
       next_index_.store(0, std::memory_order_relaxed);
       remaining_workers_ = workers_.size();
       ++generation_;
@@ -123,10 +153,20 @@ public:
         return remaining_workers_ == 0;
       });
       requests_ = {};
-      results_ = nullptr;
+      results_ = {};
+      codestreams_ = {};
     }
 
-    *results = std::move(candidate);
+    const auto observer = codestream_internal::batch_publication_observer_for_testing;
+    if (observer.observe != nullptr)
+      observer.observe(observer.context, candidate.view(), candidate_bytes);
+
+    // No fallible work after staging starts. Keep every byte charge until the
+    // entire public result array, not just an individual vector, is published.
+    for (size_t i = 0; i < candidate.size(); ++i)
+      publication_charges[i] = candidate_bytes[i].MoveToPublication(&candidate[i].codestream);
+    candidate.PublishTo(results);
+    publication_charges.clear();
     return Status::Ok();
   }
 
@@ -149,7 +189,9 @@ private:
     size_t observed_generation = 0;
     while (true) {
       std::span<const VarDctBatchEncodingRequest> requests;
-      std::vector<VarDctBatchEncodingResult>* results = nullptr;
+      std::span<VarDctBatchEncodingResult> results;
+      std::span<CodestreamBuffer> bytes;
+      resource_budget_internal::ResourceContext resource_context;
       {
         std::unique_lock lock(work_mutex_);
         work_available_.wait(lock, [&] {
@@ -161,6 +203,8 @@ private:
         observed_generation = generation_;
         requests = requests_;
         results = results_;
+        bytes = codestreams_;
+        resource_context = resource_context_;
       }
 
       while (true) {
@@ -169,7 +213,8 @@ private:
         if (index >= requests.size()) {
           break;
         }
-        EncodeOne(requests[index], &(*results)[index]);
+        const resource_budget_internal::ResourceContextScope resources(resource_context);
+        EncodeOne(requests[index], &results[index], &bytes[index]);
       }
 
       {
@@ -191,7 +236,9 @@ private:
   size_t generation_ = 0;
   size_t remaining_workers_ = 0;
   std::span<const VarDctBatchEncodingRequest> requests_;
-  std::vector<VarDctBatchEncodingResult>* results_ = nullptr;
+  std::span<VarDctBatchEncodingResult> results_;
+  std::span<CodestreamBuffer> codestreams_;
+  resource_budget_internal::ResourceContext resource_context_;
   std::atomic<size_t> next_index_{0};
 };
 
@@ -222,6 +269,8 @@ Status VarDctBatchEncoder::Create(
     }
     encoder->reset(new VarDctBatchEncoder(std::move(impl)));
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate image batch encoder");

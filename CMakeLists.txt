@@ -1567,6 +1567,16 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME frontend_storage COMMAND gjxl_frontend_storage_test)
   set_tests_properties(frontend_storage PROPERTIES TIMEOUT 60)
 
+  add_executable(gjxl_publication_storage_test tests/publication_storage_test.cpp)
+  target_link_libraries(gjxl_publication_storage_test PRIVATE gjxl_codestream)
+  add_test(NAME publication_storage COMMAND gjxl_publication_storage_test)
+  set_tests_properties(publication_storage PROPERTIES TIMEOUT 60)
+
+  add_executable(gjxl_workflow_publication_test tests/workflow_publication_test.cpp)
+  target_link_libraries(gjxl_workflow_publication_test PRIVATE gjxl_c gjxl_codestream)
+  add_test(NAME workflow_publication COMMAND gjxl_workflow_publication_test)
+  set_tests_properties(workflow_publication PROPERTIES TIMEOUT 180)
+
   add_executable(
     gjxl_ac_strategy_grid_test
     tests/ac_strategy_grid_test.cpp

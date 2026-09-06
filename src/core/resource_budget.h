@@ -315,6 +315,38 @@ public:
     budget.changed.notify_all();
   }
 
+  /// Changes the owning category, not the backing, domain or reservation.
+  /// Caller must have exclusive ownership of this ticket and its transition.
+  [[nodiscard]] Status Reclassify(ResourceClass owner) {
+    if (!valid() || static_cast<size_t>(owner) >= static_cast<size_t>(ResourceClass::kCount))
+      return Status::InvalidArgument("Invalid allocation owner transition");
+    auto& budget = *state_->budget;
+    std::lock_guard lock(budget.mutex);
+    if (owner == resource_class_) return Status::Ok();
+    auto& old = budget.snapshot.classes[static_cast<size_t>(resource_class_)];
+    auto& next = budget.snapshot.classes[static_cast<size_t>(owner)];
+    if (phase_ == Phase::kPending) {
+      old.pending_capacity_bytes -= capacity_;
+      --old.pending_count;
+      next.pending_capacity_bytes += capacity_;
+      ++next.pending_count;
+    } else {
+      --old.backing_count;
+      ++next.backing_count;
+      if (phase_ == Phase::kLive) {
+        old.live_capacity_bytes -= capacity_;
+        old.live_requested_bytes -= requested_;
+        next.live_capacity_bytes += capacity_;
+        next.live_requested_bytes += requested_;
+      } else {
+        old.idle_capacity_bytes -= capacity_;
+        next.idle_capacity_bytes += capacity_;
+      }
+    }
+    resource_class_ = owner;
+    return Status::Ok();
+  }
+
 private:
   friend class ResourceReservation;
   enum class Phase { kPending, kLive, kIdle };
@@ -352,7 +384,7 @@ inline Status ResourceReservation::PrepareAllocation(
   auto& budget = *state_->budget;
   std::lock_guard lock(budget.mutex);
   if (capacity_bytes > state_->capacity_bytes - state_->charged_bytes)
-    return Status::OutOfMemory("Allocation exceeds admitted resource plan");
+    return Status::ResourcePlanExceeded("Allocation exceeds admitted resource plan");
   state_->charged_bytes += capacity_bytes;
   allocation->state_ = state_;
   allocation->capacity_ = capacity_bytes;

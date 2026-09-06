@@ -10,8 +10,10 @@ backing and joined-worker propagation. The [serializer attachment](resident-seri
 adds qualified token/model/search-container backing with measured overhead. The
 [frontend attachment](resident-frontend-accounting.md) extends backing coverage to
 preparation/evaluation arrays and completed-frame metadata, with exact parity,
-failure/lifetime checks and measured costs. Result publication and whole-workflow
-admission are not implemented yet.
+failure/lifetime checks and measured costs. The
+[publication attachment](resident-publication-accounting.md) adds candidate and
+retained codestream-byte backing through C/C++ and batch ownership handoff.
+Diagnostic result storage and whole-workflow admission remain pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
 ## Source-backed ownership inventory
@@ -186,8 +188,8 @@ Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
 Milestone 4 still requires the remaining host allocation attachments and shared planners,
-CPU result-publication coverage, public domain configuration/propagation, automatic cache eviction,
-retry and batch-result integration, end-to-end failure/progress tests, and
+diagnostic result-publication coverage, public domain configuration/propagation, automatic cache eviction,
+retry and aggregate batch-result admission, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited
 opportunities' final dispositions and measured gates. Milestone 6 still requires
 aggregate CPU scheduling and actual latency/throughput qualification. None is

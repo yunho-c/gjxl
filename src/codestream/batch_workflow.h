@@ -26,12 +26,14 @@ struct VarDctBatchEncodingResult {
 
 /// Persistent bounded-concurrency driver for independent image encodes.
 ///
-/// Each worker executes the existing single-image public workflow, preserving
+/// Each worker executes the existing single-image encoding workflow, preserving
 /// its codec decisions and atomic output behavior. Metal requests share the
 /// process-wide production backend while retaining independent per-image
 /// preparation and scratch. This permits CPU preparation and serialization
 /// for one image to overlap another image's GPU work; it does not fuse images
 /// into one Metal dispatch.
+/// Encoded bytes remain internally owned until the whole result array is
+/// published; this ownership boundary alone does not impose a memory limit.
 ///
 /// One Encode call runs every request and preserves request order in results.
 /// Individual failures are reported in the matching result. A successful

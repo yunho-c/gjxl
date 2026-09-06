@@ -14,6 +14,13 @@
 
 namespace gjxl::codestream_internal {
 
+/// Internal complete-encode result. Candidate bytes stay charged until the
+/// outer C/C++ or batch adapter explicitly publishes them.
+[[nodiscard]] Status EncodeLinearRgbVarDctCodestreamOwned(
+  ConstImage3FView linear_rgb, VarDctEncodingOptions options,
+  CodestreamBuffer* codestream, VarDctEncodingSummary* summary = nullptr,
+  VarDctEncodingTiming* timing = nullptr);
+
 struct QuantizationMatrixScaleStats {
   float x_edge = 0.0f;
   float b_edge = 0.0f;

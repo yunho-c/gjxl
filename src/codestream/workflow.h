@@ -179,7 +179,9 @@ struct VarDctEncodingTiming {
   uint64_t aggregate_search_nanoseconds = 0;
   /// Duration of the successful attempt retained as the final codestream.
   uint64_t selected_attempt_nanoseconds = 0;
-  /// End-to-end workflow time, including validation and output commit.
+  /// Time through the internal workflow's successful-result commit, including
+  /// validation. Excludes prepared-state teardown and the outer public adapter's
+  /// ownership handoff; surround the public call to measure complete latency.
   uint64_t total_nanoseconds = 0;
   std::vector<VarDctEncodingAttemptTiming> attempts;
 };

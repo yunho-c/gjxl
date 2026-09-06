@@ -75,6 +75,54 @@ bool Until(Predicate&& predicate) {
   return true;
 }
 
+bool CheckOwnerTransitions() {
+  ResourceBudget budget(200);
+  ResourceReservation producer, consumer;
+  ResourceAllocation allocation, excess;
+  if (!Ok(budget.TryReserve(100, &producer)) ||
+      !Ok(producer.PrepareAllocation(ResourceClass::kSerializer, 48, 64, &allocation)))
+    return false;
+  const Status underplan = producer.PrepareAllocation(ResourceClass::kInput, 37, 37, &excess);
+  const Status copied = underplan;
+  if (!Check(copied.code() == StatusCode::kOutOfMemory && copied.resource_plan_exceeded() &&
+      !Status::OutOfMemory("Physical allocation failed").resource_plan_exceeded() &&
+      !excess.valid(), "Resource-plan failure lost its structured reason")) return false;
+  for (int phase = 0; phase < 3; ++phase) {
+    const auto before = budget.snapshot();
+    if (!Ok(allocation.Reclassify(ResourceClass::kRetainedResult)) ||
+        !Ok(allocation.Reclassify(ResourceClass::kRetainedResult)) ||
+        !Code(allocation.Reclassify(ResourceClass::kCount), StatusCode::kInvalidArgument))
+      return false;
+    const auto after = budget.snapshot();
+    const auto& owner = after.classes[static_cast<size_t>(ResourceClass::kRetainedResult)];
+    const auto& old = after.classes[static_cast<size_t>(ResourceClass::kSerializer)];
+    if (!Check(Consistent(after, 200) && after.committed_bytes() == before.committed_bytes() &&
+        after.reserved_unbacked_bytes == before.reserved_unbacked_bytes &&
+        after.total.pending_capacity_bytes == before.total.pending_capacity_bytes &&
+        after.total.live_capacity_bytes == before.total.live_capacity_bytes &&
+        after.total.idle_capacity_bytes == before.total.idle_capacity_bytes &&
+        owner.pending_capacity_bytes == (phase == 0 ? 64 : 0) &&
+        owner.live_capacity_bytes == (phase == 1 ? 64 : 0) &&
+        owner.live_requested_bytes == (phase == 1 ? 48 : 0) &&
+        owner.idle_capacity_bytes == (phase == 2 ? 64 : 0) &&
+        old.backing_count == 0 && old.pending_count == 0,
+        "Owner transition changed total backing or lost its phase")) return false;
+    if (!Ok(allocation.Reclassify(ResourceClass::kSerializer))) return false;
+    if (phase == 0 && !Ok(allocation.Commit())) return false;
+    if (phase == 1 && !Ok(allocation.MakeIdle())) return false;
+  }
+  producer.Reset();
+  if (!Ok(budget.TryReserve(64, &consumer)) || !Ok(allocation.TransferTo(consumer))) return false;
+  consumer.Reset();
+  bool transitioned = false;
+  std::thread thread([&] {
+    transitioned = allocation.Reclassify(ResourceClass::kRetainedResult).ok();
+    allocation.Reset();
+  });
+  thread.join();
+  return Check(transitioned, "Closed-producer owner transition failed") && Empty(budget);
+}
+
 bool CheckLifecycle() {
   ResourceBudget budget(100);
   ResourceReservation job;
@@ -464,7 +512,7 @@ bool CheckStateModel() {
       a.backing_count == b.backing_count && a.pending_count == b.pending_count;
   };
   for (size_t step = 0; step < 20000; ++step) {
-    const size_t action = random() % 11;
+    const size_t action = random() % 12;
     const size_t j = random() % jobs.size();
     const size_t a = random() % allocations.size();
     auto& job = model_jobs[j];
@@ -530,6 +578,10 @@ bool CheckStateModel() {
         StatusCode::kOk;
       if (!Code(jobs[j].ReduceCapacity(capacity), code)) return false;
       if (code == StatusCode::kOk) job.capacity = capacity;
+    } else if (action == 11 && backing.valid) {
+      const size_t kind = random() % static_cast<size_t>(ResourceClass::kCount);
+      if (!Ok(allocations[a].Reclassify(static_cast<ResourceClass>(kind)))) return false;
+      backing.resource_class = kind;
     }
     const auto actual = budget.snapshot();
     const auto oracle = expected();
@@ -552,6 +604,6 @@ int main() {
   return CheckLifecycle() && CheckTransfersAndMoves() && CheckPendingAndFailure() &&
     CheckOverflowAndLifetime() && CheckFifoAndCancellation() &&
     CheckConcurrentAccounting() && CheckRetainedBackingAndQueueRemoval() &&
-    CheckStateModel()
+    CheckStateModel() && CheckOwnerTransitions()
       ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -3,13 +3,17 @@
 
 #pragma once
 
+#include <cstdint>
 #include <iterator>
 #include <stdexcept>
 #include <vector>
 
 #include "core/managed_allocator.h"
+#include "core/publication_vector.h"
 
 namespace gjxl::codestream_internal {
+
+using CodestreamBuffer = resource_budget_internal::PublicationVector<uint8_t>;
 
 /// Owning serializer storage. Consumers should borrow spans, not require the
 /// allocator type of a producer. Backing is charged only in managed scopes.

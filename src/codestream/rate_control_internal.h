@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "codestream/workflow.h"
+#include "codestream/storage.h"
 #include "core/status.h"
 
 namespace gjxl::codestream_internal {
@@ -29,8 +30,9 @@ struct TargetSizeSearchOptions {
     kMaximumTargetSizeButteraugliTarget;
 };
 
-struct TargetSizeSearchResult {
-  std::vector<uint8_t> codestream;
+template <typename Bytes>
+struct TargetSizeSearchResultFor {
+  Bytes codestream;
   VarDctEncodingSummary summary;
   size_t attempt_count = 0;
   size_t failed_attempt_count = 0;
@@ -38,14 +40,20 @@ struct TargetSizeSearchResult {
   bool search_exhausted = false;
 
   friend bool operator==(
-    const TargetSizeSearchResult&,
-    const TargetSizeSearchResult&) = default;
+    const TargetSizeSearchResultFor&,
+    const TargetSizeSearchResultFor&) = default;
 };
 
-using TargetSizeEvaluator = std::function<Status(
+using TargetSizeSearchResult = TargetSizeSearchResultFor<std::vector<uint8_t>>;
+using ManagedTargetSizeSearchResult = TargetSizeSearchResultFor<CodestreamBuffer>;
+
+template <typename Bytes>
+using TargetSizeEvaluatorFor = std::function<Status(
   float butteraugli_target,
-  std::vector<uint8_t>* codestream,
+  Bytes* codestream,
   VarDctEncodingSummary* summary)>;
+using TargetSizeEvaluator = TargetSizeEvaluatorFor<std::vector<uint8_t>>;
+using ManagedTargetSizeEvaluator = TargetSizeEvaluatorFor<CodestreamBuffer>;
 
 /// Performs a bounded target-size search over complete encodes controlled by a
 /// Butteraugli-target-like scalar. Score history is optional; when present its
@@ -54,5 +62,10 @@ using TargetSizeEvaluator = std::function<Status(
   const TargetSizeSearchOptions& options,
   const TargetSizeEvaluator& evaluator,
   TargetSizeSearchResult* result);
+
+[[nodiscard]] Status SearchTargetSize(
+  const TargetSizeSearchOptions& options,
+  const ManagedTargetSizeEvaluator& evaluator,
+  ManagedTargetSizeSearchResult* result);
 
 }  // namespace gjxl::codestream_internal

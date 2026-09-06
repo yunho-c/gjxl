@@ -1079,7 +1079,7 @@ Status AssembleCandidate(
   std::span<const BitWriter> common_sections,
   std::span<const BitWriter> ac_sections,
   size_t ac_group_count,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::AssemblyProfile* profile) {
 
   if (output == nullptr) {
@@ -1144,8 +1144,8 @@ Status AssembleCandidate(
     const ProfileClock::time_point output_copy_begin =
       WorkBegin(profile != nullptr);
     const std::span<const uint8_t> bytes = writer.padded_bytes();
-    std::vector<uint8_t> candidate(bytes.begin(), bytes.end());
-    *output = std::move(candidate);
+    status = codestream_internal::CodestreamBuffer::CopyFrom(bytes, output);
+    if (!status.ok()) return status;
     WorkEnd(
       profile != nullptr, output_copy_begin,
       profile == nullptr ? nullptr : &profile->output_copy_nanoseconds);
@@ -1163,7 +1163,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
   bool exhaustive_representation_search,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
   if (output == nullptr) {
@@ -1887,7 +1887,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     }
 
     const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
-    std::vector<uint8_t> candidate_output;
+    codestream_internal::CodestreamBuffer candidate_output;
     status = AssembleCandidate(
       frame, common_sections, ac_sections,
       selected.streams.size(), &candidate_output,
@@ -2003,7 +2003,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
 Status EncodeVarDctCodestreamMaximumCompression(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
   return EncodeVarDctCodestreamWithRepresentationPolicy(
@@ -2013,7 +2013,7 @@ Status EncodeVarDctCodestreamMaximumCompression(
 Status EncodeVarDctCodestreamSingleRepresentation(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
   return EncodeVarDctCodestreamWithRepresentationPolicy(
@@ -2023,7 +2023,7 @@ Status EncodeVarDctCodestreamSingleRepresentation(
 Status EncodeVarDctCodestreamImpl(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
   const resource_budget_internal::ManagedHostScope managed_host(
@@ -2199,6 +2199,18 @@ Status codestream_internal::EncodeVarDctCodestreamFromView(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile) {
+  if (output == nullptr) return Status::InvalidArgument("Codestream output is null");
+  CodestreamBuffer candidate;
+  const Status status = EncodeVarDctCodestreamImpl(frame, options, &candidate, profile);
+  if (status.ok()) candidate.PublishTo(output);
+  return status;
+}
+
+Status codestream_internal::EncodeVarDctCodestreamToBuffer(
+  const VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  CodestreamBuffer* output,
   VarDctCodestreamProfile* profile) {
   return EncodeVarDctCodestreamImpl(frame, options, output, profile);
 }

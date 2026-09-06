@@ -142,8 +142,10 @@ adds writer/image-plane backing and joined CPU worker propagation. The
 [serializer attachment](resident-serializer-accounting.md) extends this to owned
 token/model/candidate containers, with exact parity and measured overhead. The
 [frontend attachment](resident-frontend-accounting.md) covers preparation/evaluation
-arrays and completed-frame metadata, with exact parity and measured costs. Result
-publication and whole-workflow admission are still pending; these
+arrays and completed-frame metadata, with exact parity and measured costs. The
+[publication attachment](resident-publication-accounting.md) adds candidate and
+retained codestream-byte ownership through C/C++ and batch publication. Diagnostic
+result storage and whole-workflow admission are still pending; these
 partial attachments do not satisfy the milestone.
 
 Deliverables:

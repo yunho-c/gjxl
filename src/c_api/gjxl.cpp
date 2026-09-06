@@ -92,6 +92,8 @@ GJXLResult Guard(Function&& function) noexcept {
   ClearLastError();
   try {
     return std::forward<Function>(function)();
+  } catch (const gjxl::resource_budget_internal::ManagedAllocationFailure& failure) {
+    return TranslateStatus(failure.status());
   } catch (const std::bad_alloc&) {
     return Fail(GJXL_ERROR_OUT_OF_MEMORY, "C API allocation failed");
   } catch (const std::exception& exception) {
@@ -358,6 +360,8 @@ GJXLResult gjxl_encode(
       .row_stride_bytes = image->row_stride_bytes,
       .format = packed_format,
     };
+    const gjxl::resource_budget_internal::ManagedHostScope managed_input(
+      gjxl::resource_budget_internal::ResourceClass::kInput);
     gjxl::Image3FBuffer linear_rgb;
     result = TranslateStatus(
       gjxl::c_api_internal::ConvertPackedSrgbToLinearRgb(
@@ -372,8 +376,8 @@ GJXLResult gjxl_encode(
     encoding_options.compression_mode = compression_mode;
     encoding_options.backend = context->backend;
     encoding_options.cpu_thread_count = context->cpu_thread_count;
-    std::vector<uint8_t> codestream;
-    result = TranslateStatus(gjxl::EncodeLinearRgbVarDctCodestream(
+    gjxl::codestream_internal::CodestreamBuffer codestream;
+    result = TranslateStatus(gjxl::codestream_internal::EncodeLinearRgbVarDctCodestreamOwned(
       linear_rgb.const_view(), encoding_options, &codestream));
     if (result != GJXL_OK) {
       return result;
@@ -383,10 +387,24 @@ GJXLResult gjxl_encode(
                   "Encoder returned an empty codestream");
     }
 
+    // Keep both allocations charged through the C publication copy. Member
+    // lifetime order frees the array before its ticket on any failure.
+    gjxl::resource_budget_internal::ResourceAllocation publication;
+    {
+      const gjxl::resource_budget_internal::ResourceClassScope resource_class(
+        gjxl::resource_budget_internal::ResourceClass::kRetainedResult);
+      result = TranslateStatus(gjxl::resource_budget_internal::PrepareResourceAllocation(
+        codestream.size(), codestream.size(), &publication));
+    }
+    if (result != GJXL_OK) return result;
+    gjxl::resource_budget_internal::ManagedHostAllocationCheckpointForTest();
     auto data = std::make_unique<uint8_t[]>(codestream.size());
+    result = TranslateStatus(publication.Commit());
+    if (result != GJXL_OK) return result;
     std::memcpy(data.get(), codestream.data(), codestream.size());
     output->data = data.release();
     output->size = codestream.size();
+    publication.Reset();
     return GJXL_OK;
   });
 }

@@ -726,7 +726,7 @@ struct PreparedWorkflow {
   GpuBackend* supplied_backend,
   bool supplied_backend_is_qualified,
   bool resolve_production_backend,
-  std::vector<uint8_t>* codestream,
+  codestream_internal::CodestreamBuffer* codestream,
   VarDctEncodingSummary* summary,
   codestream_internal::VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
@@ -882,7 +882,7 @@ struct PreparedWorkflow {
     profile, pipeline_begin,
     &candidate_profile.quantization_pipeline_nanoseconds);
 
-  std::vector<uint8_t> candidate;
+  codestream_internal::CodestreamBuffer candidate;
   const WorkflowClock::time_point codestream_begin = ProfileBegin(profile);
   const VarDctCodestreamOptions codestream_options{
     .entropy_behavior =
@@ -893,7 +893,7 @@ struct PreparedWorkflow {
   const auto frame_view = encoding.completed_frame != nullptr
     ? encoding.completed_frame->view()
     : vardct_frame_internal::BorrowFrame(encoding.frame);
-  status = codestream_internal::EncodeVarDctCodestreamFromView(
+  status = codestream_internal::EncodeVarDctCodestreamToBuffer(
     frame_view, codestream_options, &candidate,
     profile == nullptr ? nullptr : &candidate_profile.codestream);
   ProfileEnd(
@@ -1259,7 +1259,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   GpuBackend* supplied_backend,
   bool supplied_backend_is_qualified,
   bool resolve_production_backend,
-  std::vector<uint8_t>* codestream,
+  codestream_internal::CodestreamBuffer* codestream,
   VarDctEncodingSummary* summary,
   VarDctEncodingTiming* timing,
   codestream_internal::VarDctEncodingProfile* profile,
@@ -1423,7 +1423,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         local_profile.input_preparation_nanoseconds =
           ElapsedNanoseconds(preparation_begin);
       }
-      codestream_internal::TargetSizeSearchResult search_result;
+      codestream_internal::ManagedTargetSizeSearchResult search_result;
       const auto search_begin = timing == nullptr
         ? WorkflowClock::time_point{}
         : WorkflowClock::now();
@@ -1435,7 +1435,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
           .selection = options.target_size_selection,
         },
         [&](float butteraugli_target,
-            std::vector<uint8_t>* attempt_codestream,
+            codestream_internal::CodestreamBuffer* attempt_codestream,
             VarDctEncodingSummary* attempt_summary) {
           const auto attempt_begin = timing == nullptr
             ? WorkflowClock::time_point{}
@@ -1568,7 +1568,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       local_profile.input_preparation_nanoseconds =
         ElapsedNanoseconds(preparation_begin);
     }
-    std::vector<uint8_t> candidate;
+    codestream_internal::CodestreamBuffer candidate;
     VarDctEncodingSummary candidate_summary;
     codestream_internal::VarDctEncodingProfile attempt_profile;
     const auto attempt_begin = timing == nullptr
@@ -1632,6 +1632,28 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   return Status::Ok();
 }
 
+Status EncodeLinearRgbVarDctCodestreamPublishedImpl(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  GpuBackend* supplied_backend,
+  bool supplied_backend_is_qualified,
+  bool resolve_production_backend,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingTiming* timing,
+  codestream_internal::VarDctEncodingProfile* profile,
+  gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+  if (codestream == nullptr) return Status::InvalidArgument("Codestream output is null");
+  codestream_internal::CodestreamBuffer candidate;
+  const Status status = EncodeLinearRgbVarDctCodestreamImpl(
+    linear_rgb, options, supplied_backend, supplied_backend_is_qualified,
+    resolve_production_backend, &candidate, summary, timing, profile,
+    gpu_profiling_mode, gpu_profile);
+  if (status.ok()) candidate.PublishTo(codestream);
+  return status;
+}
+
 Status TrimVarDctPreparationCache() {
   GpuBackend* backend = GetProductionMetalCache().published_backend.load(
     std::memory_order_acquire);
@@ -1644,7 +1666,7 @@ Status EncodeLinearRgbVarDctCodestream(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary) {
 
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, nullptr,
     nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
@@ -1660,12 +1682,21 @@ Status EncodeLinearRgbVarDctCodestreamProfiled(
     return Status::InvalidArgument(
       "Profiled VarDCT encoding timing output is null");
   }
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, timing,
     nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 namespace codestream_internal {
+
+Status EncodeLinearRgbVarDctCodestreamOwned(
+  ConstImage3FView linear_rgb, VarDctEncodingOptions options,
+  CodestreamBuffer* codestream, VarDctEncodingSummary* summary,
+  VarDctEncodingTiming* timing) {
+  return EncodeLinearRgbVarDctCodestreamImpl(
+    linear_rgb, options, nullptr, false, true, codestream, summary, timing,
+    nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
+}
 
 bool ShouldComputeQuantizationMatrixScaleStats(
   const VarDctEncodingOptions& options) noexcept {
@@ -1742,7 +1773,7 @@ Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary) {
 
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
     codestream, summary, nullptr, nullptr,
     gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
@@ -1760,7 +1791,7 @@ Status EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
   if (profile == nullptr) {
     return Status::InvalidArgument("VarDCT encoding profile output is null");
   }
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
     codestream, summary, nullptr, profile,
     gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
@@ -1781,7 +1812,7 @@ Status EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(
     return Status::InvalidArgument(
       "VarDCT GPU profile outputs are null");
   }
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
     codestream, summary, nullptr, profile, profiling_mode, gpu_profile);
 }

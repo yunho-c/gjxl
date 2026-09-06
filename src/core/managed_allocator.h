@@ -51,6 +51,16 @@ inline void DisarmManagedHostAllocationFailureForTest() noexcept {
   detail::managed_host_backings_before_failure = std::numeric_limits<size_t>::max();
 }
 
+/// Call after authorization and immediately before physical backing allocation.
+inline void ManagedHostAllocationCheckpointForTest() {
+  if (!ManagedHostAllocationFailurePendingForTest()) return;
+  if (detail::managed_host_backings_before_failure == 0) {
+    DisarmManagedHostAllocationFailureForTest();
+    throw std::bad_alloc();
+  }
+  --detail::managed_host_backings_before_failure;
+}
+
 /// Stateless allocation-time domain selection, with an allocation-owned ticket.
 /// Moves/swaps do not change a backing's domain; copies/new capacity use the
 /// current scope. Deallocation needs neither that scope nor its producer thread.
@@ -96,13 +106,7 @@ public:
       Status status = PrepareResourceAllocation(bytes, bytes, &allocation);
       if (!status.ok()) throw ManagedAllocationFailure(std::move(status));
     }
-    if (ManagedHostAllocationFailurePendingForTest()) {
-      if (detail::managed_host_backings_before_failure == 0) {
-        DisarmManagedHostAllocationFailureForTest();
-        throw std::bad_alloc();
-      }
-      --detail::managed_host_backings_before_failure;
-    }
+    ManagedHostAllocationCheckpointForTest();
     auto* backing = static_cast<std::byte*>(::operator new(
       sizeof(Header) + bytes, std::align_val_t{kAlignment}));
     if (allocation.valid()) {

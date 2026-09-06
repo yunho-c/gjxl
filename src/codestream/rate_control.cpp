@@ -55,12 +55,13 @@ struct SearchInterval {
     : summary.score_history.back();
 }
 
+template <typename Bytes>
 [[nodiscard]] bool BetterCandidate(
   const TargetSizeSearchOptions& options,
   float candidate_target,
-  const std::vector<uint8_t>& candidate,
+  const Bytes& candidate,
   const VarDctEncodingSummary& candidate_summary,
-  const TargetSizeSearchResult& best) noexcept {
+  const TargetSizeSearchResultFor<Bytes>& best) noexcept {
 
   if (best.codestream.empty()) {
     return true;
@@ -97,10 +98,11 @@ struct SearchInterval {
   return candidate_target < best.summary.selected_butteraugli_target;
 }
 
+template <typename Bytes>
 [[nodiscard]] Status ValidateSearchOptions(
   const TargetSizeSearchOptions& options,
-  const TargetSizeEvaluator& evaluator,
-  const TargetSizeSearchResult* result) {
+  const TargetSizeEvaluatorFor<Bytes>& evaluator,
+  const TargetSizeSearchResultFor<Bytes>* result) {
 
   switch (options.selection) {
     case TargetSizeSelectionPolicy::kLargestAtOrBelow:
@@ -124,21 +126,23 @@ struct SearchInterval {
   return Status::Ok();
 }
 
-/// Evaluator failures are candidate-local. An invalid successful result is a
-/// search-contract violation and remains terminal.
+/// Ordinary evaluator failures are candidate-local. A resource-plan overrun
+/// or invalid successful result is a contract violation and remains terminal.
+template <typename Bytes>
 [[nodiscard]] Status EvaluateCandidate(
   float butteraugli_target,
   const TargetSizeSearchOptions& options,
-  const TargetSizeEvaluator& evaluator,
-  TargetSizeSearchResult* best,
+  const TargetSizeEvaluatorFor<Bytes>& evaluator,
+  TargetSizeSearchResultFor<Bytes>* best,
   Status* first_failure) {
 
-  std::vector<uint8_t> codestream;
+  Bytes codestream;
   VarDctEncodingSummary summary;
   ++best->attempt_count;
   Status status = evaluator(
     butteraugli_target, &codestream, &summary);
   if (!status.ok()) {
+    if (status.resource_plan_exceeded()) return status;
     ++best->failed_attempt_count;
     if (first_failure->ok()) {
       *first_failure = std::move(status);
@@ -166,7 +170,7 @@ struct SearchInterval {
 }
 
 [[nodiscard]] size_t WidestInterval(
-  const std::vector<SearchInterval>& intervals) noexcept {
+  const Storage<SearchInterval>& intervals) noexcept {
 
   size_t best = 0;
   for (size_t index = 1; index < intervals.size(); ++index) {
@@ -184,10 +188,11 @@ struct SearchInterval {
 
 }  // namespace
 
-Status SearchTargetSize(
+template <typename Bytes>
+Status SearchTargetSizeImpl(
   const TargetSizeSearchOptions& options,
-  const TargetSizeEvaluator& evaluator,
-  TargetSizeSearchResult* result) {
+  const TargetSizeEvaluatorFor<Bytes>& evaluator,
+  TargetSizeSearchResultFor<Bytes>* result) {
 
   Status status = ValidateSearchOptions(options, evaluator, result);
   if (!status.ok()) {
@@ -195,7 +200,7 @@ Status SearchTargetSize(
   }
 
   try {
-    TargetSizeSearchResult candidate;
+    TargetSizeSearchResultFor<Bytes> candidate;
     Status first_failure;
     const float lower = options.minimum_butteraugli_target;
     const float upper = options.maximum_butteraugli_target;
@@ -214,7 +219,7 @@ Status SearchTargetSize(
       }
     }
 
-    std::vector<SearchInterval> intervals;
+    Storage<SearchInterval> intervals;
     intervals.push_back({lower, upper});
     while (candidate.attempt_count < options.maximum_attempts &&
            (candidate.codestream.empty() ||
@@ -249,6 +254,8 @@ Status SearchTargetSize(
       (candidate.attempt_count == options.maximum_attempts ||
        intervals.empty());
     *result = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate target-size search storage");
@@ -257,6 +264,20 @@ Status SearchTargetSize(
       "Target-size search storage is too large");
   }
   return Status::Ok();
+}
+
+Status SearchTargetSize(
+  const TargetSizeSearchOptions& options,
+  const TargetSizeEvaluator& evaluator,
+  TargetSizeSearchResult* result) {
+  return SearchTargetSizeImpl(options, evaluator, result);
+}
+
+Status SearchTargetSize(
+  const TargetSizeSearchOptions& options,
+  const ManagedTargetSizeEvaluator& evaluator,
+  ManagedTargetSizeSearchResult* result) {
+  return SearchTargetSizeImpl(options, evaluator, result);
 }
 
 }  // namespace gjxl::codestream_internal
