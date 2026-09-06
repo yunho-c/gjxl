@@ -1261,6 +1261,72 @@ bool CheckDirectAnsOptimization() {
   return true;
 }
 
+bool CheckSparseDirectAnsPopulations() {
+  using gjxl::codestream_internal::DirectAnsEntropyMode;
+  for (uint32_t contexts : {1u, 33u, 257u, 6930u}) {
+    for (uint32_t pattern = 0; pattern < 3; ++pattern) {
+      std::vector<gjxl::EntropyToken> tokens;
+      std::vector<gjxl::codestream_internal::PreparedFixedAnsCluster>
+        populations(contexts);
+      const auto append = [&](uint32_t context, uint32_t value) {
+        tokens.push_back({context, value});
+        gjxl::HybridUintToken encoded;
+        if (!gjxl::EncodeHybridUint(
+              value, gjxl::kDefaultHybridUintConfig, &encoded).ok()) {
+          return false;
+        }
+        auto& population = populations[context];
+        ++population.counts[encoded.symbol];
+        ++population.token_count;
+        population.extra_bits += encoded.extra_bit_count;
+        population.maximum_symbol = std::max(
+          population.maximum_symbol, encoded.symbol);
+        return true;
+      };
+      if (pattern != 0) {
+        for (uint32_t context = 0; context < contexts; ++context) {
+          if (context != 0 && context != contexts - 1 && context % 97 != 0) {
+            continue;
+          }
+          for (uint32_t index = 0; index < 96; ++index) {
+            const uint32_t value = pattern == 1 ? index % 7 :
+              ((index * 17 + context) % (3 + context % 61));
+            if (!append(context, value)) return false;
+          }
+        }
+        // Exercise both table-backed counts and the >65536 log2 fallback.
+        if (pattern == 2) {
+          for (size_t index = 0; index < 65537; ++index) {
+            if (!append(0, 0)) return false;
+          }
+        }
+      }
+      const auto before = populations;
+      const std::array views = {
+        gjxl::EntropyTokenStreamView::Interleaved(tokens)};
+      gjxl::EntropyCode scanned, prepared;
+      gjxl::EntropyCodeCost scanned_cost, prepared_cost;
+      if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+            views, {.context_count = contexts}, DirectAnsEntropyMode::kBalanced,
+            &scanned, &scanned_cost).ok() ||
+          !gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+            views, {.context_count = contexts}, populations, &prepared,
+            &prepared_cost).ok() || scanned != prepared ||
+          scanned_cost != prepared_cost || populations != before) {
+        std::cerr << "Sparse direct ANS populations changed model or input\n";
+        return false;
+      }
+      if (pattern < 2 && (prepared.ans_histograms.size() != 1 ||
+          !std::ranges::all_of(prepared.context_map,
+            [](uint8_t cluster) { return cluster == 0; }))) {
+        std::cerr << "Empty or identical ANS contexts did not canonicalize\n";
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckBestDirectAnsClusteringRefinement() {
   // This deterministic population fixture yields nine farthest-first
   // clusters, then one beneficial ANS-population-cost merge, matching the
@@ -1730,6 +1796,7 @@ int main() {
       !CheckDirectAnsSourcePolicies() ||
       !CheckOrdinaryCoderSelectionPolicy() ||
       !CheckBestDirectAnsClusteringRefinement() ||
+      !CheckSparseDirectAnsPopulations() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {

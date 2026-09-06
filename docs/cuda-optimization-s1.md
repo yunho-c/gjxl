@@ -14,7 +14,8 @@
   contiguous AC nonzero reduction, fused L2/final masking, and fused
   vertical blur/low-medium construction, compact prepared Butteraugli scratch,
   fused mirrored RGB blur/Opsin conversion, and packed active-coefficient
-  readback into ownership-backed final frame storage
+  readback into ownership-backed final frame storage, in-place ANS clustering,
+  and hoisted histogram log-table access
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -28,7 +29,20 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S50 against the S48
+below supersede them. The latest implemented checkpoint, S51 against S50
+(`ad18132`), removes a full private histogram copy and per-symbol log-table
+initialization checks from host ANS clustering. All 162 GPU bodies and the CUDA
+library are unchanged. Warm entropy-optimization wall time improves by median
+paired 20.8% / 21.7% / 20.8% at 4K / 1080p / Flower; whole encode improves
+1.9% / 3.5% / 5.0%. The same-executable 1080p control nevertheless regresses
+4.1% overall despite faster entropy work, and cold 4K is essentially flat.
+All 71 CUDA / 50 CPU tests, three host ASan targets, broad clustering
+differentials, 58 byte-identical decoded-image pairs, and batch checks pass.
+See [S51](#in-place-ans-clustering-and-hoisted-log-table-access-s51) for controls,
+retained outliers, and limits. This remains a targeted optimization, not proof
+of a universal encoder speedup or a maxed-out implementation.
+
+The preceding implemented checkpoint, S50 against the S48
 production baseline `f22c2f8` (S49 is investigation-only), packs active integer
 coefficients within the existing final submission and reads them directly into
 overwrite-only final frame storage. It clears only host edge tails and transfers
@@ -7629,6 +7643,183 @@ to remove packing traffic/launches, reducing validated host assembly costs,
 and measuring deferred readback allocation for bounded/no-frame use. Current
 preparation still allocates final-capacity host storage even in that mode.
 Neither a new bypass nor an unmeasured size threshold is introduced here.
+
+## In-place ANS clustering and hoisted log-table access (S51)
+
+S51 compares against `ad18132` on the same RTX 3060 Laptop, MSVC 14.37 / CUDA
+11.8 Release build. Qualification date is 2026-09-05 America/New_York
+(2026-09-06 UTC). This is host work on the fully-resident encode path, not GPU
+entropy coding. No CUDA source, GPU math, transfer layout, public API, or
+system configuration changes are involved.
+
+### Locate the work before changing it
+
+`s51_rank.py` ranks all kernels in the three retained S50 traces per workload.
+Malta responses remain the largest GPU component, followed by wide blurs;
+the already rejected larger Malta tiles and shuffle variants are not repeated.
+The S50 host profile also reports roughly 30 / 19 ms of ANS histogram work
+at 4K / 1080p. These `_work` fields accumulate worker time and must not be
+added to wall phases: DC and AC entropy tasks can overlap.
+
+An isolated source diagnostic separates histogram population construction,
+clustering, and normalization search. On the large AC model, both image sizes
+have 6,930 contexts, of which 2,849 / 2,539 are populated. Farthest-first seed
+selection and subsequent ordered assignment perform 180,784 / 160,944 distance
+evaluations; Flower has 1,485 contexts, 528 populated, and 18,513 evaluations.
+Warmed detailed samples put the redundant source copy near 2.25 / 1.98 /
+0.43 ms and seed plus assignment work near 14.4 / 9.0 / 1.4 ms. The broad
+histogram-work field is not predominantly normalization search.
+
+Native MSVC inspection establishes a second cost: the old distance function
+calls `ExactCountLog2` at its total-count and per-populated-bin sites. That
+helper performs a thread-safe lazy-static guard check on each call, including
+TLS access. The table lookup itself is cheap, but the surrounding function and
+guard work repeats across the many distance evaluations. This is executed-code
+evidence, unlike the previously rejected source-duplicate Malta hypothesis.
+
+### Retained implementation and isolated controls
+
+`FastClusterDirectAnsHistograms` now caches Shannon costs directly in the
+partition builder's private histogram vector. Counts, context order, and totals
+are unchanged; no caller-owned prepared population is borrowed or mutated.
+This removes the extra 256-bin source copy, including empty contexts. At 6,930
+contexts the bins alone occupied 14,192,640 bytes, plus histogram metadata.
+This is eliminated allocation/copy accounting, not a measured RSS claim.
+
+The existing exact log table is factored into a reference-returning accessor.
+Clustering obtains the initialized table once and passes it to distance
+evaluation; individual Shannon calculations also acquire it outside their
+symbol loops. Entries, the 65,536 cutoff, the `std::log2` fallback above it,
+ordered double accumulation, overflow checks, seed ties, the 32-cluster cap,
+assignment order, and canonicalization remain unchanged. There is still one
+thread-safe lazy table, with no approximation or global fast-math change.
+
+The candidate's native distance body has no calls to the guarded log helper
+and no lazy-initialization guard references. Its two direct `log2` call sites
+are the unchanged out-of-table fallback, not new approximate math. All **162
+GPU bodies** compare identically, and `gjxl_cuda.lib` hashes identically to
+the retained S50 library. GPU performance gains are not claimed.
+
+Nine captured real population sets include the small/DC and AC partitions for
+each workload, with their exact original clusters and symbol maps. A single
+replay executable tests baseline, no-copy only, hoisted lookup only, and both.
+Three warmups precede nine alternating-order rounds, with two repetitions for
+large partitions and twenty for small ones. Timed calls include the same
+output verification on every branch. The large AC partitions give:
+
+| Replay variant, median ms | 4K | 1080p | Flower |
+| --- | ---: | ---: | ---: |
+| Frozen baseline | 12.553 | 12.388 | 1.785 |
+| No source copy | 10.548 | 10.960 | 1.280 |
+| Hoisted lookup | 10.085 | 9.803 | 1.358 |
+| Both | 7.114 | 6.831 | 0.792 |
+| Both, median paired change | -44.8% | -43.4% | -55.8% |
+
+All nine sets match captured clusters, integer populations, symbol maps, and
+Shannon-cost bits on every replay. The production implementation also hoists
+table access from individual Shannon loops and passes the table once per
+clustering call, so it is qualified separately rather than assumed identical
+to the experimental wrapper.
+
+### Whole-workflow measurements and limits
+
+Release and same-executable comparisons each retain seven alternating process
+pairs per workload, three warmups, five samples, and all 41 phase fields.
+Inputs are odd 3839x2159 / 1919x1079 and linear Flower 510x532, distance 1.2,
+effort 7, fully resident, encoding-only. Entries below are medians of process
+medians; percentages are medians of paired ratios, not ratios of those medians.
+
+| Warm release phase | 4K parent -> S51 ms; paired change | 1080p parent -> S51 ms; paired change | Flower parent -> S51 ms; paired change |
+| --- | ---: | ---: | ---: |
+| ANS histogram worker time | 31.174 -> 24.131; -17.6% | 19.023 -> 14.254; -24.5% | 4.454 -> 2.952; -26.8% |
+| Entropy optimization wall time | 26.731 -> 20.536; -20.8% | 21.838 -> 16.959; -21.7% | 5.514 -> 3.854; -20.8% |
+| Codestream encoding wall time | 112.083 -> 107.942; -9.1% | 49.235 -> 44.365; -9.1% | 13.395 -> 10.575; -9.9% |
+| Whole encode | 417.857 -> 412.923; -1.9% | 110.008 -> 105.956; -3.5% | 27.254 -> 23.713; -5.0% |
+
+Entropy optimization improves in 6/7, 7/7, and 7/7 release pairs. Whole encode
+improves in 4/7, 6/7, and 5/7, with ranges [-4.9%, +4.2%], [-16.1%, +1.9%],
+and [-33.7%, +1.7%]. The unchanged quantization pipeline changes by paired
++0.6% / +0.7% / +0.8%; it is not credited to this host optimization. Neither
+the 34.403-ms Flower parent outlier nor any slower candidate is discarded.
+
+The diagnostic `s51_control.exe` selects the retained clustering algorithm with
+`S51_REFERENCE_CLUSTER`; its default uses the production implementation. Both
+branches share the current surrounding encoder and canonicalization helpers.
+There is no switch or instrumentation in production. All 46 control image
+triples match qualified production bytes. The control's entropy-optimization
+wall time improves -27.0% / -18.4% / -22.5% (7/7, 7/7, 6/7 wins), while whole
+encode changes **-3.7% / +4.1% / -3.9%** (6/7, 3/7, 5/7 wins).
+
+In particular, the 1080p control improves every entropy pair but regresses
+overall: unchanged quantization and AC tokenization change +4.0% and +9.4%.
+Flower's optimized 40.164-ms outlier has slower work across several stages.
+These observations are retained without assigning an unproven cause. They
+prevent a stable universal end-to-end gain claim despite the isolated mechanism
+and targeted phase improvements. Median paired ratios can differ in direction
+from ratios of cohort medians in these noisy paired records.
+
+Seven cold pairs (zero warmups, one sample) give whole-encode medians
+524.736 -> 514.138 ms, 158.227 -> 155.706 ms, and 48.124 -> 46.078 ms, with
+paired changes **+0.2% / -0.8% / -4.3%** and 3/7, 4/7, 7/7 wins. The first
+two cold cohorts remain inconclusive. Boundary GPU readings are 60-67 C,
+P3 / 1282 MHz, with thermal/power-limit flags active; no clock normalization
+or power/security changes were attempted. Exploratory diagnostic timings are
+not pooled with these contemporaneous paired comparisons.
+
+### Qualification and reproduction
+
+- All **71 CUDA-enabled tests** pass in 55.25 s and all **50 CPU-only GCC
+  tests** pass in 16.91 s, including installed consumers. Twelve new sparse
+  population cases cover 1/33/257/6,930 contexts, empty and identical
+  distributions, sparse distinct contexts, counts above the log-table cutoff,
+  scanned-versus-prepared model/cost equality, and unchanged caller populations.
+- Three fully host-instrumented Clang ASan targets pass: entropy primitives,
+  codestream encoder, and public codestream workflow. Existing multithreaded
+  workflow/batch tests exercise the shared, still thread-safe lazy table.
+  No new CUDA sanitizer claim is made for this host-only change.
+- A production-source oracle compares retained clustering control flow against
+  the actual candidate on nine captured sets, **321 synthetic clustering
+  cases**, **1,024 distance pairs**, and **65,536 exact table values**. It checks
+  cluster populations/maps, bitwise Shannon costs and distances, unchanged
+  source counts, and matching errors, including large counts and overflow.
+- All **46 primary image pairs** are byte-identical and independently decode
+  to equal Butteraugli scores using pinned libjxl
+  `e8ff09762481785938d8e4e01333ed3917571161`, linear RGB
+  `RGB_D65_SRG_Rel_Lin`. The established seven-input, three-distance, effort
+  7 plus sample/Flower effort-9, encoding-only/scored matrix is unchanged.
+  Twelve additional pairs cover sample, Flower, and Keong Macan at distance
+  1.2, each encoding-only/scored, under legacy `--high-density` (no explicit
+  effort) and `--maximum-compression --effort 7`. All twelve match bytes and
+  decoded scores, for **58 qualified pairs** total. The initial invalid
+  high-density-plus-effort invocation was corrected; final labels and metadata
+  explicitly identify the legacy mode rather than claiming effort 7.
+- Batch byte checks pass with one warmup and three samples. Even 1080p fully
+  resident batch 1/2/4 gives paired speedups 1.037x / 1.215x / 1.433x against
+  same-version serial execution; maximum-throughput gives 1.002x / 1.212x /
+  1.960x. Even 4K fully resident batch 1/2 gives 0.996x / 1.064x. These are
+  concurrency results, not cross-version gains.
+
+Ignored `build-cuda-ninja/profiles` artifacts include `s51_rank.{py,json}`,
+`s51_ans_{probe,detail}.cpp` and per-workload diagnostics,
+`s51_capture.{cpp,ps1,asm}` and nine `s51_population_*.bin` files,
+`s51_replay.{cpp,ps1,txt}` and paired replay summary,
+`s51_oracle.{cpp,ps1,txt}`, `s51_checks.ps1`, `s51_performance.ps1`,
+native GPU/host dumps and summary, the same-executable control source/objects,
+`s51_{final_phases,control_comparison}.json`, `s51_cold_*.json`,
+primary/control/extra-mode image reports and outputs, CTest/ASan logs, batch
+results, and GPU-state boundaries. `s51_report.py` derives the summaries;
+`s51_validate.py` checks the recorded identities and evidence.
+`s51_final_binary_hashes.json` and `s51_artifact_hashes.json` freeze binaries,
+libraries, production snapshots, captured populations, and diagnostic artifacts.
+Older S50 validators that compare against live source/binary hashes are not
+validators of this new checkpoint; the retained S50 files remain intact.
+
+The change is adopted for verified removal of redundant host work with
+unchanged output, not as proof that every encode is faster. Remaining leads
+include the prepared-population allocation/validation path, unresolved
+whole-workflow variability, and the dominant Malta/wide-blur GPU work. No
+admin/firewall or permission failure was reported, and the performance workflow
+completed normally. Optimization remains active, not maxed out.
 
 ## Work that should not lead the next cycle
 

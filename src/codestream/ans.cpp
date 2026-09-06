@@ -117,7 +117,7 @@ Status AllocationFailure() {
   return Status::OutOfMemory("ANS entropy allocation failed");
 }
 
-double ExactCountLog2(uint64_t value) {
+const std::array<double, kExactLog2TableSize + 1>& ExactCountLog2Table() {
   static const std::array<double, kExactLog2TableSize + 1> table = [] {
     std::array<double, kExactLog2TableSize + 1> values{};
     for (size_t index = 1; index < values.size(); ++index) {
@@ -125,9 +125,20 @@ double ExactCountLog2(uint64_t value) {
     }
     return values;
   }();
+  return table;
+}
+
+double ExactCountLog2(
+  uint64_t value,
+  const std::array<double, kExactLog2TableSize + 1>& table) {
+
   return value <= kExactLog2TableSize
     ? table[static_cast<size_t>(value)]
     : std::log2(static_cast<double>(value));
+}
+
+double ExactCountLog2(uint64_t value) {
+  return ExactCountLog2(value, ExactCountLog2Table());
 }
 
 class BitCountWriter {
@@ -1029,14 +1040,15 @@ double DirectHistogramShannonBits(const DirectAnsHistogram& histogram) {
   if (histogram.total_count == 0) {
     return 0.0;
   }
+  const auto& log2_table = ExactCountLog2Table();
   const double total = static_cast<double>(histogram.total_count);
-  double bits = total * ExactCountLog2(histogram.total_count);
+  double bits = total * ExactCountLog2(histogram.total_count, log2_table);
   const size_t alphabet_size = histogram.maximum_symbol + 1;
   for (uint64_t count :
        std::span(histogram.counts).first(alphabet_size)) {
     if (count != 0) {
       bits -= static_cast<double>(count) *
-        ExactCountLog2(count);
+        ExactCountLog2(count, log2_table);
     }
   }
   return bits;
@@ -1045,6 +1057,7 @@ double DirectHistogramShannonBits(const DirectAnsHistogram& histogram) {
 Status DirectHistogramDistance(
   const DirectAnsHistogram& left,
   const DirectAnsHistogram& right,
+  const std::array<double, kExactLog2TableSize + 1>& log2_table,
   double* distance) {
 
   if (distance == nullptr) {
@@ -1060,7 +1073,7 @@ Status DirectHistogramDistance(
     return Status::Ok();
   }
   double combined_bits = static_cast<double>(total_count) *
-    ExactCountLog2(total_count);
+    ExactCountLog2(total_count, log2_table);
   const size_t alphabet_size = std::max(
     left.total_count == 0 ? 0 : left.maximum_symbol + 1,
     right.total_count == 0 ? 0 : right.maximum_symbol + 1);
@@ -1071,7 +1084,8 @@ Status DirectHistogramDistance(
     }
     const uint64_t count = left.counts[symbol] + right.counts[symbol];
     if (count != 0) {
-      combined_bits -= static_cast<double>(count) * ExactCountLog2(count);
+      combined_bits -= static_cast<double>(count) *
+        ExactCountLog2(count, log2_table);
     }
   }
   *distance = combined_bits - left.shannon_bits - right.shannon_bits;
@@ -1129,19 +1143,24 @@ Status CanonicalizeDirectClusters(
 }
 
 Status FastClusterDirectAnsHistograms(
-  const std::vector<DirectAnsHistogram>& input,
+  std::vector<DirectAnsHistogram>& source,
   std::vector<DirectAnsHistogram>* clustered,
   std::vector<uint32_t>* symbols) {
 
-  if (input.empty() || clustered == nullptr || symbols == nullptr) {
+  if (source.empty() || clustered == nullptr || symbols == nullptr) {
     return Status::InvalidArgument("Direct ANS clustering input is invalid");
   }
   constexpr size_t kMaximumClusters = kMaximumPrefixClusters;
   constexpr double kMinimumDistinctDistance = 48.0;
-  std::vector<DirectAnsHistogram> source = input;
+  // This is the partition builder's private working set. Cache Shannon costs
+  // in place instead of copying every 256-bin histogram, including empty ones.
+  // Counts and context order remain unchanged for canonicalization/refinement.
   for (DirectAnsHistogram& histogram : source) {
     histogram.shannon_bits = DirectHistogramShannonBits(histogram);
   }
+  // Resolve the thread-safe lazy table once per clustering pass, not once per
+  // populated symbol in every distance. Keep the ordered double sum unchanged.
+  const auto& log2_table = ExactCountLog2Table();
   clustered->clear();
   clustered->reserve(std::min(kMaximumClusters, source.size()));
   symbols->assign(source.size(), kMaximumClusters);
@@ -1167,7 +1186,7 @@ Status FastClusterDirectAnsHistograms(
       }
       double distance = 0.0;
       if (Status status = DirectHistogramDistance(
-            source[index], clustered->back(), &distance);
+            source[index], clustered->back(), log2_table, &distance);
           !status.ok()) {
         return status;
       }
@@ -1189,7 +1208,7 @@ Status FastClusterDirectAnsHistograms(
     for (size_t cluster = 0; cluster < clustered->size(); ++cluster) {
       double distance = 0.0;
       if (Status status = DirectHistogramDistance(
-            source[index], (*clustered)[cluster], &distance);
+            source[index], (*clustered)[cluster], log2_table, &distance);
           !status.ok()) {
         return status;
       }

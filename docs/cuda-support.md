@@ -746,6 +746,18 @@ excluding added GPU packing cost. Warm whole-encode changes are -2.3% / -3.8% /
 not claim a universal encoder gain. C++ consumers must rebuild for the private
 frame-storage representation change.
 
+[S51](cuda-optimization-s1.md#in-place-ans-clustering-and-hoisted-log-table-access-s51)
+reduces host ANS clustering work in the fully-resident workflow: private
+histogram costs are cached in place and exact log-table access is hoisted out
+of symbol loops. Counts, ordered floating-point sums, cluster decisions, and
+encoded bytes remain unchanged; all 162 GPU bodies and the CUDA library are
+identical. All 71 CUDA / 50 CPU tests, three host ASan targets, clustering
+differentials, 58 decoded-image pairs, and batch checks pass. Warm entropy
+optimization improves roughly 21% across the measured workloads, while
+whole-encode gains are smaller and inconsistent across controls. In particular,
+the same-executable 1080p cohort regresses overall despite faster entropy work.
+The study retains that result and all outliers; optimization remains ongoing.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
