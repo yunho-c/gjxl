@@ -109,10 +109,31 @@ Status ValidateOrder(
   return Status::Ok();
 }
 
+// Isolating the contiguous update lets the compiler vectorize narrow counts
+// without architecture-specific intrinsics or aliasing assumptions.
+template <typename Count>
+void CountCoefficientZeros(
+  const int32_t* coefficients, Count* counts, size_t size) {
+  for (size_t coefficient = 0; coefficient < size; ++coefficient) {
+    counts[coefficient] += coefficients[coefficient] == 0;
+  }
+}
+
+constexpr bool Use32BitZeroCounts(Extent2D blocks) noexcept {
+  size_t area = 0;
+  return blocks.try_area(&area) &&
+    area <= std::numeric_limits<uint32_t>::max();
+}
+
+static_assert(Use32BitZeroCounts({65535, 65537}));
+static_assert(!Use32BitZeroCounts({65536, 65536}));
+static_assert(!Use32BitZeroCounts({std::numeric_limits<size_t>::max(), 2}));
+
+template <typename Count>
 Status CountGroupZeros(
   const VarDctAcGroupView& group,
   const AcStrategyGrid& strategies,
-  std::array<std::array<std::vector<uint64_t>, 3>,
+  std::array<std::array<std::vector<Count>, 3>,
              codestream_internal::kSimpleCoefficientOrderCount>* zero_counts,
   bool sample_dct8,
   std::array<uint64_t, 2>* random_state,
@@ -164,7 +185,7 @@ Status CountGroupZeros(
         }
         *present_mask |= family_bit;
         for (size_t channel = 0; channel < 3; ++channel) {
-          std::vector<uint64_t>& counts = (*zero_counts)[family][channel];
+          std::vector<Count>& counts = (*zero_counts)[family][channel];
           if (counts.empty()) {
             counts.assign(info->coefficient_count(), 0);
           } else if (counts.size() != info->coefficient_count()) {
@@ -175,21 +196,19 @@ Status CountGroupZeros(
         const bool selected = !sample_dct8 || use_sample();
         if (selected) {
           for (size_t channel = 0; channel < 3; ++channel) {
-            uint64_t* const counts = (*zero_counts)[family][channel].data();
+            Count* const counts = (*zero_counts)[family][channel].data();
             const std::span<const int32_t> coefficients =
               group.coefficients[channel].subspan(
                 source_offset, info->coefficient_count());
             // The validated frame has a size_t-representable block area.
             // Each zero-initialized counter is incremented at most once per
-            // anchor, and anchors partition that area. A uint64_t count
-            // therefore cannot overflow: update it without data-dependent
-            // branches or repeatedly loading the vector's data pointer.
+            // anchor, and anchors partition that area. The caller selects
+            // uint32_t only when the area fits, and uint64_t otherwise.
+            // Neither counter type can overflow for the selected frame.
             static_assert(std::numeric_limits<size_t>::digits <=
                           std::numeric_limits<uint64_t>::digits);
-            for (size_t coefficient = 0; coefficient < coefficients.size();
-                 ++coefficient) {
-              counts[coefficient] += coefficients[coefficient] == 0;
-            }
+            CountCoefficientZeros(
+              coefficients.data(), counts, coefficients.size());
           }
         }
       }
@@ -347,7 +366,10 @@ Status ComputeSimpleCoefficientOrders(
     frame, VarDctCoefficientOrderBehavior::kFull, orders);
 }
 
-Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+namespace {
+
+template <typename Count>
+Status ComputeCoefficientOrdersWithCounts(
   const VarDctEncoderFrame& frame,
   VarDctCoefficientOrderBehavior behavior,
   SimpleCoefficientOrders* orders) {
@@ -372,7 +394,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
       return Status::Ok();
     }
 
-    std::array<std::array<std::vector<uint64_t>, 3>,
+    std::array<std::array<std::vector<Count>, 3>,
                codestream_internal::kSimpleCoefficientOrderCount> zero_counts;
     uint16_t present_mask = 0;
     Status status;
@@ -427,7 +449,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
         1.0f / std::sqrt(static_cast<float>(natural.size()));
       bool nondefault = false;
       for (size_t channel = 0; channel < 3; ++channel) {
-        const std::vector<uint64_t>& counts = zero_counts[family][channel];
+        const std::vector<Count>& counts = zero_counts[family][channel];
         if (counts.size() != natural.size()) {
           return Status::Internal(
             "Coefficient-order zero counts are incomplete");
@@ -464,6 +486,20 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
     return AllocationFailure();
   }
   return Status::Ok();
+}
+
+}  // namespace
+
+Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+  const VarDctEncoderFrame& frame,
+  VarDctCoefficientOrderBehavior behavior,
+  SimpleCoefficientOrders* orders) {
+  // Each anchor can add at most one to a coefficient's zero population.
+  // Keep the original range on exceptionally large frames, while ordinary
+  // frames use smaller counters and the vectorizable contiguous helper.
+  return Use32BitZeroCounts(frame.geometry().block_grid().blocks)
+    ? ComputeCoefficientOrdersWithCounts<uint32_t>(frame, behavior, orders)
+    : ComputeCoefficientOrdersWithCounts<uint64_t>(frame, behavior, orders);
 }
 
 Status ValidateSimpleCoefficientOrders(const SimpleCoefficientOrders& orders) {

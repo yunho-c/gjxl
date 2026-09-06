@@ -118,7 +118,7 @@ int main() {
   try {
     size_t cases = 0;
     for (size_t strategy = 0; strategy <= kStrategies.size(); ++strategy) {
-      for (size_t pattern = 0; pattern < 6; ++pattern) {
+      for (size_t pattern = 0; pattern < 8; ++pattern) {
         const auto frame = MakeFrame(strategy, pattern);
         for (const auto behavior : {gjxl::VarDctCoefficientOrderBehavior::kFull,
                gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
@@ -134,6 +134,32 @@ int main() {
           if (pattern < 2 && orders.used_order_mask != 0)
             throw std::runtime_error("Constant zero populations changed tie order");
           ++cases;
+        }
+      }
+    }
+    // Cover single groups, exact group boundaries, and multiple narrow edge
+    // groups, with LLF-only and last-coefficient populations as well as ties.
+    for (size_t block_side : {8u, 32u, 68u}) {
+      for (size_t strategy : {size_t{0}, size_t{2}, kStrategies.size()}) {
+        for (size_t pattern : {0u, 4u, 5u, 6u, 7u}) {
+          const auto frame = MakeFrame(strategy, pattern, block_side);
+          for (auto behavior : {gjxl::VarDctCoefficientOrderBehavior::kFull,
+                 gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
+            gjxl::SimpleCoefficientOrders actual;
+            Check(gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+              frame, behavior, &actual));
+            const auto expected = ReferenceOrders(frame, behavior);
+            if (actual != expected) {
+              throw std::runtime_error("Boundary coefficient orders differ");
+            }
+            std::vector<gjxl::EntropyToken> actual_tokens, expected_tokens;
+            Check(gjxl::TokenizeSimpleCoefficientOrders(actual, &actual_tokens));
+            Check(gjxl::TokenizeSimpleCoefficientOrders(expected, &expected_tokens));
+            if (actual_tokens != expected_tokens) {
+              throw std::runtime_error("Boundary coefficient-order tokens differ");
+            }
+            ++cases;
+          }
         }
       }
     }

@@ -15,7 +15,8 @@
   vertical blur/low-medium construction, compact prepared Butteraugli scratch,
   fused mirrored RGB blur/Opsin conversion, and packed active-coefficient
   readback into ownership-backed final frame storage, in-place ANS clustering,
-  hoisted histogram log-table access, and borrowed prepared ANS populations
+  hoisted histogram log-table access, borrowed prepared ANS populations,
+  and bounded narrow coefficient-order counters with portable SIMD counting
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -29,7 +30,21 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S52 against S51
+below supersede them. The latest implemented checkpoint, S53 against S52
+(`5ea11e6`), uses proven-safe 32-bit coefficient zero populations on ordinary
+frames and retains the 64-bit fallback. A small portable helper enables
+packed counting in the production MSVC object, without intrinsics, aliasing
+promises, or changed compiler flags. Warm release coefficient-order work
+improves by median paired 54.3% / 48.1% / 39.9% at 4K / 1080p / Flower;
+whole encode improves 3.5% / 3.9% / 5.1%. Same-executable controls confirm
+the targeted reduction but give smaller overall gains; cold Flower still
+regresses in the control. All 71 CUDA / 50 CPU tests, four host ASan targets,
+58 decoded-image pairs, and independent/forced-width differentials pass.
+GPU code and ABI are unchanged. See
+[S53](#bounded-narrow-coefficient-order-counting-s53) for controls and limits.
+This is not a universal speedup or a maxed-out implementation.
+
+The preceding checkpoint, S52 against S51
 (`355180e`), borrows validated prepared ANS count arrays instead of initializing
 and copying a full private histogram array. At 6,930 contexts it eliminates
 14.14 MB of source storage. Complete large-partition replay improves 24-32%,
@@ -8028,6 +8043,209 @@ no security, power, cooling, clock, priority, or service settings were changed.
 Remaining work includes the cross-executable coefficient-order regression,
 the cold-run variability, token-scanned DC population construction, and the
 dominant Malta/wide-blur GPU work. Optimization remains active, not maxed out.
+
+## Bounded narrow coefficient-order counting (S53)
+
+S53 compares against S52 `5ea11e6` on the RTX 3060 Laptop, MSVC 14.37 /
+CUDA 11.8 Release configuration. Qualification completes on 2026-09-06
+America/New_York. This is host coefficient-order preparation in the
+fully-resident workflow; CUDA source, transfers, GPU allocations, public
+headers, API/ABI, and production compiler flags are unchanged.
+
+### Establish the native bottleneck and bound
+
+S52's coefficient-order slowdown preceded its changed ANS work. The S51
+library's extracted coefficient-order object is byte-identical to the
+pre-change S52 production object (SHA-256
+`9efc34e02140d1fe7c5d2f0b3939479a48481a8ef3e0ee6ade2727c38c6f4227`).
+Thus a coefficient-order source/object change does not explain that earlier
+cross-executable anomaly. Link/layout effects and external variability remain
+unresolved; the new optimization is not presented as its causal diagnosis.
+
+The original native `CountGroupZeros` has 526 instructions and a scalar
+64-bit count update, consistent with the S41 investigation. Simply narrowing
+the inlined counts remains scalar in the first prototype. Isolating the
+contiguous update in a small helper enables MSVC's packed 32-bit counting.
+A 64-bit helper stays scalar, including the exploratory restricted-pointer
+variant. The selected 32-bit helper needs neither `__restrict` nor intrinsics:
+it is ordinary `counts[i] += coefficients[i] == 0` C++.
+
+The private implementation selects `uint32_t` when the validated frame's
+block area fits `UINT32_MAX`, and `uint64_t` otherwise. Each zero-initialized
+counter is incremented at most once per anchor; anchors partition the block
+area. Consequently neither selected type can overflow. The bound uses checked
+area multiplication, with compile-time checks at `UINT32_MAX`, at 2^32, and
+for `size_t` multiplication overflow. The existing size-width assertion and
+all validation remain. No public frame representation changes.
+
+Group/anchor traversal, sampling RNG state and decisions, selected transforms,
+stable ties, LLF prefixes, the float-scaled sorting formula, and exact order
+and Lehmer-token output are retained. The 64-bit fallback uses the same
+algorithm, not a reduced-support path. For all five supported order families
+and three channels, counter element storage is **23,808 instead of 47,616
+bytes**. This excludes vector/allocator overhead and is not an RSS claim.
+
+Disassembly of the actual CMake production object, not just a diagnostic
+build, contains packed `pcmpeqd` / `psubd` updates inside the 32-bit
+`CountGroupZeros` specialization. The emitted narrow helper has 54
+instructions; the wide helper has 12 scalar instructions. The enclosing
+narrow/wide group functions have 525/490 instructions; instruction count
+alone is not used as a performance estimate. All **162 GPU bodies** and the
+entire CUDA library remain identical to S52. `/Qvec-report:2` is used only
+in a separate diagnostic compile, not added to production flags.
+
+### Exact differential tests and isolated replay
+
+The tracked coefficient-order fixture expands from 96 to **218 cases**,
+using an independent coefficient-major 64-bit scalar reference. It covers
+all seven transform shapes plus mixed families, full and sampled policies,
+all-zero/nonzero, sparse/dense, tied, signed-int32-extreme, LLF-only, and
+last-coefficient populations. Added 8/32/68-block-side cases cover single
+groups, exact boundaries, and multiple narrow edge groups. Full order arrays
+and Lehmer token streams match; small-frame cutoff and invalid-input
+atomicity checks remain.
+
+The production-source oracle also compares **218 frame cases** across frozen
+S52, forced narrow, forced wide, and the adaptive entry point. It passes
+**1,800 counter/guard cases**, including empty/tail lengths, offsets,
+near-limit initial counts, unchanged coefficient inputs, and wide counts
+beyond `UINT32_MAX`; **12,800 scaled-key cases** around FP32 precision and
+integer boundaries; and three width-selection boundaries. Forced wide is
+tested on ordinary frames: no multi-billion-anchor frame is allocated.
+The oracle is native MSVC; the tracked fixture also runs under GCC and ASan.
+
+A separate same-executable replay measures frozen S52, current forced-wide,
+and adaptive implementations on the same completed frame. It uses a
+132x132-block grid (active 1053x1049), sparse nonzero pattern, seven shapes
+plus mixed, and both policies: **16 cases**. Three warmups precede twelve
+rounds covering all six mode orders twice, with three calls per mode/round.
+Frame construction, equality checks, output destruction, GPU work, and
+Lehmer tokenization are outside the timed calls.
+
+Adaptive counting wins **12/12 rounds in all 16 cases**, with median paired
+changes from **-31.0% to -62.5%**. Representative complete order-computation
+medians are:
+
+| Replay case | S52 ms | S53 adaptive ms | Median paired change |
+| --- | ---: | ---: | ---: |
+| DCT8, full | 1.964 | 0.883 | -55.5% |
+| DCT8, sampled | 1.631 | 1.127 | -31.0% |
+| DCT16x16, full | 1.872 | 0.727 | -61.1% |
+| Mixed, full | 3.042 | 1.483 | -53.7% |
+| Mixed, sampled policy | 3.501 | 1.582 | -52.1% |
+
+The forced-wide implementation stays much closer to S52: paired changes
+range from -4.8% to +5.8%. These controlled results support narrow packed
+counting, not a claim that any helper extraction is faster. Exploratory
+unpaired runs and all replay outliers remain available but are not pooled
+with this final cohort.
+
+### Whole-workflow results and limitations
+
+Warm release and same-executable control cohorts each use seven alternating
+process pairs, three warmups, five samples, and all 41 phase fields. Inputs
+are odd 3839x2159 / 1919x1079 and linear Flower 510x532, distance 1.2,
+effort 7, fully resident, encoding-only. Times are medians of process medians;
+percentages are medians of paired ratios, not ratios of those medians.
+The coefficient-order phase includes order computation and tokenization.
+
+| Warm release phase | 4K S52 -> S53 ms; paired change | 1080p S52 -> S53 ms; paired change | Flower S52 -> S53 ms; paired change |
+| --- | ---: | ---: | ---: |
+| Coefficient-order work | 19.530 -> 8.777; -54.3% | 5.185 -> 2.644; -48.1% | 1.155 -> 0.667; -39.9% |
+| AC tokenization | 43.249 -> 30.608; -27.2% | 13.978 -> 11.465; -17.4% | 3.436 -> 2.863; -12.8% |
+| Codestream encoding wall time | 111.778 -> 100.787; -9.8% | 46.748 -> 41.698; -10.3% | 10.906 -> 9.701; -8.7% |
+| Whole encode | 423.997 -> 408.950; -3.5% | 108.249 -> 105.592; -3.9% | 23.977 -> 23.131; -5.1% |
+
+Coefficient-order work improves in **7/7 pairs per workload**, with ranges
+[-64.3%, -51.8%], [-58.4%, -41.3%], and [-49.8%, -35.1%]. Whole encode
+wins 5/7, 6/7, and 5/7, with ranges [-11.6%, +5.0%], [-16.0%, +9.0%],
+and [-27.9%, +20.3%]. Work counters can overlap and are not summed as wall
+time. Unchanged quantization shifts -1.3% / -1.1% / -0.3% in this cohort;
+those differences are not credited to the host optimization.
+
+The single diagnostic `s53_control.exe` selects frozen S52 order computation
+with `S53_REFERENCE_ORDER`; absence selects the actual adaptive code. There
+is no production switch. All **46 baseline/optimized/production image
+triples** match bytes. Its independent warm cohort gives:
+
+| Same-executable warm control | 4K | 1080p | Flower |
+| --- | ---: | ---: | ---: |
+| Coefficient-order ms, baseline -> optimized | 16.073 -> 9.565 | 4.497 -> 2.713 | 1.157 -> 0.680 |
+| Coefficient-order paired change; wins | -40.2%; 7/7 | -39.4%; 7/7 | -35.9%; 7/7 |
+| Codestream wall-time paired change | +1.5% | -4.6% | -9.4% |
+| Whole-encode ms, baseline -> optimized | 431.576 -> 427.037 | 108.564 -> 107.040 | 27.267 -> 24.760 |
+| Whole-encode paired change; wins | -1.1%; 4/7 | -2.0%; 6/7 | -4.3%; 6/7 |
+
+The 4K control's unchanged histogram, entropy, and section work is slower
+by 10.9%, 6.4%, and 4.0%; its codestream wall-time regression is retained.
+Whole-encode control ranges are [-6.2%, +4.0%], [-8.1%, +0.8%], and
+[-30.9%, +29.5%]. Flower's 34.288-ms baseline and 34.333-ms optimized
+outliers occur in different pairs and are both retained.
+
+Seven cold release pairs, zero warmups and one sample, give whole-encode
+medians 514.141 -> 512.727, 151.463 -> 143.386, and 44.667 -> 44.053 ms.
+Paired changes are **-0.02% / -3.2% / -1.9%**, with 4/7, 6/7, and 5/7
+wins. The 587.410-ms optimized 4K and 68.510-ms baseline Flower outliers
+remain. A separate seven-pair same-executable cold follow-up gives whole
+changes **-3.0% / -0.3% / +1.3%**, with 7/7, 4/7, and only 2/7 wins.
+Its coefficient-order work improves 43.8% / 35.3% / 18.9%, with 7/7,
+7/7, and 6/7 wins, but Flower codestream wall time regresses 4.5%.
+The optimized Flower 65.289-ms outlier includes a 67.5% increase in unchanged
+quantization in that pair. This does not establish the cause or erase the
+cold regression. No new A/A/B cohort was run for S53.
+
+GPU boundary readings are 60 -> 66 C, P3, 1282 -> 847 MHz, with software
+thermal-slowdown and power-cap flags active at both boundaries. Unchanged
+warm 4K quantization is around 275 ms here versus around 175 ms in S52's
+final cohort. Cohorts are not pooled or clock-normalized; no GPU gain or
+causal thermal diagnosis is claimed. The consistent targeted reduction is
+retained, with smaller and non-universal whole-workflow benefits.
+
+### Qualification and retained evidence
+
+- All **71 CUDA-enabled CTests** pass in 59.76 s and all **50 CPU-only GCC
+  CTests** in 18.83 s, including installed consumers.
+- Four fully host-instrumented Clang 22 ASan targets pass: entropy,
+  coefficient order, codestream encoder, and public codestream workflow.
+  No new CUDA sanitizer claim is made for unchanged GPU code.
+- All **58 image pairs** match bytes and independently decoded Butteraugli
+  scores using pinned libjxl `e8ff09762481785938d8e4e01333ed3917571161`
+  and linear RGB `RGB_D65_SRG_Rel_Lin`. The 46-case primary matrix includes
+  seven images at distances 0.5/1.2/3, effort 7, plus sample/Flower effort 9.
+  Twelve extra cases cover legacy high-density without explicit effort and
+  maximum-compression at effort 7. Encoding-only and scored outputs agree.
+- Batch byte checks pass with one warmup and three samples. Even 1080p
+  fully-resident batch 1/2/4 gives same-version paired speedups
+  1.016x / 1.169x / 1.372x; maximum-throughput gives
+  0.979x / 1.503x / 2.082x. Even 4K fully-resident batch 1/2 gives
+  1.089x / 1.067x. These compare concurrency within S53, not versions.
+
+Ignored `build-cuda-ninja/profiles` evidence includes `s53_order_original.cpp`,
+the narrow/restricted/portable exploratory variants and logs,
+`s53_oracle.{cpp,ps1,txt}`, `s53_order_replay.{cpp,ps1,txt}` and its summary,
+native host/GPU comparisons, the control source and build, correctness and
+performance scripts, CTest/ASan logs, primary/control/extra-mode image reports,
+all warm/cold/control records, batch results, and GPU boundaries.
+`s53_report.py` derives paired summaries; `s53_validate.py` checks source
+identity against production and frozen S52, ordered replay records, native
+evidence, image hashes, timing arithmetic, and checkpoint identities.
+`s53_final_binary_hashes.json` and `s53_artifact_hashes.json` freeze retained
+binaries/libraries, source snapshots, and experimental evidence. All 33
+retained S52 binary/library identities remain unchanged.
+
+Two setup issues were corrected before performance qualification: a prototype
+retained a wide pointer declaration and failed compilation, and the first
+native verifier also matched lambda/cleanup symbols instead of only the
+actual function. That verification attempt stopped before benchmarking;
+exact symbol-prefix matching fixes the verifier. Neither was a production
+failure. No admin/firewall or permission error was reported, and no security,
+power, clock, cooling, priority, or service configuration was changed.
+
+Remaining leads include token-scanned DC population construction and dominant
+Malta/wide-blur GPU work. Accumulating coefficient-order populations on the
+GPU is a possible later experiment, not a measured or implemented gain.
+Earlier cross-executable and cold-run variability remain unresolved.
+Optimization stays active; this checkpoint does not establish "maxed out."
 
 ## Work that should not lead the next cycle
 

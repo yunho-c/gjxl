@@ -769,6 +769,22 @@ All 71 CUDA / 50 CPU tests, three host ASan targets, 58 decoded-image pairs,
 17,961 partition comparisons, and batch checks pass. GPU code and ABI are
 unchanged; optimization remains ongoing.
 
+[S53](cuda-optimization-s1.md#bounded-narrow-coefficient-order-counting-s53)
+uses 32-bit private coefficient-order populations when the validated block
+area proves they cannot overflow, with the original 64-bit range retained
+for larger frames. A portable contiguous helper enables packed counting in
+the production MSVC object; no intrinsics, aliasing promises, public API/ABI,
+GPU code, or compiler flags change. Warm release coefficient-order work
+improves by paired median 54.3% / 48.1% / 39.9% at 4K / 1080p / Flower,
+and whole encode by 3.5% / 3.9% / 5.1%. Same-executable warm controls confirm
+the target benefit but give smaller whole-encode gains. Cold release 4K is
+flat and cold control Flower regresses 1.3%; all outliers remain documented.
+All 71 CUDA / 50 CPU tests, four host ASan targets, 58 decoded-image pairs,
+218 independent and 218 forced-width frame cases, counter-boundary checks,
+and batch checks pass. S52's earlier cross-executable order-stage anomaly
+is not explained by a source/object change and remains unresolved.
+Optimization remains ongoing.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
