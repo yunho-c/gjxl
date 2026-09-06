@@ -852,6 +852,18 @@ comparisons, 40 new late-section failure cases, and 58 byte-identical
 decoded-image pairs pass. GPU code, API/ABI, and quality policy are unchanged.
 Complete-workflow variability and remaining GPU work are still open.
 
+[S59](cuda-optimization-s1.md#per-channel-malta-fusion-investigation-s59-not-retained)
+investigates combining three Malta responses per channel, but does not
+retain the new kernels. Staged 24-row fusion improves isolated 1080p/small
+cases substantially and 4K slightly. Whole encodes remain mixed: the initial
+4K cohort regresses 2.3%, a separate warm cohort improves 2.4%, and cold
+Flower regresses 3.6%. All 46 image cases produce identical bytes in three
+control modes; guarded/nondefault-stream checks and four scoped GPU
+sanitizers pass. A missing test-fixture initialization dependency caused two
+invalid timing attempts and was corrected without weakening equality or
+changing kernels. All 171 existing GPU bodies remain identical. Production
+stays at S58; the diagnostic gains are not advertised as a release speedup.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

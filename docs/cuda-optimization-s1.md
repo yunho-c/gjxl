@@ -9322,6 +9322,220 @@ binary identities. The goal remains active: perceptual GPU work and
 entropy-task scheduling/whole-workflow variability remain substantial
 investigation targets. Fully-resident encoding is not demonstrated maxed out.
 
+## Per-channel Malta fusion investigation (S59, not retained)
+
+S59 returns to GPU perceptual work after S58. No production source, test,
+API/ABI, allocation layout, arithmetic policy, or executable is changed by
+this checkpoint. The fusion candidates remain in the ignored diagnostic
+bundle; the retained implementation is S58. This is a completed experiment,
+not a claim that fully-resident encoding is maxed out.
+
+### Fresh profile and hypothesis
+
+Fresh Nsight Systems captures use the current release benchmark, three
+warmups, one captured sample, fully-resident AQ, and the existing profiler
+range. These are individual instrumented traces, not paired speed estimates:
+
+| Workload | Total GPU kernel ms | Kernel launches | Malta kernel ms |
+| --- | ---: | ---: | ---: |
+| odd 4K | 179.195 | 395 | 32.874 |
+| odd 1080p | 32.266 | 382 | 3.976 |
+| Flower | 6.173 | 395 | 0.611 |
+
+The 4K trace contains 16 low-frequency Malta calls totaling 20.608 ms and
+eight full-response calls totaling 12.266 ms. Other large individual
+components include joint low/medium horizontal convolution (12.375 ms),
+joint horizontal33 convolution (10.448 ms), and L2/final masking (7.251 ms).
+The approximately 173–200 ms profiler-start API duration is instrumentation
+overhead, not an uninstrumented encoder optimization target.
+
+Each difference evaluation currently launches six Malta kernels. Per
+channel, a full response initializes the accumulation and two low-frequency
+responses add to it. The prototype preserves `(full + low1) + low2`, both
+rounded additions, all directional-sum trees, both divisions in scaling,
+threshold branches, zero halo, and the original host weight calculations.
+It gathers the original stages into two independent channel plans and
+launches channel 1 then channel 0. Live psycho inputs occupy separate planes
+from AC accumulations; the production working-plane reuse does not require
+interleaving the two channels.
+
+Fusing each channel could reduce six launches to two per difference
+evaluation and five global accumulation accesses to one per channel/pixel.
+That is 32 bytes/pixel of removed program-level global accesses across both
+channels, not measured DRAM traffic. Fusion does not eliminate the six
+input-plane reads per channel or the scale/response math. Using 24-row tiles
+also loads more halo values than the existing 64-row policy on large images: an
+interior tile loads 40/32 × 32/24 values per output instead of
+40/32 × 72/64. That increases theoretical input loads by 12.5 bytes/pixel
+across both channels, before caches and partial-edge effects. Shared-memory
+traffic, barriers, instruction size, and occupancy remain tradeoffs.
+
+### Independent prototypes and fixture failure
+
+All designs use 256 threads, 32 output columns, 8/24/64 output rows, and
+both ordinary and flattened grids:
+
+- **Staged:** reuse one scaled shared tile and keep the partial response in
+  shared memory. Five barriers protect tile reuse; no lane exits before a
+  barrier, including partial image tiles.
+- **Three tiles:** hold all three scaled tiles simultaneously, synchronize
+  once, and compute the three responses at each output position.
+- **Thread-local array (v2):** replace shared partials with a per-thread
+  array. Despite zero reported spill loads/stores, the 24/64-row variants
+  have 16/32-byte stack frames. A targeted native 64-row dump confirms
+  `LDL`/`STL`; this is not register-only accumulation.
+- **Explicitly indexed registers (v3):** use compile-time row indices so the
+  compiler can scalarize the partial array. All six grid/height variants
+  have zero stack/local storage, but unrolling enlarges the response body.
+
+The first fixture omitted a dependency between pageable host-to-device
+initialization on the default stream and an oracle on a nonblocking stream.
+The initial timing attempt stopped after seven cases. A diagnostic rerun
+failed on the **unchanged baseline**, with zero input producing correct zero
+output versus NaNs in the expected result: 138,363 differing values at
+510×532. The 20-case focused reproduction had passed, so it was not a
+deterministic image-arithmetic failure. CUDA permits a pageable synchronous
+copy to return after staging but before its device transfer finishes; see
+[NVIDIA's synchronization contract](https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html).
+The corrected fixture synchronizes initialization before launching the
+nonblocking-stream oracle. No kernel or equality rule changed to resolve
+this failure. Both incomplete timing logs, the original binary/source, and
+the diagnostic NaN failure remain retained and excluded from performance
+summaries.
+
+The synchronized first design passes 1,152 fused comparisons. V2 and v3
+each pass 1,728: eight edge/odd shapes, six input patterns, two channels,
+nine variants, and both grid forms. Patterns cover signed zero, near-equal
+and mixed random values, branch thresholds and adjacent floats, identical
+inputs, subnormals, finite extremes, infinities, and NaNs. Full allocations
+are compared bitwise, including output guards; input buffers and oracle
+scratch guards are checked. These are not tall-grid-limit tests: flattening
+is forced on small cases, and no production tall-grid qualification is
+claimed for the new kernels.
+
+V3 also passes the original 656 guarded single-stage fixtures and scoped
+Compute Sanitizer memcheck, initcheck, synccheck, and racecheck. Each tool
+runs 72 fused cases on 65×65 inputs on a nondefault stream. There are zero
+reported errors and zero race hazards. The expensive full-AQ racecheck is
+not repeated. No fresh full CPU/CUDA CTest, ASan, batch, or decoder run is
+claimed for this diagnostic-only checkpoint.
+
+The v3 native audit finds 189 GPU bodies: all 171 existing bodies are
+identical to the retained implementation, with 18 added experimental
+kernels. All 18 have zero stack/local storage. At 24 rows, staged fusion
+uses 8,192 bytes shared memory and 39/40 registers (2D/flat); three-tile
+fusion uses 15,360 bytes shared memory; explicit-register fusion uses 5,120
+bytes and 42 registers. At 64 rows, explicit-register fusion uses 11,520
+bytes shared memory and 49/44 registers, while three-tile fusion needs
+34,560 shared bytes. Zero spills alone did not establish the intended
+storage behavior in v2, and fewer global accesses did not establish speed.
+
+### Isolated timings
+
+Every complete cohort contains 18 cases: 3840×2160, 1920×1080, and 510×532,
+three patterns (zero, near-equal, mixed), and both channels. The first
+cohort has seven modes, 14 balanced rounds, and 1,764 event-timing rows.
+V2/v3 each have ten modes, 20 balanced rounds, and 3,600 rows. Orders rotate
+and reverse so each mode appears in every position twice. Each interval
+contains three channel evaluations; a full bitwise output check follows
+every interval outside its event timing. Warmup counts are recorded and all
+timing rows and raw outliers are retained. No incomplete cohort is summarized,
+and absolute times from separate runs are not pooled.
+
+The staged 24-row design is the consistent isolated candidate. Ranges below
+are across the six per-workload case medians of paired changes, not pooled
+samples or ratios of unrelated medians:
+
+| Cohort / design | 4K | 1080p | 510×532 |
+| --- | ---: | ---: | ---: |
+| synchronized v1, staged24 | -3.17% to -0.57% | -13.81% to -10.02% | -18.39% to -15.90% |
+| v2, staged24 | -2.37% to -0.93% | -14.06% to -6.88% | -17.22% to -14.02% |
+| v3, staged24 | -2.08% to -0.52% | -14.14% to -8.15% | -17.06% to -14.71% |
+| v3, explicit registers24 | -0.36% to +2.04% | -14.15% to -6.13% | -16.51% to -15.04% |
+
+The v2 local-array 64-row variant improves 4K by 2.55–3.15%, but explicit
+register scalarization at that height instead regresses 4K by 3.35–5.62%.
+Three-tile 64-row fusion is approximately 43–47% slower at 4K across these
+cohorts. The unfavorable variants remain in the raw records; they are not
+replaced by only the winning tile height. These synthetic-input results do
+not measure real captured psycho-plane populations or whole encodes.
+
+### Whole-workflow checks and decision
+
+A same-binary control selects the original six launches, staged24, or
+explicit-register24 outside the GPU kernels. All 46 established image/
+distance/effort/final-score cases produce byte-identical outputs in all
+three modes, matching the frozen S58 outputs. This is 138 generated files;
+S58's pinned-decoder and metric evidence is reused by exact byte identity,
+not represented as fresh decode/metric executions. The control links the
+S58-compatible phase object; no pre-S50 private frame ABI is mixed in.
+
+The first whole-workflow cohort uses all six permutations of the three
+modes, three warmups and five samples per process. Separate focused warm
+and cold cohorts compare only staged24 against baseline in seven alternating
+pairs. Warm uses three warmups/seven samples, cold zero warmups/one sample.
+Every run retains all 41 phase fields. The following percentages are
+medians of within-cohort paired ratios; parentheses show faster whole-encode
+pairs. They must not be pooled across cohorts:
+
+| Cohort / candidate | Workload | Quantization | Codestream | Whole encode |
+| --- | --- | ---: | ---: | ---: |
+| initial staged24 | 4K | +0.48% | +5.26% | +2.29% (1/6) |
+| initial staged24 | 1080p | -1.45% | -1.12% | -1.53% (4/6) |
+| initial staged24 | Flower | -3.37% | -3.91% | -1.82% (4/6) |
+| initial registers24 | 4K | -0.82% | +0.14% | -0.43% (4/6) |
+| initial registers24 | 1080p | -0.89% | -1.56% | -1.82% (4/6) |
+| initial registers24 | Flower | -2.97% | -2.27% | -2.32% (4/6) |
+| focused warm staged24 | 4K | -2.73% | -1.97% | -2.45% (5/7) |
+| focused warm staged24 | 1080p | -1.49% | -0.22% | -0.53% (5/7) |
+| focused warm staged24 | Flower | -3.17% | -2.72% | -3.28% (4/7) |
+| cold staged24 | 4K | +0.52% | +7.44% | -0.04% (4/7) |
+| cold staged24 | 1080p | -2.54% | -0.54% | -1.89% (4/7) |
+| cold staged24 | Flower | +2.59% | +1.96% | +3.62% (2/7) |
+
+The focused warm result does not erase the initial 4K regression, nor does
+the cold 1080p improvement erase the Flower regression. Initial Flower
+whole-encode pair ranges span -20.63% to +30.60% for staged24; the focused
+warm range is -19.68% to +29.04%. Cold 4K codestream changes span -5.48% to
++56.37% although no CPU codestream code changed. Those observations limit
+causal claims about small whole-workflow differences. The full raw phase
+distributions and all outliers remain available.
+
+The focused cohorts start at 59 C / P3 / 1282 MHz / 22.17 W and end at
+65 C / P3 / 1282 MHz / 25.68 W, with thermal-slowdown and power-cap flags
+active at both boundaries. These are boundary observations, not a causal
+diagnosis or normalization. Builds, sanitizers, native dumps, profiling,
+and performance cohorts run serially. No power, clock, cooling, priority,
+security, or service settings change. No admin/firewall prompt, permission
+failure, or stalled process is observed; the earlier long-running job's
+suspected firewall cause remains unconfirmed.
+
+S59 does **not retain** these kernels. There is a repeatable isolated
+medium/small-image gain and a favorable focused warm cohort, but the 4K
+local gain is small, initial and cold workflow results remain mixed, and
+fusion adds considerable code/storage tradeoffs. This is a conservative
+acceptance decision, not proof that all Malta fusion is ineffective.
+A useful next step is real psycho-plane capture/replay or a more focused
+scale/response experiment; other large convolution passes remain open.
+No runtime fallback, geometry heuristic, or numerical relaxation is added
+to conceal a failed case.
+
+The ignored `build-cuda-ninja/profiles/s59_*` bundle retains all three
+prototype generations, both invalid timing attempts, corrected checks,
+8,964 valid timing rows, three workflow cohorts, 46 quality triples,
+native/resource evidence, and scoped sanitizer logs. The S58 production
+binary and artifact manifests remain immutable and revalidate. S59's
+manifest freezes its diagnostic evidence and source/doc snapshots;
+reproductions must choose new output prefixes. `s59_validate.py --frozen`
+checks source/binary identity, exact-output/timing coverage, quality hashes,
+native findings, paired arithmetic, and the evidence manifest. The broader
+optimization goal remains active.
+
+The v1 diagnostic probe requires `S59_SYNC_FIXTURE=1` for valid reruns;
+its preserved original build script describes the failed unsynchronized
+attempt. V2/v3 synchronize fixture initialization unconditionally. Do not
+rerun any of these scripts in place over frozen outputs.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
