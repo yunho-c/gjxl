@@ -1127,6 +1127,18 @@ the failed evidence remains. No firewall/permission block or system-setting
 change occurs. A size-dependent policy remains untested, and the backend is
 not considered maxed out.
 
+[S74](cuda-optimization-s1.md#provisional-resident-metadata-cost-s74-investigation)
+identifies discarded provisional strategy metadata as a host-side target.
+An encoder-only guarded counterfactual preserves all 203 GPU bodies and
+18 retained bitstreams/reports. Clean warm measurements save about 8.96 ms
+in 4K quantization and 3.29 ms at 1080p; total-time results are noisier and
+cold 4K is inconclusive. A timing cohort overlapping a native audit is
+preserved but excluded. Two sanitizer wrappers lose application console
+output despite exact bitstreams and clean tool summaries; qualification
+remains unresolved. No production change is retained. An API-preserving
+lazy metadata implementation and its lifecycle/error tests remain open.
+No firewall cause is established or security setting changed.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

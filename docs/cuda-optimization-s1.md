@@ -12859,6 +12859,121 @@ builds, not hidden behind a passing summary. Slow sanitizer runs make
 progress and terminate. Restricted hardware counters are not retried; no
 security, clock, power or cooling settings are changed.
 
+## Provisional resident metadata cost (S74, investigation)
+
+S74 investigates a host preparation gap before changing more convolution
+tiles. The retained runtime is still S70; this checkpoint changes no
+production source, test, library or executable.
+
+### Critical-path attribution
+
+A read-only analysis of all eight frozen S73 warm 4K traces includes kernels,
+copies and memsets in the GPU interval union. Each trace has 373 kernels and
+54 copies. Gaps total 48.67-60.23 ms; 46.39-58.04 ms occurs where the next
+correlated API starts after the previous GPU operation ends. The largest gap,
+18.73-27.18 ms, lies between a 16-byte input-preparation result readback and a
+1,036,800-byte upload of provisional DCT8 anchors. Kernel-to-kernel gaps total
+only 1.50-1.70 ms. Thus simply capturing consecutive kernel launches in a
+CUDA Graph would not address most of the observed idle span. The intervening
+host-result dependencies still matter. Event synchronization API durations
+overlap GPU execution and are not additive savings; profiler-start duration
+is capture overhead outside the useful GPU span.
+
+An ignored CPU-only resident-evaluator override adds nested steady-clock
+scopes. Both diagnostic executables preserve all 203 retained GPU bodies.
+Removing the scope include and declarations exactly reconstructs the current
+production source. Three public encodes match retained bitstreams; each of
+three phase cohorts has one warmup and three subsequent encodes. Splitting
+metadata scopes by lifecycle, excluding that warmup, gives:
+
+| Input | Initial provisional metadata, median ms | Replacement metadata, median ms |
+| --- | ---: | ---: |
+| Padded 4K | 8.1157 | 1.8728 |
+| Padded 1080p | 2.3815 | 0.5346 |
+| Flower | 0.2667 | 0.1470 |
+
+The original grouped scope summary mixes initial and replacement invocations;
+`s74_host_roles.py` provides the explicit split. Nested scope durations
+include child work/logging and GPU waits. They are neither independent costs
+nor uninstrumented speedup measurements.
+
+The fully resident frontend initially prepares an all-DCT8 grid. Its initial
+quantization and AC-strategy input views use image, mask, quant-field and CfL
+buffers, not transform metadata. After selecting the actual strategies, the
+encoder calls `Reconfigure` before adjustment or encoding policy evaluation.
+The initial metadata is discarded. Arena capacities depend on image geometry
+and maximum block counts, not the provisional anchor list.
+
+### Encoder-only counterfactual
+
+`s74_defer_aq_resident.cpp` is a diagnostic override, not a generic lazy
+prepared-evaluator implementation. Mode 1 omits initial metadata construction,
+upload and commit for complete resident frontends, but still uploads quant
+tables and allocates the same arenas. Guards reject metadata-dependent public
+operations until a successful `Reconfigure` commits the replacement. Modes 0
+and 2 take the same eager path; mode 2 is a duplicate baseline for process
+noise. Both executables again preserve all 203 retained GPU bodies.
+
+All 18 public d1.2/e7 encodes (4K, 1080p and flower; scored and encoding-only;
+three modes) match retained S70 bitstreams, strategy reports and score text.
+No premature metadata-use guard fires. This does not qualify generic direct
+prepared use, invalid-input semantics, a fresh decoder/metric comparison or
+the complete release suite.
+
+The first 54-window warm timing cohort accidentally overlaps the end of a
+CPU native-code audit. It is preserved as shakedown evidence and excluded
+in full, not selectively trimmed. Separate clean warm and cold cohorts run
+only after both producers terminate: 54 serial process windows each, all six
+orders of the three modes, three inputs. Warm windows use three warmups and
+seven samples; cold windows use zero warmups and one sample. All 41 timing
+fields and encoded-size checks are preserved. These are same-binary
+counterfactual measurements, not retained production speedups.
+
+| Input | Warm quantization change | Warm total change | Cold quantization change | Cold total change |
+| --- | ---: | ---: | ---: | ---: |
+| Padded 4K | -3.62% | -2.39% | -0.37% | -0.33% |
+| Padded 1080p | -6.64% | -3.54% | -2.54% | -2.88% |
+| Flower | -4.51% | -1.47% | -7.05% | -5.15% |
+
+Entries are medians of six candidate/control ratios. Warm quantization saves
+8.96 ms at 4K and 3.29 ms at 1080p, winning all six pairs in both cases.
+Against duplicate mode 2, those phase changes are -5.60% and -4.85%.
+Whole-workflow effects are less decisive: the identical warm 4K duplicate
+itself moves +2.41% in total time, and candidate warm 4K total wins five of
+six pairs. Cold 4K is inconclusive. Small-image and serialization variation
+remain visible; no median is a promise for other workloads or machines.
+
+### Qualification limits and next implementation
+
+Two 1080p memcheck attempts produce exact retained bitstreams and zero-error,
+zero-leak tool summaries, but omit the application's mode/completion text.
+The first combined file redirection and the second separate tool-log/piped
+application-output approach both fail the wrapper's marker assertion. Neither
+is counted as completed sanitizer qualification, and the intended six-check
+matrix does not run. Both failed wrappers, reports, logs and outputs remain.
+The cause of the missing application output is unresolved. No active admin
+prompt or matching application-crash event is found in the scoped read-only
+check; there is no evidence establishing a firewall cause. No permissions or
+security settings are changed, and restricted counters are not retried.
+
+The measured redundant work warrants an API-preserving lazy implementation
+experiment. It must retain owned initial state, reject invalid metadata at
+preparation as before, realize metadata under the existing operation lock
+before any dependent use, and let `Reconfigure` replace pending state without
+constructing the discarded plan. A narrow all-DCT8 frontend fast path could
+avoid general deferred validation; an explicit opt-in hint is another design
+to evaluate. Neither is implemented or inferred safe by this counterfactual.
+Required tests include direct use without reconfiguration, caller input
+lifetime, invalid EPF/strategy grids, failed reconfiguration, repeated use,
+submission failure and unchanged allocation/output contracts. The backend
+is not considered maxed out.
+
+The ignored `s74_*` bundle preserves host attribution, original and clean
+timing cohorts, all diagnostic binaries/sources, exact-output checks and
+failed sanitizer evidence. Frozen hashes cover dependencies, retained runtime
+and source/document snapshots; `s74_validate.py --frozen` checks the bundle,
+with `--current` additionally checking the current source/runtime snapshots.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
