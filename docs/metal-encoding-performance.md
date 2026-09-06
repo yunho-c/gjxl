@@ -13,6 +13,12 @@ authoritative for the supported bitstream profile. This roadmap is the
 cross-stage performance contract and must not turn a leaf-kernel speedup into
 an encoder claim.
 
+The [resident execution roadmap](resident-execution.md) owns the bounded,
+policy-preserving refactor of representations, lifetimes, resource admission,
+and CPU/GPU scheduling. Its completed handoff milestones are recorded in
+[resident frame handoff](resident-frame-handoff.md). Algorithmic search reduction
+and AQ-policy changes remain separate qualification tracks.
+
 ## Success criteria
 
 The primary throughput gate is:

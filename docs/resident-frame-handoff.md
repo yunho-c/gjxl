@@ -1,5 +1,11 @@
 # Resident frame handoff
 
+This document records completed milestones 1 and 2 of the broader
+[resident execution refactor](resident-execution.md). That roadmap owns the
+remaining integration, resource-admission, reuse, and scheduling work and its
+completion criteria. The implementation and measurements below retain their
+original milestone baselines.
+
 ## Milestone 1: ownership-independent consumers
 
 This refactor removes the owned-frame requirement from the internal codestream
@@ -7,8 +13,9 @@ consumer interface. It does not yet eliminate Metal's final frame assembly or
 change the GPU coefficient layout. AQ iterations, AC selection, quantization,
 coefficient-order policy, and entropy policy are unchanged.
 
-Base revision: `4ea12ab` (the Metal fusion merge). Development branch:
-`refactor/resident-frame-handoff`; worktree: `../gjxl-resident-frame-handoff`.
+Base revision: `4ea12ab` (the Metal fusion merge). Original development branch:
+`refactor/resident-frame-handoff`, now named `refactor/resident-execution`;
+worktree: `../gjxl-resident-frame-handoff`.
 
 ## Interface and ownership
 
@@ -288,7 +295,17 @@ qualification artifacts.
 
 ## Later milestones
 
-Shared resource admission and new scheduling remain separate later work.
-Milestone 2 removes the compulsory full AC copy; it does not eliminate every
-frame-metadata copy, every intermediate coefficient allocation, or the CPU
-entropy/codestream tail.
+The [resident execution roadmap](resident-execution.md#milestones-and-dependencies)
+defines the remaining milestones:
+
+- Integrate and jointly qualify the preparation branch with completed output.
+- Establish coordinated resource accounting and memory admission.
+- Audit and qualify further policy-preserving reuse and lifetime reductions.
+- Coordinate CPU participation and CPU/GPU scheduling across admitted images.
+
+These extend original proposals #3, #4A, and #5. Candidate pruning and selective
+refinement (#4B) remain a separate policy track, not a prerequisite for this
+refactor. Milestone 2 removes the compulsory full AC copy; it does not eliminate
+every frame-metadata copy, every intermediate coefficient allocation, or the
+CPU entropy/codestream tail. Small metadata snapshots remain intentional where
+they keep completed output independent of large temporary arenas.
