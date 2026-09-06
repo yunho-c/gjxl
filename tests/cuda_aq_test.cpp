@@ -1765,6 +1765,6 @@ int main() {
       !CheckConcurrentPublicWorkflow(*gpu)) {
     return EXIT_FAILURE;
   }
-  std::cout << "CUDA exact and maximum-throughput AQ match CPU.\n";
+  std::cout << "CUDA exact and maximum-throughput AQ match CPU.\n" << std::flush;
   return EXIT_SUCCESS;
 }

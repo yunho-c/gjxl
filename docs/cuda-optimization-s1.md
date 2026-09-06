@@ -13,7 +13,8 @@
   counting, lightweight ANS token emission, direct AC token accumulation,
   contiguous AC nonzero reduction, fused L2/final masking, and fused
   vertical blur/low-medium construction, compact prepared Butteraugli scratch,
-  and fused mirrored RGB blur/Opsin conversion
+  fused mirrored RGB blur/Opsin conversion, and packed active-coefficient
+  readback into ownership-backed final frame storage
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -27,15 +28,23 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest investigation at `f22c2f8` measures coefficient
-readback/frame assembly and tests an isolated GPU-packing/ownership-transfer
-prototype. It is **not adopted**: the fixed-capacity transfer adds padding and
-metadata overhead, small-image results regress, and its additional submission
-fails an existing conformance assertion. The production implementation remains
-S48. See [S49](#coefficient-handoff-measurement-and-packing-prototype-s49) for the
-retained measurements, qualification limits, and next architectural options.
+below supersede them. The latest implemented checkpoint, S50 against the S48
+production baseline `f22c2f8` (S49 is investigation-only), packs active integer
+coefficients within the existing final submission and reads them directly into
+overwrite-only final frame storage. It clears only host edge tails and transfers
+ownership after validation. The extra host coefficient staging owner, full
+final-buffer clear, and host layout copy disappear; D2H bytes and submission
+counts are unchanged. Same-executable inclusive host handoff improves by median
+paired 29.9% / 26.1% / 10.6% at 4K / 1080p / Flower, excluding the added GPU
+packing cost. Warm whole-encode changes are -2.3% / -3.8% / -4.4%; cold Flower
+regresses 3.2%, so this is not a universal speedup claim. All 71 CUDA / 50 CPU
+tests, four host ASan targets, seven scoped CUDA sanitizer runs, 46 byte-identical
+decoded-image pairs, and batch checks pass. See
+[S50](#owned-active-coefficient-readback-s50) for costs, controls, and limits;
+the rejected [S49](#coefficient-handoff-measurement-and-packing-prototype-s49)
+prototype remains separately documented.
 
-The latest implemented checkpoint against `bf458d6` fuses
+The preceding S48 checkpoint against `bf458d6` fuses
 the three vertical five-tap RGB blurs with Opsin conversion. It removes
 18 launches per normal encode and three intermediate plane writes/reads
 per psycho pass without increasing scratch or transfers. The targeted
@@ -7415,6 +7424,211 @@ Per-process stdout/stderr, diagnostic executables/objects, image outputs/reports
 and the failed conformance result
 are retained. No system settings were changed, and no admin/firewall failure
 was reported by these runs. Optimization remains ongoing, not maxed out.
+
+## Owned active-coefficient readback (S50)
+
+S50 implements a revised handoff after the rejected S49 prototype. Production
+comparison is against `f22c2f8`; `8d8dfad` only records S49's investigation.
+Qualification ran on 2026-09-05 America/New_York (2026-09-06 UTC), Release
+MSVC 14.37 / CUDA 11.8, architecture 86, RTX 3060 Laptop / driver 577.00.
+Global math, power, clock, cooling, priority, security, and service settings
+were not changed. Optimization remains ongoing, not maxed out.
+
+### Storage, layout, and ordering
+
+The former resident handoff reads batch-ordered integers into a full active
+host staging allocation, allocates and clears final fixed-capacity AC-group
+storage, then validates and copies transforms into that layout. S50 separates
+the integer readback layout from the existing forward-float batch layout:
+
+1. Host metadata records an eight-byte packed destination offset per anchor.
+   Active group/channel rows are contiguous on the device; edge rows use their
+   actual coefficient counts rather than the fixed 65,536-value host capacity.
+2. One integer-copy kernel per nonempty strategy batch runs after the final
+   inverse consumer, inside the existing final reconstruction/policy submission.
+   It reuses the existing reconstruction-coefficient scratch allocation. Scored
+   policy iterations do not pack; only requested final frames do. A subsequent
+   evaluation rewrites reconstruction floats before any inverse consumer.
+3. Consecutive rows with equal active widths form readback runs. Contiguous or
+   pitched copies write active values directly into final group/channel rows;
+   only unused host tails are cleared. There is no device padding clear or
+   padded-tail transfer, and no extra submission/wait pair.
+4. Frame assembly validates geometry, transforms, offsets, group coverage,
+   DC/raw quantization, EPF, optional active-value sentinels, and zero tails,
+   then transfers ownership. On failure both the input owner and published
+   output remain unchanged. The poison hook allocates and poisons the actual
+   next readback destination, including after ownership has been consumed.
+
+`OverwriteArray<int32_t>` provides fixed-size overwrite-only allocation,
+deep copying, and noexcept ownership transfer; it does not introduce shared
+ownership. Public frame views, capacity, and copy semantics remain unchanged.
+The private C++ object representation changes, so consumers and diagnostic
+objects must be rebuilt; old S41/S49 objects must not be linked to these
+libraries. CPU reconstruction and borrowed assembly retain initialized storage
+and the original copy path. Installed-consumer tests pass in both builds.
+
+`CudaDeviceToHostCopy` gains row count and optional source/destination pitches;
+existing four-field descriptors still mean a single contiguous copy. All
+descriptors are validated before enqueueing, including source ownership, byte
+ranges, pitch widths, and row-span overflow. A common synchronization completes
+the batch. This is an internal API, not a new public readback contract.
+
+### Deterministic costs and GPU evidence
+
+Three alternating CUDA-only Nsight pairs per odd-padded workload retain all
+original kernel names, ordering, grids, blocks, and native resource usage.
+All 161 preexisting native bodies are byte-identical; the added packing body
+uses 28 registers, zero stack/local/shared bytes, and no barriers. Its median
+summed GPU time is 0.935 ms at 4K (seven launches) and 0.224 ms at 1080p
+(six launches). These are added costs, not removed GPU work.
+
+| Captured quantity | 4K parent -> S50 | 1080p parent -> S50 |
+| --- | ---: | ---: |
+| Kernel launches | 400 -> 407 | 388 -> 394 |
+| Total D2H bytes | 103,699,012 -> same | 25,924,192 -> same |
+| D2H operations | 19 -> 20 | 19 -> 28 |
+| Total H2D bytes | 117,079,320 -> 118,254,624 | 29,336,392 -> 29,631,464 |
+| H2D operations | 31 -> 33 | 31 -> 33 |
+| Persistent arena request | 402,396,664 -> 403,433,464 | 100,617,726 -> 100,877,054 |
+
+There are still five arena requests; only the persistent metadata arena grows,
+by 1,036,800 / 259,328 bytes including alignment. The coefficient scratch arena
+does not grow. D2D remains one 518,400 / 129,600-byte transfer, and device
+memsets remain four operations totaling 28 bytes. Additional H2D copies upload
+initial and reconfigured packing offsets. AC readback uses two / ten runs.
+The active coefficient payload remains 99,532,800 / 24,883,200 bytes. Removing
+its separate host staging owner saves that allocation during final assembly;
+this is an ownership/accounting result, not a measured RSS claim.
+
+The original-kernel subset nevertheless varies by median paired -8.4% / -2.2%
+in these short profiled cohorts despite identical code and launch structure.
+Do not attribute those changes to packing. Boundary readings show 62-67 C,
+1282 MHz, P3 where sampled, with software thermal/power-limit flags active.
+These are boundary observations, not per-kernel clock normalization. All
+outliers are retained; no hardware counter privileges were requested.
+
+### Same-executable handoff control
+
+`s50_handoff_probe.exe` selects the old staging/copy path with diagnostic-only
+`S50_COPY_AC`; the default branch is the packed handoff. Both branches retain
+S50's metadata allocation/uploads and new frame representation, isolating the
+handoff from those changes. Neither switch nor timing instrumentation is in
+production. Both branches match qualified production image bytes in all 46
+cases. This is a mechanism control, not an independent old-release baseline.
+
+Seven alternating process pairs per workload use three warmups and five samples.
+The host sum includes preparation's staging allocation, tail preparation,
+readback, assembly setup, and full assembly. The inclusive sum also includes
+metadata construction. Sums are formed per sample before taking medians;
+medians below are medians of process medians, while changes are medians of
+paired ratios. GPU packing occurs earlier and is excluded from these host sums.
+
+| Controlled host quantity (ms) | 4K baseline -> packed | 1080p baseline -> packed | Flower baseline -> packed |
+| --- | ---: | ---: | ---: |
+| Host tail/descriptor preparation | 0.004 -> 1.995 | 0.005 -> 1.695 | 0.001 -> 0.315 |
+| Readback | 16.937 -> 17.493 | 4.737 -> 5.933 | 0.821 -> 0.844 |
+| Frame assembly | 26.719 -> 7.845 | 9.369 -> 2.483 | 1.172 -> 0.453 |
+| Assembly full clear | 10.857 -> approximately 0 | 5.236 -> 0 | 0.684 -> 0 |
+| Transform copy/validation phase | 13.989 -> 5.782 | 3.561 -> 1.837 | 0.359 -> 0.347 |
+| Combined host sum | 44.452 -> 28.259 | 14.532 -> 10.488 | 2.037 -> 1.692 |
+| Inclusive host sum | 54.604 -> 38.959 | 17.754 -> 13.363 | 2.351 -> 2.011 |
+
+The copy/validation phase becomes metadata and coefficient validation, not
+zero work. Readback itself is slower by paired median 3.8% / 18.7% / 5.7%;
+additional copy descriptors and the different page-touch pattern are plausible
+contributors, not separately established causes. Inclusive host changes are
+-29.9% / -26.1% / -10.6%, improving 7/7, 7/7, and 6/7 pairs respectively;
+paired ranges are [-32.6%, -23.7%], [-32.4%, -19.5%], and [-31.8%, +3.9%].
+The same-executable quantization pipeline improves -4.2% / -7.8% / -2.6%,
+while whole encode changes -1.0% / -3.9% / -2.4% with only 5/7 wins each.
+Unchanged codestream work varies substantially; the control does not establish
+a stable small-image or universal end-to-end gain.
+
+### Public workflow timing and qualification
+
+The independent production-baseline comparison also uses seven alternating
+process pairs, three warmups and five samples, with 41 retained phase fields.
+Benchmark inputs are odd 3839x2159 / 1919x1079 and linear Flower 510x532,
+distance 1.2, effort 7, fully resident, final-score collection disabled.
+The candidate phase object is rebuilt against current headers; the parent is
+the retained S48 executable.
+
+| Warm phase | 4K parent -> S50 ms; paired change | 1080p parent -> S50 ms; paired change | Flower parent -> S50 ms; paired change |
+| --- | ---: | ---: | ---: |
+| Quantization pipeline | 297.409 -> 279.327; -5.6% | 57.947 -> 54.469; -6.8% | 11.843 -> 11.542; -3.5% |
+| Whole encode | 437.635 -> 420.257; -2.3% | 115.248 -> 111.599; -3.8% | 24.865 -> 24.148; -4.4% |
+| Unchanged codestream encoding | 115.762 -> 116.174; -0.7% | 50.416 -> 49.789; -1.4% | 11.528 -> 11.101; -5.0% |
+
+All seven quantization pairs improve for each workload. Whole encode improves
+6/7, 7/7, and 6/7; paired ranges are [-9.3%, +5.8%], [-8.0%, -1.4%], and
+[-30.8%, +2.7%]. Flower's 32.451/34.784-ms parent outliers and all other slow
+observations remain in the report. The earlier three-pair exploratory cohort
+is retained separately, not pooled with this final cohort.
+
+Seven cold process pairs use zero warmups and one sample. Whole-encode medians
+are 546.312 -> 524.998 ms, 159.307 -> 153.680 ms, and 47.373 -> 50.601 ms;
+paired changes are -1.9% / -4.3% / **+3.2%**, with 5/7, 6/7, and 3/7 wins.
+Cold quantization changes are -2.9% / -5.6% / +3.9%. Cold startup and the small
+photo regression remain limits of the adopted optimization, not discarded data.
+
+Qualification includes:
+
+- All **71 CUDA-enabled tests**, repeated after final profiling, and all
+  **50 CPU-only GCC tests**, including installed consumers. The final CUDA run
+  completes in 54.35 s. Packing's unavailable-device exit is registered as skip.
+- Four fully host-instrumented Clang ASan targets: overwrite-array ownership,
+  VarDCT frame, reconstruction, and codestream encoder.
+- New packing fixture: 64 geometry/strategy cases x three changed-data reuses,
+  through 480x270 blocks, all seven strategy shapes plus mixed patterns, integer
+  extremes, prefix/suffix guards, unchanged inputs/metadata, pitched-copy
+  active rows, and untouched tails. Ten malformed descriptor cases verify
+  pre-enqueue atomic rejection, alongside empty/zero-row launch cases.
+- Owned frame tests cover single, full, and partial groups, mixed transforms,
+  malformed views/layouts, active sentinels, nonzero tails, failure atomicity,
+  optional sentinel policy, deep copies, and repeated exact-pointer transfers.
+  Existing AQ poison, prepared reuse, scored/encoding-only equality, failure,
+  and allocation/submission assertions pass without relaxed expectations.
+- Four scoped packing sanitizer runs (memcheck/initcheck/synccheck/racecheck)
+  each complete 48 cases x three reuses with zero errors/hazards. Three final
+  AQ runs (memcheck with stream-ordered race/leak checks, initcheck, synccheck)
+  report explicit completion and zero errors; memcheck reports zero leaks.
+  Earlier unflushed AQ logs are retained but final claims use the reruns with
+  explicit flushed markers. The old aborted full-AQ race run is not repeated
+  or counted as passing.
+- All 46 parent/candidate image pairs are byte-identical and independently
+  decode to identical Butteraugli scores with pinned libjxl
+  `e8ff09762481785938d8e4e01333ed3917571161`, linear RGB
+  `RGB_D65_SRG_Rel_Lin`. Seven inputs, distances 0.5/1.2/3 at effort 7 plus
+  sample/Flower effort 9, each encoding-only and scored, retain the established
+  matrix. Quality 1080p/4K inputs are distinct from odd timing inputs. All 46
+  same-executable control triples also match those qualified bytes.
+- Batch byte checks pass with one warmup / three samples: even 1080p fully
+  resident batch 1/2/4 gives paired speedups 1.019x / 1.079x / 1.315x against
+  same-version serial execution; maximum-throughput gives 0.971x / 1.488x /
+  1.937x. Even 4K fully resident batch 1/2 gives 1.027x / 1.058x. These are
+  concurrency measurements, not parent-versus-S50 speedups.
+
+Artifacts under ignored `build-cuda-ninja/profiles` include
+`s50_{phase,handoff}_build.ps1`, fresh probe source/objects/executables,
+`s50_{run,more}_checks.ps1`, `s50_performance.ps1`,
+`s50_final_phases.json`, `s50_control_comparison.json`, `s50_cold_*.json`,
+`s50_{quality,control_quality}.json`, native dumps and summary,
+twelve Nsight reports/SQLite exports, sanitizer/ASan/CTest logs, batch outputs,
+GPU-state boundaries, and all image outputs/reports. `s50_report.py` derives
+paired summaries; `s50_validate.py` checks identities and evidence.
+`s50_final_binary_hashes.json` and `s50_artifact_hashes.json` freeze current
+binaries, production source snapshots, diagnostic objects, and evidence for
+future comparisons. The historical S49 validator expects unchanged S48 live
+binaries and is therefore not a validator of S50's current build.
+
+No permission error, admin/firewall failure, or stalled process was reported
+by these checks. The performance workflow completed in about five minutes;
+the user's suspected cause of the older long runtime remains unconfirmed.
+Future leads include writing final integer offsets directly from the producer
+to remove packing traffic/launches, reducing validated host assembly costs,
+and measuring deferred readback allocation for bounded/no-frame use. Current
+preparation still allocates final-capacity host storage even in that mode.
+Neither a new bypass nor an unmeasured size threshold is introduced here.
 
 ## Work that should not lead the next cycle
 

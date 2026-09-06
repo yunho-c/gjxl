@@ -555,6 +555,21 @@ Status CudaBackend::CopyDeviceToHostBatch(
       return Status::InvalidArgument(
           "CUDA device-to-host batch exceeds a source buffer");
     }
+    if (copy.size_bytes == 0 || copy.row_count == 0) continue;
+    const size_t source_pitch = copy.source_row_stride_bytes == 0
+      ? copy.size_bytes : copy.source_row_stride_bytes;
+    const size_t destination_pitch = copy.destination_row_stride_bytes == 0
+      ? copy.size_bytes : copy.destination_row_stride_bytes;
+    if (source_pitch < copy.size_bytes || destination_pitch < copy.size_bytes ||
+        copy.row_count - 1 >
+          (copy.source->size_bytes() - copy.source_offset_bytes - copy.size_bytes) /
+            source_pitch ||
+        copy.row_count - 1 >
+          (std::numeric_limits<size_t>::max() - copy.size_bytes) /
+            destination_pitch) {
+      return Status::InvalidArgument(
+          "CUDA device-to-host batch row layout is invalid");
+    }
   }
   ScopedCudaDevice device(state_->ordinal);
   if (device.status() != cudaSuccess) {
@@ -564,12 +579,21 @@ Status CudaBackend::CopyDeviceToHostBatch(
   cudaError_t error = cudaSuccess;
   bool enqueued = false;
   for (const CudaDeviceToHostCopy& copy : copies) {
-    if (copy.size_bytes == 0) continue;
+    if (copy.size_bytes == 0 || copy.row_count == 0) continue;
     const CudaBuffer* source = AsCudaBuffer(*copy.source);
     const auto* pointer = static_cast<const std::byte*>(source->pointer()) +
                           copy.source_offset_bytes;
-    error = cudaMemcpyAsync(copy.destination, pointer, copy.size_bytes,
-                            cudaMemcpyDeviceToHost, state_->stream);
+    const size_t source_pitch = copy.source_row_stride_bytes == 0
+      ? copy.size_bytes : copy.source_row_stride_bytes;
+    const size_t destination_pitch = copy.destination_row_stride_bytes == 0
+      ? copy.size_bytes : copy.destination_row_stride_bytes;
+    error = copy.row_count == 1 ||
+              (source_pitch == copy.size_bytes && destination_pitch == copy.size_bytes)
+      ? cudaMemcpyAsync(copy.destination, pointer, copy.row_count * copy.size_bytes,
+                        cudaMemcpyDeviceToHost, state_->stream)
+      : cudaMemcpy2DAsync(copy.destination, destination_pitch, pointer, source_pitch,
+                          copy.size_bytes, copy.row_count, cudaMemcpyDeviceToHost,
+                          state_->stream);
     if (error != cudaSuccess) break;
     enqueued = true;
   }

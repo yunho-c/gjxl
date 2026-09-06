@@ -14,6 +14,7 @@
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
 #include "core/image.h"
+#include "core/overwrite_array.h"
 #include "core/quantizer.h"
 #include "core/status.h"
 
@@ -166,7 +167,7 @@ private:
   std::array<std::vector<float>, 3> dc_;
   Extent2D ac_group_extent_;
   std::vector<size_t> group_used_coefficient_count_;
-  std::vector<int32_t> ac_coefficients_;
+  OverwriteArray<int32_t> ac_coefficients_;
 };
 
 }  // namespace gjxl

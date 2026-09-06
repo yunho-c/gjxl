@@ -36,6 +36,10 @@ struct QuantizedFrameAssemblyInput {
   std::span<const int32_t> quantized_ac;
   std::span<const QuantizedAcTransformLayout> transforms;
   bool reject_unwritten_coefficients = false;
+  /// Optional final-layout storage matching quantized_ac exactly. Transforms
+  /// must name their final group/channel offsets and unused tails must be zero.
+  /// Consumed only on success; both this storage and out are unchanged on failure.
+  OverwriteArray<int32_t>* ac_group_storage = nullptr;
 };
 
 [[nodiscard]] Status AssembleVarDctEncoderFrame(

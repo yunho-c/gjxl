@@ -728,9 +728,23 @@ measures the remaining coefficient readback and frame assembly. An isolated
 GPU-packing/ownership-transfer prototype improves the measured large-image
 handoff but retains host clearing, transfers padded edge tails, and regresses
 on the small-photo cohort. Its 46 image pairs are byte-identical, but an extra
-submission violates the existing AQ resource-count assertion. It is not adopted;
-production remains S48, with overwrite-only final storage and tighter transfer
-layout left as separate design leads. No stable whole-encode gain is claimed.
+submission violates the existing AQ resource-count assertion. It was not adopted;
+production remained S48 at that checkpoint. No stable whole-encode gain was claimed.
+
+[S50](cuda-optimization-s1.md#owned-active-coefficient-readback-s50) implements
+the revised active-row layout: GPU packing stays inside the existing final
+submission and reuses reconstruction scratch; pitched copies write only active
+coefficients into overwrite-only final frame storage. Only unused host tails
+are cleared, and validated assembly transfers ownership with unchanged failure
+atomicity and deep-copy semantics. D2H bytes and submission counts stay fixed;
+offset metadata and up to seven packing launches are added. All 71 CUDA / 50 CPU
+tests, four host ASan targets, seven scoped CUDA sanitizers, 46 byte-identical
+decoded-image pairs, and batch checks pass. Same-executable inclusive host
+handoff improves by paired median 29.9% / 26.1% / 10.6% at 4K / 1080p / Flower,
+excluding added GPU packing cost. Warm whole-encode changes are -2.3% / -3.8% /
+-4.4%, but cold Flower regresses 3.2%; the study retains all outliers and does
+not claim a universal encoder gain. C++ consumers must rebuild for the private
+frame-storage representation change.
 
 ### Math and kernel strategy
 

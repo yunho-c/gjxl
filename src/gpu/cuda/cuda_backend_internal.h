@@ -39,6 +39,10 @@ struct CudaDeviceToHostCopy {
   void* destination = nullptr;
   size_t size_bytes = 0;
   size_t source_offset_bytes = 0;
+  // size_bytes is the active byte width of each row. Zero pitches mean packed.
+  size_t row_count = 1;
+  size_t source_row_stride_bytes = 0;
+  size_t destination_row_stride_bytes = 0;
 };
 
 [[nodiscard]] Status CudaStatus(cudaError_t error, std::string_view operation,

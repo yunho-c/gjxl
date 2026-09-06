@@ -321,6 +321,15 @@ Status ValidateAssemblyInput(
       "Quantized VarDCT frame assembly group grid is too large");
   }
 
+  if (input.ac_group_storage != nullptr &&
+      (input.ac_group_storage->size() !=
+         *group_count * 3 * kVarDctAcGroupCoefficientCapacity ||
+       input.quantized_ac.data() != input.ac_group_storage->data() ||
+       input.quantized_ac.size() != input.ac_group_storage->size())) {
+    return Status::InvalidArgument(
+      "Quantized VarDCT owned AC storage does not match its view");
+  }
+
   size_t anchor_count = 0;
   Status status = input.strategies->ForEachAnchor(
     [&](size_t, size_t, AcStrategyType) {
@@ -369,8 +378,10 @@ Status AssembleVarDctEncoderFrame(
     result.raw_quant_field_.resize(block_count);
     result.epf_sharpness_.resize(block_count);
     result.group_used_coefficient_count_.assign(group_count, 0);
-    result.ac_coefficients_.assign(
-      group_count * 3 * kVarDctAcGroupCoefficientCapacity, 0);
+    if (input.ac_group_storage == nullptr) {
+      result.ac_coefficients_.assign(
+        group_count * 3 * kVarDctAcGroupCoefficientCapacity, 0);
+    }
     for (size_t channel = 0; channel < 3; ++channel) {
       result.quantized_dc_[channel].resize(block_count);
       result.dc_[channel].resize(block_count);
@@ -468,6 +479,14 @@ Status AssembleVarDctEncoderFrame(
             "Quantized VarDCT AC group coefficient capacity overflowed");
         }
         for (size_t channel = 0; channel < 3; ++channel) {
+          if (input.ac_group_storage != nullptr) {
+            if (transform.coefficient_offsets[channel] !=
+                  result.AcGroupChannelOffset(group_index, channel) + group_offset) {
+              return Status::InvalidArgument(
+                "Quantized VarDCT owned AC transform offset is invalid");
+            }
+            continue;
+          }
           if (!CopyQuantizedCoefficients(
                 input.quantized_ac.subspan(
                   transform.coefficient_offsets[channel], coefficient_count),
@@ -503,6 +522,31 @@ Status AssembleVarDctEncoderFrame(
         return Status::Internal(
           "Quantized data did not completely fill its VarDCT AC groups");
       }
+    }
+    if (input.ac_group_storage != nullptr) {
+      uint32_t invalid = 0;
+      for (size_t group_index = 0; group_index < group_count; ++group_index) {
+        const size_t used = result.group_used_coefficient_count_[group_index];
+        for (size_t channel = 0; channel < 3; ++channel) {
+          const int32_t* coefficients = input.ac_group_storage->data() +
+            result.AcGroupChannelOffset(group_index, channel);
+          if (input.reject_unwritten_coefficients) {
+            for (size_t index = 0; index < used; ++index) {
+              invalid |= static_cast<uint32_t>(
+                coefficients[index] == kUnwrittenQuantizedCoefficient);
+            }
+          }
+          for (size_t index = used; index < kVarDctAcGroupCoefficientCapacity;
+               ++index) {
+            invalid |= static_cast<uint32_t>(coefficients[index] != 0);
+          }
+        }
+      }
+      if (invalid != 0) {
+        return Status::InvalidArgument(
+          "Quantized VarDCT owned AC coefficients or tails are invalid");
+      }
+      result.ac_coefficients_ = std::move(*input.ac_group_storage);
     }
     *out = std::move(result);
     return Status::Ok();
