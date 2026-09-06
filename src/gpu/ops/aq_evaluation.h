@@ -22,6 +22,8 @@
 
 namespace gjxl {
 
+namespace vardct_frame_internal { class CompletedVarDctFrame; }
+
 class ColorCorrelationMap;
 
 enum class AqEvaluationMetric {
@@ -153,6 +155,10 @@ struct AqResidentButteraugliPolicyOutput {
   std::vector<double>* score_history = nullptr;
   Image3FView reconstructed_linear_rgb;
   VarDctEncoderFrame* frame = nullptr;
+  /// Internal encoding handoff. Mutually exclusive with owned `frame`.
+  /// On success the lease is independent of this prepared operation/backend.
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
+    completed_frame = nullptr;
 };
 
 struct AqEvaluationMemoryStats {

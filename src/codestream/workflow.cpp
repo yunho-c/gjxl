@@ -25,6 +25,7 @@
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
 #include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/encoder.h"
 #include "codestream/encoder_internal.h"
 #include "codestream/rate_control_internal.h"
@@ -437,6 +438,7 @@ struct PipelineStorage {
 
 struct EncodingArtifacts {
   VarDctEncoderFrame frame;
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed_frame;
   std::vector<double> score_history;
   MaximumErrorResult maximum_error_result;
 };
@@ -824,6 +826,7 @@ struct PreparedWorkflow {
         options.metal_aq_mode ==
           GpuAdaptiveQuantizationMode::kExactCoefficients ||
         options.rate_control_mode == VarDctRateControlMode::kMaximumError,
+      .completed_frame = &encoding.completed_frame,
     };
     status = gpu_profile == nullptr
       ? quantization_pipeline_internal::
@@ -869,12 +872,12 @@ struct PreparedWorkflow {
     .coefficient_order_behavior =
       codestream_internal::ResolveCoefficientOrderBehavior(options),
   };
-  status = profile == nullptr
-    ? EncodeVarDctCodestream(
-        encoding.frame, codestream_options, &candidate)
-    : codestream_internal::EncodeVarDctCodestreamProfiled(
-        encoding.frame, codestream_options, &candidate,
-        &candidate_profile.codestream);
+  const auto frame_view = encoding.completed_frame != nullptr
+    ? encoding.completed_frame->view()
+    : vardct_frame_internal::BorrowFrame(encoding.frame);
+  status = codestream_internal::EncodeVarDctCodestreamFromView(
+    frame_view, codestream_options, &candidate,
+    profile == nullptr ? nullptr : &candidate_profile.codestream);
   ProfileEnd(
     profile, codestream_begin,
     &candidate_profile.codestream_encoding_nanoseconds);
@@ -938,7 +941,7 @@ struct PreparedWorkflow {
     ? VarDctExecutionBackend::kMetal
     : VarDctExecutionBackend::kCpu;
   candidate_summary.metal_aq_mode = options.metal_aq_mode;
-  status = encoding.frame.strategies().ForEachAnchor(
+  status = frame_view.strategies().ForEachAnchor(
     [&](size_t, size_t, AcStrategyType strategy) {
       const size_t index = static_cast<size_t>(strategy);
       if (index >= candidate_summary.strategy_counts.size()) {

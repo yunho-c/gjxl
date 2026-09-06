@@ -11,6 +11,7 @@
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline_internal.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "core/block_grid.h"
 #include "core/image_ops.h"
 #include "gpu/ops/adaptive_quantization.h"
@@ -532,7 +533,9 @@ Status RunPreparedGpuQuantizationPipelineImpl(
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_aq,
   QuantizationPipelineMaterialization materialization,
-  gpu_profile_internal::GpuProfilingSession* profiling_session) {
+  gpu_profile_internal::GpuProfilingSession* profiling_session,
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
+    completed_frame = nullptr) {
 
   switch (aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
@@ -619,6 +622,7 @@ Status RunPreparedGpuQuantizationPipelineImpl(
         materialization.reconstructed_linear_rgb,
       .final_perceptual_evaluation =
         materialization.final_perceptual_evaluation,
+      .completed_frame = completed_frame,
     }, profiling_session);
   const Status status = RunPreparedQuantizationPipelineWithProviders(
     original_linear_rgb, prepared, strategy_search, adaptive_quantization,
@@ -678,7 +682,8 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
       .maximum_error_result = output.maximum_error_result,
     },
   };
-  return RunPreparedGpuQuantizationPipelineImpl(
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed;
+  const Status status = RunPreparedGpuQuantizationPipelineImpl(
     gpu, original_linear_rgb, prepared, options, aq_mode, pipeline_output,
     stats, prepared_aq,
     {
@@ -690,7 +695,11 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
         output.collect_final_butteraugli_score,
       .apply_throughput_iteration_limit = false,
     },
-    nullptr);
+    nullptr, output.completed_frame == nullptr ? nullptr : &completed);
+  if (status.ok() && output.completed_frame != nullptr) {
+    *output.completed_frame = std::move(completed);
+  }
+  return status;
 }
 
 Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
@@ -739,6 +748,7 @@ Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
       .maximum_error_result = output.maximum_error_result,
     },
   };
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed;
   Status status = RunPreparedGpuQuantizationPipelineImpl(
     gpu, original_linear_rgb, prepared, options, aq_mode, pipeline_output,
     nullptr, prepared_aq,
@@ -751,9 +761,13 @@ Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
         output.collect_final_butteraugli_score,
       .apply_throughput_iteration_limit = false,
     },
-    &profiling_session);
+    &profiling_session,
+    output.completed_frame == nullptr ? nullptr : &completed);
   if (!status.ok()) return status;
   *profile = std::move(profiling_session).Finish();
+  if (output.completed_frame != nullptr) {
+    *output.completed_frame = std::move(completed);
+  }
   return Status::Ok();
 }
 

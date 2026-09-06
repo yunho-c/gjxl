@@ -23,6 +23,7 @@
 #include "codec/maximum_error.h"
 #include "codec/reconstruction.h"
 #include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "core/ac_strategy.h"
 #include "core/status.h"
 #include "core/quantizer.h"
@@ -1962,7 +1963,7 @@ enum class ResidentPolicyFailure {
   kReadback,
 };
 
-bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
+bool CheckResidentPolicyFailure(ResidentPolicyFailure failure, bool leased = false) {
   Fixture fixture;
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!fixture.Initialize() ||
@@ -2029,6 +2030,14 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
   std::vector<float> block(block_count, kPoison);
   std::vector<double> scores = {-91.0};
   gjxl::VarDctEncoderFrame frame;
+  struct SentinelFrame final : gjxl::vardct_frame_internal::CompletedVarDctFrame {
+    gjxl::vardct_frame_internal::VarDctFrameView view() const noexcept override {
+      return {};
+    }
+  };
+  std::unique_ptr<gjxl::vardct_frame_internal::CompletedVarDctFrame> completed =
+    std::make_unique<SentinelFrame>();
+  const auto* sentinel = completed.get();
   const gjxl::AqResidentButteraugliPolicyInput input{
     .adjusted_initial_quant_field = {
       initial.data(), blocks, blocks.width},
@@ -2043,7 +2052,8 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
       .quant_field = {quant.data(), blocks, blocks.width},
       .block_distance_map = {block.data(), blocks, blocks.width},
       .score_history = &scores,
-      .frame = &frame,
+      .frame = leased ? nullptr : &frame,
+      .completed_frame = leased ? &completed : nullptr,
     };
   };
   const gjxl::StatusCode expected =
@@ -2059,6 +2069,7 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
       !std::ranges::all_of(block, [](float value) {
         return std::bit_cast<uint32_t>(value) == kPoisonBits;
       }) || scores != std::vector<double>{-91.0} || frame.valid() ||
+      completed.get() != sentinel ||
       !ExpectCode(prepared->EvaluateResidentButteraugliPolicy(
                     input, make_output()),
                   gjxl::StatusCode::kFailedPrecondition,
@@ -2782,6 +2793,11 @@ int main() {
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kCompletion) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kNumeric) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kReadback) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kUpload, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kSubmission, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kCompletion, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kNumeric, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kReadback, true) ||
       !CheckReconfiguration(*gpu) ||
       !CheckMemoryScaling(*gpu) ||
       !CheckSplitSeamAndDestruction(*gpu) ||

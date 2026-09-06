@@ -22,10 +22,12 @@
 #include <vector>
 
 #include "codec/chroma_from_luma.h"
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/dc_conversion.h"
 #include "codec/quantization.h"
 #include "codec/quantization_tables_generated.h"
 #include "codec/vardct_frame_internal.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "core/image_buffer.h"
 #include "core/quantizer.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
@@ -38,6 +40,57 @@
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+
+// The only device allocation retained by a completed frame is its final AC
+// output (plus a small destination table). No AQ arena, backend, or submission
+// is retained. MTL::Buffer owns its allocation independently of the backend.
+class MetalCompletedVarDctFrame final
+    : public vardct_frame_internal::CompletedVarDctFrame {
+ public:
+  vardct_frame_internal::VarDctFrameView view() const noexcept override {
+    const Extent2D blocks = strategies.extent();
+    const size_t count = raw_quant.size();
+    ConstImage3I32View quantized_dc_view;
+    ConstImage3FView dc_view;
+    for (size_t channel = 0; channel < 3; ++channel) {
+      quantized_dc_view.plane[channel] = {
+        quantized_dc.data() + channel * count, blocks, blocks.width};
+      dc_view.plane[channel] = {
+        dc.data() + channel * count, blocks, blocks.width};
+    }
+    return vardct_frame_internal::VarDctFrameView({
+      .input = {
+        .geometry = geometry,
+        .strategies = &strategies,
+        .raw_quant_field = {raw_quant.data(), blocks, blocks.width},
+        .quantizer = &quantizer,
+        .color_correlation = &color_correlation,
+        .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+      },
+      .profile = profile,
+      .quantized_dc = quantized_dc_view,
+      .dc = dc_view,
+      .ac_group_extent = group_extent,
+      .group_used_coefficient_count = group_used,
+      .ac_coefficients = coefficients,
+    });
+  }
+
+  std::unique_ptr<DeviceBuffer> allocation;
+  std::span<const int32_t> coefficients;
+  FrameGeometry geometry;
+  AcStrategyGrid strategies;
+  Quantizer quantizer;
+  ColorCorrelationMap color_correlation;
+  SimpleVarDctCodestreamProfile profile;
+  Extent2D group_extent;
+  std::vector<size_t> group_used;
+  std::vector<uint8_t> sharpness;
+  std::vector<int32_t> raw_quant;
+  std::vector<int32_t> quantized_dc;
+  std::vector<float> dc;
+};
+
 namespace {
 
 using ProfileClock = std::chrono::steady_clock;
@@ -142,7 +195,7 @@ void DispatchThreads1d(MTL::ComputeCommandEncoder* encoder,
 
 static_assert(std::is_standard_layout_v<AqReconstructionParams>);
 static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
-static_assert(sizeof(AqReconstructionParams) == 136);
+static_assert(sizeof(AqReconstructionParams) == 140);
 static_assert(sizeof(AqResetParams) == 32);
 static_assert(sizeof(AqResidentPolicyInitializeParams) == 20);
 static_assert(sizeof(AqResidentPolicyUpdateParams) == 44);
@@ -2274,6 +2327,11 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   }
   const bool quant_field_requested =
     PlaneDescriptorSpecified(output.quant_field);
+  const bool frame_requested =
+    output.frame != nullptr || output.completed_frame != nullptr;
+  if (output.frame != nullptr && output.completed_frame != nullptr) {
+    return Status::InvalidArgument("Resident frame outputs are mutually exclusive");
+  }
   const bool block_map_requested =
     PlaneDescriptorSpecified(output.block_distance_map);
   const bool reconstruction_requested = std::ranges::any_of(
@@ -2299,7 +2357,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       "Resident Butteraugli final output is invalid");
   }
   if (!input.evaluate_final_field &&
-      (input.iterations == 0 || output.frame == nullptr ||
+      (input.iterations == 0 || !frame_requested ||
        block_map_requested || reconstruction_requested)) {
     return Status::InvalidArgument(
       "Resident final-frame-only policy output is invalid");
@@ -2361,6 +2419,17 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
 
   std::vector<double> candidate_scores;
   VarDctEncoderFrame candidate_frame;
+  std::unique_ptr<MetalCompletedVarDctFrame> candidate_completed_frame;
+  uint64_t output_prepare_nanoseconds = 0;
+  if (output.completed_frame != nullptr) {
+    const auto begin = profiling ? ProfileClock::now() : ProfileClock::time_point{};
+    status = PrepareCompletedFrame(&candidate_completed_frame);
+    if (profiling) output_prepare_nanoseconds = ElapsedNanoseconds(begin);
+    if (!status.ok()) {
+      CompleteOperation();
+      return status;
+    }
+  }
   const size_t score_count =
     input.iterations + static_cast<size_t>(input.evaluate_final_field);
   try {
@@ -2745,7 +2814,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   }
 
   QuantizerParams resident_quantizer;
-  if (output.frame != nullptr) {
+  if (frame_requested) {
     status = backend_->CopyDeviceToHost(
       *resident_quantizer_params_.buffer, &resident_quantizer,
       sizeof(resident_quantizer), resident_quantizer_params_.offset_bytes);
@@ -2755,7 +2824,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     if (status.ok()) {
       candidate_readback_stats.quantizer_bytes = sizeof(resident_quantizer);
       candidate_readback_stats.mapped_frame_bytes =
-        (coefficient_value_count_ + 4 * block_count_) * sizeof(int32_t);
+        ((candidate_completed_frame == nullptr ? coefficient_value_count_ :
+            completed_coefficients_.extent.width) + 4 * block_count_) * sizeof(int32_t);
     }
   }
   if (reconstruction_requested) {
@@ -2815,19 +2885,32 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     return Status::Internal(
       "Resident Butteraugli reconstruction readback is invalid");
   }
-  if (output.frame != nullptr) {
+  if (frame_requested) {
     uint64_t mapping_nanoseconds = 0;
     uint64_t assembly_nanoseconds = 0;
-    status = AssembleFrameFromCompletedDeviceBuffers(
-      true, &candidate_frame,
-      profiling ? &mapping_nanoseconds : nullptr,
-      profiling ? &assembly_nanoseconds : nullptr);
+    if (candidate_completed_frame != nullptr) {
+      const auto begin = profiling ? ProfileClock::now() : ProfileClock::time_point{};
+      status = FinishCompletedFrame(*candidate_completed_frame);
+      if (profiling) assembly_nanoseconds = ElapsedNanoseconds(begin);
+    } else {
+      status = AssembleFrameFromCompletedDeviceBuffers(
+        true, &candidate_frame,
+        profiling ? &mapping_nanoseconds : nullptr,
+        profiling ? &assembly_nanoseconds : nullptr);
+    }
     if (!status.ok()) {
       Invalidate();
       return status;
     }
     if (profiling) {
       try {
+        if (candidate_completed_frame != nullptr) {
+          candidate_profile.wall_stages.push_back({
+            .stage_id = "resident.frame_output_prepare",
+            .kind = gpu_profile_internal::GpuWallStageKind::kHost,
+            .wall_nanoseconds = output_prepare_nanoseconds,
+          });
+        }
         candidate_profile.wall_stages.push_back({
           .stage_id = "resident.frame_mapping",
           .kind = gpu_profile_internal::GpuWallStageKind::kReadback,
@@ -2874,6 +2957,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     }
   }
   if (output.frame != nullptr) *output.frame = std::move(candidate_frame);
+  if (output.completed_frame != nullptr) {
+    *output.completed_frame = std::move(candidate_completed_frame);
+  }
   last_readback_stats_ = candidate_readback_stats;
   resident_forward_coefficients_ready_ = true;
   if (profiling) *profile = std::move(candidate_profile);
@@ -3092,6 +3178,129 @@ Status MetalPreparedAqEvaluation::AssembleFrame(
           .reject_unwritten_coefficients = true,
       },
       frame);
+}
+
+Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
+    std::unique_ptr<MetalCompletedVarDctFrame>* out) {
+  try {
+    auto frame = std::make_unique<MetalCompletedVarDctFrame>();
+    Status status = FrameGeometry::Create(source_extent_, &frame->geometry);
+    if (!status.ok()) return status;
+    frame->strategies = strategies_host_;
+    frame->profile = options_.profile;
+    frame->sharpness = epf_sharpness_host_;
+    frame->raw_quant.resize(block_count_);
+    frame->quantized_dc.resize(3 * block_count_);
+    frame->dc.resize(3 * block_count_);
+    constexpr size_t cap = kVarDctAcGroupCoefficientCapacity;
+    constexpr size_t dim = kVarDctAcGroupBlockDimension;
+    frame->group_extent = {
+      (block_extent_.width + dim - 1) / dim,
+      (block_extent_.height + dim - 1) / dim};
+    size_t group_count = 0;
+    if (!frame->group_extent.try_area(&group_count) ||
+        group_count > std::numeric_limits<uint32_t>::max() / (3 * cap)) {
+      return Status::InvalidArgument("Completed Metal frame is too large");
+    }
+    const size_t coefficient_count = group_count * 3 * cap;
+    frame->group_used.assign(group_count, 0);
+    std::vector<uint32_t> destinations(anchor_count_);
+    // Build from the authoritative post-search anchors on every output
+    // request, not from the provisional preparation's strategy grid.
+    for (const AqAnchor& anchor : row_major_anchors_) {
+      const auto& batch = batches_[anchor.batch_index];
+      const auto* info = GetAcStrategyInfo(anchor.strategy);
+      const size_t gx = anchor.block_x / dim;
+      const size_t gy = anchor.block_y / dim;
+      if (info == nullptr ||
+          (anchor.block_x + info->covered_blocks.width - 1) / dim != gx ||
+          (anchor.block_y + info->covered_blocks.height - 1) / dim != gy) {
+        return Status::InvalidArgument("Completed Metal transform crosses a group");
+      }
+      const size_t group = gy * frame->group_extent.width + gx;
+      size_t& used = frame->group_used[group];
+      if (batch.coefficient_count > cap - used) {
+        return Status::Internal("Completed Metal group capacity overflow");
+      }
+      destinations[batch.anchor_offset + anchor.index_in_batch] =
+        static_cast<uint32_t>(group * 3 * cap + used);
+      used += batch.coefficient_count;
+    }
+    const size_t allocation_count = coefficient_count + destinations.size();
+    if (allocation_count < coefficient_count || allocation_count >
+        std::numeric_limits<size_t>::max() / sizeof(int32_t)) {
+      return Status::InvalidArgument("Completed Metal allocation is too large");
+    }
+    status = backend_->Allocate(
+      allocation_count * sizeof(int32_t), &frame->allocation);
+    if (!status.ok()) return status;
+    auto* metal = MetalBackend::AsMetalBuffer(*frame->allocation);
+    auto* storage = static_cast<int32_t*>(metal->handle()->contents());
+    if (storage == nullptr) {
+      return Status::Internal("Completed Metal output is not host accessible");
+    }
+    // Initialize only unused group tails. Every used coefficient is written
+    // directly by the final quantization dispatch; no full-plane clear/copy.
+    for (size_t group = 0; group < group_count; ++group) {
+      for (size_t channel = 0; channel < 3; ++channel) {
+        const size_t base = (group * 3 + channel) * cap;
+        std::fill(storage + base + frame->group_used[group],
+                  storage + base + cap, 0);
+      }
+    }
+    std::copy(destinations.begin(), destinations.end(),
+              reinterpret_cast<uint32_t*>(storage + coefficient_count));
+    completed_coefficients_ = {
+      frame->allocation.get(), 0, DeviceElementType::kI32,
+      {coefficient_count, 1}, coefficient_count};
+    completed_destinations_ = {
+      frame->allocation.get(), coefficient_count * sizeof(int32_t),
+      DeviceElementType::kI32, {anchor_count_, 1}, anchor_count_};
+    *out = std::move(frame);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory("Unable to allocate completed Metal frame");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument("Completed Metal frame dimensions are too large");
+  }
+}
+
+Status MetalPreparedAqEvaluation::FinishCompletedFrame(
+    MetalCompletedVarDctFrame& frame) const {
+  std::span<const int32_t> raw_quant;
+  std::span<const int32_t> quantized_dc;
+  Status status = BorrowCompletedContiguousI32(
+    *backend_, completed_coefficients_, &frame.coefficients);
+  if (status.ok()) status = BorrowCompletedContiguousI32(
+    *backend_, raw_quant_, &raw_quant);
+  if (status.ok()) status = BorrowCompletedContiguousI32(
+    *backend_, quantized_dc_, &quantized_dc);
+  if (!status.ok()) return status;
+  if (raw_quant.size() != block_count_ || quantized_dc.size() != 3 * block_count_) {
+    return Status::Internal("Completed Metal metadata dimensions changed");
+  }
+  // These block-resolution fields are snapshotted so temporary AQ storage can
+  // be reused/destroyed immediately. The full-resolution AC plane is borrowed.
+  std::copy(raw_quant.begin(), raw_quant.end(), frame.raw_quant.begin());
+  std::copy(quantized_dc.begin(), quantized_dc.end(), frame.quantized_dc.begin());
+  frame.quantizer = last_quantizer_;
+  status = chroma_from_luma_internal::CreateColorCorrelationMap(
+    {last_y_to_x_.data(), tile_extent_, tile_extent_.width},
+    {last_y_to_b_.data(), tile_extent_, tile_extent_.width},
+    &frame.color_correlation);
+  if (!status.ok()) return status;
+  const auto& steps = frame.quantizer.dc_steps();
+  for (size_t i = 0; i < block_count_; ++i) {
+    const float y = static_cast<float>(frame.quantized_dc[block_count_ + i]) * steps[1];
+    frame.dc[i] = static_cast<float>(frame.quantized_dc[i]) * steps[0];
+    frame.dc[block_count_ + i] = y;
+    frame.dc[2 * block_count_ + i] =
+      static_cast<float>(frame.quantized_dc[2 * block_count_ + i]) * steps[2] + y;
+  }
+  if (!frame.view().valid()) {
+    return Status::DeviceError("Completed Metal frame is invalid");
+  }
+  return Status::Ok();
 }
 
 Status MetalPreparedAqEvaluation::AssembleFrameFromReadback(
@@ -4360,12 +4569,18 @@ Status MetalPreparedAqEvaluation::WaitForOperation(
 
 void MetalPreparedAqEvaluation::CompleteOperation() {
   std::lock_guard lock(mutex_);
+  completed_coefficients_ = {};
+  completed_destinations_ = {};
+  write_completed_coefficients_ = false;
   state_ = State::kReady;
 }
 
 void MetalPreparedAqEvaluation::Invalidate() {
   std::lock_guard lock(mutex_);
   submission_.reset();
+  completed_coefficients_ = {};
+  completed_destinations_ = {};
+  write_completed_coefficients_ = false;
   state_ = State::kInvalid;
   scratch_lease_reusable_ = false;
 }
@@ -4571,6 +4786,8 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
 void MetalPreparedAqEvaluation::EncodeResidentReconstruction(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
     uint32_t iteration) {
+  write_completed_coefficients_ = completed_coefficients_.buffer != nullptr &&
+    iteration == resident_policy_iterations_;
   reset_params_.preserve_error = iteration == 0 ? 0u : 1u;
   reset_params_.preserve_forward_coefficients =
     iteration == 0 && !resident_forward_coefficients_ready_ ? 0u : 1u;
@@ -4586,6 +4803,7 @@ void MetalPreparedAqEvaluation::EncodeResidentReconstruction(
 
 void MetalPreparedAqEvaluation::EncodeResidentFrame(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) {
+  write_completed_coefficients_ = completed_coefficients_.buffer != nullptr;
   reset_params_.preserve_error = 1u;
   reset_params_.preserve_forward_coefficients = 1u;
   EncodeResidentQuantizer(backend, encoder);
@@ -4636,6 +4854,9 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
     const void* context) {
   auto& stage = *static_cast<const ResidentProfileStageContext*>(context);
   MetalPreparedAqEvaluation& self = *stage.self;
+  self.write_completed_coefficients_ =
+    self.completed_coefficients_.buffer != nullptr &&
+    stage.iteration == self.resident_policy_iterations_;
   switch (stage.stage) {
     case ResidentProfileStage::kReconstruction:
       self.reset_params_.preserve_error = stage.iteration == 0 ? 0u : 1u;

@@ -161,6 +161,8 @@ struct AdaptiveQuantizationMaterialization {
   bool block_distance_map = true;
   bool reconstructed_linear_rgb = true;
   bool final_perceptual_evaluation = true;
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
+    completed_frame = nullptr;
 };
 
 /// Reusable frame-level GPU AQ state for repeated rate-control attempts.

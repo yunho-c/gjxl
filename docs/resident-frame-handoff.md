@@ -1,4 +1,6 @@
-# Resident frame handoff: milestone 1
+# Resident frame handoff
+
+## Milestone 1: ownership-independent consumers
 
 This refactor removes the owned-frame requirement from the internal codestream
 consumer interface. It does not yet eliminate Metal's final frame assembly or
@@ -142,12 +144,151 @@ build/release/gjxl_encoding_benchmark --workload padded_4k \
 
 For natural inputs, replace `--workload padded_4k` with `--input INPUT.pfm`.
 
-## Next milestone
+## Milestone 2: completed Metal output
 
-Connect completed Metal output through a bounded owner/lease, initially at the
-existing synchronous completion boundary. Then measure final coefficient writes
-into the consumer layout, removing the compulsory repack/owned copy across the
-whole handoff. The current milestone intentionally retains that assembly;
-merely routing it through a view is not a zero-copy GPU handoff or a claimed
-copy-elimination speedup. Shared resource admission and new scheduling remain
-separate later work.
+Milestone 1 was committed as `ca440d1`. Milestone 2 connects the resident
+Butteraugli encoding workflow to an exclusive `CompletedVarDctFrame` lease.
+The serializer and the workflow's strategy summary both read its frame view.
+The existing public owned-frame and diagnostic paths remain available; exact
+coefficients, maximum-error control, and maximum throughput retain their owned
+handoffs. No AQ iteration, coefficient decision, AC search, entropy policy,
+thread admission, or batch scheduling policy is changed.
+
+The final coefficient kernel writes AC coefficients directly to the existing
+group/channel-major serializer layout. Transform dispatch and floating-point
+reconstruction remain strategy-batch-major. A destination table maps each batch
+anchor to its group-local, row-major transform offset. It is constructed from
+the authoritative final strategy grid for each output request, including after
+reconfiguration. Both final-score and final-frame-only requests use direct
+output writes. Intermediate AQ iterations and the owned diagnostic path keep
+their previous layout.
+
+There is no GPU packing kernel, extra submission, or full AC readback/repack into
+`VarDctEncoderFrame`. Only unused fixed-capacity group tails are initialized on
+the host; the final quantization dispatch writes every used coefficient.
+Integer DC and adjusted raw quantization are snapshotted at block resolution.
+Floating DC is reconstructed using the same CPU steps as owned assembly, and
+strategy, sharpness, quantizer and final CfL metadata are independently owned.
+These small copies are intentional: they sever the output's dependence on AQ
+scratch without requiring a separate GPU metadata-copy pass.
+
+The lease owns one non-purgeable shared Metal allocation containing final AC
+coefficients and its destination table, plus the block-resolution metadata.
+Its allocation is bounded by frame geometry: `3 * group_count * 65536` int32
+coefficients and one uint32 destination per transform anchor. It retains no
+backend, prepared evaluator, submission, or scratch arena. It is published only
+after the existing synchronous GPU completion and output validation. Failed
+requests preserve the previous caller output. It is freed when the encoding
+attempt's consumers finish; no new idle cache is introduced.
+
+The existing prepared workflow may still retain its evaluator for target-size
+attempt reuse. That is an independent preparation lifetime, not a requirement
+of the completed frame. Releasing or reusing the evaluator does not invalidate
+the output. Existing batch in-flight limits remain the workflow admission
+boundary; this milestone adds no process-wide active-memory budget.
+
+### Relationship to `perf/metal-preparation`
+
+The separate worktree's `e1010fe` shares transient AQ storage with Butteraugli
+and defers host preparation; `306f153` adds a bounded volatile preparation cache.
+Those changes were inspected, not merged. This output allocation does not alias
+their borrowed filter/gather planes or participate in their scratch caches.
+The two changes are architecturally complementary, but combined source and
+performance qualification will still be required when integrating the branches.
+Current milestone-2 measurements use `ca440d1` as their baseline and do not
+include the preparation branch's speed or memory gains.
+
+### Qualification
+
+Permanent tests exercise direct output against owned output with exact DC/AC,
+raw quantization, reconstructed DC, score-history and codestream comparisons.
+They cover tiny/padded images, partial AC groups, multiple DC groups, all seven
+supported transforms, reconfiguration away from a provisional DCT8 grid,
+0/2-update policies, final-score on/off, stage-profiled/unprofiled parity,
+concurrent reads during evaluator
+reuse, forced idle-scratch reclamation, and serialization after both evaluator
+and backend destruction. Simultaneous owned/leased output requests are rejected
+before allocation/submission. Upload, submission, completion, device-numeric,
+and readback failures preserve an existing lease and diagnostic outputs.
+
+Qualification artifacts and commands are retained locally under
+`build/handoff-qualification/`. The fresh committed-milestone-1 build is frozen
+at `build/milestone1`; `build/baseline` remains the older pre-milestone-1 build.
+
+Final Release CTest passes **63/64**, versus **62/63** on milestone 1. Both
+retain only the CPU `quantization_pipeline` mismatch documented above; no
+golden or tolerance was changed. The completed-frame, AQ-evaluation and full
+GPU-pipeline tests also pass **3/3** with AddressSanitizer and UBSan. Leak
+checking is disabled, and UBSan null checks are suppressed only in the vendor
+`third_party/metal-cpp` headers: their nil retain/release wrapper fails before
+encoding in the unsuppressed run. That failure and the narrowly scoped
+suppression are retained. No GJXL source checks are suppressed.
+
+All **56** corpus/policy cases match milestone-1 codestream bytes, including
+efforts 1–10, final-score diagnostics, throughput, exact coefficients, and
+target-size retries. Independent pinned decoding of Kodak17, planter 4K and
+padded stress 4K matches PFM bytes. Pinned full conformance continues to pass
+all **22** fixtures. These output checks are separate from the timing matrix.
+
+### Complete-call performance and memory
+
+Apple M4 Pro, 48 GiB, macOS 15.6; fresh Release libraries, SIMD/fused-tuned Metal,
+fully resident, distance 1.2, effort 7, automatic CPU threads. The driver is
+adapted from the preparation worktree's complete-call harness. It measures the
+entire synchronous encode call **including evaluator teardown**, excluding
+backend creation, image loading, hashing and output writes. This boundary is
+slightly wider than the milestone-1 public-workflow profile table above.
+
+Seven independent process pairs alternate parent/candidate order for each
+workload. Each process alternates the named input and a deterministically
+changed-image companion, discards its first three encodes, and retains six
+encodes per image. The table shows the named input's medians of seven process
+medians and the median of seven paired latency ratios. It is not a ratio of
+aggregate worker counters. All 840 encodes retain identical per-image output
+hashes and sizes across variants/repetitions; process-boundary checks found no
+other GJXL encoding jobs during the accepted timing matrix.
+
+| Input | Milestone 1 | Milestone 2 | Median paired latency change |
+| --- | ---: | ---: | ---: |
+| Padded 1080p, 1919×1079 | 85.104 ms | 84.047 ms | -0.59% |
+| Padded 4K, 3839×2159 | 294.037 ms | 286.912 ms | -2.19% |
+| Kodak17, 512×768 | 25.452 ms | 24.731 ms | -2.58% |
+| Planter 4K, 3840×2160 | 300.730 ms | 292.970 ms | -2.76% |
+
+The changed-image companions improve by 1.56%, 2.63%, 2.14% and 3.36%,
+respectively. The primary 1080p case improves in 5/7 pairs; the other primary
+inputs improve in 7/7. This supports a modest end-to-end gain on this cohort,
+not a general corpus-wide performance claim.
+
+The downstream cost matters: primary padded-4K serializer wall time increases
+from 38.088 to 39.963 ms, and planter from 44.419 to 46.593 ms, while their
+quantization-pipeline wall time decreases from 241.143 to 233.313 ms and
+241.592 to 232.107 ms. The benchmark does not establish the hardware cause of
+the serializer slowdown. Eliminating the AC copy does not make all its saved
+host time an end-to-end win.
+
+A separate padded-4K stage-profile probe (one warmup, three samples per build)
+retains **five submissions and 341 dispatches** in both builds. Median host
+frame assembly changes from **11.894 ms** to **0.800 ms** of mapping/metadata
+finalization plus **0.582 ms** of output preparation. Final-frame GPU stages
+are **3.399→3.489 ms** in this small probe. These instrumented substage numbers
+explain the handoff boundary; they are not additional independent end-to-end
+performance samples. The new `resident.frame_output_prepare` wall stage records
+allocation, destination-table construction and tail initialization explicitly.
+
+Three alternating memory-probe pairs at padded 4K retain two source images,
+perform three encodes and sample the task physical-footprint counters. Median
+process peak is **3344.4→3347.0 MiB**; footprint one second idle with the backend
+alive is **1194.3→1196.3 MiB**. These are effectively unchanged, not a peak-memory
+reduction or a claim that the existing AQ caches retain no memory. The output
+lease itself is not cached. Freshly relinking the final Release libraries
+reproduces the timed candidate driver byte-for-byte; commands, library and
+driver hashes, all process samples, and memory logs are retained with the
+qualification artifacts.
+
+## Later milestones
+
+Shared resource admission and new scheduling remain separate later work.
+Milestone 2 removes the compulsory full AC copy; it does not eliminate every
+frame-metadata copy, every intermediate coefficient allocation, or the CPU
+entropy/codestream tail.

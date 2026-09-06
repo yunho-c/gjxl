@@ -23,7 +23,9 @@
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/encoder.h"
+#include "codestream/encoder_internal.h"
 #include "codestream/workflow.h"
 #include "codestream/workflow_internal.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
@@ -765,6 +767,35 @@ bool CheckDefaultUpdatePipelineParity() {
       encoding_codestream != resident_codestream) {
     std::cerr << "Encoding-only resident pipeline materialized host "
                  "preprocessing or changed frame output: "
+              << encoding_status.message() << '\n';
+    return false;
+  }
+
+  std::unique_ptr<gjxl::vardct_frame_internal::CompletedVarDctFrame>
+    encoding_lease;
+  gjxl::VarDctEncoderFrame leased_fallback;
+  std::vector<double> leased_scores;
+  encoding_status = gjxl::quantization_pipeline_internal::
+    RunPreparedGpuQuantizationPipelineForEncoding(
+      *gpu, original.ConstView(), encoding_prepared, options,
+      gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+      {
+        .frame = &leased_fallback,
+        .score_history = &leased_scores,
+        .completed_frame = &encoding_lease,
+      }, nullptr, &encoding_aq);
+  std::vector<uint8_t> leased_bytes;
+  if (encoding_status.ok() && encoding_lease != nullptr) {
+    // The public-workflow handoff must also survive releasing its reusable
+    // preparation, not only direct prepared-evaluator unit tests.
+    encoding_aq.evaluation.reset();
+    encoding_status = gjxl::codestream_internal::EncodeVarDctCodestreamFromView(
+      encoding_lease->view(), {}, &leased_bytes);
+  }
+  if (!encoding_status.ok() || encoding_lease == nullptr ||
+      leased_fallback.valid() || leased_scores != resident.scores ||
+      leased_bytes != resident_codestream) {
+    std::cerr << "Encoding-only completed frame handoff failed: "
               << encoding_status.message() << '\n';
     return false;
   }

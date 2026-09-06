@@ -25,6 +25,8 @@
 
 namespace gjxl::metal_internal {
 
+class MetalCompletedVarDctFrame;
+
 struct AqReconstructionParams {
   uint32_t coding_width;
   uint32_t coding_height;
@@ -53,6 +55,7 @@ struct AqReconstructionParams {
   float epf_quant_multiplier;
   std::array<float, 8> epf_sharpness_lut;
   uint32_t use_resident_quantizer;
+  uint32_t group_major_output;
 };
 
 struct AqResetParams {
@@ -478,6 +481,9 @@ private:
       std::span<const int32_t> quantized_ac,
       VarDctEncoderFrame* frame) const;
   Status AssembleFrameFromReadback(VarDctEncoderFrame *frame) const;
+  Status PrepareCompletedFrame(
+      std::unique_ptr<MetalCompletedVarDctFrame>* frame);
+  Status FinishCompletedFrame(MetalCompletedVarDctFrame& frame) const;
   Status AssembleFrameFromCompletedDeviceBuffers(
       bool raw_quant_is_device_resident,
       VarDctEncoderFrame* frame,
@@ -629,6 +635,11 @@ private:
   DevicePlaneView gathered_pixels_;
   DevicePlaneView forward_coefficients_;
   DevicePlaneView quantized_coefficients_;
+  // Borrowed only while an operation is busy. The candidate/output owns these
+  // allocations independently of both AQ arenas and the backend's reuse pool.
+  DevicePlaneView completed_coefficients_;
+  DevicePlaneView completed_destinations_;
+  bool write_completed_coefficients_ = false;
   DevicePlaneView reconstruction_coefficients_;
   DevicePlaneView dc_;
   DevicePlaneView quantized_dc_;

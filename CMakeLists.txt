@@ -2405,6 +2405,21 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_quantization_gpu_pipeline_test
   )
 
+  add_executable(
+    gjxl_metal_completed_frame_test
+    tests/metal_completed_frame_test.cpp
+  )
+  target_link_libraries(
+    gjxl_metal_completed_frame_test
+    PRIVATE gjxl_codestream gjxl_gpu_ops gjxl_metal
+  )
+  target_compile_definitions(
+    gjxl_metal_completed_frame_test
+    PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+  )
+  add_dependencies(gjxl_metal_completed_frame_test gjxl_metal_shaders)
+  add_test(NAME metal_completed_frame COMMAND gjxl_metal_completed_frame_test)
+
   add_test(
     NAME codec_install_consumer
     COMMAND

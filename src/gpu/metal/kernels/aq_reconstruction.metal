@@ -35,6 +35,7 @@ struct AqReconstructionParams {
   float epf_quant_multiplier;
   float epf_sharpness_lut[8];
   uint use_resident_quantizer;
+  uint group_major_output;
 };
 
 struct AqResetParams {
@@ -1513,6 +1514,7 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
   device const uchar* epf_sharpness [[buffer(13)]],
   device const uint* resident_quantizer [[buffer(14)]],
   device const float* adjustment_thresholds [[buffer(15)]],
+  device const uint* group_destinations [[buffer(16)]],
   uint anchor_index [[threadgroup_position_in_grid]],
   uint thread_index [[thread_index_in_threadgroup]],
   uint group_size [[threads_per_threadgroup]]) {
@@ -1667,7 +1669,11 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
       1.0f,
       threshold,
       error);
-    quantized_coefficients[offset] = quantized;
+    const uint output_offset = params.group_major_output != 0u
+      ? group_destinations[params.anchor_offset + anchor_index] +
+          channel * 65536u + coefficient
+      : offset;
+    quantized_coefficients[output_offset] = quantized;
     reconstruction_coefficients[offset] = aq_dequantize_coefficient(
       quantized,
       quant_tables[table_offsets.x + table],
@@ -1702,7 +1708,11 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
         multiplier,
         threshold,
         error);
-      quantized_coefficients[offset] = quantized;
+      const uint output_offset = params.group_major_output != 0u
+        ? group_destinations[params.anchor_offset + anchor_index] +
+            channel * 65536u + coefficient
+        : offset;
+      quantized_coefficients[output_offset] = quantized;
       reconstruction_coefficients[offset] = aq_dequantize_coefficient(
         quantized,
         quant_tables[table_offsets.x + table],

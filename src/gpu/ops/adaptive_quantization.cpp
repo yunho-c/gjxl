@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include "codec/vardct_frame_view_internal.h"
+
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/chroma_from_luma_internal.h"
@@ -614,6 +616,8 @@ Status RunGpuAdaptiveQuantizationImpl(
       }
       Image3FBuffer fused_reconstruction;
       VarDctEncoderFrame fused_frame;
+      std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>
+        completed_frame;
       AqResidentButteraugliPolicyOutput fused_output{
         .score_history = &fused_result.score_history,
       };
@@ -633,7 +637,11 @@ Status RunGpuAdaptiveQuantizationImpl(
           fused_output.reconstructed_linear_rgb =
             fused_reconstruction.view();
         }
-        fused_output.frame = &fused_frame;
+        if (materialization.completed_frame != nullptr) {
+          fused_output.completed_frame = &completed_frame;
+        } else {
+          fused_output.frame = &fused_frame;
+        }
       }
       const AqResidentButteraugliPolicyInput resident_input{
           .adjusted_initial_quant_field = policy_initial,
@@ -690,6 +698,9 @@ Status RunGpuAdaptiveQuantizationImpl(
               full_output->reconstructed_linear_rgb);
           }
           *full_output->frame = std::move(fused_frame);
+          if (materialization.completed_frame != nullptr) {
+            *materialization.completed_frame = std::move(completed_frame);
+          }
           *full_output->score_history =
             std::move(fused_result.score_history);
         }

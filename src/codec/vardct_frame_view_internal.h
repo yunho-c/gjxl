@@ -75,6 +75,16 @@ class VarDctFrameView {
   VarDctFrameViewData data_;
 };
 
+/// Exclusive completed-output lease, independent of a producer's scratch.
+/// Destruction releases the backing only after all synchronous readers finish.
+/// Implementations publish a view only after device completion and must not
+/// retain a prepared evaluator or return live storage to a reuse/purge pool.
+class CompletedVarDctFrame {
+ public:
+  virtual ~CompletedVarDctFrame() = default;
+  [[nodiscard]] virtual VarDctFrameView view() const noexcept = 0;
+};
+
 /// Borrows without validating coefficient values; an invalid owner yields an
 /// invalid view. Destroying, assigning, or moving the owner ends the borrow.
 [[nodiscard]] VarDctFrameView BorrowFrame(

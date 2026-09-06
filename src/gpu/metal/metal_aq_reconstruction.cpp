@@ -267,6 +267,8 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
 
   if (!exact_coefficient_reconstruction_) {
     EncodeAdjustedQuantizationBatch(backend, encoder, batch_index);
+    AqReconstructionParams output_params = params;
+    output_params.group_major_output = write_completed_coefficients_ ? 1u : 0u;
     encoder->setComputePipelineState(
         backend.aq_pipelines_.encode_reconstruction_coefficients.get());
     BindPlane(encoder, anchors_, 0);
@@ -275,12 +277,13 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
     BindPlane(encoder, y_to_x_, 3);
     BindPlane(encoder, y_to_b_, 4);
     BindPlane(encoder, forward_coefficients_, 5);
-    BindPlane(encoder, quantized_coefficients_, 6);
+    BindPlane(encoder, write_completed_coefficients_
+        ? completed_coefficients_ : quantized_coefficients_, 6);
     BindPlane(encoder, reconstruction_coefficients_, 7);
     BindPlane(encoder, dc_, 8);
     BindPlane(encoder, quantized_dc_, 9);
     BindPlane(encoder, reconstruction_error_, 10);
-    encoder->setBytes(&params, sizeof(params), 11);
+    encoder->setBytes(&output_params, sizeof(output_params), 11);
     BindPlane(encoder, inverse_sigma_, 12);
     BindPlane(encoder, epf_sharpness_, 13);
     BindPlane(encoder,
@@ -289,6 +292,8 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
                 : raw_quant_,
               14);
     BindPlane(encoder, gathered_pixels_, 15);
+    BindPlane(encoder, write_completed_coefficients_
+        ? completed_destinations_ : anchors_, 16);
     DispatchMetalThreadgroups(
         encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),

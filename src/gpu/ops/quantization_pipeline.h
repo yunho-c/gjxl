@@ -60,6 +60,11 @@ struct GpuEncodingQuantizationPipelineOutput {
   std::vector<double>* score_history = nullptr;
   MaximumErrorResult* maximum_error_result = nullptr;
   bool collect_final_butteraugli_score = true;
+  /// Optional resident lease. `frame` remains the required compatibility
+  /// destination and is empty on leased success. Other modes fill `frame` and
+  /// clear the lease on success; failure preserves the previous lease.
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
+    completed_frame = nullptr;
 };
 
 /// Reuses target-invariant host preparation across complete GPU attempts.
