@@ -12,12 +12,18 @@
 #include "codestream/storage.h"
 #include "codestream/encoding_result_internal.h"
 #include "core/status.h"
+#include "core/host_storage_bound.h"
 
 namespace gjxl::codestream_internal {
 
 inline constexpr float kMinimumTargetSizeButteraugliTarget = 0.01f;
 inline constexpr float kMaximumTargetSizeButteraugliTarget = 10.0f;
 inline constexpr size_t kMaximumTargetSizeEncodeAttempts = 64;
+
+/// Search-interval vector only; current and retained-best encode results are
+/// separate owners. This does not run a search or validate its byte target.
+[[nodiscard]] Status ComputeTargetSizeControlStorageBound(
+  size_t maximum_attempts, resource_budget_internal::HostStorageBound* out);
 
 struct TargetSizeSearchOptions {
   size_t target_bytes = 0;

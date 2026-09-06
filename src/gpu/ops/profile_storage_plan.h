@@ -18,6 +18,7 @@ struct ProfileStorageShape {
   size_t stages = 0;
   size_t dispatches = 0;
   size_t maximum_id_length = 0;
+  bool operator==(const ProfileStorageShape&) const = default;
 };
 
 /// Full nested GpuExecutionProfile backing, including vector/string growth.

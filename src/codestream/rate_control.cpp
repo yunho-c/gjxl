@@ -191,6 +191,23 @@ template <typename Bytes>
 
 }  // namespace
 
+Status ComputeTargetSizeControlStorageBound(
+  size_t maximum_attempts, resource_budget_internal::HostStorageBound* out) {
+  if (out == nullptr || maximum_attempts == 0 ||
+      maximum_attempts > kMaximumTargetSizeEncodeAttempts) {
+    return Status::InvalidArgument("Target-size control storage shape is invalid");
+  }
+  resource_budget_internal::HostStorageBound bound;
+  // One initial interval exists even when the first endpoint meets tolerance.
+  // Every subsequent midpoint removes one and appends two; endpoints add none.
+  if (!bound.AddVector<SearchInterval>(std::max(size_t{1}, maximum_attempts - 1),
+        resource_budget_internal::VectorCapacityPolicy::kGrowing)) {
+    return Status::OutOfMemory("Target-size control storage bound overflows");
+  }
+  *out = bound;
+  return Status::Ok();
+}
+
 template <typename Bytes>
 Status SearchTargetSizeImpl(
   const TargetSizeSearchOptions& options,

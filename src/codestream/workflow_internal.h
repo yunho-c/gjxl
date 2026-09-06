@@ -15,6 +15,18 @@
 
 namespace gjxl::codestream_internal {
 
+/// Shared policy resolution for execution and whole-workflow storage planning.
+/// The caller validates effort and density mode before using this recipe.
+[[nodiscard]] constexpr size_t AdaptiveQuantizationIterations(
+  const VarDctEncodingOptions& options) noexcept {
+  if (options.density_mode == VarDctDensityMode::kHighDensity) return 4;
+  if (options.effort <= 3) return 0;
+  if (options.effort <= 6) return 1;
+  if (options.effort == 7) return 2;
+  if (options.effort <= 9) return 3;
+  return 4;
+}
+
 /// Internal complete-encode result. Candidate bytes stay charged until the
 /// outer C/C++ or batch adapter explicitly publishes them.
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestreamOwned(

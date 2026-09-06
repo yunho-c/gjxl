@@ -193,6 +193,11 @@ performance or physical-footprint measurement is asserted by this checkpoint.
 
 ## Remaining whole-workflow work
 
+The later [whole resident workflow checkpoint](resident-workflow-storage-planning.md)
+composes these profiles with the production Metal Butteraugli encode and its
+parent session. It also bounds unprofiled forced-Metal size-search attempts.
+The broader public-domain, other-policy and batch requirements remain pending.
+
 These plans close the policy/geometry-to-count gap for the covered Metal AQ
 submissions. They still need composition with host policy fields, retained
 preparation across attempts, completed/owned outputs, parent diagnostic sessions,

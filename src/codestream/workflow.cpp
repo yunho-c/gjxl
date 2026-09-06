@@ -174,27 +174,6 @@ constexpr float kAutomaticMetalMinimumButteraugliTarget = 1.0f;
 constexpr float kAutomaticMetalMaximumButteraugliTarget = 1.2f;
 constexpr std::string_view kQualifiedMetalBackend = "Metal: Apple M4 Pro";
 
-size_t AdaptiveQuantizationIterations(
-  const VarDctEncodingOptions& options) {
-
-  if (options.density_mode == VarDctDensityMode::kHighDensity) {
-    return 4;
-  }
-  if (options.effort <= 3) {
-    return 0;
-  }
-  if (options.effort <= 6) {
-    return 1;
-  }
-  if (options.effort == 7) {
-    return 2;
-  }
-  if (options.effort <= 9) {
-    return 3;
-  }
-  return 4;
-}
-
 bool ValidQuantizationMatrixScaleStats(
   const codestream_internal::QuantizationMatrixScaleStats& stats) {
 
@@ -738,7 +717,7 @@ struct PreparedWorkflow {
   CpuQuantizationPipelineOptions pipeline_options;
   pipeline_options.butteraugli_target = options.butteraugli_target;
   pipeline_options.adaptive_quantization.iterations =
-    AdaptiveQuantizationIterations(options);
+    codestream_internal::AdaptiveQuantizationIterations(options);
   if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     pipeline_options.adaptive_quantization.control_mode =
       AdaptiveQuantizationControlMode::kMaximumError;

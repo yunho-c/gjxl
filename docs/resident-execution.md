@@ -193,8 +193,12 @@ derive those dispatch bounds from policy and geometry, including multi-pass
 reductions, optional initial bitonic sorting, reference preparation, adjustment
 and final output. They compose individual profile graphs without observed-count
 allowances; host policy and complete workflow/session composition are still pending.
-Whole-workflow planning/admission is still pending; these partial attachments
-do not satisfy the milestone.
+The [whole resident workflow plan](resident-workflow-storage-planning.md) now
+composes production Metal Butteraugli preparation, AC/AQ, completed output,
+serialization and parent diagnostic sessions, including forced-Metal size-search
+retention. Complete cold/warm encodes fit its preflight reservation. Other
+backend/policy paths, input adapters, retained batch results and public-domain
+admission remain pending; these checkpoints do not satisfy the milestone.
 
 Deliverables:
 

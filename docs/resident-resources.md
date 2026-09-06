@@ -58,11 +58,13 @@ explicit capacity guard prevents context growth from invalidating stage pointers
 The [AQ profile plans](resident-aq-profile-storage-planning.md) add policy/geometry
 dispatch counts and complete per-submission diagnostic envelopes, including
 reference preparation, initial sorting, adjustment and resident frame output.
-Their session/attempt lifetimes still need whole-workflow composition.
-Remaining frontend/search/evaluation-state bounds and their combined
-device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
-workflow envelope and public domain integration.
-Whole-workflow planning and admission remain pending.
+The [whole resident workflow plan](resident-workflow-storage-planning.md) composes
+these session/attempt lifetimes with production Metal Butteraugli preparation,
+AC/AQ, completed output, serialization and forced-Metal size-search retention.
+It qualifies complete cold/warm encodes under precomputed reservations, not
+only isolated components. Other backend/policy envelopes, input adapters and
+retained batch results still need composition and public domain integration.
+Whole-domain admission remains pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
 ## Source-backed ownership inventory
@@ -240,7 +242,7 @@ Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
 Milestone 4 still requires a final allocation-coverage audit, remaining
-host/serializer bounds and their combination with the shared token/device plans,
+frontend/backend-policy envelopes and input-adapter/batch composition,
 public domain configuration/propagation, automatic cache eviction,
 retry and aggregate batch-result admission, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "codestream/workflow_internal.h"
+#include "codestream/resident_workflow_storage_plan.h"
 #include "core/image_buffer.h"
 #include "gpu/metal/metal_backend.h"
 
@@ -158,8 +159,11 @@ bool CheckWorkflowFailures(GpuBackend& gpu, GpuProfilingMode mode) {
   options.cpu_thread_count = 1;
   std::vector<uint8_t> oracle;
   VarDctEncodingSummary oracle_summary;
-  // Ample manual test envelope, not a production estimator.
-  constexpr size_t kEnvelope = 64 * 1024 * 1024;
+  ResidentWorkflowStoragePlan storage_plan;
+  if (!Ok(ComputeResidentWorkflowStoragePlan(image.extent(),
+      {.encoding = options, .collect_profile = true,
+       .collect_gpu_profile = true}, &storage_plan))) return false;
+  const size_t kEnvelope = storage_plan.working.peak_bytes;
   {
     ResourceBudget budget(kEnvelope);
     ResourceReservation job;
