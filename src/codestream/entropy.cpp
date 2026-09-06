@@ -19,6 +19,7 @@
 
 #include "codestream/ans_internal.h"
 #include "codestream/entropy_internal.h"
+#include "codestream/entropy_storage_plan.h"
 #include "codestream/huffman.h"
 #include "codestream/profile_internal.h"
 
@@ -2340,6 +2341,83 @@ Status codestream_internal::CountTokenStreamBits(
   uint64_t* bit_count) {
   return CountTokenStreamBits(
     EntropyTokenStreamView::Interleaved(tokens), code, bit_count);
+}
+
+Status codestream_internal::ComputePrefixOptimizationStoragePlan(
+  const EntropyOptimizationStorageOptions& o,
+  EntropyOptimizationStoragePlan* out) {
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
+      o.initial_histograms > 256 || o.borrow_prepared_clusters ||
+      (o.policy != EntropyStoragePolicy::kFastPrefix &&
+       o.policy != EntropyStoragePolicy::kPrefix) ||
+      (o.retain_prepared_clusters &&
+       (o.policy == EntropyStoragePolicy::kFastPrefix || !o.return_cost)))
+    return Status::InvalidArgument("Prefix optimization plan is invalid");
+  const bool fast = o.policy == EntropyStoragePolicy::kFastPrefix;
+  const size_t histograms = o.initial_histograms == 0
+    ? o.contexts : o.initial_histograms;
+  EntropyOptimizationStoragePlan plan;
+  const size_t k = plan.clusters = std::min(kMaximumPrefixClusters, histograms);
+  const auto overflow = [] {
+    return Status::OutOfMemory("Prefix optimization storage overflows");
+  };
+  EntropyModelStoragePlan model;
+  Status status = ComputeEntropyModelStoragePlan(
+    EntropyCodingMode::kPrefix, o.contexts, k, &model);
+  if (!status.ok()) return status;
+  if (!plan.output.Add(model.owned) ||
+      (o.return_cost && !plan.output.AddVector<uint64_t>(o.sections, kFreshExact)))
+    return overflow();
+  HostStorageBound prepared;
+  if (o.retain_prepared_clusters) {
+    if (!prepared.AddVector<uint8_t>(o.contexts, kFreshExact) ||
+        !prepared.AddVector<Storage<WeightedValue>>(k, kFreshExact) ||
+        !prepared.AddVector<WeightedValue>(o.tokens, kGrowing) ||
+        !plan.output.Add(prepared))
+      return overflow();
+  }
+  auto& work = plan.working;
+  // Legacy, maximum-seeded, refined and current candidate histograms plus a
+  // clustering helper and its compacted replacement. The fast path needs only
+  // one clustered owner and its replacement. Same-size reserve/assign can reuse.
+  if (!work.AddVector<Histogram>(histograms, kFreshExact) ||
+      !work.AddVector<Histogram>(k, kReusedExact, fast ? 2 : 6) ||
+      !work.AddVector<uint8_t>(histograms, kReusedExact, fast ? 1 : 6) ||
+      !work.AddVector<uint32_t>(histograms, kFreshExact, fast ? 1 : 2) ||
+      !work.AddVector<double>(histograms, kFreshExact) ||
+      !work.AddVector<size_t>(k, kFreshExact, fast ? 1 : 2) ||
+      (!fast && !work.AddVector<PrefixCode>(k, kFreshExact)) ||
+      // Best/refined/configured/candidate models and a local builder output.
+      // Six covers the returned model too; it is not added again from output.
+      !work.Add(model.owned, fast ? 1 : 6) ||
+      !work.Add(model.write_scratch) ||
+      (o.return_cost && !work.AddVector<uint64_t>(o.sections, kFreshExact)))
+    return overflow();
+  HostStorageBound writer;
+  status = ComputeEntropyWriterStorageBound(model.maximum_bits, &writer);
+  if (!status.ok()) return status;
+  if (!work.Add(writer)) return overflow();
+  EntropyAggregationStoragePlan aggregate;
+  status = ComputeEntropyAggregationStoragePlan(o.tokens, &aggregate);
+  if (!status.ok()) return status;
+  // Only the final configured partition collects raw values, not every screened
+  // cluster cap. It owns one exact N-value array, sliced across clusters.
+  if (!work.AddVector<uint32_t>(o.tokens, kFreshExact) ||
+      !work.AddVector<size_t>(k + 1, kFreshExact) ||
+      !work.AddVector<size_t>(k, kFreshExact) ||
+      !work.AddVector<uint64_t>(k, kFreshExact) ||
+      !work.AddVector<HybridUintConfig>(fast ? 1 : 1 + kBalancedUintConfigs.size(),
+                                       kGrowing) ||
+      !work.Add(aggregate.scratch))
+    return overflow();
+  if (o.retain_prepared_clusters) {
+    if (!work.Add(prepared)) return overflow();
+  } else if (!work.AddVector<WeightedValue>(o.tokens, kGrowing)) {
+    return overflow();
+  }
+  *out = plan;
+  return Status::Ok();
 }
 
 }  // namespace gjxl

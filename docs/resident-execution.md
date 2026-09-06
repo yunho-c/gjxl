@@ -152,6 +152,9 @@ and AC-search capacities for reuse by upfront planning and actual allocation.
 The [host/token bounds](resident-token-storage-planning.md) add reviewed vector
 growth/replacement bounds, shared AC/DC token reservations, and aggregate token
 owners plus worker scratch across order/context-map candidates.
+The [entropy bounds](resident-entropy-storage-planning.md) cover aggregation,
+Prefix/ANS model search and retained candidates, and model/token writer scratch;
+they also close the missed high-density clustering-queue accounting attachment.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "codestream/profile_internal.h"
+#include "codestream/entropy_storage_plan.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -112,6 +113,44 @@ struct AliasEntry {
 struct ReverseBitChunk {
   uint32_t bits = 0;
   uint8_t bit_count = 0;
+};
+
+struct Remainder {
+  size_t symbol = 0;
+  uint64_t remainder = 0;
+};
+
+struct EntropyDelta {
+  int32_t frequency = 0;
+  size_t count_index = 0;
+  size_t symbol = 0;
+};
+
+struct DirectAnsClusterPair {
+  double cost = 0.0;
+  uint32_t first = 0;
+  uint32_t second = 0;
+  uint32_t version = 0;
+
+  bool operator<(const DirectAnsClusterPair& other) const {
+    return std::tie(cost, first, second, version) >
+      std::tie(other.cost, other.first, other.second, other.version);
+  }
+};
+
+struct ConfigWidthStats {
+  bool valid = false;
+  uint64_t config_bits = 0;
+  double estimated_bits = 0.0;
+};
+
+struct ConfigCandidate {
+  HybridUintConfig config;
+  AnsHistogram histogram;
+  size_t maximum_symbol = 0;
+  uint64_t extra_bits = 0;
+  double estimated_bits = 0.0;
+  std::array<ConfigWidthStats, kAnsAlphabetWidthCount> width_stats;
 };
 
 Status AllocationFailure() {
@@ -210,10 +249,6 @@ Status NormalizeHistogram(
     return Status::Ok();
   }
 
-  struct Remainder {
-    size_t symbol = 0;
-    uint64_t remainder = 0;
-  };
   Storage<Remainder> remainders;
   remainders.reserve(populated);
   size_t normalized_total = 0;
@@ -370,11 +405,6 @@ bool RebalanceHistogram(
   // population balances the total to kAnsTableSize. This follows libjxl's
   // integer entropy-delta algorithm; only the initial approximation uses
   // floating point.
-  struct EntropyDelta {
-    int32_t frequency = 0;
-    size_t count_index = 0;
-    size_t symbol = 0;
-  };
   const auto& log2_table = PopulationLog2Table();
   const auto& allowed = GetAllowedPopulations().values[shift];
   const auto& allowed_index = GetAllowedPopulations().indexes[shift];
@@ -1213,17 +1243,6 @@ Status RefineBestDirectAnsClusters(
   if (clustered == nullptr || symbols == nullptr || clustered->empty()) {
     return Status::InvalidArgument("Direct ANS refinement input is invalid");
   }
-  struct Pair {
-    double cost = 0.0;
-    uint32_t first = 0;
-    uint32_t second = 0;
-    uint32_t version = 0;
-
-    bool operator<(const Pair& other) const {
-      return std::tie(cost, first, second, version) >
-        std::tie(other.cost, other.first, other.second, other.version);
-    }
-  };
   Storage<double> costs(clustered->size());
   for (size_t index = 0; index < clustered->size(); ++index) {
     if (Status status = DirectAnsPopulationCost(
@@ -1234,7 +1253,7 @@ Status RefineBestDirectAnsClusters(
   Storage<uint32_t> versions(clustered->size(), 1);
   Storage<uint32_t> renumbering(clustered->size());
   std::iota(renumbering.begin(), renumbering.end(), uint32_t{0});
-  std::priority_queue<Pair> pairs;
+  std::priority_queue<DirectAnsClusterPair, Storage<DirectAnsClusterPair>> pairs;
   const auto enqueue = [&](uint32_t left, uint32_t right,
                            auto* queue) -> Status {
     DirectAnsHistogram merged = (*clustered)[left];
@@ -1263,7 +1282,7 @@ Status RefineBestDirectAnsClusters(
   }
   uint32_t next_version = 2;
   while (!pairs.empty()) {
-    const Pair pair = pairs.top();
+    const DirectAnsClusterPair pair = pairs.top();
     pairs.pop();
     if (pair.version !=
           std::max(versions[pair.first], versions[pair.second]) ||
@@ -1810,10 +1829,8 @@ Status codestream_internal::AggregateEntropyValues(
     // Large coefficient-token arrays contain many duplicate small values. Avoid
     // sorting every occurrence, while retaining the cheaper sort for inputs too
     // small to amortize zeroing and scanning the dense table.
-    constexpr size_t kDenseValueCount = 1 << 16;
-    constexpr size_t kMinimumCountingInput = 1 << 12;
     Storage<WeightedValue> candidate;
-    if (values.size() < kMinimumCountingInput) {
+    if (values.size() < kEntropyMinimumCountingInput) {
       std::ranges::sort(values);
       candidate.reserve(std::min(values.size(), kMaximumAnsAlphabetSize));
       for (uint32_t value : values) {
@@ -1830,7 +1847,7 @@ Status codestream_internal::AggregateEntropyValues(
       return Status::Ok();
     }
 
-    Storage<uint64_t> dense_counts(kDenseValueCount);
+    Storage<uint64_t> dense_counts(kEntropyDenseValueCount);
     // Keep uncommon larger raw values sparse so the dense allocation remains
     // bounded for arbitrary uint32_t inputs.
     std::unordered_map<uint32_t, uint64_t, std::hash<uint32_t>,
@@ -2020,8 +2037,13 @@ Status codestream_internal::WriteAnsTokenStream(
     return Status::InvalidArgument("ANS token-stream output is null");
   }
   try {
+    size_t chunk_count = 0;
+    if (Status status = ComputeAnsReverseChunkCount(tokens.size(), &chunk_count);
+        !status.ok()) {
+      return status;
+    }
     Storage<ReverseBitChunk> reverse_chunks;
-    reverse_chunks.reserve(2 * tokens.size());
+    reverse_chunks.reserve(chunk_count);
     const auto append_chunk = [&reverse_chunks](
                                 uint32_t bits, uint8_t bit_count) {
       reverse_chunks.push_back({bits, bit_count});
@@ -2224,19 +2246,7 @@ Status OptimizeAnsEntropyCodeImpl(
     constexpr size_t kMaximumLogAlphaSize = 8;
     constexpr size_t kLogAlphaSizeCount =
       kMaximumLogAlphaSize - kMinimumLogAlphaSize + 1;
-    struct ConfigWidthStats {
-      bool valid = false;
-      uint64_t config_bits = 0;
-      double estimated_bits = 0.0;
-    };
-    struct ConfigCandidate {
-      HybridUintConfig config;
-      AnsHistogram histogram;
-      size_t maximum_symbol = 0;
-      uint64_t extra_bits = 0;
-      double estimated_bits = 0.0;
-      std::array<ConfigWidthStats, kLogAlphaSizeCount> width_stats;
-    };
+    static_assert(kLogAlphaSizeCount == kAnsAlphabetWidthCount);
     Storage<Storage<ConfigCandidate>> options(cluster_count);
     for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
       Storage<codestream_internal::WeightedValue> weighted_values;
@@ -2935,6 +2945,167 @@ Status OptimizeAnsEntropyCode(
   } catch (const std::length_error&) {
     return AllocationFailure();
   }
+}
+
+Status codestream_internal::ComputeAnsReverseChunkCount(size_t tokens,
+                                                       size_t* out) {
+  if (out == nullptr)
+    return Status::InvalidArgument("ANS chunk count output is null");
+  if (tokens > Storage<ReverseBitChunk>{}.max_size() / 2)
+    return Status::OutOfMemory("ANS reverse chunk count overflows");
+  *out = 2 * tokens;
+  return Status::Ok();
+}
+
+Status codestream_internal::ComputeEntropyTokenEmissionStoragePlan(
+  EntropyCodingMode mode, size_t tokens, EntropyTokenEmissionStoragePlan* out) {
+  if (out == nullptr ||
+      (mode != EntropyCodingMode::kPrefix && mode != EntropyCodingMode::kAns))
+    return Status::InvalidArgument("Entropy emission plan is invalid");
+  EntropyTokenEmissionStoragePlan plan;
+  const size_t fixed = mode == EntropyCodingMode::kAns ? 32 : 0;
+  const size_t per_token = mode == EntropyCodingMode::kAns ? 31 + 16 : 31 + 15;
+  if (tokens > (std::numeric_limits<size_t>::max() - fixed) / per_token)
+    return Status::OutOfMemory("Entropy emission bits overflow");
+  plan.maximum_bits = fixed + per_token * tokens;
+  Status status = ComputeEntropyWriterStorageBound(plan.maximum_bits,
+                                                  &plan.scratch);
+  if (!status.ok()) return status;
+  if (mode == EntropyCodingMode::kAns) {
+    status = ComputeAnsReverseChunkCount(tokens, &plan.reverse_chunks);
+    if (!status.ok()) return status;
+    if (!plan.scratch.AddVector<ReverseBitChunk>(plan.reverse_chunks,
+          resource_budget_internal::VectorCapacityPolicy::kFreshExact))
+      return Status::OutOfMemory("Entropy emission storage overflows");
+  }
+  *out = plan;
+  return Status::Ok();
+}
+
+Status codestream_internal::ComputeAnsOptimizationStoragePlan(
+  const EntropyOptimizationStorageOptions& o,
+  EntropyOptimizationStoragePlan* out) {
+  using enum EntropyStoragePolicy;
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  const bool direct = o.policy == kBalancedAns || o.policy == kHighDensityAns;
+  if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
+      o.initial_histograms > 256 || o.retain_prepared_clusters ||
+      (!direct && o.policy != kAnsFromPrefix && o.policy != kDeferredAnsFromPrefix) ||
+      (direct && o.borrow_prepared_clusters) ||
+      (o.policy == kDeferredAnsFromPrefix && !o.borrow_prepared_clusters))
+    return Status::InvalidArgument("ANS optimization plan is invalid");
+  const bool balanced = o.policy == kBalancedAns;
+  const bool deferred = o.policy == kDeferredAnsFromPrefix;
+  const size_t histograms = o.initial_histograms == 0
+    ? o.contexts : o.initial_histograms;
+  EntropyOptimizationStoragePlan plan;
+  const size_t k = plan.clusters = std::min(kMaximumPrefixClusters, histograms);
+  const size_t configs = balanced ? 1 : (direct
+    ? kHighDensityAnsUintConfigs.size() : kAnsUintConfigs.size());
+  const size_t widths = direct ? 1 : kAnsAlphabetWidthCount;
+  const auto overflow = [] {
+    return Status::OutOfMemory("ANS optimization storage overflows");
+  };
+  EntropyModelStoragePlan model;
+  Status status = ComputeEntropyModelStoragePlan(
+    EntropyCodingMode::kAns, o.contexts, k, &model);
+  if (!status.ok()) return status;
+  if (!plan.output.Add(model.owned, deferred ? widths : 1) ||
+      (deferred && !plan.output.AddVector<PreparedAnsEntropyCandidate>(
+        kAnsAlphabetWidthCount, kFreshExact)) ||
+      (!deferred && o.return_cost &&
+       !plan.output.AddVector<uint64_t>(o.sections, kFreshExact)))
+    return overflow();
+
+  auto& work = plan.working;
+  // Candidate objects retain their nested frequency arrays across all configs;
+  // vector replacement moves the arrays, it does not clone their backing.
+  if (!work.Add(model.owned, widths) ||
+      !work.AddVector<PreparedAnsEntropyCandidate>(kAnsAlphabetWidthCount,
+                                                 kFreshExact) ||
+      !work.AddVector<Storage<ConfigCandidate>>(k, kFreshExact) ||
+      !work.AddVector<ConfigCandidate>(configs, kGrowing, k) ||
+      !work.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact,
+                               configs * k) ||
+      // One BuildBestAnsHistogram: incumbent and current normalization plus
+      // either remainder sorting or precision-rebalancing scratch, serially.
+      !work.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact, 2) ||
+      !work.AddVector<Remainder>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !work.AddVector<EntropyDelta>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !work.AddVector<int32_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      // One reverse-map construction: alias table, distribution, cutoffs and
+      // two push/pop stacks. Each active index occurs in at most one stack.
+      !work.AddVector<AliasEntry>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !work.AddVector<uint32_t>(kMaximumAnsAlphabetSize, kFreshExact, 2) ||
+      !work.AddVector<uint32_t>(kMaximumAnsAlphabetSize, kGrowing, 2) ||
+      !work.Add(model.write_scratch))
+    return overflow();
+  HostStorageBound writer;
+  status = ComputeEntropyWriterStorageBound(model.maximum_bits, &writer);
+  if (!status.ok()) return status;
+  if (!work.Add(writer)) return overflow(); // Model destination.
+  status = ComputeEntropyWriterStorageBound(12, &writer);
+  if (!status.ok()) return status;
+  if (!work.Add(writer)) return overflow(); // One uint-config measurement.
+
+  if (!direct) {
+    EntropyModelStoragePlan prefix;
+    status = ComputeEntropyModelStoragePlan(
+      EntropyCodingMode::kPrefix, o.contexts, k, &prefix);
+    if (!status.ok()) return status;
+    status = ComputeEntropyWriterStorageBound(prefix.maximum_bits, &writer);
+    if (!status.ok()) return status;
+    if (!work.Add(prefix.write_scratch) || !work.Add(writer)) return overflow();
+  }
+  if (deferred || !direct || o.return_cost) {
+    // Four measured costs, best-cost copy/assignment and the singleton
+    // MeasureAnsCode replacement. This also covers finalization's two costs.
+    if (!work.AddVector<uint64_t>(o.sections, kFreshExact, 5) ||
+        !work.AddVector<uint64_t>(o.sections, kReusedExact))
+      return overflow();
+  }
+
+  if (direct) {
+    // Original histograms + farthest-first mutable copy; clustered + reordered
+    // histograms. Fast clustering/refinement and model search are sequential,
+    // but summing their peaks avoids relying on an optimistic last-use release.
+    if (!work.AddVector<DirectAnsHistogram>(histograms, kFreshExact, 2) ||
+        !work.AddVector<DirectAnsHistogram>(k, kReusedExact, 2) ||
+        !work.AddVector<uint32_t>(histograms, kFreshExact) ||
+        !work.AddVector<double>(histograms, kFreshExact) ||
+        !work.AddVector<size_t>(k, kFreshExact) ||
+        !work.AddVector<uint8_t>(o.contexts, kFreshExact, 2))
+      return overflow();
+    if (balanced) {
+      if (!work.AddVector<PreparedFixedAnsCluster>(k, kFreshExact))
+        return overflow();
+    } else {
+      // Initial K*(K-1)/2 pairs plus (K-1)*(K-2)/2 after successful merges.
+      // Stale queue entries retain capacity: bound ALL enqueues, (K-1)^2,
+      // not merely the current active-cluster pairs. K is in [1,32].
+      if (!work.AddVector<double>(k, kFreshExact) ||
+          !work.AddVector<uint32_t>(k, kFreshExact, 3) ||
+          !work.AddVector<DirectAnsClusterPair>((k - 1) * (k - 1), kGrowing) ||
+          !work.AddVector<Storage<WeightedValue>>(k, kFreshExact))
+        return overflow();
+    }
+  }
+  if ((direct && !balanced) || (!direct && !o.borrow_prepared_clusters)) {
+    EntropyAggregationStoragePlan aggregate;
+    status = ComputeEntropyAggregationStoragePlan(o.tokens, &aggregate);
+    if (!status.ok()) return status;
+    // Across all clusters, raw logical lengths sum to N; their vector capacity
+    // bounds add to 2N/3N. Weighted destinations also sum to <=2N/3N, even
+    // when some clusters take the small-sort and others the counting path.
+    // Hash/dense scratch exists for ONE cluster at a time, not K copies.
+    if (!work.AddVector<Storage<uint32_t>>(k, kFreshExact) ||
+        !work.AddVector<uint32_t>(o.tokens, kGrowing) ||
+        !work.AddVector<WeightedValue>(o.tokens, kGrowing) ||
+        !work.Add(aggregate.scratch))
+      return overflow();
+  }
+  *out = plan;
+  return Status::Ok();
 }
 
 }  // namespace gjxl

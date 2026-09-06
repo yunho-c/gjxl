@@ -21,6 +21,10 @@ recipes to planning and allocation.
 The [host/token bounds](resident-token-storage-planning.md) add checked vector
 capacity/replacement sums, shared AC/DC reservations and aggregate token-owner
 bounds; the remaining serializer/frontend estimates are not yet complete.
+The [entropy bounds](resident-entropy-storage-planning.md) add policy-specific
+aggregation, model/candidate, lookup-table and emission envelopes and account the
+previously missed high-density clustering queue. Whole-serializer assembly,
+frontend/retry and retained-result envelopes still need their combined plan.
 Whole-workflow planning and admission remain pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 

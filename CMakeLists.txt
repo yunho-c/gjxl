@@ -278,6 +278,7 @@ add_library(
   src/codestream/rate_control.cpp
   src/codestream/sections.cpp
   src/codestream/token_storage_plan.cpp
+  src/codestream/entropy_storage_plan.cpp
   src/codestream/workflow.cpp
 )
 
@@ -1267,6 +1268,11 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_token_storage_plan_test tests/token_storage_plan_test.cpp)
   target_link_libraries(gjxl_token_storage_plan_test PRIVATE gjxl_codestream)
   add_test(NAME token_storage_plan COMMAND gjxl_token_storage_plan_test)
+
+  add_executable(gjxl_entropy_storage_plan_test tests/entropy_storage_plan_test.cpp)
+  target_link_libraries(gjxl_entropy_storage_plan_test PRIVATE gjxl_codestream)
+  add_test(NAME entropy_storage_plan COMMAND gjxl_entropy_storage_plan_test)
+  set_tests_properties(entropy_storage_plan PROPERTIES TIMEOUT 180)
 
   add_executable(
     gjxl_block_context_map_test
