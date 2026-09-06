@@ -3223,6 +3223,8 @@ Status MetalPreparedAqEvaluation::AssembleFrame(
 
 Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     std::unique_ptr<MetalCompletedVarDctFrame>* out) {
+  const resource_budget_internal::ResourceClassScope resource_class(
+    resource_budget_internal::ResourceClass::kCompletedFrame);
   try {
     auto frame = std::make_unique<MetalCompletedVarDctFrame>();
     Status status = FrameGeometry::Create(source_extent_, &frame->geometry);

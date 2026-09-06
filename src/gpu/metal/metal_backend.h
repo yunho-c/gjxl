@@ -135,4 +135,10 @@ Status CreateEmbeddedMetalBackend(
   bool fail_submission,
   bool fail_completion);
 
+/// Fails the next backing allocation after its resource ticket is prepared.
+[[nodiscard]] Status ArmNextMetalAllocationFailureForTest(GpuBackend& backend);
+
+/// Sum of idle AQ/resident-input and Butteraugli backing capacities.
+[[nodiscard]] size_t MetalPreparationCacheBytesForTesting(GpuBackend& backend);
+
 }  // namespace gjxl

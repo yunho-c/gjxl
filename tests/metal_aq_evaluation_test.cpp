@@ -2498,7 +2498,7 @@ bool CheckScratchWorkspaceLeases() {
       !CheckStatus(gpu->TrimPreparationCache(), "trim during active AQ"))
     return false;
   prepared.reset();
-  return waited && gjxl::MetalButteraugliCacheBytesForTesting(*gpu) == 0;
+  return waited && gjxl::MetalPreparationCacheBytesForTesting(*gpu) == 0;
 }
 
 bool CheckIndependentConcurrency(gjxl::GpuBackend& gpu) {

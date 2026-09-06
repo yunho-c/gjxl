@@ -3,6 +3,8 @@
 
 #include "gpu/ops/ac_strategy_search.h"
 
+#include "core/resource_context.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -312,6 +314,8 @@ static Status FindAcStrategyGridGpuImpl(
   AcStrategyGrid* out,
   AcStrategyGpuSearchStats* stats,
   gpu_profile_internal::GpuProfilingSession* profiling_session) {
+  const resource_budget_internal::ResourceClassScope resource_class(
+    resource_budget_internal::ResourceClass::kAcSearch);
   Extent2D block_extent;
   Extent2D tile_extent;
   size_t pixel_count = 0;

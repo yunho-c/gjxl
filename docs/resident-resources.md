@@ -2,10 +2,11 @@
 
 This is the implementation record for milestone 4 of
 [resident execution](resident-execution.md), based on the integrated checkpoint
-`ec4d4c5`. **Milestone 4 is not complete.** The initial implementation is the
-tested [capacity-domain primitive](../src/core/resource_budget.h), not production
-allocation interception or a new workflow limit. The resource inventory and
-integration decisions below retain the CPU tail and batch-result requirements.
+`ec4d4c5`. **Milestone 4 is not complete.** The tested
+[capacity-domain primitive](../src/core/resource_budget.h) now has
+[real Metal allocation attachments and all-pool trim](resident-metal-accounting.md).
+Host allocation coverage and whole-workflow admission are not implemented yet.
+The inventory and decisions below retain the CPU tail and batch-result requirements.
 
 ## Source-backed ownership inventory
 
@@ -132,13 +133,13 @@ whole-workflow limits until its integration coverage is complete.
 | Shared AQ/Butteraugli planes, smaller final staging, omitted host mask and deferred metadata | Implemented in milestone 3; preserve its parity/lifetime gates and count the shared physical backing only once. |
 | AC-search packed/rate scratch retained after placement | Implement a source-aware last-use release opportunity after checking prepared-run reuse/retries. Measure complete-call and peak effects; do not discard reusable source state indiscriminately. |
 | Full evaluator/reference storage retained during CPU serialization | Audit retry and diagnostic consumers, then release what has no future consumer. Independent completed-frame ownership permits this but does not itself release the evaluator. |
-| Three existing AQ pools plus Butteraugli cache | Integrate aggregate idle accounting/eviction and generation-aware trim. Measure backend-alive and post-trim physical footprint separately from capacity. |
+| Three existing AQ pools plus Butteraugli cache | Common Metal accounting and generation-aware all-pool trim are implemented and measured in the Metal attachment checkpoint. Domain-wide automatic eviction/admission is still required. |
 | Intermediate AQ coefficients versus serializer layout | Keep distinct where reconstruction/AQ consumers require their current layout. The final-output destination optimization is already implemented; another layout change needs measured end-to-end benefit. |
 | Small copied completed-frame metadata | Intentionally retained: separates output from much larger evaluator lifetimes. Do not make metadata zero-copy by keeping the evaluator alive. |
 | Exact shared candidate calculations / further kernel fusion | Inventory against the integrated profile. No unqualified arithmetic reordering or candidate pruning. A documented measured rejection or reasoned deferral is valid; this row is not yet a completed audit. |
 | CPU token/model/writer overlap and storage growth | Inventory by balanced/high-density/exhaustive policy while adding allocation coverage. Preserve model search, tie rules, and exact output; resource pressure cannot silently reduce search. |
 
-## Validation and remaining gates
+## Foundation validation and remaining gates
 
 The permanent `resource_budget` test covers requested-versus-capacity counters,
 pending/committed/idle transitions, domain sharing and isolation, cache transfers,
@@ -172,12 +173,14 @@ UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/resource-sanitize -R '^reso
 TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/resource-tsan -R '^resource_budget$' --repeat until-fail:25 --output-on-failure
 ```
 
-The foundation header is consumed only by its permanent test at this checkpoint;
-production encoders are unchanged. No new encoder speedup or managed-memory
-bound is claimed, and milestone 3's frozen combined baseline remains intact.
+At the `b6bc044` foundation checkpoint, the header was consumed only by its
+permanent test and production encoders were unchanged. The subsequent Metal
+attachment has its own [qualification record](resident-metal-accounting.md).
+Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
+frozen combined baseline remains intact.
 
-Milestone 4 still requires real allocation attachments and shared planners,
-CPU serializer coverage, public domain configuration/propagation, cache eviction,
+Milestone 4 still requires host allocation attachments and shared planners,
+CPU serializer coverage, public domain configuration/propagation, automatic cache eviction,
 retry and batch-result integration, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited
 opportunities' final dispositions and measured gates. Milestone 6 still requires

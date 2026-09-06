@@ -29,6 +29,7 @@ enum class ResourceClass : size_t {
   kCompletedFrame,
   kSerializer,
   kRetainedResult,
+  kUnclassified,
   kCount,
 };
 
@@ -197,6 +198,14 @@ public:
 
   [[nodiscard]] bool valid() const noexcept { return state_ != nullptr; }
   [[nodiscard]] size_t capacity_bytes() const noexcept { return capacity_; }
+  [[nodiscard]] bool idle() const noexcept {
+    return valid() && phase_ == Phase::kIdle;
+  }
+  [[nodiscard]] bool SharesDomain(const ResourceReservation& reservation) const noexcept {
+    return valid() && reservation.valid() &&
+      state_->budget == reservation.state_->budget;
+  }
+  [[nodiscard]] bool SharesDomain(const ResourceBudget& budget) const noexcept;
 
   [[nodiscard]] Status Commit() {
     if (!valid() || phase_ != Phase::kPending)
@@ -418,6 +427,7 @@ public:
   }
 
 private:
+  friend class ResourceAllocation;
   [[nodiscard]] Status Validate(
     size_t capacity, const ResourceReservation* reservation) const {
     if (capacity == 0 || reservation == nullptr || reservation->valid())
@@ -454,5 +464,9 @@ private:
 
   std::shared_ptr<detail::BudgetState> state_;
 };
+
+inline bool ResourceAllocation::SharesDomain(const ResourceBudget& budget) const noexcept {
+  return valid() && state_->budget == budget.state_;
+}
 
 }  // namespace gjxl::resource_budget_internal

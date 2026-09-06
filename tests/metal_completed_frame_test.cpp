@@ -19,6 +19,7 @@
 #include "codestream/encoder.h"
 #include "codestream/encoder_internal.h"
 #include "core/image_buffer.h"
+#include "core/resource_context.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_butteraugli_test.h"
@@ -86,6 +87,10 @@ bool SerializeEqual(const Retained &retained) {
 bool RunCase(Extent2D extent, bool deferred_frontend = false,
              GpuBackend* shared_gpu = nullptr,
              std::vector<Retained>* exported = nullptr, size_t image_seed = 0) {
+  const size_t completed_class = static_cast<size_t>(
+    resource_budget_internal::ResourceClass::kCompletedFrame);
+  auto& budget = resource_budget_internal::DefaultResourceBudget();
+  const size_t earlier_backings = budget.snapshot().classes[completed_class].backing_count;
   std::vector<Retained> retained;
   {
     FrameGeometry geometry;
@@ -255,6 +260,10 @@ bool RunCase(Extent2D extent, bool deferred_frontend = false,
         return false;
   }
   // No source, strategy grid, evaluator, or locally owned backend survives.
+  // At this GPU-accounting checkpoint each completed frame has one independent
+  // device backing; CPU metadata is not yet attached to the ledger.
+  if (budget.snapshot().classes[completed_class].backing_count !=
+      earlier_backings + retained.size()) return false;
   for (const auto &result : retained)
     if (!SerializeEqual(result))
       return false;
@@ -300,7 +309,7 @@ bool CheckPreparationIntegration() {
     trimmer.join();
     if (!encoded || !reader.get() || !trim_ok.load() ||
         !Check(gpu->TrimPreparationCache()) ||
-        MetalButteraugliCacheBytesForTesting(*gpu) != 0) return false;
+        MetalPreparationCacheBytesForTesting(*gpu) != 0) return false;
   }
   for (const auto& result : retained)
     if (!SerializeEqual(result)) return false;

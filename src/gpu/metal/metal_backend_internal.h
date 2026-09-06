@@ -20,6 +20,7 @@
 #include <utility>
 
 #include "core/ac_strategy.h"
+#include "core/resource_context.h"
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
@@ -221,8 +222,10 @@ public:
   MetalBuffer(
     NS::SharedPtr<MTL::Buffer> buffer,
     BackendId backend_id,
-    size_t size_bytes)
+    size_t size_bytes,
+    resource_budget_internal::ResourceAllocation allocation)
     : DeviceBuffer(BackendKind::kMetal, backend_id, size_bytes),
+      allocation_(std::move(allocation)),
       buffer_(std::move(buffer)) {}
 
   ~MetalBuffer() override = default;
@@ -243,7 +246,16 @@ public:
     return buffer_->contents();
   }
 
+  [[nodiscard]] resource_budget_internal::ResourceAllocation& allocation() noexcept {
+    return allocation_;
+  }
+
+  // Set at scratch acquisition, checked at return under the backend cache lock.
+  uint64_t cache_generation = 0;
+
 private:
+  // Reverse member destruction releases the Metal backing before its charge.
+  resource_budget_internal::ResourceAllocation allocation_;
   NS::SharedPtr<MTL::Buffer> buffer_;
 };
 
@@ -279,6 +291,7 @@ public:
   Status TrimPreparationCache() override;
   Status EmptyButteraugliCacheForTesting();
   size_t ButteraugliCacheBytesForTesting();
+  size_t PreparationCacheBytesForTesting();
 
   [[nodiscard]] BackendKind kind() const noexcept override;
   [[nodiscard]] std::string_view name() const noexcept override;
@@ -376,6 +389,10 @@ public:
   void ArmNextSubmissionFailureForTest(
     bool fail_submission,
     bool fail_completion) noexcept;
+
+  void ArmNextAllocationFailureForTest() noexcept {
+    test_fail_next_allocation_.store(true, std::memory_order_relaxed);
+  }
 
 private:
   friend class MetalPreparedAqEvaluation;
@@ -631,14 +648,14 @@ private:
   bool test_fail_completion_ = false;
   std::atomic<bool> test_fail_next_submission_{false};
   std::atomic<bool> test_fail_next_completion_{false};
-  std::mutex aq_scratch_pool_mutex_;
+  std::atomic<bool> test_fail_next_allocation_{false};
+  std::mutex preparation_cache_mutex_;
   std::array<
     std::optional<DeviceScratchArena>,
     static_cast<size_t>(MetalAqScratchArena::kCount)> idle_aq_scratch_;
   const size_t butteraugli_cache_limit_;
-  std::mutex butteraugli_cache_mutex_;
   std::optional<DeviceScratchArena> idle_butteraugli_scratch_;
-  uint64_t butteraugli_cache_generation_ = 0;
+  uint64_t preparation_cache_generation_ = 0;
   std::string name_;
 };
 

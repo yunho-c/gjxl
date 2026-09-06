@@ -46,10 +46,11 @@ public:
     };
   }
 
-  /// Releases idle perceptual-reference preparation capacity, if supported.
+  /// Releases idle preparation capacity, if supported. Metal releases both AQ
+  /// arenas (including resident input) and Butteraugli scratch.
   /// Safe during independent encodes: active storage remains valid, but leases
   /// already acquired at the trim boundary cannot repopulate this cache.
-  /// Does not initialize a device, wait for active work, or trim other pools.
+  /// Does not initialize a device or wait for active work.
   virtual Status TrimPreparationCache() { return Status::Ok(); }
 
   virtual Status Allocate(

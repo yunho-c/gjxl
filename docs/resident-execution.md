@@ -134,9 +134,11 @@ set of resource classes and reservations, not a general graph runtime.
 
 The [resource implementation record](resident-resources.md) contains the
 source-backed ownership inventory, integration decisions, and tested primitive
-for reservation/allocation lifetimes and FIFO admission. Production allocation
-coverage and workflow enforcement are still pending; the primitive alone does
-not satisfy this milestone.
+for reservation/allocation lifetimes and FIFO admission. The
+[Metal attachment checkpoint](resident-metal-accounting.md) adds real backing
+charges, domain-aware cache transitions, and all-pool trim with physical-memory
+and complete-call measurements. Host coverage and workflow admission are still
+pending; this Metal-only attachment does not satisfy the milestone.
 
 Deliverables:
 
@@ -163,9 +165,10 @@ Deliverables:
   Admitted work must be able to drain without another job holding its required
   capacity. Any staged reservation growth needs a demonstrated progress rule.
 
-Before implementation, resolve and record the configuration surface, default
-limits, domain ownership, reservation estimates, and treatment of retained batch
-results. These are design decisions still open here, not existing API promises.
+The resource record specifies the configuration surface, defaults, domain
+ownership, reservation strategy and treatment of retained batch results. Concrete
+shared estimators and API integration remain to be implemented; those recorded
+decisions are not existing API promises.
 
 Acceptance:
 

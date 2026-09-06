@@ -2438,6 +2438,14 @@ if(GJXL_BUILD_TESTS)
   add_dependencies(gjxl_metal_completed_frame_test gjxl_metal_shaders)
   add_test(NAME metal_completed_frame COMMAND gjxl_metal_completed_frame_test)
 
+  add_executable(gjxl_metal_resource_budget_test tests/metal_resource_budget_test.cpp)
+  target_link_libraries(gjxl_metal_resource_budget_test PRIVATE gjxl_codestream gjxl_metal)
+  target_compile_definitions(gjxl_metal_resource_budget_test PRIVATE
+    GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_resource_budget_test gjxl_metal_shaders)
+  add_test(NAME metal_resource_budget COMMAND gjxl_metal_resource_budget_test)
+  set_tests_properties(metal_resource_budget PROPERTIES TIMEOUT 30)
+
   add_test(
     NAME codec_install_consumer
     COMMAND
