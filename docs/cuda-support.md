@@ -1165,6 +1165,17 @@ cold-process behavior. No size gate, thread-policy change or production
 implementation is added. Every bounded child completes without an observed
 permission/firewall block. Remaining host and GPU costs are still open.
 
+[S77](cuda-optimization-s1.md#serializer-worker-lifecycle-s77-not-retained)
+measures serializer worker lifetimes and finds about 0.81/1.12/1.62 ms per
+Flower/1080p/4K encode with no worker active inside the profiled calls. Two
+caller-participation counterfactuals preserve all 3,306 encoded results and
+203 GPU bodies. Flower benefits, but larger-image totals remain mixed or
+adverse against duplicate controls, so neither policy is retained. All 39
+runtime artifacts remain unchanged. Exact GPU coefficient-order population
+accumulation remains an unimplemented host-scan lead; the backend is not
+considered maxed out. No permission/firewall block or system-setting change
+occurs.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

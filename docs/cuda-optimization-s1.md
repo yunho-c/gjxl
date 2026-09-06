@@ -13201,6 +13201,113 @@ its immutable snapshots. `s76_validate.py --frozen` verifies the bundle and
 reconstructs every recorded comparison; `--current` also checks current
 source/runtime identity.
 
+## Serializer worker lifecycle (S77, not retained)
+
+S77 follows S76 with direct scheduling evidence. `RunParallelSections`
+creates and joins new `std::thread` workers at multiple serializer stages.
+Automatic mode spawns every participant and leaves the caller waiting;
+explicit CPU budgets already use the caller as one participant. No
+production implementation or thread policy changes in this checkpoint.
+
+An ignored serializer override records each call's source location, task and
+participant counts, thread-creation/join spans, and per-worker lifetime and
+task count. Records are collected in memory and printed after the encode.
+The analysis uses unions of overlapping worker intervals, not the sum of
+launch and join times. Top-level call intervals are disjoint; nested intervals
+would be reported separately. All 42 instrumented encodes pass exact bytes
+against S70 and repeated summary equality, across Flower/1080p/4K and
+automatic/single-CPU configurations, with two warmups and five samples each.
+
+| Automatic CPU scheduling | Flower | Padded 1080p | Padded 4K |
+| --- | ---: | ---: | ---: |
+| Serializer calls per encode | 5 | 5 | 5 |
+| Threads spawned per encode | 17 | 21 | 25 |
+| Median summed call time with no worker active | 0.807 ms | 1.122 ms | 1.624 ms |
+| Median serializer time | 8.427 ms | 22.488 ms | 50.333 ms |
+
+No zero-task or late-start-after-all-task-workers-finish worker appears in
+these probes. Single-CPU serialization takes 10.855/33.474/101.367 ms, despite
+much smaller no-worker intervals. The gaps include call setup and cleanup,
+not just OS thread startup; work can also be descheduled inside a recorded
+worker lifetime. Thus these are instrumented attribution observations, not
+an additive prediction of removable overhead or public speedups.
+
+### Two caller-participation counterfactuals
+
+The first override uses the caller for every automatic parallel stage,
+spawning N-1 instead of N workers with the same participant limit and queue.
+The second enables this only for the two-task block-context/coefficient-order
+preparation call. Explicit budgets remain unchanged. Each executable has
+mode 0 original, mode 1 candidate and mode 2 identical-original control.
+There is no image-size gate. Mode markers and flushed timing rows are outside
+the timed encode, and the scheduling instrumentation is absent.
+
+Each candidate passes 222 preflight encodes, then 1,296 measured encodes plus
+114 warmup/reference encodes. Together with the instrumented probe, all
+3,306 encodes preserve bytes and per-process summaries; all 30 saved reference
+bitstreams match the corresponding S70 hash and size. Three native/source
+audits preserve all 203 GPU function bodies and reconstruct exactly the
+instrumentation or scheduling-only source differences. No new decoder,
+sanitizer or production test-suite run is claimed. All 39 retained runtime
+artifacts remain byte-identical to S75; the frozen S76 evidence revalidates.
+
+Each candidate has two 120-triple Flower replicates and two 48-triple
+replicates per large input. Every six-triple block visits all six mode orders;
+the second replicate reverses input order. Native audits, preflight and
+measurements are serial. Broad-caller measurement runs from 23:20:35 to
+23:23:11 UTC on September 6; targeted measurement runs from 23:28:05 to
+23:30:43. Every child completes within its 120-second limit. All raw warmups,
+adverse samples, duplicate controls and 41 phase fields are retained.
+
+The table combines both replicates and reports medians of per-triple paired
+changes, not ratios of separate medians. Negative values are faster.
+
+| Candidate / input | AC tokenization | Serializer | Total | Duplicate-original total |
+| --- | ---: | ---: | ---: | ---: |
+| All stages / Flower | -11.17% | -4.25% | -1.99% | -0.50% |
+| All stages / 1080p | -2.47% | -0.83% | -0.04% | +0.31% |
+| All stages / 4K | -2.79% | -2.16% | -0.40% | -1.58% |
+| Preparation only / Flower | -10.32% | -2.79% | -1.55% | -0.02% |
+| Preparation only / 1080p | -0.53% | +0.17% | -0.18% | +0.52% |
+| Preparation only / 4K | -0.97% | +0.37% | +1.22% | +0.36% |
+
+Broad-caller Flower serializer improvement repeats at -4.25% in both
+replicates, with combined paired savings of 0.395 ms; total saves 0.401 ms.
+Targeted Flower serializer saves 0.262 ms and total 0.313 ms. Both retain
+Flower benefits relative to duplicate mode 2. Six-triple-block descriptive
+bootstrap intervals for Flower total are [-2.58%, -1.41%] and
+[-2.18%, -0.43%], respectively; quantization intervals cross zero.
+These do not establish cross-machine or cold-process behavior.
+
+The larger-input results do not establish a net win. Broad-caller 4K is
+0.80% slower in total and 1.32% slower in serialization relative to duplicate
+mode 2, despite looking faster relative to mode 0. Targeted 4K total regresses
+in both replicates (+1.06%/+1.49%); relative to duplicate mode 2 its combined
+total is almost flat (+0.12%). Unchanged quantization timings also move,
+showing residual within-process variation. Neither candidate is retained,
+and no small-image gate is inferred from this limited input set.
+
+Before a general caller policy could be retained, higher-effort nested work,
+concurrency and participant accounting would need explicit qualification:
+entering another `ParallelScope` on an already-participating caller can count
+the same physical thread twice. This was a source-inspection concern, not a
+failure observed in these five-call effort-7 runs.
+
+The evidence bounds a real but modest scheduling opportunity. Coefficient-
+order work remains about 8.45 ms in the broad-control 4K baseline. GPU zero-
+population accumulation was already identified after S53 but not implemented
+or measured there; it is a larger remaining host-scan lead to investigate
+with exact sampling/order semantics and a public-boundary gate. No new GPU
+histogram or worker pool has been implemented here. Optimization remains open.
+
+The ignored `s77_*` bundle contains eight diagnostic binary/object files,
+seven source/document snapshots, all producers and raw evidence. Its
+`s77_validate.py --frozen` checks hashes, all worker intervals, all paired
+rows/fields/orders, three native/source audits and the serial job timeline;
+`--current` additionally verifies current source/runtime identities. No
+firewall, elevation or permission block is observed, and no security,
+power, clock, cooling, priority or service setting changes.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
