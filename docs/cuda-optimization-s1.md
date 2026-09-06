@@ -9118,6 +9118,210 @@ inlining without enlarging the already substantial partition function.
 It still requires generated-code verification and whole-workflow acceptance;
 S57 does not demonstrate that this work, or fully-resident encoding, is maxed out.
 
+## Small token-scanned ANS histogram routine (S58)
+
+S58 follows the rejected S57 experiment without treating its replay gains
+as release acceptance. The failed version still called the private integer
+converter per token. This version extracts the token-scanned loop into a
+small private `AddDirectAnsTokenHistograms` routine, where the compiler
+can inline `EncodeHybridUintValidated`.
+
+The caller still validates the configuration, initial context map, and
+histogram extent before calling the helper. The helper preserves section-view
+validation, context bounds, ANS symbol/count/extra-bit overflow checks, and
+the original token order and histogram updates. It returns one successful
+status per partition, not per token. Exceptions are still caught by the
+caller's existing allocation-failure boundary, and caller-visible outputs
+are assigned only after the entire partition succeeds. Prepared AC
+populations, clustering, model selection, and all other integer-conversion
+call sites remain unchanged. There are no public API/ABI, GPU, memory-layout,
+quality-policy, or scheduling changes.
+
+### Three-way experiment and exactness
+
+The diagnostic compares the original partition, an extracted scan retaining
+the checked public conversion, and an extracted scan using the validated
+conversion. Selection happens outside the scan, once per partition. This
+separates extraction effects from actual conversion inlining; it is not a
+per-token runtime toggle in production.
+
+S58 reuses S57's six frozen input captures because production ANS behavior
+was restored before this experiment. The three eight-context order streams
+contain 1,756 / 1,629 / 441 tokens; the corresponding 45-context DC streams
+contain 557,106 / 139,588 / 20,804 tokens at 4K / 1080p / Flower. Capture
+hashes remain checked against S57's frozen manifest; no fresh capture-I/O
+timings are presented as S58 performance.
+
+All three diagnostic modes pass the frozen S57 entropy fixture. The replay
+then checks 39,264 exact candidate/reference comparisons across 816 valid
+configurations, both entropy policies, mapped/unmapped contexts, interleaved
+and guarded offset-split layouts, bounded/random/UINT32_MAX values, invalid
+views/configurations/maps/contexts, and real captures. Status codes/messages,
+partitions, prepared populations, input immutability, and failure-atomic
+outputs agree. The original alphabet-limit errors remain authoritative even
+when the HybridUint configuration itself is valid.
+
+Each of 12 capture/layout cases uses six warmups per mode, then all six
+three-mode permutations twice, with three calls per timing. All 432 raw
+timings are retained. They include allocation and complete partition
+construction/clustering; output comparison and destruction are outside the
+timed interval. Paired median DC-partition changes relative to the original:
+
+| Capture | Extracted checked, interleaved / split | Extracted validated, interleaved / split |
+| --- | ---: | ---: |
+| 4K | +3.93% / +0.20% | -34.91% / -36.44% |
+| 1080p | +6.94% / +2.33% | -30.07% / -31.99% |
+| Flower | -5.26% / +3.72% | -29.24% / -24.02% |
+
+The validated variant wins all 12 pairs in every capture/layout case,
+including the smaller order streams, which improve 29.17–40.45%.
+Extraction alone is mixed and has slower individual observations; its
+slower DC medians are not discarded. Absolute timings are not pooled with
+S57's separately collected replay cohort.
+
+### Release machine code
+
+The new release scan contains 248 static instructions, no public conversion
+call, and no private conversion call. Its full instruction/relocation body
+matches the whole-workflow control's validated scan exactly after anonymous-namespace
+symbol normalization. The checked extracted diagnostic scan contains 222
+instructions and retains its public conversion call. The larger static body
+of the validated scan includes the previously out-of-line conversion; it
+does not imply more dynamic work than calling that conversion per token.
+
+The release partition changes from 2,113 to 1,888 static instructions and
+calls the scan once. Diagnostic original/validated partition bodies contain
+1,999 / 1,782 instructions and are **not** native-identical to those release
+partition bodies. The exact match applies to the small scan, not the whole
+partition or executable. No retired-instruction or hardware-counter claim
+is inferred from static instruction counts.
+
+The CUDA archive is byte-identical to S57, preserving all 171 GPU bodies
+by archive identity. No fresh CUDA native dump, GPU profile, or CUDA
+sanitizer result is claimed for this host-only change.
+
+### Correctness qualification
+
+All 71 CUDA CTests pass (68.51 s), all 50 CPU GCC CTests pass (17.90 s),
+installed consumers pass, and five CPU-only Clang ASan targets pass:
+DC groups, entropy, coefficient order, codestream encoder, and workflow.
+The S57 all-816-configuration scanned/population oracle remains enabled,
+alongside 443,904 independently inverted HybridUint encoding cases.
+
+New tracked coverage exercises 40 failures in a later section after valid
+tokens have populated local histograms and an empty section has been read.
+Both entropy policies, initial-map choices, and first-section layouts are
+covered. Mismatched split lengths, mixed backing storage, out-of-range
+contexts, and symbols outside the ANS alphabet preserve exact errors and
+unchanged code/cost outputs, including section-cost sentinels.
+
+All 58 candidate/S57 encoded-image pairs are byte-identical and independently
+decoded/scored with the pinned libjxl decoder and Butteraugli metric:
+46 primary cases plus six legacy high-density and six maximum-compression.
+Every paired decoded-quality score agrees exactly. GPU/host quality policy
+and encoded-size contracts remain unchanged.
+
+### Workflow screening and final measurement
+
+The first whole-encode control screen uses all six three-mode permutations
+per workload, three warmups and five samples per process. It retains 41 raw
+profile fields and matching encoded-size checks, not byte comparisons
+inside the timing run. The validated variant's histogram changes are
+-16.67% / +2.31% / -1.73% at 4K / 1080p / Flower, with 6/6, 2/6, and 4/6
+wins. Whole-encode changes are -1.43% / +3.34% / -0.53% (4/6, 1/6, 3/6).
+The 1080p screen regression is retained. Extraction alone gives whole-encode
+-1.16% / +1.77% / +3.03%; it is not presented as a universal improvement.
+
+The subsequent seven-pair same-executable warm comparison selects original
+versus extracted validated scans. Histogram changes are -11.40% / -8.34% /
+-3.46% (5/7, 6/7, 4/7 wins); whole-encode changes are -1.78% / -1.99% /
++2.14% (4/7, 5/7, 2/7). Importantly, 4K codestream time rises 7.49% and
+Flower codestream time rises 3.27% in this cohort. Those regressions remain
+reported alongside the histogram gains, not credited to the optimization.
+
+A freshly compiled release phase probe compares S58 with frozen S57 over
+seven alternating pairs per workload, using the same warmup/sample policy:
+
+| Workload | Histogram work | Codestream encoding | Whole encode |
+| --- | ---: | ---: | ---: |
+| 4K | -13.97%, 7/7 wins | -8.06%, 4/7 | -1.21%, 4/7 |
+| 1080p | -5.15%, 4/7 | +1.97%, 3/7 | +0.08%, 2/7 |
+| Flower | +1.49%, 3/7 | +3.61%, 3/7 | +2.00%, 3/7 |
+
+The 4K histogram marginal medians are 24.375 -> 20.631 ms; all seven
+paired changes lie between -32.35% and -2.28%. Percentages throughout this
+section are medians of within-pair ratios, not ratios of marginal medians.
+The histogram field includes clustering and other partition work, not just
+the extracted token scan. Unchanged stages also vary: 4K AC tokenization
+falls 13.44%, while release quantization changes +0.45% / +0.18% / +1.90%.
+The code change does not establish a cause for those unrelated-stage changes.
+
+All original cold results are retained. Seven fresh-process release pairs
+(zero warmups, one sample) give whole-encode +4.09% / +5.54% / +0.82%
+(2/7, 1/7, 3/7 wins). Quantization changes +0.58% / +0.08% / -1.08%.
+Separate cold same-executable pairs give whole-encode -0.95% / +2.07% /
++5.26% (4/7, 2/7, 2/7); their histogram changes are -4.15% / -0.87% /
++2.82%. Cold 1080p and Flower therefore do not demonstrate an end-to-end
+improvement, and Flower regresses in both principal warm cohorts as well.
+
+Because the initial cold release totals were worse, a separately recorded
+cold release **phase** cohort collects all 41 fields, again with seven
+alternating pairs and zero warmups/one sample. Histogram changes are
+-14.58% / -6.93% / -12.06% (7/7, 6/7, 4/7 wins), and whole-encode changes
+are -4.40% / -3.80% / -3.39% (5/7, 6/7, 4/7). Codestream changes are
+-2.55% / -4.25% / -8.13%, while unchanged quantization improves
+1.62% / 3.24% / 5.24%. The initial 4K parent run takes 627.468 ms versus
+473.280 ms for the candidate, and the 1080p parent has a 170.721 ms
+outlier; both remain in the record. This follow-up supports a histogram
+benefit but neither erases the first cold regression nor proves its cause.
+The extra profiling boundary and separately collected cohort are explicit;
+their absolute times are not pooled with the uninstrumented cold benchmark.
+
+Same-version batch scheduling (one warmup, three samples) passes exact
+byte/summary checks. Even 1080p batch sizes 1/2/4 give fully-resident
+speedups 1.036/1.223/1.356x and batch medians 117.167/183.444/341.053 ms.
+Maximum-throughput gives 0.965/1.517/2.067x and
+69.472/91.793/158.768 ms; all three size-one samples are slower.
+Even 4K fully-resident sizes 1/2 give 1.024/1.038x and
+418.029/850.550 ms. These are scheduling comparisons within S58, not
+S58-versus-S57 optimizer speedups.
+
+The main performance sequence's boundary observations span 58 C / P8 /
+210 MHz / 15.80 W with software thermal/power flags inactive, to
+66 C / P3 / 945 MHz / 32.19 W with both flags active. The later cold-phase
+sequence starts at 59 C / P0 / 1282 MHz / 22.90 W and ends at 61 C / P3 /
+1282 MHz / 22.63 W. These are boundary readings, not per-operation state,
+normalization, or a causal thermal diagnosis. No power, clock, cooling,
+priority, security, or service settings were changed. No admin/firewall
+failure or stalled job was observed.
+
+### Retention and remaining work
+
+S58 retains the small scan as an exact, portable CPU-path improvement:
+the conversion is demonstrably inlined in release, the measured scan body
+matches production, all captured partitions improve, and the 4K release
+histogram phase improves in all warm and detailed cold pairs. This is a
+narrower claim than a universal whole-encode speedup. The cold baseline
+regressions and small-image warm regressions remain unresolved; later
+work must continue measuring complete encodes rather than assume that a
+local improvement predicts every workload's wall time.
+
+The ignored `build-cuda-ninja/profiles/s58_*` bundle retains the parent
+source/fixture, three-mode control, 432 replay rows, initial and final
+workflow cohorts, native object dumps, 58 image comparisons, test/ASan
+logs, batch observations, and the extra cold-phase cohort. The six input
+captures remain immutable in S57's bundle. The freeze retains 37 tested
+executables/libraries and four source/doc snapshots. Reproductions must
+use fresh output prefixes rather than overwrite frozen evidence.
+
+`s58_validate.py --frozen` checks exact extraction scope against S57,
+capture identity, all differential/timing records and paired arithmetic,
+the small-scan native match and whole-partition non-match, unchanged CUDA
+archive identity, tests/quality results, both manifests, and predecessor
+binary identities. The goal remains active: perceptual GPU work and
+entropy-task scheduling/whole-workflow variability remain substantial
+investigation targets. Fully-resident encoding is not demonstrated maxed out.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

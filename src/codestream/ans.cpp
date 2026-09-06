@@ -1374,6 +1374,36 @@ Status RefineBestDirectAnsClusters(
   return CanonicalizeDirectClusters(input, clustered, symbols);
 }
 
+// The caller has validated the immutable configuration, context map,
+// and histogram extent before scanning any section.
+Status AddDirectAnsTokenHistograms(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  std::span<DirectAnsHistogram> histograms) {
+  for (const EntropyTokenStreamView section : section_tokens) {
+    if (!section.valid()) {
+      return Status::InvalidArgument("ANS token-stream view is invalid");
+    }
+    for (size_t index = 0; index < section.size(); ++index) {
+      const EntropyToken token = section[index];
+      if (token.context >= options.context_count) {
+        return Status::InvalidArgument(
+          "ANS token context is out of range");
+      }
+      const HybridUintToken encoded =
+        codestream_internal::EncodeHybridUintValidated(
+          token.value, options.uint_config);
+      const size_t histogram = options.initial_context_map.empty()
+        ? token.context
+        : options.initial_context_map[token.context];
+      if (!histograms[histogram].Add(encoded)) {
+        return Status::InvalidArgument("ANS histogram count overflow");
+      }
+    }
+  }
+  return Status::Ok();
+}
+
 Status PrepareDirectAnsPartition(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
@@ -1485,29 +1515,10 @@ Status PrepareDirectAnsPartition(
         }
       }
     } else {
-      for (const EntropyTokenStreamView section : section_tokens) {
-        if (!section.valid()) {
-          return Status::InvalidArgument("ANS token-stream view is invalid");
-        }
-        for (size_t index = 0; index < section.size(); ++index) {
-          const EntropyToken token = section[index];
-          if (token.context >= options.context_count) {
-            return Status::InvalidArgument(
-              "ANS token context is out of range");
-          }
-          HybridUintToken encoded;
-          if (Status status = EncodeHybridUint(
-                token.value, options.uint_config, &encoded);
-              !status.ok()) {
-            return status;
-          }
-          const size_t histogram = options.initial_context_map.empty()
-            ? token.context
-            : options.initial_context_map[token.context];
-          if (!histograms[histogram].Add(encoded)) {
-            return Status::InvalidArgument("ANS histogram count overflow");
-          }
-        }
+      if (Status status = AddDirectAnsTokenHistograms(
+            section_tokens, options, histograms);
+          !status.ok()) {
+        return status;
       }
     }
     ProfileEnd(

@@ -1494,6 +1494,80 @@ bool CheckScannedDirectAnsValidation() {
   return true;
 }
 
+bool CheckScannedDirectAnsLateSectionFailures() {
+  using gjxl::codestream_internal::DirectAnsEntropyMode;
+  using gjxl::codestream_internal::OptimizeDirectAnsEntropyCode;
+  const std::array tokens{gjxl::EntropyToken{0, 1}, gjxl::EntropyToken{1, 2}};
+  const std::array<uint32_t, 4> values{0xDEADBEEFu, 1, 2, 0xDEADBEEFu};
+  const std::array<uint16_t, 4> contexts{0xBEEF, 0, 1, 0xBEEF};
+  const std::array<uint8_t, 2> map{0, 0};
+  size_t cases = 0;
+  for (auto mode : {DirectAnsEntropyMode::kBalanced, DirectAnsEntropyMode::kHighDensity}) {
+    for (bool mapped : {false, true}) {
+      for (bool split : {false, true}) {
+        for (int failure = 0; failure < 5; ++failure) {
+          gjxl::EntropyCodeOptions options{
+            .context_count = 2,
+            .initial_context_map = mapped ? std::span(map) : std::span<const uint8_t>{},
+            .initial_histogram_count = mapped ? 1u : 0u,
+          };
+          std::array<gjxl::EntropyTokenStreamView, 3> views{
+            split ? gjxl::EntropyTokenStreamView::Split(
+              std::span(values).subspan(1, 2), std::span(contexts).subspan(1, 2)) :
+              gjxl::EntropyTokenStreamView::Interleaved(tokens),
+            gjxl::EntropyTokenStreamView::Interleaved({}),
+            gjxl::EntropyTokenStreamView::Interleaved(tokens),
+          };
+          const char* message = "ANS token-stream view is invalid";
+          std::array invalid_tokens = tokens;
+          if (failure == 0) {
+            views[2] = gjxl::EntropyTokenStreamView::Split(
+              std::span(values).subspan(1, 2), std::span(contexts).subspan(1, 1));
+          }
+          if (failure == 1) {
+            views[2] = gjxl::EntropyTokenStreamView::Split(
+              std::span(values).subspan(1, 2), std::span(contexts).subspan(1, 2));
+            views[2].tokens = tokens;
+          }
+          if (failure == 2) views[2].values = std::span(values).subspan(1, 2);
+          if (failure == 3) {
+            invalid_tokens.back().context = options.context_count;
+            views[2] = gjxl::EntropyTokenStreamView::Interleaved(invalid_tokens);
+            message = "ANS token context is out of range";
+          }
+          if (failure == 4) {
+            options.uint_config = {15, 0, 0};
+            invalid_tokens.back().value = 256;
+            views[2] = gjxl::EntropyTokenStreamView::Interleaved(invalid_tokens);
+            message = "ANS histogram count overflow";
+          }
+          gjxl::EntropyCode code;
+          code.context_count = 123;
+          code.context_map = {8, 9};
+          gjxl::EntropyCodeCost cost;
+          cost.token_bits = 456;
+          cost.section_token_bits = {10, 20};
+          const auto code_before = code;
+          const auto cost_before = cost;
+          const auto input_before = invalid_tokens;
+          const auto status = OptimizeDirectAnsEntropyCode(views, options, mode, &code, &cost);
+          if (status.code() != gjxl::StatusCode::kInvalidArgument || status.message() != message ||
+              code != code_before || cost != cost_before || invalid_tokens != input_before ||
+              values.front() != 0xDEADBEEFu || values.back() != 0xDEADBEEFu ||
+              contexts.front() != 0xBEEF || contexts.back() != 0xBEEF) {
+            std::cerr << "Late ANS section failure changed status or output\n";
+            return false;
+          }
+          ++cases;
+        }
+      }
+    }
+  }
+  if (cases != 40) return false;
+  std::cout << "Verified 40 late ANS section failures after populated and empty sections.\n";
+  return true;
+}
+
 bool CheckBorrowedDirectAnsValidation() {
   using gjxl::codestream_internal::PreparedFixedAnsCluster;
   using gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations;
@@ -2031,6 +2105,7 @@ int main() {
       !CheckBorrowedDirectAnsValidation() ||
       !CheckScannedDirectAnsConfigurations() ||
       !CheckScannedDirectAnsValidation() ||
+      !CheckScannedDirectAnsLateSectionFailures() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {

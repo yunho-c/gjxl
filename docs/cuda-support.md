@@ -839,6 +839,19 @@ pairs. Production ANS code is restored to S56; no S57 speedup is claimed.
 The failed experiment and all slower cohorts remain documented. A smaller
 token-scan routine is an open experiment, not an accepted optimization.
 
+[S58](cuda-optimization-s1.md#small-token-scanned-ans-histogram-routine-s58)
+extracts a small private ANS token scan, enabling actual integer-conversion
+inlining. Its release scan body exactly matches the measured control, while
+the larger partition bodies do not. All captured partitions improve; warm
+4K release histogram work falls 14.0%, winning all seven pairs. Whole-encode
+changes are -1.2% / +0.1% / +2.0% at 4K / 1080p / Flower. Cold release
+regressions of +4.1% / +5.5% / +0.8% remain recorded despite a more favorable
+separate cold-phase cohort; this is not a universal wall-time speedup.
+All 71 CUDA / 50 CPU tests, five host ASan targets, 39,264 exact oracle
+comparisons, 40 new late-section failure cases, and 58 byte-identical
+decoded-image pairs pass. GPU code, API/ABI, and quality policy are unchanged.
+Complete-workflow variability and remaining GPU work are still open.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
