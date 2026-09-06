@@ -17,7 +17,7 @@
   readback into ownership-backed final frame storage, in-place ANS clustering,
   hoisted histogram log-table access, borrowed prepared ANS populations,
   bounded narrow coefficient-order counters with portable SIMD counting,
-  and multi-row Malta halo reuse
+  multi-row Malta halo reuse, and joint-channel horizontal33 convolution
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -31,7 +31,20 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S54 against S53
+below supersede them. The latest implemented checkpoint, S55 against S54
+(`058b2df`), computes horizontal33 for all three channels in one kernel,
+removing 12 launches per profiled encode without changing image-plane
+traffic or arithmetic. Controlled horizontal-stage paired gains are
+8.8% / 15.2% / 24.3% at 4K / 1080p / Flower, although one 4K target
+observation and two 4K total-GPU observations regress. Warm release whole
+encode improves only 0.45% / 0.93% / 0.37%; cold 4K regresses in both
+release and control cohorts. All 71 CUDA / 50 CPU tests, four host ASan
+targets, seven scoped CUDA sanitizer runs, and 58 byte-identical decoded
+image pairs pass. All 170 existing GPU bodies remain unchanged; the new
+production body matches the measured control. See
+[S55](#joint-channel-horizontal33-convolution-s55) for evidence and limits.
+
+The preceding implemented checkpoint, S54 against S53
 (`7e5be16`), retains 256-thread Malta blocks while reusing each loaded halo
 across multiple output rows per lane. Controlled GPU traces show median
 paired Malta improvements of 18.7% / 7.6% / 7.9% at 4K / 1080p / Flower.
@@ -8493,6 +8506,233 @@ Public API/ABI and arithmetic remain unchanged; the new entry is confined
 to internal CUDA testing. Wide blurs, remaining Malta work, token-scanned DC
 population construction, and full-workflow variability remain live leads.
 The optimization goal remains active, not demonstrated maxed out.
+
+## Joint-channel horizontal33 convolution (S55)
+
+S55 compares against S54 `058b2df` on the same RTX 3060 Laptop,
+MSVC 14.37 / CUDA 11.8 configuration. Fresh three-warmup, one-capture
+fully-resident profiles identify horizontal33 at 12.506 / 2.021 ms
+for odd 4K / 1080p, across 18 launches. Total GPU time is
+186.556 / 32.954 ms with 407 / 394 launches. The unchanged joint
+vertical33/low-medium pass takes another 12.901 / 2.072 ms. This is
+a targeted blur optimization, not a new arithmetic or quality mode.
+
+### What is shared, and what is not
+
+The previous path launches the same horizontal33 convolution separately
+for three XYB channels. The joint kernel loads the three independent
+halos into shared storage, shares weight loading, edge tests, normalization,
+and coordinate calculations, and advances three separate sums in the
+original tap order. Each channel still performs its original rounded
+division. No symmetry regrouping, reciprocal approximation, reduced
+precision, global fast math, or change to vertical filtering is introduced.
+
+The retained tile remains 256 columns by four rows with 256 threads.
+Every thread participates in the cooperative load and barrier; only
+then can out-of-image output lanes skip work. The flattened grid retains
+support for more than 65,535 tile rows. A fixed tile is retained from
+the screen below; this is not a claim of universal optimality.
+
+Low/medium preparation changes from three horizontal launches plus one
+joint vertical/output launch to two launches. Six psycho-image passes
+therefore remove 12 launches per profiled encode. All three packed
+horizontal intermediates are still written and consumed, and all image
+halo loads remain. This does **not** eliminate an image-sized temporary,
+image-plane traffic, arena capacity, allocation, transfer, or submission.
+Weight/address reuse is a program-level structural change; no DRAM
+traffic reduction or achieved-occupancy measurement is claimed.
+
+The original horizontal and vertical kernels remain available through
+the CUDA-internal low/medium reference path. No header, public API/ABI,
+host coefficient layout, encoder policy, or diagnostic runtime switch
+changes in production.
+
+### Same-executable tile screen
+
+The diagnostic binary contains frozen S54 source, the frozen 220-case
+low/medium fixture, and four independently selectable joint candidates.
+All five modes, including S54, pass those guarded cases with three-stage
+reuse. The fixture checks full allocations, misaligned offsets, independent
+padding, Gaussian/impulse/irregular weights, signed zero, extreme magnitudes,
+cancellation boundaries, NaN/Inf inputs, and immutable inputs/weights.
+
+The timing screen has 24 cases: packed/padded 510x532, 960x540, 1920x1080,
+3840x2160, 31x32767, and 16384x64, each measuring horizontal-only and complete
+low/medium preparation. All 16 device allocations compare bit-for-bit
+outside the timing windows. Sixteen warmups per mode precede ten balanced
+orders: five cyclic forward orders and five reversed orders. Each CUDA
+event window contains three repetitions; launch gaps are included, while
+setup and host checking are excluded. All 1,200 timings and drift remain.
+
+| Joint tile | Registers | Shared bytes | Packed 1080p horizontal / complete change | Packed 4K horizontal / complete change |
+| --- | ---: | ---: | ---: | ---: |
+| 256x4, retained | 46 | 13,960 | -13.6% / -6.7% | -11.0% / -4.7% |
+| 128x8 | 46 | 15,496 | -12.9% / -6.6% | -10.9% / -3.5% |
+| 128x4 | 46 | 7,816 | -9.7% / -4.8% | -6.6% / -2.2% |
+| 64x8 | 46 | 9,352 | -8.9% / -4.3% | -5.6% / -3.1% |
+
+All candidates use zero stack/spill storage. Every one of the 24 case
+medians favors each candidate over its paired baseline; individual slower
+samples are retained. The retained tile's padded 1080p and 4K complete
+changes are -6.9% and -4.8%. Narrow 31x32767 favors 64x8 more strongly
+(-52.5% / -52.4% complete, packed/padded) than the retained tile
+(-43.5% / -42.8%). That does not establish a broad size-dispatch policy.
+
+Final native qualification finds 171 GPU bodies versus S54's 170.
+Every preexisting body is instruction-identical after translation-unit
+hash normalization. The new production 256x4 body matches the measured
+same-executable control body after removing only its renamed function
+header: 46 registers, 13,960 shared bytes, no stack/local allocation.
+The host codestream library is byte-identical to S54.
+
+### Controlled full-workflow traces
+
+A diagnostic-only `S55_HORIZONTAL_MODE` selects baseline or joint inside
+one linked executable; its frozen S54 baseline is unchanged outside the
+selector/prototype insertion. Three alternating pairs per workload use
+three warmups and one captured encode. Every pair has 18 -> 6 horizontal
+launches, identical non-target kernel structure, identical copies and byte
+counts, and identical allocation requests. Total launches fall by 12.
+All 46 control image triples match retained production bytes.
+
+| Workload | Baseline horizontal ms, three runs | Joint horizontal ms | Median paired target change | Other GPU change | Total GPU change |
+| --- | --- | --- | ---: | ---: | ---: |
+| Odd 4K | 14.239 / 12.974 / 13.879 | 15.850 / 11.838 / 12.456 | -8.8% | +4.4% | +3.3% |
+| Odd 1080p | 2.082 / 1.917 / 1.965 | 1.677 / 1.626 / 1.701 | -15.2% | +0.1% | -0.7% |
+| Flower | 0.365 / 0.368 / 0.366 | 0.276 / 0.276 / 0.277 | -24.3% | -0.01% | -1.4% |
+
+The 4K target wins two of three pairs, not all three. Its first target
+regresses 11.3%, with other GPU work +15.2% and total +14.9%. Two of
+three 4K total-GPU observations regress; one 1080p total also regresses.
+No samples are discarded and unchanged GPU work is not attributed to the
+new kernel. These are control-executable traces, not final release
+captures; the exact native match ties the candidate body to production.
+
+An earlier same-executable wall cohort has seven alternating pairs,
+three warmups and five samples per process. Quantization-pipeline changes
+are +0.06% / -1.32% / +0.76% for 4K / 1080p / Flower; whole-encode changes
+are -1.29% / +0.27% / -0.83%, with 6/7, 3/7, and 4/7 wins. The 1080p
+whole-path regression and Flower's +41.5% individual whole-encode outlier
+remain. This cohort does not justify a universal end-to-end speedup.
+
+### Qualification and final timing
+
+The final Release build passes all 71 CUDA CTests (67.35 seconds), all
+50 CPU-only GCC CTests (16.25 seconds), and installed consumers. Four
+Clang 22 CPU-only host ASan targets pass: entropy, coefficient order,
+codestream encoder, and public workflow. Host sources require no rebuild.
+
+The tracked low/medium fixture expands to 320 cases over 32 geometries,
+packed/padded layouts and five value/weight patterns, with three-stage
+reuse and full guard checking. Added cases cover both sides of the
+256-column and four-row boundaries. Its separate 1x4,194,305 case passes,
+exercising the flattened grid well beyond 65,535 tile rows.
+
+All four scoped CUDA sanitizers pass on 30 guarded cases: 33x33, 1x5,
+and 257x5, both padding modes, all five patterns, three reuse stages.
+Memcheck/initcheck/synccheck take about 2.6 / 2.7 / 2.8 seconds;
+racecheck completes in 40.7 seconds with zero hazards, errors, or warnings.
+The complete AQ fixture also passes memcheck, initcheck, and synccheck
+(28.4 / 20.1 / 13.2 seconds). Memcheck reports zero leaked bytes with
+stream-ordered race tracking and full leak checking enabled. The AQ
+fixture's legacy console wording omits fully resident, but its main
+function explicitly runs `CheckFullyResident`. No full-AQ racecheck or
+tall-image sanitizer qualification is claimed.
+
+All 58 encode/decode comparisons against S54 have identical codestream
+bytes and identical independently decoded Butteraugli scores. The primary
+46 span seven inputs, distances 0.5/1.2/3.0 at effort 7, sample/Flower
+effort 9, and scoring on/off. Twelve additional pairs cover legacy
+high-density and effort-7 maximum-compression modes. The pinned libjxl
+`e8ff09762481785938d8e4e01333ed3917571161` Clang 22 decoder/metric uses
+linear sRGB/D65; no size/score threshold is flagged. All 46 diagnostic
+baseline/joint/production triples also agree exactly.
+
+Final warm release measurements use seven alternating S54/S55 pairs per
+workload, three warmups and five samples per process, with 41 phase fields.
+Cold comparisons use seven pairs with zero warmups and one sample.
+Percentages below are medians of paired ratios, not ratios of the separately
+reported marginal median times; those two statistics can have opposite signs.
+
+| Warm release phase | 4K S54 -> S55 ms; paired change | 1080p S54 -> S55 ms; paired change | Flower S54 -> S55 ms; paired change |
+| --- | --- | --- | --- |
+| Quantization pipeline | 266.463 -> 266.965; +0.19%, 3/7 wins | 53.905 -> 52.671; -1.44%, 5/7 | 11.742 -> 11.585; -1.75%, 4/7 |
+| Codestream encoding | 93.590 -> 92.113; +2.85%, 3/7 | 38.754 -> 39.283; +1.16%, 3/7 | 9.494 -> 9.601; +0.76%, 3/7 |
+| Whole encode | 396.315 -> 389.955; -0.45%, 4/7 | 99.451 -> 99.017; -0.93%, 5/7 | 22.610 -> 22.727; -0.37%, 4/7 |
+
+The 4K quantization median is effectively flat, and all three unchanged
+codestream-phase paired medians regress. Whole-encode pair ranges are
+-5.69..+5.50%, -22.24..+9.55%, and -14.89..+17.82%. The retained
+401.133 -> 423.207 ms 4K and 21.345 -> 25.149 ms Flower pairs illustrate
+why the targeted GPU result is not a uniform wall-speedup claim.
+The separate same-executable warm cohort above remains independent.
+
+| Cold whole encode | 4K baseline -> joint ms; paired change | 1080p baseline -> joint ms; paired change | Flower baseline -> joint ms; paired change |
+| --- | --- | --- | --- |
+| Release S54 -> S55 | 497.822 -> 499.690; +0.87%, 3/7 wins | 144.039 -> 151.206; -1.58%, 4/7 | 45.411 -> 44.367; -6.06%, 6/7 |
+| Same-executable control | 494.393 -> 503.944; +0.98%, 3/7 | 140.071 -> 139.908; -0.72%, 4/7 | 47.276 -> 47.145; +0.06%, 3/7 |
+
+Both cold 4K whole-encode cohorts regress. Release quantization changes
+are -0.29% / -0.69% / -3.13%; cold control quantization changes are
++1.49% / -0.20% / -0.77%. Control 4K codestream work is +6.09%, despite
+the byte-identical host library. Cold whole-path outliers include +14.64%
+at release 1080p and +22.62% at control Flower. No S55 A/A/B cohort is
+claimed, and the controls do not explain away the slower observations.
+
+Batch qualification uses one warmup and three alternating serial/batch
+samples. Every result is checked against the single-image codestream and
+summary. At even 1080p, fully-resident batch sizes 1/2/4 have paired
+speedups 0.981/1.135/1.300x and batch medians 101.373/190.497/358.675 ms;
+size 1 is slower in all three observations. Maximum-throughput gives
+0.987/1.520/1.849x and 70.554/91.205/163.077 ms, with size 1 slower
+in two observations. Even 4K fully-resident sizes 1/2 give 1.005/0.996x
+and 410.622/874.178 ms; size 2 is slower in two of three observations
+(range 0.982..1.052x). These are same-version scheduling comparisons,
+not S55-versus-S54 improvements.
+
+Control-workflow boundary readings move from 56 C / 1282 MHz / 22.48 W
+to 63 C / 1282 MHz / 25.11 W. Final release/batch boundaries move from
+59 C / P0 / 1282 MHz / 22.97 W to 66 C / P3 / 1282 MHz / 24.61 W.
+Software thermal/power flags change from inactive to active. These are
+boundary samples, not per-kernel readings, performance normalization, or
+causal thermal diagnoses; the latter reading precedes the short cold-control
+follow-up. No clock, power, cooling, priority, security, or service settings
+were changed.
+
+### Retention and limits
+
+The ignored `build-cuda-ninja/profiles/s55_*` bundle retains frozen parent
+source and fixture, the four-candidate probe, all 1,200 raw timings, control
+source/binaries, 20 Nsight reports and SQLite exports, complete test and
+sanitizer logs, native dumps, 58 quality pairs, 46 control triples, warm/cold
+phase records, batch records, and summary/validation scripts. The production
+and diagnostic sources used for each result are retained separately.
+`s55_freeze.ps1` retains 35 binaries/libraries and four tracked source/doc
+snapshots without overwriting an existing checkpoint. Use a fresh evidence
+prefix for reruns, not the frozen output names.
+
+`s55_validate.py --frozen` verifies native identity, source scope, exact
+screen rows/orders/arithmetic, saved SQLite kernel/copy/allocation records,
+test markers, quality hashes/scores, raw phase fields and paired summary
+formulas, batch observations, unchanged parent identities, and both frozen
+manifests. Final native matching connects the controlled kernel timings
+to the released body without substituting a standalone prototype.
+
+The first 4K capture completed, but Windows PowerShell stopped its export
+wrapper on profiler stderr. Exporting that same saved capture completed;
+a single-element array mistake then rejected the 1080p workload before a
+valid capture, and the corrected resume script succeeded. No valid
+capture or slower observation was replaced. The first screen summarizer
+also required explicit UTF-16 decoding of PowerShell's saved log; its
+corrected rerun used the same 1,200 timings. These were script errors,
+not observed firewall/admin failures. All final runs are terminal.
+The cause of the earlier S30 wait remains unconfirmed.
+
+This checkpoint reduces a measured horizontal blur cost and launch count
+with unchanged results. It does not establish a uniform whole-encode gain
+or demonstrate that the fully-resident path is maxed out. Remaining
+vertical blur, Malta, other horizontal filters, token-scanned DC population
+construction, and workflow variability remain concrete investigation leads.
 
 ## Work that should not lead the next cycle
 

@@ -799,6 +799,20 @@ outliers, and slower batch observations remain documented. All 71 CUDA /
 Public API/ABI is unchanged; a CUDA-internal testing entry permits bounded
 sanitizer coverage of every tile/grid specialization. Optimization continues.
 
+[S55](cuda-optimization-s1.md#joint-channel-horizontal33-convolution-s55)
+combines three horizontal33 channel passes into one exact kernel, removing
+12 launches per profiled encode while retaining the same image intermediates,
+transfers, allocations, and arithmetic. Controlled horizontal GPU time
+improves by paired 8.8% / 15.2% / 24.3% at 4K / 1080p / Flower, but the
+4K total-GPU cohort regresses. Warm release whole-encode gains are only
+0.45% / 0.93% / 0.37%; cold 4K regresses in release and same-executable
+controls. All slower observations remain documented. All 71 CUDA / 50 CPU
+tests, four host ASan targets, seven scoped CUDA sanitizers, 320 guarded
+low/medium cases, the tall case, and 58 decoded-image pairs pass. The 170
+existing GPU bodies are unchanged and the new body matches the measured
+control, with no spills. No public API/ABI or quality-policy changes;
+optimization remains ongoing.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

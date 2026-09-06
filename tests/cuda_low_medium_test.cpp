@@ -182,13 +182,19 @@ int main(int argc, char** argv) {
       std::cout << "Verified tall low/medium case above 65535 tile rows\n" << std::flush;
       return 0;
     }
-    constexpr std::array<std::array<uint32_t, 2>, 22> shapes{{
+    constexpr std::array<std::array<uint32_t, 2>, 32> shapes{{
         {1,1}, {1,19}, {19,1}, {7,11}, {15,15}, {31,31}, {32,32}, {33,33},
         {47,47}, {48,48}, {49,49}, {63,63}, {64,64}, {65,65}, {95,95},
-        {96,96}, {97,97}, {127,65}, {255,3}, {256,4}, {257,67}, {511,129}}};
+        {96,96}, {97,97}, {127,65}, {255,3}, {256,4}, {257,67}, {511,129},
+        {1,3}, {1,4}, {1,5}, {255,5}, {256,3}, {256,5}, {257,3},
+        {257,4}, {257,5}, {513,9}}};
     size_t cases = 0;
     for (const auto& shape : shapes) {
-      if (mode == "--sanitizer" && shape[0] != 1 && shape[0] != 33 && shape[0] != 65) continue;
+      // Include tiny, all-border, and horizontal-tile-boundary cases without
+      // paying for the tall fixture under race instrumentation.
+      if (mode == "--sanitizer" && shape[0] != 33 &&
+          !(shape[0] == 1 && shape[1] == 5) &&
+          !(shape[0] == 257 && shape[1] == 5)) continue;
       for (bool padded : {false,true})
         for (unsigned pattern = 0; pattern < 5; ++pattern) {
           Verify(shape[0], shape[1], padded, pattern);

@@ -338,6 +338,72 @@ __device__ __forceinline__ void ConvolutionTiledBody(
   }
 }
 
+// Joint horizontal33 keeps each channel's sum and rounded division separate.
+// Every lane participates in the halo load and barrier, including partial tiles.
+template<unsigned Width, unsigned Height>
+__global__ void ConvolutionHorizontal3Kernel(
+    const float* input0, const float* input1, const float* input2,
+    const float* weights, float* output0, float* output1, float* output2,
+    uint32_t width, uint32_t height, uint32_t input_stride) {
+  constexpr unsigned InputWidth = Width + 32;
+  constexpr unsigned InputSize = InputWidth * Height;
+  __shared__ float tile0[InputSize], tile1[InputSize], tile2[InputSize];
+  __shared__ float kernel[33];
+  __shared__ float normalization;
+  const uint32_t columns = (width + Width - 1) / Width;
+  const uint32_t origin_x = (blockIdx.x % columns) * Width;
+  const uint32_t origin_y = (blockIdx.x / columns) * Height;
+  if (threadIdx.x < 33) kernel[threadIdx.x] = weights[threadIdx.x];
+  if (threadIdx.x == 0) {
+    float weight_sum = 0.0f;
+    for (unsigned tap = 0; tap < 33; ++tap) weight_sum += weights[tap];
+    normalization = weight_sum;
+  }
+  for (unsigned index = threadIdx.x; index < InputSize; index += blockDim.x) {
+    const int x = static_cast<int>(origin_x + index % InputWidth) - 16;
+    const uint32_t y = origin_y + index / InputWidth;
+    const bool valid = x >= 0 && x < static_cast<int>(width) && y < height;
+    const size_t source = static_cast<size_t>(y) * input_stride + x;
+    tile0[index] = valid ? input0[source] : 0.0f;
+    tile1[index] = valid ? input1[source] : 0.0f;
+    tile2[index] = valid ? input2[source] : 0.0f;
+  }
+  __syncthreads();
+  for (unsigned index = threadIdx.x; index < Width * Height; index += blockDim.x) {
+    const uint32_t local_x = index % Width;
+    const uint32_t local_y = index / Width;
+    const uint32_t x = origin_x + local_x, y = origin_y + local_y;
+    if (x >= width || y >= height) continue;
+    const unsigned first = local_y * InputWidth + local_x;
+    float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f;
+    float weight_sum = normalization;
+    if (x >= 16 && static_cast<size_t>(x) + 16 < width) {
+#pragma unroll
+      for (unsigned tap = 0; tap < 33; ++tap) {
+        sum0 += tile0[first + tap] * kernel[tap];
+        sum1 += tile1[first + tap] * kernel[tap];
+        sum2 += tile2[first + tap] * kernel[tap];
+      }
+    } else {
+      weight_sum = 0.0f;
+#pragma unroll
+      for (unsigned tap = 0; tap < 33; ++tap) {
+        const int coordinate = static_cast<int>(x) + static_cast<int>(tap) - 16;
+        if (coordinate >= 0 && coordinate < static_cast<int>(width)) {
+          sum0 += tile0[first + tap] * kernel[tap];
+          sum1 += tile1[first + tap] * kernel[tap];
+          sum2 += tile2[first + tap] * kernel[tap];
+          weight_sum += kernel[tap];
+        }
+      }
+    }
+    const size_t destination = static_cast<size_t>(y) * width + x;
+    output0[destination] = sum0 / weight_sum;
+    output1[destination] = sum1 / weight_sum;
+    output2[destination] = sum2 / weight_sum;
+  }
+}
+
 struct StoreConvolution {
   float* output;
   uint32_t stride;
@@ -1804,22 +1870,31 @@ cudaError_t LaunchLowMediumImpl(const CudaButteraugliLowMediumPlan& plan,
   if (plan.width == 0 || plan.height == 0) return cudaSuccess;
   if (plan.input_stride < plan.width || plan.output_stride < plan.width ||
       (reference && plan.blurred_stride < plan.width)) return cudaErrorInvalidValue;
-  for (size_t channel = 0; channel < 3; ++channel) {
-    cudaError_t error;
-    if (reference) {
-      error = LaunchBlur<33>(plan.input[channel], plan.input_stride, plan.weights,
+  if (reference) {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      const cudaError_t error = LaunchBlur<33>(
+          plan.input[channel], plan.input_stride, plan.weights,
           plan.intermediate[channel], plan.blurred[channel], plan.blurred_stride,
           plan.width, plan.height, stream);
-    } else {
-      ConvolutionTiledKernel<true, 33>
-          <<<ConvolutionTile<true>::Blocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
-              plan.input[channel], plan.weights, plan.intermediate[channel],
-              plan.width, plan.height, plan.input_stride, plan.width);
-      error = CheckLaunch();
+      if (error != cudaSuccess) return error;
     }
+  } else {
+    // Share weight loads, normalization, and address work across channels.
+    // The original horizontal intermediates and per-channel tap order remain.
+    constexpr unsigned int kHorizontalWidth = 256;
+    constexpr unsigned int kHorizontalHeight = 4;
+    const unsigned int blocks =
+        ((plan.width + kHorizontalWidth - 1) / kHorizontalWidth) *
+        ((plan.height + kHorizontalHeight - 1) / kHorizontalHeight);
+    ConvolutionHorizontal3Kernel<kHorizontalWidth, kHorizontalHeight>
+        <<<blocks, kPlaneThreads, 0, stream>>>(
+            plan.input[0], plan.input[1], plan.input[2], plan.weights,
+            plan.intermediate[0], plan.intermediate[1], plan.intermediate[2],
+            plan.width, plan.height, plan.input_stride);
+    const cudaError_t error = CheckLaunch();
     if (error != cudaSuccess) return error;
   }
-  const LowMediumParams params{plan.width, plan.height, plan.input_stride,
+ const LowMediumParams params{plan.width, plan.height, plan.input_stride,
       reference ? plan.blurred_stride : plan.width, plan.output_stride};
   if (reference) {
     LowMediumKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
