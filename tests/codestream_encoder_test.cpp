@@ -22,6 +22,7 @@
 #include "core/frame_geometry.h"
 #include "core/image.h"
 #include "core/quantizer.h"
+#include "core/thread_budget.h"
 
 namespace {
 
@@ -639,13 +640,70 @@ bool CheckDeferredCandidatePrimitives() {
   return true;
 }
 
+bool CheckManagedSerializerStorage() {
+  using namespace gjxl;
+  using namespace resource_budget_internal;
+  VarDctEncoderFrame frame;
+  const auto prepared = MakeFrame(257, 257, {3541, 10}, {}, &frame);
+  if (!prepared.ok()) return false;
+  for (auto behavior : {VarDctEntropyBehavior::kBalanced,
+                        VarDctEntropyBehavior::kHighDensity,
+                        VarDctEntropyBehavior::kMaximumCompression}) {
+    std::vector<uint8_t> expected;
+    {
+      thread_budget_internal::EncodeScope threads(1);
+      if (!EncodeVarDctCodestream(frame, {.entropy_behavior = behavior}, &expected).ok())
+        return false;
+    }
+    const auto fallback_peak = DefaultResourceBudget().snapshot().peak_backing_bytes;
+    // This is a writer-attachment test, not a complete serializer memory plan.
+    ResourceBudget budget(64 * 1024 * 1024);
+    ResourceReservation job;
+    if (!budget.Reserve(64 * 1024 * 1024, &job).ok()) return false;
+    std::vector<uint8_t> encoded;
+    thread_budget_internal::CpuParticipantTracker tracker;
+    {
+      ResourceContextScope resources({&job, ResourceClass::kSerializer});
+      thread_budget_internal::EncodeScope threads(4, &tracker);
+      const auto status = EncodeVarDctCodestream(frame, {.entropy_behavior = behavior}, &encoded);
+      if (!status.ok()) { std::cerr << status.message() << '\n'; return false; }
+    }
+    job.Reset();
+    if (encoded != expected || tracker.peak() < 2 || budget.snapshot().peak_backing_bytes == 0 ||
+        budget.snapshot().committed_bytes() != 0 ||
+        DefaultResourceBudget().snapshot().peak_backing_bytes != fallback_peak) {
+      std::cerr << "Managed parallel serialization changed bytes or leaked ownership\n";
+      return false;
+    }
+    ResourceBudget tiny(1);
+    ResourceReservation rejected;
+    if (!tiny.Reserve(1, &rejected).ok()) return false;
+    {
+      ResourceContextScope resources({&rejected, ResourceClass::kSerializer});
+      const std::vector<uint8_t> sentinel{1, 2, 3};
+      encoded = sentinel;
+      const auto status = EncodeVarDctCodestream(frame, {.entropy_behavior = behavior}, &encoded);
+      if (status.code() != StatusCode::kOutOfMemory || encoded != sentinel ||
+          tiny.snapshot().total.backing_count != 0 || tiny.snapshot().total.pending_count != 0) {
+        std::cerr << "Managed serializer rejection did not preserve caller output\n";
+        return false;
+      }
+    }
+    rejected.Reset();
+    if (tiny.snapshot().committed_bytes() != 0) return false;
+    if (!EncodeVarDctCodestream(frame, {.entropy_behavior = behavior}, &encoded).ok() ||
+        encoded != expected) return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
   if (!CheckCodestreamAndFrameHeaders() || !CheckQuantizerSelectors() ||
       !CheckAssemblyAndDeterminism() || !CheckAdaptiveBlockContextSelection() ||
       !CheckEntropyBehaviorPlumbing() || !CheckAtomicRejections() ||
-      !CheckDeferredCandidatePrimitives()) {
+      !CheckDeferredCandidatePrimitives() || !CheckManagedSerializerStorage()) {
     return EXIT_FAILURE;
   }
   std::cout << "All codestream encoder tests passed.\n";

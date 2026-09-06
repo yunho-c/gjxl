@@ -9,9 +9,9 @@
 #include <span>
 #include <stdexcept>
 #include <utility>
-#include <vector>
 
 #include "core/image.h"
+#include "core/managed_allocator.h"
 
 namespace gjxl {
 
@@ -31,8 +31,8 @@ public:
       throw std::length_error("Image3FBuffer extent is invalid");
     }
 
-    std::array<std::vector<float>, 3> planes;
-    for (std::vector<float>& plane : planes) {
+    std::array<resource_budget_internal::ManagedVector<float>, 3> planes;
+    for (auto& plane : planes) {
       plane.resize(pixel_count);
     }
     planes_ = std::move(planes);
@@ -86,7 +86,7 @@ public:
 
 private:
   Extent2D extent_;
-  std::array<std::vector<float>, 3> planes_;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> planes_;
 };
 
 }  // namespace gjxl

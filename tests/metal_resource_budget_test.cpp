@@ -169,9 +169,10 @@ bool CheckCacheDomainsAndReclamation() {
     ResourceReservation job;
     if (!Ok(budget.Reserve(capacity, &job))) return false;
     const auto before = gpu->stats().successful_allocations;
+    // Caller-owned source is outside this device-only fixture's reservation.
+    image = Image({32, 32}, seed++);
     {
       ResourceContextScope context({&job, ResourceClass::kUnclassified});
-      image = Image({32, 32}, seed++);
       if (!PrepareInput(*gpu, image, &prepared) ||
           !CheckInputBytes(*gpu, image, *prepared)) return false;
       if (!Check(gpu->stats().successful_allocations == before + fresh &&

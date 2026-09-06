@@ -137,8 +137,10 @@ source-backed ownership inventory, integration decisions, and tested primitive
 for reservation/allocation lifetimes and FIFO admission. The
 [Metal attachment checkpoint](resident-metal-accounting.md) adds real backing
 charges, domain-aware cache transitions, and all-pool trim with physical-memory
-and complete-call measurements. Host coverage and workflow admission are still
-pending; this Metal-only attachment does not satisfy the milestone.
+and complete-call measurements. The [host attachment checkpoint](resident-host-accounting.md)
+adds writer/image-plane backing and joined CPU worker propagation. Token/model
+coverage and whole-workflow admission are still pending; these partial attachments
+do not satisfy the milestone.
 
 Deliverables:
 

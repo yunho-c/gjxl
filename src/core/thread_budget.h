@@ -6,6 +6,8 @@
 #include <atomic>
 #include <cstddef>
 
+#include "core/resource_context.h"
+
 namespace gjxl::thread_budget_internal {
 
 class CpuParticipantTracker {
@@ -69,8 +71,9 @@ private:
 class ParallelScope {
 public:
   explicit ParallelScope(
-    size_t thread_count, CpuParticipantTracker* tracker)
-      : previous_(cpu_thread_budget_state), tracker_(tracker) {
+    size_t thread_count, CpuParticipantTracker* tracker,
+    resource_budget_internal::ResourceContext resources)
+      : resources_(resources), previous_(cpu_thread_budget_state), tracker_(tracker) {
     cpu_thread_budget_state = {
       .thread_count = thread_count,
       .parallel_depth = previous_.parallel_depth + 1,
@@ -88,6 +91,7 @@ public:
   ParallelScope& operator=(const ParallelScope&) = delete;
 
 private:
+  resource_budget_internal::ResourceContextScope resources_;
   CpuThreadBudgetState previous_;
   CpuParticipantTracker* tracker_ = nullptr;
 };

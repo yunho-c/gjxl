@@ -128,12 +128,13 @@ Status RunParallelSections(size_t count, Function&& function) {
     thread_budget_internal::CpuThreadCount();
   auto* const participant_tracker =
     thread_budget_internal::ParticipantTracker();
+  const auto resource_context = resource_budget_internal::CurrentResourceContext();
   const size_t participant_count = cpu_thread_count == 0
     ? automatic_worker_count
     : std::min(automatic_worker_count, cpu_thread_count);
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker);
+      cpu_thread_count, participant_tracker, resource_context);
     for (size_t index = 0; index < count; ++index) {
       Status status = invoke(index, 0);
       if (!status.ok()) return status;
@@ -150,7 +151,7 @@ Status RunParallelSections(size_t count, Function&& function) {
   workers.reserve(spawned_worker_count);
   const auto run_worker = [&](size_t worker_index) {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker);
+      cpu_thread_count, participant_tracker, resource_context);
     while (true) {
       const size_t index =
         next_index.fetch_add(1, std::memory_order_relaxed);
@@ -1994,6 +1995,8 @@ Status EncodeVarDctCodestreamImpl(
   std::vector<uint8_t>* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
+  const resource_budget_internal::ManagedHostScope managed_host(
+    resource_budget_internal::ResourceClass::kSerializer);
   return options.entropy_behavior ==
       VarDctEntropyBehavior::kMaximumCompression
     ? EncodeVarDctCodestreamMaximumCompression(

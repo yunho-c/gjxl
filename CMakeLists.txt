@@ -1552,6 +1552,11 @@ if(GJXL_BUILD_TESTS)
 
   set_tests_properties(resource_budget PROPERTIES TIMEOUT 30)
 
+  add_executable(gjxl_managed_allocator_test tests/managed_allocator_test.cpp)
+  target_link_libraries(gjxl_managed_allocator_test PRIVATE gjxl_codestream)
+  add_test(NAME managed_allocator COMMAND gjxl_managed_allocator_test)
+  set_tests_properties(managed_allocator PROPERTIES TIMEOUT 30)
+
   add_executable(
     gjxl_ac_strategy_grid_test
     tests/ac_strategy_grid_test.cpp

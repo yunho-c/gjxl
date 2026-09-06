@@ -1296,6 +1296,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       "VarDCT CPU thread count must be zero or at most 256");
   }
   thread_budget_internal::CpuParticipantTracker participant_tracker;
+  const resource_budget_internal::ManagedHostScope managed_host(
+    resource_budget_internal::ResourceClass::kPreparation);
   const thread_budget_internal::EncodeScope thread_budget(
     options.cpu_thread_count,
     profile == nullptr ? nullptr : &participant_tracker);

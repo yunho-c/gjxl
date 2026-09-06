@@ -18,6 +18,9 @@ struct ResourceContext {
   // Borrowed until the synchronous work and all propagated workers finish.
   ResourceReservation* reservation = nullptr;
   ResourceClass resource_class = ResourceClass::kUnclassified;
+  // Opt in at encoder entry points, not when caller-owned inputs are created.
+  // An explicit reservation also enables managed host allocation.
+  bool track_host_allocations = false;
 };
 
 inline thread_local ResourceContext current_resource_context;
@@ -52,6 +55,16 @@ public:
   ResourceClassScope& operator=(const ResourceClassScope&) = delete;
 private:
   ResourceClass previous_;
+};
+
+/// Enables managed host storage for one encoder call, preserving its domain.
+/// Only containers using the managed allocator are covered by this scope.
+class ManagedHostScope {
+public:
+  explicit ManagedHostScope(ResourceClass resource_class) noexcept
+    : scope_({current_resource_context.reservation, resource_class, true}) {}
+private:
+  ResourceContextScope scope_;
 };
 
 /// A backing owner calls this before allocation, then commits after success.

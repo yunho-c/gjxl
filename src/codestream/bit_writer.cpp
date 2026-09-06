@@ -55,6 +55,8 @@ Status BitWriter::PrepareWrite(size_t bit_count) {
   }
   try {
     storage_.resize(end_bytes, 0);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -198,6 +200,8 @@ Status BitWriter::WithMaxBits(
   }
   try {
     storage_.reserve(reserved_bytes);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -214,6 +218,8 @@ Status BitWriter::WithMaxBits(
   Status status;
   try {
     status = operation();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    status = error.status();
   } catch (const std::bad_alloc&) {
     status = AllocationFailure();
   } catch (const std::length_error&) {

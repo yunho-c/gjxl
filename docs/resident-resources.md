@@ -5,7 +5,9 @@ This is the implementation record for milestone 4 of
 `ec4d4c5`. **Milestone 4 is not complete.** The tested
 [capacity-domain primitive](../src/core/resource_budget.h) now has
 [real Metal allocation attachments and all-pool trim](resident-metal-accounting.md).
-Host allocation coverage and whole-workflow admission are not implemented yet.
+The [host attachment checkpoint](resident-host-accounting.md) adds writer/image-plane
+backing and joined-worker propagation; host coverage is still partial and
+whole-workflow admission is not implemented yet.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
 ## Source-backed ownership inventory
@@ -179,7 +181,7 @@ attachment has its own [qualification record](resident-metal-accounting.md).
 Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
-Milestone 4 still requires host allocation attachments and shared planners,
+Milestone 4 still requires the remaining host allocation attachments and shared planners,
 CPU serializer coverage, public domain configuration/propagation, automatic cache eviction,
 retry and batch-result integration, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited
