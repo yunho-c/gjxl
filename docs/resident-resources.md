@@ -12,8 +12,10 @@ adds qualified token/model/search-container backing with measured overhead. The
 preparation/evaluation arrays and completed-frame metadata, with exact parity,
 failure/lifetime checks and measured costs. The
 [publication attachment](resident-publication-accounting.md) adds candidate and
-retained codestream-byte backing through C/C++ and batch ownership handoff.
-Diagnostic result storage and whole-workflow admission remain pending.
+retained codestream-byte backing through C/C++ and batch ownership handoff. The
+[diagnostic attachment](resident-diagnostic-accounting.md) covers score histories,
+summary/timing records and nested GPU-profile storage through publication.
+Whole-workflow planning and admission remain pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
 ## Source-backed ownership inventory
@@ -187,8 +189,8 @@ attachment has its own [qualification record](resident-metal-accounting.md).
 Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
-Milestone 4 still requires the remaining host allocation attachments and shared planners,
-diagnostic result-publication coverage, public domain configuration/propagation, automatic cache eviction,
+Milestone 4 still requires a final allocation-coverage audit and shared planners,
+public domain configuration/propagation, automatic cache eviction,
 retry and aggregate batch-result admission, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited
 opportunities' final dispositions and measured gates. Milestone 6 still requires

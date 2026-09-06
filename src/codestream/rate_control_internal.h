@@ -10,6 +10,7 @@
 
 #include "codestream/workflow.h"
 #include "codestream/storage.h"
+#include "codestream/encoding_result_internal.h"
 #include "core/status.h"
 
 namespace gjxl::codestream_internal {
@@ -31,9 +32,13 @@ struct TargetSizeSearchOptions {
 };
 
 template <typename Bytes>
+using TargetSizeSummaryFor = std::conditional_t<std::is_same_v<Bytes, CodestreamBuffer>,
+  OwnedEncodingSummary, VarDctEncodingSummary>;
+
+template <typename Bytes>
 struct TargetSizeSearchResultFor {
   Bytes codestream;
-  VarDctEncodingSummary summary;
+  TargetSizeSummaryFor<Bytes> summary;
   size_t attempt_count = 0;
   size_t failed_attempt_count = 0;
   bool target_size_met = false;
@@ -51,7 +56,7 @@ template <typename Bytes>
 using TargetSizeEvaluatorFor = std::function<Status(
   float butteraugli_target,
   Bytes* codestream,
-  VarDctEncodingSummary* summary)>;
+  TargetSizeSummaryFor<Bytes>* summary)>;
 using TargetSizeEvaluator = TargetSizeEvaluatorFor<std::vector<uint8_t>>;
 using ManagedTargetSizeEvaluator = TargetSizeEvaluatorFor<CodestreamBuffer>;
 

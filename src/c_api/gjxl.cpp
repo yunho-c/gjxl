@@ -397,7 +397,8 @@ GJXLResult gjxl_encode(
         codestream.size(), codestream.size(), &publication));
     }
     if (result != GJXL_OK) return result;
-    gjxl::resource_budget_internal::ManagedHostAllocationCheckpointForTest();
+    gjxl::resource_budget_internal::ManagedHostAllocationCheckpointForTest(
+      gjxl::resource_budget_internal::ResourceClass::kRetainedResult);
     auto data = std::make_unique<uint8_t[]>(codestream.size());
     result = TranslateStatus(publication.Commit());
     if (result != GJXL_OK) return result;

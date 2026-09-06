@@ -56,12 +56,37 @@ public:
     return Construct(count, out, owner, [&] { return std::vector<T>(count); });
   }
 
+  /// Establish a fixed backing capacity, then accumulate at most that many
+  /// values. Appending never asks std::vector to grow its allocation.
+  [[nodiscard]] static Status CreateForAppend(
+    size_t capacity, PublicationVector* out,
+    ResourceClass owner = ResourceClass::kRetainedResult) {
+    PublicationVector candidate;
+    if (out == nullptr) return Status::InvalidArgument("Publication vector output is null");
+    Status status = Create(capacity, &candidate, owner);
+    if (!status.ok()) return status;
+    candidate.values_.clear();
+    *out = std::move(candidate);
+    return Status::Ok();
+  }
+
+  [[nodiscard]] Status Append(const T& value) {
+    static_assert(std::is_nothrow_copy_constructible_v<T>);
+    if (values_.size() == values_.capacity())
+      return Status::ResourcePlanExceeded("Publication vector exceeds planned capacity");
+    values_.push_back(value);
+    return Status::Ok();
+  }
+
   [[nodiscard]] size_t size() const noexcept { return values_.size(); }
   [[nodiscard]] size_t capacity() const noexcept { return values_.capacity(); }
   [[nodiscard]] bool empty() const noexcept { return values_.empty(); }
   [[nodiscard]] const T* data() const noexcept { return values_.data(); }
   [[nodiscard]] std::span<const T> view() const noexcept { return values_; }
   [[nodiscard]] std::span<T> mutable_view() noexcept { return values_; }
+  [[nodiscard]] auto begin() const noexcept { return values_.begin(); }
+  [[nodiscard]] auto end() const noexcept { return values_.end(); }
+  [[nodiscard]] const T& back() const noexcept { return values_.back(); }
   T& operator[](size_t i) noexcept { return values_[i]; }
   const T& operator[](size_t i) const noexcept { return values_[i]; }
 
@@ -90,12 +115,12 @@ public:
 
   [[nodiscard]] Status TransferTo(ResourceReservation& reservation) {
     return allocation_.valid() ? allocation_.TransferTo(reservation) :
-      (empty() ? Status::Ok() : Status::FailedPrecondition("Result backing is not managed"));
+      (capacity() == 0 ? Status::Ok() : Status::FailedPrecondition("Result backing is not managed"));
   }
 
   [[nodiscard]] Status Reclassify(ResourceClass owner) {
     return allocation_.valid() ? allocation_.Reclassify(owner) :
-      (empty() ? Status::Ok() : Status::FailedPrecondition("Result backing is not managed"));
+      (capacity() == 0 ? Status::Ok() : Status::FailedPrecondition("Result backing is not managed"));
   }
 
   friend bool operator==(const PublicationVector& a, const PublicationVector& b) {
@@ -118,7 +143,7 @@ private:
         Status status = PrepareResourceAllocation(bytes, bytes, &candidate.allocation_);
         if (!status.ok()) return status;
       }
-      if (count != 0) ManagedHostAllocationCheckpointForTest();
+      if (count != 0) ManagedHostAllocationCheckpointForTest(owner);
       if (count != 0) candidate.values_ = constructor();
       if (candidate.values_.capacity() != count)
         return Status::Internal("Reviewed publication-vector capacity contract changed");

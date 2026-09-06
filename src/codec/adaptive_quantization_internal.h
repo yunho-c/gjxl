@@ -37,12 +37,15 @@ struct EvaluationProfile {
   [[nodiscard]] bool operator==(const EvaluationProfile&) const = default;
 };
 
-/// Timings for one complete invocation of the iterative AQ policy.
+/// Timings for one complete invocation of the iterative AQ policy. This is an
+/// internal owner, not the public workflow timing record; evaluation backing
+/// retains its charge through moves until this internal profile is destroyed.
 struct AdaptiveQuantizationProfile {
   uint64_t loop_setup_nanoseconds = 0;
   uint64_t quant_field_update_nanoseconds = 0;
   uint64_t output_commit_nanoseconds = 0;
-  std::vector<EvaluationProfile> evaluations;
+  resource_budget_internal::ManagedVector<
+    EvaluationProfile, resource_budget_internal::ResourceClass::kDiagnostics> evaluations;
 
   [[nodiscard]] bool
   operator==(const AdaptiveQuantizationProfile&) const = default;
@@ -81,7 +84,7 @@ protected:
 struct AdaptiveQuantizationPolicyResult {
   resource_budget_internal::ManagedVector<float> quant_field;
   resource_budget_internal::ManagedVector<float> block_distance;
-  std::vector<double> score_history;
+  resource_budget_internal::PublicationVector<double> score_history;
   MaximumErrorResult maximum_error;
 };
 

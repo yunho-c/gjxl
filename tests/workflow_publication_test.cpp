@@ -57,27 +57,67 @@ bool CheckWorkflow(const Fixture& fixture) {
   ResourceReservation job;
   if (!Ok(budget.TryReserve(kTestEnvelope, &job))) return false;
   CodestreamBuffer retained;
-  VarDctEncodingSummary summary;
+  OwnedEncodingSummary summary;
   std::vector<uint8_t> published;
   {
     ResourceContextScope scope({&job, ResourceClass::kPreparation});
     if (!Ok(EncodeLinearRgbVarDctCodestreamOwned(fixture.linear.const_view(),
         fixture.options, &retained, &summary))) return false;
     const auto s = budget.snapshot();
-    if (!Check(s.total.live_capacity_bytes == retained.capacity() && s.total.backing_count == 1 &&
+    if (!Check(s.total.live_capacity_bytes == retained.capacity() +
+        summary.value().score_history.capacity() * sizeof(double) && s.total.backing_count == 2 &&
         s.classes[static_cast<size_t>(ResourceClass::kSerializer)].live_capacity_bytes == retained.capacity(),
         "Owned workflow released result bytes or retained temporary backing")) return false;
     VarDctEncodingSummary reference;
     if (!Ok(EncodeLinearRgbVarDctCodestream(fixture.linear.const_view(), fixture.options,
         &published, &reference)) || !Check(std::ranges::equal(retained.view(), published) &&
-        summary == reference, "Owned/public workflow outputs differ")) return false;
-    if (!Check(budget.snapshot().total.live_capacity_bytes == retained.capacity(),
+        summary.value() == reference, "Owned/public workflow outputs differ")) return false;
+    if (!Check(budget.snapshot().total.live_capacity_bytes == retained.capacity() +
+        summary.value().score_history.capacity() * sizeof(double),
         "Public output remained in managed accounting")) return false;
   }
   job.Reset();
   const auto* pointer = retained.data();
   retained.PublishTo(&published);
+  VarDctEncodingSummary published_summary;
+  summary.PublishTo(&published_summary);
   return Check(published.data() == pointer, "Workflow publication copied output") && Empty(budget);
+}
+
+bool CheckPublicDiagnosticFailures(const Fixture& fixture) {
+  for (auto owner : {ResourceClass::kRetainedResult, ResourceClass::kAqScratch}) {
+    ResourceBudget budget(kTestEnvelope);
+    ResourceReservation job;
+    if (!Ok(budget.TryReserve(kTestEnvelope, &job))) return false;
+    {
+      ResourceContextScope scope({&job, ResourceClass::kPreparation});
+      std::vector<uint8_t> bytes{23};
+      VarDctEncodingSummary summary;
+      summary.score_history = {42};
+      const auto old_summary = summary;
+      VarDctEncodingTiming timing;
+      timing.total_nanoseconds = 123;
+      timing.attempts.resize(2);
+      const auto* old_attempts = timing.attempts.data();
+      ArmManagedHostClassAllocationFailureAfterForTest(owner, 0);
+      const Status status = EncodeLinearRgbVarDctCodestreamProfiled(fixture.linear.const_view(),
+        fixture.options, &bytes, &summary, &timing);
+      const bool injected = !ManagedHostAllocationFailurePendingForTest();
+      DisarmManagedHostAllocationFailureForTest();
+      if (!Check(injected && status.code() == StatusCode::kOutOfMemory &&
+          bytes == std::vector<uint8_t>{23} && summary == old_summary &&
+          timing.total_nanoseconds == 123 && timing.attempts.size() == 2 &&
+          timing.attempts.data() == old_attempts && budget.snapshot().total.backing_count == 0,
+          "Timing/score allocation failure was not atomic")) return false;
+      if (!Ok(EncodeLinearRgbVarDctCodestreamProfiled(fixture.linear.const_view(), fixture.options,
+          &bytes, &summary, &timing)) || !Check(!bytes.empty() && !summary.score_history.empty() &&
+          timing.attempts.size() == 1 && budget.snapshot().total.backing_count == 0,
+          "Public diagnostic output remained charged or failed recovery")) return false;
+    }
+    job.Reset();
+    if (!Empty(budget)) return false;
+  }
+  return true;
 }
 
 struct BatchObservation {
@@ -86,21 +126,26 @@ struct BatchObservation {
   size_t calls = 0;
   bool good = true;
   static void Observe(void* opaque, std::span<const VarDctBatchEncodingResult> results,
-                      std::span<const CodestreamBuffer> bytes) noexcept {
+                      std::span<const OwnedEncodingResult> owned) noexcept {
     auto& self = *static_cast<BatchObservation*>(opaque);
     ++self.calls;
     size_t expected = results.size() * (sizeof(VarDctBatchEncodingResult) +
-      sizeof(CodestreamBuffer) + sizeof(ResourceAllocation));
+      sizeof(OwnedEncodingResult) + 3 * sizeof(ResourceAllocation));
     size_t backings = results.empty() ? 0 : 3;
-    self.good &= results.size() == bytes.size() && self.previous->size() == 1 &&
+    self.good &= results.size() == owned.size() && self.previous->size() == 1 &&
       (*self.previous)[0].codestream.size() == 1 && (*self.previous)[0].codestream[0] == 0x17;
     for (size_t i = 0; i < results.size(); ++i) {
       self.good &= results[i].codestream.empty();
+      const auto& bytes = owned[i].codestream;
+      const auto& summary = owned[i].summary.value();
+      const auto& timing = owned[i].timing.value();
       if (results[i].status.ok()) {
-        self.good &= !bytes[i].empty() && bytes[i].size() == results[i].summary.encoded_bytes;
-        expected += bytes[i].capacity();
-        ++backings;
-      } else self.good &= bytes[i].empty();
+        self.good &= !bytes.empty() && bytes.size() == summary.encoded_bytes &&
+          results[i].summary.score_history.empty() && results[i].timing.attempts.empty();
+        expected += bytes.capacity() + summary.score_history.capacity() * sizeof(double) +
+          timing.attempts.capacity() * sizeof(VarDctEncodingAttemptTiming);
+        backings += 1 + (summary.score_history.capacity() != 0) + (timing.attempts.capacity() != 0);
+      } else self.good &= bytes.empty() && summary.score_history.empty() && timing.attempts.empty();
     }
     const auto s = self.budget->snapshot();
     const auto& result = s.classes[static_cast<size_t>(ResourceClass::kRetainedResult)];
@@ -254,7 +299,8 @@ bool CheckC(const Fixture& fixture) {
 
 int main() {
   Fixture fixture;
-  return fixture.Init() && CheckWorkflow(fixture) && CheckBatch(fixture) && CheckC(fixture) &&
+  return fixture.Init() && CheckWorkflow(fixture) && CheckPublicDiagnosticFailures(fixture) &&
+    CheckBatch(fixture) && CheckC(fixture) &&
     Check(DefaultResourceBudget().snapshot().peak_committed_bytes == 0,
           "Explicit publication reservation escaped to the default domain")
     ? EXIT_SUCCESS : EXIT_FAILURE;

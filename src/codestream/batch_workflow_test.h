@@ -5,6 +5,7 @@
 
 #include "codestream/batch_workflow.h"
 #include "codestream/storage.h"
+#include "codestream/encoding_result_internal.h"
 
 namespace gjxl::codestream_internal {
 
@@ -14,7 +15,7 @@ namespace gjxl::codestream_internal {
 struct BatchPublicationObserverForTesting {
   void* context = nullptr;
   void (*observe)(void*, std::span<const VarDctBatchEncodingResult>,
-                  std::span<const CodestreamBuffer>) noexcept = nullptr;
+                  std::span<const OwnedEncodingResult>) noexcept = nullptr;
 };
 inline thread_local BatchPublicationObserverForTesting batch_publication_observer_for_testing;
 

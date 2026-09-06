@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -32,14 +33,22 @@ private:
 namespace detail {
 inline thread_local size_t managed_host_backings_before_failure =
   std::numeric_limits<size_t>::max();
+inline thread_local ResourceClass managed_host_failure_class = ResourceClass::kCount;
 }
 
 inline void ArmNextManagedHostAllocationFailureForTest() noexcept {
   detail::managed_host_backings_before_failure = 0;
+  detail::managed_host_failure_class = ResourceClass::kCount;
 }
 
 inline void ArmManagedHostAllocationFailureAfterForTest(size_t count) noexcept {
   detail::managed_host_backings_before_failure = count;
+  detail::managed_host_failure_class = ResourceClass::kCount;
+}
+
+inline void ArmManagedHostClassAllocationFailureAfterForTest(ResourceClass owner, size_t count) noexcept {
+  detail::managed_host_backings_before_failure = count;
+  detail::managed_host_failure_class = owner;
 }
 
 [[nodiscard]] inline bool ManagedHostAllocationFailurePendingForTest() noexcept {
@@ -49,11 +58,15 @@ inline void ArmManagedHostAllocationFailureAfterForTest(size_t count) noexcept {
 
 inline void DisarmManagedHostAllocationFailureForTest() noexcept {
   detail::managed_host_backings_before_failure = std::numeric_limits<size_t>::max();
+  detail::managed_host_failure_class = ResourceClass::kCount;
 }
 
 /// Call after authorization and immediately before physical backing allocation.
-inline void ManagedHostAllocationCheckpointForTest() {
+inline void ManagedHostAllocationCheckpointForTest(
+    ResourceClass owner = CurrentResourceContext().resource_class) {
   if (!ManagedHostAllocationFailurePendingForTest()) return;
+  if (detail::managed_host_failure_class != ResourceClass::kCount &&
+      detail::managed_host_failure_class != owner) return;
   if (detail::managed_host_backings_before_failure == 0) {
     DisarmManagedHostAllocationFailureForTest();
     throw std::bad_alloc();
@@ -100,13 +113,13 @@ public:
     const size_t bytes = count * sizeof(T);
     ResourceAllocation allocation;
     const auto context = CurrentResourceContext();
+    const ResourceClass owner = Owner == ResourceClass::kCount ? context.resource_class : Owner;
     if (context.reservation != nullptr || context.track_host_allocations) {
-      const ResourceClassScope resource_class(
-        Owner == ResourceClass::kCount ? context.resource_class : Owner);
+      const ResourceClassScope resource_class(owner);
       Status status = PrepareResourceAllocation(bytes, bytes, &allocation);
       if (!status.ok()) throw ManagedAllocationFailure(std::move(status));
     }
-    ManagedHostAllocationCheckpointForTest();
+    ManagedHostAllocationCheckpointForTest(owner);
     auto* backing = static_cast<std::byte*>(::operator new(
       sizeof(Header) + bytes, std::align_val_t{kAlignment}));
     if (allocation.valid()) {
@@ -130,6 +143,15 @@ public:
     ::operator delete(backing, std::align_val_t{kAlignment});
   }
 
+  /// Only at a public ownership handoff, after all fallible work. The caller
+  /// now owns the still-live allocation; later deallocation sees an empty
+  /// ticket. Pointer must be the beginning of this allocator's backing.
+  static void ReleaseChargeAfterPublication(T* pointer) noexcept {
+    if (pointer == nullptr) return;
+    auto* backing = reinterpret_cast<std::byte*>(pointer) - sizeof(Header);
+    reinterpret_cast<Header*>(backing)->allocation.Reset();
+  }
+
   template <typename U>
   [[nodiscard]] bool operator==(const ManagedAllocator<U, Owner>&) const noexcept {
     return true;
@@ -138,5 +160,8 @@ public:
 
 template <typename T, ResourceClass Owner = ResourceClass::kCount>
 using ManagedVector = std::vector<T, ManagedAllocator<T, Owner>>;
+
+template <ResourceClass Owner = ResourceClass::kCount>
+using ManagedString = std::basic_string<char, std::char_traits<char>, ManagedAllocator<char, Owner>>;
 
 }  // namespace gjxl::resource_budget_internal

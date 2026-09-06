@@ -29,6 +29,7 @@ enum class ResourceClass : size_t {
   kCompletedFrame,
   kSerializer,
   kRetainedResult,
+  kDiagnostics,
   kUnclassified,
   kCount,
 };

@@ -600,7 +600,7 @@ Status MetalBackend::SubmitImagePrimitiveSequenceProfiled(
     if (!status.ok()) return status;
   }
   try {
-    const std::string stage_id_storage(stage_id);
+    const gpu_profile_internal::ProfileString stage_id_storage(stage_id);
     const MetalProfiledComputeStage stage{
       .stage_id = stage_id_storage.c_str(),
       .encode = &MetalBackend::EncodePrimitiveSubmission,
@@ -610,6 +610,8 @@ Status MetalBackend::SubmitImagePrimitiveSequenceProfiled(
       "gjxl image primitive sequence profile",
       std::span<const MetalProfiledComputeStage>(&stage, 1), mode,
       submission);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate image primitive profile metadata");

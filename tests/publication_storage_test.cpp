@@ -10,6 +10,7 @@
 
 #include "codestream/rate_control_internal.h"
 #include "core/publication_vector.h"
+#include "core/publication_output.h"
 
 namespace {
 using namespace gjxl;
@@ -124,6 +125,40 @@ struct DestructionProbe {
   }
 };
 
+struct ProbeRecord {
+  std::vector<DestructionProbe> values;
+};
+
+bool CheckRecordDestruction() {
+  using Owner = PublicationRecord<ProbeRecord, DestructionProbe, &ProbeRecord::values>;
+  ResourceBudget budget(4096);
+  ResourceReservation job;
+  if (!Ok(budget.TryReserve(4096, &job))) return false;
+  {
+    ResourceContextScope scope({&job, ResourceClass::kRetainedResult});
+    PublicationVector<DestructionProbe> a, b, c;
+    if (!Ok(PublicationVector<DestructionProbe>::Create(3, &a)) ||
+        !Ok(PublicationVector<DestructionProbe>::Create(5, &b)) ||
+        !Ok(PublicationVector<DestructionProbe>::Create(2, &c))) return false;
+    Owner first, second;
+    first.SetField(std::move(a));
+    second.SetField(std::move(b));
+    DestructionProbe::budget = &budget;
+    DestructionProbe::ordered = true;
+    DestructionProbe::expected_bytes = 10 * sizeof(DestructionProbe);
+    first.SetField(std::move(c));
+    DestructionProbe::expected_bytes = 7 * sizeof(DestructionProbe);
+    first = std::move(second);
+    DestructionProbe::expected_bytes = 5 * sizeof(DestructionProbe);
+    // Closing the producer must not affect backing/charge destruction order.
+    job.Reset();
+    first.Reset();
+    DestructionProbe::budget = nullptr;
+    if (!Check(DestructionProbe::ordered, "Record replacement freed its ticket before backing")) return false;
+  }
+  return Empty(budget);
+}
+
 bool CheckDestructionAndEscrow() {
   ResourceBudget budget(4096);
   ResourceReservation job;
@@ -175,6 +210,118 @@ bool CheckDestructionAndEscrow() {
   return Empty(budget);
 }
 
+bool CheckBoundedHistoryAndRecord() {
+  using History = PublicationVector<double>;
+  ResourceBudget budget(256);
+  ResourceReservation job;
+  if (!Ok(budget.TryReserve(256, &job))) return false;
+  {
+    ResourceContextScope scope({&job, ResourceClass::kAqScratch});
+    History history, internal;
+    if (!Ok(History::CreateForAppend(3, &history, ResourceClass::kAqScratch)) ||
+        !Check(history.empty() && history.capacity() == 3 &&
+          budget.snapshot().total.live_capacity_bytes == 24,
+          "Empty bounded history lost its backing charge")) return false;
+    const auto* pointer = history.data();
+    ArmNextManagedHostAllocationFailureForTest();
+    const bool appended = history.Append(1.0).ok() && history.Append(2.0).ok() &&
+      history.Append(3.0).ok();
+    const Status full = history.Append(4.0);
+    const bool allocation_free = ManagedHostAllocationFailurePendingForTest();
+    DisarmManagedHostAllocationFailureForTest();
+    if (!Check(appended && allocation_free && full.resource_plan_exceeded() &&
+        history.size() == 3 && history.data() == pointer && history.back() == 3.0,
+        "Bounded append grew, changed its previous values, or lost the plan error")) return false;
+    PublicationOutput<double> owned_output(&internal), absent;
+    if (!Check(absent == nullptr && owned_output != nullptr, "History output validity differs")) return false;
+    owned_output.Publish(std::move(history));
+    if (!Check(internal.data() == pointer && budget.snapshot().total.live_capacity_bytes == 24,
+        "Internal history publication discarded its charge")) return false;
+
+    OwnedEncodingSummary summary, replacement;
+    summary.value().encoded_bytes = 123;
+    summary.SetField(std::move(internal));
+    if (!Check(summary.value().score_history.data() == pointer,
+        "Summary adoption copied history")) return false;
+    const std::array<double, 2> next{5.0, 6.0};
+    if (!Ok(History::CopyFrom(next, &history, ResourceClass::kAqScratch))) return false;
+    replacement.SetField(std::move(history));
+    replacement.value().encoded_bytes = 456;
+    if (!Check(budget.snapshot().total.live_capacity_bytes == 40, "Record overlap was not charged")) return false;
+    summary = std::move(replacement);
+    if (!Check(summary.value().encoded_bytes == 456 &&
+        budget.snapshot().total.live_capacity_bytes == 16,
+        "Record move assignment lost scalar metadata or leaked old history")) return false;
+    if (!Ok(summary.Reclassify(ResourceClass::kRetainedResult))) return false;
+    job.Reset();
+    VarDctEncodingSummary published;
+    auto charge = summary.MoveToPublication(&published);
+    if (!Check(budget.snapshot().committed_bytes() == 16 &&
+        std::ranges::equal(published.score_history, next), "Record publication lost escrow")) return false;
+    charge.Reset();
+    if (!Empty(budget)) return false;
+  }
+  // Empty logical size must not make an untracked capacity appear managed.
+  History untracked;
+  if (!Ok(History::CreateForAppend(1, &untracked)) ||
+      !Check(!untracked.Reclassify(ResourceClass::kRetainedResult).ok(),
+        "Empty untracked history bypassed ownership validation")) return false;
+  return true;
+}
+
+bool CheckManagedScoreTies() {
+  const auto score = [](float target) {
+    return target == kMinimumTargetSizeButteraugliTarget ? 5.0 :
+      target == kMaximumTargetSizeButteraugliTarget ? 2.0 : 0.0;
+  };
+  const TargetSizeSearchOptions options{.target_bytes = 90, .maximum_attempts = 3};
+  TargetSizeSearchResult expected;
+  const TargetSizeEvaluator oracle = [&](float target, std::vector<uint8_t>* bytes,
+                                        VarDctEncodingSummary* summary) {
+    bytes->assign(80, 0);
+    summary->encoded_bytes = 80;
+    summary->selected_butteraugli_target = target;
+    summary->score_history = {score(target)};
+    summary->final_butteraugli_score_evaluated = true;
+    return Status::Ok();
+  };
+  if (!Ok(SearchTargetSize(options, oracle, &expected))) return false;
+  ResourceBudget budget(1024);
+  ResourceReservation job;
+  ManagedTargetSizeSearchResult actual;
+  if (!Ok(budget.TryReserve(1024, &job))) return false;
+  {
+    ResourceContextScope scope({&job, ResourceClass::kSerializer});
+    const ManagedTargetSizeEvaluator evaluator = [&](float target, CodestreamBuffer* bytes,
+                                                   OwnedEncodingSummary* owner) {
+      Status status = CodestreamBuffer::Create(80, bytes, ResourceClass::kSerializer);
+      if (!status.ok()) return status;
+      PublicationVector<double> history;
+      const std::array<double, 1> scores{score(target)};
+      status = PublicationVector<double>::CopyFrom(scores, &history, ResourceClass::kAqScratch);
+      if (!status.ok()) return status;
+      owner->SetField(std::move(history));
+      auto& summary = owner->value();
+      summary.encoded_bytes = 80;
+      summary.selected_butteraugli_target = target;
+      summary.final_butteraugli_score_evaluated = true;
+      return Status::Ok();
+    };
+    if (!Ok(SearchTargetSize(options, evaluator, &actual)) ||
+        !Check(actual.summary.value() == expected.summary &&
+          std::ranges::equal(actual.codestream.view(), expected.codestream) &&
+          actual.attempt_count == expected.attempt_count &&
+          budget.snapshot().total.live_capacity_bytes == 88 &&
+          budget.snapshot().total.backing_count == 2 && budget.snapshot().peak_backing_bytes >= 176,
+          "Managed score tie-break or retained candidate histories differ")) return false;
+  }
+  job.Reset();
+  if (!Check(budget.snapshot().committed_bytes() == 88, "Closed search lost score ownership")) return false;
+  std::thread consumer([retained = std::move(actual)] {});
+  consumer.join();
+  return Empty(budget);
+}
+
 bool CheckManagedSearch() {
   for (bool underplan : {false, true}) {
     ResourceBudget budget(1024);
@@ -188,7 +335,7 @@ bool CheckManagedSearch() {
       size_t attempts = 0;
       bool overlap = false;
       const ManagedTargetSizeEvaluator evaluator = [&](float target, CodestreamBuffer* bytes,
-                                                       VarDctEncodingSummary* summary) {
+                                                       OwnedEncodingSummary* summary) {
         ++attempts;
         if (attempts == 2) {
           if (underplan) return CodestreamBuffer::Create(1024, bytes);
@@ -198,8 +345,8 @@ bool CheckManagedSearch() {
         Status status = CodestreamBuffer::Create(count, bytes, ResourceClass::kSerializer);
         if (!status.ok()) return status;
         if (attempts == 3) overlap = budget.snapshot().total.live_capacity_bytes >= 7 + 100 + 80;
-        summary->encoded_bytes = count;
-        summary->selected_butteraugli_target = target;
+        summary->value().encoded_bytes = count;
+        summary->value().selected_butteraugli_target = target;
         return Status::Ok();
       };
       const Status status = SearchTargetSize({.target_bytes = 90, .maximum_attempts = 3},
@@ -222,6 +369,7 @@ bool CheckManagedSearch() {
 }  // namespace
 
 int main() {
-  return CheckOwnership() && CheckFailures() && CheckDestructionAndEscrow() && CheckManagedSearch()
+  return CheckOwnership() && CheckFailures() && CheckDestructionAndEscrow() && CheckManagedSearch() &&
+    CheckRecordDestruction() && CheckBoundedHistoryAndRecord() && CheckManagedScoreTies()
     ? EXIT_SUCCESS : EXIT_FAILURE;
 }

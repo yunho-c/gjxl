@@ -158,7 +158,7 @@ struct AqResidentButteraugliPolicyOutput {
   /// resident instead of transferring it to the host.
   PlaneF32View quant_field;
   PlaneF32View block_distance_map;
-  std::vector<double>* score_history = nullptr;
+  resource_budget_internal::PublicationOutput<double> score_history;
   Image3FView reconstructed_linear_rgb;
   VarDctEncoderFrame* frame = nullptr;
   /// Internal encoding handoff. Mutually exclusive with owned `frame`.

@@ -1409,8 +1409,10 @@ Status RunAdaptiveQuantizationPolicyImpl(
           ElapsedNanoseconds(setup_begin);
       }
 
-      std::vector<double> score_history;
-      score_history.reserve(kEvaluationCount);
+      resource_budget_internal::PublicationVector<double> score_history;
+      status = resource_budget_internal::PublicationVector<double>::CreateForAppend(
+        kEvaluationCount, &score_history, resource_budget_internal::ResourceClass::kAqScratch);
+      if (!status.ok()) return status;
       AdaptiveQuantizationEvaluation evaluation;
       bool upper_bound_limited = false;
       ManagedVector<float> best_feasible_field;
@@ -1448,8 +1450,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
         if (profile != nullptr) {
           local_profile.evaluations.push_back(evaluation_profile);
         }
-        score_history.push_back(evaluation.score);
-        return Status::Ok();
+        return score_history.Append(evaluation.score);
       };
 
       // Apply all five pinned updates, but retain the closest already-valid
@@ -1563,8 +1564,10 @@ Status RunAdaptiveQuantizationPolicyImpl(
         ElapsedNanoseconds(setup_begin);
     }
 
-    std::vector<double> score_history;
-    score_history.reserve(options.iterations + 1);
+    resource_budget_internal::PublicationVector<double> score_history;
+    status = resource_budget_internal::PublicationVector<double>::CreateForAppend(
+      options.iterations + 1, &score_history, resource_budget_internal::ResourceClass::kAqScratch);
+    if (!status.ok()) return status;
     AdaptiveQuantizationEvaluation evaluation;
     for (size_t iteration = 0; iteration <= options.iterations; ++iteration) {
       EvaluationProfile evaluation_profile;
@@ -1591,7 +1594,8 @@ Status RunAdaptiveQuantizationPolicyImpl(
       if (profile != nullptr) {
         local_profile.evaluations.push_back(evaluation_profile);
       }
-      score_history.push_back(evaluation.score);
+      status = score_history.Append(evaluation.score);
+      if (!status.ok()) return status;
       if (iteration == options.iterations) {
         break;
       }
@@ -1756,7 +1760,7 @@ Status FindBestQuantizationImpl(
     evaluation.reconstructed_linear.const_view(),
     output.reconstructed_linear_rgb);
   *output.frame = std::move(evaluation.frame);
-  *output.score_history = std::move(policy_result.score_history);
+  output.score_history.Publish(std::move(policy_result.score_history));
   if (output.maximum_error_result != nullptr) {
     *output.maximum_error_result = policy_result.maximum_error;
   }

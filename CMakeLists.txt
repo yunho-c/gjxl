@@ -1577,6 +1577,11 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME workflow_publication COMMAND gjxl_workflow_publication_test)
   set_tests_properties(workflow_publication PROPERTIES TIMEOUT 180)
 
+  add_executable(gjxl_diagnostic_storage_test tests/diagnostic_storage_test.cpp)
+  target_link_libraries(gjxl_diagnostic_storage_test PRIVATE gjxl_codestream)
+  add_test(NAME diagnostic_storage COMMAND gjxl_diagnostic_storage_test)
+  set_tests_properties(diagnostic_storage PROPERTIES TIMEOUT 60)
+
   add_executable(
     gjxl_ac_strategy_grid_test
     tests/ac_strategy_grid_test.cpp
@@ -2470,6 +2475,14 @@ if(GJXL_BUILD_TESTS)
   add_dependencies(gjxl_metal_resource_budget_test gjxl_metal_shaders)
   add_test(NAME metal_resource_budget COMMAND gjxl_metal_resource_budget_test)
   set_tests_properties(metal_resource_budget PROPERTIES TIMEOUT 30)
+
+  add_executable(gjxl_metal_diagnostic_storage_test tests/metal_diagnostic_storage_test.cpp)
+  target_link_libraries(gjxl_metal_diagnostic_storage_test PRIVATE gjxl_codestream gjxl_metal)
+  target_compile_definitions(gjxl_metal_diagnostic_storage_test PRIVATE
+    GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_diagnostic_storage_test gjxl_metal_shaders)
+  add_test(NAME metal_diagnostic_storage COMMAND gjxl_metal_diagnostic_storage_test)
+  set_tests_properties(metal_diagnostic_storage PROPERTIES TIMEOUT 180)
 
   add_test(
     NAME codec_install_consumer

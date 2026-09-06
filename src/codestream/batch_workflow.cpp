@@ -7,6 +7,7 @@
 #include "codestream/batch_workflow_test.h"
 
 #include <atomic>
+#include <array>
 #include <condition_variable>
 #include <exception>
 #include <mutex>
@@ -17,7 +18,7 @@
 #include <utility>
 
 namespace gjxl {
-using codestream_internal::CodestreamBuffer;
+using codestream_internal::OwnedEncodingResult;
 using resource_budget_internal::PublicationVector;
 using resource_budget_internal::ManagedVector;
 using resource_budget_internal::ResourceAllocation;
@@ -26,18 +27,18 @@ namespace {
 void EncodeOne(
   const VarDctBatchEncodingRequest& request,
   VarDctBatchEncodingResult* result,
-  CodestreamBuffer* bytes) noexcept {
+  OwnedEncodingResult* owned) noexcept {
 
   VarDctBatchEncodingResult candidate;
-  CodestreamBuffer candidate_bytes;
+  OwnedEncodingResult candidate_owned;
   try {
     candidate.status = codestream_internal::EncodeLinearRgbVarDctCodestreamOwned(
       request.linear_rgb,
       request.options,
-      &candidate_bytes,
-      &candidate.summary,
-      &candidate.timing);
-    if (candidate.status.ok()) candidate.status = candidate_bytes.Reclassify(
+      &candidate_owned.codestream,
+      &candidate_owned.summary,
+      &candidate_owned.timing);
+    if (candidate.status.ok()) candidate.status = candidate_owned.Reclassify(
       resource_budget_internal::ResourceClass::kRetainedResult);
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
     candidate.status = failure.status();
@@ -54,8 +55,8 @@ void EncodeOne(
     candidate.status = Status::Internal(
       "Batch image encoding failed with an unknown exception");
   }
-  if (!candidate.status.ok()) candidate_bytes.Reset();
-  *bytes = std::move(candidate_bytes);
+  if (!candidate.status.ok()) candidate_owned = {};
+  *owned = std::move(candidate_owned);
   *result = std::move(candidate);
 }
 
@@ -111,12 +112,12 @@ public:
     const resource_budget_internal::ManagedHostScope managed_host(
       resource_budget_internal::ResourceClass::kRetainedResult);
     // Declare escrow before the candidate: rollback frees backing first.
-    ManagedVector<ResourceAllocation> publication_charges;
+    ManagedVector<std::array<ResourceAllocation, 3>> publication_charges;
     PublicationVector<VarDctBatchEncodingResult> candidate;
-    ManagedVector<CodestreamBuffer> candidate_bytes;
+    ManagedVector<OwnedEncodingResult> candidate_owned;
     try {
       publication_charges.resize(requests.size());
-      candidate_bytes.resize(requests.size());
+      candidate_owned.resize(requests.size());
       Status status = PublicationVector<VarDctBatchEncodingResult>::Create(requests.size(), &candidate);
       if (!status.ok()) return status;
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
@@ -139,7 +140,7 @@ public:
       std::lock_guard work_lock(work_mutex_);
       requests_ = requests;
       results_ = candidate.mutable_view();
-      codestreams_ = candidate_bytes;
+      owned_results_ = candidate_owned;
       resource_context_ = resource_budget_internal::CurrentResourceContext();
       next_index_.store(0, std::memory_order_relaxed);
       remaining_workers_ = workers_.size();
@@ -154,17 +155,20 @@ public:
       });
       requests_ = {};
       results_ = {};
-      codestreams_ = {};
+      owned_results_ = {};
     }
 
     const auto observer = codestream_internal::batch_publication_observer_for_testing;
     if (observer.observe != nullptr)
-      observer.observe(observer.context, candidate.view(), candidate_bytes);
+      observer.observe(observer.context, candidate.view(), candidate_owned);
 
     // No fallible work after staging starts. Keep every byte charge until the
     // entire public result array, not just an individual vector, is published.
-    for (size_t i = 0; i < candidate.size(); ++i)
-      publication_charges[i] = candidate_bytes[i].MoveToPublication(&candidate[i].codestream);
+    for (size_t i = 0; i < candidate.size(); ++i) {
+      publication_charges[i][0] = candidate_owned[i].codestream.MoveToPublication(&candidate[i].codestream);
+      publication_charges[i][1] = candidate_owned[i].summary.MoveToPublication(&candidate[i].summary);
+      publication_charges[i][2] = candidate_owned[i].timing.MoveToPublication(&candidate[i].timing);
+    }
     candidate.PublishTo(results);
     publication_charges.clear();
     return Status::Ok();
@@ -190,7 +194,7 @@ private:
     while (true) {
       std::span<const VarDctBatchEncodingRequest> requests;
       std::span<VarDctBatchEncodingResult> results;
-      std::span<CodestreamBuffer> bytes;
+      std::span<OwnedEncodingResult> owned;
       resource_budget_internal::ResourceContext resource_context;
       {
         std::unique_lock lock(work_mutex_);
@@ -203,7 +207,7 @@ private:
         observed_generation = generation_;
         requests = requests_;
         results = results_;
-        bytes = codestreams_;
+        owned = owned_results_;
         resource_context = resource_context_;
       }
 
@@ -214,7 +218,7 @@ private:
           break;
         }
         const resource_budget_internal::ResourceContextScope resources(resource_context);
-        EncodeOne(requests[index], &results[index], &bytes[index]);
+        EncodeOne(requests[index], &results[index], &owned[index]);
       }
 
       {
@@ -237,7 +241,7 @@ private:
   size_t remaining_workers_ = 0;
   std::span<const VarDctBatchEncodingRequest> requests_;
   std::span<VarDctBatchEncodingResult> results_;
-  std::span<CodestreamBuffer> codestreams_;
+  std::span<OwnedEncodingResult> owned_results_;
   resource_budget_internal::ResourceContext resource_context_;
   std::atomic<size_t> next_index_{0};
 };

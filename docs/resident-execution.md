@@ -144,9 +144,11 @@ token/model/candidate containers, with exact parity and measured overhead. The
 [frontend attachment](resident-frontend-accounting.md) covers preparation/evaluation
 arrays and completed-frame metadata, with exact parity and measured costs. The
 [publication attachment](resident-publication-accounting.md) adds candidate and
-retained codestream-byte ownership through C/C++ and batch publication. Diagnostic
-result storage and whole-workflow admission are still pending; these
-partial attachments do not satisfy the milestone.
+retained codestream-byte ownership through C/C++ and batch publication. The
+[diagnostic attachment](resident-diagnostic-accounting.md) extends retained
+ownership to score histories, summaries, attempt timings and GPU profile graphs.
+Whole-workflow planning/admission is still pending; these partial attachments
+do not satisfy the milestone.
 
 Deliverables:
 

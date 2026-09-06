@@ -226,10 +226,10 @@ python3 build/publication-resource-qualification/batch.py
 
 ## Remaining work
 
-This attachment covers codestream-byte publication, not all result storage.
+This checkpoint covered codestream-byte publication, not all result storage.
+The subsequent [diagnostic attachment](resident-diagnostic-accounting.md) adds
 AQ score histories, returned summary histories, timing-attempt arrays and GPU
-profiling containers still need explicit ownership/accounting through their
-own public boundaries. Small control objects and allocator/driver overhead
+profiling containers through their own public boundaries. Small control objects and allocator/driver overhead
 remain the separately documented exclusions; diagnostic arrays are not silently
 reclassified as excluded overhead.
 

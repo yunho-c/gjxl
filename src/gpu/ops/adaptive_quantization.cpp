@@ -685,8 +685,7 @@ Status RunGpuAdaptiveQuantizationImpl(
           CopyContiguousPlane(
             fused_result.block_distance,
             bounded_output->block_distance_map);
-          *bounded_output->score_history =
-            std::move(fused_result.score_history);
+          bounded_output->score_history.Publish(std::move(fused_result.score_history));
         } else {
           if (materialization.quant_field) {
             CopyContiguousPlane(
@@ -706,8 +705,7 @@ Status RunGpuAdaptiveQuantizationImpl(
           if (materialization.completed_frame != nullptr) {
             *materialization.completed_frame = std::move(completed_frame);
           }
-          *full_output->score_history =
-            std::move(fused_result.score_history);
+          full_output->score_history.Publish(std::move(fused_result.score_history));
         }
         return Status::Ok();
       }
@@ -743,7 +741,7 @@ Status RunGpuAdaptiveQuantizationImpl(
       CopyContiguousPlane(result.quant_field, bounded_output->quant_field);
       CopyContiguousPlane(
         result.block_distance, bounded_output->block_distance_map);
-      *bounded_output->score_history = std::move(result.score_history);
+      bounded_output->score_history.Publish(std::move(result.score_history));
     } else {
       Image3FBuffer reconstructed = evaluator.TakeFinalReconstruction();
       VarDctEncoderFrame frame = evaluator.TakeFinalFrame();
@@ -759,7 +757,7 @@ Status RunGpuAdaptiveQuantizationImpl(
           reconstructed.const_view(), full_output->reconstructed_linear_rgb);
       }
       *full_output->frame = std::move(frame);
-      *full_output->score_history = std::move(result.score_history);
+      full_output->score_history.Publish(std::move(result.score_history));
       if (full_output->maximum_error_result != nullptr) {
         *full_output->maximum_error_result = result.maximum_error;
       }

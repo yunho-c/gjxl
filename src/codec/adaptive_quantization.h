@@ -13,6 +13,7 @@
 #include "codec/codestream.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
+#include "core/publication_output.h"
 #include "core/quantizer.h"
 #include "core/status.h"
 
@@ -99,7 +100,7 @@ struct AdaptiveQuantizationOutput {
   Image3FView reconstructed_linear_rgb;
   VarDctEncoderFrame* frame = nullptr;
   /// Aggregate Butteraugli score or normalized maximum-error history.
-  std::vector<double>* score_history = nullptr;
+  resource_budget_internal::PublicationOutput<double> score_history;
   /// Required in maximum-error mode. Optional otherwise.
   MaximumErrorResult* maximum_error_result = nullptr;
 };

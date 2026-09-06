@@ -57,7 +57,7 @@ struct PreparedQuantizationPipeline;
 
 struct GpuEncodingQuantizationPipelineOutput {
   VarDctEncoderFrame* frame = nullptr;
-  std::vector<double>* score_history = nullptr;
+  resource_budget_internal::PublicationOutput<double> score_history;
   MaximumErrorResult* maximum_error_result = nullptr;
   bool collect_final_butteraugli_score = true;
   /// Optional resident lease. `frame` remains the required compatibility

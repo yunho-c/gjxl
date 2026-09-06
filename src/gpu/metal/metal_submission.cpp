@@ -27,6 +27,7 @@ using gpu_profile_internal::GpuDispatchKind;
 using gpu_profile_internal::GpuDispatchProfile;
 using gpu_profile_internal::GpuProfilingMode;
 using gpu_profile_internal::GpuSubmissionProfile;
+using gpu_profile_internal::ProfileString;
 
 constexpr size_t kMaximumDispatchTimestampSamples = 4096;
 constexpr size_t kMaximumRegisteredPipelines = 512;
@@ -46,11 +47,29 @@ struct ActiveDispatchProfile {
   size_t maximum_samples = 0;
   bool overflow = false;
   bool allocation_failed = false;
+  Status allocation_failure;
   std::array<char, kMaximumKernelIdBytes> current_kernel_id{};
   size_t current_kernel_id_size = 0;
 };
 
 thread_local ActiveDispatchProfile* g_active_dispatch_profile = nullptr;
+
+struct ScopedActiveDispatchProfile {
+  explicit ScopedActiveDispatchProfile(ActiveDispatchProfile* active)
+    : previous(std::exchange(g_active_dispatch_profile, active)) {}
+  ~ScopedActiveDispatchProfile() { g_active_dispatch_profile = previous; }
+  ScopedActiveDispatchProfile(const ScopedActiveDispatchProfile&) = delete;
+  ScopedActiveDispatchProfile& operator=(const ScopedActiveDispatchProfile&) = delete;
+  ActiveDispatchProfile* previous;
+};
+
+struct ScopedComputeEncoding {
+  explicit ScopedComputeEncoding(MTL::ComputeCommandEncoder* encoder) : encoder(encoder) {}
+  ~ScopedComputeEncoding() { encoder->endEncoding(); }
+  ScopedComputeEncoding(const ScopedComputeEncoding&) = delete;
+  ScopedComputeEncoding& operator=(const ScopedComputeEncoding&) = delete;
+  MTL::ComputeCommandEncoder* encoder;
+};
 
 std::mutex g_pipeline_registry_mutex;
 std::array<PipelineRegistryEntry, kMaximumRegisteredPipelines>
@@ -83,8 +102,8 @@ void EncodeProfiledDispatch(
     active->stage->dispatches.push_back({
       .kernel_id = active->current_kernel_id_size == 0
         ? active->stage->stage_id + ".dispatch_" +
-            std::to_string(invocation)
-        : std::string(
+            ProfileString(std::to_string(invocation))
+        : ProfileString(
             active->current_kernel_id.data(),
             active->current_kernel_id_size),
       .kind = kind,
@@ -96,6 +115,9 @@ void EncodeProfiledDispatch(
       },
       .invocation = static_cast<uint32_t>(invocation),
     });
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    active->allocation_failed = true;
+    if (active->allocation_failure.ok()) active->allocation_failure = failure.status();
   } catch (const std::bad_alloc&) {
     active->allocation_failed = true;
   } catch (const std::length_error&) {
@@ -214,59 +236,67 @@ public:
         "Metal timestamp counter resolution returned incomplete data");
     }
 
-    GpuSubmissionProfile candidate = profile_;
-    const auto* bytes = static_cast<const uint8_t*>(resolved->bytes());
-    if (profiling_mode_ == GpuProfilingMode::kStage) {
-      for (size_t index = 0; index < candidate.stages.size(); ++index) {
-        MTL::CounterResultTimestamp begin{};
-        MTL::CounterResultTimestamp end{};
-        std::memcpy(
-          &begin, bytes + (2 * index) * sizeof(begin), sizeof(begin));
-        std::memcpy(
-          &end, bytes + (2 * index + 1) * sizeof(end), sizeof(end));
-        if (begin.timestamp == MTL::CounterErrorValue ||
-            end.timestamp == MTL::CounterErrorValue ||
-            end.timestamp < begin.timestamp) {
-          return Status::DeviceError(
-            "Metal timestamp counter returned an invalid stage interval");
-        }
-        candidate.stages[index].begin_timestamp = begin.timestamp;
-        candidate.stages[index].end_timestamp = end.timestamp;
-        candidate.stages[index].gpu_nanoseconds =
-          end.timestamp - begin.timestamp;
-      }
-    } else {
-      size_t sample_index = 0;
-      for (auto& stage : candidate.stages) {
-        for (auto& dispatch : stage.dispatches) {
+    try {
+      GpuSubmissionProfile candidate = profile_;
+      const auto* bytes = static_cast<const uint8_t*>(resolved->bytes());
+      if (profiling_mode_ == GpuProfilingMode::kStage) {
+        for (size_t index = 0; index < candidate.stages.size(); ++index) {
           MTL::CounterResultTimestamp begin{};
           MTL::CounterResultTimestamp end{};
           std::memcpy(
-            &begin, bytes + sample_index++ * sizeof(begin), sizeof(begin));
+            &begin, bytes + (2 * index) * sizeof(begin), sizeof(begin));
           std::memcpy(
-            &end, bytes + sample_index++ * sizeof(end), sizeof(end));
+            &end, bytes + (2 * index + 1) * sizeof(end), sizeof(end));
           if (begin.timestamp == MTL::CounterErrorValue ||
               end.timestamp == MTL::CounterErrorValue ||
               end.timestamp < begin.timestamp) {
             return Status::DeviceError(
-              "Metal timestamp counter returned an invalid dispatch interval");
+              "Metal timestamp counter returned an invalid stage interval");
           }
-          dispatch.begin_timestamp = begin.timestamp;
-          dispatch.end_timestamp = end.timestamp;
-          dispatch.gpu_nanoseconds = end.timestamp - begin.timestamp;
+          candidate.stages[index].begin_timestamp = begin.timestamp;
+          candidate.stages[index].end_timestamp = end.timestamp;
+          candidate.stages[index].gpu_nanoseconds =
+            end.timestamp - begin.timestamp;
         }
-        if (!stage.dispatches.empty()) {
-          stage.begin_timestamp = stage.dispatches.front().begin_timestamp;
-          stage.end_timestamp = stage.dispatches.back().end_timestamp;
-          stage.gpu_nanoseconds =
-            stage.end_timestamp - stage.begin_timestamp;
+      } else {
+        size_t sample_index = 0;
+        for (auto& stage : candidate.stages) {
+          for (auto& dispatch : stage.dispatches) {
+            MTL::CounterResultTimestamp begin{};
+            MTL::CounterResultTimestamp end{};
+            std::memcpy(
+              &begin, bytes + sample_index++ * sizeof(begin), sizeof(begin));
+            std::memcpy(
+              &end, bytes + sample_index++ * sizeof(end), sizeof(end));
+            if (begin.timestamp == MTL::CounterErrorValue ||
+                end.timestamp == MTL::CounterErrorValue ||
+                end.timestamp < begin.timestamp) {
+              return Status::DeviceError(
+                "Metal timestamp counter returned an invalid dispatch interval");
+            }
+            dispatch.begin_timestamp = begin.timestamp;
+            dispatch.end_timestamp = end.timestamp;
+            dispatch.gpu_nanoseconds = end.timestamp - begin.timestamp;
+          }
+          if (!stage.dispatches.empty()) {
+            stage.begin_timestamp = stage.dispatches.front().begin_timestamp;
+            stage.end_timestamp = stage.dispatches.back().end_timestamp;
+            stage.gpu_nanoseconds =
+              stage.end_timestamp - stage.begin_timestamp;
+          }
         }
       }
+      Status status = GpuDuration(&candidate.command_buffer_gpu_nanoseconds);
+      if (!status.ok()) return status;
+      *profile = std::move(candidate);
+      return Status::Ok();
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
+    } catch (const std::bad_alloc&) {
+      return Status::OutOfMemory("Unable to allocate Metal GPU profile snapshot");
+    } catch (const std::length_error&) {
+      return Status::InvalidArgument("Metal GPU profile snapshot is too large");
     }
-    Status status = GpuDuration(&candidate.command_buffer_gpu_nanoseconds);
-    if (!status.ok()) return status;
-    *profile = std::move(candidate);
-    return Status::Ok();
   }
 
 private:
@@ -387,6 +417,8 @@ Status MetalBackend::ResolveGpuSubmissionProfile(
   if (!status.ok()) return status;
   try {
     submission_profile.submission_id = submission_id;
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU submission profile ID");
@@ -399,6 +431,8 @@ Status MetalBackend::ResolveGpuSubmissionProfile(
   candidate.capabilities = ProfilingCapabilities();
   try {
     candidate.submissions.push_back(std::move(submission_profile));
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU submission profile metadata");
@@ -566,6 +600,8 @@ Status MetalBackend::SubmitComputeProfiled(
   GpuSubmissionProfile profile;
   try {
     profile.stages.reserve(stages.size());
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Metal stage profile metadata");
@@ -603,6 +639,7 @@ Status MetalBackend::SubmitComputeProfiled(
       return Status::SubmissionFailed(
         "Failed to create profiled Metal compute encoder");
     }
+    const ScopedComputeEncoding encoding_scope(encoder);
     try {
       profile.stages.push_back({
         .stage_id = stage.stage_id,
@@ -610,6 +647,8 @@ Status MetalBackend::SubmitComputeProfiled(
         .iteration = stage.iteration,
         .invocation = stage.invocation,
       });
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate Metal stage profile metadata");
@@ -620,15 +659,24 @@ Status MetalBackend::SubmitComputeProfiled(
     active_dispatch.stage = &profile.stages.back();
     encoder->setLabel(NS::String::string(
       stage.stage_id, NS::UTF8StringEncoding));
-    g_active_dispatch_profile = &active_dispatch;
-    stage.encode(*this, encoder, stage.context);
-    g_active_dispatch_profile = nullptr;
-    encoder->endEncoding();
+    {
+      const ScopedActiveDispatchProfile active_scope(&active_dispatch);
+      try {
+        stage.encode(*this, encoder, stage.context);
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        return failure.status();
+      } catch (const std::bad_alloc&) {
+        return Status::OutOfMemory("Unable to allocate profiled compute encoding metadata");
+      } catch (const std::length_error&) {
+        return Status::InvalidArgument("Profiled compute encoding metadata is too large");
+      }
+    }
     if (active_dispatch.overflow) {
       return Status::InvalidArgument(
         "Metal dispatch profile exceeds the timestamp sample capacity");
     }
     if (active_dispatch.allocation_failed) {
+      if (!active_dispatch.allocation_failure.ok()) return active_dispatch.allocation_failure;
       return Status::OutOfMemory(
         "Unable to allocate Metal dispatch profile metadata");
     }

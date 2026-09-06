@@ -446,14 +446,14 @@ struct PipelineStorage {
   ManagedVector<float> block_distance;
   Image3FBuffer reconstructed;
   VarDctEncoderFrame frame;
-  std::vector<double> score_history;
+  resource_budget_internal::PublicationVector<double> score_history;
   MaximumErrorResult maximum_error_result;
 };
 
 struct EncodingArtifacts {
   VarDctEncoderFrame frame;
   std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed_frame;
-  std::vector<double> score_history;
+  resource_budget_internal::PublicationVector<double> score_history;
   MaximumErrorResult maximum_error_result;
 };
 
@@ -727,7 +727,7 @@ struct PreparedWorkflow {
   bool supplied_backend_is_qualified,
   bool resolve_production_backend,
   codestream_internal::CodestreamBuffer* codestream,
-  VarDctEncodingSummary* summary,
+  codestream_internal::OwnedEncodingSummary* summary,
   codestream_internal::VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
   gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
@@ -904,7 +904,8 @@ struct PreparedWorkflow {
   }
 
   const WorkflowClock::time_point summary_begin = ProfileBegin(profile);
-  VarDctEncodingSummary candidate_summary;
+  codestream_internal::OwnedEncodingSummary candidate_summary_owner;
+  auto& candidate_summary = candidate_summary_owner.value();
   candidate_summary.extent = prepared.geometry.frame();
   candidate_summary.encoded_bytes = candidate.size();
   candidate_summary.density_mode = options.density_mode;
@@ -946,7 +947,7 @@ struct PreparedWorkflow {
       encoding.maximum_error_result.outcome;
   }
   candidate_summary.encode_attempt_count = 1;
-  candidate_summary.score_history = encoding.score_history;
+  candidate_summary_owner.SetField(std::move(encoding.score_history));
   candidate_summary.final_butteraugli_score_evaluated =
     options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
     !candidate_summary.score_history.empty() &&
@@ -981,7 +982,7 @@ struct PreparedWorkflow {
 
   *codestream = std::move(candidate);
   if (summary != nullptr) {
-    *summary = std::move(candidate_summary);
+    *summary = std::move(candidate_summary_owner);
   }
   if (profile != nullptr) {
     *profile = candidate_profile;
@@ -1260,8 +1261,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   bool supplied_backend_is_qualified,
   bool resolve_production_backend,
   codestream_internal::CodestreamBuffer* codestream,
-  VarDctEncodingSummary* summary,
-  VarDctEncodingTiming* timing,
+  codestream_internal::OwnedEncodingSummary* summary,
+  codestream_internal::OwnedEncodingTiming* timing,
   codestream_internal::VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
   gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
@@ -1277,7 +1278,9 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   const auto total_begin = !profiling
     ? WorkflowClock::time_point{}
     : WorkflowClock::now();
-  VarDctEncodingTiming local_timing;
+  codestream_internal::OwnedEncodingTiming timing_owner;
+  auto& local_timing = timing_owner.value();
+  resource_budget_internal::PublicationVector<VarDctEncodingAttemptTiming> attempt_timings;
   codestream_internal::VarDctEncodingProfile local_profile;
   gpu_profile_internal::GpuExecutionProfile local_gpu_profile;
   if (codestream == nullptr || !linear_rgb.valid()) {
@@ -1375,6 +1378,11 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   const bool target_size_control =
     options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
     options.rate_control_mode == VarDctRateControlMode::kTargetBitsPerPixel;
+  if (timing != nullptr) {
+    status = resource_budget_internal::PublicationVector<VarDctEncodingAttemptTiming>::CreateForAppend(
+      target_size_control ? options.target_size_maximum_attempts : 1, &attempt_timings);
+    if (!status.ok()) return status;
+  }
   const bool resident_input_candidate =
     (options.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident ||
      options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
@@ -1436,7 +1444,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         },
         [&](float butteraugli_target,
             codestream_internal::CodestreamBuffer* attempt_codestream,
-            VarDctEncodingSummary* attempt_summary) {
+            codestream_internal::OwnedEncodingSummary* attempt_summary) {
           const auto attempt_begin = timing == nullptr
             ? WorkflowClock::time_point{}
             : WorkflowClock::now();
@@ -1464,7 +1472,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
             AccumulateEncodingProfile(attempt_profile, &local_profile);
           }
           if (timing != nullptr) {
-            local_timing.attempts.push_back({
+            const Status timing_status = attempt_timings.Append({
               .butteraugli_target = butteraugli_target,
               .encode_and_serialize_nanoseconds =
                 ElapsedNanoseconds(attempt_begin),
@@ -1473,6 +1481,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
                 : 0,
               .succeeded = attempt_status.ok(),
             });
+            if (!timing_status.ok()) return timing_status;
           }
           return attempt_status;
         },
@@ -1480,27 +1489,28 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       if (timing != nullptr) {
         local_timing.aggregate_search_nanoseconds =
           ElapsedNanoseconds(search_begin);
+        timing_owner.SetField(std::move(attempt_timings));
       }
       if (!status.ok()) {
         return status;
       }
 
-      search_result.summary.rate_control_mode = options.rate_control_mode;
-      search_result.summary.effective_target_bytes = effective_target_bytes;
-      search_result.summary.target_size_tolerance_bytes =
+      search_result.summary.value().rate_control_mode = options.rate_control_mode;
+      search_result.summary.value().effective_target_bytes = effective_target_bytes;
+      search_result.summary.value().target_size_tolerance_bytes =
         target_size_tolerance_bytes;
-      search_result.summary.encode_attempt_count = search_result.attempt_count;
-      search_result.summary.failed_encode_attempt_count =
+      search_result.summary.value().encode_attempt_count = search_result.attempt_count;
+      search_result.summary.value().failed_encode_attempt_count =
         search_result.failed_attempt_count;
-      search_result.summary.target_size_selection =
+      search_result.summary.value().target_size_selection =
         options.target_size_selection;
-      search_result.summary.target_size_met = search_result.target_size_met;
-      search_result.summary.target_size_search_exhausted =
+      search_result.summary.value().target_size_met = search_result.target_size_met;
+      search_result.summary.value().target_size_search_exhausted =
         search_result.search_exhausted;
       if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes) {
-        search_result.summary.requested_target_bytes = options.target_bytes;
+        search_result.summary.value().requested_target_bytes = options.target_bytes;
       } else {
-        search_result.summary.requested_target_bits_per_pixel =
+        search_result.summary.value().requested_target_bits_per_pixel =
           options.target_bits_per_pixel;
       }
       if (timing != nullptr) {
@@ -1509,7 +1519,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
           [&](const VarDctEncodingAttemptTiming& attempt) {
             return attempt.succeeded &&
               attempt.butteraugli_target ==
-                search_result.summary.selected_butteraugli_target &&
+                search_result.summary.value().selected_butteraugli_target &&
               attempt.encoded_bytes == search_result.codestream.size();
           });
         if (selected == local_timing.attempts.end()) {
@@ -1521,7 +1531,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       }
       if (profile != nullptr) {
         local_profile.execution_backend =
-          search_result.summary.execution_backend;
+          search_result.summary.value().execution_backend;
         local_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
       }
       *codestream = std::move(search_result.codestream);
@@ -1530,7 +1540,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       }
       if (timing != nullptr) {
         local_timing.total_nanoseconds = ElapsedNanoseconds(total_begin);
-        *timing = std::move(local_timing);
+        *timing = std::move(timing_owner);
       }
       if (profile != nullptr) {
         local_profile.peak_cpu_participants = participant_tracker.peak();
@@ -1569,7 +1579,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         ElapsedNanoseconds(preparation_begin);
     }
     codestream_internal::CodestreamBuffer candidate;
-    VarDctEncodingSummary candidate_summary;
+    codestream_internal::OwnedEncodingSummary candidate_summary;
     codestream_internal::VarDctEncodingProfile attempt_profile;
     const auto attempt_begin = timing == nullptr
       ? WorkflowClock::time_point{}
@@ -1582,7 +1592,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       profile == nullptr ? nullptr : &attempt_profile,
       gpu_profiling_mode, gpu_profiling ? &local_gpu_profile : nullptr);
     if (timing != nullptr) {
-      local_timing.attempts.push_back({
+      const Status timing_status = attempt_timings.Append({
         .butteraugli_target =
           options.rate_control_mode == VarDctRateControlMode::kMaximumError
             ? 0.0f
@@ -1592,6 +1602,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         .encoded_bytes = status.ok() ? candidate.size() : 0,
         .succeeded = status.ok(),
       });
+      if (!timing_status.ok()) return timing_status;
     }
     if (!status.ok()) {
       return status;
@@ -1601,6 +1612,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     }
 
     if (timing != nullptr) {
+      timing_owner.SetField(std::move(attempt_timings));
       local_timing.selected_attempt_nanoseconds =
         local_timing.attempts.front().encode_and_serialize_nanoseconds;
     }
@@ -1610,7 +1622,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     }
     if (timing != nullptr) {
       local_timing.total_nanoseconds = ElapsedNanoseconds(total_begin);
-      *timing = std::move(local_timing);
+      *timing = std::move(timing_owner);
     }
     if (profile != nullptr) {
       local_profile.execution_backend =
@@ -1646,11 +1658,21 @@ Status EncodeLinearRgbVarDctCodestreamPublishedImpl(
   gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
   if (codestream == nullptr) return Status::InvalidArgument("Codestream output is null");
   codestream_internal::CodestreamBuffer candidate;
+  codestream_internal::OwnedEncodingSummary candidate_summary;
+  codestream_internal::OwnedEncodingTiming candidate_timing;
   const Status status = EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, supplied_backend, supplied_backend_is_qualified,
-    resolve_production_backend, &candidate, summary, timing, profile,
+    resolve_production_backend, &candidate,
+    summary == nullptr ? nullptr : &candidate_summary,
+    timing == nullptr ? nullptr : &candidate_timing, profile,
     gpu_profiling_mode, gpu_profile);
-  if (status.ok()) candidate.PublishTo(codestream);
+  if (status.ok()) {
+    auto byte_charge = candidate.MoveToPublication(codestream);
+    resource_budget_internal::ResourceAllocation summary_charge, timing_charge;
+    if (summary != nullptr) summary_charge = candidate_summary.MoveToPublication(summary);
+    if (timing != nullptr) timing_charge = candidate_timing.MoveToPublication(timing);
+    if (gpu_profile != nullptr) gpu_profile->ReleaseResourceChargesAfterPublication();
+  }
   return status;
 }
 
@@ -1691,8 +1713,8 @@ namespace codestream_internal {
 
 Status EncodeLinearRgbVarDctCodestreamOwned(
   ConstImage3FView linear_rgb, VarDctEncodingOptions options,
-  CodestreamBuffer* codestream, VarDctEncodingSummary* summary,
-  VarDctEncodingTiming* timing) {
+  CodestreamBuffer* codestream, OwnedEncodingSummary* summary,
+  OwnedEncodingTiming* timing) {
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, timing,
     nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);

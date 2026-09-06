@@ -39,7 +39,7 @@ enum class GpuAdaptiveQuantizationMode {
 struct GpuAdaptiveQuantizationPolicyOutput {
   PlaneF32View quant_field;
   PlaneF32View block_distance_map;
-  std::vector<double>* score_history = nullptr;
+  resource_budget_internal::PublicationOutput<double> score_history;
 };
 
 struct GpuFrameOnlyQuantizationOutput {

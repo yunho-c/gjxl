@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "codestream/encoder_internal.h"
+#include "codestream/encoding_result_internal.h"
 #include "codestream/workflow.h"
 #include "gpu/backend.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
@@ -18,8 +19,8 @@ namespace gjxl::codestream_internal {
 /// outer C/C++ or batch adapter explicitly publishes them.
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestreamOwned(
   ConstImage3FView linear_rgb, VarDctEncodingOptions options,
-  CodestreamBuffer* codestream, VarDctEncodingSummary* summary = nullptr,
-  VarDctEncodingTiming* timing = nullptr);
+  CodestreamBuffer* codestream, OwnedEncodingSummary* summary = nullptr,
+  OwnedEncodingTiming* timing = nullptr);
 
 struct QuantizationMatrixScaleStats {
   float x_edge = 0.0f;

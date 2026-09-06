@@ -17,11 +17,19 @@
 #include <vector>
 
 #include "core/status.h"
+#include "core/managed_publication.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/primitives.h"
 
 namespace gjxl::gpu_profile_internal {
+
+template <typename T>
+using ProfileStorage = resource_budget_internal::ManagedVector<
+  T, resource_budget_internal::ResourceClass::kDiagnostics>;
+using ProfileString = resource_budget_internal::ManagedString<
+  resource_budget_internal::ResourceClass::kDiagnostics>;
+using resource_budget_internal::ReleaseManagedBackingAfterPublication;
 
 enum class GpuProfilingMode : uint8_t {
   kDisabled,
@@ -51,7 +59,7 @@ struct GpuExtent3D {
 };
 
 struct GpuDispatchProfile {
-  std::string kernel_id;
+  ProfileString kernel_id;
   GpuDispatchKind kind = GpuDispatchKind::kThreads;
   GpuExtent3D grid;
   GpuExtent3D threads_per_threadgroup;
@@ -64,23 +72,23 @@ struct GpuDispatchProfile {
 };
 
 struct GpuStageProfile {
-  std::string stage_id;
-  std::string group_id;
+  ProfileString stage_id;
+  ProfileString group_id;
   uint32_t iteration = 0;
   uint32_t invocation = 0;
   uint64_t begin_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t gpu_nanoseconds = 0;
-  std::vector<GpuDispatchProfile> dispatches;
+  ProfileStorage<GpuDispatchProfile> dispatches;
 
   bool operator==(const GpuStageProfile&) const = default;
 };
 
 struct GpuSubmissionProfile {
-  std::string submission_id;
+  ProfileString submission_id;
   uint32_t invocation = 0;
   uint64_t command_buffer_gpu_nanoseconds = 0;
-  std::vector<GpuStageProfile> stages;
+  ProfileStorage<GpuStageProfile> stages;
 
   bool operator==(const GpuSubmissionProfile&) const = default;
 };
@@ -95,7 +103,7 @@ enum class GpuWallStageKind : uint8_t {
 };
 
 struct GpuWallStageProfile {
-  std::string stage_id;
+  ProfileString stage_id;
   GpuWallStageKind kind = GpuWallStageKind::kOperation;
   uint32_t invocation = 0;
   uint64_t wall_nanoseconds = 0;
@@ -106,8 +114,27 @@ struct GpuWallStageProfile {
 struct GpuExecutionProfile {
   GpuProfilingMode mode = GpuProfilingMode::kDisabled;
   GpuProfilingCapabilities capabilities;
-  std::vector<GpuWallStageProfile> wall_stages;
-  std::vector<GpuSubmissionProfile> submissions;
+  ProfileStorage<GpuWallStageProfile> wall_stages;
+  ProfileStorage<GpuSubmissionProfile> submissions;
+
+  /// Only the complete workflow's outer publication adapter calls this.
+  /// Internal child profiles and submission snapshots retain their charges.
+  void ReleaseResourceChargesAfterPublication() noexcept {
+    for (auto& wall : wall_stages) ReleaseManagedBackingAfterPublication(wall.stage_id);
+    for (auto& submission : submissions) {
+      ReleaseManagedBackingAfterPublication(submission.submission_id);
+      for (auto& stage : submission.stages) {
+        ReleaseManagedBackingAfterPublication(stage.stage_id);
+        ReleaseManagedBackingAfterPublication(stage.group_id);
+        for (auto& dispatch : stage.dispatches)
+          ReleaseManagedBackingAfterPublication(dispatch.kernel_id);
+        ReleaseManagedBackingAfterPublication(stage.dispatches);
+      }
+      ReleaseManagedBackingAfterPublication(submission.stages);
+    }
+    ReleaseManagedBackingAfterPublication(wall_stages);
+    ReleaseManagedBackingAfterPublication(submissions);
+  }
 
   bool operator==(const GpuExecutionProfile&) const = default;
 };
@@ -153,11 +180,13 @@ public:
     }
     try {
       profile_.wall_stages.push_back({
-        .stage_id = std::string(stage_id),
+        .stage_id = ProfileString(stage_id),
         .kind = kind,
         .invocation = invocation,
         .wall_nanoseconds = elapsed < 0 ? 0u : static_cast<uint64_t>(elapsed),
       });
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate GPU wall-stage profile metadata");
@@ -198,6 +227,10 @@ public:
       }
       submission.invocation = invocation;
     }
+    if (child.wall_stages.size() > profile_.wall_stages.max_size() - profile_.wall_stages.size() ||
+        child.submissions.size() > profile_.submissions.max_size() - profile_.submissions.size()) {
+      return Status::InvalidArgument("GPU pipeline profile metadata is too large");
+    }
     try {
       profile_.wall_stages.reserve(
         profile_.wall_stages.size() + child.wall_stages.size());
@@ -211,6 +244,8 @@ public:
         profile_.submissions.end(),
         std::make_move_iterator(child.submissions.begin()),
         std::make_move_iterator(child.submissions.end()));
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate GPU pipeline profile metadata");

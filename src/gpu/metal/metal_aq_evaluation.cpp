@@ -2473,7 +2473,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       "Injected resident Butteraugli host-staging failure");
   }
 
-  std::vector<double> candidate_scores;
+  resource_budget_internal::PublicationVector<double> candidate_scores;
   VarDctEncoderFrame candidate_frame;
   std::unique_ptr<MetalCompletedVarDctFrame> candidate_completed_frame;
   uint64_t output_prepare_nanoseconds = 0;
@@ -2489,7 +2489,12 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   const size_t score_count =
     input.iterations + static_cast<size_t>(input.evaluate_final_field);
   try {
-    candidate_scores.resize(score_count);
+    status = resource_budget_internal::PublicationVector<double>::Create(
+      score_count, &candidate_scores, resource_budget_internal::ResourceClass::kAqScratch);
+    if (!status.ok()) {
+      CompleteOperation();
+      return status;
+    }
     if (quant_field_requested) {
       resident_policy_quant_readback_.resize(block_count_);
     }
@@ -3016,7 +3021,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         block_extent_.width, output.block_distance_map.Row(y));
     }
   }
-  *output.score_history = std::move(candidate_scores);
+  output.score_history.Publish(std::move(candidate_scores));
   if (reconstruction_requested) {
     for (size_t channel = 0; channel < 3; ++channel) {
       for (size_t y = 0; y < source_extent_.height; ++y) {

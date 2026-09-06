@@ -60,9 +60,11 @@ template <typename Bytes>
   const TargetSizeSearchOptions& options,
   float candidate_target,
   const Bytes& candidate,
-  const VarDctEncodingSummary& candidate_summary,
+  const TargetSizeSummaryFor<Bytes>& candidate_summary_owner,
   const TargetSizeSearchResultFor<Bytes>& best) noexcept {
 
+  const auto& candidate_summary = SummaryValue(candidate_summary_owner);
+  const auto& best_summary = SummaryValue(best.summary);
   if (best.codestream.empty()) {
     return true;
   }
@@ -91,11 +93,11 @@ template <typename Bytes>
     }
   }
   const double candidate_score = FinalScore(candidate_summary);
-  const double best_score = FinalScore(best.summary);
+  const double best_score = FinalScore(best_summary);
   if (candidate_score != best_score) {
     return candidate_score < best_score;
   }
-  return candidate_target < best.summary.selected_butteraugli_target;
+  return candidate_target < best_summary.selected_butteraugli_target;
 }
 
 template <typename Bytes>
@@ -137,10 +139,11 @@ template <typename Bytes>
   Status* first_failure) {
 
   Bytes codestream;
-  VarDctEncodingSummary summary;
+  TargetSizeSummaryFor<Bytes> summary_owner;
+  const auto& summary = SummaryValue(summary_owner);
   ++best->attempt_count;
   Status status = evaluator(
-    butteraugli_target, &codestream, &summary);
+    butteraugli_target, &codestream, &summary_owner);
   if (!status.ok()) {
     if (status.resource_plan_exceeded()) return status;
     ++best->failed_attempt_count;
@@ -162,9 +165,9 @@ template <typename Bytes>
   }
 
   if (BetterCandidate(
-        options, butteraugli_target, codestream, summary, *best)) {
+        options, butteraugli_target, codestream, summary_owner, *best)) {
     best->codestream = std::move(codestream);
-    best->summary = std::move(summary);
+    best->summary = std::move(summary_owner);
   }
   return Status::Ok();
 }
