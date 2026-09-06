@@ -1084,6 +1084,19 @@ No new firewall/permission block occurred and no system settings changed.
 LF Malta and convolution work remain open targets; the backend is not
 considered maxed out.
 
+[S71](cuda-optimization-s1.md#conditional-second-malta-division-s71-not-retained)
+rejects conditional second-division layouts for Malta. Factoring the
+correction expression fails a finite bitwise guard. Two other layouts and
+an unchanged control each pass 15,360 two-oracle comparisons; all 3,456
+selected captured-stage timing windows remain exact. Native instructions
+confirm that the outer guard really skips the unused division, but its
+4K stage-time aggregate is 0.44% slower; four separate correction branches
+are 3.71% slower. These are local stage aggregates, not encoder timings.
+The S70 runtime, tests and 39 release binaries/libraries remain unchanged.
+No new permission/firewall block occurs or system settings change. Input/
+output and tile-staging costs remain to be separated from arithmetic;
+the backend is not considered maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

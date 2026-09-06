@@ -12233,6 +12233,137 @@ are not a single common sample. Further work should investigate the LF
 response/scaling split or another measured convolution bottleneck; larger
 row groups and finer zero classification are not justified by this evidence.
 
+## Conditional second Malta division (S71, not retained)
+
+S71 starts from S70 `5eb8751` on the same RTX 3060 Laptop, CUDA 11.8,
+MSVC 14.37 and `sm_86` setup. LF Malta remains the largest independent
+4K kernel-time median. In retained-input replays, the two entirely zero
+LF stages still take about 0.64 ms despite the existing response shortcut.
+S66 established two independently refined divisions in `MaltaScaleValue`;
+S71 tests skipping the second when no asymmetric correction consumes it.
+This is an arithmetic/control-flow experiment, not another reciprocal
+approximation, relaxed FP mode or raw-input-zero shortcut.
+
+### Candidates, guards and emitted instructions
+
+The diagnostic copies both the prior single-row and S70 paired-row kernels,
+changing only the scaling helper. Halo loading, response sum trees, zero
+classification, accumulation and the existing geometry policy stay fixed.
+
+| Mode | Change | Disposition |
+| --- | --- | --- |
+| 0 | Actual S70 dispatch | Timing baseline |
+| 1 | Factor correction term/sign; divide only when needed | Reject: finite bitwise mismatch |
+| 2 | Put the original division inside each correction branch | Reject: slower |
+| 3 | Original helper in separately named kernels | Native-identical control |
+| 4 | One outer correction-needed guard, then original branch tree | Reject: no general benefit |
+
+Mode 1 fails at stage 0 of the 31x9, full-response, additive, finite
+near-equal pattern, with the single-row ordinary-grid schedule. Factoring
+the expression is not bitwise equivalent in this compiled implementation;
+no timing or sanitizer qualification is claimed for that mode. The build
+driver completes all four independent guard processes before reporting
+this expected rejection. Both original compilations succeed.
+
+Modes 2, 3 and 4 each pass 2,560 fixtures / 15,360 two-oracle stage
+comparisons against the separate scale/response and prior zero-aware
+implementations. Ten geometries, both row schedules, both grid forms,
+full/LF, initialize/add and sixteen patterns exercise finite thresholds,
+signed zeros, denormals, infinities, NaNs and exceptional accumulators.
+Guards, padding and input immutability remain checked. These runs force
+flattening on bounded shapes; they are not new tall-grid limit tests.
+
+Modes 2 and 4 also pass memcheck, initcheck, synccheck and racecheck:
+eight scoped campaigns, each with 192 fixtures / 1,152 two-oracle stage
+comparisons, forcing heights 8/24/64 and both schedules/grid forms on
+65x65 inputs. Errors, leaked bytes and race warnings are zero. Memcheck
+includes explicit leak and stream-ordered-race checks. The original
+racecheck processes finish in approximately 96 seconds each, with progress
+markers retained. These are prototype checks, not full-AQ/release campaigns.
+
+All three diagnostic executables contain the same 171 GPU bodies:
+75 unchanged parent bodies and 96 additions. All 24 mode-3 bodies match
+their parent counterparts exactly; modes 1/2/4 differ in all 24. Registers
+and shared storage match the corresponding control in every specialization,
+with zero stack/local storage. Paired ordinary height-64 full/LF remain
+48/40 registers and 11,520 shared bytes.
+
+The native scale-loop audit confirms the outer guard ahead of the second
+reciprocal/refinement/exceptional path in all 24 mode-4 bodies. For example,
+paired height-64 LF branches at `0x420` to `0x600`, skipping the second
+`MUFU.RCP` at `0x430`. Mode 2 instead emits five division sequences: the
+first quotient plus four separate correction paths. The static input-load
+to shared-store region has 106 instructions in mode 2 versus 59 in the LF
+control and 60 in mode 4. These are static code counts, not dynamic executed
+instructions or achieved occupancy; divergent lanes can traverse different
+correction paths.
+
+### Population and retained-input timing
+
+A source-predicate audit covers all 36 retained S65 first-full-resolution
+captures, totaling 68,281,932 raw pixels. It models the actual 32-lane
+cooperative shared-halo loading cohorts, including padding, rather than
+counting only individual pixels that avoid a correction. At 4K the
+whole-load-warp skip fractions for stages 0 through 5 are approximately
+0%, 23.775%, 0%, 100%, 0.000275% and 100%. Dense stages therefore provide
+almost no warp-wide division elimination, even when many individual pixels
+need no correction. This is a static population model, not a hardware
+counter measurement.
+
+The selected replay excludes invalid mode 1 and retains the original
+five-mode binary unexecuted. Modes 0/2/3/4 use 24 balanced forward/reverse
+rounds, three launches per window, explicit resets and stream synchronization.
+All 3,456 windows pass exact guarded three-launch accumulation checks;
+no round or outlier is removed. The six workloads are 4K, 1080p, Flower
+and three 500x500 corpus photographs. These are retained S65 inputs, not
+fresh S71 captures, all iterations or complete encoder workflows.
+
+The following sums of six independently measured stage medians are
+descriptive aggregates, not paired whole-encode measurements. Negative
+means less stage time.
+
+| Captured stage aggregate | Four branches (2) | Identical control (3) | Outer guard (4) |
+| --- | ---: | ---: | ---: |
+| 4K | +3.71% | -0.05% | +0.44% |
+| 1080p | +2.67% | -0.26% | +0.19% |
+| Flower | +5.26% | -0.24% | -0.13% |
+| Keong macan | +3.55% | +0.22% | -1.18% |
+| Riaphotographs | +4.46% | +4.81% | +5.95% |
+| Bliznaca | +3.36% | -1.15% | +0.00% |
+
+Mode 2's 4K stage-0 paired median regresses 12.04%, losing all 24 pairs.
+Mode 4 regresses 4K dense stages 0/1/2/4 by 1.14% / 1.65% / 0.52% /
+0.25%; its entirely zero stages 3/5 improve only 0.54% / 0.43%, or
+0.32% / 0.48% versus the identical control. The compiler did retain the
+intended division skip, but it barely changes these large zero-stage times.
+Small-case scatter remains visible, including the Riaphotographs control's
++4.81% aggregate. No selective sparse-stage policy is justified here.
+
+### Disposition and evidence
+
+Reject all three changed layouts. Production source, tests, allocation
+policy and the 39 S70 release binaries/libraries remain unchanged. No fresh
+release build, full CPU/CUDA suite, ASan, decoded-quality campaign, batch
+qualification or whole-encode speedup is claimed.
+
+The ignored `build-cuda-ninja/profiles/s71_*` bundle preserves the failed
+guard, both original binaries, the selected replay binary, all build and
+native logs, source-predicate populations and every timing window. Native
+identity ties the guarded and timed bodies together. `s71_validate.py`
+read-only reconstruction checks the native reports, guards, sanitizer logs,
+all population rows, every paired timing summary, capture attribution and
+the document table. The freeze includes five source/document snapshots;
+validation also verifies all S59-S70 artifact hashes. No new firewall,
+admin or permission block occurs, and the previous optional-counter
+restriction is not retried. No security, clock, cooling or power setting
+changes.
+
+The next investigation should separate unavoidable input/output and tile
+staging costs from scale/response arithmetic, or address another measured
+convolution bottleneck. The small benefit from removing a real division
+does not itself prove a bandwidth ceiling. S71 narrows one hypothesis;
+it does not establish that the backend is maxed out.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
