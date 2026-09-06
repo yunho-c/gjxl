@@ -34,6 +34,7 @@
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
 #include "gpu/metal/metal_status.h"
+#include "gpu/metal/metal_storage_plan.h"
 #include "gpu/scratch.h"
 
 #define setComputePipelineState(state)                                    \
@@ -135,10 +136,9 @@ Status BorrowCompletedContiguousI32(
   return Status::Ok();
 }
 
-inline constexpr size_t kBufferAlignment = 256;
 inline constexpr NS::UInteger kBlockReductionThreadCount = 256;
 inline constexpr NS::UInteger kAqThreadCount = 256;
-inline constexpr size_t kQuantTableValueCount = 11904;
+inline constexpr size_t kQuantTableValueCount = kAqQuantTableValueCount;
 inline constexpr std::array<AcStrategyType, 7> kSupportedAqStrategies = {
     AcStrategyType::kDct8,     AcStrategyType::kDct16x16,
     AcStrategyType::kDct32x32, AcStrategyType::kDct16x8,
@@ -587,65 +587,8 @@ template <typename T>
   return Status::Ok();
 }
 
-[[nodiscard]] Status ValidateAqGeometry(
-  Extent2D source,
-  Extent2D coding) {
-
-  if (source.empty() || coding.empty() ||
-      coding.width % kJxlBlockDimension != 0 ||
-      coding.height % kJxlBlockDimension != 0 ||
-      source.width > coding.width || source.height > coding.height ||
-      coding.width - source.width >= kJxlBlockDimension ||
-      coding.height - source.height >= kJxlBlockDimension) {
-    return Status::InvalidArgument(
-      "Prepared AQ source and padded coding geometry are incompatible");
-  }
-  const Extent2D blocks{
-    coding.width / kJxlBlockDimension,
-    coding.height / kJxlBlockDimension,
-  };
-  constexpr size_t kShaderMaximum =
-    static_cast<size_t>(std::numeric_limits<uint32_t>::max());
-  size_t block_count = 0;
-  if (source.width > kShaderMaximum || source.height > kShaderMaximum ||
-      coding.width > kShaderMaximum || coding.height > kShaderMaximum ||
-      blocks.width > kShaderMaximum / 2 || blocks.height > kShaderMaximum ||
-      !blocks.try_area(&block_count) || block_count > kShaderMaximum) {
-    return Status::InvalidArgument(
-      "Prepared AQ geometry exceeds Metal shader limits");
-  }
-  return Status::Ok();
-}
-
-[[nodiscard]] Status AddPlannedPlane(
-  DeviceElementType type,
-  Extent2D extent,
-  size_t row_stride,
-  size_t* bytes) {
-
-  if (bytes == nullptr || extent.empty() || row_stride < extent.width) {
-    return Status::InvalidArgument("Prepared AQ plane plan is invalid");
-  }
-  const size_t element_size = DeviceElementSize(type);
-  if (*bytes > std::numeric_limits<size_t>::max() - (kBufferAlignment - 1)) {
-    return Status::InvalidArgument("Prepared AQ plane alignment overflows");
-  }
-  const size_t aligned =
-    (*bytes + kBufferAlignment - 1) & ~(kBufferAlignment - 1);
-  if (extent.height - 1 >
-      (std::numeric_limits<size_t>::max() - extent.width) / row_stride) {
-    return Status::InvalidArgument("Prepared AQ plane geometry overflows");
-  }
-  const size_t elements = (extent.height - 1) * row_stride + extent.width;
-  if (elements > std::numeric_limits<size_t>::max() / element_size) {
-    return Status::InvalidArgument("Prepared AQ plane byte size overflows");
-  }
-  const size_t plane_bytes = elements * element_size;
-  if (aligned > std::numeric_limits<size_t>::max() - plane_bytes) {
-    return Status::InvalidArgument("Prepared AQ arena size overflows");
-  }
-  *bytes = aligned + plane_bytes;
-  return Status::Ok();
+[[nodiscard]] Status ValidateAqGeometry(Extent2D source, Extent2D coding) {
+  return ValidateAqStorageGeometry(source, coding);
 }
 
 template <typename T>
@@ -804,42 +747,27 @@ Status MetalPreparedResidentInput::Prepare(
     preparation.original_linear_rgb.extent(), preparation.coding_extent);
   if (!status.ok()) return status;
 
-  size_t capacity_bytes = 0;
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = AddPlannedPlane(
-      DeviceElementType::kF32, preparation.original_linear_rgb.extent(),
-      preparation.original_linear_rgb.width(), &capacity_bytes);
-    if (!status.ok()) return status;
-  }
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = AddPlannedPlane(
-      DeviceElementType::kF32, preparation.coding_extent,
-      preparation.coding_extent.width, &capacity_bytes);
-    if (!status.ok()) return status;
-  }
-  status = AddPlannedPlane(
-    DeviceElementType::kI32, {4, 1}, 4, &capacity_bytes);
+  ResidentInputStoragePlan storage_plan;
+  status = ComputeResidentInputStoragePlan(
+    preparation.original_linear_rgb.extent(), preparation.coding_extent, &storage_plan);
   if (!status.ok()) return status;
   status = backend_->AcquireAqScratchArena(
-    MetalAqScratchArena::kResidentInput, capacity_bytes, &arena_);
+    MetalAqScratchArena::kResidentInput, storage_plan.capacity_bytes, &arena_);
   if (!status.ok()) return status;
 
   for (size_t channel = 0; channel < 3; ++channel) {
-    status = arena_.AllocatePlane(
-      DeviceElementType::kF32, preparation.original_linear_rgb.extent(),
-      preparation.original_linear_rgb.width(), kBufferAlignment,
-      &original_[channel]);
+    status = arena_.BindPlane(storage_plan.original[channel], &original_[channel]);
     if (!status.ok()) return status;
   }
   for (size_t channel = 0; channel < 3; ++channel) {
-    status = arena_.AllocatePlane(
-      DeviceElementType::kF32, preparation.coding_extent,
-      preparation.coding_extent.width, kBufferAlignment, &coding_[channel]);
+    status = arena_.BindPlane(storage_plan.coding[channel], &coding_[channel]);
     if (!status.ok()) return status;
   }
-  status = arena_.AllocatePlane(
-    DeviceElementType::kI32, {4, 1}, 4, kBufferAlignment, &result_);
+  status = arena_.BindPlane(storage_plan.result, &result_);
   if (!status.ok()) return status;
+  if (arena_.layout_bytes() != storage_plan.capacity_bytes) {
+    return Status::Internal("Resident input bindings disagree with storage plan");
+  }
 
   for (size_t channel = 0; channel < 3; ++channel) {
     status = UploadPlane(
@@ -1181,238 +1109,31 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (!status.ok()) return status;
   }
 
-  size_t persistent_bytes = 0;
-  if (!frame_only_ && !borrowed_original_linear_rgb_) {
-    for (size_t channel = 0; channel < 3; ++channel) {
-      status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
-                               source_extent_.width, &persistent_bytes);
-      if (!status.ok())
-        return status;
-    }
-  }
-  if (!borrowed_coding_opsin_) {
-    for (size_t channel = 0; channel < 3; ++channel) {
-      status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
-                               coding_extent_.width, &persistent_bytes);
-      if (!status.ok())
-        return status;
-    }
-  }
-  if (needs_reconstructed) {
-    for (size_t channel = 0; channel < 3; ++channel) {
-      status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
-                               coding_extent_.width, &persistent_bytes);
-      if (!status.ok())
-        return status;
-    }
-  }
-  if (!frame_only_) {
-    for (size_t channel = 0; channel < 3; ++channel) {
-      status = AddPlannedPlane(DeviceElementType::kF32, source_extent_,
-                               source_extent_.width, &persistent_bytes);
-      if (!status.ok())
-        return status;
-    }
-    status = AddPlannedPlane(DeviceElementType::kI32,
-                             {block_extent_.width * 2, block_extent_.height},
-                             block_extent_.width * 2, &persistent_bytes);
-    if (!status.ok())
-      return status;
-  }
-  status = AddPlannedPlane(
-      DeviceElementType::kI32, {2 * anchor_capacity_count, 1},
-      2 * anchor_capacity_count, &persistent_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kU8, block_extent_,
-                           block_extent_.width, &persistent_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kF32, {kQuantTableValueCount, 1},
-                           kQuantTableValueCount, &persistent_bytes);
-  if (!status.ok())
-    return status;
-  if (resident_quantization_) {
-    status = AddPlannedPlane(
-      DeviceElementType::kI32, {6 * block_count_, 1},
-      6 * block_count_, &persistent_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kI32,
-                             {tile_extent_.width * tile_extent_.height + 1, 1},
-                             tile_extent_.width * tile_extent_.height + 1,
-                             &persistent_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
-                             tile_extent_.width, &persistent_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
-                             tile_extent_.width, &persistent_bytes);
-    if (!status.ok()) return status;
-  }
-
-  size_t staging_bytes = 0;
-  status = AddPlannedPlane(DeviceElementType::kI32, block_extent_,
-                           block_extent_.width, &staging_bytes);
-  if (!status.ok())
-    return status;
-  if (!frame_only_) {
-    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
-                             block_extent_.width, &staging_bytes);
-    if (!status.ok())
-      return status;
-  }
-  if (frame_only_resident_initial_quant_) {
-    const Extent2D pre_erosion_extent{
-      coding_extent_.width / 4, coding_extent_.height / 4};
-    status = AddPlannedPlane(DeviceElementType::kF32, pre_erosion_extent,
-                             pre_erosion_extent.width, &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
-                             coding_extent_.width, &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
-                             block_extent_.width, &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
-                             block_extent_.width, &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
-                             coding_extent_.width, &staging_bytes);
-    if (!status.ok()) return status;
-    if (frame_only_resident_quantizer_) {
-      status = AddPlannedPlane(
-        DeviceElementType::kF32, {initial_quant_sort_count_, 1},
-        initial_quant_sort_count_, &staging_bytes);
-      if (!status.ok()) return status;
-      status = AddPlannedPlane(
-        DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
-      if (!status.ok()) return status;
-      status = AddPlannedPlane(
-        DeviceElementType::kI32, {2, 1}, 2, &staging_bytes);
-      if (!status.ok()) return status;
-    }
-  }
-  if (resident_quantization_) {
-    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
-                             block_extent_.width, &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
-                             block_extent_.width, &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kF32, {5, 1}, 5,
-                             &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kI32, {256, 1}, 256,
-                             &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kI32, {3, 1}, 3,
-                             &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kF32, {2, 1}, 2,
-                             &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kI32, {2, 1}, 2,
-                             &staging_bytes);
-    if (!status.ok()) return status;
-  }
-  for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
-    for (size_t channel = 0; channel < 3; ++channel) {
-      status = AddPlannedPlane(DeviceElementType::kF32, coding_extent_,
-                               coding_extent_.width, &staging_bytes);
-      if (!status.ok())
-        return status;
-    }
-  }
-  if (!resident_quantization_) {
-    status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
-                             tile_extent_.width, &staging_bytes);
-    if (!status.ok()) return status;
-    status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
-                             tile_extent_.width, &staging_bytes);
-    if (!status.ok()) return status;
-  }
-  if (!frame_only_) {
-    status = AddPlannedPlane(DeviceElementType::kF32, block_extent_,
-                             block_extent_.width, &staging_bytes);
-    if (!status.ok())
-      return status;
-    if (options_.metric == AqEvaluationMetric::kButteraugli) {
-      if (uses_butteraugli_sinks_) {
-        status = AddPlannedPlane(
-          DeviceElementType::kF32, {anchor_capacity_count, 1},
-          anchor_capacity_count, &staging_bytes);
-        if (!status.ok()) return status;
-      }
-      status = AddPlannedPlane(
-        DeviceElementType::kF32, {1, 1}, 1, &staging_bytes);
-      if (!status.ok()) return status;
-    } else {
-      status = AddPlannedPlane(
-        DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
-        &staging_bytes);
-      if (!status.ok()) return status;
-    }
-  }
-  status =
-      AddPlannedPlane(DeviceElementType::kF32, {coefficient_value_count_, 1},
-                      coefficient_value_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status =
-      AddPlannedPlane(DeviceElementType::kF32, {coefficient_value_count_, 1},
-                      coefficient_value_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status =
-      AddPlannedPlane(DeviceElementType::kI32, {coefficient_value_count_, 1},
-                      coefficient_value_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
-  if (!frame_only_) {
-    status = AddPlannedPlane(
-        DeviceElementType::kF32, {coefficient_value_count_, 1},
-        coefficient_value_count_, &staging_bytes);
-    if (!status.ok())
-      return status;
-    status = AddPlannedPlane(DeviceElementType::kF32,
-                             {3 * block_count_, 1}, 3 * block_count_,
-                             &staging_bytes);
-    if (!status.ok())
-      return status;
-  }
-  status = AddPlannedPlane(DeviceElementType::kI32, {3 * block_count_, 1},
-                           3 * block_count_, &staging_bytes);
-  if (!status.ok())
-    return status;
-  status = AddPlannedPlane(DeviceElementType::kI32, {1, 1}, 1, &staging_bytes);
-  if (!status.ok())
-    return status;
-  if (!frame_only_) {
-    status = AddPlannedPlane(
-        DeviceElementType::kF32, {maximum_coefficient_count_, 1},
-        maximum_coefficient_count_, &staging_bytes);
-    if (!status.ok())
-      return status;
-    status = AddPlannedPlane(
-        DeviceElementType::kI32, {maximum_coefficient_count_, 1},
-        maximum_coefficient_count_, &staging_bytes);
-    if (!status.ok())
-      return status;
-    status = AddPlannedPlane(
-        DeviceElementType::kF32, {maximum_coefficient_count_, 1},
-        maximum_coefficient_count_, &staging_bytes);
-    if (!status.ok())
-      return status;
-  }
-
+  AqStoragePlan storage_plan;
+  status = ComputeAqStoragePlan({
+    .source_extent = source_extent_,
+    .coding_extent = coding_extent_,
+    .anchor_capacity_count = anchor_capacity_count,
+    .maximum_coefficient_count = maximum_coefficient_count_,
+    .initial_quant_sort_count = initial_quant_sort_count_,
+    .filter_scratch_image_count = filter_scratch_image_count_,
+    .frame_only = frame_only_,
+    .borrowed_original_linear_rgb = borrowed_original_linear_rgb_,
+    .borrowed_coding_opsin = borrowed_coding_opsin_,
+    .needs_reconstructed = needs_reconstructed,
+    .frame_only_resident_initial_quant = frame_only_resident_initial_quant_,
+    .frame_only_resident_quantizer = frame_only_resident_quantizer_,
+    .resident_quantization = resident_quantization_,
+    .uses_butteraugli_sinks = uses_butteraugli_sinks_,
+    .metric = options_.metric,
+  }, &storage_plan);
+  if (!status.ok()) return status;
   status = backend_->AcquireAqScratchArena(
-    MetalAqScratchArena::kPersistent, persistent_bytes, &persistent_);
-  if (!status.ok())
-    return status;
+    MetalAqScratchArena::kPersistent, storage_plan.persistent_bytes, &persistent_);
+  if (!status.ok()) return status;
   status = backend_->AcquireAqScratchArena(
-    MetalAqScratchArena::kStaging, staging_bytes, &staging_);
-  if (!status.ok())
-    return status;
+    MetalAqScratchArena::kStaging, storage_plan.staging_bytes, &staging_);
+  if (!status.ok()) return status;
 
   if (!frame_only_) {
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -1423,9 +1144,7 @@ Status MetalPreparedAqEvaluation::Prepare(
           const_cast<DeviceBuffer*>(plane.buffer), plane.offset_bytes,
           plane.element_type, plane.extent, plane.row_stride};
       } else {
-        status = persistent_.AllocatePlane(
-            DeviceElementType::kF32, source_extent_, source_extent_.width,
-            kBufferAlignment, &original_[channel]);
+        status = persistent_.BindPlane(storage_plan.original[channel], &original_[channel]);
         if (!status.ok()) return status;
       }
     }
@@ -1438,152 +1157,94 @@ Status MetalPreparedAqEvaluation::Prepare(
         const_cast<DeviceBuffer*>(plane.buffer), plane.offset_bytes,
         plane.element_type, plane.extent, plane.row_stride};
     } else {
-      status = persistent_.AllocatePlane(
-          DeviceElementType::kF32, coding_extent_, coding_extent_.width,
-          kBufferAlignment, &coding_[channel]);
+      status = persistent_.BindPlane(storage_plan.coding[channel], &coding_[channel]);
       if (!status.ok())
         return status;
     }
   }
   if (needs_reconstructed) {
     for (size_t channel = 0; channel < 3; ++channel) {
-      status = persistent_.AllocatePlane(
-          DeviceElementType::kF32, coding_extent_, coding_extent_.width,
-          kBufferAlignment, &reconstructed_[channel]);
+      status = persistent_.BindPlane(storage_plan.reconstructed[channel], &reconstructed_[channel]);
       if (!status.ok())
         return status;
     }
   }
   if (!frame_only_) {
     for (size_t channel = 0; channel < 3; ++channel) {
-      status = persistent_.AllocatePlane(
-          DeviceElementType::kF32, source_extent_, source_extent_.width,
-          kBufferAlignment, &reconstructed_linear_[channel]);
+      status = persistent_.BindPlane(storage_plan.reconstructed_linear[channel], &reconstructed_linear_[channel]);
       if (!status.ok())
         return status;
     }
-    status = persistent_.AllocatePlane(
-        DeviceElementType::kI32,
-        {block_extent_.width * 2, block_extent_.height},
-        block_extent_.width * 2, kBufferAlignment, &strategies_);
+    status = persistent_.BindPlane(storage_plan.strategies, &strategies_);
     if (!status.ok())
       return status;
   }
   status =
-      persistent_.AllocatePlane(
-          DeviceElementType::kI32, {2 * anchor_capacity_count, 1},
-          2 * anchor_capacity_count, kBufferAlignment, &anchors_);
+      persistent_.BindPlane(storage_plan.anchors, &anchors_);
   if (!status.ok())
     return status;
-  status = persistent_.AllocatePlane(
-      DeviceElementType::kU8, block_extent_, block_extent_.width,
-      kBufferAlignment, &epf_sharpness_);
+  status = persistent_.BindPlane(storage_plan.epf_sharpness, &epf_sharpness_);
   if (!status.ok())
     return status;
-  status = persistent_.AllocatePlane(
-      DeviceElementType::kF32, {kQuantTableValueCount, 1},
-      kQuantTableValueCount, kBufferAlignment, &quant_tables_);
+  status = persistent_.BindPlane(storage_plan.quant_tables, &quant_tables_);
   if (!status.ok())
     return status;
   if (resident_quantization_) {
-    status = persistent_.AllocatePlane(
-      DeviceElementType::kI32, {6 * block_count_, 1},
-      6 * block_count_, kBufferAlignment,
-      &color_transform_records_);
+    status = persistent_.BindPlane(storage_plan.color_transform_records, &color_transform_records_);
     if (!status.ok()) return status;
-    status = persistent_.AllocatePlane(
-      DeviceElementType::kI32,
-      {tile_extent_.width * tile_extent_.height + 1, 1},
-      tile_extent_.width * tile_extent_.height + 1, kBufferAlignment,
-      &color_tile_offsets_);
+    status = persistent_.BindPlane(storage_plan.color_tile_offsets, &color_tile_offsets_);
     if (!status.ok()) return status;
   }
 
-  status = staging_.AllocatePlane(DeviceElementType::kI32, block_extent_,
-                                  block_extent_.width, kBufferAlignment,
-                                  &raw_quant_);
+  status = staging_.BindPlane(storage_plan.raw_quant, &raw_quant_);
   if (!status.ok())
     return status;
   if (!frame_only_) {
-    status = staging_.AllocatePlane(DeviceElementType::kF32, block_extent_,
-                                    block_extent_.width, kBufferAlignment,
-                                    &inverse_sigma_);
+    status = staging_.BindPlane(storage_plan.inverse_sigma, &inverse_sigma_);
     if (!status.ok())
       return status;
   }
   if (frame_only_resident_initial_quant_) {
     const Extent2D pre_erosion_extent{
       coding_extent_.width / 4, coding_extent_.height / 4};
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, pre_erosion_extent, pre_erosion_extent.width,
-      kBufferAlignment, &initial_quant_pre_erosion_);
+    status = staging_.BindPlane(storage_plan.initial_quant_pre_erosion, &initial_quant_pre_erosion_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, coding_extent_, coding_extent_.width,
-      kBufferAlignment, &initial_quant_unblurred_pixel_mask_);
+    status = staging_.BindPlane(storage_plan.initial_quant_unblurred_pixel_mask, &initial_quant_unblurred_pixel_mask_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, block_extent_, block_extent_.width,
-      kBufferAlignment, &initial_quant_field_);
+    status = staging_.BindPlane(storage_plan.initial_quant_field, &initial_quant_field_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, block_extent_, block_extent_.width,
-      kBufferAlignment, &initial_quant_strategy_mask_);
+    status = staging_.BindPlane(storage_plan.initial_quant_strategy_mask, &initial_quant_strategy_mask_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, coding_extent_, coding_extent_.width,
-      kBufferAlignment, &initial_quant_pixel_mask_);
+    status = staging_.BindPlane(storage_plan.initial_quant_pixel_mask, &initial_quant_pixel_mask_);
     if (!status.ok()) return status;
     if (frame_only_resident_quantizer_) {
-      status = staging_.AllocatePlane(
-        DeviceElementType::kF32, {initial_quant_sort_count_, 1},
-        initial_quant_sort_count_, kBufferAlignment, &initial_quant_sort_);
+      status = staging_.BindPlane(storage_plan.initial_quant_sort, &initial_quant_sort_);
       if (!status.ok()) return status;
-      status = staging_.AllocatePlane(
-        DeviceElementType::kF32, {1, 1}, 1, kBufferAlignment,
-        &initial_quant_median_);
+      status = staging_.BindPlane(storage_plan.initial_quant_median, &initial_quant_median_);
       if (!status.ok()) return status;
-      status = staging_.AllocatePlane(
-        DeviceElementType::kI32, {2, 1}, 2, kBufferAlignment,
-        &initial_quantizer_params_);
+      status = staging_.BindPlane(storage_plan.initial_quantizer_params, &initial_quantizer_params_);
       if (!status.ok()) return status;
     }
   }
   if (resident_quantization_) {
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, block_extent_, block_extent_.width,
-      kBufferAlignment, &resident_quant_field_);
+    status = staging_.BindPlane(storage_plan.resident_quant_field, &resident_quant_field_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, block_extent_, block_extent_.width,
-      kBufferAlignment, &resident_policy_initial_field_);
+    status = staging_.BindPlane(storage_plan.resident_policy_initial_field, &resident_policy_initial_field_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, {5, 1}, 5, kBufferAlignment,
-      &resident_policy_scores_);
+    status = staging_.BindPlane(storage_plan.resident_policy_scores, &resident_policy_scores_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kI32, {256, 1}, 256, kBufferAlignment,
-      &resident_quant_histogram_);
+    status = staging_.BindPlane(storage_plan.resident_quant_histogram, &resident_quant_histogram_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kI32, {3, 1}, 3, kBufferAlignment,
-      &resident_quant_selection_state_);
+    status = staging_.BindPlane(storage_plan.resident_quant_selection_state, &resident_quant_selection_state_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kF32, {2, 1}, 2, kBufferAlignment,
-      &resident_quant_statistics_);
+    status = staging_.BindPlane(storage_plan.resident_quant_statistics, &resident_quant_statistics_);
     if (!status.ok()) return status;
-    status = staging_.AllocatePlane(
-      DeviceElementType::kI32, {2, 1}, 2, kBufferAlignment,
-      &resident_quantizer_params_);
+    status = staging_.BindPlane(storage_plan.resident_quantizer_params, &resident_quantizer_params_);
     if (!status.ok()) return status;
   }
   for (size_t image = 0; image < filter_scratch_image_count_; ++image) {
     for (size_t channel = 0; channel < 3; ++channel) {
-      status = staging_.AllocatePlane(DeviceElementType::kF32, coding_extent_,
-                                      coding_extent_.width, kBufferAlignment,
-                                      &filter_scratch_[image][channel]);
+      status = staging_.BindPlane(storage_plan.filter_scratch[image][channel], &filter_scratch_[image][channel]);
       if (!status.ok())
         return status;
     }
@@ -1591,92 +1252,66 @@ Status MetalPreparedAqEvaluation::Prepare(
   DeviceScratchArena& color_arena =
       resident_quantization_ ? persistent_ : staging_;
   status =
-      color_arena.AllocatePlane(DeviceElementType::kI8, tile_extent_,
-                                tile_extent_.width, kBufferAlignment, &y_to_x_);
+      color_arena.BindPlane(storage_plan.y_to_x, &y_to_x_);
   if (!status.ok())
     return status;
   status =
-      color_arena.AllocatePlane(DeviceElementType::kI8, tile_extent_,
-                                tile_extent_.width, kBufferAlignment, &y_to_b_);
+      color_arena.BindPlane(storage_plan.y_to_b, &y_to_b_);
   if (!status.ok())
     return status;
   if (!frame_only_) {
-    status = staging_.AllocatePlane(DeviceElementType::kF32, block_extent_,
-                                    block_extent_.width, kBufferAlignment,
-                                    &block_distance_);
+    status = staging_.BindPlane(storage_plan.block_distance, &block_distance_);
     if (!status.ok())
       return status;
     if (options_.metric == AqEvaluationMetric::kButteraugli) {
       if (uses_butteraugli_sinks_) {
-        status = staging_.AllocatePlane(
-          DeviceElementType::kF32, {anchor_capacity_count, 1},
-          anchor_capacity_count, kBufferAlignment, &score_partials_);
+        status = staging_.BindPlane(storage_plan.score_partials, &score_partials_);
         if (!status.ok()) return status;
       }
-      status = staging_.AllocatePlane(
-        DeviceElementType::kF32, {1, 1}, 1, kBufferAlignment, &score_);
+      status = staging_.BindPlane(storage_plan.score, &score_);
       if (!status.ok()) return status;
     } else {
-      status = staging_.AllocatePlane(
-        DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
-        kBufferAlignment, &transform_maximum_error_);
+      status = staging_.BindPlane(storage_plan.transform_maximum_error, &transform_maximum_error_);
       if (!status.ok()) return status;
     }
   }
-  status = staging_.AllocatePlane(
-      DeviceElementType::kF32, {coefficient_value_count_, 1},
-      coefficient_value_count_, kBufferAlignment, &gathered_pixels_);
+  status = staging_.BindPlane(storage_plan.gathered_pixels, &gathered_pixels_);
   if (!status.ok())
     return status;
-  status = staging_.AllocatePlane(
-      DeviceElementType::kF32, {coefficient_value_count_, 1},
-      coefficient_value_count_, kBufferAlignment, &forward_coefficients_);
+  status = staging_.BindPlane(storage_plan.forward_coefficients, &forward_coefficients_);
   if (!status.ok())
     return status;
-  status = staging_.AllocatePlane(
-      DeviceElementType::kI32, {coefficient_value_count_, 1},
-      coefficient_value_count_, kBufferAlignment, &quantized_coefficients_);
+  status = staging_.BindPlane(storage_plan.quantized_coefficients, &quantized_coefficients_);
   if (!status.ok())
     return status;
   if (!frame_only_) {
-    status = staging_.AllocatePlane(DeviceElementType::kF32,
-                                    {coefficient_value_count_, 1},
-                                    coefficient_value_count_, kBufferAlignment,
-                                    &reconstruction_coefficients_);
+    status = staging_.BindPlane(storage_plan.reconstruction_coefficients, &reconstruction_coefficients_);
     if (!status.ok())
       return status;
-    status = staging_.AllocatePlane(
-        DeviceElementType::kF32, {3 * block_count_, 1}, 3 * block_count_,
-        kBufferAlignment, &dc_);
+    status = staging_.BindPlane(storage_plan.dc, &dc_);
     if (!status.ok())
       return status;
   }
-  status = staging_.AllocatePlane(
-      DeviceElementType::kI32, {3 * block_count_, 1}, 3 * block_count_,
-      kBufferAlignment, &quantized_dc_);
+  status = staging_.BindPlane(storage_plan.quantized_dc, &quantized_dc_);
   if (!status.ok())
     return status;
-  status = staging_.AllocatePlane(DeviceElementType::kI32, {1, 1}, 1,
-                                  kBufferAlignment, &reconstruction_error_);
+  status = staging_.BindPlane(storage_plan.reconstruction_error, &reconstruction_error_);
   if (!status.ok())
     return status;
   if (!frame_only_) {
-    status = staging_.AllocatePlane(
-        DeviceElementType::kF32, {maximum_coefficient_count_, 1},
-        maximum_coefficient_count_, kBufferAlignment, &quant_probe_input_);
+    status = staging_.BindPlane(storage_plan.quant_probe_input, &quant_probe_input_);
     if (!status.ok())
       return status;
-    status = staging_.AllocatePlane(
-        DeviceElementType::kI32, {maximum_coefficient_count_, 1},
-        maximum_coefficient_count_, kBufferAlignment, &quant_probe_quantized_);
+    status = staging_.BindPlane(storage_plan.quant_probe_quantized, &quant_probe_quantized_);
     if (!status.ok())
       return status;
-    status = staging_.AllocatePlane(
-        DeviceElementType::kF32, {maximum_coefficient_count_, 1},
-        maximum_coefficient_count_, kBufferAlignment,
-        &quant_probe_dequantized_);
+    status = staging_.BindPlane(storage_plan.quant_probe_dequantized, &quant_probe_dequantized_);
     if (!status.ok())
       return status;
+  }
+  if (persistent_.layout_bytes() != storage_plan.persistent_bytes ||
+      staging_.layout_bytes() != storage_plan.staging_bytes) {
+    return Status::Internal("AQ bindings disagree with storage plan");
   }
 
   for (size_t channel = 0; channel < 3; ++channel) {
@@ -3266,8 +2901,12 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
   const resource_budget_internal::ResourceClassScope resource_class(
     resource_budget_internal::ResourceClass::kCompletedFrame);
   try {
+    CompletedFrameStoragePlan storage_plan;
+    Status status = ComputeCompletedFrameStoragePlan(
+      source_extent_, coding_extent_, anchor_count_, &storage_plan);
+    if (!status.ok()) return status;
     auto frame = std::make_unique<MetalCompletedVarDctFrame>();
-    Status status = FrameGeometry::Create(source_extent_, &frame->geometry);
+    status = FrameGeometry::Create(source_extent_, &frame->geometry);
     if (!status.ok()) return status;
     frame->strategies = strategies_host_;
     frame->profile = options_.profile;
@@ -3277,15 +2916,8 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     frame->dc.resize(3 * block_count_);
     constexpr size_t cap = kVarDctAcGroupCoefficientCapacity;
     constexpr size_t dim = kVarDctAcGroupBlockDimension;
-    frame->group_extent = {
-      (block_extent_.width + dim - 1) / dim,
-      (block_extent_.height + dim - 1) / dim};
-    size_t group_count = 0;
-    if (!frame->group_extent.try_area(&group_count) ||
-        group_count > std::numeric_limits<uint32_t>::max() / (3 * cap)) {
-      return Status::InvalidArgument("Completed Metal frame is too large");
-    }
-    const size_t coefficient_count = group_count * 3 * cap;
+    frame->group_extent = storage_plan.group_extent;
+    const size_t group_count = storage_plan.group_count;
     frame->group_used.assign(group_count, 0);
     ManagedVector<uint32_t> destinations(anchor_count_);
     // Build from the authoritative post-search anchors on every output
@@ -3309,13 +2941,8 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
         static_cast<uint32_t>(group * 3 * cap + used);
       used += batch.coefficient_count;
     }
-    const size_t allocation_count = coefficient_count + destinations.size();
-    if (allocation_count < coefficient_count || allocation_count >
-        std::numeric_limits<size_t>::max() / sizeof(int32_t)) {
-      return Status::InvalidArgument("Completed Metal allocation is too large");
-    }
     status = backend_->Allocate(
-      allocation_count * sizeof(int32_t), &frame->allocation);
+      storage_plan.capacity_bytes, &frame->allocation);
     if (!status.ok()) return status;
     auto* metal = MetalBackend::AsMetalBuffer(*frame->allocation);
     auto* storage = static_cast<int32_t*>(metal->handle()->contents());
@@ -3332,13 +2959,16 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
       }
     }
     std::copy(destinations.begin(), destinations.end(),
-              reinterpret_cast<uint32_t*>(storage + coefficient_count));
+      reinterpret_cast<uint32_t*>(reinterpret_cast<std::byte*>(storage) +
+                                  storage_plan.destinations.offset_bytes));
+    const auto& coefficients = storage_plan.coefficients;
+    const auto& destination_plane = storage_plan.destinations;
     completed_coefficients_ = {
-      frame->allocation.get(), 0, DeviceElementType::kI32,
-      {coefficient_count, 1}, coefficient_count};
+      frame->allocation.get(), coefficients.offset_bytes, coefficients.element_type,
+      coefficients.extent, coefficients.row_stride};
     completed_destinations_ = {
-      frame->allocation.get(), coefficient_count * sizeof(int32_t),
-      DeviceElementType::kI32, {anchor_count_, 1}, anchor_count_};
+      frame->allocation.get(), destination_plane.offset_bytes, destination_plane.element_type,
+      destination_plane.extent, destination_plane.row_stride};
     *out = std::move(frame);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {

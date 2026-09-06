@@ -15,6 +15,9 @@ failure/lifetime checks and measured costs. The
 retained codestream-byte backing through C/C++ and batch ownership handoff. The
 [diagnostic attachment](resident-diagnostic-accounting.md) covers score histories,
 summary/timing records and nested GPU-profile storage through publication.
+The [shared device plans](resident-storage-planning.md) now supply the same
+checked AQ/input/Butteraugli/completed-output layouts and AC-search capacity
+recipes to planning and allocation.
 Whole-workflow planning and admission remain pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
@@ -93,8 +96,10 @@ allocation adapters are not wired by the foundation commit.
   or new streaming-output API. Transfer results out of managed accounting only
   at the existing public ownership handoff.
 
-Concrete plane/token/model bounds, the API adapters, and allocation coverage
-still require implementation and tests before workflow enforcement can land.
+The device recipes are now shared with actual allocation. Conservative host,
+token/model/writer bounds, their simultaneous-work envelope, the API adapters,
+and final allocation coverage still require implementation and tests before
+workflow enforcement can land.
 In particular, excluding all CPU allocations or retained batch results to make
 a GPU-only limiter pass would not satisfy this design or the parent roadmap.
 
@@ -189,7 +194,8 @@ attachment has its own [qualification record](resident-metal-accounting.md).
 Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
-Milestone 4 still requires a final allocation-coverage audit and shared planners,
+Milestone 4 still requires a final allocation-coverage audit, host/serializer
+bounds and their combination with the shared device plans,
 public domain configuration/propagation, automatic cache eviction,
 retry and aggregate batch-result admission, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited

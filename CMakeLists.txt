@@ -497,6 +497,7 @@ add_library(
   STATIC
 
   src/gpu/ops/ac_strategy_search.cpp
+  src/gpu/ops/ac_strategy_storage_plan.cpp
   src/gpu/ops/adaptive_quantization.cpp
   src/gpu/ops/gaborish.cpp
   src/gpu/ops/quantization_pipeline.cpp
@@ -986,6 +987,7 @@ add_library(
   src/gpu/metal/metal_butteraugli.cpp
   src/gpu/metal/metal_primitives.cpp
   src/gpu/metal/metal_submission.cpp
+  src/gpu/metal/metal_storage_plan.cpp
 )
 
 add_dependencies(
@@ -2133,6 +2135,11 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_gpu_image_test
   )
 
+  add_executable(gjxl_ac_strategy_storage_plan_test tests/ac_strategy_storage_plan_test.cpp)
+  target_link_libraries(gjxl_ac_strategy_storage_plan_test PRIVATE gjxl_gpu_ops)
+  add_test(NAME ac_strategy_storage_plan COMMAND gjxl_ac_strategy_storage_plan_test)
+  set_tests_properties(ac_strategy_storage_plan PROPERTIES TIMEOUT 30)
+
   add_executable(
     gjxl_gpu_primitives_metal_test
     tests/gpu_primitives_metal_test.cpp
@@ -2483,6 +2490,11 @@ if(GJXL_BUILD_TESTS)
   add_dependencies(gjxl_metal_diagnostic_storage_test gjxl_metal_shaders)
   add_test(NAME metal_diagnostic_storage COMMAND gjxl_metal_diagnostic_storage_test)
   set_tests_properties(metal_diagnostic_storage PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_metal_storage_plan_test tests/metal_storage_plan_test.cpp)
+  target_link_libraries(gjxl_metal_storage_plan_test PRIVATE gjxl_metal)
+  add_test(NAME metal_storage_plan COMMAND gjxl_metal_storage_plan_test)
+  set_tests_properties(metal_storage_plan PROPERTIES TIMEOUT 30)
 
   add_test(
     NAME codec_install_consumer

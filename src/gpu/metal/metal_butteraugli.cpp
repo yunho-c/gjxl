@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "gpu/metal/metal_status.h"
+#include "gpu/metal/metal_storage_plan.h"
 #include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/scratch.h"
 
@@ -34,8 +35,7 @@ using resource_budget_internal::ManagedVector;
 
 namespace {
 
-constexpr size_t kPlaneAlignment = 64;
-constexpr size_t kReductionWidth = 256;
+constexpr size_t kReductionWidth = kButteraugliReductionWidth;
 constexpr std::array<float, 5> kBlurSigmas{
   1.2f,
   7.15593339443f,
@@ -43,11 +43,11 @@ constexpr std::array<float, 5> kBlurSigmas{
   1.56416327805f,
   2.7f,
 };
-constexpr std::array<size_t, 5> kKernelSizes{5, 33, 15, 7, 13};
+constexpr auto kKernelSizes = kButteraugliKernelSizes;
 
 constexpr size_t kPsychoReference = 0;
 constexpr size_t kPsychoDistorted = 10;
-constexpr size_t kPsychoPlaneCount = 10;
+constexpr size_t kPsychoPlaneCount = kButteraugliPsychoPlaneCount;
 constexpr size_t kReferenceMask = 20;
 
 // Psycho-image encoding finishes before difference encoding begins. Reuse its
@@ -55,7 +55,7 @@ constexpr size_t kReferenceMask = 20;
 // its convolution intermediates for difference scratch. The final staging
 // plane remains distinct because multiscale composition and diagnostic capture
 // can keep it live alongside the difference scratch.
-constexpr size_t kImage = 21;
+constexpr size_t kImage = kButteraugliBorrowedFirstPlane;
 constexpr size_t kAc = kImage;
 constexpr size_t kDc = kImage + 3;
 constexpr size_t kPsychoWork = 27;
@@ -63,8 +63,8 @@ constexpr size_t kWork = kPsychoWork;
 // Psycho construction uses kWork through kWork + 2 and raw masks use + 4.
 // Packed subscale caches leave this full-size mask slot invariant after prep.
 constexpr size_t kReferenceErodedMask = kWork + 3;
-constexpr size_t kFinalStaging = 32;
-constexpr size_t kWorkingPlaneCount = 33;
+constexpr size_t kFinalStaging = kButteraugliFinalStagingPlane;
+constexpr size_t kWorkingPlaneCount = kButteraugliWorkingPlaneCount;
 constexpr size_t kMaltaTileWidth = 32;
 constexpr size_t kMaltaTileHeight = 8;
 constexpr size_t kMaltaRadius = 4;
@@ -306,22 +306,6 @@ static_assert(sizeof(CropParams) == 24);
 static_assert(sizeof(ComposeParams) == 20);
 static_assert(sizeof(ReductionParams) == 12);
 
-[[nodiscard]] bool AddAlignedAllocation(
-  size_t size_bytes,
-  size_t* capacity) noexcept {
-
-  if (capacity == nullptr ||
-      *capacity > std::numeric_limits<size_t>::max() - (kPlaneAlignment - 1)) {
-    return false;
-  }
-  const size_t aligned =
-    (*capacity + kPlaneAlignment - 1) & ~(kPlaneAlignment - 1);
-  if (aligned > std::numeric_limits<size_t>::max() - size_bytes) {
-    return false;
-  }
-  *capacity = aligned + size_bytes;
-  return true;
-}
 
 [[nodiscard]] Status CreatePipeline(
   MTL::Device* device,
@@ -391,56 +375,17 @@ public:
 
   [[nodiscard]] Status PrepareStorage() {
     const Extent2D requested = extent();
-    if (requested.width > std::numeric_limits<uint32_t>::max() ||
-        requested.height > std::numeric_limits<uint32_t>::max()) {
-      return Status::InvalidArgument(
-        "Device Butteraugli extent exceeds Metal shader limits");
-    }
-    expanded_ = requested.width < 8 || requested.height < 8;
-    working_extent_ = expanded_
-      ? Extent2D{std::max<size_t>(8, requested.width),
-                 std::max<size_t>(8, requested.height)}
-      : requested;
-    xborder_ = requested.width < 8 ? (8 - requested.width) / 2 : 0;
-    yborder_ = requested.height < 8 ? (8 - requested.height) / 2 : 0;
-    multiscale_ = !expanded_ && requested.width >= 15 &&
-                  requested.height >= 15;
-    if (multiscale_) {
-      sub_extent_ = {(requested.width + 1) / 2,
-                     (requested.height + 1) / 2};
-    }
-
-    size_t working_area = 0;
-    size_t requested_area = 0;
-    if (!working_extent_.try_area(&working_area) ||
-        !requested.try_area(&requested_area) ||
-        requested_area > std::numeric_limits<uint32_t>::max() ||
-        working_area > std::numeric_limits<size_t>::max() / sizeof(float)) {
-      return Status::InvalidArgument(
-        "Device Butteraugli scratch geometry overflows");
-    }
-    const size_t plane_bytes = working_area * sizeof(float);
-    size_t sub_area = 0;
-    size_t sub_plane_bytes = 0;
-    if (multiscale_) {
-      if (!sub_extent_.try_area(&sub_area) ||
-          sub_area >
-          std::numeric_limits<size_t>::max() / sizeof(float)) {
-        return Status::InvalidArgument(
-          "Device Butteraugli cached-reference geometry overflows");
-      }
-      sub_plane_bytes = sub_area * sizeof(float);
-    }
-    const size_t partial_count =
-      requested_area / kReductionWidth +
-      static_cast<size_t>(requested_area % kReductionWidth != 0);
-    if (partial_count >
-        std::numeric_limits<size_t>::max() / sizeof(float)) {
-      return Status::InvalidArgument(
-        "Device Butteraugli reduction scratch overflows");
-    }
-
     const bool borrowing = borrowed_scratch_.has_value();
+    ButteraugliStoragePlan storage_plan;
+    Status status = ComputeButteraugliStoragePlan(requested, borrowing, &storage_plan);
+    if (!status.ok()) return status;
+    expanded_ = storage_plan.expanded;
+    working_extent_ = storage_plan.working_extent;
+    xborder_ = storage_plan.xborder;
+    yborder_ = storage_plan.yborder;
+    multiscale_ = storage_plan.multiscale;
+    sub_extent_ = storage_plan.sub_extent;
+    const size_t plane_bytes = storage_plan.working_plane_bytes;
     if (borrowing) {
       if (!multiscale_) {
         return Status::InvalidArgument("Borrowed Butteraugli scratch requires "
@@ -487,57 +432,11 @@ public:
     const auto is_borrowed = [borrowing](size_t slot) {
       return borrowing && slot >= kImage && slot < kImage + 9;
     };
-    size_t capacity = 0;
-    for (size_t index = 0; index < kWorkingPlaneCount; ++index) {
-      if (is_borrowed(index))
-        continue;
-      // Multiscale composition only uses final staging for the half-size map.
-      const size_t bytes =
-        multiscale_ && index == kFinalStaging ? sub_plane_bytes : plane_bytes;
-      if (!AddAlignedAllocation(bytes, &capacity)) {
-        return Status::InvalidArgument(
-          "Device Butteraugli scratch capacity overflows");
-      }
-    }
-    if (multiscale_) {
-      for (size_t index = 0; index < reference_sub_.size() + 2; ++index) {
-        if (!AddAlignedAllocation(sub_plane_bytes, &capacity)) {
-          return Status::InvalidArgument(
-            "Device Butteraugli cached-reference capacity overflows");
-        }
-      }
-    }
-    for (size_t index = 0; index < 2; ++index) {
-      if (!AddAlignedAllocation(partial_count * sizeof(float), &capacity)) {
-        return Status::InvalidArgument(
-          "Device Butteraugli reduction capacity overflows");
-      }
-    }
-    for (size_t kernel_size : kKernelSizes) {
-      if (!AddAlignedAllocation(kernel_size * sizeof(float), &capacity)) {
-        return Status::InvalidArgument(
-          "Device Butteraugli kernel capacity overflows");
-      }
-    }
-
-    cached_reference_bytes_ =
-      (kPsychoPlaneCount + 2) * plane_bytes +
-      (multiscale_ ? (kPsychoPlaneCount + 2) * sub_plane_bytes : 0);
-    gaussian_kernel_bytes_ = 0;
-    for (size_t kernel_size : kKernelSizes) {
-      gaussian_kernel_bytes_ += kernel_size * sizeof(float);
-    }
-    peak_comparison_scratch_bytes_ =
-      (kWorkingPlaneCount - (kPsychoPlaneCount + 2)) * plane_bytes +
-      2 * partial_count * sizeof(float);
-
-    if (borrowing)
-      peak_comparison_scratch_bytes_ -= 9 * plane_bytes;
-    if (multiscale_) {
-      peak_comparison_scratch_bytes_ -= plane_bytes - sub_plane_bytes;
-    }
-    Status status = metal_.AcquireButteraugliArena(
-      capacity, &scratch_, &cache_generation_);
+    cached_reference_bytes_ = storage_plan.cached_reference_bytes;
+    gaussian_kernel_bytes_ = storage_plan.gaussian_kernel_bytes;
+    peak_comparison_scratch_bytes_ = storage_plan.peak_comparison_scratch_bytes;
+    status = metal_.AcquireButteraugliArena(
+      storage_plan.capacity_bytes, &scratch_, &cache_generation_);
     if (!status.ok()) return status;
     for (size_t index = 0; index < planes_.size(); ++index) {
       DevicePlaneView &plane = planes_[index];
@@ -545,50 +444,27 @@ public:
         plane = borrowed_scratch_->planes[index - kImage];
         continue;
       }
-      const Extent2D plane_extent =
-        multiscale_ && index == kFinalStaging ? sub_extent_ : working_extent_;
-      status =
-        scratch_.AllocatePlane(DeviceElementType::kF32, plane_extent,
-                               plane_extent.width, kPlaneAlignment, &plane);
+      status = scratch_.BindPlane(storage_plan.planes[index], &plane);
       if (!status.ok()) return status;
     }
     reference_eroded_mask_ = Plane(kReferenceErodedMask, working_extent_);
     if (multiscale_) {
-      for (DevicePlaneView& plane : reference_sub_) {
-        status = scratch_.AllocatePlane(
-          DeviceElementType::kF32,
-          sub_extent_,
-          sub_extent_.width,
-          kPlaneAlignment,
-          &plane);
+      for (size_t index = 0; index < reference_sub_.size(); ++index) {
+        status = scratch_.BindPlane(storage_plan.reference_sub[index], &reference_sub_[index]);
         if (!status.ok()) return status;
       }
-      status = scratch_.AllocatePlane(
-        DeviceElementType::kF32, sub_extent_, sub_extent_.width,
-        kPlaneAlignment, &reference_sub_mask_);
+      status = scratch_.BindPlane(storage_plan.reference_sub_mask, &reference_sub_mask_);
       if (!status.ok()) return status;
-      status = scratch_.AllocatePlane(
-        DeviceElementType::kF32, sub_extent_, sub_extent_.width,
-        kPlaneAlignment, &reference_sub_eroded_mask_);
+      status = scratch_.BindPlane(storage_plan.reference_sub_eroded_mask, &reference_sub_eroded_mask_);
       if (!status.ok()) return status;
     }
-    const Extent2D reduction_extent{partial_count, 1};
-    status = scratch_.AllocatePlane(
-      DeviceElementType::kF32, reduction_extent, partial_count,
-      kPlaneAlignment, &reduction_a_);
+    status = scratch_.BindPlane(storage_plan.reduction[0], &reduction_a_);
     if (!status.ok()) return status;
-    status = scratch_.AllocatePlane(
-      DeviceElementType::kF32, reduction_extent, partial_count,
-      kPlaneAlignment, &reduction_b_);
+    status = scratch_.BindPlane(storage_plan.reduction[1], &reduction_b_);
     if (!status.ok()) return status;
 
     for (size_t index = 0; index < kernels_.size(); ++index) {
-      status = scratch_.AllocatePlane(
-        DeviceElementType::kF32,
-        {kKernelSizes[index], 1},
-        kKernelSizes[index],
-        kPlaneAlignment,
-        &kernels_[index]);
+      status = scratch_.BindPlane(storage_plan.kernels[index], &kernels_[index]);
       if (!status.ok()) return status;
       const ManagedVector<float> kernel = MakeGaussianKernel(kBlurSigmas[index]);
       if (kernel.size() != kKernelSizes[index]) {
@@ -601,6 +477,9 @@ public:
         kernel.size() * sizeof(float),
         kernels_[index].offset_bytes);
       if (!status.ok()) return status;
+    }
+    if (scratch_.layout_bytes() != storage_plan.capacity_bytes) {
+      return Status::Internal("Butteraugli bindings disagree with storage plan");
     }
     return Status::Ok();
   }

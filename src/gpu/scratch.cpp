@@ -8,6 +8,32 @@
 
 namespace gjxl {
 
+Status DeviceScratchLayoutPlan::AddPlane(
+  DeviceElementType element_type, Extent2D extent, size_t row_stride,
+  size_t alignment_bytes, DevicePlaneLayout* plane) {
+  if (plane == nullptr || alignment_bytes == 0 ||
+      (alignment_bytes & (alignment_bytes - 1)) != 0) {
+    return Status::InvalidArgument("Device scratch plane plan is invalid");
+  }
+  const size_t element_size = DeviceElementSize(element_type);
+  if (element_size == 0 || alignment_bytes < element_size) {
+    return Status::InvalidArgument("Device scratch alignment is invalid");
+  }
+  size_t size_bytes = 0;
+  Status status = ComputeDevicePlaneSizeBytes(element_type, extent, row_stride, &size_bytes);
+  if (!status.ok()) return status;
+  if (capacity_bytes_ > std::numeric_limits<size_t>::max() - (alignment_bytes - 1)) {
+    return Status::InvalidArgument("Device scratch alignment overflows");
+  }
+  const size_t offset = (capacity_bytes_ + alignment_bytes - 1) & ~(alignment_bytes - 1);
+  if (size_bytes > std::numeric_limits<size_t>::max() - offset) {
+    return Status::InvalidArgument("Device scratch layout overflows");
+  }
+  *plane = {element_type, extent, row_stride, offset, size_bytes};
+  capacity_bytes_ = offset + size_bytes;
+  return Status::Ok();
+}
+
 Status DeviceScratchArena::Prepare(
   GpuBackend& backend,
   size_t capacity_bytes) {
@@ -49,36 +75,27 @@ Status DeviceScratchArena::AllocatePlane(
   size_t alignment_bytes,
   DevicePlaneView* view) {
 
-  if (view == nullptr || buffer_ == nullptr || extent.empty() ||
-      row_stride < extent.width || alignment_bytes == 0 ||
-      (alignment_bytes & (alignment_bytes - 1)) != 0) {
-    return Status::InvalidArgument(
-      "Device scratch plane request is invalid");
+  DeviceScratchLayoutPlan plan(layout_bytes_);
+  DevicePlaneLayout plane;
+  const Status status = plan.AddPlane(element_type, extent, row_stride, alignment_bytes, &plane);
+  if (!status.ok()) return status;
+  return BindPlane(plane, view);
+}
+
+Status DeviceScratchArena::BindPlane(const DevicePlaneLayout& plane, DevicePlaneView* view) {
+  if (view == nullptr || buffer_ == nullptr) {
+    return Status::InvalidArgument("Device scratch plane request is invalid");
   }
-  const size_t element_size = DeviceElementSize(element_type);
-  if (element_size == 0 || alignment_bytes < element_size) {
-    return Status::InvalidArgument(
-      "Device scratch alignment is invalid");
-  }
-  if (layout_bytes_ >
-      std::numeric_limits<size_t>::max() - (alignment_bytes - 1)) {
-    return Status::InvalidArgument(
-      "Device scratch alignment overflows");
-  }
-  const size_t aligned_offset =
-    (layout_bytes_ + alignment_bytes - 1) & ~(alignment_bytes - 1);
   DevicePlaneView candidate{
-    buffer_.get(), aligned_offset, element_type, extent, row_stride};
+    buffer_.get(), plane.offset_bytes, plane.element_type, plane.extent, plane.row_stride};
   DeviceMemoryRange range;
-  Status status = ComputeDevicePlaneRange(candidate, backend_id_, &range);
-  if (!status.ok()) {
-    return status;
+  const Status status = ComputeDevicePlaneRange(candidate, backend_id_, &range);
+  if (!status.ok()) return status;
+  if (range.size_bytes != plane.size_bytes) {
+    return Status::InvalidArgument("Device scratch planned byte size is inconsistent");
   }
-  if (aligned_offset > std::numeric_limits<size_t>::max() - range.size_bytes) {
-    return Status::InvalidArgument(
-      "Device scratch layout overflows");
-  }
-  layout_bytes_ = aligned_offset + range.size_bytes;
+  // Range validation proves the end fits the actual backing, including addition.
+  layout_bytes_ = std::max(layout_bytes_, range.offset_bytes + range.size_bytes);
   peak_layout_bytes_ = std::max(peak_layout_bytes_, layout_bytes_);
   *view = candidate;
   return Status::Ok();

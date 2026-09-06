@@ -147,6 +147,8 @@ arrays and completed-frame metadata, with exact parity and measured costs. The
 retained codestream-byte ownership through C/C++ and batch publication. The
 [diagnostic attachment](resident-diagnostic-accounting.md) extends retained
 ownership to score histories, summaries, attempt timings and GPU profile graphs.
+The [shared device plans](resident-storage-planning.md) extract checked layouts
+and AC-search capacities for reuse by upfront planning and actual allocation.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 
@@ -177,8 +179,8 @@ Deliverables:
 
 The resource record specifies the configuration surface, defaults, domain
 ownership, reservation strategy and treatment of retained batch results. Concrete
-shared estimators and API integration remain to be implemented; those recorded
-decisions are not existing API promises.
+whole-workflow estimators (including host/serializer bounds) and API integration
+remain to be implemented; those recorded decisions are not existing API promises.
 
 Acceptance:
 

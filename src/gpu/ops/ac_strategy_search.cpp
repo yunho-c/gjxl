@@ -26,6 +26,7 @@
 #include "gpu/buffer.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
+#include "gpu/ops/ac_strategy_storage_plan.h"
 
 namespace gjxl {
 using resource_budget_internal::ManagedVector;
@@ -36,15 +37,6 @@ constexpr size_t kColorTileBlockDimension =
   kColorTileDimension / kJxlBlockDimension;
 static_assert(kColorTileBlockDimension == 8);
 
-bool TryMultiply(size_t left, size_t right, size_t* result) {
-  if (result == nullptr ||
-      (right != 0 && left > std::numeric_limits<size_t>::max() / right)) {
-    return false;
-  }
-  *result = left * right;
-  return true;
-}
-
 Status ValidateSearchInputs(
   ConstImage3FView opsin,
   const ResidentAcStrategySearchInputs* resident,
@@ -53,33 +45,17 @@ Status ValidateSearchInputs(
   const ColorCorrelationMap& color_correlation,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
-  Extent2D* block_extent,
-  Extent2D* tile_extent,
-  size_t* pixel_count,
-  size_t* block_count) {
-  if (out == nullptr || block_extent == nullptr || tile_extent == nullptr ||
-      pixel_count == nullptr || block_count == nullptr) {
+  ac_strategy_search_internal::StoragePlan* storage_plan) {
+  if (out == nullptr || storage_plan == nullptr) {
     return Status::InvalidArgument("GPU AC-strategy search output is null");
   }
   const Extent2D opsin_extent = opsin.valid()
     ? opsin.extent()
     : resident == nullptr ? Extent2D{} : resident->opsin.plane[0].extent;
-  if (opsin_extent.empty() ||
-      opsin_extent.width % kJxlBlockDimension != 0 ||
-      opsin_extent.height % kJxlBlockDimension != 0) {
-    return Status::InvalidArgument(
-      "GPU AC-strategy search requires a padded opsin image");
-  }
-  *block_extent = {
-    opsin_extent.width / kJxlBlockDimension,
-    opsin_extent.height / kJxlBlockDimension,
-  };
-  if (!opsin_extent.try_area(pixel_count) ||
-      !block_extent->try_area(block_count)) {
-    return Status::InvalidArgument(
-      "GPU AC-strategy search dimensions are too large");
-  }
-  if (!quant_field.valid() || quant_field.extent != *block_extent ||
+  const Status status = ac_strategy_search_internal::ComputeStoragePlan(
+    opsin_extent, resident != nullptr, storage_plan);
+  if (!status.ok()) return status;
+  if (!quant_field.valid() || quant_field.extent != storage_plan->block_extent ||
       (!(resident != nullptr && pixel_mask.data == nullptr &&
          pixel_mask.extent == Extent2D{} && pixel_mask.stride == 0) &&
        (!pixel_mask.valid() || pixel_mask.extent != opsin_extent)) ||
@@ -87,25 +63,11 @@ Status ValidateSearchInputs(
     return Status::InvalidArgument(
       "GPU AC-strategy search fields have invalid geometry");
   }
-  *tile_extent = {
-    opsin_extent.width / kColorTileDimension +
-      static_cast<size_t>(opsin_extent.width % kColorTileDimension != 0),
-    opsin_extent.height / kColorTileDimension +
-      static_cast<size_t>(opsin_extent.height % kColorTileDimension != 0),
-  };
-  if (color_correlation.tile_extent() != *tile_extent ||
+  if (color_correlation.tile_extent() != storage_plan->tile_extent ||
       !std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f) {
     return Status::InvalidArgument(
       "GPU AC-strategy search options or color map are invalid");
-  }
-  constexpr size_t kUint32Maximum = std::numeric_limits<uint32_t>::max();
-  if (opsin_extent.width > kUint32Maximum ||
-      opsin_extent.height > kUint32Maximum ||
-      *pixel_count > kUint32Maximum || block_extent->width > kUint32Maximum ||
-      block_extent->height > kUint32Maximum) {
-    return Status::InvalidArgument(
-      "GPU AC-strategy search exceeds 32-bit indexing limits");
   }
   return Status::Ok();
 }
@@ -165,42 +127,13 @@ Status MakeCandidates(
   ConstPlaneF32View quant_field,
   const ColorCorrelationMap& color_correlation,
   bool device_quant_norm,
+  size_t candidate_count,
   ManagedVector<AcStrategyCandidate>* candidates) {
   if (candidates == nullptr) {
     return Status::Internal("GPU AC-strategy candidate output is null");
   }
   candidates->clear();
   const Extent2D covered = GetAcStrategyInfo(staged.strategy)->covered_blocks;
-  size_t candidate_count = 0;
-  for (size_t tile_y = 0; tile_y < tile_extent.height; ++tile_y) {
-    const size_t block_y = tile_y * kColorTileBlockDimension;
-    const size_t tile_height =
-      std::min(kColorTileBlockDimension, block_extent.height - block_y);
-    for (size_t tile_x = 0; tile_x < tile_extent.width; ++tile_x) {
-      const size_t block_x = tile_x * kColorTileBlockDimension;
-      const size_t tile_width =
-        std::min(kColorTileBlockDimension, block_extent.width - block_x);
-      if (tile_width < covered.width || tile_height < covered.height) {
-        continue;
-      }
-      const size_t positions_x =
-        (tile_width - covered.width) / staged.anchor_step + 1;
-      const size_t positions_y =
-        (tile_height - covered.height) / staged.anchor_step + 1;
-      size_t tile_candidate_count = 0;
-      if (!TryMultiply(positions_x, positions_y, &tile_candidate_count) ||
-          candidate_count > std::numeric_limits<size_t>::max() -
-                              tile_candidate_count) {
-        return Status::InvalidArgument(
-          "GPU AC-strategy candidate count overflows");
-      }
-      candidate_count += tile_candidate_count;
-    }
-  }
-  if (candidate_count > std::numeric_limits<uint32_t>::max()) {
-    return Status::InvalidArgument(
-      "GPU AC-strategy candidate count exceeds Metal limits");
-  }
   candidates->reserve(candidate_count);
 
   for (size_t tile_y = 0; tile_y < tile_extent.height; ++tile_y) {
@@ -228,6 +161,9 @@ Status MakeCandidates(
               return status;
             }
           }
+          if (candidates->size() == candidate_count) {
+            return Status::Internal("GPU AC-strategy enumeration exceeds its storage plan");
+          }
           candidates->push_back({
             .block_x = static_cast<uint32_t>(block_x + local_x),
             .block_y = static_cast<uint32_t>(block_y + local_y),
@@ -240,7 +176,8 @@ Status MakeCandidates(
       }
     }
   }
-  return Status::Ok();
+  return candidates->size() == candidate_count ? Status::Ok() :
+    Status::Internal("GPU AC-strategy enumeration disagrees with its storage plan");
 }
 
 Status EnsureAllocation(
@@ -320,23 +257,21 @@ static Status FindAcStrategyGridGpuImpl(
   gpu_profile_internal::GpuProfilingSession* profiling_session) {
   const resource_budget_internal::ResourceClassScope resource_class(
     resource_budget_internal::ResourceClass::kAcSearch);
-  Extent2D block_extent;
-  Extent2D tile_extent;
-  size_t pixel_count = 0;
-  size_t block_count = 0;
+  ac_strategy_search_internal::StoragePlan storage_plan;
   Status status = ValidateSearchInputs(opsin, resident,
     quant_field,
     pixel_mask,
     color_correlation,
     options,
     out,
-    &block_extent,
-    &tile_extent,
-    &pixel_count,
-    &block_count);
+    &storage_plan);
   if (!status.ok()) {
     return status;
   }
+  const Extent2D block_extent = storage_plan.block_extent;
+  const Extent2D tile_extent = storage_plan.tile_extent;
+  const size_t pixel_count = storage_plan.pixel_count;
+  const size_t block_count = storage_plan.block_count;
   const Extent2D opsin_extent = opsin.valid()
     ? opsin.extent() : resident->opsin.plane[0].extent;
   if (resident != nullptr) {
@@ -396,14 +331,14 @@ static Status FindAcStrategyGridGpuImpl(
     if (resident == nullptr) {
       status = EnsureAndUpload(gpu,
         packed_opsin.data(),
-        packed_opsin.size() * sizeof(float),
+        storage_plan.opsin_bytes,
         &state.device_opsin);
       if (!status.ok()) {
         return status;
       }
       status = EnsureAndUpload(gpu,
         packed_mask.data(),
-        packed_mask.size() * sizeof(float),
+        storage_plan.mask_bytes,
         &state.device_mask);
       if (!status.ok()) {
         return status;
@@ -415,9 +350,8 @@ static Status FindAcStrategyGridGpuImpl(
     auto& resources = state.resources;
     auto& cost_storage = state.cost_storage;
     AcStrategyGpuSearchStats result_stats;
-    size_t maximum_packed_bytes = 0;
-    size_t maximum_rate_bytes = 0;
     for (size_t i = 0; i < kStages.size(); ++i) {
+      const auto& stage_plan = storage_plan.stages[i];
       StrategyResources& resource = resources[i];
       resource.staged = kStages[i];
       status = MakeCandidates(resource.staged,
@@ -426,6 +360,7 @@ static Status FindAcStrategyGridGpuImpl(
         quant_field,
         color_correlation,
         resident != nullptr,
+        stage_plan.candidate_count,
         &resource.candidates);
       if (!status.ok()) {
         return status;
@@ -433,6 +368,9 @@ static Status FindAcStrategyGridGpuImpl(
       status = PackMatrices(resource.staged.strategy, &resource.matrices);
       if (!status.ok()) {
         return status;
+      }
+      if (resource.matrices.size() != stage_plan.matrix_bytes / sizeof(float)) {
+        return Status::Internal("GPU AC-strategy matrices disagree with storage plan");
       }
       resource.costs.resize(resource.candidates.size());
       const size_t strategy_index =
@@ -448,52 +386,35 @@ static Status FindAcStrategyGridGpuImpl(
       }
       status = EnsureAndUpload(gpu,
         resource.candidates.data(),
-        resource.candidates.size() * sizeof(AcStrategyCandidate),
+        stage_plan.candidate_bytes,
         &resource.device_candidates);
       if (!status.ok()) {
         return status;
       }
       status = EnsureAndUpload(gpu,
         resource.matrices.data(),
-        resource.matrices.size() * sizeof(float),
+        stage_plan.matrix_bytes,
         &resource.device_matrices);
       if (!status.ok()) {
         return status;
       }
       status = EnsureAllocation(
-        gpu, resource.costs.size() * sizeof(float),
+        gpu, stage_plan.cost_bytes,
         &resource.device_costs);
       if (!status.ok()) {
         return status;
       }
-
-      const size_t coefficient_count =
-        GetAcStrategyInfo(resource.staged.strategy)->coefficient_count();
-      size_t packed_elements = 0;
-      size_t packed_bytes = 0;
-      size_t rate_bytes = 0;
-      if (!TryMultiply(resource.candidates.size(), 3, &packed_elements) ||
-          !TryMultiply(packed_elements, coefficient_count, &packed_elements) ||
-          !TryMultiply(packed_elements, sizeof(float), &packed_bytes) ||
-          !TryMultiply(resource.candidates.size(),
-            3 * kAcStrategyRateScratchBytesPerChannel,
-            &rate_bytes)) {
-        return Status::InvalidArgument(
-          "GPU AC-strategy search scratch size overflows");
-      }
-      maximum_packed_bytes = std::max(maximum_packed_bytes, packed_bytes);
-      maximum_rate_bytes = std::max(maximum_rate_bytes, rate_bytes);
     }
 
-    status = EnsureAllocation(gpu, maximum_packed_bytes, &state.scratch_a);
+    status = EnsureAllocation(gpu, storage_plan.maximum_packed_bytes, &state.scratch_a);
     if (!status.ok()) {
       return status;
     }
-    status = EnsureAllocation(gpu, maximum_packed_bytes, &state.scratch_b);
+    status = EnsureAllocation(gpu, storage_plan.maximum_packed_bytes, &state.scratch_b);
     if (!status.ok()) {
       return status;
     }
-    status = EnsureAllocation(gpu, maximum_rate_bytes, &state.rate_scratch);
+    status = EnsureAllocation(gpu, storage_plan.maximum_rate_bytes, &state.rate_scratch);
     if (!status.ok()) {
       return status;
     }

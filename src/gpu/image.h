@@ -72,6 +72,13 @@ struct DeviceImage3View {
   }
 };
 
+/// Computes the minimal containing byte size without a buffer/backend. Shared
+/// by pre-allocation planning and validation of actual device views. Failure
+/// leaves the output unchanged; row padding after the final row is not included.
+[[nodiscard]] Status ComputeDevicePlaneSizeBytes(
+  DeviceElementType element_type, Extent2D extent, size_t row_stride,
+  size_t* size_bytes);
+
 /// Validates plane geometry and returns the minimal containing byte range.
 [[nodiscard]] Status ComputeDevicePlaneRange(
   ConstDevicePlaneView view,

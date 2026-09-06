@@ -7,6 +7,31 @@
 
 namespace gjxl {
 
+Status ComputeDevicePlaneSizeBytes(
+  DeviceElementType element_type, Extent2D extent, size_t row_stride,
+  size_t* size_bytes) {
+  if (size_bytes == nullptr || extent.empty() || row_stride < extent.width) {
+    return Status::InvalidArgument("Device plane size output or geometry is invalid");
+  }
+  const size_t element_size = DeviceElementSize(element_type);
+  if (element_size == 0) {
+    return Status::InvalidArgument("Device plane element type is invalid");
+  }
+  if (extent.height - 1 > std::numeric_limits<size_t>::max() / row_stride) {
+    return Status::InvalidArgument("Device plane row geometry overflows");
+  }
+  const size_t last_row = (extent.height - 1) * row_stride;
+  if (extent.width > std::numeric_limits<size_t>::max() - last_row) {
+    return Status::InvalidArgument("Device plane element range overflows");
+  }
+  const size_t count = last_row + extent.width;
+  if (count > std::numeric_limits<size_t>::max() / element_size) {
+    return Status::InvalidArgument("Device plane byte range overflows");
+  }
+  *size_bytes = count * element_size;
+  return Status::Ok();
+}
+
 Status ComputeDevicePlaneRange(
   ConstDevicePlaneView view,
   BackendId expected_backend,
@@ -31,23 +56,10 @@ Status ComputeDevicePlaneRange(
     return Status::InvalidArgument(
       "Device plane type or offset alignment is invalid");
   }
-  if (view.extent.height - 1 >
-      std::numeric_limits<size_t>::max() / view.row_stride) {
-    return Status::InvalidArgument(
-      "Device plane row geometry overflows");
-  }
-  const size_t last_row = (view.extent.height - 1) * view.row_stride;
-  if (view.extent.width >
-      std::numeric_limits<size_t>::max() - last_row) {
-    return Status::InvalidArgument(
-      "Device plane element range overflows");
-  }
-  const size_t element_count = last_row + view.extent.width;
-  if (element_count > std::numeric_limits<size_t>::max() / element_size) {
-    return Status::InvalidArgument(
-      "Device plane byte range overflows");
-  }
-  const size_t size_bytes = element_count * element_size;
+  size_t size_bytes = 0;
+  const Status status = ComputeDevicePlaneSizeBytes(
+    view.element_type, view.extent, view.row_stride, &size_bytes);
+  if (!status.ok()) return status;
   if (view.offset_bytes > view.buffer->size_bytes() ||
       size_bytes > view.buffer->size_bytes() - view.offset_bytes) {
     return Status::InvalidArgument(
