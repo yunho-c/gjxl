@@ -132,6 +132,12 @@ Acceptance:
 Depends on milestone 3's integrated ownership model. Start with a small explicit
 set of resource classes and reservations, not a general graph runtime.
 
+The [resource implementation record](resident-resources.md) contains the
+source-backed ownership inventory, integration decisions, and tested primitive
+for reservation/allocation lifetimes and FIFO admission. Production allocation
+coverage and workflow enforcement are still pending; the primitive alone does
+not satisfy this milestone.
+
 Deliverables:
 
 - A source-backed inventory of allocation owners, capacities, aliases, last

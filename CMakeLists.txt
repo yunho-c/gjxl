@@ -1535,6 +1535,24 @@ if(GJXL_BUILD_TESTS)
   )
 
   add_executable(
+    gjxl_resource_budget_test
+    tests/resource_budget_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_resource_budget_test
+    PRIVATE
+      gjxl_core
+  )
+
+  add_test(
+    NAME resource_budget
+    COMMAND gjxl_resource_budget_test
+  )
+
+  set_tests_properties(resource_budget PROPERTIES TIMEOUT 30)
+
+  add_executable(
     gjxl_ac_strategy_grid_test
     tests/ac_strategy_grid_test.cpp
   )
