@@ -862,7 +862,28 @@ control modes; guarded/nondefault-stream checks and four scoped GPU
 sanitizers pass. A missing test-fixture initialization dependency caused two
 invalid timing attempts and was corrected without weakening equality or
 changing kernels. All 171 existing GPU bodies remain identical. Production
-stays at S58; the diagnostic gains are not advertised as a release speedup.
+stays at S58 at that checkpoint; the diagnostic gains are not advertised as
+a release speedup.
+
+[S60](cuda-optimization-s1.md#fused-reference-erosion-and-l2final-masking-s60)
+fuses reference-mask erosion with L2/final masking, removing four launches
+per profiled encode and one intermediate float-plane write/read per
+difference evaluation. Isolated combined work improves 14.9-19.7%, winning
+all 432 pairs. Explicit rounding intrinsics preserve the original sm86
+contraction tree after an initial one-ULP failure. The release kernel matches
+the measured body exactly; all 171 existing GPU bodies remain unchanged.
+Plane 26 is still used for psycho work, so the 27-plane allocation remains.
+Public API, frame ABI, and quality policy are unchanged.
+
+All 71 CUDA / 50 CPU tests, five host ASan targets, seven scoped GPU sanitizer
+checks, 432 new three-reuse erosion fixtures, and 58 byte-identical decoded
+image pairs pass. Whole-workflow evidence remains mixed: warm public changes
+are -2.9% / +1.5% / +5.5% at 4K / 1080p / Flower; true cold changes are
++2.7% / +1.6% / -1.9%. Two initially cold-labeled cohorts actually used
+warmups due to scalar PowerShell argument splatting; both remain recorded as
+warm repeats, and corrected cold runs are separate. S60 is retained for its
+consistent targeted GPU gain, not as a universal encoder speedup. Remaining
+workflow variability and cross-device qualification are still open.
 
 ### Math and kernel strategy
 

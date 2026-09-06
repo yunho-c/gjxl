@@ -27,12 +27,11 @@ constexpr unsigned int kPsychoWork = 24;
 constexpr unsigned int kMaskInput = 23;
 constexpr unsigned int kMaskIntermediate = 24;
 constexpr unsigned int kReferenceMask = 25;
-constexpr unsigned int kFuzzyMask = 26;
 // The separable distorted-mask blur may overwrite its own input. Its
 // horizontal intermediate is dead before the cropped/subscale map is written.
 constexpr unsigned int kDistortedMask = kMaskInput;
 constexpr unsigned int kFinalStaging = kMaskIntermediate;
-static_assert(kFuzzyMask + 1 == kCudaButteraugliWorkingPlaneCount);
+static_assert(kPsychoWork + 3 == kCudaButteraugliWorkingPlaneCount);
 
 struct PlaneParams {
   uint32_t width;
@@ -1319,6 +1318,34 @@ __global__ void FuzzyErosionKernel(const float* input, float* output,
       0.45f * minimum0 + 0.3f * minimum1 + 0.25f * minimum2;
 }
 
+__device__ float FuzzyErosionValue(const float* input, PlaneParams params,
+                                   uint32_t x0, uint32_t y0) {
+  constexpr int kStep = 3;
+  const int x = static_cast<int>(x0);
+  const int y = static_cast<int>(y0);
+  float minimum0 = input[static_cast<size_t>(y0) * params.input_stride + x0];
+  float minimum1 = 2.0f * minimum0;
+  float minimum2 = minimum1;
+  for (int dy = -kStep; dy <= kStep; dy += kStep) {
+    for (int dx = -kStep; dx <= kStep; dx += kStep) {
+      if (dx == 0 && dy == 0) continue;
+      const int sx = x + dx;
+      const int sy = y + dy;
+      if (sx >= 0 && sy >= 0 && sx < static_cast<int>(params.width) &&
+          sy < static_cast<int>(params.height)) {
+        StoreMin3(input[static_cast<size_t>(sy) * params.input_stride +
+                        static_cast<uint32_t>(sx)],
+                  &minimum0, &minimum1, &minimum2);
+      }
+    }
+  }
+  // Preserve the stored erosion result's contraction and rounding before
+  // applying MaskY/MaskDcY. Source reassociation can round the other product.
+  const float weighted1 = __fmul_rn(0.3f, minimum1);
+  const float weighted01 = __fmaf_rn(0.45f, minimum0, weighted1);
+  return __fmaf_rn(0.25f, minimum2, weighted01);
+}
+
 __device__ float MaskY(float delta) {
   constexpr float kGlobalScale = 1.0f / (17.83f * 0.79079917404f);
   const float value =
@@ -1411,6 +1438,59 @@ __global__ void L2FinalKernel(DifferencePlan difference_plan, FinalPlan plan) {
   const float ac_y = ac1 + 10.0f * difference * difference;
   const float mask_value = MaskY(plan.mask[index]);
   const float dc_mask_value = MaskDcY(plan.mask[index]);
+  const float masked_dc = dc0 * params.x_multiplier * dc_mask_value +
+                          dc1 * dc_mask_value + dc2 * dc_mask_value;
+  const float masked_ac = ac0 * params.x_multiplier * mask_value +
+                          ac_y * mask_value + ac2 * mask_value;
+  const float result = sqrtf(masked_dc + masked_ac);
+  plan.output[static_cast<size_t>(y) * params.output_stride + x] =
+      isfinite(result) && result >= 0.0f ? result : NAN;
+}
+
+// Reference-mask erosion has no consumer other than final masking.
+__global__ void ErosionL2FinalKernel(DifferencePlan difference_plan,
+                                     FinalPlan plan) {
+  const FinalParams params = plan.params;
+  const DifferenceParams difference_params = difference_plan.params;
+  const size_t flat =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  if (flat >= count) return;
+  const uint32_t y = static_cast<uint32_t>(flat / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(flat - static_cast<size_t>(y) * params.width);
+  const size_t r = static_cast<size_t>(y) * difference_params.reference_stride + x;
+  const size_t d = static_cast<size_t>(y) * difference_params.distorted_stride + x;
+  const size_t index = static_cast<size_t>(y) * params.stride + x;
+  const float inverse_asymmetry = 1.0f / difference_params.asymmetry;
+  const float total0 = L2Asymmetric(
+      difference_plan.reference[6][r], difference_plan.distorted[6][d],
+      400.0f * difference_params.asymmetry, 400.0f * inverse_asymmetry,
+      difference_plan.ac[0][index]);
+  const float total1 = L2Asymmetric(
+      difference_plan.reference[7][r], difference_plan.distorted[7][d],
+      1.50815703118f * difference_params.asymmetry,
+      1.50815703118f * inverse_asymmetry, difference_plan.ac[1][index]);
+  const float md0 = difference_plan.reference[3][r] - difference_plan.distorted[3][d];
+  const float md1 = difference_plan.reference[4][r] - difference_plan.distorted[4][d];
+  const float md2 = difference_plan.reference[5][r] - difference_plan.distorted[5][d];
+  const float ac0 = UnfusedMultiplyAdd(md0 * md0, 2150.0f, total0);
+  const float ac1 = UnfusedMultiplyAdd(md1 * md1, 10.6195433239f, total1);
+  const float ac2 = md2 * md2 * 16.2176043152f;
+  const float ld0 = difference_plan.reference[0][r] - difference_plan.distorted[0][d];
+  const float ld1 = difference_plan.reference[1][r] - difference_plan.distorted[1][d];
+  const float ld2 = difference_plan.reference[2][r] - difference_plan.distorted[2][d];
+  const float dc0 = ld0 * ld0 * 29.2353797994f;
+  const float dc1 = ld1 * ld1 * 0.844626970982f;
+  const float dc2 = ld2 * ld2 * 0.703646627719f;
+  const float difference =
+      plan.mask_reference[index] - plan.mask_distorted[index];
+  const float ac_y = ac1 + 10.0f * difference * difference;
+  const PlaneParams erosion_params{params.width, params.height, params.stride,
+                                    params.stride};
+  const float eroded = FuzzyErosionValue(plan.mask_reference, erosion_params, x, y);
+  const float mask_value = MaskY(eroded);
+  const float dc_mask_value = MaskDcY(eroded);
   const float masked_dc = dc0 * params.x_multiplier * dc_mask_value +
                           dc1 * dc_mask_value + dc2 * dc_mask_value;
   const float masked_ac = ac0 * params.x_multiplier * mask_value +
@@ -1685,7 +1765,7 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
     uint32_t reference_stride,
     const std::array<const float*, kCudaButteraugliPsychoPlaneCount>& distorted,
     uint32_t distorted_stride, const float* cached_reference_mask,
-    uint32_t cached_mask_stride, float* output, uint32_t output_stride,
+    float* output, uint32_t output_stride,
     uint32_t width, uint32_t height, cudaStream_t stream) {
   constexpr double kWeights[6] = {37.0819870399, 8246.75321353, 18.7237414387,
                                   6923.99476109, 1.10039032555, 173.5};
@@ -1737,7 +1817,6 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
                        plan.hf_asymmetry};
   cudaError_t error = cudaSuccess;
   const float* reference_mask = cached_reference_mask;
-  uint32_t reference_mask_stride = cached_mask_stride;
   if (reference_mask == nullptr) {
     error =
         LaunchMaskPrecompute(reference, reference_stride, plan.planes[kMaskInput],
@@ -1749,15 +1828,7 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
                        plan.working_width, width, height, stream);
     if (error != cudaSuccess) return error;
     reference_mask = plan.planes[kReferenceMask];
-    reference_mask_stride = plan.working_width;
   }
-
-  const PlaneParams fuzzy{width, height, reference_mask_stride,
-                          plan.working_width};
-  FuzzyErosionKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
-      reference_mask, plan.planes[kFuzzyMask], fuzzy);
-  error = CheckLaunch();
-  if (error != cudaSuccess) return error;
 
   error = LaunchMaskPrecompute(distorted, distorted_stride, plan.planes[kMaskInput],
                                plan.working_width, width, height, stream);
@@ -1772,7 +1843,6 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
   for (size_t channel = 0; channel < 2; ++channel) {
     final.ac[channel] = plan.planes[kAc + channel];
   }
-  final.mask = plan.planes[kFuzzyMask];
   final.mask_reference = reference_mask;
   final.mask_distorted = plan.planes[kDistortedMask];
   final.output = output;
@@ -1781,7 +1851,7 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
   // Only AC[0:2] is consumed by the fused pass. Leave unused AC/DC pointers
   // null: their former slots now hold masks. The horizontal mask intermediate
   // is no longer read, so it can also hold the cropped/subscale output map.
-  L2FinalKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+  ErosionL2FinalKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
       difference, final);
   return CheckLaunch();
 }
@@ -1917,7 +1987,8 @@ cudaError_t LaunchLowMediumImpl(const CudaButteraugliLowMediumPlan& plan,
 }
 
 cudaError_t LaunchL2FinalForTest(const CudaButteraugliL2FinalPlan& plan,
-                               bool reference, cudaStream_t stream) {
+                               bool reference, cudaStream_t stream,
+                               bool erode_reference = false) {
   if (plan.width == 0 || plan.height == 0) return cudaSuccess;
   if (plan.reference_stride < plan.width || plan.distorted_stride < plan.width ||
       plan.work_stride < plan.width || plan.output_stride < plan.width)
@@ -1949,6 +2020,9 @@ cudaError_t LaunchL2FinalForTest(const CudaButteraugliL2FinalPlan& plan,
     if (error != cudaSuccess) return error;
     FinalKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
         final);
+  } else if (erode_reference) {
+    ErosionL2FinalKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
+        difference, final);
   } else {
     L2FinalKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(
         difference, final);
@@ -1985,6 +2059,26 @@ cudaError_t LaunchCudaButteraugliL2Final(
 cudaError_t LaunchCudaButteraugliL2FinalReference(
     const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream) {
   return LaunchL2FinalForTest(plan, true, stream);
+}
+
+cudaError_t LaunchCudaButteraugliErosionFinalForTesting(
+    const CudaButteraugliL2FinalPlan& plan, float* erosion_scratch,
+    bool reference, cudaStream_t stream) {
+  if (plan.width == 0 || plan.height == 0) return cudaSuccess;
+  if (plan.reference_stride < plan.width || plan.distorted_stride < plan.width ||
+      plan.work_stride < plan.width || plan.output_stride < plan.width)
+    return cudaErrorInvalidValue;
+  if (!reference) return LaunchL2FinalForTest(plan, false, stream, true);
+  if (erosion_scratch == nullptr) return cudaErrorInvalidValue;
+  const PlaneParams params{plan.width, plan.height, plan.work_stride,
+                            plan.work_stride};
+  FuzzyErosionKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0,
+                       stream>>>(plan.mask_reference, erosion_scratch, params);
+  const cudaError_t error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+  auto separate = plan;
+  separate.mask = erosion_scratch;
+  return LaunchL2FinalForTest(separate, false, stream);
 }
 
 cudaError_t LaunchCudaButteraugliBlurAndSplit(
@@ -2169,7 +2263,7 @@ cudaError_t LaunchCudaButteraugliCompare(
     if (error != cudaSuccess) return error;
     error = LaunchDifference(plan, reference_main, plan.working_width,
                              distorted_main, plan.working_width,
-                             plan.planes[20], plan.working_width,
+                             plan.planes[20],
                              plan.planes[kFinalStaging], plan.working_width,
                              plan.working_width, plan.working_height, stream);
     if (error != cudaSuccess) return error;
@@ -2186,7 +2280,7 @@ cudaError_t LaunchCudaButteraugliCompare(
     if (error != cudaSuccess) return error;
     error = LaunchDifference(plan, reference_main, plan.working_width,
                              distorted_main, plan.working_width,
-                             plan.planes[20], plan.working_width, distance_map,
+                             plan.planes[20], distance_map,
                              distance_stride, plan.width, plan.height, stream);
     if (error != cudaSuccess) return error;
     if (plan.multiscale != 0) {
@@ -2206,7 +2300,7 @@ cudaError_t LaunchCudaButteraugliCompare(
       if (error != cudaSuccess) return error;
       error = LaunchDifference(
           plan, ConstPsycho(plan.reference_sub), plan.sub_width, distorted_main,
-          plan.working_width, nullptr, 0, plan.planes[kFinalStaging],
+          plan.working_width, nullptr, plan.planes[kFinalStaging],
           plan.working_width, plan.sub_width, plan.sub_height, stream);
       if (error != cudaSuccess) return error;
       const ComposeParams compose{plan.width, plan.height, distance_stride,

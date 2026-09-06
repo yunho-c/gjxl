@@ -18,7 +18,8 @@
   hoisted histogram log-table access, borrowed prepared ANS populations,
   bounded narrow coefficient-order counters with portable SIMD counting,
   multi-row Malta halo reuse, joint-channel horizontal33 convolution,
-  direct DC context lookup, and success-path DC residual emission
+  direct DC context lookup, success-path DC residual emission,
+  inline validated ANS token scanning, and fused erosion/L2/final masking
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -32,7 +33,29 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S56 against S55
+below supersede them. The latest implemented checkpoint, S60 against S58
+production (`bf4968b`; S59 is investigation-only), fuses reference-mask erosion
+with L2/final masking. It removes four launches per profiled encode and one
+intermediate plane write/read per difference evaluation. Isolated combined
+work improves 14.9-19.7%, winning all 432 pairs, and the release kernel matches
+the measured body exactly. Warm public whole-encode changes are -2.9% / +1.5% /
++5.5% at 4K / 1080p / Flower; true cold changes are +2.7% / +1.6% / -1.9%.
+Slower cohorts remain recorded. All 71 CUDA / 50 CPU tests, five host ASan
+targets, seven scoped GPU sanitizer checks, and 58 byte-identical decoded
+image pairs pass. The 27-plane allocation and public/private frame ABI remain
+unchanged. Two initially cold-labeled cohorts actually used warmups; they are
+preserved as warm repeats, and corrected cold runs are separate. This is a
+targeted GPU improvement, not a universal wall-time speedup or a maxed-out
+implementation. See [S60](#fused-reference-erosion-and-l2final-masking-s60).
+
+S58 isolates the validated ANS token scan so conversion actually inlines;
+warm 4K histogram work improves 14.0%, but whole-workflow and cold results
+remain mixed. S59's per-channel Malta fusion is not retained because its
+4K local gain is small and workflow evidence is inconsistent. See
+[S58](#small-token-scanned-ans-histogram-routine-s58) and
+[S59](#per-channel-malta-fusion-investigation-s59-not-retained).
+
+The preceding implemented checkpoint, S56 against S55
 (`81266d7`), replaces a 34-run DC context search with an exact compile-time
 lookup and removes per-value success-status construction. Final warm release
 DC tokenization improves 34.4% / 31.5% / 42.1% at 4K / 1080p / Flower,
@@ -9535,6 +9558,247 @@ The v1 diagnostic probe requires `S59_SYNC_FIXTURE=1` for valid reruns;
 its preserved original build script describes the failed unsynchronized
 attempt. V2/v3 synchronize fixture initialization unconditionally. Do not
 rerun any of these scripts in place over frozen outputs.
+
+## Fused reference erosion and L2/final masking (S60)
+
+Date: 2026-09-06. Parent tree: `76c962b`, with production still at S58
+(`bf4968b`). Qualification uses the same RTX 3060 Laptop / CUDA 11.8 / sm86
+Release configuration. This checkpoint retains the original erosion
+selection logic inside a new fused kernel; the separately tested
+conditional-selection rewrite is not adopted.
+
+### Remove the sole intermediate consumer
+
+`LaunchDifference` previously computed reference-mask erosion into plane 26,
+then launched `L2FinalKernel`, whose masking was its sole consumer. The new
+`ErosionL2FinalKernel` computes the same erosion value locally before
+`MaskY`/`MaskDcY`. Original L2 arithmetic, asymmetry, raw-mask activity
+difference, final square root, and invalid-result behavior are unchanged.
+This removes one launch and one float-plane write/read per difference
+evaluation: eight nominal bytes per output pixel, not a measured DRAM-byte
+claim. Default profiled encodes evaluate four differences, removing four
+launches overall. No transfers, scheduling policy, or quality decisions change.
+
+The old `StoreMin3`, `FuzzyErosionKernel`, and `L2FinalKernel` bodies remain
+unchanged as independent conformance oracles. The new helper keeps strict
+comparisons and neighborhood traversal, including negative, unsorted,
+non-finite, tied, and signed-zero inputs. It does not replace the operation
+with generic min/max. The private redundant cached-mask-stride argument is
+removed: every cached call already uses the working stride, also required
+by the raw-mask activity calculation. Main, expanded, and subsampled paths
+retain their existing geometry and output strides.
+
+Plane 26 is no longer an erosion output, but it remains the third horizontal
+33-tap psycho-work plane. The 27-plane allocation must therefore remain;
+there is no capacity/VRAM-reduction claim. Public API, frame ABI, and prepared
+plan layout are unchanged. The private test entry accepts a disjoint erosion
+scratch plane for the reference implementation; the fused branch ignores
+that scratch and the old eroded-mask pointer. Output must not alias inputs
+or neighboring reference-mask values.
+
+### Rounding failure, corrected candidates, and native code
+
+The initial exactness gate fails before timing at 1x19, tight stride,
+positive-random mask, asymmetry 0.6. Three erosion values differ by one ULP;
+for example offset 9 is `0x40954561` versus `0x40954562`. Native inspection
+shows a contraction-tree change, not a selection-logic error: the retained
+kernel first rounds `0.3 * minimum1`, while the new source expression first
+rounds `0.45 * minimum0`. Equivalent-looking FP32 expressions are not enough.
+The failed sources, objects, executable, guard output, and disassembly remain
+available; no timing from that version is used.
+
+V2 explicitly matches the retained sm86 contraction tree:
+
+```cpp
+const float weighted1 = __fmul_rn(0.3f, minimum1);
+const float weighted01 = __fmaf_rn(0.45f, minimum0, weighted1);
+return __fmaf_rn(0.25f, minimum2, weighted01);
+```
+
+There is no tolerance relaxation or global fast-math change. Other toolkits
+and architectures still require qualification; this native comparison is
+for the measured sm86 build. The diagnostic executable offers four fixed
+modes: original separate passes, conditional-selection erosion with separate
+L2/final, fused original selection, and fused conditional selection. The
+environment switch exists only in the ignored diagnostic sources.
+
+Corrected guards pass 2,592 candidate comparisons across 12 tiny/edge shapes,
+tight/padded strides, six mask patterns, three asymmetries, three candidate
+modes, and two reuse rounds. Input guards and output bits are checked; the
+separate erosion result is also checked where materialized. Default-stream
+fixture copies are explicitly completed before nonblocking-stream work.
+Four scoped diagnostic sanitizer tools pass 48 comparisons apiece, with
+zero errors or race hazards.
+
+All 171 preexisting GPU bodies are unchanged in both diagnostic and release
+binaries. The diagnostic has three new bodies: standalone selection uses
+24 registers, fused original uses 40, and fused selection uses 42. All have
+zero stack, local, and shared storage. Release has 172 bodies, and its sole
+new kernel is instruction-for-instruction identical to the measured fused
+original-selection body. The first native-audit script had an overescaped
+regular expression; its failed output is retained. Correcting the parser
+and reusing the original dumps passes the audit without changing kernels.
+
+### Isolated and instrumented measurements
+
+The isolated screen contains 18 cases: 3840x2160, 1920x1080, and 510x532;
+zero, positive-random, and smooth masks; tight and padded strides. Combined
+timings use every permutation of four modes, with three calls per event;
+standalone erosion uses 12 alternating pairs. All 2,160 timing rows retain
+exact-output checks outside the event interval. Every observation is kept.
+The following ranges span per-case median paired changes, not pooled times;
+negative means faster.
+
+| Size | Fused original erosion + L2/final | Fused selection + L2/final | Standalone selection erosion |
+| --- | ---: | ---: | ---: |
+| 4K | -14.87% to -17.62% | -14.97% to -17.83% | +11.23% to +36.68% |
+| 1080p | -15.33% to -19.71% | -15.38% to -20.05% | +14.50% to +34.86% |
+| 510x532 | -17.07% to -19.64% | -18.29% to -20.74% | -2.76% to +25.55% |
+
+Chosen fused-original mode wins all 24 paired observations in all 18 cases:
+432/432. Separate selection plus unchanged L2/final regresses 0.77-4.26%
+across the screen. Fused selection is similar, but adds a second numerical
+implementation and two registers without establishing a compelling advantage.
+No input-dependent selection or geometry heuristic is added.
+
+Sixteen same-executable Nsight traces provide two AB/BA pairs for each warm
+workload and two cold Flower pairs. The targeted eight launches become four.
+Total kernel counts fall 395 to 391 at 4K/Flower and 382 to 378 at 1080p.
+
+| Instrumented cohort | Targeted GPU time, pair 1 / pair 2 | Total GPU time, pair 1 / pair 2 |
+| --- | ---: | ---: |
+| Warm 4K | -26.29% / -28.61% | +7.38% / -5.04% |
+| Warm 1080p | -20.64% / -20.62% | +3.93% / +0.19% |
+| Warm Flower | -19.99% / -20.26% | -1.11% / -1.21% |
+| Cold Flower | -20.26% / -19.50% | -1.08% / -1.02% |
+
+The cold Flower follow-up investigates its wall regression: targeted launch
+API time also falls 64.21% / 62.55%, including first-use calls. Thus these
+instrumented traces do not explain the wall regression as extra target GPU
+or launch-API work. They also do not diagnose the remaining cause. Slower
+total-GPU traces remain recorded, and profiler timing is not substituted for
+release wall timing.
+
+### Release qualification
+
+All 71 CUDA tests and 50 CPU-only tests pass, as do five host ASan targets:
+DC group, entropy, coefficient order, codestream encoder, and public workflow.
+The existing 360 guarded L2/final cases with three reuse stages remain intact.
+The same test adds 432 erosion/final fixtures, each with three nondefault-stream
+reuse stages (1,296 output comparisons). Twelve shapes, two stride modes, six
+raw-mask patterns, and three asymmetries cover signed zero, signed random,
+gradients, arbitrary float bit patterns, infinities, NaNs, and subnormals.
+Reuse changes the raw mask, and every input and padding guard is checked.
+Zero dimensions, four invalid stride fields in both branches, null unused
+inputs, and missing reference scratch are covered.
+
+Four release sanitizer tools exercise the eight-case erosion subset, each
+with three reuse stages; memcheck, initcheck, and synccheck also run full AQ.
+All report zero errors; racecheck reports zero hazards, and full-AQ memcheck
+reports zero leaks with stream-ordered race tracking enabled. Full-AQ
+racecheck is not repeated. The sanitizer logs retain the flushed eight-case
+geometry marker but omit the final buffered summary line; a separate direct
+run and the full CTest log retain that summary. No missing line is treated
+as an additional sanitizer result.
+
+The diagnostic full-encode gate produces 46 baseline/fused byte-identical
+pairs matching frozen S58 hashes. Release qualification freshly encodes,
+decodes with pinned libjxl `e8ff09762481785938d8e4e01333ed3917571161`, and
+measures 58 parent/candidate image pairs: 46 primary, six high-density,
+and six maximum-compression. All codestream bytes, dimensions, and decoded
+Butteraugli scores match; size/score ratios are exactly 1.0. These checks
+include encoding-only and final-score paths. Timing runs check encoded size
+only; their separate byte/decoded-quality gate is not inferred from size.
+
+### Whole workflow, mislabeled cohorts, and retention
+
+Every cohort uses seven alternating parent/candidate pairs at each size.
+Same-executable controls use three warmups/seven samples, or zero/one for
+cold. Release phase/public cohorts use three/five when warm and zero/one
+when cold. Public benchmarks expose seven timing fields; the freshly rebuilt
+S60 phase probe exposes 41. No pre-S50 frame-ABI probe object is reused.
+Medians below are of paired percentage changes; the whole column includes
+the number of faster candidate pairs. They are not ratios of separate medians.
+
+| Cohort | Size | Quantization pipeline | Codestream | Whole encode (wins/7) |
+| --- | --- | ---: | ---: | ---: |
+| Control warm | 4K | -1.21% | -5.31% | -1.55% (4) |
+| Control warm | 1080p | -1.53% | -8.14% | -4.45% (4) |
+| Control warm | Flower | -2.36% | +0.21% | -0.92% (4) |
+| Control cold | 4K | -0.38% | +2.06% | -0.49% (4) |
+| Control cold | 1080p | -2.94% | -2.14% | +0.09% (3) |
+| Control cold | Flower | +3.89% | +10.94% | +5.02% (1) |
+| Release phase warm | 4K | -1.69% | +1.12% | -1.88% (4) |
+| Release phase warm | 1080p | -2.34% | +0.88% | -1.77% (4) |
+| Release phase warm | Flower | +2.44% | +4.73% | +2.40% (2) |
+| Release public warm | 4K | -1.95% | -7.02% | -2.94% (5) |
+| Release public warm | 1080p | +3.90% | -0.51% | +1.48% (3) |
+| Release public warm | Flower | -1.60% | +4.44% | +5.46% (1) |
+| Release phase true cold | 4K | -3.50% | -0.72% | -1.93% (4) |
+| Release phase true cold | 1080p | -1.51% | +0.62% | -1.39% (5) |
+| Release phase true cold | Flower | +2.08% | +5.89% | +6.32% (1) |
+| Release public true cold | 4K | +2.79% | +5.03% | +2.71% (3) |
+| Release public true cold | 1080p | -0.86% | +2.62% | +1.61% (3) |
+| Release public true cold | Flower | -0.81% | -2.98% | -1.85% (4) |
+
+The evidence audit catches a PowerShell harness error before freezing:
+assigning a one-item array through an `if` expression produces a scalar
+string, and splatting it passes `c`, `o`, `l`, `d` as four arguments. The
+original Python driver silently treats that as warm. Consequently the first
+`s60_release_{phase,public}_cold` files are **warm repeats, not cold evidence**.
+Their recorded commands, metadata (`cold: false`), samples, and results remain
+unchanged. A V2 driver validates arguments strictly, and explicit `cold`
+invocations produce separate `*_cold_v2` artifacts. Diagnostic control and
+profiler cold runs already had correct arguments and are unaffected.
+
+The mislabeled warm-repeat results are retained separately, including their
+largest regressions; correcting the labels does not discard observations:
+
+| Actual warm repeat | Size | Quantization pipeline | Codestream | Whole encode (wins/7) |
+| --- | --- | ---: | ---: | ---: |
+| Phase, old cold label | 4K | -1.29% | -8.52% | -2.31% (6) |
+| Phase, old cold label | 1080p | +1.20% | -0.88% | +0.65% (3) |
+| Phase, old cold label | Flower | +0.47% | -0.19% | +0.85% (2) |
+| Public, old cold label | 4K | -0.40% | +5.54% | +0.37% (3) |
+| Public, old cold label | 1080p | -3.47% | -6.28% | -4.84% (5) |
+| Public, old cold label | Flower | +6.70% | +8.69% | +10.62% (2) |
+
+No favorable cohort erases a slower one. Cold-control Flower quantization
+loses all seven pairs. Warm-public Flower whole changes range -6.01% to
++26.15%; true-cold public 4K spans -5.42% to +11.82%. Unchanged CPU codestream
+work also varies substantially. The repeatable isolated reduction and exact
+native match support retention as a targeted GPU optimization, not a stable
+whole-encoder speedup. Unlike S59, its isolated 4K gain is substantial, with
+no shared storage or new heuristic. Workflow variability remains unresolved.
+
+Batch checks compare this release against its own sequential path, not S58.
+Median paired speedups at batch sizes 1/2/4 are 0.932x / 1.190x / 1.389x for
+1080p fully-resident and 0.990x / 1.507x / 1.941x for maximum-throughput.
+4K fully-resident at sizes 1/2 gives 0.948x / 1.007x. All three-sample runs
+complete and retain their byte checks; these are concurrency qualification,
+not cross-version speedup estimates.
+
+The initial release measurements start at 57 C / P8 / 210 MHz / 15.30 W,
+with limiting flags inactive, and end at 68 C / P3 / 1282 MHz / 33.81 W,
+with thermal-slowdown and power-cap flags active. Corrected cold runs start
+at 55 C / P8 / 210 MHz / 14.61 W, inactive, and end at 60 C / P3 / 1282 MHz /
+24.47 W, active. These boundary observations are not a causal diagnosis or
+a normalization. Builds, sanitizers, profiling, native dumps, and performance
+run serially. No power, clock, cooling, priority, security, or service settings
+change. No admin/firewall prompt or permission failure is reported by these
+runs; the user's suspected explanation for the earlier long runtime remains
+unconfirmed. The argument-labeling failure is unrelated to firewall access.
+
+The ignored `build-cuda-ninja/profiles/s60_*` bundle retains both numerical
+generations, the failed native parser, all eight workflow cohorts with raw
+fields, 16 traces, correctness/native/sanitizer evidence, and batch results.
+`s60_validate.py --frozen` rechecks scoped source changes, paired arithmetic,
+profile SQL correlations, decoded-image hashes, coverage, and manifests.
+Thirty-seven release binaries/libraries and five source/doc snapshots are
+frozen. S58/S59 evidence remains immutable and revalidates. Reproduction must
+use new output prefixes, strict argument parsing, and the actual commands
+inside JSON; do not rerun frozen producers in place. Larger convolution work
+and complete-workflow variability remain open. The optimization goal is active.
 
 ## Work that should not lead the next cycle
 

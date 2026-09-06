@@ -169,6 +169,15 @@ struct CudaButteraugliL2FinalPlan {
 [[nodiscard]] cudaError_t LaunchCudaButteraugliL2FinalReference(
     const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream);
 
+// Internal conformance entry for reference-mask erosion plus L2/final masking.
+// The plan's mask pointer is ignored. The separate reference writes the
+// caller's disjoint erosion_scratch plane (work_stride); the fused entry
+// leaves all inputs untouched and permits null scratch. Output must not
+// overlap any input, including the reference mask's neighboring pixels.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliErosionFinalForTesting(
+    const CudaButteraugliL2FinalPlan& plan, float* erosion_scratch,
+    bool reference, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaButteraugliPrepare(
     const CudaButteraugliPlan& plan, cudaStream_t stream);
 

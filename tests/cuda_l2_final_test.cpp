@@ -166,6 +166,149 @@ void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern, floa
     }
   }
 }
+struct NonblockingStream {
+  cudaStream_t value = nullptr;
+  NonblockingStream() {
+    CheckCuda(cudaStreamCreateWithFlags(&value, cudaStreamNonBlocking));
+  }
+  ~NonblockingStream() { (void)cudaStreamDestroy(value); }
+};
+
+Case ErosionCase(uint32_t width, uint32_t height, bool padded,
+                 unsigned pattern, float asymmetry) {
+  Case c(width, height, padded, pattern % 5, asymmetry);
+  c.plan.x_multiplier = pattern % 3 == 0 ? 0.0f : pattern % 3 == 1 ? 1.0f : 3.7f;
+  std::mt19937 rng(58321u + width + 31 * height + pattern);
+  const std::array<float, 11> special{
+      0.0f, -0.0f, std::numeric_limits<float>::min(),
+      -std::numeric_limits<float>::min(), std::numeric_limits<float>::denorm_min(),
+      -std::numeric_limits<float>::denorm_min(), std::numeric_limits<float>::max(),
+      -std::numeric_limits<float>::max(), std::numeric_limits<float>::infinity(),
+      -std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()};
+  for (uint32_t y = 0; y < height; ++y) {
+    for (uint32_t x = 0; x < width; ++x) {
+      float& value = c.planes[23][Case::Offset(23) +
+          static_cast<size_t>(y) * c.strides[23] + x];
+      if (pattern == 0) value = (x + y) % 2 ? -0.0f : 0.0f;
+      if (pattern == 2)
+        value = 0.1f + static_cast<float>(x) / width +
+                 0.3f * static_cast<float>(y) / height;
+      if (pattern == 3 && (x + y) % 2) value = -value;
+      if (pattern == 4) value = special[(x + 7 * y) % special.size()];
+      if (pattern == 5) {
+        const uint32_t bits = rng();
+        std::memcpy(&value, &bits, sizeof(value));
+      }
+    }
+  }
+  return c;
+}
+
+void VerifyErosion(uint32_t width, uint32_t height, bool padded,
+                   unsigned pattern, float asymmetry) {
+  using namespace gjxl::cuda_internal;
+  Case c = ErosionCase(width, height, padded, pattern, asymmetry);
+  DeviceCase reference(c), candidate(c);
+  NonblockingStream stream;
+  // The fused path does not read the eroded-mask plane or unused L2 scratch.
+  reference.plan.mask = candidate.plan.mask = nullptr;
+  candidate.plan.ac[2] = nullptr;
+  candidate.plan.dc.fill(nullptr);
+  for (unsigned reuse = 0; reuse < 3; ++reuse) {
+    if (reuse == 2) {
+      for (uint32_t y = 0; y < height; ++y)
+        for (uint32_t x = 0; x < width; ++x) {
+          float& value = c.planes[23][Case::Offset(23) +
+              static_cast<size_t>(y) * c.strides[23] + x];
+          value = -0.75f * value + 0.013f;
+        }
+    }
+    for (size_t p = 0; p < c.planes.size(); ++p) {
+      reference.planes[p]->Write(c.planes[p]);
+      candidate.planes[p]->Write(c.planes[p]);
+    }
+    // Pageable copies on the default stream can finish after returning to
+    // the host. Explicitly order them before the nonblocking test stream.
+    CheckCuda(cudaDeviceSynchronize());
+    CheckCuda(LaunchCudaButteraugliErosionFinalForTesting(
+        reference.plan, reference.planes[22]->data + Case::Offset(22),
+        true, stream.value));
+    CheckCuda(LaunchCudaButteraugliErosionFinalForTesting(
+        candidate.plan, nullptr, false, stream.value));
+    CheckCuda(cudaStreamSynchronize(stream.value));
+    for (size_t p = 0; p < c.planes.size(); ++p) {
+      const auto expected = reference.planes[p]->Read();
+      const auto actual = candidate.planes[p]->Read();
+      if (p == 25) Equal(expected, actual);
+      else Equal(c.planes[p], actual);
+      if (p != 22 && p != 25) Equal(c.planes[p], expected);
+      for (size_t i = 0; i < expected.size(); ++i) {
+        const bool active = i >= Case::Offset(p) &&
+            i < Case::Offset(p) + static_cast<size_t>(c.strides[p]) * height &&
+            (i - Case::Offset(p)) % c.strides[p] < width;
+        if (!active &&
+            (std::memcmp(&expected[i], &c.planes[p][i], sizeof(float)) != 0 ||
+             std::memcmp(&actual[i], &c.planes[p][i], sizeof(float)) != 0))
+          throw std::runtime_error("Erosion/final padding guard overwritten");
+      }
+    }
+  }
+}
+
+void VerifyErosionCases(bool small) {
+  using namespace gjxl::cuda_internal;
+  for (bool zero_width : {false, true}) {
+    CudaButteraugliL2FinalPlan empty;
+    empty.width = zero_width ? 0 : 17;
+    empty.height = zero_width ? 17 : 0;
+    for (bool reference : {false, true})
+      CheckCuda(LaunchCudaButteraugliErosionFinalForTesting(
+          empty, nullptr, reference, nullptr));
+  }
+  for (size_t invalid = 0; invalid < 4; ++invalid) {
+    CudaButteraugliL2FinalPlan malformed;
+    malformed.width = malformed.height = 1;
+    malformed.reference_stride = malformed.distorted_stride = 1;
+    malformed.work_stride = malformed.output_stride = 1;
+    uint32_t* const strides[] = {&malformed.reference_stride,
+        &malformed.distorted_stride, &malformed.work_stride, &malformed.output_stride};
+    *strides[invalid] = 0;
+    for (bool reference : {false, true})
+      if (LaunchCudaButteraugliErosionFinalForTesting(
+              malformed, nullptr, reference, nullptr) != cudaErrorInvalidValue)
+        throw std::runtime_error("Invalid erosion/final stride not rejected");
+  }
+  CudaButteraugliL2FinalPlan no_scratch;
+  no_scratch.width = no_scratch.height = 1;
+  no_scratch.reference_stride = no_scratch.distorted_stride = 1;
+  no_scratch.work_stride = no_scratch.output_stride = 1;
+  if (LaunchCudaButteraugliErosionFinalForTesting(
+          no_scratch, nullptr, true, nullptr) != cudaErrorInvalidValue)
+    throw std::runtime_error("Null erosion reference scratch not rejected");
+  constexpr std::array<std::array<uint32_t, 2>, 12> shapes{{
+      {1,1}, {1,19}, {19,1}, {7,11}, {31,63}, {32,64},
+      {33,65}, {63,31}, {127,65}, {255,3}, {256,4}, {257,67}}};
+  size_t cases = 0;
+  for (const auto& shape : shapes) {
+    if (small && shape != std::array<uint32_t, 2>{33,65}) continue;
+    for (bool padded : {false, true}) {
+      for (unsigned pattern = 0; pattern < 6; ++pattern) {
+        if (small && pattern != 1 && pattern != 3 && pattern != 4 && pattern != 5)
+          continue;
+        for (float asymmetry : {0.6f, 1.0f, 2.5f}) {
+          if (small && asymmetry != 1.0f) continue;
+          VerifyErosion(shape[0], shape[1], padded, pattern, asymmetry);
+          ++cases;
+        }
+      }
+    }
+    std::cout << "Verified erosion/final geometry " << shape[0] << 'x' << shape[1]
+              << " (" << cases << " cases)\n" << std::flush;
+  }
+  if (cases != (small ? 8 : 432)) throw std::runtime_error("Erosion coverage differs");
+  std::cout << "Verified " << cases
+            << " guarded erosion/final cases with three-stage nondefault-stream reuse\n";
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -174,6 +317,10 @@ int main(int argc, char** argv) {
   const bool small = argc > 1 && std::string_view(argv[1]) == "--sanitizer";
   try {
     CheckCuda(cudaSetDevice(0));
+    if (argc > 1 && std::string_view(argv[1]) == "--erosion-sanitizer") {
+      VerifyErosionCases(true);
+      return 0;
+    }
     using namespace gjxl::cuda_internal;
     for (bool zero_width : {false, true}) {
       CudaButteraugliL2FinalPlan empty;
@@ -210,6 +357,7 @@ int main(int argc, char** argv) {
                 << " (" << cases << " cases)\n" << std::flush;
     }
     std::cout << "Verified " << cases << " guarded L2/final cases with three-stage reuse\n";
+    VerifyErosionCases(small);
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;
