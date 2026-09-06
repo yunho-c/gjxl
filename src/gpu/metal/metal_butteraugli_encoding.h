@@ -61,6 +61,11 @@ struct MetalButteraugliResidentComparisonDescriptor {
   std::span<const MetalButteraugliResidentBatch> batches;
 };
 
+/// Prevents pooling after failure in an enclosing AQ submission/readback.
+/// The owner still must wait for its submission before destroying the borrower.
+void DiscardPreparedMetalButteraugliLease(
+  PreparedDeviceButteraugli& prepared) noexcept;
+
 /// Validates an AQ-owned comparison before its enclosing command buffer is
 /// created. This is intentionally Metal-only and is not a generic GPU command
 /// interface.

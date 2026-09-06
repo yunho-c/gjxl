@@ -485,6 +485,7 @@ static int CheckEncoding(GJXLContext* context) {
 }
 
 int main(void) {
+  if (gjxl_trim_preparation_cache() != GJXL_OK) return 1;
   if (!CheckInitializers() || !CheckQualityHelper()) {
     return EXIT_FAILURE;
   }

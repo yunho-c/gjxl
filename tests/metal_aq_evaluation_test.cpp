@@ -33,6 +33,7 @@
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/resident_input.h"
 
@@ -2387,8 +2388,8 @@ bool CheckScratchWorkspaceLeases() {
   }
   const gjxl::GpuBackendStats after_reuse = gpu->stats();
   if (after_reuse.successful_allocations !=
-        before_reuse.successful_allocations + 1) {
-    std::cerr << "Warm AQ preparation did not reuse both scratch arenas\n";
+        before_reuse.successful_allocations) {
+    std::cerr << "Warm AQ preparation did not reuse all three scratch arenas\n";
     return false;
   }
   EvaluationOutputStorage reused(fixture.strategies.extent());
@@ -2400,7 +2401,9 @@ bool CheckScratchWorkspaceLeases() {
   prepared.reset();
   if (!CheckStatus(
         gjxl::metal_internal::EmptyMetalAqScratchArenasForTesting(*gpu),
-        "scratch-lease pressure reclamation")) {
+        "scratch-lease pressure reclamation") ||
+      !CheckStatus(gjxl::EmptyMetalButteraugliCacheForTesting(*gpu),
+                   "Butteraugli pressure reclamation")) {
     return false;
   }
 
@@ -2458,10 +2461,18 @@ bool CheckScratchWorkspaceLeases() {
     return false;
   }
   EvaluationOutputStorage recovered(fixture.strategies.extent());
-  return CheckStatus(
-           prepared->Evaluate(fixture.input.View(), recovered.View()),
-           "scratch-lease recovery evaluation") &&
-         CompareOutputs(changed_expected, recovered);
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), recovered.View()),
+                   "scratch-lease recovery evaluation") ||
+      !CompareOutputs(changed_expected, recovered)) return false;
+  bool waited = false;
+  if (!CheckStatus(gjxl::metal_internal::SetMetalAqWaitObserverForTesting(
+        *prepared, &waited), "trimmed AQ wait observer") ||
+      !CheckStatus(gjxl::metal_internal::SubmitMetalAqEvaluationForTesting(
+        *prepared, fixture.input.View()), "trimmed AQ outstanding submission") ||
+      !CheckStatus(gpu->TrimPreparationCache(), "trim during active AQ"))
+    return false;
+  prepared.reset();
+  return waited && gjxl::MetalButteraugliCacheBytesForTesting(*gpu) == 0;
 }
 
 bool CheckIndependentConcurrency(gjxl::GpuBackend& gpu) {

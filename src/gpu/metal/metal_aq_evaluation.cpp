@@ -866,6 +866,9 @@ MetalPreparedAqEvaluation::~MetalPreparedAqEvaluation() {
   }
   // Destroy the borrower before returning its backing AQ arenas to the pool.
   // The submission above has completed even on the failure/destruction path.
+  if (!reusable && butteraugli_ != nullptr) {
+    DiscardPreparedMetalButteraugliLease(*butteraugli_);
+  }
   butteraugli_.reset();
   backend_->ReleaseAqScratchArena(
     MetalAqScratchArena::kPersistent, std::move(persistent_), reusable);

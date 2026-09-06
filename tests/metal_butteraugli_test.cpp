@@ -639,9 +639,148 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   return true;
 }
 
+
+// Exercise allocation reuse separately from per-image reference caching. The
+// uncached backend is a bit-exact oracle for changed images/options/layouts.
+[[nodiscard]] bool CheckCapacityCache() {
+  std::unique_ptr<gjxl::GpuBackend> backend, oracle;
+  gjxl::MetalBackendOptions uncached;
+  uncached.butteraugli_cache_bytes = 0;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backend).ok() ||
+      !gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, uncached, &oracle).ok())
+    return false;
+  size_t iteration = 0;
+  const auto run = [&](gjxl::Extent2D extent, size_t allocations,
+                       bool trim_active = false) {
+    HostImage reference(extent), distorted(extent);
+    FillFixture(&reference, &distorted, false);
+    for (auto& plane : reference.values)
+      for (float& value : plane) value = value * 0.93f + 0.01f * iteration;
+    gjxl::ButteraugliOptions options;
+    if (iteration++ % 2) options.hf_asymmetry = 1.6f;
+    std::vector<float> maps[2];
+    double scores[2]{};
+    for (size_t index = 0; index < 2; ++index) {
+      auto& gpu = index ? *oracle : *backend;
+      DeviceImage ref, dis;
+      gjxl::test::GuardedDevicePlane map, score;
+      if (!ref.Prepare(gpu, extent, 3) || !ref.Upload(reference) ||
+          !dis.Prepare(gpu, extent, 5) || !dis.Upload(distorted) ||
+          !map.Prepare(gpu, extent, extent.width + 7).ok() ||
+          !score.Prepare(gpu, {1, 1}, 3).ok()) return false;
+      std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
+      const auto before = gpu.stats();
+      if (!gjxl::PrepareDeviceButteraugli(
+            gpu, {ref.View(), options}, &prepared).ok() ||
+          gpu.stats().successful_allocations !=
+            before.successful_allocations + (index ? 1 : allocations)) {
+        std::cerr << "Butteraugli capacity reuse failed at " << iteration << '\n';
+        return false;
+      }
+      if (trim_active && !gpu.TrimPreparationCache().ok()) return false;
+      if (!prepared->Compare({dis.View(), map.View(), score.View()}).ok())
+        return false;
+      maps[index].resize(extent.width * extent.height);
+      if (!prepared->ReadDistanceMap(
+            {maps[index].data(), extent, extent.width}).ok() ||
+          !prepared->ReadScore(&scores[index]).ok()) return false;
+      prepared.reset();
+      if ((index || trim_active) &&
+          gjxl::MetalButteraugliCacheBytesForTesting(gpu) != 0) return false;
+    }
+    return SameBits(maps[0], maps[1]) &&
+      std::bit_cast<uint64_t>(scores[0]) == std::bit_cast<uint64_t>(scores[1]);
+  };
+  if (!run({32, 32}, 1) || !run({32, 32}, 0) ||
+      !run({31, 31}, 0) || !run({64, 64}, 1) ||
+      !run({3, 7}, 1) || !run({7, 3}, 0) ||
+      !run({9, 13}, 1) || !run({17, 29}, 1) || !run({17, 29}, 0) ||
+      !gjxl::EmptyMetalButteraugliCacheForTesting(*backend).ok() ||
+      !run({17, 29}, 1) || !backend->TrimPreparationCache().ok() ||
+      gjxl::MetalButteraugliCacheBytesForTesting(*backend) != 0 ||
+      !run({17, 29}, 1, true) || !run({17, 29}, 1)) return false;
+
+  // Both preparation and comparison failures must drop the acquired lease.
+  HostImage reference({17, 29}), distorted({17, 29});
+  FillFixture(&reference, &distorted, false);
+  DeviceImage ref, dis;
+  gjxl::test::GuardedDevicePlane map, score;
+  if (!ref.Prepare(*backend, reference.extent, 3) || !ref.Upload(reference) ||
+      !dis.Prepare(*backend, reference.extent, 5) || !dis.Upload(distorted) ||
+      !map.Prepare(*backend, reference.extent, 24).ok() ||
+      !score.Prepare(*backend, {1, 1}, 3).ok()) return false;
+  for (bool during_preparation : {true, false}) {
+    for (bool completion : {false, true}) {
+      std::unique_ptr<gjxl::PreparedDeviceButteraugli> prepared;
+      if (!during_preparation && !gjxl::PrepareDeviceButteraugli(
+            *backend, {ref.View(), {}}, &prepared).ok()) return false;
+      if (!gjxl::ArmNextMetalSubmissionFailureForTest(
+            *backend, !completion, completion).ok()) return false;
+      const auto status = during_preparation
+        ? gjxl::PrepareDeviceButteraugli(*backend, {ref.View(), {}}, &prepared)
+        : prepared->Compare({dis.View(), map.View(), score.View()});
+      if (status.ok()) return false;
+      prepared.reset();
+      if (gjxl::MetalButteraugliCacheBytesForTesting(*backend) != 0 ||
+          !run({17, 29}, 1)) return false;
+    }
+  }
+  // A nonzero but insufficient backend budget also bypasses the cache.
+  backend.reset();
+  uncached.butteraugli_cache_bytes = 1;
+  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, uncached, &backend).ok() ||
+      !run({17, 29}, 1) || !run({17, 29}, 1) ||
+      gjxl::MetalButteraugliCacheBytesForTesting(*backend) != 0) return false;
+  return true;
+}
+
+[[nodiscard]] bool CheckProcessCapacityBudget() {
+  constexpr size_t limit = size_t{1024} * 1024 * 1024;
+  if (gjxl::MetalButteraugliProcessCacheBytesForTesting() != 0) return false;
+  std::array<std::unique_ptr<gjxl::GpuBackend>, 3> backends;
+  std::array<DeviceImage, 3> references;
+  std::array<std::unique_ptr<gjxl::PreparedDeviceButteraugli>, 3> prepared;
+  HostImage reference({2048, 1536}), distorted(reference.extent);
+  FillFixture(&reference, &distorted, false);
+  size_t bytes = 0;
+  for (size_t index = 0; index < backends.size(); ++index) {
+    if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backends[index]).ok() ||
+        !references[index].Prepare(*backends[index], reference.extent, 3) ||
+        !references[index].Upload(reference) ||
+        !gjxl::PrepareDeviceButteraugli(*backends[index],
+          {references[index].View(), {}}, &prepared[index]).ok()) return false;
+    bytes = prepared[index]->memory_stats().prepared_allocation_bytes;
+  }
+  if (bytes * 2 > limit || bytes * 3 <= limit ||
+      gjxl::MetalButteraugliProcessCacheBytesForTesting() != 0) return false;
+  // Concurrent returns race for one process-wide budget, never one per backend.
+  std::array<std::thread, 3> threads;
+  for (size_t i = 0; i < 3; ++i)
+    threads[i] = std::thread([&, i] { prepared[i].reset(); });
+  for (auto& thread : threads) thread.join();
+  size_t retained = 0, rejected = 0;
+  for (auto& backend : backends) {
+    const size_t idle = gjxl::MetalButteraugliCacheBytesForTesting(*backend);
+    retained += idle;
+    rejected += idle == 0;
+  }
+  if (retained != 2 * bytes || rejected != 1 ||
+      gjxl::MetalButteraugliProcessCacheBytesForTesting() != retained)
+    return false;
+  for (size_t i = 0; i < 3; ++i) {
+    // Destruction alone must release this backend's share of the global budget.
+    backends[i].reset();
+  }
+  return gjxl::MetalButteraugliProcessCacheBytesForTesting() == 0;
+}
+
 }  // namespace
 
 int main() {
+  if (!CheckCapacityCache() || !CheckProcessCapacityBudget()) {
+    std::cerr << "Metal Butteraugli capacity-cache lifecycle check failed\n";
+    return EXIT_FAILURE;
+  }
   float maximum_map_error = 0.0f;
   double maximum_score_error = 0.0;
   float maximum_stage_error = 0.0f;

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -87,6 +88,11 @@ struct MetalBackendOptions {
 
   MetalAcResidualInverseMode ac_residual_inverse =
     MetalAcResidualInverseMode::kFusedTuned;
+
+  // One idle Butteraugli allocation, made volatile while idle. Zero disables
+  // this cache. The process-wide sum across all Metal backends is additionally
+  // capped at 1 GiB. Active encodes and the existing AQ pools are not counted.
+  size_t butteraugli_cache_bytes = size_t{1024} * 1024 * 1024;
 
   // Deterministic failure injection used by real-device backend tests.
   bool test_fail_submission = false;

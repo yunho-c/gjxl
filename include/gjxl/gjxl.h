@@ -112,6 +112,13 @@ GJXL_API GJXLResult gjxl_context_create(
   const GJXLContextOptions* options,
   GJXLContext** context) GJXL_NOEXCEPT;
 
+/// Releases idle Butteraugli preparation capacity shared by all contexts and
+/// batch encoders. Safe alongside encoding; does not wait for active work or
+/// initialize Metal. Existing AQ pools are unchanged. Encodes started after
+/// this boundary may cache again. Context destruction does not trim this
+/// process-wide cache. Useful when the application becomes idle.
+GJXL_API GJXLResult gjxl_trim_preparation_cache(void) GJXL_NOEXCEPT;
+
 GJXL_API void gjxl_context_destroy(
   GJXLContext* context) GJXL_NOEXCEPT;
 

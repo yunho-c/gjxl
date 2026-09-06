@@ -513,9 +513,10 @@ bool CheckCase(gjxl::GpuBackend& gpu, bool non_default, size_t iterations,
     return false;
   }
   const gjxl::GpuBackendStats after = gpu.stats();
+  // All three arenas may now be leased; cold preparation allocates at most three.
   const uint64_t policy_allocations =
       after.successful_allocations - before.successful_allocations;
-  if (policy_allocations < 1 || policy_allocations > 3 ||
+  if (policy_allocations > 3 ||
       after.committed_submissions !=
         before.committed_submissions + iterations + 2) {
     std::cerr << "GPU AQ policy preparation/evaluation resource count differs\n";
@@ -553,7 +554,7 @@ bool CheckCase(gjxl::GpuBackend& gpu, bool non_default, size_t iterations,
   const uint64_t full_allocations =
       after_full.successful_allocations -
       before_full.successful_allocations;
-  if (full_allocations < 1 || full_allocations > 3 ||
+  if (full_allocations > 3 ||
       after_full.committed_submissions !=
         before_full.committed_submissions + iterations + 2) {
     std::cerr << "GPU final materialization added a submission or allocation\n";
@@ -584,7 +585,7 @@ bool CheckFullyResidentCase(
   const uint64_t bounded_allocations =
       after_bounded.successful_allocations -
       before_bounded.successful_allocations;
-  if (bounded_allocations < 1 || bounded_allocations > 3 ||
+  if (bounded_allocations > 3 ||
       after_bounded.committed_submissions !=
           before_bounded.committed_submissions + 3) {
     std::cerr << "Fully resident bounded resource count differs\n";
@@ -600,7 +601,7 @@ bool CheckFullyResidentCase(
   const uint64_t full_allocations =
       after_full.successful_allocations -
       before_full.successful_allocations;
-  if (full_allocations < 1 || full_allocations > 3 ||
+  if (full_allocations > 3 ||
       after_full.committed_submissions !=
           before_full.committed_submissions + 3 ||
       !bounded.PaddingPoisoned() || !full.PaddingPoisoned() ||

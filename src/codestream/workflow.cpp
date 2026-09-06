@@ -4,6 +4,7 @@
 #include "codestream/workflow.h"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -330,25 +331,35 @@ MetalBackendOptions ProductionMetalBackendOptions() {
   };
 }
 
+struct ProductionMetalCache {
+  std::once_flag once;
+  std::unique_ptr<GpuBackend> backend;
+  std::atomic<GpuBackend*> published_backend{nullptr};
+  Status status = Status::Unavailable(
+    "Production Metal backend has not been initialized");
+};
+
+ProductionMetalCache& GetProductionMetalCache() {
+  static ProductionMetalCache cache;
+  return cache;
+}
+
 Status ResolveProductionMetalBackend(GpuBackend** out) {
   if (out == nullptr) {
     return Status::InvalidArgument(
       "Production Metal backend output pointer is null");
   }
   *out = nullptr;
-  struct Cache {
-    std::once_flag once;
-    std::unique_ptr<GpuBackend> backend;
-    Status status = Status::Unavailable(
-      "Production Metal backend has not been initialized");
-  };
-  static Cache cache;
+  ProductionMetalCache& cache = GetProductionMetalCache();
   std::call_once(cache.once, [&] {
     cache.status = CreateEmbeddedMetalBackend(
       ProductionMetalBackendOptions(), &cache.backend);
     if (cache.status.ok() && cache.backend == nullptr) {
       cache.status = Status::Internal(
         "Embedded Metal factory returned no backend");
+    }
+    if (cache.status.ok()) {
+      cache.published_backend.store(cache.backend.get(), std::memory_order_release);
     }
   });
   if (!cache.status.ok()) {
@@ -1603,6 +1614,12 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       "Public VarDCT encoding dimensions are too large");
   }
   return Status::Ok();
+}
+
+Status TrimVarDctPreparationCache() {
+  GpuBackend* backend = GetProductionMetalCache().published_backend.load(
+    std::memory_order_acquire);
+  return backend == nullptr ? Status::Ok() : backend->TrimPreparationCache();
 }
 
 Status EncodeLinearRgbVarDctCodestream(

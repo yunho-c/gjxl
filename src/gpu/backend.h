@@ -46,6 +46,12 @@ public:
     };
   }
 
+  /// Releases idle perceptual-reference preparation capacity, if supported.
+  /// Safe during independent encodes: active storage remains valid, but leases
+  /// already acquired at the trim boundary cannot repopulate this cache.
+  /// Does not initialize a device, wait for active work, or trim other pools.
+  virtual Status TrimPreparationCache() { return Status::Ok(); }
+
   virtual Status Allocate(
     size_t size_bytes,
     std::unique_ptr<DeviceBuffer>* out) = 0;

@@ -378,6 +378,13 @@ public:
       borrowed_scratch_ = *borrowed_scratch;
   }
 
+  ~MetalPreparedDeviceButteraugli() override {
+    metal_.ReleaseButteraugliArena(
+      std::move(scratch_), cache_generation_, prepared_ok_ && valid());
+  }
+
+  void DiscardScratchLease() noexcept { prepared_ok_ = false; }
+
   [[nodiscard]] Status PrepareStorage() {
     const Extent2D requested = extent();
     if (requested.width > std::numeric_limits<uint32_t>::max() ||
@@ -525,7 +532,8 @@ public:
     if (multiscale_) {
       peak_comparison_scratch_bytes_ -= plane_bytes - sub_plane_bytes;
     }
-    Status status = scratch_.Prepare(metal_, capacity);
+    Status status = metal_.AcquireButteraugliArena(
+      capacity, &scratch_, &cache_generation_);
     if (!status.ok()) return status;
     for (size_t index = 0; index < planes_.size(); ++index) {
       DevicePlaneView &plane = planes_[index];
@@ -630,10 +638,13 @@ public:
         "Metal Butteraugli preparation submission is null");
     }
     status = submission->Wait();
-    if (!status.ok() || !profiling) return status;
-    return metal_.ResolveGpuSubmissionProfile(
-      *submission, "frontend.prepare_aq.reference", profiling_mode,
-      profile);
+    if (!status.ok()) return status;
+    if (profiling) {
+      status = metal_.ResolveGpuSubmissionProfile(
+        *submission, "frontend.prepare_aq.reference", profiling_mode, profile);
+    }
+    prepared_ok_ = status.ok();
+    return status;
   }
 
   [[nodiscard]] DeviceButteraugliMemoryStats memory_stats()
@@ -2190,6 +2201,8 @@ private:
 
   MetalBackend& metal_;
   DeviceScratchArena scratch_;
+  uint64_t cache_generation_ = 0;
+  bool prepared_ok_ = false;
   std::optional<MetalButteraugliScratch> borrowed_scratch_;
   std::array<DevicePlaneView, kWorkingPlaneCount> planes_;
   PsychoPlanes reference_sub_;
@@ -2211,6 +2224,12 @@ private:
   std::optional<MetalButteraugliStage> capture_stage_;
   bool capture_ready_ = false;
 };
+
+void DiscardPreparedMetalButteraugliLease(
+  PreparedDeviceButteraugli& prepared) noexcept {
+  auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
+  if (metal != nullptr) metal->DiscardScratchLease();
+}
 
 Status ValidatePreparedMetalButteraugliEncoding(
   PreparedDeviceButteraugli& prepared,
