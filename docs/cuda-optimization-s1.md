@@ -8960,6 +8960,164 @@ remains active: DC lookup work is removed, but token-scanned ANS histogram
 construction, metadata validation/tokenization, major perceptual GPU
 passes, and whole-workflow variability remain concrete leads.
 
+## Token-scanned ANS validation-hoist experiment (S57, rejected)
+
+S57 investigated the repeated public `EncodeHybridUint` call in
+`PrepareDirectAnsPartition`. The partition entry already rejects invalid
+HybridUint configurations, and every uint32 value has an encoding once the
+configuration is valid. The candidate replaced only that per-token public
+call with `EncodeHybridUintValidated`; context checks, ANS symbol/count/extra-bit
+overflow checks, initial maps, prepared populations, clustering, and failure
+atomicity stayed unchanged. No public API/ABI, GPU, allocation policy, or
+quality-policy changes were proposed.
+
+**The production change was rejected and restored to S56.** Captured-partition
+replay improved, but the release workflow did not demonstrate an improvement.
+The retained tracked change is regression coverage, not an encoder speedup.
+
+### Captures, differential checks, and generated code
+
+The diagnostic executable contains separate original and candidate partition
+functions, selected once per partition by `S57_ANS_MODE`. Its six captures
+come from single fully-resident encodes of padded 4K, padded 1080p, and Flower.
+Each has an eight-context coefficient-order stream (1,756 / 1,629 / 441
+tokens) and a 45-context DC stream (557,106 / 139,588 / 20,804 tokens).
+Capture I/O is enabled separately and those encode times are not performance
+evidence. Prepared AC population construction is not captured or changed.
+
+The frozen original entropy fixture passes with both diagnostic modes.
+An additional 19,632 comparisons cover all 816 valid configurations,
+bounded/random/UINT32_MAX values, both entropy policies, initial maps,
+interleaved and guarded offset-split layouts, invalid configurations,
+malformed views, out-of-range contexts, and map errors. Partition/prepared
+outputs, exact status codes/messages, input immutability, and unchanged
+sentinel outputs on failure agree. Some valid HybridUint configurations
+produce symbols outside the 256-bin ANS alphabet; those failures must not
+be mistaken for invalid configurations or silently accepted.
+
+Replay measures complete partition construction, including allocation and
+clustering, not just token conversion. Each of 12 capture/layout cases uses
+six warmups per mode and 12 alternating AB/BA pairs, with three calls per
+timing: all 288 raw timings are retained. Paired median reductions for the
+larger DC partitions are:
+
+| Capture | Interleaved | Offset split |
+| --- | ---: | ---: |
+| 4K | 5.15%, 11/12 wins | 13.56%, 12/12 |
+| 1080p | 4.68%, 12/12 | 5.50%, 12/12 |
+| Flower | 17.34%, 12/12 | 11.70%, 11/12 |
+
+Small coefficient-order captures are mixed: 4K interleaved regresses 4.23%
+and both 1080p layouts regress 1.31% / 0.20%; Flower improves 15.77% / 12.66%.
+All slower individual observations remain in the replay records.
+
+MSVC release disassembly shows 2,113 -> 2,071 static instructions in the
+whole partition function. The public conversion relocation disappears,
+but **one private conversion call remains**: the compiler does not inline
+the helper here. The saved work is repeated configuration validation and
+successful `Status` construction, not elimination of the call itself.
+Diagnostic bodies contain 1,999 / 1,956 instructions and neither is
+instruction-identical to its release counterpart. These are source-equivalent
+controls with a measured native-layout limitation, not exact-native controls.
+Static instruction counts are not retired-instruction measurements.
+
+The CUDA archive remains byte-identical to S56, preserving all 171 GPU
+bodies by archive identity. No fresh CUDA native dump, GPU profile,
+hardware-counter result, or CUDA sanitizer result is claimed for S57.
+
+### Complete-workflow results and rejection
+
+All percentages below are medians of within-pair ratios, not ratios of
+marginal median times. Cohorts are separate; their absolute timings are
+not pooled. Every warm process uses three warmups and five samples.
+The histogram profile field also includes clustering and other partition
+work; it is not an isolated DC token-scan timer.
+
+The first five-pair same-executable screen gives whole-encode changes
+-1.06% / +5.87% / -3.18% at 4K / 1080p / Flower (4/5, 1/5, 5/5 wins).
+The separate seven-pair follow-up gives -2.59% / +1.05% / -0.72%
+(4/7, 3/7, 5/7). Histogram changes in that follow-up are
+-4.91% / +2.48% / +0.37%. The repeated 1080p regression is retained.
+Those controls check encoded sizes during timing, not full output bytes.
+
+A freshly compiled release phase probe then compares the candidate with
+the frozen S56 release, using seven alternating pairs per workload:
+
+| Workload | Histogram work | Codestream encoding | Whole encode |
+| --- | ---: | ---: | ---: |
+| 4K | +8.90%, 1/7 wins | +1.93%, 1/7 | +0.58%, 3/7 |
+| 1080p | +9.85%, 1/7 | +2.95%, 1/7 | +1.78%, 1/7 |
+| Flower | +1.09%, 2/7 | -5.77%, 4/7 | -2.32%, 4/7 |
+
+Whole-encode pair ranges are -4.68..+3.71%, -13.50..+20.41%, and
+-32.79..+6.28%. Unchanged stages
+also vary: release quantization changes -1.09% / +1.48% / -0.47%,
+and 4K coefficient-order work rises 7.74%. These observations do not prove
+that the source edit caused every regression, nor establish compiler layout
+or thermal state as the cause. They do fail to justify shipping this variant.
+
+Seven cold release pairs (zero warmups, one sample per fresh process) give
+whole-encode changes +1.42% / +0.67% / -3.89% (2/7, 2/7, 6/7 wins).
+Separate cold same-executable pairs give +0.16% / +6.45% / -4.07%
+(3/7, 2/7, 4/7). The 1080p cold control has histogram +11.87% and
+codestream +15.48%, while unchanged quantization rises 3.22%.
+The 4K cold-control codestream range reaches +74.39%; it is not discarded.
+
+The rejected candidate also completes byte/summary-checked same-version
+batch scheduling tests (one warmup, three samples). Even 1080p batch sizes
+1/2/4 give fully-resident speedups 1.004/1.104/1.221x and maximum-throughput
+0.974/1.471/2.005x. Even 4K fully-resident sizes 1/2 give 0.993/1.053x.
+These are not candidate-versus-S56 optimizer gains and include slower
+size-one results. Raw batch medians and all sample rows remain retained.
+
+Performance boundary readings are 58 C / P0 / 1282 MHz / 22.97 W with
+software thermal/power flags inactive, then 66 C / P3 / 937 MHz / 26.72 W
+with both flags active. Boundaries do not provide per-operation state or
+causal normalization. No power, clock, cooling, priority, security, or
+service settings were changed. All runs completed without an observed
+admin/firewall error; the earlier S30 long-run cause remains unconfirmed.
+
+### Qualification, restoration, and retained coverage
+
+The candidate passes all 71 CUDA CTests (73.48 s), all 50 CPU GCC CTests
+(18.68 s), installed consumers, and five CPU-only Clang ASan targets:
+DC groups, entropy, coefficient order, codestream encoder, and workflow.
+All 58 encoded-image pairs are byte-identical to S56 and independently
+decoded/scored with the pinned libjxl decoder and Butteraugli metric:
+46 primary cases plus six legacy high-density and six maximum-compression.
+These establish correctness of the rejected candidate, not a reason to
+ignore the performance result.
+
+Tracked entropy tests now compare scanned construction with populations
+built through the checked public conversion for every valid configuration,
+mapped/unmapped contexts, interleaved/offset-split layouts, and empty
+sections. Exact models, costs, failure statuses, and input/output atomicity
+must agree. Additional tests preserve invalid-configuration behavior even
+on empty input, out-of-range contexts, and valid encodings whose symbols
+exceed the ANS alphabet. The pre-existing 443,904 independently inverted
+HybridUint encoding cases remain in place.
+
+After restoration, all 71 CUDA CTests (69.04 s), all 50 CPU CTests
+(17.57 s), and all five host ASan targets pass again. Production ANS
+source is identical to S56; the added tests pass on that implementation.
+The restored ANS object differs only in three bytes of the COFF build-time
+field, and its complete instruction/relocation dump matches the parent.
+
+The ignored `build-cuda-ninja/profiles/s57_*` bundle distinguishes the
+rejected candidate sources/binaries from the restored checkpoint. It keeps
+the six captures, source controls, native dumps, 288 replay rows, all
+workflow cohorts, 58 image comparisons, and both qualification logs.
+The timing scripts describe the rejected candidate; reproductions after
+restoration must use its retained binaries, not silently substitute the
+restored encoder. `s57_validate.py --frozen` checks this distinction,
+restoration, differential evidence, paired arithmetic, and artifact hashes.
+
+The optimization goal remains active. A concrete next experiment is a
+small separately compiled token-scan routine that permits actual conversion
+inlining without enlarging the already substantial partition function.
+It still requires generated-code verification and whole-workflow acceptance;
+S57 does not demonstrate that this work, or fully-resident encoding, is maxed out.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

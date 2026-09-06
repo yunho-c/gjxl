@@ -1349,6 +1349,151 @@ bool CheckSparseDirectAnsPopulations() {
   return true;
 }
 
+bool CheckScannedDirectAnsConfigurations() {
+  using gjxl::codestream_internal::DirectAnsEntropyMode;
+  using gjxl::codestream_internal::PreparedFixedAnsCluster;
+  using gjxl::codestream_internal::OptimizeDirectAnsEntropyCode;
+  using gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations;
+  size_t configurations = 0;
+  for (uint8_t split = 0; split <= 15; ++split) {
+    for (uint8_t msb = 0; msb <= split; ++msb) {
+      for (uint8_t lsb = 0; lsb <= split - msb; ++lsb) {
+        const gjxl::HybridUintConfig config{split, msb, lsb};
+        ++configurations;
+        std::vector<gjxl::EntropyToken> tokens;
+        std::vector<uint32_t> values{0xDEADBEEFu};
+        std::vector<uint16_t> contexts{0xBEEF};
+        std::vector<PreparedFixedAnsCluster> populations(4);
+        const auto append = [&](uint32_t value) {
+          gjxl::HybridUintToken encoded;
+          if (!gjxl::EncodeHybridUint(value, config, &encoded).ok()) return false;
+          // Valid HybridUint configurations can produce symbols outside the
+          // ANS alphabet. Exercise those errors separately below.
+          if (encoded.symbol >= gjxl::kMaximumAnsAlphabetSize) return true;
+          const auto context = static_cast<uint16_t>(tokens.size() % 4);
+          tokens.push_back({context, value});
+          values.push_back(value);
+          contexts.push_back(context);
+          auto& population = populations[context];
+          ++population.counts[encoded.symbol];
+          ++population.token_count;
+          population.extra_bits += encoded.extra_bit_count;
+          population.maximum_symbol = std::max(population.maximum_symbol, encoded.symbol);
+          return true;
+        };
+        for (uint32_t value = 0; value < 32; ++value) {
+          if (!append(value)) return false;
+        }
+        for (uint32_t exponent = 0; exponent < 32; ++exponent) {
+          if (!append((uint32_t{1} << exponent) - 1) ||
+              !append(uint32_t{1} << exponent)) return false;
+        }
+        if (!append(UINT32_MAX)) return false;
+        values.push_back(0xDEADBEEFu);
+        contexts.push_back(0xBEEF);
+        const auto tokens_before = tokens;
+        const auto values_before = values;
+        const auto contexts_before = contexts;
+        const auto populations_before = populations;
+        const std::array<uint8_t, 4> map{0, 1, 0, 1};
+        for (bool mapped : {false, true}) {
+          const gjxl::EntropyCodeOptions options{
+            .context_count = 4,
+            .initial_context_map = mapped ? std::span(map) : std::span<const uint8_t>{},
+            .initial_histogram_count = mapped ? 2u : 0u,
+            .uint_config = config,
+          };
+          const std::array interleaved{
+            gjxl::EntropyTokenStreamView::Interleaved(tokens),
+            gjxl::EntropyTokenStreamView::Interleaved({}),
+          };
+          gjxl::EntropyCode sentinel;
+          sentinel.context_count = 99;
+          gjxl::EntropyCodeCost cost_sentinel;
+          cost_sentinel.model_bits = 123;
+          auto expected = sentinel;
+          auto expected_cost = cost_sentinel;
+          const auto expected_status = OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+            interleaved, options, populations, &expected, &expected_cost);
+          for (bool split_layout : {false, true}) {
+            auto views = interleaved;
+            if (split_layout) {
+              views[0] = gjxl::EntropyTokenStreamView::Split(
+                std::span(values).subspan(1, tokens.size()),
+                std::span(contexts).subspan(1, tokens.size()));
+            }
+            auto actual = sentinel;
+            auto actual_cost = cost_sentinel;
+            const auto status = OptimizeDirectAnsEntropyCode(
+              views, options, DirectAnsEntropyMode::kBalanced, &actual, &actual_cost);
+            if (status.code() != expected_status.code() ||
+                status.message() != expected_status.message() ||
+                actual != expected || actual_cost != expected_cost ||
+                (!status.ok() && (actual != sentinel || actual_cost != cost_sentinel)) ||
+                tokens != tokens_before || values != values_before ||
+                contexts != contexts_before || populations != populations_before) {
+              std::cerr << "Scanned ANS differs from checked population oracle\n";
+              return false;
+            }
+          }
+        }
+      }
+    }
+  }
+  if (configurations != 816) return false;
+  std::cout << "Verified scanned ANS for 816 configurations, mapped/unmapped, "
+               "interleaved/offset-split layouts.\n";
+  return true;
+}
+
+bool CheckScannedDirectAnsValidation() {
+  using gjxl::codestream_internal::DirectAnsEntropyMode;
+  using gjxl::codestream_internal::OptimizeDirectAnsEntropyCode;
+  for (auto mode : {DirectAnsEntropyMode::kBalanced, DirectAnsEntropyMode::kHighDensity}) {
+    for (bool empty : {false, true}) {
+      for (int failure = 0; failure < 6; ++failure) {
+        std::vector<gjxl::EntropyToken> tokens{{0, 0}, {1, 1}};
+        if (empty) tokens.clear();
+        gjxl::EntropyCodeOptions options{.context_count = 2};
+        const char* message = "Direct ANS partition output is invalid";
+        if (failure == 0) options.uint_config = {16, 0, 0};
+        if (failure == 1) options.uint_config = {4, 5, 0};
+        if (failure == 2) options.uint_config = {4, 2, 3};
+        if (failure == 3) options.context_count = 0;
+        if (failure == 4) {
+          if (empty) continue;
+          tokens.back().context = options.context_count;
+          message = "ANS token context is out of range";
+        }
+        if (failure == 5) {
+          if (empty) continue;
+          // A valid configuration and uint32 value, but symbol 256 cannot
+          // be stored in the 256-bin ANS histogram.
+          options.uint_config = {15, 0, 0};
+          tokens.back().value = 256;
+          message = "ANS histogram count overflow";
+        }
+        const std::array views{gjxl::EntropyTokenStreamView::Interleaved(tokens)};
+        gjxl::EntropyCode code;
+        code.context_count = 123;
+        gjxl::EntropyCodeCost cost;
+        cost.token_bits = 456;
+        const auto code_before = code;
+        const auto cost_before = cost;
+        const auto tokens_before = tokens;
+        const auto status = OptimizeDirectAnsEntropyCode(views, options, mode, &code, &cost);
+        if (status.code() != gjxl::StatusCode::kInvalidArgument ||
+            status.message() != message || code != code_before ||
+            cost != cost_before || tokens != tokens_before) {
+          std::cerr << "Scanned ANS validation changed status or output\n";
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckBorrowedDirectAnsValidation() {
   using gjxl::codestream_internal::PreparedFixedAnsCluster;
   using gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations;
@@ -1884,6 +2029,8 @@ int main() {
       !CheckBestDirectAnsClusteringRefinement() ||
       !CheckSparseDirectAnsPopulations() ||
       !CheckBorrowedDirectAnsValidation() ||
+      !CheckScannedDirectAnsConfigurations() ||
+      !CheckScannedDirectAnsValidation() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {

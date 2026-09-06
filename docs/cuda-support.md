@@ -827,6 +827,18 @@ are not instruction-identical, a stated limitation of those controls.
 Token-scanned ANS histogram preparation and remaining GPU work are still
 open leads; the fully-resident path is not demonstrated maxed out.
 
+[S57](cuda-optimization-s1.md#token-scanned-ans-validation-hoist-experiment-s57-rejected)
+adds exhaustive scanned-ANS configuration and failure-atomicity coverage.
+Its proposed validation-hoist optimization was **rejected**: captured DC
+partition replay improved, but release histogram work regressed about
+8.9% / 9.8% at 4K / 1080p, with six of seven pairs slower in each case.
+The compiler retained a private conversion call, and diagnostic/release
+bodies were not native-identical. Candidate correctness passed 71 CUDA /
+50 CPU tests, five host ASan targets, and 58 byte-identical decoded-image
+pairs. Production ANS code is restored to S56; no S57 speedup is claimed.
+The failed experiment and all slower cohorts remain documented. A smaller
+token-scan routine is an open experiment, not an accepted optimization.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
