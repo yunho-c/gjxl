@@ -6235,8 +6235,9 @@ score reduction, and reference-mask caching are unchanged.
 
 The fused operation eliminates six float stores and six float loads per
 active pixel, or 48 logical bytes. Two full-resolution and two half-scale
-comparisons at padded 4K remove 995,328,000 logical intermediate bytes per
-encode; at padded 1080p the corresponding count is 248,832,000 bytes.
+comparisons for the odd 3839x2159 benchmark input (1920x1080 half-scale)
+remove 994,752,096 logical intermediate bytes per encode. The odd
+1919x1079 input (960x540 half-scale) removes 248,544,096 bytes.
 These are source-level traffic counts, not measured DRAM transactions.
 Four launches disappear. Allocation requests and host/device copies do
 not change.
