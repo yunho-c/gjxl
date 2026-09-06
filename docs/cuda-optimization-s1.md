@@ -22,7 +22,7 @@
   inline validated ANS token scanning, fused erosion/L2/final masking,
   cooperative final color correlation, adjacent-row low-medium reuse,
   paired horizontal-convolution input reuse, and prefetched initial
-  color-correlation samples
+  color-correlation samples, and exact zero-tile Malta responses
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -36,25 +36,24 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S64 against S63
-(`6f968df`), preloads eight initial-CfL samples per original accumulation lane,
-preserving the original arithmetic order. An explicit dispatch keeps the
-original kernel below 32 columns. The new 48-register body exactly matches
-two final stage screens and the complete-workflow control; all 175 previous
-GPU bodies remain unchanged. Six full-workflow trace pairs improve targeted
-initial-CfL GPU duration by 43-45%. All 73 CUDA / 50 CPU tests, five host ASan
-targets, seven scoped GPU sanitizer checks, and 58 freshly decoded,
-byte-identical image pairs pass.
+below supersede them. The latest implemented checkpoint, S65 against S64
+(`73179fd`), skips Malta response arithmetic only when every scaled value
+in the tile and halo is exactly zero. It preserves scaling, the output
+write/add, exceptional values, and the original tile policy. All twelve new
+GPU bodies match the guarded, replay, sanitizer, and full-workflow controls;
+all 176 previous bodies remain unchanged. Five of six selected-mode trace
+pairs improve targeted Malta GPU duration by 8-21%; one 4K pair regresses
+0.30%. All 73 CUDA / 50 CPU tests, five host ASan targets, seven release GPU
+sanitizer checks, and 58 freshly decoded byte-identical image pairs pass.
 
-Public whole-encode changes are warm -10.0% / -0.1% / +3.1% and cold
--14.7% / +7.2% / -5.6% at 4K / 1080p / Flower, with very broad paired ranges.
-The unchanged host codestream phase also moves substantially; the large
-4K wall-time gains cannot all be assigned to this small GPU target.
-Final performance endpoints report neither thermal nor power limiting, but
-the earlier stage/control endpoints report both. This is a local GPU
-improvement, not a universal whole-encoder speedup. See
-[S64](#prefetched-initial-color-correlation-s64) for competing schedules,
-35,206 timing windows, arithmetic audits, diagnostic failures, and slower
+Public whole-encode changes are warm -1.49% / +0.40% / -1.36% and cold
+-1.09% / +0.14% / -0.57% at 4K / 1080p / Flower, with broad paired ranges.
+The unchanged host codestream phase also moves, and earlier Flower wall
+controls regress. Both final performance endpoints report thermal/power
+limiting; 4K batch two loses to serial in all three pairs. This is an exact,
+content-dependent GPU improvement, not a universal whole-encoder speedup.
+See [S65](#exact-zero-tile-malta-responses-s65) for competing layouts,
+25,800 timing windows, causal controls, diagnostic failures, and slower
 observations. Optimization remains ongoing, not maxed out.
 
 The preceding implemented checkpoint, S60 against S58
@@ -10957,6 +10956,243 @@ larger 4K Malta work, remaining resident reconstruction/quantization costs,
 and host serialization remain relevant. Further changes still need explicit
 causal controls and whole-workflow qualification; more streams or reduced
 precision are not justified by this experiment.
+
+
+## Exact zero-tile Malta responses (S65)
+
+S65 compares against S64 `73179fd` on the same RTX 3060 Laptop,
+CUDA 11.8/sm86/MSVC 14.37 configuration. Identified retained S64 candidate
+traces put 4K Malta at about 41.75 ms across its full/LF variants, against
+about 190 ms total GPU work. These are not freshly measured S65 baselines.
+
+### Skip a provably zero response, not its output operation
+
+Each block still scales its original 32-column tile and four-pixel halo.
+While doing so, each thread records whether any scaled value compares
+nonzero. A block-wide OR replaces the existing barrier. If every scaled
+halo value is signed zero, all sixteen directional sums of squares produce
+positive zero, so the response calculation can be omitted. Initialization
+still writes that positive zero; accumulation still executes the original
+addition. Skipping the addition would incorrectly preserve negative zero or
+change exceptional accumulator behavior.
+
+NaNs and infinities compare nonzero and retain the original response path.
+The decision is made after the original scaling arithmetic, not from a
+threshold, channel number, approximate difference, or unscaled input test.
+Both correctly rounded divisions and all nonzero-response arithmetic remain.
+Every thread participates in the cooperative load and collective before any
+partial-tile exit. The existing adaptive heights 8/24/64, 256 threads,
+2D/flat-grid boundary, halo, strides, and initialization policy are unchanged.
+
+Native instructions confirm a uniform branch before the first response
+shared-memory load; the compiler really skips response arithmetic on the
+zero path. In the 64-row LF body the branch is at 0x7f0, preceding the first
+response LDS at 0x800. The collective is BAR.RED.OR, not an extra launch.
+Shared storage is unchanged; the 64-row LF register count falls from 38 to
+36. All twelve new specializations have zero stack/local storage, exactly
+match the guard/replay/sanitizer/workflow prototypes, and leave all 176
+previous GPU bodies instruction-identical. The old fused response and
+separate-pass oracle remain accessible to private conformance tests.
+Allocations, transfers, launches, public API, frame ABI, and quality policy
+do not change.
+
+### Wider tiles and raw-zero detection were competing experiments
+
+The initial sweep tests 27 layouts plus the original dispatch: widths
+16/32/64/128, heights 8 through 128, and 128/256/512-thread variants.
+It covers 18,816 balanced timing windows over twelve synthetic cases, each
+with exact three-stage output and guards. All twelve width-32 controls
+are instruction-identical to the original height/grid/frequency variants.
+The independent guard sweep passes 5,184 fixtures/15,552 comparisons.
+
+Eighteen real stage captures then replay twelve selected layouts in 5,184
+balanced windows. Width 64/height 24 improves the six 4K stages by
+0.40-2.08% and HD by 0.89-4.97%, but regresses Flower by 0.41-3.31%.
+Larger tiles are not consistently better: width 128/height 64 regresses 4K
+by 21.35-32.93%. The occupancy API reports six resident blocks for the
+original 256-thread layouts, four for width 64/height 64, and two for width
+128/height 64, limited by shared storage. These are theoretical ceilings,
+not achieved occupancy measurements.
+
+The captures expose substantial exact-zero populations after psycho-plane
+range removal. MF-x is entirely zero in the captured first evaluation of
+4K, HD, Flower, and three 500x500 corpus photographs. UHF-x is entirely zero
+in 4K/HD, 95.91% zero in Flower, and 97.36-99.95% zero in those photographs.
+Those are observations of content, not structural guarantees about channels;
+the production collective checks every actual scaled tile and halo.
+
+Four zero-aware alternatives are tested: scaled-zero detection with the
+original policy, raw-zero detection with two shared tiles and a second
+barrier on nonzero blocks, and scaled-zero detection with fixed width
+64/height 24 or 32. The raw variant preserves exceptional scaling parameters
+but substantially penalizes dense stages. It and both wider policies are
+rejected. The selected mode keeps the original geometry.
+
+| Selected mode: range over six captured stage medians | Paired time change |
+| --- | ---: |
+| 4K | -9.62% to +0.45% |
+| 1080p | -12.61% to +0.53% |
+| Flower | -38.49% to +1.06% |
+| Keong macan | -54.35% to +2.39% |
+| Riaphotographs | -54.02% to +2.54% |
+| Bliznaca | -50.94% to +5.98% |
+
+The selected corpus MF-x/UHF-x stages win all ten paired rotations each,
+but dense-stage regressions remain, including +5.98% on one Bliznaca stage.
+These two zero-replay cohorts each contain 900 exact-output timing windows;
+all four alternatives also pass 3,200 guarded fixtures/9,600 comparisons.
+Across wide and zero replays, 25,800 timing windows are retained. Replay
+packs the first full-resolution six-stage evaluation and repeats three
+launches; it does not reproduce every iteration, subscale, workflow stride,
+or launch dependency. Independent stage medians are not summed into a claimed
+whole-encode speedup. Host FP32 population counts are not a CPU output oracle.
+
+### Full-workflow controls retain the adverse observations
+
+The same-binary control changes only the Malta dispatch. All 46 encoded
+pairs for each of modes 1 and 3 match frozen S64 hashes. This control gate
+reuses S64 decoded evidence; it is distinct from fresh release decoding.
+The first six-permutation wall cohort records selected-mode whole changes
+of -0.76% / -0.39% / +4.49% at 4K / HD / Flower. Flower loses all six pairs,
+with a +0.23% to +45.66% range. That cohort is retained, not replaced.
+
+The subsequent alternating seven-pair controls use three warmups/seven
+samples, or zero warmups/one cold sample:
+
+| S65 same-binary control | Quantization pipeline | Codestream encoding | Whole encode | Whole wins / 7 |
+| --- | ---: | ---: | ---: | ---: |
+| Warm 4K | -2.54% | -4.36% | -2.12% | 7 |
+| Warm 1080p | -0.67% | -2.31% | -1.26% | 6 |
+| Warm Flower | +1.30% | +2.04% | +1.61% | 2 |
+| Cold 4K | -1.20% | -5.79% | -2.26% | 5 |
+| Cold 1080p | +4.05% | -1.74% | +3.06% | 2 |
+| Cold Flower | -0.44% | +1.95% | -0.03% | 4 |
+| Warm Keong macan | +1.96% | -0.44% | +0.02% | 3 |
+| Warm Riaphotographs | -1.61% | -1.52% | -0.07% | 4 |
+| Warm Bliznaca | -0.22% | -0.98% | -1.37% | 4 |
+
+Two alternating trace pairs per workload cover both selected and wider-zero
+controls: 24 traces total. Each retains 24 Malta launches and the complete
+untargeted kernel sequence; total launch counts are 391 at 4K/Flower and
+378 at HD. Selected-mode target/total GPU time changes are:
+
+| S65 complete trace | Target GPU pair 1 / 2 | Total GPU pair 1 / 2 |
+| --- | ---: | ---: |
+| 4K | -20.93% / +0.30% | -7.12% / +13.57% |
+| 1080p | -15.95% / -11.19% | -2.51% / -1.28% |
+| Flower | -8.42% / -8.71% | -0.95% / -1.08% |
+
+The slower second 4K pair is not excluded. Target launch API time also
+scatters, including +14.39% in one HD pair. The width-64/height-24 zero
+control improves 4K target time 18.87-20.79% and HD 12.28-18.40%, but
+regresses Flower target time 2.34-2.47% in both pairs. This supports retaining
+the original geometry, not a claim that the selected mode wins every stage
+or workflow. Total-GPU and host-serialization changes cannot all be assigned
+to skipped Malta arithmetic. Instrumented traces are not release wall times.
+
+### Qualification and retained evidence
+
+All 73 CUDA tests, 50 CPU tests, and five host ASan targets pass. The permanent
+Malta suite now checks 1,856 guarded fixtures/5,568 three-stage comparisons,
+including zero/denormal tiles, sparse halo-edge values, isolated NaNs,
+negative-zero and exceptional accumulators, and zero normalization parameters.
+It retains the old fused oracle checks. Thirty-two tall fixtures cover both
+sides of the old and current flat-grid boundaries, including all-zero input.
+
+Four release Malta sanitizer tools each pass 168 fixtures/504 comparisons;
+full AQ passes memcheck/initcheck/synccheck. The independent four-tool
+prototype campaign covers 320 fixtures/960 comparisons per tool. Memcheck
+explicitly enables stream-ordered race and leak checking; racechecks report
+zero hazards. No full-AQ racecheck is run. All 58 newly encoded parent/candidate
+pairs are byte-identical, freshly decoded at the correct dimensions, and have
+identical independent Butteraugli scores, including the extra entropy modes.
+
+The first wide diagnostic failed to compile because of a missing string
+include and ambiguous initializer lists; corrected sources and all failed
+logs remain. An unused renamed synthetic entry in the wide replay retains a
+missing-return warning but is never called. A release-runner label replacement
+mistakenly requested nonexistent vcvars65.bat after the CUDA/CPU suites had
+passed. Its failed script/log remain; the corrected runner resumed at ASan
+without overwriting those results. These are harness issues, not GPU faults.
+Native extraction and racecheck delays completed successfully. The user was
+notified during unexpectedly slow diagnostics; no firewall or permission block
+was confirmed and no OS security settings were changed.
+
+An initial evidence-parser assertion expected the older CTest success
+wording. The retained log actually says "100% tests passed out of 73".
+The corrected parser accepts both success formats and independently counts
+all 73 passed rows; no functional test was rerun or relabeled. Its failed
+validator snapshot and first pre-freeze report remain.
+
+### Release wall and batch measurements
+
+These are separate parent/release executables, not the dispatch-control
+binary. Each cohort has seven alternating pairs per workload, three warmups
+and five samples for warm runs, zero warmups and one sample for cold runs.
+All raw fields remain: 41 in the diagnostic phase probe, seven in the public
+benchmark. Negative percentages mean less elapsed time. Rows are medians of
+paired ratios, not ratios of independent medians.
+
+| S65 release comparison | Quantization pipeline | Codestream encoding | Whole encode | Whole wins / 7 |
+| --- | ---: | ---: | ---: | ---: |
+| Phase warm 4K | -3.02% | -2.45% | -2.27% | 5 |
+| Phase warm 1080p | -1.02% | +3.40% | +0.56% | 2 |
+| Phase warm Flower | -3.91% | -3.34% | -5.48% | 5 |
+| Phase cold 4K | -2.26% | -2.02% | -2.37% | 4 |
+| Phase cold 1080p | -3.44% | -4.35% | -1.81% | 5 |
+| Phase cold Flower | -2.09% | +1.18% | -0.65% | 4 |
+| Public warm 4K | -1.85% | -6.53% | -1.49% | 5 |
+| Public warm 1080p | -1.75% | +0.88% | +0.40% | 3 |
+| Public warm Flower | -3.40% | +1.37% | -1.36% | 4 |
+| Public cold 4K | -2.97% | -0.16% | -1.09% | 4 |
+| Public cold 1080p | +0.23% | +0.48% | +0.14% | 2 |
+| Public cold Flower | -1.06% | +1.33% | -0.57% | 4 |
+
+Whole-time ranges remain broad. Warm public 4K spans -7.22% to +4.79%,
+HD -10.84% to +2.98%, and Flower -30.21% to +7.78%. Cold Flower spans
+-57.94% to +20.54%. The unchanged host codestream phase moves by -6.53%
+in warm public 4K and +3.40% in warm phase HD. The local instruction/replay
+evidence supports skipped work; it does not explain every host timing change
+or establish significant end-to-end improvements in these noisy cohorts.
+
+The current batch policy uses one warmup and three alternating serial/batch
+pairs, checking each output against its serial reference. These ratios are
+within S65, not S64-to-S65 speedups:
+
+| Current S65 batch policy | Batch 1 | Batch 2 | Batch 4 |
+| --- | ---: | ---: | ---: |
+| 1080p fully-resident | 1.048x | 1.192x | 1.284x |
+| 1080p maximum-throughput | 0.823x | 1.495x | 1.886x |
+| 4K fully-resident | 1.010x | 0.961x | not run |
+
+4K batch two loses all three pairs (0.934-0.999x), with 425.03 ms per image
+versus 387.89 ms at batch one. Maximum-throughput batch one also loses all
+three pairs. 4K batch four is not run, and no lane-count policy changes.
+
+Release timing endpoints are 68 C/P3/1,732 MHz/30.41 W and
+70 C/P3/240 MHz/22.68 W, both reporting thermal and power limiting. Earlier
+wide replay ends at 67 C/P3/1,777 MHz/35.93 W with both active. The selected
+wall control moves from 55 C/P0/1,282 MHz/6,000 MHz memory/22.39 W with
+neither limit to 64 C/P3/1,282 MHz/5,500 MHz memory/28.15 W with both active.
+These are endpoint snapshots, not continuous samples or explanations of
+individual outliers. No clock normalization or system-setting changes are
+made, and separate cohorts are not pooled.
+
+Reproduction and retained failures are under ignored
+`build-cuda-ninja/profiles/s65_*`: candidate sources/binaries, raw screens,
+36 stage captures, native instructions/resources, all 24 trace/SQLite pairs,
+quality artifacts, sanitizer reports, release timings, and validators.
+The checkpoint retains 39 release binaries/libraries and five source/document
+snapshots. The validator recomputes source/native equivalence, every timing
+rotation/statistic, trace sequences and GPU/API totals, decoded dimensions
+and hashes, documentation tables, and frozen manifests. S59-S64 archived
+artifacts remain unchanged.
+
+The backend is not maxed out. Nonzero Malta still scales the full halo and
+executes the original divisions and directional response; reconstruction,
+quantization, other psycho stages, and host serialization remain material.
+The rejected wider/raw-zero schedules constrain the next investigation.
+Neither more streams nor approximate zero thresholds follow from this result.
 
 
 ## Work that should not lead the next cycle

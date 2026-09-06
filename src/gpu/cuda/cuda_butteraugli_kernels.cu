@@ -1351,13 +1351,117 @@ __global__ void MaltaScaleResponseKernel(const float* reference,
   }
 }
 
-template <unsigned int TileHeight, bool FlatGrid>
+template <unsigned int TileHeight, bool LowFrequency, bool FlatGrid>
+__global__ void ZeroAwareMaltaScaleResponseKernel(const float* reference,
+                                         const float* distorted,
+                                         float* accumulation,
+                                         CudaButteraugliMaltaParams params) {
+  constexpr unsigned int kTileValues =
+      kMaltaTileStride * (TileHeight + 2 * kMaltaRadius);
+  static_assert(TileHeight % kMaltaTileHeight == 0);
+  __shared__ float tile[kTileValues];
+  uint32_t origin_x = blockIdx.x * kMaltaTileWidth;
+  uint32_t origin_y = blockIdx.y * TileHeight;
+  if constexpr (FlatGrid) {
+    const uint32_t tile_columns =
+        (params.width + kMaltaTileWidth - 1) / kMaltaTileWidth;
+    origin_x = (blockIdx.x % tile_columns) * kMaltaTileWidth;
+    origin_y = (blockIdx.x / tile_columns) * TileHeight;
+  }
+  const MaltaScaleParams scale{params.width,
+                               params.height,
+                               params.reference_stride,
+                               params.distorted_stride,
+                               0,
+                               static_cast<uint32_t>(LowFrequency),
+                               params.norm2_0_gt_1,
+                               params.norm2_0_lt_1,
+                               params.norm};
+  // A tile (including its halo) containing only signed zeros has a +0
+  // response. Still initialize or add that result: skipping the store/add
+  // would change signed-zero and exceptional accumulation behavior.
+  // Scale directly into the shared response tile, including its halo. This
+  // repeats halo arithmetic but avoids an intermediate plane and a launch.
+  // Every thread participates in the load/barrier, even in a partial tile.
+  bool any_nonzero = false;
+  for (unsigned int index = threadIdx.x; index < kTileValues;
+       index += blockDim.x) {
+    const int x = static_cast<int>(origin_x + index % kMaltaTileStride) -
+                  static_cast<int>(kMaltaRadius);
+    const int y = static_cast<int>(origin_y + index / kMaltaTileStride) -
+                  static_cast<int>(kMaltaRadius);
+    float value = 0.0f;
+    if (x >= 0 && y >= 0 && x < static_cast<int>(params.width) &&
+        y < static_cast<int>(params.height)) {
+      value = MaltaScaleValue(
+          reference[static_cast<size_t>(y) * params.reference_stride + x],
+          distorted[static_cast<size_t>(y) * params.distorted_stride + x],
+          scale);
+    }
+    tile[index] = value;
+    any_nonzero |= value != 0.0f;
+  }
+  // This collective also publishes the entire halo before any response reads.
+  // NaN and infinity compare nonzero, so they retain the original arithmetic.
+  const bool nonzero = __syncthreads_or(any_nonzero);
+  const uint32_t local_x = threadIdx.x % kMaltaTileWidth;
+  if constexpr (TileHeight == kMaltaTileHeight) {
+    const uint32_t local_y = threadIdx.x / kMaltaTileWidth;
+    const uint32_t x = origin_x + local_x;
+    const uint32_t y = origin_y + local_y;
+    if (x >= params.width || y >= params.height) return;
+    const float* center = tile + (local_y + kMaltaRadius) * kMaltaTileStride +
+                          local_x + kMaltaRadius;
+    const float result =
+        nonzero ? (LowFrequency ? MaltaLf(center) : MaltaFull(center)) : 0.0f;
+    const size_t output = static_cast<size_t>(y) * params.accumulation_stride + x;
+    if (params.initialize_accumulation != 0) {
+      accumulation[output] = result;
+    } else {
+      accumulation[output] += result;
+    }
+  } else {
+    // Reuse one loaded halo across multiple output rows per lane, while
+    // retaining 256 threads. Keep responses rolled to bound register liveness.
+    // Every lane has already completed the cooperative load and barrier.
+#pragma unroll 1
+    for (uint32_t local_y = threadIdx.x / kMaltaTileWidth;
+         local_y < TileHeight; local_y += kMaltaTileHeight) {
+      const uint32_t x = origin_x + local_x;
+      const uint32_t y = origin_y + local_y;
+      if (x >= params.width || y >= params.height) continue;
+      const float* center = tile + (local_y + kMaltaRadius) * kMaltaTileStride +
+                            local_x + kMaltaRadius;
+      const float result =
+        nonzero ? (LowFrequency ? MaltaLf(center) : MaltaFull(center)) : 0.0f;
+      const size_t output =
+          static_cast<size_t>(y) * params.accumulation_stride + x;
+      if (params.initialize_accumulation != 0) {
+        accumulation[output] = result;
+      } else {
+        accumulation[output] += result;
+      }
+    }
+  }
+}
+
+template <unsigned int TileHeight, bool FlatGrid, bool ZeroAware = false>
 cudaError_t LaunchFusedMalta(const float* reference, const float* distorted,
                              float* accumulation,
                              CudaButteraugliMaltaParams params, dim3 grid,
                              cudaStream_t stream) {
   constexpr unsigned int kThreads = kMaltaTileWidth * kMaltaTileHeight;
-  if (params.low_frequency != 0) {
+  if constexpr (ZeroAware) {
+    if (params.low_frequency != 0) {
+      ZeroAwareMaltaScaleResponseKernel<TileHeight, true, FlatGrid>
+          <<<grid, kThreads, 0, stream>>>(reference, distorted, accumulation,
+                                          params);
+    } else {
+      ZeroAwareMaltaScaleResponseKernel<TileHeight, false, FlatGrid>
+          <<<grid, kThreads, 0, stream>>>(reference, distorted, accumulation,
+                                          params);
+    }
+  } else if (params.low_frequency != 0) {
     MaltaScaleResponseKernel<TileHeight, true, FlatGrid>
         <<<grid, kThreads, 0, stream>>>(reference, distorted, accumulation, params);
   } else {
@@ -1384,7 +1488,7 @@ static_assert(MaltaTileHeightForSize(32, 1017) == 24);
 static_assert(MaltaTileHeightForSize(1024, 1472) == 24);
 static_assert(MaltaTileHeightForSize(1024, 1473) == 64);
 
-template <unsigned int TileHeight>
+template <unsigned int TileHeight, bool ZeroAware = false>
 cudaError_t LaunchTiledMalta(const float* reference,
                              const float* distorted, float* accumulation,
                              CudaButteraugliMaltaParams params,
@@ -1396,11 +1500,11 @@ cudaError_t LaunchTiledMalta(const float* reference,
   // Avoid per-thread grid division for normal images without introducing a
   // new height limit: CUDA's grid.y is limited to 65535 blocks.
   if (tile_rows > 65535) {
-    return LaunchFusedMalta<TileHeight, true>(
+    return LaunchFusedMalta<TileHeight, true, ZeroAware>(
         reference, distorted, accumulation, params,
         dim3(tile_columns * tile_rows), stream);
   }
-  return LaunchFusedMalta<TileHeight, false>(
+  return LaunchFusedMalta<TileHeight, false, ZeroAware>(
       reference, distorted, accumulation, params, dim3(tile_columns, tile_rows),
       stream);
 }
@@ -2354,13 +2458,13 @@ cudaError_t LaunchCudaButteraugliMalta(const float* reference,
                                        cudaStream_t stream) {
   switch (MaltaTileHeightForSize(params.width, params.height)) {
     case 8:
-      return LaunchTiledMalta<8>(
+      return LaunchTiledMalta<8, true>(
           reference, distorted, accumulation, params, stream);
     case 24:
-      return LaunchTiledMalta<24>(
+      return LaunchTiledMalta<24, true>(
           reference, distorted, accumulation, params, stream);
     default:
-      return LaunchTiledMalta<64>(
+      return LaunchTiledMalta<64, true>(
           reference, distorted, accumulation, params, stream);
   }
 }
@@ -2394,6 +2498,39 @@ cudaError_t LaunchCudaButteraugliMaltaForTesting(
         ? LaunchFusedMalta<64, true>(
             reference, distorted, accumulation, params, grid, stream)
         : LaunchFusedMalta<64, false>(
+            reference, distorted, accumulation, params, grid, stream);
+  }
+}
+
+cudaError_t LaunchCudaButteraugliMaltaZeroAwareForTesting(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
+    cudaStream_t stream) {
+  const uint32_t columns =
+      (params.width + kMaltaTileWidth - 1) / kMaltaTileWidth;
+  if (tile_height != 8 && tile_height != 24 && tile_height != 64) {
+    return cudaErrorInvalidValue;
+  }
+  const uint32_t rows = (params.height + tile_height - 1) / tile_height;
+  const dim3 grid = flat_grid ? dim3(columns * rows) : dim3(columns, rows);
+  switch (tile_height) {
+    case 8:
+      return flat_grid
+        ? LaunchFusedMalta<8, true, true>(
+            reference, distorted, accumulation, params, grid, stream)
+        : LaunchFusedMalta<8, false, true>(
+            reference, distorted, accumulation, params, grid, stream);
+    case 24:
+      return flat_grid
+        ? LaunchFusedMalta<24, true, true>(
+            reference, distorted, accumulation, params, grid, stream)
+        : LaunchFusedMalta<24, false, true>(
+            reference, distorted, accumulation, params, grid, stream);
+    default:
+      return flat_grid
+        ? LaunchFusedMalta<64, true, true>(
+            reference, distorted, accumulation, params, grid, stream)
+        : LaunchFusedMalta<64, false, true>(
             reference, distorted, accumulation, params, grid, stream);
   }
 }

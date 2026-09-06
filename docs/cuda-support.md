@@ -976,6 +976,28 @@ large 4K gains to CfL alone. Final endpoints report neither thermal nor power
 limiting; earlier stage/control endpoints report both. No system settings
 change. The local gain is supported, but the backend is not maxed out.
 
+[S65](cuda-optimization-s1.md#exact-zero-tile-malta-responses-s65) skips Malta
+response arithmetic only when a block-wide check finds that every scaled
+tile/halo value is exactly zero. Original scaling, tile geometry, output
+write/add, exceptional behavior, launches, allocations, and transfers remain.
+All twelve new bodies match guarded/replay/sanitizer/workflow controls; all
+176 previous bodies are unchanged. Wider tiles and double-shared raw-zero
+detection are rejected. Captured zero-rich stages improve substantially, but
+dense-stage and full-workflow regressions remain.
+
+All 73 CUDA / 50 CPU tests, five host ASan targets, seven release GPU sanitizer
+checks, and 58 freshly decoded byte-identical pairs pass. Permanent Malta
+coverage rises to 1,856 three-stage fixtures plus 32 tall-grid fixtures;
+release sanitizers cover 168 fixtures per tool. Five selected-mode trace
+pairs improve Malta GPU duration 8-21%; one 4K pair regresses 0.30%.
+Warm public whole changes are -1.49% / +0.40% / -1.36% at 4K / HD / Flower;
+cold changes are -1.09% / +0.14% / -0.57%. Earlier Flower controls regress,
+host phases scatter, and both release endpoint snapshots report thermal/power
+limiting. 4K batch two loses to serial in all three current-policy pairs.
+No system settings change. Harness failures and slow diagnostics are retained;
+no firewall or permission block is confirmed. This remains a local exact
+optimization, not a universal speedup or a maxed-out backend.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

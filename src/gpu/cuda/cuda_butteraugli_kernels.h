@@ -57,9 +57,15 @@ struct CudaButteraugliMaltaParams {
     const float* reference, const float* distorted, float* accumulation,
     CudaButteraugliMaltaParams params, cudaStream_t stream);
 
-// Internal differential/sanitizer entry: exercise each production specialization
-// on small guarded inputs, independently of the size-based launch policy.
+// Internal differential entry for the prior fused response, with no zero-tile
+// shortcut. Force the tile/grid policy independently of image size.
 [[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaForTesting(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
+    cudaStream_t stream);
+
+// Exercise every production zero-aware specialization on small guarded inputs.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaZeroAwareForTesting(
     const float* reference, const float* distorted, float* accumulation,
     CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
     cudaStream_t stream);
