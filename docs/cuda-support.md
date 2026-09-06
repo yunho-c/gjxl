@@ -1031,6 +1031,27 @@ collected, and no security or clock settings were changed. Ordinary CUDA
 and Nsight Systems runs completed. No firewall block is established, and
 the backend is not considered maxed out.
 
+[S68](cuda-optimization-s1.md#fuse-mirrored-rgb-blur-and-opsin-s68)
+fuses mirrored RGB blur and Opsin using shared 32x8/32x16 tiles, with a
+joint-horizontal fallback at widths <= 24. Geometry screens expose severe
+thin-image regressions from unconditional fusion, so the retained policy
+also accounts for short heights and small tile grids. It eliminates eighteen
+launches per measured encode and the global horizontal-image roundtrip on
+wider inputs, without reducing S67's 25-plane arena or changing transfers.
+All 188 existing GPU bodies are unchanged; three additions match the tested
+prototypes instruction-for-instruction. The 73 CUDA tests, 50 CPU tests,
+five host ASan targets, eleven release GPU sanitizer checks, 261 full-map
+comparisons and 58 freshly decoded pairs pass; outputs remain bit-identical.
+All six parent/candidate comparisons in the twelve release traces improve
+the target stage across three workloads, with unchanged
+non-target launch structure, copies and allocations. Warm whole 4K paired
+medians improve 4.78% in the phase probe and 3.80% in the public benchmark.
+This is not a universal whole-encode speedup: public Flower regresses 4.92%
+warm and 6.74% cold, and public cold 1080p regresses 1.36%. Thermal/power
+limits and all adverse samples remain documented. No new permission or
+firewall block occurred; no system security or performance settings changed.
+The backend is not considered maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

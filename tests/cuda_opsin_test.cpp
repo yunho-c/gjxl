@@ -71,6 +71,12 @@ struct Case {
       planes[12][Offset(12)+tap]=pattern==3 ? (tap==2 ? 1.0f : 0.0f)
           : pattern==5 ? 0.03f+(tap%3)*0.11f : std::exp(-0.5f*delta*delta);
     }
+    if (pattern==6) {
+      constexpr std::array<float,5> weights{1.0f,-2.0f,2.0f,-2.0f,1.0f};
+      for (unsigned tap=0; tap<5; ++tap) planes[12][Offset(12)+tap]=weights[tap];
+    }
+    if (pattern==7) planes[12][Offset(12)+2]=poison;
+    if (pattern==8) planes[12][Offset(12)+2]=std::numeric_limits<float>::infinity();
     std::mt19937 rng(4973u+width+height*31+pattern);
     std::uniform_real_distribution<float> random(-1.0f,3.0f);
     for (size_t p=0; p<3; ++p)
@@ -106,15 +112,20 @@ struct DeviceCase {
 };
 void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern) {
   Case c(width,height,padded,pattern);
-  DeviceCase reference(c),candidate(c);
+  DeviceCase reference(c),candidate(c),materialized(c);
+  // Only the narrow resident path materializes horizontal RGB. The fully
+  // fused paths must not dereference any of these ignored pointers.
+  if (width>24) candidate.plan.intermediate.fill(nullptr);
   const auto original_reference=reference.plan;
   for (unsigned reuse=0; reuse<3; ++reuse) {
     reference.plan=original_reference;
     reference.plan.intensity_target=candidate.plan.intensity_target=
+        materialized.plan.intensity_target=
         std::array<float,3>{80.0f,255.0f,1000.0f}[reuse];
     if (reuse==1) {
       // Exact S47 storage policy: one reused horizontal plane and blurred RGB
-      // overwritten by pointwise XYB. The fused path needs three horizontals.
+      // overwritten by pointwise XYB. The materialized resident oracle and
+      // narrow resident path instead need three distinct horizontals.
       reference.plan.intermediate.fill(reference.plan.intermediate[0]);
       reference.plan.blurred=reference.plan.output;
     }
@@ -126,19 +137,33 @@ void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern) {
             value=-0.75f*value+0.013f;
           }
       candidate.plan.blurred.fill(nullptr);
+      materialized.plan.blurred.fill(nullptr);
     }
     for (size_t p=0; p<13; ++p) {
       reference.planes[p]->Write(c.planes[p]);
       candidate.planes[p]->Write(c.planes[p]);
+      materialized.planes[p]->Write(c.planes[p]);
     }
     reference.Launch(true); candidate.Launch(false);
+    CheckCuda(gjxl::cuda_internal::LaunchCudaButteraugliOpsinMaterializedReference(
+        materialized.plan,nullptr));
     CheckCuda(cudaDeviceSynchronize());
     for (size_t p=0; p<13; ++p) {
       const auto a=reference.planes[p]->Read(), b=candidate.planes[p]->Read();
-      if (p<3 || p==12) { Equal(c.planes[p],a); Equal(c.planes[p],b); }
-      if (p>=9 && p<12) Equal(a,b);
-      if (p>=3 && p<6 && reuse!=1) Equal(a,b);
-      if (p>=6 && p<9) { Equal(c.planes[p],b); if (reuse==1) Equal(c.planes[p],a); }
+      const auto m=materialized.planes[p]->Read();
+      if (p<3 || p==12) {
+        Equal(c.planes[p],a); Equal(c.planes[p],b); Equal(c.planes[p],m);
+      }
+      if (p>=9 && p<12) { Equal(a,b); Equal(a,m); }
+      if (p>=3 && p<6) {
+        if (reuse!=1) Equal(a,m);
+        if (width<=24) Equal(m,b);
+        else Equal(c.planes[p],b);
+      }
+      if (p>=6 && p<9) {
+        Equal(c.planes[p],b); Equal(c.planes[p],m);
+        if (reuse==1) Equal(c.planes[p],a);
+      }
       if (reuse==1 && (p==4 || p==5)) Equal(c.planes[p],a);
       if (p==12) continue;
       for (size_t i=0; i<a.size(); ++i) {
@@ -146,7 +171,8 @@ void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern) {
             i<Case::Offset(p)+static_cast<size_t>(c.strides[p])*height &&
             (i-Case::Offset(p))%c.strides[p]<width;
         if (!active && (std::memcmp(&a[i],&c.planes[p][i],sizeof(float))!=0 ||
-                        std::memcmp(&b[i],&c.planes[p][i],sizeof(float))!=0))
+                        std::memcmp(&b[i],&c.planes[p][i],sizeof(float))!=0 ||
+                        std::memcmp(&m[i],&c.planes[p][i],sizeof(float))!=0))
           throw std::runtime_error("Opsin padding guard overwritten");
       }
     }
@@ -166,13 +192,15 @@ int main(int argc,char** argv) {
       empty.width=zero_width ? 0 : 17; empty.height=zero_width ? 17 : 0;
       CheckCuda(LaunchCudaButteraugliOpsin(empty,nullptr));
       CheckCuda(LaunchCudaButteraugliOpsinReference(empty,nullptr));
+      CheckCuda(LaunchCudaButteraugliOpsinMaterializedReference(empty,nullptr));
     }
     for (unsigned invalid=0; invalid<4; ++invalid) {
       CudaButteraugliOpsinPlan bad;
       bad.width=bad.height=bad.output_stride=1; bad.input_stride.fill(1);
       (invalid<3 ? bad.input_stride[invalid] : bad.output_stride)=0;
       if (LaunchCudaButteraugliOpsin(bad,nullptr)!=cudaErrorInvalidValue ||
-          LaunchCudaButteraugliOpsinReference(bad,nullptr)!=cudaErrorInvalidValue)
+          LaunchCudaButteraugliOpsinReference(bad,nullptr)!=cudaErrorInvalidValue ||
+          LaunchCudaButteraugliOpsinMaterializedReference(bad,nullptr)!=cudaErrorInvalidValue)
         throw std::runtime_error("Invalid Opsin stride not rejected");
     }
     if (mode=="--tall-only") {
@@ -180,19 +208,26 @@ int main(int argc,char** argv) {
       std::cout << "Verified tall Opsin case above 65535 tile rows\n" << std::flush;
       return 0;
     }
-    constexpr std::array<std::array<uint32_t,2>,20> shapes{{
+    constexpr std::array<std::array<uint32_t,2>,29> shapes{{
         {1,1},{1,3},{3,1},{1,19},{19,1},{2,2},{3,7},{7,3},{8,8},{15,15},
-        {16,16},{17,17},{31,31},{32,32},{33,33},{63,17},{64,16},{65,33},{257,67},{511,129}}};
+        {16,16},{17,17},{31,31},{32,32},{33,33},{63,17},{64,16},{65,33},{257,67},{511,129},
+        {24,65},{25,65},{4097,8},{4097,9},{8160,16},{8192,16},
+        {15,1025},{1025,15},{513,257}}};
     size_t cases=0;
     for (const auto& shape:shapes) {
-      if (mode=="--sanitizer" && shape[0]!=1 && shape[0]!=33 && shape[0]!=65) continue;
-      for (bool padded:{false,true}) for (unsigned pattern=0;pattern<6;++pattern) {
+      const bool large_sanitizer=shape==std::array<uint32_t,2>{513,257};
+      if (mode=="--sanitizer" && shape[0]!=1 && shape[0]!=24 && shape[0]!=25 &&
+          shape[0]!=33 && shape[0]!=65 && !large_sanitizer) continue;
+      for (bool padded:{false,true}) for (unsigned pattern=0;pattern<9;++pattern) {
+        if (mode=="--sanitizer" &&
+            (large_sanitizer ? (!padded || pattern!=1) : pattern>=6)) continue;
         Verify(shape[0],shape[1],padded,pattern); ++cases;
       }
       std::cout << "Verified Opsin geometry " << shape[0] << 'x' << shape[1]
                 << " (" << cases << " cases)\n" << std::flush;
     }
-    std::cout << "Verified " << cases << " guarded Opsin cases with three-stage reuse\n" << std::flush;
+    std::cout << "Verified " << cases
+              << " guarded Opsin cases with three-stage reuse and two oracles\n" << std::flush;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n'; return 1;
   }

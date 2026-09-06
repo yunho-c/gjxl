@@ -703,6 +703,104 @@ __global__ void ConvolutionOpsinKernel(OpsinConvolutionPlan plan) {
   }
 }
 
+// Narrow images cannot efficiently fill the shared two-dimensional RGB tile.
+// Share horizontal address/weight work across RGB there, retaining the packed
+// intermediates consumed by ConvolutionOpsinKernel.
+__global__ void JointHorizontalOpsinBlurKernel(OpsinConvolutionPlan plan) {
+  const size_t index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (index >= static_cast<size_t>(plan.width) * plan.height) return;
+  const uint32_t y = static_cast<uint32_t>(index / plan.width);
+  const uint32_t x = static_cast<uint32_t>(index - static_cast<size_t>(y) * plan.width);
+  float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f, normalization = 0.0f;
+#pragma unroll
+  for (int delta = -2; delta <= 2; ++delta) {
+    const int sx = MirrorCoordinate(static_cast<int>(x) + delta,
+                                     static_cast<int>(plan.width));
+    const float weight = plan.weights[delta + 2];
+    sum0 += plan.input[0][static_cast<size_t>(y) * plan.input_stride[0] + sx] * weight;
+    sum1 += plan.input[1][static_cast<size_t>(y) * plan.input_stride[1] + sx] * weight;
+    sum2 += plan.input[2][static_cast<size_t>(y) * plan.input_stride[2] + sx] * weight;
+    normalization += weight;
+  }
+  plan.output[0][index] = sum0 / normalization;
+  plan.output[1][index] = sum1 / normalization;
+  plan.output[2][index] = sum2 / normalization;
+}
+
+template <unsigned Width, unsigned Height>
+__global__ void FusedMirroredOpsinKernel(OpsinConvolutionPlan plan) {
+  constexpr unsigned InputWidth = Width + 4, InputHeight = Height + 4;
+  __shared__ float horizontal[3][Width * InputHeight];
+  __shared__ float raw[3][InputWidth * InputHeight];
+  const uint32_t columns = (plan.width + Width - 1) / Width;
+  const uint32_t origin_x = (blockIdx.x % columns) * Width;
+  const uint32_t origin_y = (blockIdx.x / columns) * Height;
+  float normalization = 0.0f;
+#pragma unroll
+  for (unsigned tap = 0; tap < 5; ++tap) normalization += plan.weights[tap];
+  // Reflect both axes, including repeated reflection for one-pixel extents.
+  // No lane exits before either barrier, even in a partially filled tile.
+  for (unsigned index = threadIdx.x; index < InputWidth * InputHeight;
+       index += blockDim.x) {
+    const int x = MirrorCoordinate(static_cast<int>(origin_x + index % InputWidth) - 2,
+                                     static_cast<int>(plan.width));
+    const int y = MirrorCoordinate(static_cast<int>(origin_y + index / InputWidth) - 2,
+                                     static_cast<int>(plan.height));
+#pragma unroll
+    for (unsigned c = 0; c < 3; ++c)
+      raw[c][index] = plan.input[c][static_cast<size_t>(y) * plan.input_stride[c] + x];
+  }
+  __syncthreads();
+  // A reflected raw row has the same horizontal result as the corresponding
+  // reflected row of the materialized horizontal image. Keep both divisions
+  // and each five-tap FMA chain in their original order.
+  for (unsigned index = threadIdx.x; index < Width * InputHeight;
+       index += blockDim.x) {
+    const unsigned lx = index % Width, ly = index / Width;
+    const uint32_t x = origin_x + lx;
+    float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f;
+    if (x < plan.width) {
+#pragma unroll
+      for (unsigned tap = 0; tap < 5; ++tap) {
+        const unsigned source = ly * InputWidth + lx + tap;
+        const float value0 = raw[0][source];
+        const float value1 = raw[1][source];
+        const float value2 = raw[2][source];
+        const float weight = plan.weights[tap];
+        sum0 += value0 * weight;
+        sum1 += value1 * weight;
+        sum2 += value2 * weight;
+      }
+    }
+    horizontal[0][index] = sum0 / normalization;
+    horizontal[1][index] = sum1 / normalization;
+    horizontal[2][index] = sum2 / normalization;
+  }
+  __syncthreads();
+  for (unsigned index = threadIdx.x; index < Width * Height; index += blockDim.x) {
+    const unsigned lx = index % Width, ly = index / Width;
+    const uint32_t x = origin_x + lx, y = origin_y + ly;
+    if (x >= plan.width || y >= plan.height) continue;
+    float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f;
+#pragma unroll
+    for (unsigned tap = 0; tap < 5; ++tap) {
+      const float weight = plan.weights[tap];
+      sum0 += horizontal[0][index + tap * Width] * weight;
+      sum1 += horizontal[1][index + tap * Width] * weight;
+      sum2 += horizontal[2][index + tap * Width] * weight;
+    }
+    const float3 blurred = make_float3(sum0 / normalization, sum1 / normalization,
+                                       sum2 / normalization);
+    const unsigned source = (ly + 2) * InputWidth + lx + 2;
+    const float3 input = make_float3(raw[0][source], raw[1][source], raw[2][source]);
+    const float3 output = OpsinFromBlurredRgb(input, blurred, plan.intensity_target);
+    const size_t destination = static_cast<size_t>(y) * plan.output_stride + x;
+    plan.output[0][destination] = output.x;
+    plan.output[1][destination] = output.y;
+    plan.output[2][destination] = output.z;
+  }
+}
+
 __global__ void LowMediumKernel(const float* xyb0, const float* xyb1,
                                 const float* xyb2, const float* blurred0,
                                 const float* blurred1, const float* blurred2,
@@ -2254,6 +2352,51 @@ cudaError_t LaunchOpsinImpl(const CudaButteraugliOpsinPlan& plan,
   return CheckLaunch();
 }
 
+cudaError_t LaunchResidentOpsinImpl(const CudaButteraugliOpsinPlan& plan,
+                                   cudaStream_t stream) {
+  if (plan.width == 0 || plan.height == 0) return cudaSuccess;
+  if (plan.output_stride < plan.width) return cudaErrorInvalidValue;
+  for (uint32_t stride : plan.input_stride)
+    if (stride < plan.width) return cudaErrorInvalidValue;
+  OpsinConvolutionPlan fused{};
+  for (size_t channel = 0; channel < 3; ++channel) {
+    fused.input[channel] = plan.input[channel];
+    fused.intermediate[channel] = plan.intermediate[channel];
+    fused.output[channel] = plan.output[channel];
+    fused.input_stride[channel] = plan.input_stride[channel];
+  }
+  fused.weights = plan.weights;
+  fused.width = plan.width;
+  fused.height = plan.height;
+  fused.output_stride = plan.output_stride;
+  fused.intensity_target = plan.intensity_target;
+  if (plan.width <= 24) {
+    // Avoid loading mostly inactive columns of a shared RGB tile.
+    auto horizontal = fused;
+    for (size_t channel = 0; channel < 3; ++channel)
+      horizontal.output[channel] = plan.intermediate[channel];
+    JointHorizontalOpsinBlurKernel
+        <<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0, stream>>>(horizontal);
+    const cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+    const unsigned blocks = ((plan.width + 31) / 32) * ((plan.height + 15) / 16);
+    ConvolutionOpsinKernel<16><<<blocks, kPlaneThreads, 0, stream>>>(fused);
+  } else {
+    const uint64_t tiles = ((uint64_t{plan.width} + 31) / 32) *
+                           ((uint64_t{plan.height} + 15) / 16);
+    // Shorter tiles reduce partial-row work and expose more blocks on small
+    // images; larger workloads amortize the reflected halo over sixteen rows.
+    if (plan.height <= 8 || tiles < 256) {
+      const unsigned blocks = ((plan.width + 31) / 32) * ((plan.height + 7) / 8);
+      FusedMirroredOpsinKernel<32, 8><<<blocks, kPlaneThreads, 0, stream>>>(fused);
+    } else {
+      const unsigned blocks = static_cast<unsigned>(tiles);
+      FusedMirroredOpsinKernel<32, 16><<<blocks, kPlaneThreads, 0, stream>>>(fused);
+    }
+  }
+  return CheckLaunch();
+}
+
 cudaError_t LaunchLowMediumImpl(const CudaButteraugliLowMediumPlan& plan,
                                bool reference, cudaStream_t stream,
                                bool sequential = false) {
@@ -2370,6 +2513,11 @@ cudaError_t LaunchL2FinalForTest(const CudaButteraugliL2FinalPlan& plan,
 }  // namespace
 
 cudaError_t LaunchCudaButteraugliOpsin(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream) {
+  return LaunchResidentOpsinImpl(plan, stream);
+}
+
+cudaError_t LaunchCudaButteraugliOpsinMaterializedReference(
     const CudaButteraugliOpsinPlan& plan, cudaStream_t stream) {
   return LaunchOpsinImpl(plan, false, stream);
 }

@@ -98,8 +98,10 @@ struct CudaButteraugliFrequencyParams {
     CudaButteraugliFrequencyParams params, cudaStream_t stream);
 
 // Mirrored five-tap RGB blur followed by pointwise Opsin conversion.
-// Fused intermediates are three disjoint packed width*height planes. RGB
-// inputs, intermediates and XYB outputs must be mutually disjoint. The
+// At width <= 24, resident intermediates are three disjoint packed
+// width*height planes; wider resident inputs ignore them and permit null.
+// The materialized resident oracle always needs three such intermediates.
+// RGB inputs, used intermediates and XYB outputs must be mutually disjoint. The
 // separate-pass oracle may reuse one horizontal intermediate and may alias
 // each blurred plane with its output. Blurred/output strides are identical;
 // fused blurred pointers are ignored and may be null.
@@ -120,6 +122,9 @@ struct CudaButteraugliOpsinPlan {
     const CudaButteraugliOpsinPlan& plan, cudaStream_t stream);
 
 [[nodiscard]] cudaError_t LaunchCudaButteraugliOpsinReference(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliOpsinMaterializedReference(
     const CudaButteraugliOpsinPlan& plan, cudaStream_t stream);
 
 // 33-tap separable blur followed by low/medium-frequency construction.

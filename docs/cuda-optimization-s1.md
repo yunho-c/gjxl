@@ -11587,6 +11587,275 @@ mixed/adverse timings visible. Do not retain either reference-mask cache,
 claim changed numerical behavior, or treat this checkpoint as a maxed-out
 backend. Further speed-focused work remains open.
 
+## Fuse mirrored RGB blur and Opsin (S68)
+
+S68 starts from S67 `b69fde4` and targets fully-resident Butteraugli input
+traffic and launch overhead. S67's retained candidate traces contain eighteen
+horizontal five-tap RGB convolutions and six vertical/Opsin kernels per
+encode. Their independent 4K medians are 6.97 and 6.94 ms; 1080p is 0.964 and
+1.162 ms, and Flower is 0.151 and 0.161 ms. `s68_baseline.json` identifies and
+hashes those historical captures; these are not fresh S68 baseline timings.
+
+The old resident path already fuses vertical blur with pointwise Opsin but
+still writes and rereads three full horizontal RGB planes. S68 replaces that
+four-launch bundle with a shared-memory two-dimensional tile on sufficiently
+wide images. A cooperatively loaded, reflected RGB halo feeds the ordered
+horizontal five-tap sums; their rounded results remain in shared memory for
+the ordered vertical sums and unchanged Opsin conversion. The original RGB
+sample is also reused from the raw tile. Both divisions and FMA chains keep
+their previous order. No approximate reciprocal or global fast math is added.
+
+For three full-resolution and three half-resolution psycho preparations,
+eliminating the intermediate image roundtrip removes
+`24 * 3 * (full_pixels + half_pixels)` logical image-access bytes: 746,064,072
+at odd 4K and 186,408,072 at odd 1080p. These are not measured DRAM bytes;
+shared tiles repeat halo input loads and the cache can serve some accesses.
+There is no additional arena reduction: S67's 25 full working planes remain,
+because narrow Opsin and subsequent 33-tap XYB work still need horizontal
+storage. The verified arenas remain 912,045,108 / 227,862,004 / 29,855,412 bytes
+for odd 4K / odd 1080p / Flower, respectively.
+
+### Geometry experiments and selected implementation
+
+An eleven-mode probe compares the original four-launch operation (0), joint
+RGB horizontal plus original vertical/Opsin (1), direct-input fused tiles
+32x8/16/32 (2/3/4), shared-input fused tiles 32x8/16/32 (5/6/7), shared 64x16
+(8), an instruction-identical duplicate of the old horizontal kernel (9),
+and direct-input 64x16 (10). Full fusion permits null horizontal pointers.
+All modes pass 5,148 guarded fixtures across 26 geometries, packed/padded
+layouts and nine patterns, with three reuse passes: 15,444 bitwise output
+comparisons. Patterns include zero-sum, NaN and infinite weights. All eleven
+modes also pass the forced 1 x 4,194,305 tall case beyond 65,535 tile rows.
+
+Four separate synthetic timing cohorts retain 2,904 / 2,904 / 8,228 / 4,840
+event windows, totaling 18,876 windows and 780 paired summaries. Each window
+contains three graph-captured complete Opsin operations; its reported time
+is divided by three. Eight warmup graphs per mode precede twenty-two
+balanced forward/reverse orders across all eleven modes. Every window checks
+all three guarded XYB arrays against the seven-launch oracle outside timing;
+inputs, weights, ignored buffers and remaining guards are checked separately.
+These are Gaussian-weight synthetic RGB fixtures, not captured encoder-stage
+inputs. No adverse samples are trimmed.
+
+Shared 32x16 halves odd-4K operation time in the initial packed/padded screen
+(-50.03% / -50.28%, 22/22 wins each); direct 32x16 gives -46.71% / -46.28%.
+However, unconditional shared 32x16 is wrong for thin images: the
+1 x 1,048,577 fixture regresses +164.46% / +124.59%, 3 x 32,767 regresses
++73.33% / +40.06%, and 7 x 4,097 regresses +16.29% / +13.71%. Inactive columns
+and repeated halo work outweigh saved global materialization there. Joint
+horizontal RGB avoids that penalty. Widths 24-26 show mixed packed/padded
+crossover; widths 27-31 favor fusion in the measured tall fixtures. Short
+images and small tile grids favor eight rows, while larger grids amortize
+the halo better with sixteen rows.
+
+The retained policy is a measured compromise, not a universal optimum:
+
+| Geometry | Resident operation | Launches per psycho preparation |
+| --- | --- | ---: |
+| Width <= 24 | Joint RGB horizontal, then original vertical/Opsin | 2 |
+| Wider, height <= 8 or fewer than 256 32x16 tiles | Shared fused 32x8 | 1 |
+| Remaining wider images | Shared fused 32x16 | 1 |
+
+The tile-count decision uses 64-bit arithmetic. Tiles use flattened block
+indexing, repeated mirror reflection and no early exit before either shared
+barrier. The internal plan layout and public ABI do not change. Wider inputs
+ignore horizontal pointers; the narrow path still requires three disjoint
+packed intermediates. Production contains neither the experimental mode
+environment variable nor rejected direct/large-tile specializations.
+
+Native extraction finds 70 probe bodies (60 unchanged parent bodies plus
+ten additions), 198 in each full-encoder diagnostic control (188 unchanged
+plus ten), and 191 in release (188 unchanged plus three). The duplicate
+horizontal control is instruction-identical to its parent. All three added
+release bodies are instruction-identical to the tested/timed prototypes.
+Joint horizontal uses 40 registers and no shared storage. Shared fused 32x8
+and 32x16 use 37 registers and 9,792 / 16,320 shared bytes. None uses stack
+or local storage. These resources are not a measurement of achieved occupancy.
+
+### Correctness and release qualification
+
+The first full-encoder control keeps modes 0/1/3/6/9 in one executable;
+each passes 31 prepared cases, and modes 0/3/6 produce identical sets of 261
+full maps/scores across 29 extents, three policies and three reuse scenarios.
+The selected-policy control adds mode 11, dispatching to modes 1/5/6; modes
+0/11 pass the same functional and full-map gates. All memory statistics match
+the independent 25-plane accounting, with one prepare allocation and no
+comparison allocation. The first control's 230 encodes and the policy
+control's 92 encodes match the 46 frozen S67 codestreams. Those diagnostic
+hash gates do not claim fresh decoding or metric computation.
+
+Fresh release qualification passes:
+
+- The release build, all 73 CUDA tests (106.01 seconds), all 50 CPU tests
+  (15.74 seconds), and five existing host AddressSanitizer targets.
+- The expanded permanent Opsin fixture: 29 shapes, nine patterns and both
+  layouts, totaling 522 guarded cases with three-stage reuse. Both the old
+  seven-launch separate oracle and the old four-launch materialized resident
+  oracle are checked. Width 24/25, height 8/9, 255/256-tile boundaries,
+  multiscale shapes, exceptional weights, input/weight immutability, ignored
+  buffers and prefix/suffix/row guards are covered. The existing production
+  tall case now exercises narrow dispatch; forced tall fused coverage belongs
+  to the eleven-mode prototype, not that permanent tall test.
+- All four GPU sanitizer tools on 264 prototype fixtures (792 reuse
+  comparisons per tool), plus eleven release checks: all four tools on the
+  85-case scoped Opsin fixture and seven-case prepared fixture, and memcheck,
+  initcheck and synccheck on AQ. No full-AQ racecheck is claimed. Memcheck
+  enables full leak checks and stream-ordered race tracking; all errors,
+  leak counts and race warnings are zero.
+- A fresh release set of 261 full maps/scores is bit-identical to S67 and
+  all resource rows match the independent unchanged 25-plane model.
+- Fifty-eight fresh parent/candidate decoded pairs: 46 main cases, six
+  high-density and six maximum-compression. Both codestream and decoded PFM
+  bytes match, with identical dimensions and Butteraugli scores. None is
+  flagged by size or quality thresholds.
+
+### Full-workflow measurements
+
+Six same-binary diagnostic cohorts retain seven alternating baseline/candidate
+pairs per workload. Warm processes use three warmups and seven samples;
+cold processes use zero warmups and one sample. All 41 raw phase fields,
+process time bounds and size checks remain. Codestream identity comes from
+the separate hash gates above, not these size checks. Percentages below are
+the median of paired candidate/parent ratios minus one; negative is faster.
+Independent medians need not yield the paired percentage. Whole wins are
+out of seven.
+
+| Diagnostic control | Quantization pipeline | Codestream encoding | Whole encode | Whole wins |
+| --- | ---: | ---: | ---: | ---: |
+| Mode 6 warm 4K | -3.90% | -7.87% | -3.98% | 6 |
+| Mode 6 warm 1080p | -2.61% | -0.09% | -1.12% | 4 |
+| Mode 6 warm Flower | -1.62% | -2.08% | -1.86% | 5 |
+| Mode 6 cold 4K | +0.22% | -7.25% | -0.88% | 5 |
+| Mode 6 cold 1080p | -2.53% | +3.22% | +0.01% | 3 |
+| Mode 6 cold Flower | -5.53% | +1.23% | -3.53% | 4 |
+| Mode 3 warm 4K | -4.66% | +2.69% | -2.53% | 5 |
+| Mode 3 warm 1080p | -1.19% | +0.97% | -0.95% | 4 |
+| Mode 3 warm Flower | +0.71% | -0.55% | -0.49% | 4 |
+| Mode 9 warm 4K | -0.21% | +4.95% | -0.64% | 4 |
+| Mode 9 warm 1080p | +0.62% | +0.53% | +0.06% | 3 |
+| Mode 9 warm Flower | -0.52% | +3.51% | +3.49% | 3 |
+| Mode 11 warm 4K | -4.10% | -3.37% | -4.69% | 7 |
+| Mode 11 warm 1080p | -0.84% | -1.62% | -1.88% | 4 |
+| Mode 11 warm Flower | +0.01% | +1.52% | +1.22% | 3 |
+| Mode 11 cold 4K | -5.83% | -16.05% | -8.66% | 7 |
+| Mode 11 cold 1080p | -1.18% | -2.54% | -1.94% | 5 |
+| Mode 11 cold Flower | -3.95% | -9.40% | -5.20% | 5 |
+
+The native-identical mode-9 control's Flower whole median is +3.49% and
+range -2.72% to +39.22%; unchanged code also exhibits material scatter.
+Selected-policy mode 11 wins all seven 4K whole pairs in both warm and cold
+cohorts, but warm Flower regresses +1.22% (range -7.85% to +23.84%).
+Its endpoints are 57 C/P0/1,282 MHz SM/6,000 MHz memory/22.50 W without
+reported limits, then 64 C/P3/1,282 MHz SM/5,500 MHz memory/24.63 W with
+thermal and power limits active. These snapshots do not explain individual
+samples. Large codestream-phase changes are not caused by new entropy code.
+
+Each full-encoder control also has twelve Nsight Systems traces: two
+alternating pairs at 4K, 1080p and Flower, three warmups and one captured
+encode. Fixed mode 6 reduces the target bundle by -45.94% / -32.72% at 4K,
+-45.41% / -39.96% at 1080p, and -37.68% / -37.50% at Flower. Selected policy
+reduces it by -32.68% / -40.70%, -44.23% / -47.11%, and -37.84% / -38.02%,
+respectively. Both sets remove exactly eighteen launches, with unchanged
+non-target kernel structure, allocation requests and copy counts/bytes.
+These are diagnostic control binaries, not release-binary qualification.
+
+Four separate release cohorts compare retained S67 with the production S68
+build. They use seven alternating pairs each, three warmups/five samples for
+warm processes and zero/one for cold. The phase probe retains 41 raw fields;
+the public benchmark retains seven. No GPU jobs overlap these measurements.
+
+| Release cohort | Quantization pipeline | Codestream encoding | Whole encode | Whole wins |
+| --- | ---: | ---: | ---: | ---: |
+| Phase warm 4K | -5.22% | -3.93% | -4.78% | 7 |
+| Phase warm 1080p | -1.72% | -1.71% | -1.19% | 5 |
+| Phase warm Flower | -3.46% | -1.28% | -2.03% | 6 |
+| Phase cold 4K | +1.41% | -1.49% | -1.53% | 4 |
+| Phase cold 1080p | -1.86% | -0.98% | -1.49% | 4 |
+| Phase cold Flower | +0.45% | +1.53% | +1.17% | 3 |
+| Public warm 4K | -3.59% | +1.17% | -3.80% | 6 |
+| Public warm 1080p | -4.03% | -2.01% | -0.77% | 5 |
+| Public warm Flower | +1.55% | +7.50% | +4.92% | 2 |
+| Public cold 4K | -3.72% | -4.02% | -1.88% | 5 |
+| Public cold 1080p | -2.27% | +3.83% | +1.36% | 3 |
+| Public cold Flower | +6.51% | +10.54% | +6.74% | 1 |
+
+Warm 4K agrees directionally between the phase probe and public benchmark:
+phase whole medians are 382.108 -> 363.853 ms and public medians are
+395.942 -> 387.916 ms, while their paired changes are -4.78% and -3.80%.
+The whole paired ranges are -8.35% to -2.57% and -8.16% to +3.61%.
+This does not establish an across-workload speedup. Public warm Flower loses
+five of seven pairs (+4.92%, range -5.21% to +38.59%); public cold Flower
+loses six (+6.74%, range -5.23% to +34.29%). Public cold 1080p is +1.36%,
+and phase cold Flower is +1.17%. All adverse results remain. Release/batch
+endpoints are 63 C/P3/1,282 MHz SM/22.77 W and 70 C/P3/547 MHz SM/25.31 W;
+thermal and power limits are active at both. No clock, power or cooling
+settings were changed.
+
+Twelve fresh release traces independently verify the selected dispatch.
+Each pair preserves all non-target launch order/grid/block/register/shared/
+local metadata, five allocation requests, and copy counts/bytes. The target
+changes from eighteen horizontal plus six vertical/Opsin launches to six
+fused launches. 4K and 1080p use six launches of the 32x16 specialization;
+Flower uses three 32x16 and three 32x8 kernel launches.
+
+| Release trace workload | Target bundle pair changes | Total GPU pair changes | Launches |
+| --- | ---: | ---: | ---: |
+| 4K | -39.08% / -11.81% | -10.68% / +15.27% | 391 -> 373 |
+| 1080p | -43.96% / -40.51% | -2.99% / -2.46% | 378 -> 360 |
+| Flower | -37.60% / -37.27% | -2.05% / -2.08% | 391 -> 373 |
+
+The second 4K parent target bundle happens to take 10.223 ms versus 14.100 ms
+in the first parent capture; candidate times are 9.015 and 8.590 ms.
+The +15.27% total-GPU result remains visible even though the target bundle
+improves in that pair. Instrumented total-GPU changes are not release wall
+times and cannot all be attributed to Opsin. Copies remain H2D 118,254,624 /
+29,631,464 / 4,028,828 bytes, D2H 103,699,012 / 25,924,192 / 3,430,532 bytes,
+and D2D 518,400 / 129,600 / 17,152 bytes for 4K / 1080p / Flower.
+
+Current-policy serial/batch identity checks use one warmup and three
+alternating pairs. These compare batching against serial execution under
+S68, not S67-to-S68 improvements:
+
+| S68 batch policy | Batch 1 | Batch 2 | Batch 4 |
+| --- | ---: | ---: | ---: |
+| 1080p fully resident | 0.991x | 1.238x | 1.208x |
+| 1080p maximum throughput | 1.086x | 1.634x | 2.065x |
+| 4K fully resident | 0.946x | 1.039x | Not run |
+
+4K batch two spans 1.017x-1.117x. Batch four at 4K remains intentionally
+untested on this memory-constrained device.
+
+### Evidence and disposition
+
+Retain the geometry-qualified fusion for its proven local stage reduction
+and repeatable warm 4K benefit, while explicitly retaining the mixed/adverse
+small-image whole timings. It adds no memory saving beyond S67. Fresh 4K
+candidate kernel medians still put the two 64-row Malta responses at 17.00
+and 12.68 ms, low-medium rows at 9.96 ms, fused Opsin at 8.80 ms, and
+erosion/L2/final at 8.60 ms. These remaining stages offer the next bounded
+input-reuse investigations; this checkpoint does not establish a maxed-out
+backend.
+
+Ignored `build-cuda-ninja/profiles/s68_*` evidence retains all prototype,
+control and release sources/objects, complete guards/windows/maps/encodes,
+native instructions/resources, tests, quality metrics, sanitizers, wall
+cohorts, batches and 36 traces. `s68_validate.py` reconstructs raw evidence,
+paired statistics and document tables without rerunning GPU work.
+The checkpoint freezes 39 release binaries/libraries, five source/document
+snapshots and the artifact manifest, and verifies the S59-S67 archives by
+their saved-file hashes.
+
+The first prototype build lacked an explicit `<string>` include for
+`std::stoul`; its source/log and corrected build remain. An initial release
+profiler script assembly split at the wrong import, leaving a no-op capture
+script and a summary script that hit the pre-existing-report guard before
+any GPU launch. Both failed scripts and the error log remain; the corrected
+scripts produced the twelve release traces above without overwriting older
+evidence. No admin/firewall prompt or new permission block was observed.
+S67's optional `ERR_NVGPUCTRPERM` hardware-counter restriction was not
+retried; no security settings or privileges changed. Ordinary CUDA tests,
+sanitizers and Nsight Systems completed normally.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
