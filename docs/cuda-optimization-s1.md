@@ -15,7 +15,7 @@
   vertical blur/low-medium construction, compact prepared Butteraugli scratch,
   fused mirrored RGB blur/Opsin conversion, and packed active-coefficient
   readback into ownership-backed final frame storage, in-place ANS clustering,
-  and hoisted histogram log-table access
+  hoisted histogram log-table access, and borrowed prepared ANS populations
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -29,7 +29,19 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S51 against S50
+below supersede them. The latest implemented checkpoint, S52 against S51
+(`355180e`), borrows validated prepared ANS count arrays instead of initializing
+and copying a full private histogram array. At 6,930 contexts it eliminates
+14.14 MB of source storage. Complete large-partition replay improves 24-32%,
+with identical output and unchanged GPU code. Whole-encode timing is mixed:
+warm release cohorts regress slightly, and cold 1080p regressions remain in
+the record alongside a favorable counterbalanced follow-up. All 71 CUDA /
+50 CPU tests, three host ASan targets, 58 decoded-image pairs, and broad
+partition differentials pass. See
+[S52](#borrowed-prepared-ans-populations-s52) for the controls and limitations.
+This is a targeted work/storage reduction, not a stable universal speedup.
+
+The preceding checkpoint, S51 against S50
 (`ad18132`), removes a full private histogram copy and per-symbol log-table
 initialization checks from host ANS clustering. All 162 GPU bodies and the CUDA
 library are unchanged. Warm entropy-optimization wall time improves by median
@@ -7820,6 +7832,202 @@ include the prepared-population allocation/validation path, unresolved
 whole-workflow variability, and the dominant Malta/wide-blur GPU work. No
 admin/firewall or permission failure was reported, and the performance workflow
 completed normally. Optimization remains active, not maxed out.
+
+## Borrowed prepared ANS populations (S52)
+
+S52 compares against S51 `355180e` on the same RTX 3060 Laptop, MSVC 14.37 /
+CUDA 11.8 Release configuration, on 2026-09-05 America/New_York (September 6
+UTC). This is host preparation on the fully-resident path. GPU code, floating
+point operations, transfer layout, public headers, and ABI are unchanged.
+
+### Locate and remove the remaining copy
+
+A current-source diagnostic separates initial histogram allocation from
+validation/import. For the 6,930-context AC partition, warmed allocation
+medians are about 3.21 / 2.24 ms at 4K / 1080p; validation plus import takes
+3.89 / 3.27 ms. Flower's 1,485 contexts give 0.49 / 0.57 ms. These are scoped
+instrumented observations, not timings to pool with the final cohorts. DC
+and AC entropy workers overlap, so their work must not be added as wall time.
+
+An initial nine-set replay tests the unchanged builder, reserve/push instead
+of zero-initialization, cached symbol extra-bit counts with a proven overflow
+bound, and their combination. On large AC populations the no-initialization
+variant improves preparation by paired 24.1% / 27.9% / 20.7% at 4K / 1080p /
+Flower. The combination is worse than that variant and regresses Flower 4.1%
+against the baseline. It is not adopted. In particular, **the original
+per-bin division and every validation check remain in production**.
+
+Instead, an unmapped prepared partition now constructs a small private vector
+of `DirectAnsHistogramView` records. Each record references the caller's
+read-only 256-bin array and owns its metadata and mutable Shannon cache.
+Clustering reads that view directly. Selected seeds, assigned/merged clusters,
+and canonicalized output retain owning arrays. An initial context map still
+requires merged owned histograms; token-scanned and high-density paths also
+keep their owning working sets. The same algorithm is instantiated for owned
+and borrowed sources, without a separate approximate clustering path.
+
+The span's lifetime covers this synchronous partition build; no view escapes
+into prepared output or asynchronous work. View-vector reallocation does not
+move the referenced population arrays. Every count bin, including tails of
+allegedly empty contexts, is validated before clustering. Counts, totals,
+extra-bit overflow checks, symbol metadata checks, ordered double sums, seed
+ties, assignment order, and output-on-failure behavior remain unchanged.
+Only the partition's private Shannon caches are mutable.
+
+Native `sizeof` checks report 2,080 bytes per owning source histogram versus
+40 per view. Thus the source element storage changes as follows, excluding
+allocator metadata, vector headers, the unchanged caller populations, and
+the small owning cluster vectors:
+
+| Context count | S51 source storage | S52 source storage | Eliminated bytes |
+| ---: | ---: | ---: | ---: |
+| 6,930 | 14,414,400 | 277,200 | 14,137,200 |
+| 1,485 | 3,088,800 | 59,400 | 3,029,400 |
+
+This removes both initialization and copying of the large source arrays,
+not just their initialization. It is storage/traffic accounting, not an RSS
+measurement. Native host output confirms the view instantiation and retains
+the validator's division instruction. All **162 GPU bodies** and the entire
+`gjxl_cuda.lib` are identical to the retained S51 versions.
+
+### Production-source isolated qualification
+
+The oracle embeds the actual candidate source and S51's frozen owning
+histogram, clustering, and partition implementation. Its identity check strips
+only explicit diagnostic/reference additions and compares the candidate with
+production and the reference with the retained S51 source snapshot. It passes
+**17,961 partition checks**: nine captured real partitions plus eleven
+synthetic patterns in mapped/unmapped forms across all **816 HybridUint
+configurations**. Checks cover exact partition/prepared outputs, equal error
+codes and messages, unchanged caller populations, and atomic outputs on
+failure. Nine additional owned-versus-borrowed clustering pairs compare
+integer populations, context maps, and bitwise Shannon costs.
+
+That executable also times complete partition preparation and clustering on
+all nine real captures. There are three warmups and nine alternating-order
+rounds, with three repetitions for large partitions and twenty for small
+ones. Output equality checks and destruction are outside each timed call.
+The large AC partitions give:
+
+| Complete partition replay | 4K | 1080p | Flower |
+| --- | ---: | ---: | ---: |
+| S51 median ms | 15.277 | 16.793 | 2.161 |
+| S52 median ms | 10.806 | 11.926 | 1.467 |
+| Median paired change | -25.9% | -24.0% | -32.1% |
+| Faster rounds | 9/9 | 8/9 | 9/9 |
+
+The small/DC captures are replayed as prepared populations only for isolated
+coverage; the actual encoder still builds those partitions from token streams.
+Their isolated improvements are therefore not claimed as workflow savings.
+The first replay invocation incorrectly used the default HybridUint config for
+the eight-context permutation/order partition and was correctly rejected.
+Encoder source establishes `{0,0,0}` for that partition; the corrected replay
+passes all nine sets. This was diagnostic setup, not a production failure.
+
+### Whole-workflow qualification
+
+Release and same-executable warm comparisons each use seven alternating
+process pairs per workload, three warmups, five samples, and all 41 phase
+fields. Inputs are odd 3839x2159 / 1919x1079 and linear Flower 510x532,
+distance 1.2, effort 7, fully resident, encoding-only. Times below are medians
+of process medians; changes are medians of paired ratios, not ratios of those
+medians. No slower samples are removed.
+
+| Warm release phase | 4K S51 -> S52 ms; paired change | 1080p S51 -> S52 ms; paired change | Flower S51 -> S52 ms; paired change |
+| --- | ---: | ---: | ---: |
+| ANS histogram worker time | 25.493 -> 24.677; -4.0% | 14.456 -> 13.106; -13.3% | 3.073 -> 2.605; -9.6% |
+| Entropy optimization wall time | 20.991 -> 20.568; -0.7% | 17.198 -> 15.261; -15.8% | 4.120 -> 3.365; -7.8% |
+| Codestream encoding wall time | 110.103 -> 113.910; +4.9% | 45.800 -> 44.992; -3.6% | 10.979 -> 10.306; +1.6% |
+| Whole encode | 309.647 -> 318.859; +1.7% | 103.114 -> 102.581; +0.4% | 24.035 -> 23.110; +0.7% |
+
+Entropy wall time improves in 4/7, 4/7, and 5/7 release pairs; whole encode
+improves in only 3/7 each. Whole-encode ranges are [-2.9%, +6.8%],
+[-18.3%, +18.2%], and [-32.5%, +28.9%]. Notably, the unchanged coefficient
+order stage is slower in **all seven** 4K and 1080p release pairs, by paired
+25.3% / 22.1%. This stage precedes the changed ANS preparation. That
+cross-executable observation is unresolved, not credited to the optimization
+and not dismissed as established random noise. Flower's 34.255-ms parent and
+31.277-ms candidate outliers both remain in the report.
+
+The single diagnostic `s52_control.exe` selects S51's frozen preparation and
+clustering with `S52_REFERENCE_PREPARATION`; absence selects the actual
+candidate. It has no production switch. All 46 baseline/optimized/production
+image triples match bytes. Warm control histogram work changes -26.1% /
+-19.1% / -10.4%, entropy wall time -20.5% / -16.7% / -12.6%, and whole encode
+**-4.5% / -5.3% / +0.4%**, with 5/7, 4/7, 3/7 whole-encode wins. The
+36.582-ms optimized Flower outlier and all slower control pairs are retained.
+
+Seven cold release pairs (zero warmups, one sample) give whole-encode medians
+496.704 -> 417.168, 156.118 -> 173.837, and 47.410 -> 45.955 ms, with paired
+changes **-15.0% / +11.3% / -3.5%** and 6/7, 1/7, 5/7 wins. Unchanged
+quantization changes -11.3% / +3.4% / -1.4%, so the large 4K difference is not
+attributed to this host change. A separately retained same-executable cold
+follow-up gives **+0.7% / +9.9% / -3.6%** overall, with 3/7, 1/7, 4/7 wins.
+In that 1080p control, entropy wall time also regresses 2.0%; the repeated
+cold regression cannot be hidden by the favorable isolated or warm results.
+
+To examine that contradiction, a further 1080p cold A/A/B cohort executes all
+six orders twice: A0 and A1 are identical baseline commands/environments, and
+B selects borrowing in the same executable. Across twelve triples, identical
+A1/A0 whole-encode ratios range from -8.8% to +10.2% (median +0.9%). B versus
+the mean of its two contemporaneous baselines gives -2.9% whole encode (9/12
+wins), -17.3% entropy wall time, and -13.9% histogram work (12/12 each).
+The entropy-wall range is [-31.6%, -5.3%]; unchanged quantization is -0.3%
+and coefficient-order work -0.7%. This confirms substantial timing variation
+and supports the targeted reduction in that cohort, but does **not** establish
+the cause of the earlier regressions or replace those results.
+
+The change is retained for eliminating redundant source storage/traffic and
+its independently checked targeted benefit. Stable cross-workload full-encode
+and cold speedups remain unproven. Boundary GPU readings are 60 -> 77 C,
+P0, 1282 -> 1267 MHz, with software power-cap active at the final boundary;
+software thermal-slowdown is inactive at both boundaries. The unchanged 4K
+quantization pipeline is near 175 ms in this final warm cohort versus roughly
+275 ms in earlier cohorts. These cohorts are not pooled, and no GPU speedup,
+clock normalization, or causal thermal diagnosis is claimed.
+
+### Correctness and retained evidence
+
+- All **71 CUDA-enabled tests** pass in 53.48 s; all **50 CPU-only GCC tests**
+  pass in 16.82 s, including installed consumers. Twelve sparse-population
+  fixtures now also exercise initial context maps. New cases reject each of
+  256 hidden malformed bins and cover symbol bounds, total/extra-bit overflow,
+  invalid maximum metadata, and mapped/unmapped merge overflow while checking
+  caller immutability and atomic code/cost outputs.
+- Three fully host-instrumented Clang ASan targets pass: entropy primitives,
+  codestream encoder, and public codestream workflow. Large sparse borrowed
+  inputs are exercised by the entropy target. No new CUDA sanitizer claim is
+  made for unchanged GPU code.
+- All **58 image pairs** match bytes and independently decoded Butteraugli
+  scores with pinned libjxl `e8ff09762481785938d8e4e01333ed3917571161` and
+  linear RGB `RGB_D65_SRG_Rel_Lin`: the 46-case primary matrix plus six legacy
+  high-density and six maximum-compression pairs. Encoding-only and scored
+  outputs agree; high-density uses no explicit effort, while the additional
+  maximum-compression cases use effort 7.
+- Batch byte checks pass with one warmup and three samples. Even 1080p fully
+  resident batch 1/2/4 gives same-version paired speedups 0.934x / 1.403x /
+  1.655x; maximum-throughput gives 1.058x / 1.303x / 1.901x. Even 4K fully
+  resident batch 1/2 gives 1.001x / 1.087x, including a retained 479.185-ms
+  batch-one outlier. These are not cross-version gains.
+
+Ignored `build-cuda-ninja/profiles` evidence includes
+`s52_prepare_probe.{cpp,ps1}` and diagnostics, the four-way preparation replay
+and native assembly, `s52_oracle.{cpp,ps1,txt}` and partition replay summary,
+native GPU/host comparisons, `s52_checks.ps1`, `s52_performance.ps1`,
+`s52_followup.ps1`, primary/control/extra-mode image reports, CTest/ASan logs,
+all warm/cold/control records, `s52_cold_aab.{py,json,txt}`, batch results,
+and GPU boundaries. `s52_report.py` derives paired summaries;
+`s52_validate.py` checks source identities, comparisons, outputs, and hashes.
+`s52_final_binary_hashes.json` and `s52_artifact_hashes.json` freeze retained
+binaries, libraries, source snapshots, and experiment evidence. S51's retained
+files remain unchanged; its validator of live S51 sources is not a validator
+of this later checkpoint.
+
+No admin/firewall or permission error was reported; all runs completed and
+no security, power, cooling, clock, priority, or service settings were changed.
+Remaining work includes the cross-executable coefficient-order regression,
+the cold-run variability, token-scanned DC population construction, and the
+dominant Malta/wide-blur GPU work. Optimization remains active, not maxed out.
 
 ## Work that should not lead the next cycle
 

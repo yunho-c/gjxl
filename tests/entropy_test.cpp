@@ -1322,6 +1322,92 @@ bool CheckSparseDirectAnsPopulations() {
         std::cerr << "Empty or identical ANS contexts did not canonicalize\n";
         return false;
       }
+      // An initial map must merge populations into owned histograms rather
+      // than borrow individual contexts. Compare this fallback as well.
+      const uint32_t mapped_count = std::min(contexts, uint32_t{7});
+      std::vector<uint8_t> initial_map(contexts);
+      for (uint32_t context = 0; context < contexts; ++context) {
+        initial_map[context] = static_cast<uint8_t>(context % mapped_count);
+      }
+      const gjxl::EntropyCodeOptions mapped_options{
+        .context_count = contexts,
+        .initial_context_map = initial_map,
+        .initial_histogram_count = mapped_count,
+      };
+      if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+            views, mapped_options, DirectAnsEntropyMode::kBalanced,
+            &scanned, &scanned_cost).ok() ||
+          !gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+            views, mapped_options, populations, &prepared,
+            &prepared_cost).ok() || scanned != prepared ||
+          scanned_cost != prepared_cost || populations != before) {
+        std::cerr << "Mapped direct ANS populations changed model or input\n";
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool CheckBorrowedDirectAnsValidation() {
+  using gjxl::codestream_internal::PreparedFixedAnsCluster;
+  using gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations;
+  const std::array tokens{gjxl::EntropyToken{0, 0}};
+  const std::array views{gjxl::EntropyTokenStreamView::Interleaved(tokens)};
+  std::vector<PreparedFixedAnsCluster> valid(2);
+  valid[0].counts[0] = valid[0].token_count = 1;
+  gjxl::EntropyCode code;
+  gjxl::EntropyCodeCost cost;
+  if (!OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+        views, {.context_count = 2}, valid, &code, &cost).ok()) {
+    return false;
+  }
+  const auto code_before = code;
+  const auto cost_before = cost;
+  const auto rejected = [&](const std::vector<PreparedFixedAnsCluster>& input,
+                            const gjxl::EntropyCodeOptions& options) {
+    const auto input_before = input;
+    const auto status = OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+      views, options, input, &code, &cost);
+    return status.code() == gjxl::StatusCode::kInvalidArgument &&
+      input == input_before && code == code_before && cost == cost_before;
+  };
+  // Even an allegedly empty context must have every bin checked, including
+  // bins beyond its declared maximum. Borrowing must not trust the metadata.
+  for (size_t symbol = 0; symbol < gjxl::kMaximumAnsAlphabetSize; ++symbol) {
+    auto input = valid;
+    input[1].counts[symbol] = 1;
+    if (!rejected(input, {.context_count = 2})) {
+      std::cerr << "Borrowed ANS skipped a malformed population bin\n";
+      return false;
+    }
+  }
+  for (size_t pattern = 0; pattern < 6; ++pattern) {
+    auto input = valid;
+    auto& population = input[1];
+    if (pattern == 0) population.maximum_symbol = gjxl::kMaximumAnsAlphabetSize;
+    if (pattern == 1) population.extra_bits = 1;
+    if (pattern == 2) {
+      population.counts[0] = UINT64_MAX;
+      population.counts[1] = 1;
+    }
+    if (pattern == 3) {
+      population.counts[16] = population.token_count = UINT64_MAX;
+      population.maximum_symbol = 16;
+    }
+    if (pattern == 4) {
+      population.counts[0] = population.token_count = 1;
+      population.maximum_symbol = 1;
+    }
+    if (pattern == 5) {
+      population.counts[0] = population.token_count = UINT64_MAX;
+    }
+    const std::array<uint8_t, 2> initial_map{0, 0};
+    if (!rejected(input, {.context_count = 2}) ||
+        !rejected(input, {.context_count = 2,
+          .initial_context_map = initial_map, .initial_histogram_count = 1})) {
+      std::cerr << "Borrowed or mapped ANS validation was not atomic\n";
+      return false;
     }
   }
   return true;
@@ -1797,6 +1883,7 @@ int main() {
       !CheckOrdinaryCoderSelectionPolicy() ||
       !CheckBestDirectAnsClusteringRefinement() ||
       !CheckSparseDirectAnsPopulations() ||
+      !CheckBorrowedDirectAnsValidation() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {

@@ -1012,7 +1012,8 @@ struct DirectAnsHistogram {
     return true;
   }
 
-  bool AddHistogram(const DirectAnsHistogram& other) {
+  template <typename Histogram>
+  bool AddHistogram(const Histogram& other) {
     if (total_count >
           std::numeric_limits<uint64_t>::max() - other.total_count ||
         extra_bits >
@@ -1036,7 +1037,29 @@ struct DirectAnsHistogram {
   }
 };
 
-double DirectHistogramShannonBits(const DirectAnsHistogram& histogram) {
+// Counts stay in the caller's validated population array for this synchronous
+// partition build. Only small metadata and the mutable Shannon cache are local;
+// selected seeds and merged clusters still own their counts.
+struct DirectAnsHistogramView {
+  const std::array<uint64_t, kMaximumAnsAlphabetSize>& counts;
+  uint64_t total_count;
+  uint64_t extra_bits;
+  uint32_t maximum_symbol;
+  double shannon_bits = 0.0;
+
+  operator DirectAnsHistogram() const {
+    return {
+      .counts = counts,
+      .total_count = total_count,
+      .extra_bits = extra_bits,
+      .maximum_symbol = maximum_symbol,
+      .shannon_bits = shannon_bits,
+    };
+  }
+};
+
+template <typename Histogram>
+double DirectHistogramShannonBits(const Histogram& histogram) {
   if (histogram.total_count == 0) {
     return 0.0;
   }
@@ -1054,8 +1077,9 @@ double DirectHistogramShannonBits(const DirectAnsHistogram& histogram) {
   return bits;
 }
 
+template <typename Histogram>
 Status DirectHistogramDistance(
-  const DirectAnsHistogram& left,
+  const Histogram& left,
   const DirectAnsHistogram& right,
   const std::array<double, kExactLog2TableSize + 1>& log2_table,
   double* distance) {
@@ -1092,8 +1116,9 @@ Status DirectHistogramDistance(
   return Status::Ok();
 }
 
+template <typename Histogram>
 Status CanonicalizeDirectClusters(
-  const std::vector<DirectAnsHistogram>& input,
+  const std::vector<Histogram>& input,
   std::vector<DirectAnsHistogram>* clustered,
   std::vector<uint32_t>* symbols) {
 
@@ -1142,8 +1167,9 @@ Status CanonicalizeDirectClusters(
   return Status::Ok();
 }
 
+template <typename Histogram>
 Status FastClusterDirectAnsHistograms(
-  std::vector<DirectAnsHistogram>& source,
+  std::vector<Histogram>& source,
   std::vector<DirectAnsHistogram>* clustered,
   std::vector<uint32_t>* symbols) {
 
@@ -1155,7 +1181,7 @@ Status FastClusterDirectAnsHistograms(
   // This is the partition builder's private working set. Cache Shannon costs
   // in place instead of copying every 256-bin histogram, including empty ones.
   // Counts and context order remain unchanged for canonicalization/refinement.
-  for (DirectAnsHistogram& histogram : source) {
+  for (Histogram& histogram : source) {
     histogram.shannon_bits = DirectHistogramShannonBits(histogram);
   }
   // Resolve the thread-safe lazy table once per clustering pass, not once per
@@ -1383,7 +1409,15 @@ Status PrepareDirectAnsPartition(
 
   try {
     const ProfileClock::time_point histogram_begin = ProfileBegin(profile);
-    std::vector<DirectAnsHistogram> histograms(histogram_count);
+    const bool borrow_populations =
+      !fixed_context_populations.empty() && options.initial_context_map.empty();
+    std::vector<DirectAnsHistogram> histograms;
+    std::vector<DirectAnsHistogramView> borrowed_histograms;
+    if (borrow_populations) {
+      borrowed_histograms.reserve(histogram_count);
+    } else {
+      histograms.resize(histogram_count);
+    }
     if (!fixed_context_populations.empty()) {
       if (mode != codestream_internal::DirectAnsEntropyMode::kBalanced ||
           fixed_context_populations.size() != options.context_count) {
@@ -1435,14 +1469,14 @@ Status PrepareDirectAnsPartition(
           return Status::InvalidArgument(
             "Prepared direct ANS population count differs");
         }
-        DirectAnsHistogram source{
+        DirectAnsHistogramView source{
           .counts = population.counts,
           .total_count = population.token_count,
           .extra_bits = population.extra_bits,
           .maximum_symbol = population.maximum_symbol,
         };
-        if (options.initial_context_map.empty()) {
-          histograms[context] = std::move(source);
+        if (borrow_populations) {
+          borrowed_histograms.push_back(source);
         } else {
           const size_t histogram = options.initial_context_map[context];
           if (!histograms[histogram].AddHistogram(source)) {
@@ -1483,8 +1517,11 @@ Status PrepareDirectAnsPartition(
     const ProfileClock::time_point clustering_begin = ProfileBegin(profile);
     std::vector<DirectAnsHistogram> clustered;
     std::vector<uint32_t> histogram_symbols;
-    Status status = FastClusterDirectAnsHistograms(
-      histograms, &clustered, &histogram_symbols);
+    Status status = borrow_populations
+      ? FastClusterDirectAnsHistograms(
+          borrowed_histograms, &clustered, &histogram_symbols)
+      : FastClusterDirectAnsHistograms(
+          histograms, &clustered, &histogram_symbols);
     if (status.ok() &&
         mode == codestream_internal::DirectAnsEntropyMode::kHighDensity) {
       status = RefineBestDirectAnsClusters(

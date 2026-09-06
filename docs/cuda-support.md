@@ -758,6 +758,17 @@ whole-encode gains are smaller and inconsistent across controls. In particular,
 the same-executable 1080p cohort regresses overall despite faster entropy work.
 The study retains that result and all outliers; optimization remains ongoing.
 
+[S52](cuda-optimization-s1.md#borrowed-prepared-ans-populations-s52) reads
+validated prepared ANS populations through private metadata views. The caller's
+counts stay read-only; merged clusters remain owning and all validation is
+retained. At 6,930 contexts, source element storage drops from 14.41 MB to
+0.277 MB. Large-partition replay improves 24-32%; full-encode results are mixed,
+including retained warm release and cold 1080p regressions. A counterbalanced
+cold follow-up supports the entropy-stage benefit, not a universal speedup.
+All 71 CUDA / 50 CPU tests, three host ASan targets, 58 decoded-image pairs,
+17,961 partition comparisons, and batch checks pass. GPU code and ABI are
+unchanged; optimization remains ongoing.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
