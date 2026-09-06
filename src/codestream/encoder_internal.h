@@ -16,6 +16,9 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+namespace vardct_frame_internal {
+class VarDctFrameView;
+}
 
 namespace codestream_internal {
 
@@ -107,6 +110,15 @@ struct VarDctCodestreamProfile {
 
   bool operator==(const VarDctCodestreamProfile&) const = default;
 };
+
+/// Synchronously serializes a borrowed completed frame, including validation.
+/// All parallel workers finish before return; neither the view nor its backing
+/// is retained. Output and optional profile remain unchanged on failure.
+[[nodiscard]] Status EncodeVarDctCodestreamFromView(
+  const vardct_frame_internal::VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile = nullptr);
 
 /// Diagnostic-only serializer entry point. On failure, both `output` and
 /// `profile` remain unchanged.

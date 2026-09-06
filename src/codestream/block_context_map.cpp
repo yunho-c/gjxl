@@ -18,10 +18,11 @@
 #include <vector>
 
 #include "codec/codestream.h"
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/simple_ac_context.h"
 
 namespace gjxl {
+using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 constexpr size_t kMinimumAdaptiveBlockCount = 1024;
@@ -63,7 +64,7 @@ SimpleBlockContextMap MakeSingleContextMap() {
 }
 
 Status CountRawQuantAndOrders(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::array<std::array<size_t, 256>,
              codestream_internal::kSimpleCoefficientOrderCount>* counts,
   std::array<size_t, 256>* qf_counts,
@@ -300,11 +301,11 @@ Status ComputeSimpleBlockContextMapCandidates(
     return status;
   }
   return codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
-    frame, maps);
+    vardct_frame_internal::BorrowFrame(frame), maps);
 }
 
 Status codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::vector<SimpleBlockContextMap>* maps) {
 
   if (maps == nullptr) {
@@ -366,11 +367,11 @@ Status ComputeSimpleBlockContextMap(
     return status;
   }
   return codestream_internal::ComputeSimpleBlockContextMapForEncoder(
-    frame, map);
+    vardct_frame_internal::BorrowFrame(frame), map);
 }
 
 Status codestream_internal::ComputeSimpleBlockContextMapForEncoder(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   SimpleBlockContextMap* map) {
 
   if (map == nullptr) {

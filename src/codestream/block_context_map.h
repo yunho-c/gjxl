@@ -15,6 +15,9 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+namespace vardct_frame_internal {
+class VarDctFrameView;
+}
 
 inline constexpr size_t kSimpleNonzeroBucketCount = 37;
 inline constexpr size_t kSimpleZeroDensityContextCount = 458;
@@ -76,11 +79,11 @@ namespace codestream_internal {
 
 /// Serializer-only entry points for an already validated frame.
 [[nodiscard]] Status ComputeSimpleBlockContextMapCandidatesForEncoder(
-  const VarDctEncoderFrame& frame,
+  const vardct_frame_internal::VarDctFrameView& frame,
   std::vector<SimpleBlockContextMap>* maps);
 
 [[nodiscard]] Status ComputeSimpleBlockContextMapForEncoder(
-  const VarDctEncoderFrame& frame,
+  const vardct_frame_internal::VarDctFrameView& frame,
   SimpleBlockContextMap* map);
 
 }  // namespace codestream_internal

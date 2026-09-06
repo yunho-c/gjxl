@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstddef>
 
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "core/quantizer.h"
 
 namespace gjxl {
@@ -96,6 +96,12 @@ float QuantizationMatrixMultiplier(uint8_t scale) noexcept {
 }
 
 Status ValidateSimpleCodestreamFrame(const VarDctEncoderFrame& frame) {
+  return vardct_frame_internal::ValidateSimpleCodestreamFrame(
+    vardct_frame_internal::BorrowFrame(frame));
+}
+
+Status vardct_frame_internal::ValidateSimpleCodestreamFrame(
+  const VarDctFrameView& frame) {
   if (!frame.valid()) {
     return Status::InvalidArgument("VarDCT frame is invalid");
   }

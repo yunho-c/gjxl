@@ -1857,6 +1857,10 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_vardct_frame_test
   )
 
+  add_executable(gjxl_vardct_frame_view_test tests/vardct_frame_view_test.cpp)
+  target_link_libraries(gjxl_vardct_frame_view_test PRIVATE gjxl_codestream)
+  add_test(NAME vardct_frame_view COMMAND gjxl_vardct_frame_view_test)
+
   add_executable(
     gjxl_simple_codestream_profile_test
     tests/simple_codestream_profile_test.cpp

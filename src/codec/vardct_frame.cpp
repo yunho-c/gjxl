@@ -12,6 +12,7 @@
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/dct.h"
 #include "codec/vardct_frame_internal.h"
+#include "codec/vardct_frame_view_internal.h"
 
 namespace gjxl {
 namespace {
@@ -92,18 +93,65 @@ ConstImage3FView VarDctEncoderFrame::dc() const noexcept {
 Status VarDctEncoderFrame::GetAcGroup(
   size_t group_index,
   VarDctAcGroupView* out) const {
+  return vardct_frame_internal::BorrowFrame(*this).GetAcGroup(group_index, out);
+}
+
+bool VarDctEncoderFrame::valid() const {
+  return vardct_frame_internal::BorrowFrame(*this).valid();
+}
+
+vardct_frame_internal::VarDctFrameView vardct_frame_internal::BorrowFrame(
+  const VarDctEncoderFrame& frame) noexcept {
+  // Validate owned allocation sizes before exposing uncounted core plane views.
+  // Value validation remains in the common view validator.
+  size_t block_count = 0;
+  if (!frame.geometry_.block_grid().blocks.try_area(&block_count) ||
+      frame.raw_quant_field_.size() != block_count ||
+      frame.epf_sharpness_.size() != block_count) {
+    return {};
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (frame.quantized_dc_[channel].size() != block_count ||
+        frame.dc_[channel].size() != block_count) {
+      return {};
+    }
+  }
+  return VarDctFrameView({
+    .input = {
+      .geometry = frame.geometry_,
+      .strategies = &frame.strategies_,
+      .raw_quant_field = frame.raw_quant_field(),
+      .quantizer = &frame.quantizer_,
+      .color_correlation = &frame.color_correlation_,
+      .epf_sharpness = frame.epf_sharpness(),
+    },
+    .profile = frame.profile_,
+    .quantized_dc = frame.quantized_dc(),
+    .dc = frame.dc(),
+    .ac_group_extent = frame.ac_group_extent_,
+    .group_used_coefficient_count = frame.group_used_coefficient_count_,
+    .ac_coefficients = frame.ac_coefficients_,
+  });
+}
+
+Status vardct_frame_internal::VarDctFrameView::GetAcGroup(
+  size_t group_index,
+  VarDctAcGroupView* out) const {
 
   if (out == nullptr) {
     return Status::InvalidArgument("VarDCT AC-group output is null");
   }
   size_t group_count = 0;
-  if (!ac_group_extent_.try_area(&group_count) ||
-      group_count != group_used_coefficient_count_.size() ||
+  if (!ValidGeometry(data_.input.geometry) ||
+      data_.ac_group_extent != data_.input.geometry.block_grid().blocks.ceil_div(
+        kVarDctAcGroupBlockDimension) ||
+      !data_.ac_group_extent.try_area(&group_count) ||
+      group_count != data_.group_used_coefficient_count.size() ||
       group_index >= group_count ||
       group_count > std::numeric_limits<size_t>::max() / 3 ||
       group_count * 3 > std::numeric_limits<size_t>::max() /
         kVarDctAcGroupCoefficientCapacity ||
-      ac_coefficients_.size() != group_count * 3 *
+      data_.ac_coefficients.size() != group_count * 3 *
         kVarDctAcGroupCoefficientCapacity) {
     return Status::InvalidArgument("VarDCT AC-group index is invalid");
   }
@@ -111,8 +159,8 @@ Status VarDctEncoderFrame::GetAcGroup(
   size_t block_x = 0;
   size_t block_y = 0;
   const Extent2D block_extent = GroupBlockExtent(
-    geometry_.block_grid().blocks,
-    ac_group_extent_,
+    data_.input.geometry.block_grid().blocks,
+    data_.ac_group_extent,
     group_index,
     &block_x,
     &block_y);
@@ -122,11 +170,13 @@ Status VarDctEncoderFrame::GetAcGroup(
     .block_y = block_y,
     .block_extent = block_extent,
     .used_coefficient_count =
-      group_used_coefficient_count_[group_index],
+      data_.group_used_coefficient_count[group_index],
   };
   for (size_t channel = 0; channel < 3; ++channel) {
+    const size_t offset = (group_index * 3 + channel) *
+      kVarDctAcGroupCoefficientCapacity;
     result.coefficients[channel] = {
-      ac_coefficients_.data() + AcGroupChannelOffset(group_index, channel),
+      data_.ac_coefficients.data() + offset,
       kVarDctAcGroupCoefficientCapacity,
     };
   }
@@ -134,104 +184,114 @@ Status VarDctEncoderFrame::GetAcGroup(
   return Status::Ok();
 }
 
-bool VarDctEncoderFrame::valid() const {
-  if (!ValidGeometry(geometry_) ||
-      !strategies_.complete() ||
-      strategies_.extent() != geometry_.block_grid().blocks ||
-      !quantizer_.valid() ||
-      !color_correlation_.valid() ||
-      color_correlation_.tile_extent() != ExpectedColorTileExtent(geometry_) ||
-      !profile_.valid()) {
+bool vardct_frame_internal::VarDctFrameView::valid() const {
+  if (!ValidGeometry(geometry()) ||
+      data_.input.strategies == nullptr ||
+      !strategies().complete() ||
+      strategies().extent() != geometry().block_grid().blocks ||
+      data_.input.quantizer == nullptr || !quantizer().valid() ||
+      data_.input.color_correlation == nullptr || !color_correlation().valid() ||
+      color_correlation().tile_extent() != ExpectedColorTileExtent(geometry()) ||
+      !profile().valid()) {
     return false;
   }
 
   size_t block_count = 0;
   size_t group_count = 0;
-  const Extent2D blocks = geometry_.block_grid().blocks;
-  const Extent2D expected_group_extent{
-    (blocks.width + kVarDctAcGroupBlockDimension - 1) /
-      kVarDctAcGroupBlockDimension,
-    (blocks.height + kVarDctAcGroupBlockDimension - 1) /
-      kVarDctAcGroupBlockDimension,
+  const Extent2D blocks = geometry().block_grid().blocks;
+  const auto valid_plane = [blocks](const auto& plane) {
+    const size_t maximum_elements =
+      std::numeric_limits<size_t>::max() / sizeof(*plane.data);
+    return plane.valid() && plane.extent == blocks &&
+      blocks.width <= maximum_elements &&
+      (blocks.height == 1 ||
+       plane.stride <= (maximum_elements - blocks.width) / (blocks.height - 1));
   };
-  if (!geometry_.block_grid().blocks.try_area(&block_count) ||
-      !ac_group_extent_.try_area(&group_count) ||
-      ac_group_extent_ != expected_group_extent ||
-      raw_quant_field_.size() != block_count ||
-      epf_sharpness_.size() != block_count ||
-      group_used_coefficient_count_.size() != group_count) {
+  if (!blocks.try_area(&block_count) ||
+      !ac_group_extent().try_area(&group_count) ||
+      ac_group_extent() != blocks.ceil_div(kVarDctAcGroupBlockDimension) ||
+      ac_group_count() != group_count ||
+      !valid_plane(raw_quant_field()) || !valid_plane(epf_sharpness())) {
     return false;
   }
   for (size_t channel = 0; channel < 3; ++channel) {
-    if (quantized_dc_[channel].size() != block_count ||
-        dc_[channel].size() != block_count ||
-        !std::ranges::all_of(dc_[channel], [](float value) {
-          return std::isfinite(value);
-        })) {
+    if (!valid_plane(quantized_dc().plane[channel]) ||
+        !valid_plane(dc().plane[channel])) {
       return false;
     }
-  }
-  const std::array<float, 3>& dc_steps = quantizer_.dc_steps();
-  for (size_t index = 0; index < block_count; ++index) {
-    const float reconstructed_y =
-      static_cast<float>(quantized_dc_[1][index]) * dc_steps[1];
-    if (dc_[0][index] !=
-          static_cast<float>(quantized_dc_[0][index]) * dc_steps[0] ||
-        dc_[1][index] != reconstructed_y ||
-        dc_[2][index] !=
-          static_cast<float>(quantized_dc_[2][index]) * dc_steps[2] +
-            reconstructed_y) {
-      return false;
+    for (size_t y = 0; y < blocks.height; ++y) {
+      if (!std::ranges::all_of(
+            std::span<const float>(dc().plane[channel].Row(y), blocks.width),
+            [](float value) { return std::isfinite(value); })) {
+        return false;
+      }
     }
   }
-  if (!std::ranges::all_of(raw_quant_field_, [](int32_t value) {
-        return value >= 1 && value <= kMaxRawQuant;
-      }) ||
-      !std::ranges::all_of(
-        epf_sharpness_,
-        [](uint8_t value) { return value < 8; })) {
-    return false;
+  const std::array<float, 3>& dc_steps = quantizer().dc_steps();
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      const float reconstructed_y =
+        static_cast<float>(quantized_dc().plane[1].Row(y)[x]) * dc_steps[1];
+      const float dc_x = dc().plane[0].Row(y)[x];
+      const float dc_y = dc().plane[1].Row(y)[x];
+      const float dc_b = dc().plane[2].Row(y)[x];
+      if (dc_x != static_cast<float>(quantized_dc().plane[0].Row(y)[x]) *
+            dc_steps[0] ||
+          dc_y != reconstructed_y ||
+          dc_b != static_cast<float>(quantized_dc().plane[2].Row(y)[x]) *
+            dc_steps[2] + reconstructed_y) {
+        return false;
+      }
+    }
+  }
+  for (size_t y = 0; y < blocks.height; ++y) {
+    if (!std::ranges::all_of(
+          std::span<const int32_t>(raw_quant_field().Row(y), blocks.width),
+          [](int32_t value) { return value >= 1 && value <= kMaxRawQuant; }) ||
+        !std::ranges::all_of(
+          std::span<const uint8_t>(epf_sharpness().Row(y), blocks.width),
+          [](uint8_t value) { return value < 8; })) {
+      return false;
+    }
   }
 
   if (group_count > std::numeric_limits<size_t>::max() / 3 ||
       group_count * 3 > std::numeric_limits<size_t>::max() /
         kVarDctAcGroupCoefficientCapacity ||
-      ac_coefficients_.size() != group_count * 3 *
+      data_.ac_coefficients.size() != group_count * 3 *
         kVarDctAcGroupCoefficientCapacity) {
     return false;
   }
-
+  // The storage sizes are checked above. Scan fixed-capacity tails directly;
+  // the integer reduction lets the compiler vectorize the exact zero check.
   for (size_t group_index = 0; group_index < group_count; ++group_index) {
     size_t block_x = 0;
     size_t block_y = 0;
     const Extent2D group_blocks = GroupBlockExtent(
-      blocks,
-      ac_group_extent_,
-      group_index,
-      &block_x,
-      &block_y);
+      blocks, ac_group_extent(), group_index, &block_x, &block_y);
     size_t covered_blocks = 0;
     if (!group_blocks.try_area(&covered_blocks) ||
         covered_blocks > kVarDctAcGroupCoefficientCapacity / kJxlBlockArea) {
       return false;
     }
     const size_t expected = covered_blocks * kJxlBlockArea;
-    if (group_used_coefficient_count_[group_index] != expected) {
+    if (data_.group_used_coefficient_count[group_index] != expected) {
       return false;
     }
     for (size_t channel = 0; channel < 3; ++channel) {
-      const size_t base = AcGroupChannelOffset(group_index, channel);
-      if (!std::ranges::all_of(
-            ac_coefficients_.begin() + base + expected,
-            ac_coefficients_.begin() + base +
-              kVarDctAcGroupCoefficientCapacity,
-            [](int32_t value) { return value == 0; })) {
+      const size_t base = (group_index * 3 + channel) *
+        kVarDctAcGroupCoefficientCapacity;
+      uint32_t nonzero = 0;
+      for (size_t i = expected; i < kVarDctAcGroupCoefficientCapacity; ++i) {
+        nonzero |= static_cast<uint32_t>(data_.ac_coefficients[base + i]);
+      }
+      if (nonzero != 0) {
         return false;
       }
     }
   }
 
-  const Status strategy_status = strategies_.ForEachAnchor(
+  const Status strategy_status = strategies().ForEachAnchor(
     [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
       const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
       if (info == nullptr) {

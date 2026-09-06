@@ -21,13 +21,14 @@
 #include <vector>
 
 #include "codec/codestream.h"
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/ac_group.h"
 #include "codestream/encoder.h"
 #include "core/ac_strategy.h"
 #include "core/thread_budget.h"
 
 namespace gjxl {
+using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 constexpr uint16_t kSupportedOrderMask =
@@ -450,11 +451,12 @@ Status ComputeSimpleCoefficientOrders(
   }
 
   return codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
-    frame, VarDctCoefficientOrderBehavior::kFull, orders);
+    vardct_frame_internal::BorrowFrame(frame),
+    VarDctCoefficientOrderBehavior::kFull, orders);
 }
 
 Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCoefficientOrderBehavior behavior,
   SimpleCoefficientOrders* orders) {
 

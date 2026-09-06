@@ -18,6 +18,9 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+namespace vardct_frame_internal {
+class VarDctFrameView;
+}
 
 inline constexpr size_t kSimpleDcGroupDimension = 2048;
 inline constexpr size_t kSimpleDcGroupBlockDimension = 256;
@@ -65,7 +68,7 @@ namespace codestream_internal {
 
 /// Serializer-only entry point for an already validated frame.
 [[nodiscard]] Status TokenizeSimpleDcGroupsForEncoder(
-  const VarDctEncoderFrame& frame,
+  const vardct_frame_internal::VarDctFrameView& frame,
   std::vector<SimpleDcGroupTokenStreams>* groups);
 
 }  // namespace codestream_internal

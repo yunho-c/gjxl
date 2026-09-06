@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "codec/codestream.h"
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/ac_group.h"
 #include "codestream/ans_internal.h"
 #include "codestream/bit_writer.h"
@@ -36,6 +36,7 @@
 #include "core/thread_budget.h"
 
 namespace gjxl {
+using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 using ProfileClock = std::chrono::steady_clock;
@@ -615,7 +616,7 @@ Status FinalizeAcCandidate(
 }
 
 Status WriteCommonSections(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::span<const SimpleDcGroupTokenStreams> dc_groups,
   std::span<const std::vector<EntropyToken>> dc_streams,
   const SimpleBlockContextMap& block_context_map,
@@ -829,7 +830,7 @@ Status MeasureDcGroupSections(
 }
 
 Status MeasureCommonSections(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   size_t dc_group_count,
   const SimpleBlockContextMap& block_context_map,
   const EntropyCode& dc_code,
@@ -998,7 +999,7 @@ Status PhysicalSectionSizes(
 }
 
 Status WriteFramePrefix(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   BitWriter* writer) {
 
   Status status = WriteSimpleCodestreamHeader(
@@ -1010,7 +1011,7 @@ Status WriteFramePrefix(
 }
 
 Status MeasureCandidateSize(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::span<const uint64_t> common_section_bits,
   std::span<const uint64_t> ac_section_bits,
   size_t ac_group_count,
@@ -1046,7 +1047,7 @@ Status MeasureCandidateSize(
 }
 
 Status AssembleCandidate(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::span<const BitWriter> common_sections,
   std::span<const BitWriter> ac_sections,
   size_t ac_group_count,
@@ -1129,7 +1130,7 @@ Status AssembleCandidate(
 }
 
 Status EncodeVarDctCodestreamWithRepresentationPolicy(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
   bool exhaustive_representation_search,
   std::vector<uint8_t>* output,
@@ -1968,7 +1969,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
 }
 
 Status EncodeVarDctCodestreamMaximumCompression(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
@@ -1978,7 +1979,7 @@ Status EncodeVarDctCodestreamMaximumCompression(
 }
 
 Status EncodeVarDctCodestreamSingleRepresentation(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
@@ -1988,7 +1989,7 @@ Status EncodeVarDctCodestreamSingleRepresentation(
 }
 
 Status EncodeVarDctCodestreamImpl(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
   std::vector<uint8_t>* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
@@ -2133,7 +2134,8 @@ Status EncodeVarDctCodestream(
   VarDctCodestreamOptions options,
   std::vector<uint8_t>* output) {
 
-  return EncodeVarDctCodestreamImpl(frame, options, output, nullptr);
+  return codestream_internal::EncodeVarDctCodestreamFromView(
+    vardct_frame_internal::BorrowFrame(frame), options, output);
 }
 
 Status codestream_internal::EncodeVarDctCodestreamProfiled(
@@ -2153,6 +2155,15 @@ Status codestream_internal::EncodeVarDctCodestreamProfiled(
   if (profile == nullptr) {
     return Status::InvalidArgument("Codestream profile output is null");
   }
+  return EncodeVarDctCodestreamFromView(
+    vardct_frame_internal::BorrowFrame(frame), options, output, profile);
+}
+
+Status codestream_internal::EncodeVarDctCodestreamFromView(
+  const VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile) {
   return EncodeVarDctCodestreamImpl(frame, options, output, profile);
 }
 

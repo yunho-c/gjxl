@@ -16,9 +16,10 @@
 
 #include "codec/chroma_from_luma.h"
 #include "codec/codestream.h"
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 
 namespace gjxl {
+using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 static_assert(kSimpleDcGroupDimension / kJxlBlockDimension
@@ -368,11 +369,11 @@ Status TokenizeSimpleDcGroups(const VarDctEncoderFrame& frame,
   }
 
   return codestream_internal::TokenizeSimpleDcGroupsForEncoder(
-    frame, groups);
+    vardct_frame_internal::BorrowFrame(frame), groups);
 }
 
 Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::vector<SimpleDcGroupTokenStreams>* groups) {
 
   if (groups == nullptr) {

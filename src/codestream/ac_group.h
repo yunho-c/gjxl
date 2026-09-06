@@ -19,6 +19,9 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+namespace vardct_frame_internal {
+class VarDctFrameView;
+}
 struct SimpleBlockContextMap;
 struct SimpleCoefficientOrders;
 struct VarDctAcGroupView;
@@ -142,6 +145,12 @@ struct SimpleAcGroupTokenTemplate {
 
 namespace codestream_internal {
 
+/// Already validated frame and coefficient orders; borrows only for this call.
+[[nodiscard]] Status BuildSimpleAcGroupTokenTemplatesForEncoder(
+  const vardct_frame_internal::VarDctFrameView& frame,
+  const SimpleCoefficientOrders& orders,
+  std::vector<SimpleAcGroupTokenTemplate>* groups);
+
 struct SimpleAcStrategyAnchor {
   size_t x = 0;
   size_t y = 0;
@@ -199,7 +208,7 @@ struct SimpleAcTokenizationScratch {
 /// One-pass ordinary serializer primitive for an already validated frame,
 /// coefficient-order set, and block-context map.
 [[nodiscard]] Status TokenizeSimpleAcGroupForEncoder(
-  const VarDctEncoderFrame& frame,
+  const vardct_frame_internal::VarDctFrameView& frame,
   const SimpleCoefficientOrders& orders,
   const SimpleAcNaturalOrders& natural_orders,
   const SimpleBlockContextMap& block_context_map,
@@ -212,7 +221,7 @@ struct SimpleAcTokenizationScratch {
 /// frame, coefficient orders, and block-context map once before dispatching
 /// independent group tasks into fixed output slots.
 [[nodiscard]] Status BuildSimpleAcGroupTokenTemplateForEncoder(
-  const VarDctEncoderFrame& frame,
+  const vardct_frame_internal::VarDctFrameView& frame,
   const SimpleCoefficientOrders& orders,
   size_t group_index,
   SimpleAcGroupTokenTemplate* group);

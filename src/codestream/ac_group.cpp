@@ -19,12 +19,13 @@
 #include <vector>
 
 #include "codec/codestream.h"
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
 #include "codestream/simple_ac_context.h"
 
 namespace gjxl {
+using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 inline constexpr size_t kBlockContextCount = 4;
@@ -940,6 +941,19 @@ Status BuildSimpleAcGroupTokenTemplates(
     return status;
   }
 
+  return codestream_internal::BuildSimpleAcGroupTokenTemplatesForEncoder(
+    vardct_frame_internal::BorrowFrame(frame), orders, groups);
+}
+
+Status codestream_internal::BuildSimpleAcGroupTokenTemplatesForEncoder(
+  const VarDctFrameView& frame,
+  const SimpleCoefficientOrders& orders,
+  std::vector<SimpleAcGroupTokenTemplate>* groups) {
+  if (groups == nullptr) {
+    return Status::InvalidArgument("AC-group token-template output is null");
+  }
+  Status status;
+
   try {
     std::vector<SimpleAcGroupTokenTemplate> candidate;
     candidate.reserve(frame.ac_group_count());
@@ -1077,7 +1091,7 @@ Status codestream_internal::PrepareSimpleAcNaturalOrders(
 }
 
 Status codestream_internal::TokenizeSimpleAcGroupForEncoder(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   const SimpleCoefficientOrders& orders,
   const SimpleAcNaturalOrders& natural_orders,
   const SimpleBlockContextMap& block_context_map,
@@ -1101,7 +1115,7 @@ Status codestream_internal::TokenizeSimpleAcGroupForEncoder(
 }
 
 Status codestream_internal::BuildSimpleAcGroupTokenTemplateForEncoder(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   const SimpleCoefficientOrders& orders,
   size_t group_index,
   SimpleAcGroupTokenTemplate* group) {

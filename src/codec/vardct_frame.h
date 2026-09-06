@@ -30,6 +30,8 @@ enum class AcCoefficientDecisionMode {
 };
 
 namespace vardct_frame_internal {
+class VarDctFrameView;
+[[nodiscard]] VarDctFrameView BorrowFrame(const VarDctEncoderFrame&) noexcept;
 struct QuantizedFrameAssemblyInput;
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
   QuantizedFrameAssemblyInput,
@@ -127,6 +129,9 @@ public:
     VarDctAcGroupView* out) const;
 
 private:
+  friend vardct_frame_internal::VarDctFrameView
+    vardct_frame_internal::BorrowFrame(const VarDctEncoderFrame&) noexcept;
+
   friend Status ComputeQuantizedCoefficients(
     ConstImage3FView,
     VarDctFrameInput,
