@@ -12364,6 +12364,277 @@ convolution bottleneck. The small benefit from removing a real division
 does not itself prove a bandwidth ceiling. S71 narrows one hypothesis;
 it does not establish that the backend is maxed out.
 
+## Align Malta accumulator rows (S72, not retained)
+
+S72 starts from S71 `7f4f024`, whose runtime is S70 `5eb8751`, on the same
+RTX 3060 Laptop / CUDA 11.8 / MSVC 14.37 configuration. S71 established
+that suppressing an unused division barely changes the large zero-LF
+stage time. S72 separates component costs, rejects a materialized split,
+then isolates accumulator row layout as a useful optimization target.
+The production candidate changes storage/addressing, not Malta arithmetic.
+
+### Component experiment and rejected split
+
+The diagnostic copies both single-row and paired-row response kernels.
+Nine modes compare actual S70, a separately named native-identical control,
+linear scale/accumulation, tiled scale/center accumulation, linear
+subtraction/accumulation, tiled subtraction/center accumulation, response
+from an untimed precomputed scaled plane, timed materialization plus that
+response, and positive-zero accumulation. The five component-only modes
+omit the directional response and are not valid encoder replacements.
+The response-only timing excludes its setup. Component costs are not
+assumed additive, and no measured DRAM ceiling is inferred by subtraction.
+
+The timed materialized split is exact but rejected: the six-stage sum of
+independent medians regresses 46.71% at 4K and 45.98% at 1080p. Every 4K
+stage loses all 18 pairs. The named control and split each pass 2,560
+fixtures / 15,360 comparisons against two exact oracles; the split also
+passes all four scoped GPU sanitizer tools. Native inspection preserves
+all 75 production bodies and adds 63 bodies. All three diagnostic binaries
+contain the same 138 bodies, including 24 instruction-identical controls.
+The intended loads, shared staging and barriers remain emitted; all 63
+additions have zero stack/local storage.
+
+At the zero-LF 4K stage 3, full Malta takes 0.639488 ms, linear scaling
+0.526336, tiled scaling 0.637440, linear subtraction 0.525653, tiled
+subtraction 0.632320, response-only 0.518656, timed split 0.918187 and
+zero accumulation 0.271019. Replacing scale arithmetic with subtraction
+barely changes these large component times. Linear components being faster
+than tiled components motivates checking memory layout; it does not prove
+that either is a complete replacement or establish a bandwidth limit.
+
+All replays use the same 36 attributed first-full-resolution S65 captures:
+six stages each for odd 4K, odd 1080p, Flower and three corpus images. They
+are not fresh S72 captures or all encoder iterations/subscales. The
+nine-mode run retains 5,832 output-checked windows, 288 paired summaries
+and 48 descriptive aggregates. Component expected outputs intentionally
+differ from full Malta; inputs, row padding and temporary guards are checked.
+The additional four-tool component sanitizer scope is only a 65x65 crop of
+Flower stage 0, ordinary height-8 full-frequency dispatch, all nine modes.
+Instrumented timings are not performance evidence. The first replay's
+host-reference-lambda warning is removed in a distinct v2 source/binary;
+the original remains unexecuted, and all GPU bodies remain identical.
+
+### Isolating row layout
+
+The next probe uses only the 75 unchanged production GPU bodies. Four
+layouts compare packed rows, rows rounded to eight floats, rows rounded
+to 32 floats, and a duplicate packed allocation. All allocations have
+the same 128-byte pointer offset, with logical output equality and input/
+padding checks. It retains 3,456 windows across 24 balanced rounds per
+captured stage. Both aligned layouts improve every 4K LF stage in all
+24 pairs. The 32-float six-stage aggregate improves 11.16% at 4K and
+8.80% at 1080p; these are stage aggregates, not workflow times.
+
+A separate five-layout isolation keeps packed input/output, aligns only
+inputs, aligns only output, aligns both, or uses another packed duplicate.
+It again contains exactly the 75 unchanged bodies and retains all 3,600
+windows across 20 balanced rounds per stage. Output-only alignment
+reproduces the large LF gain; input-only does not:
+
+| Six-stage independent-median sum | Input only | Output only | Both | Packed duplicate |
+|---|---:|---:|---:|---:|
+| 4K | +1.36% | -11.18% | -11.14% | -0.14% |
+| 1080p | +0.33% | -8.66% | -8.84% | -0.73% |
+| Flower | +3.43% | -2.62% | -2.73% | -3.22% |
+| Keong macan | -0.10% | +0.00% | -2.05% | -1.27% |
+| Riaphotographs | -1.70% | -0.63% | -2.51% | -1.52% |
+| Bliznaca | -0.43% | -4.96% | -3.67% | -7.10% |
+
+Output-only 4K LF stages 2/3/4/5 improve 14.84% / 16.60% / 15.62% /
+15.44%, each winning all 20 pairs; versus the duplicate packed allocation
+they improve 14.89% / 16.32% / 15.63% / 15.69%. Input-only alignment
+regresses those stages. Full-frequency initialization stages are near
+neutral. Small-case scatter, including the strong Bliznaca duplicate,
+prevents a general small-case benefit claim. This is an empirical layout
+effect, not a DRAM-transaction or achieved-occupancy measurement.
+
+### Candidate storage and correctness
+
+Only work slots 21/22 grow to a row stride rounded to 32 floats. They hold
+packed RGB temporaries during psycho construction, then AC accumulators;
+those lifetimes do not overlap, and the earlier packed data fits inside
+the larger storage. The other 23 working planes, masks and cached reference
+layout remain packed; input strides are unchanged. Plane-base alignment remains 64
+bytes. The physical range is `(height - 1) * stride + width`, without
+padding after the final row. Overflow checks retain the full representable
+geometry domain, using packed fallback when uint32 round-up cannot fit.
+The private plan's zero stride preserves diagnostic packed compatibility.
+
+Malta receives the aligned output stride. The two final kernels address
+AC with that stride while continuing to address masks with packed width.
+All arithmetic, launch dispatch and the 25-plane count remain unchanged.
+The candidate release contains the same 203 bodies: 201 instruction-identical to
+S70; only `L2FinalKernel` and `ErosionL2FinalKernel` change. Both stay at
+40 registers, zero shared/stack/local storage. Cached reference bytes are
+unchanged; peak scratch is 12 packed planes plus two physical AC planes
+and the two reductions. Prepared allocation grows by 17,152 bytes at
+3839x2159, 8,576 at 1919x1079 and 8,448 at 510x532, including inter-plane
+alignment. Padding costs at most 31 floats per preceding row of each AC
+plane; tiny widths can have proportionally larger overhead.
+
+The release passes 73 CUDA and 50 CPU tests, five host ASan targets,
+31 prepared cases with independently updated memory accounting, 2,944
+guarded Malta cases, and 15 release GPU sanitizer checks. The latter are
+four tools each for Malta, prepared Butteraugli and L2/final, plus three
+AQ tools; full-AQ racecheck is not rerun. L2 scope covers 90 L2/final and
+eight erosion/final cases; prepared scope includes seven expanded, odd,
+tall, wide and partial shapes. No errors, leaks or race warnings occur.
+
+All 261 complete maps/scores across 29 extents match retained S70 bitwise.
+A diagnostic host-only environment selector switches packed/aligned rows
+inside one binary with all 203 release GPU bodies unchanged. Each layout
+also passes 261 full-map comparisons and the corresponding independently
+checked memory statistics. The selector exists only in ignored source,
+not in production. Two extra mode values duplicate the same two host
+branches for subsequent timing controls.
+
+The 58-case quality matrix comprises 46 balanced, six high-density and
+six maximum-compression cases. Release and both layouts produce 174 exact
+codestream matches to hash-verified retained S70 outputs. All 58 fresh
+release decodes match retained parent decoded pixels and Butteraugli
+metrics exactly with the pinned independent tools. The parent outputs
+are verified/reused, not freshly encoded or decoded this cycle; the two
+controls use byte identity rather than additional fresh decoder runs.
+
+### Whole-workflow evidence and disposition
+
+The same-binary layout comparison retains eight balanced rotating/reverse
+rounds, three warmups and seven samples per warm process; cold processes
+have no warmup and one sample. Modes 0/2 duplicate the packed host branch,
+1/3 the aligned branch. All 288 control process windows and 41 raw timing
+fields per process remain recorded. The selected paired medians are:
+
+| Control cohort / workload | Aligned quantization | Aligned total | Packed duplicate total | Aligned duplicate total |
+|---|---:|---:|---:|---:|
+| warm 4K | +0.69% | +0.13% | -1.21% | +2.50% |
+| warm 1080p | +0.27% | +0.42% | -0.45% | +0.90% |
+| warm Flower | -2.21% | -3.00% | -3.65% | -3.09% |
+| cold 4K | +1.42% | -0.58% | -2.51% | -1.66% |
+| cold 1080p | -0.28% | -0.39% | -0.82% | +3.51% |
+| cold Flower | +0.72% | +1.41% | -0.94% | -1.15% |
+| corpus warm Keong macan | -0.07% | +0.48% | +5.77% | +0.07% |
+| corpus warm Riaphotographs | +0.97% | +0.93% | +4.83% | +0.50% |
+| corpus warm Bliznaca | +0.28% | -0.23% | +6.47% | +1.31% |
+
+All values compare with the first packed policy; duplicate scatter is not
+discarded or treated as a correction factor. The descriptive comparison
+of per-round means of the two aligned versus two packed policies is also
+retained in `s72_timing_tables.md`: warm 4K total +1.41%, 1080p +0.66%;
+cold +0.93% / +2.47%. These aggregates are additional descriptions, not
+substitutes for the individual results.
+
+The release comparison uses retained S70 and candidate S72 binaries:
+seven alternating pairs, three warmups/five samples for warm processes,
+zero warmups/one sample for cold. The phase probe retains 41 fields and
+public benchmark seven. All 168 process windows remain recorded:
+
+| Release cohort / workload | Quantization paired median | Total paired median | Total wins / 7 |
+|---|---:|---:|---:|
+| Phase warm 4K | +0.10% | +1.13% | 3 |
+| Phase warm 1080p | -0.50% | -0.33% | 4 |
+| Phase warm Flower | -0.90% | -3.05% | 4 |
+| Phase cold 4K | -0.50% | -0.38% | 4 |
+| Phase cold 1080p | -1.56% | -4.30% | 5 |
+| Phase cold Flower | +2.09% | +2.30% | 3 |
+| Public warm 4K | -1.83% | -1.22% | 5 |
+| Public warm 1080p | -1.46% | +0.08% | 3 |
+| Public warm Flower | +2.18% | +2.64% | 2 |
+| Public cold 4K | -1.62% | +1.68% | 3 |
+| Public cold 1080p | +2.82% | +5.89% | 1 |
+| Public cold Flower | -7.23% | -8.61% | 4 |
+
+Public warm 4K quantization wins all seven pairs, with total wins in five,
+but phase warm 4K and the same-binary controls do not corroborate a clear
+net benefit. Cold public 1080p and warm public Flower regress. The broad
+cold/small-case ranges, CPU codestream variance and duplicate-control
+scatter prevent interpreting favorable individual cohorts as a general
+speedup. Timing output-size checks are separate from the exact-byte
+qualification above; no samples are discarded.
+
+Twelve alternating Nsight Systems traces retain identical launch counts,
+grids, blocks, registers, shared/local memory and copies. Exactly one arena
+allocation grows by the independently expected amount. Each trace covers
+one explicitly marked warm encode. Instrumented kernel sums change:
+
+| Workload | LF Malta, two pairs | Full Malta, two pairs | All GPU kernel time, two pairs | Launches |
+|---|---:|---:|---:|---:|
+| 4K | -6.62% / -4.29% | -15.00% / +0.87% | -6.04% / -0.47% | 373 |
+| 1080p | -1.28% / +3.76% | -6.66% / +2.20% | -3.74% / +0.84% | 360 |
+| Flower | -4.68% / -4.47% | +2.25% / +2.13% | -0.20% / -0.26% | 373 |
+
+The first 4K pair also moves unchanged non-target kernels substantially;
+its whole reduction cannot be attributed to AC row layout. The complete
+encoder LF effect is smaller than isolated replay, and 1080p reverses
+between pairs. These are not public wall-clock results. Candidate 4K
+independent median hot spots remain LF Malta 14.96 ms, low/medium vertical
+convolution 10.87, fused Opsin 9.89, erosion/final 9.47 and full Malta 9.32.
+
+A focused same-binary prepared diagnostic removes CPU codestream work.
+Four prepared arenas remain resident, using the permanent synthetic
+reference/distortion fixture at 3839x2159, 1919x1079 and 510x532; the last
+is not the Flower photograph. Three warmups per arena precede 24 balanced
+rounds, one synchronous comparison per event/wall window, 288 windows
+total. Full maps/scores/guards match before and after every shape, with
+unchanged inputs and zero timed allocations. All 203 GPU bodies equal the
+candidate release. Events include host launch gaps, not only kernel time.
+
+| Synthetic prepared extent | Aligned event median | Packed duplicate | Aligned duplicate |
+|---|---:|---:|---:|
+| 3839x2159 | +2.01% | +2.55% | +3.62% |
+| 1919x1079 | +0.17% | +0.15% | -0.21% |
+| 510x532 | -0.64% | +0.61% | +0.08% |
+
+Wall results track the event results. Large outliers remain, including a
+4K aligned-duplicate maximum +160.72%; simultaneous arenas and host gaps
+limit attribution. This is a synthetic prepared calculation, not a fresh
+captured encoder distortion. It does not establish a net resident gain.
+
+Candidate-only serial/batch checks use one warmup and three alternating
+samples, with exact internal codestream equality. At 1080p, sizes 1/2/4
+give paired median speedups 1.027x / 1.614x / 1.345x fully resident and
+1.026x / 1.830x / 1.992x maximum throughput. At 4K, fully resident sizes
+1/2 give 0.931x / 1.012x. These compare serial with batch inside the
+candidate, not S70 with S72. Batch-end thermal/power flags are active at
+69 C / P3 / 240 MHz / 24.60 W. Endpoint states neither describe every
+sample nor justify clock normalization.
+
+Reject both the materialized split and production AC-row alignment for
+this checkpoint. Alignment demonstrably helps narrow replay, but the
+integrated evidence is insufficient to retain the extra layout/addressing
+complexity and storage. No dimension-specific policy is inferred from
+these mixed results. Future layout work needs a new hypothesis that
+accounts for integrated staging, memory placement or launch gaps; a
+different measured convolution bottleneck is also still open. The
+backend is not considered maxed out.
+
+### Preservation and restoration
+
+The ignored `s72_*` bundle preserves all diagnostic sources/binaries,
+candidate build/test/native logs, raw replay/quality/timing/trace data,
+and the 39 candidate binaries/libraries with hashes. The four edited
+sources matched the saved candidate snapshot before their known changes
+were reversed. Production and tests again match S71/S70. Nineteen changed
+build paths were restored from hash-verified retained S70 artifacts after
+checking their candidate backups; all 39 retained artifacts now match
+byte-for-byte. The candidate's successful qualification is not a claim
+that its runtime was retained.
+
+`s72_validate.py` reconstructs the native/guard/sanitizer evidence, all
+replay windows and paired summaries, exact maps/memory, decoded quality,
+serial performance order and medians, trace structure/allocation/copies,
+and batch summaries. Historical candidate build paths resolve through
+the preserved candidate manifest after restoration. The initial ASan-log
+parser expected “passed” from a test that correctly prints “Verified 218”;
+the failed parser log is retained and the corrected reconstruction passes.
+No production test failure is hidden by that correction.
+
+No new firewall, admin or permission block occurs. Slow racecheck runs
+report progress and finish; optional restricted hardware counters are not
+retried. No security, clock, cooling or power setting changes. The restored
+runtime passes all 73 CUDA tests again in 117.66 seconds. Final evidence
+hashes and seven current source/document snapshots accompany the checkpoint.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

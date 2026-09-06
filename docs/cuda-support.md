@@ -1097,6 +1097,22 @@ No new permission/firewall block occurs or system settings change. Input/
 output and tile-staging costs remain to be separated from arithmetic;
 the backend is not considered maxed out.
 
+[S72](cuda-optimization-s1.md#align-malta-accumulator-rows-s72-not-retained)
+separates Malta component and row-layout costs. Materializing scaled values
+regresses the 4K six-stage replay aggregate 46.71%. Accumulator-only row
+alignment improves isolated 4K LF stages 14.84-16.60%, but complete-workflow
+evidence is mixed: public warm 4K improves 1.22%, phase warm 4K regresses
+1.13%, and same-binary duplicate controls do not establish a net gain.
+The candidate passes 73 CUDA / 50 CPU tests, five host ASan targets,
+15 release GPU sanitizer checks, 261 exact maps/scores per policy and
+58 exact decoded-quality cases. Twelve traces preserve launch/transfer
+structure and confirm the expected small allocation increase. Nevertheless,
+the alignment change is not retained; production/tests and all 39 saved
+S70 build artifacts are restored, with the candidate and all adverse
+results preserved. No permission/firewall block or system-setting change
+occurs. Integrated layout and convolution costs remain open targets;
+the backend is not considered maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
