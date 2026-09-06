@@ -21,7 +21,8 @@
   direct DC context lookup, success-path DC residual emission,
   inline validated ANS token scanning, fused erosion/L2/final masking,
   cooperative final color correlation, adjacent-row low-medium reuse,
-  and paired horizontal-convolution input reuse
+  paired horizontal-convolution input reuse, and prefetched initial
+  color-correlation samples
   implemented;
   optimization ongoing
 - Profile revision: `a474937`
@@ -35,22 +36,26 @@
 ## Executive finding
 
 The opening measurements describe revision `a474937`; the completion snapshots
-below supersede them. The latest implemented checkpoint, S63 against S62
-(`3cdcc0e`), reuses each horizontal-convolution input across two adjacent
-outputs while preserving each output's original FMA order. The explicit
-geometry dispatch keeps the original body at logical plane widths up to 32.
-The new 48-register release body matches four stage screens and the complete
-workflow control; all 174 existing GPU bodies remain unchanged. Complete
-workflow traces improve targeted horizontal GPU time roughly 40-55%, but
-public whole-encode changes remain mixed: warm +0.3% / -0.3% / -3.1% and
-cold -0.4% / +0.5% / -7.3% at 4K / 1080p / Flower.
-The final performance snapshot reports thermal and power throttling; these
-cohorts do not establish a universal encoder speedup. All 72 CUDA / 50 CPU
-tests, five host ASan targets, scoped GPU sanitizers, and 58 byte-identical
-decoded-image pairs pass. The competing layouts, timing audit, complete
-workflow, and regressions are recorded in
-[S63](#horizontal-input-reuse-s63). Optimization remains ongoing,
-not maxed out.
+below supersede them. The latest implemented checkpoint, S64 against S63
+(`6f968df`), preloads eight initial-CfL samples per original accumulation lane,
+preserving the original arithmetic order. An explicit dispatch keeps the
+original kernel below 32 columns. The new 48-register body exactly matches
+two final stage screens and the complete-workflow control; all 175 previous
+GPU bodies remain unchanged. Six full-workflow trace pairs improve targeted
+initial-CfL GPU duration by 43-45%. All 73 CUDA / 50 CPU tests, five host ASan
+targets, seven scoped GPU sanitizer checks, and 58 freshly decoded,
+byte-identical image pairs pass.
+
+Public whole-encode changes are warm -10.0% / -0.1% / +3.1% and cold
+-14.7% / +7.2% / -5.6% at 4K / 1080p / Flower, with very broad paired ranges.
+The unchanged host codestream phase also moves substantially; the large
+4K wall-time gains cannot all be assigned to this small GPU target.
+Final performance endpoints report neither thermal nor power limiting, but
+the earlier stage/control endpoints report both. This is a local GPU
+improvement, not a universal whole-encoder speedup. See
+[S64](#prefetched-initial-color-correlation-s64) for competing schedules,
+35,206 timing windows, arithmetic audits, diagnostic failures, and slower
+observations. Optimization remains ongoing, not maxed out.
 
 The preceding implemented checkpoint, S60 against S58
 production (`bf4968b`; S59 is investigation-only), fuses reference-mask erosion
@@ -10651,6 +10656,308 @@ across competing schedules and complete-workflow traces, with a measured
 narrow-width fallback. Stable-condition whole-workflow repeats, other GPU
 architectures, initial color correlation, and the remaining dominant
 resident stages are still open. Optimization is not maxed out.
+
+## Prefetched initial color correlation (S64)
+
+S64 compares against S63 `6f968df` on the same RTX 3060 Laptop, CUDA 11.8,
+sm86/MSVC 14.37 configuration. Retained S63 candidate traces put initial CfL
+at 0.486 ms in Flower, its largest single GPU kernel, and 0.565 ms at 1080p.
+At 4K, Malta remains much larger: its two 64-row variants total about 38.9 ms.
+These are identified retained captures, not fresh S64 baselines. Initial CfL
+is a bounded target, not a claim to have removed the dominant 4K cost.
+
+### Preserve the four chains while preloading samples
+
+Each color tile still uses the original four accumulation lanes. A lane now
+preloads eight samples of each channel into registers before accumulating
+them in their original order. Full chunks span 32 columns; the remaining
+samples use the original scalar schedule. Both the mean pass and the centered
+regression pass preserve their four per-lane chains, the `(0+1)+(2+3)` sum,
+division, thresholding, and signed-map quantization. Nonfinite samples retain
+the original error-bit and untouched-output behavior. This is not a new
+reduction tree or a reduced-precision approximation.
+
+The selected block holds eight four-lane tiles in 32 threads, instead of
+32 tiles in 128 threads. Register use rises from 42 to 48 per thread; there
+is no shared, stack, or local storage. For that launch size, the occupancy
+API reports sixteen blocks and 512 threads per SM, versus ten blocks and
+1,280 threads for the original launch. These are theoretical limits, not
+measured occupancy. The smaller blocks distribute the finite tile population
+across more SMs; a higher theoretical thread ceiling alone does not predict
+the measured result.
+
+Logical image widths below 32 contain no complete eight-sample chunk. Their
+measured small regressions are avoided with an explicit width dispatch to
+the original kernel. Width 32 already uses the new body. Partial right-hand
+color tiles in wider images use its scalar remainder. This is a geometry
+dispatch, not a content or quality heuristic. Both the resident initial-CfL
+entry and the DCT8 frame-encoding entry use the same dispatch; the original
+body remains available through a private conformance entry.
+
+The release adds one GPU body. All 175 previous bodies remain instruction-
+identical, and the new body exactly matches V5, V6, and the complete-workflow
+control. The number of launches, allocations, transfers, map layout, frame
+ABI, public API, and quality policy do not change. Both passes still read
+the same logical input samples; there is no image-plane traffic reduction.
+
+### Competing schedules and the causal controls
+
+V1 compares baseline with six four-lane block packings, from one through 64
+tiles per block, and ten cooperative-load variants using 8/16/32 lanes per
+tile. Cooperative variants load adjacent samples and broadcast them into
+replicas of the original four chains. The 4,624 ordinary-launch event windows
+cover eight synthetic geometries, seventeen modes, and 34 balanced forward/
+reverse orders. Each window contains three launches, after six warmup calls
+per mode. Full-warp loading helps small images but strongly regresses 4K;
+smaller blocks alone are also not a universal improvement.
+
+Three diagnostic captures retain the actual post-preprocessing CfL planes
+from fully-resident 4K, 1080p, and Flower encodes. All 175 GPU bodies in the
+capture executable match S63. Synchronized capture copies make these input
+captures unsuitable for wall-time comparisons. They are replay data, not
+performance observations.
+
+V2 adds two-, four-, and eight-sample vector loads within the four-lane group,
+with subgroup register transposes, at three block packings each. Its 3,168
+graph windows cover eight synthetic and three captured inputs, twelve modes,
+and 24 balanced orders. Graph submissions contain three kernel nodes and
+are diagnostic only. Representative captured-input median paired changes
+are below; negative means faster.
+
+| V2 captured input | Full warp, two tiles/block | Vector 2, eight tiles/block | Vector 4, eight tiles/block | Vector 8, eight tiles/block |
+| --- | ---: | ---: | ---: | ---: |
+| Flower | -56.92% | +185.82% | +61.60% | -4.72% |
+| 1080p | -48.84% | +167.61% | +49.73% | -13.92% |
+| 4K | +56.36% | +86.60% | +19.83% | -21.87% |
+
+V3 adds sixteen-sample vector loads and scalar preload/accumulate controls
+with 4/8/16 samples per lane and 8/16/32 tiles per block. The scalar controls
+load a chunk before updating the sums but do not use vector loads or input
+shuffles. The 7,128 graph windows cover eleven input cases, eighteen modes,
+and 36 balanced orders. Scalar preloading wins broadly, showing that vector
+transactions or transpose-based coalescing are not necessary for the gain.
+
+| V3 captured input, eight tiles/block | Vector 16 | Scalar preload 4 | Scalar preload 8 | Scalar preload 16 |
+| --- | ---: | ---: | ---: | ---: |
+| Flower | -28.36% | -22.48% | -36.00% | -19.63% |
+| 1080p | -31.93% | -21.90% | -32.81% | -20.53% |
+| 4K | -11.61% | -23.91% | -27.12% | -18.72% |
+
+V4 compares that explicit preloading with plain compiler unroll factors
+4/8/16. The latter all regress: roughly 100-114% on captured 1080p/Flower
+and 33-39% at 4K. A 60-geometry small-width/height sweep also exposes waste
+in incomplete preload chunks. V4 retains 6,762 graph windows across 69
+synthetic/captured cases, seven modes, and fourteen balanced orders.
+
+V5 separates complete chunks from scalar remainders. Four new variants use
+4/8 samples and 8/16 tiles per block, in another 6,762-window graph screen.
+Eight samples/eight tiles is selected. V6 repeats the 69-case screen with
+ordinary launches and the final below-32 fallback: another 6,762 windows.
+It keeps the full-warp alternative and earlier controls for comparison.
+
+| Captured input | V5 chunk/remainder, graph | V6 final dispatch, ordinary launches | V6 wins / 14 |
+| --- | ---: | ---: | ---: |
+| Flower | -42.97% | -41.56% | 14 |
+| 1080p | -41.07% | -39.69% | 14 |
+| 4K | -24.14% | -24.59% | 14 |
+
+The full-chunk body uses ordinary scalar global loads. Its 75 static load
+instructions and 83 static FFMAs include both fast and remainder paths;
+they are not executed counts per sample. Its 48 registers are fewer than
+the earlier guarded eight-sample preloader's 56. Plain unrolling uses only
+34 registers but is much slower. The evidence supports batching independent
+loads before dependent arithmetic, reducing chunk-control work, and changing
+block packing together. It does not establish a hardware-counter claim about
+cache misses, memory throughput, achieved occupancy, or a single instruction
+as the cause. All 35,206 timing windows, including regressions, remain.
+
+### Diagnostic failures and stronger arithmetic checks
+
+The first cooperative prototype stalls at the partial-width case after
+64x56. Its shuffle mask names the whole active warp inside loops whose trip
+counts differ between tiles. A live process check finds GPU utilization at
+100%; the user is notified, and only the identified probe process is stopped.
+Restricting the mask to each tile's lanes lets the unchanged guard sequence
+finish. The stalled source, binary, build log, and partial guard log remain;
+that run is not counted as a completed experiment. No administrator prompt,
+firewall block, or permission failure is observed.
+
+The first floating audit also exposes a harness ordering error: an output
+reset can finish after a kernel on the non-blocking stream, leaving unchanged
+poison rather than a computed sum. Both failed audit generations remain.
+An explicit default-stream wait before launching fixes the audit. CUDA 11.8
+documents that a pageable host-to-device copy may return before its device
+transfer finishes. The V3 and later fixture resets explicitly wait for that
+copy. [CUDA synchronization behavior](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-runtime-api/api-sync-behavior.html)
+
+V1/V2 map-only guard runs retain that setup-ordering limitation; they are not
+the final conformance evidence. The corrected V3 floating audit rechecks all
+37 candidates, not just its screen subset, over 870 synthetic reuse cases
+and nine captured-input reuse cases: 32,523 comparisons. All 24 per-tile
+floating sums, maps, error bits, and guards match bit-for-bit, and actual
+non-audit kernel outputs are checked separately. V4 and V5 audits each add
+5,274 comparisons for their six selected/control modes. These counts include
+overlapping fixtures, not distinct images. V6 additionally checks output
+guards independently and checks error bits against the host's input-finiteness
+expectation. Read-only inputs and their guards remain intact.
+
+A mechanically malformed V2 report parser initially fails with SyntaxError;
+its source is preserved, and the correction reads the same raw measurements.
+No screen is restarted to replace unfavorable observations. The earlier S61
+fixture/audit source is checked read-only and already orders its resets;
+the old archives are not changed by this S64 harness correction.
+
+### Complete-workflow controls
+
+The same-executable control retains all 175 S63 GPU bodies and adds the 44
+experimental bodies. Diagnostic mode 45 selects the final dispatch. All 46
+baseline/candidate codestream pairs match frozen S63 hashes. These are
+hash-only control checks, separate from fresh release decodes and metrics.
+
+Seven alternating pairs per workload use three warmups/seven samples when
+warm, and zero warmups/one sample when cold. All 41 phase fields and raw
+commands remain. These are median paired percentage changes, not ratios of
+aggregate medians.
+
+| Same-executable S64 control | Quantization pipeline | Codestream encoding | Whole encode | Whole wins / 7 |
+| --- | ---: | ---: | ---: | ---: |
+| Warm 4K | -1.74% | -5.85% | -1.02% | 6 |
+| Warm 1080p | -2.36% | -5.42% | -3.33% | 4 |
+| Warm Flower | -2.80% | -2.15% | -1.87% | 5 |
+| Cold 4K | -0.40% | +3.42% | +0.88% | 3 |
+| Cold 1080p | +1.56% | -2.35% | -0.32% | 4 |
+| Cold Flower | -6.34% | +4.94% | -2.45% | 5 |
+
+Twelve warm traces provide two alternating pairs per workload. Every trace
+has one initial-CfL launch and the same non-target kernel sequence. Total
+launch counts remain 391 at 4K/Flower and 378 at 1080p.
+
+| S64 complete trace | Target GPU pair 1 / 2 | Total GPU pair 1 / 2 |
+| --- | ---: | ---: |
+| Warm 4K | -45.30% / -44.18% | -8.03% / -2.08% |
+| Warm 1080p | -43.13% / -44.53% | -1.30% / -4.68% |
+| Warm Flower | -44.07% / -43.53% | -3.77% / -3.44% |
+
+All six target-duration pairs improve, but target launch API duration rises
+14.50% and 89.93% in the two 1080p pairs. Total-GPU changes can exceed the
+saved CfL duration, so they cannot all be attributed to this one kernel.
+Instrumented durations are not substituted for unprofiled wall times; cold
+4K whole-encode and other slower observations remain in the record.
+
+### Release correctness and sanitizer observability
+
+All 73 CUDA and 50 CPU CTest targets pass, as do five host ASan targets
+(DC group, entropy, coefficient order, codestream encoder, and public
+codestream workflow). The new permanent initial-CfL test compares the original
+and dispatched kernels over 310 fixtures with three-stage reuse: 930 map,
+error, and guard comparisons. Its 31 geometries cover short widths around
+the dispatch boundary, partial color tiles, tile counts around block/warp
+boundaries, and tall/narrow and wide/short images. Ten patterns include
+structured/noisy data, constant values, signed zero, denormals, cancellation,
+large finite values, NaNs, and infinities. Reset copies explicitly finish
+before work on the non-blocking stream; error bits are checked against the
+host's input-finiteness expectation, not only against the GPU reference.
+
+The scoped sanitizer test uses eight boundary geometries and four patterns,
+with 32 fixtures and 96 comparisons per tool. Memcheck (including stream-
+ordered races and full leak checking), initcheck, synccheck, and racecheck
+all pass. Full AQ separately passes memcheck/initcheck/synccheck, with zero
+errors and zero leaked bytes where checked. Full-AQ racecheck is not rerun
+or claimed; the earlier aborted long run remains unqualified.
+
+The first new-test sanitizer invocation prints a zero-error summary but no
+application-completion marker, so it is not accepted as a pass. Direct runs
+do print the marker, and a session-details retry identifies the CUDA target.
+Existing sanitizer tests explicitly flush their final messages. Adding that
+flush to this test restores its 96-comparison marker under instrumentation;
+a fresh seven-check campaign then asserts both tool success and application
+completion. The unflushed source/binary and unsuccessful diagnostic wrapper
+attempts remain. This is evidence of buffered output in this invocation, not
+of a firewall block. No administrator, firewall, or permission change is made.
+Only the host test is rebuilt for the flush; its CTest is rerun and passes.
+
+The fresh release quality campaign encodes, decodes, and measures 58 parent/
+candidate pairs: 46 core cases and six each in high-density and maximum-
+compression modes. All codestream bytes, decoded dimensions, and measured
+Butteraugli scores match; size and score ratios are 1. The pinned decoder
+revision is `e8ff09762481785938d8e4e01333ed3917571161`. These fresh checks are
+separate from the 46 hash-only same-executable controls.
+
+### Fresh release timings and remaining limits
+
+Fresh release executables are compared with retained S63 executables in four
+separate seven-pair cohorts. Warm uses three warmups/five samples; cold uses
+zero warmups/one sample. Phase builds retain all 41 fields and public builds
+all seven. Executable hashes, exact commands, raw outputs, alternating order,
+pair ranges, and win counts remain. Encoded-size checks in timing runs are
+not substituted for the fresh quality campaign above.
+
+| Fresh release cohort | Quantization pipeline | Codestream encoding | Whole encode | Whole wins / 7 |
+| --- | ---: | ---: | ---: | ---: |
+| Phase warm 4K | -1.93% | -3.77% | -2.80% | 5 |
+| Phase warm 1080p | -0.54% | -7.66% | -2.14% | 4 |
+| Phase warm Flower | +0.91% | +5.53% | +2.81% | 3 |
+| Phase cold 4K | -0.11% | +0.12% | +0.05% | 3 |
+| Phase cold 1080p | -2.88% | -3.06% | -2.26% | 5 |
+| Phase cold Flower | +1.47% | -0.44% | -2.15% | 4 |
+| Public warm 4K | -4.81% | -19.02% | -10.00% | 5 |
+| Public warm 1080p | -1.60% | +2.01% | -0.11% | 4 |
+| Public warm Flower | -3.46% | +4.80% | +3.14% | 3 |
+| Public cold 4K | -7.22% | -27.26% | -14.70% | 5 |
+| Public cold 1080p | +1.10% | +16.67% | +7.18% | 3 |
+| Public cold Flower | -2.07% | -12.60% | -5.60% | 4 |
+
+The public warm 4K whole-encode range is -18.85% to +3.35%; warm 1080p is
+-11.92% to +68.51%, and warm Flower is -33.11% to +70.92%. Cold public ranges
+are -21.73% to +20.17%, -5.76% to +21.53%, and -25.16% to +33.19%.
+The host codestream phase is unchanged by this GPU implementation yet also
+moves substantially. The large 4K public median gains cannot reasonably be
+assigned entirely to a sub-millisecond CfL saving. These observations are
+retained without filtering or rerunning a cohort to obtain a favorable
+result. The much tighter target-kernel controls support the local change;
+whole-encoder effects remain uncertain and workload/state dependent.
+
+The current batch policy is checked with one warmup and three alternating
+serial/batch pairs. Values below are median paired serial/batch ratios, not
+S63-to-S64 speedups. Each output is checked against its serial reference.
+
+| Current S64 batch policy | Batch 1 | Batch 2 | Batch 4 |
+| --- | ---: | ---: | ---: |
+| 1080p fully-resident | 0.988x | 1.168x | 1.733x |
+| 1080p maximum-throughput | 1.169x | 1.503x | 1.805x |
+| 4K fully-resident | 1.046x | 1.190x | not run |
+
+Batch ratios also vary widely: 1080p resident batch four ranges from 1.117x
+to 1.998x. Its median milliseconds per image is worse than batch two in this
+cohort; the paired ratio does not establish improved absolute throughput.
+4K batch four is not run. No lane-count or concurrency policy changes.
+
+The final performance endpoints are 60 C/P0/1,282 MHz/25.19 W and
+74 C/P0/1,762 MHz/44.79 W, both reporting neither thermal nor power limiting.
+Earlier stage-screen endpoints differ: V1 reports both limits at each end;
+V2-V6 end with both active, as does the complete-workflow control. V6 moves
+from 58 C/P0/1,282 MHz/22.68 W to 60 C/P3/1,605 MHz/33.61 W; the control moves
+from 57 C/P8/210 MHz/15.77 W to 65 C/P3/1,282 MHz/24.99 W. All raw snapshots
+remain. Endpoint samples neither characterize every timed interval nor
+identify the cause of host timing scatter. No clock, power, process-priority,
+security, or service settings are changed, and no clock normalization is
+applied. Different cohorts are not pooled.
+
+Reproduction is under ignored `build-cuda-ninja/profiles/s64_*`: candidate
+sources/binaries, all six raw screens, arithmetic audits, native bodies and
+resources, input captures, twelve workflow traces/SQLite exports, quality
+artifacts, sanitizer reports, release timings, and validators. The checkpoint
+retains 39 release binaries/libraries and six source/document snapshots.
+The validator recomputes timing statistics, native-body equality, trace
+launch/runtime totals, decoded dimensions and hashes, documentation tables,
+and the frozen manifests; S59-S63 evidence remains unchanged.
+
+S64 is a precise initial-CfL improvement, not a maxed-out backend. The much
+larger 4K Malta work, remaining resident reconstruction/quantization costs,
+and host serialization remain relevant. Further changes still need explicit
+causal controls and whole-workflow qualification; more streams or reduced
+precision are not justified by this experiment.
+
 
 ## Work that should not lead the next cycle
 

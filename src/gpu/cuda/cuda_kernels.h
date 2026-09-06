@@ -122,6 +122,13 @@ struct CudaAcStrategyBatchParams {
     signed char* y_to_x, signed char* y_to_b, unsigned int* error,
     CudaAqGeometry geometry, cudaStream_t stream);
 
+// Private conformance oracle with the original four-lane sample schedule.
+// Requires the same validated, packed, eight-pixel-padded geometry as above.
+[[nodiscard]] cudaError_t LaunchCudaAqInitialCflReference(
+    const float* coding_x, const float* coding_y, const float* coding_b,
+    signed char* y_to_x, signed char* y_to_b, unsigned int* error,
+    CudaAqGeometry geometry, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqSelectResidentQuantizer(
     const float* quant_field, unsigned int block_count,
     unsigned int* selection_state, unsigned int* histogram, float* statistics,

@@ -950,6 +950,32 @@ are +0.3% / -0.3% / -3.1% at 4K / 1080p / Flower; cold changes are
 remain documented. This is a targeted GPU improvement, not a universal
 whole-encoder speedup or a maxed-out backend.
 
+[S64](cuda-optimization-s1.md#prefetched-initial-color-correlation-s64) preloads
+eight initial-CfL samples per original lane before accumulating them in the
+same order. Eight four-lane tiles share a 32-thread block; widths below 32
+keep the original body. The new body uses 48 registers and no shared,
+stack, or local storage. All 175 old GPU bodies remain unchanged, and the
+release body matches both final stage screens and the complete-workflow
+control. Launches, allocations, transfers, maps, frame ABI, public API,
+and quality policy are unchanged. Six workflow trace pairs improve targeted
+initial-CfL GPU time by 43-45%; vector loads and a new reduction tree are
+not necessary for the gain.
+
+All 73 CUDA / 50 CPU tests, five host ASan targets, seven scoped GPU sanitizer
+checks, and 58 fresh byte-identical decoded pairs pass. The new permanent
+test covers 310 fixtures with three-stage reuse; scoped sanitizer runs cover
+32 fixtures/96 comparisons each. A missing completion message under the
+first sanitizer invocation is resolved by explicitly flushing the test's
+output, with fresh instrumented checks; no firewall or permission block is
+confirmed. Earlier diagnostic failures and corrections are preserved.
+
+Warm public whole changes are -10.0% / -0.1% / +3.1% at 4K / 1080p / Flower;
+cold changes are -14.7% / +7.2% / -5.6%. Broad paired ranges and substantial
+changes in the unchanged host serialization phase prevent attributing those
+large 4K gains to CfL alone. Final endpoints report neither thermal nor power
+limiting; earlier stage/control endpoints report both. No system settings
+change. The local gain is supported, but the backend is not maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
