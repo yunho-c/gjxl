@@ -13090,6 +13090,117 @@ frozen artifact/dependency/runtime/source hashes are checked by
 retained source/runtime snapshots. S70 remains preserved as the parent
 runtime, while the S75 candidate is now retained.
 
+## Interleaved small-image metadata controls (S76, investigation)
+
+S76 investigates S75's adverse small-image public results without changing
+production code or introducing an image-size gate. The earlier warm public
+Flower total/serializer regressions of 3.57%/9.07%, and cold total regression
+of 2.57%, remain preserved. They are not relabeled as passing measurements.
+S75's same-binary warm result had instead improved, motivating a test that
+switches metadata behavior between individual encodes inside one process.
+
+### Probe and qualification
+
+The new ignored `s76_interleave.exe` links the frozen S75 control object.
+Modes 0 and 2 both use eager metadata; mode 1 uses the retained, validated,
+owned-state deferred implementation. The probe reuses the frozen 41-field
+phase mapper and checked profiled encoding boundary. All 203 native GPU
+function bodies match S70, and the reused control source/object/header hashes
+match the frozen S75 bundle. No device arithmetic or production policy changes.
+
+Each process reads one input, obtains an eager reference, runs six warmup
+triples, then runs measured triples. Every block of six triples visits all
+six mode orders once, in deterministically shuffled order. Each encode must
+match its process's reference bytes and summary exactly. The first bitstream
+is saved and must match the frozen S70 distance-1.2, effort-7 encoding-only
+reference hash and size. The three inputs are Flower, padded 1080p and padded
+4K. No scored, other-effort, or other-image performance claim is added here.
+
+Six preflight processes pass 222 encodes. Twelve subsequent measurement
+processes pass 3,168 measured encodes plus 228 warmup/reference encodes, for
+3,618 exact encodes altogether. All 18 saved reference files match S70.
+All 3,600 logged timing rows, all 41 fields, mode markers, orders and paired
+summaries reconstruct from raw output. Warmups and adverse measurements are
+retained; none of the measured samples is excluded. Percentage comparisons
+are undefined when a tiny baseline field rounds to zero; these cases are
+counted explicitly and retain their absolute timings.
+
+Flower has two 120-triple replicates for each of four configurations:
+persistent versus newly created backend, and automatic versus one CPU
+participant. The second replicate reverses configuration order. Four large
+controls between the Flower replicates each use 24 triples, automatic CPU
+threading, and persistent or fresh backends. Native auditing and preflight
+finish before measurement; all measurement children execute serially from
+23:02:57 to 23:05:56 UTC on September 6. Every child completes within its
+120-second limit. No permission failure, elevation prompt, or firewall block
+is observed, and no security or system scheduling setting changes.
+
+Fresh backend creation/destruction occurs on every encode **within an already
+warm process**. It is not a cold-process experiment. The profiled total excludes
+backend construction/destruction; a separate outer timer includes them. The
+control's flushed mode marker is inside preparation timing, equally for all
+three modes. Row formatting and byte/summary comparison are outside the
+encoding call, although buffered row output can flush with the next marker.
+These are diagnostic, instrumented same-binary comparisons, not replacement
+public-release benchmarks. S75's full tests, decoded quality and sanitizers
+remain the production qualification; S76 adds no fresh sanitizer or decoder
+run and revalidates the frozen S75 evidence.
+
+### Results and decision
+
+Each percentage below is the median of adjacent, paired per-triple changes,
+not a ratio of separate timing medians. Negative values are faster. Flower
+rows combine both replicates, with 240 pairs per comparison.
+
+| Flower backend / CPU budget | Quantization | Serializer | Total | Duplicate eager total |
+| --- | ---: | ---: | ---: | ---: |
+| Persistent / automatic | -2.97% | -0.06% | -2.18% | -0.04% |
+| Fresh / automatic | -2.54% | -0.19% | -1.69% | -0.08% |
+| Persistent / one | -2.84% | +0.78% | -0.77% | -0.20% |
+| Fresh / one | -3.04% | -0.09% | -1.56% | -0.13% |
+
+Automatic-thread Flower saves a median paired 0.326/0.361 ms in quantization
+and 0.452/0.468 ms total for persistent/fresh backends. Total improves in
+152/240 and 145/240 pairs; quantization improves in 177/240 and 172/240.
+Comparison to duplicate eager mode 2 also improves total by 2.25%/1.65%.
+All six order-specific quantization medians improve in both automatic-thread
+configurations. Descriptive 2,000-resample, six-triple-block bootstrap
+intervals for total change are [-2.88%, -1.16%] and [-2.84%, -0.40%]; serializer
+intervals cross zero. These within-cohort intervals do not establish behavior
+across cold starts, other machines or workloads.
+
+Each of the eight Flower process-level paired total medians is negative,
+but persistent single-thread replicate 1 is essentially flat (-0.04%).
+Single-thread serialization is not generally faster: eager serializer
+medians are 11.03/10.68 ms versus automatic 9.11/9.14 ms for persistent/fresh
+configurations. Those absolute cross-process observations are not an
+interleaved CPU-policy experiment. The source still creates and joins
+`std::thread` workers in `RunParallelSections`; this is a possible future
+profiling target, not evidence for forcing serial execution or adding a pool.
+
+The smaller large-image controls also favor deferred metadata. Persistent /
+fresh 1080p paired quantization changes are -4.41% / -3.49%, and total changes
+-4.66% / -1.38%. At 4K they are -3.98% / -2.35% for quantization and -5.42% /
+-2.16% total. Duplicate eager total changes range from -2.43% to +1.49%, so
+these four-block controls remain descriptive; they do not improve the
+precision of S75's public large-image results.
+
+The warm-process data do not reproduce a metadata-induced small-image
+slowdown. They support retaining S75 without an image-size gate. They do not
+identify the cause of the older public regressions or settle cold-process
+behavior. No global CPU-thread policy or runtime implementation is changed.
+Further work should directly measure remaining host preparation, serializer
+work and worker-lifecycle costs, rather than infer them from cross-process
+noise. The overall CUDA optimization goal remains open.
+
+The ignored `s76_*` bundle preserves the diagnostic source/object/executable,
+producers, native dump, all raw runs and reconstructed results. Its seven
+source/document snapshots, diagnostic files and dependencies are hashed;
+all 39 retained runtime artifacts remain byte-identical to S75 and reuse
+its immutable snapshots. `s76_validate.py --frozen` verifies the bundle and
+reconstructs every recorded comparison; `--current` also checks current
+source/runtime identity.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

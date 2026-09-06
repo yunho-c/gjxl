@@ -1153,6 +1153,18 @@ output, with six full encode checks passing. No security settings change.
 Remaining host and GPU bottlenecks are still open; this is not a maxed-out
 claim.
 
+[S76](cuda-optimization-s1.md#interleaved-small-image-metadata-controls-s76-investigation)
+tests S75's small-image concern with per-encode, within-process eager/lazy/
+duplicate-eager interleaving. All 3,618 preflight, measured and warmup/reference
+encodes preserve bytes and summaries; all 203 GPU bodies and 39 retained
+runtime artifacts remain unchanged. Flower's automatic-thread paired total
+improves 2.18% with a persistent backend and 1.69% with fresh backends inside
+the warm process, with essentially unchanged serialization. The earlier
+public regressions remain recorded; these diagnostic results do not settle
+cold-process behavior. No size gate, thread-policy change or production
+implementation is added. Every bounded child completes without an observed
+permission/firewall block. Remaining host and GPU costs are still open.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
