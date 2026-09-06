@@ -167,6 +167,10 @@ atomic reconstruction scratch, including tile lists and dispatch backing.
 The [field and color-correlation bounds](resident-field-storage-planning.md)
 cover initial-quantization row workers/atomic fields, adjustment, quantizer
 selection and per-tile CfL scratch with independently retained map output.
+The [preprocessing/perceptual bounds](resident-perceptual-storage-planning.md)
+cover color dispatch/atomic images, nested filter scratch, block reductions and
+native Butteraugli prepared/one-shot ownership and multiscale replacement. They
+also preserve typed underplan errors across six previously generic wrappers.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

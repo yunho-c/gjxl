@@ -242,6 +242,7 @@ add_library(
   src/codec/quantization_pipeline.cpp
   src/codec/reconstruction.cpp
   src/codec/frontend_storage_plan.cpp
+  src/codec/perceptual_storage_plan.cpp
   src/codec/codestream.cpp
   src/codec/vardct_frame.cpp
 )
@@ -1601,6 +1602,11 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_frontend_field_storage_plan_test PRIVATE gjxl_codec)
   add_test(NAME frontend_field_storage_plan COMMAND gjxl_frontend_field_storage_plan_test)
   set_tests_properties(frontend_field_storage_plan PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_perceptual_storage_plan_test tests/perceptual_storage_plan_test.cpp)
+  target_link_libraries(gjxl_perceptual_storage_plan_test PRIVATE gjxl_codec)
+  add_test(NAME perceptual_storage_plan COMMAND gjxl_perceptual_storage_plan_test)
+  set_tests_properties(perceptual_storage_plan PROPERTIES TIMEOUT 180)
 
   add_executable(gjxl_publication_storage_test tests/publication_storage_test.cpp)
   target_link_libraries(gjxl_publication_storage_test PRIVATE gjxl_codestream)

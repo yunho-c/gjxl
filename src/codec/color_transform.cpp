@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codec/color_transform.h"
+#include "codec/frontend_storage_plan.h"
 
 #include "codec/color_transform_internal.h"
 
@@ -122,8 +123,8 @@ Status RunParallelRows(
   Extent2D extent,
   Function&& function) {
 
-  constexpr size_t kMinimumParallelPixels = 256 * 256;
-  constexpr size_t kMaximumWorkers = 12;
+  using frontend_storage_internal::kMinimumParallelColorPixels;
+  using frontend_storage_internal::kMaximumColorWorkers;
   size_t pixel_count = 0;
   if (!extent.try_area(&pixel_count)) {
     return Status::InvalidArgument(
@@ -131,9 +132,9 @@ Status RunParallelRows(
   }
   const size_t hardware_workers = std::max<size_t>(
     std::thread::hardware_concurrency(), 1);
-  const size_t automatic_worker_count = pixel_count < kMinimumParallelPixels
+  const size_t automatic_worker_count = pixel_count < kMinimumParallelColorPixels
     ? 1
-    : std::min(extent.height, std::min(kMaximumWorkers, hardware_workers));
+    : std::min(extent.height, std::min(kMaximumColorWorkers, hardware_workers));
   const size_t cpu_thread_count =
     thread_budget_internal::CpuThreadCount();
   auto* const participant_tracker =
@@ -258,6 +259,8 @@ Status ConvertImage(
     });
     if (!status.ok()) return status;
     CopyImage(result.const_view(), output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate color-transform scratch storage");
@@ -418,6 +421,8 @@ Status LinearRgbToOpsin(
       linear_rgb, intensity_target, result.view());
     if (!status.ok()) return status;
     CopyImage(result.const_view(), opsin);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate color-transform scratch storage");
@@ -454,6 +459,8 @@ Status color_transform_internal::LinearRgbToPaddedOpsin(
           padded_opsin.plane[channel].Row(y));
       }
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate color-transform scratch storage");

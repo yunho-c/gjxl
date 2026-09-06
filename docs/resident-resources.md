@@ -36,7 +36,11 @@ tile lists/dispatch and the full atomic reconstruction scratch image.
 The [field and color-correlation bounds](resident-field-storage-planning.md)
 add initial-quantization worker and atomic-field scratch, adjustment, quantizer
 selection and per-tile CfL working/output ownership.
-Remaining frontend/search/perceptual-state bounds and their combined
+The [preprocessing/perceptual bounds](resident-perceptual-storage-planning.md)
+add color conversion, nested loop filters, block reductions and native Butteraugli
+prepared/one-shot scratch, including real old/new replacement overlap. Six
+color/filter boundaries now preserve typed underplan reasons.
+Remaining frontend/search/evaluation-state bounds and their combined
 device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
 workflow envelope and public domain integration.
 Whole-workflow planning and admission remain pending.

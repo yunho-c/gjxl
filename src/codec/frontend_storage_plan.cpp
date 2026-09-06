@@ -48,6 +48,66 @@ Status FieldScratch(Extent2D blocks, size_t planes, HostStorageBound *out) {
 }
 } // namespace
 
+Status ComputeColorTransformStoragePlan(Extent2D source, Extent2D destination,
+                                        bool direct_padded,
+                                        size_t cpu_thread_count,
+                                        ColorTransformStoragePlan *out) {
+  size_t dispatch_pixels = 0, destination_pixels = 0;
+  if (out == nullptr || source.empty() || destination.empty() ||
+      source.width > destination.width || source.height > destination.height ||
+      (!direct_padded && source != destination))
+    return Status::InvalidArgument("Color-transform plan extents are invalid");
+  if (!Extent2D{destination.width, source.height}.try_area(&dispatch_pixels) ||
+      !destination.try_area(&destination_pixels))
+    return Overflow();
+  ColorTransformStoragePlan plan;
+  const size_t workers = cpu_thread_count == 0
+                             ? kMaximumColorWorkers
+                             : std::min(cpu_thread_count, kMaximumColorWorkers);
+  plan.maximum_participants = dispatch_pixels < kMinimumParallelColorPixels
+                                  ? 1
+                                  : std::min(workers, source.height);
+  if ((!direct_padded &&
+       !plan.working.AddVector<float>(destination_pixels, kFreshExact, 3)) ||
+      (plan.maximum_participants > 1 &&
+       (!plan.working.AddVector<Status>(source.height, kFreshExact) ||
+        !plan.working.AddVector<std::thread>(plan.maximum_participants,
+                                             kFreshExact))))
+    return Overflow();
+  *out = plan;
+  return Status::Ok();
+}
+
+Status ComputeLoopFilterStorageBound(Extent2D pixels, bool gaborish,
+                                     size_t epf_iterations,
+                                     HostStorageBound *out) {
+  size_t count = 0;
+  if (out == nullptr || pixels.empty() || epf_iterations > 3)
+    return Status::InvalidArgument("Loop-filter storage options are invalid");
+  if (!pixels.try_area(&count))
+    return Overflow();
+  HostStorageBound bound;
+  // EPF uses one image at iterations 1/2, two at 3, and none at 0. When both
+  // filters run, the outer image coexists first with Gaborish's one temporary,
+  // then with EPF's temporaries. All destination/input backing is separate.
+  const size_t epf_images = epf_iterations == 0   ? 0
+                            : epf_iterations == 3 ? 2
+                                                  : 1;
+  const size_t images = !gaborish ? epf_images
+                        : epf_iterations == 0
+                            ? 1
+                            : 1 + std::max(size_t{1}, epf_images);
+  if (!bound.AddVector<float>(count, kFreshExact, 3 * images))
+    return Overflow();
+  *out = bound;
+  return Status::Ok();
+}
+
+Status ComputeBlockReductionStorageBound(Extent2D blocks,
+                                         HostStorageBound *out) {
+  return FieldScratch(blocks, 1, out);
+}
+
 Status ComputeInitialQuantStoragePlan(Extent2D padded_extent,
                                       size_t cpu_thread_count,
                                       InitialQuantStoragePlan *out) {

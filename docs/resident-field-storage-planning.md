@@ -6,6 +6,9 @@ adjustment, quantizer selection and color correlation. **It does not complete
 frontend planning or whole-workflow admission.** Search, preprocessing/perceptual
 state, evaluation/retry/result storage and their overlapping host/device lifetimes
 still need their remaining bounds and composition.
+The subsequent [preprocessing/perceptual checkpoint](resident-perceptual-storage-planning.md)
+supplies color/filter, block-reduction and native Butteraugli bounds; remaining
+search/evaluation/metadata and whole-workflow composition are still pending.
 
 The internal interfaces extend
 [`frontend_storage_plan.h`](../src/codec/frontend_storage_plan.h). Successful

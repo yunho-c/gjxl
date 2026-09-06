@@ -18,6 +18,39 @@ inline constexpr size_t kMaximumForwardWorkers = 8;
 inline constexpr size_t kMinimumParallelInitialQuantValues = 256 * 256;
 inline constexpr size_t kMaximumInitialQuantWorkers = 12;
 
+inline constexpr size_t kMinimumParallelColorPixels = 256 * 256;
+inline constexpr size_t kMaximumColorWorkers = 12;
+
+struct ColorTransformStoragePlan {
+  size_t maximum_participants = 0;
+  HostStorageBound working;
+  bool operator==(const ColorTransformStoragePlan &) const = default;
+};
+
+/// Atomic public forward/inverse color conversion: same-sized input/output,
+/// three temporary F32 planes plus dispatcher backing. With direct_padded=true,
+/// bound the internal LinearRgbToPaddedOpsin instead: it writes the supplied
+/// scratch directly and dispatches source.height rows of destination.width.
+/// Destination must cover source; caller images are separate owners.
+[[nodiscard]] Status
+ComputeColorTransformStoragePlan(Extent2D source, Extent2D destination,
+                                 bool direct_padded, size_t cpu_thread_count,
+                                 ColorTransformStoragePlan *out);
+
+/// Complete ApplyLoopFilters scratch at exact pixels, including nested filter
+/// temporaries. epf_iterations is 0..3. Standalone Gaborish (forward/inverse)
+/// has the same bound as gaborish=true, epf_iterations=0. No returned owner.
+[[nodiscard]] Status ComputeLoopFilterStorageBound(Extent2D pixels,
+                                                   bool gaborish,
+                                                   size_t epf_iterations,
+                                                   HostStorageBound *out);
+
+/// One fresh block-sized atomic F32 array, used by ComputeEpfInverseSigma,
+/// ReduceButteraugliDistanceMap and ReduceMaximumError. Borrowed inputs and
+/// caller output/reduction structs are separate; their validation is unchanged.
+[[nodiscard]] Status ComputeBlockReductionStorageBound(Extent2D blocks,
+                                                       HostStorageBound *out);
+
 struct InitialQuantStoragePlan {
   size_t maximum_participants = 0;
   // Complete temporary backing; the three caller-provided destination planes
