@@ -55,6 +55,10 @@ AC validation/context/stage and resident AQ callback-input reserves with executi
 AC recording and resolution use a five-dispatch-per-nonempty-batch bound;
 resident AQ still needs its separate policy/geometry-to-dispatch audit. An
 explicit capacity guard prevents context growth from invalidating stage pointers.
+The [AQ profile plans](resident-aq-profile-storage-planning.md) add policy/geometry
+dispatch counts and complete per-submission diagnostic envelopes, including
+reference preparation, initial sorting, adjustment and resident frame output.
+Their session/attempt lifetimes still need whole-workflow composition.
 Remaining frontend/search/evaluation-state bounds and their combined
 device/attempt/diagnostic/retained-batch-result lifetimes still need the whole
 workflow envelope and public domain integration.

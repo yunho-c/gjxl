@@ -352,115 +352,6 @@ static_assert(sizeof(AqOpsinToLinearParams) == 20);
   return Status::Ok();
 }
 
-[[nodiscard]] const char* AqReconstructionProfileStageId(
-    AcStrategyType strategy) noexcept {
-  switch (strategy) {
-    case AcStrategyType::kDct8:
-      return "aq.reconstruction.dct8";
-    case AcStrategyType::kDct16x8:
-      return "aq.reconstruction.dct16x8";
-    case AcStrategyType::kDct8x16:
-      return "aq.reconstruction.dct8x16";
-    case AcStrategyType::kDct16x16:
-      return "aq.reconstruction.dct16";
-    case AcStrategyType::kDct32x16:
-      return "aq.reconstruction.dct32x16";
-    case AcStrategyType::kDct16x32:
-      return "aq.reconstruction.dct16x32";
-    case AcStrategyType::kDct32x32:
-      return "aq.reconstruction.dct32";
-    default:
-      return "aq.reconstruction.unsupported";
-  }
-}
-
-[[nodiscard]] const char* AqReconstructionCoefficientProfileStageId(
-    AcStrategyType strategy) noexcept {
-  switch (strategy) {
-    case AcStrategyType::kDct8:
-      return "aq.reconstruction.coefficients.dct8";
-    case AcStrategyType::kDct16x8:
-      return "aq.reconstruction.coefficients.dct16x8";
-    case AcStrategyType::kDct8x16:
-      return "aq.reconstruction.coefficients.dct8x16";
-    case AcStrategyType::kDct16x16:
-      return "aq.reconstruction.coefficients.dct16";
-    case AcStrategyType::kDct32x16:
-      return "aq.reconstruction.coefficients.dct32x16";
-    case AcStrategyType::kDct16x32:
-      return "aq.reconstruction.coefficients.dct16x32";
-    case AcStrategyType::kDct32x32:
-      return "aq.reconstruction.coefficients.dct32";
-    default:
-      return "aq.reconstruction.coefficients.unsupported";
-  }
-}
-
-[[nodiscard]] const char* AqReconstructionScatterProfileStageId(
-    AcStrategyType strategy) noexcept {
-  switch (strategy) {
-    case AcStrategyType::kDct8:
-      return "aq.reconstruction.scatter.dct8";
-    case AcStrategyType::kDct16x8:
-      return "aq.reconstruction.scatter.dct16x8";
-    case AcStrategyType::kDct8x16:
-      return "aq.reconstruction.scatter.dct8x16";
-    case AcStrategyType::kDct16x16:
-      return "aq.reconstruction.scatter.dct16";
-    case AcStrategyType::kDct32x16:
-      return "aq.reconstruction.scatter.dct32x16";
-    case AcStrategyType::kDct16x32:
-      return "aq.reconstruction.scatter.dct16x32";
-    case AcStrategyType::kDct32x32:
-      return "aq.reconstruction.scatter.dct32";
-    default:
-      return "aq.reconstruction.scatter.unsupported";
-  }
-}
-
-[[nodiscard]] const char* AqForwardCoefficientProfileStageId(
-    AcStrategyType strategy) noexcept {
-  switch (strategy) {
-    case AcStrategyType::kDct8:
-      return "aq.reconstruction.forward.dct8";
-    case AcStrategyType::kDct16x8:
-      return "aq.reconstruction.forward.dct16x8";
-    case AcStrategyType::kDct8x16:
-      return "aq.reconstruction.forward.dct8x16";
-    case AcStrategyType::kDct16x16:
-      return "aq.reconstruction.forward.dct16";
-    case AcStrategyType::kDct32x16:
-      return "aq.reconstruction.forward.dct32x16";
-    case AcStrategyType::kDct16x32:
-      return "aq.reconstruction.forward.dct16x32";
-    case AcStrategyType::kDct32x32:
-      return "aq.reconstruction.forward.dct32";
-    default:
-      return "aq.reconstruction.forward.unsupported";
-  }
-}
-
-[[nodiscard]] const char* AqFinalFrameProfileStageId(
-    AcStrategyType strategy) noexcept {
-  switch (strategy) {
-    case AcStrategyType::kDct8:
-      return "aq.final_frame.dct8";
-    case AcStrategyType::kDct16x8:
-      return "aq.final_frame.dct16x8";
-    case AcStrategyType::kDct8x16:
-      return "aq.final_frame.dct8x16";
-    case AcStrategyType::kDct16x16:
-      return "aq.final_frame.dct16";
-    case AcStrategyType::kDct32x16:
-      return "aq.final_frame.dct32x16";
-    case AcStrategyType::kDct16x32:
-      return "aq.final_frame.dct16x32";
-    case AcStrategyType::kDct32x32:
-      return "aq.final_frame.dct32";
-    default:
-      return "aq.final_frame.unsupported";
-  }
-}
 
 [[nodiscard]] bool FinitePositive(float value) noexcept {
   return std::isfinite(value) && value > 0.0f;
@@ -934,15 +825,10 @@ Status MetalPreparedAqEvaluation::Prepare(
   (void)block_extent_.try_area(&block_count_);
   (void)coding_extent_.try_area(&pixel_count_);
   if (frame_only_resident_quantizer_) {
-    initial_quant_sort_count_ = 1;
-    while (initial_quant_sort_count_ < block_count_) {
-      if (initial_quant_sort_count_ >
-          std::numeric_limits<uint32_t>::max() / 2) {
-        return Status::InvalidArgument(
-            "Resident initial-quant sort dimensions are too large");
-      }
-      initial_quant_sort_count_ *= 2;
-    }
+    InitialQuantSortPlan sort;
+    Status sort_status = ComputeInitialQuantSortPlan(block_count_, &sort);
+    if (!sort_status.ok()) return sort_status;
+    initial_quant_sort_count_ = sort.count;
   }
   if (pixel_count_ >
       static_cast<size_t>(std::numeric_limits<uint32_t>::max()) / 3) {

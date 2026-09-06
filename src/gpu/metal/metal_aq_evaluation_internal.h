@@ -17,6 +17,7 @@
 #include "codec/vardct_frame_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
+#include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"

@@ -16,6 +16,7 @@
 #include "codec/vardct_frame_view_internal.h"
 #include "core/image_buffer.h"
 #include "gpu/metal/metal_aq_host_storage_plan.h"
+#include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_storage_plan.h"
 #include "gpu/metal/metal_submission_storage_plan.h"
@@ -379,6 +380,138 @@ struct Envelope {
   }
 };
 
+bool CheckAuxiliaryProfiles(GpuBackend &gpu) {
+  using namespace gpu_profile_internal;
+  auto *preparer = dynamic_cast<GpuAqEvaluationProfiler *>(&gpu);
+  auto *resolver = dynamic_cast<GpuSubmissionProfiler *>(&gpu);
+  if (!preparer || !resolver) return false;
+  const auto capabilities = resolver->QueryGpuProfilingCapabilities();
+  if (!capabilities.timestamp_counter || !capabilities.stage_boundary) {
+    std::cout << "Auxiliary profile tests skipped: timestamps unavailable\n";
+    return true;
+  }
+  const auto peak = [](const SubmissionProfileStoragePlan &p) {
+    return std::max(p.recorded.peak_bytes, p.resolution.peak_bytes);
+  };
+  const auto graph_ok = [&](const GpuExecutionProfile &p, size_t dispatches,
+                           const SubmissionProfileStoragePlan &plan,
+                           const ResourceBudget &budget) {
+    return Check(p.submissions.size() == 1 && p.wall_stages.empty() &&
+                   p.submissions[0].stages.size() == 1 &&
+                   p.submissions[0].stages[0].dispatches.size() <= dispatches &&
+                   budget.snapshot().classes[static_cast<size_t>(ResourceClass::kDiagnostics)]
+                       .live_capacity_bytes <= plan.resolved_output.retained_bytes,
+                 "Auxiliary profile exceeded counts or retained storage");
+  };
+  size_t initial_cases = 0, reference_cases = 0;
+  for (const Extent2D extent : {Extent2D{1, 1}, {8, 8}, {14, 15},
+                                {15, 15}, {89, 57}, {257, 9}}) {
+    Fixture f(extent);
+    if (!f.Init()) return false;
+    AqAuxiliaryProfileStoragePlan plan;
+    if (!Ok(ComputeAqAuxiliaryProfileStoragePlan({extent, f.coding}, &plan)))
+      return false;
+    Envelope envelope;
+    if (!envelope.Init(f, 1)) return false;
+    auto preparation = f.Preparation(1);
+    preparation.strategies = &f.mixed;
+    {
+      const size_t capacity = envelope.device + envelope.host.working.peak_bytes +
+                              peak(plan.reference);
+      ResourceBudget budget(capacity);
+      ResourceReservation job;
+      if (!Ok(budget.TryReserve(capacity, &job))) return false;
+      {
+        ResourceContextScope scope({&job, ResourceClass::kPreparation});
+        std::unique_ptr<PreparedAqEvaluation> prepared;
+        GpuExecutionProfile result;
+        if (!Ok(preparer->PrepareAqEvaluationProfiled(preparation,
+                    GpuProfilingMode::kStage, &prepared, &result)) ||
+            !graph_ok(result, plan.reference_dispatches, plan.reference, budget) ||
+            !Check(result.submissions[0].stages[0].dispatches.size() ==
+                       plan.reference_dispatches,
+                   "Reference preparation count is not exact")) return false;
+      }
+      job.Reset();
+      // Successful preparation can return charged arenas to the idle pool.
+      if (!Ok(gpu.TrimPreparationCache()) || !Empty(budget)) return false;
+      ++reference_cases;
+    }
+    {
+      std::unique_ptr<PreparedAqEvaluation> prepared;
+      if (!Ok(PrepareAqEvaluation(gpu, preparation, &prepared))) return false;
+      auto *profiler = dynamic_cast<PreparedAqEvaluationProfiler *>(prepared.get());
+      if (!profiler) return false;
+      // The adjustment's atomic host result is separate from its graph.
+      const size_t capacity = peak(plan.adjustment) + f.block_count * sizeof(float);
+      ResourceBudget budget(capacity);
+      ResourceReservation job;
+      if (!Ok(budget.TryReserve(capacity, &job))) return false;
+      {
+        ResourceContextScope scope({&job, ResourceClass::kPreparation});
+        GpuExecutionProfile result;
+        if (!Ok(profiler->AdjustQuantFieldResidentProfiled(1.0f,
+                    {f.field.data(), f.blocks, f.blocks.width},
+                    {f.adjusted.data(), f.blocks, f.blocks.width},
+                    GpuProfilingMode::kStage, &result)) ||
+            !graph_ok(result, plan.adjustment_dispatches, plan.adjustment, budget))
+          return false;
+      }
+      job.Reset();
+      if (!Empty(budget)) return false;
+    }
+    for (size_t flags = 0; flags < 16; ++flags) {
+      const bool ac = flags & 1, cfl = flags & 2, quantizer = flags & 4,
+                 gaborish = flags & 8;
+      // Production initial CfL/inverse-Gaborish uses the resident AC input path.
+      if (!ac && (cfl || gaborish)) continue;
+      if (!Ok(ComputeAqAuxiliaryProfileStoragePlan(
+              {extent, f.coding, ac, cfl, quantizer, gaborish}, &plan))) return false;
+      auto initial = f.Preparation(5);
+      initial.resident_ac_strategy_inputs = ac;
+      initial.resident_initial_cfl = cfl;
+      initial.frame_only_resident_quantizer = quantizer;
+      initial.options.profile.loop_filter.gaborish = gaborish;
+      std::unique_ptr<PreparedAqEvaluation> prepared;
+      if (!Ok(PrepareAqEvaluation(gpu, initial, &prepared))) return false;
+      auto *profiler = dynamic_cast<PreparedAqEvaluationProfiler *>(prepared.get());
+      if (!profiler) return false;
+      const InitialQuantFieldOutput output{
+        {f.field.data(), f.blocks, f.blocks.width},
+        {f.mask.data(), f.blocks, f.blocks.width},
+        ac ? PlaneF32View{} : PlaneF32View{f.pixel_mask.data(), f.coding, f.coding.width}};
+      QuantizerParams actual, expected;
+      ResourceBudget budget(peak(plan.initial));
+      ResourceReservation job;
+      if (!Ok(budget.TryReserve(peak(plan.initial), &job))) return false;
+      {
+        ResourceContextScope scope({&job, ResourceClass::kPreparation});
+        GpuExecutionProfile result;
+        if (!Ok(profiler->ComputeInitialQuantizationProfiled({}, output,
+                    quantizer ? &actual : nullptr, 1.0f, nullptr,
+                    GpuProfilingMode::kStage, &result)) ||
+            !graph_ok(result, plan.initial_dispatches, plan.initial, budget) ||
+            !Check(result.submissions[0].stages[0].dispatches.size() ==
+                       plan.initial_dispatches, "Initial-quant dispatch count differs"))
+          return false;
+      }
+      job.Reset();
+      if (!Empty(budget)) return false;
+      const auto field = f.field, mask = f.mask, pixels = f.pixel_mask;
+      if (!Ok(prepared->ComputeInitialQuantization({}, output,
+                  quantizer ? &expected : nullptr, 1.0f)) ||
+          !Check(field == f.field && mask == f.mask && pixels == f.pixel_mask &&
+                     (!quantizer || (expected.global_scale == actual.global_scale &&
+                                     expected.quant_dc == actual.quant_dc)),
+                 "Profiled initial quantization changed decisions")) return false;
+      ++initial_cases;
+    }
+  }
+  std::cout << "Auxiliary profiles: " << reference_cases << " reference/adjustment; "
+            << initial_cases << " initial-quantization cases\n";
+  return true;
+}
+
 bool CheckProfileInputs(GpuBackend &gpu) {
   using namespace gpu_profile_internal;
   auto *resolver = dynamic_cast<GpuSubmissionProfiler *>(&gpu);
@@ -389,14 +522,29 @@ bool CheckProfileInputs(GpuBackend &gpu) {
     return true;
   }
   size_t cases = 0;
-  for (const Extent2D extent : {Extent2D{8, 8}, {89, 57}}) {
+  for (const Extent2D extent : {Extent2D{1, 1}, {8, 8}, {14, 15}, {15, 15},
+                                {89, 57}, {257, 257}, {2049, 2049}, {14, 4682}}) {
     Fixture f(extent);
     if (!f.Init()) return false;
+    size_t anchors = 0;
+    std::array<bool, static_cast<size_t>(AcStrategyType::kCount)> families{};
+    for (size_t y = 0; y < f.blocks.height; ++y)
+      for (size_t x = 0; x < f.blocks.width; ++x) {
+        AcStrategyCell cell;
+        if (!Ok(f.mixed.Get(x, y, &cell))) return false;
+        if (cell.is_anchor) {
+          ++anchors;
+          families[static_cast<size_t>(cell.strategy)] = true;
+        }
+      }
+    const size_t family_count = std::count(families.begin(), families.end(), true);
     for (bool gaborish : {false, true})
       for (size_t epf = 0; epf <= 3; ++epf)
         for (size_t iterations = 0; iterations <= 4; ++iterations)
           for (bool final : {false, true}) {
             if (iterations == 0 && !final) continue;
+            if (extent.height > 1024 && (gaborish || epf != 0 || iterations != 0))
+              continue;
             auto preparation = f.Preparation(1);
             preparation.strategies = &f.mixed;
             preparation.options.profile.loop_filter.gaborish = gaborish;
@@ -425,12 +573,16 @@ bool CheckProfileInputs(GpuBackend &gpu) {
                 .upper_bound = setup.upper_bound,
                 .iterations = iterations,
                 .evaluate_final_field = final};
-            ResidentAqProfileInputStoragePlan metadata;
-            if (!Ok(ComputeResidentAqProfileInputStoragePlan(
+            ResidentAqProfileStoragePlan profile_plan;
+            const bool completed_output = gaborish;
+            if (!Ok(ComputeResidentAqProfileStoragePlan(extent, f.coding,
                     {iterations, final, extent.width >= 15 && extent.height >= 15,
-                     gaborish, epf}, &metadata))) return false;
+                     gaborish, epf}, completed_output ? AqProfileFrameOutput::kCompleted
+                                                     : AqProfileFrameOutput::kOwned,
+                     &profile_plan))) return false;
             std::vector<double> expected_scores, scores;
             VarDctEncoderFrame expected, actual;
+            std::unique_ptr<CompletedVarDctFrame> completed;
             GpuExecutionProfile observed, result;
             auto *reference_profiler =
                 dynamic_cast<PreparedAqEvaluationProfiler *>(reference.get());
@@ -442,17 +594,29 @@ bool CheckProfileInputs(GpuBackend &gpu) {
                     GpuProfilingMode::kStage, &observed)) ||
                 !Check(observed.submissions.size() == 1 &&
                            observed.submissions[0].stages.size() <=
-                               metadata.stage_capacity,
+                               profile_plan.metadata.stage_capacity,
                        "AQ recording exceeded the shared stage capacity"))
               return false;
-            // Only the input-array plan is policy-derived here. Bound this
-            // fixture's OTHER diagnostic owners from its first actual graph;
-            // this is deliberately not a workflow dispatch-count estimator.
+            // Counts observed below are validation only. The entire diagnostic
+            // envelope is now planned before recording, from geometry/policy.
             SubmissionProfileStorageOptions shape;
             shape.stages = observed.submissions[0].stages.size();
             shape.maximum_submission_id_length =
                 observed.submissions[0].submission_id.size();
             for (const auto &stage : observed.submissions[0].stages) {
+              if ((stage.stage_id == "butteraugli.resident_reduction" &&
+                   !Check(stage.dispatches.size() == family_count +
+                              ButteraugliReductionDispatchCount(anchors),
+                          "Resident reduction depth differs from actual anchors")) ||
+                  (stage.stage_id == "butteraugli.score_reduction" &&
+                   !Check(stage.dispatches.size() == ButteraugliReductionDispatchCount(
+                              extent.width * extent.height),
+                          "Complete-map score reduction depth differs")) ||
+                  ((stage.stage_id == "aq.reconstruction.quantizer" ||
+                    stage.stage_id == "aq.final_frame.quantizer") &&
+                   !Check(stage.dispatches.size() == 20,
+                          "Resident radix quantizer dispatch count differs")))
+                return false;
               shape.dispatches += stage.dispatches.size();
               shape.maximum_stage_id_length =
                   std::max(shape.maximum_stage_id_length, stage.stage_id.size());
@@ -462,31 +626,30 @@ bool CheckProfileInputs(GpuBackend &gpu) {
                 shape.maximum_kernel_id_length = std::max(
                     shape.maximum_kernel_id_length, dispatch.kernel_id.size());
             }
-            size_t wall_id_length = 0;
-            for (const auto &wall : observed.wall_stages)
-              wall_id_length = std::max(wall_id_length, wall.stage_id.size());
-            SubmissionProfileStoragePlan graph;
-            HostStorageBound wall;
             Envelope other;
-            if (!Ok(ComputeSubmissionProfileStoragePlan(shape, &graph)) ||
-                !Ok(ComputeProfileStorageBound(
-                    {observed.wall_stages.size(), 0, 0, 0, wall_id_length}, &wall)) ||
+            if (!Check(shape.dispatches <= profile_plan.maximum_dispatches &&
+                         shape.maximum_stage_id_length <= profile_plan.maximum_id_length &&
+                         shape.maximum_group_id_length <= profile_plan.maximum_id_length,
+                       "AQ recorded graph exceeds policy-derived counts") ||
                 !other.Init(f, 1)) return false;
             const size_t capacity =
-                metadata.input.peak_bytes + other.host.working.peak_bytes +
-                other.owned.output.peak_bytes + 5 * sizeof(double) +
-                std::max(graph.recorded.peak_bytes, graph.resolution.peak_bytes) +
-                wall.peak_bytes;
+                profile_plan.working.peak_bytes + other.host.working.peak_bytes +
+                5 * sizeof(double) + (completed_output ?
+                    other.completed_host.working.peak_bytes + other.completed_device.capacity_bytes
+                    : other.owned.output.peak_bytes);
             ResourceBudget budget(capacity);
             ResourceReservation job;
             if (!Ok(budget.TryReserve(capacity, &job))) return false;
             {
               ResourceContextScope scope({&job, ResourceClass::kPreparation});
               if (!Ok(measured_profiler->EvaluateResidentButteraugliPolicyProfiled(
-                      input, {.score_history = &scores, .frame = &actual},
+                      input, {.score_history = &scores,
+                              .frame = completed_output ? nullptr : &actual,
+                              .completed_frame = completed_output ? &completed : nullptr},
                       GpuProfilingMode::kStage, &result)) ||
-                  !Check(scores == expected_scores &&
-                             Equal(BorrowFrame(expected), BorrowFrame(actual)) &&
+                  !Check(scores == expected_scores && (!completed_output || completed) &&
+                             Equal(BorrowFrame(expected), completed_output ? completed->view()
+                                                                         : BorrowFrame(actual)) &&
                              result.submissions.size() == 1 &&
                              result.submissions[0].stages.size() == shape.stages &&
                              budget.snapshot().peak_backing_bytes <= capacity,
@@ -494,6 +657,7 @@ bool CheckProfileInputs(GpuBackend &gpu) {
                 return false;
             }
             actual = {};
+            completed.reset();
             measured.reset();
             result = {};
             job.Reset();
@@ -1150,7 +1314,8 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   std::unique_ptr<GpuBackend> gpu;
   if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu)) ||
-      !CheckProfileInputs(*gpu) || !CheckRuntime(*gpu) || !CheckPrepareFailures(*gpu) ||
+      !CheckAuxiliaryProfiles(*gpu) || !CheckProfileInputs(*gpu) ||
+      !CheckRuntime(*gpu) || !CheckPrepareFailures(*gpu) ||
       !CheckOperationFailures(*gpu) || !CheckExactGroupBoundary(*gpu))
     return EXIT_FAILURE;
   gpu.reset();

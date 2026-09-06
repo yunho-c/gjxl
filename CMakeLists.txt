@@ -990,6 +990,7 @@ add_library(
   src/gpu/metal/metal_aq_butteraugli.cpp
   src/gpu/metal/metal_aq_evaluation.cpp
   src/gpu/metal/metal_aq_host_storage_plan.cpp
+  src/gpu/metal/metal_aq_profile_storage_plan.cpp
   src/gpu/metal/metal_aq_postprocess.cpp
   src/gpu/metal/metal_aq_reconstruction.cpp
   src/gpu/metal/metal_butteraugli.cpp
@@ -2570,6 +2571,11 @@ if(GJXL_BUILD_TESTS)
   target_include_directories(gjxl_metal_submission_storage_plan_test SYSTEM PRIVATE third_party/metal-cpp)
   add_test(NAME metal_submission_storage_plan COMMAND gjxl_metal_submission_storage_plan_test)
   set_tests_properties(metal_submission_storage_plan PROPERTIES TIMEOUT 30)
+
+  add_executable(gjxl_metal_aq_profile_storage_plan_test tests/metal_aq_profile_storage_plan_test.cpp)
+  target_link_libraries(gjxl_metal_aq_profile_storage_plan_test PRIVATE gjxl_metal)
+  add_test(NAME metal_aq_profile_storage_plan COMMAND gjxl_metal_aq_profile_storage_plan_test)
+  set_tests_properties(metal_aq_profile_storage_plan PROPERTIES TIMEOUT 30)
 
   add_test(
     NAME codec_install_consumer

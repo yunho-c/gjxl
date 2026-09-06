@@ -167,6 +167,11 @@ restarted or changed, and earlier qualification evidence was preserved.
 
 ## Remaining composition
 
+The later [AQ profile checkpoint](resident-aq-profile-storage-planning.md)
+completes the dispatch-count audit described below for the covered production
+AQ submissions. It replaces the fixture-derived diagnostic allowance with an
+upfront policy/geometry plan. Whole-workflow composition remains pending.
+
 The next required count audit is AQ/Butteraugli and initial-quantization
 recording: resident quantizer selection, geometry-dependent bitonic sorting,
 multiscale perceptual/filter dispatches, and preparation versus policy versus

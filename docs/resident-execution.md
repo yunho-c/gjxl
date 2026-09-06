@@ -188,6 +188,11 @@ AC validated-batch/profile-input and resident AQ context-array reserves with
 execution. They compose AC recording/resolution with a five-dispatch-per-batch
 bound and prevent context-array growth from invalidating recorded pointers.
 AQ/Butteraugli dispatch counts and complete workflow composition remain separate.
+The [AQ profile counts](resident-aq-profile-storage-planning.md) subsequently
+derive those dispatch bounds from policy and geometry, including multi-pass
+reductions, optional initial bitonic sorting, reference preparation, adjustment
+and final output. They compose individual profile graphs without observed-count
+allowances; host policy and complete workflow/session composition are still pending.
 Whole-workflow planning/admission is still pending; these partial attachments
 do not satisfy the milestone.
 

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/metal_aq_profile_storage_plan.h"
 
 #include "core/managed_allocator.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
@@ -111,7 +112,6 @@ constexpr std::array<double, 6> kMaltaNorms{
   71.7800275169,
   5.0,
 };
-constexpr std::array<size_t, 6> kMaltaAccumulationOrder{4, 5, 2, 3, 0, 1};
 constexpr std::array<size_t, 6> kMaltaPsychoPlane{4, 3, 7, 6, 9, 8};
 
 struct PlaneParams {
@@ -1280,7 +1280,7 @@ private:
     const float sqrt_asymmetry = std::sqrt(asymmetry);
     if (profile_stage == DifferenceProfileStage::kAll ||
         profile_stage == DifferenceProfileStage::kMalta) {
-      for (size_t stage_index : kMaltaAccumulationOrder) {
+      for (size_t stage_index : kButteraugliMaltaAccumulationOrder) {
       const double weight_up = stage_index < 2
         ? kMaltaWeights[stage_index]
         : stage_index < 4
@@ -1628,9 +1628,7 @@ private:
       static_cast<uint32_t>(input.row_stride),
       static_cast<uint32_t>(input_count),
     };
-    const size_t output_count =
-      input_count / kReductionWidth +
-      static_cast<size_t>(input_count % kReductionWidth != 0);
+    const size_t output_count = NextButteraugliReductionCount(input_count);
     encoder->setComputePipelineState(
       metal_.butteraugli_pipelines_.maximum_reduction.get());
     Bind(encoder, Handle(metal_, input), input.offset_bytes, 0);
@@ -1651,9 +1649,7 @@ private:
     (void)input.extent.try_area(&input_count);
     bool use_a = true;
     while (true) {
-      const size_t output_count =
-        input_count / kReductionWidth +
-        static_cast<size_t>(input_count % kReductionWidth != 0);
+      const size_t output_count = NextButteraugliReductionCount(input_count);
       DevicePlaneView destination = output_count == 1
         ? output
         : (use_a ? reduction_a_ : reduction_b_);
