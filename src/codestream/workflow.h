@@ -195,6 +195,13 @@ struct VarDctEncodingTiming {
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary = nullptr);
 
+/// Releases idle Butteraugli preparation capacity on the process-wide Metal
+/// backend shared by single-image, batch and C API encoders. Does not initialize
+/// Metal or wait for active encodes. Existing AQ pools are unchanged. Active
+/// preparation leases acquired before the trim cannot repopulate this cache;
+/// subsequent encodes may cache again. Call when an application becomes idle.
+[[nodiscard]] Status TrimVarDctPreparationCache();
+
 /// Encodes identically to EncodeLinearRgbVarDctCodestream and atomically
 /// returns wall-clock diagnostics. Timing values are observational and are
 /// intentionally excluded from deterministic summary equality.

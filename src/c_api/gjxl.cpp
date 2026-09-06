@@ -294,6 +294,10 @@ GJXLResult gjxl_context_create(
   });
 }
 
+GJXLResult gjxl_trim_preparation_cache(void) noexcept {
+  return Guard([] { return TranslateStatus(gjxl::TrimVarDctPreparationCache()); });
+}
+
 void gjxl_context_destroy(GJXLContext* context) noexcept {
   ClearLastError();
   delete context;

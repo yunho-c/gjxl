@@ -3,11 +3,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <future>
 #include <iostream>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "codec/adaptive_quantization_internal.h"
@@ -18,6 +21,7 @@
 #include "core/image_buffer.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
 
@@ -79,7 +83,9 @@ bool SerializeEqual(const Retained &retained) {
          bytes == retained.bytes;
 }
 
-bool RunCase(Extent2D extent) {
+bool RunCase(Extent2D extent, bool deferred_frontend = false,
+             GpuBackend* shared_gpu = nullptr,
+             std::vector<Retained>* exported = nullptr, size_t image_seed = 0) {
   std::vector<Retained> retained;
   {
     FrameGeometry geometry;
@@ -96,7 +102,8 @@ bool RunCase(Extent2D extent) {
         for (size_t c = 0; c < 3; ++c) {
           const float value =
               0.03f +
-              0.8f * static_cast<float>((sx * (c + 3) + sy * 7) % 127) / 127.0f;
+              0.8f * static_cast<float>(
+                (sx * (c + 3) + sy * 7 + image_seed * 17) % 127) / 127.0f;
           rgb.view().plane[c].Row(y)[x] = value;
           if (x < extent.width && y < extent.height) {
             source.view().plane[c].Row(y)[x] = value;
@@ -106,9 +113,13 @@ bool RunCase(Extent2D extent) {
     }
     if (!Check(LinearRgbToOpsin(rgb.const_view(), 255.0f, opsin.view())))
       return false;
-    std::unique_ptr<GpuBackend> gpu;
-    if (!Check(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu)))
-      return false;
+    std::unique_ptr<GpuBackend> owned_gpu;
+    GpuBackend* gpu = shared_gpu;
+    if (gpu == nullptr) {
+      if (!Check(CreateMetalBackend(GJXL_METALLIB_PATH, &owned_gpu)))
+        return false;
+      gpu = owned_gpu.get();
+    }
     AcStrategyGrid strategies;
     if (!Check(AcStrategyGrid::Create(blocks, &strategies)))
       return false;
@@ -122,9 +133,12 @@ bool RunCase(Extent2D extent) {
                 .coding_opsin = opsin.const_view(),
                 .strategies = &strategies,
                 .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+                .frame_only_resident_initial_quant = deferred_frontend,
+                .resident_ac_strategy_inputs = deferred_frontend,
                 .resident_quantization = true,
                 .coefficient_decision_mode =
                     AcCoefficientDecisionMode::kAdjustedSharedQuant,
+                .defer_final_transform_metadata = deferred_frontend,
             },
             &prepared)))
       return false;
@@ -240,15 +254,62 @@ bool RunCase(Extent2D extent) {
       if (!SerializeEqual(result))
         return false;
   }
-  // No backend, source, strategy grid, or evaluator survives this boundary.
+  // No source, strategy grid, evaluator, or locally owned backend survives.
   for (const auto &result : retained)
     if (!SerializeEqual(result))
       return false;
+  if (exported != nullptr) {
+    for (auto& result : retained) exported->push_back(std::move(result));
+  }
+  return true;
+}
+
+bool CheckPreparationIntegration() {
+  std::vector<Retained> retained;
+  {
+    std::unique_ptr<GpuBackend> gpu;
+    if (!Check(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu))) return false;
+    // The same backend sees changed images and layouts while earlier completed
+    // frames remain live. Deferred metadata must be finalized by Reconfigure.
+    if (!RunCase({273, 265}, true, gpu.get(), &retained) ||
+        MetalButteraugliCacheBytesForTesting(*gpu) == 0 ||
+        !Check(EmptyMetalButteraugliCacheForTesting(*gpu))) return false;
+    // Reacquire the same capacity first so this takes the Empty recovery path,
+    // rather than merely discarding an oversized cache entry on downsizing.
+    if (!RunCase({273, 265}, true, gpu.get(), &retained, 1) ||
+        !RunCase({129, 127}, true, gpu.get(), &retained, 2)) return false;
+    for (const auto& result : retained)
+      if (!SerializeEqual(result)) return false;
+
+    std::atomic<bool> trim_ok{true};
+    std::jthread trimmer([&](std::stop_token stop) {
+      while (!stop.stop_requested()) {
+        if (!gpu->TrimPreparationCache().ok()) trim_ok.store(false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    });
+    // Capture stable pointees, not vector elements that may move on append.
+    auto reader = std::async(std::launch::async,
+      [frame = retained.front().frame.get(), expected = retained.front().bytes] {
+        std::vector<uint8_t> bytes;
+        return Check(codestream_internal::EncodeVarDctCodestreamFromView(
+          frame->view(), {}, &bytes)) && bytes == expected;
+      });
+    const bool encoded = RunCase({273, 265}, true, gpu.get(), &retained, 3);
+    trimmer.request_stop();
+    trimmer.join();
+    if (!encoded || !reader.get() || !trim_ok.load() ||
+        !Check(gpu->TrimPreparationCache()) ||
+        MetalButteraugliCacheBytesForTesting(*gpu) != 0) return false;
+  }
+  for (const auto& result : retained)
+    if (!SerializeEqual(result)) return false;
   return true;
 }
 } // namespace
 
 int main() {
+  if (!CheckPreparationIntegration()) return EXIT_FAILURE;
   for (const auto extent :
        std::array<Extent2D, 4>{{{1, 1}, {19, 17}, {273, 265}, {2057, 17}}}) {
     if (!RunCase(extent))

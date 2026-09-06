@@ -34,14 +34,14 @@ Development branch: `refactor/resident-execution` (originally
 The proposal numbers below refer to the original architecture discussion, not
 the implementation milestone numbers used later in this document.
 
-| Proposal | Scope | Status at the `dabe129` implementation checkpoint |
+| Proposal | Scope | Status after preparation integration (milestone 3) |
 | --- | --- | --- |
 | #3: Stable coefficients and frame views | Included | Principal handoff complete in `ca440d1` and `dabe129`: ownership-independent consumers, direct final AC destinations, independent completed-output lease. |
-| #4A: Reuse, fusion, shorter intermediate lifetimes | Included, subject to numerical and end-to-end gates | Resident fusion is in the `4ea12ab` base. Further scratch/preparation work exists on `perf/metal-preparation`, not yet integrated here. Remaining opportunities need an explicit inventory. |
+| #4A: Reuse, fusion, shorter intermediate lifetimes | Included, subject to numerical and end-to-end gates | Resident fusion is in the `4ea12ab` base. Shared scratch, deferred preparation, and volatile capacity caching from `perf/metal-preparation` are integrated and jointly qualified. Remaining opportunities need an explicit inventory. |
 | #4B: Screening, pruning, selective refinement | Separate policy track | Deferred; not an unfinished requirement of this structural refactor. |
 | #5: Ownership, resource budgets, scheduling | Included | Output ownership is established. Existing AQ leases and batch overlap are foundations, not coordinated whole-workflow admission. |
 
-The separate preparation branch has two relevant commits:
+The integrated preparation branch contributes two commits:
 
 - `e1010fe`: share nine transient F32 planes between AQ and Butteraugli, reduce
   staging capacity, defer provisional metadata, and avoid unrequested host masks.
@@ -49,10 +49,10 @@ The separate preparation branch has two relevant commits:
   Its per-backend and process-wide idle-cache limits do not cover active storage,
   existing AQ pools, or completed output.
 
-Its design records are `docs/metal-preparation-integration.md` and
-`docs/metal-volatile-preparation-cache.md` on `perf/metal-preparation`. They are
-not yet files on this branch. Their qualification must not be added to handoff
-measurements as if the combination had been measured.
+Its original design records are [shared scratch and preparation](metal-preparation-integration.md)
+and [volatile caching](metal-volatile-preparation-cache.md). Their historical
+measurements remain separate. The [joint integration record](resident-execution-integration.md)
+qualifies the combination against `a747fca` with preparation at `306f153`.
 
 ### Invariants and exclusions
 
@@ -98,7 +98,15 @@ Completion here does not mean minimum peak memory: the workflow can retain a
 prepared evaluator for reuse independently of the completed frame. The recorded
 milestone-2 footprint is effectively unchanged from milestone 1.
 
-### 3. Integrate preparation and handoff — pending
+### 3. Integrate preparation and handoff — complete
+
+The [integration record](resident-execution-integration.md) covers semantic
+reconciliation, joint lifetime tests, exact corpus/policy bytes, pinned decoder
+and conformance checks, and fresh complete-call/physical-footprint measurements.
+Both parent and candidate retain only the documented CPU golden mismatch
+(63/64 Release tests); the targeted sanitizer suites pass 3/3 with the recorded
+vendor-header limitation. The measured peak falls, but one-second idle footprint
+rises with caching; this is not a whole-encoder memory budget.
 
 Deliverables:
 

@@ -198,10 +198,11 @@ boundary; this milestone adds no process-wide active-memory budget.
 
 The separate worktree's `e1010fe` shares transient AQ storage with Butteraugli
 and defers host preparation; `306f153` adds a bounded volatile preparation cache.
-Those changes were inspected, not merged. This output allocation does not alias
+At the milestone-2 checkpoint those changes were inspected, not merged. This
+output allocation does not alias
 their borrowed filter/gather planes or participate in their scratch caches.
-The two changes are architecturally complementary, but combined source and
-performance qualification will still be required when integrating the branches.
+The two changes are architecturally complementary. Subsequent integration and
+combined qualification are recorded in [milestone 3](resident-execution-integration.md).
 Current milestone-2 measurements use `ca440d1` as their baseline and do not
 include the preparation branch's speed or memory gains.
 

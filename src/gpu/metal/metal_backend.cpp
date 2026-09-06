@@ -26,6 +26,7 @@
 #include "gpu/backend.h"
 #include "gpu/buffer.h"
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/metal/metal_embedded_library_internal.h"
 #include "gpu/metal/metal_status.h"
 #include "gpu/ops/ac_strategy.h"
@@ -649,6 +650,20 @@ Status CreateTransformPipeline(
 namespace metal_internal {
 namespace {
 
+// Limits only the additional Butteraugli capacity cache, including every
+// simultaneously alive backend. Active leases are never purgeable/counted.
+constexpr size_t kButteraugliProcessCacheLimit = size_t{1024} * 1024 * 1024;
+std::atomic<size_t> idle_butteraugli_bytes{0};
+
+bool ReserveButteraugliCacheBytes(size_t bytes) noexcept {
+  size_t current = idle_butteraugli_bytes.load(std::memory_order_relaxed);
+  while (bytes <= kButteraugliProcessCacheLimit - current) {
+    if (idle_butteraugli_bytes.compare_exchange_weak(
+          current, current + bytes, std::memory_order_relaxed)) return true;
+  }
+  return false;
+}
+
 // One idle arena of each class is enough to accelerate sequential encodes
 // without multiplying the retained capacity by the number of concurrent
 // callers. Larger forced-Metal workloads remain supported, but their arenas
@@ -669,7 +684,8 @@ MetalBackend::MetalBackend(
   AqPipelines aq_pipelines,
   ButteraugliPipelines butteraugli_pipelines,
   bool test_fail_submission,
-  bool test_fail_completion)
+  bool test_fail_completion,
+  size_t butteraugli_cache_bytes)
   : device_(std::move(device)),
     command_queue_(std::move(command_queue)),
     library_(std::move(library)),
@@ -680,7 +696,9 @@ MetalBackend::MetalBackend(
     aq_pipelines_(std::move(aq_pipelines)),
     butteraugli_pipelines_(std::move(butteraugli_pipelines)),
     test_fail_submission_(test_fail_submission),
-    test_fail_completion_(test_fail_completion) {
+    test_fail_completion_(test_fail_completion),
+    butteraugli_cache_limit_(std::min(
+      butteraugli_cache_bytes, kButteraugliProcessCacheLimit)) {
 
   NS::String* device_name = device_->name();
   if (device_name != nullptr) {
@@ -692,6 +710,101 @@ MetalBackend::MetalBackend(
   if (name_.empty()) {
     name_ = "Metal";
   }
+}
+
+MetalBackend::~MetalBackend() {
+  // All prepared operations must already be destroyed by the backend contract.
+  DropButteraugliCacheLocked();
+}
+
+void MetalBackend::DropButteraugliCacheLocked() noexcept {
+  if (!idle_butteraugli_scratch_) return;
+  const size_t bytes = idle_butteraugli_scratch_->capacity_bytes();
+  idle_butteraugli_scratch_.reset();
+  idle_butteraugli_bytes.fetch_sub(bytes, std::memory_order_relaxed);
+}
+
+Status MetalBackend::TrimPreparationCache() {
+  std::lock_guard lock(butteraugli_cache_mutex_);
+  ++butteraugli_cache_generation_;
+  DropButteraugliCacheLocked();
+  return Status::Ok();
+}
+
+Status MetalBackend::AcquireButteraugliArena(
+  size_t required_capacity_bytes, DeviceScratchArena* arena,
+  uint64_t* generation) {
+  if (arena == nullptr || generation == nullptr ||
+      required_capacity_bytes == 0 || arena->capacity_bytes() != 0) {
+    return Status::InvalidArgument("Invalid Butteraugli scratch lease request");
+  }
+  DeviceScratchArena candidate;
+  {
+    std::lock_guard lock(butteraugli_cache_mutex_);
+    *generation = butteraugli_cache_generation_;
+    if (idle_butteraugli_scratch_) {
+      candidate = std::move(*idle_butteraugli_scratch_);
+      idle_butteraugli_scratch_.reset();
+      idle_butteraugli_bytes.fetch_sub(
+        candidate.capacity_bytes(), std::memory_order_relaxed);
+    }
+  }
+  const size_t capacity = candidate.capacity_bytes();
+  // Grow on demand and shed disproportionate high-water capacity on downsizing.
+  if (capacity < required_capacity_bytes ||
+      capacity - required_capacity_bytes > required_capacity_bytes) {
+    candidate = DeviceScratchArena{};
+  }
+  if (candidate.capacity_bytes() != 0) {
+    MetalBuffer* buffer = AsMetalBuffer(*candidate.backing_buffer());
+    if (buffer == nullptr || buffer->handle()->setPurgeableState(
+          MTL::PurgeableStateNonVolatile) == MTL::PurgeableStateEmpty) {
+      candidate = DeviceScratchArena{};
+    }
+  }
+  Status status = candidate.Prepare(*this, required_capacity_bytes);
+  if (!status.ok()) return status;
+  *arena = std::move(candidate);
+  return Status::Ok();
+}
+
+void MetalBackend::ReleaseButteraugliArena(
+  DeviceScratchArena arena, uint64_t generation, bool reusable) noexcept {
+  const size_t bytes = arena.capacity_bytes();
+  if (!reusable || bytes == 0 || bytes > butteraugli_cache_limit_) return;
+  MetalBuffer* buffer = AsMetalBuffer(*arena.backing_buffer());
+  if (buffer == nullptr) return;
+  try {
+    std::lock_guard lock(butteraugli_cache_mutex_);
+    if (generation != butteraugli_cache_generation_) return;
+    if (idle_butteraugli_scratch_ &&
+        idle_butteraugli_scratch_->capacity_bytes() <= bytes) return;
+    DropButteraugliCacheLocked();
+    arena.ResetLayout();
+    // This method is called only after all submissions using the arena finish.
+    (void)buffer->handle()->setPurgeableState(MTL::PurgeableStateVolatile);
+    if (!ReserveButteraugliCacheBytes(bytes)) return;
+    idle_butteraugli_scratch_.emplace(std::move(arena));
+  } catch (...) {
+    // Opportunistic pooling must not throw from prepared-object destruction.
+  }
+}
+
+Status MetalBackend::EmptyButteraugliCacheForTesting() {
+  std::lock_guard lock(butteraugli_cache_mutex_);
+  if (idle_butteraugli_scratch_) {
+    MetalBuffer* buffer =
+      AsMetalBuffer(*idle_butteraugli_scratch_->backing_buffer());
+    if (buffer == nullptr) return Status::Internal("Non-Metal idle scratch");
+    (void)buffer->handle()->setPurgeableState(MTL::PurgeableStateEmpty);
+  }
+  return Status::Ok();
+}
+
+size_t MetalBackend::ButteraugliCacheBytesForTesting() {
+  std::lock_guard lock(butteraugli_cache_mutex_);
+  return idle_butteraugli_scratch_
+    ? idle_butteraugli_scratch_->capacity_bytes() : 0;
 }
 
 BackendKind MetalBackend::kind() const noexcept {
@@ -1419,7 +1532,8 @@ Status CreateMetalBackendImpl(
       std::move(aq_pipelines),
       std::move(butteraugli_pipelines),
       options.test_fail_submission,
-      options.test_fail_completion));
+      options.test_fail_completion,
+      options.butteraugli_cache_bytes));
 
   return Status::Ok();
 }
@@ -1460,3 +1574,22 @@ Status CreateEmbeddedMetalBackend(
 }  // namespace gjxl
 
 #undef setComputePipelineState
+
+namespace gjxl {
+
+Status EmptyMetalButteraugliCacheForTesting(GpuBackend& backend) {
+  auto* metal = dynamic_cast<metal_internal::MetalBackend*>(&backend);
+  if (metal == nullptr) return Status::InvalidArgument("Expected Metal backend");
+  return metal->EmptyButteraugliCacheForTesting();
+}
+
+size_t MetalButteraugliCacheBytesForTesting(GpuBackend& backend) {
+  auto* metal = dynamic_cast<metal_internal::MetalBackend*>(&backend);
+  return metal == nullptr ? 0 : metal->ButteraugliCacheBytesForTesting();
+}
+
+size_t MetalButteraugliProcessCacheBytesForTesting() {
+  return metal_internal::idle_butteraugli_bytes.load(std::memory_order_relaxed);
+}
+
+}  // namespace gjxl

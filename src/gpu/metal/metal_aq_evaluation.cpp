@@ -917,6 +917,12 @@ MetalPreparedAqEvaluation::~MetalPreparedAqEvaluation() {
       *observer = true;
     }
   }
+  // Destroy the borrower before returning its backing AQ arenas to the pool.
+  // The submission above has completed even on the failure/destruction path.
+  if (!reusable && butteraugli_ != nullptr) {
+    DiscardPreparedMetalButteraugliLease(*butteraugli_);
+  }
+  butteraugli_.reset();
   backend_->ReleaseAqScratchArena(
     MetalAqScratchArena::kPersistent, std::move(persistent_), reusable);
   backend_->ReleaseAqScratchArena(
@@ -965,6 +971,8 @@ Status MetalPreparedAqEvaluation::Prepare(
   options_ = preparation.options;
   coefficient_decision_mode_ = preparation.coefficient_decision_mode;
   frame_only_ = preparation.frame_only;
+  final_transform_metadata_pending_ =
+    preparation.defer_final_transform_metadata;
   frame_only_inverse_gaborish_ =
       preparation.frame_only_inverse_gaborish;
   resident_initial_cfl_ = preparation.resident_initial_cfl;
@@ -1041,7 +1049,8 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (frame_only_resident_initial_quant_) {
       last_initial_quant_field_.resize(block_count_);
       last_initial_strategy_mask_.resize(block_count_);
-      last_initial_pixel_mask_.resize(pixel_count_);
+      if (!resident_ac_strategy_inputs_)
+        last_initial_pixel_mask_.resize(pixel_count_);
     }
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory("Unable to allocate prepared AQ host staging");
@@ -1120,24 +1129,26 @@ Status MetalPreparedAqEvaluation::Prepare(
         "Prepared AQ anchors do not cover the coding image exactly");
   }
   try {
-    final_transform_layouts_.reserve(block_count_);
-    for (const AqAnchor& anchor : row_major_anchors_) {
-      const AqStrategyBatch& batch = batches_[anchor.batch_index];
-      const size_t channel_stride =
-        batch.anchor_count * batch.coefficient_count;
-      vardct_frame_internal::QuantizedAcTransformLayout transform{
-        .block_x = anchor.block_x,
-        .block_y = anchor.block_y,
-        .strategy = anchor.strategy,
-        .coefficient_count = batch.coefficient_count,
-      };
-      for (size_t channel = 0; channel < 3; ++channel) {
-        const size_t offset = batch.coefficient_offset +
-          channel * channel_stride +
-          anchor.index_in_batch * batch.coefficient_count;
-        transform.coefficient_offsets[channel] = offset;
+    if (!final_transform_metadata_pending_) {
+      final_transform_layouts_.reserve(block_count_);
+      for (const AqAnchor &anchor : row_major_anchors_) {
+        const AqStrategyBatch &batch = batches_[anchor.batch_index];
+        const size_t channel_stride =
+          batch.anchor_count * batch.coefficient_count;
+        vardct_frame_internal::QuantizedAcTransformLayout transform{
+          .block_x = anchor.block_x,
+          .block_y = anchor.block_y,
+          .strategy = anchor.strategy,
+          .coefficient_count = batch.coefficient_count,
+        };
+        for (size_t channel = 0; channel < 3; ++channel) {
+          const size_t offset = batch.coefficient_offset +
+                                channel * channel_stride +
+                                anchor.index_in_batch * batch.coefficient_count;
+          transform.coefficient_offsets[channel] = offset;
+        }
+        final_transform_layouts_.push_back(transform);
       }
-      final_transform_layouts_.push_back(transform);
     }
   } catch (const std::bad_alloc &) {
     return Status::OutOfMemory(
@@ -1150,7 +1161,7 @@ Status MetalPreparedAqEvaluation::Prepare(
   if (!status.ok()) {
     return status;
   }
-  if (resident_quantization_) {
+  if (resident_quantization_ && !final_transform_metadata_pending_) {
     status = BuildColorTransformMetadata(
       row_major_anchors_, batches_, block_extent_, tile_extent_,
       &color_transform_records, &color_tile_offsets);
@@ -1213,9 +1224,10 @@ Status MetalPreparedAqEvaluation::Prepare(
       DeviceElementType::kI32, {6 * block_count_, 1},
       6 * block_count_, &persistent_bytes);
     if (!status.ok()) return status;
-    status = AddPlannedPlane(
-      DeviceElementType::kI32, {color_tile_offsets.size(), 1},
-      color_tile_offsets.size(), &persistent_bytes);
+    status = AddPlannedPlane(DeviceElementType::kI32,
+                             {tile_extent_.width * tile_extent_.height + 1, 1},
+                             tile_extent_.width * tile_extent_.height + 1,
+                             &persistent_bytes);
     if (!status.ok()) return status;
     status = AddPlannedPlane(DeviceElementType::kI8, tile_extent_,
                              tile_extent_.width, &persistent_bytes);
@@ -1467,8 +1479,10 @@ Status MetalPreparedAqEvaluation::Prepare(
       &color_transform_records_);
     if (!status.ok()) return status;
     status = persistent_.AllocatePlane(
-      DeviceElementType::kI32, {color_tile_offsets.size(), 1},
-      color_tile_offsets.size(), kBufferAlignment, &color_tile_offsets_);
+      DeviceElementType::kI32,
+      {tile_extent_.width * tile_extent_.height + 1, 1},
+      tile_extent_.width * tile_extent_.height + 1, kBufferAlignment,
+      &color_tile_offsets_);
     if (!status.ok()) return status;
   }
 
@@ -1693,7 +1707,7 @@ Status MetalPreparedAqEvaluation::Prepare(
                   quant_tables_);
   if (!status.ok())
     return status;
-  if (resident_quantization_) {
+  if (resident_quantization_ && !final_transform_metadata_pending_) {
     status = UploadPlane(
       *backend_,
       ConstPlaneI32View{
@@ -1929,6 +1943,29 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
   }
+  MetalButteraugliScratch borrowed_butteraugli_scratch;
+  const MetalButteraugliScratch *borrowed_butteraugli = nullptr;
+  if (uses_butteraugli_sinks_ && filter_scratch_image_count_ == 2) {
+    // Reference preparation finishes before AQ begins. During each comparison,
+    // filtering/color conversion and coefficient gathering have already
+    // finished. Neither the filtered XYB intermediates nor gathered pixels
+    // remain live; reconstructed linear RGB, forward coefficients and cached
+    // references do.
+    size_t index = 0;
+    for (const auto &image : filter_scratch_) {
+      for (DevicePlaneView plane : image) {
+        borrowed_butteraugli_scratch.planes[index++] = plane;
+      }
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      DevicePlaneView plane = gathered_pixels_;
+      plane.offset_bytes += channel * pixel_count_ * sizeof(float);
+      plane.extent = coding_extent_;
+      plane.row_stride = coding_extent_.width;
+      borrowed_butteraugli_scratch.planes[index++] = plane;
+    }
+    borrowed_butteraugli = &borrowed_butteraugli_scratch;
+  }
   DeviceButteraugliMemoryStats butteraugli_memory;
   if (options_.metric == AqEvaluationMetric::kButteraugli) {
     const DeviceButteraugliPrepareDescriptor descriptor{
@@ -1938,7 +1975,8 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (profiling) {
       gpu_profile_internal::GpuExecutionProfile reference_profile;
       status = backend_->PrepareDeviceButteraugliImpl(
-        descriptor, profiling_mode, &butteraugli_, &reference_profile);
+        descriptor, profiling_mode, &butteraugli_, &reference_profile,
+        borrowed_butteraugli);
       if (status.ok()) {
         if (reference_profile.mode != profiling_mode ||
             reference_profile.capabilities !=
@@ -1950,8 +1988,9 @@ Status MetalPreparedAqEvaluation::Prepare(
           reference_profile.submissions);
       }
     } else {
-      status = PrepareDeviceButteraugli(
-        *backend_, descriptor, &butteraugli_);
+      status = backend_->PrepareDeviceButteraugliImpl(
+        descriptor, gpu_profile_internal::GpuProfilingMode::kDisabled,
+        &butteraugli_, nullptr, borrowed_butteraugli);
     }
     if (!status.ok())
       return status;
@@ -2194,9 +2233,9 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     if (status.ok() && resident_quantization_) {
       status = UploadPlane(
         *backend_,
-        ConstPlaneI32View{
-          color_tile_offsets.data(), {color_tile_offsets.size(), 1},
-          color_tile_offsets.size()},
+        ConstPlaneI32View{color_tile_offsets.data(),
+                          {tile_extent_.width * tile_extent_.height + 1, 1},
+                          color_tile_offsets.size()},
         color_tile_offsets_);
     }
     if (!status.ok()) {
@@ -2212,6 +2251,7 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     maximum_error_reduction_params_ = maximum_error_reduction_params;
     row_major_anchors_ = std::move(row_major_anchors);
     final_transform_layouts_ = std::move(transform_layouts);
+    final_transform_metadata_pending_ = false;
     anchor_count_ = anchor_offset;
     final_cfl_params_.transform_count =
       static_cast<uint32_t>(anchor_count_);
@@ -3031,7 +3071,8 @@ Status MetalPreparedAqEvaluation::SetInvariantColorCorrelation(
 Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
     ConstPlaneF32View quant_field, float quant_dc) {
 
-  if (!resident_quantization_ || frame_only_) {
+  if (!resident_quantization_ || frame_only_ ||
+      final_transform_metadata_pending_) {
     return Status::FailedPrecondition(
       "Resident final color correlation was not prepared");
   }
@@ -3983,6 +4024,12 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
   status = ValidateOptions(preparation.options);
   if (!status.ok())
     return status;
+  if (preparation.defer_final_transform_metadata &&
+      (!preparation.resident_ac_strategy_inputs ||
+       !preparation.resident_quantization || preparation.frame_only)) {
+    return Status::InvalidArgument(
+      "Deferred transform metadata requires resident AC search and AQ");
+  }
   if (preparation.frame_only_inverse_gaborish &&
       (!preparation.frame_only ||
        !preparation.options.profile.loop_filter.gaborish)) {
@@ -4073,6 +4120,9 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
 }
 
 Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
+  if (final_transform_metadata_pending_)
+    return Status::FailedPrecondition(
+      "AQ transform metadata requires successful reconfiguration");
   const bool resident_field = input.quant_field.valid();
   if (resident_field &&
       (!resident_quantization_ || input.quant_field.extent != block_extent_ ||
@@ -4972,66 +5022,56 @@ Status CreateAqPipelines(
       "Metal cannot launch the AQ maximum-error threadgroup");
   }
   const std::array<
-      std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      32>
-      reconstruction = {{
-          {"gjxl_aq_reset_exact_evaluation",
-           &pipelines.reset_exact_evaluation},
-          {"gjxl_aq_reset_exact_coefficients",
-           &pipelines.reset_exact_coefficients},
-          {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
-          {"gjxl_aq_reset_frame_encoding", &pipelines.reset_frame_encoding},
-          {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
-          {"gjxl_aq_final_cfl", &pipelines.final_cfl},
-          {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
-          {"gjxl_aq_resident_input_transform",
-           &pipelines.resident_input_transform},
-          {"gjxl_aq_resident_input_statistics",
-           &pipelines.resident_input_statistics},
-          {"gjxl_aq_initial_quant_gradient",
-           &pipelines.initial_quant_gradient},
-          {"gjxl_aq_initial_quant_fuzzy_erosion",
-           &pipelines.initial_quant_fuzzy_erosion},
-          {"gjxl_aq_initial_quant_modulation",
-           &pipelines.initial_quant_modulation},
-          {"gjxl_aq_initial_quant_sort_prepare",
-           &pipelines.initial_quant_sort_prepare},
-          {"gjxl_aq_initial_quant_sort_step",
-           &pipelines.initial_quant_sort_step},
-          {"gjxl_aq_initial_quant_capture_median",
-           &pipelines.initial_quant_capture_median},
-          {"gjxl_aq_initial_quant_deviation_prepare",
-           &pipelines.initial_quant_deviation_prepare},
-          {"gjxl_aq_initial_quant_finalize_quantizer",
-           &pipelines.initial_quant_finalize_quantizer},
-          {"gjxl_aq_initial_quant_raw_quant",
-           &pipelines.initial_quant_raw_quant},
-          {"gjxl_aq_adjust_quant_field", &pipelines.adjust_quant_field},
-          {"gjxl_aq_resident_quant_select_initialize",
-           &pipelines.resident_quant_select_initialize},
-          {"gjxl_aq_resident_quant_histogram",
-           &pipelines.resident_quant_histogram},
-          {"gjxl_aq_resident_quant_select_bucket",
-           &pipelines.resident_quant_select_bucket},
-          {"gjxl_aq_resident_quant_finalize_quantizer",
-           &pipelines.resident_quant_finalize_quantizer},
-          {"gjxl_aq_resident_policy_initialize",
-           &pipelines.resident_policy_initialize},
-          {"gjxl_aq_resident_policy_update",
-           &pipelines.resident_policy_update},
-          {"gjxl_aq_gather_transform_pixels",
-           &pipelines.gather_transform_pixels},
-          {"gjxl_aq_select_adjusted_quantization",
-           &pipelines.select_adjusted_quantization},
-          {"gjxl_aq_encode_reconstruction_coefficients",
-           &pipelines.encode_reconstruction_coefficients},
-          {"gjxl_aq_encode_frame_coefficients",
-           &pipelines.encode_frame_coefficients},
-          {"gjxl_aq_scatter_reconstructed_pixels",
-           &pipelines.scatter_reconstructed_pixels},
-          {"gjxl_aq_quantization_probe", &pipelines.quantization_probe},
-          {"gjxl_aq_adjustment_probe", &pipelines.adjustment_probe},
-      }};
+    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 33>
+    reconstruction = {{
+      {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
+      {"gjxl_aq_reset_exact_coefficients", &pipelines.reset_exact_coefficients},
+      {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
+      {"gjxl_aq_reset_frame_encoding", &pipelines.reset_frame_encoding},
+      {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
+      {"gjxl_aq_final_cfl", &pipelines.final_cfl},
+      {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
+      {"gjxl_aq_resident_input_transform", &pipelines.resident_input_transform},
+      {"gjxl_aq_resident_input_statistics",
+       &pipelines.resident_input_statistics},
+      {"gjxl_aq_initial_quant_gradient", &pipelines.initial_quant_gradient},
+      {"gjxl_aq_initial_quant_fuzzy_erosion",
+       &pipelines.initial_quant_fuzzy_erosion},
+      {"gjxl_aq_validate_initial_mask", &pipelines.validate_initial_mask},
+      {"gjxl_aq_initial_quant_modulation", &pipelines.initial_quant_modulation},
+      {"gjxl_aq_initial_quant_sort_prepare",
+       &pipelines.initial_quant_sort_prepare},
+      {"gjxl_aq_initial_quant_sort_step", &pipelines.initial_quant_sort_step},
+      {"gjxl_aq_initial_quant_capture_median",
+       &pipelines.initial_quant_capture_median},
+      {"gjxl_aq_initial_quant_deviation_prepare",
+       &pipelines.initial_quant_deviation_prepare},
+      {"gjxl_aq_initial_quant_finalize_quantizer",
+       &pipelines.initial_quant_finalize_quantizer},
+      {"gjxl_aq_initial_quant_raw_quant", &pipelines.initial_quant_raw_quant},
+      {"gjxl_aq_adjust_quant_field", &pipelines.adjust_quant_field},
+      {"gjxl_aq_resident_quant_select_initialize",
+       &pipelines.resident_quant_select_initialize},
+      {"gjxl_aq_resident_quant_histogram", &pipelines.resident_quant_histogram},
+      {"gjxl_aq_resident_quant_select_bucket",
+       &pipelines.resident_quant_select_bucket},
+      {"gjxl_aq_resident_quant_finalize_quantizer",
+       &pipelines.resident_quant_finalize_quantizer},
+      {"gjxl_aq_resident_policy_initialize",
+       &pipelines.resident_policy_initialize},
+      {"gjxl_aq_resident_policy_update", &pipelines.resident_policy_update},
+      {"gjxl_aq_gather_transform_pixels", &pipelines.gather_transform_pixels},
+      {"gjxl_aq_select_adjusted_quantization",
+       &pipelines.select_adjusted_quantization},
+      {"gjxl_aq_encode_reconstruction_coefficients",
+       &pipelines.encode_reconstruction_coefficients},
+      {"gjxl_aq_encode_frame_coefficients",
+       &pipelines.encode_frame_coefficients},
+      {"gjxl_aq_scatter_reconstructed_pixels",
+       &pipelines.scatter_reconstructed_pixels},
+      {"gjxl_aq_quantization_probe", &pipelines.quantization_probe},
+      {"gjxl_aq_adjustment_probe", &pipelines.adjustment_probe},
+    }};
   for (const auto &[name, pipeline] : reconstruction) {
     status = CreateAqPipeline(device, library, name, pipeline);
     if (!status.ok()) {

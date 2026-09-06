@@ -2027,3 +2027,13 @@ kernel void gjxl_aq_adjustment_probe(
       decision.raw_quant, 1.0f, decision.y_thresholds[quadrant], error);
   }
 }
+
+// Preserve the host scan's numeric check when the full mask stays on device.
+kernel void
+gjxl_aq_validate_initial_mask(device const float *mask [[buffer(0)]],
+                              device atomic_uint *error [[buffer(1)]],
+                              constant uint &count [[buffer(2)]],
+                              uint index [[thread_position_in_grid]]) {
+  if (index < count && (!isfinite(mask[index]) || mask[index] <= 0.0f))
+    atomic_fetch_or_explicit(error, 4096u, memory_order_relaxed);
+}

@@ -36,6 +36,7 @@
 namespace gjxl::metal_internal {
 
 class MetalBackend;
+struct MetalButteraugliScratch;
 
 using MetalComputeEncodeCallback = void (*)(
   MetalBackend&,
@@ -112,6 +113,7 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_gradient;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_fuzzy_erosion;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_modulation;
+  NS::SharedPtr<MTL::ComputePipelineState> validate_initial_mask;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_sort_prepare;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_sort_step;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_capture_median;
@@ -269,9 +271,14 @@ public:
     AqPipelines aq_pipelines,
     ButteraugliPipelines butteraugli_pipelines,
     bool test_fail_submission,
-    bool test_fail_completion);
+    bool test_fail_completion,
+    size_t butteraugli_cache_bytes);
 
-  ~MetalBackend() override = default;
+  ~MetalBackend() override;
+
+  Status TrimPreparationCache() override;
+  Status EmptyButteraugliCacheForTesting();
+  size_t ButteraugliCacheBytesForTesting();
 
   [[nodiscard]] BackendKind kind() const noexcept override;
   [[nodiscard]] std::string_view name() const noexcept override;
@@ -377,10 +384,11 @@ private:
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 
   Status PrepareDeviceButteraugliImpl(
-    const DeviceButteraugliPrepareDescriptor& descriptor,
+    const DeviceButteraugliPrepareDescriptor &descriptor,
     gpu_profile_internal::GpuProfilingMode mode,
-    std::unique_ptr<PreparedDeviceButteraugli>* prepared,
-    gpu_profile_internal::GpuExecutionProfile* profile);
+    std::unique_ptr<PreparedDeviceButteraugli> *prepared,
+    gpu_profile_internal::GpuExecutionProfile *profile,
+    const MetalButteraugliScratch *borrowed_scratch = nullptr);
 
   Status PrepareAqEvaluationImpl(
     const AqEvaluationPreparation& preparation,
@@ -398,6 +406,13 @@ private:
     MetalAqScratchArena kind,
     DeviceScratchArena arena,
     bool reusable) noexcept;
+
+  Status AcquireButteraugliArena(
+    size_t required_capacity_bytes, DeviceScratchArena* arena,
+    uint64_t* generation);
+  void ReleaseButteraugliArena(
+    DeviceScratchArena arena, uint64_t generation, bool reusable) noexcept;
+  void DropButteraugliCacheLocked() noexcept;
 
   Status EmptyAqScratchArenasForTesting();
   struct TransformEncodeContext {
@@ -620,6 +635,10 @@ private:
   std::array<
     std::optional<DeviceScratchArena>,
     static_cast<size_t>(MetalAqScratchArena::kCount)> idle_aq_scratch_;
+  const size_t butteraugli_cache_limit_;
+  std::mutex butteraugli_cache_mutex_;
+  std::optional<DeviceScratchArena> idle_butteraugli_scratch_;
+  uint64_t butteraugli_cache_generation_ = 0;
   std::string name_;
 };
 

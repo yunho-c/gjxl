@@ -12,6 +12,11 @@
 
 namespace gjxl {
 
+/// Deterministically exercises Metal's reclaimed-resource return path.
+[[nodiscard]] Status EmptyMetalButteraugliCacheForTesting(GpuBackend& backend);
+[[nodiscard]] size_t MetalButteraugliCacheBytesForTesting(GpuBackend& backend);
+[[nodiscard]] size_t MetalButteraugliProcessCacheBytesForTesting();
+
 /// Test-only observable stages matching the pinned scalar golden ordering.
 enum class MetalButteraugliStage : size_t {
   kBlurSigma1p2,
