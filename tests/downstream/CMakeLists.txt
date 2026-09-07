@@ -61,7 +61,7 @@ target_link_libraries(
     gjxl::c
 )
 
-add_executable(gjxl_domain_consumer execution_domain_consumer.cpp legacy_context_consumer.c)
+add_executable(gjxl_domain_consumer execution_domain_consumer.cpp legacy_context_consumer.c legacy_domain_consumer.c)
 target_link_libraries(gjxl_domain_consumer PRIVATE gjxl::c gjxl::codestream)
 target_compile_features(gjxl_domain_consumer PRIVATE c_std_11)
 target_compile_options(gjxl_domain_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror)

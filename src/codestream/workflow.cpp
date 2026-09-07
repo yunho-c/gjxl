@@ -1397,7 +1397,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   codestream_internal::OwnedEncodingTiming* timing,
   codestream_internal::VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
-  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile,
+  thread_budget_internal::CpuExecutionScope* outer_cpu_execution = nullptr) {
 
   const bool gpu_profiling =
     gpu_profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
@@ -1410,6 +1411,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   const auto total_begin = !profiling
     ? WorkflowClock::time_point{}
     : WorkflowClock::now();
+  thread_budget_internal::CpuExecutionScope local_cpu_execution;
   codestream_internal::OwnedEncodingTiming timing_owner;
   auto& local_timing = timing_owner.value();
   resource_budget_internal::PublicationVector<VarDctEncodingAttemptTiming> attempt_timings;
@@ -1442,6 +1444,9 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   status = admission.Start(admission_bytes, options.execution_domain);
   if (!status.ok())
     return status;
+  auto& cpu_execution = outer_cpu_execution != nullptr ? *outer_cpu_execution : local_cpu_execution;
+  status = cpu_execution.Start(options.execution_domain, options.cpu_thread_count, timing != nullptr);
+  if (!status.ok()) return status;
   thread_budget_internal::CpuParticipantTracker participant_tracker;
   const resource_budget_internal::ManagedHostScope managed_host(
     resource_budget_internal::ResourceClass::kPreparation);
@@ -1614,6 +1619,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         *summary = std::move(search_result.summary);
       }
       if (timing != nullptr) {
+        const auto cpu_timing = cpu_execution.timing();
+        local_timing.cpu_admission_wait_nanoseconds = cpu_timing.initial_queue_nanoseconds;
+        local_timing.cpu_resume_wait_nanoseconds = cpu_timing.resume_queue_nanoseconds;
+        local_timing.cpu_blocked_nanoseconds = cpu_timing.blocked_nanoseconds;
         local_timing.total_nanoseconds = ElapsedNanoseconds(total_begin);
         *timing = std::move(timing_owner);
       }
@@ -1696,6 +1705,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       *summary = std::move(candidate_summary);
     }
     if (timing != nullptr) {
+      const auto cpu_timing = cpu_execution.timing();
+      local_timing.cpu_admission_wait_nanoseconds = cpu_timing.initial_queue_nanoseconds;
+      local_timing.cpu_resume_wait_nanoseconds = cpu_timing.resume_queue_nanoseconds;
+      local_timing.cpu_blocked_nanoseconds = cpu_timing.blocked_nanoseconds;
       local_timing.total_nanoseconds = ElapsedNanoseconds(total_begin);
       *timing = std::move(timing_owner);
     }
@@ -1732,6 +1745,9 @@ Status EncodeLinearRgbVarDctCodestreamPublishedImpl(
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
   gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
   if (codestream == nullptr) return Status::InvalidArgument("Codestream output is null");
+  // Started by the implementation only after memory admission; retained here
+  // through evaluator teardown and the complete public ownership handoff.
+  thread_budget_internal::CpuExecutionScope cpu_execution;
   codestream_internal::CodestreamBuffer candidate;
   codestream_internal::OwnedEncodingSummary candidate_summary;
   codestream_internal::OwnedEncodingTiming candidate_timing;
@@ -1740,7 +1756,7 @@ Status EncodeLinearRgbVarDctCodestreamPublishedImpl(
     resolve_production_backend, &candidate,
     summary == nullptr ? nullptr : &candidate_summary,
     timing == nullptr ? nullptr : &candidate_timing, profile,
-    gpu_profiling_mode, gpu_profile);
+    gpu_profiling_mode, gpu_profile, &cpu_execution);
   if (status.ok()) {
     auto byte_charge = candidate.MoveToPublication(codestream);
     resource_budget_internal::ResourceAllocation summary_charge, timing_charge;
@@ -1789,10 +1805,11 @@ namespace codestream_internal {
 Status EncodeLinearRgbVarDctCodestreamOwned(
   ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   CodestreamBuffer* codestream, OwnedEncodingSummary* summary,
-  OwnedEncodingTiming* timing) {
+  OwnedEncodingTiming* timing,
+  thread_budget_internal::CpuExecutionScope* outer_cpu_execution) {
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, timing,
-    nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
+    nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr, outer_cpu_execution);
 }
 
 bool ShouldComputeQuantizationMatrixScaleStats(

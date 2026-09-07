@@ -12,6 +12,7 @@
 #include "gjxl/execution_domain.hpp"
 
 extern "C" int check_legacy_contexts(void);
+extern "C" int check_legacy_domains(void);
 
 namespace {
 bool CheckCValidation() {
@@ -21,22 +22,27 @@ bool CheckCValidation() {
   std::memset(&options, 0xa5, sizeof(options));
   std::array<unsigned char, sizeof(options)> before{};
   std::memcpy(before.data(), &options, sizeof(options));
-  for (size_t size : {size_t{0}, sizeof(options) - 1,
+  for (size_t size : {size_t{0}, offsetof(GJXLExecutionDomainOptions, cpu_participant_limit) - 1,
                       static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1}) {
     if (gjxl_execution_domain_options_init(&options, size) != GJXL_ERROR_INVALID_ARGUMENT ||
         std::memcmp(before.data(), &options, sizeof(options)) != 0)
       return false;
   }
   if (gjxl_execution_domain_options_init(&options, sizeof(options)) != GJXL_OK ||
-      options.managed_memory_bytes != 0)
+      options.managed_memory_bytes != 0 || options.cpu_participant_limit != 0)
     return false;
   GJXLExecutionDomain *raw = nullptr;
-  options.struct_size = sizeof(options) - 1;
+  options.struct_size = offsetof(GJXLExecutionDomainOptions, cpu_participant_limit) - 1;
   if (gjxl_execution_domain_create(&options, &raw) != GJXL_ERROR_INVALID_ARGUMENT ||
       raw != nullptr ||
       gjxl_execution_domain_create(nullptr, nullptr) != GJXL_ERROR_INVALID_ARGUMENT)
     return false;
-  if (gjxl_execution_domain_create(nullptr, &raw) != GJXL_OK)
+  options.struct_size = sizeof(options);
+  options.cpu_participant_limit = GJXL_MAX_CPU_THREADS + 1;
+  if (gjxl_execution_domain_create(&options, &raw) != GJXL_ERROR_INVALID_ARGUMENT || raw != nullptr)
+    return false;
+  options.cpu_participant_limit = 2;
+  if (gjxl_execution_domain_create(&options, &raw) != GJXL_OK)
     return false;
   const std::unique_ptr<GJXLExecutionDomain, decltype(&gjxl_execution_domain_destroy)> domain(
       raw, gjxl_execution_domain_destroy);
@@ -44,13 +50,14 @@ bool CheckCValidation() {
       raw != domain.get())
     return false;
   const auto retained = gjxl::RetainExecutionDomain(raw);
-  if (!retained || retained == gjxl::ExecutionDomain::Default())
+  if (!retained || retained == gjxl::ExecutionDomain::Default() ||
+      retained->options().cpu_participant_limit != 2)
     return false;
   GJXLExecutionDomainSnapshot snapshot{};
   std::memset(&snapshot, 0xa5, sizeof(snapshot));
   std::array<unsigned char, sizeof(snapshot)> old_snapshot{};
   std::memcpy(old_snapshot.data(), &snapshot, sizeof(snapshot));
-  for (size_t size : {size_t{0}, sizeof(snapshot) - 1,
+  for (size_t size : {size_t{0}, offsetof(GJXLExecutionDomainSnapshot, effective_cpu_participant_limit) - 1,
                       static_cast<size_t>(std::numeric_limits<uint32_t>::max()) + 1}) {
     if (gjxl_execution_domain_snapshot(raw, &snapshot, size) != GJXL_ERROR_INVALID_ARGUMENT ||
         std::memcmp(old_snapshot.data(), &snapshot, sizeof(snapshot)) != 0)
@@ -59,7 +66,9 @@ bool CheckCValidation() {
   return gjxl_execution_domain_snapshot(raw, nullptr, sizeof(snapshot)) ==
              GJXL_ERROR_INVALID_ARGUMENT &&
          gjxl_execution_domain_snapshot(raw, &snapshot, sizeof(snapshot)) == GJXL_OK &&
-         snapshot.struct_size == sizeof(snapshot) && snapshot.peak_committed_bytes == 0;
+         snapshot.struct_size == sizeof(snapshot) && snapshot.peak_committed_bytes == 0 &&
+         snapshot.effective_cpu_participant_limit == 2 && snapshot.peak_cpu_participants == 0 &&
+         check_legacy_domains();
 }
 
 bool CheckSharedLimit() {

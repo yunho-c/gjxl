@@ -59,6 +59,10 @@ typedef struct {
   uint32_t struct_size;
   /// Zero is unlimited but accounted. Managed capacity is not process RSS.
   uint64_t managed_memory_bytes;
+  /// Aggregate executing callers and workers across this domain. Zero selects
+  /// hardware concurrency (1..GJXL_MAX_CPU_THREADS); positive values must not
+  /// exceed GJXL_MAX_CPU_THREADS. Per-encode limits remain upper bounds.
+  uint32_t cpu_participant_limit;
 } GJXLExecutionDomainOptions;
 
 typedef struct {
@@ -71,6 +75,18 @@ typedef struct {
   uint64_t peak_committed_bytes;
   uint64_t active_reservations;
   uint64_t waiting_requests;
+  /// Memory and CPU sets are sampled separately, not as one atomic snapshot.
+  uint64_t effective_cpu_participant_limit;
+  uint64_t active_cpu_participants;
+  /// Capacity granted before workers start, not additional active threads.
+  uint64_t reserved_cpu_workers;
+  /// Created workers retain protected capacity while blocked, preventing nested
+  /// joins from multiplying dormant worker threads. Not active participants.
+  uint64_t suspended_cpu_workers;
+  uint64_t waiting_cpu_callers;
+  uint64_t peak_cpu_participants;
+  /// Peak active plus reserved plus suspended capacity; at most the limit.
+  uint64_t peak_cpu_protected_slots;
 } GJXLExecutionDomainSnapshot;
 
 typedef struct {

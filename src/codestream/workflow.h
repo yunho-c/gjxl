@@ -66,7 +66,8 @@ struct VarDctEncodingOptions {
   /// deterministic DCT8-only coefficient-order sampling.
   int32_t effort = 7;
   /// Maximum participating CPU threads per encode. Zero selects the existing
-  /// automatic stage-specific worker policy. GPU execution is not constrained.
+  /// automatic stage-specific desired parallelism. Both are additionally bounded
+  /// by the shared execution domain. GPU execution is not constrained.
   size_t cpu_thread_count = 0;
   /// Compatibility override that performs four AQ updates regardless of
   /// effort. It is meaningful only for Butteraugli-target and target-size
@@ -110,6 +111,7 @@ struct VarDctEncodingOptions {
   bool collect_final_butteraugli_score = false;
   /// Shares one immutable managed-memory allowance with every call using this
   /// handle. Null selects the process-wide default, not a new per-call budget.
+  /// Its CPU cap includes callers, reserved workers and dormant joined workers.
   std::shared_ptr<const ExecutionDomain> execution_domain;
 };
 
@@ -187,6 +189,15 @@ struct VarDctEncodingTiming {
   /// validation. Excludes prepared-state teardown and the outer public adapter's
   /// ownership handoff; surround the public call to measure complete latency.
   uint64_t total_nanoseconds = 0;
+  /// Initial CPU-slot queue after memory admission. Does not include memory
+  /// admission, batch-driver queueing, or caller-owned input preparation.
+  uint64_t cpu_admission_wait_nanoseconds = 0;
+  /// Calling-thread queue time when resuming after a GPU wait or worker join.
+  uint64_t cpu_resume_wait_nanoseconds = 0;
+  /// Calling-thread wall spans yielded for GPU waits and worker joins, excluding
+  /// the subsequent resume queue. Not worker CPU time or GPU execution time.
+  /// These three CPU diagnostics stop at the same internal commit as total.
+  uint64_t cpu_blocked_nanoseconds = 0;
   std::vector<VarDctEncodingAttemptTiming> attempts;
 };
 

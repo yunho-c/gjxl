@@ -5,6 +5,9 @@ to real C++, C and batch entry points. The comparison parent is `156b3b2`.
 It completes milestone 4's memory-admission part of resident execution, not aggregate CPU
 scheduling, a codec-policy change, or a process-RSS limiter.
 
+Later work adds [shared CPU participation](resident-cpu-coordination.md); the
+measurements below describe this earlier memory-admission checkpoint only.
+
 ## Behavior and ownership
 
 `ExecutionDomain` is an immutable shared handle containing a managed-capacity

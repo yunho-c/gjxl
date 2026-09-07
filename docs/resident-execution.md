@@ -295,14 +295,20 @@ Acceptance:
 - The audited set has a recorded disposition. Intentional remaining copies and
   materializations are documented rather than treated as unbounded follow-up.
 
-### 6. Coordinated CPU/GPU scheduling — pending
+### 6. Coordinated CPU/GPU scheduling — in progress
 
 Depends on stable output lifetimes and working admission from milestone 4;
 milestone 5 changes require updated resource estimates and requalification.
 
+The [CPU coordination checkpoint](resident-cpu-coordination.md) adds shared C/C++
+domain limits, caller/worker participation, FIFO admission and yielded GPU/join
+boundaries. Public queue/service and shutdown qualification remain outstanding;
+this checkpoint does not mark milestone 6 complete.
+
 The [batch driver](../src/codestream/batch_workflow.h) already permits one image's
 CPU work to overlap another's Metal work. It invokes independent single-image
-workflows, whose [CPU budgets](../src/core/thread_budget.h) are per encode. The
+workflows, whose [per-image CPU budgets](../src/core/thread_budget.h) now also
+draw from their shared domain. The
 goal is coordinated use of that capability, not a claim of introducing overlap
 for the first time.
 

@@ -68,12 +68,13 @@ Status RunParallelForwardTransforms(
     }
     return Status::Ok();
   }
-  const size_t participant_count = cpu_thread_count == 0
+  thread_budget_internal::CpuWorkerGroup cpu_workers(cpu_thread_count == 0
     ? automatic_worker_count
-    : std::min(automatic_worker_count, cpu_thread_count);
+    : std::min(automatic_worker_count, cpu_thread_count));
+  const size_t participant_count = cpu_workers.participants();
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context);
+      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
       if (!status.ok()) return status;
@@ -84,13 +85,13 @@ Status RunParallelForwardTransforms(
   ManagedVector<Status> statuses(count);
   std::atomic<size_t> next_index{0};
   ManagedVector<std::thread> workers;
-  const size_t spawned_worker_count = cpu_thread_count == 0
+  const size_t spawned_worker_count = cpu_thread_count == 0 && !cpu_workers.enabled()
     ? participant_count
     : participant_count - 1;
   workers.reserve(spawned_worker_count);
   const auto run_worker = [&] {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context);
+      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
     while (true) {
       const size_t index =
         next_index.fetch_add(1, std::memory_order_relaxed);
@@ -117,19 +118,19 @@ Status RunParallelForwardTransforms(
     }
   } catch (const std::bad_alloc&) {
     next_index.store(count, std::memory_order_relaxed);
-    for (std::thread& worker : workers) worker.join();
+    thread_budget_internal::JoinCpuWorkers(workers);
     return Status::OutOfMemory("Unable to allocate CPU worker state");
   } catch (const std::system_error&) {
     next_index.store(count, std::memory_order_relaxed);
-    for (std::thread& worker : workers) worker.join();
+    thread_budget_internal::JoinCpuWorkers(workers);
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
       if (!status.ok()) return status;
     }
     return Status::Ok();
   }
-  if (cpu_thread_count != 0) run_worker();
-  for (std::thread& worker : workers) worker.join();
+  if (cpu_thread_count != 0 || cpu_workers.enabled()) run_worker();
+  thread_budget_internal::JoinCpuWorkers(workers);
   for (const Status& status : statuses) {
     if (!status.ok()) return status;
   }

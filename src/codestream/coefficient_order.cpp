@@ -75,8 +75,9 @@ Status RunParallelCoefficientGroups(
   size_t coefficient_count,
   Function&& function) {
 
-  const size_t participant_count =
-    CoefficientOrderParticipantCount(count, coefficient_count);
+  thread_budget_internal::CpuWorkerGroup cpu_workers(
+    CoefficientOrderParticipantCount(count, coefficient_count));
+  const size_t participant_count = cpu_workers.participants();
   if (participant_count == 0) return Status::Ok();
   const size_t cpu_thread_count =
     thread_budget_internal::CpuThreadCount();
@@ -85,7 +86,7 @@ Status RunParallelCoefficientGroups(
   const auto resource_context = resource_budget_internal::CurrentResourceContext();
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context);
+      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index, 0);
       if (!status.ok()) return status;
@@ -96,13 +97,13 @@ Status RunParallelCoefficientGroups(
   Storage<Status> statuses(count);
   std::atomic<size_t> next_index{0};
   Storage<std::thread> workers;
-  const size_t spawned_worker_count = cpu_thread_count == 0
+  const size_t spawned_worker_count = cpu_thread_count == 0 && !cpu_workers.enabled()
     ? participant_count
     : participant_count - 1;
   workers.reserve(spawned_worker_count);
   const auto run_worker = [&](size_t worker_index) {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context);
+      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
     while (true) {
       const size_t index =
         next_index.fetch_add(1, std::memory_order_relaxed);
@@ -127,15 +128,15 @@ Status RunParallelCoefficientGroups(
     }
   } catch (const std::system_error&) {
     next_index.store(count, std::memory_order_relaxed);
-    for (std::thread& worker : workers) worker.join();
+    thread_budget_internal::JoinCpuWorkers(workers);
     return Status::Internal("Unable to start coefficient-order workers");
   } catch (const std::bad_alloc&) {
     next_index.store(count, std::memory_order_relaxed);
-    for (std::thread& worker : workers) worker.join();
+    thread_budget_internal::JoinCpuWorkers(workers);
     return AllocationFailure();
   }
-  if (cpu_thread_count != 0) run_worker(spawned_worker_count);
-  for (std::thread& worker : workers) worker.join();
+  if (cpu_thread_count != 0 || cpu_workers.enabled()) run_worker(spawned_worker_count);
+  thread_budget_internal::JoinCpuWorkers(workers);
   for (const Status& status : statuses) {
     if (!status.ok()) return status;
   }

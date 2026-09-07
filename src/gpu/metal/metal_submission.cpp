@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "gpu/metal/metal_status.h"
+#include "core/cpu_execution.h"
 
 namespace gjxl::metal_internal {
 namespace {
@@ -169,6 +170,7 @@ public:
   ~MetalSubmission() override = default;
 
   Status Wait() override {
+    thread_budget_internal::CpuSuspension suspension;
     std::call_once(wait_once_, [this] {
       auto pool = NS::TransferPtr(
         NS::AutoreleasePool::alloc()->init());

@@ -21,6 +21,7 @@
 #include "c_api/image_conversion.h"
 #include "codestream/workflow.h"
 #include "codestream/workflow_admission.h"
+#include "core/cpu_execution.h"
 #include "codestream/workflow_internal.h"
 #include "core/image_buffer.h"
 #include "core/status.h"
@@ -45,12 +46,16 @@ constexpr size_t kContextOptionsCpuThreadsSize =
   offsetof(GJXLContextOptions, num_cpu_threads) + sizeof(uint32_t);
 constexpr size_t kContextOptionsDomainSize =
     offsetof(GJXLContextOptions, execution_domain) + sizeof(GJXLExecutionDomain *);
+constexpr size_t kDomainOptionsV1Size = offsetof(GJXLExecutionDomainOptions, cpu_participant_limit);
+constexpr size_t kDomainOptionsCpuSize = kDomainOptionsV1Size + sizeof(uint32_t);
+constexpr size_t kDomainSnapshotV1Size = offsetof(GJXLExecutionDomainSnapshot, effective_cpu_participant_limit);
 constexpr size_t kEncoderOptionsV1Size =
   offsetof(GJXLEncoderOptions, compression_mode);
 constexpr size_t kEncoderOptionsCompressionModeSize =
   offsetof(GJXLEncoderOptions, compression_mode) +
   sizeof(GJXLCompressionMode);
 static_assert(gjxl::kMaximumCpuThreadCount == GJXL_MAX_CPU_THREADS);
+static_assert(gjxl::kMaximumDomainCpuParticipants == GJXL_MAX_CPU_THREADS);
 thread_local std::array<char, kDiagnosticCapacity> last_error{};
 
 void ClearLastError() noexcept {
@@ -248,7 +253,7 @@ extern "C" {
 
 GJXLResult gjxl_execution_domain_options_init(GJXLExecutionDomainOptions *options,
                                               size_t caller_size) noexcept {
-  return Guard([&] { return InitializeOptions(options, caller_size); });
+  return Guard([&] { return InitializeOptions(options, caller_size, kDomainOptionsV1Size); });
 }
 
 GJXLResult gjxl_execution_domain_create(const GJXLExecutionDomainOptions *options,
@@ -258,13 +263,15 @@ GJXLResult gjxl_execution_domain_create(const GJXLExecutionDomainOptions *option
       return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Execution domain output must be empty");
     gjxl::ExecutionDomainOptions parsed;
     if (options != nullptr) {
-      const auto status = ValidateSizedStruct(options->struct_size, sizeof(*options),
+      const auto status = ValidateSizedStruct(options->struct_size, kDomainOptionsV1Size,
                                               "Execution domain options struct is too small");
       if (status != GJXL_OK)
         return status;
       if (options->managed_memory_bytes > std::numeric_limits<size_t>::max())
         return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Managed memory limit is not representable");
       parsed.managed_memory_bytes = static_cast<size_t>(options->managed_memory_bytes);
+      if (options->struct_size >= kDomainOptionsCpuSize)
+        parsed.cpu_participant_limit = options->cpu_participant_limit;
     }
     auto candidate = std::make_unique<GJXLExecutionDomain>();
     const auto status = TranslateStatus(gjxl::ExecutionDomain::Create(parsed, &candidate->value));
@@ -284,7 +291,7 @@ GJXLResult gjxl_execution_domain_snapshot(const GJXLExecutionDomain *domain,
                                           GJXLExecutionDomainSnapshot *snapshot,
                                           size_t caller_size) noexcept {
   return Guard([&]() -> GJXLResult {
-    if (snapshot == nullptr || caller_size < sizeof(*snapshot) ||
+    if (snapshot == nullptr || caller_size < kDomainSnapshotV1Size ||
         caller_size > std::numeric_limits<uint32_t>::max())
       return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Execution domain snapshot allocation is invalid");
     const auto handle = domain == nullptr ? gjxl::ExecutionDomain::Default() : domain->value;
@@ -299,6 +306,19 @@ GJXLResult gjxl_execution_domain_snapshot(const GJXLExecutionDomain *domain,
     snapshot->peak_committed_bytes = state.peak_committed_bytes;
     snapshot->active_reservations = state.active_reservations;
     snapshot->waiting_requests = state.waiting_requests;
+    // Old callers supply only the v1 memory prefix. Never touch a field that
+    // is not wholly covered by their allocation (including intermediate sizes).
+#define GJXL_STORE_CPU_SNAPSHOT(field) \
+    if (caller_size >= offsetof(GJXLExecutionDomainSnapshot, field) + sizeof(snapshot->field)) \
+      snapshot->field = state.field
+    GJXL_STORE_CPU_SNAPSHOT(effective_cpu_participant_limit);
+    GJXL_STORE_CPU_SNAPSHOT(active_cpu_participants);
+    GJXL_STORE_CPU_SNAPSHOT(reserved_cpu_workers);
+    GJXL_STORE_CPU_SNAPSHOT(suspended_cpu_workers);
+    GJXL_STORE_CPU_SNAPSHOT(waiting_cpu_callers);
+    GJXL_STORE_CPU_SNAPSHOT(peak_cpu_participants);
+    GJXL_STORE_CPU_SNAPSHOT(peak_cpu_protected_slots);
+#undef GJXL_STORE_CPU_SNAPSHOT
     return GJXL_OK;
   });
 }
@@ -451,9 +471,15 @@ GJXLResult gjxl_encode(
       .row_stride_bytes = image->row_stride_bytes,
       .format = packed_format,
     };
-    result = TranslateStatus(gjxl::c_api_internal::ValidatePackedSrgbImage(packed_image));
-    if (result != GJXL_OK)
-      return result;
+    {
+      // RGBA validation scans alpha before memory admission. Account that CPU
+      // work, then release the slot before waiting for a memory reservation.
+      gjxl::thread_budget_internal::CpuExecutionScope validation_cpu;
+      result = TranslateStatus(validation_cpu.Start(context->execution_domain, context->cpu_thread_count));
+      if (result != GJXL_OK) return result;
+      result = TranslateStatus(gjxl::c_api_internal::ValidatePackedSrgbImage(packed_image));
+      if (result != GJXL_OK) return result;
+    }
     gjxl::VarDctEncodingOptions encoding_options;
     encoding_options.butteraugli_target = options->distance;
     encoding_options.effort = options->effort;
@@ -477,6 +503,9 @@ GJXLResult gjxl_encode(
     result = TranslateStatus(admission.Start(admission_bytes, context->execution_domain));
     if (result != GJXL_OK)
       return result;
+    gjxl::thread_budget_internal::CpuExecutionScope cpu_execution;
+    result = TranslateStatus(cpu_execution.Start(context->execution_domain, context->cpu_thread_count));
+    if (result != GJXL_OK) return result;
     const gjxl::resource_budget_internal::ManagedHostScope managed_input(
       gjxl::resource_budget_internal::ResourceClass::kInput);
     gjxl::Image3FBuffer linear_rgb;

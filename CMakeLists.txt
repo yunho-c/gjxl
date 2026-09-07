@@ -1588,6 +1588,22 @@ if(GJXL_BUILD_TESTS)
 
   set_tests_properties(resource_budget PROPERTIES TIMEOUT 30)
 
+  add_executable(gjxl_cpu_budget_test tests/cpu_budget_test.cpp)
+  target_link_libraries(gjxl_cpu_budget_test PRIVATE gjxl_core)
+  add_test(NAME cpu_budget COMMAND gjxl_cpu_budget_test)
+  set_tests_properties(cpu_budget PROPERTIES TIMEOUT 30)
+
+  add_executable(gjxl_cpu_execution_test tests/cpu_execution_test.cpp)
+  target_link_libraries(gjxl_cpu_execution_test PRIVATE gjxl_core)
+  add_test(NAME cpu_execution COMMAND gjxl_cpu_execution_test)
+  set_tests_properties(cpu_execution PROPERTIES TIMEOUT 30)
+
+  add_executable(gjxl_workflow_cpu_coordination_test tests/workflow_cpu_coordination_test.cpp)
+  target_link_libraries(gjxl_workflow_cpu_coordination_test PRIVATE gjxl_c gjxl_codestream)
+  add_test(NAME workflow_cpu_coordination COMMAND gjxl_workflow_cpu_coordination_test)
+  add_test(NAME workflow_cpu_coordination_cpu COMMAND gjxl_workflow_cpu_coordination_test --cpu-only)
+  set_tests_properties(workflow_cpu_coordination workflow_cpu_coordination_cpu PROPERTIES TIMEOUT 120)
+
   add_executable(gjxl_managed_allocator_test tests/managed_allocator_test.cpp)
   target_link_libraries(gjxl_managed_allocator_test PRIVATE gjxl_codestream)
   add_test(NAME managed_allocator COMMAND gjxl_managed_allocator_test)

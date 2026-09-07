@@ -6,6 +6,7 @@
 #include "codestream/batch_workflow_test.h"
 #include "codestream/workflow_admission.h"
 #include "codestream/workflow_internal.h"
+#include "core/cpu_execution.h"
 
 #include <array>
 #include <atomic>
@@ -41,6 +42,10 @@ Status PlanBatch(std::span<const VarDctBatchEncodingRequest> requests, size_t wo
                  std::shared_ptr<const ExecutionDomain> *domain, bool *explicit_domain,
                  codestream_internal::BatchWorkflowStoragePlan *plan) {
   try {
+    thread_budget_internal::CpuExecutionScope planning_cpu;
+    const Status cpu_status = planning_cpu.Start(requests.empty() ? nullptr :
+                                                 requests.front().options.execution_domain);
+    if (!cpu_status.ok()) return cpu_status;
     codestream_internal::BatchWorkflowStorageAccumulator accumulator;
     for (const auto &request : requests) {
       auto selected = request.options.execution_domain ? request.options.execution_domain
@@ -70,7 +75,8 @@ Status PlanBatch(std::span<const VarDctBatchEncodingRequest> requests, size_t wo
 void EncodeOne(
   const VarDctBatchEncodingRequest& request,
   VarDctBatchEncodingResult* result,
-  OwnedEncodingResult* owned) noexcept {
+  OwnedEncodingResult* owned,
+  thread_budget_internal::CpuExecutionScope* cpu_execution) noexcept {
 
   VarDctBatchEncodingResult candidate;
   OwnedEncodingResult candidate_owned;
@@ -80,7 +86,7 @@ void EncodeOne(
       request.options,
       &candidate_owned.codestream,
       &candidate_owned.summary,
-      &candidate_owned.timing);
+      &candidate_owned.timing, cpu_execution);
     if (candidate.status.ok()) candidate.status = candidate_owned.Reclassify(
       resource_budget_internal::ResourceClass::kRetainedResult);
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
@@ -167,6 +173,9 @@ public:
       return admission_status;
     const resource_budget_internal::ManagedHostScope managed_host(
       resource_budget_internal::ResourceClass::kRetainedResult);
+    thread_budget_internal::CpuExecutionScope cpu_execution;
+    admission_status = cpu_execution.Start(domain);
+    if (!admission_status.ok()) return admission_status;
     // Declare escrow before the candidate: rollback frees backing first.
     ManagedVector<std::array<ResourceAllocation, 3>> publication_charges;
     PublicationVector<VarDctBatchEncodingResult> candidate;
@@ -215,6 +224,9 @@ public:
     work_available_.notify_all();
 
     {
+      // Resume only after releasing work_mutex_: a resumed caller may be
+      // queued behind an image worker that still needs that mutex to finish.
+      thread_budget_internal::CpuSuspension suspension;
       std::unique_lock work_lock(work_mutex_);
       work_complete_.wait(work_lock, [this] {
         return remaining_workers_ == 0;
@@ -300,9 +312,12 @@ private:
         if (!results[index].status.ok())
           continue;
         const resource_budget_internal::ResourceContextScope resources(resource_context);
+        // Started inside EncodeOne after validation/admission; retain it through
+        // result ownership transfer and any post-image preparation-cache trim.
+        thread_budget_internal::CpuExecutionScope cpu_execution;
         if (observer.observe != nullptr)
           observer.observe(observer.context, index, true);
-        EncodeOne(requests[index], &results[index], &owned[index]);
+        EncodeOne(requests[index], &results[index], &owned[index], &cpu_execution);
         bool terminal = results[index].status.resource_plan_exceeded();
         if (trim) {
           Status status;

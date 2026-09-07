@@ -32,7 +32,10 @@ namespace gjxl::codestream_internal {
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestreamOwned(
   ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   CodestreamBuffer* codestream, OwnedEncodingSummary* summary = nullptr,
-  OwnedEncodingTiming* timing = nullptr);
+  OwnedEncodingTiming* timing = nullptr,
+  // Optional unstarted scope, entered after admission and kept alive by the
+  // adapter through its result retention/cache-trim epilogue.
+  thread_budget_internal::CpuExecutionScope* outer_cpu_execution = nullptr);
 
 struct QuantizationMatrixScaleStats {
   float x_edge = 0.0f;
