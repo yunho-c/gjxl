@@ -6,6 +6,13 @@ are already implemented; this audit identifies what remains intentionally
 separate and why. No new kernel, alias, arithmetic change or policy pruning is
 introduced by this checkpoint. Aggregate CPU scheduling remains milestone 6.
 
+Later handoff experiments against `32cd437` are recorded in
+[borrowed AC scores and adjusted quant fields](resident-borrowed-handoff-experiments.md).
+They remove real copies and host buffers but have no established independent
+whole-encode benefit; that follow-up retains evidence and revisit criteria.
+The separately integrated packed-input change is documented in
+[packed resident input](packed-resident-input.md).
+
 ## Inventory and decisions
 
 The following producers, consumers and lifetime boundaries are the audited set.
