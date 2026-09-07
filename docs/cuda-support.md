@@ -1202,6 +1202,19 @@ prior launches and allocation/synchronization counts. These are qualified
 warm gains, not universal or batch-throughput claims. No security-setting
 change or observed permission/firewall block occurs; optimization remains open.
 
+[S80](cuda-optimization-s1.md#lossless-sparse-ac-transfer-investigation-s80)
+investigates lossless sparse AC transfer without changing S79 production.
+The 4K handoff carries 99.5 MB despite only 1.12% nonzero coefficients.
+Guarded GPU compression/CPU reconstruction passes exact signed-int32 replay,
+but fresh ordinary host-buffer costs erase smaller-image gains. Unconditional
+sparse transfer is not justified. A zero-backed Windows output counterfactual
+also times a full dense read, so deferred page costs are not hidden. This is
+not a production allocator change or a new public/batch speedup claim. The
+zero-backed experiment is not a general fix either: 4K is nearly flat against
+its own dense baseline, while several corpus cases lose. Seven GPU sanitizer
+and five host-ASan jobs pass; ownership/reuse and reconstruction remain the
+next gates before any sparse-transfer integration. S79 remains retained.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

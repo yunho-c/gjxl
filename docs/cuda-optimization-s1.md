@@ -13593,6 +13593,158 @@ qualification, raw profiles, paired controls, traces and failed diagnostics;
 `s79_validate.py --frozen` reconstructs the evidence, with `--current` also
 checking current source/runtime identities.
 
+## Lossless sparse AC transfer investigation (S80)
+
+S80 starts from retained S79 `914b42c`. It tests whether a lossless sparse
+transfer can remove a substantial resident-to-CPU handoff cost. Production
+code, tests and all 40 retained runtime artifacts remain unchanged. These
+are transfer/reconstruction experiments, not public encoder speedups.
+
+### Attribution and format
+
+Read-only reconstruction of the two S79 candidate 4K traces finds 38.04 and
+48.43 ms of copies and 34.09 and 34.87 ms of gaps in the device-work union.
+The final active AC payload is 99,532,800 bytes: 94,371,840 contiguous and
+5,160,960 pitched. In trace pair 1 these two copies take 20.032253 ms.
+The three original-image uploads each carry 33,153,604 bytes. Profiler-start
+time is capture setup, not an additive encode saving, and copy-adjacent host
+gaps are not evidence of a permission block or a measured bandwidth ceiling.
+
+The S78 4K export has only 278,533 nonzeros among 24,883,200 coefficients;
+1080p has 70,907 of 6,220,800, and Flower has 42,804 of 823,296. A fixed
+256-value block header containing eight masks and one payload offset reduces
+the 4K representation to 4,613,332 bytes, excluding a four-byte total count.
+Values remain signed int32; no numerical-range or quantization assumption is
+introduced. A dense input can instead expand to 103.515625% of its old size.
+
+The two CUDA prototypes use 256 or 1,024 threads. Warp ballots and a shared
+prefix sum compact nonzeros; one integer atomic reserves each nonempty
+block's payload, and its header records the resulting offset. Global block
+ordering need not be deterministic. Resources are respectively 21/40 registers
+and 36/132 shared bytes, with zero stack/local storage. Both native bodies
+are identical in all five diagnostic executables, including host-ASan builds.
+
+Six modes compare dense transfer, sparse-256 with global CPU zero/scatter,
+the identical dense branch, sparse-1024 with global zero/scatter, and the two
+sparse kernels with block-local CPU zero/scatter. The input is already packed
+active AC. Count clear, kernel, count readback/wait, payload readback/wait and
+CPU reconstruction are timed. Exact comparison runs after every observation.
+
+### Qualification and lifetime controls
+
+Three additional corpus exports perform 21 exact S70/S79-identical encodes.
+Together with S78 they provide 111 frames. Sixty synthetic arrays cover empty
+work, warp/block/tail boundaries, random signed values, INT32_MIN/MAX and
+zero/dense populations. V1 checks all six modes twice on every input, with
+complete host/device guards, unchanged source and unused header/value tails.
+All four GPU sanitizer tools pass on the same scope. Race checking takes
+225 seconds with advancing case output and terminates with zero hazards.
+
+V2 adds fresh ordinary output and sparse host-buffer allocations, plus four
+roughly 100 MB repeated-vector stress inputs: zero, all nonzero, approximately
+75% extreme nonzero, and approximately 12.5% nonzero. These are explicitly
+synthetic coefficient vectors, not additional natural images. Both reused and
+fresh lifetimes pass plain, host-ASan and stream-ordered memcheck qualification.
+
+The V1 screen has 2,880 measured and 720 warm observations, but a V2 host
+build overlaps a few small-image reverse-order windows. All are preserved
+as exploratory. The separate V2 study runs after qualification and builds:
+40 serial cohorts, 5,760 measured and 1,440 warm observations, ten inputs,
+two lifetimes and reverse-order replicates. Each six-round block balances
+the six modes across all six positions. Adverse pairs are not discarded.
+
+For sparse-256/global-zero mode 1 versus dense mode 0, V2 median paired
+changes show why reused buffers alone are insufficient (negative is faster):
+
+| Input | Reused host buffers | Fresh ordinary buffers |
+| --- | ---: | ---: |
+| Padded 4K | -55.31% | -10.33% |
+| Padded 1080p | -22.72% | +22.20% |
+| Flower | -24.02% | +17.11% |
+| Keong macan | -35.53% | +13.87% |
+| Riaphotographs | -36.69% | +6.62% |
+| Bliznaca | -27.76% | +16.52% |
+
+Ordinary fresh dense-buffer reconstruction erases most small-image gains.
+Dense and extreme-value stress inputs regress heavily; even the roughly
+12.5%-nonzero stress can lose. Unconditional sparse readback is not justified.
+
+### Zero-backed output counterfactual
+
+V3 additionally allocates fresh Windows output with ordinary
+`VirtualAlloc(MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)` pages, omitting the
+explicit dense zero fill only for that owner. Microsoft documents initial
+zero contents and the matching `VirtualFree(base, 0, MEM_RELEASE)` contract.
+No large pages, executable pages, page locking, foreign processes or security
+settings are involved. This is a diagnostic owner, not a portable production
+allocator. [VirtualAlloc documentation](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc),
+[VirtualFree documentation](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualfree).
+
+Crucially, V3 times a full dense checksum read for **all** modes/lifetimes so
+demand-zero pages cannot defer their first-read cost to the later oracle.
+The checksum is additional to, not a replacement for, exact comparison.
+Allocation, count/transfer, reconstruction and dense consumption are separate
+components. Buffer destruction and the tiny gap between reconstruction and
+consumption clock scopes remain excluded. Host ASan covers the ordinary
+allocations/decoder; explicit guards also cover the VirtualAlloc output,
+which is not a normal ASan heap allocation.
+
+All three V3 lifetime policies pass 115 inputs plus 60 boundary arrays,
+six modes twice each, both plain and under host ASan. New zero-backed ownership
+also passes stream-ordered GPU memcheck. Across versions there are 37,560
+guarded qualification comparisons, seven GPU sanitizer jobs and five host
+ASan jobs. The additional timed dense read still is not full frame validation,
+fixed-capacity group-tail assembly, serialization or complete lifecycle timing.
+
+V3 runs 60 isolated cohorts: ten inputs, three lifetime policies, two
+reverse-order replicates, 8,640 measured and 2,160 warm observations. Mode 1
+versus mode 0, now including dense consumption, has these median paired
+changes within each lifetime policy:
+
+| Input | Reused | Fresh ordinary | Fresh zero-backed |
+| --- | ---: | ---: | ---: |
+| Padded 4K | -30.08% | -10.53% | -0.68% |
+| Padded 1080p | -16.89% | +11.54% | +3.92% |
+| Flower | -22.04% | +9.86% | -27.32% |
+| Keong macan | -25.27% | +8.64% | +32.29% |
+| Riaphotographs | -30.49% | +1.77% | +9.90% |
+| Bliznaca | -25.35% | +9.87% | +22.08% |
+
+The zero-backed 4K result is also nearly flat versus duplicate mode 2
+(-0.83%). Its isolated Flower win is relative to that allocation policy's
+own dense baseline, not proof that changing the production allocator wins.
+The lifetime policies run in separate process windows; cross-policy ratios
+of independent medians are not paired counterfactuals. All-zero 100 MB
+zero-backed mode 1 is only 2.10% faster than its dense mode 0. Fully nonzero,
+75%-extreme and 12.5%-nonzero zero-backed stress regress 77.38%, 89.60%
+and 16.48%, respectively. A large byte reduction does not establish a gain.
+
+### Disposition and next work
+
+Reject unconditional sparse readback and the proposed general zero-backed
+allocator fix. The qualified format remains a useful prototype, especially
+with reused output storage, but neither experiment is retained in production.
+Next work should measure bounded frame-storage reuse/ownership and cheaper
+linear reconstruction, or compare a lossless fixed-width transport. A public
+integration must preserve final group layout/tails and frame ownership, include
+setup and destruction, provide a dense/oversized fallback, and pass complete
+encode/decode, concurrency and batch gates. The observed 4K stage savings are
+not an end-to-end speedup claim or justification for a fitted image-size gate.
+
+The ignored `s80_*` bundle retains all versions, failed diagnostics and raw
+rows. Initial NumPy analysis failed before execution and was replaced with
+standard-library binary arrays; no dependency was installed. An initial Clang
+ASan compile/link command was rejected and corrected in a separate script.
+Neither was a firewall or privilege failure. V1's host-build overlap remains
+disclosed; later V2/V3 cohorts run after their qualification/build/native work.
+`s80_validate.py --frozen` reconstructs populations, checksums, native bodies,
+all paired summaries, 37,560 guarded and 21,600 timed exact comparisons,
+and 141 recorded non-overlapping GPU-job intervals. That timeline excludes
+CPU-only build/native work and is not a blanket machine-idleness claim.
+`--current` additionally checks source snapshots and the 40 unchanged S79
+runtime files. No security, clock, power, cooling or priority setting changes,
+and no observed firewall/admin/permission block. Optimization remains ongoing.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
