@@ -1363,6 +1363,19 @@ oversized test-allocation and strict-screen records remain. No permission block
 is observed. Production, permanent tolerances and the S79 runtime are unchanged;
 broader convolution/final-pass work and resident qualification remain open.
 
+[S92](cuda-optimization-s1.md#geometry-aware-phased-convolution-s92) tests a
+fixed geometry/occupancy-aware dispatch for S73's exact phased convolution.
+Selected wide boundary cases improve, but a packed single-column case loses
+in both repetitions while its padded counterpart wins. The rule also misses
+some wide-shape wins. All direct/sanitizer/prepared checks pass; 24 ordinary
+and 3,612 interleaved fully-resident encodes preserve retained bytes and
+summaries exactly. Whole-workflow results are mixed against native-identical
+controls, and fresh 4K's favorable public total does not repeat at the outer
+backend-lifetime boundary. No policy is promoted or tuned on the same data.
+All 322 GPU jobs finish, with no observed permission block. Production and
+all 40 retained runtime files remain unchanged. Layout-aware dispatch and
+broader convolution/final-mask investigations remain open.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

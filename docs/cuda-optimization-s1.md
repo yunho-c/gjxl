@@ -15963,6 +15963,285 @@ intervals and completion markers, and verifies the unchanged runtime.
 Seven source/document snapshots separate frozen evidence from later edits.
 Only the two CUDA documents change; user-owned untracked files stay untouched.
 
+## Geometry-aware phased convolution (S92)
+
+S92 follows S91 `7f7d866` and tests S73's open size-aware channel-phase
+policy on the retained S79 fully-resident implementation. This is a
+data-reuse/dispatch experiment, not another rounding-changing normalization
+experiment. The production source, permanent tests/tolerances, and all 40
+retained runtime files remain unchanged.
+
+### Hypothesis and fixed policy
+
+The retained vertical convolution computes three adjacent output rows per
+thread in 48-row tiles. The S73 candidate stages Y/B together, then X, reusing
+one two-channel shared-memory buffer in a 96-row tile. It preserves the tap
+order, included-weight sums, divisions, and final low/medium expressions.
+The nominal interior plane traffic falls from 56 to 52 bytes/output through
+less repeated halo staging; these are logical bytes, not measured memory
+transactions. Horizontal dispatch and launch count do not change.
+
+Four modes in one diagnostic executable are:
+
+- 0: retained joint-channel 48-row kernel;
+- 1: a renamed, native-identical copy of mode 0;
+- 2: the geometry policy below, selecting the original or phased body;
+- 3: the same phased 96-row body forced for every nonempty image.
+
+Before new timing, the policy is fixed to require at least two full waves
+of resident candidate blocks and strictly fewer nominal staged halo rows:
+
+```text
+columns = ceil(width / 32)
+rows48  = ceil(height / 48)
+rows96  = ceil(height / 96)
+capacity = SM count * active candidate blocks per SM
+use_tall = width && height && capacity
+        && columns * rows96 >= 2 * capacity
+        && rows96 * 128 < rows48 * 80
+```
+
+The arithmetic uses 64-bit intermediates. Ordinary CUDA device/occupancy
+queries report 30 SMs, three active candidate blocks/SM, and capacity 90 on
+this RTX 3060 Laptop. The threshold is therefore 180 candidate blocks.
+The candidate uses 73 registers/thread and 32,904 shared bytes/block, with
+no spills. No privileged hardware counters are needed or retried.
+The halo test prevents selecting very wide single-row images merely because
+their horizontal grid is large. The 16 hand-expected boundary shapes also
+exercise incomplete 48/96-row tiles and an extremely narrow, tall image.
+
+This setup is diagnostic: occupancy is queried once before test/timing,
+and a process-global mode selector routes the calls. It is not a proposed
+thread-safe, per-device production cache. A future retained implementation
+would need prepared-owner/backend metadata, safe fallback and multi-device
+qualification, without per-launch occupancy queries.
+
+### Correctness and native identity
+
+The current permanent low/medium test is freshly compiled for all four
+modes, including three-stage reuse, both separate and sequential oracles,
+all 16 complete allocations, poison padding, unchanged inputs/weights and
+unused blurred planes. The third reuse changes input values and passes null
+unused blurred pointers. No error tolerance is introduced.
+
+| Direct qualification | Fixture executions | Two-oracle stage comparisons |
+|---|---:|---:|
+| Release, four modes | 1,840 | 11,040 |
+| Host ASan, four modes | 1,840 | 11,040 |
+| Original two tall fixtures, four modes | 8 | 48 |
+| Dispatch boundary release | 128 | 768 |
+| Dispatch boundary host ASan | 128 | 768 |
+| Interior/phase-reuse host ASan | 120 | 720 |
+| Each of memcheck/initcheck/synccheck/racecheck | 120 | 720 |
+| Total across the above runs | 4,544 | 27,264 |
+
+The scoped sanitizer matrix is 1x97, 33x97 and 65x193, packed/padded, five
+input/weight patterns and four modes. These heights explicitly cover
+interior three-row evaluation, phased shared-memory reuse and partial tall
+tiles; the earlier short-height normalization subsets are not evidence of
+that same coverage. Memcheck reports zero errors and zero leaks, with full
+leak checking and stream-ordered race tracking enabled. Initcheck and
+synccheck report zero errors; racecheck reports zero hazards/errors/warnings.
+The established packed 1x4,194,305 and padded 33x262,145 tall fixtures are
+used without repeating S91's oversized padded single-column allocation.
+
+Eleven standalone native artifacts contain exactly 77 kernel bodies:
+75 retained bodies, one native-identical renamed control, and one candidate.
+The candidate is native-identical to S73's 96-row phase body after symbol
+renaming/canonicalization. Three freshly linked integrated executables
+(encoder, prepared test and interleave probe) contain 207 bodies: all 205
+current retained bodies plus those two additions. The retained encoder's
+fresh native dump exactly matches S79's 205-body dump. Current retained is
+205, not the 203-body count from before S79's two population kernels.
+
+All four freshly compiled prepared-workflow suites pass their 31 cases,
+including memory accounting and failure invalidation. All 24 ordinary
+HD/4K/Flower encodes (four modes, scored/unscored, d1.2/e7 fully-resident)
+match the retained codestream hash/size, strategy summary and final-score
+text exactly. This is not a new decoded-quality or complete release suite.
+
+### Boundary timing
+
+For each of 16 shapes, packed/padded input/output, and vertical-only or
+horizontal-plus-vertical boundary, release and host-ASan preflights verify
+all four graphs. The horizontal intermediates remain packed in both padding
+cases; padded input/output strides are width+11 and width+23 respectively.
+The two timing repetitions reverse shape, padding, boundary and permutation
+order. Each uses eight warmup quartets followed by all 24 permutations of
+the four modes, with four stage calls per event window. Every window is
+followed by a bitwise check of all 16 allocations outside events. No clocks
+are normalized and no outliers are removed. Host dispatch selection is
+outside captured graph-event timing.
+
+The 256 preflight/ASan/measurement jobs complete serially, producing 16,384
+event windows (12,288 measured, 4,096 warm), 17,408 checked four-call graph
+bursts, and 69,632 graph-contained stage calls. Baseline/oracle setup calls
+are additional. These are synthetic primitive timings, not encoder times.
+Negative percentages mean faster; each entry is the median of 24 within-
+quartet ratios, separately for each repetition.
+
+| Shape | Tall | Padding | Vertical policy/original % (r0 / r1) | H+V policy/original % (r0 / r1) |
+|---|---:|---:|---:|---:|
+| 2848x192 | 0 | 0 | +0.186 / -0.279 | +0.000 / +0.125 |
+| 2848x192 | 0 | 1 | +0.000 / +0.091 | -0.251 / +0.000 |
+| 2879x192 | 1 | 0 | -9.384 / -9.444 | -6.382 / -6.555 |
+| 2879x192 | 1 | 1 | -9.326 / -9.410 | -5.952 / -5.911 |
+| 2880x192 | 1 | 0 | -8.669 / -8.426 | -6.057 / -6.145 |
+| 2880x192 | 1 | 1 | -8.812 / -9.285 | -6.435 / -6.320 |
+| 2880x96 | 0 | 0 | -0.550 / +0.000 | +0.239 / +0.239 |
+| 2880x96 | 0 | 1 | -0.364 / +0.184 | +0.478 / +0.238 |
+| 2880x97 | 0 | 0 | -0.330 / -0.336 | +0.224 / +0.000 |
+| 2880x97 | 0 | 1 | +0.497 / +0.000 | -0.112 / +0.108 |
+| 2880x144 | 0 | 0 | +0.123 / -0.363 | +0.000 / +0.162 |
+| 2880x144 | 0 | 1 | +0.121 / -0.122 | -0.240 / -0.243 |
+| 2880x145 | 1 | 0 | -9.882 / -10.606 | -6.782 / -6.373 |
+| 2880x145 | 1 | 1 | -9.696 / -9.859 | -8.056 / -6.740 |
+| 2880x193 | 1 | 0 | -6.516 / -6.679 | -4.088 / -4.684 |
+| 2880x193 | 1 | 1 | -5.930 / -6.155 | -3.769 / -3.830 |
+| 2880x240 | 1 | 0 | -7.023 / -7.704 | -4.925 / -5.077 |
+| 2880x240 | 1 | 1 | -8.229 / -7.795 | -5.263 / -5.308 |
+| 2880x241 | 1 | 0 | -7.337 / -7.284 | -5.454 / -4.724 |
+| 2880x241 | 1 | 1 | -8.702 / -7.737 | -5.737 / -5.941 |
+| 5760x48 | 0 | 0 | -0.771 / +0.195 | +0.124 / -0.248 |
+| 5760x48 | 0 | 1 | -0.192 / +0.000 | +0.124 / -0.123 |
+| 5760x49 | 1 | 0 | -9.740 / -10.032 | -7.576 / -7.792 |
+| 5760x49 | 1 | 1 | -10.433 / -10.577 | -8.789 / -8.198 |
+| 5760x96 | 1 | 0 | -7.449 / -7.342 | -6.464 / -6.119 |
+| 5760x96 | 1 | 1 | -8.217 / -8.108 | -6.269 / -6.393 |
+| 5760x97 | 0 | 0 | -0.085 / -1.032 | -0.118 / +0.234 |
+| 5760x97 | 0 | 1 | +0.086 / +0.086 | +0.058 / +0.000 |
+| 1x17184 | 0 | 0 | -0.200 / +0.000 | +0.107 / +0.000 |
+| 1x17184 | 0 | 1 | +0.321 / +0.140 | +0.096 / +0.118 |
+| 1x17185 | 1 | 0 | +2.008 / +1.980 | +0.645 / +0.539 |
+| 1x17185 | 1 | 1 | -7.731 / -7.444 | -1.929 / -2.061 |
+
+### Fully-resident workflow timing
+
+The freshly compiled interleave probe covers the seven existing inputs at
+d1.2/e7, fully-resident AQ, no final-score collection and automatic CPU
+thread count. Each input is run with one reused backend and a backend
+created/destroyed for each encode, in two repetitions with reversed input
+and backend-lifetime order. Each job performs one reference encode, eight
+warmup quartets and 24 measured quartets. Every measured block contains all
+24 permutations, deterministically shuffled with a recorded seed. All
+3,612 encodes (2,688 measured, 896 warm and 28 reference) match codestream
+bytes and the full strategy summary exactly. The saved reference output
+also matches the frozen retained hash and size.
+
+All 41 public workflow profile fields, backend creation time, outer wall
+time and peak CPU participants are retained per encode. Mode assignment,
+byte/summary comparisons and logging are outside timing. The outer timer
+includes backend creation/destruction for the fresh case. "Fresh" means a
+fresh backend object, not a cold process or CUDA context: initialization and
+the reference/warmup encodes precede measured windows. Unlike graph timing,
+the workflow includes the diagnostic host dispatch branch. These unscored
+timings do not claim scored-workflow or concurrent-request throughput gains.
+
+| Workload | Fresh backend | Total policy/original % (r0 / r1) | Total policy/control % (r0 / r1) | AQ policy/original % (r0 / r1) |
+|---|---:|---:|---:|---:|
+| sample | 0 | -1.882 / -1.855 | +2.425 / -2.118 | -0.375 / -0.844 |
+| sample | 1 | +0.376 / -1.895 | +0.682 / -0.690 | +0.075 / +0.060 |
+| 4k | 0 | -0.070 / -0.721 | +1.664 / -0.538 | -0.941 / +0.449 |
+| 4k | 1 | -0.722 / -2.228 | -0.995 / -1.141 | -1.071 / -0.321 |
+| 1080p | 0 | +0.342 / +0.043 | -1.363 / -1.165 | -0.854 / +2.064 |
+| 1080p | 1 | -0.070 / +0.952 | +0.194 / -0.778 | -0.294 / +0.979 |
+| flower | 0 | -0.097 / +0.382 | -0.764 / -0.508 | -0.211 / -0.113 |
+| flower | 1 | +0.381 / -0.449 | +1.374 / -0.836 | +0.983 / +0.226 |
+| keong | 0 | +0.263 / -0.018 | -0.049 / -1.152 | +0.810 / -0.957 |
+| keong | 1 | -2.727 / +2.391 | -2.100 / +0.203 | -2.281 / +2.049 |
+| riaphotographs | 0 | +0.953 / -0.837 | -0.116 / +0.403 | +0.252 / +1.085 |
+| riaphotographs | 1 | -0.622 / +1.624 | -0.084 / +1.121 | +1.551 / +0.704 |
+| bliznaca | 0 | -0.092 / -0.087 | +0.855 / +1.863 | +0.703 / +0.335 |
+| bliznaca | 1 | -1.099 / -0.484 | -2.772 / -1.693 | -1.099 / +0.658 |
+
+### Decision and reproducibility
+
+Do not retain this policy. All 32 selected wide-shape/padding/boundary
+combinations beat both controls in both repetitions. The padded narrow
+case adds two wins, but packed 1x17,185 loses to both controls in both
+repetitions: vertical +2.008/+1.980% versus original and +1.610/+1.468%
+versus renamed control; H+V +0.645/+0.539% and +0.538/+0.589% respectively.
+The same dimensions with padded input/output win. Because the horizontal
+intermediate remains packed, this is evidence that nominal halo rows and
+resident block waves alone do not capture the relevant access/layout cost;
+it does not identify a hardware-transaction cause without counters.
+There are also missed opportunities: forced tall wins at several rejected
+wide geometries, including 2,848x192 just below the wave threshold. The
+policy is neither a sufficient nor a necessary performance condition.
+No cutoff is retuned on these results and presented as an independent win.
+
+HD/4K main and half-scale stages select tall; the smaller corpus cases
+retain the original body. Nevertheless, full-workflow attribution is weak:
+
+- Reused 4K total policy/original is -0.070/-0.721%, but policy/control is
+  +1.664/-0.538% and AQ policy/original changes sign (-0.941/+0.449%).
+- Reused HD total is slightly slower than original in both repetitions
+  (+0.342/+0.043%); AQ changes sign (-0.854/+2.064%).
+- Fresh 4K public total and AQ beat both controls in both repetitions, but
+  outer policy/original is -1.316/+0.211% and outer policy/control is
+  -0.679/+0.760%. Backend-lifetime-inclusive improvement does not repeat.
+- Fresh Bliznaca also shows favorable public-total medians despite selecting
+  the unchanged kernel body; outer policy/original changes sign there too.
+  Small signed medians are not themselves proof of a dispatch benefit.
+
+The raw unchanged-code control, forced-tall comparisons, phase timings and
+both repetitions remain visible. Medians of within-quartet ratios need not
+be transitive or equal ratios of separate medians. No fresh whole-GPU trace
+or decoded-quality run is performed because neither the general dispatch
+nor a dependable workflow gain is established. Native identity and exact
+outputs do not substitute for those future promotion gates.
+
+A narrower layout-aware policy remains a hypothesis, but fixing the
+single-column counterexample alone would not resolve the workflow evidence.
+Broader convolution data reuse and the retained erosion/L2/final-mask pass
+remain open bottleneck leads. The encoder is not declared maxed out.
+
+The active racecheck runs from 11:11:13.880705 to 11:17:47.163874 UTC
+(6m33s), with flushed fixture progress. The boundary timing sweep runs
+11:29:54.573409 to 11:34:35.935434 (4m41s), and the full-encode campaign
+11:34:54.851512 to 11:40:01.759985 (5m07s), on 2026-09-07. All 322
+correctness/timing GPU jobs finish successfully and their intervals do not
+overlap. Live observation handles are resumed, not restarted on timeout.
+No admin, firewall, permission prompt or privileged-counter retry is
+observed. CPU builds/native audits overlap qualification only, not the
+timing campaigns; machine-wide isolation is not claimed. Clock, power,
+security, priority and cooling settings are unchanged.
+
+Failed setup attempts are retained separately:
+
+- The first GPU build consumes a source incorrectly reconstructed from
+  truncated tool output, including the truncation warning. It fails to
+  compile. A checked local copy plus small wrapper edits produces a new
+  complete `_v2` source; the failed source/build and prior include version
+  remain. Large source snapshots must not be reconstructed from displayed
+  output without first checking completeness.
+- The first policy-probe build lacks `<string>` for `std::to_string`.
+  The prior source is preserved; the corrected release and ASan builds pass.
+- The first integrated native audit expects the pre-S79 count of 203.
+  The corrected audit requires all 205 retained bodies to equal S79, plus
+  the two known additions; it reuses the terminal retained dump rather than
+  accepting an arbitrary count or repeating GPU work.
+- A preliminary input-resolver check uses short corpus names that do not
+  match the full frozen case identifiers. Explicit name mapping fixes the
+  host-only lookup before any interleave job starts; its prior script stays.
+- S91 `--frozen --current` is invoked after the new study text is inserted
+  and correctly rejects the changed document. The only changed S91 source
+  at that point is this study. S91 frozen validation and an independent
+  check of all 40 current/snapshotted runtime hashes pass. No prior evidence
+  is edited or GPU test repeated to satisfy the old current-document hash.
+
+The platform remains RTX 3060 Laptop / driver 577.00 / CUDA 11.8 / sm_86 /
+MSVC 14.37 with clang-cl host ASan. Ignored
+`build-cuda-ninja/profiles/s92_*` artifacts preserve complete source snapshots,
+failed versions, build/qualification logs, executable/native hashes, raw
+geometry and workflow timings, exact outputs, analyzers and validators.
+The captured-input replay executable is built/native-audited but not run;
+the new graph timings use the explicit synthetic boundary matrix instead.
+Frozen validation rederives the tables, verifies completion/order/intervals,
+checks native identity and protects the retained runtime. Eight source and
+document snapshots distinguish frozen evidence from later edits. Only the
+two CUDA documents change; the three user-owned untracked files stay untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
