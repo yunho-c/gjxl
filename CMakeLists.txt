@@ -941,6 +941,7 @@ if(GJXL_ENABLE_METAL_PROFILING)
       "${GJXL_METALLIB}"
 
     DEPENDS
+      gjxl_metal_shaders
       "${GJXL_METALLIB}"
 
     COMMENT
@@ -968,6 +969,10 @@ add_custom_command(
     "${GJXL_EMBEDDED_METALLIB_INCLUDE}"
 
   DEPENDS
+    # The target orders consumers after the sole producer; the file keeps
+    # incremental embedding sensitive to changed shader bytes. Without both,
+    # recursive Make can run duplicate link rules while xxd reads the output.
+    gjxl_metal_shaders
     "${GJXL_METALLIB}"
 
   COMMENT
@@ -1079,6 +1084,16 @@ if(GJXL_BUILD_TESTS)
     COMPONENTS Interpreter
     REQUIRED
   )
+
+  add_test(NAME metal_build_graph
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/metal_build_graph_test.py"
+      --source "${CMAKE_CURRENT_SOURCE_DIR}")
+  set_tests_properties(metal_build_graph PROPERTIES TIMEOUT 90)
+
+  add_executable(gjxl_metal_embedded_library_test tests/metal_embedded_library_test.cpp)
+  target_link_libraries(gjxl_metal_embedded_library_test PRIVATE gjxl_metal)
+  target_compile_definitions(gjxl_metal_embedded_library_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_test(NAME metal_embedded_library COMMAND gjxl_metal_embedded_library_test)
 
   add_test(
     NAME metal_profile_driver

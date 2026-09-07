@@ -201,9 +201,10 @@ repairs all seven failures without changing baseline source.
 span with the complete library byte-for-byte for the immediate parent, candidate,
 sanitized candidate and repaired integrated baseline; all match. The unchanged
 shader SHA-256 is `9dcbc4dff15fd81c0793a1df3d68fd06ac821d0f34929a0e397f1de4e9cafae4`.
-Use explicit Ninja for subsequent fresh builds, consistent with the repository's
-Justfile, and resolve the Makefile target-ordering defect separately. Do not
-attribute this generated-artifact failure to the CPU scheduler.
+The follow-up [build-ordering checkpoint](metal-build-ordering.md) resolves the
+Makefile defect and adds graph and linked-payload regression tests. Explicit
+Ninja remains consistent with the repository's Justfile. Do not attribute this
+generated-artifact failure to the CPU scheduler.
 
 ## Remaining milestone 6 work
 
@@ -221,8 +222,6 @@ attribute this generated-artifact failure to the CPU scheduler.
   explicit: this synchronous API does not publish each image as soon as it is ready.
 - Exercise real loop launch failures in addition to the primitive partial-launch
   model, and audit exceptional shutdown/queue transitions with the final scheduler.
-- Close the parallel Makefile shader/embedding dependency race and retain linked
-  payload validation when preparing fresh comparison builds.
 - Qualify the complete final scheduler against the integrated preparation baseline,
   not just this immediate parent: small/natural/padded 1080p/4K and mixed-size
   inputs, several in-flight counts, simultaneous callers, single-image regressions,
