@@ -17068,6 +17068,185 @@ separate frozen evidence from later edits. S94 frozen/current validation
 passes before these document changes. Only these two CUDA documents are
 committed; the three user-owned untracked files remain untouched.
 
+## Prepared mask fusion on retained decoded pairs (S96)
+
+S96 follows S95 `940bda1` and moves its diagnostic integration from complete
+encoding to the synchronous public prepared-Compare boundary. The GPU
+implementation is unchanged: release and host-ASAN harnesses link the frozen
+S95 object and retained libraries, and both native dumps match all 209
+bodies of the previously qualified executable. No production source or
+retained runtime file is rebuilt or replaced.
+
+### Inputs, qualification and timing boundary
+
+Seven retained source/decoded pairs match the preceding encode corpus:
+sample, odd padded 3839x2159 and 1919x1079, flower, keong, riaphotographs,
+and bliznaca. The HD/4K sources are procedural benchmark images, not newly
+captured photographs. Flower and the three named corpus images provide
+photographic inputs. All are linear RGB PFM. The distorted image is S70's
+distance-1.2, effort-7, unscored candidate decode; its distance-0.5 decode
+provides an alternate changed input. S70 used the pinned independent decoder
+with `RGB_D65_SRG_Rel_Lin`. Fourteen decoded-input hashes match the original
+S70 frozen manifest, and seven source hashes match S95's dependencies.
+This reuses verified decoded artifacts; it is not a new decode or encode.
+
+Each process prepares one public object and guarded device inputs/outputs.
+Packed mode uses width strides for every RGB channel and distance output;
+padded mode uses reference width+3/+4/+5, distorted width+5/+6/+7, and map
+width+9. Both modes retain leading/trailing guards and a padded score buffer.
+Internal main/half-scale strides remain those of the real public owner.
+
+Before any timed windows, changed-input states run decoded1.2 -> identity
+-> decoded0.5 -> decoded1.2. Each state executes a retained oracle followed
+by all four modes in alternating orders. Output is poisoned before each
+qualification call. Entire maps and double-score bits must match, including
+host row padding; device and public map readbacks agree, outputs are finite,
+and all output/input guards and values are preserved. Compact memory
+accounting, zero new device allocations and exactly one submission per
+Compare are checked. The final restored map/score becomes the timing oracle.
+
+Fourteen release and fourteen host-ASAN untimed preflights pass. Every timed
+process repeats the same qualification before measurement. Host ASAN covers
+the new harness, not the retained libraries or device code. No new CUDA
+sanitizer run is claimed: the native-identical integration retains S95's
+four-tool qualification, and this round changes only the host harness and
+input selection.
+
+A timed window is four successive synchronous public `Compare` calls on
+already resident input, divided by four. `steady_clock` starts after mode
+selection and the initial statistics read, and stops before final statistics,
+readback, exact comparisons or logging. It includes ordinary public
+validation, launch/submission, and completion handling on every call.
+Uploads, reference preparation, allocations and output checks are outside
+the timer. This is neither a graph replay nor the encoder's internal
+already-active-submission boundary.
+
+Every timed/warm window is followed by exact full-map/score and output-guard
+checks. A final input/guard check follows the campaign. Readback/check work
+between windows can influence subsequent device state; excluding it from
+the timer does not imply it has no experimental effect. Only the last output
+of each four-call timed window is inspected, not intermediate outputs.
+Each qualification call is inspected separately.
+
+Each job uses eight warmup quartets and all 24 permutations of the four
+modes as shuffled measured quartets. The seed is
+`960000 + repetition*1000 + case_index*10 + padded`. Two repetitions reverse
+case/layout order. All warm and measured values are retained, with no
+outlier filtering, normalization or timeout restart. Public Compare is a
+relevant synchronous operation, but its timing cannot be relabeled as
+complete fully-resident encoding.
+
+### Results and interpretation
+
+All 28 measured jobs finish. Together with 28 preflights, the successful
+work comprises 15,456 public comparisons, 4,704 full output checks and
+252 input/guard check sets. There are 2,688 measured windows and 896 warm
+windows, each containing four comparisons. The remaining 1,120 comparisons
+are the twenty-call changed-input qualification in each successful process.
+
+The table preserves every input/layout/repetition. Retained values are
+median milliseconds per comparison; percentage columns are median
+within-quartet paired changes, not ratios of independently selected medians.
+Negative is faster. The control and both candidate copies remain separate.
+
+| Input | Padded | Repetition | Retained ms | Control / original % | Flat / original % | Flat / control % | Copy / original % | Copy / control % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| sample | 0 | 0 | 0.250150 | +0.038 | -4.273 | -6.401 | -3.731 | -4.764 |
+| sample | 1 | 0 | 0.233538 | +0.225 | -4.275 | -6.207 | -1.727 | -1.644 |
+| 4k | 0 | 0 | 49.643237 | -0.168 | -1.572 | -0.820 | +2.679 | +0.981 |
+| 4k | 1 | 0 | 48.230125 | -0.226 | +3.745 | +2.950 | +0.063 | -0.451 |
+| 1080p | 0 | 0 | 6.774212 | -0.057 | -2.047 | -3.638 | -2.027 | -2.577 |
+| 1080p | 1 | 0 | 6.913488 | +0.108 | -1.050 | -0.492 | -2.698 | -3.053 |
+| flower | 0 | 0 | 1.185713 | +1.081 | -1.994 | -3.902 | -2.393 | -2.355 |
+| flower | 1 | 0 | 1.178625 | +1.406 | -1.106 | -3.398 | -2.948 | -3.023 |
+| keong | 0 | 0 | 1.121175 | -0.694 | -2.291 | -1.505 | -2.212 | -1.618 |
+| keong | 1 | 0 | 1.097688 | +1.101 | -2.428 | -3.679 | -2.300 | -3.241 |
+| riaphotographs | 0 | 0 | 1.114712 | +0.003 | -2.496 | -2.593 | -2.873 | -3.051 |
+| riaphotographs | 1 | 0 | 1.125900 | -1.367 | -2.959 | -2.181 | -2.972 | -3.771 |
+| bliznaca | 0 | 0 | 1.115013 | -0.075 | -3.766 | -3.192 | -4.224 | -3.840 |
+| bliznaca | 1 | 0 | 1.133987 | -0.172 | -3.330 | -2.137 | -3.156 | -3.152 |
+| bliznaca | 1 | 1 | 1.121487 | +0.272 | -2.383 | -1.598 | -2.357 | -2.622 |
+| bliznaca | 0 | 1 | 1.131725 | +0.005 | -3.851 | -4.238 | -4.014 | -4.427 |
+| riaphotographs | 1 | 1 | 1.089225 | +1.422 | -2.772 | -4.084 | -2.423 | -4.025 |
+| riaphotographs | 0 | 1 | 1.100713 | -0.351 | -3.407 | -2.572 | -3.643 | -3.086 |
+| keong | 1 | 1 | 1.134250 | -0.830 | -3.199 | -2.878 | -3.485 | -3.375 |
+| keong | 0 | 1 | 1.108400 | +1.182 | -2.466 | -3.429 | -3.029 | -3.618 |
+| flower | 1 | 1 | 1.196738 | -0.167 | -2.236 | -2.571 | -3.004 | -1.721 |
+| flower | 0 | 1 | 1.195350 | -0.426 | -3.598 | -2.632 | -2.317 | -1.525 |
+| 1080p | 1 | 1 | 6.885550 | +0.316 | -1.906 | -3.298 | -1.680 | -2.024 |
+| 1080p | 0 | 1 | 7.070987 | +0.308 | -2.159 | -2.395 | -1.397 | -2.008 |
+| 4k | 1 | 1 | 50.365050 | +2.287 | -1.678 | -3.836 | -0.015 | -4.046 |
+| 4k | 0 | 1 | 47.674262 | +4.945 | +5.903 | -1.003 | +3.724 | +2.219 |
+| sample | 1 | 1 | 0.267888 | -1.240 | -3.814 | -2.798 | -0.608 | -0.272 |
+| sample | 0 | 1 | 0.250725 | -1.181 | -2.769 | -3.348 | -0.861 | -2.653 |
+
+Across both copies, both controls and both repetitions, twelve of fourteen
+input/layout combinations are consistently faster and two are mixed; none
+is consistently slower. All non-4K combinations win all eight comparisons.
+For HD, flat/original is about 1.05-2.16% faster and the identical flat copy
+about 1.40-2.70% faster. The photographic inputs also win consistently;
+their paired flat/original changes range from about -1.11% to -3.85%.
+This supports a real prepared-operation benefit below 4K on this device,
+not merely a two-kernel primitive result.
+
+Both 4K layouts remain mixed. Packed repetition 1 has +4.945% control/original
+scatter; flat is +5.903% versus original but -1.003% versus that control.
+The identical copy also disagrees in other comparisons. Retained medians
+span 47.674-50.365 ms across 4K jobs. The desired sub-millisecond saving is
+not separated reliably from this variation by this experiment. There is
+no measured basis here to assign the variation to thermals, clocks,
+Windows scheduling, profiling, or another process. Do not use a favorable
+control, discard a repetition, or infer a production size threshold.
+
+### Next boundary and operational evidence
+
+Keep the numerically qualified fusion candidate. The next useful diagnostic
+is the internal already-active-submission entry point
+`EncodePreparedCudaButteraugli`, using the same real prepared owner and
+source/decoded pairs, with explicit on-stream timing. Unlike public Compare,
+this is the entry used inside resident evaluation. Compare ordinary launch
+and, if needed, graph-replay GPU spans while preserving native-identical
+controls, exact results, realistic strides and node/launch accounting.
+Label graph results separately from ordinary execution and public wall time.
+This can test whether the integrated GPU saving survives the full comparison
+without conflating it with a synchronous public submission on every call.
+It must not replace eventual complete-encoder measurement or decoder/release
+qualification. The resident path is not proven maxed out, and production
+remains S79 `914b42c` with all 40 retained runtime files unchanged.
+
+The first host build fails on a C++20 `std::string + std::string_view`
+expression in PFM error reporting. The original source/log are retained;
+an explicit string conversion fixes it before any GPU run. The first ASAN
+process then exits before application output with Windows status
+`0xc0000135`. Its imported `clang_rt.asan_dynamic-x86_64.dll` is installed
+under LLVM's `lib/clang/22/lib/windows`, absent from the launcher's search
+path. Adding that directory only to the resumed child-process environment
+allows the identical executable to run all fourteen ASAN cases. The failed
+empty log and result remain separate; the fourteen successful release jobs
+are not repeated. No system-wide environment or security setting is changed.
+An early preflight-launch attempt is rejected by its native-audit gate while
+the audit is still running; no GPU process starts in that attempt.
+
+All 56 successful GPU jobs have nonoverlapping intervals. Qualification runs
+13:59:52.832347-14:01:49.993740 UTC on 2026-09-07, including the separately
+recorded failed ASAN start and its environment repair. Timing runs
+14:01:51.267170-14:06:51.092565 (about five minutes). All observation handles
+reach terminal completion, with no live job restarted on an observation
+timeout. Builds and native audits finish before qualification; light source
+editing and completed-result analysis overlap timing, so machine-wide
+isolation is not claimed. No admin, firewall or permission prompt is
+observed, and no restricted counter is retried. The loader issue is reported
+when observed and resolved without attributing it to the earlier long run.
+
+Ignored `build-cuda-ninja/profiles/s96_*` retains the host harness, failed
+source/build and loader records, both native dumps, all successful raw
+qualification/timing results, input hashes, analyzers and recomputing
+validation. Frozen source/document, dependency, diagnostic-binary and
+retained-runtime manifests keep the evidence independently checkable after
+later edits. S95 frozen/current validation passes before this round's
+document edits. Only the two CUDA documents are committed; the user's three
+untracked files remain untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

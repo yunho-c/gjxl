@@ -1420,6 +1420,20 @@ each capture has one known post-kernel invalid-context status also present
 in S93. No admin/firewall/permission block is observed. Production remains
 S79 with all 40 retained runtime files unchanged.
 
+[S96](cuda-optimization-s1.md#prepared-mask-fusion-on-retained-decoded-pairs-s96)
+measures synchronous public prepared comparisons on seven frozen
+source/decoded pairs in packed and padded layouts. Successful jobs execute
+15,456 comparisons and pass 4,704 exact full-output checks; release and
+host-ASAN native bodies match S95. Both candidate copies beat
+both controls in both repetitions for all twelve non-4K input/layout
+combinations, including roughly 1-3% prepared-comparison gains at HD.
+The two 4K layouts remain mixed with substantial control scatter. These
+are prepared-operation results, not complete-encoder gains. Next isolate
+the internal already-active-submission comparison boundary before deciding
+promotion. One host compile error and one missing-ASAN-DLL startup failure
+are corrected and preserved; no admin/firewall/permission prompt is observed.
+Production and all 40 retained runtime files remain unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
