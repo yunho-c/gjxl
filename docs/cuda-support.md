@@ -1266,6 +1266,18 @@ size/geometry and compact-fill study, complete production qualification and
 concurrent batch-throughput gates. All runs complete without a detected
 permission block; the 5.5-minute 4K memcheck is verified active computation.
 
+[S85](cuda-optimization-s1.md#size-geometry-and-overlap-headroom-s85) adds a
+coarse 50-input size/geometry sweep using the unchanged S84 binary: 36,890
+exact encodes, 50 fresh independent decodes, 50 scoped encoder-ASan and four
+GPU memcheck replays, plus release/ASan fixture parity. Small cases often
+have too little post-submission wait to hide full host initialization, while
+thin heavily padded images can benefit from changed host first-touch/clearing
+costs. Duplicate variation and replication counterexamples prevent a clean
+production size cutoff. Focused timing-position/store-policy tests and
+production/batch qualification remain necessary; production stays unchanged.
+One host fixture compiler-command failure is corrected and preserved, with
+no detected firewall or permission block and no encoder retry.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

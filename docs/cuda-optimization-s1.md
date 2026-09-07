@@ -14434,6 +14434,162 @@ firewall/admin/permission block was observed; the suggested cause of the
 user's earlier delay remains unconfirmed. Detected prompts or blocks should
 continue to be reported promptly.
 
+## Size, geometry and overlap headroom (S85)
+
+S85 starts from S84 `f7477fe` and reuses the frozen eight-mode timing binary
+without rebuilding encoder or CUDA code. It explores the unresolved
+small-image cost and compact-fill choice; it does **not** establish a production
+size threshold or promote an unconditional transport change.
+
+### Controlled inputs and verification
+
+The 50 inputs are center-aligned, border-clamped bilinear derivatives of
+Flower and Keong macan in supplied linear RGB, not 50 independent photographs.
+There is no gamma conversion or extra antialias filter. Each family has the
+same 25 geometries: 1x1, 8x8, 17x13; paired 63x65/64x64/65x63,
+127x129/128x128/129x127, 255x257/256x256/257x255 and
+511x513/512x512/513x511; 767x431 and 1279x719; 1x1023/1023x1,
+7x1025/1025x7, 63x1023/1023x63 and 255x1023/1023x255.
+
+Release and scoped-ASan fixture generators produce byte-identical PFMs for
+all 50 cases, with orientation/channel/value roundtrip and finite-pixel checks.
+Fifty fresh retained S79 CLI references are independently decoded by the
+pinned djxl, with dimensions and finite pixels checked. No new perceptual
+metric result is claimed. All 7,300 preflight encodes in 100 geometry/lifetime
+windows match codestream bytes, complete summaries, active coefficients and
+fixed group tails. Fifty scoped host-ASan and four GPU memcheck all-mode
+replays add 540 exact encodes and pass with zero reported errors; GPU memchecks
+also report zero leaks. These are new geometry replays of the qualified S84
+binary, not a new complete production CPU/CUDA suite or batch-throughput test.
+
+One fixture-tool build attempt fails: Clang rejects an explicit object output
+combined with the library input in the MSVC-style compile/link invocation.
+Splitting compilation and linking resolves it. The failed log and original
+build script are preserved; no encoder build or benchmark is retried, and this
+is not a Windows privilege/firewall problem.
+
+### Coarse timing protocol
+
+Eight warm and eight measured Williams rounds retain S84's eight modes,
+duplicate dense controls 0/2 and duplicate combined modes 5/6. Every block
+balances all positions and all 56 ordered different-mode within-round
+predecessor pairs. Every round has a checked dense conditioning encode.
+Two replications reverse family, geometry and backend-lifetime order:
+200 process windows, 12,800 measured, 12,800 warm, 3,200 conditioning and
+200 reference encodes, totaling 29,000 exact encodes. Each geometry/lifetime
+has only 16 measured pairs per mode. These exploratory results are not pooled
+with S84's longer 24-round measurements.
+
+The measurement index stores hashes and metadata, with timing rows retained
+in immutable raw logs and fully parsed during each run and independent audit.
+This avoids repeatedly serializing all prior rows between process windows.
+The preflight v1 runner is preserved; the encoder commands, seeds, schedule
+and timing executable are unchanged. As before, equality checks and index
+writing are outside encode timers, and no blanket machine-idleness claim is
+made.
+
+### Findings and limits
+
+The selected rows below illustrate mechanisms and counterexamples, not a
+threshold-training subset. The complete 100-group table and every mode pair
+and replication remain in the ignored analysis artifacts. Percentages are
+medians of within-round paired profile-total changes; negative is faster.
+Mode 3 is dense prefill with omitted redundant tails; 5 fills both dense and
+compact owners before narrow readback; 7 omits compact filling but retains the
+same early allocation. Wait/fill columns are separate stage medians in ms,
+not differences of paired totals.
+
+| Case / backend | 3 vs dense 0 | 5 vs dense 0 | 5 vs dense 2 | 7 vs dense 0 | Dense 0 wait ms | Mode 5 fill ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Flower 1x1023 / persistent | -3.59% | -4.23% | -5.22% | -2.85% | 0.0055 | 0.4039 |
+| Keong 1x1023 / persistent | -3.81% | -0.90% | -1.89% | -1.39% | 0.0105 | 0.4002 |
+| Keong 256x256 / persistent | +0.86% | +1.93% | -0.56% | -1.17% | 0.0057 | 0.1198 |
+| Flower 512x512 / fresh | +3.17% | +9.89% | +8.64% | +3.95% | 0.8700 | 0.7451 |
+| Flower 1279x719 / persistent | -1.75% | -3.50% | -3.24% | -4.11% | 6.9750 | 2.7878 |
+| Flower 1279x719 / fresh | -4.17% | -3.99% | -3.63% | -4.30% | 6.1013 | 2.8790 |
+| Keong 1279x719 / persistent | -2.99% | -6.19% | -4.14% | -7.07% | 7.0495 | 2.7938 |
+| Keong 1279x719 / fresh | -2.26% | -1.34% | -4.28% | -2.84% | 6.6870 | 2.8407 |
+
+The main new finding is that post-submission overlap headroom is not set by
+pixel area alone. For Keong 256x256 persistent, dense control wait is about
+0.006 ms while combined fill costs about 0.120 ms. Flower 512x512 fresh has
+roughly 0.870 ms wait against a 0.745 ms fill. At 1279x719 the four
+family/lifetime groups have 6.10-7.05 ms dense wait and 2.79-2.88 ms fill.
+This supports the inference that small cases often cannot hide the same host
+work as the larger cases. Wait includes driver and scheduling overhead: these
+are host-stage observations, not new GPU-only traces or proof that every
+candidate interval overlaps by the same amount.
+
+Padding matters separately. A 1x1023 image has only 24,576 active coefficients
+but 786,432 fixed-storage coefficients: 98,304 active bytes inside a
+3,145,728-byte owner. Persistent Flower's dense wait is only about 0.006 ms,
+yet mode 3 gains 3.59% and its readback-stage median falls from 0.6243 to
+0.1108 ms after a 0.4065 ms full fill. Full contiguous initialization and
+first-touch before device readback can change host costs even when almost
+no wait remains. The measurements do not distinguish contiguous-tail-clear
+efficiency from cheaper page first-touch/driver readback behavior; they must
+not all be labelled hidden GPU-overlap gains. Mode 3 beats both dense controls
+in both replications for 1x1023 in both families and lifetimes, but not every
+transposed thin case does so.
+
+The larger combined medians remain encouraging: at 1279x719, mode 5 versus
+dense 0 ranges from -1.34% to -6.19% across the two families/lifetimes.
+Nevertheless Flower persistent's second replication is +0.93% versus dense 0,
+and Keong fresh's duplicate combined mode 6 is +0.84% in its first
+replication. Those counterexamples prevent calling even this coarse region
+uniformly confirmed.
+
+The fresh Flower 512x512 group is a useful warning: mode 5 is +9.89% versus
+dense 0 and +8.64% versus dense 2, but identical combined mode 6 is only
++0.99% versus dense 0. In the second replication, 5 is +16.65% while 6 is
+-2.93% versus dense 0; mode 5's post-submission interval is faster there even
+though its whole quantization pipeline is slower. This is not evidence for
+a clean transport threshold at 512 pixels. Combined duplicate total medians
+span -7.00% to +8.81%, and dense duplicates span -4.81% to +4.30% across
+the 100 groups. Only 14 groups have both combined copies beating both dense
+controls in every replication's profile-total **and** outer-wall median.
+These descriptive counts are not confidence intervals or generalization tests.
+
+The compact-fill choice is still unresolved. Both full-fill mode 5 and
+dense-only-fill mode 7 beat both dense controls in both replications' total
+medians in 36/100 groups; this alone does not identify one universal winner.
+The 100 groups contain 84 byte-transport and 16 int16-transport groups, with
+no observed int32 fallback. Boundary telemetry is 60/67 C, SM 210/1282 MHz
+and memory 405/5500 MHz on the RTX 3060 Laptop GPU; these are boundary
+observations under ordinary power management, not in-kernel clocks.
+
+### Disposition and evidence
+
+Do not add a production area cutoff from this sweep. A focused follow-up
+should compare the same full initialization before and after wait, with
+redundant tails omitted in both, to separate first-touch/tail-clear effects
+from true overlap. Recheck ordinary versus streaming expansion after
+pre-initialization, since S81's original cold-destination tradeoff need not
+hold after S84 changes first-touch. The separate narrow kernel/clear also
+remains a possible small-case cost to investigate for fusion into existing
+AC packing. These are hypotheses, not measured improvements in S85.
+
+Any selected policy still needs separately fixed longer confirmation runs,
+holdout geometry/content, complete production CPU/CUDA qualification and
+concurrent batch-throughput/memory-pressure checks. S79's production source
+and all 40 retained runtime files remain unchanged. The backend is not
+considered maxed out.
+
+The ignored `s85_*` bundle preserves generators (including the failed build
+command), fixtures, independent decodes, logs, runner versions and exhaustive
+analysis. `python build-cuda-ninja/profiles/s85_validate.py --frozen --prior`
+checks the S84 dependency evidence and reconstructs 36,890 explicitly counted
+exact encodes: 50 new retained references, 7,300 preflight, 540 encoder
+sanitizer replays and 29,000 timing encodes. It also verifies 50 release/ASan
+fixture pairs and 50 independent decodes. The 604 non-overlapping completed
+campaign intervals include fixture generation, decoding and inspection;
+they do not claim all machine activity was serial or GPU-only.
+
+No security, privilege, clock, power, cooling or priority changes occur, and
+no firewall/admin/permission block is detected. All encoder, decoder,
+qualification and timing runs finish without retry. The host fixture build
+retry described above is preserved separately.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
