@@ -8,14 +8,12 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <limits>
 #include <new>
 #include <span>
 #include <stdexcept>
-#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -36,7 +34,7 @@
 #include "codestream/sections.h"
 #include "codestream/serializer_storage_plan.h"
 #include "core/thread_budget.h"
-#include "core/worker_launch_internal.h"
+#include "core/parallel_work_internal.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -148,54 +146,22 @@ Status RunParallelSections(size_t count, Function&& function) {
     return Status::Ok();
   }
 
-  Storage<Status> statuses(count);
-  std::atomic<size_t> next_index{0};
-  Storage<std::thread> workers;
   const size_t spawned_worker_count = cpu_thread_count == 0 && !cpu_workers.enabled()
     ? participant_count
     : participant_count - 1;
-  workers.reserve(spawned_worker_count);
-  const auto run_worker = [&](size_t worker_index) {
-    thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
-    while (true) {
-      const size_t index =
-        next_index.fetch_add(1, std::memory_order_relaxed);
-      if (index >= count) break;
-      try {
-        statuses[index] = invoke(index, worker_index);
-      } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
-        statuses[index] = error.status();
-      } catch (const std::bad_alloc&) {
-        statuses[index] = AllocationFailure();
-      } catch (const std::length_error&) {
-        statuses[index] = AllocationFailure();
-      } catch (...) {
-        statuses[index] = Status::Internal(
-          "Codestream section worker failed unexpectedly");
-      }
-    }
+  constexpr thread_budget_internal::ParallelWorkErrors errors{
+    .allocation = "Codestream assembly allocation failed",
+    .unexpected = "Codestream section worker failed unexpectedly",
+    .length_code = StatusCode::kOutOfMemory,
+    .length = "Codestream assembly allocation failed",
+    .launch_allocation = "Codestream assembly allocation failed",
+    .launch_action = thread_budget_internal::LaunchFailureAction::kReturnError,
+    .launch = "Unable to start codestream section workers",
   };
-  try {
-    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      thread_budget_internal::LaunchWorker(workers, thread_budget_internal::WorkerLaunchSite::kSerializerSections,
-                                          worker, run_worker, worker);
-    }
-  } catch (const std::system_error&) {
-    next_index.store(count, std::memory_order_relaxed);
-    thread_budget_internal::JoinCpuWorkers(workers);
-    return Status::Internal("Unable to start codestream section workers");
-  } catch (const std::bad_alloc&) {
-    next_index.store(count, std::memory_order_relaxed);
-    thread_budget_internal::JoinCpuWorkers(workers);
-    return AllocationFailure();
-  }
-  if (cpu_thread_count != 0 || cpu_workers.enabled()) run_worker(spawned_worker_count);
-  thread_budget_internal::JoinCpuWorkers(workers);
-  for (const Status& status : statuses) {
-    if (!status.ok()) return status;
-  }
-  return Status::Ok();
+  return thread_budget_internal::RunParallelWork<Storage>(
+    count, cpu_workers, spawned_worker_count,
+    thread_budget_internal::WorkerLaunchSite::kSerializerSections, errors,
+    invoke);
 }
 
 Status WriteDcGroupSection(

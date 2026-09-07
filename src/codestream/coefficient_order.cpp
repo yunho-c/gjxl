@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +14,6 @@
 #include <new>
 #include <span>
 #include <stdexcept>
-#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -27,7 +25,7 @@
 #include "codestream/representation_storage_plan.h"
 #include "core/ac_strategy.h"
 #include "core/thread_budget.h"
-#include "core/worker_launch_internal.h"
+#include "core/parallel_work_internal.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -95,54 +93,22 @@ Status RunParallelCoefficientGroups(
     return Status::Ok();
   }
 
-  Storage<Status> statuses(count);
-  std::atomic<size_t> next_index{0};
-  Storage<std::thread> workers;
   const size_t spawned_worker_count = cpu_thread_count == 0 && !cpu_workers.enabled()
     ? participant_count
     : participant_count - 1;
-  workers.reserve(spawned_worker_count);
-  const auto run_worker = [&](size_t worker_index) {
-    thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
-    while (true) {
-      const size_t index =
-        next_index.fetch_add(1, std::memory_order_relaxed);
-      if (index >= count) break;
-      try {
-        statuses[index] = function(index, worker_index);
-      } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
-        statuses[index] = error.status();
-      } catch (const std::bad_alloc&) {
-        statuses[index] = AllocationFailure();
-      } catch (const std::length_error&) {
-        statuses[index] = AllocationFailure();
-      } catch (...) {
-        statuses[index] = Status::Internal(
-          "Coefficient-order worker failed unexpectedly");
-      }
-    }
+  constexpr thread_budget_internal::ParallelWorkErrors errors{
+    .allocation = "Coefficient-order allocation failed",
+    .unexpected = "Coefficient-order worker failed unexpectedly",
+    .length_code = StatusCode::kOutOfMemory,
+    .length = "Coefficient-order allocation failed",
+    .launch_allocation = "Coefficient-order allocation failed",
+    .launch_action = thread_budget_internal::LaunchFailureAction::kReturnError,
+    .launch = "Unable to start coefficient-order workers",
   };
-  try {
-    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      thread_budget_internal::LaunchWorker(workers, thread_budget_internal::WorkerLaunchSite::kCoefficientOrders,
-                                          worker, run_worker, worker);
-    }
-  } catch (const std::system_error&) {
-    next_index.store(count, std::memory_order_relaxed);
-    thread_budget_internal::JoinCpuWorkers(workers);
-    return Status::Internal("Unable to start coefficient-order workers");
-  } catch (const std::bad_alloc&) {
-    next_index.store(count, std::memory_order_relaxed);
-    thread_budget_internal::JoinCpuWorkers(workers);
-    return AllocationFailure();
-  }
-  if (cpu_thread_count != 0 || cpu_workers.enabled()) run_worker(spawned_worker_count);
-  thread_budget_internal::JoinCpuWorkers(workers);
-  for (const Status& status : statuses) {
-    if (!status.ok()) return status;
-  }
-  return Status::Ok();
+  return thread_budget_internal::RunParallelWork<Storage>(
+    count, cpu_workers, spawned_worker_count,
+    thread_budget_internal::WorkerLaunchSite::kCoefficientOrders, errors,
+    function);
 }
 
 bool UseCoefficientOrderSample(std::array<uint64_t, 2>* random_state) {

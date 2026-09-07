@@ -1395,6 +1395,11 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME batch_scheduling_cpu COMMAND gjxl_batch_scheduling_test --cpu-only)
   set_tests_properties(batch_scheduling batch_scheduling_cpu PROPERTIES TIMEOUT 120)
 
+  add_executable(gjxl_parallel_work_test tests/parallel_work_test.cpp)
+  target_link_libraries(gjxl_parallel_work_test PRIVATE gjxl_core)
+  add_test(NAME parallel_work COMMAND gjxl_parallel_work_test)
+  set_tests_properties(parallel_work PROPERTIES TIMEOUT 60)
+
   add_executable(gjxl_worker_launch_failure_test tests/worker_launch_failure_test.cpp)
   target_link_libraries(gjxl_worker_launch_failure_test PRIVATE gjxl_codestream)
   # Partition the complete matrix by route: instrumentation makes whole-image

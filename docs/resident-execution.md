@@ -38,6 +38,8 @@ The [installed interface](installed-interface.md) lists the public boundary and
 the implementation headers required by its templates, inline methods and owners.
 The [shared planning recipes](planning-recipes.md) document the counts shared
 with execution and the lifetime composition retained by component planners.
+The [worker orchestration guide](worker-orchestration.md) describes the shared
+parallel task loop and the failure policies retained by each stage.
 
 ## Scope and current status
 

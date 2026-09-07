@@ -9,14 +9,12 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <new>
 #include <stdexcept>
-#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -27,7 +25,7 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "core/thread_budget.h"
-#include "core/worker_launch_internal.h"
+#include "core/parallel_work_internal.h"
 
 namespace gjxl {
 using resource_budget_internal::ManagedVector;
@@ -155,54 +153,20 @@ Status RunParallelRows(
     return Status::Ok();
   }
 
-  ManagedVector<Status> statuses(extent.height);
-  std::atomic<size_t> next_row{0};
-  ManagedVector<std::thread> workers;
   const size_t spawned_worker_count = frontend_dispatch_internal::SpawnedWorkers(
     participant_count, cpu_thread_count != 0 || cpu_workers.enabled());
-  workers.reserve(spawned_worker_count);
-  const auto run_worker = [&] {
-    thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
-    while (true) {
-      const size_t y = next_row.fetch_add(1, std::memory_order_relaxed);
-      if (y >= extent.height) break;
-      try {
-        statuses[y] = function(y);
-      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
-        statuses[y] = failure.status();
-      } catch (const std::bad_alloc&) {
-        statuses[y] = Status::OutOfMemory("Unable to allocate color-transform worker storage");
-      } catch (...) {
-        statuses[y] = Status::Internal(
-          "Color-transform worker failed unexpectedly");
-      }
-    }
+  constexpr thread_budget_internal::ParallelWorkErrors errors{
+    .allocation = "Unable to allocate color-transform worker storage",
+    .unexpected = "Color-transform worker failed unexpectedly",
+    .length_code = StatusCode::kInternal,
+    .length = "Color-transform worker failed unexpectedly",
+    .launch_allocation = "Unable to allocate CPU worker state",
+    .launch_action = thread_budget_internal::LaunchFailureAction::kRetrySerial,
   };
-  try {
-    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      thread_budget_internal::LaunchWorker(workers, thread_budget_internal::WorkerLaunchSite::kColorRows,
-                                          worker, run_worker);
-    }
-  } catch (const std::bad_alloc&) {
-    next_row.store(extent.height, std::memory_order_relaxed);
-    thread_budget_internal::JoinCpuWorkers(workers);
-    return Status::OutOfMemory("Unable to allocate CPU worker state");
-  } catch (const std::system_error&) {
-    next_row.store(extent.height, std::memory_order_relaxed);
-    thread_budget_internal::JoinCpuWorkers(workers);
-    for (size_t y = 0; y < extent.height; ++y) {
-      Status status = function(y);
-      if (!status.ok()) return status;
-    }
-    return Status::Ok();
-  }
-  if (cpu_thread_count != 0 || cpu_workers.enabled()) run_worker();
-  thread_budget_internal::JoinCpuWorkers(workers);
-  for (const Status& status : statuses) {
-    if (!status.ok()) return status;
-  }
-  return Status::Ok();
+  return thread_budget_internal::RunParallelWork<ManagedVector>(
+    extent.height, cpu_workers, spawned_worker_count,
+    thread_budget_internal::WorkerLaunchSite::kColorRows, errors,
+    [&](size_t index, size_t) { return function(index); });
 }
 
 template <typename Convert>

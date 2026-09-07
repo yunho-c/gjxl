@@ -5,12 +5,10 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <new>
 #include <stdexcept>
-#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -28,7 +26,7 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "core/thread_budget.h"
-#include "core/worker_launch_internal.h"
+#include "core/parallel_work_internal.h"
 
 namespace gjxl {
 using resource_budget_internal::ManagedVector;
@@ -73,59 +71,20 @@ Status RunParallelForwardTransforms(
     return Status::Ok();
   }
 
-  ManagedVector<Status> statuses(count);
-  std::atomic<size_t> next_index{0};
-  ManagedVector<std::thread> workers;
   const size_t spawned_worker_count = frontend_dispatch_internal::SpawnedWorkers(
     participant_count, cpu_thread_count != 0 || cpu_workers.enabled());
-  workers.reserve(spawned_worker_count);
-  const auto run_worker = [&] {
-    thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
-    while (true) {
-      const size_t index =
-        next_index.fetch_add(1, std::memory_order_relaxed);
-      if (index >= count) break;
-      try {
-        statuses[index] = function(index);
-      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
-        statuses[index] = failure.status();
-      } catch (const std::bad_alloc&) {
-        statuses[index] = Status::OutOfMemory(
-          "Unable to allocate forward-transform worker storage");
-      } catch (const std::length_error&) {
-        statuses[index] = Status::InvalidArgument(
-          "Forward-transform worker storage is too large");
-      } catch (...) {
-        statuses[index] = Status::Internal(
-          "Forward-transform worker failed unexpectedly");
-      }
-    }
+  constexpr thread_budget_internal::ParallelWorkErrors errors{
+    .allocation = "Unable to allocate forward-transform worker storage",
+    .unexpected = "Forward-transform worker failed unexpectedly",
+    .length_code = StatusCode::kInvalidArgument,
+    .length = "Forward-transform worker storage is too large",
+    .launch_allocation = "Unable to allocate CPU worker state",
+    .launch_action = thread_budget_internal::LaunchFailureAction::kRetrySerial,
   };
-  try {
-    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      thread_budget_internal::LaunchWorker(workers, thread_budget_internal::WorkerLaunchSite::kForwardTransforms,
-                                          worker, run_worker);
-    }
-  } catch (const std::bad_alloc&) {
-    next_index.store(count, std::memory_order_relaxed);
-    thread_budget_internal::JoinCpuWorkers(workers);
-    return Status::OutOfMemory("Unable to allocate CPU worker state");
-  } catch (const std::system_error&) {
-    next_index.store(count, std::memory_order_relaxed);
-    thread_budget_internal::JoinCpuWorkers(workers);
-    for (size_t index = 0; index < count; ++index) {
-      Status status = function(index);
-      if (!status.ok()) return status;
-    }
-    return Status::Ok();
-  }
-  if (cpu_thread_count != 0 || cpu_workers.enabled()) run_worker();
-  thread_budget_internal::JoinCpuWorkers(workers);
-  for (const Status& status : statuses) {
-    if (!status.ok()) return status;
-  }
-  return Status::Ok();
+  return thread_budget_internal::RunParallelWork<ManagedVector>(
+    count, cpu_workers, spawned_worker_count,
+    thread_budget_internal::WorkerLaunchSite::kForwardTransforms, errors,
+    [&](size_t index, size_t) { return function(index); });
 }
 
 float MatrixMultiplier(
