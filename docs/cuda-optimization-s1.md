@@ -18389,6 +18389,266 @@ failure. Only the two CUDA documents are committed; the forty retained
 runtime files, production sources and three user-owned untracked files
 remain unchanged.
 
+## Resident graph retirement before completion (S102)
+
+S102 follows S101 `be7b793` and tests its proposed last-use retirement
+boundary. All changes are diagnostic host copies: production remains S79
+`914b42c`, with the forty retained runtime files unchanged. The experiment
+does not change CUDA arithmetic, allocation plans, graph signatures, or
+reference binding. All four new release/ASAN executables contain the same
+209 canonical CUDA bodies as the frozen retained-math oracle.
+
+### Ownership and measurement contract
+
+The pinned CUDA 11.8 driver graph API specifies that destroying an
+in-flight executable does not terminate its execution and that freeing is
+asynchronous at completion. The matching Programming Guide demonstrates
+runtime graph-executable destruction after launch and before stream
+synchronization in its CUDA User Objects example. Graph access still needs
+external serialization. Sources: [CUDA 11.8 driver graph API](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-driver-api/group__CUDA__GRAPH.html)
+and [CUDA 11.8 CUDA User Objects](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-c-programming-guide/index.html#cuda-user-objects).
+
+S102 does not use CUDA user objects or infer that arbitrary application
+buffers are automatically retained. The original prepared owner keeps all
+scratch, reference, input and output ownership until normal completion and
+destruction. The existing backend submission lock serializes graph access;
+the focused raw tests supply their own external serialization. No
+cross-owner graph cache, new pool, production host callback, or extra
+synchronization is added to the measured path.
+
+Six labels share one new binary:
+
+| Labels | Comparison launch | Graph-handle retirement |
+| --- | --- | --- |
+| 0 / 1 | Direct, identical controls | No graph handles |
+| 2 / 3 | Graph, identical controls | Final prepared-owner destructor |
+| 4 / 5 | Graph, identical controls | End of resident-policy submission |
+
+Early retirement runs after all policy work, including optional packed AC,
+has been queued and before the backend completion event/wait. It destroys
+the executable and graph handles on their owning device, propagates
+errors, treats repeated empty retirement as success, and skips retirement
+during an outer capture. After retirement, another comparison rebuilds a
+fresh graph. The direct path includes a tiny no-op retirement mode check;
+its complete diagnostic host code is not byte-identical to production.
+
+Per successful encoder call, graph modes require one build, two launches,
+one hit, one created/destroyed graph and executable, and no errors. Early
+modes additionally require one retirement call and one successful
+retirement, with no empty/capture-skip count. These are successful API-call
+counts, not proof that opaque driver resources have physically been freed.
+Early destruction can defer driver cleanup, and existing scratch accounting
+does not establish graph peak memory or charge all deferred cleanup inside
+the measured host interval. `retire_ns` contains `destroy_ns`; they are not
+added together. Moving destruction into the public profile is not itself
+a whole-call speedup.
+
+### Qualification and fixed timing design
+
+Four MSVC 14.37 / clang-cl ASAN compile/link jobs pass with `/WX`; no new
+CUDA compilation is needed. Full release and ASAN suites each pass 204
+parent cases, 4,896 six-label candidate comparisons, 816 direct-oracle
+comparisons and 9,792 rejected requests. The public prepared comparison
+tests do not automatically retire on labels 4/5: the explicit internal
+policy hook and focused tests exercise actual retirement.
+
+Each exact-suite job also covers fourteen descriptor pairs, four stream
+checks, two nested captures, ten injected capture/instantiate/upload/launch
+failures and three pending-retirement extents (3x7, 17x29, 513x257). In each
+pending test, a test-only callback holds the stream, a worker retires the
+graph within one second while that gate stays closed, and releasing the
+gate yields exact outputs and intact guards. Rebuild, repeated-empty and
+outer-capture-skip behavior all pass. An independent watchdog and
+unconditional gate release prevent a blocked future from stranding the
+test. This is not a general independent-context concurrency qualification.
+
+The two full jobs additionally pass the retained 31-case CPU differential
+and completion-failure suites. Two scoped release/ASAN smoke jobs and four
+scoped CUDA sanitizer jobs repeat the lifetime/descriptor coverage.
+Memcheck, initcheck, synccheck and racecheck also each run a whole-encoder
+failure/recovery test. Together with six release/ASAN encoder fault jobs on
+the sample, flower-2000 and nominal 4K, these test twenty intentional
+retirement failures and twenty successful same-backend recoveries.
+Caller codestream, summary and profile sentinels remain unchanged on
+failure. This does not promise that private device scratch is unwritten
+after a failure injected following submission. All eighteen GPU
+qualification jobs pass; memcheck reports zero leaks and the sanitizers
+report zero errors/hazards.
+
+The failures above are synthetic injections before the selected operations,
+not forced failures inside CUDA's destruction API. They do not exhaust
+every driver/device-loss path or establish the peak live driver allocation
+set under independent concurrent encodes.
+
+Timing reuses the twelve frozen S101 photograph fixtures and their S79
+byte/quality references, plus nominal 1080p and 4K synthetic inputs with
+actual dimensions 1919x1079 and 3839x2159 and frozen S70 byte references.
+No photographs are regenerated. Fifty-six rounds-zero release/ASAN
+preflights and four full-timer 17x13 sample preflights pass before timing:
+1,188 encoder calls, 1,128 exact comparisons and sixty reference hashes.
+
+The fixed main plan is fourteen cases by monitoring off/on by two
+repetitions; the second repetition reverses case and monitor order. Each
+job has one fresh direct reference, six label qualifications, eight warm-up
+sextets and 24 measured sextets. Four randomized six-row Williams blocks
+balance label position, each ordered adjacent pair once per block and
+each directed precedence pair three times. This is not all 720 label
+permutations. Matched-monitor jobs use the same schedule. Seeds, every
+label's counters, all 41 public profile fields, the complete Encode helper
+interval and read-only telemetry are retained.
+
+The primary gate uses complete `outer_ms`, not the public-profile total.
+Each label comparison is the median of within-sextet percentage changes.
+For each case/monitor configuration, each candidate-family comparison
+collects four label pairings across two repetitions. All eight negative
+values are called faster, all positive slower, otherwise mixed. This is a
+descriptive sign gate, not a statistical significance claim; all three
+identical-label controls remain visible without filtering.
+
+### Complete-encode result: lower tail, no consistent retirement win
+
+All 56 main timing jobs pass: 11,144 encodes, 11,088 exact comparisons,
+8,064 measured calls, 2,688 warm-ups, 336 label qualifications and 56
+fresh-reference hash checks. Together with preflight, 116 harness jobs
+contain 12,332 encodes and 12,216 exact comparisons. The ten encoder fault
+jobs add fifty calls, including twenty intentional failures. All 134 GPU
+jobs succeed; an expected failed encode inside a passing fault test is
+not a failed GPU job. Independent decode/quality evidence is reused because
+outputs are byte-identical to the frozen decoded/quality-qualified references.
+
+The table reports the range of eight paired-median percentage changes per
+family, with negative values faster. The baseline column is the two
+mode-0 whole-call medians in milliseconds. Monitoring 0 means the sampler
+is off except for its outside-window snapshot; 1 enables read-only sampling.
+
+| Case | Monitor | Direct outer ms, repetitions 0 / 1 | Late vs direct % | Early vs direct % | Early vs late % |
+| --- | --- | --- | --- | --- | --- |
+| flower_500 | 0 | 19.401 / 19.673 | -2.727 to -0.343 | -3.734 to -0.769 | -1.839 to +1.686 |
+| flower_500 | 1 | 20.349 / 26.055 | -5.293 to -0.861 | -4.904 to -0.242 | -2.098 to +1.490 |
+| keong_500 | 0 | 20.389 / 21.219 | -2.968 to +0.180 | -2.895 to +0.268 | -1.734 to +2.794 |
+| keong_500 | 1 | 19.747 / 20.671 | -1.925 to +2.583 | -4.089 to -0.585 | -5.034 to +0.496 |
+| riaphotographs_500 | 0 | 20.067 / 20.403 | -2.619 to +0.595 | -3.657 to +1.810 | -1.610 to +2.150 |
+| riaphotographs_500 | 1 | 18.062 / 18.741 | -2.867 to +1.859 | -2.767 to +0.583 | -1.279 to +2.305 |
+| bliznaca_500 | 0 | 18.706 / 19.673 | -2.396 to +3.822 | -2.306 to +1.450 | -2.811 to +1.015 |
+| bliznaca_500 | 1 | 18.884 / 19.788 | -3.275 to +2.994 | -3.726 to +1.390 | -4.157 to -0.527 |
+| flower_1000 | 0 | 48.818 / 51.458 | -2.497 to +4.510 | -2.528 to +2.071 | -3.271 to +0.837 |
+| flower_1000 | 1 | 51.544 / 53.246 | -3.908 to +1.498 | -5.179 to +2.067 | -2.692 to +0.660 |
+| keong_1000 | 0 | 55.379 / 58.916 | -2.739 to +2.295 | -2.644 to -0.165 | -2.801 to +2.121 |
+| keong_1000 | 1 | 62.604 / 61.449 | -2.391 to +0.760 | -2.174 to +6.607 | -2.704 to +4.395 |
+| riaphotographs_1000 | 0 | 48.568 / 50.023 | -3.601 to -0.185 | -4.778 to +2.548 | -1.373 to +4.445 |
+| riaphotographs_1000 | 1 | 46.946 / 48.782 | -1.437 to +3.701 | -2.301 to +2.859 | -1.787 to +1.478 |
+| bliznaca_1000 | 0 | 56.159 / 60.536 | -5.078 to +5.420 | -2.647 to +1.786 | -0.785 to +2.067 |
+| bliznaca_1000 | 1 | 55.426 / 58.904 | -2.900 to +0.251 | -3.004 to +0.623 | -2.190 to +3.565 |
+| flower_2000 | 0 | 162.459 / 161.024 | -2.391 to +2.535 | -3.792 to +1.557 | -2.452 to +1.711 |
+| flower_2000 | 1 | 159.945 / 161.263 | -4.342 to +0.953 | -1.740 to +1.230 | +0.456 to +2.405 |
+| keong_2000 | 0 | 173.042 / 174.253 | -6.048 to +1.404 | -5.706 to +3.547 | -5.634 to +6.021 |
+| keong_2000 | 1 | 173.768 / 168.381 | -6.789 to +3.497 | -4.661 to +2.272 | -1.243 to +4.526 |
+| riaphotographs_2000 | 0 | 153.779 / 161.072 | -2.435 to +4.013 | -3.537 to +4.489 | -2.082 to +3.332 |
+| riaphotographs_2000 | 1 | 153.293 / 156.401 | -1.137 to +5.426 | -1.472 to +3.733 | -2.686 to +2.739 |
+| bliznaca_2000 | 0 | 161.952 / 174.434 | -1.218 to +2.579 | -1.981 to +3.393 | -4.464 to +3.788 |
+| bliznaca_2000 | 1 | 166.984 / 167.556 | -3.547 to +4.514 | -3.813 to +1.980 | -3.667 to +1.109 |
+| 1080p | 0 | 81.289 / 82.612 | -3.581 to +1.546 | -1.174 to +3.450 | -1.175 to +3.494 |
+| 1080p | 1 | 80.369 / 79.839 | -4.369 to +1.465 | -4.041 to +1.138 | -1.157 to +1.851 |
+| 4k | 0 | 349.161 / 358.208 | -2.655 to +1.456 | -2.506 to +1.059 | -3.286 to +1.073 |
+| 4k | 1 | 357.224 / 353.122 | -2.365 to +2.276 | -2.208 to +2.141 | -3.048 to +2.532 |
+
+Early versus late retirement passes the whole-call sign gate in only one
+of 28 case/monitor configurations (bliznaca-500 with monitoring); one is
+slower (flower-2000 with monitoring), and 26 are mixed. No content passes
+that comparison with both monitoring settings. Early versus direct is
+faster in four configurations and mixed in 24. Only flower-500 passes
+both monitors, and the late-retirement graph also passes both there:
+this is not evidence that early retirement caused the small-image graph
+advantage. All 2000-square and both synthetic-resolution configurations
+remain mixed against direct launches.
+
+At 500 square, early graph quantization is consistently faster than direct
+in all eight configurations (1.199-6.235%), but only three pass the
+public-total gate and only three pass the complete-call gate. At 1000
+square, early graph quantization passes two configurations, public total none, and complete
+call one. A successful subphase result is not an end-to-end result.
+Identical-label whole-call controls span roughly -3.933 to +3.039% at
+500 square, -4.727 to +4.077% at 1000, and -4.595 to +6.220% at 2000.
+At 4K, the identical early labels alone span -3.194 to -0.641% across
+the four jobs. This control scatter precludes interpreting every small
+paired percentage as a causal implementation effect.
+
+The lifetime experiment does change the measured boundary as intended:
+
+| Case family | Late destroy median range ms | Early destroy median range ms | Paired early-minus-late tail range ms |
+| --- | --- | --- | --- |
+| 500 square | 0.1033-0.1543 | 0.0406-0.0815 | -0.15510 to -0.08045 |
+| 1000 square | 0.1031-0.1831 | 0.0446-0.0705 | -0.19520 to -0.05980 |
+| 2000 square | 0.11495-0.20255 | 0.04885-0.06275 | -0.35890 to -0.01075 |
+| Nominal 1080p | 0.1017-0.1211 | 0.0450-0.0566 | -0.15305 to -0.05765 |
+| Nominal 4K | 0.14925-0.17625 | 0.04745-0.05970 | -0.46920 to +0.06020 |
+
+Here tail means outer minus public total; these are not GPU execution
+times. At 500 square, direct tail medians are 0.0519-0.1446 ms, late graph
+0.1687-0.2613 ms and early graph 0.05295-0.14385 ms. Earlier retirement
+largely removes the added late tail, but neither that movement nor the
+shorter destroy API call establishes a matching complete-encode saving.
+Recorded capture/instantiate/upload/destroy sums at that size have median
+ranges 0.3464-0.47075 ms late and 0.2737-0.4353 ms early; the sums omit
+other host work and do not resolve deferred driver freeing.
+
+### Device state, disposition and evidence
+
+The unchanged read-only sampler records the following contained-window
+context. A covered window has at least one fully contained query, not
+continuous coverage of its GPU work.
+
+| Family | Covered / measured windows | SM samples / below 500 MHz | Median window-mean SM MHz |
+| --- | --- | --- | --- |
+| 500 square | 382 / 1152 | 382 / 0 | 1282 |
+| 1000 square | 1014 / 1152 | 1048 / 0 | 1155 |
+| 2000 square | 1152 / 1152 | 3058 / 788 | 757 |
+| Nominal 1080p | 288 / 288 | 382 / 22 | 1012 |
+| Nominal 4K | 288 / 288 | 1644 / 889 | 552.333 |
+
+The 4K window means span 210-1395 MHz. Every contained reason mask is
+0x24 and memory clock is 5500 MHz. These samples do not prove GPU-core
+overheating, identify a vendor performance mode, measure paging, or rule
+out unsampled clock changes. The post-run snapshot at 17:55:07.210012 UTC
+reports the same 40 W enforced limit, unsupported ordinary power-limit
+query, AC online/charging, Windows Balanced and 80% battery. No power,
+clock, profile, priority, security or firewall setting is changed.
+
+Keep S79 production unchanged. Last-use retirement is a tested diagnostic
+mechanism, not a demonstrated general whole-encode optimization or a
+universal geometry dispatch rule. Do not spend the next cycle repeatedly
+re-measuring the same destructor tail. A future graph design should first
+identify a larger avoidable cost or additional safe reuse. Any proposed
+promotion must also qualify opaque graph-resource lifetime, peak memory,
+independent contexts and aggregate same-mode workload time so that deferred
+cleanup is not merely transferred between adjacent labels or outside the
+measured return boundary. The backend is not proven maxed out.
+
+S101 frozen/current validation passes before this experiment. The eighteen
+GPU qualification jobs run 17:20:09.557644-17:34:12.857818 UTC on
+2026-09-07; the longest racecheck advances normally for about seven minutes.
+Recomputed qualification evidence passes before the sixty preflights at
+17:34:30.090472-17:35:52.930114. Their parser passes before main timing at
+17:35:55.171099-17:55:06.783774: 19m12s, not an idle timeout. GPU-job
+intervals are nonoverlapping. Light editing, static inspection and an
+analysis self-test overlap timing; machine-wide isolation is not claimed.
+The self-test checks all fifteen six-label pairings, rejects 96 corrupted
+counter cases and verifies no retirement double counting. No process is
+restarted after an observation timeout, and no admin/firewall/permission
+prompt or restricted-counter retry is observed.
+
+The ignored `s102_*` evidence preserves all new host sources, build and
+native-code audits, qualification/failure/sanitizer reports, the predeclared
+timing design, complete preflight/timing logs and codestreams, telemetry,
+six-label paired analyses, findings and a recomputing validator. Four new
+executables, eight objects, two ASAN PDBs and four large native dumps are
+stored in the dedicated `U:/gjxl-cuda-diagnostics/s102` directory because
+C: remains low on free space. Separate data, diagnostic-binary, artifact,
+external-dependency, source/document and retained-runtime manifests anchor
+the evidence. Only the two CUDA documents are committed; production code,
+the forty retained runtime files and three user-owned untracked files
+remain unchanged.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

@@ -1510,6 +1510,25 @@ forty runtime files remain unchanged; timing completes in 8m35s with no
 observed permission prompt. Generated fixtures/decoded PFMs use a dedicated
 U: directory to avoid C:'s low free space, with all data hash-anchored.
 
+[S102](cuda-optimization-s1.md#resident-graph-retirement-before-completion-s102)
+tests explicit graph retirement after resident-policy submission, with
+scratch and input/output ownership retained through completion. All 134
+GPU jobs pass, including blocked-stream lifetime tests, failure/recovery,
+release/ASAN and all four CUDA sanitizers. The 116 complete-encode harness
+jobs contain 12,332 encodes: outputs match retained byte oracles, and
+candidates match fresh direct summaries. Early retirement reduces the
+measured late cleanup tail, but versus late
+retirement only one of 28 whole-call configurations is faster, one slower
+and 26 mixed; none passes both monitoring settings. All 2000-square and
+synthetic-resolution configurations remain mixed versus direct launches.
+Keep production and all forty runtime files unchanged. Successful destroy
+API calls do not prove physical driver freeing or complete graph-memory
+accounting; further graph work needs a larger cost/reuse opportunity and
+aggregate-workload/resource qualification, not another destructor-tail
+microbenchmark. Main timing takes 19m12s with advancing logs and no
+observed admin/firewall/permission prompt. New binaries and native dumps
+are hash-anchored in a dedicated U: directory; no system settings change.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
