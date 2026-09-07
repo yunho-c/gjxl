@@ -1,9 +1,9 @@
 # Shared CPU participation checkpoint
 
 This is the first scheduling checkpoint after `f30e92a`, not completion of
-[milestone 6](resident-execution.md#6-coordinated-cpugpu-scheduling--in-progress).
+[milestone 6](resident-execution.md#6-coordinated-cpugpu-scheduling--complete).
 It bounds shared CPU participation without changing codec decisions or replacing
-the synchronous batch driver. Remaining work is listed below.
+the synchronous batch driver. Subsequent gate closures are listed below.
 
 ## Ownership and limits
 
@@ -207,7 +207,7 @@ Makefile defect and adds graph and linked-payload regression tests. Explicit
 Ninja remains consistent with the repository's Justfile. Do not attribute this
 generated-artifact failure to the CPU scheduler.
 
-## Remaining milestone 6 work
+## Subsequent milestone 6 closure
 
 - The [batch lifecycle checkpoint](resident-batch-lifecycle.md) now defines and
   tests explicit shutdown: reject new/queued calls, drain the active call and
@@ -216,17 +216,19 @@ generated-artifact failure to the CPU scheduler.
 - The [batch timing checkpoint](resident-batch-timing.md) now records driver,
   memory and CPU queueing separately from image service through internally
   retained-result readiness. Use those metrics alongside complete public-call
-  makespan in the remaining final qualification, preserving the distinct later
+  makespan in the final qualification, preserving the distinct later
   whole-array publication boundary.
 - The [worker-launch checkpoint](resident-worker-launch.md) now exercises actual
   loop construction failures, partial-worker cleanup, fallback/recovery and
   exceptional shutdown/queue transitions. Its sanitizer matrix supplements the
   primitive partial-launch model.
-- Qualify the complete final scheduler against the integrated preparation baseline,
-  not just this immediate parent: small/natural/padded 1080p/4K and mixed-size
-  inputs, several in-flight counts, simultaneous callers, single-image regressions,
-  throughput, per-image latency and memory pressure. Keep exact bytes/independent
-  decoded pixels, conformance and sanitizer qualifications current.
+- The [final qualification](resident-scheduling-qualification.md) compares the
+  complete scheduler against the integrated preparation baseline, not just this
+  immediate parent: small/natural/padded 1080p/4K and mixed-size inputs, several
+  in-flight counts, simultaneous callers, single-image regressions, throughput,
+  image latency and memory pressure. Exact bytes/decoded pixels, conformance,
+  permanent tests and scoped sanitizer gates pass with the stated inherited
+  golden failure. The structural milestone is complete, with measured costs.
 
 The scope is still a shared synchronous execution domain. No asynchronous public
 API, codec-policy change, GPU entropy implementation or thread-pool replacement

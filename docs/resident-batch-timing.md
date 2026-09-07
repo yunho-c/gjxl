@@ -1,7 +1,7 @@
 # Batch queue, service and internal readiness
 
 This checkpoint follows `806830e` and adds the measurements needed for the final
-[scheduling qualification](resident-execution.md#6-coordinated-cpugpu-scheduling--in-progress).
+[scheduling qualification](resident-execution.md#6-coordinated-cpugpu-scheduling--complete).
 It does not mark that milestone complete or claim a performance improvement.
 
 ## Measurement contract
@@ -100,7 +100,7 @@ runtime, benchmark and test units also pass strict
 
 The [worker-launch checkpoint](resident-worker-launch.md) now covers real
 parallel-loop construction failures and admitted service timing during drain.
-The final independent-process comparison against the integrated preparation
-baseline remains outstanding.
-The new benchmark columns are observability, not by themselves performance
-evidence or a reason to declare the scheduling effort finished.
+The [final independent-process comparison](resident-scheduling-qualification.md)
+against the integrated preparation baseline now completes the structural
+milestone. These benchmark columns provide observability; the subsequent
+comparison, not their existence alone, supplies the performance evidence.

@@ -18,6 +18,9 @@ policy-preserving refactor of representations, lifetimes, resource admission,
 and CPU/GPU scheduling. Its completed handoff milestones are recorded in
 [resident frame handoff](resident-frame-handoff.md). Algorithmic search reduction
 and AQ-policy changes remain separate qualification tracks.
+The [final structural qualification](resident-scheduling-qualification.md) now
+closes that bounded refactor, with measured costs and benefits; it does not
+complete this broader roadmap's `50x` throughput objective.
 
 ## Success criteria
 

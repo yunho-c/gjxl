@@ -2,9 +2,9 @@
 
 This document records completed milestones 1 and 2 of the broader
 [resident execution refactor](resident-execution.md). That roadmap owns the
-remaining integration, resource-admission, reuse, and scheduling work and its
-completion criteria. The implementation and measurements below retain their
-original milestone baselines.
+subsequent integration, resource-admission, reuse, and scheduling work and its
+completion criteria, now closed by the [final qualification](resident-scheduling-qualification.md).
+The implementation and measurements below retain their original milestone baselines.
 
 ## Milestone 1: ownership-independent consumers
 
@@ -297,7 +297,7 @@ qualification artifacts.
 ## Later milestones
 
 The [resident execution roadmap](resident-execution.md#milestones-and-dependencies)
-defines the remaining milestones:
+records the subsequently completed milestones:
 
 - Integrate and jointly qualify the preparation branch with completed output.
 - Establish coordinated resource accounting and memory admission.

@@ -22,8 +22,10 @@ This is the policy-preserving architecture roadmap under the broader
 [Metal AQ](metal-aq.md) remains authoritative for numerical/residency contracts,
 and [codestream documentation](codestream.md) for the supported bitstream profile.
 [Resident frame handoff](resident-frame-handoff.md) retains the detailed design
-and qualification record for completed milestones 1 and 2; its measurements are
-not evidence for the unimplemented milestones below.
+and qualification record for completed milestones 1 and 2. The
+[final scheduling qualification](resident-scheduling-qualification.md) closes
+the subsequent structural milestones with their costs and limitations; earlier
+measurements are not substitutes for that final comparison.
 
 Development branch: `refactor/resident-execution` (originally
 `refactor/resident-frame-handoff`). The worktree remains
@@ -39,7 +41,7 @@ the implementation milestone numbers used later in this document.
 | #3: Stable coefficients and frame views | Included | Principal handoff complete in `ca440d1` and `dabe129`: ownership-independent consumers, direct final AC destinations, independent completed-output lease. |
 | #4A: Reuse, fusion, shorter intermediate lifetimes | Included, subject to numerical and end-to-end gates | Fusion, shared scratch, deferred preparation and final-use release are qualified. The remaining audited opportunities have explicit dispositions in milestone 5. |
 | #4B: Screening, pruning, selective refinement | Separate policy track | Deferred; not an unfinished requirement of this structural refactor. |
-| #5: Ownership, resource budgets, scheduling | Included | Output ownership and shared whole-workflow memory admission are implemented and qualified. Aggregate CPU scheduling remains milestone 6; existing batch overlap alone does not complete it. |
+| #5: Ownership, resource budgets, scheduling | Included | Complete: independent output ownership, shared whole-workflow memory/CPU admission, explicit shutdown/drain, and queue/service/ready timing. Final integrated-baseline qualification covers resource limits, correctness, performance and pressure costs. |
 
 The integrated preparation branch contributes two commits:
 
@@ -243,8 +245,9 @@ Deliverables:
 The resource record specifies the configuration surface, defaults, domain
 ownership, reservation strategy and treatment of retained batch results. The
 memory configuration, entry-point selection and input/batch enforcement are now
-implemented. The aggregate CPU-domain configuration/enforcement remains part of
-milestone 6, not an implied promise of the memory API.
+implemented. Aggregate CPU-domain configuration/enforcement is separately
+implemented and qualified in milestone 6; it is not a process-RSS or OS-thread
+count promise of the memory API.
 
 Acceptance:
 
@@ -270,7 +273,8 @@ and scheduling milestones are not completed by these boundaries alone.
 The [final reuse/fusion dispositions](resident-reuse-dispositions.md) close the
 audited set with source-backed dependency/lifetime reasoning, fresh phase
 evidence and explicit retained/deferred choices. No further unbounded fusion
-requirement remains; aggregate CPU scheduling is still milestone 6.
+requirement remains. Aggregate CPU scheduling is qualified separately in
+milestone 6 below.
 
 Deliverables:
 
@@ -295,7 +299,7 @@ Acceptance:
 - The audited set has a recorded disposition. Intentional remaining copies and
   materializations are documented rather than treated as unbounded follow-up.
 
-### 6. Coordinated CPU/GPU scheduling — in progress
+### 6. Coordinated CPU/GPU scheduling — complete
 
 Depends on stable output lifetimes and working admission from milestone 4;
 milestone 5 changes require updated resource estimates and requalification.
@@ -307,9 +311,12 @@ explicit shutdown/drain with active and queued calls. The
 [batch timing checkpoint](resident-batch-timing.md) separates arrival queueing,
 image service and retained-result readiness from whole-array publication.
 The [worker-launch checkpoint](resident-worker-launch.md) exercises actual
-parallel-loop construction failures, recovery and concurrent shutdown. Final
-integrated-baseline qualification remains outstanding; these checkpoints do not
-mark milestone 6 complete.
+parallel-loop construction failures, recovery and concurrent shutdown. The
+[final integrated-baseline qualification](resident-scheduling-qualification.md)
+closes this milestone: 56 corpus/policy byte comparisons, pinned decoding and
+conformance, permanent/sanitizer tests, 189 alternating-process performance
+pairs and 42 pressure processes. It records both memory benefits and latency
+regressions; this is not a general speedup claim.
 
 The [batch driver](../src/codestream/batch_workflow.h) already permits one image's
 CPU work to overlap another's Metal work. It invokes independent single-image
@@ -367,6 +374,11 @@ integrated ownership is qualified, declared resources are coherently accounted
 and admitted, the audited reuse opportunities have dispositions, and cross-image
 scheduling obeys resource limits with qualified correctness/performance. Maintain
 reviewable milestone commits and durable summaries identifying raw artifacts.
+
+That contract is now satisfied by the completed records above. The final
+qualification compares runtime `07dd92e` with integrated baseline `ec4d4c5` and
+seals the evidence. It preserves the known golden mismatch and scoped sanitizer
+limitations rather than declaring an entirely green or universally faster build.
 
 Completion does not require every intermediate to disappear, every workload to
 speed up, or all encoding work to move to Metal. It does require explicit costs,

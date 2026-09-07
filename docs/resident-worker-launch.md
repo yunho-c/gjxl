@@ -1,8 +1,9 @@
 # Partial worker-launch failure qualification
 
 This checkpoint follows `0683407` and closes the actual loop launch-failure gate
-in [milestone 6](resident-execution.md#6-coordinated-cpugpu-scheduling--in-progress).
-The final comparison against the integrated preparation baseline is still required.
+in [milestone 6](resident-execution.md#6-coordinated-cpugpu-scheduling--complete).
+The subsequent [final qualification](resident-scheduling-qualification.md)
+completes the integrated-baseline comparison and structural effort.
 
 ## Scope and preserved behavior
 
@@ -100,5 +101,5 @@ Source, executable, library, build-cache and log identities are retained in
 SHA-256 `9dcbc4dff15fd81c0793a1df3d68fd06ac821d0f34929a0e397f1de4e9cafae4`.
 
 These checks qualify exception cleanup, ownership and shutdown transitions.
-They do not substitute for the remaining whole-call latency, throughput and
-memory-pressure comparison against the integrated baseline.
+They do not substitute for the separately completed whole-call latency,
+throughput and memory-pressure comparison against the integrated baseline.
