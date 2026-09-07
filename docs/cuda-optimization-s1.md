@@ -18045,7 +18045,7 @@ GPU jobs pass; the two failed early jobs are separately preserved.
 
 The following cells show repetition 0 / repetition 1. Percentages are
 medians of the 24 within-quartet ratios, not ratios of displayed medians;
-negative means faster. Inputs are packed 3840x2160, packed 1920x1080 and
+negative means faster. Inputs are packed 3839x2159, packed 1919x1079 and
 the retained 510x532 flower photograph. Monitor 0 disables the background
 sampler, retaining its initial diagnostic sample; monitor 1 enables it.
 
@@ -18158,6 +18158,236 @@ external-dependency, diagnostic-binary and retained-runtime manifests
 anchor the evidence. Only the two CUDA documents are committed; all forty
 retained runtime files and production sources are unchanged, and the
 three user-owned untracked files remain untouched.
+
+## Resident graph crossover across photograph content and size (S101)
+
+S101 follows S100 `a54ef95` and tests whether its small-photograph graph
+benefit generalizes across content and geometry. It reuses the exact
+qualified S100 v2 release and host-ASAN encoder binaries: modes 0/1 are
+identical direct labels, modes 2/3 are identical owner-lifetime graph labels,
+and GPU arithmetic remains retained mode 0. No host/CUDA compilation,
+production replacement or new native implementation is introduced.
+
+This cycle also corrects S100's explicit benchmark dimension labels:
+the nominal 1080p/4K inputs are 1919x1079 and 3839x2159, not 1920x1080
+and 3840x2160. Their PFM headers and parsed timing records already carried
+the correct sizes; no measured data changes. The frozen historical S100
+document snapshot is preserved rather than overwritten.
+
+### Matched fixtures and production-reference qualification
+
+The four contents are the retained flower, keong macan, riaphotographs
+and bliznaca photographs. The latter three are already 500x500 and are
+used without modification. The 510x532 flower is center-cropped to
+500x500 (x=5, y=16). Each 500-square base is then enlarged to 1000-square
+and 2000-square by exact 2x2 or 4x4 pixel replication, without floating-point
+interpolation, color conversion or new dependencies. The fixture checker
+reconstructs every output row from original pixel bytes, checks dimensions,
+finite values, bottom-up row orientation and little-endian PFM encoding,
+and records source/crop/transform hashes.
+
+These twelve cases hold the base content constant while changing geometry
+and also vary content at matched geometry. Replication changes spatial
+sampling, transform decisions and work distribution; the larger images
+are not a substitute for a native high-resolution photographic corpus or
+a content-independent kernel microbenchmark. No threshold is inferred
+merely from their pixel counts.
+
+C: had roughly 190 MB free. Read-only volume/partition inspection identified
+U: as a separate fixed NTFS partition on the local NVMe disk with ample
+space. Nine generated fixtures and twelve independent decoded PFMs use
+the new dedicated `U:/gjxl-cuda-diagnostics/s101` directory (about 472 MiB).
+The three unchanged 500-square inputs remain at their retained paths;
+existing files, the recovery partition and user data are untouched.
+Local scripts/logs/manifests stay under the ignored profiles directory.
+
+All twelve inputs are first encoded by the retained production S79 CLI at
+distance 1.2, effort 7, forced CUDA fully-resident, with final score disabled.
+Every codestream independently decodes with the pinned libjxl decoder to
+the expected finite linear-RGB PFM, then receives a fresh independent
+Butteraugli measurement. The three unchanged original photographs also
+match their frozen S70 byte hashes and sizes. New fixture reference bytes
+are established by the production binary, not by graph mode.
+
+The first encode/decode succeeded, but the original verification helper
+incorrectly required the decoder's PFM to be little-endian. The decoder
+validly emits big-endian scale +1.0. The corrected helper validates either
+unit-scale byte order and finite payloads; the successful first two jobs
+are reused only after their terminal reports, commands and hashes are
+verified. The original script and recovery record are retained. No GPU
+job failed and no encoder/decoder process was rerun for this helper error.
+
+All 48 new preflights pass (twelve inputs, monitor off/on, release/ASAN),
+performing 240 encodes and 192 exact comparisons against fresh direct
+references, each in turn byte-checked against the production oracle.
+There are no new CUDA sanitizer jobs in S101: S100's full release/ASAN,
+descriptor/stream/failure and four-sanitizer evidence is retained, and
+hash/native-body verification confirms the two reused diagnostic binaries
+are unchanged. Fresh preflights exercise the new image geometries/content;
+this does not extend the sanitizer matrix to arbitrary concurrent contexts.
+
+### Interleaved complete-encode results
+
+The 48 timing jobs also pass. Each contains one reference, four mode
+qualifications, eight warm-up quartets and 24 measured quartets covering
+every mode permutation. Two repetitions reverse the size/content and
+monitor schedule; paired monitor settings share seed
+`1010000 + 1000*rep + 10*case_index`. Input loading, backend creation and
+external exact comparisons are outside timing, while graph setup and
+destruction remain inside the outer encode interval. The persistent
+backend, distance/effort, automatic CPU threads, disabled final score,
+four labels and NVML sampling contract are unchanged from S100.
+
+Measurement performs 6,384 encodes, including 4,608 measured encodes,
+1,536 warm-ups, 192 mode qualifications and 48 references. All 6,336
+measurement comparisons preserve exact bytes and strategy summaries.
+Across preflight and timing, 6,624 harness encodes produce 6,528 exact
+comparisons and 96 production-reference byte checks; twelve standalone
+production oracles bring the cycle total to 6,636 encodes and 108
+successful GPU jobs. Every graph encode still records exactly one build,
+two launches, one hit, balanced handles and no error/rebuild/nested capture.
+
+Each row below summarizes both repetitions and all four graph/direct-label
+pairings: the range contains eight medians of 24 within-quartet percentage
+ratios. Negative means faster. A wholly negative range is the strict
+sign-consistency gate used here, not a confidence interval or a p-value.
+Direct-0 milliseconds show repetition 0 / repetition 1. The full individual
+control ratios and all public stages remain in the saved paired tables.
+
+| Content / square size | Monitor | Direct-0 total ms | Public total % range | Quantization % range | Outer encode % range |
+| --- | --- | --- | --- | --- | --- |
+| flower_500 | 0 | 18.019 / 19.678 | -2.917 to -0.561 | -4.626 to -2.786 | -1.875 to +0.192 |
+| flower_500 | 1 | 18.400 / 21.366 | -3.623 to +0.154 | -4.002 to -1.534 | -2.267 to +0.537 |
+| keong_500 | 0 | 19.260 / 21.805 | -4.453 to -1.304 | -5.991 to -1.417 | -3.825 to -0.895 |
+| keong_500 | 1 | 19.241 / 20.013 | -2.972 to +2.366 | -2.848 to +0.662 | -2.709 to +3.276 |
+| riaphotographs_500 | 0 | 17.636 / 18.514 | -3.024 to -0.810 | -5.441 to -2.747 | -2.943 to -0.405 |
+| riaphotographs_500 | 1 | 18.201 / 18.698 | -3.767 to -1.629 | -4.839 to -2.664 | -3.305 to -1.060 |
+| bliznaca_500 | 0 | 17.750 / 20.971 | -3.019 to +0.755 | -5.607 to -0.863 | -2.324 to +2.250 |
+| bliznaca_500 | 1 | 18.531 / 19.072 | -2.744 to +0.402 | -3.914 to -0.065 | -2.699 to +0.665 |
+| flower_1000 | 0 | 47.632 / 49.382 | -4.510 to +0.568 | -4.452 to -0.754 | -4.225 to +0.576 |
+| flower_1000 | 1 | 46.295 / 50.085 | -4.372 to +1.084 | -4.736 to -0.914 | -3.609 to +1.226 |
+| keong_1000 | 0 | 54.327 / 56.593 | -3.954 to +2.839 | -3.384 to +0.698 | -3.538 to +3.435 |
+| keong_1000 | 1 | 52.040 / 64.235 | -4.394 to +0.613 | -3.971 to +0.708 | -3.931 to +0.890 |
+| riaphotographs_1000 | 0 | 44.437 / 50.514 | -3.284 to -0.316 | -2.520 to -0.684 | -2.221 to -0.184 |
+| riaphotographs_1000 | 1 | 44.643 / 46.828 | -3.086 to +1.405 | -4.218 to +0.229 | -2.803 to +2.097 |
+| bliznaca_1000 | 0 | 53.405 / 53.563 | -1.746 to +0.587 | -2.097 to +0.042 | -1.329 to +0.699 |
+| bliznaca_1000 | 1 | 51.039 / 55.809 | -1.396 to +1.477 | -2.948 to -0.722 | -1.832 to +1.365 |
+| flower_2000 | 0 | 137.798 / 158.489 | -5.733 to +1.276 | -3.398 to +1.085 | -5.843 to +1.166 |
+| flower_2000 | 1 | 141.200 / 157.815 | -3.028 to +1.486 | -2.730 to +1.265 | -2.791 to +1.466 |
+| keong_2000 | 0 | 157.610 / 169.934 | -3.045 to +4.824 | -2.411 to +2.606 | -3.015 to +5.360 |
+| keong_2000 | 1 | 156.967 / 162.456 | -2.953 to +2.305 | -2.433 to +1.674 | -2.916 to +2.596 |
+| riaphotographs_2000 | 0 | 138.966 / 146.401 | -2.280 to +3.532 | -3.125 to +4.139 | -2.180 to +3.893 |
+| riaphotographs_2000 | 1 | 144.065 / 146.355 | -5.193 to +1.742 | -2.571 to +2.359 | -4.941 to +1.747 |
+| bliznaca_2000 | 0 | 153.180 / 158.030 | -2.486 to +2.151 | -1.288 to +2.581 | -2.319 to +2.426 |
+| bliznaca_2000 | 1 | 154.975 / 163.502 | -3.895 to +1.535 | -6.299 to +2.189 | -3.645 to +1.768 |
+
+At 500-square, seven of eight content/monitor configurations pass the
+quantization sign gate, four pass public total, and only three pass outer
+encode time. At 1000-square those counts are four, one and one; all eight
+2000-square configurations are mixed at every boundary. The four passing
+outer configurations are unmonitored keong 500, riaphotographs 500 with
+both monitoring settings, and unmonitored riaphotographs 1000. Only
+riaphotographs 500 passes the outer gate with both monitors. These results
+do not support a universal graph-dispatch pixel threshold.
+
+Identical graph-label public-total paired changes range from -1.668% to
++1.547% at 500-square, -3.348% to +2.226% at 1000-square, and -5.200% to
++4.970% at 2000-square. Direct median public totals span 17.636-21.805,
+44.437-64.235 and 137.798-169.934 ms respectively. The larger-case mixed
+results and sizable identical-control variation are retained, without
+outlier removal, clock normalization or cherry-picking a favorable label.
+
+### A concrete boundary cost: graph teardown after the public profile
+
+Source inspection identifies why public total is not the complete return
+boundary in this measured non-target-size path. In
+`src/codestream/workflow.cpp`, the `PreparedWorkflow` local owns
+`gpu_adaptive_quantization`; its `PreparedAdaptiveQuantization::evaluation`
+owns the CUDA resident evaluator, which owns `butteraugli_`. That prepared
+comparison owns the diagnostic graph cache. The normal path assigns
+`local_profile.total_nanoseconds` before leaving the scope that destroys
+`prepared`. Consequently graph destruction, other prepared-resource
+cleanup and return-wrapper work occur after the public profile stops but
+before S100's outer timer stops. No new timing-boundary assumption is
+needed to see this: the saved outer timer already includes the full call.
+
+The following ranges are medians across individual modes/runs. Paired
+tail deltas compare graph labels 2/3 against direct labels 0/1 within the
+same quartet; they are not differences of separately displayed medians.
+
+| Square size | Direct outer-minus-public ms | Graph outer-minus-public ms | Recorded graph destruction ms | Paired graph-minus-direct tail ms |
+| --- | --- | --- | --- | --- |
+| 500 | 0.0581-0.2149 | 0.1784-0.3866 | 0.0863-0.1697 | +0.0733 to +0.2919 |
+| 1000 | 0.2122-0.4325 | 0.3119-0.5729 | 0.1020-0.1862 | +0.0415 to +0.2066 |
+| 2000 | 0.8216-1.2222 | 0.9751-1.4755 | 0.1057-0.2048 | -0.0626 to +0.3609 |
+
+Thus the small-image graph teardown is a real unprofiled component that
+erodes tenths-of-a-millisecond gains. It is not the whole tail: other
+resource cleanup and wrapper work remain. The analysis saves
+`tail_minus_recorded_destroy` only as an accounting residual, not as a
+measured hypothetical graph-free encode. Likewise the four recorded graph
+API groups total median ranges of 0.314-0.475, 0.327-0.457 and
+0.383-0.506 ms by increasing size, but are neither complete graph overhead
+nor GPU execution time. Setup/destruction alone does not explain every
+mixed timing, especially the larger-case identical-control scatter.
+
+### Device-state context and next implementation boundary
+
+For each size, monitoring covers 768 measured encode windows across four
+contents and two repetitions. It contains clock samples in 246 / 638 / 768
+windows at 500 / 1000 / 2000 square, with 246 / 650 / 1,927 SM-clock
+samples and 0 / 0 / 454 samples below 500 MHz. Median per-window mean SM
+clocks are 1282 / 1282 / 825 MHz; 2000-square window means range from
+300 to 1530 MHz. These are contained-sample statistics, not fractions of
+GPU work or time. Small-image mixed whole-call results occur without an
+observed low-clock sample in the covered windows. This does not establish
+low SM clocks as their sole explanation: uncovered windows and activity
+between samples remain unobserved.
+
+Every contained reason mask is again 0x24 and memory clock is 5500 MHz.
+The post-run snapshot at 16:52:23.811342 UTC reports a 40 W enforced limit,
+AC online/charging, Windows Balanced and 81% battery; the ordinary
+power-limit query is unsupported. Vendor performance mode remains
+unestablished. Sampling cadence, query statuses and latency, raw metrics
+and per-window associations remain saved. Driver reason flags are not
+proof of GPU-core overheating, and reported used memory is not proof of
+paging or complete graph-resource accounting.
+
+Production remains S79 `914b42c`: no universal graph flag or size cutoff
+is promoted. The next implementation experiment should address the known
+graph lifetime cost while still measuring the full return boundary. In
+particular, investigate whether graph handles can be safely retired at
+the last-use submission boundary while other resident work is outstanding,
+rather than retaining them until the final prepared-workflow destructor.
+First verify the pinned CUDA lifetime/concurrency guarantees, then test
+all failure paths and complete-encode timing; merely moving cost into an
+earlier profile phase does not make encoding faster. Cross-owner graph
+reuse is a separate design requiring pointer/reference rebinding,
+exclusive ownership and resource/peak-memory accounting. Neither is a
+proven improvement yet. The backend is not proven maxed out.
+
+S100 frozen/current validation passes before changes. The twelve production
+oracle encodes and independent CPU decode/metric jobs finish before new
+preflights, which run 16:42:06.824819-16:42:49.975138 UTC on 2026-09-07.
+Parsed preflights pass before the 48 timing jobs at
+16:43:30.044057-16:52:05.443979 (8m35s). All 108 GPU-job intervals are
+nonoverlapping. Live process identifiers and advancing logs are observed;
+no process is restarted after an observation timeout. Light editing and
+completed-result analysis overlap the campaign, so machine-wide isolation
+is not claimed. No admin/firewall/permission prompt or restricted-counter
+retry is observed, and no system-level power, clock, profile, priority or
+security configuration is changed.
+
+The ignored `s101_*` evidence contains fixture construction/verification,
+production oracles, decoder/metric reports, every preflight/timing report,
+reference codestreams and telemetry CSVs, full paired results, the profile
+tail analysis, digest/findings and recomputing validator. Dedicated data
+hashes cover the 21 new PFMs on U:. Artifact, external-dependency,
+source/document, reused diagnostic-binary and retained-runtime manifests
+anchor the remaining evidence, including the recovered endian-check
+failure. Only the two CUDA documents are committed; the forty retained
+runtime files, production sources and three user-owned untracked files
+remain unchanged.
 
 ## Work that should not lead the next cycle
 

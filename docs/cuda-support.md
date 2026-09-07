@@ -1495,6 +1495,21 @@ any dispatch threshold, and qualify graph resources/concurrency. Production
 and all forty retained runtime files remain unchanged. Timing takes 4m04s;
 the longer racecheck advances normally, with no observed permission prompt.
 
+[S101](cuda-optimization-s1.md#resident-graph-crossover-across-photograph-content-and-size-s101)
+tests four retained photographs at matched 500-, 1000- and 2000-square
+geometries using unchanged S100 binaries. All 108 GPU jobs pass, with
+6,636 total encodes and twelve independent production-reference decodes
+and quality measurements. Only four of 24 content/monitor configurations
+pass the whole-call graph timing gate; every 2000-square configuration is
+mixed, so no universal size cutoff is justified. Source and measured tails
+show graph destruction happens after the public profile stops but inside
+the outer encode interval, costing median 0.086-0.170 ms on the smallest
+fixtures. Next investigate safe last-use graph retirement under the full
+return-boundary gate, not a profile-only improvement. Production and all
+forty runtime files remain unchanged; timing completes in 8m35s with no
+observed permission prompt. Generated fixtures/decoded PFMs use a dedicated
+U: directory to avoid C:'s low free space, with all data hash-anchored.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
