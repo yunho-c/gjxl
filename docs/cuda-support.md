@@ -1291,6 +1291,23 @@ CTAs/batches. Holdout policy selection and production/batch gates remain open;
 S79 production stays unchanged. The 5.5-minute 4K memcheck is verified active
 work and finishes with zero reported errors/leaks; no permission block is seen.
 
+[S87](cuda-optimization-s1.md#fused-compact-ac-packing-s87) safely reuses dead
+threshold storage for two diagnostic fused dense/compact packers, preserving
+the original quantized source and dense fallback without another device
+allocation. Native audits retain 208 GPU bodies plus two new packers;
+14,462 exact encodes and 42 accepted qualification jobs pass. Synthetic
+GPU-event packing intervals improve 14-36%, but incremental whole-encode
+fusion gains do not hold consistently across both duplicate controls and
+replications. The combined compact-readback candidate still beats both
+dense controls in every large-image replication with vector fusion; that
+gain includes the earlier readback/initialization changes. Scratch placement
+alone is not a general speedup, and no unconditional fused policy is promoted.
+Original host-compile and missing-final-marker failures are preserved; only
+the affected adapters are corrected/rebuilt, with final sanitizer markers
+captured. No CUDA/encoder timing retry occurs or permission block is observed. Small-
+transform packing granularity and production/batch qualification remain open;
+the 40-file S79 runtime stays unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

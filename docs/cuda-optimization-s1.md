@@ -14785,6 +14785,247 @@ priority setting is changed. Builds, encoder checks and measurements finish
 without retry, and no admin/firewall/permission block is detected.
 Production remains unchanged and the backend is not considered maxed out.
 
+## Fused compact AC packing (S87)
+
+S87 implements two diagnostic fused packers and resolves S86's source-aliasing
+constraint without another device allocation. The original quantized input
+and dense packed fallback remain intact. The retained production/runtime is
+still S79; this is a same-binary experiment based on S86 `9256db1`, not a
+production promotion or a cumulative speedup claim.
+
+### Dead-storage proof and controlled implementations
+
+`thresholds_device_` is a distinct allocation of N floats, or 4*N bytes.
+Adjusted-quantization selectors write the thresholds used by coefficient
+materialization; all materialization and any reconstruction/metric consumers
+precede final packing on the same stream. Packing and coefficient-order
+population do not read thresholds. The byte payload at [0,N), int16 payload
+at [N,3*N) and four-byte flags at [3*N,3*N+4) therefore fit dead storage under
+the existing N>=8, N%8==0, uint32/count/grid eligibility bounds.
+
+Later adjusted evaluations do not require every byte to be restored as a
+float. Both scalar and cooperative selectors compute new local thresholds
+and overwrite `batch.coefficient_offset + 4*anchor_index + [0,4)`, precisely
+the locations subsequently read by their materializers. Without adjustment,
+materializers use computed thresholds instead. Initial preparation, forward
+DCT, CfL and policy setup do not consume the scratch. Generic evaluation
+resets the diagnostic state and retains its dense path. The lifetime audit
+records these producer/reader relationships, and the existing repeated-object
+AQ checks exercise policy evaluation, generic reconstruction and another
+policy evaluation on the same prepared object.
+
+| Mode | Packing and compact device destination |
+| --- | --- |
+| 0 / 2 | Retained dense duplicate controls |
+| 1 / 3 | Retained pack plus S81 separate narrow; quantized scratch |
+| 4 / 5 | Retained pack plus S81 separate narrow; threshold scratch |
+| 6 | Fused scalar dense, byte and int16 stores; threshold scratch |
+| 7 | Fused four-coefficient packed stores; threshold scratch |
+
+All six narrow modes use identical batched metadata, early 2*N raw host
+staging, full dense/compact initialization before wait, omitted redundant
+tail clearing and streaming host expansion. The raw expansion helper is
+identical to S86 apart from identifier prefixes. Modes 4/5 versus 1/3
+separate scratch placement from fusion; 6/7 versus 4/5 isolate fusion;
+7 versus 6 compares the two fused store implementations. Per-frame counters
+verify the selected scratch, one to seven pack calls, fused dispatch for
+every nonempty batch only in 6/7, and one separate narrow pass only in
+1/3/4/5. Mode selection is captured under the prepared-object lock.
+
+Both new kernels preserve the retained anchor, channel and edge-group
+mapping and always emit dense int32 fallback as well as both compact widths.
+An ordered flag clear precedes fused packing; two block-wide overflow votes
+and a conditional atomic OR preserve exact int8/int16 width selection. The
+experiment removes the separate narrow pass, not the flag clear. Scalar
+packing uses one coefficient per thread; vector4 uses aligned int4
+loads/dense stores and packed uint32/uint2 compact stores. CUDA 11.8 sm_86
+compilation reports 38/40 registers, zero stack and zero spills respectively.
+
+Ignoring metadata, flags, transaction efficiency and caches, separate packing
+and narrowing issue 15*N payload bytes (8*N then 7*N); fusion issues 11*N,
+saving the second 4*N dense read. This is source-level traffic accounting,
+not a measured DRAM-byte reduction. Per-anchor block scheduling, overflow
+atomics and launch gaps can also matter.
+
+### Qualification and synthetic GPU-event evidence
+
+Native audits preserve all 205 S79 and three S81 GPU bodies and identify only
+the two new fused bodies in release/ASan interleave and the AQ executable.
+The rebuilt standalone replay's release/ASan executables and the benchmark
+contain the same six relevant retained/new GPU bodies. No unrelated native
+kernel changes are folded into the comparison.
+
+The standalone CPU-oracle replay covers five block geometries, seven
+preferred transform shapes plus a mixed layout, six integer patterns and
+three packers: 40 layout configurations and 720 comparisons per full run.
+Small geometries can collapse different preferences to identical layouts;
+these are not 40 independent images. Tests include int8/int16 endpoints,
+int32 extremes and overflow-to-nonoverflow allocation reuse, nonzero source
+and anchor offsets, edge groups, dense and both compact payloads, flags,
+unchanged input and guarded allocations. Empty input, invalid kind and null
+nonempty input have three additional host-API checks.
+
+Canonical qualification contains 42 accepted jobs: 12 functional AQ/batch,
+23 scoped host-ASan, four GPU memcheck, one initcheck, one synccheck and one
+release expansion job. Host input replays cover all eleven encode inputs;
+GPU input memcheck covers the sample, thin Flower and padded 4K across all
+eight modes. These input replays account for 140 exact encodes. Release and
+ASan expansion each pass 5,632 cases. Five accepted standalone packing runs
+(initial release plus four sanitizer runs) each pass all 720 comparisons.
+The separate 22-window active/tail preflight accounts for 1,606 exact encodes.
+
+Two operational failures are retained explicitly. The first benchmark host
+compile misses `<string>` and fails before creating its object; a separate
+corrected build succeeds. Later, direct memcheck emits all 40 layout markers
+and zero errors/leaks but no final success marker. That attempt is not
+accepted. Explicit final stream flushing is added only to the direct replay
+and benchmark adapters, with original sources/binaries/logs preserved and
+new V2 binary filenames. The first 38 accepted qualification records remain
+unchanged; four direct-packer sanitizer jobs are rerun and pass with captured
+final markers. The earlier successful pack-ASan run and marker-incomplete
+memcheck remain separate retired attempts. This does not establish why the
+original marker was lost. No CUDA kernel or encoder is rebuilt or retried
+for either adapter correction, and performance timing begins afterward.
+
+Nine synthetic GPU-event windows cross 256x256, 1080p and 4K-equivalent
+block grids with DCT8-, DCT16- and DCT32-preferred layouts; edge leftovers
+use DCT8. Each tests all-zero byte-fitting coefficients and alternating int16
+endpoints, not photographic coefficient histograms. Six warm and 24 measured
+three-mode rounds per pattern balance positions and directed predecessor
+pairs. Each event interval contains 16 ordered flag-clear/packing pipelines.
+The nine windows contain 1,296 measured and 324 warm observations, plus 108
+CPU-oracle checks bracketing timing: 26,028 pipelines including checks.
+
+Scalar fusion reduces paired event-interval medians by 14.32-36.31% versus
+retained pack plus separate narrowing across all 18 geometry/style/pattern
+groups. Vector4 reduces them by 13.63-36.08%. Neither implementation is
+uniformly best. At 4K with DCT8 preference, vector4 is 4.90%/6.23% slower
+than scalar for zero/int16 patterns; with DCT16 preference it is 6.21%/4.41%
+faster, and with DCT32 preference 4.15%/2.69% faster. DCT8 vector4 uses only
+16 threads per anchor versus 64 scalar threads, suggesting a scheduling/
+utilization follow-up; this experiment does not isolate that explanation.
+These are device-event pipeline intervals, which can include stream-idle
+host-launch gaps, not profiler-summed kernel times or whole-encode gains.
+
+### Whole-encode results and counterexamples
+
+The fixed eleven-input/two-lifetime protocol uses eight-mode Williams blocks,
+eight warm and 24 measured rounds, independently checked dense conditioning
+each round, and two replications with reversed input/lifetime order. Labels
+and row order are shuffled per block. All 44 windows complete and are retained;
+the schedule accounts for 12,716 exact encodes: 8,448 measured, 2,816 warm,
+1,408 conditioning and 44 references. Each combined group has 48 measured
+pairs per mode. Codestream SHA-256 and byte counts are checked against the
+retained S70/S85 references. There is no new decoder, quality-metric,
+complete production-suite or concurrent-throughput acceptance claim.
+
+The table reports combined paired profile-total percentage medians; negative
+is faster. The first two columns are narrow duplicate controls, followed by
+scratch placement, scalar fusion, vector fusion and vector-versus-scalar.
+All 56 ordered pairs, outer-wall/stage results and individual replications
+are retained in the analysis. Paired medians are not ratios of separately
+aggregated medians and do not compose by subtracting table columns.
+
+| Input / lifetime | Quantized duplicate 3/1 | Threshold duplicate 5/4 | Threshold 4/1 | Scalar fusion 6/4 | Vector fusion 7/4 | Vector/scalar 7/6 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Sample / persistent | -3.52% | -2.26% | -0.49% | -0.13% | -1.15% | +0.58% |
+| Sample / fresh | +0.19% | +0.31% | -1.85% | -0.61% | -1.34% | +0.10% |
+| Padded 1080p / persistent | +0.52% | +1.23% | -0.99% | +0.06% | -0.25% | +0.66% |
+| Padded 1080p / fresh | -0.99% | -0.29% | +0.16% | -0.58% | -1.05% | -0.70% |
+| Padded 4K / persistent | +0.19% | +0.35% | +0.30% | +2.36% | +0.70% | -2.08% |
+| Padded 4K / fresh | -0.47% | -2.58% | -0.07% | -1.82% | -2.34% | -0.81% |
+| Flower / persistent | +0.87% | +0.61% | +0.63% | -0.94% | -1.58% | +0.14% |
+| Flower / fresh | +1.22% | -0.86% | +1.73% | +0.61% | +1.00% | -0.13% |
+| Keong macan / persistent | +0.41% | -0.23% | +2.08% | -1.45% | +0.32% | +1.56% |
+| Keong macan / fresh | +0.66% | -1.13% | -1.89% | -2.10% | -1.45% | -0.70% |
+| Riaphotographs / persistent | +0.52% | -2.15% | +2.91% | -3.38% | -1.49% | +1.05% |
+| Riaphotographs / fresh | +0.46% | -1.34% | +1.16% | +0.69% | -0.71% | -0.43% |
+| Bliznaca / persistent | +2.19% | -0.71% | +0.53% | +0.04% | +1.29% | -0.58% |
+| Bliznaca / fresh | +2.51% | +0.75% | +1.79% | -1.20% | -2.74% | +0.88% |
+| Flower 512x512 / persistent | -0.80% | +0.10% | +0.47% | -0.27% | -0.50% | -0.46% |
+| Flower 512x512 / fresh | +0.31% | +1.87% | -0.85% | +0.31% | -0.33% | -2.81% |
+| Flower 1x1023 / persistent | -0.50% | -0.62% | +0.10% | +0.63% | +1.07% | +1.09% |
+| Flower 1x1023 / fresh | +0.39% | -0.42% | +0.24% | +1.37% | -0.63% | -1.53% |
+| Flower 1023x1 / persistent | -1.03% | -1.79% | -0.21% | -0.06% | -0.86% | +0.08% |
+| Flower 1023x1 / fresh | +0.51% | -2.45% | +1.24% | -1.85% | -2.82% | +0.15% |
+| Keong 256x256 / persistent | -1.10% | -1.61% | +2.11% | -2.05% | -0.79% | +0.57% |
+| Keong 256x256 / fresh | +0.17% | -1.49% | +1.07% | -0.78% | -2.24% | -0.38% |
+
+The large-image compact-readback candidate survives the new kernels: vector
+mode 7 beats both dense controls in both replications' profile-total and
+outer-wall medians at 1080p and 4K. Against dense 0, combined total gains are
+8.63%/6.31% for persistent/fresh 1080p and 2.78%/3.16% for 4K; outer-wall
+gains are 8.39%/4.97% and 2.03%/2.27%. These include compact transfer,
+pre-wait host initialization and streaming expansion, not just fusion.
+
+Fusion's incremental whole-encode benefit is much less consistent. Neither
+fused variant beats both threshold separate-pass controls in both total and
+outer wall in both 1080p replications. At persistent 4K, scalar 6 is slower
+than threshold 4 in both replications (total +2.28%/+2.36%), yet faster than
+duplicate 5 in both (-1.37%/-1.23%). Vector 7 beats 5 there but changes sign
+against 4. At fresh 4K, scalar beats both threshold controls in both total
+and outer wall, whereas vector does not: its total contrast against 5
+changes from -3.29% to +2.82%. Thus the synthetic packing improvement does
+not establish a universal incremental encoder speedup.
+
+Across all 22 combined groups, scalar and vector beat both threshold
+controls in both replications' total and outer wall in only two and three
+groups respectively. Vector beats scalar by that criterion in only two
+groups. Threshold scratch alone is not established as a general speedup
+either: modes 4 and 5 beat both quantized-scratch duplicates by the same
+criterion in two and four groups, with only Keong fresh shared between them.
+Its primary demonstrated value is a safe destination enabling fusion.
+
+Duplicate variation remains visible: combined dense 2/0 total medians span
+-1.56% to +1.50%, and individual-replication medians -5.91% to +5.09%.
+Quantized narrow duplicates span -3.52% to +2.51% combined, and threshold
+duplicates -2.58% to +1.87%. The small sample's vector result is faster
+against dense 0 but slower against dense 2 in both combined lifetime groups.
+No unconditional narrow/fused policy or new size cutoff follows from this
+study. All narrow modes select the same width: 18 byte-width and four
+int16-width groups, with no dense fallback in these timing inputs; integer
+overflow fallback is exercised separately by the direct replay.
+
+Synthetic pack pipelines occupy roughly 0.29-0.44 ms at 1080p and 1.11-1.86
+ms at 4K, whereas these whole-encode medians are tens to hundreds of ms.
+Those are different workloads/boundaries, not an extrapolated speedup. They
+help explain why a large percentage improvement to packing alone need not
+dominate complete-workflow variation. Narrow-mode D2H/expansion medians stay
+near 1.27-1.31/1.05-1.09 ms at 1080p and 4.44-4.47/3.67-3.79 ms at 4K;
+fusion does not change the compact host readback protocol.
+
+Keep the safe scratch proof and both qualified fused implementations as
+diagnostic candidates. A bounded follow-up can group multiple small
+transform anchors per block, preserving each anchor's source and edge-group
+destination mapping, all-thread participation in overflow votes and the
+ordered flag clear. The source-level note records increased per-anchor flag
+update frequency for non-int8 data as another hypothesis, not a measured
+cause. No grouped kernel or shape-dependent production policy is implemented
+here. Holdout geometry/content, complete production and concurrent
+throughput/memory-pressure gates remain necessary before promotion.
+
+### Evidence and operational limits
+
+The ignored `s87_*` bundle preserves original and V2 adapters, build failures,
+qualification, native audits, raw timing, all pair/replication summaries,
+lifetime/follow-up notes and the independent verifier. Run
+`python build-cuda-ninja/profiles/s87_validate.py --frozen --prior` to verify
+the frozen bundle and inherited S86 evidence. It reconstructs 14,462
+explicitly counted exact encodes (1,606 preflight, 140 sanitizer input
+replays and 12,716 measurement encodes), the separate functional/expansion/
+direct packing jobs, all nine GPU-event windows and 117 non-overlapping
+accepted runner intervals. Those intervals exclude the two preserved retired
+direct-replay attempts; this is not an all-machine-activity seriality claim.
+
+Measurement boundary telemetry is 56/70 C, SM 1282/1282 MHz and memory
+5500/5500 MHz on the RTX 3060 Laptop GPU under ordinary power management;
+these are not in-kernel clocks. The encoder timing campaign finishes in
+about 12 minutes 38 seconds with no retry. Its earlier 4K memcheck takes
+about 5 minutes 19 seconds and is verified active, finishing with zero
+reported errors/leaks. No admin/firewall/permission block is observed and no
+security, privilege, clock, power or priority setting is changed. Production
+remains unchanged and the backend is not considered maxed out.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
