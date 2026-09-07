@@ -14028,6 +14028,217 @@ snapshots and the retained runtime. No security, privilege, clock, power,
 cooling or priority changes were made, and no firewall/admin/permission block
 was observed. The suggested cause of the user's earlier delay is unconfirmed.
 
+## Overlapped dense host first-touch (S83)
+
+S83 starts from S82 `559028c` and tests ordinary host-buffer initialization
+inside the asynchronous resident-policy interval. S82's narrow transport and
+metadata batching are not included. All existing GPU kernels, dense transfers,
+metadata synchronizations, tail zeroing and final frame ownership stay intact.
+
+Modes 0/2 are duplicate retained dense controls; 1/4 fill the final coefficient
+owner with zeros after successful submission and before its mandatory wait;
+3 performs the same full fill after successful wait; 5 writes one int32 at
+each 4-KiB stride and the last element before waiting. The machine reports
+4096-byte system pages, but the stride mode has no page locking, allocator
+replacement or platform-specific mapping. Full fill uses ordinary C++ stores.
+
+The buffer is not referenced by the queued GPU computation. It is already
+allocated during fresh preparation; repeated prepared use after owned frame
+handoff ensures replacement storage under the existing prepared-object lock,
+before submitting work. Initialization cannot allocate or return a failure.
+Every successful submission still waits, including injected completion
+failure, and caller outputs retain the existing commit-after-validation rule.
+Generic evaluation does not take this diagnostic path. No new device arena,
+host staging owner, helper thread or pool is introduced.
+
+### Correctness and measurement boundary
+
+Fourteen serial preflight windows cover seven images and persistent/fresh
+backend lifetimes. All 518 encodes match retained codestream bytes and summary
+fields. An extra dense readback oracle checks every active coefficient and
+fixed-capacity tail. Recorded submission/fill/wait/readback intervals verify
+each mode's exact placement and touch count; controls must report no touch.
+
+Seven release functional jobs cover AQ and batch in full-pre-wait,
+full-post-wait and stride-pre-wait modes, plus the public workflow test.
+Seven scoped host-ASan jobs cover full/stride AQ and batch, and all six modes
+on sample/Flower/4K encodes. Instrumentation includes the changed resident
+source and callers, not the retained linked libraries; MSVC STL container
+annotations are disabled consistently with those libraries. Three GPU
+memcheck jobs cover AQ, batch and seven full 4K encodes (reference plus each
+mode once). Explicit application completion and zero errors/leaks are required
+and pass. No new initcheck/synccheck/racecheck campaign is claimed: the three
+audited timing, ASan-timing and AQ executables have exactly the 205 retained
+GPU bodies, and no device memory operation changes.
+
+The full 4K memcheck initially emits no application progress for about a
+minute because its config is buffered until after the reference and first
+mode. A read-only live check finds the owned application/sanitizer pair
+consuming CPU time, 100% GPU activity and no consent process; rows then arrive
+at about 32 seconds per encode. It completes without stopping or restarting.
+This is active instrumented work, not an observed firewall/admin block.
+
+All 58 fresh CLI encodes in the default full-pre-wait mode match the retained
+S70/S79 codestream hashes, strategy summaries and optional final scores,
+including high-density and maximum-compression cases. The byte-identical
+references were already independently decoded/scored; S83 does not claim a
+fresh decoder/metric run or complete CPU/CUDA suite.
+
+The timing protocol uses 28 serial process windows: seven inputs, persistent
+or freshly created backend, and two reversed input/lifetime-order replicates.
+Each has six warm and 24 measured six-mode rounds, with shuffled Latin
+rotations balancing every mode's position. A persistent backend does not reuse
+the final host coefficient owner; fresh backend is not a fresh process.
+The profiled total includes actual serialization; the outer timer additionally
+includes optional backend creation/destruction and call teardown. Input load,
+equality/oracle checks, file output and returned codestream destruction are
+outside timing. The dense oracle is enabled only for qualification. Separate
+fill, wait, readback, post-wait and post-submission intervals help distinguish
+moving work from removing it. Builds, native audits, sanitizer/quality/profile
+work and evidence reconstruction finish before performance measurement.
+
+### Trace and paired results
+
+Eight unrestricted CUDA-only 4K captures run in orders 0/1/3/5 and 5/3/1/0.
+All 309 kernel launches/resources, transfer and clear fingerprints, and runtime
+API counts match. D2H remains 103,723,588 bytes. The final submission's host
+gap between event recording and event wait is 16.90/17.21 ms for full pre-wait
+fill, with 16.74/17.03 ms of GPU kernel activity inside it. Stride touching
+has 12.70/12.28 ms host gaps and 12.57/12.17 ms overlapping GPU activity. Dense
+and post-wait controls have only 0.002-0.014 ms in that gap. Source placement
+and independent harness interval checks identify the added host work as the
+initialization; kernel-active durations are interval unions, not summed
+double-counted overlapping launches.
+
+Captured D2H time falls from 21.61/22.68 ms dense to 16.59/16.05 ms full
+pre-wait, 16.56/17.04 ms full post-wait and 16.05/16.40 ms stride pre-wait.
+The post-wait control pays its initialization outside GPU overlap. These
+traces establish the mechanism, not a public encode or batch speedup.
+
+The initial position-balanced campaign completes 5,068 exact encodes: 4,032
+measured, 1,008 warm and 28 references. Each cell below is the median
+same-round profiled-total percentage change over 48 pairs; negative is faster.
+`Full/dense` is mode 1 versus 0, `Overlap` is mode 1 versus the identical
+post-wait fill (3), and `Stride/dense` is mode 5 versus 0.
+
+| Input | Persistent, full/dense | Persistent, overlap | Persistent, stride/dense | Fresh, full/dense | Fresh, overlap | Fresh, stride/dense |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Sample | -1.59% | -0.25% | +1.13% | +0.86% | -2.10% | +1.88% |
+| Padded 1080p | -4.41% | -7.31% | -4.02% | -3.59% | -4.81% | -3.46% |
+| Padded 4K | -2.07% | -2.32% | -0.89% | -1.19% | -2.20% | +1.53% |
+| Flower | -3.35% | -3.49% | -2.30% | -0.14% | -0.75% | -2.34% |
+| Keong macan | -3.24% | -1.70% | -3.41% | -0.85% | -0.52% | -2.17% |
+| Riaphotographs | -1.99% | -3.53% | -1.13% | +0.50% | -0.39% | -2.36% |
+| Bliznaca | -2.46% | -1.97% | -1.97% | -3.12% | -2.31% | -1.83% |
+
+Full pre-wait fill at 1080p also improves 2.91%/2.02% against duplicate dense
+mode 2 for persistent/fresh backend. Both full-fill implementations (1/4)
+improve against both dense controls in the combined 1080p results. Persistent
+4K differs: mode 1 is 0.81% slower against dense 2 despite the 2.07% improvement
+against 0; both separate replicate medians against 2 are positive. Fresh 4K
+mode 1 improves against both dense controls in aggregate, but its replicate
+signs against 2 differ. The sparse-touch and small-image results are also mixed.
+These observations motivate a schedule-control follow-up before retention.
+
+### Preceding-mode-balanced follow-up (V2)
+
+The initial cyclic Latin rotations balance positions but not preceding-mode
+exposure. In persistent 4K replicate 0, dense control 0 follows mode 3 ten
+times while dense control 2 follows mode 3 five times. This imbalance is not
+proof that carryover caused the control discrepancy. V1 remains reported
+separately and is neither overwritten nor pooled into V2.
+
+V2 changes only the caller schedule, using the six-row Williams construction
+based on `[0,1,5,2,4,3]`, with shuffled labels and row order in each block.
+Every mode occupies every position once, and each of the 30 ordered pairs of
+different modes occurs exactly once within rounds. A checked retained-dense
+encode precedes every round and is destroyed before its timed modes. This
+conditioning standardizes the start; it does not claim to erase all allocator,
+cache, thermal or higher-order history. Conditioning encodes are counted but
+excluded from paired timing statistics. The unchanged resident object and
+libraries retain the prior qualification; the scheduling-only V2 caller is
+not separately host-ASan-instrumented. Its separate native audit preserves all
+205 kernels, and its preflight rechecks exact outputs, order and touch bounds.
+
+V2 passes 602 preflight encodes (including 84 conditioning encodes), then
+5,908 performance-campaign encodes: 4,032 measured, 1,008 warm, 840 conditioning
+and 28 references. Its 28 serial windows and 48 measured pairs per combined
+cell match V1's input/lifetime/replicate coverage. The following percentages
+are profiled-total paired medians, not conditioning-inclusive throughput.
+
+| Input | Persistent, full/dense 0 | Persistent, full/dense 2 | Persistent, stride/dense 0 | Fresh, full/dense 0 | Fresh, full/dense 2 | Fresh, stride/dense 0 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Sample | -0.99% | -0.69% | -0.04% | -0.29% | -0.14% | +1.31% |
+| Padded 1080p | -4.65% | -2.96% | -4.47% | -3.71% | -3.71% | -3.59% |
+| Padded 4K | -3.36% | -2.75% | -1.19% | -0.90% | +0.67% | +0.74% |
+| Flower | -0.96% | -3.06% | -1.08% | +0.79% | -0.47% | +0.50% |
+| Keong macan | -2.82% | -3.94% | -3.54% | -2.50% | -2.07% | -3.40% |
+| Riaphotographs | -0.93% | -0.41% | -3.24% | -0.68% | -1.71% | -1.73% |
+| Bliznaca | -1.01% | -1.21% | -1.63% | -0.63% | -0.96% | -1.62% |
+
+Full pre-wait fill's 1080p total improvement against dense 2 is 2.96%/3.71%
+for persistent/fresh backend, with 28/48 and 33/48 wins and median same-round
+savings of 2.27/3.53 ms. The outer timer improves 2.82%/3.54%. Each of its four
+separate 1080p process-window medians improves against both dense controls.
+Duplicate full-fill mode 4 improves in the combined 1080p cohorts too, though
+its second fresh-backend replicate is near flat/slightly adverse. This
+supports a real local benefit without claiming every encode is faster.
+
+At persistent 4K, mode 1 improves against dense 2 by 2.75%, with 33/48 wins
+and an 8.91 ms median saving; its separate replicate medians are -2.63% and
+-4.94%. But duplicate full-fill mode 4 is 2.94% slower than mode 1, despite
+identical implementation, and one of its replicate medians loses against both
+dense controls. Fresh 4K mode 1 remains +0.67% versus dense 2 (only 19/48 wins,
+outer timer +0.56%) while improving 0.90% versus dense 0. Stride touching is
+also not a general replacement. V2 reduces neither all noise nor the need for
+duplicate controls: combined dense duplicates span -1.18% to +1.38%, and
+full-fill duplicates span -2.62% to +2.94%. Paired medians are not confidence
+bounds; no causal explanation for all remaining variation is established.
+
+The measured subinterval gives a clearer mechanism at 1080p. Full pre-wait
+fill costs a median 5.21/5.31 ms for persistent/fresh backend, while wait time
+falls from dense 2's 17.09/15.81 ms to 11.78/10.62 ms. Readback falls from
+6.02/6.31 ms to 4.97/4.90 ms. The complete post-submission interval saves
+2.83/2.97 ms against dense 2, winning 47/48 and 48/48 pairs. Against post-wait
+fill, that interval wins every pair and saves 5.16/4.86 ms. Separate medians
+need not add exactly, so these are not an additive latency budget.
+
+Fresh 4K illustrates why a stage gain is insufficient: its post-submission
+interval saves 6.54 ms against dense 2, yet the complete total is slower by a
+median 2.67 ms. All 41 phase fields, interval timings and separate replicates
+are retained, not filtered to favorable stages. Boundary telemetry is
+63/71 C and 210/1282 MHz SM clock for V1, and 64/71 C and 1380/1282 MHz for V2.
+Clocks/power management are not locked; boundary samples are not kernel clocks.
+
+### Disposition and next gates
+
+Overlapped ordinary first-touch is a qualified prototype with repeated 1080p
+whole-encode gains and directly observed CPU/GPU overlap. It is not promoted
+unconditionally: fresh 4K is not a stable gain, duplicate controls still vary,
+and production/batch-throughput qualification is not complete. All public
+production sources and the 40-file S79 runtime remain unchanged. No image-size
+cutoff or host-storage reuse policy is inferred from these samples.
+
+Two bounded follow-ups remain unimplemented: skip the redundant tail clear
+only when this exact owner has already been fully initialized, and combine
+pre-wait host first-touch with S82's narrow transfer while comparing against
+both dense and narrow controls. The latter must include compact staging's
+allocation, initialization and memory cost. Any retained variant still needs
+failure/ownership, complete production and concurrent batch gates. This is
+continued optimization, not evidence that fully resident encoding is maxed out.
+
+The ignored `s83_*` bundle preserves V1/V2 callers, the unchanged diagnostic
+resident implementation, binaries, traces, raw logs and independent analysis.
+`python build-cuda-ninja/profiles/s83_validate.py --frozen` reconstructs both
+tables and verifies 12,272 explicitly counted exact encodes, four native-
+identical executables, eight traces and 167 non-overlapping completed campaign
+intervals. The count excludes additional functional-test and profile encodes;
+interval checks exclude CPU-only work and do not claim blanket machine idleness.
+V2 conditioning is counted separately and not included in paired performance
+statistics. `--current` additionally checks source/docs snapshots and the
+unchanged runtime. No security, privilege, clock, power, cooling or priority
+changes were made, and no firewall/admin/permission block was observed.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

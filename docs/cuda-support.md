@@ -1239,6 +1239,20 @@ work is the next untested lead. Preserved setup/visibility/timeout failures
 are not counted as passes or attributed to a firewall/admin block. No security
 or device setting changes occur; fully resident optimization remains open.
 
+[S83](cuda-optimization-s1.md#overlapped-dense-host-first-touch-s83) overlaps
+ordinary final-host-buffer initialization with resident GPU work, without
+changing kernels, transfers, synchronizations or frame ownership. It qualifies
+12,272 exact encodes across separate position-balanced and preceding-mode-
+balanced campaigns, seven functional jobs, seven scoped host-ASan jobs and
+three GPU memchecks. Eight traces directly show CPU initialization overlapping
+GPU kernels. The stronger schedule measures full-initialization 1080p gains
+of 2.96%/3.71% against duplicate dense control for persistent/fresh backend,
+but fresh 4K remains mixed despite a faster post-submission stage. Production
+is unchanged: avoiding redundant tail clearing, combining overlap with narrow
+transport, and production/batch qualification remain next gates. No permission
+or firewall block is observed; the quiet initial 4K memcheck is verified active
+work, not restarted. The backend is not considered maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
