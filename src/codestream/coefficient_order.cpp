@@ -27,6 +27,7 @@
 #include "codestream/representation_storage_plan.h"
 #include "core/ac_strategy.h"
 #include "core/thread_budget.h"
+#include "core/worker_launch_internal.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -124,7 +125,8 @@ Status RunParallelCoefficientGroups(
   };
   try {
     for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      workers.emplace_back(run_worker, worker);
+      thread_budget_internal::LaunchWorker(workers, thread_budget_internal::WorkerLaunchSite::kCoefficientOrders,
+                                          worker, run_worker, worker);
     }
   } catch (const std::system_error&) {
     next_index.store(count, std::memory_order_relaxed);

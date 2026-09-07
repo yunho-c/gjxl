@@ -1,8 +1,10 @@
 # Explicit synchronous batch shutdown
 
 This scheduling checkpoint follows `9bc7f24`. It closes the explicit
-shutdown/drain gate in [milestone 6](resident-execution.md#6-coordinated-cpugpu-scheduling--in-progress),
-not the remaining timing, launch-failure or final performance qualification.
+shutdown/drain gate in [milestone 6](resident-execution.md#6-coordinated-cpugpu-scheduling--in-progress).
+The subsequent [timing](resident-batch-timing.md) and
+[worker-launch](resident-worker-launch.md) checkpoints close those respective
+gates; final integrated-baseline qualification remains outstanding.
 
 ## Public contract
 

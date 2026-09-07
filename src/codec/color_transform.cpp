@@ -26,6 +26,7 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "core/thread_budget.h"
+#include "core/worker_launch_internal.h"
 
 namespace gjxl {
 using resource_budget_internal::ManagedVector;
@@ -188,7 +189,8 @@ Status RunParallelRows(
   };
   try {
     for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      workers.emplace_back(run_worker);
+      thread_budget_internal::LaunchWorker(workers, thread_budget_internal::WorkerLaunchSite::kColorRows,
+                                          worker, run_worker);
     }
   } catch (const std::bad_alloc&) {
     next_row.store(extent.height, std::memory_order_relaxed);

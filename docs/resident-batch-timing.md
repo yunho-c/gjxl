@@ -98,7 +98,9 @@ smoke checks, not independent-process performance qualification. The changed
 runtime, benchmark and test units also pass strict
 `-Wall -Wextra -Wpedantic -Werror` syntax checks.
 
-Real parallel-loop launch-failure coverage and the final independent-process
-comparison against the integrated preparation baseline remain outstanding.
+The [worker-launch checkpoint](resident-worker-launch.md) now covers real
+parallel-loop construction failures and admitted service timing during drain.
+The final independent-process comparison against the integrated preparation
+baseline remains outstanding.
 The new benchmark columns are observability, not by themselves performance
 evidence or a reason to declare the scheduling effort finished.

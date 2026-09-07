@@ -29,6 +29,7 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "core/thread_budget.h"
+#include "core/worker_launch_internal.h"
 #include "util/fast_math.h"
 
 namespace gjxl {
@@ -115,7 +116,8 @@ Status RunParallelInitialQuantWork(
   };
   try {
     for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      workers.emplace_back(run_worker);
+      thread_budget_internal::LaunchWorker(workers, thread_budget_internal::WorkerLaunchSite::kInitialQuantization,
+                                          worker, run_worker);
     }
   } catch (const std::bad_alloc&) {
     next_index.store(count, std::memory_order_relaxed);

@@ -218,8 +218,10 @@ generated-artifact failure to the CPU scheduler.
   retained-result readiness. Use those metrics alongside complete public-call
   makespan in the remaining final qualification, preserving the distinct later
   whole-array publication boundary.
-- Exercise real loop launch failures in addition to the primitive partial-launch
-  model, and audit exceptional shutdown/queue transitions with the final scheduler.
+- The [worker-launch checkpoint](resident-worker-launch.md) now exercises actual
+  loop construction failures, partial-worker cleanup, fallback/recovery and
+  exceptional shutdown/queue transitions. Its sanitizer matrix supplements the
+  primitive partial-launch model.
 - Qualify the complete final scheduler against the integrated preparation baseline,
   not just this immediate parent: small/natural/padded 1080p/4K and mixed-size
   inputs, several in-flight counts, simultaneous callers, single-image regressions,

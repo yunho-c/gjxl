@@ -35,6 +35,7 @@
 #include "codestream/sections.h"
 #include "codestream/serializer_storage_plan.h"
 #include "core/thread_budget.h"
+#include "core/worker_launch_internal.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -176,7 +177,8 @@ Status RunParallelSections(size_t count, Function&& function) {
   };
   try {
     for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      workers.emplace_back(run_worker, worker);
+      thread_budget_internal::LaunchWorker(workers, thread_budget_internal::WorkerLaunchSite::kSerializerSections,
+                                          worker, run_worker, worker);
     }
   } catch (const std::system_error&) {
     next_index.store(count, std::memory_order_relaxed);

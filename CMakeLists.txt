@@ -1388,6 +1388,24 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME batch_scheduling_cpu COMMAND gjxl_batch_scheduling_test --cpu-only)
   set_tests_properties(batch_scheduling batch_scheduling_cpu PROPERTIES TIMEOUT 120)
 
+  add_executable(gjxl_worker_launch_failure_test tests/worker_launch_failure_test.cpp)
+  target_link_libraries(gjxl_worker_launch_failure_test PRIVATE gjxl_codestream)
+  # Partition the complete matrix by route: instrumentation makes whole-image
+  # recovery expensive. No case is removed, and each synchronization gate keeps
+  # its own short deadline independently of the test's instrumentation allowance.
+  function(gjxl_add_worker_launch_failure_test group backend)
+    add_test(NAME worker_launch_failure_${group}
+      COMMAND gjxl_worker_launch_failure_test --group ${group})
+    set_tests_properties(worker_launch_failure_${group} PROPERTIES
+      TIMEOUT 600 LABELS worker-launch-${backend})
+  endfunction()
+  foreach(group startup forward cpu_color cpu_aq cpu_orders cpu_sections cpu_drains)
+    gjxl_add_worker_launch_failure_test(${group} cpu)
+  endforeach()
+  foreach(group metal_forward metal_orders metal_sections metal_drains)
+    gjxl_add_worker_launch_failure_test(${group} metal)
+  endforeach()
+
   add_executable(
     gjxl_rate_control_search_test
     tests/rate_control_search_test.cpp

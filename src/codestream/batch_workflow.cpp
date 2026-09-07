@@ -7,6 +7,7 @@
 #include "codestream/workflow_admission.h"
 #include "codestream/workflow_internal.h"
 #include "core/cpu_execution.h"
+#include "core/worker_launch_internal.h"
 
 #include <array>
 #include <atomic>
@@ -143,7 +144,8 @@ public:
     try {
       workers_.reserve(max_in_flight_);
       for (size_t index = 0; index < max_in_flight_; ++index) {
-        workers_.emplace_back([this, index] { WorkerLoop(index); });
+        thread_budget_internal::LaunchWorker(workers_, thread_budget_internal::WorkerLaunchSite::kBatchDriver,
+                                            index, [this, index] { WorkerLoop(index); });
       }
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
       Stop();

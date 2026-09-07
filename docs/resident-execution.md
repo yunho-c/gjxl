@@ -306,8 +306,10 @@ boundaries. The [batch lifecycle checkpoint](resident-batch-lifecycle.md) adds
 explicit shutdown/drain with active and queued calls. The
 [batch timing checkpoint](resident-batch-timing.md) separates arrival queueing,
 image service and retained-result readiness from whole-array publication.
-Real loop launch-failure and final integrated-baseline qualification remain outstanding;
-these checkpoints do not mark milestone 6 complete.
+The [worker-launch checkpoint](resident-worker-launch.md) exercises actual
+parallel-loop construction failures, recovery and concurrent shutdown. Final
+integrated-baseline qualification remains outstanding; these checkpoints do not
+mark milestone 6 complete.
 
 The [batch driver](../src/codestream/batch_workflow.h) already permits one image's
 CPU work to overlap another's Metal work. It invokes independent single-image
