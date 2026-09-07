@@ -15507,6 +15507,224 @@ hashes. S88's frozen/current/prior validator also passes before S89 edits.
 Both tracked changes are documentation-only; unrelated user files remain
 untouched.
 
+## Shared convolution normalization (S90)
+
+S90 follows S89 `6d36721` and tests normalization in the retained 33-tap
+vertical low/medium convolution. **Neither guarded reciprocal variant is
+retained.** Both lose to the original and native-identical control on every
+HD/4K capture, in vertical-only and horizontal-plus-vertical timing, across
+both repetitions. Most resolution-group regressions are around 1–2%.
+Production source and the 40-file S79 runtime remain unchanged.
+
+### New reuse boundary, unchanged convolution arithmetic
+
+S62 already tested row grouping, tile dimensions, thread counts and tap-major
+controls; S73 tested phased channel storage and register limits. S90 instead
+shares a denominator operation. The retained kernel computes three channel
+quotients per output row after the same included-weight sum. Interior rows
+throughout a tile share that divisor; edge rows may have different sums.
+
+| Mode | Normalization |
+| --- | --- |
+| 0 | Retained three channel divisions |
+| 1 | Renamed, native-identical retained kernel |
+| 2 | One shared reciprocal per CTA for interior triples; ordinary division at edges |
+| 3 | One reciprocal per output row, shared across its three channels |
+
+The candidates adapt S66's refined reciprocal recipe to a different reuse
+boundary: channels/rows, rather than two pixel-dependent Malta quotients.
+They use a rounded reciprocal, a rounded numerator product, a fused residual,
+and a fused quotient correction. Numerators are handled by magnitude with
+explicit sign-bit restoration, including signed zero. Positive divisors in
+`[2^-60, 2^60]` and zero or numerator magnitudes in `[2^-30, 2^30]` use the
+guarded route; other values retain ordinary rounded division. Mode 2 also
+retains ordinary division for triples touching a vertical edge.
+
+All tap/FMA and included-weight addition orders, rounded fallbacks, six
+low/medium output expressions, input/output strides, tile/grid geometry and
+launch count are unchanged. The tile remains 32x48 with 256 threads and
+three shared channel halos. No host allocation, transfer, arena-layout,
+public ABI, quality policy, environment dispatch or production flag changes.
+Range guards and a rounded reciprocal are not by themselves a proof that
+every final quotient is correctly rounded; the following are empirical
+qualification results, not an exhaustive mathematical guarantee.
+
+The GPU object and six guard/replay/weight-fixture release/host-ASan
+executables contain the same 78 GPU bodies: 75 retained, one renamed exact
+control and two candidates. Retained bodies match S89 after canonicalizing
+only NVCC's translation-unit namespace. The control also matches after
+renaming its symbol; instruction encodings, offsets and scheduling bits are
+still compared. The independent quotient probe has two additional diagnostic
+bodies and is not included in the 78-body count.
+
+| Mode | Registers | Shared bytes | Static instructions | Static RCP | Static FFMA | Static LDS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 / 1 | 54 | 30,856 | 1,736 | 11 | 651 | 219 |
+| 2 | 50 | 30,860 | 2,048 | 25 | 723 | 219 |
+| 3 | 48 | 30,856 | 1,936 | 18 | 682 | 219 |
+
+All have zero stack/spills. Lower register use does not improve the
+shared-storage-limited theoretical block count on this GPU. This is a
+resource-budget inference, not a fresh achieved-occupancy measurement.
+The guards/fallbacks enlarge static code and reciprocal counts despite
+sharing work on the intended fast path. Static counts include fallback,
+edge and setup paths; they do not count executed operations or establish
+which instructions caused the measured regressions. Image-plane traffic
+and the shared input-load structure remain unchanged.
+
+### Arithmetic and state qualification
+
+The current permanent fixture is hash-identical to its S73 snapshot.
+Release and host-ASan each run its 460 cases in all four modes, preserving
+three-stage reuse, changed input values, null unused blur planes, all 16
+allocations, guards and two independent references. Eight further mode/case
+combinations cover 1x4,194,305 and padded 33x262,145 flattened grids. Empty
+and invalid-stride API checks remain enabled for every mode.
+
+Memcheck, initcheck, synccheck and racecheck each cover 80 scoped permanent
+fixtures per mode. All pass; memory checking reports zero errors/leaks and
+race checking zero hazards/errors/warnings. A separate extension tests
+eight weight families: positive/signed zero, negative impulse, NaN,
+infinity, tiny/huge magnitude and alternating signs. Release and host-ASan
+each pass 1,280 added fixtures; scoped memcheck passes 384 with zero errors
+and leaks. These do not relax or replace the original bitwise comparisons.
+Together, the convolution jobs cover 7,912 fixture executions and 47,472
+two-oracle stage comparisons, including overlapping cases across tools.
+
+The independent quotient probe checks 402,653,184 results in 128 launches
+(two recipes, 64 seeds, 1,048,576 triples each). It combines guarded-range
+and raw-bit inputs, signed/exceptional numerator endpoints, and mode 2's
+interior/edge decision. Every result matches ordinary rounded division
+bit-for-bit. These counts include fallback lanes; they are not that many
+distinct fast-path inputs or a proof over all float combinations. Explicit
+unusual-weight convolution tests additionally exercise zero, negative and
+exceptional divisors that random bit sampling alone might miss.
+
+### Captured-input timing
+
+S90 reuses the 18 hash-checked S73 convolution captures from 4K, HD and
+Flower. Their six calls per workload alternate full and half resolution,
+with packed half-reference output and working-width strides in subsequent
+half-size calls. They are not six Malta stages, fresh captures, all AQ
+iterations, or every pyramid input. Replay restores the recorded strides
+but uses diagnostic guard offsets and separate allocations, not the
+integrated arena's exact addresses.
+
+Thirty-six release and 36 host-ASan preflight jobs cover every capture in
+vertical-only and horizontal-plus-vertical forms. Each first checks the
+retained output against the separate-pass reference, then all four modes
+against all 16 retained allocations. Every mode's captured graph contains
+four vertical kernels or four horizontal/vertical pairs, with exact node
+counts checked. Graphs are diagnostic submission machinery, not a proposed
+production graph-capture feature.
+
+The 72 timing jobs use two repetitions with reversed capture, boundary and
+permutation order. Eight warm rounds per mode precede all 24 permutations
+of four modes. Every measured position and directed neighbor is balanced.
+There are 6,912 measured and 2,304 warm event observations, with exact
+16-allocation comparison after every window. The 144 preflight/timing jobs
+check 9,792 four-call graph bursts, or 39,168 convolution stage/preparation
+invocations; separate setup/reference calls are not included in that count.
+These are not codec encodes.
+
+Events include graph execution, with the unchanged horizontal kernel inside
+each H+V pair. Allocation, initial preparation, reference construction,
+readback and comparisons are outside the event interval. They can still
+affect the surrounding cache/power state. Large jobs spend substantial
+wall time in full-array readback and comparison. Event intervals are not
+profiler-summed kernels, isolated division latency, or whole-encode time.
+No outlier filtering, clock normalization or cross-boundary pooling occurs.
+
+### Results and disposition
+
+The table sums medians for the three captured calls at each resolution.
+Percentages compare those sums to mode 0, with r0/r1 shown separately and
+negative meaning faster. A sum is not a measured encoder sequence. Raw
+per-capture paired medians and all control contrasts remain in the report.
+
+| Capture / resolution | Timed work | Retained sum ms, r0 / r1 | Copied control | Shared inverse | Per-output inverse |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 4k / full | Vertical | 6.050304 / 6.128512 | +0.161% / +0.138% | +1.170% / +0.739% | +0.876% / +0.643% |
+| 4k / full | H+V | 9.834752 / 8.797952 | -0.216% / -0.290% | +1.550% / +0.381% | +1.724% / +1.017% |
+| 4k / half | Vertical | 1.490304 / 1.479424 | -0.361% / +0.000% | +0.721% / +1.280% | +1.331% / +1.523% |
+| 4k / half | H+V | 2.150912 / 2.157056 | -0.095% / +0.131% | +1.339% / +0.789% | +1.101% / +1.127% |
+| 1080p / full | Vertical | 1.468416 / 1.468416 | -0.096% / +0.087% | +1.020% / +1.151% | +1.682% / +1.473% |
+| 1080p / full | H+V | 2.119040 / 2.121600 | +0.079% / +0.145% | +0.948% / +0.923% | +1.232% / +1.297% |
+| 1080p / half | Vertical | 0.372736 / 0.373632 | +0.103% / +0.034% | +1.717% / +1.439% | +1.957% / +1.096% |
+| 1080p / half | H+V | 0.568320 / 0.570368 | -0.045% / -0.314% | +0.968% / +0.314% | +1.419% / +0.830% |
+| flower / full | Vertical | 0.201728 / 0.205952 | +0.127% / +0.062% | +1.396% / +0.932% | +1.777% / +0.186% |
+| flower / full | H+V | 0.323712 / 0.309248 | -0.277% / -0.041% | +0.870% / +0.911% | +0.712% / +0.828% |
+| flower / half | Vertical | 0.067328 / 0.065792 | +3.232% / +0.778% | +3.992% / +4.086% | +6.654% / +0.000% |
+| flower / half | H+V | 0.101632 / 0.100480 | +0.000% / +0.510% | -0.756% / -1.274% | -0.378% / -1.274% |
+
+Both candidates lose to both modes 0 and 1 in all 24 HD/4K
+capture/boundary combinations across both repetitions, using paired-percent
+medians. Neither has a vertical-only capture that wins against both
+controls in both repetitions. Across all 36 capture/boundary combinations,
+mode 2 has 34 repeatable losses, one mixed result and one repeatable win;
+mode 3 has 30 losses, five mixed results and the same single win.
+That win is Flower's last half-size H+V capture, not its vertical-only
+counterpart. Small H+V improvements without targeted vertical improvement
+do not establish that normalization became faster.
+
+The copied control's per-capture paired changes span −1.15..+6.72%, with
+the larger deviations on small work. Absolute cohorts also drift: full-size
+4K H+V baseline sums are 9.834752 and 8.797952 ms, while their separate
+vertical sums are 6.050304 and 6.128512 ms. These observations are retained;
+they cannot be subtracted to infer unchanged horizontal-kernel duration or
+attributed to a particular clock/OS cause. The within-cohort paired losses
+against both controls remain the basis for rejecting the variants.
+
+Do not integrate these guarded reciprocal recipes. Register reduction,
+reciprocal sharing and broad numerical conformance do not deliver a net
+benefit here, with unchanged halo traffic and additional guard/refinement/
+fallback machinery. The evidence does not isolate that machinery's individual
+costs and does not prove normalization or convolution is fully optimized.
+No whole-encoder integration, new encoded/decoded quality run, full release
+suite or throughput claim is made for a candidate that fails this stage gate.
+
+The next useful experiment should change more than where the same guarded
+division recipe executes. Pre-normalized interior convolution weights are
+one different arithmetic hypothesis, but they change floating-point
+accumulation results and would need explicit error and decoded-quality
+gates, not S90's bit-exact claims. S73's size-aware phase policy and broader
+convolution/final-pass data movement also remain open. Fully-resident VarDCT
+encoding is not considered maxed out.
+
+### Completion and preservation
+
+All executed builds, arithmetic/convolution tests and timing jobs pass
+without restart. Mode 3 has a benign unused-shared-declaration compiler
+warning; native shared usage confirms no extra storage is emitted for it.
+An initial read used the wrong permanent-test filename before `rg` resolved
+`tests/cuda_low_medium_test.cpp`; no build or GPU job was affected.
+Unlike S89's unflushed summary, every S90 completion marker is explicitly
+flushed and survives sanitizer wrapping.
+
+The 83 correctness jobs (11 direct, 72 captured-input) and 72 timing jobs
+have 155 verified, completed, non-overlapping GPU-job intervals. This does
+not assert machine-wide isolation: CPU-only builds/native audits occur
+during qualification, not performance timing. Racecheck runs 09:33:19 to
+09:40:27 UTC on 2026-09-07, about 7m08s, with observed process activity and
+mode progress. Timing runs 09:43:31 to 09:55:59 UTC, about 12m27s.
+No admin/firewall/permission block is observed and restricted hardware
+counters are not retried. Security, privilege, clocks, power, priority and
+cooling settings are unchanged.
+
+The RTX 3060 Laptop / CUDA 11.8 / sm_86 / MSVC 14.37 setup remains, with
+clang-cl host ASan and driver 577.00. A post-campaign snapshot reads 0% GPU
+utilization, 58 C, 1,282 MHz and 22.81 W; it is not in-kernel telemetry.
+S89's frozen/current validation passes before the documentation edit.
+
+Ignored `build-cuda-ninja/profiles/s90_*` files retain the source snapshots,
+diagnostic helpers, probes, graph/runner scripts, native dumps/resources,
+all completed logs and raw samples, comparison tables, numerical evidence,
+source/binary/dependency hashes and validators. Frozen verification rebuilds
+statistics from raw rows, checks completion counts, serial GPU intervals,
+native identities, table text and the retained runtime. Six source/document
+snapshots separate frozen evidence from future current-source edits.
+Only the two CUDA documents change; user-owned untracked files stay untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

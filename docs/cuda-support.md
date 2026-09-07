@@ -1337,6 +1337,19 @@ independently establish completion without rerunning. No permission block
 is observed. Production and the 40-file S79 runtime remain unchanged;
 larger convolution/final perceptual mechanisms remain open, not maxed out.
 
+[S90](cuda-optimization-s1.md#shared-convolution-normalization-s90) tests
+guarded reciprocal sharing across convolution channels/rows, including one
+CTA-wide interior reciprocal. Both variants pass 402,653,184 primitive
+quotient checks and 47,472 two-oracle fixture-stage comparisons, but lose
+to both retained controls on every HD/4K capture in both timing boundaries
+and repetitions. Lower register use does not overcome unchanged shared
+storage/traffic and additional guard/refinement/fallback code. All 155
+correctness/timing GPU jobs complete, including a 7m08s active racecheck
+with zero hazards. No permission block or test/timing restart occurs.
+Production and the S79 runtime remain unchanged. Other convolution
+arithmetic/data-movement hypotheses remain open; rounding-changing variants
+would need independent error and decoded-quality gates.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
