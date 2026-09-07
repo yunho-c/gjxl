@@ -1403,6 +1403,23 @@ working strides, prepared reuse, failure/quality gates and complete encode
 timing remain to be qualified. Production and all 40 retained runtime files
 remain unchanged; the flat fused primitive is the next integration candidate.
 
+[S95](cuda-optimization-s1.md#resident-mask-fusion-integration-and-qualification-s95)
+integrates S94's flat fusion in an isolated resident diagnostic encoder,
+using dead plane 23 for expanded/half-scale final staging and preserving
+live horizontal input in plane 24. Exact prepared-state tests, host ASAN,
+four CUDA sanitizer tools, 124 CPU-differential prepared cases, and 24
+scored/unscored encodes pass; 3,612 paired timing encodes preserve bytes and
+summaries. Integrated traces remove four launches with unchanged allocation
+and transfer histograms and reduce the target vertical-blur/final boundary
+about 8.7-9.4% at 4K. Whole-encoder timings remain mixed against both
+identical controls and both candidate copies, so this is not an end-to-end
+speedup claim or a production promotion. Next measure steady public prepared
+Compare on real inputs before enlarged workflow and decoder qualification.
+The failed invalid-option fixture and recovered trace checks are retained;
+each capture has one known post-kernel invalid-context status also present
+in S93. No admin/firewall/permission block is observed. Production remains
+S79 with all 40 retained runtime files unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -16798,6 +16798,276 @@ All 40 retained runtime files remain byte-identical. Only the two CUDA
 documents change; the three user-owned untracked files remain untouched.
 
 
+## Resident mask-fusion integration and qualification (S95)
+
+S95 follows S94 `7e67dd4`. The flat fused candidate is now integrated in
+an isolated diagnostic encoder and passes exact prepared-state, sanitizer,
+and codestream checks. Its targeted GPU boundary remains faster in paired
+traces. Complete-encode timings, however, do not establish a consistent win
+against both native-identical controls and both candidate copies. Keep the
+qualified candidate for a lower-noise prepared-Compare measurement; do not
+promote it or declare the resident path maxed out. Production remains S79
+`914b42c`, with all 40 retained runtime files unchanged.
+
+### Integration and scratch ownership
+
+One diagnostic binary provides four modes: retained (0), an identical
+unfused control (1), flat fusion (2), and an identical flat copy (3).
+`S95_FINAL_MODE` selects standalone process modes; the paired harness sets
+the diagnostic atomic directly. `LaunchCudaButteraugliCompare` loads it
+once and passes that value to all three `LaunchDifference` sites. This
+global test selector is not a proposed production threading policy.
+
+The candidates preserve S94's device arithmetic and flat256 output mapping.
+Only host launch order and final staging ownership change. All six Malta
+stages finish before mask preparation. Distorted mask precompute writes
+plane 23 before the now-dead distorted psycho plane 19 can be reused for
+the uncached reference mask. The uncached half-scale reference mask is
+prepared and blurred first, using 19 -> 24 -> 19. Distorted horizontal blur
+then writes 23 -> 24, and fused vertical blur/final consumes plane 24.
+
+Expanded and half-scale final output uses the dead raw-mask plane 23,
+not the live cross-row horizontal-input plane 24. Both the expanded
+write/crop-read pair and half-scale write/composition-read pair select the
+same staging plane. Retained/control modes keep plane 24 staging and the
+original distorted/reference blur order. Nonexpanded main output still
+writes the caller distance map. Plane counts, working strides, allocation,
+public validation, and failure handling are unchanged. The main reference
+mask remains cached in plane 20; reference blur is not fused or eliminated.
+
+Ten GPU-object/executable native audits find 79 standalone bodies and 209
+integrated encoder bodies. All 205 retained encoder bodies match the S79
+native dump; all 79 selected Butteraugli bodies match S94's flat artifact
+after excluding its two unused tiled candidates. The four added bodies are
+two controls and two flat copies. Each flat copy has 40 registers, zero
+shared memory, stack, spills or barriers, and 928 static instructions with
+53 LDG instructions. These are static counts, not measured memory traffic.
+CUDA 11.8, MSVC 14.37 and sm_86 are used without fast-math changes. Builds
+link the retained libraries without overwriting them.
+
+### Prepared-state and encoded-output qualification
+
+An initial exact-test job exits 1 after two successful 1x1 cases because
+its third fixture sets `x_multiplier=0`. That value was useful in S94's
+low-level primitive test but is invalid for the public prepared API, which
+requires strictly positive finite options. The failed source, binaries,
+log and result are preserved. A separately named v2 fixture changes that
+option to 3.7; no kernel or integration change is needed.
+
+Release and host-ASAN v2 suites each exercise 204 cases: 34 shapes, packed
+and padded output layouts, and three valid option sets. Shapes include
+1x1, narrow/tall and expanded boundaries, odd/even HD and 4K, and 15x1025
+and 1025x15. The options are defaults; hf=2.5, x=0.75, intensity=255; and
+hf=0.6, x=3.7, intensity=80. Inputs are bounded finite RGB fixtures, not
+captured photographic comparisons. Real public-owner full-width half-scale
+strides and expanded/cropped paths are exercised.
+
+Each case owns two independently prepared objects and runs changed-input
+rounds 1 -> identity -> 2 -> 1. Every round compares the retained oracle
+with all four modes in alternating orders. Entire maps, host padding and
+double-score bits match exactly. Tests preserve input/leading/trailing/row
+guards, compare device output with `ReadDistanceMap`, check finite output
+and compact memory accounting, and require zero new device allocations and
+one submission per successful Compare. The 16 candidate and four oracle
+comparisons per case also exercise repeated reuse after changed inputs.
+
+Eight invalid requests per mode test an empty descriptor, null distorted
+plane, output overlap with reference or distorted input, score/map overlap,
+short map stride, null map buffer, and bad score extent. Each rejects
+without allocation or submission, keeps the prepared object valid, and
+preserves its last successful map and score: 32 rejected requests per case.
+
+Memcheck, initcheck, synccheck and racecheck each run eight scoped cases:
+3x7, 17x29, 15x1025 and 1025x15, each packed and padded with default options.
+All report zero errors/hazards; memcheck's full leak and stream-ordered race
+checks report zero leaked allocations. Across the six successful custom
+jobs, totals are 440 cases, 7,040 candidate comparisons, 1,760 oracle
+comparisons and 14,080 rejected requests. The failed initial fixture is
+excluded. Host ASAN instruments the harness, not linked libraries or CUDA
+device arithmetic.
+
+The existing CPU-differential prepared suite separately passes all 31 cases
+in each mode (124 cases), including its 1.5e-3 CPU tolerance, 1e-7 identity
+tolerance, compact storage, deterministic distortion/identity/restore reuse,
+input guards, zero steady allocations, and injected completion failure
+that invalidates the prepared object and rejects the next Compare.
+
+Twenty-four scored/unscored fully-resident encodes cover HD, 4K and flower
+in all four modes at distance 1.2, effort 7. Bytes, SHA-256, strategy
+summaries and final perceptual score summaries match retained S70 evidence.
+No new independent decoder or quality-metric run is performed in S95;
+identical bytes preserve previously checked outputs, but do not constitute
+a new decoder qualification or a broader quality claim.
+
+### Integrated profiling boundary
+
+Twelve Nsight Systems captures pair retained mode 0 and flat mode 2 on 4K,
+HD and flower, with two repetitions and reversed case/mode order. Each
+uses three warmups and one profiled fully-resident GPU-only sample. Capture
+uses CUDA tracing and memory accounting, no CPU sampling or privileged
+hardware counters, and `--capture-range-end=stop --kill=false --wait=primary`.
+
+The first capture exits successfully and produces its report, but the
+launcher marks it unaccepted because Nsight does not forward the expected
+application stdout marker. That report is exported and verified, not
+rerun. Its original result remains unchanged, with a separate hashed
+recovery record. The remaining captures verify exported kernel counts.
+
+An initial trace-analysis assertion that every recorded runtime return is
+zero fails. All twelve captures contain exactly one post-kernel
+`cuCtxSynchronize=201`, also present in the retained S93 4K trace. CUDA's
+installed header identifies 201 as `CUDA_ERROR_INVALID_CONTEXT`, not a
+permission error. Every other recorded return is zero. The revised
+analyzer accepts only that exact status, once and after the final kernel;
+the failed analyzer and read-only investigations are retained. Its caller
+or cause is not established without a stack trace, so it is not attributed
+conclusively to profiling or application code. It is not a clean-zero
+runtime-status result and is not evidence of a firewall block.
+
+Both repetitions have identical allocation and transfer histograms
+(operation/kind, size and count). The only runtime-name count change is
+four fewer `cudaLaunchKernel_v7000` calls. Four original distorted vertical13
+and four original erosion/L2/final launches become four flat fused launches;
+all other kernel counts match. Total launches change 309 -> 305 at 4K,
+335 -> 331 at HD, and 374 -> 370 for flower.
+
+The like-for-like boundary is the sum of distorted vertical blur and final
+for retained mode, versus the fused kernel sum. Matching verifies the
+main/half-scale call sequence and excludes the unchanged reference blur.
+Comparing only the old final kernel with the fused kernel would include
+different work. Values below are GPU kernel sums in milliseconds, not
+complete-encode wall time:
+
+| Input | Repetition | Retained vertical + final ms | Fused ms | Change |
+| --- | ---: | ---: | ---: | ---: |
+| 4k | 0 | 11.890196 | 10.773460 | -9.392% |
+| 1080p | 0 | 1.978601 | 1.752866 | -11.409% |
+| flower | 0 | 0.289894 | 0.252390 | -12.937% |
+| flower | 1 | 0.289733 | 0.252550 | -12.834% |
+| 1080p | 1 | 1.964968 | 1.753604 | -10.757% |
+| 4k | 1 | 11.836066 | 10.810206 | -8.667% |
+
+Thus the integrated target boundary saves about 1.03-1.12 ms at 4K. These
+are separate captures with scatter, and cannot establish an encoder-wide
+gain by themselves. Total GPU kernel sums are also retained in the evidence,
+but are not used as a wall-time promotion gate.
+
+### Complete-encoder paired timing
+
+The single integrated binary measures seven retained PFM inputs: sample,
+4K, HD, flower, keong, riaphotographs and bliznaca. Each uses both reused
+and freshly created backends, two repetitions, and reversed case/backend
+order in repetition 1. Fully-resident distance 1.2, effort 7 and automatic
+CPU thread selection are fixed. Each job has one reference encode, eight
+warmup quartets, and all 24 mode permutations as shuffled measured quartets.
+Seeds are `950000 + repetition*1000 + case_index*10 + fresh`. Every encode
+checks exact bytes and summaries against its reference.
+
+All 28 jobs pass: 3,612 encodes comprise 28 references, 896 warmups and
+2,688 measured encodes. Forty-one public profile fields, backend creation,
+and an outer lifetime timer are retained. Public `total` and `outer_ms`
+are different boundaries: the fresh outer timer includes backend creation,
+encoding and destruction. There is no outlier removal, clock normalization,
+timeout restart, or manual priority/power change.
+
+Entries are median within-quartet paired percentage changes, repetition
+0 / 1; negative is faster. Fresh=0 reuses the backend; fresh=1 recreates it.
+Control/original quantifies native-identical baseline scatter. Both flat
+copies must be compared with both controls, not just the favorable column.
+
+| Input | Fresh | Boundary | Control / original % | Flat / original % | Flat / control % | Copy / original % | Copy / control % |
+| --- | ---: | --- | --- | --- | --- | --- | --- |
+| sample | 0 | total | +0.931 / +1.818 | +1.678 / +1.139 | -2.510 / -0.542 | +4.932 / +0.248 | -2.040 / -1.835 |
+| sample | 0 | outer_ms | +1.135 / +2.125 | +1.744 / +1.059 | -2.776 / -0.615 | +5.254 / +0.252 | -2.320 / -1.882 |
+| sample | 1 | total | -0.196 / -1.925 | -2.014 / -0.625 | -1.560 / +2.046 | -2.909 / -1.395 | -0.699 / +1.158 |
+| sample | 1 | outer_ms | -0.064 / -1.550 | -2.056 / -0.901 | -1.081 / +2.176 | -2.475 / -1.376 | -0.807 / +1.583 |
+| 4k | 0 | total | +0.578 / -0.480 | +1.150 / -1.341 | +0.220 / +0.923 | +1.096 / -1.865 | +2.504 / +1.269 |
+| 4k | 0 | outer_ms | +0.668 / -0.539 | +1.188 / -1.532 | +0.121 / +0.822 | +1.067 / -1.922 | +2.553 / +1.228 |
+| 4k | 1 | total | +1.049 / -1.588 | +1.146 / -0.922 | -0.410 / -0.060 | +1.356 / -1.342 | +1.688 / -1.386 |
+| 4k | 1 | outer_ms | +2.021 / -1.384 | +0.029 / -1.411 | -1.238 / +0.473 | +1.131 / -2.506 | +1.518 / -2.456 |
+| 1080p | 0 | total | +0.540 / -1.389 | -0.485 / -1.484 | +1.364 / -1.284 | -1.902 / -1.061 | -1.590 / -2.201 |
+| 1080p | 0 | outer_ms | -0.136 / -1.318 | -0.404 / -1.579 | +1.339 / -0.843 | -1.747 / -1.368 | -1.530 / -2.145 |
+| 1080p | 1 | total | -1.411 / -2.636 | -1.304 / -1.995 | +0.286 / -0.714 | -1.260 / -0.970 | +0.292 / -0.824 |
+| 1080p | 1 | outer_ms | -1.242 / -2.780 | -0.931 / -1.819 | -0.199 / -0.972 | -1.415 / -0.956 | -0.253 / -1.399 |
+| flower | 0 | total | +0.845 / +0.539 | -0.518 / +0.366 | -1.300 / +0.953 | -0.125 / +1.850 | -1.636 / +1.904 |
+| flower | 0 | outer_ms | +0.741 / +0.778 | -0.430 / +0.735 | -1.472 / +0.825 | -1.312 / +1.857 | -1.557 / +1.739 |
+| flower | 1 | total | +2.549 / +2.439 | +3.387 / -1.012 | -0.430 / -1.818 | +1.254 / -0.104 | -0.343 / -2.184 |
+| flower | 1 | outer_ms | +2.610 / +1.857 | +3.215 / -1.051 | +0.933 / -1.708 | +1.158 / -0.120 | -0.409 / -1.833 |
+| keong | 0 | total | +1.566 / +2.356 | +0.163 / +0.671 | -1.839 / -2.045 | +2.646 / +0.315 | -1.912 / -2.204 |
+| keong | 0 | outer_ms | +1.092 / +2.255 | +0.698 / +0.323 | -1.855 / -2.163 | +2.043 / +0.107 | -1.544 / -2.121 |
+| keong | 1 | total | +2.000 / +0.581 | +1.730 / -0.581 | +0.172 / -1.099 | +1.391 / -0.286 | -0.895 / -0.620 |
+| keong | 1 | outer_ms | +2.000 / +0.920 | +1.537 / -0.028 | +0.359 / -1.288 | +0.874 / -0.344 | -1.179 / -0.353 |
+| riaphotographs | 0 | total | +1.295 / +0.290 | +0.205 / +0.516 | -0.740 / -0.635 | +0.967 / +0.804 | -0.040 / +0.722 |
+| riaphotographs | 0 | outer_ms | +1.235 / +0.175 | +0.950 / +0.652 | -0.582 / -0.379 | +0.637 / +0.570 | +0.100 / +1.005 |
+| riaphotographs | 1 | total | +0.491 / -1.681 | +0.324 / -0.604 | +0.722 / -0.125 | -2.004 / -0.866 | +0.148 / -0.158 |
+| riaphotographs | 1 | outer_ms | -0.572 / -1.248 | +0.012 / -0.507 | +0.821 / -0.108 | -1.746 / -0.798 | -0.164 / +0.399 |
+| bliznaca | 0 | total | -0.693 / -0.067 | -1.094 / +0.809 | -0.373 / -2.675 | -0.569 / +0.548 | +1.217 / -1.875 |
+| bliznaca | 0 | outer_ms | -0.286 / -0.177 | -1.137 / +0.702 | -0.521 / -2.694 | -0.541 / +1.123 | +1.073 / -1.790 |
+| bliznaca | 1 | total | -2.393 / -0.621 | +0.246 / +2.038 | +0.155 / +3.128 | -1.280 / +1.324 | -1.915 / +1.256 |
+| bliznaca | 1 | outer_ms | -3.571 / +0.087 | -2.039 / +2.463 | +0.071 / +3.371 | -0.711 / +1.741 | -1.990 / +1.382 |
+
+Across eight comparisons per input/backend combination (two copies, two
+controls, two repetitions), all fourteen public-total outcomes are mixed.
+The quantization-pipeline field has two consistently faster and twelve
+mixed outcomes; the outer timer has one consistently faster (fresh HD)
+and thirteen mixed outcomes. None is consistently slower. A post-hoc
+within-quartet mean-of-copies diagnostic is retained separately; it is not
+substituted for the primary comparison or used to manufacture a promotion
+gate after seeing the results.
+
+Retained 4K public-total medians drift from 288.723250 to 329.370950 ms
+between repetitions with reused backends, and 376.310300 to 407.367250 ms
+with fresh backends. Fresh outer medians drift from 400.512800 to
+437.089150 ms. No measured clock/thermal evidence establishes a cause.
+The approximately 1 ms targeted saving is small compared with this whole
+workflow variation. Favorable HD results and the trace boundary support
+further investigation, not a general end-to-end speedup claim.
+
+### Disposition, operational record and frozen evidence
+
+Keep the diagnostic integration and next measure the public prepared
+Compare boundary repeatedly on resident real-image inputs, preferably
+retained source/decoded PFM pairs. Preserve both native-identical controls,
+both candidate copies, changed-input correctness, and realistic main/half
+strides. If that establishes a stable benefit, collect enlarged coupled
+fully-resident timings and the remaining decoder/release qualification
+before production promotion. Do not infer that fusion is universally slow,
+add an image-size threshold, or declare optimization exhausted from this
+mixed screen. Any eventual production build must use a new build directory
+or verified archival relocation so frozen dependency paths remain valid.
+
+All 75 GPU jobs have terminal, nonoverlapping intervals: one failed invalid
+fixture and 74 successful workloads, including the successfully recovered
+first profile capture. Release v2 qualification runs
+13:11:01.959777-13:13:01.316068 UTC on 2026-09-07; host ASAN finishes at
+13:15:31.281684. Racecheck runs 13:15:55.009706-13:19:47.921203 with steady
+progress. The measured complete-encode campaign runs
+13:29:04.347821-13:33:59.161681 (4m55s). No live GPU job is restarted on an
+observation timeout, and no timing result is discarded. CPU builds/native
+audits overlap correctness work but finish before complete-encode timing;
+light result inspection/analysis overlaps some timing. Machine-wide
+isolation is not claimed.
+
+No admin, firewall or permission prompt is observed. Restricted counters
+are not retried; security, clock, power and priority settings are unchanged.
+This does not establish the cause of an earlier long run. The invalid
+public-option fixture, stdout-marker recovery, and post-kernel trace-status
+analysis failure are all preserved separately from successful checks. A
+setup read initially names a nonexistent prepared-test path; the actual
+`tests/cuda_butteraugli_test.cpp` is located without changing user files.
+The profiler demangled-name matcher is corrected to its observed
+`ConvolutionTiledKernel<(bool)0, (unsigned int)13>` syntax before the first
+completed analysis.
+
+Ignored `build-cuda-ninja/profiles/s95_*` contains parent/integration sources,
+all failed and successful build/test reports, profiler reports and exports,
+raw paired timings, native/resource audits, analyzers and recomputing
+validation. Seven source/document snapshots, diagnostic binary hashes,
+external dependency hashes and the unchanged retained-runtime manifest
+separate frozen evidence from later edits. S94 frozen/current validation
+passes before these document changes. Only these two CUDA documents are
+committed; the three user-owned untracked files remain untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
