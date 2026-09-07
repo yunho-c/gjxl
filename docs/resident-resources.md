@@ -67,9 +67,12 @@ The [native CPU workflow plan](resident-cpu-workflow-storage-planning.md) adds
 shared CPU-side AQ policy and native evaluator lifetimes, compatibility outputs,
 and complete CPU Butteraugli, maximum-error and target-size workflows. Isolated
 AQ and complete CPU tests fit their respective upfront bounds; the existing
-runtime object code remains byte-identical. Metal compatibility policies,
-mixed-backend automatic searches, input adapters and retained batch results
-still need composition and public domain integration.
+runtime object code remains byte-identical.
+The [compatibility plans](resident-compatibility-workflow-storage-planning.md)
+add exact-coefficient, resident maximum-error and maximum-throughput workflows,
+including coexistence of native and GPU preparation during automatic exact
+searches. Unified entry-point selection, input adapters and retained batch
+results still need composition and public domain integration.
 Whole-domain admission remains pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
@@ -150,9 +153,10 @@ allocation adapters are not wired by the foundation commit.
 
 The device recipes are now shared with actual allocation, and complete
 conservative CPU and resident Metal Butteraugli workflow plans compose the
-serializer and frontend component bounds. Remaining Metal policy and mixed-backend
-attempt/result envelopes, the API adapters, and final allocation coverage still require
-implementation and tests before workflow enforcement can land.
+serializer and frontend component bounds. Metal compatibility and mixed-backend
+search plans now cover the other encoding policies. Entry-point plan selection,
+input/batch adapters and final allocation coverage still require implementation
+and tests before workflow enforcement can land.
 In particular, excluding all CPU allocations or retained batch results to make
 a GPU-only limiter pass would not satisfy this design or the parent roadmap.
 
@@ -248,7 +252,7 @@ Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
 Milestone 4 still requires a final allocation-coverage audit, remaining
-frontend/backend-policy envelopes and input-adapter/batch composition,
+entry-point plan selection and input-adapter/batch composition,
 public domain configuration/propagation, automatic cache eviction,
 retry and aggregate batch-result admission, end-to-end failure/progress tests, and
 physical peak/idle/post-trim measurements. Milestone 5 still requires the audited

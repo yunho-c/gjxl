@@ -202,9 +202,13 @@ The [native CPU workflow plan](resident-cpu-workflow-storage-planning.md) adds
 the shared CPU-side AQ policy, native evaluator old/new overlap, compatibility
 destinations and complete CPU Butteraugli/maximum-error/size-search lifetimes.
 Its isolated AQ and complete CPU encodes fit precomputed reservations without
-changing runtime object code. Metal compatibility policies, mixed-backend
-automatic searches, input adapters, retained batch results and public-domain
-admission remain pending; these checkpoints do not satisfy the milestone.
+changing runtime object code.
+The [compatibility workflow plans](resident-compatibility-workflow-storage-planning.md)
+add exact-coefficient, resident maximum-error and maximum-throughput lifetimes,
+plus simultaneous CPU/Metal preparation in automatic exact-coefficient searches.
+Unified entry-point plan selection, input adapters, retained batch results and
+public-domain admission remain pending; these checkpoints do not satisfy the
+milestone.
 
 Deliverables:
 
@@ -233,7 +237,7 @@ Deliverables:
 
 The resource record specifies the configuration surface, defaults, domain
 ownership, reservation strategy and treatment of retained batch results. Remaining
-backend-policy bounds, mixed-backend/input/batch composition and API integration remain
+entry-point plan selection, input/batch composition and API integration remain
 to be implemented; those recorded decisions are not existing API promises.
 
 Acceptance:

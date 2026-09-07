@@ -157,9 +157,11 @@ not turn an internal plan into public admission or establish a performance gain.
 
 ## Remaining integration
 
-Combine this CPU coverage with Metal exact-coefficient, maximum-error and
-maximum-throughput plans and explicit mixed-backend automatic-attempt lifetimes.
-Then compose input adapters and aggregate retained batch results, and install
+The subsequent [compatibility plans](resident-compatibility-workflow-storage-planning.md)
+combine this CPU coverage with Metal exact-coefficient, maximum-error and
+maximum-throughput lifetimes and a conservative mixed-backend automatic-search
+bound. Compose unified entry-point selection, input adapters and aggregate
+retained batch results, and install
 the immutable shared C++/C execution domain with complete upfront reservations,
 cache shedding and terminal underplan handling. The resident Butteraugli and CPU
 estimators are ingredients for that boundary, not substitutes for it. Milestone
