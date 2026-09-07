@@ -578,6 +578,7 @@ if(GJXL_ENABLE_CUDA)
     src/gpu/cuda/cuda_ac_strategy.cpp
     src/gpu/cuda/cuda_ac_strategy_kernels.cu
     src/gpu/cuda/cuda_ac_group_kernels.cu
+    src/gpu/cuda/cuda_coefficient_order_kernels.cu
     src/gpu/cuda/cuda_aq.cpp
     src/gpu/cuda/cuda_aq_kernels.cu
     src/gpu/cuda/cuda_aq_exact.cpp

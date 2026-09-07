@@ -30,6 +30,7 @@
 #include "core/quantizer.h"
 #include "gpu/cuda/cuda_aq_exact_kernels.h"
 #include "gpu/cuda/cuda_ac_group_kernels.h"
+#include "gpu/cuda/cuda_coefficient_order_kernels.h"
 #include "gpu/cuda/cuda_aq_resident_kernels.h"
 #include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/cuda/cuda_butteraugli_internal.h"
@@ -1187,6 +1188,8 @@ class CudaPreparedResidentAqEvaluation final
     std::array<CudaAqExactBatch, 7> batches{};
     std::vector<CudaAqAnchor> device_anchors;
     std::vector<uint64_t> packing_offsets;
+    std::vector<uint8_t> sampled_dct8;
+    uint16_t population_mask = 0;
     std::vector<HostAnchor> row_major_anchors;
     std::vector<uint8_t> epf_sharpness;
     std::vector<CudaAqColorTransformRecord> color_transforms;
@@ -1512,6 +1515,13 @@ class CudaPreparedResidentAqEvaluation final
         }
         const size_t count = grouped[index].size();
         const size_t coefficient_count = info->coefficient_count();
+        if (count != 0) {
+          const size_t family = vardct_frame_internal::OrderPopulationFamily(coefficient_count);
+          if (family == vardct_frame_internal::kOrderPopulationSizes.size()) {
+            return Status::Internal("CUDA resident population family is unsupported");
+          }
+          candidate.population_mask |= uint16_t{1} << family;
+        }
         if (anchor_offset > std::numeric_limits<uint32_t>::max() ||
             count > std::numeric_limits<uint32_t>::max() ||
             coefficient_offset > std::numeric_limits<uint32_t>::max() ||
@@ -1549,6 +1559,29 @@ class CudaPreparedResidentAqEvaluation final
           anchor_offset > block_count_) {
         return Status::Internal(
             "CUDA resident AQ strategies do not cover the coding image");
+      }
+
+      if (NeedsOrderPopulation() && candidate.population_mask == 1) {
+        candidate.sampled_dct8.resize(block_count_);
+        uint64_t a = 0x94D049BB133111EBull, b = 0xBF58476D1CE4E5B9ull;
+        // Pure DCT8 batch indexes are global row-major. Generate selections in
+        // the CPU algorithm's AC-group-first order, then store at batch index.
+        for (size_t gy = 0; gy < block_extent_.height; gy += 32) {
+          for (size_t gx = 0; gx < block_extent_.width; gx += 32) {
+            const size_t end_y = std::min(gy + 32, block_extent_.height);
+            const size_t end_x = std::min(gx + 32, block_extent_.width);
+            for (size_t y = gy; y < end_y; ++y) {
+              for (size_t x = gx; x < end_x; ++x) {
+                const uint64_t bits = a + b, old_b = b;
+                a ^= a << 23;
+                b = a ^ old_b ^ (a >> 18) ^ (old_b >> 5);
+                a = old_b;
+                candidate.sampled_dct8[y * block_extent_.width + x] =
+                  (bits >> 32) <= (UINT64_MAX >> 32) / 2;
+              }
+            }
+          }
+        }
       }
 
       candidate.layouts.reserve(candidate.row_major_anchors.size());
@@ -1639,6 +1672,14 @@ class CudaPreparedResidentAqEvaluation final
     size_t persistent_bytes = 0;
     size_t staging_bytes = 0;
     Status status = Status::Ok();
+    if (NeedsOrderPopulation()) {
+      status = PlanPlane(DeviceElementType::kU8, block_extent_,
+                         block_extent_.width, &persistent_bytes);
+      if (!status.ok()) return status;
+      constexpr size_t count = vardct_frame_internal::kOrderPopulationCount;
+      status = PlanPlane(DeviceElementType::kI32, {count, 1}, count, &staging_bytes);
+      if (!status.ok()) return status;
+    }
     if (!has_borrowed_input()) {
       for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
         status = PlanPlane(DeviceElementType::kF32,
@@ -1778,6 +1819,15 @@ class CudaPreparedResidentAqEvaluation final
 
   Status AllocateArenas() {
     Status status = Status::Ok();
+    if (NeedsOrderPopulation()) {
+      status = AllocatePlane(persistent_, DeviceElementType::kU8, block_extent_,
+                             block_extent_.width, &sampled_dct8_device_);
+      if (!status.ok()) return status;
+      constexpr size_t count = vardct_frame_internal::kOrderPopulationCount;
+      status = AllocatePlane(staging_, DeviceElementType::kI32, {count, 1}, count,
+                             &order_population_device_);
+      if (!status.ok()) return status;
+    }
     if (!has_borrowed_input()) {
       for (DevicePlaneView& plane : original_) {
         status = AllocatePlane(persistent_,
@@ -1947,7 +1997,7 @@ class CudaPreparedResidentAqEvaluation final
   Status UploadMetadata(
       const Metadata& metadata,
       std::span<const float> quant_tables = {}) {
-    std::array<CudaHostToDeviceCopy, 6> uploads{{
+    std::array<CudaHostToDeviceCopy, 7> uploads{{
         {anchors_device_.buffer, metadata.device_anchors.data(),
          metadata.device_anchors.size() * sizeof(CudaAqAnchor),
          anchors_device_.offset_bytes},
@@ -1964,6 +2014,11 @@ class CudaPreparedResidentAqEvaluation final
          packing_offsets_device_.offset_bytes},
     }};
     size_t upload_count = 5;
+    if (!metadata.sampled_dct8.empty()) {
+      uploads[upload_count++] = {sampled_dct8_device_.buffer,
+        metadata.sampled_dct8.data(), metadata.sampled_dct8.size(),
+        sampled_dct8_device_.offset_bytes};
+    }
     if (!quant_tables.empty()) {
       uploads[upload_count++] = {
           quant_tables_device_.buffer, quant_tables.data(),
@@ -1975,6 +2030,7 @@ class CudaPreparedResidentAqEvaluation final
 
   void CommitMetadata(Metadata metadata) {
     batches_ = metadata.batches;
+    order_population_readback_.present_mask = metadata.population_mask;
     row_major_anchors_ = std::move(metadata.row_major_anchors);
     epf_sharpness_ = std::move(metadata.epf_sharpness);
     layouts_ = std::move(metadata.layouts);
@@ -2066,7 +2122,13 @@ class CudaPreparedResidentAqEvaluation final
     if (!status.ok()) return status;
     std::vector<CudaDeviceToHostCopy> readbacks;
     try {
-      readbacks.reserve(4 + ac_readback_runs_.size());
+      readbacks.reserve(5 + ac_readback_runs_.size());
+      if (NeedsOrderPopulation()) {
+        readbacks.push_back({order_population_device_.buffer,
+          order_population_readback_.counts.data(),
+          order_population_readback_.counts.size() * sizeof(uint32_t),
+          order_population_device_.offset_bytes});
+      }
       for (const AcReadbackRun& run : ac_readback_runs_) {
         int32_t* destination = quantized_readback_.data() + run.group_offset;
         if (run.row_values != kVarDctAcGroupCoefficientCapacity) {
@@ -2130,7 +2192,9 @@ class CudaPreparedResidentAqEvaluation final
          .quantized_ac = {quantized_readback_.data(), ac_storage_count_},
          .transforms = layouts_,
          .reject_unwritten_coefficients = true,
-         .ac_group_storage = &quantized_readback_},
+         .ac_group_storage = &quantized_readback_,
+         .coefficient_order_population = NeedsOrderPopulation()
+           ? &order_population_readback_ : nullptr},
         frame);
   }
 
@@ -2433,6 +2497,16 @@ class CudaPreparedResidentAqEvaluation final
 
   static cudaError_t EncodePackedAc(
       CudaBackend& backend, CudaPreparedResidentAqEvaluation& self) {
+    if (self.NeedsOrderPopulation()) {
+      uint32_t* populations = Pointer<uint32_t>(self.order_population_device_);
+      cudaError_t status = cudaMemsetAsync(populations, 0,
+        vardct_frame_internal::kOrderPopulationCount * sizeof(uint32_t), backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      status = LaunchCudaCoefficientOrderPopulation(
+        Pointer<const int>(self.quantized_device_), self.batches_,
+        Pointer<const uint8_t>(self.sampled_dct8_device_), populations, backend.state_->stream);
+      if (status != cudaSuccess) return status;
+    }
     // Every inverse transform is finished on this stream. A later evaluation
     // rewrites reconstruction coefficients before any inverse consumer.
     for (const CudaAqExactBatch& batch : self.batches_) {
@@ -2672,6 +2746,12 @@ class CudaPreparedResidentAqEvaluation final
     return borrowed_coding_.plane[0].buffer != nullptr;
   }
 
+  bool NeedsOrderPopulation() const noexcept {
+    // Match the serializer's natural-order cutoff and narrow-counter bound.
+    return !(block_extent_.width < 5 && block_extent_.height < 5) &&
+      block_count_ <= std::numeric_limits<uint32_t>::max();
+  }
+
   const float* CodingPointer(
     size_t channel) const {
     return has_borrowed_input()
@@ -2720,6 +2800,8 @@ class CudaPreparedResidentAqEvaluation final
   DevicePlaneView thresholds_device_{};
   DevicePlaneView quantized_device_{};
   DevicePlaneView packing_offsets_device_{};
+  DevicePlaneView sampled_dct8_device_{};
+  DevicePlaneView order_population_device_{};
   DevicePlaneView reconstruction_coefficients_device_{};
   DevicePlaneView dc_device_{};
   DevicePlaneView quantized_dc_device_{};
@@ -2756,6 +2838,7 @@ class CudaPreparedResidentAqEvaluation final
   std::vector<float> maximum_readback_;
   std::vector<int32_t> raw_readback_;
   OverwriteArray<int32_t> quantized_readback_;
+  vardct_frame_internal::CoefficientOrderPopulation order_population_readback_;
   std::vector<int32_t> quantized_dc_readback_;
   std::vector<int8_t> y_to_x_readback_;
   std::vector<int8_t> y_to_b_readback_;

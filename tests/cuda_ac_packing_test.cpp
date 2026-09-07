@@ -14,7 +14,9 @@
 #include <vector>
 
 #include "core/ac_strategy.h"
+#include "codec/coefficient_order_population_internal.h"
 #include "gpu/cuda/cuda_ac_group_kernels.h"
+#include "gpu/cuda/cuda_coefficient_order_kernels.h"
 #include "gpu/cuda/cuda_backend.h"
 #include "gpu/cuda/cuda_backend_internal.h"
 
@@ -98,18 +100,42 @@ bool Case(CudaBackend& backend, Extent2D blocks, size_t pattern) {
   constexpr size_t source_prefix = 17, output_prefix = 13, final_prefix = 7;
   std::vector<int32_t> source(source_prefix + count + 31, kPoison);
   std::vector<int32_t> expected(output_prefix + count + 29, kPoison), actual(expected.size());
-  std::unique_ptr<DeviceBuffer> ds, dd, da, di;
+  using namespace gjxl::vardct_frame_internal;
+  const bool pure_dct8 = grouped[0].size() == records.size();
+  constexpr size_t population_prefix = 17, flag_prefix = 11;
+  constexpr uint32_t population_guard = 0xABCDEF12u;
+  std::vector<uint8_t> flags(flag_prefix + records.size() + 19, 0xABu);
+  if (pure_dct8) {
+    uint64_t a = 0x94D049BB133111EBull, b = 0xBF58476D1CE4E5B9ull;
+    for (size_t gy = 0; gy < blocks.height; gy += 32) {
+      for (size_t gx = 0; gx < blocks.width; gx += 32) {
+        for (size_t y = gy; y < std::min(gy + 32, blocks.height); ++y) {
+          for (size_t x = gx; x < std::min(gx + 32, blocks.width); ++x) {
+            const uint64_t bits = a + b, old_b = b;
+            a ^= a << 23; b = a ^ old_b ^ (a >> 18) ^ (old_b >> 5); a = old_b;
+            flags[flag_prefix + y * blocks.width + x] = (bits >> 32) <= (UINT64_MAX >> 32) / 2;
+          }
+        }
+      }
+    }
+  }
+  std::vector<uint32_t> populations(population_prefix + kOrderPopulationCount + 23, population_guard);
+  std::unique_ptr<DeviceBuffer> ds, dd, da, di, dz, df;
   if (!Check(backend.Allocate(source.size() * 4, &ds)) ||
+      !Check(backend.Allocate(populations.size() * 4, &dz)) ||
+      !Check(backend.Allocate(flags.size(), &df)) ||
+      !Check(backend.CopyHostToDevice(*df, flags.data(), flags.size(), 0)) ||
       !Check(backend.Allocate(expected.size() * 4, &dd)) ||
       !Check(backend.Allocate(anchors.size() * sizeof(CudaAqAnchor), &da)) ||
       !Check(backend.Allocate(offsets.size() * sizeof(uint64_t), &di)) ||
       !Check(backend.CopyHostToDevice(*da, anchors.data(), anchors.size() * sizeof(CudaAqAnchor), 0)) ||
       !Check(backend.CopyHostToDevice(*di, offsets.data(), offsets.size() * sizeof(uint64_t), 0))) return false;
-  for (uint32_t reuse = 0; reuse < 3; ++reuse) {
+  for (uint32_t reuse = 0; reuse < 5; ++reuse) {
     for (size_t i = 0; i < count; ++i) {
       const uint32_t bits = static_cast<uint32_t>(i) * 1664525u +
         1013904223u + reuse * 987654321u + static_cast<uint32_t>(pattern);
-      source[source_prefix + i] = std::bit_cast<int32_t>(bits);
+      source[source_prefix + i] = reuse == 4 || (reuse == 3 && (bits & 3) != 0)
+        ? 0 : std::bit_cast<int32_t>(bits);
     }
     for (size_t i = 0; i < 5; ++i) {
       constexpr std::array<int32_t, 5> extremes{
@@ -117,9 +143,18 @@ bool Case(CudaBackend& backend, Extent2D blocks, size_t pattern) {
         std::bit_cast<int32_t>(uint32_t{0x81234567})};
       source[source_prefix + i] = extremes[(i + reuse) % extremes.size()];
     }
+    std::vector<uint32_t> expected_populations(populations.size(), population_guard);
+    std::fill_n(expected_populations.begin() + population_prefix, kOrderPopulationCount, 0);
     for (const Record& record : records) {
       const size_t values = GetAcStrategyInfo(kStrategies[record.strategy])->coefficient_count();
+      const size_t family = OrderPopulationFamily(values);
       for (size_t c = 0; c < 3; ++c) {
+        for (size_t i = 0; i < values; ++i) {
+          const bool zero = source[source_prefix + record.source + c * record.source_stride + i] == 0;
+          expected_populations[population_prefix + c * kOrderPopulationStride + kOrderPopulationOffsets[family] + i] += zero;
+          if (pure_dct8 && flags[flag_prefix + record.y * blocks.width + record.x])
+            expected_populations[population_prefix + kOrderPopulationFullCount + c * 64 + i] += zero;
+        }
         std::copy_n(source.data() + source_prefix + record.source + c * record.source_stride, values,
           expected.data() + output_prefix + group_base[record.group] + c * group_size[record.group] + record.used);
       }
@@ -131,12 +166,19 @@ bool Case(CudaBackend& backend, Extent2D blocks, size_t pattern) {
     const auto* ip = static_cast<const uint64_t*>(static_cast<CudaBuffer*>(di.get())->pointer());
     const auto* sp = static_cast<const int*>(static_cast<CudaBuffer*>(ds.get())->pointer()) + source_prefix;
     auto* dp = static_cast<int*>(static_cast<CudaBuffer*>(dd.get())->pointer()) + output_prefix;
+    std::fill(populations.begin(), populations.end(), population_guard);
+    std::fill_n(populations.begin() + population_prefix, kOrderPopulationCount, 0);
+    if (!Check(backend.CopyHostToDevice(*dz, populations.data(), populations.size() * 4, 0))) return false;
+    auto* zp = static_cast<uint32_t*>(static_cast<CudaBuffer*>(dz.get())->pointer()) + population_prefix;
+    const auto* fp = static_cast<const uint8_t*>(static_cast<CudaBuffer*>(df.get())->pointer()) + flag_prefix;
+    if (LaunchCudaCoefficientOrderPopulation(sp, batches, pure_dct8 ? fp : nullptr, zp, nullptr) != cudaSuccess) return false;
     for (const auto& batch : batches) {
       if (LaunchCudaPackAcGroups(ap, ip, sp, dp, batch,
             static_cast<uint32_t>(blocks.width), static_cast<uint32_t>(blocks.height), nullptr) != cudaSuccess) return false;
     }
     if (cudaDeviceSynchronize() != cudaSuccess ||
-        !Check(backend.CopyDeviceToHost(*dd, actual.data(), actual.size() * 4, 0)) || actual != expected) return false;
+        !Check(backend.CopyDeviceToHost(*dd, actual.data(), actual.size() * 4, 0)) || actual != expected ||
+        !Check(backend.CopyDeviceToHost(*dz, populations.data(), populations.size() * 4, 0)) || populations != expected_populations) return false;
     std::vector<int32_t> final(final_prefix + group_count * 3 * 65536 + 19, kPoison);
     std::vector<CudaDeviceToHostCopy> copies;
     for (size_t g = 0; g < group_count; ++g) {
@@ -158,7 +200,9 @@ bool Case(CudaBackend& backend, Extent2D blocks, size_t pattern) {
   }
   std::vector<CudaAqAnchor> anchors_after(anchors.size());
   std::vector<uint64_t> offsets_after(offsets.size());
+  std::vector<uint8_t> flags_after(flags.size());
   return Check(backend.CopyDeviceToHost(*da, anchors_after.data(), anchors_after.size() * sizeof(CudaAqAnchor), 0)) &&
+    Check(backend.CopyDeviceToHost(*df, flags_after.data(), flags_after.size(), 0)) && flags_after == flags &&
     Check(backend.CopyDeviceToHost(*di, offsets_after.data(), offsets_after.size() * sizeof(uint64_t), 0)) &&
     std::memcmp(anchors.data(), anchors_after.data(), anchors.size() * sizeof(CudaAqAnchor)) == 0 && offsets == offsets_after;
 }
@@ -214,6 +258,13 @@ bool ReadbackValidation(CudaBackend& backend) {
   empty.row_count = 0;
   if (!Check(backend.CopyDeviceToHostBatch(std::span(&empty, 1)))) return false;
   CudaAqExactBatch batch{};
+  std::array<CudaAqExactBatch, 7> populations{};
+  if (LaunchCudaCoefficientOrderPopulation(nullptr, populations, nullptr, nullptr, nullptr) != cudaSuccess) return false;
+  populations[0].anchor_count = 1;
+  for (uint32_t size : {0u, 63u, 64u, 1025u}) {
+    populations[0].coefficient_count = size;
+    if (LaunchCudaCoefficientOrderPopulation(nullptr, populations, nullptr, nullptr, nullptr) != cudaErrorInvalidValue) return false;
+  }
   if (LaunchCudaPackAcGroups(nullptr, nullptr, nullptr, nullptr, batch, 0, 0, nullptr) != cudaSuccess) return false;
   batch.anchor_count = 1;
   return LaunchCudaPackAcGroups(nullptr, nullptr, nullptr, nullptr, batch, 0, 0, nullptr) == cudaErrorInvalidValue;
@@ -240,6 +291,6 @@ int main(int argc, char** argv) {
       ++cases;
     }
   }
-  std::cout << "CUDA AC packing: " << cases << " cases x 3 reuse passes; guarded values, metadata, and pitched copies match.\n" << std::flush;
+  std::cout << "CUDA AC packing: " << cases << " cases x 5 reuse passes; guarded values, populations, metadata, and pitched copies match.\n" << std::flush;
   return EXIT_SUCCESS;
 }

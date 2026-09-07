@@ -32,6 +32,7 @@
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/input_preparation.h"
+#include "coefficient_order_population_fixture.h"
 
 namespace {
 
@@ -795,7 +796,7 @@ bool CheckFullyResident(gjxl::GpuBackend& gpu, const ImageStorage& source,
           before_full.committed_submissions + 3 ||
       bounded_quant != full.quant || bounded_block != full.block ||
       bounded_scores != full.scores || full.scores.size() != 4 ||
-      !full.frame.valid()) {
+      !full.frame.valid() || !gjxl_test::CheckResidentPopulation(full.frame)) {
     std::cerr << "CUDA resident bounded and full results differ\n";
     return false;
   }
@@ -1000,7 +1001,7 @@ bool CheckResidentInvariantColorCorrelationContract(
              "Evaluate CUDA resident invariant CfL with a changed field")) {
     return false;
   }
-  if (!frame.valid() ||
+  if (!frame.valid() || !gjxl_test::CheckResidentPopulation(frame) ||
       quantizer.global_scale !=
           evaluation_quantizer.params().global_scale ||
       quantizer.quant_dc != evaluation_quantizer.params().quant_dc ||
@@ -1097,7 +1098,8 @@ bool CheckResidentInvariantColorCorrelationContract(
         !Check(prepared->EvaluateResidentButteraugliPolicy(
                    policy_input, policy_output),
                "Materialize coefficient-only resident policy") ||
-        policy_scores.size() != iterations || !policy_frame.valid()) return false;
+        policy_scores.size() != iterations || !policy_frame.valid() ||
+        !gjxl_test::CheckResidentPopulation(policy_frame)) return false;
     const auto materialized_field = policy_field;
     const auto materialized_scores = policy_scores;
     std::vector<uint8_t> materialized_bytes, evaluated_bytes, policy_bytes;
@@ -1202,7 +1204,7 @@ bool CheckResidentMaximumError(gjxl::GpuBackend& gpu,
                   .score_history = &scores,
                   .maximum_error_result = &maximum}),
              "CUDA resident maximum-error AQ") ||
-      !frame.valid() || scores.size() != maximum.evaluation_count ||
+      !frame.valid() || !gjxl_test::CheckResidentPopulation(frame) || scores.size() != maximum.evaluation_count ||
       scores.size() != 6 ||
       maximum.outcome == gjxl::MaximumErrorOutcome::kNotApplicable ||
       !std::isfinite(maximum.normalized_maximum) ||
@@ -1284,7 +1286,8 @@ bool CheckResidentFrontend(gjxl::GpuBackend& gpu, const ImageStorage& source,
   const double pixel_error = MaximumError(expected_pixel, actual_pixel);
   if (quant_error > 2.0e-6 || strategy_error > 2.0e-6 ||
       pixel_error > 2.0e-5 || actual_quant != final_quant ||
-      !cuda_frame.valid()) {
+      !cuda_frame.valid() ||
+      gjxl::vardct_frame_internal::GetCoefficientOrderPopulation(cuda_frame) != nullptr) {
     std::cerr << "CUDA initial frontend differs: quant=" << quant_error
               << " strategy=" << strategy_error << " pixel=" << pixel_error
               << '\n';
@@ -1705,7 +1708,7 @@ bool CheckDeferredResidentMetadata(gjxl::GpuBackend &gpu,
         } else if (!Check(prepared->Evaluate(input, output),
                           "Evaluate with pending CUDA metadata"))
           return false;
-        if (!frame.valid() || !pending(*prepared, false) ||
+        if (!frame.valid() || !gjxl_test::CheckResidentPopulation(frame) || !pending(*prepared, false) ||
             !Check(gjxl::EncodeVarDctCodestream(frame, &result.bytes),
                    "Serialize pending CUDA metadata result") ||
             gpu.stats().successful_allocations != allocations)

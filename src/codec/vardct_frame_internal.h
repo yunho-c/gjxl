@@ -9,6 +9,7 @@
 #include <span>
 
 #include "codec/vardct_frame.h"
+#include "codec/coefficient_order_population_internal.h"
 
 namespace gjxl::vardct_frame_internal {
 
@@ -40,6 +41,10 @@ struct QuantizedFrameAssemblyInput {
   /// must name their final group/channel offsets and unused tails must be zero.
   /// Consumed only on success; both this storage and out are unchanged on failure.
   OverwriteArray<int32_t>* ac_group_storage = nullptr;
+  /// Optional exact population result from the internal coefficient producer.
+  /// Copied, never borrowed. Shape/bounds are checked; equality to quantized_ac
+  /// is a producer invariant, just like the supplied quantized DC/AC decisions.
+  const CoefficientOrderPopulation* coefficient_order_population = nullptr;
 };
 
 [[nodiscard]] Status AssembleVarDctEncoderFrame(

@@ -431,6 +431,7 @@ Status AssembleVarDctEncoderFrame(
     }
 
     size_t transform_index = 0;
+    std::array<size_t, 7> population_anchors{};
     status = input.strategies->ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
         if (transform_index >= input.transforms.size()) {
@@ -448,6 +449,13 @@ Status AssembleVarDctEncoderFrame(
             "Quantized VarDCT transform metadata does not match strategies");
         }
         const size_t coefficient_count = info->coefficient_count();
+        if (input.coefficient_order_population != nullptr) {
+          const size_t family = OrderPopulationFamily(coefficient_count);
+          if (family == population_anchors.size()) {
+            return Status::InvalidArgument("Quantized population family is unsupported");
+          }
+          ++population_anchors[family];
+        }
         if (transform.coefficient_count != coefficient_count) {
           return Status::InvalidArgument(
             "Quantized VarDCT transform coefficient count is invalid");
@@ -523,6 +531,39 @@ Status AssembleVarDctEncoderFrame(
           "Quantized data did not completely fill its VarDCT AC groups");
       }
     }
+    if (input.coefficient_order_population != nullptr) {
+      const auto& population = *input.coefficient_order_population;
+      if (block_count > std::numeric_limits<uint32_t>::max()) {
+        return Status::InvalidArgument("Quantized populations require wide counters");
+      }
+      uint16_t present = 0;
+      for (size_t family = 0; family < population_anchors.size(); ++family) {
+        if (population_anchors[family]) present |= uint16_t{1} << family;
+        for (size_t channel = 0; channel < 3; ++channel) {
+          for (size_t i = 0; i < kOrderPopulationSizes[family]; ++i) {
+            if (population.counts[channel * kOrderPopulationStride +
+                kOrderPopulationOffsets[family] + i] > population_anchors[family]) {
+              return Status::InvalidArgument("Quantized population exceeds anchor bound");
+            }
+          }
+        }
+      }
+      if (population.present_mask != present) {
+        return Status::InvalidArgument("Quantized population presence mask differs");
+      }
+      for (size_t channel = 0; channel < 3; ++channel) {
+        for (size_t i = 0; i < 64; ++i) {
+          const uint32_t sampled = population.counts[kOrderPopulationFullCount + channel * 64 + i];
+          if (sampled > population.counts[channel * kOrderPopulationStride + i] ||
+              (present != 1 && sampled != 0)) {
+            return Status::InvalidArgument("Quantized sampled population is invalid");
+          }
+        }
+      }
+      // Allocate before consuming caller storage; every failure remains atomic.
+      result.coefficient_order_population_ =
+        std::make_shared<const CoefficientOrderPopulation>(population);
+    }
     if (input.ac_group_storage != nullptr) {
       uint32_t invalid = 0;
       for (size_t group_index = 0; group_index < group_count; ++group_index) {
@@ -557,6 +598,11 @@ Status AssembleVarDctEncoderFrame(
     return Status::InvalidArgument(
       "Quantized VarDCT frame assembly dimensions are too large");
   }
+}
+
+const CoefficientOrderPopulation* GetCoefficientOrderPopulation(
+  const VarDctEncoderFrame& frame) noexcept {
+  return frame.coefficient_order_population_.get();
 }
 
 }  // namespace vardct_frame_internal

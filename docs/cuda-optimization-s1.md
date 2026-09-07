@@ -13442,6 +13442,157 @@ Public byte/decoded-quality and paired total-encode gates remain required.
 No frame cache or production launcher is implemented in S78. Optimization
 remains ongoing, not maxed out.
 
+## Resident coefficient-order populations (S79)
+
+S79 implements the S78 lead from `f71335c`, using frozen S75 runtime as the
+performance baseline. Final resident quantized AC now feeds an exact GPU
+zero-population reduction when a frame is materialized. An owned immutable
+cache follows that frame into the unchanged CPU stable sort and order-token
+writer. This removes a measured host scan; it is not GPU entropy coding or a
+claim of universal end-to-end improvement.
+
+### Ownership, sampling and resource contract
+
+The internal frame-assembly input optionally supplies 5,952 full count bins
+and 192 pure-DCT8 sampled bins: 24 KiB of unsigned 32-bit counters. Assembly
+checks family presence, anchor-count bounds, absent-family zeros and sampled
+subset bounds, then copies the result into frame-owned immutable storage.
+It does not recount AC; exact equality to the producer's final coefficients
+is an explicit internal-producer invariant. No caller-owned mutable cache
+alias survives assembly. Copies/moves retain the appropriate cache, and
+allocation/validation failures do not consume owned AC or change output.
+
+Full and effort-7 sampled policies remain selectable on the same frame.
+Only an entirely DCT8 frame samples, using the existing AC-group-first PRNG
+order; host flags are stored at the resident batch's global-raster indexes.
+Mixed frames need no flag upload. Stable float-scaled keys, ties, LLF prefixes,
+public frame validation and encoded order tokens are unchanged. Generic CPU,
+exact-coefficient and separate maximum-throughput frame-only producers retain
+the existing uncached CPU route. The existing small-frame natural-order cutoff
+and wide-counter fallback remain; there is no empirical image-size gate.
+
+One launch dispatches all resident batches. A 32-by-8-thread block combines
+64 anchors before global atomic adds. The full-only specialization uses
+30 registers and 3,072 shared bytes; pure-DCT8 full-plus-sampled uses 38 and
+6,144. Both have zero stack/local storage. All 203 earlier GPU bodies are
+identical to S70; the two new bodies are identical in the production encoder,
+phase probe, direct replay and interleaved control. No fast-math change occurs.
+
+Existing arenas account for 24 KiB additional staging plus one byte per block
+of persistent sampling capacity, with normal alignment rounding. Counts are
+cleared/recomputed for each materialized frame and read back in the existing
+batch. No extra device arena or steady-state device allocation is introduced;
+frame assembly does allocate the small immutable host cache.
+
+### Qualification
+
+- The 73-test CUDA suite and 50-test CPU-only suite pass, including installed
+  consumers. The subsequently expanded CUDA packing/population test is rebuilt
+  and rerun separately: 64 geometry/strategy cases by five reuse passes,
+  including all seven shapes, mixed grids, edge groups through 480-by-270
+  blocks, original random/extreme-value cases and added dense-zero cases.
+- The 218 coefficient-order cases now also compare cached/uncached full and
+  sampled policies, frame copies/moves and mutable-input isolation. Cutoff and
+  invalid-input/cache-assembly atomicity tests pass. Actual resident AQ tests
+  independently recount cached bins and compare both policies and order tokens
+  after stripping the cache through checked assembly; repeated evaluation,
+  reconfiguration, pending metadata and injected failure contracts still pass.
+- All 108 S78 frame exports pass the actual production-layout kernel replay,
+  three repetitions each, with 6,144 exact bins and unchanged guarded sources,
+  flags and outputs. Eleven GPU sanitizer jobs pass: four full replay tools,
+  three full AQ tools, and four tools on 48 permanent small/medium packing
+  cases by five reuse passes. No errors, leaks or hazards are reported.
+- Eight host AddressSanitizer targets pass: DC, entropy, coefficient order,
+  codestream encoder/workflow, overwrite storage, frame and reconstruction.
+- All 58 freshly encoded/independently decoded cases match S70 bitstreams,
+  decoded pixels, strategy/score reports and perceptual scores exactly,
+  including scored/unscored, effort 9, high-density and maximum-compression.
+
+An initial AQ assertion incorrectly expected a cache on the separate frame-only
+maximum-throughput frontend. The failed log remains; the assertion now checks
+that this path has no cache, without relaxing a numerical tolerance. No
+production defect was found in that failure.
+
+### Public measurements and same-process controls
+
+Warm phase and public cohorts each alternate eight parent/candidate process
+pairs per input, three warmups and five measured encodes per process. A cold
+public cohort uses zero warmups and one measured encode. These are 144 serial
+windows and 816 encodes, with encoded-size checks in the benchmark itself;
+the separate 58-case qualification supplies byte/decoder evidence. Inputs
+are the saved padded 1080p/4K and Flower PFMs, not the benchmark's generated
+`--workload` images. All raw fields, adverse pairs and endpoint telemetry
+remain in the evidence bundle.
+
+Median within-pair changes, percent (negative is faster):
+
+| Endpoint | Padded 4K | Padded 1080p | Flower |
+| --- | ---: | ---: | ---: |
+| Warm phase-probe total | +1.13 | -2.70 | -2.71 |
+| Warm public total | -0.84 | -1.70 | -2.31 |
+| Warm public serialization | -12.73 | -9.41 | -4.87 |
+| Cold public total | -5.95 | +0.89 | -2.47 |
+
+These small cohorts have broad ranges. The first cold 4K parent has a large
+startup outlier; it is not discarded. Cold 1080p remains a limitation. Warm
+phase/public endpoints range from 59 to 66 C and report differing sampled
+memory clocks, without changing power, clock, cooling, priority or services.
+Independent medians must not be substituted for the paired percentages.
+
+A diagnostic switch then interleaves disabled/enabled/duplicate-disabled
+population pipelines within one executable, preserving its frame ABI and
+other code. It disables planning, flags, counting, readback and cache attachment
+together; the production source contains no switch. All six permutations are
+balanced in six-triple blocks, with deterministic reshuffling and reverse
+configuration order in a second replicate. There are two backend lifetimes:
+persistent and freshly created inside the already-warm process. Neither is
+a cold-process substitute. Each replicate/lifetime uses 120 Flower triples
+and 24 triples for each larger input.
+
+All 222 preflight, 2,016 measured and 228 warmup/reference encodes preserve
+bytes and summaries; 18 saved outputs match S70. Combined paired results:
+
+| Backend lifetime / endpoint | Padded 4K | Padded 1080p | Flower |
+| --- | ---: | ---: | ---: |
+| Persistent total vs disabled 0 | -1.74% | -2.68% | -1.41% |
+| Persistent total vs duplicate 2 | -1.98% | -2.76% | -1.66% |
+| Fresh total vs disabled 0 | -2.25% | -1.21% | -0.87% |
+| Fresh total vs duplicate 2 | -1.97% | +0.11% | -0.85% |
+
+Persistent coefficient-order medians fall from 8.5184 to 0.30235 ms at 4K,
+2.4545 to 0.3391 ms at 1080p, and 0.58165 to 0.3067 ms on Flower. Their
+paired savings are 8.22275/2.0888/0.2697 ms. All replicate totals improve
+against mode 0, but fresh-backend 1080p is essentially flat against duplicate
+mode 2 and its first replicate regresses 1.15%. Flower descriptive balanced-
+block bootstrap intervals for total are [-2.02%, -0.79%] persistent and
+[-2.18%, -0.07%] fresh; these do not establish cross-machine guarantees.
+
+### Integrated trace accounting and remaining limits
+
+Two opposite-order Nsight trace pairs on the saved 4K PFM preserve all 308
+previous kernel names, grids and resources. One population kernel adds
+0.513069/0.507341 ms, using 4,064 blocks. Exactly one 24 KiB zero clear and
+one 24 KiB D2H transfer are added; all other copies and clears are identical.
+Allocation calls remain five `cudaMallocFromPoolAsync` and five `cudaFreeAsync`
+per captured encode; synchronization-call counts also match. Arena byte
+increments above are source-derived, not captured allocation-event payloads.
+The replay's extra descriptor/upload setup is not part of this integration.
+
+The trace analyzer initially used the wrong memset schema column and then
+inherited S75's 373-launch assumption for its generated workload. Both failed
+analyzers/logs remain; the corrected analyzer checks the actual saved-PFM
+308-to-309 sequence and ordered copy/clear fingerprints. No firewall,
+elevation or permission block is observed, and no restricted counters are used.
+
+S79 is retained as exact resident host-scan removal with qualified warm
+benefits, not universal warm/cold or batch-throughput improvement. Additional
+architectures/toolkits, cold-run variation, batch throughput, remaining GPU
+work and CPU token/entropy work remain open. The backend is not maxed out.
+The ignored `s79_*` bundle preserves producers, source/runtime snapshots,
+qualification, raw profiles, paired controls, traces and failed diagnostics;
+`s79_validate.py --frozen` reconstructs the evidence, with `--current` also
+checking current source/runtime identities.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

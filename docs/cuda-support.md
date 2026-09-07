@@ -1188,6 +1188,20 @@ population caching and resident integration are still unimplemented. Two
 preserved setup failures concern a tiny-frame export cutoff and an escaped
 build path, not an observed permission/firewall block. Optimization continues.
 
+[S79](cuda-optimization-s1.md#resident-coefficient-order-populations-s79)
+retains exact GPU coefficient-order zero populations on materialized resident
+frames, with immutable owned caching and unchanged CPU sorting/sampling
+semantics. Generic and separate frame-only paths retain CPU fallback. All
+73 CUDA / 50 CPU tests, eight host ASan targets, eleven GPU sanitizer jobs,
+58 fresh exact decode/quality cases and 2,466 interleaved control encodes pass.
+The expanded permanent GPU population test passes after the full-suite run.
+Persistent same-process paired total improves about 1.74%/2.68%/1.41% at
+4K/1080p/Flower; cold public 1080p is 0.89% slower in its small cohort. A 4K
+trace adds one roughly 0.51 ms kernel and 24 KiB clear/readback, preserving all
+prior launches and allocation/synchronization counts. These are qualified
+warm gains, not universal or batch-throughput claims. No security-setting
+change or observed permission/firewall block occurs; optimization remains open.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -19,6 +19,7 @@
 
 #include "codec/codestream.h"
 #include "codec/vardct_frame.h"
+#include "codec/coefficient_order_population_internal.h"
 #include "codestream/ac_group.h"
 #include "codestream/encoder.h"
 #include "core/ac_strategy.h"
@@ -398,7 +399,11 @@ Status ComputeCoefficientOrdersWithCounts(
                codestream_internal::kSimpleCoefficientOrderCount> zero_counts;
     uint16_t present_mask = 0;
     Status status;
-    if (behavior ==
+    const auto* population =
+      vardct_frame_internal::GetCoefficientOrderPopulation(frame);
+    if (population != nullptr) {
+      present_mask = population->present_mask;
+    } else if (behavior ==
         VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled) {
       status = PresentOrderMask(frame, &present_mask);
       if (!status.ok()) return status;
@@ -410,18 +415,32 @@ Status ComputeCoefficientOrdersWithCounts(
       0x94D049BB133111EBull,
       0xBF58476D1CE4E5B9ull,
     };
-    for (size_t group_index = 0; group_index < frame.ac_group_count();
-         ++group_index) {
-      VarDctAcGroupView group;
-      status = frame.GetAcGroup(group_index, &group);
-      if (!status.ok()) {
-        return status;
+    if (population != nullptr) {
+      using namespace vardct_frame_internal;
+      for (size_t family = 0; family < zero_counts.size(); ++family) {
+        if (!(present_mask & (uint16_t{1} << family))) continue;
+        for (size_t channel = 0; channel < 3; ++channel) {
+          const size_t offset = sample_dct8
+            ? kOrderPopulationFullCount + channel * 64
+            : channel * kOrderPopulationStride + kOrderPopulationOffsets[family];
+          const auto* begin = population->counts.data() + offset;
+          zero_counts[family][channel].assign(begin, begin + kOrderPopulationSizes[family]);
+        }
       }
-      status = CountGroupZeros(
-        group, frame.strategies(), &zero_counts, sample_dct8, &random_state,
-        &present_mask);
-      if (!status.ok()) {
-        return status;
+    } else {
+      for (size_t group_index = 0; group_index < frame.ac_group_count();
+           ++group_index) {
+        VarDctAcGroupView group;
+        status = frame.GetAcGroup(group_index, &group);
+        if (!status.ok()) {
+          return status;
+        }
+        status = CountGroupZeros(
+          group, frame.strategies(), &zero_counts, sample_dct8, &random_state,
+          &present_mask);
+        if (!status.ok()) {
+          return status;
+        }
       }
     }
 

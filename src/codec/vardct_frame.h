@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -31,6 +32,9 @@ enum class AcCoefficientDecisionMode {
 };
 
 namespace vardct_frame_internal {
+struct CoefficientOrderPopulation;
+[[nodiscard]] const CoefficientOrderPopulation* GetCoefficientOrderPopulation(
+  const VarDctEncoderFrame&) noexcept;
 struct QuantizedFrameAssemblyInput;
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
   QuantizedFrameAssemblyInput,
@@ -128,6 +132,9 @@ public:
     VarDctAcGroupView* out) const;
 
 private:
+  friend const vardct_frame_internal::CoefficientOrderPopulation*
+    vardct_frame_internal::GetCoefficientOrderPopulation(
+      const VarDctEncoderFrame&) noexcept;
   friend Status ComputeQuantizedCoefficients(
     ConstImage3FView,
     VarDctFrameInput,
@@ -168,6 +175,9 @@ private:
   Extent2D ac_group_extent_;
   std::vector<size_t> group_used_coefficient_count_;
   OverwriteArray<int32_t> ac_coefficients_;
+  // Immutable and frame-owned: copies may share counts, never mutable input.
+  std::shared_ptr<const vardct_frame_internal::CoefficientOrderPopulation>
+    coefficient_order_population_;
 };
 
 }  // namespace gjxl
