@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <vector>
@@ -17,11 +18,30 @@ struct VarDctBatchEncodingRequest {
   VarDctEncodingOptions options;
 };
 
+/// Per-image calling-thread wall spans, not CPU time or GPU execution time.
+/// Arrival is the beginning of this batch's Encode call, before driver locking.
+/// Ready means the image result is internally retained and optional cache trim
+/// has finished; the public result array is published only after all images.
+struct VarDctBatchSchedulingTiming {
+  /// Arrival through successful initial image CPU admission. Includes driver
+  /// queueing, preflight, memory admission, work-slot wait and initial CPU wait.
+  uint64_t queue_nanoseconds = 0;
+  /// Initial image CPU admission through internal readiness, including GPU and
+  /// worker waits, CPU resumption, prepared teardown and result retention/trim.
+  uint64_t service_nanoseconds = 0;
+  /// Arrival through internal readiness; exactly queue + service.
+  uint64_t ready_nanoseconds = 0;
+  /// False for errors resolved before image CPU admission. In that case service
+  /// is zero and queue equals ready. Whole-batch failures publish no new timing.
+  bool cpu_admitted = false;
+};
+
 struct VarDctBatchEncodingResult {
   Status status;
   std::vector<uint8_t> codestream;
   VarDctEncodingSummary summary;
   VarDctEncodingTiming timing;
+  VarDctBatchSchedulingTiming scheduling;
 };
 
 /// Persistent bounded-concurrency driver for independent image encodes.

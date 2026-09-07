@@ -1382,6 +1382,12 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME batch_lifecycle_cpu COMMAND gjxl_batch_lifecycle_test --cpu-only)
   set_tests_properties(batch_lifecycle batch_lifecycle_cpu PROPERTIES TIMEOUT 120)
 
+  add_executable(gjxl_batch_scheduling_test tests/batch_scheduling_test.cpp)
+  target_link_libraries(gjxl_batch_scheduling_test PRIVATE gjxl_codestream)
+  add_test(NAME batch_scheduling COMMAND gjxl_batch_scheduling_test)
+  add_test(NAME batch_scheduling_cpu COMMAND gjxl_batch_scheduling_test --cpu-only)
+  set_tests_properties(batch_scheduling batch_scheduling_cpu PROPERTIES TIMEOUT 120)
+
   add_executable(
     gjxl_rate_control_search_test
     tests/rate_control_search_test.cpp

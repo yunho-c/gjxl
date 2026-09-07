@@ -45,6 +45,7 @@ void IdentityAndObservers() {
   {
     CpuExecutionScope root;
     Require(root.Start(domain, 2).ok() && HasCpuParticipation(), "Root participation failed");
+    Require(!root.admitted_at(), "Untimed CPU scope recorded an admission timestamp");
     Require(!root.Start(domain).ok(), "Execution scope accepted a second Start");
     resource_budget_internal::ResourceContext resources;
     resources.domain = domain.get();
@@ -101,7 +102,10 @@ void SuspensionAndFifoResume() {
   CpuParticipantTracker tracker;
   {
     CpuExecutionScope root;
+    const auto before = std::chrono::steady_clock::now();
     Require(root.Start(domain, 1, true).ok(), "Root start failed");
+    Require(root.admitted_at() && *root.admitted_at() >= before &&
+            *root.admitted_at() <= std::chrono::steady_clock::now(), "CPU admission timestamp is invalid");
     EncodeScope encode(1, &tracker);
     std::atomic<bool> entered{false};
     std::thread waiter([&] {

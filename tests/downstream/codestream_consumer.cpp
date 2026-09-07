@@ -48,6 +48,9 @@ int main() {
   return batch_status.ok() && closed_status.code() == gjxl::StatusCode::kUnavailable &&
       batch_results.data() == retained_results && batch_results.size() == 2 &&
       batch_results[0].status.ok() && batch_results[1].status.ok() &&
+      batch_results[0].scheduling.cpu_admitted && batch_results[0].scheduling.service_nanoseconds > 0 &&
+      batch_results[0].scheduling.ready_nanoseconds == batch_results[0].scheduling.queue_nanoseconds +
+        batch_results[0].scheduling.service_nanoseconds &&
       batch_results[0].codestream == codestream &&
       batch_results[1].codestream == codestream &&
       codestream.size() >= 2 &&

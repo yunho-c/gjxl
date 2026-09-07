@@ -67,12 +67,15 @@ std::vector<VarDctBatchEncodingResult> Sentinel() {
   result[0].codestream = {0xde, 0xad};
   result[0].summary.encoded_bytes = 123;
   result[0].timing.total_nanoseconds = 456;
+  result[0].scheduling = {7, 11, 18, true};
   return result;
 }
 void Unchanged(const std::vector<VarDctBatchEncodingResult>& result, const void* address) {
   Require(result.data() == address && result.size() == 1 &&
           result[0].codestream == std::vector<uint8_t>({0xde, 0xad}) &&
-          result[0].summary.encoded_bytes == 123 && result[0].timing.total_nanoseconds == 456,
+          result[0].summary.encoded_bytes == 123 && result[0].timing.total_nanoseconds == 456 &&
+          result[0].scheduling.queue_nanoseconds == 7 && result[0].scheduling.service_nanoseconds == 11 &&
+          result[0].scheduling.ready_nanoseconds == 18 && result[0].scheduling.cpu_admitted,
           "Rejected batch changed caller-owned results");
 }
 void Empty(const ExecutionDomain& domain) {
@@ -207,13 +210,18 @@ void WaitingForAdmission(bool memory) {
     const auto s = fixture.domain->snapshot();
     return memory ? s.waiting_requests == 1 : s.waiting_cpu_callers == 1;
   }, "Active batch did not wait for resource admission");
+  const auto observed_wait = std::chrono::steady_clock::now();
   std::thread closer([&] { events.Install(); driver->Shutdown(); stopped = true; });
   Until([&] { return events.Get(Event::kClosing) == 1; }, "Admission-wait shutdown did not close");
   Require(!stopped, "Shutdown returned without draining an admission-waiting call");
+  const auto held_wait = std::chrono::steady_clock::now() - observed_wait;
   held_cpu.reset(); held_memory.reset();
   active.join(); closer.join();
   Ok(status);
   Require(stopped && result.size() == 1 && result[0].status.ok(), "Admission-waiting batch failed to drain");
+  Require(result[0].scheduling.cpu_admitted && result[0].scheduling.queue_nanoseconds >=
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(held_wait).count()),
+          "Batch queue timing omitted CPU or memory admission wait");
   driver.reset();
   Empty(*fixture.domain);
 }

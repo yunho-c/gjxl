@@ -91,6 +91,9 @@ struct BenchmarkRow {
   Distribution sequential_ms;
   Distribution batched_ms;
   Distribution paired_speedup;
+  Distribution image_queue_ms;
+  Distribution image_service_ms;
+  Distribution image_ready_ms;
 };
 
 [[nodiscard]] size_t ParsePositiveSize(
@@ -323,13 +326,16 @@ void FillImage(ImageStorage* image) {
   gjxl::VarDctBatchEncoder& encoder,
   std::span<const gjxl::VarDctBatchEncodingRequest> requests,
   const std::vector<uint8_t>& expected_codestream,
-  const gjxl::VarDctEncodingSummary& expected_summary) {
+  const gjxl::VarDctEncodingSummary& expected_summary,
+  std::vector<gjxl::VarDctBatchSchedulingTiming>* image_timings = nullptr) {
 
   std::vector<gjxl::VarDctBatchEncodingResult> results;
   const Clock::time_point begin = Clock::now();
   const gjxl::Status status = encoder.Encode(requests, &results);
-  const double elapsed_ms =
-    std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
+  const auto elapsed = Clock::now() - begin;
+  const double elapsed_ms = std::chrono::duration<double, std::milli>(elapsed).count();
+  const auto elapsed_ns = static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
   if (!status.ok()) {
     throw std::runtime_error(
       "Batch scheduler failed: " + std::string(status.message()));
@@ -350,6 +356,12 @@ void FillImage(ImageStorage* image) {
         "Image " + std::to_string(index) +
         " did not match the single-image reference");
     }
+    const auto timing = results[index].scheduling;
+    if (!timing.cpu_admitted || timing.ready_nanoseconds != timing.queue_nanoseconds + timing.service_nanoseconds ||
+        timing.ready_nanoseconds > elapsed_ns) {
+      throw std::runtime_error("Image queue/service timing exceeds complete public-call boundary");
+    }
+    if (image_timings != nullptr) image_timings->push_back(timing);
   }
   return elapsed_ms;
 }
@@ -402,6 +414,7 @@ void FillImage(ImageStorage* image) {
   std::vector<double> sequential_samples;
   std::vector<double> batched_samples;
   std::vector<double> paired_speedups;
+  std::vector<gjxl::VarDctBatchSchedulingTiming> image_timings;
   sequential_samples.reserve(options.samples);
   batched_samples.reserve(options.samples);
   paired_speedups.reserve(options.samples);
@@ -411,14 +424,14 @@ void FillImage(ImageStorage* image) {
     const bool batch_first = sample % 2 != 0;
     if (batch_first) {
       batched_ms = RunBatch(
-        *batched, requests, expected_codestream, expected_summary);
+        *batched, requests, expected_codestream, expected_summary, &image_timings);
       sequential_ms = RunBatch(
         *sequential, requests, expected_codestream, expected_summary);
     } else {
       sequential_ms = RunBatch(
         *sequential, requests, expected_codestream, expected_summary);
       batched_ms = RunBatch(
-        *batched, requests, expected_codestream, expected_summary);
+        *batched, requests, expected_codestream, expected_summary, &image_timings);
     }
     sequential_samples.push_back(sequential_ms);
     batched_samples.push_back(batched_ms);
@@ -432,12 +445,21 @@ void FillImage(ImageStorage* image) {
               << sequential_ms / batched_ms << "x\n";
   }
 
+  std::vector<double> image_queue_ms, image_service_ms, image_ready_ms;
+  for (const auto& timing : image_timings) {
+    image_queue_ms.push_back(static_cast<double>(timing.queue_nanoseconds) / 1e6);
+    image_service_ms.push_back(static_cast<double>(timing.service_nanoseconds) / 1e6);
+    image_ready_ms.push_back(static_cast<double>(timing.ready_nanoseconds) / 1e6);
+  }
   return {
     .workload = workload,
     .batch_size = batch_size,
     .sequential_ms = Summarize(std::move(sequential_samples)),
     .batched_ms = Summarize(std::move(batched_samples)),
     .paired_speedup = Summarize(std::move(paired_speedups)),
+    .image_queue_ms = Summarize(std::move(image_queue_ms)),
+    .image_service_ms = Summarize(std::move(image_service_ms)),
+    .image_ready_ms = Summarize(std::move(image_ready_ms)),
   };
 }
 
@@ -445,7 +467,9 @@ void PrintRows(const std::vector<BenchmarkRow>& rows) {
   std::cout
     << "\nworkload,width,height,batch_size,serial_median_ms,"
        "batch_median_ms,batch_ms_per_image,batch_images_per_second,"
-       "paired_speedup_median,paired_speedup_min,paired_speedup_max\n";
+       "paired_speedup_median,paired_speedup_min,paired_speedup_max,"
+       "image_queue_median_ms,image_queue_max_ms,image_service_median_ms,image_service_max_ms,"
+       "image_ready_median_ms,image_ready_max_ms\n";
   for (const BenchmarkRow& row : rows) {
     const double milliseconds_per_image =
       row.batched_ms.median / static_cast<double>(row.batch_size);
@@ -463,7 +487,10 @@ void PrintRows(const std::vector<BenchmarkRow>& rows) {
               << images_per_second << ','
               << row.paired_speedup.median << ','
               << row.paired_speedup.minimum << ','
-              << row.paired_speedup.maximum << '\n';
+              << row.paired_speedup.maximum << ','
+              << row.image_queue_ms.median << ',' << row.image_queue_ms.maximum << ','
+              << row.image_service_ms.median << ',' << row.image_service_ms.maximum << ','
+              << row.image_ready_ms.median << ',' << row.image_ready_ms.maximum << '\n';
   }
 }
 
@@ -481,6 +508,9 @@ int main(int argc, char** argv) {
     std::cout << "Boundary: linear RGB input through in-memory codestream; "
                  "input generation, file I/O, and driver construction are "
                  "excluded.\n";
+    std::cout << "Image queue/service/ready spans are pooled across measured batched calls, "
+                 "excluding warmups. Ready is internally retained, not publicly available; "
+                 "batch_ms_per_image is throughput-derived, not service latency.\n";
 
     std::vector<BenchmarkRow> rows;
     for (const WorkloadSpec& workload : kWorkloads) {

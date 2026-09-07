@@ -90,8 +90,9 @@ yielded GPU/join wall spans. These end at the existing internal successful-resul
 commit, before prepared teardown and outer publication. They do not include
 batch-driver queueing or memory-admission wait and are not worker CPU time or GPU
 execution time. They must not be relabeled complete service latency; surround
-the public call for complete latency. Batch arrival-to-start/service metrics
-remain a separate deliverable below.
+the public call for complete latency. The follow-up
+[batch timing checkpoint](resident-batch-timing.md) adds separate arrival queue,
+service and internal-readiness spans without changing these older boundaries.
 
 ## Qualification record
 
@@ -212,12 +213,11 @@ generated-artifact failure to the CPU scheduler.
   tests explicit shutdown: reject new/queued calls, drain the active call and
   join workers while the object stays alive. Keep this coverage current with
   subsequent scheduler changes; external callers must return before destruction.
-- Add request-arrival, queue and service measurements through batch completion,
-  including waiting for the same driver's encode mutex and memory/CPU admission.
-  Preserve failure atomicity and distinguish internal timings from public wall time.
-  Measure image queueing to its first CPU slot and service through internally
-  retained-result readiness. Keep the later whole-array publication boundary
-  explicit: this synchronous API does not publish each image as soon as it is ready.
+- The [batch timing checkpoint](resident-batch-timing.md) now records driver,
+  memory and CPU queueing separately from image service through internally
+  retained-result readiness. Use those metrics alongside complete public-call
+  makespan in the remaining final qualification, preserving the distinct later
+  whole-array publication boundary.
 - Exercise real loop launch failures in addition to the primitive partial-launch
   model, and audit exceptional shutdown/queue transitions with the final scheduler.
 - Qualify the complete final scheduler against the integrated preparation baseline,

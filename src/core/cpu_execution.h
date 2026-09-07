@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <chrono>
+#include <optional>
+
 #include "core/execution_domain.h"
 
 namespace gjxl::thread_budget_internal {
@@ -56,6 +59,7 @@ public:
     if (current_cpu_execution.permit != nullptr) {
       if (!HasCpuParticipation() || !budget.Shares(*current_cpu_execution.permit))
         return Status::InvalidArgument("Nested CPU execution uses a different or suspended domain");
+      if (collect_timing) admitted_at_ = std::chrono::steady_clock::now();
       started_ = true;
       return Status::Ok();
     }
@@ -66,6 +70,7 @@ public:
     if (!status.ok()) return status;
     status = budget.Acquire(&permit_);
     if (!status.ok()) { job_permit_.Reset(); return status; }
+    if (collect_timing) admitted_at_ = std::chrono::steady_clock::now();
     timing_.initial_queue_nanoseconds = permit_.wait_nanoseconds();
     previous_ = current_cpu_execution;
     current_cpu_execution = {budget, std::move(job), &permit_, collect_timing ? &timing_ : nullptr, {}};
@@ -76,12 +81,18 @@ public:
     return Status::OutOfMemory("Unable to allocate CPU execution state");
   }
   [[nodiscard]] CpuExecutionTiming timing() const noexcept { return timing_; }
+  /// Calling-thread observation of successful initial admission, only when
+  /// timing was requested. A nested borrowing scope observes its own Start.
+  [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> admitted_at() const noexcept {
+    return admitted_at_;
+  }
 
 private:
   CpuExecutionContext previous_;
   cpu_budget_internal::CpuPermit permit_;
   cpu_budget_internal::CpuPermit job_permit_;
   CpuExecutionTiming timing_;
+  std::optional<std::chrono::steady_clock::time_point> admitted_at_;
   bool started_ = false;
   bool owns_ = false;
 };

@@ -10,6 +10,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <exception>
 #include <limits>
@@ -26,6 +27,19 @@ using resource_budget_internal::PublicationVector;
 using resource_budget_internal::ManagedVector;
 using resource_budget_internal::ResourceAllocation;
 namespace {
+using Clock = std::chrono::steady_clock;
+
+VarDctBatchSchedulingTiming SchedulingTiming(
+    Clock::time_point arrival, const thread_budget_internal::CpuExecutionScope* cpu = nullptr) noexcept {
+  const auto ready_at = Clock::now();
+  const auto admitted_at = cpu == nullptr ? std::nullopt : cpu->admitted_at();
+  const auto nanoseconds = [](Clock::duration duration) {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count());
+  };
+  const uint64_t ready = nanoseconds(ready_at - arrival);
+  const uint64_t queue = admitted_at ? nanoseconds(*admitted_at - arrival) : ready;
+  return {queue, ready - queue, ready, admitted_at.has_value()};
+}
 
 void ObserveLifecycle(codestream_internal::BatchLifecycleEventForTesting event) noexcept {
   const auto observer = codestream_internal::batch_lifecycle_observer_for_testing;
@@ -169,6 +183,7 @@ public:
     std::span<const VarDctBatchEncodingRequest> requests,
     std::vector<VarDctBatchEncodingResult>* results) {
 
+    const auto arrival = Clock::now();
     if (results == nullptr) {
       return Status::InvalidArgument(
         "Image batch result output is null");
@@ -218,6 +233,8 @@ public:
         candidate[i].status = PlanRequest(requests[i], &ignored);
         if (candidate[i].status.code() == StatusCode::kOutOfMemory)
           return candidate[i].status;
+        if (!candidate[i].status.ok())
+          candidate[i].scheduling = SchedulingTiming(arrival);
       }
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
       return failure.status();
@@ -237,6 +254,7 @@ public:
     {
       std::lock_guard work_lock(work_mutex_);
       requests_ = requests;
+      arrival_ = arrival;
       results_ = candidate.mutable_view();
       owned_results_ = candidate_owned;
       resource_context_ = resource_budget_internal::CurrentResourceContext();
@@ -307,6 +325,7 @@ private:
       std::span<const VarDctBatchEncodingRequest> requests;
       std::span<VarDctBatchEncodingResult> results;
       std::span<OwnedEncodingResult> owned;
+      Clock::time_point arrival;
       resource_budget_internal::ResourceContext resource_context;
       size_t in_flight = 0;
       bool trim = false;
@@ -322,6 +341,7 @@ private:
         }
         observed_generation = generation_;
         requests = requests_;
+        arrival = arrival_;
         results = results_;
         owned = owned_results_;
         resource_context = resource_context_;
@@ -366,6 +386,7 @@ private:
           size_t expected = std::numeric_limits<size_t>::max();
           terminal_index_.compare_exchange_strong(expected, index, std::memory_order_relaxed);
         }
+        results[index].scheduling = SchedulingTiming(arrival, &cpu_execution);
         if (observer.observe != nullptr)
           observer.observe(observer.context, index, false);
       }
@@ -395,6 +416,7 @@ private:
   codestream_internal::BatchExecutionObserverForTesting execution_observer_;
   std::atomic<size_t> terminal_index_{std::numeric_limits<size_t>::max()};
   std::span<const VarDctBatchEncodingRequest> requests_;
+  Clock::time_point arrival_;
   std::span<VarDctBatchEncodingResult> results_;
   std::span<OwnedEncodingResult> owned_results_;
   resource_budget_internal::ResourceContext resource_context_;

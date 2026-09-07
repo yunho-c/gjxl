@@ -86,6 +86,7 @@ disabled; this is not a claim of leak-sanitizer or unsuppressed Metal cleanlines
 The changed runtime and test translation units also pass strict
 `-Wall -Wextra -Wpedantic -Werror` syntax checks.
 
-Queue/service measurement and a repeated integrated-baseline performance
-comparison remain required for final scheduling completion. These functional
-checks alone are not a throughput or latency claim.
+The follow-up [timing checkpoint](resident-batch-timing.md) adds queue/service
+measurement. Real loop launch-failure coverage and a repeated integrated-baseline
+performance comparison remain required for final scheduling completion. These
+functional checks alone are not a throughput or latency claim.
