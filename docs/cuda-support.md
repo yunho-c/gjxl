@@ -1376,6 +1376,19 @@ All 322 GPU jobs finish, with no observed permission block. Production and
 all 40 retained runtime files remain unchanged. Layout-aware dispatch and
 broader convolution/final-mask investigations remain open.
 
+[S93](cuda-optimization-s1.md#erosion-tiling-and-the-streaming-limit-s93)
+refreshes the fully-resident traces and rejects direct/shared erosion tiling
+as general replacements: both lose at 4K despite exact guards and clean
+sanitizers. A separately qualified, explicitly nonperceptual read/write proxy
+moves the same 20 live input planes and is essentially no faster at 4K
+(about 253 logical GB/s for either kernel). This strongly favors reducing
+intermediate memory traffic over further arithmetic-only tuning for that
+large pass; it is not a DRAM-counter measurement or proof of optimality.
+The next lead is distorted-mask vertical-blur/final-pass fusion, with explicit
+scratch-alias and half-scale ordering hazards to resolve. All 306 GPU jobs
+complete without an observed permission block. Production and all 40 retained
+runtime files remain unchanged; the encoder is not declared maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

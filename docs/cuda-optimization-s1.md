@@ -16242,6 +16242,258 @@ checks native identity and protects the retained runtime. Eight source and
 document snapshots distinguish frozen evidence from later edits. Only the
 two CUDA documents change; the three user-owned untracked files stay untouched.
 
+## Erosion tiling and the streaming limit (S93)
+
+S93 follows S92 `e2744fb`. It refreshes the retained fully-resident GPU
+profile, tests whether shared-memory erosion reuse helps final masking,
+then measures a nonperceptual streaming proxy to distinguish arithmetic
+work from the cost of moving the pass's live planes. No production code,
+permanent test/tolerance, prepared allocation or retained runtime changes.
+
+### Fresh baseline and hypothesis
+
+Six fresh CUDA-only Nsight Systems traces use the hash-checked retained
+S79 phase probe, the existing PFM inputs, three warmups and one marked
+fully-resident unscored encode per capture. The second repetition reverses
+workload order. Sampling, context-switch tracing and privileged counters
+remain off. Each trace contains four erosion/L2/final launches:
+
+| Workload | Repetition | Kernel launches | All GPU kernel ms | Erosion/final ms | Share of kernel sum |
+|---|---:|---:|---:|---:|---:|
+| 3839x2159 | 0 | 309 | 169.008201 | 10.368983 | 6.135% |
+| 3839x2159 | 1 | 309 | 169.260796 | 9.199964 | 5.435% |
+| 1919x1079 | 0 | 335 | 27.129773 | 1.751684 | 6.457% |
+| 1919x1079 | 1 | 335 | 27.842431 | 1.757317 | 6.312% |
+| 510x532 | 0 | 374 | 5.245832 | 0.250949 | 4.784% |
+| 510x532 | 1 | 374 | 5.245601 | 0.249830 | 4.763% |
+
+These are fresh instrumented kernel-time sums, not wall-time shares or a
+new decoded-quality comparison. Low/medium convolution, paired Malta and
+Opsin also remain significant; this pass is not claimed to be the sole
+bottleneck. S67 already rejected materialized reference-mask caches, whose
+extra streaming planes outweighed reduced arithmetic. S93 instead changes
+only local work assignment and neighborhood loading, without another
+full-image buffer.
+
+One diagnostic executable has four modes: retained flat 256-thread blocks;
+a renamed native-identical control; 32x8 output tiles with original direct
+mask loads; and the same output tiles with a shared 38x14 mask neighborhood.
+The direct tiled mode separates work-layout effects from shared loading.
+The shared tile contains 532 floats (2,128 bytes), or 2.078125 nominal global
+mask loads/output for a full tile, versus nine source-level neighborhood
+samples/output. That is not a DRAM-transaction comparison: neighboring
+direct loads may hit cache. Every block cooperatively fills the halo and
+reaches its barrier before invalid output lanes return. A flattened tile
+grid avoids a 65,535-row grid-Y limit.
+
+Strict min-three comparisons, traversal order, missing-neighbor behavior,
+explicit erosion contraction, L2 asymmetry, masking divisions and final
+square-root/invalid-result behavior are preserved. No generic min/max
+rewrite, new tolerance or fast-math flag is used.
+
+| Mode | Registers/thread | Shared bytes/block | Static native instructions | Static LDG / LDS / STS | Barriers |
+|---|---:|---:|---:|---:|---:|
+| Retained | 40 | 0 | 744 | 28 / 0 / 0 | 0 |
+| Renamed control | 40 | 0 | 744 | 28 / 0 / 0 | 0 |
+| Direct tiled | 40 | 0 | 680 | 28 / 0 / 0 | 0 |
+| Shared tiled | 39 | 2128 | 896 | 27 / 9 / 8 | 1 |
+
+All have zero stack and spills. Counts are static instructions, including
+branches and edge paths, not executed instructions or memory transactions.
+The shared loader adds address/boundary/staging work even though it reduces
+repeated source-level mask reads. Seven standalone native artifacts have
+exactly 78 bodies: all 75 retained Butteraugli bodies, the exact renamed
+control and two tiled candidates. Retained bodies match the prior native
+baseline; the unchanged code is not inferred merely from equal counts.
+
+### Exactness, guards and tiled measurements
+
+Release and host-ASan each run all four modes through the current permanent
+360 L2/final and 432 erosion/final fixtures, with three reuse stages. That
+is 3,168 fixture executions and 9,504 output comparisons per build. All
+26 allocations are checked, including unchanged inputs, poison padding,
+unused scratch, exceptional floats and changed-input reuse. The erosion
+oracle retains separate erosion followed by final masking, and nonblocking
+streams are explicitly ordered after fixture copies.
+
+Each CUDA sanitizer tool runs four modes of the eight-case 33x65 erosion
+subset: 32 fixtures and 96 comparisons. Memcheck uses full leak checking
+and stream-ordered race tracking; all four tools report zero errors/leaks
+or race hazards as applicable. Release and ASan also each pass four
+1x524,281 fixtures (12 comparisons), covering 65,536 flattened tile rows.
+Totals are 6,472 fixture executions and 19,416 comparisons, of which 10,776
+exercise erosion/final and 8,640 the unchanged ordinary L2/final path.
+
+The graph screen covers nine dimensions, packed/padded rows and three
+synthetic patterns. Pattern 0 uses signed zero; pattern 1 uses random finite
+psycho data and positive masks; pattern 2 combines tiny/large psycho data
+with a smooth reference mask. The last is a stress pattern, not a captured
+encoder distortion. Reference/distorted/work/output padded strides are
+width+11/+17/+23/+29. Half-scale-sized cases here are independent synthetic
+layouts, not the encoder's full-width-strided subscale allocations.
+
+All 54 release and 54 host-ASan preflights pass. The 108 measured jobs use
+two repetitions with reversed shape/padding/pattern order, eight warmup
+quartets and all 24 permutations of four modes, four graph-contained calls
+per event. Full output bits are checked after every window; all 26 complete
+allocations are checked after each graph's initial replay and after the
+campaign for that case, outside events. The 216 jobs produce 13,824 windows
+(10,368 measured, 3,456 warm), 14,688 graph-output checks and 1,080 complete
+guard sets. Host dispatch selection is outside graph events. Every sample
+is retained, without clock normalization or outlier removal.
+
+The table spans the six per-case paired medians (three patterns, two
+repetitions) for each shape/padding. Negative is faster; the raw individual
+results and both-control contrasts remain available.
+
+| Shape | Padding | Copied/original % | Direct tiled/original % | Shared tiled/original % | Shared/direct % |
+|---|---:|---:|---:|---:|---:|
+| 3839x2159 | 0 | -0.028 to +0.056 | +0.488 to +0.591 | +0.883 to +0.991 | +0.366 to +0.510 |
+| 3839x2159 | 1 | -0.009 to +0.037 | +0.465 to +0.609 | +0.956 to +1.013 | +0.369 to +0.480 |
+| 3840x2160 | 0 | -0.070 to +0.028 | +0.660 to +0.707 | +0.850 to +1.066 | +0.185 to +0.291 |
+| 3840x2160 | 1 | -0.051 to +0.056 | +0.427 to +0.571 | +0.923 to +1.036 | +0.443 to +0.587 |
+| 1919x1079 | 0 | +0.000 to +0.037 | +0.074 to +0.185 | -0.037 to +0.037 | -0.185 to -0.074 |
+| 1919x1079 | 1 | -0.037 to +0.018 | +0.074 to +0.148 | -0.074 to +0.000 | -0.184 to -0.111 |
+| 1920x1080 | 0 | -0.037 to +0.056 | +0.111 to +0.185 | +0.000 to +0.055 | -0.148 to -0.074 |
+| 1920x1080 | 1 | +0.000 to +0.000 | +0.074 to +0.147 | -0.037 to +0.037 | -0.147 to -0.074 |
+| 960x540 | 0 | -0.145 to +0.927 | -0.217 to +0.217 | -0.216 to +0.145 | -0.144 to +0.578 |
+| 960x540 | 1 | -0.427 to +0.214 | -0.569 to +0.287 | -0.500 to +0.000 | -0.560 to +0.359 |
+| 510x532 | 0 | -0.270 to +0.269 | +0.000 to +1.074 | -0.270 to +0.270 | -0.935 to -0.268 |
+| 510x532 | 1 | -0.265 to +0.265 | +0.000 to +0.796 | -0.532 to -0.265 | -1.055 to -0.267 |
+| 255x266 | 0 | +0.000 to +0.459 | -0.472 to +1.852 | -0.909 to +0.000 | -1.827 to +0.000 |
+| 255x266 | 1 | -0.459 to +0.000 | +0.000 to +0.901 | -2.620 to -0.909 | -2.655 to -1.802 |
+| 32x64 | 0 | -13.836 to +2.500 | -11.616 to +6.944 | -1.724 to +13.889 | +0.000 to +8.596 |
+| 32x64 | 1 | -13.043 to +0.000 | -3.750 to +0.000 | -3.869 to +5.000 | +0.000 to +5.000 |
+| 33x65 | 0 | +0.000 to +4.762 | -9.456 to +0.000 | +0.000 to +5.132 | +2.500 to +8.271 |
+| 33x65 | 1 | +0.000 to +4.762 | -7.262 to -2.273 | -4.762 to +2.000 | +0.000 to +5.409 |
+
+Both tiled variants regress against both retained controls in both
+repetitions for all twelve 4K shape/padding/pattern combinations. Direct
+tiling loses about 0.43-0.71%; shared tiling about 0.85-1.07%. HD shared
+tiling is near zero. Some smaller padded cases improve, but tiny-case
+control scatter and event granularity preclude treating every signed
+median as a real gain. Across all 54 combinations, the direct mode is
+faster/slower/mixed against both controls in both repetitions in 5/30/19;
+shared is 9/16/29. No geometry policy is fitted or promoted from this screen.
+
+### Nonperceptual data-movement comparison
+
+The second same-binary comparison keeps the retained final kernel and its
+exact duplicate, and replaces modes 2/3 with two native-identical streaming
+proxies. Each proxy reads eight reference planes, eight distorted planes,
+two AC planes and two raw masks, then stores one ordered FP32 sum. It
+preserves the existing flat index mapping and all four independent strides.
+It does **not** compute erosion, L2 error, masking or a perceptual distance,
+and is never an encoder candidate. Explicit GPU rounded additions match a
+separate CPU sum over all active pixels. Retained outputs still match the
+separate erosion/final oracle; proxy outputs have their own expected array.
+Inputs, padding and unused buffers remain unchanged.
+
+The proxies use 38 registers with zero shared memory, stack or spills.
+Their separate object has two bodies; both linked replay executables have
+80, including all 78 preceding bodies unchanged and two identical proxies.
+All four CUDA sanitizer tools pass the scoped padded 33x65 proxy fixture.
+The finite-random pattern then passes 18 release and 18 host-ASan preflights
+over the same nine shapes and two padding modes, followed by 36 timing jobs
+with the same balanced four-mode protocol. All 4,608 windows (3,456 measured,
+1,152 warm), 4,896 graph-output checks and 360 full guard sets pass; scoped
+sanitizer checks are additional. These are correctness checks of the proxy's
+sum and memory contract, not perceptual-quality qualification.
+
+Logical traffic is 20 float inputs plus one output, 84 bytes/pixel. The
+retained kernel's reported rate uses that same unique-plane accounting;
+neighborhood reloads, cache effects, physical transactions and overfetch are
+not included. Rates divide these logical bytes by measured kernel-event
+time. They are not measured DRAM throughput or a theoretical bandwidth
+limit. Proxy ratios are paired medians; rates use each mode's own median.
+
+| Shape | Padding | Proxy/original % (r0 / r1) | Retained logical GB/s (r0 / r1) | Proxy logical GB/s (r0 / r1) |
+|---|---:|---:|---:|---:|
+| 3839x2159 | 0 | +0.005 / -0.014 | 253.402 / 253.154 | 253.342 / 253.201 |
+| 3839x2159 | 1 | -0.014 / -0.009 | 252.660 / 252.766 | 252.601 / 252.824 |
+| 3840x2160 | 0 | -0.042 / +0.075 | 253.255 / 253.325 | 253.349 / 253.149 |
+| 3840x2160 | 1 | +0.023 / +0.102 | 252.855 / 252.890 | 252.784 / 252.655 |
+| 1919x1079 | 0 | -0.259 / -0.259 | 251.915 / 251.915 | 252.571 / 252.571 |
+| 1919x1079 | 1 | -0.222 / -0.222 | 251.078 / 250.985 | 251.589 / 251.542 |
+| 1920x1080 | 0 | -0.204 / -0.259 | 252.047 / 251.860 | 252.468 / 252.468 |
+| 1920x1080 | 1 | -0.258 / -0.221 | 251.070 / 251.024 | 251.627 / 251.627 |
+| 960x540 | 0 | -0.721 / -0.727 | 245.455 / 245.809 | 247.238 / 248.321 |
+| 960x540 | 1 | -1.007 / -1.066 | 244.572 / 241.277 | 246.880 / 243.348 |
+| 510x532 | 0 | -1.490 / -1.882 | 240.613 / 239.320 | 244.579 / 243.909 |
+| 510x532 | 1 | -1.857 / -1.987 | 237.089 / 235.521 | 241.265 / 240.613 |
+| 255x266 | 0 | -3.828 / -5.607 | 214.007 / 206.081 | 222.567 / 218.203 |
+| 255x266 | 1 | -4.673 / -4.717 | 206.081 / 208.007 | 218.203 / 218.203 |
+| 32x64 | 0 | -30.952 / -28.571 | 44.800 / 44.800 | 61.091 / 67.200 |
+| 32x64 | 1 | -31.250 / -31.250 | 42.000 / 42.000 | 61.091 / 61.091 |
+| 33x65 | 0 | -31.250 / -20.714 | 43.989 / 43.989 | 63.984 / 58.652 |
+| 33x65 | 1 | -19.139 / -33.272 | 28.728 / 41.402 | 40.004 / 63.984 |
+
+### Disposition and next mechanism
+
+At 4K, removing nearly all perceptual arithmetic leaves time essentially
+unchanged: proxy/original spans -0.042% to +0.102%, while both operate near
+253 logical GB/s. At HD the proxy is only about 0.20-0.26% faster. This is
+strong evidence that moving the live planes dominates these large streaming
+boundaries and that the arithmetic is largely hidden. It is not a proof of
+a hard lower bound, a particular cache/DRAM bottleneck, or optimality across
+all inputs and hardware. The proxy omits neighborhood accesses and changes
+arithmetic, dependencies and register use. Smaller inputs leave more visible
+arithmetic/launch work; the 32x64/33x65 percentages also have coarse event
+granularity and control scatter. No global "maxed out" claim follows.
+
+Reject the two tiled variants as general replacements. Do not promote the
+nonperceptual proxy. No candidate whole-encode timing, fresh decoder run or
+production release qualification is attempted for these rejected primitives.
+The new evidence redirects the next investigation toward removing an
+intermediate memory pass rather than more standalone erosion arithmetic.
+
+The concrete next lead is to fuse the distorted-mask 13-tap vertical blur
+with erosion/L2/final masking. Its materialized distorted mask has no later
+consumer beyond that final pass. Eliminating its write/read would save
+eight nominal bytes/output plus one launch per difference evaluation,
+before counting any new tile-loading or arithmetic costs. This is an
+unimplemented hypothesis, not a measured speedup.
+
+Two lifetime constraints must be resolved first. Expanded/subscale final
+maps currently reuse plane 24, which would still hold the vertical blur's
+horizontal input; in-place cross-tile halo consumption would be unsafe.
+Plane 23 may instead be reusable after its raw distorted-mask input has
+been consumed by the horizontal pass, with crop/compose routing updated.
+Also, uncached half-scale reference-mask construction currently overwrites
+plane 24 after the distorted blur. A possible order is distorted-mask
+precompute, reference-mask precompute/blur, distorted horizontal blur, then
+the fused final pass. Distorted precompute must precede reuse of psycho
+output 9 for the reference mask. This ordering, all aliases, contraction
+rounding and full prepared-workflow outputs require independent tests.
+
+All 306 GPU jobs, including six baseline traces, complete with nonoverlapping
+intervals. Tiled timing runs 12:04:37.857338-12:08:52.528397 UTC on
+2026-09-07 (4m15s). The streaming timing campaign finishes at
+12:18:06.863536; its exact start is retained in the first measured job.
+All observation handles are resumed to terminal completion; no GPU
+test/timing job is restarted or discarded. No admin, firewall or permission
+prompt is observed, and restricted hardware counters are not retried.
+Clock, power, priority, cooling and security settings remain unchanged.
+CPU builds/native audits overlap qualification only, not either timing
+campaign; machine-wide isolation is not claimed.
+
+Two failed diagnostic builds remain preserved. The first tiled wrapper
+includes its dispatcher before `PlaneBlocks` and `CheckLaunch` are declared;
+moving the include below those helpers fixes it. The first proxy attempts
+to use host-only `std::array::operator[]` in device code; a private C-array
+descriptor fixes it without enabling relaxed-constexpr compilation. Prior
+source versions and failed/completed build logs remain. Neither failure
+reaches GPU qualification. S92 frozen/current validation passes before
+the documentation edit.
+
+Ignored `build-cuda-ninja/profiles/s93_*` preserves six baseline traces,
+complete snapshots, probes, source failures, build/native/resource records,
+all raw qualified and explicitly nonperceptual timings, per-mode controls,
+analyzers, hashes and a recomputing validator. Six source/document snapshots
+separate frozen evidence from later edits. All 40 retained runtime files
+remain byte-identical; only the two CUDA documents change, and the three
+user-owned untracked files remain untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
