@@ -1529,6 +1529,28 @@ microbenchmark. Main timing takes 19m12s with advancing logs and no
 observed admin/firewall/permission prompt. New binaries and native dumps
 are hash-anchored in a dedicated U: directory; no system settings change.
 
+[S103](cuda-optimization-s1.md#complete-retained-encode-attribution-s103)
+profiles the complete unchanged retained encode in six content/size cases,
+with reversed-order plain controls. All 24 main jobs pass exact-output
+checks; main timing takes 2m36s. Including both release/ASAN host-harness
+preflights and the accepted tiny trace, 57 accepted jobs contain 354 encodes.
+One original trace lacks its final application marker and remains unaccepted;
+dedicated application logging qualifies the replacement harness. All four
+new host executables match the retained 205 native CUDA bodies, and all
+forty production runtime files remain unchanged.
+
+The 80 exact-quantizer kernels take only 2.66 ms GPU time per 4K encode,
+1.59% of kernel time. Larger inactive intervals precede strategy-metadata
+uploads: up to 19.08 ms at 4K, mostly before the memcpy API. Copy sizes and
+source order identify that boundary, but do not separate host strategy merge,
+metadata construction and scheduling. Instrument those host stages next;
+do not treat all gaps as removable launch overhead or promote a tiny-kernel
+change from launch counts alone. Profiling materially affects timings and
+telemetry shows changing state. This is attribution, not a new speedup or
+proof that optimization is exhausted. No system/security settings change or
+permission prompt is observed. Large new evidence is on U:, with mutable
+profiler temporary files excluded from freezing and nothing deleted.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

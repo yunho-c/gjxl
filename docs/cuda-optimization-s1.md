@@ -18649,6 +18649,195 @@ the evidence. Only the two CUDA documents are committed; production code,
 the forty retained runtime files and three user-owned untracked files
 remain unchanged.
 
+## Complete retained encode attribution (S103)
+
+S103 follows S102 `38dcd78` and returns to the complete retained S79 encode
+instead of another graph-destructor experiment. The result is an attribution
+map, not a promoted optimization: the exact quantizer has many launches but
+little of the large-image GPU time, while substantial GPU-inactive intervals
+precede host-to-device strategy-metadata uploads. Separate host strategy
+selection, metadata construction and other preparation before selecting the
+next implementation. Production remains S79 `914b42c`; it is not proven
+maxed out.
+
+### Harness, scope and qualification
+
+The diagnostic host harness links the seven retained production libraries,
+CUDA runtime, read-only NVML and the installed NVTX library. Original and
+application-log-v2 versions each build with MSVC release and clang-cl ASAN,
+with warnings treated as errors. All four new executables have exactly the
+same 205 canonical native CUDA bodies as a fresh dump of the hash-frozen S79
+phase probe. S102's experimental executables contained 209 bodies because
+they included additional diagnostic variants; 205 here is the actual retained
+library set, not a loss of production kernels. There is no new CUDA
+compilation or CUDA sanitizer run. ASAN qualifies the new host harness, not
+every unchanged library as an instrumented build.
+
+Each main job creates one persistent backend, encodes a fresh reference,
+checks eight warm-ups and measures three complete profiled Encode helper
+calls. Each non-reference result must match the fresh reference's bytes and
+summary; the saved reference must also match its frozen byte oracle. Outer
+timing includes per-encode preparation, serialization and internal owner
+destruction, but excludes backend lifetime, file I/O and output comparisons.
+NVTX encloses that interval. Distance is 1.2, effort 7, automatic CPU thread
+count, fully resident, with no final score request. Read-only monitoring is
+enabled for every main job.
+
+The six cases are two 500-square photographs, their frozen S101
+integer-replicated 2000-square derivatives, and synthetic 1919x1079 and
+3839x2159 inputs. The derivatives are not natural high-resolution photographs.
+Two repetitions reverse both case order and plain/traced order. There are
+24 main jobs, 288 encodes, 264 exact comparisons, 24 reference hashes, 192
+warm-ups and 72 measured calls; 36 calls appear in twelve main traces.
+These short controls diagnose gross instrumentation effects, not statistical
+significance or a production speedup. They are not pooled with S102 timing.
+
+Both host-harness versions pass sixteen two-encode preflights: the six cases
+in release/ASAN with monitoring, plus the 17x13 sample in release/ASAN with
+monitoring off/on. One accepted v2 tiny trace additionally verifies the
+profiler/SQLite/NVTX handshake. In total, 57 accepted GPU jobs contain 354
+encodes, 297 exact comparisons and 57 reference hash checks. An original
+tiny trace is separately retained as unaccepted, not counted as a pass.
+
+That original qualification returned zero from Nsight, but the wrapper log
+did not contain the application's final PASS after `cudaProfilerStop`.
+Exported `ProcessStreams` contains the configuration and one measured row,
+not that terminal marker. The installed CLI's output-forwarding default was
+already enabled. V2 therefore writes, flushes and closes a dedicated
+application log, and acceptance requires its final marker as well as a zero
+process exit and exact-output checks. No stopped process was restarted under
+the original label. Both versions, the unaccepted trace and its SQLite export
+remain available.
+
+Two exclusive-output naming collisions affected host report aggregation,
+not GPU execution: the v2 native-audit job already occupied the requested
+aggregate filename, and the gap-detail data already occupied its wrapper's
+report filename. Existing outputs were preserved; a differently named native
+aggregate and a recomputing gap-detail check recovered the evidence without
+rebuilding or repeating GPU work. A findings assertion initially assumed all
+six largest gaps per case preceded metadata. Inspection showed a 1080p D2H
+gap and a different 4K H2D gap among them; the corrected analysis explicitly
+filters by direction and the complete five-copy payload sequence. The failed
+analysis log and pre-correction script are preserved, and those other gaps
+are not relabeled as metadata.
+
+### Trace accounting and observations
+
+Nsight Systems 2023.2.3 traces CUDA/NVTX with CUDA memory usage enabled,
+CPU sampling/context-switch tracing disabled, `cudaProfilerApi` capture,
+`--capture-range-end=stop --kill=false --wait=primary`. No restricted GPU
+counters, elevation or force-overwrite option is requested. SQLite is opened
+read-only. All GPU activities fit a single measured NVTX range, none crosses
+a range boundary, and no GPU activities lie outside those ranges. Each case
+has identical ordered kernel/launch, copy-payload and memset fingerprints
+across its six traced encodes. All traced in-range runtime API return values
+are zero. Raw memory events are retained; they are not a complete process or
+driver physical-memory accounting.
+
+The following outer values are each repetition's three-call median. GPU
+union and inside-span gap are independent medians across six traced encodes;
+do not add independent medians. Quantizer GPU time is its six-call arithmetic
+mean. All times are milliseconds. Kernel counts and quantizer launch counts
+are per encode.
+
+| Case | Plain outer, rep 0 / 1 | Traced outer, rep 0 / 1 | Traced GPU union | Inside GPU-span gap | Kernels | Quantizer kernels | Quantizer GPU mean |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| flower_500 | 19.210 / 19.966 | 23.748 / 25.015 | 6.194 | 6.259 | 374 | 80 | 0.359 |
+| keong_500 | 21.088 / 24.438 | 37.457 / 26.443 | 6.192 | 10.929 | 374 | 80 | 0.352 |
+| flower_2000 | 132.715 / 137.528 | 161.932 / 153.169 | 74.492 | 24.495 | 374 | 80 | 1.151 |
+| keong_2000 | 141.613 / 162.639 | 163.389 / 160.944 | 76.007 | 26.800 | 374 | 80 | 1.253 |
+| 1080p | 74.527 / 74.553 | 84.182 / 88.091 | 36.972 | 15.322 | 335 | 80 | 0.663 |
+| 4k | 301.198 / 316.863 | 333.784 / 335.811 | 217.585 | 44.275 | 309 | 80 | 2.662 |
+
+Observed traced/plain changes range from -1.04% to +77.62%; 4K is
++10.82%/+5.98%. This includes instrumentation and changing machine state,
+not an isolated estimate of profiler overhead. Plain controls also use NVTX
+annotations. Do not interpret trace gaps as equivalent untraced launch costs.
+
+For an additive example, the arithmetic means over all six 4K traces are:
+0.314 ms before first GPU activity, 213.416 ms GPU union, 44.134 ms gaps
+inside its first-to-last activity span, and 81.184 ms after last activity,
+totaling 339.048 ms NVTX duration before rounding. GPU union consists of
+167.082 ms kernel time, 46.324 ms copy time and 0.009 ms memset time in
+these traces. Host synchronization spans average 162.373 ms, with
+160.773 ms overlapping GPU activity; adding waits to GPU time would
+double count. The post-GPU interval includes host work and cleanup, not
+necessarily serialization alone.
+
+Every inside-span gap is partitioned relative to the next activity's unique
+correlated host API: before API entry, inside the API, and after its return.
+For 4K those means are 39.415, 3.107 and 1.612 ms, with zero unclassified
+gap time. This is temporal attribution, not proof that all pre-entry time is
+CPU computation or that API return proves hardware dispatch. OS scheduling,
+host work, profiler effects and other delays are not separated by this trace.
+
+The largest individual gap in each case precedes five H2D copies matching
+`CudaPreparedResidentAqEvaluation::UploadMetadata`: anchors (8 bytes each),
+EPF sharpness (one byte per block), color transforms (24 bytes per anchor),
+color-tile offsets (four bytes per tile plus one), and packing offsets
+(eight bytes per anchor). At 4K the sequence is 65,280 / 129,600 / 195,840 /
+8,164 / 65,280 bytes, implying 8,160 anchors. Its largest gap is 19.077 ms,
+of which 18.947 ms precedes the correlated memcpy API; that API lasts
+0.103 ms. The preceding GPU activity is a 72,720-byte D2H copy. The maxima
+are 0.765/1.328 ms for the 500-square cases, 7.207/9.669 ms for their
+2000-square derivatives, and 3.339 ms at 1080p. The mapping uses source,
+geometry, byte counts and order, not captured CPU stacks. `Reconfigure`
+builds metadata before uploading it; AC-strategy search also merges cost
+readbacks on the host. These traces do not assign the entire interval to
+`BuildMetadata`, or prove all the large gaps are that same operation.
+
+### Next mechanism and limits
+
+The 80 quantizer kernels comprise eight initializations, 32 histograms,
+32 bucket selections, four finalizations and four raw-quant conversions.
+Four quantizer selections each compute a median and median absolute
+deviation using four radix passes. They are only 1.59% of aggregate 4K
+kernel time, versus 6.91-7.05% at 500 square. An exact shared-memory selector
+could reduce launch count, but that is a hypothesis with size-dependent
+serialization risk, not the dominant demonstrated 4K GPU opportunity.
+The four logical selections use different invariant/current policy fields;
+do not delete an apparently duplicate selection without an equivalence proof.
+
+Large-image kernel rankings are distributed across previously investigated
+Butteraugli paths: 4K's largest single family, paired Malta, is 8.59% of
+kernel time, followed by low/medium convolution rows, erosion and fused
+Opsin. Neither this distribution nor the quantizer count supports another
+unqualified graph or tiny-kernel optimization. First instrument the CPU
+strategy merge and metadata construction separately, using existing stage
+profiling where applicable, and retain an uninstrumented complete-encode
+control. Qualify any resulting change for exact decisions, failed
+reconfiguration, ownership/lifetime and complete workflow performance.
+
+Telemetry is sparse and state varies. Fully contained query intervals
+include sub-500 MHz samples: 4K has 8/29 plain and 3/33 traced, while the
+two plain 500-square cases each have one query reporting 210 MHz core,
+405 MHz memory and reason 0x1. Other contained reason samples are 0x24.
+Query containment does not make reported state continuous or unlagged.
+No clock normalization, thermal diagnosis or vendor-mode inference is made.
+The post-run read-only snapshot at 18:29:07.145841 UTC reports a 40 W
+enforced limit, unsupported ordinary power-limit query, AC online/charging,
+Windows Balanced and 83% battery. No power, clock, profile, priority,
+security or firewall setting changes.
+
+S102 frozen/current validation passes before building. Main GPU jobs run
+18:22:49.694973-18:25:25.634645 UTC on 2026-09-07: 155.940 seconds,
+about 2m36s, with serial trace exports between jobs. Job intervals do not
+overlap. No admin/firewall/permission prompt or blocked counter retry is
+observed. This duration describes the main campaign, not the entire
+investigation or an hour-long idle wait.
+
+Ignored `s103_*` scripts remain in `build-cuda-ninja/profiles`; new outputs
+are in `U:/gjxl-cuda-diagnostics/s103` because C: has only tens of MB free.
+Four executables, four objects, two ASAN PDBs, five native dumps, fourteen
+Nsight reports/SQLite exports, all application/wrapper logs, outputs,
+telemetry, analyses and failure/recovery evidence are preserved. Process-local
+TEMP/TMP also use that dedicated U: directory. Mutable profiler temp files
+are excluded from frozen evidence, retained in place and not deleted.
+Recomputing validation and separate artifact, dependency, binary, data,
+source/document and retained-runtime hash manifests anchor the evidence.
+Only the two CUDA documents are committed; production code, all forty
+retained runtime files and the three user-owned untracked files are unchanged.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
