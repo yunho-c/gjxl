@@ -1479,6 +1479,22 @@ lifetime; prebuilt replay timings alone do not prove amortization. The
 timing batch finishes in 3m54s with no observed permission prompt. Production,
 the 40 retained runtime files and system settings remain unchanged.
 
+[S100](cuda-optimization-s1.md#resident-comparison-graph-setup-at-encoder-lifetime-s100)
+implements an isolated prepared-owner comparison-graph cache with capture,
+instantiation, upload and destruction inside complete encode timing. Actual
+resident reuse is one build and two launches per encode. Full release/ASAN,
+descriptor/stream/failure checks and all four CUDA sanitizers pass; all ten
+diagnostic binaries retain the same 209 CUDA bodies. Across 52 successful
+encoder jobs, 2,820 encodes preserve exact S70 bytes and strategy summaries.
+Both 4K and 1080p remain mixed, while the 510x532 photograph improves public
+total by 0.314-3.771% and quantization by 3.269-4.828%; one unmonitored outer
+comparison still regresses slightly. Recorded setup/cleanup groups total
+roughly 0.37-0.49 ms, excluding other wrapper work and driver graph-memory
+accounting. Next test geometry/content-matched photographs before defining
+any dispatch threshold, and qualify graph resources/concurrency. Production
+and all forty retained runtime files remain unchanged. Timing takes 4m04s;
+the longer racecheck advances normally, with no observed permission prompt.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

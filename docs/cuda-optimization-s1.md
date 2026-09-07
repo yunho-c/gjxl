@@ -17901,6 +17901,264 @@ the two CUDA documents are committed. All 40 retained runtime files and
 production sources remain unchanged, and the three user-owned untracked
 files remain untouched.
 
+## Resident comparison graph setup at encoder lifetime (S100)
+
+S100 follows S99 `5212872` and implements its next experiment: cache a CUDA
+comparison graph inside the actual prepared Butteraugli owner, charging
+setup and teardown to complete fully-resident encoding. This is an isolated
+host-side diagnostic, not a production replacement. GPU arithmetic is fixed
+to retained S95 mode 0; none of the mask-fusion variants is selected.
+
+### Ownership, descriptors and setup accounting
+
+`s100_cuda_butteraugli_v2.cpp` redirects both the public prepared comparison
+and `EncodeComparisonOnStream` through `s100_graph_v2.h`. The graph cache is
+the owner's last member, so its executable and graph are destroyed before
+owned scratch. Reference preparation, plan, options and scratch belong to
+that same prepared lifetime. Its cache signature includes all three
+distorted pointers and strides, distance-map pointer and stride, score
+pointer and CUDA stream. A changed signature builds a new graph; unchanged
+descriptors replay it. No cross-encode prepared-reference cache is added.
+
+Capture uses thread-local mode and ends before errors are returned. A
+successful capture must contain nodes, then is instantiated and explicitly
+uploaded on the comparison stream. Upload adds no synchronization. When
+already inside active capture, the wrapper emits the original comparison
+kernels into that outer graph instead of nesting a capture. Invalidated
+capture and CUDA operational failures are surfaced without a direct/CPU
+retry. RAII handles select their CUDA device and record creation,
+destruction and cleanup failures, including partially initialized graphs.
+
+Mode labels 0/1 both take the same direct host path; labels 2/3 both take
+the same graph host path. These are identical-label controls, not separate
+native kernel copies. All ten linked executables across the preserved
+prototype/test versions retain the same 209 canonical CUDA bodies as the
+frozen S95 exact binary. No new CUDA compilation is required.
+
+Every qualified direct encode records two comparisons. Every graph encode
+records one build, two launches, one cache hit and balanced creation and
+destruction of one graph/executable, with no descriptor rebuild, nested
+capture, operational error or cleanup error. The real policy loop therefore
+offers only two comparison launches per prepared lifetime for these inputs
+at distance 1.2 / effort 7. Prebuilt repeated-replay timing does not measure
+this amortization boundary.
+
+Four additional counters time the host capture group, instantiate call,
+upload enqueue and handle destruction, inside the encode boundary. Their
+sum is only the recorded API-group time: it excludes capture-status/node
+queries, graph launch and other wrapper work, and upload is asynchronous.
+It is neither GPU elapsed time nor complete graph overhead; subtracting
+it cannot establish hypothetical setup-free performance. Existing backend
+allocation counters and prepared scratch statistics do not include
+driver-internal graph memory. Balanced handles and a clean leak check do
+not establish zero graph allocations or an unchanged peak-memory budget.
+
+### Qualification and preserved failures
+
+The final test harness is v3, linked against the unchanged v2 graph-owner
+objects used by both v2 encoder binaries. Release and host-ASAN full suites
+each pass 204 cases: 34 tiny/thin/odd/HD/4K shapes, two output paddings and
+three options. Four changed input states per case are compared against the
+direct oracle with exact maps, scores and guards, including identity and
+restored inputs. Each full suite checks 3,264 candidate comparisons,
+816 oracle comparisons and 6,528 rejected invalid requests. Each also
+passes the retained 31-case CPU differential/compact-scratch suite and its
+completion-failure injection; worst map/score errors are 0.000231382 and
+0.000020504 against the 0.0015 differential tolerance.
+
+Both v3 scoped release/host-ASAN smoke jobs and all four CUDA sanitizer
+jobs pass the eight-case tiny/thin subset plus the focused checks below.
+Memcheck reports zero errors and zero bytes leaked in zero allocations;
+initcheck and synccheck report zero errors, and racecheck reports zero
+hazards (zero errors/warnings). Counting the two full jobs, two scoped
+smokes and four sanitizers gives 456 parent cases, 7,296 candidate and
+1,824 oracle comparisons, and 14,592 rejected requests. The focused
+checks add 112 descriptor pairs, 32 stream checks, sixteen outer captures
+and eighty synthetic failures across these eight successful jobs. The
+two full suites additionally cover 62 CPU differential cases and two
+completion injections.
+
+Focused checks per job cover fourteen descriptor pairs, four alternate/
+original-stream comparisons, two outer captures and ten injected failures
+across 3x7 and 17x29. One-shot host injections before capture,
+instantiation, upload and launch (fresh and cached executable) produce
+submission failure, preserve poisoned outputs, invalidate the prepared
+object and balance graph handles. Invalid requests do not consume an
+armed injection; subsequent comparisons and score reads reject the
+invalidated object. These are synthetic wrapper errors, not claims that
+every possible driver failure or concurrent-context path was exercised.
+
+Two earlier failed GPU jobs are retained and excluded from passing totals.
+The original graph guard assumed only 26/58 nodes and rejected expanded
+tiny images: expansion/crop can add nodes, and reduction/opsin geometry
+also changes their count. The corrected v2 guard requires a nonempty
+graph; focused outer-capture counts are scoped specifically to 3x7 (30)
+and 17x29 (59), not generalized. The next full run passed all 204 map
+cases but its wrapper failed before focused checks: a test function
+renamed from `main` omitted an explicit success return. The original build
+warnings were missed. V3 adds `return 0`, builds both test harnesses with
+warnings as errors, and reruns the complete gates.
+
+The first auxiliary native-audit aggregate also collided with an existing
+per-job report path. Both successful audit reports were preserved and
+reaggregated under a new name without repeating compilation or dumping.
+A parser-generation string-substitution error was repaired before parsing;
+the broken parser is retained separately. Neither harness/analysis failure
+is evidence of a firewall block, and no failed or partial job is relabeled
+as successful.
+
+### Complete-encode measurement contract
+
+The v2 encoder harness retains S99's persistent backend, automatic CPU
+thread setting, fully-resident distance 1.2 / effort 7 configuration,
+disabled final score and synchronized read-only NVML sampler. It compares
+every encode's bytes and strategy summary against a fresh direct reference
+outside timing, and checks that reference against frozen S70 bytes and
+size. PFM loading, backend creation and external validation are outside the
+outer encode interval; prepared graph creation, upload and destruction are
+inside it. Public profile totals and quantization-pipeline time are
+reported alongside that outer host interval, not mislabeled as GPU time.
+
+Each measurement process executes one reference, four qualification
+encodes, eight warm-up quartets and 24 measured quartets covering every
+permutation of the four mode labels. Within-quartet paired ratios use the
+retained S95 analyzer. Two repetitions reverse the input/monitor schedule
+for packed 4K, packed 1080p and the retained flower image, with monitoring
+off and on. Seeds intentionally retain S99's `990000 + 1000*rep +
+10*case_index` schedule. The twelve jobs contain 1,152 measured encodes;
+warm-ups and qualifications are not included in reported timing medians.
+
+Both initial and corrected v2 encoder preflights passed twenty release/
+host-ASAN jobs each, covering the sample and three measurement inputs,
+both monitoring settings and all four labels, including the full timing
+branch on the sample. Each set performs 612 encodes, 592 exact comparisons
+and twenty retained-byte reference checks. Initial and v2 artifacts remain
+separate; only the corrected v2 encoder is used for the final measurements.
+
+### Paired timings and setup cost
+
+All twelve measurement jobs pass: 1,596 encodes, 1,584 exact comparisons
+and twelve frozen-byte reference checks. Including both preflight versions
+gives 52 successful encoder jobs, 2,820 encodes and 2,768 exact comparisons
+plus 52 reference checks. Together with the eight final test jobs, sixty
+GPU jobs pass; the two failed early jobs are separately preserved.
+
+The following cells show repetition 0 / repetition 1. Percentages are
+medians of the 24 within-quartet ratios, not ratios of displayed medians;
+negative means faster. Inputs are packed 3840x2160, packed 1920x1080 and
+the retained 510x532 flower photograph. Monitor 0 disables the background
+sampler, retaining its initial diagnostic sample; monitor 1 enables it.
+
+Public total:
+
+| Input | Monitor | Direct-0 median ms | Direct 1/0 % | Graph 2/0 % | Graph 2/1 % | Graph 3/0 % | Graph 3/1 % |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4k | 0 | 325.671200 / 346.512650 | +0.900 / -0.670 | +0.814 / +0.048 | -0.792 / +1.731 | +1.160 / -0.608 | -1.772 / +0.949 |
+| 4k | 1 | 329.499550 / 333.442350 | +2.767 / -0.848 | -0.870 / -1.632 | +1.429 / +1.142 | +1.498 / +0.240 | -1.134 / +1.717 |
+| 1080p | 0 | 77.879100 / 82.300200 | -1.985 / +0.830 | -0.453 / -0.182 | +1.835 / -0.496 | +0.318 / -5.648 | +1.995 / -2.542 |
+| 1080p | 1 | 77.710850 / 77.387500 | +3.611 / +0.683 | +1.759 / -1.079 | -2.436 / -1.425 | +1.064 / -0.023 | -1.170 / -1.400 |
+| flower | 0 | 22.655400 / 20.443500 | +2.013 / +0.261 | -0.314 / -1.421 | -2.332 / -2.161 | -1.912 / -2.594 | -3.771 / -2.423 |
+| flower | 1 | 21.259150 / 22.380800 | -0.625 / -0.096 | -2.306 / -2.026 | -1.377 / -1.276 | -1.835 / -2.345 | -1.023 / -1.075 |
+
+Public quantization pipeline:
+
+| Input | Monitor | Direct-0 median ms | Direct 1/0 % | Graph 2/0 % | Graph 2/1 % | Graph 3/0 % | Graph 3/1 % |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4k | 0 | 246.422700 / 258.709850 | +2.908 / -1.376 | +1.855 / -0.657 | -0.274 / +3.325 | +1.790 / -0.514 | -4.092 / +1.316 |
+| 4k | 1 | 250.319900 / 253.578650 | +1.148 / +1.106 | -0.896 / +2.178 | -0.677 / -0.326 | +1.522 / +1.258 | +0.488 / +2.405 |
+| 1080p | 0 | 46.745250 / 48.671900 | -1.029 / +0.396 | -1.118 / +0.115 | +2.224 / -0.723 | -0.281 / -2.059 | +2.258 / -2.212 |
+| 1080p | 1 | 46.269100 / 46.400700 | +1.571 / -0.662 | -0.391 / -1.294 | -1.244 / -1.044 | -0.400 / -1.242 | -2.549 / +0.506 |
+| flower | 0 | 10.460650 / 10.114400 | +1.218 / +0.560 | -3.405 / -3.534 | -4.446 / -3.949 | -3.269 / -3.454 | -4.056 / -3.858 |
+| flower | 1 | 10.228200 / 10.526550 | +0.375 / -0.298 | -4.828 / -4.067 | -4.284 / -3.849 | -3.598 / -3.759 | -4.431 / -3.705 |
+
+Both 4K and 1080p remain mixed for public total, quantization and outer
+encode time across both graph labels, both direct labels and repetitions.
+The flower is faster in all sixteen public-total pairings (0.314-3.771%)
+and all sixteen quantization pairings (3.269-4.828%). Its monitored outer
+interval is also faster in all eight pairings (0.555-2.239%), but the
+unmonitored outer result is mixed: one pairing is +0.296%, while the other
+seven are negative. Thus even this positive photograph result does not
+pass every complete-boundary/control gate.
+
+Across the twelve runs, identical direct-label public-total paired changes
+range from -1.985% to +3.611%; identical graph-label changes range from
+-1.669% to +1.905%. Four-K public-total MAD across modes/repetitions is
+6.498-16.585 ms and quantization MAD is 3.368-13.222 ms. Its direct median
+total is 325.671-346.513 ms, with quantization 246.423-258.710 ms. Median
+per-encode quantization share is 75.70-76.60%, still including the phase's
+host work and transfers. No outliers are removed and no timing is
+normalized by clock or power telemetry.
+
+The range of graph-label medians across both monitors/repetitions is:
+
+| Input | Capture ms | Instantiate ms | Upload-enqueue ms | Destroy ms | Recorded-group sum ms |
+| --- | --- | --- | --- | --- | --- |
+| 4K | 0.0853-0.0977 | 0.1244-0.1522 | 0.0403-0.0541 | 0.1538-0.1901 | 0.4310-0.4903 |
+| 1080p | 0.0806-0.0933 | 0.1322-0.1570 | 0.0429-0.0980 | 0.1002-0.1140 | 0.3971-0.4830 |
+| Flower | 0.0693-0.0815 | 0.1174-0.1352 | 0.0483-0.0671 | 0.1299-0.1555 | 0.3678-0.4405 |
+
+The sum column is the median of each encode's four recorded groups, not
+the sum of four separate medians. Setup/cleanup is measurable, but neither
+these partial host spans nor the mixed whole-encode results establish
+that setup alone explains the absence of a 4K gain.
+
+### Telemetry, disposition and evidence record
+
+Contained NVML samples cover all 192 measured 4K windows and all 192
+1080p windows, but only seventy of 192 flower windows. There are
+1,041 / 248 / 70 contained SM-clock samples respectively; 520 / 6 / 0
+are below 500 MHz. These are sample counts, not fractions of GPU work or
+time. Median per-window mean SM clocks are 610.17 / 1027 / 1282 MHz;
+the 4K window means range from 225 to 1477 MHz. The whole-encode cadence
+therefore again visits both low and higher clocks, rather than matching
+S98's consistently low-clock score-only bursts.
+
+All contained reason masks are 0x24 (software power-cap plus software
+thermal-slowdown flags), with 5500 MHz memory clocks. Four-K contained
+core-temperature window means are 70-72 C; the flags alone do not prove
+core overheating. The read-only post-run snapshot at
+16:29:25.834622 UTC reports an enforced 40 W limit; the ordinary power-limit
+query is unsupported. Windows is Balanced, AC online and charging at
+82%; the vendor performance profile is not established. Requested 50 ms
+sampling again yields roughly 62.4-62.6 ms median cadence. Query latency
+and native NVML statuses are preserved; utilization retains its longer
+hardware sampling window, and reported used memory is not a paging or
+graph-allocation accounting measurement.
+
+Production remains S79 `914b42c`. This cycle establishes a functioning
+owner-lifetime graph prototype and measures its real two-launch reuse,
+not a universal speedup. The positive small-photograph quantization result
+is a lead for a geometry/content-matched photographic crossover study,
+including more retained named photographs and complete-boundary controls.
+It does not authorize a 510x532-derived production threshold. Additional
+graph-resource/peak-memory and concurrent-context qualification would
+also be required before promotion. A larger policy-level graph remains a
+separate hypothesis, not a conclusion that avoiding comparison setup will
+necessarily fix 4K. The backend is not proven maxed out.
+
+S99 frozen/current validation passes before the diagnostic builds. The
+final full release/ASAN jobs run 16:15:06.550020-16:19:44.777493 UTC on
+2026-09-07, followed by four sanitizers through 16:25:02.279663. Racecheck
+alone takes 4m47s with advancing cases, not an idle permission wait. Parsed
+v2 preflights pass before timing. The twelve timing jobs run
+16:25:17.119514-16:29:20.620986 (4m04s). All 62 recorded GPU-job intervals,
+including the two early failures, are nonoverlapping. Live process/log
+progress is retained and no process is restarted after an observation
+timeout. Light source/document editing and completed-result analysis
+overlap execution, so machine-wide isolation is not claimed.
+
+No admin/firewall/permission prompt or restricted-counter retry is observed.
+No system-level power, clock, profile, priority or security configuration
+is changed. The read-only post-run snapshots follow the last timing job.
+Ignored `build-cuda-ninja/profiles/s100_*` preserves every version's source,
+build/native/test evidence, logs, telemetry CSVs, reference codestreams,
+paired results, setup/telemetry digest and recomputing validator, including
+the failed prototypes and parser. Frozen source/document, artifact,
+external-dependency, diagnostic-binary and retained-runtime manifests
+anchor the evidence. Only the two CUDA documents are committed; all forty
+retained runtime files and production sources are unchanged, and the
+three user-owned untracked files remain untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
