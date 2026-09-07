@@ -1215,6 +1215,16 @@ its own dense baseline, while several corpus cases lose. Seven GPU sanitizer
 and five host-ASan jobs pass; ownership/reuse and reconstruction remain the
 next gates before any sparse-transfer integration. S79 remains retained.
 
+[S81](cuda-optimization-s1.md#lossless-narrow-ac-transfer-investigation-s81)
+qualifies lossless byte/int16 AC transport with exact int32 fallback. Linear
+streaming expansion improves the fresh 4K replay stage by 10.73%, but fresh
+1080p is near flat and Flower loses 20.18%; this is not a general readback fix
+or a whole-encode gain. All 66,432 guarded and 7,200 timed comparisons pass,
+alongside two host-ASan and four GPU sanitizer jobs. Production and the 40-file
+S79 runtime remain unchanged. Flags synchronization, host-storage ownership
+and full-workflow integration remain open; no observed privilege/firewall
+block or security/device-setting change occurs.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -13745,6 +13745,124 @@ CPU-only build/native work and is not a blanket machine-idleness claim.
 runtime files. No security, clock, power, cooling or priority setting changes,
 and no observed firewall/admin/permission block. Optimization remains ongoing.
 
+## Lossless narrow AC transfer investigation (S81)
+
+S81 starts from S80 `ef5a18c`, with S79 production/runtime unchanged. It tests
+linear lossless byte/int16 transport instead of sparse masks and scatter.
+One CUDA kernel optionally writes both representations and returns two exact
+signed-range overflow flags. The CPU selects byte, int16, or the original
+int32 payload; no coefficient is clamped, rounded, or accepted out of range.
+
+The six-mode replay has duplicate dense controls (0/2), dual packing with an
+ordinary compiler-optimized expansion loop (1), identical dual transport with
+SSE2 non-temporal expansion (3), and int16-only/byte-only packing with dense
+fallback (4/5). Streaming stores require 16-byte-aligned output, otherwise
+mode 3 uses ordinary stores; a store fence precedes consumption. GPU byte/word
+payload capacities include the final padded pack word, with 4/8-byte alignment.
+
+### Correctness and measurement boundary
+
+The same 111 validated exports and four approximately 100 MB repeated-vector
+stresses as S80 pass. Another 231 synthetic cases cover 21 lengths around
+scalar, SIMD, warp and CTA tails, exact signed-width endpoints, last-element
+first-overflow values, random int32 and sparse INT32_MIN/MAX. Every case uses
+two repeats, two output offsets and all six modes. Checks include exact dense
+output, checksum, both packed low-bit representations even on overflow,
+padded final words, unused outputs, canaries, flags and unchanged source.
+
+Plain and host-ASan qualification each run both reused and fresh ordinary
+allocation policies. Four CUDA sanitizer jobs use fresh storage: memcheck,
+initcheck, synccheck and racecheck all report zero errors/hazards; memcheck
+reports zero leaks. In total, 66,432 guarded comparisons pass. The MSVC timing
+and Clang-ASan executables have exactly the same three sm_86 kernel bodies.
+Dual/int16/byte variants use 22/18/16 registers, with zero stack and spills.
+Unused specialization accumulators produce harmless compiler warnings.
+
+Timing includes ordinary dense allocation/first-touch, packing and flags
+readback/synchronization, payload allocation/transfer, CPU expansion and a full
+dense checksum read. Full equality and guard checks are outside timing. The
+checksum is a consumption proxy, not actual frame assembly/entropy coding.
+Input upload, device allocation, original group packing, final fixed-capacity
+group tails, metadata/frame assembly and destruction are excluded. Reused
+buffers are a separate policy; independent process medians across allocation
+policies are not paired allocator counterfactuals.
+
+### Paired results
+
+Forty serial process windows cover ten inputs, two allocation policies and
+two reversed input/policy-order replicates. Each window has six warm rounds
+and 24 measured rounds; six-mode Latin rotations balance every position in
+each six-round block. All 7,200 timed outputs are exact (5,760 measured and
+1,440 warm). The following are median same-round total-time changes versus
+dense mode 0, across 48 measured pairs per cell; negative is faster. Mode 2
+is the same dense branch, not another implementation.
+
+| Input | Reused, dual ordinary (1) | Reused, dual streaming (3) | Fresh, dual ordinary (1) | Fresh, dual streaming (3) | Fresh, duplicate dense (2) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Padded 4K | -12.13% | -20.84% | +1.93% | -10.73% | -0.39% |
+| Padded 1080p | -8.52% | -19.11% | +14.35% | -0.56% | -1.16% |
+| Flower | -9.90% | -1.40% | +22.39% | +20.18% | +0.24% |
+| Keong macan | -19.19% | -14.46% | +4.11% | -0.08% | -0.22% |
+| Riaphotographs | -21.65% | -16.43% | +2.01% | -1.82% | -0.40% |
+| Bliznaca | -21.10% | -15.74% | +4.19% | -0.25% | -0.21% |
+
+Fresh 4K streaming also improves 8.95% against duplicate dense mode 2,
+with a 4.17 ms median same-round saving and 36/48 wins. Its separate replicate
+medians versus mode 2 are -9.63% and -7.34%. Fresh 1080p is instead 1.63%
+slower against mode 2, reinforcing the near-flat interpretation. Fresh Flower
+requires int16, not byte transport, and is 20.11% slower against mode 2.
+The ordinary dual loop does not win on any fresh real-image combined median.
+Int16-only is 19.90%-26.56% slower on these fresh real-image cohorts. Byte-only
+has a small 4K combined win (-2.81%), but its two replicate signs differ;
+Flower's exact dense fallback loses 8.13%. Neither single-width variant is a
+general fix. All modes and individual cohorts remain in the raw analysis.
+
+The synthetic stress vectors distinguish density from value range. All-zero,
+all-nonzero +/-1 and 12.5%-nonzero vectors all fit bytes; the 75%-extreme vector
+must use the original int32 payload. Fresh-policy results are:
+
+| Stress | Dual ordinary (1) | Dual streaming (3) | Int16 only (4) | Byte only (5) | Duplicate dense (2) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| All zero | +0.86% | -9.94% | +15.41% | -3.31% | -0.45% |
+| All nonzero, +/-1 | +0.40% | -8.83% | +16.28% | -2.79% | -0.00% |
+| 75% int32 extremes | +2.38% | +3.07% | +3.37% | +3.38% | -0.40% |
+| 12.5% nonzero | +1.08% | -9.55% | +14.56% | +1.36% | -0.09% |
+
+Individual timings are noisy even when combined duplicate-control medians
+are close: fresh 4K streaming versus mode 2 ranges from -42.61% to +63.18%.
+Packing time includes clear, kernel, flags transfer and synchronization, not
+just GPU kernel duration. Ordinary device power management remains enabled;
+boundary telemetry records 67/64 C and 210/1282 MHz SM clocks, not locked
+or necessarily representative in-kernel clocks. No build/native audit or
+evidence reconstruction overlaps measurement. CPU-only prior-evidence checking
+does overlap race qualification, which is not used for performance claims.
+
+### Disposition and next gates
+
+Do not deploy unconditional narrow readback or select an image-size cutoff
+from these samples. Streaming expansion is a qualified lossless prototype
+with a repeated fresh 4K stage gain, not a general production improvement.
+No production sources/binaries change and no new full encode/decode, CUDA/CPU
+suite, quality or batch campaign is claimed. S79 remains retained.
+
+Next work should investigate the extra flags synchronization, possible reuse
+of existing mandatory readback, and bounded host-storage reuse/ownership. A
+public integration must preserve exact signed values, final group layout and
+zero tails, failure atomicity, immutable frame ownership and oversized/dense
+fallbacks, then include setup, destruction, real serialization and concurrent
+batch behavior. These stage results do not establish whole-encode speedup or
+that fully resident optimization is maxed out.
+
+The ignored `s81_*` bundle contains source, binaries, native dumps, serial raw
+logs, paired summaries and independent reconstruction. `s81_validate.py
+--frozen` verifies the frozen bundle, all 48 non-overlapping recorded GPU-job
+intervals, 66,432 guarded comparisons and 7,200 timed comparisons, independently
+recomputing source range flags/checksums and the document tables. `--current`
+additionally checks source/docs snapshots and all 40 unchanged S79 runtime
+files. No security, privilege, clock, power, cooling or priority changes were
+made. No firewall/admin/permission block was observed; the user's suggested
+cause for an earlier delay remains unconfirmed.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
