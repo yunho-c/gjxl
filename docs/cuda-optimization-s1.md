@@ -14239,6 +14239,201 @@ statistics. `--current` additionally checks source/docs snapshots and the
 unchanged runtime. No security, privilege, clock, power, cooling or priority
 changes were made, and no firewall/admin/permission block was observed.
 
+## Combined first-touch and narrow AC transport (S84)
+
+S84 starts from S83 `858e7aa` and combines the two previously qualified
+mechanisms: lossless narrow AC transport with batched metadata, and ordinary
+host initialization during asynchronous resident GPU work. It also isolates
+skipping a redundant tail clear. This is a diagnostic candidate, not a change
+to the retained S79 production runtime.
+
+### Design and ownership
+
+| Mode | Transport | Initialization before policy wait | Tail clearing |
+| --- | --- | --- | --- |
+| 0 / 2 | Retained dense controls | None | Original |
+| 1 | Retained dense | Full final dense owner | Original |
+| 3 | Retained dense | Full final dense owner | Skip redundant clear |
+| 4 | Batched metadata, narrow streaming expansion | None; selected typed staging allocated after wait | Original |
+| 5 / 6 | Batched metadata, narrow streaming expansion | Full dense owner and raw compact staging | Skip redundant clear |
+| 7 | Batched metadata, narrow streaming expansion | Full dense owner only; same early compact allocation as 5/6 | Skip redundant clear |
+
+Modes 5/6/7 allocate **2*N compact bytes before submission**, even if the
+selected byte payload uses only N. Mode 4 allocates the selected N or 2*N
+bytes after wait. Thus 5 versus 7 isolates compact initialization with equal
+capacity/allocation timing; 5 versus 4 combines early allocation, dense and
+compact initialization, and omitted tail clearing. The latter is deliberately
+not presented as a single-factor comparison.
+
+For padded 4K, N is 24,883,200 coefficients. The ordinary final dense owner
+still occupies 106,168,320 bytes, and early compact staging adds 49,766,400
+bytes, versus 24,883,200 for mode 4's selected byte staging. This is extra host
+memory and CPU write traffic, not compression of the final ownership contract.
+The device payload and flags reuse existing dead scratch; device allocation
+behavior is unchanged.
+
+The prepared-object mutex still covers allocation, submission, initialization
+and assembly. All allocation that moves earlier happens before submission.
+Successful submissions always reach their mandatory wait, including injected
+completion failures; pre-wait fills allocate nothing and do not throw.
+An explicit per-call assembly flag permits omitting tails only after this
+owner was fully filled. Generic evaluation resets diagnostic mode/flags and
+keeps original dense transport and tail clearing. Existing frame ownership
+and failure-atomic caller handoff remain intact.
+
+The common host expander consumes raw bytes through unaligned SSE2 loads and
+scalar `memcpy`, not an `int16_t*` dereference into byte-owned storage.
+Streaming stores require aligned destinations and are fenced before use.
+The original three S81 device kernels are reused unchanged. Invalid flag 2,
+which cannot arise from the dual-width overflow predicate, is rejected.
+Flower selects int16 and the other six timing inputs select bytes. No timing
+input selects int32 fallback: that signed-extreme behavior retains S81 replay
+coverage, not a new integrated fallback performance claim.
+
+### Qualification and measurement protocol
+
+Both builds succeed. Release and scoped-ASan host-only expansion executables
+each pass 5,632 cases: two signed widths, 22 counts/tails, 16 source alignments,
+four destination alignments and two store policies, with signed endpoints,
+source preservation and output canaries. Raw allocations end at the payload
+boundary so ASan can detect vector overreads.
+
+Three native audits (timing, scoped-ASan timing, AQ test) match all 205
+retained GPU bodies plus all three S81 narrow bodies. The exact preflight
+covers 14 windows and 1,022 encodes, with an independent dense device oracle
+for every active coefficient and fixed group tail. All 26 qualification jobs
+pass: 11 functional, 12 scoped host-ASan (including the host expansion test),
+and three GPU memchecks. These include repeated/poisoned prepared use,
+failure atomicity, batch execution, all-mode sample/4K/Flower ASan replay and
+an all-mode 4K memcheck. The latter completes normally in about 327 seconds:
+10 exact encodes, zero errors and zero leaked bytes. Its initially quiet
+output is checked against owned processes, accumulating CPU time and 100%
+GPU utilization; it is not killed or restarted.
+
+Host ASan instruments the changed diagnostic resident implementation and
+its callers, not every retained library; MSVC STL container annotations are
+disabled for compatible linking. This is not a new complete CPU/CUDA suite,
+concurrent batch-throughput qualification, or GPU initcheck/synccheck/racecheck
+campaign. No new device arithmetic is introduced.
+
+All 58 fresh default-mode-5 CLI encodes match retained S70/S79 hashes,
+strategy summaries and optional final scores, including higher-effort,
+high-density and maximum-compression cases. Those references were already
+decoded/scored; no fresh decoder or metric run is claimed.
+
+The timing design is fixed before running: eight-row Williams base
+[0,1,7,2,6,3,5,4], independently randomized labels and row order per block.
+Each eight-round block places every mode in every position once and includes
+all 56 ordered different-mode within-round predecessor pairs once. One
+checked dense conditioning encode precedes every round and is destroyed
+before timed modes. It does not claim to reset all allocator/cache/thermal
+state.
+
+There are eight warm and 24 measured rounds per process window, seven inputs,
+persistent/fresh backend lifetimes and two reversed input/lifetime-order
+replications: 28 serial windows, 5,376 measured, 1,792 warm, 896 conditioning
+and 28 reference encodes, totaling 8,092 exact encodes. Every codestream and
+complete summary must match its reference; every reference must match the
+retained SHA-256. Fresh backend does not mean fresh process, and persistent
+backend does not retain the final host coefficient owner between encodes.
+Input loading, equality checks, file I/O and returned codestream destruction
+are outside timing. The profile total includes actual serialization; outer
+wall time also includes optional backend creation/destruction and call
+teardown. All 41 profile stages and host fill/wait/readback intervals are kept.
+
+### Transfer mechanism and whole-encode outcome
+
+Twelve unrestricted CUDA captures use orders 0/1/3/4/5/7 and 7/5/4/3/1/0.
+Dense modes share all 309 kernel/resource fingerprints, copy/clear
+fingerprints and runtime API counts. Narrow modes share their corresponding
+fingerprints: the same 309 kernels plus one narrow kernel and four-byte
+clear, unchanged device allocation API counts, and two fewer stream
+synchronizations. Active AC readback changes from 99,532,800 to 24,883,200
+bytes plus four flag bytes; total D2H changes from 103,723,588 to 29,073,992
+bytes, a reduction of 74,649,596 bytes.
+
+Mode 5's final event-record-to-wait host gaps are 20.17/23.19 ms, of which
+20.08/22.98 ms overlaps active GPU kernels. Captured D2H totals are
+4.55/4.56 ms for mode 5, versus 31.73/21.87 ms for dense 0 and 7.90/4.99 ms
+for narrow-only 4. Untouched compact mode 7 has 18.62/9.58 ms captured D2H.
+These are mechanism observations, not advertised whole-encode speedups.
+
+The table gives medians of 48 within-round paired **profile-total percent
+changes**; negative is faster. Replications and all other mode pairs remain
+separate in the artifacts.
+
+| Input | Persistent 5 vs dense 0 | Persistent 5 vs dense 2 | Persistent 5 vs narrow 4 | Fresh 5 vs dense 0 | Fresh 5 vs dense 2 | Fresh 5 vs narrow 4 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Sample | +0.03% | -0.80% | -1.22% | +1.73% | +1.04% | +0.92% |
+| Padded 1080p | -6.37% | -5.97% | -3.30% | -4.85% | -5.27% | -4.94% |
+| Padded 4K | -3.22% | -3.78% | -3.66% | -2.68% | -6.27% | -2.57% |
+| Flower | -3.95% | -3.23% | -4.83% | -1.83% | -3.57% | -2.55% |
+| Keong macan | -2.08% | -3.58% | -2.02% | -2.62% | -2.39% | -2.41% |
+| Riaphotographs | -1.52% | -2.24% | -0.55% | -3.31% | -3.18% | -1.67% |
+| Bliznaca | -3.94% | -2.27% | -2.72% | -2.10% | -2.15% | -0.06% |
+
+At 1080p, mode 5 versus dense 0 saves 4.87/4.70 ms for persistent/fresh
+backend, with 38/48 and 34/48 paired wins. At 4K it saves 10.83/11.03 ms,
+with 32/48 wins for each lifetime. Outer-wall medians favor mode 5 by
+5.61%/3.99% at 1080p and 2.66%/2.90% at 4K. Both combined duplicates 5/6
+beat both dense controls 0/2 in every individual 1080p/4K replication's
+profile-total and outer-wall median. Mode 5 also beats narrow-only mode 4 in
+every such replication. This is stronger whole-encode evidence than S82/S83
+alone, not merely a faster transfer stage.
+
+The readback-plus-expansion interval is faster in all 48 pairs for each
+1080p/4K lifetime. Its paired median savings versus dense 0 are
+5.27/5.43 ms at 1080p and 11.59/11.85 ms at 4K. Mode 5's full pre-wait fill
+medians are 7.42/7.71 ms and 17.70/18.27 ms respectively, including compact
+fill medians of 2.12/2.29 ms and 5.49/5.84 ms. These costs are visible and
+overlapped, not excluded from whole-encode timing.
+
+Important limits remain. Combined duplicate 6-versus-5 total medians span
+-3.24% to +1.27% across image/lifetime groups; duplicate dense 2-versus-0 spans
+-1.83% to +2.79%. Fresh 4K dense 2 is itself +2.53% versus dense 0, so the
+-6.27% candidate-versus-2 result must not replace the more conservative
+candidate-versus-0 comparison. These medians are not confidence bounds.
+One Riaphotographs persistent replication is +0.15% versus dense 0, despite
+its favorable combined median.
+
+The tiny sample is not a general win. Fresh mode 5 is +1.73% versus dense 0
+and +1.04% versus dense 2, about 0.135/0.080 ms slower. Tail omission alone
+(3 versus 1) is mixed in whole-encode timing, including +2.55% at persistent
+4K. Omitting compact initialization (7 versus 5) has favorable combined
+total medians at 1080p/4K, but changes sign across some replications and its
+post-submission result is also mixed. The study therefore does not establish
+compact filling or tail omission as independently universal wins.
+
+Boundary telemetry is 63/70 C, SM 210/510 MHz and memory 405/810 MHz on the
+RTX 3060 Laptop GPU. These are idle/boundary observations, not in-kernel
+clocks. Ordinary power management remains enabled.
+
+### Disposition and reproducibility
+
+Advance the combined transport/first-touch design to production qualification;
+do not promote an unconditional implementation or infer a size threshold from
+these seven inputs. Next gates are a bounded size/geometry sweep for the small
+image cost and compact-fill choice, then production integration with the
+complete CPU/CUDA suite, failure/ownership checks and paired concurrent batch
+throughput/memory-pressure evidence. The ordinary owning frame must remain
+unchanged. The backend is still not considered maxed out.
+
+Production source and the 40-file S79 runtime remain unchanged. The ignored
+`s84_*` bundle preserves the protocol, diagnostic source, raw logs, binaries,
+native dumps, traces, analysis and source/dependency/runtime/artifact hashes.
+`python build-cuda-ninja/profiles/s84_validate.py --frozen` reconstructs this
+table and verifies 9,401 explicitly counted exact encodes, the 26 qualification
+jobs, three native-identical executables and twelve traces. Its 138
+non-overlapping completed campaign intervals include one host-only ASan test;
+they do not assert blanket machine idleness. Additional functional-test and
+profile encodes are not included in the 9,401 count.
+
+No build, qualification, capture or benchmark required a retry. No security,
+privilege, clock, power, cooling or priority changes were made. No
+firewall/admin/permission block was observed; the suggested cause of the
+user's earlier delay remains unconfirmed. Detected prompts or blocks should
+continue to be reported promptly.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

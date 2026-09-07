@@ -1253,6 +1253,19 @@ transport, and production/batch qualification remain next gates. No permission
 or firewall block is observed; the quiet initial 4K memcheck is verified active
 work, not restarted. The backend is not considered maxed out.
 
+[S84](cuda-optimization-s1.md#combined-first-touch-and-narrow-ac-transport-s84)
+combines narrow AC transport with overlapped initialization of ordinary host
+buffers. It qualifies 9,401 exact encodes, 26 functional/sanitizer jobs and
+twelve traces with unchanged retained GPU bodies. In balanced whole-encode
+comparisons, the combined mode gains 6.37%/4.85% at persistent/fresh 1080p and
+3.22%/2.68% at 4K versus the primary dense control; both combined duplicates
+beat both dense controls in every 1080p/4K replication. The tiny sample still
+regresses, duplicate controls reveal timing noise, and early compact staging
+adds 49.77 MB of host memory at 4K. Production remains unchanged pending a
+size/geometry and compact-fill study, complete production qualification and
+concurrent batch-throughput gates. All runs complete without a detected
+permission block; the 5.5-minute 4K memcheck is verified active computation.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
