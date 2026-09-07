@@ -3,9 +3,8 @@
 
 #pragma once
 
-#include <cstdint>
-
 #include "core/managed_allocator.h"
+#include "core/stdlib_storage_compat.h"
 
 namespace gjxl::resource_budget_internal {
 
@@ -16,19 +15,10 @@ void ReleaseManagedBackingAfterPublication(ManagedVector<T, Owner>& values) noex
   ManagedAllocator<T, Owner>::ReleaseChargeAfterPublication(values.data());
 }
 
-// Reviewed libc++ C++20 string contract: __get_short_pointer points into the
-// string object's inline character array; __get_long_pointer is the allocator's
-// original pointer, outside the string object. Never inspect an
-// inline short string as if it had an allocation header. Review before porting.
-#if !defined(_LIBCPP_VERSION) || _LIBCPP_STD_VER != 20
-#error "Managed string publication requires the reviewed libc++ C++20 contract"
-#endif
 template <ResourceClass Owner>
 void ReleaseManagedBackingAfterPublication(ManagedString<Owner>& value) noexcept {
-  const auto object = reinterpret_cast<uintptr_t>(&value);
-  const auto data = reinterpret_cast<uintptr_t>(value.data());
-  if (data < object || data - object >= sizeof(value))
-    ManagedAllocator<char, Owner>::ReleaseChargeAfterPublication(value.data());
+  if (auto* data = stdlib_storage_internal::StringHeapData(value))
+    ManagedAllocator<char, Owner>::ReleaseChargeAfterPublication(data);
 }
 
 }  // namespace gjxl::resource_budget_internal

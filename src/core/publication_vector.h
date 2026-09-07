@@ -12,19 +12,14 @@
 #include <vector>
 
 #include "core/managed_allocator.h"
+#include "core/stdlib_storage_compat.h"
 
 namespace gjxl::resource_budget_internal {
 
 // Unlike ManagedVector, this owner can hand its backing to an existing public
 // std::vector without copying. Capacity is established only by a fresh count
-// or forward-range constructor, never by implicit vector growth. The current
-// macOS build uses libc++ in C++20: __init_with_size -> __vallocate ->
-// __allocate_at_least returns {allocator.allocate(n), n}. Review that backing
-// contract before supporting another standard library/language mode; checking
-// capacity only AFTER an unknown allocation would not enforce a hard bound.
-#if !defined(_LIBCPP_VERSION) || _LIBCPP_STD_VER != 20
-#error "PublicationVector requires the reviewed libc++ C++20 allocation contract"
-#endif
+// or forward-range constructor through the audited compatibility boundary,
+// never by implicit vector growth.
 
 template <typename T>
 class PublicationVector {
@@ -46,14 +41,16 @@ public:
     std::span<const T> source, PublicationVector* out,
     ResourceClass owner = ResourceClass::kSerializer) {
     return Construct(source.size(), out, owner, [&] {
-      return std::vector<T>(source.begin(), source.end());
+      return stdlib_storage_internal::MakeExactVector(source);
     });
   }
 
   [[nodiscard]] static Status Create(
     size_t count, PublicationVector* out,
     ResourceClass owner = ResourceClass::kRetainedResult) {
-    return Construct(count, out, owner, [&] { return std::vector<T>(count); });
+    return Construct(count, out, owner, [&] {
+      return stdlib_storage_internal::MakeExactVector<T>(count);
+    });
   }
 
   /// Establish a fixed backing capacity, then accumulate at most that many

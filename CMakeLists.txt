@@ -20,6 +20,19 @@ endif()
 
 enable_language(OBJCXX)
 
+# Default to C++20; honor an explicitly selected, audited C++23 mode. Check
+# exactly the modes used by implementation targets, including Objective-C++.
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 20)
+endif()
+if(NOT DEFINED CMAKE_OBJCXX_STANDARD)
+  set(CMAKE_OBJCXX_STANDARD "${CMAKE_CXX_STANDARD}")
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+include(cmake/CheckStorageToolchain.cmake)
+gjxl_check_storage_toolchain("${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 option(
   GJXL_BUILD_TESTS
   "Build tests"
@@ -451,6 +464,7 @@ configure_package_config_file(
   cmake/gjxlConfig.cmake.in
   "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfig.cmake"
   INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
+  PATH_VARS CMAKE_INSTALL_INCLUDEDIR
 )
 
 write_basic_package_version_file(
@@ -470,6 +484,7 @@ install(
   FILES
     "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/gjxlConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckStorageToolchain.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/gjxl"
 )
 
@@ -1084,6 +1099,20 @@ if(GJXL_BUILD_TESTS)
     COMPONENTS Interpreter
     REQUIRED
   )
+
+  add_executable(gjxl_stdlib_storage_compat_test tests/stdlib_storage_compat_test.cpp)
+  target_link_libraries(gjxl_stdlib_storage_compat_test PRIVATE gjxl_core)
+  set_target_properties(gjxl_stdlib_storage_compat_test PROPERTIES CXX_STANDARD 20)
+  add_test(NAME stdlib_storage_compat COMMAND gjxl_stdlib_storage_compat_test)
+  add_executable(gjxl_stdlib_storage_compat_cxx23_test tests/stdlib_storage_compat_test.cpp)
+  target_link_libraries(gjxl_stdlib_storage_compat_cxx23_test PRIVATE gjxl_core)
+  set_target_properties(gjxl_stdlib_storage_compat_cxx23_test PROPERTIES CXX_STANDARD 23)
+  add_test(NAME stdlib_storage_compat_cxx23 COMMAND gjxl_stdlib_storage_compat_cxx23_test)
+  add_test(NAME storage_toolchain
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/storage_toolchain_test.py"
+      --source "${CMAKE_CURRENT_SOURCE_DIR}" --compiler "${CMAKE_CXX_COMPILER}"
+      --cmake "${CMAKE_COMMAND}")
+  set_tests_properties(storage_toolchain PROPERTIES TIMEOUT 90)
 
   add_test(NAME metal_build_graph
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/metal_build_graph_test.py"

@@ -3,6 +3,13 @@
 
 @PACKAGE_INIT@
 
+# C ABI-only clients do not instantiate GJXL's C++ storage types. C++ interface
+# consumers should request their components (or omit COMPONENTS for all).
+if(NOT "${gjxl_FIND_COMPONENTS}" STREQUAL "c")
+  include("${CMAKE_CURRENT_LIST_DIR}/CheckStorageToolchain.cmake")
+  gjxl_check_storage_toolchain("@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/gjxlTargets.cmake")
 
 foreach(component IN ITEMS core codec codestream c)

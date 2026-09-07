@@ -31,6 +31,10 @@ Development branch: `refactor/resident-execution` (originally
 `refactor/resident-frame-handoff`). The worktree remains
 `../gjxl-resident-frame-handoff`.
 
+The [storage toolchain contract](storage-toolchain.md) defines the supported
+compiler, libc++ implementation, ABI and C++20/C++23 modes used by memory bounds
+and publication, including installed-consumer requirements and upgrade checks.
+
 ## Scope and current status
 
 The proposal numbers below refer to the original architecture discussion, not

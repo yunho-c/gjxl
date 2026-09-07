@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <unordered_map>
 
 #include "codestream/entropy_internal.h"
 
@@ -57,19 +56,15 @@ ComputeEntropyAggregationStoragePlan(size_t maximum_values,
         static_cast<size_t>(std::min<uint64_t>(maximum_values, value_domain));
     const size_t sparse = static_cast<size_t>(std::min<uint64_t>(
         maximum_values, value_domain - kEntropyDenseValueCount));
-    // The concrete libc++ rebound node, not sizeof(value_type) or an estimated
-    // allocator overhead. HostStorageBound gates the reviewed libc++ C++20 ABI.
-    using Node =
-        std::__hash_node<std::__hash_value_type<uint32_t, uint64_t>, void *>;
-    // operator[] starts empty, inserts only new keys, and keeps load factor 1.
-    // At rehash old buckets < new unique count U; requested buckets <= 2U.
-    // Next-prime rounding is <2x (first allocation is 2). Thus current <=4U
-    // and old+replacement <=5U pointer slots. See the documented proof/audit.
+    using Backing = stdlib_storage_internal::UnorderedMapBacking<uint32_t, uint64_t>;
+    // Aggregation uses the compatibility boundary's empty-map/default-load
+    // insertion contract; codec policy determines the maximum sparse entries.
     if (!plan.output.AddVector<WeightedValue>(unique, kFreshExact) ||
         !plan.scratch.AddVector<uint64_t>(kEntropyDenseValueCount,
                                           kFreshExact) ||
-        !plan.scratch.Add({sizeof(Node), sizeof(Node)}, sparse) ||
-        !plan.scratch.Add({4 * sizeof(void *), 5 * sizeof(void *)}, sparse))
+        !plan.scratch.Add({Backing::kNodeBytes, Backing::kNodeBytes}, sparse) ||
+        !plan.scratch.Add({Backing::kRetainedBucketBytesPerEntry,
+                          Backing::kPeakBucketBytesPerEntry}, sparse))
       return Overflow();
   }
   *out = plan;

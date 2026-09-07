@@ -5,7 +5,16 @@ cmake_minimum_required(VERSION 3.25)
 
 project(gjxl_downstream_consumer LANGUAGES C CXX)
 
-find_package(gjxl CONFIG REQUIRED COMPONENTS c)
+if(GJXL_TEST_C_ABI_ONLY)
+  find_package(gjxl CONFIG REQUIRED COMPONENTS c)
+  # The same C ABI encode/free fixture is also valid C++.
+  set_source_files_properties(c_api_consumer.c PROPERTIES LANGUAGE CXX)
+  add_executable(gjxl_c_abi_consumer c_api_consumer.c)
+  target_link_libraries(gjxl_c_abi_consumer PRIVATE gjxl::c)
+  return()
+endif()
+
+find_package(gjxl CONFIG REQUIRED COMPONENTS c codec codestream)
 
 add_executable(
   gjxl_codec_consumer

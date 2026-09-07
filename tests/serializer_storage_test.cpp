@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <thread>
 #include <vector>
@@ -254,6 +255,13 @@ template <typename T> struct FailingAllocator : std::allocator<T> {
     if (fail) throw std::bad_alloc();
     return std::allocator<T>::allocate(count);
   }
+#if __cplusplus >= 202302L
+  // The inherited C++23 member calls std::allocator::allocate directly and
+  // bypasses the failure hook. Keep both allocation entry points injectable.
+  std::allocation_result<T*> allocate_at_least(size_t count) {
+    return {allocate(count), count};
+  }
+#endif
 };
 
 bool CheckLegacyPublicationAtomicity() {

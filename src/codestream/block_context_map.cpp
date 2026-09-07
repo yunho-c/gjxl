@@ -203,6 +203,7 @@ SimpleBlockContextMap BuildAdaptiveMap(
 
 Status codestream_internal::ComputeBlockContextMapStoragePlan(
   Extent2D blocks, bool exhaustive, BlockContextMapStoragePlan* out) {
+  static_assert(stdlib_storage_internal::kVectorGrowthFactor <= 3);
   using enum resource_budget_internal::VectorCapacityPolicy;
   size_t block_count = 0;
   if (out == nullptr || blocks.empty() || !blocks.try_area(&block_count)) {
@@ -230,7 +231,7 @@ Status codestream_internal::ComputeBlockContextMapStoragePlan(
   if (adaptive &&
       (!plan.working.AddVector<size_t>(cells, kFreshExact) ||
        // remap, clusters, labels, and the old map backing during resize.
-       // resize from cells to 3*cells requests exactly 3*cells in libc++.
+       // The audited vector growth rule makes this resize to 3*cells exact.
        !plan.working.AddVector<uint8_t>(cells, kFreshExact, 4) ||
        // MedianQuantThreshold remains alive beside the map's copied threshold.
        !plan.working.AddVector<uint32_t>(plan.maximum_thresholds,

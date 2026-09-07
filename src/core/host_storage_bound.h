@@ -7,17 +7,9 @@
 #include <limits>
 
 #include "core/managed_allocator.h"
+#include "core/stdlib_storage_compat.h"
 
 namespace gjxl::resource_budget_internal {
-
-// These are backing bounds, not ISO std::vector guarantees. In the reviewed
-// libc++ C++20 implementation, fresh count/forward-range construction and
-// reserve allocate exactly n elements. Growth recommends max(2 * old_capacity,
-// new_size), capped at max_size(). Review before enabling another
-// library/language mode.
-#if !defined(_LIBCPP_VERSION) || _LIBCPP_STD_VER != 20
-#error "HostStorageBound requires the reviewed libc++ C++20 allocation contract"
-#endif
 
 enum class VectorCapacityPolicy {
   kFreshExact,  // One allocation; subsequent writes stay within that capacity.
@@ -65,11 +57,11 @@ struct HostStorageBound {
     case VectorCapacityPolicy::kFreshExact:
       break;
     case VectorCapacityPolicy::kReusedExact:
-      peak_factor = 2;
+      peak_factor = stdlib_storage_internal::kVectorReplacementPeakFactor;
       break;
     case VectorCapacityPolicy::kGrowing:
-      retained_factor = 2;
-      peak_factor = 3;
+      retained_factor = stdlib_storage_internal::kVectorGrowingRetainedFactor;
+      peak_factor = stdlib_storage_internal::kVectorGrowingPeakFactor;
       break;
     default:
       return false;
@@ -94,22 +86,19 @@ struct HostStorageBound {
       return false;
     if (maximum_length <= empty.capacity())
       return Add({}, instances);
-    // Reviewed libc++ char-string __recommend rounds length+1 to an 8-byte
-    // boundary, with a special inline/long boundary adjustment. 32 bytes of
-    // slack covers both without coupling this bound to the short-string ABI.
-    // Growth occurs only when old capacity < the new requested size, doubles
-    // old capacity, and rounds again. Near max_size its saturation branch is
-    // also bounded by twice the request plus this slack. During shrink_to_fit
-    // a formerly doubled owner can coexist with one fresh replacement.
+    // Backing assumptions, including rounding and replacement overlap, live
+    // in the compatibility boundary rather than in individual storage plans.
+    using namespace stdlib_storage_internal;
     constexpr size_t max = std::numeric_limits<size_t>::max();
-    if (maximum_length > max - 32)
+    if (maximum_length > max - kStringFreshSlack)
       return false;
-    const size_t fresh = maximum_length + 32;
+    const size_t fresh = maximum_length + kStringFreshSlack;
     if (policy == StringCapacityPolicy::kFresh)
       return Add({fresh, fresh}, instances);
-    if (fresh > max / 3)
+    if (fresh > max / kStringGrowingPeakFactor)
       return false;
-    return Add({2 * fresh, 3 * fresh}, instances);
+    return Add({kStringGrowingRetainedFactor * fresh,
+                kStringGrowingPeakFactor * fresh}, instances);
   }
 
   bool operator==(const HostStorageBound &) const = default;
