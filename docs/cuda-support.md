@@ -1225,6 +1225,20 @@ S79 runtime remain unchanged. Flags synchronization, host-storage ownership
 and full-workflow integration remain open; no observed privilege/firewall
 block or security/device-setting change occurs.
 
+[S82](cuda-optimization-s1.md#integrated-narrow-ac-transport-and-metadata-batching-s82)
+integrates metadata batching and lossless narrow transport in a diagnostic
+resident implementation. Six 4K traces confirm two fewer synchronizations and
+74.65 MB less D2H traffic, with unchanged device allocations. All 5,762 counted
+exact encodes, three functional jobs, five scoped host-ASan jobs and six GPU
+sanitizer jobs pass; 58 fresh encodes match already decoded/scored references,
+without fresh decoder runs. Persistent-backend 1080p gains about 2%, but 4K
+and fresh-backend results depend on controls or remain mixed. Neither narrow
+transport nor metadata-only batching is retained; the 40-file S79 runtime is
+unchanged. Overlapping ordinary dense-output first-touch with resident GPU
+work is the next untested lead. Preserved setup/visibility/timeout failures
+are not counted as passes or attributed to a firewall/admin block. No security
+or device setting changes occur; fully resident optimization remains open.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

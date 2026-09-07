@@ -13863,6 +13863,171 @@ files. No security, privilege, clock, power, cooling or priority changes were
 made. No firewall/admin/permission block was observed; the user's suggested
 cause for an earlier delay remains unconfirmed.
 
+## Integrated narrow AC transport and metadata batching (S82)
+
+S82 starts from S81 `d0ce0ea`, with retained S79 production/runtime unchanged.
+It integrates the lossless transport prototype into a shadow resident host
+implementation and measures complete encodes. Modes 0/2 are duplicate dense
+controls; 1/4 only batch metadata readback; 3 adds dual byte/int16 transport
+with streaming expansion; 5 uses the same transport with ordinary expansion.
+These mode numbers are local to S82, not the S81 replay mode mapping.
+
+### Integration and correctness boundary
+
+The resident-policy error flag, scores, requested diagnostic maps and final
+quantizer share one checked readback batch. Narrow flags join that batch, so
+they introduce no extra synchronization. Device errors are checked before
+processing copied metadata; caller-visible outputs still commit only after
+successful validation and frame assembly. Generic evaluation stays dense.
+
+After the unchanged GPU population count and AC group pack, the old quantized
+scratch is dead. Its existing 4N-byte capacity holds N byte values, 2N int16
+values and four flag bytes; the packed original int32 source remains intact
+in reconstruction scratch for dense fallback. Narrow eligibility requires
+N >= 8, N divisible by eight, uint32 count and supported grid bounds. Exact
+range flags choose byte, int16 or original int32 without clamping or rounding.
+
+CPU expansion writes the original fixed-capacity group layout and preserves
+zero tails. Mode 3 uses aligned SSE2 non-temporal stores with a store fence,
+falling back to ordinary stores on unaligned destinations. No device arena,
+frame ownership, population cache or serializer change is needed. There is
+additional ordinary host byte/int16 staging, and the final dense host owner
+still exists: unchanged device allocation statistics do not mean unchanged
+host memory use. No pinned storage, pool or custom deleter is introduced.
+
+Fourteen preflight windows (seven inputs, persistent/fresh backend) perform
+518 exact codestream/summary comparisons, including an extra dense readback
+oracle for every active coefficient and fixed group tail. Three release
+functional jobs cover AQ, public workflow and batch workflow. Five scoped
+host-ASan jobs cover AQ, batch and full sample/Flower/4K encodes. Instrumentation
+covers the changed resident host source and callers, not the retained linked
+libraries; MSVC STL container annotations are disabled to match those libraries.
+
+Six completed CUDA sanitizer jobs cover AQ memcheck/initcheck/synccheck/
+racecheck, batch memcheck and all six integrated modes at full padded 4K.
+All report zero errors/hazards; memcheck also reports zero leaks. The final
+4K sanitizer-only driver performs seven full encodes, including its reference,
+with fresh backends, dense-oracle checks and normal shutdown; it omits repeated
+benchmark warmups, not input coverage or the full image. Twelve diagnostic
+executables contain exactly the 205 retained and three S81 native GPU bodies.
+
+Another 58 fresh mode-3 CLI encodes match the existing S70/S79 codestream
+hashes, strategy summaries and optional final scores, including high-density
+and maximum-compression cases. These exact matches reuse already decoded/
+scored references; S82 does not claim fresh decoder or metric runs, a complete
+CPU/CUDA suite, or a concurrent batch-throughput campaign.
+
+### Trace and whole-encode measurements
+
+Six unrestricted CUDA-only 4K captures run in orders 0/1/3 and 3/1/0. All 309
+prior kernel launches/resources are identical. Batching removes two stream
+synchronizations (34 to 32), with unchanged event synchronization and device
+allocation API counts. Narrow adds one 0.818-0.850 ms kernel and a four-byte
+clear. It replaces 99,532,800 active AC bytes with 24,883,200 payload bytes plus
+four flag bytes; total captured D2H falls from 103,723,588 to 29,073,992 bytes.
+Those transfer/kernel timings alone are not end-to-end speedups.
+
+The timing protocol has 28 serial process windows: seven inputs, two backend
+lifetime policies and two reversed input/policy-order replicates. Each window
+has six warm and 24 measured rounds of all six modes, with shuffled Latin
+rotations balancing each mode in every position. Same-round pairs provide
+48 measured comparisons per combined cell. Duplicate controls expose timing
+variation; no build, native audit, sanitizer or evidence reconstruction runs
+alongside measurement.
+
+Persistent backend does not mean reused host coefficient storage: each encode
+still prepares and owns its final frame. Fresh backend is recreated within
+the process, not a cold process/context experiment. The profiled encode total
+includes actual serialization. A separate outer timer also includes optional
+backend creation/destruction and call teardown. Input loading, equality checks,
+file output and destruction of the returned codestream are outside timing.
+
+All 5,068 benchmark encodes are exact: 4,032 measured, 1,008 warm and 28
+references. The following are median same-round profiled-total percentage
+changes; negative is faster. `Batch` is mode 1 versus dense 0; `Narrow` is
+streaming mode 3 versus dense 0; `Added transport` is mode 3 versus batch 1.
+
+| Input | Persistent, batch | Persistent, narrow | Persistent, added transport | Fresh, batch | Fresh, narrow | Fresh, added transport |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Sample | -1.51% | +0.37% | +1.65% | +0.77% | -0.02% | -1.29% |
+| Padded 1080p | -1.08% | -2.03% | -1.57% | +1.61% | +1.76% | -0.42% |
+| Padded 4K | -0.52% | +0.68% | -0.80% | -0.01% | -1.84% | +0.18% |
+| Flower | +0.47% | +0.54% | +1.77% | +2.58% | +1.42% | -0.93% |
+| Keong macan | -0.28% | +0.45% | -0.35% | -0.87% | -1.41% | +0.10% |
+| Riaphotographs | -1.16% | +0.31% | +1.30% | +1.45% | -0.95% | -2.78% |
+| Bliznaca | -2.33% | -2.27% | -1.11% | +1.35% | -0.05% | +0.60% |
+
+Persistent 1080p streaming improves 2.13% against duplicate dense mode 2,
+with 31/48 wins and a 1.64 ms median same-round saving. Its separate replicate
+medians are -2.50% and -1.72%; it also improves against both batch-only controls
+in each replicate. The outer timer improves 1.59% against mode 2. This is a
+qualified local result, not a universal transport win: fresh 1080p is +1.76%
+versus mode 0 and -0.45% versus mode 2 (+0.11% on the outer timer versus 2).
+
+At persistent 4K, streaming is +0.68% versus dense 0 but -2.03% versus dense 2;
+the replicate signs against 0 differ (+1.88%, -1.41%). Fresh 4K is -1.84%
+versus 0 but +0.28% versus 2, with only 24/48 wins against 2; its outer timer
+is +0.66% versus 2. Added transport is near flat against fresh batch-only
+mode 1 (+0.18%). Thus the S81 fresh 4K stage result does not establish a robust
+integrated full-encode gain here. Flower requires int16; the other six inputs
+fit bytes. None of these timing inputs exercises narrow mode's int32 fallback;
+the signed-extreme fallback has S81 replay coverage, not a new S82 timing claim.
+
+Ordinary expansion (5) is not a general alternative: versus dense 0 it is
++1.34%/+1.95% at persistent/fresh 4K and +0.57%/+1.55% at 1080p. Metadata-only
+batching also lacks a general attributable whole-encode benefit in these
+samples. All six modes, duplicate controls and separate replicates remain
+reported. Combined duplicate dense changes span -1.03% to +3.11%; duplicate
+batch-only changes span -1.20% to +1.61%. Individual paired timings are much
+noisier still, so these small medians are not confidence bounds. Boundary
+telemetry is 57/78 C and 210/1282 MHz SM clock on the RTX 3060 Laptop GPU;
+ordinary power management remains enabled, and these are not in-kernel clocks.
+
+### Investigation failures and evidence
+
+The first input-selection assertion expected six rather than seven references
+and failed before any GPU job. An initial scoped-ASan link failed on the STL
+annotation mismatch; separately named V2 objects/executables correct it. A
+piped native dump timed out; its child was terminated/waited, no dump JSON was
+created, and its partial piped stdout was not preserved. A new file-backed dump
+succeeds. The first trace-summary parser expected an unversioned API name;
+it now accepts the observed `_v3020` suffix without changing count expectations.
+Evidence preflight also corrected a tuple/list JSON round-trip mismatch in
+that summary builder; the existing summary values and captures are unchanged.
+
+The first experimental and unchanged-baseline batch memchecks return zero and
+report zero errors/leaks but omit the application success marker. Neither is
+counted as a completed pass. A wrapper with flushed output and explicit start/
+exit markers passes twice without a CUDA-unavailable skip. The original
+37-encode 4K memcheck was progressing at about 30-31 seconds per encode, which
+would exceed its 900-second cap. Only its revalidated owned process pair was
+intentionally stopped; partial logs/output remain and are not counted as a
+pass. The seven-encode sanitizer-only driver then completes. Partial V1/V2
+manifests remain unchanged; completed V3 records preserve their lineage.
+
+Neither unconditional narrow transport nor metadata-only batching is promoted
+to production. The prototype removes the extra flags-sync objection and
+qualifies integration, but does not provide a general stable end-to-end win.
+All 40 S79 runtime files and public production sources remain unchanged.
+The next bounded lead is to overlap ordinary dense-output first-touch with
+resident GPU work between successful submission and its mandatory wait. It
+must preserve repeated prepared-object ownership and failure atomicity, compare
+post-wait first-touch, and qualify concurrent memory-bandwidth effects. It is
+not yet implemented or measured; optimization is not considered maxed out.
+
+The ignored `s82_*` bundle preserves diagnostic source/binaries, raw logs,
+native dumps, traces, partial-attempt lineage and paired summaries. Running
+`python build-cuda-ninja/profiles/s82_validate.py --frozen` reconstructs the
+tables and verifies 5,762 explicitly counted exact encodes, twelve native-
+identical executables and 120 non-overlapping completed campaign intervals.
+The count excludes additional functional-test/profile encodes and inconclusive/
+stopped attempts. The interval check excludes CPU-only build/native work and
+is not a blanket machine-idleness claim; some native work overlaps sanitizer
+qualification, never measurement. `--current` additionally checks source/docs
+snapshots and the retained runtime. No security, privilege, clock, power,
+cooling or priority changes were made, and no firewall/admin/permission block
+was observed. The suggested cause of the user's earlier delay is unconfirmed.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
