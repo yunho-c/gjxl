@@ -283,6 +283,7 @@ add_library(
   src/codestream/resident_workflow_storage_plan.cpp
   src/codestream/cpu_workflow_storage_plan.cpp
   src/codestream/compatibility_workflow_storage_plan.cpp
+  src/codestream/workflow_storage_plan.cpp
   src/codestream/sections.cpp
   src/codestream/token_storage_plan.cpp
   src/codestream/entropy_storage_plan.cpp
@@ -2601,6 +2602,20 @@ if(GJXL_BUILD_TESTS)
   add_dependencies(gjxl_compatibility_workflow_storage_plan_test gjxl_metal_shaders)
   add_test(NAME compatibility_workflow_storage_plan COMMAND gjxl_compatibility_workflow_storage_plan_test)
   set_tests_properties(compatibility_workflow_storage_plan PROPERTIES TIMEOUT 300)
+
+  add_executable(gjxl_metal_cache_admission_test tests/metal_cache_admission_test.cpp)
+  target_link_libraries(gjxl_metal_cache_admission_test PRIVATE gjxl_metal)
+  target_include_directories(gjxl_metal_cache_admission_test SYSTEM PRIVATE third_party/metal-cpp)
+  target_compile_definitions(gjxl_metal_cache_admission_test PRIVATE
+    GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_cache_admission_test gjxl_metal_shaders)
+  add_test(NAME metal_cache_admission COMMAND gjxl_metal_cache_admission_test)
+  set_tests_properties(metal_cache_admission PROPERTIES TIMEOUT 60)
+
+  add_executable(gjxl_workflow_storage_plan_test tests/workflow_storage_plan_test.cpp)
+  target_link_libraries(gjxl_workflow_storage_plan_test PRIVATE gjxl_c gjxl_codestream gjxl_metal)
+  add_test(NAME workflow_storage_plan COMMAND gjxl_workflow_storage_plan_test)
+  set_tests_properties(workflow_storage_plan PROPERTIES TIMEOUT 180)
 
   add_test(
     NAME codec_install_consumer

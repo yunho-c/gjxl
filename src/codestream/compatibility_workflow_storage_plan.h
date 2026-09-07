@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+
 #include "codestream/cpu_workflow_storage_plan.h"
 
 namespace gjxl::codestream_internal {
@@ -19,6 +21,9 @@ struct MetalCompatibilityWorkflowStoragePlan {
   SerializerStoragePlan serializer;
   HostStorageBound output;
   HostStorageBound working;
+  // Same order as ResidentWorkflowStoragePlan: input, persistent, staging,
+  // Butteraugli. This is a pool-capacity bound, not additional active backing.
+  std::array<size_t, 4> idle_pool_capacity{};
   bool
   operator==(const MetalCompatibilityWorkflowStoragePlan &) const = default;
 };

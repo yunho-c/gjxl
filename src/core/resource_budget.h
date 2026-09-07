@@ -228,11 +228,15 @@ public:
 
   /// Call only after all users complete. Idle capacity remains charged even
   /// when its OS pages are volatile or reclaimed; this is not a RAM counter.
+  /// Unavailable leaves the ticket live when admission is queued. Cache owners
+  /// must then destroy the backing rather than retaining it as idle storage.
   [[nodiscard]] Status MakeIdle() {
     if (!valid() || phase_ != Phase::kLive)
       return Status::FailedPrecondition("Allocation is not live");
     auto& budget = *state_->budget;
     std::lock_guard lock(budget.mutex);
+    if (budget.first != nullptr)
+      return Status::Unavailable("Idle caching is deferred while admission waits");
     ForUsage([&](ResourceUsage& usage) {
       usage.live_requested_bytes -= requested_;
       usage.live_capacity_bytes -= capacity_;
@@ -429,12 +433,19 @@ public:
 
   /// FIFO admission, including unequal request sizes. Only callers holding no
   /// resources needed by another waiting request may wait here. Cache owners
-  /// must arrange eviction before waiting; this class owns no physical storage.
+  /// may provide eviction after FIFO enqueue and before waiting. It runs without
+  /// the budget lock. Enqueue first so concurrent cache returns cannot strand
+  /// this waiter: MakeIdle rejects retention while any admission is queued.
+  /// This class itself owns no physical storage. The callback must not wait for
+  /// another reservation or mutate the output reservation.
   [[nodiscard]] Status Reserve(
     size_t capacity_bytes, ResourceReservation* reservation,
-    std::stop_token stop = {}) const {
+    std::stop_token stop = {},
+    Status (*evict_idle)(void*) = nullptr, void* eviction_context = nullptr) const {
     Status status = Validate(capacity_bytes, reservation);
     if (!status.ok()) return status;
+    if (stop.stop_requested())
+      return Status::Unavailable("Resource admission cancelled");
     std::shared_ptr<detail::ReservationState> candidate;
     status = MakeCandidate(capacity_bytes, &candidate);
     if (!status.ok()) return status;
@@ -443,11 +454,25 @@ public:
     state_->Enqueue(&waiter);
     bool ready = false;
     try {
+      if (evict_idle != nullptr &&
+          !(state_->first == &waiter && Fits(capacity_bytes))) {
+        lock.unlock();
+        status = evict_idle(eviction_context);
+        lock.lock();
+        if (!status.ok()) {
+          state_->Remove(&waiter);
+          lock.unlock();
+          state_->changed.notify_all();
+          return status;
+        }
+      }
       ready = state_->changed.wait(lock, stop, [&] {
         return state_->first == &waiter && Fits(capacity_bytes);
       });
     } catch (...) {
+      if (!lock.owns_lock()) lock.lock();
       state_->Remove(&waiter);
+      lock.unlock();
       state_->changed.notify_all();
       throw;
     }

@@ -389,14 +389,16 @@ bool CheckConcurrentAccounting() {
             !job.PrepareAllocation(ResourceClass::kAqScratch, 8, 16, &first).ok() ||
             !job.PrepareAllocation(ResourceClass::kCompletedFrame,
                                    capacity - 16, capacity - 16, &second).ok() ||
-            !first.Commit().ok() || !second.Commit().ok() ||
-            !first.MakeIdle().ok()) {
+            !first.Commit().ok() || !second.Commit().ok()) {
           good = false;
           return;
         }
+        const Status idle = first.MakeIdle();
+        if (idle.ok()) {
+          if (!first.MakeLive(4).ok()) good = false;
+        } else if (idle.code() != StatusCode::kUnavailable) good = false;
         if (iteration % 2 == 0) job.Reset();
         if (!Consistent(shared.snapshot(), 256)) good = false;
-        if (!first.MakeLive(4).ok()) good = false;
         // Destruction alternates between tickets-first and producer-first.
       }
     });
@@ -439,6 +441,92 @@ bool CheckRetainedBackingAndQueueRemoval() {
   if (!Check(Until([&] { return acquired[0].load(); }),
       "Releasing retained output did not wake admission")) return false;
   for (auto& worker : workers) worker.join();
+  return Empty(budget);
+}
+
+bool CheckAdmissionEviction() {
+  ResourceBudget budget(100);
+  ResourceReservation producer, consumer;
+  ResourceAllocation idle;
+  struct Context {
+    ResourceBudget* budget;
+    ResourceAllocation* allocation;
+    size_t calls = 0;
+    int mode = 0;
+  } context{&budget, &idle};
+  const auto evict = +[](void* opaque) -> Status {
+    auto& c = *static_cast<Context*>(opaque);
+    ++c.calls;
+    // Both calls take the budget mutex: callback invocation must not hold it.
+    if (c.budget->snapshot().waiting_requests != 1)
+      return Status::Internal("Eviction ran before FIFO enqueue");
+    if (c.mode == 1) return Status::Unavailable("Injected eviction failure");
+    if (c.mode == 2) throw std::runtime_error("Injected eviction exception");
+    c.allocation->Reset();
+    return Status::Ok();
+  };
+  if (!Ok(budget.Reserve(100, &producer)) ||
+      !Ok(producer.PrepareAllocation(ResourceClass::kInput, 100, 100, &idle)) ||
+      !Ok(idle.Commit()) || !Ok(idle.MakeIdle())) return false;
+  producer.Reset();
+  for (int mode : {1, 2}) {
+    context.mode = mode;
+    bool threw = false;
+    try {
+      const auto status = budget.Reserve(100, &consumer, {}, evict, &context);
+      if (!Check(mode == 1 && status.code() == StatusCode::kUnavailable,
+          "Eviction failure lost its status")) return false;
+    } catch (const std::runtime_error&) { threw = true; }
+    if (!Check(threw == (mode == 2) && !consumer.valid() &&
+        budget.snapshot().waiting_requests == 0 &&
+        budget.snapshot().total.idle_capacity_bytes == 100,
+        "Failed eviction leaked a waiter, reservation or cache mutation")) return false;
+  }
+  context.mode = 0;
+  if (!Ok(budget.Reserve(100, &consumer, {}, evict, &context)) ||
+      !Check(context.calls == 3 && !idle.valid() &&
+        budget.snapshot().total.idle_capacity_bytes == 0,
+        "Idle-only blocker did not admit after eviction")) return false;
+  consumer.Reset();
+  std::stop_source stopped;
+  stopped.request_stop();
+  if (!Code(budget.Reserve(100, &consumer, stopped.get_token(), evict, &context),
+            StatusCode::kUnavailable) ||
+      !Code(budget.Reserve(101, &consumer, {}, evict, &context),
+            StatusCode::kOutOfMemory) ||
+      !Code(budget.Reserve(0, &consumer, {}, evict, &context),
+            StatusCode::kInvalidArgument) ||
+      !Ok(budget.Reserve(100, &consumer, {}, evict, &context)) ||
+      !Check(context.calls == 3, "Unneeded admission evicted caches")) return false;
+  consumer.Reset();
+  return Empty(budget);
+}
+
+bool CheckCacheReturnWhileWaiting() {
+  ResourceBudget budget(100);
+  ResourceReservation producer;
+  ResourceAllocation allocation;
+  if (!Ok(budget.Reserve(100, &producer)) ||
+      !Ok(producer.PrepareAllocation(ResourceClass::kAqScratch, 100, 100,
+                                     &allocation)) || !Ok(allocation.Commit()))
+    return false;
+  std::atomic<bool> acquired{false};
+  std::jthread waiter([&](std::stop_token stop) {
+    ResourceReservation job;
+    acquired = budget.Reserve(100, &job, stop).ok();
+  });
+  if (!Check(Until([&] { return budget.snapshot().waiting_requests == 1; }),
+      "Admission did not queue behind live storage")) return false;
+  const auto before = budget.snapshot();
+  if (!Code(allocation.MakeIdle(), StatusCode::kUnavailable) ||
+      !Check(budget.snapshot().total.live_capacity_bytes == before.total.live_capacity_bytes &&
+        budget.snapshot().total.idle_capacity_bytes == 0,
+        "Refused cache return changed allocation state")) return false;
+  allocation.Reset();
+  producer.Reset();
+  if (!Check(Until([&] { return acquired.load(); }),
+      "Cache refusal did not allow waiting admission to progress")) return false;
+  waiter.join();
   return Empty(budget);
 }
 
@@ -604,6 +692,7 @@ int main() {
   return CheckLifecycle() && CheckTransfersAndMoves() && CheckPendingAndFailure() &&
     CheckOverflowAndLifetime() && CheckFifoAndCancellation() &&
     CheckConcurrentAccounting() && CheckRetainedBackingAndQueueRemoval() &&
-    CheckStateModel() && CheckOwnerTransitions()
+    CheckStateModel() && CheckOwnerTransitions() && CheckAdmissionEviction() &&
+    CheckCacheReturnWhileWaiting()
       ? EXIT_SUCCESS : EXIT_FAILURE;
 }

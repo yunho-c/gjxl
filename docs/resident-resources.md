@@ -154,9 +154,12 @@ allocation adapters are not wired by the foundation commit.
 The device recipes are now shared with actual allocation, and complete
 conservative CPU and resident Metal Butteraugli workflow plans compose the
 serializer and frontend component bounds. Metal compatibility and mixed-backend
-search plans now cover the other encoding policies. Entry-point plan selection,
-input/batch adapters and final allocation coverage still require implementation
-and tests before workflow enforcement can land.
+search plans now cover the other encoding policies. The
+[unified preflight checkpoint](resident-admission-preflight.md) composes these
+with C input/publication and retained batch ownership, and adds FIFO-aware
+matching-domain eviction across live Metal backends. Actual entry-point route
+selection, public domains, batch slot/trim enforcement and final allocation
+coverage still require implementation and tests before workflow enforcement can land.
 In particular, excluding all CPU allocations or retained batch results to make
 a GPU-only limiter pass would not satisfy this design or the parent roadmap.
 

@@ -212,6 +212,8 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       !device_inventory.Add({ac.device_bytes, ac.device_bytes}))
     return Overflow();
   p.device_bytes = device_inventory.peak_bytes;
+  p.idle_pool_capacity = {input.capacity_bytes, aq.persistent_bytes,
+                          aq.staging_bytes, butter.capacity_bytes};
   frontend_storage_internal::ColorCorrelationStoragePlan cfl;
   status = frontend_storage_internal::ComputeColorCorrelationStoragePlan(
       coding, frontend_storage_internal::ColorCorrelationStorageMode::kCopy,

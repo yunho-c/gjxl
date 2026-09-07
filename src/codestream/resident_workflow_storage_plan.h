@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+
 #include "codestream/serializer_storage_plan.h"
 #include "codestream/workflow.h"
 #include "gpu/ops/profile_storage_plan.h"
@@ -42,6 +44,11 @@ struct ResidentWorkflowStoragePlan {
   HostStorageBound search_phase;
   HostStorageBound completion_phase;
   HostStorageBound working;
+  // Maximum capacity this workflow can leave in each production Metal pool:
+  // resident input, AQ persistent, AQ staging, Butteraugli. Active work already
+  // includes these bytes. A batch must also bound idle pools left by earlier
+  // images while different images consume its active-work slots.
+  std::array<size_t, 4> idle_pool_capacity{};
   bool operator==(const ResidentWorkflowStoragePlan &) const = default;
 };
 

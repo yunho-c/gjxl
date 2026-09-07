@@ -38,6 +38,7 @@
 namespace gjxl::metal_internal {
 
 class MetalBackend;
+struct MetalBackendRegistry;
 struct MetalButteraugliScratch;
 
 using MetalComputeEncodeCallback = void (*)(
@@ -310,6 +311,8 @@ public:
   ~MetalBackend() override;
 
   Status TrimPreparationCache() override;
+  Status TrimPreparationCacheForDomain(
+    const resource_budget_internal::ResourceBudget& budget);
   Status EmptyButteraugliCacheForTesting();
   size_t ButteraugliCacheBytesForTesting();
   size_t PreparationCacheBytesForTesting();
@@ -421,6 +424,7 @@ private:
   friend class MetalPreparedAqEvaluation;
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
+  friend struct MetalCacheAdmissionTestAccess;
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 
   Status PrepareDeviceButteraugliImpl(
@@ -680,6 +684,8 @@ private:
   std::optional<DeviceScratchArena> idle_butteraugli_scratch_;
   uint64_t preparation_cache_generation_ = 0;
   std::string name_;
+  // Keep the registry alive through backend teardown, including static teardown.
+  std::shared_ptr<MetalBackendRegistry> registry_;
 };
 
 Status CreateAcStrategyPipelines(

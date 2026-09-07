@@ -648,7 +648,18 @@ Status CreateTransformPipeline(
 }  // namespace
 
 namespace metal_internal {
+
+struct MetalBackendRegistry {
+  std::mutex mutex;
+  std::vector<MetalBackend*> backends;
+};
+
 namespace {
+
+std::shared_ptr<MetalBackendRegistry> PreparationCacheRegistry() {
+  static auto registry = std::make_shared<MetalBackendRegistry>();
+  return registry;
+}
 
 // Limits only the additional Butteraugli capacity cache, including every
 // simultaneously alive backend. Active leases are never purgeable/counted.
@@ -710,11 +721,49 @@ MetalBackend::MetalBackend(
   if (name_.empty()) {
     name_ = "Metal";
   }
+  // Register last: a failed constructor must never publish a dangling pointer.
+  registry_ = PreparationCacheRegistry();
+  std::lock_guard lock(registry_->mutex);
+  registry_->backends.push_back(this);
 }
 
 MetalBackend::~MetalBackend() {
+  {
+    // Eviction holds this same lock while visiting a backend, so removal waits
+    // for an in-progress visit before any cache or device members are destroyed.
+    std::lock_guard lock(registry_->mutex);
+    std::erase(registry_->backends, this);
+  }
   // All prepared operations must already be destroyed by the backend contract.
   DropButteraugliCacheLocked();
+}
+
+Status TrimMetalPreparationCachesForDomain(
+  const resource_budget_internal::ResourceBudget& budget) {
+  const auto registry = PreparationCacheRegistry();
+  std::lock_guard lock(registry->mutex);
+  for (auto* backend : registry->backends) {
+    const Status status = backend->TrimPreparationCacheForDomain(budget);
+    if (!status.ok()) return status;
+  }
+  return Status::Ok();
+}
+
+Status MetalBackend::TrimPreparationCacheForDomain(
+  const resource_budget_internal::ResourceBudget& budget) {
+  std::lock_guard lock(preparation_cache_mutex_);
+  const auto matches = [&](auto& arena) {
+    if (!arena) return false;
+    auto* buffer = AsMetalBuffer(*arena->backing_buffer());
+    return buffer != nullptr && buffer->allocation().SharesDomain(budget);
+  };
+  if (matches(idle_butteraugli_scratch_)) DropButteraugliCacheLocked();
+  for (auto& arena : idle_aq_scratch_)
+    if (matches(arena)) arena.reset();
+  // Unlike explicit trim, eviction does not advance a backend-wide epoch:
+  // unrelated domains keep their leases. Queued admission prevents matching
+  // active allocations becoming idle until the waiter has made progress.
+  return Status::Ok();
 }
 
 void MetalBackend::DropButteraugliCacheLocked() noexcept {
@@ -754,8 +803,13 @@ Status MetalBackend::AcquireButteraugliArena(
   }
   const size_t capacity = candidate.capacity_bytes();
   // Grow on demand and shed disproportionate high-water capacity on downsizing.
+  // An admitted plan bounds this allocation's requested capacity, not whatever
+  // portion of the whole job's credit happens to remain at cache acquisition.
+  // Keep legacy hysteresis only for calls without a complete reservation.
   if (capacity < required_capacity_bytes ||
-      capacity - required_capacity_bytes > required_capacity_bytes) {
+      capacity - required_capacity_bytes > required_capacity_bytes ||
+      (resource_budget_internal::CurrentResourceContext().reservation != nullptr &&
+       capacity != required_capacity_bytes)) {
     candidate = DeviceScratchArena{};
   }
   if (candidate.capacity_bytes() != 0) {

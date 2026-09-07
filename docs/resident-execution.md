@@ -206,9 +206,12 @@ changing runtime object code.
 The [compatibility workflow plans](resident-compatibility-workflow-storage-planning.md)
 add exact-coefficient, resident maximum-error and maximum-throughput lifetimes,
 plus simultaneous CPU/Metal preparation in automatic exact-coefficient searches.
-Unified entry-point plan selection, input adapters, retained batch results and
-public-domain admission remain pending; these checkpoints do not satisfy the
-milestone.
+The [unified preflight and cache-progress checkpoint](resident-admission-preflight.md)
+composes selected policy recipes with packed C conversion/publication and
+streamed batch retained-result, work-slot and per-pool idle bounds. It also adds
+queued eviction and matching-domain all-backend cache reclamation. Actual
+entry-point route selection, public domains and enforcement of the admission
+and batch contracts remain pending; these checkpoints do not satisfy the milestone.
 
 Deliverables:
 

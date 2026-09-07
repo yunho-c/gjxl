@@ -124,6 +124,8 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
   if (!status.ok())
     return status;
   p.evaluator = host.working;
+  p.idle_pool_capacity[1] = device.persistent_bytes;
+  p.idle_pool_capacity[2] = device.staging_bytes;
   for (size_t bytes : {device.persistent_bytes, device.staging_bytes})
     if (!p.evaluator.Add({bytes, bytes}))
       return Overflow();
@@ -134,6 +136,7 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
       return status;
     // Provisional strategy grid and adjusted policy input are additional to
     // the common prepared fields. Invariant CfL output is copied on the host.
+    p.idle_pool_capacity[0] = input.capacity_bytes;
     ColorCorrelationStoragePlan cfl;
     status = ComputeColorCorrelationStoragePlan(
         coding, ColorCorrelationStorageMode::kCopy, &cfl);
@@ -153,6 +156,7 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
       return status;
     if (!p.evaluator.Add({butter.capacity_bytes, butter.capacity_bytes}))
       return Overflow();
+    p.idle_pool_capacity[3] = butter.capacity_bytes;
   }
   OwnedFrameStoragePlan frame;
   status = ComputeOwnedFrameStoragePlan(source, &frame);

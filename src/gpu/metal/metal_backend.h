@@ -14,6 +14,14 @@
 
 namespace gjxl {
 
+namespace resource_budget_internal { class ResourceBudget; }
+namespace metal_internal {
+/// Evict matching-domain idle pools across all live Metal backends. Does not
+/// create a backend or touch active leases. Caller must not hold a budget lock.
+[[nodiscard]] Status TrimMetalPreparationCachesForDomain(
+  const resource_budget_internal::ResourceBudget& budget);
+}  // namespace metal_internal
+
 // Built-in DCT kernel implementations. Availability is strategy-dependent.
 enum class MetalDctImplementation {
   kScalarMatmul,
