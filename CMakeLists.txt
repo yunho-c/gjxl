@@ -426,34 +426,19 @@ install(
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )
 
-install(
-  FILES include/gjxl/gjxl.h include/gjxl/execution_domain.hpp
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gjxl"
-)
-
-install(
-  DIRECTORY src/core
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  FILES_MATCHING
-    PATTERN "*.h"
-)
-
-install(
-  DIRECTORY src/codec
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  FILES_MATCHING
-    PATTERN "*.h"
-    PATTERN "*_internal.h" EXCLUDE
-    PATTERN "quantization_tables_generated.h" EXCLUDE
-)
-
-install(
-  DIRECTORY src/codestream
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  FILES_MATCHING
-    PATTERN "*.h"
-    PATTERN "*_internal.h" EXCLUDE
-)
+# Public entry points and the support headers needed to instantiate them.
+# Do not infer the installed interface from directory contents or filenames.
+include(cmake/InstalledHeaders.cmake)
+foreach(header IN LISTS GJXL_INSTALLED_HEADERS)
+  if(header MATCHES "^gjxl/")
+    set(source_header "include/${header}")
+  else()
+    set(source_header "src/${header}")
+  endif()
+  get_filename_component(header_directory "${header}" DIRECTORY)
+  install(FILES "${source_header}"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${header_directory}")
+endforeach()
 
 install(
   TARGETS gjxl_encode
@@ -1071,17 +1056,6 @@ install(
     gjxl_metal
   EXPORT gjxlTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
-
-install(
-  DIRECTORY src/gpu
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  FILES_MATCHING
-    PATTERN "*.h"
-    PATTERN "*_internal.h" EXCLUDE
-    PATTERN "*_profile.h" EXCLUDE
-    PATTERN "*_test.h" EXCLUDE
-    PATTERN "metal/kernels" EXCLUDE
 )
 
 target_compile_features(
@@ -2721,8 +2695,10 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
       "-DGJXL_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       "-DGJXL_TEST_CONFIG=$<CONFIG>"
+      "-DGJXL_INSTALL_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_consumer.cmake"
   )
+  set_tests_properties(codec_install_consumer PROPERTIES TIMEOUT 180)
 endif()
 
 if(GJXL_BUILD_BENCHMARKS)

@@ -49,6 +49,8 @@ and link `gjxl::c` without this C++ interface restriction; the installed test
 also exercises such a client in C++23. Request `codec`, `codestream` or `core`
 when using those C++ interfaces. Omitting `COMPONENTS` checks the full interface.
 Building the underlying library still requires the supported C++ toolchain.
+The [installed interface](installed-interface.md) distinguishes public headers
+from the implementation dependencies needed by those C++ consumers.
 
 ## Compatibility boundary
 

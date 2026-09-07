@@ -10,7 +10,12 @@ if(NOT DEFINED GJXL_TEST_CONFIG OR GJXL_TEST_CONFIG STREQUAL "")
 endif()
 
 set(test_root "${GJXL_BUILD_DIR}/installed-consumer-test")
+set(staging_prefix "${test_root}/staging-prefix")
 set(install_prefix "${test_root}/prefix")
+set(consumer_source "${test_root}/consumer-source")
+if(NOT DEFINED GJXL_INSTALL_INCLUDEDIR)
+  set(GJXL_INSTALL_INCLUDEDIR include)
+endif()
 file(REMOVE_RECURSE "${test_root}")
 
 # Keep the same configure/build/run checks for each supported consumer mode.
@@ -26,23 +31,48 @@ endfunction()
 
 run_checked("gjxl installation"
   "${CMAKE_COMMAND}" --install "${GJXL_BUILD_DIR}"
-  --prefix "${install_prefix}" --config "${GJXL_TEST_CONFIG}")
+  --prefix "${staging_prefix}" --config "${GJXL_TEST_CONFIG}")
+# Verify relocation and keep the consumer fixture separate from source headers.
+file(RENAME "${staging_prefix}" "${install_prefix}")
+file(COPY "${GJXL_SOURCE_DIR}/tests/downstream/" DESTINATION "${consumer_source}")
+file(COPY "${GJXL_SOURCE_DIR}/cmake/InstalledHeaders.cmake" DESTINATION "${consumer_source}")
 
-if(NOT EXISTS "${install_prefix}/include/gjxl/gjxl.h")
-  message(FATAL_ERROR "installed C API header is missing")
+include("${consumer_source}/InstalledHeaders.cmake")
+set(installed_include "${install_prefix}/${GJXL_INSTALL_INCLUDEDIR}")
+# This glob inspects the artifact; production installation uses only the list.
+file(GLOB_RECURSE actual_headers RELATIVE "${installed_include}" "${installed_include}/*")
+set(expected_headers ${GJXL_INSTALLED_HEADERS})
+list(SORT expected_headers)
+list(SORT actual_headers)
+if(NOT actual_headers STREQUAL expected_headers)
+  set(missing_headers ${expected_headers})
+  list(REMOVE_ITEM missing_headers ${actual_headers})
+  set(extra_headers ${actual_headers})
+  list(REMOVE_ITEM extra_headers ${expected_headers})
+  message(FATAL_ERROR
+    "installed header boundary differs: missing=[${missing_headers}], unexpected=[${extra_headers}]")
 endif()
-if(EXISTS "${install_prefix}/include/c_api")
-  message(FATAL_ERROR "private C adapter headers were installed")
-endif()
+
+file(GLOB_RECURSE package_files "${install_prefix}/*.cmake")
+foreach(package_file IN LISTS package_files)
+  file(READ "${package_file}" package_contents)
+  foreach(forbidden_path IN ITEMS "${GJXL_SOURCE_DIR}" "${GJXL_BUILD_DIR}" "${staging_prefix}")
+    string(FIND "${package_contents}" "${forbidden_path}" found)
+    if(NOT found EQUAL -1)
+      message(FATAL_ERROR "${package_file} leaks a source/build/staging path: ${forbidden_path}")
+    endif()
+  endforeach()
+endforeach()
 
 foreach(standard IN ITEMS 20 23)
   set(consumer_build "${test_root}/cxx${standard}")
   run_checked("downstream C++${standard} configure"
-    "${CMAKE_COMMAND}" -S "${GJXL_SOURCE_DIR}/tests/downstream" -B "${consumer_build}"
+    "${CMAKE_COMMAND}" -S "${consumer_source}" -B "${consumer_build}"
     "-DCMAKE_PREFIX_PATH=${install_prefix}" "-DCMAKE_BUILD_TYPE=${GJXL_TEST_CONFIG}"
-    "-DCMAKE_CXX_STANDARD=${standard}" -DCMAKE_CXX_STANDARD_REQUIRED=ON)
+    "-DCMAKE_CXX_STANDARD=${standard}" -DCMAKE_CXX_STANDARD_REQUIRED=ON
+    -DGJXL_CHECK_INSTALLED_HEADERS=ON)
   run_checked("downstream C++${standard} build"
-    "${CMAKE_COMMAND}" --build "${consumer_build}" --config "${GJXL_TEST_CONFIG}")
+    "${CMAKE_COMMAND}" --build "${consumer_build}" --config "${GJXL_TEST_CONFIG}" --parallel 4)
   foreach(consumer IN ITEMS gjxl_codec_consumer gjxl_codestream_consumer gjxl_c_consumer gjxl_domain_consumer)
     set(consumer_executable "${consumer_build}/${consumer}")
     if(NOT EXISTS "${consumer_executable}")
@@ -53,7 +83,7 @@ foreach(standard IN ITEMS 20 23)
 endforeach()
 
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -S "${GJXL_SOURCE_DIR}/tests/downstream"
+  COMMAND "${CMAKE_COMMAND}" -S "${consumer_source}"
     -B "${test_root}/unsupported-cxx26" "-DCMAKE_PREFIX_PATH=${install_prefix}"
     -DCMAKE_CXX_STANDARD=26
   RESULT_VARIABLE unsupported_result OUTPUT_VARIABLE unsupported_output ERROR_VARIABLE unsupported_error
@@ -69,7 +99,7 @@ endif()
 # A client requesting only the C ABI does not need the C++ interface probe.
 set(c_abi_build "${test_root}/c-abi-cxx23")
 run_checked("C ABI-only C++23 configure"
-  "${CMAKE_COMMAND}" -S "${GJXL_SOURCE_DIR}/tests/downstream" -B "${c_abi_build}"
+  "${CMAKE_COMMAND}" -S "${consumer_source}" -B "${c_abi_build}"
   "-DCMAKE_PREFIX_PATH=${install_prefix}" "-DCMAKE_BUILD_TYPE=${GJXL_TEST_CONFIG}"
   -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DGJXL_TEST_C_ABI_ONLY=ON)
 run_checked("C ABI-only C++23 build"
