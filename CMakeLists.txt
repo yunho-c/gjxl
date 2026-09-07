@@ -1078,6 +1078,13 @@ if(GJXL_BUILD_TESTS)
     REQUIRED
   )
 
+  if(Python3_VERSION VERSION_GREATER_EQUAL 3.12)
+    add_test(NAME resident_qualification_controller
+      COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/resident_qualification/test_runner.py")
+    set_tests_properties(resident_qualification_controller PROPERTIES TIMEOUT 30 LABELS cli)
+  endif()
+
   add_executable(gjxl_stdlib_storage_compat_test tests/stdlib_storage_compat_test.cpp)
   target_link_libraries(gjxl_stdlib_storage_compat_test PRIVATE gjxl_core)
   set_target_properties(gjxl_stdlib_storage_compat_test PROPERTIES CXX_STANDARD 20)

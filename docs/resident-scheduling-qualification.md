@@ -287,6 +287,16 @@ quality-time policy track (#4B and #1/#2), not unfinished structural milestones.
 
 ## Retained evidence
 
+For a fresh reconstruction, use the tracked
+[qualification package](../tools/resident_qualification/README.md). It takes
+explicit corpus and decoder paths, reconstructs matching source/library pairs,
+and runs fresh correctness and sanitizer gates. Its `--historical` configuration
+selects the revisions measured here. New results remain a separate experiment;
+the original measurements and artifact identities below are unchanged.
+
+The following artifacts are a local historical archive, not tracked prerequisites
+for that package.
+
 `build/resident-scheduling-qualification/` contains `driver.cpp`, resumable
 `run.py`, frozen `build.json`, per-process raw logs/JSON, append-only
 `execution-events.jsonl`, retained compressed and decoded outputs, and phase
@@ -298,7 +308,7 @@ identities; `verify` also checks the sealed file hashes and recomputes the repor
 Both phases pass. Validation manifest SHA-256:
 `451848146149f37824a6bc1934985ae5f833e9bc3d452abf0619f105936344cf`.
 
-To recheck the retained local evidence:
+To recheck the original evidence where that local archive is still available:
 
 ```sh
 python3 build/resident-scheduling-qualification/run.py verify

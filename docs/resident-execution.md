@@ -1,10 +1,29 @@
 # Resident execution architecture
 
-## Charter and motivation
+Resident execution keeps image evaluation and prepared data on Metal while CPU
+code performs placement decisions, frame assembly, entropy coding, and emission.
+Its organizing boundaries are **ownership, complete-call admission, and CPU/GPU
+participation**. It preserves encoder decisions; residency does not imply that
+all encoder work runs on the GPU.
 
-Preserve GJXL's current encoding decisions while making data representation,
-storage lifetimes, resource admission, and CPU/GPU scheduling coherent across
-the complete Metal resident workflow.
+This page describes current contracts, followed by the
+[historical milestones](#historical-milestones) and their original revision
+boundaries. The [historical scheduling qualification](resident-scheduling-qualification.md)
+records the integrated comparison and its costs; it is not a performance claim
+about every later revision.
+
+Contents:
+
+- [Charter and motivation](#charter-and-motivation)
+- [One complete encode](#one-complete-encode)
+- [Ownership boundaries](#ownership-boundaries)
+- [Admission and storage planning](#admission-and-storage-planning)
+- [CPU participation and GPU waits](#cpu-participation-and-gpu-waits)
+- [Batches, publication, and shutdown](#batches-publication-and-shutdown)
+- [Interfaces and maintenance gates](#interfaces-and-maintenance-gates)
+- [Historical milestones](#historical-milestones)
+
+## Charter and motivation
 
 The architectural problem is broader than slow kernels. Independently designed
 stages can require owned results, incompatible layouts, long-lived scratch, and
@@ -12,41 +31,172 @@ separate resource decisions. Those boundaries make allocation, conversion, and
 retention compulsory even when the consumer only needs access to existing data.
 Unified memory does not eliminate those traversals or establish safe lifetimes.
 
-The organizing questions are: what data is needed, in which representation,
-until when, and by whom? The goal is a GPU-centric heterogeneous encoder, not a
-GPU-only encoder. CPU AC placement, tokenization, entropy coding, and emission
-can remain appropriate parts of the design.
+The organizing questions are what data is needed, in which representation,
+until when, and by whom. The architecture preserves encoding decisions while
+making those representation, lifetime, admission, and scheduling boundaries
+coherent across the complete workflow.
 
-This is the policy-preserving architecture roadmap under the broader
-[Metal encoding performance roadmap](metal-encoding-performance.md).
+This work is part of the [Metal encoding performance roadmap](metal-encoding-performance.md).
 [Metal AQ](metal-aq.md) remains authoritative for numerical/residency contracts,
 and [codestream documentation](codestream.md) for the supported bitstream profile.
-[Resident frame handoff](resident-frame-handoff.md) retains the detailed design
-and qualification record for completed milestones 1 and 2. The
-[final scheduling qualification](resident-scheduling-qualification.md) closes
-the subsequent structural milestones with their costs and limitations; earlier
-measurements are not substitutes for that final comparison.
 
-Development branch: `refactor/resident-execution` (originally
-`refactor/resident-frame-handoff`). The worktree remains
-`../gjxl-resident-frame-handoff`.
+## One complete encode
 
-The [storage toolchain contract](storage-toolchain.md) defines the supported
-compiler, libc++ implementation, ABI and C++20/C++23 modes used by memory bounds
-and publication, including installed-consumer requirements and upgrade checks.
-The [installed interface](installed-interface.md) lists the public boundary and
-the implementation headers required by its templates, inline methods and owners.
-The [shared planning recipes](planning-recipes.md) document the counts shared
-with execution and the lifetime composition retained by component planners.
-The [worker orchestration guide](worker-orchestration.md) describes the shared
-parallel task loop and the failure policies retained by each stage.
+```mermaid
+flowchart LR
+    input[Caller input] --> admission[Whole-call admission]
+    admission --> preparation[Prepared input and evaluator scratch]
+    preparation --> completed[Completed-frame owner]
+    completed --> serializer[CPU serializer borrows frame]
+    serializer --> publication[Atomic output publication]
+    publication --> result[Caller-owned result]
+```
 
-## Scope and current status
+The workflow keeps owners alive across each synchronous consumer. GPU completion
+precedes CPU borrowing. Releasing evaluator scratch must not invalidate completed
+output, and retaining completed output must not require keeping the evaluator or
+backend alive. Allocation tickets follow backing storage through handoff.
+
+Entry points and orchestration live in [workflow.cpp](../src/codestream/workflow.cpp),
+with the C adapter in [gjxl.cpp](../src/c_api/gjxl.cpp) and batch orchestration in
+[batch_workflow.cpp](../src/codestream/batch_workflow.cpp). CPU and compatibility
+Metal routes share the public ownership/admission contracts while retaining their
+own component lifetimes and plans.
+
+## Ownership boundaries
+
+| Owner or view | Lifetime and consumer contract |
+| --- | --- |
+| Caller input | The caller keeps borrowed image backing valid for the synchronous call. Preparation handles layout/color requirements. [Packed resident input](packed-resident-input.md) describes direct C-input preparation and the owned resident result. |
+| Prepared input and evaluator scratch | Prepared state belongs to its execution slot and follows image/reuse rules. Scratch can be reused only after its consumers finish; shape compatibility does not permit reusing changed image contents. |
+| Completed frame | `CompletedVarDctFrame` owns an exclusive completed-output lease. Its backing survives scratch reuse and producer/backend destruction until the owner is released. |
+| Serializer frame view | `VarDctFrameView` borrows immutable backing without allocating or extending its lifetime. It neither waits for GPU completion nor retains a lease. All synchronous serializer workers finish before the owner can be released. |
+| Candidate/output storage | Current candidate, retained best, timing, scores, and batch results have distinct owners. Publication transfers completed backing after fallible work succeeds. Public output arguments remain unchanged on failure. |
+| Reusable caches | Cache backing keeps its domain-owned accounting ticket. Idle storage and active storage differ; reclamation follows domain identity and completion rules. |
+
+The frame owner/view contract is defined in
+[vardct_frame_view_internal.h](../src/codec/vardct_frame_view_internal.h).
+The [frame handoff guide](resident-frame-handoff.md) explains direct group-major
+output destinations and the legacy owned-frame adapter. Allocation-owned tickets
+and final publication live in [managed_allocator.h](../src/core/managed_allocator.h)
+and [publication_vector.h](../src/core/publication_vector.h).
+
+Small owned metadata can intentionally outlive or release much larger scratch.
+The [reuse dispositions](resident-reuse-dispositions.md) identify retained and
+deferred opportunities; [borrowed-handoff experiments](resident-borrowed-handoff-experiments.md)
+remain experiments with their own baselines.
+
+## Admission and storage planning
+
+An immutable `ExecutionDomain` supplies a shared managed-memory allowance and
+aggregate CPU-participation limit. C, C++, and batch callers can share its identity.
+The default domain is shared; equal numeric limits do not make independent
+domains interchangeable. A zero managed-memory limit is unlimited but accounted.
+
+Admission reserves a conservative complete-workflow envelope before substantial
+work. It does not grow an active reservation to conceal an underestimated plan.
+An allocation that exceeds its admitted plan preserves the typed
+`ResourcePlanExceeded` classification through exception adapters and retries.
+Memory pressure must not silently change effort, candidate sets, or encoder policy.
+
+Allocation counts can be shared between execution and planning. **Lifetime
+composition remains component-specific**: phase maxima, overlapping scratch,
+retained results, and pooled backing are distinct. See the [shared planning
+recipes](planning-recipes.md), [admission preflight](resident-admission-preflight.md),
+and [public admission](resident-public-admission.md). Cache accounting and pressure
+tradeoffs are documented with those mechanisms rather than inferred from RSS.
+
+Managed committed capacity includes unbacked reservation. The ledger excludes
+storage outside its declared ownership/accounting coverage and is not a process
+physical-memory cap. Process peak, idle footprint, managed backing, and committed
+capacity must be reported separately.
+
+## CPU participation and GPU waits
+
+CPU participation begins after memory admission. Per-image limits draw from the
+shared domain. `CpuWorkerGroup` reserves additional participants before thread
+construction; `ParallelScope` propagates resource context and nested-work state.
+The [shared worker runner](worker-orchestration.md) handles dispatch, launch,
+joining and ordered status collection for five stages, preserving their distinct
+serial-retry/error policies and scratch indices.
+
+Blocking GPU, join, and one-time-initialization waits suspend CPU participation.
+Image callers yield their slot and requeue to resume; suspended workers retain
+protected capacity so nested waits cannot multiply dormant worker threads.
+Resumption completes before serial fallback or result collection. Nested work
+must obey the same domain and per-image limits.
+
+The implementation is in [cpu_execution.h](../src/core/cpu_execution.h),
+[thread_budget.h](../src/core/thread_budget.h), and
+[parallel_work_internal.h](../src/core/parallel_work_internal.h).
+The [CPU coordination record](resident-cpu-coordination.md) explains fairness,
+protected capacity, and one-slot progress. This is a synchronous coordinator,
+not an OS-thread-count guarantee or a general asynchronous task graph.
+
+## Batches, publication, and shutdown
+
+A batch driver bounds concurrent execution slots and retains ordered per-image
+results until atomic array publication. Its plan includes retained results as
+well as active work. Fewer admitted slots can reduce footprint and increase
+queueing; additional slots do not promise monotonically better throughput.
+
+Shutdown rejects queued work and drains admitted work synchronously. It is not
+cancellation. Destruction still requires external callers to have returned.
+See [batch lifecycle](resident-batch-lifecycle.md),
+[batch timing](resident-batch-timing.md), and
+[worker-launch failures](resident-worker-launch.md).
+
+Queue covers arrival through initial CPU admission. Service covers admission
+through internally retained-result readiness, including teardown. Ready equals
+queue plus service and precedes whole-array publication. Batch/cohort makespan,
+per-image latency, and summed worker/GPU durations are different measurements.
+
+## Interfaces and maintenance gates
+
+The [installed interface](installed-interface.md) defines public headers and
+required implementation dependencies. Internal planners, worker orchestration,
+and test facilities are not automatically installed. The [storage toolchain
+contract](storage-toolchain.md) defines the audited libc++ behavior, ABI, and
+C++20/C++23 support used by reservation and publication guarantees.
+
+When changing a boundary, verify its allocation owner, live overlap, completion
+requirement, and failure publication behavior. Preserve independent numerical
+oracles, exact parent/candidate decisions and bytes, resource/admission tests,
+worker-failure cleanup, domain reuse, and installed-consumer checks. A historical
+failure must be reproduced on the new baseline before it is treated as inherited.
+
+The tracked [qualification package](../tools/resident_qualification/README.md)
+reconstructs revisions, accepts explicit corpus/decoder locations, and retains
+raw measurements and hashes. Start there for commands and prerequisites. Its
+smoke profile includes full correctness and sanitizer gates plus representative
+measurement jobs; only the full profile runs the entire performance/pressure
+matrix. Each sealed result declares which profile actually ran.
+
+The original integrated comparison accepted resource/ownership benefits alongside
+measured regressions in some workloads. Preserve those limitations in the
+[historical record](resident-scheduling-qualification.md). Tightening reservations,
+changing packing, or optimizing GPU work requires a new, explicitly bounded
+comparison. Screening/pruning, predictive AQ, and other quality/time-policy
+changes remain separate from these ownership and resource contracts.
+
+## Historical milestones
+
+These records preserve the original implementation sequence and completion
+criteria. Status statements and measurements below apply to the revisions
+recorded with each milestone. The current architecture and maintenance gates
+are described above; earlier checkpoints do not replace a fresh qualification.
+
+The development branch was `refactor/resident-execution` (originally
+`refactor/resident-frame-handoff`), in the `../gjxl-resident-frame-handoff` worktree.
+
+<a id="scope-and-current-status"></a>
+
+### Original scope and status
 
 The proposal numbers below refer to the original architecture discussion, not
 the implementation milestone numbers used later in this document.
 
-| Proposal | Scope | Current status |
+| Proposal | Scope | Status at completion |
 | --- | --- | --- |
 | #3: Stable coefficients and frame views | Included | Principal handoff complete in `ca440d1` and `dabe129`: ownership-independent consumers, direct final AC destinations, independent completed-output lease. |
 | #4A: Reuse, fusion, shorter intermediate lifetimes | Included, subject to numerical and end-to-end gates | Fusion, shared scratch, deferred preparation and final-use release are qualified. The remaining audited opportunities have explicit dispositions in milestone 5. |
@@ -66,7 +216,7 @@ and [volatile caching](metal-volatile-preparation-cache.md). Their historical
 measurements remain separate. The [joint integration record](resident-execution-integration.md)
 qualifies the combination against `a747fca` with preparation at `306f153`.
 
-### Invariants and exclusions
+#### Invariants and exclusions
 
 - Preserve AQ iteration/stopping policy, AC candidate sets and tie rules,
   quantization decisions, coefficient-order policy, entropy behavior, and
@@ -87,19 +237,19 @@ qualifies the combination against `a747fca` with preparation at `306f153`.
   entropy coding, a new general computation-graph framework, and cross-image
   kernel fusion are not prerequisites or completion criteria.
 
-## Milestones and dependencies
+### Milestones and dependencies
 
 Milestones 1 and 2 retain the numbering in the handoff record. The expanded
 roadmap adds integration before coordinated resources and scheduling. Each
 milestone should remain independently reviewable and record its actual baseline.
 
-### 1. Ownership-independent consumers — complete
+#### 1. Ownership-independent consumers — complete
 
 `ca440d1` introduced the read-only frame interface and adapted owned frames.
 Serialization, coefficient orders, block contexts, and tokenizers consume the
 view without requiring a particular allocation owner.
 
-### 2. Completed Metal output — complete
+#### 2. Completed Metal output — complete
 
 `dabe129` writes final AC coefficients directly into serializer-compatible shared
 storage and publishes an exclusive completed-frame owner after GPU completion
@@ -110,7 +260,7 @@ Completion here does not mean minimum peak memory: the workflow can retain a
 prepared evaluator for reuse independently of the completed frame. The recorded
 milestone-2 footprint is effectively unchanged from milestone 1.
 
-### 3. Integrate preparation and handoff — complete
+#### 3. Integrate preparation and handoff — complete
 
 The [integration record](resident-execution-integration.md) covers semantic
 reconciliation, joint lifetime tests, exact corpus/policy bytes, pinned decoder
@@ -139,7 +289,7 @@ Acceptance:
 - Complete-call timing including teardown; peak and idle footprint with the
   backend alive. Concurrent correctness stress is not throughput qualification.
 
-### 4. Coordinated resource accounting and admission — complete
+#### 4. Coordinated resource accounting and admission — complete
 
 Depends on milestone 3's integrated ownership model. Start with a small explicit
 set of resource classes and reservations, not a general graph runtime.
@@ -269,7 +419,7 @@ Acceptance:
 - Counters reconcile with owned allocation capacities. Physical peak/idle
   measurements are reported separately, including any excluded memory.
 
-### 5. Targeted reuse and lifetime reductions — complete
+#### 5. Targeted reuse and lifetime reductions — complete
 
 The inventory from milestone 4 defines the opportunities. Individual #4A changes
 can proceed alongside its accounting implementation, after milestone 3.
@@ -309,7 +459,7 @@ Acceptance:
 - The audited set has a recorded disposition. Intentional remaining copies and
   materializations are documented rather than treated as unbounded follow-up.
 
-### 6. Coordinated CPU/GPU scheduling — complete
+#### 6. Coordinated CPU/GPU scheduling — complete
 
 Depends on stable output lifetimes and working admission from milestone 4;
 milestone 5 changes require updated resource estimates and requalification.
@@ -360,7 +510,7 @@ Acceptance:
   including single-image regressions, memory-pressure cases, and a range of
   in-flight counts. Concurrency correctness alone is insufficient.
 
-## Qualification and completion contract
+### Qualification and completion contract
 
 Use fresh Release parent/candidate builds and record revisions, build flags,
 hardware, input metadata/hashes, effort, AQ mode, distance, CPU budget, memory
@@ -395,7 +545,7 @@ speed up, or all encoding work to move to Metal. It does require explicit costs,
 lifetimes, limits, and evidence for the choices retained. No fixed speedup is
 promised by this roadmap.
 
-## Separate policy track: #4B and #1/#2
+### Separate policy track: #4B and #1/#2
 
 Candidate screening/pruning, selective regional refinement, predictive AQ, and
 different iteration/stopping policies may use this infrastructure later. They
