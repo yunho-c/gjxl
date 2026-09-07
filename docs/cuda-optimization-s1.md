@@ -15725,6 +15725,244 @@ native identities, table text and the retained runtime. Six source/document
 snapshots separate frozen evidence from future current-source edits.
 Only the two CUDA documents change; user-owned untracked files stay untouched.
 
+## Pre-normalized convolution weights (S91)
+
+S91 investigates the arithmetic lead left by S90: divide each interior
+convolution weight by the original ordered weight sum once per CTA, then
+accumulate with those rounded normalized weights and omit the three output
+divisions per pixel. This intentionally changes rounding, not merely the
+location of the S90 refined reciprocal. Parent is `c8ed294`; production code,
+permanent tests, public policy and the 40-file S79 runtime remain unchanged.
+
+### Mechanism and native evidence
+
+The four modes are the retained 48-row Rows3 kernel, a renamed identical
+control, normalized interior weights, and the same normalized arithmetic with
+a tile-wide exceptional-range fallback. Horizontal dispatch, 32x48 vertical
+tiles, 256 threads, three output rows per lane, tap order, channel halos,
+low/medium expressions, image-plane traffic and launch count stay fixed.
+Entire boundary triples use the original weights and divisions.
+
+The guarded mode requires every weight in `[2^-10,2^10]`; every valid sample
+in all three horizontal-input halos must be signed zero or have magnitude
+in `[2^-60,2^60]`. A block-wide predicate reduction replaces the original
+barrier. Thirty-three lanes then divide the stored weights by normalization,
+followed by a second barrier. Unsafe tiles retain the old interior arithmetic.
+This is an exceptional-range guard, not a proof of a bounded output error.
+The unguarded mode is a performance diagnostic with no general exceptional-
+state safety claim. No global fast-math flag is enabled.
+
+All 75 retained GPU bodies match the previous native baseline after only
+canonicalizing the translation-unit anonymous namespace. The renamed control
+matches its retained body, including instruction encodings and scheduling
+bits, after function renaming. The two candidates bring the unit to 78 bodies.
+
+| Mode | Registers | Shared bytes | Static instructions | RCP | FFMA | LDS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Retained / copied | 54 | 30,856 | 1,736 | 11 | 651 | 219 |
+| Normalized weights | 54 | 30,988 | 1,832 | 12 | 656 | 229 |
+| Guarded normalized weights | 72 | 30,988 | 1,860 | 12 | 656 | 229 |
+
+All modes have zero stack/spill bytes. Native branches bypass the output
+division sequences for eligible interior values; they are not speculatively
+executed on the fast path. The additional static reciprocal includes weight
+normalization, and fallback division machinery remains. Static counts are
+not dynamic execution counts or hardware-counter measurements. No measured
+occupancy or individual instruction-cost attribution is claimed.
+
+### Numerical checks, and a failed captured-input screen
+
+The diagnostic screen uses the existing `PrimitiveReferenceTolerance`:
+`2e-5 + 5e-6 * abs(retained_value)`. It applies only to eligible low/medium
+outputs. Controls, fallback tiles, boundary triples, input/weight arrays,
+padding and unused blur planes retain bitwise equality checks. This does not
+change the permanent low/medium test or establish a new public quality policy.
+
+Release and host ASan each pass 900 fixture constructions / 8,280 candidate
+stages. Ten geometries, packed/padded strides, five input patterns and nine
+weight families cover ordinary values, zero/signed zero, huge/tiny input,
+impulse/color cancellation, NaN/Inf, and zero, negative, NaN, infinite,
+tiny/huge or alternating-sign weights. Mode 2 is restricted to the ordinary
+finite families; mode 3 and both controls test all families. Three-stage
+reuse changes inputs in stage three and supplies null unused blur pointers.
+Each retained result is also compared bitwise with the separate-pass oracle.
+
+The established tall cases (1x4,194,305 packed and 33x262,145 padded) pass
+24 candidate stages. Each of memcheck/initcheck/synccheck/racecheck passes
+180 scoped fixtures / 1,656 candidate stages, including interior and boundary
+rows on 1x97 and 33x97. There are zero sanitizer errors, memory leaks or race
+hazards/warnings. Successful direct coverage totals 2,522 fixtures, 23,208
+candidate stages and 7,566 retained-versus-separate-oracle comparisons.
+Largest direct-test gate fraction is 0.626623, on tall input.
+
+Those passes are insufficient: the strict first saved 4K stage fails the
+primitive screen in mode 2. The original nonzero job and log are retained.
+All 18 saved S73 stages subsequently show violations in both normalized
+variants: 0.22437–0.45522% of eligible output values per capture, with maximum
+gate fractions 2.446308–4.583882. The variants have identical recorded error
+summaries and counts on these captures; range guards do not solve the issue.
+Maximum absolute difference across captures is 0.00192260742.
+
+On the first 3839x2159 capture, violations are concentrated in subtractive
+outputs, not simply the largest-magnitude low plane:
+
+| Output plane | Violating values | Largest difference / gate |
+| --- | ---: | ---: |
+| Low X | 0 | 0.128099 |
+| Low Y | 0 | 0.149094 |
+| Low B | 8,778 | 1.883613 |
+| Medium X | 0 | 0.058638 |
+| Medium Y | 117,804 | 3.045119 |
+| Medium B | 622 | 1.317671 |
+
+A separate 21-fixture cancellation probe (seven scale exponents, three signed
+patterns, four modes: 84 comparisons) reports 131,379 combined normalized-
+mode violations. Some guarded inputs inside the accepted range fail; endpoint
+neighbors outside the range correctly fall back. Its ordinary test Gaussian
+is not substituted for the production weights in the saved-image replay.
+
+Difference from retained is not automatically error from mathematical truth.
+At the worst medium-Y difference above, retained/candidate are
+−0.00872039795 / −0.00865936279, versus a double ideal of −0.00868042138:
+the candidate is closer at that pixel. However, 4,096 deterministic sample
+positions per plane have slightly higher candidate RMS error in all six
+planes. Medium-Y RMS is 1.46124e-5 / 1.50783e-5; low-B is
+2.64003e-4 / 2.67253e-4. This local ideal uses the stored FP32 horizontal
+values, weights and float-represented constants, then double accumulation,
+normalization and pointwise operations. It is neither a complete CPU pipeline
+nor an independently decoded quality measurement.
+
+### Explicitly unqualified timing protocol
+
+The strict replay is not relabeled as passing. New `observed_replay` release
+and host-ASan executables retain all numerical violations under an explicit
+`report_failures` policy. Their GPU bodies are unchanged. Observer completion
+means data collection completed, not that numerical qualification passed.
+All exact guards/fallback/boundary checks remain fatal, and every subsequent
+warm/measured burst must reproduce its mode's initial result bitwise.
+
+The same 18 frozen S73 low/medium inputs are used: six calls each for 4K, HD
+and Flower, alternating full and half resolution, with original input/output
+strides restored in separately guarded allocations. They are not fresh inputs,
+Malta captures, integrated scratch addresses or new codec encodes.
+Each graph contains four vertical-only calls or four horizontal/vertical pairs
+(four/eight kernel nodes). Preflight checks all 16 allocations numerically
+against retained and independently checks retained against the separate oracle.
+Warm/measured repetitions compare all 16 allocations bitwise with each mode's
+preflight output outside events. Readbacks, host scans and double diagnostics
+are not included in kernel-event intervals.
+
+Eight warm rounds precede all 24 permutations of the four modes. Every
+measured position and ordered neighbor is balanced. The second repetition
+reverses captures, timing-boundary order and permutation/position indexing.
+There is no outlier filtering, clock normalization or pooling of vertical and
+H+V boundaries. Timing is an unprofiled isolated-stage diagnostic, not summed
+profiler kernels, encoder wall time or an integrated graph feature.
+
+### Results and decision
+
+The table sums three per-capture medians at each resolution; it is not a
+timed three-call sequence or encoder duration. Changes are ratios of those
+sums against retained. Independent per-capture paired-percent medians,
+against both controls, determine the decision.
+
+| Capture / resolution | Timed work | Retained sum ms, r0 / r1 | Copied control | Normalized weights | Guarded weights |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 4k / full | Vertical | 6.000640 / 5.982976 | +0.254% / -0.041% | +0.651% / +0.494% | +0.751% / +0.695% |
+| 4k / full | H+V | 8.357888 / 8.310912 | -0.046% / -0.005% | +0.297% / +0.256% | +0.263% / +0.360% |
+| 4k / half | Vertical | 1.482624 / 1.480320 | +0.095% / -0.190% | +1.252% / +1.228% | +1.019% / +1.098% |
+| 4k / half | H+V | 2.155904 / 2.152064 | -0.332% / -0.149% | +0.499% / +1.124% | +0.101% / +0.809% |
+| 1080p / full | Vertical | 1.430144 / 1.425024 | +0.072% / -0.009% | +1.047% / +0.880% | +0.958% / +0.826% |
+| 1080p / full | H+V | 2.081152 / 2.054016 | -0.006% / -0.006% | +0.738% / +0.654% | +0.658% / +0.692% |
+| 1080p / half | Vertical | 0.374784 / 0.376576 | +0.000% / -0.306% | +2.049% / +1.292% | +1.981% / +1.801% |
+| 1080p / half | H+V | 0.573056 / 0.571136 | -0.156% / -0.022% | +0.960% / +1.210% | +1.318% / +1.300% |
+| flower / full | Vertical | 0.207232 / 0.206848 | -0.185% / +0.681% | +3.212% / +3.156% | +3.335% / +1.733% |
+| flower / full | H+V | 0.325248 / 0.327296 | +0.079% / -0.626% | +2.007% / +0.939% | +1.810% / +1.408% |
+| flower / half | Vertical | 0.069888 / 0.068608 | +0.000% / +0.560% | +2.015% / +4.664% | +1.282% / +3.358% |
+| flower / half | H+V | 0.102144 / 0.102656 | +0.251% / -1.247% | +2.381% / +1.746% | +2.256% / +2.618% |
+
+Both variants lose to both controls in both repetitions on 34 of the 36
+capture/boundary combinations, including all 24 HD/4K combinations. The
+remaining two combinations are Flower's last half-size stage, vertical and
+H+V; their outcomes are mixed. Neither variant has a repeatable win against
+both controls. Every grouped candidate sum in the table is slower than its
+retained sum, even before considering the failed numerical screen.
+
+Reject these implementations. Removing interior output divisions does not
+deliver a net benefit with this shared-weight setup, extra synchronization
+and branch structure. The comparison does not isolate any one of those costs.
+Register pressure alone is not an explanation: the unguarded version uses
+the retained register count and also loses. Small-work noise remains visible:
+copied-control paired changes span −3.61..+1.13%. No outliers are removed.
+
+This is not evidence that every rounding-changing approach is unacceptable.
+It shows why ordinary fixtures and range guards cannot substitute for
+captured-input and independently decoded-quality qualification. Neither a
+whole-encoder build nor new encoded/decoded quality run is justified for
+these stage-losing implementations. No existing tolerance is relaxed and no
+global math policy changes.
+
+Further arithmetic work would need a materially different implementation,
+such as preparation-time normalized weights and grouped interior finalization,
+plus a defensible numerical contract and full resident quality/performance
+qualification. Their setup savings and benefit are not measured here.
+S73's size-aware phase policy and broader convolution/final-pass data movement
+also remain open; fully-resident VarDCT is not demonstrated maxed out.
+
+### Completion and preservation
+
+There are 36 release and 36 host-ASan observational preflight jobs, followed
+by 72 serial timing jobs. They produce 9,216 event observations (6,912 measured,
+2,304 warm) and 9,792 checked four-call bursts, or 39,168 replay stage calls.
+Setup/oracle calls and direct fixtures are separate. Observer completion does
+not count the numerical violations as passing quality checks.
+
+The 155 serial GPU-job intervals include 153 accepted completion records
+(direct qualification/observations and captured replay), and two explicitly
+rejected jobs: the oversized tall fixture and strict first captured-input
+screen. The initial tall attempt added a 1x4,194,305 padded case, with input/
+blur/output strides 12/18/24; one full copy is about 3.976 GB, and three device
+copies exceed dedicated GPU memory. It terminates with host `bad allocation`.
+The old log does not identify the exact failed allocation; the footprint
+motivates restoring prior coverage, not a claim of an observed allocation site.
+A new host executable uses the established tall geometry/stride coverage,
+while ordinary padded 1-wide tests remain. This is not a production-memory fix.
+
+Two earlier host compilation attempts fail on a missing include path and
+missing `<string>`; their logs and source versions are preserved. The GPU
+object compiles once. Corrected host builds and the explicitly unqualified
+observers use new records/artifacts; no timing job is restarted or retried.
+All 78 GPU bodies match across ten artifacts: the object and nine linked
+executables, including qualification, strict/observational replay and detail
+diagnostics. A strict replay executable was compiled with host ASan but was
+not run after the strict release screen failed; ASan captured replay uses
+the explicitly observational executable.
+
+Racecheck runs 10:19:51–10:29:37 UTC on 2026-09-07 (about 9m46s), with verified
+live processes, increasing CPU use and geometry completion. Timing runs
+10:36:20–10:49:22 UTC (about 13m01s). No admin/firewall/permission block is
+observed. Restricted hardware counters are not retried; security, privilege,
+clock, power, priority and cooling settings remain unchanged. CPU builds and
+native audits overlap qualification only, not timing; machine-wide isolation
+is not claimed.
+
+The reporting validator initially encounters Windows' default CP1252 decoding
+of the UTF-8 study. Explicit UTF-8 document decoding fixes that host reporting
+issue; its prior version is preserved and no GPU run is repeated.
+
+The platform remains RTX 3060 Laptop / driver 577.00 / CUDA 11.8 / sm_86 /
+MSVC 14.37, with clang-cl host ASan. An idle post-run snapshot reads 0% GPU
+utilization, 63 C, 210 MHz and 16.47 W; it is not in-kernel telemetry.
+S90 frozen/current validation passes before the documentation edit.
+
+Ignored `build-cuda-ninja/profiles/s91_*` artifacts retain snapshots, all
+failed/completed logs, probes, guards, raw timings/errors, independent double
+details, native dumps/resources, scripts, hashes and validators. Validation
+rederives timing/numerical summaries, checks exact native controls, job
+intervals and completion markers, and verifies the unchanged runtime.
+Seven source/document snapshots separate frozen evidence from later edits.
+Only the two CUDA documents change; user-owned untracked files stay untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

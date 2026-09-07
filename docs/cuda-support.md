@@ -1350,6 +1350,19 @@ Production and the S79 runtime remain unchanged. Other convolution
 arithmetic/data-movement hypotheses remain open; rounding-changing variants
 would need independent error and decoded-quality gates.
 
+[S91](cuda-optimization-s1.md#pre-normalized-convolution-weights-s91) rejects
+pre-normalized interior weights with and without a tile-wide exceptional-range
+guard. Both lose to both retained controls on 34 of 36 saved stage/boundary
+combinations in both repetitions; the other two are mixed, with no repeatable
+win. The existing primitive numerical screen also fails on all 18 saved stages,
+despite passing ordinary/tall fixtures and all four sanitizers. Explicitly
+unqualified observers preserve violations, exact guards and per-mode bitwise
+repeatability; their completion is not a quality pass. Double-reference detail
+separates difference from retained from mathematical error. All failed build,
+oversized test-allocation and strict-screen records remain. No permission block
+is observed. Production, permanent tolerances and the S79 runtime are unchanged;
+broader convolution/final-pass work and resident qualification remain open.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
