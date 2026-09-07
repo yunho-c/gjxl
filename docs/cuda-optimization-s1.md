@@ -15307,6 +15307,206 @@ privilege, clock, power or priority setting is changed. All retained
 production source and the 40-file S79 runtime remain unchanged. The
 backend is not considered maxed out.
 
+## Malta scaling/response split (S89)
+
+S89 follows S88 `a6c2b93` with a new standalone mechanism test for the
+current paired Malta kernel. **Do not retain a separate scaling pass.**
+Both complete split duplicates lose to all three fused controls on all
+36 captured stages in both timing repetitions. The sum of six independent
+stage medians regresses about 46% at 4K and 43–44% at HD. Preparing scaling
+outside the response-only timing instead saves about 19% and 22–23%; those
+partial-stage savings do not survive including the scaling pass.
+Production source and the 40-file S79 runtime remain unchanged.
+
+### Mechanism, controls and native code
+
+The retained fused kernel scales input pixels directly into its shared
+response tile, repeating scaling across neighboring tile halos. S89
+extracts the same paired and tiny-grid response schedules into kernels
+that load an already-scaled plane. It keeps the Sum5/Sum7/Sum9 trees,
+AddSquare order, low-frequency/full-frequency selection, zero-tile vote,
+NaN/infinity behavior, initialization/addition, boundaries and grid policy.
+The complete split calls the retained `MaltaScaleKernel` immediately before
+the new response kernel on the same stream. No reciprocal approximation,
+conditional-division shortcut, extra zero classification, wider row group,
+or accumulator-row alignment experiment is repeated from S66/S69–S72.
+This tests a modern paired split, not the old unpaired reference response.
+
+| Mode | Timed work |
+| --- | --- |
+| 0 / 4 | Current selected fused kernel, duplicate labels |
+| 1 | Separately named, native-identical fused control |
+| 2 / 5 | Retained scale kernel followed by selected response-only kernel |
+| 3 | Response-only kernel; scaling prepared once before the timed burst |
+
+All six modes receive the same inputs and produce exactly the same output.
+Mode 3 is an explicitly partial-stage diagnostic, not an equivalent amount
+of timed work or a realizable encoder speedup. Its pre-scaling can also warm
+the intermediate in cache. Timing differences cannot be interpreted as an
+additive decomposition of the fused kernel or a hard optimization ceiling.
+
+Each candidate response/control family instantiates both response schedules,
+three tile heights (8/24/64), two frequencies and two grid forms: 24 bodies
+per family. The GPU object and all four release/host-ASan guard/replay
+executables contain the same 123 GPU bodies. All 75 retained bodies match
+the frozen S88 executable; all 24 renamed controls match their originals
+after normalizing only the explicit name and NVCC's translation-unit
+anonymous-namespace prefix. Instruction offsets, encodings and scheduling
+bits remain in the exact comparison. The 24 response bodies are identical
+across every qualification/timing artifact.
+
+All 48 new bodies and the retained scale kernel have zero stack/spills.
+For the ordinary 64-row paired kernels, full/LF register counts remain
+48/40 and shared storage remains 11,520 bytes. Removing scaling therefore
+does not improve those resource limits. Static instruction counts fall
+552→384 full and 536→368 LF; each still contains 70 shared-load instructions
+in the paired loop body. Three static `MUFU.RCP` instructions disappear.
+These are disassembly counts, including setup/padding, not dynamic execution
+counts, a count of mathematical divisions, or hardware-counter attribution.
+
+At the saved 3839x2159 size, fused halos evaluate scaling 11,608,593 times
+for 8,288,401 pixels, a factor of 1.400583. The split scales each pixel once
+but needs a 33,153,604-byte intermediate. Logical input/work float accesses
+increase from 23,217,186 to 36,473,796, excluding unchanged accumulation
+accesses and counting halo loads independently. This is source-level
+traffic accounting, not measured DRAM traffic: caches and transactions can
+change physical traffic. Extra traffic and a launch are consistent with
+the observed loss; S89 does not isolate their individual contributions.
+
+The replay allocates every plane before timing, so the penalty is not timed
+allocation overhead. A separate read-only lifetime review identifies plane
+24 as plausible scratch during `LaunchDifference`'s serial Malta loop:
+psycho work has finished, AC uses planes 21/22, and later mask intermediates
+overwrite plane 24. This is not a tested new alias contract. No arena reuse,
+extra production allocation, or whole-encoder integration is implemented.
+
+### Qualification and measurement boundary
+
+Release and scoped-host-ASan executables each pass 12,288 guarded fixtures,
+three accumulation stages per fixture. The coverage includes 20 natural
+geometries around short-image, tiny-grid and tile-policy cutoffs; forced
+8/24/64-row 2D/flat grids for tiny and paired schedules; all 16 retained
+patterns; both frequencies; and both initialization modes. Patterns cover
+finite/asymmetric thresholds, signed zeros, subnormals, infinities, NaNs,
+sparse halo values and exceptional destination payloads. Inputs remain
+unchanged, output and scaled-plane values match the retained separate
+reference bit-for-bit, and offset/padded guards and unused scratch survive.
+
+Memcheck, initcheck and synccheck each complete another 1,728 scoped
+fixtures with three stages, zero errors and (memcheck) zero leaks. Together
+the five direct jobs establish 89,280 fixture-stage comparisons. They do
+not test a newly integrated encoder, every extreme-height dispatch boundary,
+or other architectures/toolkits. The final unflushed summary-line issue
+below is retained separately from the successful comparisons.
+
+The data replay uses all 36 hash-checked S65 captures: six first-full-scale
+Malta stages each from odd 4K, odd HD, Flower, Keong, Riaphotographs and
+Bliznaca. These are older fixed inputs, not fresh S89 captures, later AQ
+iterations, all subscales, or current whole-encode trace measurements.
+Every capture first passes separate release and host-ASan preflight jobs.
+
+Each of the 72 measurement jobs has six preflight bursts, six warm Williams
+rows and 24 measured rows across six modes. A burst contains four stage
+calls. The second repetition reverses capture order and within-row order.
+Every mode occupies each position equally, and all 30 directed predecessor
+pairs occur equally within each measured six-row Williams cycle. Results
+retain 10,368 measured and 2,592 warm event observations. Output and work
+plane (including both guards) are checked after every burst, and immutable
+inputs are checked at the end of every process.
+
+CUDA events bracket only the four calls: the complete split includes both
+kernels and the extra launch every time. Allocation, input/work/output
+uploads, resets, comparisons and readbacks are outside the events. Mode 3's
+single preparatory scaling call is also outside. Event intervals may include
+host-launch idle gaps; they are not profiler-summed kernel durations or
+whole-encode time. Readback checks between bursts and ordinary laptop power
+management remain part of the surrounding replay environment.
+
+The 144 capture jobs check 13,824 four-call bursts, or 55,296 stage
+invocations across complete and response-only modes, plus 576 independent
+reference invocations. They are not codec encodes. The 77 correctness jobs
+(five direct, 36 release capture, 36 host-ASan capture) and 72 measurement
+jobs have 149 verified, non-overlapping completed execution intervals.
+No new encoder bytes, decoder, quality, concurrent-throughput or complete
+production-suite result is claimed by this diagnostic-only experiment.
+
+### Results and decision
+
+Percentages below compare sums of the six independently measured stage
+medians against mode 0; negative is faster. The sum is a summary of fixed
+captured stages, not a timed six-stage encoder sequence. Paired per-stage
+contrasts and both repetitions are retained separately in `s89_summary.json`.
+
+| Capture | Replicate | Retained sum (ms) | Copied control | Complete split 2 | Response-only 3 | Retained duplicate 4 | Complete split 5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4k | 0 | 3.780428 | -0.017% | +45.841% | -19.491% | +0.018% | +45.849% |
+| 4k | 1 | 3.787456 | +0.108% | +45.954% | -19.441% | -0.003% | +45.868% |
+| 1080p | 0 | 1.053324 | +0.237% | +43.491% | -22.300% | -0.094% | +43.407% |
+| 1080p | 1 | 1.049348 | -0.034% | +43.520% | -22.908% | -0.216% | +43.708% |
+| flower | 0 | 0.185664 | +1.629% | +40.594% | -39.814% | +0.037% | +41.313% |
+| flower | 1 | 0.193860 | -0.485% | +39.059% | -42.358% | -1.389% | +37.592% |
+| keong | 0 | 0.183876 | +0.672% | +42.607% | -42.083% | -0.374% | +40.721% |
+| keong | 1 | 0.186112 | -1.775% | +39.608% | -42.916% | -1.919% | +40.098% |
+| riaphotographs | 0 | 0.181812 | -0.180% | +40.492% | -40.299% | -1.641% | +40.374% |
+| riaphotographs | 1 | 0.179048 | +0.156% | +43.899% | -39.663% | -0.400% | +42.811% |
+| bliznaca | 0 | 0.181344 | +0.015% | +45.317% | -39.580% | -0.300% | +43.345% |
+| bliznaca | 1 | 0.180804 | +0.911% | +42.875% | -40.461% | +0.126% | +41.703% |
+
+Both complete split duplicates lose against modes 0, 1 and 4 on every one
+of the 36 stages in both repetitions, using paired-percent medians. Mode 3
+beats those same controls everywhere, but excludes necessary work. Across
+individual stage/repetition comparisons versus mode 0, split 2 regresses
+26.58–76.70% and split 5 regresses 20.46–77.80%; response-only improves
+17.14–54.92%. Copied/duplicate fused control ranges are −2.46..+3.68% and
+−3.05..+2.69%, much smaller than the split losses. These ranges are not
+confidence intervals and do not erase smaller-case drift.
+
+Keep the fused scaling/response path. The new evidence rejects paying a
+separate global-plane round trip solely to remove repeated halo scaling,
+even with the retained paired response and preallocated storage. It does
+not show that Malta, scaling, the CUDA backend or fully-resident VarDCT
+encoding is maxed out. Next investigate a concrete mechanism in the larger
+low/medium convolution or final perceptual passes identified by S88, with
+fresh whole-pipeline qualification for any candidate worth integrating.
+
+### Completion corrections and frozen evidence
+
+The initial native audit stops at a lookup assertion because NVCC embeds
+the diagnostic translation-unit name in anonymous-namespace symbols.
+Canonicalizing that length-encoded namespace allows exact instruction
+comparison; the same successful disassembly is reused, without rebuilding.
+A read-only activity check also uses an absent legacy NVSMI path before
+resolving `nvidia-smi` from PATH. Neither is a CUDA execution failure.
+
+Memcheck completes with exit 0, zero errors/leaks and all six explicitly
+flushed per-mode completion lines, but its redundant final summary is
+missing. That last source line has no explicit flush, unlike the per-mode
+markers. The runner's original marker rejection and `accepted=false`
+report remain unchanged. An independent completion-resolution record
+checks the terminal exit, executable/log hashes, all six exact mode/count
+markers and the sanitizer summaries. All comparisons and guard/input checks
+precede those markers; no test work follows the sixth. Initcheck/synccheck
+use the same stronger explicit per-mode completion checks. No test is
+restarted to replace this evidence and no binary or timing is rebuilt.
+
+Release build takes about 28 seconds, release guarded tests 4m04s and
+host-ASan guards 5m26s. The 72-job timing campaign runs 09:07:43–09:10:16 UTC
+on 2026-09-07, about 2m33s. Process activity is observed during longer tests.
+No admin/firewall/permission block is observed, and no security, privilege,
+clock, power or priority setting is changed. Restricted optional hardware
+counters are not retried. Hardware is the RTX 3060 Laptop, 6 GiB, driver
+577.00; builds use CUDA 11.8, sm_86 and MSVC 14.37, with clang-cl host ASan.
+
+Ignored `build-cuda-ninja/profiles/s89_*` artifacts retain snapshots, the
+GPU/host sources, binaries, commands, native dumps, all raw logs and timing
+rows, the rejected marker report and independent resolution, resource and
+logical-traffic audits, lifetime notes, summaries and hashes. The validator
+rebuilds tables and contrasts from raw records, checks native identities,
+all completed jobs, serial intervals, documentation rows and frozen/current
+hashes. S88's frozen/current/prior validator also passes before S89 edits.
+Both tracked changes are documentation-only; unrelated user files remain
+untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

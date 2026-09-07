@@ -1323,6 +1323,20 @@ rejected Malta experiments. All executed builds/tests/timings pass without
 retry; the active 5m14s 4K memcheck reports zero errors/leaks. No permission
 block is observed, and production/runtime remain unchanged.
 
+[S89](cuda-optimization-s1.md#malta-scalingresponse-split-s89) rejects a
+separate Malta scaling pass with the current paired response schedule.
+Both split duplicates lose to all three fused controls on all 36 saved
+stages in both repetitions. Six-stage median sums regress about 46% at
+4K and 43–44% at HD, despite response-only savings when scaling is excluded.
+The 77 correctness and 72 timing jobs preserve exact outputs, intermediate
+planes and guards; 75 retained and 24 renamed control GPU bodies are
+native-identical across all qualification/timing builds. A missing unflushed
+memcheck summary initially stops the runner; the original record remains,
+and terminal exit, all six flushed mode completions and zero errors/leaks
+independently establish completion without rerunning. No permission block
+is observed. Production and the 40-file S79 runtime remain unchanged;
+larger convolution/final perceptual mechanisms remain open, not maxed out.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
