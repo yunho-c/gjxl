@@ -2836,6 +2836,16 @@ if(GJXL_BUILD_BENCHMARKS)
     benchmarks/dct_benchmark.cpp
   )
 
+  add_executable(gjxl_metal_coefficient_probe benchmarks/metal_coefficient_probe.cpp)
+  target_link_libraries(gjxl_metal_coefficient_probe PRIVATE gjxl_metal)
+  target_include_directories(gjxl_metal_coefficient_probe PRIVATE third_party/metal-cpp)
+  add_executable(gjxl_metal_dct_image_probe benchmarks/metal_dct_image_probe.cpp)
+  target_link_libraries(gjxl_metal_dct_image_probe PRIVATE gjxl_metal)
+  target_include_directories(gjxl_metal_dct_image_probe PRIVATE third_party/metal-cpp)
+  add_executable(gjxl_metal_epf_probe benchmarks/metal_epf_probe.cpp)
+  target_link_libraries(gjxl_metal_epf_probe PRIVATE gjxl_metal)
+  target_include_directories(gjxl_metal_epf_probe PRIVATE third_party/metal-cpp)
+
   target_link_libraries(
     gjxl_dct_benchmark
     PRIVATE

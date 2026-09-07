@@ -733,10 +733,10 @@ kernel void gjxl_ac_strategy_residual(
 // The fused inverse consumes the residual coefficients before they leave
 // threadgroup memory. All coefficient threads participate in basis staging;
 // only the row-owning SIMD groups execute the matrix tiles afterward.
-template <uint N, uint ThreadgroupWidth>
+template <uint N, uint ThreadgroupWidth, typename PixelPointer>
 __attribute__((always_inline)) inline void AcStrategyInverseSquareDct(
   threadgroup const float* coefficients,
-  device float* pixels,
+  PixelPointer pixels,
   constant const float* basis,
   float scale,
   threadgroup float* shared_basis,
@@ -815,10 +815,10 @@ __attribute__((always_inline)) inline void AcStrategyInverseSquareDct(
   }
 }
 
-template <uint Rows, uint Columns, uint ThreadgroupWidth>
+template <uint Rows, uint Columns, uint ThreadgroupWidth, typename PixelPointer>
 __attribute__((always_inline)) inline void AcStrategyInverseRectangularDct(
   threadgroup const float* coefficients,
-  device float* pixels,
+  PixelPointer pixels,
   constant const float* vertical_basis,
   constant const float* horizontal_basis,
   float scale,
@@ -1238,4 +1238,173 @@ kernel void gjxl_ac_strategy_cost(
     costs[candidate_index] =
       isfinite(result) && result >= 0.0f ? result : NAN;
   }
+}
+
+// Reuse the completed magnitude reduction arena for inverse pixels and loss.
+// The inverse helper's basis-staging barrier publishes the rate before this
+// arena is overwritten. Every lane rejoins here, including non-row SIMD groups.
+template <uint Count, uint Workers>
+inline void AcStrategyReduceInverseLoss(
+  threadgroup float* pixels,
+  device const float* pixel_mask,
+  device const AcStrategyCandidate* candidates,
+  device float* loss_sums,
+  constant AcStrategyBatchParams& params,
+  uint tid,
+  uint transform_index) {
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint candidate_index = transform_index / 3;
+  const uint channel = transform_index % 3;
+  const AcStrategyCandidate candidate = candidates[candidate_index];
+  const bool fits = candidate.block_x <=
+      (params.pixel_width - params.transform_width) / 8 &&
+    candidate.block_y <= (params.pixel_height - params.transform_height) / 8;
+  for (uint i = tid; i < Count; i += Workers) {
+    float mask = NAN;
+    if (fits) {
+      const uint x = candidate.block_x * 8 + i % params.transform_width;
+      const uint y = candidate.block_y * 8 + i / params.transform_width;
+      mask = pixel_mask[y * params.pixel_mask_row_stride + x];
+    }
+    float weighted = (mask + kMaskOffset[channel]) * pixels[i];
+    weighted *= weighted;
+    weighted *= weighted;
+    weighted *= weighted;
+    pixels[i] = isfinite(mask) && mask > 0.0f ? weighted : NAN;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // Preserve the split cost kernel's binary tree, not a SIMD sum with a
+  // different association. Compact groups cover multiple indices per lane.
+  for (uint stride = Count / 2; stride != 0; stride /= 2) {
+    for (uint i = tid; i < stride; i += Workers) pixels[i] += pixels[i + stride];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (tid == 0) loss_sums[transform_index] = pixels[0];
+}
+#define GJXL_AC_SQUARE_LOSS_KERNEL(                    \
+  name, size, basis, scale, worker_count)                                  \
+kernel void name(                                                           \
+  device const float* coefficients [[buffer(0)]],                           \
+  device const float* matrices [[buffer(1)]],                               \
+  device const AcStrategyCandidate* candidates [[buffer(2)]],               \
+  device const float* quant_field [[buffer(3)]],                            \
+  device float* pixels [[buffer(4)]],                                       \
+  device ChannelRate* channel_rates [[buffer(5)]],                          \
+  constant AcStrategyBatchParams& params [[buffer(6)]],                     \
+  device const float* precomputed_quant_norm [[buffer(7)]],                 \
+  device const float* pixel_mask [[buffer(8)]],                            \
+  threadgroup float* residual_coefficients [[threadgroup(0)]],              \
+  threadgroup float* magnitude_reduction [[threadgroup(1)]],                \
+  threadgroup uint* nonzero_reduction [[threadgroup(2)]],                   \
+  uint tid [[thread_index_in_threadgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
+  uint3 group_position [[threadgroup_position_in_grid]]) {                   \
+  ComputeAcStrategyResidualCompact<size * size, worker_count>(              \
+    coefficients, matrices, candidates, quant_field,                       \
+    precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
+    magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
+  threadgroup float shared_basis[size * size];                              \
+  AcStrategyInverseSquareDct<size, worker_count>(                           \
+    residual_coefficients, magnitude_reduction, basis, scale, shared_basis, tid,         \
+    simdgroup_index, uint3(0));                                             \
+  AcStrategyReduceInverseLoss<size * size, worker_count>(                 \
+    magnitude_reduction, pixel_mask, candidates, pixels, params, tid,      \
+    group_position.x);                                                     \
+}
+
+#define GJXL_AC_RECTANGULAR_LOSS_KERNEL(                \
+  name, rows, columns, vertical_basis, horizontal_basis, scale,             \
+  worker_count)                                                             \
+kernel void name(                                                           \
+  device const float* coefficients [[buffer(0)]],                           \
+  device const float* matrices [[buffer(1)]],                               \
+  device const AcStrategyCandidate* candidates [[buffer(2)]],               \
+  device const float* quant_field [[buffer(3)]],                            \
+  device float* pixels [[buffer(4)]],                                       \
+  device ChannelRate* channel_rates [[buffer(5)]],                          \
+  constant AcStrategyBatchParams& params [[buffer(6)]],                     \
+  device const float* precomputed_quant_norm [[buffer(7)]],                 \
+  device const float* pixel_mask [[buffer(8)]],                            \
+  threadgroup float* residual_coefficients [[threadgroup(0)]],              \
+  threadgroup float* magnitude_reduction [[threadgroup(1)]],                \
+  threadgroup uint* nonzero_reduction [[threadgroup(2)]],                   \
+  uint tid [[thread_index_in_threadgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
+  uint3 group_position [[threadgroup_position_in_grid]]) {                   \
+  ComputeAcStrategyResidualCompact<rows * columns, worker_count>(           \
+    coefficients, matrices, candidates, quant_field,                       \
+    precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
+    magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
+  threadgroup float shared_vertical_basis[rows * rows];                     \
+  threadgroup float shared_horizontal_basis[columns * columns];             \
+  AcStrategyInverseRectangularDct<rows, columns, worker_count>(             \
+    residual_coefficients, magnitude_reduction, vertical_basis, horizontal_basis, scale, \
+    shared_vertical_basis, shared_horizontal_basis, tid, simdgroup_index,   \
+    uint3(0));                                                              \
+  AcStrategyReduceInverseLoss<rows * columns, worker_count>(               \
+    magnitude_reduction, pixel_mask, candidates, pixels, params, tid,      \
+    group_position.x);                                                     \
+}
+
+GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct8_residual_inverse_compact_loss,
+  8, kOrthonormalDct8, kInverseDct8Scale, 32)
+GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct16_residual_inverse_compact_loss,
+  16, kOrthonormalDct16, kInverseDct16Scale, 64)
+GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct32_residual_inverse_tuned_loss,
+  32, kOrthonormalDct32, kInverseDct32Scale, 512)
+GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct16x8_residual_inverse_compact_loss,
+  16, 8, kOrthonormalDct16, kOrthonormalDct8, kInverseDct16x8Scale, 64)
+GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct8x16_residual_inverse_compact_loss,
+  8, 16, kOrthonormalDct8, kOrthonormalDct16, kInverseDct16x8Scale, 32)
+GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct32x16_residual_inverse_compact_loss,
+  32, 16, kOrthonormalDct32, kOrthonormalDct16, kInverseDct32x16Scale, 128)
+GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct16x32_residual_inverse_tuned_loss,
+  16, 32, kOrthonormalDct16, kOrthonormalDct32, kInverseDct32x16Scale, 256)
+
+#undef GJXL_AC_SQUARE_LOSS_KERNEL
+#undef GJXL_AC_RECTANGULAR_LOSS_KERNEL
+
+kernel void gjxl_ac_strategy_cost_from_loss(
+  device const float* loss_sums [[buffer(0)]],
+  device const float* pixel_mask [[buffer(1)]],
+  device const AcStrategyCandidate* candidates [[buffer(2)]],
+  device const ChannelRate* channel_rates [[buffer(3)]],
+  device float* costs [[buffer(4)]],
+  device const float* quant_field [[buffer(5)]],
+  constant AcStrategyBatchParams& params [[buffer(6)]],
+  uint candidate_index [[thread_position_in_grid]]) {
+  if (candidate_index >= params.candidate_count) return;
+  const AcStrategyCandidate candidate = candidates[candidate_index];
+  float entropy = 0.0f;
+  float loss = 0.0f;
+    for (uint channel = 0; channel < 3; ++channel) {
+      const uint transform_index = candidate_index * 3 + channel;
+      const ChannelRate rate = channel_rates[transform_index];
+      entropy += params.cost_delta * rate.magnitude;
+      const uint nonzero_bits = CeilLog2Nonzero(rate.nonzero_count + 1) + 1;
+      entropy += params.zeros_multiplier * float(
+        CeilLog2Nonzero(nonzero_bits + 17) + nonzero_bits);
+      loss += loss_sums[transform_index] *
+        kChannelMultiplier[channel];
+
+      if (channel == 0 && params.covered_block_count >= 2) {
+        const float weight = 1.0f + min(
+          3.0f,
+          float(params.covered_block_count) / 8.0f);
+        entropy *= weight;
+        loss *= weight;
+      }
+    }
+
+    const float quant_norm = AcStrategyQuantNorm(
+      quant_field, costs, candidate, candidate_index, params);
+    const float normalized_loss = loss / float(params.coefficient_count);
+    const float loss_cost =
+      powr(normalized_loss, 0.125f) * float(params.coefficient_count) /
+      quant_norm;
+    const float result =
+      entropy * candidate.entropy_multiplier +
+      params.info_loss_multiplier * loss_cost;
+    costs[candidate_index] =
+      isfinite(result) && result >= 0.0f ? result : NAN;
 }

@@ -60,6 +60,13 @@ struct AqReconstructionParams {
   uint32_t group_major_output;
 };
 
+struct AqDctImageParams {
+  uint32_t anchor_offset;
+  uint32_t anchor_count;
+  uint32_t coefficient_offset;
+  uint32_t image_stride;
+};
+
 struct AqResetParams {
   uint32_t coefficient_value_count;
   uint32_t dc_value_count;
@@ -526,7 +533,7 @@ private:
       size_t batch_index) const;
   void EncodeReconstructionCoefficientBatch(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
-      size_t batch_index) const;
+      size_t batch_index, bool reconstruct = true) const;
   void EncodeAdjustedQuantizationBatch(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       size_t batch_index) const;
@@ -695,6 +702,11 @@ private:
   AqAdjustmentProbeParams adjustment_probe_params_{};
   AqGaborishParams gaborish_params_{};
   std::array<AqEpfParams, 3> epf_params_{};
+  struct EpfDispatch {
+    MTL::ComputePipelineState* pipeline = nullptr;
+    bool tiled = false;
+  };
+  std::array<EpfDispatch, 3> epf_dispatch_{};
   AqOpsinToLinearParams opsin_to_linear_params_{};
   std::array<AqStrategyBatch, 7> batches_{};
   std::array<AqReconstructionParams, 7> reconstruction_params_{};

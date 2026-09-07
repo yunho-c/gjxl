@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -359,7 +360,8 @@ bool RunStrategyCase(
   gjxl::GpuBackend& gpu,
   std::string_view implementation,
   gjxl::AcStrategyType strategy,
-  const Fixture& fixture) {
+  const Fixture& fixture,
+  std::vector<float>* observed_costs = nullptr) {
 
   constexpr float kButteraugliTarget = 1.3f;
   const gjxl::AcStrategyInfo* info = gjxl::GetAcStrategyInfo(strategy);
@@ -488,6 +490,10 @@ bool RunStrategyCase(
   }
 
   if (!CheckSubmissionStorage(gpu, batch, poisoned_costs)) return false;
+  if (observed_costs != nullptr) {
+    observed_costs->insert(observed_costs->end(),
+                          poisoned_costs.begin(), poisoned_costs.end());
+  }
 
   double max_absolute_error = 0.0;
   double max_relative_error = 0.0;
@@ -568,6 +574,10 @@ bool RunStrategyCase(
   }
 
   const gjxl::GpuBackendStats before_submissions = gpu.stats();
+  if (observed_costs != nullptr) {
+    observed_costs->insert(observed_costs->end(),
+                          poisoned_costs.begin(), poisoned_costs.end());
+  }
   std::unique_ptr<gjxl::GpuSubmission> first_submission;
   std::unique_ptr<gjxl::GpuSubmission> second_submission;
   if (!CheckStatus(
@@ -717,11 +727,36 @@ bool CheckValidation() {
   return true;
 }
 
+bool CheckLossFusionExact(const Fixture& fixture) {
+  std::array<std::vector<float>, 2> costs;
+  const std::array modes = {gjxl::MetalAcResidualInverseMode::kFusedWide,
+                           gjxl::MetalAcResidualInverseMode::kFusedTuned};
+  for (size_t index = 0; index < modes.size(); ++index) {
+    std::unique_ptr<gjxl::GpuBackend> gpu;
+    if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH,
+          OptionsFor(gjxl::MetalDctImplementation::kSimdgroupMatmul, modes[index]),
+          &gpu), "Create exact loss-fusion comparison backend")) return false;
+    for (auto strategy : kStrategies) {
+      if (!RunStrategyCase(*gpu, "exact loss fusion", strategy, fixture,
+                           &costs[index])) return false;
+    }
+  }
+  if (costs[0].size() != costs[1].size()) return false;
+  for (size_t index = 0; index < costs[0].size(); ++index) {
+    if (std::bit_cast<uint32_t>(costs[0][index]) !=
+        std::bit_cast<uint32_t>(costs[1][index])) {
+      std::cerr << "Loss fusion changes cost bits at " << index << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
   const Fixture fixture;
-  if (!CheckValidation() ||
+  if (!CheckValidation() || !CheckLossFusionExact(fixture) ||
       !CheckImplementation(
         gjxl::MetalDctImplementation::kScalarMatmul,
         "scalar matmul",

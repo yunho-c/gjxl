@@ -1565,6 +1565,28 @@ Status CreateMetalBackendImpl(
     if (!status.ok()) {
       return status;
     }
+    const AcStrategyInfo* info = GetAcStrategyInfo(selection.strategy);
+    const bool resident_shape = info != nullptr &&
+      info->pixel_extent().width <= 32 && info->pixel_extent().height <= 32;
+    const auto create_image_pipeline = [&](const DctImplementationSpec* spec,
+        std::string_view function_name, std::string_view direction,
+        TransformPipeline* out) {
+      return CreateTransformPipeline(device.get(), library.get(),
+        selection.strategy, spec->display_name, spec->dispatch_mode,
+        spec->fixed_threads_per_threadgroup, spec->simdgroups_per_threadgroup,
+        spec->transforms_per_threadgroup, false,
+        std::string(function_name) + "_image", direction, out);
+    };
+    if (resident_shape && selection.forward == MetalDctImplementation::kSimdgroupMatmul) {
+      status = create_image_pipeline(forward_spec, forward_spec->forward_function_name,
+                                     "forward image", &pipelines.forward_image);
+      if (!status.ok()) return status;
+    }
+    if (resident_shape && selection.inverse == MetalDctImplementation::kSimdgroupMatmul) {
+      status = create_image_pipeline(inverse_spec, inverse_spec->inverse_function_name,
+                                     "inverse image", &pipelines.inverse_image);
+      if (!status.ok()) return status;
+    }
   }
 
   AcStrategyPipelines ac_strategy_pipelines;

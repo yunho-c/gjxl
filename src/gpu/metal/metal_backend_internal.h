@@ -108,6 +108,8 @@ struct TransformPipeline {
 struct TransformPipelinePair {
   TransformPipeline forward;
   TransformPipeline inverse;
+  TransformPipeline forward_image;
+  TransformPipeline inverse_image;
 };
 
 using TransformPipelineRegistry =
@@ -153,12 +155,17 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> select_adjusted_quantization;
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> encode_scored_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> encode_final_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_frame_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> quantization_probe;
   NS::SharedPtr<MTL::ComputePipelineState> adjustment_probe;
   NS::SharedPtr<MTL::ComputePipelineState> gaborish;
   NS::SharedPtr<MTL::ComputePipelineState> epf;
+  // The measured Apple-family-9 table is resolved once per prepared image.
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_direct;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_tiled;
   NS::SharedPtr<MTL::ComputePipelineState> opsin_to_linear;
 };
 
@@ -168,11 +175,13 @@ struct AcStrategyPipelines {
     NS::SharedPtr<MTL::ComputePipelineState> residual_inverse;
     NS::UInteger forward_threads_per_threadgroup = 0;
     NS::UInteger residual_inverse_threads_per_threadgroup = 0;
+    bool reduces_loss = false;
   };
 
   NS::SharedPtr<MTL::ComputePipelineState> gather;
   NS::SharedPtr<MTL::ComputePipelineState> residual;
   NS::SharedPtr<MTL::ComputePipelineState> cost;
+  NS::SharedPtr<MTL::ComputePipelineState> cost_from_loss;
   std::array<FusedStages, kAcStrategyCount> fused;
   NS::UInteger gather_threads_per_threadgroup = 0;
 };

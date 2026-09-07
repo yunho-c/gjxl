@@ -1494,6 +1494,18 @@ Status MetalPreparedAqEvaluation::Prepare(
           options_.profile.loop_filter.epf_options.border_sad_multiplier,
           options_.profile.loop_filter.epf_options.channel_scale,
       };
+      // The triplet-load 32x8 tile wins for patch SAD at measured 256x256 and
+      // larger extents. Pixel SAD favors direct loads through 720p; its tiled
+      // variant becomes useful after the working set grows beyond that cohort.
+      const size_t area = source_extent_.width * source_extent_.height;
+      const bool tile = source_extent_.width >= 64 && source_extent_.height >= 64 &&
+        area >= (pass == 2 ? size_t{1024} * 1024 : size_t{256} * 256);
+      const auto& specialized = tile ? backend_->aq_pipelines_.epf_tiled[index] :
+                                        backend_->aq_pipelines_.epf_direct[index];
+      epf_dispatch_[index] = {
+        specialized ? specialized.get() : backend_->aq_pipelines_.epf.get(),
+        tile && bool(specialized),
+      };
     }
     opsin_to_linear_params_ = {
         static_cast<uint32_t>(source_extent_.width),
@@ -2224,11 +2236,15 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           append_reconstruction_stage(
             AqReconstructionProfileStageId(batches_[batch_index].strategy),
             ReconstructionProfileStage::kInverseBatch, iteration, batch_index);
-          append_reconstruction_stage(
-            AqReconstructionScatterProfileStageId(
-              batches_[batch_index].strategy),
-            ReconstructionProfileStage::kScatterBatch, iteration,
-            batch_index);
+          const size_t strategy_index =
+            static_cast<size_t>(batches_[batch_index].strategy);
+          if (!backend_->transform_pipelines_[strategy_index].inverse_image.state) {
+            append_reconstruction_stage(
+              AqReconstructionScatterProfileStageId(
+                batches_[batch_index].strategy),
+              ReconstructionProfileStage::kScatterBatch, iteration,
+              batch_index);
+          }
         }
         if (iteration == 0) {
           append_stage(
@@ -4473,7 +4489,7 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
   EncodeResidentQuantizer(backend, encoder);
   for (size_t batch_index = 0; batch_index < batches_.size();
        ++batch_index) {
-    EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);
+    EncodeReconstructionCoefficientBatch(backend, encoder, batch_index, false);
   }
 }
 
@@ -4529,9 +4545,16 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
             !self.resident_forward_coefficients_ready_
           ? 0u
           : 1u;
-      self.EncodeReconstructionProfileStage(
-        backend, encoder, stage.reconstruction_stage,
-        stage.reconstruction_batch_index);
+      if (stage.reconstruction_stage == ReconstructionProfileStage::kCoefficientBatch &&
+          stage.iteration == self.resident_policy_iterations_ &&
+          !self.resident_evaluate_final_field_) {
+        self.EncodeReconstructionCoefficientBatch(
+          backend, encoder, stage.reconstruction_batch_index, false);
+      } else {
+        self.EncodeReconstructionProfileStage(
+          backend, encoder, stage.reconstruction_stage,
+          stage.reconstruction_batch_index);
+      }
       if (stage.reconstruction_stage ==
             ReconstructionProfileStage::kFinalColorCorrelation &&
           self.resident_color_correlation_pending_) {
@@ -4636,7 +4659,7 @@ Status CreateAqPipelines(
       "Metal cannot launch the AQ maximum-error threadgroup");
   }
   const std::array<
-    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 33>
+    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 35>
     reconstruction = {{
       {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
       {"gjxl_aq_reset_exact_coefficients", &pipelines.reset_exact_coefficients},
@@ -4679,6 +4702,10 @@ Status CreateAqPipelines(
        &pipelines.select_adjusted_quantization},
       {"gjxl_aq_encode_reconstruction_coefficients",
        &pipelines.encode_reconstruction_coefficients},
+      {"gjxl_aq_encode_scored_coefficients",
+       &pipelines.encode_scored_coefficients},
+      {"gjxl_aq_encode_final_coefficients",
+       &pipelines.encode_final_coefficients},
       {"gjxl_aq_encode_frame_coefficients",
        &pipelines.encode_frame_coefficients},
       {"gjxl_aq_scatter_reconstructed_pixels",
@@ -4725,6 +4752,26 @@ Status CreateAqPipelines(
         kPostprocessThreads) {
       return Status::Unavailable(
         "Metal cannot launch an AQ postprocess threadgroup");
+    }
+  }
+  if (device->supportsFamily(MTL::GPUFamilyApple9)) {
+    constexpr std::array<std::string_view, 3> direct_names = {
+      "gjxl_aq_epf_pass0_direct", "gjxl_aq_epf_pass1_direct", "gjxl_aq_epf_pass2_direct"};
+    constexpr std::array<std::string_view, 3> tiled_names = {
+      "gjxl_aq_epf_pass0_tile32x4_p2", "gjxl_aq_epf_pass1_tile32x4_p2",
+      "gjxl_aq_epf_pass2_tile32x4_p2"};
+    for (size_t pass = 0; pass < 3; ++pass) {
+      status = CreateAqPipeline(device, library, direct_names[pass], &pipelines.epf_direct[pass]);
+      if (!status.ok()) return status;
+      status = CreateAqPipeline(device, library, tiled_names[pass], &pipelines.epf_tiled[pass]);
+      if (!status.ok()) return status;
+      if (pipelines.epf_direct[pass]->maxTotalThreadsPerThreadgroup() < 64 ||
+          pipelines.epf_tiled[pass]->maxTotalThreadsPerThreadgroup() < 128 ||
+          pipelines.epf_tiled[pass]->threadExecutionWidth() != 32) {
+        // Optional geometry must not disable an otherwise usable backend.
+        pipelines.epf_direct[pass].reset();
+        pipelines.epf_tiled[pass].reset();
+      }
     }
   }
   *out = std::move(pipelines);

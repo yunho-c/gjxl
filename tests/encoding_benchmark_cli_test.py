@@ -430,6 +430,8 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 for stage in reconstruction_stages
             )
         )
+        self.assertFalse(any(stage.startswith("aq.reconstruction.scatter.")
+                             for stage in reconstruction_stages))
         self.assertIn("aq.epf.pass_1", {stage["stage_id"] for stage in stages})
         self.assertIn(
             "butteraugli.malta.main", {stage["stage_id"] for stage in stages}
@@ -495,18 +497,18 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             )
             self.assertNotIn("gjxl_ac_strategy_residual", kernel_ids)
             inverse_suffix = (
-                "_residual_inverse_tuned"
+                "_residual_inverse_tuned_loss"
                 if stage["stage_id"]
                 in {
                     "frontend.ac_strategy.dct16x32",
                     "frontend.ac_strategy.dct32",
                 }
-                else "_residual_inverse_compact"
+                else "_residual_inverse_compact_loss"
             )
             self.assertEqual(
                 sum(name.endswith(inverse_suffix) for name in kernel_ids), 1
             )
-            self.assertIn("gjxl_ac_strategy_cost", kernel_ids)
+            self.assertIn("gjxl_ac_strategy_cost_from_loss", kernel_ids)
 
     def test_ac_residual_inverse_modes_select_expected_kernels(
         self,
@@ -558,6 +560,8 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                             inverse_suffix = "_residual_inverse_tuned"
                         else:
                             inverse_suffix = "_residual_inverse_compact"
+                    if mode == "fused-tuned":
+                        inverse_suffix += "_loss"
                     kernel_ids = {
                         dispatch["kernel_id"]
                         for dispatch in stage["dispatches"]
@@ -566,6 +570,10 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                     self.assertEqual(
                         sum(name.endswith(inverse_suffix) for name in kernel_ids),
                         1,
+                    )
+                    self.assertIn(
+                        "gjxl_ac_strategy_cost_from_loss" if mode == "fused-tuned"
+                        else "gjxl_ac_strategy_cost", kernel_ids
                     )
                     if mode == "split":
                         self.assertIn("gjxl_ac_strategy_residual", kernel_ids)

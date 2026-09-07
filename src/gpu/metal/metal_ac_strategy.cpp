@@ -184,6 +184,9 @@ Status CreateAcStrategyPipelines(
   if (!status.ok()) {
     return status;
   }
+  status = CreatePipeline(device, library, "gjxl_ac_strategy_cost_from_loss",
+                          &pipelines.cost_from_loss);
+  if (!status.ok()) return status;
 
   for (const FusedStageSpec& spec : kFusedStageSpecs) {
     const size_t strategy_index = static_cast<size_t>(spec.strategy);
@@ -214,6 +217,7 @@ Status CreateAcStrategyPipelines(
       std::string_view function_name = spec.residual_inverse_function_name;
       size_t residual_inverse_simdgroups =
         spec.simdgroups_per_threadgroup;
+      std::string loss_function_name;
       if (residual_inverse_mode ==
           MetalAcResidualInverseMode::kFusedCompact) {
         function_name = spec.compact_residual_inverse_function_name;
@@ -222,6 +226,9 @@ Status CreateAcStrategyPipelines(
         function_name = spec.tuned_residual_inverse_function_name;
         residual_inverse_simdgroups =
           spec.tuned_simdgroups_per_threadgroup;
+        loss_function_name = std::string(function_name) + "_loss";
+        function_name = loss_function_name;
+        fused.reduces_loss = true;
       }
       status = CreatePipeline(
         device,
@@ -771,6 +778,10 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
     encoder->setBytes(&validated.params, sizeof(validated.params), 6);
     encoder->setBuffer(validated.costs->handle(), 0, 7);
+    if (fused.reduces_loss) {
+      encoder->setBuffer(validated.pixel_mask->handle(),
+                         validated.pixel_mask_offset_bytes, 8);
+    }
     encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 2);
@@ -806,7 +817,9 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     residual_pixels = validated.scratch_b;
   }
 
-  encoder->setComputePipelineState(ac_strategy_pipelines_.cost.get());
+  encoder->setComputePipelineState(fused.reduces_loss
+    ? ac_strategy_pipelines_.cost_from_loss.get()
+    : ac_strategy_pipelines_.cost.get());
   encoder->setBuffer(residual_pixels->handle(), 0, 0);
   encoder->setBuffer(validated.pixel_mask->handle(),
                      validated.pixel_mask_offset_bytes, 1);
@@ -816,6 +829,12 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   encoder->setBuffer(validated.quant_field->handle(),
                      validated.quant_field_offset_bytes, 5);
   encoder->setBytes(&validated.params, sizeof(validated.params), 6);
+  if (fused.reduces_loss) {
+    DispatchMetalThreads(encoder,
+      MTL::Size(validated.params.candidate_count, 1, 1),
+      MTL::Size(64, 1, 1));
+    return;
+  }
   encoder->setThreadgroupMemoryLength(3 * reduction_bytes, 0);
   DispatchMetalThreadgroups(
     encoder,

@@ -201,7 +201,8 @@ __attribute__((always_inline)) inline void ForwardSquareDctSimdgroup(
   uint lane,
   uint simd_width,
   uint simdgroup_index,
-  uint3 group_position)
+  uint3 group_position,
+  uint image_stride = N)
 {
   constexpr uint kTileSize = 8;
   constexpr uint kTilesPerDimension = N / kTileSize;
@@ -243,7 +244,7 @@ __attribute__((always_inline)) inline void ForwardSquareDctSimdgroup(
       simdgroup_load(
         a,
         A + base,
-        N,
+        image_stride,
         ulong2(column_tile * kTileSize,
                inner_tile * kTileSize));
 
@@ -307,7 +308,8 @@ __attribute__((always_inline)) inline void InverseSquareDctSimdgroup(
   uint lane,
   uint simd_width,
   uint simdgroup_index,
-  uint3 group_position)
+  uint3 group_position,
+  uint image_stride = N)
 {
   constexpr uint kTileSize = 8;
   constexpr uint kTilesPerDimension = N / kTileSize;
@@ -395,7 +397,7 @@ __attribute__((always_inline)) inline void InverseSquareDctSimdgroup(
     simdgroup_store(
       accumulator,
       B + base,
-      N,
+      image_stride,
       ulong2(column_tile * kTileSize,
              simdgroup_index * kTileSize));
   }
@@ -707,7 +709,8 @@ ForwardRectangularDctSimdgroupWithBasis(
   HorizontalBasisPointer horizontal_basis,
   float scale,
   uint simdgroup_index,
-  uint3 group_position)
+  uint3 group_position,
+  uint image_stride = Columns)
 {
   constexpr uint kTileSize = 8;
   constexpr uint kRowTiles = Rows / kTileSize;
@@ -742,7 +745,7 @@ ForwardRectangularDctSimdgroupWithBasis(
       simdgroup_load(
         a,
         A + base,
-        Columns,
+        image_stride,
         ulong2(column_tile * kTileSize,
                inner_tile * kTileSize));
 
@@ -817,7 +820,8 @@ InverseRectangularDctSimdgroupWithBasis(
   HorizontalBasisPointer horizontal_basis,
   float scale,
   uint simdgroup_index,
-  uint3 group_position)
+  uint3 group_position,
+  uint image_stride = Columns)
 {
   constexpr uint kTileSize = 8;
   constexpr uint kRowTiles = Rows / kTileSize;
@@ -905,7 +909,7 @@ InverseRectangularDctSimdgroupWithBasis(
     simdgroup_store(
       accumulator,
       B + base,
-      Columns,
+      image_stride,
       ulong2(column_tile * kTileSize,
              simdgroup_index * kTileSize));
   }
@@ -2271,3 +2275,225 @@ kernel void gjxl_dct32_inverse_simdgroup_2d_matmul(
     simdgroup_index,
     group_position);
 }
+
+// Resident AQ transforms retain the packed coefficient layout but address
+// disjoint anchor rectangles directly. Scalar/factored transforms keep their
+// existing packed path. Each dispatch still has one group per channel/anchor.
+struct AqDctImageParams {
+  uint anchor_offset;
+  uint anchor_count;
+  uint coefficient_offset;
+  uint image_stride;
+};
+kernel void gjxl_dct8_forward_simdgroup_2d_matmul_image(
+  device const float* image_x [[buffer(0)]],
+  device const float* image_y [[buffer(1)]],
+  device const float* image_b [[buffer(2)]],
+  device const uint2* anchors [[buffer(3)]],
+  device float* coefficients [[buffer(4)]],
+  constant AqDctImageParams& params [[buffer(5)]],
+  uint lane [[thread_index_in_simdgroup]],
+  uint simd_width [[threads_per_simdgroup]],
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position [[threadgroup_position_in_grid]]) {
+  const uint anchor_index = group_position.x % params.anchor_count;
+  const uint channel = group_position.x / params.anchor_count;
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index];
+  device const float* image = channel == 0 ? image_x : channel == 1 ? image_y : image_b;
+  image += anchor.y * 8 * params.image_stride + anchor.x * 8;
+  coefficients += params.coefficient_offset + group_position.x * 64;
+  // lift hard-coded DCT matrix onto threadgroup memory for simdgroup_load()
+  threadgroup float c_shared[64];
+
+  for (uint i = lane; i < 64; i += simd_width) {
+    c_shared[i] = kOrthonormalDct8[i];
+  }
+
+  // synchronize threadgroup
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  simdgroup_float8x8 a;
+  simdgroup_float8x8 b;
+  simdgroup_float8x8 c;  // 8x8 DCT-II transform
+  simdgroup_float8x8 ct; // 8x8 DCT-II transform, transposed
+
+  simdgroup_load(a, image, params.image_stride);
+  simdgroup_load(c,  c_shared);
+  simdgroup_load(ct, c_shared, 8, ulong2(0), true);
+
+  simdgroup_multiply(b, c, a);
+  simdgroup_multiply(b, b, ct);
+
+  b.thread_elements() *= kForwardDct8Scale;
+
+  simdgroup_store(b, coefficients, 8, ulong2(0), true);
+}
+
+#define GJXL_AQ_FORWARD_SQUARE_IMAGE(name, rows, columns, vertical, horizontal, scale) \
+kernel void name( \
+  device const float* image_x [[buffer(0)]], \
+  device const float* image_y [[buffer(1)]], \
+  device const float* image_b [[buffer(2)]], \
+  device const uint2* anchors [[buffer(3)]], \
+  device float* coefficients [[buffer(4)]], \
+  constant AqDctImageParams& params [[buffer(5)]], \
+  uint lane [[thread_index_in_simdgroup]], \
+  uint simd_width [[threads_per_simdgroup]], \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]], \
+  uint3 group_position [[threadgroup_position_in_grid]]) { \
+  const uint anchor_index = group_position.x % params.anchor_count; \
+  const uint channel = group_position.x / params.anchor_count; \
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index]; \
+  device const float* image = channel == 0 ? image_x : channel == 1 ? image_y : image_b; \
+  image += anchor.y * 8 * params.image_stride + anchor.x * 8; \
+  coefficients += params.coefficient_offset + group_position.x * rows * columns; \
+  threadgroup float shared_basis[rows * rows]; \
+  ForwardSquareDctSimdgroup<rows>(image, coefficients, vertical, shared_basis, scale, \
+    lane, simd_width, simdgroup_index, uint3(0), params.image_stride); \
+}
+GJXL_AQ_FORWARD_SQUARE_IMAGE(gjxl_dct16_forward_simdgroup_2d_matmul_image,
+  16, 16, kOrthonormalDct16, kOrthonormalDct16, kForwardDct16Scale)
+GJXL_AQ_FORWARD_SQUARE_IMAGE(gjxl_dct32_forward_simdgroup_2d_matmul_image,
+  32, 32, kOrthonormalDct32, kOrthonormalDct32, kForwardDct32Scale)
+#undef GJXL_AQ_FORWARD_SQUARE_IMAGE
+
+#define GJXL_AQ_FORWARD_RECT_IMAGE(name, rows, columns, vertical, horizontal, scale) \
+kernel void name( \
+  device const float* image_x [[buffer(0)]], \
+  device const float* image_y [[buffer(1)]], \
+  device const float* image_b [[buffer(2)]], \
+  device const uint2* anchors [[buffer(3)]], \
+  device float* coefficients [[buffer(4)]], \
+  constant AqDctImageParams& params [[buffer(5)]], \
+  uint lane [[thread_index_in_simdgroup]], \
+  uint simd_width [[threads_per_simdgroup]], \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]], \
+  uint3 group_position [[threadgroup_position_in_grid]]) { \
+  const uint anchor_index = group_position.x % params.anchor_count; \
+  const uint channel = group_position.x / params.anchor_count; \
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index]; \
+  device const float* image = channel == 0 ? image_x : channel == 1 ? image_y : image_b; \
+  image += anchor.y * 8 * params.image_stride + anchor.x * 8; \
+  coefficients += params.coefficient_offset + group_position.x * rows * columns; \
+  threadgroup float shared_vertical[rows * rows]; \
+  threadgroup float shared_horizontal[columns * columns]; \
+  StageRectangularDctBasis<rows, columns>(vertical, horizontal, \
+    shared_vertical, shared_horizontal, lane, simd_width, simdgroup_index); \
+  ForwardRectangularDctSimdgroupWithBasis<rows, columns>(image, coefficients, shared_vertical, \
+    shared_horizontal, scale, simdgroup_index, uint3(0), params.image_stride); \
+}
+GJXL_AQ_FORWARD_RECT_IMAGE(gjxl_dct16x8_forward_simdgroup_2d_matmul_image,
+  16, 8, kOrthonormalDct16, kOrthonormalDct8, kForwardDct16x8Scale)
+GJXL_AQ_FORWARD_RECT_IMAGE(gjxl_dct8x16_forward_simdgroup_2d_matmul_image,
+  8, 16, kOrthonormalDct8, kOrthonormalDct16, kForwardDct16x8Scale)
+GJXL_AQ_FORWARD_RECT_IMAGE(gjxl_dct32x16_forward_simdgroup_2d_matmul_image,
+  32, 16, kOrthonormalDct32, kOrthonormalDct16, kForwardDct32x16Scale)
+GJXL_AQ_FORWARD_RECT_IMAGE(gjxl_dct16x32_forward_simdgroup_2d_matmul_image,
+  16, 32, kOrthonormalDct16, kOrthonormalDct32, kForwardDct32x16Scale)
+#undef GJXL_AQ_FORWARD_RECT_IMAGE
+kernel void gjxl_dct8_inverse_simdgroup_2d_matmul_image(
+  device float* image_x [[buffer(0)]],
+  device float* image_y [[buffer(1)]],
+  device float* image_b [[buffer(2)]],
+  device const uint2* anchors [[buffer(3)]],
+  device const float* coefficients [[buffer(4)]],
+  constant AqDctImageParams& params [[buffer(5)]],
+  uint lane [[thread_index_in_simdgroup]],
+  uint simd_width [[threads_per_simdgroup]],
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint3 group_position [[threadgroup_position_in_grid]]) {
+  const uint anchor_index = group_position.x % params.anchor_count;
+  const uint channel = group_position.x / params.anchor_count;
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index];
+  device float* image = channel == 0 ? image_x : channel == 1 ? image_y : image_b;
+  image += anchor.y * 8 * params.image_stride + anchor.x * 8;
+  coefficients += params.coefficient_offset + group_position.x * 64;
+  // lift hard-coded DCT matrix onto threadgroup memory for simdgroup_load()
+  threadgroup float c_shared[64];
+
+  for (uint i = lane; i < 64; i += simd_width) {
+    c_shared[i] = kOrthonormalDct8[i];
+  }
+
+  // synchronize threadgroup
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  simdgroup_float8x8 a;
+  simdgroup_float8x8 b;
+  simdgroup_float8x8 c;  // 8x8 DCT-II transform
+  simdgroup_float8x8 ct; // 8x8 DCT-II transform, transposed
+
+  simdgroup_load(a, coefficients, 8, ulong2(0), true);
+  simdgroup_load(c,  c_shared);
+  simdgroup_load(ct, c_shared, 8, ulong2(0), true);
+
+  simdgroup_multiply(b, ct, a);
+  simdgroup_multiply(b, b, c);
+
+  b.thread_elements() *= kInverseDct8Scale;
+
+  simdgroup_store(b, image, params.image_stride);
+}
+
+#define GJXL_AQ_INVERSE_SQUARE_IMAGE(name, rows, columns, vertical, horizontal, scale) \
+kernel void name( \
+  device float* image_x [[buffer(0)]], \
+  device float* image_y [[buffer(1)]], \
+  device float* image_b [[buffer(2)]], \
+  device const uint2* anchors [[buffer(3)]], \
+  device const float* coefficients [[buffer(4)]], \
+  constant AqDctImageParams& params [[buffer(5)]], \
+  uint lane [[thread_index_in_simdgroup]], \
+  uint simd_width [[threads_per_simdgroup]], \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]], \
+  uint3 group_position [[threadgroup_position_in_grid]]) { \
+  const uint anchor_index = group_position.x % params.anchor_count; \
+  const uint channel = group_position.x / params.anchor_count; \
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index]; \
+  device float* image = channel == 0 ? image_x : channel == 1 ? image_y : image_b; \
+  image += anchor.y * 8 * params.image_stride + anchor.x * 8; \
+  coefficients += params.coefficient_offset + group_position.x * rows * columns; \
+  threadgroup float shared_basis[rows * rows]; \
+  InverseSquareDctSimdgroup<rows>(coefficients, image, vertical, shared_basis, scale, \
+    lane, simd_width, simdgroup_index, uint3(0), params.image_stride); \
+}
+GJXL_AQ_INVERSE_SQUARE_IMAGE(gjxl_dct16_inverse_simdgroup_2d_matmul_image,
+  16, 16, kOrthonormalDct16, kOrthonormalDct16, kInverseDct16Scale)
+GJXL_AQ_INVERSE_SQUARE_IMAGE(gjxl_dct32_inverse_simdgroup_2d_matmul_image,
+  32, 32, kOrthonormalDct32, kOrthonormalDct32, kInverseDct32Scale)
+#undef GJXL_AQ_INVERSE_SQUARE_IMAGE
+
+#define GJXL_AQ_INVERSE_RECT_IMAGE(name, rows, columns, vertical, horizontal, scale) \
+kernel void name( \
+  device float* image_x [[buffer(0)]], \
+  device float* image_y [[buffer(1)]], \
+  device float* image_b [[buffer(2)]], \
+  device const uint2* anchors [[buffer(3)]], \
+  device const float* coefficients [[buffer(4)]], \
+  constant AqDctImageParams& params [[buffer(5)]], \
+  uint lane [[thread_index_in_simdgroup]], \
+  uint simd_width [[threads_per_simdgroup]], \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]], \
+  uint3 group_position [[threadgroup_position_in_grid]]) { \
+  const uint anchor_index = group_position.x % params.anchor_count; \
+  const uint channel = group_position.x / params.anchor_count; \
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index]; \
+  device float* image = channel == 0 ? image_x : channel == 1 ? image_y : image_b; \
+  image += anchor.y * 8 * params.image_stride + anchor.x * 8; \
+  coefficients += params.coefficient_offset + group_position.x * rows * columns; \
+  threadgroup float shared_vertical[rows * rows]; \
+  threadgroup float shared_horizontal[columns * columns]; \
+  StageRectangularDctBasis<rows, columns>(vertical, horizontal, \
+    shared_vertical, shared_horizontal, lane, simd_width, simdgroup_index); \
+  InverseRectangularDctSimdgroupWithBasis<rows, columns>(coefficients, image, shared_vertical, \
+    shared_horizontal, scale, simdgroup_index, uint3(0), params.image_stride); \
+}
+GJXL_AQ_INVERSE_RECT_IMAGE(gjxl_dct16x8_inverse_simdgroup_2d_matmul_image,
+  16, 8, kOrthonormalDct16, kOrthonormalDct8, kInverseDct16x8Scale)
+GJXL_AQ_INVERSE_RECT_IMAGE(gjxl_dct8x16_inverse_simdgroup_2d_matmul_image,
+  8, 16, kOrthonormalDct8, kOrthonormalDct16, kInverseDct16x8Scale)
+GJXL_AQ_INVERSE_RECT_IMAGE(gjxl_dct32x16_inverse_simdgroup_2d_matmul_image,
+  32, 16, kOrthonormalDct32, kOrthonormalDct16, kInverseDct32x16Scale)
+GJXL_AQ_INVERSE_RECT_IMAGE(gjxl_dct16x32_inverse_simdgroup_2d_matmul_image,
+  16, 32, kOrthonormalDct16, kOrthonormalDct32, kInverseDct32x16Scale)
+#undef GJXL_AQ_INVERSE_RECT_IMAGE

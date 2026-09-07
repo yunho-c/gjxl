@@ -167,13 +167,20 @@ void MetalPreparedAqEvaluation::EncodeEpfPass(
     : filter_scratch_[(filter_stage - 1) % 2];
   const std::array<DevicePlaneView, 3> output =
     filter_scratch_[filter_stage % 2];
-  encoder->setComputePipelineState(backend.aq_pipelines_.epf.get());
+  const EpfDispatch& dispatch = epf_dispatch_[pass];
+  encoder->setComputePipelineState(dispatch.pipeline);
   BindImage(encoder, current, 0);
   BindPlane(encoder, inverse_sigma_, 3);
   BindImage(encoder, output, 4);
   BindPlane(encoder, reconstruction_error_, 7);
   encoder->setBytes(&epf_params_[pass], sizeof(epf_params_[pass]), 8);
-  MetalBackend::DispatchPlane(encoder, source_extent_);
+  if (dispatch.tiled) {
+    DispatchMetalThreadgroups(encoder,
+      MTL::Size((source_extent_.width + 31) / 32, (source_extent_.height + 7) / 8, 1),
+      MTL::Size(32, 4, 1));
+  } else {
+    MetalBackend::DispatchPlane(encoder, source_extent_);
+  }
 }
 
 void MetalPreparedAqEvaluation::EncodeOpsinToLinear(
