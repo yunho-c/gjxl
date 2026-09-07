@@ -3,6 +3,8 @@
 
 #include "codestream/cpu_workflow_storage_plan.h"
 
+#include "codestream/workflow_publication_storage_plan.h"
+
 #include <cmath>
 
 #include "codec/ac_strategy_storage_plan.h"
@@ -120,27 +122,18 @@ Status ComputeCpuWorkflowStoragePlan(Extent2D source,
       &p.serializer);
   if (!status.ok())
     return status;
-  HostStorageBound scores, timing;
-  if (!scores.AddVector<double>(p.score_count, kFreshExact) ||
-      (o.collect_timing && !timing.AddVector<VarDctEncodingAttemptTiming>(
-                               p.maximum_attempts, kFreshExact)))
-    return Overflow();
-  if (search) {
-    status = ComputeTargetSizeControlStorageBound(p.maximum_attempts,
-                                                  &p.search_control);
-    if (!status.ok())
-      return status;
-    if (p.maximum_attempts > 1 && (!p.retained_best.Add(p.serializer.output) ||
-                                   !p.retained_best.Add(scores)))
-      return Overflow();
-  }
-  p.output = p.serializer.output;
-  if (!p.output.Add(scores) || !p.output.Add(timing))
-    return Overflow();
+  WorkflowPublicationStoragePlan publication;
+  status = ComputeWorkflowPublicationStoragePlan(
+      p.serializer.output, p.score_count, p.maximum_attempts, search,
+      o.collect_timing, &publication, "CPU workflow storage bound overflows");
+  if (!status.ok()) return status;
+  p.search_control = publication.search_control;
+  p.retained_best = publication.retained_best;
+  p.output = publication.output;
   p.working = p.frontend;
   // AQ already includes the current score owner. The serializer bound already
   // includes current codestream output. Do not add either output again.
-  for (auto part : {p.aq.working, p.serializer.working, timing,
+  for (auto part : {p.aq.working, p.serializer.working, publication.timing,
                     p.search_control, p.retained_best})
     if (!p.working.Add(part))
       return Overflow();

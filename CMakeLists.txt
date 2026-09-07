@@ -1068,6 +1068,10 @@ if(GJXL_BUILD_TESTS)
 
   enable_testing()
 
+  add_executable(gjxl_planning_recipes_test tests/planning_recipes_test.cpp)
+  target_link_libraries(gjxl_planning_recipes_test PRIVATE gjxl_codestream)
+  add_test(NAME planning_recipes COMMAND gjxl_planning_recipes_test)
+
   find_package(
     Python3
     COMPONENTS Interpreter

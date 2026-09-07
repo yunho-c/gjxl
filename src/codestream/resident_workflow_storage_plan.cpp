@@ -3,6 +3,8 @@
 
 #include "codestream/resident_workflow_storage_plan.h"
 
+#include "codestream/workflow_publication_storage_plan.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -264,26 +266,17 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       &p.serializer);
   if (!status.ok())
     return status;
-  HostStorageBound scores, timing;
-  if (!scores.AddVector<double>(p.score_count, kFreshExact) ||
-      (o.collect_timing && !timing.AddVector<VarDctEncodingAttemptTiming>(
-                               p.maximum_attempts, kFreshExact)))
-    return Overflow();
-  if (search) {
-    status = ComputeTargetSizeControlStorageBound(p.maximum_attempts,
-                                                  &p.search_control);
-    if (!status.ok())
-      return status;
-    if (p.maximum_attempts > 1 && (!p.retained_best.Add(p.serializer.output) ||
-                                   !p.retained_best.Add(scores)))
-      return Overflow();
-  }
-  p.output = p.serializer.output;
-  if (!p.output.Add(scores) || !p.output.Add(timing) ||
-      !p.output.Add(profile_output))
-    return Overflow();
+  WorkflowPublicationStoragePlan publication;
+  status = ComputeWorkflowPublicationStoragePlan(
+      p.serializer.output, p.score_count, p.maximum_attempts, search,
+      o.collect_timing, &publication, "Resident workflow storage bound overflows");
+  if (!status.ok()) return status;
+  p.search_control = publication.search_control;
+  p.retained_best = publication.retained_best;
+  p.output = publication.output;
+  if (!p.output.Add(profile_output)) return Overflow();
   HostStorageBound common = common_device;
-  for (const auto part : {common_frontend, p.diagnostics, scores, timing,
+  for (const auto part : {common_frontend, p.diagnostics, publication.scores, publication.timing,
                           p.search_control, p.retained_best})
     if (!common.Add(part))
       return Overflow();

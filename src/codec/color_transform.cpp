@@ -3,6 +3,7 @@
 
 #include "codec/color_transform.h"
 #include "codec/frontend_storage_plan.h"
+#include "codec/frontend_dispatch_internal.h"
 
 #include "codec/color_transform_internal.h"
 
@@ -124,20 +125,14 @@ Status RunParallelRows(
   Extent2D extent,
   Function&& function) {
 
-  using frontend_storage_internal::kMinimumParallelColorPixels;
-  using frontend_storage_internal::kMaximumColorWorkers;
   size_t pixel_count = 0;
   if (!extent.try_area(&pixel_count)) {
     return Status::InvalidArgument(
       "Color-transform image dimensions are too large");
   }
-  const size_t hardware_workers = std::max<size_t>(
-    std::thread::hardware_concurrency(), 1);
-  const size_t automatic_worker_count = pixel_count < kMinimumParallelColorPixels
-    ? 1
-    : std::min(extent.height, std::min(kMaximumColorWorkers, hardware_workers));
-  const size_t cpu_thread_count =
-    thread_budget_internal::CpuThreadCount();
+  const size_t cpu_thread_count = thread_budget_internal::CpuThreadCount();
+  const size_t desired_participants = frontend_dispatch_internal::kColor.Participants(
+      extent.height, pixel_count, cpu_thread_count, std::thread::hardware_concurrency());
   auto* const participant_tracker =
     thread_budget_internal::ParticipantTracker();
   const auto resource_context = resource_budget_internal::CurrentResourceContext();
@@ -148,9 +143,7 @@ Status RunParallelRows(
     }
     return Status::Ok();
   }
-  thread_budget_internal::CpuWorkerGroup cpu_workers(cpu_thread_count == 0
-    ? automatic_worker_count
-    : std::min(automatic_worker_count, cpu_thread_count));
+  thread_budget_internal::CpuWorkerGroup cpu_workers(desired_participants);
   const size_t participant_count = cpu_workers.participants();
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(
@@ -165,9 +158,8 @@ Status RunParallelRows(
   ManagedVector<Status> statuses(extent.height);
   std::atomic<size_t> next_row{0};
   ManagedVector<std::thread> workers;
-  const size_t spawned_worker_count = cpu_thread_count == 0 && !cpu_workers.enabled()
-    ? participant_count
-    : participant_count - 1;
+  const size_t spawned_worker_count = frontend_dispatch_internal::SpawnedWorkers(
+    participant_count, cpu_thread_count != 0 || cpu_workers.enabled());
   workers.reserve(spawned_worker_count);
   const auto run_worker = [&] {
     thread_budget_internal::ParallelScope scope(

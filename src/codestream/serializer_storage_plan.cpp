@@ -157,10 +157,6 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
                                         kSerializerMaximumSectionWorkers);
   static_assert(kJxlBlockDimension == 8);
   const Extent2D blocks = frame_extent.ceil_div(kJxlBlockDimension);
-  size_t block_count = 0, color_tiles = 0;
-  if (!blocks.try_area(&block_count) ||
-      !blocks.ceil_div(8).try_area(&color_tiles))
-    return Overflow();
   CoefficientOrderStoragePlan orders;
   Status status = ComputeCoefficientOrderStoragePlan(blocks, order_behavior,
                                                      workers, &orders);
@@ -191,12 +187,8 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
     return status;
   plan.ac_group_count = tokenization.ac_group_count;
   plan.dc_group_count = tokenization.dc_group_count;
-  // AC reserve: 3*(64B + anchors), anchors <=B. DC: 3B residuals plus
-  // 2*color_tiles +2*anchors+B metadata. DC boundaries align to color tiles.
-  if (!Multiply(block_count, 195, &plan.maximum_ac_tokens) ||
-      !Multiply(block_count, 6, &plan.maximum_dc_tokens) ||
-      !AddScaled(color_tiles, 2, &plan.maximum_dc_tokens))
-    return Overflow();
+  plan.maximum_ac_tokens = tokenization.maximum_ac_tokens;
+  plan.maximum_dc_tokens = tokenization.maximum_dc_tokens;
   const size_t g = plan.ac_group_count, d = plan.dc_group_count;
   if (d > std::numeric_limits<size_t>::max() / 2)
     return Overflow();
@@ -257,31 +249,15 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
     if (!work.Add({task_peaks[i], task_peaks[i]}))
       return Overflow();
 
-  const Extent2D ac_extent{
-      std::min(blocks.width, kVarDctAcGroupBlockDimension),
-      std::min(blocks.height, kVarDctAcGroupBlockDimension)};
-  const Extent2D dc_extent{
-      std::min(blocks.width, kSimpleDcGroupBlockDimension),
-      std::min(blocks.height, kSimpleDcGroupBlockDimension)};
-  AcGroupTokenCounts ac_counts;
-  DcGroupTokenCounts dc_counts;
-  status = ComputeAcGroupTokenCounts(
-      ac_extent, ac_extent.width * ac_extent.height, &ac_counts);
-  if (!status.ok())
-    return status;
-  status = ComputeDcGroupTokenCounts(
-      dc_extent, dc_extent.width * dc_extent.height, &dc_counts);
-  if (!status.ok())
-    return status;
   EntropyTokenEmissionStoragePlan ac_emission, dc_emission;
   // ANS's 47N+32 bits and reverse chunks dominate Prefix's 46N scratch.
   status = ComputeEntropyTokenEmissionStoragePlan(
-      EntropyCodingMode::kAns, ac_counts.token_capacity, &ac_emission);
+      EntropyCodingMode::kAns, tokenization.maximum_ac_group_tokens, &ac_emission);
   if (!status.ok())
     return status;
   status = ComputeEntropyTokenEmissionStoragePlan(
       EntropyCodingMode::kAns,
-      std::max(dc_counts.dc_tokens, dc_counts.metadata_tokens), &dc_emission);
+      tokenization.maximum_dc_group_stream_tokens, &dc_emission);
   if (!status.ok())
     return status;
   HostStorageBound ac_writers, dc_writers;

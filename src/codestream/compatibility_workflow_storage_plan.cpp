@@ -3,6 +3,8 @@
 
 #include "codestream/compatibility_workflow_storage_plan.h"
 
+#include "codestream/workflow_publication_storage_plan.h"
+
 #include <algorithm>
 
 #include "codec/frontend_storage_plan.h"
@@ -60,7 +62,6 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
   p.score_count = frame_only ? 0 : cpu.score_count;
   p.frontend = cpu.frontend;
   p.serializer = cpu.serializer;
-  p.search_control = cpu.search_control;
   const auto coding = p.coding_extent;
   const Extent2D blocks{coding.width / 8, coding.height / 8};
   AqHostStoragePlan host;
@@ -224,19 +225,16 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
         !p.ac_search.Add(submission.working))
       return Overflow();
   }
-  HostStorageBound scores, timing;
-  if (!scores.AddVector<double>(p.score_count, kFreshExact) ||
-      (o.collect_timing && !timing.AddVector<VarDctEncodingAttemptTiming>(
-                               p.maximum_attempts, kFreshExact)))
-    return Overflow();
-  if (p.maximum_attempts > 1 && (!p.retained_best.Add(p.serializer.output) ||
-                                 !p.retained_best.Add(scores)))
-    return Overflow();
-  p.output = p.serializer.output;
-  if (!p.output.Add(scores) || !p.output.Add(timing))
-    return Overflow();
+  WorkflowPublicationStoragePlan publication;
+  status = ComputeWorkflowPublicationStoragePlan(
+      p.serializer.output, p.score_count, p.maximum_attempts, IsSearch(e.rate_control_mode),
+      o.collect_timing, &publication, "Metal compatibility workflow bound overflows");
+  if (!status.ok()) return status;
+  p.search_control = publication.search_control;
+  p.retained_best = publication.retained_best;
+  p.output = publication.output;
   p.working = p.frontend;
-  for (auto owner : {p.evaluator, p.ac_search, p.serializer.working, timing,
+  for (auto owner : {p.evaluator, p.ac_search, p.serializer.working, publication.timing,
                      p.search_control, p.retained_best})
     if (!p.working.Add(owner))
       return Overflow();

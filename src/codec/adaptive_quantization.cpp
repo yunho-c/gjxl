@@ -22,6 +22,7 @@
 #include "codec/color_transform.h"
 #include "codec/convolution.h"
 #include "codec/frontend_storage_plan.h"
+#include "codec/frontend_dispatch_internal.h"
 #include "codec/maximum_error.h"
 #include "codec/quantization.h"
 #include "core/block_grid.h"
@@ -53,16 +54,9 @@ Status RunParallelInitialQuantWork(
   Function&& function) {
 
   if (count == 0) return Status::Ok();
-  using frontend_storage_internal::kMaximumInitialQuantWorkers;
-  using frontend_storage_internal::kMinimumParallelInitialQuantValues;
-  const size_t hardware_workers = std::max<size_t>(
-    std::thread::hardware_concurrency(), 1);
-  const size_t automatic_worker_count =
-    value_count < kMinimumParallelInitialQuantValues
-      ? 1
-      : std::min(count, std::min(kMaximumInitialQuantWorkers, hardware_workers));
-  const size_t cpu_thread_count =
-    thread_budget_internal::CpuThreadCount();
+  const size_t cpu_thread_count = thread_budget_internal::CpuThreadCount();
+  const size_t desired_participants = frontend_dispatch_internal::kInitialQuant.Participants(
+      count, value_count, cpu_thread_count, std::thread::hardware_concurrency());
   auto* const participant_tracker =
     thread_budget_internal::ParticipantTracker();
   const auto resource_context = resource_budget_internal::CurrentResourceContext();
@@ -73,9 +67,7 @@ Status RunParallelInitialQuantWork(
     }
     return Status::Ok();
   }
-  thread_budget_internal::CpuWorkerGroup cpu_workers(cpu_thread_count == 0
-    ? automatic_worker_count
-    : std::min(automatic_worker_count, cpu_thread_count));
+  thread_budget_internal::CpuWorkerGroup cpu_workers(desired_participants);
   const size_t participant_count = cpu_workers.participants();
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(
@@ -90,9 +82,8 @@ Status RunParallelInitialQuantWork(
   ManagedVector<Status> statuses(count);
   std::atomic<size_t> next_index{0};
   ManagedVector<std::thread> workers;
-  const size_t spawned_worker_count = cpu_thread_count == 0 && !cpu_workers.enabled()
-    ? participant_count
-    : participant_count - 1;
+  const size_t spawned_worker_count = frontend_dispatch_internal::SpawnedWorkers(
+    participant_count, cpu_thread_count != 0 || cpu_workers.enabled());
   workers.reserve(spawned_worker_count);
   const auto run_worker = [&] {
     thread_budget_internal::ParallelScope scope(

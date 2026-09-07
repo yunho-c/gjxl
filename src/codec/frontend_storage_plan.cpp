@@ -3,6 +3,8 @@
 
 #include "codec/frontend_storage_plan.h"
 
+#include "codec/frontend_dispatch_internal.h"
+
 #include <algorithm>
 #include <limits>
 #include <thread>
@@ -61,17 +63,14 @@ Status ComputeColorTransformStoragePlan(Extent2D source, Extent2D destination,
       !destination.try_area(&destination_pixels))
     return Overflow();
   ColorTransformStoragePlan plan;
-  const size_t workers = cpu_thread_count == 0
-                             ? kMaximumColorWorkers
-                             : std::min(cpu_thread_count, kMaximumColorWorkers);
-  plan.maximum_participants = dispatch_pixels < kMinimumParallelColorPixels
-                                  ? 1
-                                  : std::min(workers, source.height);
+  plan.maximum_participants = frontend_dispatch_internal::kColor.MaximumParticipants(
+      source.height, dispatch_pixels, cpu_thread_count);
   if ((!direct_padded &&
        !plan.working.AddVector<float>(destination_pixels, kFreshExact, 3)) ||
       (plan.maximum_participants > 1 &&
        (!plan.working.AddVector<Status>(source.height, kFreshExact) ||
-        !plan.working.AddVector<std::thread>(plan.maximum_participants,
+        !plan.working.AddVector<std::thread>(frontend_dispatch_internal::SpawnedWorkers(
+            plan.maximum_participants, cpu_thread_count != 0),
                                              kFreshExact))))
     return Overflow();
   *out = plan;
@@ -117,14 +116,9 @@ Status ComputeInitialQuantStoragePlan(Extent2D padded_extent,
   if (!padded_extent.try_area(&pixels))
     return Overflow();
   const size_t row_groups = padded_extent.height / 4;
-  const size_t workers =
-      cpu_thread_count == 0
-          ? kMaximumInitialQuantWorkers
-          : std::min(cpu_thread_count, kMaximumInitialQuantWorkers);
   InitialQuantStoragePlan plan;
-  plan.maximum_participants = pixels < kMinimumParallelInitialQuantValues
-                                  ? 1
-                                  : std::min(workers, row_groups);
+  plan.maximum_participants = frontend_dispatch_internal::kInitialQuant.MaximumParticipants(
+      row_groups, pixels, cpu_thread_count);
   // The pixel mask and quarter-resolution erosion input survive both phases.
   HostStorageBound common;
   if (!common.AddVector<float>(pixels, kFreshExact) ||
@@ -135,7 +129,8 @@ Status ComputeInitialQuantStoragePlan(Extent2D padded_extent,
                              plan.maximum_participants) ||
       (plan.maximum_participants > 1 &&
        (!rows.AddVector<Status>(row_groups, kFreshExact) ||
-        !rows.AddVector<std::thread>(plan.maximum_participants, kFreshExact))))
+        !rows.AddVector<std::thread>(frontend_dispatch_internal::SpawnedWorkers(
+            plan.maximum_participants, cpu_thread_count != 0), kFreshExact))))
     return Overflow();
   // Workers (including their row arrays, statuses and thread vector) have
   // joined and returned before the quant/strategy fields and blurred mask.
@@ -250,13 +245,8 @@ Status ComputePreparedForwardStoragePlan(Extent2D padded_extent,
       !ColorTileExtent(padded_extent).try_area(&tiles) ||
       tiles == std::numeric_limits<size_t>::max())
     return Overflow();
-  const size_t workers =
-      cpu_thread_count == 0
-          ? kMaximumForwardWorkers
-          : std::min(cpu_thread_count, kMaximumForwardWorkers);
-  plan.maximum_participants = pixels < kMinimumParallelForwardCoefficients
-                                  ? 1
-                                  : std::min(workers, plan.maximum_transforms);
+  plan.maximum_participants = frontend_dispatch_internal::kForwardTransform.MaximumParticipants(
+      plan.maximum_transforms, pixels, cpu_thread_count);
   using prepared_coefficients_internal::PreparedTransform;
   auto &output = plan.output;
   if (!output.AddVector<float>(pixels, kFreshExact, 3) ||
@@ -272,7 +262,8 @@ Status ComputePreparedForwardStoragePlan(Extent2D padded_extent,
       !plan.working.AddVector<size_t>(plan.maximum_transforms, kGrowing) ||
       (plan.maximum_participants > 1 &&
        (!plan.working.AddVector<Status>(plan.maximum_transforms, kFreshExact) ||
-        !plan.working.AddVector<std::thread>(plan.maximum_participants,
+        !plan.working.AddVector<std::thread>(frontend_dispatch_internal::SpawnedWorkers(
+            plan.maximum_participants, cpu_thread_count != 0),
                                              kFreshExact))))
     return Overflow();
   *out = plan;

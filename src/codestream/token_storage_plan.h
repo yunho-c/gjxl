@@ -81,6 +81,12 @@ struct TokenizationStorageOptions {
 struct TokenizationStoragePlan {
   size_t ac_group_count = 0;
   size_t dc_group_count = 0;
+  // Token capacities for ONE encoding candidate, independent of map/order
+  // variants. Derived from the runtime's group recipes at the anchor bound.
+  size_t maximum_ac_tokens = 0;
+  size_t maximum_dc_tokens = 0; // DC residual and metadata streams together.
+  size_t maximum_ac_group_tokens = 0;
+  size_t maximum_dc_group_stream_tokens = 0; // Largest single DC stream.
   HostStorageBound dc;
   HostStorageBound ac;
   bool operator==(const TokenizationStoragePlan &) const = default;

@@ -331,7 +331,7 @@ bool PurePlans() {
         if (!Check(color.maximum_participants == p &&
                        color.working.peak_bytes ==
                            12 * n + (p > 1 ? e.height * sizeof(Status) +
-                                                 p * sizeof(std::thread)
+                                                 (p - size_t(threads != 0)) * sizeof(std::thread)
                                            : 0),
                    "Color-transform dispatch bound differs"))
           return false;
@@ -339,7 +339,7 @@ bool PurePlans() {
                                                  &color)) ||
             !Check(
                 color.working.peak_bytes ==
-                    (p > 1 ? e.height * sizeof(Status) + p * sizeof(std::thread)
+                    (p > 1 ? e.height * sizeof(Status) + (p - size_t(threads != 0)) * sizeof(std::thread)
                            : 0),
                 "Direct color transform added a temporary image"))
           return false;

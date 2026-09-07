@@ -36,6 +36,8 @@ compiler, libc++ implementation, ABI and C++20/C++23 modes used by memory bounds
 and publication, including installed-consumer requirements and upgrade checks.
 The [installed interface](installed-interface.md) lists the public boundary and
 the implementation headers required by its templates, inline methods and owners.
+The [shared planning recipes](planning-recipes.md) document the counts shared
+with execution and the lifetime composition retained by component planners.
 
 ## Scope and current status
 

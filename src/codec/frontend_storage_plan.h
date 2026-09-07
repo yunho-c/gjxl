@@ -10,17 +10,6 @@ namespace gjxl::frontend_storage_internal {
 
 using resource_budget_internal::HostStorageBound;
 
-// Shared with the forward-transform dispatcher, not a separate tuning policy.
-inline constexpr size_t kMinimumParallelForwardCoefficients = 256 * 256;
-inline constexpr size_t kMaximumForwardWorkers = 8;
-
-// Shared with initial quantization's existing dispatcher.
-inline constexpr size_t kMinimumParallelInitialQuantValues = 256 * 256;
-inline constexpr size_t kMaximumInitialQuantWorkers = 12;
-
-inline constexpr size_t kMinimumParallelColorPixels = 256 * 256;
-inline constexpr size_t kMaximumColorWorkers = 12;
-
 struct ColorTransformStoragePlan {
   size_t maximum_participants = 0;
   HostStorageBound working;

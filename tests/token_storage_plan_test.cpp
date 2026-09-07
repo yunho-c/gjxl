@@ -287,8 +287,15 @@ bool CheckGroupClassSum() {
                 (6 * w * h + 2 * ((w + 7) / 8) * ((h + 7) / 8)) +
             dc_groups * sizeof(SimpleDcGroupTokenStreams) +
             std::min(w, 256ul) * std::min(h, 256ul) * (sizeof(DcAnchor) + 1);
+        const size_t largest_dc_blocks = std::min(w, 256ul) * std::min(h, 256ul);
+        const size_t largest_dc_tiles = ((std::min(w, 256ul) + 7) / 8) *
+                                       ((std::min(h, 256ul) + 7) / 8);
         if (!Check(plan.ac_group_count == ac_groups && plan.ac == expected &&
                        plan.dc_group_count == dc_groups &&
+                       plan.maximum_ac_tokens == 195 * w * h &&
+                       plan.maximum_dc_tokens == 6 * w * h + 2 * ((w + 7) / 8) * ((h + 7) / 8) &&
+                       plan.maximum_ac_group_tokens == 195 * std::min(w, 32ul) * std::min(h, 32ul) &&
+                       plan.maximum_dc_group_stream_tokens == 3 * largest_dc_blocks + 2 * largest_dc_tiles &&
                        plan.dc.retained_bytes == dc_expected &&
                        plan.dc.peak_bytes == dc_expected,
                    "Constant-time group sum differs from explicit group "
@@ -297,7 +304,11 @@ bool CheckGroupClassSum() {
       }
     }
   }
-  TokenizationStoragePlan sentinel{17, 23, {5, 7}, {11, 13}}, plan = sentinel;
+  TokenizationStoragePlan sentinel{
+      .ac_group_count = 17, .dc_group_count = 23,
+      .maximum_ac_tokens = 29, .maximum_dc_tokens = 31,
+      .maximum_ac_group_tokens = 37, .maximum_dc_group_stream_tokens = 41,
+      .dc = {5, 7}, .ac = {11, 13}}, plan = sentinel;
   TokenizationStorageOptions options{.context_count = 1980};
   for (Extent2D extent : {Extent2D{}, Extent2D{0, 1},
                           Extent2D{std::numeric_limits<size_t>::max(), 2},

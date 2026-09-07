@@ -21,6 +21,15 @@ bool Multiply(size_t a, size_t b, size_t *out) {
   return true;
 }
 
+bool AddScaled(size_t count, size_t instances, size_t *total) {
+  size_t value = 0;
+  if (!Multiply(count, instances, &value) ||
+      value > std::numeric_limits<size_t>::max() - *total)
+    return false;
+  *total += value;
+  return true;
+}
+
 // Interior, right strip, bottom strip, corner. Group boundaries are multiples
 // of color-tile dimensions, so local metadata tile counts sum correctly too.
 template <typename Function>
@@ -75,6 +84,12 @@ Status ComputeTokenizationStoragePlan(Extent2D blocks,
         extent, extent.width * extent.height, &group);
     if (!status.ok())
       return status;
+    if (!AddScaled(group.counts.dc_tokens, count, &plan.maximum_dc_tokens) ||
+        !AddScaled(group.counts.metadata_tokens, count, &plan.maximum_dc_tokens))
+      return Overflow();
+    plan.maximum_dc_group_stream_tokens = std::max(
+        {plan.maximum_dc_group_stream_tokens, group.counts.dc_tokens,
+         group.counts.metadata_tokens});
     return plan.dc.Add(group.output, count) ? Status::Ok() : Overflow();
   };
   Status status = ForGroupClasses(blocks, kSimpleDcGroupBlockDimension, add_dc);
@@ -106,6 +121,10 @@ Status ComputeTokenizationStoragePlan(Extent2D blocks,
         options.collect_fixed_populations, &group);
     if (!group_status.ok())
       return group_status;
+    if (!AddScaled(group.counts.token_capacity, count, &plan.maximum_ac_tokens))
+      return Overflow();
+    plan.maximum_ac_group_tokens =
+        std::max(plan.maximum_ac_group_tokens, group.counts.token_capacity);
     if (!options.exhaustive)
       return plan.ac.Add(group.direct_output, count) ? Status::Ok()
                                                      : Overflow();

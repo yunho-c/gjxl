@@ -304,7 +304,7 @@ bool PurePlans() {
                 : std::min(rows, threads == 0 ? 12 : std::min(threads, 12ul));
         const size_t row_bytes =
             4 * (n + n / 16 + p * pixels.width) +
-            (p > 1 ? rows * sizeof(Status) + p * sizeof(std::thread) : 0);
+            (p > 1 ? rows * sizeof(Status) + (p - size_t(threads != 0)) * sizeof(std::thread) : 0);
         const size_t finish_bytes = 4 * (2 * n + n / 16 + 2 * (n / 64));
         if (!Check(plan.maximum_participants == p &&
                        plan.working.peak_bytes ==
