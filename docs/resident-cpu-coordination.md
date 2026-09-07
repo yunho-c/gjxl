@@ -208,12 +208,10 @@ generated-artifact failure to the CPU scheduler.
 
 ## Remaining milestone 6 work
 
-- Define and test an explicit safe shutdown/drain boundary while the driver
-  object remains alive and calls are active or queued. Concurrent destruction
-  of an object still used by callers is not a valid substitute for that contract.
-  The intended minimal contract rejects new/queued batches, drains the active
-  batch and joins driver workers; external API-calling threads must finish before
-  the driver object is destroyed.
+- The [batch lifecycle checkpoint](resident-batch-lifecycle.md) now defines and
+  tests explicit shutdown: reject new/queued calls, drain the active call and
+  join workers while the object stays alive. Keep this coverage current with
+  subsequent scheduler changes; external callers must return before destruction.
 - Add request-arrival, queue and service measurements through batch completion,
   including waiting for the same driver's encode mutex and memory/CPU admission.
   Preserve failure atomicity and distinguish internal timings from public wall time.

@@ -59,6 +59,16 @@ public:
 
   [[nodiscard]] size_t max_in_flight() const noexcept;
 
+  /// Permanently close this driver, drain the active Encode call (including
+  /// admission waits), and join its workers. New calls and calls queued behind
+  /// the active call return kUnavailable without changing their result arrays.
+  /// Idempotent and safe alongside Encode/Shutdown calls while the object stays
+  /// alive. This does not cancel active work or release another caller's held
+  /// resources: admission must still become possible for a drain to finish.
+  /// All external calls must return before the object is destroyed. Do not
+  /// invoke Shutdown from work whose completion that same driver is awaiting.
+  void Shutdown() noexcept;
+
   [[nodiscard]] Status Encode(
     std::span<const VarDctBatchEncodingRequest> requests,
     std::vector<VarDctBatchEncodingResult>* results);

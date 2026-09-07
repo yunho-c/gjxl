@@ -41,7 +41,12 @@ int main() {
   std::vector<gjxl::VarDctBatchEncodingResult> batch_results;
   const gjxl::Status batch_status =
     batch_encoder->Encode(requests, &batch_results);
-  return batch_status.ok() && batch_results.size() == 2 &&
+  const auto* retained_results = batch_results.data();
+  batch_encoder->Shutdown();
+  batch_encoder->Shutdown();
+  const gjxl::Status closed_status = batch_encoder->Encode(requests, &batch_results);
+  return batch_status.ok() && closed_status.code() == gjxl::StatusCode::kUnavailable &&
+      batch_results.data() == retained_results && batch_results.size() == 2 &&
       batch_results[0].status.ok() && batch_results[1].status.ok() &&
       batch_results[0].codestream == codestream &&
       batch_results[1].codestream == codestream &&

@@ -27,6 +27,11 @@ using resource_budget_internal::ManagedVector;
 using resource_budget_internal::ResourceAllocation;
 namespace {
 
+void ObserveLifecycle(codestream_internal::BatchLifecycleEventForTesting event) noexcept {
+  const auto observer = codestream_internal::batch_lifecycle_observer_for_testing;
+  if (observer.observe != nullptr) observer.observe(observer.context, event);
+}
+
 Status PlanRequest(const VarDctBatchEncodingRequest &request,
                    codestream_internal::WorkflowStoragePlan *plan) {
   if (!request.linear_rgb.valid())
@@ -117,7 +122,7 @@ public:
     : max_in_flight_(max_in_flight) {}
 
   ~Impl() {
-    Stop();
+    Shutdown();
   }
 
   [[nodiscard]] Status Start() {
@@ -149,6 +154,17 @@ public:
     return max_in_flight_;
   }
 
+  void Shutdown() noexcept {
+    closing_.store(true, std::memory_order_release);
+    ObserveLifecycle(codestream_internal::BatchLifecycleEventForTesting::kClosing);
+    // Yield through the complete drain, and unlock before resuming. An active
+    // batch may need this caller's CPU slot to finish its work/publication.
+    thread_budget_internal::CpuSuspension suspension;
+    std::lock_guard encode_lock(encode_mutex_);
+    Stop();
+    ObserveLifecycle(codestream_internal::BatchLifecycleEventForTesting::kStopped);
+  }
+
   [[nodiscard]] Status Encode(
     std::span<const VarDctBatchEncodingRequest> requests,
     std::vector<VarDctBatchEncodingResult>* results) {
@@ -158,7 +174,19 @@ public:
         "Image batch result output is null");
     }
 
-    std::unique_lock encode_lock(encode_mutex_);
+    if (closing_.load(std::memory_order_acquire))
+      return Status::Unavailable("Image batch encoder is shut down");
+    ObserveLifecycle(codestream_internal::BatchLifecycleEventForTesting::kWaitingForDriver);
+    std::unique_lock encode_lock(encode_mutex_, std::defer_lock);
+    {
+      thread_budget_internal::CpuSuspension suspension;
+      encode_lock.lock();
+    }
+    // This check linearizes activation against shutdown. Do not set stopping_
+    // until this active call has returned: workers must not abandon its images.
+    if (closing_.load(std::memory_order_acquire))
+      return Status::Unavailable("Image batch encoder is shut down");
+    ObserveLifecycle(codestream_internal::BatchLifecycleEventForTesting::kActive);
     std::shared_ptr<const ExecutionDomain> domain;
     bool explicit_domain = false;
     codestream_internal::BatchWorkflowStoragePlan batch_plan;
@@ -259,6 +287,7 @@ public:
 
 private:
   void Stop() noexcept {
+    thread_budget_internal::CpuSuspension suspension;
     {
       std::lock_guard lock(work_mutex_);
       stopping_ = true;
@@ -356,6 +385,7 @@ private:
   std::mutex work_mutex_;
   std::condition_variable work_available_;
   std::condition_variable work_complete_;
+  std::atomic<bool> closing_{false};
   bool stopping_ = false;
   size_t generation_ = 0;
   size_t remaining_workers_ = 0;
@@ -411,6 +441,10 @@ Status VarDctBatchEncoder::Create(
 
 size_t VarDctBatchEncoder::max_in_flight() const noexcept {
   return impl_->max_in_flight();
+}
+
+void VarDctBatchEncoder::Shutdown() noexcept {
+  impl_->Shutdown();
 }
 
 Status VarDctBatchEncoder::Encode(

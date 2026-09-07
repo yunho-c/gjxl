@@ -302,8 +302,10 @@ milestone 5 changes require updated resource estimates and requalification.
 
 The [CPU coordination checkpoint](resident-cpu-coordination.md) adds shared C/C++
 domain limits, caller/worker participation, FIFO admission and yielded GPU/join
-boundaries. Public queue/service and shutdown qualification remain outstanding;
-this checkpoint does not mark milestone 6 complete.
+boundaries. The [batch lifecycle checkpoint](resident-batch-lifecycle.md) adds
+explicit shutdown/drain with active and queued calls. Queue/service, real loop
+launch-failure and final integrated-baseline qualification remain outstanding;
+these checkpoints do not mark milestone 6 complete.
 
 The [batch driver](../src/codestream/batch_workflow.h) already permits one image's
 CPU work to overlap another's Metal work. It invokes independent single-image

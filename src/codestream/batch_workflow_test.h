@@ -27,4 +27,14 @@ struct BatchExecutionObserverForTesting {
 };
 inline thread_local BatchExecutionObserverForTesting batch_execution_observer_for_testing;
 
+enum class BatchLifecycleEventForTesting { kWaitingForDriver, kActive, kClosing, kStopped };
+// Calling-thread boundaries for deterministic queue/drain tests. Like the
+// worker hook, this must not throw or reenter/mutate the driver; context must
+// outlive the observed call. It is deliberately not a public lifecycle API.
+struct BatchLifecycleObserverForTesting {
+  void* context = nullptr;
+  void (*observe)(void*, BatchLifecycleEventForTesting) noexcept = nullptr;
+};
+inline thread_local BatchLifecycleObserverForTesting batch_lifecycle_observer_for_testing;
+
 }  // namespace gjxl::codestream_internal
