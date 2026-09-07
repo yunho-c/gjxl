@@ -1448,6 +1448,23 @@ establishes an encoder-wide gain or a causal clock/power explanation.
 Production and the 40 retained runtime files remain unchanged; no permission
 prompt or restricted-counter retry occurs.
 
+[S98](cuda-optimization-s1.md#resident-comparison-telemetry-and-validation-cadence-s98)
+adds synchronized read-only NVML telemetry and tests validation cadence and
+graph burst length without changing any of the 209 linked CUDA bodies.
+All 28 qualification and twelve packed-4K timing jobs pass. Full-map checking
+between windows leaves mixed fusion results and large event-time scatter;
+score-only runs show sustained low SM clocks and repeatable paired
+fusion regressions of 0.411-2.081% (burst four) and 0.741-1.151% (burst
+sixteen), with background monitoring both off and on. The timed driver
+reports power/thermal software limiting flags; the post-run snapshot reports
+a 40 W enforced power limit, AC online and Windows Balanced. This identifies
+a relevant device-state constraint, not GPU-core overheating or an
+encoder-wide result. No power, clock, priority, profile or security setting
+is changed. Next test the real resident encoder lifetime under the same
+telemetry discipline; production and all 40 retained runtime files remain
+unchanged. The timing campaign takes 18m09s with continuous progress and no
+observed admin/firewall/permission prompt.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

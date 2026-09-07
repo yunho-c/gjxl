@@ -17483,6 +17483,225 @@ validation passes before document edits; all 40 retained runtime files
 remain unchanged. Only the two CUDA documents are committed, and the three
 user-owned untracked files remain untouched.
 
+## Resident comparison telemetry and validation cadence (S98)
+
+S98 follows S97 `679bdd0` and investigates why the 4K resident comparison
+varies inside GPU event spans even with graph replay. It adds host-only,
+read-only device telemetry and explicit monotonic window timestamps to the
+qualified diagnostic harness. It does not change production kernels or
+promote the S95 fusion candidate. Production remains S79 `914b42c`.
+
+### Boundary, controls and qualification
+
+The experiment retains S95's four modes: original retained kernels (0),
+the unfused native-identical control (1), flat fusion (2), and the
+native-identical flat-fusion copy (3). Both new release and host-ASAN
+executables reuse `s95_gpu.obj`; canonical comparison against the S95
+linked native dump verifies all 209 CUDA bodies unchanged in each new
+executable. No CUDA recompilation or production-library rebuild is needed.
+
+The real prepared object, cached reference, resident stream, independent
+guarded packed/padded input planes and internal comparison descriptor are
+unchanged. Each job checks decoded 1.2, identity, decoded 0.5 and decoded 1.2
+again against the public retained oracle, including every output-map bit,
+score and guard. Identity is also checked near zero. This reuses the 21
+hash-verified linear PFM inputs; it is not new decoder qualification.
+
+Timing uses kernel-only CUDA graphs, with one comparison for correctness
+and bursts of four or sixteen for timing. The multi-scale graph still
+contains 58 retained/control versus 56 fused kernels per comparison:
+232 versus 224 nodes for burst four and 928 versus 896 for burst sixteen.
+The nodes form the same linear dependency chain. The diagnostic internal
+calls stay inside the already-active submission context and allocate no
+steady-state device buffers; their backend submission counter stays zero.
+
+Each timed job runs eight warmup quartets and all 24 permutations of the
+four modes, without dropping samples. Full-map checking after every warmup
+window is retained. The measured-window check factor selects either a full
+map/score/guard readback after every window (`checks=1`) or only a bit-exact
+score check (`checks=0`). All four modes receive a final new comparison and
+full output check, followed by input guards. Score-only timing does not
+claim that every timed intermediate map is inspected. Validation is outside
+the reported event and wall intervals, but its effect on the subsequent
+device state is deliberately part of this investigation.
+
+Qualification covers all burst/check/monitor combinations on the padded
+tiny sample under release and host ASAN, both 4K layouts with the monitor
+off/on under both builds, and monitored padded HD and flower inputs under
+both builds: 28 jobs. The separate performance campaign contains twelve
+release jobs on packed odd 3839x2159 only: burst four with full checks,
+burst four with score-only checks, and burst sixteen with score-only checks,
+each with background monitoring off/on and two repetitions. The second
+repetition reverses both configuration and monitoring order. Matching
+configurations share a seeded mode schedule within a repetition. Factor
+comparisons are across processes, not randomized within a process.
+
+### Telemetry contract
+
+CUDA's actual PCI bus identifier selects the NVML device (`0000:01:00.0`).
+Both monitor settings initialize NVML and take one initial sample; only
+`monitor=1` starts background sampling. A host thread requests one sample
+every 50 ms, recording each eight-getter sample's monotonic begin/end time,
+individual return statuses, SM/memory clocks, temperature, power, utilization, memory use,
+performance state and clock-limiting reason bits. It never calls a setter.
+A UTC/monotonic anchor connects telemetry to job logs. Status 3 is explicitly
+unavailable rather than a fabricated zero; other errors are surfaced.
+
+Each comparison window records the same monotonic clock around event
+recording and synchronization, and the validator recomputes its host wall
+time from those timestamps. Per-window telemetry includes only complete
+query intervals contained within that window. NVML utilization itself is
+averaged over an internal device-dependent period (documented as roughly
+one sixth to one second), so polling every 50 ms does not create fresh
+instantaneous utilization measurements. WDDM's reported memory accounting
+also does not independently prove absence of paging or memory pressure.
+All values, including transitions and unusually slow queries, are retained;
+there is no clock normalization, outlier filtering or machine-state change.
+
+### Paired comparison results
+
+All 40 GPU jobs pass. Qualification executes 21,104 comparisons, 1,904 full
+output checks, 768 score-only checks and 128 input/guard checks. Measurement
+executes another 12,576 comparisons, 1,056 full output checks, 768 score-only
+checks and 60 input/guard checks. Together these are 33,680 comparisons
+(160 public oracles and 33,520 internal comparisons), 2,960 full output
+checks and 1,536 score-only checks. Only the twelve main jobs contribute
+performance results: 1,152 measured and 384 warmup windows. Tiny-sample
+timing used to qualify harness options is excluded from that campaign.
+There are no new CUDA sanitizer jobs in S98; S97's graph sanitizer coverage
+and the unchanged GPU native bodies are retained evidence, while S98
+release/host-ASAN checks qualify the new host sampler and timestamp harness.
+
+The following table preserves process execution order. Times are median
+GPU-event milliseconds per comparison. Percentages are medians of 24 paired
+permutation deltas, not ratios of independent medians; negative is faster.
+`checks=1` means full-map checking between measured windows, `checks=0`
+score-only, and `monitor=1` background NVML sampling. All rows are packed
+4K graph replay, not complete encodes.
+
+| Burst | Checks | Monitor | Rep | Retained ms | Control/original % | Flat/original % | Flat/control % | Copy/original % | Copy/control % |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 4 | 1 | 0 | 0 | 44.114552 | +5.763 | +2.471 | +0.695 | +1.673 | -1.810 |
+| 4 | 1 | 1 | 0 | 50.534575 | -5.922 | -4.774 | +1.330 | -2.269 | +2.718 |
+| 4 | 0 | 0 | 0 | 70.591366 | -0.128 | +1.420 | +1.430 | +1.521 | +2.081 |
+| 4 | 0 | 1 | 0 | 72.333984 | +0.055 | +1.398 | +1.463 | +1.223 | +1.333 |
+| 16 | 0 | 0 | 0 | 75.114780 | +0.058 | +1.004 | +1.031 | +0.862 | +0.958 |
+| 16 | 0 | 1 | 0 | 76.158836 | +0.183 | +0.879 | +0.741 | +1.151 | +0.977 |
+| 16 | 0 | 1 | 1 | 77.643566 | +0.010 | +1.010 | +0.896 | +0.948 | +0.976 |
+| 16 | 0 | 0 | 1 | 78.150181 | -0.005 | +0.920 | +1.001 | +0.987 | +1.044 |
+| 4 | 0 | 1 | 1 | 78.042740 | -0.664 | +0.943 | +1.122 | +0.493 | +1.074 |
+| 4 | 0 | 0 | 1 | 77.763050 | -0.267 | +0.957 | +1.183 | +0.411 | +0.878 |
+| 4 | 1 | 1 | 1 | 50.997080 | +3.369 | +3.079 | +0.488 | +6.618 | +0.366 |
+| 4 | 1 | 0 | 1 | 56.536160 | -0.574 | +1.641 | -0.107 | +0.469 | -1.095 |
+
+Full-map checking remains mixed against both controls and both fused copies
+across repetitions, with monitoring either off or on. In contrast, both
+score-only burst lengths are slower for every fused-copy/control pairing
+in both repetitions and monitor settings. The observed paired regression
+ranges are 0.411-2.081% for burst four and 0.741-1.151% for burst sixteen.
+This is a repeatable rejection of universal fusion in this sustained 4K
+diagnostic regime, not evidence that fusion loses on every workload or
+that it has a measured encoder-wide cost of those percentages.
+
+### Cadence, clock state and limits
+
+The gaps between measured windows change by roughly three orders of
+magnitude: job-median gaps are 141.672-179.030 ms with full-map checks
+versus 0.169-0.207 ms with score-only checks. These are excluded host gaps,
+not extra time accidentally included in the event measurements. Full-map
+retained medians are 44.115-56.536 ms, versus 70.591-78.043 ms for
+score-only burst four and 75.115-78.150 ms for burst sixteen. The faster
+full-check pattern returns in the last two jobs after the sustained runs,
+so a simple monotonic slowdown over campaign time cannot alone explain it.
+Absolute times still drift between repetitions; the reversal is not an
+isolated or randomized causal experiment on clock policy.
+
+Within-job, per-mode event median absolute deviation is 1.933-3.997 ms
+with full-map checks, 0.512-0.882 ms for score-only burst four and
+0.217-0.440 ms for burst sixteen. Corresponding medians of wall minus
+event time per comparison are about 0.050-0.061, 0.010-0.014 and
+0.004-0.005 ms. Longer windows reduce scatter here, but do not make the
+candidate faster or remove between-process state drift.
+
+All 576 monitored measured windows contain telemetry: 2-4 samples per
+full-check window, 2-6 for score-only burst four, and 18-21 for burst
+sixteen. Across the two repetitions, medians of in-window mean SM clocks
+are 544.542 MHz for full checks, 240.000 MHz for score-only burst four,
+and 231.897 MHz for burst sixteen. The ranges are respectively 217-1357,
+210-1282 and 218.8-252.2 MHz; 98, 3 and 0 of each group's 192 windows
+exceed 500 MHz on that mean. Transition samples are preserved. Full-check
+within-mode time/clock correlations are not uniformly strong; some strong
+score-only correlations are driven by a few transition windows. These
+statistics are not a fitted causal model or justification to normalize
+timings by clock frequency.
+
+The six monitored jobs collect 8,570 samples. Their actual median polling
+intervals are 62.406-62.584 ms, despite requesting 50 ms; median query costs
+are 0.226-0.261 ms and the longest query is 13.844 ms. Monitoring can
+perturb execution. The score-only loss occurs with monitoring off as well
+as on, but separate-process absolute timing differences do not isolate a
+precise monitor overhead.
+
+During the monitored timing periods, the reported limiting-reason mask is
+always `0x24`: NVML's software power-cap and software thermal-slowdown bits.
+Neither hardware thermal slowdown nor hardware power-brake bits are set.
+Memory clocks are 5500 MHz. Median in-window mean power is 34.933 W for
+full checks and about 39.930 W for both score-only groups. Reported memory
+use is constant within a burst setting (1,454,034,944 bytes for burst four,
+1,481,297,920 for burst sixteen); that WDDM reading is not a paging audit.
+
+Only after timing, a read-only snapshot reports an enforced power limit of
+40 W, while the ordinary power-management-limit getter is unsupported.
+Windows reports AC online, charging, 81% battery and the Balanced power
+scheme. This does not identify the vendor-specific laptop performance
+profile or prove that the limit stayed constant throughout earlier jobs.
+It is nevertheless consistent with the sustained roughly 40 W samples
+and the synchronized power-cap flag. The post-run GPU/hardware-slowdown
+thresholds are 105/102 C, while measured in-window mean GPU temperatures
+range from 62 to 73 C. Memory-temperature and acoustic thresholds are
+unavailable, and memory junction temperature is not queried. The thermal
+flag therefore does not establish GPU-core overheating or its underlying
+cause; NVML documents software thermal limiting for GPU or memory.
+
+The next useful performance boundary is the actual resident encoder
+lifetime with the same timestamp/telemetry discipline: determine whether
+its policy work and intervening stages reproduce the sustained state,
+and keep the graph-amortization lead separate from mask-fusion promotion.
+Any user-selected laptop performance-profile change needs a newly labeled
+campaign, not merged timing data or retroactive normalization. No clock,
+power, priority, security or laptop-profile setting is changed here.
+The backend is not proven maxed out and fusion remains unpromoted.
+
+### Operational record and evidence
+
+S97 frozen/current validation passes before any document edits. Release and
+ASAN host builds and both native audits pass before qualification; no
+compiler, GPU, telemetry-permission or correctness failure occurs. The
+28 qualification jobs run 14:44:44.499843-14:46:01.252333 UTC on
+2026-09-07. The twelve performance jobs run
+14:48:24.250345-15:06:33.276379, or 18m09s. All 40 GPU intervals are
+nonoverlapping. The runner records each process identifier and regularly
+reports advancing log size; no job is restarted after an observation
+timeout. Light editing and completed-result analysis overlap timing, so
+machine-wide isolation is not claimed. Both configuration snapshots occur
+after the last timing job, at approximately 15:06:43-15:06:44 UTC.
+
+No admin, firewall or permission prompt is observed. This establishes
+progress for this campaign, not the cause of any earlier long runtime.
+Unavailable NVML getters are recorded explicitly and no restricted query
+is retried with elevation. The user is informed about the read-only power
+findings and the absence of an observed permission block.
+
+Ignored `build-cuda-ninja/profiles/s98_*` preserves the new host harness,
+telemetry/timing headers, build/native reports, all forty job logs and CSVs,
+paired analysis, per-window telemetry linkage, cadence/scatter digest,
+post-run power/limit snapshots and a recomputing validator. Artifact,
+source/document, dependency, diagnostic-binary and retained-runtime
+manifests preserve their hashes, including the installed NVML header,
+import library and runtime DLL. Only the two CUDA documents are committed;
+production and all 40 retained runtime files remain byte-identical. The
+three user-owned untracked files remain untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
