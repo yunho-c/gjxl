@@ -18,6 +18,11 @@ struct PackedSrgbImageView;
 [[nodiscard]] Status ConvertValidatedPackedSrgbToLinearRgb(PackedSrgbImageView image,
                                                            Image3FBuffer *linear_rgb);
 
+/// Writes a previously validated immutable packed source into caller-owned
+/// planes of the same extent. Source and destination must not overlap.
+[[nodiscard]] Status ConvertValidatedPackedSrgbInto(PackedSrgbImageView image,
+                                                    Image3FView output);
+
 enum class PackedPixelFormat : uint32_t {
   kInvalid = 0,
   kRgb8Srgb = 1,

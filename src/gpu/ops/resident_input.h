@@ -22,6 +22,14 @@ struct ResidentInputPreparation {
   ConstImage3FView original_linear_rgb;
   Extent2D coding_extent;
   bool compute_matrix_scale_statistics = false;
+  /// Optional synchronous alternative to original_linear_rgb. The callback
+  /// must initialize every source pixel before returning success, may not
+  /// retain the writable view, and runs before any GPU submission. The caller
+  /// keeps fill_context alive through PrepareResidentInput. On failure the
+  /// partially initialized storage is discarded. Specify exactly one source.
+  Extent2D fill_extent;
+  Status (*fill_original)(const void* context, Image3FView destination) = nullptr;
+  const void* fill_context = nullptr;
 };
 
 /// Owns one validated linear-RGB upload and the corresponding padded coding
@@ -38,6 +46,13 @@ public:
     noexcept = 0;
   [[nodiscard]] virtual ConstDeviceImage3View coding_opsin() const noexcept = 0;
   [[nodiscard]] virtual ResidentInputStatistics statistics() const noexcept = 0;
+
+  /// Completed read-only CPU view when the backend provides shared storage.
+  /// An empty view means CPU mapping is unavailable. The owner must outlive
+  /// every reader, just as for the device views above.
+  [[nodiscard]] virtual ConstImage3FView original_linear_rgb_host() const noexcept {
+    return {};
+  }
 
 protected:
   PreparedResidentInput() = default;

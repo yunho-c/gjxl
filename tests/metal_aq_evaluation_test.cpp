@@ -2923,6 +2923,87 @@ bool CheckResidentInputPreparation(gjxl::GpuBackend& gpu) {
     return false;
   }
 
+  struct FillContext {
+    gjxl::ConstImage3FView source;
+    size_t* calls;
+    bool fail;
+    bool invalid_numeric;
+  };
+  size_t calls = 0;
+  const auto fill = +[](const void* opaque, gjxl::Image3FView output) {
+    const auto& context = *static_cast<const FillContext*>(opaque);
+    ++*context.calls;
+    for (size_t c = 0; c < 3; ++c)
+      for (size_t y = 0; y < output.height(); ++y)
+        std::copy_n(context.source.plane[c].Row(y), output.width(),
+                    output.plane[c].Row(y));
+    if (context.invalid_numeric)
+      output.plane[0].Row(0)[0] = std::numeric_limits<float>::quiet_NaN();
+    return context.fail ? gjxl::Status::OutOfMemory("Injected resident fill failure")
+                        : gjxl::Status::Ok();
+  };
+  prepared.reset();
+  for (size_t attempt = 0; attempt < 4; ++attempt) {
+    const FillContext context{original.View(), &calls, attempt == 0, attempt == 1};
+    gjxl::ResidentInputPreparation descriptor{.coding_extent = kCoding,
+                                              .compute_matrix_scale_statistics = true,
+                                              .fill_extent = kSource,
+                                              .fill_original = fill,
+                                              .fill_context = &context};
+    if (attempt == 0) {
+      auto conflicting = descriptor;
+      conflicting.original_linear_rgb = original.View();
+      if (gjxl::PrepareResidentInput(gpu, conflicting, &prepared).code() !=
+            gjxl::StatusCode::kInvalidArgument ||
+          prepared || calls != 0)
+        return false;
+      auto missing_callback = descriptor;
+      missing_callback.fill_original = nullptr;
+      if (gjxl::PrepareResidentInput(gpu, missing_callback, &prepared).code() !=
+            gjxl::StatusCode::kInvalidArgument ||
+          prepared || calls != 0)
+        return false;
+    }
+    const auto result = gjxl::PrepareResidentInput(gpu, descriptor, &prepared);
+    if (calls != attempt + 1)
+      return false;
+    if (attempt < 2) {
+      const auto expected_code = attempt == 0 ? gjxl::StatusCode::kOutOfMemory
+                                              : gjxl::StatusCode::kInvalidArgument;
+      if (result.code() != expected_code || prepared)
+        return false;
+      continue;
+    }
+    if (!CheckStatus(result, "generated resident input") || !prepared)
+      return false;
+    const auto host = prepared->original_linear_rgb_host();
+    const auto stats = prepared->statistics();
+    if (!host.valid() || host.extent() != kSource ||
+        stats.x_edge != actual_stats.x_edge || stats.b_edge != actual_stats.b_edge ||
+        stats.exposed_blue != actual_stats.exposed_blue)
+      return false;
+    for (size_t c = 0; c < 3; ++c) {
+      for (size_t y = 0; y < kSource.height; ++y)
+        for (size_t x = 0; x < kSource.width; ++x)
+          if (host.plane[c].Row(y)[x] != original.View().plane[c].Row(y)[x])
+            return false;
+      const auto plane = prepared->coding_opsin().plane[c];
+      for (size_t y = 0; y < kCoding.height; ++y) {
+        if (!CheckStatus(gpu.CopyDeviceToHost(
+                           *plane.buffer, actual.plane[c].data() + y * actual.stride,
+                           kCoding.width * sizeof(float),
+                           plane.offset_bytes + y * plane.row_stride * sizeof(float)),
+                         "generated input readback"))
+          return false;
+        for (size_t x = 0; x < kCoding.width; ++x)
+          if (actual.plane[c][y * actual.stride + x] !=
+              expected.plane[c][y * expected.stride + x])
+            return false;
+      }
+    }
+    prepared.reset();
+  }
+
   original.plane[1][2 * original.stride + 3] =
     std::numeric_limits<float>::quiet_NaN();
   prepared.reset();

@@ -621,20 +621,31 @@ void MetalPreparedResidentInput::EncodeSubmission(
 
 Status MetalPreparedResidentInput::Prepare(
     const ResidentInputPreparation& preparation) {
-  if (!preparation.original_linear_rgb.valid() ||
-      !std::ranges::all_of(
-        preparation.original_linear_rgb.plane,
-        [](ConstPlaneF32View plane) { return ValidHostPlaneLayout(plane); })) {
+  const bool filling = preparation.fill_original != nullptr;
+  const bool supplied_host =
+    std::ranges::any_of(preparation.original_linear_rgb.plane,
+                        [](ConstPlaneF32View plane) { return plane.data != nullptr; });
+  if ((filling && supplied_host) || (!filling && (!preparation.fill_extent.empty() ||
+                                                  preparation.fill_context != nullptr))) {
+    return Status::InvalidArgument("Resident input must specify exactly one source");
+  }
+  const Extent2D source_extent =
+    filling ? preparation.fill_extent : preparation.original_linear_rgb.extent();
+  if ((!filling && (!preparation.original_linear_rgb.valid() ||
+                    !std::ranges::all_of(preparation.original_linear_rgb.plane,
+                                         [](ConstPlaneF32View plane) {
+                                           return ValidHostPlaneLayout(plane);
+                                         }))) ||
+      source_extent.empty()) {
     return Status::InvalidArgument(
       "Resident input linear-RGB view is invalid");
   }
-  Status status = ValidateAqGeometry(
-    preparation.original_linear_rgb.extent(), preparation.coding_extent);
+  Status status = ValidateAqGeometry(source_extent, preparation.coding_extent);
   if (!status.ok()) return status;
 
   ResidentInputStoragePlan storage_plan;
-  status = ComputeResidentInputStoragePlan(
-    preparation.original_linear_rgb.extent(), preparation.coding_extent, &storage_plan);
+  status = ComputeResidentInputStoragePlan(source_extent, preparation.coding_extent,
+                                           &storage_plan);
   if (!status.ok()) return status;
   status = backend_->AcquireAqScratchArena(
     MetalAqScratchArena::kResidentInput, storage_plan.capacity_bytes, &arena_);
@@ -654,11 +665,26 @@ Status MetalPreparedResidentInput::Prepare(
     return Status::Internal("Resident input bindings disagree with storage plan");
   }
 
-  for (size_t channel = 0; channel < 3; ++channel) {
-    status = UploadPlane(
-      *backend_, preparation.original_linear_rgb.plane[channel],
-      original_[channel]);
+  if (filling) {
+    Image3FView destination;
+    for (size_t c = 0; c < 3; ++c) {
+      auto* buffer = MetalBackend::AsMetalBuffer(*original_[c].buffer);
+      if (buffer == nullptr)
+        return Status::Internal("Resident input is not shared Metal storage");
+      destination.plane[c] = {
+        reinterpret_cast<float*>(static_cast<std::byte*>(buffer->contents()) +
+                                 original_[c].offset_bytes),
+        source_extent, original_[c].row_stride};
+    }
+    status = preparation.fill_original(preparation.fill_context, destination);
     if (!status.ok()) return status;
+  } else {
+    for (size_t channel = 0; channel < 3; ++channel) {
+      status = UploadPlane(*backend_, preparation.original_linear_rgb.plane[channel],
+                           original_[channel]);
+      if (!status.ok())
+        return status;
+    }
   }
   constexpr std::array<uint32_t, 4> kZero{};
   status = backend_->CopyHostToDevice(
@@ -666,8 +692,8 @@ Status MetalPreparedResidentInput::Prepare(
   if (!status.ok()) return status;
 
   params_ = {
-    static_cast<uint32_t>(preparation.original_linear_rgb.width()),
-    static_cast<uint32_t>(preparation.original_linear_rgb.height()),
+    static_cast<uint32_t>(source_extent.width),
+    static_cast<uint32_t>(source_extent.height),
     static_cast<uint32_t>(original_[0].row_stride),
     static_cast<uint32_t>(preparation.coding_extent.width),
     static_cast<uint32_t>(preparation.coding_extent.height),
@@ -704,6 +730,23 @@ Status MetalPreparedResidentInput::Prepare(
 ConstDeviceImage3View MetalPreparedResidentInput::original_linear_rgb() const
     noexcept {
   return {{{original_[0], original_[1], original_[2]}}};
+}
+
+ConstImage3FView MetalPreparedResidentInput::original_linear_rgb_host() const noexcept {
+  ConstImage3FView view;
+  for (size_t c = 0; c < 3; ++c) {
+    if (original_[c].buffer == nullptr)
+      return {};
+    const auto* buffer = MetalBackend::AsMetalBuffer(*original_[c].buffer);
+    if (buffer == nullptr)
+      return {};
+    const auto* data =
+      static_cast<const std::byte*>(buffer->contents()) + original_[c].offset_bytes;
+    view.plane[c] = {reinterpret_cast<const float*>(data),
+                     {params_.source_width, params_.source_height},
+                     original_[c].row_stride};
+  }
+  return view;
 }
 
 ConstDeviceImage3View MetalPreparedResidentInput::coding_opsin() const

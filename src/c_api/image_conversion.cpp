@@ -120,28 +120,40 @@ Status ValidatePackedSrgbImage(PackedSrgbImageView image) {
   return Status::Ok();
 }
 
-Status ConvertValidatedPackedSrgbToLinearRgb(PackedSrgbImageView image, Image3FBuffer *linear_rgb) {
+Status ConvertValidatedPackedSrgbInto(PackedSrgbImageView image, Image3FView output) {
+  if (!output.valid() || output.extent() != Extent2D{image.width, image.height}) {
+    return Status::InvalidArgument("Packed conversion output shape differs");
+  }
+  const size_t width = image.width, height = image.height;
+  const size_t bytes_per_pixel = image.format == PackedPixelFormat::kRgb8Srgb ? 3 : 4;
+  const std::array<float, 256>& table = SrgbToLinearTable();
+  for (size_t y = 0; y < height; ++y) {
+    const uint8_t* input_row = image.pixels + y * image.row_stride_bytes;
+    float* red = output.plane[0].Row(y);
+    float* green = output.plane[1].Row(y);
+    float* blue = output.plane[2].Row(y);
+    for (size_t x = 0; x < width; ++x) {
+      const size_t input_index = x * bytes_per_pixel;
+      red[x] = table[input_row[input_index]];
+      green[x] = table[input_row[input_index + 1]];
+      blue[x] = table[input_row[input_index + 2]];
+    }
+  }
+  return Status::Ok();
+}
+
+Status ConvertValidatedPackedSrgbToLinearRgb(PackedSrgbImageView image,
+                                             Image3FBuffer* linear_rgb) {
   if (linear_rgb == nullptr)
     return Status::InvalidArgument("Output image must not be null");
   const size_t width = image.width, height = image.height;
   const Extent2D extent{width, height};
-  const size_t bytes_per_pixel = image.format == PackedPixelFormat::kRgb8Srgb ? 3 : 4;
   try {
     Image3FBuffer candidate(extent);
     Image3FView output = candidate.view();
-    const std::array<float, 256>& table = SrgbToLinearTable();
-    for (size_t y = 0; y < height; ++y) {
-      const uint8_t* input_row = image.pixels + y * image.row_stride_bytes;
-      float* red = output.plane[0].Row(y);
-      float* green = output.plane[1].Row(y);
-      float* blue = output.plane[2].Row(y);
-      for (size_t x = 0; x < width; ++x) {
-        const size_t input_index = x * bytes_per_pixel;
-        red[x] = table[input_row[input_index]];
-        green[x] = table[input_row[input_index + 1]];
-        blue[x] = table[input_row[input_index + 2]];
-      }
-    }
+    const Status status = ConvertValidatedPackedSrgbInto(image, output);
+    if (!status.ok())
+      return status;
     *linear_rgb = std::move(candidate);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {

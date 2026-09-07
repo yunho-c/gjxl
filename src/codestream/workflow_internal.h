@@ -12,6 +12,7 @@
 #include "codestream/workflow.h"
 #include "gpu/backend.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
+#include "gpu/ops/resident_input.h"
 
 namespace gjxl::codestream_internal {
 
@@ -36,6 +37,28 @@ namespace gjxl::codestream_internal {
   // Optional unstarted scope, entered after admission and kept alive by the
   // adapter through its result retention/cache-trim epilogue.
   thread_budget_internal::CpuExecutionScope* outer_cpu_execution = nullptr);
+
+/// Internal synchronous packed-input handoff. The view borrows from owner;
+/// moving the complete object transfers both to the encoding workflow.
+struct ResidentEncodingInput {
+  ConstImage3FView linear_rgb;
+  std::unique_ptr<PreparedResidentInput> owner;
+};
+
+/// Called after C-adapter memory/CPU admission. Requires forced resident Metal
+/// encoding; failure leaves the output unchanged. The generator is invoked
+/// synchronously and is not retained.
+[[nodiscard]] Status
+PrepareResidentEncodingInput(Extent2D source, const VarDctEncodingOptions& options,
+                             Status (*fill)(const void*, Image3FView),
+                             const void* context, ResidentEncodingInput* input);
+
+/// Consumes the prepared input. Its owner is released at the workflow's normal
+/// last-use boundary, after all borrowing GPU work has completed.
+[[nodiscard]] Status
+EncodeResidentLinearRgbVarDctCodestreamOwned(ResidentEncodingInput input,
+                                             VarDctEncodingOptions options,
+                                             CodestreamBuffer* codestream);
 
 struct QuantizationMatrixScaleStats {
   float x_edge = 0.0f;

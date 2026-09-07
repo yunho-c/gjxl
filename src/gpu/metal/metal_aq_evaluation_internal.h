@@ -268,6 +268,7 @@ public:
   Status Prepare(const ResidentInputPreparation& preparation);
   [[nodiscard]] ConstDeviceImage3View original_linear_rgb() const
     noexcept override;
+  [[nodiscard]] ConstImage3FView original_linear_rgb_host() const noexcept override;
   [[nodiscard]] ConstDeviceImage3View coding_opsin() const noexcept override;
   [[nodiscard]] ResidentInputStatistics statistics() const noexcept override;
 

@@ -533,8 +533,8 @@ struct PreparedWorkflow {
   }
 
   FrameGeometry geometry;
-  // Borrows the encode caller's immutable source for this synchronous
-  // prepared workflow and all of its target-size attempts.
+  // Borrows either the encode caller's immutable source or resident_input's
+  // completed shared source for this synchronous prepared workflow.
   ConstImage3FView linear_rgb;
   std::unique_ptr<Image3FBuffer> opsin;
   codestream_internal::QuantizationMatrixScaleStats matrix_scale_stats;
@@ -590,14 +590,12 @@ struct PreparedWorkflow {
   }
 }
 
-[[nodiscard]] Status PrepareWorkflow(
-  ConstImage3FView linear_rgb,
-  VarDctEncodingOptions options,
-  GpuBackend* selected_gpu,
-  bool selected_metal,
-  bool backend_preselected,
-  codestream_internal::VarDctEncodingProfile* profile,
-  std::unique_ptr<PreparedWorkflow>* prepared) {
+[[nodiscard]] Status
+PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
+                GpuBackend* selected_gpu, bool selected_metal, bool backend_preselected,
+                codestream_internal::VarDctEncodingProfile* profile,
+                std::unique_ptr<PreparedWorkflow>* prepared,
+                std::unique_ptr<PreparedResidentInput> resident_input = nullptr) {
 
   if (prepared == nullptr) {
     return Status::InvalidArgument(
@@ -627,16 +625,19 @@ struct PreparedWorkflow {
     }
     if (backend_preselected && selected_metal) {
       const WorkflowClock::time_point resident_begin = ProfileBegin(profile);
-      status = PrepareResidentInput(
-        *selected_gpu,
-        {
-          .original_linear_rgb = candidate->original_linear_rgb(),
-          .coding_extent = geometry.padded_frame(),
-          .compute_matrix_scale_statistics =
-            codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
-              options),
-        },
-        &candidate->resident_input);
+      if (resident_input != nullptr) {
+        candidate->resident_input = std::move(resident_input);
+      } else {
+        status = PrepareResidentInput(
+          *selected_gpu,
+          {
+            .original_linear_rgb = candidate->original_linear_rgb(),
+            .coding_extent = geometry.padded_frame(),
+            .compute_matrix_scale_statistics =
+              codestream_internal::ShouldComputeQuantizationMatrixScaleStats(options),
+          },
+          &candidate->resident_input);
+      }
       if (!status.ok()) return status;
       if (profile != nullptr) {
         profile->input_resident_preparation_nanoseconds =
@@ -1345,6 +1346,43 @@ Status codestream_internal::SelectQuantizationMatrixScales(
   return Status::Ok();
 }
 
+Status codestream_internal::PrepareResidentEncodingInput(
+  Extent2D source, const VarDctEncodingOptions& options,
+  Status (*fill)(const void*, Image3FView), const void* context,
+  ResidentEncodingInput* input) {
+  if (input == nullptr || fill == nullptr ||
+      options.backend != VarDctBackendPreference::kMetal ||
+      options.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident ||
+      options.rate_control_mode != VarDctRateControlMode::kButteraugliTarget) {
+    return Status::InvalidArgument("Generated input requires forced resident Metal");
+  }
+  GpuBackend* gpu = nullptr;
+  Status status = ResolveProductionMetalBackend(&gpu);
+  if (!status.ok())
+    return status;
+  FrameGeometry geometry;
+  status = FrameGeometry::Create(source, &geometry);
+  if (!status.ok())
+    return status;
+  ResidentEncodingInput candidate;
+  status = PrepareResidentInput(*gpu,
+                                {.coding_extent = geometry.padded_frame(),
+                                 .compute_matrix_scale_statistics =
+                                   ShouldComputeQuantizationMatrixScaleStats(options),
+                                 .fill_extent = source,
+                                 .fill_original = fill,
+                                 .fill_context = context},
+                                &candidate.owner);
+  if (!status.ok())
+    return status;
+  candidate.linear_rgb = candidate.owner->original_linear_rgb_host();
+  if (!candidate.linear_rgb.valid() || candidate.linear_rgb.extent() != source) {
+    return Status::Internal("Resident input has no matching completed host view");
+  }
+  *input = std::move(candidate);
+  return Status::Ok();
+}
+
 Status codestream_internal::PlanWorkflowAdmission(
     Extent2D source, const WorkflowStorageOptions &options, GpuBackend *supplied_backend,
     bool supplied_backend_is_qualified, bool resolve_production_backend, WorkflowStoragePlan *out) {
@@ -1387,18 +1425,16 @@ Status codestream_internal::PlanWorkflowAdmission(
 }
 
 Status EncodeLinearRgbVarDctCodestreamImpl(
-  ConstImage3FView linear_rgb,
-  VarDctEncodingOptions options,
-  GpuBackend* supplied_backend,
-  bool supplied_backend_is_qualified,
-  bool resolve_production_backend,
-  codestream_internal::CodestreamBuffer* codestream,
+  ConstImage3FView linear_rgb, VarDctEncodingOptions options,
+  GpuBackend* supplied_backend, bool supplied_backend_is_qualified,
+  bool resolve_production_backend, codestream_internal::CodestreamBuffer* codestream,
   codestream_internal::OwnedEncodingSummary* summary,
   codestream_internal::OwnedEncodingTiming* timing,
   codestream_internal::VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
   gpu_profile_internal::GpuExecutionProfile* gpu_profile,
-  thread_budget_internal::CpuExecutionScope* outer_cpu_execution = nullptr) {
+  thread_budget_internal::CpuExecutionScope* outer_cpu_execution = nullptr,
+  std::unique_ptr<PreparedResidentInput> resident_input = nullptr) {
 
   const bool gpu_profiling =
     gpu_profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
@@ -1485,6 +1521,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       local_profile.backend_selection_nanoseconds =
         ElapsedNanoseconds(selection_begin);
     }
+  }
+  if (resident_input != nullptr &&
+      (!backend_preselected || !workflow_metal || target_size_control)) {
+    return Status::InvalidArgument("Prepared input requires a resident Metal attempt");
   }
   if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
       options.rate_control_mode ==
@@ -1647,10 +1687,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     const auto preparation_begin = !profiling
       ? WorkflowClock::time_point{}
       : WorkflowClock::now();
-    status = PrepareWorkflow(
-      linear_rgb, options, workflow_gpu, workflow_metal,
-      backend_preselected,
-      profile == nullptr ? nullptr : &local_profile, &prepared);
+    status =
+      PrepareWorkflow(linear_rgb, options, workflow_gpu, workflow_metal,
+                      backend_preselected, profile == nullptr ? nullptr : &local_profile,
+                      &prepared, std::move(resident_input));
     if (!status.ok()) {
       return status;
     }
@@ -1810,6 +1850,20 @@ Status EncodeLinearRgbVarDctCodestreamOwned(
   return EncodeLinearRgbVarDctCodestreamImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, timing,
     nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr, outer_cpu_execution);
+}
+
+Status EncodeResidentLinearRgbVarDctCodestreamOwned(ResidentEncodingInput input,
+                                                    VarDctEncodingOptions options,
+                                                    CodestreamBuffer* codestream) {
+  if (input.owner == nullptr || options.backend != VarDctBackendPreference::kMetal ||
+      options.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident ||
+      options.rate_control_mode != VarDctRateControlMode::kButteraugliTarget) {
+    return Status::InvalidArgument("Prepared input requires forced resident Metal");
+  }
+  return EncodeLinearRgbVarDctCodestreamImpl(
+    input.linear_rgb, options, nullptr, false, true, codestream, nullptr, nullptr,
+    nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr, nullptr,
+    std::move(input.owner));
 }
 
 bool ShouldComputeQuantizationMatrixScaleStats(

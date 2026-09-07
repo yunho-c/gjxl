@@ -509,18 +509,34 @@ GJXLResult gjxl_encode(
     const gjxl::resource_budget_internal::ManagedHostScope managed_input(
       gjxl::resource_budget_internal::ResourceClass::kInput);
     gjxl::Image3FBuffer linear_rgb;
-    result = TranslateStatus(
-        gjxl::c_api_internal::ConvertValidatedPackedSrgbToLinearRgb(packed_image, &linear_rgb));
-    if (result != GJXL_OK) {
-      return result;
-    }
-
     gjxl::codestream_internal::CodestreamBuffer codestream;
-    result = TranslateStatus(gjxl::codestream_internal::EncodeLinearRgbVarDctCodestreamOwned(
-      linear_rgb.const_view(), encoding_options, &codestream));
-    if (result != GJXL_OK) {
-      return result;
+    if (context->backend == gjxl::VarDctBackendPreference::kMetal) {
+      gjxl::codestream_internal::ResidentEncodingInput resident_input;
+      result = TranslateStatus(gjxl::codestream_internal::PrepareResidentEncodingInput(
+        {image->width, image->height}, encoding_options,
+        +[](const void* context, gjxl::Image3FView destination) {
+          return gjxl::c_api_internal::ConvertValidatedPackedSrgbInto(
+            *static_cast<const gjxl::c_api_internal::PackedSrgbImageView*>(context),
+            destination);
+        },
+        &packed_image, &resident_input));
+      if (result != GJXL_OK)
+        return result;
+      result = TranslateStatus(
+        gjxl::codestream_internal::EncodeResidentLinearRgbVarDctCodestreamOwned(
+          std::move(resident_input), encoding_options, &codestream));
+    } else {
+      result =
+        TranslateStatus(gjxl::c_api_internal::ConvertValidatedPackedSrgbToLinearRgb(
+          packed_image, &linear_rgb));
+      if (result != GJXL_OK)
+        return result;
+      result =
+        TranslateStatus(gjxl::codestream_internal::EncodeLinearRgbVarDctCodestreamOwned(
+          linear_rgb.const_view(), encoding_options, &codestream));
     }
+    if (result != GJXL_OK)
+      return result;
     if (codestream.empty()) {
       return Fail(GJXL_ERROR_INTERNAL,
                   "Encoder returned an empty codestream");

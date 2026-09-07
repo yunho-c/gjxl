@@ -392,10 +392,17 @@ bool CheckCAdapter() {
             const bool injected =
                 failure == 0 || !ManagedHostAllocationFailurePendingForTest();
             DisarmManagedHostAllocationFailureForTest();
-            if (!Check(status == (failure == 0 ? GJXL_ERROR_RESOURCE_PLAN_EXCEEDED
-                                               : GJXL_ERROR_OUT_OF_MEMORY) &&
-                           injected && bytes.value.data == nullptr && bytes.value.size == 0,
-                       "C input/publication failure was not atomic"))
+            if (failure == 1 && backend == GJXL_BACKEND_METAL) {
+              if (!Check(status == GJXL_OK && !injected && bytes.value.data != nullptr &&
+                           bytes.value.size != 0,
+                         "Resident C input allocated a redundant host image"))
+                return false;
+              gjxl_buffer_free(&bytes.value);
+            } else if (!Check(status == (failure == 0 ? GJXL_ERROR_RESOURCE_PLAN_EXCEEDED
+                                                      : GJXL_ERROR_OUT_OF_MEMORY) &&
+                                injected && bytes.value.data == nullptr &&
+                                bytes.value.size == 0,
+                              "C input/publication failure was not atomic"))
               return false;
             if (failure != 0 &&
                 !Check(gjxl_encode(context.get(), &image, &eo, &bytes.value) ==
