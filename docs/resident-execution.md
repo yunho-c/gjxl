@@ -37,7 +37,7 @@ the implementation milestone numbers used later in this document.
 | Proposal | Scope | Current status |
 | --- | --- | --- |
 | #3: Stable coefficients and frame views | Included | Principal handoff complete in `ca440d1` and `dabe129`: ownership-independent consumers, direct final AC destinations, independent completed-output lease. |
-| #4A: Reuse, fusion, shorter intermediate lifetimes | Included, subject to numerical and end-to-end gates | Resident fusion is in the `4ea12ab` base. Shared scratch, deferred preparation, and volatile capacity caching from `perf/metal-preparation` are integrated and jointly qualified. Remaining opportunities need an explicit inventory. |
+| #4A: Reuse, fusion, shorter intermediate lifetimes | Included, subject to numerical and end-to-end gates | Fusion, shared scratch, deferred preparation and final-use release are qualified. The remaining audited opportunities have explicit dispositions in milestone 5. |
 | #4B: Screening, pruning, selective refinement | Separate policy track | Deferred; not an unfinished requirement of this structural refactor. |
 | #5: Ownership, resource budgets, scheduling | Included | Output ownership and shared whole-workflow memory admission are implemented and qualified. Aggregate CPU scheduling remains milestone 6; existing batch overlap alone does not complete it. |
 
@@ -256,7 +256,7 @@ Acceptance:
 - Counters reconcile with owned allocation capacities. Physical peak/idle
   measurements are reported separately, including any excluded memory.
 
-### 5. Targeted reuse and lifetime reductions — pending
+### 5. Targeted reuse and lifetime reductions — complete
 
 The inventory from milestone 4 defines the opportunities. Individual #4A changes
 can proceed alongside its accounting implementation, after milestone 3.
@@ -266,7 +266,11 @@ AC release after final placement and prepared-evaluator/input release before the
 CPU tail of a final completed-frame attempt. Earlier size-search attempts retain
 reuse, and phase planning continues charging idle caches. Its qualification and
 measured disposition are recorded separately; the remaining audit and admission
-and scheduling milestones are not completed by these boundaries.
+and scheduling milestones are not completed by these boundaries alone.
+The [final reuse/fusion dispositions](resident-reuse-dispositions.md) close the
+audited set with source-backed dependency/lifetime reasoning, fresh phase
+evidence and explicit retained/deferred choices. No further unbounded fusion
+requirement remains; aggregate CPU scheduling is still milestone 6.
 
 Deliverables:
 

@@ -206,7 +206,11 @@ The primitive does not own buffers, evict caches, propagate worker contexts,
 estimate memory, cap CPU participation, or alter encoding. It cannot establish
 whole-workflow limits until its integration coverage is complete.
 
-## Initial reuse/lifetime audit for milestone 5
+## Reuse/lifetime audit for milestone 5
+
+The [final dispositions](resident-reuse-dispositions.md) close this inventory
+with producers, consumers, lifetimes, arithmetic constraints and fresh phase
+evidence. The rows below retain the implementation history; milestone 5 is complete.
 
 | Candidate | Current disposition and required evidence |
 | --- | --- |
@@ -216,7 +220,7 @@ whole-workflow limits until its integration coverage is complete.
 | Three existing AQ pools plus Butteraugli cache | Common Metal accounting and generation-aware all-pool trim are implemented and measured in the Metal attachment checkpoint. Public admission adds domain-wide automatic eviction and tight-batch retirement. |
 | Intermediate AQ coefficients versus serializer layout | Keep distinct where reconstruction/AQ consumers require their current layout. The final-output destination optimization is already implemented; another layout change needs measured end-to-end benefit. |
 | Small copied completed-frame metadata | Intentionally retained: separates output from much larger evaluator lifetimes. Do not make metadata zero-copy by keeping the evaluator alive. |
-| Exact shared candidate calculations / further kernel fusion | Inventory against the integrated profile. No unqualified arithmetic reordering or candidate pruning. A documented measured rejection or reasoned deferral is valid; this row is not yet a completed audit. |
+| Exact shared candidate calculations / further kernel fusion | Larger-block quant norms already reuse the forward-pass result; AQ forward coefficients already survive iterations. Further AC fusion needs a new cross-channel group/reduction decomposition, and cross-size transform reuse needs a valid byte-preserving factorization. Explicitly deferred with measured phase costs and source dependency analysis in the final disposition record; no candidate pruning. |
 | CPU token/model/writer overlap and storage growth | Serializer containers have qualified allocation-owned backing tickets, with measured overhead. Fixed context-tree heap copies and a static owning default-map copy were removed. Whole-workflow bounds now compose policy-dependent simultaneous capacities and candidate/result publication under public admission. Preserve model search, tie rules, and exact output; resource pressure cannot silently reduce search. |
 
 ## Foundation validation and remaining gates
@@ -263,7 +267,8 @@ Milestone 4's public configuration, plan selection, input/batch composition,
 domain propagation, eviction and whole-call failure/progress enforcement are
 implemented and qualified in the public admission checkpoint, completing the
 milestone with its final allocation audit and physical peak/idle/post-trim and
-latency results. Component tests alone did not establish this. Milestone 5 still requires the audited
-opportunities' final dispositions and measured gates. Milestone 6 still requires
+latency results. Component tests alone did not establish this. Milestone 5 is
+also complete through the final reuse/fusion disposition record and its measured
+and lifetime gates. Milestone 6 still requires
 aggregate CPU scheduling and actual latency/throughput qualification. None is
 marked complete by the foundation's unit tests.
