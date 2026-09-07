@@ -1,5 +1,16 @@
 # CUDA optimization study S1
 
+Latest follow-up: [S104–S105 candidate disposition and counter survey](cuda-candidate-qualification.md).
+S84 and S95 are rejected as default production changes after the four-way
+complete-call/batch qualification; retained production remains S79. Portable
+Nsight Compute 2025.2 enables the hardware-counter survey: 249 main profiles
+cover all observed kernel specializations at 4K, 1080p and Flower. Final masking
+is DRAM-bound; leading Malta variants show high SM load/store-pipeline demand.
+Direct host timers separate the roughly 12 ms 4K strategy merge from roughly
+3 ms metadata construction. The new retained full-call medians are about
+322–325 / 81–84 / 22–23 ms for 4K / 1080p / Flower; see that report for exact
+boundaries, adverse results, capacity failures, evidence and limitations.
+
 - Status: S1.1-S1.5, packed/register-tiled DCT, tiled Malta,
   specialized/tiled blurs, packed AC-search residuals, tiled EPF, and fused
   AC gather/DCT plus residual/inverse/loss fusion, compact AC-search scratch,

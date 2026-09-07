@@ -1551,6 +1551,25 @@ proof that optimization is exhausted. No system/security settings change or
 permission prompt is observed. Large new evidence is on U:, with mutable
 profiler temporary files excluded from freezing and nothing deleted.
 
+[S104–S105](cuda-candidate-qualification.md) closes S84/S95 default-production
+qualification with a four-way comparison, concurrent batches and memory checks.
+S84 retains large single-image gains but has mixed batch/size evidence and about
+47.4 MiB extra host working set per 4K image. Mask fusion gives no consistent
+complete-call gain alone or added to S84. Both tested default changes are
+rejected; production remains S79. Four-image 4K encounters schedule-dependent
+OOM including baseline controls, motivating capacity-aware admission.
+
+Portable Nsight Compute 2025.2 succeeds where installed 2022.3 reports a driver
+resource error. The survey collects 249 main first-invocation profiles covering
+all observed specializations in three retained traces, plus repeated leading
+kernels. Final masking reaches about 96% DRAM utilization; Malta instead shows
+high SM load/store demand with much lower FMA utilization. Direct CPU scopes
+identify about 12 ms in 4K strategy merging and 3.1 ms in metadata construction.
+Fresh retained outer medians are 322–325 ms at 4K, 81–84 ms at 1080p and 22–23 ms
+on Flower. These are new observations of unchanged production, not a speedup.
+The report and accompanying counter CSV give priorities, ceilings, provenance
+and limits; no driver or system setting is changed.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
