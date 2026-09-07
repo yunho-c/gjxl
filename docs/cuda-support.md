@@ -1308,6 +1308,21 @@ captured. No CUDA/encoder timing retry occurs or permission block is observed. S
 transform packing granularity and production/batch qualification remain open;
 the 40-file S79 runtime stays unchanged.
 
+[S88](cuda-optimization-s1.md#grouped-compact-packing-s88) qualifies three
+grouped vector packers with partial-block and exact-overflow coverage,
+14,462 exact encodes and 43 qualification jobs. Two-pass synthetic DCT8
+packing gains reach about 26% versus S87 vector4, but neither grouped
+encoder family beats both vector controls across both repetitions in total
+and outer wall for any input/lifetime group. Retained 4K traces explain a
+key limitation: their transform mix is DCT32x32/DCT32x16, not DCT8. Packing
+is only about 0.6% of recorded kernel time there, while the leading paired
+Malta variants total about 14.5%. These are older, hash-checked traces, not
+new S88 profiling. Keep grouped packing diagnostic and prioritize fresh
+attribution of larger perceptual/convolution costs, accounting for prior
+rejected Malta experiments. All executed builds/tests/timings pass without
+retry; the active 5m14s 4K memcheck reports zero errors/leaks. No permission
+block is observed, and production/runtime remain unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -15026,6 +15026,287 @@ reported errors/leaks. No admin/firewall/permission block is observed and no
 security, privilege, clock, power or priority setting is changed. Production
 remains unchanged and the backend is not considered maxed out.
 
+## Grouped compact packing (S88)
+
+S88 follows S87 `6326f7f` with three diagnostic grouped vector packers.
+They preserve the safe threshold-scratch protocol and reduce large DCT8
+packing costs in a separate two-replication GPU-event study. The encoder
+comparison holds host ownership, initialization and readback policy fixed.
+No production/runtime change or cumulative speedup is implied; S79 remains
+retained.
+
+### Work assignment and qualification
+
+S87 assigns one block per transform anchor. Its vector4 DCT8 case uses
+16 threads per block, versus 64 for scalar packing. S88 instead assigns
+one four-coefficient unit per thread in fixed 64-, 128- or 256-thread blocks.
+A batch-local unit index identifies its anchor and coefficient by shifts
+and masks for supported counts 64, 128, 256, 512 and 1024. Source vectors
+are contiguous within each channel. Destination offsets and edge-group
+channel strides are obtained for each anchor independently; adjacent anchors
+need not share a group stride.
+
+For DCT8, each full block covers four, eight or sixteen anchors. Smaller
+blocks may split a larger transform across multiple blocks. Padding lanes
+do no payload accesses but participate in both block-wide overflow votes.
+There is no early return before a vote. A conditional atomic OR per block
+updates the same flags, which are cleared on the stream before packing.
+Dense int32 fallback and both compact widths are always emitted, including
+when every compact width overflows. Source, dense and compact/flag regions
+remain disjoint, with no new device allocation.
+
+The wrapper rejects unsupported coefficient counts, pointer misalignment
+and excessive grid dimensions before launching. Existing validated packing
+metadata supplies aligned destination offsets and non-overlapping coverage.
+The five supported counts cover all seven currently accepted CUDA resident
+transform strategies; no additional strategy restriction is introduced.
+The new kernels compile with CUDA 11.8 for sm_86 at 30 registers each, zero
+stack and zero spills, compared with S87's 38/40 scalar/vector registers.
+Grouping also removes S87's per-thread coefficient loop and changes address
+calculation and compiled resource use. The comparison therefore does not
+attribute every improvement solely to block count or atomic frequency.
+
+Standalone replay covers eight block geometries (1x1, 3x5, 17x1, 31x1,
+33x1, 31x33, 32x32 and 33x35), seven preferred transform shapes plus mixed
+layouts, six integer patterns and six packers. Each complete replay checks
+64 layout configurations and 2,304 comparisons. Thin geometries exercise
+partial grouped blocks; edge groups, nonzero source/anchor offsets, int8/
+int16 endpoints, int32 extremes, reused scratch after overflow, unchanged
+source and guarded dense/compact storage remain covered. The independent
+CPU mapping proves complete destination coverage without overlap. Nine
+additional host-API checks cover retained and grouped empty/invalid calls,
+unsupported count, misalignment and excessive grid. Some small geometries
+collapse different shape preferences to identical layouts.
+
+Release, scoped host ASan, GPU memcheck, initcheck and synccheck each pass
+all 2,304 comparisons and capture final markers; memcheck reports zero
+errors and leaks. All six relevant S87 GPU bodies remain identical, with
+three new grouped bodies, in the three standalone executables. Full native
+audits of encoder timing, ASan timing and AQ executables preserve all 210
+S87 bodies plus those same three grouped bodies. The separate active/tail
+preflight passes 22 windows and 1,606 exact encodes.
+
+### Two-pass synthetic GPU-event study
+
+Variants are retained dense pack plus separate narrowing, S87 scalar,
+S87 vector4, grouped64, grouped128 and grouped256. Nine block-grid/style
+windows cross 256x256, 1080p and 4K pixel equivalents with DCT8-, DCT16-
+and DCT32-preferred layouts; edge leftovers use DCT8. All-zero byte-fitting
+and alternating int16-endpoint coefficients are synthetic, not photographic
+histograms. A second replication reverses the geometry/style order and uses
+a different fixed seed.
+
+Each pattern has six warm and 24 measured six-mode Williams rounds. Every
+six-round block balances all positions and all 30 directed predecessor
+pairs. Each event interval contains 16 packing pipelines including the
+ordered flag clear. Exact source/dense/compact/flag/guard checks bracket each
+window, outside timing. The study contains 18 windows, 5,184 measured and
+1,296 warm observations, plus 432 checked pipelines: 104,112 pipelines
+including checks. Each combined contrast has 48 measured pairs. Event
+intervals may include stream-idle host-launch gaps; they are not profiler-
+summed kernel times or whole-encode speedups.
+
+The table gives combined paired event-interval percentage medians versus
+S87 vector4; negative is faster. All 30 directed contrasts and both
+replications remain available in the raw-log-derived summary.
+
+| Synthetic geometry / preferred shape / pattern | Grouped64 / vector4 | Grouped128 / vector4 | Grouped256 / vector4 |
+| --- | ---: | ---: | ---: |
+| 256x256 / DCT8 / zero | -1.43% | -1.61% | +0.44% |
+| 256x256 / DCT8 / int16 | -4.41% | -4.50% | -4.23% |
+| 256x256 / DCT16 / zero | -2.84% | -3.25% | +0.24% |
+| 256x256 / DCT16 / int16 | -1.50% | +2.91% | +2.67% |
+| 256x256 / DCT32 / zero | -2.37% | -0.60% | -0.79% |
+| 256x256 / DCT32 / int16 | -1.31% | -4.48% | +0.62% |
+| 1920x1080 / DCT8 / zero | -7.60% | -7.20% | -7.46% |
+| 1920x1080 / DCT8 / int16 | -17.89% | -18.28% | -18.42% |
+| 1920x1080 / DCT16 / zero | -0.35% | -0.30% | -0.29% |
+| 1920x1080 / DCT16 / int16 | -0.24% | -0.31% | -0.28% |
+| 1920x1080 / DCT32 / zero | -0.64% | -0.58% | -0.64% |
+| 1920x1080 / DCT32 / int16 | -0.96% | -1.06% | -1.20% |
+| 3840x2160 / DCT8 / zero | -18.42% | -17.10% | -17.06% |
+| 3840x2160 / DCT8 / int16 | -25.21% | -25.96% | -25.44% |
+| 3840x2160 / DCT16 / zero | -0.05% | -0.11% | -0.11% |
+| 3840x2160 / DCT16 / int16 | -0.30% | -1.05% | -1.24% |
+| 3840x2160 / DCT32 / zero | -0.27% | -0.29% | -0.33% |
+| 3840x2160 / DCT32 / int16 | +0.46% | -0.04% | -0.30% |
+
+All three grouped variants beat both S87 scalar and vector4 in both
+replications and both patterns for large DCT8 layouts. For grouped128,
+paired savings versus vector4 are 0.0222/0.0784 ms at 1080p and
+0.2527/0.4407 ms at 4K for zero/int16 patterns. Versus scalar, its combined
+percentage gains are 6.00%/15.26% and 12.30%/20.05% respectively. This
+is more than merely recovering S87 vector4's DCT8 regression.
+
+Larger preferred transforms show mostly sub-percent contrasts, with no
+universal grouped block-size winner. Grouped64's 4K DCT32 int16 combined
+result regresses 0.46%; grouped256's corresponding gain is only 0.30%.
+The tiny 256x256 cases have sign changes and replication variation, so the
+study does not justify an unconditional shape/size policy. Grouped64 is
+kept as a standalone granularity probe; the fixed encoder comparison uses
+grouped128 and grouped256 with duplicate controls, not a retrospectively
+selected fastest timing window.
+
+### Encoder qualification and fixed timing protocol
+
+| Encoder mode | Packing implementation |
+| --- | --- |
+| 0 / 2 | Retained dense duplicate controls |
+| 1 / 3 | S87 vector4 fused duplicates |
+| 4 / 5 | S88 grouped128 fused duplicates |
+| 6 / 7 | S88 grouped256 fused duplicates |
+
+All six narrow modes use the same threshold scratch, batched metadata,
+early 2*N raw host allocation, full dense/compact initialization before
+wait, omitted redundant tail clearing and streaming expansion. The raw
+expansion helper is identifier-only identical to S87. Each frame reports
+one to seven pack calls, fused calls for all narrow batches and grouped
+calls only in 4/5/6/7. Captured mode and exact counter assertions tie the
+timed labels to the intended dispatch; generic evaluation retains dense
+behavior and repeated-object AQ tests cover later reconstruction/reuse.
+
+The encoder-level campaign passes 38 jobs: 12 functional AQ/batch, 22
+scoped host-ASan, three GPU memcheck and one release expansion job. Together
+with the five standalone packing jobs, there are 43 accepted qualification
+jobs. Eleven ASan input replays and sample/thin/4K memcheck replays exercise
+all eight encoder modes, accounting for 140 exact encodes. Release and
+ASan expansion each pass 5,632 cases. The 4K memcheck takes about 5 minutes
+14 seconds, with growing process CPU counters, progressing logs and 100%
+GPU utilization at recorded observations; it ends with zero errors/leaks.
+
+The fixed whole-encode protocol uses the same eleven S87 inputs and both
+backend lifetimes, eight warm and 24 measured eight-mode Williams rounds,
+checked dense conditioning each round and two replications with reversed
+input/lifetime order. Labels and row order are shuffled per block. The
+44-window schedule accounts for 12,716 exact encodes: 8,448 measured, 2,816
+warm, 1,408 conditioning and 44 references. Every codestream is checked
+against retained S70/S85 byte counts and SHA-256, and each combined contrast
+has 48 measured pairs. All 56 ordered pairs, profile stages, outer wall and
+replications are retained; no timing-window selection or duplicate-based
+correction is applied. This is not a new decoder/quality-metric campaign,
+complete production-suite run or concurrent-throughput qualification.
+
+All 44 timing windows pass. The following combined paired profile-total
+percentage medians use negative for faster. The first three columns are
+duplicate controls; the other columns compare grouped128 with vector4,
+grouped256 with vector4, and grouped256 with grouped128. These medians do
+not compose by subtracting columns and are not ratios of separate medians.
+
+| Input / lifetime | Vector duplicate 3/1 | Grouped128 duplicate 5/4 | Grouped256 duplicate 7/6 | Grouped128/vector 4/1 | Grouped256/vector 6/1 | Grouped256/128 6/4 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Sample / persistent | -2.55% | +0.56% | -0.55% | -1.87% | -2.15% | -1.21% |
+| Sample / fresh | +1.37% | +0.06% | +0.54% | +0.45% | -0.19% | -1.33% |
+| Padded 1080p / persistent | +0.79% | +0.04% | +0.15% | -0.15% | -0.53% | -0.94% |
+| Padded 1080p / fresh | +1.07% | -1.70% | +0.65% | -1.18% | -0.53% | -1.24% |
+| Padded 4K / persistent | +1.15% | -0.56% | -1.01% | +1.88% | +0.33% | +1.48% |
+| Padded 4K / fresh | +1.05% | -0.16% | -0.57% | +1.18% | +1.22% | +0.63% |
+| Flower / persistent | +0.04% | +0.84% | +1.40% | +1.13% | -0.74% | -0.66% |
+| Flower / fresh | -0.56% | -0.60% | +3.66% | -0.17% | +1.13% | -1.21% |
+| Keong macan / persistent | +0.68% | -1.04% | -0.87% | -0.65% | +1.28% | +0.09% |
+| Keong macan / fresh | -2.79% | -2.49% | +0.21% | -0.48% | -0.69% | -0.42% |
+| Riaphotographs / persistent | +1.35% | -0.51% | -1.50% | +0.98% | +1.81% | +0.63% |
+| Riaphotographs / fresh | -3.99% | -3.32% | +0.83% | +0.42% | -2.42% | -0.78% |
+| Bliznaca / persistent | -0.09% | -0.22% | +3.45% | -1.31% | -1.72% | -0.59% |
+| Bliznaca / fresh | -1.42% | -0.95% | -0.59% | -1.00% | +1.85% | +1.39% |
+| Flower 512x512 / persistent | +0.61% | -0.93% | +0.28% | +1.35% | +1.10% | +2.17% |
+| Flower 512x512 / fresh | +1.63% | -0.94% | +0.40% | +0.78% | -0.78% | +0.49% |
+| Flower 1x1023 / persistent | -0.87% | +0.15% | +0.01% | +0.39% | +0.80% | +0.52% |
+| Flower 1x1023 / fresh | -0.23% | -1.92% | +0.42% | -0.66% | -2.23% | -1.07% |
+| Flower 1023x1 / persistent | +0.04% | +0.88% | -2.29% | -1.80% | +0.81% | +0.83% |
+| Flower 1023x1 / fresh | +0.97% | -1.21% | -1.01% | +0.51% | +1.61% | +1.66% |
+| Keong 256x256 / persistent | +0.93% | -0.17% | +0.35% | +0.89% | +1.03% | -0.78% |
+| Keong 256x256 / fresh | -0.54% | +0.47% | -1.00% | -1.20% | +1.51% | +0.20% |
+
+Neither grouped family establishes a fully replicated incremental
+whole-encode win: there is no combined input/lifetime group where both
+grouped128 duplicates beat both vector duplicates in both replications'
+total and outer-wall medians. The same is true of grouped256, and of both
+grouped256 duplicates versus both grouped128 duplicates. These are
+descriptive sign checks, not statistical significance tests or proof of
+equal performance.
+
+For persistent 4K, grouped128 mode 4 regresses against vector 1 in both
+replications (total +1.10%/+2.67%, outer +1.16%/+2.90%). At fresh 4K the
+same total contrast changes from +1.96% to -1.48%. Persistent 1080p mode 6
+beats vector 1 in both replications but changes sign against duplicate 3.
+Such counterexamples prevent selecting a universal grouped implementation
+from a favorable single column or replication.
+
+The broader compact-readback candidate remains useful: all four grouped
+modes beat both dense controls in both replications' total and outer-wall
+medians at persistent/fresh 1080p and persistent 4K. That family-wide
+criterion does not hold at fresh 4K, although modes 5 and 7 individually
+pass it. These comparisons include pre-wait initialization, compact
+transfer and streaming expansion; they are not grouping-only gains.
+
+Combined duplicate total medians span -4.10% to +4.04% for dense, -3.99%
+to +1.63% for vector4, -3.32% to +0.88% for grouped128 and -2.29% to
++3.66% for grouped256. Individual-replication ranges are wider; grouped256
+reaches +6.01%. All six narrow modes select the same width in every window.
+Host copy/expansion medians remain near 1.29-1.31/1.06-1.10 ms at 1080p
+and 4.44-4.48/3.66-3.95 ms at 4K. Neither the width choice nor the host
+readback protocol explains a new grouping-only transfer saving.
+
+### Retained-trace attribution and disposition
+
+A read-only audit of two hash-checked S79 candidate 4K traces clarifies
+the workload limitation. Their final coefficient materializers identify
+8,040 DCT32x32 anchors and 120 DCT32x16 anchors, with matching packing
+launch grids and no DCT8 batch. Those shapes account for all 24,883,200
+active coefficients of the same saved 4K input. These are retained S79
+launch records, not newly captured S88 arguments; they establish that the
+synthetic DCT8 stress is not representative of that retained benchmark's
+transform mix. The standalone DCT32-preferred case itself has DCT8 edge
+leftovers, unlike these actual DCT32x16 edge transforms.
+
+The same two retained traces put dense packing at 0.9762/0.9648 ms,
+or 0.56%/0.62% of summed recorded kernel time. The two leading paired
+Malta response specializations total 25.4501/22.6910 ms, or 14.59%/14.48%.
+Low/medium row construction takes 10.3167/9.4381 ms and erosion/L2/final
+masking 9.8744/8.9536 ms. These are sums from two separately instrumented
+S79 captures, not S88 encode-time shares, new trace measurements or an
+allowance to substitute synthetic packing durations into real workflows.
+
+Keep the grouped packers as qualified diagnostic candidates, but do not
+promote either universal grouped dispatch or a newly inferred size policy.
+The synthetic gain is real within its measured scope; the complete encode
+campaign does not establish a reliable incremental win. More packing
+block-size tuning should not displace fresh attribution of dense LF
+Malta scaling/response or a larger convolution target.
+
+That follow-up must account for previous work. S66 shared reciprocals,
+S69 finer zero regions, S71 conditional division and S72 accumulator-row
+alignment were rejected. S70 already tests direction/row-major pairs,
+two spacings and four-row groups. Its LF source calls the response helper
+twice, but native code already reuses loads; that source form is not
+evidence of missing reuse. Larger row groups lost despite fewer static
+loads. The priority note records these constraints; no new Malta kernel,
+relaxed arithmetic or profiler capture is included here.
+
+### Evidence and operational limits
+
+The ignored `s88_*` bundle contains grouped source, host/native build logs,
+both timing studies, every qualification/preflight log, raw-log-derived
+pair/replication summaries, retained-trace audits and source snapshots.
+`python build-cuda-ninja/profiles/s88_validate.py --frozen --prior`
+reconstructs 14,462 explicitly counted exact encodes (1,606 preflight,
+140 sanitizer input replays and 12,716 timing-campaign encodes), the 43
+qualification jobs, 18 GPU-event windows and 127 non-overlapping completed
+runner intervals. Separate functional, expansion and direct-packing
+comparisons are not relabeled as extra codec encodes. The interval check
+does not assert that all machine activity was idle or serial.
+
+The 44-window encoder campaign finishes in about 12 minutes 53 seconds.
+Boundary telemetry is 65/70 C, SM 210/1282 MHz and memory 405/5500 MHz
+on the RTX 3060 Laptop under ordinary power management, not in-kernel
+clocks. No CUDA/compiler, encoder, sanitizer or timing retry occurs. A
+template-generation assertion is corrected before creating the encoder
+build script or invoking its compiler; this is not an executed-build
+failure. No admin/firewall/permission block is observed, and no security,
+privilege, clock, power or priority setting is changed. All retained
+production source and the 40-file S79 runtime remain unchanged. The
+backend is not considered maxed out.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
