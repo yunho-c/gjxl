@@ -14590,6 +14590,201 @@ no firewall/admin/permission block is detected. All encoder, decoder,
 qualification and timing runs finish without retry. The host fixture build
 retry described above is preserved separately.
 
+## Initialization position and expansion stores (S86)
+
+S86 starts from S85 `f3018bf`. It isolates two unresolved mechanisms with
+diagnostic binaries: identical initialization before versus after wait, and
+ordinary versus streaming expansion stores after initialization. Production
+source and the 40-file S79 runtime remain unchanged.
+
+### Matched interventions and qualification
+
+| Mode | Metadata / AC transport | Full initialization | Expansion |
+| --- | --- | --- | --- |
+| 0 / 2 | Retained dense controls | Original partial-tail loop | None |
+| 1 | Retained dense | Dense owner before wait | None |
+| 3 | Retained dense | Dense owner after wait | None |
+| 4 | Batched / narrow | Dense + compact before wait | Streaming |
+| 5 | Batched / narrow | Dense + compact after wait | Streaming |
+| 6 | Batched / narrow | Dense + compact before wait | Ordinary |
+| 7 | Batched / narrow | Dense + compact after wait | Ordinary |
+
+Every filled mode omits redundant tail clearing. All narrow modes allocate
+the same `2*N` raw compact capacity before submission and fill it completely.
+The same nonthrowing fill lambda runs either after successful submission or
+after successful wait, before policy metadata readback. Dense allocation
+timing is also identical within each matched pair. Generic evaluation resets
+diagnostic state and retains its original dense behavior; output ownership,
+device scratch capacity, width decisions and exact fallback are unchanged.
+
+Thus 1/3, 4/5 and 6/7 change fill position; 6/4 and 7/5 change the store
+policy. Three additional common-mode timestamps separate frame D2H batch
+time from host expansion. The batch includes the other frame readbacks,
+not just AC payload. These are host-stage measurements, not GPU-only traces.
+
+Release and scoped host-ASan builds pass without retry. Native audits verify
+all 205 retained S79 GPU bodies and three S81 narrow bodies unchanged in the
+timing, ASan timing and AQ-test executables. The raw expansion helper is
+source-identical to S84 apart from its diagnostic identifier. Both release
+and ASan host-only expansion tests pass 5,632 alignment/count/signed-width
+cases each.
+
+All 22 preflight windows pass the independent dense active-coefficient and
+fixed-tail oracle: 1,606 exact encodes. The 38 qualification jobs comprise
+12 functional AQ/batch replays, 22 scoped host-ASan jobs, three GPU memchecks
+and one release expansion test. Host ASan covers post-wait dense and all
+narrow position/store combinations in AQ/batch tests, plus an all-mode once
+replay for every input and the expansion test. GPU memcheck covers sample,
+thin Flower and 4K, with zero reported errors and leaks. The 4K check takes
+about 327 seconds; live child handles, increasing CPU time and advancing
+mode output confirm active work, not a detected permission block.
+
+### Timing protocol and whole-encode contrasts
+
+The fixed input set is all seven S70 distance-1.2/effort-7 encoding cases,
+plus S85 Flower 512x512, 1x1023 and 1023x1 and Keong 256x256. Those four
+diagnostic cases were selected from prior evidence; they are not holdouts.
+Eight warm and 24 measured Williams rounds balance all positions and all
+56 ordered different-mode within-round predecessor pairs per block.
+Every round has a checked dense conditioning encode. Two replications
+reverse input and backend-lifetime order.
+
+All 44 measurement windows complete: 8,448 measured, 2,816 warm, 1,408
+conditioning and 44 reference encodes, totaling 12,716 exact encodes.
+Every encode matches complete summary and codestream bytes; each reference
+matches its retained S70 or S85 SHA-256. Each input/lifetime group has
+48 measured pairs per mode. These runs are not pooled with S84/S85.
+No fresh decoder, perceptual metric, GPU-only trace, complete production
+CPU/CUDA suite or concurrent throughput acceptance result is claimed.
+
+The following are medians of within-round paired profile-total percentages;
+negative is faster. The first three contrasts are before versus after wait.
+The next two are ordinary versus streaming stores. Duplicate dense 2/0 is
+shown to expose variation; these descriptive medians are not confidence
+intervals.
+
+| Case / backend | Dense pre/post 1/3 | Narrow NT pre/post 4/5 | Narrow ordinary pre/post 6/7 | Ordinary/NT pre 6/4 | Ordinary/NT post 7/5 | Dense duplicate 2/0 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Sample / persistent | -1.07% | -0.05% | -2.37% | +0.68% | +1.41% | +0.95% |
+| Sample / fresh | -2.39% | -1.83% | +0.50% | +2.72% | -1.83% | +1.83% |
+| Padded 1080p / persistent | -4.97% | -11.57% | -7.81% | +3.27% | +0.62% | -2.76% |
+| Padded 1080p / fresh | -5.09% | -6.65% | -7.75% | +0.76% | +1.84% | +0.98% |
+| Padded 4K / persistent | -4.20% | -7.63% | -6.43% | +1.53% | -0.52% | +0.77% |
+| Padded 4K / fresh | -4.83% | -4.70% | -5.23% | -1.10% | +1.45% | +1.08% |
+| Flower / persistent | -3.21% | -3.15% | -3.33% | -0.99% | +1.45% | +0.03% |
+| Flower / fresh | -2.96% | -4.20% | -5.05% | -1.52% | +1.17% | -1.79% |
+| Keong macan / persistent | -2.43% | -3.35% | -5.68% | -1.21% | -1.84% | +1.92% |
+| Keong macan / fresh | -1.22% | -0.31% | -3.92% | -1.25% | -0.63% | +0.21% |
+| Riaphotographs / persistent | -1.42% | -1.58% | -2.73% | -0.21% | +0.70% | +0.56% |
+| Riaphotographs / fresh | -3.50% | -2.45% | -2.03% | -4.79% | -0.72% | +0.84% |
+| Bliznaca / persistent | -2.82% | -3.17% | -2.21% | -0.88% | -0.15% | -1.47% |
+| Bliznaca / fresh | -2.23% | -2.76% | -2.65% | -0.97% | +0.96% | +2.03% |
+| Flower 512x512 / persistent | -2.29% | -2.55% | -3.40% | -1.13% | -0.50% | -1.14% |
+| Flower 512x512 / fresh | -2.87% | -2.26% | -3.85% | -0.25% | +0.15% | -1.24% |
+| Flower 1x1023 / persistent | -0.37% | -0.09% | -0.94% | -0.39% | +0.78% | +1.39% |
+| Flower 1x1023 / fresh | -0.13% | -0.49% | -3.03% | +0.65% | +1.90% | -0.34% |
+| Flower 1023x1 / persistent | -0.28% | +3.35% | -1.33% | -2.68% | +2.27% | +0.58% |
+| Flower 1023x1 / fresh | +2.75% | +0.07% | -0.21% | -1.01% | +0.14% | +0.40% |
+| Keong 256x256 / persistent | +1.13% | +1.55% | -2.51% | -0.86% | -0.24% | -1.77% |
+| Keong 256x256 / fresh | +0.93% | +0.96% | +1.70% | +0.17% | -0.12% | +2.14% |
+
+### Mechanisms, counterexamples and disposition
+
+For 1080p and 4K, every fill-position contrast is faster before wait in
+both replications' profile-total **and** outer-wall medians. Combined dense
+1/3 gains are 4.20-5.09%; narrow streaming 4/5 gains are 4.70-11.57%;
+narrow ordinary 6/7 gains are 5.23-7.81%. These are matched position
+comparisons, not gains versus production.
+
+For example, persistent 1080p dense fill medians are 5.2919 ms before wait
+and 5.2446 ms after wait; the respective wait medians are 12.5770 and
+17.6419 ms, with nearly identical 4.78/4.82 ms readback. Narrow streaming
+has 7.4454/7.4153 ms fills, 10.9542/17.9715 ms waits and 2.3856/2.4765 ms
+readback. This supports useful overlap of host work with remaining GPU work
+on these large cases. It does not make fill free or identify every driver,
+scheduling, cache or clock contribution. In particular, differences of
+separate stage medians are not paired total savings.
+
+Pre-wait streaming mode 4 beats both retained dense controls in every
+1080p/4K replication's total and outer-wall medians. Against dense 0,
+combined profile-total gains are 8.26%/4.40% at 1080p persistent/fresh and
+4.19%/1.36% at 4K; outer-wall gains are 7.96%/3.66% and 3.65%/1.97%.
+Against dense 2, profile-total gains are 6.22%/5.72% and 3.72%/3.44%.
+These are same-binary diagnostic contrasts, not cumulative speedups added
+to earlier studies.
+
+Ordinary stores do not displace streaming stores as the large-image
+candidate. With pre-wait fill, host expansion medians increase from about
+1.08-1.10 to 2.13-2.19 ms at 1080p, and from 3.62-3.79 to 9.26-9.73 ms
+at 4K. Compact D2H batch medians remain near 1.30 and 4.45-4.50 ms.
+Ordinary-store expansion medians and paired readback percentages are worse
+in every large-image replication, on both sides of wait. Pre-wait paired
+readback regressions span 44.75-72.47% across the four combined groups.
+
+Whole-encode counterexamples still matter: ordinary pre-wait 4K fresh is
+1.10% faster in combined profile-total, but 1.14% slower in outer wall.
+Ordinary post-wait 4K persistent is 0.52% faster in total despite a 63.91%
+readback regression. These do not erase the isolated expansion cost, nor
+do they justify calling streaming universally faster in every whole-encode
+comparison. Small-case store-policy results remain mixed.
+
+Thin cases separate the other mechanism. For persistent Flower 1x1023,
+post-wait dense mode 3 still gains 1.31% versus dense 0 and 1.53% versus
+dense 2, beating both in both replications' total and outer-wall medians.
+The transposed persistent 1023x1 case does likewise, gaining 1.34%/2.08%.
+Mode 3 cannot hide its fill before wait: this is direct evidence of a
+benefit outside pre-wait overlap for these cases.
+
+For 1x1023 persistent, original dense wait is just 0.0041 ms. Original
+readback/D2H medians are 0.6485/0.1278 ms; mode 3 has a 0.4230 ms fill
+after wait and 0.1164/0.1154 ms readback/D2H. Most of the readback-stage
+reduction is outside the D2H call, consistent with cheaper full-owner/tail
+handling. The timings still do not individually isolate allocation,
+page-first-touch and clearing costs. Nor is fill position a universal win:
+thin fresh and Keong 256x256 contrasts have sign changes or regressions.
+
+Duplicate dense total medians span -2.76% to +2.14% across the 22 combined
+groups and -5.19% to +4.45% across individual replications. Across all
+22 groups, 1/3, 4/5 and 6/7 beat their matched alternative in both
+replications' total and outer-wall medians in 16, 13 and 17 groups
+respectively. These are descriptive counts, not a production policy or
+a validated cutoff. There are 18 byte-width and four int16-width groups,
+with no observed dense fallback in these timing inputs.
+
+Keep pre-wait streaming readback as the large-image candidate. Do not
+switch expansion stores unconditionally or infer a production area cutoff
+from the diagnostic cases. A fixed policy still needs holdout geometry
+and content, full production qualification and concurrent throughput/
+memory-pressure acceptance before promotion.
+
+The separate narrow packing pass remains a fundamental follow-up, but a
+read-only source audit exposes an aliasing constraint: current AC packing
+still reads `quantized_device_` across anchor CTAs and transform batches.
+S81 reuses that buffer as compact scratch only **after** all packing ends.
+Writing compact output there inside the packing kernel can corrupt unread
+source values. Fusion must prove a different dead destination or change
+the compact/dense-fallback protocol; flag initialization also needs ordering
+before all flag updates. The ignored `s86_fusion_constraints.md` records
+these unimplemented alternatives. No fused-kernel speedup is claimed.
+
+### Evidence and operational limits
+
+The ignored `s86_*` bundle preserves source, build/native logs, qualification,
+raw timing, all pair/replication summaries and the independent verifier.
+`python build-cuda-ninja/profiles/s86_validate.py --frozen --prior` checks
+the inherited S85 evidence and reconstructs 14,462 explicitly counted exact
+encodes: 1,606 preflight, 140 sanitizer input replays and 12,716 measurement
+encodes. It also checks the separate functional/expansion jobs and 104
+non-overlapping completed campaign intervals. This is not a claim that all
+machine activity was idle or serial.
+
+Measurement boundary telemetry is 66/70 C, SM 210/637 MHz and memory
+405/810 MHz on the RTX 3060 Laptop GPU under ordinary power management;
+these are not in-kernel clocks. No security, privilege, clock, power or
+priority setting is changed. Builds, encoder checks and measurements finish
+without retry, and no admin/firewall/permission block is detected.
+Production remains unchanged and the backend is not considered maxed out.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

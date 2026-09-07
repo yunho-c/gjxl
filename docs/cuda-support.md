@@ -1278,6 +1278,19 @@ production/batch qualification remain necessary; production stays unchanged.
 One host fixture compiler-command failure is corrected and preserved, with
 no detected firewall or permission block and no encoder retry.
 
+[S86](cuda-optimization-s1.md#initialization-position-and-expansion-stores-s86)
+isolates full initialization before/after wait and ordinary/streaming host
+expansion: 14,462 exact encodes, 38 qualification jobs and unchanged native
+GPU kernels. Pre-wait filling wins all matched large-image position contrasts
+in both replications' total and outer-wall medians. Streaming expansion retains
+the large-image readback advantage after initialization; ordinary stores are
+not a universal replacement. Post-wait initialization can still help thin
+images, separating some tail/setup savings from overlap. A packing-fusion
+follow-up must avoid overwriting quantized source still being read by other
+CTAs/batches. Holdout policy selection and production/batch gates remain open;
+S79 production stays unchanged. The 5.5-minute 4K memcheck is verified active
+work and finishes with zero reported errors/leaks; no permission block is seen.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
