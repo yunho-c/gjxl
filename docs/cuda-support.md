@@ -1389,6 +1389,20 @@ scratch-alias and half-scale ordering hazards to resolve. All 306 GPU jobs
 complete without an observed permission block. Production and all 40 retained
 runtime files remain unchanged; the encoder is not declared maxed out.
 
+[S94](cuda-optimization-s1.md#mask-blurfinal-fusion-and-flat-output-locality-s94)
+qualifies distorted-mask vertical-blur/erosion/L2/final fusion as an isolated
+primitive. The 32x64 tiled version loses at 4K; 32x8 helps HD but is not a
+general 4K win. Preserving flat row-major final output mapping instead gives
+about 11% lower time at 4K and 12% at HD for this two-kernel boundary, with
+both candidate copies beating both unfused controls in both repetitions on
+all 18 finite-random geometry/layout combinations. Across both experiments,
+42,672 guarded comparisons and all 304 GPU jobs pass, including host and
+CUDA sanitizer gates. No permission block is observed. This is not an
+encoder-wide speedup: plane-23 staging, uncached half-scale ordering, real
+working strides, prepared reuse, failure/quality gates and complete encode
+timing remain to be qualified. Production and all 40 retained runtime files
+remain unchanged; the flat fused primitive is the next integration candidate.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

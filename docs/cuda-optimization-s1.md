@@ -16494,6 +16494,310 @@ separate frozen evidence from later edits. All 40 retained runtime files
 remain byte-identical; only the two CUDA documents change, and the three
 user-owned untracked files remain untouched.
 
+## Mask-blur/final fusion and flat output locality (S94)
+
+S94 follows S93 `747480a` and tests its concrete memory-pass-removal lead.
+A row-major fused implementation passes the strict primitive gates and is
+about 11% faster at 4K and 12% at HD for the **vertical distorted-mask blur
+plus erosion/L2/final** boundary. Both repetitions and both independently
+named native-identical copies beat both unfused controls on all 18
+finite-random geometry/layout combinations. This is a promising primitive,
+not a promoted encoder change or an 11% whole-encode improvement.
+Production remains S79 `914b42c`; the backend is not declared maxed out.
+
+### Boundary, ownership and two tiled candidates
+
+The retained boundary writes a 13-tap vertically blurred distorted mask,
+then reads that plane during erosion/L2/final masking. It has no other
+consumer. Fusion removes this materialized plane's one float write and one
+float read per output, plus one launch. Eight nominal bytes/output are
+removed, but this does not measure net DRAM traffic: additional tap loads,
+halos, cache behavior and the execution layout can offset the saving.
+Horizontal blur and distorted-mask precompute are outside this timing
+boundary; the candidates consume already-horizontal input.
+
+The first same-binary comparison contains four modes:
+
+- 0: retained tiled vertical13 followed by flat256 erosion/L2/final.
+- 1: separately named, native-identical copies of both retained kernels.
+- 2: vertical13 fused with erosion/L2/final, using a 32x64 output tile.
+- 3: the same fused body with a 32x8 output tile.
+
+The generic convolution body is copied with tile height as a template
+argument. Its store callback performs final masking with the just-computed
+blur scalar. It preserves tap order, included-edge weight accumulation,
+rounded division, all-lane halo loading/barrier placement, strict erosion
+traversal/comparisons and S60's explicit weighted-erosion contraction.
+L2 arithmetic, independent strides, asymmetry and invalid-result handling
+remain unchanged. Unused AC/DC/mask pointers are null in candidate tests.
+No weight prenormalization, fast-math flag, extra image cache or production
+dispatch policy is introduced.
+
+Ownership is deliberately not changed in this primitive experiment.
+Production plane 24 holds the horizontal distorted-mask input and currently
+also stages expanded/subscale final maps. Neither tiled nor flat fusion can
+safely write that plane while neighboring outputs still read its vertical
+halo. Plane 23 becomes available after horizontal blur consumes the raw
+distorted mask. A future integration must route both final writes and their
+crop/compose readers to that dead plane, only for the fused branch.
+
+Uncached half-scale reference-mask construction also currently overwrites
+plane 24 after the distorted blur. The safe proposed order remains:
+distorted-mask precompute; reference-mask precompute and complete blur;
+distorted horizontal blur; fused final. Distorted precompute must precede
+reuse of psycho output 9 for reference-mask storage. None of these host
+ordering or alias changes is implemented or qualified by S94.
+
+### Guard and native gates
+
+Each tiled and flat diagnostic family runs the same qualification protocol.
+A full release run and a host-ASAN run each execute 3,456 fixtures and
+10,368 bitwise comparisons: four modes, twelve shapes, packed/padded
+layouts, six input patterns, three asymmetries, two weight sets, and three
+reuses. The third reuse changes both the reference mask and horizontal
+distorted-mask input. Weight sets are the production sigma-2.7 Gaussian
+formula and an asymmetric positive diagnostic sequence. Patterns cover
+signed zero, finite random values, extreme magnitudes, negative masks,
+non-finite values and arbitrary float bit patterns.
+
+The oracle materializes retained vertical13 output and uses the existing
+separate erosion/final testing route. Candidate outputs must match its
+bits; all 26 candidate plane allocations plus the weight and blur-scratch
+allocations are checked, including leading/trailing guards, row padding,
+poison and unused storage. Fused launches receive null blur scratch and
+leave that allocation untouched; unfused controls must match the oracle's
+complete materialized blur. Input copies are explicitly synchronized before
+the nonblocking test stream. Host ASAN instruments the host harness, not
+device arithmetic.
+
+Each of memcheck, initcheck, synccheck and racecheck runs 48 fixtures/144
+comparisons per family, including padded and packed 33x65 edge tiles.
+Memcheck enables full leak reporting and stream-ordered race tracking.
+All report zero errors/hazards; memcheck reports zero leaked allocations.
+Release and ASAN each also execute four 1x524281 fixtures/12 comparisons.
+The 32x8 mapping spans 65,536 tile rows. Across both families, these gates
+total 14,224 fixtures and 42,672 exact comparisons in sixteen GPU jobs.
+
+Five primary native artifacts contain the same 79 bodies: all 75 retained
+Butteraugli bodies are unchanged from the prior standalone baseline,
+plus two native-identical controls and two tiled candidates. Five flat
+artifacts retain all 79 bodies unchanged and add two native-identical
+flat candidates, for 81 bodies. Native and binary hashes cover the GPU
+object and release/ASAN probe/replay executables in each family.
+
+| Kernel | Registers | Shared bytes | Static instructions | LDG / LDS / STS | Barriers |
+| --- | ---: | ---: | ---: | --- | ---: |
+| Retained/control vertical13 | 39 | 9784 | 368 | 15 / 30 / 3 | 1 |
+| Retained/control erosion/L2/final | 40 | 0 | 744 | 28 / 0 / 0 | 0 |
+| Fused 32x64 | 40 | 9784 | 912 | 42 / 43 / 3 | 1 |
+| Fused 32x8 | 40 | 2616 | 912 | 42 / 43 / 3 | 1 |
+| Flat fused / identical copy | 40 | 0 | 928 | 53 / 0 / 0 | 0 |
+
+All have zero stack, spill stores and spill loads. Instruction counts are
+static code counts, not dynamic execution counts or memory transactions.
+
+### Tiled replay results
+
+Nine shapes are replayed packed and padded: 3839x2159, 3840x2160,
+1919x1079, 1920x1080, 960x540, 510x532, 255x266, 32x64 and 33x65.
+Padded reference/distorted/work/output strides are width+11/+17/+23/+29.
+These are synthetic independent-stride inputs, not captured encoder data
+or half-scale layouts using the full-resolution working stride.
+
+Patterns are 0 signed zero, 1 finite-random psycho data with positive masks,
+and 2 extreme-magnitude psycho data with a smooth reference mask. Pattern 2
+is a stress input that often yields final NaNs, not a photographic workload.
+There are 54 release and 54 host-ASAN untimed preflights, then 108 measured
+jobs: two repetitions of all 54 combinations. Repetition 1 reverses
+geometry/layout/pattern order and mode order within the quartet schedule.
+
+Each graph contains four stage invocations: eight kernel nodes for either
+unfused mode and four for either fused mode. Node counts are asserted.
+There are eight warmup quartets and all 24 mode permutations as measured
+quartets. Output bits are checked after every event window; complete
+28-allocation checks follow each initial graph replay and the final case.
+All event windows, including warmups and both controls, are retained.
+Timing excludes host comparisons, allocation, copies and logging.
+
+The tiled campaign has 13,824 event windows (10,368 measured, 3,456 warm),
+14,688 graph-output checks and 1,080 complete guard sets. Entries below
+are median paired percentages against retained mode 0, repetition 0 / 1;
+negative is faster. Classification additionally checks mode 1 in both
+repetitions, rather than selecting one favorable control.
+
+| Shape | Padded | Pattern | Fused64 / retained % r0 / r1 | Fused8 / retained % r0 / r1 |
+| --- | ---: | ---: | --- | --- |
+| 3839x2159 | 0 | 0 | +8.075 / +8.539 | +1.852 / +1.359 |
+| 3839x2159 | 0 | 1 | +6.930 / +4.360 | +0.345 / -0.128 |
+| 3839x2159 | 0 | 2 | +6.020 / +4.932 | +0.489 / +1.523 |
+| 3839x2159 | 1 | 0 | +9.911 / +9.873 | +1.746 / +1.944 |
+| 3839x2159 | 1 | 1 | +9.089 / +7.927 | +1.292 / +2.271 |
+| 3839x2159 | 1 | 2 | +8.354 / +6.744 | +1.489 / +2.712 |
+| 3840x2160 | 0 | 0 | +10.996 / +11.186 | -2.572 / -1.445 |
+| 3840x2160 | 0 | 1 | +9.771 / +8.053 | +0.574 / +0.708 |
+| 3840x2160 | 0 | 2 | +9.968 / +7.414 | +2.247 / +2.612 |
+| 3840x2160 | 1 | 0 | +8.744 / +8.690 | +2.741 / +2.748 |
+| 3840x2160 | 1 | 1 | +7.800 / +8.065 | +0.854 / +1.641 |
+| 3840x2160 | 1 | 2 | +8.301 / +7.726 | +0.126 / +1.106 |
+| 1919x1079 | 0 | 0 | +3.734 / +3.330 | -10.190 / -10.346 |
+| 1919x1079 | 0 | 1 | +2.802 / +2.145 | -10.031 / -8.788 |
+| 1919x1079 | 0 | 2 | +2.635 / +2.173 | -8.628 / -8.439 |
+| 1919x1079 | 1 | 0 | +3.581 / +3.749 | -9.707 / -9.637 |
+| 1919x1079 | 1 | 1 | +2.908 / +2.720 | -8.494 / -8.111 |
+| 1919x1079 | 1 | 2 | +2.722 / +2.999 | -7.640 / -7.835 |
+| 1920x1080 | 0 | 0 | +6.357 / +6.514 | -10.665 / -10.454 |
+| 1920x1080 | 0 | 1 | +5.049 / +4.892 | -10.801 / -10.602 |
+| 1920x1080 | 0 | 2 | +5.219 / +5.083 | -10.749 / -10.455 |
+| 1920x1080 | 1 | 0 | +3.025 / +2.920 | -10.145 / -10.117 |
+| 1920x1080 | 1 | 1 | +1.789 / +1.989 | -8.967 / -8.799 |
+| 1920x1080 | 1 | 2 | +1.773 / +1.639 | -7.838 / -8.120 |
+| 960x540 | 0 | 0 | +3.547 / +3.008 | -13.597 / -12.549 |
+| 960x540 | 0 | 1 | +3.397 / +3.640 | -13.073 / -13.263 |
+| 960x540 | 0 | 2 | +3.272 / +2.779 | -13.378 / -13.161 |
+| 960x540 | 1 | 0 | +1.293 / +1.299 | -12.816 / -12.846 |
+| 960x540 | 1 | 1 | +1.659 / +1.830 | -12.561 / -13.398 |
+| 960x540 | 1 | 2 | +1.844 / +1.346 | -13.038 / -13.043 |
+| 510x532 | 0 | 0 | -0.230 / -0.569 | -13.730 / -14.155 |
+| 510x532 | 0 | 1 | -0.228 / -0.453 | -13.310 / -13.477 |
+| 510x532 | 0 | 2 | +0.004 / +0.000 | -12.685 / -13.251 |
+| 510x532 | 1 | 0 | -0.226 / -0.559 | -13.235 / -13.416 |
+| 510x532 | 1 | 1 | +0.565 / -0.444 | -12.896 / -13.214 |
+| 510x532 | 1 | 2 | -0.112 / -0.447 | -13.019 / -13.408 |
+| 255x266 | 0 | 0 | -11.271 / -8.140 | -18.477 / -18.999 |
+| 255x266 | 0 | 1 | -10.409 / -5.624 | -17.164 / -15.566 |
+| 255x266 | 0 | 2 | -10.409 / -5.445 | -17.259 / -16.670 |
+| 255x266 | 1 | 0 | -12.230 / -7.640 | -19.783 / -19.079 |
+| 255x266 | 1 | 1 | -10.332 / -6.102 | -17.089 / -16.608 |
+| 255x266 | 1 | 2 | -10.005 / -6.081 | -16.845 / -17.391 |
+| 32x64 | 0 | 0 | +89.189 / +91.489 | -45.946 / -46.809 |
+| 32x64 | 0 | 1 | +109.091 / +92.391 | -43.271 / -48.913 |
+| 32x64 | 0 | 2 | +112.121 / +101.163 | -35.369 / -44.186 |
+| 32x64 | 1 | 0 | +87.755 / +91.667 | -45.549 / -42.262 |
+| 32x64 | 1 | 1 | +101.111 / +104.545 | -41.566 / -40.006 |
+| 32x64 | 1 | 2 | +111.628 / +106.522 | -40.238 / -40.667 |
+| 33x65 | 0 | 0 | +88.669 / +91.489 | -45.917 / -45.344 |
+| 33x65 | 0 | 1 | +96.715 / +112.771 | -46.159 / -45.898 |
+| 33x65 | 0 | 2 | +100.000 / +96.785 | -46.159 / -46.738 |
+| 33x65 | 1 | 0 | +80.581 / +81.930 | -50.439 / -44.210 |
+| 33x65 | 1 | 1 | +96.809 / +67.857 | -41.385 / -39.565 |
+| 33x65 | 1 | 2 | +102.198 / +86.000 | -41.107 / -39.657 |
+
+The 32x64 candidate loses against both controls in both repetitions on
+all twelve 4K combinations. At HD it is also slower. The 32x8 candidate
+wins all twelve HD combinations, about 7.6-10.8% versus retained, and all
+smaller tested combinations. At 4K it has only one four-way consistent
+win (packed 3840x2160 signed zero), eight losses and three mixed outcomes.
+Across all 54 combinations, fused64 is faster/slower/mixed in 10/42/2;
+fused8 in 43/8/3. Neither is selected as a universal replacement.
+The smallest cases have coarse event granularity and visible control
+scatter; their large percentages must not be generalized to encoding.
+
+### Flat-layout follow-up
+
+The tiled result motivates a separately qualified implementation that
+preserves the retained final pass's flat256, row-major output mapping.
+Every thread directly reads the thirteen valid vertical taps and weights
+in original order, accumulates sum and included normalization, divides,
+and invokes the same final-store body. It has no shared tile or barrier.
+Two template instantiations provide native-identical candidate copies;
+the other two modes remain the original unfused pair and its identical
+control. The shared-tile candidates remain in the binary but are not timed
+as flat modes 2/3.
+
+This is a changed access/reuse/coordination strategy, not proof that one
+particular cache or translation structure caused the tiled regression.
+Direct loading increases explicit tap loads and removes their shared-memory
+reuse; any net memory-traffic benefit depends on cache behavior. No
+privileged hardware counters are used to infer a measured DRAM reduction.
+
+The flat follow-up times finite-random pattern 1 only, over the same nine
+shapes and two layouts. Its separate full guard suite still includes all
+six patterns and both weight sets. Eighteen release and eighteen ASAN
+preflights precede 36 measured jobs. The same burst, permutations, warmups,
+reverse repetition, node-count, output and complete guard checks apply.
+Totals are 4,608 event windows (3,456 measured, 1,152 warm), 4,896 graph-output
+checks and 360 complete guard sets.
+
+| Shape | Padded | Pattern | Flat / retained % r0 / r1 | Flat copy / retained % r0 / r1 |
+| --- | ---: | ---: | --- | --- |
+| 3839x2159 | 0 | 1 | -11.292 / -11.356 | -11.251 / -11.163 |
+| 3839x2159 | 1 | 1 | -10.957 / -11.492 | -11.141 / -11.389 |
+| 3840x2160 | 0 | 1 | -11.515 / -11.067 | -11.183 / -11.166 |
+| 3840x2160 | 1 | 1 | -11.168 / -10.934 | -11.156 / -11.016 |
+| 1919x1079 | 0 | 1 | -11.675 / -11.997 | -11.731 / -12.038 |
+| 1919x1079 | 1 | 1 | -11.868 / -11.835 | -11.856 / -11.807 |
+| 1920x1080 | 0 | 1 | -11.792 / -11.995 | -11.775 / -12.038 |
+| 1920x1080 | 1 | 1 | -11.696 / -11.607 | -11.794 / -11.604 |
+| 960x540 | 0 | 1 | -14.392 / -14.365 | -14.445 / -14.339 |
+| 960x540 | 1 | 1 | -14.373 / -13.734 | -14.347 / -14.137 |
+| 510x532 | 0 | 1 | -15.376 / -15.176 | -15.385 / -15.480 |
+| 510x532 | 1 | 1 | -15.402 / -15.376 | -15.151 / -15.513 |
+| 255x266 | 0 | 1 | -22.059 / -24.658 | -22.059 / -24.658 |
+| 255x266 | 1 | 1 | -21.222 / -24.081 | -22.100 / -23.490 |
+| 32x64 | 0 | 1 | -48.485 / -37.626 | -46.875 / -41.507 |
+| 32x64 | 1 | 1 | -45.714 / -42.045 | -47.059 / -43.487 |
+| 33x65 | 0 | 1 | -45.455 / -49.242 | -47.059 / -47.059 |
+| 33x65 | 1 | 1 | -47.222 / -31.494 | -47.222 / -39.706 |
+
+Both candidate copies beat both controls in both repetitions for all
+eighteen combinations. Flat/original ranges from -10.934% to -11.515% at
+4K, -11.607% to -11.997% at HD, roughly -13.7% to -14.4% at 960x540,
+and -15.2% to -15.4% at 510x532. At 4K the retained pair takes about
+3.1 ms; saving roughly 0.35 ms applies to this two-kernel boundary only.
+It is not a measured complete-encoder saving. The tiny-image results again
+have coarse events and control scatter.
+
+### Disposition, next integration and evidence
+
+Retain the flat fused kernel as the next integration candidate; do not
+promote either tiled variant or introduce a size threshold from this screen.
+The primitive evidence is strong enough to justify full-workflow work,
+but not to skip it. Next gates are:
+
+1. Implement the plane-23 staging and uncached-reference ordering above in
+   an isolated diagnostic forward source, preserving the retained branch.
+2. Qualify real full-width half-scale strides, expanded/cropped images,
+   repeated prepared evaluation, changed distorted inputs, all candidate
+   aliases, null/invalid inputs and failure behavior.
+3. Audit integrated native bodies; compare prepared outputs, summaries,
+   codestream bytes and allocation/transfer behavior with the retained path.
+4. Measure complete fully-resident encoding using paired identical controls,
+   fresh and reused backends, real images, and both the public encode and
+   outer lifetime boundaries. Run independent decoder/quality gates before
+   promotion. Do not report the isolated 11% as an encoder-wide gain.
+5. Preserve frozen build dependencies when making any eventual production
+   build; use a new directory or verified archival relocation.
+
+All 304 GPU jobs finish with nonoverlapping intervals. Tiled timing runs
+12:42:24.393313-12:47:08.096574 UTC on 2026-09-07 (4m44s); flat timing
+runs 12:52:07.336004-12:53:37.409617 (1m30s). All observation handles
+reach terminal completion; no GPU qualification/timing job is restarted,
+discarded or filtered. CPU builds/native audits overlap qualification,
+not either timing campaign. Machine-wide isolation is not claimed.
+
+No admin, firewall or permission prompt is observed. Restricted hardware
+counters are not retried, and clock/power/priority/security settings are
+unchanged. This does not establish the cause of any earlier long run.
+
+One host replay build fails because a mechanical fixture adaptation creates
+`oracle.d.d.planes` and leaves `d.planes` instead of `d.d.planes`.
+The failed source and log are preserved; correcting those two accesses
+builds successfully. No GPU test fails. A setup snapshot initially names a
+nonexistent test filename; the two completed snapshots are retained and the
+correct `tests/cuda_l2_final_test.cpp` is then copied without overwriting.
+An early resource-inspection attempt reads an unfinished native dump;
+rerunning the read after that same dump completes succeeds without
+restarting it. S93 frozen/current validation passes before documentation
+changes.
+
+Ignored `build-cuda-ninja/profiles/s94_*` holds source snapshots, failed and
+successful builds, strict fixtures, both replay families, all raw results,
+native/resource audits, analyzers, hashes and a recomputing validator.
+Six source/document snapshots separate frozen evidence from later edits.
+All 40 retained runtime files remain byte-identical. Only the two CUDA
+documents change; the three user-owned untracked files remain untouched.
+
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
