@@ -187,10 +187,11 @@ bool CheckBatch(const Fixture& fixture) {
     if (!Ok(budget.TryReserve(8192, &job))) return false;
     {
       ResourceContextScope scope({&job, ResourceClass::kPreparation});
-      if (!Ok(encoder->Encode(requests, &results))) return false;
-      for (size_t i : {0, 2, 3})
-        if (!Check(results[i].status.resource_plan_exceeded() && results[i].codestream.empty(),
-            "Batch worker escaped an insufficient resource plan")) return false;
+      const auto previous = results[0].codestream;
+      if (!Check(encoder->Encode(requests, &results).resource_plan_exceeded() &&
+                     results.size() == 4 && results[0].codestream == previous,
+                 "Batch worker underplan escaped its domain or published partial results"))
+        return false;
     }
     job.Reset();
     if (!Empty(budget)) return false;
@@ -244,10 +245,12 @@ bool CheckC(const Fixture& fixture) {
     const GJXLResult result = gjxl_encode(context.get(), &image, &encoding, &output);
     const bool rejected_before_allocating = ManagedHostAllocationFailurePendingForTest();
     DisarmManagedHostAllocationFailureForTest();
-    if (!Check(result == GJXL_ERROR_OUT_OF_MEMORY && rejected_before_allocating &&
-        output.data == nullptr && output.size == 0 &&
-        std::string_view(gjxl_get_last_error()) == "Allocation exceeds admitted resource plan",
-        "C conversion bypassed its plan or lost the precise error")) return false;
+    if (!Check(result == GJXL_ERROR_RESOURCE_PLAN_EXCEEDED && rejected_before_allocating &&
+                   output.data == nullptr && output.size == 0 &&
+                   std::string_view(gjxl_get_last_error()) ==
+                       "Allocation exceeds admitted resource plan",
+               "C conversion bypassed its plan or lost the precise error"))
+      return false;
   }
   job.Reset();
   if (!Empty(budget)) return false;

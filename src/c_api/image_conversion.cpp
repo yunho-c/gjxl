@@ -52,6 +52,13 @@ Status ConvertPackedSrgbToLinearRgb(PackedSrgbImageView image,
   if (linear_rgb == nullptr) {
     return Status::InvalidArgument("Output image must not be null");
   }
+  const Status status = ValidatePackedSrgbImage(image);
+  if (!status.ok())
+    return status;
+  return ConvertValidatedPackedSrgbToLinearRgb(image, linear_rgb);
+}
+
+Status ValidatePackedSrgbImage(PackedSrgbImageView image) {
   if (image.width == 0 || image.height == 0) {
     return Status::InvalidArgument("Image dimensions must be nonzero");
   }
@@ -110,6 +117,15 @@ Status ConvertPackedSrgbToLinearRgb(PackedSrgbImageView image,
     }
   }
 
+  return Status::Ok();
+}
+
+Status ConvertValidatedPackedSrgbToLinearRgb(PackedSrgbImageView image, Image3FBuffer *linear_rgb) {
+  if (linear_rgb == nullptr)
+    return Status::InvalidArgument("Output image must not be null");
+  const size_t width = image.width, height = image.height;
+  const Extent2D extent{width, height};
+  const size_t bytes_per_pixel = image.format == PackedPixelFormat::kRgb8Srgb ? 3 : 4;
   try {
     Image3FBuffer candidate(extent);
     Image3FView output = candidate.view();

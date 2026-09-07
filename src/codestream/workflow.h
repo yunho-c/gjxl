@@ -10,6 +10,7 @@
 
 #include "codestream/entropy_behavior.h"
 #include "core/ac_strategy.h"
+#include "core/execution_domain.h"
 #include "core/image.h"
 #include "core/status.h"
 #include "gpu/ops/adaptive_quantization.h"
@@ -107,6 +108,9 @@ struct VarDctEncodingOptions {
   /// coefficient workflows already produce the final score as part of their
   /// ordinary policy evaluation.
   bool collect_final_butteraugli_score = false;
+  /// Shares one immutable managed-memory allowance with every call using this
+  /// handle. Null selects the process-wide default, not a new per-call budget.
+  std::shared_ptr<const ExecutionDomain> execution_domain;
 };
 
 /// Encoder analysis reported without exposing temporary pipeline storage.

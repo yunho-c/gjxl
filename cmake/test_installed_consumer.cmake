@@ -68,7 +68,8 @@ foreach(
   consumer
   gjxl_codec_consumer
   gjxl_codestream_consumer
-  gjxl_c_consumer)
+  gjxl_c_consumer
+  gjxl_domain_consumer)
   set(consumer_executable "${consumer_build}/${consumer}")
   if(NOT EXISTS "${consumer_executable}")
     set(consumer_executable

@@ -19,4 +19,12 @@ struct BatchPublicationObserverForTesting {
 };
 inline thread_local BatchPublicationObserverForTesting batch_publication_observer_for_testing;
 
+// Exact driver work-slot boundaries, propagated to joined workers. The hook
+// must not throw or mutate encoder state; its context outlives Encode.
+struct BatchExecutionObserverForTesting {
+  void *context = nullptr;
+  void (*observe)(void *, size_t request, bool entering) noexcept = nullptr;
+};
+inline thread_local BatchExecutionObserverForTesting batch_execution_observer_for_testing;
+
 }  // namespace gjxl::codestream_internal

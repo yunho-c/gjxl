@@ -29,6 +29,7 @@ extern "C" {
 #endif
 
 typedef struct GJXLContext GJXLContext;
+typedef struct GJXLExecutionDomain GJXLExecutionDomain;
 
 typedef int32_t GJXLResult;
 enum {
@@ -39,6 +40,8 @@ enum {
   GJXL_ERROR_OUT_OF_MEMORY = 4,
   GJXL_ERROR_BACKEND = 5,
   GJXL_ERROR_INTERNAL = 6,
+  /// An admitted plan was exceeded; terminal, not a retryable allocation miss.
+  GJXL_ERROR_RESOURCE_PLAN_EXCEEDED = 7,
 };
 
 typedef int32_t GJXLBackend;
@@ -54,10 +57,31 @@ enum {
 
 typedef struct {
   uint32_t struct_size;
+  /// Zero is unlimited but accounted. Managed capacity is not process RSS.
+  uint64_t managed_memory_bytes;
+} GJXLExecutionDomainOptions;
+
+typedef struct {
+  uint32_t struct_size;
+  uint64_t live_requested_bytes;
+  uint64_t live_capacity_bytes;
+  uint64_t idle_capacity_bytes;
+  uint64_t reserved_unbacked_bytes;
+  uint64_t peak_backing_bytes;
+  uint64_t peak_committed_bytes;
+  uint64_t active_reservations;
+  uint64_t waiting_requests;
+} GJXLExecutionDomainSnapshot;
+
+typedef struct {
+  uint32_t struct_size;
   GJXLBackend backend;
   /// Maximum participating CPU threads per encode. Zero selects automatic;
   /// positive values must not exceed GJXL_MAX_CPU_THREADS.
   uint32_t num_cpu_threads;
+  /// Shared immutable allowance; null selects one process-wide default.
+  /// Context creation retains the domain independently of this handle.
+  const GJXLExecutionDomain *execution_domain;
 } GJXLContextOptions;
 
 typedef int32_t GJXLCompressionMode;
@@ -100,6 +124,18 @@ typedef struct {
 /// caller_size must describe the complete caller allocation and fit uint32_t.
 GJXL_API GJXLResult gjxl_context_options_init(
   GJXLContextOptions* options, size_t caller_size) GJXL_NOEXCEPT;
+
+GJXL_API GJXLResult gjxl_execution_domain_options_init(GJXLExecutionDomainOptions *options,
+                                                       size_t caller_size) GJXL_NOEXCEPT;
+/// Creates a domain; null options select a new unlimited explicit domain.
+GJXL_API GJXLResult gjxl_execution_domain_create(const GJXLExecutionDomainOptions *options,
+                                                 GJXLExecutionDomain **domain) GJXL_NOEXCEPT;
+/// Releases only this handle. Contexts and active/retained storage remain valid.
+GJXL_API void gjxl_execution_domain_destroy(GJXLExecutionDomain *domain) GJXL_NOEXCEPT;
+/// Null domain queries the shared default. caller_size bounds the output write.
+GJXL_API GJXLResult gjxl_execution_domain_snapshot(const GJXLExecutionDomain *domain,
+                                                   GJXLExecutionDomainSnapshot *snapshot,
+                                                   size_t caller_size) GJXL_NOEXCEPT;
 
 /// Initializes encoder options with distance 1.0, effort 7, and automatic
 /// compression behavior.

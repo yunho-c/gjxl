@@ -5,6 +5,10 @@
 
 #include "core/resource_budget.h"
 
+namespace gjxl {
+class ExecutionDomain;
+}
+
 namespace gjxl::resource_budget_internal {
 
 /// Shared accounting for calls without an explicit admitted context. Unlimited
@@ -21,6 +25,7 @@ struct ResourceContext {
   // Opt in at encoder entry points, not when caller-owned inputs are created.
   // An explicit reservation also enables managed host allocation.
   bool track_host_allocations = false;
+  const ExecutionDomain *domain = nullptr;
 };
 
 inline thread_local ResourceContext current_resource_context;
@@ -62,7 +67,13 @@ private:
 class ManagedHostScope {
 public:
   explicit ManagedHostScope(ResourceClass resource_class) noexcept
-    : scope_({current_resource_context.reservation, resource_class, true}) {}
+      : scope_([resource_class] {
+          auto context = CurrentResourceContext();
+          context.resource_class = resource_class;
+          context.track_host_allocations = true;
+          return context;
+        }()) {}
+
 private:
   ResourceContextScope scope_;
 };

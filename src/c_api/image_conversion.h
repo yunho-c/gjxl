@@ -11,6 +11,13 @@
 
 namespace gjxl::c_api_internal {
 
+struct PackedSrgbImageView;
+/// Shared no-allocation validation, including opaque-alpha verification.
+[[nodiscard]] Status ValidatePackedSrgbImage(PackedSrgbImageView image);
+/// Requires successful validation of the same immutable borrowed input.
+[[nodiscard]] Status ConvertValidatedPackedSrgbToLinearRgb(PackedSrgbImageView image,
+                                                           Image3FBuffer *linear_rgb);
+
 enum class PackedPixelFormat : uint32_t {
   kInvalid = 0,
   kRgb8Srgb = 1,

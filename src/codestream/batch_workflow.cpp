@@ -3,13 +3,15 @@
 
 #include "codestream/batch_workflow.h"
 
-#include "codestream/workflow_internal.h"
 #include "codestream/batch_workflow_test.h"
+#include "codestream/workflow_admission.h"
+#include "codestream/workflow_internal.h"
 
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <exception>
+#include <limits>
 #include <mutex>
 #include <new>
 #include <stdexcept>
@@ -23,6 +25,47 @@ using resource_budget_internal::PublicationVector;
 using resource_budget_internal::ManagedVector;
 using resource_budget_internal::ResourceAllocation;
 namespace {
+
+Status PlanRequest(const VarDctBatchEncodingRequest &request,
+                   codestream_internal::WorkflowStoragePlan *plan) {
+  if (!request.linear_rgb.valid())
+    return Status::InvalidArgument("VarDCT encoding input or output is invalid");
+  return codestream_internal::PlanWorkflowAdmission(
+      request.linear_rgb.extent(),
+      {request.options, codestream_internal::WorkflowStorageRoute::kCpu,
+       codestream_internal::WorkflowStorageAdapter::kBorrowedLinearRgb, true},
+      nullptr, false, true, plan);
+}
+
+Status PlanBatch(std::span<const VarDctBatchEncodingRequest> requests, size_t workers,
+                 std::shared_ptr<const ExecutionDomain> *domain, bool *explicit_domain,
+                 codestream_internal::BatchWorkflowStoragePlan *plan) {
+  try {
+    codestream_internal::BatchWorkflowStorageAccumulator accumulator;
+    for (const auto &request : requests) {
+      auto selected = request.options.execution_domain ? request.options.execution_domain
+                                                       : ExecutionDomain::Default();
+      if (*domain && domain->get() != selected.get())
+        return Status::InvalidArgument("All batch requests must share an execution domain");
+      *domain = std::move(selected);
+      *explicit_domain |= bool(request.options.execution_domain);
+      codestream_internal::WorkflowStoragePlan image_plan;
+      const Status status = PlanRequest(request, &image_plan);
+      // A shape whose complete plan cannot be represented has no admissible
+      // work slot. Ordinary invalid/unavailable requests retain per-image errors.
+      if (status.code() == StatusCode::kOutOfMemory)
+        return status;
+      const Status added = accumulator.AddRequest(status.ok() ? &image_plan : nullptr);
+      if (!added.ok())
+        return added;
+    }
+    if (!*domain)
+      *domain = ExecutionDomain::Default();
+    return accumulator.Finish(workers, (*domain)->options().managed_memory_bytes, plan);
+  } catch (const std::bad_alloc &) {
+    return Status::OutOfMemory("Unable to plan batch admission");
+  }
+}
 
 void EncodeOne(
   const VarDctBatchEncodingRequest& request,
@@ -75,7 +118,7 @@ public:
     try {
       workers_.reserve(max_in_flight_);
       for (size_t index = 0; index < max_in_flight_; ++index) {
-        workers_.emplace_back([this] { WorkerLoop(); });
+        workers_.emplace_back([this, index] { WorkerLoop(index); });
       }
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
       Stop();
@@ -109,6 +152,19 @@ public:
         "Image batch result output is null");
     }
 
+    std::unique_lock encode_lock(encode_mutex_);
+    std::shared_ptr<const ExecutionDomain> domain;
+    bool explicit_domain = false;
+    codestream_internal::BatchWorkflowStoragePlan batch_plan;
+    Status admission_status =
+        PlanBatch(requests, max_in_flight_, &domain, &explicit_domain, &batch_plan);
+    if (!admission_status.ok())
+      return admission_status;
+    codestream_internal::WorkflowAdmission admission;
+    admission_status =
+        admission.Start(batch_plan.working.peak_bytes, explicit_domain ? domain : nullptr);
+    if (!admission_status.ok())
+      return admission_status;
     const resource_budget_internal::ManagedHostScope managed_host(
       resource_budget_internal::ResourceClass::kRetainedResult);
     // Declare escrow before the candidate: rollback frees backing first.
@@ -120,6 +176,12 @@ public:
       candidate_owned.resize(requests.size());
       Status status = PublicationVector<VarDctBatchEncodingResult>::Create(requests.size(), &candidate);
       if (!status.ok()) return status;
+      for (size_t i = 0; i < requests.size(); ++i) {
+        codestream_internal::WorkflowStoragePlan ignored;
+        candidate[i].status = PlanRequest(requests[i], &ignored);
+        if (candidate[i].status.code() == StatusCode::kOutOfMemory)
+          return candidate[i].status;
+      }
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
       return failure.status();
     } catch (const std::bad_alloc&) {
@@ -130,7 +192,6 @@ public:
         "Image batch contains too many requests");
     }
 
-    std::unique_lock encode_lock(encode_mutex_);
     if (requests.empty()) {
       candidate.PublishTo(results);
       return Status::Ok();
@@ -142,6 +203,11 @@ public:
       results_ = candidate.mutable_view();
       owned_results_ = candidate_owned;
       resource_context_ = resource_budget_internal::CurrentResourceContext();
+      in_flight_ = batch_plan.in_flight;
+      trim_after_each_image_ = batch_plan.trim_after_each_image;
+      domain_ = domain;
+      execution_observer_ = codestream_internal::batch_execution_observer_for_testing;
+      terminal_index_.store(std::numeric_limits<size_t>::max(), std::memory_order_relaxed);
       next_index_.store(0, std::memory_order_relaxed);
       remaining_workers_ = workers_.size();
       ++generation_;
@@ -156,7 +222,12 @@ public:
       requests_ = {};
       results_ = {};
       owned_results_ = {};
+      domain_.reset();
     }
+
+    const size_t terminal = terminal_index_.load(std::memory_order_relaxed);
+    if (terminal != std::numeric_limits<size_t>::max())
+      return candidate[terminal].status;
 
     const auto observer = codestream_internal::batch_publication_observer_for_testing;
     if (observer.observe != nullptr)
@@ -189,13 +260,17 @@ private:
     workers_.clear();
   }
 
-  void WorkerLoop() noexcept {
+  void WorkerLoop(size_t worker_index) noexcept {
     size_t observed_generation = 0;
     while (true) {
       std::span<const VarDctBatchEncodingRequest> requests;
       std::span<VarDctBatchEncodingResult> results;
       std::span<OwnedEncodingResult> owned;
       resource_budget_internal::ResourceContext resource_context;
+      size_t in_flight = 0;
+      bool trim = false;
+      std::shared_ptr<const ExecutionDomain> domain;
+      codestream_internal::BatchExecutionObserverForTesting observer;
       {
         std::unique_lock lock(work_mutex_);
         work_available_.wait(lock, [&] {
@@ -209,16 +284,46 @@ private:
         results = results_;
         owned = owned_results_;
         resource_context = resource_context_;
+        in_flight = in_flight_;
+        trim = trim_after_each_image_;
+        domain = domain_;
+        observer = execution_observer_;
       }
 
-      while (true) {
+      while (worker_index < in_flight && terminal_index_.load(std::memory_order_relaxed) ==
+                                             std::numeric_limits<size_t>::max()) {
         const size_t index =
           next_index_.fetch_add(1, std::memory_order_relaxed);
         if (index >= requests.size()) {
           break;
         }
+        if (!results[index].status.ok())
+          continue;
         const resource_budget_internal::ResourceContextScope resources(resource_context);
+        if (observer.observe != nullptr)
+          observer.observe(observer.context, index, true);
         EncodeOne(requests[index], &results[index], &owned[index]);
+        bool terminal = results[index].status.resource_plan_exceeded();
+        if (trim) {
+          Status status;
+          try {
+            status = codestream_internal::WorkflowAdmission::TrimIdle(*domain);
+          } catch (const std::bad_alloc &) {
+            status = {StatusCode::kOutOfMemory, {}};
+          } catch (...) {
+            status = {StatusCode::kInternal, {}};
+          }
+          if (!status.ok()) {
+            results[index].status = std::move(status);
+            terminal = true;
+          }
+        }
+        if (terminal) {
+          size_t expected = std::numeric_limits<size_t>::max();
+          terminal_index_.compare_exchange_strong(expected, index, std::memory_order_relaxed);
+        }
+        if (observer.observe != nullptr)
+          observer.observe(observer.context, index, false);
       }
 
       {
@@ -239,6 +344,11 @@ private:
   bool stopping_ = false;
   size_t generation_ = 0;
   size_t remaining_workers_ = 0;
+  size_t in_flight_ = 0;
+  bool trim_after_each_image_ = false;
+  std::shared_ptr<const ExecutionDomain> domain_;
+  codestream_internal::BatchExecutionObserverForTesting execution_observer_;
+  std::atomic<size_t> terminal_index_{std::numeric_limits<size_t>::max()};
   std::span<const VarDctBatchEncodingRequest> requests_;
   std::span<VarDctBatchEncodingResult> results_;
   std::span<OwnedEncodingResult> owned_results_;

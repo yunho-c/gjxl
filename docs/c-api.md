@@ -93,6 +93,7 @@ extern "C" {
 #endif
 
 typedef struct GJXLContext GJXLContext;
+typedef struct GJXLExecutionDomain GJXLExecutionDomain;
 
 typedef int32_t GJXLResult;
 enum {
@@ -103,6 +104,7 @@ enum {
     GJXL_ERROR_OUT_OF_MEMORY = 4,
     GJXL_ERROR_BACKEND = 5,
     GJXL_ERROR_INTERNAL = 6,
+    GJXL_ERROR_RESOURCE_PLAN_EXCEEDED = 7,
 };
 
 typedef int32_t GJXLBackend;
@@ -120,6 +122,7 @@ typedef struct {
     uint32_t struct_size;
     GJXLBackend backend;
     uint32_t num_cpu_threads;
+    const GJXLExecutionDomain* execution_domain;
 } GJXLContextOptions;
 
 typedef int32_t GJXLCompressionMode;
@@ -362,6 +365,32 @@ behavior.
 Device indexes remain omitted because the current factory uses the
 system-default Metal device.
 
+### Shared managed-memory domains
+
+`GJXLExecutionDomainOptions::managed_memory_bytes` configures an immutable
+allowance shared by every context retaining the same `GJXLExecutionDomain`.
+Initialize options with `gjxl_execution_domain_options_init`, create a handle
+with `gjxl_execution_domain_create`, and set the context's appended
+`execution_domain` field before context creation. Check each result. The context
+retains the domain independently; `gjxl_execution_domain_destroy` releases only
+the caller's handle. Null context domains use one shared, unlimited-but-accounted
+default; creating with null domain options instead creates an independent
+unlimited explicit domain.
+
+`gjxl_execution_domain_snapshot` reports managed live/idle/reserved capacity,
+peaks and admission counts. This is not RSS: caller buffers, published output,
+immutable setup, driver internals and small control/allocator overhead are
+excluded. Converted C input and the final output copy are included until
+publication. Impossible plans fail before conversion; temporary occupancy can
+wait in FIFO order. An admitted plan violation is terminal and reported as
+`GJXL_ERROR_RESOURCE_PLAN_EXCEEDED`, distinct from an allocation failure.
+
+The original 8-byte and 12-byte context layouts retain default-domain behavior.
+C++ callers can share the identical domain using the installed
+`gjxl/execution_domain.hpp` bridge. See [public admission](resident-public-admission.md)
+for the full boundary, batch behavior and qualification. Aggregate CPU scheduling
+is separate; the memory-domain API does not change the per-encode CPU limit above.
+
 ## Image-view contract
 
 The first consumer path uses interleaved 8-bit pixels:
@@ -435,7 +464,8 @@ Internal status translation should preserve these distinctions:
 | `INVALID_ARGUMENT` | Malformed pointers, sizes, layouts, or option values |
 | `UNSUPPORTED` | Valid concept outside the current profile, such as lossless or alpha |
 | `UNAVAILABLE` | Requested execution backend cannot be created or selected |
-| `OUT_OF_MEMORY` | Host or device allocation failure |
+| `OUT_OF_MEMORY` | Host/device allocation failure or a complete plan above the managed limit |
+| `RESOURCE_PLAN_EXCEEDED` | An admitted plan was exceeded; terminal without retry or partial publication |
 | `BACKEND` | Submission, completion, or device execution failure |
 | `INTERNAL` | Invariant failure or unexpected exception |
 

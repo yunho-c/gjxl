@@ -24,7 +24,6 @@
 #include <arm_neon.h>
 #endif
 
-#include "core/managed_allocator.h"
 #include "codec/color_transform_internal.h"
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
@@ -33,10 +32,12 @@
 #include "codestream/encoder.h"
 #include "codestream/encoder_internal.h"
 #include "codestream/rate_control_internal.h"
+#include "codestream/workflow_admission.h"
 #include "codestream/workflow_internal.h"
 #include "codestream/workflow_lifetime_test.h"
 #include "core/frame_geometry.h"
 #include "core/image_buffer.h"
+#include "core/managed_allocator.h"
 #include "core/thread_budget.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/ac_strategy.h"
@@ -295,6 +296,78 @@ Status ValidateRateControlOptions(
       "Target-size tolerance is not representable");
   }
   *tolerance_bytes = static_cast<size_t>(tolerance);
+  return Status::Ok();
+}
+
+Status ValidateWorkflowOptions(Extent2D source, const VarDctEncodingOptions &options,
+                               bool gpu_profiling, size_t *target_bytes, size_t *tolerance_bytes) {
+  size_t effective_target_bytes = 0, target_size_tolerance_bytes = 0;
+  Status status = ValidateRateControlOptions(source, options, &effective_target_bytes,
+                                             &target_size_tolerance_bytes);
+  if (!status.ok()) {
+    return status;
+  }
+  if (options.effort < 1 || options.effort > 10) {
+    return Status::InvalidArgument("VarDCT effort must be in [1, 10]");
+  }
+  if (options.cpu_thread_count > kMaximumCpuThreadCount) {
+    return Status::InvalidArgument("VarDCT CPU thread count must be zero or at most 256");
+  }
+  switch (options.backend) {
+  case VarDctBackendPreference::kAutomatic:
+  case VarDctBackendPreference::kCpu:
+  case VarDctBackendPreference::kMetal:
+    break;
+  default:
+    return Status::InvalidArgument("VarDCT encoding backend preference is invalid");
+  }
+  switch (options.density_mode) {
+  case VarDctDensityMode::kDefault:
+  case VarDctDensityMode::kHighDensity:
+    break;
+  default:
+    return Status::InvalidArgument("VarDCT density mode is invalid");
+  }
+  switch (options.compression_mode) {
+  case VarDctCompressionMode::kAutomatic:
+  case VarDctCompressionMode::kMaximumCompression:
+    break;
+  default:
+    return Status::InvalidArgument("VarDCT compression mode is invalid");
+  }
+  switch (options.metal_aq_mode) {
+  case GpuAdaptiveQuantizationMode::kExactCoefficients:
+  case GpuAdaptiveQuantizationMode::kFullyResident:
+    break;
+  case GpuAdaptiveQuantizationMode::kThroughput:
+  case GpuAdaptiveQuantizationMode::kMaximumThroughput:
+    if (options.backend != VarDctBackendPreference::kMetal) {
+      return Status::InvalidArgument("Throughput AQ requires an explicitly forced Metal backend");
+    }
+    break;
+  default:
+    return Status::InvalidArgument("VarDCT Metal AQ mode is invalid");
+  }
+  if (options.metal_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput &&
+      options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
+    return Status::InvalidArgument("Maximum-throughput AQ does not evaluate maximum error");
+  }
+  if (options.density_mode == VarDctDensityMode::kHighDensity &&
+      (options.rate_control_mode == VarDctRateControlMode::kMaximumError ||
+       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput ||
+       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput)) {
+    return Status::InvalidArgument("High-density AQ requires iterative Butteraugli control");
+  }
+  if (gpu_profiling && (options.backend != VarDctBackendPreference::kMetal ||
+                        (options.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+                         options.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+                        options.rate_control_mode != VarDctRateControlMode::kButteraugliTarget)) {
+    return Status::InvalidArgument(
+        "GPU profiling requires a resident Metal Butteraugli-target workflow");
+  }
+
+  *target_bytes = effective_target_bytes;
+  *tolerance_bytes = target_size_tolerance_bytes;
   return Status::Ok();
 }
 
@@ -1272,6 +1345,47 @@ Status codestream_internal::SelectQuantizationMatrixScales(
   return Status::Ok();
 }
 
+Status codestream_internal::PlanWorkflowAdmission(
+    Extent2D source, const WorkflowStorageOptions &options, GpuBackend *supplied_backend,
+    bool supplied_backend_is_qualified, bool resolve_production_backend, WorkflowStoragePlan *out) {
+  if (out == nullptr)
+    return Status::InvalidArgument("Workflow admission plan output is null");
+  size_t target = 0, tolerance = 0;
+  Status status = ValidateWorkflowOptions(source, options.encoding, options.collect_gpu_profile,
+                                          &target, &tolerance);
+  if (!status.ok())
+    return status;
+  FrameGeometry geometry;
+  status = FrameGeometry::Create(source, &geometry);
+  if (!status.ok())
+    return status;
+  auto selected = options;
+  auto e = options.encoding;
+  const bool search = e.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
+                      e.rate_control_mode == VarDctRateControlMode::kTargetBitsPerPixel;
+  const bool automatic_search = search && e.backend == VarDctBackendPreference::kAutomatic;
+  selected.route = WorkflowStorageRoute::kCpu;
+  if (automatic_search && (e.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident ||
+                           !TargetSizeSearchMayEvaluate(e.target_size_maximum_attempts,
+                                                        IsAutomaticMetalTargetEligible))) {
+    return ComputeWorkflowStoragePlan(source, selected, out);
+  }
+  if (automatic_search) {
+    e.rate_control_mode = VarDctRateControlMode::kButteraugliTarget;
+    e.butteraugli_target = 1.0f; // Qualify the existing automatic target interval.
+  }
+  GpuBackend *gpu = nullptr;
+  bool metal = false;
+  status = SelectAttemptBackend(geometry, e, supplied_backend, supplied_backend_is_qualified,
+                                resolve_production_backend, &gpu, &metal);
+  if (!status.ok())
+    return status;
+  if (metal)
+    selected.route = automatic_search ? WorkflowStorageRoute::kAutomaticExactSearch
+                                      : WorkflowStorageRoute::kMetal;
+  return ComputeWorkflowStoragePlan(source, selected, out);
+}
+
 Status EncodeLinearRgbVarDctCodestreamImpl(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,
@@ -1307,92 +1421,33 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   }
   size_t effective_target_bytes = 0;
   size_t target_size_tolerance_bytes = 0;
-  Status status = ValidateRateControlOptions(
-    linear_rgb.extent(),
-    options,
-    &effective_target_bytes,
-    &target_size_tolerance_bytes);
-  if (!status.ok()) {
+  Status status = ValidateWorkflowOptions(linear_rgb.extent(), options, gpu_profiling,
+                                          &effective_target_bytes, &target_size_tolerance_bytes);
+  if (!status.ok())
     return status;
+  codestream_internal::WorkflowAdmission admission;
+  size_t admission_bytes = 0;
+  if (resource_budget_internal::CurrentResourceContext().reservation == nullptr) {
+    codestream_internal::WorkflowStoragePlan plan;
+    status = codestream_internal::PlanWorkflowAdmission(
+        linear_rgb.extent(),
+        {options, codestream_internal::WorkflowStorageRoute::kCpu,
+         codestream_internal::WorkflowStorageAdapter::kBorrowedLinearRgb, timing != nullptr,
+         profile != nullptr, gpu_profiling},
+        supplied_backend, supplied_backend_is_qualified, resolve_production_backend, &plan);
+    if (!status.ok())
+      return status;
+    admission_bytes = plan.working.peak_bytes;
   }
-  if (options.effort < 1 || options.effort > 10) {
-    return Status::InvalidArgument(
-      "VarDCT effort must be in [1, 10]");
-  }
-  if (options.cpu_thread_count > kMaximumCpuThreadCount) {
-    return Status::InvalidArgument(
-      "VarDCT CPU thread count must be zero or at most 256");
-  }
+  status = admission.Start(admission_bytes, options.execution_domain);
+  if (!status.ok())
+    return status;
   thread_budget_internal::CpuParticipantTracker participant_tracker;
   const resource_budget_internal::ManagedHostScope managed_host(
     resource_budget_internal::ResourceClass::kPreparation);
   const thread_budget_internal::EncodeScope thread_budget(
     options.cpu_thread_count,
     profile == nullptr ? nullptr : &participant_tracker);
-  switch (options.backend) {
-    case VarDctBackendPreference::kAutomatic:
-    case VarDctBackendPreference::kCpu:
-    case VarDctBackendPreference::kMetal:
-      break;
-    default:
-      return Status::InvalidArgument(
-        "VarDCT encoding backend preference is invalid");
-  }
-  switch (options.density_mode) {
-    case VarDctDensityMode::kDefault:
-    case VarDctDensityMode::kHighDensity:
-      break;
-    default:
-      return Status::InvalidArgument(
-        "VarDCT density mode is invalid");
-  }
-  switch (options.compression_mode) {
-    case VarDctCompressionMode::kAutomatic:
-    case VarDctCompressionMode::kMaximumCompression:
-      break;
-    default:
-      return Status::InvalidArgument(
-        "VarDCT compression mode is invalid");
-  }
-  switch (options.metal_aq_mode) {
-    case GpuAdaptiveQuantizationMode::kExactCoefficients:
-    case GpuAdaptiveQuantizationMode::kFullyResident:
-      break;
-    case GpuAdaptiveQuantizationMode::kThroughput:
-    case GpuAdaptiveQuantizationMode::kMaximumThroughput:
-      if (options.backend != VarDctBackendPreference::kMetal) {
-        return Status::InvalidArgument(
-          "Throughput AQ requires an explicitly forced Metal backend");
-      }
-      break;
-    default:
-      return Status::InvalidArgument(
-        "VarDCT Metal AQ mode is invalid");
-  }
-  if (options.metal_aq_mode ==
-        GpuAdaptiveQuantizationMode::kMaximumThroughput &&
-      options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
-    return Status::InvalidArgument(
-      "Maximum-throughput AQ does not evaluate maximum error");
-  }
-  if (options.density_mode == VarDctDensityMode::kHighDensity &&
-      (options.rate_control_mode == VarDctRateControlMode::kMaximumError ||
-       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput ||
-       options.metal_aq_mode ==
-         GpuAdaptiveQuantizationMode::kMaximumThroughput)) {
-    return Status::InvalidArgument(
-      "High-density AQ requires iterative Butteraugli control");
-  }
-  if (gpu_profiling &&
-      (options.backend != VarDctBackendPreference::kMetal ||
-       (options.metal_aq_mode !=
-          GpuAdaptiveQuantizationMode::kFullyResident &&
-        options.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
-       options.rate_control_mode !=
-          VarDctRateControlMode::kButteraugliTarget)) {
-    return Status::InvalidArgument(
-      "GPU profiling requires a resident Metal Butteraugli-target workflow");
-  }
   const bool target_size_control =
     options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
     options.rate_control_mode == VarDctRateControlMode::kTargetBitsPerPixel;

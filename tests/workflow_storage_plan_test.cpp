@@ -392,8 +392,9 @@ bool CheckCAdapter() {
             const bool injected =
                 failure == 0 || !ManagedHostAllocationFailurePendingForTest();
             DisarmManagedHostAllocationFailureForTest();
-            if (!Check(status == GJXL_ERROR_OUT_OF_MEMORY && injected &&
-                           bytes.value.data == nullptr && bytes.value.size == 0,
+            if (!Check(status == (failure == 0 ? GJXL_ERROR_RESOURCE_PLAN_EXCEEDED
+                                               : GJXL_ERROR_OUT_OF_MEMORY) &&
+                           injected && bytes.value.data == nullptr && bytes.value.size == 0,
                        "C input/publication failure was not atomic"))
               return false;
             if (failure != 0 &&

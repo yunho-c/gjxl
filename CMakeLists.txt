@@ -414,7 +414,7 @@ install(
 )
 
 install(
-  FILES include/gjxl/gjxl.h
+  FILES include/gjxl/gjxl.h include/gjxl/execution_domain.hpp
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gjxl"
 )
 
@@ -2616,6 +2616,13 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_workflow_storage_plan_test PRIVATE gjxl_c gjxl_codestream gjxl_metal)
   add_test(NAME workflow_storage_plan COMMAND gjxl_workflow_storage_plan_test)
   set_tests_properties(workflow_storage_plan PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_workflow_admission_test tests/workflow_admission_test.cpp)
+  target_link_libraries(gjxl_workflow_admission_test PRIVATE gjxl_c gjxl_codestream gjxl_metal)
+  add_test(NAME workflow_admission COMMAND gjxl_workflow_admission_test)
+  set_tests_properties(workflow_admission PROPERTIES TIMEOUT 180)
+  add_test(NAME workflow_admission_cpu COMMAND gjxl_workflow_admission_test --cpu-only)
+  set_tests_properties(workflow_admission_cpu PROPERTIES TIMEOUT 180)
 
   add_test(
     NAME codec_install_consumer

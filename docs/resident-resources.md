@@ -2,7 +2,9 @@
 
 This is the implementation record for milestone 4 of
 [resident execution](resident-execution.md), based on the integrated checkpoint
-`ec4d4c5`. **Milestone 4 is not complete.** The tested
+`ec4d4c5`. **Milestone 4 is complete**, with the final API, allocation audit,
+failure/progress and measured qualification in [public admission](resident-public-admission.md).
+Aggregate CPU scheduling remains milestone 6. The tested
 [capacity-domain primitive](../src/core/resource_budget.h) now has
 [real Metal allocation attachments and all-pool trim](resident-metal-accounting.md).
 The [host attachment checkpoint](resident-host-accounting.md) adds writer/image-plane
@@ -71,9 +73,11 @@ runtime object code remains byte-identical.
 The [compatibility plans](resident-compatibility-workflow-storage-planning.md)
 add exact-coefficient, resident maximum-error and maximum-throughput workflows,
 including coexistence of native and GPU preparation during automatic exact
-searches. Unified entry-point selection, input adapters and retained batch
-results still need composition and public domain integration.
-Whole-domain admission remains pending.
+searches. The [public admission checkpoint](resident-public-admission.md) now
+connects those composed plans to C++/C entry points and retained batch results,
+with one shared default or an explicit immutable domain, FIFO idle eviction,
+and enforced batch work slots/trim. Its qualification is separate from the
+earlier component tests; aggregate CPU scheduling is still pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
 ## Source-backed ownership inventory
@@ -103,12 +107,13 @@ summing its planes as additional allocations would double-count shared storage.
 
 ## Integration decisions
 
-These decisions define the intended workflow integration; the public API and
-allocation adapters are not wired by the foundation commit.
+These decisions define workflow integration. The foundation commit did not wire
+the public API; the [public admission checkpoint](resident-public-admission.md)
+subsequently implements its memory portion. CPU enforcement remains milestone 6.
 
 - **Domain/configuration:** an immutable, shared execution-domain handle carries
-  managed-capacity and aggregate CPU limits. A C++ workflow option and equivalent
-  opaque C handle will permit explicit domains. A null handle selects one shared
+  managed capacity; aggregate CPU limits will extend it in milestone 6. A C++
+  workflow option and equivalent opaque C handle permit explicit domains. A null handle selects one shared
   production domain, not a fresh budget per encode, batch, context, or explicit
   backend. Do not reconfigure a live domain in place.
 - **Defaults:** zero managed bytes means no configured hard memory cap, while
@@ -157,9 +162,9 @@ serializer and frontend component bounds. Metal compatibility and mixed-backend
 search plans now cover the other encoding policies. The
 [unified preflight checkpoint](resident-admission-preflight.md) composes these
 with C input/publication and retained batch ownership, and adds FIFO-aware
-matching-domain eviction across live Metal backends. Actual entry-point route
-selection, public domains, batch slot/trim enforcement and final allocation
-coverage still require implementation and tests before workflow enforcement can land.
+matching-domain eviction across live Metal backends. Public entry-point route
+selection, domains and batch slot/trim enforcement are now implemented, with
+their whole-workflow validation and final allocation review recorded separately.
 In particular, excluding all CPU allocations or retained batch results to make
 a GPU-only limiter pass would not satisfy this design or the parent roadmap.
 
@@ -208,11 +213,11 @@ whole-workflow limits until its integration coverage is complete.
 | Shared AQ/Butteraugli planes, smaller final staging, omitted host mask and deferred metadata | Implemented in milestone 3; preserve its parity/lifetime gates and count the shared physical backing only once. |
 | AC-search packed/rate scratch retained after placement | Implemented in the [last-use checkpoint](resident-last-use.md): reuse through the final search, then release before AQ. Earlier retries and reusable API defaults retain their storage. Measurement and qualification are recorded there. |
 | Full evaluator/reference storage retained during CPU serialization | Implemented in the [last-use checkpoint](resident-last-use.md) only for a final independent completed-frame attempt. Earlier retries and owned/diagnostic consumers retain their contracts. Idle pooled capacity remains charged. |
-| Three existing AQ pools plus Butteraugli cache | Common Metal accounting and generation-aware all-pool trim are implemented and measured in the Metal attachment checkpoint. Domain-wide automatic eviction/admission is still required. |
+| Three existing AQ pools plus Butteraugli cache | Common Metal accounting and generation-aware all-pool trim are implemented and measured in the Metal attachment checkpoint. Public admission adds domain-wide automatic eviction and tight-batch retirement. |
 | Intermediate AQ coefficients versus serializer layout | Keep distinct where reconstruction/AQ consumers require their current layout. The final-output destination optimization is already implemented; another layout change needs measured end-to-end benefit. |
 | Small copied completed-frame metadata | Intentionally retained: separates output from much larger evaluator lifetimes. Do not make metadata zero-copy by keeping the evaluator alive. |
 | Exact shared candidate calculations / further kernel fusion | Inventory against the integrated profile. No unqualified arithmetic reordering or candidate pruning. A documented measured rejection or reasoned deferral is valid; this row is not yet a completed audit. |
-| CPU token/model/writer overlap and storage growth | Serializer containers have qualified allocation-owned backing tickets, with measured overhead. Fixed context-tree heap copies and a static owning default-map copy were removed. The whole-serializer and resident-workflow bounds now cover policy-dependent simultaneous capacities and candidate/result publication. Public-domain composition/admission remains pending. Preserve model search, tie rules, and exact output; resource pressure cannot silently reduce search. |
+| CPU token/model/writer overlap and storage growth | Serializer containers have qualified allocation-owned backing tickets, with measured overhead. Fixed context-tree heap copies and a static owning default-map copy were removed. Whole-workflow bounds now compose policy-dependent simultaneous capacities and candidate/result publication under public admission. Preserve model search, tie rules, and exact output; resource pressure cannot silently reduce search. |
 
 ## Foundation validation and remaining gates
 
@@ -254,11 +259,11 @@ attachment has its own [qualification record](resident-metal-accounting.md).
 Neither checkpoint claims a whole-encoder managed-memory bound; milestone 3's
 frozen combined baseline remains intact.
 
-Milestone 4 still requires a final allocation-coverage audit, remaining
-entry-point plan selection and input-adapter/batch composition,
-public domain configuration/propagation, automatic cache eviction,
-retry and aggregate batch-result admission, end-to-end failure/progress tests, and
-physical peak/idle/post-trim measurements. Milestone 5 still requires the audited
+Milestone 4's public configuration, plan selection, input/batch composition,
+domain propagation, eviction and whole-call failure/progress enforcement are
+implemented and qualified in the public admission checkpoint, completing the
+milestone with its final allocation audit and physical peak/idle/post-trim and
+latency results. Component tests alone did not establish this. Milestone 5 still requires the audited
 opportunities' final dispositions and measured gates. Milestone 6 still requires
 aggregate CPU scheduling and actual latency/throughput qualification. None is
 marked complete by the foundation's unit tests.

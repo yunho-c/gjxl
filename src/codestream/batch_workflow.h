@@ -41,6 +41,11 @@ struct VarDctBatchEncodingResult {
 /// or output arguments leave caller-visible results unchanged. Concurrent
 /// Encode calls on the same driver are serialized; use one call containing all
 /// available requests to expose the configured in-flight parallelism.
+/// All requests must share one execution domain (null means the shared default).
+/// Admission reserves all retained results and at least the largest work slot
+/// before allocating or encoding; a finite limit may reduce in-flight workers,
+/// never effort or candidates. An infeasible batch or terminal planner violation
+/// leaves the entire caller-visible result array unchanged.
 class VarDctBatchEncoder {
 public:
   ~VarDctBatchEncoder();

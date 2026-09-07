@@ -417,6 +417,10 @@ public:
     return state_->snapshot;
   }
 
+  [[nodiscard]] bool SharesDomain(const ResourceReservation &reservation) const noexcept {
+    return reservation.state_ && reservation.state_->budget == state_;
+  }
+
   [[nodiscard]] Status TryReserve(
     size_t capacity_bytes, ResourceReservation* reservation) const {
     Status status = Validate(capacity_bytes, reservation);

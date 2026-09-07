@@ -20,6 +20,12 @@ inline constexpr float kMinimumTargetSizeButteraugliTarget = 0.01f;
 inline constexpr float kMaximumTargetSizeButteraugliTarget = 10.0f;
 inline constexpr size_t kMaximumTargetSizeEncodeAttempts = 64;
 
+/// Whether the default bounded search can reach a matching target before its
+/// attempt cap, ignoring data-dependent early success. Uses the runtime's
+/// interval ordering without encoding or allocating a search vector.
+[[nodiscard]] bool TargetSizeSearchMayEvaluate(size_t maximum_attempts,
+                                               bool (*predicate)(float)) noexcept;
+
 /// Search-interval vector only; current and retained-best encode results are
 /// separate owners. This does not run a search or validate its byte target.
 [[nodiscard]] Status ComputeTargetSizeControlStorageBound(

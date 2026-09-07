@@ -4,10 +4,12 @@
 #include "codestream/rate_control_internal.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
 #include <new>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -172,8 +174,7 @@ template <typename Bytes>
   return Status::Ok();
 }
 
-[[nodiscard]] size_t WidestInterval(
-  const Storage<SearchInterval>& intervals) noexcept {
+[[nodiscard]] size_t WidestInterval(std::span<const SearchInterval> intervals) noexcept {
 
   size_t best = 0;
   for (size_t index = 1; index < intervals.size(); ++index) {
@@ -190,6 +191,39 @@ template <typename Bytes>
 }
 
 }  // namespace
+
+bool TargetSizeSearchMayEvaluate(size_t maximum_attempts, bool (*predicate)(float)) noexcept {
+  if (predicate == nullptr || maximum_attempts == 0 ||
+      maximum_attempts > kMaximumTargetSizeEncodeAttempts)
+    return false;
+  const float lower = kMinimumTargetSizeButteraugliTarget;
+  const float upper = kMaximumTargetSizeButteraugliTarget;
+  if (predicate(lower))
+    return true;
+  if (maximum_attempts == 1)
+    return false;
+  if (predicate(upper))
+    return true;
+  std::array<SearchInterval, kMaximumTargetSizeEncodeAttempts> intervals{};
+  intervals[0] = {lower, upper};
+  size_t count = 1, attempts = 2;
+  while (attempts < maximum_attempts && count != 0) {
+    const size_t index = WidestInterval(std::span(intervals).first(count));
+    const auto interval = intervals[index];
+    for (size_t i = index + 1; i < count; ++i)
+      intervals[i - 1] = intervals[i];
+    --count;
+    const float midpoint = interval.lower + 0.5f * (interval.upper - interval.lower);
+    if (midpoint == interval.lower || midpoint == interval.upper)
+      continue;
+    ++attempts;
+    if (predicate(midpoint))
+      return true;
+    intervals[count++] = {interval.lower, midpoint};
+    intervals[count++] = {midpoint, interval.upper};
+  }
+  return false;
+}
 
 Status ComputeTargetSizeControlStorageBound(
   size_t maximum_attempts, resource_budget_internal::HostStorageBound* out) {

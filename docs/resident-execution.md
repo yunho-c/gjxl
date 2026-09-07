@@ -34,12 +34,12 @@ Development branch: `refactor/resident-execution` (originally
 The proposal numbers below refer to the original architecture discussion, not
 the implementation milestone numbers used later in this document.
 
-| Proposal | Scope | Status after preparation integration (milestone 3) |
+| Proposal | Scope | Current status |
 | --- | --- | --- |
 | #3: Stable coefficients and frame views | Included | Principal handoff complete in `ca440d1` and `dabe129`: ownership-independent consumers, direct final AC destinations, independent completed-output lease. |
 | #4A: Reuse, fusion, shorter intermediate lifetimes | Included, subject to numerical and end-to-end gates | Resident fusion is in the `4ea12ab` base. Shared scratch, deferred preparation, and volatile capacity caching from `perf/metal-preparation` are integrated and jointly qualified. Remaining opportunities need an explicit inventory. |
 | #4B: Screening, pruning, selective refinement | Separate policy track | Deferred; not an unfinished requirement of this structural refactor. |
-| #5: Ownership, resource budgets, scheduling | Included | Output ownership is established. Existing AQ leases and batch overlap are foundations, not coordinated whole-workflow admission. |
+| #5: Ownership, resource budgets, scheduling | Included | Output ownership and shared whole-workflow memory admission are implemented and qualified. Aggregate CPU scheduling remains milestone 6; existing batch overlap alone does not complete it. |
 
 The integrated preparation branch contributes two commits:
 
@@ -127,7 +127,7 @@ Acceptance:
 - Complete-call timing including teardown; peak and idle footprint with the
   backend alive. Concurrent correctness stress is not throughput qualification.
 
-### 4. Coordinated resource accounting and admission — pending
+### 4. Coordinated resource accounting and admission — complete
 
 Depends on milestone 3's integrated ownership model. Start with a small explicit
 set of resource classes and reservations, not a general graph runtime.
@@ -209,9 +209,11 @@ plus simultaneous CPU/Metal preparation in automatic exact-coefficient searches.
 The [unified preflight and cache-progress checkpoint](resident-admission-preflight.md)
 composes selected policy recipes with packed C conversion/publication and
 streamed batch retained-result, work-slot and per-pool idle bounds. It also adds
-queued eviction and matching-domain all-backend cache reclamation. Actual
-entry-point route selection, public domains and enforcement of the admission
-and batch contracts remain pending; these checkpoints do not satisfy the milestone.
+queued eviction and matching-domain all-backend cache reclamation. The
+[public admission checkpoint](resident-public-admission.md) now connects route
+selection, shared C/C++ domains, complete-call reservations and batch slot/trim
+enforcement. Its passing whole-workflow qualification and pressure tradeoffs are recorded separately;
+the earlier component checkpoints alone do not satisfy the milestone.
 
 Deliverables:
 
@@ -239,9 +241,10 @@ Deliverables:
   capacity. Any staged reservation growth needs a demonstrated progress rule.
 
 The resource record specifies the configuration surface, defaults, domain
-ownership, reservation strategy and treatment of retained batch results. Remaining
-entry-point plan selection, input/batch composition and API integration remain
-to be implemented; those recorded decisions are not existing API promises.
+ownership, reservation strategy and treatment of retained batch results. The
+memory configuration, entry-point selection and input/batch enforcement are now
+implemented. The aggregate CPU-domain configuration/enforcement remains part of
+milestone 6, not an implied promise of the memory API.
 
 Acceptance:
 
