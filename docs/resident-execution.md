@@ -197,7 +197,13 @@ The [whole resident workflow plan](resident-workflow-storage-planning.md) now
 composes production Metal Butteraugli preparation, AC/AQ, completed output,
 serialization and parent diagnostic sessions, including forced-Metal size-search
 retention. Complete cold/warm encodes fit its preflight reservation. Other
-backend/policy paths, input adapters, retained batch results and public-domain
+backend/policy paths remain separate.
+The [native CPU workflow plan](resident-cpu-workflow-storage-planning.md) adds
+the shared CPU-side AQ policy, native evaluator old/new overlap, compatibility
+destinations and complete CPU Butteraugli/maximum-error/size-search lifetimes.
+Its isolated AQ and complete CPU encodes fit precomputed reservations without
+changing runtime object code. Metal compatibility policies, mixed-backend
+automatic searches, input adapters, retained batch results and public-domain
 admission remain pending; these checkpoints do not satisfy the milestone.
 
 Deliverables:
@@ -227,7 +233,7 @@ Deliverables:
 
 The resource record specifies the configuration surface, defaults, domain
 ownership, reservation strategy and treatment of retained batch results. Remaining
-frontend bounds, combined whole-workflow estimators and API integration remain
+backend-policy bounds, mixed-backend/input/batch composition and API integration remain
 to be implemented; those recorded decisions are not existing API promises.
 
 Acceptance:

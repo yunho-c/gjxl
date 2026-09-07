@@ -244,6 +244,7 @@ add_library(
   src/codec/frontend_storage_plan.cpp
   src/codec/ac_strategy_storage_plan.cpp
   src/codec/perceptual_storage_plan.cpp
+  src/codec/adaptive_quantization_storage_plan.cpp
   src/codec/codestream.cpp
   src/codec/vardct_frame.cpp
 )
@@ -280,6 +281,7 @@ add_library(
   src/codestream/huffman.cpp
   src/codestream/rate_control.cpp
   src/codestream/resident_workflow_storage_plan.cpp
+  src/codestream/cpu_workflow_storage_plan.cpp
   src/codestream/sections.cpp
   src/codestream/token_storage_plan.cpp
   src/codestream/entropy_storage_plan.cpp
@@ -2585,6 +2587,11 @@ if(GJXL_BUILD_TESTS)
   add_dependencies(gjxl_resident_workflow_storage_plan_test gjxl_metal_shaders)
   add_test(NAME resident_workflow_storage_plan COMMAND gjxl_resident_workflow_storage_plan_test)
   set_tests_properties(resident_workflow_storage_plan PROPERTIES TIMEOUT 240)
+
+  add_executable(gjxl_cpu_workflow_storage_plan_test tests/cpu_workflow_storage_plan_test.cpp)
+  target_link_libraries(gjxl_cpu_workflow_storage_plan_test PRIVATE gjxl_codestream gjxl_metal)
+  add_test(NAME cpu_workflow_storage_plan COMMAND gjxl_cpu_workflow_storage_plan_test)
+  set_tests_properties(cpu_workflow_storage_plan PROPERTIES TIMEOUT 300)
 
   add_test(
     NAME codec_install_consumer

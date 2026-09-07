@@ -14,6 +14,10 @@
 
 namespace gjxl::adaptive_quantization_internal {
 
+// Pinned maximum-error policy, shared with storage planning. Independent of
+// the Butteraugli effort/iteration setting.
+inline constexpr size_t kMaximumErrorUpdateCount = 5;
+
 /// Stages measured inside one encode/reconstruct/measure evaluation.
 enum class EvaluationStage : size_t {
   kFieldConstruction,

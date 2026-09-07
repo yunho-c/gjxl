@@ -206,9 +206,11 @@ The probe source, binary and JSONL output are retained with the qualification.
 
 ## Remaining work
 
-Complete the other workflow/backend policy envelopes, including CPU host-policy
-state and compatibility outputs, and combine input adapters and retained batch
-results. Then wire shared C++/C execution domains, full upfront reservations,
+The subsequent [native CPU checkpoint](resident-cpu-workflow-storage-planning.md)
+supplies CPU host-policy state, native evaluator/compatibility outputs and
+complete CPU workflow bounds. Complete the remaining Metal compatibility policy
+and mixed-backend automatic-search envelopes, and combine input adapters and
+retained batch results. Then wire shared C++/C execution domains, full upfront reservations,
 cache shedding and atomic failure paths through all entry points. The estimator
 alone is not admission. Milestone 5's explicit last-use/reuse dispositions and
 milestone 6's aggregate CPU coordination, fairness and throughput gates remain

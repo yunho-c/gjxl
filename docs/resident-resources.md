@@ -62,8 +62,14 @@ The [whole resident workflow plan](resident-workflow-storage-planning.md) compos
 these session/attempt lifetimes with production Metal Butteraugli preparation,
 AC/AQ, completed output, serialization and forced-Metal size-search retention.
 It qualifies complete cold/warm encodes under precomputed reservations, not
-only isolated components. Other backend/policy envelopes, input adapters and
-retained batch results still need composition and public domain integration.
+only isolated components.
+The [native CPU workflow plan](resident-cpu-workflow-storage-planning.md) adds
+shared CPU-side AQ policy and native evaluator lifetimes, compatibility outputs,
+and complete CPU Butteraugli, maximum-error and target-size workflows. Isolated
+AQ and complete CPU tests fit their respective upfront bounds; the existing
+runtime object code remains byte-identical. Metal compatibility policies,
+mixed-backend automatic searches, input adapters and retained batch results
+still need composition and public domain integration.
 Whole-domain admission remains pending.
 The inventory and decisions below retain the CPU tail and batch-result requirements.
 
@@ -142,10 +148,10 @@ allocation adapters are not wired by the foundation commit.
   or new streaming-output API. Transfer results out of managed accounting only
   at the existing public ownership handoff.
 
-The device recipes are now shared with actual allocation, the CPU serializer
-has a complete conservative storage plan, and frontend representation bounds
-are tested. Remaining host bounds and their combined device/attempt/result
-envelope, the API adapters, and final allocation coverage still require
+The device recipes are now shared with actual allocation, and complete
+conservative CPU and resident Metal Butteraugli workflow plans compose the
+serializer and frontend component bounds. Remaining Metal policy and mixed-backend
+attempt/result envelopes, the API adapters, and final allocation coverage still require
 implementation and tests before workflow enforcement can land.
 In particular, excluding all CPU allocations or retained batch results to make
 a GPU-only limiter pass would not satisfy this design or the parent roadmap.

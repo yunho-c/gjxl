@@ -1373,7 +1373,7 @@ Status RunAdaptiveQuantizationPolicyImpl(
         AdaptiveQuantizationControlMode::kMaximumError) {
       constexpr float kInitializationTarget = 1.0f;
       constexpr float kInitialQuantDc = 0x1.43d136p+2f;
-      constexpr size_t kUpdateCount = 5;
+      constexpr size_t kUpdateCount = kMaximumErrorUpdateCount;
       constexpr size_t kEvaluationCount = kUpdateCount + 1;
 
       AdaptiveQuantizationProfile local_profile;
