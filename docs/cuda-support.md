@@ -1434,6 +1434,20 @@ promotion. One host compile error and one missing-ASAN-DLL startup failure
 are corrected and preserved; no admin/firewall/permission prompt is observed.
 Production and all 40 retained runtime files remain unchanged.
 
+[S97](cuda-optimization-s1.md#integrated-mask-fusion-on-the-resident-stream-s97)
+times the full internal comparison on the resident stream with ordinary
+launches and graph replay. All 117 GPU jobs pass, including release/host-ASAN
+preflights and five graph sanitizer checks. Multi-scale capture changes
+58 -> 56 kernels per comparison. Fusion wins all twelve non-4K input/layout
+combinations against both controls and copies in graph replay, but 4K remains
+mixed in both launch styles. Its event-time scatter is much larger than the
+roughly 0.05 ms surrounding host overhead, so synchronous public-call overhead
+alone is not the cause. Next gather time-aligned device telemetry and examine
+graph setup amortization; neither this diagnostic nor a later idle snapshot
+establishes an encoder-wide gain or a causal clock/power explanation.
+Production and the 40 retained runtime files remain unchanged; no permission
+prompt or restricted-counter retry occurs.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

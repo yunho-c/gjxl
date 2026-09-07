@@ -17247,6 +17247,242 @@ later edits. S95 frozen/current validation passes before this round's
 document edits. Only the two CUDA documents are committed; the user's three
 untracked files remain untouched.
 
+## Integrated mask fusion on the resident stream (S97)
+
+S97 follows S96 `9b0460f` and tests the full integrated comparison through
+`EncodePreparedCudaButteraugli`, the internal entry used by resident AQ.
+It compares ordinary stream launches and graph replay without changing
+production source, the S95 GPU object, or retained libraries. Two new host
+harnesses, release and host-ASAN, retain all 209 native bodies exactly.
+
+### Stream boundary and graph qualification
+
+The same seven frozen source/decoded PFM triples, packed/padded layouts,
+default metric options, and changed-input sequence from S96 are used. The
+source is prepared through the real public factory. The harness obtains
+the CUDA buffer owner's existing backend stream, selects its device with
+the internal scoped-device guard, and owns the only caller until completion.
+No private class layout or production access control is modified.
+
+Every changed-input state first runs the synchronous public retained oracle.
+The four internal modes then write the same live output buffers, with exact
+maps, double scores, finite output and full host/device guards checked.
+Public readback still refers to the buffers bound by that oracle; internal
+encoding does not pretend to update the public object's last-result metadata.
+No public method is called with internal GPU work outstanding. Public oracle
+calls require one committed submission; internal launches leave backend
+submission and allocation counters unchanged. This is backend accounting,
+not a claim that the CUDA graph runtime allocates no internal resources.
+
+Ordinary mode records a start event on that stream, enqueues four full
+internal comparisons, records a stop event, and waits for that event. Graph
+mode instead launches a pre-instantiated graph containing four comparisons
+between the same events. Both report event elapsed time and the surrounding
+host wall interval, divided by four. The wall interval includes event
+recording, launch and completion handling; neither interval includes
+preparation, graph construction/upload, readback, exact checking or logging.
+Event spans can include host-feed gaps and device scheduling waits; they
+are not sums of isolated kernel service times or clock-normalized work.
+
+Each graph-mode process captures eight graphs: one- and four-comparison
+graphs for all four modes. Capture contains only kernel nodes. Node counts
+scale exactly with the comparison count, and each graph has nodes-1 edges
+on its single ordered stream. The 17x13 sample changes 26 -> 25 kernels per
+comparison (104 -> 100 for a quartet); multi-scale images change 58 -> 56
+(232 -> 224). Identical controls and copies have equal node counts. Graphs
+are instantiated and uploaded before execution. This captures comparison
+work only, not a complete resident AQ iteration, encoder or production graph.
+
+Fifty-six untimed preflights cover seven triples, two layouts, ordinary and
+graph execution, and release/host-ASAN builds. Each checks decoded1.2 ->
+identity -> decoded0.5 -> decoded1.2 using four public oracles and sixteen
+internal comparisons. One-comparison graphs execute in these preflights;
+four-comparison graphs are structurally checked there and have their outputs
+checked during warmup before measured windows. Every timed process repeats
+the changed-input qualification, then uses eight warmup quartets and all
+24 shuffled mode permutations. Every window's last full output is checked;
+intermediate outputs within the four-call window are not separately read.
+
+Five additional graph-execution sanitizer jobs pass. Memcheck exercises the
+sample's full four-comparison warm/measured schedule, and separately the
+padded multi-scale flower preflight. Initcheck, synccheck and racecheck run
+the padded sample preflight. All report zero errors/hazards; both memcheck
+jobs enable full leak and stream-ordered race checks and report zero leaked
+allocations. Instrumented timings are excluded from performance analysis.
+Host ASAN covers the new harness, not retained libraries or device arithmetic.
+
+Timing uses two repetitions of all seven inputs, two layouts and both launch
+styles: 56 jobs. Repetition 1 reverses case, layout and launch-style order.
+Seeds are `970000 + repetition*1000 + case_index*10 + padded`; the two launch
+styles share the same permutation schedule for each input/layout/repetition,
+but execute in separate processes. Cross-style medians are therefore not
+paired within a single process. No normalization or outlier filtering is
+applied. Readback/check gaps and light host-side analysis remain potential
+experimental influences, even though they are outside the timing windows.
+
+### Paired timing results
+
+Across 56 preflights and 56 timing jobs, 30,912 comparisons pass 9,408 full
+output checks and 504 input/guard check sets. These comprise 448 public
+oracles and 30,464 internal comparisons. Uninstrumented timing retains
+5,376 measured and 1,792 warm windows. Sanitizers separately add 612
+comparisons (20 public and 592 internal), 228 output checks and 21 input
+check sets. Their event values do not enter the performance statistics.
+
+Entries below preserve both repetitions as r0 / r1. Graph=0 means ordinary
+launches; graph=1 means pre-instantiated replay. Retained values are median
+milliseconds per comparison. Percentage columns are median within-quartet
+paired changes; negative is faster. All four candidate/control comparisons
+are retained, including reversals.
+
+GPU-event boundary:
+
+| Input | Padded | Graph | Retained ms r0 / r1 | Control / original % | Flat / original % | Flat / control % | Copy / original % | Copy / control % |
+| --- | ---: | ---: | --- | --- | --- | --- | --- | --- |
+| sample | 0 | 0 | 0.235976 / 0.249356 | +1.053 / +2.781 | -6.696 / -4.507 | -7.492 / -4.885 | -4.713 / -1.966 | -4.967 / -4.175 |
+| sample | 0 | 1 | 0.107152 / 0.104232 | +0.101 / -0.989 | -3.101 / -3.609 | -3.719 / -3.106 | -2.951 / -4.195 | -3.866 / -2.967 |
+| sample | 1 | 0 | 0.234292 / 0.241100 | -0.450 / +0.307 | -3.888 / -4.287 | -3.606 / -3.677 | -0.635 / -5.499 | +0.186 / -2.469 |
+| sample | 1 | 1 | 0.106492 / 0.105688 | +0.387 / +0.145 | -3.725 / -2.734 | -3.676 / -2.304 | -3.535 / -3.064 | -3.666 / -3.639 |
+| 4k | 0 | 0 | 44.548256 / 53.087868 | +2.554 / +0.603 | +7.814 / -0.577 | +3.987 / -0.881 | +0.587 / -0.143 | -0.408 / +1.267 |
+| 4k | 0 | 1 | 45.624170 / 55.173004 | +4.594 / +0.692 | +8.187 / +0.376 | +2.401 / -1.530 | +0.715 / +0.634 | -1.173 / -2.050 |
+| 4k | 1 | 0 | 47.057531 / 50.852560 | -0.504 / +1.317 | +2.359 / +6.343 | -0.178 / +1.893 | +5.497 / +3.365 | +4.250 / +1.377 |
+| 4k | 1 | 1 | 49.050739 / 52.208740 | +0.608 / +0.144 | +0.117 / +0.666 | +0.206 / +1.394 | -4.151 / +3.498 | +0.986 / +4.683 |
+| 1080p | 0 | 0 | 7.070988 / 6.793720 | -0.539 / -1.690 | -2.063 / -1.867 | -1.710 / -1.138 | -1.579 / -0.855 | -0.873 / +0.276 |
+| 1080p | 0 | 1 | 6.320608 / 7.251944 | +2.684 / +0.441 | -1.669 / -1.030 | -4.205 / -2.439 | -1.523 / -1.459 | -3.383 / -1.814 |
+| 1080p | 1 | 0 | 7.026444 / 7.017808 | +0.544 / +0.701 | -2.048 / -2.446 | -1.857 / -2.496 | -1.534 / -2.744 | -1.687 / -1.998 |
+| 1080p | 1 | 1 | 6.546928 / 6.472476 | +1.941 / +0.105 | -2.059 / -1.898 | -3.530 / -2.158 | -1.851 / -0.641 | -2.334 / -2.541 |
+| flower | 0 | 0 | 1.182880 / 1.180268 | +0.413 / +0.343 | -2.280 / -0.381 | -2.568 / -1.263 | -2.401 / -2.604 | -2.671 / -2.680 |
+| flower | 0 | 1 | 0.971256 / 0.967700 | +0.038 / +0.599 | -1.869 / -1.883 | -2.107 / -2.515 | -1.913 / -1.750 | -2.079 / -2.399 |
+| flower | 1 | 0 | 1.187044 / 1.185628 | -0.512 / -0.458 | -2.963 / -3.154 | -1.354 / -2.430 | -2.469 / -3.432 | -1.684 / -2.755 |
+| flower | 1 | 1 | 0.971936 / 0.969832 | +0.225 / +0.283 | -1.979 / -1.974 | -2.226 / -2.299 | -2.251 / -2.286 | -2.426 / -2.540 |
+| keong | 0 | 0 | 1.122168 / 1.131816 | +0.329 / -0.788 | -3.043 / -3.114 | -3.528 / -2.857 | -2.934 / -2.862 | -3.207 / -2.629 |
+| keong | 0 | 1 | 0.910616 / 0.912352 | +0.207 / +0.251 | -1.908 / -2.269 | -2.143 / -2.488 | -1.882 / -2.297 | -2.075 / -2.452 |
+| keong | 1 | 0 | 1.119852 / 1.121472 | -0.989 / +1.822 | -3.569 / -1.939 | -2.677 / -3.451 | -2.911 / -0.319 | -1.829 / -2.493 |
+| keong | 1 | 1 | 0.904084 / 0.910320 | +0.166 / +0.414 | -2.236 / -2.452 | -2.435 / -2.617 | -2.131 / -2.025 | -2.539 / -2.334 |
+| riaphotographs | 0 | 0 | 1.135004 / 1.170804 | -0.218 / -2.568 | -2.908 / -4.779 | -2.689 / -1.696 | -3.105 / -4.492 | -3.699 / -3.459 |
+| riaphotographs | 0 | 1 | 0.920028 / 0.915832 | +0.110 / +0.300 | -2.371 / -2.048 | -2.536 / -2.443 | -2.350 / -2.073 | -2.572 / -2.452 |
+| riaphotographs | 1 | 0 | 1.143252 / 1.142860 | +0.320 / -0.200 | -2.719 / -3.144 | -3.123 / -2.538 | -3.655 / -2.753 | -2.942 / -2.748 |
+| riaphotographs | 1 | 1 | 0.916348 / 0.916844 | +0.393 / +0.168 | -2.245 / -2.461 | -2.511 / -2.412 | -2.278 / -2.272 | -2.602 / -2.301 |
+| bliznaca | 0 | 0 | 1.133460 / 1.150716 | +0.084 / -0.618 | -2.400 / -2.604 | -3.268 / -2.092 | -3.023 / -1.613 | -2.698 / -1.513 |
+| bliznaca | 0 | 1 | 0.913920 / 0.916420 | +0.207 / +0.230 | -2.036 / -2.237 | -2.386 / -2.340 | -2.197 / -2.155 | -2.401 / -2.284 |
+| bliznaca | 1 | 0 | 1.139144 / 1.135116 | +0.558 / -0.463 | -0.970 / -2.322 | -2.447 / -2.428 | -1.428 / -3.086 | -2.228 / -3.127 |
+| bliznaca | 1 | 1 | 0.916448 / 0.915948 | +0.052 / +0.270 | -2.323 / -2.110 | -2.431 / -2.502 | -2.067 / -1.959 | -2.168 / -2.442 |
+
+Surrounding host wall boundary (same windows, separate measurement):
+
+| Input | Padded | Graph | Retained ms r0 / r1 | Control / original % | Flat / original % | Flat / control % | Copy / original % | Copy / control % |
+| --- | ---: | ---: | --- | --- | --- | --- | --- | --- |
+| sample | 0 | 0 | 0.239987 / 0.253962 | +1.298 / +2.642 | -6.512 / -5.018 | -7.256 / -4.155 | -5.438 / -1.616 | -4.701 / -4.174 |
+| sample | 0 | 1 | 0.111212 / 0.108450 | -0.169 / -0.537 | -3.875 / -2.949 | -3.533 / -2.340 | -3.533 / -3.424 | -3.517 / -3.578 |
+| sample | 1 | 0 | 0.239475 / 0.245075 | +0.076 / -0.179 | -3.616 / -4.440 | -3.227 / -3.550 | -1.201 / -4.869 | -0.296 / -2.816 |
+| sample | 1 | 1 | 0.112462 / 0.109787 | -0.034 / -0.248 | -4.032 / -2.305 | -3.944 / -2.050 | -3.511 / -3.970 | -3.362 / -3.640 |
+| 4k | 0 | 0 | 44.593900 / 53.132987 | +2.539 / +0.613 | +7.783 / -0.588 | +3.968 / -0.884 | +0.602 / -0.147 | -0.419 / +1.258 |
+| 4k | 0 | 1 | 45.682350 / 55.223862 | +4.586 / +0.680 | +8.174 / +0.405 | +2.411 / -1.498 | +0.728 / +0.612 | -1.183 / -2.039 |
+| 4k | 1 | 0 | 47.110550 / 50.912087 | -0.495 / +1.314 | +2.360 / +6.341 | -0.175 / +1.896 | +5.509 / +3.378 | +4.224 / +1.384 |
+| 4k | 1 | 1 | 49.146713 / 52.262038 | +0.598 / +0.130 | +0.112 / +0.656 | +0.177 / +1.376 | -4.147 / +3.495 | +0.958 / +4.672 |
+| 1080p | 0 | 0 | 7.124562 / 6.830863 | -0.438 / -1.644 | -2.159 / -1.952 | -1.642 / -1.053 | -1.481 / -0.921 | -0.819 / +0.298 |
+| 1080p | 0 | 1 | 6.366312 / 7.294887 | +2.583 / +0.488 | -1.859 / -1.071 | -4.348 / -2.556 | -1.393 / -1.585 | -3.345 / -1.903 |
+| 1080p | 1 | 0 | 7.061838 / 7.046387 | +0.441 / +0.670 | -2.036 / -2.333 | -2.016 / -2.512 | -1.518 / -2.714 | -1.706 / -2.112 |
+| 1080p | 1 | 1 | 6.594938 / 6.521738 | +1.864 / +0.105 | -2.046 / -1.786 | -3.495 / -2.158 | -1.764 / -0.725 | -2.376 / -2.501 |
+| flower | 0 | 0 | 1.190375 / 1.189938 | +0.582 / +0.096 | -2.000 / -0.296 | -2.561 / -1.269 | -2.271 / -2.378 | -2.459 / -2.474 |
+| flower | 0 | 1 | 0.977525 / 0.977075 | +0.094 / +0.394 | -1.889 / -1.975 | -2.233 / -2.433 | -2.062 / -1.806 | -2.196 / -2.439 |
+| flower | 1 | 0 | 1.195512 / 1.193175 | -0.432 / -0.318 | -2.899 / -2.810 | -1.131 / -2.538 | -2.495 / -3.089 | -1.592 / -2.787 |
+| flower | 1 | 1 | 0.981325 / 0.980137 | +0.015 / +0.070 | -1.766 / -2.133 | -2.189 / -2.430 | -2.208 / -2.306 | -2.390 / -2.617 |
+| keong | 0 | 0 | 1.132038 / 1.140050 | +0.458 / -0.749 | -3.123 / -3.111 | -3.597 / -2.852 | -2.926 / -2.860 | -3.203 / -2.500 |
+| keong | 0 | 1 | 0.918375 / 0.918787 | +0.230 / +0.206 | -1.840 / -2.163 | -1.998 / -2.481 | -1.810 / -2.252 | -2.078 / -2.451 |
+| keong | 1 | 0 | 1.126162 / 1.126825 | -0.869 / +1.801 | -3.563 / -1.943 | -2.657 / -3.212 | -2.783 / -0.583 | -1.826 / -2.377 |
+| keong | 1 | 1 | 0.909263 / 0.916438 | +0.278 / +0.277 | -2.329 / -2.319 | -2.470 / -2.609 | -2.124 / -1.888 | -2.383 / -2.289 |
+| riaphotographs | 0 | 0 | 1.140275 / 1.180388 | -0.265 / -2.685 | -2.682 / -4.884 | -2.723 / -1.619 | -3.094 / -4.668 | -3.649 / -2.804 |
+| riaphotographs | 0 | 1 | 0.926813 / 0.921400 | +0.104 / +0.336 | -2.371 / -2.086 | -2.488 / -2.426 | -2.431 / -2.021 | -2.624 / -2.441 |
+| riaphotographs | 1 | 0 | 1.148637 / 1.148413 | +0.303 / -0.088 | -2.729 / -3.042 | -3.212 / -2.550 | -3.602 / -2.789 | -2.750 / -2.738 |
+| riaphotographs | 1 | 1 | 0.921850 / 0.923288 | +0.345 / +0.151 | -2.133 / -2.407 | -2.497 / -2.386 | -2.197 / -2.172 | -2.523 / -2.258 |
+| bliznaca | 0 | 0 | 1.139012 / 1.160450 | -0.038 / -0.629 | -2.600 / -2.431 | -3.418 / -2.058 | -3.156 / -1.488 | -2.713 / -1.495 |
+| bliznaca | 0 | 1 | 0.919700 / 0.922988 | +0.309 / +0.324 | -2.026 / -2.132 | -2.397 / -2.391 | -2.072 / -2.107 | -2.358 / -2.295 |
+| bliznaca | 1 | 0 | 1.145313 / 1.140588 | +0.701 / -0.454 | -0.897 / -2.178 | -2.404 / -2.416 | -1.432 / -3.131 | -2.168 / -3.446 |
+| bliznaca | 1 | 1 | 0.923200 / 0.921963 | -0.003 / +0.227 | -2.380 / -2.053 | -2.432 / -2.486 | -2.073 / -1.856 | -2.199 / -2.450 |
+
+### Disposition and remaining measurement problem
+
+With both copies, both controls and both repetitions required to agree,
+ordinary launches classify 10/0/4 input/layout combinations as
+faster/slower/mixed for GPU events, and 11/0/3 for the surrounding wall
+interval. The mixed event cases are both 4K layouts, packed HD and padded
+sample. Packed HD has one +0.276% copy/control reversal; padded sample has
+one +0.186% event-only reversal but all negative wall comparisons.
+Graph replay classifies 12/0/2 for both boundaries: every non-4K combination
+wins all eight comparisons, and both 4K layouts remain mixed. Photographic
+graph flat/original changes are roughly -1.87% to -2.46%.
+
+The 4K disagreement survives removal of per-kernel host feeding from the
+timed graph body. For example, packed graph flat/original is +8.187% in
+repetition 0 and +0.376% in repetition 1, whereas flat/control is +2.401%
+and -1.530%; the copy has different reversals. This does not establish that
+the kernel is inherently slower, or that all variation is random noise.
+Identical-copy disagreement, temporal drift and possible ordering/device
+state effects remain unresolved. Do not promote a universal replacement,
+select a favorable copy/control, or derive a size threshold from these data.
+
+Across the eight 4K jobs and four modes, median wall-minus-event overhead
+is approximately 0.046-0.058 ms per comparison. Within-job event median
+absolute deviations are about 1.38-4.34 ms, much larger than that residual
+host interval or S95's expected sub-millisecond target saving. Retained
+packed GPU-event medians drift from 44.548 to 53.088 ms with ordinary
+launches and from 45.624 to 55.173 ms with graphs. Thus the synchronous
+public API and the host time outside the events cannot alone explain the
+observed 4K variation. This does not exclude device scheduling, host activity
+between windows, memory effects, power/clock state or other interference;
+none is established causally by this campaign.
+
+The graph baseline also provides a separate lead: photographic retained
+event spans are approximately 0.90-0.97 ms versus 1.12-1.19 ms with ordinary
+launches, and the tiny sample is about 0.10-0.11 versus 0.23-0.25 ms. These
+are cross-process observations, not a paired complete-encoder graph speedup.
+Graph construction, upload, reuse lifetime and dynamic resident policy work
+are excluded. A future production graph design must demonstrate amortization
+and complete-workflow benefit before being adopted.
+
+Next, characterize the 4K measurement instability with time-aligned read-only
+clock, utilization, power/throttling and memory telemetry, known-identical
+controls, and explicit window timestamps. Compare window duration and
+inter-window validation effects without dropping inconvenient samples or
+normalizing results to unmeasured clocks. Separately investigate graph reuse
+at a real resident lifetime boundary if its setup cost can be amortized.
+Keep the qualified fusion candidate available, but production remains S79
+`914b42c`. Whole-encoder timing and decoder/release qualification still gate
+promotion, and the resident backend is not proven maxed out.
+
+### Operational record and frozen evidence
+
+All 117 GPU jobs finish with nonoverlapping intervals: 56 preflights,
+five sanitizer jobs and 56 timing jobs. Preflights run
+14:16:18.446752-14:18:09.147065 UTC on 2026-09-07; sanitizer work finishes
+at 14:19:26.176810. Timing runs 14:19:43.174904-14:29:46.957355 (10m04s).
+All builds, native audits and GPU jobs pass; no job is restarted after an
+observation timeout and no output is filtered. Build/native work finishes
+before GPU qualification. Light source editing and completed-result analysis
+overlap timing, so machine-wide isolation is not claimed.
+
+Only after the full timing campaign, an unprivileged `nvidia-smi` snapshot
+reports driver 577.00 on the RTX 3060 Laptop GPU, 64 C, graphics/memory
+clocks 1282/6000 MHz, P0, 23.73 W, and zero reported utilization. This single
+post-run reading is not synchronized telemetry and is not used to infer
+the cause of earlier variation or normalize any sample. The power-limit
+field is unavailable. No admin, firewall or permission prompt is observed;
+no restricted hardware counter is retried, and no clock, power, priority or
+security setting is changed.
+
+Ignored `build-cuda-ninja/profiles/s97_*` retains the host/event/graph harness,
+build and native reports, all qualification and timing logs, graph structure,
+separate event/wall analyses, scatter diagnostics, the post-run snapshot and
+recomputing validation. Source/document, dependency, diagnostic-binary and
+retained-runtime manifests preserve the evidence. The first final-validation
+attempt finds graph-node tuples unequal to their JSON list representation;
+the original parser is retained and normalized list output fixes the check
+without changing stored results or rerunning GPU work. S96 frozen/current
+validation passes before document edits; all 40 retained runtime files
+remain unchanged. Only the two CUDA documents are committed, and the three
+user-owned untracked files remain untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
