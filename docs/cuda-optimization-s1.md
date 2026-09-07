@@ -13308,6 +13308,140 @@ rows/fields/orders, three native/source audits and the serial job timeline;
 firewall, elevation or permission block is observed, and no security,
 power, clock, cooling, priority or service setting changes.
 
+## GPU coefficient-order population replay (S78, investigation)
+
+S78 starts from S77 `9a7381f` on the same RTX 3060 Laptop / CUDA 11.8 /
+MSVC 14.37 / `sm_86` system. It qualifies diagnostic GPU counters, not a
+resident integration. Production source and all 39 retained S75 runtime
+artifacts remain unchanged. No public encoding speedup is established here.
+
+### Isolate the host scan
+
+An instrumented copy of `coefficient_order.cpp` separates strategy-presence
+detection, zero counting, stable order sorting and validation. Four real
+encoding-only distance-1.2 workflows each run two warmups and five measured
+encodes. All 28 preserve S70 bytes and repeated summaries. The first warmup
+exports the completed quantized frame and CPU populations; export I/O is
+outside the five-sample statistics. All 203 GPU bodies remain identical to
+S70, and removing only the explicit instrumentation reconstructs the current
+production source exactly.
+
+Median host subphases, milliseconds:
+
+| Input / effort | Presence | Count | Sort | Validation |
+| --- | ---: | ---: | ---: | ---: |
+| Padded 1080p / 7 | 0.2988 | 1.6928 | 0.0754 | 0.0220 |
+| Padded 4K / 7 | 1.0560 | 6.1737 | 0.0866 | 0.0185 |
+| Flower / 7 | 0.0536 | 0.2086 | 0.0809 | 0.0285 |
+| Flower / 9 | 0.0003 | 0.2283 | 0.0977 | 0.0321 |
+
+All four real frames contain mixed transform families, so even effort 7
+counts every anchor. Only an entirely DCT8 frame uses the existing sampled
+policy. The 4K presence/count medians sum to 7.23 ms, versus about 0.105 ms
+for sorting/validation. S53 already narrowed and vectorized the CPU count;
+this evidence supports moving the scan, without changing float-scaled keys,
+stable ties, LLF prefixes or sampling semantics.
+
+### Exact replay and competing kernels
+
+Four real exports and 104 synthetic exports form a 108-frame replay corpus.
+The synthetic cases cover all seven supported transform shapes and mixed
+grids, both full/sampled policies, 8/36/68-block sides, group boundaries,
+all-zero/nonzero, sparse/dense/tied populations, extreme signed coefficients,
+LLF-only and last-coefficient cases. Each replay independently recounts the
+exported coefficients with a scalar CPU implementation and validates the
+PRNG decisions in AC-group-first anchor order before sorting descriptors
+into GPU family batches. Output is 5,952 exact unsigned 32-bit counts,
+23,808 bytes; oversized counts require the existing wide CPU fallback.
+
+Three diagnostic recipes use ordinary integer arithmetic:
+
+- One 256-thread block per anchor, globally atomically adding each zero.
+- One launch per family, with 32 coefficient lanes by eight anchor rows;
+  shared reduction combines up to 64 anchors before global atomic adds.
+- The same reduction with all family batches dispatched in one launch;
+  power-of-two coefficient tile sizes permit mask/shift indexing.
+
+These respectively use 20/29/32 registers and 0/3,072/3,072 shared bytes,
+with no stack, local storage or spills. Original atomic/tiled native bodies
+are identical across all executables; the final comparison binary contains
+the same three GPU bodies as the preceding unified-launch binary.
+
+Each of three replay executables passes all 108 cases and full-corpus
+memcheck, initcheck, synccheck and racecheck: 12 sanitizer jobs, zero reported
+errors/leaks/hazards. Every output bin matches. Guards and unchanged device
+coefficient/anchor sources are checked after each frame case. Empty/null
+launcher smoke checks also pass, but are not exhaustive API qualification.
+This is not a fresh full production test-suite or decoder qualification.
+
+### Same-binary comparison and limits
+
+Earlier separate-executable cohorts are preserved, including an unchanged
+atomic 4K clear/count/readback shift from 1.152544 to 0.497296 ms. That
+variation prevents using those cohorts to rank the two reduction layouts.
+The final comparison therefore puts atomic, separate-family tiled, unified
+and duplicate atomic into modes 0/1/2/3 of one binary. Each input gets two
+process replicates, with reversed input order in the second. Each process
+runs 24 warmup and 48 measured quadruples, covering all 24 permutations once
+during warmup and twice during measurement: 2,304 total replay rows, 1,536
+measured rows, 96 paired measured quadruples per combined input.
+
+CUDA-event clear/count/readback medians, milliseconds:
+
+| Input / effort | Atomic 0 | Tiled 1 | Unified 2 | Atomic 3 |
+| --- | ---: | ---: | ---: | ---: |
+| Padded 1080p / 7 | 0.181920 | 0.213248 | 0.181168 | 0.181712 |
+| Padded 4K / 7 | 0.522432 | 0.540032 | 0.497392 | 0.523472 |
+| Flower / 7 | 0.091952 | 0.117568 | 0.076608 | 0.093744 |
+| Flower / 9 | 0.082208 | 0.116576 | 0.073056 | 0.092656 |
+
+Unified paired changes versus atomic 0 are +0.67%, -4.49%, -16.06%, -18.56%,
+and versus duplicate atomic 3 are +0.54%, -5.43%, -17.87%, -20.28% in table
+order. These are medians of within-quadruple ratios, not ratios of the
+independent medians above. Duplicate 3 versus 0 moves +0.07%, +0.12%,
++2.69%, +3.36%. Separate-family tiled is slower than atomic 0 on all four
+combined inputs. Unified 4K replicates are 0.496000/0.498624 ms; unified
+host-wall medians are 0.19345/0.51095/0.08785/0.08235 ms in table order.
+
+The unified recipe is the preferred integration candidate, roughly tied at
+1080p and better on 4K/Flower in this comparison, not a universal kernel win.
+Replay excludes coefficient upload, descriptor preparation/sorting, CPU
+recount, startup and actual resident-pipeline integration. CUDA-event ranges
+include clear, kernel launch gaps and the 23,808-byte readback, not just GPU
+arithmetic. No dedicated thermal telemetry accompanies these short cohorts;
+duplicate controls do not eliminate machine-state uncertainty. Do not
+subtract replay duration from a host phase and claim a public encode gain.
+
+The initial tiny 3x2-block case correctly takes the natural-order cutoff and
+does not export a frame. Seven internal encodes pass, but the export wrapper
+fails with `FileNotFoundError`; its incomplete report and traceback remain.
+A later read-only check confirms its saved 237-byte JXL matches S70 without
+reclassifying the failed export. V2 uses separate paths and excludes this
+cutoff case. The first scratch GPU build also fails before compilation due
+to a malformed escaped Windows CUDA path; its script/log remain alongside
+the successful forward-slash-path build. Scratch bounds/signedness fixes
+were rebuilt before qualification, without replacing measured evidence.
+Neither setup failure establishes a firewall or administrator-prompt cause.
+
+The ignored `s78_*` bundle includes all producers, 108 frame exports, raw
+logs, analysis, 13 diagnostic binary/object files and 12 source/document
+snapshots. `s78_validate.py --frozen` reconstructs timing rows/orders/pairs,
+native identities, source instrumentation, the two failed setup records and
+141 nonoverlapping recorded native/encode/export/GPU job intervals;
+`--current` additionally checks current source/runtime identities. Build
+logs and standalone replay native dumps lack structured timestamps, so the
+timeline check is not a blanket machine-idleness claim. No observed
+firewall, elevation or permission block and no system-setting change occur.
+
+Next, compute populations from already resident quantized AC only when a
+frame is materialized, attach owned immutable counts to that frame, and feed
+the unchanged CPU sorting logic. Pure-DCT8 full/sampled policy compatibility,
+AC-group-first PRNG order, generic/wide fallback, arena/readback accounting,
+copy/move ownership, reconfiguration and failure atomicity must be qualified.
+Public byte/decoded-quality and paired total-encode gates remain required.
+No frame cache or production launcher is implemented in S78. Optimization
+remains ongoing, not maxed out.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes

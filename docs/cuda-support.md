@@ -1176,6 +1176,18 @@ accumulation remains an unimplemented host-scan lead; the backend is not
 considered maxed out. No permission/firewall block or system-setting change
 occurs.
 
+[S78](cuda-optimization-s1.md#gpu-coefficient-order-population-replay-s78-investigation)
+isolates about 7.23 ms of 4K CPU strategy-presence/zero-count work and qualifies
+three diagnostic GPU counting recipes on 108 exported frames. All exact bin,
+guard/source checks and 12 full-corpus GPU sanitizer jobs pass. A same-binary
+four-mode comparison measures unified clear/count/readback at about 0.50 ms
+for 4K, with a paired 4.49% improvement over the atomic control, but roughly
+no improvement at 1080p. These are resident replay results, not public encode
+speedups. All 39 production runtime artifacts remain unchanged; frame-owned
+population caching and resident integration are still unimplemented. Two
+preserved setup failures concern a tiny-frame export cutoff and an escaped
+build path, not an observed permission/firewall block. Optimization continues.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
