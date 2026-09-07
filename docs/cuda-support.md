@@ -1465,6 +1465,20 @@ telemetry discipline; production and all 40 retained runtime files remain
 unchanged. The timing campaign takes 18m09s with continuous progress and no
 observed admin/firewall/permission prompt.
 
+[S99](cuda-optimization-s1.md#complete-resident-encodes-with-synchronized-telemetry-s99)
+moves synchronized telemetry to complete resident encodes with a persistent
+backend. All 32 qualification/timing jobs pass: 2,208 encodes retain exact
+S70 bytes and unchanged strategy summaries, and both host binaries retain
+all 209 CUDA bodies. Four-K visits both low and higher clocks; the tight
+score-only comparison loop does not reproduce its complete device cadence.
+All six input/monitor configurations remain mixed at public total and outer
+encode boundaries, so fusion is still unpromoted. The public quantization
+phase accounts for roughly 75% of 4K time, including its host/transfer work.
+Next measure graph setup and reuse inside the actual resident-owner
+lifetime; prebuilt replay timings alone do not prove amortization. The
+timing batch finishes in 3m54s with no observed permission prompt. Production,
+the 40 retained runtime files and system settings remain unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -17702,6 +17702,205 @@ import library and runtime DLL. Only the two CUDA documents are committed;
 production and all 40 retained runtime files remain byte-identical. The
 three user-owned untracked files remain untouched.
 
+## Complete resident encodes with synchronized telemetry (S99)
+
+S99 follows S98 `79f0cfa` and tests whether its sustained low-clock
+comparison-loop regime describes complete fully-resident encoding. It
+measures the real resident workflow and retains native-identical controls;
+it does not change GPU arithmetic, power policy or production binaries.
+The result is not a fusion promotion: all six input/monitor configurations
+remain mixed at both public total and outer encode boundaries.
+
+### Harness and qualification
+
+The new host harness includes the frozen S50 input/options/profile mapper
+used by S95 and the qualified S98 NVML sampler. Both release and host-ASAN
+executables reuse `s95_gpu.obj` and the seven retained libraries. Native
+audits verify all 209 linked CUDA bodies identical to the S95 reference
+in both executables. Four modes remain original, native-identical unfused
+control, flat fusion and native-identical flat copy. No CUDA recompilation
+or new CUDA sanitizer campaign is performed; host ASAN instruments the new
+harness, not the retained libraries or device code.
+
+Each process loads one hash-verified linear PFM and creates one persistent
+CUDA backend. Encodes use fully-resident AQ, distance 1.2, effort 7,
+automatic CPU thread selection and no final-score collection. Backend
+creation and destruction are outside timing; per-encode workflow preparation,
+resident execution, serialization and summary work remain inside the
+profiled public call. This is not reuse of an already-prepared comparison
+object across timed encodes. The outer monotonic interval surrounds the
+existing checked Encode helper, and all 41 public profile fields are
+retained separately. It is a host workflow interval, not GPU-event time.
+
+Each job writes one original reference codestream and qualifies all four
+modes against its bytes and strategy summary. Timed jobs additionally run
+eight warmup quartets and every permutation of the four modes as 24
+shuffled measured quartets. Every encode checks exact bytes and summary
+outside timing. The stored reference also matches the S70 expected size
+and SHA-256. This preserves prior decoder-qualified output, but is not a
+fresh independent decoder or quality-metric run.
+
+Twenty qualification jobs cover sample, odd HD, odd 4K and flower with
+monitoring off/on under release and host ASAN, plus the complete timing
+branch on the tiny sample under all four monitor/build combinations. They
+execute 612 encodes with 592 exact comparisons to twenty references.
+The twelve performance jobs use 4K, HD and flower, monitoring off/on,
+and two repetitions; repetition 1 reverses both input and monitor order.
+Seeds are `990000 + repetition*1000 + case_index*10`, with case indices
+1/2/3 for 4K/HD/flower. Within a repetition each input's monitor settings
+share the mode schedule, but monitoring is a separate-process factor.
+
+All 32 jobs pass: 2,208 complete encodes comprise 32 references and 2,176
+exact byte/summary comparisons. Only twelve performance jobs enter timing
+analysis: 1,596 encodes include 1,152 measured, 384 warmup, 48 initial mode
+qualifications and twelve references. Tiny-sample qualification timings
+are excluded. The analyzer checks input/output/source/binary/log/CSV hashes,
+configuration, permutation coverage, timestamp-to-outer-time equality,
+positive profile times, exact-output markers and nonoverlapping job order.
+
+### Complete workflow and quantization results
+
+Tables show repetition 0 / 1. Times are retained median milliseconds;
+percentages are median within-quartet paired changes, not ratios of
+independent medians. Negative is faster. All samples remain in the analysis,
+with no clock normalization, outlier filtering or timeout restart.
+
+Public total encode boundary:
+
+| Input | Monitor | Retained ms | Control/original % | Flat/original % | Flat/control % | Copy/original % | Copy/control % |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4k | 0 | 302.966400 / 328.752950 | +0.966 / +2.760 | +3.275 / +2.339 | +1.065 / -1.544 | +0.446 / +0.609 | -0.574 / -1.075 |
+| 4k | 1 | 317.106800 / 336.885800 | -1.947 / -3.012 | -2.323 / -3.864 | -0.823 / +0.373 | -1.966 / -2.349 | -0.005 / +1.273 |
+| 1080p | 0 | 74.815300 / 76.379500 | +0.875 / -0.464 | -0.917 / -1.494 | -2.012 / -2.038 | -0.224 / -0.656 | -1.847 / +0.483 |
+| 1080p | 1 | 75.033750 / 80.957450 | +0.991 / -3.023 | -1.197 / -0.526 | -1.620 / +1.510 | -0.494 / -2.854 | -2.149 / -0.741 |
+| flower | 0 | 22.528350 / 20.116400 | -2.683 / +0.984 | +0.410 / -0.864 | +1.564 / -0.013 | +0.599 / -0.630 | +2.684 / -0.420 |
+| flower | 1 | 19.895450 / 20.047500 | -1.014 / +1.183 | +0.153 / +0.383 | +1.268 / -0.159 | -0.166 / -0.346 | +0.355 / -0.643 |
+
+Public quantization-pipeline phase, which includes host preparation,
+transfers and synchronization as well as GPU execution:
+
+| Input | Monitor | Retained ms | Control/original % | Flat/original % | Flat/control % | Copy/original % | Copy/control % |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4k | 0 | 224.207800 / 247.686250 | +0.255 / +3.623 | +3.895 / +2.090 | +1.149 / -0.945 | +0.935 / +1.084 | -0.046 / -0.048 |
+| 4k | 1 | 236.397750 / 254.638800 | -2.551 / -3.409 | -3.371 / -2.823 | +0.212 / -0.054 | -0.425 / -2.318 | +1.564 / +1.033 |
+| 1080p | 0 | 45.290200 / 45.125850 | -0.385 / -0.228 | -1.688 / -0.161 | -1.953 / -2.755 | +0.055 / -0.335 | -1.729 / -0.155 |
+| 1080p | 1 | 44.776750 / 47.966100 | +1.103 / -1.676 | -0.957 / -0.827 | -2.369 / +0.118 | -1.192 / -3.847 | -1.539 / -2.281 |
+| flower | 0 | 10.444650 / 9.860700 | -1.015 / -0.684 | -0.406 / -1.299 | +0.554 / -1.182 | +0.217 / -0.389 | +0.226 / -1.127 |
+| flower | 1 | 9.826900 / 9.756350 | -0.450 / +0.059 | -0.963 / -0.499 | -0.326 / -1.255 | -0.401 / -0.629 | -0.732 / -0.752 |
+
+Both copies must beat both controls in both repetitions for a repeatable
+win. Public total and outer time are mixed in all six configurations;
+quantization is mixed in five and faster only for monitored flower. The
+latter does not establish a complete-encoder gain or a monitor-independent
+substage win. The favorable first HD repetition and monitored 4K columns
+cannot replace the full repeated-control test. No fusion threshold is
+selected from this campaign.
+
+For original mode, job medians of per-encode quantization/total ratios are
+74.68-76.44% at 4K, 59.04-59.95% at HD and 47.22-49.84% for flower.
+The corresponding codestream phase is 14.53-15.47%, 29.81-31.16% and
+42.59-45.51%. These are public host-phase budget shares, not percentages of
+pure GPU time. Four-K therefore remains the strongest measured resident
+pipeline target among these inputs; small-photo encoder time also has a
+substantial serializer component. This is not a corpus-wide budget claim.
+
+Four-K within-job, per-mode total median absolute deviation is
+4.320-13.125 ms and quantization deviation is 3.559-9.458 ms. The median
+outer-minus-public-total residual is 1.934-2.172 ms; it includes the
+helper/lifetime work outside the public profile, not GPU-event overhead.
+Control/original total deltas span -3.012 to +2.760%, larger than the
+small expected encode-wide saving from S95's isolated fused boundary.
+Different monitor settings are separate processes, so absolute timing
+differences do not isolate the sampler's overhead.
+
+### Time-aligned device state
+
+The sampler again queries the CUDA-selected PCI device with no setters.
+Monitor-off jobs retain one initial sample and no background sampling.
+Only complete sample-query intervals contained within a measured encode
+are linked to it. Timing includes every encode, including those with no
+contained telemetry. The six monitored jobs collect 1,841 samples; 1,309
+fall entirely inside measured windows. Actual job-median polling intervals
+are 62.328-62.531 ms, median query costs 0.242-0.289 ms, and maximum query
+cost 12.824 ms. NVML utilization retains its own averaging interval, and
+query overhead and sparse coverage remain explicit limitations.
+
+| Input | Covered measured encodes, rep 0 / 1 | In-window samples | Samples below 500 MHz | Median of per-encode mean SM MHz |
+| --- | --- | --- | --- | --- |
+| 4k | 96 / 96 | 1001 | 470 | 648.5 |
+| 1080p | 96 / 96 | 245 | 0 | 1050.0 |
+| flower | 32 / 31 | 63 | 0 | 1282.0 |
+
+The low-clock count is a count of sampled readings, not a fraction of GPU
+execution time. Four-K per-encode mean SM clocks range from 232 to 1500 MHz;
+HD ranges from 622 to 1470 MHz. Every sampled flower window reports
+1282 MHz, but 129 of its 192 measured encodes have no contained sample.
+No value is imputed for those windows and no timing is discarded.
+
+Four-K still visits low clocks, but its mixed whole-encode state is unlike
+S98's almost continuously low-clock, score-only burst regime. Four-K gaps
+between encodes have job medians of only 0.180-0.195 ms, comparable to
+S98's score-only external gaps; complete encoding additionally contains
+CPU preparation, serialization and other stages within each window.
+Thus an isolated repeated-comparison loop cannot represent the complete
+encoder's device cadence merely by removing its validation readback.
+The telemetry windows do not identify individual quantization kernels or
+GPU-stage boundaries, so they cannot establish which internal stage caused
+a clock transition or a causal clock-adjusted speedup.
+
+All contained samples report limiting-reason mask `0x24`, the same software
+power/thermal flags as S98, and 5500 MHz memory clocks. Median in-window
+mean power is 37.639 W at 4K, 38.202 W at HD and 32.190 W for sampled
+flower windows. Reported used memory is respectively 2,617,954,304,
+873,123,840 and 369,807,360 bytes. These WDDM readings include cached
+memory and are not a live-allocation or paging audit. Only after timing,
+the enforced limit is again 40 W, ordinary power-limit query unsupported,
+AC online/charging, Windows Balanced and battery 82%. GPU-core temperature
+alone still does not explain the reported software thermal bit; memory
+junction temperature and the vendor performance profile are not established.
+
+### Next implementation boundary and evidence record
+
+Universal mask-fusion promotion remains unjustified; production stays S79
+`914b42c`. Repeating the same isolated fusion timing is not the next useful
+action. S97's graph replay result motivates an amortization experiment at
+the real resident lifetime. Current source inspection identifies the owner:
+`CudaPreparedResidentAqEvaluation` prepares and owns `butteraugli_`, and
+its resident policy loop calls `EncodePreparedCudaButteraugli` on the
+backend stream with the reconstructed image and fixed distance/score
+buffers. The internal call resolves to
+`CudaPreparedDeviceButteraugli::EncodeComparisonOnStream`.
+
+Any graph experiment must charge capture, instantiation, upload, changing
+descriptor handling and destruction to that actual lifetime, rather than
+reuse the prebuilt graphs outside S97/S98 timing. It must preserve scratch
+ownership, cached-reference validity, failure behavior and allocation
+accounting, and pass a complete-encoder gate with identical outputs. Stable
+descriptors within a policy loop are a feasibility lead, not evidence of
+enough replay calls to amortize setup. The backend is not proven maxed out.
+
+S98 frozen/current validation passes before document edits. Both host builds
+and native audits pass, then qualification runs
+15:17:42.974078-15:18:07.002825 UTC on 2026-09-07. Parsed qualification
+passes before measurement. The twelve timing jobs run
+15:19:34.237422-15:23:28.686671 (3m54s). All 32 GPU jobs are nonoverlapping;
+the runner reports live process identifiers and advancing logs. No job is
+restarted after an observation timeout. Light editing, source inspection
+and completed-result analysis overlap timing, so machine-wide isolation is
+not claimed. Read-only power snapshots follow timing at approximately
+15:23:51-15:23:52 UTC. No admin/firewall/permission prompt or restricted
+counter retry occurs; no clock, power, profile, priority or security setting
+is changed.
+
+Ignored `build-cuda-ninja/profiles/s99_*` preserves harness/build/native
+evidence, all job logs/CSVs/reference codestreams, parsed paired results,
+per-window telemetry, phase/scatter digest, post-run snapshots and the
+recomputing validator. Source/document, artifact, external-dependency,
+diagnostic-binary and retained-runtime manifests preserve hashes. Only
+the two CUDA documents are committed. All 40 retained runtime files and
+production sources remain unchanged, and the three user-owned untracked
+files remain untouched.
+
 ## Work that should not lead the next cycle
 
 ### More execution lanes
