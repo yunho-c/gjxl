@@ -1741,6 +1741,16 @@ scoped checks and retained-runtime identities pass. The next test is sustained
 device-only replay to distinguish workload-history effects from short-burst
 kernel throughput, not further polling of the same cached fields.
 
+[S121](cuda-malta-sustained-s121.md) reproduces a several-fold slowdown in
+device-only replay of unchanged, idempotent Malta work. Read-only endpoint
+checks reveal varying enforced limits, including 30/40 W and roughly 67–72 W,
+so opposite-order runs cannot be pooled as one fixed operating state. With
+40 W at both endpoints, 128-launch unprobed bursts rise from about 0.71 to
+3.13 ms per launch between first and last quarters; local late rates approach
+0.30 cycles/ns. All 900 replay bursts and retained-runtime identities pass.
+Production is unchanged. Candidate screening now needs sustained workload and
+operating-state controls before final resident-encoder qualification.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
