@@ -377,7 +377,10 @@ bool CheckDirectCase(gjxl::GpuBackend &gpu, gjxl::Extent2D source_extent,
 }
 
 bool CheckDirectCorpus(gjxl::GpuBackend &gpu) {
-  constexpr std::array<std::pair<gjxl::Extent2D, gjxl::Extent2D>, 5> extents = {
+  constexpr std::array<std::pair<gjxl::Extent2D, gjxl::Extent2D>, 8> extents = {
+      std::pair{gjxl::Extent2D{1, 1}, gjxl::Extent2D{8, 8}},
+      std::pair{gjxl::Extent2D{1, 9}, gjxl::Extent2D{8, 16}},
+      std::pair{gjxl::Extent2D{2, 2}, gjxl::Extent2D{8, 8}},
       std::pair{gjxl::Extent2D{5, 3}, gjxl::Extent2D{8, 8}},
       std::pair{gjxl::Extent2D{16, 8}, gjxl::Extent2D{16, 8}},
       std::pair{gjxl::Extent2D{3, 17}, gjxl::Extent2D{8, 24}},

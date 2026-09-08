@@ -1505,6 +1505,8 @@ Status MetalPreparedAqEvaluation::Prepare(
       epf_dispatch_[index] = {
         specialized ? specialized.get() : backend_->aq_pipelines_.epf.get(),
         tile && bool(specialized),
+        tile && specialized ? backend_->aq_pipelines_.epf_linear_tiled[index].get()
+                            : backend_->aq_pipelines_.epf_linear_direct[index].get(),
       };
     }
     opsin_to_linear_params_ = {
@@ -2260,11 +2262,16 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           const char* id = pass == 0 ? "aq.epf.pass_0"
                            : pass == 1 ? "aq.epf.pass_1"
                                        : "aq.epf.pass_2";
+          if (CanFuseFinalEpf() && IsFinalEpfPass(pass)) {
+            id = pass == 1 ? "aq.epf_linear.pass_1" : "aq.epf_linear.pass_2";
+          }
           append_stage(id, ResidentProfileStage::kEpf, iteration, pass);
         }
-        append_stage(
-          "aq.opsin_to_linear", ResidentProfileStage::kOpsinToLinear,
-          iteration);
+        if (!CanFuseFinalEpf()) {
+          append_stage(
+            "aq.opsin_to_linear", ResidentProfileStage::kOpsinToLinear,
+            iteration);
+        }
         if (butteraugli_multiscale) {
           append_stage(
             "butteraugli.psycho.sub",
@@ -4420,7 +4427,7 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
       self.EncodeResidentPolicyInitialize(backend, encoder);
     }
 
-    self.EncodePostprocess(backend, encoder);
+    self.EncodePostprocess(backend, encoder, true);
     if (self.uses_butteraugli_sinks_) {
       const auto batches =
         MakeResidentButteraugliBatches(self.block_reduction_params_);
@@ -4570,7 +4577,9 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
       self.EncodeGaborish(backend, encoder);
       break;
     case ResidentProfileStage::kEpf:
-      self.EncodeEpfPass(backend, encoder, stage.epf_pass);
+      self.EncodeEpfPass(backend, encoder, stage.epf_pass,
+                        self.CanFuseFinalEpf() &&
+                        self.IsFinalEpfPass(stage.epf_pass));
       break;
     case ResidentProfileStage::kOpsinToLinear:
       self.EncodeOpsinToLinear(backend, encoder);
@@ -4760,6 +4769,26 @@ Status CreateAqPipelines(
     constexpr std::array<std::string_view, 3> tiled_names = {
       "gjxl_aq_epf_pass0_tile32x4_p2", "gjxl_aq_epf_pass1_tile32x4_p2",
       "gjxl_aq_epf_pass2_tile32x4_p2"};
+    constexpr std::array<std::string_view, 3> linear_direct_names = {
+      "", "gjxl_aq_epf_pass1_linear_direct", "gjxl_aq_epf_pass2_linear_direct"};
+    constexpr std::array<std::string_view, 3> linear_tiled_names = {
+      "", "gjxl_aq_epf_pass1_linear_tile32x4_p2",
+      "gjxl_aq_epf_pass2_linear_tile32x4_p2"};
+    for (size_t pass = 1; pass < 3; ++pass) {
+      auto& direct = pipelines.epf_linear_direct[pass];
+      auto& tiled = pipelines.epf_linear_tiled[pass];
+      const Status direct_status = CreateAqPipeline(
+        device, library, linear_direct_names[pass], &direct);
+      const Status tiled_status = CreateAqPipeline(
+        device, library, linear_tiled_names[pass], &tiled);
+      if (!direct_status.ok() || !tiled_status.ok() ||
+          direct->maxTotalThreadsPerThreadgroup() < 64 ||
+          tiled->maxTotalThreadsPerThreadgroup() < 128 ||
+          tiled->threadExecutionWidth() != 32) {
+        direct.reset();
+        tiled.reset();
+      }
+    }
     for (size_t pass = 0; pass < 3; ++pass) {
       status = CreateAqPipeline(device, library, direct_names[pass], &pipelines.epf_direct[pass]);
       if (!status.ok()) return status;

@@ -651,6 +651,139 @@ kernel void gjxl_butteraugli_frequency_low_medium_tiled_f32(
     49.87984651440f;
 }
 
+// Hold the proven 16x64 output footprint and its halo fixed while varying
+// how many outputs each lane owns. Constant weights are a separate experiment.
+template <uint PixelsPerThread, typename WeightPointer>
+inline void FrequencyLowMediumCoarsened(
+
+  device const float* input0,
+  device const float* input1,
+  device const float* input2,
+  WeightPointer weights,
+  device float* low0,
+  device float* low1,
+  device float* low2,
+  device float* medium0,
+  device float* medium1,
+  device float* medium2,
+  constant FrequencyLowMediumTiledParams& params,
+  threadgroup float* scratch,
+  uint2 local_position,
+  uint2 group_position,
+  uint2 group_size) {
+
+  constexpr int kRadius = 16;
+  const uint tile_height = 64u + 2 * uint(kRadius);
+  const uint horizontal_stride = 16u;
+  const uint horizontal_plane_size = horizontal_stride * tile_height;
+  threadgroup float* horizontal0 = scratch;
+  threadgroup float* horizontal1 = horizontal0 + horizontal_plane_size;
+  threadgroup float* horizontal2 = horizontal1 + horizontal_plane_size;
+
+  const uint thread_index =
+    local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int group_x = int(group_position.x * 16u);
+  const int group_y = int(group_position.y * 64u);
+  const int horizontal_origin_y = group_y - kRadius;
+  for (uint index = thread_index; index < horizontal_plane_size;
+       index += thread_count) {
+    const uint local_x = index % horizontal_stride;
+    const uint tile_y = index / horizontal_stride;
+    const int x = group_x + int(local_x);
+    const int y = horizontal_origin_y + int(tile_y);
+    float weight_sum = 0.0f;
+    float sum0 = 0.0f;
+    float sum1 = 0.0f;
+    float sum2 = 0.0f;
+    if (x < int(params.width) && y >= 0 && y < int(params.height)) {
+      const int first = max(0, x - kRadius);
+      const int last = min(int(params.width) - 1, x + kRadius);
+      for (int source_x = first; source_x <= last; ++source_x) {
+        const float weight = weights[source_x + kRadius - x];
+        const uint input_index =
+          uint(y) * params.input_stride + uint(source_x);
+        weight_sum += weight;
+        sum0 += input0[input_index] * weight;
+        sum1 += input1[input_index] * weight;
+        sum2 += input2[input_index] * weight;
+      }
+    }
+    horizontal0[index] = weight_sum == 0.0f ? 0.0f : sum0 / weight_sum;
+    horizontal1[index] = weight_sum == 0.0f ? 0.0f : sum1 / weight_sum;
+    horizontal2[index] = weight_sum == 0.0f ? 0.0f : sum2 / weight_sum;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint pixel = 0; pixel < PixelsPerThread; ++pixel) {
+  const uint2 position = group_position * uint2(16u, 64u) +
+    local_position + uint2(0u, pixel * (64u / PixelsPerThread));
+  if (position.x >= params.width || position.y >= params.height) continue;
+  const int y = int(position.y);
+  const int first = max(0, y - kRadius);
+  const int last = min(int(params.height) - 1, y + kRadius);
+  float weight_sum = 0.0f;
+  float sum0 = 0.0f;
+  float sum1 = 0.0f;
+  float sum2 = 0.0f;
+  for (int source_y = first; source_y <= last; ++source_y) {
+    const float weight = weights[source_y + kRadius - y];
+    const uint horizontal_index =
+      uint(source_y - horizontal_origin_y) * horizontal_stride +
+      local_position.x;
+    weight_sum += weight;
+    sum0 += horizontal0[horizontal_index] * weight;
+    sum1 += horizontal1[horizontal_index] * weight;
+    sum2 += horizontal2[horizontal_index] * weight;
+  }
+  const float low_x = sum0 / weight_sum;
+  const float low_y = sum1 / weight_sum;
+  const float low_b = sum2 / weight_sum;
+  const uint input_index =
+    position.y * params.input_stride + position.x;
+  const uint output_index =
+    position.y * params.output_stride + position.x;
+  medium0[output_index] = input0[input_index] - low_x;
+  medium1[output_index] = input1[input_index] - low_y;
+  medium2[output_index] = input2[input_index] - low_b;
+  low0[output_index] = low_x * 33.832837186260f;
+  low1[output_index] = low_y * 14.458268100570f;
+  low2[output_index] =
+    unfused_multiply_add(-0.362267051518f, low_y, low_b) *
+    49.87984651440f;
+  }
+}
+
+#define GJXL_LOW_MEDIUM_COARSENED(name, pixels, weight_space) \
+kernel void name( \
+ \
+  device const float* input0 [[buffer(0)]], \
+  device const float* input1 [[buffer(1)]], \
+  device const float* input2 [[buffer(2)]], \
+  weight_space const float* weights [[buffer(3)]], \
+  device float* low0 [[buffer(4)]], \
+  device float* low1 [[buffer(5)]], \
+  device float* low2 [[buffer(6)]], \
+  device float* medium0 [[buffer(7)]], \
+  device float* medium1 [[buffer(8)]], \
+  device float* medium2 [[buffer(9)]], \
+  constant FrequencyLowMediumTiledParams& params [[buffer(10)]], \
+  threadgroup float* scratch [[threadgroup(0)]], \
+  uint2 local_position [[thread_position_in_threadgroup]], \
+  uint2 group_position [[threadgroup_position_in_grid]], \
+  uint2 group_size [[threads_per_threadgroup]]) { \
+  FrequencyLowMediumCoarsened<pixels>( \
+    input0, input1, input2, weights, low0, low1, low2, medium0, medium1, medium2, params, scratch, local_position, group_position, group_size); \
+}
+GJXL_LOW_MEDIUM_COARSENED(gjxl_butteraugli_low_medium_p1_device, 1, device)
+GJXL_LOW_MEDIUM_COARSENED(gjxl_butteraugli_low_medium_p1_constant, 1, constant)
+GJXL_LOW_MEDIUM_COARSENED(gjxl_butteraugli_low_medium_p2_device, 2, device)
+GJXL_LOW_MEDIUM_COARSENED(gjxl_butteraugli_low_medium_p2_constant, 2, constant)
+GJXL_LOW_MEDIUM_COARSENED(gjxl_butteraugli_low_medium_p4_device, 4, device)
+GJXL_LOW_MEDIUM_COARSENED(gjxl_butteraugli_low_medium_p4_constant, 4, constant)
+
+#undef GJXL_LOW_MEDIUM_COARSENED
+
 inline float maximum_clamp(float value, float maximum) {
   if (value >= maximum) {
     return unfused_multiply_add(value - maximum, 0.724216145665f, maximum);
@@ -944,17 +1077,12 @@ inline float malta_full_tile(threadgroup const float* input, int x, int y,
   return result;
 }
 
-kernel void gjxl_butteraugli_malta_fused_f32(
-  device const float* reference [[buffer(0)]],
-  device const float* distorted [[buffer(1)]],
-  device float* response [[buffer(2)]],
-  device float* accumulation [[buffer(3)]],
-  constant MaltaFusedParams& params [[buffer(4)]],
-  threadgroup float* scaled_tile [[threadgroup(0)]],
-  uint2 local_position [[thread_position_in_threadgroup]],
-  uint2 group_position [[threadgroup_position_in_grid]],
-  uint2 group_size [[threads_per_threadgroup]]) {
-
+template <bool FixedShape>
+inline void MaltaFused(  device const float* reference, device const float* distorted,
+  device float* response, device float* accumulation,
+  constant MaltaFusedParams& params, threadgroup float* scaled_tile,
+  uint2 local_position, uint2 group_position, uint2 dynamic_group_size) {
+  const uint2 group_size = FixedShape ? uint2(32, 8) : dynamic_group_size;
   const uint tile_stride = group_size.x + 8u;
   const uint tile_height = group_size.y + 8u;
   const uint thread_index = local_position.y * group_size.x + local_position.x;
@@ -998,6 +1126,25 @@ kernel void gjxl_butteraugli_malta_fused_f32(
     accumulation[accumulation_index] += result;
   }
 }
+
+#define GJXL_MALTA_FUSED_KERNEL(Name, FixedShape) \
+kernel void Name( \
+  device const float* reference [[buffer(0)]], \
+  device const float* distorted [[buffer(1)]], \
+  device float* response [[buffer(2)]], \
+  device float* accumulation [[buffer(3)]], \
+  constant MaltaFusedParams& params [[buffer(4)]], \
+  threadgroup float* scaled_tile [[threadgroup(0)]], \
+  uint2 local_position [[thread_position_in_threadgroup]], \
+  uint2 group_position [[threadgroup_position_in_grid]], \
+  uint2 group_size [[threads_per_threadgroup]]) { \
+  MaltaFused<FixedShape>(reference, distorted, response, accumulation, params, \
+    scaled_tile, local_position, group_position, group_size); \
+}
+GJXL_MALTA_FUSED_KERNEL(gjxl_butteraugli_malta_fused_f32, false)
+// Specialize the production 32x8 shape so all stencil offsets are constant.
+GJXL_MALTA_FUSED_KERNEL(gjxl_butteraugli_malta_fixed_f32, true)
+#undef GJXL_MALTA_FUSED_KERNEL
 
 kernel void gjxl_butteraugli_malta_response_f32(
   device const float* input [[buffer(0)]],
@@ -1350,39 +1497,43 @@ kernel void gjxl_butteraugli_compose_f32(
     main_value * 0.85f + 0.5f * sub_value;
 }
 
-kernel void gjxl_butteraugli_resident_l2_reduce_f32(
-  device const float* rlow0 [[buffer(0)]],
-  device const float* rlow1 [[buffer(1)]],
-  device const float* rlow2 [[buffer(2)]],
-  device const float* rmed0 [[buffer(3)]],
-  device const float* rmed1 [[buffer(4)]],
-  device const float* rmed2 [[buffer(5)]],
-  device const float* rhigh0 [[buffer(6)]],
-  device const float* rhigh1 [[buffer(7)]],
-  device const float* dlow0 [[buffer(8)]],
-  device const float* dlow1 [[buffer(9)]],
-  device const float* dlow2 [[buffer(10)]],
-  device const float* dmed0 [[buffer(11)]],
-  device const float* dmed1 [[buffer(12)]],
-  device const float* dmed2 [[buffer(13)]],
-  device const float* dhigh0 [[buffer(14)]],
-  device const float* dhigh1 [[buffer(15)]],
-  device const float* malta_ac0 [[buffer(16)]],
-  device const float* malta_ac1 [[buffer(17)]],
-  device const float* mask [[buffer(18)]],
-  device const float* mask_blurred_reference [[buffer(19)]],
-  device const float* mask_blurred_distorted [[buffer(20)]],
-  device const float* sub_map [[buffer(21)]],
-  device const uint2* anchors [[buffer(22)]],
-  device float* block_distance [[buffer(23)]],
-  device float* score_partials [[buffer(24)]],
-  device atomic_uint* error [[buffer(25)]],
-  constant ResidentReductionParams& params [[buffer(26)]],
-  uint anchor_index [[threadgroup_position_in_grid]],
-  uint thread_index [[thread_index_in_threadgroup]]) {
+// Widths below 256 are used only when the entire block fits in Width lanes.
+// This omits zero-only upper tree levels without changing the nonzero sums.
+template <uint Width, bool SimdTail>
+__attribute__((always_inline)) inline void ResidentL2Reduce(
 
-  threadgroup float partial_sum[256];
-  threadgroup float partial_maximum[256];
+  device const float* rlow0,
+  device const float* rlow1,
+  device const float* rlow2,
+  device const float* rmed0,
+  device const float* rmed1,
+  device const float* rmed2,
+  device const float* rhigh0,
+  device const float* rhigh1,
+  device const float* dlow0,
+  device const float* dlow1,
+  device const float* dlow2,
+  device const float* dmed0,
+  device const float* dmed1,
+  device const float* dmed2,
+  device const float* dhigh0,
+  device const float* dhigh1,
+  device const float* malta_ac0,
+  device const float* malta_ac1,
+  device const float* mask,
+  device const float* mask_blurred_reference,
+  device const float* mask_blurred_distorted,
+  device const float* sub_map,
+  device const uint2* anchors,
+  device float* block_distance,
+  device float* score_partials,
+  device atomic_uint* error,
+  constant ResidentReductionParams& params,
+  uint anchor_index,
+  uint thread_index,
+  threadgroup float* partial_sum,
+  threadgroup float* partial_maximum) {
+
   if (anchor_index >= params.anchor_count) return;
 
   const uint partial_index = params.anchor_offset + anchor_index;
@@ -1405,7 +1556,7 @@ kernel void gjxl_butteraugli_resident_l2_reduce_f32(
   float sum = 0.0f;
   float maximum = -INFINITY;
   for (uint local_index = thread_index; local_index < pixel_count;
-       local_index += 256u) {
+       local_index += Width) {
     const uint x = x_begin + local_index % valid_width;
     const uint y = y_begin + local_index / valid_width;
     const uint index = y * params.work_stride + x;
@@ -1445,13 +1596,30 @@ kernel void gjxl_butteraugli_resident_l2_reduce_f32(
   partial_maximum[thread_index] = maximum;
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  for (uint width = 128u; width != 0u; width >>= 1u) {
+  for (uint width = Width / 2;
+       width != 0u && (!SimdTail || width >= 32u); width >>= 1u) {
     if (thread_index < width) {
       partial_sum[thread_index] += partial_sum[thread_index + width];
       partial_maximum[thread_index] = max(
         partial_maximum[thread_index], partial_maximum[thread_index + width]);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  // The shared tree has already combined indices 32 apart. Explicit shuffle
+  // additions preserve its remaining 16/8/4/2/1 order; simd_sum would not.
+  // Selection requires a 32-lane SIMD width. Only lane zero consumes the result.
+  if (SimdTail && thread_index < 32u) {
+    float lane_sum = partial_sum[thread_index];
+    float lane_maximum = partial_maximum[thread_index];
+    for (uint delta = 16u; delta != 0u; delta >>= 1u) {
+      lane_sum += simd_shuffle_down(lane_sum, delta);
+      lane_maximum = max(lane_maximum, simd_shuffle_down(lane_maximum, delta));
+    }
+    if (thread_index == 0u) {
+      partial_sum[0] = lane_sum;
+      partial_maximum[0] = lane_maximum;
+    }
   }
 
   if (thread_index == 0u) {
@@ -1471,6 +1639,55 @@ kernel void gjxl_butteraugli_resident_l2_reduce_f32(
     score_partials[partial_index] = partial_maximum[0];
   }
 }
+
+#define GJXL_RESIDENT_L2_KERNEL(name, width, simd_tail) \
+kernel void name( \
+ \
+  device const float* rlow0 [[buffer(0)]], \
+  device const float* rlow1 [[buffer(1)]], \
+  device const float* rlow2 [[buffer(2)]], \
+  device const float* rmed0 [[buffer(3)]], \
+  device const float* rmed1 [[buffer(4)]], \
+  device const float* rmed2 [[buffer(5)]], \
+  device const float* rhigh0 [[buffer(6)]], \
+  device const float* rhigh1 [[buffer(7)]], \
+  device const float* dlow0 [[buffer(8)]], \
+  device const float* dlow1 [[buffer(9)]], \
+  device const float* dlow2 [[buffer(10)]], \
+  device const float* dmed0 [[buffer(11)]], \
+  device const float* dmed1 [[buffer(12)]], \
+  device const float* dmed2 [[buffer(13)]], \
+  device const float* dhigh0 [[buffer(14)]], \
+  device const float* dhigh1 [[buffer(15)]], \
+  device const float* malta_ac0 [[buffer(16)]], \
+  device const float* malta_ac1 [[buffer(17)]], \
+  device const float* mask [[buffer(18)]], \
+  device const float* mask_blurred_reference [[buffer(19)]], \
+  device const float* mask_blurred_distorted [[buffer(20)]], \
+  device const float* sub_map [[buffer(21)]], \
+  device const uint2* anchors [[buffer(22)]], \
+  device float* block_distance [[buffer(23)]], \
+  device float* score_partials [[buffer(24)]], \
+  device atomic_uint* error [[buffer(25)]], \
+  constant ResidentReductionParams& params [[buffer(26)]], \
+  uint anchor_index [[threadgroup_position_in_grid]], \
+  uint thread_index [[thread_index_in_threadgroup]]) { \
+  threadgroup float partial_sum[width]; \
+  threadgroup float partial_maximum[width]; \
+  ResidentL2Reduce<width, simd_tail>( \
+    rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1, dlow0, dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1, malta_ac0, malta_ac1, mask, mask_blurred_reference, mask_blurred_distorted, sub_map, anchors, block_distance, score_partials, error, params, anchor_index, thread_index, \
+    partial_sum, partial_maximum); \
+}
+
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_f32, 256, false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w64_tree, 64, false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w64_simd, 64, true)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w128_tree, 128, false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w128_simd, 128, true)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w256_tree, 256, false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w256_simd, 256, true)
+
+#undef GJXL_RESIDENT_L2_KERNEL
 
 kernel void gjxl_butteraugli_reduce_max_f32(
   device const float* input [[buffer(0)]], device float* output [[buffer(1)]],

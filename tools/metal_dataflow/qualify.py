@@ -28,6 +28,8 @@ def main():
         action="store_true",
         help="Revalidate and reuse completed commands with identical runtime artifacts",
     )
+    parser.add_argument("--hardware-aware", action="store_true",
+                        help="Qualify the follow-up reduction, filter, Malta and EPF fusion kernels")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     out = args.output.resolve()
@@ -163,6 +165,34 @@ def main():
             and "56 forward/inverse image pairs agree bitwise" not in result
         ) or (name == "epf" and json.loads(result)["bitwise_cases"] != count):
             raise RuntimeError("Incomplete guarded probe")
+    if args.hardware_aware:
+        validation = {
+            "MTL_DEBUG_LAYER": "1",
+            "MTL_DEBUG_LAYER_ERROR_MODE": "assert",
+            "MTL_SHADER_VALIDATION": "1",
+            "MTL_SHADER_VALIDATION_ENABLE_ERROR_REPORTING": "1",
+            "MTL_SHADER_VALIDATION_REPORT_TO_STDERR": "1",
+            "MTL_SHADER_VALIDATION_ABORT_ON_FAULT": "1",
+        }
+        probes = [
+            ("reduction", "butteraugli_reduction", [], 990),
+            ("filter", "butteraugli_filter", [], 180),
+            ("malta", "butteraugli_filter", ["--malta"], 240),
+            ("epf-linear", "epf", ["--linear"], 168),
+        ]
+        for name, probe, options, expected in probes:
+            for suffix, environment in [("", None), ("-metal-validation", validation)]:
+                result = run(name + suffix,
+                    [candidate / ("gjxl_metal_" + probe + "_probe"), *libraries, *options],
+                    environment=environment)
+                lines = [json.loads(line) for line in result.splitlines() if line.startswith("{")]
+                if len(lines) != 1 or lines[0].get("bitwise_cases") != expected or not lines[0].get("guards"):
+                    raise RuntimeError("Incomplete guarded hardware-aware probe: " + name)
+        run("hardware-aware-metal-validation-tests", [
+            "ctest", "--test-dir", candidate, "--output-on-failure", "--no-tests=error",
+            "--parallel", "1", "-R",
+            "^(metal_ac_strategy|metal_ac_strategy_search|metal_butteraugli|metal_aq_evaluation|metal_aq_postprocess)$",
+        ], environment=validation)
     for label, build in builds.items():
         result = run(
             label + "-conformance",
@@ -192,6 +222,8 @@ def main():
             "dct_cases": 56,
             "epf_cases": 432,
             "conformance_per_revision": 22,
+            "hardware_aware_cases": 1578 if args.hardware_aware else 0,
+            "hardware_aware_validation_cases": 1578 if args.hardware_aware else 0,
         },
     )
 

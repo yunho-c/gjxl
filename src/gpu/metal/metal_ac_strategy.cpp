@@ -272,6 +272,21 @@ Status CreateAcStrategyPipelines(
     }
   }
 
+  // DCT16 keeps all three channels local with six SIMD groups. Other shapes
+  // retain their qualified split forward and residual/inverse stages.
+  auto& candidate16 = pipelines.fused[static_cast<size_t>(AcStrategyType::kDct16x16)];
+  if (candidate16.forward && candidate16.reduces_loss &&
+      device->supportsFamily(MTL::GPUFamilyApple9)) {
+    NS::SharedPtr<MTL::ComputePipelineState> pipeline;
+    status = CreatePipeline(device, library,
+      "gjxl_ac_strategy_dct16_candidate_loss_parallel", &pipeline);
+    if (status.ok() && pipeline->threadExecutionWidth() == 32 &&
+        pipeline->maxTotalThreadsPerThreadgroup() >= 192 &&
+        pipeline->staticThreadgroupMemoryLength() <= device->maxThreadgroupMemoryLength()) {
+      candidate16.candidate_loss = std::move(pipeline);
+    }
+  }
+
   constexpr NS::UInteger kPreferredGatherThreads = 256;
   const NS::UInteger execution_width =
     pipelines.gather->threadExecutionWidth();
@@ -725,7 +740,25 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   const AcStrategyPipelines::FusedStages& fused =
     ac_strategy_pipelines_.fused[
       static_cast<size_t>(validated.strategy)];
-  if (fused.forward) {
+  if (fused.candidate_loss) {
+    encoder->setComputePipelineState(fused.candidate_loss.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      encoder->setBuffer(validated.opsin[channel]->handle(),
+                        validated.opsin_offset_bytes[channel], channel);
+    }
+    encoder->setBuffer(validated.candidates->handle(), 0, 3);
+    encoder->setBuffer(validated.quant_field->handle(),
+                      validated.quant_field_offset_bytes, 4);
+    encoder->setBuffer(validated.matrices->handle(), 0, 5);
+    encoder->setBuffer(validated.pixel_mask->handle(),
+                      validated.pixel_mask_offset_bytes, 6);
+    encoder->setBuffer(validated.costs->handle(), 0, 7);
+    encoder->setBuffer(validated.scratch_a->handle(), 0, 8);
+    encoder->setBuffer(validated.rate_scratch->handle(), 0, 9);
+    encoder->setBytes(&validated.params, sizeof(validated.params), 10);
+    DispatchMetalThreadgroups(encoder,
+      MTL::Size(validated.params.candidate_count, 1, 1), MTL::Size(192, 1, 1));
+  } else if (fused.forward) {
     encoder->setComputePipelineState(fused.forward.get());
     for (size_t channel = 0; channel < 3; ++channel) {
       encoder->setBuffer(validated.opsin[channel]->handle(),
@@ -767,7 +800,9 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   const NS::UInteger reduction_bytes =
     validated.params.coefficient_count * sizeof(float);
   MetalBuffer* residual_pixels = nullptr;
-  if (fused.residual_inverse) {
+  if (fused.candidate_loss) {
+    residual_pixels = validated.scratch_a;
+  } else if (fused.residual_inverse) {
     encoder->setComputePipelineState(fused.residual_inverse.get());
     encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
     encoder->setBuffer(validated.matrices->handle(), 0, 1);

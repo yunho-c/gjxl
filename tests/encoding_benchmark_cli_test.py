@@ -432,7 +432,10 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         )
         self.assertFalse(any(stage.startswith("aq.reconstruction.scatter.")
                              for stage in reconstruction_stages))
-        self.assertIn("aq.epf.pass_1", {stage["stage_id"] for stage in stages})
+        self.assertTrue(
+            {"aq.epf.pass_1", "aq.epf_linear.pass_1"}
+            & {stage["stage_id"] for stage in stages}
+        )
         self.assertIn(
             "butteraugli.malta.main", {stage["stage_id"] for stage in stages}
         )
@@ -481,11 +484,19 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 for stage in ac_stages
             )
         )
-        self.assertTrue(all(len(stage["dispatches"]) == 3 for stage in ac_stages))
         for stage in ac_stages:
             kernel_ids = {
                 dispatch["kernel_id"] for dispatch in stage["dispatches"]
             }
+            if "gjxl_ac_strategy_dct16_candidate_loss_parallel" in kernel_ids:
+                self.assertEqual(stage["stage_id"], "frontend.ac_strategy.dct16")
+                self.assertEqual(len(stage["dispatches"]), 2)
+                self.assertEqual(kernel_ids, {
+                    "gjxl_ac_strategy_dct16_candidate_loss_parallel",
+                    "gjxl_ac_strategy_cost_from_loss",
+                })
+                continue
+            self.assertEqual(len(stage["dispatches"]), 3)
             self.assertNotIn("gjxl_ac_strategy_gather", kernel_ids)
             self.assertEqual(
                 sum(
@@ -566,6 +577,15 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                         dispatch["kernel_id"]
                         for dispatch in stage["dispatches"]
                     }
+                    if "gjxl_ac_strategy_dct16_candidate_loss_parallel" in kernel_ids:
+                        self.assertEqual(mode, "fused-tuned")
+                        self.assertEqual(stage["stage_id"], "frontend.ac_strategy.dct16")
+                        self.assertEqual(len(stage["dispatches"]), 2)
+                        self.assertEqual(kernel_ids, {
+                            "gjxl_ac_strategy_dct16_candidate_loss_parallel",
+                            "gjxl_ac_strategy_cost_from_loss",
+                        })
+                        continue
                     self.assertEqual(len(stage["dispatches"]), dispatch_count)
                     self.assertEqual(
                         sum(name.endswith(inverse_suffix) for name in kernel_ids),

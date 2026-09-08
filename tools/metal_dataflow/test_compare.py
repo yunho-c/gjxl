@@ -5,8 +5,10 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
-from compare import extract
+from compare import extract, quiet
 
 
 class ExtractTest(unittest.TestCase):
@@ -90,6 +92,37 @@ class ExtractTest(unittest.TestCase):
         broken[0]["capabilities"]["stage_boundary"] = False
         with self.assertRaises(RuntimeError):
             self.extract(broken, True)
+
+    def test_fused_epf_uses_the_same_timed_work(self):
+        def samples(fused):
+            return [dict(sample_index=i, capabilities={"stage_boundary": True},
+                submissions=[{"stages": [
+                    {"stage_id": "aq.epf.pass_1", "gpu_nanoseconds": 10},
+                    *([{"stage_id": "aq.epf_linear.pass_2", "gpu_nanoseconds": a + b}]
+                      if fused else [
+                          {"stage_id": "aq.epf.pass_2", "gpu_nanoseconds": a},
+                          {"stage_id": "aq.opsin_to_linear", "gpu_nanoseconds": b}]),
+                ]}]) for i, (a, b) in enumerate(((100, 0), (0, 100), (0, 0)))]
+        baseline = self.extract(samples(False), True)
+        candidate = self.extract(samples(True), True)
+        self.assertEqual(baseline["group.epf_linear"], 0.00011)
+        self.assertEqual(baseline["group.epf_linear"], candidate["group.epf_linear"])
+        self.assertEqual(baseline["group.all_stages"], candidate["group.all_stages"])
+
+    def test_paused_controller_requires_a_quiet_child(self):
+        with patch("compare.subprocess.check_output", return_value=
+                   "900001 T /usr/bin/python3\n900002 R /tmp/gjxl_encoding_benchmark\n"):
+            with self.assertRaises(RuntimeError):
+                quiet()
+        with patch("compare.subprocess.check_output", return_value=
+                   "900001 T /usr/bin/python3\n900002 Z /tmp/gjxl_encoding_benchmark\n"):
+            quiet()
+        with patch("compare.subprocess.check_output", return_value=
+                   "900001 S /usr/bin/python3\n"), patch(
+                   "compare.subprocess.run", return_value=SimpleNamespace(stdout=
+                   "python3 tools/scripts/cjxl_runtime_characterization.py run")):
+            with self.assertRaises(RuntimeError):
+                quiet()
 
 
 if __name__ == "__main__":

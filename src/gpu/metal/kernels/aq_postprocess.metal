@@ -50,6 +50,15 @@ constant int2 kEpfCardinalOffsets[4] = {
 };
 
 static uint aq_mirror_offset(uint coordinate, int delta, uint size) {
+  // EPF reaches up to three pixels away. A single reflection is insufficient
+  // for one- or two-pixel dimensions; preserve the fast path for larger planes.
+  if (size < 3u) {
+    if (size == 1u) return 0u;
+    // The remaining dimension is two, so its reflection period is four.
+    // Unsigned wrapping retains the low bits for negative offsets as well.
+    const uint reflected = (coordinate + uint(delta)) & 3u;
+    return reflected < 2u ? reflected : 3u - reflected;
+  }
   if (delta < 0) {
     const uint distance = uint(-delta);
     return coordinate >= distance
@@ -245,6 +254,41 @@ kernel void gjxl_aq_epf_f32(
   }
 }
 
+inline void AqStoreLinear(float3 input, float scale, uint output_index,
+    device float* output_r, device float* output_g, device float* output_b,
+    device atomic_uint* error) {
+  constexpr float kOpsinBias = 0.0037930732552754493f;
+  constexpr float kBiasCuberoot = 0.15595419704914093f;
+  constexpr float kInverseOpsinMatrix[9] = {
+    11.031566901960783f, -9.866943921568629f, -0.16462299647058826f,
+    -3.254147380392157f, 4.418770392156863f, -0.16462299647058826f,
+    -3.6588512862745097f, 2.7129230470588235f, 1.9459282392156863f,
+  };
+  const float gamma[3] = {
+    input.y + input.x + kBiasCuberoot,
+    input.y - input.x + kBiasCuberoot,
+    input.z + kBiasCuberoot,
+  };
+  float mixed[3];
+  for (uint channel = 0u; channel < 3u; ++channel) {
+    mixed[channel] = gamma[channel] * gamma[channel] * gamma[channel] -
+      kOpsinBias;
+  }
+  device float* outputs[3] = {output_r, output_g, output_b};
+  for (uint row = 0u; row < 3u; ++row) {
+    float value = scale * kInverseOpsinMatrix[3u * row] * mixed[0];
+    value = fma(
+      scale * kInverseOpsinMatrix[3u * row + 1u], mixed[1], value);
+    value = fma(
+      scale * kInverseOpsinMatrix[3u * row + 2u], mixed[2], value);
+    if (!isfinite(value)) {
+      atomic_fetch_or_explicit(error, 64u, memory_order_relaxed);
+      value = 0.0f;
+    }
+    outputs[row][output_index] = value;
+  }
+}
+
 kernel void gjxl_aq_opsin_to_linear_rgb_f32(
   device const float* input_x [[buffer(0)]],
   device const float* input_y [[buffer(1)]],
@@ -257,37 +301,23 @@ kernel void gjxl_aq_opsin_to_linear_rgb_f32(
   uint2 position [[thread_position_in_grid]]) {
 
   if (position.x >= params.width || position.y >= params.height) return;
-  constexpr float kOpsinBias = 0.0037930732552754493f;
-  constexpr float kBiasCuberoot = 0.15595419704914093f;
-  constexpr float kInverseOpsinMatrix[9] = {
-    11.031566901960783f, -9.866943921568629f, -0.16462299647058826f,
-    -3.254147380392157f, 4.418770392156863f, -0.16462299647058826f,
-    -3.6588512862745097f, 2.7129230470588235f, 1.9459282392156863f,
-  };
-  const uint input_index = position.y * params.input_stride + position.x;
-  const uint output_index = position.y * params.output_stride + position.x;
-  const float gamma[3] = {
-    input_y[input_index] + input_x[input_index] + kBiasCuberoot,
-    input_y[input_index] - input_x[input_index] + kBiasCuberoot,
-    input_b[input_index] + kBiasCuberoot,
-  };
-  float mixed[3];
-  for (uint channel = 0u; channel < 3u; ++channel) {
-    mixed[channel] = gamma[channel] * gamma[channel] * gamma[channel] -
-      kOpsinBias;
-  }
-  device float* outputs[3] = {output_r, output_g, output_b};
-  for (uint row = 0u; row < 3u; ++row) {
-    float value = params.scale * kInverseOpsinMatrix[3u * row] * mixed[0];
-    value = fma(
-      params.scale * kInverseOpsinMatrix[3u * row + 1u], mixed[1], value);
-    value = fma(
-      params.scale * kInverseOpsinMatrix[3u * row + 2u], mixed[2], value);
-    if (!isfinite(value)) {
-      atomic_fetch_or_explicit(error, 64u, memory_order_relaxed);
-      value = 0.0f;
-    }
-    outputs[row][output_index] = value;
+  const uint index = position.y * params.input_stride + position.x;
+  AqStoreLinear(float3(input_x[index], input_y[index], input_b[index]),
+    params.scale, position.y * params.output_stride + position.x,
+    output_r, output_g, output_b, error);
+}
+
+template <bool LinearOutput>
+inline void AqStoreEpfOutput(thread const float* values, float scale, uint index,
+    device float* output_x, device float* output_y, device float* output_b,
+    device atomic_uint* error) {
+  if (LinearOutput) {
+    AqStoreLinear(float3(values[0], values[1], values[2]), scale, index,
+      output_x, output_y, output_b, error);
+  } else {
+    output_x[index] = values[0];
+    output_y[index] = values[1];
+    output_b[index] = values[2];
   }
 }
 
@@ -307,15 +337,14 @@ inline float aq_dataflow_sample(threadgroup const float* plane,
                uint(int(local.x) + delta.x)];
 }
 
-template <uint Pass, typename PlanePointer>
+template <uint Pass, bool LinearOutput = false, typename PlanePointer>
 inline void AqEpfDataflowPixel(PlanePointer input_x, PlanePointer input_y,
     PlanePointer input_b, device const float* inverse_sigma,
     device float* output_x, device float* output_y, device float* output_b,
     device atomic_uint* error, constant AqEpfParams& params,
-    uint2 position, uint2 local, uint tile_stride) {
+    uint2 position, uint2 local, uint tile_stride, float linear_scale = 1.0f) {
   if (position.x >= params.width || position.y >= params.height) return;
   PlanePointer inputs[3] = {input_x, input_y, input_b};
-  device float* outputs[3] = {output_x, output_y, output_b};
   const uint output_index = position.y * params.output_stride + position.x;
   const float block_inverse_sigma = inverse_sigma[
     (position.y / 8u) * params.inverse_sigma_stride + position.x / 8u];
@@ -325,9 +354,10 @@ inline void AqEpfDataflowPixel(PlanePointer input_x, PlanePointer input_y,
                                          local, tile_stride, int2(0));
   }
   if (block_inverse_sigma < -3.905242919921875f) {
-    for (uint channel = 0u; channel < 3u; ++channel) {
-      outputs[channel][output_index] = center[channel];
-    }
+    // Bypass intentionally omits EPF validation. Conversion retains its own
+    // error bit for non-finite bypass pixels, exactly as the separate passes.
+    AqStoreEpfOutput<LinearOutput>(center, linear_scale, output_index,
+      output_x, output_y, output_b, error);
     return;
   }
   const bool block_border =
@@ -368,8 +398,10 @@ inline void AqEpfDataflowPixel(PlanePointer input_x, PlanePointer input_y,
       atomic_fetch_or_explicit(error, 32u, memory_order_relaxed);
       value = 0.0f;
     }
-    outputs[channel][output_index] = value;
+    sum[channel] = value;
   }
+  AqStoreEpfOutput<LinearOutput>(sum, linear_scale, output_index,
+    output_x, output_y, output_b, error);
 }
 
 #define GJXL_EPF_ARGUMENTS \
@@ -402,13 +434,14 @@ inline uint aq_epf_mirror_coordinate(int coordinate, uint size) {
   return uint(reflected < int(size) ? reflected : period - reflected - 1);
 }
 
-template <uint Pass, uint Width, uint Height, uint PixelsPerThread>
+template <uint Pass, uint Width, uint Height, uint PixelsPerThread,
+          bool LinearOutput = false>
 inline void AqEpfDataflowTile(device const float* input_x,
     device const float* input_y, device const float* input_b,
     device const float* inverse_sigma, device float* output_x,
     device float* output_y, device float* output_b, device atomic_uint* error,
     constant AqEpfParams& params, threadgroup float* tile,
-    uint2 thread_position, uint2 group_position) {
+    uint2 thread_position, uint2 group_position, float linear_scale = 1.0f) {
   constexpr uint kHalo = Pass == 0 ? 3 : Pass == 1 ? 2 : 1;
   constexpr uint kStride = Width + 2 * kHalo;
   constexpr uint kTileHeight = Height * PixelsPerThread;
@@ -434,10 +467,10 @@ inline void AqEpfDataflowTile(device const float* input_x,
   for (uint pixel = 0; pixel < PixelsPerThread; ++pixel) {
     const uint2 local = thread_position + uint2(kHalo, kHalo + pixel * Height);
     const uint2 position = origin + thread_position + uint2(0, pixel * Height);
-    AqEpfDataflowPixel<Pass>(static_cast<threadgroup const float*>(tile),
+    AqEpfDataflowPixel<Pass, LinearOutput>(static_cast<threadgroup const float*>(tile),
       static_cast<threadgroup const float*>(tile + kPlane),
       static_cast<threadgroup const float*>(tile + 2 * kPlane), inverse_sigma,
-      output_x, output_y, output_b, error, params, position, local, kStride);
+      output_x, output_y, output_b, error, params, position, local, kStride, linear_scale);
   }
 }
 
@@ -462,4 +495,28 @@ GJXL_EPF_VARIANTS(1)
 GJXL_EPF_VARIANTS(2)
 #undef GJXL_EPF_VARIANTS
 #undef GJXL_EPF_TILED
+// Only passes 1 and 2 can be the final EPF pass. These variants directly
+// materialize linear RGB, preserving EPF sanitization before color conversion.
+#define GJXL_EPF_LINEAR_DIRECT(name, pass) \
+kernel void name(GJXL_EPF_ARGUMENTS, constant float& scale [[buffer(9)]], \
+  uint2 position [[thread_position_in_grid]]) { \
+  AqEpfDataflowPixel<pass, true>(input_x, input_y, input_b, inverse_sigma, \
+    output_x, output_y, output_b, error, params, position, uint2(0), 0, scale); \
+}
+#define GJXL_EPF_LINEAR_TILED(name, pass) \
+kernel void name(GJXL_EPF_ARGUMENTS, constant float& scale [[buffer(9)]], \
+  uint2 thread_position [[thread_position_in_threadgroup]], \
+  uint2 group_position [[threadgroup_position_in_grid]]) { \
+  constexpr uint halo = pass == 1 ? 2 : 1; \
+  threadgroup float tile[3 * (32 + 2 * halo) * (8 + 2 * halo)]; \
+  AqEpfDataflowTile<pass, 32, 4, 2, true>(input_x, input_y, input_b, \
+    inverse_sigma, output_x, output_y, output_b, error, params, tile, \
+    thread_position, group_position, scale); \
+}
+GJXL_EPF_LINEAR_DIRECT(gjxl_aq_epf_pass1_linear_direct, 1)
+GJXL_EPF_LINEAR_DIRECT(gjxl_aq_epf_pass2_linear_direct, 2)
+GJXL_EPF_LINEAR_TILED(gjxl_aq_epf_pass1_linear_tile32x4_p2, 1)
+GJXL_EPF_LINEAR_TILED(gjxl_aq_epf_pass2_linear_tile32x4_p2, 2)
+#undef GJXL_EPF_LINEAR_DIRECT
+#undef GJXL_EPF_LINEAR_TILED
 #undef GJXL_EPF_ARGUMENTS

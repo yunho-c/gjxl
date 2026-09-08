@@ -285,8 +285,13 @@ bool CheckSubmissionStorage(gjxl::GpuBackend& gpu,
     for (const auto& stage : result.submissions[0].stages) {
       if (stage.stage_id != AcStrategyProfileStageId(batch.strategy) ||
           stage.group_id != kAcStrategyProfileGroupId ||
-          stage.dispatches.size() < 3 || stage.dispatches.size() > 5)
+          stage.dispatches.size() < 2 || stage.dispatches.size() > 5)
         return false;
+      if (stage.dispatches.size() == 2 &&
+          (stage.dispatches.front().kernel_id !=
+             "gjxl_ac_strategy_dct16_candidate_loss_parallel" ||
+           stage.dispatches.back().kernel_id !=
+             "gjxl_ac_strategy_cost_from_loss")) return false;
       dispatches += stage.dispatches.size();
     }
     if (dispatches > plan.maximum_dispatches) return false;

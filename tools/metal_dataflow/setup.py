@@ -47,6 +47,7 @@ for name, extent in [("small", "17x9"), ("4k", "3839x2159")]:
                 subprocess.run(
                     cmd, stdout=f, stderr=subprocess.STDOUT, check=True, timeout=600
                 )
+            quiet()
             data = [
                 json.loads(line)
                 for line in log.read_text().splitlines()

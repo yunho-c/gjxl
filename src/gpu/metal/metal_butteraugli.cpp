@@ -1668,8 +1668,6 @@ private:
     ConstDevicePlaneView sub_map,
     const MetalButteraugliResidentComparisonDescriptor& descriptor) {
 
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.resident_reduction.get());
     const PsychoPlanes reference = PsychoSlots(kPsychoReference, working_extent_);
     const PsychoPlanes distorted = PsychoSlots(kPsychoDistorted, working_extent_);
     for (size_t index = 0; index < 8; ++index) {
@@ -1704,6 +1702,11 @@ private:
 
     for (const MetalButteraugliResidentBatch& batch : descriptor.batches) {
       if (batch.anchor_count == 0) continue;
+      const bool small = batch.pixel_width == 8 && batch.pixel_height == 8 &&
+        bool(metal_.butteraugli_pipelines_.resident_reduction_small);
+      encoder->setComputePipelineState(small
+        ? metal_.butteraugli_pipelines_.resident_reduction_small.get()
+        : metal_.butteraugli_pipelines_.resident_reduction.get());
       const ResidentReductionParams params{
         static_cast<uint32_t>(extent().width),
         static_cast<uint32_t>(extent().height),
@@ -1723,7 +1726,7 @@ private:
       DispatchMetalThreadgroups(
         encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
-        MTL::Size(kReductionWidth, 1, 1));
+        MTL::Size(small ? 64 : kReductionWidth, 1, 1));
     }
     EncodeMaximumReduction(
       encoder, descriptor.score_partials, descriptor.score);
@@ -2204,7 +2207,9 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_convolve_transpose_f32", &pipelines.convolution_transpose},
     {"gjxl_butteraugli_opsin_blur5_tiled_f32",
      &pipelines.opsin_blur5_tiled},
-    {"gjxl_butteraugli_frequency_low_medium_tiled_f32",
+    {device->supportsFamily(MTL::GPUFamilyApple9)
+       ? "gjxl_butteraugli_low_medium_p1_device"
+       : "gjxl_butteraugli_frequency_low_medium_tiled_f32",
      &pipelines.frequency_low_medium_tiled},
     {"gjxl_butteraugli_frequency_high_convolve_f32",
      &pipelines.frequency_high_convolve},
@@ -2215,7 +2220,9 @@ Status CreateButteraugliPipelines(
      &pipelines.frequency_ultra_mask_convolve},
     {"gjxl_butteraugli_malta_scale_f32", &pipelines.malta_scale},
     {"gjxl_butteraugli_malta_response_f32", &pipelines.malta_response},
-    {"gjxl_butteraugli_malta_fused_f32", &pipelines.malta_fused},
+    {device->supportsFamily(MTL::GPUFamilyApple9)
+       ? "gjxl_butteraugli_malta_fixed_f32" : "gjxl_butteraugli_malta_fused_f32",
+     &pipelines.malta_fused},
     {"gjxl_butteraugli_l2_f32", &pipelines.l2},
     {"gjxl_butteraugli_mask_precompute_f32", &pipelines.mask_precompute},
     {"gjxl_butteraugli_fuzzy_erosion_f32", &pipelines.fuzzy_erosion},
@@ -2279,6 +2286,17 @@ Status CreateButteraugliPipelines(
       kLowMediumThreadgroupMemoryBytes) {
     return Status::Unavailable(
       "Metal lacks memory for the tiled Butteraugli low/medium threadgroup");
+  }
+  // The explicit shuffle tree requires 32 lanes; other devices retain the
+  // original reduction. Eight-by-eight blocks never have more than 64 pixels.
+  if (device->supportsFamily(MTL::GPUFamilyApple9)) {
+    NS::SharedPtr<MTL::ComputePipelineState> small;
+    const Status status = CreatePipeline(device, library,
+      "gjxl_butteraugli_resident_l2_reduce_w64_simd", &small);
+    if (status.ok() && small->threadExecutionWidth() == 32 &&
+        small->maxTotalThreadsPerThreadgroup() >= 64) {
+      pipelines.resident_reduction_small = std::move(small);
+    }
   }
   *out = std::move(pipelines);
   return Status::Ok();

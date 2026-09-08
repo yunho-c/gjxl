@@ -44,6 +44,8 @@ constexpr size_t MaximumAqIdLength() {
                               "aq.epf.pass_0",
                               "aq.epf.pass_1",
                               "aq.epf.pass_2",
+                              "aq.epf_linear.pass_1",
+                              "aq.epf_linear.pass_2",
                               "aq.opsin_to_linear",
                               "aq.block_reduction",
                               "aq.final_frame",

@@ -166,6 +166,8 @@ struct AqPipelines {
   // The measured Apple-family-9 table is resolved once per prepared image.
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_direct;
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_tiled;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_linear_direct;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_linear_tiled;
   NS::SharedPtr<MTL::ComputePipelineState> opsin_to_linear;
 };
 
@@ -173,6 +175,7 @@ struct AcStrategyPipelines {
   struct FusedStages {
     NS::SharedPtr<MTL::ComputePipelineState> forward;
     NS::SharedPtr<MTL::ComputePipelineState> residual_inverse;
+    NS::SharedPtr<MTL::ComputePipelineState> candidate_loss;
     NS::UInteger forward_threads_per_threadgroup = 0;
     NS::UInteger residual_inverse_threads_per_threadgroup = 0;
     bool reduces_loss = false;
@@ -243,6 +246,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> crop;
   NS::SharedPtr<MTL::ComputePipelineState> compose;
   NS::SharedPtr<MTL::ComputePipelineState> resident_reduction;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_reduction_small;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
 };
 

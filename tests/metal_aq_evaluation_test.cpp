@@ -1346,7 +1346,8 @@ bool CheckResidentForwardDispatches(
   return true;
 }
 
-bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
+bool CheckResidentButteraugliPolicy(
+    gjxl::GpuBackend& gpu, gjxl::AqEvaluationOptions options = MakeOptions()) {
   Fixture fixture;
   if (!fixture.Initialize()) return false;
   const gjxl::Extent2D blocks = fixture.strategies.extent();
@@ -1365,7 +1366,7 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
         .coding_opsin = fixture.coding.View(),
         .strategies = &fixture.strategies,
         .epf_sharpness = {sharpness.data(), blocks, blocks.width},
-        .options = MakeOptions(),
+        .options = options,
         .resident_quantization = true,
         .coefficient_decision_mode =
           gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
@@ -1558,8 +1559,32 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
       saw_reconstruction_batch |=
         stage.stage_id.starts_with("aq.reconstruction.dct");
     }
-    saw_epf |= stage.stage_id == "aq.epf.pass_1";
+    saw_epf |= stage.stage_id == "aq.epf.pass_1" ||
+               stage.stage_id == "aq.epf_linear.pass_1";
     saw_malta |= stage.stage_id == "butteraugli.malta.main";
+    if (stage.stage_id.starts_with("aq.epf_linear.")) {
+      const bool valid_kernel = stage.dispatches.size() == 1 &&
+        (stage.dispatches[0].kernel_id == "gjxl_aq_epf_pass1_linear_direct" ||
+         stage.dispatches[0].kernel_id == "gjxl_aq_epf_pass1_linear_tile32x4_p2" ||
+         stage.dispatches[0].kernel_id == "gjxl_aq_epf_pass2_linear_direct" ||
+         stage.dispatches[0].kernel_id == "gjxl_aq_epf_pass2_linear_tile32x4_p2");
+      const bool extra_conversion = std::ranges::any_of(
+        gpu_profile.submissions[0].stages, [&](const auto& other) {
+          return other.iteration == stage.iteration &&
+                 other.stage_id == "aq.opsin_to_linear";
+        });
+      if (!valid_kernel || extra_conversion) {
+        std::cerr << "Resident final EPF fusion dispatch contract differs: "
+                  << stage.stage_id << " epf="
+                  << options.profile.loop_filter.epf_options.iterations
+                  << " gaborish=" << options.profile.loop_filter.gaborish
+                  << " extra_conversion=" << extra_conversion << " kernels=";
+        for (const auto& dispatch : stage.dispatches)
+          std::cerr << dispatch.kernel_id << ",";
+        std::cerr << '\n';
+        return false;
+      }
+    }
     if (stage.end_timestamp < stage.begin_timestamp ||
         stage.gpu_nanoseconds !=
           stage.end_timestamp - stage.begin_timestamp ||
@@ -1569,7 +1594,9 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
     }
   }
   if (!saw_reconstruction_reset || !saw_reconstruction_quantizer ||
-      !saw_reconstruction_batch || !saw_epf || !saw_malta) {
+      !saw_reconstruction_batch ||
+      saw_epf != (options.profile.loop_filter.epf_options.iterations != 0) ||
+      !saw_malta) {
     std::cerr << "Profiled resident stages are incomplete\n";
     return false;
   }
@@ -3066,6 +3093,15 @@ int main() {
       options.profile.loop_filter.gaborish = gaborish;
       options.profile.loop_filter.epf_options.iterations = epf;
       if (!CheckProductionEvaluation(*gpu, options)) return EXIT_FAILURE;
+      if (epf != 0) {
+        // Failure tests above create many backends. Refresh this one so its
+        // kernel names remain in the bounded diagnostic pipeline registry.
+        std::unique_ptr<gjxl::GpuBackend> policy_gpu;
+        if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &policy_gpu),
+                         "filter-config resident backend") ||
+            !CheckResidentButteraugliPolicy(*policy_gpu, options))
+          return EXIT_FAILURE;
+      }
     }
   }
   std::cout << "Metal AQ Milestone 7 evaluation tests passed; max block "

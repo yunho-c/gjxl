@@ -32,22 +32,32 @@ def save(path, value):
 def quiet():
     busy = []
     for line in subprocess.check_output(
-        ["ps", "-axo", "pid=,comm="], text=True
+        ["ps", "-axo", "pid=,stat=,comm="], text=True
     ).splitlines():
-        fields = line.strip().split(None, 1)
-        if len(fields) != 2:
+        fields = line.strip().split(None, 2)
+        if len(fields) != 3:
             continue
-        pid, command = fields
+        pid, state, command = fields
         name = Path(command).name
-        if int(pid) == os.getpid():
+        if int(pid) == os.getpid() or any(flag in state for flag in "TZ"):
             continue
-        if name.startswith("gjxl_") or name in (
+        controller = False
+        if name.lower().startswith("python"):
+            # Detect quiet gaps between children of an independent study.
+            args = subprocess.run(["ps", "-p", pid, "-o", "args="],
+                                  capture_output=True, text=True).stdout
+            controller = any(script in args for script in (
+                "cjxl_runtime_characterization.py", "cjxl_wall_profile_validate.py"
+            ))
+        if controller or name.startswith("gjxl_") or name in (
             "ctest",
             "ninja",
             "make",
             "clang",
             "clang++",
             "cc1",
+            "metal",
+            "xctrace",
         ):
             busy.append(line)
     if busy:
@@ -97,6 +107,9 @@ def extract(path, profile, expected_samples):
                     )
                 ),
                 "group.epf": lambda k: k.startswith("aq.epf."),
+                "group.epf_linear": lambda k: k.startswith(
+                    ("aq.epf.", "aq.epf_linear.")
+                ) or k == "aq.opsin_to_linear",
                 "group.all_stages": lambda k: True,
             }
             grouped = {
@@ -257,6 +270,9 @@ def main():
                         raise RuntimeError(
                             f"Benchmark failed ({process.returncode}): {log}"
                         )
+                    # Reject a study that starts while this process is timing.
+                    # Raw/log files remain as an excluded incomplete attempt.
+                    quiet()
                     save(
                         record,
                         {
@@ -269,6 +285,15 @@ def main():
                     )
                 medians[label] = extract(raw, args.profile, args.samples)
             if args.profile:
+                if any(key.startswith("aq.epf_linear.") for key in medians["candidate"]):
+                    # Fusion changes the individual pass boundary. Compare the
+                    # same EPF + conversion work; retain raw per-stage records.
+                    for metrics in medians.values():
+                        for key in list(metrics):
+                            if key in ("group.epf", "aq.opsin_to_linear") or key.startswith(
+                                ("aq.epf.", "aq.epf_linear.")
+                            ):
+                                del metrics[key]
                 removed = medians["baseline"].keys() - medians["candidate"].keys()
                 if any(
                     not key.startswith("aq.reconstruction.scatter.") for key in removed

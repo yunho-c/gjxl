@@ -570,12 +570,15 @@ private:
       const void *context);
 
   void EncodePostprocess(MetalBackend &backend,
-                         MTL::ComputeCommandEncoder *encoder) const;
+                         MTL::ComputeCommandEncoder *encoder,
+                         bool linear_only = false) const;
+  bool CanFuseFinalEpf() const noexcept;
+  bool IsFinalEpfPass(uint32_t pass) const noexcept;
   void EncodeGaborish(MetalBackend& backend,
                       MTL::ComputeCommandEncoder* encoder) const;
   void EncodeEpfPass(MetalBackend& backend,
                      MTL::ComputeCommandEncoder* encoder,
-                     uint32_t pass) const;
+                     uint32_t pass, bool linear_output = false) const;
   void EncodeOpsinToLinear(MetalBackend& backend,
                            MTL::ComputeCommandEncoder* encoder) const;
   void EncodeResidentPolicyInitialize(
@@ -705,6 +708,7 @@ private:
   struct EpfDispatch {
     MTL::ComputePipelineState* pipeline = nullptr;
     bool tiled = false;
+    MTL::ComputePipelineState* linear_pipeline = nullptr;
   };
   std::array<EpfDispatch, 3> epf_dispatch_{};
   AqOpsinToLinearParams opsin_to_linear_params_{};
