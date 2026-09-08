@@ -1639,6 +1639,19 @@ storage remains opt-in; CPU tile scheduling is unchanged. The report includes
 the earlier test-upload ordering defect, failed probes, exact math/lifetime
 contracts, duplicate controls and the qualification limits.
 
+[S112](cuda-tile-scheduling-s112.md) qualifies bounded dynamic CPU scheduling
+of the prepared candidate-cost merge without changing per-tile math. The
+clean odd-4K merge saves 4.35–4.67 ms, but its enclosing quantization phase
+is slower by 0.43–14.13 ms across all eight automatic-thread paired medians;
+complete-call and batch throughput remain mixed. The candidate is **not
+promoted**: serial CPU routing, S111 GPU fusion and opt-in compact storage
+are unchanged, with no new runtime selector or compatibility layer. There
+are 6,684 checked encodes, 14 matching expected rejections, scoped ASAN
+coverage including parallel HD/4K batches, and 79/79 candidate CTest passes.
+The tested source/build integration is archived, not retained in the runtime.
+The next targets are quantization time outside the merge and serial grid
+export; the cause of the outside-merge slowdown is not yet established.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
