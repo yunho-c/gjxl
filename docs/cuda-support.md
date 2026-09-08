@@ -1869,6 +1869,16 @@ preserving maximum-error ownership, other filter routes, allocations and
 compact defaults. Next isolate filter-scratch lifetime planning: the default
 fused perceptual path leaves one allocated scratch image unused.
 
+[S132](cuda-filter-storage-s132.md) removes that unused image and reuses
+the inverse-DCT storage for later filter passes. All profiles need at most
+one dedicated scratch image; a lone perceptual EPF without Gaborish needs
+none. The default padded 4K persistent arena falls from 403.6 to 304.0 MB,
+with all 214 GPU kernels unchanged. All 80 CTests, 1,746 frozen-oracle encodes,
+256 profile comparisons and eight CUDA sanitizer jobs pass. Complete-encode
+repeats do not establish a dependable speed change, so this is retained as
+a live-storage reduction, not a claimed throughput percentage. The next
+step is to reprofile the complete resident critical path after these changes.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

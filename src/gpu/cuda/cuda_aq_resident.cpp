@@ -365,13 +365,16 @@ class CudaPreparedResidentAqEvaluation final
     if (!status.ok()) return status;
     options_ = preparation.options;
     resident_frontend_ = resident_frontend;
-    filter_stage_count_ =
+    filter_xyb_stage_count_ =
         (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
         options_.profile.loop_filter.epf_options.iterations;
-    filter_scratch_count_ = std::min<size_t>(2, filter_stage_count_);
-    final_filter_index_ = filter_stage_count_ == 0
-                              ? -1
-                              : static_cast<int>((filter_stage_count_ - 1) % 2);
+    // Count materialized XYB images, not logical filters. A fused first
+    // boundary writes once; a final perceptual EPF writes RGB directly.
+    if (FuseGaborishEpf()) --filter_xyb_stage_count_;
+    if (options_.metric != AqEvaluationMetric::kMaximumError &&
+        options_.profile.loop_filter.epf_options.iterations != 0) {
+      --filter_xyb_stage_count_;
+    }
 
     Metadata metadata;
     status = DeferInitialDct8Metadata(*preparation.strategies,
@@ -1718,8 +1721,7 @@ class CudaPreparedResidentAqEvaluation final
                            coding_extent_.width, &persistent_bytes);
       }
     }
-    for (size_t image = 0; image < filter_scratch_count_ && status.ok();
-         ++image) {
+    if (filter_xyb_stage_count_ != 0) {
       for (size_t channel = 0; channel < 3 && status.ok(); ++channel) {
         status = PlanPlane(DeviceElementType::kF32, coding_extent_,
                            coding_extent_.width, &persistent_bytes);
@@ -1876,8 +1878,8 @@ class CudaPreparedResidentAqEvaluation final
                              coding_extent_, coding_extent_.width, &plane);
       if (!status.ok()) return status;
     }
-    for (size_t image = 0; image < filter_scratch_count_; ++image) {
-      for (DevicePlaneView& plane : filter_scratch_[image]) {
+    if (filter_xyb_stage_count_ != 0) {
+      for (DevicePlaneView& plane : filter_scratch_) {
         status = AllocatePlane(persistent_, DeviceElementType::kF32,
                                coding_extent_, coding_extent_.width, &plane);
         if (!status.ok()) return status;
@@ -2583,6 +2585,15 @@ class CudaPreparedResidentAqEvaluation final
     return cudaSuccess;
   }
 
+  bool FuseGaborishEpf() const noexcept {
+    const uint32_t iterations =
+        options_.profile.loop_filter.epf_options.iterations;
+    return options_.profile.loop_filter.gaborish &&
+           (iterations == 2 ||
+            (iterations == 1 &&
+             options_.metric == AqEvaluationMetric::kMaximumError));
+  }
+
   cudaError_t EncodePostprocess(CudaBackend& backend) {
     std::array<DevicePlaneView, 3> current = reconstructed_;
     size_t stage = 0;
@@ -2591,27 +2602,23 @@ class CudaPreparedResidentAqEvaluation final
         options_.profile.loop_filter.epf_options.iterations;
     const uint32_t first_pass = iterations == 3 ? 0 : 1;
     uint32_t next_pass = first_pass;
-    if (options_.profile.loop_filter.gaborish &&
-        (iterations == 2 ||
-         (iterations == 1 && options_.metric == AqEvaluationMetric::kMaximumError))) {
+    if (FuseGaborishEpf()) {
       status = LaunchCudaAqGaborishEpf(
           ConstPointers(current), Pointer<const float>(inverse_sigma_device_),
-          MutablePointers(filter_scratch_[1]),
+          MutablePointers(filter_scratch_),
           Pointer<unsigned int>(error_device_), gaborish_params_, epf_params_[1],
           backend.state_->stream);
       if (status != cudaSuccess) return status;
-      // Retain the same logical stage count and XYB owner as two separate
-      // passes. Maximum-error scoring depends on this final-plane selection.
-      current = filter_scratch_[1];
-      stage = 2;
+      current = filter_scratch_;
+      stage = 1;
       next_pass = 2;
     } else if (options_.profile.loop_filter.gaborish) {
       status = LaunchCudaAqGaborish(ConstPointers(current),
-                                    MutablePointers(filter_scratch_[0]),
+                                    MutablePointers(filter_scratch_),
                                     Pointer<unsigned int>(error_device_),
                                     gaborish_params_, backend.state_->stream);
       if (status != cudaSuccess) return status;
-      current = filter_scratch_[0];
+      current = filter_scratch_;
       ++stage;
     }
     for (uint32_t pass = next_pass; pass < first_pass + iterations; ++pass) {
@@ -2625,7 +2632,11 @@ class CudaPreparedResidentAqEvaluation final
             Pointer<unsigned int>(error_device_), epf_params_[pass],
             color_params_, backend.state_->stream);
       }
-      std::array<DevicePlaneView, 3>& destination = filter_scratch_[stage % 2];
+      // The inverse-DCT image is dead after its first filter read. Alternate
+      // with it instead of retaining a second scratch image. Each launch has
+      // distinct input/output storage; the next evaluation fully reconstructs
+      // this image again before any filter reads it.
+      auto& destination = stage % 2 == 0 ? filter_scratch_ : reconstructed_;
       status = LaunchCudaAqEpf(
           ConstPointers(current), Pointer<const float>(inverse_sigma_device_),
           MutablePointers(destination), Pointer<unsigned int>(error_device_),
@@ -2797,9 +2808,7 @@ class CudaPreparedResidentAqEvaluation final
   }
 
   std::array<DevicePlaneView, 3> FinalFilteredImage() const noexcept {
-    return final_filter_index_ < 0
-               ? reconstructed_
-               : filter_scratch_[static_cast<size_t>(final_filter_index_)];
+    return filter_xyb_stage_count_ % 2 == 0 ? reconstructed_ : filter_scratch_;
   }
 
   template <typename T>
@@ -2868,7 +2877,7 @@ class CudaPreparedResidentAqEvaluation final
   ConstDeviceImage3View borrowed_original_{};
   ConstDeviceImage3View borrowed_coding_{};
   std::array<DevicePlaneView, 3> reconstructed_{};
-  std::array<std::array<DevicePlaneView, 3>, 2> filter_scratch_{};
+  std::array<DevicePlaneView, 3> filter_scratch_{};
   std::array<DevicePlaneView, 3> reconstructed_linear_{};
   DevicePlaneView anchors_device_{};
   DevicePlaneView epf_sharpness_device_{};
@@ -2918,9 +2927,7 @@ class CudaPreparedResidentAqEvaluation final
   std::vector<size_t> group_packed_offsets_;
   std::vector<AcReadbackRun> ac_readback_runs_;
   size_t anchor_count_ = 0;
-  size_t filter_stage_count_ = 0;
-  size_t filter_scratch_count_ = 0;
-  int final_filter_index_ = -1;
+  size_t filter_xyb_stage_count_ = 0;
   AqEvaluationOptions options_{};
   AcStrategyGrid strategies_{};
   std::array<CudaAqExactBatch, 7> batches_{};

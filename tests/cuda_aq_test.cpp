@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -1926,6 +1927,130 @@ bool CheckPublicWorkflow(
   return true;
 }
 
+bool CheckResidentFilterLifetimes(gjxl::GpuBackend& gpu,
+                                 const ImageStorage& source,
+                                 const ImageStorage& opsin) {
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8,
+                              kPaddedExtent.height / 8};
+  const size_t count = blocks.width * blocks.height;
+  gjxl::AcStrategyGrid strategies;
+  if (!MakeExactStrategies(&strategies)) return false;
+  std::vector<uint8_t> sharpness(count);
+  std::array<std::vector<float>, 2> fields;
+  for (auto& field : fields) field.resize(count);
+  for (size_t i = 0; i < count; ++i) {
+    sharpness[i] = static_cast<uint8_t>(i % 8);
+    fields[0][i] = 0.78f + 0.011f * static_cast<float>(i % 23);
+    fields[1][i] = 1.3f + 0.023f * static_cast<float>(i % 17);
+  }
+  // Padded float planes are multiples of the arena's 256-byte alignment.
+  const size_t image_bytes =
+      3 * kPaddedExtent.width * kPaddedExtent.height * sizeof(float);
+  const auto bits_equal = [](const auto& a, const auto& b) {
+    return a.size() == b.size() &&
+           std::memcmp(a.data(), b.data(), a.size() * sizeof(a[0])) == 0;
+  };
+  for (bool maximum : {false, true}) {
+    size_t unfiltered_bytes = 0;
+    for (bool gaborish : {false, true}) {
+      for (uint32_t epf = 0; epf <= 3; ++epf) {
+        gjxl::AqEvaluationOptions options;
+        options.profile.loop_filter.gaborish = gaborish;
+        options.profile.loop_filter.epf_options.iterations = epf;
+        options.metric = maximum ? gjxl::AqEvaluationMetric::kMaximumError
+                                 : gjxl::AqEvaluationMetric::kButteraugli;
+        options.maximum_error = {0.035f, 0.05f, 0.065f};
+        std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+        if (!Check(gjxl::PrepareAqEvaluation(gpu,
+                       {.original_linear_rgb = source.View(),
+                        .coding_opsin = opsin.View(),
+                        .strategies = &strategies,
+                        .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+                        .options = options,
+                        .resident_quantization = true,
+                        .coefficient_decision_mode =
+                            gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant},
+                       &prepared),
+                   "Prepare resident filter lifetime test")) return false;
+        const auto memory = prepared->memory_stats();
+        if (!gaborish && epf == 0) unfiltered_bytes = memory.persistent_bytes;
+        // Independent table: only no filters, or one perceptual EPF without
+        // Gaborish, can avoid scratch entirely. Every other route needs one
+        // image, even three EPFs and maximum-error XYB materialization.
+        const bool needs_scratch = gaborish || epf > (maximum ? 0u : 1u);
+        if (memory.persistent_bytes !=
+            unfiltered_bytes + (needs_scratch ? image_bytes : 0)) {
+          std::cerr << "Resident filter scratch size differs: maximum=" << maximum
+                    << " gaborish=" << gaborish << " epf=" << epf << '\n';
+          return false;
+        }
+        if (!Check(prepared->PrepareInvariantColorCorrelationResident(
+                       {fields[0].data(), blocks, blocks.width}, 1.0f),
+                   "Prepare filter lifetime CfL")) return false;
+        const auto allocations = gpu.stats().successful_allocations;
+        std::vector<float> map(count), reference_map;
+        ImageStorage rgb(kSourceExtent);
+        std::array<std::vector<float>, 3> reference_rgb;
+        gjxl::VarDctEncoderFrame frame;
+        gjxl::QuantizerParams quantizer{}, reference_quantizer{};
+        gjxl::MaximumErrorReduction reduction{}, reference_reduction{};
+        double score = 0.0, reference_score = 0.0;
+        gjxl::AqEvaluationOutput::Final final{
+            .reconstructed_linear_rgb = rgb.View(), .frame = &frame};
+        const gjxl::AqEvaluationOutput output{
+            .block_distance_map = {map.data(), blocks, blocks.width},
+            .score = &score, .maximum_error = maximum ? &reduction : nullptr,
+            .quantizer = &quantizer, .final = &final};
+        for (size_t stage = 0; stage < 3; ++stage) {
+          const auto& field = fields[stage % 2];
+          if (!Check(prepared->Evaluate(
+                         {.quant_field = {field.data(), blocks, blocks.width},
+                          .quant_dc = 1.0f}, output),
+                     "Evaluate reused resident filters") ||
+              !frame.valid() || !gjxl_test::CheckResidentPopulation(frame) ||
+              gpu.stats().successful_allocations != allocations) return false;
+          if (stage == 0) {
+            reference_map = map;
+            reference_rgb = rgb.plane;
+            reference_score = score;
+            reference_quantizer = quantizer;
+            reference_reduction = reduction;
+          } else if (stage == 2) {
+            if (!bits_equal(map, reference_map) || score != reference_score ||
+                quantizer.global_scale != reference_quantizer.global_scale ||
+                quantizer.quant_dc != reference_quantizer.quant_dc ||
+                reduction != reference_reduction) return false;
+            for (size_t c = 0; c < 3; ++c)
+              if (!bits_equal(rgb.plane[c], reference_rgb[c])) return false;
+          }
+        }
+        // A completion failure happens after filters may have overwritten the
+        // reused inverse-DCT storage. Caller outputs must still be atomic and
+        // the invalidated object must not submit another evaluation.
+        if (!Check(gjxl::ArmNextCudaSubmissionFailureForTest(gpu, false, true),
+                   "Arm filter lifetime completion failure")) return false;
+        const gjxl::AqEvaluationInput input{
+            .quant_field = {fields[1].data(), blocks, blocks.width}, .quant_dc = 1.0f};
+        if (prepared->Evaluate(input, output).ok()) return false;
+        const auto submissions = gpu.stats().committed_submissions;
+        if (prepared->Evaluate(input, output).code() !=
+                gjxl::StatusCode::kFailedPrecondition ||
+            gpu.stats().committed_submissions != submissions ||
+            gpu.stats().successful_allocations != allocations ||
+            !bits_equal(map, reference_map) || score != reference_score ||
+            reduction != reference_reduction ||
+            quantizer.global_scale != reference_quantizer.global_scale ||
+            quantizer.quant_dc != reference_quantizer.quant_dc) return false;
+        for (size_t c = 0; c < 3; ++c)
+          if (!bits_equal(rgb.plane[c], reference_rgb[c])) return false;
+      }
+    }
+  }
+  std::cout << "Resident filter lifetimes: 16 profiles, 48 reused evaluations, "
+               "16 atomic failures passed.\n";
+  return true;
+}
+
 bool CheckConcurrentPublicWorkflow(gjxl::GpuBackend& gpu) {
   constexpr gjxl::Extent2D kConcurrentExtent{512, 384};
   ImageStorage source(kConcurrentExtent);
@@ -2037,6 +2162,7 @@ int main() {
       !CheckPreparedReuseAndFailure(*gpu, source, opsin) ||
       !CheckDeferredResidentMetadata(*gpu, source, opsin) ||
       !CheckPublicWorkflow(*gpu, source) ||
+      !CheckResidentFilterLifetimes(*gpu, source, opsin) ||
       !CheckConcurrentPublicWorkflow(*gpu)) {
     return EXIT_FAILURE;
   }
