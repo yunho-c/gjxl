@@ -348,13 +348,16 @@ void WriteRawSamples(const std::filesystem::path &destination,
     output.exceptions(std::ios::badbit | std::ios::failbit);
     output.open(temporary, std::ios::out | std::ios::trunc);
     output << "{\n"
-           << "  \"schema_version\": " << (options.stage_profile ? 2 : 1)
+           << "  \"schema_version\": " << (options.stage_profile ? 3 : 1)
            << ",\n";
     if (options.stage_profile) {
-      output << "  \"timing_semantics\": {\"elapsed_nanoseconds\": "
-                "\"complete-encode-wall-time\", \"phase_nanoseconds\": "
-                "\"wall-clock-barrier-time\", \"work_nanoseconds\": "
-                "\"aggregate-worker-time\"},\n";
+      output
+          << "  \"timing_semantics\": {\"elapsed_nanoseconds\": "
+             "\"complete-encode-wall-time\", \"phase_nanoseconds\": "
+             "\"wall-clock-barrier-time\", \"work_nanoseconds\": "
+             "\"aggregate-worker-time\", \"wall_exclusive_nanoseconds\": "
+             "\"additive-caller-wall-time\", \"wall_inclusive_nanoseconds\": "
+             "\"nested-caller-wall-time-not-additive\"},\n";
     } else {
       output << "  \"timing_semantics\": "
                 "\"complete-encode-wall-time\",\n";
@@ -381,6 +384,34 @@ void WriteRawSamples(const std::filesystem::path &destination,
              << ", \"encoded_bytes\": " << sample.encoded_bytes;
 #if GJXL_LIBJXL_STAGE_PROFILE
       if (options.stage_profile) {
+        output << ", \"wall_profile_version\": "
+               << jxl::kEncoderWallProfileVersion;
+        output << ", \"wall_root_nanoseconds\": "
+               << sample.stage_profile.wall_root_nanoseconds;
+        output << ", \"frame_invocations\": "
+               << sample.stage_profile.frame_invocations;
+        output << ", \"refinement_iterations\": "
+               << sample.stage_profile.refinement_iterations;
+        output << ", \"internal_width\": "
+               << sample.stage_profile.internal_width;
+        output << ", \"internal_height\": "
+               << sample.stage_profile.internal_height;
+        output << ", \"resampling\": " << sample.stage_profile.resampling;
+        const auto write_wall = [&](const char *name, const auto &values) {
+          output << ", \"" << name << "\": {";
+          for (size_t i = 0; i < jxl::kEncoderWallStageCount; ++i) {
+            if (i)
+              output << ", ";
+            output << '\"' << jxl::kEncoderWallStageNames[i]
+                   << "\": " << values[i];
+          }
+          output << '}';
+        };
+        write_wall("wall_exclusive_nanoseconds",
+                   sample.stage_profile.wall_exclusive_nanoseconds);
+        write_wall("wall_inclusive_nanoseconds",
+                   sample.stage_profile.wall_inclusive_nanoseconds);
+        write_wall("wall_invocations", sample.stage_profile.wall_invocations);
         output << ", \"phase_nanoseconds\": {";
         for (size_t stage = 0; stage < kPhaseNames.size(); ++stage) {
           if (stage != 0)
@@ -446,6 +477,19 @@ void ValidateStageProfile(const Sample &sample) {
   if (profile.overflowed) {
     throw std::runtime_error("libjxl stage profile counter overflowed");
   }
+  uint64_t wall_sum = 0;
+  for (size_t i = 0; i < jxl::kEncoderWallStageCount; ++i) {
+    wall_sum += profile.wall_exclusive_nanoseconds[i];
+    if (profile.wall_exclusive_nanoseconds[i] >
+        profile.wall_inclusive_nanoseconds[i]) {
+      throw std::runtime_error(
+          "Exclusive wall stage exceeds inclusive duration");
+    }
+  }
+  if (wall_sum != profile.wall_root_nanoseconds || wall_sum == 0 ||
+      wall_sum > sample.elapsed_nanoseconds) {
+    throw std::runtime_error("Invalid additive wall-stage partition");
+  }
   uint64_t phase_sum = 0;
   for (size_t stage = 0; stage + 1 < kPhaseNames.size(); ++stage) {
     if (profile.phase_nanoseconds[stage] == 0 ||
@@ -461,13 +505,13 @@ void ValidateStageProfile(const Sample &sample) {
     details << "libjxl serializer phase union does not match its wall phases: "
             << "phase_sum=" << phase_sum
             << " complete=" << profile.phase_nanoseconds[complete]
-            << " complete_invocations="
-            << profile.phase_invocations[complete] << " phases=";
+            << " complete_invocations=" << profile.phase_invocations[complete]
+            << " phases=";
     for (size_t stage = 0; stage + 1 < kPhaseNames.size(); ++stage) {
-      if (stage != 0) details << ',';
-      details << kPhaseNames[stage] << ':'
-              << profile.phase_nanoseconds[stage] << '/'
-              << profile.phase_invocations[stage];
+      if (stage != 0)
+        details << ',';
+      details << kPhaseNames[stage] << ':' << profile.phase_nanoseconds[stage]
+              << '/' << profile.phase_invocations[stage];
     }
     throw std::runtime_error(details.str());
   }
@@ -475,8 +519,7 @@ void ValidateStageProfile(const Sample &sample) {
   // profiling session. kCompleteSerializer is their accumulated phase union,
   // so its invocation count is not necessarily one.
   if (profile.phase_invocations[complete] == 0) {
-    throw std::runtime_error(
-        "libjxl stage profile has no serializer session");
+    throw std::runtime_error("libjxl stage profile has no serializer session");
   }
   for (size_t work = 0; work < kWorkNames.size(); ++work) {
     if (profile.work_nanoseconds[work] == 0 ||
@@ -493,6 +536,20 @@ void ValidateStageProfile(const Sample &sample) {
 }
 
 void ValidateStableStageProfile(const Sample &expected, const Sample &actual) {
+  if (expected.stage_profile.wall_invocations !=
+          actual.stage_profile.wall_invocations ||
+      expected.stage_profile.refinement_iterations !=
+          actual.stage_profile.refinement_iterations ||
+      expected.stage_profile.frame_invocations !=
+          actual.stage_profile.frame_invocations ||
+      expected.stage_profile.internal_width !=
+          actual.stage_profile.internal_width ||
+      expected.stage_profile.internal_height !=
+          actual.stage_profile.internal_height ||
+      expected.stage_profile.resampling != actual.stage_profile.resampling) {
+    throw std::runtime_error(
+        "Wall-stage invocation counts or geometry changed between samples");
+  }
   if (expected.stage_profile.phase_invocations !=
           actual.stage_profile.phase_invocations ||
       expected.stage_profile.work_invocations !=

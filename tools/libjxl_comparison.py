@@ -1219,7 +1219,7 @@ def median_process_row(
             }
     else:
         schema_version = document.get("schema_version")
-        if schema_version not in {1, 2} or document.get("encoder") != "libjxl":
+        if schema_version not in {1, 2, 3} or document.get("encoder") != "libjxl":
             raise ComparisonError(f"Unexpected libjxl raw schema: {raw_path}")
         if document.get("revision") != expected_libjxl_revision:
             raise ComparisonError(f"libjxl benchmark revision mismatch: {raw_path}")
@@ -1229,7 +1229,7 @@ def median_process_row(
         encoded = [sample["encoded_bytes"] for sample in samples]
         requested_distance = document["requested_distance"]
         policy = {"thread_count": document["thread_count"]}
-        if schema_version == 2:
+        if schema_version in {2, 3}:
             if document.get("stage_profile_enabled") is not True:
                 raise ComparisonError(f"Disabled libjxl stage schema: {raw_path}")
             semantics = document.get("timing_semantics", {})
