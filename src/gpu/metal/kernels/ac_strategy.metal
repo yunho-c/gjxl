@@ -645,8 +645,10 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidual(
   }
 }
 
+// SimdTail callers require a 32-lane SIMD width and channel-local tid.
 template <uint CoefficientCount, uint WorkerCount, bool LocalInput = false,
-          typename CoefficientPointer, typename ResidualPointer>
+          bool SimdTail = false, typename CoefficientPointer,
+          typename ResidualPointer>
 __attribute__((always_inline)) inline void ComputeAcStrategyResidualCompact(
   CoefficientPointer coefficients,
   device const float* matrices,
@@ -694,7 +696,8 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidualCompact(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  for (uint stride = CoefficientCount / 2; stride != 0; stride /= 2) {
+  for (uint stride = CoefficientCount / 2;
+       stride != 0 && (!SimdTail || stride >= 32); stride /= 2) {
     for (uint index = tid; index < stride; index += WorkerCount) {
       magnitude_reduction[index] += magnitude_reduction[index + stride];
       nonzero_reduction[index] += nonzero_reduction[index + stride];
@@ -702,7 +705,20 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidualCompact(
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 
-  if (tid == 0) {
+  // Only the first SIMD group of each channel runs the tail. The shared
+  // stride-32 step above publishes its 32 inputs; explicit shuffles preserve
+  // the original 16/8/4/2/1 tree. Every source lane stays active.
+  if (SimdTail) {
+    if (tid < 32) {
+      float magnitude = magnitude_reduction[tid];
+      uint nonzero = nonzero_reduction[tid];
+      for (uint delta = 16; delta != 0; delta /= 2) {
+        magnitude += simd_shuffle_down(magnitude, delta);
+        nonzero += simd_shuffle_down(nonzero, delta);
+      }
+      if (tid == 0) channel_rates[transform_index] = {magnitude, nonzero};
+    }
+  } else if (tid == 0) {
     channel_rates[transform_index] = {
       magnitude_reduction[0],
       nonzero_reduction[0],
@@ -1261,7 +1277,7 @@ kernel void gjxl_ac_strategy_cost(
 // Reuse the completed magnitude reduction arena for inverse pixels and loss.
 // The inverse helper's unconditional barrier publishes the rate before this
 // arena is overwritten. Every lane rejoins here, including non-row SIMD groups.
-template <uint Count, uint Workers>
+template <uint Count, uint Workers, bool SimdTail = false>
 inline void AcStrategyReduceInverseLoss(
   threadgroup float* pixels,
   device const float* pixel_mask,
@@ -1293,11 +1309,24 @@ inline void AcStrategyReduceInverseLoss(
   threadgroup_barrier(mem_flags::mem_threadgroup);
   // Preserve the split cost kernel's binary tree, not a SIMD sum with a
   // different association. Compact groups cover multiple indices per lane.
-  for (uint stride = Count / 2; stride != 0; stride /= 2) {
+  for (uint stride = Count / 2;
+       stride != 0 && (!SimdTail || stride >= 32); stride /= 2) {
     for (uint i = tid; i < stride; i += Workers) pixels[i] += pixels[i + stride];
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
-  if (tid == 0) loss_sums[transform_index] = pixels[0];
+  // As in the magnitude tail, keep all 32 source lanes active and preserve
+  // the original tree feeding lane zero. Callers require a 32-lane SIMD width.
+  if (SimdTail) {
+    if (tid < 32) {
+      float loss = pixels[tid];
+      for (uint delta = 16; delta != 0; delta /= 2) {
+        loss += simd_shuffle_down(loss, delta);
+      }
+      if (tid == 0) loss_sums[transform_index] = loss;
+    }
+  } else if (tid == 0) {
+    loss_sums[transform_index] = pixels[0];
+  }
 }
 #define GJXL_AC_SQUARE_LOSS_KERNEL(                    \
   name, size, basis, scale, worker_count)                                  \
@@ -1425,7 +1454,7 @@ kernel void gjxl_ac_strategy_dct16_candidate_loss_parallel(
     local_simdgroup, uint3(transform_index, 0, 0));
   // All channel groups publish before any X/B lane consumes Y coefficients.
   threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
-  ComputeAcStrategyResidualCompact<Count, Workers, true>(
+  ComputeAcStrategyResidualCompact<Count, Workers, true, true>(
     coefficients, matrices, candidates, quant_field, quant_norm,
     residual + channel * Count, channel_rates, params,
     magnitude + channel * Count, nonzero + channel * Count, 0, local_tid,
@@ -1434,7 +1463,7 @@ kernel void gjxl_ac_strategy_dct16_candidate_loss_parallel(
     residual + channel * Count, magnitude + channel * Count,
     kOrthonormalDct16, kInverseDct16Scale, basis,
     local_tid, local_simdgroup, uint3(0));
-  AcStrategyReduceInverseLoss<Count, Workers>(
+  AcStrategyReduceInverseLoss<Count, Workers, true>(
     magnitude + channel * Count, pixel_mask, candidates, loss_sums,
     params, local_tid, transform_index);
 }
@@ -1484,7 +1513,7 @@ kernel void name(                                                           \
     vertical, horizontal, lane, 32, local_simdgroup,                        \
     uint3(transform_index, 0, 0));                                          \
   threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);  \
-  ComputeAcStrategyResidualCompact<Count, workers, true>(                   \
+  ComputeAcStrategyResidualCompact<Count, workers, true, true>(             \
     coefficients, matrices, candidates, quant_field, quant_norm,            \
     residual + channel * Count, channel_rates, params,                      \
     magnitude + channel * Count, nonzero + channel * Count, 0, local_tid,   \
@@ -1494,7 +1523,7 @@ kernel void name(                                                           \
     vertical_basis, horizontal_basis, kInverseDct16x8Scale,                 \
     vertical, horizontal, local_tid, local_simdgroup,                       \
     uint3(0));                                                              \
-  AcStrategyReduceInverseLoss<Count, workers>(                              \
+  AcStrategyReduceInverseLoss<Count, workers, true>(                        \
     magnitude + channel * Count, pixel_mask, candidates, loss_sums,         \
     params, local_tid, transform_index);                                    \
 }
