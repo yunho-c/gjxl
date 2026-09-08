@@ -1783,6 +1783,18 @@ reduction, not a demonstrated universal elapsed-time improvement. All 1,680
 observed power-limit endpoints are 40 W; clocks within an encode remain an
 uncontrolled source of variation.
 
+[S125](cuda-epf-color-fusion-s125.md) qualifies an isolated final-EPF/color
+fusion candidate. Keeping filtered values in registers removes their three
+plane writes/reads: measured 4K boundary DRAM traffic falls about 49.8%, with
+unchanged FFMA work. All 48 case/burst-length matched medians favor fusion;
+4K final pass 2 improves about 49% in short bursts and 37–40% in sustained
+bursts. The study passes 69,120 guarded pipeline executions and all four CUDA
+sanitizers, with native-identical controls. Its inputs are synthetic and its
+output strides differ from the resident path, so this is not yet a production
+or whole-encode result. Next integrate and qualify real resident layouts and
+hot inputs, preserving maximum-error evaluation's filtered-XYB consumer.
+Current runtime remains S124, without a new compatibility layer or policy.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
