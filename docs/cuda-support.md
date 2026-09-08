@@ -1731,6 +1731,16 @@ Probe overhead and duplicate-control drift are measured explicitly. All 1,160
 exact encodes, 1,920 replay bursts, scoped sanitizers and retained-runtime hashes
 pass. Production is unchanged; read-only telemetry is the next bounded test.
 
+[S120](cuda-malta-telemetry-s120.md) adds bounded host/device clock mapping and
+read-only management telemetry with on/off controls. Reported SM clocks and
+limit counters update about every 500 ms; even accurately timed queries do
+not resolve individual Malta calls. The 40 W limit and `0x24` flags are also
+reported during faster replay, while newer thermal/brake counters are
+unsupported. Production is unchanged. All 555 exact encodes, 480 replay bursts,
+scoped checks and retained-runtime identities pass. The next test is sustained
+device-only replay to distinguish workload-history effects from short-burst
+kernel throughput, not further polling of the same cached fields.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
