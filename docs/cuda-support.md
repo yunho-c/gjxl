@@ -1720,6 +1720,17 @@ slowdown. The next test needs lightweight in-stream cycle-rate observation,
 not a claim that profiling has already proved throttling. All 580 exact encode
 checks pass; GPU bodies and retained runtime hashes are unchanged.
 
+[S119](cuda-malta-cycle-rate-s119.md) observes cycle rate beside ordinary
+resident Malta launches without counter profiling. Timer-edge alignment makes
+5/20-microsecond replay probes agree near 1.60 cycles/ns. Aligned 4K probes
+observe 0.71–0.77 near the early full-response call and 0.29–0.31 near the late
+one, accompanying roughly 1.04–1.14 versus 2.55–2.78 ms bracket gaps. Normalizing
+those gaps by endpoint rates gives approximately 0.80 million cycles, but
+neither that estimate nor the one-SM probes identify the system-level cause.
+Probe overhead and duplicate-control drift are measured explicitly. All 1,160
+exact encodes, 1,920 replay bursts, scoped sanitizers and retained-runtime hashes
+pass. Production is unchanged; read-only telemetry is the next bounded test.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
