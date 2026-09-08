@@ -1698,6 +1698,18 @@ fixtures and all four CUDA sanitizers; production and its S114 qualification
 remain unchanged. Separate full batches from tail handling before further
 scaling-loop/preload experiments.
 
+[S117](cuda-malta-preload-s117.md) separates full-batch tails and explicit
+input preloading. Two-value preloading improves historical and current-call
+replays, but is not promoted: 4K integrated evidence is noisy and does not
+qualify a stable replacement. Current captures preserve all 24 calls and
+their row strides, exposing older replay coverage gaps. Kernel traces confirm
+that the resident pipeline's much larger Malta total appears in kernel durations,
+not merely event intervals enclosing launch gaps. The next priority is the
+early/later execution-context slowdown, before further preload tuning.
+Production is unchanged; 972 exact encode checks, differential fixtures,
+scoped sanitizers and retained-runtime hashes pass. No compatibility layer
+or new dispatch heuristic is added.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
