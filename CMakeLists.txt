@@ -2430,6 +2430,13 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_direct_ac_pack COMMAND gjxl_cuda_direct_ac_pack_test)
     set_tests_properties(cuda_direct_ac_pack PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_cuda_compose_maximum_test tests/cuda_compose_maximum_test.cu)
+    set_target_properties(gjxl_cuda_compose_maximum_test PROPERTIES
+      CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED YES CUDA_EXTENSIONS NO)
+    target_link_libraries(gjxl_cuda_compose_maximum_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_compose_maximum COMMAND gjxl_cuda_compose_maximum_test)
+    set_tests_properties(cuda_compose_maximum PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(gjxl_cuda_opsin_test tests/cuda_opsin_test.cpp)
     target_link_libraries(gjxl_cuda_opsin_test PRIVATE gjxl_cuda)
     target_include_directories(gjxl_cuda_opsin_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})

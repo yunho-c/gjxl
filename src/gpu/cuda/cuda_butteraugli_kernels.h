@@ -203,6 +203,31 @@ struct CudaButteraugliL2FinalPlan {
 [[nodiscard]] cudaError_t LaunchCudaButteraugliPrepare(
     const CudaButteraugliPlan& plan, cudaStream_t stream);
 
+// Qualified fusion primitive; prepared comparisons still use separate passes
+// pending a repeatable integrated performance gain (see S110).
+// Multiscale map composition and maximum score. Width/height are nonzero and
+// width*height <= UINT32_MAX-255; strides cover their logical row widths.
+// The sub-map is ceil(width/2) by ceil(height/2). Output may alias main_map
+// exactly (with equal strides), but no other buffers may overlap. Each scratch
+// buffer holds ceil(width*height/256) floats; neither is needed for <=256 pixels.
+// The map preserves the composition result; any nonfinite or negative logical
+// value makes the score NaN. Padding is neither read nor written.
+struct CudaButteraugliComposePlan {
+  const float* main_map = nullptr;
+  const float* sub_map = nullptr;
+  float* output = nullptr;
+  std::array<float*, 2> reduction{};
+  float* score = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t main_stride = 0;
+  uint32_t sub_stride = 0;
+  uint32_t output_stride = 0;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliCompose(
+    const CudaButteraugliComposePlan& plan, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaButteraugliCompare(
     const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
     std::array<uint32_t, 3> distorted_stride, float* distance_map,

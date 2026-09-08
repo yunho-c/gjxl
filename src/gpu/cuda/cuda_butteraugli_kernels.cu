@@ -2216,6 +2216,48 @@ __global__ void ComposeKernel(const float* main_map, const float* sub_map,
       main_value * 0.85f + 0.5f * sub_value;
 }
 
+// Keep the same reduction tree and invalid-value propagation in the fused
+// first pass and the remaining passes. All threads, including tail lanes,
+// participate in every barrier.
+__device__ void StoreBlockMaximum(float value, float* values, float* output) {
+  values[threadIdx.x] = value;
+  __syncthreads();
+  for (uint32_t step = kReductionWidth / 2; step != 0; step /= 2) {
+    if (threadIdx.x < step) {
+      const float other = values[threadIdx.x + step];
+      values[threadIdx.x] = isnan(values[threadIdx.x]) || isnan(other)
+                                ? NAN
+                                : fmaxf(values[threadIdx.x], other);
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) output[blockIdx.x] = values[0];
+}
+
+__global__ void ComposeMaximumKernel(const float* main_map, const float* sub_map,
+                                     float* output, float* partial,
+                                     ComposeParams params) {
+  __shared__ float values[kReductionWidth];
+  const size_t flat =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const size_t count = static_cast<size_t>(params.width) * params.height;
+  float value = -INFINITY;
+  if (flat < count) {
+    const uint32_t y = static_cast<uint32_t>(flat / params.width);
+    const uint32_t x =
+        static_cast<uint32_t>(flat - static_cast<size_t>(y) * params.width);
+    const float main_value =
+        main_map[static_cast<size_t>(y) * params.main_stride + x];
+    const float sub_value =
+        sub_map[static_cast<size_t>(y / 2) * params.sub_stride + x / 2];
+    value = main_value * 0.85f + 0.5f * sub_value;
+    // AQ still consumes the materialized map. Sanitize only the score input.
+    output[static_cast<size_t>(y) * params.output_stride + x] = value;
+    if (!isfinite(value) || value < 0.0f) value = NAN;
+  }
+  StoreBlockMaximum(value, values, partial);
+}
+
 struct ReductionParams {
   uint32_t width;
   uint32_t input_stride;
@@ -2233,18 +2275,7 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
     value = input[static_cast<size_t>(y) * params.input_stride + x];
     if (!isfinite(value) || value < 0.0f) value = NAN;
   }
-  values[threadIdx.x] = value;
-  __syncthreads();
-  for (uint32_t step = kReductionWidth / 2; step != 0; step /= 2) {
-    if (threadIdx.x < step) {
-      const float other = values[threadIdx.x + step];
-      values[threadIdx.x] = isnan(values[threadIdx.x]) || isnan(other)
-                                ? NAN
-                                : fmaxf(values[threadIdx.x], other);
-    }
-    __syncthreads();
-  }
-  if (threadIdx.x == 0) output[blockIdx.x] = values[0];
+  StoreBlockMaximum(value, values, output);
 }
 
 [[nodiscard]] unsigned int PlaneBlocks(uint32_t width, uint32_t height) {
@@ -2530,31 +2561,42 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
 }
 
 [[nodiscard]] cudaError_t LaunchMaximumReduction(
-    const CudaButteraugliPlan& plan, const float* input, uint32_t input_stride,
-    float* output, cudaStream_t stream) {
-  uint32_t input_count = plan.width * plan.height;
-  uint32_t width = plan.width;
-  bool use_a = true;
+    const std::array<float*, 2>& reduction, const float* input,
+    ReductionParams params, float* output, bool use_a, cudaStream_t stream) {
   while (true) {
     const uint32_t output_count =
-        (input_count + kReductionWidth - 1) / kReductionWidth;
+        (params.input_count + kReductionWidth - 1) / kReductionWidth;
     float* destination =
-        output_count == 1 ? output : plan.reduction[use_a ? 0 : 1];
-    const ReductionParams params{width, input_stride, input_count};
+        output_count == 1 ? output : reduction[use_a ? 0 : 1];
     ReduceMaximumKernel<<<output_count, kReductionWidth, 0, stream>>>(
         input, destination, params);
     const cudaError_t error = CheckLaunch();
     if (error != cudaSuccess) return error;
     if (output_count == 1) return cudaSuccess;
     input = destination;
-    input_count = output_count;
-    width = output_count;
-    input_stride = output_count;
+    params = {output_count, output_count, output_count};
     use_a = !use_a;
   }
 }
 
 }  // namespace
+
+cudaError_t LaunchCudaButteraugliCompose(
+    const CudaButteraugliComposePlan& plan, cudaStream_t stream) {
+  const uint32_t count = plan.width * plan.height;
+  const uint32_t partial_count = (count + kReductionWidth - 1) / kReductionWidth;
+  float* partial = partial_count == 1 ? plan.score : plan.reduction[0];
+  const ComposeParams params{plan.width, plan.height, plan.main_stride,
+                             plan.sub_stride, plan.output_stride};
+  ComposeMaximumKernel<<<partial_count, kReductionWidth, 0, stream>>>(
+      plan.main_map, plan.sub_map, plan.output, partial, params);
+  const cudaError_t error = CheckLaunch();
+  if (error != cudaSuccess || partial_count == 1) return error;
+  // The first pass already wrote A. Continue into B, never over its input.
+  return LaunchMaximumReduction(
+      plan.reduction, partial, {partial_count, partial_count, partial_count},
+      plan.score, false, stream);
+}
 
 namespace {
 cudaError_t LaunchOpsinImpl(const CudaButteraugliOpsinPlan& plan,
@@ -3125,8 +3167,9 @@ cudaError_t LaunchCudaButteraugliCompare(
       if (error != cudaSuccess) return error;
     }
   }
-  return LaunchMaximumReduction(plan, distance_map, distance_stride, score,
-                                stream);
+  return LaunchMaximumReduction(
+      plan.reduction, distance_map,
+      {plan.width, distance_stride, plan.width * plan.height}, score, true, stream);
 }
 
 }  // namespace gjxl::cuda_internal

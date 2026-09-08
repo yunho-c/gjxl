@@ -1602,8 +1602,8 @@ passes 156 injected allocation failures in both release and ASAN. Two-image
 the public driver; peak working set falls about 153 MiB. Small batches and
 driver 1080p timings remain mixed, so compact CUDA storage remains opt-in.
 S108 proposed direct narrow group packing as the next compact-path candidate,
-investigated in S109 below. Composition/reduction and tile scheduling remain
-separate experiments.
+investigated in S109 below. Composition/reduction integration is measured in
+S110; tile scheduling remains a separate experiment.
 
 [S109](cuda-direct-packing-s109.md) implements and validates direct byte/word
 group packing, reducing logical packing traffic from 15N to 7N bytes and the
@@ -1614,6 +1614,16 @@ gains mixed. There are 2,645 exact encode checks plus 45 under integrated
 memcheck, and all four kernel sanitizers pass. The report preserves the tested
 integration and explains why the scoped saving is not promoted as an encoder
 speedup.
+
+[S110](cuda-compose-integration-s110.md) carries composition/maximum fusion
+through prepared Butteraugli, exact encoder oracles and concurrent batches.
+The new primitive passes 480 bitwise kernel cases and all four sanitizers;
+the integrated candidate passes 2,942 exact encode checks plus 36 under
+memcheck. It eliminates one map read and one launch per comparison without
+changing scratch capacity. Full-call measurements remain mixed across
+repetitions, including duplicate-label controls, so the encoder keeps its
+separate-pass route. The qualified primitive and permanent test are retained
+without a new runtime selector or compatibility adapter.
 
 ### Math and kernel strategy
 
