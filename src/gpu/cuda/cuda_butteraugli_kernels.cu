@@ -510,14 +510,108 @@ struct StoreConvolution {
   }
 };
 
+// Evaluate adjacent outputs together so K+1 shared input loads feed 2K
+// products. Each output still consumes taps in ascending order, including its
+// original rounded normalization and division. The halo and launch geometry
+// are unchanged; every lane publishes its loads before partial tiles return.
+template <unsigned int KernelSize>
+__device__ __forceinline__ void ConvolutionHorizontalPairBody(
+    const float* input, const float* weights, float* output,
+    uint32_t width, uint32_t height, uint32_t input_stride,
+    uint32_t output_stride) {
+  static_assert(KernelSize == 7 || KernelSize == 13 || KernelSize == 15);
+  constexpr unsigned int kWidth = ConvolutionTile<true>::kWidth;
+  constexpr unsigned int kHeight = ConvolutionTile<true>::kHeight;
+  constexpr unsigned int kRadius = KernelSize / 2;
+  constexpr unsigned int kInputWidth = kWidth + 2 * kRadius;
+  constexpr unsigned int kOutputs = 2, kGroups = kWidth / kOutputs;
+  __shared__ float tile[kInputWidth * kHeight];
+  __shared__ float kernel[KernelSize];
+  __shared__ float normalization;
+  const uint32_t columns = (width + kWidth - 1) / kWidth;
+  const uint32_t origin_x = (blockIdx.x % columns) * kWidth;
+  const uint32_t origin_y = (blockIdx.x / columns) * kHeight;
+  if (threadIdx.x < KernelSize) kernel[threadIdx.x] = weights[threadIdx.x];
+  if (threadIdx.x == 0) {
+    float sum = 0.0f;
+    for (unsigned int tap = 0; tap < KernelSize; ++tap) sum += weights[tap];
+    normalization = sum;
+  }
+  for (unsigned int i = threadIdx.x; i < kInputWidth * kHeight;
+       i += blockDim.x) {
+    const int x = static_cast<int>(origin_x + i % kInputWidth) -
+                  static_cast<int>(kRadius);
+    const uint32_t y = origin_y + i / kInputWidth;
+    tile[i] = x >= 0 && x < static_cast<int>(width) && y < height
+                  ? input[static_cast<size_t>(y) * input_stride + x]
+                  : 0.0f;
+  }
+  __syncthreads();
+  for (unsigned int group = threadIdx.x; group < kGroups * kHeight;
+       group += blockDim.x) {
+    const unsigned int local_x = (group % kGroups) * kOutputs;
+    const unsigned int local_y = group / kGroups;
+    const uint32_t x = origin_x + local_x, y = origin_y + local_y;
+    if (x >= width || y >= height) continue;
+    const unsigned int first = local_y * kInputWidth + local_x;
+    float sum[kOutputs] = {}, weight_sum[kOutputs];
+    const bool interior =
+        x >= kRadius && static_cast<uint64_t>(x) + kOutputs - 1 + kRadius < width;
+#pragma unroll
+    for (unsigned int col = 0; col < kOutputs; ++col)
+      weight_sum[col] = interior ? normalization : 0.0f;
+    if (interior) {
+#pragma unroll
+      for (unsigned int i = 0; i < KernelSize + kOutputs - 1; ++i) {
+        const float value = tile[first + i];
+#pragma unroll
+        for (unsigned int col = 0; col < kOutputs; ++col) {
+          if (i >= col && i < col + KernelSize)
+            sum[col] += value * kernel[i - col];
+        }
+      }
+    } else {
+#pragma unroll
+      for (unsigned int i = 0; i < KernelSize + kOutputs - 1; ++i) {
+        const int coordinate =
+            static_cast<int>(x) + static_cast<int>(i) - static_cast<int>(kRadius);
+        // Skip excluded taps altogether: multiplying a zero halo by an
+        // exceptional weight would not preserve the original edge behavior.
+        if (coordinate >= 0 && coordinate < static_cast<int>(width)) {
+          const float value = tile[first + i];
+#pragma unroll
+          for (unsigned int col = 0; col < kOutputs; ++col) {
+            if (i >= col && i < col + KernelSize) {
+              const float weight = kernel[i - col];
+              sum[col] += value * weight;
+              weight_sum[col] += weight;
+            }
+          }
+        }
+      }
+    }
+#pragma unroll
+    for (unsigned int col = 0; col < kOutputs; ++col) {
+      if (x + col < width)
+        output[static_cast<size_t>(y) * output_stride + x + col] =
+            sum[col] / weight_sum[col];
+    }
+  }
+}
+
 template <bool Horizontal, unsigned int KernelSize>
 __global__ void ConvolutionTiledKernel(const float* input, const float* weights,
                                        float* output, uint32_t width,
                                        uint32_t height, uint32_t input_stride,
                                        uint32_t output_stride) {
-  ConvolutionTiledBody<Horizontal, KernelSize>(
-      input, weights, width, height, input_stride,
-      StoreConvolution{output, output_stride});
+  if constexpr (Horizontal && KernelSize != 33) {
+    ConvolutionHorizontalPairBody<KernelSize>(
+        input, weights, output, width, height, input_stride, output_stride);
+  } else {
+    ConvolutionTiledBody<Horizontal, KernelSize>(
+        input, weights, width, height, input_stride,
+        StoreConvolution{output, output_stride});
+  }
 }
 
 __device__ float ButteraugliFastLog2(float value) {
@@ -2323,7 +2417,18 @@ __global__ void ReduceMaximumKernel(const float* input, float* output,
   return cudaSuccess;
 }
 
+// Keep the prior single-output arithmetic independent of the paired route
+// used by the frequency-split differential tests.
 template <unsigned int KernelSize>
+__global__ void ConvolutionHorizontalReferenceKernel(
+    const float* input, const float* weights, float* output, uint32_t width,
+    uint32_t height, uint32_t input_stride, uint32_t output_stride) {
+  ConvolutionTiledBody<true, KernelSize>(
+      input, weights, width, height, input_stride,
+      StoreConvolution{output, output_stride});
+}
+
+template <unsigned int KernelSize, bool ReferenceHorizontal = false>
 [[nodiscard]] cudaError_t LaunchBlur(const float* input, uint32_t input_stride,
                                      const float* weights, float* intermediate,
                                      float* output, uint32_t output_stride,
@@ -2343,9 +2448,15 @@ template <unsigned int KernelSize>
         ConvolutionTile<true>::Blocks(width, height);
     const unsigned int vertical_blocks =
         ConvolutionTile<false>::Blocks(width, height);
-    ConvolutionTiledKernel<true, KernelSize>
-        <<<horizontal_blocks, kPlaneThreads, 0, stream>>>(
-            input, weights, intermediate, width, height, input_stride, width);
+    if constexpr (ReferenceHorizontal) {
+      ConvolutionHorizontalReferenceKernel<KernelSize>
+          <<<horizontal_blocks, kPlaneThreads, 0, stream>>>(
+              input, weights, intermediate, width, height, input_stride, width);
+    } else {
+      ConvolutionTiledKernel<true, KernelSize>
+          <<<horizontal_blocks, kPlaneThreads, 0, stream>>>(
+              input, weights, intermediate, width, height, input_stride, width);
+    }
     cudaError_t error = CheckLaunch();
     if (error != cudaSuccess) return error;
     ConvolutionTiledKernel<false, KernelSize>
@@ -2892,9 +3003,9 @@ cudaError_t LaunchCudaButteraugliBlurAndSplitReference(
       params.channel != 4) return cudaErrorInvalidValue;
   if (params.width == 0 || params.height == 0) return cudaSuccess;
   const cudaError_t error = params.channel < 2
-      ? LaunchBlur<15>(input, params.input_stride, weights, intermediate,
+      ? LaunchBlur<15, true>(input, params.input_stride, weights, intermediate,
                        blurred, blurred_stride, params.width, params.height, stream)
-      : LaunchBlur<7>(input, params.input_stride, weights, intermediate,
+      : LaunchBlur<7, true>(input, params.input_stride, weights, intermediate,
                       blurred, blurred_stride, params.width, params.height, stream);
   if (error != cudaSuccess) return error;
   const FrequencyParams frequency{params.width, params.height, params.input_stride,

@@ -83,6 +83,16 @@ struct Case {
       const float delta = static_cast<float>(i) - taps / 2;
       weights[kWeightOffset + i] = pattern == 3 ? (i == taps / 2 ? 1.0f : 0.0f)
           : pattern == 4 ? 0.03f + (i % 3) * 0.11f : std::exp(-0.07f * delta * delta);
+      if (pattern == 6) weights[kWeightOffset + i] = 0.0f;
+      if (pattern == 7) {
+        const std::array<float, 4> exceptional{
+            poison, std::numeric_limits<float>::infinity(),
+            -std::numeric_limits<float>::infinity(), -0.0f};
+        weights[kWeightOffset + i] = exceptional[i % exceptional.size()];
+      }
+      if (pattern == 8 && (i & 1)) weights[kWeightOffset + i] *= -1.0f;
+      if (pattern == 9)
+        weights[kWeightOffset + i] = std::numeric_limits<float>::denorm_min();
     }
     std::mt19937 rng(78271u + width + 31 * height + pattern);
     std::uniform_real_distribution<float> random(-1.0f, 1.0f);
@@ -101,6 +111,12 @@ struct Case {
           if ((x + y) % 2) value = -value;
         }
         if (pattern == 4) value *= (x + y) % 3 == 0 ? 1.0e-37f : 1.0e19f;
+        if (pattern == 5) {
+          const std::array<float, 5> exceptional{
+              poison, std::numeric_limits<float>::infinity(),
+              -std::numeric_limits<float>::infinity(), 0.0f, -0.0f};
+          value = exceptional[(x + y) % exceptional.size()];
+        }
         input[kInputOffset + static_cast<size_t>(y) * params.input_stride + x] = value;
       }
     }
@@ -179,13 +195,14 @@ int main() {
           LaunchCudaButteraugliBlurAndSplitReference(nullptr, nullptr, nullptr, nullptr, 0, nullptr, invalid, nullptr) != cudaErrorInvalidValue)
         throw std::runtime_error("Unsupported channel not rejected");
     }
-    constexpr std::array<std::array<uint32_t, 2>, 16> shapes{{
+    constexpr std::array<std::array<uint32_t, 2>, 22> shapes{{
         {1,1}, {1,19}, {19,1}, {7,11}, {15,15}, {31,63}, {32,64}, {33,65},
-        {63,31}, {65,33}, {127,65}, {255,3}, {256,4}, {257,67}, {511,129}, {3,257}}};
+        {63,31}, {65,33}, {127,65}, {255,3}, {256,4}, {257,67}, {511,129}, {3,257},
+        {2,2}, {3,3}, {4,4}, {5,5}, {13,7}, {259,9}}};
     unsigned cases = 0;
     for (const auto& shape : shapes)
       for (uint32_t channel : {0u, 1u, 3u, 4u})
-        for (unsigned pattern = 0; pattern < 5; ++pattern) {
+        for (unsigned pattern = 0; pattern < 10; ++pattern) {
           try { Verify(shape[0], shape[1], channel, pattern); }
           catch (...) {
             std::cerr << "Case " << shape[0] << 'x' << shape[1] << " channel=" << channel

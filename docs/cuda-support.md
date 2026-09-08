@@ -1665,6 +1665,19 @@ checks, and preserves rejected captures and excluded control timings. Malta
 and tiled convolution remain higher-value device-work targets than the
 roughly half-millisecond 4K serial grid export.
 
+[S114](cuda-horizontal-pair-s114.md) retains paired adjacent outputs for the
+7/13/15-tap horizontal Butteraugli filters. The final kernels are instruction-
+identical to the measured prototype, saving 3.01–3.51 ms in instrumented
+odd-4K horizontal-filter intervals. Whole-encode results remain mixed, so
+this is a GPU-stage improvement, not a general throughput claim. Malta's
+64x32 tile helps 4K but regresses on some HD stages and is not promoted.
+Launch geometry, allocation, vertical/33-tap routes, S111 fusion, serial CPU
+scheduling and opt-in compact storage are unchanged. There is no runtime
+selector or compatibility layer. Qualification passes 2,070 exact encode
+checks, 14 expected rejections, all scoped CUDA sanitizers and 78/78 CTest
+tests; the expanded 880-case frequency test retains independent horizontal
+references. Failed setup attempts and all slower observations are preserved.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
