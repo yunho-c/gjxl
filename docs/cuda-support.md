@@ -1795,6 +1795,17 @@ or whole-encode result. Next integrate and qualify real resident layouts and
 hot inputs, preserving maximum-error evaluation's filtered-XYB consumer.
 Current runtime remains S124, without a new compatibility layer or policy.
 
+[S126](cuda-epf-color-integration-s126.md) integrates that candidate into an
+isolated fully resident owner while preserving maximum-error evaluation's
+filtered-XYB data. Actual coding-stride/packed-RGB layouts and six hot captures
+pass bitwise checks, as do 2,076 frozen-oracle encodes, 256 parameter-matrix
+AQ pairs and nine CUDA sanitizer jobs. All 211 original GPU bodies remain
+unchanged. Every candidate-versus-control in-encode stage median is favorable,
+with primary savings of about 0.40 ms at HD and 1.61 ms at 4K. Uninstrumented
+whole-encode timing is mixed, including one slower 4K window; this is a local
+stage improvement, not a general throughput claim. Clean production-build
+qualification and a permanent regression test are next. Runtime stays S124.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
