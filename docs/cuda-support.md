@@ -1879,6 +1879,18 @@ repeats do not establish a dependable speed change, so this is retained as
 a live-storage reduction, not a claimed throughput percentage. The next
 step is to reprofile the complete resident critical path after these changes.
 
+[S133](cuda-resident-reprofile-s133.md) refreshes that profile without changing
+runtime code. Across 576 frozen-oracle encodes and 24 complete traces, padded
+4K still spends roughly 6.4–7.0 ms in host resident preparation, 4.6–4.9 ms
+constructing strategy candidates, and 9–17 ms merging their costs while the
+GPU is idle. Template-aware attribution also separates strategy residual
+DCT work from AQ reconstruction. Compact cuts 4K D2H volume by 74.65 MB, but
+separate-process timings do not establish a new causal speedup or justify a
+default change. All 214 GPU bodies remain unchanged. The next bounded
+experiment removes unused host initial-field/mask storage from encoding-only
+resident preparation, preserving real host-output requests and verifying
+whole-call performance; the rejected S112 scheduler remains unpromoted.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
