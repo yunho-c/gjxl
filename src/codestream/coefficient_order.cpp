@@ -559,114 +559,158 @@ Status ComputeCoefficientOrdersWithCounts(
       return Status::Ok();
     }
 
-    Storage<VarDctAcGroupView> groups(frame.ac_group_count());
-    size_t coefficient_count = 0;
-    for (size_t group_index = 0; group_index < groups.size(); ++group_index) {
-      Status status = frame.GetAcGroup(group_index, &groups[group_index]);
-      if (!status.ok()) {
-        return status;
-      }
-      if (groups[group_index].used_coefficient_count >
-          std::numeric_limits<size_t>::max() - coefficient_count) {
-        return Status::InvalidArgument(
-          "Coefficient-order value count overflows");
-      }
-      coefficient_count += groups[group_index].used_coefficient_count;
-    }
-
+    ZeroCounts<Count> zero_counts;
     uint16_t present_mask = 0;
     Status status;
-    if (behavior ==
-        VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled) {
-      status = PresentOrderMask(
-        groups, frame.strategies(), &present_mask);
-      if (!status.ok()) return status;
-    }
-    const bool sample_dct8 =
-      behavior == VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled &&
-      present_mask == 1;
-
-    Storage<Storage<uint8_t>> sample_decisions;
-    if (sample_dct8) {
-      sample_decisions.resize(groups.size());
-      std::array<uint64_t, 2> random_state = {
-        0x94D049BB133111EBull,
-        0xBF58476D1CE4E5B9ull,
-      };
-      for (size_t group_index = 0; group_index < groups.size();
-           ++group_index) {
-        size_t anchor_count = 0;
-        if (!groups[group_index].block_extent.try_area(&anchor_count)) {
-          return Status::InvalidArgument(
-            "Coefficient-order sample count overflows");
-        }
-        Storage<uint8_t>& decisions = sample_decisions[group_index];
-        decisions.resize(anchor_count);
-        for (uint8_t& selected : decisions) {
-          selected = static_cast<uint8_t>(
-            UseCoefficientOrderSample(&random_state));
-        }
+    const auto population = frame.coefficient_order_population();
+    if (!population.counts.empty()) {
+      using namespace vardct_frame_internal;
+      if (population.counts.size() != kOrderPopulationCount ||
+          population.present_mask == 0 ||
+          (population.present_mask & ~kSupportedOrderMask) != 0 ||
+          !Use32BitZeroCounts(blocks)) {
+        return Status::InvalidArgument("Coefficient-order population metadata is invalid");
       }
-    }
-
-    ZeroCounts<Count> zero_counts;
-    const size_t participant_count =
-      CoefficientOrderParticipantCount(groups.size(), coefficient_count);
-    if (participant_count == 1) {
-      for (size_t group_index = 0; group_index < groups.size();
-           ++group_index) {
-        status = CountGroupZeros(
-          groups[group_index], frame.strategies(), &zero_counts, sample_dct8,
-          sample_dct8
-            ? std::span<const uint8_t>(sample_decisions[group_index])
-            : std::span<const uint8_t>{},
-          &present_mask);
-        if (!status.ok()) return status;
+      present_mask = population.present_mask;
+      const size_t block_count = blocks.width * blocks.height;
+      const bool sample = present_mask == 1 && behavior ==
+        VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled;
+      for (size_t family = 0; family < kOrderPopulationSizes.size(); ++family) {
+        const size_t n = kOrderPopulationSizes[family];
+        if (n == 0) continue;
+        const bool present = (present_mask & (uint16_t{1} << family)) != 0;
+        for (size_t channel = 0; channel < 3; ++channel) {
+          const auto full = population.counts.subspan(
+            channel * kOrderPopulationStride + kOrderPopulationOffsets[family], n);
+          for (uint32_t count : full) {
+            if (count > (present ? block_count / (n / 64) : 0)) {
+              return Status::InvalidArgument("Coefficient-order population exceeds its bounds");
+            }
+          }
+          if (family == 0) {
+            const auto sampled = population.counts.subspan(
+              kOrderPopulationFullCount + channel * 64, 64);
+            for (size_t i = 0; i < 64; ++i) {
+              if (sampled[i] > (present_mask == 1 ? full[i] : 0)) {
+                return Status::InvalidArgument("Coefficient-order sampled population is invalid");
+              }
+            }
+          }
+          if (present) {
+            const auto selected = sample
+              ? population.counts.subspan(kOrderPopulationFullCount + channel * 64, 64)
+              : full;
+            zero_counts[family][channel].assign(selected.begin(), selected.end());
+          }
+        }
       }
     } else {
-      std::array<ZeroCounts<Count>, kMaximumCoefficientOrderWorkers> worker_counts;
-      std::array<uint16_t, kMaximumCoefficientOrderWorkers> worker_masks{};
-      status = RunParallelCoefficientGroups(
-        groups.size(), coefficient_count,
-        [&](size_t group_index, size_t worker_index) {
-          return CountGroupZeros(
-            groups[group_index], frame.strategies(),
-            &worker_counts[worker_index], sample_dct8,
+      Storage<VarDctAcGroupView> groups(frame.ac_group_count());
+      size_t coefficient_count = 0;
+      for (size_t group_index = 0; group_index < groups.size(); ++group_index) {
+        Status status = frame.GetAcGroup(group_index, &groups[group_index]);
+        if (!status.ok()) {
+          return status;
+        }
+        if (groups[group_index].used_coefficient_count >
+            std::numeric_limits<size_t>::max() - coefficient_count) {
+          return Status::InvalidArgument(
+            "Coefficient-order value count overflows");
+        }
+        coefficient_count += groups[group_index].used_coefficient_count;
+      }
+
+      if (behavior ==
+          VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled) {
+        status = PresentOrderMask(
+          groups, frame.strategies(), &present_mask);
+        if (!status.ok()) return status;
+      }
+      const bool sample_dct8 =
+        behavior == VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled &&
+        present_mask == 1;
+
+      Storage<Storage<uint8_t>> sample_decisions;
+      if (sample_dct8) {
+        sample_decisions.resize(groups.size());
+        std::array<uint64_t, 2> random_state = {
+          0x94D049BB133111EBull,
+          0xBF58476D1CE4E5B9ull,
+        };
+        for (size_t group_index = 0; group_index < groups.size();
+             ++group_index) {
+          size_t anchor_count = 0;
+          if (!groups[group_index].block_extent.try_area(&anchor_count)) {
+            return Status::InvalidArgument(
+              "Coefficient-order sample count overflows");
+          }
+          Storage<uint8_t>& decisions = sample_decisions[group_index];
+          decisions.resize(anchor_count);
+          for (uint8_t& selected : decisions) {
+            selected = static_cast<uint8_t>(
+              UseCoefficientOrderSample(&random_state));
+          }
+        }
+      }
+
+      const size_t participant_count =
+        CoefficientOrderParticipantCount(groups.size(), coefficient_count);
+      if (participant_count == 1) {
+        for (size_t group_index = 0; group_index < groups.size();
+             ++group_index) {
+          status = CountGroupZeros(
+            groups[group_index], frame.strategies(), &zero_counts, sample_dct8,
             sample_dct8
               ? std::span<const uint8_t>(sample_decisions[group_index])
               : std::span<const uint8_t>{},
-            &worker_masks[worker_index]);
-        });
-      if (!status.ok()) {
-        return status;
-      }
+            &present_mask);
+          if (!status.ok()) return status;
+        }
+      } else {
+        std::array<ZeroCounts<Count>, kMaximumCoefficientOrderWorkers> worker_counts;
+        std::array<uint16_t, kMaximumCoefficientOrderWorkers> worker_masks{};
+        status = RunParallelCoefficientGroups(
+          groups.size(), coefficient_count,
+          [&](size_t group_index, size_t worker_index) {
+            return CountGroupZeros(
+              groups[group_index], frame.strategies(),
+              &worker_counts[worker_index], sample_dct8,
+              sample_dct8
+                ? std::span<const uint8_t>(sample_decisions[group_index])
+                : std::span<const uint8_t>{},
+              &worker_masks[worker_index]);
+          });
+        if (!status.ok()) {
+          return status;
+        }
 
-      for (size_t worker = 0; worker < worker_counts.size(); ++worker) {
-        present_mask |= worker_masks[worker];
-        for (size_t family = 0; family < zero_counts.size(); ++family) {
-          for (size_t channel = 0; channel < 3; ++channel) {
-            const Storage<Count>& source =
-              worker_counts[worker][family][channel];
-            if (source.empty()) {
-              continue;
-            }
-            Storage<Count>& destination =
-              zero_counts[family][channel];
-            if (destination.empty()) {
-              destination.assign(source.size(), 0);
-            } else if (destination.size() != source.size()) {
-              return Status::Internal(
-                "Coefficient-order worker dimensions disagree");
-            }
-            for (size_t coefficient = 0; coefficient < source.size();
-                 ++coefficient) {
-              if (source[coefficient] >
-                  std::numeric_limits<Count>::max() -
-                    destination[coefficient]) {
-                return Status::InvalidArgument(
-                  "Coefficient zero count overflow");
+        for (size_t worker = 0; worker < worker_counts.size(); ++worker) {
+          present_mask |= worker_masks[worker];
+          for (size_t family = 0; family < zero_counts.size(); ++family) {
+            for (size_t channel = 0; channel < 3; ++channel) {
+              const Storage<Count>& source =
+                worker_counts[worker][family][channel];
+              if (source.empty()) {
+                continue;
               }
-              destination[coefficient] += source[coefficient];
+              Storage<Count>& destination =
+                zero_counts[family][channel];
+              if (destination.empty()) {
+                destination.assign(source.size(), 0);
+              } else if (destination.size() != source.size()) {
+                return Status::Internal(
+                  "Coefficient-order worker dimensions disagree");
+              }
+              for (size_t coefficient = 0; coefficient < source.size();
+                   ++coefficient) {
+                if (source[coefficient] >
+                    std::numeric_limits<Count>::max() -
+                      destination[coefficient]) {
+                  return Status::InvalidArgument(
+                    "Coefficient zero count overflow");
+                }
+                destination[coefficient] += source[coefficient];
+              }
             }
           }
         }

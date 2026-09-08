@@ -46,8 +46,9 @@ using resource_budget_internal::ManagedVector;
 
 
 // The only device allocation retained by a completed frame is its final AC
-// output (plus a small destination table). No AQ arena, backend, or submission
-// is retained. MTL::Buffer owns its allocation independently of the backend.
+// output, destination table, zero populations, and DCT8 sample flags. No AQ
+// arena, backend, or submission is retained. MTL::Buffer owns its allocation
+// independently of the backend.
 class MetalCompletedVarDctFrame final
     : public vardct_frame_internal::CompletedVarDctFrame {
  public:
@@ -77,11 +78,13 @@ class MetalCompletedVarDctFrame final
       .ac_group_extent = group_extent,
       .group_used_coefficient_count = group_used,
       .ac_coefficients = coefficients,
+      .coefficient_order_population = population,
     });
   }
 
   std::unique_ptr<DeviceBuffer> allocation;
   std::span<const int32_t> coefficients;
+  vardct_frame_internal::CoefficientOrderPopulationView population;
   FrameGeometry geometry;
   AcStrategyGrid strategies;
   Quantizer quantizer;
@@ -2480,7 +2483,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       candidate_readback_stats.quantizer_bytes = sizeof(resident_quantizer);
       candidate_readback_stats.mapped_frame_bytes =
         ((candidate_completed_frame == nullptr ? coefficient_value_count_ :
-            completed_coefficients_.extent.width) + 4 * block_count_) * sizeof(int32_t);
+            completed_coefficients_.extent.width + completed_order_population_.extent.width) +
+          4 * block_count_) * sizeof(int32_t);
     }
   }
   if (reconstruction_requested) {
@@ -2867,6 +2871,16 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     const size_t group_count = storage_plan.group_count;
     frame->group_used.assign(group_count, 0);
     ManagedVector<uint32_t> destinations(anchor_count_);
+    uint16_t present_mask = 0;
+    for (const auto& batch : batches_) {
+      if (batch.anchor_count != 0) {
+        const size_t family = vardct_frame_internal::OrderPopulationFamily(batch.coefficient_count);
+        if (family >= vardct_frame_internal::kOrderPopulationSizes.size()) {
+          return Status::Internal("Completed Metal population family is invalid");
+        }
+        present_mask |= uint16_t{1} << family;
+      }
+    }
     // Build from the authoritative post-search anchors on every output
     // request, not from the provisional preparation's strategy grid.
     for (const AqAnchor& anchor : row_major_anchors_) {
@@ -2883,6 +2897,10 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
       size_t& used = frame->group_used[group];
       if (batch.coefficient_count > cap - used) {
         return Status::Internal("Completed Metal group capacity overflow");
+      }
+      if (present_mask == 1 && batch.anchor_offset + anchor.index_in_batch !=
+            anchor.block_y * block_extent_.width + anchor.block_x) {
+        return Status::Internal("Completed Metal DCT8 sample mapping is invalid");
       }
       destinations[batch.anchor_offset + anchor.index_in_batch] =
         static_cast<uint32_t>(group * 3 * cap + used);
@@ -2908,6 +2926,32 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     std::copy(destinations.begin(), destinations.end(),
       reinterpret_cast<uint32_t*>(reinterpret_cast<std::byte*>(storage) +
                                   storage_plan.destinations.offset_bytes));
+    auto* base = reinterpret_cast<std::byte*>(storage);
+    auto* populations = reinterpret_cast<uint32_t*>(base + storage_plan.order_population.offset_bytes);
+    std::fill_n(populations, vardct_frame_internal::kOrderPopulationCount, 0u);
+    auto* samples = reinterpret_cast<uint8_t*>(base + storage_plan.order_samples.offset_bytes);
+    std::fill_n(samples, anchor_count_, uint8_t{0});
+    if (present_mask == 1) {
+      // Pure DCT8's single batch is raster-ordered. Generate decisions in the
+      // encoder's AC-group-first order, then remap to the batch anchor index.
+      uint64_t a = 0x94D049BB133111EBull, b = 0xBF58476D1CE4E5B9ull;
+      for (size_t gy = 0; gy < frame->group_extent.height; ++gy) {
+        for (size_t gx = 0; gx < frame->group_extent.width; ++gx) {
+          for (size_t y = gy * dim; y < std::min((gy + 1) * dim, block_extent_.height); ++y) {
+            for (size_t x = gx * dim; x < std::min((gx + 1) * dim, block_extent_.width); ++x) {
+              const uint64_t bits = a + b;
+              const uint64_t old_b = b;
+              a ^= a << 23;
+              b = a ^ old_b ^ (a >> 18) ^ (old_b >> 5);
+              a = old_b;
+              samples[y * block_extent_.width + x] =
+                (bits >> 32) <= (std::numeric_limits<uint64_t>::max() >> 32) / 2;
+            }
+          }
+        }
+      }
+    }
+    frame->population.present_mask = present_mask;
     const auto& coefficients = storage_plan.coefficients;
     const auto& destination_plane = storage_plan.destinations;
     completed_coefficients_ = {
@@ -2916,6 +2960,15 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     completed_destinations_ = {
       frame->allocation.get(), destination_plane.offset_bytes, destination_plane.element_type,
       destination_plane.extent, destination_plane.row_stride};
+    const auto& population_plane = storage_plan.order_population;
+    const auto& samples_plane = storage_plan.order_samples;
+    completed_order_population_ = {
+      frame->allocation.get(), population_plane.offset_bytes, population_plane.element_type,
+      population_plane.extent, population_plane.row_stride};
+    completed_order_samples_ = {
+      frame->allocation.get(), samples_plane.offset_bytes, samples_plane.element_type,
+      samples_plane.extent, samples_plane.row_stride};
+    completed_sample_dct8_ = present_mask == 1;
     *out = std::move(frame);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
@@ -2932,9 +2985,15 @@ Status MetalPreparedAqEvaluation::FinishCompletedFrame(
   const resource_budget_internal::ResourceClassScope resource_class(
     resource_budget_internal::ResourceClass::kCompletedFrame);
   std::span<const int32_t> raw_quant;
+  std::span<const int32_t> population;
   std::span<const int32_t> quantized_dc;
   Status status = BorrowCompletedContiguousI32(
     *backend_, completed_coefficients_, &frame.coefficients);
+  if (status.ok()) status = BorrowCompletedContiguousI32(
+    *backend_, completed_order_population_, &population);
+  if (status.ok()) {
+    frame.population.counts = {reinterpret_cast<const uint32_t*>(population.data()), population.size()};
+  }
   if (status.ok()) status = BorrowCompletedContiguousI32(
     *backend_, raw_quant_, &raw_quant);
   if (status.ok()) status = BorrowCompletedContiguousI32(
@@ -4261,6 +4320,9 @@ void MetalPreparedAqEvaluation::CompleteOperation() {
   std::lock_guard lock(mutex_);
   completed_coefficients_ = {};
   completed_destinations_ = {};
+  completed_order_population_ = {};
+  completed_order_samples_ = {};
+  completed_sample_dct8_ = false;
   write_completed_coefficients_ = false;
   state_ = State::kReady;
 }
@@ -4270,6 +4332,9 @@ void MetalPreparedAqEvaluation::Invalidate() {
   submission_.reset();
   completed_coefficients_ = {};
   completed_destinations_ = {};
+  completed_order_population_ = {};
+  completed_order_samples_ = {};
+  completed_sample_dct8_ = false;
   write_completed_coefficients_ = false;
   state_ = State::kInvalid;
   scratch_lease_reusable_ = false;
@@ -4671,7 +4736,7 @@ Status CreateAqPipelines(
       "Metal cannot launch the AQ maximum-error threadgroup");
   }
   const std::array<
-    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 35>
+    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 36>
     reconstruction = {{
       {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
       {"gjxl_aq_reset_exact_coefficients", &pipelines.reset_exact_coefficients},
@@ -4716,6 +4781,7 @@ Status CreateAqPipelines(
        &pipelines.encode_reconstruction_coefficients},
       {"gjxl_aq_encode_scored_coefficients",
        &pipelines.encode_scored_coefficients},
+      {"gjxl_aq_count_coefficient_zeros", &pipelines.count_coefficient_zeros},
       {"gjxl_aq_encode_final_coefficients",
        &pipelines.encode_final_coefficients},
       {"gjxl_aq_encode_frame_coefficients",

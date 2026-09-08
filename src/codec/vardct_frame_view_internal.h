@@ -4,6 +4,7 @@
 #pragma once
 
 #include "codec/vardct_frame.h"
+#include "codec/coefficient_order_population_internal.h"
 
 namespace gjxl::vardct_frame_internal {
 
@@ -18,6 +19,7 @@ struct VarDctFrameViewData {
   Extent2D ac_group_extent;
   std::span<const size_t> group_used_coefficient_count;
   std::span<const int32_t> ac_coefficients;
+  CoefficientOrderPopulationView coefficient_order_population;
 };
 
 /// Read-only, non-owning completed frame. No allocation or materialization.
@@ -70,6 +72,9 @@ class VarDctFrameView {
     return data_.group_used_coefficient_count.size();
   }
   [[nodiscard]] Status GetAcGroup(size_t index, VarDctAcGroupView* out) const;
+  [[nodiscard]] CoefficientOrderPopulationView coefficient_order_population() const noexcept {
+    return data_.coefficient_order_population;
+  }
 
  private:
   VarDctFrameViewData data_;

@@ -18,6 +18,7 @@
 
 #include "core/managed_allocator.h"
 #include "codec/chroma_from_luma_internal.h"
+#include "codec/coefficient_order_population_internal.h"
 #include "codec/gaborish_internal.h"
 #include "core/image_ops.h"
 #include "core/quantizer.h"
@@ -326,6 +327,26 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
         MTL::Size(std::min<NS::UInteger>(
                       kAqThreadCount, batch.coefficient_count),
                   1, 1));
+    if (write_completed_coefficients_) {
+      // Serial dispatch dependency: consume this batch only after its final
+      // integer stores. Profiled and ordinary execution take this same path.
+      const size_t family = vardct_frame_internal::OrderPopulationFamily(batch.coefficient_count);
+      const std::array<uint32_t, 4> count_params = {
+        static_cast<uint32_t>(batch.anchor_offset),
+        static_cast<uint32_t>(batch.anchor_count),
+        static_cast<uint32_t>(vardct_frame_internal::kOrderPopulationOffsets[family]),
+        completed_sample_dct8_ ? 1u : 0u,
+      };
+      encoder->setComputePipelineState(backend.aq_pipelines_.count_coefficient_zeros.get());
+      BindPlane(encoder, completed_coefficients_, 0);
+      BindPlane(encoder, completed_destinations_, 1);
+      BindPlane(encoder, completed_order_samples_, 2);
+      BindPlane(encoder, completed_order_population_, 3);
+      encoder->setBytes(count_params.data(), sizeof(count_params), 4);
+      DispatchMetalThreadgroups(encoder,
+        MTL::Size(batch.coefficient_count / 32, (batch.anchor_count + 63) / 64, 1),
+        MTL::Size(32, 8, 1));
+    }
   }
 }
 

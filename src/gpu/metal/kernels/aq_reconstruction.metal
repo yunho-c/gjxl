@@ -2067,3 +2067,48 @@ gjxl_aq_validate_initial_mask(device const float *mask [[buffer(0)]],
   if (index < count && (!isfinite(mask[index]) || mask[index] <= 0.0f))
     atomic_fetch_or_explicit(error, 4096u, memory_order_relaxed);
 }
+
+// Exact zero populations over the final group-major AC. Each group covers 32
+// coefficient positions and 64 anchors, reducing 8 rows before global atomics.
+// Counts and sources occupy disjoint slices of the completed output lease.
+// Host ABI: anchor offset, anchor count, family population offset, sample DCT8.
+kernel void gjxl_aq_count_coefficient_zeros(
+    device const int* coefficients [[buffer(0)]],
+    device const uint* destinations [[buffer(1)]],
+    device const uchar* samples [[buffer(2)]],
+    device atomic_uint* populations [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint2 tid [[thread_position_in_threadgroup]]) {
+  constexpr uint kChannelCapacity = 65536;
+  constexpr uint kPopulationStride = 1984;
+  constexpr uint kFullCount = 3 * kPopulationStride;
+  threadgroup uint partial[6][256];
+  uint counts[6] = {};
+  const uint coefficient = group.x * 32 + tid.x;
+  for (uint row = tid.y; row < 64; row += 8) {
+    const uint anchor = group.y * 64 + row;
+    if (anchor >= params.y) continue;
+    const uint index = params.x + anchor;
+    const uint offset = destinations[index] + coefficient;
+    const bool selected = params.w != 0 && samples[index] != 0;
+    for (uint c = 0; c < 3; ++c) {
+      const uint zero = coefficients[offset + c * kChannelCapacity] == 0;
+      counts[c] += zero;
+      if (selected) counts[3 + c] += zero;
+    }
+  }
+  const uint lane = tid.y * 32 + tid.x;
+  for (uint c = 0; c < (params.w != 0 ? 6u : 3u); ++c) partial[c][lane] = counts[c];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (tid.y == 0) {
+    for (uint c = 0; c < (params.w != 0 ? 6u : 3u); ++c) {
+      uint sum = 0;
+      for (uint row = 0; row < 8; ++row) sum += partial[c][row * 32 + tid.x];
+      const uint destination = c < 3
+        ? c * kPopulationStride + params.z + coefficient
+        : kFullCount + (c - 3) * 64 + coefficient;
+      if (sum != 0) atomic_fetch_add_explicit(populations + destination, sum, memory_order_relaxed);
+    }
+  }
+}

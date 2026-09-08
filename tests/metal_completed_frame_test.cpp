@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "codec/adaptive_quantization_internal.h"
+#include "coefficient_order_population_fixture.h"
 #include "codec/color_transform.h"
 #include "codec/vardct_frame_view_internal.h"
 #include "codestream/encoder.h"
@@ -78,6 +79,23 @@ struct Retained {
 };
 
 bool SerializeEqual(const Retained &retained) {
+  const auto view = retained.frame->view();
+  const gjxl_test::OrderPopulationFixture oracle(view);
+  const auto actual = view.coefficient_order_population();
+  if (actual.present_mask != oracle.mask || !std::ranges::equal(actual.counts, oracle.counts)) {
+    std::cerr << "GPU coefficient populations differ from scalar recount\n";
+    return false;
+  }
+  for (const auto behavior : {VarDctCoefficientOrderBehavior::kFull,
+                             VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
+    SimpleCoefficientOrders cached, recounted;
+    if (!Check(codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(view, behavior, &cached)) ||
+        !Check(codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+          oracle.WithPopulation(view, {}), behavior, &recounted)) || cached != recounted) {
+      std::cerr << "GPU populations changed coefficient orders\n";
+      return false;
+    }
+  }
   std::vector<uint8_t> bytes;
   return Check(codestream_internal::EncodeVarDctCodestreamFromView(
              retained.frame->view(), {}, &bytes)) &&
@@ -277,7 +295,7 @@ bool RunCase(Extent2D extent, bool deferred_frontend = false,
         }))) return false;
     expected_bytes += blocks.width * blocks.height * (1 + 1 + 4 + 3 * (4 + 4)) +
       tiles.width * tiles.height * 2 + view.ac_group_count() * sizeof(size_t) +
-      (3 * view.ac_group_count() * kVarDctAcGroupCoefficientCapacity + anchors) * sizeof(int32_t);
+      (3 * view.ac_group_count() * kVarDctAcGroupCoefficientCapacity + anchors + 6144) * sizeof(int32_t) + anchors;
   }
   const auto usage = budget.snapshot().classes[completed_class];
   if (usage.backing_count != earlier_backings + 9 * retained.size() ||

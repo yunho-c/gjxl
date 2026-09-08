@@ -186,6 +186,12 @@ Status vardct_frame_internal::VarDctFrameView::GetAcGroup(
 }
 
 bool vardct_frame_internal::VarDctFrameView::valid() const {
+  const auto population = coefficient_order_population();
+  if (population.counts.empty() ? population.present_mask != 0
+      : population.counts.size() != kOrderPopulationCount ||
+        population.present_mask == 0 || (population.present_mask & ~uint16_t{0x5D}) != 0) {
+    return false;
+  }
   if (!ValidGeometry(geometry()) ||
       data_.input.strategies == nullptr ||
       !strategies().complete() ||

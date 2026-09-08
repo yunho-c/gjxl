@@ -20,6 +20,7 @@
 #include "codestream/coefficient_order.h"
 #include "codestream/encoder.h"
 #include "quantized_frame_fixture.h"
+#include "coefficient_order_population_fixture.h"
 
 namespace {
 
@@ -120,11 +121,17 @@ int main() {
     for (size_t strategy = 0; strategy <= kStrategies.size(); ++strategy) {
       for (size_t pattern = 0; pattern < 8; ++pattern) {
         const auto frame = MakeFrame(strategy, pattern);
+        const auto view = gjxl::vardct_frame_internal::BorrowFrame(frame);
+        const gjxl_test::OrderPopulationFixture population(view);
         for (const auto behavior : {gjxl::VarDctCoefficientOrderBehavior::kFull,
                gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
           gjxl::SimpleCoefficientOrders orders;
           Check(gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
             gjxl::vardct_frame_internal::BorrowFrame(frame), behavior, &orders));
+          gjxl::SimpleCoefficientOrders cached;
+          Check(gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+            population.WithPopulation(view, {population.counts, population.mask}), behavior, &cached));
+          if (orders != cached) throw std::runtime_error("Cached coefficient orders differ");
           const auto reference = ReferenceOrders(frame, behavior);
           if (orders != reference) throw std::runtime_error("Coefficient orders differ");
           std::vector<gjxl::EntropyToken> tokens, reference_tokens;
@@ -143,11 +150,17 @@ int main() {
       for (size_t strategy : {size_t{0}, size_t{2}, kStrategies.size()}) {
         for (size_t pattern : {0u, 4u, 5u, 6u, 7u}) {
           const auto frame = MakeFrame(strategy, pattern, block_side);
+          const auto view = gjxl::vardct_frame_internal::BorrowFrame(frame);
+          const gjxl_test::OrderPopulationFixture population(view);
           for (auto behavior : {gjxl::VarDctCoefficientOrderBehavior::kFull,
                  gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
             gjxl::SimpleCoefficientOrders actual;
             Check(gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
               gjxl::vardct_frame_internal::BorrowFrame(frame), behavior, &actual));
+            gjxl::SimpleCoefficientOrders cached;
+            Check(gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+              population.WithPopulation(view, {population.counts, population.mask}), behavior, &cached));
+            if (cached != actual) throw std::runtime_error("Boundary cached orders differ");
             const auto expected = ReferenceOrders(frame, behavior);
             if (actual != expected) {
               throw std::runtime_error("Boundary coefficient orders differ");
@@ -171,6 +184,22 @@ int main() {
     const auto frame = MakeFrame(kStrategies.size(), 2);
     Check(gjxl::ComputeSimpleCoefficientOrders(frame, &orders));
     const auto sentinel = orders;
+    const auto view = gjxl::vardct_frame_internal::BorrowFrame(frame);
+    gjxl_test::OrderPopulationFixture population(view);
+    for (size_t bad = 0; bad < 5; ++bad) {
+      auto counts = population.counts;
+      gjxl::vardct_frame_internal::CoefficientOrderPopulationView data{counts, population.mask};
+      switch (bad) {
+        case 0: data.counts = data.counts.first(6143); break;
+        case 1: data.present_mask = 2; break;
+        case 2: data.present_mask = 0; break;
+        case 3: counts[0] = UINT32_MAX; break;
+        case 4: counts[5952] = 1; break; // Sampled bins forbidden on mixed frames.
+      }
+      if (gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+            population.WithPopulation(view, data), gjxl::VarDctCoefficientOrderBehavior::kFull, &orders).ok() ||
+          orders != sentinel) throw std::runtime_error("Malformed population was not atomic");
+    }
     if (gjxl::ComputeSimpleCoefficientOrders({}, &orders).ok() ||
         orders != sentinel ||
         gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(

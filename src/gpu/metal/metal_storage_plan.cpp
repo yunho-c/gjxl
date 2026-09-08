@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "gpu/metal/metal_storage_plan.h"
+#include "codec/coefficient_order_population_internal.h"
 
 #include <algorithm>
 #include <limits>
@@ -535,6 +536,16 @@ Status ComputeCompletedFrameStoragePlan(Extent2D source, Extent2D coding,
                       alignof(int32_t), &candidate.destinations);
   if (!status.ok())
     return status;
+  // The group-major uint32 indexing bound above also bounds every population
+  // by fewer than 2^32 anchors, including sums across rectangular orientations.
+  constexpr size_t population_count = vardct_frame_internal::kOrderPopulationCount;
+  status = layout.AddPlane(DeviceElementType::kI32, {population_count, 1},
+                           population_count, alignof(uint32_t),
+                           &candidate.order_population);
+  if (!status.ok()) return status;
+  status = layout.AddPlane(DeviceElementType::kU8, {anchor_count, 1}, anchor_count,
+                           1, &candidate.order_samples);
+  if (!status.ok()) return status;
   candidate.capacity_bytes = layout.capacity_bytes();
   *plan = candidate;
   return Status::Ok();

@@ -284,13 +284,15 @@ bool CheckCompletedFrames() {
         const size_t coefficients = count * 3 * 65536;
         if (!Check(plan.group_extent == groups && plan.group_count == count &&
                        plan.coefficient_count == coefficients &&
-                       plan.capacity_bytes == (coefficients + anchors) * 4 &&
+                       plan.capacity_bytes == (coefficients + anchors + 6144) * 4 + anchors &&
+                       plan.order_population.offset_bytes == (coefficients + anchors) * 4 &&
+                       plan.order_samples.offset_bytes == (coefficients + anchors + 6144) * 4 &&
                        plan.destinations.offset_bytes == coefficients * 4 &&
                        plan.coefficients.extent == Extent2D{coefficients, 1} &&
                        plan.destinations.extent == Extent2D{anchors, 1},
                    "Completed frame layout differs from frozen group-major "
                    "recipe") ||
-            !CheckSlices({plan.coefficients, plan.destinations}, 4,
+            !CheckSlices({plan.coefficients, plan.destinations, plan.order_population, plan.order_samples}, 1,
                          plan.capacity_bytes))
           return false;
         ++cases;

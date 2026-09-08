@@ -157,6 +157,7 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_scored_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_final_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> count_coefficient_zeros;
   NS::SharedPtr<MTL::ComputePipelineState> encode_frame_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> quantization_probe;

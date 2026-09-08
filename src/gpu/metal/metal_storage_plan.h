@@ -113,11 +113,13 @@ struct CompletedFrameStoragePlan {
   size_t capacity_bytes = 0;
   DevicePlaneLayout coefficients;
   DevicePlaneLayout destinations;
+  DevicePlaneLayout order_population;
+  DevicePlaneLayout order_samples;
   bool operator==(const CompletedFrameStoragePlan &) const = default;
 };
 
-/// The final group-major coefficients and destination table share one
-/// independent allocation. Before strategy selection, block count bounds anchor
+/// The final group-major coefficients, destination table, zero populations, and
+/// sample flags share one independent allocation. Block count bounds anchor
 /// capacity; actual output generation supplies its authoritative final anchor
 /// count.
 [[nodiscard]] Status

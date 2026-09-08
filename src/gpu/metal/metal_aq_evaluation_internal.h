@@ -656,6 +656,9 @@ private:
   // allocations independently of both AQ arenas and the backend's reuse pool.
   DevicePlaneView completed_coefficients_;
   DevicePlaneView completed_destinations_;
+  DevicePlaneView completed_order_population_;
+  DevicePlaneView completed_order_samples_;
+  bool completed_sample_dct8_ = false;
   bool write_completed_coefficients_ = false;
   DevicePlaneView reconstruction_coefficients_;
   DevicePlaneView dc_;

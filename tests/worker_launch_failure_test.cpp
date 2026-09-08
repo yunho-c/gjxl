@@ -102,7 +102,8 @@ void SingleFailures(bool metal, bool exact = false, std::optional<Site> selected
     // Prepared forward DCT belongs to exact Metal, not the native CPU pipeline.
     // Resident Metal uses its own frontend kernels; exercise its real CPU tail.
     if (!metal && site == Site::kForwardTransforms) continue;
-    if (metal && exact && site != Site::kForwardTransforms) continue;
+    if (metal && exact && site != Site::kForwardTransforms &&
+        !(selected && site == Site::kCoefficientOrders)) continue;
     if (metal && !exact && site != Site::kCoefficientOrders && site != Site::kSerializerSections) continue;
     for (size_t threads : {0, 4}) {
       fixture.options.cpu_thread_count = threads;
@@ -130,20 +131,33 @@ void SingleFailures(bool metal, bool exact = false, std::optional<Site> selected
             status = EncodeLinearRgbVarDctCodestreamProfiled(fixture.image.const_view(), fixture.options,
                                                            &bytes, &summary, &timing);
           }
-          if (!fault.triggered || fault.launched_in_group != before) {
-            std::cerr << "Unreached launch site=" << static_cast<int>(site) << " before=" << before
-                      << " threads=" << threads << " metal=" << metal << '\n';
-            std::exit(EXIT_FAILURE);
-          }
-          if (FallsBack(site, kind)) {
+          const bool cached_orders = metal && !exact && site == Site::kCoefficientOrders;
+          if (cached_orders) {
+            // Resident frames supply GPU populations. There must be no CPU
+            // counting-worker launch to fail, even with automatic/explicit
+            // worker budgets. The exact-coefficient case below keeps the
+            // real CPU recount's partial-launch and output-atomicity coverage.
             Ok(status);
-            Require(bytes == fixture.expected && summary == fixture.summary && timing.total_nanoseconds > 0,
-                    "Partial launch serial fallback changed bytes or decisions");
+            Require(!fault.triggered && fault.launched_in_group == 0 &&
+                    bytes == fixture.expected && summary == fixture.summary &&
+                    timing.total_nanoseconds > 0,
+                    "Cached Metal orders launched workers or changed output");
           } else {
-            Require(status.code() == FailureCode(kind) && bytes.data() == old_bytes &&
-                    bytes == std::vector<uint8_t>({3, 1, 4}) && summary.encoded_bytes == 123 &&
-                    timing.total_nanoseconds == 456 && timing.attempts.data() == old_attempts && timing.attempts.size() == 2,
-                    "Launch failure changed public output, timing, or its error classification");
+            if (!fault.triggered || fault.launched_in_group != before) {
+              std::cerr << "Unreached launch site=" << static_cast<int>(site) << " before=" << before
+                        << " threads=" << threads << " metal=" << metal << '\n';
+              std::exit(EXIT_FAILURE);
+            }
+            if (FallsBack(site, kind)) {
+              Ok(status);
+              Require(bytes == fixture.expected && summary == fixture.summary && timing.total_nanoseconds > 0,
+                      "Partial launch serial fallback changed bytes or decisions");
+            } else {
+              Require(status.code() == FailureCode(kind) && bytes.data() == old_bytes &&
+                      bytes == std::vector<uint8_t>({3, 1, 4}) && summary.encoded_bytes == 123 &&
+                      timing.total_nanoseconds == 456 && timing.attempts.data() == old_attempts && timing.attempts.size() == 2,
+                      "Launch failure changed public output, timing, or its error classification");
+            }
           }
           Empty(*fixture.domain);
           Ok(EncodeLinearRgbVarDctCodestream(fixture.image.const_view(), fixture.options, &bytes, &summary));
@@ -326,7 +340,10 @@ int main(int argc, char** argv) {
     else if (group == "cpu_orders") SingleFailures(false, false, Site::kCoefficientOrders);
     else if (group == "cpu_sections") SingleFailures(false, false, Site::kSerializerSections);
     else if (group == "metal_forward") SingleFailures(true, true, Site::kForwardTransforms);
-    else if (group == "metal_orders") SingleFailures(true, false, Site::kCoefficientOrders);
+    else if (group == "metal_orders") {
+      SingleFailures(true, false, Site::kCoefficientOrders);
+      SingleFailures(true, true, Site::kCoefficientOrders);
+    }
     else if (group == "metal_sections") SingleFailures(true, false, Site::kSerializerSections);
     else if (group == "cpu_drains") {
       BatchFailureDuringShutdown(false, Site::kColorRows, Kind::kSystemError);
