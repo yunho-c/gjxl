@@ -1947,6 +1947,14 @@ verify seven fewer launches and unchanged memcpy payloads. Next investigate
 the remaining quant-norm/final-cost boundaries and complete-candidate tile
 packing, without treating noisy whole-call percentages as universal speedups.
 
+[S139](cuda-fused-final-cost-s139.md) tests final-cost composition inside that
+same block, consuming shared channel rates/losses while retaining S138's tile
+schedule and allocation layout. Exact differential grids and frozen encodes
+pass, but whole-call primary comparisons favor fusion in only 8/16 runs, with
+three of four 4K comparisons unfavorable. The standalone final-cost work was
+only about 0.16 ms at 4K in prior traces. The prototype is not promoted; S138
+remains the runtime baseline for isolated candidate-packing/scheduling work.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
